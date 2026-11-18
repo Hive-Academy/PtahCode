@@ -1,3 +1,4 @@
+import { choosePtahSelect } from '../../choose-ptah-select';
 /**
  * E2E: Settings smoke captures (TASK_2026_555 Batch 16, Task 16.1 — plan
  * Component 14, §6): both tabs, both hosts, both themes, at 1024x768, so
@@ -421,7 +422,11 @@ async function captureMatrixPopovers(
   const popover = '[data-testid="cli-matrix-popover"]';
   // Model: the cell opens the popover with its search focused and the list open (interactions/orchestration-2).
   await expandMatrixDetail(page, 'codex');
-  await page.locator('#lane-detail-codex [data-popover-kind="model"]').click();
+  await page
+    .locator(
+      '[data-testid="cli-provider-card-codex"] [data-popover-kind="model"]',
+    )
+    .click();
   const search = page.locator(`${popover} input[role="combobox"]`);
   await expect(search).toBeEnabled();
   await expect(search).toBeFocused();
@@ -438,7 +443,11 @@ async function captureMatrixPopovers(
   await page.keyboard.press('Escape');
   await expect(page.locator(popover)).toHaveCount(0);
   // Effort: the CLI's allowlist as a two-column grid, the saved value pressed (interactions/orchestration-3).
-  await page.locator('#lane-detail-codex [data-popover-kind="effort"]').click();
+  await page
+    .locator(
+      '[data-testid="cli-provider-card-codex"] [data-popover-kind="effort"]',
+    )
+    .click();
   await expect(page.locator(`${popover} [aria-pressed="true"]`)).toHaveText(
     'Medium',
   );
@@ -536,9 +545,10 @@ async function captureMatrixPopovers(
       await dialog
         .locator('[data-testid="add-cli-instance-name"]')
         .fill('Glm-Secondary');
-      await dialog
-        .locator('[data-testid="add-cli-instance-provider"]')
-        .selectOption('kimi-code');
+      await choosePtahSelect(
+        dialog.locator('[data-testid="add-cli-instance-provider"]'),
+        'Kimi Code · OAuth',
+      );
     } else {
       await expect(
         dialog.locator('[data-testid="cli-tier-source-haiku"]'),
@@ -598,7 +608,6 @@ async function assertOrchestrationFold(
 ): Promise<void> {
   const matrix = page.locator('[data-testid="cli-matrix"]');
   await expect(matrix).toBeVisible();
-  const details = page.locator('[data-testid="background-roles-details"]');
   const scroll = await page.evaluate(() => ({
     window: window.scrollY,
     page: Math.max(
@@ -620,10 +629,7 @@ async function assertOrchestrationFold(
       page,
       '[data-testid="cli-provider-grid"] [data-testid^="cli-provider-card-"]',
     ),
-    rolesSummary: await bottomOf(
-      page,
-      '[data-testid="background-roles-summary"]',
-    ),
+    rolesSummary: await bottomOf(page, '[data-testid="consumer-table"]'),
   };
   const rowHeights = await matrix
     .locator('[data-testid^="cli-provider-card-"]')
@@ -682,8 +688,8 @@ async function assertOrchestrationFold(
   ).toBe('block');
   const consumers = page.locator('[data-testid="consumer-table"]');
   await expect(consumers).toHaveClass(/\bgrid\b/);
-  await expect(consumers).toHaveClass(/\bgap-2\b/);
-  await expect(details).not.toHaveAttribute('open');
+  await expect(consumers).toHaveClass(/gap-\[var\(--ptah-gap-field\)\]/);
+  await expect(consumers).toBeVisible();
   for (const region of ORCHESTRATION_FOLD_REGIONS[host]) {
     expect(bottoms[region], `${region} bottom`).toBeLessThanOrEqual(
       ORCHESTRATION_FOLD,
@@ -703,49 +709,14 @@ async function assertOrchestrationFold(
   }
 }
 
-/**
- * Batch 33: captures the background roles `<details>` opened by its summary, and closes it again. Batch 36 moved the
- * fold measurement to `assertOrchestrationFold`.
- */
+/** Capture the always-visible background roles and their reassignment popover. */
 async function captureRolesOpen(
   page: Page,
   host: 'vscode' | 'electron',
   theme: string,
 ): Promise<void> {
   await expect(page.locator('[data-testid="cli-matrix"]')).toBeVisible();
-  const details = page.locator('[data-testid="background-roles-details"]');
-  const summary = page.locator('[data-testid="background-roles-summary"]');
-  await expect(details).not.toHaveAttribute('open');
-  // Batch 34 revise 1: the disclosure chevron points right (›) closed and down (⌄) open: one 90° clockwise turn, on its
-  // wrapper only. lucide-angular copies its host class onto the <svg>, so a rotate on the icon applied twice (180°, ‹).
-  const chevron = summary.locator('[data-testid="background-roles-chevron"]');
-  const turn = () =>
-    chevron.evaluate((node) => {
-      const icons = Array.from(
-        node.querySelectorAll('lucide-angular, svg'),
-      ).map((icon) => getComputedStyle(icon).transform);
-      return {
-        wrapper: getComputedStyle(node).transform,
-        icons: icons.every((value) => value === 'none')
-          ? 'none'
-          : icons.join(' / '),
-      };
-    });
-  expect(await turn(), 'closed chevron points right').toEqual({
-    wrapper: 'none',
-    icons: 'none',
-  });
-  await summary.click();
-  await expect(details).toHaveAttribute('open', '');
-  await expect(
-    page.locator('[data-testid="assignments-heading"]'),
-  ).toBeVisible();
-  await expect
-    .poll(turn, {
-      message:
-        'open chevron points down: the wrapper turns 90° clockwise, the icon does not turn',
-    })
-    .toEqual({ wrapper: 'matrix(0, 1, -1, 0, 0, 0)', icons: 'none' });
+  await expect(page.locator('[data-testid="consumer-table"]')).toBeVisible();
   // Batch 35 revise R1: every role's Provider & model cell is one line in both hosts (the label truncates instead).
   const consumers = page.locator('[data-testid="consumer-table"]');
   const consumerRows = consumers.locator(
@@ -767,7 +738,7 @@ async function captureRolesOpen(
   expect(cellHeights).toHaveLength(3);
   for (const height of cellHeights)
     expect(height, 'role cell is one line').toBeLessThanOrEqual(24);
-  await summary.evaluate((node) => node.scrollIntoView({ block: 'start' }));
+  await consumers.scrollIntoViewIfNeeded();
   await waitForSettled(page);
   await capture(page, 'orchestration-roles-open', host, theme);
   // A retained role's reassignment popover stays on screen; Esc returns focus.
@@ -796,8 +767,7 @@ async function captureRolesOpen(
   await page.keyboard.press('Escape');
   await expect(rolePopover).toHaveCount(0);
   await expect(roleCell).toBeFocused();
-  await summary.click();
-  await expect(details).not.toHaveAttribute('open');
+  await expect(consumers).toBeVisible();
   await page.evaluate(() => {
     window.scrollTo(0, 0);
     for (const node of Array.from(document.querySelectorAll('*')))
@@ -1180,7 +1150,8 @@ for (const host of ['vscode', 'electron'] as const) {
       // re-save confirm that names it ("Saved to: VS Code." / "Saved to: Desktop app."); cancelled after.
       const appLabel = host === 'electron' ? 'Desktop app' : 'VS Code';
       const saveTo = mainPopover.locator('[data-testid="main-agent-save-to"]');
-      const saveToOptions = await saveTo.locator('option').allTextContents();
+      await saveTo.getByRole('combobox').click();
+      const saveToOptions = await saveTo.getByRole('option').allTextContents();
       console.log(
         `B27b save-to ${host}/${theme}: ${saveToOptions.map((text) => text.trim()).join(' | ')}`,
       );
@@ -1189,7 +1160,8 @@ for (const host of ['vscode', 'electron'] as const) {
         appLabel,
         'This workspace',
       ]);
-      await saveTo.selectOption('app');
+      await page.keyboard.press('Escape');
+      await choosePtahSelect(saveTo, appLabel);
       await mainPopover
         .locator('[data-testid="main-agent-provider-rescope"]')
         .click();
@@ -1462,16 +1434,15 @@ for (const host of ['vscode', 'electron'] as const) {
       for (const [cli, label] of Object.entries(expected)) {
         await expandMatrixDetail(page, cli);
         const version = page.locator(
-          `#lane-detail-${cli} [data-testid="cli-provider-facts"] [data-ptah-description-row]:has(dt:text-is("Version")) span[title]`,
+          `#lane-detail-${cli} [data-testid="cli-provider-facts"] dt:text-is("Version") + dd span[title]`,
         );
         await expect(version).toHaveText(label);
         await expect(version).toHaveAttribute('title', LIVE_VERSIONS[cli]);
         const fact = await version.evaluate((element) => ({
           term:
             element
-              .closest('[data-ptah-description-row]')
-              ?.querySelector('dt')
-              ?.textContent?.trim() ?? null,
+              .closest('dd')
+              ?.previousElementSibling?.textContent?.trim() ?? null,
           inHeader: element.closest('header') !== null,
           clipped: element.scrollWidth > element.clientWidth + 1,
         }));
@@ -1481,20 +1452,45 @@ for (const host of ['vscode', 'electron'] as const) {
       }
       // 52.2: the Antigravity model cell shows the id once, on at most two lines, with the name in its title.
       const model = page.locator(
-        '#lane-detail-antigravity [data-popover-kind="model"]',
+        '[data-testid="cli-provider-card-antigravity"] [data-popover-kind="model"]',
       );
       await expect(model).toHaveText('claude-sonnet-4-6');
       await expect(model).toHaveAttribute(
         'title',
         'claude-sonnet-4-6 (Claude Sonnet 4.6 (Thinking))',
       );
-      const modelLines = await model.evaluate((element) =>
-        Math.round(
-          element.getBoundingClientRect().height /
-            parseFloat(getComputedStyle(element).lineHeight),
-        ),
-      );
-      expect(modelLines).toBeLessThanOrEqual(2);
+      const modelGeometry = await model.evaluate((element) => {
+        const style = getComputedStyle(element);
+        const cell = element.closest('th, td');
+        const cellStyle = cell ? getComputedStyle(cell) : null;
+        const table = element.closest('.ptah-table');
+        return {
+          lines: Math.round(
+            element.getBoundingClientRect().height /
+              parseFloat(style.lineHeight),
+          ),
+          height: element.getBoundingClientRect().height,
+          triggerWidth: element.getBoundingClientRect().width,
+          cellContentWidth:
+            cell && cellStyle
+              ? cell.clientWidth -
+                parseFloat(cellStyle.paddingLeft) -
+                parseFloat(cellStyle.paddingRight)
+              : null,
+          tableWidth: table?.getBoundingClientRect().width ?? null,
+          tier: `collapsed=${table?.getAttribute('data-collapsed')} model-column=${table?.getAttribute('data-model-column')}`,
+          font: style.font,
+          minHeight: style.minHeight,
+          whiteSpace: style.whiteSpace,
+          overflowWrap: style.overflowWrap,
+          viewport: window.innerWidth,
+        };
+      });
+      const modelLines = modelGeometry.lines;
+      expect(
+        modelLines,
+        `Antigravity model trigger geometry: ${JSON.stringify(modelGeometry)}`,
+      ).toBeLessThanOrEqual(2);
       await capture(page, 'live-orchestration', host, theme);
     });
   }

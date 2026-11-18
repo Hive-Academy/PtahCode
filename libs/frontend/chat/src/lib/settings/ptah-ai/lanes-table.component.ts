@@ -12,15 +12,20 @@ import {
   output,
   signal,
   viewChild,
+  ViewEncapsulation,
 } from '@angular/core';
 import { NgTemplateOutlet } from '@angular/common';
-import type { CliLaneDefaults, CliType } from '@ptah-extension/shared';
+import {
+  resolveCliLaneDefaultPair,
+  type CliLaneDefaults,
+  type CliType,
+} from '@ptah-extension/shared';
 import {
   PtahTableComponent,
-  PtahTableRowTitleComponent,
   PtahTableRowDirective,
   PtahCollapsibleCellDirective,
   PtahDetailCellDirective,
+  PtahDetailRowDirective,
   PtahRowExpanderComponent,
   PtahTableOrderButtonsComponent,
   PtahTableRowActionsComponent,
@@ -29,17 +34,15 @@ import {
   PtahToggleDirective,
   PtahButtonDirective,
   NativePopoverComponent,
-  ProviderMarkComponent,
   PtahInlineConfirmComponent,
 } from '@ptah-extension/ui';
-import { cliMarkFor } from '@ptah-extension/chat-ui';
+import { LaneRowIdentityComponent } from './lane-row-identity.component';
 import {
   cliModelDisplay,
   type CliMatrixCellField,
   type CliMatrixRow,
 } from './cli-matrix-rows';
 import { CliLaneDefaultCellComponent } from './cli-lane-default-cell.component';
-import { CliCapabilityCellsComponent } from './cli-capability-cells.component';
 import { CliModelEffortPopoverComponent } from './cli-model-effort-popover.component';
 import { LanesTableStatusComponent } from './lanes-table-status.component';
 import { LanesTableDeleteFocus } from './lanes-table-delete-focus';
@@ -59,10 +62,10 @@ export type LaneTableRow = CliMatrixRow & {
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     PtahTableComponent,
-    PtahTableRowTitleComponent,
     PtahTableRowDirective,
     PtahCollapsibleCellDirective,
     PtahDetailCellDirective,
+    PtahDetailRowDirective,
     PtahRowExpanderComponent,
     PtahTableOrderButtonsComponent,
     PtahTableRowActionsComponent,
@@ -71,473 +74,39 @@ export type LaneTableRow = CliMatrixRow & {
     PtahToggleDirective,
     PtahButtonDirective,
     NativePopoverComponent,
-    ProviderMarkComponent,
     CliLaneDefaultCellComponent,
-    CliCapabilityCellsComponent,
     CliModelEffortPopoverComponent,
+    LaneRowIdentityComponent,
     LanesTableStatusComponent,
     PtahInlineConfirmComponent,
     LanesTableDetailComponent,
     NgTemplateOutlet,
   ],
-  template: `
-    <ptah-table
-      #table
-      label="Lanes"
-      density="compact"
-      [collapseBelow]="950"
-      data-testid="cli-provider-grid"
-    >
-      <!-- Column widths of the prototype (rev 2). The last col is the details expander. -->
-      @if (table.collapsed()) {
-        <colgroup data-testid="lanes-colgroup-collapsed"><col class="w-[10%]" /><col class="w-[34%]" /><col class="w-[31%]" /><col class="w-[15%]" /><col class="w-[10%]" /></colgroup>
-      } @else {
-        <colgroup data-testid="lanes-colgroup"><col class="w-[6%]" /><col class="w-[20%]" /><col class="w-[12%]" /><col class="w-[14%]" /><col class="w-[11%]" /><col class="w-[17%]" /><col class="w-[13%]" /><col class="w-[7%]" /><col /></colgroup>
-      }
-      <thead>
-        <tr>
-          <th scope="col">Order</th>
-          <th scope="col">Lane</th>
-          <th scope="col">Status</th>
-          <th scope="col" ptahCollapsible>Permission</th>
-          <th scope="col" ptahCollapsible>Network</th>
-          <th scope="col" ptahCollapsible>Model</th>
-          <th scope="col" ptahCollapsible>Actions</th>
-          <th scope="col">Enabled</th>
-          <th scope="col" class="sr-only">Details</th>
-        </tr>
-      </thead>
-      <tbody>
-        @if (error() && rows().length > 0) {
-          <tr>
-            <td [ptahMessageCell]="9">
-              {{ error() }}
-              <button
-                ptahButton
-                type="button"
-                variant="ghost"
-                size="xs"
-                (click)="retry.emit()"
-              >
-                Retry
-              </button>
-            </td>
-          </tr>
-        }
-        @for (row of rows(); track row.id) {
-          @let position = positions().get(row.id);
-          <tr
-            [ptahRowState]="
-              row.kind === 'system' && !row.installed ? 'muted' : 'default'
-            "
-            [attr.data-testid]="
-              row.kind === 'system'
-                ? 'cli-provider-card-' + row.id
-                : 'cli-matrix-row-' + row.id
-            "
-          >
-            <td>
-              @if (row.kind === 'system' && !row.installed) {
-                <span>—</span>
-              } @else if (orderMode()) {
-                <fieldset class="contents" [disabled]="rowBusy(row) || !canWrite()">
-                  <ptah-table-order-buttons
-                    [rowLabel]="row.name"
-                    [index]="position ?? 0"
-                    [count]="positions().size"
-                    (moveUp)="moveRow(row, -1)"
-                    (moveDown)="moveRow(row, 1)"
-                  />
-                </fieldset>
-              } @else {
-                {{ row.order ?? (position ?? 0) + 1 }}
-              }
-            </td>
-            <th scope="row">
-              <ptah-table-row-title
-                [attr.data-testid]="
-                  row.kind === 'system' && row.versionLabel
-                    ? 'cli-matrix-version'
-                    : null
-                "
-                [attr.title]="row.kind === 'system' ? row.versionLabel : null"
-                [name]="row.name"
-                [kind]="row.kind === 'system' ? 'CLI agent' : 'Ptah CLI'"
-                [secondary]="
-                  row.kind === 'system'
-                    ? (row.versionLabel ?? '')
-                    : row.provider
-                "
-                [mono]="row.kind === 'system'"
-              >
-                <ptah-provider-mark
-                  ptahRowMark
-                  [providerId]="
-                    row.kind === 'system' ? row.cli : markId(row.providerId)
-                  "
-                  fallback="Terminal"
-                  size="sm"
-                />
-              </ptah-table-row-title>
-            </th>
-            <td>
-              <ptah-lanes-table-status
-                [row]="row"
-                [testing]="!!testingRows()[row.id]"
-                [testResult]="testResults()[row.id] ?? ''"
-                (installGuide)="showDetail($event, 'install'); installGuide.emit($event)"
-                (signIn)="showDetail($event, 'credentials'); signIn.emit($event)"
-              />
-              @if (row.kind === 'instance') {
-                <span data-testid="cli-matrix-tier-summary"
-                  [title]="tierList(row)"
-                  class="block text-xs text-base-content-muted">
-                  {{ row.tiers === null ? 'loading' : row.tiers.length + ' of 3 set' }}
-                </span>
-              }
-            </td>
-            <td ptahCollapsible ptahControlCell>
-              @if (row.kind === 'system') {
-                <ptah-cli-lane-default-cell
-                  [cli]="row.cli"
-                  [name]="row.name"
-                  [manifest]="row.manifest"
-                  [saved]="defaults()?.[row.cli]"
-                  [disabled]="!row.installed || rowBusy(row) || !canWrite()"
-                  field="permission"
-                  [showCaption]="false"
-                  (selected)="defaultSelected.emit({ row, choice: $event })"
-                  (resetRequested)="defaultResetRequested.emit(row)"
-                />
-              } @else {
-                <span title="Managed by connection">Unavailable</span>
-              }
-            </td>
-            <td ptahCollapsible ptahControlCell>
-              @if (row.kind === 'system') {
-                <ptah-cli-lane-default-cell
-                  [cli]="row.cli"
-                  [name]="row.name"
-                  [manifest]="row.manifest"
-                  [saved]="defaults()?.[row.cli]"
-                  [disabled]="!row.installed || rowBusy(row) || !canWrite()"
-                  field="network"
-                  [showCaption]="false"
-                  (selected)="defaultSelected.emit({ row, choice: $event })"
-                  (resetRequested)="defaultResetRequested.emit(row)"
-                />
-              } @else {
-                <span title="Managed by connection">Unavailable</span>
-              }
-            </td>
-            <td
-              ptahCollapsible
-              [attr.title]="modelOf(row).title"
-              data-testid="cli-matrix-model"
-            >
-              <ng-template #modelEffort let-row let-place="place">
-                <span
-                  class="inline-flex min-w-0 items-center gap-ptah-inline text-xs"
-                >
-                  @if (row.kind === 'instance' && row.selectedModel === null) {
-                    <span class="font-mono" [title]="modelOf(row).title">{{
-                      modelOf(row).label
-                    }}</span>
-                  } @else {
-                    <ptah-native-popover
-                      [isOpen]="isOpen(row, 'model', place)"
-                      [keepInViewport]="true"
-                      placement="bottom-start"
-                      [hasBackdrop]="true"
-                      backdropClass="transparent"
-                      (closed)="closePopover()"
-                    >
-                      <button
-                        trigger
-                        type="button"
-                        ptahButton
-                        variant="ghost"
-                        size="xs"
-                        density="compact"
-                        class="min-w-0 font-mono"
-                        data-popover-kind="model"
-                        [disabled]="!row.interactive || !canWrite()"
-                        [attr.data-busy]="rowBusy(row) ? '' : null"
-                        [attr.aria-disabled]="rowBusy(row) ? 'true' : null"
-                        [attr.aria-busy]="rowBusy(row) ? 'true' : null"
-                        [attr.aria-label]="'Model default for ' + row.name"
-                        [attr.aria-expanded]="isOpen(row, 'model', place)"
-                        [title]="modelOf(row).title"
-                        (click)="togglePopover(row, 'model', place)"
-                      >
-                        {{ modelOf(row).label }}
-                      </button>
-                      @if (isOpen(row, 'model', place)) {
-                        <ptah-cli-model-effort-popover
-                          content
-                          [row]="row"
-                          field="model"
-                          (closed)="closePopover()"
-                        />
-                      }
-                    </ptah-native-popover>
-                  }
-                  @if (row.kind === 'instance' || row.effort) {
-                    <span aria-hidden="true">·</span>
-                    <ptah-native-popover
-                      [isOpen]="isOpen(row, 'effort', place)"
-                      [keepInViewport]="true"
-                      placement="bottom-start"
-                      [hasBackdrop]="true"
-                      backdropClass="transparent"
-                      (closed)="closePopover()"
-                    >
-                      <button
-                        trigger
-                        type="button"
-                        ptahButton
-                        variant="ghost"
-                        size="xs"
-                        density="compact"
-                        data-popover-kind="effort"
-                        [disabled]="!row.interactive || !canWrite()"
-                        [attr.data-busy]="rowBusy(row) ? '' : null"
-                        [attr.aria-disabled]="rowBusy(row) ? 'true' : null"
-                        [attr.aria-busy]="rowBusy(row) ? 'true' : null"
-                        [attr.aria-label]="'Effort default for ' + row.name"
-                        [attr.aria-expanded]="isOpen(row, 'effort', place)"
-                        [title]="effortOf(row)"
-                        (click)="togglePopover(row, 'effort', place)"
-                      >
-                        {{ effortOf(row) }}
-                      </button>
-                      @if (isOpen(row, 'effort', place)) {
-                        <ptah-cli-model-effort-popover
-                          content
-                          [row]="row"
-                          field="effort"
-                          (closed)="closePopover()"
-                        />
-                      }
-                    </ptah-native-popover>
-                  } @else {
-                    <span aria-hidden="true">·</span>
-                    <!-- A generic span takes no aria-label: the hidden prefix names the value instead. -->
-                    <span class="text-base-content-muted" data-testid="lanes-effort-na"><span class="sr-only">Effort </span>n/a</span>
-                  }
-                </span>
-              </ng-template>
-              <ng-container
-                [ngTemplateOutlet]="modelEffort"
-                [ngTemplateOutletContext]="{ $implicit: row, place: 'cell' }"
-              />
-            </td>
-            <td ptahCollapsible>
-              <ptah-table-row-actions [rowLabel]="row.name">
-                <button role="menuitem" type="button"
-                  [attr.aria-label]="'Details for ' + row.name"
-                  (click)="showDetail(row)">Details</button>
-                <button
-                  role="menuitem"
-                  type="button"
-                  [disabled]="
-                    rowBusy(row) ||
-                    testingRows()[row.id] ||
-                    (row.kind === 'system' && !row.installed)
-                  "
-                  (click)="test.emit(row)"
-                  [attr.data-testid]="
-                    row.kind === 'instance' ? 'cli-matrix-test-' + row.id : null
-                  "
-                >
-                  Test
-                </button>
-                <button
-                  role="menuitem"
-                  type="button"
-                  (click)="showDetail(row, 'capabilities'); capabilities.emit(row)"
-                >
-                  All capabilities
-                </button>
-                @if (row.kind === 'instance') {
-                  <button role="menuitem" type="button"
-                    [attr.data-testid]="'cli-matrix-tiers-' + row.id"
-                    (click)="tiers.emit(row); showDetail(row)">Tiers</button>
-                  <button
-                    role="menuitem"
-                    type="button"
-                    [disabled]="rowBusy(row) || !canWrite()"
-                    (click)="edit.emit(row)"
-                    [attr.data-testid]="'cli-matrix-edit-' + row.id"
-                  >
-                    Edit
-                  </button>
-                  <button
-                    role="menuitem"
-                    type="button"
-                    [disabled]="rowBusy(row) || !canWrite()"
-                    (click)="requestDelete(row, $event)"
-                    [attr.data-testid]="'cli-matrix-delete-' + row.id"
-                  >
-                    Delete
-                  </button>
-                }
-              </ptah-table-row-actions>
-              @if (pendingDelete()?.id === row.id) {
-                <ptah-inline-confirm
-                  [message]="'Delete ' + row.name + '?'"
-                  tone="danger"
-                  (confirm)="confirmDelete(row)"
-                  (cancelled)="cancelDelete()"
-                />
-              }
-            </td>
-            <td ptahControlCell>
-              <input
-                ptahToggle
-                type="checkbox"
-                [checked]="enabledShown(row)"
-                [disabled]="
-                  (row.kind === 'system' && !row.installed) ||
-                  rowBusy(row) ||
-                  !canWrite()
-                "
-                [attr.aria-label]="row.name + ' enabled'"
-                [attr.data-testid]="
-                  row.kind === 'instance' ? 'cli-matrix-toggle-' + row.id : null
-                "
-                (change)="toggleRow(row, $event)"
-              />
-            </td>
-            <td>
-              <ptah-table-row-expander
-                [label]="'Details for ' + row.name"
-                [controls]="'lane-detail-' + row.id"
-                #expander
-                [expanded]="detailRowId() === row.id"
-                (expandedChange)="detailExpanded(row, $event); closePopover()"
-              />
-            </td>
-          </tr>
-          <tr class="ptah-table-detail-row"
-            [hidden]="detailRowId() !== row.id"
-            [id]="'lane-detail-' + row.id">
-            <td ptahDetailCell [colspan]="table.collapsed() ? 5 : 9">
-              @if (detailRowId() === row.id) {
-                <ptah-lanes-table-detail [row]="row"
-                  [openKind]="infoOpen()?.rowId === row.id ? infoOpen()?.kind ?? null : null"
-                  [testResult]="testResults()[row.id] ?? ''" [testing]="!!testingRows()[row.id]"
-                  [busy]="busy()" [guides]="guides()"
-                  (kindToggled)="toggleInfo(row, $event)" (popoverClosed)="infoOpen.set(null)"
-                  (redetect)="redetect.emit($event)" (codexSettings)="codexSettings.emit()"
-                  (tiers)="tiers.emit($event)" />
-                @if (table.collapsed()) {
-                <dl>
-                  <dt>Permission</dt>
-                  <dd>
-                    @if (row.kind === 'system') {
-                      <ptah-cli-lane-default-cell
-                        [cli]="row.cli"
-                        [name]="row.name"
-                        [manifest]="row.manifest"
-                        [saved]="defaults()?.[row.cli]"
-                        [disabled]="
-                          !row.installed || rowBusy(row) || !canWrite()
-                        "
-                        field="permission"
-                        [showCaption]="true"
-                        (selected)="
-                          defaultSelected.emit({ row, choice: $event })
-                        "
-                        (resetRequested)="defaultResetRequested.emit(row)"
-                      />
-                    } @else {
-                      Unavailable
-                    }
-                  </dd>
-                  <dt>Network</dt>
-                  <dd>
-                    @if (row.kind === 'system') {
-                      <ptah-cli-lane-default-cell
-                        [cli]="row.cli"
-                        [name]="row.name"
-                        [manifest]="row.manifest"
-                        [saved]="defaults()?.[row.cli]"
-                        [disabled]="
-                          !row.installed || rowBusy(row) || !canWrite()
-                        "
-                        field="network"
-                        [showCaption]="true"
-                        (selected)="
-                          defaultSelected.emit({ row, choice: $event })
-                        "
-                        (resetRequested)="defaultResetRequested.emit(row)"
-                      />
-                    } @else {
-                      Unavailable
-                    }
-                  </dd>
-                  <dt>Model</dt>
-                  <dd>
-                    <ng-container
-                      [ngTemplateOutlet]="modelEffort"
-                      [ngTemplateOutletContext]="{
-                        $implicit: row,
-                        place: 'detail',
-                      }"
-                    />
-                  </dd>
-                  <dt>Actions</dt>
-                  <dd>
-                    <ptah-table-row-actions [rowLabel]="row.name">
-                      <button role="menuitem" type="button" [disabled]="rowBusy(row) || testingRows()[row.id] || (row.kind === 'system' && !row.installed)" (click)="test.emit(row)">Test</button>
-                      <button role="menuitem" type="button" (click)="showDetail(row, 'capabilities'); capabilities.emit(row)">All capabilities</button>
-                      @if (row.kind === 'instance') {
-                        <button role="menuitem" type="button" [disabled]="rowBusy(row) || !canWrite()" (click)="edit.emit(row)">Edit</button>
-                        <button role="menuitem" type="button" [disabled]="rowBusy(row) || !canWrite()" (click)="requestDelete(row, $event)">Delete</button>
-                      }
-                    </ptah-table-row-actions>
-                    @if (pendingDelete()?.id === row.id) {
-                      <ptah-inline-confirm [message]="'Delete ' + row.name + '?'" tone="danger" (confirm)="confirmDelete(row)" (cancelled)="cancelDelete()" />
-                    }
-                  </dd>
-                  <dt>Capabilities</dt>
-                  <dd><ptah-cli-capability-cells [manifest]="row.manifest" [compact]="true" /></dd>
-                </dl>
-                }
-              }
-            </td>
-          </tr>
-        } @empty {
-          <tr>
-            <td [ptahMessageCell]="9">
-              @if (loading()) {
-                Loading lanes…
-              } @else if (error()) {
-                {{ error() }}
-                <button
-                  ptahButton
-                  type="button"
-                  variant="ghost"
-                  size="xs"
-                  (click)="retry.emit()"
-                >
-                  Retry
-                </button>
-              } @else {
-                No lanes available.
-              }
-            </td>
-          </tr>
-        }
-      </tbody>
-    </ptah-table>
-  `,
+  encapsulation: ViewEncapsulation.None,
+  styleUrl: './lanes-table.component.css',
+  templateUrl: './lanes-table.component.html',
 })
 export class LanesTableComponent {
-  protected tierList(row: LaneTableRow): string {
-    if (row.kind !== 'instance' || !row.tiers?.length) return 'No tier models';
-    return row.tiers.map(tier => `${tier.label}: ${tier.model}`).join(', ');
+  /** Middle tier is based on the actual pane, never the app viewport. */
+  protected readonly modelColumn = signal(false);
+  protected recover(row: LaneTableRow): void {
+    if (row.status.kind === 'not-installed') {
+      this.showDetail(row, 'install');
+      this.installGuide.emit(row);
+    } else {
+      this.showDetail(row, 'credentials');
+      this.signIn.emit(row);
+    }
+  }
+  protected resetDefaultLabel(row: LaneTableRow): string {
+    if (!row.manifest) return 'Reset to default';
+    const pair = resolveCliLaneDefaultPair(row.manifest);
+    const permission = 'permission' in pair ? pair.permission : undefined;
+    const description =
+      permission === 'yolo'
+        ? 'Auto \u2014 full access'
+        : (permission ?? 'Auto');
+    return `Reset to default (${description})`;
   }
   readonly rows = input.required<readonly LaneTableRow[]>();
   /** Index among positioned rows; uninstalled system rows have no entry. */
@@ -558,7 +127,16 @@ export class LanesTableComponent {
   readonly testResults = input<Readonly<Record<string, string>>>({});
   readonly loading = input(false);
   readonly error = input<string | null>(null);
-  readonly guides = input<Readonly<Partial<Record<CliType, { readonly command: string | null; readonly note: string }>>>>({});
+  readonly guides = input<
+    Readonly<
+      Partial<
+        Record<
+          CliType,
+          { readonly command: string | null; readonly note: string }
+        >
+      >
+    >
+  >({});
   protected readonly testAnnouncement = computed(() =>
     this.rows()
       .map((row) =>
@@ -599,9 +177,15 @@ export class LanesTableComponent {
   }>();
   readonly defaultResetRequested = output<LaneTableRow>();
   protected readonly detailRowId = signal<string | null>(null);
-  protected readonly infoOpen = signal<{ readonly rowId: string; readonly kind: CliProviderInfoKind | 'credentials' } | null>(null);
+  protected readonly infoOpen = signal<{
+    readonly rowId: string;
+    readonly kind: CliProviderInfoKind | 'credentials';
+  } | null>(null);
   closeGuide(rowId: string): void {
-    if (this.infoOpen()?.rowId === rowId && this.infoOpen()?.kind === 'install') {
+    if (
+      this.infoOpen()?.rowId === rowId &&
+      this.infoOpen()?.kind === 'install'
+    ) {
       this.infoOpen.set(null);
     }
   }
@@ -609,27 +193,55 @@ export class LanesTableComponent {
     this.detailRowId.set(expanded ? row.id : null);
     if (!expanded) this.infoOpen.set(null);
   }
-  protected showDetail(row: LaneTableRow, kind?: CliProviderInfoKind | 'credentials'): void {
+  protected showDetail(
+    row: LaneTableRow,
+    kind?: CliProviderInfoKind | 'credentials',
+  ): void {
     this.detailRowId.set(row.id);
     this.infoOpen.set(kind ? { rowId: row.id, kind } : null);
   }
-  protected infoIsOpen(row: LaneTableRow, kind: CliProviderInfoKind | 'credentials'): boolean {
+  protected infoIsOpen(
+    row: LaneTableRow,
+    kind: CliProviderInfoKind | 'credentials',
+  ): boolean {
     return this.infoOpen()?.rowId === row.id && this.infoOpen()?.kind === kind;
   }
-  protected toggleInfo(row: LaneTableRow, kind: CliProviderInfoKind | 'credentials'): void {
-    this.infoOpen.set(this.infoIsOpen(row, kind) ? null : { rowId: row.id, kind });
+  protected toggleInfo(
+    row: LaneTableRow,
+    kind: CliProviderInfoKind | 'credentials',
+  ): void {
+    this.infoOpen.set(
+      this.infoIsOpen(row, kind) ? null : { rowId: row.id, kind },
+    );
   }
   constructor() {
+    afterNextRender(() => {
+      if (typeof ResizeObserver === 'undefined') return;
+      const observer = new ResizeObserver(([entry]) => {
+        this.modelColumn.set(entry.contentRect.width >= 640);
+      });
+      observer.observe(this.element.nativeElement);
+      this.destroyRef.onDestroy(() => observer.disconnect());
+    });
     // The UI order component restores focus after a move. Suppress its focus tooltip
     // for that return, as the policy order editor does when its popover closes.
     const onOrderFocus = (event: FocusEvent): void => {
-      if (this.orderFocusReturning() && event.target instanceof Element &&
-          event.target.matches('[data-order-up], [data-order-down]')) {
+      if (
+        this.orderFocusReturning() &&
+        event.target instanceof Element &&
+        event.target.matches('[data-order-up], [data-order-down]')
+      ) {
         event.stopImmediatePropagation();
       }
     };
     this.element.nativeElement.addEventListener('focus', onOrderFocus, true);
-    this.destroyRef.onDestroy(() => this.element.nativeElement.removeEventListener('focus', onOrderFocus, true));
+    this.destroyRef.onDestroy(() =>
+      this.element.nativeElement.removeEventListener(
+        'focus',
+        onOrderFocus,
+        true,
+      ),
+    );
     effect(() => {
       const announcement = this.testAnnouncement();
       if (announcement) this.table()?.announce(announcement);
@@ -637,11 +249,11 @@ export class LanesTableComponent {
     effect(() => {
       const open = this.openCell();
       if (!open) return;
-      const currentRow = this.rows().find(r => r.id === open.row.id);
+      const currentRow = this.rows().find((r) => r.id === open.row.id);
       if (
         !currentRow ||
         !open.row.interactive ||
-        (open.place === 'detail' && !this.table()?.collapsed())
+        (open.place === 'detail' && this.detailRowId() !== open.row.id)
       ) {
         this.openCell.set(null);
       } else if (currentRow !== open.row) {
@@ -650,7 +262,9 @@ export class LanesTableComponent {
     });
     effect(() => this.deleteFocus.onRowsChanged(this.rows()));
   }
-  protected rowBusy(row: LaneTableRow): boolean { return this.busy() || !!this.busyRows()[row.id]; }
+  protected rowBusy(row: LaneTableRow): boolean {
+    return this.busy() || !!this.busyRows()[row.id];
+  }
   protected enabledShown(row: LaneTableRow): boolean {
     return row.enabled && (row.kind === 'instance' || row.installed);
   }
@@ -662,7 +276,11 @@ export class LanesTableComponent {
   }
   protected toggleRow(row: LaneTableRow, event: Event): void {
     const control = event.target as HTMLInputElement;
-    if ((row.kind === 'system' && !row.installed) || this.rowBusy(row) || !this.canWrite()) {
+    if (
+      (row.kind === 'system' && !row.installed) ||
+      this.rowBusy(row) ||
+      !this.canWrite()
+    ) {
       control.checked = this.enabledShown(row);
       return;
     }
@@ -692,7 +310,7 @@ export class LanesTableComponent {
       open?.row === row &&
       open.field === field &&
       open.place === place &&
-      (place === 'cell' || !!this.table()?.collapsed())
+      (place === 'cell' || this.detailRowId() === row.id)
     );
   }
   protected togglePopover(
@@ -711,12 +329,22 @@ export class LanesTableComponent {
     const open = this.openCell();
     this.openCell.set(null);
     if (open) {
-      afterNextRender(() => {
-        const scope = open.place === 'detail'
-          ? this.element.nativeElement.querySelector<HTMLElement>(`#lane-detail-${open.row.id}`)
-          : this.element.nativeElement.querySelector<HTMLElement>(`[data-testid="cli-matrix-row-${open.row.id}"]`);
-        scope?.querySelector<HTMLElement>(`[data-popover-kind="${open.field}"]`)?.focus();
-      }, { injector: this.injector });
+      afterNextRender(
+        () => {
+          const scope =
+            open.place === 'detail'
+              ? this.element.nativeElement.querySelector<HTMLElement>(
+                  `#lane-detail-${open.row.id}`,
+                )
+              : this.element.nativeElement.querySelector<HTMLElement>(
+                  `[data-testid="cli-matrix-row-${open.row.id}"]`,
+                );
+          scope
+            ?.querySelector<HTMLElement>(`[data-popover-kind="${open.field}"]`)
+            ?.focus();
+        },
+        { injector: this.injector },
+      );
     }
   }
   protected effortOf(row: LaneTableRow): string {
@@ -724,10 +352,22 @@ export class LanesTableComponent {
       (row.kind === 'system' ? row.effort?.value : row.effort) || 'default'
     );
   }
-  /** Provider mark of a Ptah CLI instance; the Ptah `P` when it has none. */
-  protected markId(providerId: string): string {
-    const mark = cliMarkFor('ptah-cli', providerId);
-    return mark.kind === 'provider' ? mark.providerId : 'ptah-cli';
+  /**
+   * The lane has an effort setting: instances always, a system lane when its CLI has one
+   * (`effort` is null otherwise). An unset effort keeps the trigger ("default"), because
+   * the trigger is the only way to choose an effort. An instance whose model is not
+   * loaded yet (`selectedModel` null) shows no trigger.
+   */
+  protected hasEffort(row: LaneTableRow): boolean {
+    if (row.kind === 'instance') return row.selectedModel !== null;
+    return row.effort != null;
+  }
+  protected hasModelId(row: LaneTableRow): boolean {
+    return !!(row.kind === 'system' ? row.model.value : row.selectedModel);
+  }
+  /** A model id as at most two unbreakable parts (see `splitModelId`). */
+  protected modelParts(row: LaneTableRow): readonly [string, string] | null {
+    return this.hasModelId(row) ? splitModelId(this.modelOf(row).label) : null;
   }
   /** Model text. Instance: null = not loaded, '' = the tier mappings decide. */
   protected modelOf(row: LaneTableRow): { label: string; title: string } {
@@ -738,7 +378,30 @@ export class LanesTableComponent {
       return cliModelDisplay(row.model.value);
     }
     if (row.selectedModel === null) return { label: '—', title: 'Not loaded' };
-    const label = row.selectedModel || 'provider default';
+    const label = row.selectedModel || 'Provider default';
     return { label, title: label };
   }
+}
+
+/**
+ * Splits a model id after the one hyphen that makes its longer part shortest. The row renders the parts as two
+ * no-wrap spans with one `<wbr>` between them, so a compact row shows the id on at most two lines with any line
+ * breaker ("claude-" / "sonnet-4-6"). Returns null for an id with white space or with no inner hyphen; such a label
+ * keeps the normal line breaks.
+ */
+export function splitModelId(id: string): readonly [string, string] | null {
+  if (/\s/.test(id)) return null;
+  let best: readonly [string, string] | null = null;
+  for (
+    let i = id.indexOf('-');
+    i > 0 && i < id.length - 1;
+    i = id.indexOf('-', i + 1)
+  ) {
+    const parts = [id.slice(0, i + 1), id.slice(i + 1)] as const;
+    const longest = Math.max(parts[0].length, parts[1].length);
+    if (!best || longest < Math.max(best[0].length, best[1].length)) {
+      best = parts;
+    }
+  }
+  return best;
 }

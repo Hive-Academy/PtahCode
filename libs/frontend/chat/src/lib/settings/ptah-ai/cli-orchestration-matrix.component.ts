@@ -41,10 +41,7 @@ import { CliProviderGridComponent } from './cli-provider-grid.component';
 import type { LaneTableRow } from './lanes-table.component';
 import { CliSharedDefaultsComponent } from './cli-shared-defaults.component';
 import { savePreferredAgentOrder } from './preferred-agent-order-save';
-import {
-  PtahButtonDirective,
-} from '@ptah-extension/ui';
-
+import { LanesSectionHeaderComponent } from './lanes-section-header.component';
 
 /**
  * #77: install copy per system CLI. Codex and Copilot keep the old "No CLI agents found" commands; the other four are
@@ -128,81 +125,84 @@ const SAVE_SCOPE = 'global';
     PtahCliInstancesComponent,
     CliProviderGridComponent,
     CliSharedDefaultsComponent,
-    PtahButtonDirective,
+    LanesSectionHeaderComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="flex flex-col gap-[var(--ptah-gap-field)]">
-    <section
-      class="flex flex-col gap-[var(--ptah-gap-field)]"
-      aria-labelledby="cli-matrix-heading"
-      data-testid="settings-cli-matrix"
-      data-glass-surface="content"
+    <div
+      class="flex flex-col gap-[var(--ptah-gap-field)] [&>*:focus-within]:z-[var(--ptah-z-raised)]"
     >
-      <div section-header class="flex flex-wrap items-center gap-x-[var(--ptah-gap-inline)] gap-y-[var(--ptah-gap-label)]">
-        <h2
-          id="cli-matrix-heading"
-          class="flex items-center gap-[var(--ptah-gap-inline)] text-sm font-semibold normal-case text-base-content"
+      <section
+        class="flex flex-col gap-[var(--ptah-gap-field)]"
+        aria-labelledby="cli-matrix-heading"
+        data-testid="settings-cli-matrix"
+        data-glass-surface="content"
+      >
+        <ptah-lanes-section-header
+          [total]="laneCounts().total"
+          [enabled]="laneCounts().enabled"
+          [editing]="orderMode()"
+          [disabled]="busy() || !canWrite()"
+          (editRequested)="orderMode.set(!orderMode())"
+          (addRequested)="openAdd('header')"
+        />
+        <ptah-agent-orchestration-config />
+
+        <div
+          class="flex min-w-0 flex-col gap-[var(--ptah-gap-field)]"
+          data-testid="cli-matrix"
+          tabindex="-1"
+          [attr.aria-busy]="loading()"
         >
-          <lucide-angular
-            [img]="TerminalIcon"
-            class="h-4 w-4 text-primary"
-            aria-hidden="true"
+          <ptah-cli-provider-grid
+            [rows]="tableRows()"
+            [defaults]="state.orchestration().data?.cliLaneDefaults"
+            [busy]="busy()"
+            [canWrite]="canWrite()"
+            [loading]="loading()"
+            [testingRows]="testingRows()"
+            [testResults]="tableTestResults()"
+            [orderMode]="orderMode()"
+            [guides]="CLI_INSTALL_GUIDES"
+            [error]="laneReadError()"
+            (toggled)="toggle($event.row, $event.event)"
+            (moved)="moveLane($event.row, $event.direction)"
+            (test)="test($event.id)"
+            (edit)="editLane($event)"
+            (delete)="deleteLane($event)"
+            (capabilities)="showCapabilities($event)"
+            (installGuide)="showInstallGuide($event)"
+            (signIn)="signInLane($event)"
+            (retry)="retryLanes()"
+            (redetect)="redetectFromGuide($event)"
+            (codexSettings)="codexSettingsRequested.emit()"
+            (tiers)="editTiers($event)"
+            (defaultSelected)="selectTableDefault($event.row, $event.choice)"
+            (defaultResetRequested)="resetTableDefault($event)"
           />
-          CLI Agents &amp; Custom Instances Matrix
-        </h2>
-        <!-- Wide only: the narrow (Electron) box keeps the header to one line. -->
-        <span class="cli-wide-only text-xs text-base-content-muted"
-          >Click model or effort cells to reassign in place</span
-        >
-      </div>
-
-      <p class="text-xs text-base-content-muted">These are CLI capabilities. Permission and network defaults are editable. A running lane may offer fewer actions.</p>
-
-      <ptah-agent-orchestration-config />
-      <button type="button" ptahButton variant="ghost" data-testid="lanes-order-edit"
-        [attr.aria-pressed]="orderMode()" (click)="orderMode.set(!orderMode())">
-        {{ orderMode() ? 'Done editing order' : 'Edit lane order' }}
-      </button>
-
-      <div class="flex min-w-0 flex-col gap-[var(--ptah-gap-field)]" data-testid="cli-matrix" tabindex="-1" [attr.aria-busy]="loading()">
-        <ptah-cli-provider-grid
-          [rows]="tableRows()" [defaults]="state.orchestration().data?.cliLaneDefaults"
-          [busy]="busy()" [canWrite]="canWrite()" [loading]="loading()"
-          [testingRows]="testingRows()" [testResults]="tableTestResults()"
-          [orderMode]="orderMode()" [guides]="CLI_INSTALL_GUIDES"
-          [error]="laneReadError()"
-          (toggled)="toggle($event.row, $event.event)"
-          (moved)="moveLane($event.row, $event.direction)"
-          (test)="test($event.id)"
-          (edit)="editLane($event)"
-          (delete)="deleteLane($event)"
-          (capabilities)="showCapabilities($event)"
-          (installGuide)="showInstallGuide($event)"
-          (signIn)="signInLane($event)"
-          (retry)="retryLanes()" (redetect)="redetectFromGuide($event)"
-          (codexSettings)="codexSettingsRequested.emit()"
-          (tiers)="editTiers($event)"
-          (defaultSelected)="selectTableDefault($event.row, $event.choice)"
-          (defaultResetRequested)="resetTableDefault($event)" />
-        @if (!loading() && tableRows().length === 0) {
-          <p data-testid="cli-matrix-empty">No CLI agent is installed. Install one from the list below, then Re-detect.</p>
-        }
-        @if (loading() && !hostReadStates()) {
-          <p data-testid="cli-matrix-empty">Loading CLI agents…</p>
-        }
-      </div>
-      <!-- The host's read states (loading and retry per source) show inside this card, outside the
+          @if (!loading() && tableRows().length === 0) {
+            <p data-testid="cli-matrix-empty">
+              No CLI agent is installed. Install one from the list below, then
+              Re-detect.
+            </p>
+          }
+          @if (loading() && !hostReadStates()) {
+            <p data-testid="cli-matrix-empty">Loading CLI agents…</p>
+          }
+        </div>
+        <!-- The host's read states (loading and retry per source) show inside this card, outside the
            aria-busy region, so a failed read is announced (TASK_2026_2256). -->
-      <ng-content select="[read-states]" />
-
-    </section>
+        <ng-content select="[read-states]" />
+      </section>
 
       @if (ptahManifest(); as manifest) {
-        <ptah-cli-shared-defaults [manifest]="manifest"
+        <ptah-cli-shared-defaults
+          [manifest]="manifest"
           [saved]="state.orchestration().data?.cliLaneDefaults?.['ptah-cli']"
           [disabled]="busy() || !canWrite()"
-          (selected)="savePtahDefault($event)" (resetRequested)="resetPtahDefault()" />
+          (selected)="savePtahDefault($event)"
+          (resetRequested)="resetPtahDefault()"
+        />
       }
 
       <!-- The Ptah CLI instances: their own sub-section under a hairline, with Add and one card per instance. -->
@@ -230,8 +230,16 @@ const SAVE_SCOPE = 'global';
       (closed)="closeTiers()"
     />
   `,
-  styles: `:host { display: block; min-width: 0; max-width: 100%; }
-    :host-context([data-glass='on']) [data-testid='settings-cli-matrix'] { padding: 1.25rem; }`,
+  styles: `
+    :host {
+      display: block;
+      min-width: 0;
+      max-width: 100%;
+    }
+    :host-context([data-glass='on']) [data-testid='settings-cli-matrix'] {
+      padding: 1.25rem;
+    }
+  `,
 })
 export class CliOrchestrationMatrixComponent {
   private readonly providerGrid = viewChild(CliProviderGridComponent);
@@ -240,7 +248,9 @@ export class CliOrchestrationMatrixComponent {
   readonly hostReadStates = input(false, { transform: booleanAttribute });
   protected readonly TerminalIcon = Terminal;
   protected readonly CLI_INSTALL_GUIDES = CLI_INSTALL_GUIDES;
-  protected readonly guideDetecting = computed(() => this.state.cliDetection().status === 'loading');
+  protected readonly guideDetecting = computed(
+    () => this.state.cliDetection().status === 'loading',
+  );
 
   protected readonly state = inject(ProvidersSettingsStateService);
   private readonly feedback = inject(SettingsSaveFeedbackService);
@@ -256,13 +266,19 @@ export class CliOrchestrationMatrixComponent {
       cliTest: this.state.cliTest().data,
     }),
   );
-  protected readonly systemTestTexts = computed((): Readonly<Record<string, string>> => {
-    const test = this.state.cliTest().data;
-    if (!test || !test.id) return {};
-    return { [test.id]: test.success
-      ? (test.latencyMs === null ? 'Test passed.' : `Test passed in ${test.latencyMs}ms.`)
-      : cliTestFailedText(test.reason) };
-  });
+  protected readonly systemTestTexts = computed(
+    (): Readonly<Record<string, string>> => {
+      const test = this.state.cliTest().data;
+      if (!test || !test.id) return {};
+      return {
+        [test.id]: test.success
+          ? test.latencyMs === null
+            ? 'Passed.'
+            : `Passed in ${test.latencyMs}ms.`
+          : (test.reason ?? 'Failed.'),
+      };
+    },
+  );
   /** The Ptah CLI instances, in the preferred order, for their own sub-section. */
   protected readonly instances = computed(() =>
     this.rows().installed.filter(
@@ -270,39 +286,65 @@ export class CliOrchestrationMatrixComponent {
     ),
   );
   protected readonly tableRows = computed((): readonly LaneTableRow[] =>
-    [...this.rows().installed, ...this.rows().uninstalled].map((row, index) => ({
-      ...row,
-      order: row.kind === 'system' && !row.installed ? undefined : index + 1,
-    })),
+    [...this.rows().installed, ...this.rows().uninstalled].map(
+      (row, index) => ({
+        ...row,
+        order: row.kind === 'system' && !row.installed ? undefined : index + 1,
+      }),
+    ),
   );
+  protected readonly laneCounts = computed(() => ({
+    enabled: this.rows().installed.filter((row) => row.enabled).length,
+    total: this.tableRows().length,
+  }));
   protected readonly laneReadError = computed(() =>
     this.state.orchestration().status === 'error' ||
     this.state.cliAgents().status === 'error'
       ? 'Could not load lanes.'
-      : this.rows().missing.length ? 'Some lane data could not be loaded. Showing the lanes that could be read.' : null,
+      : this.rows().missing.length
+        ? 'Some lane data could not be loaded. Showing the lanes that could be read.'
+        : null,
   );
   protected async retryLanes(): Promise<void> {
-    await Promise.all([this.state.refreshOrchestration(), this.state.refreshCliAgents()]);
+    await Promise.all([
+      this.state.refreshOrchestration(),
+      this.state.refreshCliAgents(),
+    ]);
   }
   protected readonly orderMode = signal(false);
-  protected readonly testingRows = computed((): Readonly<Record<string, boolean>> => {
-    const id = this.testingId();
-    return id ? { [id]: true } : {};
-  });
-  protected readonly tableTestResults = computed((): Readonly<Record<string, string>> => {
-    const result: Record<string, string> = { ...this.systemTestTexts() };
-    for (const row of this.instances()) {
-      if (row.lastTest) result[row.id] = row.lastTest.success
-        ? (row.lastTest.latencyMs === null ? 'Test passed.' : `Test passed in ${row.lastTest.latencyMs}ms.`)
-        : cliTestFailedText(row.lastTest.reason);
-    }
-    return result;
-  });
-  protected async moveLane(row: LaneTableRow, direction: -1 | 1): Promise<void> {
+  protected readonly testingRows = computed(
+    (): Readonly<Record<string, boolean>> => {
+      const id = this.testingId();
+      return id ? { [id]: true } : {};
+    },
+  );
+  protected readonly tableTestResults = computed(
+    (): Readonly<Record<string, string>> => {
+      const result: Record<string, string> = { ...this.systemTestTexts() };
+      for (const row of this.instances()) {
+        if (row.lastTest)
+          result[row.id] = row.lastTest.success
+            ? row.lastTest.latencyMs === null
+              ? 'Passed.'
+              : `Passed in ${row.lastTest.latencyMs}ms.`
+            : 'Failed.';
+      }
+      return result;
+    },
+  );
+  protected async moveLane(
+    row: LaneTableRow,
+    direction: -1 | 1,
+  ): Promise<void> {
     if (!this.state.reviewContext() || this.busy()) return;
-    const installed = this.rows().installed.map(item => item.id);
+    const installed = this.rows().installed.map((item) => item.id);
     const saved = this.state.orchestration().data?.preferredAgentOrder;
-    const order = movePreferredAgentOrder(Array.isArray(saved) ? saved : [], installed, row.id, direction);
+    const order = movePreferredAgentOrder(
+      Array.isArray(saved) ? saved : [],
+      installed,
+      row.id,
+      direction,
+    );
     if (!order) return;
     await savePreferredAgentOrder(this.state, this.feedback, order);
   }
@@ -314,19 +356,26 @@ export class CliOrchestrationMatrixComponent {
     if (row.kind === 'instance') await this.remove(row);
   }
   protected showCapabilities(row: LaneTableRow): void {
-    this.focusAfterRender(`#lane-detail-${row.id} [data-popover-kind="capabilities"]`);
+    this.focusAfterRender(
+      `#lane-detail-${row.id} [data-popover-kind="capabilities"]`,
+    );
   }
   protected showInstallGuide(row: LaneTableRow): void {
-    this.focusAfterRender(`#lane-detail-${row.id} [data-popover-kind="install"]`);
+    this.focusAfterRender(
+      `#lane-detail-${row.id} [data-popover-kind="install"]`,
+    );
   }
   protected signInLane(row: LaneTableRow): void {
-    this.focusAfterRender(`#lane-detail-${row.id} [data-popover-kind="credentials"]`);
+    this.focusAfterRender(
+      `#lane-detail-${row.id} [data-popover-kind="credentials"]`,
+    );
   }
   protected editTiers(row: LaneTableRow): void {
     if (row.kind === 'instance') this.openTiers(row);
   }
   protected async selectTableDefault(
-    row: LaneTableRow, choice: NonNullable<CliLaneDefaults[SystemCliType]>,
+    row: LaneTableRow,
+    choice: NonNullable<CliLaneDefaults[SystemCliType]>,
   ): Promise<void> {
     if (row.kind === 'system') await this.saveLaneDefault(row, choice);
   }
@@ -335,7 +384,9 @@ export class CliOrchestrationMatrixComponent {
   }
   protected readonly ptahManifest = computed(() => {
     const detected = this.state.orchestration().data?.detectedClis;
-    return Array.isArray(detected) ? detected.find(cli => cli.ptahCliId)?.manifest : undefined;
+    return Array.isArray(detected)
+      ? detected.find((cli) => cli.ptahCliId)?.manifest
+      : undefined;
   });
   /** Neither source has data yet (the container shows each section's own loading or error line). */
   protected readonly loading = computed(
@@ -406,7 +457,8 @@ export class CliOrchestrationMatrixComponent {
   }
 
   protected openTiers(row: InstanceCliMatrixRow): void {
-    this.tiersOpener = this.element.nativeElement.ownerDocument.activeElement as HTMLElement | null;
+    this.tiersOpener = this.element.nativeElement.ownerDocument
+      .activeElement as HTMLElement | null;
     this.tierTarget.set({
       id: row.id,
       name: row.name,
@@ -455,7 +507,9 @@ export class CliOrchestrationMatrixComponent {
       return;
     }
     this.providerGrid()?.closeGuide(rowId);
-    this.focusAfterRender(`[data-testid="cli-provider-card-${rowId}"] input[type="checkbox"]`);
+    this.focusAfterRender(
+      `[data-testid="cli-provider-card-${rowId}"] input[type="checkbox"]`,
+    );
   }
 
   /**
@@ -465,21 +519,28 @@ export class CliOrchestrationMatrixComponent {
    * own fixed reason when it has one.
    */
   private testResult(
-    row: InstanceCliMatrixRow,
+    row: CliMatrixRow,
   ): { readonly ok: boolean; readonly text: string } | null {
-    if (row.lastTest) {
-      if (row.lastTest.success) {
+    const current = this.state.cliTest().data;
+    const lastTest =
+      row.kind === 'instance'
+        ? row.lastTest
+        : current?.id === row.id
+          ? current
+          : null;
+    if (lastTest) {
+      if (lastTest.success) {
         return {
           ok: true,
           text:
-            row.lastTest.latencyMs === null
+            lastTest.latencyMs === null
               ? 'Test passed.'
-              : `Test passed in ${row.lastTest.latencyMs}ms.`,
+              : `Test passed in ${lastTest.latencyMs}ms.`,
         };
       }
       return {
         ok: false,
-        text: cliTestFailedText(row.lastTest.reason),
+        text: cliTestFailedText(lastTest.reason),
       };
     }
     if (
@@ -492,21 +553,29 @@ export class CliOrchestrationMatrixComponent {
 
   protected async test(id: string): Promise<void> {
     if (this.testing()) return;
+    const { installed, uninstalled } = this.rows();
+    const row = [...installed, ...uninstalled].find(
+      (candidate) => candidate.id === id,
+    );
+    if (!row) return;
     this.testingId.set(id);
     this.lastTestedId.set(id);
     try {
-      await this.state.testCliConnection(id);
+      if (row.kind === 'system') await this.state.testSystemLane(row.cli);
+      else await this.state.testCliConnection(id);
     } finally {
       this.testingId.set(null);
     }
-    const { installed, uninstalled } = this.rows();
-    const row = [...installed, ...uninstalled].find(
-      (candidate): candidate is InstanceCliMatrixRow =>
-        candidate.kind === 'instance' && candidate.id === id,
+    const latest = [...this.rows().installed, ...this.rows().uninstalled].find(
+      (candidate) => candidate.id === id,
     );
-    const result = row ? this.testResult(row) : null;
+    const result = latest ? this.testResult(latest) : null;
     // Named: a later Test of another instance replaces this toast, so each one says whose result it is.
-    if (row && result) this.feedback.announce(`${row.name}: ${result.text}`, result.ok ? 'status' : 'alert');
+    if (row && result)
+      this.feedback.announce(
+        `${row.name}: ${result.text}`,
+        result.ok ? 'status' : 'alert',
+      );
   }
 
   /**
@@ -524,7 +593,9 @@ export class CliOrchestrationMatrixComponent {
     if (row.kind === 'system') {
       const set = (on: boolean) => () => {
         const disabled = this.state.orchestration().data?.disabledClis;
-        const others = (Array.isArray(disabled) ? disabled : []).filter((cli) => cli !== row.cli);
+        const others = (Array.isArray(disabled) ? disabled : []).filter(
+          (cli) => cli !== row.cli,
+        );
         return this.state.saveSettings(
           {
             orchestration: { disabledClis: on ? others : [...others, row.cli] },
@@ -553,10 +624,15 @@ export class CliOrchestrationMatrixComponent {
     });
   }
 
-  protected async saveLaneDefault(row: SystemCliMatrixRow, choice: NonNullable<CliLaneDefaults[SystemCliType]>): Promise<void> {
+  protected async saveLaneDefault(
+    row: SystemCliMatrixRow,
+    choice: NonNullable<CliLaneDefaults[SystemCliType]>,
+  ): Promise<void> {
     await this.laneDefaults.save(row.cli, row.name, choice);
   }
-  protected async savePtahDefault(choice: NonNullable<CliLaneDefaults['ptah-cli']>): Promise<void> {
+  protected async savePtahDefault(
+    choice: NonNullable<CliLaneDefaults['ptah-cli']>,
+  ): Promise<void> {
     await this.laneDefaults.save('ptah-cli', 'Ptah CLI', choice);
   }
 
@@ -591,9 +667,12 @@ export class CliOrchestrationMatrixComponent {
         for (const selector of selectors) {
           const target = root.querySelector<HTMLElement>(selector);
           // The narrow layout hides inline Tiers and Test (they move into More).
-          if (target && !target.closest('[hidden], [aria-hidden="true"]') &&
-              getComputedStyle(target).display !== 'none' &&
-              getComputedStyle(target).visibility !== 'hidden') {
+          if (
+            target &&
+            !target.closest('[hidden], [aria-hidden="true"]') &&
+            getComputedStyle(target).display !== 'none' &&
+            getComputedStyle(target).visibility !== 'hidden'
+          ) {
             target.focus();
             return;
           }

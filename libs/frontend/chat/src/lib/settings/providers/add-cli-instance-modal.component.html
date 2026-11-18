@@ -1,0 +1,261 @@
+<ptah-native-modal
+  [isOpen]="open()"
+  ariaLabelledby="add-cli-instance-title"
+  size="md"
+  (closed)="requestClose()"
+>
+  <div
+    modal-header
+    class="surface-3 -mx-6 -mt-6 mb-4 flex items-center justify-between gap-2 border-b px-5 py-3"
+    data-testid="add-cli-instance-modal"
+  >
+    <h2 id="add-cli-instance-title" class="text-sm font-bold text-base-content">
+      {{
+        editing() ? 'Edit ' + editing()?.name : 'Add Ptah CLI Agent Instance'
+      }}
+    </h2>
+    <button type="button" ptahIconButton label="Close" (click)="requestClose()">
+      <lucide-angular [img]="CloseIcon" class="h-4 w-4" aria-hidden="true" />
+    </button>
+  </div>
+
+  <form
+    class="space-y-3 text-xs"
+    (submit)="$event.preventDefault(); submit()"
+    data-testid="add-cli-instance-form"
+  >
+    <ptah-field
+      label="Instance name"
+      [error]="duplicateName() ? duplicateMessage : null"
+    >
+      <input
+        ptahInput
+        id="add-cli-instance-name"
+        type="text"
+        class="w-full text-xs text-base-content"
+        [value]="name()"
+        (input)="name.set(value($event))"
+        placeholder="e.g. Glm-Secondary, Llama-Local"
+        autocomplete="off"
+        maxlength="80"
+        data-testid="add-cli-instance-name"
+        [attr.aria-invalid]="duplicateName()"
+        [attr.aria-describedby]="
+          duplicateName() ? 'add-cli-instance-name-error' : null
+        "
+      />
+    </ptah-field>
+    @if (duplicateName()) {
+      <p
+        id="add-cli-instance-name-error"
+        role="alert"
+        class="text-base-content"
+        data-testid="add-cli-instance-name-error"
+      >
+        {{ duplicateMessage }}
+      </p>
+    }
+
+    <div class="space-y-1">
+      <span
+        class="block font-semibold text-base-content"
+        id="add-cli-instance-provider-label"
+        >Provider connection</span
+      >
+      @if (editing(); as target) {
+        <p
+          class="flex items-center gap-2 text-base-content"
+          aria-labelledby="add-cli-instance-provider-label"
+          data-testid="add-cli-instance-provider-fixed"
+        >
+          <ptah-provider-mark [providerId]="target.providerId" fallback="Bot" />
+          <span>{{ target.providerName }}</span>
+        </p>
+      } @else {
+        <span class="flex items-center gap-2">
+          @if (providerId()) {
+            <ptah-provider-mark [providerId]="providerId()" fallback="Bot" />
+          }
+          <ptah-select
+            size="sm"
+            class="min-w-0 flex-1"
+            label="Provider connection"
+            aria-labelledby="add-cli-instance-provider-label"
+            [options]="providerSelectOptions()"
+            [value]="providerId()"
+            placeholder="Choose a provider connection…"
+            (valueChange)="selectProvider($event ?? '')"
+            data-testid="add-cli-instance-provider"
+          />
+        </span>
+        @if (state.connections().status === 'error') {
+          <p
+            role="alert"
+            class="text-base-content"
+            data-testid="add-cli-instance-providers-error"
+          >
+            The provider connections could not be loaded. Close and retry from
+            the Providers tab.
+          </p>
+        }
+      }
+    </div>
+
+    @if (showSignIn()) {
+      <div
+        class="space-y-2 rounded border border-base-300 bg-base-200 p-3"
+        data-testid="add-cli-instance-copilot"
+      >
+        <div class="flex items-center justify-between gap-2">
+          <span class="font-semibold text-base-content">GitHub sign-in</span>
+          <span
+            ptahBadge
+            appearance="outline"
+            size="xs"
+            [tone]="signedIn() ? 'ok' : 'warn'"
+            class="h-auto py-0.5 font-medium text-base-content"
+            data-testid="add-cli-instance-copilot-state"
+            >{{ signInLabel() }}</span
+          >
+        </div>
+        <p class="text-base-content-muted">
+          {{
+            editing()
+              ? 'GitHub Copilot is signed out. Sign in so this instance can run.'
+              : 'Sign in with GitHub to use Copilot for this CLI instance. Create is available once sign-in is confirmed.'
+          }}
+        </p>
+        @if (signInMessage(); as message) {
+          <p
+            [attr.role]="signInFailed() ? 'alert' : 'status'"
+            class="text-base-content"
+            data-testid="add-cli-instance-copilot-message"
+          >
+            {{ message }}
+          </p>
+        }
+        <button
+          type="button"
+          ptahButton
+          variant="primary"
+          [disabled]="signingIn() || signedIn()"
+          (click)="signIn()"
+          data-testid="add-cli-instance-copilot-login"
+        >
+          {{
+            signingIn()
+              ? signInBusyLabel()
+              : signInFailed()
+                ? 'Retry login with GitHub'
+                : 'Login with GitHub'
+          }}
+        </button>
+      </div>
+    }
+
+    @if (!editing() && providerId() === 'anthropic') {
+      <fieldset class="space-y-2" data-testid="add-cli-instance-claude-source">
+        <legend class="text-sm font-semibold">
+          Claude API key for this instance
+        </legend>
+        <label class="flex items-center gap-2"
+          ><input
+            type="radio"
+            name="claude-source"
+            [checked]="claudeSource() === 'shared-connection'"
+            [disabled]="!provider()?.hasKey"
+            (change)="selectClaudeSource('shared-connection')"
+          />Use the saved Claude API connection key</label
+        >
+        <label class="flex items-center gap-2"
+          ><input
+            type="radio"
+            name="claude-source"
+            [checked]="claudeSource() === 'instance'"
+            (change)="selectClaudeSource('instance')"
+          />Use a separate key for this instance</label
+        >
+        @if (!provider()?.hasKey) {
+          <p class="text-xs text-base-content-muted">
+            Connect Claude API first to use its saved key, or enter a separate
+            key.
+          </p>
+        }
+      </fieldset>
+    }
+    @if (showKey()) {
+      <ptah-field [label]="keyLabel()">
+        <input
+          ptahInput
+          size="md"
+          id="add-cli-instance-key"
+          [type]="keyVisible() ? 'text' : 'password'"
+          autocomplete="new-password"
+          spellcheck="false"
+          class="w-full pr-9 font-mono"
+          [value]="key()"
+          (input)="key.set(value($event))"
+          placeholder="sk-…"
+          aria-describedby="add-cli-instance-key-help"
+          data-testid="add-cli-instance-key"
+        />
+        <span ptahFieldTrailing class="flex items-center">
+          <button
+            type="button"
+            ptahIconButton
+            (click)="keyVisible.set(!keyVisible())"
+            [label]="keyVisible() ? 'Hide API key' : 'Show API key'"
+            [attr.aria-pressed]="keyVisible()"
+            data-testid="add-cli-instance-toggle-visibility"
+          >
+            <lucide-angular
+              [img]="keyVisible() ? EyeOffIcon : EyeIcon"
+              class="h-3.5 w-3.5"
+              aria-hidden="true"
+            />
+          </button>
+        </span>
+      </ptah-field>
+    }
+    @if (keyHint(); as hint) {
+      <p
+        id="add-cli-instance-key-help"
+        class="text-xs text-base-content-muted"
+        data-testid="add-cli-instance-key-help"
+      >
+        {{ hint }}
+      </p>
+    }
+    <!-- Submitting with Enter from a field. The visible submit is in the footer. -->
+    <button
+      type="submit"
+      class="hidden"
+      tabindex="-1"
+      aria-hidden="true"
+    ></button>
+  </form>
+
+  <div
+    modal-footer
+    class="surface-3 -mx-6 -mb-6 mt-5 flex items-center justify-between gap-2 border-t px-5 py-3"
+  >
+    <button type="button" ptahButton variant="ghost" (click)="requestClose()">
+      Cancel
+    </button>
+    <button
+      type="button"
+      ptahButton
+      variant="primary"
+      [disabled]="!canSubmit()"
+      (click)="submit()"
+      data-testid="add-cli-instance-submit"
+    >
+      {{ busy() ? 'Saving…' : editing() ? 'Save changes' : 'Create Instance' }}
+    </button>
+    <!-- showModal() makes the page inert: this copy of the toast is the one announced while the modal is open.
+             Only while open: a closed modal must not keep a second toast (and Undo) in the page. -->
+    @if (open()) {
+      <ptah-settings-toast />
+    }
+  </div>
+</ptah-native-modal>

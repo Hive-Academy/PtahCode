@@ -8,7 +8,11 @@
  */
 import { signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
-import { PROVIDER_MODELS_LOADER } from '@ptah-extension/ui';
+import { By } from '@angular/platform-browser';
+import {
+  PROVIDER_MODELS_LOADER,
+  PtahRichSelectComponent,
+} from '@ptah-extension/ui';
 import {
   ClaudeRpcService,
   LoggingService,
@@ -102,10 +106,11 @@ describe('DecisionModelRowComponent: Ollama Cloud and custom endpoint (TASK_2026
   }
 
   async function pickKind(kind: string): Promise<void> {
-    const select = byTestId<HTMLSelectElement>('decision-kind');
+    const select: PtahRichSelectComponent<string> = fixture.debugElement.query(
+      By.css('ptah-select[data-testid="decision-kind"]'),
+    )?.componentInstance;
     if (!select) throw new Error('kind picker missing');
-    select.value = kind;
-    select.dispatchEvent(new Event('change'));
+    select.value.set(kind);
     await flush();
   }
 
@@ -342,6 +347,20 @@ describe('DecisionModelRowComponent: Ollama Cloud and custom endpoint (TASK_2026
       await create();
       await open();
       await pickKind('custom');
+      for (const id of [
+        'decision-base-url',
+        'decision-model',
+        'decision-api-key',
+      ]) {
+        const input = byTestId(id);
+        expect(input?.hasAttribute('ptahInput')).toBe(true);
+        expect(
+          input
+            ?.closest('ptah-field')
+            ?.querySelector('label')
+            ?.getAttribute('for'),
+        ).toBe(input?.id);
+      }
       expect(byTestId('decision-base-url')).not.toBeNull();
       expect(byTestId('decision-model')).not.toBeNull();
       expect(byTestId<HTMLInputElement>('decision-api-key')?.type).toBe(
@@ -357,9 +376,17 @@ describe('DecisionModelRowComponent: Ollama Cloud and custom endpoint (TASK_2026
           ([method]) => method === 'agent:listDecisionModels',
         ),
       ).toBe(false);
-      expect(text('decision-base-url-help')).toContain(
-        'unless the endpoint is on this machine',
+      const info = host().querySelector<HTMLButtonElement>(
+        'button[aria-label="More about Base URL"]',
       );
+      expect(info).not.toBeNull();
+      info?.click();
+      fixture.detectChanges();
+      expect(
+        host().querySelector(
+          '[role="dialog"][aria-label="More about Base URL"]',
+        )?.textContent,
+      ).toContain('unless the endpoint is on this machine');
     });
 
     it('marks an invalid base URL inline and keeps Save disabled; an empty field shows no hint', async () => {
@@ -377,7 +404,7 @@ describe('DecisionModelRowComponent: Ollama Cloud and custom endpoint (TASK_2026
       );
       expect(field?.getAttribute('aria-invalid')).toBe('true');
       expect(field?.getAttribute('aria-describedby')).toBe(
-        'decision-model-base-url-help decision-model-base-url-error',
+        'decision-model-base-url-error decision-model-base-url-help',
       );
       expect(saveButton()?.disabled).toBe(true);
     });

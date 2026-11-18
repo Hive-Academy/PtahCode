@@ -196,7 +196,10 @@ describe('SettingsComponent deep-link', () => {
     shell.setActiveTab('orchestration');
     shell.openCodexSettings();
     expect(shell.activeSettingsTab()).toBe('claude-auth');
-    expect(shell.requestedDrawer()).toEqual({ providerId: 'openai-codex', tab: 'credentials' });
+    expect(shell.requestedDrawer()).toEqual({
+      providerId: 'openai-codex',
+      tab: 'credentials',
+    });
     shell.setActiveTab('tools');
     expect(shell.requestedDrawer()).toBeNull();
   });
@@ -392,7 +395,13 @@ describe('SettingsComponent agents-routing landing', () => {
     });
     TestBed.overrideComponent(SettingsComponent, {
       set: {
-        imports: [PtahSettingsLayoutComponent, PtahDescriptionListComponent, PtahStatusComponent, PtahStatePanelComponent, PtahSkeletonComponent, PtahFormSectionComponent, 
+        imports: [
+          PtahSettingsLayoutComponent,
+          PtahDescriptionListComponent,
+          PtahStatusComponent,
+          PtahStatePanelComponent,
+          PtahSkeletonComponent,
+          PtahFormSectionComponent,
           AgentsRoutingSettingsComponent,
           MotionStageDirective,
           PtahButtonDirective,
@@ -414,18 +423,42 @@ describe('SettingsComponent agents-routing landing', () => {
   }
   afterEach(() => TestBed.resetTestingModule());
 
-  // Batch 33 (deviation 4): the roles sit in a <details> closed by default; a background-role deep link opens it.
+  // Background roles stay visible; deep links scroll and focus the section.
+  const scrollIntoView = jest.fn();
+  const originalScrollIntoView = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    'scrollIntoView',
+  );
+  beforeEach(() => {
+    scrollIntoView.mockClear();
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: scrollIntoView,
+    });
+  });
+  afterEach(() => {
+    if (originalScrollIntoView) {
+      Object.defineProperty(
+        HTMLElement.prototype,
+        'scrollIntoView',
+        originalScrollIntoView,
+      );
+    } else {
+      Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView');
+    }
+  });
   it.each(['background-models', 'memory-curator', 'enhancement'] as const)(
-    'opens the background roles <details> for the %s deep link and focuses the section',
+    'scrolls to and focuses the always-visible background section for the %s deep link',
     async (section) => {
       const element = await land({ tab: 'orchestration', section });
-      const details = element.querySelector<HTMLDetailsElement>(
-        '[data-testid="background-roles-details"]',
+      const sectionNode = element.querySelector(
+        '[data-focus="background-models"]',
       );
-      expect(details?.open).toBe(true);
-      expect(document.activeElement).toBe(
-        element.querySelector('[data-focus="background-models"]'),
-      );
+      expect(sectionNode).not.toBeNull();
+      expect(sectionNode?.closest('details')).toBeNull();
+      expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
+      expect(scrollIntoView.mock.contexts).toContain(sectionNode);
+      expect(document.activeElement).toBe(sectionNode);
     },
   );
 
@@ -438,8 +471,8 @@ describe('SettingsComponent agents-routing landing', () => {
     expect(element.querySelector('#providers-cli-heading')).toBeNull();
   });
 
-  // Batch 35 revise R3: the sticky deep link. Leaving Providers and coming back must not re-open the roles.
-  it('re-visiting Providers after a background-role deep link leaves the roles closed and unfocused', async () => {
+  // A consumed deep link must not refocus the section on a later visit.
+  it('re-visiting Providers after a background-role deep link leaves the visible section unfocused', async () => {
     const state = providersStateFake();
     TestBed.configureTestingModule({
       providers: [
@@ -456,7 +489,13 @@ describe('SettingsComponent agents-routing landing', () => {
     });
     TestBed.overrideComponent(SettingsComponent, {
       set: {
-        imports: [PtahSettingsLayoutComponent, PtahDescriptionListComponent, PtahStatusComponent, PtahStatePanelComponent, PtahSkeletonComponent, PtahFormSectionComponent, 
+        imports: [
+          PtahSettingsLayoutComponent,
+          PtahDescriptionListComponent,
+          PtahStatusComponent,
+          PtahStatePanelComponent,
+          PtahSkeletonComponent,
+          PtahFormSectionComponent,
           AgentsRoutingSettingsComponent,
           MotionStageDirective,
           PtahButtonDirective,
@@ -478,11 +517,12 @@ describe('SettingsComponent agents-routing landing', () => {
     await fixture.whenStable();
     fixture.detectChanges();
     const element = fixture.nativeElement as HTMLElement;
-    expect(
-      element.querySelector<HTMLDetailsElement>(
-        '[data-testid="background-roles-details"]',
-      )?.open,
-    ).toBe(true);
+    const initialSection = element.querySelector(
+      '[data-focus="background-models"]',
+    );
+    expect(initialSection).not.toBeNull();
+    expect(document.activeElement).toBe(initialSection);
+    scrollIntoView.mockClear();
     fixture.componentInstance.setActiveTab('pro-features');
     fixture.detectChanges();
     (document.activeElement as HTMLElement | null)?.blur();
@@ -490,11 +530,12 @@ describe('SettingsComponent agents-routing landing', () => {
     fixture.detectChanges();
     await fixture.whenStable();
     fixture.detectChanges();
-    expect(
-      element.querySelector<HTMLDetailsElement>(
-        '[data-testid="background-roles-details"]',
-      )?.open,
-    ).toBe(false);
+    const sectionNode = element.querySelector(
+      '[data-focus="background-models"]',
+    );
+    expect(sectionNode).not.toBeNull();
+    expect(sectionNode?.closest('details')).toBeNull();
+    expect(scrollIntoView.mock.contexts).not.toContain(sectionNode);
     expect(document.activeElement).not.toBe(
       element.querySelector('[data-focus="background-models"]'),
     );
@@ -529,7 +570,19 @@ describe('SettingsComponent agents-routing landing', () => {
       ],
     });
     TestBed.overrideComponent(SettingsComponent, {
-      set: { imports: [PtahSettingsLayoutComponent, PtahDescriptionListComponent, PtahStatusComponent, PtahStatePanelComponent, PtahSkeletonComponent, PtahFormSectionComponent, AgentsRoutingStub, MotionStageDirective], schemas: [CUSTOM_ELEMENTS_SCHEMA] },
+      set: {
+        imports: [
+          PtahSettingsLayoutComponent,
+          PtahDescriptionListComponent,
+          PtahStatusComponent,
+          PtahStatePanelComponent,
+          PtahSkeletonComponent,
+          PtahFormSectionComponent,
+          AgentsRoutingStub,
+          MotionStageDirective,
+        ],
+        schemas: [CUSTOM_ELEMENTS_SCHEMA],
+      },
     });
     const appState = TestBed.inject(AppStateManager);
     appState.requestSettingsTab({
@@ -561,14 +614,19 @@ describe('SettingsComponent agents-routing landing', () => {
   it.each([
     { tab: 'providers' },
     { tab: 'orchestration', section: 'cli-agents' },
-  ] as const)('leaves the background roles closed for %o', async (request) => {
-    const element = await land(request);
-    expect(
-      element.querySelector<HTMLDetailsElement>(
-        '[data-testid="background-roles-details"]',
-      )?.open,
-    ).toBe(false);
-  });
+  ] as const)(
+    'keeps the background section visible without focusing it for %o',
+    async (request) => {
+      const element = await land(request);
+      const sectionNode = element.querySelector(
+        '[data-focus="background-models"]',
+      );
+      expect(sectionNode).not.toBeNull();
+      expect(sectionNode?.closest('details')).toBeNull();
+      expect(scrollIntoView.mock.contexts).not.toContain(sectionNode);
+      expect(document.activeElement).not.toBe(sectionNode);
+    },
+  );
 
   it('renders the Context Management container, not Providers or the agents routing, and opens the state', async () => {
     const state = providersStateFake();
@@ -587,13 +645,26 @@ describe('SettingsComponent agents-routing landing', () => {
     });
     TestBed.overrideComponent(SettingsComponent, {
       set: {
-        imports: [PtahSettingsLayoutComponent, PtahDescriptionListComponent, PtahStatusComponent, PtahStatePanelComponent, PtahSkeletonComponent, PtahFormSectionComponent, OrchestrationSettingsComponent, MotionStageDirective],
+        imports: [
+          PtahSettingsLayoutComponent,
+          PtahDescriptionListComponent,
+          PtahStatusComponent,
+          PtahStatePanelComponent,
+          PtahSkeletonComponent,
+          PtahFormSectionComponent,
+          OrchestrationSettingsComponent,
+          MotionStageDirective,
+        ],
         schemas: [CUSTOM_ELEMENTS_SCHEMA],
       },
     });
     TestBed.overrideComponent(OrchestrationSettingsComponent, {
       set: {
-        imports: [MotionStageDirective, PtahButtonDirective, PtahIconButtonDirective],
+        imports: [
+          MotionStageDirective,
+          PtahButtonDirective,
+          PtahIconButtonDirective,
+        ],
         schemas: [CUSTOM_ELEMENTS_SCHEMA],
       },
     });
@@ -640,7 +711,17 @@ describe('SettingsComponent header', () => {
     });
     TestBed.overrideComponent(SettingsComponent, {
       set: {
-        imports: [PtahSettingsLayoutComponent, PtahDescriptionListComponent, PtahStatusComponent, PtahStatePanelComponent, PtahSkeletonComponent, PtahFormSectionComponent, MotionStageDirective, PtahButtonDirective, PtahIconButtonDirective],
+        imports: [
+          PtahSettingsLayoutComponent,
+          PtahDescriptionListComponent,
+          PtahStatusComponent,
+          PtahStatePanelComponent,
+          PtahSkeletonComponent,
+          PtahFormSectionComponent,
+          MotionStageDirective,
+          PtahButtonDirective,
+          PtahIconButtonDirective,
+        ],
         schemas: [CUSTOM_ELEMENTS_SCHEMA],
       },
     });
@@ -653,15 +734,24 @@ describe('SettingsComponent header', () => {
   it('shows the workspace name (full path in title) and the Desktop app label', () => {
     const element = render(true, 'C:\\work\\ptah-extension');
     const context = element.querySelector('[data-testid="settings-context"]');
-    expect(Array.from(context?.querySelectorAll('dt, dd') ?? [], (node) => node.textContent?.trim())).toEqual(['Workspace', 'ptah-extension', 'App', 'Desktop']);
-    expect(context?.getAttribute('title')).toBe(
-      'C:\\work\\ptah-extension',
-    );
+    expect(
+      Array.from(context?.querySelectorAll('dt, dd') ?? [], (node) =>
+        node.textContent?.trim(),
+      ),
+    ).toEqual(['Workspace', 'ptah-extension', 'App', 'Desktop']);
+    expect(context?.getAttribute('title')).toBe('C:\\work\\ptah-extension');
   });
 
   it('shows only the VS Code app label when no folder is open', () => {
     const element = render(false, null);
-    expect(Array.from(element.querySelectorAll('[data-testid="settings-context"] dt, [data-testid="settings-context"] dd'), (node) => node.textContent?.trim())).toEqual(['App', 'VS Code']);
+    expect(
+      Array.from(
+        element.querySelectorAll(
+          '[data-testid="settings-context"] dt, [data-testid="settings-context"] dd',
+        ),
+        (node) => node.textContent?.trim(),
+      ),
+    ).toEqual(['App', 'VS Code']);
   });
 
   it('keeps Back and four enabled tab buttons with their names (D9)', () => {
@@ -683,8 +773,16 @@ describe('SettingsComponent header', () => {
       'Search & Voice',
     ]);
     expect(tabs.every((tab) => !tab.disabled)).toBe(true);
-    expect(element.querySelector('[data-testid="settings-tabs"]')?.getAttribute('aria-label')).toBe('Settings sections');
-    expect(element.querySelector('[data-testid="settings-back"]')?.closest('[nav-header]')).not.toBeNull();
+    expect(
+      element
+        .querySelector('[data-testid="settings-tabs"]')
+        ?.getAttribute('aria-label'),
+    ).toBe('Settings sections');
+    expect(
+      element
+        .querySelector('[data-testid="settings-back"]')
+        ?.closest('[nav-header]'),
+    ).not.toBeNull();
     expect(tabs[0].classList.contains('tab-active')).toBe(true);
     expect(tabs[0].getAttribute('data-active')).toBe('true');
     expect(tabs[0].getAttribute('aria-current')).toBe('page');
@@ -692,14 +790,21 @@ describe('SettingsComponent header', () => {
 
   it('keeps one settings-back test id and a narrow-only Back in the header actions', () => {
     const element = render(false, null);
-    expect(element.querySelectorAll('[data-testid="settings-back"]')).toHaveLength(1);
-    const narrowBack = element.querySelector<HTMLButtonElement>('[data-narrow-back]');
+    expect(
+      element.querySelectorAll('[data-testid="settings-back"]'),
+    ).toHaveLength(1);
+    const narrowBack =
+      element.querySelector<HTMLButtonElement>('[data-narrow-back]');
     expect(narrowBack?.getAttribute('aria-label')).toBe('Back to Chat');
     expect(narrowBack?.hasAttribute('data-testid')).toBe(false);
     // The wrapper owns the hide rule: ptahButton's display rule beats a utility on the button.
-    expect(narrowBack?.classList.contains('[@container(min-width:640px)]:hidden')).toBe(false);
     expect(
-      narrowBack?.closest('[data-narrow-back-slot]')?.classList.contains('[@container(min-width:640px)]:hidden'),
+      narrowBack?.classList.contains('[@container(min-width:640px)]:hidden'),
+    ).toBe(false);
+    expect(
+      narrowBack
+        ?.closest('[data-narrow-back-slot]')
+        ?.classList.contains('[@container(min-width:640px)]:hidden'),
     ).toBe(true);
     expect(narrowBack?.closest('[nav-header]')).toBeNull();
   });
@@ -784,7 +889,17 @@ describe('SettingsComponent security copy', () => {
     });
     TestBed.overrideComponent(SettingsComponent, {
       set: {
-        imports: [PtahSettingsLayoutComponent, PtahDescriptionListComponent, PtahStatusComponent, PtahStatePanelComponent, PtahSkeletonComponent, PtahFormSectionComponent, MotionStageDirective, PtahButtonDirective, PtahIconButtonDirective],
+        imports: [
+          PtahSettingsLayoutComponent,
+          PtahDescriptionListComponent,
+          PtahStatusComponent,
+          PtahStatePanelComponent,
+          PtahSkeletonComponent,
+          PtahFormSectionComponent,
+          MotionStageDirective,
+          PtahButtonDirective,
+          PtahIconButtonDirective,
+        ],
         schemas: [CUSTOM_ELEMENTS_SCHEMA],
       },
     });
@@ -936,7 +1051,13 @@ describe('SettingsComponent deferred tabs', () => {
     });
     TestBed.overrideComponent(SettingsComponent, {
       set: {
-        imports: [PtahSettingsLayoutComponent, PtahDescriptionListComponent, PtahStatusComponent, PtahStatePanelComponent, PtahSkeletonComponent, PtahFormSectionComponent, 
+        imports: [
+          PtahSettingsLayoutComponent,
+          PtahDescriptionListComponent,
+          PtahStatusComponent,
+          PtahStatePanelComponent,
+          PtahSkeletonComponent,
+          PtahFormSectionComponent,
           MotionStageDirective,
           AdvancedStub,
           SearchVoiceStub,
@@ -962,29 +1083,41 @@ describe('SettingsComponent deferred tabs', () => {
     fixture.detectChanges();
     expect(stage?.getAttribute('data-motion-dir')).toBe('forward');
     expect(stage?.querySelector('.ptah-motion-panel')).not.toBeNull();
-    expect(stage?.querySelectorAll(':scope > .ptah-motion-panel')).toHaveLength(1);
+    expect(stage?.querySelectorAll(':scope > .ptah-motion-panel')).toHaveLength(
+      1,
+    );
 
     const [block] = await fixture.getDeferBlocks();
     await block.render(DeferBlockState.Complete);
-    expect(element.querySelector('ptah-advanced-settings')?.parentElement?.classList.contains('ptah-motion-panel')).toBe(true);
+    expect(
+      element
+        .querySelector('ptah-advanced-settings')
+        ?.parentElement?.classList.contains('ptah-motion-panel'),
+    ).toBe(true);
 
     fixture.componentInstance.setActiveTab('claude-auth');
     fixture.detectChanges();
     expect(stage?.getAttribute('data-motion-dir')).toBe('back');
-    expect(stage?.querySelectorAll(':scope > .ptah-motion-panel')).toHaveLength(1);
+    expect(stage?.querySelectorAll(':scope > .ptah-motion-panel')).toHaveLength(
+      1,
+    );
   });
 
   it('settles a rapid Providers to Advanced to Providers switch on one backward panel', () => {
     const fixture = create(DeferBlockBehavior.Manual);
     fixture.detectChanges();
-    const stage = (fixture.nativeElement as HTMLElement).querySelector<HTMLElement>('.ptah-motion-stage');
+    const stage = (
+      fixture.nativeElement as HTMLElement
+    ).querySelector<HTMLElement>('.ptah-motion-stage');
     fixture.componentInstance.setActiveTab('pro-features');
     fixture.detectChanges();
     expect(stage?.getAttribute('data-motion-dir')).toBe('forward');
     fixture.componentInstance.setActiveTab('claude-auth');
     fixture.detectChanges();
     expect(stage?.getAttribute('data-motion-dir')).toBe('back');
-    expect(stage?.querySelectorAll(':scope > .ptah-motion-panel')).toHaveLength(1);
+    expect(stage?.querySelectorAll(':scope > .ptah-motion-panel')).toHaveLength(
+      1,
+    );
   });
 
   it('shows an aria-busy placeholder until the Advanced chunk renders, then wires modelChanged', async () => {
@@ -1032,11 +1165,19 @@ describe('SettingsComponent deferred tabs', () => {
     // Exactly one alert region (the panel's error section), so the error is announced one time.
     expect(error?.hasAttribute('role')).toBe(false);
     expect(error?.querySelectorAll('[role="alert"]').length).toBe(1);
-    expect(error?.querySelector('[role="alert"]')?.textContent).toContain('The Providers page could not load.');
-    expect(error?.querySelector('ptah-state-panel')?.getAttribute('state')).toBe('error');
+    expect(error?.querySelector('[role="alert"]')?.textContent).toContain(
+      'The Providers page could not load.',
+    );
+    expect(
+      error?.querySelector('ptah-state-panel')?.getAttribute('state'),
+    ).toBe('error');
     expect(error?.textContent).toContain('The Providers page could not load.');
     // One Reload button only: the panel has no action of its own.
-    expect(Array.from(error?.querySelectorAll('button') ?? [], (button) => button.textContent?.trim())).toEqual(['Reload']);
+    expect(
+      Array.from(error?.querySelectorAll('button') ?? [], (button) =>
+        button.textContent?.trim(),
+      ),
+    ).toEqual(['Reload']);
 
     const reload = jest
       .spyOn(fixture.componentInstance, 'reloadWindow')
@@ -1172,7 +1313,19 @@ describe('SettingsComponent deep-linked provider request', () => {
       ],
     });
     TestBed.overrideComponent(SettingsComponent, {
-      set: { imports: [PtahSettingsLayoutComponent, PtahDescriptionListComponent, PtahStatusComponent, PtahStatePanelComponent, PtahSkeletonComponent, PtahFormSectionComponent, ProvidersPageStub, MotionStageDirective], schemas: [CUSTOM_ELEMENTS_SCHEMA] },
+      set: {
+        imports: [
+          PtahSettingsLayoutComponent,
+          PtahDescriptionListComponent,
+          PtahStatusComponent,
+          PtahStatePanelComponent,
+          PtahSkeletonComponent,
+          PtahFormSectionComponent,
+          ProvidersPageStub,
+          MotionStageDirective,
+        ],
+        schemas: [CUSTOM_ELEMENTS_SCHEMA],
+      },
     });
     const appState = TestBed.inject(AppStateManager);
     appState.requestSettingsTab({

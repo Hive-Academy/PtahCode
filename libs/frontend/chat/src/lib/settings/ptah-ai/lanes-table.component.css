@@ -1,0 +1,469 @@
+/* The ResizeObserver of the Model column tier measures this host. An inline
+   custom element reports a zero content width, so the host must be a block. */
+ptah-lanes-table {
+  display: block;
+  min-width: 0;
+}
+ptah-lanes-table .ptah-table-grid {
+  table-layout: fixed;
+}
+ptah-lanes-table .ptah-table-grid th,
+ptah-lanes-table .ptah-table-grid td {
+  vertical-align: middle;
+  min-width: 0;
+}
+ptah-lanes-table .lane-expander {
+  width: 2.5rem;
+  padding-inline: 0;
+}
+ptah-lanes-table [laneActions] {
+  display: contents;
+}
+ptah-lanes-table .lane-default-value + dt {
+  font-size: 0.875rem;
+}
+ptah-lanes-table .lane-default-value {
+  font-size: 0.875rem;
+  min-width: 0;
+}
+ptah-lanes-table
+  .lane-default-value
+  ptah-cli-lane-default-cell[data-layout='compact'] {
+  width: 12rem;
+  max-width: 100%;
+}
+
+ptah-lanes-table .lane-default-value [data-popover-kind='model'] {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  height: auto;
+  text-align: start;
+}
+
+ptah-lanes-table [data-testid='lanes-colgroup'] col:nth-child(2) {
+  width: 26%;
+}
+ptah-lanes-table .ptah-table-control-cell > span {
+  font-size: 0.75rem;
+  color: var(--ptah-section-description-color);
+}
+ptah-lanes-table .lane-model-value {
+  display: flex;
+  width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+}
+ptah-lanes-table .lane-model-value > ptah-native-popover {
+  min-width: 0;
+  flex: 0 1 auto;
+  overflow: hidden;
+}
+ptah-lanes-table .lane-model-value > span,
+ptah-lanes-table .lane-model-value button {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+ptah-lanes-table .lane-row-actions {
+  display: flex;
+  width: 100%;
+  white-space: nowrap;
+  flex-wrap: nowrap;
+}
+ptah-lanes-table .lane-row-actions > ptah-table-row-actions {
+  margin-inline-start: auto;
+  flex: 0 0 auto;
+}
+ptah-lanes-table .lane-row-actions > button {
+  padding-inline: 0.25rem;
+  flex-shrink: 0;
+}
+
+ptah-lanes-table .lane-order {
+  width: 3rem;
+}
+ptah-lanes-table .lane-status {
+  width: 23%;
+}
+ptah-lanes-table .lane-enabled {
+  width: 3rem;
+}
+ptah-lanes-table .lane-model-trigger {
+  padding-inline: 0;
+  font-family: var(--ptah-font-sans);
+}
+ptah-lanes-table .lane-model-trigger.font-mono {
+  font-family: var(--ptah-font-mono);
+}
+ptah-lanes-table
+  .lane-model-value
+  > ptah-native-popover:has([data-popover-kind='effort']) {
+  flex-shrink: 0;
+}
+ptah-lanes-table .lane-default-value .lane-model-value {
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+ptah-lanes-table .lane-default-value .lane-model-value button {
+  white-space: nowrap;
+}
+
+/* Budget fixed columns against table width, including an embedded settings pane. */
+/* 2rem expander button plus 2 x 0.25rem cell padding: a smaller column overflows the table. */
+ptah-lanes-table .ptah-table[data-collapsed='true'] .lane-expander {
+  width: 2.5rem;
+}
+ptah-lanes-table
+  .ptah-table[data-collapsed='true']
+  .ptah-table-grid
+  > thead
+  > tr
+  > th,
+ptah-lanes-table
+  .ptah-table[data-collapsed='true']
+  .ptah-table-grid
+  > tbody
+  > tr
+  > :is(th, td) {
+  padding-inline: 0.25rem;
+}
+ptah-lanes-table
+  .ptah-table[data-collapsed='true']
+  .ptah-table-grid
+  > thead
+  > tr
+  > th:nth-last-child(2) {
+  font-size: 0.6875rem;
+}
+/* Projected fact content must inherit the detail grid's body size, not cell sizing. */
+ptah-lanes-table [ptahDetailFacts] dd,
+ptah-lanes-table [ptahDetailFacts] dd span:not(.sr-only),
+ptah-lanes-table [ptahDetailFacts] dd .text-xs,
+ptah-lanes-table
+  [ptahDetailFacts]
+  dd
+  button.btn.btn-xs[data-ptah-button]:is(.btn, #ptah-button) {
+  font-size: inherit;
+}
+ptah-lanes-table
+  [ptahDetailFacts]
+  .lane-model-value
+  button.btn.btn-xs[data-ptah-button]:is(.btn, #ptah-button) {
+  padding-inline: 0;
+  text-align: start;
+}
+ptah-lanes-table .ptah-table-grid > tbody > tr:not([ptahDetailRow]) {
+  height: 49px;
+}
+ptah-lanes-table .ptah-table[data-collapsed='true'] .lane-status {
+  width: 8rem;
+}
+
+/* Recovery is visible beside Status in both table layouts. */
+ptah-lanes-table
+  ptah-lane-row-identity
+  .lane-install-guide[data-ptah-button]:is(.btn, #ptah-button) {
+  display: none;
+}
+
+/* Detail values are editable facts and may occupy several lines. */
+ptah-lanes-table .lane-default-value .lane-model-value {
+  flex-wrap: wrap;
+  overflow: visible;
+  white-space: normal;
+}
+ptah-lanes-table .lane-default-value .lane-model-value > ptah-native-popover {
+  overflow: visible;
+}
+ptah-lanes-table .lane-default-value .lane-model-value > span,
+ptah-lanes-table .lane-default-value .lane-model-value button {
+  white-space: normal;
+  overflow: visible;
+  overflow-wrap: anywhere;
+  height: auto;
+  text-overflow: clip;
+}
+
+/* Compact rows keep identity, kind and model in normal flow. */
+ptah-lanes-table .ptah-table[data-collapsed='true'] .lane-order {
+  width: 2.5rem;
+}
+ptah-lanes-table .ptah-table[data-collapsed='true'] .lane-status {
+  width: 7.25rem;
+}
+ptah-lanes-table
+  .ptah-table[data-collapsed='true']
+  th[scope='row']
+  .lane-model-value {
+  margin-block-start: var(--ptah-space-1);
+  flex-wrap: wrap;
+  overflow: visible;
+  white-space: normal;
+}
+ptah-lanes-table
+  .ptah-table[data-collapsed='true']
+  th[scope='row']
+  .lane-model-value
+  > ptah-native-popover {
+  overflow: visible;
+  max-width: 100%;
+}
+ptah-lanes-table
+  .ptah-table[data-collapsed='true']
+  th[scope='row']
+  .lane-model-value
+  :is(button, span) {
+  height: auto;
+  white-space: normal;
+  overflow: visible;
+  overflow-wrap: normal;
+  word-break: normal;
+  text-overflow: clip;
+  text-align: start;
+}
+
+/* Compact budget: 48 order + 112 status + 32 enabled + 40 expander.
+   At 358px this leaves 126px for the full lane name. */
+ptah-lanes-table .ptah-table[data-collapsed='true'] .lane-order {
+  width: 3rem;
+}
+ptah-lanes-table .ptah-table[data-collapsed='true'] .lane-status {
+  width: 7rem;
+}
+ptah-lanes-table .ptah-table[data-collapsed='true'] .lane-enabled {
+  width: 2rem;
+}
+ptah-lanes-table
+  .ptah-table[data-collapsed='true']
+  .ptah-table-grid
+  > :is(thead, tbody)
+  > tr
+  > :first-child {
+  padding-inline: var(--ptah-space-2);
+}
+ptah-lanes-table td[hidden],
+ptah-lanes-table th[hidden] {
+  display: none;
+}
+ptah-lanes-table
+  .ptah-table[data-collapsed='true'][data-model-column='true']
+  .lane-status {
+  width: 13rem;
+}
+ptah-lanes-table
+  .ptah-table[data-collapsed='true'][data-model-column='true']
+  .lane-model {
+  width: 10rem;
+}
+ptah-lanes-table
+  .ptah-table[data-collapsed='true'][data-model-column='true']
+  ptah-lane-row-identity[data-collapsed='true']
+  .ptah-table-row-title-primary {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: start;
+}
+ptah-lanes-table
+  .ptah-table[data-collapsed='true'][data-model-column='true']
+  ptah-lane-row-identity[data-collapsed='true']
+  .ptah-table-row-title-kind {
+  flex-basis: auto;
+  order: 0;
+}
+ptah-lanes-table
+  .lane-default-value
+  [data-popover-kind='effort'][data-ptah-button]:is(.btn, #ptah-button) {
+  border: var(--ptah-border-width) solid var(--ptah-card-border-faint);
+  border-radius: var(--ptah-space-1);
+  padding-inline: var(--ptah-space-1);
+}
+
+/* The inline-block popover trigger otherwise sizes to its unwrapped contents,
+   even after its flex-item host shrinks. Keep the entire hit target in its cell. */
+ptah-lanes-table .lane-model-value > ptah-native-popover > .popover-trigger {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+}
+ptah-lanes-table
+  .lane-model-value
+  button[data-ptah-button]:is(.btn, #ptah-button) {
+  box-sizing: border-box;
+  height: auto;
+  min-width: 0;
+  max-width: 100%;
+}
+
+ptah-lanes-table
+  .ptah-table[data-collapsed='true']
+  th[scope='row']
+  .lane-model-value
+  button[data-ptah-button]:is(.btn, #ptah-button) {
+  height: auto;
+  white-space: normal;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+
+/* A model id is one flex item (two items would never wrap) that breaks at
+   most once, at the <wbr> between its two no-wrap parts (Batch 52: at most
+   two lines). Wide tiers keep one line and the ellipsis. The id weight wins
+   over the compact `.lane-model-value :is(button, span)` rule, which sets
+   white-space: normal. */
+ptah-lanes-table .lane-model-id {
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+ptah-lanes-table .lane-model-part:is(span, #lane-model-part) {
+  white-space: nowrap;
+}
+
+/* The Status cell owns the menu anchor in every tier. The action wrapper has
+   no box (and no transform), so recovery labels cannot move the menu. */
+ptah-lanes-table [data-lane-status] {
+  position: relative;
+  padding-inline-end: 2.5rem;
+  white-space: nowrap;
+}
+ptah-lanes-table [data-lane-status] > ptah-lanes-table-status {
+  display: inline-flex;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+ptah-lanes-table [data-lane-status] .ptah-status-text {
+  white-space: nowrap;
+  overflow-wrap: normal;
+  word-break: normal;
+}
+ptah-lanes-table [data-lane-status] > .lane-row-actions {
+  display: contents;
+}
+ptah-lanes-table [data-lane-status] .lane-row-actions > button {
+  display: inline-block;
+  vertical-align: middle;
+  padding-inline: 0;
+  margin-inline-start: var(--ptah-space-2);
+  font-size: 0.75rem;
+  white-space: nowrap;
+}
+ptah-lanes-table [data-lane-status] .lane-row-actions > ptah-table-row-actions {
+  position: absolute;
+  inset-inline-end: var(--ptah-gap-inline);
+  top: 50%;
+  transform: translateY(-50%);
+  margin: 0;
+}
+ptah-lanes-table
+  .ptah-table[data-collapsed='true']
+  .ptah-table-grid
+  > tbody
+  > tr
+  > [data-lane-status] {
+  padding-inline: 0.25rem 2rem;
+}
+ptah-lanes-table
+  .ptah-table[data-collapsed='true']
+  [data-lane-status]
+  .lane-row-actions
+  > ptah-table-row-actions {
+  inset-inline-end: 0.25rem;
+}
+ptah-lanes-table
+  .ptah-table[data-collapsed='true']
+  [data-lane-status]
+  .ptah-table-row-actions
+  button[data-ptah-button]:is(.btn, #ptah-button) {
+  width: 1.5rem;
+  min-width: 1.5rem;
+}
+/* Only compact stacks recovery under status; the menu stays at row center. */
+ptah-lanes-table
+  .ptah-table[data-collapsed='true']:not([data-model-column='true'])
+  [data-lane-status]
+  > ptah-lanes-table-status,
+ptah-lanes-table
+  .ptah-table[data-collapsed='true']:not([data-model-column='true'])
+  [data-lane-status]
+  .lane-row-actions
+  > button {
+  display: block;
+  margin: 0;
+}
+
+/* Compact identity uses intrinsic tracks: the name stays beside its mark,
+   while the spanning chip cannot distribute spare width between those tracks. */
+ptah-lanes-table
+  .ptah-table[data-collapsed='true']:not([data-model-column='true']) {
+  & ptah-lane-row-identity .ptah-table-row-title-primary[class] {
+    display: grid;
+    grid-template-columns: 1rem minmax(0, max-content) max-content;
+    justify-content: start;
+    align-items: start;
+    column-gap: 0.25rem;
+    row-gap: 0.1875rem;
+  }
+  & ptah-lane-row-identity [ptahRowMark] {
+    grid-column: 1;
+    grid-row: 1;
+    width: 1rem;
+  }
+  & ptah-lane-row-identity .ptah-table-row-title-name {
+    grid-column: 2;
+    grid-row: 1;
+    white-space: nowrap;
+  }
+  & ptah-lane-row-identity ptah-lane-default-warning {
+    grid-column: 3;
+    grid-row: 1;
+  }
+  & ptah-lane-row-identity .ptah-table-row-title-kind {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    width: max-content;
+    flex: none;
+    justify-self: start;
+  }
+  & th[scope='row'] .lane-model-value {
+    margin-block-start: 0.1875rem;
+  }
+  &
+    th[scope='row']
+    .lane-model-value
+    > ptah-native-popover:has([data-popover-kind='model']) {
+    flex: 0 1 100%;
+    width: 100%;
+    min-width: 0;
+  }
+  &
+    th[scope='row']
+    [data-popover-kind='model'][data-ptah-button]:is(.btn, #ptah-button) {
+    width: 100%;
+    /* The shared button centers its flex content; keep the label at the start. */
+    justify-content: flex-start;
+    text-align: start;
+    line-height: 0.75rem;
+    border-block-width: 0;
+    overflow-wrap: normal;
+    word-break: normal;
+  }
+  &
+    [data-lane-status]
+    .lane-row-actions
+    > button[data-ptah-button]:is(.btn, #ptah-button) {
+    height: auto;
+    min-height: 1.5rem;
+    line-height: 1rem;
+  }
+  & [data-lane-status] .ptah-status-text {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    overflow-wrap: normal;
+    word-break: normal;
+  }
+}

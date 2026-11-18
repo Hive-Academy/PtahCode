@@ -1,3 +1,4 @@
+import { choosePtahSelect } from '../../choose-ptah-select';
 /**
  * E2E: Providers tab interaction scenes (TASK_2026_555 Batch 28, Task 28.1 "Validation notes").
  *
@@ -60,11 +61,17 @@ for (const host of HOSTS) {
     });
 
     if (host === 'electron') {
-      test('Codex settings opens the OpenAI Codex Credentials drawer', async ({ page }) => {
+      test('Codex settings opens the OpenAI Codex Credentials drawer', async ({
+        page,
+      }) => {
         await expandMatrixDetail(page, 'codex');
         await page.getByRole('button', { name: 'Codex settings' }).click();
-        await expect(page.locator('[data-testid="connection-drawer-title"]')).toContainText('OpenAI Codex');
-        await expect(page.getByRole('tab', { name: 'Credentials' })).toHaveAttribute('aria-selected', 'true');
+        await expect(
+          page.locator('[data-testid="connection-drawer-title"]'),
+        ).toContainText('OpenAI Codex');
+        await expect(
+          page.getByRole('tab', { name: 'Credentials' }),
+        ).toHaveAttribute('aria-selected', 'true');
       });
     }
 
@@ -222,9 +229,10 @@ for (const host of HOSTS) {
     }) => {
       const popover = await openMainAgentPopover(page);
       const before = getFixtureState(page).calls.length;
-      await popover
-        .locator('[data-testid="main-agent-provider"]')
-        .selectOption('kimi-code');
+      await choosePtahSelect(
+        popover.locator('[data-testid="main-agent-provider"]'),
+        'Kimi Code \u00b7 OAuth',
+      );
       await expect(
         popover.locator('[data-testid="main-agent-provider-copy"]'),
       ).toHaveText(
@@ -408,7 +416,9 @@ for (const host of HOSTS) {
         page.locator('[data-testid="connection-detail-drawer"]'),
       ).toHaveCount(0);
       await expect(
-        card(page, 'Kimi Code').locator('[data-testid="provider-card-details-trigger"]'),
+        card(page, 'Kimi Code').locator(
+          '[data-testid="provider-card-details-trigger"]',
+        ),
       ).toBeFocused();
     });
   });
@@ -476,7 +486,9 @@ for (const host of HOSTS) {
           .filter((call) => call.method === 'auth:checkConnection'),
       ).toHaveLength(1);
       // Focus stays on the card (its action left the face while it read "Checking…").
-      await expect(kimiCode.locator('[data-testid="provider-card-details-trigger"]')).toBeFocused();
+      await expect(
+        kimiCode.locator('[data-testid="provider-card-details-trigger"]'),
+      ).toBeFocused();
     });
   });
 }

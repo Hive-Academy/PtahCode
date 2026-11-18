@@ -22,11 +22,14 @@ import {
   PtahButtonDirective,
   PtahFieldComponent,
   PtahInputDirective,
-  PtahSelectDirective,
+  PtahRichSelectComponent,
   PtahIconButtonDirective,
   ProviderMarkComponent,
 } from '@ptah-extension/ui';
-import { ANTHROPIC_API_LANE_ENTRY, getAnthropicProvider } from '@ptah-extension/shared';
+import {
+  ANTHROPIC_API_LANE_ENTRY,
+  getAnthropicProvider,
+} from '@ptah-extension/shared';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import { SettingsToastComponent } from '../feedback/settings-toast.component';
 
@@ -39,9 +42,7 @@ export interface CliInstanceEditTarget {
 }
 
 /** Connections a Ptah CLI instance cannot use (the rule of the instance manager retired in Batch 34). */
-const EXCLUDED_PROVIDERS: ReadonlySet<string> = new Set([
-  'openai-codex',
-]);
+const EXCLUDED_PROVIDERS: ReadonlySet<string> = new Set(['openai-codex']);
 const COPILOT = 'github-copilot';
 const MODALITY: Readonly<Record<string, string>> = {
   apiKey: 'API key',
@@ -94,276 +95,11 @@ type KeyMode = 'required' | 'optional' | 'none' | 'sign-in';
     ProviderMarkComponent,
     PtahFieldComponent,
     PtahInputDirective,
-    PtahSelectDirective,
+    PtahRichSelectComponent,
     SettingsToastComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  template: `
-    <ptah-native-modal
-      [isOpen]="open()"
-      ariaLabelledby="add-cli-instance-title"
-      size="md"
-      (closed)="requestClose()"
-    >
-      <div
-        modal-header
-        class="surface-3 -mx-6 -mt-6 mb-4 flex items-center justify-between gap-2 border-b px-5 py-3"
-        data-testid="add-cli-instance-modal"
-      >
-        <h2
-          id="add-cli-instance-title"
-          class="text-sm font-bold text-base-content"
-        >
-          {{
-            editing()
-              ? 'Edit ' + editing()?.name
-              : 'Add Ptah CLI Agent Instance'
-          }}
-        </h2>
-        <button
-          type="button"
-          ptahIconButton
-          label="Close"
-          (click)="requestClose()"
-        >
-          <lucide-angular
-            [img]="CloseIcon"
-            class="h-4 w-4"
-            aria-hidden="true"
-          />
-        </button>
-      </div>
-
-      <form
-        class="space-y-3 text-xs"
-        (submit)="$event.preventDefault(); submit()"
-        data-testid="add-cli-instance-form"
-      >
-        <ptah-field label="Instance name" [error]="duplicateName() ? duplicateMessage : null">
-          <input
-            ptahInput
-            id="add-cli-instance-name"
-            type="text"
-            class="w-full text-xs text-base-content"
-            [value]="name()"
-            (input)="name.set(value($event))"
-            placeholder="e.g. Glm-Secondary, Llama-Local"
-            autocomplete="off"
-            maxlength="80"
-            data-testid="add-cli-instance-name"
-            [attr.aria-invalid]="duplicateName()"
-            [attr.aria-describedby]="
-              duplicateName() ? 'add-cli-instance-name-error' : null
-            "
-          />
-        </ptah-field>
-          @if (duplicateName()) {
-            <p id="add-cli-instance-name-error" role="alert" class="text-base-content" data-testid="add-cli-instance-name-error">{{ duplicateMessage }}</p>
-          }
-
-        <div class="space-y-1">
-          <span
-            class="block font-semibold text-base-content"
-            id="add-cli-instance-provider-label"
-            >Provider connection</span
-          >
-          @if (editing(); as target) {
-            <p
-              class="flex items-center gap-2 text-base-content"
-              aria-labelledby="add-cli-instance-provider-label"
-              data-testid="add-cli-instance-provider-fixed"
-            >
-              <ptah-provider-mark
-                [providerId]="target.providerId"
-                fallback="Bot"
-              />
-              <span>{{ target.providerName }}</span>
-            </p>
-          } @else {
-            <span class="flex items-center gap-2">
-              @if (providerId()) {
-                <ptah-provider-mark
-                  [providerId]="providerId()"
-                  fallback="Bot"
-                />
-              }
-              <select
-                ptahSelect
-                size="sm"
-                class="min-w-0 flex-1 text-xs text-base-content"
-                aria-labelledby="add-cli-instance-provider-label"
-                (change)="selectProvider(value($event))"
-                data-testid="add-cli-instance-provider"
-              >
-                <option value="" [selected]="!providerId()">
-                  Choose a provider connection…
-                </option>
-                @for (option of providerOptions(); track option.id) {
-                  <option
-                    [value]="option.id"
-                    [selected]="option.id === providerId()"
-                  >
-                    {{ option.label }}
-                  </option>
-                }
-              </select>
-            </span>
-            @if (state.connections().status === 'error') {
-              <p
-                role="alert"
-                class="text-base-content"
-                data-testid="add-cli-instance-providers-error"
-              >
-                The provider connections could not be loaded. Close and retry
-                from the Providers tab.
-              </p>
-            }
-          }
-        </div>
-
-        @if (showSignIn()) {
-          <div
-            class="space-y-2 rounded border border-base-300 bg-base-200 p-3"
-            data-testid="add-cli-instance-copilot"
-          >
-            <div class="flex items-center justify-between gap-2">
-              <span class="font-semibold text-base-content"
-                >GitHub sign-in</span
-              >
-              <span
-                ptahBadge appearance="outline" size="xs" [tone]="signedIn() ? 'ok' : 'warn'"
-                class="h-auto py-0.5 font-medium text-base-content"
-                data-testid="add-cli-instance-copilot-state"
-                >{{ signInLabel() }}</span
-              >
-            </div>
-            <p class="text-base-content-muted">
-              {{
-                editing()
-                  ? 'GitHub Copilot is signed out. Sign in so this instance can run.'
-                  : 'Sign in with GitHub to use Copilot for this CLI instance. Create is available once sign-in is confirmed.'
-              }}
-            </p>
-            @if (signInMessage(); as message) {
-              <p
-                [attr.role]="signInFailed() ? 'alert' : 'status'"
-                class="text-base-content"
-                data-testid="add-cli-instance-copilot-message"
-              >
-                {{ message }}
-              </p>
-            }
-            <button
-              type="button"
-              ptahButton
-              variant="primary"
-              [disabled]="signingIn() || signedIn()"
-              (click)="signIn()"
-              data-testid="add-cli-instance-copilot-login"
-            >
-              {{
-                signingIn()
-                  ? signInBusyLabel()
-                  : signInFailed()
-                    ? 'Retry login with GitHub'
-                    : 'Login with GitHub'
-              }}
-            </button>
-          </div>
-        }
-
-        @if (!editing() && providerId() === 'anthropic') {
-          <fieldset class="space-y-2" data-testid="add-cli-instance-claude-source">
-            <legend class="text-sm font-semibold">Claude API key for this instance</legend>
-            <label class="flex items-center gap-2"><input type="radio" name="claude-source" [checked]="claudeSource() === 'shared-connection'" [disabled]="!provider()?.hasKey" (change)="selectClaudeSource('shared-connection')" />Use the saved Claude API connection key</label>
-            <label class="flex items-center gap-2"><input type="radio" name="claude-source" [checked]="claudeSource() === 'instance'" (change)="selectClaudeSource('instance')" />Use a separate key for this instance</label>
-            @if (!provider()?.hasKey) { <p class="text-xs text-base-content-muted">Connect Claude API first to use its saved key, or enter a separate key.</p> }
-          </fieldset>
-        }
-        @if (showKey()) {
-          <ptah-field [label]="keyLabel()">
-              <input
-                ptahInput
-                size="md"
-                id="add-cli-instance-key"
-                [type]="keyVisible() ? 'text' : 'password'"
-                autocomplete="new-password"
-                spellcheck="false"
-                class="w-full pr-9 font-mono"
-                [value]="key()"
-                (input)="key.set(value($event))"
-                placeholder="sk-…"
-                aria-describedby="add-cli-instance-key-help"
-                data-testid="add-cli-instance-key"
-              />
-              <span ptahFieldTrailing class="flex items-center">
-                <button
-                  type="button"
-                  ptahIconButton
-                  (click)="keyVisible.set(!keyVisible())"
-                  [label]="keyVisible() ? 'Hide API key' : 'Show API key'"
-                  [attr.aria-pressed]="keyVisible()"
-                  data-testid="add-cli-instance-toggle-visibility"
-                >
-                  <lucide-angular
-                    [img]="keyVisible() ? EyeOffIcon : EyeIcon"
-                    class="h-3.5 w-3.5"
-                    aria-hidden="true"
-                  />
-                </button>
-              </span>
-          </ptah-field>
-        }
-        @if (keyHint(); as hint) {
-          <p
-            id="add-cli-instance-key-help"
-            class="text-xs text-base-content-muted"
-            data-testid="add-cli-instance-key-help"
-          >
-            {{ hint }}
-          </p>
-        }
-        <!-- Submitting with Enter from a field. The visible submit is in the footer. -->
-        <button
-          type="submit"
-          class="hidden"
-          tabindex="-1"
-          aria-hidden="true"
-        ></button>
-      </form>
-
-      <div
-        modal-footer
-        class="surface-3 -mx-6 -mb-6 mt-5 flex items-center justify-between gap-2 border-t px-5 py-3"
-      >
-        <button
-          type="button"
-          ptahButton
-          variant="ghost"
-          (click)="requestClose()"
-        >
-          Cancel
-        </button>
-        <button
-          type="button"
-          ptahButton
-          variant="primary"
-          [disabled]="!canSubmit()"
-          (click)="submit()"
-          data-testid="add-cli-instance-submit"
-        >
-          {{
-            busy() ? 'Saving…' : editing() ? 'Save changes' : 'Create Instance'
-          }}
-        </button>
-        <!-- showModal() makes the page inert: this copy of the toast is the one announced while the modal is open.
-             Only while open: a closed modal must not keep a second toast (and Undo) in the page. -->
-        @if (open()) {
-          <ptah-settings-toast />
-        }
-      </div>
-    </ptah-native-modal>
-  `,
+  templateUrl: './add-cli-instance-modal.component.html',
 })
 export class AddCliInstanceModalComponent {
   protected readonly CloseIcon = X;
@@ -386,17 +122,29 @@ export class AddCliInstanceModalComponent {
   /** The typed key: held only here, never in service state. */
   protected readonly key = signal('');
   protected readonly keyVisible = signal(false);
-  protected readonly claudeSource = signal<'shared-connection' | 'instance'>('shared-connection');
+  protected readonly claudeSource = signal<'shared-connection' | 'instance'>(
+    'shared-connection',
+  );
   private context: ProvidersEditContext | null = null;
   private session = 0;
 
   protected readonly busy = this.feedback.saving;
+  protected readonly providerSelectOptions = computed(() => [
+    { value: '', label: 'Choose a provider connection…' },
+    ...this.providerOptions().map((option) => ({
+      value: option.id,
+      label: option.label,
+    })),
+  ]);
   protected readonly providerOptions = computed(() =>
     (this.state.connections().data ?? [])
       .filter((connection) => !EXCLUDED_PROVIDERS.has(connection.id))
       .map((connection) => ({
         id: connection.id,
-        label: connection.id === 'anthropic' ? 'Claude API · API key' : `${connection.name} · ${MODALITY[connection.authMode] ?? connection.authMode}`,
+        label:
+          connection.id === 'anthropic'
+            ? 'Claude API · API key'
+            : `${connection.name} · ${MODALITY[connection.authMode] ?? connection.authMode}`,
       })),
   );
   protected readonly provider = computed<ProvidersConnection | null>(() => {
@@ -410,7 +158,12 @@ export class AddCliInstanceModalComponent {
   protected readonly keyMode = computed<KeyMode | null>(() => {
     const provider = this.provider();
     if (!provider) return this.editing() ? 'optional' : null;
-    if (provider.id === 'anthropic' && !this.editing() && this.claudeSource() === 'shared-connection') return 'none';
+    if (
+      provider.id === 'anthropic' &&
+      !this.editing() &&
+      this.claudeSource() === 'shared-connection'
+    )
+      return 'none';
     if (provider.id === COPILOT) return 'sign-in';
     if (provider.authMode === 'cli') return 'none';
     if (
@@ -440,8 +193,12 @@ export class AddCliInstanceModalComponent {
   /** #48 hints (the old wording of the pre-#581 instance manager at `7ecdefa45^1`, where it existed). */
   protected readonly keyHint = computed(() => {
     const provider = this.provider();
-    if (provider?.id === 'anthropic' && !this.editing()) return this.claudeSource() === 'shared-connection' ? null : 'Enter a separate Claude API key for this instance.';
-    if (this.editing()?.providerId === ANTHROPIC_API_LANE_ENTRY.id) return 'A key entered here becomes a separate key for this instance. Leave empty to keep the current credential source.';
+    if (provider?.id === 'anthropic' && !this.editing())
+      return this.claudeSource() === 'shared-connection'
+        ? null
+        : 'Enter a separate Claude API key for this instance.';
+    if (this.editing()?.providerId === ANTHROPIC_API_LANE_ENTRY.id)
+      return 'A key entered here becomes a separate key for this instance. Leave empty to keep the current credential source.';
     switch (this.keyMode()) {
       case 'none':
         return provider?.authMode === 'cli'
@@ -449,7 +206,10 @@ export class AddCliInstanceModalComponent {
           : `No API key needed — make sure ${provider?.name ?? 'the local server'} is running locally.`;
       case 'optional':
         if (provider?.id === 'ollama-cloud')
-          return 'Optional — run ollama signin to use Ollama Cloud, or paste an ollama.com API key above to enable live model discovery and pricing.';
+          return (
+            'Optional \u2014 run ollama signin to use Ollama Cloud, or paste an ollama.com API key above ' +
+            'to enable live model discovery and pricing.'
+          );
         // Edit: an empty field keeps the stored key (the label says so), so the connection hint is for creation only.
         if (provider && getAnthropicProvider(provider.id)?.apiKeyFallback)
           return this.editing()
@@ -537,7 +297,11 @@ export class AddCliInstanceModalComponent {
       return this.name().trim() !== target.name || !!this.key().trim();
     const provider = this.provider();
     if (!provider || EXCLUDED_PROVIDERS.has(provider.id)) return false;
-    if (provider.id === 'anthropic' && this.claudeSource() === 'shared-connection') return provider.hasKey;
+    if (
+      provider.id === 'anthropic' &&
+      this.claudeSource() === 'shared-connection'
+    )
+      return provider.hasKey;
     if (this.keyMode() === 'sign-in') return this.signedIn();
     return this.keyMode() !== 'required' || !!this.key().trim();
   });
@@ -621,9 +385,20 @@ export class AddCliInstanceModalComponent {
         this.state.saveSettings(
           {
             cli: [
-              { action: 'create', params: providerId === 'anthropic'
-                ? { name, providerId: ANTHROPIC_API_LANE_ENTRY.id, credentialSource: this.claudeSource(), ...(this.claudeSource() === 'instance' ? { apiKey: key } : {}) }
-                : { name, providerId, apiKey: key } },
+              {
+                action: 'create',
+                params:
+                  providerId === 'anthropic'
+                    ? {
+                        name,
+                        providerId: ANTHROPIC_API_LANE_ENTRY.id,
+                        credentialSource: this.claudeSource(),
+                        ...(this.claudeSource() === 'instance'
+                          ? { apiKey: key }
+                          : {}),
+                      }
+                    : { name, providerId, apiKey: key },
+              },
             ],
           },
           context,
@@ -665,9 +440,14 @@ export class AddCliInstanceModalComponent {
                       action: 'update' as const,
                       // A key entered for a Claude API instance is a per-instance key: the source moves to
                       // 'instance' in the same write (the registry rejects a key for the shared source).
-                      params: target.providerId === ANTHROPIC_API_LANE_ENTRY.id
-                        ? { id: target.id, apiKey: params.apiKey, credentialSource: 'instance' as const }
-                        : { id: target.id, apiKey: params.apiKey },
+                      params:
+                        target.providerId === ANTHROPIC_API_LANE_ENTRY.id
+                          ? {
+                              id: target.id,
+                              apiKey: params.apiKey,
+                              credentialSource: 'instance' as const,
+                            }
+                          : { id: target.id, apiKey: params.apiKey },
                     },
                   ]
                 : []),

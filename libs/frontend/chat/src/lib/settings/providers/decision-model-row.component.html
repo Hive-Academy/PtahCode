@@ -1,0 +1,307 @@
+<article
+  data-testid="consumer-row-decision"
+  [class.border-primary]="editing()"
+  class="consumer-role grid min-w-0 items-center gap-[var(--ptah-gap-field)] border-b border-base-content/10"
+>
+  <div class="min-w-0">
+    <div class="flex min-w-0 flex-wrap items-center gap-2">
+      <h3
+        class="text-sm font-medium text-base-content"
+        data-testid="consumer-name-decision"
+      >
+        {{ row().name }}
+      </h3>
+      <span ptahBadge size="xs" data-testid="consumer-tier-decision">{{
+        load() === 'loading' ? 'loading' : row().stateLabel
+      }}</span>
+    </div>
+    <p class="mt-[var(--ptah-space-1)] text-sm text-base-content-muted">
+      Chooses a model for routing decisions.
+    </p>
+    @if (load() !== 'loading') {
+      <p
+        class="mt-[var(--ptah-space-1)] truncate text-xs text-base-content-muted"
+        [title]="row().stateMessage"
+        [attr.role]="row().attention ? 'alert' : null"
+        data-testid="decision-state"
+      >
+        {{ row().stateMessage }}
+      </p>
+    }
+  </div>
+  @if (load() === 'loading') {
+    <div
+      class="mt-auto flex flex-wrap items-center gap-1.5"
+      data-testid="consumer-notloaded-decision"
+    >
+      <span class="text-xs text-base-content" role="status">Loading…</span>
+    </div>
+  } @else {
+    <div class="min-w-0 w-full">
+      <ptah-native-popover
+        #editorPopover
+        class="consumer-cell-popover block w-full min-w-0"
+        [isOpen]="editing()"
+        placement="bottom-start"
+        [hasBackdrop]="true"
+        [keepInViewport]="true"
+        backdropClass="transparent"
+        (closed)="close()"
+        (opened)="editorRef()?.nativeElement?.focus()"
+        (keydown)="onEditorKeydown($event)"
+      >
+        <button
+          #cell
+          trigger
+          ptahButton
+          variant="outline"
+          align="start"
+          size="sm"
+          type="button"
+          [class]="cellClass"
+          [attr.aria-disabled]="busy() ? 'true' : null"
+          [attr.aria-label]="row().name + ': ' + row().cellLabel + '. Change'"
+          [attr.aria-expanded]="editing()"
+          [title]="row().cellLabel"
+          aria-haspopup="dialog"
+          (click)="toggle()"
+          data-testid="consumer-edit-decision"
+        >
+          <span
+            class="min-w-0 flex-1 truncate text-left"
+            data-testid="consumer-summary-decision"
+            >{{ row().cellLabel }}</span
+          >
+          <lucide-angular
+            [img]="ChevronIcon"
+            class="h-3 w-3 shrink-0 text-base-content-muted"
+            aria-hidden="true"
+          />
+        </button>
+        @if (editing()) {
+          <div
+            #editor
+            content
+            role="dialog"
+            aria-modal="true"
+            tabindex="-1"
+            aria-label="Choose the decision model"
+            class="relative flex w-[27rem] max-w-[calc(100vw-2rem)] flex-col gap-2 overflow-y-auto whitespace-normal p-2 text-left text-xs"
+            [style.max-height.px]="editorMaxHeight()"
+            data-testid="consumer-editor-decision"
+          >
+            <div class="flex items-center justify-between gap-2">
+              <label for="decision-model-kind" [class]="label"
+                >Decision model</label
+              >
+              <button
+                type="button"
+                ptahIconButton
+                class="shrink-0"
+                label="Close"
+                (click)="close()"
+                data-testid="consumer-close-decision"
+              >
+                <lucide-angular
+                  [img]="CloseIcon"
+                  class="h-4 w-4"
+                  aria-hidden="true"
+                />
+              </button>
+            </div>
+            <ptah-select
+              triggerId="decision-model-kind"
+              label="Decision model kind"
+              class="w-full"
+              [options]="kindOptions"
+              [value]="draft().kind"
+              [disabled]="busy() || disabled()"
+              (valueChange)="onKind($event); editorPopover.reposition()"
+              data-testid="decision-kind"
+            />
+            <div
+              class="-mx-2 min-h-16 space-y-2 overflow-y-auto px-2 py-1"
+              data-testid="decision-editor-body"
+            >
+              @if (draft().kind === 'ollama-cloud') {
+                <p
+                  class="text-xs text-base-content-muted"
+                  data-testid="decision-cloud-help"
+                >
+                  Uses your Ollama Cloud provider key and calls ollama.com
+                  directly. Without a key, requests go through your signed-in
+                  local Ollama. Chat and routing share one Ollama Cloud plan.
+                </p>
+                <button
+                  type="button"
+                  [class]="action"
+                  (click)="setUpOllamaCloud()"
+                  data-testid="decision-cloud-setup"
+                >
+                  Set up Ollama Cloud
+                </button>
+              }
+              @if (draft().kind === 'structured') {
+                <label for="decision-model-provider" [class]="label"
+                  >Provider</label
+                >
+                <ptah-select
+                  triggerId="decision-model-provider"
+                  label="Provider"
+                  class="w-full"
+                  [options]="providerSelectOptions()"
+                  [value]="draft().providerId"
+                  placeholder="Choose a provider"
+                  [disabled]="busy() || disabled()"
+                  (valueChange)="onProvider($event ?? '')"
+                  data-testid="decision-provider"
+                />
+                @if (providers().length === 0) {
+                  <p
+                    class="text-xs text-base-content"
+                    data-testid="decision-no-providers"
+                  >
+                    No provider is configured. Set one up on Providers first.
+                  </p>
+                }
+              }
+              @if (draft().kind === 'custom') {
+                <ptah-decision-model-base-url-field
+                  [value]="draft().baseUrl"
+                  [error]="fieldError('baseUrl')"
+                  [disabled]="busy() || disabled()"
+                  (valueChange)="onBaseUrl($event)"
+                  (submitted)="save()"
+                />
+              }
+              @if (draft().kind !== 'unset') {
+                <ptah-field
+                  [label]="modelLabel()"
+                  size="sm"
+                  class="min-w-0 flex-1"
+                  ><input
+                    ptahInput
+                    id="decision-model-model"
+                    type="text"
+                    list="decision-model-suggestions"
+                    tone="mono"
+                    autocomplete="off"
+                    spellcheck="false"
+                    [attr.aria-invalid]="fieldError('model') ? 'true' : null"
+                    [attr.aria-describedby]="describedBy('model')"
+                    [placeholder]="modelPlaceholder()"
+                    [value]="draft().model"
+                    [disabled]="busy() || disabled()"
+                    (input)="onField('model', $event)"
+                    (keydown.enter)="save()"
+                    data-testid="decision-model"
+                /></ptah-field>
+                <datalist id="decision-model-suggestions">
+                  @for (id of suggestions().ids; track id) {
+                    <option [value]="id"></option>
+                  }
+                </datalist>
+                <p
+                  id="decision-model-model-help"
+                  class="text-xs text-base-content-muted"
+                  data-testid="decision-model-help"
+                >
+                  {{ modelHelp() }}
+                </p>
+                @if (fieldError('model'); as message) {
+                  <p
+                    id="decision-model-model-error"
+                    role="alert"
+                    class="text-xs text-error"
+                    data-testid="decision-model-error"
+                  >
+                    {{ message }}
+                  </p>
+                }
+              }
+              @if (keyedKind(); as keyKind) {
+                <ptah-decision-model-key-field
+                  [label]="keyText[keyKind].label"
+                  [value]="apiKey()"
+                  [disabled]="busy() || disabled()"
+                  [showRemove]="keyMayBeStored()"
+                  (valueChange)="apiKey.set($event)"
+                  (remove)="removeKey()"
+                />
+              }
+              @if (usesSystemOne()) {
+                <ptah-decision-model-timeout-field [disabled]="disabled()" />
+              }
+            </div>
+            @if (draft().kind !== 'unset') {
+              <button
+                type="button"
+                ptahButton
+                variant="primary"
+                class="self-start"
+                [disabled]="!canSave()"
+                (click)="save()"
+                data-testid="decision-save"
+              >
+                Save decision model
+              </button>
+            }
+            <p
+              class="px-1 text-xs text-base-content-muted"
+              data-testid="decision-footer"
+            >
+              {{ footer() }}
+            </p>
+          </div>
+        }
+      </ptah-native-popover>
+      @if (row().detail; as detail) {
+        <p
+          class="break-words text-xs text-base-content-muted"
+          data-testid="decision-detail"
+        >
+          Detail: {{ detail }}
+        </p>
+      }
+      @if (row().localityMessage; as locality) {
+        <p
+          class="text-xs text-base-content-muted"
+          data-testid="decision-locality"
+        >
+          {{ locality }}
+        </p>
+      }
+      @if (row().confidenceMessage; as confidence) {
+        <p
+          class="text-xs text-base-content-muted"
+          data-testid="decision-confidence"
+        >
+          {{ confidence }}
+        </p>
+      }
+      @if (row().setupProviderId; as providerId) {
+        <button
+          type="button"
+          [class]="action"
+          [attr.aria-label]="'Set up ' + row().setupProviderName"
+          (click)="setupProviderRequested.emit(providerId)"
+          data-testid="decision-setup"
+        >
+          Set up {{ row().setupProviderName }}
+        </button>
+      }
+      @if (load() === 'error') {
+        <button
+          type="button"
+          [class]="action"
+          aria-label="Retry reading the decision model status"
+          [disabled]="busy()"
+          (click)="reload()"
+          data-testid="decision-retry"
+        >
+          Retry
+        </button>
+      }
+    </div>
+  }
+</article>

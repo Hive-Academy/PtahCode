@@ -50,7 +50,10 @@ import {
 } from './main-agent-reassign-popover.component';
 import { ProviderCatalogModalComponent } from './provider-catalog-modal.component';
 import { connectedAccountCount } from './accounts/account-presentation';
-import { connectionKind, type ConnectionDrawerTabId } from './connection-drawer/connection-kind';
+import {
+  connectionKind,
+  type ConnectionDrawerTabId,
+} from './connection-drawer/connection-kind';
 import type { OverviewConnectionStatus } from './connection-drawer/overview-tab.component';
 // Type-only: the Credentials tab and its helpers stay in the drawer's deferred chunk (the write runner is tiny).
 import type {
@@ -65,6 +68,7 @@ import { commitToast } from '../feedback/settings-commit-toast';
 // Rendered only inside `@defer`, so it stays out of the eager settings bundle.
 import { KimiCodeLoginProgressComponent } from './connection-drawer/kimi-code-login-progress.component';
 import {
+  NativePopoverComponent,
   PtahBadgeDirective,
   PtahButtonDirective,
   PtahFieldComponent,
@@ -120,6 +124,7 @@ const CONTROL =
     PtahStatePanelComponent,
     PtahSkeletonComponent,
     PtahCardGridDirective,
+    NativePopoverComponent,
   ],
   template: `
     <div
@@ -135,9 +140,16 @@ const CONTROL =
       <div class="space-y-8 py-3">
         <!-- One card: the Main agent block, a hairline, then Connections (the divider pattern of the CLI matrix card
              between the system lanes and the Ptah CLI instances). -->
-        <div class="space-y-8" data-testid="providers-main-connections-card" data-glass-surface="content">
+        <div
+          class="space-y-8"
+          data-testid="providers-main-connections-card"
+          data-glass-surface="content"
+        >
           <!-- Main-agent region. Loading shows as the section's skeleton (aria-busy here keeps captures waiting). -->
-          <div [attr.aria-busy]="mainReadsLoading()" data-testid="main-agent-region">
+          <div
+            [attr.aria-busy]="mainReadsLoading()"
+            data-testid="main-agent-region"
+          >
             <!-- The Main agent section holds the D16 badges and opens the Main Agent popover (provider, model, effort).
                  Deferred with the popover (eager route at its bundle budget) behind a same-footprint placeholder. -->
             @defer (on immediate) {
@@ -170,8 +182,8 @@ const CONTROL =
                     [attr.data-read-error]="section.id"
                   >
                     <p class="min-w-0">
-                      {{ section.title }} could not be loaded. Your saved settings
-                      have not changed.
+                      {{ section.title }} could not be loaded. Your saved
+                      settings have not changed.
                     </p>
                     <button
                       type="button"
@@ -190,14 +202,14 @@ const CONTROL =
                   >
                     @if (clearTarget() === 'all-above-global') {
                       <p>
-                        Use the global {{ settingLabel(key) }} value. Removes the
-                        workspace and App overrides above Global. Removing the App
-                        override also affects its other workspaces.
+                        Use the global {{ settingLabel(key) }} value. Removes
+                        the workspace and App overrides above Global. Removing
+                        the App override also affects its other workspaces.
                       </p>
                     } @else {
                       <p>
-                        Clear {{ settingLabel(key) }} override. The host will resolve
-                        the next stored source.
+                        Clear {{ settingLabel(key) }} override. The host will
+                        resolve the next stored source.
                       </p>
                       <p>
                         Next source:
@@ -209,8 +221,8 @@ const CONTROL =
                     }
                     @if (clearEndsSessions(key)) {
                       <p data-testid="clear-ends-sessions">
-                        Clearing this override ends running chat sessions. It cannot
-                        be undone from here.
+                        Clearing this override ends running chat sessions. It
+                        cannot be undone from here.
                       </p>
                     }
                     <button
@@ -260,29 +272,66 @@ const CONTROL =
                   Connections
                 </h2>
                 @if (state.connections().status === 'ready') {
-                  <span
-                    ptahBadge
-                    data-testid="connections-count"
+                  <span ptahBadge data-testid="connections-count"
+                    >{{ connections().length }} configured</span
                   >
-                    {{ connections().length }} configured ·
-                    {{ catalog().length }} available in catalog</span
+                  <ptah-native-popover
+                    [isOpen]="catalogHintOpen()"
+                    placement="bottom-start"
+                    backdropClass="transparent"
+                    [keepInViewport]="true"
+                    (closed)="catalogHintOpen.set(false)"
                   >
+                    <button
+                      trigger
+                      type="button"
+                      ptahButton
+                      variant="ghost"
+                      data-testid="catalog-hint"
+                      aria-haspopup="dialog"
+                      aria-controls="providers-catalog-hint-list"
+                      [attr.aria-expanded]="catalogHintOpen()"
+                      (click)="catalogHintOpen.update(toggle)"
+                    >
+                      <span ptahBadge
+                        >{{ catalog().length }} available in catalog</span
+                      >
+                    </button>
+                    <div
+                      content
+                      class="p-[var(--ptah-gap-field)]"
+                      role="dialog"
+                      aria-label="Available catalog providers"
+                      id="providers-catalog-hint-list"
+                    >
+                      <ul
+                        class="max-h-64 overflow-y-auto text-sm"
+                        data-testid="catalog-hint-text"
+                      >
+                        @for (provider of catalog(); track provider.id) {
+                          <li>{{ provider.name }}</li>
+                        } @empty {
+                          <li>{{ catalogHint().lead }}</li>
+                        }
+                      </ul>
+                    </div>
+                  </ptah-native-popover>
                 }
               </div>
               <div class="flex flex-wrap items-center gap-2">
                 <ptah-field label="Filter connections" size="sm" class="w-52">
-                <input
-                  ptahInput
-                  id="connections-filter"
-                  size="sm"
-                  type="search"
-                  class="w-full text-sm text-base-content"
-                  placeholder="Filter connections…"
-                  aria-label="Filter connections"
-                  data-testid="connections-filter"
-                  [value]="filter()"
-                  (input)="filter.set(inputValue($event))"
-                />
+                  <input
+                    ptahInput
+                    id="connections-filter"
+                    size="sm"
+                    type="search"
+                    class="w-full text-sm text-base-content"
+                    placeholder="Filter connections…"
+                    aria-label="Filter connections"
+                    data-testid="connections-filter"
+                    [value]="filter()"
+                    (input)="filter.set(inputValue($event))"
+                  />
                 </ptah-field>
                 <button
                   type="button"
@@ -304,31 +353,46 @@ const CONTROL =
                 </button>
               </div>
             </div>
-            @if (requestedDrawer()?.tab === 'credentials' && state.connections().status === 'ready' && !codexConnectionPresent()) {
-              <button type="button" ptahButton variant="primary" class="mt-3" data-testid="connect-codex" (click)="connectMissingCodex()">Connect Codex</button>
-            }
-            <!-- Catalog caption, directly under the header: one passive line, the names truncate (full list in the
-                 title). "Connect provider" above is the one way into the catalog. -->
-            <div
-              class="flex min-w-0 text-xs text-base-content-muted"
-              data-testid="catalog-hint"
-            >
-              <p
-                class="min-w-0 flex-1 truncate"
-                [attr.title]="catalogHint().names || null"
-                data-testid="catalog-hint-text"
+            @if (
+              requestedDrawer()?.tab === 'credentials' &&
+              state.connections().status === 'ready' &&
+              !codexConnectionPresent()
+            ) {
+              <button
+                type="button"
+                ptahButton
+                variant="primary"
+                class="mt-3"
+                data-testid="connect-codex"
+                (click)="connectMissingCodex()"
               >
-                <span class="font-medium">{{ catalogHint().lead }}</span>
-                {{ catalogHint().names }}
-              </p>
-            </div>
+                Connect Codex
+              </button>
+            }
+            @if (state.connections().status !== 'ready') {
+              <div
+                class="text-xs text-base-content-muted"
+                data-testid="catalog-hint"
+              >
+                <p data-testid="catalog-hint-text">{{ catalogHint().lead }}</p>
+              </div>
+            }
             @if (state.connections().status === 'error') {
-              <ptah-alert tone="error" [compact]="true" live="assertive" data-read-error="connections">
+              <ptah-alert
+                tone="error"
+                [compact]="true"
+                live="assertive"
+                data-read-error="connections"
+              >
                 <p class="min-w-0">
                   Providers could not be loaded. Your saved settings have not
                   changed.
                 </p>
-                <button alertAction type="button" ptahButton variant="ghost"
+                <button
+                  alertAction
+                  type="button"
+                  ptahButton
+                  variant="ghost"
                   (click)="state.refreshConnections()"
                 >
                   Retry providers
@@ -336,15 +400,23 @@ const CONTROL =
               </ptah-alert>
             }
             @if (
-              state.connections().status === 'ready' && connections().length === 0
+              state.connections().status === 'ready' &&
+              connections().length === 0
             ) {
-              <ptah-state-panel state="empty" title="No connections configured."
-                body="Connect a provider to get started." />
+              <ptah-state-panel
+                state="empty"
+                title="No connections configured."
+                body="Connect a provider to get started."
+              />
             }
             @if (state.connections().status === 'loading') {
-              <div aria-label="Loading connections"><ptah-skeleton [lines]="2" size="sm" /></div>
+              <div aria-label="Loading connections">
+                <ptah-skeleton [lines]="2" size="sm" />
+              </div>
             }
-            @if (filter() && connections().length && !shownConnections().length) {
+            @if (
+              filter() && connections().length && !shownConnections().length
+            ) {
               <p
                 role="status"
                 class="text-sm text-base-content-muted"
@@ -371,7 +443,9 @@ const CONTROL =
                   [providerId]="connection.id"
                   [providerName]="connection.name"
                   [authModality]="connection.authMode"
-                  [sourceLabel]="connection.hasKey ? 'Key stored locally' : null"
+                  [sourceLabel]="
+                    connection.hasKey ? 'Key stored locally' : null
+                  "
                   [authModalityText]="connection.custom ? 'Custom' : null"
                   [status]="connectionStatus(connection)"
                   [isActive]="activeId() === connection.id"
@@ -564,7 +638,8 @@ const CONTROL =
     }
   `,
   styles: `
-    :host-context([data-glass='on']) [data-testid='providers-main-connections-card'] {
+    :host-context([data-glass='on'])
+      [data-testid='providers-main-connections-card'] {
       padding: 1.25rem;
     }
   `,
@@ -577,8 +652,11 @@ export class ProvidersSettingsComponent implements OnInit, OnDestroy {
   /** Opens the requested connection drawer once the connection list is ready (Electron only: Accounts is D34). */
   readonly requestedDrawer = input<ProvidersSettingsDrawerRequest | null>(null);
   readonly requestedDrawerConsumed = output<void>();
-  protected readonly codexConnectionPresent = computed(() =>
-    this.state.connections().data?.some((connection) => connection.id === 'openai-codex') ?? false,
+  protected readonly codexConnectionPresent = computed(
+    () =>
+      this.state
+        .connections()
+        .data?.some((connection) => connection.id === 'openai-codex') ?? false,
   );
   protected readonly state = inject(ProvidersSettingsStateService);
   /** Accounts is Electron only (D34): elsewhere the drawer tab is absent and the account reads never run. */
@@ -673,6 +751,8 @@ export class ProvidersSettingsComponent implements OnInit, OnDestroy {
     'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content';
   /** The provider catalog modal is open. */
   protected readonly catalogOpen = signal(false);
+  protected readonly catalogHintOpen = signal(false);
+  protected readonly toggle = (open: boolean): boolean => !open;
   protected readonly wizardOpen = signal(false);
   protected readonly wizardProviderId = signal('');
   /** Incremented per openWizard: keys the wizard instance so every setup session starts from a clean draft. */
@@ -916,14 +996,18 @@ export class ProvidersSettingsComponent implements OnInit, OnDestroy {
       curatorProvider:
         memory.status === 'ready' ? (memory.data?.curatorProvider ?? '') : null,
       enhancementProvider:
-        enhancement.status === 'ready' ? (enhancement.data?.provider ?? '') : null,
+        enhancement.status === 'ready'
+          ? (enhancement.data?.provider ?? '')
+          : null,
       cliAgents: agents.status === 'ready' ? agents.data : null,
       // The Codex CLI's detection and on/off state (`agent:getConfig`); "Codex CLI" counts under OpenAI Codex.
       systemClis: clis.status === 'ready' ? clis.data : null,
     });
   });
   /** Read-only view of `usage()` for the cards: the consumer names behind "Used by N", once usage is complete. */
-  protected readonly usedByLabels = computed<Readonly<Record<string, readonly string[]>>>(() => {
+  protected readonly usedByLabels = computed<
+    Readonly<Record<string, readonly string[]>>
+  >(() => {
     const usage = this.usage();
     if (!usage.complete) return {};
     return Object.fromEntries(
@@ -1061,12 +1145,18 @@ export class ProvidersSettingsComponent implements OnInit, OnDestroy {
         return;
       }
       const key = `${'providerId' in request ? request.providerId : request.connection}:${request.tab}`;
-      if (key === drawerOpenedFor || this.state.connections().status !== 'ready')
+      if (
+        key === drawerOpenedFor ||
+        this.state.connections().status !== 'ready'
+      )
         return;
       drawerOpenedFor = key;
       untracked(() => {
-        const connection = (this.state.connections().data ?? []).find((entry) =>
-          'providerId' in request ? entry.id === request.providerId : this.isClaudeCli(entry),
+        const connection = (this.state.connections().data ?? []).find(
+          (entry) =>
+            'providerId' in request
+              ? entry.id === request.providerId
+              : this.isClaudeCli(entry),
         );
         if (connection) this.openDrawer(connection.id, request.tab);
       });
@@ -1231,7 +1321,10 @@ export class ProvidersSettingsComponent implements OnInit, OnDestroy {
       !this.state.route().data?.ready
     );
   }
-  protected openDrawer(providerId: string, tab: ConnectionDrawerTabId = 'overview'): void {
+  protected openDrawer(
+    providerId: string,
+    tab: ConnectionDrawerTabId = 'overview',
+  ): void {
     const active = this.element.nativeElement.ownerDocument.activeElement;
     this.drawerOpener = active instanceof HTMLElement ? active : null;
     // Set with the connection, in one pass: the drawer applies it only when its connection changes.
@@ -1246,7 +1339,9 @@ export class ProvidersSettingsComponent implements OnInit, OnDestroy {
    * Main Agent node's Reassign button (A-3), else to whatever held focus.
    */
   protected openAccountSignIn(): void {
-    const claude = (this.state.connections().data ?? []).find((connection) => this.isClaudeCli(connection));
+    const claude = (this.state.connections().data ?? []).find((connection) =>
+      this.isClaudeCli(connection),
+    );
     this.mainPopover.set(null);
     if (!claude) return;
     this.openDrawer(claude.id, 'accounts');
@@ -1347,9 +1442,21 @@ export class ProvidersSettingsComponent implements OnInit, OnDestroy {
     // m2 (Providers 21-28 review): a new or re-set connection must be visible; old filter text could hide it.
     if (confirmed) this.filter.set('');
     // One toast for the whole commit: the fields it saved, did not save and could not confirm.
-    if (confirmed) this.feedback.announce('Connection settings saved and refreshed.', 'status');
-    else this.feedback.announce(['Some connection settings were not confirmed.', commitToast(this.state.commit())?.message]
-      .filter(Boolean).join(' '), 'alert');
+    if (confirmed)
+      this.feedback.announce(
+        'Connection settings saved and refreshed.',
+        'status',
+      );
+    else
+      this.feedback.announce(
+        [
+          'Some connection settings were not confirmed.',
+          commitToast(this.state.commit())?.message,
+        ]
+          .filter(Boolean)
+          .join(' '),
+        'alert',
+      );
   }
   protected selectWizardProvider(providerId: string): void {
     this.selectedWizardProvider.set(providerId);
@@ -1381,7 +1488,10 @@ export class ProvidersSettingsComponent implements OnInit, OnDestroy {
     this.wizardContext.set(null);
     // A saved setup already said so when it committed.
     if (this.wizardCommitState() !== 'saved')
-      this.feedback.announce('Setup closed. External sign-in, if completed, remains available.', 'status');
+      this.feedback.announce(
+        'Setup closed. External sign-in, if completed, remains available.',
+        'status',
+      );
     void this.state.cancelVerification().catch((error: unknown) => {
       const errorType =
         error instanceof Error ? error.constructor.name : typeof error;

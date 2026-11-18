@@ -23,3 +23,5 @@ export {
   type WebviewFixtures,
   type WebviewWorkerFixtures,
 } from './lib/test-fixtures';
+
+export { choosePtahSelect } from './lib/choose-ptah-select';

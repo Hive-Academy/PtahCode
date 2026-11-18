@@ -1,17 +1,11 @@
-/**
- * DecisionModelRowComponent (TASK_2026_646 Batch 22, Req 1): the seventh Background Model Roles card.
- * Covers the kind switch, the five states with their detail text, the locality and no-confidence sentences, the
- * `agent:setConfig` payload per kind, the write-only Jev key (never echoed, explicit delete), a status read that
- * fails ("not reachable", saving still open) and the save error path through SettingsSaveFeedbackService.
- * Batch 40b (P4 fix round): an unread selection offers no Undo, logs carry only an error type, the structured list is
- * unfiltered with matching help text, Remove stored key follows the known key state, and the footer claims no false Undo.
- */
+/** Decision model kinds, status, persistence, validation, key handling, focus and shared field ownership. */
 import { signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
 import {
   NativePopoverComponent,
   PROVIDER_MODELS_LOADER,
+  PtahRichSelectComponent,
 } from '@ptah-extension/ui';
 import {
   ClaudeRpcService,
@@ -63,6 +57,9 @@ describe('DecisionModelRowComponent', () => {
       .map(([, params]) => params);
 
   /** Microtasks only: a save starts the toast's dismiss timer, which `whenStable()` would wait out. */
+  const selectControl = (id: string): PtahRichSelectComponent<string> =>
+    fixture.debugElement.query(By.css(`ptah-select[data-testid="${id}"]`))
+      .componentInstance;
   async function flush(): Promise<void> {
     for (let i = 0; i < 4; i += 1) {
       fixture.detectChanges();
@@ -87,10 +84,9 @@ describe('DecisionModelRowComponent', () => {
   }
 
   async function pickKind(kind: string): Promise<void> {
-    const select = byTestId<HTMLSelectElement>('decision-kind');
+    const select = selectControl('decision-kind');
     if (!select) throw new Error('kind picker missing');
-    select.value = kind;
-    select.dispatchEvent(new Event('change'));
+    select.value.set(kind);
     await flush();
   }
 
@@ -163,7 +159,9 @@ describe('DecisionModelRowComponent', () => {
     expect(text('consumer-name-decision')).toBe('Decision model');
     expect(text('consumer-tier-decision')).toBe('unset');
     expect(text('consumer-summary-decision')).toBe('Unset · code ranking');
-    expect(byTestId('consumer-row-decision')?.className).toContain('border-base-content/10');
+    expect(byTestId('consumer-row-decision')?.className).toContain(
+      'border-base-content/10',
+    );
   });
 
   describe('the five states (Req 1.5), with the host detail as plain text', () => {
@@ -292,9 +290,9 @@ describe('DecisionModelRowComponent', () => {
       await create();
       await open();
       const options = Array.from(
-        byTestId<HTMLSelectElement>('decision-kind')?.options ?? [],
+        selectControl('decision-kind').options() ?? [],
       );
-      expect(options.map((option) => option.textContent?.trim())).toEqual([
+      expect(options.map((option) => option.label)).toEqual([
         'Unset',
         'Ollama decision model',
         'Ollama Cloud',
@@ -302,7 +300,7 @@ describe('DecisionModelRowComponent', () => {
         'Custom endpoint (/v1/systemone)',
         'Structured-output model',
       ]);
-      expect(byTestId<HTMLSelectElement>('decision-kind')?.value).toBe('unset');
+      expect(selectControl('decision-kind').value()).toBe('unset');
       expect(byTestId('decision-model')).toBeNull();
       expect(byTestId('decision-save')).toBeNull();
       expect(
@@ -344,14 +342,13 @@ describe('DecisionModelRowComponent', () => {
       await create();
       await open();
       await pickKind('structured');
-      const provider = byTestId<HTMLSelectElement>('decision-provider');
-      expect(Array.from(provider?.options ?? []).map((o) => o.value)).toEqual([
+      const provider = selectControl('decision-provider');
+      expect(Array.from(provider.options() ?? []).map((o) => o.value)).toEqual([
         '',
         'anthropic',
       ]);
       if (provider) {
-        provider.value = 'anthropic';
-        provider.dispatchEvent(new Event('change'));
+        provider.value.set('anthropic');
       }
       await flush();
       expect(listModels).toHaveBeenCalledWith('anthropic');
@@ -641,10 +638,9 @@ describe('DecisionModelRowComponent', () => {
       );
       listModels.mockImplementationOnce(() => Promise.reject(SECRET));
       await pickKind('structured');
-      const provider = byTestId<HTMLSelectElement>('decision-provider');
+      const provider = selectControl('decision-provider');
       if (!provider) throw new Error('provider picker missing');
-      provider.value = 'anthropic';
-      provider.dispatchEvent(new Event('change'));
+      provider.value.set('anthropic');
       await flush();
       expect(text('decision-model-help')).toBe(
         'Could not list models. Type a model name.',
@@ -658,16 +654,17 @@ describe('DecisionModelRowComponent', () => {
     });
   });
 
-  it('forces a readable control border and placeholder over the light-theme input rule (P4 visual S1, S2)', async () => {
+  it('uses shared fields with labels for model and key entry', async () => {
     await create();
     await open();
     await pickKind('jev');
-    for (const id of ['decision-kind', 'decision-model', 'decision-api-key'])
-      expect(byTestId(id)?.className).toContain('!border-base-content-muted');
-    for (const id of ['decision-model', 'decision-api-key'])
-      expect(byTestId(id)?.className).toContain(
-        'placeholder:!text-base-content-muted',
-      );
+    for (const id of ['decision-model', 'decision-api-key']) {
+      const control = byTestId(id);
+      expect(control?.hasAttribute('ptahInput')).toBe(true);
+      expect(
+        control?.closest('ptah-field')?.querySelector('label'),
+      ).not.toBeNull();
+    }
   });
 
   it('closes on Close and returns focus to the cell', async () => {
@@ -727,6 +724,22 @@ describe('DecisionModelRowComponent', () => {
       expect(body?.contains(byTestId('decision-footer'))).toBe(false);
     });
 
+    it('keeps the kind and provider chevrons in the shared select grid cell', async () => {
+      await create();
+      await open();
+      await pickKind('structured');
+      for (const id of ['decision-kind', 'decision-provider']) {
+        const select = byTestId(id);
+        const trigger = select?.querySelector('[role="combobox"]');
+        const actions = select?.querySelector('.ptah-select__actions');
+        expect(select?.classList.contains('ptah-select')).toBe(true);
+        expect(select?.classList.contains('block')).toBe(false);
+        expect(trigger?.parentElement).toBe(select);
+        expect(actions?.parentElement).toBe(select);
+        expect(actions?.querySelector('.ptah-select__chevron')).not.toBeNull();
+      }
+    });
+
     it('keeps Save and its footer text in a fixed footer after the scrolling body (P4 re-review 8)', async () => {
       await create();
       await open();
@@ -775,14 +788,21 @@ describe('DecisionModelRowComponent', () => {
       await pickKind('ollama');
       const close = byTestId<HTMLButtonElement>('consumer-close-decision');
       const timeout = byTestId<HTMLInputElement>('decision-timeout');
-      if (!close || !timeout) throw new Error('editor controls missing');
-      // Save is disabled with an empty model, so the request timeout field (below the model) is the last stop.
-      const forward = tab(timeout);
+      const timeoutInfo = timeout
+        ?.closest('ptah-field')
+        ?.querySelector<HTMLButtonElement>(
+          'button[aria-label="More about Request timeout (seconds)"]',
+        );
+      if (!close || !timeout || !timeoutInfo)
+        throw new Error('editor controls missing');
+      // Save is disabled with an empty model; the timeout info action follows its input.
+      expect(tab(timeout).defaultPrevented).toBe(false);
+      const forward = tab(timeoutInfo);
       expect(forward.defaultPrevented).toBe(true);
       expect(document.activeElement).toBe(close);
       const back = tab(close, true);
       expect(back.defaultPrevented).toBe(true);
-      expect(document.activeElement).toBe(timeout);
+      expect(document.activeElement).toBe(timeoutInfo);
       const inside = tab(byTestId<HTMLSelectElement>('decision-kind') ?? close);
       expect(inside.defaultPrevented).toBe(false);
     });
@@ -802,7 +822,9 @@ describe('DecisionModelRowComponent', () => {
       const back = tab(editor, true);
       expect(back.defaultPrevented).toBe(true);
       // Unset: the kind picker is the last enabled control.
-      expect(document.activeElement).toBe(byTestId('decision-kind'));
+      expect(document.activeElement).toBe(
+        document.getElementById('decision-model-kind'),
+      );
     });
 
     it('closes on Escape from the focused dialog and returns focus to the cell', async () => {

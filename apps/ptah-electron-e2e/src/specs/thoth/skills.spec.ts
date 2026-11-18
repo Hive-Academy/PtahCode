@@ -114,7 +114,7 @@ test.describe('Thoth - Skills Library', () => {
     await ui.goto('settings');
     const page = ui.page;
     // Background Model Roles sit on the default Providers tab.
-    await page.locator('[data-testid="background-roles-summary"]').click();
+    await expect(page.locator('[data-testid="consumer-table"]')).toBeVisible();
     const row = page.locator('[data-testid="consumer-row-enhancement"]');
     await expect(row).toBeVisible();
     await expect(

@@ -1,3 +1,4 @@
+import { choosePtahSelect } from '../../choose-ptah-select';
 /**
  * The Gate G reachability table (TASK_2026_555 Batch 16, Task 16.1 — D14,
  * plan Component 14, implementation-plan.md:797-820).
@@ -343,9 +344,10 @@ const providersAuth: readonly ReachabilityEntry[] = [
     // Gate V 28: the card has no "Use for main agent" (prototype); Reassign -> the popover's provider select -> D6 confirm.
     reach: async (page) => {
       const popover = await openMainAgentPopover(page);
-      await popover
-        .locator('[data-testid="main-agent-provider"]')
-        .selectOption('kimi-code');
+      await choosePtahSelect(
+        popover.locator('[data-testid="main-agent-provider"]'),
+        'Kimi Code',
+      );
       await visibleEnabled(
         popover.getByRole('button', { name: 'Use for main agent' }),
       );
@@ -506,12 +508,14 @@ const providersAuth: readonly ReachabilityEntry[] = [
     // Batch 27b: 3 targets in both hosts (the App target is the host's own layer); RUX-5 pins their names per host.
     reach: async (page) => {
       const popover = await openMainAgentPopover(page);
-      await expect(
-        popover.locator('[data-testid="main-agent-save-to"] option'),
-      ).toHaveCount(3);
-      await popover
-        .locator('[data-testid="main-agent-save-to"]')
-        .selectOption('workspace');
+      const saveTo = popover.locator('[data-testid="main-agent-save-to"]');
+      await saveTo.getByRole('combobox').click();
+      await expect(saveTo.getByRole('option')).toHaveCount(3);
+      await page.keyboard.press('Escape');
+      await choosePtahSelect(
+        popover.locator('[data-testid="main-agent-save-to"]'),
+        'This workspace',
+      );
       await openThenClose(
         popover.locator('[data-testid="main-agent-provider-rescope"]'),
         popover.getByRole('button', { name: 'Use for main agent' }),
@@ -998,16 +1002,26 @@ const orchestrationPolicy: readonly ReachabilityEntry[] = [
       const details = row.locator('ptah-table-row-expander button');
       if (await details.isVisible()) await details.click();
       else {
-        await row.locator('ptah-table-row-actions button[aria-haspopup="menu"]').click();
+        await row
+          .locator('ptah-table-row-actions button[aria-haspopup="menu"]')
+          .click();
         await row.getByRole('menuitem', { name: 'Details' }).click();
       }
-      await page.locator('#lane-detail-glm-instance-1 ptah-table-row-actions button[aria-haspopup="menu"]').click();
+      await page
+        .locator(
+          '[data-testid="cli-matrix-row-glm-instance-1"] ptah-table-row-actions button[aria-haspopup="menu"]',
+        )
+        .click();
       await visibleEnabled(
-        page.locator('#lane-detail-glm-instance-1 [role="menuitem"]:text-is("Edit")'),
+        page.locator(
+          '[data-testid="cli-matrix-row-glm-instance-1"] [role="menuitem"]:text-is("Edit")',
+        ),
       );
       await page.keyboard.press('Escape');
       await expect(
-        page.locator('#lane-detail-glm-instance-1 [role="menu"]'),
+        page.locator(
+          '[data-testid="cli-matrix-row-glm-instance-1"] [role="menu"]',
+        ),
       ).toHaveCount(0);
     },
   },
@@ -1108,16 +1122,18 @@ const other: readonly ReachabilityEntry[] = [
       await expect(
         page.getByRole('button', { name: 'Providers', exact: true }),
       ).toHaveClass(/tab-active/);
-      const details = page.locator('[data-testid="background-roles-details"]');
-      await expect(details).toHaveAttribute('open', '');
+      await expect(
+        page.locator('[data-testid="consumer-table"]'),
+      ).toBeVisible();
       const editor = page.locator(
         '[data-testid="consumer-editor-enhancement"]',
       );
       await expect(editor).toBeVisible();
       await page.locator('[data-testid="consumer-close-enhancement"]').click();
       await expect(editor).toHaveCount(0);
-      await page.locator('[data-testid="background-roles-summary"]').click();
-      await expect(details).not.toHaveAttribute('open');
+      await expect(
+        page.locator('[data-testid="consumer-table"]'),
+      ).toBeVisible();
     },
   },
   {
@@ -1379,9 +1395,12 @@ const regressedUx: readonly ReachabilityEntry[] = [
     // to `settings-providers.e2e.spec.ts`.
     reach: async (page) => {
       await providersTab(page);
-      await expect(page.locator('[data-testid="catalog-hint"]')).toContainText(
-        'OpenRouter',
-      );
+      // The catalog names moved into the popover of the "N available in catalog" badge.
+      await page.locator('[data-testid="catalog-hint"]').click();
+      await expect(
+        page.locator('[data-testid="catalog-hint-text"]'),
+      ).toContainText('OpenRouter');
+      await page.keyboard.press('Escape');
       const dialog = await openCatalog(page);
       await expect(dialog.locator('[data-provider]')).not.toHaveCount(0);
       await dialog
@@ -1407,17 +1426,21 @@ const regressedUx: readonly ReachabilityEntry[] = [
     reach: async (page) => {
       const popover = await openMainAgentPopover(page);
       const target = popover.locator('[data-testid="main-agent-save-to"]');
+      await target.getByRole('combobox').click();
       const label = await expectHostAppScope(
         page,
         popover,
-        target.locator('option[value="app"]'),
+        target
+          .getByRole('option')
+          .filter({ hasText: /^(VS Code|Desktop app)$/ }),
       );
-      await expect(target.locator('option')).toHaveText([
+      await expect(target.getByRole('option')).toHaveText([
         'Global · all apps',
         label,
         'This workspace',
       ]);
-      await target.selectOption('workspace');
+      await page.keyboard.press('Escape');
+      await choosePtahSelect(target, 'This workspace');
       await popover
         .locator('[data-testid="main-agent-provider-rescope"]')
         .click();
@@ -1703,7 +1726,6 @@ export const KEPT_SELECTORS: readonly KeptSelector[] = [
   {
     selector: '[data-testid="assignments-heading"]',
     tab: 'Providers',
-    reveal: '[data-testid="background-roles-summary"]',
   },
 ];
 

@@ -1,5 +1,8 @@
 import { TestBed } from '@angular/core/testing';
-import { CLI_LANE_DEFAULTS_PATCH_SCHEMA, setCustomProviderEntries } from '@ptah-extension/shared';
+import {
+  CLI_LANE_DEFAULTS_PATCH_SCHEMA,
+  setCustomProviderEntries,
+} from '@ptah-extension/shared';
 import type {
   AuthGetEffectiveRouteResult,
   AuthVerifyDraftConnectionResult,
@@ -203,12 +206,25 @@ describe('ProvidersSettingsStateService', () => {
         ProvidersSettingsStateService,
         WorkspaceScopeService,
         { provide: ClaudeRpcService, useValue: { call } },
-        { provide: CodexSignInService, useValue: { start: codexStart, cancel: codexCancel, state: () => null } },
+        {
+          provide: CodexSignInService,
+          useValue: {
+            start: codexStart,
+            cancel: codexCancel,
+            state: () => null,
+          },
+        },
         {
           provide: ModelStateService,
           useValue: { refreshModels: jest.fn(async () => undefined) },
         },
-        { provide: AuthStateService, useValue: { refreshAuthStatus, persistedAuthMethod: () => 'claudeCli' } },
+        {
+          provide: AuthStateService,
+          useValue: {
+            refreshAuthStatus,
+            persistedAuthMethod: () => 'claudeCli',
+          },
+        },
       ],
     });
     workspace = TestBed.inject(WorkspaceScopeService);
@@ -489,13 +505,21 @@ describe('ProvidersSettingsStateService', () => {
       credential: { kind: 'apiKey', value: 'private-key' },
     });
     call.mockClear();
-    handlers.set('auth:setDirectAnthropicApiKey', async () => success({ success: true }));
+    handlers.set('auth:setDirectAnthropicApiKey', async () =>
+      success({ success: true }),
+    );
     await service.connectProvider(
       connectionDraft({ providerId: 'anthropic' }),
       reviewed,
     );
-    expect(call).toHaveBeenCalledWith('auth:setDirectAnthropicApiKey', { apiKey: 'private-key' }, undefined);
-    expect(call.mock.calls.some(([method]) => method === 'auth:saveSettings')).toBe(false);
+    expect(call).toHaveBeenCalledWith(
+      'auth:setDirectAnthropicApiKey',
+      { apiKey: 'private-key' },
+      undefined,
+    );
+    expect(
+      call.mock.calls.some(([method]) => method === 'auth:saveSettings'),
+    ).toBe(false);
     call.mockClear();
     handlers.set('auth:saveSettings', async () => success({ success: true }));
     await service.connectProvider(
@@ -1143,7 +1167,9 @@ describe('ProvidersSettingsStateService', () => {
     );
     await service.performExternalAuth('openai-codex', 'sign-in');
     expect(codexStart).toHaveBeenCalledTimes(1);
-    expect(call.mock.calls.some(([method]) => method === 'auth:codexLogin')).toBe(false);
+    expect(
+      call.mock.calls.some(([method]) => method === 'auth:codexLogin'),
+    ).toBe(false);
     expect(service.externalAuth().data?.signInState).toBe('in-flight');
     expect(service.externalAuth().data?.message).toBeNull();
   });
@@ -1435,12 +1461,25 @@ describe('ProvidersSettingsStateService', () => {
           ProvidersSettingsStateService,
           WorkspaceScopeService,
           { provide: ClaudeRpcService, useValue: { call } },
-          { provide: CodexSignInService, useValue: { start: codexStart, cancel: codexCancel, state: () => null } },
+          {
+            provide: CodexSignInService,
+            useValue: {
+              start: codexStart,
+              cancel: codexCancel,
+              state: () => null,
+            },
+          },
           {
             provide: ModelStateService,
             useValue: { refreshModels: jest.fn(async () => undefined) },
           },
-          { provide: AuthStateService, useValue: { refreshAuthStatus, persistedAuthMethod: () => 'claudeCli' } },
+          {
+            provide: AuthStateService,
+            useValue: {
+              refreshAuthStatus,
+              persistedAuthMethod: () => 'claudeCli',
+            },
+          },
           { provide: VSCodeService, useValue: { isElectron } },
         ],
       });
@@ -1559,25 +1598,39 @@ describe('ProvidersSettingsStateService', () => {
   });
 
   describe('CLI lane default row read-back', () => {
-    let persisted: { permission?: 'plan' | 'ask' | 'auto-edit' | 'yolo'; network?: 'allow' | 'deny' } | undefined;
+    let persisted:
+      | {
+          permission?: 'plan' | 'ask' | 'auto-edit' | 'yolo';
+          network?: 'allow' | 'deny';
+        }
+      | undefined;
     let afterWrite: (() => void) | undefined;
 
     beforeEach(() => {
       persisted = { permission: 'plan', network: 'allow' };
       afterWrite = undefined;
-      handlers.set('agent:getConfig', async () => success({ cliLaneDefaults: persisted === undefined ? {} : { codex: persisted } }));
+      handlers.set('agent:getConfig', async () =>
+        success({
+          cliLaneDefaults: persisted === undefined ? {} : { codex: persisted },
+        }),
+      );
       handlers.set('agent:setConfig', async (params) => {
         const patch = CLI_LANE_DEFAULTS_PATCH_SCHEMA.parse(
-          params && typeof params === 'object' && 'cliLaneDefaults' in params ? params.cliLaneDefaults : undefined,
+          params && typeof params === 'object' && 'cliLaneDefaults' in params
+            ? params.cliLaneDefaults
+            : undefined,
         ).codex;
         if (patch === null) persisted = undefined;
         else if (patch) {
           persisted = { ...persisted };
           if (patch.permission === null) delete persisted.permission;
-          else if (patch.permission !== undefined) persisted.permission = patch.permission;
+          else if (patch.permission !== undefined)
+            persisted.permission = patch.permission;
           if (patch.network === null) delete persisted.network;
-          else if (patch.network !== undefined) persisted.network = patch.network;
-          if (!persisted.permission && !persisted.network) persisted = undefined;
+          else if (patch.network !== undefined)
+            persisted.network = patch.network;
+          if (!persisted.permission && !persisted.network)
+            persisted = undefined;
         }
         afterWrite?.();
         return success({ success: true });
@@ -1586,38 +1639,95 @@ describe('ProvidersSettingsStateService', () => {
 
     it('confirms a partial edit with its retained field', async () => {
       const reviewed = await context();
-      await service.saveSettings({ orchestration: { cliLaneDefaults: { codex: { permission: 'ask' } } } }, reviewed);
+      await service.saveSettings(
+        {
+          orchestration: { cliLaneDefaults: { codex: { permission: 'ask' } } },
+        },
+        reviewed,
+      );
       expect(service.commit().status).toBe('saved');
-      expect(service.orchestration().data?.cliLaneDefaults?.codex).toEqual({ permission: 'ask', network: 'allow' });
+      expect(service.orchestration().data?.cliLaneDefaults?.codex).toEqual({
+        permission: 'ask',
+        network: 'allow',
+      });
     });
 
     it('detects an external change to a retained field and displays the persisted row', async () => {
       const reviewed = await context();
-      afterWrite = () => { persisted = { permission: 'ask', network: 'deny' }; };
-      await service.saveSettings({ orchestration: { cliLaneDefaults: { codex: { permission: 'ask' } } } }, reviewed);
-      expect(service.commit()).toMatchObject({ status: 'failed', saved: [], unsaved: ['agentOrchestration.cliLaneDefaults.codex'] });
-      expect(service.orchestration().data?.cliLaneDefaults?.codex).toEqual({ permission: 'ask', network: 'deny' });
+      afterWrite = () => {
+        persisted = { permission: 'ask', network: 'deny' };
+      };
+      await service.saveSettings(
+        {
+          orchestration: { cliLaneDefaults: { codex: { permission: 'ask' } } },
+        },
+        reviewed,
+      );
+      expect(service.commit()).toMatchObject({
+        status: 'failed',
+        saved: [],
+        unsaved: ['agentOrchestration.cliLaneDefaults.codex'],
+      });
+      expect(service.orchestration().data?.cliLaneDefaults?.codex).toEqual({
+        permission: 'ask',
+        network: 'deny',
+      });
     });
 
     it('checks the retained field when undoing a partial edit', async () => {
       const reviewed = await context();
-      await service.saveSettings({ orchestration: { cliLaneDefaults: { codex: { permission: 'ask' } } } }, reviewed);
-      afterWrite = () => { persisted = { permission: 'plan', network: 'deny' }; };
-      await service.saveSettings({ orchestration: { cliLaneDefaults: { codex: { permission: 'plan' } } } }, reviewed);
-      expect(service.commit()).toMatchObject({ status: 'failed', saved: [], unsaved: ['agentOrchestration.cliLaneDefaults.codex'] });
-      expect(service.orchestration().data?.cliLaneDefaults?.codex).toEqual({ permission: 'plan', network: 'deny' });
+      await service.saveSettings(
+        {
+          orchestration: { cliLaneDefaults: { codex: { permission: 'ask' } } },
+        },
+        reviewed,
+      );
+      afterWrite = () => {
+        persisted = { permission: 'plan', network: 'deny' };
+      };
+      await service.saveSettings(
+        {
+          orchestration: { cliLaneDefaults: { codex: { permission: 'plan' } } },
+        },
+        reviewed,
+      );
+      expect(service.commit()).toMatchObject({
+        status: 'failed',
+        saved: [],
+        unsaved: ['agentOrchestration.cliLaneDefaults.codex'],
+      });
+      expect(service.orchestration().data?.cliLaneDefaults?.codex).toEqual({
+        permission: 'plan',
+        network: 'deny',
+      });
     });
 
     it('confirms a reset only when read-back has no row', async () => {
       const reviewed = await context();
-      await service.saveSettings({ orchestration: { cliLaneDefaults: { codex: null } } }, reviewed);
+      await service.saveSettings(
+        { orchestration: { cliLaneDefaults: { codex: null } } },
+        reviewed,
+      );
       expect(service.commit().status).toBe('saved');
-      expect(service.orchestration().data?.cliLaneDefaults?.codex).toBeUndefined();
+      expect(
+        service.orchestration().data?.cliLaneDefaults?.codex,
+      ).toBeUndefined();
       persisted = { permission: 'ask' };
-      afterWrite = () => { persisted = { permission: 'ask' }; };
-      await service.saveSettings({ orchestration: { cliLaneDefaults: { codex: null } } }, reviewed);
-      expect(service.commit()).toMatchObject({ status: 'failed', saved: [], unsaved: ['agentOrchestration.cliLaneDefaults.codex'] });
-      expect(service.orchestration().data?.cliLaneDefaults?.codex).toEqual({ permission: 'ask' });
+      afterWrite = () => {
+        persisted = { permission: 'ask' };
+      };
+      await service.saveSettings(
+        { orchestration: { cliLaneDefaults: { codex: null } } },
+        reviewed,
+      );
+      expect(service.commit()).toMatchObject({
+        status: 'failed',
+        saved: [],
+        unsaved: ['agentOrchestration.cliLaneDefaults.codex'],
+      });
+      expect(service.orchestration().data?.cliLaneDefaults?.codex).toEqual({
+        permission: 'ask',
+      });
     });
   });
 
@@ -1881,7 +1991,15 @@ describe('ProvidersSettingsStateService', () => {
       service.clearScopeOverride('authMethod', 'nearest', reviewed),
       service.saveCursorCredential('key', reviewed),
     ]);
-    expect(refused).toEqual([false, false, false, { started: false, selectionReread: 'not-run' }, false, false, false]);
+    expect(refused).toEqual([
+      false,
+      false,
+      false,
+      { started: false, selectionReread: 'not-run' },
+      false,
+      false,
+      false,
+    ]);
     expect(service.commit().status).toBe('saving');
     expect(call).not.toHaveBeenCalled();
     pending.resolve(success({ success: true }));
@@ -2153,7 +2271,12 @@ describe('ProvidersSettingsStateService', () => {
       // A host without the TTL fields reads as 'auto' with no env override.
       expect(service.orchestration()).toEqual({
         status: 'ready',
-        data: { ...expected, cliLaneDefaults: {}, missingFields: ['cliLaneDefaults'], subagentPromptCacheTtl: 'auto' },
+        data: {
+          ...expected,
+          cliLaneDefaults: {},
+          missingFields: ['cliLaneDefaults'],
+          subagentPromptCacheTtl: 'auto',
+        },
         error: null,
       });
       expect(
@@ -2381,6 +2504,136 @@ describe('ProvidersSettingsStateService', () => {
       expect(service.cliTest()).toMatchObject({ status: 'error', data: null });
     });
 
+    it('tests an installed system lane with detection, never the instance RPC', async () => {
+      handlers.set('agent:detectClis', async () =>
+        success({
+          clis: [{ cli: 'codex', installed: true, messagingMode: 'none' }],
+        }),
+      );
+      call.mockClear();
+      await service.testSystemLane('codex');
+      expect(service.cliTest().data).toEqual({
+        id: 'codex',
+        success: true,
+        latencyMs: expect.any(Number),
+        reason: null,
+      });
+      expect(
+        call.mock.calls.some(([method]) => method === 'ptahCli:testConnection'),
+      ).toBe(false);
+    });
+
+    it.each([[], [{ cli: 'codex', installed: false, messagingMode: 'none' }]])(
+      'fails with fixed copy when a system lane is absent or uninstalled (%j)',
+      async (...[clis]) => {
+        handlers.set('agent:detectClis', async () => success({ clis }));
+        await service.testSystemLane('codex');
+        expect(service.cliTest().data).toMatchObject({
+          id: 'codex',
+          success: false,
+          reason: 'Not detected.',
+        });
+      },
+    );
+
+    it('fails a named Claude account that is not signed in with fixed copy', async () => {
+      handlers.set('agent:detectClis', async () =>
+        success({
+          clis: [{ cli: 'claude', installed: true, messagingMode: 'none' }],
+        }),
+      );
+      handlers.set('provider:getAccountStatus', async () =>
+        success({
+          ok: true,
+          account: { state: 'signed-out', label: 'private host text' },
+        }),
+      );
+      await service.testSystemLane('claude', { profileId: 'profile-1' });
+      expect(call).toHaveBeenCalledWith(
+        'provider:getAccountStatus',
+        {
+          provider: 'claude',
+          profileId: 'profile-1',
+        },
+        undefined,
+      );
+      expect(service.cliTest().data).toMatchObject({
+        id: 'claude',
+        success: false,
+        reason: 'Account not ready.',
+      });
+      expect(JSON.stringify(service.cliTest())).not.toContain(
+        'private host text',
+      );
+    });
+
+    it('passes Claude with a signed-in ambient login', async () => {
+      handlers.set('agent:detectClis', async () =>
+        success({
+          clis: [{ cli: 'claude', installed: true, messagingMode: 'none' }],
+        }),
+      );
+      handlers.set('provider:getAmbientClaudeStatus', async () =>
+        success({
+          ok: true,
+          status: { state: 'connected', checkedAt: null },
+        }),
+      );
+      await service.testSystemLane('claude', 'ambient');
+      expect(service.cliTest().data).toMatchObject({
+        id: 'claude',
+        success: true,
+        reason: null,
+      });
+    });
+
+    it('drops an old result immediately and discards a cleared system probe', async () => {
+      handlers.set('ptahCli:testConnection', async () =>
+        success({ success: true }),
+      );
+      await service.testCliConnection('agent-1');
+      const pending = deferred<RpcResult<unknown>>();
+      handlers.set('agent:detectClis', () => pending.promise);
+      const run = service.testSystemLane('codex');
+      expect(service.cliTest()).toMatchObject({
+        status: 'loading',
+        data: null,
+      });
+      service.clearCliTest('codex');
+      pending.resolve(
+        success({
+          clis: [{ cli: 'codex', installed: true, messagingMode: 'none' }],
+        }),
+      );
+      await run;
+      expect(service.cliTest()).toMatchObject({
+        status: 'unloaded',
+        data: null,
+      });
+    });
+
+    it.each(['signed-out', 'unknown'])(
+      'fails a Claude ambient %s state with fixed copy',
+      async (state) => {
+        handlers.set('agent:detectClis', async () =>
+          success({
+            clis: [{ cli: 'claude', installed: true, messagingMode: 'none' }],
+          }),
+        );
+        handlers.set('provider:getAmbientClaudeStatus', async () =>
+          success({
+            ok: true,
+            status: { state, checkedAt: null, reason: 'private host text' },
+          }),
+        );
+        await service.testSystemLane('claude', 'ambient');
+        expect(service.cliTest().data).toMatchObject({
+          success: false,
+          reason: 'Account not signed in.',
+        });
+      },
+    );
+
     it('S1: the Test RPC timeout is above the host 30 s abort', async () => {
       handlers.set('ptahCli:testConnection', async () =>
         success({ success: true, latencyMs: 1 }),
@@ -2457,21 +2710,39 @@ describe('ProvidersSettingsStateService', () => {
     it.each([
       {
         name: 'CLI login only',
-        auth: { kimiCodeAuthenticated: true, kimiCodeCredentialSource: 'cli-login' },
+        auth: {
+          kimiCodeAuthenticated: true,
+          kimiCodeCredentialSource: 'cli-login',
+        },
         hasKey: false,
-        expected: { credentialSource: 'cli-login', configured: true, tokenStale: false },
+        expected: {
+          credentialSource: 'cli-login',
+          configured: true,
+          tokenStale: false,
+        },
       },
       {
         name: 'key only',
-        auth: { kimiCodeAuthenticated: false, kimiCodeCredentialSource: 'api-key' },
+        auth: {
+          kimiCodeAuthenticated: false,
+          kimiCodeCredentialSource: 'api-key',
+        },
         hasKey: true,
-        expected: { credentialSource: 'api-key', configured: true, tokenStale: false },
+        expected: {
+          credentialSource: 'api-key',
+          configured: true,
+          tokenStale: false,
+        },
       },
       {
         name: 'neither',
         auth: { kimiCodeCredentialSource: 'none' },
         hasKey: false,
-        expected: { credentialSource: 'none', configured: false, tokenStale: false },
+        expected: {
+          credentialSource: 'none',
+          configured: false,
+          tokenStale: false,
+        },
       },
       {
         name: 'stale CLI login with a fallback key',
@@ -2481,37 +2752,55 @@ describe('ProvidersSettingsStateService', () => {
           kimiCodeCredentialSource: 'api-key',
         },
         hasKey: true,
-        expected: { credentialSource: 'api-key', configured: true, tokenStale: true },
+        expected: {
+          credentialSource: 'api-key',
+          configured: true,
+          tokenStale: true,
+        },
       },
       {
         name: 'an unknown source from the host',
         auth: { kimiCodeCredentialSource: 'browser-cookie' },
         hasKey: false,
-        expected: { credentialSource: 'none', configured: false, tokenStale: false },
+        expected: {
+          credentialSource: 'none',
+          configured: false,
+          tokenStale: false,
+        },
       },
-    ])('maps the Kimi Code credential source: $name', async ({ auth, hasKey, expected }) => {
-      handlers.set('auth:getAuthStatus', async () =>
-        success({ authMethod: 'apiKey', hasApiKey: false, ...auth }),
-      );
-      handlers.set('auth:getApiKeyStatus', async () =>
-        success({
-          providers: [
-            { provider: 'kimi-code', displayName: 'Kimi Code', hasApiKey: hasKey, isDefault: false },
-          ],
-        }),
-      );
-      await service.refreshConnections();
-      const connections = service.connections().data ?? [];
-      expect(connections.find((entry) => entry.id === 'kimi-code')).toMatchObject({
-        authMode: 'oauth',
-        hasKey,
-        ...expected,
-      });
-      // Only a sign-in connection with a fallback key carries a credential source.
-      expect(
-        connections.find((entry) => entry.id === 'openai-codex'),
-      ).not.toHaveProperty('credentialSource');
-    });
+    ])(
+      'maps the Kimi Code credential source: $name',
+      async ({ auth, hasKey, expected }) => {
+        handlers.set('auth:getAuthStatus', async () =>
+          success({ authMethod: 'apiKey', hasApiKey: false, ...auth }),
+        );
+        handlers.set('auth:getApiKeyStatus', async () =>
+          success({
+            providers: [
+              {
+                provider: 'kimi-code',
+                displayName: 'Kimi Code',
+                hasApiKey: hasKey,
+                isDefault: false,
+              },
+            ],
+          }),
+        );
+        await service.refreshConnections();
+        const connections = service.connections().data ?? [];
+        expect(
+          connections.find((entry) => entry.id === 'kimi-code'),
+        ).toMatchObject({
+          authMode: 'oauth',
+          hasKey,
+          ...expected,
+        });
+        // Only a sign-in connection with a fallback key carries a credential source.
+        expect(
+          connections.find((entry) => entry.id === 'openai-codex'),
+        ).not.toHaveProperty('credentialSource');
+      },
+    );
 
     it("maps the host's masked key hints onto stored-key connections and drops any other shape (Batch 28d)", async () => {
       const hint = '•••• 8f21';

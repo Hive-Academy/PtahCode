@@ -1,3 +1,5 @@
+import { expandMatrixDetail } from './settings-matrix-detail';
+import { choosePtahSelect } from '../../choose-ptah-select';
 /**
  * Gate G entries for the CLI matrix (Batch 30; on the Providers tab since the Context Management regroup): the restored #43, #44, #54, #70 and #71, and
  * the regressed-UX fixes RUX-8 and RUX-11. Batch 31 re-pointed #63 (Copilot auto-approve) and #64 (Cursor key) here;
@@ -57,13 +59,17 @@ const GLM_ID = 'glm-instance-1';
 /** Returns a provider card, or the existing Ptah CLI instance card. */
 async function matrixCard(page: Page, id: string): Promise<Locator> {
   await agentsRoutingTab(page);
-  const card = page.locator(`[data-testid="${id === GLM_ID ? 'cli-matrix-row' : 'cli-provider-card'}-${id}"]`);
+  const card = page.locator(
+    `[data-testid="${id === GLM_ID ? 'cli-matrix-row' : 'cli-provider-card'}-${id}"]`,
+  );
   await expect(card).toBeVisible();
   const details = card.locator('ptah-table-row-expander button');
   if ((await details.getAttribute('aria-expanded')) === 'false') {
     if (await details.isVisible()) await details.click();
     else {
-      await card.locator('ptah-table-row-actions button[aria-haspopup="menu"]').click();
+      await card
+        .locator('ptah-table-row-actions button[aria-haspopup="menu"]')
+        .click();
       await card.getByRole('menuitem', { name: 'Details' }).click();
     }
   }
@@ -71,9 +77,14 @@ async function matrixCard(page: Page, id: string): Promise<Locator> {
 }
 
 /** The visible value button beside a provider card's field label. */
-function providerField(card: Locator, field: 'Model' | 'Effort' | 'Safety'): Locator {
+function providerField(
+  card: Locator,
+  field: 'Model' | 'Effort' | 'Safety',
+): Locator {
   return field === 'Safety'
-    ? card.locator('xpath=following-sibling::tr[1]//*[@data-popover-kind="permission"]')
+    ? card.locator(
+        'xpath=following-sibling::tr[1]//*[@data-popover-kind="permission"]',
+      )
     : card.locator(`[data-popover-kind="${field.toLowerCase()}"]`);
 }
 
@@ -86,11 +97,13 @@ async function openMoreActions(
   _row: Locator,
   id: string,
 ): Promise<Locator> {
-  const more = page.locator(`#lane-detail-${id} ptah-table-row-actions button[aria-haspopup="menu"]`);
+  const more = page.locator(
+    `[data-testid="cli-matrix-row-${id}"] ptah-table-row-actions button[aria-haspopup="menu"]`,
+  );
   await visibleEnabled(more);
   await more.click();
   await expect(
-    page.locator(`#lane-detail-${id} [role="menu"]`),
+    page.locator(`[data-testid="cli-matrix-row-${id}"] [role="menu"]`),
   ).toBeVisible();
   return more;
 }
@@ -309,9 +322,10 @@ const INSTANCE_ENTRIES: readonly ReachabilityEntry[] = [
         await visibleEnabled(
           dialog.locator('[data-testid="add-cli-instance-name"]'),
         );
-        await dialog
-          .locator('[data-testid="add-cli-instance-provider"]')
-          .selectOption('kimi-code');
+        await choosePtahSelect(
+          dialog.locator('[data-testid="add-cli-instance-provider"]'),
+          'Kimi Code · OAuth',
+        );
         await visibleEnabled(
           dialog.locator('[data-testid="add-cli-instance-key"]'),
         );
@@ -332,9 +346,10 @@ const INSTANCE_ENTRIES: readonly ReachabilityEntry[] = [
       const add = page.locator('[data-testid="cli-matrix-add"]');
       const dialog = await openMatrixModal(page, add, 'add-cli-instance-modal');
       try {
-        await dialog
-          .locator('[data-testid="add-cli-instance-provider"]')
-          .selectOption('ollama-cloud');
+        await choosePtahSelect(
+          dialog.locator('[data-testid="add-cli-instance-provider"]'),
+          'Ollama Cloud · Local server',
+        );
         await expect(
           dialog.locator('[data-testid="add-cli-instance-key-help"]'),
         ).toContainText('run ollama signin');
@@ -580,9 +595,10 @@ export const CLI_MATRIX_ENTRIES: readonly ReachabilityEntry[] = [
             .fill('Copilot-agent');
           // Gate V 36 M6: choosing Copilot re-reads the sign-in (this variant's host says signed in), never trusting an
           // earlier read; the inline login stays reachable (disabled once signed in).
-          await dialog
-            .locator('[data-testid="add-cli-instance-provider"]')
-            .selectOption('github-copilot');
+          await choosePtahSelect(
+            dialog.locator('[data-testid="add-cli-instance-provider"]'),
+            'GitHub Copilot · OAuth',
+          );
           const create = dialog.locator(
             '[data-testid="add-cli-instance-submit"]',
           );
@@ -615,9 +631,10 @@ export const CLI_MATRIX_ENTRIES: readonly ReachabilityEntry[] = [
             await dialog
               .locator('[data-testid="add-cli-instance-name"]')
               .fill('Copilot-agent');
-            await dialog
-              .locator('[data-testid="add-cli-instance-provider"]')
-              .selectOption('github-copilot');
+            await choosePtahSelect(
+              dialog.locator('[data-testid="add-cli-instance-provider"]'),
+              'GitHub Copilot · OAuth',
+            );
             const create = dialog.locator(
               '[data-testid="add-cli-instance-submit"]',
             );
@@ -662,9 +679,10 @@ export const CLI_MATRIX_ENTRIES: readonly ReachabilityEntry[] = [
       const add = page.locator('[data-testid="cli-matrix-add"]');
       const dialog = await openMatrixModal(page, add, 'add-cli-instance-modal');
       try {
-        await dialog
-          .locator('[data-testid="add-cli-instance-provider"]')
-          .selectOption('kimi-code');
+        await choosePtahSelect(
+          dialog.locator('[data-testid="add-cli-instance-provider"]'),
+          'Kimi Code · OAuth',
+        );
         const key = dialog.locator('[data-testid="add-cli-instance-key"]');
         await key.fill('sk-e2e-reach-key');
         await expect(key).toHaveAttribute('type', 'password');
@@ -689,7 +707,9 @@ export const CLI_MATRIX_ENTRIES: readonly ReachabilityEntry[] = [
       const tiers = glm.locator(`[data-testid="cli-matrix-tiers-${GLM_ID}"]`);
       if (await tiers.isVisible()) await tiers.click();
       else {
-        await page.locator(`#lane-detail-${GLM_ID} button:text-is("Edit tiers")`).click();
+        await page
+          .locator(`#lane-detail-${GLM_ID} button:text-is("Edit tiers")`)
+          .click();
       }
       const dialog = page.locator(
         'dialog:has([data-testid="cli-tier-mapping-modal"])',
@@ -757,7 +777,10 @@ export const CLI_MATRIX_ENTRIES: readonly ReachabilityEntry[] = [
             copilotAutoApprove: true,
           });
           await expect(toggle).toBeChecked();
-          await expect(providerField(copilot, 'Safety')).toHaveText('Auto-approve: On');
+          await expect(providerField(copilot, 'Safety')).toHaveAttribute(
+            'title',
+            'Copilot runs every tool call without asking for approval.',
+          );
           const undo = page.locator('[data-testid="settings-toast-undo"]');
           await visibleEnabled(undo);
           await undo.click();
@@ -822,7 +845,9 @@ export const CLI_MATRIX_ENTRIES: readonly ReachabilityEntry[] = [
     reach: async (page) => {
       const row = await matrixCard(page, GLM_ID);
       await expect(
-        row.locator('xpath=following-sibling::tr[1]//*[@data-testid="cli-matrix-key-status"]'),
+        row.locator(
+          'xpath=following-sibling::tr[1]//*[@data-testid="cli-matrix-key-status"]',
+        ),
       ).toHaveText('Key set');
     },
   },
@@ -834,7 +859,9 @@ export const CLI_MATRIX_ENTRIES: readonly ReachabilityEntry[] = [
       const row = await matrixCard(page, GLM_ID);
       // The instance card's tier mapping: each tier's label over its model.
       for (const tier of ['Sonnet', 'Opus', 'Haiku']) {
-        const slot = row.locator(`xpath=following-sibling::tr[1]//*[@data-tier="${tier.toLowerCase()}"]`);
+        const slot = row.locator(
+          `xpath=following-sibling::tr[1]//*[@data-tier="${tier.toLowerCase()}"]`,
+        );
         await expect(slot).toContainText(tier);
         await expect(slot).toContainText('glm-5.3:cloud');
       }
@@ -847,7 +874,7 @@ export const CLI_MATRIX_ENTRIES: readonly ReachabilityEntry[] = [
     // Badge + ℹ popover per row: the old wording for Codex; Copilot's badge reads its saved auto-approve.
     reach: async (page) => {
       const codex = await matrixCard(page, 'codex');
-      await expect(providerField(codex, 'Safety')).toHaveText('Full auto');
+      await expect(providerField(codex, 'Safety')).toHaveText('Permission');
       const info = providerField(codex, 'Safety');
       await throughMatrixPopover(
         page,
@@ -861,23 +888,47 @@ export const CLI_MATRIX_ENTRIES: readonly ReachabilityEntry[] = [
       );
       await expect(info).toBeFocused();
       const copilot = await matrixCard(page, 'copilot');
-      await expect(providerField(copilot, 'Safety')).toHaveText('Auto-approve: Off');
+      await expect(providerField(copilot, 'Safety')).toHaveAttribute(
+        'title',
+        'Copilot runs read-only tools without asking. Every other tool call waits for your approval.',
+      );
+      await expandMatrixDetail(page, 'codex');
       await throughMatrixPopover(
         page,
         page.locator('#lane-detail-codex [data-popover-kind="capabilities"]'),
         'cli-provider-popover-content',
         async (panel) => {
-          await expect(panel).toHaveAttribute('aria-label', 'Codex capabilities');
-          await expect(panel.locator('ptah-cli-capability-detail')).toBeVisible();
+          await expect(panel).toHaveAttribute(
+            'aria-label',
+            'Codex capabilities',
+          );
+          await expect(
+            panel.locator('ptah-cli-capability-detail'),
+          ).toBeVisible();
         },
       );
-      const permission = codex.getByRole('combobox', { name: 'Codex permission default' });
+      const chips = page.locator('#lane-detail-codex [data-capability]');
+      for (const chip of await chips.all()) {
+        await chip.click();
+        const valueId = await chip.getAttribute('aria-controls');
+        await expect(page.locator(`[id="${valueId}"] p`)).not.toBeEmpty();
+        await page.keyboard.press('Escape');
+      }
+      const permission = codex.getByRole('combobox', {
+        name: 'Codex permission default',
+      });
       await visibleEnabled(permission);
-      await expect(codex.getByRole('combobox', { name: 'Codex network default' })).toBeVisible();
-      await permission.selectOption('yolo');
-      const confirmation = codex.locator('dialog:has-text("Confirm full access")');
+      await expect(
+        codex.getByRole('combobox', { name: 'Codex network default' }),
+      ).toBeVisible();
+      await choosePtahSelect(permission, 'Yolo');
+      const confirmation = codex.locator(
+        'dialog:has-text("Confirm full access")',
+      );
       await expect(confirmation).toHaveAttribute('open', '');
-      await expect(confirmation.getByRole('button', { name: 'Confirm' })).toBeVisible();
+      await expect(
+        confirmation.getByRole('button', { name: 'Confirm' }),
+      ).toBeVisible();
       await confirmation.getByRole('button', { name: 'Cancel' }).click();
       await expect(confirmation).not.toHaveAttribute('open');
       await expect(permission).toBeFocused();
@@ -900,24 +951,56 @@ export const CLI_MATRIX_ENTRIES: readonly ReachabilityEntry[] = [
       await expect(pi).toContainText('Not installed');
       await expect(cursor).toContainText('Not installed');
       const rows = page.locator('[data-testid^="cli-provider-card-"]');
-      expect(await rows.allTextContents()).toEqual(expect.arrayContaining([expect.stringContaining('Cursor'), expect.stringContaining('Pi')]));
-      expect(await cursor.evaluate((node) => {
-        const piRow = document.querySelector('[data-testid="cli-provider-card-pi"]');
-        return piRow !== null && Boolean(node.compareDocumentPosition(piRow) & Node.DOCUMENT_POSITION_FOLLOWING);
-      })).toBe(true);
+      expect(await rows.allTextContents()).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining('Cursor'),
+          expect.stringContaining('Pi'),
+        ]),
+      );
+      expect(
+        await cursor.evaluate((node) => {
+          const piRow = document.querySelector(
+            '[data-testid="cli-provider-card-pi"]',
+          );
+          return (
+            piRow !== null &&
+            Boolean(
+              node.compareDocumentPosition(piRow) &
+              Node.DOCUMENT_POSITION_FOLLOWING,
+            )
+          );
+        }),
+      ).toBe(true);
       await pi.getByRole('button', { name: 'More actions for Pi' }).click();
       await expect(pi.getByRole('menuitem', { name: 'Test' })).toBeDisabled();
       await page.keyboard.press('Escape');
-      await expect(pi.getByRole('switch', { name: 'Pi enabled' })).toBeDisabled();
-      await pi.getByRole('button', { name: 'Details for Pi' }).click();
-      await throughMatrixPopover(page, page.locator('#lane-detail-pi [data-popover-kind="install"]'), 'cli-provider-popover-content', async (panel) => {
-        await expect(panel).toContainText('npm install -g @earendil-works/pi-coding-agent');
-        await visibleEnabled(panel.getByRole('button', { name: 'Re-detect' }));
+      await expect(
+        pi.getByRole('switch', { name: 'Pi enabled' }),
+      ).toBeDisabled();
+      await expandMatrixDetail(page, 'pi');
+      await throughMatrixPopover(
+        page,
+        page.locator('#lane-detail-pi [data-popover-kind="install"]'),
+        'cli-provider-popover-content',
+        async (panel) => {
+          await expect(panel).toContainText(
+            'npm install -g @earendil-works/pi-coding-agent',
+          );
+          await visibleEnabled(
+            panel.getByRole('button', { name: 'Re-detect' }),
+          );
+        },
+      );
+      const shared = page.getByRole('region', {
+        name: 'Ptah CLI shared defaults',
       });
-      const shared = page.getByRole('region', { name: 'Ptah CLI shared defaults' });
       await expect(shared).toBeVisible();
-      await expect(shared.getByRole('combobox', { name: 'Ptah CLI permission default' })).toBeVisible();
-      await expect(shared.getByRole('combobox', { name: 'Ptah CLI network default' })).toBeVisible();
+      await expect(
+        shared.getByRole('combobox', { name: 'Ptah CLI permission default' }),
+      ).toBeVisible();
+      await expect(
+        shared.getByRole('combobox', { name: 'Ptah CLI network default' }),
+      ).toBeVisible();
     },
   },
   {
@@ -965,8 +1048,14 @@ export const CLI_MATRIX_ENTRIES: readonly ReachabilityEntry[] = [
         await visibleEnabled(test);
         await test.click();
       } else {
-        await page.locator(`#lane-detail-${GLM_ID} ptah-table-row-actions button[aria-haspopup="menu"]`).click();
-        const menuTest = page.locator(`#lane-detail-${GLM_ID} [role="menuitem"]:text-is("Test")`);
+        await page
+          .locator(
+            `[data-testid="cli-matrix-row-${GLM_ID}"] ptah-table-row-actions button[aria-haspopup="menu"]`,
+          )
+          .click();
+        const menuTest = page.locator(
+          `[data-testid="cli-matrix-row-${GLM_ID}"] [role="menuitem"]:text-is("Test")`,
+        );
         await visibleEnabled(menuTest);
         await menuTest.click();
       }

@@ -1,17 +1,39 @@
+import { PtahFieldGridDirective } from '@ptah-extension/ui';
 import {
-  ChangeDetectionStrategy, Component, DestroyRef, computed, effect, inject, input, signal, untracked,
+  ChangeDetectionStrategy,
+  Component,
+  DestroyRef,
+  computed,
+  effect,
+  inject,
+  input,
+  signal,
+  untracked,
 } from '@angular/core';
-import { ProvidersSettingsStateService, type ProvidersConnection, type ProvidersCustomEntry } from '@ptah-extension/core';
-import { validateProviderBaseUrl, type AuthVerifyDraftConnectionParams, type AuthVerifyDraftConnectionResult } from '@ptah-extension/shared';
+import {
+  ProvidersSettingsStateService,
+  type ProvidersConnection,
+  type ProvidersCustomEntry,
+} from '@ptah-extension/core';
+import {
+  validateProviderBaseUrl,
+  type AuthVerifyDraftConnectionParams,
+  type AuthVerifyDraftConnectionResult,
+} from '@ptah-extension/shared';
 import type { CancelDraftFn, VerifyDraftFn } from './credentials-tab.component';
 import { runDrawerWrite, type DrawerWriteOutcome } from './drawer-write';
 import { SettingsBusyDisabledDirective } from '../../feedback/busy-disabled.directive';
 import { SettingsSaveFeedbackService } from '../../feedback/settings-save-feedback.service';
 import { commitToast } from '../../feedback/settings-commit-toast';
-import { PtahButtonDirective, PtahFieldComponent, PtahInputDirective } from '@ptah-extension/ui';
+import {
+  PtahButtonDirective,
+  PtahFieldComponent,
+  PtahInputDirective,
+} from '@ptah-extension/ui';
 
 /** Verbatim (plan :662-664): pricing has no runtime reader (`provider-registry.ts:703-718`). */
-export const PRICING_NOTE = 'Stored for your reference; Ptah does not use it for cost estimates yet.';
+export const PRICING_NOTE =
+  'Stored for your reference; Ptah does not use it for cost estimates yet.';
 
 type Section = 'endpoint' | 'help' | 'pricing' | 'delete';
 type ProbeState = 'idle' | 'checking' | 'verified' | 'failed';
@@ -25,33 +47,53 @@ const SAVED_TEXT: Readonly<Record<Section, string>> = {
 
 const PROBE_FAILURE_COPY: Readonly<Record<string, string>> = {
   'credential-rejected': 'The provider rejected the key.',
-  'permission-denied': 'This account cannot use the requested service or model.',
+  'permission-denied':
+    'This account cannot use the requested service or model.',
   unreachable: 'Could not reach this address.',
   timeout: 'The endpoint did not answer in time.',
   'rate-limited': 'The endpoint is rate-limiting requests. Retry in a moment.',
   'quota-exhausted': 'This account has no available quota for the check.',
   'model-unavailable': 'The model used for the check is not available here.',
   cancelled: 'Check cancelled.',
-  'no-stored-credential': 'No key is stored for this connection. Add one on the Credentials tab.',
-  'stored-credential-mismatch': 'The stored key can only be checked against the saved address. Enter the key to check the new one.',
+  'no-stored-credential':
+    'No key is stored for this connection. Add one on the Credentials tab.',
+  'stored-credential-mismatch':
+    'The stored key can only be checked against the saved address. Enter the key to check the new one.',
   unclassified: 'The check failed. Retry.',
 };
 
 let PROBE_COUNTER = 0;
 
 function probeResultText(result: AuthVerifyDraftConnectionResult): string {
-  const latency = result.latencyMs !== null && result.latencyMs !== undefined ? ` (${result.latencyMs}ms)` : '';
+  const latency =
+    result.latencyMs !== null && result.latencyMs !== undefined
+      ? ` (${result.latencyMs}ms)`
+      : '';
   return result.outcome === 'verified'
     ? `Endpoint verified${latency}. Save it to apply.`
     : `Check failed${latency}: ${PROBE_FAILURE_COPY[result.reason ?? 'unclassified'] ?? PROBE_FAILURE_COPY['unclassified']} Nothing was saved.`;
 }
 
 /** Parses the two price fields: both empty clears the pricing; otherwise both must be numbers ≥ 0. */
-export function parsePricing(input: string, output: string): { readonly ok: true; readonly value: ProvidersCustomEntry['pricing'] } | { readonly ok: false } {
-  const a = input.trim(), b = output.trim();
+export function parsePricing(
+  input: string,
+  output: string,
+):
+  | { readonly ok: true; readonly value: ProvidersCustomEntry['pricing'] }
+  | { readonly ok: false } {
+  const a = input.trim(),
+    b = output.trim();
   if (!a && !b) return { ok: true, value: null };
-  const inputPerMillion = Number(a), outputPerMillion = Number(b);
-  if (!a || !b || !Number.isFinite(inputPerMillion) || !Number.isFinite(outputPerMillion) || inputPerMillion < 0 || outputPerMillion < 0) {
+  const inputPerMillion = Number(a),
+    outputPerMillion = Number(b);
+  if (
+    !a ||
+    !b ||
+    !Number.isFinite(inputPerMillion) ||
+    !Number.isFinite(outputPerMillion) ||
+    inputPerMillion < 0 ||
+    outputPerMillion < 0
+  ) {
     return { ok: false };
   }
   return { ok: true, value: { inputPerMillion, outputPerMillion } };
@@ -69,108 +111,15 @@ export function parsePricing(input: string, output: string): { readonly ok: true
 @Component({
   selector: 'ptah-connection-advanced-tab',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, PtahButtonDirective, PtahFieldComponent, PtahInputDirective],
+  imports: [
+    PtahFieldGridDirective,
+    SettingsBusyDisabledDirective,
+    PtahButtonDirective,
+    PtahFieldComponent,
+    PtahInputDirective,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  template: `
-    <div class="space-y-4 text-sm" data-testid="connection-advanced">
-      @if (!entry()) {
-        <div class="space-y-2" aria-busy="true" data-testid="advanced-skeleton">
-          <span class="skeleton block h-8 w-full"></span>
-          <span class="skeleton block h-8 w-full"></span>
-        </div>
-      } @else {
-        <section class="space-y-2" aria-labelledby="advanced-endpoint-heading">
-          <h3 id="advanced-endpoint-heading" class="font-semibold text-base-content">Endpoint</h3>
-          <ptah-field label="Base URL">
-          <input ptahInput id="advanced-base-url" type="url" class="w-full font-mono text-xs" tone="mono" [value]="baseUrl()"
-            (input)="baseUrlDraft.set(value($event)); abandonProbe()" data-testid="advanced-base-url" />
-          </ptah-field>
-          @if (baseUrlError(); as error) { <p class="text-xs text-base-content">{{ error }}</p> }
-          <ptah-field label="Models endpoint">
-          <input ptahInput id="advanced-models-endpoint" type="text" class="w-full font-mono text-xs" tone="mono"
-            [value]="modelsEndpoint()" placeholder="e.g. /v1/models" (input)="modelsEndpointDraft.set(value($event)); abandonProbe()"
-            data-testid="advanced-models-endpoint" />
-          </ptah-field>
-          <p class="text-xs text-base-content-muted">Path Ptah uses to list this gateway's models. Leave it empty to use the default.</p>
-          @if (baseUrlChanged()) {
-            <ptah-field label="API key for the check">
-            <input ptahInput id="advanced-check-key" type="password" autocomplete="off" class="w-full font-mono text-xs" tone="mono"
-              [value]="keyDraft()" (input)="keyDraft.set(value($event)); abandonProbe()" data-testid="advanced-check-key" />
-            </ptah-field>
-            <p class="text-xs text-base-content-muted">The stored key can only be checked against the saved address. It is used for this check only and is not saved.</p>
-          }
-          <!-- The check's state gates Save endpoint, so it stays here; its result is also the page toast. -->
-          <p role="status" class="flex items-center gap-1.5 text-xs text-base-content" data-testid="advanced-probe">
-            @if (probeState() !== 'idle') { <span [class]="probeDot()" aria-hidden="true"></span> }
-            {{ probeText() }}
-          </p>
-          <div class="flex flex-wrap gap-2">
-            <button type="button" ptahButton [disabled]="!canCheck()" (click)="check()"
-              data-testid="advanced-check">{{ probeState() === 'checking' ? 'Checking…' : 'Check endpoint' }}</button>
-            <button type="button" ptahButton variant="primary" [disabled]="!canSaveEndpoint()" (click)="saveEndpoint()"
-              data-testid="advanced-save-endpoint">Save endpoint</button>
-          </div>
-        </section>
-
-        <section class="space-y-2" aria-labelledby="advanced-help-heading">
-          <h3 id="advanced-help-heading" class="sr-only">Documentation URL</h3>
-          <div class="flex gap-2">
-            <ptah-field label="Documentation URL" class="min-w-0 flex-1">
-            <input ptahInput id="advanced-help-url" type="url" class="min-w-0 flex-1 text-xs"
-              [value]="helpUrl()" placeholder="https://" (input)="helpUrlDraft.set(value($event))" data-testid="advanced-help-url" />
-            </ptah-field>
-            <button type="button" ptahButton [busy]="busy()" [disabled]="helpUrlDraft() === null || !!helpUrlError()"
-              (click)="saveHelpUrl()" data-testid="advanced-save-help">Save</button>
-          </div>
-          @if (helpUrlError(); as error) { <p class="text-xs text-base-content">{{ error }}</p> }
-        </section>
-
-        <section class="space-y-2 rounded border border-base-300 bg-base-200 p-3" aria-labelledby="advanced-pricing-heading">
-          <h3 id="advanced-pricing-heading" class="font-semibold text-base-content">Token pricing (per 1M tokens)</h3>
-          <div class="grid grid-cols-2 gap-2">
-            <ptah-field label="Input price ($ / 1M)" size="sm">
-              <input ptahInput id="advanced-price-input" type="number" min="0" step="0.01" class="w-full font-mono text-xs" tone="mono"
-                [value]="inputPrice()" (input)="inputPriceDraft.set(value($event))" data-testid="advanced-price-input" />
-            </ptah-field>
-            <ptah-field label="Output price ($ / 1M)" size="sm">
-              <input ptahInput id="advanced-price-output" type="number" min="0" step="0.01" class="w-full font-mono text-xs" tone="mono"
-                [value]="outputPrice()" (input)="outputPriceDraft.set(value($event))" data-testid="advanced-price-output" />
-            </ptah-field>
-          </div>
-          <p class="text-xs text-base-content-muted" data-testid="advanced-pricing-note">{{ pricingNote }}</p>
-          @if (!pricing().ok) { <p class="text-xs text-base-content">Enter both prices as numbers of 0 or more, or leave both empty.</p> }
-          <button type="button" ptahButton [busy]="busy()" [disabled]="!pricingDirty() || !pricing().ok"
-            (click)="savePricing()" data-testid="advanced-save-pricing">Save pricing</button>
-        </section>
-
-        <section class="flex items-center justify-between gap-3 border-t border-base-300 pt-3" aria-labelledby="advanced-delete-heading">
-          <div class="min-w-0">
-            <h3 id="advanced-delete-heading" class="flex items-center gap-1.5 font-semibold text-base-content">
-              <span class="h-2 w-2 rounded-full bg-error" aria-hidden="true"></span> Delete connection
-            </h3>
-            <p class="text-xs text-base-content-muted">Removes this custom gateway and its stored key from this machine.</p>
-            @if (isDriver()) {
-              <p class="text-xs text-base-content" data-testid="advanced-delete-blocked">Switch the main agent first.</p>
-            }
-          </div>
-          @if (!confirmingDelete()) {
-            <button type="button" class="btn btn-outline btn-sm border-error text-base-content" [disabled]="busy() || isDriver()"
-              (click)="confirmingDelete.set(true)" data-testid="advanced-delete">Delete connection</button>
-          }
-        </section>
-        @if (confirmingDelete()) {
-          <div role="group" aria-label="Confirm delete connection" class="space-y-2 rounded border border-base-300 p-3" data-testid="advanced-delete-confirm">
-            <p class="text-xs text-base-content">Delete {{ connection().name }} for good? Its endpoint, settings and stored key are removed.</p>
-            <div class="flex gap-2">
-              <button type="button" class="btn btn-outline btn-sm border-error text-base-content" [ptahBusyDisabled]="busy() || isDriver()"
-                (click)="deleteConnection()" data-testid="advanced-delete-confirm-button">Delete for good</button>
-              <button type="button" ptahButton variant="ghost" (click)="confirmingDelete.set(false)">Cancel</button>
-            </div>
-          </div>
-        }
-      }
-    </div>
-  `,
+  templateUrl: './advanced-tab.component.html',
 })
 export class AdvancedTabComponent {
   private readonly state = inject(ProvidersSettingsStateService);
@@ -182,7 +131,9 @@ export class AdvancedTabComponent {
   readonly cancelDraftVerification = input.required<CancelDraftFn>();
 
   protected readonly pricingNote = PRICING_NOTE;
-  protected readonly entry = computed(() => this.state.customEntry(this.connection().id));
+  protected readonly entry = computed(() =>
+    this.state.customEntry(this.connection().id),
+  );
   /** `null` = not edited: the field shows the stored value. */
   protected readonly baseUrlDraft = signal<string | null>(null);
   protected readonly modelsEndpointDraft = signal<string | null>(null);
@@ -193,49 +144,100 @@ export class AdvancedTabComponent {
   protected readonly keyDraft = signal('');
   protected readonly confirmingDelete = signal(false);
   protected readonly probeState = signal<ProbeState>('idle');
-  protected readonly probeResult = signal<AuthVerifyDraftConnectionResult | null>(null);
+  protected readonly probeResult =
+    signal<AuthVerifyDraftConnectionResult | null>(null);
   private readonly outcome = signal<DrawerWriteOutcome | null>(null);
   private probeId: string | null = null;
   private readonly connectionId = computed(() => this.connection().id);
 
-  protected readonly baseUrl = computed(() => this.baseUrlDraft() ?? this.entry()?.baseUrl ?? '');
-  protected readonly modelsEndpoint = computed(() => this.modelsEndpointDraft() ?? this.entry()?.modelsEndpoint ?? '');
-  protected readonly helpUrl = computed(() => this.helpUrlDraft() ?? this.entry()?.helpUrl ?? '');
-  protected readonly inputPrice = computed(() => this.inputPriceDraft() ?? String(this.entry()?.pricing?.inputPerMillion ?? ''));
-  protected readonly outputPrice = computed(() => this.outputPriceDraft() ?? String(this.entry()?.pricing?.outputPerMillion ?? ''));
-  protected readonly baseUrlChanged = computed(() => this.baseUrl().trim() !== (this.entry()?.baseUrl ?? ''));
-  private readonly modelsEndpointChanged = computed(() => this.modelsEndpoint().trim() !== (this.entry()?.modelsEndpoint ?? ''));
+  protected readonly baseUrl = computed(
+    () => this.baseUrlDraft() ?? this.entry()?.baseUrl ?? '',
+  );
+  protected readonly modelsEndpoint = computed(
+    () => this.modelsEndpointDraft() ?? this.entry()?.modelsEndpoint ?? '',
+  );
+  protected readonly helpUrl = computed(
+    () => this.helpUrlDraft() ?? this.entry()?.helpUrl ?? '',
+  );
+  protected readonly inputPrice = computed(
+    () =>
+      this.inputPriceDraft() ??
+      String(this.entry()?.pricing?.inputPerMillion ?? ''),
+  );
+  protected readonly outputPrice = computed(
+    () =>
+      this.outputPriceDraft() ??
+      String(this.entry()?.pricing?.outputPerMillion ?? ''),
+  );
+  protected readonly baseUrlChanged = computed(
+    () => this.baseUrl().trim() !== (this.entry()?.baseUrl ?? ''),
+  );
+  private readonly modelsEndpointChanged = computed(
+    () => this.modelsEndpoint().trim() !== (this.entry()?.modelsEndpoint ?? ''),
+  );
   protected readonly baseUrlError = computed(() =>
-    this.baseUrlChanged() && !validateProviderBaseUrl(this.baseUrl().trim()).ok ? 'Enter an http:// or https:// URL.' : null);
+    this.baseUrlChanged() && !validateProviderBaseUrl(this.baseUrl().trim()).ok
+      ? 'Enter an http:// or https:// URL.'
+      : null,
+  );
   protected readonly helpUrlError = computed(() => {
     const url = this.helpUrl().trim();
-    return url && !/^https?:\/\/\S+$/i.test(url) ? 'Enter an http:// or https:// URL, or leave it empty.' : null;
+    return url && !/^https?:\/\/\S+$/i.test(url)
+      ? 'Enter an http:// or https:// URL, or leave it empty.'
+      : null;
   });
-  protected readonly pricing = computed(() => parsePricing(this.inputPrice(), this.outputPrice()));
-  protected readonly pricingDirty = computed(() => this.inputPriceDraft() !== null || this.outputPriceDraft() !== null);
-  protected readonly busy = computed(() => this.state.commit().status === 'saving' || this.outcome()?.status === 'saving');
-  protected readonly canCheck = computed(() => !this.busy() && this.probeState() !== 'checking' && !this.baseUrlError()
-    && (this.baseUrlChanged() || this.modelsEndpointChanged()) && (!this.baseUrlChanged() || !!this.keyDraft().trim()));
-  protected readonly canSaveEndpoint = computed(() => !this.busy() && this.probeState() === 'verified'
-    && this.probeResult()?.probeId === this.probeId && (this.baseUrlChanged() || this.modelsEndpointChanged()));
+  protected readonly pricing = computed(() =>
+    parsePricing(this.inputPrice(), this.outputPrice()),
+  );
+  protected readonly pricingDirty = computed(
+    () => this.inputPriceDraft() !== null || this.outputPriceDraft() !== null,
+  );
+  protected readonly busy = computed(
+    () =>
+      this.state.commit().status === 'saving' ||
+      this.outcome()?.status === 'saving',
+  );
+  protected readonly canCheck = computed(
+    () =>
+      !this.busy() &&
+      this.probeState() !== 'checking' &&
+      !this.baseUrlError() &&
+      (this.baseUrlChanged() || this.modelsEndpointChanged()) &&
+      (!this.baseUrlChanged() || !!this.keyDraft().trim()),
+  );
+  protected readonly canSaveEndpoint = computed(
+    () =>
+      !this.busy() &&
+      this.probeState() === 'verified' &&
+      this.probeResult()?.probeId === this.probeId &&
+      (this.baseUrlChanged() || this.modelsEndpointChanged()),
+  );
   /** The check's state stays inline: a `verified` result is what enables Save endpoint. */
   protected readonly probeText = computed(() => {
     const result = this.probeResult();
     switch (this.probeState()) {
-      case 'checking': return 'Checking the endpoint…';
-      case 'idle': return 'A changed base URL or models endpoint is saved only after a passing check.';
-      default: return result ? probeResultText(result) : '';
+      case 'checking':
+        return 'Checking the endpoint…';
+      case 'idle':
+        return 'A changed base URL or models endpoint is saved only after a passing check.';
+      default:
+        return result ? probeResultText(result) : '';
     }
   });
-  protected readonly probeDot = computed(() =>
-    `h-2 w-2 shrink-0 rounded-full ${this.probeState() === 'verified' ? 'bg-success' : this.probeState() === 'failed' ? 'bg-error' : 'bg-base-content-muted'}`);
+  protected readonly probeDot = computed(
+    () =>
+      `h-2 w-2 shrink-0 rounded-full ${this.probeState() === 'verified' ? 'bg-success' : this.probeState() === 'failed' ? 'bg-error' : 'bg-base-content-muted'}`,
+  );
 
   constructor() {
     effect(() => {
       this.connectionId();
       untracked(() => this.resetAll());
     });
-    inject(DestroyRef).onDestroy(() => { this.abandonProbe(); this.keyDraft.set(''); });
+    inject(DestroyRef).onDestroy(() => {
+      this.abandonProbe();
+      this.keyDraft.set('');
+    });
   }
 
   protected value(event: Event): string {
@@ -249,17 +251,31 @@ export class AdvancedTabComponent {
     this.probeState.set('checking');
     this.probeResult.set(null);
     const params: AuthVerifyDraftConnectionParams = {
-      probeId, providerId: this.connection().id, authMode: 'custom', baseUrl: this.baseUrl().trim(),
-      credential: this.baseUrlChanged() ? { kind: 'apiKey', value: this.keyDraft().trim() } : { kind: 'stored' },
+      probeId,
+      providerId: this.connection().id,
+      authMode: 'custom',
+      baseUrl: this.baseUrl().trim(),
+      credential: this.baseUrlChanged()
+        ? { kind: 'apiKey', value: this.keyDraft().trim() }
+        : { kind: 'stored' },
     };
-    void this.verifyDraftConnection()(params).then((result) => {
-      if (this.probeId !== probeId || result.probeId !== probeId) return;
-      this.settleProbe(result);
-    }).catch(() => {
-      if (this.probeId !== probeId) return;
-      this.settleProbe({ probeId, outcome: 'failed', reason: 'unclassified', detail: null, latencyMs: null, modelUsed: null,
-        checkedAt: new Date().toISOString() });
-    });
+    void this.verifyDraftConnection()(params)
+      .then((result) => {
+        if (this.probeId !== probeId || result.probeId !== probeId) return;
+        this.settleProbe(result);
+      })
+      .catch(() => {
+        if (this.probeId !== probeId) return;
+        this.settleProbe({
+          probeId,
+          outcome: 'failed',
+          reason: 'unclassified',
+          detail: null,
+          latencyMs: null,
+          modelUsed: null,
+          checkedAt: new Date().toISOString(),
+        });
+      });
   }
 
   /** Records a check's result (it gates Save endpoint, so it stays inline) and also says it in the page toast. */
@@ -267,7 +283,10 @@ export class AdvancedTabComponent {
     this.probeResult.set(result);
     const verified = result.outcome === 'verified';
     this.probeState.set(verified ? 'verified' : 'failed');
-    this.feedback.announce(probeResultText(result), verified ? 'status' : 'alert');
+    this.feedback.announce(
+      probeResultText(result),
+      verified ? 'status' : 'alert',
+    );
   }
 
   protected saveEndpoint(): Promise<void> {
@@ -276,36 +295,61 @@ export class AdvancedTabComponent {
     const id = this.connection().id;
     const changes: { baseUrl?: string; modelsEndpoint?: string | null } = {};
     if (this.baseUrlChanged()) changes.baseUrl = this.baseUrl().trim();
-    if (this.modelsEndpointChanged()) changes.modelsEndpoint = this.modelsEndpoint().trim() || null;
-    return this.write('endpoint', (context) => this.state.updateCustomEntryEndpoint(id, changes, probeId, context), () => {
-      this.baseUrlDraft.set(null);
-      this.modelsEndpointDraft.set(null);
-      this.keyDraft.set('');
-      this.abandonProbe();
-      // The Credentials tab checks a replacement key against the stored address it read on open.
-      if (changes.baseUrl !== undefined) void this.state.refreshConnectionSetup(id);
-    });
+    if (this.modelsEndpointChanged())
+      changes.modelsEndpoint = this.modelsEndpoint().trim() || null;
+    return this.write(
+      'endpoint',
+      (context) =>
+        this.state.updateCustomEntryEndpoint(id, changes, probeId, context),
+      () => {
+        this.baseUrlDraft.set(null);
+        this.modelsEndpointDraft.set(null);
+        this.keyDraft.set('');
+        this.abandonProbe();
+        // The Credentials tab checks a replacement key against the stored address it read on open.
+        if (changes.baseUrl !== undefined)
+          void this.state.refreshConnectionSetup(id);
+      },
+    );
   }
 
   protected saveHelpUrl(): Promise<void> {
-    const id = this.connection().id, helpUrl = this.helpUrl().trim();
-    return this.write('help', (context) => this.state.updateCustomEntryFields(id, { helpUrl }, context), () => this.helpUrlDraft.set(null));
+    const id = this.connection().id,
+      helpUrl = this.helpUrl().trim();
+    return this.write(
+      'help',
+      (context) => this.state.updateCustomEntryFields(id, { helpUrl }, context),
+      () => this.helpUrlDraft.set(null),
+    );
   }
 
   protected savePricing(): Promise<void> {
     const parsed = this.pricing();
     if (!parsed.ok) return Promise.resolve();
     const id = this.connection().id;
-    return this.write('pricing', (context) => this.state.updateCustomEntryFields(id, { pricing: parsed.value }, context), () => {
-      this.inputPriceDraft.set(null);
-      this.outputPriceDraft.set(null);
-    });
+    return this.write(
+      'pricing',
+      (context) =>
+        this.state.updateCustomEntryFields(
+          id,
+          { pricing: parsed.value },
+          context,
+        ),
+      () => {
+        this.inputPriceDraft.set(null);
+        this.outputPriceDraft.set(null);
+      },
+    );
   }
 
   protected deleteConnection(): Promise<void> {
     this.confirmingDelete.set(false);
     const id = this.connection().id;
-    return this.write('delete', (context) => this.state.removeCustomEntry(id, context), () => undefined);
+    return this.write(
+      'delete',
+      (context) => this.state.removeCustomEntry(id, context),
+      () => undefined,
+    );
   }
 
   /**
@@ -313,7 +357,11 @@ export class AdvancedTabComponent {
    * outcome that lands after another connection opened in this tab belongs to that earlier connection
    * and is dropped.
    */
-  private async write(section: Section, run: Parameters<typeof runDrawerWrite>[1], onSaved: () => void): Promise<void> {
+  private async write(
+    section: Section,
+    run: Parameters<typeof runDrawerWrite>[1],
+    onSaved: () => void,
+  ): Promise<void> {
     if (this.busy()) return;
     const id = this.connectionId();
     await runDrawerWrite(this.state, run, (outcome) => {
@@ -328,7 +376,8 @@ export class AdvancedTabComponent {
 
   protected abandonProbe(): void {
     const probeId = this.probeId;
-    if (probeId && this.probeState() === 'checking') void this.cancelDraftVerification()({ probeId }).catch(() => undefined);
+    if (probeId && this.probeState() === 'checking')
+      void this.cancelDraftVerification()({ probeId }).catch(() => undefined);
     this.probeId = null;
     this.probeState.set('idle');
     this.probeResult.set(null);
@@ -336,7 +385,14 @@ export class AdvancedTabComponent {
 
   private resetAll(): void {
     this.abandonProbe();
-    for (const draft of [this.baseUrlDraft, this.modelsEndpointDraft, this.helpUrlDraft, this.inputPriceDraft, this.outputPriceDraft]) draft.set(null);
+    for (const draft of [
+      this.baseUrlDraft,
+      this.modelsEndpointDraft,
+      this.helpUrlDraft,
+      this.inputPriceDraft,
+      this.outputPriceDraft,
+    ])
+      draft.set(null);
     this.keyDraft.set('');
     this.confirmingDelete.set(false);
     this.outcome.set(null);

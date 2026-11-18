@@ -1,3 +1,4 @@
+import { PtahFieldComponent } from '@ptah-extension/ui';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -47,187 +48,16 @@ const FOCUS =
 @Component({
   selector: 'ptah-cursor-credential-popover',
   standalone: true,
-  imports: [LucideAngularModule, PtahBadgeDirective, PtahButtonDirective, PtahIconButtonDirective, PtahInputDirective],
+  imports: [
+    PtahFieldComponent,
+    LucideAngularModule,
+    PtahBadgeDirective,
+    PtahButtonDirective,
+    PtahIconButtonDirective,
+    PtahInputDirective,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  template: `
-    <div
-      role="dialog"
-      aria-labelledby="cursor-credential-title"
-      class="surface-3 w-[19rem] max-w-[calc(100vw-2rem)] space-y-2.5 rounded-xl p-3 text-left text-xs"
-      data-testid="cursor-credential-popover"
-    >
-      <div
-        class="flex items-center justify-between gap-2 border-b border-base-300 pb-1.5"
-      >
-        <h3
-          id="cursor-credential-title"
-          class="text-xs font-bold text-base-content"
-        >
-          Cursor credentials
-        </h3>
-        <button
-          type="button"
-          ptahIconButton
-          size="xs"
-          label="Close"
-          (click)="closed.emit()"
-        >
-          <lucide-angular
-            [img]="CloseIcon"
-            class="h-3.5 w-3.5"
-            aria-hidden="true"
-          />
-        </button>
-      </div>
-
-      <div class="flex items-center justify-between gap-2">
-        <span class="font-semibold text-base-content">Stored API key</span>
-        @if (stored() === null) {
-          <span
-            class="text-base-content-muted"
-            data-testid="cursor-credential-status"
-            >Not loaded</span
-          >
-        } @else {
-          <span ptahBadge appearance="outline" size="xs" [tone]="stored() ? 'ok' : 'neutral'"
-            class="h-auto py-0.5 font-medium"
-            data-testid="cursor-credential-status"
-            >{{ stored() ? 'Set' : 'Not set' }}</span
-          >
-        }
-      </div>
-
-      @if (envSet()) {
-        <p
-          class="rounded border border-info/40 bg-info/10 px-2 py-1.5 text-base-content"
-          data-testid="cursor-credential-env-note"
-        >
-          CURSOR_API_KEY is set in the environment and takes precedence over the
-          stored key.
-        </p>
-      }
-
-      <p class="text-base-content-muted" data-testid="cursor-credential-help">
-        Create a key at cursor.com → Dashboard → Integrations. Ptah keeps it in
-        this machine's secrets store and never shows it again.
-      </p>
-
-      <div class="space-y-1">
-        <label
-          for="cursor-credential-key"
-          class="block font-semibold text-base-content"
-          >{{ stored() ? 'Replace API key' : 'API key' }}</label
-        >
-        <div class="relative">
-          <input
-            ptahInput
-            size="sm"
-            tone="mono"
-            id="cursor-credential-key"
-            [type]="keyVisible() ? 'text' : 'password'"
-            autocomplete="off"
-            spellcheck="false"
-            [class]="
-              'w-full pr-9 font-mono text-xs ' +
-              focusRing
-            "
-            [value]="key()"
-            (input)="onKeyInput($event)"
-            [readonly]="busy()"
-            [attr.aria-busy]="busy() ? 'true' : null"
-            placeholder="crsr_…"
-            data-testid="cursor-credential-key"
-          />
-          <span class="absolute right-1 top-1">
-            <button
-              type="button"
-              ptahIconButton
-              size="xs"
-              (click)="keyVisible.set(!keyVisible())"
-              [label]="keyVisible() ? 'Hide API key' : 'Show API key'"
-              [attr.aria-pressed]="keyVisible()"
-              data-testid="cursor-credential-toggle-visibility"
-            >
-              <lucide-angular
-                [img]="keyVisible() ? EyeOffIcon : EyeIcon"
-                class="h-3.5 w-3.5"
-                aria-hidden="true"
-              />
-            </button>
-          </span>
-        </div>
-      </div>
-
-      <div class="flex flex-wrap items-center gap-1.5">
-        <!-- Raw on purpose: the empty-field Save is aria-disabled and stays focusable with the daisyUI disabled look
-             (e2e settings-orchestration, Batch 51.2). ptahButton has no lasting aria-disabled state. -->
-        <button
-          type="button"
-          [class]="'btn btn-primary btn-xs min-h-7 ' + focusRing"
-          [attr.aria-disabled]="busy() || !key().trim() ? 'true' : null"
-          (click)="save()"
-          data-testid="cursor-credential-save"
-        >
-          {{
-            outcome()?.status === 'saving' && action() === 'save'
-              ? 'Saving…'
-              : 'Save key'
-          }}
-        </button>
-        @if (stored() && !confirmRemove()) {
-          <button
-            type="button"
-            ptahButton
-            size="xs"
-            [busy]="busy()"
-            (click)="askRemove()"
-            data-testid="cursor-credential-remove"
-          >
-            Remove stored key
-          </button>
-        }
-      </div>
-      @if (confirmRemove()) {
-        <div
-          role="group"
-          aria-label="Confirm removing the stored Cursor key"
-          class="surface-2 space-y-1.5 rounded-lg p-2"
-          data-testid="cursor-credential-remove-confirm"
-        >
-          <p class="text-base-content">
-            Remove the stored Cursor key?
-            {{
-              envSet()
-                ? 'Cursor keeps using CURSOR_API_KEY from the environment.'
-                : 'Cursor stops working until a key is set again.'
-            }}
-          </p>
-          <div class="flex flex-wrap gap-1.5">
-            <button
-              type="button"
-              ptahButton
-              size="xs"
-              [busy]="busy()"
-              (click)="remove()"
-              data-testid="cursor-credential-remove-confirm-button"
-            >
-              Remove key
-            </button>
-            <button
-              type="button"
-              ptahButton
-              size="xs"
-              [busy]="busy()"
-              (click)="cancelRemove()"
-              data-testid="cursor-credential-remove-cancel"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      }
-    </div>
-  `,
+  templateUrl: './cursor-credential-popover.component.html',
 })
 export class CursorCredentialPopoverComponent implements OnDestroy {
   protected readonly CloseIcon = X;

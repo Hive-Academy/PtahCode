@@ -56,14 +56,16 @@ describe('DecisionModelTimeoutFieldComponent', () => {
   let stored: unknown;
 
   const field = (): HTMLInputElement => {
-    const input = (fixture.nativeElement as HTMLElement).querySelector<HTMLInputElement>(
-      '[data-testid="decision-timeout"]',
-    );
+    const input = (
+      fixture.nativeElement as HTMLElement
+    ).querySelector<HTMLInputElement>('[data-testid="decision-timeout"]');
     if (!input) throw new Error('timeout field missing');
     return input;
   };
   const setCalls = (): unknown[] =>
-    call.mock.calls.filter(([method]) => method === 'settings:set').map(([, params]) => params);
+    call.mock.calls
+      .filter(([method]) => method === 'settings:set')
+      .map(([, params]) => params);
 
   async function flush(): Promise<void> {
     for (let i = 0; i < 4; i += 1) {
@@ -88,7 +90,8 @@ describe('DecisionModelTimeoutFieldComponent', () => {
   beforeEach(() => {
     stored = null;
     call = jest.fn(async (method: string, params: { value?: unknown }) => {
-      if (method === 'settings:get') return rpcSuccess({ success: true, value: stored });
+      if (method === 'settings:get')
+        return rpcSuccess({ success: true, value: stored });
       stored = params.value;
       return rpcSuccess({ success: true });
     });
@@ -97,7 +100,10 @@ describe('DecisionModelTimeoutFieldComponent', () => {
       providers: [
         { provide: ClaudeRpcService, useValue: { call } },
         { provide: LoggingService, useValue: { warn: jest.fn() } },
-        { provide: ProvidersSettingsStateService, useValue: { commit: signal({ status: 'idle' }) } },
+        {
+          provide: ProvidersSettingsStateService,
+          useValue: { commit: signal({ status: 'idle' }) },
+        },
         SettingsSaveFeedbackService,
       ],
     });
@@ -107,13 +113,44 @@ describe('DecisionModelTimeoutFieldComponent', () => {
 
   it('says an unsaved timeout may wait for a local load and a saved one bounds every request', async () => {
     await create();
-    const help = (fixture.nativeElement as HTMLElement).querySelector(
-      '[data-testid="decision-timeout-help"]',
-    );
+    const host = fixture.nativeElement as HTMLElement;
+    host
+      .querySelector<HTMLButtonElement>(
+        'button[aria-label="More about Request timeout (seconds)"]',
+      )
+      ?.click();
+    await flush();
+    const help = host.querySelector('[role="dialog"]');
     expect(help?.textContent).toContain(
       'first request may wait up to 60 s while a local model loads',
     );
     expect(help?.textContent).toContain('saved value bounds every request');
+  });
+
+  it('opens the complete timeout help and preserves its ids', async () => {
+    await create();
+    const host = fixture.nativeElement as HTMLElement;
+    const expected =
+      'How long one decision request may take before routing falls back. Raise it for a slow model, such as one running on a CPU. Applies to every decision model except a structured-output model. Without a saved value, the first request may wait up to 60 s while a local model loads. A saved value bounds every request. Saves on its own when you press Enter or leave the field; empty uses the default.';
+    const help = host.querySelector('#decision-model-timeout-help');
+    expect(help).toBe(
+      host.querySelector('[data-testid="decision-timeout-help"]'),
+    );
+    expect(help?.textContent?.trim()).toBe(expected);
+    expect(field().getAttribute('aria-describedby')?.split(/\s+/)).toContain(
+      'decision-model-timeout-help',
+    );
+    const trigger = host.querySelector<HTMLButtonElement>(
+      'button[aria-label="More about Request timeout (seconds)"]',
+    );
+    expect(trigger).not.toBeNull();
+    trigger?.click();
+    await flush();
+    expect(trigger?.getAttribute('aria-expanded')).toBe('true');
+    expect(host.querySelector('[role="dialog"]')?.textContent?.trim()).toBe(
+      expected,
+    );
+    expect(host.querySelector('.ptah-field__message')).toBeNull();
   });
 
   it('reads the stored value in seconds', async () => {
@@ -131,7 +168,9 @@ describe('DecisionModelTimeoutFieldComponent', () => {
   it('saves a committed value in milliseconds', async () => {
     await create();
     await commit('25');
-    expect(setCalls()).toEqual([{ key: DECISION_MODEL_TIMEOUT_SETTING_KEY, value: 25_000 }]);
+    expect(setCalls()).toEqual([
+      { key: DECISION_MODEL_TIMEOUT_SETTING_KEY, value: 25_000 },
+    ]);
     expect(TestBed.inject(SettingsSaveFeedbackService).toast()?.message).toBe(
       'Saved decision request timeout.',
     );
@@ -141,7 +180,9 @@ describe('DecisionModelTimeoutFieldComponent', () => {
     stored = 12_000;
     await create();
     await commit('');
-    expect(setCalls()).toEqual([{ key: DECISION_MODEL_TIMEOUT_SETTING_KEY, value: null }]);
+    expect(setCalls()).toEqual([
+      { key: DECISION_MODEL_TIMEOUT_SETTING_KEY, value: null },
+    ]);
   });
 
   it('shows a hint and writes nothing for an invalid value', async () => {
@@ -150,7 +191,9 @@ describe('DecisionModelTimeoutFieldComponent', () => {
     expect(setCalls()).toEqual([]);
     expect(field().getAttribute('aria-invalid')).toBe('true');
     expect(
-      (fixture.nativeElement as HTMLElement).querySelector('[data-testid="decision-timeout-error"]')?.textContent,
+      (fixture.nativeElement as HTMLElement).querySelector(
+        '[data-testid="decision-timeout-error"]',
+      )?.textContent,
     ).toContain('Not saved. Enter whole seconds from 1 to 60');
   });
 
@@ -159,7 +202,9 @@ describe('DecisionModelTimeoutFieldComponent', () => {
     await create();
     expect(field().disabled).toBe(true);
     expect(
-      (fixture.nativeElement as HTMLElement).querySelector('[data-testid="decision-timeout-read-error"]'),
+      (fixture.nativeElement as HTMLElement).querySelector(
+        '[data-testid="decision-timeout-read-error"]',
+      ),
     ).not.toBeNull();
   });
 

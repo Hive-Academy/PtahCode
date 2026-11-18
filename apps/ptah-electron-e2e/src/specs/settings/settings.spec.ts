@@ -16,8 +16,8 @@ test.describe('Settings', () => {
    * the old assertion proved the default tab actually mounted content; the
    * new ones prove the same against the new page by asserting its Background
    * connections section header (`providers-connections-heading`), not just the
- * shell. The Background models header (`assignments-heading`) is asserted on
- * the same Providers tab after opening the roles details.
+   * shell. The Background models header (`assignments-heading`) is asserted on
+   * the same Providers tab after opening the roles details.
    */
   test('settings renders', async ({ ui }) => {
     await ui.goto('settings');
@@ -30,9 +30,8 @@ test.describe('Settings', () => {
     await expect(page.locator('[data-testid="settings-back"]')).toBeVisible();
 
     // `assignments-heading` sits on the Providers tab inside the Background
-    // Model Roles <details>, closed by default (Batch 33): open it before
-    // looking for the heading.
-    await page.locator('[data-testid="background-roles-summary"]').click();
+    // Background model roles are always visible on Providers.
+    await expect(page.locator('[data-testid="consumer-table"]')).toBeVisible();
     await expect(
       page.locator('[data-testid="assignments-heading"]'),
     ).toBeVisible();

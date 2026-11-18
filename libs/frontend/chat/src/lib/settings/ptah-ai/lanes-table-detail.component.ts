@@ -8,13 +8,15 @@ import {
   input,
   output,
   viewChildren,
+  signal,
+  ViewEncapsulation,
 } from '@angular/core';
 import type { CliType } from '@ptah-extension/shared';
 import {
   NativePopoverComponent,
   PtahButtonDirective,
-  PtahDescriptionItemComponent,
   PtahDescriptionListComponent,
+  PtahTableDetailLayoutComponent,
 } from '@ptah-extension/ui';
 import type { LaneTableRow } from './lanes-table.component';
 import type {
@@ -27,7 +29,6 @@ import {
   CliProviderCardPopoversComponent,
   type CliProviderInfoKind,
 } from './cli-provider-card-popovers.component';
-import { CliCapabilityCellsComponent } from './cli-capability-cells.component';
 import { cliCapabilityView } from './cli-capability-view';
 
 @Component({
@@ -37,236 +38,15 @@ import { cliCapabilityView } from './cli-capability-view';
   imports: [
     NativePopoverComponent,
     PtahButtonDirective,
-    PtahDescriptionItemComponent,
     PtahDescriptionListComponent,
+    PtahTableDetailLayoutComponent,
     ClaudeLaneAccountCellComponent,
     CursorCredentialPopoverComponent,
     CliProviderCardPopoversComponent,
-    CliCapabilityCellsComponent,
   ],
-  template: `
-    @if (systemRow(); as system) {
-      @if (system.cli === 'claude' && system.installed) {
-        <ptah-claude-lane-account-cell />
-      }
-      <ptah-description-list
-        [ariaLabel]="system.name + ' details'"
-        data-testid="cli-provider-facts"
-      >
-        @if (system.versionLabel) {
-          <div ptahDescriptionItem term="Version">
-            <span [title]="system.version ?? ''">{{
-              system.versionLabel
-            }}</span>
-          </div>
-        }
-        @if (system.codexStatusLine) {
-          <div
-            ptahDescriptionItem
-            term="Executable"
-            [value]="system.codexStatusLine"
-          ></div>
-        }
-        <div
-          ptahDescriptionItem
-          term="Provider"
-          [value]="system.provider ?? 'CLI default'"
-        ></div>
-        <div
-          ptahDescriptionItem
-          term="Native CLI behavior"
-          title="Built-in behavior of this CLI. Lanes that Ptah spawns use the Lane default below; a parent session in Plan Mode caps them to Plan."
-        >
-          <ptah-native-popover
-            [isOpen]="isOpen('permission')"
-            [keepInViewport]="true"
-            placement="bottom-start"
-            [hasBackdrop]="true"
-            backdropClass="transparent"
-            (closed)="popoverClosed.emit()"
-          >
-            <button
-              trigger
-              type="button"
-              ptahButton
-              variant="ghost"
-              size="xs"
-              data-popover-kind="permission"
-              [title]="system.permission.detail"
-              [attr.aria-expanded]="isOpen('permission')"
-              (click)="kindToggled.emit('permission')"
-            >
-              {{ system.permission.badge }}
-            </button>
-            @if (isOpen('permission')) {
-              <ptah-cli-provider-card-popovers
-                content
-                [row]="system"
-                kind="permission"
-                (closed)="popoverClosed.emit()"
-              />
-            }
-          </ptah-native-popover>
-        </div>
-      </ptah-description-list>
-      <ptah-cli-capability-cells [manifest]="system.manifest" />
-      @for (kind of infoKinds; track kind) {
-        @if (kind !== 'install' || !system.installed) {
-          <ptah-native-popover
-            [isOpen]="isOpen(kind)"
-            [keepInViewport]="true"
-            placement="bottom-start"
-            [hasBackdrop]="true"
-            backdropClass="transparent"
-            (closed)="popoverClosed.emit()"
-          >
-            <button
-              trigger
-              type="button"
-              ptahButton
-              variant="ghost"
-              size="xs"
-              [attr.data-popover-kind]="kind"
-              [attr.aria-expanded]="isOpen(kind)"
-              (click)="kindToggled.emit(kind)"
-            >
-              {{
-                kind === 'install'
-                  ? 'Install guide'
-                  : kind === 'info'
-                    ? 'Info'
-                    : 'All capabilities'
-              }}
-            </button>
-            @if (isOpen(kind)) {
-              <ptah-cli-provider-card-popovers
-                content
-                [row]="system"
-                [kind]="kind"
-                [detail]="testResult() || system.permission.detail"
-                [guide]="guides()[system.cli]"
-                [busy]="busy()"
-                (redetectRequested)="redetect.emit($event)"
-                (closed)="popoverClosed.emit()"
-              />
-            }
-          </ptah-native-popover>
-        }
-      }
-      @if (system.credentialAction) {
-        <ptah-native-popover
-          [isOpen]="isOpen('credentials')"
-          [keepInViewport]="true"
-          placement="bottom-start"
-          [hasBackdrop]="true"
-          backdropClass="transparent"
-          (opened)="focusCredentialKey()"
-          (closed)="popoverClosed.emit()"
-        >
-          <button
-            trigger
-            type="button"
-            ptahButton
-            variant="outline"
-            size="xs"
-            data-popover-kind="credentials"
-            [attr.aria-expanded]="isOpen('credentials')"
-            (click)="kindToggled.emit('credentials')"
-          >
-            Credentials
-          </button>
-          @if (isOpen('credentials')) {
-            <ptah-cursor-credential-popover
-              content
-              (closed)="popoverClosed.emit()"
-            />
-          }
-        </ptah-native-popover>
-      } @else if (system.cli === 'codex') {
-        <button
-          type="button"
-          ptahButton
-          variant="outline"
-          size="xs"
-          (click)="codexSettings.emit()"
-        >
-          Codex settings
-        </button>
-      }
-    } @else if (instanceRow(); as instance) {
-      <ptah-description-list [ariaLabel]="instance.name + ' details'">
-        <div
-          ptahDescriptionItem
-          term="Provider"
-          [value]="instance.provider"
-        ></div>
-        @if (
-          instance.keyStatus?.kind !== 'missing' && instance.keyStatus;
-          as keyStatus
-        ) {
-          <div
-            ptahDescriptionItem
-            term="Key"
-            [value]="keyStatus.label"
-            data-testid="cli-matrix-key-status"
-          ></div>
-        }
-        <div ptahDescriptionItem term="Tier models">
-          @for (tier of instance.tiers ?? []; track tier.tier) {
-            <span [attr.data-tier]="tier.tier"
-              >{{ tier.label }}: {{ tier.model }}</span
-            >
-          } @empty {
-            No tier models
-          }
-        </div>
-      </ptah-description-list>
-      <button
-        type="button"
-        ptahButton
-        variant="ghost"
-        size="xs"
-        (click)="tiers.emit(instance)"
-      >
-        Edit tiers
-      </button>
-      <ptah-native-popover
-        [isOpen]="isOpen('capabilities')"
-        [keepInViewport]="true"
-        placement="bottom-start"
-        [hasBackdrop]="true"
-        backdropClass="transparent"
-        (closed)="popoverClosed.emit()"
-      >
-        <button
-          trigger
-          type="button"
-          ptahButton
-          variant="ghost"
-          size="xs"
-          data-popover-kind="capabilities"
-          [attr.aria-expanded]="isOpen('capabilities')"
-          [attr.aria-controls]="'instance-capabilities-' + instance.id"
-          (click)="kindToggled.emit('capabilities')"
-        >
-          Show capabilities
-        </button>
-        @if (isOpen('capabilities')) {
-          <div content [id]="'instance-capabilities-' + instance.id" class="max-h-72 w-72 overflow-auto text-xs" style="padding: var(--ptah-gap-field)">
-            @for (group of capabilityView(instance).groups; track group.heading) {
-              <h4 class="font-semibold" style="margin-top: var(--ptah-gap-field)">{{ group.heading }}</h4>
-              @for (line of group.lines; track line.label) {
-                <p style="margin-top: calc(var(--ptah-gap-field) / 2)" [title]="line.reason || ''">{{ line.label }}: {{ line.value }} @if (line.reason) { · {{ line.reason }} }</p>
-              }
-            }
-          </div>
-        }
-      </ptah-native-popover>
-    }
-    <div data-testid="cli-matrix-test-result">
-      {{ testing() ? 'Running…' : testResult() || 'Not run yet' }}
-    </div>
-  `,
+  encapsulation: ViewEncapsulation.None,
+  styleUrl: './lanes-table-detail.component.css',
+  templateUrl: './lanes-table-detail.component.html',
 })
 export class LanesTableDetailComponent {
   private readonly element = inject<ElementRef<HTMLElement>>(ElementRef);
@@ -277,11 +57,14 @@ export class LanesTableDetailComponent {
     // table puts installed rows first). The move hides an open native popover.
     effect(() => {
       this.row();
+      if (this.openKind() !== null) this.openChip.set(null);
       for (const popover of this.popovers()) popover.reattach();
     });
   }
   protected focusCredentialKey(): void {
-    this.element.nativeElement.querySelector<HTMLElement>('[data-testid="cursor-credential-key"]')?.focus();
+    this.element.nativeElement
+      .querySelector<HTMLElement>('[data-testid="cursor-credential-key"]')
+      ?.focus();
   }
   protected readonly systemRow = computed((): SystemCliMatrixRow | null => {
     const row = this.row();
@@ -310,15 +93,21 @@ export class LanesTableDetailComponent {
   readonly redetect = output<string>();
   readonly codexSettings = output<void>();
   readonly tiers = output<LaneTableRow>();
+  readonly test = output<void>();
   protected readonly infoKinds: readonly CliProviderInfoKind[] = [
-    'info',
     'capabilities',
+    'info',
     'install',
   ];
   protected isOpen(kind: CliProviderInfoKind | 'credentials'): boolean {
     return this.openKind() === kind;
   }
-  protected capabilityView(row: InstanceCliMatrixRow) {
+  protected readonly openChip = signal<string | null>(null);
+  protected toggleChip(label: string): void {
+    this.popoverClosed.emit();
+    this.openChip.update((current) => (current === label ? null : label));
+  }
+  protected capabilityView(row: LaneTableRow) {
     return cliCapabilityView(row.manifest);
   }
 }

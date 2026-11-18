@@ -328,9 +328,6 @@
     "btn-square": 1,
     "btn-xs": 6
   },
-  "libs/frontend/chat/src/lib/settings/advanced/advanced-settings-group.component.ts": {
-    "<dynamic>": 2
-  },
   "libs/frontend/chat/src/lib/settings/advanced/codex-sandbox-setting.component.ts": {
     "<dynamic>": 2,
     "btn": 1,
@@ -342,11 +339,6 @@
     "btn-sm": 1,
     "btn-warning": 1
   },
-  "libs/frontend/chat/src/lib/settings/output-style/output-style-parity-section.component.ts": {
-    "btn": 1,
-    "btn-outline": 1,
-    "btn-xs": 1
-  },
   "libs/frontend/chat/src/lib/settings/providers/accounts/account-detail-view.component.ts": {
     "<dynamic>": 5,
     "btn": 2,
@@ -357,13 +349,10 @@
   "libs/frontend/chat/src/lib/settings/providers/accounts/ambient-account-row.component.ts": {
     "<dynamic>": 1
   },
-  "libs/frontend/chat/src/lib/settings/providers/agents-routing-settings.component.ts": {
-    "<dynamic>": 1
-  },
   "libs/frontend/chat/src/lib/settings/providers/connection-detail-drawer.component.ts": {
     "<dynamic>": 1
   },
-  "libs/frontend/chat/src/lib/settings/providers/connection-drawer/advanced-tab.component.ts": {
+  "libs/frontend/chat/src/lib/settings/providers/connection-drawer/advanced-tab.component.html": {
     "<dynamic>": 1,
     "btn": 2,
     "btn-outline": 2,
@@ -393,19 +382,13 @@
     "skeleton": 1
   },
   "libs/frontend/chat/src/lib/settings/providers/decision-model-key-field.component.ts": {
-    "<dynamic>": 3
+    "<dynamic>": 1
   },
-  "libs/frontend/chat/src/lib/settings/providers/decision-model-row.base-url-field.component.ts": {
-    "<dynamic>": 2
+  "libs/frontend/chat/src/lib/settings/providers/decision-model-row.component.html": {
+    "<dynamic>": 6
   },
-  "libs/frontend/chat/src/lib/settings/providers/decision-model-row.component.ts": {
-    "<dynamic>": 10
-  },
-  "libs/frontend/chat/src/lib/settings/providers/decision-model-row.timeout-field.component.ts": {
-    "<dynamic>": 2
-  },
-  "libs/frontend/chat/src/lib/settings/providers/main-agent-reassign-popover.component.ts": {
-    "<dynamic>": 10
+  "libs/frontend/chat/src/lib/settings/providers/main-agent-reassign-popover.component.html": {
+    "<dynamic>": 7
   },
   "libs/frontend/chat/src/lib/settings/providers/main-agent-scope-badges.component.ts": {
     "<dynamic>": 2
@@ -425,7 +408,7 @@
   "libs/frontend/chat/src/lib/settings/providers/setting-scope-row.component.ts": {
     "<dynamic>": 5
   },
-  "libs/frontend/chat/src/lib/settings/ptah-ai/agent-orchestration-config.component.ts": {
+  "libs/frontend/chat/src/lib/settings/ptah-ai/agent-orchestration-config.component.html": {
     "<dynamic>": 5
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/claude-lane-account-cell.component.ts": {
@@ -445,17 +428,14 @@
     "toggle-success": 1,
     "toggle-xs": 1
   },
-  "libs/frontend/chat/src/lib/settings/ptah-ai/cursor-credential-popover.component.ts": {
+  "libs/frontend/chat/src/lib/settings/ptah-ai/cursor-credential-popover.component.html": {
     "<dynamic>": 2,
     "btn": 1,
     "btn-primary": 1,
     "btn-xs": 1
   },
-  "libs/frontend/chat/src/lib/settings/ptah-ai/ptah-cli-instances.component.ts": {
+  "libs/frontend/chat/src/lib/settings/ptah-ai/ptah-cli-instances.component.html": {
     "<dynamic>": 9
-  },
-  "libs/frontend/chat/src/lib/settings/ptah-ai/voice-config.component.ts": {
-    "<dynamic>": 1
   },
   "libs/frontend/command-center/src/lib/components/command-center-page.component.html": {
     "alert": 1

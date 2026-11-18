@@ -1,3 +1,4 @@
+import { PtahFieldComponent, PtahInputDirective } from '@ptah-extension/ui';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -56,30 +57,31 @@ export const DECISION_KEY_TEXT: Readonly<
 @Component({
   selector: 'ptah-decision-model-key-field',
   standalone: true,
-  imports: [],
+  imports: [PtahFieldComponent, PtahInputDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block space-y-2' },
   template: `
-    <label for="decision-model-api-key" [class]="labelClass">{{
-      label()
-    }}</label>
-    <input
-      #field
-      id="decision-model-api-key"
-      type="password"
-      [class]="inputClass"
-      autocomplete="new-password"
-      spellcheck="false"
-      aria-describedby="decision-model-api-key-help"
-      placeholder="Enter a new key to store it"
-      [value]="value()"
-      [disabled]="disabled()"
-      (input)="onInput($event)"
-      data-testid="decision-api-key"
-    />
-    <p id="decision-model-api-key-help" class="text-xs text-base-content-muted">
-      Stored in this machine's secret storage. A stored key is never shown here.
-    </p>
+    <ptah-field
+      [label]="label()"
+      size="sm"
+      info="Stored in this machine's secret storage. A stored key is never shown here."
+      infoTextId="decision-model-api-key-help"
+    >
+      <input
+        ptahInput
+        #field
+        id="decision-model-api-key"
+        type="password"
+        tone="mono"
+        autocomplete="new-password"
+        spellcheck="false"
+        aria-describedby="decision-model-api-key-help"
+        placeholder="Enter a new key to store it"
+        [value]="value()"
+        [disabled]="disabled()"
+        (input)="onInput($event)"
+        data-testid="decision-api-key"
+    /></ptah-field>
     @if (showRemove()) {
       <button
         type="button"
@@ -94,8 +96,6 @@ export const DECISION_KEY_TEXT: Readonly<
   `,
 })
 export class DecisionModelKeyFieldComponent {
-  protected readonly labelClass = DECISION_LABEL;
-  protected readonly inputClass = DECISION_INPUT;
   protected readonly actionClass = DECISION_ACTION;
 
   readonly label = input.required<string>();

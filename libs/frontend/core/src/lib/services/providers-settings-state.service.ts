@@ -1,4 +1,10 @@
-import { parseCliAgents, parseDetectedClis, parseOrchestration } from './providers-orchestration-schema';
+import { laneDefaultOperations } from './providers-lane-default-operations';
+import { testSystemLane, testInstanceLane } from './providers-system-lane-test';
+import {
+  parseCliAgents,
+  parseDetectedClis,
+  parseOrchestration,
+} from './providers-orchestration-schema';
 import {
   Injectable,
   computed,
@@ -22,9 +28,10 @@ import {
   type ScopedSettingEntry,
   type SettingScope,
   type PtahCliConfig,
-  type CliLaneDefaults,
-  type CliType,
+  type SystemCliType,
 } from '@ptah-extension/shared';
+import { ProviderAccountsStateService } from './provider-accounts-state.service';
+import { VSCodeService } from './vscode.service';
 import { ClaudeRpcService } from './claude-rpc.service';
 import { AuthStateService } from './auth-state.service';
 import { EffortSettingsChangeService } from './effort-settings-change.service';
@@ -55,7 +62,8 @@ import type {
   ProvidersEnhancementSettings,
   ProvidersExternalAuthAction,
   ProvidersMainSources,
-  ProvidersCliTest, ProvidersCliAgents,
+  ProvidersCliTest,
+  ProvidersCliAgents,
   ProvidersCustomEntry,
   ProvidersDetectedClis,
   ProvidersOrchestration,
@@ -108,20 +116,13 @@ const ACTIVATABLE_STATUSES: ReadonlySet<string> = new Set([
   'skipped',
 ]);
 
-/** Above the host's own 30 s abort of `ptahCli:testConnection` (`ptah-cli-registry.ts`). */
-const CLI_TEST_TIMEOUT_MS = 45_000;
-/** The registry's own FIXED test errors → fixed copy. Any other text (pattern-redacted host text) is dropped (M1). */
-const CLI_TEST_REASONS: Readonly<Record<string, string>> = {
-  'API key not configured': 'No API key is stored for this instance.',
-  'No response received from provider': 'The provider did not respond.',
-  'Agent configuration not found':
-    'This instance was not found. Refresh and try again.',
-};
-
 /** Page-owned lifecycle: call open() on entry. No constructor I/O or polling. */
 @Injectable({ providedIn: 'root' })
 export class ProvidersSettingsStateService {
   private readonly rpc = inject(ClaudeRpcService);
+  private readonly accounts = inject(VSCodeService).isElectron
+    ? inject(ProviderAccountsStateService)
+    : null;
   private readonly authState = inject(AuthStateService);
   private readonly commits = inject(ProvidersCommitService);
   private readonly setup = inject(ProvidersConnectionSetupService);
@@ -140,8 +141,7 @@ export class ProvidersSettingsStateService {
     createSectionStore<RpcMethodResult<'memory:getTriggers'>['triggers']>();
   private readonly enhancementStore =
     createSectionStore<ProvidersEnhancementSettings>();
-  private readonly cliStore =
-    createSectionStore<ProvidersCliAgents>();
+  private readonly cliStore = createSectionStore<ProvidersCliAgents>();
   private readonly orchestrationStore =
     createSectionStore<ProvidersOrchestration>();
   private readonly customEntriesStore =
@@ -255,7 +255,8 @@ export class ProvidersSettingsStateService {
         resolvedAuthModality: result.resolvedAuthModality,
         resolvedModel: result.resolvedModel,
         storedAuthMethodScope: result.storedAuthMethodScope,
-        authMethodIsUnset: result.storedAuthMethodDiagnostic === null ||
+        authMethodIsUnset:
+          result.storedAuthMethodDiagnostic === null ||
           result.storedAuthMethodDiagnostic.trim() === '',
         providers: result.providers,
         lastSuccessfulProbeAt: result.lastSuccessfulProbeAt,
@@ -328,42 +329,48 @@ export class ProvidersSettingsStateService {
 
   private readonly cliTestStore = createSectionStore<ProvidersCliTest>();
   readonly cliTest = this.view(this.cliTestStore);
-  /** The instance the current (or last) Test ran for. */
+  /** The row the current (or last) Test ran for. */
   private cliTestRunId: string | null = null;
-  /**
-   * One run's result only (Gate V 36 S1): the previous result is dropped before the call and never retained after a
-   * failure, so a failed or timed-out run can never show an earlier pass. The RPC timeout is above the host's own 30 s
-   * abort, so a slow host answer is still this run's. `reason` is fixed copy for the registry's own fixed strings and
-   * `null` otherwise (M1): `sanitizeErrorMessage` is pattern-based, so host text never enters state.
-   */
+  /** System lanes use detection and Claude's account probes, rather than the instance registry. */
+  async testSystemLane(
+    cli: SystemCliType,
+    account?: { profileId: string } | 'ambient',
+  ): Promise<void> {
+    const selection =
+      this.accounts?.state('claude')().snapshot?.selections.lane.selection;
+    const selected =
+      account ?? (selection?.kind === 'named' ? selection : 'ambient');
+    await this.runLaneTest(cli, () =>
+      testSystemLane(
+        (method, params) => this.require(method, params),
+        cli,
+        selected,
+      ),
+    );
+  }
+
+  /** One run only: clear stale results; the helper keeps the host timeout and fixed-copy allowlist (Gate V 36 S1, M1). */
   async testCliConnection(id: string): Promise<void> {
+    await this.runLaneTest(id, () =>
+      testInstanceLane(
+        (method, params, timeout) => this.require(method, params, timeout),
+        id,
+      ),
+    );
+  }
+  private async runLaneTest(
+    id: string,
+    request: () => Promise<ProvidersCliTest>,
+  ): Promise<void> {
     this.cliTestStore.value.set({
       status: 'unloaded',
       data: null,
       error: null,
     });
     this.cliTestRunId = id;
-    await readSection(
-      this.cliTestStore,
-      this.workspace,
-      async () => {
-        const result = await this.require(
-          'ptahCli:testConnection',
-          { id },
-          CLI_TEST_TIMEOUT_MS,
-        );
-        return {
-          id,
-          success: result.success,
-          latencyMs: result.latencyMs ?? null,
-          reason: result.success
-            ? null
-            : (CLI_TEST_REASONS[result.error ?? ''] ?? null),
-        };
-      },
-      false,
-    );
+    await readSection(this.cliTestStore, this.workspace, request, false);
   }
+
   /**
    * M8: the last Test describes the key, name and tiers it ran with; a write to any of them drops it (and discards an
    * in-flight run for that instance, which started before the change).
@@ -563,7 +570,10 @@ export class ProvidersSettingsStateService {
     providerId: string,
     applyTo: SettingScope,
     context: ProvidersEditContext,
-  ): Promise<{ started: boolean; selectionReread: 'ok' | 'failed' | 'not-run' }> {
+  ): Promise<{
+    started: boolean;
+    selectionReread: 'ok' | 'failed' | 'not-run';
+  }> {
     return this.setup.activateConnection(
       providerId,
       applyTo,
@@ -699,7 +709,8 @@ export class ProvidersSettingsStateService {
           const result = await this.require('settings:get', {
             key: PROVIDERS_ENHANCEMENT_KEYS[field],
           });
-          if (!result.success) throw new Error('Enhancement settings unavailable');
+          if (!result.success)
+            throw new Error('Enhancement settings unavailable');
           return result.value;
         }),
       );
@@ -708,14 +719,14 @@ export class ProvidersSettingsStateService {
         typeof model !== 'string' ||
         typeof timeoutMs !== 'number' ||
         !Number.isFinite(timeoutMs)
-      ) throw new Error('Enhancement settings unavailable');
+      )
+        throw new Error('Enhancement settings unavailable');
       return { provider, model: model === 'inherit' ? '' : model, timeoutMs };
     });
   }
   async refreshCliAgents(): Promise<void> {
-    await this.read(
-      this.cliStore,
-      async () => parseCliAgents((await this.require('ptahCli:list', {})).agents),
+    await this.read(this.cliStore, async () =>
+      parseCliAgents((await this.require('ptahCli:list', {})).agents),
     );
   }
   /** The CLI summary omits pinned models. Project only model fields from persisted non-secret configuration. */
@@ -790,13 +801,22 @@ export class ProvidersSettingsStateService {
    * A failed read drops the previous value: a stale Cursor flag would read as a current "Set".
    * The section shows its error and Retry instead.
    */
-  async refreshOrchestration(missingFields: readonly string[] = []): Promise<void> {
+  async refreshOrchestration(
+    missingFields: readonly string[] = [],
+  ): Promise<void> {
     await readSection(
       this.orchestrationStore,
       this.workspace,
       async (): Promise<ProvidersOrchestration> => {
-        const parsed = parseOrchestration(await this.require('agent:getConfig', undefined));
-        return { ...parsed, missingFields: [...new Set([...parsed.missingFields ?? [], ...missingFields])] };
+        const parsed = parseOrchestration(
+          await this.require('agent:getConfig', undefined),
+        );
+        return {
+          ...parsed,
+          missingFields: [
+            ...new Set([...(parsed.missingFields ?? []), ...missingFields]),
+          ],
+        };
       },
       false,
     );
@@ -889,35 +909,13 @@ export class ProvidersSettingsStateService {
   ): Promise<boolean> {
     if (patch.orchestration?.cliLaneDefaults) {
       const rows = patch.orchestration.cliLaneDefaults;
-      return this.runCommit(Object.entries(rows).map(([cli, choice]) => {
-        let expected: CliLaneDefaults[CliType] | undefined;
-        return {
-        fields: [`agentOrchestration.cliLaneDefaults.${cli}`],
-        write: async () => {
-          const before = (await this.require('agent:getConfig', undefined)).cliLaneDefaults;
-          const previous = Object.entries(before ?? {}).find(([name]) => name === cli)?.[1];
-          expected = choice === null ? undefined : {
-            ...previous,
-            ...(choice.permission === null ? { permission: undefined } :
-              choice.permission === undefined ? {} : { permission: choice.permission }),
-            ...(choice.network === null ? { network: undefined } :
-              choice.network === undefined ? {} : { network: choice.network }),
-          };
-          if (cli === 'codex' && expected?.permission === undefined && expected?.network === undefined)
-            expected = undefined;
-          return (await this.require('agent:setConfig', {
-            cliLaneDefaults: { [cli]: choice },
-          })).success;
-        },
-        readBack: async () => {
-          const saved = (await this.require('agent:getConfig', undefined)).cliLaneDefaults;
-          const row = Object.entries(saved ?? {}).find(([name]) => name === cli)?.[1];
-          return (row === undefined) === (expected === undefined) &&
-            row?.permission === expected?.permission &&
-            row?.network === expected?.network;
-        },
-      };
-      }), context);
+      return this.runCommit(
+        laneDefaultOperations(rows, (method, params) =>
+          this.require(method, params),
+        ),
+
+        context,
+      );
     }
     const operations = this.commits.operations(patch);
     return this.runCommit(operations, context, () => {

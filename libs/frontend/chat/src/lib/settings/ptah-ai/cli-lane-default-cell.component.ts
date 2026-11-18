@@ -1,4 +1,8 @@
 import {
+  LANE_PERMISSION_LABELS,
+  LANE_NETWORK_LABELS,
+} from './lane-option-labels';
+import {
   ChangeDetectionStrategy,
   Component,
   ElementRef,
@@ -12,9 +16,10 @@ import {
   NativePopoverComponent,
   PtahButtonDirective,
   PtahFieldComponent,
+  PtahFieldGridDirective,
   PtahFieldTriggerDirective,
   PtahIconButtonDirective,
-  PtahSelectDirective,
+  PtahRichSelectComponent,
 } from '@ptah-extension/ui';
 import type {
   CliAdapterManifest,
@@ -52,7 +57,8 @@ let nextTitleId = 0;
     PtahFieldTriggerDirective,
     PtahIconButtonDirective,
     PtahFieldComponent,
-    PtahSelectDirective,
+    PtahFieldGridDirective,
+    PtahRichSelectComponent,
   ],
   // Layout comes from the host data-layout attribute, not class bindings (ui-class-audit). Spacing uses --ptah-* tokens.
   host: { '[attr.data-layout]': 'layout()' },
@@ -70,7 +76,7 @@ let nextTitleId = 0;
        instead of setting the column's minimum width. white-space: normal overrides the table control
        cell's nowrap, which otherwise lets the line run into the next columns (TASK_2026_2256, 1440). */
     :host([data-layout='compact']) {
-      width: fit-content;
+      width: 100%;
       white-space: normal;
     }
     :host([data-layout='card']) {
@@ -88,33 +94,12 @@ let nextTitleId = 0;
     dialog.modal:not([open]) {
       display: none;
     }
-    .fields {
-      display: grid;
-      grid-template-columns: minmax(0, 1fr);
-      gap: var(--ptah-gap-controls);
-      min-width: 0;
-    }
-    :host([data-layout='card']) .fields,
-    :host([data-layout='wide']) .fields {
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-    :host([data-layout='wide']) .fields {
-      gap: var(--ptah-gap-field);
-    }
-    :host([data-layout='wide']) ptah-field {
-      max-width: 20rem;
-      min-width: 9rem;
-    }
-    @container (max-width: 479px) {
-      :host([data-layout='wide']) .fields {
-        grid-template-columns: minmax(0, 1fr);
-      }
-    }
   `,
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
+    <ng-content />
     @if (layout() === 'card') {
-      @if (saved()) {
+      @if (saved() && (layout() !== 'compact' || showCaption())) {
         <ptah-native-popover
           class="defaults-reset"
           [isOpen]="resetOpen()"
@@ -155,26 +140,21 @@ let nextTitleId = 0;
       }
       <ptah-field label="Permission" size="sm" class="min-w-0">
         @if (permissions().length) {
-          <select
-            ptahSelect
-            class="w-full min-w-0 max-w-full"
-            [attr.aria-label]="name() + ' permission default'"
-            [title]="effectivePermission() ?? ''"
+          <ptah-select
+            #permissionSelect
+            class="w-full min-w-0"
+            size="sm"
+            [label]="name() + ' permission default'"
+            [title]="permissionLabel()"
+            [options]="permissionOptions()"
+            [value]="effectivePermission() ?? null"
+            placeholder="Select mode"
             [disabled]="disabled() || pending() !== null"
-            (change)="choosePermission($event)"
-          >
-            @if (effectivePermission() === undefined) {
-              <option value="" disabled [selected]="true">Choose</option>
-            }
-            @for (mode of permissions(); track mode) {
-              <option
-                [value]="mode"
-                [selected]="mode === effectivePermission()"
-              >
-                {{ mode }}
-              </option>
-            }
-          </select>
+            (valueChange)="
+              choosePermission($event, permissionSelect.element.nativeElement);
+              restoreSelection(permissionSelect, effectivePermission() ?? null)
+            "
+          />
         } @else {
           <button
             ptahFieldTrigger
@@ -190,24 +170,25 @@ let nextTitleId = 0;
       <ptah-field
         label="Network"
         size="sm"
-        class="min-w-0"
-        [hint]="!networks().length ? reason() : ''"
+        class="min-w-0 [&_.ptah-field__info]:!inline-flex"
+        [info]="!networks().length ? reason() : ''"
       >
         @if (networks().length) {
-          <select
-            ptahSelect
-            class="w-full min-w-0 max-w-full"
-            [attr.aria-label]="name() + ' network default'"
-            [title]="effectiveNetwork() ?? ''"
+          <ptah-select
+            #networkSelect
+            class="w-full min-w-0"
+            size="sm"
+            [label]="name() + ' network default'"
+            [title]="networkLabel()"
+            [options]="networkOptions()"
+            [value]="effectiveNetwork() ?? null"
+            placeholder="Select mode"
             [disabled]="disabled() || pending() !== null"
-            (change)="chooseNetwork($event)"
-          >
-            @for (mode of networks(); track mode) {
-              <option [value]="mode" [selected]="mode === effectiveNetwork()">
-                {{ mode }}
-              </option>
-            }
-          </select>
+            (valueChange)="
+              chooseNetwork($event, networkSelect.element.nativeElement);
+              restoreSelection(networkSelect, effectiveNetwork() ?? null)
+            "
+          />
         } @else {
           <button
             ptahFieldTrigger
@@ -228,7 +209,7 @@ let nextTitleId = 0;
           >⚠ Unsupported combination: {{ warningText }}</span
         >
       }
-    } @else {
+    } @else if (layout() !== 'reset') {
       <div
         class="flex min-w-0 max-w-full flex-col gap-[var(--ptah-gap-controls)] text-xs text-base-content [overflow-wrap:anywhere]"
       >
@@ -246,7 +227,7 @@ let nextTitleId = 0;
             saved() ? 'Saved default' : 'Auto (default) · built-in'
           }}</span>
         }
-        @if (saved()) {
+        @if (saved() && (layout() !== 'compact' || showCaption())) {
           <ptah-native-popover
             [isOpen]="resetOpen()"
             placement="bottom-start"
@@ -280,41 +261,67 @@ let nextTitleId = 0;
             }
           </ptah-native-popover>
         }
-        @if (unsupportedCombination(); as reason) {
-          <span role="status">Unsupported combination: {{ reason }}</span>
+        @if (
+          (layout() !== 'compact' || showCaption()) && unsupportedCombination();
+          as reason
+        ) {
+          <span role="status" [title]="'Unsupported combination: ' + reason"
+            ><span aria-hidden="true">&#9888;</span
+            ><span class="sr-only"
+              >Unsupported combination: {{ reason }}</span
+            ></span
+          >
         }
-        <div class="fields">
+        <div ptahFieldGrid>
           @if (field() !== 'network' && permissions().length) {
             <!-- Visible label from ptah-field; the aria-label keeps the provider name in the accessible name. -->
-            <ptah-field label="Permission" appearance="stacked" class="min-w-0">
-              <select
-                ptahSelect
-                class="w-full min-w-0 max-w-full text-base-content"
-                [attr.aria-label]="name() + ' permission default'"
-                [title]="effectivePermission() ?? ''"
+            @if (layout() === 'compact') {
+              <ptah-select
+                #permissionSelect
+                class="w-full min-w-0"
+                size="sm"
+                [label]="name() + ' permission default'"
+                [title]="permissionLabel()"
+                [options]="permissionOptions()"
+                [value]="effectivePermission() ?? null"
+                placeholder="Select mode"
                 [disabled]="disabled() || pending() !== null"
-                (change)="choosePermission($event)"
-              >
-                <!-- Per-option [selected]: a select [value] bound before its options render falls back to the first option ("plan"). -->
-                @if (
-                  effectivePermission() === undefined &&
-                  permissions().length > 0
-                ) {
-                  <option value="" disabled [selected]="true">
-                    Choose a permission
-                  </option>
-                }
-                @for (mode of permissions(); track mode) {
-                  <option
-                    [value]="mode"
-                    [selected]="mode === effectivePermission()"
-                  >
-                    {{ mode }}
-                  </option>
-                }
-              </select>
-            </ptah-field>
-            @if (cli() === 'cursor') {
+                (valueChange)="
+                  choosePermission(
+                    $event,
+                    permissionSelect.element.nativeElement
+                  );
+                  restoreSelection(
+                    permissionSelect,
+                    effectivePermission() ?? null
+                  )
+                "
+              />
+            } @else {
+              <ptah-field label="Permission" class="min-w-0"
+                ><ptah-select
+                  #permissionSelect
+                  class="w-full min-w-0"
+                  size="sm"
+                  [label]="name() + ' permission default'"
+                  [title]="permissionLabel()"
+                  [options]="permissionOptions()"
+                  [value]="effectivePermission() ?? null"
+                  placeholder="Select mode"
+                  [disabled]="disabled() || pending() !== null"
+                  (valueChange)="
+                    choosePermission(
+                      $event,
+                      permissionSelect.element.nativeElement
+                    );
+                    restoreSelection(
+                      permissionSelect,
+                      effectivePermission() ?? null
+                    )
+                  "
+              /></ptah-field>
+            }
+            @if (cli() === 'cursor' && layout() !== 'compact') {
               @for (mode of unavailablePermissions(); track mode.mode) {
                 <span class="text-base-content" tabindex="0"
                   >{{ mode.mode }} unavailable: {{ mode.reason }}</span
@@ -322,33 +329,54 @@ let nextTitleId = 0;
               }
             }
           } @else if (field() !== 'network') {
-            <span tabindex="0" [title]="reason()"
-              >Permission: Unavailable — {{ reason() }}</span
+            <span
+              class="text-xs text-base-content-muted"
+              tabindex="0"
+              [title]="reason()"
+              >Unavailable<span class="sr-only">{{ reason() }}</span></span
             >
           }
           @if (field() !== 'permission' && networks().length) {
-            <ptah-field label="Network" appearance="stacked" class="min-w-0">
-              <select
-                ptahSelect
-                class="w-full min-w-0 max-w-full text-base-content"
-                [attr.aria-label]="name() + ' network default'"
-                [title]="effectiveNetwork() ?? ''"
+            @if (layout() === 'compact') {
+              <ptah-select
+                #networkSelect
+                class="w-full min-w-0"
+                size="sm"
+                [label]="name() + ' network default'"
+                [title]="networkLabel()"
+                [options]="networkOptions()"
+                [value]="effectiveNetwork() ?? null"
+                placeholder="Select mode"
                 [disabled]="disabled() || pending() !== null"
-                (change)="chooseNetwork($event)"
-              >
-                @for (mode of networks(); track mode) {
-                  <option
-                    [value]="mode"
-                    [selected]="mode === effectiveNetwork()"
-                  >
-                    {{ mode }}
-                  </option>
-                }
-              </select>
-            </ptah-field>
+                (valueChange)="
+                  chooseNetwork($event, networkSelect.element.nativeElement);
+                  restoreSelection(networkSelect, effectiveNetwork() ?? null)
+                "
+              />
+            } @else {
+              <ptah-field label="Network" class="min-w-0"
+                ><ptah-select
+                  #networkSelect
+                  class="w-full min-w-0"
+                  size="sm"
+                  [label]="name() + ' network default'"
+                  [title]="networkLabel()"
+                  [options]="networkOptions()"
+                  [value]="effectiveNetwork() ?? null"
+                  placeholder="Select mode"
+                  [disabled]="disabled() || pending() !== null"
+                  (valueChange)="
+                    chooseNetwork($event, networkSelect.element.nativeElement);
+                    restoreSelection(networkSelect, effectiveNetwork() ?? null)
+                  "
+              /></ptah-field>
+            }
           } @else if (field() !== 'permission') {
-            <span tabindex="0" [title]="reason()"
-              >Network: Unavailable — {{ reason() }}</span
+            <span
+              class="text-xs text-base-content-muted"
+              tabindex="0"
+              [title]="reason()"
+              >Unavailable<span class="sr-only">{{ reason() }}</span></span
             >
           }
         </div>
@@ -397,7 +425,7 @@ export class CliLaneDefaultCellComponent {
   readonly saved = input<Choice>();
   readonly disabled = input(false);
   /** `compact`: one column at its content width. `wide`: settings row. `card`: full card width, Permission and Network side by side. */
-  readonly layout = input<'compact' | 'wide' | 'card'>('compact');
+  readonly layout = input<'compact' | 'wide' | 'card' | 'reset'>('compact');
   readonly field = input<'both' | 'permission' | 'network'>('both');
   readonly showCaption = input(true);
   readonly selected = output<Choice>();
@@ -411,7 +439,7 @@ export class CliLaneDefaultCellComponent {
   protected readonly resetOpen = signal(false);
   private readonly dialog =
     viewChild<ElementRef<HTMLDialogElement>>('confirmation');
-  private returnFocus: HTMLSelectElement | HTMLButtonElement | null = null;
+  private returnFocus: HTMLElement | null = null;
   readonly defaultPair = computed(() =>
     this.manifest() ? resolveCliLaneDefaultPair(this.manifest()!, {}) : {},
   );
@@ -491,48 +519,84 @@ export class CliLaneDefaultCellComponent {
         ? this.reason()
         : null,
   );
-  protected choosePermission(event: Event): void {
-    if (!(event.target instanceof HTMLSelectElement)) return;
-    this.returnFocus = event.target;
-    const parsed = CLI_LANE_DEFAULT_SCHEMA.shape.permission.safeParse(
-      event.target.value,
-    );
-    event.target.value = this.effectivePermission() ?? '';
+  readonly permissionLabel = computed(() => {
+    const value = this.effectivePermission();
+    return value ? LANE_PERMISSION_LABELS[value] : 'Select mode';
+  });
+  readonly networkLabel = computed(() => {
+    const value = this.effectiveNetwork();
+    return value ? LANE_NETWORK_LABELS[value] : 'Select mode';
+  });
+  readonly permissionOptions = computed(() =>
+    this.permissions().map((value) => ({
+      value,
+      label: LANE_PERMISSION_LABELS[value],
+    })),
+  );
+  readonly networkOptions = computed(() =>
+    this.networks().map((value) => ({
+      value,
+      label: LANE_NETWORK_LABELS[value],
+    })),
+  );
+  private restoring = false;
+  protected restoreSelection<T>(
+    select: PtahRichSelectComponent<T>,
+    value: T | null,
+  ): void {
+    this.restoring = true;
+    try {
+      select.value.set(value);
+    } finally {
+      this.restoring = false;
+    }
+  }
+  protected choosePermission(value: unknown, trigger?: HTMLElement): void {
+    if (this.restoring) return;
+    this.returnFocus =
+      trigger ??
+      (document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null);
+    const parsed = CLI_LANE_DEFAULT_SCHEMA.shape.permission.safeParse(value);
     if (
       !parsed.success ||
       !parsed.data ||
       !this.permissions().includes(parsed.data)
     )
       return;
-    const value = parsed.data;
+    const permission = parsed.data;
     const network = NETWORKS.find(
       (mode) =>
         this.manifest()?.networkModes[mode].state === 'supported' &&
-        this.manifest()?.permissionModes[value]?.networkModes.includes(mode),
+        this.manifest()?.permissionModes[permission]?.networkModes.includes(
+          mode,
+        ),
     );
     const currentNetwork = this.effectiveNetwork();
     this.propose({
-      permission: value,
+      permission,
       ...(network
         ? {
             network:
               currentNetwork &&
-              this.manifest()?.permissionModes[value]?.networkModes.includes(
-                currentNetwork,
-              )
+              this.manifest()?.permissionModes[
+                permission
+              ]?.networkModes.includes(currentNetwork)
                 ? currentNetwork
                 : network,
           }
         : {}),
     });
   }
-  protected chooseNetwork(event: Event): void {
-    if (!(event.target instanceof HTMLSelectElement)) return;
-    this.returnFocus = event.target;
-    const parsed = CLI_LANE_DEFAULT_SCHEMA.shape.network.safeParse(
-      event.target.value,
-    );
-    event.target.value = this.effectiveNetwork() ?? '';
+  protected chooseNetwork(value: unknown, trigger?: HTMLElement): void {
+    if (this.restoring) return;
+    this.returnFocus =
+      trigger ??
+      (document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null);
+    const parsed = CLI_LANE_DEFAULT_SCHEMA.shape.network.safeParse(value);
     if (parsed.success && parsed.data && this.networks().includes(parsed.data))
       this.propose({
         permission: this.effectivePermission(),
@@ -544,7 +608,13 @@ export class CliLaneDefaultCellComponent {
       this.openConfirmation({ kind: 'choice', value: choice });
     else this.selected.emit(choice);
   }
-  protected requestReset(): void {
+  /** Shared entry point for projected detail reset controls. */
+  requestReset(): void {
+    if (this.disabled()) return;
+    this.returnFocus =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
     this.resetOpen.set(false);
     if (this.defaultPermission() === 'yolo')
       this.openConfirmation({ kind: 'reset' });
