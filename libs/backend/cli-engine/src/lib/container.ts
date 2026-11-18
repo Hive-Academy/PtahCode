@@ -163,7 +163,6 @@ import {
   CapabilityRpcHandlers,
   activateSessionLifecycleNotifier,
   registerChatServices,
-  registerHarnessServices,
   registerRpcSurface,
   registerSharedRpcHandlers,
   type HostProfile,
@@ -184,6 +183,7 @@ import { CliWebviewManagerAdapter } from './transport/cli-webview-manager-adapte
 import { CliFireAndForgetHandler } from './transport/cli-fire-and-forget-handler';
 import { createCliRpcHostProfile } from './rpc/cli-host-profile';
 import { registerThothLibraries } from './thoth/register-thoth-libraries';
+import { registerBotsComposition } from './register-bots-composition';
 
 /**
  * Options for bootstrapping the CLI DI container.
@@ -938,6 +938,7 @@ export class CliDIContainer {
     );
 
     registerThothLibraries(container, logger);
+    registerBotsComposition(container, logger, bootstrapMode === 'full');
     startCliLaneOutcomes(container, logger);
     // TASK_2026_2254_b94b: transcript scans caused a main-process hang.
     // A later transcript import must run off the main thread.
@@ -1118,7 +1119,6 @@ export class CliDIContainer {
       }
       try {
         registerChatServices(container);
-        registerHarnessServices(container);
         container.registerSingleton(AgentRpcHandlers);
         if (options.filePicker) {
           container.register(PLATFORM_TOKENS.FILE_DIALOG, {
