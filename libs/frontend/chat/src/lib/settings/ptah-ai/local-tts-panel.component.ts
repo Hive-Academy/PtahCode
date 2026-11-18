@@ -155,13 +155,13 @@ interface VoiceGroup {
 
         <!-- V15: custom id or folder (only for non-curated sources) -->
         @if (source() !== 'curated') {
-          <div class="flex flex-col gap-ptah-field">
+          <div class="col-span-full flex flex-col gap-ptah-field">
             <div class="min-w-0">
-              <div class="flex items-center gap-1">
+              <div class="flex items-start gap-[var(--ptah-gap-field)]">
                 <ptah-field
-                  class="flex-1"
+                  class="min-w-0 flex-1"
                   label="Custom model id or folder"
-                  hint="Enter an owner/name repository or an absolute folder path."
+                  hint="Use owner/name or an absolute folder path."
                   ><input
                     id="local-tts-custom"
                     type="text"
@@ -181,18 +181,21 @@ interface VoiceGroup {
                     (input)="onCustomModelInput($event)"
                     data-testid="local-tts-custom-input"
                 /></ptah-field>
-                <button
-                  type="button"
-                  ptahButton
-                  variant="primary"
-                  size="xs"
-                  [busy]="saving()"
-                  [disabled]="!customModelValid()"
-                  (click)="saveCustomSource()"
-                  data-testid="local-tts-custom-save"
-                >
-                  Save
-                </button>
+                <!-- Save centred on the field box (not the box plus hint). -->
+                <div class="flex h-[var(--ptah-field-h-md)] shrink-0 items-center">
+                  <button
+                    type="button"
+                    ptahButton
+                    variant="primary"
+                    size="xs"
+                    [busy]="saving()"
+                    [disabled]="!customModelValid()"
+                    (click)="saveCustomSource()"
+                    data-testid="local-tts-custom-save"
+                  >
+                    Save
+                  </button>
+                </div>
               </div>
               @if (customModel().length > 0 && !customModelValid()) {
                 <p
@@ -215,8 +218,8 @@ interface VoiceGroup {
           </div>
         }
 
-        <!-- V17: Kokoro voice -->
-        <div class="flex flex-col gap-ptah-field">
+        <!-- V17: Kokoro voice (full row beside a custom source, so its hint stays on one line) -->
+        <div class="flex flex-col gap-ptah-field" [class.col-span-full]="source() !== 'curated'">
           <div class="min-w-0">
             @if (isLoadingVoices()) {
               <div

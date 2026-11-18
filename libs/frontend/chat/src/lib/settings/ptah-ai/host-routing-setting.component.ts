@@ -82,7 +82,7 @@ type SetAnswer = 'acknowledged' | 'refused' | 'unknown';
         <span id="host-routing-heading" hidden>{{ label }}</span>
         <ptah-setting-row
           label="Suggest a lane for each task"
-          hint="Suggestions appear before a lane starts. You can always choose another lane."
+          hint="Suggestions appear before a lane starts."
           controlId="host-routing-toggle"
         >
           @if (load() === 'ready') {

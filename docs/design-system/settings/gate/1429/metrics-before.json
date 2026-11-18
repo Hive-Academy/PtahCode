@@ -1,0 +1,20 @@
+{
+  "phase": "before",
+  "autoHandoffHintLines1168": 2,
+  "tokenBudgetInfo": false,
+  "routingHintLines1168": 2,
+  "stacking": {
+    "page-stt-1824": "on-top",
+    "page-tts-1824": "covered-by:section:form-section",
+    "page-stt-1168": "on-top",
+    "page-tts-1168": "covered-by:section:form-section",
+    "page-stt-784": "on-top",
+    "page-tts-784": "covered-by:section:form-section",
+    "drawer-stt-1824": "on-top",
+    "drawer-tts-1824": "on-top",
+    "drawer-stt-1168": "on-top",
+    "drawer-tts-1168": "on-top",
+    "drawer-stt-784": "on-top",
+    "drawer-tts-784": "on-top"
+  }
+}

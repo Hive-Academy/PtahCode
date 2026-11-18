@@ -278,6 +278,74 @@ describe('SessionBudgetSettingsComponent', () => {
     ).toBeNull();
   });
 
+  it('keeps the full help in popovers and a range-only hint below each number field', async () => {
+    await create();
+    const fields = [
+      {
+        key: 'tokens',
+        label: 'Token budget',
+        help: 'Chat token limit.',
+      },
+      {
+        key: 'usd',
+        label: 'Cost budget (USD)',
+        help: 'Session cost limit.',
+      },
+      {
+        key: 'fallbackWeightedTokens',
+        label: 'Fallback weighted tokens',
+        help: 'Used when model pricing is unavailable.',
+      },
+      {
+        key: 'tightenPercent',
+        label: 'Tighten at (%)',
+        help: 'Starts tightening; stays below Handoff.',
+      },
+      {
+        key: 'handoffPercent',
+        label: 'Handoff at (%)',
+        help: 'Offers to wrap up and hand off to a new session.',
+      },
+      {
+        key: 'handoffAfterCompactions',
+        label: 'Handoff after compactions',
+        help: 'Handoff after repeated compactions leave context at least half full.',
+      },
+      {
+        key: 'tightenWindowTokens',
+        label: 'Compact window (tokens)',
+        help: 'Advisory only until set; then lowers the compact window.',
+      },
+    ] as const;
+    for (const setting of fields) {
+      const row = field(setting.key).closest('ptah-field');
+      // Token and cost help only repeats the label; every other field keeps its full help in the popover.
+      const longHelp = setting.key !== 'tokens' && setting.key !== 'usd';
+      expect(row?.querySelector(`button[aria-label="More about ${setting.label}"]`) !== null).toBe(longHelp);
+      if (longHelp) {
+        const info = row?.querySelector<HTMLElement>('.sr-only[id^="ptah-field-info-"]');
+        expect(info?.textContent).toBe(setting.help);
+        expect(field(setting.key).getAttribute('aria-describedby')?.split(' ')).toContain(info?.id);
+        row?.querySelector<HTMLButtonElement>(`button[aria-label="More about ${setting.label}"]`)?.click();
+        fixture.detectChanges();
+        expect(row?.querySelector('.ptah-field__info-panel')?.textContent?.trim()).toBe(setting.help);
+      }
+      expect(row?.querySelector('.ptah-field__message')?.textContent?.trim()).toBe(`Range: ${SESSION_BUDGET_SETTINGS[setting.key].min.toLocaleString('en-US')} to ${SESSION_BUDGET_SETTINGS[setting.key].max.toLocaleString('en-US')}.`);
+      const suffix = row?.querySelector('[ptahFieldTrailing]');
+      expect(suffix?.classList.contains('shrink-0')).toBe(true);
+      expect(suffix?.getAttribute('aria-hidden')).toBe('true');
+    }
+    for (const key of ['unit', 'token-measure']) {
+      const row = byTestId(`session-budget-${key}`)?.closest('ptah-field');
+      expect(row?.querySelector('.ptah-field__info')).toBeNull();
+      expect(row?.querySelector('.ptah-field__message')?.textContent?.trim()).toBe(
+        key === 'unit' ? 'Tokens or priced cost.' : 'Weighted discounts cache reads.',
+      );
+      const help = row?.querySelector<HTMLElement>(`#session-budget-${key}-help`);
+      expect(help).not.toBeNull();
+    }
+  });
+
   describe('load', () => {
     it('reads all sessionBudget keys and shows the saved values (TOKENS, 50M default)', async () => {
       await create();
@@ -298,8 +366,10 @@ describe('SessionBudgetSettingsComponent', () => {
       expect(read).toHaveLength(Object.keys(SESSION_BUDGET_SETTINGS).length);
       expect(field('tokens').value).toBe('50000000');
       expect(field('tokens').className).toContain('input-sm');
-      expect(field('tokens').className).toContain('flex-1');
-      expect(field('tokens').className).toContain('join-item');
+      expect(field('tokens').hasAttribute('size')).toBe(false);
+      expect(field('tokens').className).not.toContain('flex-1');
+      expect(field('tokens').className).not.toContain('join-item');
+      expect(field('tokens').classList.contains('tabular-nums')).toBe(true);
       expect(host().textContent).toContain('Range: 1,000,000 to 2,000,000,000');
       expect(field('tightenPercent').value).toBe('50');
       expect(field('handoffPercent').value).toBe('80');
@@ -533,7 +603,7 @@ describe('SessionBudgetSettingsComponent', () => {
   });
 
   describe('tightenWindowTokens', () => {
-    it('explains "advisory only until set", and an empty field writes null', async () => {
+    it('explains the unset advisory state, and an empty field writes null', async () => {
       stored['sessionBudget.tightenWindowTokens'] = 400_000;
       await create();
       expect(
@@ -542,9 +612,9 @@ describe('SessionBudgetSettingsComponent', () => {
             field('tightenWindowTokens')
               .getAttribute('aria-describedby')
               ?.split(' ')
-              .find((id) => id.startsWith('ptah-field-description-')),
+              .find((id) => id.startsWith('ptah-field-info-')),
         )?.textContent,
-      ).toMatch(/advisory only until set/i);
+      ).toBe('Advisory only until set; then lowers the compact window.');
       await enter('tightenWindowTokens', '');
       expect(writes()).toEqual([
         { key: 'sessionBudget.tightenWindowTokens', value: null },
@@ -709,8 +779,8 @@ describe('SessionBudgetSettingsComponent', () => {
     await create();
     const description = (id: string) => (host().querySelector(`#${id}`)?.getAttribute('aria-describedby') ?? '')
       .split(' ').map((value) => host().querySelector(`[id="${value}"]`)?.textContent).join(' ');
-    expect(description('session-budget-unit')).toContain('Tokens use chat usage; Cost uses priced models.');
-    expect(description('session-budget-token-measure')).toContain('Weighted discounts cache reads; raw counts all tokens.');
+    expect(description('session-budget-unit')).toContain('Tokens or priced cost.');
+    expect(description('session-budget-token-measure')).toContain('Weighted discounts cache reads.');
   });
 
 });
