@@ -4,6 +4,7 @@ import { createSubagentBudgetHooks } from './subagent-budget-hooks';
 describe('subagent budget hooks', () => {
   const monitor = {
     checkNotesTool: jest.fn().mockResolvedValue(undefined),
+    recordNotesToolResult: jest.fn().mockResolvedValue(undefined),
     hasNotesGate: jest.fn().mockReturnValue(false),
     finishWarnedAgent: jest.fn().mockResolvedValue(undefined),
     takeNormalHandoff: jest.fn(),
@@ -148,4 +149,33 @@ describe('subagent budget hooks', () => {
     expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('missing session id'),
       expect.objectContaining({ hasSessionId: false, eventName: 'PreToolUse', agentId: 'agent-7', toolName: 'Write' }));
   });
+});
+
+
+describe('successful notes tool result hook', () => {
+  const logger = { info: jest.fn(), debug: jest.fn(), warn: jest.fn(), error: jest.fn() };
+  it('reports only successful PostToolUse and rejects embedded errors', async () => {
+    const monitor = { checkNotesTool: jest.fn(), hasNotesGate: jest.fn(), finishWarnedAgent: jest.fn(),
+      takeNormalHandoff: jest.fn(), takeInterruptedHandoff: jest.fn(), recordNotesToolResult: jest.fn() };
+    const hooks = createSubagentBudgetHooks(logger, monitor, 'parent');
+    for (const [event, response] of [['PostToolUseFailure', {}], ['PreToolUse', {}], ['PostToolUse', { is_error: true }], ['PostToolUse', {}]] as const) {
+      const callback = hooks[event]?.[0]?.hooks[0];
+      if (!callback) throw new Error('Missing hook');
+      await callback({ hook_event_name: event, session_id: 'parent', agent_id: 'agent', tool_name: 'Write',
+        tool_input: { file_path: '/ws/notes.md' }, tool_response: response } as HookInput, 'write-id', { signal: new AbortController().signal });
+    }
+    expect(monitor.recordNotesToolResult).toHaveBeenCalledTimes(1);
+    expect(monitor.recordNotesToolResult).toHaveBeenCalledWith('parent', 'agent', 'Write', { file_path: '/ws/notes.md' });
+  });
+});
+
+
+it('warns once per hook installation when the notes result recorder is missing', () => {
+  const logger = { info: jest.fn(), debug: jest.fn(), warn: jest.fn(), error: jest.fn() };
+  createSubagentBudgetHooks(logger, {
+    checkNotesTool: jest.fn(), hasNotesGate: jest.fn(), finishWarnedAgent: jest.fn(),
+    takeNormalHandoff: jest.fn(), takeInterruptedHandoff: jest.fn(),
+  });
+  expect(logger.warn).toHaveBeenCalledTimes(1);
+  expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Notes result recorder missing'));
 });

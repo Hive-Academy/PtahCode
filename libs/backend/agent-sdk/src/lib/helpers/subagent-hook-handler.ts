@@ -76,7 +76,7 @@ export class SubagentHookHandler {
     @inject(SDK_TOKENS.SDK_SESSION_STATS_OWNER)
     private readonly statsOwner: SessionStatsOwnerService,
     @inject(SDK_TOKENS.SDK_SUBAGENT_BUDGET_MONITOR, { isOptional: true })
-    private readonly budgetMonitor?: Pick<SubagentBudgetMonitor, 'recordTranscriptPath'> & Partial<Pick<SubagentBudgetMonitor, 'checkNotesTool' | 'hasNotesGate' | 'finishWarnedAgent' | 'takeNormalHandoff' | 'takeInterruptedHandoff'>>,
+    private readonly budgetMonitor?: Pick<SubagentBudgetMonitor, 'recordTranscriptPath'> & Partial<Pick<SubagentBudgetMonitor, 'checkNotesTool' | 'hasNotesGate' | 'finishWarnedAgent' | 'takeNormalHandoff' | 'takeInterruptedHandoff' | 'recordNotesToolResult'>>,
   ) {}
 
   /**
@@ -222,6 +222,7 @@ export class SubagentHookHandler {
     if (monitor?.checkNotesTool && monitor.hasNotesGate && monitor.finishWarnedAgent && monitor.takeNormalHandoff && monitor.takeInterruptedHandoff) {
       const budgetHooks = createSubagentBudgetHooks(this.logger, {
         checkNotesTool: monitor.checkNotesTool.bind(monitor),
+        recordNotesToolResult: monitor.recordNotesToolResult?.bind(monitor),
         hasNotesGate: monitor.hasNotesGate.bind(monitor),
         finishWarnedAgent: monitor.finishWarnedAgent.bind(monitor),
         takeNormalHandoff: monitor.takeNormalHandoff.bind(monitor),

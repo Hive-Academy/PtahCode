@@ -1711,6 +1711,10 @@ describe('SessionQueryExecutor — subagent budget monitor wiring (TASK_2026_597
       await flush();
       feed(run, bigSubagentRequest());
       await flush();
+      expect(port.stopSubagent).not.toHaveBeenCalled();
+      // A context-only crossing gets notes time; missing telemetry is independent safety.
+      feed(run, msg({ type: 'assistant', session_id: REAL, parent_tool_use_id: 'toolu_big', message: { id: 'msg_safety' } }));
+      await flush();
       expect(port.stopSubagent).toHaveBeenCalledWith(REAL, 'task-1');
       expect(port.pushParentMessage).toHaveBeenCalledTimes(1);
       expect(port.pushParentMessage).toHaveBeenCalledWith(
@@ -1735,6 +1739,10 @@ describe('SessionQueryExecutor — subagent budget monitor wiring (TASK_2026_597
       );
       feed(run, bigSubagentRequest());
       await flush();
+      expect(port.stopSubagent).not.toHaveBeenCalled();
+      // A context-only crossing gets notes time; missing telemetry is independent safety.
+      feed(run, msg({ type: 'assistant', session_id: REAL, parent_tool_use_id: 'toolu_big', message: { id: 'msg_safety' } }));
+      await flush();
       expect(stopSubagent).toHaveBeenCalledWith(REAL, 'task-1');
       expect(port.pushParentMessage).toHaveBeenCalledWith(
         REAL,
@@ -1758,7 +1766,7 @@ describe('SessionQueryExecutor — subagent budget monitor wiring (TASK_2026_597
     const sub = subAssistant();
     feed(run, sub);
     expect(observe).toHaveBeenCalledTimes(1);
-    expect(observe).toHaveBeenCalledWith(REAL, sub);
+    expect(observe).toHaveBeenCalledWith(REAL, sub, { kind: 'native', providerId: 'anthropic' });
     run.abortController.abort();
   });
 
@@ -1886,7 +1894,7 @@ describe('SessionQueryExecutor — subagent budget monitor wiring (TASK_2026_597
     });
     feed(run, spawning);
     expect(observe).toHaveBeenCalledTimes(1);
-    expect(observe).toHaveBeenCalledWith(REAL, spawning);
+    expect(observe).toHaveBeenCalledWith(REAL, spawning, { kind: 'native', providerId: 'anthropic' });
     run.abortController.abort();
   });
 
