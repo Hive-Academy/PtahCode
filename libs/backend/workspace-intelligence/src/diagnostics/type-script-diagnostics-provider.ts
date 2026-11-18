@@ -36,6 +36,7 @@
  */
 
 import * as path from 'path';
+import type { Logger } from '@ptah-extension/vscode-core';
 import { FileType, isPathWithinRoots } from '@ptah-extension/platform-core';
 import type {
   IDiagnosticsProvider,
@@ -181,6 +182,7 @@ export class TypeScriptDiagnosticsProvider implements IDiagnosticsProvider {
     private readonly fs: IFileSystemProvider,
     maxConfigs: number = DEFAULT_MAX_CONFIGS,
     private readonly platform: NodeJS.Platform = process.platform,
+    private readonly logger?: Pick<Logger, 'info' | 'warn'>,
   ) {
     this.maxConfigs = maxConfigs;
   }
@@ -406,6 +408,8 @@ export class TypeScriptDiagnosticsProvider implements IDiagnosticsProvider {
       );
     }
 
+    const lane = scoped ? 'scoped' : 'unscoped';
+    const started = performance.now();
     let outcome: TsDiagnosticsRunOutcome;
     try {
       outcome = await tsDiagnosticsWorker.run({
@@ -416,14 +420,32 @@ export class TypeScriptDiagnosticsProvider implements IDiagnosticsProvider {
         // A scoped check must never wait behind a whole-workspace compile on
         // the same compiler — including one `withBudget` already answered for
         // and deliberately left running.
-        lane: scoped ? 'scoped' : 'unscoped',
+        lane,
       });
     } catch (error: unknown) {
       // The worker died, timed out, or the compiler threw. Nothing was
       // checked, so the one answer that must not be given is a clean one.
       const msg = error instanceof Error ? error.message : String(error);
+      if (
+        error instanceof Error &&
+        'code' in error &&
+        error.code === 'ERR_WORKER_OUT_OF_MEMORY'
+      ) {
+        this.logger?.warn(
+          'TypeScript diagnostics worker exceeded its memory cap',
+          { lane, reason: msg },
+        );
+      }
       return unavailable(`TypeScript type-check did not complete: ${msg}`);
     }
+
+    this.logger?.info('TypeScript diagnostics worker run completed', {
+      lane,
+      heapUsedMb: outcome.heapUsedMb,
+      heapTotalMb: outcome.heapTotalMb,
+      durationMs: Math.round(performance.now() - started),
+      programCount: outcome.programCount,
+    });
 
     // "At least one program was created" is a condition distinct from "no
     // errors occurred". If no program was ever built, nothing was type-checked

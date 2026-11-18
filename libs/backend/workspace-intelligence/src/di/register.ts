@@ -116,7 +116,12 @@ export function registerTypeScriptDiagnosticsProvider(
       : createGoVetChecker(container, logger, options.getProcessSpawner);
   container.register(PLATFORM_TOKENS.DIAGNOSTICS_PROVIDER, {
     useValue: new LanguageAwareDiagnosticsProvider(
-      new TypeScriptDiagnosticsProvider(fileSystem),
+      new TypeScriptDiagnosticsProvider(
+        fileSystem,
+        undefined,
+        undefined,
+        logger,
+      ),
       fileSystem,
       container.resolve<TreeSitterParserService>(
         TOKENS.TREE_SITTER_PARSER_SERVICE,
