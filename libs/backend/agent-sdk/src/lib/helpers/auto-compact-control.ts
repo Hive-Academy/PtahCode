@@ -60,11 +60,11 @@ export type AutoCompactModelClass = 'claude' | 'proxied';
 export type AutoCompactWindowSource = 'setting' | 'env' | 'default' | 'runtime';
 
 /**
- * First-party Claude defaults to 200,000; proxied models defer to the runtime.
+ * Both model classes defer to the runtime unless the user configures a window.
  */
 export const A1_DEFAULT_WINDOW: Readonly<
   Record<AutoCompactModelClass, number | null>
-> = Object.freeze({ claude: 200_000, proxied: null });
+> = Object.freeze({ claude: null, proxied: null });
 
 /**
  * The flag-tier keys Ptah may contribute. A key is PRESENT only when Ptah has
