@@ -99,6 +99,46 @@ describe('resolveChildSettings', () => {
     ).toEqual(['sonnet-new', 'sonnet-old']);
   });
 
+  it('records ranking for a fallback candidate after the decision model choice is refused', async () => {
+    const h = harness();
+    h.router.route.mockResolvedValueOnce({
+      model: 'sonnet-new',
+      effort: 'high',
+      modelSource: 'model',
+      effortSource: 'model',
+      reason,
+      candidates: ['sonnet-new', 'sonnet-old'],
+    });
+    h.host.resolveChildModel.mockResolvedValueOnce({
+      accepted: false,
+      code: 'invalid-model',
+      message: 'refused',
+    });
+    await expect(h.resolve()).resolves.toMatchObject({
+      ok: true,
+      model: 'sonnet-old',
+      modelSource: 'ranking',
+      effortSource: 'model',
+    });
+  });
+
+  it('keeps the decision model source when its first choice is admitted', async () => {
+    const h = harness();
+    h.router.route.mockResolvedValueOnce({
+      model: 'sonnet-new',
+      effort: 'high',
+      modelSource: 'model',
+      effortSource: 'model',
+      reason,
+      candidates: ['sonnet-new', 'sonnet-old'],
+    });
+    await expect(h.resolve()).resolves.toMatchObject({
+      ok: true,
+      model: 'sonnet-new',
+      modelSource: 'model',
+    });
+  });
+
   it('keeps an explicit model pin while routing the missing effort', async () => {
     const h = harness();
     h.host.resolveChildModel.mockResolvedValueOnce({

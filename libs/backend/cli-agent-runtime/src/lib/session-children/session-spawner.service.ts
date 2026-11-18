@@ -2610,6 +2610,8 @@ export class SessionSpawnerService implements ISessionSpawner {
       label: label?.trim() || child.label,
       ...(child.model ? { model: child.model } : {}),
       ...(child.effort ? { effort: child.effort } : {}),
+      ...childSettingSources(child),
+      ...(child.settingReason ? { settingReason: child.settingReason } : {}),
       ...(child.taskId ? { taskId: child.taskId } : {}),
       branch: child.branch,
       baseRef: child.baseRef,

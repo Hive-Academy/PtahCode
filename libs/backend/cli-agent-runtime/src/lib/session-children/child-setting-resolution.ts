@@ -95,7 +95,9 @@ export async function resolveChildSettings(
           });
           if (admission.accepted) {
             model = admission.resolvedModel;
-            modelSource = routed.modelSource;
+            // A fallback candidate comes from the ranking, not from the decision model.
+            modelSource =
+              candidate === routed.model ? routed.modelSource : 'ranking';
             break;
           }
           logger?.warn('[SessionSpawner] Routed model was not admitted', {
