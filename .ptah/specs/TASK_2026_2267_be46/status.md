@@ -65,3 +65,4 @@ Against rev2-context-dark-784.jpg (Context Management):
 - Merge 3ac87e18c (origin/main c8dbeda7e, #1417): advanced-settings-group.component.ts resolved on the #1417 version; 'section' mode rebuilt on ptah-form-section wide with the context-budgets aside note; the field spec now expects floating fields in both modes (#1417 default).
 - Merge 0ab7868bd (origin/main d699e2830, #1409): clean.
 - Pushed on user request while the full gate ran: lint+typecheck chat,core PASS; focused jest (group + lane rotation specs, 49 tests) PASS. Test phase, typecheck-templates, ui-class-audit and shot refresh run after the push.
+- Final checks on the merged head: gate -p chat,core PASS; typecheck-templates PASS; ui-class-audit 0 over baseline (total 638 -> 629); shots refreshed. Select panel on top, no z-index fix. context-dark-1824-after-part3 shows 150000 (local main bundle predates #1409); coordinator chose option B (note in PR body, no build).
