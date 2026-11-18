@@ -73,6 +73,7 @@ describe('ptah-field notch label', () => {
     for (const [, prelude] of floated) expect(prelude).not.toContain('[placeholder');
     const placeholder = `${FLOATING} :is(.ptah-field__body, #ptah-field) :is(input, textarea, #ptah-control)::placeholder`;
     expect(exact(placeholder)).toContain('color: transparent;');
+    expect(exact(placeholder)).toContain('-webkit-text-fill-color: transparent;');
     expect(
       exact(
         `${FLOATING} .ptah-field__box:focus-within :is(.ptah-field__body, #ptah-field) :is(input, textarea, #ptah-control)::placeholder`,

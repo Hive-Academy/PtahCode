@@ -190,14 +190,18 @@
 /* True floating label: at rest the label takes the place of the placeholder,
    so the placeholder is transparent. Focus floats the label and shows the
    placeholder. The id in :is() beats the placeholder color of
-   ptah-form-controls.css without !important. */
+   ptah-form-controls.css without !important. The glass theme sets the
+   placeholder color with !important, so the rest state also clears the text
+   fill (Chromium paints placeholder text with -webkit-text-fill-color). */
 .ptah-field[data-appearance='floating'] :is(.ptah-field__body, #ptah-field) :is(input, textarea, #ptah-control)::placeholder {
   color: transparent;
+  -webkit-text-fill-color: transparent;
   transition: color var(--ptah-duration-base) var(--ptah-ease-standard);
 }
 
 .ptah-field[data-appearance='floating'] .ptah-field__box:focus-within :is(.ptah-field__body, #ptah-field) :is(input, textarea, #ptah-control)::placeholder {
   color: var(--ptah-field-placeholder);
+  -webkit-text-fill-color: currentColor;
 }
 
 /* A native select whose chosen option has an empty value (a "Select..."
