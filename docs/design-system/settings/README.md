@@ -23,6 +23,9 @@ the apply plan and the screens.
 - Exception that stays: in a `ptah-setting-row` and in a compact table cell, the control shows
   no floating label, because the row title or the column header is the label. The dropdown of
   that control still uses the designed menu.
+- Decision model and lane routing settings (Routing suggestions, Rotate close executors) live on
+  the Decision matrix page, not on Context Management (user decision of 2026-11-18). Context
+  Management keeps only context topics. The "See decision matrix" link is removed.
 - The "Field appearance (F3)" rule of `settings-apply-plan.md` (`appearance="stacked"` for
   fields that always have a value) is replaced by the floating label rule above.
 

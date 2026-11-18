@@ -1,3 +1,4 @@
+import { AdvancedOverviewStore } from '../advanced/advanced-overview.store';
 import { signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import {
@@ -111,6 +112,7 @@ describe('ClaudeBuiltinsConfigComponent', () => {
     TestBed.configureTestingModule({
       imports: [ClaudeBuiltinsConfigComponent],
       providers: [
+        AdvancedOverviewStore,
         { provide: ClaudeRpcService, useValue: { call } },
         { provide: ProvidersSettingsStateService, useValue: { commit: signal({ status: 'idle' }) } },
         { provide: VSCodeService, useValue: { isElectron: true, config: signal({}) } },
@@ -171,7 +173,7 @@ describe('ClaudeBuiltinsConfigComponent', () => {
       expect(byTestId('claude-tools-applies-note').getAttribute('role')).toBe('note');
       expect(byTestId('claude-tools-applies-note').textContent).toContain('These settings apply to all your workspaces.');
       // Everything off: 2,890 (tools) + 1,110 (skills) = 4,000.
-      expect(savings()).toBe('Currently hidden: about 4,000 tokens per new session (estimate).');
+      expect(savings()).toBe('Saved per turn 4,000 tokens');
       expect(byTestId('claude-tools-savings').getAttribute('aria-live')).toBe('polite');
       for (const group of Array.from(element.querySelectorAll('[role="group"][aria-labelledby]'))) {
         const heading = element.querySelector(`#${group.getAttribute('aria-labelledby')}`);
@@ -186,7 +188,7 @@ describe('ClaudeBuiltinsConfigComponent', () => {
       expect(toolBox('ReportFindings').checked).toBe(true);
       expect(skillBox('code-review').checked).toBe(true);
       // 4,000 - 850 - 460 = 2,690 -> 2,700.
-      expect(savings()).toBe('Currently hidden: about 2,700 tokens per new session (estimate).');
+      expect(savings()).toBe('Saved per turn 2,700 tokens');
     });
 
     it('shows skeleton rows and an aria-busy card while loading, with no live toggles', async () => {
@@ -260,7 +262,7 @@ describe('ClaudeBuiltinsConfigComponent', () => {
       expect(syncedTable()?.textContent).not.toContain('anthropic-skills:');
       expect(queryTestId('claude-tools-synced-empty')).toBeNull();
       // Groups 1-3 all off: 4,000 + 120 + 80 = 4,200.
-      expect(savings()).toBe('Currently hidden: about 4,200 tokens per new session (estimate).');
+      expect(savings()).toBe('Saved per turn 4,200 tokens');
     });
 
     it('shows the empty state, and no group 3 table, when the account has no synced skills', async () => {
@@ -281,7 +283,7 @@ describe('ClaudeBuiltinsConfigComponent', () => {
       expect(skillBox('anthropic-skills:init').checked).toBe(true);
       expect(skillBox('init').checked).toBe(false);
       // 4,200 - 80 = 4,120 -> 4,100.
-      expect(savings()).toBe('Currently hidden: about 4,100 tokens per new session (estimate).');
+      expect(savings()).toBe('Saved per turn 4,100 tokens');
     });
 
     it('sends the qualified id, toasts the plain name, sums the savings live, and Undo sends the inverse call', async () => {
@@ -296,14 +298,14 @@ describe('ClaudeBuiltinsConfigComponent', () => {
       expect(skillBox('init').checked).toBe(false);
       expect(feedback.toast()?.message).toBe('Saved docx skill.');
       // 4,200 - 120 = 4,080 -> 4,100.
-      expect(savings()).toBe('Currently hidden: about 4,100 tokens per new session (estimate).');
+      expect(savings()).toBe('Saved per turn 4,100 tokens');
 
       await feedback.undo();
       await settle();
 
       expect(call).toHaveBeenLastCalledWith(SET, { kind: 'skill', id: 'anthropic-skills:docx', enabled: false });
       expect(skillBox('anthropic-skills:docx').checked).toBe(false);
-      expect(savings()).toBe('Currently hidden: about 4,200 tokens per new session (estimate).');
+      expect(savings()).toBe('Saved per turn 4,200 tokens');
     });
 
     it('a failed synced save re-reads the stored lists, shows the fixed error and keeps focus', async () => {
@@ -369,7 +371,7 @@ describe('ClaudeBuiltinsConfigComponent', () => {
 
       expect(call).toHaveBeenCalledWith(SET, { kind: 'tool', id: 'Workflow', enabled: true });
       expect(toolBox('Workflow').checked).toBe(true);
-      expect(savings()).toBe('Currently hidden: about 2,000 tokens per new session (estimate).');
+      expect(savings()).toBe('Saved per turn 2,000 tokens');
       expect(feedback.toast()?.tone).toBe('status');
       expect(feedback.toast()?.message).toBe('Saved Workflow tool.');
       expect(feedback.toast()?.canUndo).toBe(true);
@@ -379,7 +381,7 @@ describe('ClaudeBuiltinsConfigComponent', () => {
 
       expect(call).toHaveBeenLastCalledWith(SET, { kind: 'tool', id: 'Workflow', enabled: false });
       expect(toolBox('Workflow').checked).toBe(false);
-      expect(savings()).toBe('Currently hidden: about 4,000 tokens per new session (estimate).');
+      expect(savings()).toBe('Saved per turn 4,000 tokens');
     });
 
     it('sends only the skill id, never a list, so stored ids this card does not show are untouched', async () => {
@@ -430,7 +432,7 @@ describe('ClaudeBuiltinsConfigComponent', () => {
       expect(feedback.toast()?.tone).toBe('alert');
       expect(feedback.toast()?.message).toBe(COULD_NOT_UPDATE_CLAUDE_BUILTINS);
       expect(feedback.toast()?.message).not.toContain('host detail');
-      expect(savings()).toBe('Currently hidden: about 4,000 tokens per new session (estimate).');
+      expect(savings()).toBe('Saved per turn 4,000 tokens');
     });
 
     it('marks every toggle busy (still focusable) while a save runs', async () => {
@@ -454,6 +456,14 @@ describe('ClaudeBuiltinsConfigComponent', () => {
   });
 
   describe('Dependency blocked', () => {
+    it('omits dependency text and accessible references for skills without a dependency', async () => {
+      await render();
+      const checkbox = skillBox('keybindings-help');
+      expect(checkbox.getAttribute('aria-describedby')).toBeNull();
+      expect(queryTestId('claude-skill-dependency-keybindings-help')).toBeNull();
+      expect(checkbox.parentElement?.parentElement?.textContent).not.toContain('None');
+    });
+
     it('badges a skill that is on while its tool is off; turning the tool on clears it and never changes the skill', async () => {
       stored.skills = ['code-review'];
       await render();
@@ -486,13 +496,13 @@ describe('ClaudeBuiltinsConfigComponent', () => {
       await settle();
       expect(skillBox('code-review').checked).toBe(true);
       // The backend still denies code-review while ReportFindings is off: the total stays 4,000.
-      expect(savings()).toBe('Currently hidden: about 4,000 tokens per new session (estimate).');
+      expect(savings()).toBe('Saved per turn 4,000 tokens');
 
       feedback.dismiss();
       toolBox('ReportFindings').click();
       await settle();
       // 4,000 - 850 - 460 = 2,690 -> 2,700.
-      expect(savings()).toBe('Currently hidden: about 2,700 tokens per new session (estimate).');
+      expect(savings()).toBe('Saved per turn 2,700 tokens');
     });
   });
 
@@ -610,4 +620,14 @@ describe('ClaudeBuiltinsConfigComponent', () => {
       expect(toolBox('ReportFindings').checked).toBe(true);
     });
   });
+  it('reports loaded tools and savings and clears the overview after a failed reload', async () => {
+    await render();
+    const overview = TestBed.inject(AdvancedOverviewStore);
+    expect(overview.segments().find((segment) => segment.id === 'claude-tools')).toMatchObject({ value: '0 of 6 on', meta: 'Saves 4,000 tokens', tone: 'ok' });
+    responses['agent:getClaudeBuiltins'] = () => fail('unavailable');
+    await component.load();
+    await settle();
+    expect(overview.segments().find((segment) => segment.id === 'claude-tools')).toMatchObject({ value: 'Not loaded', tone: 'idle' });
+  });
+
 });

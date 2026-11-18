@@ -113,6 +113,8 @@ export interface SendOutcome {
    * / `isPending`, or withdraw it with `FollowUpQueueService.withdraw`.
    */
   queued?: QueuedFollowUpRef;
+  /** The backend ran the message to its end inside the send: no turn streams after it. */
+  settled?: boolean;
 }
 
 /**
@@ -1130,7 +1132,7 @@ export class MessageSenderService {
         this.tabManager.markLoaded(activeTabId);
         this.tabManager.markTabIdle(activeTabId);
         this.sessionManager.setStatus('loaded');
-        return { success: true };
+        return { success: true, settled: true };
       }
       if (result.data?.enqueued !== true) {
         this.streamingHandler.retirePendingPrompt?.(

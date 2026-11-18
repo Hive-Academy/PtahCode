@@ -429,6 +429,7 @@ describe('MessageSenderService', () => {
 
       await expect(service.send('/compact')).resolves.toEqual({
         success: true,
+        settled: true,
       });
 
       expect(tabsSignal()[0].status).toBe('loaded');

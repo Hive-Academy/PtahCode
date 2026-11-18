@@ -4,18 +4,25 @@ import {
   ElementRef,
   Injector,
   afterNextRender,
+  effect,
   inject,
   output,
   signal,
+  untracked,
   viewChild,
 } from '@angular/core';
 import {
-  LucideAngularModule,
-  Download,
-  Upload,
-} from 'lucide-angular';
-import { ClaudeRpcService, VSCodeService } from '@ptah-extension/core';
+  AuthStateService,
+  ClaudeRpcService,
+  VSCodeService,
+} from '@ptah-extension/core';
+import {
+  ADVANCED_SETTINGS,
+  ADVANCED_SETTING_GROUPS,
+  type AdvancedSettingGroupId,
+} from '@ptah-extension/shared';
 import { AdvancedSettingsGroupComponent } from './advanced/advanced-settings-group.component';
+import { AdvancedOverviewStore } from './advanced/advanced-overview.store';
 import { LicenseStatusCardComponent } from './license/license-status-card.component';
 import { VscodeLmConfigComponent } from './pro-features/vscode-lm-config.component';
 import { McpPortConfigComponent } from './pro-features/mcp-port-config.component';
@@ -23,7 +30,20 @@ import { ClaudeBuiltinsConfigComponent } from './pro-features/claude-builtins-co
 import { AgentBehaviourSectionComponent } from './pro-features/agent-behaviour-section.component';
 import { OutputStyleConfigComponent } from './output-style/output-style-config.component';
 import { SettingsSaveFeedbackService } from './feedback/settings-save-feedback.service';
-import { PtahButtonDirective, PtahDisclosureComponent, PtahInlineConfirmComponent } from '@ptah-extension/ui';
+import {
+  PtahButtonDirective,
+  PtahDisclosureComponent,
+  PtahFormSectionComponent,
+  PtahInlineConfirmComponent,
+  PtahInstrumentBandComponent,
+} from '@ptah-extension/ui';
+
+/** The upkeep groups of the Fine-tuning section, in page order. */
+const FINE_TUNING_GROUPS: readonly AdvancedSettingGroupId[] = [
+  'memory-upkeep',
+  'scheduled-jobs',
+  'workspace-harness',
+];
 
 /**
  * A per-key import failure is reported as `<key>: <reason>`, the key being a `ptah.*` secret
@@ -56,8 +76,9 @@ const KEYED_IMPORT_ERROR = /^(ptah\.|config:)/;
   selector: 'ptah-advanced-settings',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
+  // Page-scoped: each section reports its loaded summary for the instrument band.
+  providers: [AdvancedOverviewStore],
   imports: [
-    LucideAngularModule,
     LicenseStatusCardComponent,
     AgentBehaviourSectionComponent,
     OutputStyleConfigComponent,
@@ -68,9 +89,22 @@ const KEYED_IMPORT_ERROR = /^(ptah\.|config:)/;
     PtahButtonDirective,
     PtahInlineConfirmComponent,
     PtahDisclosureComponent,
+    PtahFormSectionComponent,
+    PtahInstrumentBandComponent,
   ],
   template: `
-    <div class="flex flex-col gap-[var(--ptah-gap-section)] py-[var(--ptah-gap-field)]">
+    <!-- Each glass section is its own stacking context. The section with focus (an open select
+         panel) is raised, so the next section cannot cover the panel. -->
+    <div
+      class="flex flex-col pb-[var(--ptah-gap-field)] [&>*]:relative [&>*:focus-within]:z-[var(--ptah-z-raised)]"
+      data-advanced-sections
+    >
+      <ptah-instrument-band
+        class="mb-[var(--ptah-gap-heading)]"
+        [segments]="overview.segments()"
+        ariaLabel="Advanced overview"
+        data-testid="advanced-overview"
+      />
       <ptah-license-status-card>
         <!--
           M5: the import confirm takes the place of Export / Import inside the header's action row, so the
@@ -98,37 +132,25 @@ const KEYED_IMPORT_ERROR = /^(ptah\.|config:)/;
             <button
               type="button"
               ptahButton
+              variant="secondary"
               [busy]="isExporting()"
               [disabled]="isExporting()"
               (click)="exportSettings()"
               aria-label="Export settings"
             >
-              @if (!isExporting()) {
-                <lucide-angular
-                  [img]="UploadIcon"
-                  class="w-3 h-3"
-                  aria-hidden="true"
-                />
-              }
-              <span>Export</span>
+              Export settings
             </button>
             <button
               #importButton
               type="button"
               ptahButton
+              variant="secondary"
               [busy]="isImporting()"
               [disabled]="isImporting()"
               (click)="requestImport()"
               aria-label="Import settings"
             >
-              @if (!isImporting()) {
-                <lucide-angular
-                  [img]="DownloadIcon"
-                  class="w-3 h-3"
-                  aria-hidden="true"
-                />
-              }
-              <span>Import</span>
+              Import settings
             </button>
           }
         </div>
@@ -140,38 +162,57 @@ const KEYED_IMPORT_ERROR = /^(ptah\.|config:)/;
       <ptah-claude-builtins-config />
       <ptah-vscode-lm-config (modelChanged)="modelChanged.emit()" />
 
-      <!-- Fine-tuning (TASK_2026_658): closed by default; its groups load in their own chunk once opened and in view. -->
-      <section
-        class="border-t border-base-content/10 pt-[var(--ptah-gap-group)]"
-        data-glass-surface="content"
-      >
-        <ptah-disclosure
-          label="Fine-tuning"
-          description="Upkeep and timing values for memory, scheduled jobs and the workspace harness. The defaults suit most people."
-          data-testid="fine-tuning-details"
+      <!-- Fine-tuning (TASK_2026_658): one closed row per upkeep group. A group loads in its own chunk only when
+           its row is opened (the closed body is hidden, so its viewport trigger cannot fire before). -->
+      <section data-glass-surface="content" data-testid="fine-tuning-section">
+        <ptah-form-section
+          id="advanced-fine-tuning"
+          heading="Fine-tuning"
+          [divider]="true"
+          description="Upkeep jobs for memory, scheduled jobs and the workspace harness."
+          [wide]="true"
         >
-          <span ptahDisclosureSummary data-testid="fine-tuning-summary" aria-hidden="true" class="sr-only">Fine-tuning</span>
           <div
-            class="mt-[var(--ptah-gap-heading)] flex flex-col gap-[var(--ptah-gap-group)] border-t border-base-content/10 pt-[var(--ptah-gap-heading)]"
+            class="flex flex-col divide-y divide-base-content/10 border-y border-base-content/10"
+            data-testid="fine-tuning-details"
           >
-            @defer (on viewport) {
-              <ptah-advanced-settings-group groupId="memory-upkeep" [contentSurface]="false" />
-              <ptah-advanced-settings-group groupId="scheduled-jobs" [contentSurface]="false" />
-              <ptah-advanced-settings-group groupId="workspace-harness" [contentSurface]="false" />
-            } @placeholder {
-              <div
-                class="min-h-[2.75rem] border-b border-base-content/10"
-                data-testid="fine-tuning-placeholder"
-              ></div>
+            <span data-testid="fine-tuning-summary" class="sr-only">Fine-tuning</span>
+            @for (group of fineTuningGroups; track group.id) {
+              <ptah-disclosure
+                class="py-[var(--ptah-gap-controls)]"
+                [label]="group.title"
+                [attr.data-testid]="'fine-tuning-row-' + group.id"
+              >
+                <span
+                  ptahDisclosureMeta
+                  class="[margin-inline-start:auto] shrink-0 text-xs text-base-content-muted"
+                  >{{ group.count }} settings</span
+                >
+                <div class="pt-[var(--ptah-gap-controls)]">
+                  @defer (on viewport) {
+                    <ptah-advanced-settings-group
+                      [groupId]="group.id"
+                      [contentSurface]="false"
+                      headingStyle="hidden"
+                    />
+                  } @placeholder {
+                    <div
+                      class="min-h-[2.75rem]"
+                      data-testid="fine-tuning-placeholder"
+                    ></div>
+                  }
+                </div>
+              </ptah-disclosure>
             }
           </div>
-        </ptah-disclosure>
+        </ptah-form-section>
       </section>
     </div>
   `,
   styles: `
-    :host-context([data-glass='on']) [data-glass-surface='content'] {
-      padding: 1.25rem;
+    /* Without glass the sections are separated by their dividers; glass sections are cards, so they need a gap. */
+    :host-context([data-glass='on']) [data-advanced-sections] {
+      gap: var(--ptah-gap-section);
     }
   `,
 })
@@ -187,12 +228,41 @@ export class AdvancedSettingsComponent {
   /** VS Code LM model changes can change which CLIs are usable (#84). */
   readonly modelChanged = output<void>();
 
-  readonly DownloadIcon = Download;
-  readonly UploadIcon = Upload;
+  /** The summary of each section for the instrument band. */
+  protected readonly overview = inject(AdvancedOverviewStore);
+  private readonly authState = inject(AuthStateService);
+  /** One Fine-tuning row per upkeep group: its title and its number of settings. */
+  protected readonly fineTuningGroups = FINE_TUNING_GROUPS.map((id) => ({
+    id,
+    title:
+      ADVANCED_SETTING_GROUPS.find((group) => group.id === id)?.title ?? id,
+    count: ADVANCED_SETTINGS.filter((setting) => setting.group === id).length,
+  }));
   readonly isExporting = signal(false);
   readonly isImporting = signal(false);
   /** The inline import confirm is open (S-confirm, P8). */
   readonly confirmingImport = signal(false);
+
+  constructor() {
+    // Setup segment: the Setup block renders in the Settings shell, outside this store's
+    // provider, so the page reports it from the auth status (Claude Code install check).
+    effect(() => {
+      const loaded = this.authState.isLoaded();
+      const found = this.authState.claudeCliInstalled();
+      untracked(() => {
+        if (!loaded) {
+          this.overview.clear('setup');
+          return;
+        }
+        this.overview.report(
+          'setup',
+          found
+            ? { value: 'Ready', meta: 'Claude Code found', tone: 'ok' }
+            : { value: 'Check needed', meta: 'Claude Code not found', tone: 'warn' },
+        );
+      });
+    });
+  }
 
   /**
    * Export settings to a JSON file.

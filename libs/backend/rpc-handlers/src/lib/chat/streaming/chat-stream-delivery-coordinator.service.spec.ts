@@ -68,6 +68,71 @@ function makeBlockedCoordinator() {
 }
 
 describe('ChatStreamDeliveryCoordinator', () => {
+  it.each([false, true])('confirms a real turn including visible-to-hidden delivery (%s)', async (visibleStart) => {
+    const { coordinator, sent } = makeCoordinator();
+    await coordinator.updateViewport({ protocolVersion: 2, visibleTabIds: visibleStart ? [TAB_ID] : [] });
+    const generating: FlatStreamEventUnion = {
+      id: 'generating', eventType: 'turn_state', sessionId: SESSION_ID,
+      timestamp: 1, messageId: 'turn', phase: 'generating', revision: 1,
+      backgroundTasks: [], sessionCrons: [], terminalReason: null,
+    };
+    coordinator.publish(TAB_ID, SESSION_ID, generating);
+    await coordinator.flushBeforeTerminal(TAB_ID);
+    await coordinator.updateViewport({ protocolVersion: 2, visibleTabIds: [] });
+    const terminal = { ...generating, phase: 'idle' as const, revision: 2 };
+    coordinator.publish(TAB_ID, SESSION_ID, terminal);
+    await coordinator.flushBeforeTerminal(TAB_ID);
+    expect(sent.at(-1)?.payload).toMatchObject({ statusOnly: true, turnRan: true, event: terminal });
+    if (!visibleStart) expect(sent).toHaveLength(1);
+    coordinator.publish(TAB_ID, SESSION_ID, { ...terminal, revision: 3 });
+    await coordinator.flushBeforeTerminal(TAB_ID);
+    expect(sent.at(-1)?.payload).not.toHaveProperty('turnRan');
+  });
+
+  it.each(['idle', 'failed', 'awaiting-background', 'sleeping'] as const)(
+    'clears activity at every terminal phase (%s)', async (phase) => {
+      const { coordinator, sent } = makeCoordinator();
+      await coordinator.updateViewport({ protocolVersion: 2, visibleTabIds: [TAB_ID] });
+      const state: FlatStreamEventUnion = {
+        id: 'state', eventType: 'turn_state', sessionId: SESSION_ID,
+        timestamp: 1, messageId: 'turn', phase: 'generating', revision: 1,
+        backgroundTasks: [], sessionCrons: [], terminalReason: null,
+      };
+      coordinator.publish(TAB_ID, SESSION_ID, state);
+      coordinator.publish(TAB_ID, SESSION_ID, { ...state, phase, revision: 2 });
+      await coordinator.flushBeforeTerminal(TAB_ID);
+      await coordinator.updateViewport({ protocolVersion: 2, visibleTabIds: [] });
+      coordinator.publish(TAB_ID, SESSION_ID, { ...state, phase: 'idle', revision: 3 });
+      await coordinator.flushBeforeTerminal(TAB_ID);
+      expect(sent.at(-1)?.payload).toMatchObject({ statusOnly: true });
+      expect(sent.at(-1)?.payload).not.toHaveProperty('turnRan');
+    },
+  );
+
+  it('does not infer activity from lone terminals or retirement-only events', async () => {
+    const { coordinator, sent } = makeCoordinator();
+    await coordinator.updateViewport({ protocolVersion: 2, visibleTabIds: [] });
+    const state: FlatStreamEventUnion = {
+      id: 'state', eventType: 'turn_state', sessionId: SESSION_ID,
+      timestamp: 1, messageId: 'turn', phase: 'generating', revision: 1,
+      backgroundTasks: [], sessionCrons: [], terminalReason: null,
+    };
+    coordinator.publish(TAB_ID, SESSION_ID, { ...state, retirementOnly: true });
+    coordinator.publish(TAB_ID, SESSION_ID, { ...state, phase: 'idle', retirementOnly: true });
+    await coordinator.flushBeforeTerminal(TAB_ID);
+    expect(sent).toHaveLength(0);
+    coordinator.publish(TAB_ID, SESSION_ID, { ...state, phase: 'idle', revision: 2 });
+    await coordinator.flushBeforeTerminal(TAB_ID);
+    expect(sent[0].payload).not.toHaveProperty('turnRan');
+    coordinator.publish(TAB_ID, SESSION_ID, state);
+    coordinator.publish(TAB_ID, SESSION_ID, { ...state, phase: 'idle', retirementOnly: true });
+    await coordinator.flushBeforeTerminal(TAB_ID);
+    expect(sent).toHaveLength(1);
+    coordinator.publish(TAB_ID, SESSION_ID, { ...state, phase: 'idle', revision: 3 });
+    await coordinator.flushBeforeTerminal(TAB_ID);
+    expect(sent.at(-1)?.payload).toMatchObject({ turnRan: true });
+  });
+
   it('delivers hidden terminal status while retaining text and ordered terminal for reveal', async () => {
     const { coordinator, sent } = makeCoordinator();
     await coordinator.updateViewport({ protocolVersion: 2, visibleTabIds: [] });

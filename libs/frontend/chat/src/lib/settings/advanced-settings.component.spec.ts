@@ -3,6 +3,7 @@ import {
   Component,
   input,
   output,
+  signal,
 } from '@angular/core';
 import {
   DeferBlockState,
@@ -10,7 +11,11 @@ import {
   type ComponentFixture,
 } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
-import { ClaudeRpcService, VSCodeService } from '@ptah-extension/core';
+import {
+  AuthStateService,
+  ClaudeRpcService,
+  VSCodeService,
+} from '@ptah-extension/core';
 import {
   createMockRpcService,
   rpcError,
@@ -87,6 +92,7 @@ class VsCodeLmStub {
 class AdvancedGroupStub {
   readonly groupId = input.required<string>();
   readonly contentSurface = input(true);
+  readonly headingStyle = input<'caps' | 'section' | 'hidden'>('caps');
 }
 
 describe('AdvancedSettingsComponent', () => {
@@ -100,9 +106,15 @@ describe('AdvancedSettingsComponent', () => {
     return call ? { message: call[0], tone: call[1] } : undefined;
   };
 
+  /** Auth status the Setup band segment reads (not loaded by default). */
+  const authLoaded = signal(false);
+  const claudeFound = signal(false);
+
   beforeEach(() => {
     rpc = createMockRpcService();
     announce = jest.fn();
+    authLoaded.set(false);
+    claudeFound.set(false);
   });
   afterEach(() => {
     fixture?.destroy();
@@ -117,6 +129,13 @@ describe('AdvancedSettingsComponent', () => {
         { provide: ClaudeRpcService, useValue: rpc },
         { provide: VSCodeService, useValue: { isElectron } },
         { provide: SettingsSaveFeedbackService, useValue: { announce } },
+        {
+          provide: AuthStateService,
+          useValue: {
+            isLoaded: authLoaded.asReadonly(),
+            claudeCliInstalled: claudeFound.asReadonly(),
+          },
+        },
       ],
     }).overrideComponent(AdvancedSettingsComponent, {
       remove: {
@@ -194,13 +213,23 @@ describe('AdvancedSettingsComponent', () => {
     ).toBe('ptah-claude-builtins-config');
   });
 
-  it('ends with a closed Fine-tuning disclosure whose deferred groups render the four upkeep groups (TASK_2026_658)', async () => {
+  it('ends with a Fine-tuning section of closed rows whose deferred groups render the upkeep groups (TASK_2026_658)', async () => {
     await render(false);
-      const details = element.querySelector<HTMLElement>(
+    const details = element.querySelector<HTMLElement>(
       '[data-testid="fine-tuning-details"]',
     );
-    expect(details?.parentElement?.getAttribute('data-glass-surface')).toBe('content');
-      expect(details?.querySelector('button')?.getAttribute('aria-expanded')).toBe('false');
+    expect(
+      details?.closest('[data-testid="fine-tuning-section"]')?.getAttribute('data-glass-surface'),
+    ).toBe('content');
+    const rowButtons = Array.from(
+      details?.querySelectorAll<HTMLButtonElement>('ptah-disclosure button[aria-expanded]') ?? [],
+    );
+    expect(rowButtons.map((button) => button.textContent?.trim())).toEqual([
+      'Memory upkeep',
+      'Scheduled jobs',
+      'Workspace harness',
+    ]);
+    expect(rowButtons.every((button) => button.getAttribute('aria-expanded') === 'false')).toBe(true);
     expect(
       element.querySelector('[data-testid="fine-tuning-summary"]')?.textContent,
     ).toContain('Fine-tuning');
@@ -208,13 +237,14 @@ describe('AdvancedSettingsComponent', () => {
       Array.from(
         element.querySelectorAll<HTMLElement>('[data-testid^="group-"]'),
       ).map((node) => node.dataset['testid']);
-    const [block] = await fixture.getDeferBlocks();
-    await block.render(DeferBlockState.Placeholder);
+    const blocks = await fixture.getDeferBlocks();
+    expect(blocks).toHaveLength(3);
+    for (const block of blocks) await block.render(DeferBlockState.Placeholder);
     expect(
       element.querySelector('[data-testid="fine-tuning-placeholder"]'),
     ).not.toBeNull();
     expect(groupIds()).toEqual([]);
-    await block.render(DeferBlockState.Complete);
+    for (const block of blocks) await block.render(DeferBlockState.Complete);
     expect(groupIds()).toEqual([
       'group-memory-upkeep',
       'group-scheduled-jobs',
@@ -225,6 +255,42 @@ describe('AdvancedSettingsComponent', () => {
         element.querySelector('[data-testid="group-memory-upkeep"]'),
       ),
     ).toBe(true);
+  });
+
+  it('starts with the overview band: one idle segment per section until the section reports', async () => {
+    await render(false);
+    const band = element.querySelector('[data-testid="advanced-overview"]');
+    expect(band?.compareDocumentPosition(element.querySelector('ptah-license-status-card') as Node)).toBe(
+      Node.DOCUMENT_POSITION_FOLLOWING,
+    );
+    const segments = Array.from(band?.querySelectorAll('button') ?? []).map((button) =>
+      button.getAttribute('aria-label'),
+    );
+    expect(segments).toEqual([
+      'Membership Not loaded',
+      'Agent behaviour Not loaded',
+      'Output style Not loaded',
+      'MCP server Not loaded',
+      'Claude Code tools Not loaded',
+      'Setup Not loaded',
+    ]);
+  });
+
+  it('reports the Setup segment from the Claude Code install check once auth status loads', async () => {
+    authLoaded.set(true);
+    claudeFound.set(true);
+    await render(false);
+    const label = (): string | null | undefined =>
+      Array.from(
+        element.querySelectorAll('[data-testid="advanced-overview"] button'),
+      )
+        .map((button) => button.getAttribute('aria-label'))
+        .find((text) => text?.startsWith('Setup'));
+    expect(label()).toContain('Ready');
+    claudeFound.set(false);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    expect(label()).toContain('Check needed');
   });
 
   it('keeps the Export settings aria-label and calls ptah.exportSettings in VS Code', async () => {

@@ -94,6 +94,23 @@ describe('AdvancedSettingsGroupComponent', () => {
     await settle();
   }
 
+  it('uses the wide section only on the Context rendering path; fields float in both modes (#1417)', async () => {
+    await create('context-budgets');
+    expect(host().querySelector('ptah-form-section')).toBeNull();
+    fixture.componentRef.setInput('headingStyle', 'section');
+    fixture.detectChanges();
+    expect(host().querySelector('ptah-form-section[wide]')).not.toBeNull();
+    for (const field of host().querySelectorAll('ptah-field')) {
+      expect(field.querySelector('[data-appearance]')?.getAttribute('data-appearance')).toBe('floating');
+    }
+    fixture.componentRef.setInput('headingStyle', 'caps');
+    fixture.detectChanges();
+    expect(host().querySelector('ptah-form-section')).toBeNull();
+    for (const field of host().querySelectorAll('ptah-field')) {
+      expect(field.querySelector('[data-appearance]')?.getAttribute('data-appearance')).toBe('floating');
+    }
+  });
+
   beforeEach(() => {
     toast = null;
     lastUndo = null;
@@ -151,6 +168,8 @@ describe('AdvancedSettingsGroupComponent', () => {
     const key = 'compaction.threshold';
     expect(field(key).value).toBe('');
     expect(field(key).placeholder).toBe('Model default');
+    expect(field(key).closest('ptah-field')?.querySelector('.ptah-field__footer')?.textContent)
+      .toContain('Model default or 100,000 to 1,000,000 tokens');
     await enter(key, '800000');
     expect(writes()).toEqual([{ key, value: 800000 }]);
     await enter(key, '');
@@ -199,34 +218,33 @@ describe('AdvancedSettingsGroupComponent', () => {
       expect(classesOf(header())).not.toContain('border-b');
     });
 
-    it("'section' renders the 16px sentence-case heading with a divider and the description", async () => {
+    it('keeps the section heading hook and accessible region name', async () => {
       await createWith('section');
-      expect(classesOf(heading())).toEqual(
-        expect.arrayContaining(['text-base', 'font-semibold']),
-      );
-      expect(classesOf(heading())).not.toContain('uppercase');
-      expect(classesOf(header())).toContain('border-b');
-      // The section's 12px flex gap is the only header-to-content spacing.
-      expect(classesOf(header()).some((name) => name.startsWith('mb-'))).toBe(false);
-      expect(header().querySelector('p')?.textContent?.trim()).toBe(
-        group?.description,
+      const section = host().querySelector('section');
+      const headingId = section?.getAttribute('aria-labelledby');
+      expect(headingId).toBeTruthy();
+      expect(host().querySelector(`[id="${headingId}"]`)?.textContent).toContain(group?.title);
+      expect(byTestId('settings-section-memory-upkeep')).not.toBeNull();
+    });
+
+    it("'section' uses the shared section title and description", async () => {
+      await createWith('section');
+      expect(host().querySelector('ptah-form-section[wide]')).not.toBeNull();
+      expect(host().querySelector('ptah-form-section h3')?.textContent).toContain(group?.title);
+      expect(host().querySelector('ptah-form-section')?.textContent).toContain(group?.description);
+    });
+
+    it("'section' keeps the agent-limits note of the context-budgets group", async () => {
+      fixture = TestBed.createComponent(AdvancedSettingsGroupComponent);
+      fixture.componentRef.setInput('groupId', 'context-budgets');
+      fixture.componentRef.setInput('headingStyle', 'section');
+      fixture.detectChanges();
+      await settle();
+      expect(host().querySelector('ptah-form-section [aside]')?.textContent).toContain(
+        'Agent limits apply even when compaction is off.',
       );
     });
 
-    it.each(['caps', 'section'] as const)(
-      'keeps the heading id, aria-labelledby and test id in %s',
-      async (style) => {
-        await createWith(style);
-        const section = byTestId('settings-section-memory-upkeep');
-        expect(section).not.toBeNull();
-        expect(heading().id).toBeTruthy();
-        expect(section?.getAttribute('aria-labelledby')).toBe(heading().id);
-        expect(heading().textContent?.trim()).toBe(group?.title);
-      },
-    );
-  });
-
-  describe('load', () => {
     it('reads only the group keys, in parallel with a 5 s timeout, and shows the saved values', async () => {
       await create('memory-upkeep');
       expect(
@@ -366,24 +384,41 @@ describe('AdvancedSettingsGroupComponent', () => {
   });
 
   describe('help text', () => {
-    it('adds the range with its unit and the apply note', async () => {
+    it('keeps only the range inline and opens the full explanation on request', async () => {
       await create('memory-upkeep');
       const help = byTestId(
         'advanced-setting-memory.retention.processedDays-field',
       );
-      expect(help?.textContent).toContain('Range: 1 to 365 days.');
-      expect(help?.textContent).toContain('Applies on the next cleanup run.');
+      expect(help?.textContent).toContain('1 to 365 days');
+      expect(help?.querySelector('.ptah-field__footer')?.textContent).not.toContain('Applies on the next cleanup run.');
+      const setting = ADVANCED_SETTINGS.find((item) => item.key === 'memory.retention.processedDays');
+      const trigger = help?.querySelector<HTMLButtonElement>('button');
+      expect(trigger?.getAttribute('aria-label')).toBe('More about ' + setting?.label);
+      expect(help?.querySelector('[id="advanced-setting-memory.retention.processedDays-help"]')?.textContent)
+        .toContain(setting?.help);
+      expect(help?.querySelector('button[aria-label^="About "]')).toBeNull();
+      trigger?.click();
+      fixture.detectChanges();
+      await settle();
+      expect(help?.querySelector('[content]')?.textContent).toContain(setting?.help);
+      expect(help?.querySelector('[content]')?.textContent).toContain('Applies on the next cleanup run.');
+      expect(field('memory.retention.processedDays').getAttribute('aria-describedby'))
+        .toContain('advanced-setting-memory.retention.processedDays-help');
     });
 
     it('marks a restart key with the restart note and badge', async () => {
       await create('scheduled-jobs');
       const restart = byTestId('advanced-setting-cron.maxConcurrentJobs-field');
-      expect(restart?.textContent).toContain('Restart Ptah to apply.');
-      expect(restart?.querySelector('.badge')?.textContent?.trim()).toBe(
+      expect(restart?.querySelector('.ptah-field__footer')?.textContent).not.toContain('Restart Ptah to apply.');
+      restart?.querySelector<HTMLButtonElement>('button')?.click();
+      fixture.detectChanges();
+      await settle();
+      expect(restart?.querySelector('[content]')?.textContent).toContain('Restart Ptah to apply.');
+      expect(restart?.querySelector('[data-restart-badge]')?.textContent?.trim()).toBe(
         'Restart',
       );
       await create('memory-upkeep');
-      expect(host().querySelector('.badge')).toBeNull();
+      expect(host().querySelector('[data-restart-badge]')).toBeNull();
     });
 
     it('names the next Codex agent for codex keys and right away for live keys', async () => {
@@ -394,10 +429,11 @@ describe('AdvancedSettingsGroupComponent', () => {
           ?.textContent,
       ).toContain('Applies to the next Codex agent you start.');
       await create('background-queries');
-      expect(
-        byTestId('advanced-setting-internalQuery.maxConcurrent-field')
-          ?.textContent,
-      ).toContain('Applies right away.');
+      const background = byTestId('advanced-setting-internalQuery.maxConcurrent-field');
+      background?.querySelector<HTMLButtonElement>('button')?.click();
+      fixture.detectChanges();
+      await settle();
+      expect(background?.querySelector('[content]')?.textContent).toContain('Applies right away.');
     });
   });
 

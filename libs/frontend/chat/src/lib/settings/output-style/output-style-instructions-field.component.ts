@@ -97,7 +97,7 @@ import { MarkdownBlockComponent } from '@ptah-extension/markdown';
           </div>
         } @else {
           <div class="ptah-motion-panel" animate.enter="ptah-motion-enter" [animate.leave]="leaveEditorPanel">
-          <ptah-field label="Instructions" appearance="stacked">
+          <ptah-field label="Instructions">
           <textarea
             ptahTextarea tone="mono"
             id="output-style-body"
