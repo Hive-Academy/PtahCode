@@ -457,3 +457,29 @@ ptah-lanes-table
   border-radius: var(--ptah-space-1);
   padding-inline: var(--ptah-space-1);
 }
+
+/* The inline-block popover trigger otherwise sizes to its unwrapped contents,
+   even after its flex-item host shrinks. Keep the entire hit target in its cell. */
+ptah-lanes-table .lane-model-value > ptah-native-popover > .popover-trigger {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+}
+ptah-lanes-table
+  .lane-model-value
+  button[data-ptah-button]:is(.btn, #ptah-button) {
+  box-sizing: border-box;
+  height: auto;
+  min-width: 0;
+  max-width: 100%;
+}
+
+ptah-lanes-table
+  .ptah-table[data-collapsed='true']
+  th[scope='row']
+  .lane-model-value
+  button[data-ptah-button]:is(.btn, #ptah-button) {
+  height: auto;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}

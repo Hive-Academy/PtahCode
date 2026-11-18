@@ -586,6 +586,50 @@ describe('MainAgentReassignPopoverComponent', () => {
       expect(selectControl('main-agent-provider').value()).toBe('first');
     });
 
+    it('renders the registry-derived Kimi OAuth option in the provider trigger listbox', async () => {
+      state.connections.set(
+        ready([
+          connection('first', 'First'),
+          connection('kimi-code', 'Kimi Code', 'oauth'),
+        ]),
+      );
+      state.route.set(
+        ready({
+          ...ROUTE,
+          providers: [
+            ...ROUTE.providers,
+            { id: 'kimi-code', type: 'oauth', status: 'connected' },
+          ],
+        } as ProvidersEffectiveRoute),
+      );
+      await flush();
+      const trigger = query(
+        'main-agent-provider',
+      )?.querySelector<HTMLButtonElement>('button[role="combobox"]');
+      trigger?.click();
+      await flush();
+      const listbox = document.getElementById(
+        trigger?.getAttribute('aria-controls') ?? '',
+      );
+      expect(listbox?.getAttribute('role')).toBe('listbox');
+      const matches = Array.from(
+        listbox?.querySelectorAll('[role="option"]') ?? [],
+      ).filter(
+        (option) =>
+          option.querySelector('.ptah-select__label')?.textContent?.trim() ===
+          'Kimi Code \u00b7 OAuth',
+      );
+      expect(matches).toHaveLength(1);
+      expect(matches[0].getAttribute('aria-disabled')).not.toBe('true');
+      (matches[0] as HTMLElement).click();
+      await flush();
+      expect(trigger?.getAttribute('aria-expanded')).toBe('false');
+      expect(query('main-agent-provider-copy')?.textContent).toContain(
+        'New main-agent requests use Kimi Code.',
+      );
+      nothingWritten();
+    });
+
     it('(e) a provider change needs its confirm before Save; Save then activates it to the "Save to" scope', async () => {
       expect(query('main-agent-provider-confirm')).toBeNull();
       choose('main-agent-provider', 'second');

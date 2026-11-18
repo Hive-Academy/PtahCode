@@ -383,6 +383,39 @@ describe('LanesTableComponent visual presentation', () => {
     expect(triggers?.[0].getAttribute('aria-expanded')).toBe('true');
   });
 
+  it('keeps the CI Codex model and effort in separate popover wrappers in the narrow row', async () => {
+    const { fixture, host } = await mount([
+      system('codex', {
+        model: { key: 'codexModel', value: 'gpt-5.5-codex' },
+        effort: { key: 'codexReasoningEffort', value: 'medium' },
+      }),
+    ]);
+    narrow(fixture);
+    const row = q(host, '[data-testid="cli-provider-card-codex"]');
+    const model = row?.querySelector<HTMLButtonElement>(
+      '[data-popover-kind="model"]',
+    );
+    const effort = row?.querySelector<HTMLButtonElement>(
+      '[data-popover-kind="effort"]',
+    );
+    expect(model?.textContent?.trim()).toBe('gpt-5.5-codex');
+    expect(effort?.textContent?.trim()).toBe('medium');
+    expect(model?.parentElement?.classList.contains('popover-trigger')).toBe(
+      true,
+    );
+    expect(
+      model?.parentElement?.parentElement?.parentElement?.classList.contains(
+        'lane-model-value',
+      ),
+    ).toBe(true);
+    expect(
+      row?.querySelector('[data-lane-status]')?.contains(model ?? null),
+    ).toBe(false);
+    model?.click();
+    fixture.detectChanges();
+    expect(model?.getAttribute('aria-expanded')).toBe('true');
+  });
+
   it('puts one reachable row model in its own column in a 742px container', async () => {
     const { fixture, host } = await mount([system('codex')]);
     const table = fixture.debugElement.query(By.directive(PtahTableComponent))
