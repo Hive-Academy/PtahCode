@@ -319,12 +319,21 @@ describe('ClaudeRouteCertifier.certify', () => {
       expect(h.probe.status).not.toHaveBeenCalled();
     });
 
-    it('ancestor with .git and .claude/settings.local.json', async () => {
-      const h = harness();
+    it('ancestor with .git and an override in .claude/settings.local.json', async () => {
+      const logger = { warn: jest.fn() };
+      const h = harness('win32', Date.now, logger);
       h.state.present.add('C:\\work\\.git');
-      h.state.present.add('C:\\work\\.claude\\settings.local.json');
+      h.state.files.set('C:\\work\\.claude\\settings.local.json', JSON.stringify({ apiKeyHelper: 'helper.cmd' }));
       await expect(h.certifier.certify(certifyRequest(newRoute()))).resolves.toEqual({ ok: false, code: 'unsupported-source', terminated: true });
       expect(h.probe.status).not.toHaveBeenCalled();
+      expect(logger.warn).toHaveBeenCalledWith('[ClaudeRouteCertifier] Policy source refused', { source: 'S4' });
+    });
+
+    it('ancestor with .git and a benign .claude/settings.local.json certifies', async () => {
+      const h = harness();
+      h.state.present.add('C:\\work\\.git');
+      h.state.files.set('C:\\work\\.claude\\settings.local.json', JSON.stringify({ permissions: { allow: ['Bash(git status)'] } }));
+      await expect(h.certifier.certify(certifyRequest(newRoute()))).resolves.toMatchObject({ ok: true });
     });
   });
 
