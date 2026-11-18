@@ -21,17 +21,24 @@ import { SearchVoiceSummaryStore } from './search-voice-summary.store';
           <div ptahDescriptionItem term="API key" [value]="hasKey() ? 'Saved' : 'Not set'"></div>
           <div ptahDescriptionItem term="Voice" [value]="voiceLabel()" [mono]="unknownVoice()"></div>
         </ptah-description-list>
-        <div footer class="flex flex-wrap gap-ptah-controls">
-          <button type="button" ptahButton variant="secondary" data-testid="voice-elevenlabs-manage"
+        <div class="flex flex-wrap items-center gap-ptah-controls">
+          <button type="button" ptahButton variant="outline" data-testid="voice-elevenlabs-manage"
             (click)="details.emit()">{{ hasKey() ? 'Change key' : 'Add key' }}</button>
-          <button type="button" ptahButton variant="ghost" data-testid="voice-elevenlabs-details"
+          <button type="button" ptahButton variant="outline" data-testid="voice-elevenlabs-details"
             (click)="details.emit()">Voice details</button>
+          @if (hasKey()) {
+            <button type="button" ptahButton variant="ghost" tone="danger" class="summary-clear"
+              aria-label="Clear the ElevenLabs API key" data-testid="voice-elevenlabs-clear"
+              (click)="clearKey.emit()">Clear key</button>
+          }
         </div>
       </ptah-form-section>
     </section>
   `,
   styles: `
     :host { display: block; }
+    /* The destructive action sits at the end of the action row, as in the prototype. */
+    .summary-clear { margin-inline-start: auto; }
     :host-context([data-glass='on']) [data-glass-surface='content'] {
       padding: 0 1.25rem;
     }
@@ -41,6 +48,7 @@ export class VoiceElevenlabsSummaryComponent {
   readonly config = input.required<VoiceProviderConfigDto>();
   readonly voices = input<readonly VoiceInfoDto[] | null>(null);
   readonly details = output<void>();
+  readonly clearKey = output<void>();
   private readonly summary = inject(SearchVoiceSummaryStore, { optional: true });
   readonly hasKey = computed(() => this.config().elevenlabs.apiKeyConfigured);
   private readonly voiceName = computed(() => this.voices()?.find(voice => voice.id === this.config().elevenlabs.voiceId)?.label);

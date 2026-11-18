@@ -171,11 +171,12 @@ function providerLabel(provider: ProviderId): string {
                (cancelClear)="cancelClear($event)"
              />
 
-            <p class="text-xs text-base-content-muted mt-2">
+            <p class="selection-note text-xs text-base-content-muted">
               At least one provider must stay selected.
             </p>
 
             <ptah-setting-row
+              class="max-results-row"
               label="Max results"
               hint="Results each provider returns for one search."
               controlId="web-search-max-results"
@@ -214,6 +215,9 @@ function providerLabel(provider: ProviderId): string {
     .web-search-header h2 { font-size: var(--ptah-text-section-title-size); line-height: var(--ptah-text-section-title-leading); font-weight: var(--ptah-text-section-title-weight); }
     .web-search-header p { grid-column: 1 / -1; }
     .max-results { width: 16rem; max-width: 100%; }
+    .selection-note { margin-top: var(--ptah-gap-label); }
+    /* Divider and row gap between the provider grid note and the next setting. */
+    .max-results-row { margin-top: var(--ptah-gap-field); border-top: var(--ptah-border-width) solid var(--ptah-border-color); }
     @media (max-width: 639px) { .max-results { width: 100%; } }
 
     :host-context([data-glass='on']) [data-glass-surface='content'] {

@@ -40,6 +40,22 @@ describe('VoiceElevenlabsSummaryComponent', () => {
     expect(TestBed.inject(SearchVoiceSummaryStore).segments()[0].meta).toBe('Voice Sarah');
   });
 
+  it('shows two outline actions in the body and a Clear key action at the end', () => {
+    const fixture = render();
+    const clear = jest.fn();
+    fixture.componentInstance.clearKey.subscribe(clear);
+    const element: HTMLElement = fixture.nativeElement;
+    for (const id of ['voice-elevenlabs-manage', 'voice-elevenlabs-details']) {
+      const button = element.querySelector<HTMLButtonElement>(`[data-testid="${id}"]`);
+      expect(button?.classList).toContain('btn-outline');
+      expect(button?.closest('[data-testid="form-section-body"]')).not.toBeNull();
+    }
+    const clearButton = element.querySelector<HTMLButtonElement>('[data-testid="voice-elevenlabs-clear"]');
+    expect(clearButton?.getAttribute('aria-label')).toBe('Clear the ElevenLabs API key');
+    clearButton?.click();
+    expect(clear).toHaveBeenCalledTimes(1);
+  });
+
   it('offers key setup and forwards both actions to the TTS drawer', () => {
     const fixture = render(false);
     const details = jest.fn();
@@ -49,6 +65,7 @@ describe('VoiceElevenlabsSummaryComponent', () => {
     expect(element.textContent).toContain('Add key');
     element.querySelectorAll('button').forEach(button => button.click());
     expect(details).toHaveBeenCalledTimes(2);
+    expect(element.querySelector('[data-testid="voice-elevenlabs-clear"]')).toBeNull();
     expect(TestBed.inject(SearchVoiceSummaryStore).segments()[0]).toMatchObject({ value: 'No key', meta: 'Add a key for cloud voices', tone: 'idle' });
   });
 });

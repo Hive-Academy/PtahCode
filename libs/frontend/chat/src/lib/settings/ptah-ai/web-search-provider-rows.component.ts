@@ -56,7 +56,7 @@ export interface ProviderTestResult {
             </ptah-native-popover>
           </div>
           <div class="provider-body">
-            <span [attr.data-testid]="'settings-web-search-status-' + opt.value">
+            <span class="provider-test" [attr.data-testid]="'settings-web-search-status-' + opt.value">
               @if (testResults().find(r => r.provider === opt.value); as r) {
                 <ptah-status [status]="r.success ? 'online' : 'failed'" [label]="r.success ? 'Works' : TEST_FAILED" />
               } @else { <span class="sr-only">Not tested</span> }
@@ -123,7 +123,9 @@ export interface ProviderTestResult {
     .provider[data-readiness='missing'] { border-inline-start-color: var(--ptah-card-tone-warning); }
     .provider-header { display: flex; align-items: center; gap: var(--ptah-gap-controls); padding: var(--ptah-card-padding-sm); }
     .provider-mark { display: grid; place-items: center; flex-shrink: 0; width: 2.25rem; height: 2.25rem; border: 1px solid var(--ptah-border-color); border-radius: var(--ptah-radius-control); background: var(--ptah-card-bg); font-weight: 600; }
-    .provider-body { display: flex; flex-direction: column; gap: var(--ptah-gap-controls); padding: var(--ptah-card-padding-sm); flex: 1; }
+    /* The status line follows the header: no top padding, and the hidden test status takes no gap. */
+    .provider-body { display: flex; flex-direction: column; gap: var(--ptah-gap-controls); padding: 0 var(--ptah-card-padding-sm) var(--ptah-card-padding-sm); flex: 1; }
+    .provider-test { display: contents; }
     .provider-footer { display: flex; align-items: center; flex-wrap: nowrap; gap: var(--ptah-gap-inline); padding: var(--ptah-card-padding-sm); border-top: 1px solid var(--ptah-border-color); margin-top: auto; }
     .provider-footer [hidden] { display: none; }
     .clear-key { margin-inline-start: auto; }

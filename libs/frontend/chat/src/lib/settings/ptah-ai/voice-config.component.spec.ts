@@ -300,6 +300,16 @@ describe('VoiceConfigComponent', () => {
     expect(element.textContent).not.toContain('host detail');
   });
 
+  it('opens the TTS tab with a clear request for the page Clear key action, and other Details reset it', async () => {
+    await render();
+    component.requestClearKey();
+    expect(component.drawerDirection()).toBe('tts');
+    expect(component.clearKeyRequested()).toBe(true);
+    component.openDetails('stt');
+    expect(component.drawerDirection()).toBe('stt');
+    expect(component.clearKeyRequested()).toBe(false);
+  });
+
   it('loads the drawer only when Details is used, on that direction\'s tab', async () => {
     await render();
     const [block] = await fixture.getDeferBlocks();

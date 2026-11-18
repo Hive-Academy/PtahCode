@@ -362,6 +362,22 @@ describe('ElevenLabsPanelComponent', () => {
     });
   });
   describe('clear key (V21, S-confirm)', () => {
+    it('opens the confirm once for a page clear request and never writes without confirm', async () => {
+      routeRpc({ 'voice:listVoices': VOICES });
+      mount('tts', elConfig({ apiKeyConfigured: true }));
+      await settle();
+      fixture.componentRef.setInput('startClearConfirm', true);
+      fixture.detectChanges();
+      expect(byTestId('elevenlabs-clear-group')).not.toBeNull();
+      expect(calls('voice:setApiKey')).toEqual([]);
+      byTestId<HTMLButtonElement>('elevenlabs-clear-cancel').click();
+      fixture.detectChanges();
+      // A config reload with the request still set must not open it again.
+      fixture.componentRef.setInput('config', elConfig({ apiKeyConfigured: true }));
+      fixture.detectChanges();
+      expect(element.querySelector('[data-testid="elevenlabs-clear-group"]')).toBeNull();
+    });
+
     it('asks for an inline confirm first, focuses Cancel, and Cancel returns focus to Clear', async () => {
       routeRpc({ 'voice:listVoices': VOICES });
       mount('tts', elConfig({ apiKeyConfigured: true }));

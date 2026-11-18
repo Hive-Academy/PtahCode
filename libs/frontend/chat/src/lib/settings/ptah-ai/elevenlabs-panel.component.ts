@@ -403,6 +403,8 @@ export class ElevenLabsPanelComponent {
   readonly direction = input.required<'stt' | 'tts'>();
   readonly config = input.required<VoiceProviderConfigElevenLabsDto>();
   readonly keyOnly = input(false);
+  /** Opens the clear confirmation on mount (page "Clear key" action); the confirm still asks. */
+  readonly startClearConfirm = input(false);
   readonly changed = output<void>();
   readonly AlertCircleIcon = AlertCircle;
   readonly CheckCircleIcon = CheckCircle;
@@ -471,6 +473,16 @@ export class ElevenLabsPanelComponent {
     // Loads voices on mount and again once a first key is saved and the container re-reads.
     effect(() => {
       if (this.showVoicePicker()) untracked(() => void this.loadVoices());
+    });
+    // One shot per request: a later config reload must not open the confirmation again.
+    let clearRequestHandled = false;
+    effect(() => {
+      if (!this.startClearConfirm()) {
+        clearRequestHandled = false;
+      } else if (!clearRequestHandled && this.config().apiKeyConfigured) {
+        clearRequestHandled = true;
+        untracked(() => this.confirmingClear.set(true));
+      }
     });
   }
   onKeyInput(event: Event): void {

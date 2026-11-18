@@ -78,7 +78,8 @@ const TABS: readonly NativeTab[] = [
               <div class="ptah-motion-panel px-2 pt-4" animate.enter="ptah-motion-enter" animate.leave="ptah-motion-leave">
               @switch (ttsProvider()) {
                 @case ('elevenlabs') {
-                  <ptah-elevenlabs-panel direction="tts" [config]="cfg.elevenlabs" (changed)="changed.emit()" />
+                  <ptah-elevenlabs-panel direction="tts" [config]="cfg.elevenlabs" [startClearConfirm]="confirmClearKey()"
+                    (changed)="changed.emit()" />
                 }
                 @default {
                   <ptah-local-tts-panel [config]="cfg.local" (changed)="changed.emit()" />
@@ -100,7 +101,8 @@ const TABS: readonly NativeTab[] = [
           <p class="mb-3 text-xs text-base-content-muted">
             Save a key to use ElevenLabs for voice.
           </p>
-          <ptah-elevenlabs-panel [direction]="dir" [config]="cfg.elevenlabs" [keyOnly]="true" (changed)="changed.emit()" />
+          <ptah-elevenlabs-panel [direction]="dir" [config]="cfg.elevenlabs" [keyOnly]="true"
+            [startClearConfirm]="confirmClearKey() && dir === 'tts'" (changed)="changed.emit()" />
         </section>
       </ng-template>
       @if (direction() !== null) {
@@ -119,6 +121,8 @@ export class VoiceDetailsDrawerComponent {
   /** The open tab; `null` closes the drawer. Two-way so a tab switch inside the drawer is kept by the parent. */
   readonly direction = model<VoiceDirection | null>(null);
   readonly config = input<VoiceProviderConfigDto | null>(null);
+  /** Set by the page "Clear key" action: the TTS tab opens with the ElevenLabs clear confirmation. */
+  readonly confirmClearKey = input(false);
   readonly closed = output<void>();
   /** A panel saved something; the parent re-reads the provider config. */
   readonly changed = output<void>();

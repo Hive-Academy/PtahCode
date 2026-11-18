@@ -108,7 +108,7 @@ const SAVE_PROVIDER_FAILED: Record<VoiceDirection, string> = {
         } @else if (rows().length) {
           <div data-testid="voice-engines-matrix">
             @for (row of rows(); track row.direction) {
-              <ptah-setting-row #settingRow [label]="row.name"
+              <ptah-setting-row #settingRow [label]="row.name" density="compact"
                 [attr.data-testid]="'voice-engine-row-' + row.direction">
                 <div status class="voice-row-status">
                   <ptah-status [status]="row.status.label === 'Ready' ? 'completed' : 'warning'"
@@ -153,13 +153,14 @@ const SAVE_PROVIDER_FAILED: Record<VoiceDirection, string> = {
     </section>
     @if (config(); as cfg) {
       <ptah-voice-elevenlabs-summary [config]="cfg" [voices]="elevenLabsVoices()"
-        (details)="openDetails('tts')" />
+        (details)="openDetails('tts')" (clearKey)="requestClearKey()" />
     }
 
     <!-- Lazy: the drawer and the panels it hosts load the first time a Details button is used. -->
     @defer (when drawerDirection() !== null) {
       <ptah-voice-details-drawer [(direction)]="drawerDirection" [config]="config()"
-        (closed)="drawerDirection.set(null)" (changed)="reloadAll()" />
+        [confirmClearKey]="clearKeyRequested()"
+        (closed)="drawerDirection.set(null); clearKeyRequested.set(false)" (changed)="reloadAll()" />
     }
   `,
   styles: `
@@ -192,6 +193,7 @@ export class VoiceConfigComponent implements OnInit {
   readonly isLoading = signal(true);
   /** Direction whose drawer tab is open; `null` closes drawer D-VOICE. */
   readonly drawerDirection = signal<VoiceDirection | null>(null);
+  readonly clearKeyRequested = signal(false);
 
   /** The provider selects, one per row in row order (stt, tts). */
   private readonly providerSelects = viewChildren(PtahRichSelectComponent);
@@ -318,7 +320,14 @@ export class VoiceConfigComponent implements OnInit {
     return name ? { modelLabel: name, modelTitle: null } : { modelLabel: 'Custom voice', modelTitle: voiceId };
   }
 
+  /** Page "Clear key": open the TTS drawer tab with the ElevenLabs clear confirmation. */
+  requestClearKey(): void {
+    this.openDetails('tts');
+    this.clearKeyRequested.set(true);
+  }
+
   openDetails(direction: VoiceDirection): void {
+    this.clearKeyRequested.set(false);
     this.drawerDirection.set(direction);
   }
 
