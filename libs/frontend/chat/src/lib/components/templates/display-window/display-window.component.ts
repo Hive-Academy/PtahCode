@@ -9,7 +9,7 @@ import {
 } from '@angular/core';
 import { DOCUMENT } from '@angular/common';
 // The panel is named only inside `@defer`, so the compiler loads its entry
-// lazily (the display sheet's rule); the type import is erased.
+// lazily; the type import is erased.
 import {
   DisplayPanelComponent,
   type DisplayPanelViewStateChange,
@@ -33,7 +33,7 @@ const LINK_ERROR_MS = 5000;
  * snapshot (`DisplayWindowStateHandler`), and turns every panel output into a
  * `displayWindow:action` for the main renderer, which owns the dock state.
  * Links go through `artifacts:openLink` (the main-process allowlist), never
- * `window.open`. Re-attach sends the `attach` action; before any snapshot it
+ * `window.open`. Close sends the historical `attach` action; before any snapshot it
  * closes the window directly. The window's theme follows the snapshot through
  * the `data-theme` and `data-theme-mode` root attributes.
  */
@@ -56,13 +56,18 @@ const LINK_ERROR_MS = 5000;
           · {{ current.count }}
         }
       </h1>
+      <button type="button" ptahButton variant="ghost" size="xs"
+        [disabled]="view() === null"
+        [attr.aria-pressed]="view()?.pinned ?? false"
+        (click)="send({ type: 'pin', pinned: !view()?.pinned })"
+        data-testid="display-window-pin">Keep current view</button>
       <button
         type="button"
         ptahButton variant="ghost" size="xs"
-        (click)="reattach()"
-        data-testid="display-window-reattach"
+        (click)="closeWindow()"
+        data-testid="display-window-close"
       >
-        Re-attach
+        Close
       </button>
     </header>
     @if (linkError()) {
@@ -175,8 +180,8 @@ export class DisplayWindowComponent {
     });
   }
 
-  /** Re-attach: the main window shows the panel again and this window closes. */
-  protected reattach(): void {
+  /** Close the display window. */
+  protected closeWindow(): void {
     if (this.state.snapshot() !== null) {
       this.send({ type: 'attach' });
       return;

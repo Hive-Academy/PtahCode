@@ -19,7 +19,7 @@ import { capture } from './settings-capture';
 import { HOST_DETAIL } from './settings-advanced-search-voice.fixtures';
 import {
   asvState, chooseVoiceProvider, dismissToast, expectEscReturnsFocus, expectFailedWrite, openVoiceDrawer, closeDrawers,
-  promptDetailsButton, searchVoiceTab, styleRow,
+  pickRichOption, promptDetailsButton, richOption, richTrigger, searchVoiceTab, styleRow,
 } from './settings-advanced-search-voice.reach';
 
 test.use({ useAppBuild: true });
@@ -118,7 +118,7 @@ async function attempt(findings: string[], name: string, body: () => Promise<voi
 async function captureAdvanced(page: Page, host: Host, theme: string): Promise<unknown> {
   await gotoSettingsTab(page, 'Advanced');
   await expect(page.locator('[data-testid="output-style-matrix"]')).toBeVisible();
-  await expect(page.locator('[data-testid="vscode-lm-model-select"]')).toBeVisible();
+  await expect(page.locator('[data-testid="vscode-lm-model-select"]').getByRole('combobox')).toBeVisible();
   await waitForSettled(page);
   const fold = await test.step('fold §2.2', () => assertAdvancedFold(page, host, theme)).then(() => null, (error: unknown) => error);
   await capture(page, 'advanced', host, theme);
@@ -208,7 +208,8 @@ for (const host of HOSTS) {
     await escape('Advanced: membership key popover', () => by('membership-key-trigger'), by('membership-key-popover'));
     await escape('Advanced: import confirm', () => page.getByRole('button', { name: 'Import settings' }), by('import-confirm'),
       () => by('import-confirm').getByRole('button', { name: 'Cancel' }).click());
-    await escape('Advanced: effort popover', () => by('agent-behaviour-effort-value'), by('agent-behaviour-effort-choice-high'));
+    await escape('Advanced: effort popover', () => by('agent-behaviour-effort-value').getByRole('combobox'),
+      page.getByRole('listbox').getByRole('option', { name: 'High', exact: true }));
     await escape('Advanced: new output style drawer (D-OS)', () => by('output-style-new-button'), by('output-style-drawer'));
     await escape('Advanced: edit output style drawer (D-OS)',
       () => styleRow(page, 'concise-reviewer').locator('[data-testid="output-style-edit-button"]'), by('output-style-drawer'));
@@ -223,10 +224,12 @@ for (const host of HOSTS) {
       by('settings-web-search-clear-group-tavily'), () => by('settings-web-search-clear-cancel-tavily').click());
     if (host === 'electron') {
       await attempt(findings, 'Voice: provider select', async () => {
-        const select = by('voice-provider-btn-stt');
-        await select.focus();
-        await expect(select).toBeFocused();
-        await expect(by('voice-provider-option-stt-local')).toBeEnabled();
+        const trigger = richTrigger(by('voice-provider-btn-stt'));
+        await trigger.focus();
+        await expect(trigger).toBeFocused();
+        await trigger.click();
+        await expect(richOption(by('voice-provider-option-stt-local'))).not.toHaveAttribute('aria-disabled', 'true');
+        await page.keyboard.press('Escape');
       });
       for (const direction of ['stt', 'tts'] as const) {
         await escape(`Voice: details drawer (${direction})`, () => by(`voice-engine-details-${direction}`), by('voice-details-drawer'));
@@ -250,11 +253,14 @@ for (const host of HOSTS) {
     const findings: string[] = [];
     await gotoSettingsTab(page, 'Advanced');
     await attempt(findings, 'effort (transport failure)', async () => {
-      const value = page.locator('[data-testid="agent-behaviour-effort-value"]');
+      const value = page.locator('[data-testid="agent-behaviour-effort-value"]').getByRole('combobox');
       await expect(value).toContainText('Medium');
       failures.set('config:effort-set', rpcError(HOST_DETAIL));
       await value.click();
-      await page.locator('[data-testid="agent-behaviour-effort-choice-high"]').click();
+      // The panel opens over the next section: a trial click on the lowest option fails if that
+      // section covers the panel (pointer hit-target check, no write).
+      await page.getByRole('listbox').getByRole('option').last().click({ trial: true });
+      await page.getByRole('listbox').getByRole('option', { name: 'High', exact: true }).click();
       await expectFailedWrite(page, 'Could not save the chat reasoning effort.');
       await expect(value).toContainText('Medium');
     });
@@ -290,9 +296,9 @@ for (const host of HOSTS) {
         await openVoiceDrawer(page, 'stt');
         const select = page.locator('[data-testid="local-stt-model-select"]');
         failures.set('voice:setConfig', { ok: false, error: HOST_DETAIL });
-        await select.selectOption('small.en');
+        await pickRichOption(page, select, 'small.en (~250 MB, more accurate)');
         await expectFailedWrite(page, 'Could not save the voice configuration.');
-        await expect(select).toHaveValue('base.en');
+        await expect(richTrigger(select)).toContainText('base.en (~80 MB, default)');
       });
       await dismissToast(page);
       await closeDrawers(page).catch(() => undefined);
@@ -301,11 +307,11 @@ for (const host of HOSTS) {
         await dismissToast(page, 'Saved text-to-speech provider.');
         await openVoiceDrawer(page, 'tts');
         const select = page.locator('[data-testid="local-tts-voice-select"]');
-        await expect(select).toHaveValue('af_heart');
+        await expect(richTrigger(select)).toContainText('Heart (US female)');
         failures.set('voice:setTtsConfig', { ok: false, error: HOST_DETAIL });
-        await select.selectOption('am_michael');
+        await pickRichOption(page, select, 'Michael (US male)');
         await expectFailedWrite(page, 'Could not save the text-to-speech configuration.');
-        await expect(select).toHaveValue('af_heart');
+        await expect(richTrigger(select)).toContainText('Heart (US female)');
       });
       await dismissToast(page);
       await closeDrawers(page).catch(() => undefined);

@@ -1,4 +1,3 @@
-import type { DisplayFileItem } from '@ptah-extension/chat-ui';
 import {
   Component,
   Input,
@@ -9,7 +8,6 @@ import {
   input,
   output,
   signal,
-  type Type,
 } from '@angular/core';
 import { By } from '@angular/platform-browser';
 jest.mock('ngx-markdown', () => {
@@ -74,7 +72,6 @@ import {
   type PtahUiDisplayDockSync,
 } from '@ptah-extension/chat-ui';
 import {
-  DisplayPanelComponent,
   type DisplaySurface,
 } from '@ptah-extension/chat-ui/display-panel';
 import type { SurfaceContent } from '@ptah-extension/shared/mcp-apps-contracts/surface';
@@ -92,22 +89,6 @@ class RailTileStub {
   readonly actions = inject(SESSION_CARD_ACTIONS);
 }
 
-@Component({ selector: 'ptah-display-panel', standalone: true, template: '' })
-class RailDisplayPanelStub {
-  readonly surfaces = input<readonly DisplaySurface[]>([]);
-  readonly files = input<readonly DisplayFileItem[]>([]);
-  readonly selectedKey = input<string | null>(null);
-  readonly scrollToSelectedOnMount = input(false);
-  readonly pinned = input(false);
-  readonly viewStates = input<unknown>(null);
-  readonly selectedKeyChange = output<string>();
-  readonly viewStateChange = output<unknown>();
-  readonly artifacts = input<readonly unknown[]>([]);
-  readonly open = input(false);
-  readonly fullscreenArtifactId = input<string | null>(null);
-  readonly fullscreenChange = output<unknown>();
-  readonly openExternal = output<string>();
-}
 @Component({
   selector: 'ptah-agent-monitor-panel',
   standalone: true,
@@ -122,28 +103,9 @@ class RailAgentPanelStub {
   readonly closed = output<void>();
 }
 
-function componentImport(
-  owner: Type<unknown>,
-  selector: string,
-): Type<unknown> {
-  type Dependency = Type<unknown> & { ɵcmp?: { selectors: string[][] } };
-  const definition = owner as Type<unknown> & {
-    ɵcmp: { dependencies: Dependency[] | (() => Dependency[]) };
-  };
-  const imports = definition.ɵcmp.dependencies;
-  const component = (typeof imports === 'function' ? imports() : imports).find(
-    (dependency) =>
-      dependency.ɵcmp?.selectors.some((selectors) =>
-        selectors.includes(selector),
-      ),
-  );
-  if (!component)
-    throw new Error(`Missing ${selector} in ${owner.name} imports`);
-  return component;
-}
 
 describe('CanvasDetailTranscriptComponent visibility', () => {
-  it('fenced display opens and updates in place in the Rail sheet', async () => {
+  it('fenced display updates remain available without an inline Rail sheet', async () => {
     const originalResizeObserver = global.ResizeObserver;
     global.ResizeObserver = jest.fn().mockImplementation(() => ({
       observe: jest.fn(),
@@ -305,19 +267,8 @@ describe('CanvasDetailTranscriptComponent visibility', () => {
         },
       ],
     });
-    const displaySheet = componentImport(
-      ChatViewComponent,
-      'ptah-display-sheet',
-    );
     TestBed.overrideComponent(ChatViewComponent, {
-      set: {
-        imports: [SidebarTabComponent, displaySheet, RailAgentPanelStub],
-        schemas: [NO_ERRORS_SCHEMA],
-      },
-    });
-    TestBed.overrideComponent(displaySheet, {
-      remove: { imports: [DisplayPanelComponent] },
-      add: { imports: [RailDisplayPanelStub] },
+      set: { imports: [SidebarTabComponent, RailAgentPanelStub], schemas: [NO_ERRORS_SCHEMA] },
     });
     const fixture = TestBed.createComponent(CanvasDetailTranscriptComponent);
     fixture.componentRef.setInput('tabId', 'parent');
@@ -358,22 +309,11 @@ describe('CanvasDetailTranscriptComponent visibility', () => {
       store.setSurfaces('parent', { surfaces: [first], statuses: new Map() });
       store.requestAutoOpen('parent', 'turn-1', first.key);
       await settle();
-      const panel = fixture.debugElement.query(
-        By.directive(RailDisplayPanelStub),
-      );
-      expect(panel).toBeTruthy();
-      expect(panel.componentInstance.surfaces()).toEqual([first]);
+      expect(fixture.nativeElement.querySelector('ptah-display-sheet')).toBeNull();
       const updated = { ...first, updatedSeq: 2 };
       store.setSurfaces('parent', { surfaces: [updated], statuses: new Map() });
       await settle();
-      expect(
-        fixture.nativeElement.querySelectorAll('ptah-display-sheet'),
-      ).toHaveLength(1);
-      expect(
-        fixture.debugElement.query(By.directive(RailDisplayPanelStub))
-          .componentInstance,
-      ).toBe(panel.componentInstance);
-      expect(panel.componentInstance.surfaces()).toEqual([updated]);
+      expect(store.surfaces('parent')).toEqual([updated]);
       fixture.componentRef.setInput('visible', false);
       await settle();
       expect(
@@ -389,7 +329,7 @@ describe('CanvasDetailTranscriptComponent visibility', () => {
         fixture.debugElement.query(By.directive(ChatViewComponent))
           .componentInstance,
       ).toBe(chat.componentInstance);
-      expect(panel.componentInstance.surfaces()).toEqual([updated]);
+      expect(store.surfaces('parent')).toEqual([updated]);
       jest.useFakeTimers();
       const actions = injector.get(SESSION_CARD_ACTIONS);
       const status = fixture.nativeElement.querySelector(

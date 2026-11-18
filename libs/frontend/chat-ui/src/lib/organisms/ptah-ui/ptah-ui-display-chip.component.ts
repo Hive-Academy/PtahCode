@@ -70,7 +70,7 @@ export class PtahUiDisplayChipComponent {
   readonly messageId = input.required<string>();
   readonly nodeId = input.required<string>();
   readonly active = input(true);
-  /** Batch 4 binds this request to sheet navigation. */
+  /** The host routes this request to the detached display window. */
   readonly openInDisplayRequested = output<string>();
 
   protected readonly available = computed(

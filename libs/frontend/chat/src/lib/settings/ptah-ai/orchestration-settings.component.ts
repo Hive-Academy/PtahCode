@@ -3,17 +3,13 @@ import {
   Component,
   OnInit,
   inject,
-  output,
 } from '@angular/core';
-import {
-  ProvidersSettingsStateService,
-  VSCodeService,
-} from '@ptah-extension/core';
+import { ProvidersSettingsStateService } from '@ptah-extension/core';
+import { PtahInstrumentBandComponent } from '@ptah-extension/ui';
+import { ContextOverviewStore } from './context-overview.store';
 import { SubagentCacheTtlSettingComponent } from './subagent-cache-ttl-setting.component';
 import { SessionBudgetSettingsComponent } from './session-budget-settings.component';
 import { LaneGuardsSettingsComponent } from './lane-guards-settings.component';
-import { HostRoutingSettingComponent } from './host-routing-setting.component';
-import { LaneRotationSettingComponent } from './lane-rotation-setting.component';
 import { AdvancedSettingsGroupComponent } from '../advanced/advanced-settings-group.component';
 
 /**
@@ -21,30 +17,39 @@ import { AdvancedSettingsGroupComponent } from '../advanced/advanced-settings-gr
  * do not change). Opens the shared state itself, because a user can land on this tab first and the subagent cache TTL
  * reads it.
  *
- * Order: the subagent prompt-cache TTL, the session budget, Lane guards, then Electron-only routing
- * suggestions and executor rotation, then the advanced groups (context budgets,
- * background query limits; TASK_2026_658) in one
- * viewport-deferred chunk. The decision matrix has its own child page. The CLI matrix and the
- * background model roles moved to the Providers tab (`AgentsRoutingSettingsComponent`), with their deep links.
+ * Contains prompt caching, session budgets, lane guards and deferred context budget / background query groups.
+ * Routing suggestions and executor rotation live on the Decision matrix page. Saves use the page toast.
  *
- * No inline commit panel: the TTL, this tab's only `commit()` writer, reports through the page toast
- * (`SettingsSaveFeedbackService.save`).
+ * The field grids of this page use a wider column minimum (14.5rem): the long field labels and unit suffixes
+ * do not fit a half column of the 470px content column at 1168px, so that width shows one field per row, and
+ * 1440px and wider still show three columns.
  */
 @Component({
   selector: 'ptah-orchestration-settings',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
+  providers: [ContextOverviewStore],
+  host: {
+    style:
+      '--ptah-field-grid-min-sm: 14.5rem; --ptah-field-grid-min-md: 14.5rem',
+  },
   imports: [
+    PtahInstrumentBandComponent,
     SubagentCacheTtlSettingComponent,
     SessionBudgetSettingsComponent,
     LaneGuardsSettingsComponent,
-    HostRoutingSettingComponent,
-    LaneRotationSettingComponent,
     AdvancedSettingsGroupComponent,
   ],
   template: `
     <!-- Same box and rhythm as the Providers page: the Settings shell sets the width, centring and side padding. -->
-    <div class="flex flex-col gap-[var(--ptah-gap-section)] py-[var(--ptah-gap-heading)] font-sans text-sm text-base-content">
+    <div
+      class="flex flex-col gap-[var(--ptah-gap-section)] py-[var(--ptah-gap-heading)] font-sans text-sm text-base-content"
+    >
+      <ptah-instrument-band
+        [segments]="overview.segments()"
+        [loading]="overview.loading()"
+        ariaLabel="Context management overview"
+      />
       <!-- Subagent prompt-cache TTL (TASK_2026_597 N1): its own chunk, loaded when scrolled into view. -->
       @defer (on viewport) {
         <ptah-subagent-cache-ttl-setting />
@@ -70,17 +75,17 @@ import { AdvancedSettingsGroupComponent } from '../advanced/advanced-settings-gr
       <!-- Independent of the tall budget form: guards are small and should always be available. -->
       <ptah-lane-guards-settings />
 
-      <!-- Routing suggestions (TASK_2026_857): Electron only, because only the Electron host runs the coordinator. -->
-      @if (isElectron) {
-        <ptah-host-routing-setting (openMatrix)="openMatrix.emit()" />
-        <ptah-lane-rotation-setting />
-      }
-
       <!-- Advanced orchestration values (TASK_2026_658): one chunk, loaded when scrolled into view, below the session
            budget and the always-available Lane guards; the placeholder is one row. -->
       @defer (on viewport) {
-        <ptah-advanced-settings-group groupId="context-budgets" headingStyle="section" />
-        <ptah-advanced-settings-group groupId="background-queries" headingStyle="section" />
+        <ptah-advanced-settings-group
+          groupId="context-budgets"
+          headingStyle="section"
+        />
+        <ptah-advanced-settings-group
+          groupId="background-queries"
+          headingStyle="section"
+        />
       } @placeholder {
         <div
           class="min-h-[2.75rem] border-b border-base-content/10"
@@ -91,11 +96,11 @@ import { AdvancedSettingsGroupComponent } from '../advanced/advanced-settings-gr
   `,
 })
 export class OrchestrationSettingsComponent implements OnInit {
-  readonly openMatrix = output<void>();
   private readonly state = inject(ProvidersSettingsStateService);
-  protected readonly isElectron = inject(VSCodeService).isElectron === true;
+  protected readonly overview = inject(ContextOverviewStore);
 
   ngOnInit(): void {
     void this.state.open();
+    void this.overview.reload();
   }
 }

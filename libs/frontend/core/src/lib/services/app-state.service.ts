@@ -137,7 +137,7 @@ export interface PendingSettingsTab {
     | 'memory-curator'
     | 'enhancement'
     | 'capability-matrix'
-    | 'decision-matrix'
+    | 'host-routing' | 'routing-suggestions' | 'lane-rotation' | 'decision-matrix'
     | 'matrix';
 }
 

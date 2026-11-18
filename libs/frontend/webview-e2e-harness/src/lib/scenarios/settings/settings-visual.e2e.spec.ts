@@ -326,6 +326,7 @@ async function assertOrderStripWhole(
 /**
  * Batch 27b deviation 6 / Batch 28: an open popover is painted above everything on the page, the Main agent
  * section's badges included. The top-most element at the centre of each popover row must belong to the popover.
+ * Each row is first scrolled into view inside the popover, because the panel scrolls when the window is short.
  */
 async function assertPopoverOnTop(
   page: Page,
@@ -336,6 +337,8 @@ async function assertPopoverOnTop(
     (panel, rowSelector) =>
       Array.from(panel.querySelectorAll(rowSelector))
         .map((row) => {
+          // The popover scrolls whole when the room beside its trigger is short: test stacking, not scroll.
+          row.scrollIntoView({ block: 'nearest', inline: 'nearest' });
           const box = row.getBoundingClientRect();
           const top = document.elementFromPoint(
             box.left + box.width / 2,

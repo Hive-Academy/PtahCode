@@ -293,6 +293,7 @@ const DisplayWindowActionSchema = z.discriminatedUnion('type', [
     surfaceKey: z.string().min(1),
     viewState: SurfaceViewStateWireSchema,
   }),
+  z.strictObject({ type: z.literal('pin'), pinned: z.boolean() }),
   z.strictObject({ type: z.literal('attach') }),
 ]);
 

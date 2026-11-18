@@ -28,11 +28,11 @@ export function isPtahDescriptionValueEmpty(value: string | number | null | unde
 
 const DIVIDER_CLASS = '[border-bottom:var(--ptah-border-width)_solid_var(--ptah-border-color)]';
 
-/** Row grid: term above value below 640px, three columns from 640px (spec section 0.4 `form-split`). */
+/** Row grid: term above value below the `row-split` container width (26rem), three columns from it (spec section 0.4). */
 const ROW_CLASS = [
   'grid min-h-[var(--ptah-dl-row-min-h)] py-[var(--ptah-gap-controls)] gap-[var(--ptah-gap-label)]',
-  '[@container(min-width:640px)]:grid-cols-[var(--ptah-dl-term-w)_minmax(0,1fr)_auto]',
-  '[@container(min-width:640px)]:items-center [@container(min-width:640px)]:gap-x-[var(--ptah-gap-field)]',
+  'row-split:grid-cols-[var(--ptah-dl-term-w)_minmax(0,1fr)_auto]',
+  'row-split:items-center row-split:gap-x-[var(--ptah-gap-field)]',
 ].join(' ');
 
 const COMPACT_ROW_CLASS =
@@ -185,7 +185,7 @@ export class PtahDescriptionListComponent {
     <!-- A second dd: a dl row holds only dt and dd. Empty (no action) is display:none. -->
     <dd
       data-ptah-description-actions
-      class="flex items-center gap-[var(--ptah-gap-controls)] justify-self-start empty:hidden [@container(min-width:640px)]:justify-self-end"
+      class="flex items-center gap-[var(--ptah-gap-controls)] justify-self-start empty:hidden row-split:justify-self-end"
       ><ng-content select="[actions]"
     /></dd>
   `,

@@ -54,7 +54,7 @@ const TABS: readonly NativeTab[] = [
       <!-- One projectable node per @if: a multi-node @if cannot project into the drawer's slots (NG8011). -->
       @if (direction() !== null) {
         <div drawer-header data-testid="voice-details-drawer">
-          <h2 class="text-sm font-semibold text-base-content">Voice engines</h2>
+          <h2 class="text-sm font-semibold text-base-content">Voice details</h2>
           <p class="text-xs text-base-content-muted" data-testid="voice-details-subtitle">{{ subtitle() }}</p>
         </div>
       }
@@ -78,7 +78,8 @@ const TABS: readonly NativeTab[] = [
               <div class="ptah-motion-panel px-2 pt-4" animate.enter="ptah-motion-enter" animate.leave="ptah-motion-leave">
               @switch (ttsProvider()) {
                 @case ('elevenlabs') {
-                  <ptah-elevenlabs-panel direction="tts" [config]="cfg.elevenlabs" (changed)="changed.emit()" />
+                  <ptah-elevenlabs-panel direction="tts" [config]="cfg.elevenlabs" [startClearConfirm]="confirmClearKey()"
+                    (changed)="changed.emit()" />
                 }
                 @default {
                   <ptah-local-tts-panel [config]="cfg.local" (changed)="changed.emit()" />
@@ -94,13 +95,14 @@ const TABS: readonly NativeTab[] = [
       <ng-template #elevenLabsSetup let-cfg let-dir="direction">
         <section class="mt-4 border-t border-base-300 pt-4" aria-labelledby="elevenlabs-setup-heading"
           data-testid="voice-elevenlabs-setup">
-          <h3 id="elevenlabs-setup-heading" class="text-xs font-bold uppercase tracking-wider text-base-content">
-            ElevenLabs (cloud)
+          <h3 id="elevenlabs-setup-heading" class="font-medium text-base-content">
+            ElevenLabs setup
           </h3>
           <p class="mb-3 text-xs text-base-content-muted">
-            Save an API key here, then pick ElevenLabs as the provider in the Voice engines table.
+            Save a key to use ElevenLabs for voice.
           </p>
-          <ptah-elevenlabs-panel [direction]="dir" [config]="cfg.elevenlabs" [keyOnly]="true" (changed)="changed.emit()" />
+          <ptah-elevenlabs-panel [direction]="dir" [config]="cfg.elevenlabs" [keyOnly]="true"
+            [startClearConfirm]="confirmClearKey() && dir === 'tts'" (changed)="changed.emit()" />
         </section>
       </ng-template>
       @if (direction() !== null) {
@@ -119,6 +121,8 @@ export class VoiceDetailsDrawerComponent {
   /** The open tab; `null` closes the drawer. Two-way so a tab switch inside the drawer is kept by the parent. */
   readonly direction = model<VoiceDirection | null>(null);
   readonly config = input<VoiceProviderConfigDto | null>(null);
+  /** Set by the page "Clear key" action: the TTS tab opens with the ElevenLabs clear confirmation. */
+  readonly confirmClearKey = input(false);
   readonly closed = output<void>();
   /** A panel saved something; the parent re-reads the provider config. */
   readonly changed = output<void>();

@@ -1,10 +1,10 @@
 /**
  * OutputStyleListComponent — the matrix picker half of the output-style section (A19-A24).
  *
- * Rebuilt as a P4 matrix (`table table-xs`) with an Active radio column (G7) and
+ * Selectable card collection with native radio controls and
  * collapsed Command-line parity `<details>` (P9):
  *  - **A19**: P4 matrix with Active (radio), Name, Tier, Description, Actions columns.
- *    Retains `role="radiogroup"` on the table.
+ *    Retains `role="radiogroup"` on the grid.
  *  - **A20**: Status/tier badges use the shared outline badge owner,
  *    preserving deviation #6 (colour on dot/border only).
  *  - **A22**: Edit opens drawer D-OS; Delete opens P8 inline confirm in the row.
@@ -38,6 +38,7 @@ import {
   LucideAngularModule,
   AlertTriangle,
   Check,
+  Info,
   Pencil,
   Trash2,
 } from 'lucide-angular';
@@ -58,7 +59,7 @@ import {
 import type { OutputStyleFailedOperation } from './output-style.store';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
 import { OutputStyleNoticesComponent } from './output-style-notices.component';
-import { PtahBadgeDirective, PtahButtonDirective, PtahCardGridDirective, PtahIconButtonDirective, PtahSkeletonComponent } from '@ptah-extension/ui';
+import { PtahBadgeDirective, PtahButtonDirective, PtahIconButtonDirective, PtahSkeletonComponent, NativePopoverComponent } from '@ptah-extension/ui';
 
 export { PARITY_TIERS, type ParityTierOption };
 
@@ -78,10 +79,10 @@ export interface OutputStyleSelectionRequest {
 }
 
 const TIER_LABELS: Readonly<Record<OutputStyleTier, string>> = {
-  builtin: 'Built-in',
-  user: 'You',
-  project: 'Project',
-  plugin: 'Plugin',
+  builtin: 'Built in',
+  user: 'Custom',
+  project: 'Custom',
+  plugin: 'Custom',
 };
 
 const SHADOW_WINNER_LABELS: Readonly<Record<OutputStyleTier, string>> = {
@@ -102,24 +103,10 @@ const BUILT_IN_NOTE = 'Built into the agent — Ptah can select it but not chang
 @Component({
   selector: 'ptah-output-style-list',
   standalone: true,
-  imports: [SettingsBusyDisabledDirective, LucideAngularModule, OutputStyleNoticesComponent, OutputStyleParitySectionComponent, PtahButtonDirective, PtahIconButtonDirective, PtahBadgeDirective, PtahSkeletonComponent, PtahCardGridDirective],
+  imports: [SettingsBusyDisabledDirective, LucideAngularModule, OutputStyleNoticesComponent, OutputStyleParitySectionComponent, PtahButtonDirective, PtahIconButtonDirective, PtahBadgeDirective, PtahSkeletonComponent, NativePopoverComponent],
+  host: { class: 'block w-full min-w-0' },
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <ptah-output-style-notices
-      [failedOperation]="failedOperation()"
-      [activeName]="activeName()"
-      [activeMissing]="activeMissing()"
-      [invalidCount]="invalid().length"
-      [hasCollision]="hasCollision()"
-      [collidingNames]="collidingNames()"
-      [usingFallback]="usingFallback()"
-      [styles]="styles()"
-      [saving]="saving()"
-      (dismissError)="dismissError.emit()"
-      (clearSelection)="onSelectNull()"
-      (copyToProject)="copyToProject.emit($event)"
-    />
-
     <!-- Matrix Table (A19, A20, A22, G7) -->
     @if (loading()) {
       <div class="flex items-center gap-[var(--ptah-gap-controls)] py-[var(--ptah-gap-field)] text-xs text-base-content-muted" role="status">
@@ -127,10 +114,10 @@ const BUILT_IN_NOTE = 'Built into the agent — Ptah can select it but not chang
         Reading your style files…
       </div>
     } @else {
-      <div>
+      <div class="[container-type:inline-size] w-full min-w-0">
+        <!-- Cap the tracks at three: auto-fill reserves empty columns on wide sections. -->
         <div
-          ptahCardGrid
-          variant="tight"
+          class="grid w-full grid-cols-1 items-stretch gap-[var(--ptah-card-grid-gap)] [@container(min-width:416px)]:grid-cols-2 [@container(min-width:672px)]:grid-cols-3"
           role="radiogroup"
           aria-label="Active output style"
           data-testid="output-style-matrix"
@@ -142,17 +129,20 @@ const BUILT_IN_NOTE = 'Built into the agent — Ptah can select it but not chang
               let i = $index
             ) {
               <div
-                class="rounded-[var(--ptah-card-radius)] border border-base-content/10 p-[var(--ptah-gap-field)]"
+                class="relative flex min-w-0 flex-col gap-[var(--ptah-gap-controls)] rounded-[var(--ptah-card-radius)] border-2 p-[var(--ptah-gap-field)]"
+                [class.border-base-content/10]="!isActive(style)"
+                [class.border-primary]="isActive(style)"
+                [class.bg-primary/5]="isActive(style)"
                 [class.opacity-60]="isShadowed(style)"
                 [attr.data-testid]="'output-style-row-' + style.name"
               >
                 <!-- Active Radio Column -->
-                <div class="inline-flex items-center">
+                <div class="absolute top-[var(--ptah-gap-field)] right-[var(--ptah-gap-field)] inline-flex items-center">
                   <input
                     type="radio"
                     name="active-output-style"
                     role="radio"
-                    class="cursor-pointer disabled:cursor-not-allowed"
+                    class="accent-primary cursor-pointer disabled:cursor-not-allowed"
                     [checked]="isActive(style)"
                     [ptahBusyDisabled]="saving() || isShadowed(style)"
                     [attr.aria-checked]="isActive(style)"
@@ -164,7 +154,7 @@ const BUILT_IN_NOTE = 'Built into the agent — Ptah can select it but not chang
                 </div>
 
                 <!-- Name Column -->
-                <div class="font-medium text-base-content">
+                <div class="pr-[var(--ptah-gap-group)] font-semibold text-base-content">
                   <div class="flex items-center gap-[var(--ptah-gap-inline)]">
                     @if (isActive(style)) {
                       <lucide-angular
@@ -178,6 +168,22 @@ const BUILT_IN_NOTE = 'Built into the agent — Ptah can select it but not chang
                   </div>
                 </div>
 
+                <!-- Description Column + Notes (the built-in note is the badge title and one footnote, M4) -->
+                <div class="text-xs text-base-content-muted">
+                  <div class="break-words leading-relaxed">{{ style.description }}</div>
+                  @if (shadowNote(style); as note) {
+                    <p class="text-xs text-base-content-muted mt-[var(--ptah-gap-label)]" [id]="shadowNoteId(i)">
+                      {{ note }}
+                    </p>
+                  }
+                  @if (pluginNote(style); as note) {
+                    <p class="text-xs text-base-content-muted mt-[var(--ptah-gap-label)]">
+                      {{ note }}
+                    </p>
+                  }
+                </div>
+
+                <div class="flex flex-wrap items-center justify-between gap-[var(--ptah-gap-inline)]">
                 <!-- Tier Column (A20: outline badges, colour on dot/border only) -->
                 <div>
                   <div class="flex items-center gap-[var(--ptah-gap-label)] flex-wrap">
@@ -202,28 +208,25 @@ const BUILT_IN_NOTE = 'Built into the agent — Ptah can select it but not chang
                   </div>
                 </div>
 
-                <!-- Description Column + Notes (the built-in note is the badge title and one footnote, M4) -->
-                <div class="text-xs text-base-content-muted">
-                  <div>{{ style.description }}</div>
-                  @if (shadowNote(style); as note) {
-                    <p class="text-xs text-base-content-muted mt-[var(--ptah-gap-label)]" [id]="shadowNoteId(i)">
-                      {{ note }}
-                    </p>
-                  }
-                  @if (pluginNote(style); as note) {
-                    <p class="text-xs text-base-content-muted mt-[var(--ptah-gap-label)]">
-                      {{ note }}
-                    </p>
-                  }
-                </div>
-
                 <!-- Actions Column -->
                 <div>
                   <div class="flex items-center justify-end gap-[var(--ptah-gap-label)]">
+                    @if (style.tier === 'builtin') {
+                      <ptah-native-popover [isOpen]="previewName() === style.name" [keepInViewport]="true" (closed)="previewName.set(null)">
+                        <button trigger type="button" ptahButton variant="ghost" size="xs" (click)="previewName.set(style.name)">Preview</button>
+                        <div content class="max-w-xs p-[var(--ptah-gap-field)] text-xs leading-relaxed">
+                          <p class="font-semibold">{{ style.name }}</p>
+                          <p class="mt-[var(--ptah-gap-controls)]">{{ style.description }}</p>
+                          <p class="mt-[var(--ptah-gap-controls)] text-base-content-muted">{{ builtInNote }}</p>
+                        </div>
+                      </ptah-native-popover>
+                    }
+
                     <button
                       type="button"
-                      ptahIconButton variant="ghost" size="xs" class="disabled:bg-transparent disabled:border-transparent disabled:opacity-50 text-base-content"
-                      [label]="'Edit ' + style.name"
+                      ptahButton variant="ghost" size="xs" class="disabled:bg-transparent disabled:border-transparent disabled:opacity-50 text-base-content"
+                      [hidden]="style.tier === 'builtin'"
+                      [style.display]="style.tier === 'builtin' ? 'none' : null"
                       [disabled]="!style.editable || saving()"
                       [attr.aria-label]="'Edit ' + style.name"
                       [attr.title]="actionTitle(style, 'Edit')"
@@ -235,12 +238,14 @@ const BUILT_IN_NOTE = 'Built into the agent — Ptah can select it but not chang
                         class="w-3.5 h-3.5"
                         aria-hidden="true"
                       />
+                      @if (style.editable) { Edit }
                     </button>
                     <button
                       #deleteBtn
                       type="button"
-                      ptahIconButton variant="ghost" size="xs" class="disabled:bg-transparent disabled:border-transparent disabled:opacity-50 text-base-content"
-                      [label]="'Delete ' + style.name"
+                      ptahButton variant="ghost" size="xs" class="disabled:bg-transparent disabled:border-transparent disabled:opacity-50 text-base-content"
+                      [hidden]="style.tier === 'builtin'"
+                      [style.display]="style.tier === 'builtin' ? 'none' : null"
                       [disabled]="!style.deletable || saving()"
                       [attr.aria-label]="'Delete ' + style.name"
                       [attr.title]="actionTitle(style, 'Delete')"
@@ -252,8 +257,10 @@ const BUILT_IN_NOTE = 'Built into the agent — Ptah can select it but not chang
                         class="w-3.5 h-3.5"
                         aria-hidden="true"
                       />
+                      @if (style.deletable) { Delete }
                     </button>
                   </div>
+                </div>
                 </div>
               </div>
               <!-- D5 / P8: the delete confirm spans the table under its row -->
@@ -295,11 +302,27 @@ const BUILT_IN_NOTE = 'Built into the agent — Ptah can select it but not chang
           
         </div>
       </div>
-      @if (hasBuiltIn()) {
-        <p class="text-xs text-base-content-muted mt-[var(--ptah-gap-label)]" data-testid="output-style-builtin-note">
-          Built-in styles are part of the agent — Ptah can select them but not change them.
-        </p>
-      }
+      <!-- The built-in note and the output-style help share one line (no lone help icon row). -->
+      <div class="mt-[var(--ptah-gap-label)] flex items-center gap-[var(--ptah-gap-label)]">
+        @if (hasBuiltIn()) {
+          <p class="text-xs text-base-content-muted" data-testid="output-style-builtin-note">
+            Built-in styles are part of the agent — Ptah can select them but not change them.
+          </p>
+        }
+        <ptah-native-popover [isOpen]="helpOpen()" [keepInViewport]="true" (closed)="helpOpen.set(false)">
+          <button trigger type="button" ptahIconButton variant="ghost" size="xs" label="About output styles" (click)="helpOpen.set(true)">
+            <lucide-angular [img]="InfoIcon" class="w-3.5 h-3.5" aria-hidden="true" />
+          </button>
+          <div content class="max-w-xs p-[var(--ptah-gap-field)]">
+            <!-- Footer Note (Req 2.5) -->
+            <p class="text-xs text-base-content-muted leading-relaxed">
+              A style applies from your next session onwards — a conversation that is
+              already running keeps the style it started with. Styles influence tone and
+              structure; Ptah's own engineering instructions still apply on top.
+            </p>
+          </div>
+        </ptah-native-popover>
+      </div>
 
       <!-- Invalid Files List (A23) -->
       @if (invalid().length > 0) {
@@ -316,7 +339,7 @@ const BUILT_IN_NOTE = 'Built into the agent — Ptah can select it but not chang
                     class="w-3.5 h-3.5 text-warning shrink-0"
                     aria-hidden="true"
                   />
-                  <span class="font-medium text-base-content">{{ entry.fileName }}</span>
+                  <span class="pr-[var(--ptah-gap-group)] font-semibold text-base-content">{{ entry.fileName }}</span>
                   <span ptahBadge appearance="outline" size="xs" class="text-base-content">
                     {{ tierLabel(entry.tier) }}
                   </span>
@@ -347,6 +370,21 @@ const BUILT_IN_NOTE = 'Built into the agent — Ptah can select it but not chang
       }
     }
 
+    <ptah-output-style-notices
+      [failedOperation]="failedOperation()"
+      [activeName]="activeName()"
+      [activeMissing]="activeMissing()"
+      [invalidCount]="invalid().length"
+      [hasCollision]="hasCollision()"
+      [collidingNames]="collidingNames()"
+      [usingFallback]="usingFallback()"
+      [styles]="styles()"
+      [saving]="saving()"
+      (dismissError)="dismissError.emit()"
+      (clearSelection)="onSelectNull()"
+      (copyToProject)="copyToProject.emit($event)"
+    />
+
     <!-- Command-Line Parity Section (A24, P9) -->
     <ptah-output-style-parity-section
       [parityEnabled]="parityEnabled()"
@@ -362,15 +400,12 @@ const BUILT_IN_NOTE = 'Built into the agent — Ptah can select it but not chang
       (dismissParity)="dismissParity.emit()"
     />
 
-    <!-- Footer Note (Req 2.5) -->
-    <p class="text-xs text-base-content-muted mt-[var(--ptah-gap-controls)] leading-relaxed">
-      A style applies from your next session onwards — a conversation that is
-      already running keeps the style it started with. Styles influence tone and
-      structure; Ptah's own engineering instructions still apply on top.
-    </p>
   `,
 })
 export class OutputStyleListComponent {
+  readonly previewName = signal<string | null>(null);
+  readonly helpOpen = signal(false);
+  readonly InfoIcon = Info;
   readonly styles = input.required<readonly OutputStyleEntry[]>();
   readonly invalid = input.required<readonly InvalidOutputStyle[]>();
   readonly active = input<ActiveOutputStyleState | null>(null);

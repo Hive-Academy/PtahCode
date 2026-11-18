@@ -123,6 +123,27 @@ describe('DisplayWindowComponent', () => {
       .componentInstance as StubPanel;
   }
 
+  it('disables pin until a view is available', async () => {
+    replies['displayWindow:getState'] = { success: true, data: { state: null } };
+    const fixture = await render();
+    const pin = host(fixture).querySelector<HTMLButtonElement>('[data-testid="display-window-pin"]');
+    expect(pin?.disabled).toBe(true);
+    pin?.click();
+    expect(call).not.toHaveBeenCalledWith('displayWindow:action', expect.anything());
+  });
+
+  it('keeps the current view pinned through a typed action', async () => {
+    const fixture = await render();
+    const pin = host(fixture).querySelector<HTMLButtonElement>('[data-testid="display-window-pin"]');
+    expect(pin?.disabled).toBe(false);
+    expect(pin?.getAttribute('aria-pressed')).toBe('true');
+    pin?.click();
+    await settle(fixture);
+    expect(call).toHaveBeenCalledWith('displayWindow:action', { tabId: 'tab-1', action: { type: 'pin', pinned: false } });
+    expect(host(fixture).classList.contains('h-dvh')).toBe(true);
+    expect(host(fixture).querySelector('main')?.classList.contains('min-h-0')).toBe(true);
+  });
+
   it('pulls the cached state on boot and renders the panel from it', async () => {
     const fixture = await render();
     expect(call).toHaveBeenCalledWith('displayWindow:getState', {});
@@ -232,11 +253,11 @@ describe('DisplayWindowComponent', () => {
     expect(host(fixture).textContent).toContain('Could not open the link.');
   });
 
-  it('Re-attach sends the attach action', async () => {
+  it('Close sends the historical attach wire action', async () => {
     const fixture = await render();
     host(fixture)
       .querySelector<HTMLButtonElement>(
-        '[data-testid="display-window-reattach"]',
+        '[data-testid="display-window-close"]',
       )
       ?.click();
     expect(call).toHaveBeenCalledWith('displayWindow:action', {
@@ -245,7 +266,7 @@ describe('DisplayWindowComponent', () => {
     });
   });
 
-  it('Re-attach before any snapshot closes the window directly', async () => {
+  it('Close before any snapshot closes the window directly', async () => {
     replies['displayWindow:getState'] = {
       success: true,
       data: { state: null },
@@ -253,7 +274,7 @@ describe('DisplayWindowComponent', () => {
     const fixture = await render();
     host(fixture)
       .querySelector<HTMLButtonElement>(
-        '[data-testid="display-window-reattach"]',
+        '[data-testid="display-window-close"]',
       )
       ?.click();
     expect(call).toHaveBeenCalledWith('displayWindow:close', {});

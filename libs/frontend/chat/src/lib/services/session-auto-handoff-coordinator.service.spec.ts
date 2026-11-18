@@ -1,9 +1,9 @@
 ﻿import { signal, type WritableSignal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { ClaudeRpcService, LoggingService } from '@ptah-extension/core';
-import { QueuedFollowUpStore, TabManagerService, TabWorkspacePartitionService } from '@ptah-extension/chat-state';
+import { QueuedFollowUpStore, TabManagerService, TabWorkspacePartitionService, SessionTurnActivityStore } from '@ptah-extension/chat-state';
 import type { TabState } from '@ptah-extension/chat-types';
-import { SessionId, type SessionBudgetState } from '@ptah-extension/shared';
+import { SessionId, type SessionBudgetState, type SessionTurnState } from '@ptah-extension/shared';
 import { FollowUpQueueService } from './chat-store/follow-up-queue.service';
 import { MessageDispatchService } from './chat-store/message-dispatch.service';
 import { ChatStore } from './chat.store';
@@ -36,6 +36,7 @@ describe('SessionAutoHandoffCoordinatorService', () => {
   let permission: WritableSignal<boolean>;
   let store: QueuedFollowUpStore;
   let handoff: SessionAutoHandoffService;
+  let turnActivity: SessionTurnActivityStore;
   let send: jest.Mock;
   let probe: jest.Mock;
   let withdraw: jest.Mock;
@@ -46,14 +47,28 @@ describe('SessionAutoHandoffCoordinatorService', () => {
   let probeGate: Promise<void> | null;
   let nextId: number;
   const tab = (id: string) => [...active(), ...background].find((t) => t.id === id) as TabState;
+  const recordStreaming = (item: TabState) => {
+    if (item.status === 'streaming' && item.claudeSessionId) {
+      turnActivity.recordTurnActivity(item.claudeSessionId);
+    }
+  };
   const patch = (id: string, update: Partial<TabState>) => {
+    recordStreaming({ ...tab(id), ...update });
     active.update((tabs) => tabs.map((t) => t.id === id ? { ...t, ...update } : t));
     background = background.map((t) => t.id === id ? { ...t, ...update } : t);
     revision.update((n) => n + 1);
   };
   const run = async () => { TestBed.tick(); await settle(); await settle(); };
   const start = (tabs: TabState[] = [], parked: TabState[] = []) => {
+    [...tabs, ...parked].forEach(recordStreaming);
     active.set(tabs); background = parked; revision.update((n) => n + 1);
+  };
+  // Existing scenarios begin after a turn recorded before the limit budget arrives.
+  const startAfterTurn = (tabs: TabState[] = [], parked: TabState[] = []) => {
+    for (const item of [...tabs, ...parked]) {
+      if (item.claudeSessionId) turnActivity.recordTurnActivity(item.claudeSessionId);
+    }
+    start(tabs, parked);
   };
   const queued = () => store.forTab(TAB)[0];
   const holdProbe = () => {
@@ -113,14 +128,134 @@ describe('SessionAutoHandoffCoordinatorService', () => {
       { provide: ClaudeRpcService, useValue: { call: statusCall } },
       { provide: ChatStore, useValue: { isCompactingForTab: () => compacting() } },
     ] });
+    turnActivity = TestBed.inject(SessionTurnActivityStore);
     store = TestBed.inject(QueuedFollowUpStore);
     handoff = TestBed.inject(SessionAutoHandoffService);
     TestBed.inject(SessionAutoHandoffCoordinatorService);
   });
   afterEach(() => { TestBed.resetTestingModule(); jest.restoreAllMocks(); });
 
+  it('does not probe, claim or send for an idle reopened session at its limit', async () => {
+    const claim = jest.spyOn(handoff, 'claim');
+    start([makeTab(TAB)]);
+    await run();
+    patch(TAB, { sessionBudget: { ...BUDGET, revision: 13 } });
+    await run();
+    expect(probe).not.toHaveBeenCalled();
+    expect(claim).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+    expect(info).toHaveBeenCalledWith('[SessionAutoHandoff]', 'automatic hand-off skipped: no turn in this page lifetime', {
+      sessionId: SESSION, tabId: TAB,
+    });
+  });
+
+  it.each([true, false])('gates a hidden external turn by backend confirmation (%s)', async (turnRan) => {
+    const claim = jest.spyOn(handoff, 'claim');
+    start([], [makeTab(TAB)]);
+    await run();
+    const terminal: SessionTurnState = {
+      phase: 'idle', revision: 2, timestamp: 1, backgroundTasks: [],
+      sessionCrons: [], terminalReason: 'completed',
+    };
+    // Exercise the production hidden-status writer against this partition fixture.
+    Reflect.apply(TabManagerService.prototype.applyHiddenTurnStateStatus, {
+      findTabByIdAcrossWorkspaces: (id: string) => ({ tab: tab(id) }),
+      canApplyTurnState: () => true,
+      turnActivity,
+      updateTabInternal: patch,
+    }, [TAB, terminal, SESSION, { turnRan }]);
+    await run();
+    patch(TAB, { sessionBudget: { ...BUDGET, revision: 13 } });
+    await run();
+    expect(tab(TAB).status).toBe('loaded');
+    expect(probe).toHaveBeenCalledTimes(turnRan ? 1 : 0);
+    expect(claim).toHaveBeenCalledTimes(turnRan ? 1 : 0);
+    expect(send).toHaveBeenCalledTimes(turnRan ? 1 : 0);
+  });
+
+  it('fires exactly once when the reopened session starts streaming', async () => {
+    const claim = jest.spyOn(handoff, 'claim');
+    start([makeTab(TAB)]);
+    await run();
+    expect(probe).not.toHaveBeenCalled();
+    expect(claim).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+    patch(TAB, { status: 'streaming' });
+    await run();
+    patch(TAB, { sessionBudget: { ...BUDGET, revision: 13 } });
+    await run();
+    expect(probe).toHaveBeenCalledTimes(1);
+    expect(claim).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(queued()?.content).toBe(COMMAND);
+  });
+
+  it('remembers streaming when the limit budget arrives after the turn ends', async () => {
+    start([makeTab(TAB, { status: 'streaming', sessionBudget: { ...BUDGET, stage: 'handoff' } })]);
+    await run();
+    patch(TAB, { status: 'loaded' });
+    await run();
+    expect(probe).not.toHaveBeenCalled();
+    patch(TAB, { sessionBudget: { ...BUDGET, revision: 13 } });
+    await run();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith(COMMAND, { tabId: TAB });
+    expect(handoff.entry(SESSION)?.clientMessageId).toBeNull();
+  });
+
+  it('gates an idle background partition until its session streams', async () => {
+    const claim = jest.spyOn(handoff, 'claim');
+    start([], [makeTab(TAB)]);
+    await run();
+    expect(probe).not.toHaveBeenCalled();
+    expect(claim).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+    patch(TAB, { status: 'streaming' });
+    await run();
+    patch(TAB, { sessionBudget: { ...BUDGET, revision: 13 } });
+    await run();
+    expect(probe).toHaveBeenCalledTimes(1);
+    expect(claim).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(queued()?.content).toBe(COMMAND);
+  });
+
+  it('fires after a background turn with no budget receives its first limit budget', async () => {
+    start([], [makeTab(TAB, { sessionBudget: null })]);
+    await run();
+    patch(TAB, { status: 'streaming' });
+    await run();
+    patch(TAB, { status: 'loaded' });
+    await run();
+    expect(probe).not.toHaveBeenCalled();
+    patch(TAB, { sessionBudget: { ...BUDGET } });
+    await run();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith(COMMAND, { tabId: TAB });
+  });
+
+  it('retains streaming and loaded writes in one tick before a limit update', async () => {
+    start([makeTab(TAB, { sessionBudget: null })]);
+    await run();
+    patch(TAB, { status: 'streaming' });
+    patch(TAB, { status: 'loaded' });
+    patch(TAB, { sessionBudget: { ...BUDGET } });
+    await run();
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send).toHaveBeenCalledWith(COMMAND, { tabId: TAB });
+  });
+
+  it('tracks activity recorded after an idle limit candidate was evaluated', async () => {
+    start([makeTab(TAB)]);
+    await run();
+    expect(send).not.toHaveBeenCalled();
+    turnActivity.recordTurnActivity(SESSION);
+    await run();
+    expect(send).toHaveBeenCalledTimes(1);
+  });
+
   it('fires once for a hidden tab at its limit', async () => {
-    start([makeTab('shown', { claudeSessionId: OTHER_SESSION, sessionBudget: null }), makeTab(TAB)]);
+    startAfterTurn([makeTab('shown', { claudeSessionId: OTHER_SESSION, sessionBudget: null }), makeTab(TAB)]);
     await run();
     expect(send).toHaveBeenCalledWith(COMMAND, { tabId: TAB });
     expect(info).toHaveBeenCalledWith('[SessionAutoHandoff]', 'automatic hand-off fired', { sessionId: SESSION, tabId: TAB, delivery: 'sent' });
@@ -132,7 +267,7 @@ describe('SessionAutoHandoffCoordinatorService', () => {
 
   it('does not send when the durable status is starting', async () => {
     statusCall.mockResolvedValue({ success: true, data: { state: 'starting', successorSessionId: null } });
-    start([makeTab(TAB)]);
+    startAfterTurn([makeTab(TAB)]);
     await run();
     expect(send).not.toHaveBeenCalled();
     expect(handoff.entry(SESSION)?.state).toBe('pending');
@@ -141,7 +276,7 @@ describe('SessionAutoHandoffCoordinatorService', () => {
   it('does not send to a tab rebound while the pre-send status is pending', async () => {
     let resolve!: (value: { success: true; data: { state: 'absent' } }) => void;
     statusCall.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
-    start([makeTab(TAB)]);
+    startAfterTurn([makeTab(TAB)]);
     TestBed.tick();
     await settle();
     patch(TAB, { claudeSessionId: OTHER_SESSION });
@@ -152,7 +287,7 @@ describe('SessionAutoHandoffCoordinatorService', () => {
   });
 
   it('keeps a delivered entry when unavailable status finishes after delivery', async () => {
-    start([makeTab(TAB)]);
+    startAfterTurn([makeTab(TAB)]);
     await run();
     let resolve!: (value: { success: true; data: { state: 'unavailable' } }) => void;
     statusCall.mockImplementationOnce(() => new Promise((done) => { resolve = done; }));
@@ -165,7 +300,7 @@ describe('SessionAutoHandoffCoordinatorService', () => {
   });
 
   it('keeps a delivered entry when a stale status request rejects', async () => {
-    start([makeTab(TAB)]);
+    startAfterTurn([makeTab(TAB)]);
     handoff.claim(SESSION);
     handoff.recordQueued(SESSION, null);
     let reject!: (error: Error) => void;
@@ -178,7 +313,7 @@ describe('SessionAutoHandoffCoordinatorService', () => {
   });
 
   it('does not release a delivered entry when streaming begins during status lookup', async () => {
-    start([makeTab(TAB)]);
+    startAfterTurn([makeTab(TAB)]);
     handoff.claim(SESSION);
     handoff.recordQueued(SESSION, null);
     handoff.transition(SESSION, 'delivered');
@@ -192,10 +327,10 @@ describe('SessionAutoHandoffCoordinatorService', () => {
   });
 
   it('reconciles a delivered turn after polling expires and the stream settles', async () => {
-    start([makeTab(TAB, { status: 'streaming' })]);
-    handoff.claim(SESSION);
-    handoff.recordQueued(SESSION, null);
-    handoff.transition(SESSION, 'delivered');
+    startAfterTurn([makeTab(TAB)]);
+    await run();
+    patch(TAB, { status: 'streaming' });
+    await run();
     statusCall.mockResolvedValue({ success: true, data: { state: 'absent' } });
     await TestBed.inject(SessionAutoHandoffCoordinatorService)['reconcile'](TAB, SESSION, 12);
     const callsBeforeSettlement = statusCall.mock.calls.length;
@@ -206,7 +341,7 @@ describe('SessionAutoHandoffCoordinatorService', () => {
 
   it('keeps a visible status error and does not send when status is unavailable', async () => {
     statusCall.mockResolvedValue({ success: true, data: { state: 'unavailable', successorSessionId: null } });
-    start([makeTab(TAB)]);
+    startAfterTurn([makeTab(TAB)]);
     await run();
     expect(send).not.toHaveBeenCalled();
     expect(handoff.entry(SESSION)?.state).toBe('pending');
@@ -215,7 +350,7 @@ describe('SessionAutoHandoffCoordinatorService', () => {
 
   it('releases a never-sent claim after authoritative absent and retries', async () => {
     statusCall.mockResolvedValue({ success: true, data: { state: 'unavailable' } });
-    start([makeTab(TAB)]);
+    startAfterTurn([makeTab(TAB)]);
     await run();
     expect(handoff.entry(SESSION)?.attempts).toBe(0);
     statusCall.mockResolvedValue({ success: true, data: { state: 'absent' } });
@@ -226,25 +361,72 @@ describe('SessionAutoHandoffCoordinatorService', () => {
 
   it('cleans an unsent pending claim when the confirmed stage falls below limit', async () => {
     statusCall.mockResolvedValue({ success: true, data: { state: 'unavailable' } });
-    start([makeTab(TAB)]);
+    startAfterTurn([makeTab(TAB)]);
     await run();
     patch(TAB, { sessionBudget: { ...BUDGET, stage: 'handoff' } });
     await run();
     expect(handoff.entry(SESSION)).toBeNull();
   });
 
-  it('resends a direct delivered command after authoritative absent', async () => {
-    start([makeTab(TAB)]);
+  it('resends a direct delivered command after streaming ends with authoritative absent', async () => {
+    startAfterTurn([makeTab(TAB)]);
     await run();
     expect(handoff.entry(SESSION)?.clientMessageId).toBeNull();
+    patch(TAB, { status: 'streaming' });
+    await run();
+    patch(TAB, { status: 'loaded' });
+    await run();
     await run();
     expect(send).toHaveBeenCalledTimes(2);
+  });
+
+  it('resends a direct command whose send already settled with authoritative absent', async () => {
+    send.mockResolvedValueOnce({ success: true, settled: true });
+    startAfterTurn([makeTab(TAB)]);
+    await run();
+    await run();
+    expect(send).toHaveBeenCalledTimes(2);
+    await run();
+    expect(send).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['direct', 'queued'] as const)('sends once while a %s delivery has not started streaming, even after polling expires', async (delivery) => {
+    jest.useFakeTimers();
+    try {
+      startAfterTurn([makeTab(TAB, { status: delivery === 'queued' ? 'streaming' : 'loaded' })]);
+      const flush = async () => {
+        TestBed.tick();
+        await jest.advanceTimersByTimeAsync(1);
+        TestBed.tick();
+      };
+      await flush();
+      if (delivery === 'queued') {
+        patch(TAB, { status: 'loaded' });
+        store.settle(queued().clientMessageId, 'delivered');
+        await flush();
+      }
+      for (let step = 0; step < 15; step++) {
+        await jest.advanceTimersByTimeAsync(60_000);
+        await flush();
+      }
+      expect(send).toHaveBeenCalledTimes(1);
+      expect(handoff.entry(SESSION)?.state).toBe('delivered');
+      // Starting late must still wake reconciliation when this turn ends.
+      patch(TAB, { status: 'streaming' });
+      await flush();
+      patch(TAB, { status: 'loaded' });
+      await flush();
+      await flush();
+      expect(send).toHaveBeenCalledTimes(2);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('resumes a claimed deferral after compaction finishes', async () => {
     let resolveStatus!: (value: { success: true; data: { state: 'absent' } }) => void;
     statusCall.mockImplementationOnce(() => new Promise((resolve) => { resolveStatus = resolve; }));
-    start([makeTab(TAB)]);
+    startAfterTurn([makeTab(TAB)]);
     TestBed.tick();
     await Promise.resolve();
     compacting.set(true);
@@ -258,7 +440,7 @@ describe('SessionAutoHandoffCoordinatorService', () => {
 
   it.each(['recorded', 'closePending', 'closeCompleted'] as const)('does not resend when status is %s', async (state) => {
     statusCall.mockResolvedValue({ success: true, data: { state, successorSessionId: null } });
-    start([makeTab(TAB)]);
+    startAfterTurn([makeTab(TAB)]);
     await run();
     expect(send).not.toHaveBeenCalled();
     expect(handoff.entry(SESSION)?.state).toBe(state === 'closeCompleted' ? 'completed' : 'recorded');
@@ -266,7 +448,7 @@ describe('SessionAutoHandoffCoordinatorService', () => {
 
   it('defers until compaction ends', async () => {
     compacting.set(true);
-    start([makeTab(TAB)]);
+    startAfterTurn([makeTab(TAB)]);
     await run();
     expect(send).not.toHaveBeenCalled();
     compacting.set(false);
@@ -277,7 +459,7 @@ describe('SessionAutoHandoffCoordinatorService', () => {
   it('fails a deferral that remains compacting after ten minutes', async () => {
     jest.useFakeTimers();
     compacting.set(true);
-    start([makeTab(TAB)]);
+    startAfterTurn([makeTab(TAB)]);
     try {
       TestBed.tick();
       jest.advanceTimersByTime(600_000);
@@ -292,7 +474,7 @@ describe('SessionAutoHandoffCoordinatorService', () => {
     jest.useFakeTimers();
     try {
       compacting.set(true);
-      start([makeTab(TAB)]);
+      startAfterTurn([makeTab(TAB)]);
       TestBed.tick();
       patch(TAB, { claudeSessionId: OTHER_SESSION, sessionBudget: null });
       TestBed.tick();
@@ -310,11 +492,16 @@ describe('SessionAutoHandoffCoordinatorService', () => {
       store.add({ clientMessageId, tabId: options.tabId, sessionId: SESSION, content: COMMAND, isCommand: true, phase: 'held' });
       return { success: true, queued: { clientMessageId, tabId: options.tabId, sessionId: SESSION } };
     });
-    start([makeTab(TAB)]);
+    startAfterTurn([makeTab(TAB)]);
     await run();
     for (let attempt = 1; attempt <= 5; attempt++) {
       expect(send).toHaveBeenCalledTimes(attempt);
       store.settle(queued().clientMessageId, 'delivered');
+      await run();
+      patch(TAB, { status: 'streaming' });
+      await run();
+      patch(TAB, { status: 'loaded' });
+      await run();
       await run();
     }
     expect(handoff.entry(SESSION)?.state).toBe('failed');
@@ -322,13 +509,13 @@ describe('SessionAutoHandoffCoordinatorService', () => {
   });
 
   it('fires for a background workspace partition', async () => {
-    start([makeTab('shown', { claudeSessionId: OTHER_SESSION, sessionBudget: null })], [makeTab(TAB)]);
+    startAfterTurn([makeTab('shown', { claudeSessionId: OTHER_SESSION, sessionBudget: null })], [makeTab(TAB)]);
     await run();
     expect(send).toHaveBeenCalledWith(COMMAND, { tabId: TAB });
   });
 
   it('holds the slash hand-off behind a running turn until delivery', async () => {
-    start([makeTab(TAB, {
+    startAfterTurn([makeTab(TAB, {
       status: 'streaming',
       sessionBudget: { ...BUDGET },
       liveBudgetStage: 'limit',
@@ -344,7 +531,7 @@ describe('SessionAutoHandoffCoordinatorService', () => {
   });
 
   it('does not queue a hand-off based only on a live estimate', async () => {
-    start([makeTab(TAB, {
+    startAfterTurn([makeTab(TAB, {
       status: 'streaming',
       sessionBudget: { ...BUDGET, stage: 'handoff', percent: 82 },
       liveBudgetStage: 'limit',
@@ -364,7 +551,7 @@ describe('SessionAutoHandoffCoordinatorService', () => {
   it.each(['withdrawn', 'failed'] as const)(
     'releases a queued claim on %s and retries after the gate',
     async (outcome) => {
-      start([makeTab(TAB, { status: 'streaming' })]);
+      startAfterTurn([makeTab(TAB, { status: 'streaming' })]);
       await run();
       store.settle(queued().clientMessageId, outcome);
       expect(handoff.entry(SESSION)).toBeNull();
@@ -376,7 +563,7 @@ describe('SessionAutoHandoffCoordinatorService', () => {
   );
 
   it('keeps a cancelled claim after withdrawal', async () => {
-    start([makeTab(TAB, { status: 'streaming' })]);
+    startAfterTurn([makeTab(TAB, { status: 'streaming' })]);
     await run();
     handoff.cancel(SESSION);
     store.settle(queued().clientMessageId, 'withdrawn');
@@ -389,7 +576,7 @@ describe('SessionAutoHandoffCoordinatorService', () => {
 
   it('waits for resume and pending permission, then fires', async () => {
     permission.set(true);
-    start([makeTab(TAB, { status: 'resuming' })]);
+    startAfterTurn([makeTab(TAB, { status: 'resuming' })]);
     await run();
     expect(send).not.toHaveBeenCalled();
     patch(TAB, { status: 'loaded' });
@@ -404,13 +591,13 @@ describe('SessionAutoHandoffCoordinatorService', () => {
     ['setting off', { ...BUDGET, autoHandoff: false }],
     ['below limit', { ...BUDGET, stage: 'handoff' as const, percent: 82 }],
   ])('does not fire with %s', async (_label, budget) => {
-    start([makeTab(TAB, { sessionBudget: budget })]);
+    startAfterTurn([makeTab(TAB, { sessionBudget: budget })]);
     await run();
     expect(send).not.toHaveBeenCalled();
   });
 
   it('logs each limit skip reason once per session across evaluations', async () => {
-    start([makeTab(TAB, { sessionBudget: { ...BUDGET, autoHandoff: false } })]);
+    startAfterTurn([makeTab(TAB, { sessionBudget: { ...BUDGET, autoHandoff: false } })]);
     await run();
     patch(TAB, { sessionBudget: { ...BUDGET, autoHandoff: false, revision: 13 } });
     await run();
@@ -426,7 +613,7 @@ describe('SessionAutoHandoffCoordinatorService', () => {
 
   it('does not retry a confirmed missing skill', async () => {
     probe.mockResolvedValue('missing');
-    start([makeTab(TAB)]);
+    startAfterTurn([makeTab(TAB)]);
     await run();
     patch(TAB, { sessionBudget: { ...BUDGET, revision: 13 } });
     await run();
@@ -436,7 +623,7 @@ describe('SessionAutoHandoffCoordinatorService', () => {
 
   it('retries a transient probe failure after its gate', async () => {
     probe.mockResolvedValueOnce('transient');
-    start([makeTab(TAB)]);
+    startAfterTurn([makeTab(TAB)]);
     await run();
     now += 5_001;
     patch(TAB, { sessionBudget: { ...BUDGET, revision: 13 } });
@@ -446,7 +633,7 @@ describe('SessionAutoHandoffCoordinatorService', () => {
 
   it('releases a failed send claim and retries after its gate', async () => {
     send.mockResolvedValueOnce({ success: false, error: 'offline' });
-    start([makeTab(TAB)]);
+    startAfterTurn([makeTab(TAB)]);
     await run();
     expect(handoff.entry(SESSION)).toBeNull();
     now += 5_001;
@@ -457,7 +644,7 @@ describe('SessionAutoHandoffCoordinatorService', () => {
 
   it('does not send into a replaced session after an in-flight probe', async () => {
     const release = holdProbe();
-    start([makeTab(TAB)]);
+    startAfterTurn([makeTab(TAB)]);
     await run();
     patch(TAB, { claudeSessionId: OTHER_SESSION });
     release();
@@ -469,7 +656,7 @@ describe('SessionAutoHandoffCoordinatorService', () => {
   it('still sends if another tab becomes visible during the probe', async () => {
     const release = holdProbe();
     const other = makeTab('shown', { claudeSessionId: OTHER_SESSION, sessionBudget: null });
-    start([other, makeTab(TAB)]);
+    startAfterTurn([other, makeTab(TAB)]);
     await run();
     active.set([makeTab(TAB), other]);
     release();
@@ -479,7 +666,7 @@ describe('SessionAutoHandoffCoordinatorService', () => {
 
   it('does not add a second hand-off after manual wrap-up', async () => {
     handoff.markManualWrapUp(SESSION);
-    start([makeTab(TAB)]);
+    startAfterTurn([makeTab(TAB)]);
     await run();
     expect(send).not.toHaveBeenCalled();
   });
