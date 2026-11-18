@@ -60,6 +60,12 @@ export interface MemoryTierTotals {
  * - `filteredEntries`   — entries filtered by current tier filter.
  * - `totalsByTier`      — derived per-tier totals.
  */
+export interface MemoryPurgeStatus {
+  readonly running: boolean;
+  readonly error: string | null;
+  readonly info: string | null;
+}
+
 @Injectable({ providedIn: 'root' })
 export class MemoryStateService {
   private readonly rpcService = inject(MemoryRpcService);
@@ -96,6 +102,8 @@ export class MemoryStateService {
    * `_entries` — a late refresh must not clobber a newer search and vice versa.
    */
   private entriesReqSeq = 0;
+  /** Workspace and tier of the list rows on the screen; null for none or a search. */
+  private entriesContext: string | null = null;
   private statsReqSeq = 0;
   private symbolsReqSeq = 0;
   public readonly entries = this._entries.asReadonly();
@@ -110,6 +118,16 @@ export class MemoryStateService {
     () => this._entries().length < this._total(),
   );
   public readonly error = this._error.asReadonly();
+  /** Purge status. It is here so that it stays when the Health view closes. */
+  private readonly _purge = signal<MemoryPurgeStatus>({
+    running: false,
+    error: null,
+    info: null,
+  });
+  public readonly purge = this._purge.asReadonly();
+  public patchPurge(patch: Partial<MemoryPurgeStatus>): void {
+    this._purge.update((status) => ({ ...status, ...patch }));
+  }
   /** True while `memory:rebuildIndex` is in flight (separate from `loading`). */
   public readonly rebuilding = this._rebuilding.asReadonly();
   /** Result of the last successful rebuild (or `null`). */
@@ -204,20 +222,25 @@ export class MemoryStateService {
 
   /** Refresh the entry list from `memory:list`, optionally restricted to a tier. */
   public async refresh(): Promise<void> {
+    // A search is on the screen: run it again, so that the result and the
+    // search field agree and paging stays off.
+    if (this._query().trim()) {
+      await this.search(this._query());
+      return;
+    }
     const scoped = this.resolveScopedWorkspaceRoot();
     if (!scoped.ok) {
-      this._entries.set([]);
-      this._total.set(0);
-      this._error.set(scoped.error);
+      this.clearEntries(scoped.error);
       return;
     }
     const seq = ++this.entriesReqSeq;
     this._loadingMore.set(false);
     this._loading.set(true);
     this._error.set(null);
+    const tier = this._tierFilter();
+    const { workspaceRoot } = scoped;
+    const context = JSON.stringify([workspaceRoot ?? null, tier]);
     try {
-      const tier = this._tierFilter();
-      const { workspaceRoot } = scoped;
       const result = await this.rpcService.list({
         ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
         ...(tier !== 'all' ? { tier } : {}),
@@ -227,23 +250,36 @@ export class MemoryStateService {
       if (seq !== this.entriesReqSeq) return;
       this._entries.set(result.memories);
       this._total.set(result.total ?? result.memories.length);
+      this.entriesContext = context;
     } catch (err) {
       if (seq !== this.entriesReqSeq) return;
+      // Rows of another workspace or tier must not stay: the next page would
+      // use their count as its offset.
+      if (this.entriesContext !== context) {
+        this._entries.set([]);
+        this._total.set(0);
+        this.entriesContext = null;
+      }
       this._error.set(failureMessage('list', err));
     } finally {
       if (seq === this.entriesReqSeq) this._loading.set(false);
     }
   }
 
+  /** No scope can be resolved: drop the rows and each pending request. */
+  private clearEntries(error: string): void {
+    ++this.entriesReqSeq;
+    this._loading.set(false);
+    this._loadingMore.set(false);
+    this._entries.set([]);
+    this._total.set(0);
+    this.entriesContext = null;
+    this._error.set(error);
+  }
+
   /** Append the next page of the current list, ignoring stale responses. */
   public async loadMore(): Promise<void> {
-    if (
-      this._loading() ||
-      this._loadingMore() ||
-      !this.hasMore() ||
-      this._query().trim()
-    )
-      return;
+    if (this._loading() || this._loadingMore() || !this.hasMore()) return;
     const scoped = this.resolveScopedWorkspaceRoot();
     if (!scoped.ok) {
       this._error.set(scoped.error);
@@ -296,8 +332,7 @@ export class MemoryStateService {
     }
     const scoped = this.resolveScopedWorkspaceRoot();
     if (!scoped.ok) {
-      this._entries.set([]);
-      this._error.set(scoped.error);
+      this.clearEntries(scoped.error);
       return;
     }
     const seq = ++this.entriesReqSeq;
@@ -313,6 +348,7 @@ export class MemoryStateService {
       if (seq !== this.entriesReqSeq) return;
       this._entries.set(result.hits.map((hit) => hit.memory));
       this._total.set(result.hits.length);
+      this.entriesContext = null;
     } catch (err) {
       if (seq !== this.entriesReqSeq) return;
       this._error.set(failureMessage('search', err));
@@ -359,7 +395,9 @@ export class MemoryStateService {
     this._error.set(null);
     try {
       const res = await this.rpcService.forget(id);
-      if (res.success) {
+      // The rows can be another result set by now: change the total only
+      // when the forgotten memory is one of them.
+      if (res.success && this._entries().some((m) => m.id === id)) {
         this._entries.update((list) => list.filter((m) => m.id !== id));
         this._total.update((total) => Math.max(0, total - 1));
       }

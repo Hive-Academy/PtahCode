@@ -8,7 +8,10 @@ import {
   type IndexingUiState,
 } from '@ptah-extension/workspace-indexing';
 
-import { MemoryStateService } from '../services/memory-state.service';
+import {
+  MemoryStateService,
+  type MemoryPurgeStatus,
+} from '../services/memory-state.service';
 import { MemoryGraphStateService } from '../services/memory-graph-state.service';
 import { MemoryRpcService } from '../services/memory-rpc.service';
 import { MemoryDiagnosticsStateService } from '../services/memory-diagnostics-state.service';
@@ -107,6 +110,19 @@ function vscodeServiceStub(isElectron: boolean): Partial<VSCodeService> {
  * Smoke tests for {@link MemoryCuratorTabComponent}. Stubs the entire
  * {@link MemoryStateService} surface so no real RPC traffic is generated.
  */
+/** Signal-backed purge status, like the real MemoryStateService. */
+function purgeStub(): Pick<MemoryStateService, 'purge' | 'patchPurge'> {
+  const purge = signal<MemoryPurgeStatus>({
+    running: false,
+    error: null,
+    info: null,
+  });
+  return {
+    purge,
+    patchPurge: (patch) => purge.update((status) => ({ ...status, ...patch })),
+  };
+}
+
 describe('MemoryCuratorTabComponent', () => {
   let stateMock: jest.Mocked<MemoryStateService>;
 
@@ -115,6 +131,7 @@ describe('MemoryCuratorTabComponent', () => {
       entries: jest.fn(() => []),
       query: jest.fn(() => ''),
       tierFilter: jest.fn(() => 'all'),
+      ...purgeStub(),
       scopeFilter: jest.fn(() => 'workspace'),
       stats: jest.fn(() => null),
       loading: jest.fn(() => false),
@@ -330,6 +347,7 @@ describe('MemoryCuratorTabComponent', () => {
       entries: jest.fn(() => []),
       query: jest.fn(() => ''),
       tierFilter: jest.fn(() => 'all'),
+      ...purgeStub(),
       scopeFilter: jest.fn(() => 'workspace'),
       stats: jest.fn(() => null),
       loading: jest.fn(() => false),
@@ -414,6 +432,7 @@ describe('MemoryCuratorTabComponent — purge toolbar', () => {
       entries: jest.fn(() => []),
       query: jest.fn(() => ''),
       tierFilter: jest.fn(() => 'all'),
+      ...purgeStub(),
       scopeFilter: jest.fn(() => 'workspace'),
       stats: jest.fn(() => null),
       loading: jest.fn(() => false),
@@ -743,6 +762,7 @@ describe('MemoryCuratorTabComponent — workspace switch', () => {
       entries: jest.fn(() => []),
       query: jest.fn(() => ''),
       tierFilter: jest.fn(() => 'all'),
+      ...purgeStub(),
       scopeFilter: jest.fn(() => scope),
       stats: jest.fn(() => null),
       loading: jest.fn(() => false),
@@ -894,6 +914,7 @@ describe('MemoryCuratorTabComponent — indexing banner three-state predicate', 
       entries: jest.fn(() => []),
       query: jest.fn(() => ''),
       tierFilter: jest.fn(() => 'all'),
+      ...purgeStub(),
       scopeFilter: jest.fn(() => 'workspace'),
       stats: jest.fn(() => null),
       loading: jest.fn(() => false),
@@ -1040,6 +1061,7 @@ describe('MemoryCuratorTabComponent — rebuild state and banner action message'
       entries: jest.fn(() => []),
       query: jest.fn(() => ''),
       tierFilter: jest.fn(() => 'all'),
+      ...purgeStub(),
       scopeFilter: jest.fn(() => 'workspace'),
       stats: jest.fn(() => null),
       loading: jest.fn(() => false),

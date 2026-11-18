@@ -227,10 +227,11 @@ import {
       @if (state.selectedNodes().length >= 2) {
         <ptah-memory-graph-selection-bar
           [count]="state.selectedNodes().length"
+          [ids]="selectedNodeIds()"
           [busy]="busy()"
-          (pinAll)="runAction('pin', state.selectedIds())"
-          (unpinAll)="runAction('unpin', state.selectedIds())"
-          (forgetAll)="runAction('forget', state.selectedIds())"
+          (pinAll)="runAction('pin', selectedNodeIds())"
+          (unpinAll)="runAction('unpin', selectedNodeIds())"
+          (forgetAll)="runAction('forget', selectedNodeIds())"
           (clear)="state.clearSelection()"
         />
       }
@@ -272,6 +273,10 @@ export class MemoryGraphViewComponent {
   );
   protected readonly highlightIds = computed(() =>
     this.state.searchQuery().trim() ? this.state.matchIds() : null,
+  );
+  /** Bulk actions use only the selected memories that are on the screen. */
+  protected readonly selectedNodeIds = computed(() =>
+    this.state.selectedNodes().map((node) => node.id),
   );
   protected readonly timestamps = computed(() =>
     this.state.nodes().map((node) => node.createdAt),

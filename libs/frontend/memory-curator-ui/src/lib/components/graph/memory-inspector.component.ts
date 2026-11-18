@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, input, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, input, linkedSignal, output } from '@angular/core';
 import type { MemoryGraphEdgeKind, MemoryGraphNodeWire, MemoryWire } from '@ptah-extension/shared';
 import { PtahButtonDirective, PtahInlineConfirmComponent } from '@ptah-extension/ui';
 
@@ -44,6 +44,10 @@ export class MemoryInspectorComponent {
   public readonly forget = output<string>();
   public readonly selectNode = output<string>();
   public readonly closed = output<void>();
-  protected readonly confirming = signal(false);
+  /** A change of the inspected memory closes the forget confirmation. */
+  protected readonly confirming = linkedSignal({
+    source: () => this.nodes()[0]?.id ?? null,
+    computation: () => false,
+  });
   protected date(value: number): string { return new Date(value).toLocaleDateString(); }
 }

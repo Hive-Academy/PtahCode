@@ -130,6 +130,30 @@ describe('MemoryStateService pagination', () => {
     expect(service.total()).toBe(0);
     expect(service.entries()).toEqual([]);
   });
+
+  it('keeps the total when the forgotten memory is not in the rows', async () => {
+    forget.mockResolvedValue({ success: true });
+    list.mockResolvedValue({ memories: [memory('a')], total: 2 });
+    await service.refresh();
+    expect(await service.forget('other')).toBe(true);
+    expect(service.total()).toBe(2);
+    expect(service.hasMore()).toBe(true);
+  });
+
+  it('drops the rows when a refresh for another tier fails', async () => {
+    list
+      .mockResolvedValueOnce({ memories: [memory('a')], total: 5 })
+      .mockRejectedValueOnce(new Error('secret'))
+      .mockRejectedValueOnce(new Error('secret'));
+    await service.refresh();
+    await service.refresh();
+    expect(service.entries()).toHaveLength(1);
+    service.setTierFilter('recall');
+    await service.refresh();
+    expect(service.entries()).toEqual([]);
+    expect(service.hasMore()).toBe(false);
+    expect(service.error()).toBeTruthy();
+  });
 });
 
 describe('MemoryStateService — scopeFilter', () => {

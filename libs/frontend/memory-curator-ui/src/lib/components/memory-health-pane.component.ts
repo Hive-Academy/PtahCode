@@ -3,7 +3,6 @@ import {
   Component,
   computed,
   inject,
-  signal,
   viewChild,
 } from '@angular/core';
 import { AppStateManager } from '@ptah-extension/core';
@@ -65,12 +64,11 @@ export class MemoryHealthPaneComponent {
   protected readonly hasWorkspace = computed(() =>
     Boolean(this.appState.workspaceInfo()?.path),
   );
-  protected readonly purging = signal(false);
-  protected readonly purgeError = signal<string | null>(null);
-  protected readonly purgeInfo = signal<string | null>(null);
+  protected readonly purging = computed(() => this.state.purge().running);
+  protected readonly purgeError = computed(() => this.state.purge().error);
+  protected readonly purgeInfo = computed(() => this.state.purge().info);
   protected onPurgeInputChanged(): void {
-    this.purgeInfo.set(null);
-    this.purgeError.set(null);
+    this.state.patchPurge({ info: null, error: null });
   }
   protected onPurge(request: MemoryPurgeRequest): void {
     if (this.purging()) return;
@@ -78,7 +76,9 @@ export class MemoryHealthPaneComponent {
     if (!pattern) return;
     const root = this.appState.workspaceInfo()?.path ?? null;
     if (!root) {
-      this.purgeError.set('Open a workspace before purging memory.');
+      this.state.patchPurge({
+        error: 'Open a workspace before purging memory.',
+      });
       return;
     }
     if (
@@ -87,8 +87,7 @@ export class MemoryHealthPaneComponent {
       )
     )
       return;
-    this.purging.set(true);
-    this.onPurgeInputChanged();
+    this.state.patchPurge({ running: true, info: null, error: null });
     void this.runPurge(pattern, request.mode, root);
   }
   private async runPurge(
@@ -99,16 +98,16 @@ export class MemoryHealthPaneComponent {
     try {
       const result = await this.rpc.purgeBySubjectPattern(pattern, mode, root);
       this.dangerZone()?.clearPattern();
-      this.purgeInfo.set(
-        `Deleted ${result.deleted} ${result.deleted === 1 ? 'entry' : 'entries'}.`,
-      );
+      this.state.patchPurge({
+        info: `Deleted ${result.deleted} ${result.deleted === 1 ? 'entry' : 'entries'}.`,
+      });
       await this.state.refresh();
       await this.state.loadStats();
     } catch (error: unknown) {
       console.warn('[memory-tab] purgeBySubjectPattern failed', error);
-      this.purgeError.set(PURGE_FAILED_MESSAGE);
+      this.state.patchPurge({ error: PURGE_FAILED_MESSAGE });
     } finally {
-      this.purging.set(false);
+      this.state.patchPurge({ running: false });
     }
   }
 }

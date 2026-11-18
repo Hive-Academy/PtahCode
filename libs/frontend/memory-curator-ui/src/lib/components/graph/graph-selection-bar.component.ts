@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, input, output, signal } from '@angular/core';
+import { ChangeDetectionStrategy, Component, input, linkedSignal, output } from '@angular/core';
 import { PtahButtonDirective, PtahInlineConfirmComponent } from '@ptah-extension/ui';
 
 @Component({ selector: 'ptah-memory-graph-selection-bar', standalone: true, changeDetection: ChangeDetectionStrategy.OnPush,
@@ -16,10 +16,15 @@ import { PtahButtonDirective, PtahInlineConfirmComponent } from '@ptah-extension
 })
 export class GraphSelectionBarComponent {
   public readonly count = input.required<number>();
+  /** The ids that the actions use. A change closes the forget confirmation. */
+  public readonly ids = input<readonly string[]>([]);
   public readonly busy = input(false);
   public readonly pinAll = output<void>();
   public readonly unpinAll = output<void>();
   public readonly forgetAll = output<void>();
   public readonly clear = output<void>();
-  protected readonly confirming = signal(false);
+  protected readonly confirming = linkedSignal({
+    source: () => this.ids().join('\n'),
+    computation: () => false,
+  });
 }

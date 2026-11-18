@@ -30,6 +30,8 @@ const EMBEDDING_DIMENSIONS = 384;
 const EMBEDDING_BYTES = EMBEDDING_DIMENSIONS * Float32Array.BYTES_PER_ELEMENT;
 /** Ids per `IN (…)` list, below SQLite's default bound-parameter limit. */
 const VECTOR_READ_BATCH = 400;
+/** Chunk rows between two deadline checks in the vector read. */
+const VECTOR_DEADLINE_ROWS = 256;
 const ALL_EDGE_KINDS: readonly MemoryGraphEdgeKind[] = [
   'semantic',
   'subject',
@@ -242,6 +244,8 @@ function readNodeVectors(
     const ids = nodes
       .slice(offset, offset + VECTOR_READ_BATCH)
       .map((n) => n.id);
+    // One memory can have many chunks, so the rows of a batch have no fixed
+    // limit: stream them and check the deadline at intervals.
     const rows = db
       .prepare(
         `SELECT c.memory_id AS memoryId, v.embedding AS embedding
@@ -249,8 +253,19 @@ function readNodeVectors(
            JOIN memory_chunks_vec v ON v.rowid = c.rowid
           WHERE c.memory_id IN (${ids.map(() => '?').join(',')})`,
       )
-      .all(...ids) as { memoryId: string; embedding: unknown }[];
+      .iterate(...ids) as IterableIterator<{
+      memoryId: string;
+      embedding: unknown;
+    }>;
+    let read = 0;
     for (const row of rows) {
+      if (
+        ++read % VECTOR_DEADLINE_ROWS === 0 &&
+        deadlineMs !== undefined &&
+        performance.now() >= deadlineMs
+      ) {
+        throw new SemanticDeadlineError();
+      }
       const blob = row.embedding;
       if (!Buffer.isBuffer(blob) || blob.byteLength !== EMBEDDING_BYTES)
         continue;
