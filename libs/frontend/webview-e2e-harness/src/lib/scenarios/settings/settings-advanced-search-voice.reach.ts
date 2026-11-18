@@ -149,9 +149,23 @@ export async function openVoiceDrawer(page: Page, direction: 'stt' | 'tts'): Pro
 export async function chooseVoiceProvider(page: Page, direction: 'stt' | 'tts', providerId: string): Promise<void> {
   await searchVoiceTab(page);
   const select = page.locator(`[data-testid="voice-provider-btn-${direction}"]`);
-  await visibleEnabled(select);
-  await expect(page.locator(`[data-testid="voice-provider-option-${direction}-${providerId}"]`)).toBeEnabled();
-  await select.selectOption(providerId);
+  await visibleEnabled(richTrigger(select));
+  await richTrigger(select).click();
+  const option = richOption(page.locator(`[data-testid="voice-provider-option-${direction}-${providerId}"]`));
+  await expect(option).not.toHaveAttribute('aria-disabled', 'true');
+  await option.click();
+}
+
+/** The combobox trigger of a `ptah-select` host (the designed menu replaced the native select). */
+export const richTrigger = (select: Locator): Locator => select.locator('button[role="combobox"]');
+
+/** The `role="option"` row that holds an option hook (the hook is a marker inside the row). */
+export const richOption = (marker: Locator): Locator => marker.locator('xpath=ancestor::*[@role="option"][1]');
+
+/** Opens a `ptah-select` and picks the option with this exact visible name. */
+export async function pickRichOption(page: Page, select: Locator, name: string): Promise<void> {
+  await richTrigger(select).click();
+  await page.getByRole('option', { name, exact: true }).click();
 }
 
 /**

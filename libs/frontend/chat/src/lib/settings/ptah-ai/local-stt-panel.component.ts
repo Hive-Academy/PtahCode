@@ -18,7 +18,8 @@ import {
   PtahBadgeDirective,
   PtahButtonDirective,
   PtahInputDirective,
-  PtahSelectDirective,
+  PtahRichSelectComponent,
+  PtahFieldGridDirective,
   PtahFormSectionComponent,
   PtahMeterComponent,
   PtahFieldComponent,
@@ -77,111 +78,100 @@ const HF_REPO_ID_RE = /^[\w.-]+\/[\w.-]+$/;
     PtahBadgeDirective,
     PtahButtonDirective,
     PtahInputDirective,
-    PtahSelectDirective,
-  PtahFormSectionComponent,
-  PtahMeterComponent,
-  PtahFieldComponent,
-  PtahSettingRowComponent,
+    PtahRichSelectComponent,
+    PtahFieldGridDirective,
+    PtahFormSectionComponent,
+    PtahMeterComponent,
+    PtahFieldComponent,
+    PtahSettingRowComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
-    <p class="text-xs text-base-content-muted mb-3">
-      Whisper model used for voice-to-text. Curated models download to
-      <code class="text-[10px] bg-base-300 px-1 rounded">~/.ptah/models/</code>
-      on first use.
-    </p>
-
-    <ptah-form-section heading="Local speech to text" level="3" data-testid="local-stt-panel-table">
-
+    <ptah-form-section
+      wide
+      description="Transcribe audio on this device."
+      heading="Local speech to text"
+      level="3"
+      data-testid="local-stt-panel-table"
+    >
+      <div ptahFieldGrid minColumn="sm">
         <!-- V13: source. Returning to Curated saves immediately; a custom source
              is committed by its Save button (V15). -->
-        <ptah-setting-row label="Source" hint="Choose where the speech model comes from.">
-            <div
-              class="flex items-center gap-1"
-              role="radiogroup"
-              aria-label="Model source"
-            >
-              @for (opt of sourceOptions; track opt.value) {
-                <button
-                  type="button"
-                  ptahButton
-                  size="xs"
-                  class="flex-1"
-                  [variant]="source() === opt.value ? 'primary' : 'ghost'"
-                  role="radio"
-                  [attr.aria-checked]="source() === opt.value"
-                  [ptahBusyDisabled]="saving()"
-                  (click)="onSourceChange(opt.value)"
-                  [attr.data-testid]="'local-stt-source-' + opt.value"
-                >
-                  {{ opt.label }}
-                </button>
-              }
-            </div>
+        <ptah-setting-row
+          label="Source"
+          hint="Choose where the speech model comes from."
+        >
+          <div
+            class="flex items-center gap-1"
+            role="radiogroup"
+            aria-label="Model source"
+          >
+            @for (opt of sourceOptions; track opt.value) {
+              <button
+                type="button"
+                ptahButton
+                size="xs"
+                class="flex-1"
+                [variant]="source() === opt.value ? 'primary' : 'ghost'"
+                role="radio"
+                [attr.aria-checked]="source() === opt.value"
+                [ptahBusyDisabled]="saving()"
+                (click)="onSourceChange(opt.value)"
+                [attr.data-testid]="'local-stt-source-' + opt.value"
+              >
+                {{ opt.label }}
+              </button>
+            }
+          </div>
         </ptah-setting-row>
 
         <!-- V14 curated model select / V15 custom id or folder -->
-        <div class="flex flex-col gap-[var(--ptah-gap-field)]">
-          <div class="text-sm font-medium text-base-content">
-            Whisper model
-          </div>
+        <div class="flex flex-col gap-ptah-field">
           <div class="min-w-0">
             @if (source() === 'curated') {
-              <ptah-field label="Whisper model" appearance="stacked">
-<select
-                id="local-stt-model"
-                aria-label="Whisper model"
-                ptahSelect
-                size="sm"
-                class="w-full"
-                [value]="selectedModel()"
-                [ptahBusyDisabled]="saving()"
-                (change)="onModelChange($event)"
-                data-testid="local-stt-model-select"
+              <ptah-field
+                label="Whisper model"
+                hint="Curated models download to ~/.ptah/models/ on first use."
               >
-                <optgroup label="English-only">
-                  @for (opt of englishModels; track opt.value) {
-                    <option
-                      [value]="opt.value"
-                      [selected]="opt.value === selectedModel()"
-                    >
-                      {{ opt.label }}
-                    </option>
-                  }
-                </optgroup>
-                <optgroup label="Multilingual">
-                  @for (opt of multilingualModels; track opt.value) {
-                    <option
-                      [value]="opt.value"
-                      [selected]="opt.value === selectedModel()"
-                    >
-                      {{ opt.label }}
-                    </option>
-                  }
-                </optgroup>
-              </select>
-</ptah-field>
-            } @else {
-              <div class="flex items-center gap-1">
-                <input
-                  id="local-stt-custom"
-                  type="text"
-                  aria-label="Custom model id or folder"
-                  ptahInput
+                <ptah-select
+                  #selectionControl
+                  id="local-stt-model"
+                  aria-label="Whisper model"
                   size="sm"
                   class="w-full"
-                  [invalid]="customModel().length > 0 && !customModelValid()"
-                  [value]="customModel()"
+                  [value]="selectedModel()"
                   [disabled]="saving()"
-                  [placeholder]="
-                    source() === 'hf'
-                      ? 'owner/whisper-model (HF repo id)'
-                      : 'Absolute path to model folder'
-                  "
-                  (input)="onCustomModelInput($event)"
-                  data-testid="local-stt-custom-input"
+                  (valueChange)="onModelChange($event, selectionControl)"
+                  data-testid="local-stt-model-select"
+                  [options]="modelOptions"
                 />
+              </ptah-field>
+            } @else {
+              <div class="flex items-center gap-1">
+                <ptah-field
+                  class="flex-1"
+                  label="Custom model id or folder"
+                  hint="Enter an owner/name repository or an absolute folder path."
+                  ><input
+                    id="local-stt-custom"
+                    type="text"
+                    aria-label="Custom model id or folder"
+                    ptahInput
+                    size="sm"
+                    class="w-full"
+                    tone="mono"
+                    [invalid]="customModel().length > 0 && !customModelValid()"
+                    [value]="customModel()"
+                    [disabled]="saving()"
+                    [placeholder]="
+                      source() === 'hf'
+                        ? 'owner/whisper-model (HF repo id)'
+                        : 'Absolute path to model folder'
+                    "
+                    (input)="onCustomModelInput($event)"
+                    data-testid="local-stt-custom-input"
+                /></ptah-field>
                 <button
                   type="button"
                   ptahButton
@@ -215,88 +205,104 @@ const HF_REPO_ID_RE = /^[\w.-]+\/[\w.-]+$/;
             }
           </div>
         </div>
-
-        <!-- V16: download + live progress -->
-        <div class="flex flex-col gap-[var(--ptah-gap-field)]">
-          <div class="text-sm font-medium text-base-content">
-            Download
-          </div>
-          <div class="min-w-0">
-            @if (isDownloading()) {
-              <div
-                class="flex items-center gap-2"
-                data-testid="local-stt-download-status"
+      </div>
+      <!-- V16: download + live progress -->
+      <div class="flex flex-col gap-ptah-field">
+        <div class="text-sm font-medium text-base-content">Download</div>
+        <div class="min-w-0">
+          @if (isDownloading()) {
+            <div
+              class="flex items-center gap-2"
+              data-testid="local-stt-download-status"
+            >
+              <ptah-meter
+                class="flex-1"
+                [value]="downloadPercent() ?? 0"
+                [indeterminate]="downloadPercent() === null"
+                [max]="100"
+                label="Speech model download progress"
+                [hideLabel]="true"
+                [showValue]="false"
+                barRole="progressbar"
+                data-testid="local-stt-download-progress"
+              />
+              <span
+                class="text-[10px] text-base-content-muted w-20 text-right"
+                role="status"
               >
-                <ptah-meter class="flex-1" [value]="downloadPercent() ?? 0"
-                  [indeterminate]="downloadPercent() === null" [max]="100"
-                  label="Speech model download progress" [hideLabel]="true"
-                  [showValue]="false" barRole="progressbar"
-                  data-testid="local-stt-download-progress" />
-                <span
-                  class="text-[10px] text-base-content-muted w-20 text-right"
-                  role="status"
-                >
-                  <span class="sr-only">Downloading speech model</span>
-                  <span aria-hidden="true">
-                    @if (downloadPercent() !== null) {
-                      Downloading {{ downloadPercent() }}%
-                    } @else {
-                      Starting…
-                    }
-                  </span>
+                <span class="sr-only">Downloading speech model</span>
+                <span aria-hidden="true">
+                  @if (downloadPercent() !== null) {
+                    Downloading {{ downloadPercent() }}%
+                  } @else {
+                    Starting…
+                  }
                 </span>
-              </div>
-            } @else {
-              <div class="flex items-center justify-between gap-2">
-                @if (downloaded()) {
-                  <span ptahBadge appearance="outline" tone="ok"
-                    class="gap-1 whitespace-nowrap"
-                    data-testid="local-stt-download-status"
-                  >
-                    <span
-                      class="w-1.5 h-1.5 rounded-full bg-success"
-                      aria-hidden="true"
-                    ></span>
-                    Downloaded
-                  </span>
-                } @else {
-                  <span ptahBadge appearance="outline" tone="warn"
-                    class="gap-1 whitespace-nowrap"
-                    data-testid="local-stt-download-status"
-                  >
-                    <span
-                      class="w-1.5 h-1.5 rounded-full bg-warning"
-                      aria-hidden="true"
-                    ></span>
-                    Not downloaded
-                  </span>
-                }
-
-                <button
-                  type="button"
-                  ptahButton
-                  size="xs"
-                  [busy]="saving()"
-                  [disabled]="!canDownload()"
-                  (click)="downloadModel()"
-                  data-testid="local-stt-download-btn"
+              </span>
+            </div>
+          } @else {
+            <div class="flex items-center justify-between gap-2">
+              @if (downloaded()) {
+                <span
+                  ptahBadge
+                  appearance="outline"
+                  tone="ok"
+                  class="gap-1 whitespace-nowrap"
+                  data-testid="local-stt-download-status"
                 >
-                  <lucide-angular
-                    [img]="DownloadIcon"
-                    class="w-3 h-3"
+                  <span
+                    class="w-1.5 h-1.5 rounded-full bg-success"
                     aria-hidden="true"
-                  />
-                  <span>{{ downloaded() ? 'Ready' : 'Download' }}</span>
-                </button>
-              </div>
-            }
-          </div>
-        </div>
+                  ></span>
+                  Downloaded
+                </span>
+              } @else {
+                <span
+                  ptahBadge
+                  appearance="outline"
+                  tone="warn"
+                  class="gap-1 whitespace-nowrap"
+                  data-testid="local-stt-download-status"
+                >
+                  <span
+                    class="w-1.5 h-1.5 rounded-full bg-warning"
+                    aria-hidden="true"
+                  ></span>
+                  Not downloaded
+                </span>
+              }
 
+              <button
+                type="button"
+                ptahButton
+                size="xs"
+                [busy]="saving()"
+                [disabled]="!canDownload()"
+                (click)="downloadModel()"
+                data-testid="local-stt-download-btn"
+              >
+                <lucide-angular
+                  [img]="DownloadIcon"
+                  class="w-3 h-3"
+                  aria-hidden="true"
+                />
+                <span>{{ downloaded() ? 'Ready' : 'Download' }}</span>
+              </button>
+            </div>
+          }
+        </div>
+      </div>
     </ptah-form-section>
   `,
 })
 export class LocalSttPanelComponent {
+  readonly modelOptions = [
+    ...ENGLISH_MODELS.map((option) => ({ ...option, group: 'English-only' })),
+    ...MULTILINGUAL_MODELS.map((option) => ({
+      ...option,
+      group: 'Multilingual',
+    })),
+  ];
   private readonly rpc = inject(ClaudeRpcService);
   private readonly feedback = inject(SettingsSaveFeedbackService);
   private readonly downloadProgress = inject(VoiceDownloadProgressService);
@@ -379,9 +385,8 @@ export class LocalSttPanelComponent {
   }
 
   /** V14: saves on selection with Undo; a failed write reverts the select (D15). */
-  async onModelChange(event: Event): Promise<void> {
-    const select = event.target as HTMLSelectElement;
-    const next = select.value;
+  async onModelChange(next: string | null, control: PtahRichSelectComponent<string>): Promise<void> {
+    if (next === null) return;
     const previous = this.selectedModel();
     if (next === previous) return;
     await this.feedback.saveGeneric({
@@ -389,8 +394,8 @@ export class LocalSttPanelComponent {
       write: () => this.writeModel(next, previous),
       undo: () => this.writeModel(previous, next),
     });
-    // The binding alone does not repaint when the signal ends where it started.
-    select.value = this.selectedModel();
+    // Restore the menu model even if the write failed before the next render.
+    control.value.set(this.selectedModel());
   }
 
   onCustomModelInput(event: Event): void {

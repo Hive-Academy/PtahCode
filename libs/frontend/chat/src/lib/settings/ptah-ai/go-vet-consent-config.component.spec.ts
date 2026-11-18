@@ -18,19 +18,16 @@ import type {
   DiagnosticsGoVetConsentGetResult,
   DiagnosticsGoVetConsentSetResult,
 } from '@ptah-extension/shared';
-
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
+import { SearchVoiceSummaryStore } from './search-voice-summary.store';
 import { GoVetConsentConfigComponent } from './go-vet-consent-config.component';
-
 const ROOT_A = 'D:\\work\\service-a';
 const ROOT_B = 'D:\\work\\service-b';
 const GO = 'C:\\Program Files\\Go\\bin\\go.exe';
-
 const GET = 'diagnostics:go-vet-consent-get';
 /** The host's identity token for the root and binary a GET displayed. */
 const TOKEN_A = 'aaaaaaaaaaaaaaaaaaaaaaaa.bbbbbbbbbbbbbbbbbbbbbbbb';
 const SET = 'diagnostics:go-vet-consent-set';
-
 function getResult(
   overrides: Partial<DiagnosticsGoVetConsentGetResult> = {},
 ): DiagnosticsGoVetConsentGetResult {
@@ -43,20 +40,16 @@ function getResult(
     ...overrides,
   };
 }
-
 interface Deferred<T> {
   promise: Promise<T>;
   resolve: (value: T) => void;
 }
-
 function deferred<T>(): Deferred<T> {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((r) => (resolve = r));
   return { promise, resolve };
 }
-
 type Route = () => Promise<RpcResult<unknown>> | RpcResult<unknown>;
-
 /** Route mock RPC responses by method; each queue entry answers one call. */
 function routeRpc(rpc: MockRpcService, routes: Record<string, Route[]>): void {
   rpc.call.mockImplementation(((method: string) => {
@@ -66,9 +59,8 @@ function routeRpc(rpc: MockRpcService, routes: Record<string, Route[]>): void {
     }
     const next = queue.length > 1 ? queue.shift() : queue[0];
     return Promise.resolve(next ? next() : undefined);
-  }) as unknown as MockRpcService['call']);
+  }) as MockRpcService['call']);
 }
-
 function mount(rpc: MockRpcService): {
   fixture: ComponentFixture<GoVetConsentConfigComponent>;
   component: GoVetConsentConfigComponent;
@@ -83,6 +75,7 @@ function mount(rpc: MockRpcService): {
         useValue: { commit: signal({ status: 'idle' }) },
       },
       SettingsSaveFeedbackService,
+      SearchVoiceSummaryStore,
     ],
   });
   const scope = TestBed.inject(WorkspaceScopeService);
@@ -90,12 +83,10 @@ function mount(rpc: MockRpcService): {
   const fixture = TestBed.createComponent(GoVetConsentConfigComponent);
   return { fixture, component: fixture.componentInstance, scope };
 }
-
 /** The page toast: on/off results and SET failures are announced there, not in the card. */
 function toast(): { tone: string; message: string } | null {
   return TestBed.inject(SettingsSaveFeedbackService).toast();
 }
-
 async function settle(
   fixture: ComponentFixture<GoVetConsentConfigComponent>,
 ): Promise<void> {
@@ -103,21 +94,18 @@ async function settle(
   for (let i = 0; i < 6; i++) await Promise.resolve();
   fixture.detectChanges();
 }
-
 function q<T extends HTMLElement>(
   fixture: ComponentFixture<GoVetConsentConfigComponent>,
   id: string,
 ): T | null {
   return fixture.nativeElement.querySelector(`[data-testid="${id}"]`);
 }
-
 function text(
   fixture: ComponentFixture<GoVetConsentConfigComponent>,
   id: string,
 ): string {
   return q(fixture, id)?.textContent?.replace(/\s+/g, ' ').trim() ?? '';
 }
-
 function toggle(
   fixture: ComponentFixture<GoVetConsentConfigComponent>,
 ): HTMLInputElement {
@@ -125,7 +113,6 @@ function toggle(
   if (!el) throw new Error('toggle not found');
   return el;
 }
-
 function flip(
   fixture: ComponentFixture<GoVetConsentConfigComponent>,
   checked: boolean,
@@ -135,7 +122,6 @@ function flip(
   el.dispatchEvent(new Event('change'));
   fixture.detectChanges();
 }
-
 function click(
   fixture: ComponentFixture<GoVetConsentConfigComponent>,
   id: string,
@@ -145,23 +131,19 @@ function click(
   el.click();
   fixture.detectChanges();
 }
-
 function setCalls(rpc: MockRpcService): unknown[] {
   return rpc.call.mock.calls
     .filter(([method]) => method === SET)
     .map(([, params]) => params);
 }
-
 function getCount(rpc: MockRpcService): number {
   return rpc.call.mock.calls.filter(([method]) => method === GET).length;
 }
-
 describe('GoVetConsentConfigComponent', () => {
   afterEach(() => {
     jest.useRealTimers();
     TestBed.resetTestingModule();
   });
-
   it('renders the root, state and Go binary from GET', async () => {
     const rpc = createMockRpcService();
     routeRpc(rpc, { [GET]: [() => rpcSuccess(getResult({ state: 'on' }))] });
@@ -170,14 +152,12 @@ describe('GoVetConsentConfigComponent', () => {
     expect(
       (fixture.nativeElement as HTMLElement).querySelector('section')?.getAttribute('data-glass-surface'),
     ).toBe('content');
-
     expect(text(fixture, 'go-vet-consent-root')).toBe(ROOT_A);
     expect(text(fixture, 'go-vet-consent-binary')).toBe(GO);
     expect(text(fixture, 'go-vet-consent-state')).toBe('On');
     expect(toggle(fixture).checked).toBe(true);
     expect(toggle(fixture).disabled).toBe(false);
   });
-
   it('renders nothing when the host answers supported:false', async () => {
     const rpc = createMockRpcService();
     routeRpc(rpc, {
@@ -194,11 +174,9 @@ describe('GoVetConsentConfigComponent', () => {
     });
     const { fixture } = mount(rpc);
     await settle(fixture);
-
     expect(q(fixture, 'go-vet-consent-card')).toBeNull();
     expect(fixture.nativeElement.textContent.trim()).toBe('');
   });
-
   it('shows a stale consent with its reason and never as on', async () => {
     const rpc = createMockRpcService();
     routeRpc(rpc, {
@@ -209,14 +187,12 @@ describe('GoVetConsentConfigComponent', () => {
     });
     const { fixture } = mount(rpc);
     await settle(fixture);
-
-    expect(text(fixture, 'go-vet-consent-state')).toBe('Out of date');
+    expect(text(fixture, 'go-vet-consent-state')).toBe('Stale');
     expect(text(fixture, 'go-vet-consent-stale')).toContain(
       'the Go toolchain changed since consent was given',
     );
     expect(toggle(fixture).checked).toBe(false);
   });
-
   it('enables only after an explicit confirm that names the displayed root, and sends that root', async () => {
     const rpc = createMockRpcService();
     const setAnswer: DiagnosticsGoVetConsentSetResult = {
@@ -229,14 +205,11 @@ describe('GoVetConsentConfigComponent', () => {
     });
     const { fixture } = mount(rpc);
     await settle(fixture);
-
     flip(fixture, true);
     expect(setCalls(rpc)).toHaveLength(0);
     expect(text(fixture, 'go-vet-consent-confirm-root')).toBe(ROOT_A);
-
     click(fixture, 'go-vet-consent-allow');
     await settle(fixture);
-
     expect(setCalls(rpc)).toEqual([
       {
         enabled: true,
@@ -255,48 +228,38 @@ describe('GoVetConsentConfigComponent', () => {
     );
     expect(q(fixture, 'go-vet-consent-confirm')).toBeNull();
   });
-
   it('cancelling the confirmation sends nothing and leaves the toggle off', async () => {
     const rpc = createMockRpcService();
     routeRpc(rpc, { [GET]: [() => rpcSuccess(getResult())] });
     const { fixture } = mount(rpc);
     await settle(fixture);
-
     flip(fixture, true);
     expect(toggle(fixture).checked).toBe(true);
     click(fixture, 'go-vet-consent-cancel');
-
     expect(setCalls(rpc)).toHaveLength(0);
     expect(q(fixture, 'go-vet-consent-confirm')).toBeNull();
     expect(toggle(fixture).checked).toBe(false);
     expect(text(fixture, 'go-vet-consent-state')).toBe('Off');
   });
-
   it('badge and switch show the same pending state during the confirm step', async () => {
     const rpc = createMockRpcService();
     routeRpc(rpc, { [GET]: [() => rpcSuccess(getResult())] });
     const { fixture } = mount(rpc);
     await settle(fixture);
     expect(text(fixture, 'go-vet-consent-state')).toBe('Off');
-
     flip(fixture, true);
-
     expect(toggle(fixture).checked).toBe(true);
-    expect(text(fixture, 'go-vet-consent-state')).toBe('Confirm to enable');
+    expect(text(fixture, 'go-vet-consent-state')).toBe('Pending');
   });
-
   it('the enlarged hit area around the switch toggles it', async () => {
     const rpc = createMockRpcService();
     routeRpc(rpc, { [GET]: [() => rpcSuccess(getResult())] });
     const { fixture } = mount(rpc);
     await settle(fixture);
-
     click(fixture, 'go-vet-consent-toggle-target');
-
     expect(q(fixture, 'go-vet-consent-confirm')).not.toBeNull();
-    expect(text(fixture, 'go-vet-consent-state')).toBe('Confirm to enable');
+    expect(text(fixture, 'go-vet-consent-state')).toBe('Pending');
   });
-
   it('revoke reflects the read-back state and disables the toggle while in flight', async () => {
     const rpc = createMockRpcService();
     const pending = deferred<RpcResult<unknown>>();
@@ -306,23 +269,19 @@ describe('GoVetConsentConfigComponent', () => {
     });
     const { fixture } = mount(rpc);
     await settle(fixture);
-
     flip(fixture, false);
     expect(setCalls(rpc)).toEqual([
       { enabled: false, workspaceRoot: ROOT_A, source: 'settings-ui' },
     ]);
     expect(toggle(fixture).disabled).toBe(true);
     expect(toggle(fixture).checked).toBe(false);
-    expect(text(fixture, 'go-vet-consent-state')).toBe('Saving…');
-
+    expect(text(fixture, 'go-vet-consent-state')).toBe('Pending');
     pending.resolve(rpcSuccess({ success: true, state: 'off' }));
     await settle(fixture);
-
     expect(text(fixture, 'go-vet-consent-state')).toBe('Off');
     expect(toggle(fixture).checked).toBe(false);
     expect(toggle(fixture).disabled).toBe(false);
   });
-
   it('closing review 4: go-changed reverts, shows the fixed message and re-fetches the binary now on PATH', async () => {
     const rpc = createMockRpcService();
     const NEW_GO = '/opt/go-new/bin/go';
@@ -335,11 +294,9 @@ describe('GoVetConsentConfigComponent', () => {
     });
     const { fixture } = mount(rpc);
     await settle(fixture);
-
     flip(fixture, true);
     click(fixture, 'go-vet-consent-allow');
     await settle(fixture);
-
     expect(setCalls(rpc)).toEqual([
       expect.objectContaining({ confirmToken: TOKEN_A }),
     ]);
@@ -350,7 +307,6 @@ describe('GoVetConsentConfigComponent', () => {
     expect(text(fixture, 'go-vet-consent-binary')).toBe(NEW_GO);
     expect(q(fixture, 'go-vet-consent-success')).toBeNull();
   });
-
   it('closing review 4: after an enable the card shows the binary the host committed', async () => {
     const rpc = createMockRpcService();
     const COMMITTED = '/usr/local/go/bin/go-committed';
@@ -362,14 +318,11 @@ describe('GoVetConsentConfigComponent', () => {
     });
     const { fixture } = mount(rpc);
     await settle(fixture);
-
     flip(fixture, true);
     click(fixture, 'go-vet-consent-allow');
     await settle(fixture);
-
     expect(text(fixture, 'go-vet-consent-binary')).toBe(COMMITTED);
   });
-
   it('workspace-changed reverts the toggle, shows the fixed message and re-fetches', async () => {
     const rpc = createMockRpcService();
     routeRpc(rpc, {
@@ -382,11 +335,9 @@ describe('GoVetConsentConfigComponent', () => {
     const { fixture } = mount(rpc);
     await settle(fixture);
     expect(getCount(rpc)).toBe(1);
-
     flip(fixture, true);
     click(fixture, 'go-vet-consent-allow');
     await settle(fixture);
-
     expect(getCount(rpc)).toBe(2);
     expect(toggle(fixture).checked).toBe(false);
     expect(toast()?.message).toContain(
@@ -395,7 +346,6 @@ describe('GoVetConsentConfigComponent', () => {
     expect(text(fixture, 'go-vet-consent-root')).toBe(ROOT_B);
     expect(q(fixture, 'go-vet-consent-success')).toBeNull();
   });
-
   it('persist-failed reverts with no success message', async () => {
     const rpc = createMockRpcService();
     routeRpc(rpc, {
@@ -404,10 +354,8 @@ describe('GoVetConsentConfigComponent', () => {
     });
     const { fixture } = mount(rpc);
     await settle(fixture);
-
     flip(fixture, false);
     await settle(fixture);
-
     expect(toggle(fixture).checked).toBe(true);
     expect(text(fixture, 'go-vet-consent-state')).toBe('On');
     expect(q(fixture, 'go-vet-consent-success')).toBeNull();
@@ -415,7 +363,6 @@ describe('GoVetConsentConfigComponent', () => {
       'could not be saved and verified',
     );
   });
-
   it('a transport failure on SET reverts the toggle', async () => {
     const rpc = createMockRpcService();
     routeRpc(rpc, {
@@ -424,18 +371,15 @@ describe('GoVetConsentConfigComponent', () => {
     });
     const { fixture } = mount(rpc);
     await settle(fixture);
-
     flip(fixture, true);
     click(fixture, 'go-vet-consent-allow');
     await settle(fixture);
-
     expect(toggle(fixture).checked).toBe(false);
     expect(toast()?.message).toContain(
       'Could not reach the app host',
     );
     expect(toast()?.message).not.toContain('RPC timeout');
   });
-
   it('a scope change while a GET is in flight discards the old answer and re-fetches', async () => {
     const rpc = createMockRpcService();
     const first = deferred<RpcResult<unknown>>();
@@ -448,19 +392,15 @@ describe('GoVetConsentConfigComponent', () => {
     const { fixture, scope } = mount(rpc);
     fixture.detectChanges();
     expect(getCount(rpc)).toBe(1);
-
     scope.switchTo(ROOT_B);
     await settle(fixture);
     expect(getCount(rpc)).toBe(2);
     expect(text(fixture, 'go-vet-consent-root')).toBe(ROOT_B);
-
     first.resolve(rpcSuccess(getResult({ state: 'on' })));
     await settle(fixture);
-
     expect(text(fixture, 'go-vet-consent-root')).toBe(ROOT_B);
     expect(text(fixture, 'go-vet-consent-state')).toBe('Off');
   });
-
   it('a scope change closes an open confirmation so a stale root cannot be confirmed', async () => {
     const rpc = createMockRpcService();
     routeRpc(rpc, {
@@ -471,23 +411,18 @@ describe('GoVetConsentConfigComponent', () => {
     });
     const { fixture, scope } = mount(rpc);
     await settle(fixture);
-
     flip(fixture, true);
     expect(q(fixture, 'go-vet-consent-confirm')).not.toBeNull();
-
     scope.switchTo(ROOT_B);
     await settle(fixture);
-
     expect(q(fixture, 'go-vet-consent-confirm')).toBeNull();
     expect(setCalls(rpc)).toHaveLength(0);
   });
-
   it('shows a fixed error when GET fails and keeps the toggle disabled', async () => {
     const rpc = createMockRpcService();
     routeRpc(rpc, { [GET]: [() => rpcError('boom: internal detail')] });
     const { fixture } = mount(rpc);
     await settle(fixture);
-
     const error = q(fixture, 'go-vet-consent-error');
     expect(error).not.toBeNull();
     const errorElement = error as HTMLElement;
@@ -498,7 +433,6 @@ describe('GoVetConsentConfigComponent', () => {
     expect(errorElement.querySelector('button')?.textContent?.trim()).toBe('Retry');
     expect(toggle(fixture).disabled).toBe(true);
   });
-
   it('clears the load error after Retry succeeds', async () => {
     const rpc = createMockRpcService();
     routeRpc(rpc, {
@@ -510,13 +444,11 @@ describe('GoVetConsentConfigComponent', () => {
     const { fixture } = mount(rpc);
     await settle(fixture);
     expect(q(fixture, 'go-vet-consent-error')).not.toBeNull();
-
     q(fixture, 'go-vet-consent-error')?.querySelector('button')?.click();
     await settle(fixture);
     expect(q(fixture, 'go-vet-consent-error')).toBeNull();
     expect(text(fixture, 'go-vet-consent-root')).toBe(ROOT_A);
   });
-
   it('keeps the toggle disabled when no workspace is open', async () => {
     const rpc = createMockRpcService();
     routeRpc(rpc, {
@@ -524,21 +456,18 @@ describe('GoVetConsentConfigComponent', () => {
     });
     const { fixture } = mount(rpc);
     await settle(fixture);
-
     expect(text(fixture, 'go-vet-consent-root')).toBe(
       'No workspace folder is open',
     );
     expect(toggle(fixture).disabled).toBe(true);
   });
-
   it('renders consent details, status and the labelled switch with the shared patterns', async () => {
     const rpc = createMockRpcService();
     routeRpc(rpc, { [GET]: [() => rpcSuccess(getResult({ state: 'on' }))] });
     const { fixture } = mount(rpc);
     await settle(fixture);
-
     const card = q(fixture, 'go-vet-consent-card');
-    expect(card?.classList).toContain('border-base-content/10');
+    expect(card?.classList).toContain('border-surface-border');
     expect(card?.classList).not.toContain('card');
     expect(card?.classList).not.toContain('bg-base-200');
     const details = q(fixture, 'go-vet-consent-table');
@@ -547,13 +476,11 @@ describe('GoVetConsentConfigComponent', () => {
       .toEqual(['Workspace', 'Go binary']);
     expect(q(fixture, 'go-vet-consent-root')?.textContent).toContain(ROOT_A);
     expect(q(fixture, 'go-vet-consent-binary')?.textContent).toContain('go');
-
     const sw = toggle(fixture);
     expect(sw.getAttribute('role')).toBe('switch');
     expect(sw.getAttribute('aria-checked')).toBe('true');
     expect(sw.closest('ptah-setting-row')).not.toBeNull();
     expect(q(fixture, 'go-vet-consent-toggle-target')?.contains(sw)).toBe(true);
-
     const state = q(fixture, 'go-vet-consent-state');
     expect(state?.textContent?.trim()).toBe('On');
     expect(state?.querySelector('ptah-status')?.getAttribute('data-ink')).toBe('done');
@@ -562,16 +489,13 @@ describe('GoVetConsentConfigComponent', () => {
     ) as HTMLElement | null;
     expect(label?.textContent).toContain('Allow go vet in this workspace');
   });
-
   it('opens the P8 confirm with Cancel focused, and Esc cancels it with focus back on the switch (V28)', async () => {
     const rpc = createMockRpcService();
     routeRpc(rpc, { [GET]: [() => rpcSuccess(getResult())] });
     const { fixture } = mount(rpc);
     await settle(fixture);
-
     flip(fixture, true);
     await settle(fixture);
-
     const confirm = q(fixture, 'go-vet-consent-confirm');
     expect(confirm).not.toBeNull();
     const confirmGroup = confirm as HTMLElement;
@@ -588,15 +512,12 @@ describe('GoVetConsentConfigComponent', () => {
     expect(innerGroup).not.toBeNull();
     expect(innerGroup?.hasAttribute('aria-describedby')).toBe(false);
     expect(document.activeElement).toBe(q(fixture, 'go-vet-consent-cancel'));
-
     confirmGroup.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
     await settle(fixture);
-
     expect(q(fixture, 'go-vet-consent-confirm')).toBeNull();
     expect(setCalls(rpc)).toHaveLength(0);
     expect(document.activeElement).toBe(toggle(fixture));
   });
-
   it('stops the Esc keydown at the confirm, so an enclosing container does not also close (FM-4)', async () => {
     const rpc = createMockRpcService();
     routeRpc(rpc, { [GET]: [() => rpcSuccess(getResult())] });
@@ -617,7 +538,6 @@ describe('GoVetConsentConfigComponent', () => {
       document.body.removeEventListener('keydown', outer);
     }
   });
-
   it.each([
     ['a thrown Error', () => Promise.reject(new Error('secret host detail'))],
     [
@@ -634,11 +554,9 @@ describe('GoVetConsentConfigComponent', () => {
       });
       const { fixture } = mount(rpc);
       await settle(fixture);
-
       flip(fixture, true);
       click(fixture, 'go-vet-consent-allow');
       await settle(fixture);
-
       expect(toggle(fixture).checked).toBe(false);
       expect(toast()?.message).toBe(
         'Could not reach the app host. The card shows what is stored now.',
@@ -646,7 +564,6 @@ describe('GoVetConsentConfigComponent', () => {
       expect(fixture.nativeElement.textContent).not.toContain('host detail');
     },
   );
-
   it('shows the fixed load sentence, never host text, when GET throws (F1)', async () => {
     const rpc = createMockRpcService();
     routeRpc(rpc, {
@@ -654,26 +571,59 @@ describe('GoVetConsentConfigComponent', () => {
     });
     const { fixture } = mount(rpc);
     await settle(fixture);
-
     expect(text(fixture, 'go-vet-consent-error')).toContain(
       'Could not read the go vet setting for this workspace.',
     );
     expect(q(fixture, 'go-vet-consent-error')?.querySelector('button')?.textContent?.trim()).toBe('Retry');
     expect(fixture.nativeElement.textContent).not.toContain('host detail');
   });
-
-  it('sets the card description at 12 px (text-xs), the size of the web search and voice card descriptions (visual m1)', async () => {
+  it('keeps the concise description and state in the aside and details behind What runs', async () => {
     const rpc = createMockRpcService();
     routeRpc(rpc, { [GET]: [() => rpcSuccess(getResult())] });
     const { fixture } = mount(rpc);
     await settle(fixture);
-    const description = Array.from((fixture.nativeElement as HTMLElement).querySelectorAll('p')).find((p) =>
-      p.textContent?.includes("When on, Ptah's diagnostics tools run your installed Go toolchain"),
-    );
-    expect(description?.classList).toContain('text-xs');
-    expect(description?.classList).not.toContain('text-sm');
+    const element = fixture.nativeElement as HTMLElement;
+    expect(element.querySelector('#go-vet-consent-title')?.getAttribute('tabindex')).toBe('-1');
+    expect(element.querySelector('h2')?.textContent).toBe('go vet checks');
+    const aside = element.querySelector('[data-testid="form-section-aside"]');
+    expect(aside?.textContent).toContain('Let agents run go vet in Go workspaces to find problems before they edit.');
+    expect(aside?.querySelector('[data-testid="go-vet-consent-state"]')).not.toBeNull();
+    const button = element.querySelector<HTMLButtonElement>('ptah-native-popover button');
+    expect(button?.textContent).toContain('What runs');
+    expect(element.textContent).not.toContain('It does not run go:generate');
+    button?.click();
+    fixture.detectChanges();
+    expect(element.textContent).toContain('It does not run go:generate');
+    expect(element.querySelector('code')).toBeNull();
   });
-
+  it.each([
+    ['on', 'On', 'Runs in this workspace', 'ok'],
+    ['off', 'Off', 'Asks before it runs', 'idle'],
+    ['stale', 'Stale', 'Consent is out of date', 'warn'],
+  ] as const)('reports %s consent to the band', async (state, value, meta, tone) => {
+    const rpc = createMockRpcService();
+    routeRpc(rpc, { [GET]: [() => rpcSuccess(getResult({ state }))] });
+    const { fixture } = mount(rpc);
+    await settle(fixture);
+    expect(TestBed.inject(SearchVoiceSummaryStore).segments()).toEqual([
+      expect.objectContaining({ id: 'go-vet', value, meta, tone }),
+    ]);
+    flip(fixture, true);
+    expect(TestBed.inject(SearchVoiceSummaryStore).segments()[0]).toEqual(
+      expect.objectContaining({ value: 'Pending', meta: 'Saving', tone: 'info' }),
+    );
+  });
+  it('clears the segment when the host stops supporting go vet', async () => {
+    const rpc = createMockRpcService();
+    routeRpc(rpc, { [GET]: [() => rpcSuccess(getResult()), () => rpcSuccess(getResult({ supported: false }))] });
+    const { fixture, component } = mount(rpc);
+    await settle(fixture);
+    expect(TestBed.inject(SearchVoiceSummaryStore).segments()).toHaveLength(1);
+    await component.load();
+    await settle(fixture);
+    expect(TestBed.inject(SearchVoiceSummaryStore).segments()).toEqual([]);
+    expect(q(fixture, 'go-vet-consent-card')).toBeNull();
+  });
   it('uses no text size below 12 px anywhere in the component source (Batch 50b)', () => {
     const source = readFileSync(join(__dirname, 'go-vet-consent-config.component.ts'), 'utf8');
     expect(source.match(/text-\[(?:\d|1[01])(?:\.\d+)?px\]/g)).toBeNull();

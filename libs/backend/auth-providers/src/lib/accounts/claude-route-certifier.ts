@@ -442,6 +442,8 @@ export class ClaudeRouteCertifier {
       fs: this.fs,
       queryRegistry: (path, querySignal) => this.probe.queryRegistry(path, querySignal),
       signal,
+      onRefusedSource: (source) =>
+        this.logger?.warn('[ClaudeRouteCertifier] Policy source refused', { source }),
     });
     if (result.ok) return { ok: true, policy: result.policy };
     const refusal = refuse(result.code, result.terminated);

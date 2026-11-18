@@ -19,7 +19,7 @@ import { capture } from './settings-capture';
 import { HOST_DETAIL } from './settings-advanced-search-voice.fixtures';
 import {
   asvState, chooseVoiceProvider, dismissToast, expectEscReturnsFocus, expectFailedWrite, openVoiceDrawer, closeDrawers,
-  promptDetailsButton, searchVoiceTab, styleRow,
+  pickRichOption, promptDetailsButton, richOption, richTrigger, searchVoiceTab, styleRow,
 } from './settings-advanced-search-voice.reach';
 
 test.use({ useAppBuild: true });
@@ -224,10 +224,12 @@ for (const host of HOSTS) {
       by('settings-web-search-clear-group-tavily'), () => by('settings-web-search-clear-cancel-tavily').click());
     if (host === 'electron') {
       await attempt(findings, 'Voice: provider select', async () => {
-        const select = by('voice-provider-btn-stt');
-        await select.focus();
-        await expect(select).toBeFocused();
-        await expect(by('voice-provider-option-stt-local')).toBeEnabled();
+        const trigger = richTrigger(by('voice-provider-btn-stt'));
+        await trigger.focus();
+        await expect(trigger).toBeFocused();
+        await trigger.click();
+        await expect(richOption(by('voice-provider-option-stt-local'))).not.toHaveAttribute('aria-disabled', 'true');
+        await page.keyboard.press('Escape');
       });
       for (const direction of ['stt', 'tts'] as const) {
         await escape(`Voice: details drawer (${direction})`, () => by(`voice-engine-details-${direction}`), by('voice-details-drawer'));
@@ -291,9 +293,9 @@ for (const host of HOSTS) {
         await openVoiceDrawer(page, 'stt');
         const select = page.locator('[data-testid="local-stt-model-select"]');
         failures.set('voice:setConfig', { ok: false, error: HOST_DETAIL });
-        await select.selectOption('small.en');
+        await pickRichOption(page, select, 'small.en (~250 MB, more accurate)');
         await expectFailedWrite(page, 'Could not save the voice configuration.');
-        await expect(select).toHaveValue('base.en');
+        await expect(richTrigger(select)).toContainText('base.en (~80 MB, default)');
       });
       await dismissToast(page);
       await closeDrawers(page).catch(() => undefined);
@@ -302,11 +304,11 @@ for (const host of HOSTS) {
         await dismissToast(page, 'Saved text-to-speech provider.');
         await openVoiceDrawer(page, 'tts');
         const select = page.locator('[data-testid="local-tts-voice-select"]');
-        await expect(select).toHaveValue('af_heart');
+        await expect(richTrigger(select)).toContainText('Heart (US female)');
         failures.set('voice:setTtsConfig', { ok: false, error: HOST_DETAIL });
-        await select.selectOption('am_michael');
+        await pickRichOption(page, select, 'Michael (US male)');
         await expectFailedWrite(page, 'Could not save the text-to-speech configuration.');
-        await expect(select).toHaveValue('af_heart');
+        await expect(richTrigger(select)).toContainText('Heart (US female)');
       });
       await dismissToast(page);
       await closeDrawers(page).catch(() => undefined);
