@@ -136,9 +136,42 @@ describe('createCronApprovalGate', () => {
     expect(onError).toHaveBeenCalledWith(expect.any(Error), CREATE);
   });
 
+  it('cancels the prompt when the SDK aborts the hook, not after an answer', async () => {
+    const sdk = new AbortController();
+    const gate = jest.fn<ReturnType<CanUseTool>, Parameters<CanUseTool>>(
+      async () => ALLOW,
+    );
+    const approval = createCronApprovalGate(gate);
+    const hook = approval.hookMatcher.hooks[0] as HookCallback;
+    await hook(preToolUse(CREATE), 'tu-1', { signal: sdk.signal });
+    const promptSignal = gate.mock.calls[0][2].signal;
+    expect(promptSignal.aborted).toBe(false);
+    // The listener is gone after the answer.
+    sdk.abort();
+    expect(promptSignal.aborted).toBe(false);
+
+    const pending = jest.fn<ReturnType<CanUseTool>, Parameters<CanUseTool>>(
+      () => new Promise<PermissionResult>(() => undefined),
+    );
+    const second = new AbortController();
+    const held = createCronApprovalGate(pending, { deadlineMs: 50 });
+    const run = (held.hookMatcher.hooks[0] as HookCallback)(
+      preToolUse(CREATE, 'tu-2'),
+      'tu-2',
+      { signal: second.signal },
+    );
+    second.abort();
+    expect(pending.mock.calls[0][2].signal.aborted).toBe(true);
+    await run;
+  });
+
   it('denies on its own deadline, before the CLI hook timeout', async () => {
-    const { runHook } = setup(new Promise<PermissionResult>(() => undefined));
+    const { gate, runHook } = setup(
+      new Promise<PermissionResult>(() => undefined),
+    );
     const output = await runHook(CREATE);
+    // The pending prompt is cancelled, so it does not stay open.
+    expect(gate.mock.calls[0][2].signal.aborted).toBe(true);
     expect(output).toEqual({
       hookSpecificOutput: {
         hookEventName: 'PreToolUse',

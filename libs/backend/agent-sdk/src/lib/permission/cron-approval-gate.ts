@@ -95,8 +95,14 @@ export function createCronApprovalGate(
     const id = hookInput.tool_use_id ?? toolUseId;
     const input = (hookInput.tool_input ?? {}) as Record<string, unknown>;
     const agentID = (hookInput as { agent_id?: unknown }).agent_id;
+    // The prompt gets its own signal: the deadline aborts it, so no stale
+    // prompt and no activity hold stay behind a call that was denied.
+    const prompt = new AbortController();
+    const abortPrompt = (): void => prompt.abort();
+    if (signal.aborted) prompt.abort();
+    else signal.addEventListener('abort', abortPrompt, { once: true });
     const decision = gate(toolName, input, {
-      signal,
+      signal: prompt.signal,
       toolUseID: id ?? '',
       // No permission request exists yet at hook time; the id names this one.
       requestId: `cron-approval:${id ?? 'unknown'}`,
@@ -104,11 +110,12 @@ export function createCronApprovalGate(
     });
     let timer: ReturnType<typeof setTimeout> | undefined;
     const deadline = new Promise<PermissionResult>((resolve) => {
-      timer = setTimeout(
-        () =>
-          resolve({ behavior: 'deny', message: CRON_APPROVAL_TIMEOUT_MESSAGE }),
-        deadlineMs,
-      );
+      timer = setTimeout(() => {
+        // Decide first, then cancel: the timeout text wins over the result
+        // that the cancelled prompt gives.
+        resolve({ behavior: 'deny', message: CRON_APPROVAL_TIMEOUT_MESSAGE });
+        prompt.abort();
+      }, deadlineMs);
     });
     const settled = Promise.race([decision, deadline])
       // The cron branch of the permission callback always decides. A callback
@@ -123,7 +130,10 @@ export function createCronApprovalGate(
         options.onError?.(error, toolName);
         return { behavior: 'deny', message: CRON_APPROVAL_FAILED_MESSAGE };
       })
-      .finally(() => clearTimeout(timer));
+      .finally(() => {
+        clearTimeout(timer);
+        signal.removeEventListener('abort', abortPrompt);
+      });
     if (id) {
       decided.set(id, settled);
       if (decided.size > CRON_APPROVAL_REMEMBERED_MAX) {
