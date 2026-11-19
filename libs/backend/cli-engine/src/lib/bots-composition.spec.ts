@@ -1,20 +1,92 @@
 import 'reflect-metadata';
-import { readFileSync } from 'node:fs';
+import fs, { mkdtempSync, rmSync, type WriteStream } from 'node:fs';
+import { finished } from 'node:stream/promises';
+import os from 'os';
 import { join } from 'node:path';
 import { container as rootContainer } from 'tsyringe';
 import { BOTS_TOKENS, BotApplicationService } from '@ptah-extension/bots';
-import { AUTH_PROVIDERS_TOKENS } from '@ptah-extension/auth-providers';
+import {
+  AUTH_PROVIDERS_TOKENS,
+  OpenRouterPricingService,
+} from '@ptah-extension/auth-providers';
 import { HARNESS_SYNC_TOKENS } from '@ptah-extension/harness-sync';
 import { HARNESS_TOKENS, BotsRpcHandlers } from '@ptah-extension/rpc-handlers';
-import { PLATFORM_TOKENS } from '@ptah-extension/platform-core';
+import {
+  ContentDownloadService,
+  PLATFORM_TOKENS,
+  type IWorkspaceProvider,
+} from '@ptah-extension/platform-core';
+import { RepositoryIdentityBackfillService } from '@ptah-extension/usage-analytics';
 import {
   PERSISTENCE_TOKENS,
   SqliteBotRepository,
+  SqliteSessionUsageSink,
+  type SqliteConnectionService,
+  registerSessionStoreServices,
   registerPersistenceSqliteServices,
 } from '@ptah-extension/persistence-sqlite';
-import { TOKENS, type Logger } from '@ptah-extension/vscode-core';
+import {
+  TOKENS,
+  type Logger,
+  type RpcHandler,
+} from '@ptah-extension/vscode-core';
 import { createMockLogger } from '@ptah-extension/shared/testing';
 import { registerBotsComposition } from './register-bots-composition';
+import { CliDIContainer } from './container';
+import { PromptCacheService } from '@ptah-extension/agent-generation';
+import { ProcessStartTimeProbe } from '@ptah-extension/agent-sdk';
+import type { CliWorkspaceProvider } from '@ptah-extension/platform-cli';
+// eslint-disable-next-line @nx/enforce-module-boundaries -- Test-only access to an unexported constructor; production exports are outside this batch.
+import { SkillsShSourceRootService } from '../../../rpc-handlers/src/lib/skills-sh/skills-sh-source-root.service';
+
+// Keep real service registration, but do not start unrelated background jobs.
+jest.mock('@ptah-extension/persistence-sqlite', () => {
+  const actual = jest.requireActual<
+    typeof import('@ptah-extension/persistence-sqlite')
+  >('@ptah-extension/persistence-sqlite');
+  return {
+    ...actual,
+    registerSessionStoreServices: jest.fn(actual.registerSessionStoreServices),
+  };
+});
+jest.mock('@ptah-extension/task-specs', () => ({
+  ...jest.requireActual<typeof import('@ptah-extension/task-specs')>(
+    '@ptah-extension/task-specs',
+  ),
+  startTaskSpecsIndex: jest.fn<
+    ReturnType<typeof import('@ptah-extension/task-specs').startTaskSpecsIndex>,
+    Parameters<typeof import('@ptah-extension/task-specs').startTaskSpecsIndex>
+  >(() => ({ dispose: (): void => undefined })),
+}));
+jest.mock('@ptah-extension/session-organization', () => ({
+  ...jest.requireActual<typeof import('@ptah-extension/session-organization')>(
+    '@ptah-extension/session-organization',
+  ),
+  startSessionOrganization: jest.fn<
+    ReturnType<
+      typeof import('@ptah-extension/session-organization').startSessionOrganization
+    >,
+    Parameters<
+      typeof import('@ptah-extension/session-organization').startSessionOrganization
+    >
+  >(() => ({ dispose: (): void => undefined })),
+}));
+jest.mock('@ptah-extension/lane-outcomes', () => ({
+  ...jest.requireActual<typeof import('@ptah-extension/lane-outcomes')>(
+    '@ptah-extension/lane-outcomes',
+  ),
+  startAndRegisterLaneOutcomes: jest.fn<
+    ReturnType<
+      typeof import('@ptah-extension/lane-outcomes').startAndRegisterLaneOutcomes
+    >,
+    Parameters<
+      typeof import('@ptah-extension/lane-outcomes').startAndRegisterLaneOutcomes
+    >
+  >(() => undefined),
+}));
+jest.mock('./bootstrap/session-store-migration', () => ({
+  runCliSessionStoreMigration: jest.fn(async (): Promise<void> => undefined),
+}));
 
 function host(repository = true) {
   const container = rootContainer.createChildContainer();
@@ -88,13 +160,24 @@ describe('CLI bots composition', () => {
       expect(() =>
         registerBotsComposition(container, logger, true),
       ).not.toThrow();
-      const handler = container.resolve(BotsRpcHandlers);
+      // A sibling of the composed host has no application registration and
+      // cannot inherit it. The handler still resolves lazily on invocation.
+      const unbound = rootContainer.createChildContainer();
+      const handler =
+        missing === 'application'
+          ? new BotsRpcHandlers(
+              container.resolve<RpcHandler>(TOKENS.RPC_HANDLER),
+              () =>
+                unbound.resolve<BotApplicationService>(BOTS_TOKENS.APPLICATION),
+              container.resolve<IWorkspaceProvider>(
+                PLATFORM_TOKENS.WORKSPACE_PROVIDER,
+              ),
+              logger,
+            )
+          : container.resolve(BotsRpcHandlers);
       if (missing === 'application') {
-        // reset removes every binding, then restore the host ports used by the handler.
-        container.reset();
-        container.registerInstance(PLATFORM_TOKENS.WORKSPACE_PROVIDER, {
-          getWorkspaceFolders: () => [],
-        });
+        expect(unbound.isRegistered(BOTS_TOKENS.APPLICATION, true)).toBe(false);
+        expect(container.isRegistered(BOTS_TOKENS.APPLICATION)).toBe(true);
       }
       expect(() => handler.register()).not.toThrow();
       expect([...methods.keys()]).toEqual([...BotsRpcHandlers.METHODS]);
@@ -150,16 +233,149 @@ describe('CLI bots composition', () => {
     expect(error).toHaveBeenCalledWith('Bot RPC request failed', failure);
   });
 
-  it('calls domain composition once after Thoth, outside the optional RPC branch', () => {
-    const source = readFileSync(join(__dirname, 'container.ts'), 'utf8');
-    const call = source.indexOf(
-      'registerBotsComposition(container, logger, bootstrapMode',
+  describe('real CLI container bootstrap', () => {
+    let temporaryDirectory: string;
+    let outputStreams: WriteStream[];
+    let previousDbPath: string | undefined;
+    let previousSessionsDbPath: string | undefined;
+    let previousSettingsDirectory: string | undefined;
+
+    beforeEach(() => {
+      // Pricing warmup is unrelated to composition and would fetch a live catalog.
+      jest
+        .spyOn(OpenRouterPricingService.prototype, 'fetchAndRegister')
+        .mockResolvedValue([]);
+      // Fail the case if another startup path attempts a fetch, without networking.
+      jest
+        .spyOn(globalThis, 'fetch')
+        .mockRejectedValue(
+          new Error('Network requests are disabled in composition tests'),
+        );
+      outputStreams = [];
+      const createWriteStream = fs.createWriteStream;
+      jest.spyOn(fs, 'createWriteStream').mockImplementation((...args) => {
+        const stream = createWriteStream(...args);
+        outputStreams.push(stream);
+        return stream;
+      });
+      temporaryDirectory = mkdtempSync(
+        join(os.tmpdir(), 'ptah-bots-composition-'),
+      );
+      previousDbPath = process.env['PTAH_DB_PATH'];
+      previousSessionsDbPath = process.env['PTAH_SESSIONS_DB_PATH'];
+      previousSettingsDirectory = process.env['PTAH_SETTINGS_DIR'];
+      process.env['PTAH_SETTINGS_DIR'] = temporaryDirectory;
+      jest.mocked(registerSessionStoreServices).mockClear();
+      jest
+        .spyOn(SqliteSessionUsageSink.prototype, 'startFinalizer')
+        .mockImplementation(() => undefined);
+      process.env['PTAH_DB_PATH'] = join(temporaryDirectory, 'ptah.sqlite');
+      process.env['PTAH_SESSIONS_DB_PATH'] = join(
+        temporaryDirectory,
+        'sessions.sqlite',
+      );
+      // Some host adapters derive cache and content paths from the home directory.
+      jest.spyOn(os, 'homedir').mockReturnValue(temporaryDirectory);
+      // CLI's real file-manager adapter lacks disposeWatcher. This test never
+      // starts prompt-cache watchers; isolate its unrelated shutdown defect.
+      jest
+        .spyOn(PromptCacheService.prototype, 'dispose')
+        .mockImplementation(() => undefined);
+      jest
+        .spyOn(ContentDownloadService.prototype, 'ensureContent')
+        .mockRejectedValue(
+          new Error('Content downloads are disabled in composition tests'),
+        );
+      jest
+        .spyOn(RepositoryIdentityBackfillService.prototype, 'start')
+        .mockImplementation(() => undefined);
+    });
+
+    afterEach(async () => {
+      const container = CliDIContainer.activeContainer;
+      try {
+        if (container?.isRegistered(PLATFORM_TOKENS.WORKSPACE_PROVIDER)) {
+          container
+            .resolve<CliWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER)
+            .fileSettings.disposeCrossProcessWatch();
+        }
+        CliDIContainer.flushSync();
+        CliDIContainer.disposeDiagnostics();
+        await CliDIContainer.disposeHostRuntime();
+        if (container?.isRegistered(PERSISTENCE_TOKENS.SQLITE_CONNECTION)) {
+          container
+            .resolve<SqliteConnectionService>(
+              PERSISTENCE_TOKENS.SQLITE_CONNECTION,
+            )
+            .close();
+        }
+        for (const result of jest.mocked(registerSessionStoreServices).mock
+          .results) {
+          if (result.type === 'return') result.value.database.close();
+        }
+        await container?.dispose();
+        for (const stream of outputStreams) {
+          if (!stream.writableEnded) stream.end();
+          await finished(stream);
+        }
+        expect(globalThis.fetch).not.toHaveBeenCalled();
+      } finally {
+        jest.restoreAllMocks();
+        if (previousDbPath === undefined) delete process.env['PTAH_DB_PATH'];
+        else process.env['PTAH_DB_PATH'] = previousDbPath;
+        if (previousSessionsDbPath === undefined)
+          delete process.env['PTAH_SESSIONS_DB_PATH'];
+        else process.env['PTAH_SESSIONS_DB_PATH'] = previousSessionsDbPath;
+        if (previousSettingsDirectory === undefined)
+          delete process.env['PTAH_SETTINGS_DIR'];
+        else process.env['PTAH_SETTINGS_DIR'] = previousSettingsDirectory;
+        rmSync(temporaryDirectory, { recursive: true, force: true });
+      }
+    });
+
+    it.each(['minimal', 'full'] as const)(
+      'resolves bots and harness services from the %s CLI container',
+      async (bootstrapMode) => {
+        const child = rootContainer.createChildContainer();
+        // Prebind metadata-sensitive constructors before full-mode RPC setup.
+        child.register(SkillsShSourceRootService, {
+          useFactory: (c) =>
+            new SkillsShSourceRootService(
+              c.resolve<Logger>(TOKENS.LOGGER),
+              temporaryDirectory,
+            ),
+        });
+        child.registerInstance(
+          ProcessStartTimeProbe,
+          new ProcessStartTimeProbe(),
+        );
+        jest
+          .spyOn(rootContainer, 'createChildContainer')
+          .mockReturnValueOnce(child);
+        const result = CliDIContainer.setup({
+          bootstrapMode,
+          userDataPath: temporaryDirectory,
+          workspacePath: temporaryDirectory,
+          logsPath: join(temporaryDirectory, 'logs'),
+        });
+        await result.workspaceReady;
+        for (const token of [
+          ...Object.values(BOTS_TOKENS),
+          ...Object.values(HARNESS_TOKENS),
+        ]) {
+          expect(result.container.isRegistered(token)).toBe(true);
+          expect(result.container.resolve(token)).toBeInstanceOf(Object);
+        }
+        expect(
+          result.container.resolve(BOTS_TOKENS.APPLICATION),
+        ).toBeInstanceOf(BotApplicationService);
+        expect(
+          result.container.resolve(PERSISTENCE_TOKENS.BOT_REPOSITORY),
+        ).toBeInstanceOf(SqliteBotRepository);
+        expect(result.container.isRegistered(BotsRpcHandlers)).toBe(
+          bootstrapMode === 'full',
+        );
+      },
     );
-    expect(call).toBeGreaterThan(
-      source.indexOf('registerThothLibraries(container, logger)'),
-    );
-    expect(call).toBeLessThan(source.indexOf("if (bootstrapMode === 'full')"));
-    expect(source.match(/registerBotsComposition\(container/g)).toHaveLength(1);
-    expect(source).not.toContain('registerHarnessServices');
   });
 });
