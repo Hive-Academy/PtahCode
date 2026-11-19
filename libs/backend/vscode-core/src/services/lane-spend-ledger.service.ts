@@ -112,13 +112,25 @@ export class LaneSpendLedgerService implements LaneSpendReader, SessionUsageSink
     const base = { kind: 'api-spend' as const, revision: owner?.revision ?? 0, asOf: nowMs, budget: null };
     if (!this.available) return { ...base, availability: 'unavailable', periods: null, cumulative: null, coverage: 'none', creditEvidence: [] };
     const reset = owner?.resetAtMs ?? 0;
+    const resetRunIds = new Set(owner?.resetRunIds);
     const events = this.state.events.filter((event) => event.ownerKey === ownerKey && (!owner || event.occurredAtMs > reset) && event.occurredAtMs <= nowMs);
     const period = (startAt: number): { spend: LaneSpendPeriod; coveredRows: Set<SpendLedger['events'][number]> } => {
       const rows = events.filter((event) => event.occurredAtMs >= startAt);
+      const runs = new Map<string, SpendLedger['events']>();
+      const snapshotRunIds = new Set<string>();
+      const rowIndexes = new Map<SpendLedger['events'][number], number>();
+      const crossingRunIds = new Set(resetRunIds);
+      for (const row of this.state.events) {
+        if (row.ownerKey === ownerKey && row.occurredAtMs < startAt) crossingRunIds.add(row.runId);
+      }
       const coveredRows = new Set<SpendLedger['events'][number]>();
       let knownCostMicroUsd = 0, pricedEvents = 0, unpricedEvents = 0;
       let inputTokens = 0, outputTokens = 0, cacheReadTokens = 0, cacheCreationTokens = 0;
-      for (const row of rows) {
+      for (const [index, row] of rows.entries()) {
+        rowIndexes.set(row, index);
+        const run = runs.get(row.runId);
+        if (run) run.push(row); else runs.set(row.runId, [row]);
+        if (row.runCostSnapshot) snapshotRunIds.add(row.runId);
         for (const model of row.models) {
           inputTokens += model.inputTokens ?? 0; outputTokens += model.outputTokens ?? 0;
           cacheReadTokens += model.cacheReadTokens ?? 0; cacheCreationTokens += model.cacheCreationTokens ?? 0;
@@ -130,17 +142,16 @@ export class LaneSpendLedgerService implements LaneSpendReader, SessionUsageSink
       // Cross-period snapshots cannot allocate earlier usage to its original period.
       // Retention/compaction is deferred: pruning raw rows would lose cumulative
       // totals and deduplication history until reset without durable rollups.
-      for (const runId of new Set(rows.filter((row) => row.runCostSnapshot).map((row) => row.runId))) {
-        const run = rows.filter((row) => row.runId === runId);
+      for (const runId of snapshotRunIds) {
+        const run = runs.get(runId) ?? [];
         // A later unpriced snapshot leaves new usage uncovered, but must not
         // discard a previously reported absolute cost for this run.
         const snapshot = run.filter((row) => row.runCostSnapshot && row.totalCostAuthority !== 'unpriced' && row.totalCostMicroUsd !== null)
           .sort((a, b) => b.occurredAtMs - a.occurredAtMs || b.revision - a.revision)[0];
-        const crossesBoundary = owner?.resetRunIds.includes(runId) || this.state.events.some((row) =>
-          row.ownerKey === ownerKey && row.runId === runId && row.occurredAtMs < startAt);
+        const crossesBoundary = crossingRunIds.has(runId);
         if (!crossesBoundary && snapshot && snapshot.totalCostMicroUsd !== null) {
           const covered = run.filter((row) => row.occurredAtMs < snapshot.occurredAtMs ||
-            (row.occurredAtMs === snapshot.occurredAtMs && rows.indexOf(row) <= rows.indexOf(snapshot)));
+            (row.occurredAtMs === snapshot.occurredAtMs && (rowIndexes.get(row) ?? -1) <= (rowIndexes.get(snapshot) ?? -1)));
           knownCostMicroUsd -= covered.reduce((sum, row) => sum + (rowCost(row) ?? 0), 0);
           knownCostMicroUsd += snapshot.totalCostMicroUsd;
           const newlyPriced = covered.filter((row) => rowCost(row) === null).length;

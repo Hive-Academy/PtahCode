@@ -19,6 +19,36 @@ function setup(initial?: unknown) {
   return { storage, logger, ledger: new LaneSpendLedgerService(storage, logger) };
 }
 describe('durable owned spend', () => {
+  it('preserves spend and boundary coverage across many runs with many snapshots', async () => {
+    const events: SessionUsageContribution[] = [];
+    const resetRunIds: string[] = [];
+    for (let run = 0; run < 200; run++) {
+      const runId = `run-${run}`;
+      const kind = run % 4;
+      if (kind === 3) resetRunIds.push(runId);
+      if (kind === 2) events.push(event({ runId, eventKey: 'before-today', occurredAtMs: NOW - 2 * 86400000 }));
+      for (let snapshot = 0; snapshot < 20; snapshot++) {
+        const unpriced = kind === 1 && snapshot === 19;
+        events.push(event({ runId, eventKey: `snapshot-${snapshot}`, revision: snapshot, runCostSnapshot: true,
+          // Equal timestamps exercise revision selection and insertion-order coverage.
+          occurredAtMs: NOW, totalCostMicroUsd: unpriced ? null : (snapshot + 1) * 100,
+          totalCostAuthority: unpriced ? 'unpriced' : 'provider-reported' }));
+      }
+    }
+    const { ledger } = setup({ version: 1, events,
+      owners: [{ ownerKey: 'owner', revision: 1, resetAtMs: 0, resetRunIds }], credits: [] });
+    const result = await ledger.readSpend('owner', NOW);
+    // Each four-run group: 2000 + 1900 + 2000 known micro-USD, with
+    // 20 + 19 + 21 priced rows and 1 + 20 uncovered rows after reset.
+    const cumulative = { knownCostMicroUsd: 295_000, pricedEvents: 3_000, unpricedEvents: 1_050,
+      inputTokens: 40_500, outputTokens: 8_100, cacheReadTokens: 12_150, cacheCreationTokens: 16_200 };
+    expect(result).toMatchObject({ coverage: 'partial', cumulative });
+    expect(result.periods?.['7d']).toMatchObject(cumulative);
+    expect(result.periods?.['30d']).toMatchObject(cumulative);
+    // The 50 runs with earlier usage cannot allocate their snapshots to today.
+    expect(result.periods?.today).toMatchObject({ knownCostMicroUsd: 195_000, pricedEvents: 1_950,
+      unpricedEvents: 2_050, inputTokens: 40_000, outputTokens: 8_000, cacheReadTokens: 12_000, cacheCreationTokens: 16_000 });
+  });
   it.each(['model-priced', 'provider-reported'] as const)('retains unknown TTL evidence for %s snapshots', async (authority) => {
     const { ledger } = setup();
     const usage = event({ runCostSnapshot: true, totalCostAuthority: authority });
