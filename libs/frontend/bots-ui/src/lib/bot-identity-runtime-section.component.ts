@@ -177,7 +177,7 @@ import { avatarErrorMessage } from './bot-error-messages';
             </button>
             <p
               id="bot-avatar-file-hint"
-              class="mt-2 text-xs text-base-content/70"
+              class="mt-2 text-xs text-base-content-muted"
             >
               PNG, JPEG or WebP, up to 2 MB.
             </p>
