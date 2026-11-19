@@ -52,11 +52,14 @@ export class BotCatalogAdapter implements BotCatalogPort {
   ): Promise<BotCatalogSnapshot> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     let expired = false;
+    let startDeadline: () => void = () => undefined;
     const deadline = new Promise<never>((_, reject) => {
-      timer = setTimeout(() => {
-        expired = true;
-        reject(new Error('Catalog lookup timed out.'));
-      }, BOT_CATALOG_DEADLINE_MS);
+      startDeadline = () => {
+        timer = setTimeout(() => {
+          expired = true;
+          reject(new Error('Catalog lookup timed out.'));
+        }, BOT_CATALOG_DEADLINE_MS);
+      };
     });
     const bounded = async <T>(operation: () => T | Promise<T>): Promise<T> => {
       if (expired) throw new Error('Catalog lookup timed out.');
@@ -136,44 +139,7 @@ export class BotCatalogAdapter implements BotCatalogPort {
       }
     };
     const lanes: BotLaneChoice[] = [];
-    const runtime = selection?.runtime;
-    const cliTypes = SYSTEM_CLI_TYPES.filter(
-      (cli) =>
-        !runtime ||
-        (runtime.kind === 'lane' &&
-          runtime.target.kind === 'system' &&
-          runtime.target.cli === cli),
-    );
-    const cliTasks = cliTypes.map(async (cli): Promise<BotLaneChoice> => {
-      try {
-        // Cursor uses the bundled SDK; installation says nothing about credentials.
-        const command = cli === 'antigravity' ? 'agy' : cli;
-        const available = this.deps.executable
-          ? await bounded(() => this.deps.executable?.(command) ?? false)
-          : cli === 'cursor' ||
-            (await bounded(() => resolveCliPath(command))) !== null;
-        succeeded++;
-        return {
-          target: { kind: 'system', cli },
-          label: cli,
-          available,
-          capabilities: {},
-        };
-      } catch (error: unknown) {
-        failure(
-          'CLI_CATALOG_UNAVAILABLE',
-          error instanceof Error
-            ? 'CLI installation lookup unavailable.'
-            : 'CLI lookup failed.',
-        );
-        return {
-          target: { kind: 'system', cli },
-          label: cli,
-          available: false,
-          capabilities: {},
-        };
-      }
-    });
+    let runtime: BotEditable['runtime'] | undefined;
     const registryTask = (): void => {
       if (
         runtime &&
@@ -259,6 +225,45 @@ export class BotCatalogAdapter implements BotCatalogPort {
       }
     };
     try {
+      startDeadline();
+      runtime = selection?.runtime;
+      const cliTypes = SYSTEM_CLI_TYPES.filter(
+        (cli) =>
+          !runtime ||
+          (runtime.kind === 'lane' &&
+            runtime.target.kind === 'system' &&
+            runtime.target.cli === cli),
+      );
+      const cliTasks = cliTypes.map(async (cli): Promise<BotLaneChoice> => {
+        try {
+          // Cursor uses the bundled SDK; installation says nothing about credentials.
+          const command = cli === 'antigravity' ? 'agy' : cli;
+          const available = this.deps.executable
+            ? await bounded(() => this.deps.executable?.(command) ?? false)
+            : cli === 'cursor' ||
+              (await bounded(() => resolveCliPath(command))) !== null;
+          succeeded++;
+          return {
+            target: { kind: 'system', cli },
+            label: cli,
+            available,
+            capabilities: {},
+          };
+        } catch (error: unknown) {
+          failure(
+            'CLI_CATALOG_UNAVAILABLE',
+            error instanceof Error
+              ? 'CLI installation lookup unavailable.'
+              : 'CLI lookup failed.',
+          );
+          return {
+            target: { kind: 'system', cli },
+            label: cli,
+            available: false,
+            capabilities: {},
+          };
+        }
+      });
       await Promise.all([
         providersTask(),
         Promise.all(cliTasks).then((choices) => lanes.unshift(...choices)),

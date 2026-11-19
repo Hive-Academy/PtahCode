@@ -87,6 +87,25 @@ const selection: Pick<BotEditable, 'runtime' | 'skills' | 'toolRequirements'> =
   };
 
 describe('BotCatalogAdapter', () => {
+  it('clears the deadline when task setup throws synchronously', async () => {
+    jest.useFakeTimers();
+    try {
+      const { adapter } = setup();
+      const failure = new Error('Selection unavailable.');
+      const invalidSelection = {
+        ...selection,
+        get runtime(): BotEditable['runtime'] {
+          throw failure;
+        },
+      };
+      await expect(
+        adapter.read({ kind: 'user' }, invalidSelection),
+      ).rejects.toBe(failure);
+      expect(jest.getTimerCount()).toBe(0);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
   it.each<BotEditable['runtime']>([
     { kind: 'default' },
     { kind: 'main', providerId: 'provider', model: 'model' },

@@ -556,12 +556,8 @@ export class BotApplicationService {
           newSkills.some((choice) => choice.id === skill.id)
         )
           throw new BotDomainError(
-            catalog.status === 'partial'
-              ? 'PERSISTENCE_UNAVAILABLE'
-              : 'INVALID_PARAMS',
-            catalog.status === 'partial'
-              ? 'Installed skills could not be verified.'
-              : 'Choose an installed skill.',
+            'INVALID_PARAMS',
+            'Choose an installed skill.',
           );
         diagnostics.push({
           code: 'SKILL_UNRESOLVED',
