@@ -84,6 +84,11 @@ export class CronStateService {
    * workspace A can never overwrite the view after the user switched to B.
    */
   private refreshSeq = 0;
+  /**
+   * Counts the local changes of the rows. A `cron:list` response that was
+   * open during a change can be older than it and must not replace the rows.
+   */
+  private mutationSeq = 0;
 
   /**
    * List params (as a key) of the result that `_jobs` holds; `null` before
@@ -179,6 +184,7 @@ export class CronStateService {
 
   public async refresh(): Promise<void> {
     const token = ++this.refreshSeq;
+    const mutations = this.mutationSeq;
     const params = this.buildListParams();
     const key = JSON.stringify(params);
     // Rows stay only when the last successful list was for these params. With
@@ -193,6 +199,12 @@ export class CronStateService {
     try {
       const result = await this.rpc.list(params);
       if (token !== this.refreshSeq) return; // stale — a newer refresh ran
+      if (mutations !== this.mutationSeq) {
+        // A save, delete or toggle ended while this list was open. The
+        // response can be older than that change, so the list is read again.
+        await this.refresh();
+        return;
+      }
       this.jobsKey = key;
       this._jobs.set(result.jobs);
     } catch (err) {
@@ -208,6 +220,14 @@ export class CronStateService {
    * with a resolved workspace root filters to that path; `'all'` (or a scope
    * with no workspace open) lists globally.
    */
+  /** Local change of the rows after a write; see {@link mutationSeq}. */
+  private mutateJobs(
+    change: (jobs: readonly ScheduledJobDto[]) => ScheduledJobDto[],
+  ): void {
+    this.mutationSeq++;
+    this._jobs.update((jobs) => change(jobs));
+  }
+
   private buildListParams(): CronListParams {
     if (this._scopeFilter() !== 'workspace') return {};
     const root = this.appState.workspaceInfo()?.path;
@@ -232,7 +252,7 @@ export class CronStateService {
     try {
       const result = await this.rpc.create(spec);
       if (this.inActiveScope(result.job)) {
-        this._jobs.update((jobs) => [...jobs, result.job]);
+        this.mutateJobs((jobs) => [...jobs, result.job]);
       } else {
         void this.refresh();
       }
@@ -258,12 +278,12 @@ export class CronStateService {
     try {
       const result = await this.rpc.update({ id, patch });
       if (this.inActiveScope(result.job)) {
-        this._jobs.update((jobs) =>
+        this.mutateJobs((jobs) =>
           jobs.map((j) => (j.id === result.job.id ? result.job : j)),
         );
       } else {
         // The edit moved the job out of the listed workspace.
-        this._jobs.update((jobs) => jobs.filter((j) => j.id !== result.job.id));
+        this.mutateJobs((jobs) => jobs.filter((j) => j.id !== result.job.id));
         void this.refresh();
       }
       return result.job;
@@ -279,7 +299,7 @@ export class CronStateService {
     try {
       const result = await this.rpc.delete({ id });
       if (result.ok) {
-        this._jobs.update((jobs) => jobs.filter((j) => j.id !== id));
+        this.mutateJobs((jobs) => jobs.filter((j) => j.id !== id));
         if (this._selectedJobId() === id) {
           this.runsSeq++;
           this._selectedJobId.set(null);
@@ -298,7 +318,7 @@ export class CronStateService {
     this._error.set(null);
     try {
       const result = await this.rpc.toggle({ id, enabled });
-      this._jobs.update((jobs) =>
+      this.mutateJobs((jobs) =>
         jobs.map((j) => (j.id === result.job.id ? result.job : j)),
       );
     } catch (err) {

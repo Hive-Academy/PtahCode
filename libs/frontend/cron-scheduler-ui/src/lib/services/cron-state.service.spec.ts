@@ -146,6 +146,32 @@ describe('CronStateService', () => {
     expect(rpc.list).toHaveBeenLastCalledWith({ workspaceRoot: '/ws-a' });
   });
 
+  it('reads the list again when an edit ends while a list is open', async () => {
+    appState.workspaceInfo.set({ path: '/ws-a' });
+    const service = TestBed.inject(CronStateService);
+    const before = makeJob({ id: 'a', workspaceRoot: '/ws-a', name: 'old' });
+    const after = makeJob({ id: 'a', workspaceRoot: '/ws-a', name: 'new' });
+    rpc.list.mockResolvedValueOnce({ jobs: [before] });
+    await service.refresh();
+
+    let finishList: (value: CronListResult) => void = () => undefined;
+    rpc.list.mockReturnValueOnce(
+      new Promise<CronListResult>((resolve) => (finishList = resolve)),
+    );
+    rpc.list.mockResolvedValueOnce({ jobs: [after] });
+    const open = service.refresh();
+    rpc.update = jest.fn().mockResolvedValue({ job: after });
+    await service.update('a', { name: 'new' });
+    expect(service.jobs()[0].name).toBe('new');
+
+    // The open list is older than the edit: its rows are not used.
+    finishList({ jobs: [before] });
+    await open;
+    expect(service.jobs()[0].name).toBe('new');
+    expect(rpc.list).toHaveBeenCalledTimes(3);
+    expect(service.loading()).toBe(false);
+  });
+
   it('removes the rows of the previous scope before the new list arrives', async () => {
     appState.workspaceInfo.set({ path: '/ws-a' });
     const service = TestBed.inject(CronStateService);
