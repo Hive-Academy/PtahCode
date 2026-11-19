@@ -10,6 +10,7 @@ import { RpcUserError, type Logger } from '@ptah-extension/vscode-core';
 export type BotApplicationResolver = () => BotApplicationService;
 
 export class BotsRpcHandlers {
+  private registered = false;
   static readonly METHODS = [
     'bots:list',
     'bots:get',
@@ -37,11 +38,13 @@ export class BotsRpcHandlers {
   ) {}
 
   register(): void {
+    if (this.registered) return;
     for (const method of BotsRpcHandlers.METHODS) {
       this.rpcHandler.registerMethod(method, (raw: unknown) =>
         this.call(method, raw),
       );
     }
+    this.registered = true;
   }
 
   private async call(

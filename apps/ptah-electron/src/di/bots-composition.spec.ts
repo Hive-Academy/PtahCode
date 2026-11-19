@@ -100,12 +100,16 @@ describe('Electron bots composition (B10)', () => {
       SqliteBotRepository,
     );
     expect(c.resolve(BotsRpcHandlers)).toBeInstanceOf(BotsRpcHandlers);
+    expect(methods.size).toBe(0);
+    c.resolve(BotsRpcHandlers).register();
     expect([...methods.keys()]).toEqual([...BotsRpcHandlers.METHODS]);
   });
 
   it('resolves all B05 collaborators and every bot service through production factories', () => {
-    const { c, hostLogger } = setup();
+    const { c, methods, hostLogger } = setup();
     registerBotsComposition(c, hostLogger);
+    expect(methods.size).toBe(0);
+    c.resolve(BotsRpcHandlers).register();
     for (const token of collaborators) expect(c.resolve(token)).toBeDefined();
     for (const token of Object.values(BOTS_TOKENS)) {
       const service = c.resolve(token);
@@ -119,13 +123,15 @@ describe('Electron bots composition (B10)', () => {
   });
 
   it('shares the existing connection and repository singleton, without configuring a clock or opening a DB', () => {
-    const { c, hostLogger } = setup();
+    const { c, methods, hostLogger } = setup();
     const configure = jest.spyOn(SqliteBotRepository.prototype, 'configure');
     const open = jest.spyOn(
       SqliteConnectionService.prototype,
       'openAndMigrate',
     );
     registerBotsComposition(c, hostLogger);
+    expect(methods.size).toBe(0);
+    c.resolve(BotsRpcHandlers).register();
     const connection = c.resolve(PERSISTENCE_TOKENS.SQLITE_CONNECTION);
     const repository = c.resolve(PERSISTENCE_TOKENS.BOT_REPOSITORY);
     expect(repository).toBeInstanceOf(SqliteBotRepository);
@@ -146,6 +152,8 @@ describe('Electron bots composition (B10)', () => {
     const resolve = jest.spyOn(c, 'resolve');
     const register = jest.spyOn(c, 'register');
     registerBotsComposition(c, hostLogger);
+    expect(methods.size).toBe(0);
+    c.resolve(BotsRpcHandlers).register();
     expect(register.mock.calls.map(([token]) => token)).toEqual([
       BOTS_TOKENS.WORKSPACE_AUTHORIZATION,
       BOTS_TOKENS.SOURCE_READER,
@@ -172,6 +180,8 @@ describe('Electron bots composition (B10)', () => {
   it('registers every method without persistence and resolves storage only on a request', async () => {
     const { c, methods, hostLogger } = setup(false);
     registerBotsComposition(c, hostLogger);
+    expect(methods.size).toBe(0);
+    c.resolve(BotsRpcHandlers).register();
     expect(methods.size).toBe(11);
     await expect(
       method(methods, 'bots:list')({ workspaceRoot: 'D:/work' }),
@@ -190,6 +200,8 @@ describe('Electron bots composition (B10)', () => {
   it('supplies the host logger and resolves a replacement application lazily', async () => {
     const { c, methods, logger, hostLogger } = setup();
     registerBotsComposition(c, hostLogger);
+    expect(methods.size).toBe(0);
+    c.resolve(BotsRpcHandlers).register();
     const failure = new Error('host-private detail');
     c.registerInstance(BOTS_TOKENS.APPLICATION, {
       list: async () => {
@@ -206,8 +218,10 @@ describe('Electron bots composition (B10)', () => {
   });
 
   it('covers the five bot service tokens and handler in expected-resolvable', () => {
-    const { c, hostLogger } = setup();
+    const { c, methods, hostLogger } = setup();
     registerBotsComposition(c, hostLogger);
+    expect(methods.size).toBe(0);
+    c.resolve(BotsRpcHandlers).register();
     for (const token of [
       ...Object.values(BOTS_TOKENS),
       PERSISTENCE_TOKENS.BOT_REPOSITORY,
@@ -236,6 +250,7 @@ describe('Electron bots composition (B10)', () => {
     expect(phase4.indexOf('registerHarnessServices(container)')).toBeLessThan(
       phase4.indexOf('registerBotsComposition(container, logger)'),
     );
+    expect(helper).not.toContain('.register()');
     expect(helper.indexOf('registerBotAdapters(container)')).toBeLessThan(
       helper.indexOf('registerBotsServices(container)'),
     );

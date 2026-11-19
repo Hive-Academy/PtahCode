@@ -525,11 +525,6 @@ export class BotApplicationService {
     try {
       catalog = await this.deps.catalog.read(definition.scope, definition);
     } catch (error: unknown) {
-      if (newSkills.length)
-        throw new BotDomainError(
-          'PERSISTENCE_UNAVAILABLE',
-          'Installed skills could not be verified.',
-        );
       return [
         {
           code: 'CATALOG_UNAVAILABLE',
@@ -541,10 +536,11 @@ export class BotApplicationService {
         },
       ];
     }
-    if (catalog.status === 'unavailable' && newSkills.length)
-      throw new BotDomainError(
-        'PERSISTENCE_UNAVAILABLE',
-        'Installed skills could not be verified.',
+    const skillsUnknown =
+      catalog.status === 'unavailable' ||
+      catalog.diagnostics.some(
+        ({ code }) =>
+          code === 'SKILLS_UNAVAILABLE' || code === 'SKILLS_PARTIAL',
       );
     const diagnostics: BotDiagnostic[] = [...catalog.diagnostics];
     if (catalog.status !== 'available')
@@ -555,7 +551,10 @@ export class BotApplicationService {
       });
     for (const skill of definition.skills)
       if (!catalog.skills.some((choice) => choice.id === skill.id)) {
-        if (newSkills.some((choice) => choice.id === skill.id))
+        if (
+          !skillsUnknown &&
+          newSkills.some((choice) => choice.id === skill.id)
+        )
           throw new BotDomainError(
             catalog.status === 'partial'
               ? 'PERSISTENCE_UNAVAILABLE'
@@ -566,7 +565,9 @@ export class BotApplicationService {
           );
         diagnostics.push({
           code: 'SKILL_UNRESOLVED',
-          message: `Skill ${skill.id} is not installed.`,
+          message: skillsUnknown
+            ? `Skill ${skill.id} could not be verified.`
+            : `Skill ${skill.id} is not installed.`,
           field: 'skills',
           severity: 'warning',
         });

@@ -1,4 +1,8 @@
 import 'reflect-metadata';
+import {
+  BotCatalogAdapter,
+  BOT_CATALOG_DEADLINE_MS,
+} from '../bots/bot-catalog-adapter';
 import { container } from 'tsyringe';
 import {
   BotApplicationService,
@@ -24,6 +28,14 @@ import {
   BotsRpcHandlers,
   type BotApplicationResolver,
 } from './bots-rpc.handlers';
+
+jest.mock('@ptah-extension/cli-agent-runtime', () => ({
+  resolveCliPath: jest.fn(async () => null),
+  PTAH_CLI_AGENTS_CONFIG_KEY: 'ptahCliAgents',
+}));
+jest.mock('@ptah-extension/agent-sdk', () => ({
+  CLAUDE_BUILTIN_TOOL_IDS: ['Read'],
+}));
 
 const ROOT = 'C:\\Project';
 const ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
@@ -141,6 +153,66 @@ function setup(
 }
 
 describe('BotsRpcHandlers', () => {
+  it('creates and updates with unverified selected skills when discovery exceeds the deadline', async () => {
+    jest.useFakeTimers();
+    try {
+      const catalog = new BotCatalogAdapter({
+        models: { fetchModels: jest.fn() },
+        secrets: { getProviderKey: jest.fn() },
+        sources: { resolve: () => new Promise(() => undefined) },
+        config: { getWithDefault: jest.fn() },
+        logger: { debug: jest.fn() },
+      });
+      const { call, repository } = setup({ catalog });
+      const definition = {
+        ...create.definition,
+        skills: [{ id: 'unverified' }],
+      };
+      const pending = call('bots:create', { definition });
+      await jest.advanceTimersByTimeAsync(BOT_CATALOG_DEADLINE_MS);
+      const created = BotsRpcSchemas['bots:create'].result.parse(await pending);
+      expect(created.record.skills).toEqual(definition.skills);
+      expect(created.diagnostics.map(({ code }) => code)).toEqual(
+        expect.arrayContaining(['SKILLS_UNAVAILABLE', 'SKILL_UNRESOLVED']),
+      );
+      const update = call('bots:update', {
+        id: ID,
+        expectedRevision: 1,
+        schemaVersion: 2,
+        definition: {
+          ...BotEditableSchema.strip().parse(created.record),
+          skills: [{ id: 'another-unverified' }],
+        },
+      });
+      await jest.advanceTimersByTimeAsync(BOT_CATALOG_DEADLINE_MS);
+      expect(
+        BotsRpcSchemas['bots:update'].result.parse(await update).record
+          .revision,
+      ).toBe(2);
+      expect(repository.save).toHaveBeenCalledTimes(2);
+      expect(jest.getTimerCount()).toBe(0);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('registers each method once across composition and runtime surface wiring', () => {
+    const registerMethod = jest.fn();
+    const handler = new BotsRpcHandlers(
+      { registerMethod },
+      () => {
+        throw new Error('Must stay lazy');
+      },
+      { getWorkspaceFolders: () => [] },
+      { error: jest.fn() },
+    );
+    handler.register();
+    handler.register();
+    expect(registerMethod).toHaveBeenCalledTimes(
+      BotsRpcHandlers.METHODS.length,
+    );
+  });
+
   it('gets, updates and deletes user bots without an open workspace', async () => {
     const { call, authorize } = setup({}, undefined, []);
     const created = BotsRpcSchemas['bots:create'].result.parse(

@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { resolveCliPath } from '@ptah-extension/cli-agent-runtime';
 import {
   BotCatalogAdapter,
+  BOT_CATALOG_DEADLINE_MS,
   type BotCatalogDependencies,
 } from './bot-catalog-adapter';
 import {
@@ -86,6 +87,189 @@ const selection: Pick<BotEditable, 'runtime' | 'skills' | 'toolRequirements'> =
   };
 
 describe('BotCatalogAdapter', () => {
+  it.each<BotEditable['runtime']>([
+    { kind: 'default' },
+    { kind: 'main', providerId: 'provider', model: 'model' },
+    { kind: 'lane', target: { kind: 'system', cli: 'claude' } },
+  ])(
+    'settles slow CLI and skills discovery within one deadline for %j',
+    async (runtime) => {
+      jest.useFakeTimers();
+      try {
+        const { deps, adapter } = setup();
+        deps.executable = jest.fn(() => new Promise<boolean>(() => undefined));
+        jest
+          .mocked(deps.sources.resolve)
+          .mockImplementation(() => new Promise(() => undefined));
+        let settled = false;
+        const pending = adapter
+          .read({ kind: 'user' }, { ...selection, runtime })
+          .then((value) => {
+            settled = true;
+            return value;
+          });
+        await jest.advanceTimersByTimeAsync(BOT_CATALOG_DEADLINE_MS - 1);
+        expect(settled).toBe(false);
+        expect(deps.sources.resolve).toHaveBeenCalledTimes(1);
+        expect(deps.executable).toHaveBeenCalledTimes(
+          runtime.kind === 'lane' ? 1 : 0,
+        );
+        expect(deps.models.fetchModels).toHaveBeenCalledTimes(
+          runtime.kind === 'main' ? 1 : 0,
+        );
+        await jest.advanceTimersByTimeAsync(1);
+        const result = await pending;
+        expect(settled).toBe(true);
+        expect(result.diagnostics).toContainEqual(
+          expect.objectContaining({ code: 'SKILLS_UNAVAILABLE' }),
+        );
+        if (runtime.kind === 'lane') {
+          expect(deps.executable).toHaveBeenCalledWith('claude');
+          expect(result.diagnostics).toContainEqual(
+            expect.objectContaining({ code: 'CLI_CATALOG_UNAVAILABLE' }),
+          );
+          expect(result.diagnostics).toContainEqual(
+            expect.objectContaining({ code: 'RUNTIME_UNRESOLVED' }),
+          );
+        } else
+          expect(result.diagnostics.map(({ code }) => code)).not.toContain(
+            'CLI_CATALOG_UNAVAILABLE',
+          );
+        expect(jest.getTimerCount()).toBe(0);
+      } finally {
+        jest.useRealTimers();
+      }
+    },
+  );
+  it('shares the deadline between credentials and model lookup without restarting it', async () => {
+    jest.useFakeTimers();
+    try {
+      const { deps, adapter } = setup();
+      jest
+        .mocked(deps.secrets.getProviderKey)
+        .mockImplementation(
+          () =>
+            new Promise((resolve) => setTimeout(() => resolve('key'), 4000)),
+        );
+      jest
+        .mocked(deps.models.fetchModels)
+        .mockImplementation(() => new Promise(() => undefined));
+      const pending = adapter.read({ kind: 'user' }, selection);
+      expect(deps.sources.resolve).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(4000);
+      expect(deps.models.fetchModels).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(BOT_CATALOG_DEADLINE_MS - 4000);
+      const result = await pending;
+      expect(result.diagnostics.map(({ code }) => code)).toEqual(
+        expect.arrayContaining(['MODELS_UNAVAILABLE', 'CAPABILITIES_UNKNOWN']),
+      );
+      expect(jest.getTimerCount()).toBe(0);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+  it('scans all independent CLI and skill lookups concurrently without a selection', async () => {
+    jest.useFakeTimers();
+    try {
+      const { deps, adapter } = setup();
+      deps.executable = jest.fn(() => new Promise<boolean>(() => undefined));
+      jest
+        .mocked(deps.sources.resolve)
+        .mockImplementation(() => new Promise(() => undefined));
+      const pending = adapter.read({ kind: 'user' });
+      expect(deps.executable).toHaveBeenCalledTimes(4);
+      expect(deps.sources.resolve).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(BOT_CATALOG_DEADLINE_MS);
+      const result = await pending;
+      expect(result.status).toBe('partial');
+      expect(
+        result.diagnostics.filter(
+          ({ code }) => code === 'CLI_CATALOG_UNAVAILABLE',
+        ),
+      ).toHaveLength(4);
+      expect(result.diagnostics).toContainEqual(
+        expect.objectContaining({ code: 'SKILLS_UNAVAILABLE' }),
+      );
+      expect(jest.getTimerCount()).toBe(0);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+  it('keeps an unknown provider unresolved without claiming a discovery failure', async () => {
+    const { deps, adapter } = setup();
+    const result = await adapter.read(
+      { kind: 'user' },
+      {
+        ...selection,
+        runtime: { kind: 'main', providerId: 'missing', model: 'model' },
+      },
+    );
+    expect(result.diagnostics).toContainEqual(
+      expect.objectContaining({ code: 'RUNTIME_UNRESOLVED' }),
+    );
+    expect(result.diagnostics.map(({ code }) => code)).not.toEqual(
+      expect.arrayContaining(['PROVIDERS_UNAVAILABLE']),
+    );
+    expect(result.diagnostics.map(({ code }) => code)).not.toContain(
+      'MODELS_UNAVAILABLE',
+    );
+    expect(deps.models.fetchModels).not.toHaveBeenCalled();
+    expect(deps.executable).not.toHaveBeenCalled();
+  });
+  it('reads only the selected Ptah lane from the registry without system CLI discovery', async () => {
+    const { deps, adapter } = setup();
+    const result = await adapter.read(
+      { kind: 'user' },
+      {
+        ...selection,
+        runtime: {
+          kind: 'lane',
+          target: { kind: 'ptah-cli', ptahCliId: 'lane' },
+        },
+      },
+    );
+    expect(deps.executable).not.toHaveBeenCalled();
+    expect(deps.models.fetchModels).not.toHaveBeenCalled();
+    expect(result.lanes).toHaveLength(1);
+    expect(result.lanes[0]?.target).toEqual({
+      kind: 'ptah-cli',
+      ptahCliId: 'lane',
+    });
+  });
+
+  it('saves default and lane selections without waiting for unrelated provider discovery', async () => {
+    const { deps, adapter } = setup();
+    jest
+      .mocked(deps.models.fetchModels)
+      .mockImplementation(() => new Promise(() => undefined));
+    for (const runtime of [
+      { kind: 'default' },
+      { kind: 'lane', target: { kind: 'system', cli: 'claude' } },
+    ] as const) {
+      const result = await adapter.read(
+        { kind: 'user' },
+        { ...selection, runtime },
+      );
+      expect(result.skills).toContainEqual({ id: 'user-skill' });
+    }
+    expect(deps.models.fetchModels).not.toHaveBeenCalled();
+    expect(deps.secrets.getProviderKey).not.toHaveBeenCalled();
+  });
+  it('only discovers models for the provider selected by the bot', async () => {
+    const { deps, adapter } = setup();
+    jest.mocked(getAllAnthropicProviders).mockReturnValue([
+      { ...providerTemplate, id: 'unrelated', name: 'Unrelated' },
+      { ...providerTemplate, id: 'provider', name: 'Provider' },
+    ]);
+    await adapter.read({ kind: 'user' }, selection);
+    expect(deps.models.fetchModels).toHaveBeenCalledTimes(1);
+    expect(deps.models.fetchModels).toHaveBeenCalledWith(
+      'provider',
+      'private-key',
+      false,
+    );
+  });
+
   it('keeps the first duplicate lane ID and reports the ignored entry', async () => {
     const { deps, adapter } = setup();
     jest.mocked(deps.config.getWithDefault).mockReturnValue([
@@ -126,9 +310,8 @@ describe('BotCatalogAdapter', () => {
       const pending = adapter.read({ kind: 'user' });
       await jest.advanceTimersByTimeAsync(0);
       expect(deps.models.fetchModels).toHaveBeenCalledTimes(4);
-      await jest.advanceTimersByTimeAsync(15000);
-      expect(deps.models.fetchModels).toHaveBeenCalledTimes(6);
-      await jest.advanceTimersByTimeAsync(15000);
+      await jest.advanceTimersByTimeAsync(BOT_CATALOG_DEADLINE_MS);
+      expect(deps.models.fetchModels).toHaveBeenCalledTimes(4);
       const result = await pending;
       expect(result.status).toBe('partial');
       expect(
@@ -303,7 +486,7 @@ describe('BotCatalogAdapter', () => {
         .mocked(deps.secrets.getProviderKey)
         .mockReturnValue(new Promise(() => undefined));
       const pending = adapter.read({ kind: 'user' });
-      await jest.advanceTimersByTimeAsync(15000);
+      await jest.advanceTimersByTimeAsync(BOT_CATALOG_DEADLINE_MS);
       expect((await pending).diagnostics).toEqual(
         expect.arrayContaining([
           expect.objectContaining({ code: 'MODELS_UNAVAILABLE' }),

@@ -655,14 +655,15 @@ describe('BotApplicationService', () => {
             (mode === 'removed' ? 'SKILL_UNRESOLVED' : 'CATALOG_UNAVAILABLE'),
         ),
       ).toBe(true);
-      await expect(
-        service.update(
-          updateInput(renamed.record, { skills: [{ id: 'new' }] }),
-          [ROOT],
-        ),
-      ).rejects.toMatchObject({
-        code: mode === 'removed' ? 'INVALID_PARAMS' : 'PERSISTENCE_UNAVAILABLE',
-      });
+      const pending = service.update(
+        updateInput(renamed.record, { skills: [{ id: 'new' }] }),
+        [ROOT],
+      );
+      if (mode === 'removed') {
+        await expect(pending).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
+      } else {
+        expect((await pending).record.skills).toEqual([{ id: 'new' }]);
+      }
     },
   );
   it('sanitizes failed V1 conversion and retains it as an unreadable list item', async () => {

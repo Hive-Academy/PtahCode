@@ -34,6 +34,8 @@ export interface BotCatalogDependencies {
   logger: Pick<Logger, 'debug'>;
   executable?: (command: string) => boolean | Promise<boolean>;
 }
+// Keep save-time discovery well below ClaudeRpcService's 30_000 ms default.
+export const BOT_CATALOG_DEADLINE_MS = 8_000;
 const RegistryEntrySchema = z.looseObject({
   id: z.string().min(1),
   name: z.string().min(1),
@@ -48,6 +50,18 @@ export class BotCatalogAdapter implements BotCatalogPort {
     scope: BotScope,
     selection?: Pick<BotEditable, 'runtime' | 'skills' | 'toolRequirements'>,
   ): Promise<BotCatalogSnapshot> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let expired = false;
+    const deadline = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        expired = true;
+        reject(new Error('Catalog lookup timed out.'));
+      }, BOT_CATALOG_DEADLINE_MS);
+    });
+    const bounded = async <T>(operation: () => T | Promise<T>): Promise<T> => {
+      if (expired) throw new Error('Catalog lookup timed out.');
+      return Promise.race([operation(), deadline]);
+    };
     const diagnostics: BotDiagnostic[] = [];
     let succeeded = 0;
     let failed = 0;
@@ -57,158 +71,202 @@ export class BotCatalogAdapter implements BotCatalogPort {
       this.deps.logger.debug('Bot catalog dependency unavailable', { code });
     };
     const mainProviders: BotMainProviderChoice[] = [];
-    try {
-      const providers = getAllAnthropicProviders();
-      let nextProvider = 0;
-      const choices = new Map<number, BotMainProviderChoice>();
-      const worker = async (): Promise<void> => {
-        while (nextProvider < providers.length) {
-          const index = nextProvider++;
-          const provider = providers[index];
-          if (!provider) continue;
-          const choice: BotMainProviderChoice = {
-            providerId: provider.id,
-            label: provider.name,
-            capabilities: {},
-          };
-          try {
-            const key = await this.bounded(
-              this.deps.secrets.getProviderKey(provider.id),
-            );
-            const result = await this.bounded(
-              this.deps.models.fetchModels(provider.id, key ?? null, false),
-            );
-            choices.set(index, {
-              ...choice,
-              capabilities: { models: result.models.map((model) => model.id) },
-            });
-            succeeded++;
-          } catch (error: unknown) {
-            choices.set(index, choice);
-            failure(
-              'MODELS_UNAVAILABLE',
-              error instanceof Error
-                ? `Models unavailable for provider ${provider.id}.`
-                : `Model lookup failed for provider ${provider.id}.`,
-            );
+    const providersTask = async (): Promise<void> => {
+      try {
+        // Save-time diagnostics concern only the selected provider. Enumerating every
+        // provider here starts unrelated network/SDK discovery before persistence.
+        const runtime = selection?.runtime;
+        const providers = getAllAnthropicProviders().filter(
+          (provider) =>
+            !runtime ||
+            (runtime.kind === 'main' && runtime.providerId === provider.id),
+        );
+        let nextProvider = 0;
+        const choices = new Map<number, BotMainProviderChoice>();
+        const worker = async (): Promise<void> => {
+          while (nextProvider < providers.length) {
+            const index = nextProvider++;
+            const provider = providers[index];
+            if (!provider) continue;
+            const choice: BotMainProviderChoice = {
+              providerId: provider.id,
+              label: provider.name,
+              capabilities: {},
+            };
+            try {
+              const key = await bounded(() =>
+                this.deps.secrets.getProviderKey(provider.id),
+              );
+              const result = await bounded(() =>
+                this.deps.models.fetchModels(provider.id, key ?? null, false),
+              );
+              choices.set(index, {
+                ...choice,
+                capabilities: {
+                  models: result.models.map((model) => model.id),
+                },
+              });
+              succeeded++;
+            } catch (error: unknown) {
+              choices.set(index, choice);
+              failure(
+                'MODELS_UNAVAILABLE',
+                error instanceof Error
+                  ? `Models unavailable for provider ${provider.id}.`
+                  : `Model lookup failed for provider ${provider.id}.`,
+              );
+            }
           }
-        }
-      };
-      await Promise.all(
-        Array.from({ length: Math.min(4, providers.length) }, worker),
-      );
-      mainProviders.push(
-        ...[...choices]
-          .sort(([left], [right]) => left - right)
-          .map(([, choice]) => choice),
-      );
-    } catch (error: unknown) {
-      failure(
-        'PROVIDERS_UNAVAILABLE',
-        error instanceof Error
-          ? 'Provider catalog unavailable.'
-          : 'Provider lookup failed.',
-      );
-    }
+        };
+        await Promise.all(
+          Array.from({ length: Math.min(4, providers.length) }, worker),
+        );
+        mainProviders.push(
+          ...[...choices]
+            .sort(([left], [right]) => left - right)
+            .map(([, choice]) => choice),
+        );
+      } catch (error: unknown) {
+        failure(
+          'PROVIDERS_UNAVAILABLE',
+          error instanceof Error
+            ? 'Provider catalog unavailable.'
+            : 'Provider lookup failed.',
+        );
+      }
+    };
     const lanes: BotLaneChoice[] = [];
-    for (const cli of SYSTEM_CLI_TYPES) {
+    const runtime = selection?.runtime;
+    const cliTypes = SYSTEM_CLI_TYPES.filter(
+      (cli) =>
+        !runtime ||
+        (runtime.kind === 'lane' &&
+          runtime.target.kind === 'system' &&
+          runtime.target.cli === cli),
+    );
+    const cliTasks = cliTypes.map(async (cli): Promise<BotLaneChoice> => {
       try {
         // Cursor uses the bundled SDK; installation says nothing about credentials.
         const command = cli === 'antigravity' ? 'agy' : cli;
         const available = this.deps.executable
-          ? await this.bounded(this.deps.executable(command))
+          ? await bounded(() => this.deps.executable?.(command) ?? false)
           : cli === 'cursor' ||
-            (await this.bounded(resolveCliPath(command))) !== null;
-        lanes.push({
+            (await bounded(() => resolveCliPath(command))) !== null;
+        succeeded++;
+        return {
           target: { kind: 'system', cli },
           label: cli,
           available,
           capabilities: {},
-        });
-        succeeded++;
+        };
       } catch (error: unknown) {
-        lanes.push({
-          target: { kind: 'system', cli },
-          label: cli,
-          available: false,
-          capabilities: {},
-        });
         failure(
           'CLI_CATALOG_UNAVAILABLE',
           error instanceof Error
             ? 'CLI installation lookup unavailable.'
             : 'CLI lookup failed.',
         );
+        return {
+          target: { kind: 'system', cli },
+          label: cli,
+          available: false,
+          capabilities: {},
+        };
       }
-    }
-    try {
-      // Same key read by PtahCliConfigPersistence.loadConfigs, without ensureMigrated.
-      const registry = z
-        .array(z.unknown())
-        .parse(
-          this.deps.config.getWithDefault<unknown>(
-            PTAH_CLI_AGENTS_CONFIG_KEY,
-            [],
+    });
+    const registryTask = (): void => {
+      if (
+        runtime &&
+        (runtime.kind !== 'lane' || runtime.target.kind !== 'ptah-cli')
+      )
+        return;
+      try {
+        // Same key read by PtahCliConfigPersistence.loadConfigs, without ensureMigrated.
+        const registry = z
+          .array(z.unknown())
+          .parse(
+            this.deps.config.getWithDefault<unknown>(
+              PTAH_CLI_AGENTS_CONFIG_KEY,
+              [],
+            ),
+          );
+        const seenLaneIds = new Set<string>();
+        for (const [index, raw] of registry.entries()) {
+          const parsed = RegistryEntrySchema.safeParse(raw);
+          if (!parsed.success) {
+            failure(
+              'LANE_ENTRY_INVALID',
+              `Ptah CLI registry entry ${index} is malformed.`,
+            );
+            continue;
+          }
+          const entry = parsed.data;
+          if (
+            runtime?.kind === 'lane' &&
+            runtime.target.kind === 'ptah-cli' &&
+            entry.id !== runtime.target.ptahCliId
+          )
+            continue;
+          if (seenLaneIds.has(entry.id)) {
+            failure(
+              'LANE_ENTRY_DUPLICATE',
+              `Duplicate Ptah CLI registry entry ${index}.`,
+            );
+            continue;
+          }
+          seenLaneIds.add(entry.id);
+          lanes.push({
+            target: { kind: 'ptah-cli', ptahCliId: entry.id },
+            label: entry.name,
+            available: entry.enabled,
+            capabilities: {},
+          });
+        }
+        succeeded++;
+      } catch (error: unknown) {
+        failure(
+          'LANE_CATALOG_UNAVAILABLE',
+          error instanceof Error
+            ? 'Ptah CLI registry unavailable.'
+            : 'Registry lookup failed.',
+        );
+      }
+    };
+    let skills: BotEditable['skills'] = [];
+    const skillsTask = async (): Promise<void> => {
+      try {
+        const sources = await bounded(() =>
+          this.deps.sources.resolve(
+            scope.kind === 'workspace' ? scope.workspaceRoot : undefined,
           ),
         );
-      const seenLaneIds = new Set<string>();
-      for (const [index, raw] of registry.entries()) {
-        const parsed = RegistryEntrySchema.safeParse(raw);
-        if (!parsed.success) {
+        if (sources.policyUnknown || sources.overlayPluginPathsKnown === false)
           failure(
-            'LANE_ENTRY_INVALID',
-            `Ptah CLI registry entry ${index} is malformed.`,
+            'SKILLS_PARTIAL',
+            'Skill source policy or plugin overlay could not be read.',
           );
-          continue;
-        }
-        const entry = parsed.data;
-        if (seenLaneIds.has(entry.id)) {
-          failure(
-            'LANE_ENTRY_DUPLICATE',
-            `Duplicate Ptah CLI registry entry ${index}.`,
-          );
-          continue;
-        }
-        seenLaneIds.add(entry.id);
-        lanes.push({
-          target: { kind: 'ptah-cli', ptahCliId: entry.id },
-          label: entry.name,
-          available: entry.enabled,
-          capabilities: {},
-        });
-      }
-      succeeded++;
-    } catch (error: unknown) {
-      failure(
-        'LANE_CATALOG_UNAVAILABLE',
-        error instanceof Error
-          ? 'Ptah CLI registry unavailable.'
-          : 'Registry lookup failed.',
-      );
-    }
-    let skills: BotEditable['skills'] = [];
-    try {
-      const sources = await this.bounded(
-        this.deps.sources.resolve(
-          scope.kind === 'workspace' ? scope.workspaceRoot : undefined,
-        ),
-      );
-      if (sources.policyUnknown || sources.overlayPluginPathsKnown === false)
+        skills = readSkillCandidates(sources).map((candidate) => ({
+          id: candidate.slug,
+        }));
+        succeeded++;
+      } catch (error: unknown) {
         failure(
-          'SKILLS_PARTIAL',
-          'Skill source policy or plugin overlay could not be read.',
+          'SKILLS_UNAVAILABLE',
+          error instanceof Error
+            ? 'Skill catalog unavailable.'
+            : 'Skill lookup failed.',
         );
-      skills = readSkillCandidates(sources).map((candidate) => ({
-        id: candidate.slug,
-      }));
-      succeeded++;
-    } catch (error: unknown) {
-      failure(
-        'SKILLS_UNAVAILABLE',
-        error instanceof Error
-          ? 'Skill catalog unavailable.'
-          : 'Skill lookup failed.',
-      );
+      }
+    };
+    try {
+      await Promise.all([
+        providersTask(),
+        Promise.all(cliTasks).then((choices) => lanes.unshift(...choices)),
+        registryTask(),
+        skillsTask(),
+      ]);
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
     }
     const toolIds = [...CLAUDE_BUILTIN_TOOL_IDS];
     const unresolved = (code: string, field: string, message: string): void => {
@@ -307,21 +365,5 @@ export class BotCatalogAdapter implements BotCatalogPort {
       toolIds,
       diagnostics,
     };
-  }
-  private async bounded<T>(operation: T | Promise<T>): Promise<T> {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    try {
-      return await Promise.race([
-        operation,
-        new Promise<never>((_, reject) => {
-          timer = setTimeout(
-            () => reject(new Error('Catalog lookup timed out.')),
-            15000,
-          );
-        }),
-      ]);
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
   }
 }

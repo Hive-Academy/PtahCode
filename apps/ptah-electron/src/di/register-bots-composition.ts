@@ -36,16 +36,5 @@ export function registerBotsComposition(
         ),
     ),
   });
-  // Stripped DI smoke containers can omit the transport and workspace ports.
-  // Production binds both in phases 0–1, before serving the bot methods here.
-  if (
-    container.isRegistered(TOKENS.RPC_HANDLER) &&
-    container.isRegistered(PLATFORM_TOKENS.WORKSPACE_PROVIDER)
-  ) {
-    container.resolve(BotsRpcHandlers).register();
-  } else {
-    logger.warn(
-      '[bots] RPC handler or workspace provider not registered; bot methods are not served.',
-    );
-  }
+  // The shared RPC manifest registers methods during runtime wiring.
 }
