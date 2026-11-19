@@ -45,9 +45,12 @@ export interface IFileSystemProvider {
    *  - The existence check and the creation are a single filesystem
    *    operation (`open` with `wx`). Implementations MUST NOT stat-then-write.
    *
+   * A supplied mode is applied exactly after writing (subject to host support),
+   * even when the process umask masks the creation mode.
+   *
    * @throws An `Error & { code: 'EEXIST' }` when `path` already exists.
    */
-  writeFileExclusive(path: string, content: string | Uint8Array): Promise<void>;
+  writeFileExclusive(path: string, content: string | Uint8Array, options?: { mode?: number }): Promise<void>;
 
   /**
    * Write binary content to a file.

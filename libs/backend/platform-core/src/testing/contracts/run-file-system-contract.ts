@@ -82,6 +82,28 @@ export function runFileSystemContract(
       expect((await provider.lstat(destination)).nlink).toBe(1);
     });
 
+    it('applies an explicit mode before publishing an exclusive file', async () => {
+      const staged = `${exclusiveRoot}/private.tmp`;
+      const destination = `${exclusiveRoot}/private.md`;
+      // Force a restrictive umask so passing mode only to writeFile cannot pass on POSIX.
+      const previousUmask = process.platform === 'win32' ? undefined : process.umask(0o077);
+      try {
+        await provider.writeFileExclusive(staged, 'private instructions', { mode: 0o660 });
+        if (process.platform !== 'win32') {
+          expect((await provider.stat(staged)).mode).toBe(0o660);
+          expect((await provider.lstat(staged)).mode).toBe(0o660);
+        }
+        await expect(provider.writeFileExclusive(staged, 'clobber', { mode: 0o777 })).rejects.toThrow();
+        await provider.rename(staged, destination);
+        expect(await provider.readFile(destination)).toBe('private instructions');
+        if (process.platform !== 'win32') {
+          expect((await provider.lstat(destination)).mode).toBe(0o660);
+        }
+      } finally {
+        if (previousUmask !== undefined) process.umask(previousUmask);
+      }
+    });
+
     it('stat on missing path rejects', async () => {
       await expect(provider.stat('/fs/missing')).rejects.toThrow();
     });

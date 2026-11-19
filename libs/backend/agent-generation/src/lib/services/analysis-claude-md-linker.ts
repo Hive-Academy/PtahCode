@@ -71,8 +71,17 @@ export class AnalysisClaudeMdLinker {
           bytes.subarray(0, start), Buffer.from(`${eol}${index}${eol}`, 'utf8'), bytes.subarray(end),
         ]);
         const temp = join(workspaceRoot, `.CLAUDE.md.${randomUUID()}.tmp`);
-        await this.fs.writeFileExclusive(temp, updated);
+        let cleanup = true;
         try {
+          try {
+            await this.fs.writeFileExclusive(temp, updated, { mode: stat.mode });
+          } catch (error: unknown) {
+            // An exclusive-create collision belongs to someone else, never remove it.
+            if (error instanceof Error && 'code' in error && error.code === 'EEXIST') {
+              cleanup = false;
+            }
+            throw error;
+          }
           const latest = await this.fs.lstat(path);
           if (latest.type !== FileType.File || (latest.nlink ?? 1) > 1 ||
               !bytes.equals(Buffer.from(await this.fs.readFileBytes(path)))) {
@@ -83,7 +92,7 @@ export class AnalysisClaudeMdLinker {
           // read adjacent to it and never truncate the original inode in place.
           await this.fs.rename(temp, path);
         } finally {
-          if (await this.fs.exists(temp)) {
+          if (cleanup && await this.fs.exists(temp)) {
             await this.fs.delete(temp);
           }
         }

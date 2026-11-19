@@ -45,8 +45,12 @@ export class ElectronFileSystemProvider implements IFileSystemProvider {
   }
 
   /** `open(2)` with `wx`: fails with EEXIST in the same syscall. */
-  async writeFileExclusive(filePath: string, content: string | Uint8Array): Promise<void> {
-    await fs.writeFile(filePath, content, { encoding: 'utf-8', flag: 'wx' });
+  async writeFileExclusive(
+    filePath: string, content: string | Uint8Array, options?: { mode?: number },
+  ): Promise<void> {
+    await fs.writeFile(filePath, content, { encoding: 'utf-8', flag: 'wx', mode: options?.mode });
+    // Creation respects umask; restore the requested mode before callers publish the file.
+    if (options?.mode !== undefined) await fs.chmod(filePath, options.mode);
   }
 
   async writeFileBytes(filePath: string, content: Uint8Array): Promise<void> {
@@ -82,6 +86,7 @@ export class ElectronFileSystemProvider implements IFileSystemProvider {
       mtime: stats.mtimeMs,
       size: stats.size,
       nlink: stats.nlink,
+      mode: stats.mode & 0o7777,
     };
   }
 
@@ -91,6 +96,7 @@ export class ElectronFileSystemProvider implements IFileSystemProvider {
       type: stats.isSymbolicLink() ? FileType.SymbolicLink : stats.isFile() ? FileType.File : stats.isDirectory() ? FileType.Directory : FileType.Unknown,
       ctime: stats.ctimeMs, mtime: stats.mtimeMs, size: stats.size,
       nlink: stats.nlink,
+      mode: stats.mode & 0o7777,
     };
   }
 

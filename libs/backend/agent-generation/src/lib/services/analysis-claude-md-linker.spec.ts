@@ -272,6 +272,51 @@ describe('AnalysisClaudeMdLinker', () => {
       expect([...fs.__state.files.keys()].filter((file) => file.endsWith('.tmp'))).toEqual([]);
     });
 
+    it.each([0o600, 0o400, undefined])('preserves the original mode: %s', async (mode) => {
+      const { fs, linker } = await fixture();
+      const path = join(ROOT, 'CLAUDE.md');
+      const original = `${BEGIN}\n@.ptah/analysis/demo/01-project-profile.md\n${END}`;
+      await fs.writeFileExclusive(path, original, { mode });
+      fs.writeFileExclusive.mockClear();
+      expect(await linker.migrateLegacyBlock(ROOT)).toEqual({ written: true });
+      expect(fs.writeFileExclusive).toHaveBeenCalledWith(expect.any(String), expect.any(Buffer), { mode });
+      expect((await fs.lstat(path)).mode).toBe(mode);
+    });
+
+    it('removes a partially written temp file when staging rejects', async () => {
+      const { fs, linker } = await fixture();
+      const path = join(ROOT, 'CLAUDE.md');
+      const original = `${BEGIN}\n@.ptah/analysis/demo/01-project-profile.md\n${END}`;
+      await fs.writeFile(path, original);
+      fs.writeFileExclusive.mockImplementationOnce(async (temp) => {
+        await fs.writeFile(temp, 'partial private content');
+        throw Object.assign(new Error('disk full'), { code: 'ENOSPC' });
+      });
+      expect(await linker.migrateLegacyBlock(ROOT)).toEqual({ written: false, error: 'disk full' });
+      expect(await fs.readFile(path)).toBe(original);
+      expect(fs.rename).not.toHaveBeenCalled();
+      expect(fs.delete).toHaveBeenCalledTimes(1);
+      expect([...fs.__state.files.keys()].filter((file) => file.endsWith('.tmp'))).toEqual([]);
+    });
+
+    it("does not remove someone else's temp file on EEXIST", async () => {
+      const { fs, linker } = await fixture();
+      const path = join(ROOT, 'CLAUDE.md');
+      const original = `${BEGIN}\n@.ptah/analysis/demo/01-project-profile.md\n${END}`;
+      await fs.writeFile(path, original);
+      let occupied = '';
+      fs.writeFileExclusive.mockImplementationOnce(async (temp) => {
+        occupied = temp;
+        await fs.writeFile(temp, 'another writer');
+        throw Object.assign(new Error('already exists'), { code: 'EEXIST' });
+      });
+      expect(await linker.migrateLegacyBlock(ROOT)).toEqual({ written: false, error: 'already exists' });
+      expect(await fs.readFile(path)).toBe(original);
+      expect(await fs.readFile(occupied)).toBe('another writer');
+      expect(fs.rename).not.toHaveBeenCalled();
+      expect(fs.delete).not.toHaveBeenCalled();
+    });
+
     it('keeps the original and cleans staging when rename fails', async () => {
       const { fs, linker } = await fixture();
       const path = join(ROOT, 'CLAUDE.md');
