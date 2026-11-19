@@ -61,6 +61,9 @@ export class BotCatalogAdapter implements BotCatalogPort {
         }, BOT_CATALOG_DEADLINE_MS);
       };
     });
+    // degradation-audit: reported — each bounded() race reports the timeout; this
+    // handler only stops an unhandled rejection when no race is attached.
+    deadline.catch(() => undefined);
     const bounded = async <T>(operation: () => T | Promise<T>): Promise<T> => {
       if (expired) throw new Error('Catalog lookup timed out.');
       return Promise.race([operation(), deadline]);
