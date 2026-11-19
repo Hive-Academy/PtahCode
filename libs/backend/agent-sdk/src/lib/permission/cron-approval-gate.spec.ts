@@ -8,6 +8,7 @@ import {
   CRON_APPROVAL_FAILED_MESSAGE,
   CRON_APPROVAL_HOOK_MATCHER,
   CRON_APPROVAL_HOOK_TIMEOUT_SECONDS,
+  CRON_APPROVAL_REMEMBERED_MAX,
   CRON_APPROVAL_TIMEOUT_MESSAGE,
   createCronApprovalGate,
 } from './cron-approval-gate';
@@ -85,6 +86,25 @@ describe('createCronApprovalGate', () => {
     // The remembered decision is used once: a new call asks again.
     await approval.canUseTool(CREATE, {}, context('tu-7'));
     expect(gate).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps a bounded number of decisions when canUseTool never reads them', async () => {
+    const { gate, approval, runHook, context } = setup(ALLOW);
+    // An SDK allow rule skips canUseTool, so no decision is read here.
+    for (let i = 0; i <= CRON_APPROVAL_REMEMBERED_MAX; i++) {
+      await runHook(CREATE, `tu-${i}`);
+    }
+    const asked = gate.mock.calls.length;
+    // The oldest decision was dropped: that call asks again.
+    await approval.canUseTool(CREATE, {}, context('tu-0'));
+    expect(gate).toHaveBeenCalledTimes(asked + 1);
+    // The newest decision is still remembered.
+    await approval.canUseTool(
+      CREATE,
+      {},
+      context(`tu-${CRON_APPROVAL_REMEMBERED_MAX}`),
+    );
+    expect(gate).toHaveBeenCalledTimes(asked + 1);
   });
 
   it('asks in canUseTool when no hook decision exists for that call', async () => {

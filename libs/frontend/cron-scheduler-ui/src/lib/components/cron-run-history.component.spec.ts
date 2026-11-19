@@ -117,6 +117,18 @@ describe('CronRunHistoryComponent', () => {
       expect(host.querySelectorAll('li').length).toBe(1);
     });
 
+    it('shows that a refresh of listed runs is in progress', () => {
+      fixture.componentRef.setInput('state', 'loading');
+      render([makeRun()]);
+      expect(
+        host
+          .querySelector('[data-testid="cron-run-updating"]')
+          ?.getAttribute('role'),
+      ).toBe('status');
+      expect(host.querySelector('[data-testid="cron-run-loading"]')).toBeNull();
+      expect(host.querySelectorAll('li').length).toBe(1);
+    });
+
     it('hides the empty text when a run exists', () => {
       render([makeRun()]);
 

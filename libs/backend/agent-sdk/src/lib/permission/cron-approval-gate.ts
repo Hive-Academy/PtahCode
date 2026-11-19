@@ -26,6 +26,12 @@ import { isCronMutatingTool } from './cron-tool-policy';
  */
 export const CRON_APPROVAL_HOOK_TIMEOUT_SECONDS = 3600;
 const HOOK_DEADLINE_MARGIN_MS = 30_000;
+/**
+ * Most remembered decisions. `canUseTool` removes an entry when it reads it,
+ * but an SDK allow rule skips `canUseTool`, so the oldest entry goes when the
+ * map is full. A lost entry only means that the user can be asked again.
+ */
+export const CRON_APPROVAL_REMEMBERED_MAX = 32;
 
 /** Matches the five write tools and nothing the hook would not check itself. */
 export const CRON_APPROVAL_HOOK_MATCHER = 'mcp__ptah__ptah_cron_.*';
@@ -118,7 +124,13 @@ export function createCronApprovalGate(
         return { behavior: 'deny', message: CRON_APPROVAL_FAILED_MESSAGE };
       })
       .finally(() => clearTimeout(timer));
-    if (id) decided.set(id, settled);
+    if (id) {
+      decided.set(id, settled);
+      if (decided.size > CRON_APPROVAL_REMEMBERED_MAX) {
+        const oldest = decided.keys().next().value;
+        if (oldest !== undefined) decided.delete(oldest);
+      }
+    }
     const result = await settled;
     if (result.behavior === 'allow') return {};
     // A denied call never reaches `canUseTool`: drop the remembered decision.

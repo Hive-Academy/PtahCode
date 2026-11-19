@@ -115,6 +115,15 @@ function toRow(run: JobRunDto): RunRow {
           }
         </p>
       }
+      @if (state() === 'loading' && rows().length > 0) {
+        <p
+          class="text-xs text-base-content-muted"
+          role="status"
+          data-testid="cron-run-updating"
+        >
+          Updating runs…
+        </p>
+      }
       @if (rows().length === 0) {
         @switch (state()) {
           @case ('loading') {
