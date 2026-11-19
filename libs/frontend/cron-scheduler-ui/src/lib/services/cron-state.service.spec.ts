@@ -80,6 +80,33 @@ describe('CronStateService', () => {
     expect(service.jobs()).toEqual([]);
   });
 
+  it('lists a created job only when it is in the active scope', async () => {
+    appState.workspaceInfo.set({ path: '/ws-a' });
+    const service = TestBed.inject(CronStateService);
+    rpc.list.mockResolvedValue({ jobs: [] });
+    await service.refresh();
+
+    rpc.create = jest
+      .fn()
+      .mockResolvedValueOnce({
+        job: makeJob({ id: 'b', workspaceRoot: '/ws-b' }),
+      })
+      .mockResolvedValueOnce({
+        job: makeJob({ id: 'a', workspaceRoot: '/ws-a' }),
+      });
+    // The job of another workspace is returned to the caller but not listed.
+    expect((await service.create({} as never))?.id).toBe('b');
+    expect(service.jobs()).toEqual([]);
+    // The server list decides: a refresh for the active scope starts.
+    expect(rpc.list).toHaveBeenCalledTimes(2);
+    expect(rpc.list).toHaveBeenLastCalledWith({ workspaceRoot: '/ws-a' });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await service.create({} as never);
+    expect(service.jobs().map((j) => j.id)).toEqual(['a']);
+  });
+
   it('removes the rows of the previous scope before the new list arrives', async () => {
     appState.workspaceInfo.set({ path: '/ws-a' });
     const service = TestBed.inject(CronStateService);

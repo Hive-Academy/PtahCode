@@ -219,7 +219,16 @@ export class CronStateService {
     this._saveError.set(null);
     try {
       const result = await this.rpc.create(spec);
-      this._jobs.update((jobs) => [...jobs, result.job]);
+      // The scope is read now, not at the start: it can change while the
+      // request is open. A job of another workspace is saved but not listed.
+      // The comparison is on the path text, so the server list decides when
+      // the paths are different.
+      const root = this.buildListParams().workspaceRoot;
+      if (root === undefined || result.job.workspaceRoot === root) {
+        this._jobs.update((jobs) => [...jobs, result.job]);
+      } else {
+        void this.refresh();
+      }
       return result.job;
     } catch (err) {
       this._error.set(this.toMessage(err));
