@@ -240,7 +240,9 @@ export class CronExpressionService {
           ? CronExpressionService.WEEKDAY_ALIASES
           : null;
     if (aliases === null) return field;
-    return field.replace(/[A-Za-z]+/g, (word) => {
+    // Sunday as the end of a range is 7 (`MON-SUN` is 1-7), as in croner.
+    const source = index === 4 ? field.replace(/-sun(?![a-z])/gi, '-7') : field;
+    return source.replace(/[A-Za-z]+/g, (word) => {
       const value = aliases[word.toUpperCase()];
       return value === undefined ? word : String(value);
     });

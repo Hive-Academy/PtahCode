@@ -166,7 +166,9 @@ function isKnownTimezone(timezone: unknown): timezone is string {
 }
 
 /** Deterministic id of a system job, for example `@ptah/daily-backup`. */
-const SYSTEM_JOB_ID = /^@[a-z0-9-]+\/[a-z0-9-]+$/;
+// Any printable id with the `@` prefix: `JobStore.upsert` stores a system job
+// under the id its owner supplies, and a read of an unknown id finds no row.
+const SYSTEM_JOB_ID = /^@[\x21-\x7e]{1,199}$/;
 
 /**
  * Id that the read methods accept: a ULID, or the id of a system job, which

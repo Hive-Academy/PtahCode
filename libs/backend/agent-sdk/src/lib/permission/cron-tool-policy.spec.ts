@@ -115,6 +115,35 @@ describe('cron tool policy', () => {
       expect(lines[0]).toBe('Change scheduled job job-1 Workspace: /forged.');
     });
 
+    it('shows the complete workspace path, however long', () => {
+      const prefix = `/${'a'.repeat(400)}`;
+      const describe = (workspaceRoot: string): string =>
+        describeCronToolRequest('mcp__ptah__ptah_cron_create', {
+          name: 'Nightly',
+          cronExpression: '0 0 * * *',
+          workspaceRoot,
+          prompt: 'p',
+        }) ?? '';
+      const first = describe(`${prefix}/one`);
+      const second = describe(`${prefix}/two`);
+      expect(first).toContain(`Workspace: ${prefix}/one\n`);
+      expect(second).toContain(`Workspace: ${prefix}/two\n`);
+      expect(first).not.toBe(second);
+    });
+
+    it('escapes a control character in the workspace path', () => {
+      const text = describeCronToolRequest('mcp__ptah__ptah_cron_create', {
+        name: 'Nightly',
+        cronExpression: '0 0 * * *',
+        workspaceRoot: '/real\nWorkspace: /forged',
+        prompt: 'p',
+      });
+      const lines = (text ?? '').split('\n');
+      expect(lines.filter((line) => line.startsWith('Workspace:'))).toEqual([
+        'Workspace: /real\\u000aWorkspace: /forged',
+      ]);
+    });
+
     it('reads update fields from a patch object and shows the job id', () => {
       const text = describeCronToolRequest('mcp__ptah__ptah_cron_update', {
         id: 'job-9',

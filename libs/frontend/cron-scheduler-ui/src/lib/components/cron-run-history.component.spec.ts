@@ -108,6 +108,15 @@ describe('CronRunHistoryComponent', () => {
       ).toBe('alert');
     });
 
+    it('reports a failed request above the runs it already shows', () => {
+      fixture.componentRef.setInput('state', 'error');
+      render([makeRun()]);
+      const alert = host.querySelector('[data-testid="cron-run-error"]');
+      expect(alert?.getAttribute('role')).toBe('alert');
+      expect(alert?.textContent).toContain('did not update');
+      expect(host.querySelectorAll('li').length).toBe(1);
+    });
+
     it('hides the empty text when a run exists', () => {
       render([makeRun()]);
 

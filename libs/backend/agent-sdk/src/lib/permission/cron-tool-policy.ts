@@ -93,6 +93,22 @@ function oneLine(value: string): string {
   return flat.length > FIELD_MAX ? `${flat.slice(0, FIELD_MAX)}…` : flat;
 }
 
+// eslint-disable-next-line no-control-regex -- escapes them on purpose
+const PATH_CONTROL_CHARACTER = /[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g;
+
+/**
+ * Complete one-line form of a path. It is never shortened: two long paths with
+ * the same start must stay different in the approval text. A control character
+ * shows as its `\uXXXX` escape, so the text cannot forge a line and still
+ * names the exact path.
+ */
+function fullPathLine(value: string): string {
+  return value.replace(
+    PATH_CONTROL_CHARACTER,
+    (char) => `\\u${char.charCodeAt(0).toString(16).padStart(4, '0')}`,
+  );
+}
+
 /**
  * Job fields of a create/update input. Accepts the fields flat or inside a
  * `patch` object, and both `cronExpression` and `cronExpr` for the schedule.
@@ -119,7 +135,7 @@ function describeJobFields(
   }
   const workspace = readString(fields, 'workspaceRoot');
   if (workspace) {
-    lines.push(`Workspace: ${oneLine(workspace)}`);
+    lines.push(`Workspace: ${fullPathLine(workspace)}`);
   } else if (fields['workspaceRoot'] === null) {
     lines.push('Workspace: none (the job runs without a workspace)');
   } else if (mode === 'create') {

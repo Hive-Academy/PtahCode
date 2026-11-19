@@ -374,7 +374,13 @@ describe('CronJobService', () => {
 
     expect(service.delete(SYSTEM_ID)).toBe(false);
     expect(scheduler.delete).not.toHaveBeenCalled();
-    expect(service.get('@ptah/../etc')).toBeNull();
+
+    // Other stored system ids are readable too; a plain word is not an id.
+    scheduler.get.mockReturnValueOnce(makeJob());
+    expect(service.get('@ptah/daily_backup')).not.toBeNull();
+    expect(scheduler.get).toHaveBeenCalledWith('@ptah/daily_backup');
+    expect(service.get('@ptah/with space')).toBeNull();
+    expect(service.get('@')).toBeNull();
   });
 
   it('runs delegates with the paging options and returns [] for a malformed id', () => {

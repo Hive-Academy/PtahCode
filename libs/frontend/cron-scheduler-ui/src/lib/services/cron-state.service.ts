@@ -181,9 +181,12 @@ export class CronStateService {
     const token = ++this.refreshSeq;
     const params = this.buildListParams();
     const key = JSON.stringify(params);
-    if (this.jobsKey !== null && this.jobsKey !== key) {
+    // Rows stay only when the last successful list was for these params. With
+    // no successful list (`null`), a row that `create` added can be for another
+    // scope, so it goes too.
+    if (this.jobsKey !== key) {
       this.jobsKey = null;
-      this._jobs.set([]);
+      if (this._jobs().length > 0) this._jobs.set([]);
     }
     this._loading.set(true);
     this._error.set(null);

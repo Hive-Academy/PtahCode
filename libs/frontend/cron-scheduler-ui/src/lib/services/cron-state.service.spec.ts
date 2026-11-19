@@ -60,6 +60,26 @@ describe('CronStateService', () => {
     expect(service.scopeFilter()).toBe('workspace');
   });
 
+  it('removes a created row on a scope change when no list succeeded yet', async () => {
+    appState.workspaceInfo.set({ path: '/ws-a' });
+    const service = TestBed.inject(CronStateService);
+    rpc.list.mockRejectedValue(new Error('offline'));
+    service.setScopeFilter('all');
+    await Promise.resolve();
+    await Promise.resolve();
+    rpc.create = jest
+      .fn()
+      .mockResolvedValue({ job: makeJob({ id: 'b', workspaceRoot: '/ws-b' }) });
+    await service.create({} as never);
+    expect(service.jobs().map((j) => j.id)).toEqual(['b']);
+
+    service.setScopeFilter('workspace');
+    expect(service.jobs()).toEqual([]);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(service.jobs()).toEqual([]);
+  });
+
   it('removes the rows of the previous scope before the new list arrives', async () => {
     appState.workspaceInfo.set({ path: '/ws-a' });
     const service = TestBed.inject(CronStateService);

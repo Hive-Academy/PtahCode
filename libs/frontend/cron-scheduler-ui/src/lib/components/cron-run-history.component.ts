@@ -106,6 +106,15 @@ function toRow(run: JobRunDto): RunRow {
     <section aria-label="Run history" class="flex flex-col gap-ptah-heading">
       <ptah-section-header heading="Run history" [description]="countLabel()" />
 
+      @if (state() === 'error') {
+        <p class="text-xs text-error" role="alert" data-testid="cron-run-error">
+          @if (rows().length === 0) {
+            The run history did not load. Open the job again to retry.
+          } @else {
+            The run history did not update. The runs below can be out of date.
+          }
+        </p>
+      }
       @if (rows().length === 0) {
         @switch (state()) {
           @case ('loading') {
@@ -115,15 +124,6 @@ function toRow(run: JobRunDto): RunRow {
               data-testid="cron-run-loading"
             >
               Loading runs…
-            </p>
-          }
-          @case ('error') {
-            <p
-              class="text-xs text-error"
-              role="alert"
-              data-testid="cron-run-error"
-            >
-              The run history did not load. Open the job again to retry.
             </p>
           }
           @case ('loaded') {

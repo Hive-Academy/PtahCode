@@ -35,6 +35,8 @@ describe('CronExpressionService', () => {
       '0 9 * * MON',
       '0 9 * * mon-fri',
       '0 9 * * MON,WED',
+      '0 9 * * MON-SUN',
+      '0 9 * * 1-sun',
       '0 0 1 JAN,JUL *',
       '0 0 1 JAN-MAR/2 *',
     ]) {
