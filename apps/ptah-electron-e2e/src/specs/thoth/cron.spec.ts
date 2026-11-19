@@ -99,6 +99,13 @@ test.describe('Thoth — Cron tab', () => {
       page.locator('[data-testid="cron-empty-state"]'),
     ).toBeVisible();
 
+    // The mocked job has no workspace. "This workspace" lists only the jobs
+    // of the open workspace, so the list shows all workspaces here.
+    await page.locator('[data-testid="cron-scope-all"]').click();
+    await expect(
+      page.locator('[data-testid="cron-empty-state"]'),
+    ).toBeVisible();
+
     await page.locator('[data-testid="cron-new-job-btn"]').click();
     await expect(page.locator('[data-testid="cron-form"]')).toBeVisible();
 

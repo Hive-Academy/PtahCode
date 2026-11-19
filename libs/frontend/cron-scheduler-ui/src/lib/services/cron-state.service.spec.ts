@@ -107,6 +107,45 @@ describe('CronStateService', () => {
     expect(service.jobs().map((j) => j.id)).toEqual(['a']);
   });
 
+  it('does not list a job whose create ends after a scope change', async () => {
+    appState.workspaceInfo.set({ path: '/ws-a' });
+    const service = TestBed.inject(CronStateService);
+    rpc.list.mockResolvedValue({ jobs: [] });
+    service.setScopeFilter('all');
+    await Promise.resolve();
+    await Promise.resolve();
+
+    let finish: (value: { job: ScheduledJobDto }) => void = () => undefined;
+    rpc.create = jest
+      .fn()
+      .mockReturnValue(
+        new Promise<{ job: ScheduledJobDto }>((resolve) => (finish = resolve)),
+      );
+    const pending = service.create({} as never);
+    service.setScopeFilter('workspace');
+    finish({ job: makeJob({ id: 'b', workspaceRoot: '/ws-b' }) });
+    await pending;
+    expect(service.jobs()).toEqual([]);
+  });
+
+  it('removes a job that an update moved to another workspace', async () => {
+    appState.workspaceInfo.set({ path: '/ws-a' });
+    const service = TestBed.inject(CronStateService);
+    rpc.list.mockResolvedValueOnce({
+      jobs: [makeJob({ id: 'a', workspaceRoot: '/ws-a' })],
+    });
+    await service.refresh();
+    expect(service.jobs().map((j) => j.id)).toEqual(['a']);
+
+    rpc.list.mockResolvedValue({ jobs: [] });
+    rpc.update = jest.fn().mockResolvedValue({
+      job: makeJob({ id: 'a', workspaceRoot: '/ws-b' }),
+    });
+    await service.update('a', { workspaceRoot: '/ws-b' });
+    expect(service.jobs()).toEqual([]);
+    expect(rpc.list).toHaveBeenLastCalledWith({ workspaceRoot: '/ws-a' });
+  });
+
   it('removes the rows of the previous scope before the new list arrives', async () => {
     appState.workspaceInfo.set({ path: '/ws-a' });
     const service = TestBed.inject(CronStateService);

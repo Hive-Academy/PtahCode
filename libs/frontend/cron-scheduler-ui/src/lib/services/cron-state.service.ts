@@ -214,17 +214,24 @@ export class CronStateService {
     return root ? { workspaceRoot: root } : {};
   }
 
+  /**
+   * `true` when a saved job belongs in the listed rows. The scope is read when
+   * the response arrives, not when the request starts: it can change while the
+   * request is open. The comparison is on the path text and the server
+   * normalizes paths, so the caller reads the list again on `false` and the
+   * server list decides.
+   */
+  private inActiveScope(job: ScheduledJobDto): boolean {
+    const root = this.buildListParams().workspaceRoot;
+    return root === undefined || job.workspaceRoot === root;
+  }
+
   public async create(spec: CronCreateParams): Promise<ScheduledJobDto | null> {
     this._error.set(null);
     this._saveError.set(null);
     try {
       const result = await this.rpc.create(spec);
-      // The scope is read now, not at the start: it can change while the
-      // request is open. A job of another workspace is saved but not listed.
-      // The comparison is on the path text, so the server list decides when
-      // the paths are different.
-      const root = this.buildListParams().workspaceRoot;
-      if (root === undefined || result.job.workspaceRoot === root) {
+      if (this.inActiveScope(result.job)) {
         this._jobs.update((jobs) => [...jobs, result.job]);
       } else {
         void this.refresh();
@@ -250,9 +257,15 @@ export class CronStateService {
     this._saveError.set(null);
     try {
       const result = await this.rpc.update({ id, patch });
-      this._jobs.update((jobs) =>
-        jobs.map((j) => (j.id === result.job.id ? result.job : j)),
-      );
+      if (this.inActiveScope(result.job)) {
+        this._jobs.update((jobs) =>
+          jobs.map((j) => (j.id === result.job.id ? result.job : j)),
+        );
+      } else {
+        // The edit moved the job out of the listed workspace.
+        this._jobs.update((jobs) => jobs.filter((j) => j.id !== result.job.id));
+        void this.refresh();
+      }
       return result.job;
     } catch (err) {
       this._error.set(this.toMessage(err));
