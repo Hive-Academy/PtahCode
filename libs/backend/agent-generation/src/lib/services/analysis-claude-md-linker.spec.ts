@@ -255,6 +255,24 @@ describe('AnalysisClaudeMdLinker', () => {
       expect([...fs.__state.files.keys()].filter((file) => file.endsWith('.tmp'))).toEqual([]);
     });
 
+    it('preserves a permission restriction made during staging and removes the temp file', async () => {
+      const { fs, linker } = await fixture();
+      const path = join(ROOT, 'CLAUDE.md');
+      const original = `${BEGIN}\n@.ptah/analysis/demo/01-project-profile.md\n${END}`;
+      await fs.writeFile(path, original);
+      const stat = await fs.stat(path);
+      fs.lstat.mockResolvedValueOnce({ ...stat, mode: 0o644 });
+      fs.lstat.mockResolvedValueOnce({ ...stat, mode: 0o600 });
+      logger.debug.mockClear();
+      expect(await linker.migrateLegacyBlock(ROOT)).toEqual({ written: false });
+      expect(fs.lstat).toHaveBeenCalledTimes(2);
+      expect(fs.writeFileExclusive).toHaveBeenCalledWith(expect.any(String), expect.any(Buffer), { mode: 0o644 });
+      expect(await fs.readFile(path)).toBe(original);
+      expect(fs.rename).not.toHaveBeenCalled();
+      expect([...fs.__state.files.keys()].filter((file) => file.endsWith('.tmp'))).toEqual([]);
+      expect(logger.debug).toHaveBeenCalledWith('Analysis index migration skipped: CLAUDE.md changed');
+    });
+
     it('rechecks after staging, preserves an editor save and removes the temp file', async () => {
       const { fs, linker } = await fixture();
       const path = join(ROOT, 'CLAUDE.md');

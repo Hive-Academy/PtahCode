@@ -48,9 +48,14 @@ export class ElectronFileSystemProvider implements IFileSystemProvider {
   async writeFileExclusive(
     filePath: string, content: string | Uint8Array, options?: { mode?: number },
   ): Promise<void> {
-    await fs.writeFile(filePath, content, { encoding: 'utf-8', flag: 'wx', mode: options?.mode });
-    // Creation respects umask; restore the requested mode before callers publish the file.
-    if (options?.mode !== undefined) await fs.chmod(filePath, options.mode);
+    const handle = await fs.open(filePath, 'wx', options?.mode ?? 0o666);
+    try {
+      await handle.writeFile(content, { encoding: 'utf-8' });
+      // Restore mode on the created inode, even if its pathname has been replaced.
+      if (options?.mode !== undefined) await handle.chmod(options.mode);
+    } finally {
+      await handle.close();
+    }
   }
 
   async writeFileBytes(filePath: string, content: Uint8Array): Promise<void> {

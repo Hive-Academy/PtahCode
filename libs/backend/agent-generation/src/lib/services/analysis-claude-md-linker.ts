@@ -84,6 +84,7 @@ export class AnalysisClaudeMdLinker {
           }
           const latest = await this.fs.lstat(path);
           if (latest.type !== FileType.File || (latest.nlink ?? 1) > 1 ||
+              (latest.mode !== undefined && stat.mode !== undefined && latest.mode !== stat.mode) ||
               !bytes.equals(Buffer.from(await this.fs.readFileBytes(path)))) {
             this.logger.debug('Analysis index migration skipped: CLAUDE.md changed');
             return { written: false };
