@@ -42,6 +42,29 @@ describe('Bot form sections', () => {
   });
   const runtime = () => store.draft()?.definition.runtime;
 
+  it('opens the labelled hidden avatar input from the upload button', () => {
+    const fixture = TestBed.createComponent(BotIdentityRuntimeSectionComponent);
+    fixture.detectChanges();
+    const root: HTMLElement = fixture.nativeElement;
+    const file = root.querySelector<HTMLInputElement>('input[type="file"]');
+    const trigger = Array.from(root.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === 'Upload image',
+    );
+    if (!file || !trigger) throw new Error('Missing avatar upload controls');
+    expect(file.classList).toContain('sr-only');
+    expect(file.getAttribute('accept')).toBe('image/png,image/jpeg,image/webp');
+    expect(root.querySelector(`label[for="${file.id}"]`)?.textContent).toBe(
+      'Upload image',
+    );
+    expect(trigger.hasAttribute('ptahButton')).toBe(true);
+    const hint = trigger.getAttribute('aria-describedby');
+    expect(hint && root.querySelector(`#${hint}`)?.textContent).toContain(
+      'PNG, JPEG or WebP, up to 2 MB.',
+    );
+    const open = jest.spyOn(file, 'click').mockImplementation(() => undefined);
+    trigger.click();
+    expect(open).toHaveBeenCalledTimes(1);
+  });
   it('switches all runtime kinds with no stale fields', () => {
     const component = TestBed.createComponent(
       BotIdentityRuntimeSectionComponent,

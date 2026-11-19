@@ -77,6 +77,12 @@ for (const width of [1280, 900]) {
         overflow: boolean;
       }[] = [];
       const evidencePath = join(OUT, `bots-review-${width}-${appearance}.json`);
+      let dirtySaveBar: {
+        top: number | null;
+        bottom: number | null;
+        viewportHeight: number;
+        insideViewport: boolean;
+      } | null = null;
       const cdp = await page.context().newCDPSession(page);
       const surface = page.locator('ptah-bots-page');
       const editor = surface.getByRole('article');
@@ -117,6 +123,7 @@ for (const width of [1280, 900]) {
           JSON.stringify(
             {
               evidence,
+              dirtySaveBar,
               softErrors: testInfo.errors.map((error) => error.message),
             },
             null,
@@ -191,6 +198,21 @@ for (const width of [1280, 900]) {
         await expect(saveBar.locator('span[start][role="status"]')).toHaveText(
           'Unsaved changes',
         );
+        const bounds = await saveBar.boundingBox();
+        const viewportHeight = await page.evaluate(() => window.innerHeight);
+        dirtySaveBar = {
+          top: bounds?.y ?? null,
+          bottom: bounds ? bounds.y + bounds.height : null,
+          viewportHeight,
+          insideViewport:
+            bounds !== null &&
+            bounds.height > 0 &&
+            bounds.y >= 0 &&
+            bounds.y + bounds.height <= viewportHeight,
+        };
+        expect
+          .soft(dirtySaveBar.insideViewport, 'dirty save bar inside viewport')
+          .toBe(true);
         await capture('dirty');
         await name.fill('');
         await saveBar
@@ -289,6 +311,7 @@ for (const width of [1280, 900]) {
           JSON.stringify(
             {
               evidence,
+              dirtySaveBar,
               softErrors: testInfo.errors.map((error) => error.message),
             },
             null,

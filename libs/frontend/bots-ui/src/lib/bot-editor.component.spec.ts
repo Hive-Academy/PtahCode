@@ -126,7 +126,7 @@ describe('Bot editor', () => {
     if (!found) throw new Error(`Missing button: ${text}`);
     return found;
   }
-  it('associates Enabled with the exact hint and keeps execution unavailable', async () => {
+  it('associates Enabled with the exact hint without duplicating the page notice', async () => {
     const fixture = await setup();
     const root: HTMLElement = fixture.nativeElement;
     const toggle = root.querySelector<HTMLInputElement>('[role="switch"]');
@@ -135,7 +135,15 @@ describe('Bot editor', () => {
     expect(hint && root.querySelector(`#${hint}`)?.textContent).toBe(
       'Applies at once. Does not save other edits.',
     );
-    expect(root.textContent).toContain('Bots cannot start yet');
+    expect(
+      Array.from(root.querySelectorAll('h3'), (heading) => heading.textContent),
+    ).not.toContain('Bots cannot start yet');
+    expect(root.querySelector('#bot-enabled-hint')?.classList).toContain(
+      'sr-only',
+    );
+    expect(root.querySelector('[ptahBadge]')?.textContent).toContain(
+      'Disabled',
+    );
     store.patchDraft({ instructions: 'Unsaved work' });
     if (!toggle) throw new Error('Missing switch');
     toggle.checked = true;

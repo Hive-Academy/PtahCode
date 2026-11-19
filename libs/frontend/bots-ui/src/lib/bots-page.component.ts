@@ -27,6 +27,7 @@ import {
   PtahSkeletonComponent,
   PtahStatePanelComponent,
 } from '@ptah-extension/ui';
+import { LucideAngularModule, Search } from 'lucide-angular';
 import { BotEditorComponent } from './bot-editor.component';
 import { BotListRowComponent } from './bot-list-row.component';
 import { BotsStore } from './bots.store';
@@ -37,6 +38,7 @@ import { BotsProviderModelsLoader } from './bots-provider-models-loader';
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
+    LucideAngularModule,
     BotEditorComponent,
     BotListRowComponent,
     PtahAlertComponent,
@@ -63,7 +65,13 @@ import { BotsProviderModelsLoader } from './bots-provider-models-loader';
         </p>
       </div>
       @if (!empty()) {
-        <button ptahButton type="button" (click)="newBot()" [disabled]="busy()">
+        <button
+          ptahButton
+          variant="primary"
+          type="button"
+          (click)="newBot()"
+          [disabled]="busy()"
+        >
           New bot
         </button>
       }
@@ -97,13 +105,16 @@ import { BotsProviderModelsLoader } from './bots-provider-models-loader';
       <ptah-alert tone="error" live="assertive">{{ error.message }}</ptah-alert>
     }
     @if (empty()) {
-      <ptah-state-panel
-        state="empty"
-        title="No bots yet"
-        body="A bot keeps a name, instructions, a model, skills, memory and approval rules in one place. Create one to get started."
-        actionLabel="New bot"
-        (action)="newBot()"
-      />
+      <div class="empty-state">
+        <ptah-state-panel
+          state="empty"
+          title="No bots yet"
+          body="A bot keeps a name, instructions, a model, skills, memory and approval rules in one place. Create one to get started."
+        />
+        <button ptahButton variant="primary" type="button" (click)="newBot()">
+          New bot
+        </button>
+      </div>
     } @else {
       <ptah-list-detail
         [splitAt]="960"
@@ -113,17 +124,23 @@ import { BotsProviderModelsLoader } from './bots-provider-models-loader';
       >
         <div list class="roster" [attr.aria-busy]="store.loading()">
           <div class="filters">
-            <label
-              >Search bots<input
+            <label class="search-filter">
+              <span class="sr-only">Search bots</span>
+              <lucide-icon [img]="searchIcon" [size]="14" aria-hidden="true" />
+              <input
                 ptahInput
                 type="search"
+                placeholder="Search bots"
+                size="sm"
                 [disabled]="firstLoading()"
                 [value]="search()"
                 (input)="setSearch($event)"
             /></label>
-            <label
-              >Scope<select
+            <label class="scope-filter">
+              <span class="sr-only">Scope</span>
+              <select
                 ptahSelect
+                size="sm"
                 [value]="scope()"
                 (change)="setScope($event)"
               >
@@ -231,6 +248,7 @@ import { BotsProviderModelsLoader } from './bots-provider-models-loader';
   `,
 })
 export class BotsPageComponent {
+  protected readonly searchIcon = Search;
   protected readonly store = inject(BotsStore);
   private readonly rpc = inject(ClaudeRpcService);
   private readonly layout = inject(ElectronLayoutService);

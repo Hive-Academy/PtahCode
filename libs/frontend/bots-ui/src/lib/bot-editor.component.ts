@@ -15,6 +15,7 @@ import {
 import type { InstalledSkill } from '@ptah-extension/shared';
 import {
   NativeDropdownComponent,
+  PtahBadgeDirective,
   PtahButtonDirective,
   PtahIconButtonDirective,
   PtahToggleDirective,
@@ -39,6 +40,7 @@ import { BotConflictDrawerComponent } from './bot-conflict-drawer.component';
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     NativeDropdownComponent,
+    PtahBadgeDirective,
     PtahButtonDirective,
     PtahIconButtonDirective,
     PtahToggleDirective,
@@ -69,12 +71,19 @@ import { BotConflictDrawerComponent } from './bot-conflict-drawer.component';
         <h2 id="bot-editor-title" class="text-lg font-semibold">
           {{ isNew() ? 'New bot' : store.selected()?.name }}
         </h2>
-        <span>{{
-          archived() ? 'Archived' : draft.enabled ? 'Enabled' : 'Disabled'
-        }}</span>
+        <span
+          ptahBadge
+          [tone]="!archived() && draft.enabled ? 'ok' : 'neutral'"
+          >{{
+            archived() ? 'Archived' : draft.enabled ? 'Enabled' : 'Disabled'
+          }}</span
+        >
         @if (!isNew()) {
           <span class="text-xs font-mono">Revision {{ draft.revision }}</span>
-          <label class="flex items-center gap-2">
+          <label
+            class="ml-auto flex items-center gap-2"
+            title="Applies at once. Does not save other edits."
+          >
             <input
               ptahToggle
               type="checkbox"
@@ -85,7 +94,7 @@ import { BotConflictDrawerComponent } from './bot-conflict-drawer.component';
               (change)="toggle($event)"
             />Enabled
           </label>
-          <span id="bot-enabled-hint" class="text-xs"
+          <span id="bot-enabled-hint" class="sr-only"
             >Applies at once. Does not save other edits.</span
           >
           <ptah-native-dropdown
@@ -176,12 +185,6 @@ import { BotConflictDrawerComponent } from './bot-conflict-drawer.component';
           </ptah-native-dropdown>
         }
       </header>
-      <div role="note" class="border border-base-300 rounded-lg p-4 mb-4">
-        <h3 class="font-semibold">Bots cannot start yet</h3>
-        <p>
-          Execution is not available yet. You can save a bot's definition now.
-        </p>
-      </div>
       @if (archived()) {
         <div
           role="note"

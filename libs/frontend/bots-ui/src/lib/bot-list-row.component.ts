@@ -69,7 +69,9 @@ import { avatarErrorMessage, botErrorMessage } from './bot-error-messages';
           [status]="status() === 'enabled' ? 'online' : 'pending'"
           [label]="statusLabel()"
         />
-        <span class="description">{{ item.description }}</span>
+        @if (item.description) {
+          <span class="description">{{ item.description }}</span>
+        }
         <span class="metadata">
           <span ptahBadge>{{
             item.scope.kind === 'user' ? 'User' : 'Workspace'
@@ -112,7 +114,7 @@ import { avatarErrorMessage, botErrorMessage } from './bot-error-messages';
       }
       .bot-row[aria-current='true'] {
         background: var(--surface-2);
-        border-color: var(--line);
+        border-color: transparent;
       }
       .bot-row[aria-current='true']::before {
         content: '';
@@ -122,7 +124,7 @@ import { avatarErrorMessage, botErrorMessage } from './bot-error-messages';
         bottom: 10px;
         width: 3px;
         border-radius: 3px;
-        background: var(--p);
+        background: var(--ptah-btn-primary-bg);
       }
       .avatar {
         grid-row: 1 / 4;
@@ -138,6 +140,7 @@ import { avatarErrorMessage, botErrorMessage } from './bot-error-messages';
       }
       .name,
       .description {
+        min-width: 0;
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
@@ -155,7 +158,7 @@ import { avatarErrorMessage, botErrorMessage } from './bot-error-messages';
         font-size: 0.75rem;
       }
       button:focus-visible {
-        outline: 2px solid var(--p);
+        outline: 2px solid var(--ptah-btn-primary-bg);
         outline-offset: 2px;
       }
     `,

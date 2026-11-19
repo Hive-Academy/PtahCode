@@ -12,6 +12,7 @@ import {
 } from '@angular/core';
 import type { BotEditable, BotLaneTarget } from '@ptah-extension/shared';
 import {
+  PtahButtonDirective,
   PtahFieldComponent,
   PtahInputDirective,
   PtahTextareaDirective,
@@ -27,6 +28,7 @@ import { avatarErrorMessage } from './bot-error-messages';
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
+    PtahButtonDirective,
     PtahFieldComponent,
     PtahInputDirective,
     PtahTextareaDirective,
@@ -147,21 +149,39 @@ import { avatarErrorMessage } from './bot-error-messages';
               </button>
             }
           }
-          <ptah-field
-            label="Upload image"
-            hint="PNG, JPEG or WebP, up to 2 MB."
-          >
+          <div class="min-w-0">
+            <label for="bot-avatar-file" class="sr-only">Upload image</label>
             <input
-              ptahInput
+              id="bot-avatar-file"
+              class="sr-only"
+              tabindex="-1"
               type="file"
               #avatarFile
               accept="image/png,image/jpeg,image/webp"
+              aria-describedby="bot-avatar-file-hint"
               [disabled]="
                 disabled() || store.avatarUpload()?.status === 'loading'
               "
               (change)="upload($event)"
             />
-          </ptah-field>
+            <button
+              ptahButton
+              type="button"
+              aria-describedby="bot-avatar-file-hint"
+              [disabled]="
+                disabled() || store.avatarUpload()?.status === 'loading'
+              "
+              (click)="avatarFile.click()"
+            >
+              Upload image
+            </button>
+            <p
+              id="bot-avatar-file-hint"
+              class="mt-2 text-xs text-base-content/70"
+            >
+              PNG, JPEG or WebP, up to 2 MB.
+            </p>
+          </div>
           @if (avatarReadError()) {
             <p role="alert">{{ avatarReadError() }}</p>
           }
