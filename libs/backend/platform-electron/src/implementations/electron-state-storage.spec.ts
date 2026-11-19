@@ -43,6 +43,48 @@ describe('ElectronStateStorage — Electron-specific behaviour', () => {
     provider = new ElectronStateStorage(storage, 'state.json');
   });
 
+  it.each(['async', 'sync', 'load'] as const)(
+    'isolates the %s baseline from caller mutations and repeated rollbacks',
+    async (source) => {
+      let fail = false;
+      const createStore = () => new ElectronStateStorage(
+        storage, 'state.json', undefined, undefined, async (filePath, contents) => {
+          if (fail) throw new Error('disk');
+          await fs.writeFile(filePath, contents, 'utf8');
+        },
+      );
+      provider = createStore();
+      const value = { nested: { count: 1 } };
+      if (source === 'sync') provider.updateSync('kept', value);
+      else {
+        const update = provider.update('kept', value);
+        await provider.flush();
+        await update;
+      }
+      if (source === 'load') provider = createStore();
+      const live = provider.get<typeof value>('kept');
+      expect(live).toBeDefined();
+      if (!live) throw new Error('missing stored value');
+      if (source !== 'load') expect(live).toBe(value);
+      live.nested.count = 99;
+      fail = true;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const rejected = expect(provider.update('kept', { nested: { count: 2 } })).rejects.toThrow('disk');
+        await expect(provider.flush()).rejects.toThrow('disk');
+        await rejected;
+        const restored = provider.get<typeof value>('kept');
+        expect(restored).toEqual({ nested: { count: 1 } });
+        if (!restored) throw new Error('missing rollback value');
+        if (attempt === 0) restored.nested.count = 88;
+      }
+      fail = false;
+      const next = provider.update('other', true);
+      await provider.flush();
+      await next;
+      expect(createStore().get('kept')).toEqual({ nested: { count: 1 } });
+    },
+  );
+
   it.each([false, true])('rebases queued rollback after first commit succeeds=%s', async (firstSucceeds) => {
     let started: (() => void) | undefined;
     let release: (() => void) | undefined;

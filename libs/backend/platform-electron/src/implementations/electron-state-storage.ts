@@ -1,6 +1,7 @@
 import * as fs from 'node:fs';
 import * as fsPromises from 'node:fs/promises';
 import * as path from 'node:path';
+import { z } from 'zod';
 import type { Logger } from '@ptah-extension/vscode-core';
 import {
   StateStorageNotReadyError,
@@ -23,8 +24,11 @@ import {
 } from './electron-state-storage-worker-host';
 import {
   assertJsonCompatibleValue,
+  electronStateJsonValueSchema,
   type JsonValue,
 } from './electron-state-storage-worker-protocol';
+
+const persistedStateSchema = z.record(z.string(), electronStateJsonValueSchema);
 
 export interface ElectronStateStorageWorkerOptions {
   readonly workerPath: string;
@@ -78,7 +82,7 @@ export class ElectronStateStorage
     if (!workerOptions) {
       this.workerHost = null;
       this.loadSync();
-      this.persistedData = { ...this.data };
+      this.persistedData = structuredClone(this.data);
       this.readinessState = { status: 'ready' };
       this.readyPromise = Promise.resolve();
       return;
@@ -359,7 +363,7 @@ export class ElectronStateStorage
         if (this.keyGenerations.get(key) !== generation) continue;
         const persisted = this.persistedData[key];
         if (persisted === undefined) delete this.data[key];
-        else this.data[key] = persisted;
+        else this.data[key] = structuredClone(persisted);
       }
       reject?.(error instanceof Error ? error : new Error(String(error)));
       throw error;
@@ -422,7 +426,7 @@ export class ElectronStateStorage
     }
     // The final commit is synchronous so updateSync cannot interleave with it.
     fs.renameSync(tmpPath, this.filePath);
-    this.persistedData = snapshot;
+    this.persistedData = persistedStateSchema.parse(JSON.parse(serialized));
     this.commitGeneration++;
     const ms = performance.now() - started;
     if (ms > 50) this.logger?.warn('[platform-electron] slow global state write', {
@@ -440,7 +444,7 @@ export class ElectronStateStorage
     const tmpPath = `${this.filePath}.sync-tmp`;
     fs.writeFileSync(tmpPath, serialized, 'utf8');
     fs.renameSync(tmpPath, this.filePath);
-    this.persistedData = snapshot;
+    this.persistedData = persistedStateSchema.parse(JSON.parse(serialized));
     this.commitGeneration++;
     const ms = performance.now() - started;
     if (ms > 50) {

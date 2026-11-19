@@ -11,7 +11,10 @@
 import * as fs from 'fs';
 import * as fsPromises from 'fs/promises';
 import * as path from 'path';
+import { z } from 'zod';
 import type { IStateStorage } from '@ptah-extension/platform-core';
+
+const persistedStateSchema = z.record(z.string(), z.json());
 
 export class CliStateStorage implements IStateStorage {
   private data: Record<string, unknown> = {};
@@ -23,7 +26,7 @@ export class CliStateStorage implements IStateStorage {
   constructor(storageDirPath: string, filename: string) {
     this.filePath = path.join(storageDirPath, filename);
     this.loadSync();
-    this.persistedData = { ...this.data };
+    this.persistedData = structuredClone(this.data);
   }
 
   get<T>(key: string, defaultValue?: T): T | undefined {
@@ -45,7 +48,7 @@ export class CliStateStorage implements IStateStorage {
         if (this.keyGenerations.get(key) === generation) {
           const persisted = this.persistedData[key];
           if (persisted === undefined) delete this.data[key];
-          else this.data[key] = persisted;
+          else this.data[key] = structuredClone(persisted);
         }
         throw error;
       }
@@ -73,12 +76,13 @@ export class CliStateStorage implements IStateStorage {
     await fsPromises.mkdir(dir, { recursive: true });
     const tmpPath = this.filePath + '.tmp';
     const snapshot = { ...this.data };
+    const serialized = JSON.stringify(snapshot, null, 2);
     await fsPromises.writeFile(
       tmpPath,
-      JSON.stringify(snapshot, null, 2),
+      serialized,
       'utf-8',
     );
     await fsPromises.rename(tmpPath, this.filePath);
-    this.persistedData = snapshot;
+    this.persistedData = persistedStateSchema.parse(JSON.parse(serialized));
   }
 }

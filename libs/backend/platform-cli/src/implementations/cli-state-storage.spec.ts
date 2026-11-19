@@ -45,6 +45,30 @@ describe('CliStateStorage — CLI-specific behaviour', () => {
     provider = new CliStateStorage(storage, 'state.json');
   });
 
+  it.each(['update', 'load'] as const)(
+    'isolates the %s baseline from caller mutations and repeated rollbacks',
+    async (source) => {
+      const value = { nested: { count: 1 } };
+      await provider.update('kept', value);
+      if (source === 'load') provider = new CliStateStorage(storage, 'state.json');
+      const live = provider.get<typeof value>('kept');
+      expect(live).toBeDefined();
+      if (!live) throw new Error('missing stored value');
+      if (source === 'update') expect(live).toBe(value);
+      live.nested.count = 99;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        jest.spyOn(fs, 'rename').mockRejectedValueOnce(new Error('disk'));
+        await expect(provider.update('kept', { nested: { count: 2 } })).rejects.toThrow('disk');
+        const restored = provider.get<typeof value>('kept');
+        expect(restored).toEqual({ nested: { count: 1 } });
+        if (!restored) throw new Error('missing rollback value');
+        if (attempt === 0) restored.nested.count = 88;
+      }
+      await provider.update('other', true);
+      expect(new CliStateStorage(storage, 'state.json').get('kept')).toEqual({ nested: { count: 1 } });
+    },
+  );
+
   it('restores disk baseline after consecutive failures before an unrelated commit', async () => {
     await provider.update('key', 0);
     jest.spyOn(fs, 'rename').mockRejectedValueOnce(new Error('disk')).mockRejectedValueOnce(new Error('disk'));
