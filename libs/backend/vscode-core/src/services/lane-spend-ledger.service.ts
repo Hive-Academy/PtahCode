@@ -132,10 +132,13 @@ export class LaneSpendLedgerService implements LaneSpendReader, SessionUsageSink
       // totals and deduplication history until reset without durable rollups.
       for (const runId of new Set(rows.filter((row) => row.runCostSnapshot).map((row) => row.runId))) {
         const run = rows.filter((row) => row.runId === runId);
-        const snapshot = run.filter((row) => row.runCostSnapshot).sort((a, b) => b.occurredAtMs - a.occurredAtMs || b.revision - a.revision)[0];
+        // A later unpriced snapshot leaves new usage uncovered, but must not
+        // discard a previously reported absolute cost for this run.
+        const snapshot = run.filter((row) => row.runCostSnapshot && row.totalCostAuthority !== 'unpriced' && row.totalCostMicroUsd !== null)
+          .sort((a, b) => b.occurredAtMs - a.occurredAtMs || b.revision - a.revision)[0];
         const crossesBoundary = owner?.resetRunIds.includes(runId) || this.state.events.some((row) =>
           row.ownerKey === ownerKey && row.runId === runId && row.occurredAtMs < startAt);
-        if (!crossesBoundary && snapshot.totalCostAuthority !== 'unpriced' && snapshot.totalCostMicroUsd !== null) {
+        if (!crossesBoundary && snapshot && snapshot.totalCostMicroUsd !== null) {
           const covered = run.filter((row) => row.occurredAtMs < snapshot.occurredAtMs ||
             (row.occurredAtMs === snapshot.occurredAtMs && rows.indexOf(row) <= rows.indexOf(snapshot)));
           knownCostMicroUsd -= covered.reduce((sum, row) => sum + (rowCost(row) ?? 0), 0);

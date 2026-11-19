@@ -17,6 +17,7 @@ export class CliStateStorage implements IStateStorage {
   private data: Record<string, unknown> = {};
   private readonly filePath: string;
   private writePromise: Promise<void> = Promise.resolve();
+  private readonly keyGenerations = new Map<string, number>();
 
   constructor(storageDirPath: string, filename: string) {
     this.filePath = path.join(storageDirPath, filename);
@@ -29,16 +30,21 @@ export class CliStateStorage implements IStateStorage {
   }
 
   async update(key: string, value: unknown): Promise<void> {
+    const previous = this.data[key];
+    const generation = (this.keyGenerations.get(key) ?? 0) + 1;
+    this.keyGenerations.set(key, generation);
+    if (value === undefined) delete this.data[key];
+    else this.data[key] = value;
     // degradation-audit: reported — the previous update caller received its rejection.
     const write = this.writePromise.catch(() => undefined).then(async () => {
-      const previous = this.data[key];
-      if (value === undefined) delete this.data[key];
-      else this.data[key] = value;
       try {
         await this.persist();
       } catch (error: unknown) {
-        if (previous === undefined) delete this.data[key];
-        else this.data[key] = previous;
+        // A failed older write must not undo a newer in-memory update.
+        if (this.keyGenerations.get(key) === generation) {
+          if (previous === undefined) delete this.data[key];
+          else this.data[key] = previous;
+        }
         throw error;
       }
     });

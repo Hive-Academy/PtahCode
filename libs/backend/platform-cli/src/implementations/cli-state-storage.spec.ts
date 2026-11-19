@@ -6,7 +6,7 @@
  */
 
 import 'reflect-metadata';
-import * as fs from 'fs/promises';
+import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { runStateStorageContract } from '@ptah-extension/platform-core/testing';
@@ -21,6 +21,7 @@ async function makeTempDir(): Promise<string> {
 }
 
 afterEach(async () => {
+  jest.restoreAllMocks();
   while (tmpDirs.length > 0) {
     const dir = tmpDirs.pop();
     if (!dir) continue;
@@ -42,6 +43,42 @@ describe('CliStateStorage — CLI-specific behaviour', () => {
   beforeEach(async () => {
     storage = await makeTempDir();
     provider = new CliStateStorage(storage, 'state.json');
+  });
+
+  it('makes updates and queued updates visible before persistence settles', async () => {
+    const first = provider.update('visible', 1);
+    expect(provider.get('visible')).toBe(1);
+    const second = provider.update('visible', 2);
+    expect(provider.get('visible')).toBe(2);
+    await Promise.all([first, second]);
+    const deletion = provider.update('visible', undefined);
+    expect(provider.get('visible')).toBeUndefined();
+    await deletion;
+  });
+
+  it('keeps a queued same-key update when the preceding write fails', async () => {
+    await provider.update('kept', 0);
+    const failure = new Error('rename failed');
+    jest.spyOn(fs, 'rename').mockRejectedValueOnce(failure);
+    const failed = provider.update('kept', 1);
+    const rejected = expect(failed).rejects.toBe(failure);
+    const successful = provider.update('kept', 2);
+    expect(provider.get('kept')).toBe(2);
+    await rejected;
+    expect(provider.get('kept')).toBe(2);
+    await successful;
+    expect(provider.get('kept')).toBe(2);
+    expect(new CliStateStorage(storage, 'state.json').get('kept')).toBe(2);
+  });
+
+  it('removes a failed new key when no later update supersedes it', async () => {
+    const failure = new Error('rename failed');
+    jest.spyOn(fs, 'rename').mockRejectedValueOnce(failure);
+    const write = provider.update('new-key', 1);
+    expect(provider.get('new-key')).toBe(1);
+    await expect(write).rejects.toBe(failure);
+    expect(provider.get('new-key')).toBeUndefined();
+    expect(new CliStateStorage(storage, 'state.json').get('new-key')).toBeUndefined();
   });
 
   it('rolls back failed updates and deletions before a later write', async () => {

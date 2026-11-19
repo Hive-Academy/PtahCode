@@ -175,6 +175,22 @@ describe('explicit storage repair and async validation', () => {
     expect(await ledger.readSpend('owner', NOW)).toMatchObject({ coverage: 'partial',
       cumulative: { knownCostMicroUsd: 5_000_000, pricedEvents: 2, unpricedEvents: 1 } });
   });
+  it('retains the latest usable snapshot when a later run snapshot is unpriced', async () => {
+    const { ledger, storage, logger } = setup();
+    await ledger.recordUsage(event({ eventKey: 'older-snapshot', occurredAtMs: NOW - 3,
+      runCostSnapshot: true, totalCostMicroUsd: 2_000_000 }));
+    await ledger.recordUsage(event({ eventKey: 'priced-snapshot', occurredAtMs: NOW - 2,
+      runCostSnapshot: true, totalCostMicroUsd: 5_000_000 }));
+    await ledger.recordUsage(event({ eventKey: 'unpriced-snapshot', occurredAtMs: NOW - 1,
+      runCostSnapshot: true, totalCostAuthority: 'unpriced', totalCostMicroUsd: null }));
+    const restored = new LaneSpendLedgerService(storage, logger);
+    const result = await restored.readSpend('owner', NOW);
+    const expected = { knownCostMicroUsd: 5_000_000, pricedEvents: 2, unpricedEvents: 1 };
+    expect(result).toMatchObject({ coverage: 'partial', cumulative: expected });
+    expect(result.periods?.today).toMatchObject(expected);
+    expect(result.periods?.['7d']).toMatchObject(expected);
+    expect(result.periods?.['30d']).toMatchObject(expected);
+  });
   it('retains later deltas after an absolute snapshot', async () => {
     const { ledger } = setup();
     await ledger.recordUsage(event({ occurredAtMs: NOW - 2, totalCostMicroUsd: 2_000_000 }));
