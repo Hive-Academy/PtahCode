@@ -408,13 +408,14 @@ export function calculateExactMessageCost(
     (tokens.cacheCreation1h ?? 0) > (tokens.cacheCreation ?? 0);
   if (normalizeModelKey(modelId).replace(/(haiku-5)\.5$/, '$1-5') === 'claude-haiku-5-5' &&
     (options.pricingProvider !== 'anthropic' || options.contextTokens === undefined || !Number.isSafeInteger(options.contextTokens) || options.contextTokens < 0)) return unavailable('rate-missing');
-  const nativeRate = options.pricingProvider === 'anthropic' ? findAnthropicRate(modelId, options.contextTokens) : null;
+  const lowerModelId = modelId.trim().toLowerCase();
+  const variantTags = lowerModelId.slice(stripModelVariantTags(lowerModelId).length);
+  const nativeModelId = normalizeModelKey(modelId).replace(/(\d)\.(\d)/g, '$1-$2') + variantTags;
+  const nativeRate = options.pricingProvider === 'anthropic' ? findAnthropicRate(nativeModelId, options.contextTokens) : null;
   const found = options.pricingProvider === 'anthropic'
-    ? (nativeRate ? { modelIdUsed: modelId, pricing: nativeRate } : null)
+    ? (nativeRate ? { modelIdUsed: nativeModelId, pricing: nativeRate } : null)
     : findExactModelPricing(modelId);
-  // No catalog entry (or only a base Claude entry for a `[1m]` request) means
-  // Ptah lacks a needed rate: "not priced", never a fabricated
-  // substitute rate or zero.
+  // Missing rates stay unpriced; variant requests must resolve their own entry.
   if (!found) return unavailable(usageIncomplete ? 'usage-incomplete' : 'rate-missing');
   const { pricing } = found;
   const provenance: PriceProvenance = {
@@ -432,8 +433,7 @@ export function calculateExactMessageCost(
       costUnavailableReason: 'usage-incomplete',
     };
   }
-  // Only the id's own entry (or its catalog spelling) prices it: a `[1m]`
-  // request resolved to its base entry stays unpriced.
+  // A variant resolved to its base entry stays unpriced.
   if (options.pricingProvider !== 'anthropic' && found.modelIdUsed !== resolvePricingKey(modelId.toLowerCase())) {
     return unavailable('rate-missing');
   }

@@ -15,6 +15,7 @@ import type { IStateStorage } from '@ptah-extension/platform-core';
 
 export class CliStateStorage implements IStateStorage {
   private data: Record<string, unknown> = {};
+  private persistedData: Record<string, unknown> = {};
   private readonly filePath: string;
   private writePromise: Promise<void> = Promise.resolve();
   private readonly keyGenerations = new Map<string, number>();
@@ -22,6 +23,7 @@ export class CliStateStorage implements IStateStorage {
   constructor(storageDirPath: string, filename: string) {
     this.filePath = path.join(storageDirPath, filename);
     this.loadSync();
+    this.persistedData = { ...this.data };
   }
 
   get<T>(key: string, defaultValue?: T): T | undefined {
@@ -30,7 +32,6 @@ export class CliStateStorage implements IStateStorage {
   }
 
   async update(key: string, value: unknown): Promise<void> {
-    const previous = this.data[key];
     const generation = (this.keyGenerations.get(key) ?? 0) + 1;
     this.keyGenerations.set(key, generation);
     if (value === undefined) delete this.data[key];
@@ -42,8 +43,9 @@ export class CliStateStorage implements IStateStorage {
       } catch (error: unknown) {
         // A failed older write must not undo a newer in-memory update.
         if (this.keyGenerations.get(key) === generation) {
-          if (previous === undefined) delete this.data[key];
-          else this.data[key] = previous;
+          const persisted = this.persistedData[key];
+          if (persisted === undefined) delete this.data[key];
+          else this.data[key] = persisted;
         }
         throw error;
       }
@@ -70,11 +72,13 @@ export class CliStateStorage implements IStateStorage {
     const dir = path.dirname(this.filePath);
     await fsPromises.mkdir(dir, { recursive: true });
     const tmpPath = this.filePath + '.tmp';
+    const snapshot = { ...this.data };
     await fsPromises.writeFile(
       tmpPath,
-      JSON.stringify(this.data, null, 2),
+      JSON.stringify(snapshot, null, 2),
       'utf-8',
     );
     await fsPromises.rename(tmpPath, this.filePath);
+    this.persistedData = snapshot;
   }
 }

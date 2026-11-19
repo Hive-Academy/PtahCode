@@ -146,7 +146,9 @@ export class LaneSpendLedgerService implements LaneSpendReader, SessionUsageSink
           const newlyPriced = covered.filter((row) => rowCost(row) === null).length;
           unpricedEvents -= newlyPriced;
           pricedEvents += newlyPriced;
-          for (const row of covered) coveredRows.add(row);
+          if (snapshot.totalCostAuthority === 'provider-reported') {
+            for (const row of covered) coveredRows.add(row);
+          }
         }
       }
       return { spend: { startAt, endAt: nowMs, knownCostMicroUsd, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, pricedEvents, unpricedEvents }, coveredRows };

@@ -45,6 +45,28 @@ describe('CliStateStorage — CLI-specific behaviour', () => {
     provider = new CliStateStorage(storage, 'state.json');
   });
 
+  it('restores disk baseline after consecutive failures before an unrelated commit', async () => {
+    await provider.update('key', 0);
+    jest.spyOn(fs, 'rename').mockRejectedValueOnce(new Error('disk')).mockRejectedValueOnce(new Error('disk'));
+    const first = expect(provider.update('key', 1)).rejects.toThrow('disk');
+    const second = expect(provider.update('key', 2)).rejects.toThrow('disk');
+    await Promise.all([first, second]);
+    expect(provider.get('key')).toBe(0);
+    await provider.update('other', true);
+    expect(new CliStateStorage(storage, 'state.json').get('key')).toBe(0);
+  });
+
+  it('accounts for other pending keys included in a successful full snapshot', async () => {
+    await provider.update('key', 0);
+    const rename = fs.rename.bind(fs);
+    jest.spyOn(fs, 'rename').mockImplementationOnce(rename).mockRejectedValueOnce(new Error('disk'));
+    const first = provider.update('other', true);
+    const second = expect(provider.update('key', 2)).rejects.toThrow('disk');
+    await Promise.all([first, second]);
+    expect(provider.get('key')).toBe(2);
+    expect(new CliStateStorage(storage, 'state.json').get('key')).toBe(2);
+  });
+
   it('makes updates and queued updates visible before persistence settles', async () => {
     const first = provider.update('visible', 1);
     expect(provider.get('visible')).toBe(1);

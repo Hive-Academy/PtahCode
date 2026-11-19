@@ -19,6 +19,15 @@ function setup(initial?: unknown) {
   return { storage, logger, ledger: new LaneSpendLedgerService(storage, logger) };
 }
 describe('durable owned spend', () => {
+  it.each(['model-priced', 'provider-reported'] as const)('retains unknown TTL evidence for %s snapshots', async (authority) => {
+    const { ledger } = setup();
+    const usage = event({ runCostSnapshot: true, totalCostAuthority: authority });
+    await ledger.recordUsage({ ...usage, models: usage.models.map((model) => ({ ...model, costAuthority: 'model-priced' })) });
+    expect(await ledger.readSpend('owner', NOW)).toMatchObject({
+      coverage: authority === 'model-priced' ? 'partial' : 'complete',
+      cumulative: { knownCostMicroUsd: 100, pricedEvents: 1, unpricedEvents: 0 },
+    });
+  });
   it('survives restart and idempotent replay, retaining token classes', async () => {
     const { storage, logger, ledger } = setup();
     await ledger.recordUsage(event()); await ledger.recordUsage(event());

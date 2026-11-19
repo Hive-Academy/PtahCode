@@ -43,6 +43,80 @@ describe('ElectronStateStorage — Electron-specific behaviour', () => {
     provider = new ElectronStateStorage(storage, 'state.json');
   });
 
+  it.each([false, true])('rebases queued rollback after first commit succeeds=%s', async (firstSucceeds) => {
+    let started: (() => void) | undefined;
+    let release: (() => void) | undefined;
+    const writing = new Promise<void>((resolve) => { started = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let attempt = 0;
+    provider = new ElectronStateStorage(storage, 'state.json', undefined, undefined,
+      async (filePath, contents) => {
+        attempt++;
+        if (attempt === 1) {
+          started?.();
+          await gate;
+          if (firstSucceeds) {
+            await fs.writeFile(filePath, contents, 'utf8');
+            return;
+          }
+        }
+        throw new Error('disk');
+      });
+    provider.updateSync('key', 0);
+    const first = provider.update('key', 1);
+    const firstResult = firstSucceeds ? expect(first).resolves.toBeUndefined() : expect(first).rejects.toThrow('disk');
+    const flush = provider.flush();
+    const flushResult = firstSucceeds ? expect(flush).resolves.toBeUndefined() : expect(flush).rejects.toThrow('disk');
+    await writing;
+    const second = expect(provider.update('key', 2)).rejects.toThrow('disk');
+    const secondFlush = expect(provider.flush()).rejects.toThrow('disk');
+    release?.();
+    await Promise.all([firstResult, flushResult, second, secondFlush]);
+    expect(provider.get('key')).toBe(firstSucceeds ? 1 : 0);
+    provider.updateSync('other', true);
+    expect(new ElectronStateStorage(storage, 'state.json').get('key')).toBe(firstSucceeds ? 1 : 0);
+  });
+
+  it('commits pending keys included in another batch full snapshot', async () => {
+    let attempt = 0;
+    provider = new ElectronStateStorage(storage, 'state.json', undefined, undefined, async (filePath, contents) => {
+      if (++attempt === 2) throw new Error('disk');
+      await fs.writeFile(filePath, contents, 'utf8');
+    });
+    provider.updateSync('key', 0);
+    const first = provider.update('other', true);
+    const firstFlush = provider.flush();
+    const second = expect(provider.update('key', 2)).rejects.toThrow('disk');
+    const secondFlush = expect(provider.flush()).rejects.toThrow('disk');
+    await Promise.all([first, firstFlush, second, secondFlush]);
+    expect(provider.get('key')).toBe(2);
+    expect(new ElectronStateStorage(storage, 'state.json').get('key')).toBe(2);
+  });
+
+  it('keeps every key committed by updateSync when an in-flight write fails', async () => {
+    let started: (() => void) | undefined;
+    let rejectWrite: ((error: Error) => void) | undefined;
+    const writing = new Promise<void>((resolve) => { started = resolve; });
+    const gate = new Promise<void>((_resolve, reject) => { rejectWrite = reject; });
+    provider = new ElectronStateStorage(storage, 'state.json', undefined, undefined, async () => {
+      started?.();
+      await gate;
+    });
+    provider.updateSync('key', 0);
+    const update = expect(provider.update('key', 1)).rejects.toThrow('disk');
+    const flush = expect(provider.flush()).rejects.toThrow('disk');
+    await writing;
+    provider.updateSync('other', true);
+    rejectWrite?.(new Error('disk'));
+    await Promise.all([update, flush]);
+    expect(provider.get('key')).toBe(1);
+    const later = expect(provider.update('key', 2)).rejects.toThrow('disk');
+    await expect(provider.flush()).rejects.toThrow('disk');
+    await later;
+    expect(provider.get('key')).toBe(1);
+    expect(new ElectronStateStorage(storage, 'state.json').get('key')).toBe(1);
+  });
+
   it('rolls back a failed global-state write before a later commit', async () => {
     let fail = false;
     provider = new ElectronStateStorage(storage, 'state.json', undefined, undefined, async (filePath, contents) => {
@@ -275,3 +349,4 @@ describe('ElectronStateStorage — Electron-specific behaviour', () => {
     expect(entries.some((e) => e.endsWith('.tmp'))).toBe(false);
   });
 });
+

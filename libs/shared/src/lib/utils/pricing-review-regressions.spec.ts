@@ -40,3 +40,27 @@ it('retains one-hour pricing when seeding native Claude static models', () => {
   seedStaticModelPricing('claude-cli');
   expect(findModelPricing('claude-sonnet-5-5')?.cacheCreation1hCostPerToken).toBe(bundled);
 });
+
+it.each(['anthropic/claude-sonnet-4-6', 'claude-sonnet-4-6-20251101', 'claude-sonnet-4.6'])(
+  'resolves native Anthropic model spelling %s', (model) => {
+    const result = calculateExactMessageCost(model, { input: 1000, output: 100 }, { billingMode: 'api-key', pricingProvider: 'anthropic' });
+    expect(result.totalCost).toBeCloseTo(0.0045);
+    expect(result.priceProvenance?.modelIdUsed).toBe('claude-sonnet-4-6');
+  },
+);
+it('keeps native Haiku tier selection after normalization', () => {
+  const model = 'anthropic/claude-haiku-5.5-20261118';
+  const tokens = { input: 1000, output: 0 };
+  const options = { billingMode: 'api-key', pricingProvider: 'anthropic' } as const;
+  expect(calculateExactMessageCost(model, tokens, options).costUnavailableReason).toBe('rate-missing');
+  expect(calculateExactMessageCost(model, tokens, { ...options, contextTokens: 100_000 }).totalCost).toBeCloseTo(0.0001);
+  expect(calculateExactMessageCost(model, tokens, { ...options, contextTokens: 100_001 }).totalCost).toBeCloseTo(0.0005);
+});
+
+it.each(['claude-sonnet-4-6[1m]', 'anthropic/claude-sonnet-4.6-20251101[1m]'])(
+  'keeps native variant %s distinct from the base rate', (model) => {
+    registerProviderPricing({ [model]: rate });
+    expect(calculateExactMessageCost(model, { input: 1000, output: 100 }, { billingMode: 'api-key', pricingProvider: 'anthropic' }))
+      .toMatchObject({ totalCost: null, costUnavailableReason: 'rate-missing' });
+  },
+);

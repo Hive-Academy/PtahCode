@@ -56,7 +56,7 @@ export class ElectronStateStorage
   private commitGeneration = 0;
   private writeTimer: ReturnType<typeof setTimeout> | null = null;
   private maxWriteTimer: ReturnType<typeof setTimeout> | null = null;
-  private readonly previousValues = new Map<string, JsonValue | undefined>();
+  private persistedData: Record<string, JsonValue> = {};
   private readonly changedKeys = new Set<string>();
   private readonly keyGenerations = new Map<string, number>();
   private pendingWrite: Promise<void> | null = null;
@@ -78,6 +78,7 @@ export class ElectronStateStorage
     if (!workerOptions) {
       this.workerHost = null;
       this.loadSync();
+      this.persistedData = { ...this.data };
       this.readinessState = { status: 'ready' };
       this.readyPromise = Promise.resolve();
       return;
@@ -178,7 +179,6 @@ export class ElectronStateStorage
       return;
     }
 
-    if (!this.previousValues.has(key)) this.previousValues.set(key, this.data[key]);
     this.keyGenerations.set(key, (this.keyGenerations.get(key) ?? 0) + 1);
     if (value === undefined) delete this.data[key];
     else this.data[key] = value as JsonValue;
@@ -235,7 +235,6 @@ export class ElectronStateStorage
     this.changedKeys.clear();
     try {
       this.persistSync(changedCount);
-      this.previousValues.clear();
       resolve?.();
     } catch (error: unknown) {
       reject?.(error instanceof Error ? error : new Error(String(error)));
@@ -343,9 +342,7 @@ export class ElectronStateStorage
     this.pendingWrite = null;
     this.resolvePendingWrite = null;
     this.rejectPendingWrite = null;
-    const previousValues = new Map(this.previousValues);
     const generations = new Map([...this.changedKeys].map((key) => [key, this.keyGenerations.get(key)]));
-    this.previousValues.clear();
     const changedCount = this.changedKeys.size;
     this.changedKeys.clear();
     this.writePromise = this.writePromise
@@ -358,13 +355,11 @@ export class ElectronStateStorage
       await this.writePromise;
       resolve?.();
     } catch (error: unknown) {
-      for (const [key, previous] of previousValues) {
-        if (this.keyGenerations.get(key) !== generations.get(key)) {
-          if (this.changedKeys.has(key)) this.previousValues.set(key, previous);
-          continue;
-        }
-        if (previous === undefined) delete this.data[key];
-        else this.data[key] = previous;
+      for (const [key, generation] of generations) {
+        if (this.keyGenerations.get(key) !== generation) continue;
+        const persisted = this.persistedData[key];
+        if (persisted === undefined) delete this.data[key];
+        else this.data[key] = persisted;
       }
       reject?.(error instanceof Error ? error : new Error(String(error)));
       throw error;
@@ -414,7 +409,8 @@ export class ElectronStateStorage
   private async persist(changedCount: number): Promise<void> {
     const generation = this.commitGeneration;
     const started = performance.now();
-    const serialized = JSON.stringify(this.data);
+    const snapshot = { ...this.data };
+    const serialized = JSON.stringify(snapshot);
     const bytes = Buffer.byteLength(serialized);
     const dir = path.dirname(this.filePath);
     await fsPromises.mkdir(dir, { recursive: true });
@@ -426,6 +422,7 @@ export class ElectronStateStorage
     }
     // The final commit is synchronous so updateSync cannot interleave with it.
     fs.renameSync(tmpPath, this.filePath);
+    this.persistedData = snapshot;
     this.commitGeneration++;
     const ms = performance.now() - started;
     if (ms > 50) this.logger?.warn('[platform-electron] slow global state write', {
@@ -435,13 +432,15 @@ export class ElectronStateStorage
 
   private persistSync(changedCount: number): void {
     const started = performance.now();
-    const serialized = JSON.stringify(this.data);
+    const snapshot = { ...this.data };
+    const serialized = JSON.stringify(snapshot);
     const bytes = Buffer.byteLength(serialized);
     const dir = path.dirname(this.filePath);
     fs.mkdirSync(dir, { recursive: true });
     const tmpPath = `${this.filePath}.sync-tmp`;
     fs.writeFileSync(tmpPath, serialized, 'utf8');
     fs.renameSync(tmpPath, this.filePath);
+    this.persistedData = snapshot;
     this.commitGeneration++;
     const ms = performance.now() - started;
     if (ms > 50) {
