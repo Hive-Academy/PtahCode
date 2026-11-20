@@ -341,7 +341,7 @@ describe('ClaudeRouteCertifier.certify', () => {
     const classO: ReadonlyArray<[string, Record<string, unknown>]> = [
       ['team', { subscriptionType: 'team' }],
       ['enterprise', { subscriptionType: 'enterprise' }],
-      ['missing subscriptionType', { subscriptionType: undefined }],
+      ['api', { subscriptionType: 'api' }],
       ['allowedProviders present', { allowedProviders: ['firstParty'] }],
       ['apiKeySource apiKeyHelper', { apiKeySource: 'apiKeyHelper' }],
       ['non-firstParty provider', { apiProvider: 'bedrock' }],
@@ -355,6 +355,18 @@ describe('ClaudeRouteCertifier.certify', () => {
       await expect(h.certifier.certify(certifyRequest(route))).resolves.toEqual({ ok: false, code: 'unsupported-source', terminated: true });
       expect(h.probe.status).toHaveBeenCalledTimes(1);
     });
+
+    // A fresh `claude auth login` records no plan until a later full session.
+    it.each([['null', null], ['missing', undefined]])(
+      '%s subscriptionType is class P and reaches the identity comparison',
+      async (_label, subscriptionType) => {
+        const h = harness();
+        const route = newRoute();
+        h.statusFor.set(route.canonicalPath, statusJson({ subscriptionType, email: 'other@example.test', configDirectory: 'C:\\elsewhere' }));
+        await expect(h.certifier.certify(certifyRequest(route))).resolves.toEqual({ ok: false, code: 'identity-mismatch', terminated: true });
+        expect(h.probe.status).toHaveBeenCalledTimes(1);
+      },
+    );
 
     it('class P with every S9 signal absent certifies as personal', async () => {
       const launch = await certified(harness());

@@ -1,9 +1,12 @@
 import { claudeSubscriptionFamily, claudeIdentityReference } from '@ptah-extension/agent-sdk';
 
 /**
- * Account class (decisions.md D13). `P`: a personal Pro/Max/Ultra claude.ai login
- * with no policy or foreign key source. `O`: every other signed-in result.
- * Class O is never certified for a named run.
+ * Account class (decisions.md D13). `P`: a personal claude.ai login with no
+ * policy or foreign key source whose plan is Pro/Max/Ultra or not recorded yet
+ * (`subscriptionType` null or absent: a fresh `claude auth login` records the
+ * plan only during a later full session). `O`: every other signed-in result,
+ * a team, enterprise, API or unknown plan word included. Class O is never
+ * certified for a named run.
  */
 export type ClaudeAccountClass = 'P' | 'O';
 
@@ -58,9 +61,13 @@ function normalizeDirectory(directory: string, platform: NodeJS.Platform): strin
  */
 function isPersonalClass(status: Record<string, unknown>): boolean {
   if (status['authMethod'] !== 'claude.ai' || status['apiProvider'] !== 'firstParty') return false;
+  // A missing plan is unknown, not an org plan; any value that is not a string is refused.
   const subscription = status['subscriptionType'];
-  const family = claudeSubscriptionFamily(typeof subscription === 'string' ? subscription : undefined);
-  if (family !== 'pro' && family !== 'max' && family !== 'ultra') return false;
+  if (subscription !== undefined && subscription !== null) {
+    if (typeof subscription !== 'string') return false;
+    const family = claudeSubscriptionFamily(subscription);
+    if (family !== 'pro' && family !== 'max' && family !== 'ultra') return false;
+  }
   if (status['forcedLoginMethod'] != null && status['forcedLoginMethod'] !== 'claudeai') return false;
   if (status['allowedProviders'] != null) return false;
   if (has(status, 'apiKeySource') && status['apiKeySource'] !== 'none') return false;

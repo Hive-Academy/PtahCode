@@ -21,6 +21,7 @@ import {
   type ActiveAuth,
   type PlanCredentialResolution,
 } from '@ptah-extension/auth-providers';
+import type { ClaudeUsageProfileRoots } from '@ptah-extension/auth-providers-tokens';
 import {
   LIMIT_LOOKUP_DEADLINE_MS,
   type CliDetectionResult,
@@ -32,6 +33,7 @@ import {
   type DiscoveredPlanOwner,
   type DiscoveryLedger,
   type DiscoveryOwnerSource,
+  type DiscoverySessions,
 } from './plan-limit-owner-discovery.service';
 
 const ref = (
@@ -86,7 +88,11 @@ interface Harness {
   routes: Map<string, 'native' | 'proxy'>;
 }
 
-function createHarness(active: ActiveAuth): Harness {
+function createHarness(
+  active: ActiveAuth,
+  usageProfiles?: Pick<ClaudeUsageProfileRoots, 'listSignedInAccounts'>,
+  sessions?: DiscoverySessions,
+): Harness {
   const logger = createMockLogger();
   const owners = {
     ownerForProviderKey: jest.fn(async (id: string) =>
@@ -125,6 +131,8 @@ function createHarness(active: ActiveAuth): Harness {
     activeAuth,
     detection,
     agents,
+    sessions,
+    usageProfiles,
   );
   return {
     service,
@@ -155,6 +163,143 @@ const THIRD_PARTY = (providerId: string): ActiveAuth => ({
 });
 
 describe('PlanLimitOwnerDiscoveryService', () => {
+  const storedAccount = {
+    profileId: 'profile-fixture',
+    canonicalConfigDir: '/fixture/usage',
+    identityReference: 'ab'.repeat(32),
+  };
+  const storedOwnerKey = 'anthropic#account:abababababababab';
+
+  it('reads each stored named account without a session and skips malformed references', async () => {
+    const second = {
+      profileId: 'profile-fixture-2',
+      canonicalConfigDir: '/fixture/usage-2',
+      identityReference: 'cd'.repeat(32),
+    };
+    const h = createHarness(CLAUDE_CLI, {
+      listSignedInAccounts: async () => [
+        storedAccount,
+        { ...second, identityReference: 'malformed' },
+        second,
+      ],
+    });
+
+    const entries = await h.service.discoverTargets();
+    expect(entries.filter((entry) => entry.origin === 'named-account')).toEqual([
+      {
+        kind: 'read',
+        origin: 'named-account',
+        target: {
+          providerId: 'anthropic',
+          ownerRef: quotaOwnerRefFromKey(storedOwnerKey),
+          claudeUsageDir: {
+            kind: 'stored-profile-usage',
+            profileId: storedAccount.profileId,
+            canonicalConfigDir: storedAccount.canonicalConfigDir,
+          },
+        },
+      },
+      {
+        kind: 'read',
+        origin: 'named-account',
+        target: {
+          providerId: 'anthropic',
+          ownerRef: quotaOwnerRefFromKey('anthropic#account:cdcdcdcdcdcdcdcd'),
+          claudeUsageDir: {
+            kind: 'stored-profile-usage',
+            profileId: second.profileId,
+            canonicalConfigDir: second.canonicalConfigDir,
+          },
+        },
+      },
+    ]);
+    expect(h.owners.ownerForSession).not.toHaveBeenCalled();
+  });
+
+  it('discovers the same ambient owner with an empty profile list as with no port', async () => {
+    const absent = createHarness(CLAUDE_CLI);
+    const empty = createHarness(CLAUDE_CLI, { listSignedInAccounts: async () => [] });
+    const request = { selectedProviderId: 'claude-cli', sessionIds: ['ambient'] };
+    for (const h of [absent, empty]) h.routes.set('ambient', 'native');
+
+    const entries = await absent.service.discoverTargets(request);
+    expect([...entries]).toEqual([
+      {
+        kind: 'read',
+        origin: 'selected-provider',
+        target: {
+          providerId: 'anthropic',
+          ownerRef: CLAUDE_A,
+          sessionHandle: { kind: 'session', sessionId: 'ambient' },
+        },
+      },
+    ]);
+    expect(await empty.service.discoverTargets(request)).toEqual(entries);
+  });
+
+  it('marks the roster incomplete when the stored profile list fails', async () => {
+    const failing = createHarness(CLAUDE_CLI, {
+      listSignedInAccounts: async () => { throw new Error('store unavailable'); },
+    });
+    const empty = createHarness(CLAUDE_CLI, { listSignedInAccounts: async () => [] });
+    const request = { selectedProviderId: 'claude-cli' };
+
+    expect((await failing.service.discoverTargets(request)).discoveryIncomplete).toBe(true);
+    expect((await empty.service.discoverTargets(request)).discoveryIncomplete).toBe(false);
+  });
+
+  it('prefers the stored read to a named session entry for the same owner', async () => {
+    const record = {
+      query: {},
+      accountBinding: {
+        provider: 'claude',
+        routeFingerprint: 'fixture-route',
+        routeRevision: 1,
+        authEpoch: 1,
+      },
+    };
+    const h = createHarness(
+      CLAUDE_CLI,
+      { listSignedInAccounts: async () => [storedAccount] },
+      { find: () => record },
+    );
+    h.owners.ownerForSession.mockResolvedValue(quotaOwnerRefFromKey(storedOwnerKey));
+
+    const entries = await h.service.discoverTargets({ sessionIds: ['named'] });
+    expect(h.owners.ownerForSession).toHaveBeenCalledWith('named');
+    expect(entries.map((entry) => [ownerKeyOf(entry), entry.kind, entry.origin])).toEqual([
+      [CLAUDE_UNKNOWN.key, 'known', 'selected-provider'],
+      [storedOwnerKey, 'read', 'named-account'],
+    ]);
+  });
+
+  it('keeps the selected ambient route with no email separate from a stored account', async () => {
+    const h = createHarness(CLAUDE_CLI, {
+      listSignedInAccounts: async () => [storedAccount],
+    });
+    h.routes.set('ambient', 'native');
+    h.owners.ownerForSession.mockResolvedValue(CLAUDE_UNKNOWN);
+    h.owners.detailsFor.mockImplementation((owner) =>
+      owner === CLAUDE_UNKNOWN
+        ? { nativeClaudeRoute: true, confirmedMissingEmail: true }
+        : {},
+    );
+
+    const entries = await h.service.discoverTargets({
+      selectedProviderId: 'claude-cli',
+      sessionIds: ['ambient'],
+    });
+    expect(entries.map((entry) => [ownerKeyOf(entry), entry.origin])).toEqual([
+      [CLAUDE_UNKNOWN.key, 'selected-provider'],
+      [storedOwnerKey, 'named-account'],
+    ]);
+    expect(entries[0]).toMatchObject({
+      kind: 'read',
+      target: { sessionHandle: { kind: 'session', sessionId: 'ambient' } },
+    });
+    expect(entries[0].kind === 'read' && entries[0].target).not.toHaveProperty('claudeUsageDir');
+  });
+
   it('passes the exact resolved owner to metadata lookup and the read target', async () => {
     const h = createHarness(THIRD_PARTY('ollama-cloud'));
     const owner = { ...CLAUDE_UNKNOWN };

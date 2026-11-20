@@ -2,6 +2,7 @@
 export {
   ProviderOwnerResolver,
   accountOwnerKey,
+  claudeOwnerKeyFromIdentityReference,
   cliStoreOwnerKey,
   credentialFromHeaders,
   credentialOwnerKey,
@@ -41,6 +42,7 @@ export {
 export { snapshotWindowsForStatus } from './plan-snapshot-windows';
 // Reader contracts
 export type {
+  ClaudeUsageDirectory,
   PlanCredentialRef,
   PlanOwnerTarget,
   PlanSessionHandle,

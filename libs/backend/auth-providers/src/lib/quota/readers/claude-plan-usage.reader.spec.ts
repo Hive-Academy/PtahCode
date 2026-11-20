@@ -171,6 +171,20 @@ describe('Claude plan-usage reader', () => {
     });
   });
 
+  it('reports no-open-session for a stored profile without calling the live probe', async () => {
+    const { reader, readPlanUsage } = harness(fullUsage());
+    const reading = await reader({
+      target: {
+        ...target(),
+        claudeUsageDir: { kind: 'stored-profile-usage', profileId: 'fixture', canonicalConfigDir: '/fixture' },
+      },
+      refresh: false,
+    });
+
+    expect(reading).toMatchObject({ sourceInvalid: true, unavailableReason: 'no-open-session', windows: [] });
+    expect(readPlanUsage).not.toHaveBeenCalled();
+  });
+
   it('F28: an API-key session (rate limits unavailable) is unsupported-auth', async () => {
     const { reader } = harness({
       ...fullUsage(),

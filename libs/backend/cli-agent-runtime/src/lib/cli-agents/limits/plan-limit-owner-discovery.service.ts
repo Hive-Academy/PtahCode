@@ -17,20 +17,21 @@
  *    - `ollama-cloud`, `opencode-go`, `opencode-zen` → the stored provider key.
  *    - anything else → `provider-unsupported`, never read.
  * 2. **Local CLI stores**: installed `opencode`, `antigravity`, and `grok`.
- * 3. **The requested sessions' owners**, from the resolver's session route.
+ * 3. **Stored named Claude accounts**, read from their usage directories.
+ * 4. **The requested sessions' owners**, from the resolver's session route.
  *    A session admitted on a named Claude account is read only from its own
  *    query, and only while that session still holds the same record, query
  *    and immutable binding (route, revision, auth epoch) it held when the
  *    read began; a late answer from a replaced query is discarded and the
  *    owner stays unknown for that route and session. Discovery holds no
  *    certified route for such a session, so its card lists the proved owner
- *    with ledger evidence and "no open session": it is never read through
- *    another query, and its failed proof never becomes a known owner.
- * 4. **Lane owners from detection**: installed `codex`, and enabled Ptah CLI
+ *    with ledger evidence and "no open session" when no earlier source
+ *    listed it. A failed proof stays unresolved for that session.
+ * 5. **Lane owners from detection**: installed `codex`, and enabled Ptah CLI
  *    agents on Ollama Cloud (Glm included), each read with its own key. A
  *    missing key is still listed and reads `unsupported-config`; a
  *    placeholder reads `unsupported-auth`; neither reaches the network.
- * 5. **Ledger-only owners**: the view's `ownerKeys` (runs that recorded an
+ * 6. **Ledger-only owners**: the view's `ownerKeys` (runs that recorded an
  *    owner), then owners with active evidence. Each is listed only when no
  *    live source above named it, from ledger evidence alone, with no read —
  *    so an old account is never read as, or shown as, the current one. The
@@ -64,6 +65,7 @@ import {
 } from '@ptah-extension/agent-sdk';
 import {
   AUTH_PROVIDERS_TOKENS,
+  claudeOwnerKeyFromIdentityReference,
   quotaOwnerRefFromKey,
   resolveEffectiveAuthRoute,
   unknownOwnerKey,
@@ -74,6 +76,7 @@ import {
   type PlanOwnerTarget,
   type ProviderOwnerResolver,
 } from '@ptah-extension/auth-providers';
+import type { ClaudeUsageProfileRoots } from '@ptah-extension/auth-providers-tokens';
 import {
   ANTHROPIC_DIRECT_PROVIDER_ID,
   SLOW_LIMIT_LOOKUP_DEADLINE_MS,
@@ -102,6 +105,7 @@ import {
 export type PlanOwnerOrigin =
   | 'selected-provider'
   | 'cli-store'
+  | 'named-account'
   | 'session'
   | 'lane'
   | 'owner-key'
@@ -199,7 +203,7 @@ export class PlanLimitOwnerDiscoveryService {
   private completedCodexHomeOwner: QuotaOwnerRef | undefined;
   private codexHomeOwnerInFlight: Promise<QuotaOwnerRef> | null = null;
   private retainNextCodexHomeOwner = false;
-  /** Entries named by a session on a named Claude account. */
+  /** Entries from a named Claude account or its session. */
   private readonly namedEntries = new WeakSet<DiscoveredPlanOwner>();
 
   constructor(
@@ -221,6 +225,8 @@ export class PlanLimitOwnerDiscoveryService {
     // none, no session can carry a named-account binding.
     @inject(SDK_TOKENS.SDK_SESSION_LIFECYCLE_MANAGER, { isOptional: true })
     private readonly sessionRecords?: DiscoverySessions,
+    @inject(AUTH_PROVIDERS_TOKENS.SDK_CLAUDE_USAGE_PROFILE_ROOTS, { isOptional: true })
+    private readonly usageProfiles?: Pick<ClaudeUsageProfileRoots, 'listSignedInAccounts'>,
   ) {}
 
   /** The owners to show, deduplicated by owner key. Never rejects. */
@@ -249,6 +255,14 @@ export class PlanLimitOwnerDiscoveryService {
       SLOW_LIMIT_LOOKUP_DEADLINE_MS,
       deadlineAt,
     );
+    // Kept apart so a failed or late profile read marks the roster incomplete.
+    const named = this.fromSource(
+      'named-account',
+      () => this.namedAccounts(),
+      undefined,
+      LIMIT_LOOKUP_DEADLINE_MS,
+      deadlineAt,
+    );
     const sources: Array<
       Promise<ReadonlyArray<DiscoveredPlanOwner | undefined> | undefined>
     > = [
@@ -274,6 +288,7 @@ export class PlanLimitOwnerDiscoveryService {
           deadlineAt,
         ),
       ),
+      named,
       this.fromSource(
         'session',
         () => this.sessions(sessionIds),
@@ -354,7 +369,9 @@ export class PlanLimitOwnerDiscoveryService {
     // A timed-out detection keeps running in the detection service. Tell the
     // caller this roster needs another pull once its shared promise settles.
     return Object.assign(visible, {
-      discoveryIncomplete: (await detected) === undefined,
+      discoveryIncomplete:
+        (await detected) === undefined ||
+        (this.usageProfiles !== undefined && (await named) === undefined),
     });
   }
 
@@ -468,6 +485,23 @@ export class PlanLimitOwnerDiscoveryService {
       entries.push(
         this.entryFor(this.owners.ownerForCliStore('grok'), 'cli-store'),
       );
+    }
+    return entries;
+  }
+
+  private async namedAccounts(): Promise<DiscoveredPlanOwner[]> {
+    const accounts = (await this.usageProfiles?.listSignedInAccounts()) ?? [];
+    const entries: DiscoveredPlanOwner[] = [];
+    for (const { profileId, canonicalConfigDir, identityReference } of accounts) {
+      const key = claudeOwnerKeyFromIdentityReference(identityReference);
+      if (key === null) continue;
+      const entry = this.entryFor(quotaOwnerRefFromKey(key), 'named-account', {
+        claudeUsageDir: { kind: 'stored-profile-usage', profileId, canonicalConfigDir },
+      });
+      if (entry) {
+        this.namedEntries.add(entry);
+        entries.push(entry);
+      }
     }
     return entries;
   }

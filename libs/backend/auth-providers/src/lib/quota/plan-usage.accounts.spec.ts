@@ -142,7 +142,7 @@ describe('Claude owner cache and source handles', () => {
   });
 
   it('keeps unknown owners unavailable and never chooses an unrelated query', async () => {
-    const { service, readPlanUsageForRoute, oauthReader } = harness();
+    const { service, readPlanUsage, readPlanUsageForRoute, oauthReader } = harness();
     const unknown = {
       ...target(),
       ownerRef: quotaOwnerRefFromKey(unknownOwnerKey('anthropic', 'run')),
@@ -150,13 +150,17 @@ describe('Claude owner cache and source handles', () => {
     expect((await service.getOwnerSnapshot(unknown)).status).toBe(
       'service-unavailable',
     );
-    const missing = await service.getOwnerSnapshot({
+    expect(oauthReader).not.toHaveBeenCalled();
+    const sessionless = {
       ...target(),
       sessionHandle: undefined,
-    });
+    };
+    const missing = await service.getOwnerSnapshot(sessionless);
     expect(missing.unavailableReason).toBe('no-open-session');
+    expect(readPlanUsage).not.toHaveBeenCalled();
     expect(readPlanUsageForRoute).not.toHaveBeenCalled();
-    expect(oauthReader).not.toHaveBeenCalled();
+    expect(oauthReader).toHaveBeenCalledTimes(1);
+    expect(oauthReader).toHaveBeenCalledWith(expect.objectContaining({ target: sessionless }));
   });
 
   it('retains ambient selection and its cached reading', async () => {

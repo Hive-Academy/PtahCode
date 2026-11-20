@@ -15,6 +15,7 @@ import type { Logger } from '@ptah-extension/vscode-core';
 import type {
   ActiveAuth,
   ClaudeAccountInfo,
+  ClaudeUsageDirectory,
 } from '@ptah-extension/auth-providers';
 import type { ClaudeAccountNamedRoute } from '@ptah-extension/auth-providers-tokens';
 import type { PtahCliSummary, QuotaOwnerRef } from '@ptah-extension/shared';
@@ -116,25 +117,47 @@ const keyOf = (entry: DiscoveredPlanOwner): string =>
 
 describe('planOwnerRead on a named Claude source', () => {
   const owner = claudeOwner(ALICE, 'unused');
+  const claudeUsageDir: ClaudeUsageDirectory = {
+    kind: 'stored-profile-usage',
+    profileId: 'profile-fixture',
+    canonicalConfigDir: '/fixture/usage',
+  };
+
+  it('reads a stored account from a copy of its usage directory without a session', () => {
+    const plan = planOwnerRead(owner, {
+      claudeUsageDir,
+      claudeRoute: route('fp-a'),
+    });
+    expect(plan).toEqual({
+      kind: 'read',
+      target: { providerId: 'anthropic', ownerRef: owner, claudeUsageDir },
+    });
+    expect(plan?.kind === 'read' && plan.target.claudeUsageDir).not.toBe(claudeUsageDir);
+  });
+
+  it('does not use a stored directory for an unverified owner', () => {
+    expect(planOwnerRead(claudeOwner(null, 'unused'), { claudeUsageDir })).toEqual(
+      NO_OPEN_SESSION,
+    );
+  });
 
   it('reads only through its own session and carries a copy of the route', () => {
     const named = route('fp-a');
-    const plan = planOwnerRead(owner, { sessionId: 's-1', claudeRoute: named });
+    const plan = planOwnerRead(owner, { sessionId: 's-1', claudeRoute: named, claudeUsageDir });
     expect(plan).toEqual({
       kind: 'read',
-      target: expect.objectContaining({
+      target: {
         providerId: 'anthropic',
+        ownerRef: owner,
         sessionHandle: { kind: 'session', sessionId: 's-1' },
-        claudeRoute: expect.objectContaining({
-          routeFingerprint: 'fp-a',
-          authEpoch: 1,
-        }),
-      }),
+        claudeRoute: named,
+      },
     });
     expect(plan?.kind === 'read' && plan.target.claudeRoute).not.toBe(named);
   });
 
   it('is unavailable without a matching session; no other query stands in', () => {
+    expect(planOwnerRead(owner)).toEqual(NO_OPEN_SESSION);
     expect(planOwnerRead(owner, { claudeRoute: route('fp-a') })).toEqual(
       NO_OPEN_SESSION,
     );

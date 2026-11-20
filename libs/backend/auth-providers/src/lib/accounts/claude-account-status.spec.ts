@@ -89,6 +89,14 @@ describe('parseClaudeAccountStatus', () => {
       expect(parse(signedIn({ subscriptionType }))).toMatchObject({ loggedIn: true, accountClass: 'P' });
     });
 
+    // A fresh `claude auth login` stores no plan; the CLI records it during a later session.
+    it.each<[string, Record<string, unknown>]>([
+      ['null subscription', signedIn({ subscriptionType: null, planTier: 'other' })],
+      ['missing subscription', without(signedIn(), 'subscriptionType')],
+    ])('classifies a %s with every other personal field as P', (_label, status) => {
+      expect(parse(status)).toMatchObject({ loggedIn: true, accountClass: 'P' });
+    });
+
     it('classifies max with orgId null and orgName null as P', () => {
       expect(parse(signedIn({ orgId: null, orgName: null }))).toMatchObject({ accountClass: 'P' });
     });
@@ -125,8 +133,15 @@ describe('parseClaudeAccountStatus', () => {
     it.each<[string, Record<string, unknown>]>([
       ['team', signedIn({ subscriptionType: 'team' })],
       ['enterprise', signedIn({ subscriptionType: 'enterprise' })],
-      ['null subscription', signedIn({ subscriptionType: null })],
-      ['missing subscription', without(signedIn(), 'subscriptionType')],
+      ['api', signedIn({ subscriptionType: 'api' })],
+      ['an unknown plan word', signedIn({ subscriptionType: 'other' })],
+      ['a non-string subscription', signedIn({ subscriptionType: 20 })],
+      ['null subscription + forcedLoginMethod console', signedIn({ subscriptionType: null, forcedLoginMethod: 'console' })],
+      ['null subscription + allowedProviders', signedIn({ subscriptionType: null, allowedProviders: ['firstParty'] })],
+      ['null subscription + apiKeySource apiKeyHelper', signedIn({ subscriptionType: null, apiKeySource: 'apiKeyHelper' })],
+      ['null subscription + apiProvider bedrock', signedIn({ subscriptionType: null, apiProvider: 'bedrock' })],
+      ['null subscription + authMethod console', signedIn({ subscriptionType: null, authMethod: 'console' })],
+      ['null subscription + empty email', signedIn({ subscriptionType: null, email: '  ' })],
       ['claude_max', signedIn({ subscriptionType: 'claude_max' })],
       ['maximum', signedIn({ subscriptionType: 'maximum' })],
       ['promax', signedIn({ subscriptionType: 'promax' })],

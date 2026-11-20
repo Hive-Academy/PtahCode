@@ -169,13 +169,14 @@ export class PlanUsageService {
   private cacheHits = 0;
   private flightJoins = 0;
   private flightStarts = 0;
-  private readonly claudeOauthFailures = new Map<string, { until: number; rateLimited: boolean }>();
+  private readonly claudeOauthFailures = new Map<string, { until: number; rateLimited: boolean; reading?: PlanUsageReading }>();
 
-  private recordClaudeOauthFailure(ownerKey: string, retryAfterMs?: number): void {
+  private recordClaudeOauthFailure(ownerKey: string, retryAfterMs?: number, reading?: PlanUsageReading): void {
     this.claudeOauthFailures.delete(ownerKey);
     this.claudeOauthFailures.set(ownerKey, {
       until: this.now() + (retryAfterMs ?? 60_000),
       rateLimited: retryAfterMs !== undefined,
+      ...(reading && { reading }),
     });
     if (this.claudeOauthFailures.size > PLAN_USAGE_MAX_OWNERS) {
       const oldest = this.claudeOauthFailures.keys().next().value;
@@ -204,11 +205,18 @@ export class PlanUsageService {
     this.readers = {
       anthropic: async (request) => {
         const live = await claudeLiveReader(request);
-        if (live.unavailableReason !== 'no-open-session' || request.target.claudeRoute?.kind === 'named' || request.target.ownerRef.identityKind !== 'account')
+        // A named route falls back too: the OAuth reader reads only that route's own directory.
+        if (live.unavailableReason !== 'no-open-session' || request.target.ownerRef.identityKind !== 'account')
           return live;
         const ownerKey = request.target.ownerRef.key;
-        const failure = this.claudeOauthFailures.get(ownerKey);
-        if (failure && this.now() < failure.until && (failure.rateLimited || !request.refresh)) return live;
+        // A stored-directory target never has a session: its OAuth answer is the reading, not "no open session".
+        const usageDir = request.target.claudeUsageDir;
+        const sessionless = !!usageDir;
+        // Failures belong to one source: another directory of the same account keeps its own cooldown.
+        const failureKey = usageDir ? JSON.stringify(['usage-dir', ownerKey, usageDir.profileId]) : ownerKey;
+        const failure = this.claudeOauthFailures.get(failureKey);
+        if (failure && this.now() < failure.until && (failure.rateLimited || !request.refresh))
+          return sessionless && failure.reading ? failure.reading : live;
         try {
           const oauth = await claudeOauthReader(request);
           if (request.signal?.aborted) return live;
@@ -217,20 +225,21 @@ export class PlanUsageService {
             // The cooldown stops a re-read on each snapshot.
             this.cache.delete(ownerKey);
             this.failingSince.delete(ownerKey);
-            this.recordClaudeOauthFailure(ownerKey, oauth.retryAfterMs);
+            this.recordClaudeOauthFailure(failureKey, oauth.retryAfterMs, oauth);
             return oauth;
           }
           if (oauth.status === 'available' && oauth.windows.length > 0) {
-            this.claudeOauthFailures.delete(ownerKey);
+            this.claudeOauthFailures.delete(failureKey);
             return oauth;
           }
-          this.recordClaudeOauthFailure(ownerKey, oauth.retryAfterMs);
-          return live;
+          this.recordClaudeOauthFailure(failureKey, oauth.retryAfterMs, oauth);
+          return sessionless ? oauth : live;
         } catch (error: unknown) {
           if (request.signal?.aborted) return live;
-          this.recordClaudeOauthFailure(ownerKey);
+          const failed: PlanUsageReading = { status: 'service-unavailable', statusReason: 'cli-unavailable', windowSetEstablished: false, windows: [] };
+          this.recordClaudeOauthFailure(failureKey, undefined, failed);
           logger.warn('[PlanUsage] Claude OAuth source failed', { reason: error instanceof Error ? error.name : 'invalid' });
-          return live;
+          return sessionless ? failed : live;
         }
       },
       'openai-codex': createCodexPlanUsageReader(codexUsage, now),
@@ -265,6 +274,7 @@ export class PlanUsageService {
         sessionHandle: { ...target.sessionHandle },
       }),
       ...(target.claudeRoute && { claudeRoute: { ...target.claudeRoute } }),
+      ...(target.claudeUsageDir && { claudeUsageDir: { ...target.claudeUsageDir } }),
     };
     const key = target.ownerRef.key;
     const cached = this.cache.get(key);
@@ -667,5 +677,7 @@ function flightKey(target: PlanOwnerTarget): string {
         route.runId,
         target.sessionHandle?.sessionId,
       ])
-    : target.ownerRef.key;
+    : target.claudeUsageDir
+      ? JSON.stringify(['usage-dir', target.ownerRef.key, target.claudeUsageDir.profileId])
+      : target.ownerRef.key;
 }
