@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_2285_a3d1
-status: in_progress
+status: in_review
 type: DEVOPS
 title: Migrate Nx to the latest version and update outdated packages
 depends_on: []
