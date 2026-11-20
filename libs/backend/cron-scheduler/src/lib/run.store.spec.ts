@@ -73,7 +73,30 @@ class FakeJobRunsDatabase {
             status: 'pending',
             result_summary: null,
             error_message: null,
+            session_id: null,
           });
+          return { changes: 1, lastInsertRowid: 0 };
+        },
+        get: () => undefined,
+        all: () => [],
+        iterate: () => [][Symbol.iterator](),
+      };
+    }
+
+    // setSessionId — `WHERE id = ? AND session_id IS NULL`, so only the first
+    // write for a run lands.
+    if (/UPDATE job_runs SET session_id/i.test(sql)) {
+      const writeOnce = /session_id IS NULL/i.test(sql);
+      return {
+        run: (...params: unknown[]) => {
+          const [sessionId, id] = params;
+          const row = rows.find(
+            (candidate) =>
+              candidate.id === id &&
+              (!writeOnce || candidate.session_id === null),
+          );
+          if (!row) return { changes: 0, lastInsertRowid: 0 };
+          row.session_id = sessionId;
           return { changes: 1, lastInsertRowid: 0 };
         },
         get: () => undefined,
@@ -190,6 +213,57 @@ describe('RunStore.tryClaim', () => {
       expect((thrown as Error).message).toBe(`sqlite failure: ${code}`);
       expect((thrown as { code?: unknown }).code).toBe(code);
     }
+  });
+});
+
+/**
+ * `job_runs.session_id` links a prompt run to the SDK session that executes
+ * it. The stream can report the session id more than once, so the write is
+ * guarded in SQL: the first id stays.
+ */
+describe('RunStore.setSessionId', () => {
+  it('starts a new run without a session id', () => {
+    const { store } = buildStore();
+
+    const run = store.tryClaim(JOB_ID, 1_770_000_000_000);
+
+    expect(run.sessionId).toBeNull();
+    expect(store.latestForJob(JOB_ID)?.sessionId).toBeNull();
+  });
+
+  it('writes the session id and returns it on read', () => {
+    const { store } = buildStore();
+    const run = store.tryClaim(JOB_ID, 1_770_000_000_000);
+
+    store.setSessionId(run.id, 'session-first');
+
+    expect(store.latestForJob(JOB_ID)?.sessionId).toBe('session-first');
+    expect(store.list(JOB_ID).map((row) => row.sessionId)).toEqual([
+      'session-first',
+    ]);
+  });
+
+  it('keeps the first session id when called again with another id', () => {
+    const { store } = buildStore();
+    const run = store.tryClaim(JOB_ID, 1_770_000_000_000);
+    store.setSessionId(run.id, 'session-first');
+
+    store.setSessionId(run.id, 'session-second');
+
+    expect(store.latestForJob(JOB_ID)?.sessionId).toBe('session-first');
+  });
+
+  it('does not throw for an unknown run id and leaves other runs alone', () => {
+    const { store } = buildStore();
+    store.tryClaim(JOB_ID, 1_770_000_000_000);
+    // A run id minted against another database: valid shape, no row here.
+    const unknownRunId = buildStore().store.tryClaim(
+      JOB_ID,
+      1_770_000_000_000,
+    ).id;
+
+    expect(() => store.setSessionId(unknownRunId, 'session-x')).not.toThrow();
+    expect(store.latestForJob(JOB_ID)?.sessionId).toBeNull();
   });
 });
 

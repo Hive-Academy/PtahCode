@@ -112,6 +112,11 @@ import {
 // Imported from the builder file, not the barrel: only this injection site
 // names the reader shape.
 import type { TaskEndRunReaderLike } from './namespace-builders/tasks-namespace.builder';
+import { buildCronNamespace } from './namespace-builders/cron-namespace.builder';
+import {
+  CRON_TOKENS,
+  type CronJobService,
+} from '@ptah-extension/cron-scheduler';
 import type { TaskCloseOutServiceLike } from './namespace-builders/task-close-out.namespace';
 import type {
   CallerWorktreeRecord,
@@ -298,9 +303,7 @@ interface SdkSessionLifecycleManagerLike {
   getActiveSessionIds(): string[];
   getActiveSessionWorkspace(): string | undefined;
   getSessionWorkspace(idOrTabId: string): string | undefined;
-  find(
-    id: string,
-  ):
+  find(id: string):
     | {
         realSessionId: string | null;
         permissionLevel?: 'ask' | 'plan' | 'auto-edit' | 'yolo';
@@ -613,7 +616,7 @@ export class PtahAPIBuilder {
     private readonly taskCloseOutService?: TaskCloseOutServiceLike,
   ) {
     diagnosticsCacheInvalidator.start();
-    this.logger.info('PtahAPIBuilder initialized with 22 namespaces');
+    this.logger.info('PtahAPIBuilder initialized with 23 namespaces');
   }
 
   /**
@@ -771,7 +774,10 @@ export class PtahAPIBuilder {
             try {
               const rec =
                 this.sdkSessionLifecycleManager?.find(tabIdOrSessionId);
-              return rec?.realSessionId ?? this.resolveCodexCallerId(tabIdOrSessionId);
+              return (
+                rec?.realSessionId ??
+                this.resolveCodexCallerId(tabIdOrSessionId)
+              );
             } catch {
               return this.resolveCodexCallerId(tabIdOrSessionId);
             }
@@ -877,8 +883,14 @@ export class PtahAPIBuilder {
         return buildRouteNamespace({
           agent: builtAgent,
           childSession: {
-            canStart: () => this.resolveSessionSpawner()?.canStart(this.resolveChildSessionCallerId()) ??
-              { ok: false, code: 'chat-runtime-unavailable', reason: 'session spawner unavailable' },
+            canStart: () =>
+              this.resolveSessionSpawner()?.canStart(
+                this.resolveChildSessionCallerId(),
+              ) ?? {
+                ok: false,
+                code: 'chat-runtime-unavailable',
+                reason: 'session spawner unavailable',
+              },
           },
           container: this.container,
           hasIDECapabilities: this.ideCapabilities !== undefined,
@@ -968,6 +980,16 @@ export class PtahAPIBuilder {
               false,
             ) === true,
           logger: this.logger,
+        }),
+      ),
+      cron: this.buildNamespaceSafe('cron', () =>
+        buildCronNamespace({
+          getService: () => this.resolveCronJobService(),
+          // The caller id can be a tab id; a job records the SDK session.
+          getSessionId: () => this.resolveCallerSdkSessionId(),
+          // Not `getWorkspaceRoot()`: its home-directory fallback must never
+          // become the workspace of a scheduled job.
+          getWorkspaceRoot: () => this.resolveSessionWorkspaceRoot(),
         }),
       ),
       sessionOrganization: this.buildNamespaceSafe('sessionOrganization', () =>
@@ -1355,6 +1377,18 @@ export class PtahAPIBuilder {
     const container = this.container;
     if (!container?.isRegistered(token, true)) return undefined;
     return container.resolve<ISessionSpawner>(token);
+  }
+
+  /**
+   * The cron job service (issue #1400), resolved on EVERY call for the same
+   * reason as `resolveSessionSpawner`. `undefined` when the host never
+   * registered the scheduler; the cron namespace turns that into a refusal.
+   */
+  private resolveCronJobService(): CronJobService | undefined {
+    const token = CRON_TOKENS.CRON_JOB_SERVICE;
+    const container = this.container;
+    if (!container?.isRegistered(token, true)) return undefined;
+    return container.resolve<CronJobService>(token);
   }
 
   /**

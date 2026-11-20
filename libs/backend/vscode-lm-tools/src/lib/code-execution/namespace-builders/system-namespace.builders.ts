@@ -59,6 +59,7 @@ AGENT: ptah.agent.* (CLI agent orchestration - spawn, monitor, message, report)
 MEMORY/CORPUS: ptah.memory.* (search/list memories), ptah.corpus.* (build/list/rebuild/prime knowledge boards)
 HARNESS: ptah.harness.* (skill + MCP discovery, install, and proposeConfig)
 TASKS: ptah.tasks.* (task specs: create, update, get, paged list, check)
+CRON: ptah.cron.* (scheduled jobs: list, get, create, update, toggle, delete, runNow, runs, nextFire)
 SESSION ORGANIZATION: ptah.sessionOrganization.* (link the calling session to a task)
 DASHBOARD: ptah.dashboard.* (propose a declarative dashboard spec to the surface)
 SURFACE: ptah.surface.* (create, replace, patch, delete and read scoped surface state)
@@ -141,6 +142,37 @@ and store nothing. Anonymous patch/delete return 'surface state unavailable for
 this caller'; anonymous reads return 'no surface state for this caller'. A
 missing store returns 'surface state unavailable on this host'. v1 surfaces
 (v1:<specId>) are readable here but managed by ptah_dashboard_propose_spec.`,
+
+  cron: `ptah.cron - Scheduled jobs (the Schedules page)
+
+Also exposed as MCP tools: ptah_cron_list, ptah_cron_get, ptah_cron_create,
+ptah_cron_update, ptah_cron_toggle, ptah_cron_delete, ptah_cron_run_now,
+ptah_cron_runs, ptah_cron_next_fire. Inside execute_code only the read methods
+(list, get, runs, nextFire) work. create, update, toggle, delete and runNow
+refuse here: call their ptah_cron_* tools, where the user approves each call.
+
+A job runs its prompt as a new agent session on a cron schedule, with nobody
+watching. Write the prompt as a complete task. Every method returns
+{ status: 'ok', ... } or { status: 'refused', reason, field? }.
+
+- ptah.cron.list({ workspaceRoot?, enabledOnly? }) - { jobs } with id, name,
+    cronExpression, timezone, enabled, workspaceRoot, a prompt preview,
+    nextFire, lastRunAt, lastRunStatus and createdBy.
+- ptah.cron.get({ id }) - { job } with the full prompt.
+- ptah.cron.create({ name, cronExpression, prompt, workspaceRoot?, timezone?,
+    enabled? }) - { id, nextFire, job }. workspaceRoot defaults to the
+    workspace of the calling session; timezone defaults to UTC.
+- ptah.cron.update({ id, name?, cronExpression?, prompt?, workspaceRoot?,
+    timezone?, enabled? }) - only the fields you send change.
+- ptah.cron.toggle({ id, enabled }) / ptah.cron.delete({ id })
+- ptah.cron.runNow({ id }) - { run }; read the result later with runs.
+- ptah.cron.runs({ id, limit? }) - newest first: status, scheduledFor,
+    startedAt, endedAt, resultSummary, errorMessage, sessionId.
+- ptah.cron.nextFire({ id }) or ({ cronExpression, timezone?, count? }) -
+    { nextFire: [ISO time, ...] }; use it to check an expression first.
+
+Times are ISO 8601 strings. cronExpression has 5 fields
+(minute hour day-of-month month day-of-week).`,
 
   tasks: `ptah.tasks - Task specs under .ptah/specs/
 

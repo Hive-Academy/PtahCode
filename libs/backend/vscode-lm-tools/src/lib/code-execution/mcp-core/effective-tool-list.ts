@@ -1,20 +1,91 @@
-import type { McpCallerBinding, McpCallerCapability } from '@ptah-extension/platform-core';
+import type {
+  McpCallerBinding,
+  McpCallerCapability,
+} from '@ptah-extension/platform-core';
 import type { McpToolProfile } from '@ptah-extension/shared';
 import type { MCPToolDefinition } from '../types';
 import type { McpCaller } from './mcp-caller';
-import { isToolPermitted } from './mcp-caller-policy';
+import { isCronWriteDenied, isToolPermitted } from './mcp-caller-policy';
 import { applyPhaseToolFilter } from './mcp-caller-phase-filter';
 import { APPS_ONLY_TOOL_NAMES } from './mcp-tool-profile';
 
 import { buildAgentWaitTool } from './agent-wait.tool';
 import { buildRunCheckTool } from './run-check.tool';
 import { buildRunCheckWaitTool } from './run-check-wait.tool';
-import { buildExecuteCodeTool, buildApprovalPromptTool, buildWorkspaceAnalyzeTool, buildSearchFilesTool, buildGetDiagnosticsTool, buildLspReferencesTool, buildLspDefinitionsTool, buildGetDirtyFilesTool, buildCountTokensTool, buildAgentSpawnTool, buildAgentStatusTool, buildAgentReadTool, buildAgentMessageTool, buildAgentMessageStatusTool, buildAgentMessageControlTool, buildAgentMessageAckTool, buildAgentReportTool, buildAgentListTool, buildAgentStopTool, buildWebSearchTool, buildWorktreeListTool, buildWorktreeAddTool, buildWorktreeRemoveTool, buildJsonValidateTool, buildBrowserNavigateTool, buildBrowserScreenshotTool, buildBrowserEvaluateTool, buildBrowserClickTool, buildBrowserTypeTool, buildBrowserContentTool, buildBrowserNetworkTool, buildBrowserCloseTool, buildBrowserStatusTool, buildBrowserRecordStartTool, buildBrowserRecordStopTool, buildHarnessSearchSkillsTool, buildHarnessCreateSkillTool, buildHarnessSearchMcpRegistryTool, buildHarnessListInstalledMcpTool, buildHarnessInstallMcpTool, buildHarnessProposeConfigTool, buildAstAnalyzeTool, buildContextEnrichFileTool, buildGetDependentsTool, buildGetDependenciesTool, buildCodeSearchSymbolsTool, buildCodeReindexTool, buildMemorySearchTool, buildRelevanceRankFilesTool, buildProjectDetectMonorepoTool, buildGetSymbolIndexTool, buildTaskCreateTool, buildTaskUpdateTool, buildTaskGetTool, buildTaskListTool, buildTaskCheckTool } from './tool-description.builder';
+import {
+  buildExecuteCodeTool,
+  buildApprovalPromptTool,
+  buildWorkspaceAnalyzeTool,
+  buildSearchFilesTool,
+  buildGetDiagnosticsTool,
+  buildLspReferencesTool,
+  buildLspDefinitionsTool,
+  buildGetDirtyFilesTool,
+  buildCountTokensTool,
+  buildAgentSpawnTool,
+  buildAgentStatusTool,
+  buildAgentReadTool,
+  buildAgentMessageTool,
+  buildAgentMessageStatusTool,
+  buildAgentMessageControlTool,
+  buildAgentMessageAckTool,
+  buildAgentReportTool,
+  buildAgentListTool,
+  buildAgentStopTool,
+  buildWebSearchTool,
+  buildWorktreeListTool,
+  buildWorktreeAddTool,
+  buildWorktreeRemoveTool,
+  buildJsonValidateTool,
+  buildBrowserNavigateTool,
+  buildBrowserScreenshotTool,
+  buildBrowserEvaluateTool,
+  buildBrowserClickTool,
+  buildBrowserTypeTool,
+  buildBrowserContentTool,
+  buildBrowserNetworkTool,
+  buildBrowserCloseTool,
+  buildBrowserStatusTool,
+  buildBrowserRecordStartTool,
+  buildBrowserRecordStopTool,
+  buildHarnessSearchSkillsTool,
+  buildHarnessCreateSkillTool,
+  buildHarnessSearchMcpRegistryTool,
+  buildHarnessListInstalledMcpTool,
+  buildHarnessInstallMcpTool,
+  buildHarnessProposeConfigTool,
+  buildAstAnalyzeTool,
+  buildContextEnrichFileTool,
+  buildGetDependentsTool,
+  buildGetDependenciesTool,
+  buildCodeSearchSymbolsTool,
+  buildCodeReindexTool,
+  buildMemorySearchTool,
+  buildRelevanceRankFilesTool,
+  buildProjectDetectMonorepoTool,
+  buildGetSymbolIndexTool,
+  buildTaskCreateTool,
+  buildTaskUpdateTool,
+  buildTaskGetTool,
+  buildTaskListTool,
+  buildTaskCheckTool,
+} from './tool-description.builder';
 import { buildDashboardProposeSpecTool } from './dashboard-propose-spec.tool';
-import { buildSurfaceGetStateTool, buildSurfaceUpdateTool } from './surface-tools';
+import {
+  buildSurfaceGetStateTool,
+  buildSurfaceUpdateTool,
+} from './surface-tools';
 import { buildArtifactPublishTool } from './artifact-tools';
 import { buildSessionLinkTaskTool } from './session-organization-tools';
-import { buildSessionClearFinishedTool, buildSessionHandoffTool, buildSessionReadTool, buildSessionSendTool, buildSessionStartTool, buildSessionStatusTool, buildSessionStopTool } from './session-tools';
+import {
+  buildSessionClearFinishedTool,
+  buildSessionHandoffTool,
+  buildSessionReadTool,
+  buildSessionSendTool,
+  buildSessionStartTool,
+  buildSessionStatusTool,
+  buildSessionStopTool,
+} from './session-tools';
 import { lifecycleTools } from './lifecycle-tools';
 import { buildRouteDecideTool } from './route-tools';
 import { buildOutcomeReportTool } from './tools/outcome-report.tool';
@@ -33,8 +104,11 @@ export function composeEffectiveToolList(
   deps: EffectiveToolListDependencies,
 ): MCPToolDefinition[] {
   return applyPhaseToolFilter(
-    buildToolSet(caller, profile, deps).filter((tool) =>
-      isToolPermitted(tool.name, capability),
+    buildToolSet(caller, profile, deps).filter(
+      (tool) =>
+        isToolPermitted(tool.name, capability) &&
+        // Listed means callable: `tools/call` rejects these with the same test.
+        !isCronWriteDenied(tool.name, binding),
     ),
     binding,
   );
@@ -181,4 +255,3 @@ export function buildToolDefinitions(
       : []),
   ];
 }
-

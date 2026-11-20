@@ -30,6 +30,32 @@ describe('CronExpressionService', () => {
     }
   });
 
+  describe('validate — named months and weekdays', () => {
+    for (const expr of [
+      '0 9 * * MON',
+      '0 9 * * mon-fri',
+      '0 9 * * MON,WED',
+      '0 9 * * MON-SUN',
+      '0 9 * * 1-sun',
+      '0 0 1 JAN,JUL *',
+      '0 0 1 JAN-MAR/2 *',
+    ]) {
+      it(`accepts "${expr}"`, () => {
+        expect(svc.validate(expr).valid).toBe(true);
+      });
+    }
+
+    for (const expr of ['0 9 * * FOO', '0 9 * MON *', '0 9 * JAN *x']) {
+      it(`rejects "${expr}"`, () => {
+        expect(svc.validate(expr).valid).toBe(false);
+      });
+    }
+
+    it('describes a named expression without throwing', () => {
+      expect(svc.describe('0 9 * * MON-FRI')).not.toBe('');
+    });
+  });
+
   describe('validate — invalid expressions', () => {
     it('rejects expression with too few fields', () => {
       const v = svc.validate('* * * *');

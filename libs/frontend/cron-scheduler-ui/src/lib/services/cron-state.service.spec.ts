@@ -23,6 +23,8 @@ function makeJob(over: Partial<ScheduledJobDto>): ScheduledJobDto {
     updatedAt: over.updatedAt ?? 0,
     lastRunAt: over.lastRunAt ?? null,
     nextRunAt: over.nextRunAt ?? null,
+    createdBy: over.createdBy ?? { kind: 'user' },
+    lastRunStatus: over.lastRunStatus ?? null,
   };
 }
 
@@ -46,8 +48,235 @@ describe('CronStateService', () => {
   });
 
   it('defaults the scope filter to "workspace"', () => {
+    appState.workspaceInfo.set({ path: '/ws-a' });
     const service = TestBed.inject(CronStateService);
     expect(service.scopeFilter()).toBe('workspace');
+  });
+
+  it('reads the scope as "all" while no workspace is open', () => {
+    const service = TestBed.inject(CronStateService);
+    expect(service.scopeFilter()).toBe('all');
+    appState.workspaceInfo.set({ path: '/ws-a' });
+    expect(service.scopeFilter()).toBe('workspace');
+  });
+
+  it('removes a created row on a scope change when no list succeeded yet', async () => {
+    appState.workspaceInfo.set({ path: '/ws-a' });
+    const service = TestBed.inject(CronStateService);
+    rpc.list.mockRejectedValue(new Error('offline'));
+    service.setScopeFilter('all');
+    await Promise.resolve();
+    await Promise.resolve();
+    rpc.create = jest
+      .fn()
+      .mockResolvedValue({ job: makeJob({ id: 'b', workspaceRoot: '/ws-b' }) });
+    await service.create({} as never);
+    expect(service.jobs().map((j) => j.id)).toEqual(['b']);
+
+    service.setScopeFilter('workspace');
+    expect(service.jobs()).toEqual([]);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(service.jobs()).toEqual([]);
+  });
+
+  it('lists a created job only when it is in the active scope', async () => {
+    appState.workspaceInfo.set({ path: '/ws-a' });
+    const service = TestBed.inject(CronStateService);
+    rpc.list.mockResolvedValue({ jobs: [] });
+    await service.refresh();
+
+    rpc.create = jest
+      .fn()
+      .mockResolvedValueOnce({
+        job: makeJob({ id: 'b', workspaceRoot: '/ws-b' }),
+      })
+      .mockResolvedValueOnce({
+        job: makeJob({ id: 'a', workspaceRoot: '/ws-a' }),
+      });
+    // The job of another workspace is returned to the caller but not listed.
+    expect((await service.create({} as never))?.id).toBe('b');
+    expect(service.jobs()).toEqual([]);
+    // The server list decides: a refresh for the active scope starts.
+    expect(rpc.list).toHaveBeenCalledTimes(2);
+    expect(rpc.list).toHaveBeenLastCalledWith({ workspaceRoot: '/ws-a' });
+    await Promise.resolve();
+    await Promise.resolve();
+    await Promise.resolve();
+    await service.create({} as never);
+    expect(service.jobs().map((j) => j.id)).toEqual(['a']);
+  });
+
+  it('does not list a job whose create ends after a scope change', async () => {
+    appState.workspaceInfo.set({ path: '/ws-a' });
+    const service = TestBed.inject(CronStateService);
+    rpc.list.mockResolvedValue({ jobs: [] });
+    service.setScopeFilter('all');
+    await Promise.resolve();
+    await Promise.resolve();
+
+    let finish: (value: { job: ScheduledJobDto }) => void = () => undefined;
+    rpc.create = jest
+      .fn()
+      .mockReturnValue(
+        new Promise<{ job: ScheduledJobDto }>((resolve) => (finish = resolve)),
+      );
+    const pending = service.create({} as never);
+    service.setScopeFilter('workspace');
+    finish({ job: makeJob({ id: 'b', workspaceRoot: '/ws-b' }) });
+    await pending;
+    expect(service.jobs()).toEqual([]);
+  });
+
+  it('removes a job that an update moved to another workspace', async () => {
+    appState.workspaceInfo.set({ path: '/ws-a' });
+    const service = TestBed.inject(CronStateService);
+    rpc.list.mockResolvedValueOnce({
+      jobs: [makeJob({ id: 'a', workspaceRoot: '/ws-a' })],
+    });
+    await service.refresh();
+    expect(service.jobs().map((j) => j.id)).toEqual(['a']);
+
+    rpc.list.mockResolvedValue({ jobs: [] });
+    rpc.update = jest.fn().mockResolvedValue({
+      job: makeJob({ id: 'a', workspaceRoot: '/ws-b' }),
+    });
+    await service.update('a', { workspaceRoot: '/ws-b' });
+    expect(service.jobs()).toEqual([]);
+    expect(rpc.list).toHaveBeenLastCalledWith({ workspaceRoot: '/ws-a' });
+  });
+
+  it('reads the list again when an edit ends while a list is open', async () => {
+    appState.workspaceInfo.set({ path: '/ws-a' });
+    const service = TestBed.inject(CronStateService);
+    const before = makeJob({ id: 'a', workspaceRoot: '/ws-a', name: 'old' });
+    const after = makeJob({ id: 'a', workspaceRoot: '/ws-a', name: 'new' });
+    rpc.list.mockResolvedValueOnce({ jobs: [before] });
+    await service.refresh();
+
+    let finishList: (value: CronListResult) => void = () => undefined;
+    rpc.list.mockReturnValueOnce(
+      new Promise<CronListResult>((resolve) => (finishList = resolve)),
+    );
+    rpc.list.mockResolvedValueOnce({ jobs: [after] });
+    const open = service.refresh();
+    rpc.update = jest.fn().mockResolvedValue({ job: after });
+    await service.update('a', { name: 'new' });
+    expect(service.jobs()[0].name).toBe('new');
+
+    // The open list is older than the edit: its rows are not used.
+    finishList({ jobs: [before] });
+    await open;
+    expect(service.jobs()[0].name).toBe('new');
+    expect(rpc.list).toHaveBeenCalledTimes(3);
+    expect(service.loading()).toBe(false);
+  });
+
+  it('removes the rows of the previous scope before the new list arrives', async () => {
+    appState.workspaceInfo.set({ path: '/ws-a' });
+    const service = TestBed.inject(CronStateService);
+    rpc.list.mockResolvedValueOnce({
+      jobs: [makeJob({ id: 'other', workspaceRoot: '/ws-b' })],
+    });
+    service.setScopeFilter('all');
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(service.jobs().map((j) => j.id)).toEqual(['other']);
+
+    // Same scope: the rows stay while the refresh is open.
+    let resolveSame: (value: CronListResult) => void = () => undefined;
+    rpc.list.mockReturnValueOnce(
+      new Promise<CronListResult>((resolve) => (resolveSame = resolve)),
+    );
+    const same = service.refresh();
+    expect(service.jobs().map((j) => j.id)).toEqual(['other']);
+    resolveSame({ jobs: [makeJob({ id: 'other' })] });
+    await same;
+
+    // Other scope: no row of "all" shows as a row of "this workspace",
+    // and a failed request does not bring the old rows back.
+    rpc.list.mockRejectedValueOnce(new Error('offline'));
+    service.setScopeFilter('workspace');
+    expect(service.jobs()).toEqual([]);
+    expect(service.stats().total).toBe(0);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(service.jobs()).toEqual([]);
+    expect(service.error()).toBe('offline');
+  });
+
+  describe('run history of the selected job', () => {
+    type RunsResult = Awaited<ReturnType<CronRpcService['runs']>>;
+    const run = (id: string, jobId: string) =>
+      ({ id, jobId }) as unknown as RunsResult['runs'][number];
+
+    it('reports loading, loaded and error', async () => {
+      const service = TestBed.inject(CronStateService);
+      let resolve: (value: RunsResult) => void = () => undefined;
+      rpc.runs = jest
+        .fn()
+        .mockReturnValueOnce(
+          new Promise<RunsResult>((done) => (resolve = done)),
+        )
+        .mockRejectedValueOnce(new Error('no runs'));
+      expect(service.runsState()).toBe('idle');
+
+      service.select('job-1');
+      expect(service.runsState()).toBe('loading');
+      resolve({ runs: [] } as RunsResult);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(service.runsState()).toBe('loaded');
+
+      service.select('job-2');
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(service.runsState()).toBe('error');
+
+      service.select(null);
+      expect(service.runsState()).toBe('idle');
+    });
+
+    it('drops a response for a job that is no longer selected', async () => {
+      const service = TestBed.inject(CronStateService);
+      const resolvers: Array<(value: RunsResult) => void> = [];
+      rpc.runs = jest.fn(
+        () => new Promise<RunsResult>((done) => resolvers.push(done)),
+      );
+
+      service.select('job-1');
+      service.select('job-2');
+      expect(service.runs()).toEqual([]);
+      resolvers[1]({ runs: [run('r2', 'job-2')] } as RunsResult);
+      await Promise.resolve();
+      resolvers[0]({ runs: [run('r1', 'job-1')] } as RunsResult);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(service.runs().map((r) => r.id)).toEqual(['r2']);
+
+      // A response that arrives after the drawer closed is dropped too.
+      service.select('job-1');
+      service.select(null);
+      resolvers[2]({ runs: [run('r1', 'job-1')] } as RunsResult);
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(service.runs()).toEqual([]);
+      expect(service.runsState()).toBe('idle');
+    });
+  });
+
+  it('keeps the error of a failed save through a list refresh', async () => {
+    const service = TestBed.inject(CronStateService);
+    rpc.create = jest.fn().mockRejectedValue(new Error('name is taken'));
+    await service.create({} as never);
+    expect(service.saveError()).toBe('name is taken');
+
+    await service.refresh();
+    expect(service.error()).toBeNull();
+    expect(service.saveError()).toBe('name is taken');
+
+    service.clearSaveError();
+    expect(service.saveError()).toBeNull();
   });
 
   it('scopes cron:list to the active workspace root under "workspace" scope', async () => {

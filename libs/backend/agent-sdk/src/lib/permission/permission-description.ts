@@ -22,6 +22,7 @@ import {
   isExitPlanModeToolInput,
 } from '@ptah-extension/shared';
 import { isMcpTool } from './permission-tool-classifier';
+import { describeCronToolRequest } from './cron-tool-policy';
 
 /**
  * Generate human-readable description for permission request
@@ -33,6 +34,9 @@ export function generateDescription(
   toolName: string,
   input: Record<string, unknown>,
 ): string {
+  const cronDescription = describeCronToolRequest(toolName, input);
+  if (cronDescription) return cronDescription;
+
   if (isMcpTool(toolName)) {
     const parts = toolName.split('__');
     if (parts.length >= 3) {

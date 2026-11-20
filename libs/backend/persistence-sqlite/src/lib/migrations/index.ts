@@ -82,7 +82,10 @@ import { sql as sql0053MemoryBootScanFailureGeneration } from './0053_memory_boo
 import { sql as sql0054LaneOutcomeRecords } from './0054_lane_outcome_records';
 import { sql as sql0055SkillInvocationRunId } from './0055_skill_invocation_run_id';
 import { sql as sql0056SkillNullableGrades } from './0056_skill_nullable_grades';
-import { sql as sql0057DropSkillPipeline, vecSql as vecSql0057DropSkillPipeline } from './0057_drop_skill_pipeline';
+import {
+  sql as sql0057DropSkillPipeline,
+  vecSql as vecSql0057DropSkillPipeline,
+} from './0057_drop_skill_pipeline';
 import { sql as sql0058ProviderAccounts } from './0058_provider_accounts';
 import { sql as sql0059ProviderAccountSessionLinks } from './0059_provider_account_session_links';
 import { sql as sql0060ProviderAccountLeaseEpoch } from './0060_provider_account_lease_epoch';
@@ -101,6 +104,7 @@ import { sql as sql0072TaskEndHook } from './0072_task_end_hook';
 import { sql as sql0073TaskCloseOut } from './0073_task_close_out';
 import { sql as sql0074ReviewStatusSync } from './0074_review_status_sync';
 import { sql as sql0075PhaseGradeKeys } from './0075_phase_grade_keys';
+import { sql as sql0076CronJobCreator } from './0076_cron_job_creator';
 import type { SqliteDatabase } from '../sqlite-connection.service';
 
 export interface Migration {
@@ -487,7 +491,11 @@ export const MIGRATIONS: readonly Migration[] = [
     name: '0068_review_head_backoff',
     sql: sql0068ReviewHeadBackoff,
   },
-  { version: 69, name: '0069_review_attempt_dry_run', sql: sql0069ReviewAttemptDryRun },
+  {
+    version: 69,
+    name: '0069_review_attempt_dry_run',
+    sql: sql0069ReviewAttemptDryRun,
+  },
   {
     version: 70,
     name: '0070_indexing_last_run',
@@ -508,6 +516,11 @@ export const MIGRATIONS: readonly Migration[] = [
     name: '0073_task_close_out',
     sql: sql0073TaskCloseOut,
   },
-  { version: 74, name: '0074_review_status_sync', sql: sql0074ReviewStatusSync },
+  {
+    version: 74,
+    name: '0074_review_status_sync',
+    sql: sql0074ReviewStatusSync,
+  },
   { version: 75, name: '0075_phase_grade_keys', sql: sql0075PhaseGradeKeys },
+  { version: 76, name: '0076_cron_job_creator', sql: sql0076CronJobCreator },
 ];

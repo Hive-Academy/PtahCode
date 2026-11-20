@@ -1,4 +1,8 @@
-import { isToolPermitted, toolClass } from './mcp-caller-policy';
+import {
+  isCronWriteDenied,
+  isToolPermitted,
+  toolClass,
+} from './mcp-caller-policy';
 
 describe('mcp caller policy', () => {
   it('classifies read tools, execute_code, browsers, and unknown names', () => {
@@ -31,9 +35,7 @@ describe('mcp caller policy', () => {
     expect(isToolPermitted('ptah_agent_message_status', 'lane-report')).toBe(
       true,
     );
-    expect(isToolPermitted('ptah_agent_message_ack', 'lane-report')).toBe(
-      true,
-    );
+    expect(isToolPermitted('ptah_agent_message_ack', 'lane-report')).toBe(true);
     for (const name of [
       'ptah_agent_spawn',
       'ptah_agent_message',
@@ -53,11 +55,66 @@ describe('mcp caller policy', () => {
     expect(isToolPermitted('ptah_task_create', 'privileged')).toBe(true);
     expect(isToolPermitted('ptah_not_a_real_tool', 'privileged')).toBe(true);
     expect(isToolPermitted('ptah_agent_message_ack', 'privileged')).toBe(true);
-    expect(isToolPermitted('ptah_agent_message_control', 'privileged')).toBe(true);
+    expect(isToolPermitted('ptah_agent_message_control', 'privileged')).toBe(
+      true,
+    );
   });
 
   it('keeps the message write tools away from read-only callers', () => {
-    for (const name of ['ptah_agent_message', 'ptah_agent_message_control', 'ptah_agent_message_ack'])
+    for (const name of [
+      'ptah_agent_message',
+      'ptah_agent_message_control',
+      'ptah_agent_message_ack',
+    ])
       expect(isToolPermitted(name, 'read-only')).toBe(false);
+  });
+  describe('cron write tools', () => {
+    const writes = [
+      'ptah_cron_create',
+      'ptah_cron_update',
+      'ptah_cron_toggle',
+      'ptah_cron_delete',
+      'ptah_cron_run_now',
+    ];
+
+    it('allows them only for a credential that proves user approval', () => {
+      for (const name of writes) {
+        expect(
+          isCronWriteDenied(name, {
+            kind: 'session',
+            sessionId: 's',
+            capability: 'privileged',
+            cronWriteApproval: true,
+          }),
+        ).toBe(false);
+      }
+    });
+
+    it('denies them for every other caller, whatever its capability', () => {
+      const callers = [
+        undefined,
+        { kind: 'session', sessionId: 's', capability: 'privileged' },
+        { kind: 'agent', agentId: 'a', capability: 'privileged' },
+        { kind: 'internal-query', capability: 'privileged' },
+        { kind: 'workspace', capability: 'privileged' },
+      ] as const;
+      for (const name of writes) {
+        for (const binding of callers) {
+          expect(isCronWriteDenied(name, binding)).toBe(true);
+        }
+      }
+    });
+
+    it('does not gate the cron read tools or other tools', () => {
+      for (const name of [
+        'ptah_cron_list',
+        'ptah_cron_get',
+        'ptah_cron_runs',
+        'ptah_cron_next_fire',
+        'ptah_task_create',
+      ]) {
+        expect(isCronWriteDenied(name, undefined)).toBe(false);
+      }
+    });
   });
 });

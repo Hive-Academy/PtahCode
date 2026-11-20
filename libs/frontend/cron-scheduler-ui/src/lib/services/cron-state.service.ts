@@ -24,6 +24,13 @@ import { CronRpcService } from './cron-rpc.service';
 export type CronScopeFilter = 'workspace' | 'all';
 
 /**
+ * State of the `cron:runs` request of the selected job. The run history shows
+ * "no runs" only for `'loaded'`, never while a request is open or after it
+ * failed.
+ */
+export type CronRunsState = 'idle' | 'loading' | 'loaded' | 'error';
+
+/**
  * Aggregate stats derived from the current job list. The backend does not
  * yet expose a `cron:stats` handler (only nine methods are wired); we derive
  * stats client-side from the job list to keep parity with the architecture
@@ -47,13 +54,29 @@ export class CronStateService {
   private readonly _loading = signal<boolean>(false);
   private readonly _error = signal<string | null>(null);
   private readonly _scopeFilter = signal<CronScopeFilter>('workspace');
+  private readonly _runsState = signal<CronRunsState>('idle');
+  private readonly _saveError = signal<string | null>(null);
 
   public readonly jobs = this._jobs.asReadonly();
   public readonly selectedJobId = this._selectedJobId.asReadonly();
   public readonly runs = this._runs.asReadonly();
   public readonly loading = this._loading.asReadonly();
   public readonly error = this._error.asReadonly();
-  public readonly scopeFilter = this._scopeFilter.asReadonly();
+  public readonly runsState = this._runsState.asReadonly();
+  /**
+   * Error of the last `create` or `update` call. A list refresh does not
+   * change it, so the form keeps the reason of its own failed save.
+   */
+  public readonly saveError = this._saveError.asReadonly();
+  /**
+   * Scope that the list shows. With no workspace open there is nothing to
+   * filter by, so the list is global and the scope reads `'all'`.
+   */
+  public readonly scopeFilter = computed<CronScopeFilter>(() =>
+    this._scopeFilter() === 'workspace' && !this.appState.workspaceInfo()?.path
+      ? 'all'
+      : this._scopeFilter(),
+  );
 
   /**
    * Monotonic refresh token. Every {@link refresh} captures the current value;
@@ -61,6 +84,22 @@ export class CronStateService {
    * workspace A can never overwrite the view after the user switched to B.
    */
   private refreshSeq = 0;
+  /**
+   * Counts the local changes of the rows. A `cron:list` response that was
+   * open during a change can be older than it and must not replace the rows.
+   */
+  private mutationSeq = 0;
+
+  /**
+   * List params (as a key) of the result that `_jobs` holds; `null` before
+   * the first result. A refresh for other params first removes the rows, so
+   * jobs of the previous scope never show, with live actions, as results of
+   * the new one.
+   */
+  private jobsKey: string | null = null;
+
+  /** Same guard as {@link refreshSeq}, for the `cron:runs` request. */
+  private runsSeq = 0;
 
   /**
    * Workspace root the constructor effect last observed. `undefined` means "no
@@ -123,12 +162,14 @@ export class CronStateService {
   });
 
   public select(id: string | null): void {
-    this._selectedJobId.set(id);
-    if (id) {
-      void this.loadRuns(id);
-    } else {
+    if (this._selectedJobId() !== id) {
+      // Runs of the previous job must not show under the new one.
+      this.runsSeq++;
       this._runs.set([]);
+      this._runsState.set('idle');
     }
+    this._selectedJobId.set(id);
+    if (id) void this.loadRuns(id);
   }
 
   /**
@@ -143,11 +184,28 @@ export class CronStateService {
 
   public async refresh(): Promise<void> {
     const token = ++this.refreshSeq;
+    const mutations = this.mutationSeq;
+    const params = this.buildListParams();
+    const key = JSON.stringify(params);
+    // Rows stay only when the last successful list was for these params. With
+    // no successful list (`null`), a row that `create` added can be for another
+    // scope, so it goes too.
+    if (this.jobsKey !== key) {
+      this.jobsKey = null;
+      if (this._jobs().length > 0) this._jobs.set([]);
+    }
     this._loading.set(true);
     this._error.set(null);
     try {
-      const result = await this.rpc.list(this.buildListParams());
+      const result = await this.rpc.list(params);
       if (token !== this.refreshSeq) return; // stale — a newer refresh ran
+      if (mutations !== this.mutationSeq) {
+        // A save, delete or toggle ended while this list was open. The
+        // response can be older than that change, so the list is read again.
+        await this.refresh();
+        return;
+      }
+      this.jobsKey = key;
       this._jobs.set(result.jobs);
     } catch (err) {
       if (token !== this.refreshSeq) return;
@@ -162,22 +220,53 @@ export class CronStateService {
    * with a resolved workspace root filters to that path; `'all'` (or a scope
    * with no workspace open) lists globally.
    */
+  /** Local change of the rows after a write; see {@link mutationSeq}. */
+  private mutateJobs(
+    change: (jobs: readonly ScheduledJobDto[]) => ScheduledJobDto[],
+  ): void {
+    this.mutationSeq++;
+    this._jobs.update((jobs) => change(jobs));
+  }
+
   private buildListParams(): CronListParams {
     if (this._scopeFilter() !== 'workspace') return {};
     const root = this.appState.workspaceInfo()?.path;
     return root ? { workspaceRoot: root } : {};
   }
 
+  /**
+   * `true` when a saved job belongs in the listed rows. The scope is read when
+   * the response arrives, not when the request starts: it can change while the
+   * request is open. The comparison is on the path text and the server
+   * normalizes paths, so the caller reads the list again on `false` and the
+   * server list decides.
+   */
+  private inActiveScope(job: ScheduledJobDto): boolean {
+    const root = this.buildListParams().workspaceRoot;
+    return root === undefined || job.workspaceRoot === root;
+  }
+
   public async create(spec: CronCreateParams): Promise<ScheduledJobDto | null> {
     this._error.set(null);
+    this._saveError.set(null);
     try {
       const result = await this.rpc.create(spec);
-      this._jobs.update((jobs) => [...jobs, result.job]);
+      if (this.inActiveScope(result.job)) {
+        this.mutateJobs((jobs) => [...jobs, result.job]);
+      } else {
+        void this.refresh();
+      }
       return result.job;
     } catch (err) {
       this._error.set(this.toMessage(err));
+      this._saveError.set(this.toMessage(err));
       return null;
     }
+  }
+
+  /** Forget the error of the last save, for example when the form resets. */
+  public clearSaveError(): void {
+    this._saveError.set(null);
   }
 
   public async update(
@@ -185,14 +274,22 @@ export class CronStateService {
     patch: CronUpdateParams['patch'],
   ): Promise<ScheduledJobDto | null> {
     this._error.set(null);
+    this._saveError.set(null);
     try {
       const result = await this.rpc.update({ id, patch });
-      this._jobs.update((jobs) =>
-        jobs.map((j) => (j.id === result.job.id ? result.job : j)),
-      );
+      if (this.inActiveScope(result.job)) {
+        this.mutateJobs((jobs) =>
+          jobs.map((j) => (j.id === result.job.id ? result.job : j)),
+        );
+      } else {
+        // The edit moved the job out of the listed workspace.
+        this.mutateJobs((jobs) => jobs.filter((j) => j.id !== result.job.id));
+        void this.refresh();
+      }
       return result.job;
     } catch (err) {
       this._error.set(this.toMessage(err));
+      this._saveError.set(this.toMessage(err));
       return null;
     }
   }
@@ -202,10 +299,12 @@ export class CronStateService {
     try {
       const result = await this.rpc.delete({ id });
       if (result.ok) {
-        this._jobs.update((jobs) => jobs.filter((j) => j.id !== id));
+        this.mutateJobs((jobs) => jobs.filter((j) => j.id !== id));
         if (this._selectedJobId() === id) {
+          this.runsSeq++;
           this._selectedJobId.set(null);
           this._runs.set([]);
+          this._runsState.set('idle');
         }
       }
       return result.ok;
@@ -219,7 +318,7 @@ export class CronStateService {
     this._error.set(null);
     try {
       const result = await this.rpc.toggle({ id, enabled });
-      this._jobs.update((jobs) =>
+      this.mutateJobs((jobs) =>
         jobs.map((j) => (j.id === result.job.id ? result.job : j)),
       );
     } catch (err) {
@@ -231,7 +330,8 @@ export class CronStateService {
     this._error.set(null);
     try {
       const result = await this.rpc.runNow({ id });
-      if (result.run) {
+      // The history shows the selected job only.
+      if (result.run && this._selectedJobId() === id) {
         this._runs.update((runs) => [result.run as JobRunDto, ...runs]);
       }
       return result.run;
@@ -242,12 +342,23 @@ export class CronStateService {
   }
 
   public async loadRuns(id: string, limit = 50): Promise<void> {
+    const token = ++this.runsSeq;
+    // A response is for the job that was selected when the request started.
+    const current = (): boolean =>
+      token === this.runsSeq && this._selectedJobId() === id;
     this._error.set(null);
+    this._runsState.set('loading');
     try {
       const result = await this.rpc.runs({ id, limit });
+      if (!current()) return;
       this._runs.set(result.runs);
+      this._runsState.set('loaded');
     } catch (err) {
+      // degradation-audit: reported - a failure of the selected job goes to
+      // `error` and `runsState`; a response for another job is discarded.
+      if (!current()) return;
       this._error.set(this.toMessage(err));
+      this._runsState.set('error');
     }
   }
 

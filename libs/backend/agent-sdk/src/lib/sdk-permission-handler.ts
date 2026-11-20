@@ -49,6 +49,10 @@ import {
 import { ExitPlanModeService } from './permission/exit-plan-mode.service';
 import { evaluateUnattendedBash } from './permission/unattended-bash-policy';
 import { isPlanLaneAllowedPtahTool } from './permission/plan-lane-tool-policy';
+import {
+  CRON_UNATTENDED_DENY_MESSAGE,
+  isCronMutatingTool,
+} from './permission/cron-tool-policy';
 import type {
   UnattendedSessionPolicy,
   UnattendedSessionPolicyRegistry,
@@ -158,17 +162,31 @@ export type PermissionPromptLifecycleListener = (
 @injectable()
 export class SdkPermissionHandler implements ISdkPermissionHandler {
   /** Called by PreToolUse as well as canUseTool: SDK auto-allow can skip the latter. */
-  budgetSendMessageRefusal(targetName: string, sessionId: string): string | undefined {
-    const target = this.subagentRegistry.getToolCallIdByName(targetName) ?? targetName;
-    const state = this.budgetMonitor?.getAgentBudgetState(target, sessionId)
-      ?? this.budgetMonitor?.getAgentBudgetState(targetName, sessionId);
+  budgetSendMessageRefusal(
+    targetName: string,
+    sessionId: string,
+  ): string | undefined {
+    const target =
+      this.subagentRegistry.getToolCallIdByName(targetName) ?? targetName;
+    const state =
+      this.budgetMonitor?.getAgentBudgetState(target, sessionId) ??
+      this.budgetMonitor?.getAgentBudgetState(targetName, sessionId);
     return (state ? buildBudgetResumeRefusal(state) : undefined) ?? undefined;
   }
 
-  logBudgetSendMessageHookDenial(sessionId: string, tabId: TabId | undefined, toolUseID: string): void {
+  logBudgetSendMessageHookDenial(
+    sessionId: string,
+    tabId: TabId | undefined,
+    toolUseID: string,
+  ): void {
     this.logger.debug('[SdkPermissionHandler] Permission decision', {
-      sessionId, tabId, toolUseID, toolName: 'SendMessage', route: 'deny',
-      decisionSource: 'subagent-budget', interrupt: false,
+      sessionId,
+      tabId,
+      toolUseID,
+      toolName: 'SendMessage',
+      route: 'deny',
+      decisionSource: 'subagent-budget',
+      interrupt: false,
       recentSubagentBudgetStop:
         Date.now() - (this.recentBudgetStops.get(sessionId) ?? 0) < 60_000,
     });
@@ -176,16 +194,28 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
   private _permissionLevel: PermissionLevel = 'ask';
 
   private pendingRequests = new Map<string, PendingRequest>();
-  private readonly pendingCliAgentPermissions = new Map<string, AgentPermissionRequest>();
+  private readonly pendingCliAgentPermissions = new Map<
+    string,
+    AgentPermissionRequest
+  >();
   private readonly recentBudgetStops = new Map<string, number>();
-  private readonly attentionGenerations = new Map<string, { kind: 'permission' | 'lane-permission'; timestamp: number }>();
+  private readonly attentionGenerations = new Map<
+    string,
+    { kind: 'permission' | 'lane-permission'; timestamp: number }
+  >();
   private readonly ruleStore: PermissionRuleStore;
   private readonly lifecycleListeners =
     new Set<PermissionPromptLifecycleListener>();
 
   private pendingRequestContext = new Map<
     string,
-    { toolName: string; toolInput: Record<string, unknown>; sessionId?: SessionId; tabId?: TabId; toolUseID?: string }
+    {
+      toolName: string;
+      toolInput: Record<string, unknown>;
+      sessionId?: SessionId;
+      tabId?: TabId;
+      toolUseID?: string;
+    }
   >();
 
   private emitterInitialized = false;
@@ -217,7 +247,10 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
     @inject(SDK_TOKENS.SDK_CLI_AGENT_OWNER_LOOKUP, { isOptional: true })
     private readonly agentOwnerLookup?: SdkCliAgentOwnerLookup,
     @inject(SDK_TOKENS.SDK_SUBAGENT_BUDGET_MONITOR, { isOptional: true })
-    private readonly budgetMonitor?: Pick<SubagentBudgetMonitor, 'getAgentBudgetState'>,
+    private readonly budgetMonitor?: Pick<
+      SubagentBudgetMonitor,
+      'getAgentBudgetState'
+    >,
   ) {
     this.ruleStore = new PermissionRuleStore(this.logger);
 
@@ -253,14 +286,15 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
   }
 
   getPendingCliAgentPermissions(): AgentPermissionRequest[] {
-    return [...this.pendingCliAgentPermissions.values()].filter(
-      (request) => this.pendingRequests.has(request.requestId),
+    return [...this.pendingCliAgentPermissions.values()].filter((request) =>
+      this.pendingRequests.has(request.requestId),
     );
   }
 
   getPendingPermissionCount(sessionId?: string): number {
     return [...this.pendingRequests.values()].filter(
-      (request) => request.sessionId === sessionId || request.tabId === sessionId,
+      (request) =>
+        request.sessionId === sessionId || request.tabId === sessionId,
     ).length;
   }
 
@@ -392,7 +426,10 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
     const attention = this.attentionGenerations.get(requestId);
     if (!attention) return;
     this.attentionGenerations.delete(requestId);
-    this.hostAttention?.resolve(attentionRequestKey(attention.kind, requestId), attention.timestamp);
+    this.hostAttention?.resolve(
+      attentionRequestKey(attention.kind, requestId),
+      attention.timestamp,
+    );
   }
 
   private async sendCliAgentPermissionRequest(
@@ -409,7 +446,12 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
       owner = this.agentOwnerLookup.findAgentInfo(agentId);
     }
     if (waitedForOwner && !this.pendingRequests.has(payload.id)) return;
-    if (!owner?.parentSessionId || !owner.startedAt || !Number.isFinite(Date.parse(owner.startedAt)) || owner.status !== 'running') {
+    if (
+      !owner?.parentSessionId ||
+      !owner.startedAt ||
+      !Number.isFinite(Date.parse(owner.startedAt)) ||
+      owner.status !== 'running'
+    ) {
       queueMicrotask(() => {
         const pending = this.pendingRequests.get(payload.id);
         if (!pending) return;
@@ -494,7 +536,10 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
   }
 
   /** A chat tab remains stable when the SDK assigns a new session ID per query. */
-  private permissionRuleScope(sessionId?: SessionId, tabId?: TabId): string | undefined {
+  private permissionRuleScope(
+    sessionId?: SessionId,
+    tabId?: TabId,
+  ): string | undefined {
     return sessionId ? (tabId ?? sessionId) : undefined;
   }
 
@@ -590,9 +635,13 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
       if (toolName === 'SendMessage' && typeof input['to'] === 'string') {
         const budgetSessionId = resolveSessionId();
         const refusal = budgetSessionId
-          ? this.budgetSendMessageRefusal(input['to'], budgetSessionId as string)
+          ? this.budgetSendMessageRefusal(
+              input['to'],
+              budgetSessionId as string,
+            )
           : undefined;
-        if (refusal) return { behavior: 'deny', message: refusal, interrupt: false };
+        if (refusal)
+          return { behavior: 'deny', message: refusal, interrupt: false };
       }
       this.logger.info(
         `[SdkPermissionHandler] canUseTool invoked: ${toolName}`,
@@ -629,6 +678,29 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
       const unattendedPolicy = this.unattendedPolicies?.get(
         routingHint ?? (tabId as string | undefined),
       );
+
+      // Cron write tools (issue #1400): a scheduled job runs a prompt later
+      // with nobody watching, so a human approves each change. This runs
+      // before every auto-approval path below (unattended YOLO, the
+      // mcp__ptah__ allow, YOLO, auto-edit, background agents, stored rules).
+      // An unattended session and a CLI lane have nobody to answer: deny.
+      if (isCronMutatingTool(toolName)) {
+        if (unattendedPolicy || cliAgentResolver) {
+          this.logger.info(
+            `[SdkPermissionHandler] Denied cron write tool in a session without a user: ${toolName}`,
+          );
+          return {
+            behavior: 'deny' as const,
+            message: CRON_UNATTENDED_DENY_MESSAGE,
+            interrupt: false,
+          };
+        }
+        this.logger.info(
+          `[SdkPermissionHandler] Requesting user permission for cron write tool: ${toolName}`,
+        );
+        return await requestUserPermission(toolName, input, options);
+      }
+
       if (
         unattendedPolicy &&
         toolName !== 'AskUserQuestion' &&
@@ -811,14 +883,26 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
       const result = await decide(toolName, input, options);
       const session = resolveSessionId();
       this.logger.debug('[SdkPermissionHandler] Permission decision', {
-        sessionId: session, tabId, toolUseID: options.toolUseID, toolName,
-        route: result.behavior === 'deny' ? 'deny' :
-          prompted ? 'prompt' : 'auto-allow',
-        decisionSource: toolName === 'SendMessage' && result.behavior === 'deny'
-          ? 'subagent-budget' : 'permission-policy',
-        interrupt: result.behavior === 'deny' ? result.interrupt ?? false : false,
-        recentSubagentBudgetStop: session !== undefined &&
-          Date.now() - (this.recentBudgetStops.get(session as string) ?? 0) < 60_000,
+        sessionId: session,
+        tabId,
+        toolUseID: options.toolUseID,
+        toolName,
+        route:
+          result.behavior === 'deny'
+            ? 'deny'
+            : prompted
+              ? 'prompt'
+              : 'auto-allow',
+        decisionSource:
+          toolName === 'SendMessage' && result.behavior === 'deny'
+            ? 'subagent-budget'
+            : 'permission-policy',
+        interrupt:
+          result.behavior === 'deny' ? (result.interrupt ?? false) : false,
+        recentSubagentBudgetStop:
+          session !== undefined &&
+          Date.now() - (this.recentBudgetStops.get(session as string) ?? 0) <
+            60_000,
       });
       return result;
     };
@@ -1109,7 +1193,12 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
         cliAgentId = cliAgentResolver();
       }
       if (!cliAgentId) {
-        return { behavior: 'deny', message: 'Lane identity was not attached before the permission deadline', interrupt: true };
+        return {
+          behavior: 'deny',
+          message:
+            'Lane identity was not attached before the permission deadline',
+          interrupt: true,
+        };
       }
     }
     const route = this.classifyPermissionRoute(sessionId, tabId, cliAgentId);
@@ -1161,7 +1250,13 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
       tabId,
     };
 
-    this.pendingRequestContext.set(requestId, { toolName, toolInput: input, sessionId, tabId, toolUseID: toolUseId });
+    this.pendingRequestContext.set(requestId, {
+      toolName,
+      toolInput: input,
+      sessionId,
+      tabId,
+      toolUseID: toolUseId,
+    });
 
     this.logger.info(
       `[SdkPermissionHandler] Sending permission request to webview`,
@@ -1201,12 +1296,26 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
     }
 
     this.logger.info(`[SdkPermissionHandler] Permission response received`, {
-      requestId, sessionId, tabId, toolUseID: toolUseId, toolName,
-      route: response?.decision === 'allow' || response?.decision === 'always_allow' ? 'prompt' : 'deny',
-      decisionSource: response?.systemAbort ? 'system-abort' : response?.timedOut ? 'timeout' : 'user-response',
-      interrupt: !response || (response.decision === 'deny' && !response.systemAbort),
-      recentSubagentBudgetStop: sessionId !== undefined &&
-        Date.now() - (this.recentBudgetStops.get(sessionId as string) ?? 0) < 60_000,
+      requestId,
+      sessionId,
+      tabId,
+      toolUseID: toolUseId,
+      toolName,
+      route:
+        response?.decision === 'allow' || response?.decision === 'always_allow'
+          ? 'prompt'
+          : 'deny',
+      decisionSource: response?.systemAbort
+        ? 'system-abort'
+        : response?.timedOut
+          ? 'timeout'
+          : 'user-response',
+      interrupt:
+        !response || (response.decision === 'deny' && !response.systemAbort),
+      recentSubagentBudgetStop:
+        sessionId !== undefined &&
+        Date.now() - (this.recentBudgetStops.get(sessionId as string) ?? 0) <
+          60_000,
       totalLatency: Date.now() - startTime,
       decision: response?.decision ?? 'aborted',
     });
@@ -1325,7 +1434,10 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
     // "Always in session" needs a session to scope its rule. Without one the
     // answer is an explicit one-time Allow: no rule, no sibling resolution, and
     // the resolved decision says `allow` so no caller reports a rule.
-    const ruleScope = this.permissionRuleScope(requestContext?.sessionId, requestContext?.tabId);
+    const ruleScope = this.permissionRuleScope(
+      requestContext?.sessionId,
+      requestContext?.tabId,
+    );
     const oneTimeOnly = response.decision === 'always_allow' && !ruleScope;
     if (oneTimeOnly) {
       this.logger.warn(
@@ -1342,7 +1454,10 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
       effective.decision === 'always_allow' &&
       requestContext &&
       ruleScope &&
-      !neverAutoApproveTools.includes(requestContext.toolName)
+      !neverAutoApproveTools.includes(requestContext.toolName) &&
+      // A cron write tool never gets a stored rule: "Always Allow" allows
+      // this one call only, and no pending sibling request is resolved.
+      !isCronMutatingTool(requestContext.toolName)
     ) {
       const rule: PermissionRule = {
         id: uuidv4(),
@@ -1369,7 +1484,11 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
       ] of this.pendingRequestContext.entries()) {
         if (pendingId === requestId) continue;
         if (pendingCtx.toolName !== toolName) continue;
-        if (this.permissionRuleScope(pendingCtx.sessionId, pendingCtx.tabId) !== ruleScope) continue;
+        if (
+          this.permissionRuleScope(pendingCtx.sessionId, pendingCtx.tabId) !==
+          ruleScope
+        )
+          continue;
         // Unattended sessions never consult "Always Allow" rules.
         if (this.unattendedRequestIds.has(pendingId)) continue;
 
@@ -1410,12 +1529,19 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
     const isApproved =
       effective.decision === 'allow' || effective.decision === 'always_allow';
     this.logger.debug('[SdkPermissionHandler] Permission response handled', {
-      requestId, sessionId: pending.sessionId, tabId: pending.tabId,
-      toolUseID: requestContext?.toolUseID, toolName: requestContext?.toolName,
-      route: isApproved ? 'prompt' : 'deny', decisionSource: 'user-response',
+      requestId,
+      sessionId: pending.sessionId,
+      tabId: pending.tabId,
+      toolUseID: requestContext?.toolUseID,
+      toolName: requestContext?.toolName,
+      route: isApproved ? 'prompt' : 'deny',
+      decisionSource: 'user-response',
       interrupt: effective.decision === 'deny',
-      recentSubagentBudgetStop: pending.sessionId !== undefined &&
-        Date.now() - (this.recentBudgetStops.get(pending.sessionId as string) ?? 0) < 60_000,
+      recentSubagentBudgetStop:
+        pending.sessionId !== undefined &&
+        Date.now() -
+          (this.recentBudgetStops.get(pending.sessionId as string) ?? 0) <
+          60_000,
     });
     return true;
   }

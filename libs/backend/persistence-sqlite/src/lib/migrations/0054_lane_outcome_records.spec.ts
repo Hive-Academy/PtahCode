@@ -62,7 +62,13 @@ function tableColumns(db: DatabaseShape, pragma: string): ColumnRow[] {
     dflt_value: string | null;
     pk: number;
   }>;
-  return rows.map((r): ColumnRow => [r.name, r.type, r.notnull, r.dflt_value, r.pk]);
+  return rows.map((r): ColumnRow => [
+    r.name,
+    r.type,
+    r.notnull,
+    r.dflt_value,
+    r.pk,
+  ]);
 }
 
 /** The SC-1 record row, exactly as part B §2 declares it. */
@@ -125,7 +131,7 @@ describe('migration 0054_lane_outcome_records — registry and static SQL', () =
   });
 
   it('keeps the bundled-version ratchet current', () => {
-    expect(Math.max(...MIGRATIONS.map((m) => m.version))).toBe(75);
+    expect(Math.max(...MIGRATIONS.map((m) => m.version))).toBe(76);
   });
 });
 
@@ -283,10 +289,16 @@ describe('migration 0054_lane_outcome_records — behaviour', () => {
       ).run();
       expect(
         db
-          .prepare('SELECT run_id, kind, payload FROM lane_outcome_held_reports')
+          .prepare(
+            'SELECT run_id, kind, payload FROM lane_outcome_held_reports',
+          )
           .all(),
       ).toEqual([
-        { run_id: 'subagent:a2', kind: 'deliverables', payload: '{"checks":[]}' },
+        {
+          run_id: 'subagent:a2',
+          kind: 'deliverables',
+          payload: '{"checks":[]}',
+        },
       ]);
     } finally {
       db.close();
@@ -312,9 +324,9 @@ describe('migration 0054_lane_outcome_records — behaviour', () => {
 
       const planOf = (query: string, ...params: unknown[]): string =>
         (
-          db
-            .prepare('EXPLAIN QUERY PLAN ' + query)
-            .all(...params) as Array<{ detail: string }>
+          db.prepare('EXPLAIN QUERY PLAN ' + query).all(...params) as Array<{
+            detail: string;
+          }>
         )
           .map((r) => r.detail)
           .join('|');

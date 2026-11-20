@@ -57,6 +57,31 @@ export class CronExpressionService {
     'Saturday',
   ];
 
+  private static readonly MONTH_ALIASES: Readonly<Record<string, number>> = {
+    JAN: 1,
+    FEB: 2,
+    MAR: 3,
+    APR: 4,
+    MAY: 5,
+    JUN: 6,
+    JUL: 7,
+    AUG: 8,
+    SEP: 9,
+    OCT: 10,
+    NOV: 11,
+    DEC: 12,
+  };
+
+  private static readonly WEEKDAY_ALIASES: Readonly<Record<string, number>> = {
+    SUN: 0,
+    MON: 1,
+    TUE: 2,
+    WED: 3,
+    THU: 4,
+    FRI: 5,
+    SAT: 6,
+  };
+
   /**
    * Validate a 5-field cron expression. Accepts the standard subset:
    * `*`, integer literals, ranges (`a-b`), step values (`*\/n`, `a-b/n`),
@@ -79,7 +104,11 @@ export class CronExpressionService {
     }
     for (let i = 0; i < fields.length; i++) {
       const [min, max] = CronExpressionService.FIELD_RANGES[i];
-      const fieldErr = this.validateField(fields[i], min, max);
+      const fieldErr = this.validateField(
+        this.resolveNames(fields[i], i),
+        min,
+        max,
+      );
       if (fieldErr) {
         return {
           valid: false,
@@ -195,6 +224,28 @@ export class CronExpressionService {
     }
 
     return `Minute=${minute}, Hour=${hour}, DayOfMonth=${dom}, Month=${month}, DayOfWeek=${dow}`;
+  }
+
+  /**
+   * croner accepts JAN-DEC (month field) and SUN-SAT (day-of-week field),
+   * case-insensitive, inside ranges, lists and steps. Names are mapped to
+   * their numbers so the numeric range checks apply; unknown words stay
+   * as-is and fail the integer check.
+   */
+  private resolveNames(field: string, index: number): string {
+    const aliases =
+      index === 3
+        ? CronExpressionService.MONTH_ALIASES
+        : index === 4
+          ? CronExpressionService.WEEKDAY_ALIASES
+          : null;
+    if (aliases === null) return field;
+    // Sunday as the end of a range is 7 (`MON-SUN` is 1-7), as in croner.
+    const source = index === 4 ? field.replace(/-sun(?![a-z])/gi, '-7') : field;
+    return source.replace(/[A-Za-z]+/g, (word) => {
+      const value = aliases[word.toUpperCase()];
+      return value === undefined ? word : String(value);
+    });
   }
 
   private validateField(

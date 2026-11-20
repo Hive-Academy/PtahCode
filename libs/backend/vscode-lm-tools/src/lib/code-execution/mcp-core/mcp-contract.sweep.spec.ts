@@ -404,21 +404,44 @@ const TOOL_DRIVERS: Readonly<Record<string, ToolDriver>> = {
     },
   },
   ptah_agent_message_status: {
-    args: { agentId: 'agent-1', messageId: '11111111-1111-4111-8111-111111111111' },
+    args: {
+      agentId: 'agent-1',
+      messageId: '11111111-1111-4111-8111-111111111111',
+    },
     mock: (api, marker) => {
-      api.agent = { messageStatus: async () => ({ status: 'failed', reason: `${marker}-${filler(280000, 's')}` }) };
+      api.agent = {
+        messageStatus: async () => ({
+          status: 'failed',
+          reason: `${marker}-${filler(280000, 's')}`,
+        }),
+      };
     },
   },
   ptah_agent_message_control: {
-    args: { agentId: 'agent-1', messageId: '11111111-1111-4111-8111-111111111111', action: 'cancel' },
+    args: {
+      agentId: 'agent-1',
+      messageId: '11111111-1111-4111-8111-111111111111',
+      action: 'cancel',
+    },
     mock: (api, marker) => {
-      api.agent = { control: async () => ({ mode: 'unsupported', detail: `${marker}-${filler(280000, 'c')}` }) };
+      api.agent = {
+        control: async () => ({
+          mode: 'unsupported',
+          detail: `${marker}-${filler(280000, 'c')}`,
+        }),
+      };
     },
   },
   ptah_agent_message_ack: {
     args: { messageId: '11111111-1111-4111-8111-111111111111', state: 'read' },
     mock: (api, marker) => {
-      api.agent = { ack: async () => ({ ok: false, messageId: `${marker}-${filler(280000, 'k')}`, code: 'not_found' }) };
+      api.agent = {
+        ack: async () => ({
+          ok: false,
+          messageId: `${marker}-${filler(280000, 'k')}`,
+          code: 'not_found',
+        }),
+      };
     },
   },
   ptah_agent_message: {
@@ -935,15 +958,84 @@ const TOOL_DRIVERS: Readonly<Record<string, ToolDriver>> = {
   },
   ptah_task_close_out: {
     args: { taskId: 'TASK_2026_898_c1a5', workspaceRoot: '/repo' },
-    mock: (api, marker) => { api.tasks = { closeOut: async () => bigJsonBlob(marker) }; },
+    mock: (api, marker) => {
+      api.tasks = { closeOut: async () => bigJsonBlob(marker) };
+    },
   },
   ptah_task_close_out_status: {
     args: { runId: 'run-1' },
-    mock: (api, marker) => { api.tasks = { closeOutStatus: async () => bigJsonBlob(marker) }; },
+    mock: (api, marker) => {
+      api.tasks = { closeOutStatus: async () => bigJsonBlob(marker) };
+    },
   },
   ptah_task_cleanup_completed: {
-    args: { runId: 'run-1', taskId: 'TASK_2026_898_c1a5', workspaceRoot: '/repo' },
-    mock: (api, marker) => { api.tasks = { cleanupCompleted: async () => bigJsonBlob(marker) }; },
+    args: {
+      runId: 'run-1',
+      taskId: 'TASK_2026_898_c1a5',
+      workspaceRoot: '/repo',
+    },
+    mock: (api, marker) => {
+      api.tasks = { cleanupCompleted: async () => bigJsonBlob(marker) };
+    },
+  },
+  // Cron scheduler tools (issue #1400 Part 1): nine tools over `ptah.cron`.
+  ptah_cron_list: {
+    args: {},
+    mock: (api, marker) => {
+      api.cron = { list: async () => bigJsonBlob(marker) };
+    },
+  },
+  ptah_cron_get: {
+    args: { id: 'job-1' },
+    mock: (api, marker) => {
+      api.cron = { get: async () => bigJsonBlob(marker) };
+    },
+  },
+  ptah_cron_create: {
+    args: {
+      name: 'Nightly',
+      cronExpression: '0 2 * * *',
+      prompt: 'Triage issues.',
+    },
+    mock: (api, marker) => {
+      api.cron = { create: async () => bigJsonBlob(marker) };
+    },
+  },
+  ptah_cron_update: {
+    args: { id: 'job-1', name: 'Renamed' },
+    mock: (api, marker) => {
+      api.cron = { update: async () => bigJsonBlob(marker) };
+    },
+  },
+  ptah_cron_toggle: {
+    args: { id: 'job-1', enabled: false },
+    mock: (api, marker) => {
+      api.cron = { toggle: async () => bigJsonBlob(marker) };
+    },
+  },
+  ptah_cron_delete: {
+    args: { id: 'job-1' },
+    mock: (api, marker) => {
+      api.cron = { delete: async () => bigJsonBlob(marker) };
+    },
+  },
+  ptah_cron_run_now: {
+    args: { id: 'job-1' },
+    mock: (api, marker) => {
+      api.cron = { runNow: async () => bigJsonBlob(marker) };
+    },
+  },
+  ptah_cron_runs: {
+    args: { id: 'job-1' },
+    mock: (api, marker) => {
+      api.cron = { runs: async () => bigJsonBlob(marker) };
+    },
+  },
+  ptah_cron_next_fire: {
+    args: { cronExpression: '0 2 * * *' },
+    mock: (api, marker) => {
+      api.cron = { nextFire: async () => bigJsonBlob(marker) };
+    },
   },
   ptah_session_link_task: {
     // The success text is one fixed line around the echoed ids; an oversized
@@ -1101,7 +1193,10 @@ const TOOL_DRIVERS: Readonly<Record<string, ToolDriver>> = {
   // Handoff acknowledgement (TASK_2026_898): the oversized text rides in the
   // reason the reply echoes.
   ptah_session_handoff_ack: {
-    args: { predecessorSessionId: 'tab-old', handoffPath: '/fixture/HANDOFF.md' },
+    args: {
+      predecessorSessionId: 'tab-old',
+      handoffPath: '/fixture/HANDOFF.md',
+    },
     mock: (api, marker) => {
       api.session = sessionStub({
         acknowledge: async () => ({
@@ -1183,21 +1278,44 @@ const BELOW_OUTLINE_CAP_DRIVERS: Readonly<Record<string, ToolDriver>> = {
     },
   },
   ptah_agent_message_status: {
-    args: { agentId: 'agent-1', messageId: '11111111-1111-4111-8111-111111111111' },
+    args: {
+      agentId: 'agent-1',
+      messageId: '11111111-1111-4111-8111-111111111111',
+    },
     mock: (api, marker) => {
-      api.agent = { messageStatus: async () => ({ status: 'failed', reason: proseParagraph(marker) }) };
+      api.agent = {
+        messageStatus: async () => ({
+          status: 'failed',
+          reason: proseParagraph(marker),
+        }),
+      };
     },
   },
   ptah_agent_message_control: {
-    args: { agentId: 'agent-1', messageId: '11111111-1111-4111-8111-111111111111', action: 'cancel' },
+    args: {
+      agentId: 'agent-1',
+      messageId: '11111111-1111-4111-8111-111111111111',
+      action: 'cancel',
+    },
     mock: (api, marker) => {
-      api.agent = { control: async () => ({ mode: 'unsupported', detail: proseParagraph(marker) }) };
+      api.agent = {
+        control: async () => ({
+          mode: 'unsupported',
+          detail: proseParagraph(marker),
+        }),
+      };
     },
   },
   ptah_agent_message_ack: {
     args: { messageId: '11111111-1111-4111-8111-111111111111', state: 'read' },
     mock: (api, marker) => {
-      api.agent = { ack: async () => ({ ok: false, messageId: proseParagraph(marker), code: 'not_found' }) };
+      api.agent = {
+        ack: async () => ({
+          ok: false,
+          messageId: proseParagraph(marker),
+          code: 'not_found',
+        }),
+      };
     },
   },
   ptah_agent_message: {
@@ -2009,8 +2127,9 @@ describe('coverage matrix — served tools across host, caller and transport (de
     // run_check and HTTP-only run_check_wait. +1: ptah_session_handoff,
     // always-on (TASK_2026_655). +1: ptah_agent_message_control
     // (TASK_2026_AGENT_MESSAGING P1-E). +1: ptah_agent_message_ack (P2-G).
-    // +1: ptah_session_clear_finished (TASK_2026_932).
-    expect(namesPerCaller[0]).toHaveLength(74);
+    // +1: ptah_session_clear_finished (TASK_2026_932). +4: the ptah_cron_* read
+    // tools (issue #1400 Part 1); the 5 write tools need `cronWriteApproval`.
+    expect(namesPerCaller[0]).toHaveLength(78);
     expect(namesPerCaller[0]).toContain('ptah_artifact_publish');
   });
 
@@ -2039,7 +2158,7 @@ describe('coverage matrix — served tools across host, caller and transport (de
     // (TASK_2026_655: +1, ptah_session_handoff; P1-E: +1,
     // ptah_agent_message_control; P2-G: +1, ptah_agent_message_ack;
     // TASK_2026_932: +1, ptah_session_clear_finished).
-    expect(namesPerCaller[0]).toHaveLength(71);
+    expect(namesPerCaller[0]).toHaveLength(75);
     expect(namesPerCaller[0]).toContain('ptah_artifact_publish');
     for (const ideOnly of [
       'ptah_lsp_references',
@@ -2081,7 +2200,9 @@ describe('coverage matrix — served tools across host, caller and transport (de
         // TASK_2026_655: +1, ptah_session_handoff (always-on). P1-E: +1,
         // ptah_agent_message_control. P2-G: +1, ptah_agent_message_ack.
         // TASK_2026_932: +1, ptah_session_clear_finished.
-        expect(apps).toHaveLength(hasIDECapabilities ? 77 : 74);
+        // Issue #1400 Part 1: +4, the ptah_cron_* read tools. The 5 write tools
+        // are hidden from a caller without `cronWriteApproval`.
+        expect(apps).toHaveLength(hasIDECapabilities ? 81 : 78);
         expect(apps.filter((name) => !APPS_ONLY_TOOL_NAMES.has(name))).toEqual(
           coding,
         );
@@ -2572,6 +2693,16 @@ describe('MCP dispatcher contract sweep (TASK_2026_559 Batch 21, Task 21.1)', ()
       ptah_task_close_out: 201,
       ptah_task_close_out_status: 125,
       ptah_task_cleanup_completed: 209,
+      // Issue #1400 Part 1, measured 2026-11-18: ceil(length * 1.1) + 10.
+      ptah_cron_list: 258,
+      ptah_cron_get: 98,
+      ptah_cron_create: 454,
+      ptah_cron_update: 249,
+      ptah_cron_toggle: 212,
+      ptah_cron_delete: 218,
+      ptah_cron_run_now: 235,
+      ptah_cron_runs: 169,
+      ptah_cron_next_fire: 218,
       ptah_route_decide: 1_000,
       ptah_outcome_report: 1_000,
       // TASK_2026_597 Batch 34, measured 2026-10-04: 498 and 491 chars.
@@ -2604,8 +2735,7 @@ describe('MCP dispatcher contract sweep (TASK_2026_559 Batch 21, Task 21.1)', ()
       'file:// URLs of files inside the workspace are allowed',
     );
     const url = tool.inputSchema.properties?.['url'] as
-      | { description?: string }
-      | undefined;
+      { description?: string } | undefined;
     expect(url?.description).toContain('file://');
     expect(url?.description).toContain('inside the workspace');
   });

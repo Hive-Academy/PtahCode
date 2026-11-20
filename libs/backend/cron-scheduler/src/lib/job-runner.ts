@@ -15,7 +15,8 @@
  *     If unregistered → mark failed (this is a config bug, not a transient).
  *   - otherwise → forward the prompt to `SDK_INTERNAL_QUERY_SERVICE` and
  *     drain the stream until a `result` message lands. The result message's
- *     summary (or "ok") is stored.
+ *     summary (or "ok") is stored. The first `session_id` the stream reports is
+ *     written to the run row once, so run history can name the SDK session.
  *
  * Abort: every run is wrapped in an `AbortController` linked to the optional
  * caller `signal`. Aborts are recorded as `skipped` with the reason carried
@@ -59,6 +60,18 @@ interface IInternalQueryService {
 }
 
 const HANDLER_PREFIX = 'handler:';
+
+/**
+ * Every SDK message carries the id of the session that produced it; the
+ * `system`/`init` message is the first one. Returns it when present.
+ */
+function readSessionId(msg: unknown): string | undefined {
+  if (!msg || typeof msg !== 'object') return undefined;
+  const sessionId = (msg as { session_id?: unknown }).session_id;
+  return typeof sessionId === 'string' && sessionId.length > 0
+    ? sessionId
+    : undefined;
+}
 
 function extractHandlerName(prompt: string): string | undefined {
   if (!prompt.startsWith(HANDLER_PREFIX)) return undefined;
@@ -177,7 +190,7 @@ export class JobRunner {
     this.runs.markStarted(runId);
 
     try {
-      const result = await this.dispatch(job, scheduledFor, localCtl);
+      const result = await this.dispatch(job, scheduledFor, localCtl, runId);
       // A handler that ran to completion and deliberately did nothing is not a
       // success. `markSucceeded` used to be unconditional here, so a skill
       // drain that stopped at its daily token budget wrote "succeeded" into
@@ -246,6 +259,7 @@ export class JobRunner {
     job: ScheduledJob,
     scheduledFor: number,
     ctl: AbortController,
+    runId: RunId,
   ): Promise<JobHandlerResult> {
     if (job.prompt.startsWith(HANDLER_PREFIX)) {
       const name = job.prompt.slice(HANDLER_PREFIX.length).trim();
@@ -278,9 +292,17 @@ export class JobRunner {
     });
 
     let summary: string | undefined;
+    let sessionRecorded = false;
     try {
       for await (const msg of handle.stream) {
         if (ctl.signal.aborted) break;
+        if (!sessionRecorded) {
+          const sessionId = readSessionId(msg);
+          if (sessionId) {
+            sessionRecorded = true;
+            this.recordSessionId(job, runId, sessionId);
+          }
+        }
         if (
           msg &&
           typeof msg === 'object' &&
@@ -298,5 +320,27 @@ export class JobRunner {
       handle.close();
     }
     return { summary: summary ?? 'ok' };
+  }
+
+  /**
+   * Links the run row to its SDK session. The link is run-history metadata:
+   * a failed write must not fail a run whose agent is already working, so the
+   * error is logged and the run continues with `session_id` NULL.
+   */
+  private recordSessionId(
+    job: ScheduledJob,
+    runId: RunId,
+    sessionId: string,
+  ): void {
+    try {
+      this.runs.setSessionId(runId, sessionId);
+    } catch (err) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      this.logger.logWithContext(
+        'warn',
+        '[cron-scheduler] could not record the run session id',
+        { error, metadata: { jobId: job.id, runId } },
+      );
+    }
   }
 }

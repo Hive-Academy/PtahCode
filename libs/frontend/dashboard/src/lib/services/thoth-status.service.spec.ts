@@ -1,6 +1,10 @@
 import { TestBed } from '@angular/core/testing';
 import { signal } from '@angular/core';
-import { AppStateManager, ClaudeRpcService, VSCodeService } from '@ptah-extension/core';
+import {
+  AppStateManager,
+  ClaudeRpcService,
+  VSCodeService,
+} from '@ptah-extension/core';
 import { MemoryRpcService } from '@ptah-extension/memory-curator-ui';
 import { MemoryDiagnosticsRpcService } from '@ptah-extension/memory-curator-ui/services';
 import { CronRpcService } from '@ptah-extension/cron-scheduler-ui';
@@ -38,6 +42,8 @@ function makeJob(over: Partial<ScheduledJobDto>): ScheduledJobDto {
     updatedAt: over.updatedAt ?? 0,
     lastRunAt: over.lastRunAt ?? null,
     nextRunAt: over.nextRunAt ?? null,
+    createdBy: over.createdBy ?? { kind: 'user' },
+    lastRunStatus: over.lastRunStatus ?? null,
   };
 }
 
@@ -80,11 +86,17 @@ describe('ThothStatusService', () => {
     memoryDiagnosticsRpc = {
       getTriggers: jest.fn(async () => ({ triggers: {}, enabled: true })),
     };
-    telemetryRead = jest.fn(async () => ({ isSuccess: () => true, data: { success: true, value: true } }));
+    telemetryRead = jest.fn(async () => ({
+      isSuccess: () => true,
+      data: { success: true, value: true },
+    }));
     settingsCall = jest.fn((method: string, params: { key: string }) =>
       params.key === 'skills.telemetry.enabled'
         ? telemetryRead()
-        : Promise.resolve({ isSuccess: () => true, data: { success: true, value: true } }),
+        : Promise.resolve({
+            isSuccess: () => true,
+            data: { success: true, value: true },
+          }),
     );
     cronRpc = {
       list: jest.fn(),
@@ -124,7 +136,6 @@ describe('ThothStatusService', () => {
       lastCuratedAt: null,
     };
     memoryRpc.stats.mockResolvedValue(memStats);
-
 
     const cronList: CronListResult = {
       jobs: [
@@ -193,7 +204,9 @@ describe('ThothStatusService', () => {
     expect(summary.lastUpdatedAt).not.toBeNull();
     expect(service.hasLoadedOnce()).toBe(true);
 
-    expect(settingsCall).toHaveBeenCalledWith('settings:get', { key: 'skills.telemetry.enabled' });
+    expect(settingsCall).toHaveBeenCalledWith('settings:get', {
+      key: 'skills.telemetry.enabled',
+    });
     expect(gatewayRpc.listBindings).toHaveBeenCalledWith({ status: 'pending' });
   });
 
@@ -209,9 +222,17 @@ describe('ThothStatusService', () => {
     gatewayRpc.status.mockResolvedValue({ enabled: true, adapters: [] });
     gatewayRpc.listBindings.mockResolvedValue({ bindings: [] });
     const pausedMemory = deferred<{ triggers: object; enabled: boolean }>();
-    const pausedSkills = deferred<{ isSuccess: () => boolean; data: { success: boolean; value: boolean } }>();
+    const pausedSkills = deferred<{
+      isSuccess: () => boolean;
+      data: { success: boolean; value: boolean };
+    }>();
     memoryDiagnosticsRpc.getTriggers.mockReturnValue(pausedMemory.promise);
-    settingsCall.mockImplementation((method: string, params: { key: string }) => params.key === 'skillSynthesis.enabled' ? pausedSkills.promise : telemetryRead());
+    settingsCall.mockImplementation(
+      (method: string, params: { key: string }) =>
+        params.key === 'skillSynthesis.enabled'
+          ? pausedSkills.promise
+          : telemetryRead(),
+    );
 
     const service = TestBed.inject(ThothStatusService);
     await service.refresh();
@@ -322,46 +343,81 @@ describe('ThothStatusService', () => {
   it('shows the telemetry setting without a candidate count', async () => {
     vscode.config.set({ isElectron: false });
     memoryRpc.stats.mockResolvedValue({
-      core: 0, recall: 0, archival: 0, codeIndex: 0, lastCuratedAt: null,
+      core: 0,
+      recall: 0,
+      archival: 0,
+      codeIndex: 0,
+      lastCuratedAt: null,
     });
     telemetryRead.mockResolvedValue({
-      isSuccess: () => true, data: { success: true, value: false },
+      isSuccess: () => true,
+      data: { success: true, value: false },
     });
     const service = TestBed.inject(ThothStatusService);
     await service.refresh();
-    expect(service.summary().skills).toEqual({ available: true, telemetryEnabled: false });
-    expect(service.pillars().skills).toMatchObject({ value: 'Off', unit: '', desc: 'Skill telemetry' });
-    expect(settingsCall).toHaveBeenCalledWith('settings:get', { key: 'skills.telemetry.enabled' });
+    expect(service.summary().skills).toEqual({
+      available: true,
+      telemetryEnabled: false,
+    });
+    expect(service.pillars().skills).toMatchObject({
+      value: 'Off',
+      unit: '',
+      desc: 'Skill telemetry',
+    });
+    expect(settingsCall).toHaveBeenCalledWith('settings:get', {
+      key: 'skills.telemetry.enabled',
+    });
   });
 
   it('keeps a failed telemetry read isolated to the Skills tile', async () => {
     vscode.config.set({ isElectron: false });
     memoryRpc.stats.mockResolvedValue({
-      core: 1, recall: 0, archival: 0, codeIndex: 0, lastCuratedAt: null,
+      core: 1,
+      recall: 0,
+      archival: 0,
+      codeIndex: 0,
+      lastCuratedAt: null,
     });
     telemetryRead.mockRejectedValue(new Error('unavailable'));
     const service = TestBed.inject(ThothStatusService);
     await service.refresh();
-    expect(service.summary().skills).toEqual({ available: false, reason: 'error' });
+    expect(service.summary().skills).toEqual({
+      available: false,
+      reason: 'error',
+    });
     expect(service.summary().memory.available).toBe(true);
   });
 
   it('drops a stale telemetry answer after a newer refresh', async () => {
     vscode.config.set({ isElectron: false });
     memoryRpc.stats.mockResolvedValue({
-      core: 0, recall: 0, archival: 0, codeIndex: 0, lastCuratedAt: null,
+      core: 0,
+      recall: 0,
+      archival: 0,
+      codeIndex: 0,
+      lastCuratedAt: null,
     });
-    const oldRead = deferred<{ isSuccess: () => boolean; data: { success: boolean; value: boolean } }>();
+    const oldRead = deferred<{
+      isSuccess: () => boolean;
+      data: { success: boolean; value: boolean };
+    }>();
     telemetryRead.mockReturnValueOnce(oldRead.promise);
     telemetryRead.mockResolvedValueOnce({
-      isSuccess: () => true, data: { success: true, value: false },
+      isSuccess: () => true,
+      data: { success: true, value: false },
     });
     const service = TestBed.inject(ThothStatusService);
     const stale = service.refresh();
     await service.refresh();
-    oldRead.resolve({ isSuccess: () => true, data: { success: true, value: true } });
+    oldRead.resolve({
+      isSuccess: () => true,
+      data: { success: true, value: true },
+    });
     await stale;
-    expect(service.summary().skills).toEqual({ available: true, telemetryEnabled: false });
+    expect(service.summary().skills).toEqual({
+      available: true,
+      telemetryEnabled: false,
+    });
   });
 
   it('derives running state even when the master enabled flag is false', async () => {
@@ -634,10 +690,10 @@ describe('ThothStatusService', () => {
       const service = TestBed.inject(ThothStatusService);
       TestBed.tick();
 
-        memoryRpc.stats.mockReturnValueOnce(staleStats.promise);
+      memoryRpc.stats.mockReturnValueOnce(staleStats.promise);
       const stale = service.refresh();
 
-        memoryRpc.stats.mockResolvedValueOnce({ ...emptyStats, core: 7 });
+      memoryRpc.stats.mockResolvedValueOnce({ ...emptyStats, core: 7 });
       appState.workspaceInfo.set({ path: '/ws-b' });
       TestBed.tick();
       await flushAsync();
@@ -647,7 +703,10 @@ describe('ThothStatusService', () => {
       await flushAsync();
 
       const summary = service.summary();
-      expect(summary.skills).toEqual({ available: true, telemetryEnabled: true });
+      expect(summary.skills).toEqual({
+        available: true,
+        telemetryEnabled: true,
+      });
       expect(summary.memory).toEqual({
         available: true,
         totalFacts: 7,
@@ -713,7 +772,16 @@ describe('ThothStatusService', () => {
 
     it('refreshPaused() re-reads only the two flags', async () => {
       const service = TestBed.inject(ThothStatusService);
-      settingsCall.mockImplementation((method: string, params: { key: string }) => Promise.resolve({ isSuccess: () => true, data: { success: true, value: params.key === 'skillSynthesis.enabled' ? false : true } }));
+      settingsCall.mockImplementation(
+        (method: string, params: { key: string }) =>
+          Promise.resolve({
+            isSuccess: () => true,
+            data: {
+              success: true,
+              value: params.key === 'skillSynthesis.enabled' ? false : true,
+            },
+          }),
+      );
 
       await service.refreshPaused();
 

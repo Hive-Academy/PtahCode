@@ -1,3 +1,5 @@
+import type { Locator, Page } from '@playwright/test';
+
 import { test, expect } from '../../support/fixtures';
 
 interface ScheduledJobFixture {
@@ -12,6 +14,9 @@ interface ScheduledJobFixture {
   updatedAt: number;
   lastRunAt: number | null;
   nextRunAt: number | null;
+  createdBy: { kind: 'user' } | { kind: 'session'; sessionId: string };
+  lastRunStatus:
+    'pending' | 'running' | 'succeeded' | 'failed' | 'skipped' | null;
 }
 
 function makeJob(
@@ -31,8 +36,20 @@ function makeJob(
     updatedAt: 1_700_000_000_000,
     lastRunAt: null,
     nextRunAt: 1_700_000_300_000,
+    createdBy: { kind: 'user' },
+    lastRunStatus: null,
     ...overrides,
   };
+}
+
+/**
+ * One segment of the Schedules instrument band, found by its label. The band
+ * replaced the `cron-stat-*` statistics grid.
+ */
+function bandSegment(page: Page, label: string): Locator {
+  return page
+    .locator('[data-testid="cron-instrument-band"] li')
+    .filter({ hasText: label });
 }
 
 test.describe('Thoth — Cron tab', () => {
@@ -46,9 +63,7 @@ test.describe('Thoth — Cron tab', () => {
     await expect(
       page.locator('[data-testid="cron-empty-state"]'),
     ).toBeVisible();
-    await expect(page.locator('[data-testid="cron-stat-total"] .tabular-nums')).toHaveText(
-      '0',
-    );
+    await expect(bandSegment(page, 'Jobs')).toContainText('0');
   });
 
   test('card grid renders jobs', async ({ ui }) => {
@@ -63,15 +78,9 @@ test.describe('Thoth — Cron tab', () => {
     const page = ui.page;
 
     await expect(page.locator('[data-testid="cron-job-card"]')).toHaveCount(2);
-    await expect(page.locator('[data-testid="cron-stat-total"] .tabular-nums')).toHaveText(
-      '2',
-    );
-    await expect(page.locator('[data-testid="cron-stat-enabled"] .tabular-nums')).toHaveText(
-      '1',
-    );
-    await expect(page.locator('[data-testid="cron-stat-disabled"] .tabular-nums')).toHaveText(
-      '1',
-    );
+    await expect(bandSegment(page, 'Jobs')).toContainText('2');
+    await expect(bandSegment(page, 'Enabled')).toContainText('1');
+    await expect(bandSegment(page, 'Paused')).toContainText('1');
   });
 
   test('create job', async ({ ui }) => {
@@ -86,6 +95,13 @@ test.describe('Thoth — Cron tab', () => {
 
     const page = ui.page;
 
+    await expect(
+      page.locator('[data-testid="cron-empty-state"]'),
+    ).toBeVisible();
+
+    // The mocked job has no workspace. "This workspace" lists only the jobs
+    // of the open workspace, so the list shows all workspaces here.
+    await page.locator('[data-testid="cron-scope-all"]').click();
     await expect(
       page.locator('[data-testid="cron-empty-state"]'),
     ).toBeVisible();
@@ -106,8 +122,6 @@ test.describe('Thoth — Cron tab', () => {
 
     await expect(page.locator('[data-testid="cron-form"]')).toHaveCount(0);
     await expect(page.locator('[data-testid="cron-job-card"]')).toHaveCount(1);
-    await expect(page.locator('[data-testid="cron-stat-total"] .tabular-nums')).toHaveText(
-      '1',
-    );
+    await expect(bandSegment(page, 'Jobs')).toContainText('1');
   });
 });

@@ -27,3 +27,24 @@ export class CronConfigError extends CronSchedulerError {
     this.name = 'CronConfigError';
   }
 }
+
+/** Input field a {@link CronJobValidationError} refers to. */
+export type CronJobValidationField =
+  'name' | 'prompt' | 'workspaceRoot' | 'cronExpr' | 'timezone' | 'id';
+
+/**
+ * Thrown by `CronJobService` when caller input is rejected before it reaches
+ * the scheduler. `field` names the offending input so each caller (RPC
+ * handler, agent tool) can word its own reply. For `cronExpr` and `timezone`
+ * the message is croner's diagnostic, unchanged.
+ */
+export class CronJobValidationError extends CronSchedulerError {
+  constructor(
+    public readonly field: CronJobValidationField,
+    message: string,
+    options?: ErrorOptions,
+  ) {
+    super(message, options);
+    this.name = 'CronJobValidationError';
+  }
+}

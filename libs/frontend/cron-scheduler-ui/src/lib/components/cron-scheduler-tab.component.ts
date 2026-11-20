@@ -6,115 +6,42 @@ import {
   inject,
   signal,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { FormsModule } from '@angular/forms';
-import { RouterLink } from '@angular/router';
-import {
-  CalendarClock,
-  CirclePause,
-  CirclePlay,
-  Clock,
-  LucideAngularModule,
-  RefreshCw,
-} from 'lucide-angular';
+import { CalendarClock, LucideAngularModule } from 'lucide-angular';
 import {
   AppStateManager,
   isReviewSurfaceAvailable,
   VSCodeService,
 } from '@ptah-extension/core';
-import type { CronCreateParams, ScheduledJobDto } from '@ptah-extension/shared';
+import type { ScheduledJobDto } from '@ptah-extension/shared';
+import { PtahAlertComponent, PtahButtonDirective } from '@ptah-extension/ui';
 
 import { CronExpressionService } from '../services/cron-expression.service';
 import {
   CronStateService,
   type CronScopeFilter,
 } from '../services/cron-state.service';
-import { formatRelative, formatTime } from './cron-format';
-import { CronJobCardComponent } from './cron-job-card.component';
+import { CronHeaderBandComponent } from './cron-header-band.component';
 import { CronJobDetailDrawerComponent } from './cron-job-detail-drawer.component';
-import {
-  PtahButtonDirective,
-  PtahStatComponent,
-  PtahFieldComponent,
-  PtahIconButtonDirective,
-  PtahInputDirective,
-  PtahSelectDirective,
-  PtahSectionHeaderComponent,
-  PtahStatePanelComponent,
-  PtahSurfaceDirective,
-  PtahTextareaDirective,
-  PtahToggleDirective,
-} from '@ptah-extension/ui';
+import { CronJobFormComponent } from './cron-job-form.component';
+import { CronJobListComponent } from './cron-job-list.component';
 
-interface CronJobFormState {
-  id: string | null;
-  name: string;
-  cronExpr: string;
-  prompt: string;
-  workspaceRoot: string;
-  timezone: string;
-  enabled: boolean;
-}
-
-const SUGGESTED_TIMEZONES: readonly string[] = [
-  'UTC',
-  'America/Los_Angeles',
-  'America/Denver',
-  'America/Chicago',
-  'America/New_York',
-  'Europe/London',
-  'Europe/Berlin',
-  'Europe/Paris',
-  'Asia/Dubai',
-  'Asia/Kolkata',
-  'Asia/Singapore',
-  'Asia/Tokyo',
-  'Australia/Sydney',
-];
-
-function detectUserTimezone(): string {
-  try {
-    return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
-  } catch {
-    return 'UTC';
-  }
-}
-
-function emptyForm(timezone: string): CronJobFormState {
-  return {
-    id: null,
-    name: '',
-    cronExpr: '',
-    prompt: '',
-    workspaceRoot: '',
-    timezone,
-    enabled: true,
-  };
-}
-
-// Left raw: the Next run tile uses the theme text-info color, but ptah-stat maps info to the state color.
+/**
+ * Shell of the Schedules surface. It owns no markup of its own beyond the
+ * layout: the header band, the job list, the form and the detail drawer are
+ * child components, and every action goes to `CronStateService`.
+ */
 @Component({
   selector: 'ptah-cron-scheduler-tab',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
-    CommonModule,
-    FormsModule,
-    RouterLink,
     LucideAngularModule,
-    CronJobCardComponent,
+    CronHeaderBandComponent,
     CronJobDetailDrawerComponent,
+    CronJobFormComponent,
+    CronJobListComponent,
+    PtahAlertComponent,
     PtahButtonDirective,
-    PtahStatComponent,
-    PtahIconButtonDirective,
-    PtahFieldComponent,
-    PtahInputDirective,
-    PtahSelectDirective,
-    PtahSectionHeaderComponent,
-    PtahStatePanelComponent,
-    PtahSurfaceDirective,
-    PtahTextareaDirective,
-    PtahToggleDirective,
   ],
   template: `
     @if (!isElectron()) {
@@ -133,7 +60,9 @@ function emptyForm(timezone: string): CronJobFormState {
           only available in the PtahCode desktop app.
         </p>
         <a
-          class="link link-primary text-xs"
+          ptahButton
+          variant="link"
+          size="xs"
           href="https://github.com/Hive-Academy/PtahCode/releases"
           target="_blank"
           rel="noopener noreferrer"
@@ -141,302 +70,72 @@ function emptyForm(timezone: string): CronJobFormState {
         >
       </div>
     } @else {
-      <div class="flex flex-col gap-[var(--ptah-gap-section)]" data-testid="cron-scheduler-section">
-        <header
-          ptahSurface variant="surface-1" padding="lg"
-          class="flex flex-wrap items-start justify-between gap-[var(--ptah-gap-group)] rounded-xl"
-        >
-          <div class="flex items-start gap-3">
-            <span
-              class="mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-xl border border-surface-border bg-surface-2 text-info"
-            >
-              <lucide-angular
-                [img]="CalendarClockIcon"
-                class="w-5 h-5"
-                aria-hidden="true"
-              />
-            </span>
-            <div>
-              <h1 class="text-xl font-semibold tracking-tight">Schedules</h1>
-              <p class="mt-0.5 text-sm text-base-content-muted">
-                Cron jobs that run headless PtahCode sessions on a schedule.
-              </p>
-            </div>
-          </div>
-          <div class="flex flex-wrap items-center gap-[var(--ptah-gap-controls)]">
-            @if (reviewAvailable()) {
-              <a
-                routerLink="/review-runs"
-                ptahButton
-                variant="ghost"
-                aria-label="Open review runs"
-                data-testid="cron-review-runs-link"
-                >Review runs</a
-              >
-            }
-            <div
-              class="join"
-              role="tablist"
-              aria-label="Schedule workspace scope"
-            >
-              <button
-                type="button"
-                role="tab"
-                ptahButton
-                class="join-item"
-                data-testid="cron-scope-workspace"
-                [variant]="scopeFilter() === 'workspace' ? 'primary' : 'secondary'"
-                [attr.aria-selected]="scopeFilter() === 'workspace'"
-                (click)="onScopeChange('workspace')"
-              >
-                This workspace
-              </button>
-              <button
-                type="button"
-                role="tab"
-                ptahButton
-                class="join-item"
-                data-testid="cron-scope-all"
-                [variant]="scopeFilter() === 'all' ? 'primary' : 'secondary'"
-                [attr.aria-selected]="scopeFilter() === 'all'"
-                (click)="onScopeChange('all')"
-              >
-                All workspaces
-              </button>
-            </div>
+      <div
+        class="flex flex-col gap-[var(--ptah-gap-section)]"
+        data-testid="cron-scheduler-section"
+      >
+        <ptah-cron-header-band
+          [stats]="stats()"
+          [scope]="scopeFilter()"
+          [loading]="loading()"
+          [reviewAvailable]="reviewAvailable()"
+          (scopeChange)="onScopeChange($event)"
+          (refresh)="refresh()"
+          (newJob)="newJob()"
+        />
+
+        @if (error(); as message) {
+          <ptah-alert
+            tone="error"
+            live="assertive"
+            [compact]="true"
+            data-testid="cron-error"
+          >
+            {{ message }}
             <button
+              alertAction
               type="button"
-              ptahIconButton
-              label="Refresh jobs"
+              ptahButton
+              variant="ghost"
+              size="xs"
               [disabled]="loading()"
               (click)="refresh()"
             >
-              <lucide-angular
-                [img]="RefreshCwIcon"
-                class="size-4"
-                [class.animate-spin]="loading()"
-                aria-hidden="true"
-              />
+              Retry
             </button>
-            <button
-              type="button"
-              ptahButton
-              variant="primary"
-              data-testid="cron-new-job-btn"
-              (click)="newJob()"
-            >
-              New job
-            </button>
-          </div>
-        </header>
-
-        <div
-          class="grid grid-cols-[repeat(auto-fit,minmax(9.5rem,1fr))] gap-[var(--ptah-gap-field)]"
-          aria-label="Cron statistics"
-        >
-          <ptah-stat layout="tile" radius="none" label="Jobs" [value]="stats().total" valueTone="primary" data-testid="cron-stat-total">
-            <lucide-angular ptahStatIcon [img]="CalendarClockIcon" class="w-6 h-6 text-primary" aria-hidden="true" />
-          </ptah-stat>
-
-          <ptah-stat layout="tile" radius="none" label="Enabled" [value]="stats().enabled" valueTone="success" data-testid="cron-stat-enabled">
-            <lucide-angular ptahStatIcon [img]="CirclePlayIcon" class="w-6 h-6 text-success" aria-hidden="true" />
-          </ptah-stat>
-
-          <ptah-stat layout="tile" radius="none" label="Disabled" [value]="stats().disabled" valueTone="muted" data-testid="cron-stat-disabled">
-            <lucide-angular ptahStatIcon [img]="CirclePauseIcon" class="w-6 h-6 text-base-content-muted" aria-hidden="true" />
-          </ptah-stat>
-
-          <!-- Raw tile: ptah-stat info maps to state-run, which differs from theme text-info. -->
-          <div data-testid="cron-stat-next-run" class="stats surface-2 min-w-0 overflow-hidden">
-            <div class="stat min-w-0 overflow-hidden p-4">
-              <div class="stat-figure text-info">
-                <lucide-angular
-                  [img]="ClockIcon"
-                  class="w-6 h-6"
-                  aria-hidden="true"
-                />
-              </div>
-              <div
-                class="stat-title min-w-0 whitespace-normal text-base-content-muted"
-              >
-                Next run
-              </div>
-              <div
-                class="stat-value min-w-0 break-words text-sm font-medium text-info"
-              >
-                {{ formatTime(stats().nextRunAt) }}
-              </div>
-              @if (stats().nextRunAt !== null) {
-                <div class="stat-desc text-base-content-muted">
-                  {{ formatRelative(stats().nextRunAt) }}
-                </div>
-              }
-            </div>
-          </div>
-        </div>
-
-        @if (error()) {
-          <div role="alert" class="alert alert-error text-sm">
-            <span>{{ error() }}</span>
-          </div>
+          </ptah-alert>
         }
 
-        <div class="flex flex-col gap-[var(--ptah-gap-heading)]">
-          <ptah-section-header heading="Scheduled jobs" level="2" size="section" />
-          @if (jobs().length === 0) {
-            <ptah-state-panel
-              state="empty"
-              title="No scheduled jobs yet"
-              body="Cron jobs run a prompt on a recurring schedule as a headless PtahCode session — perfect for nightly builds, digests, or maintenance."
-              actionLabel="New job"
-              data-testid="cron-empty-state"
-              (action)="newJob()"
-            />
-          } @else {
-            <section
-              class="grid gap-[var(--ptah-gap-field)] sm:grid-cols-2 xl:grid-cols-3"
-              aria-label="Scheduled jobs"
-            >
-              @for (job of jobs(); track job.id) {
-                <ptah-cron-job-card
-                  [job]="job"
-                  [description]="describeExpr(job.cronExpr)"
-                  [selected]="selectedJobId() === job.id"
-                  (opened)="selectJob(job.id)"
-                  (runNow)="runNow(job.id)"
-                  (edit)="editJob(job)"
-                  (toggled)="toggleEnabled(job)"
-                  (removed)="confirmDelete(job)"
-                />
-              }
-            </section>
-          }
-        </div>
-
-        @if (formOpen()) {
-          <section
-            ptahSurface variant="surface-1" padding="lg"
-            class="overflow-hidden rounded-xl"
-            aria-label="Job editor"
-            data-testid="cron-form"
-          >
-            <ptah-section-header [heading]="form().id ? 'Edit job' : 'New job'" level="2" />
-            <div class="mt-[var(--ptah-gap-heading)] grid max-w-2xl gap-[var(--ptah-gap-field)] sm:grid-cols-2">
-              <ptah-field label="Name" appearance="stacked">
-                <input
-                  type="text"
-                  ptahInput
-                  data-testid="cron-form-name"
-                  [value]="form().name"
-                  (input)="patchForm({ name: inputValue($event) })"
-                />
-              </ptah-field>
-
-              <div>
-                <ptah-field
-                  label="Cron expression"
-                  appearance="stacked"
-                  [hint]="exprPreview().valid ? (exprPreview().description ?? null) : null"
-                  [error]="!exprPreview().valid && form().cronExpr.length > 0 ? (exprPreview().error ?? null) : null"
-                >
-                  <input
-                    type="text"
-                    ptahInput
-                    class="font-mono"
-                    data-testid="cron-form-expr"
-                    placeholder="*/5 * * * *"
-                    [value]="form().cronExpr"
-                    (input)="patchForm({ cronExpr: inputValue($event) })"
-                  />
-                </ptah-field>
-              </div>
-
-              <div class="sm:col-span-2">
-                <ptah-field
-                  label="Prompt / handler"
-                  appearance="stacked"
-                  hint='Reserved internal handlers (prefixed "handler:") are rejected by the backend.'
-                >
-                  <textarea
-                    ptahTextarea
-                    class="font-mono"
-                    rows="3"
-                    data-testid="cron-form-prompt"
-                    [value]="form().prompt"
-                    (input)="patchForm({ prompt: inputValue($event) })"
-                  ></textarea>
-                </ptah-field>
-              </div>
-
-              <ptah-field label="Workspace root (optional)" appearance="stacked">
-                <input
-                  type="text"
-                  ptahInput
-                  [value]="form().workspaceRoot"
-                  (input)="patchForm({ workspaceRoot: inputValue($event) })"
-                />
-              </ptah-field>
-
-              <div>
-                <ptah-field label="Timezone" appearance="stacked" [hint]="'Detected timezone: ' + detectedTimezone">
-                  <select
-                    ptahSelect
-                    [value]="form().timezone"
-                    (change)="patchForm({ timezone: selectValue($event) })"
-                  >
-                    @for (tz of timezoneOptions(); track tz) {
-                      <option [value]="tz" [selected]="tz === form().timezone">
-                        {{ tz }}
-                      </option>
-                    }
-                  </select>
-                </ptah-field>
-              </div>
-
-              <label class="flex cursor-pointer items-center gap-[var(--ptah-gap-controls)]">
-                <input
-                  type="checkbox"
-                  ptahToggle
-                  size="sm"
-                  [checked]="form().enabled"
-                  (change)="patchForm({ enabled: checkboxValue($event) })"
-                />
-                <span class="text-xs text-base-content-muted">Enabled</span>
-              </label>
-            </div>
-
-            <div class="mt-[var(--ptah-gap-group)] flex flex-wrap gap-[var(--ptah-gap-controls)]">
-              <button
-                type="button"
-                ptahButton
-                variant="primary"
-                data-testid="cron-form-submit"
-                [disabled]="!canSubmit() || loading()"
-                (click)="submitForm()"
-              >
-                {{ form().id ? 'Save changes' : 'Create job' }}
-              </button>
-              <button
-                type="button"
-                ptahButton
-                variant="ghost"
-                (click)="closeForm()"
-              >
-                Cancel
-              </button>
-            </div>
-          </section>
-        }
+        <ptah-cron-job-list
+          [jobs]="jobs()"
+          [loading]="loading()"
+          [selectedJobId]="selectedJobId()"
+          (opened)="selectJob($event)"
+          (runNow)="runNow($event)"
+          (edit)="editJob($event)"
+          (toggled)="toggleEnabled($event)"
+          (removed)="deleteJob($event)"
+          (newJob)="newJob()"
+        />
 
         <ptah-cron-job-detail-drawer
           [job]="selectedJob()"
           [runs]="runs()"
+          [runsState]="runsState()"
           [description]="selectedDescription()"
           (closed)="closeDetail()"
           (runNow)="runSelected()"
           (edit)="editSelected()"
           (toggled)="toggleSelected()"
           (removed)="deleteSelected()"
+        />
+
+        <ptah-cron-job-form
+          [open]="formOpen()"
+          [job]="editingJob()"
+          [defaultWorkspaceRoot]="defaultWorkspaceRoot()"
+          (saved)="onFormSaved()"
+          (cancelled)="closeForm()"
         />
 
         <p class="text-xs text-base-content-muted">
@@ -455,13 +154,7 @@ export class CronSchedulerTabComponent implements OnInit {
   private readonly cronExpr = inject(CronExpressionService);
   private readonly appState = inject(AppStateManager);
 
-  protected readonly detectedTimezone = detectUserTimezone();
-
   protected readonly CalendarClockIcon = CalendarClock;
-  protected readonly CirclePlayIcon = CirclePlay;
-  protected readonly CirclePauseIcon = CirclePause;
-  protected readonly ClockIcon = Clock;
-  protected readonly RefreshCwIcon = RefreshCw;
 
   public readonly isElectron = computed(
     () => this.vscodeService.config()?.isElectron === true,
@@ -473,6 +166,7 @@ export class CronSchedulerTabComponent implements OnInit {
 
   public readonly jobs = this.state.jobs;
   public readonly runs = this.state.runs;
+  public readonly runsState = this.state.runsState;
   public readonly loading = this.state.loading;
   public readonly error = this.state.error;
   public readonly selectedJobId = this.state.selectedJobId;
@@ -481,30 +175,16 @@ export class CronSchedulerTabComponent implements OnInit {
   public readonly scopeFilter = this.state.scopeFilter;
 
   public readonly formOpen = signal<boolean>(false);
-  public readonly form = signal<CronJobFormState>(
-    emptyForm(this.detectedTimezone),
+  /** The job the form edits; `null` while the form creates a new job. */
+  public readonly editingJob = signal<ScheduledJobDto | null>(null);
+
+  /**
+   * New jobs are stamped with the active workspace so they surface under the
+   * default 'workspace' scope. The form keeps the field editable.
+   */
+  public readonly defaultWorkspaceRoot = computed<string | null>(
+    () => this.appState.workspaceInfo()?.path ?? null,
   );
-
-  public readonly exprPreview = computed(() => {
-    const expr = this.form().cronExpr;
-    const v = this.cronExpr.validate(expr);
-    if (!v.valid) {
-      return { valid: false, description: '', error: v.error };
-    }
-    return {
-      valid: true,
-      description: this.cronExpr.describe(expr),
-    };
-  });
-
-  public readonly canSubmit = computed(() => {
-    const f = this.form();
-    return (
-      f.name.trim().length > 0 &&
-      f.prompt.trim().length > 0 &&
-      this.exprPreview().valid
-    );
-  });
 
   /**
    * Human rendering of the selected job's cron expression, resolved once here
@@ -513,12 +193,6 @@ export class CronSchedulerTabComponent implements OnInit {
   public readonly selectedDescription = computed<string>(() => {
     const job = this.selectedJob();
     return job === null ? '' : this.cronExpr.describe(job.cronExpr);
-  });
-
-  public readonly timezoneOptions = computed<readonly string[]>(() => {
-    const tz = this.detectedTimezone;
-    if (SUGGESTED_TIMEZONES.includes(tz)) return SUGGESTED_TIMEZONES;
-    return [tz, ...SUGGESTED_TIMEZONES];
   });
 
   public ngOnInit(): void {
@@ -536,12 +210,8 @@ export class CronSchedulerTabComponent implements OnInit {
   }
 
   public newJob(): void {
-    const form = emptyForm(this.detectedTimezone);
-    // Stamp new jobs with the active workspace so they surface under the
-    // default 'workspace' scope. The field stays editable for advanced users.
-    const activeRoot = this.appState.workspaceInfo()?.path;
-    if (activeRoot) form.workspaceRoot = activeRoot;
-    this.form.set(form);
+    this.state.select(null);
+    this.editingJob.set(null);
     this.formOpen.set(true);
   }
 
@@ -550,53 +220,20 @@ export class CronSchedulerTabComponent implements OnInit {
     // while the inline editor opens behind it would stack two surfaces and
     // trap focus in the wrong one.
     this.state.select(null);
-    this.form.set({
-      id: job.id,
-      name: job.name,
-      cronExpr: job.cronExpr,
-      prompt: job.prompt,
-      workspaceRoot: job.workspaceRoot ?? '',
-      timezone: job.timezone,
-      enabled: job.enabled,
-    });
+    this.editingJob.set(job);
     this.formOpen.set(true);
+  }
+
+  /** After a save: close the form; an edited job is selected again to show its update. */
+  public onFormSaved(): void {
+    const edited = this.editingJob();
+    this.closeForm();
+    if (edited) this.state.select(edited.id);
   }
 
   public closeForm(): void {
     this.formOpen.set(false);
-  }
-
-  public patchForm(patch: Partial<CronJobFormState>): void {
-    this.form.update((f) => ({ ...f, ...patch }));
-  }
-
-  public async submitForm(): Promise<void> {
-    if (!this.canSubmit()) return;
-    const f = this.form();
-    const workspaceRoot =
-      f.workspaceRoot.trim().length === 0 ? null : f.workspaceRoot;
-
-    if (f.id) {
-      await this.state.update(f.id, {
-        name: f.name,
-        cronExpr: f.cronExpr,
-        prompt: f.prompt,
-        workspaceRoot,
-        timezone: f.timezone,
-        enabled: f.enabled,
-      });
-    } else {
-      const params: CronCreateParams = {
-        name: f.name,
-        cronExpr: f.cronExpr,
-        prompt: f.prompt,
-        workspaceRoot,
-        timezone: f.timezone,
-        enabled: f.enabled,
-      };
-      await this.state.create(params);
-    }
-    this.formOpen.set(false);
+    this.editingJob.set(null);
   }
 
   public async toggleEnabled(job: ScheduledJobDto): Promise<void> {
@@ -608,15 +245,9 @@ export class CronSchedulerTabComponent implements OnInit {
     await this.state.runNow(id);
   }
 
-  public confirmDelete(job: ScheduledJobDto): void {
-    const proceed =
-      typeof globalThis.confirm === 'function'
-        ? globalThis.confirm(
-            `Delete cron job "${job.name}"? This cannot be undone.`,
-          )
-        : true;
-    if (!proceed) return;
-    void this.state.delete(job.id);
+  /** The card and the drawer confirm inline, so this deletes without a prompt. */
+  public deleteJob(id: string): void {
+    void this.state.delete(id);
   }
 
   public selectJob(id: string): void {
@@ -645,31 +276,6 @@ export class CronSchedulerTabComponent implements OnInit {
 
   public deleteSelected(): void {
     const job = this.selectedJob();
-    if (job) this.confirmDelete(job);
-  }
-
-  public describeExpr(expr: string): string {
-    return this.cronExpr.describe(expr);
-  }
-
-  public formatTime(epochMs: number | null): string {
-    return formatTime(epochMs);
-  }
-
-  public formatRelative(epochMs: number | null): string {
-    return formatRelative(epochMs);
-  }
-
-  public inputValue(event: Event): string {
-    const target = event.target as HTMLInputElement | HTMLTextAreaElement;
-    return target.value;
-  }
-
-  public selectValue(event: Event): string {
-    return (event.target as HTMLSelectElement).value;
-  }
-
-  public checkboxValue(event: Event): boolean {
-    return (event.target as HTMLInputElement).checked;
+    if (job) this.deleteJob(job.id);
   }
 }

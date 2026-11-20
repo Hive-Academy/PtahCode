@@ -15,6 +15,7 @@ import {
   callTaskCleanupCompleted,
   taskCleanupCompletedTool,
 } from './task-cleanup-completed.tool';
+import { cronTools } from './cron.tools';
 
 export interface LifecycleTool {
   readonly definition: MCPToolDefinition;
@@ -34,4 +35,5 @@ export const lifecycleTools: readonly LifecycleTool[] = [
   { definition: taskCloseOutTool, handler: callTaskCloseOut },
   { definition: taskCloseOutStatusTool, handler: callTaskCloseOutStatus },
   { definition: taskCleanupCompletedTool, handler: callTaskCleanupCompleted },
+  ...cronTools,
 ];

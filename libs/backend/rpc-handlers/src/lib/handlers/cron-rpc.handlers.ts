@@ -1,8 +1,9 @@
 /**
  * Cron Scheduler RPC Handlers.
  *
- * Bridges the frontend Cron Scheduler UI to the backend `CronScheduler`
- * service. Surfaces nine `cron:*` methods:
+ * Bridges the frontend Cron Scheduler UI to the backend `CronJobService`,
+ * which validates the input and owns the DTO mapping. Surfaces nine `cron:*`
+ * methods:
  *   - cron:list         → list jobs (optionally enabled-only)
  *   - cron:get          → fetch one job by id
  *   - cron:create       → create + arm a new job (croner validates expr/tz)
@@ -13,6 +14,8 @@
  *   - cron:runs         → list run history for a job
  *   - cron:nextFire     → next firing time (epoch ms)
  *
+ * Every job created here has the creator `{ kind: 'user' }`.
+ *
  * Croner errors (invalid expression, unknown timezone) propagate verbatim
  * — architecture §5.3 mandates surfacing croner's diagnostic messages
  * unchanged because they are the most actionable surface the user sees.
@@ -22,10 +25,8 @@ import { TOKENS } from '@ptah-extension/vscode-core';
 import type { Logger, RpcHandler } from '@ptah-extension/vscode-core';
 import {
   CRON_TOKENS,
-  normalizeWorkspaceRoot,
-  type CronScheduler,
-  type JobRun,
-  type ScheduledJob,
+  CronJobValidationError,
+  type CronJobService,
 } from '@ptah-extension/cron-scheduler';
 import type {
   CronCreateParams,
@@ -46,96 +47,37 @@ import type {
   CronToggleResult,
   CronUpdateParams,
   CronUpdateResult,
-  JobRunDto,
   RpcMethodName,
-  ScheduledJobDto,
 } from '@ptah-extension/shared';
-import { JobId } from '@ptah-extension/shared';
-import * as path from 'node:path';
 
 /**
- * SECURITY: reject `handler:NAME` prompts at the RPC surface.
- *
- * `handler:NAME` prompts dispatch to in-process handlers registered by trusted
- * libraries (memory:decay, etc.). A UI-driven cron:create must not be able to
- * invoke arbitrary internal handlers — those jobs must be created from within
- * the host process.
+ * Word a `CronJobValidationError` the way this RPC surface always has.
+ * Prompt and workspaceRoot refusals carry the `cron RPC:` prefix; croner
+ * diagnostics (`cronExpr`, `timezone`) and a malformed id pass through
+ * unchanged. Any other error is returned as it is.
  */
-function assertSafePrompt(prompt?: string): void {
-  if (
-    typeof prompt === 'string' &&
-    prompt.trim().toLowerCase().startsWith('handler:')
-  ) {
-    throw new Error(
-      "cron RPC: prompts starting with 'handler:' are reserved for internal jobs and cannot be created via RPC",
-    );
+function toRpcError(error: unknown): unknown {
+  if (!(error instanceof CronJobValidationError)) return error;
+  switch (error.field) {
+    case 'prompt':
+      return new Error(
+        `cron RPC: ${error.message} and cannot be created via RPC`,
+        { cause: error },
+      );
+    case 'workspaceRoot':
+      return new Error(`cron RPC: ${error.message}`, { cause: error });
+    default:
+      return error;
   }
 }
 
-/**
- * Validate a user-supplied `workspaceRoot` at the RPC boundary and return its
- * canonical form.
- *
- *   - `undefined` / `null` pass through unchanged (no workspace supplied /
- *     cleared) — the caller decides how to persist the empty case.
- *   - Any present value must be a non-empty, absolute, `..`-free string.
- *     `workspaceRoot` becomes the `cwd` for the SDK query when a job runs and
- *     the scope key for the "This workspace" list filter — never trust the
- *     renderer to produce a clean path. The param is typed `unknown` because it
- *     arrives across the JSON-RPC boundary and may not actually be a string.
- *   - The returned value is {@link normalizeWorkspaceRoot}-canonical so the
- *     stored root (write) and the list filter (read) compare on the same key
- *     regardless of trailing-separator / drive-case / separator drift.
- */
-function validateAndNormalizeWorkspaceRoot(
-  wr: unknown,
-): string | null | undefined {
-  if (wr === undefined) return undefined;
-  if (wr === null) return null;
-  if (typeof wr !== 'string' || wr.length === 0) {
-    throw new Error('cron RPC: workspaceRoot must be a non-empty string');
+/** Run a service call and reword its validation errors for RPC callers. */
+async function withRpcErrors<T>(call: () => T | Promise<T>): Promise<T> {
+  try {
+    return await call();
+  } catch (error: unknown) {
+    throw toRpcError(error);
   }
-  if (!path.isAbsolute(wr)) {
-    throw new Error('cron RPC: workspaceRoot must be an absolute path');
-  }
-  if (
-    path
-      .normalize(wr)
-      .split(path.sep)
-      .some((seg) => seg === '..')
-  ) {
-    throw new Error("cron RPC: workspaceRoot must not contain '..' segments");
-  }
-  return normalizeWorkspaceRoot(wr);
-}
-
-function toJobDto(job: ScheduledJob): ScheduledJobDto {
-  return {
-    id: job.id as unknown as string,
-    name: job.name,
-    cronExpr: job.cronExpr,
-    timezone: job.timezone,
-    prompt: job.prompt,
-    workspaceRoot: job.workspaceRoot,
-    enabled: job.enabled,
-    createdAt: job.createdAt,
-    updatedAt: job.updatedAt,
-    lastRunAt: job.lastRunAt,
-    nextRunAt: job.nextRunAt,
-  };
-}
-
-function toRunDto(run: JobRun): JobRunDto {
-  return {
-    id: run.id as unknown as string,
-    jobId: run.jobId as unknown as string,
-    scheduledFor: run.scheduledFor,
-    startedAt: run.startedAt,
-    endedAt: run.endedAt,
-    status: run.status,
-    resultSummary: run.resultSummary,
-    errorMessage: run.errorMessage,
-  };
 }
 
 @injectable()
@@ -155,36 +97,25 @@ export class CronRpcHandlers {
   constructor(
     @inject(TOKENS.LOGGER) private readonly logger: Logger,
     @inject(TOKENS.RPC_HANDLER) private readonly rpcHandler: RpcHandler,
-    @inject(CRON_TOKENS.CRON_SCHEDULER)
-    private readonly scheduler: CronScheduler,
+    @inject(CRON_TOKENS.CRON_JOB_SERVICE)
+    private readonly jobs: CronJobService,
   ) {}
 
   register(): void {
     this.rpcHandler.registerMethod<CronListParams, CronListResult>(
       'cron:list',
-      async (params) => {
-        // Validate + canonicalize the filter so it compares against jobs'
-        // normalized `workspace_root` (JobStore.list normalizes both sides).
-        // `null`/`undefined` collapse to "no filter" (global listing).
-        const workspaceRoot =
-          validateAndNormalizeWorkspaceRoot(params?.workspaceRoot) ?? undefined;
-        const jobs = this.scheduler.list({
-          enabledOnly: params?.enabledOnly,
-          workspaceRoot,
-        });
-        return { jobs: jobs.map(toJobDto) };
-      },
+      (params) =>
+        withRpcErrors(() => ({
+          jobs: this.jobs.list({
+            enabledOnly: params?.enabledOnly,
+            workspaceRoot: params?.workspaceRoot,
+          }),
+        })),
     );
 
     this.rpcHandler.registerMethod<CronGetParams, CronGetResult>(
       'cron:get',
-      async (params) => {
-        if (!params?.id) return { job: null };
-        const id = JobId.safeParse(params.id);
-        if (!id) return { job: null };
-        const job = this.scheduler.get(id);
-        return { job: job ? toJobDto(job) : null };
-      },
+      async (params) => ({ job: params?.id ? this.jobs.get(params.id) : null }),
     );
 
     this.rpcHandler.registerMethod<CronCreateParams, CronCreateResult>(
@@ -193,20 +124,19 @@ export class CronRpcHandlers {
         if (!params) {
           throw new Error('cron:create requires params');
         }
-        assertSafePrompt(params.prompt);
-        // Store the canonical form so the "This workspace" filter always
-        // matches, regardless of how the renderer stringified the path.
-        const workspaceRoot =
-          validateAndNormalizeWorkspaceRoot(params.workspaceRoot) ?? null;
-        const job = this.scheduler.create({
-          name: params.name,
-          cronExpr: params.cronExpr,
-          timezone: params.timezone,
-          prompt: params.prompt,
-          workspaceRoot,
-          enabled: params.enabled,
-        });
-        return { job: toJobDto(job) };
+        return withRpcErrors(() => ({
+          job: this.jobs.create(
+            {
+              name: params.name,
+              cronExpr: params.cronExpr,
+              timezone: params.timezone,
+              prompt: params.prompt,
+              workspaceRoot: params.workspaceRoot,
+              enabled: params.enabled,
+            },
+            { kind: 'user' },
+          ),
+        }));
       },
     );
 
@@ -216,34 +146,17 @@ export class CronRpcHandlers {
         if (!params?.id) {
           throw new Error('cron:update requires id');
         }
-        const id = JobId.from(params.id);
-        const rawPatch = params.patch ?? {};
-        assertSafePrompt(rawPatch.prompt);
-        // Only rewrite workspaceRoot when the caller actually supplied it
-        // (absent = leave unchanged; explicit null = clear; string = normalize).
-        const patch =
-          rawPatch.workspaceRoot === undefined
-            ? rawPatch
-            : {
-                ...rawPatch,
-                workspaceRoot: validateAndNormalizeWorkspaceRoot(
-                  rawPatch.workspaceRoot,
-                ),
-              };
-        const job = this.scheduler.update(id, patch);
-        return { job: toJobDto(job) };
+        return withRpcErrors(() => ({
+          job: this.jobs.update(params.id, params.patch ?? {}),
+        }));
       },
     );
 
     this.rpcHandler.registerMethod<CronDeleteParams, CronDeleteResult>(
       'cron:delete',
-      async (params) => {
-        if (!params?.id) return { ok: false };
-        const id = JobId.safeParse(params.id);
-        if (!id) return { ok: false };
-        const ok = this.scheduler.delete(id);
-        return { ok };
-      },
+      async (params) => ({
+        ok: params?.id ? this.jobs.delete(params.id) : false,
+      }),
     );
 
     this.rpcHandler.registerMethod<CronToggleParams, CronToggleResult>(
@@ -252,46 +165,36 @@ export class CronRpcHandlers {
         if (!params?.id) {
           throw new Error('cron:toggle requires id');
         }
-        const id = JobId.from(params.id);
-        const job = this.scheduler.toggle(id, params.enabled);
-        return { job: toJobDto(job) };
+        return withRpcErrors(() => ({
+          job: this.jobs.toggle(params.id, params.enabled),
+        }));
       },
     );
 
     this.rpcHandler.registerMethod<CronRunNowParams, CronRunNowResult>(
       'cron:runNow',
-      async (params) => {
-        if (!params?.id) return { run: null };
-        const id = JobId.safeParse(params.id);
-        if (!id) return { run: null };
-        const run = await this.scheduler.runNow(id);
-        return { run: run ? toRunDto(run) : null };
-      },
+      async (params) => ({
+        run: params?.id ? await this.jobs.runNow(params.id) : null,
+      }),
     );
 
     this.rpcHandler.registerMethod<CronRunsParams, CronRunsResult>(
       'cron:runs',
-      async (params) => {
-        if (!params?.id) return { runs: [] };
-        const id = JobId.safeParse(params.id);
-        if (!id) return { runs: [] };
-        const runs = this.scheduler.listRuns(id, {
-          limit: params.limit,
-          offset: params.offset,
-        });
-        return { runs: runs.map(toRunDto) };
-      },
+      async (params) => ({
+        runs: params?.id
+          ? this.jobs.runs(params.id, {
+              limit: params.limit,
+              offset: params.offset,
+            })
+          : [],
+      }),
     );
 
     this.rpcHandler.registerMethod<CronNextFireParams, CronNextFireResult>(
       'cron:nextFire',
-      async (params) => {
-        if (!params?.id) return { nextRunAt: null };
-        const id = JobId.safeParse(params.id);
-        if (!id) return { nextRunAt: null };
-        const nextRunAt = this.scheduler.nextFire(id);
-        return { nextRunAt };
-      },
+      async (params) => ({
+        nextRunAt: params?.id ? this.jobs.nextFire(params.id) : null,
+      }),
     );
 
     this.logger.info('[cron] RPC handlers registered');

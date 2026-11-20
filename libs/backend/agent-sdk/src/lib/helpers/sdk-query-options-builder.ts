@@ -25,6 +25,7 @@ import {
   type IWorkspaceProvider,
   type IMcpCallerCredentials,
 } from '@ptah-extension/platform-core';
+import { createCronApprovalGate } from '../permission/cron-approval-gate';
 import { MemoryPromptInjector } from './memory-prompt-injector';
 import { CodeSymbolPromptInjector } from './code-symbol-prompt-injector';
 import { redactMcpUrl, redactMcpOverrideMap } from './redact-mcp-url';
@@ -1062,27 +1063,37 @@ export function withPhaseDelivery(
   skills?: readonly PhaseSkillV1[],
 ): Options['systemPrompt'] {
   if (!phase && !skills?.length) return systemPrompt;
-  if (!systemPrompt || typeof systemPrompt !== 'object' ||
-      Array.isArray(systemPrompt) || systemPrompt.type !== 'preset') {
+  if (
+    !systemPrompt ||
+    typeof systemPrompt !== 'object' ||
+    Array.isArray(systemPrompt) ||
+    systemPrompt.type !== 'preset'
+  ) {
     throw new SdkError('Phase delivery requires a preset system prompt.');
   }
   const preset = systemPrompt;
   return {
     ...preset,
-    append: [preset.append, phase?.text, ...(skills ?? phase?.skills ?? []).map(skill => {
-      if (skill.text) return `Skill ${skill.name}: ${skill.text}`;
-      if (!skill.path?.trim()) return undefined;
+    append: [
+      preset.append,
+      phase?.text,
+      ...(skills ?? phase?.skills ?? []).map((skill) => {
+        if (skill.text) return `Skill ${skill.name}: ${skill.text}`;
+        if (!skill.path?.trim()) return undefined;
 
-      const realCandidate = resolveWorkspaceSkillPath(cwd, skill.path);
-      if (!realCandidate) return undefined;
-      try {
-        return `Skill ${skill.name}: ${readFileSync(realCandidate, 'utf8')}`;
-      } catch {
-        // degradation-audit: optional-capability - an unreadable skill file is
-        // skipped like a missing one (decision O-6); the phase text still applies.
-        return undefined;
-      }
-    })].filter(Boolean).join('\n\n'),
+        const realCandidate = resolveWorkspaceSkillPath(cwd, skill.path);
+        if (!realCandidate) return undefined;
+        try {
+          return `Skill ${skill.name}: ${readFileSync(realCandidate, 'utf8')}`;
+        } catch {
+          // degradation-audit: optional-capability - an unreadable skill file is
+          // skipped like a missing one (decision O-6); the phase text still applies.
+          return undefined;
+        }
+      }),
+    ]
+      .filter(Boolean)
+      .join('\n\n'),
   };
 }
 
@@ -1360,29 +1371,44 @@ export class SdkQueryOptionsBuilder {
         { tabId: sessionConfig.tabId },
       );
     }
-    const gateToolCall: CanUseTool = this.permissionHandler.createCallback(
-      routingSessionId ?? undefined,
-      undefined,
-      routingTabId ?? undefined,
-      permissionLevelResolver,
-      sessionConfig?.tabId,
-      sessionIdResolver,
-    );
+    const permissionCallback: CanUseTool =
+      this.permissionHandler.createCallback(
+        routingSessionId ?? undefined,
+        undefined,
+        routingTabId ?? undefined,
+        permissionLevelResolver,
+        sessionConfig?.tabId,
+        sessionIdResolver,
+      );
     // Silence while `canUseTool` is parked is Ptah's own doing, not the
     // provider's — see `QueryOptionsInput.activityHold`. The hold is taken for
     // every tool call, not just the blocking ones: an auto-approved tool
     // resolves in the same tick, so the cost is a matched hold/release pair,
     // and there is no list of "which branches block" to keep in step.
-    const canUseToolCallback: CanUseTool = activityHold
+    const heldPermissionCallback: CanUseTool = activityHold
       ? async (toolName, input_, options) => {
           activityHold.hold();
           try {
-            return await gateToolCall(toolName, input_, options);
+            return await permissionCallback(toolName, input_, options);
           } finally {
             activityHold.release();
           }
         }
-      : gateToolCall;
+      : permissionCallback;
+    // An SDK allow rule (for example `mcp__ptah__*` in project settings)
+    // decides a call before `canUseTool`. `PreToolUse` runs first, so the
+    // cron write approval also runs there (permission/cron-approval-gate.ts).
+    const cronApprovalGate = createCronApprovalGate(heldPermissionCallback, {
+      onError: (error, toolName) =>
+        this.logger.warn(
+          '[SdkQueryOptionsBuilder] Cron approval prompt failed; denying the call',
+          {
+            toolName,
+            error: error instanceof Error ? error.message : String(error),
+          },
+        ),
+    });
+    const canUseToolCallback: CanUseTool = cronApprovalGate.canUseTool;
     const hooks = this.createHooks(
       cwd,
       sessionId,
@@ -1409,10 +1435,15 @@ export class SdkQueryOptionsBuilder {
         if (!toolInput.success) return {};
         const budgetSession = sessionIdResolver?.() ?? sessionId;
         if (!budgetSession) {
-          this.logger.warn('[SdkQueryOptionsBuilder] SendMessage budget gate missing session id; allowing the call', {
-            hasSessionId: false, eventName: hookInput.hook_event_name,
-            agentId: toolInput.data.to, toolName: hookInput.tool_name,
-          });
+          this.logger.warn(
+            '[SdkQueryOptionsBuilder] SendMessage budget gate missing session id; allowing the call',
+            {
+              hasSessionId: false,
+              eventName: hookInput.hook_event_name,
+              agentId: toolInput.data.to,
+              toolName: hookInput.tool_name,
+            },
+          );
           // No session-independent stopped-target state is available here, so allow this call.
           return {};
         }
@@ -1448,6 +1479,7 @@ export class SdkQueryOptionsBuilder {
     };
     hooks.PreToolUse = [
       { matcher: 'SendMessage', hooks: [budgetMessageGate] },
+      cronApprovalGate.hookMatcher,
       ...(hooks.PreToolUse ?? []),
     ];
     const compactionConfig = this.compactionConfigProvider.getConfig();
@@ -1482,8 +1514,13 @@ export class SdkQueryOptionsBuilder {
     );
     const builtinPolicy = resolveClaudeBuiltinPolicy(builtinOptIns);
     // Preserve Claude preset denials and apply the phase profile to every route.
-    if (phase && (!phase.toolProfile || !Array.isArray(phase.toolProfile.disallowedTools))) {
-      throw new SdkError('Phase tool profile requires a disallowedTools array.');
+    if (
+      phase &&
+      (!phase.toolProfile || !Array.isArray(phase.toolProfile.disallowedTools))
+    ) {
+      throw new SdkError(
+        'Phase tool profile requires a disallowedTools array.',
+      );
     }
     const phaseDisallowedTools = phase
       ? uniqueNames([...phase.toolProfile.disallowedTools])
@@ -1650,8 +1687,10 @@ export class SdkQueryOptionsBuilder {
       prompt: userMessageStream,
       // Builder evidence: the phase denials were merged into this options set.
       // This does not certify a later caller's mutations to Options before query().
-      ...(phaseDisallowedTools?.length && phaseDisallowedTools.every(tool => disallowedTools.includes(tool))
-        ? { toolProfileApplied: true as const } : {}),
+      ...(phaseDisallowedTools?.length &&
+      phaseDisallowedTools.every((tool) => disallowedTools.includes(tool))
+        ? { toolProfileApplied: true as const }
+        : {}),
       options: {
         abortController,
         cwd,
@@ -2347,11 +2386,17 @@ export class SdkQueryOptionsBuilder {
         sessionId: routingSessionId,
         workspaceRoot: cwd,
         ...(toolProfile === 'apps' ? { toolProfile: 'apps' as const } : {}),
-        ...(phase ? {
-          phaseKind: phase.kind,
-          disallowedTools: phaseDisallowedTools,
-        } : {}),
+        ...(phase
+          ? {
+              phaseKind: phase.kind,
+              disallowedTools: phaseDisallowedTools,
+            }
+          : {}),
         capability: 'privileged',
+        // This host asks the user before every cron write: the cron branch
+        // of `SdkPermissionHandler` runs in `canUseTool` and, ahead of SDK
+        // allow rules, in `PreToolUse` (permission/cron-approval-gate.ts).
+        cronWriteApproval: true,
       },
       subject,
       INTERACTIVE_MCP_CREDENTIAL_MAX_AGE_MS,
@@ -2435,7 +2480,11 @@ export class SdkQueryOptionsBuilder {
     phaseKind?: PhaseKind,
   ): Partial<Record<HookEvent, HookCallbackMatcher[]>> {
     // Root tool lifetime, not child registration, owns watchdog protection.
-    const subagentHooks = this.subagentHookHandler.createHooks(cwd, sessionId, phaseKind);
+    const subagentHooks = this.subagentHookHandler.createHooks(
+      cwd,
+      sessionId,
+      phaseKind,
+    );
     const compactionHooks = this.compactionHookHandler.createHooks(
       sessionId,
       cwd,

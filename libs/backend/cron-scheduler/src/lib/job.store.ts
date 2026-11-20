@@ -1,5 +1,5 @@
 /**
- * JobStore — CRUD over `scheduled_jobs` (schema 0004_cron.sql).
+ * JobStore — CRUD over `scheduled_jobs` (schema 0004_cron.sql + 0076).
  *
  * Owns nothing beyond SQL generation + row mapping. Connection lifecycle is
  * handled by `SqliteConnectionService`; we re-resolve the prepared statement
@@ -20,6 +20,8 @@ import { JobId } from '@ptah-extension/shared';
 import { normalizeWorkspaceRoot } from './normalize-workspace-root';
 import type {
   CreateJobInput,
+  CronJobCreator,
+  JobRunStatus,
   ScheduledJob,
   UpdateJobPatch,
   UpsertJobInput,
@@ -37,7 +39,23 @@ interface ScheduledJobRow {
   updated_at: number;
   last_run_at: number | null;
   next_run_at: number | null;
+  created_by_kind: string;
+  created_by_session_id: string | null;
+  /** Correlated subquery column, see {@link SELECT_JOBS}. */
+  last_run_status: JobRunStatus | null;
 }
+
+/**
+ * Job columns plus the status of the newest run, in ONE query. The correlated
+ * subquery is served by `idx_job_runs_job(job_id, scheduled_for DESC)` from
+ * 0004, so it costs one index seek per job — no N+1 round trips.
+ */
+const SELECT_JOBS = `SELECT j.*,
+  (SELECT r.status FROM job_runs r
+    WHERE r.job_id = j.id
+    ORDER BY r.scheduled_for DESC
+    LIMIT 1) AS last_run_status
+  FROM scheduled_jobs j`;
 
 export interface IJobStore {
   create(input: CreateJobInput): ScheduledJob;
@@ -74,12 +92,14 @@ export class JobStore implements IJobStore {
     const tz = input.timezone ?? 'UTC';
     const enabled = input.enabled === false ? 0 : 1;
     const workspaceRoot = input.workspaceRoot ?? null;
+    const createdBy: CronJobCreator = input.createdBy ?? { kind: 'user' };
     this.sqlite.db
       .prepare(
         `INSERT INTO scheduled_jobs
          (id, name, cron_expr, timezone, prompt, workspace_root, enabled,
-          created_at, updated_at, last_run_at, next_run_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?)`,
+          created_at, updated_at, last_run_at, next_run_at,
+          created_by_kind, created_by_session_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?)`,
       )
       .run(
         id,
@@ -92,6 +112,8 @@ export class JobStore implements IJobStore {
         now,
         now,
         input.nextRunAt,
+        createdBy.kind,
+        createdBy.kind === 'session' ? createdBy.sessionId : null,
       );
     this.logger.debug('[cron-scheduler] job created', { id, name: input.name });
     return {
@@ -106,12 +128,14 @@ export class JobStore implements IJobStore {
       updatedAt: now,
       lastRunAt: null,
       nextRunAt: input.nextRunAt,
+      createdBy,
+      lastRunStatus: null,
     };
   }
 
   get(id: JobId): ScheduledJob | null {
     const row = this.sqlite.db
-      .prepare('SELECT * FROM scheduled_jobs WHERE id = ?')
+      .prepare(`${SELECT_JOBS} WHERE j.id = ?`)
       .get(id) as ScheduledJobRow | undefined;
     return row ? mapRow(row) : null;
   }
@@ -128,8 +152,8 @@ export class JobStore implements IJobStore {
     // Comparing normalized values on both sides in TypeScript fixes those
     // legacy rows without a migration; the scheduled_jobs table is small
     // (user-authored jobs), so the full scan is negligible.
-    const where = filter?.enabledOnly ? ' WHERE enabled = 1' : '';
-    const sql = `SELECT * FROM scheduled_jobs${where} ORDER BY created_at ASC`;
+    const where = filter?.enabledOnly ? ' WHERE j.enabled = 1' : '';
+    const sql = `${SELECT_JOBS}${where} ORDER BY j.created_at ASC`;
     const rows = this.sqlite.db.prepare(sql).all() as ScheduledJobRow[];
     const jobs = rows.map(mapRow);
     if (filter?.workspaceRoot === undefined) return jobs;
@@ -199,7 +223,8 @@ export class JobStore implements IJobStore {
    * Insert-or-replace a job using a caller-supplied ID.
    * If a row with the same `id` already exists it is fully replaced
    * (timestamps reset to now). Subsequent boots calling `upsert` with the
-   * same `id` update the schedule without creating duplicates.
+   * same `id` update the schedule without creating duplicates. System jobs
+   * are owned by the user: the creator columns keep their default.
    */
   upsert(input: UpsertJobInput): ScheduledJob {
     const now = Date.now();
@@ -239,6 +264,10 @@ export class JobStore implements IJobStore {
       id: input.id,
       name: input.name,
     });
+    // Read the row back: on a conflict the stored creation time, last run
+    // and creator stay, so the input alone does not describe the job.
+    const stored = this.get(input.id as unknown as JobId);
+    if (stored) return stored;
     return {
       id: input.id as unknown as JobId,
       name: input.name,
@@ -251,6 +280,8 @@ export class JobStore implements IJobStore {
       updatedAt: now,
       lastRunAt: null,
       nextRunAt,
+      createdBy: { kind: 'user' },
+      lastRunStatus: null,
     };
   }
 }
@@ -268,5 +299,18 @@ function mapRow(row: ScheduledJobRow): ScheduledJob {
     updatedAt: row.updated_at,
     lastRunAt: row.last_run_at,
     nextRunAt: row.next_run_at,
+    createdBy: mapCreator(row),
+    lastRunStatus: row.last_run_status ?? null,
   };
+}
+
+/**
+ * The CHECK constraint allows only 'user' | 'session'. A 'session' row with a
+ * NULL id cannot be linked to a session, so it reads as the user.
+ */
+function mapCreator(row: ScheduledJobRow): CronJobCreator {
+  if (row.created_by_kind === 'session' && row.created_by_session_id) {
+    return { kind: 'session', sessionId: row.created_by_session_id };
+  }
+  return { kind: 'user' };
 }
