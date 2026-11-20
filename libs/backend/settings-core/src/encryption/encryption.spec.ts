@@ -702,3 +702,131 @@ describe('TC-30: v3 migration atomic write-before-delete (crash-injection)', () 
     renameSpy.mockRestore();
   });
 });
+
+// ---------------------------------------------------------------------------
+// TC-31: a corrupt secrets.enc.json is moved aside, never overwritten
+// ---------------------------------------------------------------------------
+
+describe('TC-31: SecretsFileStore never destroys a corrupt secrets file', () => {
+  const CORRUPT_JSON = '{ "entries": { "a": ';
+  const UNKNOWN_FORMAT = JSON.stringify({ version: 'one', entries: [] });
+  let tmpDir: string;
+  let secretsPath: string;
+  let errorSpy: jest.SpyInstance;
+
+  beforeEach(() => {
+    tmpDir = makeTmpDir('tc31');
+    secretsPath = path.join(tmpDir, 'secrets.enc.json');
+    errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+    try {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    } catch {
+      /* best effort */
+    }
+  });
+
+  function backupFiles(): string[] {
+    return fs
+      .readdirSync(tmpDir)
+      .filter((name) => name.startsWith('secrets.enc.json.corrupt-'));
+  }
+
+  it('moves a corrupt file aside once for concurrent first reads and keeps writes open', async () => {
+    fs.writeFileSync(secretsPath, CORRUPT_JSON, 'utf8');
+    const masterKey = crypto.randomBytes(32);
+    const store = new SecretsFileStore(tmpDir);
+
+    await Promise.all([
+      store.read('a.key', masterKey),
+      store.read('b.key', masterKey),
+      store.read('c.key', masterKey),
+    ]);
+
+    expect(backupFiles()).toHaveLength(1);
+    await expect(
+      store.write('new.key', 'new-secret', masterKey),
+    ).resolves.toBeUndefined();
+    await expect(store.read('new.key', masterKey)).resolves.toBe('new-secret');
+  });
+
+  it.each([
+    ['invalid JSON', CORRUPT_JSON],
+    ['an unknown format', UNKNOWN_FORMAT],
+  ])(
+    'moves a file with %s aside and keeps it through the next persist()',
+    async (_label, content) => {
+      fs.writeFileSync(secretsPath, content, 'utf8');
+      const masterKey = crypto.randomBytes(32);
+      const store = new SecretsFileStore(tmpDir);
+
+      await expect(store.read('any.key', masterKey)).resolves.toBeUndefined();
+      await store.write('new.key', 'new-secret', masterKey);
+
+      const backups = backupFiles();
+      expect(backups).toHaveLength(1);
+      expect(fs.readFileSync(path.join(tmpDir, backups[0]), 'utf8')).toBe(
+        content,
+      );
+      // The new file holds only the new entry.
+      const fresh = new SecretsFileStore(tmpDir);
+      await expect(fresh.read('new.key', masterKey)).resolves.toBe(
+        'new-secret',
+      );
+
+      // Logged at error with the backup name only, never the file content.
+      expect(errorSpy).toHaveBeenCalledWith(
+        expect.stringContaining('moved it aside'),
+        expect.objectContaining({ backupFile: backups[0] }),
+      );
+      const logged = JSON.stringify(errorSpy.mock.calls);
+      expect(logged).not.toContain(content);
+    },
+  );
+
+  it('refuses to overwrite the file when the move aside fails', async () => {
+    fs.writeFileSync(secretsPath, CORRUPT_JSON, 'utf8');
+    const fspModule = require('fs/promises') as typeof fsPromises;
+    const realRename = fspModule.rename.bind(fspModule);
+    jest
+      .spyOn(fspModule, 'rename')
+      .mockImplementation(async (oldPath, newPath) => {
+        if (String(newPath).includes('.corrupt-')) {
+          throw Object.assign(new Error('simulated EPERM'), { code: 'EPERM' });
+        }
+        return realRename(oldPath, newPath);
+      });
+    const masterKey = crypto.randomBytes(32);
+    const store = new SecretsFileStore(tmpDir);
+
+    await expect(store.read('any.key', masterKey)).resolves.toBeUndefined();
+    await expect(
+      store.write('new.key', 'new-secret', masterKey),
+    ).rejects.toThrow('refusing to overwrite');
+    store.flushSync(masterKey);
+
+    expect(fs.readFileSync(secretsPath, 'utf8')).toBe(CORRUPT_JSON);
+    expect(backupFiles()).toHaveLength(0);
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('could not be moved aside'),
+      expect.objectContaining({ code: 'EPERM' }),
+    );
+  });
+
+  it('starts empty without a backup or an error log when the file does not exist', async () => {
+    const masterKey = crypto.randomBytes(32);
+    const store = new SecretsFileStore(tmpDir);
+
+    await expect(store.read('any.key', masterKey)).resolves.toBeUndefined();
+    await store.write('new.key', 'new-secret', masterKey);
+
+    expect(backupFiles()).toHaveLength(0);
+    expect(errorSpy).not.toHaveBeenCalled();
+    await expect(
+      new SecretsFileStore(tmpDir).read('new.key', masterKey),
+    ).resolves.toBe('new-secret');
+  });
+});

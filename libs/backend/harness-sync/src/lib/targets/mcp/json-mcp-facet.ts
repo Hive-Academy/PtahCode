@@ -215,20 +215,81 @@ export class JsonMcpFacet implements IHarnessMcpFacet {
       );
     }
 
-    return withMcpConfigLock(path, () => {
-      const fileConfig = this.readJson(path);
+    return withMcpConfigLock(path, async () => {
+      const fileConfig = this.readJsonForWrite(path);
       const existing = fileConfig[this.options.rootKey];
+      if (existing !== undefined && !isPlainObject(existing)) {
+        throw new Error(
+          `Refusing to change ${this.configRelPath()}: "${this.options.rootKey}" is not an object. Fix the file, then retry.`,
+        );
+      }
       const servers: Record<string, unknown> =
-        typeof existing === 'object' && existing !== null
-          ? { ...(existing as Record<string, unknown>) }
-          : {};
+        existing === undefined ? {} : { ...existing };
 
-      if (!change(servers)) return Promise.resolve();
+      if (!change(servers)) return;
 
       fileConfig[this.options.rootKey] = servers;
       this.writeJson(path, fileConfig);
-      return Promise.resolve();
     });
+  }
+
+  /**
+   * The read the write path uses: strict where {@link readJson} is lenient.
+   *
+   * Only an absent file (ENOENT) or an empty one reads as `{}`, so the write
+   * creates or fills it. A file that exists but cannot be read, does not
+   * parse, or is not a JSON object is REFUSED: writing `{}` plus one server
+   * back over it would drop every other server the user declared. The thrown
+   * message names the file and the failure kind only, never its contents — a
+   * JSON parse error echoes the text it choked on, and MCP env and headers
+   * hold secrets.
+   */
+  private readJsonForWrite(path: string): Record<string, unknown> {
+    let text: string;
+    try {
+      text = readFileSync(path, 'utf-8');
+    } catch (error: unknown) {
+      if (errorCode(error) === 'ENOENT') return {};
+      this.options.logger?.warn(
+        '[harness-sync] MCP config unreadable; write refused',
+        {
+          target: this.target,
+          code: errorCode(error),
+          errorName: error instanceof Error ? error.name : typeof error,
+        },
+      );
+      throw new Error(
+        `Refusing to change ${this.configRelPath()}: the file exists but could not be read (${errorCode(error) ?? 'unknown error'}). Fix the file, then retry.`,
+        { cause: error },
+      );
+    }
+
+    // A UTF-8 byte order mark is valid in a file but not in JSON.parse.
+    if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
+    if (text.trim() === '') return {};
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch (error: unknown) {
+      this.options.logger?.warn(
+        '[harness-sync] MCP config malformed; write refused',
+        {
+          target: this.target,
+          errorName: error instanceof Error ? error.name : typeof error,
+        },
+      );
+      throw new Error(
+        `Refusing to change ${this.configRelPath()}: the file is not valid JSON. Fix the file, then retry.`,
+        { cause: error },
+      );
+    }
+    if (!isPlainObject(parsed)) {
+      throw new Error(
+        `Refusing to change ${this.configRelPath()}: the file does not contain a JSON object. Fix the file, then retry.`,
+      );
+    }
+    return parsed;
   }
 
   private readServersObject(path: string): Record<string, unknown> {
@@ -239,10 +300,11 @@ export class JsonMcpFacet implements IHarnessMcpFacet {
   }
 
   /**
-   * The legacy read: every failure — absent, unreadable, malformed — is `{}`.
-   * The reconciler and the write path depend on that; {@link inspect} is the
-   * caller that needs to tell them apart, and reads through
-   * {@link readJsonStatus} instead.
+   * The legacy read, for listing only: every failure — absent, unreadable,
+   * malformed — is `{}`. {@link readAll} depends on that. {@link inspect}
+   * needs to tell them apart and reads through {@link readJsonStatus}; the
+   * write path must refuse a damaged file and reads through
+   * {@link readJsonForWrite}.
    */
   private readJson(path: string): Record<string, unknown> {
     try {
@@ -362,6 +424,11 @@ async function readJsonStatus(
  */
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** A non-null, non-array object. */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /** Every entry of a server map that is an object, as a config. */

@@ -175,6 +175,24 @@ const VERIFIED_BADGE: CatalogCardBadge = { label: 'Verified', tone: 'info' };
         <div class="flex items-center justify-center py-8">
           <span class="loading loading-spinner loading-md"></span>
         </div>
+      } @else if (keyStatus() === 'error') {
+        <!-- Status check failed: the key may be saved, so no key form here. -->
+        <div
+          class="alert alert-error alert-sm py-1 px-2"
+          role="alert"
+          data-testid="smithery-key-status-error"
+        >
+          <span class="text-xs">{{ keyStatusError() }}</span>
+          <button
+            ptahButton
+            variant="ghost"
+            size="xs"
+            (click)="retryKeyStatus()"
+            type="button"
+          >
+            Retry
+          </button>
+        </div>
       } @else {
         @if (keyStatus() === 'not-configured' || showKeyForm()) {
           <!-- Connect prompt: enter an API key before any browse RPC fires. -->
@@ -692,10 +710,16 @@ export class SmitherySurfaceComponent implements OnInit, OnDestroy {
   /** Curated category chips exposed to the template. */
   protected readonly categories = SMITHERY_CATEGORIES;
 
-  /** 'unknown' until status RPC resolves; gates ALL browse RPC. */
+  /**
+   * 'unknown' until status RPC resolves; gates ALL browse RPC. 'error' means
+   * the status could not be read (a key may still be saved), so the surface
+   * shows a Retry action rather than the API-key form.
+   */
   public readonly keyStatus = signal<
-    'unknown' | 'configured' | 'not-configured'
+    'unknown' | 'configured' | 'not-configured' | 'error'
   >('unknown');
+  /** Why the key status could not be read; set while keyStatus is 'error'. */
+  public readonly keyStatusError = signal<string | null>(null);
 
   public readonly keyInput = signal('');
   public readonly isSavingKey = signal(false);
@@ -1349,34 +1373,60 @@ export class SmitherySurfaceComponent implements OnInit, OnDestroy {
 
   // ── Browse / pagination ─────────────────────────────────────────────────────
 
+  /** Public re-entry for the key-status Retry button. */
+  public retryKeyStatus(): void {
+    void this.checkKeyStatus();
+  }
+
   private async checkKeyStatus(): Promise<void> {
+    this.keyStatus.set('unknown');
+    this.keyStatusError.set(null);
+    let configured: boolean;
     try {
       const result = await this.rpc.call(
         'mcpDirectory:getSmitheryKeyStatus',
         {},
       );
       if (this.destroyed) return;
-      const configured = result.isSuccess() && result.data.configured === true;
-      this.keyStatus.set(configured ? 'configured' : 'not-configured');
-      if (configured) {
-        // Four independent reads: the browse list, the manifest, the account
-        // and the connections. None of them gates another.
-        await Promise.all([
-          this.runBrowse(),
-          this.loadInstalled(),
-          this.loadAccount(),
-          this.loadConnections(),
-        ]);
+      if (!result.isSuccess()) {
+        // An error answer says nothing about the key; only a successful
+        // answer may resolve to 'not-configured'.
+        this.failKeyStatus(result.error);
+        return;
       }
+      configured = result.data.configured === true;
     } catch (error: unknown) {
-      // degradation-audit: reported - logged at console.warn here; the surface
-      // falls back to 'not-configured' and shows the API-key form.
+      // degradation-audit: reported - logged at console.warn and shown to the
+      // user through keyStatusError with a Retry action; the key form stays
+      // hidden because a key may already be saved.
       if (this.destroyed) return;
       console.warn('[SmitherySurface] getSmitheryKeyStatus threw', {
         errorName: error instanceof Error ? error.name : typeof error,
       });
-      this.keyStatus.set('not-configured');
+      this.failKeyStatus(undefined);
+      return;
     }
+    this.keyStatus.set(configured ? 'configured' : 'not-configured');
+    if (configured) {
+      // Four independent reads: the browse list, the manifest, the account
+      // and the connections. None of them gates another.
+      await Promise.all([
+        this.runBrowse(),
+        this.loadInstalled(),
+        this.loadAccount(),
+        this.loadConnections(),
+      ]);
+    }
+  }
+
+  /** Enter the 'error' key state with a displayable reason. */
+  private failKeyStatus(reason: string | undefined): void {
+    this.keyStatusError.set(
+      `Could not check the Smithery API key status${
+        reason && reason.trim().length > 0 ? `: ${reason}` : '.'
+      }`,
+    );
+    this.keyStatus.set('error');
   }
 
   /** The query to browse with: free text, else active category, else ''. */

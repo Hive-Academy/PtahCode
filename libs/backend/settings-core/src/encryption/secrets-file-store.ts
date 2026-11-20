@@ -24,11 +24,16 @@ interface SecretsFileFormat {
 const FILE_SCHEMA = 'https://ptah.live/schemas/secrets.enc.json';
 const FILE_VERSION = 1;
 const TMP_SUFFIX = '.flush.tmp';
+const CORRUPT_SUFFIX = '.corrupt-';
 
 export class SecretsFileStore {
   private readonly filePath: string;
   private entries: Map<string, SecretEnvelope> = new Map();
   private loaded = false;
+  /** The load in flight, shared so concurrent first calls read the file once. */
+  private loading: Promise<void> | null = null;
+  /** True when a corrupt file could not be moved aside; see quarantineCorruptFile. */
+  private writesBlocked = false;
 
   constructor(ptahDir: string) {
     this.filePath = path.join(ptahDir, 'secrets.enc.json');
@@ -88,6 +93,7 @@ export class SecretsFileStore {
     }
     const tmpPath = this.filePath + TMP_SUFFIX;
     try {
+      this.assertWritable();
       const data = this.buildFileData();
       fs.writeFileSync(tmpPath, JSON.stringify(data, null, 2), 'utf8');
       fs.renameSync(tmpPath, this.filePath);
@@ -101,8 +107,19 @@ export class SecretsFileStore {
 
   private async ensureLoaded(): Promise<void> {
     if (this.loaded) return;
-    await this.loadFromDisk();
-    this.loaded = true;
+    // One load for every concurrent caller: two loads of a corrupt file would
+    // both try to move it aside, and the second would find it gone.
+    this.loading ??= this.loadFromDisk().then(
+      () => {
+        this.loaded = true;
+      },
+      (error: unknown) => {
+        // A failed read stays unloaded, so the next call retries it.
+        this.loading = null;
+        throw error;
+      },
+    );
+    await this.loading;
   }
 
   private async loadFromDisk(): Promise<void> {
@@ -120,31 +137,74 @@ export class SecretsFileStore {
     let parsed: unknown;
     try {
       parsed = JSON.parse(raw);
-    } catch (err: unknown) {
-      // The next persist() replaces the unreadable file, so its entries are
-      // lost: log at error. Only the error name; the file holds secrets.
-      console.error(
-        '[SecretsFileStore] secrets file is not valid JSON; starting with an empty store',
-        { errorName: err instanceof Error ? err.name : typeof err },
-      );
-      this.entries = new Map();
+    } catch {
+      // degradation-audit: reported - quarantineCorruptFile logs at error
+      // and keeps the unreadable file. The parse error is not logged: its
+      // message can quote file content, and the file holds secrets.
+      await this.quarantineCorruptFile('invalid-json');
       return;
     }
 
     if (!isSecretsFileFormat(parsed)) {
-      // Same loss as an unparsable file: the next persist() replaces it.
-      // A fixed reason only; the file holds secrets.
-      console.error(
-        '[SecretsFileStore] secrets file has an unknown format; starting with an empty store',
-      );
-      this.entries = new Map();
+      await this.quarantineCorruptFile('unknown-format');
       return;
     }
 
     this.entries = new Map(Object.entries(parsed.entries));
   }
 
+  /**
+   * Move an unreadable secrets file aside so that the next persist() cannot
+   * overwrite it, then start with an empty store. The file is never read
+   * again or logged; only the backup file name is logged.
+   *
+   * If the move fails, the store stays readable (every key reads as missing)
+   * but refuses to write: persist() throws and flushSync() skips, so the
+   * corrupt file stays on disk for manual recovery. Callers already handle a
+   * thrown write (FileSettingsStore.writeSecret rejects to its caller and
+   * runV3Migration aborts before it deletes any plaintext key), while a
+   * thrown read would break every secret lookup for the session.
+   */
+  private async quarantineCorruptFile(
+    reason: 'invalid-json' | 'unknown-format',
+  ): Promise<void> {
+    this.entries = new Map();
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const backupPath = `${this.filePath}${CORRUPT_SUFFIX}${stamp}`;
+    try {
+      await fsPromises.rename(this.filePath, backupPath);
+    } catch (err: unknown) {
+      // Already gone: nothing is left that a write could overwrite.
+      if (isNodeError(err) && err.code === 'ENOENT') return;
+      this.writesBlocked = true;
+      console.error(
+        '[SecretsFileStore] secrets file is corrupt and could not be moved aside; secret writes are disabled for this session',
+        {
+          reason,
+          file: path.basename(this.filePath),
+          code: isNodeError(err) ? err.code : undefined,
+          errorName: err instanceof Error ? err.name : typeof err,
+        },
+      );
+      return;
+    }
+    console.error(
+      '[SecretsFileStore] secrets file is corrupt; moved it aside and started with an empty store',
+      { reason, backupFile: path.basename(backupPath) },
+    );
+  }
+
+  /** Throw instead of overwriting a corrupt file that could not be moved aside. */
+  private assertWritable(): void {
+    if (this.writesBlocked) {
+      throw new Error(
+        `[SecretsFileStore] ${path.basename(this.filePath)} is corrupt and could not be moved aside; refusing to overwrite it. Move or repair the file, then restart.`,
+      );
+    }
+  }
+
   private async persist(): Promise<void> {
+    this.assertWritable();
     const dir = path.dirname(this.filePath);
     await fsPromises.mkdir(dir, { recursive: true });
 

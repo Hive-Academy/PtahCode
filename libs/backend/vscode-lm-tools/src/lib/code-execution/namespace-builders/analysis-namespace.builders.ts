@@ -467,6 +467,38 @@ export function buildDependencyNamespace(
   const { dependencyGraph, workspaceProvider, fileSystemProvider, logger } =
     deps;
 
+  // `[]` means "looked it up, found nothing". A lookup that could not run
+  // throws, so the tool runner reports an error result instead of a list the
+  // agent would read as "this file has no imports / is unused".
+  const queryDependencyGraph = (
+    operation: 'getDependencies' | 'getDependents',
+    filePath: string,
+    query: (resolved: string) => string[],
+  ): string[] => {
+    const trimmed = filePath.trim();
+    if (
+      !isAbsoluteFileArg(trimmed) &&
+      !workspaceProvider.getWorkspaceRoot()
+    ) {
+      logger?.warn(`[DependencyNamespace] ${operation} failed`, {
+        errorName: 'NoWorkspace',
+      });
+      throw new Error('No workspace is open');
+    }
+    const resolved = resolveWorkspaceFilePath(trimmed, workspaceProvider);
+    try {
+      return query(resolved);
+    } catch (error: unknown) {
+      const errorName = error instanceof Error ? error.name : typeof error;
+      logger?.warn(`[DependencyNamespace] ${operation} failed`, { errorName });
+      // Only the error name crosses to the agent (the runner sends .message);
+      // the original stays internal as the cause.
+      throw new Error(`Dependency graph unavailable: ${errorName}`, {
+        cause: error,
+      });
+    }
+  };
+
   const readSymbolEntries = (workspaceRoot?: string): SymbolIndexEntry[] => {
     try {
       const index = dependencyGraph.getSymbolIndex(workspaceRoot);
@@ -635,39 +667,15 @@ export function buildDependencyNamespace(
     getDependencies: async (
       filePath: string,
       depth?: number,
-    ): Promise<string[]> => {
-      try {
-        const resolved = resolveWorkspaceFilePath(
-          filePath.trim(),
-          workspaceProvider,
-        );
-        return dependencyGraph.getDependencies(resolved, depth);
-      } catch (error: unknown) {
-        // degradation-audit: reported - logged at warn when a logger is passed;
-        // the tool gets an empty dependency list.
-        logger?.warn('[DependencyNamespace] getDependencies failed', {
-          errorName: error instanceof Error ? error.name : typeof error,
-        });
-        return [];
-      }
-    },
+    ): Promise<string[]> =>
+      queryDependencyGraph('getDependencies', filePath, (resolved) =>
+        dependencyGraph.getDependencies(resolved, depth),
+      ),
 
-    getDependents: async (filePath: string): Promise<string[]> => {
-      try {
-        const resolved = resolveWorkspaceFilePath(
-          filePath.trim(),
-          workspaceProvider,
-        );
-        return dependencyGraph.getDependents(resolved);
-      } catch (error: unknown) {
-        // degradation-audit: reported - logged at warn when a logger is passed;
-        // the tool gets an empty dependents list.
-        logger?.warn('[DependencyNamespace] getDependents failed', {
-          errorName: error instanceof Error ? error.name : typeof error,
-        });
-        return [];
-      }
-    },
+    getDependents: async (filePath: string): Promise<string[]> =>
+      queryDependencyGraph('getDependents', filePath, (resolved) =>
+        dependencyGraph.getDependents(resolved),
+      ),
 
     getSymbolIndex,
 
@@ -699,7 +707,7 @@ export function buildDependencyNamespace(
     ): Promise<GraphFileCoverage> => {
       const trimmed = filePath.trim();
       // A relative path with no open workspace cannot be resolved; the
-      // dependency calls answer [] for it, from no graph, so nothing is known.
+      // dependency calls throw for it, from no graph, so nothing is known.
       if (
         !isAbsoluteFileArg(trimmed) &&
         !workspaceProvider.getWorkspaceRoot()
