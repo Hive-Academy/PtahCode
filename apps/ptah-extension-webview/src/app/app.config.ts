@@ -179,6 +179,13 @@ class WebviewErrorHandler implements ErrorHandler {
       );
       return;
     }
+    // Browsers report "ResizeObserver loop completed with undelivered
+    // notifications" as a window error when an observer's callback changes
+    // layout again in the same frame. The skipped notifications are delivered
+    // next frame, so nothing is lost and there is nothing to act on.
+    if (isError(error) && error.message?.includes('ResizeObserver loop')) {
+      return;
+    }
     if (isError(error) && error.message?.includes('Content Security Policy')) {
       console.error('CSP Violation detected:', error.message);
       console.error(

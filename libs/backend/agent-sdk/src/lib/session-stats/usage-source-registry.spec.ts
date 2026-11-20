@@ -6,7 +6,10 @@ describe('ClaudeUsageSourceRegistry', () => {
     const previous = process.env['CLAUDE_CONFIG_DIR'];
     process.env['CLAUDE_CONFIG_DIR'] = path.join('profile', 'claude');
     try {
-      const registry = new ClaudeUsageSourceRegistry({ listActiveRoots: async () => [] });
+      const registry = new ClaudeUsageSourceRegistry({
+        listActiveRoots: async () => [],
+        listSignedInAccounts: async () => [],
+      });
       expect(await registry.listRoots()).toContain(path.join('profile', 'claude', 'projects'));
     } finally {
       if (previous === undefined) delete process.env['CLAUDE_CONFIG_DIR'];

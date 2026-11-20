@@ -731,8 +731,8 @@ const CERTIFIED_INIT_KEY_SOURCES: ReadonlySet<string> = new Set([
 /**
  * Post-init tripwire and identity: the running child must use a personal
  * claude.ai login (`claudePersonalLoginCheck`: no API key source, first-party
- * provider, a personal subscription in the raw or the display vocabulary) and
- * be the account its launch was certified for. Any
+ * provider, a personal subscription in the raw or the display vocabulary, or
+ * none recorded yet) and be the account its launch was certified for. Any
  * mismatch, an unknown identity included, refuses `identity-unproved`.
  */
 function namedIdentity(

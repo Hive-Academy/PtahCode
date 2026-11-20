@@ -1,4 +1,8 @@
-/** Read Claude subscription windows without opening an SDK session. A Keychain-only login has no credential file and returns no-oauth. */
+/**
+ * Read Claude subscription windows without opening an SDK session. A Keychain-only login has no credential file and returns no-oauth.
+ * A named route reads only its own config directory, never the process env or home. Only the Claude CLI refreshes a stored token,
+ * so an expired one stays no-oauth until the CLI runs again.
+ */
 import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
@@ -9,6 +13,7 @@ import { mapClaudePlanUsage, PlanUsageParseError } from './claude-plan-usage.rea
 import type { PlanUsageReader, PlanUsageReading } from './plan-usage-reader.types';
 
 export const CLAUDE_OAUTH_USAGE_URL = 'https://api.anthropic.com/api/oauth/usage';
+export const CLAUDE_OAUTH_PROFILE_URL = 'https://api.anthropic.com/api/oauth/profile';
 const TIMEOUT_MS = 5_000;
 const MAX_RETRY_AFTER_MS = 5 * 60_000;
 const retryAfterMs = (value: string | null, now: number): number => {
@@ -29,6 +34,11 @@ type Identity = z.infer<typeof Identity>;
 /** Both spellings name one id. A side without an id cannot contradict the other. */
 const differs = (a: string | undefined, b: string | undefined): boolean =>
   a !== undefined && b !== undefined && a !== b;
+const accountIdOf = (identity: Identity): string | undefined => identity.accountUuid ?? identity.account_uuid;
+const organizationIdOf = (identity: Identity): string | undefined => identity.organizationUuid ?? identity.organization_uuid;
+/** The two spellings of one id disagree: the source contradicts itself. */
+const aliasConflict = (identity: Identity): boolean =>
+  differs(identity.accountUuid, identity.account_uuid) || differs(identity.organizationUuid, identity.organization_uuid);
 const identityMismatch = (source: Identity, account: Identity): boolean =>
   differs(source.accountUuid ?? source.account_uuid, account.accountUuid ?? account.account_uuid) ||
   differs(source.organizationUuid ?? source.organization_uuid, account.organizationUuid ?? account.organization_uuid);
@@ -43,6 +53,11 @@ const Config = z.object({
     emailAddress: z.string().min(1),
     organizationName: z.string().optional(),
   }).optional(),
+});
+/** The token's own account, from the authenticated profile endpoint. */
+const Profile = z.object({
+  account: z.object({ uuid: z.string().min(1), email: z.string().min(1) }),
+  organization: z.object({ uuid: z.string().min(1).optional(), name: z.string().optional() }).nullable().optional(),
 });
 const Window = z.object({
   utilization: z.number().finite().min(0).nullable().optional(),
@@ -80,12 +95,18 @@ export function createClaudeOauthPlanUsageReader(
   env: () => Readonly<Record<string, string | undefined>> = () => process.env,
 ): PlanUsageReader {
   return async ({ target, signal }) => {
-    if (target.claudeRoute?.kind === 'named' || target.ownerRef.identityKind !== 'account')
+    if (target.ownerRef.identityKind !== 'account')
       return unavailable('account-unverified', 'no-usage-source');
     let token: string;
     let credentialIdentity: Identity;
     let metadataIdentity: Identity;
-    const configDir = env()['CLAUDE_CONFIG_DIR']?.trim();
+    const route = target.claudeRoute;
+    // A named directory holds both files, as a CLAUDE_CONFIG_DIR does.
+    const usesNamedDirectory = route?.kind === 'named' || !!target.claudeUsageDir;
+    const configDir = route?.kind === 'named' ? route.canonicalConfigDir
+      : target.claudeUsageDir ? target.claudeUsageDir.canonicalConfigDir
+      : env()['CLAUDE_CONFIG_DIR']?.trim();
+    if (usesNamedDirectory && !configDir) return unavailable('account-unverified', 'no-usage-source');
     const credentialsPath = join(configDir || join(home(), '.claude'), '.credentials.json');
     const accountPath = join(configDir || home(), '.claude.json');
     try {
@@ -113,6 +134,8 @@ export function createClaudeOauthPlanUsageReader(
       }) !== target.ownerRef.key) return unavailable('account-unverified');
       metadataIdentity = account;
       if (identityMismatch(credentialIdentity, metadataIdentity)) return unavailable('account-unverified');
+      if (usesNamedDirectory && (aliasConflict(credentialIdentity) || aliasConflict(metadataIdentity)))
+        return unavailable('account-unverified');
     } catch (error: unknown) {
       logger.warn('[PlanUsage] Claude OAuth account metadata unavailable', { reason: error instanceof Error ? error.name : 'invalid' });
       return unavailable('account-unverified');
@@ -122,25 +145,49 @@ export function createClaudeOauthPlanUsageReader(
     const abort = () => controller.abort();
     signal?.addEventListener('abort', abort, { once: true });
     const timer = setTimeout(abort, TIMEOUT_MS);
+    const get = (url: string) => fetcher(url, {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}`, 'anthropic-beta': 'oauth-2025-04-20', Accept: 'application/json' },
+      redirect: 'error', signal: controller.signal,
+    });
+    const httpFailure = async (response: Response): Promise<PlanUsageReading> => {
+      // degradation-audit: optional-capability - body cancel only frees the socket; the status is returned below.
+      await response.body?.cancel().catch(() => undefined);
+      return {
+        ...unavailable(response.status === 401 || response.status === 403 ? 'usage-auth-rejected' : 'cli-unavailable'),
+        ...(response.status === 429 && { retryAfterMs: retryAfterMs(response.headers.get('Retry-After'), now()) }),
+      };
+    };
     try {
-      const response = await fetcher(CLAUDE_OAUTH_USAGE_URL, {
-        method: 'GET',
-        headers: { Authorization: `Bearer ${token}`, 'anthropic-beta': 'oauth-2025-04-20', Accept: 'application/json' },
-        redirect: 'error', signal: controller.signal,
-      });
-      if (!response.ok) {
-        // degradation-audit: optional-capability - body cancel only frees the socket; the status is returned below.
-        await response.body?.cancel().catch(() => undefined);
-        return {
-          ...unavailable(response.status === 401 || response.status === 403 ? 'usage-auth-rejected' : 'cli-unavailable'),
-          ...(response.status === 429 && { retryAfterMs: retryAfterMs(response.headers.get('Retry-After'), now()) }),
-        };
+      // A named directory must bind its token to the owner. Equal account ids in both files do;
+      // otherwise (a CLI build that saves no id) the token's own profile must name the target owner.
+      const credentialAccount = accountIdOf(credentialIdentity);
+      // The profile's ids, when proved, also bind the usage response below.
+      let profileIdentity: Identity = {};
+      if (usesNamedDirectory && (credentialAccount === undefined || credentialAccount !== accountIdOf(metadataIdentity))) {
+        const profileResponse = await get(CLAUDE_OAUTH_PROFILE_URL);
+        if (!profileResponse.ok) return await httpFailure(profileResponse);
+        let profileBody: unknown;
+        try { profileBody = await profileResponse.json(); } catch { return unavailable('cli-parse-failed'); }
+        const profile = Profile.safeParse(profileBody);
+        if (!profile.success) return unavailable('account-unverified');
+        const { account, organization } = profile.data;
+        if (claudeAccountOwnerKey({ email: account.email, organization: organization?.name ?? '' }) !== target.ownerRef.key ||
+          differs(account.uuid, credentialAccount) || differs(account.uuid, accountIdOf(metadataIdentity)) ||
+          differs(organization?.uuid, organizationIdOf(credentialIdentity)) ||
+          differs(organization?.uuid, organizationIdOf(metadataIdentity))) return unavailable('account-unverified');
+        profileIdentity = { accountUuid: account.uuid, ...(organization?.uuid && { organizationUuid: organization.uuid }) };
       }
+      const response = await get(CLAUDE_OAUTH_USAGE_URL);
+      if (!response.ok) return await httpFailure(response);
       let body: unknown;
       try { body = await response.json(); } catch { return unavailable('cli-parse-failed'); }
       const parsed = ResponseBody.safeParse(body);
       if (!parsed.success) return unavailable('cli-parse-failed');
-      if (identityMismatch(parsed.data, metadataIdentity)) return unavailable('account-unverified');
+      if (identityMismatch(parsed.data, metadataIdentity) ||
+        (usesNamedDirectory && (aliasConflict(parsed.data) || identityMismatch(parsed.data, credentialIdentity) ||
+          identityMismatch(parsed.data, profileIdentity))))
+        return unavailable('account-unverified');
       const limits: Record<string, unknown> = {};
       let droppedWindow = parsed.data.limits !== undefined && !Array.isArray(parsed.data.limits);
       for (const field of ['five_hour', 'seven_day', 'seven_day_opus', 'seven_day_sonnet', 'seven_day_oauth_apps'] as const) {

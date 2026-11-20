@@ -44,6 +44,13 @@ export interface PlanSessionHandle {
   readonly sessionId: string;
 }
 
+/** Stored Claude profile directory for OAuth usage reads. */
+export interface ClaudeUsageDirectory {
+  readonly kind: 'stored-profile-usage';
+  readonly profileId: string;
+  readonly canonicalConfigDir: string;
+}
+
 /** One owner whose limits are to be read. */
 export interface PlanOwnerTarget {
   readonly providerId: string;
@@ -52,6 +59,7 @@ export interface PlanOwnerTarget {
   readonly sessionHandle?: PlanSessionHandle;
   /** Backend-only certified source; never copied to the public snapshot. */
   readonly claudeRoute?: ClaudeAccountRoute;
+  readonly claudeUsageDir?: ClaudeUsageDirectory;
   /** A CLI session created by Ptah; readers must never discover sessions. */
   readonly cliSessionId?: string;
 }

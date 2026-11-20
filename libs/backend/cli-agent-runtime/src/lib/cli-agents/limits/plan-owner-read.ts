@@ -10,6 +10,7 @@
  */
 import {
   snapshotWindowsForStatus,
+  type ClaudeUsageDirectory,
   type PlanLimitLedgerService,
   type PlanOwnerTarget,
 } from '@ptah-extension/auth-providers';
@@ -34,6 +35,7 @@ export interface PlanOwnerReadContext {
    * session it is never read (no other query may stand in).
    */
   readonly claudeRoute?: ClaudeAccountNamedRoute;
+  readonly claudeUsageDir?: ClaudeUsageDirectory;
   /** The Ptah CLI agent whose own key or shared connection a read uses. */
   readonly ptahCliId?: string;
   /** Grok CLI session id recorded when Ptah started the lane. */
@@ -114,12 +116,10 @@ const KEYLESS_READ_PROVIDERS: ReadonlySet<string> = new Set([
  * How `owner` is read, or `null` for a provider outside the plan-limit scope.
  *
  * - Claude on an API key has no plan windows: `unsupported-auth`, no read.
- * - Any other Claude owner is read only through the session it was read
- *   for. Without that session the probe would answer with whichever native
- *   session is active, which may be another account, so the owner reads as
- *   "no open session" instead. A named account's read also carries the
- *   certified route, so the reader asks only the query bound to that route
- *   and epoch.
+ * - A Claude session read uses its own query. A certified named route
+ *   restricts the query to that route and epoch. Without a session, a
+ *   stored named account can be read from its usage directory. Other
+ *   Claude owners are listed with "no open session".
  * - Ollama Cloud reads a Ptah CLI lane through the agent's own key when it
  *   holds a real one, else through the shared `ollama-cloud` provider key (the
  *   ollama.com sign-in); the main route reads the provider key. A missing key
@@ -136,19 +136,30 @@ export function planOwnerRead(
       if (owner.identityKind === 'credential') {
         return { kind: 'known', status: 'unsupported-auth' };
       }
-      return context.sessionId
-        ? {
-            kind: 'read',
-            target: {
-              providerId: 'anthropic',
-              ownerRef: owner,
-              sessionHandle: { kind: 'session', sessionId: context.sessionId },
-              ...(context.claudeRoute && {
-                claudeRoute: { ...context.claudeRoute },
-              }),
-            },
-          }
-        : NO_OPEN_SESSION;
+      if (context.sessionId) {
+        return {
+          kind: 'read',
+          target: {
+            providerId: 'anthropic',
+            ownerRef: owner,
+            sessionHandle: { kind: 'session', sessionId: context.sessionId },
+            ...(context.claudeRoute && {
+              claudeRoute: { ...context.claudeRoute },
+            }),
+          },
+        };
+      }
+      if (context.claudeUsageDir && owner.identityKind === 'account') {
+        return {
+          kind: 'read',
+          target: {
+            providerId: 'anthropic',
+            ownerRef: owner,
+            claudeUsageDir: { ...context.claudeUsageDir },
+          },
+        };
+      }
+      return NO_OPEN_SESSION;
     case 'ollama-cloud':
       // A Ptah CLI lane reads with the agent's own key when it holds a real
       // one, else (empty slot or the ollama.com sign-in placeholder) with the

@@ -25,6 +25,24 @@ describe('usage profile roots', () => {
     expect(await adapter.listActiveRoots()).toEqual([]);
   });
 
+  it('lists only signed-in profiles with a stored identity reference', async () => {
+    const identityReference = 'a'.repeat(64);
+    const adapter = new UsageProfileRootsAdapter({
+      list: () => [
+        { profile_id: 'signed-in', canonical_route: '/fixture/signed-in', state: 'signed-in', identity_ref: identityReference },
+        { profile_id: 'signed-out', canonical_route: '/fixture/signed-out', state: 'signed-out', identity_ref: identityReference },
+        { profile_id: 'missing-state', canonical_route: '/fixture/missing-state', identity_ref: identityReference },
+        { profile_id: 'missing-ref', canonical_route: '/fixture/missing-ref', state: 'signed-in' },
+        { profile_id: 'null-ref', canonical_route: '/fixture/null-ref', state: 'signed-in', identity_ref: null },
+        { profile_id: 'empty-ref', canonical_route: '/fixture/empty-ref', state: 'signed-in', identity_ref: '' },
+      ],
+    });
+
+    expect(await adapter.listSignedInAccounts()).toEqual([
+      { profileId: 'signed-in', canonicalConfigDir: '/fixture/signed-in', identityReference },
+    ]);
+  });
+
   it('keeps the port independent of agent-sdk', () => {
     const source = readFileSync(resolve(__dirname, '../../../../auth-providers-tokens/src/lib/usage-profile-roots.port.ts'), 'utf8');
     expect(source).not.toContain('agent-sdk');
