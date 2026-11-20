@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_2287_d4a9
-status: in_progress
+status: in_review
 type: REFACTORING
 title: Clear the degradation audit with one logging and error-handling standard
 depends_on: []
