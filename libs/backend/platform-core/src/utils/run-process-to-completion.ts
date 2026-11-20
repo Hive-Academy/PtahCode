@@ -3,6 +3,7 @@ import type {
   ProcessSpawnRequest,
   SpawnedProcessHandle,
 } from '../interfaces/process-spawner.interface';
+import { killProcessTree } from './process-tree-reaper';
 
 /** Output and exit state of one short command run to completion. */
 export interface ProcessRunResult {
@@ -17,13 +18,40 @@ export interface ProcessRunResult {
 export interface ProcessRunOptions {
   /** Settle as timed out after this long and stop the process. */
   readonly timeoutMs: number;
-  /** How to stop a timed-out process. Default `handle.kill()`. */
+  /** How to stop a timed-out process. Default {@link stopProcessTree}. */
   readonly onTimeout?: (handle: SpawnedProcessHandle) => void;
   /** Bytes kept per stream; the rest is dropped. Default 64 KiB. */
   readonly maxOutputBytes?: number;
 }
 
 const DEFAULT_MAX_OUTPUT_BYTES = 64 * 1024;
+
+/**
+ * Stop a process and its descendants, also when it has no pid yet.
+ *
+ * An off-thread spawner can time a probe out before the launch reports its
+ * pid. Then the root kill is queued on the handle, and the tree is reaped
+ * once the pid arrives, unless the process has already exited.
+ */
+export function stopProcessTree(
+  handle: SpawnedProcessHandle,
+  onError?: (error: unknown) => void,
+): void {
+  if (handle.pid !== undefined) {
+    if (handle.exitCode === null) void killProcessTree(handle.pid, 'SIGTERM', onError);
+    return;
+  }
+  handle.kill();
+  void handle.whenSpawned.then(
+    (pid) => {
+      if (pid !== null && handle.exitCode === null)
+        void killProcessTree(pid, 'SIGTERM', onError);
+    },
+    // A launch that failed has no process left to stop; the run itself
+    // reports the failure through its `error` event.
+    (error: unknown) => onError?.(error),
+  );
+}
 
 /**
  * Run a short command (a `--version` probe, a status query) through an
@@ -71,7 +99,7 @@ export function runProcessToCompletion(
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
-      (options.onTimeout ?? ((h) => h.kill()))(handle);
+      (options.onTimeout ?? stopProcessTree)(handle);
       resolve({
         stdout: stdout(),
         stderr: stderr(),

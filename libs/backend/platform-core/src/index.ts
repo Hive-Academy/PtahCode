@@ -379,6 +379,7 @@ export {
 } from './utils/process-tree-reaper';
 export {
   runProcessToCompletion,
+  stopProcessTree,
   type ProcessRunOptions,
   type ProcessRunResult,
 } from './utils/run-process-to-completion';

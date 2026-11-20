@@ -303,12 +303,7 @@ export class ClaudeCliPathResolver {
         },
         {
           timeoutMs: COMMAND_PATH_TIMEOUT_MS,
-          // A pid is known only once the launch finished. Before that,
-          // `kill()` is queued by the spawner and applied when it arrives.
-          onTimeout: (handle) => {
-            if (handle.pid && !handle.killed) void killProcessTree(handle.pid);
-            else handle.kill();
-          },
+          // The default stopProcessTree reaps the tree, also for a late pid.
         },
       );
       if (result.timedOut || result.exitCode !== 0) return null;

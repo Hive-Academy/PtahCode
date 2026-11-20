@@ -4,14 +4,22 @@ import type {
   IProcessSpawner,
   SpawnedProcessHandle,
 } from '../interfaces/process-spawner.interface';
-import { runProcessToCompletion } from './run-process-to-completion';
+const mockKillProcessTree = jest.fn(async () => undefined);
+jest.mock('./process-tree-reaper', () => ({
+  killProcessTree: (...args: unknown[]) => mockKillProcessTree(...(args as [])),
+}));
+
+import {
+  runProcessToCompletion,
+  stopProcessTree,
+} from './run-process-to-completion';
 
 class FakeProcess extends EventEmitter {
   readonly stdin = null;
   readonly stdout = new PassThrough();
   readonly stderr = new PassThrough();
-  readonly whenSpawned = Promise.resolve(1);
-  readonly pid = 1;
+  whenSpawned: Promise<number | null> = Promise.resolve(1);
+  pid: number | undefined = 1;
   killed = false;
   exitCode: number | null = null;
   kill = jest.fn(() => {
@@ -31,7 +39,10 @@ function spawnerFor(child: FakeProcess): IProcessSpawner & {
 const request = { command: 'codex', args: ['--version'], env: {} };
 
 describe('runProcessToCompletion', () => {
-  afterEach(() => jest.useRealTimers());
+  afterEach(() => {
+    jest.useRealTimers();
+    mockKillProcessTree.mockClear();
+  });
 
   it('collects stdout, stderr and the exit code', async () => {
     const child = new FakeProcess();
@@ -52,7 +63,7 @@ describe('runProcessToCompletion', () => {
     expect(spawner.spawnProcess).toHaveBeenCalledWith(request);
   });
 
-  it('settles at the timeout with the output so far and kills the process', async () => {
+  it('settles at the timeout with the output so far and reaps the process tree', async () => {
     jest.useFakeTimers();
     const child = new FakeProcess();
     const run = runProcessToCompletion(spawnerFor(child), request, {
@@ -69,7 +80,7 @@ describe('runProcessToCompletion', () => {
       signal: null,
       timedOut: true,
     });
-    expect(child.kill).toHaveBeenCalled();
+    expect(mockKillProcessTree).toHaveBeenCalledWith(1, 'SIGTERM', undefined);
   });
 
   it('stops a timed-out process with onTimeout when given', async () => {
@@ -134,5 +145,47 @@ describe('runProcessToCompletion', () => {
     await expect(
       runProcessToCompletion(spawner, request, { timeoutMs: 1000 }),
     ).rejects.toThrow('refused');
+  });
+});
+
+describe('stopProcessTree', () => {
+  afterEach(() => mockKillProcessTree.mockClear());
+
+  it('queues a kill and reaps the tree once a late pid arrives', async () => {
+    const child = new FakeProcess();
+    let spawned!: (pid: number) => void;
+    child.pid = undefined;
+    child.whenSpawned = new Promise((resolve) => (spawned = resolve));
+
+    stopProcessTree(child as unknown as SpawnedProcessHandle);
+    expect(child.kill).toHaveBeenCalled();
+    expect(mockKillProcessTree).not.toHaveBeenCalled();
+
+    spawned(42);
+    await child.whenSpawned;
+    await Promise.resolve();
+    expect(mockKillProcessTree).toHaveBeenCalledWith(42, 'SIGTERM', undefined);
+  });
+
+  it('does not reap a process that already exited', () => {
+    const child = new FakeProcess();
+    child.exitCode = 0;
+
+    stopProcessTree(child as unknown as SpawnedProcessHandle);
+
+    expect(mockKillProcessTree).not.toHaveBeenCalled();
+  });
+
+  it('reports a launch that failed instead of leaving the rejection unhandled', async () => {
+    const child = new FakeProcess();
+    child.pid = undefined;
+    child.whenSpawned = Promise.reject(new Error('spawn failed'));
+    const onError = jest.fn();
+
+    stopProcessTree(child as unknown as SpawnedProcessHandle, onError);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    expect(onError).toHaveBeenCalledWith(expect.objectContaining({ message: 'spawn failed' }));
+    expect(mockKillProcessTree).not.toHaveBeenCalled();
   });
 });

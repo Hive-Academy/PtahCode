@@ -64,6 +64,8 @@ describe('ClaudeCliDetector with a process spawner', () => {
         stderr: new EventEmitter(),
         pid: undefined,
         killed: false,
+        exitCode: null,
+        whenSpawned: new Promise<number | null>(() => undefined),
         kill: jest.fn(),
       });
       const detector = new ClaudeCliDetector(undefined, {
