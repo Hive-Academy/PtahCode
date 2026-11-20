@@ -98,6 +98,7 @@ function repositoryPort(): IFileSystemProvider {
     createDirectory: jest.fn(),
     createDirectoryExclusive: jest.fn(),
     writeFileExclusive: jest.fn(),
+    rename: jest.fn(),
     copy: jest.fn(),
     createFileWatcher: jest.fn(),
     exists: jest.fn(async (absolute: string) => {

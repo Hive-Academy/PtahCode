@@ -1,4 +1,5 @@
 import type { DependencyContainer } from 'tsyringe';
+import { migrateWorkspaceAnalysisIndex } from '@ptah-extension/agent-generation';
 import {
   PLATFORM_TOKENS,
   ContentDownloadService,
@@ -231,6 +232,7 @@ export function createHeavyServicesBooter(
     coordinator.markPersistenceSettled({
       sqliteOpen: thoth.sqliteConnection?.isOpen ?? false,
     });
+    if (workspaceRoot) await migrateWorkspaceAnalysisIndex(container, workspaceRoot);
     // Migrated: fork the read-only search worker now, not on the first search.
     if (thoth.sqliteConnection?.isOpen) startSearchWorkerAfterMigrations(container);
     // Migrated: move WAL checkpoints out of main-thread COMMITs (fix 11).

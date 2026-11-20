@@ -67,6 +67,43 @@ export function runFileSystemContract(
       ).rejects.toThrow();
     });
 
+    it('stages exclusive binary bytes and replaces an existing file', async () => {
+      const source = `${exclusiveRoot}/staged.tmp`;
+      const destination = `${exclusiveRoot}/destination.md`;
+      const bytes = new Uint8Array([0xff, 0x00, 0x80]);
+      await provider.writeFile(destination, 'original');
+      await provider.writeFileExclusive(source, bytes);
+      await expect(provider.writeFileExclusive(source, 'clobber')).rejects.toThrow();
+      await provider.rename(source, destination);
+      expect(await provider.readFileBytes(destination)).toEqual(bytes);
+      expect(await provider.exists(source)).toBe(false);
+      await expect(provider.rename(source, destination)).rejects.toThrow();
+      expect(await provider.readFileBytes(destination)).toEqual(bytes);
+      expect((await provider.lstat(destination)).nlink).toBe(1);
+    });
+
+    it('applies an explicit mode before publishing an exclusive file', async () => {
+      const staged = `${exclusiveRoot}/private.tmp`;
+      const destination = `${exclusiveRoot}/private.md`;
+      // Force a restrictive umask so passing mode only to writeFile cannot pass on POSIX.
+      const previousUmask = process.platform === 'win32' ? undefined : process.umask(0o077);
+      try {
+        await provider.writeFileExclusive(staged, 'private instructions', { mode: 0o660 });
+        if (process.platform !== 'win32') {
+          expect((await provider.stat(staged)).mode).toBe(0o660);
+          expect((await provider.lstat(staged)).mode).toBe(0o660);
+        }
+        await expect(provider.writeFileExclusive(staged, 'clobber', { mode: 0o777 })).rejects.toThrow();
+        await provider.rename(staged, destination);
+        expect(await provider.readFile(destination)).toBe('private instructions');
+        if (process.platform !== 'win32') {
+          expect((await provider.lstat(destination)).mode).toBe(0o660);
+        }
+      } finally {
+        if (previousUmask !== undefined) process.umask(previousUmask);
+      }
+    });
+
     it('stat on missing path rejects', async () => {
       await expect(provider.stat('/fs/missing')).rejects.toThrow();
     });

@@ -47,8 +47,17 @@ export class CliFileSystemProvider implements IFileSystemProvider {
   }
 
   /** `open(2)` with `wx`: fails with EEXIST in the same syscall. */
-  async writeFileExclusive(filePath: string, content: string): Promise<void> {
-    await fs.writeFile(filePath, content, { encoding: 'utf-8', flag: 'wx' });
+  async writeFileExclusive(
+    filePath: string, content: string | Uint8Array, options?: { mode?: number },
+  ): Promise<void> {
+    const handle = await fs.open(filePath, 'wx', options?.mode ?? 0o666);
+    try {
+      await handle.writeFile(content, { encoding: 'utf-8' });
+      // Restore mode on the created inode, even if its pathname has been replaced.
+      if (options?.mode !== undefined) await handle.chmod(options.mode);
+    } finally {
+      await handle.close();
+    }
   }
 
   async writeFileBytes(filePath: string, content: Uint8Array): Promise<void> {
@@ -83,6 +92,8 @@ export class CliFileSystemProvider implements IFileSystemProvider {
       ctime: stats.ctimeMs,
       mtime: stats.mtimeMs,
       size: stats.size,
+      nlink: stats.nlink,
+      mode: stats.mode & 0o7777,
     };
   }
 
@@ -91,6 +102,8 @@ export class CliFileSystemProvider implements IFileSystemProvider {
     return {
       type: stats.isSymbolicLink() ? FileType.SymbolicLink : stats.isFile() ? FileType.File : stats.isDirectory() ? FileType.Directory : FileType.Unknown,
       ctime: stats.ctimeMs, mtime: stats.mtimeMs, size: stats.size,
+      nlink: stats.nlink,
+      mode: stats.mode & 0o7777,
     };
   }
 
@@ -141,6 +154,10 @@ export class CliFileSystemProvider implements IFileSystemProvider {
     } catch {
       return false;
     }
+  }
+
+  async rename(source: string, destination: string): Promise<void> {
+    await fs.rename(source, destination);
   }
 
   async delete(

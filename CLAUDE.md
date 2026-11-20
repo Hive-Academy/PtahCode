@@ -175,9 +175,9 @@ main agent, every subagent and every CLI lane. Repeat them in any task prompt yo
   requested. Never use positional `nx test A B` because those names become Jest path filters.
 
 <!-- ptah:analysis:begin -->
-
-@.ptah/analysis/ptah-extension/01-project-profile.md
-@.ptah/analysis/ptah-extension/02-architecture-assessment.md
-@.ptah/analysis/ptah-extension/03-quality-audit.md
-@.ptah/analysis/ptah-extension/04-elevation-plan.md
+Workspace analysis (read a file only when the task needs it):
+- `.ptah/analysis/ptah-extension/01-project-profile.md`
+- `.ptah/analysis/ptah-extension/02-architecture-assessment.md`
+- `.ptah/analysis/ptah-extension/03-quality-audit.md`
+- `.ptah/analysis/ptah-extension/04-elevation-plan.md`
 <!-- ptah:analysis:end -->

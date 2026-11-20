@@ -77,6 +77,7 @@ export function createMockFileSystemProvider(
 ): MockFileSystemProvider {
   const files = new Map<string, Uint8Array>();
   const directories = new Set<string>();
+  const modes = new Map<string, number>();
 
   const registerDirChain = (path: string): void => {
     let dir = parentDir(path);
@@ -102,13 +103,14 @@ export function createMockFileSystemProvider(
       registerDirChain(path);
     }),
     writeFileExclusive: jest.fn(
-      async (path: string, content: string): Promise<void> => {
+      async (path: string, content: string | Uint8Array, options?: { mode?: number }): Promise<void> => {
         // Synchronous check-and-create, like `open` with `wx`.
         const normalized = path.replace(/\\/g, '/').replace(/\/$/, '');
         if (files.has(path) || directories.has(normalized)) {
           throw eexist(path);
         }
-        files.set(path, toBytes(content));
+        files.set(path, typeof content === 'string' ? toBytes(content) : content);
+        if (options?.mode !== undefined) modes.set(path, options.mode);
         registerDirChain(path);
       },
     ),
@@ -154,6 +156,8 @@ export function createMockFileSystemProvider(
           ctime: 0,
           mtime: 0,
           size: bytes.byteLength,
+          nlink: 1,
+          mode: modes.get(path),
         };
       }
       const normalized = path.replace(/\\/g, '/').replace(/\/$/, '');
@@ -180,12 +184,24 @@ export function createMockFileSystemProvider(
       const normalized = path.replace(/\\/g, '/').replace(/\/$/, '');
       return directories.has(normalized);
     }),
+    rename: jest.fn(async (source: string, destination: string): Promise<void> => {
+      const bytes = files.get(source);
+      if (!bytes) throw enoent(source);
+      files.set(destination, bytes);
+      const mode = modes.get(source);
+      if (mode === undefined) modes.delete(destination);
+      else modes.set(destination, mode);
+      modes.delete(source);
+      files.delete(source);
+    }),
     delete: jest.fn(
       async (
         path: string,
         options?: { recursive?: boolean },
       ): Promise<void> => {
         const posix = path.replace(/\\/g, '/').replace(/\/$/, '');
+        modes.delete(path);
+        modes.delete(posix);
         if (files.delete(path) || files.delete(posix)) return;
         if (directories.has(posix)) {
           directories.delete(posix);

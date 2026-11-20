@@ -11,7 +11,7 @@ description: The context that PtahCode gives agents about your project.
 
 | Source                 | Content                                                                 |
 | ---------------------- | ----------------------------------------------------------------------- |
-| **Project analysis**   | The analysis files, imported through `CLAUDE.md`. Refer to [Project analysis](/workspace/project-analysis/). |
+| **Project analysis**   | The analysis files, listed in `CLAUDE.md`. Refer to [Project analysis](/workspace/project-analysis/). |
 | **Code symbol index**  | A local index of functions, classes, and other symbols for fast code search. |
 | **Chat memory**        | Facts extracted from earlier chats. Refer to [Memory](/memory/).         |
 | **Ptah MCP tools**     | Tools such as `ptah_workspace_analyze`, `ptah_code_search_symbols`, and `ptah_get_diagnostics`. |

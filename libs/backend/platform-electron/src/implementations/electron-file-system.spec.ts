@@ -71,8 +71,8 @@ function remap(
     readFile: (p) => provider.readFile(rewrite(p)),
     readFileBytes: (p) => provider.readFileBytes(rewrite(p)),
     writeFile: (p, c) => provider.writeFile(rewrite(p), c),
-    writeFileExclusive: (p, c) =>
-      provider.writeFileExclusive(rewrite(p), c),
+    writeFileExclusive: (p, c, options) =>
+      provider.writeFileExclusive(rewrite(p), c, options),
     writeFileBytes: (p, c) => provider.writeFileBytes(rewrite(p), c),
     readDirectory: (p) => provider.readDirectory(rewrite(p)),
     stat: (p) => provider.stat(rewrite(p)),
@@ -80,6 +80,7 @@ function remap(
     realpath: (p) => provider.realpath(rewrite(p)),
     readFileBoundedNoFollow: (p, maxBytes) => provider.readFileBoundedNoFollow(rewrite(p), maxBytes),
     exists: (p) => provider.exists(rewrite(p)),
+    rename: (src, dst) => provider.rename(rewrite(src), rewrite(dst)),
     delete: (p, opts) => provider.delete(rewrite(p), opts),
     createDirectory: (p) => provider.createDirectory(rewrite(p)),
     createDirectoryExclusive: (p) =>
@@ -605,3 +606,12 @@ describe('findFiles — exclude behavior (TASK_2026_119)', () => {
     expect(normalised.some((r) => r.includes('.claude/config.ts'))).toBe(true);
   });
 });
+
+ it('reports the actual hard-link count through the filesystem port', async () => {
+   const root = await makeTempDir();
+   const source = path.join(root, 'CLAUDE.md');
+   await fs.writeFile(source, 'user instructions');
+   await fs.link(source, path.join(root, 'linked.md'));
+   const provider = new ElectronFileSystemProvider();
+   expect((await provider.lstat(source)).nlink).toBe(2);
+ });
