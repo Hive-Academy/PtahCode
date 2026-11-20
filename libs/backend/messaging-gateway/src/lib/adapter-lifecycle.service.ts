@@ -387,6 +387,9 @@ export class AdapterLifecycleService extends EventEmitter {
         cipher = await this.gatewaySettings.slackBotTokenCipher.get();
       }
     } catch (err) {
+      // degradation-audit: reported - logged at warn here; the caller gets
+      // null, so the adapter does not start (or command registration returns
+      // missing-token).
       this.logger.warn(
         '[gateway] failed to read secret — secrets file may be corrupt',
         {
@@ -422,6 +425,8 @@ export class AdapterLifecycleService extends EventEmitter {
     try {
       cipher = await this.gatewaySettings.slackAppTokenCipher.get();
     } catch (err) {
+      // degradation-audit: reported - logged at warn here; the caller gets
+      // null and the Slack adapter does not start.
       this.logger.warn('[gateway] failed to read slack app token secret', {
         error: err instanceof Error ? err.message : String(err),
       });

@@ -990,8 +990,7 @@ export class SessionImporterService {
       if (context?.kind === 'named') throw new ClaudeAccountResourceError('unavailable');
       // Only I/O now reaches here — per-record parse failures are handled
       // above. A file we could open but not read is worth more than debug.
-      // degradation-audit: optional-capability - metadata extraction is
-      // per-file; null skips this one transcript and the rest of the import
+      // Metadata extraction is per-file; null skips this one transcript and the rest of the import
       // continues, which is also the answer for a file with no session id.
       this.logger.warn('[SessionImporter] Failed to extract metadata', {
         filePath,

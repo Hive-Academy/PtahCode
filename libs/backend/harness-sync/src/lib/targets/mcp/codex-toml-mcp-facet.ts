@@ -36,6 +36,7 @@ import type {
   McpInstallTarget,
   McpServerConfig,
 } from '@ptah-extension/shared';
+import type { Logger } from '@ptah-extension/vscode-core';
 import { atomicWriteWithRetry } from '../../fs/atomic-write';
 import {
   describeError,
@@ -87,6 +88,11 @@ export interface CodexTomlMcpFacetOptions extends CodexHomeOptions {
    * since one home file holds one port.
    */
   scope?: 'home' | 'workspace';
+  /**
+   * Receives a warning when the legacy read fails for a reason other than a
+   * missing file. Optional, so callers without a logger keep working.
+   */
+  logger?: Pick<Logger, 'warn'>;
 }
 
 export class CodexTomlMcpFacet implements IHarnessMcpFacet {
@@ -238,7 +244,17 @@ export class CodexTomlMcpFacet implements IHarnessMcpFacet {
     if (path === null) return '';
     try {
       return readFileSync(path, 'utf-8');
-    } catch {
+    } catch (error: unknown) {
+      // degradation-audit: optional-capability - a missing config.toml (Codex
+      // never configured) reads as ''; other read failures are logged at warn
+      // when a logger is passed and also read as ''. `inspect` reports them
+      // through `readStatus` as status 'error'.
+      if (errorCode(error) !== 'ENOENT') {
+        this.options.logger?.warn('[harness-sync] Codex MCP config unreadable', {
+          scope: this.scope,
+          code: errorCode(error),
+        });
+      }
       return '';
     }
   }

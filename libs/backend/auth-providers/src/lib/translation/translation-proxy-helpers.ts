@@ -10,6 +10,7 @@
 
 import * as http from 'http';
 import { z } from 'zod';
+import type { Logger } from '@ptah-extension/vscode-core';
 
 const responsesUsageSchema = z.object({
   input_tokens: z.number().nonnegative().optional(),
@@ -121,11 +122,21 @@ export function buildUpstreamUrl(baseEndpoint: string, path: string): URL {
 
 /**
  * Safely parse JSON, returning the parsed value or an empty object on failure.
+ * When a logger is passed, a parse failure is logged at warn (error name only,
+ * never the input text).
  */
-export function safeJsonParse(str: string): Record<string, unknown> {
+export function safeJsonParse(
+  str: string,
+  logger?: Pick<Logger, 'warn'>,
+): Record<string, unknown> {
   try {
     return JSON.parse(str);
-  } catch {
+  } catch (error: unknown) {
+    // degradation-audit: reported - logged at warn when a logger is passed
+    // (the translation proxy passes one); the caller gets an empty object.
+    logger?.warn('[TranslationProxy] Could not parse tool-call arguments JSON', {
+      errorName: error instanceof Error ? error.name : typeof error,
+    });
     return {};
   }
 }

@@ -38,6 +38,7 @@ import type {
   HarnessTargetHealth,
   HarnessTargetId,
 } from '@ptah-extension/shared';
+import type { Logger } from '@ptah-extension/vscode-core';
 import { isRetiredPtahAgent } from './retired-agent-origin';
 import { throwIfPassAborted } from '../abort/pass-abort';
 import {
@@ -140,6 +141,11 @@ export interface WorkspaceHarnessTargetOptions {
    * specs substitute a runner to reach git-missing and timeout outcomes.
    */
   gitTrackingProbe?: GitTrackingProbe;
+  /**
+   * Receives a warning when an agent source cannot be read or transformed.
+   * Optional, so specs and callers without a logger keep working.
+   */
+  logger?: Pick<Logger, 'warn'>;
 }
 
 export class WorkspaceHarnessTarget implements IHarnessTarget {
@@ -511,7 +517,16 @@ export class WorkspaceHarnessTarget implements IHarnessTarget {
         content: readFileSync(sourceFile, 'utf-8'),
         ...(model === undefined ? {} : { model }),
       });
-    } catch {
+    } catch (error: unknown) {
+      // degradation-audit: reported - logged at warn when a logger is passed;
+      // the caller leaves this agent out of the plan, so its copy is not
+      // written or updated on this pass.
+      this.options.logger?.warn('[harness-sync] agent could not be rendered', {
+        target: this.id,
+        agentId,
+        code: (error as NodeJS.ErrnoException | null)?.code,
+        errorName: error instanceof Error ? error.name : typeof error,
+      });
       return null;
     }
   }

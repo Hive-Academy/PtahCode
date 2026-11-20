@@ -537,6 +537,8 @@ export class BootScanRunner {
         ? stored
         : null;
     } catch (err: unknown) {
+      // degradation-audit: reported - logged at warn here; null takes the cold
+      // path with its floor.
       // A read that threw leaves us knowing nothing, exactly like a read that
       // found nothing — so it takes the cold path AND its floor. Returning `0`
       // here is what turned a locked or corrupt database into a scan of all

@@ -921,7 +921,13 @@ export class TaskWriterService {
       return entries
         .filter((e) => e.type === FileType.Directory)
         .map((e) => e.name);
-    } catch {
+    } catch (error: unknown) {
+      // degradation-audit: reported - logged at warn here; the id allocator
+      // sees no existing folders, and an id that collides fails with EEXIST
+      // and is retried with a fresh suffix.
+      this.logger.warn('[task-specs] specs folder listing failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
       return [];
     }
   }

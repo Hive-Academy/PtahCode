@@ -573,6 +573,8 @@ export function registerPhase2Libraries(
           try {
             return provider.resolve<ReviewPtahCliRegistry>(CLI_AGENT_RUNTIME_TOKENS.SDK_PTAH_CLI_REGISTRY);
           } catch (error) {
+            // degradation-audit: reported - logged at warn here; review lanes
+            // get no Ptah CLI registry (undefined).
             logger.warn('[Electron DI] Review lanes cannot resolve the Ptah CLI registry', {
               error: error instanceof Error ? error.message : String(error),
             });
@@ -583,6 +585,8 @@ export function registerPhase2Libraries(
           try {
             return provider.resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER);
           } catch (error) {
+            // degradation-audit: reported - logged at warn here; review lanes
+            // get no workspace provider (undefined).
             logger.warn('[Electron DI] Review lanes cannot resolve the workspace provider', {
               error: error instanceof Error ? error.message : String(error),
             });

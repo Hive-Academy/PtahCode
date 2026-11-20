@@ -120,12 +120,23 @@ export class SecretsFileStore {
     let parsed: unknown;
     try {
       parsed = JSON.parse(raw);
-    } catch {
+    } catch (err: unknown) {
+      // The next persist() replaces the unreadable file, so its entries are
+      // lost: log at error. Only the error name; the file holds secrets.
+      console.error(
+        '[SecretsFileStore] secrets file is not valid JSON; starting with an empty store',
+        { errorName: err instanceof Error ? err.name : typeof err },
+      );
       this.entries = new Map();
       return;
     }
 
     if (!isSecretsFileFormat(parsed)) {
+      // Same loss as an unparsable file: the next persist() replaces it.
+      // A fixed reason only; the file holds secrets.
+      console.error(
+        '[SecretsFileStore] secrets file has an unknown format; starting with an empty store',
+      );
       this.entries = new Map();
       return;
     }

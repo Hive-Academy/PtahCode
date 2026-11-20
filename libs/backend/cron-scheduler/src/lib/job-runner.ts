@@ -152,6 +152,9 @@ export class JobRunner {
       const claimed = this.runs.tryClaim(job.id, scheduledFor);
       runId = claimed.id;
     } catch (err) {
+      // degradation-audit: reported - a lost slot race is logged at debug and
+      // any other claim failure at error (logWithContext) here; the run is
+      // skipped and the scheduler loop continues.
       if (err instanceof SlotAlreadyClaimedError) {
         this.logger.debug('[cron-scheduler] slot already claimed', {
           jobId: job.id,

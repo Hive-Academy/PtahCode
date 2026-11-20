@@ -140,6 +140,8 @@ export async function withErrorHandling<T>(
   try {
     return await operation();
   } catch (error) {
+    // degradation-audit: reported - handed to the caller's onError callback
+    // as a WizardError; the caller also gets null.
     const wizardError = toWizardError(error, context);
     onError(wizardError);
     return null;

@@ -91,6 +91,8 @@ export class VoiceInputService {
     try {
       this.stream = await this.recorderFactory.getUserMedia({ audio: true });
     } catch (error: unknown) {
+      // degradation-audit: reported - shown to the user through _error; the
+      // service stays idle.
       const message =
         error instanceof Error ? error.message : 'Microphone access denied';
       this._error.set(message);
@@ -105,6 +107,8 @@ export class VoiceInputService {
         this.mimeType || undefined,
       );
     } catch (error: unknown) {
+      // degradation-audit: reported - shown to the user through _error; the
+      // service stays idle.
       const message =
         error instanceof Error ? error.message : 'Failed to start recorder';
       this._error.set(message);

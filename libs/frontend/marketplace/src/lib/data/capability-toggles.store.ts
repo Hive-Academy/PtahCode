@@ -238,6 +238,8 @@ export class CapabilityTogglesStore {
       if (this._status() === 'unverified') void this.load();
       return 'saved';
     } catch (error: unknown) {
+      // degradation-audit: reported - logged at console.warn here and shown to
+      // the user through _actionError by revert(); a stale write is skipped.
       console.warn('[CapabilityTogglesStore] setEnabled threw:', error);
       if (this.isStale(workspace)) return 'skipped';
       return this.revert(key, prior, optimistic, failure);

@@ -56,6 +56,9 @@ export function emitFatalError(
   try {
     process.stderr.write(`${JSON.stringify(payload)}\n`);
   } catch {
+    // degradation-audit: optional-capability - stderr is the last reporting
+    // channel; when it cannot be written there is nowhere left to report, and
+    // emitFatalError() never throws by contract.
     return;
   }
 }

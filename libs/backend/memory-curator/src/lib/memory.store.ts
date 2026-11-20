@@ -99,6 +99,8 @@ function parseStringArrayJson(
     if (Array.isArray(parsed))
       return parsed.filter((x): x is string => typeof x === 'string');
   } catch {
+    // degradation-audit: optional-capability - pure row parser; a malformed
+    // JSON column reads as an empty list, the same as an absent one.
     return [];
   }
   return [];
@@ -384,6 +386,8 @@ export class MemoryStore implements IMemoryLister, IMemoryUsageRecorder {
     try {
       return await this.embedder.embed(texts);
     } catch (err) {
+      // degradation-audit: reported - logged at warn once per process
+      // (embedderWarnedOnce); chunks are stored without vectors.
       if (!this.embedderWarnedOnce) {
         this.embedderWarnedOnce = true;
         this.logger.warn(

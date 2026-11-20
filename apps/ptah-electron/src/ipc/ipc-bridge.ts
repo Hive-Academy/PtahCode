@@ -561,7 +561,13 @@ export class IpcBridge {
           }
           const messageType = msg['type'] as string | undefined;
           if (messageType) {
-            this.handleFireAndForgetMessage(messageType, msg);
+            // The IPC listener must not wait for fire-and-forget work.
+            void this.handleFireAndForgetMessage(messageType, msg).catch((error: unknown) => {
+              console.error('[IpcBridge] Fire-and-forget message failed', {
+                type: messageType,
+                error: error instanceof Error ? error.message : String(error),
+              });
+            });
           }
           return;
         }

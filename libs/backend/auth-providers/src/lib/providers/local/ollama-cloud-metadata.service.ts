@@ -260,6 +260,8 @@ export class OllamaCloudMetadataService {
 
       return tags;
     } catch (error) {
+      // degradation-audit: reported - logged at warn here; the empty result is
+      // cached and callers fall back to the bundled static catalog.
       this.logger.warn(
         `[OllamaCloudMetadata] ${url} fetch failed — will fall back to bundled static catalog. ${
           error instanceof Error ? error.message : String(error)
@@ -515,6 +517,9 @@ export class OllamaCloudMetadataService {
         headers,
         signal: controller.signal,
       });
+      // degradation-audit: reported - an unreadable body leaves text empty, so
+      // this method throws below (HTTP status or "Empty body") and the callers
+      // that catch it log at warn.
       const text = await res.text().catch(() => '');
       if (!res.ok) {
         const snippet = this.truncate(text);

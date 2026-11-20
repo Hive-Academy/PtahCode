@@ -681,6 +681,8 @@ export class ExternalMarketplacesComponent implements OnInit {
         this.installed.set([]);
       }
     } catch (error: unknown) {
+      // degradation-audit: reported - shown to the user through loadError; the
+      // lists are emptied. A destroyed component drops the error.
       if (this.destroyed) return;
       this.loadError.set(messageOf(error, 'Failed to load marketplaces'));
       this.marketplaces.set([]);
@@ -732,6 +734,8 @@ export class ExternalMarketplacesComponent implements OnInit {
       await this.loadMarketplaces();
       return true;
     } catch (error: unknown) {
+      // degradation-audit: reported - shown to the user through addError; the
+      // caller gets false and keeps the typed source.
       if (this.destroyed) return false;
       this.addError.set(messageOf(error, `Failed to add ${source}`));
       return false;
@@ -769,6 +773,8 @@ export class ExternalMarketplacesComponent implements OnInit {
       }
       await this.loadMarketplaces();
     } catch (error: unknown) {
+      // degradation-audit: reported - shown to the user through loadError; the
+      // marketplace stays listed.
       if (this.destroyed) return;
       this.loadError.set(messageOf(error, `Failed to remove ${source}`));
     } finally {
@@ -824,6 +830,8 @@ export class ExternalMarketplacesComponent implements OnInit {
         this.listings.set([]);
       }
     } catch (error: unknown) {
+      // degradation-audit: reported - shown to the user through browseError;
+      // the listings are emptied.
       if (this.destroyed) return;
       this.browseError.set(messageOf(error, `Failed to browse ${source}`));
       this.listings.set([]);
@@ -874,6 +882,8 @@ export class ExternalMarketplacesComponent implements OnInit {
       // backend ever answers 'installed' the UI must still report it truthfully.
       await this.applyInstalled(result.data.result, listing.source);
     } catch (error: unknown) {
+      // degradation-audit: reported - shown to the user through browseError;
+      // no consent dialog opens.
       if (this.destroyed) return;
       this.browseError.set(messageOf(error, `Failed to plan ${listing.name}`));
     } finally {
@@ -1038,6 +1048,8 @@ export class ExternalMarketplacesComponent implements OnInit {
         await this.refreshBrowse(listing.source);
       }
     } catch (error: unknown) {
+      // degradation-audit: reported - shown to the user by uninstallFailed()
+      // through browseError or the card's uninstallErrors entry.
       if (this.destroyed) return;
       this.uninstallFailed(listing, messageOf(error, fallback));
     } finally {

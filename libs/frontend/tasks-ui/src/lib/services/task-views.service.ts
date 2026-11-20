@@ -526,6 +526,8 @@ export class TaskViewsService {
           return false;
         }
       } catch (error: unknown) {
+        // degradation-audit: reported - shown to the user through _error; the
+        // caller gets false and the views stay unsaved.
         // A broken transport still throws. Left unhandled it escapes a template
         // event handler as an unhandled rejection and the user sees a control
         // that did nothing and said nothing.

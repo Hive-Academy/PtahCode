@@ -77,6 +77,8 @@ export class DisplayFileViewerComponent {
         if (file.kind === 'pdf-file') this.pdfUrl.set(this.sanitizer.bypassSecurityTrustResourceUrl(url));
       }
     } catch {
+      // degradation-audit: reported - shown to the user through error with a
+      // Retry action; a superseded read (newer generation) drops it.
       if (generation !== this.generation) return;
       this.error.set('This file could not be previewed. It may be missing, too large, or changed.');
     } finally {

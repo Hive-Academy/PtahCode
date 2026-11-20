@@ -94,6 +94,8 @@ export class SettingsExportService {
       });
       return value;
     } catch (error) {
+      // degradation-audit: reported - logged at warn here (key name only);
+      // the export omits this secret (undefined).
       this.logger.warn('[SettingsExport] Failed to read secret', {
         key,
         error: error instanceof Error ? error.message : String(error),

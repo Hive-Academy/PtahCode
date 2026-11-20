@@ -11,6 +11,7 @@
  */
 
 import type { McpInstallTarget } from '@ptah-extension/shared';
+import type { Logger } from '@ptah-extension/vscode-core';
 import { CodexTomlMcpFacet } from './codex-toml-mcp-facet';
 import { JsonMcpFacet } from './json-mcp-facet';
 import type { IHarnessMcpFacet } from './mcp-facet.port';
@@ -19,6 +20,8 @@ import { ANTIGRAVITY_URL_KEY } from './mcp-json-format';
 export interface McpFacetOptions {
   /** Overridable so specs can redirect the user-global config files. */
   homeDir?: string;
+  /** Passed to each facet, which warns when a config file is unreadable. */
+  logger?: Pick<Logger, 'warn'>;
 }
 
 /** Every target that owns an MCP config file, in a stable order. */
@@ -39,10 +42,12 @@ export function createMcpFacet(
 ): IHarnessMcpFacet {
   const home =
     options.homeDir === undefined ? {} : { homeDir: options.homeDir };
+  const log =
+    options.logger === undefined ? {} : { logger: options.logger };
 
   switch (target) {
     case 'codex':
-      return new CodexTomlMcpFacet(home);
+      return new CodexTomlMcpFacet({ ...home, ...log });
     case 'antigravity':
       return new JsonMcpFacet({
         target: 'antigravity',
@@ -53,6 +58,7 @@ export function createMcpFacet(
         // Antigravity infers the transport from `command` versus `serverUrl`,
         // exactly as Claude does from `command` versus `url`.
         includeType: false,
+        ...log,
         // The one target that does NOT call a remote endpoint `url`. Its own
         // docs (shipped inside the CLI, at
         // `~/.gemini/antigravity-cli/builtin/skills/agy-customizations/docs/mcp_servers.md`)
@@ -69,6 +75,7 @@ export function createMcpFacet(
         segments: ['.copilot', 'mcp-config.json'],
         rootKey: 'mcpServers',
         includeType: false,
+        ...log,
         ...home,
       });
     case 'cursor':
@@ -79,6 +86,7 @@ export function createMcpFacet(
         segments: ['.cursor', 'mcp.json'],
         rootKey: 'mcpServers',
         includeType: false,
+        ...log,
       });
     case 'opencode':
       return new JsonMcpFacet({
@@ -97,6 +105,7 @@ export function createMcpFacet(
         // `type` is REQUIRED by opencode's schema, and its values are its own
         // (`remote`/`local`) — which is what the dialect supplies.
         includeType: true,
+        ...log,
         dialect: 'opencode',
       });
     case 'vscode':
@@ -109,6 +118,7 @@ export function createMcpFacet(
         // `type` discriminant per entry.
         rootKey: 'servers',
         includeType: true,
+        ...log,
       });
     case 'claude':
       return new JsonMcpFacet({
@@ -120,6 +130,7 @@ export function createMcpFacet(
         // Claude infers the transport from `command` versus `url`; an explicit
         // `type` key is an unknown field to it.
         includeType: false,
+        ...log,
       });
   }
 }

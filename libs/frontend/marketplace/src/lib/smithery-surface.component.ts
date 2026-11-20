@@ -844,6 +844,8 @@ export class SmitherySurfaceComponent implements OnInit, OnDestroy {
         );
       }
     } catch {
+      // degradation-audit: reported - shown to the user through keyError; the
+      // key form stays open with its input.
       if (this.destroyed) return;
       this.keyError.set('Failed to save API key');
     } finally {
@@ -885,6 +887,8 @@ export class SmitherySurfaceComponent implements OnInit, OnDestroy {
       this.activeNamespace.set(result.data.activeNamespace);
       this.accountError.set(result.data.error ?? null);
     } catch {
+      // degradation-audit: reported - shown to the user through accountError;
+      // the browse list is left as it is.
       if (this.destroyed) return;
       this.accountError.set('Failed to read Smithery account');
     }
@@ -908,6 +912,8 @@ export class SmitherySurfaceComponent implements OnInit, OnDestroy {
       this.connections.set(result.data.connections);
       this.connectionsError.set(result.data.error ?? null);
     } catch {
+      // degradation-audit: reported - shown to the user through
+      // connectionsError; the browse list is left as it is.
       if (this.destroyed) return;
       this.connectionsError.set('Failed to load Smithery connections');
     }
@@ -948,6 +954,8 @@ export class SmitherySurfaceComponent implements OnInit, OnDestroy {
       }
       await this.loadConnections();
     } catch {
+      // degradation-audit: reported - shown to the user through
+      // connectionsError; the connection row stays unchanged.
       if (this.destroyed) return;
       this.connectionsError.set(
         `Could not open the setup page for ${connection.name}`,
@@ -984,6 +992,8 @@ export class SmitherySurfaceComponent implements OnInit, OnDestroy {
       this.serverUninstalled.emit(serverKey);
       await Promise.all([this.loadConnections(), this.loadInstalled()]);
     } catch {
+      // degradation-audit: reported - shown to the user through
+      // connectionsError; the connection stays listed.
       if (this.destroyed) return;
       this.connectionsError.set(`Failed to remove ${connection.name}`);
     } finally {
@@ -1166,6 +1176,8 @@ export class SmitherySurfaceComponent implements OnInit, OnDestroy {
         this.detailError.set(result.error ?? 'Failed to load server details');
       }
     } catch {
+      // degradation-audit: reported - shown to the user through detailError;
+      // the setup panel shows no config form.
       if (this.destroyed) return;
       this.detailError.set('Failed to load server details');
     } finally {
@@ -1255,6 +1267,8 @@ export class SmitherySurfaceComponent implements OnInit, OnDestroy {
       // its upstream authorization.
       await Promise.all([this.loadInstalled(), this.loadConnections()]);
     } catch (error: unknown) {
+      // degradation-audit: reported - shown to the user through setupError;
+      // the setup phase returns to idle in finally.
       if (this.destroyed) return;
       this.setupError.set(this.messageOf(error, 'Failed to install server'));
     } finally {
@@ -1291,6 +1305,8 @@ export class SmitherySurfaceComponent implements OnInit, OnDestroy {
         );
       }
     } catch (error: unknown) {
+      // degradation-audit: reported - shown to the user through setupError;
+      // the server stays installed.
       if (this.destroyed) return;
       this.setupError.set(this.messageOf(error, 'Failed to remove server'));
     } finally {
@@ -1352,8 +1368,13 @@ export class SmitherySurfaceComponent implements OnInit, OnDestroy {
           this.loadConnections(),
         ]);
       }
-    } catch {
+    } catch (error: unknown) {
+      // degradation-audit: reported - logged at console.warn here; the surface
+      // falls back to 'not-configured' and shows the API-key form.
       if (this.destroyed) return;
+      console.warn('[SmitherySurface] getSmitheryKeyStatus threw', {
+        errorName: error instanceof Error ? error.name : typeof error,
+      });
       this.keyStatus.set('not-configured');
     }
   }
@@ -1385,6 +1406,8 @@ export class SmitherySurfaceComponent implements OnInit, OnDestroy {
         this.servers.set([]);
       }
     } catch {
+      // degradation-audit: reported - shown to the user through browseError;
+      // the server list is emptied.
       if (this.destroyed) return;
       this.browseError.set('Failed to load Smithery servers');
       this.servers.set([]);
@@ -1411,6 +1434,8 @@ export class SmitherySurfaceComponent implements OnInit, OnDestroy {
         this.browseError.set(result.error ?? 'Failed to load more servers');
       }
     } catch {
+      // degradation-audit: reported - shown to the user through browseError;
+      // the loaded pages stay listed.
       if (this.destroyed) return;
       this.browseError.set('Failed to load more servers');
     } finally {
@@ -1437,6 +1462,8 @@ export class SmitherySurfaceComponent implements OnInit, OnDestroy {
         this.servers.set([]);
       }
     } catch {
+      // degradation-audit: reported - shown to the user through browseError;
+      // the server list is emptied.
       if (this.destroyed) return;
       this.browseError.set('Search failed');
       this.servers.set([]);

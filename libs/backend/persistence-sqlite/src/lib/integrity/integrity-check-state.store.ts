@@ -103,6 +103,8 @@ export class IntegrityCheckStateStore {
         detail: row.detail ?? null,
       };
     } catch (error: unknown) {
+      // degradation-audit: reported - logged at debug here; null means "never
+      // checked", so the caller runs the check.
       // Debug, not warn: on a host with no open database this fires on every
       // due-check, and the outcome — run the check — is the correct one.
       this.logger.debug(

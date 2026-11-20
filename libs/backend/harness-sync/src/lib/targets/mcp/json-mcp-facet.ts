@@ -29,6 +29,7 @@ import type {
   McpInstallTarget,
   McpServerConfig,
 } from '@ptah-extension/shared';
+import type { Logger } from '@ptah-extension/vscode-core';
 import { atomicWriteWithRetry } from '../../fs/atomic-write';
 import {
   describeError,
@@ -82,6 +83,11 @@ export interface JsonMcpFacetOptions {
    * change the file between the two reads without a real delay.
    */
   waitBeforeEmptyReread?: (ms: number) => Promise<void>;
+  /**
+   * Receives a warning when the legacy read fails for a reason other than a
+   * missing file. Optional, so callers without a logger keep working.
+   */
+  logger?: Pick<Logger, 'warn'>;
 }
 
 /** How long `inspect` waits before re-reading a config file that read empty. */
@@ -244,7 +250,18 @@ export class JsonMcpFacet implements IHarnessMcpFacet {
       return typeof parsed === 'object' && parsed !== null
         ? (parsed as Record<string, unknown>)
         : {};
-    } catch {
+    } catch (error: unknown) {
+      // degradation-audit: optional-capability - a missing config file reads
+      // as {} by contract (see above); an unreadable or malformed file is
+      // logged at warn when a logger is passed and also reads as {}. `inspect`
+      // reports it through `readJsonStatus` as status 'error'.
+      if (errorCode(error) !== 'ENOENT') {
+        this.options.logger?.warn('[harness-sync] MCP config unreadable', {
+          target: this.target,
+          code: errorCode(error),
+          errorName: error instanceof Error ? error.name : typeof error,
+        });
+      }
       return {};
     }
   }

@@ -90,7 +90,12 @@ export class ElectronUserInteraction implements IUserInteraction {
     try {
       await this.shellApi.openExternal(url);
       return true;
-    } catch {
+    } catch (error: unknown) {
+      // degradation-audit: reported - logged at warn here (error name only;
+      // the URL may carry OAuth state); the caller gets false ("not opened").
+      console.warn('[ElectronUserInteraction] openExternal failed', {
+        errorName: error instanceof Error ? error.name : typeof error,
+      });
       return false;
     }
   }

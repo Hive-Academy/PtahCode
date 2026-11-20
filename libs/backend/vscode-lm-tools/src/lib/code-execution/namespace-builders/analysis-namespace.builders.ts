@@ -35,6 +35,7 @@ import {
   type LanguageCoverage,
   type UnsupportedLanguageAnswer,
 } from '@ptah-extension/platform-core';
+import type { Logger } from '@ptah-extension/vscode-core';
 import {
   ContextNamespace,
   ProjectNamespace,
@@ -70,6 +71,11 @@ export interface AnalysisNamespaceDependencies {
   workspaceProvider: IWorkspaceProvider;
   /** Bounded source discovery for the dependency graph. */
   fileSystemProvider: IFileSystemProvider;
+  /**
+   * Receives a warning when a dependency query fails and answers with an empty
+   * list. Optional, so specs and callers without a logger keep working.
+   */
+  logger?: Pick<Logger, 'warn'>;
 }
 
 /**
@@ -458,7 +464,8 @@ function unsupportedGraphLanguage(
 export function buildDependencyNamespace(
   deps: AnalysisNamespaceDependencies,
 ): DependenciesNamespace {
-  const { dependencyGraph, workspaceProvider, fileSystemProvider } = deps;
+  const { dependencyGraph, workspaceProvider, fileSystemProvider, logger } =
+    deps;
 
   const readSymbolEntries = (workspaceRoot?: string): SymbolIndexEntry[] => {
     try {
@@ -635,7 +642,12 @@ export function buildDependencyNamespace(
           workspaceProvider,
         );
         return dependencyGraph.getDependencies(resolved, depth);
-      } catch {
+      } catch (error: unknown) {
+        // degradation-audit: reported - logged at warn when a logger is passed;
+        // the tool gets an empty dependency list.
+        logger?.warn('[DependencyNamespace] getDependencies failed', {
+          errorName: error instanceof Error ? error.name : typeof error,
+        });
         return [];
       }
     },
@@ -647,7 +659,12 @@ export function buildDependencyNamespace(
           workspaceProvider,
         );
         return dependencyGraph.getDependents(resolved);
-      } catch {
+      } catch (error: unknown) {
+        // degradation-audit: reported - logged at warn when a logger is passed;
+        // the tool gets an empty dependents list.
+        logger?.warn('[DependencyNamespace] getDependents failed', {
+          errorName: error instanceof Error ? error.name : typeof error,
+        });
         return [];
       }
     },

@@ -135,6 +135,8 @@ export function attachWorkspaceIndex(
     lifecycle.start();
     return lifecycle;
   } catch (error: unknown) {
+    // degradation-audit: reported - logged at warn here; the caller gets null
+    // and the CLI runs without a workspace symbol index.
     logger.warn('[CLI Thoth] Workspace index lifecycle skipped (non-fatal)', {
       error: error instanceof Error ? error.message : String(error),
     });
