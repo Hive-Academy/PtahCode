@@ -6,7 +6,7 @@
  */
 
 import 'reflect-metadata';
-import * as fs from 'fs/promises';
+import { promises as fs } from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { runStateStorageContract } from '@ptah-extension/platform-core/testing';
@@ -21,6 +21,7 @@ async function makeTempDir(): Promise<string> {
 }
 
 afterEach(async () => {
+  jest.restoreAllMocks();
   while (tmpDirs.length > 0) {
     const dir = tmpDirs.pop();
     if (!dir) continue;
@@ -44,6 +45,101 @@ describe('CliStateStorage — CLI-specific behaviour', () => {
     provider = new CliStateStorage(storage, 'state.json');
   });
 
+  it.each(['update', 'load'] as const)(
+    'isolates the %s baseline from caller mutations and repeated rollbacks',
+    async (source) => {
+      const value = { nested: { count: 1 } };
+      await provider.update('kept', value);
+      if (source === 'load') provider = new CliStateStorage(storage, 'state.json');
+      const live = provider.get<typeof value>('kept');
+      expect(live).toBeDefined();
+      if (!live) throw new Error('missing stored value');
+      if (source === 'update') expect(live).toBe(value);
+      live.nested.count = 99;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        jest.spyOn(fs, 'rename').mockRejectedValueOnce(new Error('disk'));
+        await expect(provider.update('kept', { nested: { count: 2 } })).rejects.toThrow('disk');
+        const restored = provider.get<typeof value>('kept');
+        expect(restored).toEqual({ nested: { count: 1 } });
+        if (!restored) throw new Error('missing rollback value');
+        if (attempt === 0) restored.nested.count = 88;
+      }
+      await provider.update('other', true);
+      expect(new CliStateStorage(storage, 'state.json').get('kept')).toEqual({ nested: { count: 1 } });
+    },
+  );
+
+  it('restores disk baseline after consecutive failures before an unrelated commit', async () => {
+    await provider.update('key', 0);
+    jest.spyOn(fs, 'rename').mockRejectedValueOnce(new Error('disk')).mockRejectedValueOnce(new Error('disk'));
+    const first = expect(provider.update('key', 1)).rejects.toThrow('disk');
+    const second = expect(provider.update('key', 2)).rejects.toThrow('disk');
+    await Promise.all([first, second]);
+    expect(provider.get('key')).toBe(0);
+    await provider.update('other', true);
+    expect(new CliStateStorage(storage, 'state.json').get('key')).toBe(0);
+  });
+
+  it('accounts for other pending keys included in a successful full snapshot', async () => {
+    await provider.update('key', 0);
+    const rename = fs.rename.bind(fs);
+    jest.spyOn(fs, 'rename').mockImplementationOnce(rename).mockRejectedValueOnce(new Error('disk'));
+    const first = provider.update('other', true);
+    const second = expect(provider.update('key', 2)).rejects.toThrow('disk');
+    await Promise.all([first, second]);
+    expect(provider.get('key')).toBe(2);
+    expect(new CliStateStorage(storage, 'state.json').get('key')).toBe(2);
+  });
+
+  it('makes updates and queued updates visible before persistence settles', async () => {
+    const first = provider.update('visible', 1);
+    expect(provider.get('visible')).toBe(1);
+    const second = provider.update('visible', 2);
+    expect(provider.get('visible')).toBe(2);
+    await Promise.all([first, second]);
+    const deletion = provider.update('visible', undefined);
+    expect(provider.get('visible')).toBeUndefined();
+    await deletion;
+  });
+
+  it('keeps a queued same-key update when the preceding write fails', async () => {
+    await provider.update('kept', 0);
+    const failure = new Error('rename failed');
+    jest.spyOn(fs, 'rename').mockRejectedValueOnce(failure);
+    const failed = provider.update('kept', 1);
+    const rejected = expect(failed).rejects.toBe(failure);
+    const successful = provider.update('kept', 2);
+    expect(provider.get('kept')).toBe(2);
+    await rejected;
+    expect(provider.get('kept')).toBe(2);
+    await successful;
+    expect(provider.get('kept')).toBe(2);
+    expect(new CliStateStorage(storage, 'state.json').get('kept')).toBe(2);
+  });
+
+  it('removes a failed new key when no later update supersedes it', async () => {
+    const failure = new Error('rename failed');
+    jest.spyOn(fs, 'rename').mockRejectedValueOnce(failure);
+    const write = provider.update('new-key', 1);
+    expect(provider.get('new-key')).toBe(1);
+    await expect(write).rejects.toBe(failure);
+    expect(provider.get('new-key')).toBeUndefined();
+    expect(new CliStateStorage(storage, 'state.json').get('new-key')).toBeUndefined();
+  });
+
+  it('rolls back failed updates and deletions before a later write', async () => {
+    await provider.update('kept', 1);
+    const blocker = path.join(storage, 'state.json.tmp');
+    await fs.mkdir(blocker);
+    await expect(provider.update('kept', 2)).rejects.toThrow();
+    expect(provider.get('kept')).toBe(1);
+    await expect(provider.update('kept', undefined)).rejects.toThrow();
+    expect(provider.get('kept')).toBe(1);
+    await fs.rmdir(blocker);
+    await provider.update('other', true);
+    const restored = new CliStateStorage(storage, 'state.json');
+    expect(restored.get('kept')).toBe(1);
+  });
   it('update persists JSON to the configured filename', async () => {
     await provider.update('greeting', 'hello');
     const raw = await fs.readFile(path.join(storage, 'state.json'), 'utf-8');

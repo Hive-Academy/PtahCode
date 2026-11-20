@@ -11,16 +11,22 @@
 import * as fs from 'fs';
 import * as fsPromises from 'fs/promises';
 import * as path from 'path';
+import { z } from 'zod';
 import type { IStateStorage } from '@ptah-extension/platform-core';
+
+const persistedStateSchema = z.record(z.string(), z.json());
 
 export class CliStateStorage implements IStateStorage {
   private data: Record<string, unknown> = {};
+  private persistedData: Record<string, unknown> = {};
   private readonly filePath: string;
   private writePromise: Promise<void> = Promise.resolve();
+  private readonly keyGenerations = new Map<string, number>();
 
   constructor(storageDirPath: string, filename: string) {
     this.filePath = path.join(storageDirPath, filename);
     this.loadSync();
+    this.persistedData = structuredClone(this.data);
   }
 
   get<T>(key: string, defaultValue?: T): T | undefined {
@@ -29,16 +35,27 @@ export class CliStateStorage implements IStateStorage {
   }
 
   async update(key: string, value: unknown): Promise<void> {
-    if (value === undefined) {
-      delete this.data[key];
-    } else {
-      this.data[key] = value;
-    }
-    this.writePromise = this.writePromise.then(
-      () => this.persist(),
-      () => this.persist(),
-    );
-    await this.writePromise;
+    const generation = (this.keyGenerations.get(key) ?? 0) + 1;
+    this.keyGenerations.set(key, generation);
+    if (value === undefined) delete this.data[key];
+    else this.data[key] = value;
+    // degradation-audit: reported — the previous update caller received its rejection.
+    const write = this.writePromise.catch(() => undefined).then(async () => {
+      try {
+        await this.persist();
+      } catch (error: unknown) {
+        // A failed older write must not undo a newer in-memory update.
+        if (this.keyGenerations.get(key) === generation) {
+          const persisted = this.persistedData[key];
+          if (persisted === undefined) delete this.data[key];
+          else this.data[key] = structuredClone(persisted);
+        }
+        throw error;
+      }
+    });
+    // The caller receives persistence errors; subsequent updates may retry.
+    this.writePromise = write;
+    await write;
   }
 
   keys(): readonly string[] {
@@ -58,11 +75,14 @@ export class CliStateStorage implements IStateStorage {
     const dir = path.dirname(this.filePath);
     await fsPromises.mkdir(dir, { recursive: true });
     const tmpPath = this.filePath + '.tmp';
+    const snapshot = { ...this.data };
+    const serialized = JSON.stringify(snapshot, null, 2);
     await fsPromises.writeFile(
       tmpPath,
-      JSON.stringify(this.data, null, 2),
+      serialized,
       'utf-8',
     );
     await fsPromises.rename(tmpPath, this.filePath);
+    this.persistedData = persistedStateSchema.parse(JSON.parse(serialized));
   }
 }

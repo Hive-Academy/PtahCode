@@ -21,7 +21,8 @@ import { z } from 'zod';
 
 import type { ModelCapability } from '../types/auth-env.types';
 
-import { updatePricingMap, type ModelPricing } from '../utils/pricing.utils';
+import { updatePricingMap } from '../utils/pricing.utils';
+import { staticModelPricing } from './static-model-pricing';
 import { isValidProviderBaseUrl } from './provider-base-url';
 import { COPILOT_PROVIDER_ENTRY } from './entries/copilot-provider-entry';
 import { CODEX_PROVIDER_ENTRY } from './entries/codex-provider-entry';
@@ -62,6 +63,7 @@ export interface ProviderStaticModel {
   cacheReadCostPerToken?: number;
   /** Cost per cache creation token in USD (optional) */
   cacheCreationCostPerToken?: number;
+  cacheCreation1hCostPerToken?: number;
   /**
    * Capabilities this model supports, when the provider documents them.
    *
@@ -862,27 +864,7 @@ export function seedStaticModelPricing(providerId: string): void {
   const provider = getAnthropicProvider(providerId);
   if (!provider?.staticModels) return;
 
-  const entries: Record<string, ModelPricing> = {};
-
-  for (const model of provider.staticModels) {
-    if (model.inputCostPerToken == null || model.outputCostPerToken == null) {
-      continue;
-    }
-
-    const pricing: ModelPricing = {
-      inputCostPerToken: model.inputCostPerToken,
-      outputCostPerToken: model.outputCostPerToken,
-      cacheReadCostPerToken: model.cacheReadCostPerToken,
-      cacheCreationCostPerToken: model.cacheCreationCostPerToken,
-      provider: providerId,
-      maxTokens: model.contextLength,
-    };
-    entries[model.id] = pricing;
-    const lower = model.id.toLowerCase();
-    if (lower !== model.id) {
-      entries[lower] = pricing;
-    }
-  }
+  const entries = staticModelPricing(providerId, provider.staticModels);
 
   if (Object.keys(entries).length > 0) {
     updatePricingMap(entries);

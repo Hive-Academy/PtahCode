@@ -31,6 +31,9 @@ export const STATUS_BAR_MANAGER = Symbol.for('StatusBarManager');
 export const FILE_SYSTEM_MANAGER = Symbol.for('FileSystemManager');
 export const COMMAND_MANAGER = Symbol.for('CommandManager');
 export const WEBVIEW_MANAGER = Symbol.for('WebviewManager');
+// Spend registration lands in batches 2I/2J.
+export const LANE_SPEND_READER = Symbol.for('LaneSpendReader');
+export const LANE_SPEND_LEDGER = Symbol.for('LaneSpendLedger');
 export const LOGGER = Symbol.for('Logger');
 export const ERROR_HANDLER = Symbol.for('ErrorHandler');
 export const CONFIG_MANAGER = Symbol.for('ConfigManager');
@@ -207,6 +210,8 @@ export const DEGRADATION_REPORTER = Symbol.for('DegradationReporter');
  * Provides a single source of truth for all dependency injection symbols
  */
 export const TOKENS = {
+  LANE_SPEND_READER,
+  LANE_SPEND_LEDGER,
   EXTENSION_CONTEXT,
   COMMAND_MANAGER,
   WEBVIEW_MANAGER,

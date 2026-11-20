@@ -43,6 +43,164 @@ describe('ElectronStateStorage — Electron-specific behaviour', () => {
     provider = new ElectronStateStorage(storage, 'state.json');
   });
 
+  it.each(['async', 'sync', 'load'] as const)(
+    'isolates the %s baseline from caller mutations and repeated rollbacks',
+    async (source) => {
+      let fail = false;
+      const createStore = () => new ElectronStateStorage(
+        storage, 'state.json', undefined, undefined, async (filePath, contents) => {
+          if (fail) throw new Error('disk');
+          await fs.writeFile(filePath, contents, 'utf8');
+        },
+      );
+      provider = createStore();
+      const value = { nested: { count: 1 } };
+      if (source === 'sync') provider.updateSync('kept', value);
+      else {
+        const update = provider.update('kept', value);
+        await provider.flush();
+        await update;
+      }
+      if (source === 'load') provider = createStore();
+      const live = provider.get<typeof value>('kept');
+      expect(live).toBeDefined();
+      if (!live) throw new Error('missing stored value');
+      if (source !== 'load') expect(live).toBe(value);
+      live.nested.count = 99;
+      fail = true;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const rejected = expect(provider.update('kept', { nested: { count: 2 } })).rejects.toThrow('disk');
+        await expect(provider.flush()).rejects.toThrow('disk');
+        await rejected;
+        const restored = provider.get<typeof value>('kept');
+        expect(restored).toEqual({ nested: { count: 1 } });
+        if (!restored) throw new Error('missing rollback value');
+        if (attempt === 0) restored.nested.count = 88;
+      }
+      fail = false;
+      const next = provider.update('other', true);
+      await provider.flush();
+      await next;
+      expect(createStore().get('kept')).toEqual({ nested: { count: 1 } });
+    },
+  );
+
+  it.each([false, true])('rebases queued rollback after first commit succeeds=%s', async (firstSucceeds) => {
+    let started: (() => void) | undefined;
+    let release: (() => void) | undefined;
+    const writing = new Promise<void>((resolve) => { started = resolve; });
+    const gate = new Promise<void>((resolve) => { release = resolve; });
+    let attempt = 0;
+    provider = new ElectronStateStorage(storage, 'state.json', undefined, undefined,
+      async (filePath, contents) => {
+        attempt++;
+        if (attempt === 1) {
+          started?.();
+          await gate;
+          if (firstSucceeds) {
+            await fs.writeFile(filePath, contents, 'utf8');
+            return;
+          }
+        }
+        throw new Error('disk');
+      });
+    provider.updateSync('key', 0);
+    const first = provider.update('key', 1);
+    const firstResult = firstSucceeds ? expect(first).resolves.toBeUndefined() : expect(first).rejects.toThrow('disk');
+    const flush = provider.flush();
+    const flushResult = firstSucceeds ? expect(flush).resolves.toBeUndefined() : expect(flush).rejects.toThrow('disk');
+    await writing;
+    const second = expect(provider.update('key', 2)).rejects.toThrow('disk');
+    const secondFlush = expect(provider.flush()).rejects.toThrow('disk');
+    release?.();
+    await Promise.all([firstResult, flushResult, second, secondFlush]);
+    expect(provider.get('key')).toBe(firstSucceeds ? 1 : 0);
+    provider.updateSync('other', true);
+    expect(new ElectronStateStorage(storage, 'state.json').get('key')).toBe(firstSucceeds ? 1 : 0);
+  });
+
+  it('commits pending keys included in another batch full snapshot', async () => {
+    let attempt = 0;
+    provider = new ElectronStateStorage(storage, 'state.json', undefined, undefined, async (filePath, contents) => {
+      if (++attempt === 2) throw new Error('disk');
+      await fs.writeFile(filePath, contents, 'utf8');
+    });
+    provider.updateSync('key', 0);
+    const first = provider.update('other', true);
+    const firstFlush = provider.flush();
+    const second = expect(provider.update('key', 2)).rejects.toThrow('disk');
+    const secondFlush = expect(provider.flush()).rejects.toThrow('disk');
+    await Promise.all([first, firstFlush, second, secondFlush]);
+    expect(provider.get('key')).toBe(2);
+    expect(new ElectronStateStorage(storage, 'state.json').get('key')).toBe(2);
+  });
+
+  it('keeps every key committed by updateSync when an in-flight write fails', async () => {
+    let started: (() => void) | undefined;
+    let rejectWrite: ((error: Error) => void) | undefined;
+    const writing = new Promise<void>((resolve) => { started = resolve; });
+    const gate = new Promise<void>((_resolve, reject) => { rejectWrite = reject; });
+    provider = new ElectronStateStorage(storage, 'state.json', undefined, undefined, async () => {
+      started?.();
+      await gate;
+    });
+    provider.updateSync('key', 0);
+    const update = expect(provider.update('key', 1)).rejects.toThrow('disk');
+    const flush = expect(provider.flush()).rejects.toThrow('disk');
+    await writing;
+    provider.updateSync('other', true);
+    rejectWrite?.(new Error('disk'));
+    await Promise.all([update, flush]);
+    expect(provider.get('key')).toBe(1);
+    const later = expect(provider.update('key', 2)).rejects.toThrow('disk');
+    await expect(provider.flush()).rejects.toThrow('disk');
+    await later;
+    expect(provider.get('key')).toBe(1);
+    expect(new ElectronStateStorage(storage, 'state.json').get('key')).toBe(1);
+  });
+
+  it('rolls back a failed global-state write before a later commit', async () => {
+    let fail = false;
+    provider = new ElectronStateStorage(storage, 'state.json', undefined, undefined, async (filePath, contents) => {
+      if (fail) throw new Error('disk');
+      await fs.writeFile(filePath, contents, 'utf8');
+    });
+    const first = provider.update('kept', 1);
+    await provider.flush();
+    await first;
+    fail = true;
+    const rejected = expect(provider.update('kept', 2)).rejects.toThrow('disk');
+    await expect(provider.flush()).rejects.toThrow('disk');
+    await rejected;
+    expect(provider.get('kept')).toBe(1);
+    fail = false;
+    const next = provider.update('other', true);
+    await provider.flush();
+    await next;
+    expect(new ElectronStateStorage(storage, 'state.json').get('kept')).toBe(1);
+  });
+  it.each([2, undefined])('preserves queued same-key update %s after an earlier flush fails', async (newValue) => {
+    let rejectFirst: (error: Error) => void = () => { throw new Error('write not started'); };
+    let started: () => void = () => { throw new Error('start not initialized'); };
+    const firstStarted = new Promise<void>((resolve) => { started = resolve; });
+    let writes = 0;
+    provider = new ElectronStateStorage(storage, 'state.json', undefined, undefined, async (filePath, contents) => {
+      if (++writes === 1) {
+        started();
+        await new Promise<void>((_resolve, reject) => { rejectFirst = reject; });
+      }
+      await fs.writeFile(filePath, contents, 'utf8');
+    });
+    const firstUpdate = expect(provider.update('key', 1)).rejects.toThrow('first failed');
+    const firstFlush = expect(provider.flush()).rejects.toThrow('first failed');
+    await firstStarted;
+    const secondUpdate = provider.update('key', newValue);
+    const secondFlush = provider.flush();
+    rejectFirst(new Error('first failed'));
+    await Promise.all([firstUpdate, firstFlush, secondUpdate, secondFlush]);
+    expect(provider.get('key')).toBe(newValue);
+    expect(new ElectronStateStorage(storage, 'state.json').get('key')).toBe(newValue);
+  });
   it('writes within one second during continuous updates', async () => {
     jest.useFakeTimers();
     try {
@@ -233,3 +391,4 @@ describe('ElectronStateStorage — Electron-specific behaviour', () => {
     expect(entries.some((e) => e.endsWith('.tmp'))).toBe(false);
   });
 });
+

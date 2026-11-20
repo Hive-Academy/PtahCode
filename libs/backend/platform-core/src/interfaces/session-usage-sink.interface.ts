@@ -21,12 +21,17 @@ export interface SessionUsageModelDelta {
   outputTokens: number | null;
   cacheReadTokens: number | null;
   cacheCreationTokens: number | null;
+  /** One-hour subset of cache creation; absent means the TTL split is unknown. */
+  cacheCreation1hTokens?: number | null;
   knownCostMicroUsd: number | null;
   costAuthority: 'provider-reported' | 'model-priced' | 'unpriced';
 }
 
 /** Stable identity and accepted usage from one producer event. */
 export interface SessionUsageContribution {
+  /** Captured at run start; never infer an owner from current ambient login. */
+  ownerKey?: string | null;
+  billingMode?: 'subscription' | 'api-key' | 'unknown';
   phaseKind?: PhaseKind | null;
   executorType?: UsageExecutorType | null;
   sessionId: string;

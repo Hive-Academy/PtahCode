@@ -1413,12 +1413,14 @@ describe('pricing.utils', () => {
   });
 
   describe('Anti-regression contracts (TASK_2026_134)', () => {
-    it('DEFAULT_MODEL_PRICING contains no anthropic-provider entries', () => {
+    it('DEFAULT_MODEL_PRICING contains only dated unambiguous Anthropic entries', () => {
       const entries = Object.entries(DEFAULT_MODEL_PRICING);
       const anthropic = entries.filter(
         ([, pricing]) => pricing.provider === 'anthropic',
       );
-      expect(anthropic).toEqual([]);
+      expect(anthropic).toHaveLength(7);
+      expect(anthropic.every(([, rate]) => rate.catalogVersion === '2026-11-18')).toBe(true);
+      expect(DEFAULT_MODEL_PRICING['claude-haiku-5-5']).toBeUndefined();
     });
   });
 
@@ -1603,5 +1605,35 @@ describe('calculateMessageCost parity with the agent-usage tool (M)', () => {
       perResponse,
       5,
     );
+  });
+});
+
+
+describe('native Anthropic valuation', () => {
+  it('isolates official rates from hydrated third-party catalogs', () => {
+    updatePricingMap({ 'claude-sonnet-5-5': { inputCostPerToken: 9, outputCostPerToken: 9 } });
+    expect(calculateExactMessageCost('claude-sonnet-5-5', { input: 1_000_000, output: 0 },
+      { billingMode: 'api-key', pricingProvider: 'anthropic' }).totalCost).toBe(2);
+    resetPricingMapForTesting();
+  });
+  it('keeps provider-reported zero authoritative even without usable usage', () => {
+    expect(calculateExactMessageCost('unknown', { input: -1, output: 0 },
+      { billingMode: 'api-key', providerReportedCost: 0 })).toMatchObject({ totalCost: 0, costBasis: 'reported' });
+  });
+  it('preserves subscription cost basis when provider cost is present', () => {
+    const tokens = { input: 1_000_000, output: 0 };
+    const result = calculateExactMessageCost('claude-sonnet-5-5', tokens,
+      { billingMode: 'subscription', providerReportedCost: 123 });
+    expect(result).toEqual(calculateExactMessageCost('claude-sonnet-5-5', tokens, { billingMode: 'subscription' }));
+    expect(result).toMatchObject({ costBasis: 'covered-by-subscription', pricingCoverage: 'full', totalCost: 2 });
+  });
+  it('preserves unknown billing when provider cost is present', () => {
+    expect(calculateExactMessageCost('claude-sonnet-5-5', { input: 1, output: 1 },
+      { billingMode: 'unknown', providerReportedCost: 123 })).toMatchObject({ totalCost: null,
+        costBasis: 'unknown', pricingCoverage: 'none', costUnavailableReason: 'billing-unknown' });
+  });
+  it('keeps ambiguous Haiku unpriced', () => {
+    expect(calculateExactMessageCost('claude-haiku-5-5', { input: 1, output: 1 },
+      { billingMode: 'api-key', pricingProvider: 'anthropic' }).totalCost).toBeNull();
   });
 });

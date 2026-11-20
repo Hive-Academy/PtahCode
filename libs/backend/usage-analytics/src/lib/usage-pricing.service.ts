@@ -1,6 +1,6 @@
 import { inject, injectable } from 'tsyringe';
 import { OpenRouterPricingService } from '@ptah-extension/auth-providers';
-import { calculateMessageCost, findModelPricing, pricesCacheTokens } from '@ptah-extension/shared';
+import { calculateMessageCost, findModelPricing, hasUnknownCacheCreationTtl, pricesCacheTokens } from '@ptah-extension/shared';
 import type { CostSource } from '@ptah-extension/shared';
 import type { UsageContribution } from './usage-source.types';
 
@@ -30,7 +30,7 @@ export class UsagePricingService {
       input: contribution.inputUncachedTokens, output: contribution.outputTokens,
       cacheHit: contribution.cacheReadTokens, cacheCreation: contribution.cacheWriteTokens,
     };
-    if (!pricing || !pricesCacheTokens(pricing, tokens)) {
+    if (!pricing || !pricesCacheTokens(pricing, tokens) || hasUnknownCacheCreationTtl(contribution.modelId, tokens, pricing)) {
       return { costUsd: null, cacheSavingsUsd: null, costSource: 'unpriced', priceSource: 'unavailable' };
     }
     const costUsd = calculateMessageCost(contribution.modelId, tokens, pricing);

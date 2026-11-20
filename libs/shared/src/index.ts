@@ -110,3 +110,7 @@ export type {
   ConfigClearScopeOverrideResult,
 } from './lib/types/rpc/rpc-auth.types';
 export { SCOPED_SETTING_KEYS } from './lib/types/rpc/rpc-auth.types';
+
+export type { ApiLaneSpend, LaneSpend, LaneSpendPeriod, PlanLaneUsage } from './lib/types/rpc-lane-spend.types';
+
+export type { AgentLaneSpendResult } from './lib/types/rpc/rpc-lane-plan-limits.types';

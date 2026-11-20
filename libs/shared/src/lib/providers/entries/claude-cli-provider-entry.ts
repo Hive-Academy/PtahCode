@@ -40,7 +40,7 @@ export const CLAUDE_CLI_PROVIDER_ENTRY: AnthropicProvider = {
     haiku: 'claude-haiku-5-5',
   },
   // Fallback for when the native login cannot list models. Prices and
-  // windows from models.dev where published; unpublished prices are omitted.
+  // windows from provider metadata; prices from the 2026-11-18 Anthropic card.
   staticModels: [
     {
       id: 'claude-opus-5-5',
@@ -49,6 +49,7 @@ export const CLAUDE_CLI_PROVIDER_ENTRY: AnthropicProvider = {
       contextLength: 1000000,
       supportsToolUse: true,
       inputCostPerToken: 4e-6, // $4.00 per 1M tokens
+      cacheCreation1hCostPerToken: 4 * 2e-6,
       outputCostPerToken: 20e-6, // $20.00 per 1M tokens
       cacheReadCostPerToken: 0.2e-6,
       cacheCreationCostPerToken: 5e-6,
@@ -60,8 +61,9 @@ export const CLAUDE_CLI_PROVIDER_ENTRY: AnthropicProvider = {
       contextLength: 1000000,
       supportsToolUse: true,
       inputCostPerToken: 2e-6, // $2.00 per 1M tokens
+      cacheCreation1hCostPerToken: 2 * 2e-6,
       outputCostPerToken: 10e-6, // $10.00 per 1M tokens
-      cacheReadCostPerToken: 0.2e-6,
+      cacheReadCostPerToken: 0.1e-6,
       cacheCreationCostPerToken: 2.5e-6,
     },
     {
@@ -77,6 +79,11 @@ export const CLAUDE_CLI_PROVIDER_ENTRY: AnthropicProvider = {
       description: 'Largest model (1M context)',
       contextLength: 1000000,
       supportsToolUse: true,
+      inputCostPerToken: 8e-6,
+      cacheCreation1hCostPerToken: 8 * 2e-6,
+      outputCostPerToken: 40e-6,
+      cacheReadCostPerToken: 0.2e-6,
+      cacheCreationCostPerToken: 10e-6,
     },
     {
       id: 'claude-fable-5-1',
@@ -85,6 +92,7 @@ export const CLAUDE_CLI_PROVIDER_ENTRY: AnthropicProvider = {
       contextLength: 1000000,
       supportsToolUse: true,
       inputCostPerToken: 10e-6, // $10.00 per 1M tokens
+      cacheCreation1hCostPerToken: 10 * 2e-6,
       outputCostPerToken: 50e-6, // $50.00 per 1M tokens
       cacheReadCostPerToken: 0.25e-6,
       cacheCreationCostPerToken: 12.5e-6,
@@ -96,6 +104,7 @@ export const CLAUDE_CLI_PROVIDER_ENTRY: AnthropicProvider = {
       contextLength: 1000000,
       supportsToolUse: true,
       inputCostPerToken: 5e-6, // $5.00 per 1M tokens
+      cacheCreation1hCostPerToken: 5 * 2e-6,
       outputCostPerToken: 25e-6, // $25.00 per 1M tokens
       cacheReadCostPerToken: 0.5e-6, // 0.1x input
       cacheCreationCostPerToken: 6.25e-6, // 1.25x input
@@ -107,6 +116,7 @@ export const CLAUDE_CLI_PROVIDER_ENTRY: AnthropicProvider = {
       contextLength: 1000000,
       supportsToolUse: true,
       inputCostPerToken: 3e-6, // $3.00 per 1M tokens
+      cacheCreation1hCostPerToken: 3 * 2e-6,
       outputCostPerToken: 15e-6, // $15.00 per 1M tokens
       cacheReadCostPerToken: 0.3e-6, // 0.1x input
       cacheCreationCostPerToken: 3.75e-6, // 1.25x input
@@ -118,6 +128,7 @@ export const CLAUDE_CLI_PROVIDER_ENTRY: AnthropicProvider = {
       contextLength: 200000,
       supportsToolUse: true,
       inputCostPerToken: 1e-6, // $1.00 per 1M tokens
+      cacheCreation1hCostPerToken: 1 * 2e-6,
       outputCostPerToken: 5e-6, // $5.00 per 1M tokens
       cacheReadCostPerToken: 0.1e-6, // 0.1x input
       cacheCreationCostPerToken: 1.25e-6, // 1.25x input
