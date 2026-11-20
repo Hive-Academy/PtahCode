@@ -41,8 +41,8 @@ main checkout on branch `build/nx-migrate-latest` instead of a worktree.
     overflows the stack on Node 26.
   - ptah-electron: `container.smoke.spec.ts` runs out of memory at the default 2 GB heap;
     it passes 67 of 67 tests with `--max-old-space-size=6144`.
-- `web-tree-sitter` stays at 0.27.0: `scripts/tree-sitter-grammars.json` pins that version
-  and `scripts/copy-wasm.js` rejects any other (found when building the dev app).
+- `web-tree-sitter` 0.27.2: the runtime row in `scripts/tree-sitter-grammars.json` now records
+  0.27.2 and its size (210688 bytes); `copy-wasm.js` checks both (CodeRabbit finding).
 
 ## Dev app run (Electron 44.4.3, prebuilt better-sqlite3 binary)
 
