@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_2288_e1b3
-status: in_progress
+status: in_review
 type: BUGFIX
 title: Stop corrupt config and transport failures from losing or hiding data
 depends_on:
