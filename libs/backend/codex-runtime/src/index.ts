@@ -100,6 +100,7 @@ export {
   type CodexExecutableProbes,
   type CodexSelection,
   type CodexSelectionSnapshotPort,
+  type NodeCodexExecutableProbeOptions,
 } from './lib/select-codex-executable';
 export {
   normalizeCodexHomeKey,
