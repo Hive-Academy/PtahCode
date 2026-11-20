@@ -1,0 +1,43 @@
+# Migrate Nx and update outdated packages
+
+The user asked to run `nx migrate latest` first, then update the outdated
+packages that Nx does not manage. The user approved doing this task in the
+main checkout on branch `build/nx-migrate-latest` instead of a worktree.
+
+## Plan
+
+1. `nx migrate latest`, install, `nx migrate --run-migrations`.
+2. Update the remaining packages inside their current major versions.
+3. List the major-version upgrades for a separate decision.
+
+## What was done
+
+- `nx migrate latest`: nx and @nx/* 24.0.0 -> 24.0.6. Nx generated no migrations.
+  The pinned @nx/nx-* platform packages were bumped by hand to match.
+- Angular framework ranges `~22.2.0` -> `~22.2.7`, `@angular/aria` 22.2.6 -> 22.2.7.
+  npm would not move the group until the locked entries were dropped and re-resolved.
+- Exact pins bumped: zod 4.6.7, @codemirror/view 6.43.15, @codemirror/language 6.13.1,
+  discord.js 14.28.1.
+- In-range `npm update` of the other outdated packages (lockfile only).
+
+## Held back
+
+- `better-sqlite3` stays at 13.0.3: the Electron rebuild check cannot run on the
+  developer machine (no Visual Studio C++ build tools).
+- `@cursor/sdk` stays at 1.0.31: 1.4.2 breaks the anchor in
+  `scripts/windows-hide-patch/patch-windows-hide-deps.js`.
+- `electron-builder`, `shiki`, `@pierre/diffs`, Angular 22.3, `@astrojs/starlight` 0.43.
+- Major upgrades, each a separate task: @anthropic-ai/sdk 1.x, @agentclientprotocol/sdk 2.x,
+  @huggingface/transformers 4.x, @sentry/node 11, @tavily/core 1.x, tailwindcss 4, daisyui 5,
+  mermaid 12, gridstack 14, uuid 14, chokidar 6, croner 11, minimatch 11.
+- `lucide-angular` is deprecated in favour of `@lucide/angular`; migration is a separate task.
+
+## Local verification (Node 26.13.1; the repo requires Node 24)
+
+- lint, typecheck for ptah-electron, ptah-extension-webview, shared: 6 of 6 tasks passed.
+- typecheck-templates for ptah-extension-webview: passed.
+- test: 11 of 13 tasks passed.
+  - shared: 2 tests in `dashboard-budgets.spec.ts` fail because `JSON.stringify` no longer
+    overflows the stack on Node 26.
+  - ptah-electron: `container.smoke.spec.ts` runs out of memory at the default 2 GB heap;
+    it passes 67 of 67 tests with `--max-old-space-size=6144`.
