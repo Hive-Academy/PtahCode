@@ -6,11 +6,14 @@
  */
 import { readFileSync } from 'fs';
 import { join } from 'path';
-import type { CliCommandOptions } from '../cli-adapter.interface';
-import type { AcpRequestFailure, AcpRequestMethod } from '../acp';
+import type {
+  AcpRequestFailure,
+  AcpRequestMethod,
+  AcpSessionOptions,
+} from '../acp-vendor-profile';
 import { grokAcpProfile } from './grok-acp-profile';
 
-const FIXTURES = join(__dirname, '..', 'acp', '__fixtures__');
+const FIXTURES = join(__dirname, '..', '__fixtures__');
 
 interface Envelope {
   readonly dir: string;
@@ -70,9 +73,9 @@ function advertisedModels(file: string): string[] {
   );
 }
 
-const BASE_OPTIONS: CliCommandOptions = {
-  task: 'Summarise the repository',
+const BASE_OPTIONS: AcpSessionOptions = {
   workingDirectory: 'D:\\work\\repo',
+  mcp: [],
 };
 
 function failure(
@@ -107,7 +110,7 @@ describe('grokAcpProfile', () => {
         reasoningEffort: 'high',
         autoApprove: true,
         resumeSessionId: 'sess-1',
-        mcpPort: 51820,
+        mcp: [],
       });
       expect(args).toEqual(['agent', '--no-leader', 'stdio']);
       expect(args).not.toContain('-m');
@@ -117,14 +120,20 @@ describe('grokAcpProfile', () => {
     });
   });
 
+  // The lane builds the URL and bearer (`buildLaneMcpAttachments`; its spec
+  // pins the mcpPort and missing-token cases); the profile maps the entry.
   describe('buildMcpServers', () => {
-    it('attaches the scoped Ptah http entry when mcpPort is set', () => {
+    it('attaches the scoped Ptah http entry the caller built', () => {
       expect(
         grokAcpProfile.buildMcpServers({
           ...BASE_OPTIONS,
-          mcpPort: 51820,
-          agentId: 'agent-7',
-          mcpToken: 'lane-token',
+          mcp: [
+            {
+              name: 'ptah',
+              url: `http://localhost:51820/agent/agent-7/workspace/${encodeURIComponent('D:\\work\\repo')}`,
+              headers: [{ name: 'Authorization', value: 'Bearer lane-token' }],
+            },
+          ],
         }),
       ).toEqual([
         {
@@ -136,13 +145,10 @@ describe('grokAcpProfile', () => {
       ]);
     });
 
-    it('attaches nothing when mcpPort is unset', () => {
+    it('attaches nothing when the caller built no attachment', () => {
       expect(grokAcpProfile.buildMcpServers(BASE_OPTIONS)).toEqual([]);
-    });
-
-    it('omits ptah when the lane credential is unavailable', () => {
       expect(
-        grokAcpProfile.buildMcpServers({ ...BASE_OPTIONS, mcpPort: 51820 }),
+        grokAcpProfile.buildMcpServers({ ...BASE_OPTIONS, mcp: [] }),
       ).toEqual([]);
     });
   });

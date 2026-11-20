@@ -1,21 +1,22 @@
 /**
  * GrokCliAdapter — detection, capabilities, the `grok models` parser and
  * probe, the credential check, and `runSdk` end to end against the fake ACP
- * agent. `runSdk` reaches the real ACP runner; only its `transportFactory`
- * seam is redirected to an in-memory transport, so the argv the runner would
- * spawn is pinned exactly.
+ * agent. `runSdk` reaches the real lane handle and ACP runtime; only its
+ * `transportFactory` seam is redirected to an in-memory transport, so the argv
+ * the runtime would spawn is pinned exactly.
  */
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
 import type { CliOutputSegment } from '@ptah-extension/shared';
 import { createMockLogger } from '@ptah-extension/shared/testing';
 import type { Logger } from '@ptah-extension/vscode-core';
+import type { AcpSpawnOptions } from '@ptah-extension/acp-runtime';
 import {
   createFakeAcpAgent,
   type FakeAcpAgent,
   type FakeAcpMessage,
-} from './acp/__fixtures__/fake-acp-agent';
-import type { AcpSessionHandleConfig, AcpSpawnOptions } from './acp';
+} from '@ptah-extension/acp-runtime/testing';
+import type { ProviderSessionLaneHandleConfig } from './provider-session/provider-session-lane-handle';
 
 const mockSpawnCli = jest.fn();
 const mockResolveCliPath = jest.fn();
@@ -42,21 +43,25 @@ jest.mock('fs/promises', () => ({
 
 /** The fake agent `runSdk` connects to, and what the runner was handed. */
 let mockFakeAgent: FakeAcpAgent | undefined;
-let mockHandleConfig: AcpSessionHandleConfig | undefined;
+let mockHandleConfig: ProviderSessionLaneHandleConfig | undefined;
 let mockSpawnOptions: AcpSpawnOptions | undefined;
 
-jest.mock('./acp', () => {
-  const actual = jest.requireActual<typeof import('./acp')>('./acp');
+jest.mock('./provider-session/provider-session-lane-handle', () => {
+  const actual = jest.requireActual<
+    typeof import('./provider-session/provider-session-lane-handle')
+  >('./provider-session/provider-session-lane-handle');
   const fixtures = jest.requireActual<
-    typeof import('./acp/__fixtures__/fake-acp-agent')
-  >('./acp/__fixtures__/fake-acp-agent');
+    typeof import('@ptah-extension/acp-runtime/testing')
+  >('@ptah-extension/acp-runtime/testing');
   return {
     ...actual,
-    createAcpSessionHandle: (config: AcpSessionHandleConfig) => {
+    createProviderSessionLaneHandle: (
+      config: ProviderSessionLaneHandleConfig,
+    ) => {
       mockHandleConfig = config;
       if (!mockFakeAgent) throw new Error('no fake agent scripted');
       const transport = fixtures.createFakeAcpTransport(mockFakeAgent);
-      return actual.createAcpSessionHandle({
+      return actual.createProviderSessionLaneHandle({
         ...config,
         transportFactory: (options) => {
           mockSpawnOptions = options;

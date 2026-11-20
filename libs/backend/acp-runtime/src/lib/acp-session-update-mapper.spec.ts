@@ -5,11 +5,40 @@ import type {
   SessionNotification,
   SessionUpdate,
 } from '@agentclientprotocol/sdk';
+import type { CliOutputSegment } from '@ptah-extension/shared';
+import {
+  createFlatStreamProjector,
+  projectToCliSegments,
+} from '@ptah-extension/provider-session-contracts';
 import { connectAcp, type AcpClientHandlers } from './acp-sdk-loader';
 import {
-  createAcpSessionUpdateMapper,
+  createAcpSessionUpdateMapper as createEventMapper,
   mapStopReason,
+  type AcpSessionUpdateMapperOptions,
 } from './acp-session-update-mapper';
+
+/**
+ * The lane view of the mapper: its events through `projectToCliSegments`,
+ * plus the text deltas as the lane's output. These are the golden shapes
+ * the ACP lane emitted before the runtime was extracted, so this spec pins
+ * mapper and projector together.
+ */
+function createAcpSessionUpdateMapper(
+  options?: AcpSessionUpdateMapperOptions,
+): { map(update: SessionUpdate): { output: string; segments: CliOutputSegment[] } } {
+  const mapper = createEventMapper(options);
+  return {
+    map(update) {
+      const events = mapper.map(update);
+      return {
+        output: events
+          .map((event) => (event.type === 'textDelta' ? event.delta : ''))
+          .join(''),
+        segments: events.flatMap(projectToCliSegments),
+      };
+    },
+  };
+}
 
 const FIXTURE_DIRECTORY = path.join(__dirname, '__fixtures__');
 const SDK_REPLAY_FIXTURES = [
@@ -483,5 +512,64 @@ describe('Grok inbound session/update SDK validation', () => {
       ),
     ).toBe(true);
     consoleError.mockRestore();
+  });
+});
+
+describe('replayed history through the stream projector', () => {
+  /** The `session/update` notifications `session/load` replayed (`_meta.isReplay`). */
+  function replayedUpdates(filename: string): unknown[] {
+    return fixtureEnvelopes(filename).flatMap((envelope) => {
+      if (envelope.dir !== 'in' || !isRecord(envelope.msg)) return [];
+      const params = envelope.msg.params;
+      if (envelope.msg.method !== 'session/update' || !isRecord(params)) {
+        return [];
+      }
+      const meta = params['_meta'];
+      return isRecord(meta) && meta['isReplay'] === true ? [params['update']] : [];
+    });
+  }
+
+  it('rebuilds the user turn and the assistant reply of grok-p2-session-load-replay', () => {
+    const mapper = createEventMapper();
+    const projector = createFlatStreamProjector({ now: () => 0 });
+    let sequence = 0;
+    const rows = replayedUpdates('grok-p2-session-load-replay.ndjson').flatMap(
+      (update) =>
+        mapper
+          .map(update as SessionUpdate)
+          .flatMap((body) =>
+            projector.project({
+              contextId: 'agent-1',
+              processGeneration: 1,
+              sessionId: 'sess-replay',
+              turnId: 'replay',
+              sequence: ++sequence,
+              replayed: true,
+              ...body,
+            }),
+          ),
+    );
+
+    const user = rows.filter((row) => row.messageId === 'agent-1:user:user-message');
+    expect(user.map((row) => row.eventType)).toEqual([
+      'message_start',
+      'text_delta',
+      'message_complete',
+    ]);
+    expect(user[0]).toMatchObject({ role: 'user', source: 'history' });
+    expect(user[1]).toMatchObject({
+      delta: 'Remember the token ZEBRA-4471. Reply OK only.',
+    });
+
+    const assistantText = rows
+      .flatMap((row) =>
+        row.eventType === 'text_delta' && row.messageId === 'replay:assistant'
+          ? [row.delta]
+          : [],
+      )
+      .join('');
+    expect(assistantText).toBe('OK');
+    expect(rows.some((row) => row.eventType === 'thinking_delta')).toBe(true);
+    expect(rows.every((row) => row.source === 'history')).toBe(true);
   });
 });

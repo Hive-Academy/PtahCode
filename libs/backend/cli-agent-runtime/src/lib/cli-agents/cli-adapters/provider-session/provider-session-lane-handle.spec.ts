@@ -1,9 +1,23 @@
+/**
+ * The ACP lane `SdkHandle` end to end against the scripted fake ACP agent:
+ * the real `@ptah-extension/acp-runtime` session runs underneath, with only
+ * its transport replaced by an in-memory one. These are the `SdkHandle` cases
+ * of the former `acp-session-handle.spec.ts`, assertions unchanged; the
+ * runtime-only case (SDK load failure) lives in `acp-session-runtime.spec.ts`.
+ */
 import type { CliOutputSegment } from '@ptah-extension/shared';
 import { createMockLogger } from '@ptah-extension/shared/testing';
 import type { MockLogger } from '@ptah-extension/shared/testing';
 import type { Logger } from '@ptah-extension/vscode-core';
-import type { McpAttachment } from '../../mcp-attachment-probe.port';
-import type { CliCommandOptions, SdkHandle } from '../cli-adapter.interface';
+import {
+  ACP_CANCEL_GRACE_MS,
+  ACP_HANDSHAKE_TIMEOUTS_MS,
+  ACP_USAGE_DRAIN_MS,
+  readAcpErrorDetail,
+  type AcpRequestFailure,
+  type AcpSpawnOptions,
+  type AcpVendorProfile,
+} from '@ptah-extension/acp-runtime';
 import {
   createFakeAcpAgent,
   createFakeAcpTransport,
@@ -11,20 +25,10 @@ import {
   type FakeAcpAgentOptions,
   type FakeAcpMessage,
   type FakeAcpTransport,
-} from './__fixtures__/fake-acp-agent';
-import type { AcpSpawnOptions } from './acp-process-transport';
-import * as loader from './acp-sdk-loader';
-import {
-  ACP_CANCEL_GRACE_MS,
-  ACP_HANDSHAKE_TIMEOUTS_MS,
-  ACP_USAGE_DRAIN_MS,
-  createAcpSessionHandle,
-} from './acp-session-handle';
-import {
-  readAcpErrorDetail,
-  type AcpRequestFailure,
-  type AcpVendorProfile,
-} from './acp-vendor-profile';
+} from '@ptah-extension/acp-runtime/testing';
+import type { McpAttachment } from '../../mcp-attachment-probe.port';
+import type { CliCommandOptions, SdkHandle } from '../cli-adapter.interface';
+import { createProviderSessionLaneHandle } from './provider-session-lane-handle';
 
 const NAME = 'Test Agent';
 const SESSION_ID = 'sess-1';
@@ -107,7 +111,7 @@ function start(
   const transport = createFakeAcpTransport(agent);
   const logger = createMockLogger();
   let spawn: AcpSpawnOptions | undefined;
-  const handle = createAcpSessionHandle({
+  const handle = createProviderSessionLaneHandle({
     profile: createProfile(setup.profile),
     options: {
       task: 'Summarise the repository',
@@ -175,7 +179,7 @@ afterEach(async () => {
   await Promise.all(live.splice(0).map((agent) => agent.close()));
 });
 
-describe('createAcpSessionHandle — first turn', () => {
+describe('createProviderSessionLaneHandle — first turn', () => {
   it('separates turn IDs across runs that resume the same ACP session', async () => {
     const script = (agent: FakeAcpAgent): void => {
       agent.handle('session/prompt', () => ({ result: {
@@ -458,7 +462,7 @@ describe('createAcpSessionHandle — first turn', () => {
     live.push(agent);
     const transport = createFakeAcpTransport(agent);
     let onStderrLine: ((line: string) => void) | undefined;
-    const handle = createAcpSessionHandle({
+    const handle = createProviderSessionLaneHandle({
       profile: createProfile(),
       options: { task: 't', workingDirectory: process.cwd() },
       command: 'test-agent',
@@ -486,7 +490,7 @@ describe('createAcpSessionHandle — first turn', () => {
   });
 });
 
-describe('createAcpSessionHandle — continuation', () => {
+describe('createProviderSessionLaneHandle — continuation', () => {
   it('runs a further session/prompt with its own done', async () => {
     const h = start();
     await expect(h.handle.done).resolves.toBe(0);
@@ -521,7 +525,7 @@ describe('createAcpSessionHandle — continuation', () => {
   });
 });
 
-describe('createAcpSessionHandle — stop reasons', () => {
+describe('createProviderSessionLaneHandle — stop reasons', () => {
   it.each([
     ['end_turn', 0, undefined],
     ['max_tokens', 0, { type: 'info', content: 'Token limit reached.' }],
@@ -555,7 +559,7 @@ describe('createAcpSessionHandle — stop reasons', () => {
   });
 });
 
-describe('createAcpSessionHandle — permissions', () => {
+describe('createProviderSessionLaneHandle — permissions', () => {
   it('answers a permission request with the allow_once option', async () => {
     let reply: FakeAcpMessage | undefined;
     const h = start({
@@ -634,7 +638,7 @@ describe('createAcpSessionHandle — permissions', () => {
   });
 });
 
-describe('createAcpSessionHandle — extension notifications', () => {
+describe('createProviderSessionLaneHandle — extension notifications', () => {
   it('ignores the vendor namespace and names an unknown method once', async () => {
     const h = start({
       script: (agent) =>
@@ -681,7 +685,7 @@ describe('createAcpSessionHandle — extension notifications', () => {
   });
 });
 
-describe('createAcpSessionHandle — resume', () => {
+describe('createProviderSessionLaneHandle — resume', () => {
   it('resumes with the same mcpServers and restores the context (R7)', async () => {
     const h = start({ options: { resumeSessionId: 'old-session' } });
 
@@ -795,7 +799,7 @@ describe('createAcpSessionHandle — resume', () => {
   });
 });
 
-describe('createAcpSessionHandle — session config (R6)', () => {
+describe('createProviderSessionLaneHandle — session config (R6)', () => {
   it('applies advertised config before the first prompt and skips the rest with an info', async () => {
     const h = start({
       agent: { configOptions: [MODEL_OPTION] },
@@ -1001,7 +1005,7 @@ describe('createAcpSessionHandle — session config (R6)', () => {
   });
 });
 
-describe('createAcpSessionHandle — error rows', () => {
+describe('createProviderSessionLaneHandle — error rows', () => {
   it.each([
     ['a string', 'API error (status 429 Too Many Requests): usage exhausted'],
     [
@@ -1088,24 +1092,9 @@ describe('createAcpSessionHandle — error rows', () => {
     expect(h.transport.killCount).toBe(1);
   });
 
-  it('maps AcpUnavailableError to a failed turn', async () => {
-    jest
-      .spyOn(loader, 'connectAcp')
-      .mockRejectedValueOnce(
-        new loader.AcpUnavailableError(new Error('Cannot find module')),
-      );
-    const h = start();
-
-    await expect(h.handle.done).resolves.toBe(1);
-    expect(h.errors()).toHaveLength(1);
-    expect(h.errors()[0]).toContain(
-      'The ACP client library could not be loaded: Cannot find module',
-    );
-    expect(h.transport.killCount).toBe(1);
-  });
 });
 
-describe('createAcpSessionHandle — handshake timeout', () => {
+describe('createProviderSessionLaneHandle — handshake timeout', () => {
   it('fails the turn and kills the agent when initialize overruns its deadline', async () => {
     jest.useFakeTimers({
       doNotFake: ['nextTick', 'queueMicrotask', 'setImmediate'],
@@ -1165,7 +1154,7 @@ describe('createAcpSessionHandle — handshake timeout', () => {
   });
 });
 
-describe('createAcpSessionHandle — process lifecycle', () => {
+describe('createProviderSessionLaneHandle — process lifecycle', () => {
   it('fails the turn naming the exit code when the agent exits mid-turn', async () => {
     const h = start({
       script: (agent) => agent.handle('session/prompt', () => ({ hold: true })),

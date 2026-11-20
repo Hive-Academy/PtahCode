@@ -31,8 +31,8 @@ import type {
   SpawnedProcessHandle,
 } from '@ptah-extension/platform-core';
 import { createMockLogger } from '@ptah-extension/shared/testing';
-import type { Logger } from '@ptah-extension/vscode-core';
 import { spawnAcpProcess } from './acp-process-transport';
+import type { AcpSpawnTransport } from './acp-process-transport';
 
 /**
  * A spawner over a plain `child_process.spawn` that keeps the `ChildProcess`,
@@ -90,6 +90,20 @@ function createRecordingSpawner(stdin?: Writable): {
   };
   return { spawner, child: () => last };
 }
+
+/**
+ * The spawn function the transport is handed. A lane injects `spawnCli`
+ * (Windows `.cmd` resolution, clean env, detached with orphan cleanup); this
+ * one spawns plainly through the request's spawner, or a recording one, with
+ * the same env merge over the inherited environment.
+ */
+const spawnTransport: AcpSpawnTransport = async (request) =>
+  (request.spawner ?? createRecordingSpawner().spawner).spawnProcess({
+    command: request.command,
+    args: request.args,
+    cwd: request.cwd,
+    env: { ...process.env, ...request.env },
+  });
 
 /** Collects the lines the transport hands to `onStderrLine`, in order. */
 function recordStderr(): {
@@ -177,6 +191,7 @@ describe('spawnAcpProcess', () => {
       command: process.execPath,
       args: ['-e', ECHO_SCRIPT],
       cwd: process.cwd(),
+      spawnTransport,
       onStderrLine: stderr.onLine,
     });
 
@@ -214,6 +229,7 @@ describe('spawnAcpProcess', () => {
       command: process.execPath,
       args: ['-e', WAIT_SCRIPT],
       cwd: process.cwd(),
+      spawnTransport,
       onStderrLine: stderr.onLine,
     });
 
@@ -241,6 +257,7 @@ describe('spawnAcpProcess', () => {
           'process.stdout.write(JSON.stringify({ lane: process.env.PTAH_ACP_SPEC_LANE, inherited: process.env.PTAH_ACP_SPEC_INHERITED }) + "\\n");',
         ],
         cwd: process.cwd(),
+        spawnTransport,
         env: { PTAH_ACP_SPEC_LANE: 'lane-only' },
       });
 
@@ -266,9 +283,10 @@ describe('spawnAcpProcess', () => {
       command: process.execPath,
       args: ['-e', WAIT_SCRIPT],
       cwd: process.cwd(),
+      spawnTransport,
       spawner: recording.spawner,
       onStderrLine: stderr.onLine,
-      logger: logger as unknown as Logger,
+      logger,
     });
 
     await stderr.waitFor('ready');
@@ -307,6 +325,7 @@ describe('spawnAcpProcess', () => {
       command: process.execPath,
       args: ['-e', script],
       cwd: process.cwd(),
+      spawnTransport,
     });
 
     // Without the exit grace this read hangs until the grandchild ends (20 s,
@@ -328,6 +347,7 @@ describe('spawnAcpProcess', () => {
       command: 'ptah-no-such-binary-617',
       args: [],
       cwd: process.cwd(),
+      spawnTransport,
       onStderrLine: stderr.onLine,
     });
 
@@ -365,6 +385,7 @@ describe('spawnAcpProcess', () => {
         command: process.execPath,
         args: ['-e', WAIT_SCRIPT],
         cwd: process.cwd(),
+        spawnTransport,
         spawner: recording.spawner,
         onStderrLine: stderr.onLine,
       });
