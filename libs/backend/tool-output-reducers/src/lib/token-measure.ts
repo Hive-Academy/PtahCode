@@ -207,6 +207,9 @@ function* pieces(text: string): Generator<Piece> {
     yield { start: 0, end: text.length, long: false };
     return;
   }
+  // The pattern is gpt-tokenizer's verbatim. Its `\p{M}` classes are meant to
+  // match combining marks one by one, as the tokenizer itself does.
+  // eslint-disable-next-line no-misleading-character-class
   const split = new RegExp(O200K_SPLIT_PATTERN, 'gv');
   let start = 0;
   /** Latest pre-token end after `start` that ends after a non-whitespace char. */
