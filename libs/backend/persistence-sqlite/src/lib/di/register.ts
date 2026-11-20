@@ -12,6 +12,7 @@
  */
 import type { DependencyContainer } from 'tsyringe';
 import type { Logger } from '@ptah-extension/vscode-core';
+import { SqliteBotRepository } from '../bots/sqlite-bot-repository';
 import { PERSISTENCE_TOKENS } from './tokens';
 import { SqliteConnectionService } from '../sqlite-connection.service';
 import { SqliteBackupService } from '../backup.service';
@@ -39,6 +40,10 @@ export function registerPersistenceSqliteServices(
   logger: Logger,
 ): void {
   logger.info('[persistence-sqlite] registering services');
+  container.registerSingleton(
+    PERSISTENCE_TOKENS.BOT_REPOSITORY,
+    SqliteBotRepository,
+  );
   // The worker run loop, shared by the integrity check and the backup. A
   // singleton because it holds NO per-run state — every run's worker, timer and
   // settle latch live in the closure `run()` opens — so one instance serving

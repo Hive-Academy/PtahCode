@@ -101,6 +101,7 @@ import { sql as sql0072TaskEndHook } from './0072_task_end_hook';
 import { sql as sql0073TaskCloseOut } from './0073_task_close_out';
 import { sql as sql0074ReviewStatusSync } from './0074_review_status_sync';
 import { sql as sql0075PhaseGradeKeys } from './0075_phase_grade_keys';
+import { sql as sql0076Bots } from './0076_bots';
 import type { SqliteDatabase } from '../sqlite-connection.service';
 
 export interface Migration {
@@ -510,4 +511,5 @@ export const MIGRATIONS: readonly Migration[] = [
   },
   { version: 74, name: '0074_review_status_sync', sql: sql0074ReviewStatusSync },
   { version: 75, name: '0075_phase_grade_keys', sql: sql0075PhaseGradeKeys },
+  { version: 76, name: '0076_bots', sql: sql0076Bots },
 ];

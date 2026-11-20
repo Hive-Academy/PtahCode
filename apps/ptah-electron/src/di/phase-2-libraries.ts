@@ -520,6 +520,7 @@ export function registerPhase2Libraries(
     container.register(PERSISTENCE_TOKENS.SQLITE_SLOW_STATEMENT_SINK, {
       useValue: slowStatementSink,
     });
+    // Includes BOT_REPOSITORY on the shared connection, with its default clock.
     registerPersistenceSqliteServices(container, logger);
     registerReviewCore(container);
     registerReviewGithubServices(container);

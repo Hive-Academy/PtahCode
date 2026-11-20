@@ -131,7 +131,10 @@ export {
 } from './lib/session-store/session-stats-repository';
 export { SqliteSessionUsageSink } from './lib/session-store/sqlite-session-usage-sink';
 export { SqliteUsageCursorRepository } from './lib/session-store/usage-cursor-repository';
-export type { UsageSourceCursor, UsageCursorRepository } from './lib/session-store/usage-cursor-repository';
+export type {
+  UsageSourceCursor,
+  UsageCursorRepository,
+} from './lib/session-store/usage-cursor-repository';
 export type {
   SessionUsageContribution,
   UsageExecutorType,
@@ -153,3 +156,6 @@ export {
 export { SessionStoreGate } from './lib/session-store/session-store-gate';
 
 export { resolvePtahDbPath } from './lib/db-path';
+
+export * from './lib/bots/bot-repository';
+export { SqliteBotRepository } from './lib/bots/sqlite-bot-repository';

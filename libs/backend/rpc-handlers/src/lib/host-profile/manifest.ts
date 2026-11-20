@@ -28,6 +28,7 @@ import {
 
 import type { Capability } from './capabilities';
 import {
+  BotsRpcHandlers,
   AttentionRpcHandlers,
   UsageRpcHandlers,
   AgentRpcHandlers,
@@ -122,6 +123,12 @@ export interface RpcHandlerManifestEntry {
 }
 
 export const RPC_HANDLER_MANIFEST = [
+  {
+    key: 'bots',
+    methods: BotsRpcHandlers.METHODS,
+    requires: [],
+    handler: BotsRpcHandlers,
+  },
   {
     key: 'artifacts',
     methods: ArtifactRpcHandlers.METHODS,
@@ -680,5 +687,3 @@ function assertHandlersNotSharedAcrossCapabilities(): void {
     if (!previous) seen.set(entry.handler, { key: entry.key, requires });
   }
 }
-
-

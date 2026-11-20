@@ -63,6 +63,7 @@ export type ViewType =
   | 'apps'
   | 'command-center'
   | 'review-runs'
+  | 'bots'
   | 'machines';
 
 /**
@@ -84,6 +85,7 @@ export const SURFACE_ROUTE_IDS: readonly ViewType[] = [
   'apps',
   'command-center',
   'review-runs',
+  'bots',
   'machines',
 ];
 

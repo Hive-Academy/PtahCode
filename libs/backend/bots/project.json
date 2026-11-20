@@ -1,0 +1,32 @@
+{
+  "name": "@ptah-extension/bots",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "library",
+  "sourceRoot": "libs/backend/bots/src",
+  "tags": ["scope:extension", "type:data-access"],
+  "targets": {
+    "build": {
+      "executor": "@nx/esbuild:esbuild",
+      "outputs": ["{options.outputPath}"],
+      "options": {
+        "outputPath": "dist/libs/backend/bots",
+        "main": "libs/backend/bots/src/index.ts",
+        "tsConfig": "libs/backend/bots/tsconfig.lib.json",
+        "assets": [],
+        "format": ["cjs"],
+        "external": ["vscode", "tsyringe", "better-sqlite3", "sqlite-vec"]
+      }
+    },
+    "test": {
+      "options": {
+        "passWithNoTests": true
+      }
+    },
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsc --noEmit --project libs/backend/bots/tsconfig.lib.json"
+      }
+    }
+  }
+}

@@ -133,12 +133,13 @@ describe('ElectronShellComponent Apps tab', () => {
 
   afterEach(() => fixture.destroy());
 
-  it('orders the tab row Chat, Voice, Apps, Tasks, Machines, Reviews, Analytics, Setup when folders exist', () => {
+  it('orders the tab row Chat, Voice, Apps, Tasks, Bots, Machines, Reviews, Analytics, Setup when folders exist', () => {
     const order = [
       'Chat',
       'Voice',
       'Apps',
       'Tasks',
+      'Bots',
       'Machines',
       'Reviews',
       'Analytics',
@@ -146,7 +147,7 @@ describe('ElectronShellComponent Apps tab', () => {
     ];
     expect(tabs().map((tab) => tab.title)).toEqual(order);
     expect(tabs().map((tab) => tab.textContent?.trim())).toEqual(order);
-    expect(shell().querySelectorAll('[role="tab"]')).toHaveLength(8);
+    expect(shell().querySelectorAll('[role="tab"]')).toHaveLength(9);
   });
 
   it('renders the Apps tab with the sibling tab pattern and the AppWindow icon', () => {
@@ -171,8 +172,8 @@ describe('ElectronShellComponent Apps tab', () => {
   it('does not render the Apps tab without workspace folders', () => {
     layoutStub.hasWorkspaceFolders.set(false);
     fixture.detectChanges();
-    // The strip shrinks to Machines alone (D12).
-    expect(tabs().map((tab) => tab.title)).toEqual(['Machines']);
+    // The strip shrinks to Bots and Machines (D12).
+    expect(tabs().map((tab) => tab.title)).toEqual(['Bots', 'Machines']);
     expect(shell().querySelector('button[title="Apps"]')).toBeNull();
 
     layoutStub.hasWorkspaceFolders.set(true);
@@ -196,6 +197,7 @@ describe('ElectronShellComponent Apps tab', () => {
       'false',
       'false',
       'true',
+      'false',
       'false',
       'false',
       'false',

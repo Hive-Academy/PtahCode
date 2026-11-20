@@ -35,6 +35,7 @@ describe('webview surface ids', () => {
       'apps',
       'command-center',
       'review-runs',
+      'bots',
       'machines',
     ]);
     expect(new Set(SURFACE_ROUTE_IDS).size).toBe(SURFACE_ROUTE_IDS.length);
@@ -65,6 +66,14 @@ describe('webview surface ids', () => {
     expect(isAcceptedInitialView('onboarding')).toBe(true);
     expect(surfaceRoutePath('onboarding')).toBe('/onboarding');
     expect(surfaceIdFromSegment('onboarding')).toBe('onboarding');
+  });
+
+  it('routes bots and accepts it as an initialView', () => {
+    expect(isSurfaceRouteId('bots')).toBe(true);
+    expect(isAcceptedInitialView('bots')).toBe(true);
+    expect(surfaceRoutePath('bots')).toBe('/bots');
+    expect(surfaceIdFromSegment('bots')).toBe('bots');
+    expect(resolveSurfaceAlias('bots')).toBe('bots');
   });
 
   it('accepts every route id plus every legacy alias as an initialView', () => {

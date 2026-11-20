@@ -188,6 +188,15 @@ export const appRoutes: Routes = [
       ),
   },
   {
+    path: 'bots',
+    canMatch: [electronOnlySurface],
+    providers: [
+      { provide: SURFACE_ACTIVE, useFactory: surfaceActiveFor('bots') },
+    ],
+    loadComponent: () =>
+      import('@ptah-extension/bots-ui').then((m) => m.BotsPageComponent),
+  },
+  {
     // Electron-only (TASK_2026_858): remote machines are an Electron
     // main-process service. The guard refuses every other host before the
     // lazy chunk is requested, and `**` below lands on chat.
@@ -205,7 +214,8 @@ export const appRoutes: Routes = [
     path: 'ui-gallery',
     canMatch: [electronOnlySurface],
     data: { standalone: true },
-    loadComponent: () => import('./ui-gallery.component').then((m) => m.UiGalleryComponent),
+    loadComponent: () =>
+      import('./ui-gallery.component').then((m) => m.UiGalleryComponent),
   },
   // An unaddressable URL is the chat surface, not an error page: the host can
   // send an `initialView` this build does not know, and a webview has nowhere

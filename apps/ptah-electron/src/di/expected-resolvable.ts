@@ -1,13 +1,18 @@
 import { SDK_TOKENS } from '@ptah-extension/agent-sdk';
+import { BOTS_TOKENS } from '@ptah-extension/bots';
 import { USER_LAYER_COMPOSITION_TOKENS } from '@ptah-extension/user-layer-composition';
 import { MEMORY_TOKENS } from '@ptah-extension/memory-curator';
 import { CLI_AGENT_RUNTIME_TOKENS } from '@ptah-extension/cli-agent-runtime';
 import { AUTH_PROVIDERS_TOKENS } from '@ptah-extension/auth-providers-tokens';
 import { PLATFORM_TOKENS } from '@ptah-extension/platform-core';
-import { UsageReconciliationService, RepositoryIdentityBackfillService } from '@ptah-extension/usage-analytics';
+import {
+  UsageReconciliationService,
+  RepositoryIdentityBackfillService,
+} from '@ptah-extension/usage-analytics';
 import { CODEX_RUNTIME_TOKENS } from '@ptah-extension/codex-runtime';
 import {
   AnalyticsRpcHandlers,
+  BotsRpcHandlers,
   ConfigScopeRpcHandlers,
   EnhancedPromptsRpcHandlers,
   LlmRpcHandlers,
@@ -68,7 +73,16 @@ export const EXPECTED_RESOLVABLE = [
 
 /** Lib-owned tokens composed by Electron in addition to handler classes. */
 export const EXPECTED_RESOLVABLE_TOKENS = [
-  ['USER_LAYER_MIRROR_SERVICE', USER_LAYER_COMPOSITION_TOKENS.USER_LAYER_MIRROR_SERVICE],
+  ['BOTS_RPC_HANDLERS', BotsRpcHandlers],
+  ['BOT_REPOSITORY', PERSISTENCE_TOKENS.BOT_REPOSITORY],
+  ['BOT_APPLICATION', BOTS_TOKENS.APPLICATION],
+  ['BOT_SOURCE_READER', BOTS_TOKENS.SOURCE_READER],
+  ['BOT_CATALOG', BOTS_TOKENS.CATALOG],
+  ['BOT_WORKSPACE_AUTHORIZATION', BOTS_TOKENS.WORKSPACE_AUTHORIZATION],
+  [
+    'USER_LAYER_MIRROR_SERVICE',
+    USER_LAYER_COMPOSITION_TOKENS.USER_LAYER_MIRROR_SERVICE,
+  ],
   ['SKILL_RECOMMENDATION_SERVICE', SKILL_RECOMMENDATION_SERVICE],
   ['SKILL_RANKING_SERVICE', SKILL_RANKING_SERVICE],
   ['SKILL_RANKING_CALLER', LANE_ROUTING_TOKENS.SKILL_RANKING_CALLER],
@@ -116,10 +130,7 @@ export const EXPECTED_RESOLVABLE_TOKENS = [
   ['SDK_CODEX_READINESS', AUTH_PROVIDERS_TOKENS.SDK_CODEX_READINESS],
   // Slow SQLite statements -> hang breadcrumbs; bound in phase 2 before the
   // persistence registration, optional in the lib (main-loop-sync-blocks).
-  [
-    'SQLITE_SLOW_STATEMENT_SINK',
-    PERSISTENCE_TOKENS.SQLITE_SLOW_STATEMENT_SINK,
-  ],
+  ['SQLITE_SLOW_STATEMENT_SINK', PERSISTENCE_TOKENS.SQLITE_SLOW_STATEMENT_SINK],
   ['SQLITE_SEARCH_WORKER', MEMORY_TOKENS.SQLITE_SEARCH_WORKER],
   // WAL checkpoints off the main thread (main-loop-sync-blocks fix 11): the
   // worker factory is bound in phase 2 before the persistence registration,
@@ -130,13 +141,13 @@ export const EXPECTED_RESOLVABLE_TOKENS = [
   ],
   ['WAL_CHECKPOINT_SCHEDULER', PERSISTENCE_TOKENS.WAL_CHECKPOINT_SCHEDULER],
   // One-shot read-only `dbstat` size report (U4), registered with persistence.
-  [
-    'SQLITE_TABLE_SIZE_REPORT',
-    PERSISTENCE_TOKENS.SQLITE_TABLE_SIZE_REPORT,
-  ],
+  ['SQLITE_TABLE_SIZE_REPORT', PERSISTENCE_TOKENS.SQLITE_TABLE_SIZE_REPORT],
   // `db:reset` pauses the checkpoint worker through this port (review-11).
   ['SQLITE_EXCLUSIVE_ACCESS', PERSISTENCE_TOKENS.SQLITE_EXCLUSIVE_ACCESS],
-  ['USAGE_RECONCILIATION_TRIGGER', PLATFORM_TOKENS.USAGE_RECONCILIATION_TRIGGER],
+  [
+    'USAGE_RECONCILIATION_TRIGGER',
+    PLATFORM_TOKENS.USAGE_RECONCILIATION_TRIGGER,
+  ],
   ['USAGE_RECONCILIATION_SERVICE', UsageReconciliationService],
   ['REPOSITORY_IDENTITY_BACKFILL', RepositoryIdentityBackfillService],
 ] as const;

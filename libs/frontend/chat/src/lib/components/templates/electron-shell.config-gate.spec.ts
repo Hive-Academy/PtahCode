@@ -221,7 +221,7 @@ describe('ElectronShellComponent configuration gate', () => {
     ).toBe('Settings route');
   });
 
-  it('shows the workspace app shell and Chat, Voice, Apps, Tasks, Machines, Reviews, Analytics, Setup tabs in order', () => {
+  it('shows the workspace app shell and Chat, Voice, Apps, Tasks, Bots, Machines, Reviews, Analytics, Setup tabs in order', () => {
     layoutStub.hasWorkspaceFolders.set(true);
     fixture.detectChanges();
     expect(shell().querySelector('ptah-app-shell')).not.toBeNull();
@@ -236,6 +236,7 @@ describe('ElectronShellComponent configuration gate', () => {
       'Voice',
       'Apps',
       'Tasks',
+      'Bots',
       'Machines',
       'Reviews',
       'Analytics',
@@ -252,8 +253,9 @@ describe('ElectronShellComponent configuration gate', () => {
       'false',
       'false',
       'false',
+      'false',
     ]);
-    expect(shell().querySelectorAll('[role="tab"]')).toHaveLength(8);
+    expect(shell().querySelectorAll('[role="tab"]')).toHaveLength(9);
   });
 
   it('opens onboarding from Setup and marks the tab active once the surface settles', () => {
@@ -279,12 +281,12 @@ describe('ElectronShellComponent configuration gate', () => {
     expect(
       shell().querySelector('[data-test="config-menu-trigger"]'),
     ).toBeNull();
-    // Without a folder the tab strip holds Machines alone (D12).
+    // Without a folder the tab strip holds Bots and Machines (D12).
     expect(
       Array.from(shell().querySelectorAll('[role="tablist"] [role="tab"]')).map(
         (tab) => tab.getAttribute('title'),
       ),
-    ).toEqual(['Machines']);
+    ).toEqual(['Bots', 'Machines']);
     showSettings();
     const actions = thoth.closest('.no-drag');
     expect(actions?.contains(backButton())).toBe(true);
