@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_2286_c7e2
-status: in_progress
+status: in_review
 type: BUGFIX
 title: Run startup CLI probes off the Electron main thread
 depends_on: []
