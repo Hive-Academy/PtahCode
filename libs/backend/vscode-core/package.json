@@ -16,15 +16,15 @@
     }
   },
   "dependencies": {
-    "axios": "^1.15.0",
-    "cross-spawn": "^7.0.6",
-    "tsyringe": "^4.10.0",
+    "axios": "*",
+    "cross-spawn": "*",
+    "tsyringe": "*",
     "@ptah-extension/platform-core": "0.0.1",
     "@ptah-extension/shared": "0.0.1",
-    "@sentry/node": "^10.75.0",
-    "@types/vscode": "^1.103.0",
-    "eventemitter3": "^5.0.1",
-    "which": "^7.0.0",
-    "zod": "^4.1.12"
+    "@sentry/node": "*",
+    "@types/vscode": "*",
+    "eventemitter3": "*",
+    "which": "*",
+    "zod": "*"
   }
 }

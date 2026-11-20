@@ -5,7 +5,17 @@ declare global {
     ptahConfig?: unknown;
     ptahPreviousState?: unknown;
   }
+  // zod 4 reads its config from this global when it first loads.
+  var __zod_globalConfig: { jitless?: boolean } | undefined;
 }
+
+// zod 4 probes `new Function('')` to decide whether to compile parsers. The
+// renderer CSP forbids eval, so the probe always fails and DevTools records a
+// CSP issue. Opt out before any chunk loads zod; nothing else changes.
+globalThis.__zod_globalConfig = {
+  ...globalThis.__zod_globalConfig,
+  jitless: true,
+};
 
 // The detached Display window (TASK_2026_853_3401) loads the same index.html
 // with `?ptahWindow=display` and boots its own small app from a lazy chunk.
