@@ -27,7 +27,7 @@
     "@ptah-extension/cron-scheduler": "0.0.1",
     "@ptah-extension/messaging-gateway": "0.0.1",
     "@ptah-extension/gateway-chat-bridge": "0.0.1",
-    "tsyringe": "^4.10.0",
-    "reflect-metadata": "^0.2.2"
+    "tsyringe": "*",
+    "reflect-metadata": "*"
   }
 }

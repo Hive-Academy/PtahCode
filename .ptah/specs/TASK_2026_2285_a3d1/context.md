@@ -51,3 +51,17 @@ main checkout on branch `build/nx-migrate-latest` instead of a worktree.
 - First start: the main process blocked about 27 s and several RPC calls timed out.
   Second start: about 2.9 s, no RPC timeouts. A CPU profile attributes the block to the
   process spawn in the Codex `readVersion` probe, not to an updated package.
+
+## Root package.json is the only source of versions
+
+Decided with the user: every third-party dependency in a project manifest
+(`apps/**/package.json`, `libs/**/package.json`) uses `*`. The root
+`package.json` sets the version and the lockfile fixes it. Workspace
+dependencies (`@ptah-extension/*`) keep their `0.0.1` spec.
+
+- `@openai/codex` (the bundled Codex CLI) moved to the root as `>=0.165.0`.
+- Re-applied: discord.js 14.28.1, zod 4.6.7, @openai/codex-sdk and @openai/codex 0.171.0.
+- Checks: lint (including `@nx/dependency-checks`) for the 20 changed projects passed;
+  `nx build-main ptah-electron` generated the dist manifest and pruned lockfile without
+  falling back; `validate-deps.js`, `prune-dist-deps.js` and `npm ci --dry-run` in
+  `dist/apps/ptah-electron` passed. electron-builder packaging was not run locally.
