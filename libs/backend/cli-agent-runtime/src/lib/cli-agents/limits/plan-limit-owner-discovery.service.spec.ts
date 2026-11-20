@@ -273,6 +273,24 @@ describe('PlanLimitOwnerDiscoveryService', () => {
     ]);
   });
 
+  it('keeps an ambient session read over a stored read for the same owner', async () => {
+    const h = createHarness(THIRD_PARTY('ollama-cloud'), {
+      listSignedInAccounts: async () => [storedAccount],
+    });
+    h.routes.set('ambient', 'native');
+    h.owners.ownerForSession.mockResolvedValue(quotaOwnerRefFromKey(storedOwnerKey));
+
+    const entries = await h.service.discoverTargets({ sessionIds: ['ambient'] });
+    const stored = entries.filter((entry) => ownerKeyOf(entry) === storedOwnerKey);
+    expect(stored).toHaveLength(1);
+    expect(stored[0]).toMatchObject({
+      kind: 'read',
+      origin: 'session',
+      target: { sessionHandle: { kind: 'session', sessionId: 'ambient' } },
+    });
+    expect(stored[0].kind === 'read' && stored[0].target).not.toHaveProperty('claudeUsageDir');
+  });
+
   it('keeps the selected ambient route with no email separate from a stored account', async () => {
     const h = createHarness(CLAUDE_CLI, {
       listSignedInAccounts: async () => [storedAccount],

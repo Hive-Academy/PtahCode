@@ -170,6 +170,17 @@ export class PlanUsageService {
   private flightJoins = 0;
   private flightStarts = 0;
   private readonly claudeOauthFailures = new Map<string, { until: number; rateLimited: boolean; reading?: PlanUsageReading }>();
+  /** Proven stored-directory readings, by source: the owner cache never answers for a directory. */
+  private readonly claudeUsageDirReadings = new Map<string, { reading: PlanUsageReading; readAt: number }>();
+
+  private recordClaudeUsageDirReading(sourceKey: string, reading: PlanUsageReading): void {
+    this.claudeUsageDirReadings.delete(sourceKey);
+    this.claudeUsageDirReadings.set(sourceKey, { reading, readAt: this.now() });
+    if (this.claudeUsageDirReadings.size > PLAN_USAGE_MAX_OWNERS) {
+      const oldest = this.claudeUsageDirReadings.keys().next().value;
+      if (oldest !== undefined) this.claudeUsageDirReadings.delete(oldest);
+    }
+  }
 
   private recordClaudeOauthFailure(ownerKey: string, retryAfterMs?: number, reading?: PlanUsageReading): void {
     this.claudeOauthFailures.delete(ownerKey);
@@ -213,7 +224,9 @@ export class PlanUsageService {
         const usageDir = request.target.claudeUsageDir;
         const sessionless = !!usageDir;
         // Failures belong to one source: another directory of the same account keeps its own cooldown.
-        const failureKey = usageDir ? JSON.stringify(['usage-dir', ownerKey, usageDir.profileId]) : ownerKey;
+        const failureKey = claudeOauthSourceKey(request.target);
+        const proven = sessionless ? this.claudeUsageDirReadings.get(failureKey) : undefined;
+        if (proven && !request.refresh && this.now() - proven.readAt < PLAN_USAGE_CACHE_TTL_MS) return proven.reading;
         const failure = this.claudeOauthFailures.get(failureKey);
         if (failure && this.now() < failure.until && (failure.rateLimited || !request.refresh))
           return sessionless && failure.reading ? failure.reading : live;
@@ -225,11 +238,13 @@ export class PlanUsageService {
             // The cooldown stops a re-read on each snapshot.
             this.cache.delete(ownerKey);
             this.failingSince.delete(ownerKey);
+            this.claudeUsageDirReadings.delete(failureKey);
             this.recordClaudeOauthFailure(failureKey, oauth.retryAfterMs, oauth);
             return oauth;
           }
           if (oauth.status === 'available' && oauth.windows.length > 0) {
             this.claudeOauthFailures.delete(failureKey);
+            if (sessionless) this.recordClaudeUsageDirReading(failureKey, oauth);
             return oauth;
           }
           this.recordClaudeOauthFailure(failureKey, oauth.retryAfterMs, oauth);
@@ -280,6 +295,8 @@ export class PlanUsageService {
     const cached = this.cache.get(key);
     if (
       target.claudeRoute?.kind !== 'named' &&
+      // A stored directory proves its own source first; another source's reading never answers for it.
+      !target.claudeUsageDir &&
       !options.refresh &&
       cached &&
       !(options.allowCliFallback && cached.reading.status !== 'available') &&
@@ -295,6 +312,7 @@ export class PlanUsageService {
       return Promise.resolve(this.assemble(target.ownerRef, cached.reading));
     }
     const bypass = target.claudeRoute?.kind === 'named' ? 'named-route'
+      : target.claudeUsageDir ? 'usage-dir'
       : options.refresh ? 'refresh'
       : !cached ? 'empty'
       : options.allowCliFallback && cached.reading.status !== 'available' ? 'cli-fallback'
@@ -320,6 +338,7 @@ export class PlanUsageService {
     this.flights.clear();
     this.cache.clear();
     this.failingSince.clear();
+    this.claudeUsageDirReadings.clear();
     try {
       await disposeFallbackRuns();
     } catch (_error: unknown) {
@@ -666,6 +685,16 @@ function errorKind(error: unknown): string {
 }
 
 /** Share settled windows by owner, but never join a different named source. */
+/**
+ * The Claude OAuth source of one read. A named route and a stored directory are keyed by their
+ * profile, so one directory's cooldown never blocks another directory of the same owner.
+ * An ambient read keeps the owner-only key.
+ */
+function claudeOauthSourceKey(target: PlanOwnerTarget): string {
+  const profileId = target.claudeRoute?.kind === 'named' ? target.claudeRoute.profileId : target.claudeUsageDir?.profileId;
+  return profileId === undefined ? target.ownerRef.key : JSON.stringify(['claude-dir', target.ownerRef.key, profileId]);
+}
+
 function flightKey(target: PlanOwnerTarget): string {
   const route = target.claudeRoute;
   return route?.kind === 'named'

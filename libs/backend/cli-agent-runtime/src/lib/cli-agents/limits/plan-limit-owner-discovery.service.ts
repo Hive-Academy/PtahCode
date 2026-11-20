@@ -242,7 +242,12 @@ export class PlanLimitOwnerDiscoveryService {
       for (const entry of entries) {
         if (!entry) continue;
         const key = ownerOf(entry).key;
-        if (!listed.has(key)) listed.set(key, entry);
+        const existing = listed.get(key);
+        // An ambient session read of the same owner replaces a stored-directory read: the session
+        // can still return usage when the stored directory's OAuth read fails. A named-route session
+        // keeps the stored read, which reads that same directory.
+        if (!existing || (isStoredDirRead(existing) && isAmbientSessionRead(entry)))
+          listed.set(key, entry);
       }
     };
 
@@ -819,6 +824,14 @@ export class PlanLimitOwnerDiscoveryService {
       if (timer !== undefined) clearTimeout(timer);
     }
   }
+}
+
+function isStoredDirRead(entry: DiscoveredPlanOwner): boolean {
+  return entry.kind === 'read' && !!entry.target.claudeUsageDir && !entry.target.sessionHandle;
+}
+
+function isAmbientSessionRead(entry: DiscoveredPlanOwner): boolean {
+  return entry.kind === 'read' && !!entry.target.sessionHandle && entry.target.claudeRoute?.kind !== 'named';
 }
 
 function ownerOf(entry: DiscoveredPlanOwner): QuotaOwnerRef {

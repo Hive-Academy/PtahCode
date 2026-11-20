@@ -287,6 +287,45 @@ describe('PlanUsageService', () => {
     expect(h.oauthReader).toHaveBeenCalledTimes(2);
     expect(stored.status).toBe('available');
   });
+  it('keeps a separate OAuth cooldown for each named route of the same owner', async () => {
+    const h = harness();
+    const { sessionHandle: _noSession, ...sessionless } = claudeTarget();
+    const route = (profileId: string) =>
+      ({ ...sessionless, claudeRoute: { kind: 'named', profileId } as PlanOwnerTarget['claudeRoute'] }) as PlanOwnerTarget;
+    h.oauthReader.mockResolvedValueOnce({ status: 'service-unavailable', statusReason: 'cli-unavailable', windowSetEstablished: false, windows: [], retryAfterMs: 120_000 });
+    await h.service.getOwnerSnapshot(route('profile-a'));
+    h.oauthReader.mockResolvedValueOnce({ ...mapClaudePlanUsage(claudeUsage(17), T0, h.logger as Partial<Logger> as Logger), source: 'provider-api' });
+    const other = await h.service.getOwnerSnapshot(route('profile-b'));
+    expect(h.oauthReader).toHaveBeenCalledTimes(2);
+    expect(other.status).toBe('available');
+  });
+  it('does not answer a stored-directory target from the owner cache of another source', async () => {
+    const h = harness();
+    // The ambient session caches a reading for this owner.
+    const ambient = await h.service.getOwnerSnapshot(claudeTarget());
+    expect(ambient.status).toBe('available');
+    h.oauthReader.mockResolvedValue({ status: 'service-unavailable', statusReason: 'account-unverified', sourceInvalid: true, windowSetEstablished: false, windows: [] });
+    const target: PlanOwnerTarget = {
+      providerId: 'anthropic', ownerRef: CLAUDE_A,
+      claudeUsageDir: { kind: 'stored-profile-usage', profileId: 'fixture', canonicalConfigDir: '/fixture/stored' },
+    };
+    const stored = await h.service.getOwnerSnapshot(target);
+    expect(h.oauthReader).toHaveBeenCalledTimes(1);
+    expect(stored.status).not.toBe('available');
+  });
+  it('serves a proven stored-directory reading from its own source cache until refresh', async () => {
+    const h = harness();
+    h.oauthReader.mockResolvedValue({ ...mapClaudePlanUsage(claudeUsage(17), T0, h.logger as Partial<Logger> as Logger), source: 'provider-api' });
+    const target: PlanOwnerTarget = {
+      providerId: 'anthropic', ownerRef: CLAUDE_A,
+      claudeUsageDir: { kind: 'stored-profile-usage', profileId: 'fixture', canonicalConfigDir: '/fixture/stored' },
+    };
+    expect((await h.service.getOwnerSnapshot(target)).status).toBe('available');
+    expect((await h.service.getOwnerSnapshot(target)).status).toBe('available');
+    expect(h.oauthReader).toHaveBeenCalledTimes(1);
+    await h.service.getOwnerSnapshot(target, { refresh: true });
+    expect(h.oauthReader).toHaveBeenCalledTimes(2);
+  });
   it('honors a rate limit cooldown even on refresh', async () => {
     const h = harness();
     h.readPlanUsage.mockResolvedValue(null);
