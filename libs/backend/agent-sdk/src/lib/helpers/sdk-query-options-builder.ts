@@ -124,7 +124,7 @@ import {
   TIER_ENV_VAR_MAP,
   buildTierEnvDefaults,
 } from './sdk-model-service';
-import { experimentalBetaEnv } from './build-safe-env';
+import { experimentalBetaEnv, firstByteTimeoutEnv } from './build-safe-env';
 import {
   isSyncedClaudeSkillId,
   readClaudeBuiltinOptInSettings,
@@ -1762,6 +1762,10 @@ export class SdkQueryOptionsBuilder {
               ...effectiveAuthEnv,
               NO_PROXY: '127.0.0.1,localhost',
               ...experimentalBetaEnv(effectiveAuthEnv.ANTHROPIC_BASE_URL),
+              // SDK first-byte wait below the no-activity watchdog window, so the
+              // SDK retry is announced before the watchdog can fire. A named run
+              // keeps the SDK default: its certified env takes '1' keys only.
+              ...firstByteTimeoutEnv({ ...process.env, ...effectiveAuthEnv }),
               // No CLAUDE_CODE_MAX_CONTEXT_TOKENS: the pinned CLI reads it only
               // when DISABLE_COMPACT is also set (see auto-compact-control.ts).
               // Kill switch: disable the SDK's built-in workflows (ultracode/workflow

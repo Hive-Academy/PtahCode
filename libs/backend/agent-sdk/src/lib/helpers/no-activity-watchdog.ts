@@ -225,8 +225,30 @@ export class NoActivityWatchdog {
       if (record && sameRun(record, message.run_id)) this.touch(record);
       return true;
     }
+    if (message.subtype === 'api_retry') {
+      this.observeApiRetry(message);
+      return true;
+    }
     this.observeCompaction(message);
     return false;
+  }
+
+  /**
+   * The SDK announced its own retry of a failed API request. The silence until
+   * the retry sends its first byte is accounted: arm one window that covers the
+   * announced delay and the first-byte wait of the retry, so the watchdog does
+   * not stop the turn while the SDK still recovers (TASK_2026_2288 A).
+   */
+  private observeApiRetry(
+    message: Extract<SDKMessage, { type: 'system'; subtype: 'api_retry' }>,
+  ): void {
+    const accountedMs =
+      nonNegativeMs(message.retry_delay_ms) +
+      nonNegativeMs(message.no_response?.retry_wait_ms) +
+      API_RETRY_MARGIN_MS;
+    this.arm(
+      Math.min(API_RETRY_MAX_ACCOUNTED_MS, Math.max(this.timeoutMs, accountedMs)),
+    );
   }
 
   private observeCompaction(
@@ -429,6 +451,22 @@ export type WatchdogTimeoutCause = 'no-activity' | 'compaction-dwell';
  * `COMPACTION_MAX_DWELL_MS` from when it opened.
  */
 export const NO_ACTIVITY_TIMEOUT_MS = 180_000;
+
+/**
+ * Added to the wait an SDK `api_retry` announces, so the retry's first byte
+ * can arrive before the watchdog window ends.
+ */
+export const API_RETRY_MARGIN_MS = 30_000;
+
+/** Upper bound of the window one SDK `api_retry` can account for. */
+export const API_RETRY_MAX_ACCOUNTED_MS = 900_000;
+
+/** A finite, non-negative millisecond value from SDK data, else 0. */
+function nonNegativeMs(value: number | undefined): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? value
+    : 0;
+}
 
 /**
  * Quiet bound for a backgrounded root-owned SDK task with no open root tool:

@@ -1,5 +1,11 @@
 import 'reflect-metadata';
-import { experimentalBetaEnv } from './build-safe-env';
+import {
+  SDK_FIRST_BYTE_TIMEOUT_ENV,
+  SDK_FIRST_BYTE_TIMEOUT_MS,
+  experimentalBetaEnv,
+  firstByteTimeoutEnv,
+} from './build-safe-env';
+import { NO_ACTIVITY_TIMEOUT_MS } from './no-activity-watchdog';
 
 describe('experimentalBetaEnv', () => {
   const KEY = 'PTAH_ENABLE_EXPERIMENTAL_BETAS';
@@ -40,5 +46,21 @@ describe('experimentalBetaEnv', () => {
   it('keeps experimental betas on for a remote third-party URL when the override is set', () => {
     process.env[KEY] = '1';
     expect(experimentalBetaEnv('https://api.kimi.ai/coding/')).toEqual({});
+  });
+});
+
+describe('firstByteTimeoutEnv (TASK_2026_2288 A)', () => {
+  it('keeps the SDK first-byte wait inside the watchdog window', () => {
+    // The SDK must announce its retry before the watchdog can stop the turn.
+    expect(SDK_FIRST_BYTE_TIMEOUT_MS).toBeLessThan(NO_ACTIVITY_TIMEOUT_MS);
+    expect(firstByteTimeoutEnv({})).toEqual({
+      [SDK_FIRST_BYTE_TIMEOUT_ENV]: String(SDK_FIRST_BYTE_TIMEOUT_MS),
+    });
+  });
+
+  it('keeps a value the user set', () => {
+    expect(
+      firstByteTimeoutEnv({ [SDK_FIRST_BYTE_TIMEOUT_ENV]: '240000' }),
+    ).toEqual({});
   });
 });
