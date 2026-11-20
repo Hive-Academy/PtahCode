@@ -136,6 +136,13 @@ export function claudeAccountOwnerKey(
     : null;
 }
 
+/** Derives a Claude quota owner key from the stored identity digest. */
+export function claudeOwnerKeyFromIdentityReference(ref: string): string | null {
+  return /^[0-9a-f]{64}$/.test(ref)
+    ? `${normaliseOwnerProviderId(CLAUDE_PROVIDER_ID)}#account:${ref.slice(0, FINGERPRINT_LENGTH)}`
+    : null;
+}
+
 /** CLIs whose quota owner is the CLI's own credential store. */
 export type CliStoreOwner = 'opencode' | 'antigravity' | 'grok';
 
