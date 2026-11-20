@@ -10,7 +10,12 @@ import { spawn } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { killProcessTree } from '@ptah-extension/platform-core';
+import {
+  killProcessTree,
+  runProcessToCompletion,
+  type IProcessSpawner,
+} from '@ptah-extension/platform-core';
+import type { Logger } from '@ptah-extension/vscode-core';
 
 const COMMAND_PATH_TIMEOUT_MS = 30_000;
 
@@ -34,6 +39,16 @@ export interface ResolvedClaudeCliPath {
  *   cmd.exe /c "claude.cmd" args  (which buffers stdout)
  */
 export class ClaudeCliPathResolver {
+  /**
+   * @param processSpawner - runs `where`/`which` off the main thread when the
+   *   host provides one; otherwise they spawn inline.
+   * @param logger - records a lookup command that cannot start.
+   */
+  constructor(
+    private readonly processSpawner?: IProcessSpawner,
+    private readonly logger?: Logger,
+  ) {}
+
   /**
    * Resolve a Claude CLI installation path to the actual cli.js file
    *
@@ -218,6 +233,9 @@ export class ClaudeCliPathResolver {
   private async resolveCommandPath(
     commandName: string,
   ): Promise<string | null> {
+    if (this.processSpawner) {
+      return this.resolveCommandPathOffThread(this.processSpawner, commandName);
+    }
     return new Promise((resolve) => {
       const isWindows = os.platform() === 'win32';
       const command = isWindows ? 'where' : 'which';
@@ -266,6 +284,45 @@ export class ClaudeCliPathResolver {
       }, COMMAND_PATH_TIMEOUT_MS);
       timer.unref?.();
     });
+  }
+
+  /** {@link resolveCommandPath} through the host spawner, with the same results. */
+  private async resolveCommandPathOffThread(
+    spawner: IProcessSpawner,
+    commandName: string,
+  ): Promise<string | null> {
+    const isWindows = os.platform() === 'win32';
+    try {
+      const result = await runProcessToCompletion(
+        spawner,
+        {
+          command: isWindows ? 'where' : 'which',
+          args: [commandName],
+          env: process.env,
+          detached: !isWindows,
+        },
+        {
+          timeoutMs: COMMAND_PATH_TIMEOUT_MS,
+          // A pid is known only once the launch finished. Before that,
+          // `kill()` is queued by the spawner and applied when it arrives.
+          onTimeout: (handle) => {
+            if (handle.pid && !handle.killed) void killProcessTree(handle.pid);
+            else handle.kill();
+          },
+        },
+      );
+      if (result.timedOut || result.exitCode !== 0) return null;
+      return result.stdout.trim().split(/\r?\n/)[0]?.trim() || null;
+    } catch (error: unknown) {
+      // degradation-audit: reported - logged here; the caller then treats the
+      // command as not found, as the inline path does for its 'error' event.
+      this.logger?.warn('[ClaudeCliPathResolver] Path lookup could not start', {
+        command: isWindows ? 'where' : 'which',
+        commandName,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return null;
+    }
   }
 
   /**

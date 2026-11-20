@@ -15,6 +15,7 @@ import type { ElectronPlatformOptions } from '@ptah-extension/platform-electron'
 import { registerElectronSettings } from '@ptah-extension/platform-electron';
 import { PLATFORM_TOKENS } from '@ptah-extension/platform-core';
 import type {
+  IProcessSpawner,
   IWorkspaceProvider,
   IWorkspaceLifecycleProvider,
   IStateStorage,
@@ -600,7 +601,12 @@ async function runBootstrap(
       appPath: app.getAppPath(),
     });
     const selectionSnapshot = createElectronCodexSelectionSnapshot(
-      bundledRoot, container.resolve<Logger>(TOKENS.LOGGER),
+      bundledRoot,
+      container.resolve<Logger>(TOKENS.LOGGER),
+      // Optional: without it the probes spawn inline, and Codex chat still binds.
+      container.isRegistered(SDK_TOKENS.SDK_PROCESS_SPAWNER, true)
+        ? container.resolve<IProcessSpawner>(SDK_TOKENS.SDK_PROCESS_SPAWNER)
+        : undefined,
     );
     container.register(CODEX_RUNTIME_TOKENS.SelectionSnapshot, {
       useValue: selectionSnapshot,

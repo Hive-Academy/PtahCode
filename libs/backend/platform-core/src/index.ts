@@ -377,6 +377,11 @@ export {
   PROCESS_TREE_KILL_GRACE_MS,
   killProcessTree,
 } from './utils/process-tree-reaper';
+export {
+  runProcessToCompletion,
+  type ProcessRunOptions,
+  type ProcessRunResult,
+} from './utils/run-process-to-completion';
 export { WindowsOrphanDescendants, queryWindowsProcesses, type ProcessQuery } from './utils/windows-orphan-descendants';
 export { defaultOrphanCleanupDependencies, scheduleWindowsOrphanCleanup, type OrphanCleanupDependencies } from './utils/windows-orphan-cleanup';
 export {
