@@ -69,10 +69,14 @@
  */
 
 import type { HarnessFacetMatrix } from '@ptah-extension/shared';
+import type { Logger } from '@ptah-extension/vscode-core';
 import type { ManagedManifestStore } from '../manifest-store/managed-manifest';
 import type { IHarnessCliDetector } from '../sources/harness-source.port';
 import type { IHarnessTarget } from './harness-target.port';
-import { createMcpFacet } from './mcp/mcp-facet.registry';
+import {
+  createMcpFacet,
+  type McpFacetOptions,
+} from './mcp/mcp-facet.registry';
 import { CodexAgentTransformer } from './transformers/codex-agent-transformer';
 import { CopilotAgentTransformer } from './transformers/copilot-agent-transformer';
 import { CursorAgentTransformer } from './transformers/cursor-agent-transformer';
@@ -90,8 +94,16 @@ function facets(supported: Partial<HarnessFacetMatrix>): HarnessFacetMatrix {
 }
 
 /** Facet options derived from the shared target dependencies. */
-function facetOptions(deps: RivalTargetDeps): { homeDir?: string } {
-  return deps.homeDir === undefined ? {} : { homeDir: deps.homeDir };
+function facetOptions(deps: RivalTargetDeps): McpFacetOptions {
+  return {
+    ...(deps.homeDir === undefined ? {} : { homeDir: deps.homeDir }),
+    ...logOptions(deps),
+  };
+}
+
+/** The optional logger, spread into the target and facet options. */
+function logOptions(deps: RivalTargetDeps): { logger?: Pick<Logger, 'warn'> } {
+  return deps.logger === undefined ? {} : { logger: deps.logger };
 }
 
 /** What every target factory needs from the host container. */
@@ -100,6 +112,11 @@ export interface RivalTargetDeps {
   detector: IHarnessCliDetector;
   /** Overridable so specs can redirect user-global config files. */
   homeDir?: string;
+  /**
+   * Receives warnings about unreadable agent sources and MCP config files.
+   * Optional, so specs and callers without a logger keep working.
+   */
+  logger?: Pick<Logger, 'warn'>;
 }
 
 export function createCodexTarget(deps: RivalTargetDeps): IHarnessTarget {
@@ -115,6 +132,7 @@ export function createCodexTarget(deps: RivalTargetDeps): IHarnessTarget {
     skillsDirRel: '.agents/skills',
     agentTransformer: new CodexAgentTransformer(),
     mcpFacet: createMcpFacet('codex', facetOptions(deps)),
+    ...logOptions(deps),
     coOwners: ['antigravity'],
   });
 }
@@ -132,6 +150,7 @@ export function createCopilotTarget(deps: RivalTargetDeps): IHarnessTarget {
     skillsDirRel: '.github/skills',
     agentTransformer: new CopilotAgentTransformer(),
     mcpFacet: createMcpFacet('copilot', facetOptions(deps)),
+    ...logOptions(deps),
   });
 }
 
@@ -150,6 +169,7 @@ export function createCursorTarget(deps: RivalTargetDeps): IHarnessTarget {
     commandsDirRel: '.cursor/commands',
     agentTransformer: new CursorAgentTransformer(),
     mcpFacet: createMcpFacet('cursor', facetOptions(deps)),
+    ...logOptions(deps),
   });
 }
 
@@ -161,6 +181,7 @@ export function createAntigravityTarget(deps: RivalTargetDeps): IHarnessTarget {
     detector: deps.detector,
     skillsDirRel: '.agents/skills',
     mcpFacet: createMcpFacet('antigravity', facetOptions(deps)),
+    ...logOptions(deps),
     coOwners: ['codex'],
   });
 }
@@ -183,6 +204,7 @@ export function createOpencodeTarget(deps: RivalTargetDeps): IHarnessTarget {
     detector: deps.detector,
     agentTransformer: new OpencodeAgentTransformer(),
     mcpFacet: createMcpFacet('opencode', facetOptions(deps)),
+    ...logOptions(deps),
   });
 }
 
@@ -196,6 +218,7 @@ export function createVscodeMcpTarget(deps: RivalTargetDeps): IHarnessTarget {
     // would silently drop `.vscode/mcp.json` installs.
     detector: { isInstalled: () => Promise.resolve(true) },
     mcpFacet: createMcpFacet('vscode', facetOptions(deps)),
+    ...logOptions(deps),
   });
 }
 

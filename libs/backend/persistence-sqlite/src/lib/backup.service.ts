@@ -618,6 +618,8 @@ export class SqliteBackupService implements IBackupService {
       });
       return dest;
     } catch (error: unknown) {
+      // degradation-audit: reported - logged at warn here; the caller gets
+      // null (no backup path) and the staging artifact is discarded.
       this.logger.warn('[persistence-sqlite] backup failed (non-fatal)', {
         kind,
         error: error instanceof Error ? error.message : String(error),

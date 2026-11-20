@@ -111,6 +111,24 @@ function isAgentModelProvider(value: string): value is AgentModelProvider {
   return (AGENT_MODEL_PROVIDERS as readonly string[]).includes(value);
 }
 
+/**
+ * Warn about a directory listing that failed for a reason other than "the
+ * directory is not there". A missing directory is a normal state for a plugin
+ * or a layout that has no skills or commands, so it stays silent.
+ */
+function warnUnlessMissing(
+  warn: (message: string, detail?: unknown) => void,
+  message: string,
+  error: unknown,
+): void {
+  const code = (error as NodeJS.ErrnoException | null)?.code;
+  if (code === 'ENOENT' || code === 'ENOTDIR') return;
+  warn(message, {
+    code,
+    error: error instanceof Error ? error.message : String(error),
+  });
+}
+
 /** The model `target` should write for `agent`, or `undefined` for none. */
 export function desiredAgentModel(
   agent: HarnessDesiredAgent,
@@ -653,7 +671,11 @@ export class HarnessManifestBuilder {
     let entries: string[];
     try {
       entries = readdirSync(root);
-    } catch {
+    } catch (error: unknown) {
+      // degradation-audit: optional-capability - a missing skills directory
+      // (a plugin without skills) contributes no skills; other read failures
+      // are logged at warn and also return an empty list.
+      warnUnlessMissing(this.warn, '[harness-sync] skills directory unreadable', error);
       return [];
     }
     const slugs: string[] = [];
@@ -824,7 +846,11 @@ export class HarnessManifestBuilder {
     let entries: string[];
     try {
       entries = readdirSync(root);
-    } catch {
+    } catch (error: unknown) {
+      // degradation-audit: optional-capability - a missing commands directory
+      // (a plugin without commands) contributes no commands; other read
+      // failures are logged at warn and also return an empty list.
+      warnUnlessMissing(this.warn, '[harness-sync] commands directory unreadable', error);
       return [];
     }
     const files: string[] = [];

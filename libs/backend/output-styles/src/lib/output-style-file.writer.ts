@@ -437,6 +437,8 @@ export class OutputStyleFileWriter {
     try {
       return this.workspace.getWorkspaceRoot();
     } catch (error: unknown) {
+      // degradation-audit: reported - logged at warn here; undefined means "no
+      // workspace open", so a project-tier save is refused with a message.
       this.logger.warn('[output-styles] workspace root lookup failed', {
         error:
           context?.kind === 'named'
@@ -468,6 +470,8 @@ export class OutputStyleFileWriter {
         .map((entry) => entry.name)
         .sort((a, b) => a.localeCompare(b));
     } catch (error: unknown) {
+      // degradation-audit: reported - logged at debug here (an unreadable tier
+      // directory is treated like an absent one); the style is not found there.
       this.logger.debug('[output-styles] tier directory not readable', {
         tier,
         error:
@@ -532,6 +536,8 @@ export class OutputStyleFileWriter {
     try {
       stat = await this.fs.stat(absolutePath);
     } catch (error: unknown) {
+      // degradation-audit: reported - logged at warn here; true reports the
+      // file as changed, so the save is refused as stale.
       // The file was located a moment ago and cannot be stat'ed now — treat
       // that as changed rather than as safe.
       this.logger.warn('[output-styles] stale check could not stat the file', {
@@ -574,6 +580,8 @@ export class OutputStyleFileWriter {
     try {
       return await this.fs.exists(target.absolutePath);
     } catch (error: unknown) {
+      // degradation-audit: reported - logged at warn here; true reports the
+      // name as occupied, so the save is refused instead of overwriting.
       this.logger.warn('[output-styles] collision check failed', {
         fileName: target.fileName,
         error:

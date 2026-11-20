@@ -322,7 +322,21 @@ export class ExternalPluginInstallerService {
     } catch (error: unknown) {
       await fsPromises
         .rm(targetDir, { recursive: true, force: true })
-        .catch(() => undefined);
+        .catch((cleanupError: unknown) => {
+          // The original write failure is rethrown below; a failed cleanup
+          // leaves a partial plugin tree behind, so it is logged here.
+          this.logger.warn(
+            '[ExternalPluginInstallerService] Partial plugin tree not removed',
+            {
+              pluginId: plan.pluginId,
+              code: (cleanupError as NodeJS.ErrnoException | null)?.code,
+              error:
+                cleanupError instanceof Error
+                  ? cleanupError.message
+                  : String(cleanupError),
+            },
+          );
+        });
       throw error;
     }
 
@@ -830,6 +844,10 @@ function readJsonFile<T>(
   try {
     json = JSON.parse(file.bytes.toString('utf8'));
   } catch {
+    // degradation-audit: optional-capability - pure helper over third-party
+    // plugin files; a malformed metadata file counts as absent (null), the
+    // same as one that fails the schema, and the caller falls back to the
+    // next source (the marketplace entry).
     return null;
   }
 

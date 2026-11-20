@@ -49,6 +49,9 @@ export class VoiceSecretStore {
     try {
       return this.vault.decrypt(cipher);
     } catch (error: unknown) {
+      // degradation-audit: reported - logged at warn here (provider id and
+      // error message only, never the key); null surfaces to the user as an
+      // auth failure that asks to re-enter the key.
       this.logger.warn('[voice-providers] secret decrypt failed', {
         providerId,
         error: error instanceof Error ? error.message : String(error),

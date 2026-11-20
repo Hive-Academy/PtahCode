@@ -1931,7 +1931,13 @@ export class AgentRpcHandlers {
         );
       }
       return enabled?.id;
-    } catch {
+    } catch (error: unknown) {
+      // degradation-audit: reported - logged at warn here; the caller gets no
+      // default ptahCliId (undefined), the same as when none is enabled.
+      this.logger.warn(
+        'RPC: agent:resumeCliSession could not list Ptah CLI agents',
+        { error: error instanceof Error ? error.message : String(error) },
+      );
       return undefined;
     }
   }

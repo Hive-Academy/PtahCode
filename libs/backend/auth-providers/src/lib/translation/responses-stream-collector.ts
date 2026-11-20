@@ -248,6 +248,8 @@ export function collectResponsesStream(
         content = collectOutputContent(response, resolveToolName);
         usage = translateResponsesUsage(response.usage);
       } catch (error: unknown) {
+        // degradation-audit: reported - fail() rejects the collector promise
+        // with a ResponsesStreamError, so the awaiting caller gets the failure.
         fail(error instanceof ResponsesStreamError ? error : new ResponsesStreamError('invalid_response'));
         return;
       }

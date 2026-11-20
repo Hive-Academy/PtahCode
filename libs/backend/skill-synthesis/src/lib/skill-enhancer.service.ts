@@ -1364,7 +1364,17 @@ export class SkillEnhancerService {
   private async readBody(filePath: string): Promise<string | null> {
     try {
       return await readFile(filePath, 'utf8');
-    } catch {
+    } catch (error: unknown) {
+      // degradation-audit: optional-capability - a missing clone body is null
+      // and the caller reports skipReason 'missing-clone'; other read failures
+      // are logged at warn and also return null.
+      const code = (error as NodeJS.ErrnoException | null)?.code;
+      if (code !== 'ENOENT') {
+        this.logger.warn('[skill-enhancer] clone body could not be read', {
+          code,
+          errorName: error instanceof Error ? error.name : typeof error,
+        });
+      }
       return null;
     }
   }

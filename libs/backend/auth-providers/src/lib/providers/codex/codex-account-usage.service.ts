@@ -209,6 +209,8 @@ export class CodexAccountUsageService implements ICodexAccountUsageService {
         ? 'default'
         : 'explicit';
     } catch {
+      // degradation-audit: optional-capability - an unnormalizable home path
+      // is classified 'invalid' by contract; callers skip it as a no-op.
       return 'invalid';
     }
   }

@@ -64,6 +64,8 @@ function readStoredMode(): TaskViewMode {
     const stored = globalThis.localStorage?.getItem(STORAGE_KEY);
     return isTaskViewMode(stored) ? stored : 'kanban';
   } catch {
+    // degradation-audit: optional-capability - with storage disabled the
+    // board uses the shipped 'kanban' layout, as the class doc describes.
     return 'kanban';
   }
 }

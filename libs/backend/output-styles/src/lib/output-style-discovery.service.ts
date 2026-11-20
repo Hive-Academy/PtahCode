@@ -239,6 +239,8 @@ export class OutputStyleDiscoveryService {
     try {
       return this.workspace.getWorkspaceRoot();
     } catch (error: unknown) {
+      // degradation-audit: reported - logged at warn here; undefined means "no
+      // workspace open", so discovery lists no project tier.
       this.logger.warn('[output-styles] workspace root lookup failed', {
         error: errorMessage(error),
       });

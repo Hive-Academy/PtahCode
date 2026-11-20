@@ -174,6 +174,8 @@ export class CopilotAuthService implements ICopilotAuthService {
         true
       );
     } catch (error: unknown) {
+      // degradation-audit: reported - logged at warn here; the caller gets
+      // false ("no tombstone") so silent restore still runs.
       // A settings-store read failure must never make auth *stricter* than the
       // user asked for; treat it as "no tombstone" and log.
       this.logger.warn(
@@ -356,7 +358,9 @@ export class CopilotAuthService implements ICopilotAuthService {
       );
       return await this.tryFileBasedAuth(SILENT_RESTORE_TIMEOUT_MS);
     } catch (error) {
-      this.logger.info(
+      // degradation-audit: reported - logged at warn here; the caller gets
+      // false and startup continues signed out of Copilot.
+      this.logger.warn(
         `[CopilotAuth] Silent auth restore unavailable: ${error instanceof Error ? error.message : String(error)}`,
       );
       return false;
@@ -371,7 +375,7 @@ export class CopilotAuthService implements ICopilotAuthService {
    * @returns true if file-based auth succeeded
    */
   private async tryFileBasedAuth(timeoutMs?: number): Promise<boolean> {
-    const fileToken = await readCopilotToken();
+    const fileToken = await readCopilotToken(this.logger);
     if (!fileToken) {
       this.logger.info('[CopilotAuth] No Copilot config file found');
       return false;
@@ -672,7 +676,12 @@ export class CopilotAuthService implements ICopilotAuthService {
             supportsToolUse: true,
           };
         });
-    } catch {
+    } catch (error: unknown) {
+      // degradation-audit: reported - logged at warn here; the caller gets an
+      // empty model list for this Copilot account.
+      this.logger.warn('[CopilotAuth] Could not list Copilot models', {
+        errorName: error instanceof Error ? error.name : typeof error,
+      });
       return [];
     }
   }
@@ -861,7 +870,7 @@ export class CopilotAuthService implements ICopilotAuthService {
     this.logger.info(
       '[CopilotAuth] Cached GitHub token may be stale, trying file-based refresh...',
     );
-    const fileToken = await readCopilotToken();
+    const fileToken = await readCopilotToken(this.logger);
     if (!fileToken) {
       this.logger.warn(
         '[CopilotAuth] No token available for refresh (file not found or empty)',

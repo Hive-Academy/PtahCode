@@ -200,7 +200,13 @@ export class ElectronMasterKeyProvider implements IMasterKeyProvider {
     try {
       base64Key = safeStorage.decryptString(Buffer.from(wrapped, 'base64'));
     } catch (error: unknown) {
-      void error;
+      // degradation-audit: reported - logged at warn here (error name only);
+      // null sends the caller to the machine-seed fallback, and a total loss
+      // is reported by notifyCorruption().
+      console.warn(
+        '[ptah-electron] keychain unwrap of the master key failed; trying the machine-seed fallback',
+        { errorName: error instanceof Error ? error.name : typeof error },
+      );
       return null;
     }
     const keyBuf = Buffer.from(base64Key, 'base64');

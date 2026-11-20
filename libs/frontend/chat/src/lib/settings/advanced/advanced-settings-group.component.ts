@@ -444,6 +444,8 @@ export class AdvancedSettingsGroupComponent implements OnInit {
     const settings = this.settings();
     const reads = Promise.all(
       settings.map((setting) =>
+        // degradation-audit: reported - a null read sets load to 'error', which
+        // shows the group's load error with Retry.
         rpcCall<{ success: boolean; value?: unknown }>(
           this.vscode,
           'settings:get',

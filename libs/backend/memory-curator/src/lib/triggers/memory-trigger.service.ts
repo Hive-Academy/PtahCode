@@ -1720,6 +1720,9 @@ function safeStringify(value: unknown): string | null {
   try {
     return JSON.stringify(value);
   } catch {
+    // degradation-audit: optional-capability - pure helper on a hot hook
+    // path; a value JSON cannot encode (cycle, BigInt) is stored as a null
+    // tool input/output column, the same as an absent one.
     return null;
   }
 }

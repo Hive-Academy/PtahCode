@@ -11,7 +11,8 @@ function hasOpenPopover(root: HTMLElement): boolean {
   try {
     return root.querySelector(':popover-open') !== null;
   } catch {
-    // Engines without the `:popover-open` selector (test DOMs) have none open.
+    // degradation-audit: optional-capability - engines without the
+    // `:popover-open` selector (test DOMs) have no popover open, so false.
     return false;
   }
 }

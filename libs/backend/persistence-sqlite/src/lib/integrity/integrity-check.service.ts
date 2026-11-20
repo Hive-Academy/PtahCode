@@ -175,6 +175,8 @@ export class SqliteIntegrityService {
     try {
       if (!this.isDue()) return;
     } catch (error: unknown) {
+      // degradation-audit: reported - logged at warn here; this dispatch is
+      // skipped and the next dispatchIfDue() call tries again.
       // `isDue` reads through a store that already swallows; this catch exists
       // because the contract is "never throws", not because a path is known.
       this.logger.warn('[persistence-sqlite] integrity due-check failed', {

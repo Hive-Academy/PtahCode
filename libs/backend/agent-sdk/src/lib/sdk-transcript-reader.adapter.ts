@@ -38,6 +38,8 @@ export class SdkTranscriptReaderAdapter implements ITranscriptReader {
         .map((m) => `${m.role.toUpperCase()}: ${m.content}`)
         .join('\n\n');
     } catch (error: unknown) {
+      // degradation-audit: reported - logged at warn here; the caller gets
+      // an empty transcript ('').
       const message = error instanceof Error ? error.message : String(error);
       this.logger.warn('[SdkTranscriptReaderAdapter] read failed', {
         sessionId,

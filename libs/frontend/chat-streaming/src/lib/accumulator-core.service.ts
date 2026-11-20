@@ -199,6 +199,9 @@ function isBackgroundedToolResult(output: unknown): boolean {
     try {
       text = JSON.stringify(output);
     } catch {
+      // degradation-audit: optional-capability - an unserializable payload
+      // (cyclic or BigInt) cannot be the SDK's text placeholder, so "not
+      // backgrounded" is the right answer; the result settles normally.
       return false;
     }
   }

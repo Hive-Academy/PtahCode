@@ -267,6 +267,8 @@ export class SkillClonesStateService {
         ? { previous, list: result.clones }
         : null;
     } catch (err) {
+      // degradation-audit: reported - shown to the user through error; the
+      // caller gets null and the Library keeps its previous rows.
       if (epoch === this.listEpoch) this.error.set(this.toMessage(err));
       return null;
     } finally {

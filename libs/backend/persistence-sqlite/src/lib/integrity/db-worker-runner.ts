@@ -145,6 +145,8 @@ export class DbWorkerRunner {
       try {
         worker = factory.spawn();
       } catch (error: unknown) {
+        // degradation-audit: reported - logged at warn here; settle(null)
+        // resolves the run with no response (inconclusive).
         this.logger.warn(`[persistence-sqlite] ${label} worker spawn failed`, errorContext(error));
         settle(null);
         return;

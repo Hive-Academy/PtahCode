@@ -410,6 +410,9 @@ export class PtahFileSettingsManager {
       this.watcherRetries = 0;
       return true;
     } catch (err: unknown) {
+      // degradation-audit: optional-capability - false means "no file watch";
+      // every caller then watches the directory instead. A missing file is the
+      // normal first-run case; other failures are logged at warn below.
       if (isNodeError(err) && err.code === 'ENOENT') {
         return false;
       }
@@ -577,6 +580,8 @@ export class PtahFileSettingsManager {
       const parsed = JSON.parse(raw) as Record<string, unknown>;
       freshSettings = flattenObject(parsed);
     } catch (err: unknown) {
+      // degradation-audit: reported - logged at warn here; this change is
+      // skipped and the cache keeps the previous settings.
       const msg = err instanceof Error ? err.message : String(err);
       console.warn(
         `[PtahFileSettingsManager] Cross-process read failed for ${this.filePath}: ${msg}`,
@@ -647,6 +652,9 @@ export class PtahFileSettingsManager {
           });
       }
     } catch (error: unknown) {
+      // degradation-audit: optional-capability - a missing settings file is
+      // the first run and starts with empty settings; other load failures
+      // are logged at warn below and also start empty.
       if (isNodeError(error) && error.code === 'ENOENT') {
         this.settings = {};
         return;
@@ -897,6 +905,9 @@ function deepEqual(a: unknown, b: unknown): boolean {
     try {
       return JSON.stringify(a) === JSON.stringify(b);
     } catch {
+      // degradation-audit: optional-capability - a value that cannot be
+      // serialized compares as unequal, so the watcher reports the key as
+      // changed instead of missing a change.
       return false;
     }
   }

@@ -109,6 +109,9 @@ async function safeReadText(
   try {
     return await fs.readFile(path);
   } catch {
+    // degradation-audit: optional-capability - pure helper; an absent git or
+    // package file (non-git workspace, worktree, packed ref) is null by
+    // contract, and the caller falls through to the next fingerprint source.
     return null;
   }
 }
