@@ -89,7 +89,8 @@ describe('grokAcpProfile', () => {
   it('identifies the Grok lane and resumes with session/resume', () => {
     expect(grokAcpProfile.vendor).toBe('grok');
     expect(grokAcpProfile.displayName).toBe('Grok');
-    expect(grokAcpProfile.resumeStrategy).toBe('resume');
+    expect(grokAcpProfile.signInHint).toBe('run `grok login`');
+    expect(grokAcpProfile.cancelBehavior).toBe('await-reply');
   });
 
   describe('buildSpawn', () => {
@@ -179,13 +180,25 @@ describe('grokAcpProfile', () => {
   });
 
   it('treats the x.ai namespaces as extension notifications', () => {
-    const isExtension = grokAcpProfile.isExtensionNotification;
-    if (!isExtension) throw new Error('isExtensionNotification missing');
+    const hook = grokAcpProfile.extensions?.notification;
+    if (!hook) throw new Error('extensions.notification missing');
+    const isExtension = (method: string): boolean => hook(method, {}, undefined);
     expect(isExtension('_x.ai/session_notification')).toBe(true);
     expect(isExtension('x.ai/auth/status')).toBe(true);
     expect(isExtension('_x.ai/session/prompt_complete')).toBe(true);
     expect(isExtension('session/update')).toBe(false);
     expect(isExtension('_other.vendor/x.ai/thing')).toBe(false);
+  });
+
+  it('logs the MCP servers update with its server count and stays silent', () => {
+    const hook = grokAcpProfile.extensions?.notification;
+    if (!hook) throw new Error('extensions.notification missing');
+    const logger = { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() };
+    expect(hook('_x.ai/mcp/servers_updated', { mcpServers: [{}, {}] }, logger)).toBe(true);
+    expect(logger.info).toHaveBeenCalledWith(
+      '[AcpSessionHandle] MCP servers updated notification',
+      expect.objectContaining({ method: '_x.ai/mcp/servers_updated', serverCount: 2 }),
+    );
   });
 
   it('reads a numeric exit_code from rawOutput only', () => {

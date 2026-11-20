@@ -21,16 +21,16 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function selectedResponse(optionId: string): RequestPermissionResponse {
+export function selectedResponse(optionId: string): RequestPermissionResponse {
   return { outcome: { outcome: 'selected', optionId } };
 }
 
-function cancelledResponse(): RequestPermissionResponse {
+export function cancelledResponse(): RequestPermissionResponse {
   return { outcome: { outcome: 'cancelled' } };
 }
 
 /** The request's tool call title, or undefined when it is missing or empty. */
-function toolTitleOf(request: RequestPermissionRequest): string | undefined {
+export function toolTitleOf(request: RequestPermissionRequest): string | undefined {
   if (!isRecord(request)) return undefined;
   const toolCall = request.toolCall;
   if (!isRecord(toolCall)) return undefined;
@@ -39,14 +39,14 @@ function toolTitleOf(request: RequestPermissionRequest): string | undefined {
 }
 
 /** The offered permission options, or an empty list when the request has none. */
-function offeredOptions(request: RequestPermissionRequest): readonly unknown[] {
+export function offeredOptions(request: RequestPermissionRequest): readonly unknown[] {
   return isRecord(request) && Array.isArray(request.options)
     ? request.options
     : [];
 }
 
 /** The optionId of the first option of `kind`, ignoring options without a usable id. */
-function firstOptionIdOfKind(
+export function firstOptionIdOfKind(
   options: readonly unknown[],
   kind: string,
 ): string | undefined {

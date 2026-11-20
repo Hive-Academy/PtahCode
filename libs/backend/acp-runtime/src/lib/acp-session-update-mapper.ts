@@ -7,6 +7,7 @@ const TRUNCATION_MARKER = '\n… [output truncated]';
 /** Item ids for chunks that carry no message id of their own. */
 const AGENT_MESSAGE_ITEM = 'agent-message';
 const AGENT_THOUGHT_ITEM = 'agent-thought';
+/** Prefix of a user turn's item id; a counter makes each turn distinct. */
 const USER_MESSAGE_ITEM = 'user-message';
 
 interface ToolCallDetails {
@@ -109,6 +110,15 @@ function outputFromToolUpdate(update: Record<string, unknown>): string {
   return capOutput(content || safeStringify(update['rawOutput']));
 }
 
+/** Updates that belong to the agent's side of a turn. */
+const AGENT_TURN_UPDATES: ReadonlySet<string> = new Set([
+  'agent_message_chunk',
+  'agent_thought_chunk',
+  'tool_call',
+  'tool_call_update',
+  'plan',
+]);
+
 function errorNotice(content: string): AcpStopNotice {
   return { type: 'error', content };
 }
@@ -123,10 +133,25 @@ export function createAcpSessionUpdateMapper(
   options: AcpSessionUpdateMapperOptions = {},
 ): AcpSessionUpdateMapper {
   const tools = new Map<string, ToolCallDetails>();
+  /**
+   * User turns seen so far. A replayed history sends its user chunks without
+   * a message id, so a new user turn is detected by a role change (any other
+   * update since the last user chunk) and numbered (M-1).
+   */
+  let userTurns = 0;
+  let lastWasUser = false;
 
   const map = (update: SessionUpdate): ProviderSessionEventBody[] => {
     if (!isRecord(update) || typeof update.sessionUpdate !== 'string') {
       return [];
+    }
+    // Only an agent-side update ends a user turn; one that maps to no event
+    // (usage, commands, ...) must not split a user message in two (M-3).
+    if (update.sessionUpdate === 'user_message_chunk') {
+      if (!lastWasUser) userTurns++;
+      lastWasUser = true;
+    } else if (AGENT_TURN_UPDATES.has(update.sessionUpdate)) {
+      lastWasUser = false;
     }
 
     switch (update.sessionUpdate) {
@@ -174,7 +199,7 @@ export function createAcpSessionUpdateMapper(
           ? [
               {
                 type: 'userText',
-                itemId: itemIdOf(update, USER_MESSAGE_ITEM),
+                itemId: itemIdOf(update, `${USER_MESSAGE_ITEM}-${userTurns}`),
                 text: content['text'],
               },
             ]

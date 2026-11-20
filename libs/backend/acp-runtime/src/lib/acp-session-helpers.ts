@@ -63,6 +63,16 @@ export function readConfigOptions(
   return response['configOptions'].filter(isRecord);
 }
 
+/** The mode ids a session advertised in `modes.availableModes`, read defensively. */
+export function readModeIds(response: unknown): readonly string[] {
+  if (!isRecord(response) || !isRecord(response['modes'])) return [];
+  const available = response['modes']['availableModes'];
+  if (!Array.isArray(available)) return [];
+  return available.flatMap((mode: unknown) =>
+    isRecord(mode) && typeof mode['id'] === 'string' ? [mode['id']] : [],
+  );
+}
+
 /** The values a select option offers, flattening grouped options. */
 export function advertisedValuesOf(option: Record<string, unknown>): string[] {
   const entries = Array.isArray(option['options']) ? option['options'] : [];

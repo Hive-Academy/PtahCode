@@ -110,6 +110,10 @@ export interface ProviderSession {
   capabilities(): ProviderSessionCapabilities;
   listModels(): Promise<readonly ProviderModelInfo[]>;
   events(signal: AbortSignal): AsyncIterable<ProviderSessionEvent>;
+  /**
+   * Start one turn. Turns do not overlap: a call while a turn is running
+   * rejects at once (use `steer` or `interrupt` instead).
+   */
   prompt(input: ProviderTurnInput): Promise<ProviderTurnReceipt>;
   steer?(
     input: ProviderTurnInput,

@@ -21,8 +21,12 @@
  *   stdout never reports `close` (a descendant that inherited the pipe keeps
  *   it open), so the SDK connection and any pending request settle.
  *
+ * The child is created through `IProcessSpawner.spawnProcess` with the
+ * complete environment the runner built, detached on POSIX (so a tree kill
+ * reaches the group), with orphan-descendant cleanup and no Windows job.
+ *
  * The factory returns synchronously even though the spawn is not: the
- * injected {@link AcpSpawnTransport} is async (a lane resolves a Windows
+ * optional {@link AcpCommandPreparer} is async (a lane resolves a Windows
  * `.cmd` wrapper before it spawns), so early stdin writes are queued and
  * flushed once the child exists.
  */
@@ -36,25 +40,23 @@ import type {
 import type { ProviderSessionLogger } from '@ptah-extension/provider-session-contracts';
 import type { AcpByteStream } from './acp-sdk-loader';
 
-/** What the injected spawn function is asked to start. */
-export interface AcpSpawnRequest {
+/** The command line actually spawned, after the caller prepared it. */
+export interface AcpPreparedCommand {
   readonly command: string;
-  readonly args: readonly string[];
-  readonly cwd: string;
-  /** Variables to merge over the inherited environment. */
-  readonly env?: Readonly<Record<string, string>>;
-  readonly spawner?: IProcessSpawner;
+  /** Inserted before the profile argv (e.g. the script of a `.cmd` wrapper). */
+  readonly prefixArgs: readonly string[];
 }
 
 /**
- * Creates the agent child. The caller owns the spawn policy: a lane resolves
- * a Windows `.cmd` wrapper, merges its clean environment and spawns detached
- * with orphan cleanup (`spawnCli` in `cli-agent-runtime`). A rejection is
- * treated like a spawn `error`: `exited` settles with `signal: 'error'`.
+ * The caller's command-line policy, run before the spawn: a lane resolves a
+ * Windows `.cmd` wrapper and checks the command-line length limit. A
+ * rejection is treated like a spawn `error`: `exited` settles with
+ * `signal: 'error'`.
  */
-export type AcpSpawnTransport = (
-  request: AcpSpawnRequest,
-) => Promise<SpawnedProcessHandle>;
+export type AcpCommandPreparer = (
+  command: string,
+  args: readonly string[],
+) => Promise<AcpPreparedCommand>;
 
 /** Strip ANSI colour and charset escapes from one stderr line. Twin of `stripAnsiCodes` in cli-agent-runtime `cli-adapter.utils.ts`; keep both in sync. */
 function stripAnsiCodes(text: string): string {
@@ -89,12 +91,17 @@ export interface AcpSpawnOptions {
   readonly command: string;
   readonly args: readonly string[];
   readonly cwd: string;
-  /** Merged over the inherited environment by {@link spawnTransport}. */
-  readonly env?: Readonly<Record<string, string>>;
-  /** Creates the child off-thread (TASK_2026_367); handed to {@link spawnTransport}. */
+  /** The child's complete environment (nothing else is inherited). */
+  readonly env: Readonly<Record<string, string | undefined>>;
+  /** Windows: give the child its own hidden console. */
+  readonly needsConsole: boolean;
+  /**
+   * Creates the child (off-thread in the hosts, TASK_2026_367). Without one
+   * no child is started: `exited` settles with `signal: 'error'`.
+   */
   readonly spawner?: IProcessSpawner;
-  /** Creates the child; supplied by the caller (see {@link AcpSpawnTransport}). */
-  readonly spawnTransport: AcpSpawnTransport;
+  /** Optional command-line policy run before the spawn. */
+  readonly prepareCommand?: AcpCommandPreparer;
   /** Receives each non-empty, ANSI-stripped stderr line. */
   readonly onStderrLine?: (line: string) => void;
   /** Receives spawn refusals and errors on a live child. */
@@ -336,7 +343,8 @@ export const spawnAcpProcess: AcpTransportFactory = (
     const target = child;
     if (!target) return;
     void target.whenSpawned.then((pid) => {
-      if (pid !== null && pid !== undefined && !target.killed) {
+      // An exited pid may already belong to another process: never kill it.
+      if (pid !== null && pid !== undefined && !target.killed && !processGone) {
         void killProcessTree(pid);
       }
     });
@@ -476,19 +484,33 @@ export const spawnAcpProcess: AcpTransportFactory = (
     if (killRequested) killChild();
   };
 
+  const spawnChild = async (): Promise<SpawnedProcessHandle> => {
+    const spawner = options.spawner;
+    if (!spawner) {
+      throw new Error('no process spawner was supplied for the agent process');
+    }
+    const prepared = options.prepareCommand
+      ? await options.prepareCommand(options.command, options.args)
+      : { command: options.command, prefixArgs: [] };
+    return spawner.spawnProcess({
+      command: prepared.command,
+      args: [...prepared.prefixArgs, ...options.args],
+      cwd: options.cwd,
+      env: options.env,
+      // POSIX: a group leader, so killProcessTree can group-kill the tree.
+      detached: process.platform !== 'win32',
+      cleanupOrphanDescendants: true,
+      windowsJobPolicy: 'no-job',
+      needsConsole: options.needsConsole,
+    });
+  };
+
   void Promise.resolve()
-    .then(() =>
-      options.spawnTransport({
-        command: options.command,
-        args: options.args,
-        cwd: options.cwd,
-        env: options.env,
-        spawner: options.spawner,
-      }),
-    )
+    .then(spawnChild)
     .then(attachChild)
     .catch((error: unknown) => {
-      // The spawn function refused the command line outright — same contract
+      // The spawn was refused outright (no spawner, a rejected command line,
+      // a throwing spawner) — same contract
       // as a spawn 'error': settle, close, and drop anything queued for stdin.
       logger?.error('[AcpProcessTransport] agent process was not spawned', {
         command: options.command,

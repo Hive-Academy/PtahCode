@@ -16,3 +16,9 @@ export type {
   FakeAcpReply,
   FakeAcpTransport,
 } from '../lib/__fixtures__/fake-acp-agent';
+export {
+  readAcpFixture,
+  recordedResult,
+  recordedUpdatesDuring,
+} from '../lib/__fixtures__/acp-fixture-reader';
+export type { AcpFixtureEnvelope } from '../lib/__fixtures__/acp-fixture-reader';

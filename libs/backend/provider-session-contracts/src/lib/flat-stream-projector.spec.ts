@@ -174,11 +174,51 @@ describe('createFlatStreamProjector', () => {
     ).toBe('known');
   });
 
-  it('gives no stream row to infos, errors, plans and stderr, and never throws', () => {
+  it('keeps two replayed user turns apart by their turn ids', () => {
+    const projector = createFlatStreamProjector();
+    const ids = [
+      event(
+        { type: 'userText', itemId: 'user-message-1', text: 'one' },
+        { replayed: true, turnId: 'sess-1:replay:1' },
+      ),
+      event(
+        { type: 'userText', itemId: 'user-message-2', text: 'two' },
+        { replayed: true, turnId: 'sess-1:replay:2' },
+      ),
+    ].map((item) => projector.project(item)[0].messageId);
+    expect(ids).toEqual([
+      'sess-1:replay:1:user:user-message-1',
+      'sess-1:replay:2:user:user-message-2',
+    ]);
+  });
+
+  it('shows an error as a text block and completes a failed turn that had no output', () => {
+    const projector = createFlatStreamProjector();
+    const rows = [
+      event({ type: 'error', error: { code: 'handshake-timeout', message: 'no reply' } }),
+      event({ type: 'terminal', status: 'failed', disposition: 'broken' }),
+    ].flatMap((item) => projector.project(item));
+    expect(shapes(rows)).toEqual([
+      expect.objectContaining({ eventType: 'message_start', role: 'assistant' }),
+      expect.objectContaining({ eventType: 'text_delta', delta: 'Error: no reply', blockIndex: 0 }),
+      expect.objectContaining({ eventType: 'message_complete', stopReason: 'failed' }),
+    ]);
+
+    const silent = createFlatStreamProjector().project(
+      event({ type: 'terminal', status: 'failed', disposition: 'reusable' }, { turnId: 't-9' }),
+    );
+    expect(silent.map((row) => row.eventType)).toEqual(['message_start', 'message_complete']);
+    expect(
+      createFlatStreamProjector().project(
+        event({ type: 'terminal', status: 'interrupted', disposition: 'reusable' }),
+      ),
+    ).toEqual([]);
+  });
+
+  it('gives no stream row to infos, plans and stderr, and never throws', () => {
     const projector = createFlatStreamProjector();
     for (const body of [
       { type: 'info', message: 'n' },
-      { type: 'error', error: { code: 'turn-failed', message: 'x' } },
       { type: 'plan', entries: [] },
       { type: 'diagnostic', stream: 'stderr', line: 'l' },
       { type: 'usage', provider: 'Grok', turnId: 'sess-1:agent-1:1' },

@@ -32,7 +32,6 @@ import type {
 } from '@ptah-extension/platform-core';
 import { createMockLogger } from '@ptah-extension/shared/testing';
 import { spawnAcpProcess } from './acp-process-transport';
-import type { AcpSpawnTransport } from './acp-process-transport';
 
 /**
  * A spawner over a plain `child_process.spawn` that keeps the `ChildProcess`,
@@ -92,18 +91,15 @@ function createRecordingSpawner(stdin?: Writable): {
 }
 
 /**
- * The spawn function the transport is handed. A lane injects `spawnCli`
- * (Windows `.cmd` resolution, clean env, detached with orphan cleanup); this
- * one spawns plainly through the request's spawner, or a recording one, with
- * the same env merge over the inherited environment.
+ * What every spec hands the transport: a plain recording spawner, the complete
+ * inherited environment and no console. A spec that needs the child itself
+ * passes its own `spawner` after this spread.
  */
-const spawnTransport: AcpSpawnTransport = async (request) =>
-  (request.spawner ?? createRecordingSpawner().spawner).spawnProcess({
-    command: request.command,
-    args: request.args,
-    cwd: request.cwd,
-    env: { ...process.env, ...request.env },
-  });
+const spawnDefaults = () => ({
+  spawner: createRecordingSpawner().spawner,
+  env: { ...process.env },
+  needsConsole: false,
+});
 
 /** Collects the lines the transport hands to `onStderrLine`, in order. */
 function recordStderr(): {
@@ -191,7 +187,7 @@ describe('spawnAcpProcess', () => {
       command: process.execPath,
       args: ['-e', ECHO_SCRIPT],
       cwd: process.cwd(),
-      spawnTransport,
+      ...spawnDefaults(),
       onStderrLine: stderr.onLine,
     });
 
@@ -223,13 +219,26 @@ describe('spawnAcpProcess', () => {
     ]);
   }, 15000);
 
+  it('kill() after the child exited never tree-kills its (reusable) pid', async () => {
+    const transport = spawnAcpProcess({
+      command: process.execPath,
+      args: ['-e', 'process.exit(0)'],
+      cwd: process.cwd(),
+      ...spawnDefaults(),
+    });
+    await transport.exited;
+    transport.kill();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(mockKillProcessTree).not.toHaveBeenCalled();
+  }, 15000);
+
   it('kill() ends stdin, tree-kills once, and clears the pid', async () => {
     const stderr = recordStderr();
     const transport = spawnAcpProcess({
       command: process.execPath,
       args: ['-e', WAIT_SCRIPT],
       cwd: process.cwd(),
-      spawnTransport,
+      ...spawnDefaults(),
       onStderrLine: stderr.onLine,
     });
 
@@ -247,7 +256,7 @@ describe('spawnAcpProcess', () => {
     expect(transport.getPid()).toBeUndefined();
   }, 15000);
 
-  it('merges the spawn env over the inherited environment', async () => {
+  it('hands the child exactly the environment it was given', async () => {
     process.env['PTAH_ACP_SPEC_INHERITED'] = 'inherited';
     try {
       const transport = spawnAcpProcess({
@@ -257,8 +266,8 @@ describe('spawnAcpProcess', () => {
           'process.stdout.write(JSON.stringify({ lane: process.env.PTAH_ACP_SPEC_LANE, inherited: process.env.PTAH_ACP_SPEC_INHERITED }) + "\\n");',
         ],
         cwd: process.cwd(),
-        spawnTransport,
-        env: { PTAH_ACP_SPEC_LANE: 'lane-only' },
+        ...spawnDefaults(),
+        env: { ...process.env, PTAH_ACP_SPEC_LANE: 'lane-only' },
       });
 
       const stdout = await readAll(transport.stream.readable);
@@ -283,7 +292,7 @@ describe('spawnAcpProcess', () => {
       command: process.execPath,
       args: ['-e', WAIT_SCRIPT],
       cwd: process.cwd(),
-      spawnTransport,
+      ...spawnDefaults(),
       spawner: recording.spawner,
       onStderrLine: stderr.onLine,
       logger,
@@ -325,7 +334,7 @@ describe('spawnAcpProcess', () => {
       command: process.execPath,
       args: ['-e', script],
       cwd: process.cwd(),
-      spawnTransport,
+      ...spawnDefaults(),
     });
 
     // Without the exit grace this read hangs until the grandchild ends (20 s,
@@ -347,7 +356,7 @@ describe('spawnAcpProcess', () => {
       command: 'ptah-no-such-binary-617',
       args: [],
       cwd: process.cwd(),
-      spawnTransport,
+      ...spawnDefaults(),
       onStderrLine: stderr.onLine,
     });
 
@@ -364,6 +373,57 @@ describe('spawnAcpProcess', () => {
       writer.write(new TextEncoder().encode('{"late":true}\n')),
     ).resolves.toBeUndefined();
   }, 15000);
+
+  it('spawns the prepared command through the spawner with the agent spawn options', async () => {
+    const spawnProcess = jest.fn(() => {
+      throw new Error('stop here');
+    });
+    const prepareCommand = jest.fn(async () => ({
+      command: '/opt/node/bin/node',
+      prefixArgs: ['/opt/npm/grok/cli.js'],
+    }));
+    const transport = spawnAcpProcess({
+      command: '/opt/npm/grok.cmd',
+      args: ['agent', '--no-leader', 'stdio'],
+      cwd: '/work/repo',
+      env: { LANE: '1' },
+      needsConsole: true,
+      spawner: { spawnProcess } as unknown as IProcessSpawner,
+      prepareCommand,
+    });
+
+    await expect(transport.exited).resolves.toEqual({ code: null, signal: 'error' });
+    expect(prepareCommand).toHaveBeenCalledWith('/opt/npm/grok.cmd', ['agent', '--no-leader', 'stdio']);
+    expect(spawnProcess).toHaveBeenCalledWith({
+      command: '/opt/node/bin/node',
+      args: ['/opt/npm/grok/cli.js', 'agent', '--no-leader', 'stdio'],
+      cwd: '/work/repo',
+      env: { LANE: '1' },
+      detached: process.platform !== 'win32',
+      cleanupOrphanDescendants: true,
+      windowsJobPolicy: 'no-job',
+      needsConsole: true,
+    });
+  });
+
+  it('settles as a failed spawn when no spawner was supplied, or the command is refused', async () => {
+    const logger = createMockLogger();
+    const missing = spawnAcpProcess({
+      command: 'grok', args: [], cwd: '.', env: {}, needsConsole: false, logger,
+    });
+    await expect(missing.exited).resolves.toEqual({ code: null, signal: 'error' });
+    expect(logger.error).toHaveBeenCalledWith(
+      '[AcpProcessTransport] agent process was not spawned',
+      { command: 'grok', error: 'no process spawner was supplied for the agent process' },
+    );
+
+    const refused = spawnAcpProcess({
+      command: 'grok', args: [], cwd: '.', env: {}, needsConsole: false,
+      spawner: createRecordingSpawner().spawner,
+      prepareCommand: () => Promise.reject(new Error('command line too long')),
+    });
+    await expect(refused.exited).resolves.toEqual({ code: null, signal: 'error' });
+  });
 
   describe('stdin backpressure', () => {
     /** A stdin whose buffer is full after one chunk until `release()` is called. */
@@ -385,7 +445,7 @@ describe('spawnAcpProcess', () => {
         command: process.execPath,
         args: ['-e', WAIT_SCRIPT],
         cwd: process.cwd(),
-        spawnTransport,
+        ...spawnDefaults(),
         spawner: recording.spawner,
         onStderrLine: stderr.onLine,
       });

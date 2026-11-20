@@ -550,7 +550,7 @@ describe('replayed history through the stream projector', () => {
           ),
     );
 
-    const user = rows.filter((row) => row.messageId === 'agent-1:user:user-message');
+    const user = rows.filter((row) => row.messageId === 'replay:user:user-message-1');
     expect(user.map((row) => row.eventType)).toEqual([
       'message_start',
       'text_delta',
@@ -571,5 +571,31 @@ describe('replayed history through the stream projector', () => {
     expect(assistantText).toBe('OK');
     expect(rows.some((row) => row.eventType === 'thinking_delta')).toBe(true);
     expect(rows.every((row) => row.source === 'history')).toBe(true);
+  });
+
+  it('numbers id-less user turns on each role change and keeps chunks of one turn together (M-1)', () => {
+    const mapper = createEventMapper();
+    const user = (text: string) =>
+      ({ sessionUpdate: 'user_message_chunk', content: { type: 'text', text } }) as SessionUpdate;
+    const agent = (text: string) =>
+      ({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } }) as SessionUpdate;
+    const ids = [user('a'), user('b'), agent('ok'), user('c')].flatMap((update) =>
+      mapper.map(update).flatMap((body) => (body.type === 'userText' ? [body.itemId] : [])),
+    );
+    expect(ids).toEqual(['user-message-1', 'user-message-1', 'user-message-2']);
+  });
+
+  it('keeps one user turn across an update that maps to no event (review M-3)', () => {
+    const mapper = createEventMapper();
+    const user = (text: string) =>
+      ({ sessionUpdate: 'user_message_chunk', content: { type: 'text', text } }) as SessionUpdate;
+    const agent = (text: string) =>
+      ({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } }) as SessionUpdate;
+    const usage = { sessionUpdate: 'usage_update', used: 1, size: 10 } as unknown as SessionUpdate;
+    const commands = { sessionUpdate: 'available_commands_update', availableCommands: [] } as unknown as SessionUpdate;
+    const ids = [user('a'), usage, commands, user('b'), agent('ok'), user('c')].flatMap((update) =>
+      mapper.map(update).flatMap((body) => (body.type === 'userText' ? [body.itemId] : [])),
+    );
+    expect(ids).toEqual(['user-message-1', 'user-message-1', 'user-message-2']);
   });
 });

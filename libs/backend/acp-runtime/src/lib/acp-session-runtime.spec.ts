@@ -24,7 +24,7 @@ const SESSION_ID = 'sess-1';
 const profile: AcpVendorProfile = {
   vendor: 'grok',
   displayName: 'Test Agent',
-  resumeStrategy: 'resume',
+  signInHint: 'run `test login`',
   buildSpawn: () => ({ args: ['agent', 'stdio'] }),
   buildMcpServers: () => [],
 };
@@ -57,7 +57,7 @@ function start(
     profile,
     options: { workingDirectory: process.cwd(), agentId: 'agent-1', mcp: [] },
     command: 'test-agent',
-    spawnTransport: () => Promise.reject(new Error('not used by the fake')),
+    baseEnv: { PATH: '/bin' },
     transportFactory: (options) => {
       spawn = options;
       return transport;
@@ -84,11 +84,12 @@ afterEach(async () => {
 });
 
 describe('createAcpSession', () => {
-  it('hands the caller spawn function and the profile argv to the transport', () => {
+  it('hands the profile argv, the complete env and the console flag to the transport', () => {
     const h = start();
     expect(h.spawn()?.args).toEqual(['agent', 'stdio']);
     expect(h.spawn()?.command).toBe('test-agent');
-    expect(typeof h.spawn()?.spawnTransport).toBe('function');
+    expect(h.spawn()?.env).toEqual({ PATH: '/bin' });
+    expect(h.spawn()?.needsConsole).toBe(false);
     h.abort.abort();
   });
 
@@ -162,7 +163,7 @@ describe('createAcpSession', () => {
   });
 
   it('fails setup with protocol-unsupported on another protocol version and kills the agent', async () => {
-    const h = start({ protocolVersion: 2 });
+    const h = start({ protocolVersion: 3 });
 
     await expect(h.session.start()).resolves.toEqual({ ok: false });
     expect(h.events).toEqual([
@@ -170,11 +171,34 @@ describe('createAcpSession', () => {
         type: 'error',
         error: {
           code: 'protocol-unsupported',
-          message: 'Test Agent speaks unsupported ACP protocol version 2',
+          message: 'Test Agent speaks unsupported ACP protocol version 3',
         },
       }),
     ]);
     expect(h.transport.killCount).toBe(1);
+  });
+
+  it('accepts a protocol version 2 reply that has the v1 shape (D8)', async () => {
+    const h = start({ protocolVersion: 2 });
+    await expect(h.session.start()).resolves.toEqual({ ok: true, restoredContext: false });
+    expect(h.agent.received[0]).toMatchObject({
+      method: 'initialize',
+      params: { protocolVersion: 1 },
+    });
+    h.abort.abort();
+  });
+
+  it('refuses a version 2 reply whose shape is not v1', async () => {
+    const h = start({ protocolVersion: 2, agentCapabilities: { loadSession: 'yes' } });
+    await expect(h.session.start()).resolves.toEqual({ ok: false });
+    expect(h.events[0]).toMatchObject({
+      type: 'error',
+      error: {
+        code: 'protocol-unsupported',
+        message:
+          'Test Agent speaks ACP protocol version 2 with a reply that is not v1-shaped (agentCapabilities.loadSession)',
+      },
+    });
   });
 
   it('maps AcpUnavailableError to a failed setup', async () => {
@@ -196,7 +220,7 @@ describe('createAcpSession', () => {
     expect(h.transport.killCount).toBe(1);
   });
 
-  it('refuses a prompt before the session exists with one error event', async () => {
+  it('refuses a prompt before the session exists with one error and one terminal event', async () => {
     const h = start();
     await expect(h.session.prompt('early')).resolves.toBe(1);
     expect(h.events).toEqual([
@@ -207,6 +231,8 @@ describe('createAcpSession', () => {
           message: 'Test Agent has no ACP session to prompt',
         },
       }),
+      // Every accepted prompt ends with exactly one terminal (review S-2).
+      expect.objectContaining({ type: 'terminal', status: 'failed', disposition: 'broken' }),
     ]);
     h.abort.abort();
   });
