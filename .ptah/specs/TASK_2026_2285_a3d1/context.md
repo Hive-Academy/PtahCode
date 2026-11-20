@@ -41,3 +41,13 @@ main checkout on branch `build/nx-migrate-latest` instead of a worktree.
     overflows the stack on Node 26.
   - ptah-electron: `container.smoke.spec.ts` runs out of memory at the default 2 GB heap;
     it passes 67 of 67 tests with `--max-old-space-size=6144`.
+- `web-tree-sitter` stays at 0.27.0: `scripts/tree-sitter-grammars.json` pins that version
+  and `scripts/copy-wasm.js` rejects any other (found when building the dev app).
+
+## Dev app run (Electron 44.4.3, prebuilt better-sqlite3 binary)
+
+- The dev build and launch work; the window renders on Angular 22.2.7 and the SQLite
+  migrations apply.
+- First start: the main process blocked about 27 s and several RPC calls timed out.
+  Second start: about 2.9 s, no RPC timeouts. A CPU profile attributes the block to the
+  process spawn in the Codex `readVersion` probe, not to an updated package.
