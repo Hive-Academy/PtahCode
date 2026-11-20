@@ -326,6 +326,20 @@ describe('PlanUsageService', () => {
     await h.service.getOwnerSnapshot(target, { refresh: true });
     expect(h.oauthReader).toHaveBeenCalledTimes(2);
   });
+  it('does not serve a proven stored-directory reading after a failed refresh', async () => {
+    const h = harness();
+    h.oauthReader.mockResolvedValueOnce({ ...mapClaudePlanUsage(claudeUsage(17), T0, h.logger as Partial<Logger> as Logger), source: 'provider-api' });
+    const target: PlanOwnerTarget = {
+      providerId: 'anthropic', ownerRef: CLAUDE_A,
+      claudeUsageDir: { kind: 'stored-profile-usage', profileId: 'fixture', canonicalConfigDir: '/fixture/stored' },
+    };
+    expect((await h.service.getOwnerSnapshot(target)).status).toBe('available');
+    h.oauthReader.mockRejectedValueOnce(new Error('network'));
+    // The failed refresh shows the old reading as stale; a later snapshot never reports it as fresh.
+    expect((await h.service.getOwnerSnapshot(target, { refresh: true })).status).toBe('stale');
+    expect((await h.service.getOwnerSnapshot(target)).status).not.toBe('available');
+    expect(h.oauthReader).toHaveBeenCalledTimes(2);
+  });
   it('honors a rate limit cooldown even on refresh', async () => {
     const h = harness();
     h.readPlanUsage.mockResolvedValue(null);

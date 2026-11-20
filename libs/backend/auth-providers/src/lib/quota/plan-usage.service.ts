@@ -247,11 +247,14 @@ export class PlanUsageService {
             if (sessionless) this.recordClaudeUsageDirReading(failureKey, oauth);
             return oauth;
           }
+          // A failed read replaces the source's proven reading: a later snapshot does not hide it.
+          this.claudeUsageDirReadings.delete(failureKey);
           this.recordClaudeOauthFailure(failureKey, oauth.retryAfterMs, oauth);
           return sessionless ? oauth : live;
         } catch (error: unknown) {
           if (request.signal?.aborted) return live;
           const failed: PlanUsageReading = { status: 'service-unavailable', statusReason: 'cli-unavailable', windowSetEstablished: false, windows: [] };
+          this.claudeUsageDirReadings.delete(failureKey);
           this.recordClaudeOauthFailure(failureKey, undefined, failed);
           logger.warn('[PlanUsage] Claude OAuth source failed', { reason: error instanceof Error ? error.name : 'invalid' });
           return sessionless ? failed : live;
