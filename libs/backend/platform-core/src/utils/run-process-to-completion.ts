@@ -48,6 +48,8 @@ export function runProcessToCompletion(
     try {
       handle = spawner.spawnProcess(request);
     } catch (error: unknown) {
+      // degradation-audit: reported - the error rejects the returned promise,
+      // so the caller sees it exactly as it would a thrown error.
       reject(error instanceof Error ? error : new Error(String(error)));
       return;
     }
