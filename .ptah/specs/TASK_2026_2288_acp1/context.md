@@ -1,0 +1,57 @@
+# Context — TASK_2026_2288_acp1
+
+## User request (2026-11-20)
+
+> start a workflow for looking at t3code i do like there unified acp adapters across all
+> providers and i think we should rely on it and rather we spawn cli, to have full control
+> over its harness ? similairly i want to check how they talk to grok through acp as well,
+> so we are able to make our main agent go through those providers as well, planning to also
+> change opencode to the same adapter workflow whether through acp or opencode sdk, so its
+> unified across everything
+
+## Prior finding
+
+No existing spec plans first-class Antigravity via ACP/SDK. Antigravity today is a CLI lane
+(`agy --print` stream-json, TASK_2026_199). Grok already uses `cli-adapters/acp/`.
+
+## Reference
+
+t3code (pingdotgg/t3code) shallow clone at commit 9294a9801e80, read-only, outside the repo.
+
+## User follow-up (2026-11-20) — scope expanded to implementation, full auto
+
+> one important caveat that we need it to be adaptable to our current setup so eventually we
+> need to be able to use those as main providers and also as cli tool and have the same exact
+> setup we made so far for claude agent sdk and codex app server , also go in full automode to
+> get that working and make sure you test everything in our dev server and choose best solution
+> thats inspired by our code that we already have
+
+Decisions this implies:
+- Each new provider (Antigravity, Grok, OpenCode) must work both as a main-agent provider and as
+  a CLI lane, mirroring the existing Claude Agent SDK and Codex App Server setup exactly.
+- Design follows Ptah's existing patterns first; t3code is inspiration, not a template.
+- Full auto: no checkpoints; verify in the Electron dev app (user authorized running dev).
+
+## Runtime pre-flight (2026-11-20, this machine)
+
+- agy 1.5.13 installed; `agy acp` exists (flags include --app-data-dir, --add-dir, --agent,
+  --dangerously-skip-permissions, --cli_log_file).
+- codex-cli 0.171.0, Claude Code 2.1.329 installed.
+- grok: NOT installed (not on PATH, no ~/.grok). Live Grok testing needs the CLI and xAI auth.
+- opencode: NOT installed. Live OpenCode testing needs the CLI (npm `opencode-ai`).
+
+## Program table
+
+| Phase | Task ID | Pull request | State |
+|---|---|---|---|
+| Research + plan | TASK_2026_2288_acp1 | (this PR) | in_review |
+| P1 contracts + acp-runtime extraction | TBD | — | in_progress |
+| P2 acp-runtime hardening | TBD | — | planned |
+| P3 Antigravity ACP lane (P3x MCP bridge if needed) | TBD | — | planned |
+| P4–P6 chat foundation A/B/C | TBD | — | planned |
+| P7 chat backend (adapter, host ports, pool) | TBD | — | planned |
+| P8 Electron composition | TBD | — | planned |
+| P9 Antigravity main chat | TBD | — | planned |
+| P10 Grok main chat | TBD | — | planned (live-unverified) |
+| P11a–c OpenCode | TBD | — | blocked on PF-6 (CLI not installed) |
+| P12 consolidation | TBD | — | planned (removals need user approval) |
