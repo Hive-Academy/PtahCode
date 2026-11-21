@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_2295_p6
-status: in_progress
+status: in_review
 type: FEATURE
 title: Chat session, session RPC and slash router for provider sessions (P6)
 depends_on: [TASK_2026_2294_p5]
