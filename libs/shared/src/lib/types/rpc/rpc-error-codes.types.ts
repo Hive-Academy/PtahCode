@@ -36,6 +36,12 @@ export const RPC_USER_ERROR_CODES = [
   'FOLLOW_UP_ID_CONFLICT',
   'TASK_NOT_FOUND',
   'SESSION_ENDED',
+  /**
+   * An idle-only `chat:continue` (`admission: 'require-idle'`) found a turn
+   * in flight or a message already held. Nothing was sent; the renderer
+   * queues the message instead.
+   */
+  'TURN_IN_FLIGHT',
   /** Codex already has an operation in progress. */
   'CODEX_BUSY',
   /** A named chat option is unsupported by Codex. */

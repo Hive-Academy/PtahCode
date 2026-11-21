@@ -215,6 +215,14 @@ export interface ChatContinueParams {
    * (Zod-enforced at the handler). Slash commands cannot be queued.
    */
   readonly queueIntent?: 'next-turn';
+  /**
+   * `require-idle`: admit the prompt only when the session has no turn in
+   * flight and nothing held. A busy session refuses with `TURN_IN_FLIGHT`
+   * before anything is sent and the renderer queues the message instead, so
+   * a normal send never silently waits behind, or interrupts, a running turn.
+   * Not combined with `queueIntent`.
+   */
+  readonly admission?: 'require-idle';
 }
 
 /** Response from chat:continue RPC method */

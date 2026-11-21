@@ -26,9 +26,11 @@ import { isTabBusyGenerating } from './tab-busy';
  *   (MessageSender); a busy tab, one held by the Command Center send lock, or
  *   one with follow-ups already waiting hands the message to
  *   `FollowUpQueueService`, which gives it to the backend queue of the
- *   captured session at once (TASK_2026_884). Busy: the tab's in-flight
- *   permissions are auto-denied with the user's content as the
- *   `deny_with_message` reason.
+ *   captured session at once (TASK_2026_884). Open permission prompts are
+ *   left untouched. A normal send is idle-only: when the backend still runs
+ *   a turn the renderer did not see, it refuses with `TURN_IN_FLIGHT` and
+ *   the message is queued too, so every mid-turn message gets the same
+ *   queued card.
  * - Blocks SDK-native slash commands (`/context`, `/cost`) for
  *   non-Anthropic providers — those commands require Claude-specific runtime
  *   tables.
@@ -111,28 +113,23 @@ export class MessageDispatchService {
         // Something is already waiting: a normal send would overtake it.
         this.followUps.hasPending(resolvedTabId))
     ) {
-      // The message steers ITS tab's turn, so only that tab's pending prompts
-      // are answered with it. The queue is global: denying every request would
-      // reject another session's prompt with this tab's text as the reason.
-      for (const perm of isStreaming
-        ? this.permissionHandler.permissionRequests()
-        : []) {
-        if (!this.isPermissionForTab(perm, resolvedTabId, dispatchTab)) {
-          continue;
-        }
-        this.permissionHandler.handlePermissionResponse({
-          id: perm.id,
-          decision: 'deny_with_message',
-          reason: content,
-        });
-      }
-      const queued = this.followUps.enqueue(resolvedTabId, content, options);
-      return queued
-        ? { success: true, queued }
-        : { success: false, error: 'Invalid message content' };
+      // Queue first, always: the message waits as a queued card with
+      // Interrupt & send / Send now. It never answers an open permission
+      // prompt — that stays for the user to decide.
+      return this.queue(resolvedTabId, content, options);
     }
     const previousTerminalReason = dispatchTab?.lastTerminalReason;
-    const outcome = await this.messageSender.send(content, options);
+    // Idle-only: only this path can fall back to the queue on a refusal.
+    const outcome = await this.messageSender.send(content, {
+      ...options,
+      idleOnly: true,
+    });
+    // The renderer saw the tab idle but the backend turn still runs: the
+    // idle-only send was refused with nothing sent, so queue it like any
+    // other mid-turn message.
+    if (outcome?.turnInFlight === true && resolvedTabId != null) {
+      return this.queue(resolvedTabId, content, options);
+    }
     if (outcome?.cancelled === true) {
       if (resolvedTabId) {
         this.restoreCancelledSend(resolvedTabId, previousTerminalReason);
@@ -148,6 +145,17 @@ export class MessageDispatchService {
       );
     }
     return outcome;
+  }
+
+  private queue(
+    tabId: string,
+    content: string,
+    options?: SendMessageOptions & { ownerToken?: string },
+  ): SendOutcome {
+    const queued = this.followUps.enqueue(tabId, content, options);
+    return queued
+      ? { success: true, queued }
+      : { success: false, error: 'Invalid message content' };
   }
 
   private restoreCancelledSend(
@@ -170,9 +178,8 @@ export class MessageDispatchService {
    * routing at all is shown globally, so it is treated as the active tab's.
    */
   /**
-   * Whether a pending permission prompt belongs to the tab: the prompts
-   * {@link sendOrQueueMessage} answers (denies) when it queues a message on
-   * it. Reactive: reads the prompt list and the prompt routing revision.
+   * Whether a pending permission prompt belongs to the tab. Reactive: reads
+   * the prompt list and the prompt routing revision.
    */
   hasPendingPermissionForTab(tabId: string): boolean {
     this.permissionHandler.routingTargetRevision();

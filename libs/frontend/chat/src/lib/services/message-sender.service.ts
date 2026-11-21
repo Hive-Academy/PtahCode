@@ -56,7 +56,11 @@ import {
 } from '@ptah-extension/chat-streaming';
 import { MessageValidationService } from './message-validation.service';
 import { UltracodeStateService } from './ultracode-state.service';
-import type { SendMessageOptions, TabState } from '@ptah-extension/chat-types';
+import type {
+  SendMessageOptions,
+  SessionStatus,
+  TabState,
+} from '@ptah-extension/chat-types';
 import {
   CARRY_OVER_BUSY_TEXT,
   ProviderCarryOverService,
@@ -115,6 +119,12 @@ export interface SendOutcome {
   queued?: QueuedFollowUpRef;
   /** The backend ran the message to its end inside the send: no turn streams after it. */
   settled?: boolean;
+  /**
+   * The backend refused the idle-only send because a turn is still running
+   * (`TURN_IN_FLIGHT`). Nothing was sent and nothing is left in the
+   * transcript; the dispatcher queues the message instead.
+   */
+  turnInFlight?: boolean;
 }
 
 /**
@@ -611,7 +621,7 @@ export class MessageSenderService {
    */
   async send(
     content: string,
-    options?: SendMessageOptions & { ownerToken?: string },
+    options?: SendMessageOptions & { ownerToken?: string; idleOnly?: boolean },
   ): Promise<SendOutcome> {
     if (this.isHeld(options))
       return { success: false, error: 'Message held by Command Center' };
@@ -869,7 +879,7 @@ export class MessageSenderService {
   private async continueConversation(
     content: string,
     sessionId: SessionId,
-    options?: SendMessageOptions & { ownerToken?: string },
+    options?: SendMessageOptions & { ownerToken?: string; idleOnly?: boolean },
   ): Promise<SendOutcome> {
     if (this.isHeld(options))
       return { success: false, error: 'Message held by Command Center' };
@@ -933,7 +943,9 @@ export class MessageSenderService {
   private async runContinueConversation(
     content: string,
     sessionId: SessionId,
-    options: (SendMessageOptions & { ownerToken?: string }) | undefined,
+    options:
+      | (SendMessageOptions & { ownerToken?: string; idleOnly?: boolean })
+      | undefined,
     abortSignal: AbortSignal | undefined,
   ): Promise<SendOutcome> {
     const files = options?.files;
@@ -1037,6 +1049,7 @@ export class MessageSenderService {
         if (this.isHeld(options))
           return { success: false, error: 'Message held by Command Center' };
       }
+      const previousTabStatus = activeTab?.status ?? null;
       this.sessionManager.setStatus('resuming');
       this.tabManager.markResuming(activeTabId);
       const userMessage = createExecutionChatMessage({
@@ -1075,9 +1088,22 @@ export class MessageSenderService {
           files: files ?? [],
           ...(images && images.length > 0 ? { images } : {}),
           ...(effectiveEffort ? { effort: effectiveEffort } : {}),
+          // Idle-only (the dispatcher's sends): a turn the renderer did not
+          // see as running refuses the send (TURN_IN_FLIGHT) instead of
+          // holding it unseen. Direct callers keep the backend hold.
+          ...(options?.idleOnly ? { admission: 'require-idle' as const } : {}),
         },
         { signal: abortSignal },
       );
+
+      if ((result.data?.errorCode ?? result.errorCode) === 'TURN_IN_FLIGHT') {
+        this.withdrawRefusedPrompt(
+          activeTabId,
+          userMessage.id,
+          previousTabStatus,
+        );
+        return { success: false, turnInFlight: true };
+      }
 
       if (result.data?.cancelled === true) {
         this.rollBackUnsentPrompt(activeTabId, userMessage.id);
@@ -1168,5 +1194,35 @@ export class MessageSenderService {
    */
   private rollBackUnsentPrompt(tabId: string, messageId: string): void {
     this.streamingHandler.removeUserPromptBoundary(tabId, messageId);
+  }
+
+  /**
+   * Undo a send the backend refused as `TURN_IN_FLIGHT`. Unlike a failure, the
+   * bubble goes too (the message is queued, and its card shows instead), and
+   * the tab keeps the status it had: the backend turn is still running, so
+   * marking the tab loaded would hide its Stop.
+   */
+  private withdrawRefusedPrompt(
+    tabId: string,
+    messageId: string,
+    previousTabStatus: SessionStatus | null,
+  ): void {
+    this.streamingHandler.removeUserPromptBoundary(tabId, messageId);
+    const tab = this.tabManager.findTabByIdAcrossWorkspaces(tabId)?.tab;
+    if (tab) {
+      this.tabManager.setMessages(
+        tabId,
+        tab.messages.filter((message) => message.id !== messageId),
+      );
+    }
+    // Only undo our own `resuming`: a turn_state that arrived while the RPC
+    // was in flight is newer and wins.
+    if (tab?.status !== 'resuming') return;
+    const status = previousTabStatus ?? 'loaded';
+    this.tabManager.setStatus(tabId, status);
+    // The session manager mirrors the active tab only.
+    if (this.tabManager.activeTabId() === tabId) {
+      this.sessionManager.setStatus(status);
+    }
   }
 }

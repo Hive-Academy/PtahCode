@@ -6,7 +6,8 @@
  *   - sendOrQueueMessage: guard does NOT block /compact or /review (all providers)
  *   - sendOrQueueMessage: guard does NOT block when authState.isLoading()
  *   - sendOrQueueMessage: guard does NOT block for apiKey provider
- *   - sendOrQueueMessage: streaming auto-denies permissions with deny_with_message
+ *   - sendOrQueueMessage: queuing never answers an open permission prompt
+ *   - sendOrQueueMessage: a TURN_IN_FLIGHT refusal of a normal send is queued
  *   - sendOrQueueMessage: not streaming dispatches via MessageSender.send
  *   - sendOrQueueMessage: explicit-tabId override beats activeTab
  *   - sendOrQueueMessage: a busy tab, a send-lock-held tab or one with
@@ -275,97 +276,60 @@ describe('MessageDispatchService', () => {
     it('does NOT block /compact or /review for non-Anthropic providers', async () => {
       persistedAuthMethod.set('copilot');
       await service.sendOrQueueMessage('/compact');
-      expect(sendMock).toHaveBeenCalledWith('/compact', undefined);
+      expect(sendMock).toHaveBeenCalledWith('/compact', { idleOnly: true });
       sendMock.mockClear();
       await service.sendOrQueueMessage('/review');
-      expect(sendMock).toHaveBeenCalledWith('/review', undefined);
+      expect(sendMock).toHaveBeenCalledWith('/review', { idleOnly: true });
     });
 
     it('does NOT block when authState.isLoading() is true', async () => {
       persistedAuthMethod.set('copilot');
       isLoadingAuth.set(true);
       await service.sendOrQueueMessage('/context');
-      expect(sendMock).toHaveBeenCalledWith('/context', undefined);
+      expect(sendMock).toHaveBeenCalledWith('/context', { idleOnly: true });
     });
 
     it('does NOT block for apiKey provider', async () => {
       persistedAuthMethod.set('apiKey');
       await service.sendOrQueueMessage('/context');
-      expect(sendMock).toHaveBeenCalledWith('/context', undefined);
+      expect(sendMock).toHaveBeenCalledWith('/context', { idleOnly: true });
     });
 
     it('does NOT block for claudeCli provider', async () => {
       persistedAuthMethod.set('claudeCli');
       await service.sendOrQueueMessage('/context');
-      expect(sendMock).toHaveBeenCalledWith('/context', undefined);
+      expect(sendMock).toHaveBeenCalledWith('/context', { idleOnly: true });
     });
 
-    it('when streaming, auto-denies active permissions with deny_with_message', async () => {
+    it('when streaming, queues the message and leaves open permission prompts alone', async () => {
       activeTabStatus.set('streaming');
       permissionRequests.set([{ id: 'perm-1', sessionId: 'sess-1' }]);
       await service.sendOrQueueMessage('hello');
-      expect(handlePermissionResponseMock).toHaveBeenCalledWith({
-        id: 'perm-1',
-        decision: 'deny_with_message',
-        reason: 'hello',
-      });
+      expect(handlePermissionResponseMock).not.toHaveBeenCalled();
       expect(queueOrAppendMock).toHaveBeenCalledWith('hello', undefined);
+      expect(sendMock).not.toHaveBeenCalled();
     });
 
-    it("when streaming, denies only the target tab's prompts and leaves other sessions' prompts pending", async () => {
-      tabs = [
-        makeTab({ id: 'tab-1', claudeSessionId: 'sess-1' }),
-        makeTab({
-          id: 'tab-2',
-          claudeSessionId: 'sess-2',
-          status: 'streaming',
-        }),
-      ];
-      permissionRequests.set([
-        { id: 'own-by-tab', tabId: 'tab-2' },
-        { id: 'own-by-session', sessionId: 'sess-2' },
-        { id: 'own-by-target' },
-        { id: 'other-by-tab', tabId: 'tab-1', sessionId: 'sess-2' },
-        { id: 'other-by-session', sessionId: 'sess-1' },
-        { id: 'other-by-target' },
-        { id: 'unrouted' },
-      ]);
-      promptTargets.set('own-by-target', ['tab-2']);
-      promptTargets.set('other-by-target', ['tab-1']);
+    it('queues an idle-looking send the backend refused as TURN_IN_FLIGHT', async () => {
+      activeTabStatus.set('awaiting-background');
+      sendMock.mockResolvedValue({ success: false, turnInFlight: true });
 
-      await service.sendOrQueueMessage('feedback', { tabId: 'tab-2' });
+      const outcome = await service.sendOrQueueMessage('late', { tabId: 'tab-1' });
 
-      const denied = handlePermissionResponseMock.mock.calls.map(
-        (c) => (c[0] as { id: string }).id,
-      );
-      expect(denied).toEqual(['own-by-tab', 'own-by-session', 'own-by-target']);
-      expect(handlePermissionResponseMock).toHaveBeenCalledWith({
-        id: 'own-by-tab',
-        decision: 'deny_with_message',
-        reason: 'feedback',
+      expect(sendMock).toHaveBeenCalledWith('late', { tabId: 'tab-1', idleOnly: true });
+      expect(enqueueMock).toHaveBeenCalledWith('tab-1', 'late', { tabId: 'tab-1' });
+      expect(outcome).toEqual({
+        success: true,
+        queued: { clientMessageId: 'cm-1', tabId: 'tab-1', sessionId: 'sess-1' },
       });
-      expect(queueOrAppendMock).toHaveBeenCalledWith('feedback', {
-        tabId: 'tab-2',
-      });
-    });
-
-    it('does not answer an unrouted prompt when streaming an unrelated active tab', async () => {
-      activeTabStatus.set('streaming');
-      permissionRequests.set([
-        { id: 'unrouted' },
-        { id: 'routed-away', tabId: 'tab-9' },
-      ]);
-      await service.sendOrQueueMessage('hello');
-      const denied = handlePermissionResponseMock.mock.calls.map(
-        (c) => (c[0] as { id: string }).id,
-      );
-      expect(denied).toEqual([]);
+      // No failure bubble: the queued card is the only trace of the message.
+      expect(setMessagesMock).not.toHaveBeenCalled();
     });
 
     it('when not streaming, dispatches via MessageSender.send', async () => {
       activeTabStatus.set('loaded');
       await service.sendOrQueueMessage('hello');
-      expect(sendMock).toHaveBeenCalledWith('hello', undefined);
+      expect(sendMock).toHaveBeenCalledWith('hello', { idleOnly: true });
     });
 
     it('resolves the outcome: send result passed through, queue accepted, blocked command refused', async () => {
@@ -484,7 +448,7 @@ describe('MessageDispatchService', () => {
       ];
       await service.sendOrQueueMessage('after the error');
 
-      expect(sendMock).toHaveBeenCalledWith('after the error', undefined);
+      expect(sendMock).toHaveBeenCalledWith('after the error', { idleOnly: true });
     });
 
     it.each(['awaiting-background', 'sleeping'] as const)(
@@ -516,7 +480,7 @@ describe('MessageDispatchService', () => {
         await service.sendOrQueueMessage('follow up');
 
         expect(queueOrAppendMock).not.toHaveBeenCalled();
-        expect(sendMock).toHaveBeenCalledWith('follow up', undefined);
+        expect(sendMock).toHaveBeenCalledWith('follow up', { idleOnly: true });
       },
     );
 
@@ -564,7 +528,7 @@ describe('MessageDispatchService', () => {
       await service.sendOrQueueMessage('after the stray event');
 
       expect(queueOrAppendMock).not.toHaveBeenCalled();
-      expect(sendMock).toHaveBeenCalledWith('after the stray event', undefined);
+      expect(sendMock).toHaveBeenCalledWith('after the stray event', { idleOnly: true });
     });
   });
 
@@ -929,6 +893,6 @@ describe('MessageDispatchService with the real StreamingHandler + MessageFinaliz
     await dispatch.sendOrQueueMessage('and now this');
 
     expect(queueOrAppendMock).not.toHaveBeenCalled();
-    expect(sendMock).toHaveBeenCalledWith('and now this', undefined);
+    expect(sendMock).toHaveBeenCalledWith('and now this', { idleOnly: true });
   });
 });
