@@ -422,6 +422,37 @@ describe('decideAcpPermission', () => {
     },
   );
 
+  it('grants what `grant` accepts with auto-approve off (live F1)', () => {
+    const grant = jest.fn(() => true);
+    assertDecision(
+      decideAcpPermission(GROK_EXECUTE_REQUEST, { autoApprove: false, grant, mode: 'plan' }),
+      {
+        selectedOptionId: 'allow-once',
+        cancelled: false,
+        refused: false,
+        toolTitle: 'Execute `echo b0 > shell.txt`',
+      },
+    );
+    expect(grant).toHaveBeenCalledWith(GROK_EXECUTE_REQUEST);
+  });
+
+  it('names the lane mode in a refusal', () => {
+    assertDecision(
+      decideAcpPermission(GROK_EXECUTE_REQUEST, {
+        autoApprove: false,
+        grant: () => false,
+        mode: 'plan',
+      }),
+      {
+        selectedOptionId: 'reject-once',
+        cancelled: false,
+        refused: true,
+        info: 'Refused permission for Execute `echo b0 > shell.txt` in plan mode: auto-approve is off',
+        toolTitle: 'Execute `echo b0 > shell.txt`',
+      },
+    );
+  });
+
   it('treats a missing options argument as auto-approve on', () => {
     assertDecision(decideAcpPermission(GROK_EXECUTE_REQUEST), {
       selectedOptionId: 'allow-once',
