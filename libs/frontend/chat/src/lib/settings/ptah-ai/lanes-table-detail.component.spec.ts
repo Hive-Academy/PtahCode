@@ -94,7 +94,9 @@ describe('LanesTableDetailComponent', () => {
     expect(host.querySelector('[data-popover-kind="permission"]')).toBeNull();
     expect(host.querySelector('[data-popover-kind="info"]')).toBeNull();
     expect(host.querySelector('[data-popover-kind="capabilities"]')).toBeNull();
-    expect(host.querySelector('[data-testid="lane-detail-native-more"]')).toBeNull();
+    expect(
+      host.querySelector('[data-testid="lane-detail-native-more"]'),
+    ).toBeNull();
   });
 
   it('repeats none of the row values: version, model, permission, network, enabled', () => {
@@ -172,8 +174,14 @@ describe('LanesTableDetailComponent', () => {
     ).toBe('wide');
     expect(host.querySelectorAll('ptah-description-list')).toHaveLength(1);
     const layout = host.querySelector('ptah-table-detail-layout');
-    for (const slot of ['[ptahDetailFacts]', '[ptahDetailChips]', '[ptahDetailActions]']) {
-      expect(host.querySelector(slot)?.parentElement?.parentElement).toBe(layout);
+    for (const slot of [
+      '[ptahDetailFacts]',
+      '[ptahDetailChips]',
+      '[ptahDetailActions]',
+    ]) {
+      expect(host.querySelector(slot)?.parentElement?.parentElement).toBe(
+        layout,
+      );
     }
     const actions = Array.from(
       host.querySelectorAll('[ptahDetailActions] button'),
@@ -201,39 +209,45 @@ describe('LanesTableDetailComponent', () => {
       'MCP',
       'Limit',
     ]);
-    expect(terms.every((dt) => dt.querySelector('lucide-angular[aria-hidden="true"]'))).toBe(true);
     expect(
-      Array.from(facts.querySelectorAll('dd')).map((dd) => dd.textContent?.trim()),
-    ).toEqual(['Unverified', 'Unverified', 'Unverified', 'Unverified', 'Unverified']);
+      terms.every((dt) =>
+        dt.querySelector('lucide-angular[aria-hidden="true"]'),
+      ),
+    ).toBe(true);
+    expect(
+      Array.from(facts.querySelectorAll('dd')).map((dd) =>
+        dd.textContent?.trim(),
+      ),
+    ).toEqual([
+      'Unverified',
+      'Unverified',
+      'Unverified',
+      'Unverified',
+      'Unverified',
+    ]);
     expect(facts.querySelector('button')).toBeNull();
     expect(host.querySelector('.capability-value')).toBeNull();
   });
 
   it('renders All capabilities as an inline disclosure, not a popover (decision 20)', () => {
     const { fixture, host } = mount();
-    const disclosure = host.querySelector('ptah-disclosure[data-lane-capabilities]')!;
+    const disclosure = host.querySelector(
+      'ptah-disclosure[data-lane-capabilities]',
+    )!;
     const toggle = disclosure.querySelector<HTMLButtonElement>('button')!;
     expect(toggle.textContent).toContain('All capabilities');
     expect(toggle.getAttribute('aria-expanded')).toBe('false');
     toggle.click();
     fixture.detectChanges();
     expect(toggle.getAttribute('aria-expanded')).toBe('true');
-    const detail = disclosure.querySelector('[data-testid="cli-capability-detail"]');
+    const detail = disclosure.querySelector(
+      '[data-testid="cli-capability-detail"]',
+    );
     expect(detail?.textContent).toContain('Messaging');
     expect(detail?.closest('ptah-native-popover')).toBeNull();
-    expect(host.querySelector('[data-testid="cli-provider-popover-content"]')).toBeNull();
-  });
-
-  it('opens the All capabilities disclosure for the open kind capabilities (kebab route)', () => {
-    const { fixture, host } = mount();
-    fixture.componentRef.setInput('openKind', 'capabilities');
-    fixture.detectChanges();
     expect(
-      host
-        .querySelector('[data-lane-capabilities] button')
-        ?.getAttribute('aria-expanded'),
-    ).toBe('true');
-    expect(host.querySelector('[data-testid="cli-provider-popover-content"]')).toBeNull();
+      host.querySelector('[data-testid="cli-provider-popover-content"]'),
+    ).toBeNull();
   });
 
   it('places destructive Delete last after the instance actions', () => {
@@ -370,9 +384,13 @@ describe('LanesTableDetailComponent', () => {
       host.querySelector('[data-testid="cli-matrix-key-status"]')?.textContent,
     ).toBe('Saved');
     expect(
-      host.querySelector('[data-testid="cli-matrix-tier-summary"]')?.textContent?.trim(),
+      host
+        .querySelector('[data-testid="cli-matrix-tier-summary"]')
+        ?.textContent?.trim(),
     ).toBe('2 of 3 set');
-    expect(host.querySelector('[data-tier="opus"]')?.textContent).toBe('Opus: glm-4.6');
+    expect(host.querySelector('[data-tier="opus"]')?.textContent).toBe(
+      'Opus: glm-4.6',
+    );
     expect(host.querySelectorAll('[data-tier]')).toHaveLength(2);
   });
 
@@ -401,7 +419,7 @@ describe('LanesTableDetailComponent', () => {
     expect(
       host.querySelectorAll('[data-testid="cli-provider-popover-content"]'),
     ).toHaveLength(1);
-    fixture.componentRef.setInput('openKind', 'capabilities');
+    fixture.componentRef.setInput('openKind', null);
     fixture.detectChanges();
     expect(
       host.querySelectorAll('[data-testid="cli-provider-popover-content"]'),
@@ -422,7 +440,12 @@ describe('LanesTableDetailComponent', () => {
           useValue: {
             orchestration,
             commit: signal({
-              status: 'saved', saved: [], unsaved: [], unconfirmed: [], refreshFailed: false, message: null,
+              status: 'saved',
+              saved: [],
+              unsaved: [],
+              unconfirmed: [],
+              refreshFailed: false,
+              message: null,
             }),
             reviewContext: () => ({ scopeKey: 'workspace', activePath: '/ws' }),
             saveSettings,
@@ -432,7 +455,13 @@ describe('LanesTableDetailComponent', () => {
         SettingsSaveFeedbackService,
       ],
     });
-    const copilot = { ...row(), id: 'copilot', cli: 'copilot' as const, name: 'Copilot', codexStatusLine: null };
+    const copilot = {
+      ...row(),
+      id: 'copilot',
+      cli: 'copilot' as const,
+      name: 'Copilot',
+      codexStatusLine: null,
+    };
     const { fixture, host } = mount(copilot);
     const terms = Array.from(
       host.querySelectorAll('[data-testid="cli-provider-facts"] dt'),
@@ -441,7 +470,9 @@ describe('LanesTableDetailComponent', () => {
     const toggle = host.querySelector<HTMLInputElement>(
       '[data-testid="lane-detail-auto-approve"] [data-testid="copilot-auto-approve"]',
     )!;
-    expect(toggle.getAttribute('aria-label')).toBe('Auto-approve Copilot tool calls');
+    expect(toggle.getAttribute('aria-label')).toBe(
+      'Auto-approve Copilot tool calls',
+    );
     toggle.click();
     for (let i = 0; i < 8; i += 1) await Promise.resolve();
     fixture.detectChanges();

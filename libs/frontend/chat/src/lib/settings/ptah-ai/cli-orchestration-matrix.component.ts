@@ -42,6 +42,7 @@ import type { LaneTableRow } from './lanes-table.component';
 import { LanesAddMoreStripComponent } from './lanes-add-more-strip.component';
 import { savePreferredAgentOrder } from './preferred-agent-order-save';
 import { LanesSectionHeaderComponent } from './lanes-section-header.component';
+import { LanesMaxConcurrentComponent } from './lanes-max-concurrent.component';
 
 /**
  * #77: install copy per system CLI. Codex and Copilot keep the old "No CLI agents found" commands; the other four are
@@ -125,6 +126,7 @@ const SAVE_SCOPE = 'global';
     CliProviderGridComponent,
     LanesAddMoreStripComponent,
     LanesSectionHeaderComponent,
+    LanesMaxConcurrentComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
@@ -143,9 +145,12 @@ const SAVE_SCOPE = 'global';
           [editing]="orderMode()"
           [disabled]="busy() || !canWrite()"
           (editRequested)="orderMode.set(!orderMode())"
-          (addRequested)="openAdd('header')"
-        />
-        <ptah-agent-orchestration-config />
+        >
+          <ptah-lanes-max-concurrent controls />
+        </ptah-lanes-section-header>
+        @if (!orderMode()) {
+          <ptah-agent-orchestration-config />
+        }
 
         <div
           class="flex min-w-0 flex-col gap-[var(--ptah-gap-field)]"
@@ -202,7 +207,6 @@ const SAVE_SCOPE = 'global';
            aria-busy region, so a failed read is announced (TASK_2026_2256). -->
         <ng-content select="[read-states]" />
       </section>
-
     </div>
 
     <!-- Batch 32: centered modals on the shared native <dialog> (design-spec §6), in this lazy chunk. -->
@@ -223,9 +227,13 @@ const SAVE_SCOPE = 'global';
       display: block;
       min-width: 0;
       max-width: 100%;
+      container-type: inline-size;
     }
-    :host-context([data-glass='on']) [data-testid='settings-cli-matrix'] {
-      padding: 1.25rem;
+    /* Card inset: 0.75rem on a narrow card (design-spec "Card", 800px with nav). */
+    @container (max-width: 639px) {
+      [data-testid='settings-cli-matrix'] {
+        padding: 0.75rem;
+      }
     }
   `,
 })
@@ -285,7 +293,10 @@ export class CliOrchestrationMatrixComponent {
     ),
   );
   protected readonly tableRows = computed((): readonly LaneTableRow[] => [
-    ...this.rows().installed.map((row, index) => ({ ...row, order: index + 1 })),
+    ...this.rows().installed.map((row, index) => ({
+      ...row,
+      order: index + 1,
+    })),
     ...this.recoveryRows().map((row) => ({ ...row, order: undefined })),
   ]);
   protected readonly laneCounts = computed(() => ({

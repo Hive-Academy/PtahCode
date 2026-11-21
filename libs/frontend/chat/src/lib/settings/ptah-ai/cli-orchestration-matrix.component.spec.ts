@@ -394,7 +394,9 @@ describe('CliOrchestrationMatrixComponent', () => {
         row.getAttribute('data-testid'),
       );
     expect(
-      ids('ptah-lanes-table tbody[data-lanes-group="cli"] > tr[data-lane-kind]'),
+      ids(
+        'ptah-lanes-table tbody[data-lanes-group="cli"] > tr[data-lane-kind]',
+      ),
     ).toEqual([
       'cli-provider-card-codex',
       'cli-provider-card-antigravity',
@@ -403,7 +405,9 @@ describe('CliOrchestrationMatrixComponent', () => {
       'cli-provider-card-cursor',
     ]);
     expect(
-      ids('ptah-lanes-table tbody[data-lanes-group="ptah"] > tr[data-lane-kind]'),
+      ids(
+        'ptah-lanes-table tbody[data-lanes-group="ptah"] > tr[data-lane-kind]',
+      ),
     ).toEqual(['cli-matrix-row-glm-1']);
     // Global numbers run across both groups; the recovery row has none.
     const number = (testId: string) =>
@@ -412,9 +416,9 @@ describe('CliOrchestrationMatrixComponent', () => {
     expect(number('cli-matrix-row-glm-1')).toBe('3');
     expect(number('cli-provider-card-cursor')).toBe('—');
     // Not-installed CLIs leave the table for the strip; the keyless Cursor is not in the strip.
-    expect(ids('[data-testid="lanes-strip"] [data-testid^="cli-provider-card-"]')).toEqual([
-      'cli-provider-card-pi',
-    ]);
+    expect(
+      ids('[data-testid="lanes-strip"] [data-testid^="cli-provider-card-"]'),
+    ).toEqual(['cli-provider-card-pi']);
     expect(element().querySelectorAll('ptah-lanes-table')).toHaveLength(1);
     expect(q('ptah-cli-instances')).toBeNull();
     expect(q('ptah-cli-shared-defaults')).toBeNull();
@@ -427,15 +431,41 @@ describe('CliOrchestrationMatrixComponent', () => {
       By.css('ptah-lanes-section-header'),
     ).componentInstance as { total: () => number; enabled: () => number };
     expect(header.total()).toBe(6);
+    expect(
+      q('[data-testid="lanes-enabled-count"]')?.textContent?.trim(),
+    ).toMatch(/^\d+ of 6 enabled$/);
     // Strip CLIs are not counted.
     expect(q('[data-testid="lanes-strip-count"]')?.textContent).toBe('1');
   });
 
-  it('hides the strip in Reorder mode', () => {
+  it('hides the strip and the order line in Reorder mode', () => {
+    expect(q('ptah-agent-orchestration-config')).not.toBeNull();
     fixture.componentInstance['orderMode'].set(true);
     fixture.detectChanges();
     expect(q('[data-testid="lanes-strip"]')).toBeNull();
     expect(q('[data-testid="lanes-group-cli"]')).toBeNull();
+    expect(q('ptah-agent-orchestration-config')).toBeNull();
+  });
+
+  it('puts Max concurrent and Reorder in the card header, with no header Add (M-1, M-2)', () => {
+    const header = q('ptah-lanes-section-header');
+    expect(
+      header?.querySelector('ptah-lanes-max-concurrent #lanes-max-concurrent'),
+    ).not.toBeNull();
+    expect(
+      header
+        ?.querySelector('[data-testid="lanes-order-edit"]')
+        ?.textContent?.trim(),
+    ).toBe('Reorder');
+    expect(q('[data-testid="lanes-header-add-instance"]')).toBeNull();
+    q<HTMLButtonElement>('[data-testid="lanes-order-edit"]')?.click();
+    fixture.detectChanges();
+    expect(fixture.componentInstance['orderMode']()).toBe(true);
+    expect(
+      header
+        ?.querySelector('[data-testid="lanes-order-edit"]')
+        ?.getAttribute('aria-pressed'),
+    ).toBe('true');
   });
 
   it('keeps row facts, native behavior, capabilities and test result in the detail', () => {
@@ -456,14 +486,11 @@ describe('CliOrchestrationMatrixComponent', () => {
       ),
     ).not.toBeNull();
     expect(
-      detail?.querySelector(
-        '[data-testid="cli-matrix-test-result"]',
-      )?.textContent,
+      detail?.querySelector('[data-testid="cli-matrix-test-result"]')
+        ?.textContent,
     ).toContain('Not run yet');
     expect(button(detail, 'Info')).toBeFalsy();
-    expect(
-      q('#lane-detail-codex ptah-cli-provider-card-popovers'),
-    ).toBeNull();
+    expect(q('#lane-detail-codex ptah-cli-provider-card-popovers')).toBeNull();
     expect(
       detail?.querySelector('[data-lane-capabilities] button'),
     ).not.toBeNull();
@@ -588,7 +615,9 @@ describe('CliOrchestrationMatrixComponent', () => {
     await fixture.whenStable();
     expect(state.redetectClis).toHaveBeenCalledTimes(1);
     expect(q('[data-testid="lanes-strip"]')).toBeNull();
-    expect(q('ptah-lanes-table tr[data-testid="cli-provider-card-pi"]')).not.toBeNull();
+    expect(
+      q('ptah-lanes-table tr[data-testid="cli-provider-card-pi"]'),
+    ).not.toBeNull();
     expect(document.activeElement).toBe(
       q('[data-testid="cli-provider-card-pi"] input[type="checkbox"]'),
     );
@@ -615,13 +644,21 @@ describe('CliOrchestrationMatrixComponent', () => {
     fixture.detectChanges();
     const detail = q('#lane-detail-cursor');
     expect(detail?.hidden).toBe(false);
-    expect(detail?.querySelector('[data-popover-kind="credentials"]')).not.toBeNull();
-    expect(detail?.querySelector('[data-popover-kind="install"]')).not.toBeNull();
+    expect(
+      detail?.querySelector('[data-popover-kind="credentials"]'),
+    ).not.toBeNull();
+    expect(
+      detail?.querySelector('[data-popover-kind="install"]'),
+    ).not.toBeNull();
   });
 
   it('opens the add modal from the Ptah group header Add, the only Add control', () => {
-    expect(element().querySelectorAll('[data-testid="cli-matrix-add"]')).toHaveLength(1);
-    expect(q('[data-testid="lanes-group-ptah"] [data-testid="cli-matrix-add"]')).not.toBeNull();
+    expect(
+      element().querySelectorAll('[data-testid="cli-matrix-add"]'),
+    ).toHaveLength(1);
+    expect(
+      q('[data-testid="lanes-group-ptah"] [data-testid="cli-matrix-add"]'),
+    ).not.toBeNull();
     q<HTMLButtonElement>('[data-testid="cli-matrix-add"]')?.click();
     fixture.detectChanges();
     expect(

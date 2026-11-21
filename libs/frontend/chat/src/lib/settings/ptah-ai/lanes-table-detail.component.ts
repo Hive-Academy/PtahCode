@@ -6,7 +6,6 @@ import {
   effect,
   inject,
   input,
-  linkedSignal,
   output,
   signal,
   viewChildren,
@@ -142,18 +141,8 @@ export class LanesTableDetailComponent {
     const row = this.row();
     return row.kind === 'instance' ? row : null;
   });
-  /**
-   * The "All capabilities" disclosure. The table's route `showDetail(row, 'capabilities')`
-   * (kebab, until B3.7b) opens it; the user can also toggle it.
-   */
-  protected readonly capabilitiesOpen = linkedSignal<
-    CliProviderInfoKind | 'credentials' | null,
-    boolean
-  >({
-    source: this.openKind,
-    computation: (kind, previous) =>
-      kind === 'capabilities' ? true : (previous?.value ?? false),
-  });
+  /** The "All capabilities" disclosure (decision 20); the user toggles it. */
+  protected readonly capabilitiesOpen = signal(false);
   protected readonly capabilityFacts = computed(() =>
     cliCapabilityView(this.row().manifest).badges.map((badge) => ({
       key: badge.label,
