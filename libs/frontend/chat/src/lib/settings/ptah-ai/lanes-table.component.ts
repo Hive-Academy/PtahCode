@@ -458,8 +458,10 @@ export class LanesTableComponent {
   /** The Delete button in the detail footer that opened the inline confirm; Cancel returns focus to it. */
   private deleteOrigin: HTMLElement | null = null;
   protected requestDelete(row: LaneTableRow, event: Event): void {
-    const origin = event.target instanceof HTMLElement ? event.target : null;
-    this.deleteOrigin = origin?.closest<HTMLElement>('button') ?? origin;
+    // `currentTarget` is the bound footer button; `target` is its SVG icon when the click lands on the icon.
+    const origin =
+      event.currentTarget instanceof HTMLElement ? event.currentTarget : null;
+    this.deleteOrigin = origin;
     // After a confirmed delete, focus goes to the next row's actions trigger: capture from this row's trigger.
     const trigger = this.element.nativeElement.querySelector<HTMLElement>(
       `tr[data-testid="${row.kind === 'system' ? 'cli-provider-card-' : 'cli-matrix-row-'}${row.id}"] ptah-table-row-actions button[aria-haspopup="menu"]`,

@@ -733,6 +733,87 @@ describe('CliOrchestrationMatrixComponent', () => {
     expect(state.redetectClis).not.toHaveBeenCalled();
   });
 
+  it('reads no installed state from the previous snapshot while a lane read still runs (PR review D)', async () => {
+    const announce = jest.spyOn(feedback, 'announce');
+    q<HTMLButtonElement>('[data-testid="lanes-strip-install-pi"]')?.click();
+    fixture.detectChanges();
+    // A read that is not settled: `loading` with a snapshot that is not the result of this Re-detect.
+    state.onRedetect = () =>
+      state.orchestration.set({
+        status: 'loading',
+        data: {
+          ...ORCHESTRATION,
+          detectedClis: ORCHESTRATION.detectedClis.map((cli) =>
+            cli.cli === 'pi' ? detected('pi', true) : cli,
+          ),
+        },
+        error: null,
+      });
+    button(q('[data-testid="cli-provider-card-pi"]'), 'Re-detect')?.click();
+    await flush();
+    await fixture.whenStable();
+    expect(state.redetectClis).toHaveBeenCalledTimes(1);
+    expect(announce).toHaveBeenCalledWith(
+      'Detection ran, but the lane list could not be read. Try again.',
+      'alert',
+    );
+    expect(document.activeElement).not.toBe(
+      q('[data-testid="cli-provider-card-pi"] input[type="checkbox"]'),
+    );
+  });
+
+  it('moves focus into the row when Re-detect from the detail Install guide installs the lane (PR review E)', async () => {
+    openDetail('cursor');
+    q<HTMLButtonElement>('#lane-detail-cursor [data-popover-kind="install"]')?.click();
+    fixture.detectChanges();
+    const redetect = button(q('#lane-detail-cursor'), 'Re-detect')!;
+    redetect.focus();
+    state.onRedetect = () =>
+      state.orchestration.update((section) => ({
+        ...section,
+        data: {
+          ...ORCHESTRATION,
+          detectedClis: ORCHESTRATION.detectedClis.map((cli) =>
+            cli.cli === 'cursor' ? detected('cursor', true) : cli,
+          ),
+        },
+      }));
+    redetect.click();
+    await flush();
+    await fixture.whenStable();
+    // The detail drops its Install guide trigger and the guide; focus does not fall to body.
+    expect(redetect.isConnected).toBe(false);
+    expect(q('#lane-detail-cursor [data-popover-kind="install"]')).toBeNull();
+    expect(document.activeElement).toBe(
+      q('[data-testid="cli-provider-card-cursor"] input[type="checkbox"]'),
+    );
+  });
+
+  it('focuses the matrix region when the lane installed from the detail has no usable toggle (PR review E)', async () => {
+    state.scopes.set({ status: 'loading', data: null, error: null });
+    fixture.detectChanges();
+    openDetail('cursor');
+    q<HTMLButtonElement>('#lane-detail-cursor [data-popover-kind="install"]')?.click();
+    fixture.detectChanges();
+    const redetect = button(q('#lane-detail-cursor'), 'Re-detect')!;
+    redetect.focus();
+    state.onRedetect = () =>
+      state.orchestration.update((section) => ({
+        ...section,
+        data: {
+          ...ORCHESTRATION,
+          detectedClis: ORCHESTRATION.detectedClis.map((cli) =>
+            cli.cli === 'cursor' ? detected('cursor', true) : cli,
+          ),
+        },
+      }));
+    await fixture.componentInstance['redetectFromGuide']('cursor');
+    await flush();
+    await fixture.whenStable();
+    expect(redetect.isConnected).toBe(false);
+    expect(document.activeElement).toBe(q('[data-testid="cli-matrix"]'));
+  });
+
   it('focuses the matrix region when the found lane has no enabled toggle (finding 6)', async () => {
     state.scopes.set({ status: 'loading', data: null, error: null });
     q<HTMLButtonElement>('[data-testid="lanes-strip-install-pi"]')?.click();

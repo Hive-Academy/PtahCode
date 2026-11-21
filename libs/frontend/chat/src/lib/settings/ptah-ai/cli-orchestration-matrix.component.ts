@@ -320,6 +320,14 @@ export class CliOrchestrationMatrixComponent {
         ? 'Some lane data could not be loaded. Showing the lanes that could be read.'
         : null,
   );
+  /** Both lane sources (orchestration, Ptah CLI instance list) are ready with no missing field. */
+  private laneReadsComplete(): boolean {
+    return (
+      this.state.orchestration().status === 'ready' &&
+      this.state.cliAgents().status === 'ready' &&
+      this.rows().missing.length === 0
+    );
+  }
   protected async retryLanes(): Promise<void> {
     await Promise.all([
       this.state.refreshOrchestration(),
@@ -379,17 +387,25 @@ export class CliOrchestrationMatrixComponent {
     this.settleOrder(move, result === 'saved');
   }
   /**
-   * The announced position comes only from a verified refresh: the rows rank by the refreshed saved order. When the
-   * refresh after the write is incomplete (it dropped `preferredAgentOrder`, so the rows fall back to discovery
-   * order), no position is announced. When no move control of the row is usable then, focus goes to Done.
+   * The announced position comes only from a verified refresh: the rows rank by the refreshed saved order. No
+   * position is announced when the refresh after the write is incomplete (it dropped `preferredAgentOrder`, so the
+   * rows fall back to discovery order), when a lane source (orchestration, Ptah CLI instances) is not ready and
+   * complete, or when the numbered lanes are not the same lanes as before the move (the position would count a
+   * different list). When no move control of the row is usable then, focus goes to Done.
    */
   private settleOrder(move: LaneOrderMove, saved: boolean): void {
-    const verified = this.verifiedOrder() !== null;
+    const order = this.rows().installed.map((row) => row.id);
+    const announce =
+      saved &&
+      this.verifiedOrder() !== null &&
+      this.laneReadsComplete() &&
+      order.length === move.order.length &&
+      move.order.every((id) => order.includes(id));
     this.providerGrid()?.orderSettled({
       id: move.movedId,
       direction: move.direction,
-      saved: saved && verified,
-      order: verified ? this.rows().installed.map((row) => row.id) : [],
+      saved: announce,
+      order: announce ? order : [],
     });
     // Runs after the table's own focus return (registered first), so it only fills the gap it leaves.
     afterNextRender(
@@ -580,9 +596,16 @@ export class CliOrchestrationMatrixComponent {
       this.keepFocusAfterFailedRead();
       return;
     }
-    const installed = this.rows().installed.some(
-      (row) => row.kind === 'system' && row.id === rowId && row.installed,
-    );
+    // The lane reads of this Re-detect are done and current (`redetectClis` waits for a newer Retry). A read that
+    // still runs shows the previous snapshot: it gives no installed state.
+    const settled =
+      this.state.orchestration().status !== 'loading' &&
+      this.state.cliAgents().status !== 'loading';
+    const installed =
+      settled &&
+      this.rows().installed.some(
+        (row) => row.kind === 'system' && row.id === rowId && row.installed,
+      );
     if (installed) {
       this.providerGrid()?.closeGuide(rowId);
       this.addMoreStrip()?.closeGuide(rowId);
@@ -592,10 +615,7 @@ export class CliOrchestrationMatrixComponent {
       );
       return;
     }
-    const complete =
-      this.state.orchestration().status === 'ready' &&
-      this.state.cliAgents().status === 'ready' &&
-      this.rows().missing.length === 0;
+    const complete = this.laneReadsComplete();
     if (complete && this.rows().uninstalled.some((row) => row.id === rowId)) {
       this.feedback.announce(
         'Still not found. Check the step above, then try again.',

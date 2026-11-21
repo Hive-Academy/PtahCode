@@ -746,6 +746,41 @@ describe('CliOrchestrationMatrixComponent', () => {
     expect(document.activeElement).toBe(q('[data-testid="lanes-order-edit"]'));
   });
 
+  it.each([
+    [
+      'the Ptah CLI instance list is not ready',
+      () => state.cliAgents.set({ status: 'loading', data: [GLM], error: null }),
+    ],
+    [
+      'the Ptah CLI instance list is incomplete',
+      () => state.cliAgents.set(ready(Object.assign([GLM], { missingFields: ['cliAgents'] }))),
+    ],
+    [
+      'a lane joined the numbered lanes during the save',
+      () => state.cliAgents.set(ready([GLM, { ...GLM, id: 'glm-2', name: 'Glm two' }])),
+    ],
+    [
+      'a lane left the numbered lanes during the save',
+      () => state.cliAgents.set(ready([])),
+    ],
+  ])('announces no position after a saved move when %s (PR review C)', async (_name, change) => {
+    state.saveSettings.mockImplementation(async (patch: unknown) => {
+      const order = (patch as { orchestration: { preferredAgentOrder: string[] } })
+        .orchestration.preferredAgentOrder;
+      state.orchestration.set(ready({ ...ORCHESTRATION, preferredAgentOrder: order }));
+      change();
+      state.commit.set({ ...idle, status: 'saved' });
+      return true;
+    });
+    enterReorder();
+    q<HTMLButtonElement>('[data-testid="policy-order-down-codex"]')!.click();
+    await flush();
+    _render();
+    await fixture.whenStable();
+    expect(state.saveSettings).toHaveBeenCalledTimes(1);
+    expect(q('[data-testid="policy-order-live"]')?.textContent?.trim()).toBe('');
+  });
+
   it('restores focus with no move announcement when the order save fails (finding 5)', async () => {
     state.saveSettings.mockImplementation(async () => {
       state.commit.set({ ...idle, status: 'failed' });

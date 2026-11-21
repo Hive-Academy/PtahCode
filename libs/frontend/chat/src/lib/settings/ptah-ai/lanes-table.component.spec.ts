@@ -611,6 +611,26 @@ describe('LanesTableComponent', () => {
     expect(deleted).not.toHaveBeenCalled();
   });
 
+  it('returns focus to the footer Delete after Cancel when the click landed on its icon (PR review A)', async () => {
+    const { fixture, host } = await mount([instance('a')]);
+    expand(fixture, host, 'cli-matrix-row-a');
+    const remove = q(host, '[data-testid="cli-matrix-delete-a"]') as HTMLButtonElement;
+    // The event target is the SVG icon (not an HTMLElement); the handler is bound on the button.
+    const icon =
+      remove.querySelector('svg') ??
+      remove.appendChild(document.createElementNS('http://www.w3.org/2000/svg', 'svg'));
+    expect(icon).not.toBeInstanceOf(HTMLElement);
+    icon.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+    fixture.detectChanges();
+    const cancel = q(host, '[data-testid="lanes-delete-cancel-a"]') as HTMLButtonElement;
+    expect(cancel).not.toBeNull();
+    cancel.click();
+    fixture.detectChanges();
+    await Promise.resolve();
+    expect(q(host, 'ptah-inline-confirm')).toBeNull();
+    expect(document.activeElement).toBe(remove);
+  });
+
   it('drops the pending Delete confirmation when its detail closes', async () => {
     const { fixture, host } = await mount([instance('a')]);
     expand(fixture, host, 'cli-matrix-row-a');

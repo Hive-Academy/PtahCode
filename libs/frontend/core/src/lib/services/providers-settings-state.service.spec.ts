@@ -2387,6 +2387,44 @@ describe('ProvidersSettingsStateService', () => {
       expect(service.cliRedetecting()).toBe(false);
     });
 
+    it('waits for a newer lane read that supersedes its read-back (PR 1454 review D)', async () => {
+      const old = deferred<RpcResult<unknown>>();
+      const retry = deferred<RpcResult<unknown>>();
+      const pending = [old, retry];
+      handlers.set('agent:detectClis', async () => success({ clis: detected }));
+      handlers.set('agent:getConfig', () => {
+        const next = pending.shift();
+        if (!next) throw new Error('Unexpected read');
+        return next.promise;
+      });
+      handlers.set('ptahCli:list', async () => success({ agents: [] }));
+      handlers.set('settings:get', async () =>
+        success({ success: true, value: [] }),
+      );
+      let settled = false;
+      const run = service.redetectClis().then((ok) => {
+        settled = true;
+        return ok;
+      });
+      for (let i = 0; i < 10; i += 1) await Promise.resolve();
+      expect(pending).toHaveLength(1);
+      // The table's Retry starts a newer read: the read-back of the Re-detect publishes nothing.
+      const newer = service.refreshOrchestration();
+      old.resolve(success(fullConfig));
+      for (let i = 0; i < 10; i += 1) await Promise.resolve();
+      expect(service.orchestration().status).toBe('loading');
+      expect(settled).toBe(false);
+      expect(service.cliRedetecting()).toBe(true);
+      retry.resolve(success({ ...fullConfig, detectedClis: [] }));
+      await newer;
+      await expect(run).resolves.toBe(true);
+      expect(service.orchestration()).toMatchObject({
+        status: 'ready',
+        data: { detectedClis: [] },
+      });
+      expect(service.cliRedetecting()).toBe(false);
+    });
+
     it('rereads nothing when detection fails and reports it on cliDetection', async () => {
       handlers.set(
         'agent:detectClis',

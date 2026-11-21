@@ -18,12 +18,29 @@ describe('applyDisplayedAgentOrder', () => {
       'uninstalled', 'codex', 'pi', 'copilot',
     ]);
   });
-  it('keeps a later duplicate of a saved id at its index', () => {
+  /** The rows rank by the first occurrence of each id (`byPreferredOrder`). */
+  const ranked = (order: readonly string[], shown: readonly string[]) =>
+    [...new Set(order)].filter((id) => shown.includes(id));
+  it('moves the stale duplicates of displayed ids behind the displayed order', () => {
     const duplicateSaved = ['codex', 'uninstalled', 'codex', 'copilot', 'copilot', 'pi'];
-    expect(applyDisplayedAgentOrder(duplicateSaved, ['copilot', 'codex', 'pi'])).toEqual([
-      'copilot', 'uninstalled', 'codex', 'codex', 'copilot', 'pi',
-    ]);
+    const displayed = ['copilot', 'codex', 'pi'];
+    const order = applyDisplayedAgentOrder(duplicateSaved, displayed);
+    expect(order).toEqual(['copilot', 'uninstalled', 'codex', 'pi', 'codex', 'copilot']);
+    expect(ranked(order ?? [], displayed)).toEqual(displayed);
     expect(duplicateSaved).toEqual(['codex', 'uninstalled', 'codex', 'copilot', 'copilot', 'pi']);
+  });
+  it('does not let an earlier stale duplicate outrank the displayed order (PR review B)', () => {
+    const displayed = ['B', 'C', 'A'];
+    const order = applyDisplayedAgentOrder(['A', 'A', 'B', 'C'], displayed);
+    expect(order).toEqual(['B', 'C', 'A', 'A']);
+    expect(ranked(order ?? [], displayed)).toEqual(displayed);
+    // An undisplayed id keeps its slot between the duplicates.
+    expect(applyDisplayedAgentOrder(['A', 'x', 'A', 'B', 'C'], displayed)).toEqual([
+      'B', 'x', 'C', 'A', 'A',
+    ]);
+  });
+  it('writes nothing when a saved order with duplicates already ranks the displayed order', () => {
+    expect(applyDisplayedAgentOrder(['A', 'A', 'B', 'C'], ['A', 'B', 'C'])).toBeNull();
   });
   it('places a drag over two or more positions into the displayed slots', () => {
     expect(
