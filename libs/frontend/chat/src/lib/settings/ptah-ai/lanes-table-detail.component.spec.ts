@@ -9,6 +9,7 @@ import { ProvidersSettingsStateService } from '@ptah-extension/core';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import type { SystemCliMatrixRow } from './cli-matrix-rows';
 import { LanesTableDetailComponent } from './lanes-table-detail.component';
+import type { LaneTableRow } from './lanes-table.component';
 
 const row = (
   cli: 'codex' | 'cursor' = 'codex',
@@ -37,10 +38,26 @@ const row = (
   credentialAction: cli === 'cursor',
 });
 
+const instanceRow = () => ({
+  ...row(),
+  kind: 'instance' as const,
+  providerId: 'local',
+  provider: 'Local provider',
+  effort: '' as const,
+  keyStatus: { kind: 'missing' as const, label: 'No key' },
+  tiers: [],
+  selectedModel: null,
+  lastTest: null,
+  runtimeStatus: null,
+});
+
+const LONG_NATIVE =
+  'Asks before each edit and each shell command; a parent session in Plan Mode caps spawned lanes to Plan.';
+
 @Component({
   imports: [LanesTableDetailComponent, PtahButtonDirective],
   template: `<ptah-lanes-table-detail [row]="instance">
-    <span laneActions>
+    <span footer-actions>
       <button type="button" ptahButton variant="ghost" size="sm">Edit</button>
       <button type="button" ptahButton variant="ghost" size="sm" tone="danger">
         Delete
@@ -49,43 +66,74 @@ const row = (
   </ptah-lanes-table-detail>`,
 })
 class InstanceDetailHost {
-  readonly instance = {
-    ...row(),
-    kind: 'instance' as const,
-    providerId: 'local',
-    keyStatus: null,
-    tiers: [],
-    selectedModel: null,
-    lastTest: null,
-    runtimeStatus: null,
-  };
+  readonly instance = instanceRow();
 }
 
 describe('LanesTableDetailComponent', () => {
-  function mount(value = row()) {
+  function mount(value: LaneTableRow = row()) {
     const fixture = TestBed.createComponent(LanesTableDetailComponent);
     fixture.componentRef.setInput('row', value);
     fixture.detectChanges();
     return { fixture, host: fixture.nativeElement as HTMLElement };
   }
 
-  it('shows version, executable, provider and native permission facts', () => {
+  it('shows provider, executable and the native behavior inline (decision 13)', () => {
     const { host } = mount();
     const facts = host.querySelector(
       'ptah-description-list[data-testid="cli-provider-facts"]',
     );
     expect(facts?.getAttribute('aria-label')).toBe('Codex details');
-    expect(facts?.textContent).toContain('v1.2.3');
     expect(facts?.textContent).toContain('Executable found');
+    expect(facts?.textContent).toContain('Provider');
     expect(facts?.textContent).toContain('CLI');
-    expect(facts?.textContent).toContain('Native CLI behavior');
+    expect(facts?.textContent).toContain('Native behavior');
+    expect(
+      host.querySelector('[data-testid="lane-detail-native"]')?.textContent,
+    ).toBe('Ask before edits');
+    // Info-only facts are text, not buttons; no info popover trigger is left.
+    expect(host.querySelector('[data-popover-kind="permission"]')).toBeNull();
+    expect(host.querySelector('[data-popover-kind="info"]')).toBeNull();
+    expect(host.querySelector('[data-popover-kind="capabilities"]')).toBeNull();
+    expect(host.querySelector('[data-testid="lane-detail-native-more"]')).toBeNull();
   });
 
-  it('groups Test and its existing result in the single actions row', () => {
+  it('repeats none of the row values: version, model, permission, network, enabled', () => {
+    const { host } = mount();
+    const facts = host.querySelector('[data-testid="cli-provider-facts"]');
+    const terms = Array.from(facts?.querySelectorAll('dt') ?? []).map((dt) =>
+      dt.textContent?.trim(),
+    );
+    expect(terms).toEqual(['Provider', 'Executable', 'Native behavior']);
+    expect(facts?.textContent).not.toContain('v1.2.3');
+    expect(host.textContent).not.toContain('Enabled');
+  });
+
+  it('clamps a long native behavior to one line with More / Less', () => {
+    const { fixture, host } = mount({
+      ...row(),
+      permission: { badge: 'Ask', detail: LONG_NATIVE, tone: 'info' },
+    });
+    const text = host.querySelector('[data-testid="lane-detail-native"]')!;
+    const more = host.querySelector<HTMLButtonElement>(
+      '[data-testid="lane-detail-native-more"]',
+    )!;
+    expect(text.classList.contains('lane-detail-clamp')).toBe(true);
+    expect(more.textContent?.trim()).toBe('More');
+    expect(more.getAttribute('aria-expanded')).toBe('false');
+    expect(more.getAttribute('aria-controls')).toBe(text.id);
+    more.click();
+    fixture.detectChanges();
+    expect(text.classList.contains('lane-detail-clamp')).toBe(false);
+    expect(more.textContent?.trim()).toBe('Less');
+    expect(more.getAttribute('aria-expanded')).toBe('true');
+  });
+
+  it('groups Test and its result on the left of the footer, the actions on the right', () => {
     const { fixture, host } = mount();
     fixture.componentRef.setInput('testResult', 'Detected v1.2.3');
     fixture.detectChanges();
     const actions = host.querySelector('[ptahDetailActions]');
+    expect(actions?.getAttribute('data-testid')).toBe('lane-detail-footer');
     expect(actions?.children).toHaveLength(2);
     expect(actions?.firstElementChild?.classList.contains('test-action')).toBe(
       true,
@@ -108,30 +156,30 @@ describe('LanesTableDetailComponent', () => {
     ).toHaveLength(1);
   });
 
-  it('uses wide slots and keeps action order and size consistent', () => {
+  it('shows Running… while a test runs', () => {
+    const { fixture, host } = mount();
+    fixture.componentRef.setInput('testing', true);
+    fixture.detectChanges();
+    expect(
+      host.querySelector('[data-testid="cli-matrix-test-result"]')?.textContent,
+    ).toBe('Running…');
+  });
+
+  it('uses wide slots and keeps only real actions in the footer', () => {
     const { host } = mount();
     expect(
       host.querySelector('ptah-table-detail-layout')?.getAttribute('data-mode'),
     ).toBe('wide');
     expect(host.querySelectorAll('ptah-description-list')).toHaveLength(1);
-    expect(host.querySelector('[ptahDetailChips]')).not.toBeNull();
     const layout = host.querySelector('ptah-table-detail-layout');
-    expect(
-      host.querySelector('[ptahDetailFacts]')?.parentElement?.parentElement,
-    ).toBe(layout);
-    expect(
-      host.querySelector('[ptahDetailChips]')?.parentElement?.parentElement,
-    ).toBe(layout);
-    expect(
-      host.querySelector('[ptahDetailActions]')?.parentElement?.parentElement,
-    ).toBe(layout);
+    for (const slot of ['[ptahDetailFacts]', '[ptahDetailChips]', '[ptahDetailActions]']) {
+      expect(host.querySelector(slot)?.parentElement?.parentElement).toBe(layout);
+    }
     const actions = Array.from(
       host.querySelectorAll('[ptahDetailActions] button'),
     );
     expect(actions.map((button) => button.textContent?.trim())).toEqual([
       'Test',
-      'All capabilities',
-      'Info',
       'Codex settings',
     ]);
     expect(
@@ -142,34 +190,50 @@ describe('LanesTableDetailComponent', () => {
     expect(status?.previousElementSibling?.textContent?.trim()).toBe('Test');
   });
 
-  it('opens name-only capability chips with values in the shared popover', () => {
-    const { fixture, host } = mount();
-    const chips = Array.from(
-      host.querySelectorAll<HTMLButtonElement>('[data-capability]'),
-    );
-    expect(chips.map((chip) => chip.textContent?.trim())).toEqual([
+  it('shows the capability facts inline with icon, label and value (no chip popover)', () => {
+    const { host } = mount();
+    const facts = host.querySelector('[data-testid="cli-capability-summary"]')!;
+    const terms = Array.from(facts.querySelectorAll('dt'));
+    expect(terms.map((dt) => dt.textContent?.trim())).toEqual([
       'Messaging',
-      'Permission',
+      'Permission modes',
       'Network',
       'MCP',
       'Limit',
     ]);
-    expect(chips.every((chip) => chip.type === 'button')).toBe(true);
-    chips[0].focus();
-    expect(document.activeElement).toBe(chips[0]);
-    chips[0].click();
-    fixture.detectChanges();
-    expect(chips[0].getAttribute('aria-expanded')).toBe('true');
+    expect(terms.every((dt) => dt.querySelector('lucide-angular[aria-hidden="true"]'))).toBe(true);
     expect(
-      host.querySelector('#lane-capability-codex-Messaging')?.textContent,
-    ).toContain('Unverified');
-    chips[1].click();
-    fixture.detectChanges();
-    expect(chips[0].getAttribute('aria-expanded')).toBe('false');
-    expect(chips[1].getAttribute('aria-expanded')).toBe('true');
-    chips[1].click();
-    fixture.detectChanges();
+      Array.from(facts.querySelectorAll('dd')).map((dd) => dd.textContent?.trim()),
+    ).toEqual(['Unverified', 'Unverified', 'Unverified', 'Unverified', 'Unverified']);
+    expect(facts.querySelector('button')).toBeNull();
     expect(host.querySelector('.capability-value')).toBeNull();
+  });
+
+  it('renders All capabilities as an inline disclosure, not a popover (decision 20)', () => {
+    const { fixture, host } = mount();
+    const disclosure = host.querySelector('ptah-disclosure[data-lane-capabilities]')!;
+    const toggle = disclosure.querySelector<HTMLButtonElement>('button')!;
+    expect(toggle.textContent).toContain('All capabilities');
+    expect(toggle.getAttribute('aria-expanded')).toBe('false');
+    toggle.click();
+    fixture.detectChanges();
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    const detail = disclosure.querySelector('[data-testid="cli-capability-detail"]');
+    expect(detail?.textContent).toContain('Messaging');
+    expect(detail?.closest('ptah-native-popover')).toBeNull();
+    expect(host.querySelector('[data-testid="cli-provider-popover-content"]')).toBeNull();
+  });
+
+  it('opens the All capabilities disclosure for the open kind capabilities (kebab route)', () => {
+    const { fixture, host } = mount();
+    fixture.componentRef.setInput('openKind', 'capabilities');
+    fixture.detectChanges();
+    expect(
+      host
+        .querySelector('[data-lane-capabilities] button')
+        ?.getAttribute('aria-expanded'),
+    ).toBe('true');
+    expect(host.querySelector('[data-testid="cli-provider-popover-content"]')).toBeNull();
   });
 
   it('places destructive Delete last after the instance actions', () => {
@@ -181,7 +245,6 @@ describe('LanesTableDetailComponent', () => {
     );
     expect(buttons.map((button) => button.textContent?.trim())).toEqual([
       'Test',
-      'All capabilities',
       'Edit tiers',
       'Edit',
       'Delete',
@@ -274,17 +337,8 @@ describe('LanesTableDetailComponent', () => {
     expect(emit).toHaveBeenCalledWith('cursor');
   });
 
-  it('emits Edit tiers for an instance', () => {
-    const instance = {
-      ...row(),
-      kind: 'instance' as const,
-      providerId: 'local',
-      keyStatus: null,
-      tiers: [],
-      selectedModel: null,
-      lastTest: null,
-      runtimeStatus: null,
-    };
+  it('emits Edit tiers for an instance and shows no Provider fact (decision 13)', () => {
+    const instance = instanceRow();
     const { fixture, host } = mount(instance);
     const emit = jest.fn();
     fixture.componentInstance.tiers.subscribe(emit);
@@ -297,42 +351,52 @@ describe('LanesTableDetailComponent', () => {
     );
     expect(summary?.textContent?.trim()).toBe('0 of 3 set');
     expect(summary?.parentElement?.textContent).not.toContain('No tier models');
-    expect(
-      host
-        .querySelector('.quiet-actions')
-        ?.contains(host.querySelector('[data-popover-kind="capabilities"]')),
-    ).toBe(true);
+    const facts = host.querySelector('[data-testid="cli-provider-facts"]');
+    expect(facts?.textContent).not.toContain('Provider');
+    expect(facts?.textContent).not.toContain('Local provider');
+    expect(facts?.textContent).toContain('Tier models');
   });
 
-  it('opens rich capabilities for an instance row', () => {
-    const instance = {
-      ...row(),
-      kind: 'instance' as const,
-      providerId: 'local',
-      keyStatus: null,
-      tiers: [],
-      selectedModel: null,
-      lastTest: null,
-      runtimeStatus: null,
-    };
-    const { fixture, host } = mount(instance);
+  it('shows the key status and one line per tier for an instance', () => {
+    const { host } = mount({
+      ...instanceRow(),
+      keyStatus: { kind: 'key-set', label: 'Saved' },
+      tiers: [
+        { tier: 'opus', label: 'Opus', model: 'glm-4.6' },
+        { tier: 'haiku', label: 'Haiku', model: 'glm-4.5-air' },
+      ],
+    });
+    expect(
+      host.querySelector('[data-testid="cli-matrix-key-status"]')?.textContent,
+    ).toBe('Saved');
+    expect(
+      host.querySelector('[data-testid="cli-matrix-tier-summary"]')?.textContent?.trim(),
+    ).toBe('2 of 3 set');
+    expect(host.querySelector('[data-tier="opus"]')?.textContent).toBe('Opus: glm-4.6');
+    expect(host.querySelectorAll('[data-tier]')).toHaveLength(2);
+  });
+
+  it('shows the instance capabilities in the inline disclosure', () => {
+    const { fixture, host } = mount(instanceRow());
     const emit = jest.fn();
     fixture.componentInstance.kindToggled.subscribe(emit);
     host
-      .querySelector<HTMLButtonElement>('[data-popover-kind="capabilities"]')
+      .querySelector<HTMLButtonElement>('[data-lane-capabilities] button')
       ?.click();
-    expect(emit).toHaveBeenCalledWith('capabilities');
-    fixture.componentRef.setInput('openKind', 'capabilities');
     fixture.detectChanges();
-    const content = host.querySelector('#instance-capabilities-codex');
+    expect(emit).not.toHaveBeenCalled();
+    const content = host.querySelector(
+      '[data-lane-capabilities] [data-testid="cli-capability-detail"]',
+    );
     expect(content?.textContent).toContain('Messaging');
-    expect(content?.textContent).toContain('Permission');
+    expect(content?.textContent).toContain('Permissions');
     expect(content?.textContent).toContain('Unverified');
+    expect(host.querySelector('[data-popover-kind="capabilities"]')).toBeNull();
   });
 
-  it('has only one open popover at a time', () => {
-    const { fixture, host } = mount();
-    fixture.componentRef.setInput('openKind', 'info');
+  it('has at most one open popover: the install guide', () => {
+    const { fixture, host } = mount(row('cursor', false));
+    fixture.componentRef.setInput('openKind', 'install');
     fixture.detectChanges();
     expect(
       host.querySelectorAll('[data-testid="cli-provider-popover-content"]'),
@@ -341,6 +405,57 @@ describe('LanesTableDetailComponent', () => {
     fixture.detectChanges();
     expect(
       host.querySelectorAll('[data-testid="cli-provider-popover-content"]'),
-    ).toHaveLength(1);
+    ).toHaveLength(0);
+  });
+
+  it('shows the Copilot auto-approve switch row; a flip writes copilotAutoApprove (P-66)', async () => {
+    const saveSettings = jest.fn(async () => true);
+    const orchestration = signal({
+      status: 'ready',
+      data: { copilotAutoApprove: false },
+      error: null,
+    });
+    TestBed.configureTestingModule({
+      providers: [
+        {
+          provide: ProvidersSettingsStateService,
+          useValue: {
+            orchestration,
+            commit: signal({
+              status: 'saved', saved: [], unsaved: [], unconfirmed: [], refreshFailed: false, message: null,
+            }),
+            reviewContext: () => ({ scopeKey: 'workspace', activePath: '/ws' }),
+            saveSettings,
+            refreshOrchestration: jest.fn(async () => undefined),
+          },
+        },
+        SettingsSaveFeedbackService,
+      ],
+    });
+    const copilot = { ...row(), id: 'copilot', cli: 'copilot' as const, name: 'Copilot', codexStatusLine: null };
+    const { fixture, host } = mount(copilot);
+    const terms = Array.from(
+      host.querySelectorAll('[data-testid="cli-provider-facts"] dt'),
+    ).map((dt) => dt.textContent?.trim());
+    expect(terms).toContain('Auto-approve');
+    const toggle = host.querySelector<HTMLInputElement>(
+      '[data-testid="lane-detail-auto-approve"] [data-testid="copilot-auto-approve"]',
+    )!;
+    expect(toggle.getAttribute('aria-label')).toBe('Auto-approve Copilot tool calls');
+    toggle.click();
+    for (let i = 0; i < 8; i += 1) await Promise.resolve();
+    fixture.detectChanges();
+    expect(saveSettings).toHaveBeenCalledWith(
+      { orchestration: { copilotAutoApprove: true } },
+      { scopeKey: 'workspace', activePath: '/ws' },
+    );
+    // The toast, Undo and read-back rules of this write: copilot-auto-approve-toggle.component.spec.ts.
+    TestBed.inject(SettingsSaveFeedbackService).dismiss();
+  });
+
+  it('shows no auto-approve row for other CLIs', () => {
+    expect(
+      mount().host.querySelector('[data-testid="lane-detail-auto-approve"]'),
+    ).toBeNull();
   });
 });

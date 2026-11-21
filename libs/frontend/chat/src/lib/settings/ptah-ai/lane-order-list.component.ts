@@ -7,7 +7,6 @@ import {
   inject,
   input,
   output,
-  signal,
 } from '@angular/core';
 import {
   ChevronDown,
@@ -16,6 +15,11 @@ import {
   LucideAngularModule,
 } from 'lucide-angular';
 import { PtahIconButtonDirective } from '@ptah-extension/ui';
+import {
+  LaneOrderDrag,
+  type LaneOrderDirection,
+  type LaneOrderMove,
+} from './lane-order-drag';
 
 /** One entry of the preferred lane order: an installed system CLI or a Ptah CLI instance. */
 export interface LaneOrderChip {
@@ -24,14 +28,8 @@ export interface LaneOrderChip {
   readonly enabled: boolean;
 }
 
-export type LaneOrderDirection = 'up' | 'down';
-
-/** One requested move: the whole new order, the id that moved and the way it went. */
-export interface LaneOrderMove {
-  readonly order: string[];
-  readonly movedId: string;
-  readonly direction: LaneOrderDirection;
-}
+// Re-exported for the callers of this file until the list is deleted (B3.10).
+export type { LaneOrderDirection, LaneOrderMove } from './lane-order-drag';
 
 /**
  * The editable preferred lane order (inside the order popover of `ptah-agent-orchestration-config`).
@@ -60,19 +58,19 @@ export interface LaneOrderMove {
           class="relative flex items-center gap-[var(--ptah-gap-label)] text-xs"
           [attr.draggable]="canReorder() ? 'true' : 'false'"
           [attr.data-testid]="'policy-order-row-' + chip.id"
-          (dragstart)="startDrag($event, i)"
-          (dragover)="dragOver($event, i)"
-          (drop)="drop($event)"
-          (dragend)="endDrag()"
+          (dragstart)="drag.startDrag($event, i)"
+          (dragover)="drag.dragOver($event, i)"
+          (drop)="drag.drop($event)"
+          (dragend)="drag.endDrag()"
         >
-          @if (dropIndex() === i) {
+          @if (drag.dropIndex() === i) {
             <div
               class="pointer-events-none absolute inset-x-0 top-0 h-0.5 rounded bg-primary"
               aria-hidden="true"
               data-testid="policy-order-drop-indicator"
             ></div>
           }
-          @if (last && dropIndex() === chips().length) {
+          @if (last && drag.dropIndex() === chips().length) {
             <div
               class="pointer-events-none absolute inset-x-0 bottom-0 h-0.5 rounded bg-primary"
               aria-hidden="true"
@@ -103,7 +101,7 @@ export interface LaneOrderMove {
             [busy]="!canReorder()"
             [label]="'Move ' + chip.name + ' up'"
             [attr.data-testid]="'policy-order-up-' + chip.id"
-            (click)="moveUp(i)"
+            (click)="drag.moveUp(i)"
           >
             <lucide-angular
               [img]="UpIcon"
@@ -118,7 +116,7 @@ export interface LaneOrderMove {
             [busy]="!canReorder()"
             [label]="'Move ' + chip.name + ' down'"
             [attr.data-testid]="'policy-order-down-' + chip.id"
-            (click)="moveDown(i)"
+            (click)="drag.moveDown(i)"
           >
             <lucide-angular
               [img]="DownIcon"
@@ -142,7 +140,7 @@ export interface LaneOrderMove {
       aria-atomic="true"
       data-testid="policy-order-live"
     >
-      {{ announcement() }}
+      {{ drag.announcement() }}
     </p>
   `,
 })
@@ -161,103 +159,35 @@ export class LaneOrderListComponent {
   private readonly element = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly injector = inject(Injector);
 
-  /** The text of the polite live region (set after a move settles). */
-  protected readonly announcement = signal('');
-  /** Insertion index (0..length) under the dragged row, or `null` when a drop changes nothing. */
-  protected readonly dropIndex = signal<number | null>(null);
-  private dragFrom: number | null = null;
-  /** The row that moved and where it was, so `settled()` can tell whether the order changed. */
-  private pending: { id: string; from: number } | null = null;
-
-  protected moveUp(index: number): void {
-    if (index <= 0) return;
-    this.request(index, index - 1);
-  }
-
-  protected moveDown(index: number): void {
-    if (index >= this.chips().length - 1) return;
-    this.request(index, index + 1);
-  }
-
-  protected startDrag(event: DragEvent, index: number): void {
-    if (!this.canReorder()) {
-      event.preventDefault();
-      return;
-    }
-    this.dragFrom = index;
-    if (event.dataTransfer) {
-      event.dataTransfer.effectAllowed = 'move';
-      event.dataTransfer.setData('text/plain', this.chips()[index].id);
-    }
-  }
-
-  protected dragOver(event: DragEvent, index: number): void {
-    const from = this.dragFrom;
-    if (from === null) return;
-    event.preventDefault();
-    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
-    const row = event.currentTarget as HTMLElement;
-    const rect = row.getBoundingClientRect();
-    const target =
-      event.clientY < rect.top + rect.height / 2 ? index : index + 1;
-    // Before or after the dragged row itself is no move: no indicator.
-    this.dropIndex.set(target === from || target === from + 1 ? null : target);
-  }
-
-  protected drop(event: DragEvent): void {
-    event.preventDefault();
-    const from = this.dragFrom,
-      target = this.dropIndex();
-    this.endDrag();
-    if (from === null || target === null) return;
-    this.request(from, target > from ? target - 1 : target);
-  }
-
-  protected endDrag(): void {
-    this.dragFrom = null;
-    this.dropIndex.set(null);
-  }
+  /** The move and drag logic; the template binds its rows to it. */
+  protected readonly drag = new LaneOrderDrag({
+    ids: () => this.chips().map((chip) => chip.id),
+    name: (id) => this.chips().find((chip) => chip.id === id)?.name ?? id,
+    canReorder: () => this.canReorder(),
+    move: (move) => this.reorder.emit(move),
+  });
 
   /**
    * Called by the host once the save of a move ends. The rows show the read-back order: focus returns to the moved
    * row's button used (or its other one at an end), and the new position is announced only when the row moved.
    */
   settled(id: string, direction: LaneOrderDirection): void {
-    const pending = this.pending;
-    this.pending = null;
-    const chips = this.chips();
-    const index = chips.findIndex((chip) => chip.id === id);
-    if (pending?.id === id && index >= 0 && index !== pending.from)
-      this.announcement.set(
-        `${chips[index].name} moved to position ${index + 1} of ${chips.length}`,
-      );
-    afterNextRender(
-      () => {
-        const other = direction === 'up' ? 'down' : 'up';
-        const host = this.element.nativeElement;
-        [direction, other]
-          .map((which) =>
-            host.querySelector<HTMLButtonElement>(
-              `[data-testid="policy-order-${which}-${id}"]`,
-            ),
-          )
-          .find((button) => button && !button.disabled)
-          ?.focus();
-      },
-      { injector: this.injector },
+    this.drag.settled(id, direction, () =>
+      afterNextRender(
+        () => {
+          const other = direction === 'up' ? 'down' : 'up';
+          const host = this.element.nativeElement;
+          [direction, other]
+            .map((which) =>
+              host.querySelector<HTMLButtonElement>(
+                `[data-testid="policy-order-${which}-${id}"]`,
+              ),
+            )
+            .find((button) => button && !button.disabled)
+            ?.focus();
+        },
+        { injector: this.injector },
+      ),
     );
-  }
-
-  private request(from: number, to: number): void {
-    if (from === to || !this.canReorder()) return;
-    const order = this.chips().map((chip) => chip.id);
-    const [movedId] = order.splice(from, 1);
-    order.splice(to, 0, movedId);
-    this.pending = { id: movedId, from };
-    this.reorder.emit({
-      order,
-      movedId,
-      direction: to < from ? 'up' : 'down',
-    });
   }
 }

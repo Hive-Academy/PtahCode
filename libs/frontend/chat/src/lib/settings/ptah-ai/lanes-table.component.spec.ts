@@ -1,17 +1,20 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { CliLaneDefaultCellComponent } from './cli-lane-default-cell.component';
 import {
   PTAH_CLI_PERMISSION_CAPABILITIES,
   type CliAdapterManifest,
 } from '@ptah-extension/shared';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
-import { ChangeDetectorRef, Component, input, output } from '@angular/core';
+import { ChangeDetectorRef, Component, input, output, signal } from '@angular/core';
+import { ProvidersSettingsStateService } from '@ptah-extension/core';
+import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import { By } from '@angular/platform-browser';
-import {
-  PtahTableComponent,
-  PtahTableOrderButtonsComponent,
-} from '@ptah-extension/ui';
+import { PtahTableComponent } from '@ptah-extension/ui';
 import { CliModelEffortPopoverComponent } from './cli-model-effort-popover.component';
 import type { CliMatrixCellField, CliMatrixRow } from './cli-matrix-rows';
+import { LaneModelEffortCellComponent } from './lane-model-effort-cell.component';
+import { LanesRedetectButtonComponent } from './lanes-redetect-button.component';
 import {
   LanesTableComponent,
   type LaneTableRow,
@@ -26,6 +29,16 @@ class StubModelEffortPopoverComponent {
   readonly row = input.required<CliMatrixRow>();
   readonly field = input.required<CliMatrixCellField>();
   readonly closed = output<void>();
+}
+
+/** The CLI group header's Re-detect needs the settings state; its own spec covers it. */
+@Component({
+  selector: 'ptah-lanes-redetect-button',
+  standalone: true,
+  template: '<button type="button" [attr.data-testid]="testId()">Re-detect CLIs</button>',
+})
+class StubRedetectButtonComponent {
+  readonly testId = input('policy-redetect');
 }
 
 const instance = (
@@ -83,6 +96,31 @@ const uninstalled = (id: 'codex' | 'copilot'): LaneTableRow =>
     status: { kind: 'not-installed', label: 'Not installed', tone: 'neutral' },
   });
 
+const keylessCursor = (): LaneTableRow =>
+  ({
+    ...system('codex'),
+    id: 'cursor',
+    cli: 'cursor',
+    name: 'Cursor',
+    installed: false,
+    enabled: false,
+    interactive: false,
+    version: null,
+    versionLabel: null,
+    credentialAction: true,
+    model: { key: 'cursorModel', value: '' },
+    status: { kind: 'needs-key', label: 'Needs API key', tone: 'warning' },
+  }) as LaneTableRow;
+
+const expand = (
+  fixture: ComponentFixture<LanesTableComponent>,
+  host: HTMLElement,
+  testId: string,
+): void => {
+  q(host, `[data-testid="${testId}"] ptah-table-row-expander button`)?.click();
+  fixture.detectChanges();
+};
+
 async function mount(
   rows: readonly LaneTableRow[],
   orderMode = false,
@@ -93,9 +131,13 @@ async function mount(
   await TestBed.configureTestingModule({
     imports: [LanesTableComponent],
   })
-    .overrideComponent(LanesTableComponent, {
+    .overrideComponent(LaneModelEffortCellComponent, {
       remove: { imports: [CliModelEffortPopoverComponent] },
       add: { imports: [StubModelEffortPopoverComponent] },
+    })
+    .overrideComponent(LanesTableComponent, {
+      remove: { imports: [LanesRedetectButtonComponent] },
+      add: { imports: [StubRedetectButtonComponent] },
     })
     .compileComponents();
   const fixture = TestBed.createComponent(LanesTableComponent);
@@ -210,8 +252,11 @@ describe('LanesTableComponent', () => {
     });
     fixture.detectChanges();
     const reset = q(host, '[data-testid="lanes-detail-reset-default"]');
-    expect(reset?.textContent?.trim()).toBe('Reset to default');
+    // Icon-only RotateCcw in the detail footer; the value is in the label and tooltip.
+    expect(reset?.getAttribute('aria-label')).toBe('Reset to default');
+    expect(reset?.textContent?.trim()).toBe('');
     expect(reset?.closest('.quiet-actions')).not.toBeNull();
+    expect(reset?.closest('[data-testid="lane-detail-footer"]')).not.toBeNull();
     reset?.click();
     expect(resetRequested).toHaveBeenLastCalledWith(codex);
     narrow(fixture);
@@ -498,62 +543,56 @@ describe('LanesTableComponent', () => {
     expect(tested).toHaveBeenCalledWith(row);
   });
 
-  it('emits edit, delete and capabilities from the actions menu', async () => {
+  it('keeps only Test in the instance kebab (decision 23); Edit and Delete are in the detail footer', async () => {
     const row = instance('a');
     const { fixture, host } = await mount([row]);
     const edit = jest.fn();
     const del = jest.fn();
-    const caps = jest.fn();
     fixture.componentInstance.edit.subscribe(edit);
     fixture.componentInstance.delete.subscribe(del);
-    fixture.componentInstance.capabilities.subscribe(caps);
-
-    const open = () => {
-      const trigger = q(
-        host,
-        '[aria-label="More actions for Lane a"]',
-      ) as HTMLButtonElement;
-      trigger.click();
-      fixture.detectChanges();
-      expect(trigger.getAttribute('aria-expanded')).toBe('true');
-      expect(q(host, 'ptah-table-row-actions [role="menu"]')).not.toBeNull();
-    };
-    open();
-    expect(q(host, '[data-testid="cli-matrix-edit-a"]')).not.toBeNull();
+    const trigger = q(host, '[aria-label="More actions for Lane a"]') as HTMLButtonElement;
+    trigger.click();
     fixture.detectChanges();
-    q(host, '[data-testid="cli-matrix-edit-a"]')?.click();
-    open();
-    q(host, '[data-testid="cli-matrix-delete-a"]')?.click();
+    const items = Array.from(
+      host.querySelectorAll('ptah-table-row-actions [role="menuitem"]'),
+    ).map((item) => item.textContent?.trim());
+    expect(items).toEqual(['Test']);
+    expect(q(host, 'ptah-table-row-actions [data-testid="cli-matrix-edit-a"]')).toBeNull();
+    trigger.click();
+    fixture.detectChanges();
+    expand(fixture, host, 'cli-matrix-row-a');
+    const footer = q(host, '#lane-detail-a [data-testid="lane-detail-footer"]')!;
+    expect(footer.querySelector('[data-testid="cli-matrix-tiers-a"]')).not.toBeNull();
+    (footer.querySelector('[data-testid="cli-matrix-edit-a"]') as HTMLButtonElement).click();
+    (footer.querySelector('[data-testid="cli-matrix-delete-a"]') as HTMLButtonElement).click();
     fixture.detectChanges();
     expect(q(host, 'ptah-inline-confirm')).not.toBeNull();
-    const confirm = q(host, 'ptah-inline-confirm button') as HTMLButtonElement;
-    confirm.click();
+    (q(host, 'ptah-inline-confirm button') as HTMLButtonElement).click();
     fixture.detectChanges();
-    open();
-    const all = Array.from(host.querySelectorAll<HTMLElement>('button')).find(
-      (b) => b.textContent?.trim() === 'All capabilities',
-    );
-    all?.click();
-
     expect(edit).toHaveBeenCalledWith(row);
     expect(del).toHaveBeenCalledWith(row);
-    expect(caps).toHaveBeenCalledWith(row);
   });
 
-  it('cancels Delete and returns focus to the row actions trigger', async () => {
+  it('keeps Test and Sign in in the kebab of a row that needs a key', async () => {
+    const { fixture, host } = await mount([keylessCursor()]);
+    (q(host, '[aria-label="More actions for Cursor"]') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(
+      Array.from(
+        host.querySelectorAll('ptah-table-row-actions [role="menuitem"]'),
+      ).map((item) => item.textContent?.trim()),
+    ).toEqual(['Test', 'Sign in']);
+  });
+
+  it('cancels Delete and returns focus to the footer Delete button', async () => {
     const row = instance('a');
     const { fixture, host } = await mount([row]);
     const deleted = jest.fn();
     fixture.componentInstance.delete.subscribe(deleted);
-    const trigger = q(
-      host,
-      '[aria-label="More actions for Lane a"]',
-    ) as HTMLButtonElement;
-    trigger.click();
-    fixture.detectChanges();
-    (
-      q(host, '[data-testid="cli-matrix-delete-a"]') as HTMLButtonElement
-    ).click();
+    expand(fixture, host, 'cli-matrix-row-a');
+    const remove = q(host, '[data-testid="cli-matrix-delete-a"]') as HTMLButtonElement;
+    remove.focus();
+    remove.click();
     fixture.detectChanges();
     expect(q(host, 'ptah-inline-confirm')).not.toBeNull();
     expect(document.activeElement?.textContent?.trim()).toBe('Cancel');
@@ -566,7 +605,7 @@ describe('LanesTableComponent', () => {
     fixture.detectChanges();
     await Promise.resolve();
     expect(q(host, 'ptah-inline-confirm')).toBeNull();
-    expect(document.activeElement).toBe(trigger);
+    expect(document.activeElement).toBe(remove);
     expect(deleted).not.toHaveBeenCalled();
   });
 
@@ -582,15 +621,9 @@ describe('LanesTableComponent', () => {
         );
     });
     fixture.componentInstance.delete.subscribe(deleted);
-    const original = q(
-      host,
-      '[aria-label="More actions for Lane a"]',
-    ) as HTMLButtonElement;
-    original.click();
-    fixture.detectChanges();
-    (
-      q(host, '[data-testid="cli-matrix-delete-a"]') as HTMLButtonElement
-    ).click();
+    const original = q(host, '[aria-label="More actions for Lane a"]') as HTMLButtonElement;
+    expand(fixture, host, 'cli-matrix-row-a');
+    (q(host, '[data-testid="cli-matrix-delete-a"]') as HTMLButtonElement).click();
     fixture.detectChanges();
     (q(host, 'ptah-inline-confirm button') as HTMLButtonElement).click();
     fixture.detectChanges();
@@ -609,13 +642,8 @@ describe('LanesTableComponent', () => {
   it('keeps the delete focus fallback while the row stays, then focuses it on removal', async () => {
     const rows = [instance('a'), instance('b')];
     const { fixture, host } = await mount(rows);
-    (
-      q(host, '[aria-label="More actions for Lane a"]') as HTMLButtonElement
-    ).click();
-    fixture.detectChanges();
-    (
-      q(host, '[data-testid="cli-matrix-delete-a"]') as HTMLButtonElement
-    ).click();
+    expand(fixture, host, 'cli-matrix-row-a');
+    (q(host, '[data-testid="cli-matrix-delete-a"]') as HTMLButtonElement).click();
     fixture.detectChanges();
     (q(host, 'ptah-inline-confirm button') as HTMLButtonElement).click();
     fixture.detectChanges();
@@ -641,13 +669,8 @@ describe('LanesTableComponent', () => {
         rows.filter((item) => item !== row),
       );
     });
-    (
-      q(host, '[aria-label="More actions for Lane a"]') as HTMLButtonElement
-    ).click();
-    fixture.detectChanges();
-    (
-      q(host, '[data-testid="cli-matrix-delete-a"]') as HTMLButtonElement
-    ).click();
+    expand(fixture, host, 'cli-matrix-row-a');
+    (q(host, '[data-testid="cli-matrix-delete-a"]') as HTMLButtonElement).click();
     fixture.detectChanges();
     (q(host, 'ptah-inline-confirm button') as HTMLButtonElement).click();
     fixture.detectChanges();
@@ -657,32 +680,150 @@ describe('LanesTableComponent', () => {
     );
   });
 
+  describe('groups', () => {
+    it('renders CLI agents and Ptah CLI instances groups with counts; numbers run across both', async () => {
+      const { host } = await mount([
+        { ...system('codex'), order: 1 },
+        { ...instance('a'), order: 2 },
+        { ...system('copilot'), order: 3 },
+        { ...instance('b'), order: 4 },
+        { ...keylessCursor(), order: undefined },
+      ]);
+      const ids = (group: string) =>
+        Array.from(
+          host.querySelectorAll(`tbody[data-lanes-group="${group}"] > tr[data-lane-kind]`),
+        ).map((row) => row.getAttribute('data-testid'));
+      expect(ids('cli')).toEqual([
+        'cli-provider-card-codex',
+        'cli-provider-card-copilot',
+        'cli-provider-card-cursor',
+      ]);
+      expect(ids('ptah')).toEqual(['cli-matrix-row-a', 'cli-matrix-row-b']);
+      expect(q(host, '[data-testid="lanes-group-cli-count"]')?.textContent).toBe('3');
+      expect(q(host, '[data-testid="lanes-group-ptah-count"]')?.textContent).toBe('2');
+      const number = (testId: string) =>
+        q(host, `[data-testid="${testId}"] td`)?.textContent?.trim();
+      expect(number('cli-matrix-row-a')).toBe('2');
+      expect(number('cli-provider-card-copilot')).toBe('3');
+      expect(number('cli-provider-card-cursor')).toBe('—');
+      expect(q(host, '[data-testid="lanes-group-cli"] [data-testid="policy-redetect"]')).not.toBeNull();
+    });
+
+    it('separates the groups with padding on the second header, not a spacer row (decisions 17, 26)', async () => {
+      const { host } = await mount([system('codex'), instance('a')]);
+      const second = q(host, '[data-testid="lanes-group-ptah"]')!;
+      expect(second.classList.contains('lanes-group-second')).toBe(true);
+      expect(q(host, '[data-testid="lanes-group-gap"]')).toBeNull();
+      const css = readFileSync(join(__dirname, 'lanes-table.component.css'), 'utf8');
+      expect(css).toMatch(/\.lanes-group-second > th \{[^}]*padding-top: 1\.75rem/);
+      const tbodies = Array.from(host.querySelectorAll('tbody[data-lanes-group]'));
+      expect(tbodies.map((body) => body.getAttribute('data-lanes-group'))).toEqual(['cli', 'ptah']);
+    });
+
+    it('shows one flat list without group headers in Reorder mode', async () => {
+      const { host } = await mount([system('codex'), instance('a'), system('copilot')], true);
+      expect(q(host, '[data-testid="lanes-group-cli"]')).toBeNull();
+      expect(q(host, '[data-testid="lanes-group-ptah"]')).toBeNull();
+      expect(
+        Array.from(host.querySelectorAll('tbody[data-lanes-group="flat"] > tr[data-lane-kind]')).map(
+          (row) => row.getAttribute('data-testid'),
+        ),
+      ).toEqual(['cli-provider-card-codex', 'cli-matrix-row-a', 'cli-provider-card-copilot']);
+    });
+
+    it('has exactly one Add: the group header with instances, the empty group row without (P-60)', async () => {
+      const { fixture, host } = await mount([system('codex'), instance('a')]);
+      const add = jest.fn();
+      fixture.componentInstance.addRequested.subscribe(add);
+      expect(host.querySelectorAll('[data-testid="cli-matrix-add"]')).toHaveLength(1);
+      (q(host, '[data-testid="lanes-group-ptah"] [data-testid="cli-matrix-add"]') as HTMLButtonElement).click();
+      expect(add).toHaveBeenLastCalledWith('header');
+      fixture.componentRef.setInput('rows', [system('codex')]);
+      fixture.detectChanges();
+      expect(host.querySelectorAll('[data-testid="cli-matrix-add"]')).toHaveLength(1);
+      const empty = q(host, '[data-testid="cli-matrix-no-instances"]')!;
+      expect(empty.textContent).toContain('No Ptah CLI instance yet.');
+      (empty.querySelector('[data-testid="cli-matrix-add"]') as HTMLButtonElement).click();
+      expect(add).toHaveBeenLastCalledWith('empty');
+    });
+
+    it('renders the Ptah defaults only with a manifest; select and reset emit (P-58, P-59)', async () => {
+      const { fixture, host } = await mount([instance('a')]);
+      expect(q(host, '[data-testid="lanes-ptah-defaults"]')).toBeNull();
+      const selected = jest.fn();
+      const reset = jest.fn();
+      fixture.componentInstance.ptahDefaultSelected.subscribe(selected);
+      fixture.componentInstance.ptahDefaultResetRequested.subscribe(reset);
+      fixture.componentRef.setInput('ptahDefaults', {
+        manifest: defaultManifest,
+        saved: { permission: 'ask', network: 'deny' },
+      });
+      fixture.detectChanges();
+      const defaults = q(host, '[data-testid="lanes-group-ptah"] [data-testid="lanes-ptah-defaults"]')!;
+      const cell = fixture.debugElement
+        .queryAll(By.directive(CliLaneDefaultCellComponent))
+        .map((item) => item.componentInstance as CliLaneDefaultCellComponent)
+        .find((item) => item.cli() === 'ptah-cli')!;
+      expect(cell.resetVisibility()).toBe('always');
+      cell.selected.emit({ permission: 'plan', network: 'deny' });
+      expect(selected).toHaveBeenCalledWith({ permission: 'plan', network: 'deny' });
+      const resetButton = defaults.querySelector<HTMLButtonElement>('button[aria-label^="Reset"]');
+      expect(resetButton?.textContent?.trim()).toBe('');
+      cell.resetRequested.emit();
+      expect(reset).toHaveBeenCalledTimes(1);
+    });
+
+    it('shows the inherited Ptah default with "(default)" in Ptah rows (P20, P-35)', async () => {
+      const { fixture, host } = await mount([instance('a')]);
+      fixture.componentRef.setInput('ptahDefaults', {
+        manifest: defaultManifest,
+        saved: { permission: 'ask', network: 'allow' },
+      });
+      fixture.detectChanges();
+      const permission = q(host, '[data-testid="cli-matrix-row-a"] [data-testid="lanes-inherited-permission"]');
+      expect(permission?.textContent).toContain('Ask before edits');
+      expect(permission?.textContent).toContain('(default)');
+      expect(permission?.querySelector('lucide-angular')).not.toBeNull();
+      expect(
+        q(host, '[data-testid="cli-matrix-row-a"] [data-testid="lanes-inherited-network"]')?.textContent,
+      ).toContain('Allowed');
+    });
+  });
+
   describe('order', () => {
+    const btn = (host: HTMLElement, dir: 'up' | 'down', id: string) =>
+      q(host, `[data-testid="policy-order-${dir}-${id}"]`) as HTMLButtonElement;
+    const dragEvent = (type: string, target: Element, clientY = 0) => {
+      const event = new Event(type, {
+        bubbles: true,
+        cancelable: true,
+      }) as DragEvent;
+      Object.defineProperty(event, 'clientY', { value: clientY });
+      Object.defineProperty(event, 'dataTransfer', {
+        value: { setData: jest.fn(), effectAllowed: '', dropEffect: '' },
+      });
+      target.dispatchEvent(event);
+      return event;
+    };
+
     it('suppresses a focus tooltip during the order button focus return', async () => {
-      const { host } = await mount([instance('a'), instance('b')], true);
-      const button = q(
-        host,
-        '[data-testid="cli-matrix-row-a"] [data-order-down]',
-      ) as HTMLButtonElement;
+      const { fixture, host } = await mount([instance('a'), instance('b')], true);
+      const button = btn(host, 'down', 'a');
       const focused = jest.fn();
       button.addEventListener('focus', focused);
-      button.click();
+      fixture.componentInstance.orderSettled('a', 'down');
+      fixture.detectChanges();
+      await fixture.whenStable();
       button.dispatchEvent(new FocusEvent('focus', { bubbles: false }));
       expect(focused).not.toHaveBeenCalled();
     });
+
     it('blocks moves while busy or without write permission', async () => {
       const a = instance('a');
       const b = instance('b');
       const { fixture, host } = await mount([a, b], true);
-      const moved = jest.fn();
-      fixture.componentInstance.moved.subscribe(moved);
-      const button = q(
-        host,
-        '[data-testid="cli-matrix-row-a"] [data-order-down]',
-      ) as HTMLButtonElement;
-      const order = fixture.debugElement.queryAll(
-        By.directive(PtahTableOrderButtonsComponent),
-      )[0].componentInstance as PtahTableOrderButtonsComponent;
+      const reordered = jest.fn();
+      fixture.componentInstance.reordered.subscribe(reordered);
       for (const blocked of [
         { busy: true },
         { busyRows: { a: true } },
@@ -694,67 +835,148 @@ describe('LanesTableComponent', () => {
         for (const [key, value] of Object.entries(blocked))
           fixture.componentRef.setInput(key, value);
         fixture.detectChanges();
-        expect(button.matches(':disabled')).toBe(true);
+        const button = btn(host, 'down', 'a');
+        expect(button.getAttribute('aria-disabled')).toBe('true');
         button.click();
-        order.moveDown.emit();
-        expect(moved).not.toHaveBeenCalled();
+        const start = dragEvent(
+          'dragstart',
+          q(host, '[data-testid="policy-order-grip-a"]')!,
+        );
+        expect(start.defaultPrevented).toBe(true);
+        expect(reordered).not.toHaveBeenCalled();
       }
     });
-    it('emits moved up and down and disables the ends', async () => {
-      const a = instance('a');
-      const b = instance('b');
-      const { fixture, host } = await mount([a, b], true);
-      const moved = jest.fn();
-      fixture.componentInstance.moved.subscribe(moved);
-      const rowA = q(host, '[data-testid="cli-matrix-row-a"]') as HTMLElement;
-      const rowB = q(host, '[data-testid="cli-matrix-row-b"]') as HTMLElement;
-      const btn = (r: HTMLElement, dir: 'up' | 'down') =>
-        r.querySelector<HTMLButtonElement>(
-          `[data-order-${dir}]`,
-        ) as HTMLButtonElement;
 
-      expect(btn(rowA, 'up').disabled).toBe(true);
-      expect(btn(rowA, 'down').disabled).toBe(false);
-      expect(btn(rowB, 'up').disabled).toBe(false);
-      expect(btn(rowB, 'down').disabled).toBe(true);
-
-      btn(rowA, 'down').click();
-      btn(rowB, 'up').click();
-      expect(moved).toHaveBeenNthCalledWith(1, { row: a, direction: 1 });
-      expect(moved).toHaveBeenNthCalledWith(2, { row: b, direction: -1 });
+    it('emits reordered up and down with the whole order and marks the ends aria-disabled', async () => {
+      const { fixture, host } = await mount([instance('a'), instance('b')], true);
+      const reordered = jest.fn();
+      fixture.componentInstance.reordered.subscribe(reordered);
+      expect(btn(host, 'up', 'a').getAttribute('aria-disabled')).toBe('true');
+      expect(btn(host, 'down', 'a').getAttribute('aria-disabled')).toBeNull();
+      expect(btn(host, 'up', 'b').getAttribute('aria-disabled')).toBeNull();
+      expect(btn(host, 'down', 'b').getAttribute('aria-disabled')).toBe('true');
+      expect(btn(host, 'up', 'a').getAttribute('aria-label')).toBe('Move Lane a up');
+      expect(btn(host, 'down', 'b').getAttribute('aria-label')).toBe('Move Lane b down');
+      btn(host, 'up', 'a').click();
+      btn(host, 'down', 'b').click();
+      expect(reordered).not.toHaveBeenCalled();
+      btn(host, 'down', 'a').click();
+      btn(host, 'up', 'b').click();
+      expect(reordered).toHaveBeenNthCalledWith(1, {
+        order: ['b', 'a'],
+        movedId: 'a',
+        direction: 'down',
+      });
+      expect(reordered).toHaveBeenNthCalledWith(2, {
+        order: ['b', 'a'],
+        movedId: 'b',
+        direction: 'up',
+      });
     });
 
-    it('counts positioned rows only, so the last one before an uninstalled row cannot move down', async () => {
+    it('drags a row over two positions with a drop indicator and emits the whole order once', async () => {
+      const { fixture, host } = await mount(
+        [instance('a'), instance('b'), instance('c')],
+        true,
+      );
+      const reordered = jest.fn();
+      fixture.componentInstance.reordered.subscribe(reordered);
+      const grip = q(host, '[data-testid="policy-order-grip-a"]')!;
+      expect(grip.getAttribute('draggable')).toBe('true');
+      expect(grip.getAttribute('aria-roledescription')).toBe('sortable');
+      dragEvent('dragstart', grip);
+      const rowC = q(host, '[data-testid="cli-matrix-row-c"]')!;
+      dragEvent('dragover', rowC, 1);
+      fixture.detectChanges();
+      expect(
+        host.querySelectorAll('[data-testid="policy-order-drop-indicator"]'),
+      ).toHaveLength(1);
+      expect(rowC.getAttribute('data-drop')).toBe('after');
+      dragEvent('drop', rowC, 1);
+      fixture.detectChanges();
+      expect(reordered).toHaveBeenCalledTimes(1);
+      expect(reordered).toHaveBeenCalledWith({
+        order: ['b', 'c', 'a'],
+        movedId: 'a',
+        direction: 'down',
+      });
+      expect(
+        q(host, '[data-testid="policy-order-drop-indicator"]'),
+      ).toBeNull();
+    });
+
+    it('keeps focus on the same button of the moved row and announces its position', async () => {
+      const { fixture, host } = await mount([instance('a'), instance('b')], true);
+      fixture.componentInstance.reordered.subscribe(() => {
+        fixture.componentRef.setInput('rows', [instance('b'), instance('a')]);
+        fixture.detectChanges();
+        fixture.componentInstance.orderSettled('a', 'down');
+      });
+      btn(host, 'down', 'a').click();
+      fixture.detectChanges();
+      await fixture.whenStable();
+      // 'a' is last now: its Down is aria-disabled, so focus takes its Up.
+      expect(document.activeElement).toBe(btn(host, 'up', 'a'));
+      expect(
+        q(host, '[data-testid="policy-order-live"]')?.textContent?.trim(),
+      ).toBe('Lane a moved to position 2 of 2');
+    });
+
+    it('keeps an unpositioned row after the numbered rows with a dash and no controls', async () => {
       const { host } = await mount(
         [instance('a'), instance('b'), uninstalled('copilot')],
         true,
       );
-      const rowB = q(host, '[data-testid="cli-matrix-row-b"]') as HTMLElement;
-      const rowA = q(host, '[data-testid="cli-matrix-row-a"]') as HTMLElement;
-      expect(
-        (rowB.querySelector('[data-order-down]') as HTMLButtonElement).disabled,
-      ).toBe(true);
-      expect(
-        (rowA.querySelector('[data-order-down]') as HTMLButtonElement).disabled,
-      ).toBe(false);
+      expect(btn(host, 'down', 'b').getAttribute('aria-disabled')).toBe('true');
+      expect(btn(host, 'down', 'a').getAttribute('aria-disabled')).toBeNull();
+      const copilot = q(host, '[data-testid="cli-provider-card-copilot"]')!;
+      expect(copilot.querySelector('td')?.textContent?.trim()).toBe('—');
+      expect(copilot.querySelector('[data-order-up], [data-order-down]')).toBeNull();
+      expect(copilot.querySelector('[draggable]')).toBeNull();
     });
 
-    it('skips an uninstalled row in the middle when indexing', async () => {
-      const { host } = await mount(
+    it('skips an unpositioned row in the middle when indexing', async () => {
+      const { fixture, host } = await mount(
         [instance('a'), uninstalled('copilot'), instance('b')],
         true,
       );
-      const rowA = q(host, '[data-testid="cli-matrix-row-a"]') as HTMLElement;
-      const rowB = q(host, '[data-testid="cli-matrix-row-b"]') as HTMLElement;
-      expect(
-        (rowA.querySelector('[data-order-down]') as HTMLButtonElement).disabled,
-      ).toBe(false);
-      expect(
-        (rowB.querySelector('[data-order-up]') as HTMLButtonElement).disabled,
-      ).toBe(false);
-      expect(
-        (rowB.querySelector('[data-order-down]') as HTMLButtonElement).disabled,
-      ).toBe(true);
+      const reordered = jest.fn();
+      fixture.componentInstance.reordered.subscribe(reordered);
+      expect(btn(host, 'up', 'b').getAttribute('aria-disabled')).toBeNull();
+      expect(btn(host, 'down', 'b').getAttribute('aria-disabled')).toBe('true');
+      btn(host, 'down', 'a').click();
+      expect(reordered).toHaveBeenCalledWith({
+        order: ['b', 'a'],
+        movedId: 'a',
+        direction: 'down',
+      });
+    });
+
+    it('keeps a lane that is not enabled in the flat list at its position, still movable', async () => {
+      const { fixture, host } = await mount(
+        [instance('a'), instance('b', { enabled: false }), instance('c')],
+        true,
+      );
+      const reordered = jest.fn();
+      fixture.componentInstance.reordered.subscribe(reordered);
+      expect(btn(host, 'up', 'b').getAttribute('aria-disabled')).toBeNull();
+      btn(host, 'up', 'b').click();
+      expect(reordered).toHaveBeenCalledWith({
+        order: ['b', 'a', 'c'],
+        movedId: 'b',
+        direction: 'up',
+      });
+    });
+
+    it('closes an expanded detail when Reorder mode turns on (decision 26)', async () => {
+      const { fixture, host } = await mount([instance('a'), instance('b')]);
+      q(host, 'ptah-table-row-expander button')?.click();
+      fixture.detectChanges();
+      expect(q(host, '#lane-detail-a ptah-lanes-table-detail')).not.toBeNull();
+      fixture.componentRef.setInput('orderMode', true);
+      fixture.detectChanges();
+      expect(fixture.componentInstance['detailRowId']()).toBeNull();
+      expect(q(host, '#lane-detail-a ptah-lanes-table-detail')).toBeNull();
     });
 
     it('shows the rank when order mode is off', async () => {
@@ -763,6 +985,7 @@ describe('LanesTableComponent', () => {
         { ...instance('b'), order: 7 },
       ]);
       expect(host.querySelector('[data-order-up]')).toBeNull();
+      expect(host.querySelector('[data-testid^="policy-order-grip-"]')).toBeNull();
       const cells = (id: string) =>
         q(host, `[data-testid="cli-matrix-row-${id}"] td`)?.textContent?.trim();
       expect(cells('a')).toBe('1');
@@ -770,24 +993,58 @@ describe('LanesTableComponent', () => {
     });
   });
 
-  describe('uninstalled system row', () => {
-    it('is muted, shows a dash, no order buttons and a disabled toggle', async () => {
-      const { fixture, host } = await mount([uninstalled('copilot')], true);
-      const attention = jest.fn();
-      fixture.componentInstance.installGuide.subscribe(attention);
-      const row = q(host, '[data-testid="cli-provider-card-copilot"]');
+  describe('keyless Cursor recovery row', () => {
+    it('is muted, has a dash, no order controls, a disabled switch; Sign in opens Credentials (P-26, P-51)', async () => {
+      TestBed.configureTestingModule({
+        providers: [
+          {
+            provide: ProvidersSettingsStateService,
+            useValue: {
+              orchestration: signal({
+                status: 'ready',
+                data: { cursorApiKeyStored: false, cursorApiKeyEnvSet: false },
+                error: null,
+              }),
+              commit: signal({ status: 'idle' }),
+            },
+          },
+          SettingsSaveFeedbackService,
+        ],
+      });
+      const cursor = keylessCursor();
+      const { fixture, host } = await mount([{ ...system('codex'), order: 1 }, cursor], true);
+      const row = q(host, '[data-testid="cli-provider-card-cursor"]');
       expect(row?.getAttribute('data-state')).toBe('muted');
       expect(row?.querySelector('td')?.textContent?.trim()).toBe('—');
       expect(row?.querySelector('[data-order-up]')).toBeNull();
-      expect(
-        (q(host, '[aria-label="Copilot enabled"]') as HTMLInputElement)
-          .disabled,
-      ).toBe(true);
-      const guide = Array.from(host.querySelectorAll('button')).find(
-        (b) => b.textContent?.trim() === 'Install guide',
-      );
-      guide?.click();
-      expect(attention).toHaveBeenCalledTimes(1);
+      expect((q(host, '[aria-label="Cursor enabled"]') as HTMLInputElement).disabled).toBe(true);
+      fixture.componentRef.setInput('orderMode', false);
+      fixture.detectChanges();
+      const signIn = jest.fn();
+      fixture.componentInstance.signIn.subscribe(signIn);
+      (q(host, '[data-testid="cli-provider-card-cursor"] [data-testid="lanes-sign-in"]') as HTMLButtonElement).click();
+      fixture.detectChanges();
+      expect(signIn).toHaveBeenCalledWith(cursor);
+      const detail = q(host, '#lane-detail-cursor')!;
+      expect(detail.querySelector('[data-popover-kind="credentials"]')?.getAttribute('aria-expanded')).toBe('true');
+      expect(detail.querySelector('[data-popover-kind="install"]')).not.toBeNull();
+      // No status-cell Install guide for any row.
+      expect(Array.from(host.querySelectorAll('[data-lane-status] button')).some(
+        (button) => button.textContent?.trim() === 'Install guide',
+      )).toBe(false);
+    });
+
+    it('emits Re-detect from the keyless Cursor install guide in its detail (U-5, U-6)', async () => {
+      const { fixture, host } = await mount([keylessCursor()]);
+      const redetect = jest.fn();
+      fixture.componentInstance.redetect.subscribe(redetect);
+      expand(fixture, host, 'cli-provider-card-cursor');
+      (q(host, '#lane-detail-cursor [data-popover-kind="install"]') as HTMLButtonElement).click();
+      fixture.detectChanges();
+      Array.from(host.querySelectorAll<HTMLButtonElement>('#lane-detail-cursor button'))
+        .find((button) => button.textContent?.trim() === 'Re-detect')
+        ?.click();
+      expect(redetect).toHaveBeenCalledWith('cursor');
     });
   });
 

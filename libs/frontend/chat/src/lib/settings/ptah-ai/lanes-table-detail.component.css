@@ -5,10 +5,14 @@ ptah-lanes-table-detail {
   white-space: normal;
   overflow-wrap: anywhere;
 }
+/* One scroll owner (decision 44): the detail grows with its content and the
+   page scrolls it. No panel, list or disclosure in the detail sets its own
+   height cap or overflow. */
 ptah-lanes-table-detail .ptah-table-detail-layout[data-mode='wide'] {
-  grid-template-columns: minmax(0, 1.4fr) max-content minmax(0, 1fr);
-  grid-template-areas: 'facts chips actions' 'body body body';
-  gap: var(--ptah-gap-controls);
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-areas: 'facts chips' 'body body' 'actions actions';
+  column-gap: var(--ptah-space-8);
+  row-gap: var(--ptah-gap-controls);
   padding: var(--ptah-surface-pad);
   margin-block: var(--ptah-gap-inline);
   background: var(--ptah-card-bg-inset);
@@ -29,11 +33,13 @@ ptah-lanes-table-detail
   > [ptahDetailFacts] {
   display: block;
 }
-ptah-lanes-table-detail [ptahDetailFacts] > dl {
+ptah-lanes-table-detail [ptahDetailFacts] > dl,
+ptah-lanes-table-detail .lane-detail-capabilities > dl {
   display: grid;
-  grid-template-columns: minmax(0, 8.5rem) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 9rem) minmax(0, 1fr);
   align-items: center;
-  gap: var(--ptah-gap-inline);
+  align-content: start;
+  gap: var(--ptah-gap-inline) var(--ptah-gap-controls);
   margin: 0;
   font-size: var(--ptah-text-body-size);
 }
@@ -44,52 +50,93 @@ ptah-lanes-table-detail dd {
   overflow-wrap: anywhere;
 }
 ptah-lanes-table-detail dt {
+  display: flex;
+  align-items: center;
+  gap: var(--ptah-gap-inline);
   color: var(--color-base-content-muted);
+}
+ptah-lanes-table-detail .lane-detail-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  width: 0.875rem;
+  height: 0.875rem;
+}
+ptah-lanes-table-detail .lane-detail-mono {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--ptah-font-mono);
+}
+ptah-lanes-table-detail .lane-detail-native {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+ptah-lanes-table-detail .lane-detail-clamp {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
+  overflow: hidden;
+}
+ptah-lanes-table-detail .lane-detail-tiers {
+  display: flex;
+  flex-direction: column;
+}
+ptah-lanes-table-detail .lane-detail-tiers > [data-testid='cli-matrix-tier-summary'] {
+  color: var(--color-base-content-muted);
+}
+ptah-lanes-table-detail .lane-detail-tier {
+  display: block;
+}
+/* The Copilot switch row: the toggle draws its own section rule in other hosts. */
+ptah-lanes-table-detail
+  .lane-detail-switch
+  [data-testid='copilot-auto-approve-section'] {
+  border-top: 0;
+  padding-top: 0;
+}
+ptah-lanes-table-detail .lane-detail-all-capabilities {
+  position: static;
+  max-width: none;
+  margin-block-start: var(--ptah-gap-inline);
 }
 ptah-lanes-table-detail
   .ptah-table-detail-layout
   .ptah-table-detail-actions
   > [ptahDetailActions] {
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
   gap: var(--ptah-gap-inline);
   min-width: 0;
+  padding-block-start: var(--ptah-gap-controls);
+  border-top: var(--ptah-border-width) solid var(--ptah-card-border);
 }
 ptah-lanes-table-detail .quiet-actions,
 ptah-lanes-table-detail .test-action,
-ptah-lanes-table-detail .capability-chips,
-ptah-lanes-table-detail [laneActions] {
+ptah-lanes-table-detail [footer-actions] {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: var(--ptah-gap-inline);
   min-width: 0;
 }
-ptah-lanes-table-detail [laneActions] {
-  flex: 1 1 auto;
+ptah-lanes-table-detail .quiet-actions {
+  justify-content: flex-end;
 }
-ptah-lanes-table-detail [laneActions] > button[tone='danger'] {
-  margin-inline-start: auto;
+ptah-lanes-table-detail .test-action {
+  flex: 1 1 12rem;
 }
-ptah-lanes-table-detail .test-action [role='status'] {
+ptah-lanes-table-detail .lane-detail-test-result {
   flex: 1 1 8rem;
-}
-ptah-lanes-table-detail .capability-value {
-  padding: var(--ptah-gap-field);
-  max-width: min(20rem, 80vw);
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
-@container lane-detail (min-width: 600px) and (max-width: 1400px) {
-  ptah-lanes-table-detail .ptah-table-detail-layout[data-mode='wide'] {
-    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-    grid-template-areas: 'facts actions' 'chips chips' 'body body';
-  }
+  font-size: var(--ptah-text-caption-size);
+  color: var(--color-base-content-muted);
 }
 @container lane-detail (max-width: 599px) {
   ptah-lanes-table-detail .ptah-table-detail-layout[data-mode='wide'] {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-areas: 'facts' 'chips' 'actions' 'body';
+    grid-template-areas: 'facts' 'chips' 'body' 'actions';
   }
 }

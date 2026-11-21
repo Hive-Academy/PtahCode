@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
 import {
   ClaudeAmbientStatusService,
   ProviderAccountsStateService,
@@ -387,47 +388,84 @@ describe('CliOrchestrationMatrixComponent', () => {
     );
   });
 
-  it('mounts one Lanes table with installed, instance and uninstalled rows in try order', () => {
-    const ids = Array.from(
-      element().querySelectorAll('ptah-lanes-table tbody > tr[data-testid]'),
-    ).map((row) => row.getAttribute('data-testid'));
-    expect(ids).toEqual([
+  it('mounts one Lanes table: CLI agents and Ptah CLI groups, the keyless Cursor as recovery row, the strip for the rest', () => {
+    const ids = (selector: string) =>
+      Array.from(element().querySelectorAll(selector)).map((row) =>
+        row.getAttribute('data-testid'),
+      );
+    expect(
+      ids('ptah-lanes-table tbody[data-lanes-group="cli"] > tr[data-lane-kind]'),
+    ).toEqual([
       'cli-provider-card-codex',
       'cli-provider-card-antigravity',
-      'cli-matrix-row-glm-1',
       'cli-provider-card-copilot',
       'cli-provider-card-opencode',
       'cli-provider-card-cursor',
+    ]);
+    expect(
+      ids('ptah-lanes-table tbody[data-lanes-group="ptah"] > tr[data-lane-kind]'),
+    ).toEqual(['cli-matrix-row-glm-1']);
+    // Global numbers run across both groups; the recovery row has none.
+    const number = (testId: string) =>
+      q(`[data-testid="${testId}"] td`)?.textContent?.trim();
+    expect(number('cli-provider-card-codex')).toBe('1');
+    expect(number('cli-matrix-row-glm-1')).toBe('3');
+    expect(number('cli-provider-card-cursor')).toBe('—');
+    // Not-installed CLIs leave the table for the strip; the keyless Cursor is not in the strip.
+    expect(ids('[data-testid="lanes-strip"] [data-testid^="cli-provider-card-"]')).toEqual([
       'cli-provider-card-pi',
     ]);
     expect(element().querySelectorAll('ptah-lanes-table')).toHaveLength(1);
-    expect(q('ptah-cli-instances')).not.toBeNull();
+    expect(q('ptah-cli-instances')).toBeNull();
+    expect(q('ptah-cli-shared-defaults')).toBeNull();
   });
 
-  it('keeps row facts, native permission, capabilities and test result in the detail', () => {
+  it('counts table rows only: the badge = installed + recovery rows = the sum of the group counts', () => {
+    expect(q('[data-testid="lanes-group-cli-count"]')?.textContent).toBe('5');
+    expect(q('[data-testid="lanes-group-ptah-count"]')?.textContent).toBe('1');
+    const header = fixture.debugElement.query(
+      By.css('ptah-lanes-section-header'),
+    ).componentInstance as { total: () => number; enabled: () => number };
+    expect(header.total()).toBe(6);
+    // Strip CLIs are not counted.
+    expect(q('[data-testid="lanes-strip-count"]')?.textContent).toBe('1');
+  });
+
+  it('hides the strip in Reorder mode', () => {
+    fixture.componentInstance['orderMode'].set(true);
+    fixture.detectChanges();
+    expect(q('[data-testid="lanes-strip"]')).toBeNull();
+    expect(q('[data-testid="lanes-group-cli"]')).toBeNull();
+  });
+
+  it('keeps row facts, native behavior, capabilities and test result in the detail', () => {
     const codex = card('codex');
     expect(codex).not.toBeNull();
     openDetail('codex');
     const detail = q('#lane-detail-codex');
     expect(detail?.hidden).toBe(false);
     expect(detail?.textContent).toContain('Provider');
+    // Decision 13: native behavior and the capability facts are inline text, not popover buttons.
+    expect(detail?.textContent).toContain('Native behavior');
     expect(
       detail?.querySelector('[data-popover-kind="permission"]'),
-    ).not.toBeNull();
-    // Short capability chips; each value opens in the shared popover.
+    ).toBeNull();
     expect(
       detail?.querySelector(
         '[data-testid="cli-capability-summary"] [data-capability]',
       ),
     ).not.toBeNull();
     expect(
-      detail?.querySelector('[data-testid="cli-matrix-test-result"]')
-        ?.textContent,
+      detail?.querySelector(
+        '[data-testid="cli-matrix-test-result"]',
+      )?.textContent,
     ).toContain('Not run yet');
-    button(detail, 'Info')?.click();
-    fixture.detectChanges();
+    expect(button(detail, 'Info')).toBeFalsy();
     expect(
       q('#lane-detail-codex ptah-cli-provider-card-popovers'),
+    ).toBeNull();
+    expect(
+      detail?.querySelector('[data-lane-capabilities] button'),
     ).not.toBeNull();
   });
 
@@ -528,11 +566,12 @@ describe('CliOrchestrationMatrixComponent', () => {
     host.destroy();
   });
 
-  it('opens the install guide and invokes Re-detect', async () => {
-    button(card('pi'), 'Install guide')?.click();
+  it('opens the install guide from the strip card and invokes Re-detect; the new row takes focus (U-7)', async () => {
+    q<HTMLButtonElement>('[data-testid="lanes-strip-install-pi"]')?.click();
     fixture.detectChanges();
     expect(
-      q('#lane-detail-pi ptah-cli-provider-card-popovers')?.textContent,
+      q('[data-testid="cli-provider-card-pi"] ptah-cli-provider-card-popovers')
+        ?.textContent,
     ).toContain('Re-detect');
     state.onRedetect = () =>
       state.orchestration.update((section) => ({
@@ -544,9 +583,60 @@ describe('CliOrchestrationMatrixComponent', () => {
           ),
         },
       }));
-    button(q('#lane-detail-pi'), 'Re-detect')?.click();
+    button(q('[data-testid="cli-provider-card-pi"]'), 'Re-detect')?.click();
+    await flush();
+    await fixture.whenStable();
+    expect(state.redetectClis).toHaveBeenCalledTimes(1);
+    expect(q('[data-testid="lanes-strip"]')).toBeNull();
+    expect(q('ptah-lanes-table tr[data-testid="cli-provider-card-pi"]')).not.toBeNull();
+    expect(document.activeElement).toBe(
+      q('[data-testid="cli-provider-card-pi"] input[type="checkbox"]'),
+    );
+  });
+
+  it('keeps the strip install popover open when the CLI is still missing', async () => {
+    const announce = jest.spyOn(feedback, 'announce');
+    q<HTMLButtonElement>('[data-testid="lanes-strip-install-pi"]')?.click();
+    fixture.detectChanges();
+    button(q('[data-testid="cli-provider-card-pi"]'), 'Re-detect')?.click();
     await flush();
     expect(state.redetectClis).toHaveBeenCalledTimes(1);
-    expect(q('#lane-detail-pi ptah-cli-provider-card-popovers')).toBeNull();
+    expect(
+      q('[data-testid="cli-provider-card-pi"] ptah-cli-provider-card-popovers'),
+    ).not.toBeNull();
+    expect(announce).toHaveBeenCalledWith(
+      'Still not found. Check the step above, then try again.',
+      'status',
+    );
+  });
+
+  it('opens the keyless Cursor detail from Sign in with Credentials and the Install guide in the footer', () => {
+    button(card('cursor'), 'Sign in')?.click();
+    fixture.detectChanges();
+    const detail = q('#lane-detail-cursor');
+    expect(detail?.hidden).toBe(false);
+    expect(detail?.querySelector('[data-popover-kind="credentials"]')).not.toBeNull();
+    expect(detail?.querySelector('[data-popover-kind="install"]')).not.toBeNull();
+  });
+
+  it('opens the add modal from the Ptah group header Add, the only Add control', () => {
+    expect(element().querySelectorAll('[data-testid="cli-matrix-add"]')).toHaveLength(1);
+    expect(q('[data-testid="lanes-group-ptah"] [data-testid="cli-matrix-add"]')).not.toBeNull();
+    q<HTMLButtonElement>('[data-testid="cli-matrix-add"]')?.click();
+    fixture.detectChanges();
+    expect(
+      q('[data-testid="add-cli-instance-modal"]')
+        ?.closest('dialog')
+        ?.hasAttribute('open'),
+    ).toBe(true);
+  });
+
+  it('points the empty text to the strip', () => {
+    state.orchestration.set(ready({ ...ORCHESTRATION, detectedClis: [] }));
+    state.cliAgents.set(ready([]));
+    fixture.detectChanges();
+    expect(q('[data-testid="cli-matrix-empty"]')?.textContent?.trim()).toBe(
+      'No CLI agent installed yet. Use Add more below.',
+    );
   });
 });

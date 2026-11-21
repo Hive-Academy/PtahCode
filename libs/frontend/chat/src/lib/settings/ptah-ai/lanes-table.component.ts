@@ -11,12 +11,14 @@ import {
   input,
   output,
   signal,
+  untracked,
   viewChild,
   ViewEncapsulation,
 } from '@angular/core';
-import { NgTemplateOutlet } from '@angular/common';
 import {
+  PTAH_CLI_PERMISSION_CAPABILITIES,
   resolveCliLaneDefaultPair,
+  type CliAdapterManifest,
   type CliLaneDefaults,
   type CliType,
 } from '@ptah-extension/shared';
@@ -27,27 +29,55 @@ import {
   PtahDetailCellDirective,
   PtahDetailRowDirective,
   PtahRowExpanderComponent,
-  PtahTableOrderButtonsComponent,
   PtahTableRowActionsComponent,
   PtahTableControlCellDirective,
   PtahTableMessageCellDirective,
   PtahToggleDirective,
   PtahButtonDirective,
-  NativePopoverComponent,
+  PtahIconButtonDirective,
   PtahInlineConfirmComponent,
 } from '@ptah-extension/ui';
-import { LaneRowIdentityComponent } from './lane-row-identity.component';
 import {
-  cliModelDisplay,
-  type CliMatrixCellField,
-  type CliMatrixRow,
-} from './cli-matrix-rows';
+  Boxes,
+  ChevronDown,
+  ChevronUp,
+  GripVertical,
+  Inbox,
+  Link2,
+  Loader2,
+  LogIn,
+  LucideAngularModule,
+  Pencil,
+  Play,
+  Plus,
+  RotateCcw,
+  Terminal,
+  Trash2,
+  TriangleAlert,
+} from 'lucide-angular';
+import { LaneRowIdentityComponent } from './lane-row-identity.component';
+import type { CliMatrixCellField, CliMatrixRow } from './cli-matrix-rows';
 import { CliLaneDefaultCellComponent } from './cli-lane-default-cell.component';
-import { CliModelEffortPopoverComponent } from './cli-model-effort-popover.component';
+import {
+  LaneModelEffortCellComponent,
+  laneModelDisplay,
+} from './lane-model-effort-cell.component';
 import { LanesTableStatusComponent } from './lanes-table-status.component';
 import { LanesTableDeleteFocus } from './lanes-table-delete-focus';
 import type { CliProviderInfoKind } from './cli-provider-card-popovers.component';
 import { LanesTableDetailComponent } from './lanes-table-detail.component';
+import { LanesRedetectButtonComponent } from './lanes-redetect-button.component';
+import {
+  LANE_NETWORK_LABELS,
+  LANE_PERMISSION_LABELS,
+} from './lane-option-labels';
+import {
+  LaneOrderDrag,
+  type LaneOrderDirection,
+  type LaneOrderMove,
+} from './lane-order-drag';
+
+export { splitModelId } from './lane-model-effort-cell.component';
 export type LaneTableRow = CliMatrixRow & {
   /**
    * Position in the try order; uninstalled agents have no position.
@@ -67,36 +97,49 @@ export type LaneTableRow = CliMatrixRow & {
     PtahDetailCellDirective,
     PtahDetailRowDirective,
     PtahRowExpanderComponent,
-    PtahTableOrderButtonsComponent,
     PtahTableRowActionsComponent,
     PtahTableControlCellDirective,
     PtahTableMessageCellDirective,
     PtahToggleDirective,
     PtahButtonDirective,
-    NativePopoverComponent,
+    PtahIconButtonDirective,
+    LucideAngularModule,
     CliLaneDefaultCellComponent,
-    CliModelEffortPopoverComponent,
+    LaneModelEffortCellComponent,
     LaneRowIdentityComponent,
     LanesTableStatusComponent,
     PtahInlineConfirmComponent,
     LanesTableDetailComponent,
-    NgTemplateOutlet,
+    LanesRedetectButtonComponent,
   ],
   encapsulation: ViewEncapsulation.None,
   styleUrl: './lanes-table.component.css',
   templateUrl: './lanes-table.component.html',
 })
 export class LanesTableComponent {
+  protected readonly GripIcon = GripVertical;
+  protected readonly UpIcon = ChevronUp;
+  protected readonly DownIcon = ChevronDown;
+  protected readonly CliGroupIcon = Terminal;
+  protected readonly PtahGroupIcon = Boxes;
+  protected readonly AddIcon = Plus;
+  protected readonly InheritedIcon = Link2;
+  protected readonly TestIcon = Play;
+  protected readonly SignInIcon = LogIn;
+  protected readonly EditIcon = Pencil;
+  protected readonly DeleteIcon = Trash2;
+  protected readonly ResetIcon = RotateCcw;
+  protected readonly LoadingIcon = Loader2;
+  protected readonly AlertIcon = TriangleAlert;
+  protected readonly RetryIcon = RotateCcw;
+  protected readonly EmptyIcon = Inbox;
+  protected readonly skeletonRows = [0, 1, 2] as const;
   /** Middle tier is based on the actual pane, never the app viewport. */
   protected readonly modelColumn = signal(false);
+  /** "Sign in" of a row that needs a key (status cell and kebab): its detail opens with Credentials. */
   protected recover(row: LaneTableRow): void {
-    if (row.status.kind === 'not-installed') {
-      this.showDetail(row, 'install');
-      this.installGuide.emit(row);
-    } else {
-      this.showDetail(row, 'credentials');
-      this.signIn.emit(row);
-    }
+    this.showDetail(row, 'credentials');
+    this.signIn.emit(row);
   }
   protected resetDefaultLabel(row: LaneTableRow): string {
     if (!row.manifest) return 'Reset to default';
@@ -118,7 +161,59 @@ export class LanesTableComponent {
     }
     return map;
   });
+  /**
+   * The table bodies: Reorder mode shows one flat list in global order (decision 18); otherwise the CLI agents
+   * group (installed, then recovery rows) and the Ptah CLI instances group. Numbers stay global.
+   */
+  protected readonly groups = computed(
+    (): readonly {
+      readonly key: 'flat' | 'cli' | 'ptah';
+      readonly rows: readonly LaneTableRow[];
+    }[] =>
+      this.orderMode()
+        ? [{ key: 'flat', rows: this.rows() }]
+        : [
+            {
+              key: 'cli',
+              rows: this.rows().filter((row) => row.kind === 'system'),
+            },
+            {
+              key: 'ptah',
+              rows: this.rows().filter((row) => row.kind === 'instance'),
+            },
+          ],
+  );
+  /** Visible column count, for group headers, message rows and the detail cell. */
+  protected readonly columnCount = computed(() =>
+    this.table()?.collapsed() ? (this.modelColumn() ? 6 : 5) : 8,
+  );
+  /** The value a Ptah CLI row inherits from the group defaults (P20, P-35). */
+  protected readonly inherited = computed(() => {
+    const pair = resolveCliLaneDefaultPair(
+      this.ptahDefaults()?.manifest ?? PTAH_CLI_PERMISSION_CAPABILITIES,
+      this.ptahDefaults()?.saved ?? this.defaults()?.['ptah-cli'] ?? {},
+    );
+    return 'unsupported' in pair
+      ? { permission: 'Default', network: 'Default' }
+      : {
+          permission: pair.permission
+            ? LANE_PERMISSION_LABELS[pair.permission]
+            : 'Default',
+          network: pair.network ? LANE_NETWORK_LABELS[pair.network] : 'Default',
+        };
+  });
+  /** The numbered rows in display order: the ids that Reorder mode moves. */
+  protected readonly orderIds = computed(() =>
+    this.rows()
+      .filter((row) => this.positions().has(row.id))
+      .map((row) => row.id),
+  );
   readonly defaults = input<CliLaneDefaults>();
+  /** The Ptah CLI group defaults (manifest + saved pair); null hides the defaults cell of the group header. */
+  readonly ptahDefaults = input<{
+    readonly manifest: CliAdapterManifest;
+    readonly saved: CliLaneDefaults['ptah-cli'];
+  } | null>(null);
   readonly orderMode = input(false);
   readonly busy = input(false);
   readonly canWrite = input(true);
@@ -160,12 +255,17 @@ export class LanesTableComponent {
     place: 'cell' | 'detail';
   } | null>(null);
   readonly toggled = output<{ row: LaneTableRow; event: Event }>();
-  readonly moved = output<{ row: LaneTableRow; direction: -1 | 1 }>();
+  /** Reorder mode: the displayed numbered ids in their new order (the matrix keeps undisplayed saved ids). */
+  readonly reordered = output<LaneOrderMove>();
   readonly test = output<LaneTableRow>();
   readonly edit = output<LaneTableRow>();
   readonly delete = output<LaneTableRow>();
-  readonly capabilities = output<LaneTableRow>();
-  readonly installGuide = output<LaneTableRow>();
+  /** The one Add of the Ptah CLI group: its header button, or the primary button of the empty group row. */
+  readonly addRequested = output<'header' | 'empty'>();
+  readonly ptahDefaultSelected = output<
+    NonNullable<CliLaneDefaults['ptah-cli']>
+  >();
+  readonly ptahDefaultResetRequested = output<void>();
   readonly signIn = output<LaneTableRow>();
   readonly retry = output<void>();
   readonly redetect = output<string>();
@@ -223,8 +323,8 @@ export class LanesTableComponent {
       observer.observe(this.element.nativeElement);
       this.destroyRef.onDestroy(() => observer.disconnect());
     });
-    // The UI order component restores focus after a move. Suppress its focus tooltip
-    // for that return, as the policy order editor does when its popover closes.
+    // Focus returns to the moved row's order button after a move. Suppress its focus
+    // tooltip for that return, as the policy order editor does when its popover closes.
     const onOrderFocus = (event: FocusEvent): void => {
       if (
         this.orderFocusReturning() &&
@@ -261,18 +361,70 @@ export class LanesTableComponent {
       }
     });
     effect(() => this.deleteFocus.onRowsChanged(this.rows()));
+    // Decision 26: Reorder mode shows one flat list; an expanded detail and its popovers close.
+    effect(() => {
+      if (!this.orderMode()) return;
+      untracked(() => {
+        this.detailRowId.set(null);
+        this.infoOpen.set(null);
+        this.openCell.set(null);
+        this.pendingDelete.set(null);
+        this.drag.endDrag();
+      });
+    });
+  }
+  /** Drag and up / down of Reorder mode (decisions 14, 18). */
+  protected readonly drag = new LaneOrderDrag({
+    ids: () => this.orderIds(),
+    name: (id) => this.rows().find((row) => row.id === id)?.name ?? id,
+    canReorder: () => this.orderMode() && !this.busy() && this.canWrite(),
+    move: (move) => this.reordered.emit(move),
+  });
+  protected orderUp(row: LaneTableRow, index: number): void {
+    if (this.rowBusy(row)) return;
+    this.drag.moveUp(index);
+  }
+  protected orderDown(row: LaneTableRow, index: number): void {
+    if (this.rowBusy(row)) return;
+    this.drag.moveDown(index);
+  }
+  protected orderDragStart(row: LaneTableRow, event: DragEvent, index: number): void {
+    if (this.rowBusy(row)) {
+      event.preventDefault();
+      return;
+    }
+    this.drag.startDrag(event, index);
+  }
+  /**
+   * Called by the host once the save of a move ends. The rows show the read-back order: focus returns to the
+   * same button of the moved row (or its other one at an end), and the new position is announced.
+   */
+  orderSettled(id: string, direction: LaneOrderDirection): void {
+    this.drag.settled(id, direction, () =>
+      afterNextRender(
+        () => {
+          const host = this.element.nativeElement;
+          const other = direction === 'up' ? 'down' : 'up';
+          this.orderFocusReturning.set(true);
+          [direction, other]
+            .map((which) =>
+              host.querySelector<HTMLButtonElement>(
+                `[data-testid="policy-order-${which}-${id}"]`,
+              ),
+            )
+            .find((button) => button && button.getAttribute('aria-disabled') !== 'true')
+            ?.focus();
+          setTimeout(() => this.orderFocusReturning.set(false));
+        },
+        { injector: this.injector },
+      ),
+    );
   }
   protected rowBusy(row: LaneTableRow): boolean {
     return this.busy() || !!this.busyRows()[row.id];
   }
   protected enabledShown(row: LaneTableRow): boolean {
     return row.enabled && (row.kind === 'instance' || row.installed);
-  }
-  protected moveRow(row: LaneTableRow, direction: -1 | 1): void {
-    if (this.rowBusy(row) || !this.canWrite()) return;
-    this.orderFocusReturning.set(true);
-    setTimeout(() => this.orderFocusReturning.set(false));
-    this.moved.emit({ row, direction });
   }
   protected toggleRow(row: LaneTableRow, event: Event): void {
     const control = event.target as HTMLInputElement;
@@ -286,19 +438,33 @@ export class LanesTableComponent {
     }
     this.toggled.emit({ row, event });
   }
+  /** The Delete button in the detail footer that opened the inline confirm; Cancel returns focus to it. */
+  private deleteOrigin: HTMLElement | null = null;
   protected requestDelete(row: LaneTableRow, event: Event): void {
-    this.deleteFocus.capture(row, event);
+    const origin = event.target instanceof HTMLElement ? event.target : null;
+    this.deleteOrigin = origin?.closest<HTMLElement>('button') ?? origin;
+    // After a confirmed delete, focus goes to the next row's actions trigger: capture from this row's trigger.
+    const trigger = this.element.nativeElement.querySelector<HTMLElement>(
+      `tr[data-testid="${row.kind === 'system' ? 'cli-provider-card-' : 'cli-matrix-row-'}${row.id}"] ptah-table-row-actions button[aria-haspopup="menu"]`,
+    );
+    this.deleteFocus.capture(row, { target: trigger ?? origin } as Pick<Event, 'target'> as Event);
     this.pendingDelete.set(row);
   }
   protected confirmDelete(row: LaneTableRow): void {
     if (this.rowBusy(row) || !this.canWrite()) return;
     this.deleteFocus.confirm(row, this.rows());
     this.delete.emit(row);
-    this.cancelDelete();
+    // Confirm: focus waits on this row's actions trigger, then moves on when the row is removed.
+    this.pendingDelete.set(null);
+    this.deleteOrigin = null;
+    this.deleteFocus.cancel();
   }
   protected cancelDelete(): void {
     this.pendingDelete.set(null);
-    this.deleteFocus.cancel();
+    const origin = this.deleteOrigin;
+    this.deleteOrigin = null;
+    if (origin?.isConnected) queueMicrotask(() => origin.focus());
+    else this.deleteFocus.cancel();
   }
   protected isOpen(
     row: LaneTableRow,
@@ -312,6 +478,14 @@ export class LanesTableComponent {
       open.place === place &&
       (place === 'cell' || this.detailRowId() === row.id)
     );
+  }
+  /** The open field of a row at one place, for `ptah-lane-model-effort-cell`. */
+  protected openFieldOf(
+    row: LaneTableRow,
+    place: 'cell' | 'detail',
+  ): CliMatrixCellField | null {
+    const field = this.openCell()?.field;
+    return field && this.isOpen(row, field, place) ? field : null;
   }
   protected togglePopover(
     row: LaneTableRow,
@@ -347,61 +521,8 @@ export class LanesTableComponent {
       );
     }
   }
-  protected effortOf(row: LaneTableRow): string {
-    return (
-      (row.kind === 'system' ? row.effort?.value : row.effort) || 'default'
-    );
-  }
-  /**
-   * The lane has an effort setting: instances always, a system lane when its CLI has one
-   * (`effort` is null otherwise). An unset effort keeps the trigger ("default"), because
-   * the trigger is the only way to choose an effort. An instance whose model is not
-   * loaded yet (`selectedModel` null) shows no trigger.
-   */
-  protected hasEffort(row: LaneTableRow): boolean {
-    if (row.kind === 'instance') return row.selectedModel !== null;
-    return row.effort != null;
-  }
-  protected hasModelId(row: LaneTableRow): boolean {
-    return !!(row.kind === 'system' ? row.model.value : row.selectedModel);
-  }
-  /** A model id as at most two unbreakable parts (see `splitModelId`). */
-  protected modelParts(row: LaneTableRow): readonly [string, string] | null {
-    return this.hasModelId(row) ? splitModelId(this.modelOf(row).label) : null;
-  }
-  /** Model text. Instance: null = not loaded, '' = the tier mappings decide. */
+  /** Title of the Model cell; the cell component renders the same text. */
   protected modelOf(row: LaneTableRow): { label: string; title: string } {
-    if (row.kind === 'system') {
-      if (!row.model.value) {
-        return { label: 'CLI default', title: 'CLI default' };
-      }
-      return cliModelDisplay(row.model.value);
-    }
-    if (row.selectedModel === null) return { label: '—', title: 'Not loaded' };
-    const label = row.selectedModel || 'Provider default';
-    return { label, title: label };
+    return laneModelDisplay(row);
   }
-}
-
-/**
- * Splits a model id after the one hyphen that makes its longer part shortest. The row renders the parts as two
- * no-wrap spans with one `<wbr>` between them, so a compact row shows the id on at most two lines with any line
- * breaker ("claude-" / "sonnet-4-6"). Returns null for an id with white space or with no inner hyphen; such a label
- * keeps the normal line breaks.
- */
-export function splitModelId(id: string): readonly [string, string] | null {
-  if (/\s/.test(id)) return null;
-  let best: readonly [string, string] | null = null;
-  for (
-    let i = id.indexOf('-');
-    i > 0 && i < id.length - 1;
-    i = id.indexOf('-', i + 1)
-  ) {
-    const parts = [id.slice(0, i + 1), id.slice(i + 1)] as const;
-    const longest = Math.max(parts[0].length, parts[1].length);
-    if (!best || longest < Math.max(best[0].length, best[1].length)) {
-      best = parts;
-    }
-  }
-  return best;
 }

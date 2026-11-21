@@ -32,7 +32,8 @@ import {
   CLI_LANE_DEFAULT_SCHEMA,
   resolveCliLaneDefaultPair,
 } from '@ptah-extension/shared';
-import { Ellipsis, LucideAngularModule } from 'lucide-angular';
+import { NgTemplateOutlet } from '@angular/common';
+import { Ellipsis, LucideAngularModule, RotateCcw } from 'lucide-angular';
 
 type Choice = NonNullable<CliLaneDefaults[CliType]>;
 const PERMISSIONS: readonly LanePermissionMode[] = [
@@ -52,6 +53,7 @@ let nextTitleId = 0;
   standalone: true,
   imports: [
     LucideAngularModule,
+    NgTemplateOutlet,
     NativePopoverComponent,
     PtahButtonDirective,
     PtahFieldTriggerDirective,
@@ -97,7 +99,26 @@ let nextTitleId = 0;
   `,
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <ng-content />
+    <!-- Icon-only reset: the tooltip and the accessible name carry the value it resets to. -->
+    <ng-template #resetControl>
+      <button
+        type="button"
+        ptahIconButton
+        size="xs"
+        [label]="'Reset to default (' + resetDescription() + ')'"
+        [disabled]="disabled() || pending() !== null"
+        data-testid="cli-lane-default-reset"
+        (click)="requestReset()"
+      >
+        <lucide-angular [img]="ResetIcon" class="size-3.5" aria-hidden="true" />
+      </button>
+    </ng-template>
+    <!-- The reset layout shows a projected control when the caller gives one, otherwise the icon-only reset. -->
+    <ng-content>
+      @if (layout() === 'reset' && saved()) {
+        <ng-container [ngTemplateOutlet]="resetControl" />
+      }
+    </ng-content>
     @if (layout() === 'card') {
       @if (saved() && (layout() !== 'compact' || showCaption())) {
         <ptah-native-popover
@@ -227,7 +248,11 @@ let nextTitleId = 0;
             saved() ? 'Saved default' : 'Auto (default) · built-in'
           }}</span>
         }
-        @if (saved() && (layout() !== 'compact' || showCaption())) {
+        @if (layout() === 'compact') {
+          @if (saved() && (resetVisibility() === 'always' || showCaption())) {
+            <ng-container [ngTemplateOutlet]="resetControl" />
+          }
+        } @else if (saved()) {
           <ptah-native-popover
             [isOpen]="resetOpen()"
             placement="bottom-start"
@@ -419,6 +444,7 @@ let nextTitleId = 0;
 })
 export class CliLaneDefaultCellComponent {
   protected readonly EllipsisIcon = Ellipsis;
+  protected readonly ResetIcon = RotateCcw;
   readonly cli = input.required<CliType>();
   readonly name = input.required<string>();
   readonly manifest = input<CliAdapterManifest>();
@@ -428,6 +454,11 @@ export class CliLaneDefaultCellComponent {
   readonly layout = input<'compact' | 'wide' | 'card' | 'reset'>('compact');
   readonly field = input<'both' | 'permission' | 'network'>('both');
   readonly showCaption = input(true);
+  /**
+   * When the `compact` layout shows its reset for a saved default. `auto`: only with the caption.
+   * `always`: also with no caption (the Ptah group header of the lanes table).
+   */
+  readonly resetVisibility = input<'auto' | 'always'>('auto');
   readonly selected = output<Choice>();
   readonly resetRequested = output<void>();
   /** Unique per instance: every provider card renders its own dialog. */

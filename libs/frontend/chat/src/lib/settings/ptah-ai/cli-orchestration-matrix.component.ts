@@ -1,4 +1,5 @@
-import { movePreferredAgentOrder } from './move-preferred-agent-order';
+import { applyDisplayedAgentOrder } from './move-preferred-agent-order';
+import type { LaneOrderMove } from './lane-order-drag';
 import {
   ChangeDetectionStrategy,
   Component,
@@ -35,11 +36,10 @@ import {
   type CliTierMappingTarget,
 } from '../providers/cli-tier-mapping-modal.component';
 import { AgentOrchestrationConfigComponent } from './agent-orchestration-config.component';
-import { PtahCliInstancesComponent } from './ptah-cli-instances.component';
 import { CliLaneDefaultsStore } from './cli-lane-defaults.store';
 import { CliProviderGridComponent } from './cli-provider-grid.component';
 import type { LaneTableRow } from './lanes-table.component';
-import { CliSharedDefaultsComponent } from './cli-shared-defaults.component';
+import { LanesAddMoreStripComponent } from './lanes-add-more-strip.component';
 import { savePreferredAgentOrder } from './preferred-agent-order-save';
 import { LanesSectionHeaderComponent } from './lanes-section-header.component';
 
@@ -98,10 +98,10 @@ const SAVE_SCOPE = 'global';
 
 /**
  * CLI Agents & Custom Instances matrix (plan :710-742, design-spec §3.5).
- * System CLI cards follow the preferred order, then an "Uninstalled" group with
- * install guides (#71, #77), collapsed by default behind a disclosure row (Gate V 36 decision 1, the Electron fold).
- * Under a hairline, the Ptah CLI instances in their own sub-section (`PtahCliInstancesComponent`: one card each, with
- * the Add). Rows come from `cliMatrixRows` (Batch 29); this component owns every write, modal and focus return.
+ * One Lanes table with two groups: CLI agents (installed system CLIs in the preferred order, then recovery rows such
+ * as a keyless Cursor) and Ptah CLI instances (with the group defaults and the one Add). System CLIs that are not
+ * installed are cards in the "Add more CLI agents" strip, with install guides (#71, #77; decision 8).
+ * Rows come from `cliMatrixRows` (Batch 29); this component owns every write, modal and focus return.
  * - On/off: system → `disabledClis`; instance → `ptahCli:update.enabled`. Model and Effort cells open
  *   `CliModelEffortPopoverComponent`. Every write is `state.saveSettings` through `SettingsSaveFeedbackService`
  *   (Undo except Delete; Batch 17 constraint), and each caller acts on that save's own result (M2).
@@ -122,9 +122,8 @@ const SAVE_SCOPE = 'global';
     LucideAngularModule,
     AddCliInstanceModalComponent,
     CliTierMappingModalComponent,
-    PtahCliInstancesComponent,
     CliProviderGridComponent,
-    CliSharedDefaultsComponent,
+    LanesAddMoreStripComponent,
     LanesSectionHeaderComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -157,6 +156,7 @@ const SAVE_SCOPE = 'global';
           <ptah-cli-provider-grid
             [rows]="tableRows()"
             [defaults]="state.orchestration().data?.cliLaneDefaults"
+            [ptahDefaults]="ptahDefaults()"
             [busy]="busy()"
             [canWrite]="canWrite()"
             [loading]="loading()"
@@ -166,12 +166,10 @@ const SAVE_SCOPE = 'global';
             [guides]="CLI_INSTALL_GUIDES"
             [error]="laneReadError()"
             (toggled)="toggle($event.row, $event.event)"
-            (moved)="moveLane($event.row, $event.direction)"
+            (reordered)="reorderLanes($event)"
             (test)="test($event.id)"
             (edit)="editLane($event)"
             (delete)="deleteLane($event)"
-            (capabilities)="showCapabilities($event)"
-            (installGuide)="showInstallGuide($event)"
             (signIn)="signInLane($event)"
             (retry)="retryLanes()"
             (redetect)="redetectFromGuide($event)"
@@ -179,12 +177,22 @@ const SAVE_SCOPE = 'global';
             (tiers)="editTiers($event)"
             (defaultSelected)="selectTableDefault($event.row, $event.choice)"
             (defaultResetRequested)="resetTableDefault($event)"
+            (addRequested)="openAdd($event)"
+            (ptahDefaultSelected)="savePtahDefault($event)"
+            (ptahDefaultResetRequested)="resetPtahDefault()"
           />
           @if (!loading() && tableRows().length === 0) {
             <p data-testid="cli-matrix-empty">
-              No CLI agent is installed. Install one from the list below, then
-              Re-detect.
+              No CLI agent installed yet. Use Add more below.
             </p>
+          }
+          @if (!orderMode()) {
+            <ptah-lanes-add-more-strip
+              [rows]="stripRows()"
+              [guides]="CLI_INSTALL_GUIDES"
+              [busy]="guideDetecting()"
+              (redetect)="redetectFromGuide($event)"
+            />
           }
           @if (loading() && !hostReadStates()) {
             <p data-testid="cli-matrix-empty">Loading CLI agents…</p>
@@ -195,26 +203,6 @@ const SAVE_SCOPE = 'global';
         <ng-content select="[read-states]" />
       </section>
 
-      @if (ptahManifest(); as manifest) {
-        <ptah-cli-shared-defaults
-          [manifest]="manifest"
-          [saved]="state.orchestration().data?.cliLaneDefaults?.['ptah-cli']"
-          [disabled]="busy() || !canWrite()"
-          (selected)="savePtahDefault($event)"
-          (resetRequested)="resetPtahDefault()"
-        />
-      }
-
-      <!-- The Ptah CLI instances: their own sub-section under a hairline, with Add and one card per instance. -->
-      <ptah-cli-instances
-        [rows]="[]"
-        [empty]="!loading() && instances().length === 0"
-        [busy]="busy()"
-        [canWrite]="canWrite()"
-        [testing]="testing()"
-        [testingId]="testingId()"
-        (addRequested)="openAdd($event)"
-      />
     </div>
 
     <!-- Batch 32: centered modals on the shared native <dialog> (design-spec §6), in this lazy chunk. -->
@@ -243,6 +231,7 @@ const SAVE_SCOPE = 'global';
 })
 export class CliOrchestrationMatrixComponent {
   private readonly providerGrid = viewChild(CliProviderGridComponent);
+  private readonly addMoreStrip = viewChild(LanesAddMoreStripComponent);
   readonly codexSettingsRequested = output<void>();
   /** The host projects its own read states into `[read-states]`, so the matrix's loading line would repeat them. */
   readonly hostReadStates = input(false, { transform: booleanAttribute });
@@ -285,14 +274,20 @@ export class CliOrchestrationMatrixComponent {
       (row): row is InstanceCliMatrixRow => row.kind === 'instance',
     ),
   );
-  protected readonly tableRows = computed((): readonly LaneTableRow[] =>
-    [...this.rows().installed, ...this.rows().uninstalled].map(
-      (row, index) => ({
-        ...row,
-        order: row.kind === 'system' && !row.installed ? undefined : index + 1,
-      }),
+  /** Not installed, but a key makes them work (keyless Cursor): they stay in the CLI agents group, unnumbered. */
+  protected readonly recoveryRows = computed(() =>
+    this.rows().uninstalled.filter((row) => row.status.kind === 'needs-key'),
+  );
+  /** Not installed: the Add more strip lists them (decision 8). */
+  protected readonly stripRows = computed(() =>
+    this.rows().uninstalled.filter(
+      (row) => row.status.kind === 'not-installed',
     ),
   );
+  protected readonly tableRows = computed((): readonly LaneTableRow[] => [
+    ...this.rows().installed.map((row, index) => ({ ...row, order: index + 1 })),
+    ...this.recoveryRows().map((row) => ({ ...row, order: undefined })),
+  ]);
   protected readonly laneCounts = computed(() => ({
     enabled: this.rows().installed.filter((row) => row.enabled).length,
     total: this.tableRows().length,
@@ -332,21 +327,20 @@ export class CliOrchestrationMatrixComponent {
       return result;
     },
   );
-  protected async moveLane(
-    row: LaneTableRow,
-    direction: -1 | 1,
-  ): Promise<void> {
+  /**
+   * One Reorder move (drag or up / down) = one write of the whole saved order, with Undo. `move.order` holds only
+   * the displayed numbered ids; `applyDisplayedAgentOrder` keeps every other saved id in its slot.
+   */
+  protected async reorderLanes(move: LaneOrderMove): Promise<void> {
     if (!this.state.reviewContext() || this.busy()) return;
-    const installed = this.rows().installed.map((item) => item.id);
     const saved = this.state.orchestration().data?.preferredAgentOrder;
-    const order = movePreferredAgentOrder(
+    const order = applyDisplayedAgentOrder(
       Array.isArray(saved) ? saved : [],
-      installed,
-      row.id,
-      direction,
+      move.order,
     );
     if (!order) return;
     await savePreferredAgentOrder(this.state, this.feedback, order);
+    this.providerGrid()?.orderSettled(move.movedId, move.direction);
   }
   protected editLane(row: LaneTableRow): void {
     if (row.kind === 'instance') this.openEdit(row);
@@ -354,16 +348,6 @@ export class CliOrchestrationMatrixComponent {
   }
   protected async deleteLane(row: LaneTableRow): Promise<void> {
     if (row.kind === 'instance') await this.remove(row);
-  }
-  protected showCapabilities(row: LaneTableRow): void {
-    this.focusAfterRender(
-      `#lane-detail-${row.id} [data-popover-kind="capabilities"]`,
-    );
-  }
-  protected showInstallGuide(row: LaneTableRow): void {
-    this.focusAfterRender(
-      `#lane-detail-${row.id} [data-popover-kind="install"]`,
-    );
   }
   protected signInLane(row: LaneTableRow): void {
     this.focusAfterRender(
@@ -387,6 +371,16 @@ export class CliOrchestrationMatrixComponent {
     return Array.isArray(detected)
       ? detected.find((cli) => cli.ptahCliId)?.manifest
       : undefined;
+  });
+  /** The Ptah CLI group defaults in the table's group header (merged control 9, P-58, P-59). */
+  protected readonly ptahDefaults = computed(() => {
+    const manifest = this.ptahManifest();
+    return manifest
+      ? {
+          manifest,
+          saved: this.state.orchestration().data?.cliLaneDefaults?.['ptah-cli'],
+        }
+      : null;
   });
   /** Neither source has data yet (the container shows each section's own loading or error line). */
   protected readonly loading = computed(
@@ -507,6 +501,7 @@ export class CliOrchestrationMatrixComponent {
       return;
     }
     this.providerGrid()?.closeGuide(rowId);
+    this.addMoreStrip()?.closeGuide(rowId);
     this.focusAfterRender(
       `[data-testid="cli-provider-card-${rowId}"] input[type="checkbox"]`,
     );

@@ -1,7 +1,7 @@
 import { ChangeDetectionStrategy, Component, computed, effect, input, output, signal, untracked } from '@angular/core';
-import { LucideAngularModule, Search, Waypoints } from 'lucide-angular';
+import { LucideAngularModule, Search, Waypoints, X } from 'lucide-angular';
 import type { ProvidersConnection } from '@ptah-extension/core';
-import { NativeModalComponent, PtahAlertComponent, PtahButtonDirective, PtahFieldComponent, PtahInputDirective, PtahListRowComponent, PtahSkeletonComponent } from '@ptah-extension/ui';
+import { NativeModalComponent, PtahAlertComponent, PtahButtonDirective, PtahFieldComponent, PtahIconButtonDirective, PtahInputDirective, PtahListRowComponent, PtahSkeletonComponent } from '@ptah-extension/ui';
 import { getAnthropicProvider } from '@ptah-extension/shared';
 import { connectionAvatarTone, connectionInitials } from './provider-connection-card.state';
 
@@ -23,11 +23,11 @@ const FOCUS = 'focus-visible:outline focus-visible:outline-2 focus-visible:outli
 @Component({
   selector: 'ptah-provider-catalog-modal',
   standalone: true,
-  imports: [LucideAngularModule, NativeModalComponent, PtahAlertComponent, PtahButtonDirective, PtahFieldComponent, PtahInputDirective, PtahListRowComponent, PtahSkeletonComponent],
+  imports: [LucideAngularModule, NativeModalComponent, PtahAlertComponent, PtahButtonDirective, PtahFieldComponent, PtahIconButtonDirective, PtahInputDirective, PtahListRowComponent, PtahSkeletonComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <ptah-native-modal [isOpen]="open()" ariaLabelledby="provider-catalog-title" size="md" (closed)="closed.emit()">
-      <div modal-header class="-mx-6 -mt-6 flex items-center gap-2 border-b border-base-300 bg-base-200 px-3 py-2.5" data-testid="provider-catalog-modal">
+    <ptah-native-modal [isOpen]="open()" ariaLabelledby="provider-catalog-title" size="md" layout="shell" (closed)="closed.emit()">
+      <div modal-header class="flex items-center gap-2" data-testid="provider-catalog-modal">
         <h2 id="provider-catalog-title" class="sr-only">Connect a provider</h2>
         <lucide-angular [img]="SearchIcon" class="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
         <!-- First focusable control in the dialog: showModal() focuses it (asserted in Gate G RUX-3). -->
@@ -37,9 +37,13 @@ const FOCUS = 'focus-visible:outline focus-visible:outline-2 focus-visible:outli
           [value]="query()" (input)="query.set(value($event))" data-testid="provider-catalog-search" />
         </ptah-field>
         <kbd class="kbd kbd-xs" aria-hidden="true">ESC</kbd>
+        <!-- After the search in the DOM: the search stays the first focusable control. -->
+        <button type="button" ptahIconButton label="Close" (click)="closed.emit()" data-testid="provider-catalog-close">
+          <lucide-angular [img]="CloseIcon" class="h-4 w-4" aria-hidden="true" />
+        </button>
       </div>
 
-      <div class="-mx-3 max-h-[50vh] space-y-3 overflow-y-auto pt-3 text-xs" data-testid="provider-catalog-body">
+      <div class="space-y-3 text-xs" data-testid="provider-catalog-body">
         @switch (status()) {
           @case ('error') {
             <ptah-alert tone="error" [compact]="true" live="assertive" data-testid="provider-catalog-error">
@@ -102,6 +106,7 @@ const FOCUS = 'focus-visible:outline focus-visible:outline-2 focus-visible:outli
 })
 export class ProviderCatalogModalComponent {
   protected readonly SearchIcon = Search;
+  protected readonly CloseIcon = X;
   protected readonly CustomIcon = Waypoints;
   protected readonly focusRing = FOCUS;
 

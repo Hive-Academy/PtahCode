@@ -1,5 +1,6 @@
 import { By } from '@angular/platform-browser';
 import { LanesTableComponent } from './lanes-table.component';
+import { LanesAddMoreStripComponent } from './lanes-add-more-strip.component';
 import { ApplicationRef, signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import {
@@ -355,6 +356,17 @@ describe('CliOrchestrationMatrixComponent', () => {
     if (!component) throw new Error('Lanes table not mounted');
     return component;
   }
+  /** The numbered (positioned) lane ids, in display order. */
+  function numbered(): string[] {
+    return table()
+      .rows()
+      .filter((item) => item.kind === 'instance' || item.installed)
+      .map((item) => item.id);
+  }
+  function enterReorder(): void {
+    fixture.componentInstance['orderMode'].set(true);
+    fixture.detectChanges();
+  }
   function lane(id: string) {
     const found = table()
       .rows()
@@ -478,7 +490,12 @@ describe('CliOrchestrationMatrixComponent', () => {
       ready({ ...ORCHESTRATION, preferredAgentOrder: originalOrder }),
     );
     fixture.detectChanges();
-    table().moved.emit({ row: lane('codex'), direction: 1 });
+    expect(numbered()).toEqual(['codex', 'antigravity', 'glm-1', 'copilot', 'opencode']);
+    table().reordered.emit({
+      order: ['antigravity', 'codex', 'glm-1', 'copilot', 'opencode'],
+      movedId: 'codex',
+      direction: 'down',
+    });
     await flush();
     expect(state.saveSettings).toHaveBeenCalledWith(
       {
@@ -519,7 +536,11 @@ describe('CliOrchestrationMatrixComponent', () => {
       }),
     );
     fixture.detectChanges();
-    table().moved.emit({ row: lane('codex'), direction: 1 });
+    table().reordered.emit({
+      order: ['antigravity', 'codex', 'glm-1', 'copilot', 'opencode'],
+      movedId: 'codex',
+      direction: 'down',
+    });
     await flush();
     expect(state.saveSettings).toHaveBeenCalledWith(
       {
@@ -532,6 +553,67 @@ describe('CliOrchestrationMatrixComponent', () => {
             'copilot',
             'opencode',
           ],
+        },
+      },
+      CONTEXT,
+    );
+  });
+
+  it('writes the full order from the Reorder up / down buttons, keeps undisplayed ids in their slots, with Undo', async () => {
+    const originalOrder = ['codex', 'cursor', 'antigravity', 'glm-1', 'copilot'];
+    state.orchestration.set(ready({ ...ORCHESTRATION, preferredAgentOrder: originalOrder }));
+    fixture.detectChanges();
+    enterReorder();
+    element()
+      .querySelector<HTMLButtonElement>('[data-testid="policy-order-down-codex"]')
+      ?.click();
+    await flush();
+    expect(state.saveSettings).toHaveBeenCalledTimes(1);
+    expect(state.saveSettings).toHaveBeenCalledWith(
+      {
+        orchestration: {
+          preferredAgentOrder: ['antigravity', 'cursor', 'codex', 'glm-1', 'copilot', 'opencode'],
+        },
+      },
+      CONTEXT,
+    );
+    await feedback.undo();
+    await flush();
+    expect(state.saveSettings).toHaveBeenLastCalledWith(
+      { orchestration: { preferredAgentOrder: originalOrder } },
+      CONTEXT,
+    );
+  });
+
+  it('writes a drag over two positions once, with the undisplayed ids in their slots', async () => {
+    state.orchestration.set(
+      ready({ ...ORCHESTRATION, preferredAgentOrder: ['codex', 'cursor', 'antigravity', 'glm-1', 'copilot'] }),
+    );
+    fixture.detectChanges();
+    enterReorder();
+    const rowOf = (id: string) =>
+      element().querySelector<HTMLElement>(
+        `[data-testid="cli-provider-card-${id}"], [data-testid="cli-matrix-row-${id}"]`,
+      )!;
+    const drag = (type: string, target: Element, clientY = 0) => {
+      const event = new Event(type, { bubbles: true, cancelable: true }) as DragEvent;
+      Object.defineProperty(event, 'clientY', { value: clientY });
+      Object.defineProperty(event, 'dataTransfer', {
+        value: { setData: jest.fn(), effectAllowed: '', dropEffect: '' },
+      });
+      target.dispatchEvent(event);
+    };
+    drag('dragstart', element().querySelector('[data-testid="policy-order-grip-codex"]')!);
+    // jsdom rects are 0-sized: clientY 1 is the lower half of the target row (insert after it).
+    drag('dragover', rowOf('glm-1'), 1);
+    fixture.detectChanges();
+    drag('drop', rowOf('glm-1'), 1);
+    await flush();
+    expect(state.saveSettings).toHaveBeenCalledTimes(1);
+    expect(state.saveSettings).toHaveBeenCalledWith(
+      {
+        orchestration: {
+          preferredAgentOrder: ['antigravity', 'cursor', 'glm-1', 'codex', 'copilot', 'opencode'],
         },
       },
       CONTEXT,
@@ -582,8 +664,16 @@ describe('CliOrchestrationMatrixComponent', () => {
         ?.closest('dialog')
         ?.hasAttribute('open'),
     ).toBe(true);
-    table().tiers.emit(lane('glm-1'));
+    // Edit tiers lives in the detail footer only (decision 23).
+    q<HTMLButtonElement>(
+      '[data-testid="cli-matrix-row-glm-1"] ptah-table-row-expander button',
+    )?.click();
     fixture.detectChanges();
+    q<HTMLButtonElement>('[data-testid="cli-matrix-tiers-glm-1"]')?.click();
+    fixture.detectChanges();
+    expect(
+      q('#lane-detail-glm-1 [data-testid="cli-matrix-tiers-glm-1"]'),
+    ).not.toBeNull();
     expect(
       q('[data-testid="cli-tier-mapping-modal"]')
         ?.closest('dialog')
@@ -600,10 +690,17 @@ describe('CliOrchestrationMatrixComponent', () => {
     );
   });
 
-  it('routes install Re-detect and retry to existing state reads', async () => {
-    table().redetect.emit('pi');
+  it('routes install Re-detect (table and strip) and retry to existing state reads', async () => {
+    // The keyless Cursor detail keeps its install guide in the table; not-installed CLIs re-detect from the strip.
+    table().redetect.emit('cursor');
     await flush();
     expect(state.redetectClis).toHaveBeenCalledTimes(1);
+    const strip = fixture.debugElement.query(
+      By.directive(LanesAddMoreStripComponent),
+    )?.componentInstance as LanesAddMoreStripComponent;
+    strip.redetect.emit('pi');
+    await flush();
+    expect(state.redetectClis).toHaveBeenCalledTimes(2);
     table().retry.emit();
     await flush();
     expect(state.refreshOrchestration).toHaveBeenCalledTimes(1);

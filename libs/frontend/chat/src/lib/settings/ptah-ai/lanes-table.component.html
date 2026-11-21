@@ -4,6 +4,7 @@
   density="compact"
   [wideDetail]="true"
   [attr.data-model-column]="modelColumn()"
+  [attr.data-order-mode]="orderMode()"
   [collapseBelow]="950"
   data-testid="cli-provider-grid"
 >
@@ -45,50 +46,233 @@
       </th>
     </tr>
   </thead>
-  <tbody>
-    @if (error() && rows().length > 0) {
-      <tr>
-        <td [ptahMessageCell]="8">
-          {{ error() }}
-          <button
-            ptahButton
-            type="button"
-            variant="ghost"
-            size="xs"
-            (click)="retry.emit()"
-          >
-            Retry
-          </button>
+  @if (error() && rows().length > 0) {
+    <tbody>
+      <tr data-testid="lanes-partial-error">
+        <td [ptahMessageCell]="columnCount()" role="alert">
+          <span class="lanes-state-line">
+            <lucide-angular [img]="AlertIcon" class="lanes-state-icon" aria-hidden="true" />
+            {{ error() }}
+            <button
+              ptahButton
+              type="button"
+              variant="ghost"
+              size="xs"
+              (click)="retry.emit()"
+            >
+              <lucide-angular [img]="RetryIcon" class="lanes-state-icon" aria-hidden="true" />
+              Retry
+            </button>
+          </span>
         </td>
       </tr>
-    }
-    @for (row of rows(); track row.id) {
+    </tbody>
+  }
+  @if (rows().length === 0 && (loading() || error())) {
+    <tbody [attr.aria-busy]="loading() ? 'true' : null">
+      @if (loading()) {
+        <tr>
+          <td [ptahMessageCell]="columnCount()" role="status">
+            <span class="lanes-state-line">
+              <lucide-angular
+                [img]="LoadingIcon"
+                class="lanes-state-icon animate-spin motion-reduce:animate-none"
+                aria-hidden="true"
+              />
+              Loading lanes…
+            </span>
+          </td>
+        </tr>
+        @for (index of skeletonRows; track index) {
+          <tr class="lanes-skeleton-row" data-testid="lanes-skeleton-row" aria-hidden="true">
+            <td [ptahMessageCell]="columnCount()"><span class="lanes-skeleton-bar"></span></td>
+          </tr>
+        }
+      } @else {
+        <tr>
+          <td [ptahMessageCell]="columnCount()" role="alert">
+            <span class="lanes-state-line">
+              <lucide-angular [img]="AlertIcon" class="lanes-state-icon" aria-hidden="true" />
+              {{ error() }}
+              <button
+                ptahButton
+                type="button"
+                variant="ghost"
+                size="xs"
+                (click)="retry.emit()"
+              >
+                <lucide-angular [img]="RetryIcon" class="lanes-state-icon" aria-hidden="true" />
+                Retry
+              </button>
+            </span>
+          </td>
+        </tr>
+      }
+    </tbody>
+  } @else {
+  @for (group of groups(); track group.key) {
+    <tbody [attr.data-lanes-group]="group.key">
+      @if (group.key === 'cli') {
+        <tr class="lanes-group-header" data-testid="lanes-group-cli">
+          <th scope="rowgroup" [attr.colspan]="columnCount()">
+            <span class="lanes-group-in">
+              <lucide-angular [img]="CliGroupIcon" class="lanes-state-icon" aria-hidden="true" />
+              <span class="lanes-group-name">CLI agents</span>
+              <span class="lanes-group-count" data-testid="lanes-group-cli-count">{{ group.rows.length }}</span>
+              <span class="lanes-group-push">
+                <ptah-lanes-redetect-button />
+              </span>
+            </span>
+          </th>
+        </tr>
+      } @else if (group.key === 'ptah') {
+        <tr class="lanes-group-header lanes-group-second" data-testid="lanes-group-ptah">
+          <th scope="rowgroup" [attr.colspan]="columnCount()">
+            <span class="lanes-group-in">
+              <lucide-angular [img]="PtahGroupIcon" class="lanes-state-icon" aria-hidden="true" />
+              <span class="lanes-group-name">Ptah CLI instances</span>
+              <span class="lanes-group-count" data-testid="lanes-group-ptah-count">{{ group.rows.length }}</span>
+              <span class="lanes-group-push">
+                @if (ptahDefaults(); as defaults) {
+                  <span class="lanes-ptah-defaults" data-testid="lanes-ptah-defaults">
+                    <ptah-cli-lane-default-cell
+                      cli="ptah-cli"
+                      name="Ptah CLI"
+                      layout="compact"
+                      [showCaption]="false"
+                      resetVisibility="always"
+                      [manifest]="defaults.manifest"
+                      [saved]="defaults.saved"
+                      [disabled]="busy() || !canWrite()"
+                      (selected)="ptahDefaultSelected.emit($event)"
+                      (resetRequested)="ptahDefaultResetRequested.emit()"
+                    />
+                  </span>
+                }
+                @if (group.rows.length > 0) {
+                  <button
+                    type="button"
+                    ptahButton
+                    variant="outline"
+                    size="xs"
+                    id="cli-matrix-add"
+                    data-testid="cli-matrix-add"
+                    [disabled]="busy() || !canWrite()"
+                    (click)="addRequested.emit('header')"
+                  >
+                    <lucide-angular [img]="AddIcon" class="lanes-state-icon" aria-hidden="true" />
+                    Add Ptah CLI instance
+                  </button>
+                }
+              </span>
+            </span>
+          </th>
+        </tr>
+      }
+    @for (row of group.rows; track row.id) {
       @let position = positions().get(row.id);
       <tr
         [ptahRowState]="
           row.kind === 'system' && !row.installed ? 'muted' : 'default'
         "
+        [attr.data-lane-kind]="row.kind"
         [attr.data-testid]="
           row.kind === 'system'
             ? 'cli-provider-card-' + row.id
             : 'cli-matrix-row-' + row.id
         "
+        [attr.data-drop]="
+          orderMode() && position !== undefined
+            ? drag.dropIndex() === position
+              ? 'before'
+              : position === orderIds().length - 1 &&
+                  drag.dropIndex() === orderIds().length
+                ? 'after'
+                : null
+            : null
+        "
+        (dragover)="position !== undefined && drag.dragOver($event, position)"
+        (drop)="drag.drop($event)"
       >
-        <td>
-          @if (row.kind === 'system' && !row.installed) {
-            <span>—</span>
+        <td class="lane-order-cell">
+          @if (position === undefined) {
+            <span aria-hidden="true">—</span>
           } @else if (orderMode()) {
-            <fieldset class="contents" [disabled]="rowBusy(row) || !canWrite()">
-              <ptah-table-order-buttons
-                [rowLabel]="row.name"
-                [index]="position ?? 0"
-                [count]="positions().size"
-                (moveUp)="moveRow(row, -1)"
-                (moveDown)="moveRow(row, 1)"
-              />
-            </fieldset>
+            @if (
+              drag.dropIndex() === position ||
+              (position === orderIds().length - 1 &&
+                drag.dropIndex() === orderIds().length)
+            ) {
+              <span
+                class="lane-order-drop-indicator"
+                [attr.data-edge]="
+                  drag.dropIndex() === position ? 'before' : 'after'
+                "
+                aria-hidden="true"
+                data-testid="policy-order-drop-indicator"
+              ></span>
+            }
+            <span class="lane-order-controls">
+              <span
+                class="lane-order-grip"
+                draggable="true"
+                aria-roledescription="sortable"
+                [attr.aria-label]="'Drag ' + row.name + ' to reorder'"
+                [attr.data-testid]="'policy-order-grip-' + row.id"
+                (dragstart)="orderDragStart(row, $event, position)"
+                (dragend)="drag.endDrag()"
+              >
+                <lucide-angular
+                  [img]="GripIcon"
+                  class="lane-order-icon"
+                  aria-hidden="true"
+                />
+              </span>
+              <button
+                type="button"
+                ptahIconButton
+                size="xs"
+                density="compact"
+                data-order-up
+                [label]="'Move ' + row.name + ' up'"
+                [attr.aria-disabled]="
+                  position === 0 || rowBusy(row) || !canWrite() ? 'true' : null
+                "
+                [attr.data-testid]="'policy-order-up-' + row.id"
+                (click)="orderUp(row, position)"
+              >
+                <lucide-angular
+                  [img]="UpIcon"
+                  class="lane-order-icon"
+                  aria-hidden="true"
+                />
+              </button>
+              <button
+                type="button"
+                ptahIconButton
+                size="xs"
+                density="compact"
+                data-order-down
+                [label]="'Move ' + row.name + ' down'"
+                [attr.aria-disabled]="
+                  position === orderIds().length - 1 ||
+                  rowBusy(row) ||
+                  !canWrite()
+                    ? 'true'
+                    : null
+                "
+                [attr.data-testid]="'policy-order-down-' + row.id"
+                (click)="orderDown(row, position)"
+              >
+                <lucide-angular
+                  [img]="DownIcon"
+                  class="lane-order-icon"
+                  aria-hidden="true"
+                />
+              </button>
+            </span>
           } @else {
-            {{ row.order ?? (position ?? 0) + 1 }}
+            {{ row.order ?? position + 1 }}
           }
         </td>
         <th scope="row" class="ptah-table-control-cell">
@@ -96,12 +280,17 @@
             [row]="row"
             [defaults]="defaults()"
             [collapsed]="table.collapsed()"
-            (installGuideRequested)="recover(row)"
           />
           @if (table.collapsed() && !modelColumn()) {
-            <ng-container
-              [ngTemplateOutlet]="modelEffort"
-              [ngTemplateOutletContext]="{ $implicit: row, place: 'cell' }"
+            <ptah-lane-model-effort-cell
+              [row]="row"
+              place="cell"
+              [openField]="openFieldOf(row, 'cell')"
+              [interactive]="row.interactive"
+              [canWrite]="canWrite()"
+              [busy]="rowBusy(row)"
+              (toggled)="togglePopover(row, $event, 'cell')"
+              (closed)="closePopover()"
             />
           }
         </th>
@@ -113,40 +302,21 @@
             [testResult]="testResults()[row.id] ?? ''"
           />
           <div class="lane-row-actions flex items-center gap-ptah-inline">
-            @if (
-              row.status.kind === 'needs-key' ||
-              row.status.kind === 'not-installed'
-            ) {
+            @if (row.status.kind === 'needs-key') {
               <button
                 type="button"
                 ptahButton
                 variant="ghost"
                 size="sm"
-                [attr.aria-label]="
-                  row.status.kind === 'not-installed'
-                    ? 'Install guide'
-                    : 'Sign in'
-                "
+                aria-label="Sign in"
+                data-testid="lanes-sign-in"
                 (click)="recover(row)"
               >
-                {{
-                  row.status.kind === 'not-installed'
-                    ? table.collapsed()
-                      ? 'Install'
-                      : 'Install guide'
-                    : 'Sign in'
-                }}
+                <lucide-angular [img]="SignInIcon" class="lanes-state-icon" aria-hidden="true" />
+                Sign in
               </button>
             }
             <ptah-table-row-actions [rowLabel]="row.name">
-              <button
-                role="menuitem"
-                type="button"
-                [attr.aria-label]="'Details for ' + row.name"
-                (click)="showDetail(row)"
-              >
-                Details
-              </button>
               <button
                 role="menuitem"
                 type="button"
@@ -160,43 +330,13 @@
                   row.kind === 'instance' ? 'cli-matrix-test-' + row.id : null
                 "
               >
+                <lucide-angular [img]="TestIcon" class="lanes-state-icon" aria-hidden="true" />
                 Test
               </button>
-              <button
-                role="menuitem"
-                type="button"
-                (click)="
-                  showDetail(row, 'capabilities'); capabilities.emit(row)
-                "
-              >
-                All capabilities
-              </button>
-              @if (row.kind === 'instance') {
-                <button
-                  role="menuitem"
-                  type="button"
-                  [attr.data-testid]="'cli-matrix-tiers-' + row.id"
-                  (click)="tiers.emit(row); showDetail(row)"
-                >
-                  Tiers
-                </button>
-                <button
-                  role="menuitem"
-                  type="button"
-                  [disabled]="rowBusy(row) || !canWrite()"
-                  (click)="edit.emit(row)"
-                  [attr.data-testid]="'cli-matrix-edit-' + row.id"
-                >
-                  Edit
-                </button>
-                <button
-                  role="menuitem"
-                  type="button"
-                  [disabled]="rowBusy(row) || !canWrite()"
-                  (click)="requestDelete(row, $event)"
-                  [attr.data-testid]="'cli-matrix-delete-' + row.id"
-                >
-                  Delete
+              @if (row.status.kind === 'needs-key') {
+                <button role="menuitem" type="button" (click)="recover(row)">
+                  <lucide-angular [img]="SignInIcon" class="lanes-state-icon" aria-hidden="true" />
+                  Sign in
                 </button>
               }
             </ptah-table-row-actions>
@@ -225,10 +365,14 @@
             />
           } @else {
             <span
-              class="text-xs text-base-content-muted"
-              title="Managed by connection"
-              >Unavailable</span
+              class="lanes-inherited"
+              title="From Ptah CLI defaults"
+              data-testid="lanes-inherited-permission"
             >
+              <lucide-angular [img]="InheritedIcon" class="lanes-state-icon" aria-hidden="true" />
+              {{ inherited().permission }}
+              <span class="lanes-inherited-tag">(default)</span>
+            </span>
           }
         </td>
         <td ptahCollapsible ptahControlCell class="ptah-table-control-cell">
@@ -246,10 +390,14 @@
             />
           } @else {
             <span
-              class="text-xs text-base-content-muted"
-              title="Managed by connection"
-              >Unavailable</span
+              class="lanes-inherited"
+              title="From Ptah CLI defaults"
+              data-testid="lanes-inherited-network"
             >
+              <lucide-angular [img]="InheritedIcon" class="lanes-state-icon" aria-hidden="true" />
+              {{ inherited().network }}
+              <span class="lanes-inherited-tag">(default)</span>
+            </span>
           }
         </td>
         <td
@@ -258,117 +406,16 @@
           data-testid="cli-matrix-model"
           class="ptah-table-control-cell"
         >
-          <ng-template #modelEffort let-row let-place="place">
-            <span
-              class="lane-model-value inline-flex min-w-0 items-center gap-ptah-inline text-xs"
-            >
-              @if (row.kind === 'instance' && row.selectedModel === null) {
-                <span [title]="modelOf(row).title">{{
-                  modelOf(row).label
-                }}</span>
-              } @else {
-                <ptah-native-popover
-                  [isOpen]="isOpen(row, 'model', place)"
-                  [keepInViewport]="true"
-                  placement="bottom-start"
-                  [hasBackdrop]="true"
-                  backdropClass="transparent"
-                  (closed)="closePopover()"
-                >
-                  <button
-                    trigger
-                    type="button"
-                    ptahButton
-                    variant="ghost"
-                    size="xs"
-                    density="compact"
-                    class="min-w-0 lane-model-trigger"
-                    [class.font-mono]="hasModelId(row)"
-                    noPadding
-                    data-popover-kind="model"
-                    [disabled]="!row.interactive || !canWrite()"
-                    [attr.data-busy]="rowBusy(row) ? '' : null"
-                    [attr.aria-disabled]="rowBusy(row) ? 'true' : null"
-                    [attr.aria-busy]="rowBusy(row) ? 'true' : null"
-                    [attr.aria-label]="'Model default for ' + row.name"
-                    [attr.aria-expanded]="isOpen(row, 'model', place)"
-                    [title]="modelOf(row).title"
-                    (click)="togglePopover(row, 'model', place)"
-                  >
-                    @if (modelParts(row); as parts) {
-                      <span class="lane-model-id"
-                        ><span class="lane-model-part">{{ parts[0] }}</span
-                        ><wbr /><span class="lane-model-part">{{
-                          parts[1]
-                        }}</span></span
-                      >
-                    } @else {
-                      {{ modelOf(row).label }}
-                    }
-                  </button>
-                  @if (isOpen(row, 'model', place)) {
-                    <ptah-cli-model-effort-popover
-                      content
-                      [row]="row"
-                      field="model"
-                      (closed)="closePopover()"
-                    />
-                  }
-                </ptah-native-popover>
-              }
-              @if (
-                hasEffort(row) &&
-                (place === 'detail' ||
-                  (row.kind === 'system' ? row.effort?.value : row.effort))
-              ) {
-                @if (place !== 'detail') {
-                  <span aria-hidden="true">·</span>
-                }
-                <ptah-native-popover
-                  [isOpen]="isOpen(row, 'effort', place)"
-                  [keepInViewport]="true"
-                  placement="bottom-start"
-                  [hasBackdrop]="true"
-                  backdropClass="transparent"
-                  (closed)="closePopover()"
-                >
-                  <button
-                    trigger
-                    type="button"
-                    ptahButton
-                    [variant]="place === 'detail' ? 'outline' : 'ghost'"
-                    size="xs"
-                    density="compact"
-                    data-popover-kind="effort"
-                    [disabled]="!row.interactive || !canWrite()"
-                    [attr.data-busy]="rowBusy(row) ? '' : null"
-                    [attr.aria-disabled]="rowBusy(row) ? 'true' : null"
-                    [attr.aria-busy]="rowBusy(row) ? 'true' : null"
-                    [attr.aria-label]="'Effort default for ' + row.name"
-                    [attr.aria-expanded]="isOpen(row, 'effort', place)"
-                    [title]="effortOf(row)"
-                    (click)="togglePopover(row, 'effort', place)"
-                  >
-                    {{ place === 'detail' ? 'Effort: ' : ''
-                    }}{{ effortOf(row) }}
-                  </button>
-                  @if (isOpen(row, 'effort', place)) {
-                    <ptah-cli-model-effort-popover
-                      content
-                      [row]="row"
-                      field="effort"
-                      (closed)="closePopover()"
-                    />
-                  }
-                </ptah-native-popover>
-              }
-              <span class="sr-only" data-testid="lanes-effort-na"></span>
-            </span>
-          </ng-template>
           @if (!table.collapsed() || modelColumn()) {
-            <ng-container
-              [ngTemplateOutlet]="modelEffort"
-              [ngTemplateOutletContext]="{ $implicit: row, place: 'cell' }"
+            <ptah-lane-model-effort-cell
+              [row]="row"
+              place="cell"
+              [openField]="openFieldOf(row, 'cell')"
+              [interactive]="row.interactive"
+              [canWrite]="canWrite()"
+              [busy]="rowBusy(row)"
+              (toggled)="togglePopover(row, $event, 'cell')"
+              (closed)="closePopover()"
             />
           }
         </td>
@@ -405,7 +452,7 @@
       >
         <td
           ptahDetailCell
-          [colspan]="table.collapsed() ? (modelColumn() ? 6 : 5) : 8"
+          [colspan]="columnCount()"
         >
           @if (detailRowId() === row.id) {
             <ptah-lanes-table-detail
@@ -445,11 +492,11 @@
                         (resetRequested)="defaultResetRequested.emit(row)"
                       />
                     } @else {
-                      <span
-                        class="text-xs text-base-content-muted"
-                        title="Managed by connection"
-                        >Unavailable</span
-                      >
+                      <span class="lanes-inherited" title="From Ptah CLI defaults">
+                        <lucide-angular [img]="InheritedIcon" class="lanes-state-icon" aria-hidden="true" />
+                        {{ inherited().permission }}
+                        <span class="lanes-inherited-tag">(default)</span>
+                      </span>
                     }
                   </dd>
                   <dt>Network</dt>
@@ -471,26 +518,29 @@
                         (resetRequested)="defaultResetRequested.emit(row)"
                       />
                     } @else {
-                      <span
-                        class="text-xs text-base-content-muted"
-                        title="Managed by connection"
-                        >Unavailable</span
-                      >
+                      <span class="lanes-inherited" title="From Ptah CLI defaults">
+                        <lucide-angular [img]="InheritedIcon" class="lanes-state-icon" aria-hidden="true" />
+                        {{ inherited().network }}
+                        <span class="lanes-inherited-tag">(default)</span>
+                      </span>
                     }
                   </dd>
                 }
                 <dt>Model / Effort</dt>
                 <dd class="lane-default-value">
-                  <ng-container
-                    [ngTemplateOutlet]="modelEffort"
-                    [ngTemplateOutletContext]="{
-                      $implicit: row,
-                      place: 'detail',
-                    }"
+                  <ptah-lane-model-effort-cell
+                    [row]="row"
+                    place="detail"
+                    [openField]="openFieldOf(row, 'detail')"
+                    [interactive]="row.interactive"
+                    [canWrite]="canWrite()"
+                    [busy]="rowBusy(row)"
+                    (toggled)="togglePopover(row, $event, 'detail')"
+                    (closed)="closePopover()"
                   />
                 </dd>
               </ng-container>
-              <span laneActions>
+              <span footer-actions>
                 @if (row.kind === 'system' && defaults()?.[row.cli]) {
                   <ptah-cli-lane-default-cell
                     #detailDefaults
@@ -504,14 +554,14 @@
                   >
                     <button
                       type="button"
-                      ptahButton
-                      variant="outline"
+                      ptahIconButton
                       size="sm"
                       data-testid="lanes-detail-reset-default"
+                      [label]="resetDefaultLabel(row)"
                       [disabled]="rowBusy(row) || !canWrite()"
                       (click)="detailDefaults.requestReset()"
                     >
-                      {{ resetDefaultLabel(row) }}
+                      <lucide-angular [img]="ResetIcon" class="lanes-state-icon" aria-hidden="true" />
                     </button>
                   </ptah-cli-lane-default-cell>
                 }
@@ -521,9 +571,11 @@
                     ptahButton
                     variant="outline"
                     size="sm"
+                    [attr.data-testid]="'cli-matrix-edit-' + row.id"
                     [disabled]="rowBusy(row) || !canWrite()"
                     (click)="edit.emit(row)"
                   >
+                    <lucide-angular [img]="EditIcon" class="lanes-state-icon" aria-hidden="true" />
                     Edit
                   </button>
                   <button
@@ -531,10 +583,12 @@
                     ptahButton
                     variant="ghost"
                     size="sm"
+                    [attr.data-testid]="'cli-matrix-delete-' + row.id"
                     [disabled]="rowBusy(row) || !canWrite()"
                     tone="danger"
                     (click)="requestDelete(row, $event)"
                   >
+                    <lucide-angular [img]="DeleteIcon" class="lanes-state-icon" aria-hidden="true" />
                     Delete
                   </button>
                 }
@@ -552,26 +606,49 @@
         </td>
       </tr>
     } @empty {
-      <tr>
-        <td [ptahMessageCell]="8">
-          @if (loading()) {
-            Loading lanes…
-          } @else if (error()) {
-            {{ error() }}
-            <button
-              ptahButton
-              type="button"
-              variant="ghost"
-              size="xs"
-              (click)="retry.emit()"
-            >
-              Retry
-            </button>
-          } @else {
-            No lanes available.
-          }
-        </td>
-      </tr>
+      @if (group.key === 'ptah' && !loading()) {
+        <tr>
+          <td [ptahMessageCell]="columnCount()" data-testid="cli-matrix-no-instances">
+            <span class="lanes-state-line">
+              No Ptah CLI instance yet.
+              <button
+                type="button"
+                ptahButton
+                variant="primary"
+                size="xs"
+                id="cli-matrix-add"
+                data-testid="cli-matrix-add"
+                [disabled]="busy() || !canWrite()"
+                (click)="addRequested.emit('empty')"
+              >
+                <lucide-angular [img]="AddIcon" class="lanes-state-icon" aria-hidden="true" />
+                Add Ptah CLI instance
+              </button>
+            </span>
+          </td>
+        </tr>
+      } @else if (group.key === 'cli' && !loading() && rows().length === 0) {
+        <tr>
+          <td [ptahMessageCell]="columnCount()" data-testid="lanes-empty">
+            <span class="lanes-state-line">
+              <lucide-angular [img]="EmptyIcon" class="lanes-state-icon" aria-hidden="true" />
+              No lanes available
+            </span>
+          </td>
+        </tr>
+      }
     }
-  </tbody>
+    </tbody>
+  }
+  }
 </ptah-table>
+@if (orderMode()) {
+  <p
+    class="sr-only"
+    aria-live="polite"
+    aria-atomic="true"
+    data-testid="policy-order-live"
+  >
+    {{ drag.announcement() }}
+  </p>
+}

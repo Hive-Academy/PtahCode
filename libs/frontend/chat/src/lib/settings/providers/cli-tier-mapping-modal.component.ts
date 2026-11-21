@@ -13,7 +13,7 @@ import {
   signal,
   untracked,
 } from '@angular/core';
-import { LucideAngularModule, X } from 'lucide-angular';
+import { Layers, LucideAngularModule, X } from 'lucide-angular';
 import {
   ProvidersSettingsStateService,
   type ProvidersEditContext,
@@ -96,6 +96,7 @@ interface Catalogue {
   templateUrl: './cli-tier-mapping-modal.component.html',
 })
 export class CliTierMappingModalComponent {
+  protected readonly TitleIcon = Layers;
   protected readonly CloseIcon = X;
   protected readonly focusRing = FOCUS;
   protected readonly tiers = TIERS;

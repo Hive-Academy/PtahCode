@@ -152,6 +152,8 @@ describe('CapabilityMatrixSettingComponent', () => {
     ).toHaveLength(1);
     expect(root().querySelectorAll('[id^="detail-"]')).toHaveLength(1);
     expect(root().querySelector(`[id="${ids[0]}"]`)).not.toBeNull();
+    // The capped panel clips a shadow on the projected card (decision 32): the panel owns the surface shadow.
+    expect(root().querySelector(`[id="${ids[0]}"]`)?.className).not.toMatch(/shadow/);
   });
   it('connects collapsed detail triggers to their content', async () => {
     const original = globalThis.ResizeObserver;
