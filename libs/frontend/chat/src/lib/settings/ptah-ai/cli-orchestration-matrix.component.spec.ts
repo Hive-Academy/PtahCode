@@ -573,8 +573,8 @@ describe('CliOrchestrationMatrixComponent', () => {
   });
 
   it('projects the host read states into the card, outside any busy region', () => {
-    state.orchestration.set({ status: 'error', data: null, error: 'x' });
-    state.cliAgents.set({ status: 'error', data: null, error: 'x' });
+    state.orchestration.set({ status: 'loading', data: null, error: null });
+    state.cliAgents.set({ status: 'loading', data: null, error: null });
     const host = TestBed.createComponent(ReadStatesHostComponent);
     host.detectChanges();
     const root = host.nativeElement as HTMLElement;
@@ -636,6 +636,105 @@ describe('CliOrchestrationMatrixComponent', () => {
     expect(announce).toHaveBeenCalledWith(
       'Still not found. Check the step above, then try again.',
       'status',
+    );
+  });
+
+  it('keeps the guide open and says the read failed when detection succeeds but the read-back fails (finding 6)', async () => {
+    const announce = jest.spyOn(feedback, 'announce');
+    q<HTMLButtonElement>('[data-testid="lanes-strip-install-pi"]')?.click();
+    fixture.detectChanges();
+    state.onRedetect = () =>
+      state.orchestration.set({ status: 'error', data: null, error: 'Could not load this section. Retry.' });
+    button(q('[data-testid="cli-provider-card-pi"]'), 'Re-detect')?.click();
+    await flush();
+    await fixture.whenStable();
+    expect(announce).toHaveBeenCalledWith(
+      'Detection ran, but the lane list could not be read. Try again.',
+      'alert',
+    );
+    expect(announce).not.toHaveBeenCalledWith(
+      'Still not found. Check the step above, then try again.',
+      'status',
+    );
+    expect(document.activeElement).not.toBe(
+      q('[data-testid="cli-provider-card-pi"] input[type="checkbox"]'),
+    );
+  });
+
+  it('keeps the guide Re-detect pending until its read-backs end (finding 6)', async () => {
+    let finish: (value: boolean) => void = () => undefined;
+    state.redetectClis.mockImplementationOnce(
+      () => new Promise<boolean>((resolve) => (finish = resolve)),
+    );
+    q<HTMLButtonElement>('[data-testid="lanes-strip-install-pi"]')?.click();
+    fixture.detectChanges();
+    const redetect = () =>
+      button(q('[data-testid="cli-provider-card-pi"]'), 'Re-detect')?.click();
+    redetect();
+    await flush();
+    // Detection is done (the section is ready), but the read-backs still run: a second request waits.
+    expect(state.cliDetection().status).toBe('ready');
+    redetect();
+    await flush();
+    expect(state.redetectClis).toHaveBeenCalledTimes(1);
+    finish(true);
+    await flush();
+  });
+
+  it('focuses the matrix region when the found lane has no enabled toggle (finding 6)', async () => {
+    state.scopes.set({ status: 'loading', data: null, error: null });
+    q<HTMLButtonElement>('[data-testid="lanes-strip-install-pi"]')?.click();
+    fixture.detectChanges();
+    state.onRedetect = () =>
+      state.orchestration.update((section) => ({
+        ...section,
+        data: {
+          ...ORCHESTRATION,
+          detectedClis: ORCHESTRATION.detectedClis.map((cli) =>
+            cli.cli === 'pi' ? detected('pi', true) : cli,
+          ),
+        },
+      }));
+    button(q('[data-testid="cli-provider-card-pi"]'), 'Re-detect')?.click();
+    await flush();
+    await fixture.whenStable();
+    expect(
+      q<HTMLInputElement>('[data-testid="cli-provider-card-pi"] input[type="checkbox"]')
+        ?.disabled,
+    ).toBe(true);
+    expect(document.activeElement).toBe(q('[data-testid="cli-matrix"]'));
+  });
+
+  it('shows the terminal error and Retry, not Loading, when both reads failed (finding 8)', () => {
+    state.orchestration.set({ status: 'error', data: null, error: 'Could not load this section. Retry.' });
+    state.cliAgents.set({ status: 'error', data: null, error: 'Could not load this section. Retry.' });
+    fixture.detectChanges();
+    expect(q('[data-testid="cli-matrix"]')?.getAttribute('aria-busy')).toBe(
+      'false',
+    );
+    expect(q('[data-testid="lanes-skeleton-row"]')).toBeNull();
+    const table = q('[data-testid="cli-provider-grid"]');
+    expect(table?.textContent).toContain('Could not load lanes.');
+    expect(button(table, 'Retry')).toBeDefined();
+    expect(q('[data-testid="cli-matrix-empty"]')).toBeNull();
+  });
+
+  it('keeps Loading while one source is still pending and no row is readable (finding 8)', () => {
+    state.orchestration.set({ status: 'error', data: null, error: 'Could not load this section. Retry.' });
+    state.cliAgents.set({ status: 'loading', data: null, error: null });
+    fixture.detectChanges();
+    expect(q('[data-testid="cli-matrix"]')?.getAttribute('aria-busy')).toBe(
+      'true',
+    );
+  });
+
+  it('shows no empty copy after a partial read with zero rows (finding 8)', () => {
+    state.orchestration.set({ status: 'error', data: null, error: 'Could not load this section. Retry.' });
+    state.cliAgents.set(ready([]));
+    fixture.detectChanges();
+    expect(q('[data-testid="cli-matrix-empty"]')).toBeNull();
+    expect(q('[data-testid="cli-provider-grid"]')?.textContent).toContain(
+      'Could not load lanes.',
     );
   });
 

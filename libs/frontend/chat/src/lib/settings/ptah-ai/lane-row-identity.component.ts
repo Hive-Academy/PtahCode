@@ -5,7 +5,7 @@ import {
   input,
   ViewEncapsulation,
 } from '@angular/core';
-import type { CliLaneDefaults } from '@ptah-extension/shared';
+import { isCliProcessDump, type CliLaneDefaults } from '@ptah-extension/shared';
 import {
   ProviderMarkComponent,
   PtahTableRowTitleComponent,
@@ -152,12 +152,7 @@ import {
       [attr.data-testid]="
         row.kind === 'system' && row.versionLabel ? 'cli-matrix-version' : null
       "
-      [attr.title]="
-        row.name +
-        (row.kind === 'system' && row.versionLabel
-          ? ' - ' + row.versionLabel
-          : '')
-      "
+      [attr.title]="row.name + (versionTitle() ? ' - ' + versionTitle() : '')"
       [name]="row.name"
       [secondary]="secondLine()"
       [mono]="row.kind === 'system'"
@@ -203,6 +198,16 @@ export class LaneRowIdentityComponent {
   protected readonly secondLine = computed(() => {
     const row = this.row();
     return (row.kind === 'system' ? row.versionLabel : row.provider) || '--';
+  });
+  /**
+   * P-42: the tooltip keeps the full version line as the CLI printed it ("GitHub Copilot CLI 1.0.83.") while line 2
+   * shows the short label. A banner or multi-line probe output is never a tooltip: the short label stands in for it.
+   */
+  protected readonly versionTitle = computed(() => {
+    const row = this.row();
+    if (row.kind !== 'system' || !row.versionLabel) return '';
+    const full = row.version?.trim();
+    return full && !isCliProcessDump(full) ? full : row.versionLabel;
   });
   protected markId(providerId: string): string {
     const mark = cliMarkFor('ptah-cli', providerId);

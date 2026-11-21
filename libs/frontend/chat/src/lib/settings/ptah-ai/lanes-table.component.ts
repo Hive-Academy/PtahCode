@@ -73,8 +73,8 @@ import {
 } from './lane-option-labels';
 import {
   LaneOrderDrag,
-  type LaneOrderDirection,
   type LaneOrderMove,
+  type LaneOrderSettlement,
 } from './lane-order-drag';
 
 export { splitModelId } from './lane-model-effort-cell.component';
@@ -217,6 +217,8 @@ export class LanesTableComponent {
   readonly orderMode = input(false);
   readonly busy = input(false);
   readonly canWrite = input(true);
+  /** `false` while the saved order is not verified (failed, partial or running read): no move is requested. */
+  readonly canReorder = input(true);
   readonly busyRows = input<Readonly<Record<string, boolean>>>({});
   readonly testingRows = input<Readonly<Record<string, boolean>>>({});
   readonly testResults = input<Readonly<Record<string, string>>>({});
@@ -361,6 +363,16 @@ export class LanesTableComponent {
       }
     });
     effect(() => this.deleteFocus.onRowsChanged(this.rows()));
+    // The Delete confirmation lives in the detail footer: closing that detail drops the pending confirmation.
+    effect(() => {
+      const pending = this.pendingDelete();
+      if (pending && this.detailRowId() !== pending.id)
+        untracked(() => {
+          this.pendingDelete.set(null);
+          this.deleteOrigin = null;
+          this.deleteFocus.cancel();
+        });
+    });
     // Decision 26: Reorder mode shows one flat list; an expanded detail and its popovers close.
     effect(() => {
       if (!this.orderMode()) return;
@@ -377,7 +389,8 @@ export class LanesTableComponent {
   protected readonly drag = new LaneOrderDrag({
     ids: () => this.orderIds(),
     name: (id) => this.rows().find((row) => row.id === id)?.name ?? id,
-    canReorder: () => this.orderMode() && !this.busy() && this.canWrite(),
+    canReorder: () =>
+      this.orderMode() && !this.busy() && this.canWrite() && this.canReorder(),
     move: (move) => this.reordered.emit(move),
   });
   protected orderUp(row: LaneTableRow, index: number): void {
@@ -396,11 +409,13 @@ export class LanesTableComponent {
     this.drag.startDrag(event, index);
   }
   /**
-   * Called by the host once the save of a move ends. The rows show the read-back order: focus returns to the
-   * same button of the moved row (or its other one at an end), and the new position is announced.
+   * Called by the host once the save of a move ends, with its outcome and the confirmed numbered order. A saved
+   * move announces its new position from that order. Focus returns after the rows render, to the same button of
+   * the moved row (or its other one at an end); a failed save restores it with no announcement.
    */
-  orderSettled(id: string, direction: LaneOrderDirection): void {
-    this.drag.settled(id, direction, () =>
+  orderSettled(result: LaneOrderSettlement): void {
+    const { id, direction } = result;
+    this.drag.settled(result, () =>
       afterNextRender(
         () => {
           const host = this.element.nativeElement;

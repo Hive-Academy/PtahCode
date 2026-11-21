@@ -78,7 +78,30 @@ describe('LaneRowIdentityComponent', () => {
       expect(secondLine()?.classList).toContain('ptah-table-row-title-mono');
       const title = q('ptah-table-row-title');
       expect(title?.getAttribute('data-testid')).toBe('cli-matrix-version');
-      expect(title?.getAttribute('title')).toBe('Codex - v1.2.3');
+      expect(title?.getAttribute('title')).toBe('Codex - 1.2.3');
+    });
+
+    it('keeps the full single-line version in the tooltip and the short label on line 2 (P-42)', () => {
+      mount(
+        system({
+          id: 'copilot',
+          name: 'Copilot',
+          cli: 'copilot',
+          version: 'GitHub Copilot CLI 1.0.83.',
+          versionLabel: 'v1.0.83',
+        }),
+      );
+      expect(secondLine()?.textContent).toBe('v1.0.83');
+      expect(q('ptah-table-row-title')?.getAttribute('title')).toBe(
+        'Copilot - GitHub Copilot CLI 1.0.83.',
+      );
+    });
+
+    it('never puts a multi-line probe output in the tooltip', () => {
+      mount(system({ version: 'codex-cli 0.155.1\nUsage: codex', versionLabel: 'v0.155.1' }));
+      expect(q('ptah-table-row-title')?.getAttribute('title')).toBe(
+        'Codex - v0.155.1',
+      );
     });
 
     it('line 2 of a Ptah CLI instance is its provider', () => {

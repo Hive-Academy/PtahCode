@@ -1,13 +1,13 @@
 import { ChangeDetectionStrategy, Component, input, output, viewChild } from '@angular/core';
 import type { CliAdapterManifest, CliLaneDefaults, CliType } from '@ptah-extension/shared';
 import { LanesTableComponent, type LaneTableRow } from './lanes-table.component';
-import type { LaneOrderDirection, LaneOrderMove } from './lane-order-drag';
+import type { LaneOrderMove, LaneOrderSettlement } from './lane-order-drag';
 
 @Component({
   selector: 'ptah-cli-provider-grid', standalone: true,
   imports: [LanesTableComponent], changeDetection: ChangeDetectionStrategy.OnPush,
   template: `<ptah-lanes-table [rows]="rows()" [defaults]="defaults()" [ptahDefaults]="ptahDefaults()"
-    [busy]="busy()" [canWrite]="canWrite()" [testingRows]="testingRows()"
+    [busy]="busy()" [canWrite]="canWrite()" [canReorder]="canReorder()" [testingRows]="testingRows()"
     [testResults]="testResults()" [loading]="loading()" [orderMode]="orderMode()"
     [guides]="guides()" [error]="error()"
     (toggled)="toggled.emit($event)" (reordered)="reordered.emit($event)"
@@ -25,12 +25,13 @@ export class CliProviderGridComponent {
   private readonly table = viewChild(LanesTableComponent);
   closeGuide(rowId: string): void { this.table()?.closeGuide(rowId); }
   /** After the save of a Reorder move: focus and announcement of the moved row. */
-  orderSettled(id: string, direction: LaneOrderDirection): void { this.table()?.orderSettled(id, direction); }
+  orderSettled(result: LaneOrderSettlement): void { this.table()?.orderSettled(result); }
   readonly rows = input.required<readonly LaneTableRow[]>();
   readonly defaults = input<CliLaneDefaults>();
   readonly ptahDefaults = input<{ readonly manifest: CliAdapterManifest; readonly saved: CliLaneDefaults['ptah-cli'] } | null>(null);
   readonly busy = input(false);
   readonly canWrite = input(true);
+  readonly canReorder = input(true);
   readonly testingRows = input<Readonly<Record<string, boolean>>>({});
   readonly testResults = input<Readonly<Record<string, string>>>({});
   readonly loading = input(false);

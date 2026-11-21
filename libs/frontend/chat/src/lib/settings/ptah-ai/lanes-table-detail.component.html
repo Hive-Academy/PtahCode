@@ -41,7 +41,9 @@
       <dd class="lane-detail-native">
         <span
           class="lane-detail-native-text"
-          [class.lane-detail-clamp]="!nativeExpanded()"
+          [class.lane-detail-clamp]="
+            nativeIsLong(system.permission.detail) && !nativeExpanded()
+          "
           [id]="'lane-native-' + row().id"
           data-testid="lane-detail-native"
           >{{ system.permission.detail }}</span

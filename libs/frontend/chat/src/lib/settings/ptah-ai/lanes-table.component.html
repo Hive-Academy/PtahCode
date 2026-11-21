@@ -236,7 +236,9 @@
                 data-order-up
                 [label]="'Move ' + row.name + ' up'"
                 [attr.aria-disabled]="
-                  position === 0 || rowBusy(row) || !canWrite() ? 'true' : null
+                  position === 0 || rowBusy(row) || !canWrite() || !canReorder()
+                    ? 'true'
+                    : null
                 "
                 [attr.data-testid]="'policy-order-up-' + row.id"
                 (click)="orderUp(row, position)"
@@ -257,7 +259,8 @@
                 [attr.aria-disabled]="
                   position === orderIds().length - 1 ||
                   rowBusy(row) ||
-                  !canWrite()
+                  !canWrite() ||
+                  !canReorder()
                     ? 'true'
                     : null
                 "
@@ -341,14 +344,6 @@
               }
             </ptah-table-row-actions>
           </div>
-          @if (pendingDelete()?.id === row.id) {
-            <ptah-inline-confirm
-              [message]="'Delete ' + row.name + '?'"
-              tone="danger"
-              (confirm)="confirmDelete(row)"
-              (cancelled)="cancelDelete()"
-            />
-          }
         </td>
         <td ptahCollapsible ptahControlCell class="ptah-table-control-cell">
           @if (row.kind === 'system') {
@@ -591,16 +586,20 @@
                     <lucide-angular [img]="DeleteIcon" class="lanes-state-icon" aria-hidden="true" />
                     Delete
                   </button>
+                  <!-- The one confirmation group of Delete, next to the footer Delete that opens it. -->
+                  @if (pendingDelete()?.id === row.id) {
+                    <ptah-inline-confirm
+                      [message]="'Delete ' + row.name + '?'"
+                      tone="danger"
+                      data-testid="lanes-delete-confirm"
+                      [confirmTestId]="'lanes-delete-confirm-' + row.id"
+                      [cancelTestId]="'lanes-delete-cancel-' + row.id"
+                      (confirm)="confirmDelete(row)"
+                      (cancelled)="cancelDelete()"
+                    />
+                  }
                 }
               </span>
-              @if (pendingDelete()?.id === row.id) {
-                <ptah-inline-confirm
-                  [message]="'Delete ' + row.name + '?'"
-                  tone="danger"
-                  (confirm)="confirmDelete(row)"
-                  (cancelled)="cancelDelete()"
-                />
-              }
             </ptah-lanes-table-detail>
           }
         </td>

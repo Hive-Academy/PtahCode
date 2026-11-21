@@ -62,16 +62,11 @@ async function matrixCard(page: Page, id: string): Promise<Locator> {
     `[data-testid="${id === GLM_ID ? 'cli-matrix-row' : 'cli-provider-card'}-${id}"]`,
   );
   await expect(card).toBeVisible();
+  // The row expander is the one entry point of the table detail (the kebab has no Details item).
   const details = card.locator('ptah-table-row-expander button');
-  if ((await details.getAttribute('aria-expanded')) === 'false') {
-    if (await details.isVisible()) await details.click();
-    else {
-      await card
-        .locator('ptah-table-row-actions button[aria-haspopup="menu"]')
-        .click();
-      await card.getByRole('menuitem', { name: 'Details' }).click();
-    }
-  }
+  await expect(details).toBeVisible();
+  if ((await details.getAttribute('aria-expanded')) === 'false')
+    await details.click();
   return card;
 }
 
@@ -252,18 +247,17 @@ const INSTANCE_ENTRIES: readonly ReachabilityEntry[] = [
     status: 'present',
     reach: async (page) => {
       const glm = await matrixCard(page, GLM_ID);
-      await expect(glm).toHaveAttribute('data-kind', 'instance');
-      // The instance is a card in the "Ptah CLI instances" sub-section (the section heading replaces the old
-      // per-row "Ptah CLI" badge), with its name and its provider mark and label.
-      const section = page.locator('[data-testid="cli-instances"]');
+      await expect(glm).toHaveAttribute('data-lane-kind', 'instance');
+      // The instance is a row of the "Ptah CLI instances" group: the table body that starts with that group
+      // header, with its name and its provider mark and label.
+      const group = page.locator(
+        'tbody:has(> [data-testid="lanes-group-ptah"])',
+      );
       await expect(
-        section.getByRole('heading', {
-          name: 'Ptah CLI instances',
-          exact: true,
-        }),
-      ).toBeVisible();
+        group.locator('[data-testid="lanes-group-ptah"] .lanes-group-name'),
+      ).toHaveText('Ptah CLI instances');
       await expect(
-        section.locator(`[data-testid="cli-matrix-row-${GLM_ID}"]`),
+        group.locator(`[data-testid="cli-matrix-row-${GLM_ID}"]`),
       ).toHaveCount(1);
       await expect(glm.getByText('Glm', { exact: true })).toBeVisible();
       await expect(
@@ -695,14 +689,13 @@ export const CLI_MATRIX_ENTRIES: readonly ReachabilityEntry[] = [
     // shared fixture's `settings:get` is static, so the read-back cannot confirm the write: the entry asserts the
     // write, and that the toast does not claim it was saved (D15).
     reach: async (page) => {
-      const glm = await matrixCard(page, GLM_ID);
-      const tiers = glm.locator(`[data-testid="cli-matrix-tiers-${GLM_ID}"]`);
-      if (await tiers.isVisible()) await tiers.click();
-      else {
-        await page
-          .locator(`#lane-detail-${GLM_ID} button:text-is("Edit tiers")`)
-          .click();
-      }
+      await matrixCard(page, GLM_ID);
+      // Tiers lives in the detail footer; the same locator opens the modal and receives focus back.
+      const tiers = laneDetail(page, GLM_ID).locator(
+        `[data-testid="cli-matrix-tiers-${GLM_ID}"]`,
+      );
+      await visibleEnabled(tiers);
+      await tiers.click();
       const dialog = page.locator(
         'dialog:has([data-testid="cli-tier-mapping-modal"])',
       );

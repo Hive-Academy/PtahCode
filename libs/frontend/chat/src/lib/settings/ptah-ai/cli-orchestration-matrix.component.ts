@@ -1,4 +1,3 @@
-import { applyDisplayedAgentOrder } from './move-preferred-agent-order';
 import type { LaneOrderMove } from './lane-order-drag';
 import {
   ChangeDetectionStrategy,
@@ -40,7 +39,10 @@ import { CliLaneDefaultsStore } from './cli-lane-defaults.store';
 import { CliProviderGridComponent } from './cli-provider-grid.component';
 import type { LaneTableRow } from './lanes-table.component';
 import { LanesAddMoreStripComponent } from './lanes-add-more-strip.component';
-import { savePreferredAgentOrder } from './preferred-agent-order-save';
+import {
+  savePreferredAgentOrder,
+  verifiedPreferredAgentOrder,
+} from './preferred-agent-order-save';
 import { LanesSectionHeaderComponent } from './lanes-section-header.component';
 import { LanesMaxConcurrentComponent } from './lanes-max-concurrent.component';
 
@@ -143,7 +145,7 @@ const SAVE_SCOPE = 'global';
           [total]="laneCounts().total"
           [enabled]="laneCounts().enabled"
           [editing]="orderMode()"
-          [disabled]="busy() || !canWrite()"
+          [disabled]="busy() || !canReorder()"
           (editRequested)="orderMode.set(!orderMode())"
         >
           <ptah-lanes-max-concurrent controls />
@@ -164,6 +166,7 @@ const SAVE_SCOPE = 'global';
             [ptahDefaults]="ptahDefaults()"
             [busy]="busy()"
             [canWrite]="canWrite()"
+            [canReorder]="canReorder()"
             [loading]="loading()"
             [testingRows]="testingRows()"
             [testResults]="tableTestResults()"
@@ -186,7 +189,7 @@ const SAVE_SCOPE = 'global';
             (ptahDefaultSelected)="savePtahDefault($event)"
             (ptahDefaultResetRequested)="resetPtahDefault()"
           />
-          @if (!loading() && tableRows().length === 0) {
+          @if (confirmedEmpty()) {
             <p data-testid="cli-matrix-empty">
               No CLI agent installed yet. Use Add more below.
             </p>
@@ -245,8 +248,11 @@ export class CliOrchestrationMatrixComponent {
   readonly hostReadStates = input(false, { transform: booleanAttribute });
   protected readonly TerminalIcon = Terminal;
   protected readonly CLI_INSTALL_GUIDES = CLI_INSTALL_GUIDES;
+  /** An install-guide Re-detect stays pending through its read-backs, not only its detection call. */
+  private readonly guidePending = signal(false);
   protected readonly guideDetecting = computed(
-    () => this.state.cliDetection().status === 'loading',
+    () =>
+      this.guidePending() || this.state.cliDetection().status === 'loading',
   );
 
   protected readonly state = inject(ProvidersSettingsStateService);
@@ -338,20 +344,44 @@ export class CliOrchestrationMatrixComponent {
       return result;
     },
   );
+  /** The saved order from a ready, complete read; `null` blocks Reorder (a move would drop saved ids). */
+  private readonly verifiedOrder = computed(() =>
+    verifiedPreferredAgentOrder(this.state),
+  );
+  /**
+   * Reorder starts, and moves are requested, only with a verified saved order and at least two numbered lanes.
+   * Done stays operable: the header disables only the Reorder entry, never Done.
+   */
+  protected readonly canReorder = computed(
+    () =>
+      this.canWrite() &&
+      this.verifiedOrder() !== null &&
+      this.rows().installed.length >= 2,
+  );
   /**
    * One Reorder move (drag or up / down) = one write of the whole saved order, with Undo. `move.order` holds only
-   * the displayed numbered ids; `applyDisplayedAgentOrder` keeps every other saved id in its slot.
+   * the displayed numbered ids; `savePreferredAgentOrder` keeps every other saved id in its slot and refuses an
+   * unverified base. The grid settles with the outcome and the confirmed numbered order from the read-back.
    */
   protected async reorderLanes(move: LaneOrderMove): Promise<void> {
-    if (!this.state.reviewContext() || this.busy()) return;
-    const saved = this.state.orchestration().data?.preferredAgentOrder;
-    const order = applyDisplayedAgentOrder(
-      Array.isArray(saved) ? saved : [],
+    if (this.busy() || !this.canReorder()) {
+      this.settleOrder(move, false);
+      return;
+    }
+    const result = await savePreferredAgentOrder(
+      this.state,
+      this.feedback,
       move.order,
     );
-    if (!order) return;
-    await savePreferredAgentOrder(this.state, this.feedback, order);
-    this.providerGrid()?.orderSettled(move.movedId, move.direction);
+    this.settleOrder(move, result === 'saved');
+  }
+  private settleOrder(move: LaneOrderMove, saved: boolean): void {
+    this.providerGrid()?.orderSettled({
+      id: move.movedId,
+      direction: move.direction,
+      saved,
+      order: this.rows().installed.map((row) => row.id),
+    });
   }
   protected editLane(row: LaneTableRow): void {
     if (row.kind === 'instance') this.openEdit(row);
@@ -393,9 +423,26 @@ export class CliOrchestrationMatrixComponent {
         }
       : null;
   });
-  /** Neither source has data yet (the container shows each section's own loading or error line). */
-  protected readonly loading = computed(
-    () => !this.state.orchestration().data && !this.state.cliAgents().data,
+  /**
+   * From the source statuses: no row is readable yet and a source read is still pending. Two failed reads are
+   * not loading: the table shows its terminal error and Retry.
+   */
+  protected readonly loading = computed(() => {
+    const pending = (status: string) =>
+      status === 'unloaded' || status === 'loading';
+    return (
+      this.tableRows().length === 0 &&
+      (pending(this.state.orchestration().status) ||
+        pending(this.state.cliAgents().status))
+    );
+  });
+  /** The empty copy needs a confirmed read: both sources ready and complete, with no row. */
+  protected readonly confirmedEmpty = computed(
+    () =>
+      this.tableRows().length === 0 &&
+      this.state.orchestration().status === 'ready' &&
+      this.state.cliAgents().status === 'ready' &&
+      this.laneReadError() === null,
   );
   /** Save triggers wait while any save runs (D3). */
   protected readonly busy = this.feedback.saving;
@@ -495,26 +542,50 @@ export class CliOrchestrationMatrixComponent {
   );
 
   /**
-   * The install guide's Re-detect: the same re-read as the policy bar's Re-detect CLIs. A CLI that is found
-   * leaves the Uninstalled group, so the guide closes and focus follows the row; otherwise the page toast says why.
+   * The install guide's Re-detect: the same re-read as the policy bar's Re-detect CLIs. It stays pending until
+   * the detection and its read-backs end. Only a lane that the read-back shows as installed closes the guide and
+   * takes focus (its toggle, or the matrix region when the toggle is disabled or absent). An incomplete read-back
+   * is not "still missing": the page toast says which one it is.
    */
   protected async redetectFromGuide(rowId: string): Promise<void> {
     if (this.guideDetecting()) return;
-    if (!(await this.state.redetectClis())) {
+    this.guidePending.set(true);
+    let detected: boolean;
+    try {
+      detected = await this.state.redetectClis();
+    } finally {
+      this.guidePending.set(false);
+    }
+    if (!detected) {
       this.feedback.announce('Detection failed. Try again.', 'alert');
       return;
     }
-    if (this.rows().uninstalled.some((row) => row.id === rowId)) {
+    const installed = this.rows().installed.some(
+      (row) => row.kind === 'system' && row.id === rowId && row.installed,
+    );
+    if (installed) {
+      this.providerGrid()?.closeGuide(rowId);
+      this.addMoreStrip()?.closeGuide(rowId);
+      this.focusAfterRender(
+        `[data-testid="cli-provider-card-${rowId}"] input[type="checkbox"]`,
+        '[data-testid="cli-matrix"]',
+      );
+      return;
+    }
+    const complete =
+      this.state.orchestration().status === 'ready' &&
+      this.state.cliAgents().status === 'ready' &&
+      this.rows().missing.length === 0;
+    if (complete && this.rows().uninstalled.some((row) => row.id === rowId)) {
       this.feedback.announce(
         'Still not found. Check the step above, then try again.',
         'status',
       );
       return;
     }
-    this.providerGrid()?.closeGuide(rowId);
-    this.addMoreStrip()?.closeGuide(rowId);
-    this.focusAfterRender(
-      `[data-testid="cli-provider-card-${rowId}"] input[type="checkbox"]`,
+    this.feedback.announce(
+      'Detection ran, but the lane list could not be read. Try again.',
+      'alert',
     );
   }
 
@@ -675,6 +746,7 @@ export class CliOrchestrationMatrixComponent {
           // The narrow layout hides inline Tiers and Test (they move into More).
           if (
             target &&
+            !target.matches(':disabled') &&
             !target.closest('[hidden], [aria-hidden="true"]') &&
             getComputedStyle(target).display !== 'none' &&
             getComputedStyle(target).visibility !== 'hidden'

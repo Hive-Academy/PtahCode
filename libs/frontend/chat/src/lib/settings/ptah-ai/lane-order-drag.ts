@@ -9,6 +9,14 @@ export interface LaneOrderMove {
   readonly direction: LaneOrderDirection;
 }
 
+/** The end of a requested move's save: its outcome and the confirmed numbered id order after the read-back. */
+export interface LaneOrderSettlement {
+  readonly id: string;
+  readonly direction: LaneOrderDirection;
+  readonly saved: boolean;
+  readonly order: readonly string[];
+}
+
 export interface LaneOrderDragOptions {
   /** The ids in the displayed order, first lane first. */
   readonly ids: () => readonly string[];
@@ -31,7 +39,11 @@ export class LaneOrderDrag {
   readonly dropIndex: Signal<number | null> = this.dropIndexState.asReadonly();
   /** The text of the polite live region (set after a move settles). */
   readonly announcement: Signal<string> = this.announcementState.asReadonly();
-  private dragFrom: number | null = null;
+  /**
+   * The dragged row's id and the id sequence when the drag started. A drop resolves the source by id; when the
+   * sequence changed during the drag (a detection refresh inserted or removed a lane), the drag is cancelled.
+   */
+  private dragged: { id: string; ids: readonly string[] } | null = null;
   /** The row that moved and where it was, so `settled()` can tell whether the order changed. */
   private pending: { id: string; from: number } | null = null;
 
@@ -52,15 +64,21 @@ export class LaneOrderDrag {
       event.preventDefault();
       return;
     }
-    this.dragFrom = index;
+    const ids = [...this.options.ids()];
+    const id = ids[index];
+    if (id === undefined) {
+      event.preventDefault();
+      return;
+    }
+    this.dragged = { id, ids };
     if (event.dataTransfer) {
       event.dataTransfer.effectAllowed = 'move';
-      event.dataTransfer.setData('text/plain', this.options.ids()[index]);
+      event.dataTransfer.setData('text/plain', id);
     }
   }
 
   dragOver(event: DragEvent, index: number): void {
-    const from = this.dragFrom;
+    const from = this.dragSource();
     if (from === null) return;
     event.preventDefault();
     if (event.dataTransfer) event.dataTransfer.dropEffect = 'move';
@@ -76,7 +94,7 @@ export class LaneOrderDrag {
 
   drop(event: DragEvent): void {
     event.preventDefault();
-    const from = this.dragFrom,
+    const from = this.dragSource(),
       target = this.dropIndexState();
     this.endDrag();
     if (from === null || target === null) return;
@@ -84,28 +102,44 @@ export class LaneOrderDrag {
   }
 
   endDrag(): void {
-    this.dragFrom = null;
+    this.dragged = null;
     this.dropIndexState.set(null);
   }
 
   /**
-   * Called once the save of a move ends and `ids()` is the read-back order. The new position is announced only
-   * when the row moved. `focus` returns focus to the moved row; the view owns the DOM, so it supplies it.
+   * Called once the save of a move ends. `result.order` is the confirmed numbered id order from the read-back
+   * (the host passes it, so a child input that has yet to render cannot hide the move). The new position is
+   * announced only for a saved move that changed the row's position; a failed or refused save announces
+   * nothing. `focus` returns focus to the moved row in both cases; the view owns the DOM, so it supplies it.
    */
   settled(
-    id: string,
-    direction: LaneOrderDirection,
+    result: LaneOrderSettlement,
     focus: (id: string, direction: LaneOrderDirection) => void,
   ): void {
     const pending = this.pending;
     this.pending = null;
-    const ids = this.options.ids();
-    const index = ids.indexOf(id);
-    if (pending?.id === id && index >= 0 && index !== pending.from)
+    const { id, direction, saved, order } = result;
+    const index = order.indexOf(id);
+    if (saved && pending?.id === id && index >= 0 && index !== pending.from)
       this.announcementState.set(
-        `${this.options.name(id)} moved to position ${index + 1} of ${ids.length}`,
+        `${this.options.name(id)} moved to position ${index + 1} of ${order.length}`,
       );
     focus(id, direction);
+  }
+
+  /** The dragged row's current index, or `null` (and the drag ends) when the id sequence changed. */
+  private dragSource(): number | null {
+    const dragged = this.dragged;
+    if (!dragged) return null;
+    const ids = this.options.ids();
+    const same =
+      ids.length === dragged.ids.length &&
+      ids.every((id, index) => id === dragged.ids[index]);
+    if (!same) {
+      this.endDrag();
+      return null;
+    }
+    return ids.indexOf(dragged.id);
   }
 
   private request(from: number, to: number): void {

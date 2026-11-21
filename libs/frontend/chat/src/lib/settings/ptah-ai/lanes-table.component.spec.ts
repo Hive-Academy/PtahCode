@@ -594,19 +594,33 @@ describe('LanesTableComponent', () => {
     remove.focus();
     remove.click();
     fixture.detectChanges();
-    expect(q(host, 'ptah-inline-confirm')).not.toBeNull();
-    expect(document.activeElement?.textContent?.trim()).toBe('Cancel');
-    const cancel = Array.from(
-      host.querySelectorAll('ptah-inline-confirm button'),
-    ).find(
-      (button) => button.textContent?.trim() === 'Cancel',
+    // One confirmation group only, next to the footer Delete; its own Cancel has focus.
+    expect(host.querySelectorAll('ptah-inline-confirm')).toHaveLength(1);
+    const footer = q(host, '#lane-detail-a [data-testid="lane-detail-footer"]')!;
+    const cancel = footer.querySelector(
+      '[data-testid="lanes-delete-cancel-a"]',
     ) as HTMLButtonElement;
+    expect(cancel).not.toBeNull();
+    expect(q(host, '[data-lane-status] ptah-inline-confirm')).toBeNull();
+    expect(document.activeElement).toBe(cancel);
     cancel.click();
     fixture.detectChanges();
     await Promise.resolve();
     expect(q(host, 'ptah-inline-confirm')).toBeNull();
     expect(document.activeElement).toBe(remove);
     expect(deleted).not.toHaveBeenCalled();
+  });
+
+  it('drops the pending Delete confirmation when its detail closes', async () => {
+    const { fixture, host } = await mount([instance('a')]);
+    expand(fixture, host, 'cli-matrix-row-a');
+    (q(host, '[data-testid="cli-matrix-delete-a"]') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    expect(host.querySelectorAll('ptah-inline-confirm')).toHaveLength(1);
+    expand(fixture, host, 'cli-matrix-row-a');
+    expect(q(host, '#lane-detail-a ptah-lanes-table-detail')).toBeNull();
+    expand(fixture, host, 'cli-matrix-row-a');
+    expect(q(host, 'ptah-inline-confirm')).toBeNull();
   });
 
   it('focuses the next row actions trigger when Confirm removes the deleted row', async () => {
@@ -811,7 +825,12 @@ describe('LanesTableComponent', () => {
       const button = btn(host, 'down', 'a');
       const focused = jest.fn();
       button.addEventListener('focus', focused);
-      fixture.componentInstance.orderSettled('a', 'down');
+      fixture.componentInstance.orderSettled({
+        id: 'a',
+        direction: 'down',
+        saved: true,
+        order: ['a', 'b'],
+      });
       fixture.detectChanges();
       await fixture.whenStable();
       button.dispatchEvent(new FocusEvent('focus', { bubbles: false }));
@@ -908,9 +927,14 @@ describe('LanesTableComponent', () => {
     it('keeps focus on the same button of the moved row and announces its position', async () => {
       const { fixture, host } = await mount([instance('a'), instance('b')], true);
       fixture.componentInstance.reordered.subscribe(() => {
+        // The host settles before the new rows render (finding 5): focus waits for the render.
+        fixture.componentInstance.orderSettled({
+          id: 'a',
+          direction: 'down',
+          saved: true,
+          order: ['b', 'a'],
+        });
         fixture.componentRef.setInput('rows', [instance('b'), instance('a')]);
-        fixture.detectChanges();
-        fixture.componentInstance.orderSettled('a', 'down');
       });
       btn(host, 'down', 'a').click();
       fixture.detectChanges();
@@ -920,6 +944,36 @@ describe('LanesTableComponent', () => {
       expect(
         q(host, '[data-testid="policy-order-live"]')?.textContent?.trim(),
       ).toBe('Lane a moved to position 2 of 2');
+    });
+
+    it('restores focus with no move announcement when the save fails', async () => {
+      const { fixture, host } = await mount([instance('a'), instance('b')], true);
+      fixture.componentInstance.reordered.subscribe(() =>
+        fixture.componentInstance.orderSettled({
+          id: 'a',
+          direction: 'down',
+          saved: false,
+          order: ['a', 'b'],
+        }),
+      );
+      btn(host, 'down', 'a').click();
+      fixture.detectChanges();
+      await fixture.whenStable();
+      expect(document.activeElement).toBe(btn(host, 'down', 'a'));
+      expect(
+        q(host, '[data-testid="policy-order-live"]')?.textContent?.trim(),
+      ).toBe('');
+    });
+
+    it('requests no move while the saved order is not verified', async () => {
+      const { fixture, host } = await mount([instance('a'), instance('b')], true);
+      fixture.componentRef.setInput('canReorder', false);
+      fixture.detectChanges();
+      const reordered = jest.fn();
+      fixture.componentInstance.reordered.subscribe(reordered);
+      expect(btn(host, 'down', 'a').getAttribute('aria-disabled')).toBe('true');
+      btn(host, 'down', 'a').click();
+      expect(reordered).not.toHaveBeenCalled();
     });
 
     it('keeps an unpositioned row after the numbered rows with a dash and no controls', async () => {
@@ -1070,7 +1124,7 @@ describe('LanesTableComponent', () => {
       expect(q(host, '[data-testid="cli-provider-card-codex"]')).not.toBeNull();
       const version = q(host, '[data-testid="cli-matrix-version"]');
       expect(version?.textContent).toContain('v1.2.3');
-      expect(version?.getAttribute('title')).toBe('Codex - v1.2.3');
+      expect(version?.getAttribute('title')).toBe('Codex - 1.2.3');
       // The cell holds the model and the effort; the model button holds the label only.
       const model = q(host, '[data-testid="cli-matrix-model"]');
       expect(

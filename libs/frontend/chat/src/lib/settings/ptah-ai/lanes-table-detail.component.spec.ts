@@ -99,6 +99,22 @@ describe('LanesTableDetailComponent', () => {
     ).toBeNull();
   });
 
+  it('never clamps a short native behavior that has no More (P-43: it wraps instead)', () => {
+    const { host } = mount({
+      ...row(),
+      permission: {
+        badge: 'Auto',
+        detail: 'Runs commands and edits files with full access',
+        tone: 'info',
+      },
+    });
+    const text = host.querySelector('[data-testid="lane-detail-native"]')!;
+    expect(text.classList.contains('lane-detail-clamp')).toBe(false);
+    expect(
+      host.querySelector('[data-testid="lane-detail-native-more"]'),
+    ).toBeNull();
+  });
+
   it('repeats none of the row values: version, model, permission, network, enabled', () => {
     const { host } = mount();
     const facts = host.querySelector('[data-testid="cli-provider-facts"]');

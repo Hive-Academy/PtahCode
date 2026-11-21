@@ -620,6 +620,123 @@ describe('CliOrchestrationMatrixComponent', () => {
     );
   });
 
+  const reorderToggle = () =>
+    q<HTMLButtonElement>('[data-testid="lanes-order-edit"]')!;
+  const MOVE = {
+    order: ['glm-1'],
+    movedId: 'glm-1',
+    direction: 'up' as const,
+  };
+
+  it('blocks Reorder and every move after a failed agent:getConfig with a usable instance list (finding 1)', async () => {
+    state.orchestration.set({ status: 'error', data: null, error: 'Could not load this section. Retry.' });
+    state.cliAgents.set(
+      ready([GLM, { ...GLM, id: 'glm-2', name: 'Glm two' }]),
+    );
+    fixture.detectChanges();
+    expect(numbered()).toEqual(['glm-1', 'glm-2']);
+    expect(reorderToggle().disabled).toBe(true);
+    expect(table().canReorder()).toBe(false);
+    table().reordered.emit({ ...MOVE, order: ['glm-2', 'glm-1'], movedId: 'glm-2' });
+    await flush();
+    expect(state.saveSettings).not.toHaveBeenCalled();
+  });
+
+  it('blocks Reorder when the response omits preferredAgentOrder (finding 1)', async () => {
+    state.orchestration.set(
+      ready({
+        ...ORCHESTRATION,
+        preferredAgentOrder: [],
+        missingFields: ['preferredAgentOrder'],
+      }),
+    );
+    fixture.detectChanges();
+    expect(reorderToggle().disabled).toBe(true);
+    table().reordered.emit({
+      order: ['antigravity', 'codex', 'glm-1', 'copilot', 'opencode'],
+      movedId: 'codex',
+      direction: 'down',
+    });
+    await flush();
+    expect(state.saveSettings).not.toHaveBeenCalled();
+  });
+
+  it('keeps Done operable when the order read fails during Reorder (finding 1)', () => {
+    enterReorder();
+    state.orchestration.set({ status: 'loading', data: ORCHESTRATION, error: null });
+    fixture.detectChanges();
+    expect(reorderToggle().textContent).toContain('Done');
+    expect(reorderToggle().disabled).toBe(false);
+    expect(table().canReorder()).toBe(false);
+    reorderToggle().click();
+    fixture.detectChanges();
+    expect(fixture.componentInstance['orderMode']()).toBe(false);
+  });
+
+  it('offers Reorder only with at least two numbered lanes; Done stays when the count drops (finding 10)', () => {
+    state.orchestration.set(ready({ ...ORCHESTRATION, detectedClis: [] }));
+    state.cliAgents.set(ready([GLM]));
+    fixture.detectChanges();
+    expect(numbered()).toEqual(['glm-1']);
+    expect(reorderToggle().disabled).toBe(true);
+    state.cliAgents.set(ready([GLM, { ...GLM, id: 'glm-2', name: 'Glm two' }]));
+    fixture.detectChanges();
+    expect(reorderToggle().disabled).toBe(false);
+    enterReorder();
+    state.cliAgents.set(ready([GLM]));
+    fixture.detectChanges();
+    expect(reorderToggle().disabled).toBe(false);
+    expect(reorderToggle().textContent).toContain('Done');
+  });
+
+  it('announces the confirmed position and focuses the moved row after an async read-back (finding 5)', async () => {
+    let readBack: () => void = () => undefined;
+    state.saveSettings.mockImplementation(
+      (patch: unknown) =>
+        new Promise<boolean>((resolve) => {
+          readBack = () => {
+            const order = (patch as { orchestration: { preferredAgentOrder: string[] } })
+              .orchestration.preferredAgentOrder;
+            state.orchestration.set(ready({ ...ORCHESTRATION, preferredAgentOrder: order }));
+            state.commit.set({ ...idle, status: 'saved' });
+            resolve(true);
+          };
+        }),
+    );
+    enterReorder();
+    expect(numbered()).toEqual(['codex', 'antigravity', 'glm-1', 'copilot', 'opencode']);
+    q<HTMLButtonElement>('[data-testid="policy-order-down-codex"]')!.click();
+    fixture.detectChanges();
+    await flush();
+    readBack();
+    for (let i = 0; i < 8; i += 1) await Promise.resolve();
+    _render();
+    await fixture.whenStable();
+    expect(numbered()).toEqual(['antigravity', 'codex', 'glm-1', 'copilot', 'opencode']);
+    expect(q('[data-testid="policy-order-live"]')?.textContent?.trim()).toBe(
+      'Codex moved to position 2 of 5',
+    );
+    expect(document.activeElement).toBe(
+      q('[data-testid="policy-order-down-codex"]'),
+    );
+  });
+
+  it('restores focus with no move announcement when the order save fails (finding 5)', async () => {
+    state.saveSettings.mockImplementation(async () => {
+      state.commit.set({ ...idle, status: 'failed' });
+      return false;
+    });
+    enterReorder();
+    q<HTMLButtonElement>('[data-testid="policy-order-down-codex"]')!.click();
+    await flush();
+    _render();
+    await fixture.whenStable();
+    expect(q('[data-testid="policy-order-live"]')?.textContent?.trim()).toBe('');
+    expect(document.activeElement).toBe(
+      q('[data-testid="policy-order-down-codex"]'),
+    );
+  });
+
   it('shows one partial-data table message alongside readable lanes', () => {
     const malformed = { ...ORCHESTRATION };
     Object.defineProperty(malformed, 'detectedClis', { value: null });

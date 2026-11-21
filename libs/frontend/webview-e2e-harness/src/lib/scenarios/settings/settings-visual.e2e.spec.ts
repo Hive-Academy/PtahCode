@@ -1417,8 +1417,8 @@ for (const host of ['vscode', 'electron'] as const) {
         ),
       ).toBeVisible();
       await assertOrderStripWhole(page, host, theme, 6);
-      // 52.1: one normalised version per card. PR #1309: the version is a fact in the card's description list
-      // (term "Version"), not a second label on the name's line, so the header shows only the name and one status.
+      // 52.1: one normalised version per row, on line 2 of the Lane identity. P-42: the identity tooltip keeps
+      // the full single-line version the CLI printed, so a short label never hides it.
       const expected: Readonly<Record<string, string>> = {
         codex: 'v0.155.1',
         copilot: 'v1.0.83',
@@ -1426,23 +1426,19 @@ for (const host of ['vscode', 'electron'] as const) {
         antigravity: 'v1.2.14',
       };
       for (const [cli, label] of Object.entries(expected)) {
-        await expandMatrixDetail(page, cli);
-        const version = page.locator(
-          `#lane-detail-${cli} [data-testid="cli-provider-facts"] dt:text-is("Version") + dd span[title]`,
+        const identity = page.locator(
+          `[data-testid="cli-provider-card-${cli}"] [data-testid="cli-matrix-version"]`,
         );
-        await expect(version).toHaveText(label);
-        await expect(version).toHaveAttribute('title', LIVE_VERSIONS[cli]);
-        const fact = await version.evaluate((element) => ({
-          term:
-            element
-              .closest('dd')
-              ?.previousElementSibling?.textContent?.trim() ?? null,
-          inHeader: element.closest('header') !== null,
-          clipped: element.scrollWidth > element.clientWidth + 1,
-        }));
-        expect(fact.term).toBe('Version');
-        expect(fact.inHeader).toBe(false);
-        expect(fact.clipped).toBe(false);
+        await expect(
+          identity.locator('.ptah-table-row-title-secondary'),
+        ).toHaveText(label);
+        const title = await identity.getAttribute('title');
+        expect(title?.endsWith(` - ${LIVE_VERSIONS[cli]}`)).toBe(true);
+        await expect(
+          page.locator(
+            `#lane-detail-${cli} [data-testid="cli-provider-facts"] dt:text-is("Version")`,
+          ),
+        ).toHaveCount(0);
       }
       // 52.2: the Antigravity model cell shows the id once, on at most two lines, with the name in its title.
       const model = page.locator(

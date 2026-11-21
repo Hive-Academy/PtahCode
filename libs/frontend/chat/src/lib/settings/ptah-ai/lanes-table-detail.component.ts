@@ -63,7 +63,10 @@ const CAPABILITY_FACTS: Readonly<
   Limit: { label: 'Limit', icon: Gauge },
 };
 
-/** A native behavior text longer than this gets the More / Less control (one line holds about this much). */
+/**
+ * A native behavior text longer than this is clamped to one line and gets the More / Less control. A shorter text
+ * is never clamped: it wraps, so its full text stays readable at every width (P-43).
+ */
 const NATIVE_CLAMP_CHARS = 72;
 
 @Component({

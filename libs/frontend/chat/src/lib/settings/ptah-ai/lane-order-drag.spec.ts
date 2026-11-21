@@ -171,28 +171,77 @@ describe('LaneOrderDrag', () => {
   });
 
   describe('settled(): focus return and announcement', () => {
+    const settle = (
+      id: string,
+      direction: 'up' | 'down',
+      order: readonly string[],
+      focus: jest.Mock = jest.fn(),
+      saved = true,
+    ) => drag.settled({ id, direction, saved, order }, focus);
+
     it('announces the new position and asks for focus on the moved row', () => {
       const focus = jest.fn();
       drag.moveDown(0);
-      ids = moves[0].order;
-      drag.settled('codex', 'down', focus);
+      settle('codex', 'down', moves[0].order, focus);
       expect(drag.announcement()).toBe('Codex moved to position 2 of 4');
       expect(focus).toHaveBeenCalledWith('codex', 'down');
+    });
+
+    it('reads the confirmed order it is given, not a stale ids() binding (finding 5)', () => {
+      drag.moveDown(0);
+      // ids() still holds the old order: the child input has yet to render.
+      settle('codex', 'down', moves[0].order);
+      expect(ids[0]).toBe('codex');
+      expect(drag.announcement()).toBe('Codex moved to position 2 of 4');
     });
 
     it('announces nothing when the save did not change the order', () => {
       const focus = jest.fn();
       drag.moveDown(0);
-      drag.settled('codex', 'down', focus);
+      settle('codex', 'down', ids, focus);
+      expect(drag.announcement()).toBe('');
+      expect(focus).toHaveBeenCalledWith('codex', 'down');
+    });
+
+    it('a failed save announces no move and still restores focus', () => {
+      const focus = jest.fn();
+      drag.moveDown(0);
+      settle('codex', 'down', moves[0].order, focus, false);
       expect(drag.announcement()).toBe('');
       expect(focus).toHaveBeenCalledWith('codex', 'down');
     });
 
     it('announces nothing for a row that did not ask for a move', () => {
       drag.moveDown(0);
-      ids = moves[0].order;
-      drag.settled('copilot', 'up', jest.fn());
+      settle('copilot', 'up', moves[0].order);
       expect(drag.announcement()).toBe('');
+    });
+  });
+
+  describe('a list refresh during a drag (finding 4)', () => {
+    it('cancels the drag when a lane is inserted before the drop', () => {
+      drag.startDrag(event(1).event, 1);
+      drag.dragOver(event(3, at(3, 'after')).event, 3);
+      expect(drag.dropIndex()).toBe(4);
+      ids = ['codex', 'grok', 'antigravity', 'copilot', 'opencode'];
+      drag.drop(event().event);
+      expect(moves).toEqual([]);
+      expect(drag.dropIndex()).toBeNull();
+    });
+
+    it('stops showing a drop indicator once the sequence changed', () => {
+      drag.startDrag(event(1).event, 1);
+      ids = ['grok', ...ids];
+      const over = event(3, at(3, 'after'));
+      drag.dragOver(over.event, 3);
+      expect(drag.dropIndex()).toBeNull();
+      expect(over.raw.preventDefault).not.toHaveBeenCalled();
+    });
+
+    it('moves the dragged id when the sequence is unchanged', () => {
+      dragAndDrop(1, 3, 'after');
+      expect(moves[0].movedId).toBe('antigravity');
+      expect(moves[0].order).toEqual(['codex', 'copilot', 'opencode', 'antigravity']);
     });
   });
 });
