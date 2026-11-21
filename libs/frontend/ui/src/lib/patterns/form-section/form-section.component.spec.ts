@@ -16,6 +16,7 @@ import { PtahFormSectionComponent } from './form-section.component';
       [disabled]="disabled()"
       [error]="error()"
       [wide]="wide()"
+      [flushInGlass]="flushInGlass()"
       [icon]="icon()"
     >
       <span aside data-testid="aside-content">Beta</span>
@@ -32,6 +33,7 @@ class HostComponent {
   readonly disabled = signal(false);
   readonly error = signal<string | null>(null);
   readonly wide = signal(false);
+  readonly flushInGlass = signal(false);
   readonly icon = signal<LucideIconData | null>(null);
 }
 
@@ -216,6 +218,19 @@ describe('PtahFormSectionComponent', () => {
     expect(classes).toContain(
       '[@container(min-width:640px)]:grid-cols-[var(--ptah-form-section-aside-w)_minmax(0,var(--ptah-form-section-fields-max-w))]',
     );
+  });
+
+  it('removes the block padding under glass only when flushInGlass is set', () => {
+    const flush = '[[data-glass=on]_&]:py-0';
+    expect(section().classList.contains(flush)).toBe(false);
+    host.flushInGlass.set(true);
+    fixture.detectChanges();
+    expect(section().classList.contains(flush)).toBe(true);
+    // The token padding stays for glass off.
+    expect(section().classList.contains('py-[var(--ptah-gap-group)]')).toBe(true);
+    host.flushInGlass.set(false);
+    fixture.detectChanges();
+    expect(section().classList.contains(flush)).toBe(false);
   });
 
   it('lets the fields column grow to the content cap only when wide is set', () => {

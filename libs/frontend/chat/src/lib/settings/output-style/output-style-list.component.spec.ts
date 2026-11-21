@@ -132,8 +132,9 @@ describe('OutputStyleListComponent — CLI parity control', () => {
   });
 
   it('opens the built-in preview without changing selection', () => {
-    const buttons = Array.from<HTMLButtonElement>(fixture.nativeElement.querySelectorAll('button'));
-    buttons.find(button => button.textContent?.trim() === 'Preview')?.click();
+    const preview = fixture.nativeElement.querySelector('button[aria-label="Preview default"]') as HTMLButtonElement;
+    expect(preview.textContent?.trim()).toBe('');
+    preview.click();
     fixture.detectChanges();
     expect(list().previewName()).toBe('default');
     expect(text()).toContain('Built into the agent');
