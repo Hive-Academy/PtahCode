@@ -49,6 +49,8 @@ function decodeBase64UrlSegment(segment: string): string | null {
   try {
     return atob(padded);
   } catch {
+    // degradation-audit: optional-capability - an undecodable segment means
+    // "not a JWT" (null) and the caller uses the last_refresh rule.
     return null;
   }
 }
@@ -73,6 +75,8 @@ export function decodeJwtExpiry(token: string): number | null {
   try {
     parsedJson = JSON.parse(payloadRaw);
   } catch {
+    // degradation-audit: optional-capability - a payload that is not JSON
+    // means "not a JWT" (null) and the caller uses the last_refresh rule.
     return null;
   }
 

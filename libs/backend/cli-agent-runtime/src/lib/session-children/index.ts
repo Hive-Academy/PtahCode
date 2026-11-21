@@ -46,6 +46,8 @@ export type {
   ChildChatSessionStartOutcome,
   HandoffChatSessionStartInput,
   IChildChatSessionHost,
+  WatchdogRecoveryInput,
+  WatchdogRecoveryOutcome,
 } from './child-chat-session-host.port';
 export type {
   ChildSettingRoute,

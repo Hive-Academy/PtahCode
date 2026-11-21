@@ -314,6 +314,9 @@ export class HarnessGitignoreWriter {
         relPaths,
       );
     } catch (error: unknown) {
+      // degradation-audit: reported - logged at debug here (git can be absent
+      // or the folder not a repo, which is common); null means "tracked state
+      // unknown", so the caller adds no gitignore entries.
       this.logger.debug('[harness-sync] git tracked-path check failed', {
         workspaceRoot,
         error: error instanceof Error ? error.message : String(error),

@@ -152,6 +152,8 @@ export class CliFileSystemProvider implements IFileSystemProvider {
       await fs.access(filePath);
       return true;
     } catch {
+      // degradation-audit: optional-capability - exists() answers "not
+      // accessible" as false by contract; callers branch on it.
       return false;
     }
   }

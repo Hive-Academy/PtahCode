@@ -177,6 +177,7 @@ const TIMEOUT_DEFAULT_SEC = 120;
                   placement="bottom-start"
                   [hasBackdrop]="true"
                   backdropClass="transparent"
+                  [capToViewport]="false"
                   (closed)="cancelEdit()"
                 >
                   <button

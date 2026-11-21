@@ -14,6 +14,9 @@ async function dirIsNonEmpty(dir: string): Promise<boolean> {
     const entries = await fs.readdir(dir, { recursive: true });
     return entries.length > 0;
   } catch {
+    // degradation-audit: optional-capability - pure fs probe for a download
+    // badge; a missing model folder is the normal "not downloaded" answer,
+    // and an unreadable one cannot be loaded either, so false is right.
     return false;
   }
 }

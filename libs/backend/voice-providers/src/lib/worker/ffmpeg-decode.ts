@@ -117,7 +117,16 @@ export class FfmpegDecode {
       );
       return samples.slice();
     } finally {
-      await fs.rm(dir, { recursive: true, force: true }).catch(() => undefined);
+      // The worker has no logger. A failed cleanup leaves a decoded-audio temp
+      // folder behind, so it is written to the worker's stderr (code only) and
+      // the decode result is kept.
+      await fs
+        .rm(dir, { recursive: true, force: true })
+        .catch((error: unknown) => {
+          console.warn('[FfmpegDecode] Temp folder cleanup failed', {
+            code: (error as NodeJS.ErrnoException | null)?.code,
+          });
+        });
     }
   }
 }

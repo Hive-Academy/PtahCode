@@ -15,11 +15,14 @@
  */
 
 import {
+  API_RETRY_MARGIN_MS,
+  API_RETRY_MAX_ACCOUNTED_MS,
   BACKGROUND_TASK_QUIET_TIMEOUT_MS,
   NoActivityWatchdog,
 } from './no-activity-watchdog';
 import { COMPACTION_MAX_DWELL_MS } from './compaction/compaction-state.types';
 import type {
+  SDKAPIRetryMessage,
   HookEvent,
   HookInput,
   SDKAssistantMessage,
@@ -789,6 +792,127 @@ describe('NoActivityWatchdog', () => {
         expect(onTimeout).toHaveBeenCalledTimes(1);
         expect(onTimeout).toHaveBeenCalledWith('no-activity');
       });
+    });
+  });
+
+  describe('SDK api_retry (TASK_2026_2288 A)', () => {
+    function apiRetry(
+      extra: Partial<SDKAPIRetryMessage> = {},
+    ): SDKAPIRetryMessage {
+      return {
+        type: 'system',
+        subtype: 'api_retry',
+        attempt: 1,
+        max_retries: 1,
+        retry_delay_ms: 0,
+        error_status: null,
+        error: 'unknown',
+        ...ENVELOPE,
+        ...extra,
+      };
+    }
+
+    it('accounts the first-byte wait of an announced retry (incident 2026-11-20)', () => {
+      const onTimeout = jest.fn();
+      const wd = new NoActivityWatchdog(WINDOW, onTimeout);
+      wd.start();
+
+      // The SDK first wait ends before the window and announces one retry
+      // that waits up to 599 s for its first byte.
+      jest.advanceTimersByTime(150_000);
+      wd.observe(
+        apiRetry({ no_response: { waited_ms: 150_000, retry_wait_ms: 599_000 } }),
+      );
+
+      // A plain window after the retry must not stop the SDK recovery.
+      jest.advanceTimersByTime(WINDOW);
+      expect(onTimeout).not.toHaveBeenCalled();
+
+      jest.advanceTimersByTime(599_000 + API_RETRY_MARGIN_MS - WINDOW - 1);
+      expect(onTimeout).not.toHaveBeenCalled();
+      jest.advanceTimersByTime(1);
+      expect(onTimeout).toHaveBeenCalledWith('no-activity');
+    });
+
+    it('accounts the announced retry delay', () => {
+      const onTimeout = jest.fn();
+      const wd = new NoActivityWatchdog(WINDOW, onTimeout);
+      wd.start();
+      wd.observe(apiRetry({ retry_delay_ms: 400_000 }));
+
+      jest.advanceTimersByTime(400_000 + API_RETRY_MARGIN_MS - 1);
+      expect(onTimeout).not.toHaveBeenCalled();
+      jest.advanceTimersByTime(1);
+      expect(onTimeout).toHaveBeenCalledTimes(1);
+    });
+
+    it('never arms less than the normal window for a short retry', () => {
+      const onTimeout = jest.fn();
+      const wd = new NoActivityWatchdog(WINDOW, onTimeout);
+      wd.start();
+      wd.observe(apiRetry({ retry_delay_ms: 2_000 }));
+
+      jest.advanceTimersByTime(WINDOW - 1);
+      expect(onTimeout).not.toHaveBeenCalled();
+      jest.advanceTimersByTime(1);
+      expect(onTimeout).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps the retry window through a hold and an unrelated kick', () => {
+      const onTimeout = jest.fn();
+      const wd = new NoActivityWatchdog(WINDOW, onTimeout);
+      wd.start();
+      wd.observe(apiRetry({ retry_delay_ms: 400_000 }));
+
+      // A permission hold during the retry, then its release.
+      jest.advanceTimersByTime(10_000);
+      wd.hold();
+      jest.advanceTimersByTime(10_000);
+      wd.release();
+      // An unrelated kick (a keepalive task end) re-arms to the retry end too.
+      jest.advanceTimersByTime(10_000);
+      wd.kick();
+
+      jest.advanceTimersByTime(400_000 + API_RETRY_MARGIN_MS - 30_000 - 1);
+      expect(onTimeout).not.toHaveBeenCalled();
+      jest.advanceTimersByTime(1);
+      expect(onTimeout).toHaveBeenCalledWith('no-activity');
+    });
+
+    it('returns to the normal window after root output of the retry', () => {
+      const onTimeout = jest.fn();
+      const wd = new NoActivityWatchdog(WINDOW, onTimeout);
+      wd.start();
+      wd.observe(apiRetry({ retry_delay_ms: 400_000 }));
+      jest.advanceTimersByTime(1_000);
+      wd.observe({
+        type: 'assistant',
+        message: { content: [{ type: 'text', text: 'back' }] },
+        parent_tool_use_id: null,
+        ...ENVELOPE,
+      } as unknown as SDKMessage);
+
+      jest.advanceTimersByTime(WINDOW - 1);
+      expect(onTimeout).not.toHaveBeenCalled();
+      jest.advanceTimersByTime(1);
+      expect(onTimeout).toHaveBeenCalledTimes(1);
+    });
+
+    it('caps the window one retry can account for and ignores bad values', () => {
+      const onTimeout = jest.fn();
+      const wd = new NoActivityWatchdog(WINDOW, onTimeout);
+      wd.start();
+      wd.observe(
+        apiRetry({
+          retry_delay_ms: Number.POSITIVE_INFINITY,
+          no_response: { waited_ms: 1, retry_wait_ms: 10 * API_RETRY_MAX_ACCOUNTED_MS },
+        }),
+      );
+
+      jest.advanceTimersByTime(API_RETRY_MAX_ACCOUNTED_MS - 1);
+      expect(onTimeout).not.toHaveBeenCalled();
+      jest.advanceTimersByTime(1);
+      expect(onTimeout).toHaveBeenCalledTimes(1);
     });
   });
 });

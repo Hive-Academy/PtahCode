@@ -167,7 +167,13 @@ export class VscodeCopilotAuthService extends CopilotAuthService {
       return await vscode.authentication.getSession('github', ['read:user'], {
         createIfNone,
       });
-    } catch {
+    } catch (error: unknown) {
+      // degradation-audit: reported - logged at warn here; the caller gets no
+      // VS Code GitHub session and uses the base-class auth path instead.
+      this.logger.warn(
+        '[VscodeCopilotAuth] read:user GitHub session request failed',
+        { errorName: error instanceof Error ? error.name : typeof error },
+      );
       return undefined;
     }
   }

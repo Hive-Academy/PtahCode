@@ -748,6 +748,8 @@ export class McpDirectoryBrowserComponent implements OnInit, OnDestroy {
         showFallback();
       }
     } catch {
+      // degradation-audit: reported - shown to the user through configError
+      // ("Could not auto-detect configuration"); a destroyed panel drops it.
       if (this.destroyed) return;
       showFallback();
     } finally {
@@ -860,6 +862,8 @@ export class McpDirectoryBrowserComponent implements OnInit, OnDestroy {
         );
       }
     } catch {
+      // degradation-audit: reported - shown to the user through error
+      // ("Install failed"); a destroyed panel drops it.
       if (this.destroyed) return;
       this.error.set('Install failed');
     } finally {
@@ -943,6 +947,8 @@ export class McpDirectoryBrowserComponent implements OnInit, OnDestroy {
         this.searchResults.set([]);
       }
     } catch {
+      // degradation-audit: reported - shown to the user through error
+      // ("Search failed") with an empty result list; a destroyed panel drops it.
       if (this.destroyed) return;
       this.error.set('Search failed');
       this.searchResults.set([]);
@@ -977,6 +983,8 @@ export class McpDirectoryBrowserComponent implements OnInit, OnDestroy {
         this.popularServers.set([]);
       }
     } catch {
+      // degradation-audit: reported - shown to the user through error
+      // ("Failed to load popular MCP servers"); a destroyed panel drops it.
       if (this.destroyed) return;
       this.error.set('Failed to load popular MCP servers');
       this.popularServers.set([]);
@@ -1007,6 +1015,9 @@ export class McpDirectoryBrowserComponent implements OnInit, OnDestroy {
         );
       }
     } catch {
+      // degradation-audit: reported - shown to the user through error
+      // ("Could not load the installed MCP servers."); a destroyed panel
+      // drops it.
       if (this.destroyed) return;
       this.error.set('Could not load the installed MCP servers.');
     }

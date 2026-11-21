@@ -169,6 +169,14 @@ export class ProvidersSettingsStateService {
   readonly orchestration = this.view(this.orchestrationStore);
   /** Last explicit CLI re-detection (`redetectClis`); `loading` while it runs. */
   readonly cliDetection = this.view(this.detectionStore);
+  /** Running `redetectClis()` calls, read-backs included. */
+  private readonly redetectRuns = signal(0);
+  /**
+   * `true` from the start of a `redetectClis()` call until its read-backs end. Every Re-detect entry
+   * (section button, install guides) binds its pending state to this, so none starts while another's
+   * reads still run. `cliDetection().status` settles earlier, when the detection call itself ends.
+   */
+  readonly cliRedetecting = computed(() => this.redetectRuns() > 0);
   private readonly customEntries = this.view(this.customEntriesStore);
   readonly tiers = this.view(this.tiersStore);
   readonly verification = this.setup.verification;
@@ -724,10 +732,15 @@ export class ProvidersSettingsStateService {
       return { provider, model: model === 'inherit' ? '' : model, timeoutMs };
     });
   }
+  /** The newest lane reads (orchestration, CLI agents); `redetectClis()` waits for them. Never rejected. */
+  private orchestrationRead: Promise<void> = Promise.resolve();
+  private cliAgentsRead: Promise<void> = Promise.resolve();
   async refreshCliAgents(): Promise<void> {
-    await this.read(this.cliStore, async () =>
+    const read = this.read(this.cliStore, async () =>
       parseCliAgents((await this.require('ptahCli:list', {})).agents),
     );
+    this.cliAgentsRead = read;
+    await read;
   }
   /** The CLI summary omits pinned models. Project only model fields from persisted non-secret configuration. */
   async refreshCliModels(): Promise<void> {
@@ -804,7 +817,7 @@ export class ProvidersSettingsStateService {
   async refreshOrchestration(
     missingFields: readonly string[] = [],
   ): Promise<void> {
-    await readSection(
+    const read = readSection(
       this.orchestrationStore,
       this.workspace,
       async (): Promise<ProvidersOrchestration> => {
@@ -820,30 +833,47 @@ export class ProvidersSettingsStateService {
       },
       false,
     );
+    this.orchestrationRead = read;
+    await read;
   }
   /**
    * Re-detects installed CLIs, then rereads everything derived from them. A failed detection
    * leaves `cliDetection()` in error and rereads nothing. Each call decides on its own detection
    * result, not the shared section, which an overlapping call may have replaced, and returns it
-   * so callers can do the same.
+   * so callers can do the same. A newer lane read (the table's Retry) that supersedes a read-back
+   * publishes nothing for it, so the call also waits for the newest orchestration and CLI-agent
+   * reads: when it resolves, those two sections are settled, not the snapshot from before it.
    */
   async redetectClis(): Promise<boolean> {
-    let detected = false;
-    let missingFields: readonly string[] = [];
-    await this.read(this.detectionStore, async () => {
-      const { clis } = await this.require('agent:detectClis', undefined);
-      detected = true;
-      const parsed = parseDetectedClis(clis);
-      missingFields = parsed.missingFields;
-      return parsed.clis;
-    });
-    if (!detected) return false;
-    await Promise.all([
-      this.refreshOrchestration(missingFields),
-      this.refreshCliAgents(),
-      this.refreshCliModels(),
-    ]);
-    return true;
+    this.redetectRuns.update((runs) => runs + 1);
+    try {
+      let detected = false;
+      let missingFields: readonly string[] = [];
+      await this.read(this.detectionStore, async () => {
+        const { clis } = await this.require('agent:detectClis', undefined);
+        detected = true;
+        const parsed = parseDetectedClis(clis);
+        missingFields = parsed.missingFields;
+        return parsed.clis;
+      });
+      if (!detected) return false;
+      await Promise.all([
+        this.refreshOrchestration(missingFields),
+        this.refreshCliAgents(),
+        this.refreshCliModels(),
+      ]);
+      let reads: readonly Promise<void>[];
+      do {
+        reads = [this.orchestrationRead, this.cliAgentsRead];
+        await Promise.all(reads);
+      } while (
+        reads[0] !== this.orchestrationRead ||
+        reads[1] !== this.cliAgentsRead
+      );
+      return true;
+    } finally {
+      this.redetectRuns.update((runs) => runs - 1);
+    }
   }
   async refreshTiers(
     params: RpcMethodParams<'provider:getModelTiers'>,

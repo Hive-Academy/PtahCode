@@ -261,4 +261,138 @@ describe('Antigravity MCP facet (TASK_2026_285)', () => {
     );
     expect(leftovers).toEqual([]);
   });
+
+  // ------------------------------------------- damaged config (TASK_2026_2288)
+
+  describe('a config that exists but cannot be read or parsed is never overwritten', () => {
+    function seedRaw(content: string): void {
+      mkdirSync(join(tempHome, '.gemini', 'config'), { recursive: true });
+      writeFileSync(configPath, content, 'utf-8');
+    }
+
+    const malformed = '{ "mcpServers": { "mine": { "command": "mine-cmd" } ';
+
+    it('refuses a write over malformed JSON and leaves the bytes untouched', async () => {
+      seedRaw(malformed);
+      const facet = makeFacet();
+
+      await expect(
+        facet.write(ws, 'github', stdio('github-server')),
+      ).rejects.toThrow(/Refusing to change .*not valid JSON/);
+      expect(readFileSync(configPath, 'utf-8')).toBe(malformed);
+    });
+
+    it('accepts a config that starts with a UTF-8 byte order mark and keeps its servers', async () => {
+      seedRaw('﻿{ "mcpServers": { "mine": { "command": "mine-cmd" } } }');
+      const facet = makeFacet();
+
+      expect([...facet.readAll(ws).keys()]).toEqual(['mine']);
+      const inspection = await facet.inspect(ws);
+      expect(inspection.status).toBe('ok');
+      expect([...inspection.servers.keys()]).toEqual(['mine']);
+
+      await facet.write(ws, 'github', stdio('github-server'));
+
+      const written = JSON.parse(readFileSync(configPath, 'utf-8')) as {
+        mcpServers: Record<string, unknown>;
+      };
+      expect(Object.keys(written.mcpServers).sort()).toEqual(['github', 'mine']);
+    });
+
+    it('refuses a remove from malformed JSON and leaves the bytes untouched', async () => {
+      seedRaw(malformed);
+
+      await expect(makeFacet().remove(ws, 'mine')).rejects.toThrow(
+        /Refusing to change/,
+      );
+      expect(readFileSync(configPath, 'utf-8')).toBe(malformed);
+    });
+
+    it('never puts the file contents in the error message', async () => {
+      const secret = '{ "mcpServers": { "s": { "env": { "TOKEN": "sk-secret';
+      seedRaw(secret);
+
+      const error: unknown = await makeFacet()
+        .write(ws, 'github', stdio('github-server'))
+        .catch((e: unknown) => e);
+      expect(error).toBeInstanceOf(Error);
+      expect((error as Error).message).not.toContain('sk-secret');
+    });
+
+    it('keeps the file contents out of the inspect error too', async () => {
+      seedRaw('{ "mcpServers": { "s": { "env": { "TOKEN": sk-secret } } } }');
+
+      const inspection = await makeFacet().inspect(ws);
+      expect(inspection.status).toBe('error');
+      expect(JSON.stringify(inspection)).not.toContain('sk-secret');
+    });
+
+    it('refuses a write over invalid UTF-8 instead of saving replacement characters', async () => {
+      mkdirSync(join(tempHome, '.gemini', 'config'), { recursive: true });
+      const bytes = Buffer.concat([
+        Buffer.from('{ "mcpServers": { "mine": { "command": "a'),
+        Buffer.from([0xc3, 0x28]),
+        Buffer.from('" } } }'),
+      ]);
+      writeFileSync(configPath, bytes);
+
+      await expect(
+        makeFacet().write(ws, 'github', stdio('github-server')),
+      ).rejects.toThrow(/not valid UTF-8/);
+      expect(readFileSync(configPath).equals(bytes)).toBe(true);
+    });
+
+    it('refuses a file whose top level is not an object', async () => {
+      seedRaw('[1, 2, 3]\n');
+
+      await expect(
+        makeFacet().write(ws, 'github', stdio('github-server')),
+      ).rejects.toThrow(/does not contain a JSON object/);
+      expect(readFileSync(configPath, 'utf-8')).toBe('[1, 2, 3]\n');
+    });
+
+    it('refuses a file whose server map is not an object', async () => {
+      const content = '{ "mcpServers": "oops", "other": 1 }';
+      seedRaw(content);
+
+      await expect(
+        makeFacet().write(ws, 'github', stdio('github-server')),
+      ).rejects.toThrow(/"mcpServers" is not an object/);
+      expect(readFileSync(configPath, 'utf-8')).toBe(content);
+    });
+
+    it('refuses a write and a remove when the file cannot be read (a directory at the path)', async () => {
+      mkdirSync(configPath, { recursive: true });
+      const facet = makeFacet();
+
+      await expect(
+        facet.write(ws, 'github', stdio('github-server')),
+      ).rejects.toThrow(/could not be read/);
+      await expect(facet.remove(ws, 'github')).rejects.toThrow(
+        /could not be read/,
+      );
+      // Still the directory: nothing was renamed over it.
+      expect(() => readdirSync(configPath)).not.toThrow();
+    });
+
+    it('still reads a damaged file as empty for listing', () => {
+      seedRaw(malformed);
+      expect(makeFacet().readAll(ws).size).toBe(0);
+    });
+
+    it('creates the file when it does not exist yet (ENOENT)', async () => {
+      await makeFacet().write(ws, 'github', stdio('github-server'));
+      expect(readConfig()['mcpServers']['github']).toEqual({
+        command: 'github-server',
+      });
+    });
+
+    it('fills an empty file instead of refusing it', async () => {
+      seedRaw('   \n');
+      await makeFacet().write(ws, 'github', stdio('github-server'));
+      expect(readConfig()['mcpServers']['github']).toEqual({
+        command: 'github-server',
+      });
+    });
+  });
 });

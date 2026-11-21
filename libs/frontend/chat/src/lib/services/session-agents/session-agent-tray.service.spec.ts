@@ -237,5 +237,32 @@ describe('SessionAgentTrayService — entry mapping', () => {
       );
       expect(e.status).toBe(expected);
     });
+
+    it('carries a budget-monitor stop and its notice to the strip row', () => {
+      const [e] = entriesFor(
+        [record('b1', { status: 'stopped' })],
+        [
+          background('b1', {
+            status: 'stopped',
+            stoppedBy: 'budget-monitor',
+            stopReason: 'Ptah stopped it.',
+          }),
+        ],
+      );
+      expect(e).toMatchObject({
+        status: 'stopped',
+        stoppedBy: 'budget-monitor',
+        stopReason: 'Ptah stopped it.',
+      });
+    });
+
+    it('leaves a user stop without a budget-monitor author', () => {
+      const [e] = entriesFor(
+        [record('b1', { status: 'stopped' })],
+        [background('b1', { status: 'stopped' })],
+      );
+      expect(e.status).toBe('stopped');
+      expect(e).not.toHaveProperty('stoppedBy');
+    });
   });
 });

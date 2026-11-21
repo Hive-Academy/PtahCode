@@ -161,6 +161,8 @@ function parseStringArrayJson(raw: string | null): readonly string[] {
     if (Array.isArray(parsed))
       return parsed.filter((x): x is string => typeof x === 'string');
   } catch {
+    // degradation-audit: optional-capability - pure row parser; a malformed
+    // JSON column reads as an empty list, the same as an absent one.
     return [];
   }
   return [];
@@ -494,6 +496,8 @@ export class MemorySearchService implements IMemoryReader {
     try {
       return executeFtsQueryPlan(plan, limit, run, (row) => row.rowid);
     } catch (err) {
+      // degradation-audit: reported - logged at warn here; the search gets no
+      // BM25 hits and fuses the vector results alone.
       this.logger.warn('[memory-curator] BM25 search failed', {
         error: err instanceof Error ? err.message : String(err),
       });
@@ -947,6 +951,8 @@ export class MemorySearchService implements IMemoryReader {
         .all(...params, Date.now(), limit) as MemoryRowCompact[];
       return rows.map((r) => this.compactRowToOut(r, 0));
     } catch (err) {
+      // degradation-audit: reported - logged at warn here; mem:searchIndex
+      // returns an empty result list.
       this.logger.warn('[memory-curator] mem:searchIndex pure-filter failed', {
         error: err instanceof Error ? err.message : String(err),
       });
@@ -971,6 +977,8 @@ export class MemorySearchService implements IMemoryReader {
         .prepare(sql)
         .all(...params, ...ids) as MemoryRowCompact[];
     } catch (err) {
+      // degradation-audit: reported - logged at warn here; the ranked ids get
+      // no rows, so mem:searchIndex returns no hits for them.
       this.logger.warn('[memory-curator] mem:searchIndex fetch failed', {
         error: err instanceof Error ? err.message : String(err),
       });
@@ -1026,6 +1034,8 @@ export class MemorySearchService implements IMemoryReader {
     try {
       return executeFtsQueryPlan(plan, limit, run, (row) => row.memory_id);
     } catch (err) {
+      // degradation-audit: reported - logged at warn here; mem:searchIndex
+      // gets no BM25 hits and fuses the vector results alone.
       this.logger.warn('[memory-curator] mem:searchIndex bm25 failed', {
         error: err instanceof Error ? err.message : String(err),
       });

@@ -70,9 +70,11 @@ export function firstOptionIdOfKind(
  * per agent (Grok lists `always-allow`, an `allow_always`, first) so only the
  * kind ladder is stable. With auto-approve on the ladder is `allow_once`, then
  * `reject_once`, then cancelled — every `reject_always` is ignored. With
- * auto-approve off nothing is approved: `reject_once` when offered, else
+ * auto-approve off only what `grant` accepts is approved (`allow_once`, as
+ * with auto-approve on); anything else gets `reject_once` when offered, else
  * cancelled, since there is no UI to ask and waiting only hits the
- * inactivity watchdog.
+ * inactivity watchdog. Every refusal carries an `info` naming the tool and,
+ * when given, the lane `mode`.
  *
  * The requesting agent is an external process, so the request is treated as
  * untrusted even though the signature is typed: missing or malformed fields
@@ -80,14 +82,20 @@ export function firstOptionIdOfKind(
  */
 export function decideAcpPermission(
   request: RequestPermissionRequest,
-  options: { autoApprove?: boolean } = {},
+  options: {
+    autoApprove?: boolean;
+    /** With auto-approve off, a request this accepts is still granted. */
+    grant?: (request: RequestPermissionRequest) => boolean;
+    /** The lane mode, named in a refusal. */
+    mode?: string;
+  } = {},
 ): AcpPermissionDecision {
   try {
     const requestedTitle = toolTitleOf(request);
-    const title = requestedTitle ?? FALLBACK_TOOL_TITLE;
+    const title = `${requestedTitle ?? FALLBACK_TOOL_TITLE}${options.mode ? ` in ${options.mode} mode` : ''}`;
     const offered = offeredOptions(request);
 
-    if (options.autoApprove !== false) {
+    if (options.autoApprove !== false || options.grant?.(request) === true) {
       const allowOnce = firstOptionIdOfKind(offered, 'allow_once');
       if (allowOnce !== undefined) {
         return {

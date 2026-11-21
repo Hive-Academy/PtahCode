@@ -616,6 +616,8 @@ export class TaskIndexService implements ITaskIndexNotifier {
       if (!(await this.fs.exists(target))) return null;
       return await this.fs.readFile(target);
     } catch (error: unknown) {
+      // degradation-audit: reported - logged at warn here; null reads as "no
+      // judge verdict for this round yet".
       this.logger.warn('[task-specs] readRoundJudge failed', {
         folderName,
         round,
@@ -766,6 +768,9 @@ export class TaskIndexService implements ITaskIndexNotifier {
       folders: folderNames.length, writers: writerFolders.size, activeRoots: this.states.size, eventClasses,
     });
     try {
+      // degradation-audit: reported - this only waits for the earlier rebuild
+      // to settle; its rejection reaches the caller that scheduled it
+      // (scheduleRebuild returns that promise).
       if (state.running) await state.running.catch(() => undefined);
     const changed: string[] = [];
     for (const name of folderNames) {
@@ -840,6 +845,9 @@ export class TaskIndexService implements ITaskIndexNotifier {
       if (!state.trailing) {
         const running = state.running;
         const queuedAt = this.now();
+        // degradation-audit: reported - this only waits for the running
+        // rebuild to settle; its rejection reaches the caller that scheduled
+        // it (scheduleRebuild returned that promise).
         const trailing = running.catch(() => undefined).then(() => {
           const nextFolders = [...state.trailingFolders];
           const nextReason = state.trailingReason;
@@ -1127,6 +1135,8 @@ export class TaskIndexService implements ITaskIndexNotifier {
     try {
       return this.store.getMeta(root);
     } catch (error: unknown) {
+      // degradation-audit: reported - logged at warn here; null reads as "no
+      // index metadata", the same as an index that was never written.
       this.logger.warn('[task-specs] index getMeta failed', {
         error: error instanceof Error ? error.message : String(error),
       });

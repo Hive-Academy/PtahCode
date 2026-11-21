@@ -70,6 +70,7 @@ import {
   PtahFormSectionComponent,
 } from '@ptah-extension/ui';
 import { SettingsComponent } from './settings.component';
+import { ChatStore } from '../services/chat.store';
 import { OrchestrationSettingsComponent } from './ptah-ai/orchestration-settings.component';
 import { AgentsRoutingSettingsComponent } from './providers/agents-routing-settings.component';
 
@@ -83,6 +84,11 @@ import { AgentsRoutingSettingsComponent } from './providers/agents-routing-setti
 })
 class CliMatrixStub {
   readonly codexSettingsRequested = output<void>();
+}
+
+/** The slice of ChatStore the shell reads: the license status behind the Advanced state mark (F36). */
+function chatStoreFake(reason?: 'expired' | 'no_license') {
+  return { licenseStatus: signal(reason ? { reason } : null) };
 }
 
 /** The slice of the shared Providers state the shell, the agents routing and the Context Management container read. */
@@ -146,6 +152,7 @@ describe('SettingsComponent deep-link', () => {
         // (TASK_2026_524), so it cannot be constructed without a route table.
         ...provideSurfaceRouterTesting(),
         AppStateManager,
+        { provide: ChatStore, useValue: chatStoreFake() },
         { provide: AuthStateService, useValue: authStateStub },
         { provide: VSCodeService, useValue: vscodeServiceStub },
         { provide: ClaudeRpcService, useValue: claudeRpcStub },
@@ -384,6 +391,7 @@ describe('SettingsComponent agents-routing landing', () => {
       providers: [
         ...provideSurfaceRouterTesting(),
         AppStateManager,
+        { provide: ChatStore, useValue: chatStoreFake() },
         { provide: AuthStateService, useValue: authStateFake() },
         { provide: VSCodeService, useValue: { isElectron: false } },
         {
@@ -478,6 +486,7 @@ describe('SettingsComponent agents-routing landing', () => {
       providers: [
         ...provideSurfaceRouterTesting(),
         AppStateManager,
+        { provide: ChatStore, useValue: chatStoreFake() },
         { provide: AuthStateService, useValue: authStateFake() },
         { provide: VSCodeService, useValue: { isElectron: false } },
         {
@@ -557,6 +566,7 @@ describe('SettingsComponent agents-routing landing', () => {
       providers: [
         ...provideSurfaceRouterTesting(),
         AppStateManager,
+        { provide: ChatStore, useValue: chatStoreFake() },
         { provide: AuthStateService, useValue: authStateFake() },
         { provide: VSCodeService, useValue: { isElectron: false } },
         {
@@ -634,6 +644,7 @@ describe('SettingsComponent agents-routing landing', () => {
       providers: [
         ...provideSurfaceRouterTesting(),
         AppStateManager,
+        { provide: ChatStore, useValue: chatStoreFake() },
         { provide: AuthStateService, useValue: authStateFake() },
         { provide: VSCodeService, useValue: { isElectron: false } },
         {
@@ -689,7 +700,13 @@ describe('SettingsComponent agents-routing landing', () => {
 
 describe('SettingsComponent header', () => {
   let renderedFixture: ComponentFixture<SettingsComponent>;
-  function render(isElectron: boolean, activePath: string | null) {
+  let chatStore: ReturnType<typeof chatStoreFake>;
+  function render(
+    isElectron: boolean,
+    activePath: string | null,
+    licenseReason?: 'expired' | 'no_license',
+  ) {
+    chatStore = chatStoreFake(licenseReason);
     const state = providersStateFake();
     state.scopes.set({
       status: 'ready',
@@ -700,6 +717,7 @@ describe('SettingsComponent header', () => {
       providers: [
         ...provideSurfaceRouterTesting(),
         AppStateManager,
+        { provide: ChatStore, useValue: chatStore },
         { provide: AuthStateService, useValue: authStateFake() },
         { provide: VSCodeService, useValue: { isElectron } },
         {
@@ -786,6 +804,102 @@ describe('SettingsComponent header', () => {
     expect(tabs[0].classList.contains('tab-active')).toBe(true);
     expect(tabs[0].getAttribute('data-active')).toBe('true');
     expect(tabs[0].getAttribute('aria-current')).toBe('page');
+  });
+
+  it('F35/F37: shows the icon of the open page before the title, on a page with a stable scrollbar gutter', () => {
+    const element = render(false, null);
+    const header = element.querySelector('[data-testid="settings-layout-header"]');
+    expect(header?.querySelector('[data-testid="settings-layout-icon"]')).not.toBeNull();
+    expect(renderedFixture.componentInstance.activeTabIcon()).toBe(
+      renderedFixture.componentInstance.settingsTabs()[0].icon,
+    );
+    renderedFixture.componentInstance.setActiveTab('pro-features');
+    expect(renderedFixture.componentInstance.activeTabIcon()).toBe(
+      renderedFixture.componentInstance.settingsTabs().find((tab) => tab.id === 'pro-features')?.icon,
+    );
+    expect(
+      element.querySelector('.settings-page')?.classList.contains('[scrollbar-gutter:stable_both-edges]'),
+    ).toBe(true);
+  });
+
+  it('F34: Back and the nav title share the nav inset', () => {
+    const element = render(false, null);
+    const back = element.querySelector('[data-testid="settings-back"]');
+    expect(back?.classList.contains('[--ptah-control-px:var(--ptah-settings-nav-px)]')).toBe(true);
+    const title = back?.closest('[nav-header]')?.querySelector('h2');
+    expect(title?.textContent).toBe('Settings');
+    expect(title?.classList.contains('px-[var(--ptah-settings-nav-px)]')).toBe(true);
+  });
+
+  it('F36: no state mark on Advanced while the membership needs no attention', () => {
+    const element = render(false, null);
+    expect(element.querySelector('[data-testid="settings-layout-state-mark"]')).toBeNull();
+  });
+
+  it('F36: Advanced shows a named state mark while the membership needs attention', () => {
+    const element = render(false, null, 'expired');
+    const marks = element.querySelectorAll('[data-testid="settings-layout-state-mark"]');
+    expect(marks.length).toBe(1);
+    expect(marks[0].getAttribute('title')).toBe('Membership needs attention');
+    // The button name stays "Advanced" (live-app scripts use it); the warning is its description.
+    const button = marks[0].closest('button') as HTMLButtonElement;
+    const name = Array.from(button.childNodes)
+      // Name from content: text and elements only (no template comments), without the aria-hidden parts.
+      .filter((node) => node.nodeType !== Node.COMMENT_NODE)
+      .filter((node) => !(node instanceof Element && node.getAttribute('aria-hidden') === 'true'))
+      .map((node) => node.textContent ?? '')
+      .join('')
+      .trim();
+    expect(name).toBe('Advanced');
+    expect(button.hasAttribute('aria-label')).toBe(false);
+    expect(button.querySelector('[aria-label], [role="img"]')).toBeNull();
+    const description = element.querySelector(`[id="${button.getAttribute('aria-describedby')}"]`);
+    expect(description?.textContent).toBe('Membership needs attention');
+    // The mark follows the license status.
+    chatStore.licenseStatus.set(null);
+    renderedFixture.detectChanges();
+    expect(element.querySelector('[data-testid="settings-layout-state-mark"]')).toBeNull();
+  });
+
+  describe('Setup (A-32)', () => {
+    function openAdvanced(isElectron: boolean): HTMLElement {
+      const element = render(isElectron, null);
+      renderedFixture.componentInstance.setActiveTab('pro-features');
+      renderedFixture.detectChanges();
+      return element;
+    }
+
+    it('is a card with the shared inset: no inline padding, a section icon, one section gap', () => {
+      const element = openAdvanced(true);
+      const setup = element.querySelector('[data-testid="settings-setup"]');
+      expect(setup?.getAttribute('data-glass-surface')).toBe('content');
+      expect(setup?.hasAttribute('style')).toBe(false);
+      expect(setup?.querySelector('[data-testid="form-section-icon"]')).not.toBeNull();
+      expect(setup?.parentElement?.classList.contains('gap-[var(--ptah-gap-section)]')).toBe(true);
+    });
+
+    it('Run onboarding again opens onboarding; Check Claude Code opens the install check (Electron)', () => {
+      const element = openAdvanced(true);
+      const appState = TestBed.inject(AppStateManager);
+      const setView = jest.spyOn(appState, 'setCurrentView').mockImplementation(() => undefined);
+      const openReady = jest.spyOn(appState, 'openOnboardingReady').mockImplementation(() => undefined);
+      const run = element.querySelector<HTMLButtonElement>('[data-testid="settings-run-onboarding-again"]');
+      const check = element.querySelector<HTMLButtonElement>('[data-testid="settings-check-claude-code"]');
+      expect(run?.textContent?.trim()).toBe('Run onboarding again');
+      expect(check?.textContent?.trim()).toBe('Check Claude Code');
+      expect(run?.querySelector('lucide-angular[aria-hidden="true"]')).not.toBeNull();
+      expect(check?.querySelector('lucide-angular[aria-hidden="true"]')).not.toBeNull();
+      run?.click();
+      expect(setView).toHaveBeenCalledWith('onboarding');
+      check?.click();
+      expect(openReady).toHaveBeenCalledTimes(1);
+    });
+
+    it('Check Claude Code is Electron-only', () => {
+      const element = openAdvanced(false);
+      expect(element.querySelector('[data-testid="settings-run-onboarding-again"]')).not.toBeNull();
+      expect(element.querySelector('[data-testid="settings-check-claude-code"]')).toBeNull();
+    });
   });
 
   it('keeps one settings-back test id and a narrow-only Back in the header actions', () => {
@@ -875,6 +989,7 @@ describe('SettingsComponent security copy', () => {
         // resolves the current surface through the Router.
         ...provideSurfaceRouterTesting(),
         AppStateManager,
+        { provide: ChatStore, useValue: chatStoreFake() },
         { provide: AuthStateService, useValue: authStateStub },
         { provide: VSCodeService, useValue: { isElectron: false } },
         {
@@ -1039,6 +1154,7 @@ describe('SettingsComponent deferred tabs', () => {
       providers: [
         ...provideSurfaceRouterTesting(),
         AppStateManager,
+        { provide: ChatStore, useValue: chatStoreFake() },
         { provide: AuthStateService, useValue: authStateFake() },
         { provide: VSCodeService, useValue: { isElectron: false } },
         {
@@ -1300,6 +1416,7 @@ describe('SettingsComponent deep-linked provider request', () => {
       providers: [
         ...provideSurfaceRouterTesting(),
         AppStateManager,
+        { provide: ChatStore, useValue: chatStoreFake() },
         { provide: AuthStateService, useValue: authStateStub },
         { provide: VSCodeService, useValue: { isElectron: false } },
         {

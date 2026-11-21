@@ -9,6 +9,15 @@ export class SubagentStopNotices {
     this.byTaskId.set(taskId, { sessionId, text });
   }
 
+  /**
+   * Remove the notice of a failed stop attempt, so a later user stop of the
+   * still-running task does not carry the budget-monitor label. A newer notice
+   * of the same task stays.
+   */
+  discard(taskId: string, text: string): void {
+    if (this.byTaskId.get(taskId)?.text === text) this.byTaskId.delete(taskId);
+  }
+
   noticeFor(taskId: string): string | undefined {
     return this.byTaskId.get(taskId)?.text;
   }

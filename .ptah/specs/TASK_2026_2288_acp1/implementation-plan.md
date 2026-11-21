@@ -780,6 +780,13 @@ export type ProviderSessionErrorCode =
     at P9 start and add any new hit.
   - Brand marks and onboarding readiness (`brand-slugs.ts`, `agent-marks.ts`,
     `provider-readiness.derive.ts`) per phase.
+  - Onboarding main-connection choice (user request 2026-11-21): the "Check Claude Code and
+    Codex" step offers only `claude-cli` and `openai-codex`
+    (`libs/frontend/onboarding/src/lib/ready/connection-choice.component.ts:222-239`). Build the
+    options from the registry so each provider-session entry whose host profile is bound
+    (Antigravity in P9, Grok P10, OpenCode P11c) is a third choice with its own installed,
+    version and signed-in panel (`provider-panel.component.ts`), and retitle the step to a
+    generic one. Spec: the option is listed when the status row exists and hidden otherwise.
 - Failure behaviour: not installed -> card "not installed" + install hint; not signed in ->
   banner with hint; host without the profile -> no card.
 - Quality: signals/`computed` only; OnPush unchanged.
@@ -1141,3 +1148,44 @@ These amend the components above; where they conflict, this section wins.
 - **M-4**: `provider-proxy-pool.ts:66,228-229` is the confirmed site (fact, not assumption).
 - **M-5**: P9 locates `message-sender.service.ts` by name; add
   `libs/frontend/chat/src/lib/settings/providers/provider-consumer-rows.ts` to the renderer list.
+
+## Revision 3: harness-sync parity (user question 2026-11-21)
+
+The user asked whether the shared setup (instructions, skills, agents, MCP servers) still reaches
+every provider. A read-only audit (evidence in the P3 worktree session) found that harness sync
+has no instructions facet: Claude chat appends the Ptah core prompt, the user `systemPrompt`,
+output style, enhanced prompts and memory blocks through the SDK; Codex chat sends them as
+`baseInstructions` / `developerInstructions` plus a first-turn enhanced prompt. Provider sessions
+must reach the same result. Added scope, by phase:
+
+- **P3 (lane, fix commit on the P3 PR)**:
+  - ACP passes no `--add-dir`; confirm agy needs nothing beyond its cwd, or pass it as an
+    `agy acp` argument.
+  - The MCP credential must be revoked at lane end on the ACP path (stream-json revokes it in
+    `onMcpConfigRestored`).
+  - A restored resume drops projectGuidance and the role; keep this only when agy really
+    restores the context, else re-send them.
+- **P7 (chat backend)**:
+  - `ProviderSessionOpenRequest` gains an `instructions` field: Ptah core prompt, UI hint, user
+    `systemPrompt`, output-style body, enhanced prompts or project guidance, memory and
+    session-start blocks. These are built by the same builders Codex chat uses
+    (`codex-chat-host-ports.ts:493-518`, `codex-context.ts:332-349,992-997`). ACP has no
+    system-prompt field, so the adapter puts them in front of the first `session/prompt`, and
+    again after a resume whose context was not restored.
+  - The user `mcpServersOverride` servers are merged next to `ptah`
+    (`codex-chat-host-ports.ts:336-397`): `ProviderMcpAttachment.name` stops being fixed to
+    `'ptah'`.
+  - Harness preflight / `HarnessPolicySync` runs before a chat session opens
+    (`session-lifecycle-manager.ts:422-430`), so `.agents/skills` and agy's `mcp_config.json`
+    are current.
+  - Capability MCP toggles (`capability-resolver.service.ts`) filter the user MCP servers
+    passed by Ptah; servers loaded by the agent's own config are outside Ptah's control, and
+    that is stated in the settings UI.
+- **P10 (Grok)**: Grok is not a harness target (`HARNESS_TARGET_IDS`). Add a `grok` target (skills
+  dir, user MCP config file, agents if supported), once `grok` is installed and its discovery
+  paths are recorded live. Until then, Grok receives skills and MCP servers only through what
+  Ptah passes per session.
+- **P11 (OpenCode serve)**: each session is created with its workspace directory, so
+  `{ws}/opencode.json` and `{ws}/.opencode/agent` load per workspace. Per-process
+  `OPENCODE_CONFIG_CONTENT` does not reach a shared `opencode serve`, so the Ptah MCP uses the
+  per-session `mcp.add` the plan already names. The 4 KB argv guidance cut does not apply.

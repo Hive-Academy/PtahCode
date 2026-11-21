@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
 import {
   ClaudeAmbientStatusService,
   ProviderAccountsStateService,
@@ -171,6 +172,7 @@ class StateStub {
     this.cliTest.set(ready({ ...this.testResult, id: cli }));
   });
   readonly clearCliTest = jest.fn((_id: string) => undefined);
+  readonly cliRedetecting = signal(false);
   readonly cliDetection = signal<
     ProvidersSettingsSection<CliDetectionResult[]>
   >(ready([]));
@@ -387,34 +389,98 @@ describe('CliOrchestrationMatrixComponent', () => {
     );
   });
 
-  it('mounts one Lanes table with installed, instance and uninstalled rows in try order', () => {
-    const ids = Array.from(
-      element().querySelectorAll('ptah-lanes-table tbody > tr[data-testid]'),
-    ).map((row) => row.getAttribute('data-testid'));
-    expect(ids).toEqual([
+  it('mounts one Lanes table: CLI agents and Ptah CLI groups, the keyless Cursor as recovery row, the strip for the rest', () => {
+    const ids = (selector: string) =>
+      Array.from(element().querySelectorAll(selector)).map((row) =>
+        row.getAttribute('data-testid'),
+      );
+    expect(
+      ids(
+        'ptah-lanes-table tbody[data-lanes-group="cli"] > tr[data-lane-kind]',
+      ),
+    ).toEqual([
       'cli-provider-card-codex',
       'cli-provider-card-antigravity',
-      'cli-matrix-row-glm-1',
       'cli-provider-card-copilot',
       'cli-provider-card-opencode',
       'cli-provider-card-cursor',
-      'cli-provider-card-pi',
     ]);
+    expect(
+      ids(
+        'ptah-lanes-table tbody[data-lanes-group="ptah"] > tr[data-lane-kind]',
+      ),
+    ).toEqual(['cli-matrix-row-glm-1']);
+    // Global numbers run across both groups; the recovery row has none.
+    const number = (testId: string) =>
+      q(`[data-testid="${testId}"] td`)?.textContent?.trim();
+    expect(number('cli-provider-card-codex')).toBe('1');
+    expect(number('cli-matrix-row-glm-1')).toBe('3');
+    expect(number('cli-provider-card-cursor')).toBe('—');
+    // Not-installed CLIs leave the table for the strip; the keyless Cursor is not in the strip.
+    expect(
+      ids('[data-testid="lanes-strip"] [data-testid^="cli-provider-card-"]'),
+    ).toEqual(['cli-provider-card-pi']);
     expect(element().querySelectorAll('ptah-lanes-table')).toHaveLength(1);
-    expect(q('ptah-cli-instances')).not.toBeNull();
+    expect(q('ptah-cli-instances')).toBeNull();
+    expect(q('ptah-cli-shared-defaults')).toBeNull();
   });
 
-  it('keeps row facts, native permission, capabilities and test result in the detail', () => {
+  it('counts table rows only: the badge = installed + recovery rows = the sum of the group counts', () => {
+    expect(q('[data-testid="lanes-group-cli-count"]')?.textContent).toBe('5');
+    expect(q('[data-testid="lanes-group-ptah-count"]')?.textContent).toBe('1');
+    const header = fixture.debugElement.query(
+      By.css('ptah-lanes-section-header'),
+    ).componentInstance as { total: () => number; enabled: () => number };
+    expect(header.total()).toBe(6);
+    expect(
+      q('[data-testid="lanes-enabled-count"]')?.textContent?.trim(),
+    ).toMatch(/^\d+ of 6 enabled$/);
+    // Strip CLIs are not counted.
+    expect(q('[data-testid="lanes-strip-count"]')?.textContent).toBe('1');
+  });
+
+  it('hides the strip and the order line in Reorder mode', () => {
+    expect(q('ptah-agent-orchestration-config')).not.toBeNull();
+    fixture.componentInstance['orderMode'].set(true);
+    fixture.detectChanges();
+    expect(q('[data-testid="lanes-strip"]')).toBeNull();
+    expect(q('[data-testid="lanes-group-cli"]')).toBeNull();
+    expect(q('ptah-agent-orchestration-config')).toBeNull();
+  });
+
+  it('puts Max concurrent and Reorder in the card header, with no header Add (M-1, M-2)', () => {
+    const header = q('ptah-lanes-section-header');
+    expect(
+      header?.querySelector('ptah-lanes-max-concurrent #lanes-max-concurrent'),
+    ).not.toBeNull();
+    expect(
+      header
+        ?.querySelector('[data-testid="lanes-order-edit"]')
+        ?.textContent?.trim(),
+    ).toBe('Reorder');
+    expect(q('[data-testid="lanes-header-add-instance"]')).toBeNull();
+    q<HTMLButtonElement>('[data-testid="lanes-order-edit"]')?.click();
+    fixture.detectChanges();
+    expect(fixture.componentInstance['orderMode']()).toBe(true);
+    expect(
+      header
+        ?.querySelector('[data-testid="lanes-order-edit"]')
+        ?.getAttribute('aria-pressed'),
+    ).toBe('true');
+  });
+
+  it('keeps row facts, native behavior, capabilities and test result in the detail', () => {
     const codex = card('codex');
     expect(codex).not.toBeNull();
     openDetail('codex');
     const detail = q('#lane-detail-codex');
     expect(detail?.hidden).toBe(false);
     expect(detail?.textContent).toContain('Provider');
+    // Decision 13: native behavior and the capability facts are inline text, not popover buttons.
+    expect(detail?.textContent).toContain('Native behavior');
     expect(
       detail?.querySelector('[data-popover-kind="permission"]'),
-    ).not.toBeNull();
-    // Short capability chips; each value opens in the shared popover.
+    ).toBeNull();
     expect(
       detail?.querySelector(
         '[data-testid="cli-capability-summary"] [data-capability]',
@@ -424,10 +490,10 @@ describe('CliOrchestrationMatrixComponent', () => {
       detail?.querySelector('[data-testid="cli-matrix-test-result"]')
         ?.textContent,
     ).toContain('Not run yet');
-    button(detail, 'Info')?.click();
-    fixture.detectChanges();
+    expect(button(detail, 'Info')).toBeFalsy();
+    expect(q('#lane-detail-codex ptah-cli-provider-card-popovers')).toBeNull();
     expect(
-      q('#lane-detail-codex ptah-cli-provider-card-popovers'),
+      detail?.querySelector('[data-lane-capabilities] button'),
     ).not.toBeNull();
   });
 
@@ -508,8 +574,8 @@ describe('CliOrchestrationMatrixComponent', () => {
   });
 
   it('projects the host read states into the card, outside any busy region', () => {
-    state.orchestration.set({ status: 'error', data: null, error: 'x' });
-    state.cliAgents.set({ status: 'error', data: null, error: 'x' });
+    state.orchestration.set({ status: 'loading', data: null, error: null });
+    state.cliAgents.set({ status: 'loading', data: null, error: null });
     const host = TestBed.createComponent(ReadStatesHostComponent);
     host.detectChanges();
     const root = host.nativeElement as HTMLElement;
@@ -528,11 +594,12 @@ describe('CliOrchestrationMatrixComponent', () => {
     host.destroy();
   });
 
-  it('opens the install guide and invokes Re-detect', async () => {
-    button(card('pi'), 'Install guide')?.click();
+  it('opens the install guide from the strip card and invokes Re-detect; the new row takes focus (U-7)', async () => {
+    q<HTMLButtonElement>('[data-testid="lanes-strip-install-pi"]')?.click();
     fixture.detectChanges();
     expect(
-      q('#lane-detail-pi ptah-cli-provider-card-popovers')?.textContent,
+      q('[data-testid="cli-provider-card-pi"] ptah-cli-provider-card-popovers')
+        ?.textContent,
     ).toContain('Re-detect');
     state.onRedetect = () =>
       state.orchestration.update((section) => ({
@@ -544,9 +611,301 @@ describe('CliOrchestrationMatrixComponent', () => {
           ),
         },
       }));
-    button(q('#lane-detail-pi'), 'Re-detect')?.click();
+    button(q('[data-testid="cli-provider-card-pi"]'), 'Re-detect')?.click();
+    await flush();
+    await fixture.whenStable();
+    expect(state.redetectClis).toHaveBeenCalledTimes(1);
+    expect(q('[data-testid="lanes-strip"]')).toBeNull();
+    expect(
+      q('ptah-lanes-table tr[data-testid="cli-provider-card-pi"]'),
+    ).not.toBeNull();
+    expect(document.activeElement).toBe(
+      q('[data-testid="cli-provider-card-pi"] input[type="checkbox"]'),
+    );
+  });
+
+  it('keeps the strip install popover open when the CLI is still missing', async () => {
+    const announce = jest.spyOn(feedback, 'announce');
+    q<HTMLButtonElement>('[data-testid="lanes-strip-install-pi"]')?.click();
+    fixture.detectChanges();
+    button(q('[data-testid="cli-provider-card-pi"]'), 'Re-detect')?.click();
     await flush();
     expect(state.redetectClis).toHaveBeenCalledTimes(1);
-    expect(q('#lane-detail-pi ptah-cli-provider-card-popovers')).toBeNull();
+    expect(
+      q('[data-testid="cli-provider-card-pi"] ptah-cli-provider-card-popovers'),
+    ).not.toBeNull();
+    expect(announce).toHaveBeenCalledWith(
+      'Still not found. Check the step above, then try again.',
+      'status',
+    );
+  });
+
+  it('keeps the guide open and says the read failed when detection succeeds but the read-back fails (finding 6)', async () => {
+    const announce = jest.spyOn(feedback, 'announce');
+    q<HTMLButtonElement>('[data-testid="lanes-strip-install-pi"]')?.click();
+    fixture.detectChanges();
+    state.onRedetect = () =>
+      state.orchestration.set({ status: 'error', data: null, error: 'Could not load this section. Retry.' });
+    button(q('[data-testid="cli-provider-card-pi"]'), 'Re-detect')?.click();
+    await flush();
+    await fixture.whenStable();
+    expect(announce).toHaveBeenCalledWith(
+      'Detection ran, but the lane list could not be read. Try again.',
+      'alert',
+    );
+    expect(announce).not.toHaveBeenCalledWith(
+      'Still not found. Check the step above, then try again.',
+      'status',
+    );
+    expect(document.activeElement).not.toBe(
+      q('[data-testid="cli-provider-card-pi"] input[type="checkbox"]'),
+    );
+  });
+
+  it('keeps the guide Re-detect pending until its read-backs end (finding 6)', async () => {
+    let finish: (value: boolean) => void = () => undefined;
+    state.redetectClis.mockImplementationOnce(
+      () => new Promise<boolean>((resolve) => (finish = resolve)),
+    );
+    q<HTMLButtonElement>('[data-testid="lanes-strip-install-pi"]')?.click();
+    fixture.detectChanges();
+    const redetect = () =>
+      button(q('[data-testid="cli-provider-card-pi"]'), 'Re-detect')?.click();
+    redetect();
+    await flush();
+    // Detection is done (the section is ready), but the read-backs still run: a second request waits.
+    expect(state.cliDetection().status).toBe('ready');
+    redetect();
+    await flush();
+    expect(state.redetectClis).toHaveBeenCalledTimes(1);
+    finish(true);
+    await flush();
+  });
+
+  it('moves focus to Retry when a failed read-back destroys the guide that had focus (finding 6)', async () => {
+    q<HTMLButtonElement>('[data-testid="lanes-strip-install-pi"]')?.click();
+    fixture.detectChanges();
+    const redetect = button(q('[data-testid="cli-provider-card-pi"]'), 'Re-detect')!;
+    redetect.focus();
+    state.onRedetect = () =>
+      state.orchestration.set({
+        status: 'error',
+        data: null,
+        error: 'Could not load this section. Retry.',
+      });
+    redetect.click();
+    await flush();
+    await fixture.whenStable();
+    expect(redetect.isConnected).toBe(false);
+    expect(document.activeElement).toBe(q('[data-testid="lanes-retry"]'));
+  });
+
+  it('leaves focus where the user moved it during a failed read-back (finding 6)', async () => {
+    let finish: (value: boolean) => void = () => undefined;
+    state.redetectClis.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    q<HTMLButtonElement>('[data-testid="lanes-strip-install-pi"]')?.click();
+    fixture.detectChanges();
+    button(q('[data-testid="cli-provider-card-pi"]'), 'Re-detect')?.click();
+    await flush();
+    const elsewhere = q<HTMLButtonElement>('[data-testid="cli-matrix-add"]')!;
+    elsewhere.focus();
+    state.orchestration.set({
+      status: 'error',
+      data: null,
+      error: 'Could not load this section. Retry.',
+    });
+    finish(true);
+    await flush();
+    await fixture.whenStable();
+    expect(document.activeElement).toBe(elsewhere);
+  });
+
+  it('refuses a guide Re-detect while another entry\'s Re-detect still reads back (finding 6)', async () => {
+    state.cliRedetecting.set(true);
+    fixture.detectChanges();
+    await fixture.componentInstance['redetectFromGuide']('pi');
+    await flush();
+    expect(state.redetectClis).not.toHaveBeenCalled();
+  });
+
+  it('reads no installed state from the previous snapshot while a lane read still runs (PR review D)', async () => {
+    const announce = jest.spyOn(feedback, 'announce');
+    q<HTMLButtonElement>('[data-testid="lanes-strip-install-pi"]')?.click();
+    fixture.detectChanges();
+    // A read that is not settled: `loading` with a snapshot that is not the result of this Re-detect.
+    state.onRedetect = () =>
+      state.orchestration.set({
+        status: 'loading',
+        data: {
+          ...ORCHESTRATION,
+          detectedClis: ORCHESTRATION.detectedClis.map((cli) =>
+            cli.cli === 'pi' ? detected('pi', true) : cli,
+          ),
+        },
+        error: null,
+      });
+    button(q('[data-testid="cli-provider-card-pi"]'), 'Re-detect')?.click();
+    await flush();
+    await fixture.whenStable();
+    expect(state.redetectClis).toHaveBeenCalledTimes(1);
+    expect(announce).toHaveBeenCalledWith(
+      'Detection ran, but the lane list could not be read. Try again.',
+      'alert',
+    );
+    expect(document.activeElement).not.toBe(
+      q('[data-testid="cli-provider-card-pi"] input[type="checkbox"]'),
+    );
+  });
+
+  it('moves focus into the row when Re-detect from the detail Install guide installs the lane (PR review E)', async () => {
+    openDetail('cursor');
+    q<HTMLButtonElement>('#lane-detail-cursor [data-popover-kind="install"]')?.click();
+    fixture.detectChanges();
+    const redetect = button(q('#lane-detail-cursor'), 'Re-detect')!;
+    redetect.focus();
+    state.onRedetect = () =>
+      state.orchestration.update((section) => ({
+        ...section,
+        data: {
+          ...ORCHESTRATION,
+          detectedClis: ORCHESTRATION.detectedClis.map((cli) =>
+            cli.cli === 'cursor' ? detected('cursor', true) : cli,
+          ),
+        },
+      }));
+    redetect.click();
+    await flush();
+    await fixture.whenStable();
+    // The detail drops its Install guide trigger and the guide; focus does not fall to body.
+    expect(redetect.isConnected).toBe(false);
+    expect(q('#lane-detail-cursor [data-popover-kind="install"]')).toBeNull();
+    expect(document.activeElement).toBe(
+      q('[data-testid="cli-provider-card-cursor"] input[type="checkbox"]'),
+    );
+  });
+
+  it('focuses the matrix region when the lane installed from the detail has no usable toggle (PR review E)', async () => {
+    state.scopes.set({ status: 'loading', data: null, error: null });
+    fixture.detectChanges();
+    openDetail('cursor');
+    q<HTMLButtonElement>('#lane-detail-cursor [data-popover-kind="install"]')?.click();
+    fixture.detectChanges();
+    const redetect = button(q('#lane-detail-cursor'), 'Re-detect')!;
+    redetect.focus();
+    state.onRedetect = () =>
+      state.orchestration.update((section) => ({
+        ...section,
+        data: {
+          ...ORCHESTRATION,
+          detectedClis: ORCHESTRATION.detectedClis.map((cli) =>
+            cli.cli === 'cursor' ? detected('cursor', true) : cli,
+          ),
+        },
+      }));
+    await fixture.componentInstance['redetectFromGuide']('cursor');
+    await flush();
+    await fixture.whenStable();
+    expect(redetect.isConnected).toBe(false);
+    expect(document.activeElement).toBe(q('[data-testid="cli-matrix"]'));
+  });
+
+  it('focuses the matrix region when the found lane has no enabled toggle (finding 6)', async () => {
+    state.scopes.set({ status: 'loading', data: null, error: null });
+    q<HTMLButtonElement>('[data-testid="lanes-strip-install-pi"]')?.click();
+    fixture.detectChanges();
+    state.onRedetect = () =>
+      state.orchestration.update((section) => ({
+        ...section,
+        data: {
+          ...ORCHESTRATION,
+          detectedClis: ORCHESTRATION.detectedClis.map((cli) =>
+            cli.cli === 'pi' ? detected('pi', true) : cli,
+          ),
+        },
+      }));
+    button(q('[data-testid="cli-provider-card-pi"]'), 'Re-detect')?.click();
+    await flush();
+    await fixture.whenStable();
+    expect(
+      q<HTMLInputElement>('[data-testid="cli-provider-card-pi"] input[type="checkbox"]')
+        ?.disabled,
+    ).toBe(true);
+    expect(document.activeElement).toBe(q('[data-testid="cli-matrix"]'));
+  });
+
+  it('shows the terminal error and Retry, not Loading, when both reads failed (finding 8)', () => {
+    state.orchestration.set({ status: 'error', data: null, error: 'Could not load this section. Retry.' });
+    state.cliAgents.set({ status: 'error', data: null, error: 'Could not load this section. Retry.' });
+    fixture.detectChanges();
+    expect(q('[data-testid="cli-matrix"]')?.getAttribute('aria-busy')).toBe(
+      'false',
+    );
+    expect(q('[data-testid="lanes-skeleton-row"]')).toBeNull();
+    const table = q('[data-testid="cli-provider-grid"]');
+    expect(table?.textContent).toContain('Could not load lanes.');
+    expect(button(table, 'Retry')).toBeDefined();
+    expect(q('[data-testid="cli-matrix-empty"]')).toBeNull();
+  });
+
+  it('keeps Loading while one source is still pending and no row is readable (finding 8)', () => {
+    state.orchestration.set({ status: 'error', data: null, error: 'Could not load this section. Retry.' });
+    state.cliAgents.set({ status: 'loading', data: null, error: null });
+    fixture.detectChanges();
+    expect(q('[data-testid="cli-matrix"]')?.getAttribute('aria-busy')).toBe(
+      'true',
+    );
+  });
+
+  it('shows no empty copy after a partial read with zero rows (finding 8)', () => {
+    state.orchestration.set({ status: 'error', data: null, error: 'Could not load this section. Retry.' });
+    state.cliAgents.set(ready([]));
+    fixture.detectChanges();
+    expect(q('[data-testid="cli-matrix-empty"]')).toBeNull();
+    expect(q('[data-testid="cli-provider-grid"]')?.textContent).toContain(
+      'Could not load lanes.',
+    );
+  });
+
+  it('opens the keyless Cursor detail from Sign in with Credentials and the Install guide in the footer', () => {
+    button(card('cursor'), 'Sign in')?.click();
+    fixture.detectChanges();
+    const detail = q('#lane-detail-cursor');
+    expect(detail?.hidden).toBe(false);
+    expect(
+      detail?.querySelector('[data-popover-kind="credentials"]'),
+    ).not.toBeNull();
+    expect(
+      detail?.querySelector('[data-popover-kind="install"]'),
+    ).not.toBeNull();
+  });
+
+  it('opens the add modal from the Ptah group header Add, the only Add control', () => {
+    expect(
+      element().querySelectorAll('[data-testid="cli-matrix-add"]'),
+    ).toHaveLength(1);
+    expect(
+      q('[data-testid="lanes-group-ptah"] [data-testid="cli-matrix-add"]'),
+    ).not.toBeNull();
+    q<HTMLButtonElement>('[data-testid="cli-matrix-add"]')?.click();
+    fixture.detectChanges();
+    expect(
+      q('[data-testid="add-cli-instance-modal"]')
+        ?.closest('dialog')
+        ?.hasAttribute('open'),
+    ).toBe(true);
+  });
+
+  it('points the empty text to the strip', () => {
+    state.orchestration.set(ready({ ...ORCHESTRATION, detectedClis: [] }));
+    state.cliAgents.set(ready([]));
+    fixture.detectChanges();
+    expect(q('[data-testid="cli-matrix-empty"]')?.textContent?.trim()).toBe(
+      'No CLI agent installed yet. Use Add more below.',
+    );
   });
 });

@@ -163,6 +163,8 @@ export class LocalModelTranslationProxy extends TranslationProxyBase {
         supportsToolUse: false,
       }));
     } catch (error) {
+      // degradation-audit: reported - logged at warn here; the caller gets an
+      // empty model list for this local provider.
       this.logger.warn(
         `[${this.config.name}Proxy] Failed to list models: ${
           error instanceof Error ? error.message : String(error)

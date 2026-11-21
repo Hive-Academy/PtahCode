@@ -99,7 +99,7 @@ export const ExecutionChatMessageSchema = z.object({
   timestamp: z.number(),
   streamingState: ExecutionNodeSchema.nullable(),
   isInterrupted: z.boolean().optional(),
-  stopCause: z.enum(['user-stop', 'parent-steer', 'runtime-cap', 'host-stop', 'internal-abort']).optional(),
+  stopCause: z.enum(['user-stop', 'parent-steer', 'runtime-cap', 'host-stop', 'internal-abort', 'send-now']).optional(),
   rawContent: z.string().optional(),
   nativeUuid: z.string().optional(),
   files: z.array(z.string()).readonly().optional(),

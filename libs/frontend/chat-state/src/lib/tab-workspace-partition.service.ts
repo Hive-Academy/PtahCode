@@ -648,7 +648,13 @@ export class TabWorkspacePartitionService {
         tabs: sanitizeRestoredTabs(state.tabs as TabState[]),
         activeTabId: state.activeTabId ?? null,
       };
-    } catch {
+    } catch (error: unknown) {
+      // degradation-audit: reported - logged at warn here; the caller gets
+      // null and the workspace starts with no restored tabs.
+      console.warn(
+        '[TabWorkspacePartition] Failed to read stored workspace tab state',
+        { errorName: error instanceof Error ? error.name : typeof error },
+      );
       return null;
     }
   }

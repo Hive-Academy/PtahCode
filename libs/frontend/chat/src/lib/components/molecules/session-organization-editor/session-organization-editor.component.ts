@@ -77,8 +77,8 @@ export function httpsUrlOrNull(raw: string): string | null {
   try {
     return new URL(value).protocol === 'https:' ? value : null;
   } catch {
-    // An unparsable URL is not a link; the caller shows it as text or
-    // refuses it with a visible message.
+    // degradation-audit: optional-capability - an unparsable URL is not a
+    // link; the caller shows it as text or refuses it with a visible message.
     return null;
   }
 }

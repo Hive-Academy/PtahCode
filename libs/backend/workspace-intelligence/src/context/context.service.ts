@@ -787,6 +787,8 @@ export class ContextService {
       });
       return ignoreFiles;
     } catch (error) {
+      // degradation-audit: reported - logged at warn here; the caller gets no
+      // ignore files ([]) and nothing is cached, so the next call retries.
       this.logger.warn(
         `Failed to parse workspace ignore files for ${workspaceRoot}`,
         error,

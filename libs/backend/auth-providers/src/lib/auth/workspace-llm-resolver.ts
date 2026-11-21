@@ -107,8 +107,8 @@ export class WorkspaceLlmResolver implements IWorkspaceLlmResolver {
       ) {
         throw error;
       }
-      // degradation-audit: optional-capability - the builder already returns
-      // `undefined` on its own failures; a throw degrades the same way.
+      // The builder already returns `undefined` on its own failures; a throw
+      // degrades the same way and is logged at warn here.
       this.logger.warn(
         '[WorkspaceLlmResolver] Could not build the provider snapshot',
         { error: error instanceof Error ? error.message : String(error) },

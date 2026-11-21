@@ -4919,6 +4919,16 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       expect(mcpCredentials.revokeSubject).toHaveBeenCalledWith(agentId);
     });
 
+    it('revokes the lane credential when a running lane is stopped', async () => {
+      getMcpPort.mockReturnValue(51821);
+      const agentId = await spawnContinuable();
+      mcpCredentials.revokeSubject.mockClear();
+      const stopping = manager.stop(agentId);
+      await jest.advanceTimersByTimeAsync(600);
+      await stopping;
+      expect(mcpCredentials.revokeSubject).toHaveBeenCalledWith(agentId);
+    });
+
     it('keeps a continuation policy file after turn settlement until subprocess release', async () => {
       const remove = jest.fn().mockResolvedValue(undefined);
       Reflect.set(manager, 'instructionFiles', { remove });

@@ -307,6 +307,8 @@ export class FollowUpQueueService {
       this.pump(entry.tabId);
       return true;
     } catch (error: unknown) {
+      // degradation-audit: reported - logged at warn here; false keeps the
+      // entry in the queue.
       this.logger.warn(LOG, 'chat:queued-withdraw failed', { errorName: error instanceof Error ? error.name : typeof error });
       return false;
     }

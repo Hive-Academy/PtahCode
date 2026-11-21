@@ -305,7 +305,7 @@ const CONTROL =
                       id="providers-catalog-hint-list"
                     >
                       <ul
-                        class="max-h-64 overflow-y-auto text-sm"
+                        class="text-sm"
                         data-testid="catalog-hint-text"
                       >
                         @for (provider of catalog(); track provider.id) {

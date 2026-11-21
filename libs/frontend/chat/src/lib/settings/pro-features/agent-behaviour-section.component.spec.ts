@@ -196,7 +196,6 @@ describe('AgentBehaviourSectionComponent', () => {
           '.text-primary, .text-secondary, .text-success, .text-error, .text-warning',
         ),
       );
-      expect(coloured.length).toBeGreaterThan(0);
       // lucide-angular copies its host classes onto the inner <svg>.
       expect(
         coloured.every((node) => node.closest('lucide-angular') !== null),
@@ -411,17 +410,18 @@ describe('AgentBehaviourSectionComponent', () => {
     });
   });
 
-  describe('M1: one-line row descriptions', () => {
-    it('clamps every description to one line, with the full text as its title and for screen readers', async () => {
+  describe('row descriptions (F9)', () => {
+    it('shows every description as the wrapping row hint and keeps its id', async () => {
       await render();
       const notes = ['prompt', 'effort', 'workflows', 'ultracode'].map(
         (row) =>
           element.querySelector(`#agent-behaviour-${row}-note`) as HTMLElement,
       );
       for (const note of notes) {
-        expect(note.classList).toContain('truncate');
-        expect(note.classList).toContain('text-xs');
-        expect(note.getAttribute('title')).toBe(note.textContent?.trim());
+        expect(note.tagName).toBe('P');
+        expect(note.classList).not.toContain('truncate');
+        expect(note.hasAttribute('title')).toBe(false);
+        expect(note.textContent?.trim()).not.toBe('');
         expect(note.closest('ptah-setting-row')).not.toBeNull();
       }
       expect(notes[3].textContent).toContain('Plan each message with X-High effort.');
@@ -649,15 +649,91 @@ describe('AgentBehaviourSectionComponent', () => {
     });
   });
 
+  describe('row layout (F3, F4, decision 29)', () => {
+    it('aligns each control to the right edge, trims the edge padding and has no row border class', async () => {
+      await render();
+      const rows = Array.from(element.querySelectorAll<HTMLElement>('ptah-setting-row'));
+      expect(rows).toHaveLength(4);
+      for (const row of rows) {
+        expect(row.className).not.toContain('border-bottom');
+        expect(row.classList).toContain('first:[&>div]:pt-0');
+        expect(row.classList).toContain('last:[&>div]:pb-0');
+        expect(row.querySelector('[data-ptah-setting-control]')?.classList).toContain('justify-end');
+      }
+      expect(element.querySelector('[data-testid="form-section-icon"]')).not.toBeNull();
+    });
+
+    it('keeps the four rows in one container with the load alerts outside it (review minor 2)', async () => {
+      handlers['enhancedPrompts:getStatus'] = () =>
+        rpcError('status unavailable');
+      await render();
+      const rows = element.querySelector<HTMLElement>('[data-testid="agent-behaviour-rows"]');
+      expect(rows).not.toBeNull();
+      expect(Array.from(rows?.children ?? []).map((row) => row.tagName.toLowerCase())).toEqual(
+        Array(4).fill('ptah-setting-row'),
+      );
+      expect(rows?.firstElementChild?.getAttribute('data-testid')).toBe('agent-behaviour-row-prompt');
+      expect(rows?.lastElementChild?.getAttribute('data-testid')).toBe('agent-behaviour-row-effort');
+      const alert = element.querySelector('[data-testid="agent-behaviour-load-error"]');
+      expect(alert).not.toBeNull();
+      expect(rows?.contains(alert)).toBe(false);
+    });
+
+    it('puts the details and info buttons in the action slot and the toggle after it', async () => {
+      await render();
+      const slot = (row: string): HTMLElement | null =>
+        element.querySelector(`[data-testid="agent-behaviour-row-${row}"] [data-ptah-setting-action]`);
+      expect(slot('prompt')?.querySelector('[aria-label="System prompt details"]')).not.toBeNull();
+      expect(slot('ultracode')?.querySelector('[aria-label="About Ultracode"]')).not.toBeNull();
+      expect(slot('workflows')?.children).toHaveLength(0);
+      expect(slot('prompt')?.querySelector('input')).toBeNull();
+      expect(slot('prompt')?.nextElementSibling).toBe(checkbox('Toggle Enhanced System Prompt'));
+    });
+  });
+
+  describe('Ultracode info popover (A14)', () => {
+    afterEach(() => element?.remove());
+
+    it('opens and closes from the action slot button; Esc closes it and focus is on the button', async () => {
+      await render();
+      document.body.appendChild(element);
+      const info = element.querySelector<HTMLButtonElement>('[aria-label="About Ultracode"]');
+      expect(info).not.toBeNull();
+      expect(info?.closest('[data-ptah-setting-action]')).not.toBeNull();
+
+      info?.focus();
+      info?.click();
+      fixture.detectChanges();
+      expect(component.ultracodeInfoOpen()).toBe(true);
+      expect(
+        document.querySelector('[data-testid="agent-behaviour-ultracode-info-text"]')?.textContent,
+      ).toContain('Turning Ultracode off restores your previous reasoning effort.');
+
+      info?.click();
+      fixture.detectChanges();
+      expect(component.ultracodeInfoOpen()).toBe(false);
+
+      info?.click();
+      fixture.detectChanges();
+      expect(component.ultracodeInfoOpen()).toBe(true);
+      info?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+      fixture.detectChanges();
+      await fixture.whenStable();
+      expect(component.ultracodeInfoOpen()).toBe(false);
+      expect(document.activeElement).toBe(info);
+    });
+  });
+
   describe('System prompt details drawer (D-SP)', () => {
     it('opens drawer when Details button is clicked', async () => {
       await render();
       expect(component.drawerOpen()).toBe(false);
 
       const detailsBtn = element.querySelector<HTMLButtonElement>(
-        '[data-testid="agent-behaviour-prompt-details"]',
+        '[aria-label="System prompt details"]',
       );
       expect(detailsBtn).not.toBeNull();
+      expect(detailsBtn?.getAttribute('data-testid')).toBe('agent-behaviour-prompt-details');
       detailsBtn?.click();
       fixture.detectChanges();
 

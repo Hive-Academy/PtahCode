@@ -291,7 +291,7 @@ const LABELS: Record<OutcomeTaskKind, string> = {
                                 [id]="
                                   'detail-' + rowId(family, profile.model, kind)
                                 "
-                                class="max-w-64 bg-base-100 text-xs shadow-lg"
+                                class="max-w-64 bg-base-100 text-xs"
                               >
                                 <p>Source: {{ cell.source }}</p>
                                 <p>
@@ -421,7 +421,7 @@ const LABELS: Record<OutcomeTaskKind, string> = {
                                           'detail-' +
                                           rowId(family, profile.model, kind)
                                         "
-                                        class="max-w-64 bg-base-100 text-xs shadow-lg"
+                                        class="max-w-64 bg-base-100 text-xs"
                                       >
                                         <p>Source: {{ detail.source }}</p>
                                         <p>

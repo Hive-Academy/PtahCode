@@ -189,6 +189,8 @@ export class TaskSweepService {
       }
       return trackedCarrierFolders(result.stdout);
     } catch (error: unknown) {
+      // degradation-audit: reported - logged at warn here; null means "git
+      // tracking unknown", the same answer as a failed probe exit code above.
       this.logger.warn('[task-specs] sweep git probe failed', {
         error: error instanceof Error ? error.message : String(error),
       });

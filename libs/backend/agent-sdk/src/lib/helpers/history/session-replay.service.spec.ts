@@ -646,6 +646,109 @@ describe('SessionReplayService', () => {
     ]);
   });
 
+  describe('SDK-written assistant entries (TASK_2026_2288_5a47)', () => {
+    function syntheticPlaceholder(): SessionHistoryMessage {
+      return a({
+        role: 'assistant',
+        model: '<synthetic>',
+        usage: {
+          input_tokens: 0,
+          output_tokens: 0,
+          cache_read_input_tokens: 0,
+          cache_creation_input_tokens: 0,
+        },
+        content: [{ type: 'text', text: 'No response requested.' }],
+      } as SessionHistoryMessage['message']);
+    }
+
+    function textDeltas(events: FlatStreamEventUnion[]): string[] {
+      return events
+        .filter((e) => e.eventType === 'text_delta')
+        .map((e) => (e as { delta: string }).delta);
+    }
+
+    function startRoles(events: FlatStreamEventUnion[]): string[] {
+      return events
+        .filter((e) => e.eventType === 'message_start')
+        .map((e) => (e as { role: string }).role);
+    }
+
+    it('drops the resume placeholder after a tool_result and still replays the next prompt', () => {
+      const messages: SessionHistoryMessage[] = [
+        u({ role: 'user', content: 'do thing' }),
+        a({
+          role: 'assistant',
+          content: [
+            { type: 'tool_use', id: 't-1', name: 'Read', input: { path: '/x' } },
+          ],
+        }),
+        u({
+          role: 'user',
+          content: [
+            {
+              type: 'tool_result',
+              tool_use_id: 't-1',
+              content: 'file body',
+              is_error: false,
+            },
+          ],
+        }),
+        syntheticPlaceholder(),
+        u({ role: 'user', content: 'continue please' }),
+      ];
+
+      const out = service.replayToStreamEvents('s', messages, []);
+
+      expect(textDeltas(out)).toEqual(['do thing', 'continue please']);
+      expect(startRoles(out)).toEqual(['user', 'assistant', 'user']);
+    });
+
+    it('opens no assistant message for a placeholder right after a prompt', () => {
+      const messages: SessionHistoryMessage[] = [
+        u({ role: 'user', content: 'first' }),
+        syntheticPlaceholder(),
+        u({ role: 'user', content: 'second' }),
+      ];
+
+      const out = service.replayToStreamEvents('s', messages, []);
+
+      expect(startRoles(out)).toEqual(['user', 'user']);
+      expect(textDeltas(out)).toEqual(['first', 'second']);
+    });
+
+    it('keeps the same text from a real model', () => {
+      const messages: SessionHistoryMessage[] = [
+        u({ role: 'user', content: 'say it' }),
+        a({
+          role: 'assistant',
+          model: 'claude-opus-4',
+          content: [{ type: 'text', text: 'No response requested.' }],
+        } as SessionHistoryMessage['message']),
+      ];
+
+      const out = service.replayToStreamEvents('s', messages, []);
+
+      expect(startRoles(out)).toEqual(['user', 'assistant']);
+      expect(textDeltas(out)).toEqual(['say it', 'No response requested.']);
+    });
+
+    it('opens no assistant message for an interrupt-sentinel-only entry', () => {
+      const messages: SessionHistoryMessage[] = [
+        u({ role: 'user', content: 'first' }),
+        a({
+          role: 'assistant',
+          content: [{ type: 'text', text: '[Request interrupted by user]' }],
+        }),
+        u({ role: 'user', content: 'second' }),
+      ];
+
+      const out = service.replayToStreamEvents('s', messages, []);
+
+      expect(startRoles(out)).toEqual(['user', 'user']);
+      expect(textDeltas(out)).toEqual(['first', 'second']);
+    });
+  });
+
   it('suppresses user messages starting with <task-notification>', () => {
     const messages: SessionHistoryMessage[] = [
       u({

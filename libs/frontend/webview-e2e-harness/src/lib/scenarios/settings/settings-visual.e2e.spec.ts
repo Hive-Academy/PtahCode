@@ -319,9 +319,13 @@ async function assertOrderStripWhole(
   expect(layout.overflow).toBeLessThanOrEqual(0.5);
   expect(layout.clipped).toBe(false);
   expect(layout.chips + layout.more).toBe(total);
-  await expect(
-    page.locator('[data-testid="policy-order-edit"]'),
-  ).toHaveAttribute('aria-label', new RegExp(`${total}\\. .*Edit order$`));
+  // Phase 3 (R-3): the order is edited through the Lanes header Reorder toggle; the sr-only summary names it all.
+  const reorder = page.getByTestId('lanes-order-edit');
+  await expect(reorder).toHaveAttribute('aria-pressed', 'false');
+  await expect(reorder).toHaveAccessibleName('Reorder');
+  await expect(page.getByTestId('policy-order-summary')).toContainText(
+    `${total}. `,
+  );
 }
 
 /**
@@ -456,42 +460,34 @@ async function captureMatrixPopovers(
   await capture(page, 'orchestration-popover-effort', host, theme);
   await page.keyboard.press('Escape');
   await expect(page.locator(popover)).toHaveCount(0);
-  // Permission ℹ (the copy shown to the user at Gate V 36).
+  // Phase 3 (decision 13): the Codex detail shows "Permission modes" as an inline fact, not a popover.
   await expandMatrixDetail(page, 'codex');
-  await page
-    .locator('#lane-detail-codex [data-popover-kind="permission"]')
-    .click();
-  await expect(
-    page.locator('[data-testid="cli-provider-popover-content"]'),
-  ).toBeVisible();
-  await onScreen('[data-testid="cli-provider-popover-content"]');
-  await capture(page, 'orchestration-popover-permission', host, theme);
-  await page.keyboard.press('Escape');
-  await expect(
-    page.locator('[data-testid="cli-provider-popover-content"]'),
-  ).toHaveCount(0);
-  // Batch 31: Copilot's permission popover with the moved auto-approve toggle, and Cursor's Credentials popover.
-  await expandMatrixDetail(page, 'copilot');
-  await page
-    .locator('#lane-detail-copilot [data-popover-kind="permission"]')
-    .click();
   await expect(
     page.locator(
-      '[data-testid="cli-provider-popover-content"] [data-testid="copilot-auto-approve"]',
+      '#lane-detail-codex [data-testid="cli-capability-summary"] [data-capability="Permission"]',
+    ),
+  ).toContainText('Permission modes');
+  await expect(
+    page.locator(
+      '#lane-detail-codex [data-testid="cli-provider-popover-content"]',
+    ),
+  ).toHaveCount(0);
+  await page.locator('#lane-detail-codex').scrollIntoViewIfNeeded();
+  await capture(page, 'orchestration-popover-permission', host, theme);
+  // Decision 19: the Copilot detail has the auto-approve switch inline, and Cursor's Credentials popover.
+  await expandMatrixDetail(page, 'copilot');
+  await expect(
+    page.locator(
+      '#lane-detail-copilot [data-testid="lane-detail-auto-approve"] [data-testid="copilot-auto-approve"]',
     ),
   ).toBeEnabled();
-  await onScreen('[data-testid="cli-provider-popover-content"]');
-  await noOverflow('[data-testid="cli-provider-popover-content"]');
-  await assertPopoverOnTop(
-    page,
-    '[data-testid="cli-provider-popover-content"]',
-    'h3, p, input',
-  );
-  await capture(page, 'orchestration-popover-copilot', host, theme);
-  await page.keyboard.press('Escape');
   await expect(
-    page.locator('[data-testid="cli-provider-popover-content"]'),
+    page.locator(
+      '#lane-detail-copilot [data-testid="cli-provider-popover-content"]',
+    ),
   ).toHaveCount(0);
+  await noOverflow('#lane-detail-copilot');
+  await capture(page, 'orchestration-popover-copilot', host, theme);
   await expandMatrixDetail(page, 'cursor');
   await page
     .locator('#lane-detail-cursor [data-popover-kind="credentials"]')
@@ -776,8 +772,10 @@ async function captureRolesOpen(
 }
 
 /**
- * Batch 33 revise 1: the policy bar is one row in both hosts, and its order popover (opened from the chips) has ▲/▼
- * targets of at least 24×24 px (WCAG 2.5.8). Captured open; Esc closes it and returns focus to the chips.
+ * Batch 33 revise 1: the order line is one row in both hosts. Phase 3 (R-3, decision 18): the Lanes header "Reorder"
+ * toggle shows one flat list (no group headers, no Add more strip) whose grip and ▲/▼ targets are at least 24×24 px
+ * (WCAG 2.5.8). One move keeps focus on the same button of the moved row; "Done" returns the groups and keeps focus
+ * on the toggle. The capture name is kept.
  */
 async function captureOrderPopover(
   page: Page,
@@ -790,46 +788,42 @@ async function captureOrderPopover(
     `B33 policy bar ${host}/${theme}: ${Math.round(barBox?.width ?? 0)}x${Math.round(barBox?.height ?? 0)}`,
   );
   expect(barBox?.height ?? 0, 'policy bar is one row').toBeLessThanOrEqual(48);
-  const trigger = bar.locator('[data-testid="policy-order-edit"]');
-  const triggerBox = await trigger.boundingBox();
+  const reorder = page.getByTestId('lanes-order-edit');
+  const reorderBox = await reorder.boundingBox();
   expect(
-    Math.min(triggerBox?.width ?? 0, triggerBox?.height ?? 0),
-    'Edit order target',
+    Math.min(reorderBox?.width ?? 0, reorderBox?.height ?? 0),
+    'Reorder target',
   ).toBeGreaterThanOrEqual(24);
-  await trigger.click();
-  const popover = page.locator('[data-testid="policy-order-popover"]');
-  await expect(popover).toBeVisible();
-  const targets = await popover.locator('li button').evaluateAll((buttons) =>
-    buttons.map((button) => {
-      const box = button.getBoundingClientRect();
+  await reorder.click();
+  await expect(reorder).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByTestId('lanes-group-cli')).toHaveCount(0);
+  await expect(page.getByTestId('lanes-group-ptah')).toHaveCount(0);
+  await expect(page.getByTestId('lanes-strip')).toHaveCount(0);
+  const controls = page.locator(
+    '[data-testid^="policy-order-up-"], [data-testid^="policy-order-down-"], [data-testid^="policy-order-grip-"]',
+  );
+  const targets = await controls.evaluateAll((nodes) =>
+    nodes.map((node) => {
+      const box = node.getBoundingClientRect();
       return Math.min(Math.round(box.width), Math.round(box.height));
     }),
   );
   console.log(
-    `B33 order popover ${host}/${theme}: ${JSON.stringify(await popover.boundingBox())}; smallest target ${Math.min(...targets)}px`,
+    `B33 reorder list ${host}/${theme}: ${targets.length} controls; smallest target ${Math.min(...targets)}px`,
   );
+  expect(targets.length, 'reorder controls').toBeGreaterThan(0);
   for (const size of targets)
-    expect(size, 'move button target').toBeGreaterThanOrEqual(24);
-  const box = await popover.boundingBox();
-  const viewport = page.viewportSize();
-  expect(
-    box &&
-      viewport &&
-      box.y >= 0 &&
-      box.y + box.height <= viewport.height &&
-      box.x + box.width <= viewport.width,
-    'order popover on screen',
-  ).toBe(true);
-  await assertPopoverOnTop(
-    page,
-    '[data-testid="policy-order-popover"]',
-    'h3, li span, li button',
-  );
+    expect(size, 'move control target').toBeGreaterThanOrEqual(24);
+  const down = page.locator('[data-testid^="policy-order-down-"]').first();
+  const downId = await down.getAttribute('data-testid');
+  await down.click();
+  await expect(page.locator(`[data-testid="${downId}"]`)).toBeFocused();
   await waitForSettled(page);
   await capture(page, 'orchestration-order-popover', host, theme);
-  await page.keyboard.press('Escape');
-  await expect(popover).toHaveCount(0);
-  await expect(trigger).toBeFocused();
+  await reorder.click();
+  await expect(reorder).toHaveAttribute('aria-pressed', 'false');
+  await expect(page.getByTestId('lanes-group-cli')).toBeVisible();
+  await expect(reorder).toBeFocused();
 }
 
 /**
@@ -1423,8 +1417,8 @@ for (const host of ['vscode', 'electron'] as const) {
         ),
       ).toBeVisible();
       await assertOrderStripWhole(page, host, theme, 6);
-      // 52.1: one normalised version per card. PR #1309: the version is a fact in the card's description list
-      // (term "Version"), not a second label on the name's line, so the header shows only the name and one status.
+      // 52.1: one normalised version per row, on line 2 of the Lane identity. P-42: the identity tooltip keeps
+      // the full single-line version the CLI printed, so a short label never hides it.
       const expected: Readonly<Record<string, string>> = {
         codex: 'v0.155.1',
         copilot: 'v1.0.83',
@@ -1432,23 +1426,22 @@ for (const host of ['vscode', 'electron'] as const) {
         antigravity: 'v1.2.14',
       };
       for (const [cli, label] of Object.entries(expected)) {
-        await expandMatrixDetail(page, cli);
-        const version = page.locator(
-          `#lane-detail-${cli} [data-testid="cli-provider-facts"] dt:text-is("Version") + dd span[title]`,
+        const identity = page.locator(
+          `[data-testid="cli-provider-card-${cli}"] [data-testid="cli-matrix-version"]`,
         );
-        await expect(version).toHaveText(label);
-        await expect(version).toHaveAttribute('title', LIVE_VERSIONS[cli]);
-        const fact = await version.evaluate((element) => ({
-          term:
-            element
-              .closest('dd')
-              ?.previousElementSibling?.textContent?.trim() ?? null,
-          inHeader: element.closest('header') !== null,
-          clipped: element.scrollWidth > element.clientWidth + 1,
-        }));
-        expect(fact.term).toBe('Version');
-        expect(fact.inHeader).toBe(false);
-        expect(fact.clipped).toBe(false);
+        await expect(
+          identity.locator('.ptah-table-row-title-secondary'),
+        ).toHaveText(label);
+        const title = await identity.getAttribute('title');
+        expect(title?.endsWith(` - ${LIVE_VERSIONS[cli]}`)).toBe(true);
+        // The detail mounts only when expanded: open it and see its facts, then check that no Version fact repeats
+        // the identity's version.
+        await expandMatrixDetail(page, cli);
+        const facts = page.locator(
+          `#lane-detail-${cli} [data-testid="cli-provider-facts"]`,
+        );
+        await expect(facts).toBeVisible();
+        await expect(facts.locator('dt:text-is("Version")')).toHaveCount(0);
       }
       // 52.2: the Antigravity model cell shows the id once, on at most two lines, with the name in its title.
       const model = page.locator(

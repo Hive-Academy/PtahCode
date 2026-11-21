@@ -88,9 +88,10 @@ export interface BackgroundAgentCompletedEvent extends FlatStreamEvent {
 /**
  * Background agent stopped event
  *
- * Emitted when a background agent is explicitly stopped by the user
- * (via TaskStop tool or UI action). Distinguished from completed to
- * show appropriate UI state (stopped vs. finished).
+ * Emitted when a background agent is explicitly stopped — by the user
+ * (TaskStop tool or UI action) or by Ptah's subagent budget monitor.
+ * Distinguished from completed to show appropriate UI state (stopped vs.
+ * finished).
  */
 export interface BackgroundAgentStoppedEvent extends FlatStreamEvent {
   readonly eventType: 'background_agent_stopped';
@@ -102,6 +103,12 @@ export interface BackgroundAgentStoppedEvent extends FlatStreamEvent {
   readonly agentType?: string;
   /** Tab ID for routing */
   readonly tabId?: string;
+  /**
+   * Set when Ptah, not the user, stopped the agent. Absent for a user stop.
+   */
+  readonly stoppedBy?: 'budget-monitor';
+  /** Ptah's notice explaining the stop; set together with `stoppedBy`. */
+  readonly reason?: string;
 }
 
 /**
@@ -218,6 +225,11 @@ export interface AgentCompletedEvent extends FlatStreamEvent {
   readonly status: 'completed' | 'failed' | 'stopped';
   /** Short prose summary of what the agent accomplished */
   readonly summary: string;
+  /**
+   * Set when Ptah's subagent budget monitor, not the user, stopped the agent;
+   * `summary` then carries Ptah's notice. Absent for any other end.
+   */
+  readonly stoppedBy?: 'budget-monitor';
   /** Path to the agent's output file */
   readonly outputFile: string;
   /** Final token count */

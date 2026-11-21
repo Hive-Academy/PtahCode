@@ -1,5 +1,6 @@
 import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
+import { Settings, type LucideIconData } from 'lucide-angular';
 import { PtahFormSectionComponent } from './form-section.component';
 
 @Component({
@@ -15,6 +16,8 @@ import { PtahFormSectionComponent } from './form-section.component';
       [disabled]="disabled()"
       [error]="error()"
       [wide]="wide()"
+      [flushInGlass]="flushInGlass()"
+      [icon]="icon()"
     >
       <span aside data-testid="aside-content">Beta</span>
       <input data-testid="field-input" aria-label="Name" />
@@ -30,6 +33,8 @@ class HostComponent {
   readonly disabled = signal(false);
   readonly error = signal<string | null>(null);
   readonly wide = signal(false);
+  readonly flushInGlass = signal(false);
+  readonly icon = signal<LucideIconData | null>(null);
 }
 
 const RAW_SPACING = /\b(gap|p|px|py|m|mx|my|space-[xy])-\d/;
@@ -215,6 +220,19 @@ describe('PtahFormSectionComponent', () => {
     );
   });
 
+  it('removes the block padding under glass only when flushInGlass is set', () => {
+    const flush = '[[data-glass=on]_&]:py-0';
+    expect(section().classList.contains(flush)).toBe(false);
+    host.flushInGlass.set(true);
+    fixture.detectChanges();
+    expect(section().classList.contains(flush)).toBe(true);
+    // The token padding stays for glass off.
+    expect(section().classList.contains('py-[var(--ptah-gap-group)]')).toBe(true);
+    host.flushInGlass.set(false);
+    fixture.detectChanges();
+    expect(section().classList.contains(flush)).toBe(false);
+  });
+
   it('lets the fields column grow to the content cap only when wide is set', () => {
     const wide = '[--ptah-form-section-fields-max-w:var(--ptah-settings-content-max-w)]';
     expect(section().classList.contains(wide)).toBe(false);
@@ -226,6 +244,22 @@ describe('PtahFormSectionComponent', () => {
     host.wide.set(false);
     fixture.detectChanges();
     expect(section().classList.contains(wide)).toBe(false);
+  });
+
+  it('renders the icon before the heading only when icon is set', () => {
+    expect(q('[data-testid="form-section-icon"]')).toBeNull();
+    host.icon.set(Settings);
+    fixture.detectChanges();
+    const icon = q('[data-testid="form-section-icon"]') as HTMLElement;
+    expect(icon).not.toBeNull();
+    expect(icon.getAttribute('aria-hidden')).toBe('true');
+    expect(icon.querySelector('svg')).not.toBeNull();
+    const heading = q('h3') as HTMLElement;
+    expect(icon.parentElement).toBe(heading.parentElement);
+    expect(icon.nextElementSibling).toBe(heading);
+    host.icon.set(null);
+    fixture.detectChanges();
+    expect(q('[data-testid="form-section-icon"]')).toBeNull();
   });
 
   it('uses no raw spacing utility on any rendered element', () => {

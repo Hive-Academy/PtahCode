@@ -47,6 +47,7 @@ const isTurnStopCause = wireLiteralUnion([
   'runtime-cap',
   'host-stop',
   'internal-abort',
+  'send-now',
 ] as const satisfies readonly TurnStopCause[]);
 
 /** Mirrors `SdkTerminalReasonSchema`. */

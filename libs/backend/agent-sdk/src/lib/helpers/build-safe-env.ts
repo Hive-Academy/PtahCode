@@ -82,5 +82,32 @@ export function buildSafeEnv(
     ...buildTierEnvDefaults(authEnv),
     ...authEnv,
     ...experimentalBetaEnv(authEnv.ANTHROPIC_BASE_URL),
+    ...firstByteTimeoutEnv({ ...process.env, ...authEnv }),
+  };
+}
+
+/** The env key of the SDK first-byte wait for an API response. */
+export const SDK_FIRST_BYTE_TIMEOUT_ENV = 'CLAUDE_STREAM_FIRST_BYTE_TIMEOUT_MS';
+
+/**
+ * The SDK first-byte wait that Ptah sets. It is shorter than
+ * `NO_ACTIVITY_TIMEOUT_MS` (180 s), so the SDK reports its own retry
+ * (`system/api_retry`) before the no-activity watchdog can stop the turn.
+ * Without it the SDK default (about 180 s) and the watchdog race, and the
+ * watchdog killed the SDK retry (TASK_2026_2288 A).
+ */
+export const SDK_FIRST_BYTE_TIMEOUT_MS = 150_000;
+
+/**
+ * The SDK first-byte wait for a child process: the value the user set in
+ * `env`, else Ptah's default. Always returned, so a sanitized env such as
+ * `buildSafeEnv` keeps a value that is set only in the host process env.
+ */
+export function firstByteTimeoutEnv(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): Record<string, string> {
+  const userValue = env[SDK_FIRST_BYTE_TIMEOUT_ENV]?.trim();
+  return {
+    [SDK_FIRST_BYTE_TIMEOUT_ENV]: userValue || String(SDK_FIRST_BYTE_TIMEOUT_MS),
   };
 }

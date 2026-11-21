@@ -13,7 +13,10 @@
  * SDK has no `session/set_model` request, so a model is always a config
  * option.
  */
-import type { McpServer } from '@agentclientprotocol/sdk';
+import type {
+  McpServer,
+  RequestPermissionRequest,
+} from '@agentclientprotocol/sdk';
 import type {
   ProviderMcpAttachment,
   ProviderSessionLogger,
@@ -205,6 +208,17 @@ export interface AcpVendorProfile {
   sessionConfig?(options: AcpSessionOptions): readonly AcpSessionConfigEntry[];
   /** Vendor extension hooks. Omit to report every unknown notification once. */
   readonly extensions?: AcpExtensionHooks;
+  /**
+   * With auto-approve off (a headless lane in a narrower mode), whether the
+   * lane may still grant this `session/request_permission`, e.g. read-only
+   * tools in plan mode. Without it, every such request is refused. The
+   * request comes from the agent process and is untrusted: read it
+   * defensively and never throw.
+   */
+  grantsWithoutAutoApprove?(
+    request: RequestPermissionRequest,
+    options: AcpSessionOptions,
+  ): boolean;
   /** Exit code of a completed `execute` tool call, read from its `rawOutput`. */
   extractExitCode?(rawOutput: unknown): number | undefined;
   /**

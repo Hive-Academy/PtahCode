@@ -5,7 +5,11 @@
  * of the former `acp-session-handle.spec.ts`, assertions unchanged; the
  * runtime-only case (SDK load failure) lives in `acp-session-runtime.spec.ts`.
  */
-import type { CliOutputSegment, ProviderAccountBinding } from '@ptah-extension/shared';
+import type {
+  CliOutputSegment,
+  FlatStreamEventUnion,
+  ProviderAccountBinding,
+} from '@ptah-extension/shared';
 import { createMockLogger } from '@ptah-extension/shared/testing';
 import type { MockLogger } from '@ptah-extension/shared/testing';
 import type { Logger } from '@ptah-extension/vscode-core';
@@ -28,7 +32,10 @@ import {
 } from '@ptah-extension/acp-runtime/testing';
 import type { McpAttachment } from '../../mcp-attachment-probe.port';
 import type { CliCommandOptions, SdkHandle } from '../cli-adapter.interface';
-import { createProviderSessionLaneHandle } from './provider-session-lane-handle';
+import {
+  createProviderSessionLaneHandle,
+  type ProviderSessionLaneFallback,
+} from './provider-session-lane-handle';
 
 const NAME = 'Test Agent';
 const SESSION_ID = 'sess-1';
@@ -103,6 +110,7 @@ function start(
     options?: Partial<CliCommandOptions>;
     agent?: FakeAcpAgentOptions;
     script?: (agent: FakeAcpAgent) => void;
+    fallback?: ProviderSessionLaneFallback;
   } = {},
 ): Harness {
   const agent = createFakeAcpAgent({ sessionId: SESSION_ID, ...setup.agent });
@@ -125,6 +133,7 @@ function start(
       return transport;
     },
     logger: logger as unknown as Logger,
+    ...(setup.fallback ? { fallback: setup.fallback } : {}),
   });
   const segments: CliOutputSegment[] = [];
   const chunks: string[] = [];
@@ -141,7 +150,9 @@ function start(
     errors: () =>
       segments.filter((s) => s.type === 'error').map((s) => s.content),
     infos: () =>
-      segments.filter((s) => s.type === 'info' && !s.turnTelemetry).map((s) => s.content),
+      segments
+        .filter((s) => s.type === 'info' && !s.turnTelemetry)
+        .map((s) => s.content),
     resolvedIds,
     spawn: () => spawn,
     logger,
@@ -182,96 +193,165 @@ afterEach(async () => {
 describe('createProviderSessionLaneHandle — first turn', () => {
   it('separates turn IDs across runs that resume the same ACP session', async () => {
     const script = (agent: FakeAcpAgent): void => {
-      agent.handle('session/prompt', () => ({ result: {
-        stopReason: 'end_turn', _meta: { usage: { inputTokens: 1, outputTokens: 1 } },
-      } }));
+      agent.handle('session/prompt', () => ({
+        result: {
+          stopReason: 'end_turn',
+          _meta: { usage: { inputTokens: 1, outputTokens: 1 } },
+        },
+      }));
     };
     const first = start({ options: { agentId: 'run-a' }, script });
     const resumed = start({ options: { agentId: 'run-b' }, script });
     await expect(first.handle.done).resolves.toBe(0);
     await expect(resumed.handle.done).resolves.toBe(0);
-    expect(first.segments.find((item) => item.turnTelemetry)?.turnTelemetry)
-      .toMatchObject({ status: 'reported', usage: { turnId: 'sess-1:run-a:1' } });
-    expect(resumed.segments.find((item) => item.turnTelemetry)?.turnTelemetry)
-      .toMatchObject({ status: 'reported', usage: { turnId: 'sess-1:run-b:1' } });
+    expect(
+      first.segments.find((item) => item.turnTelemetry)?.turnTelemetry,
+    ).toMatchObject({
+      status: 'reported',
+      usage: { turnId: 'sess-1:run-a:1' },
+    });
+    expect(
+      resumed.segments.find((item) => item.turnTelemetry)?.turnTelemetry,
+    ).toMatchObject({
+      status: 'reported',
+      usage: { turnId: 'sess-1:run-b:1' },
+    });
   });
 
   it('reports prompt _meta.usage and preserves the UI usage segment', async () => {
     const h = start({
       options: { model: 'grok-test' },
-      script: (agent) => agent.handle('session/prompt', () => ({
-        result: { stopReason: 'end_turn', _meta: { usage: {
-          inputTokens: 12, outputTokens: 4, cacheReadTokens: 2, costUsd: 0.03,
-          model: 'grok-billed',
-        } } },
-      })),
+      script: (agent) =>
+        agent.handle('session/prompt', () => ({
+          result: {
+            stopReason: 'end_turn',
+            _meta: {
+              usage: {
+                inputTokens: 12,
+                outputTokens: 4,
+                cacheReadTokens: 2,
+                costUsd: 0.03,
+                model: 'grok-billed',
+              },
+            },
+          },
+        })),
     });
     await expect(h.handle.done).resolves.toBe(0);
     const telemetry = h.segments.filter((segment) => segment.turnTelemetry);
     expect(telemetry).toHaveLength(1);
-    expect(telemetry[0].turnTelemetry).toMatchObject({ status: 'reported', usage: {
-      modelId: 'grok-billed', inputTokens: 12, outputTokens: 4,
-    } });
-    expect(telemetry[0].usage).toMatchObject({ inputTokens: 12, outputTokens: 4 });
-    expect(h.handle).toMatchObject({ outcomeUsageIsTurnTotal: true, usageScope: 'turn' });
+    expect(telemetry[0].turnTelemetry).toMatchObject({
+      status: 'reported',
+      usage: {
+        modelId: 'grok-billed',
+        inputTokens: 12,
+        outputTokens: 4,
+      },
+    });
+    expect(telemetry[0].usage).toMatchObject({
+      inputTokens: 12,
+      outputTokens: 4,
+    });
+    expect(h.handle).toMatchObject({
+      outcomeUsageIsTurnTotal: true,
+      usageScope: 'turn',
+    });
     expect(h.handle.getObservedNativeThreadId?.()).toBe('sess-1');
   });
 
   it('reconciles usage_update metadata when the prompt response omits usage', async () => {
     const h = start({
       options: { model: 'requested-alias' },
-      script: (agent) => agent.handle('session/prompt', async (params, active) => {
-        await active.sessionUpdate(String(params['sessionId']), {
-          sessionUpdate: 'usage_update', used: 25, size: 1000,
-          _meta: { usage: { inputTokens: 12, outputTokens: 4, model: 'billed-model' } },
-        });
-        return { result: { stopReason: 'end_turn' } };
-      }),
+      script: (agent) =>
+        agent.handle('session/prompt', async (params, active) => {
+          await active.sessionUpdate(String(params['sessionId']), {
+            sessionUpdate: 'usage_update',
+            used: 25,
+            size: 1000,
+            _meta: {
+              usage: {
+                inputTokens: 12,
+                outputTokens: 4,
+                model: 'billed-model',
+              },
+            },
+          });
+          return { result: { stopReason: 'end_turn' } };
+        }),
     });
     await expect(h.handle.done).resolves.toBe(0);
     expect(h.segments.filter((item) => item.turnTelemetry)).toEqual([
-      expect.objectContaining({ turnTelemetry: expect.objectContaining({
-        status: 'reported', usage: expect.objectContaining({
-          inputTokens: 12, outputTokens: 4,
-          requestContextTokens: expect.objectContaining({ status: 'reported', value: 25 }),
-          modelId: 'billed-model',
+      expect.objectContaining({
+        turnTelemetry: expect.objectContaining({
+          status: 'reported',
+          usage: expect.objectContaining({
+            inputTokens: 12,
+            outputTokens: 4,
+            requestContextTokens: expect.objectContaining({
+              status: 'reported',
+              value: 25,
+            }),
+            modelId: 'billed-model',
+          }),
         }),
-      }) }),
+      }),
     ]);
   });
 
   it('reconciles usage_update after the prompt response', async () => {
     const h = start({
-      script: (agent) => agent.handle('session/prompt', (params, active) => {
-        setTimeout(() => {
-          void active.sessionUpdate(String(params['sessionId']), {
-            sessionUpdate: 'usage_update', used: 25, size: 1000,
-            _meta: { usage: { inputTokens: 12, outputTokens: 4, model: 'billed-model' } },
-          });
-        }, 150);
-        return { result: { stopReason: 'end_turn' } };
-      }),
+      script: (agent) =>
+        agent.handle('session/prompt', (params, active) => {
+          setTimeout(() => {
+            void active.sessionUpdate(String(params['sessionId']), {
+              sessionUpdate: 'usage_update',
+              used: 25,
+              size: 1000,
+              _meta: {
+                usage: {
+                  inputTokens: 12,
+                  outputTokens: 4,
+                  model: 'billed-model',
+                },
+              },
+            });
+          }, 150);
+          return { result: { stopReason: 'end_turn' } };
+        }),
     });
     await expect(h.handle.done).resolves.toBe(0);
-    expect(h.segments.find((item) => item.turnTelemetry)?.turnTelemetry?.status).toBe('reported');
+    expect(
+      h.segments.find((item) => item.turnTelemetry)?.turnTelemetry?.status,
+    ).toBe('reported');
   });
 
   it('emits one unavailable record per completed turn without usable prompt usage', async () => {
     const h = start({ options: { model: 'grok-test' } });
     await expect(h.handle.done).resolves.toBe(0);
     h.agent.handle('session/prompt', () => ({
-      result: { stopReason: 'end_turn', _meta: { usage: { inputTokens: -1, outputTokens: 2 } } },
+      result: {
+        stopReason: 'end_turn',
+        _meta: { usage: { inputTokens: -1, outputTokens: 2 } },
+      },
     }));
     const next = await h.handle.continue?.('Follow up');
     await expect(next?.done).resolves.toBe(0);
     const telemetry = h.segments.filter((segment) => segment.turnTelemetry);
     expect(telemetry).toHaveLength(2);
     expect(telemetry.map((segment) => segment.turnTelemetry)).toEqual([
-      expect.objectContaining({ status: 'unavailable', reason: 'no-usage-event' }),
-      expect.objectContaining({ status: 'unavailable', reason: 'no-usage-event' }),
+      expect.objectContaining({
+        status: 'unavailable',
+        reason: 'no-usage-event',
+      }),
+      expect.objectContaining({
+        status: 'unavailable',
+        reason: 'no-usage-event',
+      }),
     ]);
     const unavailable = telemetry.flatMap((segment) =>
-      segment.turnTelemetry?.status === 'unavailable' ? [segment.turnTelemetry] : [],
+      segment.turnTelemetry?.status === 'unavailable'
+        ? [segment.turnTelemetry]
+        : [],
     );
     expect(unavailable[0].turnId).not.toBe(unavailable[1].turnId);
   });
@@ -290,7 +370,11 @@ describe('createProviderSessionLaneHandle — first turn', () => {
       options: {
         agentId: 'a-1',
         mcpPort: 51820,
-        attachmentProbe: { get: () => undefined, getAttempt: () => undefined, waitFor },
+        attachmentProbe: {
+          get: () => undefined,
+          getAttempt: () => undefined,
+          waitFor,
+        },
       },
     });
 
@@ -784,6 +868,56 @@ describe('createProviderSessionLaneHandle — resume', () => {
     expect(h.infos()).toEqual([]);
   });
 
+  const ROLE = {
+    name: 'reviewer',
+    body: 'ROLE-BODY-MARKER',
+    sourcePath: '/ws/reviewer.md',
+    bytes: 16,
+  };
+
+  it('omits project guidance and the role only when agy restored the session (round 4)', async () => {
+    const h = start({ options: { resumeSessionId: 'old-session', role: ROLE } });
+    await expect(h.handle.done).resolves.toBe(0);
+    expect(sent(h.agent, 'session/resume')).toHaveLength(1);
+    const prompt = promptText(sent(h.agent, 'session/prompt')[0]);
+    expect(prompt).not.toContain('PROJECT-GUIDANCE-MARKER');
+    expect(prompt).not.toContain('## Role: reviewer');
+    expect(prompt).toContain('Summarise the repository');
+  });
+
+  it('omits them after a successful session/load too', async () => {
+    const h = start({
+      options: { resumeSessionId: 'old-session', role: ROLE },
+      agent: { agentCapabilities: { loadSession: true } },
+    });
+    await expect(h.handle.done).resolves.toBe(0);
+    expect(sent(h.agent, 'session/load')).toHaveLength(1);
+    const prompt = promptText(sent(h.agent, 'session/prompt')[0]);
+    expect(prompt).not.toContain('PROJECT-GUIDANCE-MARKER');
+    expect(prompt).not.toContain('## Role: reviewer');
+  });
+
+  it.each([
+    [
+      'session/resume fails',
+      {
+        script: (agent: FakeAcpAgent) =>
+          agent.handle('session/resume', () => ({
+            error: { code: -32002, message: 'Resource not found' },
+          })),
+      },
+    ],
+    ['the agent cannot resume', { agent: { agentCapabilities: {} } }],
+  ])('re-sends guidance and the role when %s and a new session starts (round 4)', async (_label, setup) => {
+    const h = start({ options: { resumeSessionId: 'old-session', role: ROLE }, ...setup });
+    await expect(h.handle.done).resolves.toBe(0);
+    expect(sent(h.agent, 'session/new')).toHaveLength(1);
+    const prompt = promptText(sent(h.agent, 'session/prompt')[0]);
+    expect(prompt).toContain('PROJECT-GUIDANCE-MARKER');
+    expect(prompt).toContain('## Role: reviewer');
+    expect(prompt).toContain('ROLE-BODY-MARKER');
+  });
+
   it('prefers session/resume when the agent advertises both resume and load', async () => {
     const h = start({ options: { resumeSessionId: 'old-session' } });
 
@@ -1086,7 +1220,6 @@ describe('createProviderSessionLaneHandle — error rows', () => {
     expect(sent(h.agent, 'session/new')).toHaveLength(0);
     expect(h.transport.killCount).toBe(1);
   });
-
 });
 
 describe('createProviderSessionLaneHandle — handshake timeout', () => {
@@ -1261,7 +1394,10 @@ describe('createProviderSessionLaneHandle — process lifecycle', () => {
 
 describe('createProviderSessionLaneHandle — P2', () => {
   const usageReply = {
-    result: { stopReason: 'end_turn', _meta: { usage: { inputTokens: 1, outputTokens: 1 } } },
+    result: {
+      stopReason: 'end_turn',
+      _meta: { usage: { inputTokens: 1, outputTokens: 1 } },
+    },
   };
 
   it('interrupts the turn via session/cancel, keeps the process, and continues on it', async () => {
@@ -1269,7 +1405,9 @@ describe('createProviderSessionLaneHandle — P2', () => {
     const h = start({
       profile: { cancelBehavior: 'await-reply' },
       script: (agent) =>
-        agent.handle('session/prompt', () => (++prompts === 1 ? { hold: true } : usageReply)),
+        agent.handle('session/prompt', () =>
+          ++prompts === 1 ? { hold: true } : usageReply,
+        ),
     });
     await h.agent.next(byMethod('session/prompt'));
     await settle();
@@ -1294,7 +1432,9 @@ describe('createProviderSessionLaneHandle — P2', () => {
     const h = start({
       profile: { cancelBehavior: 'await-reply' },
       script: (agent) =>
-        agent.handle('session/prompt', () => (++prompts === 1 ? usageReply : { hold: true })),
+        agent.handle('session/prompt', () =>
+          ++prompts === 1 ? usageReply : { hold: true },
+        ),
     });
     await expect(h.handle.done).resolves.toBe(0);
     const second = await h.handle.continue?.('long one');
@@ -1319,7 +1459,8 @@ describe('createProviderSessionLaneHandle — P2', () => {
   });
 
   it('keeps the task prompt first: continue() refuses until it was sent (PR #1444 review)', async () => {
-    let releaseProbe: (value: McpAttachment | undefined) => void = () => undefined;
+    let releaseProbe: (value: McpAttachment | undefined) => void = () =>
+      undefined;
     const attachmentProbe = {
       get: () => undefined,
       waitFor: jest.fn(
@@ -1330,7 +1471,12 @@ describe('createProviderSessionLaneHandle — P2', () => {
       ),
     };
     const h = start({
-      options: { agentId: 'a-1', mcpPort: 51820, mcpToken: 'tok', attachmentProbe },
+      options: {
+        agentId: 'a-1',
+        mcpPort: 51820,
+        mcpToken: 'tok',
+        attachmentProbe,
+      },
       script: (agent) => agent.handle('session/prompt', () => usageReply),
     });
     await h.agent.next(byMethod('session/new'));
@@ -1344,7 +1490,12 @@ describe('createProviderSessionLaneHandle — P2', () => {
       `${NAME} has not sent its task prompt yet; send the message after it`,
     );
 
-    releaseProbe({ agentId: 'a-1', method: 'initialize', port: 51820, time: 1 });
+    releaseProbe({
+      agentId: 'a-1',
+      method: 'initialize',
+      port: 51820,
+      time: 1,
+    });
     await expect(h.handle.done).resolves.toBe(0);
     const prompts = sent(h.agent, 'session/prompt');
     expect(prompts).toHaveLength(1);
@@ -1363,7 +1514,10 @@ describe('createProviderSessionLaneHandle — P2', () => {
     handle.onSegment?.((item) => segments.push(item));
     await expect(handle.done).resolves.toBe(1);
     expect(segments).toEqual([
-      { type: 'error', content: `${NAME} cannot start: no process spawner was supplied for the lane` },
+      {
+        type: 'error',
+        content: `${NAME} cannot start: no process spawner was supplied for the lane`,
+      },
     ]);
     expect(handle.supportsContinuation?.()).toBe(false);
   });
@@ -1389,7 +1543,11 @@ describe('createProviderSessionLaneHandle — account binding (PR #1445 review)'
       order.push('binding');
     });
     const h = start({
-      options: { accountBinding: binding, accountBindingId: 'binding-1', onAccountBinding },
+      options: {
+        accountBinding: binding,
+        accountBindingId: 'binding-1',
+        onAccountBinding,
+      },
       script: (agent) => {
         agentRef = agent;
         agent.handle('session/prompt', () => {
@@ -1421,7 +1579,11 @@ describe('createProviderSessionLaneHandle — account binding (PR #1445 review)'
       throw new Error('binding storage unavailable');
     });
     const h = start({
-      options: { accountBinding: binding, accountBindingId: 'binding-1', onAccountBinding },
+      options: {
+        accountBinding: binding,
+        accountBindingId: 'binding-1',
+        onAccountBinding,
+      },
     });
     await expect(h.handle.done).resolves.toBe(1);
     await settle();
@@ -1434,9 +1596,373 @@ describe('createProviderSessionLaneHandle — account binding (PR #1445 review)'
 
   it('returns 1 without prompting when the binding is incomplete', async () => {
     const onAccountBinding = jest.fn(async () => undefined);
-    const h = start({ options: { accountBindingId: 'binding-1', onAccountBinding } });
+    const h = start({
+      options: { accountBindingId: 'binding-1', onAccountBinding },
+    });
     await expect(h.handle.done).resolves.toBe(1);
     expect(onAccountBinding).not.toHaveBeenCalled();
     expect(sent(h.agent, 'session/prompt')).toHaveLength(0);
+  });
+});
+
+describe('createProviderSessionLaneHandle — stream events (P1 review m-4)', () => {
+  it('projects the turn to flat stream events for the execution cards, beside the segments', async () => {
+    const h = start({
+      script: (agent) =>
+        agent.handle('session/prompt', async (params, a) => {
+          const sessionId = String(params['sessionId']);
+          await a.sessionUpdate(sessionId, {
+            sessionUpdate: 'tool_call',
+            toolCallId: 'call-1',
+            title: 'Run ptah_search',
+            kind: 'other',
+            status: 'in_progress',
+          });
+          await a.sessionUpdate(sessionId, {
+            sessionUpdate: 'tool_call_update',
+            toolCallId: 'call-1',
+            status: 'completed',
+          });
+          await a.sessionUpdate(sessionId, {
+            sessionUpdate: 'agent_message_chunk',
+            content: { type: 'text', text: 'Found it' },
+          });
+          return { result: { stopReason: 'end_turn' } };
+        }),
+    });
+    const stream: FlatStreamEventUnion[] = [];
+    h.handle.onStreamEvent?.((event) => stream.push(event));
+
+    await expect(h.handle.done).resolves.toBe(0);
+
+    expect(stream.map((event) => event.eventType)).toEqual(
+      expect.arrayContaining([
+        'message_start',
+        'tool_start',
+        'tool_result',
+        'text_delta',
+      ]),
+    );
+    expect(
+      stream.find((event) => event.eventType === 'tool_start'),
+    ).toMatchObject({
+      toolCallId: 'call-1',
+      sessionId: SESSION_ID,
+    });
+    expect(h.segments).toContainEqual({ type: 'text', content: 'Found it' });
+  });
+
+  it('leaves a failure to its error segment so the card does not show it twice', async () => {
+    const h = start({
+      script: (agent) =>
+        agent.handle('session/prompt', () => ({
+          error: {
+            code: -32003,
+            message: 'Rate limited',
+            data: 'usage exhausted',
+          },
+        })),
+    });
+    const stream: FlatStreamEventUnion[] = [];
+    h.handle.onStreamEvent?.((event) => stream.push(event));
+
+    await expect(h.handle.done).resolves.toBe(1);
+    expect(h.errors()).toEqual([`${NAME} is rate limited: usage exhausted`]);
+    expect(
+      stream.filter(
+        (event) =>
+          event.eventType === 'text_delta' && event.delta.startsWith('Error:'),
+      ),
+    ).toEqual([]);
+  });
+});
+
+describe('createProviderSessionLaneHandle — fallback when the ACP session never opens (S3)', () => {
+  /** A stand-in for the stream-json lane handle. */
+  function fallbackHandle(): SdkHandle & { readonly continued: string[] } {
+    const continued: string[] = [];
+    return {
+      continued,
+      abort: new AbortController(),
+      done: Promise.resolve(0),
+      onOutput: (callback) => callback('stream-json output\n'),
+      onSegment: (callback) => callback({ type: 'text', content: 'from stream-json' }),
+      getSessionId: () => 'conversation-1',
+      getPid: () => 999,
+      supportsContinuation: () => true,
+      continue: async (message: string) => {
+        continued.push(message);
+        return { done: Promise.resolve(0) };
+      },
+    };
+  }
+
+  it('runs the lane on the fallback when initialize fails, without the ACP error', async () => {
+    const next = fallbackHandle();
+    const run = jest.fn(async () => next);
+    const h = start({
+      fallback: { label: 'stream-json', run },
+      script: (agent) =>
+        agent.handle('initialize', () => ({
+          error: { code: -32603, message: 'agent runtime unpack failed' },
+        })),
+    });
+
+    await expect(h.handle.done).resolves.toBe(0);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(h.errors()).toEqual([]);
+    expect(h.infos()).toEqual([
+      expect.stringMatching(
+        /^Test Agent could not open an ACP session \(.*agent runtime unpack failed.*\); this lane runs on stream-json instead\.$/,
+      ),
+    ]);
+    expect(h.segments).toContainEqual({ type: 'text', content: 'from stream-json' });
+    expect(h.output()).toContain('stream-json output');
+    expect(sent(h.agent, 'session/new')).toHaveLength(0);
+    expect(h.handle.getPid?.()).toBe(999);
+    expect(h.handle.getSessionId?.()).toBe('conversation-1');
+    expect(h.handle.supportsContinuation?.()).toBe(true);
+    await h.handle.continue?.('next');
+    expect(next.continued).toEqual(['next']);
+    h.handle.abort.abort();
+    expect(next.abort.signal.aborted).toBe(true);
+  });
+
+  it('falls back when session/new fails with a non-auth error', async () => {
+    const run = jest.fn(async () => fallbackHandle());
+    const h = start({
+      fallback: { label: 'stream-json', run },
+      script: (agent) =>
+        agent.handle('session/new', () => ({
+          error: { code: -32603, message: 'Internal error' },
+        })),
+    });
+    await expect(h.handle.done).resolves.toBe(0);
+    expect(run).toHaveBeenCalledTimes(1);
+    expect(h.errors()).toEqual([]);
+  });
+
+  it('does not fall back from a missing sign-in: the ACP error and hint stay', async () => {
+    const run = jest.fn(async () => fallbackHandle());
+    const h = start({
+      profile: { describeError: undefined },
+      fallback: { label: 'stream-json', run },
+      script: (agent) =>
+        agent.handle('session/new', () => ({
+          error: { code: -32000, message: 'Authentication required' },
+        })),
+    });
+    await expect(h.handle.done).resolves.toBe(1);
+    expect(run).not.toHaveBeenCalled();
+    expect(h.errors()).toEqual([`${NAME} is not signed in: run \`test login\``]);
+  });
+
+  it('does not fall back once a session exists (a refused model fails the lane)', async () => {
+    const run = jest.fn(async () => fallbackHandle());
+    const h = start({
+      options: { model: 'model-z' },
+      agent: { configOptions: [MODEL_OPTION] },
+      profile: {
+        sessionConfig: (options) => [
+          { configId: 'model', value: options.model ?? '', binding: true },
+        ],
+      },
+      fallback: { label: 'stream-json', run },
+      script: (agent) =>
+        agent.handle('session/set_config_option', () => ({
+          error: { code: -32602, message: 'Invalid params' },
+        })),
+    });
+    await expect(h.handle.done).resolves.toBe(1);
+    expect(run).not.toHaveBeenCalled();
+    expect(h.errors()).toHaveLength(1);
+    expect(h.errors()[0]).toMatch(/rejected model 'model-z'/);
+  });
+
+  it('does not fall back after an abort during the setup', async () => {
+    const run = jest.fn(async () => fallbackHandle());
+    const h = start({
+      fallback: { label: 'stream-json', run },
+      script: (agent) => agent.handle('initialize', () => ({ hold: true })),
+    });
+    h.handle.abort.abort();
+    await expect(h.handle.done).resolves.toBe(1);
+    expect(run).not.toHaveBeenCalled();
+  });
+
+  it('fails with one error naming both transports when the fallback cannot start', async () => {
+    const h = start({
+      fallback: {
+        label: 'stream-json',
+        run: async () => {
+          throw new Error('agy not found');
+        },
+      },
+      script: (agent) =>
+        agent.handle('initialize', () => ({
+          error: { code: -32603, message: 'boom' },
+        })),
+    });
+    await expect(h.handle.done).resolves.toBe(1);
+    expect(h.errors()).toEqual([
+      expect.stringMatching(/ACP failed \(.*boom.*\), then stream-json failed \(agy not found\)$/),
+    ]);
+  });
+
+  it('reports a fallback that could not write its MCP config (round-2 M1)', async () => {
+    const h = start({
+      fallback: {
+        label: 'stream-json',
+        run: async () => ({ ...fallbackHandle(), mcpConfigWriteFailed: true }),
+      },
+      script: (agent) =>
+        agent.handle('initialize', () => ({ error: { code: -32603, message: 'boom' } })),
+    });
+    await expect(h.handle.done).resolves.toBe(0);
+    expect(h.infos()).toContain(
+      'Ptah MCP was not configured for the stream-json lane (config-write-failed); report in your final message.',
+    );
+    expect(h.errors()).toEqual([]);
+  });
+
+  it('adds no MCP warning when the fallback configured MCP', async () => {
+    const h = start({
+      fallback: {
+        label: 'stream-json',
+        run: async () => ({ ...fallbackHandle(), mcpConfigWriteFailed: false }),
+      },
+      script: (agent) =>
+        agent.handle('initialize', () => ({ error: { code: -32603, message: 'boom' } })),
+    });
+    await h.handle.done;
+    expect(h.infos().some((info) => /config-write-failed/.test(info))).toBe(false);
+  });
+
+  it('kills the failed ACP child before the fallback spawns', async () => {
+    let killsWhenFallbackRan: number | undefined;
+    const ref: { harness?: Harness } = {};
+    const h = start({
+      fallback: {
+        label: 'stream-json',
+        run: async () => {
+          killsWhenFallbackRan = ref.harness?.transport.killCount;
+          return fallbackHandle();
+        },
+      },
+      script: (agent) =>
+        agent.handle('initialize', () => ({ error: { code: -32603, message: 'boom' } })),
+    });
+    ref.harness = h;
+    await expect(h.handle.done).resolves.toBe(0);
+    expect(killsWhenFallbackRan).toBe(1);
+    expect(h.agent.closed).toBe(true);
+  });
+
+  it('keeps the original single error without a fallback', async () => {
+    const h = start({
+      script: (agent) =>
+        agent.handle('initialize', () => ({
+          error: { code: -32603, message: 'boom' },
+        })),
+    });
+    await expect(h.handle.done).resolves.toBe(1);
+    expect(h.errors()).toHaveLength(1);
+    expect(h.errors()[0]).toMatch(/boom/);
+  });
+});
+
+describe('createProviderSessionLaneHandle — MCP credential revoke (round 4)', () => {
+  it('keeps the credential while the warm process can continue', async () => {
+    const onMcpConfigRestored = jest.fn();
+    const h = start({ options: { onMcpConfigRestored } });
+    await expect(h.handle.done).resolves.toBe(0);
+    await settle();
+    expect(h.handle.supportsContinuation?.()).toBe(true);
+    expect(onMcpConfigRestored).not.toHaveBeenCalled();
+    h.handle.abort.abort();
+  });
+
+  it('leaves an abort (stop, idle release) to the manager, which revokes itself', async () => {
+    const onMcpConfigRestored = jest.fn();
+    const h = start({ options: { onMcpConfigRestored } });
+    await expect(h.handle.done).resolves.toBe(0);
+    h.handle.abort.abort();
+    await h.transport.exited;
+    await settle();
+    // AgentProcessManager.stop and releaseSubprocess call revokeSubject; see
+    // agent-process-manager.service.spec.ts "revokes the lane credential when
+    // the idle subprocess is released" and "... when a running lane is stopped".
+    expect(onMcpConfigRestored).not.toHaveBeenCalled();
+  });
+
+  it('revokes once after a failed setup', async () => {
+    const onMcpConfigRestored = jest.fn();
+    const h = start({
+      options: { onMcpConfigRestored },
+      script: (agent) =>
+        agent.handle('initialize', () => ({ error: { code: -32603, message: 'boom' } })),
+    });
+    await expect(h.handle.done).resolves.toBe(1);
+    await h.transport.exited;
+    await settle();
+    h.handle.abort.abort();
+    await settle();
+    expect(onMcpConfigRestored).toHaveBeenCalledTimes(1);
+  });
+
+  it('revokes when the agent process dies after a turn', async () => {
+    const onMcpConfigRestored = jest.fn();
+    const h = start({ options: { onMcpConfigRestored } });
+    await expect(h.handle.done).resolves.toBe(0);
+    await h.transport.exit(1);
+    await settle();
+    expect(onMcpConfigRestored).toHaveBeenCalledTimes(1);
+  });
+
+  it('revokes after a turn that failed and broke the session', async () => {
+    const onMcpConfigRestored = jest.fn();
+    const h = start({
+      options: { onMcpConfigRestored },
+      script: (agent) =>
+        agent.handle('session/prompt', async () => {
+          await h.transport.exit(1);
+          return { hold: true };
+        }),
+    });
+    await expect(h.handle.done).resolves.toBe(1);
+    await settle();
+    expect(onMcpConfigRestored).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves the revoke to the fallback transport, which still needs the credential', async () => {
+    const onMcpConfigRestored = jest.fn();
+    const h = start({
+      options: { onMcpConfigRestored },
+      fallback: {
+        label: 'stream-json',
+        run: async () => ({
+          abort: new AbortController(),
+          done: Promise.resolve(0),
+          onOutput: () => undefined,
+        }),
+      },
+      script: (agent) =>
+        agent.handle('initialize', () => ({ error: { code: -32603, message: 'boom' } })),
+    });
+    await expect(h.handle.done).resolves.toBe(0);
+    await h.transport.exited;
+    await settle();
+    expect(onMcpConfigRestored).not.toHaveBeenCalled();
+  });
+
+  it('revokes at once when the lane has no spawner', async () => {
+    const onMcpConfigRestored = jest.fn();
+    const handle = createProviderSessionLaneHandle({
+      profile: createProfile(),
+      options: { task: 't', workingDirectory: process.cwd(), onMcpConfigRestored },
+      command: 'test-agent',
+    });
+    await expect(handle.done).resolves.toBe(1);
+    expect(onMcpConfigRestored).toHaveBeenCalledTimes(1);
   });
 });

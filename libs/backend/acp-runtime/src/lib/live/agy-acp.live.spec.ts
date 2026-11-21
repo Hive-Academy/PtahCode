@@ -11,20 +11,16 @@
  *     libs/backend/acp-runtime/src/lib/live/agy-acp.live.spec.ts
  * `PTAH_AGY_BINARY` overrides the binary (default `agy` on PATH).
  *
- * The profile is local to this spec: the Antigravity lane profile is P3.
+ * The profile is local to this spec on purpose: it checks the runtime with the
+ * bare `agy acp` argv; the lane profile (`antigravityAcpProfile`) is covered
+ * by the cli-agent-runtime live spec of the Antigravity lane.
  */
-import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import type {
-  IProcessSpawner,
-  ProcessErrorListener,
-  ProcessExitListener,
-  SpawnedProcessHandle,
-} from '@ptah-extension/platform-core';
 import type { ProviderSessionEvent } from '@ptah-extension/provider-session-contracts';
 import { createMockLogger } from '@ptah-extension/shared/testing';
+import { createLiveProcessSpawner } from '../../testing/live-process-spawner';
 import { createAcpSession, type AcpSession } from '../acp-session-runtime';
 import type { AcpVendorProfile } from '../acp-vendor-profile';
 
@@ -32,49 +28,7 @@ const LIVE = process.env['PTAH_LIVE_AGY'] === '1';
 const BINARY = process.env['PTAH_AGY_BINARY'] || 'agy';
 const TOKEN = 'PTAH-LIVE-7341';
 
-/** A plain `child_process.spawn` spawner (the hosts use an off-thread one). */
-const liveSpawner: IProcessSpawner = {
-  spawnProcess: (request) => {
-    const child = spawn(request.command, [...request.args], {
-      cwd: request.cwd,
-      env: Object.fromEntries(
-        Object.entries(request.env).filter(([, value]) => value !== undefined),
-      ) as NodeJS.ProcessEnv,
-      stdio: ['pipe', 'pipe', 'pipe'],
-      detached: request.detached,
-      windowsHide: !request.needsConsole,
-    });
-    const handle: SpawnedProcessHandle = {
-      stdin: child.stdin,
-      stdout: child.stdout,
-      stderr: child.stderr,
-      whenSpawned: new Promise((resolve) => {
-        child.once('spawn', () => resolve(child.pid ?? null));
-        child.once('error', () => resolve(null));
-      }),
-      get pid() {
-        return child.pid;
-      },
-      get killed() {
-        return child.killed;
-      },
-      get exitCode() {
-        return child.exitCode;
-      },
-      kill: (signal) => child.kill(signal),
-      on: (event: 'exit' | 'close' | 'error', listener: ProcessExitListener | ProcessErrorListener) => {
-        child.on(event, listener);
-      },
-      once: (event: 'exit' | 'close' | 'error', listener: ProcessExitListener | ProcessErrorListener) => {
-        child.once(event, listener);
-      },
-      off: (event: 'exit' | 'close' | 'error', listener: ProcessExitListener | ProcessErrorListener) => {
-        child.off(event, listener);
-      },
-    };
-    return handle;
-  },
-};
+const liveSpawner = createLiveProcessSpawner();
 
 const agyLiveProfile: AcpVendorProfile = {
   vendor: 'antigravity',

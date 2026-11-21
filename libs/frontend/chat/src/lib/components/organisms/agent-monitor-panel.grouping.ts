@@ -47,9 +47,18 @@ export interface WorkflowRunGroup<
   readonly totalTokens?: number;
 }
 
-/** Whether a status counts as a terminal failure for aggregation. */
+/**
+ * Whether a status counts as a terminal failure for aggregation. The SDK
+ * transformer reports a runtime `killed` as `stopped` (TASK_2026_2288 E), so
+ * both keep the rollup a kill always had.
+ */
 function isFailedStatus(status: string): boolean {
-  return status === 'failed' || status === 'timeout' || status === 'killed';
+  return (
+    status === 'failed' ||
+    status === 'timeout' ||
+    status === 'killed' ||
+    status === 'stopped'
+  );
 }
 
 /**

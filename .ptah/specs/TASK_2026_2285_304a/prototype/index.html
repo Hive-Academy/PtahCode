@@ -1,0 +1,785 @@
+<!doctype html>
+<html lang="en" data-theme="anubis">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Settings redesign prototype - Providers Lanes, Advanced, Claude tools</title>
+<style>
+/* ---------- Theme (values mirror apps/ptah-extension-webview/tailwind.config.js anubis / anubis-light) ---------- */
+:root, [data-theme="anubis"] {
+  --b1:#131317; --b2:#1a1a20; --b3:#242430; --bc:#e8e6e1; --bcm:#9b9895;
+  --accent:#d8d8ee; --accent-ink:#131317;           /* primary button fill as seen in the glass theme screenshots */
+  --focus:#8ab4ff;
+  --gold:#d4af37; --ok:#4ade80; --warn:#fb923c; --err:#f87171; --info:#60a5fa;
+  --glass: rgba(36,36,48,.62); --glass-border: rgba(232,230,225,.13);
+  --line: rgba(232,230,225,.10);
+  --field: rgba(232,230,225,.05);
+  --scrim: rgba(0,0,0,.6);
+  --page-bg: radial-gradient(900px 500px at 70% -10%, rgba(212,175,55,.10), transparent 60%), #0e0e12;
+}
+[data-theme="anubis-light"] {
+  --b1:#faf8f6; --b2:#f0ece9; --b3:#e8e4e1; --bc:#2a1a33; --bcm:#6a4a5c;
+  --accent:#58d6c6; --accent-ink:#2a1a33;
+  --focus:#1d4ed8;
+  --gold:#8a6500; --ok:#15803d; --warn:#b45309; --err:#b91c1c; --info:#1d4ed8;
+  --glass: rgba(255,251,245,.85); --glass-border: rgba(180,140,80,.28);
+  --line: rgba(42,26,51,.12);
+  --field: rgba(42,26,51,.04);
+  --scrim: rgba(30,20,40,.45);
+  --page-bg: radial-gradient(900px 500px at 70% -10%, rgba(212,175,55,.18), transparent 60%), #f4f0ec;
+}
+/* Project tokens (libs/frontend/ui/src/lib/tokens/ptah-tokens.css) */
+:root {
+  --ptah-space-1:.25rem; --ptah-space-2:.5rem; --ptah-space-3:.75rem; --ptah-space-4:1rem; --ptah-space-6:1.5rem; --ptah-space-8:2rem;
+  --ptah-gap-controls:var(--ptah-space-2); --ptah-gap-field:var(--ptah-space-4); --ptah-gap-group:var(--ptah-space-6);
+  --ptah-gap-section:var(--ptah-space-8); --ptah-gap-heading:var(--ptah-space-3); --ptah-page-gutter:var(--ptah-space-6);
+  --ptah-control-h-xs:1.5rem; --ptah-control-h-sm:2rem; --ptah-control-h-md:2.5rem;
+  --ptah-icon-xs:.75rem; --ptah-icon-sm:.875rem; --ptah-icon-md:1rem;
+  --ptah-form-section-aside-w:15rem;
+  --ptah-card-pad:1.25rem;           /* NEW (spec: Tokens) */
+  --ptah-z-raised:30; --ptah-z-menu:50; --ptah-z-dialog:60; --ptah-z-overlay:1000;
+  --radius-box:.75rem; --radius-btn:.375rem;
+}
+@media (prefers-reduced-motion: reduce){ *{ transition:none!important; animation:none!important; scroll-behavior:auto!important } }
+
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{font:14px/1.25rem Inter,ui-sans-serif,system-ui,"Segoe UI",sans-serif;color:var(--bc);background:var(--page-bg);display:flex;flex-direction:column;overflow:hidden}
+.muted{color:var(--bcm)}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+svg.i{width:var(--ptah-icon-md);height:var(--ptah-icon-md);flex:none;stroke:currentColor;fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+svg.i.sm{width:var(--ptah-icon-sm);height:var(--ptah-icon-sm)}
+.spin{animation:spin 1s linear infinite}@keyframes spin{to{transform:rotate(360deg)}}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+
+/* ---------- Prototype chrome (not part of the design) ---------- */
+.chrome{flex:none;display:flex;align-items:center;gap:.5rem;padding:.375rem .75rem;border-bottom:1px solid var(--line);background:var(--b1);flex-wrap:wrap;font-size:12px}
+.chrome .tabs{display:flex;gap:.25rem}
+.chrome .sp{flex:1}
+.chrome label{display:inline-flex;align-items:center;gap:.25rem}
+.chrome select{font:inherit}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:var(--radius-btn);overflow:hidden}
+.seg button{border:0;background:transparent;color:var(--bc);font:inherit;padding:.25rem .625rem;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink)}
+.stage{flex:1;min-height:0;display:flex}
+.nav{display:none;flex:none;width:13rem;border-inline-end:1px solid var(--line);padding:.75rem;background:var(--glass)}
+.nav.on{display:block}
+.nav h2{font-size:14px;margin:0 0 .5rem}
+.nav a{display:flex;align-items:center;gap:.5rem;padding:.375rem .5rem;border-radius:.375rem;color:var(--bcm)}
+.nav a.cur{background:var(--field);color:var(--bc)}
+.page{flex:1;min-width:0;overflow-y:auto;container-type:inline-size;container-name:page;padding:var(--ptah-page-gutter)}
+@container page (max-width: 640px){ .page{padding:var(--ptah-space-4)} }
+.page > section.view{display:none;max-width:96rem;margin:0 auto}
+.page > section.view.on{display:flex;flex-direction:column;gap:var(--ptah-gap-section)}
+
+/* ---------- Shared primitives ---------- */
+.card{background:var(--glass);border:1px solid var(--glass-border);border-radius:var(--radius-box);backdrop-filter:blur(14px);padding:var(--ptah-card-pad)}
+.card-head{display:flex;align-items:center;gap:.75rem;flex-wrap:wrap}
+.card-title{display:flex;align-items:center;gap:.5rem;font-size:1rem;line-height:1.5rem;font-weight:600;margin:0}
+.card-title .i{color:var(--bcm)}
+.badge{display:inline-flex;align-items:center;gap:.25rem;height:1.25rem;padding:0 .5rem;border:1px solid var(--glass-border);border-radius:.25rem;font-size:11px;line-height:1;color:var(--bc);white-space:nowrap}
+.badge.muted{color:var(--bcm)}
+.badge.kind-cli{color:var(--info);border-color:color-mix(in oklab,var(--info) 50%,transparent)}
+.badge.kind-ptah{color:var(--gold);border-color:color-mix(in oklab,var(--gold) 55%,transparent)}
+[data-theme="anubis-light"] .badge.warn,[data-theme="anubis-light"] .stat .l1 .txt{color:var(--bc)}
+[data-theme="anubis-light"] .badge.warn .i{color:var(--warn)}
+.stat .l2:empty{display:none}
+tr.grp.second th{padding-top:1.75rem}
+.grip{display:none;cursor:grab;color:var(--bcm);align-items:center}
+.reordering .grip{display:inline-flex}
+tr.lane.dragging{opacity:.4}
+tr.lane.dragover td{border-top:2px solid var(--gold)}
+.tiers{display:flex;flex-direction:column;gap:.125rem}
+.caps{grid-column:1/-1;margin-top:var(--ptah-space-3);font-size:13px}
+.caps summary{cursor:pointer;color:var(--bcm);font-size:12px;display:inline-flex;align-items:center;gap:.375rem;min-height:1.75rem}
+.caps ul{margin:.25rem 0 0;padding-inline-start:1.25rem;color:var(--bc)}
+.badge.warn{color:var(--warn);border-color:color-mix(in oklab,var(--warn) 45%,transparent)}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:.375rem;height:var(--ptah-control-h-sm);padding:0 .75rem;border:1px solid var(--glass-border);border-radius:var(--radius-btn);background:transparent;color:var(--bc);font:inherit;font-size:13px;cursor:pointer;white-space:nowrap}
+.btn:hover{background:var(--field)}
+.btn.xs{height:var(--ptah-control-h-xs);padding:0 .5rem;font-size:12px}
+.btn.primary{background:var(--accent);color:var(--accent-ink);border-color:transparent;font-weight:600}
+.btn.primary:hover{filter:brightness(1.06)}
+.btn.link{border-color:transparent;color:var(--info);padding:0 .25rem}
+.btn.ghost{border-color:transparent}
+.btn.icon{width:var(--ptah-control-h-sm);padding:0}
+.btn.icon.xs{width:var(--ptah-control-h-xs)}
+.btn.danger:hover{color:var(--err)}
+.btn[aria-pressed="true"]{background:var(--accent);color:var(--accent-ink);border-color:transparent}
+.btn:disabled{opacity:.5;cursor:not-allowed}
+select.sel,input.inp{height:var(--ptah-control-h-sm);border:1px solid var(--glass-border);border-radius:var(--radius-btn);background:var(--field);color:var(--bc);font:inherit;font-size:13px;padding:0 .5rem;min-width:0}
+select.sel{padding-inline-end:.25rem}
+select.sel option{background:var(--b2);color:var(--bc)}
+textarea.inp{height:auto;padding:.5rem;width:100%;resize:vertical}
+.ok{color:var(--ok)}.warnc{color:var(--warn)}.errc{color:var(--err)}
+.tip{position:relative}
+.tip:hover::after,.tip:focus-visible::after{content:attr(data-tip);position:absolute;z-index:var(--ptah-z-menu);inset-block-end:calc(100% + 6px);inset-inline-start:50%;transform:translateX(-50%);background:var(--b1);color:var(--bc);border:1px solid var(--glass-border);border-radius:.25rem;padding:.25rem .5rem;font-size:11px;line-height:1rem;white-space:nowrap;pointer-events:none}
+.tip.below:hover::after,.tip.below:focus-visible::after{inset-block-end:auto;inset-block-start:calc(100% + 6px)}
+.tip.end:hover::after,.tip.end:focus-visible::after{inset-inline-start:auto;inset-inline-end:0;transform:none}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px}
+.tile{width:1.5rem;height:1.5rem;border-radius:.375rem;display:grid;place-items:center;font-size:11px;font-weight:700;background:var(--field);border:1px solid var(--line);flex:none}
+
+/* Switch (replaces round checkboxes) */
+.sw{position:relative;flex:none;width:2.25rem;height:1.25rem;border-radius:999px;border:1px solid var(--glass-border);background:var(--field);cursor:pointer;padding:0;transition:background .15s}
+.sw::after{content:"";position:absolute;inset-block-start:2px;inset-inline-start:2px;width:.875rem;height:.875rem;border-radius:50%;background:var(--bcm);transition:transform .15s,background .15s}
+.sw[aria-checked="true"]{background:var(--accent);border-color:transparent}
+.sw[aria-checked="true"]::after{transform:translateX(1rem);background:var(--accent-ink)}
+.sw[aria-checked="mixed"]{background:var(--field)}
+.sw[aria-checked="mixed"]::after{transform:translateX(.5rem);background:var(--accent)}
+.sw:disabled{opacity:.5;cursor:progress}
+
+/* ---------- Section pattern (ptah-form-section + setting-row) ---------- */
+.section{display:grid;grid-template-columns:var(--ptah-form-section-aside-w) minmax(0,1fr);column-gap:var(--ptah-gap-section);align-items:start}
+.section.wide{grid-template-columns:minmax(0,1fr)}
+.sec-aside{display:flex;flex-direction:column;gap:.5rem}
+.sec-aside p{margin:0;font-size:12px;line-height:1rem;color:var(--bcm)}
+.sec-head{display:flex;align-items:flex-start;justify-content:space-between;gap:.75rem;margin-bottom:var(--ptah-gap-field)}
+.sec-fields{min-width:0;display:flex;flex-direction:column}
+.row{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:var(--ptah-space-6);align-items:center;padding-block:var(--ptah-gap-field);border-bottom:1px solid var(--line)}
+.row:first-child{padding-top:0}
+.row:last-child{border-bottom:0;padding-bottom:0}
+.row .lab{font-weight:500}
+.row .hint{font-size:12px;line-height:1rem;color:var(--bcm);margin-top:2px;max-width:60ch}
+.ctl{display:flex;align-items:center;justify-content:flex-end;gap:var(--ptah-gap-controls)}
+.ctl .slot{width:var(--ptah-control-h-sm);height:var(--ptah-control-h-sm);display:grid;place-items:center}
+.ctl select.sel{width:14rem}
+@container page (max-width: 640px){
+  .section{grid-template-columns:minmax(0,1fr);row-gap:var(--ptah-gap-field)}
+  .row{grid-template-columns:minmax(0,1fr)}
+  .row .ctl{justify-content:flex-start}
+}
+
+/* ---------- Lanes ---------- */
+.lanes-desc{margin:.25rem 0 0;color:var(--bcm);font-size:12px}
+.order-line{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem .5rem;margin:.5rem 0 var(--ptah-gap-field);font-size:12px;color:var(--bcm)}
+.order-line b{color:var(--bc);font-weight:600}
+.tbl-wrap{overflow:visible}
+table.lanes{width:100%;border-collapse:collapse;table-layout:fixed}
+table.lanes th{font-size:12px;font-weight:500;color:var(--bcm);text-align:start;padding:.25rem .5rem;white-space:nowrap}
+table.lanes thead th{border-bottom:1px solid var(--line)}
+table.lanes th .i{vertical-align:-2px;margin-inline-end:.25rem}
+table.lanes td{padding:0 .5rem;height:3.5rem;border-bottom:1px solid var(--line);vertical-align:middle}
+tr.grp th{padding:.75rem .5rem .5rem;border-bottom:1px solid var(--line);background:transparent}
+.grp-in{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;color:var(--bc);font-size:12px;font-weight:600}
+.grp-in .i{color:var(--bcm)}
+.grp-in .push{margin-inline-start:auto;display:flex;align-items:center;gap:.5rem;font-weight:400;color:var(--bcm);flex-wrap:wrap}
+.grp-in label{display:inline-flex;align-items:center;gap:.375rem}
+tr.lane.ptah td:first-child{box-shadow:inset 2px 0 0 color-mix(in oklab,var(--accent) 55%,transparent)}
+tr.lane.off td{color:var(--bcm)}
+.nm{display:flex;flex-direction:column;justify-content:center;min-width:0;gap:1px}
+.nm .l1{display:flex;align-items:center;gap:.375rem;min-width:0;font-weight:500}
+.nm .l1 span.t{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nm .l2{font-size:12px;color:var(--bcm);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding-inline-start:calc(1.5rem + .375rem)}
+.stat{display:flex;flex-direction:column;justify-content:center;gap:1px;font-size:12px}
+.stat .l1{display:flex;align-items:center;gap:.375rem;white-space:nowrap}
+.stat .l2{height:1.25rem;display:flex;align-items:center}
+.inh{display:inline-flex;align-items:center;gap:.25rem;height:var(--ptah-control-h-sm);font-size:12px;color:var(--bcm)}
+td.ord{font-variant-numeric:tabular-nums;font-size:13px}
+.ordcell{display:flex;align-items:center;gap:.25rem}
+.reord{display:none;flex-direction:column}
+.reordering .reord{display:flex}
+.reordering .reord{flex-direction:row;align-items:center}.reordering .reord .btn{width:1.25rem}.reordering table.lanes thead th:first-child{width:6.75rem!important}
+.reord .btn{height:1.25rem;width:1.5rem}
+td.model{font-size:12px}
+td.model .mono{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+tr.detail td{height:auto;padding:0;border-bottom:1px solid var(--line)}
+.detail-box{margin:.25rem .5rem .75rem;border:1px solid var(--line);border-radius:.5rem;background:var(--field);padding:var(--ptah-space-4)}
+.dgrid{display:grid;grid-template-columns:1fr 1fr;column-gap:var(--ptah-space-8)}
+dl.dl{display:grid;grid-template-columns:9rem minmax(0,1fr);gap:.5rem .75rem;margin:0;align-content:start;font-size:13px}
+dl.dl dt{display:flex;align-items:center;gap:.375rem;color:var(--bcm);font-size:12px;min-height:1.75rem}
+dl.dl dd{margin:0;display:flex;align-items:center;gap:.375rem;min-height:1.75rem;min-width:0}
+.only-narrow{display:none!important}
+.st-inline{display:none}
+.clamp{display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden;line-height:1.25rem}
+.clamp.open{-webkit-line-clamp:unset}
+.dfoot{display:flex;align-items:center;gap:.5rem;border-top:1px solid var(--line);margin-top:var(--ptah-space-4);padding-top:.75rem;flex-wrap:wrap}
+.dfoot .grow{flex:1}
+.addmore{margin-top:var(--ptah-gap-group);border-top:1px solid var(--line);padding-top:var(--ptah-space-4)}
+.am-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(11rem,1fr));gap:.5rem;margin-top:.75rem}
+.am{display:flex;flex-direction:column;gap:.5rem;border:1px solid var(--line);border-radius:.5rem;padding:.75rem;background:var(--field)}
+.am .top{display:flex;align-items:center;gap:.5rem;font-weight:500}
+.am .st{display:flex;align-items:center;gap:.375rem;font-size:12px;color:var(--bcm)}
+.am .btn{align-self:flex-start}
+.state-box{display:flex;flex-direction:column;align-items:center;gap:.5rem;padding:2rem 1rem;text-align:center;color:var(--bcm)}
+.state-box .i{width:1.5rem;height:1.5rem}
+.skel{height:3.5rem;border-bottom:1px solid var(--line);background:linear-gradient(90deg,transparent,var(--field),transparent);background-size:200% 100%;animation:sh 1.4s linear infinite}
+@keyframes sh{from{background-position:200% 0}to{background-position:-200% 0}}
+
+/* Lanes responsive: container = .page (embedded pane width). Preserves the existing "collapsed layouts under 950px" capability. */
+@container page (max-width: 950px){
+  .c-perm,.c-net{display:none}
+  .only-narrow{display:flex!important}
+  dl.dl dd.only-narrow,dl.dl dt.only-narrow{display:flex!important}
+}
+@container page (max-width: 640px){
+  .c-model,.kind,.c-stat{display:none}
+  .st-inline{display:inline-flex!important}
+  .dgrid{grid-template-columns:1fr;row-gap:var(--ptah-space-4)}
+  .grp-in .push.big{margin-inline-start:0;width:100%}
+  .card{padding:var(--ptah-space-3)}
+  table.lanes th:first-child{width:3rem!important}
+  table.lanes th[data-w=on]{width:3.5rem!important}
+  table.lanes th[data-w=ic]{width:2.25rem!important}
+  table.lanes td,table.lanes th{padding-inline:.25rem}
+}
+
+/* ---------- Menus / popovers (cap rule) ---------- */
+.floating{position:fixed;z-index:var(--ptah-z-menu);background:var(--b2);border:1px solid var(--glass-border);border-radius:.5rem;box-shadow:0 12px 32px rgba(0,0,0,.35);max-width:calc(100vw - 1rem);overflow-y:auto;overscroll-behavior:contain;padding:.25rem}
+.menu button{display:flex;align-items:center;gap:.5rem;width:100%;height:2rem;padding:0 .625rem;background:transparent;border:0;color:var(--bc);font:inherit;font-size:13px;border-radius:.25rem;cursor:pointer;text-align:start}
+.menu button:hover,.menu button:focus-visible{background:var(--field)}
+.menu button.danger{color:var(--err)}
+.menu hr{border:0;border-top:1px solid var(--line);margin:.25rem 0}
+.pop-body{padding:.5rem;display:flex;flex-direction:column;gap:.5rem;width:20rem;font-size:13px}
+.pop-head{display:flex;align-items:center;justify-content:space-between;font-weight:600}
+.modelist{list-style:none;margin:0;padding:0;border:1px solid var(--line);border-radius:.375rem}
+.modelist li{padding:.375rem .5rem;border-bottom:1px solid var(--line);font-size:12px}
+.modelist li:last-child{border-bottom:0}
+
+/* ---------- Modal shell ---------- */
+.modal{position:fixed;inset:0;z-index:var(--ptah-z-dialog);display:none;place-items:center;padding:1rem;background:var(--scrim)}
+.modal.on{display:grid}
+.modal-box{display:flex;flex-direction:column;width:min(32rem,100%);max-height:calc(100dvh - 2rem);overflow:hidden;background:var(--b2);border:1px solid var(--glass-border);border-radius:var(--radius-box);box-shadow:0 24px 64px rgba(0,0,0,.45)}
+.modal-head{flex:none;display:flex;align-items:center;gap:.5rem;padding:.75rem 1.25rem;border-bottom:1px solid var(--line)}
+.modal-head h2{margin:0;font-size:1rem;font-weight:600;display:flex;align-items:center;gap:.5rem;flex:1}
+.modal-body{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:1rem 1.25rem;display:flex;flex-direction:column;gap:var(--ptah-gap-field);
+  background:linear-gradient(var(--b2) 30%,transparent),linear-gradient(transparent,var(--b2) 70%) bottom,radial-gradient(farthest-side at 50% 0,rgba(0,0,0,.35),transparent),radial-gradient(farthest-side at 50% 100%,rgba(0,0,0,.35),transparent) bottom;
+  background-repeat:no-repeat;background-size:100% 24px,100% 24px,100% 8px,100% 8px;background-attachment:local,local,scroll,scroll}
+.modal-foot{flex:none;display:flex;align-items:center;gap:.5rem;padding:.75rem 1.25rem;border-top:1px solid var(--line)}
+.modal-foot .grow{flex:1;font-size:12px;color:var(--bcm)}
+.fld{display:flex;flex-direction:column;gap:.25rem}
+.fld label{font-size:12px;font-weight:500;color:var(--bcm)}
+.fld .inp,.fld .sel{width:100%}
+.tier{display:grid;grid-template-columns:5rem minmax(0,1fr) 7rem;gap:.5rem;align-items:center}
+.fgroup{font-size:12px;font-weight:600;display:flex;align-items:center;gap:.375rem;padding-top:.25rem}
+
+/* ---------- Output style cards ---------- */
+.os-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(14rem,1fr));gap:.75rem}
+.os{border:1px solid var(--line);border-radius:.5rem;padding:.75rem;display:flex;flex-direction:column;gap:.5rem;background:var(--field)}
+.os[aria-checked="true"]{border-color:var(--accent)}
+.os .top{display:flex;align-items:center;justify-content:space-between;font-weight:600}
+.os p{margin:0;font-size:12px;color:var(--bcm);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.os .bot{display:flex;align-items:center;justify-content:space-between}
+.radio{width:1rem;height:1rem;border-radius:50%;border:1.5px solid var(--bcm);display:grid;place-items:center}
+.os[aria-checked="true"] .radio{border-color:var(--accent)}
+.os[aria-checked="true"] .radio::after{content:"";width:.5rem;height:.5rem;border-radius:50%;background:var(--accent)}
+
+/* ---------- Claude tools & skills ---------- */
+.alert{display:flex;gap:.5rem;align-items:flex-start;border:1px solid color-mix(in oklab,var(--info) 40%,transparent);background:color-mix(in oklab,var(--info) 8%,transparent);border-radius:.5rem;padding:.5rem .75rem;font-size:12px}
+.alert .i{color:var(--info);margin-top:2px}
+.summary{position:sticky;top:calc(-1 * var(--ptah-page-gutter));z-index:var(--ptah-z-raised);display:flex;align-items:center;gap:.75rem 1rem;flex-wrap:wrap;padding:.5rem .75rem;margin-block:.75rem;border:1px solid var(--glass-border);border-radius:.5rem;background:color-mix(in oklab,var(--b2) 90%,transparent);backdrop-filter:blur(10px)}
+.summary .big{display:flex;align-items:center;gap:.375rem;font-weight:600}
+.summary .big .i{color:var(--ok)}
+.summary .search{margin-inline-start:auto;position:relative;display:flex;align-items:center}
+.summary .search .i{position:absolute;inset-inline-start:.5rem;color:var(--bcm);pointer-events:none}
+.summary .search input{padding-inline-start:1.75rem;padding-inline-end:1.75rem;width:14rem}
+.summary .search button{position:absolute;inset-inline-end:2px}
+@container page (max-width: 640px){ .summary .search{margin-inline-start:0;width:100%} .summary .search input{width:100%} .summary{top:calc(-1 * var(--ptah-space-4))} }
+.groups{display:flex;flex-direction:column;gap:.5rem}
+.grpcard{border:1px solid var(--line);border-radius:.5rem}
+.ghead{display:flex;align-items:center;gap:.5rem;padding:.25rem .5rem .25rem .25rem;min-height:2.5rem}
+.gtoggle{flex:1;min-width:0;display:flex;align-items:center;gap:.5rem;height:2rem;background:transparent;border:0;color:var(--bc);font:inherit;cursor:pointer;padding:0 .5rem;border-radius:.375rem;text-align:start;flex-wrap:nowrap}
+.gtoggle:hover{background:var(--field)}
+.gtoggle .chev{transition:transform .15s;color:var(--bcm)}
+.gtoggle[aria-expanded="true"] .chev{transform:rotate(90deg)}
+.gtoggle .gt{font-weight:600;white-space:nowrap}
+.gtoggle .meta{color:var(--bcm);font-size:12px;white-space:nowrap;font-variant-numeric:tabular-nums}
+.gbody{display:grid;grid-template-columns:1fr;border-top:1px solid var(--line)}
+.gbody[hidden]{display:none}
+@container page (min-width: 704px){ .gbody{grid-template-columns:1fr 1fr} .gbody .it:nth-child(odd){border-inline-end:1px solid var(--line)} }
+.it{display:grid;grid-template-columns:auto minmax(0,1fr) auto;column-gap:.75rem;align-items:center;padding:.375rem .75rem;min-height:2.75rem;border-bottom:1px solid var(--line)}
+.it:last-child{border-bottom:0}
+.it .nmx{font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.it .dsc{font-size:12px;line-height:1rem;color:var(--bcm);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;grid-column:2}
+.it .sw{grid-row:1 / span 2;grid-column:1}
+.it .chip{grid-column:3;grid-row:1 / span 2;display:flex;align-items:center;gap:.375rem;flex-wrap:wrap;justify-content:flex-end}
+.it mark{background:color-mix(in oklab,var(--accent) 45%,transparent);color:inherit;border-radius:2px}
+.toast{position:fixed;inset-block-end:1rem;inset-inline-end:1rem;z-index:var(--ptah-z-overlay);max-width:calc(100vw - 2rem);display:none;align-items:center;gap:.5rem;padding:.5rem .75rem;border-radius:.5rem;background:var(--b3);border:1px solid var(--glass-border);box-shadow:0 8px 24px rgba(0,0,0,.35);font-size:13px}
+.toast.on{display:flex}
+</style>
+</head>
+<body>
+<!-- ================= Inline lucide-style icon sprite ================= -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+<defs>
+<symbol id="route" viewBox="0 0 24 24"><circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/><circle cx="18" cy="5" r="3"/></symbol>
+<symbol id="terminal" viewBox="0 0 24 24"><polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/></symbol>
+<symbol id="boxes" viewBox="0 0 24 24"><path d="M2.97 12.92A2 2 0 0 0 2 14.63v3.24a2 2 0 0 0 .97 1.71l3 1.8a2 2 0 0 0 2.06 0L12 19v-5.5l-5-3-4.03 2.42Z"/><path d="m7 16.5-4.74-2.85"/><path d="m7 16.5 5-3"/><path d="M7 16.5v5.17"/><path d="M12 13.5V19l3.97 2.38a2 2 0 0 0 2.06 0l3-1.8a2 2 0 0 0 .97-1.71v-3.24a2 2 0 0 0-.97-1.71L17 10.5l-5 3Z"/><path d="m17 16.5-5-3"/><path d="m17 16.5 4.74-2.85"/><path d="M17 16.5v5.17"/><path d="M7.97 4.42A2 2 0 0 0 7 6.13v4.37l5 3 5-3V6.13a2 2 0 0 0-.97-1.71l-3-1.8a2 2 0 0 0-2.06 0l-3 1.8Z"/><path d="M12 8 7.26 5.15"/><path d="m12 8 4.74-2.85"/><path d="M12 13.5V8"/></symbol>
+<symbol id="package-plus" viewBox="0 0 24 24"><path d="M16 16h6"/><path d="M19 13v6"/><path d="M21 10V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l2-1.14"/><path d="m7.5 4.27 9 5.15"/><polyline points="3.29 7 12 12 20.71 7"/><line x1="12" x2="12" y1="22" y2="12"/></symbol>
+<symbol id="grip-vertical" viewBox="0 0 24 24"><circle cx="9" cy="12" r="1"/><circle cx="9" cy="5" r="1"/><circle cx="9" cy="19" r="1"/><circle cx="15" cy="12" r="1"/><circle cx="15" cy="5" r="1"/><circle cx="15" cy="19" r="1"/></symbol>
+<symbol id="list" viewBox="0 0 24 24"><path d="M3 12h.01M3 18h.01M3 6h.01M8 12h13M8 18h13M8 6h13"/></symbol>
+<symbol id="refresh-cw" viewBox="0 0 24 24"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></symbol>
+<symbol id="arrow-up-down" viewBox="0 0 24 24"><path d="m21 16-4 4-4-4"/><path d="M17 20V4"/><path d="m3 8 4-4 4 4"/><path d="M7 4v16"/></symbol>
+<symbol id="plus" viewBox="0 0 24 24"><path d="M5 12h14"/><path d="M12 5v14"/></symbol>
+<symbol id="check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+<symbol id="x" viewBox="0 0 24 24"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></symbol>
+<symbol id="chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+<symbol id="chevron-up" viewBox="0 0 24 24"><path d="m18 15-6-6-6 6"/></symbol>
+<symbol id="chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+<symbol id="ellipsis-vertical" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></symbol>
+<symbol id="play" viewBox="0 0 24 24"><polygon points="6 3 20 12 6 21 6 3"/></symbol>
+<symbol id="key-round" viewBox="0 0 24 24"><path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z"/><circle cx="16.5" cy="7.5" r=".5" fill="currentColor"/></symbol>
+<symbol id="log-in" viewBox="0 0 24 24"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" x2="3" y1="12" y2="12"/></symbol>
+<symbol id="book-open" viewBox="0 0 24 24"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></symbol>
+<symbol id="info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></symbol>
+<symbol id="rotate-ccw" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
+<symbol id="pencil" viewBox="0 0 24 24"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/></symbol>
+<symbol id="trash-2" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/><line x1="10" x2="10" y1="11" y2="17"/><line x1="14" x2="14" y1="11" y2="17"/></symbol>
+<symbol id="circle-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></symbol>
+<symbol id="circle-dashed" viewBox="0 0 24 24"><path d="M10.1 2.18a10 10 0 0 1 3.8 0"/><path d="M17.6 3.71a10 10 0 0 1 2.69 2.7"/><path d="M21.82 10.1a10 10 0 0 1 0 3.8"/><path d="M20.29 17.6a10 10 0 0 1-2.7 2.69"/><path d="M13.9 21.82a10 10 0 0 1-3.8 0"/><path d="M6.4 20.29a10 10 0 0 1-2.69-2.7"/><path d="M2.18 13.9a10 10 0 0 1 0-3.8"/><path d="M3.71 6.4a10 10 0 0 1 2.7-2.69"/></symbol>
+<symbol id="circle-alert" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 8v4"/><path d="M12 16h.01"/></symbol>
+<symbol id="loader-circle" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></symbol>
+<symbol id="inbox" viewBox="0 0 24 24"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></symbol>
+<symbol id="triangle-alert" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/></symbol>
+<symbol id="shield-check" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="m9 12 2 2 4-4"/></symbol>
+<symbol id="globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></symbol>
+<symbol id="plug" viewBox="0 0 24 24"><path d="M12 22v-5"/><path d="M9 8V2"/><path d="M15 8V2"/><path d="M18 8v5a4 4 0 0 1-4 4h-4a4 4 0 0 1-4-4V8Z"/></symbol>
+<symbol id="gauge" viewBox="0 0 24 24"><path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/></symbol>
+<symbol id="message-square" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol>
+<symbol id="layers" viewBox="0 0 24 24"><path d="M12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z"/><path d="M2 12a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 12"/><path d="M2 17a1 1 0 0 0 .58.91l8.6 3.91a2 2 0 0 0 1.65 0l8.58-3.9A1 1 0 0 0 22 17"/></symbol>
+<symbol id="cpu" viewBox="0 0 24 24"><rect width="16" height="16" x="4" y="4" rx="2"/><rect width="6" height="6" x="9" y="9"/><path d="M15 2v2"/><path d="M15 20v2"/><path d="M2 15h2"/><path d="M2 9h2"/><path d="M20 15h2"/><path d="M20 9h2"/><path d="M9 2v2"/><path d="M9 20v2"/></symbol>
+<symbol id="settings-2" viewBox="0 0 24 24"><path d="M20 7h-9"/><path d="M14 17H5"/><circle cx="17" cy="17" r="3"/><circle cx="7" cy="7" r="3"/></symbol>
+<symbol id="link-2" viewBox="0 0 24 24"><path d="M9 17H7A5 5 0 0 1 7 7h2"/><path d="M15 7h2a5 5 0 1 1 0 10h-2"/><line x1="8" x2="16" y1="12" y2="12"/></symbol>
+<symbol id="sliders-horizontal" viewBox="0 0 24 24"><line x1="21" x2="14" y1="4" y2="4"/><line x1="10" x2="3" y1="4" y2="4"/><line x1="21" x2="12" y1="12" y2="12"/><line x1="8" x2="3" y1="12" y2="12"/><line x1="21" x2="16" y1="20" y2="20"/><line x1="12" x2="3" y1="20" y2="20"/><line x1="14" x2="14" y1="2" y2="6"/><line x1="8" x2="8" y1="10" y2="14"/><line x1="16" x2="16" y1="18" y2="22"/></symbol>
+<symbol id="download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" x2="12" y1="15" y2="3"/></symbol>
+<symbol id="upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" x2="12" y1="3" y2="15"/></symbol>
+<symbol id="bot" viewBox="0 0 24 24"><path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/></symbol>
+<symbol id="palette" viewBox="0 0 24 24"><circle cx="13.5" cy="6.5" r=".5" fill="currentColor"/><circle cx="17.5" cy="10.5" r=".5" fill="currentColor"/><circle cx="8.5" cy="7.5" r=".5" fill="currentColor"/><circle cx="6.5" cy="12.5" r=".5" fill="currentColor"/><path d="M12 2C6.5 2 2 6.5 2 12s4.5 10 10 10c.926 0 1.648-.746 1.648-1.688 0-.437-.18-.835-.437-1.125-.29-.289-.438-.652-.438-1.125a1.64 1.64 0 0 1 1.668-1.668h1.996c3.051 0 5.555-2.503 5.555-5.554C21.965 6.012 17.461 2 12 2z"/></symbol>
+<symbol id="wrench" viewBox="0 0 24 24"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.106-3.105a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94z"/></symbol>
+<symbol id="search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+<symbol id="eye" viewBox="0 0 24 24"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></symbol>
+<symbol id="panel-right-open" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/><path d="m10 15-3-3 3-3"/></symbol>
+<symbol id="sparkles" viewBox="0 0 24 24"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4"/><path d="M22 5h-4"/></symbol>
+<symbol id="user-plus" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><line x1="19" x2="19" y1="8" y2="14"/><line x1="22" x2="16" y1="11" y2="11"/></symbol>
+<symbol id="external-link" viewBox="0 0 24 24"><path d="M15 3h6v6"/><path d="M10 14 21 3"/><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/></symbol>
+<symbol id="list-checks" viewBox="0 0 24 24"><path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/></symbol>
+<symbol id="zap" viewBox="0 0 24 24"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></symbol>
+<symbol id="sun-moon" viewBox="0 0 24 24"><path d="M12 8a2.83 2.83 0 0 0 4 4 4 4 0 1 1-4-4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.9 4.9 1.4 1.4"/><path d="m17.7 17.7 1.4 1.4"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.3 17.7-1.4 1.4"/><path d="m19.1 4.9-1.4 1.4"/></symbol>
+</defs>
+</svg>
+
+<!-- ================= Prototype chrome ================= -->
+<header class="chrome" role="toolbar" aria-label="Prototype controls">
+  <strong>Prototype</strong>
+  <div class="tabs seg" role="group" aria-label="Page">
+    <button data-view="lanes" aria-pressed="true">Providers &gt; Lanes</button>
+    <button data-view="advanced" aria-pressed="false">Advanced</button>
+    <button data-view="tools" aria-pressed="false">Claude tools</button>
+  </div>
+  <label>State <select id="stateSel" aria-label="Lanes data state"><option value="ok">Populated</option><option value="loading">Loading</option><option value="empty">Empty</option><option value="error">Error</option></select></label>
+  <label><input type="checkbox" id="navToggle"> Settings nav (13rem)</label>
+  <span class="sp"></span>
+  <div class="seg" role="group" aria-label="Theme">
+    <button id="thDark" aria-pressed="true">Dark</button><button id="thLight" aria-pressed="false">Light</button>
+  </div>
+</header>
+
+<div class="stage">
+  <nav class="nav" id="nav" aria-label="Settings sections (simulated)">
+    <h2>Settings</h2>
+    <a href="#" class="cur" onclick="return false"><svg class="i"><use href="#route"/></svg>Providers</a>
+    <a href="#" onclick="return false"><svg class="i"><use href="#sliders-horizontal"/></svg>Advanced</a>
+  </nav>
+
+  <main class="page" id="page">
+
+<!-- ==================== VIEW 1: Providers > Lanes ==================== -->
+<section class="view on" id="view-lanes" aria-labelledby="lanes-title">
+  <div class="card" id="lanesCard">
+    <div class="card-head">
+      <h2 class="card-title" id="lanes-title"><svg class="i"><use href="#route"/></svg>Lanes <span class="badge" id="laneCount">7</span></h2>
+      <span class="muted" style="font-size:12px" id="laneEnabled">6 of 7 enabled</span>
+      <span style="flex:1"></span>
+      <label class="muted" style="display:inline-flex;align-items:center;gap:.375rem;font-size:12px"><svg class="i sm"><use href="#layers"/></svg>Max concurrent
+        <input class="inp" type="number" value="3" min="1" max="100" style="width:4rem;height:var(--ptah-control-h-xs)" aria-label="Max concurrent agents"></label>
+      <button class="btn" id="reorderBtn" aria-pressed="false"><svg class="i sm"><use href="#arrow-up-down"/></svg><span>Reorder</span></button>
+    </div>
+    <p class="lanes-desc">Ptah tries enabled lanes from the top when a task does not name one.</p>
+    <div class="order-line" id="orderLine" aria-label="Preferred order"></div>
+
+    <div id="lanesBody"></div>
+
+    <div class="addmore" id="addMore">
+      <div class="card-head">
+        <h3 class="card-title" style="font-size:.875rem"><svg class="i"><use href="#package-plus"/></svg>Add more CLI agents</h3>
+        <span class="muted" style="font-size:12px">Not detected on this machine</span><button class="btn icon xs ghost tip end" data-tip="Re-detect CLI agents" aria-label="Re-detect CLI agents" data-act="redetect"><svg class="i sm"><use href="#refresh-cw"/></svg></button>
+      </div>
+      <div class="am-grid" id="amGrid"></div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== VIEW 2: Advanced ==================== -->
+<section class="view" id="view-advanced" aria-label="Advanced settings">
+  <!-- Membership & data -->
+  <div class="card">
+    <div class="section" aria-labelledby="mem-h">
+      <div class="sec-aside">
+        <h3 class="card-title" id="mem-h"><svg class="i"><use href="#key-round"/></svg>Membership &amp; data</h3>
+        <p>Your plan, your membership key, and a copy of your settings.</p>
+        <div style="display:flex;gap:.375rem;flex-wrap:wrap">
+          <span class="badge"><svg class="i" style="width:12px;height:12px"><use href="#layers"/></svg>Community</span>
+          <span class="badge warn"><svg class="i" style="width:12px;height:12px"><use href="#triangle-alert"/></svg>Needs attention</span>
+        </div>
+      </div>
+      <div class="sec-fields">
+        <div class="row">
+          <div><div class="lab">Membership key</div><div class="hint">Your key could not be verified. Enter it again to restore Ptah Builders. Local features keep working either way.</div></div>
+          <div class="ctl"><button class="btn" id="keyBtn" aria-haspopup="dialog"><svg class="i sm"><use href="#key-round"/></svg>Enter membership key</button></div>
+        </div>
+        <div class="row">
+          <div><div class="lab">Settings backup</div><div class="hint">Export a copy of your settings, or import one.</div></div>
+          <div class="ctl"><button class="btn"><svg class="i sm"><use href="#download"/></svg>Export settings</button><button class="btn"><svg class="i sm"><use href="#upload"/></svg>Import settings</button></div>
+        </div>
+        <div class="row">
+          <div><div class="lab">Ptah Builders</div><div class="hint">Create an account to unlock membership features.</div></div>
+          <div class="ctl"><button class="btn link">Explore Ptah Builders<svg class="i sm"><use href="#external-link"/></svg></button><button class="btn primary"><svg class="i sm"><use href="#user-plus"/></svg>Create account</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Agent behaviour -->
+  <div class="card">
+    <div class="section" aria-labelledby="ab-h">
+      <div class="sec-aside">
+        <h3 class="card-title" id="ab-h"><svg class="i"><use href="#bot"/></svg>Agent behaviour</h3>
+        <p>How the main agent plans and how hard it works.</p>
+      </div>
+      <div class="sec-fields">
+        <div class="row"><div><div class="lab" id="l1">System prompt mode</div><div class="hint">Ptah's project-specific prompt, used for all sessions when on.</div></div>
+          <div class="ctl"><button class="btn icon ghost tip" data-tip="System prompt details" aria-label="System prompt details"><svg class="i"><use href="#panel-right-open"/></svg></button><button class="sw" role="switch" aria-checked="true" aria-labelledby="l1"></button></div></div>
+        <div class="row"><div><div class="lab" id="l2">Ultracode</div><div class="hint">Plan each message with X-High effort.</div></div>
+          <div class="ctl"><button class="btn icon ghost tip" data-tip="About Ultracode" aria-label="About Ultracode"><svg class="i"><use href="#info"/></svg></button><button class="sw" role="switch" aria-checked="false" aria-labelledby="l2"></button></div></div>
+        <div class="row"><div><div class="lab" id="l3">Dynamic workflows</div><div class="hint">Let the agent plan and run a multi-step workflow per task instead of a single-shot reply.</div></div>
+          <div class="ctl"><span class="slot" aria-hidden="true"></span><button class="sw" role="switch" aria-checked="true" aria-labelledby="l3"></button></div></div>
+        <div class="row"><div><div class="lab" id="l4">Chat reasoning effort</div><div class="hint">Same value as Providers &gt; Main Agent effort.</div></div>
+          <div class="ctl"><select class="sel" aria-labelledby="l4"><option>Low</option><option selected>Medium</option><option>High</option><option>X-High</option></select></div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Output style (wide variant) -->
+  <div class="card">
+    <div class="section wide" aria-labelledby="os-h">
+      <div class="sec-fields">
+        <div class="sec-head">
+          <div class="sec-aside"><h3 class="card-title" id="os-h"><svg class="i"><use href="#palette"/></svg>Output style</h3><p>How the agent writes its answers. One style is active at a time.</p></div>
+          <button class="btn"><svg class="i sm"><use href="#plus"/></svg>New style</button>
+        </div>
+        <div class="os-grid" role="radiogroup" aria-label="Output style">
+          <div class="os" role="radio" aria-checked="true" tabindex="0"><div class="top">default<span class="radio"></span></div><p>The standard behaviour: concise, task-focused responses with the normal coding instructions in place.</p><div class="bot"><span class="badge muted">Built in</span><button class="btn icon xs ghost tip end" data-tip="Preview default" aria-label="Preview default"><svg class="i sm"><use href="#eye"/></svg></button></div></div>
+          <div class="os" role="radio" aria-checked="false" tabindex="-1"><div class="top">Explanatory<span class="radio"></span></div><p>Adds commentary explaining implementation choices and the patterns already used in the codebase.</p><div class="bot"><span class="badge muted">Built in</span><button class="btn icon xs ghost tip end" data-tip="Preview Explanatory" aria-label="Preview Explanatory"><svg class="i sm"><use href="#eye"/></svg></button></div></div>
+          <div class="os" role="radio" aria-checked="false" tabindex="-1"><div class="top">Learning<span class="radio"></span></div><p>Pauses at decision points and asks you to write small pieces of the code yourself, for practice.</p><div class="bot"><span class="badge muted">Built in</span><button class="btn icon xs ghost tip end" data-tip="Preview Learning" aria-label="Preview Learning"><svg class="i sm"><use href="#eye"/></svg></button></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ==================== VIEW 3: Claude tools & skills ==================== -->
+<section class="view" id="view-tools" aria-label="Claude Code tools and skills">
+  <div class="card">
+    <div class="section wide" aria-labelledby="ct-h">
+      <div class="sec-fields">
+        <div class="sec-aside"><h3 class="card-title" id="ct-h"><svg class="i"><use href="#wrench"/></svg>Claude Code tools &amp; skills</h3><p>Turn off tools you do not use. Each one costs tokens on every turn.</p></div>
+        <div class="alert" style="margin-top:.75rem"><svg class="i sm"><use href="#info"/></svg><span>Changes apply to <b>new sessions</b>. Open sessions keep what they started with. Applies to all workspaces.</span></div>
+        <div class="summary" id="summary" role="region" aria-label="Savings summary and filter">
+          <div class="big"><svg class="i"><use href="#zap"/></svg><span>Saved per turn <span id="saved">~7,600</span> tokens</span></div>
+          <span class="muted" id="onCount" style="font-size:12px"></span>
+          <span class="muted" id="saveState" style="font-size:12px" role="status" aria-live="polite"></span>
+          <div class="search"><svg class="i sm"><use href="#search"/></svg>
+            <input class="inp" id="q" type="search" placeholder="Filter tools and skills" aria-label="Filter tools and skills" autocomplete="off">
+            <button class="btn icon xs ghost tip end" data-tip="Clear filter" id="qClear" aria-label="Clear filter" hidden><svg class="i sm"><use href="#x"/></svg></button></div>
+        </div>
+        <div class="groups" id="groups"></div>
+        <div class="state-box" id="noMatch" hidden><svg class="i"><use href="#search"/></svg><div>No tools or skills match "<span id="nmq"></span>"</div><button class="btn xs" id="nmClear">Clear filter</button></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+  </main>
+</div>
+
+<!-- Floating layer -->
+<div id="floating"></div>
+
+<!-- Membership key popover content is built by JS; Modal: Add Ptah CLI instance -->
+<div class="modal" id="modal" role="presentation">
+  <div class="modal-box" role="dialog" aria-modal="true" aria-labelledby="mTitle">
+    <div class="modal-head">
+      <h2 id="mTitle"><svg class="i"><use href="#boxes"/></svg>Add Ptah CLI instance</h2>
+      <button class="btn icon ghost tip below end" data-tip="Close" aria-label="Close" data-close><svg class="i"><use href="#x"/></svg></button>
+    </div>
+    <div class="modal-body" tabindex="-1">
+      <p class="muted" style="margin:0;font-size:12px">Extra lane using one of your connected providers, with a model per tier.</p>
+      <div class="fld"><label for="m1">Name</label><input id="m1" class="inp" value="Ollama Code"></div>
+      <div class="fld"><label for="m2">Provider</label><select id="m2" class="sel"><option>Ollama Cloud</option><option>Kimi Code</option><option>OpenRouter</option></select></div>
+      <div class="fld"><label>Credentials</label><div class="inh"><svg class="i sm ok"><use href="#circle-check"/></svg>API key saved for Ollama Cloud</div></div>
+      <div class="fgroup"><svg class="i sm"><use href="#layers"/></svg>Model per tier</div>
+      <div class="tier"><span class="muted">Large</span><input class="inp mono" value="glm-5.3:cloud" aria-label="Large tier model"><select class="sel" aria-label="Large tier effort"><option>high</option><option>medium</option></select></div>
+      <div class="tier"><span class="muted">Medium</span><input class="inp mono" value="glm-5.3:cloud" aria-label="Medium tier model"><select class="sel" aria-label="Medium tier effort"><option>medium</option><option>high</option></select></div>
+      <div class="tier"><span class="muted">Small</span><input class="inp mono" value="glm-4.7:cloud" aria-label="Small tier model"><select class="sel" aria-label="Small tier effort"><option>low</option><option>medium</option></select></div>
+      <div class="fgroup"><svg class="i sm"><use href="#shield-check"/></svg>Lane defaults</div>
+      <div class="fld"><label for="m3">Permission</label><select id="m3" class="sel"><option>Inherit Ptah CLI default (Yolo)</option><option>Plan</option><option>Yolo</option></select></div>
+      <div class="fld"><label for="m4">Network</label><select id="m4" class="sel"><option>Inherit Ptah CLI default (Allowed)</option><option>Allowed</option><option>Blocked</option></select></div>
+      <div class="fld"><label for="m5">Notes</label><textarea id="m5" class="inp" rows="4">Used for long, low-cost refactors. Keep the large tier on the cloud model.</textarea></div>
+      <div class="fld"><label for="m6">Extra environment</label><textarea id="m6" class="inp mono" rows="4">OLLAMA_KEEP_ALIVE=10m
+OLLAMA_MAX_LOADED_MODELS=2</textarea></div>
+      <div class="fld"><label for="m7">Working directory rule</label><select id="m7" class="sel"><option>Workspace root</option><option>Task worktree</option></select></div>
+      <div class="fld"><label for="m8">Test prompt</label><textarea id="m8" class="inp" rows="3">Reply with the single word: ready.</textarea></div>
+    </div>
+    <div class="modal-foot">
+      <span class="grow">Applies to new tasks.</span>
+      <button class="btn" data-close>Cancel</button><button class="btn primary" data-close data-toast="Ptah CLI instance added">Add instance</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"><svg class="i sm ok"><use href="#circle-check"/></svg><span id="toastTxt"></span></div>
+
+<script>
+const $=(s,r=document)=>r.querySelector(s), $$=(s,r=document)=>[...r.querySelectorAll(s)];
+const ic=(n,c='')=>`<svg class="i ${c}" aria-hidden="true"><use href="#${n}"/></svg>`;
+let toastT; function toast(t){const e=$('#toast');$('#toastTxt').textContent=t;e.classList.add('on');clearTimeout(toastT);toastT=setTimeout(()=>e.classList.remove('on'),3200)}
+
+/* ---------- chrome ---------- */
+$$('[data-view]').forEach(b=>b.onclick=()=>{ $$('[data-view]').forEach(x=>x.setAttribute('aria-pressed',x===b)); $$('.view').forEach(v=>v.classList.toggle('on',v.id==='view-'+b.dataset.view)); closeFloat(); $('#page').scrollTop=0; $('#stateSel').disabled=b.dataset.view!=='lanes'; });
+function setTheme(t){document.documentElement.dataset.theme=t;$('#thDark').setAttribute('aria-pressed',t==='anubis');$('#thLight').setAttribute('aria-pressed',t==='anubis-light')}
+$('#thDark').onclick=()=>setTheme('anubis'); $('#thLight').onclick=()=>setTheme('anubis-light');
+$('#navToggle').onchange=e=>$('#nav').classList.toggle('on',e.target.checked);
+$('#stateSel').onchange=()=>renderLanes();
+const qs=new URLSearchParams(location.search); if(qs.get('theme')==='light')setTheme('anubis-light'); if(qs.get('nav')==='1'){ $('#navToggle').checked=true; $('#nav').classList.add('on')}
+if(qs.get('view')) setTimeout(()=>$(`[data-view="${qs.get('view')}"]`).click());
+if(qs.get('modal')) setTimeout(()=>openModal());
+
+/* switches (static ones in Advanced) */
+$$('#view-advanced .sw').forEach(s=>s.onclick=()=>s.setAttribute('aria-checked',s.getAttribute('aria-checked')!=='true'));
+$$('.os').forEach(o=>o.onclick=()=>{$$('.os').forEach(x=>{x.setAttribute('aria-checked',x===o);x.tabIndex=x===o?0:-1})});
+
+/* ---------- floating layer: one cap rule ---------- */
+let floatEl=null, floatTrigger=null;
+function closeFloat(){ if(floatEl){floatEl.remove();floatEl=null; if(floatTrigger){floatTrigger.setAttribute('aria-expanded','false');floatTrigger.focus();floatTrigger=null}} }
+function openFloat(trigger, html, {cls='',width}={}){
+  closeFloat(); const el=document.createElement('div'); el.className='floating '+cls; el.innerHTML=html; if(width) el.style.width=width; $('#floating').appendChild(el);
+  const r=trigger.getBoundingClientRect(), vh=innerHeight, vw=innerWidth, gap=6, pad=8;
+  const below=vh-r.bottom-gap-pad, above=r.top-gap-pad, place = below>=Math.min(el.scrollHeight,240)||below>=above ? 'b':'t';
+  const avail = place==='b'?below:above;
+  el.style.maxHeight = Math.max(160, Math.min(avail, vh-2*pad, 448))+'px';          /* cap rule */
+  el.style.maxWidth = `calc(100vw - ${2*pad}px)`;
+  const w=el.offsetWidth, h=el.offsetHeight;
+  let left=Math.min(Math.max(pad, r.right-w), vw-w-pad);
+  el.style.left=left+'px'; el.style.top=(place==='b'? r.bottom+gap : Math.max(pad,r.top-gap-h))+'px';
+  floatEl=el; floatTrigger=trigger; trigger.setAttribute('aria-expanded','true');
+  (el.querySelector('button, input, select')||el).focus?.();
+  return el;
+}
+document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ if(floatEl){closeFloat();e.stopPropagation()} else if($('#modal').classList.contains('on')) closeModal() }});
+document.addEventListener('mousedown',e=>{ if(floatEl && !floatEl.contains(e.target) && !floatTrigger?.contains(e.target)) { const t=floatTrigger; floatTrigger=null; closeFloat(); } });
+addEventListener('resize',()=>{ if(floatEl){const t=floatTrigger;closeFloat()} });
+$('#page').addEventListener('scroll',()=>{ if(floatEl) closeFloat() },{passive:true});
+
+/* membership key popover (decision 10: stays a popover, height-capped) */
+$('#keyBtn').onclick=e=>{ const el=openFloat(e.currentTarget,`<div class="pop-body" role="dialog" aria-label="Membership key" style="width:20rem">
+  <div class="pop-head">Membership key<button class="btn icon xs ghost tip end" data-tip="Close" data-x aria-label="Close">${ic('x','sm')}</button></div>
+  <div class="fld"><label for="kk">Key</label><input id="kk" class="inp mono" placeholder="ptah_lic_..."></div>
+  <div class="muted" style="font-size:12px">Find your key in your Ptah Builders account. It is stored on this machine only.</div>
+  <div class="errc" style="font-size:12px;display:flex;gap:.375rem">${ic('circle-alert','sm')}This key could not be verified.</div>
+  <div style="display:flex;justify-content:flex-end;gap:.5rem"><button class="btn" data-x>Cancel</button><button class="btn primary" data-x data-t="Membership key submitted">Activate</button></div></div>`);
+  $$('[data-x]',el).forEach(b=>b.onclick=()=>{ if(b.dataset.t) toast(b.dataset.t); closeFloat() }); };
+
+/* ---------- Lanes data ---------- */
+const LANES=[
+ {id:'codex',n:'Codex',k:'cli',m:'C',v:'v0.165.0',perm:'Yolo',net:'Allowed',model:'gpt-6.1-sol · high',on:true,st:'ok',ord:1,exe:'/usr/local/bin/codex',prov:'OpenAI',acct:'Main login',native:'plan',caps:['yes','plan · ask · auto · yolo','allowed','yes','-']},
+ {id:'ollama',n:'Ollama Code',k:'ptah',m:'O',v:'Ollama Cloud',perm:'Yolo',net:'Allowed',model:'glm-5.3:cloud · high',on:true,st:'ok',ord:2,prov:'Ollama Cloud',tiers:'3 tiers mapped',caps:['yes','inherits defaults','inherits defaults','yes','-']},
+ {id:'claude',n:'Claude',k:'cli',m:'>_',v:'v2.x',perm:'Yolo',net:'Allowed',model:'CLI default',on:true,st:'ok',ord:3,exe:'/usr/local/bin/claude',prov:'Anthropic',acct:'Second Lane',native:'plan',caps:['yes','plan · ask · auto · yolo','allowed','yes','-']},
+ {id:'agy',n:'Antigravity',k:'cli',m:'A',v:'v1.5.13',perm:'Yolo',net:'Allowed',model:'claude-sonnet-5-5-medium',on:true,st:'ok',ord:4,exe:'/usr/local/bin/agy',prov:'Google',acct:'Main login',native:'ask',caps:['yes','ask · yolo','allowed','yes','-']},
+ {id:'grok',n:'Grok',k:'cli',m:'G',v:'v1.0.89',perm:'',net:'Allowed',model:'CLI default',on:true,st:'ok',ord:5,unsupported:'Select a permission mode: Default is not supported for this CLI',exe:'/usr/local/bin/grok',prov:'xAI',acct:'Main login',native:'ask',caps:['yes','ask · yolo','allowed','yes','-']},
+ {id:'kimi',n:'kimi code',k:'ptah',m:'K',v:'Kimi Code',perm:'Yolo',net:'Allowed',model:'k3.1-pro[1m] · medium',on:true,st:'ok',ord:6,prov:'Kimi Code',tiers:'3 tiers mapped',caps:['yes','inherits defaults','inherits defaults','yes','-']},
+ {id:'cursor',n:'Cursor',k:'cli',m:'Cu',v:'v2026.11',perm:'',net:'Unavailable',model:'CLI default',on:false,st:'key',ord:null,unsupported:'Network control is not available for this CLI',exe:'/usr/local/bin/cursor-agent',prov:'Cursor',acct:'Not signed in',native:'ask',caps:['yes','ask','n/a','yes','-']},
+];
+const MORE=[
+ {n:'Copilot',m:'Co',cmd:'npm install -g @github/copilot'},
+ {n:'OpenCode',m:'Oc',cmd:'npm install -g opencode-ai'},
+ {n:'Pi',m:'π',cmd:'npm install -g @mariozechner/pi-coding-agent'},
+];
+let expanded='claude', reorder=false;
+const orderList=()=>LANES.filter(l=>l.ord).sort((a,b)=>a.ord-b.ord);
+function statusHtml(l){
+  if(l.st==='ok') return `<div class="stat"><div class="l1 ok">${ic('circle-check','sm')}<span class="txt">Installed</span></div><div class="l2"></div></div>`;
+  if(l.st==='key') return `<div class="stat"><div class="l1 warnc">${ic('key-round','sm')}<span class="txt">Needs API key</span></div><div class="l2"><button class="btn link xs" data-act="signin" data-id="${l.id}">${ic('log-in','sm')}Sign in</button></div></div>`;
+}
+function permCell(l){
+  if(l.k==='ptah') return `<span class="inh tip" data-tip="From Ptah CLI defaults">${ic('link-2','sm')}${l.perm} <span style="opacity:.8">(default)</span></span>`;
+  const unsup = l.unsupported && !l.perm;
+  return `<span style="display:inline-flex;align-items:center;gap:.25rem"><select class="sel" style="width:6.5rem" aria-label="Permission for ${l.n}" ${l.on||true?'':'disabled'}>${l.perm?'':'<option>Default</option>'}<option ${l.perm==='Plan'?'selected':''}>Plan</option><option>Ask</option><option ${l.perm==='Yolo'?'selected':''}>Yolo</option></select>${unsup?`<button class="btn icon xs ghost tip" data-tip="${l.unsupported}" aria-label="Unsupported combination: ${l.unsupported}">${ic('info','sm')}</button>`:''}</span>`;
+}
+function netCell(l){
+  if(l.k==='ptah') return `<span class="inh tip" data-tip="From Ptah CLI defaults">${ic('link-2','sm')}${l.net} <span style="opacity:.8">(default)</span></span>`;
+  if(l.net==='Unavailable') return `<span class="inh">Not available</span>`;
+  return `<select class="sel" style="width:6.5rem" aria-label="Network for ${l.n}"><option selected>Allowed</option><option>Blocked</option></select>`;
+}
+function rowHtml(l){
+  const n=l.ord??'-';
+  const ex=expanded===l.id;
+  return `<tr class="lane ${l.k} ${l.on?'':'off'}" data-id="${l.id}">
+  <td class="ord"><div class="ordcell"><span aria-label="Order">${n===('-')?'<span aria-label="Not in order">-</span>':n}</span>
+    ${l.ord?`<span class="reord"><span class="grip" draggable="true" data-grip="${l.id}" aria-label="Drag ${l.n} to reorder">${ic('grip-vertical','sm')}</span><button class="btn icon xs ghost" data-act="up" data-id="${l.id}" aria-label="Move ${l.n} up">${ic('chevron-up','sm')}</button><button class="btn icon xs ghost" data-act="down" data-id="${l.id}" aria-label="Move ${l.n} down">${ic('chevron-down','sm')}</button></span>`:''}</div></td>
+  <td><div class="nm"><div class="l1"><span class="tile" aria-hidden="true">${l.m}</span><span class="t">${l.n}</span><span class="badge kind kind-${l.k}">${l.k==='ptah'?'Ptah CLI':'CLI agent'}</span><span class="st-inline tip ${l.st==='ok'?'ok':'warnc'}" data-tip="${l.st==='ok'?'Installed':'Needs API key'}" role="img" aria-label="${l.st==='ok'?'Installed':'Needs API key'}">${ic(l.st==='ok'?'circle-check':'key-round','sm')}</span></div><div class="l2">${l.v}</div></div></td>
+  <td class="c-stat">${statusHtml(l)}</td>
+  <td class="c-perm">${permCell(l)}</td>
+  <td class="c-net">${netCell(l)}</td>
+  <td class="c-model model"><button class="btn xs ghost tip" style="max-width:100%;justify-content:flex-start" data-tip="Change model and effort" title="${l.model.split(' · ')[0]}" aria-haspopup="dialog" aria-expanded="false" data-act="model" data-id="${l.id}"><span class="mono" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${l.model}</span>${ic('chevron-down','sm')}</button></td>
+  <td><button class="sw" role="switch" aria-checked="${l.on}" data-act="enable" data-id="${l.id}" aria-label="Enable ${l.n}"></button></td>
+  <td><button class="btn icon ghost tip end" data-tip="Actions for ${l.n}" aria-label="Actions for ${l.n}" aria-haspopup="menu" data-act="kebab" data-id="${l.id}">${ic('ellipsis-vertical')}</button></td>
+  <td><button class="btn icon ghost tip end" data-tip="${ex?'Collapse':'Expand'} details" data-act="expand" data-id="${l.id}" aria-expanded="${ex}" aria-controls="det-${l.id}" aria-label="${ex?'Collapse':'Expand'} ${l.n} details">${ic(ex?'chevron-down':'chevron-right')}</button></td>
+ </tr>${ex?detailHtml(l):''}`;
+}
+function dl(i,k,v){return `<dt>${ic(i,'sm')}${k}</dt><dd>${v}</dd>`}
+function detailHtml(l){
+  const nativeTxt = {plan:'Plan mode: the CLI proposes changes and waits for approval before editing files or running commands.',ask:'Ask mode: the CLI asks before each edit or command. Ptah can raise this to a stricter or looser mode per lane.'}[l.native]||'';
+  /* Decision 13: only information the row does not show. Row shows: order, name, kind, version/provider (line 2), status, permission, network, model/effort, enabled. */
+  const narrowOnly = [
+    `<dt class="only-narrow">${ic('shield-check','sm')}Permission</dt><dd class="only-narrow">${permCell(l)}</dd>`,
+    `<dt class="only-narrow">${ic('globe','sm')}Network</dt><dd class="only-narrow">${netCell(l)}</dd>`,
+    `<dt class="only-narrow">${ic('cpu','sm')}Model</dt><dd class="only-narrow"><button class="btn xs" data-act="model" data-id="${l.id}" aria-haspopup="dialog"><span class="mono">${l.model}</span>${ic('chevron-down','sm')}</button></dd>`
+  ];
+  const left = l.k==='cli' ? [
+    dl('bot','Provider',l.prov), ...(l.id==='claude'?[dl('log-in','Account',l.acct)]:[]),
+    dl('terminal','Executable',`<span class="mono" style="overflow:hidden;text-overflow:ellipsis" title="${l.exe}">${l.exe}</span>`),
+    `<dt>${ic('shield-check','sm')}Native behavior</dt><dd style="align-items:flex-start;flex-direction:column;gap:0"><span class="clamp" id="nat-${l.id}">${nativeTxt}</span><button class="btn link xs" style="padding:0" data-act="more" data-id="${l.id}" aria-expanded="false" aria-controls="nat-${l.id}">More</button></dd>`
+  ].concat(narrowOnly) : [
+    dl('key-round','Key status',`<span class="ok" style="display:inline-flex;gap:.25rem;align-items:center">${ic('circle-check','sm')}Saved</span>`),
+    dl('layers','Tier models',`<div class="tiers"><span>3 of 3 set</span>${['Opus','Sonnet','Haiku'].map(t=>`<span class="muted mono" style="font-size:12px">${t}: ${l.model.split(' · ')[0]}</span>`).join('')}</div>`)
+  ].concat(narrowOnly.slice(2));
+  const right = [dl('message-square','Messaging',l.caps[0]),dl('shield-check','Permission support',l.caps[1]),dl('globe','Network support',l.caps[2]),dl('plug','MCP',l.caps[3]),dl('gauge','Limit',l.caps[4]==='-'?'<span class="muted">No limit reported</span>':l.caps[4])];
+  const test=`<button class="btn" data-act="test" data-id="${l.id}">${ic('play','sm')}Test</button><span class="muted" id="tr-${l.id}" role="status" style="font-size:12px">Not run yet</span><span class="grow"></span>`;
+  const foot = l.k==='cli'
+   ? test+`${l.st==='key'?`<button class="btn" data-act="signin" data-id="${l.id}">${ic('key-round','sm')}Credentials</button>`:''}
+      ${l.id==='codex'?`<button class="btn" data-act="x">${ic('settings-2','sm')}Codex settings</button>`:''}
+      <button class="btn icon ghost tip end" data-tip="Reset to default (plan)" aria-label="Reset to default (plan)" data-act="reset">${ic('rotate-ccw')}</button>`
+   : test+`<button class="btn" data-act="tiers">${ic('layers','sm')}Edit tiers</button>
+      <button class="btn icon ghost tip" data-tip="Edit" aria-label="Edit ${l.n}" data-act="edit">${ic('pencil')}</button>
+      <button class="btn icon ghost danger tip end" data-tip="Delete" aria-label="Delete ${l.n}" data-act="delete" data-id="${l.id}">${ic('trash-2')}</button>`;
+  return `<tr class="detail" id="det-${l.id}"><td colspan="9"><div class="detail-box"><div class="dgrid"><dl class="dl">${left.join('')}</dl><dl class="dl">${right.join('')}</dl><details class="caps"><summary>${ic('list','sm')}All capabilities</summary><ul>${right.map(x=>`<li>${x.replace(/<dt[^>]*>.*?<\/dt><dd>/,'').replace('</dd>','').replace(/<[^>]+>/g,'')}</li>`).join('')}</ul></details></div><div class="dfoot">${foot}</div></div></td></tr>`;
+}
+const HEAD=`<thead><tr><th scope="col" style="width:4.25rem">Order</th><th scope="col">Lane</th><th scope="col" class="c-stat" style="width:9.5rem">Status</th><th scope="col" class="c-perm" style="width:11rem">${ic('shield-check','sm')}Permission</th><th scope="col" class="c-net" style="width:11rem">${ic('globe','sm')}Network</th><th scope="col" class="c-model" style="width:12rem">${ic('cpu','sm')}Model</th><th scope="col" data-w="on" style="width:4rem">On</th><th scope="col" data-w="ic" style="width:2.75rem"><span class="sr-only">Actions</span></th><th scope="col" data-w="ic" style="width:2.75rem"><span class="sr-only">Details</span></th></tr></thead>`;
+function renderLanes(){
+  const st=$('#stateSel').value, body=$('#lanesBody'); closeFloat();
+  $('#addMore').hidden = st!=='ok' && st!=='empty';
+  $('#reorderBtn').disabled = st!=='ok';
+  if(st==='loading'){ body.innerHTML=`<div role="status" aria-live="polite" aria-busy="true"><div class="muted" style="display:flex;gap:.5rem;align-items:center;padding:.5rem">${ic('loader-circle','spin')}Loading lanes...</div><div class="skel"></div><div class="skel"></div><div class="skel"></div></div>`; $('#addMore').hidden=true; $('#laneCount').textContent='-'; $('#laneEnabled').textContent=''; $('#orderLine').innerHTML=''; return }
+  if(st==='error'){ body.innerHTML=`<div class="state-box" role="alert">${ic('triangle-alert','errc')}<div style="color:var(--bc)">Could not read lanes</div><div style="font-size:12px">The CLI detection did not answer. Your saved order is unchanged.</div><button class="btn" id="retry">${ic('rotate-ccw','sm')}Retry</button></div>`; $('#retry').onclick=()=>{$('#stateSel').value='ok';renderLanes()}; $('#laneCount').textContent='-'; $('#laneEnabled').textContent=''; $('#orderLine').innerHTML=''; return }
+  if(st==='empty'){ body.innerHTML=`<div class="state-box">${ic('inbox')}<div style="color:var(--bc)">No lanes available</div><div style="font-size:12px">Install a CLI agent below, or add a Ptah CLI instance.</div><button class="btn primary" data-act="add">${ic('plus','sm')}Add Ptah CLI instance</button></div>`; $('#laneCount').textContent='0'; $('#laneEnabled').textContent='0 enabled'; $('#orderLine').innerHTML=''; return }
+  const ord=orderList(), cli=LANES.filter(l=>l.k==='cli').sort((a,b)=>(a.ord??99)-(b.ord??99)), ptah=LANES.filter(l=>l.k==='ptah').sort((a,b)=>a.ord-b.ord);
+  $('#laneCount').textContent=LANES.length; $('#laneEnabled').textContent=`${ord.length} of ${LANES.length} enabled`;
+  $('#orderLine').innerHTML=`<span>Order:</span>`+ord.map((l,i)=>`<span><b>${l.ord}</b> ${l.n}</span>${i<ord.length-1?'<span aria-hidden="true">→</span>':''}`).join('');
+  if(reorder){ const flat=ord.concat(LANES.filter(l=>!l.ord)); body.innerHTML=`<div class="tbl-wrap reordering"><table class="lanes" aria-label="Lanes (reordering)">${HEAD}<tbody>${flat.map(rowHtml).join('')}</tbody></table></div>`; return }
+  body.innerHTML=`<div class="tbl-wrap ${reorder?'reordering':''}"><table class="lanes" aria-label="Lanes">${HEAD}
+  <tbody><tr class="grp"><th scope="rowgroup" colspan="9"><div class="grp-in">${ic('terminal','sm')}CLI agents <span class="badge muted">${cli.length}</span>
+    <span class="push"><button class="btn icon xs ghost tip end ${'' }" data-tip="Re-detect CLI agents" aria-label="Re-detect CLI agents" data-act="redetect">${ic('refresh-cw','sm')}</button></span></div></th></tr>${cli.map(rowHtml).join('')}</tbody>
+  <tbody><tr class="grp second"><th scope="rowgroup" colspan="9"><div class="grp-in">${ic('boxes','sm')}Ptah CLI instances <span class="badge muted">${ptah.length}</span>
+    <span class="push big"><span class="muted" style="display:inline-flex;align-items:center;gap:.25rem">${ic('sliders-horizontal','sm')}Defaults</span>
+      <label>Permission <select class="sel" style="height:var(--ptah-control-h-xs);width:5.5rem" aria-label="Ptah CLI default permission"><option>Plan</option><option selected>Yolo</option></select></label>
+      <label>Network <select class="sel" style="height:var(--ptah-control-h-xs);width:6rem" aria-label="Ptah CLI default network"><option selected>Allowed</option><option>Blocked</option></select></label>
+      <button class="btn icon xs ghost tip" data-tip="Reset defaults" aria-label="Reset Ptah CLI defaults" data-act="reset">${ic('rotate-ccw','sm')}</button>
+      <button class="btn xs" data-act="add">${ic('plus','sm')}Add Ptah CLI instance</button></span></div></th></tr>${ptah.map(rowHtml).join('')}</tbody></table></div>`;
+  $('#amGrid').innerHTML=MORE.map(m=>`<div class="am"><div class="top"><span class="tile" aria-hidden="true">${m.m}</span>${m.n}</div><div class="st">${ic('circle-dashed','sm')}Not installed</div><div style="display:flex;gap:.5rem;align-items:center"><button class="btn xs" data-act="install" data-n="${m.n}" data-cmd="${m.cmd}" aria-haspopup="dialog">${ic('book-open','sm')}Install</button></div><details class="muted" style="font-size:12px"><summary style="cursor:pointer">Details</summary><div class="mono" style="margin-top:.25rem;overflow-wrap:anywhere">${m.cmd}</div></details></div>`).join('');
+}
+$('#reorderBtn').onclick=e=>{ reorder=!reorder; e.currentTarget.setAttribute('aria-pressed',reorder); e.currentTarget.innerHTML=reorder?`${ic('check','sm')}<span>Done</span>`:`${ic('arrow-up-down','sm')}<span>Reorder</span>`; renderLanes() };
+function openModal(){ const m=$('#modal'); m.classList.add('on'); m._prev=document.activeElement; $('.modal-body',m).scrollTop=0; $('#m1').focus() }
+function closeModal(){ const m=$('#modal'); m.classList.remove('on'); m._prev?.focus() }
+$$('#modal [data-close]').forEach(b=>b.onclick=()=>{ if(b.dataset.toast) toast(b.dataset.toast); closeModal() });
+$('#modal').addEventListener('mousedown',e=>{ if(e.target.id==='modal') closeModal() });
+$('#modal').addEventListener('keydown',e=>{ if(e.key!=='Tab') return; const f=$$('button,input,select,textarea,[tabindex="-1"].modal-body',$('#modal')).filter(x=>!x.disabled&&x.offsetParent); const first=f[0], last=f[f.length-1]; if(e.shiftKey&&document.activeElement===first){last.focus();e.preventDefault()} else if(!e.shiftKey&&document.activeElement===last){first.focus();e.preventDefault()} });
+
+let dragId=null;
+$('#lanesCard').addEventListener('dragstart',e=>{const g=e.target.closest('[data-grip]'); if(!g) return; dragId=g.dataset.grip; e.dataTransfer.effectAllowed='move'; g.closest('tr').classList.add('dragging')});
+$('#lanesCard').addEventListener('dragover',e=>{const t=e.target.closest('tr.lane'); if(!t||!dragId) return; e.preventDefault(); $$('tr.dragover').forEach(x=>x.classList.remove('dragover')); t.classList.add('dragover')});
+$('#lanesCard').addEventListener('drop',e=>{const t=e.target.closest('tr.lane'); if(!t||!dragId) return; e.preventDefault(); const o=orderList(), a=o.findIndex(x=>x.id===dragId), b=o.findIndex(x=>x.id===t.dataset.id); if(a>=0&&b>=0&&a!==b){ const [m]=o.splice(a,1); o.splice(b,0,m); o.forEach((x,i)=>x.ord=i+1) } dragId=null; renderLanes()});
+$('#lanesCard').addEventListener('dragend',()=>{dragId=null; $$('tr.dragging,tr.dragover').forEach(x=>x.classList.remove('dragging','dragover'))});
+$('#lanesCard').addEventListener('click',e=>{
+  const b=e.target.closest('[data-act]'); if(!b) return; const id=b.dataset.id, l=LANES.find(x=>x.id===id), a=b.dataset.act;
+  if(a==='expand'){ expanded = expanded===id?null:id; renderLanes(); $(`[data-act="expand"][data-id="${id}"]`)?.focus() }
+  else if(a==='enable'){ l.on=!l.on; if(l.on){ l.ord=Math.max(0,...LANES.map(x=>x.ord||0))+1 } else { const o=l.ord; l.ord=null; LANES.forEach(x=>{ if(x.ord&&x.ord>o) x.ord-- }) } renderLanes(); $(`[data-act="enable"][data-id="${id}"]`)?.focus() }
+  else if(a==='up'||a==='down'){ const o=orderList(), i=o.findIndex(x=>x.id===id), j=a==='up'?i-1:i+1; if(j>=0&&j<o.length){ const t=o[i].ord; o[i].ord=o[j].ord; o[j].ord=t; renderLanes(); $(`[data-act="${a}"][data-id="${id}"]`)?.focus() } }
+  else if(a==='more'){ const t=$('#nat-'+id), o=t.classList.toggle('open'); b.textContent=o?'Less':'More'; b.setAttribute('aria-expanded',o) }
+  else if(a==='add') openModal();
+  else if(a==='redetect'){ b.innerHTML=ic('refresh-cw','sm spin'); b.disabled=true; setTimeout(()=>{renderLanes();toast('CLI agents re-detected')},900) }
+  else if(a==='test'){ const r=$('#tr-'+id); r.innerHTML=`${ic('loader-circle','sm spin')} Testing...`; r.className='muted'; setTimeout(()=>{r.innerHTML=`${ic('circle-check','sm')} Passed in 2.1 s`;r.className='ok'; r.style.display='inline-flex';r.style.gap='.25rem';r.style.alignItems='center'},900) }
+  else if(a==='delete'){ toast('Prototype: an inline confirm replaces the footer (Cancel / Delete)') }
+  else if(a==='signin'){ toast('Prototype: opens the credentials popover') }
+  else if(a==='install'){ const el=openFloat(b,`<div class="pop-body" role="dialog" aria-label="Install ${b.dataset.n}"><div class="pop-head">Install ${b.dataset.n}<button class="btn icon xs ghost tip end" data-tip="Close" data-x aria-label="Close">${ic('x','sm')}</button></div><div class="muted" style="font-size:12px">Run this in a terminal, then re-detect.</div><code class="mono" style="padding:.5rem;border:1px solid var(--line);border-radius:.375rem;background:var(--field);word-break:break-all">${b.dataset.cmd}</code><div style="display:flex;justify-content:flex-end;gap:.5rem"><button class="btn xs" data-x data-t="Command copied">Copy</button><button class="btn xs primary" data-x data-t="Re-detecting...">${'Re-detect'}</button></div></div>`); $$('[data-x]',el).forEach(x=>x.onclick=()=>{ if(x.dataset.t) toast(x.dataset.t); closeFloat() }) }
+  else if(a==='model'){ const el=openFloat(b,`<div class="pop-body" role="dialog" aria-label="Model and effort"><div class="pop-head">Model and effort<button class="btn icon xs ghost tip end" data-tip="Close" data-x aria-label="Close">${ic('x','sm')}</button></div>
+     <div class="muted" style="font-size:12px">Applies to new tasks on this lane. Long note rows and the model list scroll inside this panel, capped to the space below or above the trigger.</div>
+     <div class="fld"><label for="ms">Model</label><input id="ms" class="inp" placeholder="Search models"></div>
+     <ul class="modelist">${['CLI default','gpt-6.1-sol','gpt-6.1-mini','claude-sonnet-5-5','claude-sonnet-5-5-medium','claude-opus-4-6','glm-5.3:cloud','glm-4.7:cloud','k3.1-pro[1m]','gemini-3-pro','gemini-3-flash','grok-4-fast'].map(m=>`<li class="mono">${m}</li>`).join('')}</ul>
+     <div class="fld"><label for="me">Effort</label><select id="me" class="sel"><option>default</option><option>low</option><option>medium</option><option>high</option></select></div></div>`);
+     $$('[data-x]',el).forEach(x=>x.onclick=closeFloat) }
+  else if(a==='kebab'){ const items = l.k==='ptah'
+      ? [['play','Test']]
+      : [['play','Test'],...(l.st==='key'?[['log-in','Sign in']]:[])];
+    const el=openFloat(b,`<div class="menu" role="menu" aria-label="${l.n} actions" style="width:12rem">${items.map(i=>i[0]==='---'?'<hr>':`<button role="menuitem" class="${i[2]==='danger'?'danger':''}">${ic(i[0],'sm')}${i[1]}</button>`).join('')}</div>`);
+    $$('button',el).forEach(x=>x.onclick=()=>{ const t=x.textContent; closeFloat(); toast(t+' (prototype)') });
+    el.addEventListener('keydown',ev=>{ const bs=$$('button',el),i=bs.indexOf(document.activeElement); if(ev.key==='ArrowDown'){bs[(i+1)%bs.length].focus();ev.preventDefault()} if(ev.key==='ArrowUp'){bs[(i-1+bs.length)%bs.length].focus();ev.preventDefault()} }) }
+  else if(a==='reset'||a==='edit'||a==='tiers'||a==='x'){ toast('Prototype: '+a) }
+});
+
+/* ---------- Claude tools & skills ---------- */
+const G=[
+ {id:'tools',t:'Built-in tools',icon:'wrench',tag:'Off by default',open:true,items:[
+  ['Workflow',2000,'Run multi-step workflows from one tool call.'],['ReportFindings',850,'Hand structured findings back to the caller.'],['PushNotification',10,'Send a desktop notification when a task ends.'],['DesignSync',10,'Sync design tokens with the design tool.'],['EnterWorktree',10,'Switch the session into a git worktree.'],['ExitWorktree',10,'Return from a worktree to the main checkout.']]},
+ {id:'term',t:'Terminal-only skills',icon:'terminal',tag:'Off by default',open:false,items:[
+  ['keybindings-help',90,"Edits the terminal's keyboard bindings."],['update-config',270,"Edits Claude Code's settings.json hooks and permissions."],['fewer-permission-prompts',70,'Mines CLI transcripts for a permission allowlist.'],['plugin-authoring',100,'Builds mods for the Claude terminal UI.'],['init',25,'Writes a CLAUDE.md for the project.'],['security-review',620,'Reviews the pending branch changes for security issues.',{needs:'ReportFindings'}],['simplify',540,'Reviews changed code for reuse and simplification.'],['loop',410,'Runs a prompt on a recurring interval.'],['schedule',880,'Creates and manages scheduled agents.'],['run',305,"Launches the project's app to see a change working."],['claude-api',1400,'Reference for the Claude API and SDK.']]},
+ {id:'sync',t:'Synced from claude.ai',icon:'refresh-cw',tag:'Hidden by default',open:false,items:[]},
+];
+G.forEach(g=>g.items=g.items.map(a=>({name:a[0],tok:a[1],desc:a[2],needs:a[3]?.needs,on:false})));
+const fmt=n=>n.toLocaleString('en-US'); let saving=false, query='';
+const esc=s=>s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const hl=(s)=>{ if(!query) return esc(s); const i=s.toLowerCase().indexOf(query.toLowerCase()); return i<0?esc(s):esc(s.slice(0,i))+'<mark>'+esc(s.slice(i,i+query.length))+'</mark>'+esc(s.slice(i+query.length)) };
+const vis=g=>!query?g.items:g.items.filter(i=>(i.name+' '+i.desc).toLowerCase().includes(query.toLowerCase()));
+function renderTools(keepFocus){
+  const all=G.flatMap(g=>g.items), total=all.length, on=all.filter(i=>i.on).length;
+  $('#saved').textContent='~'+fmt(all.filter(i=>!i.on).reduce((s,i)=>s+i.tok,0)+0);
+  $('#onCount').textContent=`${on} of ${total} on`;
+  $('#qClear').hidden=!query;
+  let shown=0;
+  $('#groups').innerHTML=G.map(g=>{
+    const v=vis(g); if(query&&!v.length) return ''; shown++;
+    const open=query?true:g.open, cnt=g.items.filter(i=>i.on).length, sub=g.items.reduce((s,i)=>s+i.tok,0);
+    const vOn=v.filter(i=>i.on).length, state=v.length&&vOn===v.length?'true':vOn===0?'false':'mixed';
+    const label=query?`Turn ${state==='true'?'off':'on'} ${v.length} shown in ${g.t}`:`Turn ${state==='true'?'off':'on'} all ${g.t}`;
+    return `<div class="grpcard" data-g="${g.id}"><div class="ghead">
+      <button class="gtoggle" aria-expanded="${open}" aria-controls="gb-${g.id}" data-gt="${g.id}">${ic('chevron-right','chev')}${ic(g.icon,'sm')}<span class="gt">${g.t}</span><span class="badge muted">${g.tag}</span><span class="meta">${cnt}/${g.items.length} on · ~${fmt(sub)} tokens</span></button>
+      ${g.items.length?`<button class="sw" role="switch" aria-checked="${state}" data-gs="${g.id}" aria-label="${label}" ${saving?'disabled':''}></button>`:''}</div>
+      <div class="gbody" id="gb-${g.id}" ${open?'':'hidden'}>${v.length?v.map(i=>{ const blocked=i.needs&&i.on&&!G[0].items.find(t=>t.name===i.needs).on; return `<div class="it"><button class="sw" role="switch" aria-checked="${i.on}" data-i="${g.id}|${i.name}" aria-labelledby="n-${g.id}-${i.name}" ${blocked?`aria-describedby="b-${i.name}"`:''} ${saving?'disabled':''}></button>
+        <span class="nmx" id="n-${g.id}-${i.name}">${hl(i.name)}</span><span class="chip">${blocked?`<span class="badge warn" id="b-${i.name}">${ic('triangle-alert','sm')}${i.needs} is off</span>`:''}<span class="badge muted">~${fmt(i.tok)}</span></span>
+        <span class="dsc" title="${esc(i.desc)}">${hl(i.desc)}</span></div>` }).join(''):`<div class="state-box" style="grid-column:1/-1">${ic('inbox')}<div>No skills synced from claude.ai</div></div>`}</div></div>`;
+  }).join('');
+  $('#noMatch').hidden = !(query && shown===0); $('#nmq').textContent=query;
+}
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+$('#groups').addEventListener('click',async e=>{
+  const gt=e.target.closest('[data-gt]'), gs=e.target.closest('[data-gs]'), it=e.target.closest('[data-i]');
+  if(gt){ const g=G.find(x=>x.id===gt.dataset.gt); if(!query){ g.open=!g.open; renderTools(); $(`[data-gt="${g.id}"]`).focus() } }
+  else if(it&&!saving){ const [gid,name]=it.dataset.i.split('|'); const i=G.find(g=>g.id===gid).items.find(x=>x.name===name); i.on=!i.on; renderTools(); $(`[data-i="${it.dataset.i}"]`).focus() }
+  else if(gs&&!saving){
+    const g=G.find(x=>x.id===gs.dataset.gs), v=vis(g), target=!(v.length&&v.every(i=>i.on)), todo=v.filter(i=>i.on!==target);
+    saving=true; let done=0, fail=0; renderTools(); $(`[data-gs="${g.id}"]`).focus();
+    for(const i of todo){ $('#saveState').innerHTML=`${ic('loader-circle','sm spin')} Saving ${done+1} of ${todo.length}`; $('#saveState').style.display='inline-flex'; $('#saveState').style.gap='.25rem'; await sleep(160); i.on=target; done++; renderTools(); }
+    saving=false; $('#saveState').textContent=''; renderTools(); $(`[data-gs="${g.id}"]`)?.focus();
+    toast(`${target?'Turned on':'Turned off'} ${done} ${g.t.toLowerCase()}${fail?` (${fail} failed)`:''} · saved`);
+  }
+});
+$('#q').addEventListener('input',e=>{ query=e.target.value.trim(); renderTools() });
+const clr=()=>{ query=''; $('#q').value=''; renderTools(); $('#q').focus() };
+$('#qClear').onclick=clr; $('#nmClear').onclick=clr;
+$('#q').addEventListener('keydown',e=>{ if(e.key==='Escape'&&query){clr();e.stopPropagation()} });
+
+function fixSpans(){ const t=$('table.lanes'); if(!t) return; const n=[...t.querySelectorAll('thead th')].filter(x=>x.offsetParent!==null).length||1; $$('td[colspan],th[colspan]',t).forEach(c=>c.colSpan=n) }
+new ResizeObserver(fixSpans).observe($('#page'));
+{ const _r=renderLanes; renderLanes=function(){ _r(); fixSpans() } }
+renderLanes(); renderTools();
+if(qs.get('expandTools')){ G.forEach(g=>g.open=true); renderTools() }
+</script>
+</body>
+</html>

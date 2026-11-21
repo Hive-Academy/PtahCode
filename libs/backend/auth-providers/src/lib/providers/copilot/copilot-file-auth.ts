@@ -18,6 +18,7 @@
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { homedir } from 'node:os';
+import type { Logger } from '@ptah-extension/vscode-core';
 
 /** Shape of the github-copilot/hosts.json file */
 export interface CopilotHostsFile {
@@ -73,7 +74,10 @@ export function getCopilotAppsPath(): string {
  *
  * @param filePath - Absolute path to the JSON config file
  */
-async function readTokenFromFile(filePath: string): Promise<string | null> {
+async function readTokenFromFile(
+  filePath: string,
+  logger?: Pick<Logger, 'warn'>,
+): Promise<string | null> {
   try {
     const raw = await readFile(filePath, 'utf-8');
     const data = JSON.parse(raw) as CopilotHostsFile;
@@ -88,9 +92,30 @@ async function readTokenFromFile(filePath: string): Promise<string | null> {
     }
 
     return null;
-  } catch {
+  } catch (error: unknown) {
+    // degradation-audit: optional-capability - a missing config file means
+    // "no stored token" (null); other read or parse failures are logged at
+    // warn when a logger is passed and also return null.
+    warnUnlessMissing(error, 'token', logger);
     return null;
   }
+}
+
+/**
+ * Log a config-file read failure other than "file is missing". Only the error
+ * code or name is logged, never the file content.
+ */
+function warnUnlessMissing(
+  error: unknown,
+  what: 'token' | 'user',
+  logger?: Pick<Logger, 'warn'>,
+): void {
+  const code = (error as NodeJS.ErrnoException | null)?.code;
+  if (code === 'ENOENT' || code === 'ENOTDIR') return;
+  logger?.warn(`[CopilotFileAuth] Could not read the Copilot ${what} file`, {
+    code,
+    errorName: error instanceof Error ? error.name : typeof error,
+  });
 }
 
 /**
@@ -102,12 +127,14 @@ async function readTokenFromFile(filePath: string): Promise<string | null> {
  *
  * Returns null if neither file exists or contains a valid token.
  */
-export async function readCopilotToken(): Promise<string | null> {
-  const hostsToken = await readTokenFromFile(getCopilotHostsPath());
+export async function readCopilotToken(
+  logger?: Pick<Logger, 'warn'>,
+): Promise<string | null> {
+  const hostsToken = await readTokenFromFile(getCopilotHostsPath(), logger);
   if (hostsToken) {
     return hostsToken;
   }
-  return readTokenFromFile(getCopilotAppsPath());
+  return readTokenFromFile(getCopilotAppsPath(), logger);
 }
 
 /**
@@ -116,7 +143,10 @@ export async function readCopilotToken(): Promise<string | null> {
  * entry first, then any entry carrying a `user` (the Copilot CLI keys
  * `apps.json` as `"github.com:<app_id>"`).
  */
-async function readUserFromFile(filePath: string): Promise<string | null> {
+async function readUserFromFile(
+  filePath: string,
+  logger?: Pick<Logger, 'warn'>,
+): Promise<string | null> {
   try {
     const raw = await readFile(filePath, 'utf-8');
     const data = JSON.parse(raw) as CopilotHostsFile;
@@ -132,7 +162,11 @@ async function readUserFromFile(filePath: string): Promise<string | null> {
     }
 
     return null;
-  } catch {
+  } catch (error: unknown) {
+    // degradation-audit: optional-capability - a missing config file means
+    // "no recorded user" (null); other read or parse failures are logged at
+    // warn when a logger is passed and also return null.
+    warnUnlessMissing(error, 'user', logger);
     return null;
   }
 }
@@ -148,12 +182,14 @@ async function readUserFromFile(filePath: string): Promise<string | null> {
  *
  * Purely local: never performs I/O beyond reading the two config files.
  */
-export async function readCopilotUsername(): Promise<string | null> {
-  const hostsUser = await readUserFromFile(getCopilotHostsPath());
+export async function readCopilotUsername(
+  logger?: Pick<Logger, 'warn'>,
+): Promise<string | null> {
+  const hostsUser = await readUserFromFile(getCopilotHostsPath(), logger);
   if (hostsUser) {
     return hostsUser;
   }
-  return readUserFromFile(getCopilotAppsPath());
+  return readUserFromFile(getCopilotAppsPath(), logger);
 }
 
 /**

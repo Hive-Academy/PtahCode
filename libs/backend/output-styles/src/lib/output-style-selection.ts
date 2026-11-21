@@ -103,6 +103,8 @@ export function readOutputStyleSelection(
         ? ctx.scopeResolver.read<unknown>(key)
         : ctx.settingsStore.readGlobal<unknown>(key);
   } catch (error: unknown) {
+    // degradation-audit: reported - logged at warn here; null means "no style
+    // selected", so the surface and the session start with the default.
     ctx.logger.warn(`${ctx.logTag} selection could not be read`, {
       error: error instanceof Error ? error.message : String(error),
     });

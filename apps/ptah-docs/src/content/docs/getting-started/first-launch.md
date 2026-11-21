@@ -7,7 +7,7 @@ Ptah is free and open source. The first launch asks for no account, no sign-up, 
 
 ## Get ready
 
-On the first start, Ptah opens the **Get ready** step of Setup. It shows **Check Claude Code and Codex**. Ptah works with Claude Code or Codex as its main connection.
+On the first start, Ptah opens the **Get ready** step of Setup. It shows **Main connection**. Ptah works with Claude Code or Codex as its main connection. Each card shows whether that tool is installed and signed in; when it is not installed, **How to install** opens the install steps.
 
 1. Pick the one you use as your main connection.
 2. Make sure that it is installed and signed in. Ptah shows the status of each one, for example **Needs install** or **Needs sign-in**.

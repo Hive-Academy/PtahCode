@@ -474,6 +474,7 @@ Prefer ptah.ast over reading full files when you only need structural informatio
 - buildGraph(filePaths, workspaceRoot, discoveredFiles?) - Build dependency graph from file list (discoveredFiles: count before you capped the list)
 - getDependencies(file) - Get what a file imports (outgoing edges)
 - getDependents(file) - Get what imports this file (incoming edges)
+  Both throw when no workspace is open or the graph cannot answer; [] means the lookup ran and found none
 - getSymbolIndex(workspaceRoot?) - Get exported symbols per file, all at once
 - getSymbolIndex(workspaceRoot, { pathPrefix?, limit?, offset? }) - One page of it: { files, count, total, offset, nextOffset? }
 - isBuilt() - Check if the dependency graph has been built

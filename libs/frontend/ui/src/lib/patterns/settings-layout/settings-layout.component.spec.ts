@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, signal } from '@angular/core';
 import { ComponentFixture, TestBed } from '@angular/core/testing';
-import { Settings } from 'lucide-angular';
+import { Settings, type LucideIconData } from 'lucide-angular';
 import {
   PtahSettingsLayoutComponent,
   PtahSettingsTab,
@@ -19,6 +19,7 @@ type TabId = 'general' | 'accounts' | 'billing' | 'labs';
       [selected]="selected()"
       [title]="title()"
       [description]="description()"
+      [icon]="icon()"
       [titleLevel]="titleLevel()"
       [navMode]="navMode()"
       [navTestId]="navTestId()"
@@ -42,6 +43,7 @@ class HostComponent {
   readonly selected = signal<TabId>('general');
   readonly title = signal('Settings');
   readonly description = signal<string | null>('Manage the app.');
+  readonly icon = signal<LucideIconData | null>(null);
   readonly titleLevel = signal<PtahSettingsTitleLevel>(2);
   readonly navMode = signal<'tabs' | 'navigation'>('tabs');
   readonly navTestId = signal('settings-layout-nav');
@@ -360,16 +362,23 @@ describe('PtahSettingsLayoutComponent', () => {
   it('applies each navigation frame class on its own and keeps them out of tabs mode', () => {
     const frameClasses = [
       '[@container(min-width:640px)]:grid-cols-[var(--ptah-settings-nav-column-w)_minmax(0,1fr)]',
-      '[@container(min-width:640px)]:gap-x-0',
-      '[@container(min-width:640px)]:p-0',
     ];
     const frame = q('[data-testid="settings-layout"]') as HTMLElement;
+    const main = q('[data-testid="settings-layout-main"]') as HTMLElement;
     for (const cls of frameClasses) expect(frame.classList.contains(cls)).toBe(false);
+    expect(frame.classList.contains('p-[var(--ptah-page-gutter)]')).toBe(true);
+    expect(main.classList.contains('p-[var(--ptah-page-gutter)]')).toBe(false);
     host.navMode.set('navigation');
     fixture.detectChanges();
     for (const cls of frameClasses) expect(frame.classList.contains(cls)).toBe(true);
-    const main = q('[data-testid="settings-layout-main"]') as HTMLElement;
-    expect(main.classList.contains('[@container(min-width:640px)]:p-[var(--ptah-page-gutter)]')).toBe(true);
+    // F37: the main column is the only padding owner at every width; the frame has no padding and no gap.
+    expect(frame.classList.contains('p-[var(--ptah-page-gutter)]')).toBe(false);
+    expect(frame.classList.contains('gap-[var(--ptah-gap-group)]')).toBe(false);
+    expect(main.classList.contains('p-[var(--ptah-page-gutter)]')).toBe(true);
+    expect(main.className).not.toContain('[@container(min-width:640px)]:p-');
+    const strip = q('nav') as HTMLElement;
+    expect(strip.classList.contains('[@container(max-width:639px)]:px-[var(--ptah-page-gutter)]')).toBe(true);
+    expect(strip.classList.contains('[@container(max-width:639px)]:pt-[var(--ptah-page-gutter)]')).toBe(true);
     const list = q('[data-testid="settings-layout-tablist"]') as HTMLElement;
     expect(list.classList.contains('min-h-0')).toBe(true);
     expect(list.classList.contains('[@container(min-width:640px)]:overflow-y-auto')).toBe(true);
@@ -407,13 +416,64 @@ describe('PtahSettingsLayoutComponent', () => {
     expect(buttons[1].parentElement?.className).toContain('ml-[var(--ptah-settings-nav-child-indent)]');
   });
 
-  it('shows a state dot and count with an accessible label', () => {
+  it('renders the header icon before the title only when icon is set', () => {
+    expect(q('[data-testid="settings-layout-icon"]')).toBeNull();
+    host.icon.set(Settings);
+    fixture.detectChanges();
+    const icon = q('header [data-testid="settings-layout-icon"]') as HTMLElement;
+    expect(icon).not.toBeNull();
+    expect(icon.getAttribute('aria-hidden')).toBe('true');
+    expect(icon.classList.contains('size-[var(--ptah-icon-lg)]')).toBe(true);
+    expect(icon.nextElementSibling?.tagName).toBe('H2');
+  });
+
+  it('shows a state dot and count; the mark label is the button description, not part of its name', () => {
     host.navMode.set('navigation');
     host.tabs.set([{ id: 'general', label: 'General', stateMark: { tone: 'warn', count: 2, label: '2 need attention' } }]);
     fixture.detectChanges();
     const mark = q('[data-testid="settings-layout-state-mark"]') as HTMLElement;
-    expect(mark.getAttribute('aria-label')).toBe('2 need attention');
+    expect(mark.getAttribute('title')).toBe('2 need attention');
     expect(mark.textContent?.trim()).toBe('2');
-    expect(mark.querySelector('[aria-hidden="true"]')).not.toBeNull();
+    // The whole mark is hidden from assistive technology, so it adds nothing to the button name.
+    expect(mark.getAttribute('aria-hidden')).toBe('true');
+    expect(mark.hasAttribute('aria-label')).toBe(false);
+    expect(mark.hasAttribute('role')).toBe(false);
+    const button = mark.closest('button') as HTMLButtonElement;
+    const name = Array.from(button.childNodes)
+      // Name from content: text and elements only (no template comments), without the aria-hidden parts.
+      .filter((node) => node.nodeType !== Node.COMMENT_NODE)
+      .filter((node) => !(node instanceof Element && node.getAttribute('aria-hidden') === 'true'))
+      .map((node) => node.textContent ?? '')
+      .join('')
+      .trim();
+    expect(name).toBe('General');
+    const describedBy = button.getAttribute('aria-describedby') as string;
+    const description = q(`[id="${describedBy}"]`) as HTMLElement;
+    expect(description.textContent).toBe('2 need attention');
+    expect(description.classList.contains('sr-only')).toBe(true);
+    expect(button.contains(description)).toBe(false);
+  });
+
+  it('describes a disabled tab with a state mark by its reason, then the mark label', () => {
+    host.navMode.set('navigation');
+    host.tabs.set([
+      { id: 'general', label: 'General', disabled: true, disabledReason: 'Not ready.', stateMark: { tone: 'warn', label: 'Needs attention' } },
+    ]);
+    fixture.detectChanges();
+    const button = (q('[data-testid="settings-layout-state-mark"]') as HTMLElement).closest('button') as HTMLButtonElement;
+    const ids = (button.getAttribute('aria-describedby') ?? '').split(' ');
+    expect(ids.map((id) => q(`[id="${id}"]`)?.textContent)).toEqual(['Not ready.', 'Needs attention']);
+  });
+
+  it('adds no description for a tab without a state mark, and none in tabs mode', () => {
+    host.navMode.set('navigation');
+    host.tabs.set([{ id: 'general', label: 'General' }]);
+    fixture.detectChanges();
+    expect(q('[data-testid="settings-layout-tablist"] button')?.hasAttribute('aria-describedby')).toBe(false);
+    host.navMode.set('tabs');
+    host.tabs.set([{ id: 'general', label: 'General', stateMark: { tone: 'warn', label: 'Needs attention' } }]);
+    fixture.detectChanges();
+    expect(q('[data-testid="settings-layout-tablist"] button')?.hasAttribute('aria-describedby')).toBe(false);
+    expect(q('[data-testid="settings-layout-state-mark-text"]')).toBeNull();
   });
 });

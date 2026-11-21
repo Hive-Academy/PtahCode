@@ -275,6 +275,8 @@ function makeHarness(storage?: IStateStorage) {
     notifyResolved,
     notifyEnded: (sessionId: string) =>
       endListeners.forEach((cb) => cb({ sessionId })),
+    notifyEndedWith: (sessionId: string, cause: string) =>
+      endListeners.forEach((cb) => cb({ sessionId, cause } as { sessionId: string })),
   };
 }
 
@@ -665,6 +667,36 @@ describe('SessionHandoffService', () => {
     });
     expect(input.tabId).not.toBe(CALLER);
     expect(h.host.startChildSession).not.toHaveBeenCalled();
+  });
+
+  it('retries a top-level successor one time after a watchdog stop (TASK_2026_2288 C)', async () => {
+    const h = makeHarness();
+    const recoverAfterWatchdogStop = jest.fn(async () => ({ recovered: true as const }));
+    Object.assign(h.host, { recoverAfterWatchdogStop });
+    const result = await h.service.handoff(h.request());
+    if (!result.ok) throw new Error('handoff did not start');
+    // The successor record exists once the start settled.
+    await expect(h.ackStore.findBySuccessor(result.tabId)).resolves.toBeDefined();
+
+    jest.useFakeTimers();
+    try {
+      h.notifyEndedWith(result.tabId, 'user-stop');
+      await jest.advanceTimersByTimeAsync(10_000);
+      expect(recoverAfterWatchdogStop).not.toHaveBeenCalled();
+
+      h.notifyEndedWith(result.tabId, 'no-activity-timeout');
+      await jest.advanceTimersByTimeAsync(10_000);
+      expect(recoverAfterWatchdogStop).toHaveBeenCalledTimes(1);
+      expect(recoverAfterWatchdogStop).toHaveBeenCalledWith(
+        expect.objectContaining({
+          tabId: result.tabId,
+          senderName: 'Ptah recovery',
+          endedAt: expect.any(Number),
+        }),
+      );
+    } finally {
+      jest.useRealTimers();
+    }
   });
 
   it('uses a given label, truncated to 60 characters', async () => {

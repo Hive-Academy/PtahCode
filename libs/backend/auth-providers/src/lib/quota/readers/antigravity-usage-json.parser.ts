@@ -38,7 +38,13 @@ function slug(value: string): string {
 /** Undefined means the command was not usable JSON, so the legacy TSV parser may try it. */
 export function parseAntigravityUsageJson(output: string, observedAt: number): PlanLimitWindow[] | undefined {
   let body: unknown;
-  try { body = JSON.parse(output); } catch { return undefined; }
+  try {
+    body = JSON.parse(output);
+  } catch {
+    // degradation-audit: optional-capability - non-JSON output returns
+    // undefined by contract so the legacy TSV parser can try it.
+    return undefined;
+  }
   const parsed = OutputSchema.safeParse(body);
   const groups = parsed.success && parsed.data.type === 'command' && parsed.data.command?.name === 'usage'
     ? parsed.data.command.data?.groups : undefined;

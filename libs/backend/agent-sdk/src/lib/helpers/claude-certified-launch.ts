@@ -469,8 +469,10 @@ function parsedFlagSettings(flagSettings: string): unknown {
   try {
     return JSON.parse(flagSettings) as unknown;
   } catch {
-    // Unparseable flag settings cannot be proved free of an override; the
-    // caller refuses on `malformed`, so nothing is silently accepted.
+    // degradation-audit: optional-capability - unparseable flag settings
+    // become undefined, which claudeSettingsOverride() classifies as
+    // `malformed`; the caller refuses the launch, so nothing is silently
+    // accepted.
     return undefined;
   }
 }

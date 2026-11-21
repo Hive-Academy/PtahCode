@@ -141,72 +141,6 @@ interface StaleConflict {
           </div>
         }
 
-        @if (confirmingDiscard()) {
-          <div class="rounded border border-base-300 p-[var(--ptah-gap-controls)] text-xs text-base-content" role="alertdialog"
-            aria-label="Discard unsaved changes" data-testid="output-style-discard-confirm"
-            (keydown.escape)="keepEditing($event)">
-            <p>Discard your changes to this style? Nothing has been saved.</p>
-            <div class="flex gap-[var(--ptah-gap-label)] mt-[var(--ptah-gap-label)]">
-              <button type="button" ptahButton variant="outline" size="xs" class="border-error text-base-content" (click)="discard()"
-                data-testid="output-style-discard-button">Discard changes</button>
-              <button #safeChoice type="button" ptahButton variant="ghost" size="xs"
-                (click)="keepEditing()">Keep editing</button>
-            </div>
-          </div>
-        } @else if (conflict(); as pending) {
-          <div class="rounded border border-base-300 p-[var(--ptah-gap-controls)] text-xs text-base-content" role="alertdialog"
-            aria-label="Confirm replacing an existing file" data-testid="output-style-conflict-dialog"
-            (keydown.escape)="dismissConflict($event)">
-            <p>{{ pending.message }}</p>
-            <div class="flex gap-[var(--ptah-gap-label)] mt-[var(--ptah-gap-label)]">
-              <button type="button" ptahButton variant="outline" size="xs" class="border-error text-base-content" [ptahBusyDisabled]="saving()"
-                (click)="confirmOverwrite()">Replace it</button>
-              <button #safeChoice type="button" ptahButton variant="ghost" size="xs"
-                (click)="dismissConflict()">Keep both — I'll rename</button>
-            </div>
-          </div>
-        } @else if (stale(); as changed) {
-          <div class="rounded border border-base-300 p-[var(--ptah-gap-controls)] text-xs text-base-content" role="alertdialog"
-            aria-label="The style file changed on disk" data-testid="output-style-stale-dialog"
-            (keydown.escape)="dismissConflict($event)">
-            @if (changed.fresh === null) {
-              <p>
-                This style changed on disk after you opened it, and Ptah could not
-                read the current file. Nothing was written.
-              </p>
-              <div class="flex gap-[var(--ptah-gap-label)] mt-[var(--ptah-gap-label)]">
-                <button #safeChoice type="button" ptahButton variant="ghost" size="xs"
-                  (click)="dismissConflict()">Close</button>
-              </div>
-            } @else if (changed.confirmingReload) {
-              <p>Discard your edits and load the current file?</p>
-              <div class="flex gap-[var(--ptah-gap-label)] mt-[var(--ptah-gap-label)]">
-                <button type="button" ptahButton variant="outline" size="xs" class="border-error text-base-content"
-                  (click)="reloadFile(changed.fresh)" data-testid="output-style-stale-discard-reload">
-                  Discard and reload
-                </button>
-                <button #safeChoice type="button" ptahButton variant="ghost" size="xs"
-                  (click)="stale.set({ fresh: changed.fresh, confirmingReload: false })">Back</button>
-              </div>
-            } @else {
-              <p>
-                This style changed on disk after you opened it. Nothing was written.
-                Reload shows the current file instead of your edits; Overwrite
-                replaces the current file with your edits.
-              </p>
-              <div class="flex gap-[var(--ptah-gap-label)] mt-[var(--ptah-gap-label)]">
-                <button type="button" ptahButton variant="outline" size="xs" class="border-error text-base-content" [ptahBusyDisabled]="saving()"
-                  (click)="overwriteStale(changed.fresh)" data-testid="output-style-stale-overwrite">Overwrite</button>
-                <button type="button" ptahButton size="xs"
-                  (click)="stale.set({ fresh: changed.fresh, confirmingReload: true })"
-                  data-testid="output-style-stale-reload">Reload</button>
-                <button #safeChoice type="button" ptahButton variant="ghost" size="xs"
-                  (click)="dismissConflict()">Cancel</button>
-              </div>
-            }
-          </div>
-        }
-
         <form class="space-y-[var(--ptah-gap-field)]" id="output-style-editor-form" (submit)="submit($event)">
           <!-- Name -->
           <div>
@@ -323,6 +257,72 @@ interface StaleConflict {
             want to use it.
           </p>
         </form>
+
+        @if (confirmingDiscard()) {
+          <div class="sticky bottom-0 z-[var(--ptah-z-raised)] border-t border-base-300 bg-surface-2 p-[var(--ptah-space-3)] text-xs text-base-content" role="alertdialog" aria-modal="false"
+            aria-label="Discard unsaved changes" data-testid="output-style-discard-confirm"
+            (keydown.escape)="keepEditing($event)">
+            <p>Discard your changes to this style? Nothing has been saved.</p>
+            <div class="flex gap-[var(--ptah-gap-label)] mt-[var(--ptah-gap-label)]">
+              <button type="button" ptahButton variant="outline" size="xs" class="border-error text-base-content" (click)="discard()"
+                data-testid="output-style-discard-button">Discard changes</button>
+              <button #safeChoice type="button" ptahButton variant="ghost" size="xs"
+                (click)="keepEditing()">Keep editing</button>
+            </div>
+          </div>
+        } @else if (conflict(); as pending) {
+          <div class="sticky bottom-0 z-[var(--ptah-z-raised)] border-t border-base-300 bg-surface-2 p-[var(--ptah-space-3)] text-xs text-base-content" role="alertdialog" aria-modal="false"
+            aria-label="Confirm replacing an existing file" data-testid="output-style-conflict-dialog"
+            (keydown.escape)="dismissConflict($event)">
+            <p>{{ pending.message }}</p>
+            <div class="flex gap-[var(--ptah-gap-label)] mt-[var(--ptah-gap-label)]">
+              <button type="button" ptahButton variant="outline" size="xs" class="border-error text-base-content" [ptahBusyDisabled]="saving()"
+                (click)="confirmOverwrite()">Replace it</button>
+              <button #safeChoice type="button" ptahButton variant="ghost" size="xs"
+                (click)="dismissConflict()">Keep both — I'll rename</button>
+            </div>
+          </div>
+        } @else if (stale(); as changed) {
+          <div class="sticky bottom-0 z-[var(--ptah-z-raised)] border-t border-base-300 bg-surface-2 p-[var(--ptah-space-3)] text-xs text-base-content" role="alertdialog" aria-modal="false"
+            aria-label="The style file changed on disk" data-testid="output-style-stale-dialog"
+            (keydown.escape)="dismissConflict($event)">
+            @if (changed.fresh === null) {
+              <p>
+                This style changed on disk after you opened it, and Ptah could not
+                read the current file. Nothing was written.
+              </p>
+              <div class="flex gap-[var(--ptah-gap-label)] mt-[var(--ptah-gap-label)]">
+                <button #safeChoice type="button" ptahButton variant="ghost" size="xs"
+                  (click)="dismissConflict()">Close</button>
+              </div>
+            } @else if (changed.confirmingReload) {
+              <p>Discard your edits and load the current file?</p>
+              <div class="flex gap-[var(--ptah-gap-label)] mt-[var(--ptah-gap-label)]">
+                <button type="button" ptahButton variant="outline" size="xs" class="border-error text-base-content"
+                  (click)="reloadFile(changed.fresh)" data-testid="output-style-stale-discard-reload">
+                  Discard and reload
+                </button>
+                <button #safeChoice type="button" ptahButton variant="ghost" size="xs"
+                  (click)="stale.set({ fresh: changed.fresh, confirmingReload: false })">Back</button>
+              </div>
+            } @else {
+              <p>
+                This style changed on disk after you opened it. Nothing was written.
+                Reload shows the current file instead of your edits; Overwrite
+                replaces the current file with your edits.
+              </p>
+              <div class="flex gap-[var(--ptah-gap-label)] mt-[var(--ptah-gap-label)]">
+                <button type="button" ptahButton variant="outline" size="xs" class="border-error text-base-content" [ptahBusyDisabled]="saving()"
+                  (click)="overwriteStale(changed.fresh)" data-testid="output-style-stale-overwrite">Overwrite</button>
+                <button type="button" ptahButton size="xs"
+                  (click)="stale.set({ fresh: changed.fresh, confirmingReload: true })"
+                  data-testid="output-style-stale-reload">Reload</button>
+                <button #safeChoice type="button" ptahButton variant="ghost" size="xs"
+                  (click)="dismissConflict()">Cancel</button>
+              </div>
+            }
+          </div>
+        }
       </div>
 
       @if (isOpen()) {
@@ -332,6 +332,7 @@ interface StaleConflict {
             form="output-style-editor-form"
             ptahButton variant="primary"
             [busy]="saving()"
+            [disabled]="confirmOpen()"
             (click)="submit($event)"
             data-testid="output-style-save-button"
           >
@@ -344,6 +345,7 @@ interface StaleConflict {
           <button
             type="button"
             ptahButton variant="ghost"
+            [disabled]="confirmOpen()"
             (click)="requestClose()"
             data-testid="output-style-cancel-button"
           >
@@ -441,6 +443,10 @@ export class OutputStyleEditorComponent {
   readonly stale = signal<StaleConflict | null>(null);
   /** Esc, backdrop or Cancel on a dirty form asks before the draft is dropped. */
   readonly confirmingDiscard = signal(false);
+  /** A discard, replace or stale prompt is open: the user answers it before a save or a close. */
+  protected readonly confirmOpen = computed(
+    () => this.confirmingDiscard() || this.conflict() !== null || this.stale() !== null,
+  );
 
   readonly isEditing = computed(() => this.draft() !== null);
 
@@ -503,14 +509,12 @@ export class OutputStyleEditorComponent {
 
   /** Esc, backdrop, the close button and Cancel all land here; a dirty draft is not dropped silently. */
   requestClose(): void {
-    if (this.confirmingDiscard()) {
-      // A second Esc or backdrop click while the prompt is open keeps the draft and the prompt.
+    if (this.confirmOpen()) {
+      // Esc, a backdrop click or the close button while a prompt is open keeps the draft and that prompt.
       this.safeChoice()?.nativeElement.focus();
       return;
     }
     if (this.dirty()) {
-      this.conflict.set(null);
-      this.stale.set(null);
       this.confirmingDiscard.set(true);
       return;
     }
@@ -548,6 +552,7 @@ export class OutputStyleEditorComponent {
    */
   async submit(event?: Event): Promise<void> {
     event?.preventDefault();
+    if (this.confirmOpen()) return;
     this.submitAttempted.set(true);
 
     if (this.nameInvalid() || this.descriptionInvalid()) return;

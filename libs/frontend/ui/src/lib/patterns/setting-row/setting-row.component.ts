@@ -18,6 +18,8 @@ let nextSettingRowId = 0;
     'data-ptah-pattern': 'setting-row',
     // The divider is on the host: sibling rows in one parent show it, and the last row does not.
     class: 'block border-b border-surface-border last:border-b-0 [container-type:inline-size]',
+    // Opt-in toggles only: Angular merges this binding with the static class above.
+    '[class]': 'hostToggles()',
   },
   template: `
     <div
@@ -46,8 +48,12 @@ let nextSettingRowId = 0;
       <div
         data-ptah-setting-control
         class="flex min-w-0 flex-wrap items-center gap-ptah-controls row-split:justify-self-end"
+        [class.justify-end]="controlAlign() === 'end'"
       >
         <ng-content select="[meta]" />
+        <div class="inline-flex size-8 items-center justify-center empty:hidden" data-ptah-setting-action>
+          <ng-content select="[action]" />
+        </div>
         <ng-content />
       </div>
     </div>
@@ -60,12 +66,25 @@ export class PtahSettingRowComponent {
   readonly disabled = input(false, { transform: booleanAttribute });
   readonly disabledReason = input<string | null>(null);
   readonly density = input<'default' | 'compact'>('default');
+  /** 'end': the control column is `justify-end`, so controls share the right edge. @default 'start' (today) */
+  readonly controlAlign = input<'start' | 'end'>('start');
+  /** 'trim': a first row has no top padding and a last row has no bottom padding. @default 'all' (today) */
+  readonly edgePadding = input<'all' | 'trim'>('all');
+  /** Id for the hint paragraph, for a caller that keeps an existing aria-describedby id. Default: derived. */
+  readonly hintElementId = input<string | null>(null);
 
   private readonly fallbackId = `ptah-setting-row-${++nextSettingRowId}`;
   /** Pass this id to a projected control's aria-describedby when a hint is present. */
   /** Id of the row title. Pass it to a compact `ptah-select` as `labelledBy`. */
   readonly titleId = computed(() => `${this.controlId() || this.fallbackId}-title`);
-  readonly hintId = computed(() => `${this.controlId() || this.fallbackId}-hint`);
+  readonly hintId = computed(
+    () => this.hintElementId() ?? `${this.controlId() || this.fallbackId}-hint`,
+  );
   /** Pass this id to a projected control's aria-describedby when disabled. */
   readonly reasonId = computed(() => `${this.controlId() || this.fallbackId}-reason`);
+
+  protected readonly hostToggles = computed(() => {
+    const trim = this.edgePadding() === 'trim';
+    return { 'first:[&>div]:pt-0': trim, 'last:[&>div]:pb-0': trim };
+  });
 }

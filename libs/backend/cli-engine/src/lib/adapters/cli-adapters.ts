@@ -261,6 +261,8 @@ export class CliLoggerAdapter {
             }
             return String(arg);
           } catch {
+            // degradation-audit: optional-capability - a cyclic value degrades
+            // to the '[Unserializable]' placeholder so the log line is still written.
             return '[Unserializable]';
           }
         })

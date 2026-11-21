@@ -781,6 +781,8 @@ export class ProviderModelPickerComponent {
         this._modelsError.set(visibleLoadError(result.error));
       }
     } catch (error: unknown) {
+      // degradation-audit: reported - shown to the user through _modelsError;
+      // the model list is emptied. A stale load is dropped.
       if (generation !== this.loadGeneration) return;
       this._models.set([]);
       this._modelsError.set(
