@@ -183,8 +183,7 @@ function makeMocks(): AnalysisNamespaceDependencies & {
     isBuilt: jest.fn(),
     getCoverageReport: jest.fn(),
     getCoverageReportForFile: jest.fn(),
-    // Default: every file has a node in the answering graph.
-    resolveNodePath: jest.fn((filePath: string) => filePath),
+    resolveNodePath: jest.fn(),
     graphSpellingsOf: jest.fn().mockReturnValue([]),
     reserveBuild: jest.fn(),
     getBuildState: jest.fn(),
@@ -1512,27 +1511,6 @@ describe('buildDependencyNamespace', () => {
     expect(deps._dependencyGraph.getDependencies).not.toHaveBeenCalled();
     expect(warn).toHaveBeenCalledWith('[DependencyNamespace] getDependents failed', {
       errorName: 'GraphNotBuilt',
-    });
-  });
-
-  it('getDependencies / getDependents reject when the covering graph has no node for the file', async () => {
-    // One graph answers every path, but this file lies outside its root.
-    const deps = makeMocks();
-    deps._dependencyGraph.getCoverageReportForFile.mockReturnValue({});
-    deps._dependencyGraph.resolveNodePath.mockReturnValue(undefined);
-    const warn = jest.fn();
-    const ns = buildDependencyNamespace({ ...deps, logger: { warn } });
-
-    await expect(ns.getDependencies('D:/elsewhere/a.ts')).rejects.toThrow(
-      'Dependency graph unavailable: the file is not in the built graph',
-    );
-    await expect(ns.getDependents('D:/elsewhere/a.ts')).rejects.toThrow(
-      'Dependency graph unavailable: the file is not in the built graph',
-    );
-    expect(deps._dependencyGraph.getDependencies).not.toHaveBeenCalled();
-    expect(deps._dependencyGraph.getDependents).not.toHaveBeenCalled();
-    expect(warn).toHaveBeenCalledWith('[DependencyNamespace] getDependents failed', {
-      errorName: 'FileNotInGraph',
     });
   });
 

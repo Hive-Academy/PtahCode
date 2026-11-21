@@ -206,6 +206,8 @@ export class SecretsFileStore {
     try {
       current = await fsPromises.readFile(this.filePath, 'utf8');
     } catch (err: unknown) {
+      // degradation-audit: reported - blockWrites logs at error and every
+      // later write throws; ENOENT means the file is already gone.
       if (isNodeError(err) && err.code === 'ENOENT') return;
       // Same contract as a failed move: reads stay available, writes refuse.
       this.blockWrites('could not be read again', reason, err);
@@ -223,6 +225,8 @@ export class SecretsFileStore {
     try {
       await fsPromises.rename(this.filePath, backupPath);
     } catch (err: unknown) {
+      // degradation-audit: reported - blockWrites logs at error and every
+      // later write throws; ENOENT means the file is already gone.
       // Already gone: nothing is left that a write could overwrite.
       if (isNodeError(err) && err.code === 'ENOENT') return;
       this.blockWrites('could not be moved aside', reason, err);
