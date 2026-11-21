@@ -4,6 +4,7 @@ import { ComponentFixture, TestBed } from '@angular/core/testing';
 import { NativeDrawerComponent } from '../drawer/native-drawer.component';
 import {
   NativeModalComponent,
+  NativeModalLayout,
   NativeModalSize,
 } from './native-modal.component';
 
@@ -40,6 +41,7 @@ beforeAll(() => {
       [ariaLabel]="ariaLabel()"
       [ariaLabelledby]="ariaLabelledby()"
       [size]="size()"
+      [layout]="layout()"
       (closed)="onClosed()"
     >
       <h3 modal-header>Header <button id="modal-first" type="button">✕</button></h3>
@@ -53,6 +55,7 @@ class HostComponent {
   readonly ariaLabel = signal<string | undefined>('Connect a provider');
   readonly ariaLabelledby = signal<string | undefined>(undefined);
   readonly size = signal<NativeModalSize>('md');
+  readonly layout = signal<NativeModalLayout>('plain');
   closedCount = 0;
 
   onClosed(): void {
@@ -212,6 +215,70 @@ describe('NativeModalComponent', () => {
     expect(root().querySelector('#modal-footer')).toBeTruthy();
   });
 
+  describe('layout', () => {
+    const part = (name: 'header' | 'body' | 'footer'): HTMLElement =>
+      root().querySelector(`[data-ptah-modal-part="${name}"]`) as HTMLElement;
+
+    it('defaults to plain: every slot wrapper is display: contents and the box keeps its classes', () => {
+      const bare = TestBed.createComponent(NativeModalComponent);
+      expect(bare.componentInstance.layout()).toBe('plain');
+      bare.destroy();
+
+      open();
+      for (const name of ['header', 'body', 'footer'] as const) {
+        // jsdom does not cascade component styles into getComputedStyle: the class carries `display: contents`.
+        expect(part(name).className).toBe('ptah-modal-part');
+      }
+      expect(modalBox().className).toBe('modal-box max-w-lg');
+      expect(modalBox().hasAttribute('style')).toBe(false);
+      expect(part('header').querySelector('[modal-header]')).toBeTruthy();
+      expect(part('body').querySelector('#modal-body')).toBeTruthy();
+      expect(part('footer').querySelector('#modal-footer')).toBeTruthy();
+    });
+
+    it('shell: caps the box, scrolls the body, borders the header and footer', () => {
+      host.layout.set('shell');
+      open();
+      const box = modalBox().classList;
+      for (const cls of ['flex', 'flex-col', 'overflow-hidden', 'p-0', 'max-h-[var(--ptah-modal-max-h)]']) {
+        expect(box.contains(cls)).toBe(true);
+      }
+      const body = part('body').classList;
+      for (const cls of ['min-h-0', 'flex-1', 'overflow-y-auto', 'overscroll-contain', 'ptah-modal-scroll-shadow']) {
+        expect(body.contains(cls)).toBe(true);
+      }
+      expect(part('header').classList.contains('border-b')).toBe(true);
+      expect(part('header').classList.contains('shrink-0')).toBe(true);
+      expect(part('footer').classList.contains('border-t')).toBe(true);
+      expect(part('footer').classList.contains('shrink-0')).toBe(true);
+      expect(part('header').classList.contains('ptah-modal-part')).toBe(false);
+    });
+
+    it('shell: one max-width, the minimum of the size preset and the viewport less 2rem', () => {
+      host.layout.set('shell');
+      open();
+      const widths: Record<NativeModalSize, string> = { sm: '24rem', md: '32rem', lg: '42rem' };
+      for (const size of ['sm', 'md', 'lg'] as const) {
+        host.size.set(size);
+        fixture.detectChanges();
+        const maxWidths = Array.from(modalBox().classList).filter((cls) => cls.startsWith('max-w-'));
+        expect(maxWidths).toEqual(['max-w-[min(var(--ptah-modal-size),calc(100vw-2rem))]']);
+        expect(modalBox().style.getPropertyValue('--ptah-modal-size')).toBe(widths[size]);
+      }
+    });
+
+    it('plain: the size class only, with no width variable, for each size', () => {
+      open();
+      const classes: Record<NativeModalSize, string> = { sm: 'max-w-sm', md: 'max-w-lg', lg: 'max-w-2xl' };
+      for (const size of ['sm', 'md', 'lg'] as const) {
+        host.size.set(size);
+        fixture.detectChanges();
+        expect(modalBox().className).toBe(`modal-box ${classes[size]}`);
+        expect(modalBox().style.getPropertyValue('--ptah-modal-size')).toBe('');
+      }
+    });
+  });
+
   it('emits closed and closes the dialog when destroyed while open', () => {
     open();
     const dialog = dialogEl();
@@ -261,6 +328,16 @@ describe('NativeModalComponent', () => {
       button('modal-first').focus();
       expect(tab().defaultPrevented).toBe(false);
       expect(root().ownerDocument.activeElement).toBe(button('modal-first'));
+    });
+
+    it('wraps across header, body and footer in the shell layout', () => {
+      host.layout.set('shell');
+      fixture.detectChanges();
+      button('modal-last').focus();
+      expect(tab().defaultPrevented).toBe(true);
+      expect(root().ownerDocument.activeElement).toBe(button('modal-first'));
+      expect(tab(true).defaultPrevented).toBe(true);
+      expect(root().ownerDocument.activeElement).toBe(button('modal-last'));
     });
 
     it('does nothing while the dialog is closed', () => {
