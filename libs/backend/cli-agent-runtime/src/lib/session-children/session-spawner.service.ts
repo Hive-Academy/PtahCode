@@ -355,15 +355,19 @@ export class SessionSpawnerService implements ISessionSpawner {
       const result = await this.provisionAndStart(request, guard);
       return result;
     } finally {
-      const claimed = this.attachClaimByReservation.get(guard.reservation);
-      if (claimed !== undefined) {
-        this.attachClaimByReservation.delete(guard.reservation);
-        this.attachClaims.delete(claimed);
-      }
+      this.releaseAttachClaim(guard.reservation);
       // Queued admissions retain their slot until the continuation settles.
       if (![...this.queuedAdmissions.values()].some((entry) => entry.reservation === guard.reservation))
         this.registry.release(guard.reservation);
     }
+  }
+
+  /** Release the worktree claim of one start; safe to call more than once. */
+  private releaseAttachClaim(reservation: SessionChildReservation): void {
+    const claimed = this.attachClaimByReservation.get(reservation);
+    if (claimed === undefined) return;
+    this.attachClaimByReservation.delete(reservation);
+    this.attachClaims.delete(claimed);
   }
 
   canStart(callerSessionId: string | undefined): SessionChildEligibility {
@@ -577,6 +581,8 @@ export class SessionSpawnerService implements ISessionSpawner {
         this.queuedAdmissions.delete(childTabId);
         this.pendingStarts.delete(childTabId);
         this.registry.removePending(childTabId);
+        // A queued attach claims its worktree after `start` has returned.
+        this.releaseAttachClaim(guard.reservation);
         this.registry.release(guard.reservation);
         this.memoryAdmission.wake();
       });
@@ -730,20 +736,23 @@ export class SessionSpawnerService implements ISessionSpawner {
           return this.refuseStart('invalid-arguments', 'taskId has an invalid form');
         }
         const taskFolder = join(canonical, '.ptah', 'specs', taskId);
-        // The folder must resolve inside the worktree: a symlink in `.ptah`
-        // or `.ptah/specs` must not let an outside entry prove the task.
-        const provenFolder = await realpath(taskFolder).catch(() => undefined);
+        // The task carrier `task.md` proves a real task folder (a plain file
+        // or an empty directory at the task path does not). It must resolve
+        // inside the worktree: a symlink in `.ptah` or `.ptah/specs` must not
+        // let an outside entry prove the task.
+        const carrier = join(taskFolder, 'task.md');
+        const provenCarrier = await realpath(carrier).catch(() => undefined);
         const present =
-          provenFolder !== undefined &&
-          isPathWithinRoots(provenFolder, [canonical]) &&
-          (await access(provenFolder).then(
+          provenCarrier !== undefined &&
+          isPathWithinRoots(provenCarrier, [canonical]) &&
+          (await access(provenCarrier).then(
             () => true,
             () => false,
           ));
         if (!present) {
           return this.refuseStart(
             'branch-exists',
-            `attach requires a registered child with the same taskId, canonical worktree and branch (the registered child has no task id and the task folder ${taskFolder} is missing or outside the worktree)`,
+            `attach requires a registered child with the same taskId, canonical worktree and branch (the registered child has no task id and the task carrier ${carrier} is missing or outside the worktree)`,
           );
         }
         // The wait above let the registry change. Decide on the current

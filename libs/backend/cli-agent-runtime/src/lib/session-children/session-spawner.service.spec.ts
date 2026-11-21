@@ -600,9 +600,9 @@ describe('registered same-task attach', () => {
   });
   describe('a child started before its task existed', () => {
     const TASK = 'TASK_2026_2288_5a47';
-    /** The task folder exists only at `<worktree>/.ptah/specs/<TASK>` of `worktree`. */
+    /** The task carrier exists only at `<worktree>/.ptah/specs/<TASK>/task.md` of `worktree`. */
     const taskFolderPresent = (worktree: string | null): void => {
-      const expected = worktree === null ? null : join(worktree, '.ptah', 'specs', TASK);
+      const expected = worktree === null ? null : join(worktree, '.ptah', 'specs', TASK, 'task.md');
       sessionSpawnerFsAccess.current = async (path) => {
         if (expected !== null && String(path) === expected) return;
         throw new Error('ENOENT');
@@ -616,7 +616,7 @@ describe('registered same-task attach', () => {
     afterEach(() => {
       sessionSpawnerFsAccess.current = previousAccess;
     });
-    it('attaches to an ended child whose record has no task id when the task folder exists', async () => {
+    it('attaches to an ended child whose record has no task id when the task carrier exists', async () => {
       const h = makeHarness();
       const first = await h.spawner.start(h.request());
       if (!first.ok) throw new Error('first start failed');
@@ -656,7 +656,7 @@ describe('registered same-task attach', () => {
       }
       h.spawner.dispose();
     });
-    it('refuses when the task folder is missing from the worktree', async () => {
+    it('refuses when the task carrier is missing from the worktree', async () => {
       const h = makeHarness();
       const first = await h.spawner.start(h.request());
       if (!first.ok) throw new Error('first start failed');
@@ -667,7 +667,7 @@ describe('registered same-task attach', () => {
       expect(result).toMatchObject({
         ok: false,
         refusal: 'branch-exists',
-        detail: expect.stringContaining('task folder'),
+        detail: expect.stringContaining('task carrier'),
       });
       expect(h.provisioner.attach).not.toHaveBeenCalled();
       h.spawner.dispose();
@@ -704,14 +704,14 @@ describe('registered same-task attach', () => {
       expect(h.provisioner.attach).toHaveBeenCalledTimes(1);
       h.spawner.dispose();
     });
-    it('refuses a task folder that resolves outside the worktree', async () => {
+    it('refuses a task carrier that resolves outside the worktree', async () => {
       const h = makeHarness();
       const first = await h.spawner.start(h.request());
       if (!first.ok) throw new Error('first start failed');
       h.registry.markEnded(first.child.childSessionId, 'failed', 'ended');
       taskFolderPresent(first.child.worktreePath);
       jest.mocked(realpath).mockImplementation(async (path) =>
-        String(path).endsWith(join('specs', TASK)) ? join('/outside', TASK) : String(path),
+        String(path).endsWith(join('specs', TASK, 'task.md')) ? join('/outside', TASK, 'task.md') : String(path),
       );
       try {
         const result = await h.spawner.start(
