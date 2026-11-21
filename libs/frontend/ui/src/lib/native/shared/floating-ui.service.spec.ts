@@ -10,6 +10,8 @@ jest.mock('@floating-ui/dom', () => {
     computePosition: jest.fn(),
     autoUpdate: jest.fn(),
     shift: jest.fn(actual.shift),
+    flip: jest.fn(actual.flip),
+    size: jest.fn(actual.size),
   };
 });
 
@@ -277,6 +279,145 @@ describe('FloatingUIService', () => {
       expect(mockedShift.mock.calls.at(-1)).toEqual([
         { boundary: undefined, padding: 8, crossAxis: true },
       ]);
+    });
+
+    describe('capHeight', () => {
+      type SizeOptions = {
+        boundary?: HTMLElement;
+        padding: number;
+        apply: (state: {
+          availableHeight: number;
+          elements: { floating: HTMLElement };
+        }) => void;
+      };
+      const mockedFlip = FloatingDom.flip as unknown as jest.Mock;
+      const mockedSize = FloatingDom.size as unknown as jest.Mock;
+      const middlewareNames = (): string[] =>
+        (
+          mockedCompute.mock.calls.at(-1) as [
+            unknown,
+            unknown,
+            { middleware: { name: string }[] },
+          ]
+        )[2].middleware.map((m) => m.name);
+
+      beforeEach(() => {
+        mockedFlip.mockClear();
+        mockedSize.mockClear();
+        mockedCompute.mockResolvedValue({ x: 0, y: 0 });
+      });
+
+      it('keeps the 3-item middleware without capHeight (dropdown and autocomplete regression)', async () => {
+        await service.position(reference, floating);
+        expect(middlewareNames()).toEqual(['offset', 'flip', 'shift']);
+        expect(mockedFlip.mock.calls.at(-1)).toEqual([{ boundary: undefined }]);
+        expect(mockedSize).not.toHaveBeenCalled();
+
+        await service.position(reference, floating, { capHeight: false });
+        expect(middlewareNames()).toEqual(['offset', 'flip', 'shift']);
+        expect(mockedSize).not.toHaveBeenCalled();
+      });
+
+      it('adds size() last and flips with the bestFit fallback', async () => {
+        await service.position(reference, floating, { capHeight: true });
+        expect(middlewareNames()).toEqual(['offset', 'flip', 'shift', 'size']);
+        expect(mockedFlip.mock.calls.at(-1)).toEqual([
+          { boundary: undefined, fallbackStrategy: 'bestFit' },
+        ]);
+        expect(mockedSize.mock.calls.at(-1)?.[0]).toEqual(
+          expect.objectContaining({ padding: 8 }),
+        );
+      });
+
+      /** Captures the raw max-height writes: jsdom can drop a value with min() and var(). */
+      const captureMaxHeight = (el: HTMLElement): string[] => {
+        const writes: string[] = [];
+        Object.defineProperty(el.style, 'maxHeight', {
+          set: (v: string) => writes.push(v),
+          configurable: true,
+        });
+        return writes;
+      };
+      const applyOf = (call: number): SizeOptions['apply'] =>
+        (mockedSize.mock.calls[call]?.[0] as SizeOptions).apply;
+      const state = (availableHeight: number) => ({
+        availableHeight,
+        elements: { floating },
+      });
+
+      it('drops the size() write of an older overlapping update: height and point come from the newer compute', async () => {
+        mockedCompute.mockResolvedValueOnce({ x: 0, y: 10 });
+        await service.position(reference, floating, { capHeight: true });
+        const update = mockedAutoUpdate.mock.calls[0][2] as () => void;
+        let resolveOlder: (point: { x: number; y: number }) => void = () =>
+          undefined;
+        mockedCompute.mockImplementationOnce(
+          () => new Promise((resolve) => (resolveOlder = resolve)),
+        );
+        mockedCompute.mockResolvedValueOnce({ x: 0, y: 404 });
+        const writes = captureMaxHeight(floating);
+
+        update(); // older: size() call 1
+        update(); // newer: size() call 2
+        expect(mockedSize).toHaveBeenCalledTimes(3);
+        applyOf(2)(state(300));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        // The older compute measures and resolves last.
+        applyOf(1)(state(600));
+        resolveOlder({ x: 0, y: 732 });
+        await new Promise((resolve) => setTimeout(resolve, 0));
+
+        expect(writes).toEqual(['min(var(--ptah-popover-max-h), 300px)']);
+        expect(floating.style.top).toBe('404px');
+      });
+
+      it('writes nothing from an apply that runs after cleanup()', async () => {
+        await service.position(reference, floating, { capHeight: true });
+        const update = mockedAutoUpdate.mock.calls[0][2] as () => void;
+        update();
+        const writes = captureMaxHeight(floating);
+        service.cleanup();
+        applyOf(0)(state(300));
+        applyOf(1)(state(300));
+        expect(writes).toEqual([]);
+      });
+
+      it('writes nothing from the first compute when cleanup() runs while it measures', async () => {
+        let resolveFirst: (point: { x: number; y: number }) => void = () =>
+          undefined;
+        mockedCompute.mockImplementationOnce(
+          () => new Promise((resolve) => (resolveFirst = resolve)),
+        );
+        const pending = service.position(reference, floating, {
+          capHeight: true,
+        });
+        const writes = captureMaxHeight(floating);
+        service.cleanup();
+        applyOf(0)(state(300));
+        resolveFirst({ x: 0, y: 0 });
+        await pending;
+        expect(writes).toEqual([]);
+      });
+
+      it('writes min(var(--ptah-popover-max-h), Npx) with N at least 128', async () => {
+        await service.position(reference, floating, { capHeight: true });
+        const { apply } = mockedSize.mock.calls.at(-1)?.[0] as SizeOptions;
+        const panel = document.createElement('div');
+        // jsdom can drop a max-height with min() and var(): capture the raw value that apply() writes.
+        const writes: string[] = [];
+        Object.defineProperty(panel.style, 'maxHeight', {
+          set: (v: string) => writes.push(v),
+          configurable: true,
+        });
+
+        apply({ availableHeight: 432.7, elements: { floating: panel } });
+        apply({ availableHeight: 40, elements: { floating: panel } });
+
+        expect(writes).toEqual([
+          'min(var(--ptah-popover-max-h), 432px)',
+          'min(var(--ptah-popover-max-h), 128px)',
+        ]);
+      });
     });
 
     it('should register an auto-update listener', async () => {

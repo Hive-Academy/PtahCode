@@ -202,6 +202,17 @@ describe('NativeDrawerComponent', () => {
     expect(q('[data-testid="native-drawer-close"]')).toBeNull();
   });
 
+  it('renders the close button as a lucide X icon with its accessible name', async () => {
+    await open();
+    const close = q('[data-testid="native-drawer-close"]') as HTMLButtonElement;
+    expect(close.getAttribute('aria-label')).toBe('Close panel');
+    expect(close.querySelector('lucide-angular svg')).toBeTruthy();
+    expect(close.querySelector('lucide-angular')?.getAttribute('aria-hidden')).toBe('true');
+    expect(close.textContent).not.toContain('×');
+    close.click();
+    expect(host.closedCount).toBe(1);
+  });
+
   it('traps Tab at the end of the panel and Shift+Tab at the start', async () => {
     await open();
     const focusables = Array.from(

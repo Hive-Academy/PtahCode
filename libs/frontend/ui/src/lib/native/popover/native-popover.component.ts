@@ -104,6 +104,7 @@ type PositionOutcome = 'positioned' | 'failed' | 'timed out';
         <!-- Floating content - starts hidden until positioned -->
         <div
           #floatingRef
+          [class.ptah-popover-capped]="capToViewport()"
           class="popover-panel surface-3 z-50 rounded-xl p-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[oklch(var(--s))]"
           style="visibility: hidden;"
           tabindex="-1"
@@ -137,6 +138,14 @@ type PositionOutcome = 'positioned' | 'failed' | 'timed out';
         color: inherit;
         box-shadow: none;
         pointer-events: none;
+      }
+
+      /* Viewport cap: the height comes from the size() middleware (or the
+         fallback in revealUnpositioned); the content scrolls inside. */
+      .ptah-popover-capped {
+        max-width: calc(100vw - 1rem);
+        overflow-y: auto;
+        overscroll-behavior: contain;
       }
 
       .ptah-popover-layer::backdrop {
@@ -197,6 +206,13 @@ export class NativePopoverComponent implements OnDestroy {
    * @default false
    */
   readonly keepInViewport = input<boolean>(false);
+
+  /**
+   * Cap the panel to the viewport (max-height, max-width, inner scroll). Opt out for content with its own scroll cap.
+   * The value is read when the panel opens; a change while the panel is open applies at the next open.
+   * @default true
+   */
+  readonly capToViewport = input<boolean>(true);
 
   /**
    * Emitted when popover opens and is positioned.
@@ -365,6 +381,10 @@ export class NativePopoverComponent implements OnDestroy {
       floating.style.left = `${rect.left}px`;
       floating.style.top = `${rect.bottom}px`;
     }
+    // No size() pass ran: keep the token cap so a failed compute never leaves an uncapped panel.
+    if (this.capToViewport()) {
+      floating.style.maxHeight = 'var(--ptah-popover-max-h)';
+    }
     floating.style.visibility = 'visible';
   }
 
@@ -393,6 +413,7 @@ export class NativePopoverComponent implements OnDestroy {
             flip: true,
             shift: true,
             ...(this.keepInViewport() ? { shiftCrossAxis: true } : {}),
+            capHeight: this.capToViewport(),
           })
           .then((): PositionOutcome => 'positioned'),
         timedOut,

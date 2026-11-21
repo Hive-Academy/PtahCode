@@ -34,8 +34,8 @@ const NAVIGATION_SPLIT_PX = 640;
  */
 const NAVIGATION_CLASSES = {
   frameGrid: '[@container(min-width:640px)]:grid-cols-[var(--ptah-settings-nav-column-w)_minmax(0,1fr)]',
-  frameGap: '[@container(min-width:640px)]:gap-x-0 [@container(min-width:640px)]:p-0',
-  nav: '[@container(min-width:640px)]:sticky [@container(min-width:640px)]:top-0 [@container(min-width:640px)]:self-start [@container(min-width:640px)]:h-[var(--ptah-settings-nav-height)] [@container(min-width:640px)]:gap-[var(--ptah-settings-nav-gap)] [@container(min-width:640px)]:px-[var(--ptah-settings-nav-px)] [@container(min-width:640px)]:py-[var(--ptah-settings-nav-py)] [@container(min-width:640px)]:bg-surface-1 [@container(min-width:640px)]:border-r [@container(min-width:640px)]:border-[var(--ptah-border-color)]',
+  /** Below the split the nav strip owns its own inset: the frame has no padding in navigation mode (F37). */
+  nav: '[@container(max-width:639px)]:px-[var(--ptah-page-gutter)] [@container(max-width:639px)]:pt-[var(--ptah-page-gutter)] [@container(min-width:640px)]:sticky [@container(min-width:640px)]:top-0 [@container(min-width:640px)]:self-start [@container(min-width:640px)]:h-[var(--ptah-settings-nav-height)] [@container(min-width:640px)]:gap-[var(--ptah-settings-nav-gap)] [@container(min-width:640px)]:px-[var(--ptah-settings-nav-px)] [@container(min-width:640px)]:py-[var(--ptah-settings-nav-py)] [@container(min-width:640px)]:bg-surface-1 [@container(min-width:640px)]:border-r [@container(min-width:640px)]:border-[var(--ptah-border-color)]',
   slot: 'hidden shrink-0 [@container(min-width:640px)]:[&:not(:empty)]:block',
   list: 'flex min-h-0 min-w-0 gap-[var(--ptah-settings-nav-list-gap)] overflow-x-auto [@container(min-width:640px)]:flex-col [@container(min-width:640px)]:overflow-x-hidden [@container(min-width:640px)]:overflow-y-auto [@container(max-width:639px)]:[&>*]:shrink-0',
 } as const;
@@ -134,7 +134,7 @@ const NAV_CLASS = [
   },
   template: `
     <div
-      class="grid grid-cols-1 gap-[var(--ptah-gap-group)] p-[var(--ptah-page-gutter)]"
+      class="grid grid-cols-1"
       [class]="frameToggles()"
       data-testid="settings-layout"
     >
@@ -193,7 +193,7 @@ const NAV_CLASS = [
                   <span ptahBadge size="xs" data-testid="settings-layout-badge">{{ tab.badge }}</span>
                 }
                 @if (navMode() === 'navigation' && tab.stateMark; as mark) {
-                  <span role="img" class="inline-flex shrink-0 items-center gap-[var(--ptah-gap-label)] text-[length:var(--ptah-text-caption-size)]" [class]="markToneClass(mark.tone)" [attr.aria-label]="mark.label" data-testid="settings-layout-state-mark">
+                  <span role="img" class="inline-flex shrink-0 items-center gap-[var(--ptah-gap-label)] text-[length:var(--ptah-text-caption-size)]" [class]="markToneClass(mark.tone)" [attr.aria-label]="mark.label" [attr.title]="mark.label" data-testid="settings-layout-state-mark">
                     <span class="size-[var(--ptah-icon-xs)] rounded-full bg-current" aria-hidden="true"></span>
                     @if (mark.count !== undefined) { <span aria-hidden="true">{{ mark.count }}</span> }
                   </span>
@@ -212,7 +212,7 @@ const NAV_CLASS = [
       }
       <div
         class="mx-auto flex w-full min-w-0 max-w-[var(--ptah-settings-content-max-w)] flex-col"
-        [class]="navMode() === 'navigation' ? '[@container(min-width:640px)]:p-[var(--ptah-page-gutter)]' : ''"
+        [class.p-[var(--ptah-page-gutter)]]="navigationFrame()"
         data-testid="settings-layout-main"
       >
         <header
@@ -220,11 +220,21 @@ const NAV_CLASS = [
           data-testid="settings-layout-header"
         >
           <div class="flex min-w-0 flex-col gap-[var(--ptah-gap-label)]">
-            @if (titleLevel() === 1) {
-              <h1 [id]="titleId" [class]="titleClass">{{ title() }}</h1>
-            } @else {
-              <h2 [id]="titleId" [class]="titleClass">{{ title() }}</h2>
-            }
+            <div class="flex min-w-0 items-center gap-[var(--ptah-gap-inline)]">
+              @if (icon(); as pageIcon) {
+                <lucide-angular
+                  [img]="pageIcon"
+                  class="size-[var(--ptah-icon-lg)] shrink-0 text-base-content-muted"
+                  aria-hidden="true"
+                  data-testid="settings-layout-icon"
+                />
+              }
+              @if (titleLevel() === 1) {
+                <h1 [id]="titleId" [class]="titleClass">{{ title() }}</h1>
+              } @else {
+                <h2 [id]="titleId" [class]="titleClass">{{ title() }}</h2>
+              }
+            </div>
             @if (description(); as descriptionText) {
               <p
                 class="text-base-content-muted text-[length:var(--ptah-text-body-size)] leading-[var(--ptah-text-body-leading)]"
@@ -262,6 +272,8 @@ export class PtahSettingsLayoutComponent<TId extends string = string> {
   readonly title = input.required<string>();
   /** Muted text below the title. */
   readonly description = input<string | null>(null);
+  /** Optional lucide icon before the page title (decorative, `aria-hidden`). */
+  readonly icon = input<LucideIconData | null>(null);
   /** The title tag (h1 or h2). Default 2: the app shell already has an h1. */
   readonly titleLevel = input<PtahSettingsTitleLevel>(2);
   /** Accessible name of the nav and the tab list. */
@@ -296,13 +308,17 @@ export class PtahSettingsLayoutComponent<TId extends string = string> {
   protected readonly focusIndex = linkedSignal(() => Math.max(0, this.selectedIndex()));
 
   /** A class-map key must hold one class: Angular ignores keys that contain a space. */
+  /** Navigation mode with a nav: the main column is the only padding owner at every width (F37). */
+  protected readonly navigationFrame = computed(() => this.hasTabs() && this.navMode() === 'navigation');
+
   protected readonly frameToggles = computed(() => {
-    const navigation = this.hasTabs() && this.navMode() === 'navigation';
+    const navigation = this.navigationFrame();
     return {
+      'gap-[var(--ptah-gap-group)]': !navigation,
+      'p-[var(--ptah-page-gutter)]': !navigation,
       '[@container(min-width:768px)]:grid-cols-[var(--ptah-settings-nav-w)_minmax(0,1fr)]': this.hasTabs() && this.navMode() === 'tabs',
       '[@container(min-width:768px)]:gap-x-[var(--ptah-gap-section)]': this.hasTabs() && this.navMode() === 'tabs',
       ...singleClassToggles(NAVIGATION_CLASSES.frameGrid, navigation),
-      ...singleClassToggles(NAVIGATION_CLASSES.frameGap, navigation),
     };
   });
 

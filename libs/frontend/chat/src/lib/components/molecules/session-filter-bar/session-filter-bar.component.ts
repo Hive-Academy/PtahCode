@@ -137,6 +137,7 @@ function keepDraftUntilTrimmedChange(
           [placement]="'bottom-start'"
           [hasBackdrop]="true"
           [backdropClass]="'transparent'"
+          [capToViewport]="false"
           (closed)="filtersOpen.set(false)"
         >
           <button ptahButton variant="ghost" size="sm"

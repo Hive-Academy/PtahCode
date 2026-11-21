@@ -30,6 +30,7 @@ jest.mock('@floating-ui/dom', () => {
       [offset]="offsetValue()"
       [hasBackdrop]="hasBackdrop()"
       [backdropClass]="backdropClass()"
+      [capToViewport]="capToViewport()"
       (opened)="onOpened()"
       (closed)="onClosed()"
       (backdropClicked)="onBackdropClicked()"
@@ -48,6 +49,7 @@ class HostComponent {
   offsetValue = signal(8);
   hasBackdrop = signal(true);
   backdropClass = signal<'transparent' | 'dark'>('dark');
+  capToViewport = signal(true);
 
   openedCount = 0;
   closedCount = 0;
@@ -259,6 +261,64 @@ describe('NativePopoverComponent', () => {
     await flushAll();
 
     expect(mockedCompute).toHaveBeenCalled();
+  });
+
+  describe('viewport cap', () => {
+    const positionSpy = () =>
+      jest.spyOn(
+        fixture.debugElement
+          .query(By.directive(NativePopoverComponent))
+          .injector.get(FloatingUIService),
+        'position',
+      );
+    const panel = () =>
+      (fixture.nativeElement as HTMLElement).querySelector<HTMLElement>(
+        '.popover-panel',
+      );
+
+    it('passes capHeight: true and marks the panel capped when capToViewport is on', async () => {
+      const position = positionSpy();
+      host.isOpen.set(true);
+      fixture.detectChanges();
+      await flushAll();
+      expect(position.mock.calls[0][2]).toEqual(
+        expect.objectContaining({ capHeight: true }),
+      );
+      expect(panel()?.classList.contains('ptah-popover-capped')).toBe(true);
+    });
+
+    it('passes capHeight: false and leaves the panel uncapped with [capToViewport]="false"', async () => {
+      host.capToViewport.set(false);
+      fixture.detectChanges();
+      const position = positionSpy();
+      host.isOpen.set(true);
+      fixture.detectChanges();
+      await flushAll();
+      expect(position.mock.calls[0][2]).toEqual(
+        expect.objectContaining({ capHeight: false }),
+      );
+      expect(panel()?.classList.contains('ptah-popover-capped')).toBe(false);
+    });
+
+    it('defaults capToViewport to true when no binding is set', () => {
+      const bare = TestBed.createComponent(NativePopoverComponent);
+      expect(bare.componentInstance.capToViewport()).toBe(true);
+      bare.destroy();
+    });
+
+    it('keeps no token max-height on an unpositioned panel when the cap is off', async () => {
+      host.capToViewport.set(false);
+      fixture.detectChanges();
+      (fixture.nativeElement as HTMLElement)
+        .querySelector('.popover-trigger')
+        ?.remove();
+      host.anchor.set(document.createElement('button'));
+      host.isOpen.set(true);
+      fixture.detectChanges();
+      await flushAll();
+      expect(panel()?.style.visibility).toBe('visible');
+      expect(panel()?.style.maxHeight).toBe('');
+    });
   });
 
   describe('Escape key handling', () => {
@@ -681,6 +741,7 @@ describe('NativePopoverComponent', () => {
         expect(panel.style.position).toBe('fixed');
         expect(panel.style.left).toBe('40px');
         expect(panel.style.top).toBe('70px');
+        expect(panel.style.maxHeight).toBe('var(--ptah-popover-max-h)');
       } finally {
         consoleError.mockRestore();
         mockedCompute.mockReset();

@@ -7,4 +7,4 @@
  * @module native/modal
  */
 export { NativeModalComponent } from './native-modal.component';
-export type { NativeModalSize } from './native-modal.component';
+export type { NativeModalLayout, NativeModalSize } from './native-modal.component';

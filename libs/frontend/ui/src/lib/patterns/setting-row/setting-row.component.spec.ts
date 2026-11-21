@@ -33,6 +33,34 @@ class HostComponent {
 })
 class TwoRowsHostComponent {}
 
+@Component({
+  standalone: true,
+  imports: [PtahSettingRowComponent],
+  changeDetection: ChangeDetectionStrategy.OnPush,
+  template: `
+    <ptah-setting-row
+      label="Prompt"
+      hint="Shown to the agent"
+      controlId="prompt"
+      [hintElementId]="hintElementId()"
+      [controlAlign]="controlAlign()"
+      [edgePadding]="edgePadding()"
+    >
+      @if (withAction()) {
+        <button action type="button" data-testid="action">i</button>
+      }
+      <input id="prompt" type="checkbox" data-testid="control" />
+    </ptah-setting-row>
+  `,
+})
+class OptionsHostComponent {
+  readonly hintElementId = signal<string | null>(null);
+  readonly controlAlign = signal<'start' | 'end'>('start');
+  readonly edgePadding = signal<'all' | 'trim'>('all');
+  readonly withAction = signal(true);
+  readonly row = viewChild.required(PtahSettingRowComponent);
+}
+
 describe('PtahSettingRowComponent', () => {
   let fixture: ComponentFixture<HostComponent>;
   let host: HostComponent;
@@ -83,6 +111,64 @@ describe('PtahSettingRowComponent', () => {
       expect(inner.classList.contains('border-b')).toBe(false);
       expect(inner.classList.contains('py-ptah-field')).toBe(true);
     }
+  });
+
+  describe('action slot and opt-in layout', () => {
+    let options: ComponentFixture<OptionsHostComponent>;
+    let root: HTMLElement;
+    const control = (): HTMLElement => root.querySelector('[data-ptah-setting-control]') as HTMLElement;
+    const action = (): HTMLElement => root.querySelector('[data-ptah-setting-action]') as HTMLElement;
+    const rowHost = (): HTMLElement => root.querySelector('ptah-setting-row') as HTMLElement;
+
+    beforeEach(() => {
+      options = TestBed.createComponent(OptionsHostComponent);
+      options.detectChanges();
+      root = options.nativeElement as HTMLElement;
+    });
+
+    it('renders the action slot in a fixed box before the control', () => {
+      expect(action().querySelector('[data-testid="action"]')).not.toBeNull();
+      expect(action().classList.contains('size-8')).toBe(true);
+      const children = Array.from(control().children);
+      expect(children.indexOf(action())).toBeLessThan(
+        children.indexOf(root.querySelector('[data-testid="control"]') as HTMLElement),
+      );
+    });
+
+    it('hides an empty action box', () => {
+      options.componentInstance.withAction.set(false);
+      options.detectChanges();
+      expect(action().children).toHaveLength(0);
+      expect(action().classList.contains('empty:hidden')).toBe(true);
+    });
+
+    it('sets the hint id from hintElementId, and derives it otherwise', () => {
+      expect(root.querySelector('#prompt-hint')).not.toBeNull();
+      options.componentInstance.hintElementId.set('agent-behaviour-prompt-note');
+      options.detectChanges();
+      expect(options.componentInstance.row().hintId()).toBe('agent-behaviour-prompt-note');
+      expect(root.querySelector('#agent-behaviour-prompt-note')?.textContent).toContain('Shown to the agent');
+      expect(root.querySelector('#prompt-hint')).toBeNull();
+    });
+
+    it("keeps today's classes by default: no justify-end, no first/last padding trim", () => {
+      expect(control().classList.contains('justify-end')).toBe(false);
+      expect(rowHost().classList.contains('first:[&>div]:pt-0')).toBe(false);
+      expect(rowHost().classList.contains('last:[&>div]:pb-0')).toBe(false);
+      expect(Array.from(rowHost().classList).sort()).toEqual(
+        ['block', 'border-b', 'border-surface-border', 'last:border-b-0', '[container-type:inline-size]'].sort(),
+      );
+    });
+
+    it('adds justify-end with controlAlign="end" and the edge trim with edgePadding="trim"', () => {
+      options.componentInstance.controlAlign.set('end');
+      options.componentInstance.edgePadding.set('trim');
+      options.detectChanges();
+      expect(control().classList.contains('justify-end')).toBe(true);
+      expect(rowHost().classList.contains('first:[&>div]:pt-0')).toBe(true);
+      expect(rowHost().classList.contains('last:[&>div]:pb-0')).toBe(true);
+      expect(rowHost().classList.contains('last:border-b-0')).toBe(true);
+    });
   });
 
   it('uses compact spacing and a 640 px container stack class', () => {
