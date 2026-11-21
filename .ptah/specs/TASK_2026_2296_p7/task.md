@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_2296_p7
-status: in_progress
+status: in_review
 type: FEATURE
 title: Provider-session chat backend - adapter, host ports, pool (P7)
 depends_on: [TASK_2026_2295_p6]
