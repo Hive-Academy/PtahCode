@@ -219,7 +219,18 @@ describe('spawnAcpProcess', () => {
     ]);
   }, 15000);
 
-  it('kill() after the child exited never tree-kills its (reusable) pid', async () => {
+  /** Run `body` with `process.platform` reading `platform`. */
+  async function onPlatform(platform: NodeJS.Platform, body: () => Promise<void>): Promise<void> {
+    const original = Object.getOwnPropertyDescriptor(process, 'platform');
+    Object.defineProperty(process, 'platform', { value: platform, configurable: true });
+    try {
+      await body();
+    } finally {
+      if (original) Object.defineProperty(process, 'platform', original);
+    }
+  }
+
+  it('kill() after the child exited never signals its (reusable) bare pid', async () => {
     const transport = spawnAcpProcess({
       command: process.execPath,
       args: ['-e', 'process.exit(0)'],
@@ -227,10 +238,67 @@ describe('spawnAcpProcess', () => {
       ...spawnDefaults(),
     });
     await transport.exited;
-    transport.kill();
-    await new Promise<void>((resolve) => setImmediate(resolve));
+    await onPlatform('win32', async () => {
+      transport.kill();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    });
     expect(mockKillProcessTree).not.toHaveBeenCalled();
   }, 15000);
+
+  it('kill() after the leader exited on POSIX signals only its process group', async () => {
+    const transport = spawnAcpProcess({
+      command: process.execPath,
+      args: ['-e', 'process.exit(0)'],
+      cwd: process.cwd(),
+      ...spawnDefaults(),
+    });
+    await transport.exited;
+    await onPlatform('linux', async () => {
+      transport.kill();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    });
+    expect(mockKillProcessTree).toHaveBeenCalledTimes(1);
+    expect(mockKillProcessTree).toHaveBeenCalledWith(
+      expect.any(Number),
+      'SIGTERM',
+      undefined,
+      { groupOnly: true },
+    );
+  }, 15000);
+
+  it('kill() while the command is being prepared settles at once and never spawns', async () => {
+    const spawnProcess = jest.fn();
+    let finishPreparing!: () => void;
+    const prepareCommand = jest.fn(
+      () =>
+        new Promise<{ command: string; prefixArgs: string[] }>((resolve) => {
+          finishPreparing = () => resolve({ command: 'grok', prefixArgs: [] });
+        }),
+    );
+    const transport = spawnAcpProcess({
+      command: 'grok',
+      args: ['agent'],
+      cwd: '.',
+      env: {},
+      needsConsole: false,
+      spawner: { spawnProcess } as unknown as IProcessSpawner,
+      prepareCommand,
+    });
+    const writer = transport.stream.writable.getWriter();
+    const queued = writer.write(new TextEncoder().encode('{"queued":true}\n'));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(prepareCommand).toHaveBeenCalledTimes(1);
+
+    transport.kill();
+    await expect(transport.exited).resolves.toEqual({ code: null, signal: 'error' });
+    await expect(queued).resolves.toBeUndefined();
+
+    finishPreparing();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(spawnProcess).not.toHaveBeenCalled();
+    expect(mockKillProcessTree).not.toHaveBeenCalled();
+    expect(transport.getPid()).toBeUndefined();
+  });
 
   it('kill() ends stdin, tree-kills once, and clears the pid', async () => {
     const stderr = recordStderr();

@@ -82,6 +82,7 @@ import {
   errorText,
   isRecord,
   isReplayedUpdate,
+  readAuthoritativeConfigOptions,
   readConfigOptions,
   readJsonRpcError,
   readModeIds,
@@ -125,6 +126,12 @@ const HANDSHAKE_PHASE_LABEL: Readonly<Record<AcpHandshakePhase, string>> = {
  * the prompt (or exit) before the tree-kill.
  */
 export const ACP_CANCEL_GRACE_MS = 1_500;
+/**
+ * How long writing `session/cancel` may take. The SDK queues the notification
+ * behind any pending write (a large prompt into a child that stopped reading
+ * stdin), so the write itself is bounded; past this the agent is stopped.
+ */
+export const ACP_CANCEL_WRITE_TIMEOUT_MS = 1_500;
 /** Bound for agents that return a prompt response without usage metadata or a usage_update. */
 export const ACP_USAGE_DRAIN_MS = 2_000;
 /**
@@ -212,7 +219,11 @@ export interface AcpSession {
   setModel(model: string): Promise<boolean>;
   /** Resolves when the current agent process ends. Never rejects. */
   readonly exited: Promise<AcpProcessExit>;
-  /** The connection closed or the process exited. */
+  /**
+   * The connection closed or the process exited, or the process is being
+   * stopped (the prompt watchdog fired, a kill was started): it takes no
+   * further prompt.
+   */
   isClosed(): boolean;
   /** Session set up and config applied: it can take prompts. */
   isSetupComplete(): boolean;
@@ -253,6 +264,11 @@ interface Generation {
   closed: boolean;
   exit?: AcpProcessExit;
   killRequested: boolean;
+  /**
+   * The process is being stopped (the watchdog fired, or a kill was asked):
+   * it takes no further prompt, even before it actually exits.
+   */
+  retired: boolean;
   /** Aborted when this generation's process ends (pending approvals give up). */
   readonly gone: AbortController;
 }
@@ -302,6 +318,9 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
   let sentMcpServers = false;
   let advertisedConfig: readonly Record<string, unknown>[] = [];
   let advertisedModes: readonly string[] = [];
+  /** The last model and mode the agent acknowledged after setup; a respawn reapplies them. */
+  let acknowledgedModel: string | undefined;
+  let acknowledgedMode: string | undefined;
   let handshakePhase: AcpHandshakePhase = 'initialize';
   /** Set while {@link withHandshakeTimeout} runs; re-arms its timer for a phase. */
   let enterHandshakePhase: ((phase: AcpHandshakePhase) => void) | undefined;
@@ -350,10 +369,15 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
 
   /** Kill a generation's child once, unless it already exited (an exited pid may be reused). */
   const stopProcess = (target: Generation = gen): void => {
+    target.retired = true;
     if (target.exit || target.killRequested) return;
     target.killRequested = true;
     target.transport.kill();
   };
+
+  /** The generation can take work: its connection is open and no stop was started. */
+  const isLive = (target: Generation): boolean =>
+    !target.closed && !target.retired;
 
   const dropStale = (target: Generation, what: string): boolean => {
     if (target === gen) return false;
@@ -431,6 +455,13 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
         return;
       }
       if (isReplayedUpdate(notification)) return;
+      // A live option change (e.g. a mode added after a model switch) is what
+      // later `setMode`/`setModel` calls validate against. History never
+      // reaches here: replayed updates returned above.
+      if (notification.update.sessionUpdate === 'config_option_update') {
+        const updated = readAuthoritativeConfigOptions(notification.update);
+        if (updated) advertisedConfig = updated;
+      }
       if (promptInFlight) {
         const update = acpUsageUpdateSchema.safeParse(notification.update);
         if (update.success && update.data._meta?.usage) {
@@ -446,6 +477,17 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
     },
     requestPermission: async (request) => {
       if (dropStale(target, 'session/request_permission')) {
+        return cancelledResponse();
+      }
+      // A request for another session must not be answered with this
+      // session's policy, nor shown under it (PR #1445 review). During a
+      // re-attach the attaching id is the expected one.
+      if (!isOwnSession(request.sessionId)) {
+        logger?.warn('[AcpSessionHandle] cancelled a permission request for another session', {
+          ...logContext,
+          requestSessionId: request.sessionId,
+          sessionId: sessionId ?? attachingSessionId,
+        });
         return cancelledResponse();
       }
       return answerPermission(target, request);
@@ -486,17 +528,10 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
     const conn = target.connection;
     const id = sessionId;
     if (promptInFlight && conn && id && !target.closed) {
-      // `cancel` resolves once written, so the grace starts after the agent
-      // can see the notification. A failed cancel kills at once.
-      void sendCancel(conn, id).then(
-        () => stopAfterGrace(target, ACP_CANCEL_GRACE_MS),
-        (error: unknown) => {
-          logger?.warn('[AcpSessionHandle] session/cancel could not be sent', {
-            ...logContext,
-            error: errorText(error),
-          });
-          stopProcess(target);
-        },
+      // The grace starts once the agent can see the notification; a cancel
+      // that fails or does not get written in time kills at once.
+      void cancelPrompt(target, conn, id).then((sent) =>
+        sent ? stopAfterGrace(target, ACP_CANCEL_GRACE_MS) : undefined,
       );
       return;
     }
@@ -529,6 +564,7 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
       transport,
       closed: false,
       killRequested: false,
+      retired: false,
       gone: new AbortController(),
     };
     owner.generation = next;
@@ -558,6 +594,48 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
   const sendCancel = (conn: AcpConnectionApi, id: string): Promise<void> => {
     const meta = profile.cancelMeta?.(options);
     return conn.cancel({ sessionId: id, ...(meta ? { _meta: meta } : {}) });
+  };
+
+  /**
+   * Send `session/cancel` within {@link ACP_CANCEL_WRITE_TIMEOUT_MS}. Resolves
+   * true once it is written. On a failed, stalled or moot write (the process
+   * ended first) the agent is stopped at once and it resolves false, so no
+   * cancellation path waits on the write without a bound (PR #1445 review).
+   * Never rejects.
+   */
+  const cancelPrompt = async (
+    target: Generation,
+    conn: AcpConnectionApi,
+    id: string,
+  ): Promise<boolean> => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const stalled = new Promise<'stalled'>((resolve) => {
+      timer = setTimeout(() => resolve('stalled'), ACP_CANCEL_WRITE_TIMEOUT_MS);
+    });
+    try {
+      const outcome = await Promise.race([
+        sendCancel(conn, id).then(() => 'sent' as const),
+        stalled,
+        target.transport.exited.then(() => 'exited' as const),
+      ]);
+      if (outcome === 'sent') return true;
+      logger?.warn('[AcpSessionHandle] session/cancel was not written in time', {
+        ...logContext,
+        outcome,
+        timeoutMs: ACP_CANCEL_WRITE_TIMEOUT_MS,
+      });
+    } catch (error: unknown) {
+      // Logged here; the agent is stopped below and the caller reads `false`
+      // as "stopped".
+      logger?.warn('[AcpSessionHandle] session/cancel could not be sent', {
+        ...logContext,
+        error: errorText(error),
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+    stopProcess(target);
+    return false;
   };
 
   /**
@@ -720,6 +798,7 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
     } finally {
       attachingSessionId = undefined;
       replayCollector = undefined;
+      replayMapper.releaseTools();
     }
   };
 
@@ -746,9 +825,10 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
       { configId, configValue: value, advertisedValues: values },
     );
     // A model change can narrow the other options (e.g. the effort list),
-    // so later entries are validated against the updated set.
-    const updated = readConfigOptions(response);
-    if (updated.length > 0) advertisedConfig = updated;
+    // so later entries are validated against the updated set. The reply's
+    // list is complete: an empty one removes every option (PR #1445 review).
+    const updated = readAuthoritativeConfigOptions(response);
+    if (updated) advertisedConfig = updated;
   };
 
   /**
@@ -761,9 +841,10 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
   const applySessionConfig = async (
     conn: AcpConnectionApi,
     id: string,
+    sessionOptions: AcpSessionOptions,
   ): Promise<void> => {
     const entries: readonly AcpSessionConfigEntry[] =
-      profile.sessionConfig?.(options) ?? [];
+      profile.sessionConfig?.(sessionOptions) ?? [];
     for (const entry of entries) {
       const binding = entry.binding === true;
       const option = advertisedConfig.find(
@@ -882,11 +963,17 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
       });
       try {
         await call('authenticate', () => conn.authenticate({ methodId: method }));
+      } catch (authError: unknown) {
+        throw authError instanceof AcpTurnFailure
+          ? signInFailure(authError)
+          : authError;
+      }
+      try {
         return await create();
       } catch (retryError: unknown) {
-        throw retryError instanceof AcpTurnFailure
-          ? signInFailure(retryError)
-          : retryError;
+        // Only a second auth-required is a sign-in problem; any other failure
+        // of the retried `session/new` keeps its own message (PR #1445 review).
+        throw authRequired(retryError) ? signInFailure(retryError) : retryError;
       }
     }
   };
@@ -983,8 +1070,16 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
     // Reported before the config is applied on purpose: a refused config fails
     // the turn, but the session exists and stays resumable by this id.
     config.onSessionResolved?.(id);
-    await applySessionConfig(conn, id);
-    const mode = profile.modeFor?.(options);
+    // A respawn re-applies what the agent last acknowledged (`setModel`,
+    // `setMode`), not the values the session was opened with (PR #1445 review).
+    await applySessionConfig(
+      conn,
+      id,
+      acknowledgedModel === undefined
+        ? options
+        : { ...options, model: acknowledgedModel },
+    );
+    const mode = acknowledgedMode ?? profile.modeFor?.(options);
     if (mode) await applyMode(conn, id, mode);
     setupComplete = true;
     return { restoredContext };
@@ -1104,6 +1199,9 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
       generation: gen.number + 1,
     });
     setupComplete = false;
+    // A retired process that has not exited yet must not outlive its successor.
+    stopProcess(gen);
+    mapper.releaseTools();
     gen = spawnGeneration(gen.number + 1);
     const setup = await runSetup(previous, 'error');
     return setup.ok;
@@ -1120,6 +1218,8 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
     latestUpdateUsage = undefined;
     turnCancelledByPtah = false;
     refusedThisTurn = undefined;
+    // Tools of an earlier turn that never finished are abandoned.
+    mapper.releaseTools();
     let target = gen;
     let exitCode = 1;
     let timedOut = false;
@@ -1131,7 +1231,9 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
         notStarted = true;
         return 1;
       }
-      if (gen.closed && config.respawnOnPrompt && sessionId) {
+      // A retired generation (the watchdog fired, a kill is under way) takes
+      // no prompt even while its process is still alive (PR #1445 review).
+      if (!isLive(gen) && config.respawnOnPrompt && sessionId) {
         const respawned = await respawn();
         target = gen;
         if (!respawned) {
@@ -1141,6 +1243,14 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
       }
       const conn = target.connection;
       const id = sessionId;
+      if (setupComplete && target.retired && !target.closed && !signal.aborted) {
+        notStarted = true;
+        emitError(
+          `${name} is being stopped after an earlier turn failed; resume the session to continue`,
+          'process-exited',
+        );
+        return 1;
+      }
       if (!conn || !id || !setupComplete || signal.aborted) {
         notStarted = true;
         // After an abort the abort is the cause; no misleading error.
@@ -1155,14 +1265,15 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
         watchdog = setTimeout(() => {
           timedOut = true;
           turnCancelledByPtah = true;
+          // This process is going to be killed: no later prompt may use it.
+          target.retired = true;
           approvals.abort();
           emitError(
             `${name} did not finish the turn within ${limit / 1000} s`,
             'prompt-timeout',
           );
-          void sendCancel(conn, id).then(
-            () => stopAfterGrace(target, ACP_CANCEL_GRACE_MS),
-            () => stopProcess(target),
+          void cancelPrompt(target, conn, id).then((sent) =>
+            sent ? stopAfterGrace(target, ACP_CANCEL_GRACE_MS) : undefined,
           );
         }, limit);
         watchdog.unref?.();
@@ -1271,7 +1382,7 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
     const conn = target.connection;
     const id = sessionId;
     const settled = promptSettled;
-    if (!promptInFlight || !conn || !id || !settled || target.closed || signal.aborted) {
+    if (!promptInFlight || !conn || !id || !settled || !isLive(target) || signal.aborted) {
       return false;
     }
     turnCancelledByPtah = true;
@@ -1285,16 +1396,9 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
       // The turn may have ended meanwhile; a late cancel would hit the next one.
       if (promptSettled !== settled || !promptInFlight) return true;
     }
-    try {
-      await sendCancel(conn, id);
-    } catch (error: unknown) {
-      logger?.warn('[AcpSessionHandle] session/cancel could not be sent', {
-        ...logContext,
-        error: errorText(error),
-      });
-      stopProcess(target);
-      return false;
-    }
+    // Bounded: a cancel that fails or stalls behind a pending write has
+    // already stopped the agent.
+    if (!(await cancelPrompt(target, conn, id))) return false;
     if (cancelBehavior === 'kill') {
       await stopAfterGrace(target, ACP_CANCEL_GRACE_MS);
       return false;
@@ -1323,18 +1427,21 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
 
   const setModeOnSession = async (mode: string): Promise<boolean> => {
     const conn = gen.connection;
-    if (!conn || !sessionId || !setupComplete || gen.closed) return false;
-    return applyMode(conn, sessionId, mode);
+    if (!conn || !sessionId || !setupComplete || !isLive(gen)) return false;
+    const applied = await applyMode(conn, sessionId, mode);
+    if (applied) acknowledgedMode = mode;
+    return applied;
   };
 
   const setModel = async (model: string): Promise<boolean> => {
     const conn = gen.connection;
     const id = sessionId;
-    if (!conn || !id || !setupComplete || gen.closed) return false;
+    if (!conn || !id || !setupComplete || !isLive(gen)) return false;
     const option = optionFor('model');
     const configId = typeof option?.['id'] === 'string' ? option['id'] : 'model';
     try {
       await writeConfig(conn, id, configId, model, option ? advertisedValuesOf(option) : []);
+      acknowledgedModel = model;
       emit({ type: 'configChanged' });
       return true;
     } catch (error: unknown) {
@@ -1344,22 +1451,33 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
     }
   };
 
+  /**
+   * The first generation's setup, shared by every `start()` call: a second
+   * concurrent setup would open another SDK connection on the same byte
+   * stream and fail on its locked reader (PR #1445 review). A respawn runs
+   * its own setup.
+   */
+  let initialSetup: Promise<AcpSessionStart> | undefined;
+
   return {
     start: () =>
-      runSetup(options.resumeSessionId, options.attachFailure ?? 'new-session'),
+      (initialSetup ??= runSetup(
+        options.resumeSessionId,
+        options.attachFailure ?? 'new-session',
+      )),
     prompt,
     interrupt,
     supportsInterrupt: () =>
       cancelBehavior === 'await-reply' &&
       setupComplete &&
-      !gen.closed &&
+      isLive(gen) &&
       !signal.aborted,
     setMode: setModeOnSession,
     setModel,
     get exited() {
       return gen.transport.exited;
     },
-    isClosed: () => gen.closed,
+    isClosed: () => !isLive(gen),
     isSetupComplete: () => setupComplete,
     // A respawn before `session/prompt` is part of the turn too.
     isTurnRunning: () => promptInFlight || turnAccepted,

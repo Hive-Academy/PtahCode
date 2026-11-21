@@ -343,16 +343,35 @@ export const spawnAcpProcess: AcpTransportFactory = (
     const target = child;
     if (!target) return;
     void target.whenSpawned.then((pid) => {
-      // An exited pid may already belong to another process: never kill it.
-      if (pid !== null && pid !== undefined && !target.killed && !processGone) {
+      if (pid === null || pid === undefined) return;
+      if (!target.killed && !processGone) {
         void killProcessTree(pid);
+        return;
+      }
+      // The leader exited: its bare pid may already belong to another process,
+      // so it is never signalled. On POSIX the child led its own process group
+      // (detached), and descendants that outlived it are still in that group:
+      // signal the group only (PR #1445 review). Windows descendants are
+      // reaped by `cleanupOrphanDescendants`.
+      if (processGone && process.platform !== 'win32') {
+        void killProcessTree(pid, 'SIGTERM', undefined, { groupOnly: true });
       }
     });
   };
 
+  /** Set right before the spawner is called; until then a kill needs no child. */
+  let spawnStarted = false;
+
   const kill = (): void => {
     if (killRequested) return;
     killRequested = true;
+    if (!child && !spawnStarted) {
+      // Killed while the command was still being prepared: no child will be
+      // created (`spawnChild` checks `killRequested`), so settle now instead
+      // of leaving `exited` pending (PR #1445 review).
+      abandonSpawn();
+      return;
+    }
     killChild();
   };
 
@@ -360,6 +379,19 @@ export const spawnAcpProcess: AcpTransportFactory = (
 
   /** Set once the injected spawn function refused the spawn outright. */
   let spawnFailed = false;
+
+  /**
+   * No child will exist (a refused spawn, or a kill before the spawn): the
+   * same contract as a spawn 'error': settle, close, and drop anything queued
+   * for stdin. Idempotent.
+   */
+  const abandonSpawn = (): void => {
+    spawnFailed = true;
+    processGone = true;
+    closeReadable();
+    settleExited({ code: null, signal: 'error' });
+    flushWrites();
+  };
 
   /** Resolve on the first of 'drain', 'close' or 'error', then detach all three. */
   const resolveWhenDrained = (
@@ -479,19 +511,29 @@ export const spawnAcpProcess: AcpTransportFactory = (
       () => spawned.off('error', onChildError),
     );
 
+    if (killRequested) {
+      // Killed between the spawn call and here: stdin is ended first, so the
+      // queued writes are dropped instead of reaching the cancelled child.
+      killChild();
+      flushWrites();
+      return;
+    }
     flushWrites();
     if (closeRequested) endStdin();
-    if (killRequested) killChild();
   };
 
-  const spawnChild = async (): Promise<SpawnedProcessHandle> => {
+  const spawnChild = async (): Promise<SpawnedProcessHandle | undefined> => {
     const spawner = options.spawner;
     if (!spawner) {
       throw new Error('no process spawner was supplied for the agent process');
     }
+    if (killRequested) return undefined;
     const prepared = options.prepareCommand
       ? await options.prepareCommand(options.command, options.args)
       : { command: options.command, prefixArgs: [] };
+    // `kill()` during the preparation already settled the transport.
+    if (killRequested) return undefined;
+    spawnStarted = true;
     return spawner.spawnProcess({
       command: prepared.command,
       args: [...prepared.prefixArgs, ...options.args],
@@ -507,7 +549,10 @@ export const spawnAcpProcess: AcpTransportFactory = (
 
   void Promise.resolve()
     .then(spawnChild)
-    .then(attachChild)
+    .then((spawned) => {
+      if (spawned) attachChild(spawned);
+      else abandonSpawn();
+    })
     .catch((error: unknown) => {
       // The spawn was refused outright (no spawner, a rejected command line,
       // a throwing spawner) — same contract
@@ -516,11 +561,7 @@ export const spawnAcpProcess: AcpTransportFactory = (
         command: options.command,
         error: error instanceof Error ? error.message : String(error),
       });
-      spawnFailed = true;
-      processGone = true;
-      closeReadable();
-      settleExited({ code: null, signal: 'error' });
-      flushWrites();
+      abandonSpawn();
     });
 
   return {

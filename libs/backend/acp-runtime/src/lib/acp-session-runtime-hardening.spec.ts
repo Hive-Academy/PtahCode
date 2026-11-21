@@ -474,9 +474,9 @@ describe('approvals through a sink (A17)', () => {
     expect(h.types()).toEqual(expect.arrayContaining(['approvalRequested', 'approvalSettled']));
   });
 
-  it('maps acceptForSession to the offered allow_always option', async () => {
+  it('maps acceptForSession to allow_once, never to the offered allow_always option', async () => {
     const { answer } = await answerFor({ request: async () => 'acceptForSession' });
-    expect(answer).toEqual({ outcome: { outcome: 'selected', optionId: 'always-allow' } });
+    expect(answer).toEqual({ outcome: { outcome: 'selected', optionId: 'allow-once' } });
   });
 
   it('answers cancelled when the sink fails, never allow', async () => {
@@ -774,6 +774,271 @@ describe('code-logic review fix round 1', () => {
     expect(h.session.isTurnRunning()).toBe(true);
     await expect(turn).resolves.toBe(0);
     expect(h.session.isTurnRunning()).toBe(false);
+    h.abort.abort();
+  });
+});
+
+describe('PR #1445 review fixes', () => {
+  const usage = { inputTokens: 1, outputTokens: 1 };
+  const select = (id: string, category: string, values: readonly string[]) => ({
+    id,
+    name: id,
+    category,
+    type: 'select',
+    currentValue: values[0],
+    options: values.map((value) => ({ value, name: value })),
+  });
+  const configWrites = (agent: FakeAcpAgent) =>
+    sent(agent, 'session/set_config_option').map((message) => message.params);
+
+  /** A transport whose kill is only counted: the process keeps running. */
+  function unkillable(agent: FakeAcpAgent): FakeAcpTransport & { die(): void } {
+    const inner = createFakeAcpTransport(agent);
+    let kills = 0;
+    let settleExit!: (exit: AcpProcessExit) => void;
+    const exited = new Promise<AcpProcessExit>((resolve) => {
+      settleExit = resolve;
+    });
+    return {
+      ...inner,
+      exited,
+      kill: () => {
+        kills++;
+      },
+      get killCount() {
+        return kills;
+      },
+      die: () => settleExit({ code: 1, signal: null }),
+    };
+  }
+
+  /** A transport that never writes `session/cancel` (stdin stopped draining). */
+  function stallsCancel(agent: FakeAcpAgent): FakeAcpTransport {
+    const inner = createFakeAcpTransport(agent);
+    const writer = inner.stream.writable.getWriter();
+    const decoder = new TextDecoder();
+    return {
+      ...inner,
+      stream: {
+        readable: inner.stream.readable,
+        writable: new WritableStream<Uint8Array>({
+          write: (chunk) =>
+            decoder.decode(chunk).includes('session/cancel')
+              ? new Promise<void>(() => undefined)
+              : writer.write(chunk),
+        }),
+      },
+      get killCount() {
+        return inner.killCount;
+      },
+    };
+  }
+
+  it('4648874185: refreshes the advertised options from a live config_option_update, never from replay', async () => {
+    const h = start({ agent: () => ({ configOptions: [select('mode', 'mode', ['default'])] }) });
+    await h.session.start();
+    await expect(h.session.setMode('plan')).resolves.toBe(false);
+
+    const widened = {
+      sessionUpdate: 'config_option_update',
+      configOptions: [select('mode', 'mode', ['default', 'plan'])],
+    };
+    await h.agents[0].sessionUpdate('sess-1', widened, { isReplay: true });
+    await settle();
+    await expect(h.session.setMode('plan')).resolves.toBe(false);
+
+    await h.agents[0].sessionUpdate('sess-1', widened);
+    await settle();
+    await expect(h.session.setMode('plan')).resolves.toBe(true);
+    expect(configWrites(h.agents[0])).toEqual([
+      { sessionId: 'sess-1', configId: 'mode', value: 'plan' },
+    ]);
+    h.abort.abort();
+  });
+
+  it('4648874202: an explicitly empty option list in a config reply replaces the cache; a missing one keeps it', async () => {
+    const options = [select('model', 'model', ['a', 'b']), select('mode', 'mode', ['default', 'plan'])];
+    let reply: unknown = { configOptions: [] };
+    const h = start({
+      agent: () => ({ configOptions: options }),
+      script: (agent) => agent.handle('session/set_config_option', () => ({ result: reply })),
+    });
+    await h.session.start();
+    await expect(h.session.setModel('b')).resolves.toBe(true);
+    await expect(h.session.setMode('plan')).resolves.toBe(false);
+    expect(configWrites(h.agents[0])).toHaveLength(1);
+    h.abort.abort();
+
+    reply = {};
+    const kept = start({
+      agent: () => ({ configOptions: options }),
+      script: (agent) => agent.handle('session/set_config_option', () => ({ result: reply })),
+    });
+    await kept.session.start();
+    await expect(kept.session.setModel('b')).resolves.toBe(true);
+    await expect(kept.session.setMode('plan')).resolves.toBe(true);
+    expect(configWrites(kept.agents[0])).toHaveLength(2);
+    kept.abort.abort();
+  });
+
+  it('4648874189: cancels a permission request for another session without asking the sink', async () => {
+    const [executeRequest] = permissionRequests();
+    const sink = { request: jest.fn(async () => 'accept' as const) };
+    const h = start({
+      config: { approvals: sink },
+      script: (agent) =>
+        agent.handle('session/prompt', async (_params, fake) => {
+          await fake.request('session/request_permission', {
+            ...executeRequest,
+            sessionId: 'someone-else',
+          });
+          return { result: { stopReason: 'end_turn', _meta: { usage } } };
+        }),
+    });
+    await h.session.start();
+    await expect(h.session.prompt('x')).resolves.toBe(0);
+    expect(h.agents[0].received.find((m) => m.id === 1000)?.result).toEqual({
+      outcome: { outcome: 'cancelled' },
+    });
+    expect(sink.request).not.toHaveBeenCalled();
+    expect(h.types()).not.toContain('approvalRequested');
+    h.abort.abort();
+  });
+
+  it('4648874194: abort stops the agent when session/cancel cannot be written', async () => {
+    const h = start({
+      transport: stallsCancel,
+      script: (agent) => agent.handle('session/prompt', () => ({ hold: true })),
+    });
+    await h.session.start();
+    const turn = h.session.prompt('x');
+    await h.agents[0].next((m) => m.method === 'session/prompt');
+    h.abort.abort();
+    await turn;
+    expect(h.transports[0].killCount).toBe(1);
+    expect(sent(h.agents[0], 'session/cancel')).toHaveLength(0);
+  }, 10_000);
+
+  it('4648874194: interrupt resolves false and stops the agent when the cancel write stalls', async () => {
+    const h = start({
+      profile: { cancelBehavior: 'await-reply' },
+      transport: stallsCancel,
+      script: (agent) => agent.handle('session/prompt', () => ({ hold: true })),
+    });
+    await h.session.start();
+    const turn = h.session.prompt('x');
+    await h.agents[0].next((m) => m.method === 'session/prompt');
+    await expect(h.session.interrupt()).resolves.toBe(false);
+    await turn;
+    expect(h.transports[0].killCount).toBe(1);
+    expect(h.session.isClosed()).toBe(true);
+  }, 10_000);
+
+  it('4648874214: a respawn reapplies the acknowledged model and mode, not the opening ones', async () => {
+    const dying: Array<FakeAcpTransport & { die(): void }> = [];
+    const h = start({
+      config: { respawnOnPrompt: true },
+      options: { model: 'a' },
+      profile: {
+        sessionConfig: (o) => (o.model ? [{ configId: 'model', value: o.model, binding: true }] : []),
+        modeFor: () => 'default',
+      },
+      agent: () => ({
+        configOptions: [select('model', 'model', ['a', 'b']), select('mode', 'mode', ['default', 'plan'])],
+      }),
+      transport: (agent) => {
+        const transport = unkillable(agent);
+        dying.push(transport);
+        return transport;
+      },
+      script: (agent) =>
+        agent.handle('session/prompt', () => ({ result: { stopReason: 'end_turn', _meta: { usage } } })),
+    });
+    await h.session.start();
+    await expect(h.session.setModel('b')).resolves.toBe(true);
+    await expect(h.session.setMode('plan')).resolves.toBe(true);
+    dying[0].die();
+    await h.agents[0].close();
+    await settle();
+
+    await expect(h.session.prompt('after crash')).resolves.toBe(0);
+    expect(h.spawns).toHaveLength(2);
+    expect(configWrites(h.agents[1])).toEqual([
+      { sessionId: 'sess-1', configId: 'model', value: 'b' },
+      { sessionId: 'sess-1', configId: 'mode', value: 'plan' },
+    ]);
+    h.abort.abort();
+  });
+
+  it('4648874218: a generation the watchdog fired on takes no further prompt (lane)', async () => {
+    let prompts = 0;
+    const h = start({
+      options: { promptTimeoutMs: 30 },
+      transport: unkillable,
+      script: (agent) =>
+        agent.handle('session/prompt', () =>
+          ++prompts === 1 ? { hold: true } : { result: { stopReason: 'end_turn', _meta: { usage } } },
+        ),
+    });
+    await h.session.start();
+    await expect(h.session.prompt('slow')).resolves.toBe(1);
+    await settle();
+    expect(h.session.isClosed()).toBe(true);
+    await expect(h.session.prompt('next')).resolves.toBe(1);
+    expect(sent(h.agents[0], 'session/prompt')).toHaveLength(1);
+    expect(h.errors().map((error) => error.code)).toEqual(['prompt-timeout', 'process-exited']);
+    h.abort.abort();
+  });
+
+  it('4648874218: a generation the watchdog fired on is replaced before the next prompt (chat)', async () => {
+    let prompts = 0;
+    const h = start({
+      config: { respawnOnPrompt: true },
+      options: { promptTimeoutMs: 30 },
+      transport: unkillable,
+      script: (agent) =>
+        agent.handle('session/prompt', () =>
+          ++prompts === 1 ? { hold: true } : { result: { stopReason: 'end_turn', _meta: { usage } } },
+        ),
+    });
+    await h.session.start();
+    await expect(h.session.prompt('slow')).resolves.toBe(1);
+    await expect(h.session.prompt('next')).resolves.toBe(0);
+    expect(h.spawns).toHaveLength(2);
+    expect(sent(h.agents[0], 'session/prompt')).toHaveLength(1);
+    expect(sent(h.agents[1], 'session/resume')).toHaveLength(1);
+    h.abort.abort();
+  });
+
+  it('4648874208: a retried session/new that fails for another reason keeps its own error', async () => {
+    let creates = 0;
+    const h = start({
+      profile: { authMethod: 'oauth-personal' },
+      script: (agent) => {
+        agent.handle('initialize', () => ({ result: recordedResult(AGY, 'initialize') }));
+        agent.handle('authenticate', () => ({ result: {} }));
+        agent.handle('session/new', () =>
+          ++creates === 1
+            ? { error: { code: ACP_AUTH_REQUIRED_CODE, message: 'Authentication required' } }
+            : { error: { code: -32602, message: 'Invalid params' } },
+        );
+      },
+    });
+    await expect(h.session.start()).resolves.toEqual({ ok: false });
+    expect(sent(h.agents[0], 'authenticate')).toHaveLength(1);
+    expect(h.errors()).toEqual([
+      { code: 'request-failed', message: 'Test Agent session/new failed: Invalid params [code -32602]' },
+    ]);
+  });
+
+  it('4648874225: concurrent start() calls share one setup', async () => {
+    const h = start();
+    const [first, second] = await Promise.all([h.session.start(), h.session.start()]);
+    expect(first).toEqual({ ok: true, restoredContext: false });
+    expect(second).toBe(first);
+    expect(sent(h.agents[0], 'initialize')).toHaveLength(1);
+    expect(sent(h.agents[0], 'session/new')).toHaveLength(1);
+    expect(h.errors()).toEqual([]);
     h.abort.abort();
   });
 });

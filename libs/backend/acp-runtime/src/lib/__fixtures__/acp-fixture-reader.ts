@@ -54,7 +54,10 @@ export function recordedResult(
 
 /**
  * The `session/update` payloads the agent sent between the client's `nth`
- * request of `method` and the agent's reply to it.
+ * request of `method` and the agent's reply to it. Throws when that request
+ * is not recorded, has no recorded reply, or a later request of the same
+ * method starts before the reply: a window without its own reply would mix
+ * in the next request's updates.
  */
 export function recordedUpdatesDuring(
   fixture: readonly AcpFixtureEnvelope[],
@@ -70,7 +73,9 @@ export function recordedUpdatesDuring(
         .filter((earlier) => earlier.dir === 'out' && earlier.msg?.['method'] === method)
         .length === nth,
   );
-  if (start < 0) return [];
+  if (start < 0) {
+    throw new Error(`fixture has no ${method} request #${nth}`);
+  }
   const id = fixture[start].msg?.['id'];
   const updates: Array<{ update: unknown; meta?: Record<string, unknown> }> = [];
   for (const envelope of fixture.slice(start + 1)) {
@@ -79,7 +84,12 @@ export function recordedUpdatesDuring(
       envelope.msg?.['id'] === id &&
       envelope.msg?.['method'] === undefined
     ) {
-      break;
+      return updates;
+    }
+    if (envelope.dir === 'out' && envelope.msg?.['method'] === method) {
+      throw new Error(
+        `fixture ${method} #${nth} has no recorded reply before the next ${method}`,
+      );
     }
     const params = envelope.msg?.['params'];
     if (
@@ -93,5 +103,5 @@ export function recordedUpdatesDuring(
       });
     }
   }
-  return updates;
+  throw new Error(`fixture ${method} #${nth} has no recorded reply`);
 }

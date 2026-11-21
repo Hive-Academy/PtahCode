@@ -15,8 +15,9 @@
  *
  * A failure is visible in the tree: an `error` event becomes an `Error: ...`
  * text block of the turn's assistant message, and a `failed` terminal with no
- * message yet still opens and completes one, so a turn that failed before any
- * output (a refused handshake, a rejected prompt) is not an empty row.
+ * message yet still opens one with the terminal's error text (or a generic
+ * failure line) and completes it, so a turn that failed before any output (a
+ * refused handshake, a rejected prompt) is not an empty row.
  */
 import type {
   EventSource,
@@ -219,7 +220,21 @@ export function createFlatStreamProjector(
         const state = turnFor(event);
         if (state.completed) return [];
         if (!state.started && event.status !== 'failed') return [];
+        // A failed turn with no output yet: the message it opens says why,
+        // instead of being an empty row (PR #1445 review). A turn whose error
+        // event already opened the message keeps that text only.
+        const opensFailure = !state.started;
         const { out } = assistant();
+        if (opensFailure) {
+          state.textItemId = `error:${event.sequence}`;
+          state.textBlock += 1;
+          out.push({
+            ...base(state.messageId, 'error'),
+            eventType: 'text_delta',
+            delta: `Error: ${event.error?.message || 'the turn failed'}`,
+            blockIndex: state.textBlock,
+          });
+        }
         state.completed = true;
         out.push({
           ...base(state.messageId, 'complete'),

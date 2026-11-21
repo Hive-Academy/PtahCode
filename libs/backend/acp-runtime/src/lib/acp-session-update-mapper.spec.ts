@@ -599,3 +599,35 @@ describe('replayed history through the stream projector', () => {
     expect(ids).toEqual(['user-message-1', 'user-message-1', 'user-message-2']);
   });
 });
+
+describe('tool metadata lifetime (PR #1445 review)', () => {
+  const started = {
+    sessionUpdate: 'tool_call',
+    toolCallId: 'call-1',
+    title: 'Run tests',
+    kind: 'execute',
+    status: 'pending',
+  } as SessionUpdate;
+  const completed = {
+    sessionUpdate: 'tool_call_update',
+    toolCallId: 'call-1',
+    status: 'completed',
+  } as SessionUpdate;
+  const toolName = (bodies: ReturnType<ReturnType<typeof createEventMapper>['map']>) =>
+    bodies.find((body) => body.type === 'toolCompleted');
+
+  it('uses the remembered title for the final update, then releases it', () => {
+    const mapper = createEventMapper();
+    mapper.map(started);
+    expect(toolName(mapper.map(completed))).toMatchObject({ toolName: 'Run tests', kind: 'execute' });
+    // A duplicate final update no longer finds the released entry.
+    expect(toolName(mapper.map(completed))).toMatchObject({ toolName: undefined, kind: undefined });
+  });
+
+  it('releaseTools forgets tools that never finished', () => {
+    const mapper = createEventMapper();
+    mapper.map(started);
+    mapper.releaseTools();
+    expect(toolName(mapper.map(completed))).toMatchObject({ toolName: undefined });
+  });
+});

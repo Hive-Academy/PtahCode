@@ -63,6 +63,21 @@ export function readConfigOptions(
   return response['configOptions'].filter(isRecord);
 }
 
+/**
+ * The complete option list a config-write reply or a `config_option_update`
+ * carries. An explicit list, even an empty one, is authoritative and replaces
+ * the advertised set; `undefined` means the message carried no list (missing
+ * or malformed), so the set is kept.
+ */
+export function readAuthoritativeConfigOptions(
+  message: unknown,
+): readonly Record<string, unknown>[] | undefined {
+  if (!isRecord(message) || !Array.isArray(message['configOptions'])) {
+    return undefined;
+  }
+  return message['configOptions'].filter(isRecord);
+}
+
 /** The mode ids a session advertised in `modes.availableModes`, read defensively. */
 export function readModeIds(response: unknown): readonly string[] {
   if (!isRecord(response) || !isRecord(response['modes'])) return [];

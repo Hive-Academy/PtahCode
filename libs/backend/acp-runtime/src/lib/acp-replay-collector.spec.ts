@@ -24,7 +24,7 @@ describe('createAcpReplayCollector', () => {
   });
 
   it('keeps the newest events and says the history was truncated', () => {
-    const collector = createAcpReplayCollector(ids, 3);
+    const collector = createAcpReplayCollector(ids, { maxEvents: 3 });
     collector.add(
       ['a', 'b', 'c', 'd', 'e'].map((delta) => ({
         type: 'textDelta' as const,
@@ -40,5 +40,39 @@ describe('createAcpReplayCollector', () => {
     expect(
       events.slice(1).map((event) => (event.type === 'textDelta' ? event.delta : '')),
     ).toEqual(['c', 'd', 'e']);
+  });
+
+  it('bounds merged user chunks by the text budget and says the text was cut', () => {
+    const collector = createAcpReplayCollector(ids, { maxTextChars: 10 });
+    collector.add(
+      ['abcd', 'efgh', 'ijkl', 'mnop'].map((text) => ({
+        type: 'userText' as const,
+        itemId: 'user-message-1',
+        text,
+      })),
+    );
+    const events = collector.events();
+    expect(events).toHaveLength(2);
+    expect(events[0]).toMatchObject({
+      type: 'info',
+      message:
+        'The replayed history was truncated: 6 characters of text over the 10 character limit were cut',
+    });
+    expect(events[1]).toMatchObject({ type: 'userText', text: 'abcdefghij' });
+  });
+
+  it('drops older events to make room before cutting the newest text', () => {
+    const collector = createAcpReplayCollector(ids, { maxTextChars: 6 });
+    collector.add([
+      { type: 'textDelta', itemId: 'm', delta: 'old' },
+      { type: 'userText', itemId: 'user-message-2', text: 'new' },
+      { type: 'userText', itemId: 'user-message-2', text: 'er!' },
+    ]);
+    const events = collector.events();
+    expect(events.map((event) => event.type)).toEqual(['info', 'userText']);
+    expect(events[0]).toMatchObject({
+      message: 'The replayed history was truncated: the oldest 1 events were dropped',
+    });
+    expect(events[1]).toMatchObject({ text: 'newer!' });
   });
 });

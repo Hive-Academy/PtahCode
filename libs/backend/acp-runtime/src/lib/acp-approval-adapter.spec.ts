@@ -90,6 +90,35 @@ describe('acp approval adapter', () => {
     expect(sink.request).not.toHaveBeenCalled();
   });
 
+  it('never maps acceptForSession to allow_always, even when only allow_always is offered', () => {
+    const alwaysOnly = {
+      ...request,
+      options: [{ optionId: 'yes-always', name: 'Always', kind: 'allow_always' }],
+    } as unknown as RequestPermissionRequest;
+    expect(acpResponseForDecision(alwaysOnly, 'acceptForSession')).toEqual({
+      response: { outcome: { outcome: 'cancelled' } },
+      refused: true,
+    });
+  });
+
+  it('answers cancel when the sink aborts synchronously and returns a settled accept', async () => {
+    const approval = toProviderApprovalRequest(request, 'r');
+    const controller = new AbortController();
+    const racing: ProviderApprovalSink = {
+      request: () => {
+        controller.abort();
+        return Promise.resolve('accept');
+      },
+    };
+    await expect(
+      requestAcpApproval(racing, request, approval, controller.signal),
+    ).resolves.toEqual({
+      decision: 'cancel',
+      response: { outcome: { outcome: 'cancelled' } },
+      refused: true,
+    });
+  });
+
   it('treats a prototype-member answer as cancel and never throws', async () => {
     const approval = toProviderApprovalRequest(request, 'r');
     const odd = { request: async () => 'toString' as ProviderApprovalDecision };

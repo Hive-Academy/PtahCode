@@ -207,7 +207,32 @@ describe('createFlatStreamProjector', () => {
     const silent = createFlatStreamProjector().project(
       event({ type: 'terminal', status: 'failed', disposition: 'reusable' }, { turnId: 't-9' }),
     );
-    expect(silent.map((row) => row.eventType)).toEqual(['message_start', 'message_complete']);
+    expect(shapes(silent)).toEqual([
+      expect.objectContaining({ eventType: 'message_start', role: 'assistant' }),
+      expect.objectContaining({
+        eventType: 'text_delta',
+        delta: 'Error: the turn failed',
+        blockIndex: 0,
+      }),
+      expect.objectContaining({ eventType: 'message_complete', stopReason: 'failed' }),
+    ]);
+
+    const rejected = createFlatStreamProjector().project(
+      event(
+        {
+          type: 'terminal',
+          status: 'failed',
+          disposition: 'reusable',
+          error: { code: 'request-failed', message: 'Prompt rejected' },
+        },
+        { turnId: 't-10' },
+      ),
+    );
+    expect(shapes(rejected)).toEqual([
+      expect.objectContaining({ eventType: 'message_start' }),
+      expect.objectContaining({ eventType: 'text_delta', delta: 'Error: Prompt rejected' }),
+      expect.objectContaining({ eventType: 'message_complete', stopReason: 'failed' }),
+    ]);
     expect(
       createFlatStreamProjector().project(
         event({ type: 'terminal', status: 'interrupted', disposition: 'reusable' }),

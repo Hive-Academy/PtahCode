@@ -6,8 +6,11 @@
  * Options are chosen by `kind`, never by id or position (ids and order differ
  * per agent):
  * - `accept` -> `allow_once`;
- * - `acceptForSession` -> `allow_always`, else `allow_once` (A17: Ptah keeps
- *   no allow-list of its own, so the agent asks again next time);
+ * - `acceptForSession` -> `allow_once` only. ACP `allow_always` asks the agent
+ *   to remember the grant with a scope and duration the agent chooses, which
+ *   can outlive this session; a session-scoped approval must not widen into
+ *   that (PR #1445 review). Ptah keeps no allow-list of its own (A17), so the
+ *   agent asks again next time;
  * - `decline` -> `reject_once`;
  * - `cancel`, an abort, a sink that rejects, or a decision with no matching
  *   option -> `cancelled`. Nothing but an explicit accept ever allows.
@@ -35,7 +38,7 @@ const FALLBACK_TITLE = 'a tool call';
 /** The option kinds tried for a decision, in order. */
 const KIND_LADDER: Readonly<Record<ProviderApprovalDecision, readonly string[]>> = {
   accept: ['allow_once'],
-  acceptForSession: ['allow_always', 'allow_once'],
+  acceptForSession: ['allow_once'],
   decline: ['reject_once'],
   cancel: [],
 };
@@ -112,6 +115,9 @@ export async function requestAcpApproval(
     } finally {
       if (onAbort) signal.removeEventListener('abort', onAbort);
     }
+    // A sink that aborted synchronously and then returned an already settled
+    // `accept` can win the race above; an abort always wins (PR #1445 review).
+    if (signal.aborted) decision = 'cancel';
   }
   // Own keys only: a sink answer such as `toString` is no decision.
   if (!Object.prototype.hasOwnProperty.call(KIND_LADDER, decision)) decision = 'cancel';

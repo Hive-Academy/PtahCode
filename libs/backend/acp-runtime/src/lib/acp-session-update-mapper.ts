@@ -18,6 +18,12 @@ interface ToolCallDetails {
 export interface AcpSessionUpdateMapper {
   /** Never throws; an update with nothing to show maps to `[]`. */
   map(update: SessionUpdate): ProviderSessionEventBody[];
+  /**
+   * Forget the remembered tool metadata. A finished tool's entry is released
+   * when it completes or fails; the runtime calls this at turn, replay and
+   * generation boundaries for tools that never finished.
+   */
+  releaseTools(): void;
 }
 
 export interface AcpSessionUpdateMapperOptions {
@@ -239,6 +245,8 @@ export function createAcpSessionUpdateMapper(
         const title =
           typeof update.title === 'string' ? update.title : remembered?.title;
         if (update.status === 'completed' || update.status === 'failed') {
+          // The final update: its metadata has no further use.
+          tools.delete(update.toolCallId);
           const isCommand = update.status === 'completed' && kind === 'execute';
           return [
             {
@@ -287,6 +295,9 @@ export function createAcpSessionUpdateMapper(
         // that breaks the mapper shows nothing; the turn itself goes on.
         return [];
       }
+    },
+    releaseTools() {
+      tools.clear();
     },
   };
 }

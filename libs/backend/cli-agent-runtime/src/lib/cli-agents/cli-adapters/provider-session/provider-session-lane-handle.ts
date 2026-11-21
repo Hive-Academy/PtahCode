@@ -214,9 +214,47 @@ export function createProviderSessionLaneHandle(
       );
   };
 
+  /**
+   * The account-binding checkpoint (`CliCommandOptions.onAccountBinding`),
+   * awaited before the task prompt as the Codex lane adapter does, so a named
+   * lane never prompts before its binding to the session id persisted.
+   * Resolves false, after one error segment and stopping the agent, when the
+   * binding is incomplete or the checkpoint rejects.
+   */
+  const persistAccountBinding = async (sessionId: string): Promise<boolean> => {
+    if (options.accountBinding === undefined && options.accountBindingId === undefined) {
+      return true;
+    }
+    try {
+      if (!options.accountBinding || !options.accountBindingId || !options.onAccountBinding) {
+        throw new Error('the lane account binding is incomplete');
+      }
+      await options.onAccountBinding(
+        {
+          accountBinding: options.accountBinding,
+          accountBindingId: options.accountBindingId,
+        },
+        sessionId,
+      );
+      return true;
+    } catch (error: unknown) {
+      logger?.error('[AcpSessionHandle] account binding checkpoint failed', {
+        ...logContext,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      const message = `${name} did not start: its account binding could not be recorded`;
+      output.emit(`\n[${name}] ${message}\n`);
+      segment.emit({ type: 'error', content: message });
+      abort.abort();
+      return false;
+    }
+  };
+
   const runFirstTurn = async (): Promise<number> => {
     const setup = await session.start();
     if (!setup.ok || abort.signal.aborted) return 1;
+    const sessionId = session.getSessionId();
+    if (!sessionId || !(await persistAccountBinding(sessionId))) return 1;
     await awaitMcpAttachment();
     if (abort.signal.aborted || session.isClosed()) return 1;
     taskPromptSent = true;

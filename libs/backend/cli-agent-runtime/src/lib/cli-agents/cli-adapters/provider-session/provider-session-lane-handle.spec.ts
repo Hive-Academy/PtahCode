@@ -5,7 +5,7 @@
  * of the former `acp-session-handle.spec.ts`, assertions unchanged; the
  * runtime-only case (SDK load failure) lives in `acp-session-runtime.spec.ts`.
  */
-import type { CliOutputSegment } from '@ptah-extension/shared';
+import type { CliOutputSegment, ProviderAccountBinding } from '@ptah-extension/shared';
 import { createMockLogger } from '@ptah-extension/shared/testing';
 import type { MockLogger } from '@ptah-extension/shared/testing';
 import type { Logger } from '@ptah-extension/vscode-core';
@@ -1366,5 +1366,77 @@ describe('createProviderSessionLaneHandle — P2', () => {
       { type: 'error', content: `${NAME} cannot start: no process spawner was supplied for the lane` },
     ]);
     expect(handle.supportsContinuation?.()).toBe(false);
+  });
+});
+
+describe('createProviderSessionLaneHandle — account binding (PR #1445 review)', () => {
+  const binding: ProviderAccountBinding = {
+    version: 1,
+    provider: 'grok',
+    profileId: 'profile-1',
+    routeRevision: 1,
+    routeFingerprint: 'fingerprint',
+    authEpoch: 1,
+    runId: 'run-1',
+    identity: { kind: 'unknown' },
+  } as unknown as ProviderAccountBinding;
+
+  it('awaits the binding checkpoint with the session id before the task prompt', async () => {
+    let agentRef: FakeAcpAgent | undefined;
+    const order: string[] = [];
+    const onAccountBinding = jest.fn(async () => {
+      expect(agentRef && sent(agentRef, 'session/prompt')).toHaveLength(0);
+      order.push('binding');
+    });
+    const h = start({
+      options: { accountBinding: binding, accountBindingId: 'binding-1', onAccountBinding },
+      script: (agent) => {
+        agentRef = agent;
+        agent.handle('session/prompt', () => {
+          order.push('prompt');
+          return { result: { stopReason: 'end_turn' } };
+        });
+      },
+    });
+    await expect(h.handle.done).resolves.toBe(0);
+    expect(onAccountBinding).toHaveBeenCalledTimes(1);
+    expect(onAccountBinding).toHaveBeenCalledWith(
+      { accountBinding: binding, accountBindingId: 'binding-1' },
+      SESSION_ID,
+    );
+    expect(order).toEqual(['binding', 'prompt']);
+    h.handle.abort.abort();
+  });
+
+  it('never calls the checkpoint for a default-account lane', async () => {
+    const onAccountBinding = jest.fn(async () => undefined);
+    const h = start({ options: { onAccountBinding } });
+    await expect(h.handle.done).resolves.toBe(0);
+    expect(onAccountBinding).not.toHaveBeenCalled();
+    h.handle.abort.abort();
+  });
+
+  it('returns 1 without sending the task prompt when the checkpoint rejects', async () => {
+    const onAccountBinding = jest.fn(async () => {
+      throw new Error('binding storage unavailable');
+    });
+    const h = start({
+      options: { accountBinding: binding, accountBindingId: 'binding-1', onAccountBinding },
+    });
+    await expect(h.handle.done).resolves.toBe(1);
+    await settle();
+    expect(sent(h.agent, 'session/prompt')).toHaveLength(0);
+    expect(h.errors()).toEqual([
+      `${NAME} did not start: its account binding could not be recorded`,
+    ]);
+    expect(h.handle.supportsContinuation?.()).toBe(false);
+  });
+
+  it('returns 1 without prompting when the binding is incomplete', async () => {
+    const onAccountBinding = jest.fn(async () => undefined);
+    const h = start({ options: { accountBindingId: 'binding-1', onAccountBinding } });
+    await expect(h.handle.done).resolves.toBe(1);
+    expect(onAccountBinding).not.toHaveBeenCalled();
+    expect(sent(h.agent, 'session/prompt')).toHaveLength(0);
   });
 });
