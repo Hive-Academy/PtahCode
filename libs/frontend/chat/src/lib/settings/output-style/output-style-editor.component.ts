@@ -259,7 +259,7 @@ interface StaleConflict {
         </form>
 
         @if (confirmingDiscard()) {
-          <div class="sticky bottom-0 z-[var(--ptah-z-raised)] border-t border-base-300 bg-surface-2 p-3 text-xs text-base-content" role="alertdialog" aria-modal="false"
+          <div class="sticky bottom-0 z-[var(--ptah-z-raised)] border-t border-base-300 bg-surface-2 p-[var(--ptah-space-3)] text-xs text-base-content" role="alertdialog" aria-modal="false"
             aria-label="Discard unsaved changes" data-testid="output-style-discard-confirm"
             (keydown.escape)="keepEditing($event)">
             <p>Discard your changes to this style? Nothing has been saved.</p>
@@ -271,7 +271,7 @@ interface StaleConflict {
             </div>
           </div>
         } @else if (conflict(); as pending) {
-          <div class="sticky bottom-0 z-[var(--ptah-z-raised)] border-t border-base-300 bg-surface-2 p-3 text-xs text-base-content" role="alertdialog" aria-modal="false"
+          <div class="sticky bottom-0 z-[var(--ptah-z-raised)] border-t border-base-300 bg-surface-2 p-[var(--ptah-space-3)] text-xs text-base-content" role="alertdialog" aria-modal="false"
             aria-label="Confirm replacing an existing file" data-testid="output-style-conflict-dialog"
             (keydown.escape)="dismissConflict($event)">
             <p>{{ pending.message }}</p>
@@ -283,7 +283,7 @@ interface StaleConflict {
             </div>
           </div>
         } @else if (stale(); as changed) {
-          <div class="sticky bottom-0 z-[var(--ptah-z-raised)] border-t border-base-300 bg-surface-2 p-3 text-xs text-base-content" role="alertdialog" aria-modal="false"
+          <div class="sticky bottom-0 z-[var(--ptah-z-raised)] border-t border-base-300 bg-surface-2 p-[var(--ptah-space-3)] text-xs text-base-content" role="alertdialog" aria-modal="false"
             aria-label="The style file changed on disk" data-testid="output-style-stale-dialog"
             (keydown.escape)="dismissConflict($event)">
             @if (changed.fresh === null) {

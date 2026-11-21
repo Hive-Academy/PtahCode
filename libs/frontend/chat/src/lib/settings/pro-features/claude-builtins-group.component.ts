@@ -15,9 +15,6 @@ import { PtahBadgeDirective } from '@ptah-extension/ui';
 export type BuiltinGroupId = 'tools' | 'terminal' | 'synced';
 export type BuiltinGroupSwitchState = 'on' | 'off' | 'mixed';
 
-const THUMB_CLASS =
-  'pointer-events-none absolute left-0.5 size-2.5 rounded-full transition-transform motion-reduce:transition-none';
-
 @Component({
   selector: 'ptah-claude-builtins-group',
   standalone: true,
@@ -52,7 +49,7 @@ const THUMB_CLASS =
             <span ptahBadge appearance="outline" size="xs" class="shrink-0">{{ badgeText }}</span>
           }
           <span
-            class="ml-auto shrink-0 text-[length:var(--ptah-text-hint-size)] tabular-nums text-base-content-muted"
+            class="flex-1 shrink-0 whitespace-nowrap text-right text-[length:var(--ptah-text-hint-size)] tabular-nums text-base-content-muted"
             [attr.data-testid]="'claude-tools-group-meta-' + groupId()"
           >{{ onCount() }}/{{ total() }} on · {{ tokens() }} tokens</span>
         </button>
@@ -67,7 +64,14 @@ const THUMB_CLASS =
             (click)="onSwitch()"
             [attr.data-testid]="'claude-tools-group-switch-' + groupId()"
           >
-            <span [class]="thumbClass()" aria-hidden="true"></span>
+            <span
+              class="pointer-events-none absolute left-0.5 size-2.5 rounded-full transition-transform motion-reduce:transition-none"
+              [class.translate-x-3]="switchState() === 'on'"
+              [class.translate-x-1.5]="switchState() === 'mixed'"
+              [class.bg-primary-content]="switchState() !== 'off'"
+              [class.bg-base-content/70]="switchState() === 'off'"
+              aria-hidden="true"
+            ></span>
           </button>
         }
       </div>
@@ -117,13 +121,6 @@ export class ClaudeBuiltinsGroupComponent {
   protected readonly ariaChecked = computed(() => {
     const state = this.switchState();
     return state === 'mixed' ? 'mixed' : String(state === 'on');
-  });
-
-  protected readonly thumbClass = computed(() => {
-    const state = this.switchState();
-    const position =
-      state === 'on' ? 'translate-x-3 bg-primary-content' : state === 'mixed' ? 'translate-x-1.5 bg-primary-content' : 'bg-base-content/70';
-    return `${THUMB_CLASS} ${position}`;
   });
 
   protected onDisclosure(): void {

@@ -241,6 +241,11 @@ describe('LicenseStatusCardComponent', () => {
     expect(
       element.querySelector('[data-testid="membership-state-badge"]')?.textContent?.trim(),
     ).toBe('Needs attention');
+    const stateIcon = element.querySelector('[data-testid="membership-state-badge"] lucide-angular');
+    expect(stateIcon?.classList.contains('size-3')).toBe(true);
+    expect(stateIcon?.classList.contains('text-warning')).toBe(true);
+    expect(stateIcon?.classList.contains('text-success')).toBe(false);
+    expect(stateIcon?.classList.contains('text-base-content-muted')).toBe(false);
     expect(element.textContent).not.toContain('Active');
     // The A2 key-not-active copy is community-only.
     expect(element.querySelector('[data-testid="membership-key-row"]')).toBeNull();

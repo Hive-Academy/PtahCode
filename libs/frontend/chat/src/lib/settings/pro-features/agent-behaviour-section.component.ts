@@ -131,7 +131,8 @@ interface LoadError {
       <h2 id="agent-behaviour-heading" class="sr-only">Agent behaviour</h2>
       <ptah-form-section
         id="advanced-agent-behaviour"
-        class="[[data-glass=on]_&>section]:py-0 [[data-glass=on]_&>section]:[border-bottom:0]"
+        flushInGlass
+        class="[[data-glass=on]_&>section]:[border-bottom:0]"
         heading="Agent behaviour"
         [icon]="BotIcon"
         description="How the main agent plans and how hard it works."

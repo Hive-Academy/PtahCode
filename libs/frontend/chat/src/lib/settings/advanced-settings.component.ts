@@ -183,7 +183,7 @@ const KEYED_IMPORT_ERROR = /^(ptah\.|config:)/;
           description="Upkeep jobs for memory, scheduled jobs and the workspace harness."
           [wide]="true"
           [icon]="SlidersIcon"
-          class="[[data-glass=on]_&>section]:py-0"
+          flushInGlass
         >
           <div
             class="flex flex-col divide-y divide-base-content/10 border-y border-base-content/10"

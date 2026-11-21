@@ -97,7 +97,7 @@ export const COULD_NOT_LOAD_MCP_CONFIG =
         [level]="2"
         [divider]="true"
         [icon]="PlugIcon"
-        class="[[data-glass=on]_&>section]:py-0"
+        flushInGlass
       >
         @if (loaded()) {
           <ptah-status aside status="online" [label]="'Port ' + savedPort()" />

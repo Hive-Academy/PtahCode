@@ -128,7 +128,7 @@ const DOWNLOAD_CANCELLED_BY_USER = 'Save cancelled by user';
         @if (error(); as err) {
           <div
             role="alert"
-            class="flex items-center gap-[var(--ptah-gap-label)] rounded border border-error/40 p-3 text-xs text-base-content"
+            class="flex items-center gap-[var(--ptah-gap-label)] rounded border border-error/40 p-[var(--ptah-space-3)] text-xs text-base-content"
             data-testid="system-prompt-drawer-error"
           >
             <lucide-angular
@@ -155,7 +155,7 @@ const DOWNLOAD_CANCELLED_BY_USER = 'Save cancelled by user';
         @if (regenerationStartedAt() !== null) {
           <div
             role="status"
-            class="flex items-center gap-[var(--ptah-gap-label)] rounded border border-base-300 p-3 text-xs text-base-content"
+            class="flex items-center gap-[var(--ptah-gap-label)] rounded border border-base-300 p-[var(--ptah-space-3)] text-xs text-base-content"
             data-testid="regenerate-may-be-running"
           >
             <lucide-angular
@@ -194,7 +194,7 @@ const DOWNLOAD_CANCELLED_BY_USER = 'Save cancelled by user';
           </p>
         } @else if (hasGeneratedPrompt()) {
           <!-- Metadata (A14) -->
-          <div class="rounded border border-base-300 bg-base-200/40 p-3">
+          <div class="rounded border border-base-300 bg-base-200/40 p-[var(--ptah-space-3)]">
             @if (generatedAt(); as ts) {
               <div
                 class="flex items-center gap-[var(--ptah-gap-label)] text-xs text-base-content-muted"
@@ -322,7 +322,7 @@ const DOWNLOAD_CANCELLED_BY_USER = 'Save cancelled by user';
       @if (isOpen()) {
         <div
           drawer-footer
-          class="flex items-center justify-between gap-[var(--ptah-gap-controls)] border-t border-base-300 px-5 py-3"
+          class="flex items-center justify-between gap-[var(--ptah-gap-controls)] border-t border-base-300 px-[calc(var(--ptah-space-4)_+_var(--ptah-space-1))] py-[var(--ptah-space-3)]"
         >
           <div class="flex items-center gap-[var(--ptah-gap-controls)]">
             <button

@@ -45,7 +45,7 @@ export const COULD_NOT_SET_DEFAULT_PROVIDER = 'Could not set the default provide
         heading="VS Code language model"
         description="Uses models from VS Code's Language Model API. No API key required."
         [icon]="CpuIcon"
-        class="[[data-glass=on]_&>section]:py-0"
+        flushInGlass
         aria-labelledby="vscode-lm-heading"
         data-glass-surface="content"
       >

@@ -283,7 +283,7 @@ describe('ClaudeBuiltinsConfigComponent', () => {
       expect(bar.nextElementSibling).toBe(byTestId('claude-tools-groups'));
 
       const card = element.querySelector('ptah-form-section');
-      expect(card?.className).toContain('[[data-glass=on]_&>section]:py-0');
+      expect(card?.querySelector(':scope > section')?.className).toContain('[[data-glass=on]_&]:py-0');
       expect(card?.querySelector('[style*="padding"]')).toBeNull();
     });
 

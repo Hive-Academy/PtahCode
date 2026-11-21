@@ -180,7 +180,8 @@ function withItem(list: readonly string[], id: string, on: boolean): string[] {
     <!-- With glass on, the card inset comes from the shared Settings rule; the section adds no block padding to it. -->
     <ptah-form-section
       id="advanced-claude-tools"
-      class="[[data-glass=on]_&>section]:py-0 [[data-glass=on]_&>section]:[border-bottom:0]"
+      flushInGlass
+        class="[[data-glass=on]_&>section]:[border-bottom:0]"
       [level]="2"
       [wide]="true"
       [divider]="true"
@@ -227,14 +228,16 @@ function withItem(list: readonly string[], id: string, on: boolean): string[] {
           @if (groupProgress(); as progress) {
             <span aria-hidden="true" class="text-[length:var(--ptah-text-hint-size)] tabular-nums text-base-content-muted" data-testid="claude-tools-group-progress-visual">Saving {{ progress.done }} of {{ progress.total }}</span>
           }
-          <div class="relative ml-auto flex min-w-40 max-w-64 flex-1 items-center">
+          <!-- The wrapper takes the free width of the bar and holds the filter at its right end. -->
+          <div class="flex min-w-40 flex-1 justify-end">
+            <div class="relative flex w-full max-w-64 items-center">
             <lucide-angular [img]="SearchIcon" class="pointer-events-none absolute left-2 size-[var(--ptah-icon-sm)] text-base-content-muted" aria-hidden="true" />
             <input
               ptahInput
               size="xs"
               type="text"
               role="searchbox"
-              class="w-full pl-7 pr-7"
+              class="w-full pl-[calc(var(--ptah-space-6)_+_var(--ptah-space-1))] pr-[calc(var(--ptah-space-6)_+_var(--ptah-space-1))]"
               placeholder="Filter tools and skills"
               aria-label="Filter tools and skills"
               autocomplete="off"
@@ -249,6 +252,7 @@ function withItem(list: readonly string[], id: string, on: boolean): string[] {
                 <lucide-angular [img]="XIcon" class="size-[var(--ptah-icon-xs)]" aria-hidden="true" />
               </button>
             }
+            </div>
           </div>
         </div>
 

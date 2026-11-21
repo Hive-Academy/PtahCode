@@ -133,7 +133,7 @@ function isSandboxMode(value: unknown): value is CodexSandboxMode {
         wide
         heading="Codex sandbox"
         [icon]="ShieldCheckIcon"
-        class="[[data-glass=on]_&>section]:py-0"
+        flushInGlass
       >
       <!-- The sr-only span keeps the aria-labelledby id of the outer section. -->
       <span class="sr-only" id="codex-sandbox-heading">Codex sandbox</span>

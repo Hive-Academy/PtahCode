@@ -546,18 +546,19 @@ describe('AdvancedSettingsGroupComponent', () => {
   });
 
   it("'section' with its own glass card has no stacked block padding; without the card it keeps the padding", async () => {
-    const FLUSH = '[[data-glass=on]_&>section]:py-0';
+    const FLUSH = '[[data-glass=on]_&]:py-0';
     fixture = TestBed.createComponent(AdvancedSettingsGroupComponent);
     fixture.componentRef.setInput('groupId', 'context-budgets');
     fixture.componentRef.setInput('headingStyle', 'section');
     fixture.detectChanges();
     await settle();
     const formSection = (): Element | null => host().querySelector('ptah-form-section');
+    const inner = (): Element | null => host().querySelector('ptah-form-section > section');
     expect(host().querySelector('section')?.getAttribute('data-glass-surface')).toBe('content');
-    expect(formSection()?.classList.contains(FLUSH)).toBe(true);
+    expect(inner()?.classList.contains(FLUSH)).toBe(true);
     fixture.componentRef.setInput('contentSurface', false);
     fixture.detectChanges();
-    expect(formSection()?.classList.contains(FLUSH)).toBe(false);
+    expect(inner()?.classList.contains(FLUSH)).toBe(false);
     // The host classes of the form section stay.
     expect(formSection()?.classList.contains('block')).toBe(true);
   });

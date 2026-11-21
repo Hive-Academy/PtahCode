@@ -118,7 +118,7 @@ const KEY_NOT_ACTIVE_HINT =
         [wide]="true"
         [divider]="true"
         [icon]="KeyIcon"
-        class="[[data-glass=on]_&>section]:py-0"
+        flushInGlass
         data-glass-surface="content"
       >
         <!-- Membership (A1, A7): the one status display. Plan and state are badges in the aside (M-8); the
@@ -136,7 +136,10 @@ const KEY_NOT_ACTIVE_HINT =
             <span ptahBadge appearance="outline" [tone]="membershipState().tone" data-testid="membership-state-badge">
               <lucide-angular
                 [img]="membershipState().icon"
-                [class]="'size-3 shrink-0 ' + membershipState().iconClass"
+                class="size-3 shrink-0"
+                [class.text-warning]="membershipState().tone === 'warn'"
+                [class.text-success]="membershipState().tone === 'ok'"
+                [class.text-base-content-muted]="membershipState().tone === 'neutral'"
                 aria-hidden="true"
               />
               <span class="text-base-content">{{ membershipState().label }}</span>
@@ -499,7 +502,6 @@ export class LicenseStatusCardComponent {
         label: 'Needs attention',
         tone: 'warn',
         icon: TriangleAlert,
-        iconClass: 'text-warning',
       } as const;
     }
     if (this.licenseValid()) {
@@ -507,14 +509,12 @@ export class LicenseStatusCardComponent {
         label: 'Active',
         tone: 'ok',
         icon: CircleCheck,
-        iconClass: 'text-success',
       } as const;
     }
     return {
       label: 'Inactive',
       tone: 'neutral',
       icon: CircleAlert,
-      iconClass: 'text-base-content-muted',
     } as const;
   });
 

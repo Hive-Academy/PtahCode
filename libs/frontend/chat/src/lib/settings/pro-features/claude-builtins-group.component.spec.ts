@@ -118,6 +118,17 @@ describe('ClaudeBuiltinsGroupComponent', () => {
     expect(groupSwitch().getAttribute('aria-checked')).toBe(ariaChecked);
     expect(groupSwitch().getAttribute('aria-label')).toBe('Turn on all Built-in tools');
 
+    // The thumb position and ink follow the state. The class lists are static for the class audit.
+    const thumb = groupSwitch().querySelector('span') as HTMLElement;
+    const stateClasses = ['translate-x-3', 'translate-x-1.5', 'bg-primary-content', 'bg-base-content/70'];
+    const expected = {
+      on: ['translate-x-3', 'bg-primary-content'],
+      mixed: ['translate-x-1.5', 'bg-primary-content'],
+      off: ['bg-base-content/70'],
+    }[state];
+    expect(stateClasses.filter((name) => thumb.classList.contains(name))).toEqual(expected);
+    expect(thumb.classList.contains('rounded-full')).toBe(true);
+
     groupSwitch().click();
     expect(host.requests).toEqual([requested]);
   });

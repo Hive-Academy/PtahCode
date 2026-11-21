@@ -70,7 +70,8 @@ const OUTPUT_STYLE_PARITY_FAILED =
     >
       <ptah-form-section
         #formSection
-        class="[[data-glass=on]_&>section]:py-0 [[data-glass=on]_&>section]:[border-bottom:0]"
+        flushInGlass
+        class="[[data-glass=on]_&>section]:[border-bottom:0]"
         heading="Output style"
         description="How the agent writes its answers. One style is active at a time."
         [level]="2"
