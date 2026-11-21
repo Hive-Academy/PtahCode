@@ -1,6 +1,6 @@
 /**
  * AcpVendorProfile — the per-vendor data and small functions the ACP runner
- * (`createAcpSessionHandle`) needs. Everything vendor-specific lives here, so
+ * (`createAcpSession`) needs. Everything vendor-specific lives here, so
  * the runner stays vendor-neutral and a further ACP agent is a new profile only.
  *
  * A profile holds no state and performs no I/O.
@@ -12,8 +12,41 @@
  * `session/set_config_option` only).
  */
 import type { McpServer } from '@agentclientprotocol/sdk';
-import type { CliType } from '@ptah-extension/shared';
-import type { CliCommandOptions } from '../cli-adapter.interface';
+import type { ProviderMcpAttachment } from '@ptah-extension/provider-session-contracts';
+import type { CliType, LanePermissionMode } from '@ptah-extension/shared';
+
+/**
+ * Where a lane's model came from, so a rejected model names the setting to
+ * change. Mirrors `LaneModelSource` in `cli-agent-runtime`.
+ */
+export type AcpModelSource =
+  | 'request'
+  | 'setting'
+  | 'ptah-default'
+  | 'cli-default';
+
+/**
+ * The per-session settings a profile and the runner read. A lane passes its
+ * `CliCommandOptions`, which is a structural superset; the runner reads
+ * nothing else.
+ */
+export interface AcpSessionOptions {
+  readonly workingDirectory: string;
+  readonly permission?: LanePermissionMode;
+  readonly autoApprove?: boolean;
+  readonly model?: string;
+  readonly modelSource?: AcpModelSource;
+  readonly reasoningEffort?: string;
+  /** Re-attach to this session instead of starting a new one. */
+  readonly resumeSessionId?: string;
+  /** The lane's agent id: names the run in logs and turn ids. */
+  readonly agentId?: string;
+  /**
+   * The MCP servers the caller built for this session (URL and bearer). A
+   * profile turns them into ACP `McpServer` entries in `buildMcpServers`.
+   */
+  readonly mcp: readonly ProviderMcpAttachment[];
+}
 
 /**
  * How the runner re-attaches to an earlier session when
@@ -72,7 +105,7 @@ export interface AcpRequestFailure {
   /** Set for `session/set_config_option`: the values the session advertised for that option. */
   readonly advertisedValues?: readonly string[];
   /** The lane's options, so a message can name the setting a value came from. */
-  readonly options: CliCommandOptions;
+  readonly options: AcpSessionOptions;
 }
 
 /** How to start the agent: the argv after the binary, plus optional extra environment. */
@@ -97,16 +130,16 @@ export interface AcpVendorProfile {
    * effort never go here: they are applied through {@link sessionConfig},
    * because a vendor may ignore the flags silently.
    */
-  buildSpawn(options: CliCommandOptions): AcpSpawnSpec;
+  buildSpawn(options: AcpSessionOptions): AcpSpawnSpec;
   /** The MCP servers attached on `session/new`, `session/resume` and `session/load`. */
-  buildMcpServers(options: CliCommandOptions): readonly McpServer[];
+  buildMcpServers(options: AcpSessionOptions): readonly McpServer[];
   /** Optional `_meta` for `session/new`. */
-  sessionMeta?(options: CliCommandOptions): Record<string, unknown> | undefined;
+  sessionMeta?(options: AcpSessionOptions): Record<string, unknown> | undefined;
   /**
    * Config to apply after session setup and before the first prompt. Entries
    * whose `configId` the session did not advertise are skipped with an `info`.
    */
-  sessionConfig?(options: CliCommandOptions): readonly AcpSessionConfigEntry[];
+  sessionConfig?(options: AcpSessionOptions): readonly AcpSessionConfigEntry[];
   /**
    * Vendor extension notifications to ignore silently (for example a vendor
    * namespace such as `_vendor/*`). Omit to report every unknown method once.

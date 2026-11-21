@@ -1,0 +1,27 @@
+{
+  "name": "@ptah-extension/acp-runtime",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "library",
+  "sourceRoot": "libs/backend/acp-runtime/src",
+  "tags": ["scope:extension", "type:feature"],
+  "targets": {
+    "build": {
+      "executor": "@nx/esbuild:esbuild",
+      "outputs": ["{options.outputPath}"],
+      "options": {
+        "outputPath": "dist/libs/backend/acp-runtime",
+        "main": "libs/backend/acp-runtime/src/index.ts",
+        "tsConfig": "libs/backend/acp-runtime/tsconfig.lib.json",
+        "assets": [],
+        "format": ["cjs"],
+        "external": ["@agentclientprotocol/sdk"]
+      }
+    },
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsc --noEmit --project libs/backend/acp-runtime/tsconfig.lib.json"
+      }
+    }
+  }
+}

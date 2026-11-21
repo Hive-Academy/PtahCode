@@ -19,6 +19,15 @@
       "@ptah-extension/codex-runtime": [
         "./libs/backend/codex-runtime/src/index.ts"
       ],
+      "@ptah-extension/acp-runtime": [
+        "./libs/backend/acp-runtime/src/index.ts"
+      ],
+      "@ptah-extension/acp-runtime/testing": [
+        "./libs/backend/acp-runtime/src/testing/index.ts"
+      ],
+      "@ptah-extension/provider-session-contracts": [
+        "./libs/backend/provider-session-contracts/src/index.ts"
+      ],
       "@ptah-extension/user-layer-composition": ["./libs/backend/user-layer-composition/src/index.ts"],
       "@ptah-extension/agent-generation": [
         "./libs/backend/agent-generation/src/index.ts"

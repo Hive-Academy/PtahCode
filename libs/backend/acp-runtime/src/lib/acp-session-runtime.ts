@@ -1,53 +1,55 @@
 /**
- * createAcpSessionHandle — turns one long-lived ACP agent process into an
- * `SdkHandle`. This is the only stateful unit of the ACP layer; everything
- * vendor-specific comes from the {@link AcpVendorProfile}.
+ * createAcpSession — one long-lived ACP agent process and its session. This
+ * is the only stateful unit of the ACP runtime; everything vendor-specific
+ * comes from the {@link AcpVendorProfile}. What the agent shows is emitted as
+ * `ProviderSessionEvent`s; a consumer (the lane handle) projects them.
  *
  * Lifecycle:
- * - The process is spawned synchronously and the handle returned at once
- *   (Cursor/Pi convention). `done` is the first turn.
- * - The first turn runs the handshake inside it: `connectAcp` → `initialize`
- *   → `session/resume|load|new` → `session/set_config_option` (advertised ids
- *   only) → `session/prompt`. Each handshake phase has its own deadline
- *   ({@link ACP_HANDSHAKE_TIMEOUTS_MS}). The spawn call does not wait for
- *   them: the handle is already returned.
- * - `continue(message)` is a further `session/prompt` on the same session.
+ * - The process is spawned synchronously when the session is created.
+ * - `start()` runs the handshake: `connectAcp` → `initialize` →
+ *   `session/resume|load|new` → `session/set_config_option` (advertised ids
+ *   only). Each handshake phase has its own deadline
+ *   ({@link ACP_HANDSHAKE_TIMEOUTS_MS}).
+ * - `prompt(text)` is one `session/prompt` on the session.
  * - There is no `steer` or `interrupt`: an ACP agent queues a mid-turn prompt
- *   instead of injecting it, so the message router's own queue is used.
- * - Abort = `session/cancel` (when a prompt is in flight), then up to
- *   {@link ACP_CANCEL_GRACE_MS} for the agent to answer the prompt or exit,
+ *   instead of injecting it.
+ * - Aborting `signal` = `session/cancel` (when a prompt is in flight), then up
+ *   to {@link ACP_CANCEL_GRACE_MS} for the agent to answer the prompt or exit,
  *   then kill. The session is never closed, so it stays resumable by id.
  *
- * `done` and every continuation `done` resolve with 0 or 1 and never reject;
- * failures become one `error` segment.
+ * `start` and `prompt` never reject for an agent failure; a failure becomes
+ * one `error` event.
  */
 import { randomUUID } from 'node:crypto';
-import type {
-  InitializeResponse,
-  McpServer,
-  SessionNotification,
-} from '@agentclientprotocol/sdk';
+import type { InitializeResponse, McpServer } from '@agentclientprotocol/sdk';
 import type { IProcessSpawner } from '@ptah-extension/platform-core';
-import type { Logger } from '@ptah-extension/vscode-core';
-import { MCP_ATTACHMENT_TIMEOUT_MS } from '../../mcp-attachment-probe.port';
-import type { CliOutputSegment } from '@ptah-extension/shared';
-import { completedTurnTelemetry, turnIdentity } from '@ptah-extension/shared';
-import { z } from 'zod';
 import type {
-  CliCommandOptions,
-  ContinuationOutcome,
-  SdkHandle,
-} from '../cli-adapter.interface';
-import { buildTaskPrompt, createBufferedEmitter } from '../cli-adapter.utils';
-import { classifyCliStderr } from '../cli-stderr-severity';
+  ProviderSessionErrorCode,
+  ProviderSessionEvent,
+  ProviderSessionEventBody,
+  ProviderSessionLogger,
+} from '@ptah-extension/provider-session-contracts';
+import type { z } from 'zod';
 import { decideAcpPermission } from './acp-permission-policy';
 import { spawnAcpProcess } from './acp-process-transport';
 import type {
   AcpProcessExit,
+  AcpSpawnTransport,
   AcpTransportFactory,
 } from './acp-process-transport';
 import { AcpUnavailableError, connectAcp } from './acp-sdk-loader';
 import type { AcpClientHandlers, AcpConnectionApi } from './acp-sdk-loader';
+import {
+  acpPromptUsageSchema,
+  acpUsageUpdateSchema,
+  advertisedValuesOf,
+  describeExit,
+  errorText,
+  isRecord,
+  isReplayedUpdate,
+  readConfigOptions,
+  readJsonRpcError,
+} from './acp-session-helpers';
 import {
   createAcpSessionUpdateMapper,
   mapStopReason,
@@ -57,6 +59,7 @@ import type {
   AcpRequestFailure,
   AcpRequestMethod,
   AcpSessionConfigEntry,
+  AcpSessionOptions,
   AcpVendorProfile,
 } from './acp-vendor-profile';
 
@@ -99,121 +102,71 @@ const MAX_REPORTED_EXTENSION_METHODS = 32;
 /** Title used when a refused permission request carried none. */
 const FALLBACK_REFUSED_TITLE = 'a tool call';
 
-/** ACP prompt response extension; reject malformed counters without failing the turn. */
-const acpPromptUsageSchema = z.object({
-  model: z.string().optional(),
-  inputTokens: z.number().int().nonnegative(),
-  outputTokens: z.number().int().nonnegative(),
-  cacheReadTokens: z.number().int().nonnegative().optional(),
-  cacheWriteTokens: z.number().int().nonnegative().optional(),
-  contextTokens: z.number().int().nonnegative().optional(),
-  costUsd: z.number().finite().nonnegative().optional(),
-}).passthrough();
+/** The process generation; P1 never respawns a session's agent. */
+const PROCESS_GENERATION = 1;
 
-const acpUsageUpdateSchema = z.object({
-  sessionUpdate: z.literal('usage_update'),
-  used: z.number().int().nonnegative(),
-  _meta: z.object({ usage: acpPromptUsageSchema.optional() }).passthrough().nullish(),
-}).passthrough();
-
-export interface AcpSessionHandleConfig {
+export interface AcpSessionConfig {
   readonly profile: AcpVendorProfile;
-  readonly options: CliCommandOptions;
+  readonly options: AcpSessionOptions;
   /** The binary to run: the resolved path from detection, or a bare name. */
   readonly command: string;
   /** Creates the child off-thread when present (TASK_2026_367). */
   readonly spawner?: IProcessSpawner;
+  /** The caller's spawn policy, handed to {@link spawnAcpProcess}. */
+  readonly spawnTransport: AcpSpawnTransport;
   /** Defaults to {@link spawnAcpProcess}; specs pass an in-memory transport. */
   readonly transportFactory?: AcpTransportFactory;
-  /** Receives the raw failure detail that user-facing segments summarise. */
-  readonly logger?: Logger;
+  /** Receives the raw failure detail that user-facing events summarise. */
+  readonly logger?: ProviderSessionLogger;
+  /** Aborting ends the session (cancel grace, then kill). */
+  readonly signal: AbortSignal;
+  /** Every event, in order. Called synchronously; must not throw. */
+  readonly onEvent: (event: ProviderSessionEvent) => void;
+  /** The native session id, once `session/new` (or a resume) settled it. */
+  readonly onSessionResolved?: (sessionId: string) => void;
+}
+
+/** What `start()` settled to; on `ok: false` the error event is already out. */
+export type AcpSessionStart =
+  | { readonly ok: true; readonly restoredContext: boolean }
+  | { readonly ok: false };
+
+/** One ACP agent session as a lane drives it. */
+export interface AcpSession {
+  /** Handshake and session setup. Never rejects; stops the agent on failure. */
+  start(): Promise<AcpSessionStart>;
+  /** One `session/prompt`. Resolves with the lane exit code (0 or 1). */
+  prompt(text: string): Promise<number>;
+  /** Resolves when the agent process ends. Never rejects. */
+  readonly exited: Promise<AcpProcessExit>;
+  /** The connection closed or the process exited. */
+  isClosed(): boolean;
+  /** Session set up and config applied: it can take prompts. */
+  isSetupComplete(): boolean;
+  isTurnRunning(): boolean;
+  getSessionId(): string | undefined;
+  /** Whether the session attached at least one MCP server. */
+  attachedMcpServers(): boolean;
+  /** The agent's pid while it is alive. */
+  getPid(): number | undefined;
 }
 
 /** A turn failure whose message is already user-facing. */
 class AcpTurnFailure extends Error {
-  constructor(message: string) {
+  constructor(
+    message: string,
+    readonly code: ProviderSessionErrorCode = 'request-failed',
+  ) {
     super(message);
     this.name = 'AcpTurnFailure';
   }
 }
 
-interface JsonRpcErrorShape {
-  readonly code: number;
-  readonly message: string;
-  readonly data?: unknown;
-}
-
 const HANDSHAKE_TIMED_OUT = Symbol('acp-handshake-timed-out');
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-/** The JSON-RPC error carried by a rejected request, if it is one (SDK `RequestError`). */
-function readJsonRpcError(error: unknown): JsonRpcErrorShape | undefined {
-  if (!(error instanceof Error)) return undefined;
-  const { code, data } = error as Error & { code?: unknown; data?: unknown };
-  if (typeof code !== 'number') return undefined;
-  return { code, message: error.message, data };
-}
-
-function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-/** The session's advertised config options, read defensively (agent responses are not validated). */
-function readConfigOptions(
-  response: unknown,
-): readonly Record<string, unknown>[] {
-  if (!isRecord(response) || !Array.isArray(response['configOptions'])) {
-    return [];
-  }
-  return response['configOptions'].filter(isRecord);
-}
-
-/** The values a select option offers, flattening grouped options. */
-function advertisedValuesOf(option: Record<string, unknown>): string[] {
-  const entries = Array.isArray(option['options']) ? option['options'] : [];
-  return entries.flatMap((entry: unknown): string[] => {
-    if (!isRecord(entry)) return [];
-    if (typeof entry['value'] === 'string') return [entry['value']];
-    if (Array.isArray(entry['options'])) {
-      return entry['options'].flatMap((inner: unknown) =>
-        isRecord(inner) && typeof inner['value'] === 'string'
-          ? [inner['value']]
-          : [],
-      );
-    }
-    return [];
-  });
-}
-
-/** Whether a `session/update` is history replayed by `session/load`. */
-function isReplayedUpdate(notification: SessionNotification): boolean {
-  const meta: unknown = notification._meta;
-  if (isRecord(meta) && meta['isReplay'] === true) return true;
-  const update: unknown = notification.update;
-  return (
-    isRecord(update) &&
-    isRecord(update['_meta']) &&
-    update['_meta']['isReplay'] === true
-  );
-}
-
-function describeExit(exit: AcpProcessExit): string {
-  if (exit.code !== null) return `code ${exit.code}`;
-  if (exit.signal) return `signal ${exit.signal}`;
-  return 'code unknown';
-}
-
-/**
- * Spawn the profile's agent and return its `SdkHandle` at once. The handshake
- * and the first prompt run inside `done`.
- */
-export function createAcpSessionHandle(
-  config: AcpSessionHandleConfig,
-): SdkHandle {
-  const { profile, options, logger } = config;
+/** Spawn the profile's agent and return its session at once. */
+export function createAcpSession(config: AcpSessionConfig): AcpSession {
+  const { profile, options, logger, signal } = config;
   const name = profile.displayName;
   const logContext = { vendor: profile.vendor };
   const logMcpRequest = (
@@ -235,10 +188,6 @@ export function createAcpSessionHandle(
     });
   };
 
-  const abort = new AbortController();
-  const output = createBufferedEmitter<string>();
-  const segment = createBufferedEmitter<CliOutputSegment>();
-  const sessionResolved = createBufferedEmitter<string>();
   const mapper = createAcpSessionUpdateMapper({
     extractExitCode: (rawOutput) => profile.extractExitCode?.(rawOutput),
   });
@@ -247,7 +196,7 @@ export function createAcpSessionHandle(
   let sessionId: string | undefined;
   /** The id being resumed or loaded, so its updates pass the session filter. */
   let attachingSessionId: string | undefined;
-  /** Session set up and config applied: the handle can take further prompts. */
+  /** Session set up and config applied: the session can take further prompts. */
   let setupComplete = false;
   let sentMcpServers = false;
   let handshakePhase: AcpHandshakePhase = 'initialize';
@@ -255,11 +204,11 @@ export function createAcpSessionHandle(
   let enterHandshakePhase: ((phase: AcpHandshakePhase) => void) | undefined;
   /** The connection closed or the process exited. */
   let closed = false;
-  let mcpTimedOut = false;
-  let onMcpTimeout: (() => void) | undefined;
   let processExit: AcpProcessExit | undefined;
   let promptInFlight = false;
   let promptSequence = 0;
+  let currentTurnId: string | undefined;
+  let eventSequence = 0;
   const budgetRunId = options.agentId ?? randomUUID();
   let latestUpdateUsage: z.infer<typeof acpPromptUsageSchema> | undefined;
   let resolveUsageUpdate: (() => void) | undefined;
@@ -269,12 +218,24 @@ export function createAcpSessionHandle(
   let promptSettled: Promise<number> | undefined;
   const reportedExtensionMethods = new Set<string>();
 
-  const emitError = (content: string): void => {
-    output.emit(`\n[${name}] ${content}\n`);
-    segment.emit({ type: 'error', content });
+  const emit = (body: ProviderSessionEventBody): void => {
+    config.onEvent({
+      contextId: budgetRunId,
+      processGeneration: PROCESS_GENERATION,
+      sequence: ++eventSequence,
+      ...(sessionId ? { sessionId } : {}),
+      ...(currentTurnId ? { turnId: currentTurnId } : {}),
+      ...body,
+    });
   };
-  const emitInfo = (content: string): void => {
-    segment.emit({ type: 'info', content });
+  const emitError = (
+    message: string,
+    code: ProviderSessionErrorCode = 'turn-failed',
+  ): void => {
+    emit({ type: 'error', error: { code, message } });
+  };
+  const emitInfo = (message: string): void => {
+    emit({ type: 'info', message });
   };
 
   const spawnSpec = profile.buildSpawn(options);
@@ -284,12 +245,12 @@ export function createAcpSessionHandle(
     env: spawnSpec.env,
     cwd: options.workingDirectory,
     spawner: config.spawner,
+    spawnTransport: config.spawnTransport,
     logger,
     onStderrLine: (line) => {
       const cleaned = line.trim();
       if (!cleaned) return;
-      output.emit(`[stderr] ${cleaned}\n`);
-      segment.emit({ type: classifyCliStderr(cleaned), content: cleaned });
+      emit({ type: 'diagnostic', stream: 'stderr', line: cleaned });
     },
   });
 
@@ -350,14 +311,14 @@ export function createAcpSessionHandle(
     }
     stopProcess();
   };
-  abort.signal.addEventListener('abort', onAbort, { once: true });
+  signal.addEventListener('abort', onAbort, { once: true });
 
   void transport.exited.then((exit) => {
-    // Exit while idle needs no output: no `done` is pending, and the next
-    // message gets `unsupported`, so the caller resumes by session id.
+    // Exit while idle needs no output: no prompt is pending, and the next
+    // message is refused, so the caller resumes by session id.
     processExit = exit;
     closed = true;
-    abort.signal.removeEventListener('abort', onAbort);
+    signal.removeEventListener('abort', onAbort);
     logger?.info('[AcpSessionHandle] agent process ended', {
       ...logContext,
       code: exit.code,
@@ -368,7 +329,7 @@ export function createAcpSessionHandle(
 
   const onConnectionClosed = (): void => {
     closed = true;
-    // A child without a connection can do no more work for this lane.
+    // A child without a connection can do no more work for this session.
     stopProcess();
   };
 
@@ -386,14 +347,13 @@ export function createAcpSessionHandle(
         if (update.success && update.data._meta?.usage) {
           latestUpdateUsage = {
             ...update.data._meta.usage,
-            contextTokens: update.data._meta.usage.contextTokens ?? update.data.used,
+            contextTokens:
+              update.data._meta.usage.contextTokens ?? update.data.used,
           };
           resolveUsageUpdate?.();
         }
       }
-      const mapped = mapper.map(notification.update);
-      if (mapped.output) output.emit(mapped.output);
-      for (const item of mapped.segments) segment.emit(item);
+      for (const body of mapper.map(notification.update)) emit(body);
     },
     requestPermission: async (request) => {
       const decision = decideAcpPermission(request, {
@@ -527,7 +487,7 @@ export function createAcpSessionHandle(
                 });
           return { ok: true, configOptions: readConfigOptions(response) };
         } catch (error: unknown) {
-          if (conn.signal.aborted || abort.signal.aborted) throw error;
+          if (conn.signal.aborted || signal.aborted) throw error;
           const rpc = readJsonRpcError(error);
           const detail = rpc ? readAcpErrorDetail(rpc.data) : undefined;
           reason = `${errorText(error)}${detail ? ` (${detail})` : ''}`;
@@ -641,6 +601,7 @@ export function createAcpSessionHandle(
     if (version !== ACP_PROTOCOL_VERSION) {
       throw new AcpTurnFailure(
         `${name} speaks unsupported ACP protocol version ${String(version)}`,
+        'protocol-unsupported',
       );
     }
 
@@ -689,9 +650,9 @@ export function createAcpSessionHandle(
     }
 
     sessionId = id;
-    // Emitted before the config is applied on purpose: a refused config fails
+    // Reported before the config is applied on purpose: a refused config fails
     // the turn, but the session exists and stays resumable by this id.
-    sessionResolved.emit(id);
+    config.onSessionResolved?.(id);
     await applySessionConfig(conn, id, advertised);
     setupComplete = true;
     return { restoredContext };
@@ -730,19 +691,20 @@ export function createAcpSessionHandle(
     }
   };
 
-  /** Emit the one `error` segment a failed turn gets. Always 1. */
+  /** Emit the one `error` event a failed turn gets. Always 1. */
   const reportFailure = async (error: unknown): Promise<number> => {
-    if (abort.signal.aborted) return 1;
+    if (signal.aborted) return 1;
     logger?.warn('[AcpSessionHandle] turn failed', {
       ...logContext,
       error: errorText(error),
       exit: processExit,
     });
-    if (
-      error instanceof AcpTurnFailure ||
-      error instanceof AcpUnavailableError
-    ) {
-      emitError(error.message);
+    if (error instanceof AcpTurnFailure) {
+      emitError(error.message, error.code);
+      return 1;
+    }
+    if (error instanceof AcpUnavailableError) {
+      emitError(error.message, 'protocol-unsupported');
       return 1;
     }
     if (closed || connection?.signal.aborted) {
@@ -755,17 +717,12 @@ export function createAcpSessionHandle(
         exit
           ? `${name} exited (${describeExit(exit)}) during the turn`
           : `${name} closed the ACP connection during the turn`,
+        'process-exited',
       );
       return 1;
     }
     emitError(`${name} ACP request failed: ${errorText(error)}`);
     return 1;
-  };
-
-  const runPrompt = (text: string): Promise<number> => {
-    const pending = runPromptTurn(text);
-    promptSettled = pending;
-    return pending;
   };
 
   const runPromptTurn = async (text: string): Promise<number> => {
@@ -778,7 +735,9 @@ export function createAcpSessionHandle(
     promptInFlight = true;
     latestUpdateUsage = undefined;
     const turnId = `${id}:${budgetRunId}:${++promptSequence}`;
+    currentTurnId = turnId;
     refusedThisTurn = undefined;
+    let exitCode = 1;
     try {
       const response: unknown = await call('session/prompt', () =>
         conn.prompt({ sessionId: id, prompt: [{ type: 'text', text }] }),
@@ -789,7 +748,7 @@ export function createAcpSessionHandle(
           : 'missing';
       const mapped = mapStopReason({
         stopReason,
-        aborted: abort.signal.aborted,
+        aborted: signal.aborted,
         refusedPermissionTitle: refusedThisTurn,
         displayName: name,
       });
@@ -801,176 +760,88 @@ export function createAcpSessionHandle(
           // ACP agents can send usage_update after the prompt response. Wait
           // for that notification, with a safety bound for agents omitting it.
           let usageDrainTimer: NodeJS.Timeout | undefined;
-          const onAbort = (): void => { resolveUsageUpdate?.(); };
+          const onDrainAbort = (): void => {
+            resolveUsageUpdate?.();
+          };
           try {
             await new Promise<void>((resolve) => {
               usageDrainTimer = setTimeout(resolve, ACP_USAGE_DRAIN_MS);
               usageDrainTimer.unref();
               resolveUsageUpdate = resolve;
-              abort.signal.addEventListener('abort', onAbort, { once: true });
-              if (latestUpdateUsage || abort.signal.aborted) resolve();
+              signal.addEventListener('abort', onDrainAbort, { once: true });
+              if (latestUpdateUsage || signal.aborted) resolve();
             });
           } finally {
             clearTimeout(usageDrainTimer);
-            abort.signal.removeEventListener('abort', onAbort);
+            signal.removeEventListener('abort', onDrainAbort);
             resolveUsageUpdate = undefined;
           }
         }
         const usage = promptUsage.success ? promptUsage.data : latestUpdateUsage;
-        segment.emit({
-          type: 'info', content: usage ? `${name} turn usage.` : `${name} turn telemetry unavailable.`,
-          ...(usage ? { usage: { ...usage, model: usage.model ?? `${name}/unknown` } } : {}),
-          turnTelemetry: completedTurnTelemetry({
-            ...turnIdentity({ provider: name, turnId, modelId: usage?.model, source: 'sdk' }),
-            usage,
-          }),
-        });
+        emit({ type: 'usage', provider: name, turnId, usage });
       }
       if (mapped.segment?.type === 'error') {
         emitError(mapped.segment.content);
       } else if (mapped.segment) {
-        segment.emit(mapped.segment);
+        emitInfo(mapped.segment.content);
       }
-      return mapped.exitCode;
+      exitCode = mapped.exitCode;
+      return exitCode;
     } catch (error: unknown) {
       return await reportFailure(error);
     } finally {
+      emit({
+        type: 'terminal',
+        status:
+          exitCode === 0 ? 'completed' : signal.aborted ? 'interrupted' : 'failed',
+        disposition: closed ? 'broken' : 'reusable',
+      });
       promptInFlight = false;
+      currentTurnId = undefined;
       resolveUsageUpdate = undefined;
       latestUpdateUsage = undefined;
       refusedThisTurn = undefined;
     }
   };
 
-  const runFirstTurn = async (): Promise<number> => {
-    let restoredContext: boolean;
+  const prompt = (text: string): Promise<number> => {
+    const pending = runPromptTurn(text);
+    promptSettled = pending;
+    return pending;
+  };
+
+  const start = async (): Promise<AcpSessionStart> => {
     try {
       const outcome = await withHandshakeTimeout(setUpSession());
       if (outcome === HANDSHAKE_TIMED_OUT) {
-        if (!abort.signal.aborted) {
+        if (!signal.aborted) {
           emitError(
             `${name} did not complete the ACP handshake (${HANDSHAKE_PHASE_LABEL[handshakePhase]}) in ${ACP_HANDSHAKE_TIMEOUTS_MS[handshakePhase] / 1000} s`,
+            'handshake-timeout',
           );
         }
         stopProcess();
-        return 1;
+        return { ok: false };
       }
-      restoredContext = outcome.restoredContext;
+      return { ok: true, restoredContext: outcome.restoredContext };
     } catch (error: unknown) {
-      // A lane whose setup failed can take no prompt (a refused model must
+      // A session whose setup failed can take no prompt (a refused model must
       // not silently fall back to the default one), so the child goes too.
-      const code = await reportFailure(error);
+      await reportFailure(error);
       stopProcess();
-      return code;
+      return { ok: false };
     }
-    if (abort.signal.aborted) return 1;
-    if (
-      options.attachmentProbe &&
-      options.agentId &&
-      options.mcpPort &&
-      sentMcpServers
-    ) {
-      const attachmentWait = new AbortController();
-      const attached = await Promise.race([
-        options.attachmentProbe.waitFor(
-          options.agentId,
-          options.mcpPort,
-          MCP_ATTACHMENT_TIMEOUT_MS,
-          attachmentWait.signal,
-        ),
-        transport.exited.then(() => undefined),
-        new Promise<undefined>((resolve) => {
-          if (abort.signal.aborted) resolve(undefined);
-          else
-            abort.signal.addEventListener('abort', () => resolve(undefined), {
-              once: true,
-              signal: attachmentWait.signal,
-            });
-        }),
-      ]);
-      attachmentWait.abort();
-      if (!attached && !closed && !abort.signal.aborted) {
-        mcpTimedOut = true;
-        onMcpTimeout?.();
-        logger?.warn(
-          '[AcpSessionHandle] Ptah MCP did not connect before first prompt',
-          {
-            ...logContext,
-            cause: 'handshake-timeout',
-            agentId: options.agentId,
-            port: options.mcpPort,
-            timeoutMs: MCP_ATTACHMENT_TIMEOUT_MS,
-          },
-        );
-        emitInfo(
-          'Ptah MCP did not connect within 15s; report in your final message.',
-        );
-      }
-    }
-    if (abort.signal.aborted || closed) return 1;
-    return runPrompt(
-      buildTaskPrompt(
-        // A restored session ran its earlier turns in another handle — another
-        // process, host or Ptah version — so what they carried (the policy
-        // version, the messaging block) is unknown here. Claiming today's
-        // preambles were delivered would drop the lane policy and messaging
-        // from a resume that may never have carried them; no
-        // resumeDeliveredPreambles is passed, so both blocks stay in this
-        // first prompt. Same-process continuations (continueTurn) still send
-        // bare messages and keep their dedup.
-        { ...options, resumeRestoresContext: restoredContext },
-        profile.vendor,
-      ),
-    );
   };
-
-  const supportsContinuation = (): boolean =>
-    setupComplete && !!sessionId && !closed && !abort.signal.aborted;
-
-  /** `done` never rejects: an unexpected throw is logged and becomes exit 1. */
-  const onUnexpectedTurnError = (error: unknown): number => {
-    logger?.error('[AcpSessionHandle] turn threw unexpectedly', {
-      ...logContext,
-      error: errorText(error),
-    });
-    return 1;
-  };
-
-  const continueTurn = (message: string): Promise<ContinuationOutcome> => {
-    if (closed || abort.signal.aborted) {
-      return Promise.reject(
-        new Error(`${name} is no longer running; resume the session by id`),
-      );
-    }
-    if (!setupComplete || !sessionId) {
-      return Promise.reject(new Error(`${name} has no ACP session yet`));
-    }
-    if (promptInFlight) {
-      return Promise.reject(new Error(`${name} is still running a turn`));
-    }
-    return Promise.resolve({
-      done: runPrompt(message).catch(onUnexpectedTurnError),
-    });
-  };
-
-  const done = runFirstTurn().catch(onUnexpectedTurnError);
 
   return {
-    abort,
-    done,
-    onOutput: output.subscribe,
-    onSegment: segment.subscribe,
-    onMcpAttachmentTimeout: (callback) => {
-      onMcpTimeout = callback;
-      if (mcpTimedOut) callback();
-    },
-    getSessionId: () => sessionId ?? options.resumeSessionId,
-    onSessionResolved: sessionResolved.subscribe,
-    supportsContinuation,
-    continue: continueTurn,
+    start,
+    prompt,
+    exited: transport.exited,
+    isClosed: () => closed,
+    isSetupComplete: () => setupComplete,
+    isTurnRunning: () => promptInFlight,
+    getSessionId: () => sessionId,
+    attachedMcpServers: () => sentMcpServers,
     getPid: () => transport.getPid(),
-    outcomeUsageIsTurnTotal: true,
-    usageScope: 'turn',
-    getObservedNativeThreadId: () => sessionId,
   };
 }

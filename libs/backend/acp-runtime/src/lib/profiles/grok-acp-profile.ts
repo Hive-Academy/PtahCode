@@ -26,18 +26,15 @@
  *   Set the model explicitly to switch a resumed session.
  */
 import type { McpServer } from '@agentclientprotocol/sdk';
+import { readAcpErrorDetail } from '../acp-vendor-profile';
 import type {
-  CliCommandOptions,
-  LaneModelSource,
-} from '../cli-adapter.interface';
-import { ptahMcpServerUrl } from '../ptah-mcp-url';
-import { readAcpErrorDetail } from '../acp';
-import type {
+  AcpModelSource,
   AcpRequestFailure,
   AcpSessionConfigEntry,
+  AcpSessionOptions,
   AcpSpawnSpec,
   AcpVendorProfile,
-} from '../acp';
+} from '../acp-vendor-profile';
 
 /** JSON-RPC codes Grok answers with, as captured in the `grok-p3-*` fixtures. */
 const GROK_RATE_LIMITED = -32003;
@@ -52,7 +49,7 @@ const EXTENSION_NOTIFICATION = /^_?x\.ai\//;
 const AUTH_WORDING = /authenticat|auth method/i;
 
 /** Where a rejected model came from, worded for the user. */
-function describeModelSource(source: LaneModelSource | undefined): string {
+function describeModelSource(source: AcpModelSource | undefined): string {
   switch (source) {
     case 'request':
       return 'the spawn request';
@@ -107,30 +104,29 @@ export const grokAcpProfile: AcpVendorProfile = {
   displayName: 'Grok',
   resumeStrategy: 'resume',
 
-  buildSpawn(options: CliCommandOptions): AcpSpawnSpec {
+  buildSpawn(options: AcpSessionOptions): AcpSpawnSpec {
     return { args: options.permission === 'yolo'
       ? ['agent', '--always-approve', '--no-leader', 'stdio'] : GROK_ARGS };
   },
 
-  buildMcpServers(options: CliCommandOptions): readonly McpServer[] {
-    if (!options.mcpPort || !options.mcpToken) return [];
-    return [
-      {
-        type: 'http',
-        name: 'ptah',
-        url: ptahMcpServerUrl(
-          options.mcpPort,
-          options.workingDirectory,
-          options.agentId,
-        ),
-        headers: [
-          { name: 'Authorization', value: `Bearer ${options.mcpToken}` },
-        ],
-      },
-    ];
+  /**
+   * The caller builds the Ptah MCP attachment (scoped URL plus the lane's
+   * bearer, `buildLaneMcpAttachments` in `cli-agent-runtime`); Grok takes it
+   * as an ACP `http` entry.
+   */
+  buildMcpServers(options: AcpSessionOptions): readonly McpServer[] {
+    return (options.mcp ?? []).map((attachment) => ({
+      type: 'http' as const,
+      name: attachment.name,
+      url: attachment.url,
+      headers: attachment.headers.map((header) => ({
+        name: header.name,
+        value: header.value,
+      })),
+    }));
   },
 
-  sessionConfig(options: CliCommandOptions): readonly AcpSessionConfigEntry[] {
+  sessionConfig(options: AcpSessionOptions): readonly AcpSessionConfigEntry[] {
     const entries: AcpSessionConfigEntry[] = [];
     if (options.model) {
       // Binding: a model Grok rejects fails the turn instead of silently
