@@ -1042,3 +1042,127 @@ describe('PR #1445 review fixes', () => {
     h.abort.abort();
   });
 });
+
+describe('PR #1450 review fixes', () => {
+  const usage = { inputTokens: 1, outputTokens: 1 };
+  const terminals = (h: Harness) => h.events.filter((event) => event.type === 'terminal');
+
+  it('4651900735: logs only the name and transport of each MCP server', async () => {
+    const logger = createMockLogger();
+    const h = start({
+      config: { logger },
+      profile: {
+        buildMcpServers: () => [
+          { name: 'local', command: '/bin/tool', args: ['--token', 'arg-secret'], env: [{ name: 'API_KEY', value: 'env-secret' }] },
+          { type: 'http', name: 'ptah', url: 'http://127.0.0.1:1/mcp?key=url-secret', headers: [{ name: 'Authorization', value: 'Bearer header-secret' }] },
+        ],
+      },
+    });
+    await h.session.start();
+    const logged = logger.info.mock.calls.find(([message]) => message === '[AcpSessionHandle] session MCP servers');
+    expect(logged?.[1]).toMatchObject({
+      mcpServers: [
+        { name: 'local', transport: 'stdio' },
+        { name: 'ptah', transport: 'http' },
+      ],
+    });
+    expect(JSON.stringify(logger.info.mock.calls)).not.toMatch(/secret/);
+    // The agent still receives the full configuration.
+    expect(JSON.stringify(sent(h.agents[0], 'session/new'))).toContain('env-secret');
+    h.abort.abort();
+  });
+
+  it('4651900739: setup aborted from onSessionResolved does not report success', async () => {
+    const abort = new AbortController();
+    const h = start({ config: { signal: abort.signal, onSessionResolved: () => abort.abort() } });
+    await expect(h.session.start()).resolves.toEqual({ ok: false });
+    expect(h.session.isSetupComplete()).toBe(false);
+    expect(h.session.getSessionId()).toBe('sess-1');
+    expect(h.errors()).toEqual([]);
+  });
+
+  it('4651900739: an uncancelled setup still reports the resolved id and completes', async () => {
+    const resolved: string[] = [];
+    const h = start({ config: { onSessionResolved: (id) => resolved.push(id) } });
+    await expect(h.session.start()).resolves.toEqual({ ok: true, restoredContext: false });
+    expect(resolved).toEqual(['sess-1']);
+    expect(h.session.isSetupComplete()).toBe(true);
+    h.abort.abort();
+  });
+
+  it('4651900741: a cancelled reply on a retired, still-running process ends broken', async () => {
+    let answerPrompt!: () => void;
+    const h = start({
+      profile: { cancelBehavior: 'await-reply' },
+      transport: (agent) => {
+        // The cancel write stalls (so the runtime retires the process) and the
+        // kill is only counted: the process is still running.
+        const inner = createFakeAcpTransport(agent);
+        const writer = inner.stream.writable.getWriter();
+        const decoder = new TextDecoder();
+        let kills = 0;
+        return {
+          ...inner,
+          exited: new Promise<AcpProcessExit>(() => undefined),
+          stream: {
+            readable: inner.stream.readable,
+            writable: new WritableStream<Uint8Array>({
+              write: (chunk) =>
+                decoder.decode(chunk).includes('session/cancel')
+                  ? new Promise<void>(() => undefined)
+                  : writer.write(chunk),
+            }),
+          },
+          kill: () => {
+            kills++;
+          },
+          get killCount() {
+            return kills;
+          },
+        };
+      },
+      script: (agent) =>
+        agent.handle(
+          'session/prompt',
+          () =>
+            new Promise((resolve) => {
+              answerPrompt = () => resolve({ result: { stopReason: 'cancelled' } });
+            }),
+        ),
+    });
+    await h.session.start();
+    const turn = h.session.prompt('x');
+    await h.agents[0].next((m) => m.method === 'session/prompt');
+    await expect(h.session.interrupt()).resolves.toBe(false);
+    answerPrompt();
+    await expect(turn).resolves.toBe(1);
+    expect(h.transports[0].killCount).toBe(1);
+    expect(terminals(h)).toEqual([
+      expect.objectContaining({ status: 'interrupted', disposition: 'broken' }),
+    ]);
+    h.abort.abort();
+  }, 10_000);
+
+  it('4651900745: a kill-style interrupt keeps the next prompt off the process it stops', async () => {
+    const h = start({
+      script: (agent) => {
+        let prompts = 0;
+        agent.handle('session/prompt', () =>
+          ++prompts === 1 ? { hold: true } : { result: { stopReason: 'end_turn', _meta: { usage } } },
+        );
+      },
+    });
+    await h.session.start();
+    const turn = h.session.prompt('first');
+    await h.agents[0].next((m) => m.method === 'session/prompt');
+    const interrupted = h.session.interrupt();
+    // The held prompt is answered `cancelled` as soon as the cancel arrives,
+    // before the grace period ends and the process is killed.
+    await expect(turn).resolves.toBe(1);
+    expect(terminals(h)).toEqual([expect.objectContaining({ disposition: 'broken' })]);
+    await expect(h.session.prompt('second')).resolves.toBe(1);
+    expect(sent(h.agents[0], 'session/prompt')).toHaveLength(1);
+    await expect(interrupted).resolves.toBe(false);
+    expect(h.transports[0].killCount).toBe(1);
+  });
+});

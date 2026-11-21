@@ -318,9 +318,13 @@ export function createProviderSessionLaneHandle(
     return session
       .prompt(text)
       .then((code) =>
+        // Only a turn whose process takes the next prompt is healthy: a
+        // process retired by a failed cancel reports `interrupted` too, but
+        // the lane cannot continue on it (PR #1450 review).
         code !== 0 &&
         interruptRequested &&
         lastTerminalStatus === 'interrupted' &&
+        !session.isClosed() &&
         !abort.signal.aborted
           ? 0
           : code,
@@ -550,7 +554,19 @@ export function createProviderSessionLaneHandle(
     });
   };
 
-  const done = runFirstTurn().catch(onUnexpectedTurnError);
+  /**
+   * A first turn that threw before its task prompt went out leaves a session
+   * that can never take a message (`continue` refuses without the task
+   * prompt). The lane is aborted, so `supportsContinuation()` turns false
+   * and the agent is released instead of idling until the lane's cleanup
+   * (PR #1450 review). Every other early exit of the first turn already
+   * aborts or closes the session.
+   */
+  const done = runFirstTurn().catch((error: unknown) => {
+    const code = onUnexpectedTurnError(error);
+    if (!taskPromptSent) abort.abort();
+    return code;
+  });
 
   return {
     abort,
