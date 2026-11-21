@@ -61,6 +61,19 @@ describe('HandoffWatchdogRecovery (TASK_2026_2288 C)', () => {
     expect(WATCHDOG_RECOVERY_PROMPT).toContain('not a message from the user');
   });
 
+  it('cuts off stops at the teardown start, so a tab close during the interrupt cancels', async () => {
+    // Teardown started at 400; the end hook runs at 1_000 after the interrupt.
+    // A tab close at 700 must count as "after the watchdog end".
+    const h = harness();
+    h.recovery.onSessionEnd({
+      sessionId: SUCCESSOR_SDK,
+      cause: 'no-activity-timeout',
+      startedAt: 400,
+    });
+    await h.flush();
+    expect(h.recover).toHaveBeenCalledWith(expect.objectContaining({ endedAt: 400 }));
+  });
+
   it('waits for the teardown before it resumes', () => {
     const h = harness();
     h.recovery.onSessionEnd({ sessionId: SUCCESSOR_SDK, cause: 'no-activity-timeout' });

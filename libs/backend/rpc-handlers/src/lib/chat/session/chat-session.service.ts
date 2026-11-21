@@ -73,6 +73,7 @@ import {
   type SessionMcpStatusCallbackRegistry,
   type SessionBudgetService,
   type SessionIdResolvedCallbackRegistry,
+  SessionAdmissionRefusedError,
 } from '@ptah-extension/agent-sdk';
 import {
   CODEX_RESUME_PROFILE_CHANGED_MESSAGE,
@@ -356,8 +357,48 @@ type ChatFollowUpQueue = Pick<
   | 'withdrawAllForStop'
 >;
 
+/** Result of {@link ChatSessionService.ensureSessionActiveForRewind}. */
+type SessionActivation =
+  | { alreadyActive: true }
+  | { resumed: true }
+  | {
+      resumed: false;
+      error: string;
+      accountRefusal?: NonNullable<
+        ReturnType<typeof mainSessionAccountFailure>
+      >['accountRefusal'];
+    };
+
+/** Result of {@link ChatSessionService.recoverAfterWatchdogStop}. */
+type WatchdogRecoveryResult =
+  | { readonly recovered: true }
+  | {
+      readonly recovered: false;
+      readonly reason: 'already-active' | 'stopped' | 'resume-failed' | 'send-failed';
+      readonly detail?: string;
+    };
+
+/** A watchdog recovery in progress; a user activation of its session marks it. */
+interface RecoveryWatch {
+  userArrived: boolean;
+}
+
 @injectable()
 export class ChatSessionService {
+  /** Activation gates by session or tab id (see `withActivationGate`). */
+  private activationGateMap?: Map<string, Promise<void>>;
+  /** Watchdog recoveries in progress by session or tab id. */
+  private recoveryWatchMap?: Map<string, Set<RecoveryWatch>>;
+
+  // Lazy so that receivers built without the constructor (prototype specs) still work.
+  private get activationGates(): Map<string, Promise<void>> {
+    return (this.activationGateMap ??= new Map());
+  }
+
+  private get recoveryWatches(): Map<string, Set<RecoveryWatch>> {
+    return (this.recoveryWatchMap ??= new Map());
+  }
+
   private readonly pendingLineage = new Map<
     string,
     {
@@ -2084,13 +2125,18 @@ export class ChatSessionService {
         await this.endDeadRecordBeforeSlashCommand(sessionId, tabId);
         await this.driverLock.abandonDrive(sessionId, driveAttempt);
       } else {
-        const resumeOutcome = await this.autoResumeIfInactive(
-          sessionId,
-          tabId,
-          prompt,
-          { ...params, admissionDeadline },
-          mcpRegisteredForSubagents,
-          { deliversFollowUp: true },
+        const resumeOutcome = await this.withActivationGate(
+          [sessionId, tabId],
+          'user',
+          () =>
+            this.autoResumeIfInactive(
+              sessionId,
+              tabId,
+              prompt,
+              { ...params, admissionDeadline },
+              mcpRegisteredForSubagents,
+              { deliversFollowUp: true },
+            ),
         );
         if ('error' in resumeOutcome) {
           await this.driverLock.abandonDrive(sessionId, driveAttempt);
@@ -2611,7 +2657,7 @@ export class ChatSessionService {
         if (!driveAttempt) {
           activated = false;
         } else if (!this.hasLiveSessionStream(sessionId, params.tabId)) {
-          const activateResult = await timing.measure('sdkActivation', () => this.autoResumeIfInactive(
+          const activateResult = await timing.measure('sdkActivation', () => this.withActivationGate([sessionId, params.tabId], 'user', () => this.autoResumeIfInactive(
             sessionId,
             params.tabId,
             '',
@@ -2624,7 +2670,7 @@ export class ChatSessionService {
               accountSelection: params.accountSelection,
               admissionDeadline,
             },
-          ));
+          )));
           if ('justResumed' in activateResult) {
             activated =
               activateResult.justResumed ||
@@ -2891,17 +2937,25 @@ export class ChatSessionService {
     tabId: string,
     workspacePath: string,
     systemPrompt?: string,
-  ): Promise<
-    | { alreadyActive: true }
-    | { resumed: true }
-    | {
-        resumed: false;
-        error: string;
-        accountRefusal?: NonNullable<
-          ReturnType<typeof mainSessionAccountFailure>
-        >['accountRefusal'];
-      }
-  > {
+  ): Promise<SessionActivation> {
+    return this.withActivationGate([sessionId, tabId], 'user', () =>
+      this.activateSession(sessionId, tabId, workspacePath, systemPrompt),
+    );
+  }
+
+  /**
+   * The activation body of {@link ensureSessionActiveForRewind}, without the
+   * activation gate: the watchdog recovery calls it while it holds the gate.
+   * `cancelled` is checked after the account gate and the driver lock; when it
+   * answers true the session is not launched.
+   */
+  private async activateSession(
+    sessionId: SessionId,
+    tabId: string,
+    workspacePath: string,
+    systemPrompt?: string,
+    cancelled: () => boolean = () => false,
+  ): Promise<SessionActivation> {
     try {
       await this.gateAccount({ sessionId });
     } catch (error: unknown) {
@@ -2913,10 +2967,15 @@ export class ChatSessionService {
         accountRefusal: refusal.accountRefusal,
       };
     }
+    if (cancelled()) return { resumed: false, error: 'stopped' };
     const driveAttempt = await this.driverLock.beginDrive(sessionId, tabId);
     try {
       if (this.hasLiveSessionStream(sessionId, tabId)) {
         return { alreadyActive: true };
+      }
+      if (cancelled()) {
+        await this.driverLock.abandonDrive(sessionId, driveAttempt);
+        return { resumed: false, error: 'stopped' };
       }
 
       const outcome = await this.autoResumeIfInactive(sessionId, tabId, '', {
@@ -2948,9 +3007,17 @@ export class ChatSessionService {
    * Resume a session the no-activity watchdog ended and send it one recovery
    * prompt (TASK_2026_2288 C). The prompt has a `peer` origin, so the chat and
    * the transcript show it as an automatic message, never as the user's words.
-   * A session that is live again (the user or another path resumed it) is left
-   * alone. A session stopped after the watchdog end (`chat:abort`, for example
-   * a tab close) is not resumed and gets no prompt.
+   *
+   * Safe outcome on any doubt: no recovery.
+   * - It runs inside the session's activation gate, so it never races a
+   *   `chat:continue`, `chat:resume` or rewind activation. A user activation
+   *   that arrives while it runs makes it stand down before the prompt.
+   * - A stop of either id (`chat:abort`, for example a tab close) at or after
+   *   `endedAt` (the start of the watchdog teardown) cancels it. The check runs
+   *   on entry and after each await. A stop that lands while the resume
+   *   launches the session ends that relaunched session again.
+   * - The prompt is admitted with `require-idle`: if another turn started or a
+   *   message is queued, the prompt is dropped, never queued.
    */
   async recoverAfterWatchdogStop(input: {
     readonly sessionId: string;
@@ -2958,30 +3025,59 @@ export class ChatSessionService {
     readonly prompt: string;
     readonly senderName: string;
     readonly endedAt: number;
-  }): Promise<
-    | { readonly recovered: true }
-    | {
-        readonly recovered: false;
-        readonly reason: 'already-active' | 'stopped' | 'resume-failed' | 'send-failed';
-        readonly detail?: string;
-      }
-  > {
-    const sessionId = input.sessionId as SessionId;
+  }): Promise<WatchdogRecoveryResult> {
     const stoppedSinceEnd = (): boolean =>
       [input.sessionId, input.tabId].some(
         (id) => this.followUpQueue?.stoppedSince(id, input.endedAt) === true,
       );
     if (stoppedSinceEnd()) return { recovered: false, reason: 'stopped' };
-    if (this.hasLiveSessionStream(sessionId, input.tabId)) {
-      return { recovered: false, reason: 'already-active' };
+    const keys = [...new Set([input.sessionId, input.tabId])];
+    const watch: RecoveryWatch = { userArrived: false };
+    for (const key of keys) {
+      const watches = this.recoveryWatches.get(key) ?? new Set<RecoveryWatch>();
+      watches.add(watch);
+      this.recoveryWatches.set(key, watches);
     }
-    let resumed: Awaited<ReturnType<ChatSessionService['ensureSessionActiveForRewind']>>;
+    try {
+      return await this.withActivationGate(keys, 'recovery', () =>
+        this.runWatchdogRecovery(input, stoppedSinceEnd, watch),
+      );
+    } finally {
+      for (const key of keys) {
+        const watches = this.recoveryWatches.get(key);
+        watches?.delete(watch);
+        if (watches?.size === 0) this.recoveryWatches.delete(key);
+      }
+    }
+  }
+
+  /** The recovery steps; the caller holds the session's activation gate. */
+  private async runWatchdogRecovery(
+    input: {
+      readonly sessionId: string;
+      readonly tabId: string;
+      readonly prompt: string;
+      readonly senderName: string;
+    },
+    stoppedSinceEnd: () => boolean,
+    watch: RecoveryWatch,
+  ): Promise<WatchdogRecoveryResult> {
+    const sessionId = input.sessionId as SessionId;
+    const userOwned = (): boolean =>
+      watch.userArrived || this.hasLiveSessionStream(sessionId, input.tabId);
+    if (stoppedSinceEnd()) return { recovered: false, reason: 'stopped' };
+    if (userOwned()) return { recovered: false, reason: 'already-active' };
+    let resumed: SessionActivation;
     try {
       const workspacePath = await this.historyRead.resolveSessionFolder(sessionId);
-      resumed = await this.ensureSessionActiveForRewind(
+      if (stoppedSinceEnd()) return { recovered: false, reason: 'stopped' };
+      if (userOwned()) return { recovered: false, reason: 'already-active' };
+      resumed = await this.activateSession(
         sessionId,
         input.tabId,
         workspacePath,
+        undefined,
+        () => stoppedSinceEnd() || watch.userArrived,
       );
     } catch (error: unknown) {
       return {
@@ -2993,15 +3089,32 @@ export class ChatSessionService {
     if ('alreadyActive' in resumed) {
       return { recovered: false, reason: 'already-active' };
     }
-    if (!resumed.resumed) {
-      return { recovered: false, reason: 'resume-failed', detail: resumed.error };
+    if (stoppedSinceEnd()) {
+      // A stop during the launch found no record to end, so this call ends
+      // the session it launched: the tab is closed or the user stopped it.
+      if (resumed.resumed) await this.endRecoveredSession(sessionId);
+      return { recovered: false, reason: 'stopped' };
     }
-    if (stoppedSinceEnd()) return { recovered: false, reason: 'stopped' };
+    if (!resumed.resumed) {
+      return watch.userArrived
+        ? { recovered: false, reason: 'already-active' }
+        : { recovered: false, reason: 'resume-failed', detail: resumed.error };
+    }
+    // The user's own activation waits on the gate; the session is theirs now.
+    if (watch.userArrived) return { recovered: false, reason: 'already-active' };
     try {
       await this.sdkAdapter.sendMessageToSession(sessionId, input.prompt, {
         origin: { kind: 'peer', from: 'ptah', name: input.senderName },
+        admission: 'require-idle',
       });
     } catch (error: unknown) {
+      if (error instanceof SessionAdmissionRefusedError) {
+        return {
+          recovered: false,
+          reason: 'already-active',
+          detail: error.message,
+        };
+      }
       return {
         recovered: false,
         reason: 'send-failed',
@@ -3013,6 +3126,60 @@ export class ChatSessionService {
       tabId: input.tabId,
     });
     return { recovered: true };
+  }
+
+  /** End a session the recovery launched after its tab was closed or stopped. */
+  private async endRecoveredSession(sessionId: SessionId): Promise<void> {
+    try {
+      await this.sdkAdapter.interruptSession(sessionId, 'user-stop');
+    } catch (error: unknown) {
+      this.logger.error(
+        '[RPC] Ending a recovered session after a stop failed',
+        error instanceof Error ? error : new Error(String(error)),
+      );
+    }
+  }
+
+  /**
+   * Run one session activation at a time per key (TASK_2026_2288 C). The
+   * user's `chat:continue`, `chat:resume` and rewind activations and the
+   * watchdog recovery all go through it with the session and tab ids. A user
+   * activation marks any recovery of the same keys on entry, before it waits,
+   * so the recovery stands down instead of sending its prompt.
+   */
+  private async withActivationGate<T>(
+    keys: readonly string[],
+    owner: 'user' | 'recovery',
+    run: () => Promise<T>,
+  ): Promise<T> {
+    const unique = [...new Set(keys.filter((key) => key.length > 0))];
+    if (owner === 'user') {
+      for (const key of unique) {
+        for (const watch of this.recoveryWatches.get(key) ?? []) {
+          watch.userArrived = true;
+        }
+      }
+    }
+    for (;;) {
+      const held = unique.flatMap((key) => {
+        const gate = this.activationGates.get(key);
+        return gate ? [gate] : [];
+      });
+      if (held.length === 0) break;
+      await Promise.all(held);
+    }
+    // No await between the empty check above and these sets.
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    for (const key of unique) this.activationGates.set(key, gate);
+    try {
+      return await run();
+    } finally {
+      for (const key of unique) {
+        if (this.activationGates.get(key) === gate) this.activationGates.delete(key);
+      }
+      release();
+    }
   }
 
   /**
