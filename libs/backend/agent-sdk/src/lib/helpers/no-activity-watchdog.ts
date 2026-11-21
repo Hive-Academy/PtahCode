@@ -39,6 +39,11 @@ export class NoActivityWatchdog {
   private started = false;
   private holds = 0;
   private turnOpen = true;
+  /**
+   * Monotonic end of an announced SDK API retry window; null while none is
+   * open. A hold release or an unrelated kick re-arms to it, never shorter.
+   */
+  private retryUntilMs: number | null = null;
 
   get firedCause(): WatchdogTimeoutCause | null {
     return this.timeoutCause;
@@ -50,6 +55,7 @@ export class NoActivityWatchdog {
     // must not hold this turn's deadline forever.
     this.tools.clear();
     this.tasks.clear();
+    this.retryUntilMs = null;
     this.turnOpen = true;
     this.kick();
   }
@@ -100,6 +106,7 @@ export class NoActivityWatchdog {
     this.turnOpen = false;
     this.tools.clear();
     this.tasks.clear();
+    this.retryUntilMs = null;
     this.setCompacting(false);
     this.kick();
   }
@@ -189,6 +196,10 @@ export class NoActivityWatchdog {
     )
       return;
     if (message.type === 'system' && this.observeSystem(message)) return;
+    // Root API output proves the retry sent its first byte.
+    if (message.type === 'assistant' || message.type === 'stream_event') {
+      this.retryUntilMs = null;
+    }
     this.observeToolUses(message);
     this.observeToolResults(message);
     if (message.type === 'result') this.endTurn();
@@ -246,9 +257,12 @@ export class NoActivityWatchdog {
       nonNegativeMs(message.retry_delay_ms) +
       nonNegativeMs(message.no_response?.retry_wait_ms) +
       API_RETRY_MARGIN_MS;
-    this.arm(
-      Math.min(API_RETRY_MAX_ACCOUNTED_MS, Math.max(this.timeoutMs, accountedMs)),
+    const windowMs = Math.min(
+      API_RETRY_MAX_ACCOUNTED_MS,
+      Math.max(this.timeoutMs, accountedMs),
     );
+    this.retryUntilMs = performance.now() + windowMs;
+    this.arm(windowMs);
   }
 
   private observeCompaction(
@@ -382,9 +396,14 @@ export class NoActivityWatchdog {
     }
   }
 
-  private arm(windowMs = this.timeoutMs): void {
+  private arm(requestedMs?: number): void {
     this.clear();
     if (this.holds > 0 || this.stopped || this.fired || !this.started) return;
+    const windowMs =
+      requestedMs ??
+      (this.retryUntilMs === null
+        ? this.timeoutMs
+        : Math.max(this.timeoutMs, this.retryUntilMs - performance.now()));
     // While an enforced compaction is open the deadline never runs past its
     // dwell bound.
     const dwellRemainingMs = this.compactionDwellRemainingMs();
