@@ -261,9 +261,9 @@ export function createCodexRuntimeAdmission(
   return {
     servingProviderId: async (config) => {
       const execution = await service.prepare(config);
-      return execution.runtime === 'codex-app-server'
-        ? execution.seed.providerId
-        : execution.providerProfile?.providerId;
+      return execution.runtime === 'claude-sdk'
+        ? execution.providerProfile?.providerId
+        : execution.seed.providerId;
     },
   };
 }

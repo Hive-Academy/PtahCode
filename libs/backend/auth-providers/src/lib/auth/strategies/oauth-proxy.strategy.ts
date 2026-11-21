@@ -18,8 +18,11 @@ import type {
   AuthConfigureResult,
   AuthConfigureContext,
 } from '../auth-strategy.types';
-import { isNativeCodexAuthIntent } from '../codex-native-runtime-refusal';
-import { CODEX_NATIVE_RUNTIME_REQUIRED_MESSAGE } from '../codex-native-runtime-refusal';
+import {
+  CODEX_NATIVE_RUNTIME_REQUIRED_MESSAGE,
+  isNativeCodexAuthIntent,
+  nativeRuntimeOwnedDetail,
+} from '../codex-native-runtime-refusal';
 import { AUTH_PROVIDERS_TOKENS } from '../../di/tokens';
 import type { ProviderModelsService } from '../../provider-models.service';
 import type {
@@ -36,6 +39,7 @@ import {
 import type { ITranslationProxy } from '../../translation';
 import {
   KIMI_CODE_PROXY_TOKEN_PLACEHOLDER,
+  isProviderSessionProviderId,
   seedStaticModelPricing,
   type AuthEnv,
 } from '@ptah-extension/shared';
@@ -64,6 +68,14 @@ export class OAuthProxyStrategy implements IAuthStrategy {
 
   async configure(context: AuthConfigureContext): Promise<AuthConfigureResult> {
     const { providerId, authEnv } = context;
+    // A provider session owns its own sign-in and has no proxy: never fall
+    // through to the Copilot flow below.
+    if (isProviderSessionProviderId(providerId)) {
+      return {
+        configured: false,
+        details: [nativeRuntimeOwnedDetail(providerId)],
+      };
+    }
     if (providerId === KIMI_CODE_PROVIDER_ID) {
       this.codexAuth.stopWatchingAuthFile();
       return this.configureKimiCode(providerId, authEnv);

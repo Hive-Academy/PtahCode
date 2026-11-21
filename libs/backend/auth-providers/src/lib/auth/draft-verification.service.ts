@@ -57,6 +57,8 @@ import {
 import {
   ANTHROPIC_DIRECT_PROVIDER_ID,
   getAnthropicProvider,
+  isProviderSessionProviderId,
+  providerSessionNativeRuntimeRequiredMessage,
 } from '@ptah-extension/shared';
 import type {
   AuthVerifyDraftConnectionParams,
@@ -192,7 +194,11 @@ export function classifyDraftProbeFailure(
   // docblocks), not `instanceof`, so a mirrored check stays possible.
   const thrownName = errorName(input.thrown);
   if (thrownName === 'ProviderQuotaError') return 'quota-exhausted';
-  if (thrownName === 'ProviderAuthError' || isCodexRuntimeRefusal(input.thrown)) {
+  if (
+    thrownName === 'ProviderAuthError' ||
+    isCodexRuntimeRefusal(input.thrown) ||
+    providerSessionRefusalProviderId(input.thrown) !== null
+  ) {
     return 'credential-rejected';
   }
 
@@ -663,11 +669,17 @@ export class DraftVerificationService {
           ? 'The provider is still cooling down after rate limiting.'
           : `The provider is still cooling down after rate limiting (retry after ${Math.max(1, Math.round(retryAfterMs / 1000))}s).`;
       }
-      case 'credential-rejected':
+      case 'credential-rejected': {
         if (isCodexRuntimeRefusal(error)) {
           return CODEX_NATIVE_RUNTIME_REQUIRED_MESSAGE;
         }
+        const refusedProviderId = providerSessionRefusalProviderId(error);
+        if (refusedProviderId !== null) {
+          // Rebuilt from the provider id, never quoted from the error.
+          return providerSessionNativeRuntimeRequiredMessage(refusedProviderId);
+        }
         return 'The draft is missing a usable credential for this mode.';
+      }
       default:
         return 'The probe did not start.';
     }
@@ -758,6 +770,29 @@ function isCodexRuntimeRefusal(error: unknown): boolean {
     'providerId' in error &&
     error['providerId'] === 'openai-codex'
   );
+}
+
+/**
+ * The provider id of a provider-session runtime refusal, else `null`. Same
+ * rule as `isProviderSessionNativeRuntimeRefusal` (provider-session id plus
+ * the exact refusal text), read by name so a mirrored error also matches.
+ */
+function providerSessionRefusalProviderId(error: unknown): string | null {
+  if (
+    errorName(error) !== 'AuthRequiredError' ||
+    typeof error !== 'object' ||
+    error === null ||
+    !('providerId' in error)
+  ) {
+    return null;
+  }
+  const providerId = error['providerId'];
+  return typeof providerId === 'string' &&
+    isProviderSessionProviderId(providerId) &&
+    error instanceof Error &&
+    error.message === providerSessionNativeRuntimeRequiredMessage(providerId)
+    ? providerId
+    : null;
 }
 
 /** `retryAfterMs` of a `ProviderQuotaError`, by the documented name contract. */

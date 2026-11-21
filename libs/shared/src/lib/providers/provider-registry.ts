@@ -20,6 +20,8 @@
 import { z } from 'zod';
 
 import type { ModelCapability } from '../types/auth-env.types';
+import type { ProviderSessionProfileId } from '../types/provider-session-profile.types';
+import type { SessionRuntimeKind } from '../types/session-runtime.types';
 
 import { updatePricingMap } from '../utils/pricing.utils';
 import { staticModelPricing } from './static-model-pricing';
@@ -200,6 +202,14 @@ export interface AnthropicProvider {
    * built-in base URLs ship in Ptah's own source, a custom one does not.
    */
   isCustom?: boolean;
+  /**
+   * The provider-session profile that runs this provider as a native chat
+   * runtime (`@ptah-extension/provider-session-contracts`). Such a provider
+   * never serves the Claude SDK: global auth, one-shot queries, proxies and
+   * the messaging gateway refuse it. Built-in entries only; a custom entry
+   * cannot set it.
+   */
+  providerSession?: ProviderSessionProfileId;
 }
 
 /**
@@ -432,6 +442,20 @@ export type AnthropicProviderId =
   | 'requesty'
   | 'opencode-zen'
   | 'opencode-go';
+
+/**
+ * Provider ids reserved for provider-session entries (one per profile). An id
+ * is live only once its registry entry exists; until then every lookup below
+ * answers "not a provider session".
+ */
+export const PROVIDER_SESSION_PROVIDER_IDS = [
+  'antigravity-cli',
+  'grok-cli',
+  'opencode-cli',
+] as const;
+
+export type ProviderSessionProviderId =
+  (typeof PROVIDER_SESSION_PROVIDER_IDS)[number];
 
 /** Default provider when none is configured */
 export const DEFAULT_PROVIDER_ID: AnthropicProviderId = 'openrouter';
@@ -772,6 +796,50 @@ export function getAnthropicProvider(
   const builtIn = ANTHROPIC_PROVIDERS.find((p) => p.id === id);
   if (builtIn) return builtIn;
   return customProviders.find((p) => p.id === id);
+}
+
+/**
+ * The provider-session profile of a built-in entry, or `undefined`. Only an
+ * id reserved in {@link PROVIDER_SESSION_PROVIDER_IDS} counts, so the
+ * predicate below never narrows to an id outside that union.
+ */
+export function getProviderSessionProfile(
+  providerId: string,
+): ProviderSessionProfileId | undefined {
+  if (!(PROVIDER_SESSION_PROVIDER_IDS as readonly string[]).includes(providerId))
+    return undefined;
+  const provider: AnthropicProvider | undefined = ANTHROPIC_PROVIDERS.find(
+    (p) => p.id === providerId,
+  );
+  return provider?.providerSession;
+}
+
+/** True when `providerId` names a registry entry with a provider session. */
+export function isProviderSessionProviderId(
+  providerId: string,
+): providerId is ProviderSessionProviderId {
+  return getProviderSessionProfile(providerId) !== undefined;
+}
+
+/**
+ * Exact text of the deliberate provider-session refusal for `providerId`: a
+ * provider session is a chat or agent runtime and never serves Ptah's
+ * internal (Claude SDK) model calls. Not a general auth failure. Pure, so
+ * every caller and detector shares one spelling without a backend import.
+ */
+export function providerSessionNativeRuntimeRequiredMessage(
+  providerId: string,
+): string {
+  const name = getAnthropicProvider(providerId)?.name ?? providerId;
+  return `${name} runs only as a chat or agent runtime; it cannot serve Ptah's internal model calls.`;
+}
+
+/** The runtime that serves a new main-chat session on `providerId`. */
+export function providerRuntimeFor(providerId: string): SessionRuntimeKind {
+  if (providerId === CODEX_PROVIDER_ENTRY.id) return 'codex-app-server';
+  return getProviderSessionProfile(providerId) === undefined
+    ? 'claude-sdk'
+    : 'provider-session';
 }
 
 /** Resolve a CLI lane without exposing lane-only entries to main-agent routes. */

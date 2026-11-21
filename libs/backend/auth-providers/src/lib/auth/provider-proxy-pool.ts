@@ -64,9 +64,11 @@ import {
 } from '@ptah-extension/vscode-core';
 import type { AnthropicProvider } from '@ptah-extension/shared';
 import { codexNativeRuntimeRequired } from './codex-native-runtime-refusal';
+import { providerSessionNativeRuntimeRequired } from './provider-session-runtime-refusal';
 import {
   isCustomProviderId,
   isOpenCodeProviderId,
+  isProviderSessionProviderId,
 } from '@ptah-extension/shared';
 import {
   createOpenCodeProxyForKey,
@@ -227,6 +229,9 @@ export class ProviderProxyPool {
   ): Promise<AcquiredProxy | undefined> {
     if (providerId === 'openai-codex') {
       throw codexNativeRuntimeRequired();
+    }
+    if (isProviderSessionProviderId(providerId)) {
+      throw providerSessionNativeRuntimeRequired(providerId);
     }
     if (provider.requiresProxy !== true) {
       // Not an error and not "unsupported": this provider speaks the Anthropic

@@ -53,6 +53,9 @@ export {
   flushSessionMetadataStores,
   SESSION_METADATA_MIGRATION,
   SESSION_METADATA_WORKER_CACHE_EXCLUSIONS,
+  ProviderSessionMetadataError,
+  nativeExecutionOf,
+  parseProviderSessionThreadRecord,
 } from './lib/session-metadata-store';
 export {
   LegacySessionStoreMigrator,
@@ -65,6 +68,8 @@ export type {
   SessionMetadata,
   PersistedAgentOutput,
   TaggedAgentOutputItem,
+  ProviderSessionThreadRecord,
+  ProviderSessionThreadRecordUpdater,
 } from './lib/session-metadata-store';
 export { SessionImporterService } from './lib/session-importer.service';
 export {
@@ -190,6 +195,8 @@ export {
   AuthRequiredError,
   CODEX_NATIVE_RUNTIME_REQUIRED_MESSAGE,
   isCodexNativeRuntimeRefusal,
+  isNativeRuntimeRefusal,
+  isProviderSessionNativeRuntimeRefusal,
   InternalQueryQueueTimeoutError,
 } from './lib/errors';
 // Electron codex-runtime-composition.spec.ts and di/register.ts consume registration; hosts must override only nullable port tokens.

@@ -25,7 +25,7 @@ import {
   type SessionRuntimeIdentity,
   type SessionId,
 } from '@ptah-extension/shared';
-import { TOKENS } from '@ptah-extension/vscode-core';
+import { RpcUserError, TOKENS } from '@ptah-extension/vscode-core';
 import { isAuthorizedWorkspace } from '../../utils/workspace-authorization';
 import type { WebviewManager } from '../streaming/chat-stream-broadcaster.service';
 
@@ -39,7 +39,33 @@ export type ResolvedChatExecution =
       readonly cwd: string;
       /** Complete chat inputs for the host's validated Codex profile builder. */
       readonly config: ChatRuntimeConfig;
+    })
+  | (Extract<ResolvedExecutionProfile, { runtime: 'provider-session' }> & {
+      readonly workspacePath: string;
+      readonly cwd: string;
+      /** Complete chat inputs for the provider-session adapter. */
+      readonly config: ChatRuntimeConfig;
     });
+
+/** User-facing text while no chat path serves a provider session. */
+export const PROVIDER_SESSION_CHAT_UNAVAILABLE =
+  'Provider-session chat is not available on this host.';
+
+/**
+ * Refuse a provider-session execution on a chat path that cannot serve it
+ * yet. No host admits the runtime today (no registry entry selects it), so
+ * this is a closed door, not a degradation.
+ */
+export function refuseProviderSessionExecution<
+  T extends ResolvedChatExecution,
+>(execution: T): asserts execution is Exclude<T, { runtime: 'provider-session' }> {
+  if (execution.runtime === 'provider-session') {
+    throw new RpcUserError(
+      PROVIDER_SESSION_CHAT_UNAVAILABLE,
+      'PROVIDER_SESSION_UNAVAILABLE',
+    );
+  }
+}
 
 /**
  * The Claude execution for a host with no bound runtime profile service. A
@@ -68,21 +94,29 @@ export async function resolveClaudeExecution(
   };
 }
 
-/** Existing sessions without native metadata retain their Claude runtime. */
+/**
+ * Existing sessions without native metadata (Codex or provider session)
+ * retain their Claude runtime.
+ */
 export function storedChatRuntimeIdentity(
   sessionId: SessionId,
   metadata: {
     codexExecution?: SessionRuntimeIdentity;
+    providerSessionExecution?: SessionRuntimeIdentity;
     providerId?: string;
     workspaceId?: string;
   } | null | undefined,
   workspaceId: string,
 ): SessionRuntimeIdentity {
-  return metadata?.codexExecution ?? legacyClaudeSessionRuntimeIdentity({
-    sessionId,
-    providerId: metadata?.providerId,
-    workspaceId: metadata?.workspaceId ?? workspaceId,
-  });
+  return (
+    metadata?.codexExecution ??
+    metadata?.providerSessionExecution ??
+    legacyClaudeSessionRuntimeIdentity({
+      sessionId,
+      providerId: metadata?.providerId,
+      workspaceId: metadata?.workspaceId ?? workspaceId,
+    })
+  );
 }
 
 @injectable()

@@ -97,6 +97,11 @@ type CodexExecution = Extract<
   { runtime: 'codex-app-server' }
 >;
 
+type ProviderSessionExecution = Extract<
+  SessionRuntimeIdentity,
+  { runtime: 'provider-session' }
+>;
+
 // Registry migration 58 uses zero-based epochs/revisions. Strict objects reject
 // accidental directory/identity fields instead of silently stripping them.
 const accountRevision = z
@@ -172,6 +177,72 @@ function codexSessionName(
 ): string {
   if (current?.trim() && current !== sessionId) return current;
   return title?.trim() || current?.trim() || sessionId;
+}
+
+/**
+ * Native session mapping stored beside `providerSessionExecution`: the
+ * provider's own session id and the process generation that last held it.
+ */
+const providerSessionThreadRecordSchema = z
+  .object({
+    nativeSessionId: z.string().min(1),
+    processGeneration: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  })
+  .strict();
+
+export type ProviderSessionThreadRecord = z.infer<
+  typeof providerSessionThreadRecordSchema
+>;
+
+/** Returns the current record or the same reference to skip the write. */
+export type ProviderSessionThreadRecordUpdater = (
+  current: ProviderSessionThreadRecord | undefined,
+  execution: ProviderSessionExecution | undefined,
+) => ProviderSessionThreadRecord | undefined;
+
+/** Malformed or absent stored mappings read as absent; they never throw. */
+export function parseProviderSessionThreadRecord(
+  value: unknown,
+): ProviderSessionThreadRecord | undefined {
+  const parsed = providerSessionThreadRecordSchema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
+}
+
+/**
+ * Keep a stored caller path only when it names the same workspace key;
+ * otherwise (absent, foreign or damaged) use the proposed caller path.
+ */
+function providerSessionCallerPath(
+  stored: string | undefined,
+  key: string,
+  proposed: string,
+): string {
+  if (!stored) return proposed;
+  try {
+    return normalizeCodexWorkspaceKey(stored, process.platform) === key
+      ? stored
+      : proposed;
+  } catch {
+    // degradation-audit: optional-capability -- a stored path that cannot be
+    // normalized is treated as foreign; the proposed caller path repairs it.
+    return proposed;
+  }
+}
+
+/**
+ * The session's native runtime binding (Codex or provider session), or
+ * `undefined` for a Claude SDK or legacy session.
+ */
+export function nativeExecutionOf(
+  metadata:
+    | {
+        readonly codexExecution?: CodexExecution;
+        readonly providerSessionExecution?: ProviderSessionExecution;
+      }
+    | null
+    | undefined,
+): CodexExecution | ProviderSessionExecution | undefined {
+  return metadata?.codexExecution ?? metadata?.providerSessionExecution;
 }
 
 const codexMessageCountSchema = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER).optional();
@@ -363,6 +434,22 @@ export class CodexSessionMetadataError extends Error {
   }
 }
 
+export class ProviderSessionMetadataError extends Error {
+  constructor(
+    readonly code:
+      | 'legacy-conversion'
+      | 'invalid-identity'
+      | 'binding-change'
+      | 'unavailable-storage'
+      | 'direct-runtime-write'
+      | 'account-linkage',
+    message: string,
+  ) {
+    super(message);
+    this.name = 'ProviderSessionMetadataError';
+  }
+}
+
 export type SessionAccountBindingLookup =
   | { readonly status: 'absent' }
   | { readonly status: 'bound'; readonly binding: ProviderAccountBinding }
@@ -443,6 +530,12 @@ export interface SessionMetadata {
 
   /** Two visible messages per completed native turn: user prompt and assistant reply. */
   readonly codexMessageCount?: number;
+
+  /** Provider-session binding; history remains owned by the provider. */
+  readonly providerSessionExecution?: ProviderSessionExecution;
+
+  /** Native session mapping; written with `providerSessionExecution`. */
+  readonly providerSessionThread?: ProviderSessionThreadRecord;
 
   /**
    * Real SDK session UUID (from system 'init' message)
@@ -1402,25 +1495,7 @@ export class SessionMetadataStore {
     let workspaceId = '';
     let skipped = false;
     await this.enqueueWrite(async () => {
-      // Read authoritative detail without invoking Claude account gates. Lean
-      // listings omit child references and must not replace an existing detail.
-      let existing = this.strays.get(sessionId);
-      if (!existing && this.records) {
-        await this.gate?.whenReady();
-        const record = await this.records.get(sessionId);
-        existing = record ? validateAccountLinkage(record.detail) : undefined;
-      } else if (!existing && isAsyncStateStorage(this.storage)) {
-        existing = await this.storage.getAsync<SessionMetadata>(
-          sessionDetailKey(sessionId),
-          undefined,
-          DETAIL_READ_OPTIONS,
-        );
-      }
-      if (!existing && !this.records) {
-        existing = (await this.getAll()).find(
-          (row) => row.sessionId === sessionId,
-        );
-      }
+      const existing = await this.readRuntimeWriteDetail(sessionId);
       // The thread updater runs inside the queued write, so its compare and
       // the write are atomic; returning the current record skips the write.
       const currentThread = parseCodexThreadRecord(existing?.codexThread);
@@ -1558,6 +1633,172 @@ export class SessionMetadataStore {
               output: checkpoint.total.outputTokens,
             }
           : existing?.totalTokens ?? { input: 0, output: 0 },
+      };
+      await this.persistMetadata(detail);
+      // Identity is a launch checkpoint, durable even when other writes are queued.
+      await this.flush();
+    });
+    if (!skipped) this.emitChange(kind, sessionId, workspaceId);
+  }
+
+  /**
+   * Authoritative detail for a native identity write, read without invoking
+   * Claude account gates. Lean listings omit child references and must not
+   * replace an existing detail. Call only inside a queued write.
+   */
+  private async readRuntimeWriteDetail(
+    sessionId: SessionId,
+  ): Promise<SessionMetadata | undefined> {
+    let existing = this.strays.get(sessionId);
+    if (!existing && this.records) {
+      await this.gate?.whenReady();
+      const record = await this.records.get(sessionId);
+      existing = record ? validateAccountLinkage(record.detail) : undefined;
+    } else if (!existing && isAsyncStateStorage(this.storage)) {
+      existing = await this.storage.getAsync<SessionMetadata>(
+        sessionDetailKey(sessionId),
+        undefined,
+        DETAIL_READ_OPTIONS,
+      );
+    }
+    if (!existing && !this.records) {
+      existing = (await this.getAll()).find(
+        (row) => row.sessionId === sessionId,
+      );
+    }
+    return existing;
+  }
+
+  /**
+   * The only writer of provider-session identity (parallel to
+   * {@link updateCodexExecution}). The binding is immutable once written:
+   * provider, workspace key, profile and home never change. The workspace
+   * key is the same lexical workspace key Codex uses
+   * (`normalizeCodexWorkspaceKey`: case-folded on win32, roots kept,
+   * drive-less rooted paths refused); the
+   * detail row keeps the caller's spelling of the same folder.
+   */
+  async updateProviderSessionExecution(
+    sessionId: SessionId,
+    updater: (
+      current: ProviderSessionExecution | undefined,
+    ) => ProviderSessionExecution,
+    thread?: ProviderSessionThreadRecordUpdater,
+    title?: string,
+  ): Promise<void> {
+    let kind: SessionMetadataChangeKind = 'created';
+    let workspaceId = '';
+    let skipped = false;
+    await this.enqueueWrite(async () => {
+      const existing = await this.readRuntimeWriteDetail(sessionId);
+      const currentThread = parseProviderSessionThreadRecord(
+        existing?.providerSessionThread,
+      );
+      const nextThread = thread?.(
+        currentThread,
+        existing?.providerSessionExecution
+          ? structuredClone(existing.providerSessionExecution)
+          : undefined,
+      );
+      if (thread && nextThread === currentThread) {
+        skipped = true;
+        return;
+      }
+      if (existing && !existing.providerSessionExecution) {
+        throw new ProviderSessionMetadataError(
+          'legacy-conversion',
+          'Cannot convert another session to a provider session',
+        );
+      }
+      if (existing?.accountBinding) {
+        throw new ProviderSessionMetadataError(
+          'account-linkage',
+          'Provider sessions cannot carry account linkage',
+        );
+      }
+      kind = existing ? 'updated' : 'created';
+      const proposed = updater(
+        existing?.providerSessionExecution
+          ? structuredClone(existing.providerSessionExecution)
+          : undefined,
+      );
+      let workspaceKey: string;
+      try {
+        workspaceKey = normalizeCodexWorkspaceKey(
+          proposed.workspaceId,
+          process.platform,
+        );
+      } catch {
+        throw new ProviderSessionMetadataError(
+          'invalid-identity',
+          'Invalid provider-session workspace',
+        );
+      }
+      const parsed = SessionRuntimeIdentitySchema.safeParse({
+        ...proposed,
+        workspaceId: workspaceKey,
+      });
+      if (
+        !parsed.success ||
+        parsed.data.runtime !== 'provider-session' ||
+        parsed.data.sessionId !== sessionId
+      ) {
+        throw new ProviderSessionMetadataError(
+          'invalid-identity',
+          'Invalid provider-session identity',
+        );
+      }
+      const execution = parsed.data;
+      const stored = existing?.providerSessionExecution;
+      if (
+        stored &&
+        (stored.providerId !== execution.providerId ||
+          stored.workspaceId !== execution.workspaceId ||
+          stored.providerSession.profile !==
+            execution.providerSession.profile ||
+          stored.providerSession.normalizedHome !==
+            execution.providerSession.normalizedHome)
+      ) {
+        throw new ProviderSessionMetadataError(
+          'binding-change',
+          'Cannot change a provider-session binding',
+        );
+      }
+      if (this.isForeignWorkspace(execution.workspaceId)) {
+        throw new ProviderSessionMetadataError(
+          'unavailable-storage',
+          'Provider-session storage is unavailable for this workspace',
+        );
+      }
+      const threadRecord = nextThread
+        ? providerSessionThreadRecordSchema.safeParse(nextThread)
+        : undefined;
+      if (threadRecord && !threadRecord.success) {
+        throw new ProviderSessionMetadataError(
+          'invalid-identity',
+          'Invalid provider-session thread mapping',
+        );
+      }
+      workspaceId = providerSessionCallerPath(
+        existing?.workspaceId,
+        execution.workspaceId,
+        proposed.workspaceId,
+      );
+      const now = Date.now();
+      const detail: SessionMetadata = {
+        ...existing,
+        sessionId,
+        name: codexSessionName(existing?.name, sessionId, title),
+        workspaceId,
+        providerId: execution.providerId,
+        providerSessionExecution: execution,
+        ...(threadRecord?.success
+          ? { providerSessionThread: threadRecord.data }
+          : {}),
+        createdAt: existing?.createdAt ?? now,
+        lastActiveAt: now,
+        totalCost: existing?.totalCost ?? null,
+        totalTokens: existing?.totalTokens ?? { input: 0, output: 0 },
       };
       await this.persistMetadata(detail);
       // Identity is a launch checkpoint, durable even when other writes are queued.
@@ -1730,6 +1971,35 @@ export class SessionMetadataStore {
       );
     }
     if (
+      (metadata.providerSessionExecution !== undefined &&
+        JSON.stringify(metadata.providerSessionExecution) !==
+          JSON.stringify(existing?.providerSessionExecution)) ||
+      (metadata.providerSessionThread !== undefined &&
+        JSON.stringify(metadata.providerSessionThread) !==
+          JSON.stringify(existing?.providerSessionThread))
+    ) {
+      throw new ProviderSessionMetadataError(
+        'direct-runtime-write',
+        'Use updateProviderSessionExecution to write runtime metadata',
+      );
+    }
+    if (
+      existing?.providerSessionExecution &&
+      providerOverride &&
+      providerOverride !== existing.providerId
+    ) {
+      throw new ProviderSessionMetadataError(
+        'binding-change',
+        'Cannot change a provider-session binding',
+      );
+    }
+    if (existing?.providerSessionExecution && metadata.accountBinding) {
+      throw new ProviderSessionMetadataError(
+        'account-linkage',
+        'Provider sessions cannot carry account linkage',
+      );
+    }
+    if (
       metadata.accountBinding &&
       existing &&
       (!existing.accountBinding ||
@@ -1751,6 +2021,15 @@ export class SessionMetadataStore {
           }
         : {}),
       ...(existing?.codexThread ? { codexThread: existing.codexThread } : {}),
+      ...(existing?.providerSessionExecution
+        ? {
+            providerSessionExecution: existing.providerSessionExecution,
+            workspaceId: existing.workspaceId,
+          }
+        : {}),
+      ...(existing?.providerSessionThread
+        ? { providerSessionThread: existing.providerSessionThread }
+        : {}),
       ...(existing?.codexUsageCheckpoint
         ? { codexUsageCheckpoint: existing.codexUsageCheckpoint }
         : {}),

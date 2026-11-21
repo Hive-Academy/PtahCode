@@ -10,6 +10,11 @@
  * hint (typically the adapter's last health `errorMessage`) so the UI can render
  * an actionable banner instead of a cryptic message.
  */
+import {
+  isProviderSessionProviderId,
+  providerSessionNativeRuntimeRequiredMessage,
+  type ProviderSessionProviderId,
+} from '@ptah-extension/shared';
 import { SdkError } from './sdk.error';
 
 export class AuthRequiredError extends SdkError {
@@ -49,5 +54,33 @@ export function isCodexNativeRuntimeRefusal(
     error instanceof AuthRequiredError &&
     error.providerId === 'openai-codex' &&
     error.message === CODEX_NATIVE_RUNTIME_REQUIRED_MESSAGE
+  );
+}
+
+/**
+ * True only for the deliberate provider-session refusal: an
+ * `AuthRequiredError` whose provider is a provider-session entry and whose
+ * message is that provider's refusal text.
+ */
+export function isProviderSessionNativeRuntimeRefusal(
+  error: unknown,
+): error is AuthRequiredError & { readonly providerId: ProviderSessionProviderId } {
+  return (
+    error instanceof AuthRequiredError &&
+    error.providerId !== null &&
+    isProviderSessionProviderId(error.providerId) &&
+    error.message === providerSessionNativeRuntimeRequiredMessage(error.providerId)
+  );
+}
+
+/** The Codex or the provider-session native-runtime refusal. */
+export function isNativeRuntimeRefusal(
+  error: unknown,
+): error is AuthRequiredError & {
+  readonly providerId: 'openai-codex' | ProviderSessionProviderId;
+} {
+  return (
+    isCodexNativeRuntimeRefusal(error) ||
+    isProviderSessionNativeRuntimeRefusal(error)
   );
 }

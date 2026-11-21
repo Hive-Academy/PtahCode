@@ -17,6 +17,7 @@ import {
   getAnthropicProvider,
   getProviderAuthEnvVar,
   getProviderBaseUrl,
+  isProviderSessionProviderId,
   OLLAMA_CLOUD_DIRECT_BASE_URL,
   resolveStrategy,
 } from '@ptah-extension/shared';
@@ -29,6 +30,7 @@ import {
 } from './provider-auth.error';
 import { ProviderQuotaError } from './provider-quota.error';
 import { codexNativeRuntimeRequired } from './codex-native-runtime-refusal';
+import { providerSessionNativeRuntimeRequired } from './provider-session-runtime-refusal';
 import type { ProviderQuotaStore } from './provider-quota.store';
 import type { ICopilotAuthService } from '../providers/copilot/copilot-provider.types';
 import {
@@ -159,6 +161,9 @@ export class ProviderAuthResolver implements IProviderAuthResolver {
 
     if (providerId === 'openai-codex') {
       throw codexNativeRuntimeRequired();
+    }
+    if (isProviderSessionProviderId(providerId)) {
+      throw providerSessionNativeRuntimeRequired(providerId);
     }
 
     if (requested.length === 0) {
@@ -547,6 +552,9 @@ export class ProviderAuthResolver implements IProviderAuthResolver {
     const providerId = draft.providerId.trim();
     if (providerId === 'openai-codex') {
       throw codexNativeRuntimeRequired();
+    }
+    if (isProviderSessionProviderId(providerId)) {
+      throw providerSessionNativeRuntimeRequired(providerId);
     }
     const provider = getAnthropicProvider(providerId);
 
