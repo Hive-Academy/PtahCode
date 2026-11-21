@@ -125,6 +125,8 @@ export const SdkSubagentEndedPayloadSchema = z.object({
   cwd: z.string().min(1),
   agentId: z.string().min(1),
   agentType: z.string().min(1),
+  // degradation-audit: optional-capability - Zod schema fallback, not a
+  // promise: an invalid toolCallId parses as absent (undefined).
   toolCallId: z.string().min(1).optional().catch(undefined),
   lastAssistantMessage: z.string().nullable(),
   backgroundTasks: z.array(SdkBackgroundTaskSummarySchema).readonly(),

@@ -276,6 +276,8 @@ function parseRetryAfterBody(text: string): number | null {
     }
     return value;
   } catch {
+    // degradation-audit: optional-capability - a non-JSON body has no
+    // retry_after; null means "no hint" and the caller reports the HTTP error.
     return null;
   }
 }
@@ -284,6 +286,8 @@ async function safeText(res: { text(): Promise<string> }): Promise<string> {
   try {
     return await res.text();
   } catch {
+    // degradation-audit: optional-capability - an unreadable error body is
+    // treated as empty; the caller still returns the HTTP status as lastError.
     return '';
   }
 }

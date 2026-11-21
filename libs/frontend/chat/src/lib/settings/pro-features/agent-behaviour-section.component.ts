@@ -13,8 +13,8 @@ import {
   AlertCircle,
   Bot,
   Info,
-  ChevronRight,
   LucideAngularModule,
+  PanelRightOpen,
   Sparkles,
 } from 'lucide-angular';
 import {
@@ -72,7 +72,7 @@ const ULTRACODE_ON_FAILED =
 const ULTRACODE_OFF_FAILED =
   'Could not turn off Ultracode: your previous reasoning effort was not restored.';
 
-/** M1: every row description is one clamped line; the full text is its `title` and stays in the DOM for readers. */
+/** Each row description is the row hint. It wraps, and its id stays `agent-behaviour-<row>-note`. */
 const PROMPT_NOTE_ON =
   "Ptah's project-specific prompt, used for all sessions when on.";
 const PROMPT_NOTE_WIZARD =
@@ -131,7 +131,10 @@ interface LoadError {
       <h2 id="agent-behaviour-heading" class="sr-only">Agent behaviour</h2>
       <ptah-form-section
         id="advanced-agent-behaviour"
+        flushInGlass
+        class="[[data-glass=on]_&>section]:[border-bottom:0]"
         heading="Agent behaviour"
+        [icon]="BotIcon"
         description="How the main agent plans and how hard it works."
         [wide]="true"
         [level]="2"
@@ -157,19 +160,17 @@ interface LoadError {
             </button></ptah-alert
           >
         }
+        <!-- One container for the rows: the first row has no top padding and the last row has no divider. -->
+        <div class="flex flex-col" data-testid="agent-behaviour-rows">
         <ptah-setting-row
-          class="[border-bottom:var(--ptah-border-width)_solid_var(--ptah-border-color)] last:[border-bottom:0]"
+          controlAlign="end"
+          edgePadding="trim"
           label="System prompt mode"
           controlId="agent-behaviour-prompt-toggle"
+          [hint]="promptNote()"
+          hintElementId="agent-behaviour-prompt-note"
           data-testid="agent-behaviour-row-prompt"
         >
-          <span
-            status
-            class="basis-full truncate text-xs font-normal text-base-content-muted"
-            id="agent-behaviour-prompt-note"
-            [title]="promptNote()"
-            >{{ promptNote() }}</span
-          >
           <span meta class="sr-only" data-testid="agent-behaviour-prompt-status"
             ><ptah-status
               [status]="promptEnabled() ? 'online' : 'offline'"
@@ -180,89 +181,73 @@ interface LoadError {
                 : 'Standard system prompt'
             }}</span
           >
-          <div class="flex w-56 max-w-full items-center justify-start gap-ptah-controls">
-            <input
-              id="agent-behaviour-prompt-toggle"
-              type="checkbox"
-              ptahToggle
-              [checked]="promptEnabled()"
-              [ptahBusyDisabled]="promptToggleDisabled() || saving()"
-              (change)="onPromptModeChange($event)"
-              aria-label="Toggle Enhanced System Prompt"
-              aria-describedby="agent-behaviour-prompt-note"
-            />
-            <button
-              type="button"
-              ptahButton
-              variant="ghost"
-              aria-label="System prompt details"
-              size="xs"
-              (click)="drawerOpen.set(true)"
-              data-testid="agent-behaviour-prompt-details"
-            >
-              <lucide-angular
-                [img]="ChevronRightIcon"
-                class="w-3.5 h-3.5 text-secondary"
-                aria-hidden="true"
-              />
-              <span>Details</span>
-            </button>
-          </div>
+          <button
+            action
+            type="button"
+            ptahIconButton
+            label="System prompt details"
+            (click)="drawerOpen.set(true)"
+            data-testid="agent-behaviour-prompt-details"
+          >
+            <lucide-angular [img]="PanelRightOpenIcon" class="w-3.5 h-3.5" aria-hidden="true" />
+          </button>
+          <input
+            id="agent-behaviour-prompt-toggle"
+            type="checkbox"
+            ptahToggle
+            [checked]="promptEnabled()"
+            [ptahBusyDisabled]="promptToggleDisabled() || saving()"
+            (change)="onPromptModeChange($event)"
+            aria-label="Toggle Enhanced System Prompt"
+            aria-describedby="agent-behaviour-prompt-note"
+          />
         </ptah-setting-row>
         <ptah-setting-row
-          class="[border-bottom:var(--ptah-border-width)_solid_var(--ptah-border-color)] last:[border-bottom:0]"
+          controlAlign="end"
+          edgePadding="trim"
           label="Ultracode"
           controlId="agent-behaviour-ultracode-toggle"
+          [hint]="ultracodeHint"
+          hintElementId="agent-behaviour-ultracode-note"
           data-testid="agent-behaviour-row-ultracode"
         >
-          <span
-            status
-            class="basis-full truncate text-xs font-normal text-base-content-muted"
-            id="agent-behaviour-ultracode-note"
-            [title]="ultracodeHint"
-            >{{ ultracodeHint }}</span
-          >
           <span meta class="sr-only" data-testid="agent-behaviour-ultracode-status"
             >{{ ultracode.enabled() ? 'On' : 'Off' }} Pins X-High while on</span
           >
-          <div class="flex w-56 max-w-full items-center justify-start gap-ptah-controls">
-            <input
-              id="agent-behaviour-ultracode-toggle"
-              type="checkbox"
-              ptahToggle
-              [checked]="ultracode.enabled()"
-              [ptahBusyDisabled]="saving()"
-              (change)="onUltracodeChange($event)"
-              aria-label="Toggle Ultracode mode"
-              aria-describedby="agent-behaviour-ultracode-note"
-            />
-            <ptah-native-popover
-              [isOpen]="ultracodeInfoOpen()"
-              [keepInViewport]="true"
-              placement="bottom-end"
-              (closed)="ultracodeInfoOpen.set(false)"
-            >
-              <button trigger type="button" ptahIconButton label="About Ultracode"
-                (click)="ultracodeInfoOpen.set(!ultracodeInfoOpen())">
-                <lucide-angular [img]="InfoIcon" class="w-3.5 h-3.5" aria-hidden="true" />
-              </button>
-              <p content class="max-w-sm">{{ ultracodeNote }}</p>
-            </ptah-native-popover>
-          </div>
+          <ptah-native-popover
+            action
+            [isOpen]="ultracodeInfoOpen()"
+            [keepInViewport]="true"
+            placement="bottom-end"
+            (closed)="ultracodeInfoOpen.set(false)"
+          >
+            <button trigger type="button" ptahIconButton label="About Ultracode"
+              (click)="ultracodeInfoOpen.set(!ultracodeInfoOpen())"
+              data-testid="agent-behaviour-ultracode-info">
+              <lucide-angular [img]="InfoIcon" class="w-3.5 h-3.5" aria-hidden="true" />
+            </button>
+            <p content class="max-w-sm" data-testid="agent-behaviour-ultracode-info-text">{{ ultracodeNote }}</p>
+          </ptah-native-popover>
+          <input
+            id="agent-behaviour-ultracode-toggle"
+            type="checkbox"
+            ptahToggle
+            [checked]="ultracode.enabled()"
+            [ptahBusyDisabled]="saving()"
+            (change)="onUltracodeChange($event)"
+            aria-label="Toggle Ultracode mode"
+            aria-describedby="agent-behaviour-ultracode-note"
+          />
         </ptah-setting-row>
         <ptah-setting-row
-          class="[border-bottom:var(--ptah-border-width)_solid_var(--ptah-border-color)] last:[border-bottom:0]"
+          controlAlign="end"
+          edgePadding="trim"
           label="Dynamic workflows"
           controlId="agent-behaviour-workflows-toggle"
+          [hint]="workflowsNote"
+          hintElementId="agent-behaviour-workflows-note"
           data-testid="agent-behaviour-row-workflows"
         >
-          <span
-            status
-            class="basis-full truncate text-xs font-normal text-base-content-muted"
-            id="agent-behaviour-workflows-note"
-            [title]="workflowsNote"
-            >{{ workflowsNote }}</span
-          >
           <span meta class="sr-only" data-testid="agent-behaviour-workflows-status">{{
             workflowsLoaded()
               ? workflowsEnabled()
@@ -270,33 +255,27 @@ interface LoadError {
                 : 'Off'
               : 'Not loaded'
           }}</span>
-          <div class="flex w-56 max-w-full items-center justify-start gap-ptah-controls">
-            <input
-              id="agent-behaviour-workflows-toggle"
-              type="checkbox"
-              ptahToggle
-              [checked]="workflowsEnabled()"
-              [ptahBusyDisabled]="!workflowsLoaded() || saving()"
-              (change)="onWorkflowsChange($event)"
-              aria-label="Toggle dynamic workflows"
-              aria-describedby="agent-behaviour-workflows-note"
-            />
-          </div>
+          <input
+            id="agent-behaviour-workflows-toggle"
+            type="checkbox"
+            ptahToggle
+            [checked]="workflowsEnabled()"
+            [ptahBusyDisabled]="!workflowsLoaded() || saving()"
+            (change)="onWorkflowsChange($event)"
+            aria-label="Toggle dynamic workflows"
+            aria-describedby="agent-behaviour-workflows-note"
+          />
         </ptah-setting-row>
         <ptah-setting-row
-          class="[border-bottom:var(--ptah-border-width)_solid_var(--ptah-border-color)] last:[border-bottom:0]"
+          controlAlign="end"
+          edgePadding="trim"
           label="Chat reasoning effort"
           aria-label="Chat reasoning effort"
           controlId="agent-behaviour-effort"
+          [hint]="effortNote()"
+          hintElementId="agent-behaviour-effort-note"
           data-testid="agent-behaviour-row-effort"
         >
-          <span
-            status
-            class="basis-full truncate text-xs font-normal text-base-content-muted"
-            id="agent-behaviour-effort-note"
-            [title]="effortNote()"
-            >{{ effortNote() }}</span
-          >
           <ptah-select
             #effortSelect
             triggerId="agent-behaviour-effort"
@@ -324,6 +303,7 @@ interface LoadError {
             </ng-template>
           </ptah-select>
         </ptah-setting-row>
+        </div>
       </ptah-form-section>
     </section>
     @defer (when drawerOpen()) {
@@ -348,7 +328,7 @@ export class AgentBehaviourSectionComponent implements OnInit {
   readonly BotIcon = Bot;
   readonly SparklesIcon = Sparkles;
   readonly InfoIcon = Info;
-  readonly ChevronRightIcon = ChevronRight;
+  readonly PanelRightOpenIcon = PanelRightOpen;
   readonly AlertCircleIcon = AlertCircle;
   readonly effortChoices = EFFORT_CHOICES.map((choice) => ({ ...choice, icon: choice.value || 'default' }));
   readonly workflowsNote = WORKFLOWS_NOTE;

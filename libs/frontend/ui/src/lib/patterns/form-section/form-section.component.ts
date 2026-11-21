@@ -7,12 +7,18 @@ import {
   inject,
   input,
 } from '@angular/core';
+import { LucideAngularModule, type LucideIconData } from 'lucide-angular';
 import { PtahSectionLevel, toSectionLevel } from '../../card/card.types';
 import { PtahAlertComponent } from '../../foundation/alert.component';
 
 let nextFormSectionId = 0;
 
 const DIVIDER_CLASS = '[border-bottom:var(--ptah-border-width)_solid_var(--ptah-border-color)]';
+/**
+ * With glass on, a glass content card owns the inset. The section then has no block padding,
+ * so the padding of the card and the padding of the section do not stack.
+ */
+const FLUSH_IN_GLASS_CLASS = '[[data-glass=on]_&]:py-0';
 const DISABLED_CLASS = 'opacity-[var(--ptah-field-disabled-opacity)]';
 /** Lets the fields column grow to the settings content cap (card grids, tables). */
 const WIDE_CLASS = '[--ptah-form-section-fields-max-w:var(--ptah-settings-content-max-w)]';
@@ -42,7 +48,7 @@ const HINT_CLASS =
 @Component({
   selector: 'ptah-form-section',
   standalone: true,
-  imports: [PtahAlertComponent],
+  imports: [PtahAlertComponent, LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
     'data-ptah-pattern': 'form-section',
@@ -58,17 +64,27 @@ const HINT_CLASS =
     >
       <div class="flex min-w-0 flex-col" data-testid="form-section-aside">
         <div class="flex flex-col gap-[var(--ptah-gap-label)]">
-          @switch (level()) {
-            @case (2) {
-              <h2 tabindex="-1" [id]="headingId" [class]="titleClass">{{ heading() }}</h2>
+          <div class="flex items-center gap-[var(--ptah-gap-inline)]">
+            @if (icon(); as sectionIcon) {
+              <lucide-angular
+                [img]="sectionIcon"
+                class="size-[var(--ptah-icon-md)] shrink-0 text-base-content-muted"
+                aria-hidden="true"
+                data-testid="form-section-icon"
+              />
             }
-            @case (4) {
-              <h4 tabindex="-1" [id]="headingId" [class]="titleClass">{{ heading() }}</h4>
+            @switch (level()) {
+              @case (2) {
+                <h2 tabindex="-1" [id]="headingId" [class]="titleClass">{{ heading() }}</h2>
+              }
+              @case (4) {
+                <h4 tabindex="-1" [id]="headingId" [class]="titleClass">{{ heading() }}</h4>
+              }
+              @default {
+                <h3 tabindex="-1" [id]="headingId" [class]="titleClass">{{ heading() }}</h3>
+              }
             }
-            @default {
-              <h3 tabindex="-1" [id]="headingId" [class]="titleClass">{{ heading() }}</h3>
-            }
-          }
+          </div>
           @if (description(); as descriptionText) {
             <p
               [class]="hintClass"
@@ -122,6 +138,13 @@ export class PtahFormSectionComponent {
    * or a table. Default false: text fields keep the readable fields cap.
    */
   readonly wide = input(false, { transform: booleanAttribute });
+  /**
+   * Set it when the section is the content of a glass content card. With glass on, the section
+   * then has no block padding. With glass off, the padding stays.
+   */
+  readonly flushInGlass = input(false, { transform: booleanAttribute });
+  /** Optional lucide icon before the heading (decorative, `aria-hidden`). */
+  readonly icon = input<LucideIconData | null>(null);
 
   private readonly baseId = `ptah-form-section-${nextFormSectionId++}`;
   /** Read by ptah-editable-section to label its region. */
@@ -135,6 +158,7 @@ export class PtahFormSectionComponent {
   protected readonly sectionToggles = computed(() => ({
     [DIVIDER_CLASS]: this.divider(),
     [WIDE_CLASS]: this.wide(),
+    [FLUSH_IN_GLASS_CLASS]: this.flushInGlass(),
   }));
   protected readonly fieldsToggles = computed(() => ({ [DISABLED_CLASS]: this.disabled() }));
 

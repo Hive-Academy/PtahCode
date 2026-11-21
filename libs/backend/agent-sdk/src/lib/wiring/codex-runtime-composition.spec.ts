@@ -32,6 +32,10 @@ describe('runtime composition order', () => {
   });
 });
 
+/** Reported when neither runtime's ports are bound beside a bound core. */
+const ANY_RUNTIME_PORTS =
+  'CODEX_CHAT_ADAPTER_PORTS or PROVIDER_SESSION_CHAT_PORTS';
+
 describe('all-or-nothing native bindings', () => {
   const names = [
     'SESSION_RUNTIME_IDENTITY_LOOKUP',
@@ -39,6 +43,8 @@ describe('all-or-nothing native bindings', () => {
     'RUNTIME_ADMISSION_PORT',
     'RUNTIME_HOST_CAPABILITIES',
   ] as const;
+  const reported = (name: (typeof names)[number]) =>
+    name === 'CODEX_CHAT_ADAPTER_PORTS' ? ANY_RUNTIME_PORTS : name;
 
   // All 14 partial subsets: singles, every pair, and each missing-one case.
   it.each(Array.from({ length: 14 }, (_value, index) => index + 1))(
@@ -56,7 +62,9 @@ describe('all-or-nothing native bindings', () => {
         useFactory: constructNative,
       });
       wireAgentAdapterAliases(scope);
-      const missing = names.filter((_name, index) => !(mask & (1 << index)));
+      const missing = names
+        .filter((_name, index) => !(mask & (1 << index)))
+        .map(reported);
       for (const alias of [
         TOKENS.AGENT_ADAPTER,
         SDK_TOKENS.ROUTING_AGENT_ADAPTER,
@@ -93,7 +101,7 @@ describe('all-or-nothing native bindings', () => {
     expect(() => scope.resolve(SDK_TOKENS.ROUTING_AGENT_ADAPTER)).toThrow(
       expect.objectContaining({
         code: 'partial-native-binding',
-        token: names.slice(0, 3).join(', '),
+        token: names.slice(0, 3).map(reported).join(', '),
       }),
     );
   });
@@ -115,6 +123,90 @@ describe('all-or-nothing native bindings', () => {
   );
 });
 
+describe('provider-session runtime group', () => {
+  const core = [
+    SDK_TOKENS.SESSION_RUNTIME_IDENTITY_LOOKUP,
+    SDK_TOKENS.RUNTIME_ADMISSION_PORT,
+    SDK_TOKENS.RUNTIME_HOST_CAPABILITIES,
+  ];
+
+  it('accepts the core with provider-session ports and no Codex ports', () => {
+    const scope = container.createChildContainer();
+    registerCodexChatServices(scope);
+    for (const token of core)
+      scope.registerInstance(token, {
+        nativeCodex: false,
+        providerSessions: ['antigravity'],
+      });
+    scope.registerInstance(SDK_TOKENS.PROVIDER_SESSION_CHAT_PORTS, {});
+    scope.registerInstance(SDK_TOKENS.PROVIDER_SESSION_CHAT_ADAPTER, {
+      owns: () => false,
+    });
+    scope.registerInstance(SDK_TOKENS.SDK_AGENT_ADAPTER, {});
+    expect(scope.resolve(SDK_TOKENS.CODEX_CHAT_ADAPTER)).toBeNull();
+    expect(scope.resolve(SDK_TOKENS.ROUTING_AGENT_ADAPTER)).not.toBeNull();
+  });
+
+  it('accepts both runtimes bound beside one core', () => {
+    const scope = container.createChildContainer();
+    registerCodexChatServices(scope);
+    for (const token of core)
+      scope.registerInstance(token, { nativeCodex: true });
+    scope.registerInstance(SDK_TOKENS.CODEX_CHAT_ADAPTER_PORTS, {});
+    scope.registerInstance(SDK_TOKENS.CODEX_CHAT_ADAPTER, {});
+    scope.registerInstance(SDK_TOKENS.PROVIDER_SESSION_CHAT_PORTS, {});
+    scope.registerInstance(SDK_TOKENS.PROVIDER_SESSION_CHAT_ADAPTER, {});
+    scope.registerInstance(SDK_TOKENS.SDK_AGENT_ADAPTER, {});
+    expect(() =>
+      scope.resolve(SDK_TOKENS.ROUTING_AGENT_ADAPTER),
+    ).not.toThrow();
+  });
+
+  it('rejects provider-session ports without the core', () => {
+    const scope = container.createChildContainer();
+    registerCodexChatServices(scope);
+    scope.registerInstance(SDK_TOKENS.PROVIDER_SESSION_CHAT_PORTS, {});
+    scope.registerInstance(SDK_TOKENS.SDK_AGENT_ADAPTER, {});
+    wireAgentAdapterAliases(scope);
+    expect(() => scope.resolve(TOKENS.AGENT_ADAPTER)).toThrow(
+      expect.objectContaining({
+        code: 'partial-native-binding',
+        token:
+          'SESSION_RUNTIME_IDENTITY_LOOKUP, RUNTIME_ADMISSION_PORT, RUNTIME_HOST_CAPABILITIES',
+      }),
+    );
+  });
+
+  it('rejects a core with no runtime ports, naming either runtime', () => {
+    const scope = container.createChildContainer();
+    registerCodexChatServices(scope);
+    for (const token of core)
+      scope.registerInstance(token, { nativeCodex: false });
+    scope.registerInstance(SDK_TOKENS.SDK_AGENT_ADAPTER, {});
+    expect(() => scope.resolve(SDK_TOKENS.ROUTING_AGENT_ADAPTER)).toThrow(
+      expect.objectContaining({
+        code: 'partial-native-binding',
+        token: ANY_RUNTIME_PORTS,
+      }),
+    );
+  });
+
+  it.each([
+    SDK_TOKENS.PROVIDER_SESSION_CHAT_PORTS,
+    SDK_TOKENS.PROVIDER_SESSION_CHAT_ADAPTER,
+  ])('rejects late provider-session binding after resolution (%s)', (token) => {
+    const scope = container.createChildContainer();
+    scope.registerInstance(SDK_TOKENS.SDK_AGENT_ADAPTER, {});
+    registerCodexChatServices(scope);
+    wireAgentAdapterAliases(scope);
+    scope.resolve(TOKENS.AGENT_ADAPTER);
+    scope.registerInstance(token, {});
+    expect(() => scope.resolve(SDK_TOKENS.ROUTING_AGENT_ADAPTER)).toThrow(
+      'Runtime ports must be bound',
+    );
+  });
+});
+
 describe('stable host bindings', () => {
   const tokens = [
     SDK_TOKENS.SESSION_RUNTIME_IDENTITY_LOOKUP,
@@ -122,6 +214,8 @@ describe('stable host bindings', () => {
     SDK_TOKENS.RUNTIME_ADMISSION_PORT,
     SDK_TOKENS.RUNTIME_HOST_CAPABILITIES,
     SDK_TOKENS.CODEX_CHAT_ADAPTER,
+    SDK_TOKENS.PROVIDER_SESSION_CHAT_PORTS,
+    SDK_TOKENS.PROVIDER_SESSION_CHAT_ADAPTER,
   ];
   it.each(tokens)('names unstable useFactory token %s', (token) => {
     const scope = container.createChildContainer();

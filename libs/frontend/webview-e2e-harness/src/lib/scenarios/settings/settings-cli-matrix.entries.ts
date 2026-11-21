@@ -1,4 +1,3 @@
-import { expandMatrixDetail } from './settings-matrix-detail';
 import { choosePtahSelect } from '../../choose-ptah-select';
 /**
  * Gate G entries for the CLI matrix (Batch 30; on the Providers tab since the Context Management regroup): the restored #43, #44, #54, #70 and #71, and
@@ -63,49 +62,22 @@ async function matrixCard(page: Page, id: string): Promise<Locator> {
     `[data-testid="${id === GLM_ID ? 'cli-matrix-row' : 'cli-provider-card'}-${id}"]`,
   );
   await expect(card).toBeVisible();
+  // The row expander is the one entry point of the table detail (the kebab has no Details item).
   const details = card.locator('ptah-table-row-expander button');
-  if ((await details.getAttribute('aria-expanded')) === 'false') {
-    if (await details.isVisible()) await details.click();
-    else {
-      await card
-        .locator('ptah-table-row-actions button[aria-haspopup="menu"]')
-        .click();
-      await card.getByRole('menuitem', { name: 'Details' }).click();
-    }
-  }
+  await expect(details).toBeVisible();
+  if ((await details.getAttribute('aria-expanded')) === 'false')
+    await details.click();
   return card;
 }
 
-/** The visible value button beside a provider card's field label. */
-function providerField(
-  card: Locator,
-  field: 'Model' | 'Effort' | 'Safety',
-): Locator {
-  return field === 'Safety'
-    ? card.locator(
-        'xpath=following-sibling::tr[1]//*[@data-popover-kind="permission"]',
-      )
-    : card.locator(`[data-popover-kind="${field.toLowerCase()}"]`);
+/** The visible value button of a row's Model or Effort cell. */
+function providerField(card: Locator, field: 'Model' | 'Effort'): Locator {
+  return card.locator(`[data-popover-kind="${field.toLowerCase()}"]`);
 }
 
-/**
- * V36-7: an instance's Edit and Delete live in its "More actions" popover. Opens it and returns the trigger (focus
- * returns there when the popover, or a modal opened from it, closes).
- */
-async function openMoreActions(
-  page: Page,
-  _row: Locator,
-  id: string,
-): Promise<Locator> {
-  const more = page.locator(
-    `[data-testid="cli-matrix-row-${id}"] ptah-table-row-actions button[aria-haspopup="menu"]`,
-  );
-  await visibleEnabled(more);
-  await more.click();
-  await expect(
-    page.locator(`[data-testid="cli-matrix-row-${id}"] [role="menu"]`),
-  ).toBeVisible();
-  return more;
+/** The expanded detail of a row (the next table row, `#lane-detail-<id>`). */
+function laneDetail(page: Page, id: string): Locator {
+  return page.locator(`[id="lane-detail-${id}"]`);
 }
 
 /**
@@ -275,18 +247,17 @@ const INSTANCE_ENTRIES: readonly ReachabilityEntry[] = [
     status: 'present',
     reach: async (page) => {
       const glm = await matrixCard(page, GLM_ID);
-      await expect(glm).toHaveAttribute('data-kind', 'instance');
-      // The instance is a card in the "Ptah CLI instances" sub-section (the section heading replaces the old
-      // per-row "Ptah CLI" badge), with its name and its provider mark and label.
-      const section = page.locator('[data-testid="cli-instances"]');
+      await expect(glm).toHaveAttribute('data-lane-kind', 'instance');
+      // The instance is a row of the "Ptah CLI instances" group: the table body that starts with that group
+      // header, with its name and its provider mark and label.
+      const group = page.locator(
+        'tbody:has(> [data-testid="lanes-group-ptah"])',
+      );
       await expect(
-        section.getByRole('heading', {
-          name: 'Ptah CLI instances',
-          exact: true,
-        }),
-      ).toBeVisible();
+        group.locator('[data-testid="lanes-group-ptah"] .lanes-group-name'),
+      ).toHaveText('Ptah CLI instances');
       await expect(
-        section.locator(`[data-testid="cli-matrix-row-${GLM_ID}"]`),
+        group.locator(`[data-testid="cli-matrix-row-${GLM_ID}"]`),
       ).toHaveCount(1);
       await expect(glm.getByText('Glm', { exact: true })).toBeVisible();
       await expect(
@@ -364,12 +335,14 @@ const INSTANCE_ENTRIES: readonly ReachabilityEntry[] = [
     status: 'present',
     // Batch 32: Edit opens the add modal in edit mode (name and a replacement key; the provider is fixed).
     reach: async (page) => {
-      // V36-7: More actions → Edit; focus returns to the More trigger when the modal closes.
-      const glm = await matrixCard(page, GLM_ID);
-      const more = await openMoreActions(page, glm, GLM_ID);
+      // Phase 3 (decision 23): Edit is in the expanded detail footer; focus returns to it when the modal closes.
+      await matrixCard(page, GLM_ID);
+      const more = page.locator(
+        `#lane-detail-${GLM_ID} [data-testid="cli-matrix-edit-${GLM_ID}"]`,
+      );
       const dialog = await openMatrixModal(
         page,
-        page.locator(`[data-testid="cli-matrix-edit-${GLM_ID}"]`),
+        more,
         'add-cli-instance-modal',
       );
       try {
@@ -404,10 +377,17 @@ const INSTANCE_ENTRIES: readonly ReachabilityEntry[] = [
     status: 'present',
     // RUX-11 clicks it and checks the inline result.
     reach: async (page) => {
-      const glm = await matrixCard(page, GLM_ID);
-      await visibleEnabled(
-        glm.getByRole('button', { name: 'Test Glm', exact: true }),
+      // Phase 3: Test is in the detail footer (and the kebab); its result is the footer status line.
+      await matrixCard(page, GLM_ID);
+      const footer = page.locator(
+        `#lane-detail-${GLM_ID} [data-testid="lane-detail-footer"]`,
       );
+      await visibleEnabled(
+        footer.getByRole('button', { name: 'Test', exact: true }),
+      );
+      await expect(
+        footer.locator('[data-testid="cli-matrix-test-result"]'),
+      ).toBeVisible();
     },
   },
   {
@@ -415,11 +395,11 @@ const INSTANCE_ENTRIES: readonly ReachabilityEntry[] = [
     capability: 'Delete with confirmation',
     status: 'present',
     reach: async (page) => {
-      // V36-7: More actions → Delete → the inline confirm (focus on its Cancel) → Cancel → focus back on More.
+      // Phase 3 (decision 23): the detail footer Delete → the inline confirm (focus on its Cancel) → Cancel → focus
+      // back on Delete.
       const glm = await matrixCard(page, GLM_ID);
-      const more = await openMoreActions(page, glm, GLM_ID);
       const remove = page.locator(
-        `[data-testid="cli-matrix-delete-${GLM_ID}"]`,
+        `#lane-detail-${GLM_ID} [data-testid="cli-matrix-delete-${GLM_ID}"]`,
       );
       await visibleEnabled(remove);
       await remove.click();
@@ -429,7 +409,7 @@ const INSTANCE_ENTRIES: readonly ReachabilityEntry[] = [
       const cancel = glm.getByRole('button', { name: 'Cancel', exact: true });
       await expect(cancel).toBeFocused();
       await cancel.click();
-      await expect(more).toBeFocused();
+      await expect(remove).toBeFocused();
     },
   },
   {
@@ -489,7 +469,7 @@ const INSTANCE_ENTRIES: readonly ReachabilityEntry[] = [
     id: '#57',
     capability: 'Empty state with Add link',
     status: 'present',
-    // A second page with no Ptah CLI instance: the instances sub-section's "No Ptah CLI instance yet." state carries its own Add.
+    // A second page with no Ptah CLI instance: the Ptah CLI group's "No Ptah CLI instance yet." row carries its own Add.
     reach: (page) =>
       throughVariantBoot(
         page,
@@ -500,9 +480,15 @@ const INSTANCE_ENTRIES: readonly ReachabilityEntry[] = [
             '[data-testid="cli-matrix-no-instances"]',
           );
           await expect(empty).toContainText('No Ptah CLI instance yet.');
+          // Phase 3: the empty row of the Ptah CLI instances group carries the one Add (`cli-matrix-add`).
+          await expect(
+            variant.locator(
+              '[data-testid="lanes-group-ptah"] ~ tr [data-testid="cli-matrix-no-instances"]',
+            ),
+          ).toHaveCount(1);
           await visibleEnabled(
             empty.getByRole('button', {
-              name: 'Add Ptah CLI Instance',
+              name: 'Add Ptah CLI instance',
               exact: true,
             }),
           );
@@ -703,14 +689,13 @@ export const CLI_MATRIX_ENTRIES: readonly ReachabilityEntry[] = [
     // shared fixture's `settings:get` is static, so the read-back cannot confirm the write: the entry asserts the
     // write, and that the toast does not claim it was saved (D15).
     reach: async (page) => {
-      const glm = await matrixCard(page, GLM_ID);
-      const tiers = glm.locator(`[data-testid="cli-matrix-tiers-${GLM_ID}"]`);
-      if (await tiers.isVisible()) await tiers.click();
-      else {
-        await page
-          .locator(`#lane-detail-${GLM_ID} button:text-is("Edit tiers")`)
-          .click();
-      }
+      await matrixCard(page, GLM_ID);
+      // Tiers lives in the detail footer; the same locator opens the modal and receives focus back.
+      const tiers = laneDetail(page, GLM_ID).locator(
+        `[data-testid="cli-matrix-tiers-${GLM_ID}"]`,
+      );
+      await visibleEnabled(tiers);
+      await tiers.click();
       const dialog = page.locator(
         'dialog:has([data-testid="cli-tier-mapping-modal"])',
       );
@@ -759,37 +744,33 @@ export const CLI_MATRIX_ENTRIES: readonly ReachabilityEntry[] = [
     id: '#63',
     capability: 'Copilot auto-approve toggle',
     status: 'present',
-    // Batch 31: Copilot's permission ℹ holds the moved toggle. A real write through state.saveSettings (the fixture
-    // stores `copilotAutoApprove: false`), read back into the toggle, then Undo writes the value back.
+    // Phase 3 (decision 19): the expanded Copilot detail has the labelled "Auto-approve" switch row inline. A real
+    // write through state.saveSettings (the fixture stores `copilotAutoApprove: false`), read back into the toggle,
+    // then Undo writes the value back.
     reach: async (page) => {
-      const copilot = await matrixCard(page, 'copilot');
-      await throughMatrixPopover(
-        page,
-        providerField(copilot, 'Safety'),
-        'cli-provider-popover-content',
-        async (panel) => {
-          const toggle = panel.locator('[data-testid="copilot-auto-approve"]');
-          await visibleEnabled(toggle);
-          await expect(toggle).not.toBeChecked();
-          const before = getFixtureState(page).calls.length;
-          await toggle.click();
-          await expectCall(page, before, 'agent:setConfig', {
-            copilotAutoApprove: true,
-          });
-          await expect(toggle).toBeChecked();
-          await expect(providerField(copilot, 'Safety')).toHaveAttribute(
-            'title',
-            'Copilot runs every tool call without asking for approval.',
-          );
-          const undo = page.locator('[data-testid="settings-toast-undo"]');
-          await visibleEnabled(undo);
-          await undo.click();
-          await expectCall(page, before, 'agent:setConfig', {
-            copilotAutoApprove: false,
-          });
-          await expect(toggle).not.toBeChecked();
-        },
+      await matrixCard(page, 'copilot');
+      const detail = laneDetail(page, 'copilot');
+      await expect(
+        detail.locator('[data-testid="cli-provider-popover-content"]'),
+      ).toHaveCount(0);
+      const toggle = detail.locator(
+        '[data-testid="lane-detail-auto-approve"] [data-testid="copilot-auto-approve"]',
       );
+      await visibleEnabled(toggle);
+      await expect(toggle).not.toBeChecked();
+      const before = getFixtureState(page).calls.length;
+      await toggle.click();
+      await expectCall(page, before, 'agent:setConfig', {
+        copilotAutoApprove: true,
+      });
+      await expect(toggle).toBeChecked();
+      const undo = page.locator('[data-testid="settings-toast-undo"]');
+      await visibleEnabled(undo);
+      await undo.click();
+      await expectCall(page, before, 'agent:setConfig', {
+        copilotAutoApprove: false,
+      });
+      await expect(toggle).not.toBeChecked();
     },
   },
   {
@@ -871,49 +852,25 @@ export const CLI_MATRIX_ENTRIES: readonly ReachabilityEntry[] = [
     id: '#70',
     capability: 'Per-CLI permission and safety notes',
     status: 'restored',
-    // Badge + ℹ popover per row: the old wording for Codex; Copilot's badge reads its saved auto-approve.
+    // Phase 3 (decisions 13, 20): the expanded detail shows the capability facts inline (icon, label, value; no
+    // popover) and "All capabilities" as an inline disclosure. The row keeps the permission and network defaults.
     reach: async (page) => {
       const codex = await matrixCard(page, 'codex');
-      await expect(providerField(codex, 'Safety')).toHaveText('Permission');
-      const info = providerField(codex, 'Safety');
-      await throughMatrixPopover(
-        page,
-        info,
-        'cli-provider-popover-content',
-        async (panel) => {
-          await expect(panel).toContainText(
-            'Full auto — Codex runs headless with full access.',
-          );
-        },
+      const detail = laneDetail(page, 'codex');
+      const permissionFact = detail.locator(
+        '[data-testid="cli-capability-summary"] [data-capability="Permission"]',
       );
-      await expect(info).toBeFocused();
-      const copilot = await matrixCard(page, 'copilot');
-      await expect(providerField(copilot, 'Safety')).toHaveAttribute(
-        'title',
-        'Copilot runs read-only tools without asking. Every other tool call waits for your approval.',
-      );
-      await expandMatrixDetail(page, 'codex');
-      await throughMatrixPopover(
-        page,
-        page.locator('#lane-detail-codex [data-popover-kind="capabilities"]'),
-        'cli-provider-popover-content',
-        async (panel) => {
-          await expect(panel).toHaveAttribute(
-            'aria-label',
-            'Codex capabilities',
-          );
-          await expect(
-            panel.locator('ptah-cli-capability-detail'),
-          ).toBeVisible();
-        },
-      );
-      const chips = page.locator('#lane-detail-codex [data-capability]');
-      for (const chip of await chips.all()) {
-        await chip.click();
-        const valueId = await chip.getAttribute('aria-controls');
-        await expect(page.locator(`[id="${valueId}"] p`)).not.toBeEmpty();
-        await page.keyboard.press('Escape');
-      }
+      await expect(permissionFact).toContainText('Permission modes');
+      await expect(
+        permissionFact.locator('xpath=following-sibling::dd[1]'),
+      ).not.toBeEmpty();
+      await expect(
+        detail.locator('[data-testid="cli-provider-popover-content"]'),
+      ).toHaveCount(0);
+      const all = detail.locator('[data-lane-capabilities] button').first();
+      await visibleEnabled(all);
+      await all.click();
+      await expect(detail.locator('ptah-cli-capability-detail')).toBeVisible();
       const permission = codex.getByRole('combobox', {
         name: 'Codex permission default',
       });
@@ -939,48 +896,37 @@ export const CLI_MATRIX_ENTRIES: readonly ReachabilityEntry[] = [
     capability:
       'Per-CLI grouping of delegated settings, hidden when not installed',
     status: 'restored',
-    // Installed rows first; Cursor and Pi remain visible with Not installed status and an install guide.
+    // Phase 3 (decision 8): installed rows and the keyless Cursor recovery row stay in the table; a CLI that is not
+    // installed (Pi) is a card of the "Add more CLI agents" strip with its install guide and a Details disclosure.
     reach: async (page) => {
-      // The table keeps uninstalled rows visible after installed rows.
       await agentsRoutingTab(page);
       const cursor = await matrixCard(page, 'cursor');
-      const pi = await matrixCard(page, 'pi');
       await expect(cursor).toBeVisible();
-      await expect(pi).toBeVisible();
-      await expect(providerField(pi, 'Model')).toBeDisabled();
-      await expect(pi).toContainText('Not installed');
       await expect(cursor).toContainText('Not installed');
-      const rows = page.locator('[data-testid^="cli-provider-card-"]');
-      expect(await rows.allTextContents()).toEqual(
-        expect.arrayContaining([
-          expect.stringContaining('Cursor'),
-          expect.stringContaining('Pi'),
-        ]),
-      );
+      const strip = page.locator('[data-testid="lanes-strip"]');
+      const pi = strip.locator('[data-testid="cli-provider-card-pi"]');
+      await expect(pi).toBeVisible();
+      await expect(pi).toContainText('Not installed');
+      await expect(pi.locator('[data-popover-kind="model"]')).toHaveCount(0);
+      await expect(pi.getByRole('switch')).toHaveCount(0);
+      await expect(pi.getByRole('button', { name: /^Test/ })).toHaveCount(0);
       expect(
         await cursor.evaluate((node) => {
-          const piRow = document.querySelector(
-            '[data-testid="cli-provider-card-pi"]',
+          const piCard = document.querySelector(
+            '[data-testid="lanes-strip"] [data-testid="cli-provider-card-pi"]',
           );
           return (
-            piRow !== null &&
+            piCard !== null &&
             Boolean(
-              node.compareDocumentPosition(piRow) &
+              node.compareDocumentPosition(piCard) &
               Node.DOCUMENT_POSITION_FOLLOWING,
             )
           );
         }),
       ).toBe(true);
-      await pi.getByRole('button', { name: 'More actions for Pi' }).click();
-      await expect(pi.getByRole('menuitem', { name: 'Test' })).toBeDisabled();
-      await page.keyboard.press('Escape');
-      await expect(
-        pi.getByRole('switch', { name: 'Pi enabled' }),
-      ).toBeDisabled();
-      await expandMatrixDetail(page, 'pi');
       await throughMatrixPopover(
         page,
-        page.locator('#lane-detail-pi [data-popover-kind="install"]'),
+        page.locator('[data-testid="lanes-strip-install-pi"]'),
         'cli-provider-popover-content',
         async (panel) => {
           await expect(panel).toContainText(
@@ -991,9 +937,11 @@ export const CLI_MATRIX_ENTRIES: readonly ReachabilityEntry[] = [
           );
         },
       );
-      const shared = page.getByRole('region', {
-        name: 'Ptah CLI shared defaults',
-      });
+      const details = pi.locator('[data-strip-details="pi"] button').first();
+      await visibleEnabled(details);
+      await details.click();
+      await expect(details).toHaveAttribute('aria-expanded', 'true');
+      const shared = page.locator('[data-testid="lanes-ptah-defaults"]');
       await expect(shared).toBeVisible();
       await expect(
         shared.getByRole('combobox', { name: 'Ptah CLI permission default' }),

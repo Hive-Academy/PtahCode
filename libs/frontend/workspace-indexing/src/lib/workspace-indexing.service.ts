@@ -300,7 +300,13 @@ export class WorkspaceIndexingService implements MessageHandler {
       // status. `completedAt` is a refresh trigger for its readers.
       this._progress.set(null);
       this._completedAt.set(payload.completedAt);
-      void this.loadStatus(payload.workspaceRoot).catch(() => undefined);
+      // degradation-audit: reported - a transport failure is logged at
+      // console.warn; the panel keeps its last status until the next read.
+      void this.loadStatus(payload.workspaceRoot).catch((error: unknown) => {
+        console.warn('[workspace-indexing] getStatus failed', {
+          errorName: error instanceof Error ? error.name : typeof error,
+        });
+      });
       return;
     }
     if (message.type === INDEXING_FAILED_MESSAGE_TYPE) {

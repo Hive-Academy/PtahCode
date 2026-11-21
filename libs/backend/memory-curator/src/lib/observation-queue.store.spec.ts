@@ -883,6 +883,34 @@ describe('ObservationQueueStore — batching, budget and statement cache', () =>
     );
   });
 
+  it('warns once for repeated flush failures and logs the recovery', () => {
+    const logger = makeLogger();
+    let offline = true;
+    const db = {
+      prepare: jest.fn(() => ({ run: jest.fn() })),
+      transaction: jest.fn((fn: () => void) => fn),
+    };
+    const connection = {
+      get db() {
+        if (offline) throw new Error('Persistence is offline');
+        return db;
+      },
+    } as unknown as SqliteConnectionService;
+    const store = new ObservationQueueStore(logger, connection);
+
+    store.enqueue({ sessionId: 'retry-a', workspaceRoot: null, kind: 'tool-use' });
+    for (let attempt = 0; attempt < 5; attempt++) store.flush();
+    expect(logger.warn).toHaveBeenCalledTimes(1);
+
+    offline = false;
+    store.flush();
+    expect(store.pendingCount).toBe(0);
+    expect(logger.info).toHaveBeenCalledWith(
+      '[memory-curator] observation-queue flush recovered',
+      { failedAttempts: 5 },
+    );
+  });
+
   it('stops after one failed transaction and refuses a stale read', () => {
     const logger = makeLogger();
     const transaction = jest.fn(() => { throw new Error('SQLITE_BUSY'); });

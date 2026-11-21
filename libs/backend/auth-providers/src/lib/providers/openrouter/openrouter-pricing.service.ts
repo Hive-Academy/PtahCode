@@ -236,6 +236,9 @@ export class OpenRouterPricingService implements IPricingProvider {
         },
         signal: controller.signal,
       });
+      // degradation-audit: reported - an unreadable body leaves text empty, so
+      // this method throws below (HTTP status or "Empty body") and the caller
+      // that catches it logs the failure.
       const text = await res.text().catch(() => '');
       if (!res.ok) {
         const snippet = truncate(text);

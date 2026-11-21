@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import { claudeIdentityReference } from '@ptah-extension/agent-sdk';
 import type { SessionQuotaProbe } from '@ptah-extension/agent-sdk';
 import type { ClaudeAccountNamedRoute } from '@ptah-extension/auth-providers-tokens';
 import type { IAuthSecretsService, Logger } from '@ptah-extension/vscode-core';
@@ -7,6 +8,7 @@ import type { ICodexAccountUsageService } from '../providers/codex/codex-provide
 import {
   ProviderOwnerResolver,
   claudeAccountOwnerKey,
+  claudeOwnerKeyFromIdentityReference,
 } from './provider-owner.resolver';
 
 function route(dir: string, runId = 'run'): ClaudeAccountNamedRoute {
@@ -39,6 +41,20 @@ function harness() {
 }
 
 describe('Claude account owners', () => {
+  it('derives the same owner key from a stored identity reference and account metadata', () => {
+    const email = 'user@example.invalid';
+    const organization = 'fixture-org';
+    const ref = claudeIdentityReference(email, organization);
+    const ownerKey = claudeAccountOwnerKey({ email, organization });
+
+    expect(ownerKey).toEqual(expect.any(String));
+    expect(claudeOwnerKeyFromIdentityReference(ref ?? '')).toBe(ownerKey);
+  });
+
+  it.each(['', 'a'.repeat(63), 'g'.repeat(64), 'A'.repeat(64)])('rejects malformed identity reference %j', (ref) => {
+    expect(claudeOwnerKeyFromIdentityReference(ref)).toBeNull();
+  });
+
   it('uses trimmed email and organization, independent of the configuration directory', async () => {
     const { resolver, readAccountForRoute } = harness();
     readAccountForRoute.mockResolvedValue({

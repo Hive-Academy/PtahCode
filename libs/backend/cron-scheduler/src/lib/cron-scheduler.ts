@@ -242,7 +242,13 @@ export class CronScheduler {
       const next = probe.nextRun()?.getTime() ?? null;
       probe.stop();
       return next;
-    } catch {
+    } catch (error: unknown) {
+      // degradation-audit: reported - logged at warn here; the caller gets
+      // null ("no next run") for a job whose expression cannot be probed.
+      this.logger.warn('[cron-scheduler] nextFire probe failed', {
+        jobId: id,
+        error: error instanceof Error ? error.message : String(error),
+      });
       return null;
     }
   }

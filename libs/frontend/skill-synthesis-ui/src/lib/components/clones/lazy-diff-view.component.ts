@@ -179,6 +179,8 @@ export class LazyDiffViewComponent implements OnDestroy {
       this.componentRef = ref;
       this.state.set('ready');
     } catch (error: unknown) {
+      // degradation-audit: reported - shown to the user through errorMessage
+      // and the 'error' state with a reload action; a stale load is dropped.
       if (token !== this.loadToken) return;
       this.errorMessage.set(
         error instanceof Error ? error.message : String(error),

@@ -163,6 +163,8 @@ export class GatewayCommandService implements IGatewayCommandHandler {
       }
       return await this.sessionChoices(req, binding);
     } catch (error: unknown) {
+      // degradation-audit: reported - logged at warn here; the chat platform
+      // gets an empty autocomplete list.
       this.logger.warn('[gateway] command autocomplete failed', {
         target: req.target,
         error: error instanceof Error ? error.message : String(error),

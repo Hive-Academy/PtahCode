@@ -1,0 +1,11 @@
+{
+  "name": "@ptah-extension/provider-session-contracts",
+  "version": "0.0.1",
+  "private": true,
+  "type": "commonjs",
+  "main": "./index.cjs",
+  "types": "./index.d.ts",
+  "dependencies": {
+    "@ptah-extension/shared": "0.0.1"
+  }
+}

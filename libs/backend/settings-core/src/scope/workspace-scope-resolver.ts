@@ -27,6 +27,9 @@ function normalizeActivePath(activePath: string): string | undefined {
     }
     return norm;
   } catch {
+    // degradation-audit: optional-capability - a path that cannot be
+    // resolved is treated like an empty one (undefined), so reads fall back
+    // to the app and global keys; this is a hot settings-read helper.
     return undefined;
   }
 }

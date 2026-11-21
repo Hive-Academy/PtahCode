@@ -7,9 +7,7 @@ import type {
   CodexChatAdapterPorts,
   HostAttentionCoordinator,
   PermissionPromptLifecycleEvent,
-  RuntimeAdmissionPort,
 } from '@ptah-extension/agent-sdk';
-import type { WorkspaceProviderProfileResolver } from '@ptah-extension/auth-providers';
 import {
   buildCodexExecutionProfile,
   CODEX_PTAH_TOOL_TIMEOUT_SEC,
@@ -19,11 +17,7 @@ import {
   type CodexMcpServer,
   type CodexThreadIdentity,
 } from '@ptah-extension/codex-runtime';
-import type {
-  IWorkspaceProvider,
-  IPlatformInfo,
-  IMcpCallerCredentials,
-} from '@ptah-extension/platform-core';
+import type { IMcpCallerCredentials } from '@ptah-extension/platform-core';
 import { INTERACTIVE_MCP_CREDENTIAL_MAX_AGE_MS } from '@ptah-extension/platform-core';
 import {
   type McpHttpServerOverride,
@@ -31,32 +25,23 @@ import {
   DEFAULT_CODEX_SANDBOX_MODE,
   type PermissionResponse,
   type PermissionLevel,
-  type RuntimeHostCapabilities,
   type SessionId,
   MESSAGE_TYPES,
 } from '@ptah-extension/shared';
-import { ChatRuntimeProfileService } from '../session/chat-runtime-profile.service';
+import {
+  createChatRuntimeProfileService,
+  type ChatRuntimeAdmissionDeps,
+} from '../session/chat-runtime-admission';
 import { createCodexChatApprovalPresentation } from './codex-chat-approval-presentation';
 import {
   classifyCodexChatOptions,
   CodexChatOptionError,
 } from './codex-chat-profile-options';
-import type {
-  ChatStreamBroadcaster,
-  WebviewManager,
-} from '../streaming/chat-stream-broadcaster.service';
-
-export interface CodexRuntimeAdmissionDeps {
-  resolver: Pick<WorkspaceProviderProfileResolver, 'resolveExecutionProfile'>;
-  workspaceProvider: IWorkspaceProvider;
-  platformInfo: Pick<IPlatformInfo, 'extensionPath' | 'globalStoragePath'>;
-  hostCapabilities: RuntimeHostCapabilities;
-  webviewManager: Pick<WebviewManager, 'broadcastMessage'>;
-}
+import type { ChatStreamBroadcaster } from '../streaming/chat-stream-broadcaster.service';
 
 export interface CodexChatHostPortsDeps
   extends
-    CodexRuntimeAdmissionDeps,
+    ChatRuntimeAdmissionDeps,
     Pick<
       CodexChatAdapterPorts,
       'logger' | 'info' | 'createScope' | 'metadata' | 'approvals' | 'callbacks'
@@ -201,16 +186,6 @@ function userMcpServers(
   return { servers, secrets };
 }
 
-function profiles(deps: CodexRuntimeAdmissionDeps) {
-  return new ChatRuntimeProfileService(
-    deps.resolver,
-    deps.workspaceProvider,
-    deps.platformInfo,
-    deps.webviewManager,
-    deps.hostCapabilities,
-  );
-}
-
 const billingAuthSchema = z
   .object({
     auth_mode: z.string().nullable().optional(),
@@ -254,24 +229,10 @@ export async function resolveBillingMode(
   }
 }
 
-export function createCodexRuntimeAdmission(
-  deps: CodexRuntimeAdmissionDeps,
-): RuntimeAdmissionPort {
-  const service = profiles(deps);
-  return {
-    servingProviderId: async (config) => {
-      const execution = await service.prepare(config);
-      return execution.runtime === 'codex-app-server'
-        ? execution.seed.providerId
-        : execution.providerProfile?.providerId;
-    },
-  };
-}
-
 export function createCodexChatHostPorts(
   deps: CodexChatHostPortsDeps,
 ): CodexChatHostPorts {
-  const service = profiles(deps);
+  const service = createChatRuntimeProfileService(deps);
   const approval = createCodexChatApprovalPresentation({
     logger: deps.logger,
     approvals: {

@@ -66,6 +66,21 @@ describe('ProviderCatalogModalComponent', () => {
     expect(query('provider-catalog-custom')?.textContent).toContain('Custom endpoint gateway');
   });
 
+  it('uses the modal shell: the search header stays fixed, the list is in the one scroll body, no footer, no negative-margin chrome (B3.1)', () => {
+    const part = (name: string) => element.querySelector<HTMLElement>(`[data-ptah-modal-part="${name}"]`);
+    expect(element.querySelector('.modal-box')?.className).toContain('max-h-[var(--ptah-modal-max-h)]');
+    expect(part('header')?.contains(query('provider-catalog-search'))).toBe(true);
+    expect(part('header')?.classList.contains('shrink-0')).toBe(true);
+    expect(part('body')?.classList.contains('overflow-y-auto')).toBe(true);
+    expect(part('body')?.contains(query('provider-catalog-body'))).toBe(true);
+    expect(part('body')?.contains(query('provider-catalog-custom'))).toBe(true);
+    // The shell body is the only scroll owner: the old inner `max-h-[50vh] overflow-y-auto` box is gone.
+    expect(query('provider-catalog-body')?.className).not.toMatch(/max-h-|overflow-y-auto/);
+    expect(part('footer')?.childNodes.length).toBe(0);
+    expect(element.querySelector('.modal-box [class*="-mx-"]')).toBeNull();
+    expect(element.querySelector('.modal-box [class*="-mt-6"]')).toBeNull();
+  });
+
   it('search filters by name or id; no match says so and Clear restores the list', () => {
     search('route');
     expect(rows()).toEqual(['openrouter']);
@@ -122,6 +137,17 @@ describe('ProviderCatalogModalComponent', () => {
       expect(node.hasAttribute('data-ptah-button')).toBe(true);
     }
     expect(query('provider-catalog-search')?.classList.contains('focus-visible:outline-2')).toBe(true);
+  });
+
+  it('the header Close button comes after the search and asks the parent to close, the same as Esc', () => {
+    const close = query<HTMLButtonElement>('provider-catalog-close');
+    expect(close?.getAttribute('aria-label')).toBe('Close');
+    expect(close?.querySelector('lucide-angular')?.getAttribute('aria-hidden')).toBe('true');
+    const focusables = Array.from(query('provider-catalog-modal')?.querySelectorAll('input, button') ?? []);
+    expect(focusables[0]).toBe(query('provider-catalog-search'));
+    expect(focusables[focusables.length - 1]).toBe(close);
+    close?.click();
+    expect(fixture.componentInstance.events).toEqual(['closed']);
   });
 
   it('Esc (the dialog\'s cancel) and the backdrop only ask the parent to close', () => {

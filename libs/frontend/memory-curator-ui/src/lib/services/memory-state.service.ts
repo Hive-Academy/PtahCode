@@ -255,6 +255,8 @@ export class MemoryStateService {
       this._total.set(result.total ?? result.memories.length);
       this.entriesContext = context;
     } catch (err) {
+      // degradation-audit: reported - shown to the user through _error; a stale
+      // response's error is dropped because a newer request owns the list.
       if (seq !== this.entriesReqSeq) return;
       // Rows of another workspace or tier must not stay: the next page would
       // use their count as its offset.
@@ -353,6 +355,8 @@ export class MemoryStateService {
       this._total.set(result.hits.length);
       this.entriesContext = null;
     } catch (err) {
+      // degradation-audit: reported - shown to the user through _error; a stale
+      // response's error is dropped because a newer request owns the list.
       if (seq !== this.entriesReqSeq) return;
       this._error.set(failureMessage('search', err));
     } finally {
@@ -372,6 +376,8 @@ export class MemoryStateService {
       if (!res.success) this._error.set(memoryFailureMessage('pin'));
       return res.success;
     } catch (err) {
+      // degradation-audit: reported - shown to the user through _error; the
+      // caller gets false and the row keeps its pin state.
       this._error.set(failureMessage('pin', err));
       return false;
     }
@@ -389,6 +395,8 @@ export class MemoryStateService {
       if (!res.success) this._error.set(memoryFailureMessage('pin'));
       return res.success;
     } catch (err) {
+      // degradation-audit: reported - shown to the user through _error; the
+      // caller gets false and the row keeps its pin state.
       this._error.set(failureMessage('pin', err));
       return false;
     }
@@ -407,6 +415,8 @@ export class MemoryStateService {
       if (!res.success) this._error.set(memoryFailureMessage('forget'));
       return res.success;
     } catch (err) {
+      // degradation-audit: reported - shown to the user through _error; the
+      // caller gets false and the memory stays listed.
       this._error.set(failureMessage('forget', err));
       return false;
     }
@@ -449,6 +459,8 @@ export class MemoryStateService {
       if (seq !== this.statsReqSeq) return;
       this._stats.set(stats);
     } catch (err) {
+      // degradation-audit: reported - shown to the user through _error; the
+      // stats strip keeps its previous counts. A stale response is dropped.
       if (seq !== this.statsReqSeq) return;
       this._error.set(failureMessage('stats', err));
     }
@@ -504,6 +516,8 @@ export class MemoryStateService {
       this._symbolItems.set(result.items);
       this._symbolTotal.set(result.total);
     } catch (err) {
+      // degradation-audit: reported - shown to the user through _symbolError;
+      // a stale response's error is dropped.
       if (seq !== this.symbolsReqSeq) return;
       this._symbolError.set(failureMessage('symbols', err));
     } finally {

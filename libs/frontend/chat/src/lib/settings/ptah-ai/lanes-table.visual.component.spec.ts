@@ -6,6 +6,8 @@ import { By } from '@angular/platform-browser';
 import { PtahTableComponent } from '@ptah-extension/ui';
 import { CliModelEffortPopoverComponent } from './cli-model-effort-popover.component';
 import type { CliMatrixCellField, CliMatrixRow } from './cli-matrix-rows';
+import { LaneModelEffortCellComponent } from './lane-model-effort-cell.component';
+import { LanesRedetectButtonComponent } from './lanes-redetect-button.component';
 import {
   LanesTableComponent,
   splitModelId,
@@ -21,6 +23,16 @@ class StubModelEffortPopoverComponent {
   readonly row = input.required<CliMatrixRow>();
   readonly field = input.required<CliMatrixCellField>();
   readonly closed = output<void>();
+}
+
+/** The CLI group header's Re-detect needs the settings state; its own spec covers it. */
+@Component({
+  selector: 'ptah-lanes-redetect-button',
+  standalone: true,
+  template: '<button type="button" [attr.data-testid]="testId()">Re-detect CLIs</button>',
+})
+class StubRedetectButtonComponent {
+  readonly testId = input('policy-redetect');
 }
 
 const instance = (
@@ -88,9 +100,13 @@ async function mount(
   await TestBed.configureTestingModule({
     imports: [LanesTableComponent],
   })
-    .overrideComponent(LanesTableComponent, {
+    .overrideComponent(LaneModelEffortCellComponent, {
       remove: { imports: [CliModelEffortPopoverComponent] },
       add: { imports: [StubModelEffortPopoverComponent] },
+    })
+    .overrideComponent(LanesTableComponent, {
+      remove: { imports: [LanesRedetectButtonComponent] },
+      add: { imports: [StubRedetectButtonComponent] },
     })
     .compileComponents();
   const fixture = TestBed.createComponent(LanesTableComponent);
@@ -136,6 +152,9 @@ describe('LanesTableComponent visual presentation', () => {
     expect(edit?.classList.contains('btn-outline')).toBe(true);
     expect(edit?.classList.contains('btn-sm')).toBe(true);
     expect(remove?.getAttribute('data-tone')).toBe('danger');
+    // The table actions sit in the detail footer, beside Test.
+    expect(edit?.closest('[data-testid="lane-detail-footer"]')).not.toBeNull();
+    expect(remove?.closest('[data-testid="lane-detail-footer"]')).not.toBeNull();
   });
 
   it('hides unset effort in rows and keeps its editor in expanded details at both tiers', async () => {
@@ -196,7 +215,7 @@ describe('LanesTableComponent visual presentation', () => {
     await check();
   });
 
-  it('hides compact row subtitles while keeping the complete name and detail version', async () => {
+  it('keeps the version line in compact rows, with the complete name; the detail does not repeat it', async () => {
     const { fixture, host } = await mount([
       system('codex', { name: 'Antigravity' }),
     ]);
@@ -206,10 +225,13 @@ describe('LanesTableComponent visual presentation', () => {
     expect(q(host, '.ptah-table-row-title-name')?.textContent).toBe(
       'Antigravity',
     );
-    expect(q(host, '.ptah-table-row-title-secondary')).toBeNull();
+    expect(q(host, '.ptah-table-row-title-secondary')?.textContent).toBe(
+      'v1.2.3',
+    );
     q(host, 'ptah-table-row-expander button')?.click();
     fixture.detectChanges();
-    expect(q(host, '#lane-detail-codex')?.textContent).toContain('v1.2.3');
+    // Decision 13: row line 2 carries the version, so the detail does not repeat it.
+    expect(q(host, '#lane-detail-codex')?.textContent).not.toContain('v1.2.3');
   });
 
   it('does not show a config hint without a source', async () => {
@@ -219,9 +241,27 @@ describe('LanesTableComponent visual presentation', () => {
 
   it('shows the empty state in a message cell', async () => {
     const { host } = await mount([]);
-    const cell = q(host, 'td.ptah-table-message-cell');
-    expect(cell?.textContent).toContain('No lanes available.');
+    const cell = q(host, '[data-testid="lanes-empty"]');
+    expect(cell?.classList.contains('ptah-table-message-cell')).toBe(true);
+    expect(cell?.textContent?.trim()).toBe('No lanes available');
+    expect(cell?.querySelector('lucide-angular[aria-hidden="true"]')).not.toBeNull();
     expect(cell?.getAttribute('colspan')).toBe('8');
+  });
+
+  it('shows the loading skeleton with aria-busy and the error with role=alert and Retry', async () => {
+    const { fixture, host } = await mount([]);
+    fixture.componentRef.setInput('loading', true);
+    fixture.detectChanges();
+    expect(host.querySelectorAll('[data-testid="lanes-skeleton-row"]')).toHaveLength(3);
+    expect(q(host, 'tbody[aria-busy="true"]')).not.toBeNull();
+    expect(q(host, '[data-testid="lanes-group-cli"]')).toBeNull();
+    fixture.componentRef.setInput('loading', false);
+    fixture.componentRef.setInput('error', 'Could not load lanes');
+    fixture.detectChanges();
+    const alert = q(host, 'td[role="alert"]');
+    expect(alert?.textContent).toContain('Could not load lanes');
+    expect(alert?.querySelector('button')?.textContent?.trim()).toBe('Retry');
+    expect(host.querySelectorAll('[data-testid="lanes-skeleton-row"]')).toHaveLength(0);
   });
 
   it('distinguishes loading and error from an empty result and retries', async () => {
@@ -372,10 +412,10 @@ describe('LanesTableComponent visual presentation', () => {
     expect(button.getAttribute('aria-expanded')).toBe('true');
     expect(button.getAttribute('aria-controls')).toBe('lane-detail-a');
   });
-  it('omits an empty secondary identity line so the name can center', async () => {
+  it('fills an empty secondary identity line so every row has two lines', async () => {
     const { host } = await mount([system('copilot', { versionLabel: null })]);
     const secondary = q(host, '.ptah-table-row-title-secondary');
-    expect(secondary).toBeNull();
+    expect(secondary?.textContent).toBe('--');
   });
 
   it('keeps the full missing-key status and a single reachable row model at compact width', async () => {
@@ -531,7 +571,7 @@ describe('LanesTableComponent visual presentation', () => {
         expect(identity.getAttribute('data-collapsed')).toBe('true');
         expect(
           title?.querySelector('.ptah-table-row-title-secondary'),
-        ).toBeNull();
+        ).not.toBeNull();
         const primary = title?.querySelector('.ptah-table-row-title-primary');
         expect(
           primary?.querySelector('.ptah-table-row-title-kind'),
@@ -566,43 +606,50 @@ describe('LanesTableComponent visual presentation', () => {
     );
   });
 
-  it('keeps recovery actions beside status and tier counts in details', async () => {
-    const { fixture, host } = await mount([
-      uninstalled('codex'),
-      instance('a'),
-    ]);
-    const lane = q(host, '[data-testid="cli-provider-card-codex"]');
+  it('keeps the recovery Sign in beside status and tier counts in details', async () => {
+    const cursor = {
+      ...system('codex'),
+      id: 'cursor',
+      cli: 'cursor',
+      name: 'Cursor',
+      installed: false,
+      enabled: false,
+      interactive: false,
+      version: null,
+      versionLabel: null,
+      credentialAction: true,
+      status: { kind: 'needs-key', label: 'Needs API key', tone: 'warning' },
+    } as LaneTableRow;
+    const { fixture, host } = await mount([cursor, instance('a')]);
+    const lane = q(host, '[data-testid="cli-provider-card-cursor"]');
     expect(
       lane?.querySelector('ptah-lanes-table-status')?.textContent,
-    ).not.toContain('Install guide');
-    const install = Array.from(lane?.querySelectorAll('button') ?? []).find(
-      (button) => button.textContent?.trim() === 'Install guide',
-    );
-    expect(install?.closest('[data-lane-status]')).not.toBeNull();
+    ).not.toContain('Sign in');
+    const signIn = lane?.querySelector<HTMLButtonElement>('[data-testid="lanes-sign-in"]');
+    expect(signIn?.textContent?.trim()).toBe('Sign in');
+    expect(signIn?.closest('[data-lane-status]')).not.toBeNull();
     expect(
       Array.from(host.querySelectorAll('thead th')).map((cell) =>
         cell.textContent?.trim(),
       ),
     ).not.toContain('Actions');
     expect(lane?.querySelectorAll(':scope > th, :scope > td')).toHaveLength(8);
+    // No status-cell Install guide is left in the table.
+    expect(
+      Array.from(host.querySelectorAll('[data-lane-status] button')).some(
+        (button) => button.textContent?.trim() === 'Install guide',
+      ),
+    ).toBe(false);
     narrow(fixture);
-    const guide = lane?.querySelector<HTMLButtonElement>(
-      'ptah-lane-row-identity .lane-install-guide',
-    );
-    expect(guide?.closest('th[scope="row"]')).not.toBeNull();
-    expect(guide?.previousElementSibling?.tagName).toBe('PTAH-TABLE-ROW-TITLE');
-    expect(
-      guide?.closest('ptah-lane-row-identity')?.getAttribute('data-collapsed'),
-    ).toBe('true');
+    const identity = lane?.querySelector('ptah-lane-row-identity');
+    expect(identity?.querySelector('button')).toBeNull();
+    expect(identity?.getAttribute('data-collapsed')).toBe('true');
     expect(q(host, '[data-testid="lanes-colgroup-collapsed"]')).not.toBeNull();
-    expect(
-      lane?.querySelector('ptah-lanes-table-status')?.textContent,
-    ).not.toContain('Install guide');
     const recovered = jest.fn();
-    fixture.componentInstance.installGuide.subscribe(recovered);
-    guide?.click();
+    fixture.componentInstance.signIn.subscribe(recovered);
+    signIn?.click();
     expect(recovered).toHaveBeenCalledWith(
-      expect.objectContaining({ id: 'codex' }),
+      expect.objectContaining({ id: 'cursor' }),
     );
     expect(q(host, '[data-testid="cli-matrix-tier-summary"]')).toBeNull();
     q(

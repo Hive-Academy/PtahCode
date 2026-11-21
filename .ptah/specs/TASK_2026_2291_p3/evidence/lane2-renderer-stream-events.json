@@ -1,0 +1,110 @@
+{
+  "ok": true,
+  "value": {
+    "status": "completed",
+    "parentSessionId": null,
+    "streamEvents": [
+      {
+        "id": "7825a422-5853-45c3-abde-06d4bb03cc3b:1:2:start",
+        "timestamp": 1795248919490,
+        "messageId": "86fe67d0-2119-47c4-89b1-a209d6a5651f:7825a422-5853-45c3-abde-06d4bb03cc3b:1:assistant",
+        "source": "stream",
+        "sessionId": "86fe67d0-2119-47c4-89b1-a209d6a5651f",
+        "eventType": "message_start",
+        "role": "assistant"
+      },
+      {
+        "id": "7825a422-5853-45c3-abde-06d4bb03cc3b:1:2:tool-start",
+        "timestamp": 1795248919490,
+        "messageId": "86fe67d0-2119-47c4-89b1-a209d6a5651f:7825a422-5853-45c3-abde-06d4bb03cc3b:1:assistant",
+        "source": "stream",
+        "sessionId": "86fe67d0-2119-47c4-89b1-a209d6a5651f",
+        "eventType": "tool_start",
+        "toolCallId": "call_10680019795069534927",
+        "toolName": "Run mcp_ptah_lane_ptah_search_files",
+        "toolInput": {
+          "pattern": "**/README.md",
+          "toolSummary": "Search for README.md"
+        },
+        "isTaskTool": false
+      },
+      {
+        "id": "7825a422-5853-45c3-abde-06d4bb03cc3b:1:3:tool-result",
+        "timestamp": 1795248920442,
+        "messageId": "86fe67d0-2119-47c4-89b1-a209d6a5651f:7825a422-5853-45c3-abde-06d4bb03cc3b:1:assistant",
+        "source": "stream",
+        "sessionId": "86fe67d0-2119-47c4-89b1-a209d6a5651f",
+        "eventType": "tool_result",
+        "toolCallId": "call_10680019795069534927",
+        "output": "",
+        "isError": false
+      },
+      {
+        "id": "7825a422-5853-45c3-abde-06d4bb03cc3b:1:4:text",
+        "timestamp": 1795248922313,
+        "messageId": "86fe67d0-2119-47c4-89b1-a209d6a5651f:7825a422-5853-45c3-abde-06d4bb03cc3b:1:assistant",
+        "source": "stream",
+        "sessionId": "86fe67d0-2119-47c4-89b1-a209d6a5651f",
+        "eventType": "text_delta",
+        "delta": "[README.md](file:///D:/projects/PtahCode/.claude-",
+        "blockIndex": 0
+      },
+      {
+        "id": "7825a422-5853-45c3-abde-06d4bb03cc3b:1:5:text",
+        "timestamp": 1795248922332,
+        "messageId": "86fe67d0-2119-47c4-89b1-a209d6a5651f:7825a422-5853-45c3-abde-06d4bb03cc3b:1:assistant",
+        "source": "stream",
+        "sessionId": "86fe67d0-2119-47c4-89b1-a209d6a5651f",
+        "eventType": "text_delta",
+        "delta": "worktrees/provider-session-p3/.ptah/tmp/p3-live-ws/README.",
+        "blockIndex": 0
+      },
+      {
+        "id": "7825a422-5853-45c3-abde-06d4bb03cc3b:1:6:text",
+        "timestamp": 1795248922376,
+        "messageId": "86fe67d0-2119-47c4-89b1-a209d6a5651f:7825a422-5853-45c3-abde-06d4bb03cc3b:1:assistant",
+        "source": "stream",
+        "sessionId": "86fe67d0-2119-47c4-89b1-a209d6a5651f",
+        "eventType": "text_delta",
+        "delta": "md)\n\nDONE-P3",
+        "blockIndex": 0
+      },
+      {
+        "id": "7825a422-5853-45c3-abde-06d4bb03cc3b:1:7:complete",
+        "timestamp": 1795248922429,
+        "messageId": "86fe67d0-2119-47c4-89b1-a209d6a5651f:7825a422-5853-45c3-abde-06d4bb03cc3b:1:assistant",
+        "source": "stream",
+        "sessionId": "86fe67d0-2119-47c4-89b1-a209d6a5651f",
+        "eventType": "message_complete",
+        "tokenUsage": {
+          "input": 24538,
+          "output": 230
+        },
+        "model": "gemini-4-hydrogen-low"
+      }
+    ],
+    "segments": [
+      {
+        "type": "tool-call",
+        "content": "",
+        "toolCallId": "call_10680019795069534927",
+        "toolName": "Run mcp_ptah_lane_ptah_search_files",
+        "toolArgs": "{\"pattern\":\"**/README.md\",\"toolSummary\":\"Search for README.md\"}",
+        "toolInput": {
+          "pattern": "**/README.md",
+          "toolSummary": "Search for README.md"
+        }
+      },
+      {
+        "type": "tool-result",
+        "content": "",
+        "toolCallId": "call_10680019795069534927",
+        "toolName": "Run mcp_ptah_lane_ptah_search_files"
+      },
+      {
+        "type": "text",
+        "content": "[README.md](file:///D:/projects/PtahCode/.claude-worktrees/provider-session-p3/.ptah/tmp/p3-live-ws/README.md)\n\nDONE-P3"
+      }
+    ]
+  }
+}

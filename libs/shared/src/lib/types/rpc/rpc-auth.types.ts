@@ -1,5 +1,6 @@
 import type { AuthStrategyType } from '../auth-strategy.types';
 import type { ProviderModelTier } from './rpc-providers.types';
+import type { ProviderSessionProfileId } from '../provider-session-profile.types';
 
 /**
  * Authentication RPC Type Definitions
@@ -400,6 +401,22 @@ export interface AuthGetAuthStatusResponse {
   kimiCodeCredentialSource?: KimiCodeCredentialSource;
   /** Whether Claude CLI is installed and detected on the system */
   claudeCliInstalled?: boolean;
+  /**
+   * One row per provider-session profile this host admits; a profile with no
+   * row is not offered. Never carries a credential.
+   */
+  providerSessionStatus?: Partial<
+    Record<ProviderSessionProfileId, ProviderSessionAuthStatus>
+  >;
+}
+
+/** Install and sign-in state of one provider-session profile. */
+export interface ProviderSessionAuthStatus {
+  readonly installed: boolean;
+  readonly authenticated: boolean;
+  readonly version?: string;
+  /** User-facing instruction for signing in (for example a CLI command). */
+  readonly signInHint: string;
 }
 
 /** Response from auth:getScope RPC method */

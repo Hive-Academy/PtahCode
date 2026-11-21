@@ -7,7 +7,7 @@ export type CodexRuntimeCompositionErrorCode =
 
 const messages: Record<CodexRuntimeCompositionErrorCode, string> = {
   'partial-native-binding':
-    'Native runtime composition requires all four host bindings; missing tokens',
+    'Native runtime composition requires the chat core bindings and at least one runtime ports binding; missing tokens',
   'unstable-binding':
     'Runtime ports must be bound before resolving the agent adapter; bind a stable instance using registerInstance or a cached factory; use a fresh container for native activation',
   'identity-lookup-disposed': 'Session runtime identity lookup is disposed',

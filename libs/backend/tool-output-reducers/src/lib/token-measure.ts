@@ -32,19 +32,20 @@ const MAX_PIECE_CHARS = 1024;
 
 /**
  * o200k_base's pre-tokenizer split, verbatim from gpt-tokenizer 4
- * (`encodingParams/constants`, `O200K_TOKEN_SPLIT_PATTERN`; a spec pins the
- * copy to the installed one). `encode` runs byte-pair merging on each match
- * separately, so the token count of a text is the sum over its matches.
+ * (`encodingParams/constants`, `O200K_TOKEN_SPLIT_REGEX`; a spec pins the
+ * copy to the installed one). Since 4.1 the pattern subtracts code points
+ * that newer Unicode versions added, so it needs the `v` flag. `encode` runs
+ * byte-pair merging on each match separately, so the token count of a text
+ * is the sum over its matches.
  */
-const CONTRACTION = String.raw`(?:'(?:[sS]|[dD]|[mM]|[tT]|[lL][lL]|[vV][eE]|[rR][eE]))?`;
 export const O200K_SPLIT_PATTERN = [
-  String.raw`[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]*[\p{Ll}\p{Lm}\p{Lo}\p{M}]+${CONTRACTION}`,
-  String.raw`[^\r\n\p{L}\p{N}]?[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]+[\p{Ll}\p{Lm}\p{Lo}\p{M}]*${CONTRACTION}`,
-  String.raw`\p{N}{1,3}`,
-  String.raw` ?[^\s\p{L}\p{N}]+[\r\n/]*`,
-  String.raw`\s*[\r\n]+`,
-  String.raw`\s+(?!\S)`,
-  String.raw`\s+`,
+  String.raw`[^\r\n[[\p{L}]--[\u088F\u0C5C\u0CDC\uA7CE-\uA7CF\uA7D2\uA7D4\uA7F1\u{10940}-\u{10959}\u{10EC5}-\u{10EC7}\u{11DB0}-\u{11DDB}\u{16EA0}-\u{16EB8}\u{16EBB}-\u{16ED3}\u{16FF2}-\u{16FF3}\u{187F8}-\u{187FF}\u{18D09}-\u{18D1E}\u{18D80}-\u{18DF2}\u{1E6C0}-\u{1E6DE}\u{1E6E0}-\u{1E6E2}\u{1E6E4}-\u{1E6E5}\u{1E6E7}-\u{1E6ED}\u{1E6F0}-\u{1E6F4}\u{1E6FE}-\u{1E6FF}\u{2B73A}-\u{2B73F}\u{2CEA2}-\u{2CEAD}\u{323B0}-\u{33479}]][[\p{N}]--[\u{11DE0}-\u{11DE9}\u{16FF4}-\u{16FF6}]]]?[[[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]--[\u0295\u088F\u0C5C\u0CDC\u1ACF-\u1ADD\u1AE0-\u1AEB\uA7CE\uA7D2\uA7D4\uA7F1\u{10940}-\u{10959}\u{10EC5}-\u{10EC7}\u{10EFA}-\u{10EFB}\u{11B60}-\u{11B67}\u{11DB0}-\u{11DDB}\u{16EA0}-\u{16EB8}\u{16FF2}-\u{16FF3}\u{187F8}-\u{187FF}\u{18D09}-\u{18D1E}\u{18D80}-\u{18DF2}\u{1E6C0}-\u{1E6DE}\u{1E6E0}-\u{1E6F5}\u{1E6FE}-\u{1E6FF}\u{2B73A}-\u{2B73F}\u{2CEA2}-\u{2CEAD}\u{323B0}-\u{33479}]]]*[[[\p{Ll}\p{Lm}\p{Lo}\p{M}]--[\u088F\u0C5C\u0CDC\u1ACF-\u1ADD\u1AE0-\u1AEB\uA7CF\uA7F1\u{10940}-\u{10959}\u{10EC5}-\u{10EC7}\u{10EFA}-\u{10EFB}\u{11B60}-\u{11B67}\u{11DB0}-\u{11DDB}\u{16EBB}-\u{16ED3}\u{16FF2}-\u{16FF3}\u{187F8}-\u{187FF}\u{18D09}-\u{18D1E}\u{18D80}-\u{18DF2}\u{1E6C0}-\u{1E6DE}\u{1E6E0}-\u{1E6F5}\u{1E6FE}-\u{1E6FF}\u{2B73A}-\u{2B73F}\u{2CEA2}-\u{2CEAD}\u{323B0}-\u{33479}]]]+(?:'(?:[sSſ]|[dD]|[mM]|[tT]|[lL][lL]|[vV][eE]|[rR][eE]))?`,
+  String.raw`[^\r\n[[\p{L}]--[\u088F\u0C5C\u0CDC\uA7CE-\uA7CF\uA7D2\uA7D4\uA7F1\u{10940}-\u{10959}\u{10EC5}-\u{10EC7}\u{11DB0}-\u{11DDB}\u{16EA0}-\u{16EB8}\u{16EBB}-\u{16ED3}\u{16FF2}-\u{16FF3}\u{187F8}-\u{187FF}\u{18D09}-\u{18D1E}\u{18D80}-\u{18DF2}\u{1E6C0}-\u{1E6DE}\u{1E6E0}-\u{1E6E2}\u{1E6E4}-\u{1E6E5}\u{1E6E7}-\u{1E6ED}\u{1E6F0}-\u{1E6F4}\u{1E6FE}-\u{1E6FF}\u{2B73A}-\u{2B73F}\u{2CEA2}-\u{2CEAD}\u{323B0}-\u{33479}]][[\p{N}]--[\u{11DE0}-\u{11DE9}\u{16FF4}-\u{16FF6}]]]?[[[\p{Lu}\p{Lt}\p{Lm}\p{Lo}\p{M}]--[\u0295\u088F\u0C5C\u0CDC\u1ACF-\u1ADD\u1AE0-\u1AEB\uA7CE\uA7D2\uA7D4\uA7F1\u{10940}-\u{10959}\u{10EC5}-\u{10EC7}\u{10EFA}-\u{10EFB}\u{11B60}-\u{11B67}\u{11DB0}-\u{11DDB}\u{16EA0}-\u{16EB8}\u{16FF2}-\u{16FF3}\u{187F8}-\u{187FF}\u{18D09}-\u{18D1E}\u{18D80}-\u{18DF2}\u{1E6C0}-\u{1E6DE}\u{1E6E0}-\u{1E6F5}\u{1E6FE}-\u{1E6FF}\u{2B73A}-\u{2B73F}\u{2CEA2}-\u{2CEAD}\u{323B0}-\u{33479}]]]+[[[\p{Ll}\p{Lm}\p{Lo}\p{M}]--[\u088F\u0C5C\u0CDC\u1ACF-\u1ADD\u1AE0-\u1AEB\uA7CF\uA7F1\u{10940}-\u{10959}\u{10EC5}-\u{10EC7}\u{10EFA}-\u{10EFB}\u{11B60}-\u{11B67}\u{11DB0}-\u{11DDB}\u{16EBB}-\u{16ED3}\u{16FF2}-\u{16FF3}\u{187F8}-\u{187FF}\u{18D09}-\u{18D1E}\u{18D80}-\u{18DF2}\u{1E6C0}-\u{1E6DE}\u{1E6E0}-\u{1E6F5}\u{1E6FE}-\u{1E6FF}\u{2B73A}-\u{2B73F}\u{2CEA2}-\u{2CEAD}\u{323B0}-\u{33479}]]]*(?:'(?:[sSſ]|[dD]|[mM]|[tT]|[lL][lL]|[vV][eE]|[rR][eE]))?`,
+  String.raw`[[[\p{N}]--[\u{11DE0}-\u{11DE9}\u{16FF4}-\u{16FF6}]]]{1,3}`,
+  String.raw` ?[^\p{White_Space}[[\p{L}]--[\u088F\u0C5C\u0CDC\uA7CE-\uA7CF\uA7D2\uA7D4\uA7F1\u{10940}-\u{10959}\u{10EC5}-\u{10EC7}\u{11DB0}-\u{11DDB}\u{16EA0}-\u{16EB8}\u{16EBB}-\u{16ED3}\u{16FF2}-\u{16FF3}\u{187F8}-\u{187FF}\u{18D09}-\u{18D1E}\u{18D80}-\u{18DF2}\u{1E6C0}-\u{1E6DE}\u{1E6E0}-\u{1E6E2}\u{1E6E4}-\u{1E6E5}\u{1E6E7}-\u{1E6ED}\u{1E6F0}-\u{1E6F4}\u{1E6FE}-\u{1E6FF}\u{2B73A}-\u{2B73F}\u{2CEA2}-\u{2CEAD}\u{323B0}-\u{33479}]][[\p{N}]--[\u{11DE0}-\u{11DE9}\u{16FF4}-\u{16FF6}]]]+[\r\n\/]*`,
+  String.raw`\p{White_Space}*[\r\n]+`,
+  String.raw`\p{White_Space}+(?!\P{White_Space})`,
+  String.raw`\p{White_Space}+`,
 ].join('|');
 
 /** Exact gpt-tokenizer token count of `text`. */
@@ -206,7 +207,10 @@ function* pieces(text: string): Generator<Piece> {
     yield { start: 0, end: text.length, long: false };
     return;
   }
-  const split = new RegExp(O200K_SPLIT_PATTERN, 'gu');
+  // The pattern is gpt-tokenizer's verbatim. Its `\p{M}` classes are meant to
+  // match combining marks one by one, as the tokenizer itself does.
+  // eslint-disable-next-line no-misleading-character-class
+  const split = new RegExp(O200K_SPLIT_PATTERN, 'gv');
   let start = 0;
   /** Latest pre-token end after `start` that ends after a non-whitespace char. */
   let safe = -1;

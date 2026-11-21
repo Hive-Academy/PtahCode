@@ -128,6 +128,8 @@ function bashCommandOf(json: string): string | null {
     const command = (parsed as { command?: unknown }).command;
     return typeof command === 'string' ? command : null;
   } catch {
+    // degradation-audit: optional-capability - a tool input that is not JSON
+    // has no bash command; null means "leave the line alone" (see above).
     return null;
   }
 }

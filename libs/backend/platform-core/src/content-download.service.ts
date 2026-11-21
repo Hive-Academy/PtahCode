@@ -151,6 +151,8 @@ export class ContentDownloadService {
     try {
       return fs.existsSync(this.pluginsDir) || fs.existsSync(this.templatesDir);
     } catch {
+      // degradation-audit: optional-capability - false means "no local
+      // content yet"; callers then load nothing or wait for a download.
       return false;
     }
   }
@@ -467,7 +469,17 @@ export class ContentDownloadService {
     let entries: string[];
     try {
       entries = fs.readdirSync(dir);
-    } catch {
+    } catch (error: unknown) {
+      // degradation-audit: optional-capability - a missing root has nothing
+      // to sweep, so false ("not empty, keep it") is the answer; other read
+      // failures are logged at warn and also return false.
+      const code = (error as NodeJS.ErrnoException | null)?.code;
+      if (code !== 'ENOENT') {
+        console.warn(
+          `[ContentDownloadService] Failed to read directory ${dir} for empty-dir sweep`,
+          { code },
+        );
+      }
       return false;
     }
 
@@ -660,7 +672,16 @@ export class ContentDownloadService {
       }
 
       return null;
-    } catch {
+    } catch (error: unknown) {
+      // degradation-audit: optional-capability - a missing or malformed cache
+      // file means "no cache" (null) and the content is downloaded again;
+      // I/O failures other than ENOENT are logged at warn and also return null.
+      const code = (error as NodeJS.ErrnoException | null)?.code;
+      if (typeof code === 'string' && code !== 'ENOENT') {
+        console.warn('[ContentDownloadService] Failed to read cache metadata', {
+          code,
+        });
+      }
       return null;
     }
   }

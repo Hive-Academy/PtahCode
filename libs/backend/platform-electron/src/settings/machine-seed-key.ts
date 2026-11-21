@@ -113,10 +113,14 @@ export function decryptWithMachineSeed(
     decipher.setAuthTag(tag);
     const plain = Buffer.concat([decipher.update(ct), decipher.final()]);
     return plain.toString('utf8');
-  } catch (error: unknown) {
+  } catch {
+    // degradation-audit: reported - the only caller,
+    // ElectronMasterKeyProvider.tryDecryptMachineWrap, turns null into the
+    // notifyCorruption() path, which shows the user an error (or logs at
+    // console.error when no UI is available). No error text here: it concerns
+    // key material.
     // Any decrypt failure (bad key after real corruption, tampering) is a
     // recovery miss, not a crash — the caller decides what to do next.
-    void error;
     return null;
   }
 }

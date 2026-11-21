@@ -731,6 +731,9 @@ describe('named lane identity proof', () => {
     ['the bundled CLI Claude Ultra shape', { ...bundledCliPersonal, subscriptionType: 'Claude Ultra' }],
     ['the bundled CLI shape with apiKeySource none', { ...bundledCliPersonal, apiKeySource: 'none' }],
     ['the claude.ai token source shape', personalNoEmail],
+    // A login that reports no plan yet is unknown, not refused (TASK_2026_2287).
+    ['no subscription', { tokenSource: 'claude.ai' }],
+    ['no subscription and no token source', { apiProvider: 'firstParty' }],
   ])('passes the personal-login tripwire for %s', async (_label, info) => {
     // A different account: the run gets past the tripwire and refuses at the compare.
     const f = bootstrapFixture({
@@ -768,8 +771,6 @@ describe('named lane identity proof', () => {
       { subscription: 'other', ...refusedSubscription },
     ],
     ['an unknown subscription word', { ...personalNoEmail, subscriptionType: 'future' }, { subscription: 'other', ...refusedSubscription }],
-    ['no subscription', { tokenSource: 'claude.ai' }, { subscription: 'absent', ...refusedSubscription }],
-    ['no subscription and no token source', { apiProvider: 'firstParty' }, { subscription: 'absent', ...refusedSubscription }],
     ['a third-party provider', { ...personalNoEmail, apiProvider: 'bedrock' }, { apiProvider: false }],
     ['a vertex provider on the bundled CLI shape', { ...bundledCliPersonal, apiProvider: 'vertex' }, { apiProvider: false }],
   ])('trips on %s before any binding or prompt', async (_label, info, failed) => {

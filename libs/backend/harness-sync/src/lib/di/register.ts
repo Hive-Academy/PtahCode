@@ -142,7 +142,7 @@ export function registerHarnessSyncServices(
   );
   const detector = options.cliDetector ?? NO_CLI_DETECTOR;
   const targets = (options.targets ?? ALL_HARNESS_TARGET_FACTORIES).map(
-    (factory) => factory({ manifestStore, detector }),
+    (factory) => factory({ manifestStore, detector, logger }),
   );
 
   container.register(HARNESS_SYNC_TOKENS.MANIFEST_STORE, {

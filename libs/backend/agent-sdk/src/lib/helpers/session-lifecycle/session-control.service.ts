@@ -357,6 +357,8 @@ export class SessionControl {
     sessionId: SessionId,
     cause: SessionEndCause = 'unknown',
   ): Promise<void> {
+    // Sampled before any await, so a stop during the interrupt below is later.
+    const startedAt = Date.now();
     this.endingRecords.add(rec);
     this.logger.info(`[SessionLifecycle] Ending session: ${sessionId}`);
     const registrySessionId = rec.realSessionId ?? rec.tabId;
@@ -453,6 +455,7 @@ export class SessionControl {
         sessionId: registrySessionId,
         workspaceRoot,
         cause,
+        ...(cause === 'no-activity-timeout' ? { startedAt } : {}),
       });
     } else {
       this.logger.debug(

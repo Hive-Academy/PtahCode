@@ -2,14 +2,24 @@
   [isOpen]="open()"
   ariaLabelledby="cli-tier-mapping-title"
   size="md"
+  layout="shell"
   (closed)="closed.emit()"
 >
   <div
     modal-header
-    class="-mx-6 -mt-6 mb-4 flex items-center justify-between gap-2 border-b border-base-300 bg-base-200 px-5 py-3"
+    class="flex items-center gap-2"
     data-testid="cli-tier-mapping-modal"
   >
-    <h2 id="cli-tier-mapping-title" class="text-sm font-bold text-base-content">
+    <lucide-angular
+      [img]="TitleIcon"
+      class="h-4 w-4 shrink-0 text-base-content-muted"
+      aria-hidden="true"
+      data-testid="cli-tier-mapping-title-icon"
+    />
+    <h2
+      id="cli-tier-mapping-title"
+      class="min-w-0 flex-1 text-sm font-bold text-base-content"
+    >
       {{ target()?.name ?? 'Instance' }} Tier Model Mapping
     </h2>
     <button type="button" ptahIconButton label="Close" (click)="closed.emit()">
@@ -183,7 +193,7 @@
 
   <div
     modal-footer
-    class="-mx-6 -mb-6 mt-5 flex items-center justify-end gap-2 border-t border-base-300 bg-base-200 px-5 py-3"
+    class="flex items-center justify-end gap-2"
   >
     <button
       type="button"

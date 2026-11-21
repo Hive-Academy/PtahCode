@@ -2,15 +2,18 @@
  * Grok CLI Adapter (`grok`) — Agent Client Protocol (TASK_2026_617)
  *
  * Runs xAI's Grok CLI as `grok agent --no-leader stdio`: one long-lived ACP
- * agent process per lane, driven by the vendor-neutral ACP runner
- * (`createAcpSessionHandle`). Everything Grok-specific — argv, the Ptah MCP
- * entry, model and effort through `session/set_config_option`, the extension
- * namespace and the error wording — lives in `grokAcpProfile`.
+ * agent process per lane, driven by the ACP runtime (`@ptah-extension/acp-runtime`)
+ * through the provider-session lane handle (`createProviderSessionLaneHandle`).
+ * Everything Grok-specific — argv, the Ptah MCP entry, model and effort through
+ * `session/set_config_option`, the extension namespace and the error wording —
+ * lives in `grokAcpProfile`.
  *
  * Messaging: an ACP agent queues a prompt sent mid-turn instead of injecting
- * it, and `session/cancel` ends the turn rather than pausing it, so there is no
- * steer and no interrupt. A further message is a new `session/prompt` on the
- * same session (continuation).
+ * it, so there is no steer. Interrupt is `session/cancel`: Grok answers the
+ * cancelled prompt and keeps the process (`grok-p2-cancel-mid-shell`), so the
+ * message is re-submitted as the next `session/prompt` on the same session.
+ * A further message is a new `session/prompt` on the same session
+ * (continuation).
  *
  * Credentials are Grok's own (`grok login` → `~/.grok/auth.json`); Ptah
  * stores none and passes no per-lane env.
@@ -36,8 +39,8 @@ import {
   stripAnsiCodes,
 } from './cli-adapter.utils';
 import { probeCliStdout } from './cli-stdout-probe';
-import { createAcpSessionHandle } from './acp';
-import { grokAcpProfile } from './grok/grok-acp-profile';
+import { grokAcpProfile } from '@ptah-extension/acp-runtime';
+import { createProviderSessionLaneHandle } from './provider-session/provider-session-lane-handle';
 
 /** `grok models` must answer within this, or the model list is empty. */
 const GROK_MODELS_TIMEOUT_MS = 8000;
@@ -184,7 +187,7 @@ export class GrokCliAdapter implements CliAdapter {
     return {
       messaging: {
         steer: { state: 'unsupported', reason: 'ACP messages begin the next turn.' },
-        interrupt: { state: 'unsupported', reason: 'No run-scoped interrupt is exposed.' },
+        interrupt: { state: 'supported' },
         continuation: { state: 'supported' },
         resume: { state: 'supported' },
       },
@@ -266,7 +269,7 @@ export class GrokCliAdapter implements CliAdapter {
    */
   async runSdk(options: CliCommandOptions): Promise<SdkHandle> {
     validateLaneSpawnPolicy(this.name, this.capabilities(), options);
-    return createAcpSessionHandle({
+    return createProviderSessionLaneHandle({
       profile: grokAcpProfile,
       options,
       command: options.binaryPath ?? 'grok',

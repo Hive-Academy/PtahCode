@@ -157,6 +157,10 @@ export class CliSecretStorage implements ISecretStorage {
       decrypted += decipher.final('utf-8');
       return decrypted;
     } catch {
+      // degradation-audit: reported - the only caller, loadSync(), logs a
+      // null result at console.warn ("Failed to decrypt secrets file") and
+      // starts with an empty store. No error text is logged: it concerns
+      // secret material.
       return null;
     }
   }

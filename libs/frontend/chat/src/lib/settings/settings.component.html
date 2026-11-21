@@ -1,17 +1,19 @@
-<div class="settings-page h-full [container-type:size] overflow-y-auto bg-surface-0">
+<div class="settings-page h-full [container-type:size] overflow-y-auto [scrollbar-gutter:stable_both-edges] bg-surface-0">
   <ptah-settings-layout
     navMode="navigation"
     navTestId="settings-tabs"
     navLabel="Settings sections"
-    [tabs]="settingsTabs"
+    [tabs]="settingsTabs()"
     [selected]="selectedSettingsTab()"
     (selectedChange)="setActiveTab($event)"
     [title]="activeTabTitle()"
     [description]="activeTabDescription()"
+    [icon]="activeTabIcon()"
     [titleLevel]="1"
   >
     <div nav-header class="flex flex-col gap-[var(--ptah-settings-nav-gap)]">
-      <button type="button" ptahButton variant="ghost" size="sm" class="self-start" aria-label="Back to Chat" data-testid="settings-back" (click)="backToChat()">
+      <!-- F34: the button reads its inline padding from the control token, so Back and the title share the nav inset. -->
+      <button type="button" ptahButton variant="ghost" size="sm" class="self-start [--ptah-control-px:var(--ptah-settings-nav-px)]" aria-label="Back to Chat" data-testid="settings-back" (click)="backToChat()">
         <lucide-angular [img]="ArrowLeftIcon" class="w-4 h-4" aria-hidden="true" />
         Back to chat
       </button>
@@ -129,7 +131,7 @@
     <!-- Tab 3: Advanced (membership, agent behaviour, output style, MCP, VS Code LM) -->
     <!-- ============================================ -->
     @if (activeSettingsTab() === 'pro-features') {
-      <div class="ptah-motion-panel flex flex-col [[data-glass=on]_&]:gap-[var(--ptah-gap-section)]" animate.leave="ptah-motion-leave">
+      <div class="ptah-motion-panel flex flex-col gap-[var(--ptah-gap-section)]" animate.leave="ptah-motion-leave">
       @defer (on immediate) {
         <div class="ptah-motion-panel" animate.enter="ptah-motion-enter">
         <ptah-advanced-settings (modelChanged)="onModelChanged()" />
@@ -138,12 +140,12 @@
         <div aria-busy="true"><ptah-skeleton shape="block" /></div>
       }
       <!-- The same form section as the Advanced sections above it: title and note in the aside column,
-           the actions in the controls column. The sr-only h2 keeps the section name of the tab. -->
+           the actions in the controls column. The sr-only h2 keeps the section name of the tab.
+           Glass on: the card owns the inset (global .settings-page rule), so the form section has no block padding. -->
       <section
         aria-labelledby="settings-setup-heading"
         data-testid="settings-setup"
         data-glass-surface="content"
-        style="padding: 0"
       >
         <h2 id="settings-setup-heading" class="sr-only">Setup</h2>
         <ptah-form-section
@@ -152,11 +154,19 @@
           [divider]="true"
           description="Run the first-run steps again, or check the Claude Code install."
           [wide]="true"
+          [icon]="SetupIcon"
+          flushInGlass
         >
           <div class="flex flex-wrap items-center gap-ptah-controls">
-            <button type="button" ptahButton variant="secondary" data-testid="settings-run-onboarding-again" (click)="runOnboardingAgain()">Run onboarding again</button>
+            <button type="button" ptahButton variant="secondary" data-testid="settings-run-onboarding-again" (click)="runOnboardingAgain()">
+              <lucide-angular [img]="PlayIcon" class="size-[var(--ptah-icon-sm)]" aria-hidden="true" />
+              Run onboarding again
+            </button>
             @if (isElectron) {
-              <button type="button" ptahButton variant="secondary" data-testid="settings-check-claude-code" (click)="checkClaudeCode()">Check Claude Code</button>
+              <button type="button" ptahButton variant="secondary" data-testid="settings-check-claude-code" (click)="checkClaudeCode()">
+                <lucide-angular [img]="RefreshIcon" class="size-[var(--ptah-icon-sm)]" aria-hidden="true" />
+                Check Claude Code
+              </button>
             }
           </div>
         </ptah-form-section>

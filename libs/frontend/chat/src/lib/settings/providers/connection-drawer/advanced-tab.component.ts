@@ -11,6 +11,7 @@ import {
   untracked,
 } from '@angular/core';
 import {
+  LoggingService,
   ProvidersSettingsStateService,
   type ProvidersConnection,
   type ProvidersCustomEntry,
@@ -124,6 +125,7 @@ export function parsePricing(
 export class AdvancedTabComponent {
   private readonly state = inject(ProvidersSettingsStateService);
   private readonly feedback = inject(SettingsSaveFeedbackService);
+  private readonly logger = inject(LoggingService);
   readonly connection = input.required<ProvidersConnection>();
   /** This connection drives the main agent: it cannot be deleted. */
   readonly isDriver = input(false);
@@ -377,7 +379,14 @@ export class AdvancedTabComponent {
   protected abandonProbe(): void {
     const probeId = this.probeId;
     if (probeId && this.probeState() === 'checking')
-      void this.cancelDraftVerification()({ probeId }).catch(() => undefined);
+      // degradation-audit: reported - logged at debug here; the probe is already
+      // settled locally and its late result is discarded by probeId.
+      void this.cancelDraftVerification()({ probeId }).catch(
+        (error: unknown) =>
+          this.logger.debug('AdvancedTab', 'Draft probe cancel failed', {
+            errorName: error instanceof Error ? error.name : typeof error,
+          }),
+      );
     this.probeId = null;
     this.probeState.set('idle');
     this.probeResult.set(null);

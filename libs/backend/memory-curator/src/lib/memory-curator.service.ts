@@ -1011,6 +1011,8 @@ export class MemoryCuratorService {
     try {
       corpora = this.corpusStore.list({ workspaceRoot });
     } catch (err: unknown) {
+      // degradation-audit: reported - logged at warn here; no corpus is
+      // auto-rebuilt on this pass, and the next trigger tries again.
       this.logger.warn('[memory-curator] auto-rebuild corpus listing failed', {
         error: err instanceof Error ? err.message : String(err),
       });

@@ -44,6 +44,18 @@ export const RPC_USER_ERROR_CODES = [
   'CODEX_UNAVAILABLE',
   /** The Codex runtime could not complete the requested operation. */
   'CODEX_RUNTIME_FAILED',
+  /** The provider-session runtime or session is unavailable on this host. */
+  'PROVIDER_SESSION_UNAVAILABLE',
+  /** The provider session already has an operation in progress. */
+  'PROVIDER_SESSION_BUSY',
+  /** The provider-session runtime could not complete the requested operation. */
+  'PROVIDER_SESSION_RUNTIME_FAILED',
+  /** The provider could not resume or load the saved native session. */
+  'PROVIDER_SESSION_RESUME_FAILED',
+  /** The host already runs its maximum number of live provider sessions. */
+  'PROVIDER_SESSION_LIMIT',
+  /** A named chat option is unsupported by the provider session. */
+  'PROVIDER_SESSION_UNSUPPORTED_OPTION',
   'SEND_TIMEOUT',
   'SESSION_ATTACHED_TO_GATEWAY',
   'OUTPUT_CURSOR_STALE',

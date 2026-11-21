@@ -31,7 +31,10 @@ import {
   type IAuthStrategy,
 } from './auth-strategy.types';
 import { SdkError } from '@ptah-extension/agent-sdk';
-import { isNativeCodexAuthIntent } from './codex-native-runtime-refusal';
+import {
+  isNativeRuntimeAuthIntent,
+  nativeRuntimeOwnedDetail,
+} from './codex-native-runtime-refusal';
 import { AUTH_PROVIDERS_TOKENS } from '../di/tokens';
 import type { ProviderModelsService } from '../provider-models.service';
 import type { IAuthEnvProvider } from '@ptah-extension/agent-sdk';
@@ -164,7 +167,7 @@ export class AuthManager implements IAuthEnvProvider {
     const resolved = this.resolveProviderAndStrategy(authMethod);
     const providerId = operationContext?.providerId ?? resolved.providerId;
     if (
-      !isNativeCodexAuthIntent(operationContext) &&
+      !isNativeRuntimeAuthIntent(providerId, operationContext) &&
       authMethod !== 'thirdParty' &&
       providerId !== resolved.providerId
     ) {
@@ -250,11 +253,11 @@ export class AuthManager implements IAuthEnvProvider {
     strategyType: AuthStrategyType,
     operationContext?: AuthOperationContext,
   ): Promise<AuthResult> {
-    const nativeReturn = isNativeCodexAuthIntent(operationContext);
+    const nativeReturn = isNativeRuntimeAuthIntent(providerId, operationContext);
     if (nativeReturn && !this.activeStrategy) {
       return {
         configured: false,
-        details: ['Codex authentication is owned by the native runtime.'],
+        details: [nativeRuntimeOwnedDetail(providerId)],
       };
     }
 
@@ -283,7 +286,7 @@ export class AuthManager implements IAuthEnvProvider {
     if (nativeReturn) {
       return {
         configured: false,
-        details: ['Codex authentication is owned by the native runtime.'],
+        details: [nativeRuntimeOwnedDetail(providerId)],
       };
     }
 

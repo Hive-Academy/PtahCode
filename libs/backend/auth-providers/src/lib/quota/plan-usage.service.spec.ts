@@ -218,6 +218,128 @@ describe('PlanUsageService', () => {
     await h.service.getOwnerSnapshot(claudeTarget());
     expect(h.oauthReader).toHaveBeenCalledTimes(4);
   });
+  it('falls back to OAuth for a named route whose live reader has no open session', async () => {
+    const h = harness();
+    const { sessionHandle: _noSession, ...sessionless } = claudeTarget();
+    const named: PlanOwnerTarget = { ...sessionless, claudeRoute: { kind: 'named' } as PlanOwnerTarget['claudeRoute'] };
+    h.oauthReader.mockResolvedValueOnce({ ...mapClaudePlanUsage(claudeUsage(), T0, h.logger as Partial<Logger> as Logger), source: 'provider-api' });
+    const snapshot = await h.service.getOwnerSnapshot(named);
+    // Without a session handle the named live read never asks the probe.
+    expect(h.readPlanUsage).not.toHaveBeenCalled();
+    expect(h.oauthReader).toHaveBeenCalledTimes(1);
+    expect(h.oauthReader).toHaveBeenCalledWith(expect.objectContaining({ target: expect.objectContaining({ claudeRoute: { kind: 'named' } }) }));
+    expect(snapshot.status).toBe('available');
+  });
+  it('takes a separate flight from the default account and passes the snapshotted profile to OAuth', async () => {
+    const h = harness();
+    const live = deferred<ClaudePlanUsage>();
+    h.readPlanUsage.mockReturnValueOnce(live.promise);
+    h.oauthReader.mockResolvedValueOnce({ ...mapClaudePlanUsage(claudeUsage(17), T0, h.logger as Partial<Logger> as Logger), source: 'provider-api' });
+    const claudeUsageDir = {
+      kind: 'stored-profile-usage' as const, profileId: 'fixture', canonicalConfigDir: '/fixture/original',
+    };
+    // Keep the owner key equal so only the source distinguishes the two flights.
+    const ambient = h.service.getOwnerSnapshot(claudeTarget());
+    const stored = h.service.getOwnerSnapshot({ providerId: 'anthropic', ownerRef: CLAUDE_A, claudeUsageDir });
+    expect(stored).not.toBe(ambient);
+    claudeUsageDir.canonicalConfigDir = '/fixture/changed';
+    live.resolve(claudeUsage(42));
+    const [, storedSnapshot] = await Promise.all([ambient, stored]);
+
+    expect(h.readPlanUsage).toHaveBeenCalledTimes(1);
+    expect(h.oauthReader).toHaveBeenCalledTimes(1);
+    expect(h.oauthReader).toHaveBeenCalledWith(expect.objectContaining({
+      target: expect.objectContaining({ claudeUsageDir: { ...claudeUsageDir, canonicalConfigDir: '/fixture/original' } }),
+    }));
+    expect(storedSnapshot.windows[0]?.used).toEqual({ kind: 'percent', percent: 17 });
+  });
+  it('keeps the OAuth failure of a stored-directory target, also during the cooldown', async () => {
+    const h = harness();
+    const target: PlanOwnerTarget = {
+      providerId: 'anthropic', ownerRef: CLAUDE_A,
+      claudeUsageDir: { kind: 'stored-profile-usage', profileId: 'fixture', canonicalConfigDir: '/fixture/stored' },
+    };
+    const first = await h.service.getOwnerSnapshot(target);
+    const cooled = await h.service.getOwnerSnapshot(target);
+    expect(h.oauthReader).toHaveBeenCalledTimes(1);
+    expect(h.readPlanUsage).not.toHaveBeenCalled();
+    for (const snapshot of [first, cooled]) {
+      expect(snapshot.status).toBe('no-usage-source');
+      expect(snapshot.unavailableReason).not.toBe('no-open-session');
+    }
+    h.oauthReader.mockRejectedValueOnce(new Error('network'));
+    const thrown = await h.service.getOwnerSnapshot(target, { refresh: true });
+    expect(h.oauthReader).toHaveBeenCalledTimes(2);
+    expect(thrown.status).toBe('service-unavailable');
+    expect(thrown.unavailableReason).not.toBe('no-open-session');
+  });
+  it('keeps a separate OAuth cooldown for a stored directory of the same account', async () => {
+    const h = harness();
+    h.readPlanUsage.mockResolvedValue(null);
+    // The default account's OAuth read fails and cools down this owner key.
+    await h.service.getOwnerSnapshot(claudeTarget());
+    expect(h.oauthReader).toHaveBeenCalledTimes(1);
+    h.oauthReader.mockResolvedValueOnce({ ...mapClaudePlanUsage(claudeUsage(17), T0, h.logger as Partial<Logger> as Logger), source: 'provider-api' });
+    const stored = await h.service.getOwnerSnapshot({
+      providerId: 'anthropic', ownerRef: CLAUDE_A,
+      claudeUsageDir: { kind: 'stored-profile-usage', profileId: 'fixture', canonicalConfigDir: '/fixture/stored' },
+    });
+    expect(h.oauthReader).toHaveBeenCalledTimes(2);
+    expect(stored.status).toBe('available');
+  });
+  it('keeps a separate OAuth cooldown for each named route of the same owner', async () => {
+    const h = harness();
+    const { sessionHandle: _noSession, ...sessionless } = claudeTarget();
+    const route = (profileId: string) =>
+      ({ ...sessionless, claudeRoute: { kind: 'named', profileId } as PlanOwnerTarget['claudeRoute'] }) as PlanOwnerTarget;
+    h.oauthReader.mockResolvedValueOnce({ status: 'service-unavailable', statusReason: 'cli-unavailable', windowSetEstablished: false, windows: [], retryAfterMs: 120_000 });
+    await h.service.getOwnerSnapshot(route('profile-a'));
+    h.oauthReader.mockResolvedValueOnce({ ...mapClaudePlanUsage(claudeUsage(17), T0, h.logger as Partial<Logger> as Logger), source: 'provider-api' });
+    const other = await h.service.getOwnerSnapshot(route('profile-b'));
+    expect(h.oauthReader).toHaveBeenCalledTimes(2);
+    expect(other.status).toBe('available');
+  });
+  it('does not answer a stored-directory target from the owner cache of another source', async () => {
+    const h = harness();
+    // The ambient session caches a reading for this owner.
+    const ambient = await h.service.getOwnerSnapshot(claudeTarget());
+    expect(ambient.status).toBe('available');
+    h.oauthReader.mockResolvedValue({ status: 'service-unavailable', statusReason: 'account-unverified', sourceInvalid: true, windowSetEstablished: false, windows: [] });
+    const target: PlanOwnerTarget = {
+      providerId: 'anthropic', ownerRef: CLAUDE_A,
+      claudeUsageDir: { kind: 'stored-profile-usage', profileId: 'fixture', canonicalConfigDir: '/fixture/stored' },
+    };
+    const stored = await h.service.getOwnerSnapshot(target);
+    expect(h.oauthReader).toHaveBeenCalledTimes(1);
+    expect(stored.status).not.toBe('available');
+  });
+  it('serves a proven stored-directory reading from its own source cache until refresh', async () => {
+    const h = harness();
+    h.oauthReader.mockResolvedValue({ ...mapClaudePlanUsage(claudeUsage(17), T0, h.logger as Partial<Logger> as Logger), source: 'provider-api' });
+    const target: PlanOwnerTarget = {
+      providerId: 'anthropic', ownerRef: CLAUDE_A,
+      claudeUsageDir: { kind: 'stored-profile-usage', profileId: 'fixture', canonicalConfigDir: '/fixture/stored' },
+    };
+    expect((await h.service.getOwnerSnapshot(target)).status).toBe('available');
+    expect((await h.service.getOwnerSnapshot(target)).status).toBe('available');
+    expect(h.oauthReader).toHaveBeenCalledTimes(1);
+    await h.service.getOwnerSnapshot(target, { refresh: true });
+    expect(h.oauthReader).toHaveBeenCalledTimes(2);
+  });
+  it('does not serve a proven stored-directory reading after a failed refresh', async () => {
+    const h = harness();
+    h.oauthReader.mockResolvedValueOnce({ ...mapClaudePlanUsage(claudeUsage(17), T0, h.logger as Partial<Logger> as Logger), source: 'provider-api' });
+    const target: PlanOwnerTarget = {
+      providerId: 'anthropic', ownerRef: CLAUDE_A,
+      claudeUsageDir: { kind: 'stored-profile-usage', profileId: 'fixture', canonicalConfigDir: '/fixture/stored' },
+    };
+    expect((await h.service.getOwnerSnapshot(target)).status).toBe('available');
+    h.oauthReader.mockRejectedValueOnce(new Error('network'));
+    // The failed refresh shows the old reading as stale; a later snapshot never reports it as fresh.
+    expect((await h.service.getOwnerSnapshot(target, { refresh: true })).status).toBe('stale');
+    expect((await h.service.getOwnerSnapshot(target)).status).not.toBe('available');
+    expect(h.oauthReader).toHaveBeenCalledTimes(2);
+  });
   it('honors a rate limit cooldown even on refresh', async () => {
     const h = harness();
     h.readPlanUsage.mockResolvedValue(null);

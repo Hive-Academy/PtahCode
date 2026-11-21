@@ -545,6 +545,49 @@ describe('AdvancedSettingsGroupComponent', () => {
     });
   });
 
+  it("'section' with its own glass card has no stacked block padding; without the card it keeps the padding", async () => {
+    const FLUSH = '[[data-glass=on]_&]:py-0';
+    fixture = TestBed.createComponent(AdvancedSettingsGroupComponent);
+    fixture.componentRef.setInput('groupId', 'context-budgets');
+    fixture.componentRef.setInput('headingStyle', 'section');
+    fixture.detectChanges();
+    await settle();
+    const formSection = (): Element | null => host().querySelector('ptah-form-section');
+    const inner = (): Element | null => host().querySelector('ptah-form-section > section');
+    expect(host().querySelector('section')?.getAttribute('data-glass-surface')).toBe('content');
+    expect(inner()?.classList.contains(FLUSH)).toBe(true);
+    fixture.componentRef.setInput('contentSurface', false);
+    fixture.detectChanges();
+    expect(inner()?.classList.contains(FLUSH)).toBe(false);
+    // The host classes of the form section stay.
+    expect(formSection()?.classList.contains('block')).toBe(true);
+  });
+
+  describe('rowLayout', () => {
+    const controls = (): HTMLElement[] =>
+      Array.from(host().querySelectorAll<HTMLElement>('ptah-setting-row [data-ptah-setting-control]'));
+    const rows = (): HTMLElement[] => Array.from(host().querySelectorAll<HTMLElement>('ptah-setting-row'));
+    const TRIM = ['first:[&>div]:pt-0', 'last:[&>div]:pb-0'];
+
+    it("default renders today's rows: no right-edge alignment and no trimmed padding", async () => {
+      await create('codex-agents');
+      expect(rows().length).toBeGreaterThan(0);
+      expect(controls().some((control) => control.classList.contains('justify-end'))).toBe(false);
+      expect(rows().some((row) => TRIM.some((name) => row.classList.contains(name)))).toBe(false);
+    });
+
+    it("'aligned' puts each switch at the right edge and trims the row padding", async () => {
+      fixture = TestBed.createComponent(AdvancedSettingsGroupComponent);
+      fixture.componentRef.setInput('groupId', 'codex-agents');
+      fixture.componentRef.setInput('rowLayout', 'aligned');
+      fixture.detectChanges();
+      await settle();
+      expect(rows().length).toBeGreaterThan(0);
+      expect(controls().every((control) => control.classList.contains('justify-end'))).toBe(true);
+      expect(rows().every((row) => TRIM.every((name) => row.classList.contains(name)))).toBe(true);
+    });
+  });
+
   describe('toggles', () => {
     it('writes a boolean and shows the read-back value', async () => {
       await create('codex-agents');

@@ -276,6 +276,19 @@ export interface InteractiveRunResult {
   sdkQuery: Query;
 }
 
+/**
+ * Keep MCP server configs on the CLI command line unless the caller chose.
+ *
+ * The Claude Agent SDK warns that its default will move MCP configs from
+ * argv to stdin (`'initialize'`), which a Claude Code older than the one it
+ * bundles cannot read. Ptah launches the user's installed CLI, which can be
+ * older, so an SDK bump must not change delivery under it. Switch to
+ * `'initialize'` once the launched CLI version is known to support it.
+ */
+export function keepMcpServersOnArgv(options: SdkQueryOptions): void {
+  options.mcpServersDelivery ??= 'argv';
+}
+
 function logProvenanceTapFailure(logger: Logger, error: unknown): void {
   const message = error instanceof Error ? error.message : String(error);
   logger.warn('[model-dispatch] provenance tap failed', { error: message });
@@ -344,6 +357,7 @@ export class SdkQueryRunner {
    * spawner skips that wiring entirely.
    */
   private useOffThreadSpawner(options: SdkQueryOptions): void {
+    keepMcpServersOnArgv(options);
     if (options.spawnClaudeCodeProcess) return;
     const onStderr = options.stderr;
     options.spawnClaudeCodeProcess = (spawnOptions) =>

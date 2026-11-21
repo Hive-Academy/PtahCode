@@ -34,7 +34,7 @@
  */
 import { inject, injectable } from 'tsyringe';
 import { blankToUndefined } from '@ptah-extension/shared';
-import { TOKENS } from '@ptah-extension/vscode-core';
+import { RepeatedWarningLimiter, TOKENS } from '@ptah-extension/vscode-core';
 import type { CuratorLogger, SqliteDbProvider } from './sqlite-reader-deps.types';
 import {
   PERSISTENCE_TOKENS,
@@ -285,6 +285,13 @@ export class ObservationQueueStore {
   /** Rows captured but not yet written. Drained by {@link flush}. */
   private pending: PendingObservation[] = [];
   private retryPending = false;
+  /**
+   * A failing flush is retried every 250 ms; without a limit that is about four
+   * warnings a second for as long as persistence stays down.
+   */
+  private readonly flushWarnings = new RepeatedWarningLimiter();
+  /** Failed flush attempts since the last successful one. */
+  private failedFlushes = 0;
 
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -420,12 +427,13 @@ export class ObservationQueueStore {
     try {
       db = this.connection.db;
     } catch (error: unknown) {
-      this.logger.warn(
+      // degradation-audit: reported - warnFlushFailure logs at warn, at most
+      // once a minute with a repeat count; the batch is put back in `pending`
+      // and a retry flush is scheduled.
+      this.warnFlushFailure(
         '[memory-curator] observation-queue flush skipped — persistence unavailable',
-        {
-          retained: batch.length,
-          error: error instanceof Error ? error.message : String(error),
-        },
+        batch.length,
+        error,
       );
       this.pending.unshift(...batch);
       this.retryPending = true;
@@ -441,10 +449,14 @@ export class ObservationQueueStore {
       }) as (...args: unknown[]) => unknown);
       txn();
     } catch (error: unknown) {
-      this.logger.warn('[memory-curator] observation-queue flush failed', {
-        retained: batch.length,
-        error: error instanceof Error ? error.message : String(error),
-      });
+      // degradation-audit: reported - warnFlushFailure logs at warn, at most
+      // once a minute with a repeat count; the batch is put back in `pending`
+      // and a retry flush is scheduled.
+      this.warnFlushFailure(
+        '[memory-curator] observation-queue flush failed',
+        batch.length,
+        error,
+      );
       this.pending.unshift(...batch);
       this.retryPending = true;
       this.scheduleRemainingFlush(250);
@@ -458,9 +470,28 @@ export class ObservationQueueStore {
     );
 
     for (const entry of batch) this.emitCapture(entry.capture);
+    if (this.failedFlushes > 0) {
+      this.logger.info('[memory-curator] observation-queue flush recovered', {
+        failedAttempts: this.failedFlushes,
+      });
+      this.failedFlushes = 0;
+    }
     this.retryPending = false;
     this.scheduleRemainingFlush();
     return true;
+  }
+
+  /** Warn about a failed flush without flooding the log while retries repeat. */
+  private warnFlushFailure(message: string, retained: number, error: unknown): void {
+    this.failedFlushes += 1;
+    const suppressed = this.flushWarnings.admit(message);
+    if (suppressed === null) return;
+    this.logger.warn(message, {
+      retained,
+      failedAttempts: this.failedFlushes,
+      ...(suppressed > 0 && { suppressedSinceLastWarning: suppressed }),
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 
   /** Flush every bounded transaction before a synchronous read or rekey. */

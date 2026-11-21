@@ -64,9 +64,11 @@ import {
 } from '@ptah-extension/vscode-core';
 import type { AnthropicProvider } from '@ptah-extension/shared';
 import { codexNativeRuntimeRequired } from './codex-native-runtime-refusal';
+import { providerSessionNativeRuntimeRequired } from './provider-session-runtime-refusal';
 import {
   isCustomProviderId,
   isOpenCodeProviderId,
+  isProviderSessionProviderId,
 } from '@ptah-extension/shared';
 import {
   createOpenCodeProxyForKey,
@@ -228,6 +230,9 @@ export class ProviderProxyPool {
     if (providerId === 'openai-codex') {
       throw codexNativeRuntimeRequired();
     }
+    if (isProviderSessionProviderId(providerId)) {
+      throw providerSessionNativeRuntimeRequired(providerId);
+    }
     if (provider.requiresProxy !== true) {
       // Not an error and not "unsupported": this provider speaks the Anthropic
       // protocol directly (built-in passthroughs AND custom `lane: 'anthropic'`
@@ -365,6 +370,8 @@ export class ProviderProxyPool {
       const started = await proxy.start();
       baseUrl = started.url;
     } catch (error: unknown) {
+      // degradation-audit: reported - logged at warn here; the caller gets
+      // no pooled proxy (undefined) and the workspace has no isolated route.
       this.logger.warn(
         '[ProviderProxyPool] Failed to start isolated proxy — no pooled proxy for this provider.',
         {
@@ -594,6 +601,8 @@ export class ProviderProxyPool {
       });
       return { proxy, authToken: CUSTOM_PROXY_TOKEN_PLACEHOLDER };
     } catch (error: unknown) {
+      // degradation-audit: reported - logged at warn here; the caller gets
+      // undefined and the workspace falls back to global auth.
       this.logger.warn(
         '[ProviderProxyPool] Cannot build an isolated translation proxy for custom provider — declining (workspace falls back to global auth).',
         {

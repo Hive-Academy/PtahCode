@@ -13,6 +13,7 @@ import {
   certifiedNamedEnv,
   claudePersonalLoginCheck,
   claudePersonalLoginPassed,
+  claudeSubscriptionFamily,
   claudeVersionIdentity,
   compareClaudeVersions,
   claudeSettingsOverride,
@@ -338,6 +339,11 @@ describe('claudePersonalLoginCheck', () => {
     ['max tier', { subscriptionType: 'max_20x' }],
     ['display max tier', { subscriptionType: 'Claude Max 20x' }],
     ['lower-case display', { subscriptionType: 'claude max' }],
+    // A fresh `claude auth login` records no plan until a full session runs.
+    ['no subscription', { apiProvider: 'firstParty' }],
+    ['an undefined subscription', { ...bundled, subscriptionType: undefined }],
+    ['a JSON null subscription', JSON.parse('{"apiProvider":"firstParty","subscriptionType":null}') as ClaudeRunningLoginInfo],
+    ['an empty object', {}],
   ])('passes %s', (_label, info) => {
     expect(passes(info)).toBe(true);
   });
@@ -368,8 +374,13 @@ describe('claudePersonalLoginCheck', () => {
     ['a qualified pro', { ...bundled, subscriptionType: 'pro team' }],
     ['enterprise_max', { ...bundled, subscriptionType: 'enterprise_max' }],
     ['empty subscription', { ...bundled, subscriptionType: '' }],
-    ['no subscription', { apiProvider: 'firstParty' }],
-    ['an empty object', {}],
+    ['raw enterprise', { ...bundled, subscriptionType: 'enterprise' }],
+    ['raw api', { ...bundled, subscriptionType: 'api' }],
+    ['an unknown plan word', { ...bundled, subscriptionType: 'other' }],
+    ['an absent plan with an env OAuth token', { tokenSource: 'CLAUDE_CODE_OAUTH_TOKEN' }],
+    ['an absent plan with an env API key', { apiKeySource: 'ANTHROPIC_API_KEY' }],
+    ['an absent plan on bedrock', { apiProvider: 'bedrock' }],
+    ['a non-string subscription', JSON.parse('{"subscriptionType":20}') as ClaudeRunningLoginInfo],
   ])('refuses %s', (_label, info) => {
     expect(passes(info)).toBe(false);
   });
@@ -394,10 +405,19 @@ describe('claudePersonalLoginCheck', () => {
     ['enterprise_max', 'enterprise'],
     ['someone@example.test', 'other'],
     [undefined, 'absent'],
+    ['', 'other'],
   ])('classifies subscription %s as the fixed word %s', (word, cls) => {
     expect(claudePersonalLoginCheck({ subscriptionType: word }).subscription).toBe(
       cls,
     );
+  });
+
+  it('reports an absent plan as its own class and accepts it', () => {
+    expect(claudePersonalLoginCheck({ apiProvider: 'firstParty' })).toMatchObject({
+      subscription: 'absent',
+      personalSubscription: true,
+    });
+    expect(claudeSubscriptionFamily(null)).toBe('absent');
   });
 
   it('reports fixed booleans per check, never a value', () => {

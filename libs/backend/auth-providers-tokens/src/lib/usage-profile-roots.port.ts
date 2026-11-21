@@ -1,4 +1,5 @@
-/** Read-only roots for active named Claude profiles. No account data crosses this port. */
+/** Read-only roots and opaque identity references for named Claude profiles. */
 export interface ClaudeUsageProfileRoots {
   listActiveRoots(): Promise<readonly { profileId: string; canonicalConfigDir: string }[]>;
+  listSignedInAccounts(): Promise<readonly { profileId: string; canonicalConfigDir: string; identityReference: string }[]>;
 }

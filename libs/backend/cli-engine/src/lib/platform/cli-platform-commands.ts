@@ -289,8 +289,17 @@ export class CliPlatformCommands
 
   /** Best-effort push — a failing sink must never break the login. */
   private push(type: string, payload: unknown): void {
-    void this.pushSink?.broadcastMessage(type, payload).catch(() => {
-      /* a broken push sink must never abort an in-flight login */
+    // degradation-audit: reported - a broken push sink must never abort an
+    // in-flight login; the failure is written to stderr under --verbose, the
+    // same channel as this class's breadcrumbs (one line per output line).
+    void this.pushSink?.broadcastMessage(type, payload).catch((error: unknown) => {
+      if (this.verbose) {
+        process.stderr.write(
+          `[ptah] CliPlatformCommands.push failed (${type}): ${
+            error instanceof Error ? error.name : typeof error
+          }\n`,
+        );
+      }
     });
   }
 

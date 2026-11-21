@@ -61,11 +61,15 @@ export class HandoffWatchdogRecovery {
   constructor(private readonly deps: HandoffWatchdogRecoveryDeps) {}
 
   /** Session-end hook. Never throws; every outcome is logged. */
-  onSessionEnd(payload: Pick<SessionEndPayload, 'sessionId' | 'cause'>): void {
+  onSessionEnd(
+    payload: Pick<SessionEndPayload, 'sessionId' | 'cause' | 'startedAt'>,
+  ): void {
     if (payload.cause !== 'no-activity-timeout') return;
     const sessionId = payload.sessionId.trim();
     if (!sessionId) return;
-    const endedAt = (this.deps.now ?? Date.now)();
+    // The cancellation cutoff is the start of the watchdog teardown, not this
+    // hook: a tab close during the teardown's interrupt must cancel the retry.
+    const endedAt = payload.startedAt ?? (this.deps.now ?? Date.now)();
     const schedule =
       this.deps.schedule ??
       ((run: () => void, ms: number) => {

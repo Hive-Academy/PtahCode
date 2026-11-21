@@ -37,6 +37,20 @@ export class LanesTableDeleteFocus {
     queueMicrotask(() => this.focusTarget(targets));
   }
 
+  /**
+   * The confirmation went away without Cancel or Confirm (its detail closed, or another detail opened). Focus
+   * stays on the control the user activated; it is restored only when the dismissal took it with it.
+   */
+  dismiss(): void {
+    const targets = this.targets;
+    this.targets = [];
+    queueMicrotask(() => {
+      const active = document.activeElement;
+      if (active && active !== document.body && active.isConnected) return;
+      this.focusTarget(targets);
+    });
+  }
+
   onRowsChanged(rows: readonly FocusRow[]): void {
     const restoration = this.restoration;
     if (!restoration || rows === restoration.rows) return;

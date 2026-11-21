@@ -727,7 +727,14 @@ export class TaskDoctorService {
     try {
       const entries = await this.fs.readDirectory(folderPath);
       return entries.filter((e) => e.type === FileType.File).map((e) => e.name);
-    } catch {
+    } catch (error: unknown) {
+      // degradation-audit: reported - logged at warn here; an unreadable
+      // folder lists no documents, so callers see none in it.
+      this.logger.warn('[task-specs] doctor could not list a task folder', {
+        folderName: path.basename(folderPath),
+        code: (error as NodeJS.ErrnoException | null)?.code,
+        error: error instanceof Error ? error.message : String(error),
+      });
       return [];
     }
   }
@@ -851,7 +858,19 @@ export class TaskDoctorService {
     let raw: string;
     try {
       raw = await this.fs.readFile(path.join(folderPath, CONTEXT_FILE));
-    } catch {
+    } catch (error: unknown) {
+      // degradation-audit: optional-capability - a folder without context.md
+      // declares no metadata ({}); other read failures are logged at warn and
+      // also return {}.
+      // Node uses ENOENT; vscode.workspace.fs uses FileNotFound.
+      const code = (error as NodeJS.ErrnoException | null)?.code;
+      if (code !== 'ENOENT' && code !== 'FileNotFound') {
+        this.logger.warn('[task-specs] doctor could not read context.md', {
+          folderName: path.basename(folderPath),
+          code,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
       return {};
     }
 

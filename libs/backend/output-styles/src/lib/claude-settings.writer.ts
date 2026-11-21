@@ -346,6 +346,8 @@ export class ClaudeSettingsWriter {
     try {
       return this.workspace.getWorkspaceRoot();
     } catch (error: unknown) {
+      // degradation-audit: reported - logged at warn here; undefined means "no
+      // workspace open", so a project-scoped write returns NO_WORKSPACE.
       this.logger.warn('[output-styles] workspace root lookup failed', {
         error: errorMessage(error),
       });
@@ -368,6 +370,8 @@ export class ClaudeSettingsWriter {
       await this.fs.writeFile(backupPath, raw);
       return true;
     } catch (error: unknown) {
+      // degradation-audit: reported - logged at warn here; false means no
+      // backup was taken, and the real settings write still runs and reports.
       this.logger.warn('[output-styles] settings backup could not be written', {
         error: errorMessage(error),
       });

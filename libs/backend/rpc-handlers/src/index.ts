@@ -170,11 +170,13 @@ export {
 } from './lib/handlers/agent-rpc.schema';
 export {
   createCodexChatHostPorts,
-  createCodexRuntimeAdmission,
   type CodexChatHostPorts,
   type CodexChatHostPortsDeps,
-  type CodexRuntimeAdmissionDeps,
 } from './lib/chat/codex-host/codex-chat-host-ports';
+export {
+  createChatRuntimeAdmission,
+  type ChatRuntimeAdmissionDeps,
+} from './lib/chat/session/chat-runtime-admission';
 export { resolveSavedCodexPermissionLevel } from './lib/chat/codex-host/codex-saved-permission-level';
 export {
   createCodexChatUserQuestions,

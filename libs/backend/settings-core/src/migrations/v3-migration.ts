@@ -61,6 +61,9 @@ export async function runV3Migration(
   try {
     data = JSON.parse(raw) as Record<string, unknown>;
   } catch {
+    // degradation-audit: reported - a corrupt settings.json skips this
+    // migration; PtahFileSettingsManager.loadSync logs the same unreadable
+    // file at warn when it loads it and starts with empty settings.
     return;
   }
   const toMigrate: Array<{ key: string; value: string }> = [];

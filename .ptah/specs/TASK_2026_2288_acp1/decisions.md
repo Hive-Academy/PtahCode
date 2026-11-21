@@ -1,0 +1,18 @@
+# Decisions — TASK_2026_2288_acp1
+
+| # | Decision | Evidence / source |
+|---|---|---|
+| D1 | Type FEATURE (program), depth Full. Research phase done (research-report.md, 10-agent workflow, 26 verified corrections applied). | User request; orchestration pre-flight rules. |
+| D2 | Gate 0.1: CLI lanes disabled — no ptah_* MCP tools (ptah_agent_spawn/list) in this session. Executors are built-in subagents. | Tool list of this session. |
+| D3 | Approval mode for document gates: the user's explicit "go in full automode" instruction (2026-11-20) pre-approves Gates 1/2; each gate still gets an independent subagent review (same-side; reason: no lanes spawnable). Removals still go to the user. | context.md user follow-up; checkpoints rule "current explicit instruction wins". |
+| D4 | Architecture follows Ptah's Codex pattern: a shared runtime lib (like `libs/backend/codex-runtime`) consumed by the lane adapter in `cli-agent-runtime` and by a chat host in `rpc-handlers` (like `rpc-handlers/src/lib/chat/codex-host`). No new contracts lib is required for a dependency cycle: `rpc-handlers` already imports `cli-agent-runtime`, and `cli-agent-runtime` imports `agent-sdk`. | grep of imports 2026-11-20; user: "inspired by our code that we already have". |
+| D5 | Transports: ACP for Antigravity (`agy acp`) and Grok (`grok agent stdio`); native `opencode serve` HTTP+SSE for OpenCode. | research-report.md §1, §5.5. |
+| D6 | Each provider must work both as a main-agent runtime and as a CLI lane, mirroring Claude Agent SDK and Codex App Server. | User follow-up 2026-11-20. |
+| D7 | Port logic from t3code (MIT) by hand; do not vendor Effect code; add attribution comments in ported files. | research-report.md §7 Licensing. |
+| D8 | Keep ACP v1 client; no v2 codec. Tolerate `protocolVersion` 1 or 2 when the reply has the v1 shape. | preflight.md PF-4, PF-7: agy and Grok answer 1; v2 SDK is experimental-only. |
+| D9 | Antigravity Ptah MCP: try an `http` entry in `session/new.mcpServers` first (agy 1.5.13 accepts it without error, preflight PF-4b) and verify in P2 with a live prompt that Ptah tools are listed/callable. If not, fall back to a stdio→HTTP bridge (Ptah has none today; t3code `AcpMcpStdioBridge.ts` is the reference). | preflight.md PF-4, PF-4b. |
+| D10 | Antigravity uses the user's shared profile (default app-data-dir); no GEMINI_HOME isolation. | PF-4 shows the shared profile is signed in; isolation would hide sign-in and harness-sync MCP servers (research §7). |
+| D4a | A `provider-session-contracts` lib is added so the ACP and OpenCode runtime families, their lane handles and the chat adapter share one contract — not to break a cycle (D4 holds: no cycle exists). | implementation-plan.md decision A12; plan-review M-2. |
+| D11 | Phases re-sequenced so Antigravity (installed, signed in) is the first provider proven live; Grok verified on fixtures + fake agent and marked `live-unverified`; OpenCode P11a-c blocked on PF-6. | Revision 1 of implementation-plan.md; preflight.md. |
+| D12 | Gate 2 passed after round 2: R2-1, R2-2 and M-1..M-5 resolved by the orchestrator in "Revision 2 responses" (all are additive scope/file-list fixes taken verbatim from the reviewer's fix text, no design change); per D3 no further review round. | plan-review-round-2.md; implementation-plan.md. |
+| D13 | Delivery: each phase is its own branch and PR against `main`, stacked (P(n+1) branches from P(n)); a PR body names the PR it depends on. The program task (this folder, branch `docs/acp-unified-adapters`) ships research + plan as its own docs PR. | CLAUDE.md "one PR per task, against main"; the agent cannot merge. |

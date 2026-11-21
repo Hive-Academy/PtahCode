@@ -83,7 +83,7 @@ import { MarkdownBlockComponent } from '@ptah-extension/markdown';
         <div ptahMotionStage [motionIndex]="showPreview() ? 1 : 0">
         @if (showPreview()) {
           <div
-            class="ptah-motion-panel max-h-64 overflow-y-auto border border-base-300 rounded p-3 bg-base-200/50 text-base-content"
+            class="ptah-motion-panel max-h-[min(16rem,40dvh)] overflow-y-auto border border-base-300 rounded p-3 bg-base-200/50 text-base-content"
             animate.enter="ptah-motion-enter" animate.leave="ptah-motion-leave"
             data-test="body-preview"
           >
@@ -102,7 +102,7 @@ import { MarkdownBlockComponent } from '@ptah-extension/markdown';
             ptahTextarea tone="mono"
             id="output-style-body"
             rows="5"
-            class="w-full text-xs leading-relaxed text-base-content"
+            class="w-full min-h-32 max-h-[50dvh] resize-y [field-sizing:content] text-xs leading-relaxed text-base-content"
             placeholder="Write in short sentences. Prefer plain words over jargon."
             [value]="body()"
             (input)="onBodyInput($event)"

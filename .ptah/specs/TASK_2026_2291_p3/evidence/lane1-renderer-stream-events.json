@@ -1,0 +1,122 @@
+{
+  "ok": true,
+  "value": {
+    "streamEvents": [
+      {
+        "id": "d31faab6-1f50-4dc0-9d12-e36941ccc1c9:1:2:start",
+        "timestamp": 1795248657863,
+        "messageId": "9023dbf0-cedb-47d2-b0ff-5d64b2c44582:d31faab6-1f50-4dc0-9d12-e36941ccc1c9:1:assistant",
+        "source": "stream",
+        "sessionId": "9023dbf0-cedb-47d2-b0ff-5d64b2c44582",
+        "eventType": "message_start",
+        "role": "assistant"
+      },
+      {
+        "id": "d31faab6-1f50-4dc0-9d12-e36941ccc1c9:1:2:tool-start",
+        "timestamp": 1795248657863,
+        "messageId": "9023dbf0-cedb-47d2-b0ff-5d64b2c44582:d31faab6-1f50-4dc0-9d12-e36941ccc1c9:1:assistant",
+        "source": "stream",
+        "sessionId": "9023dbf0-cedb-47d2-b0ff-5d64b2c44582",
+        "eventType": "tool_start",
+        "toolCallId": "call_15880699925591395069",
+        "toolName": "Run mcp_ptah_lane_ptah_search_files",
+        "toolInput": {
+          "pattern": "**/README.md",
+          "toolSummary": "Search for README.md"
+        },
+        "isTaskTool": false
+      },
+      {
+        "id": "d31faab6-1f50-4dc0-9d12-e36941ccc1c9:1:4:tool-result",
+        "timestamp": 1795248659154,
+        "messageId": "9023dbf0-cedb-47d2-b0ff-5d64b2c44582:d31faab6-1f50-4dc0-9d12-e36941ccc1c9:1:assistant",
+        "source": "stream",
+        "sessionId": "9023dbf0-cedb-47d2-b0ff-5d64b2c44582",
+        "eventType": "tool_result",
+        "toolCallId": "call_15880699925591395069",
+        "output": "",
+        "isError": true
+      },
+      {
+        "id": "d31faab6-1f50-4dc0-9d12-e36941ccc1c9:1:5:complete",
+        "timestamp": 1795248659162,
+        "messageId": "9023dbf0-cedb-47d2-b0ff-5d64b2c44582:d31faab6-1f50-4dc0-9d12-e36941ccc1c9:1:assistant",
+        "source": "stream",
+        "sessionId": "9023dbf0-cedb-47d2-b0ff-5d64b2c44582",
+        "eventType": "message_complete",
+        "tokenUsage": {
+          "input": 23054,
+          "output": 87
+        },
+        "model": "gemini-4-hydrogen-low"
+      }
+    ],
+    "segments": [
+      {
+        "type": "tool-call",
+        "content": "",
+        "toolCallId": "call_15880699925591395069",
+        "toolName": "Run mcp_ptah_lane_ptah_search_files",
+        "toolArgs": "{\"pattern\":\"**/README.md\",\"toolSummary\":\"Search for README.md\"}",
+        "toolInput": {
+          "pattern": "**/README.md",
+          "toolSummary": "Search for README.md"
+        }
+      },
+      {
+        "type": "info",
+        "content": "Refused permission for Run mcp_ptah_lane_ptah_search_files: auto-approve is off"
+      },
+      {
+        "type": "tool-result-error",
+        "content": "",
+        "toolCallId": "call_15880699925591395069",
+        "toolName": "Run mcp_ptah_lane_ptah_search_files"
+      },
+      {
+        "type": "info",
+        "content": "Antigravity turn usage.",
+        "usage": {
+          "inputTokens": 23054,
+          "outputTokens": 87,
+          "cacheReadTokens": 0,
+          "cacheWriteTokens": 0,
+          "contextTokens": 23141,
+          "model": "gemini-4-hydrogen-low"
+        },
+        "turnTelemetry": {
+          "status": "reported",
+          "usage": {
+            "turnId": "9023dbf0-cedb-47d2-b0ff-5d64b2c44582:d31faab6-1f50-4dc0-9d12-e36941ccc1c9:1",
+            "modelId": "gemini-4-hydrogen-low",
+            "scope": "turn",
+            "source": "sdk",
+            "inputTokens": 23054,
+            "outputTokens": 87,
+            "cacheReadTokens": {
+              "status": "reported",
+              "value": 0,
+              "source": "sdk"
+            },
+            "cacheWriteTokens": {
+              "status": "reported",
+              "value": 0,
+              "source": "sdk"
+            },
+            "requestContextTokens": {
+              "status": "reported",
+              "value": 23141,
+              "source": "sdk"
+            },
+            "providerCostUsd": {
+              "status": "unavailable",
+              "reason": "not-reported",
+              "source": "sdk"
+            },
+            "cacheSemantics": "verified-subsets"
+          }
+        }
+      }
+    ]
+  }
+}

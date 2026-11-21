@@ -201,7 +201,7 @@ export interface AgentSessionStartConfig extends AISessionConfig {
    */
   consumer?: Extract<RuntimeConsumer, 'chat' | 'gateway'>;
   /** Runtime selected by chat preparation; admission must agree when present. */
-  runtime?: 'claude-sdk' | 'codex-app-server';
+  runtime?: 'claude-sdk' | 'codex-app-server' | 'provider-session';
   /** Requested route only; admission supplies the binding in providerProfile. */
   accountSelection?: ProviderAccountSelection;
   tabId: string;

@@ -690,6 +690,7 @@ export class PtahAPIBuilder {
       dependencyGraph: this.dependencyGraph,
       workspaceProvider: sessionAwareWorkspaceProvider,
       fileSystemProvider: this.fileSystemProvider,
+      logger: this.logger,
     };
 
     const astDeps = {

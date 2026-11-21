@@ -212,17 +212,12 @@ for (const host of HOSTS) {
       // TASK_2026_2256_159f: the wider content column no longer collapses the lane table at the
       // default viewport. These steps use the collapsed detail controls, as the More actions test does.
       await page.setViewportSize({ width: 1024, height: 768 });
-      // V36-7: Edit sits in the row's "More actions" popover; focus returns to that trigger.
+      // Phase 3 (decision 23): Edit sits in the expanded detail footer; focus returns to it.
       await expandMatrixDetail(page, GLM_ID);
       const more = page.locator(
-        `[data-testid="cli-matrix-row-${GLM_ID}"] ptah-table-row-actions button[aria-haspopup="menu"]`,
+        `#lane-detail-${GLM_ID} [data-testid="cli-matrix-edit-${GLM_ID}"]`,
       );
       await more.click();
-      await page
-        .locator(
-          `[data-testid="cli-matrix-row-${GLM_ID}"] [role="menuitem"]:text-is("Edit")`,
-        )
-        .click();
       const dialog = dialogOf(page, 'add-cli-instance-modal');
       await expect(dialog).toHaveAttribute('open', '');
       await expect(
@@ -395,9 +390,10 @@ for (const host of HOSTS) {
       await expect(menu).toBeVisible();
       const panel = await menu.boundingBox();
       if (!panel) throw new Error('No More actions panel box');
-      // The Status-cell menu owns all six instance actions at every table tier.
+      // Phase 3 (decision 23): the kebab holds the quick actions only (Test; Sign in when a key is needed).
       const items = menu.locator('button:visible');
-      await expect(items).toHaveCount(6);
+      await expect(items).toHaveCount(1);
+      await expect(menu.getByRole('menuitem', { name: 'Test' })).toBeVisible();
       for (const item of await items.all()) {
         const box = await item.boundingBox();
         if (!box) throw new Error('No More actions item box');
@@ -413,29 +409,41 @@ for (const host of HOSTS) {
         expect(box.x + box.width).toBeLessThanOrEqual(1024);
         expect(box.y + box.height).toBeLessThanOrEqual(768);
       }
-      // A column: Delete sits under Edit, not beside it.
+      await page.keyboard.press('Escape');
+      // Edit tiers, Edit and Delete are in the detail footer, Delete after Edit.
+      const footer = page.locator(
+        `#lane-detail-${GLM_ID} [data-testid="lane-detail-footer"]`,
+      );
+      await expect(
+        footer.locator(`[data-testid="cli-matrix-tiers-${GLM_ID}"]`),
+      ).toBeVisible();
       const [edit, remove] = [
-        await menu.getByRole('menuitem', { name: 'Edit' }).boundingBox(),
-        await menu.getByRole('menuitem', { name: 'Delete' }).boundingBox(),
+        await footer
+          .locator(`[data-testid="cli-matrix-edit-${GLM_ID}"]`)
+          .boundingBox(),
+        await footer
+          .locator(`[data-testid="cli-matrix-delete-${GLM_ID}"]`)
+          .boundingBox(),
       ];
-      expect(remove?.y ?? 0).toBeGreaterThan(edit?.y ?? 0);
+      expect(edit).not.toBeNull();
+      expect(remove).not.toBeNull();
     });
 
-    test('order popover: a move writes the whole order, focus stays on the moved row, Esc returns focus, Undo restores', async ({
+    test('Reorder mode: a move writes the whole order, focus stays on the moved row, Done returns focus, Undo restores', async ({
       page,
     }) => {
       const bar = page.locator('[data-testid="orchestration-policy-bar"]');
-      const trigger = bar.locator('[data-testid="policy-order-edit"]');
+      const reorder = page.getByTestId('lanes-order-edit');
       const chips = bar.locator('[data-testid^="policy-order-chip-"]');
       await expect(chips.first()).toHaveText('1. Codex');
-      await trigger.click();
-      const popover = page.locator('[data-testid="policy-order-popover"]');
-      await expect(popover).toBeVisible();
+      await reorder.click();
+      await expect(reorder).toHaveAttribute('aria-pressed', 'true');
+      await expect(page.getByTestId('lanes-group-cli')).toHaveCount(0);
       await expect(
-        popover.getByRole('button', { name: 'Move Codex up' }),
-      ).toBeDisabled();
+        page.getByRole('button', { name: 'Move Codex up' }),
+      ).toHaveAttribute('aria-disabled', 'true');
       const before = getFixtureState(page).calls.length;
-      const down = popover.getByRole('button', { name: 'Move Codex down' });
+      const down = page.getByRole('button', { name: 'Move Codex down' });
       await down.click();
       await expectCall(page, before, 'agent:setConfig', {
         preferredAgentOrder: [
@@ -447,12 +455,11 @@ for (const host of HOSTS) {
           'grok',
         ],
       });
-      // Focus never leaves the popover: during the save the move buttons are aria-disabled, not disabled (Batch 36 fix),
-      // so Esc closes the popover at any moment.
+      // During the save the move buttons are aria-disabled, not disabled, so focus stays on the moved row's button.
       await expect(down).toBeFocused();
-      await page.keyboard.press('Escape');
-      await expect(popover).toHaveCount(0);
-      await expect(trigger).toBeFocused();
+      await reorder.click();
+      await expect(reorder).toHaveAttribute('aria-pressed', 'false');
+      await expect(reorder).toBeFocused();
       await expect(chips.first()).toHaveText('1. Antigravity');
       await toastUndo(page).click();
       await expectCall(page, before, 'agent:setConfig', {

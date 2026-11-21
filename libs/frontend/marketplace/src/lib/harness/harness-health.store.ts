@@ -233,6 +233,8 @@ export class HarnessHealthStore implements MessageHandler {
       this._error.set(result.error ?? 'Failed to move the blocked paths aside');
       return null;
     } catch (error: unknown) {
+      // degradation-audit: reported - shown to the user through _error; a null
+      // return with _error set means a transport failure (see the doc above).
       this._error.set(
         messageOf(error, 'Failed to move the blocked paths aside'),
       );

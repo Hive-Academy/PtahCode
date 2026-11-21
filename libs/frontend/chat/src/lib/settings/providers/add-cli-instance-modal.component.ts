@@ -9,7 +9,7 @@ import {
   signal,
   untracked,
 } from '@angular/core';
-import { Eye, EyeOff, LucideAngularModule, X } from 'lucide-angular';
+import { Boxes, Eye, EyeOff, LucideAngularModule, X } from 'lucide-angular';
 import {
   ProvidersSettingsStateService,
   type ProvidersConnection,
@@ -102,6 +102,7 @@ type KeyMode = 'required' | 'optional' | 'none' | 'sign-in';
   templateUrl: './add-cli-instance-modal.component.html',
 })
 export class AddCliInstanceModalComponent {
+  protected readonly TitleIcon = Boxes;
   protected readonly CloseIcon = X;
   protected readonly EyeIcon = Eye;
   protected readonly EyeOffIcon = EyeOff;

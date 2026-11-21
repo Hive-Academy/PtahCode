@@ -29,6 +29,22 @@ export interface NativeSessionHistoryPort {
   ): Promise<CodexCarryOverTail>;
 }
 
+/**
+ * A provider-session history snapshot, already projected to the events and
+ * stats the renderer replays (the host projects native replay; A6).
+ */
+export type ProviderSessionHistory = Pick<SessionHistoryReadResult, 'events' | 'stats'>;
+
+/** Host port reading a provider session's native replay by chat session id. */
+export interface ProviderSessionHistoryPort {
+  read(sessionId: string, signal?: AbortSignal): Promise<ProviderSessionHistory>;
+}
+
+/** Caller options of a full history read; `signal` reaches native ports that take one. */
+export type SessionHistoryRouteReadOptions = Parameters<
+  SessionHistoryReaderService['readSessionHistory']
+>[2] & { readonly signal?: AbortSignal };
+
 export interface CarryOverRouteOptions extends CarryOverReadOptions {
   /**
    * Bound of the native read. A caller that passes none is refused for a
@@ -61,6 +77,19 @@ export class SessionHistoryRouteError extends Error {
   }
 }
 
+/** The legacy reader takes no signal; forward its options unchanged otherwise. */
+function legacyReadOptions(
+  options: SessionHistoryRouteReadOptions | undefined,
+): Parameters<SessionHistoryReaderService['readSessionHistory']>[2] {
+  if (!options || !('signal' in options)) return options;
+  const { signal: _signal, ...rest } = options;
+  return rest;
+}
+
+type NativeHistorySession =
+  | { readonly kind: 'codex'; readonly metadata: SessionMetadata }
+  | { readonly kind: 'provider-session' };
+
 export class SessionHistoryRouter {
   constructor(
     private readonly getMetadata: () => Pick<SessionMetadataStore, 'get'>,
@@ -69,17 +98,27 @@ export class SessionHistoryRouter {
       'readSessionHistory' | 'readSessionEvents' | 'readCarryOverTranscript'
     >,
     private readonly getNative: () => NativeSessionHistoryPort | null | undefined,
+    private readonly getProviderSessions: () =>
+      | ProviderSessionHistoryPort
+      | null
+      | undefined = () => undefined,
   ) {}
 
   async readSessionHistory(
     sessionId: string,
     workspacePath: string,
-    options?: Parameters<SessionHistoryReaderService['readSessionHistory']>[2],
+    options?: SessionHistoryRouteReadOptions,
   ): Promise<SessionHistoryReadResult> {
-    const session = await this.nativeSession(sessionId);
+    const session = await this.nativeSession(sessionId, workspacePath);
     if (!session)
-      return this.getLegacy().readSessionHistory(sessionId, workspacePath, options);
-    const snapshot = await this.nativeHistory(session);
+      return this.getLegacy().readSessionHistory(
+        sessionId,
+        workspacePath,
+        legacyReadOptions(options),
+      );
+    if (session.kind === 'provider-session')
+      return this.providerSessionHistory(sessionId, options?.signal);
+    const snapshot = await this.nativeHistory(session.metadata);
     const { events, stats } = this.projectHistory(sessionId, snapshot);
     return { events, stats };
   }
@@ -87,10 +126,13 @@ export class SessionHistoryRouter {
   async readSessionEvents(
     sessionId: string,
     workspacePath: string,
+    options?: { readonly signal?: AbortSignal },
   ): Promise<SessionHistoryReadResult['events']> {
-    const session = await this.nativeSession(sessionId);
+    const session = await this.nativeSession(sessionId, workspacePath);
     if (!session) return this.getLegacy().readSessionEvents(sessionId, workspacePath);
-    const snapshot = await this.nativeHistory(session);
+    if (session.kind === 'provider-session')
+      return (await this.providerSessionHistory(sessionId, options?.signal)).events;
+    const snapshot = await this.nativeHistory(session.metadata);
     return this.projectHistory(sessionId, snapshot).events;
   }
 
@@ -104,11 +146,17 @@ export class SessionHistoryRouter {
     workspacePath: string,
     options: CarryOverRouteOptions,
   ): Promise<CarryOverTranscript> {
-    const session = await this.nativeSession(sessionId);
+    const session = await this.nativeSession(sessionId, workspacePath);
     if (!session)
       return this.getLegacy().readCarryOverTranscript(sessionId, workspacePath, options);
-    if (!options.nativeBound) throw new SessionHistoryRouteError('nativePortUnavailable');
-    const tail = await this.nativeHistoryTail(session, options.nativeBound, options.signal);
+    // Provider sessions have no bounded tail read yet; refuse before any read.
+    if (!options.nativeBound || session.kind === 'provider-session')
+      throw new SessionHistoryRouteError('nativePortUnavailable');
+    const tail = await this.nativeHistoryTail(
+      session.metadata,
+      options.nativeBound,
+      options.signal,
+    );
     try {
       return projectCodexCarryOverTranscript(tail);
     } catch (error: unknown) {
@@ -116,8 +164,27 @@ export class SessionHistoryRouter {
     }
   }
 
-  private async nativeSession(sessionId: string): Promise<SessionMetadata | null> {
+  private async nativeSession(
+    sessionId: string,
+    workspacePath: string,
+  ): Promise<NativeHistorySession | null> {
     const session = await this.getMetadata().get(sessionId);
+    if (session?.providerSessionExecution?.runtime === 'provider-session') {
+      const execution = session.providerSessionExecution;
+      if (execution.sessionId !== sessionId)
+        throw new SessionHistoryRouteError('invalidNativeIdentity');
+      // The stored binding holds the normalized workspace key; the caller's
+      // workspace must be that workspace, as the Codex thread mapping is.
+      let workspaceKey: string;
+      try {
+        workspaceKey = normalizeCodexWorkspaceKey(workspacePath, process.platform);
+      } catch (error: unknown) {
+        throw new SessionHistoryRouteError('invalidNativeIdentity', error);
+      }
+      if (workspaceKey !== execution.workspaceId)
+        throw new SessionHistoryRouteError('invalidNativeIdentity');
+      return { kind: 'provider-session' };
+    }
     if (session?.codexExecution?.runtime !== 'codex-app-server') return null;
     if (session.codexExecution.sessionId !== sessionId)
       throw new SessionHistoryRouteError('invalidNativeIdentity');
@@ -136,7 +203,22 @@ export class SessionHistoryRouter {
       if (workspaceKey !== session.codexExecution.workspaceId)
         throw new SessionHistoryRouteError('invalidNativeIdentity');
     }
-    return session;
+    return { kind: 'codex', metadata: session };
+  }
+
+  private async providerSessionHistory(
+    sessionId: string,
+    signal: AbortSignal | undefined,
+  ): Promise<SessionHistoryReadResult> {
+    const port = this.getProviderSessions();
+    if (!port) throw new SessionHistoryRouteError('nativePortUnavailable');
+    try {
+      const { events, stats } = await port.read(sessionId, signal);
+      return { events, stats };
+    } catch (error: unknown) {
+      // No host error passes through: it could carry paths or payloads.
+      throw new SessionHistoryRouteError('nativeReadFailed', error);
+    }
   }
 
   private async nativeHistory(session: SessionMetadata): Promise<CodexSessionHistory> {

@@ -9,6 +9,7 @@ import type { CodeExecutionMCP } from '@ptah-extension/vscode-lm-tools';
 import type { EnhancedPromptsService } from '@ptah-extension/agent-generation';
 import type { WorkspaceProviderProfileResolver } from '@ptah-extension/auth-providers';
 import {
+  AuthRequiredError,
   legacyClaudeSessionRuntimeIdentity,
   resolveSessionRuntimeIdentity,
   type SessionRuntimeIdentityLookup,
@@ -163,6 +164,14 @@ export class GatewayTurnPreparation {
       hostCapabilities: this.deps.hostCapabilities,
       ...(existingIdentity ? { existingIdentity } : {}),
     });
+    if (decision.runtime === 'provider-session') {
+      // A9: the resolver refuses gateway turns for provider sessions; this
+      // keeps a resolver regression from running one on the Claude path.
+      throw new AuthRequiredError(
+        'Provider sessions cannot serve messaging-gateway turns.',
+        { providerId: decision.seed.providerId },
+      );
+    }
     if (decision.runtime === 'codex-app-server') {
       return {
         sdkContext,

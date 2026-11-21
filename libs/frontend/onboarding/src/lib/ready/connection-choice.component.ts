@@ -8,15 +8,26 @@ import {
   inject,
 } from '@angular/core';
 import { RouterLink } from '@angular/router';
-import { Code, Terminal, LucideAngularModule } from 'lucide-angular';
-import type { ProviderKind } from './provider-readiness.derive';
 import { ConnectionChoiceStore } from './connection-choice.store';
+import { ConnectionOptionHeadingComponent } from './connection-option-heading.component';
+import {
+  CONNECTION_OPTION_LIST,
+  connectionColumns,
+  connectionRole,
+  isConnectionOptionId,
+  type ConnectionRole,
+} from './connection-options';
 import { PtahButtonDirective, PtahStatePanelComponent } from '@ptah-extension/ui';
 
 @Component({
   selector: 'ptah-connection-choice',
   standalone: true,
-  imports: [RouterLink, LucideAngularModule, PtahButtonDirective, PtahStatePanelComponent],
+  imports: [
+    RouterLink,
+    ConnectionOptionHeadingComponent,
+    PtahButtonDirective,
+    PtahStatePanelComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
@@ -26,65 +37,60 @@ import { PtahButtonDirective, PtahStatePanelComponent } from '@ptah-extension/ui
         store.saved().kind === 'loading' || store.phase() === 'saving'
       "
     >
-      <legend id="connection-choice-label" class="font-semibold">
+      <legend id="connection-choice-label" class="sr-only">
         Main connection
       </legend>
-      <p
-        id="connection-choice-help"
-        class="mt-1 text-sm text-base-content-muted"
-      >
-        @if (store.saved().kind === 'other') {
-          Your main connection is {{ store.name() }}. Claude Code and Codex
-          below are for information. Choose one to switch.
-        } @else {
-          Ptah uses this for chat and agents. The other one is optional. You can
-          change this later in Providers.
-        }
-      </p>
+      @if (store.saved().kind === 'other') {
+        <p
+          id="connection-choice-help"
+          class="text-sm text-base-content-muted"
+        >
+          Your main connection is {{ store.name() }}. The options below are for
+          information. Choose one to switch.
+        </p>
+      }
       @if (store.saved().kind === 'loading') {
         <div
-          class="mt-3 grid grid-cols-2 gap-[var(--ptah-gap-heading)] max-[480px]:grid-cols-1"
+          class="mt-3 gap-[var(--ptah-gap-heading)] grid grid-cols-1 lg:grid-cols-[repeat(var(--connection-cols),minmax(0,1fr))]"
+          [style.--connection-cols]="columns"
           role="status"
         >
           <span class="sr-only">Loading your saved connection</span>
-          <div class="h-20 animate-pulse rounded-[14px] bg-base-200"></div>
-          <div class="h-20 animate-pulse rounded-[14px] bg-base-200"></div>
+          @for (option of options; track option.id) {
+            <div class="h-20 animate-pulse rounded-[14px] bg-base-200"></div>
+          }
         </div>
       } @else {
         <div
           role="radiogroup"
           aria-labelledby="connection-choice-label"
-          aria-describedby="connection-choice-help"
-          class="mt-3 grid grid-cols-2 gap-[var(--ptah-gap-heading)] max-[480px]:grid-cols-1"
+          [attr.aria-describedby]="
+            store.saved().kind === 'other' ? 'connection-choice-help' : null
+          "
+          class="mt-3 gap-[var(--ptah-gap-heading)] grid grid-cols-1 lg:grid-cols-[repeat(var(--connection-cols),minmax(0,1fr))]"
+          [style.--connection-cols]="columns"
           data-testid="connection-choice-cards"
         >
-          @for (card of cards; track card.id) {
+          @for (card of options; track card.id) {
             <label
-              class="flex cursor-pointer items-center gap-[var(--ptah-gap-heading)] rounded-[14px] border bg-base-200 px-[var(--ptah-surface-pad)] py-3 focus-within:ring-2 focus-within:ring-base-content focus-within:ring-offset-2"
+              class="flex cursor-pointer items-start gap-[var(--ptah-gap-heading)] rounded-[14px] border bg-base-200 px-[var(--ptah-surface-pad)] py-3 focus-within:ring-2 focus-within:ring-base-content focus-within:ring-offset-2"
               [class.border-primary]="selected() === card.id"
               [class.border-base-300]="selected() !== card.id"
               [attr.aria-disabled]="store.phase() === 'saving'"
             >
               <input
                 type="radio"
-                class="radio radio-primary"
+                class="radio radio-primary mt-2"
                 name="main-connection"
                 [value]="card.id"
                 [checked]="selected() === card.id"
                 [disabled]="store.phase() === 'saving'"
                 (change)="store.choose(card.id)"
               />
-              <lucide-angular
-                [img]="card.icon"
-                class="size-5"
-                aria-hidden="true"
+              <ptah-connection-option-heading
+                [option]="card"
+                [connectionRole]="roles()[card.id]"
               />
-              <span
-                ><strong class="block font-semibold">{{ card.name }}</strong>
-                <span class="text-[13px] text-base-content-muted">{{
-                  card.description
-                }}</span></span
-              >
             </label>
           }
         </div>
@@ -217,28 +223,24 @@ export class ConnectionChoiceComponent {
   readonly store = inject(ConnectionChoiceStore);
   private readonly injector = inject(Injector);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
-  protected readonly cards = [
-    {
-      id: 'claude-cli' as ProviderKind,
-      name: 'Claude Code',
-      description: "Anthropic's coding agent",
-      icon: Terminal,
-    },
-    {
-      id: 'openai-codex' as ProviderKind,
-      name: 'Codex',
-      description: "OpenAI's coding agent",
-      icon: Code,
-    },
-  ];
+  protected readonly options = inject(CONNECTION_OPTION_LIST);
+  /** One grid column per option, up to three. */
+  protected readonly columns = connectionColumns(this.options.length);
+  /** The provider of the saved main connection, when it is one of the options. */
+  private readonly savedProvider = computed(() => {
+    const kind = this.store.saved().kind;
+    return isConnectionOptionId(kind) ? kind : null;
+  });
   protected readonly selected = computed(
-    () =>
-      this.store.pending() ??
-      (this.store.saved().kind === 'claude-cli' ||
-      this.store.saved().kind === 'openai-codex'
-        ? this.store.saved().kind
-        : null),
+    () => this.store.pending() ?? this.savedProvider(),
   );
+  /** Each option's card role, keyed by option id. */
+  protected readonly roles = computed(() => {
+    const saved = this.savedProvider();
+    return Object.fromEntries(
+      this.options.map((option) => [option.id, connectionRole(saved, option.id)]),
+    ) as Readonly<Record<string, ConnectionRole>>;
+  });
   protected async save(): Promise<void> {
     if (!this.store.canConfirm()) return;
     await this.store.confirm();

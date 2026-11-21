@@ -557,6 +557,9 @@ class HomeAuthState implements ICodexAuthService {
         ? pending.auth
         : diskAuth;
     } catch (error) {
+      // degradation-audit: optional-capability - a missing auth file is the
+      // designed 'signed-out' answer; other read failures are logged at warn
+      // and return 'unreadable'.
       // A refresh whose write has not persisted is still the active credential.
       // Match readAuthFile's pending-rotation precedence without touching its cache.
       if (this.pendingPersist) return this.classifySignInAuth(this.pendingPersist.auth);
