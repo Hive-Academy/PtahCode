@@ -18,6 +18,7 @@ import {
   isTaskCreatedHook,
   isTaskCompletedHook,
   isTeammateIdleHook,
+  isSyntheticNoResponsePlaceholder,
   narrowTerminalReason,
 } from './claude-sdk.types';
 
@@ -264,5 +265,60 @@ describe("claude-sdk.types hook guards — truth table against the SDK's HOOK_EV
         expect(input.team_name).toBe('default');
       }
     });
+  });
+});
+
+describe('isSyntheticNoResponsePlaceholder', () => {
+  const placeholderText = [{ type: 'text', text: 'No response requested.' }];
+
+  it('matches the entry the SDK writes to repair a dead turn', () => {
+    expect(
+      isSyntheticNoResponsePlaceholder({
+        model: '<synthetic>',
+        content: placeholderText,
+      }),
+    ).toBe(true);
+    expect(
+      isSyntheticNoResponsePlaceholder({
+        model: '<synthetic>',
+        content: [
+          { type: 'text', text: '  No response requested.\n' },
+          { type: 'text', text: 'No response requested.' },
+        ],
+      }),
+    ).toBe(true);
+  });
+
+  it('does not match the same text from a real model', () => {
+    expect(
+      isSyntheticNoResponsePlaceholder({
+        model: 'claude-opus-4',
+        content: placeholderText,
+      }),
+    ).toBe(false);
+    expect(isSyntheticNoResponsePlaceholder({ content: placeholderText })).toBe(
+      false,
+    );
+  });
+
+  it('does not match a synthetic entry with other or no content', () => {
+    for (const content of [
+      [],
+      'No response requested.',
+      undefined,
+      [{ type: 'text', text: 'Something else' }],
+      [...placeholderText, { type: 'tool_use', id: 't', name: 'Read' }],
+      [null],
+    ]) {
+      expect(
+        isSyntheticNoResponsePlaceholder({ model: '<synthetic>', content }),
+      ).toBe(false);
+    }
+  });
+
+  it('rejects non-object input', () => {
+    for (const value of [null, undefined, 'x', 1]) {
+      expect(isSyntheticNoResponsePlaceholder(value)).toBe(false);
+    }
   });
 });

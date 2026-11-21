@@ -499,6 +499,40 @@ export function isInterruptSentinelText(
   return typeof text === 'string' && text.trim() === SDK_INTERRUPT_SENTINEL;
 }
 
+/** Model id the SDK stamps on assistant entries it writes itself. */
+export const SDK_SYNTHETIC_MODEL = '<synthetic>';
+
+/** Text of the placeholder the SDK writes to close a turn that died mid-request. */
+export const SDK_NO_RESPONSE_PLACEHOLDER = 'No response requested.';
+
+/**
+ * True for the assistant entry the SDK inserts on resume to repair an open
+ * turn: model `<synthetic>` and only `No response requested.` text blocks.
+ * The model never said it, so it must not render as a reply. A real model
+ * reply with the same text has a real model id and does not match.
+ */
+export function isSyntheticNoResponsePlaceholder(message: unknown): boolean {
+  if (typeof message !== 'object' || message === null) return false;
+  const { model, content } = message as {
+    readonly model?: unknown;
+    readonly content?: unknown;
+  };
+  if (model !== SDK_SYNTHETIC_MODEL) return false;
+  if (!Array.isArray(content) || content.length === 0) return false;
+  return content.every((block: unknown) => {
+    if (typeof block !== 'object' || block === null) return false;
+    const { type, text } = block as {
+      readonly type?: unknown;
+      readonly text?: unknown;
+    };
+    return (
+      type === 'text' &&
+      typeof text === 'string' &&
+      text.trim() === SDK_NO_RESPONSE_PLACEHOLDER
+    );
+  });
+}
+
 export function isToolUseBlock(
   block: ContentBlock | { type: string },
 ): block is ToolUseBlock {

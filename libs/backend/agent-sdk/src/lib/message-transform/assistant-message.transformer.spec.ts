@@ -300,6 +300,54 @@ describe('AssistantMessageTransformer', () => {
     expect(events).toEqual([]);
   });
 
+  it('skips the SDK synthetic no-response placeholder', () => {
+    const msg = {
+      uuid: 'u-syn',
+      message: {
+        id: 'm-syn',
+        model: '<synthetic>',
+        usage: { input_tokens: 0, output_tokens: 0 },
+        content: [{ type: 'text', text: 'No response requested.' }],
+      },
+    } as never;
+
+    const events = transformer.transform(
+      msg,
+      state,
+      helpers,
+      'sess-syn' as never,
+    );
+
+    expect(events).toEqual([]);
+  });
+
+  it('renders the same text when a real model said it', () => {
+    const msg = {
+      uuid: 'u-real',
+      message: {
+        id: 'm-real',
+        model: 'claude-opus',
+        content: [{ type: 'text', text: 'No response requested.' }],
+      },
+    } as never;
+
+    const events = transformer.transform(
+      msg,
+      state,
+      helpers,
+      'sess-real' as never,
+    );
+
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          eventType: 'text_delta',
+          delta: 'No response requested.',
+        }),
+      ]),
+    );
+  });
+
   it('suppresses envelopes for signature-only empty thinking', () => {
     const msg = {
       uuid: 'u-empty-thinking',
