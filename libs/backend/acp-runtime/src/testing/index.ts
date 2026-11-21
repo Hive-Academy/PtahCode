@@ -22,3 +22,10 @@ export {
   recordedUpdatesDuring,
 } from '../lib/__fixtures__/acp-fixture-reader';
 export type { AcpFixtureEnvelope } from '../lib/__fixtures__/acp-fixture-reader';
+export {
+  createAcpTeeRecorder,
+  redactAcpEnvelopes,
+  writeAcpFixture,
+} from './tee-transport';
+export type { AcpRedaction, AcpTeeRecorder } from './tee-transport';
+export { createLiveProcessSpawner } from './live-process-spawner';

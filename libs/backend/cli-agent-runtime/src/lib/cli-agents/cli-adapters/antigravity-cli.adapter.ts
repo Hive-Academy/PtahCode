@@ -1,6 +1,17 @@
 /**
  * Antigravity CLI Adapter (`agy`)
  *
+ * Two transports (TASK_2026_2291, P3):
+ * - ACP (preferred): `agy acp`, one long-lived Agent Client Protocol session
+ *   per lane through `@ptah-extension/acp-runtime` and the provider-session
+ *   lane handle (`antigravityAcpProfile`). Used when the installed `agy` is
+ *   at or above `AGY_ACP_MIN_VERSION`, its `--help` lists the `acp`
+ *   subcommand, and the host supplied a process spawner. Ptah MCP travels as
+ *   an ACP `http` entry (D9), so `mcp_config.json` is not touched;
+ *   continuation and interrupt (`session/cancel`, process kept) are supported.
+ * - stream-json (the automatic fallback, everything below): below the
+ *   version floor, when `acp` is not listed, or without a spawner.
+ *
  * Spawn-based, structured-JSONL adapter for Google's Antigravity CLI. As of
  * `agy` v1.1.11 print mode supports `--output-format stream-json`, which emits
  * one JSON object per line, so segment parsing here is an event loop like the
@@ -75,6 +86,7 @@ import { bestMessagingCapability } from './cli-adapter.interface';
 import {
   applyLaneArgvPolicy,
   translateLaneSpawnPolicy,
+  validateLaneSpawnPolicy,
 } from '../lane-spawn-policy';
 import {
   assertCommandLineWithinLimit,
@@ -91,7 +103,15 @@ import {
   killProcessTree,
   type IProcessSpawner,
 } from '@ptah-extension/platform-core';
+import { antigravityAcpProfile } from '@ptah-extension/acp-runtime';
+import {
+  agyHelpListsAcp,
+  antigravityAcpManifest,
+  meetsAgyAcpFloor,
+  type AntigravityAcpSeam,
+} from './antigravity-acp-lane';
 import { MCP_ATTACHMENT_TIMEOUT_MS } from '../mcp-attachment-probe.port';
+import { createProviderSessionLaneHandle } from './provider-session/provider-session-lane-handle';
 import { laneMcpAuthUrl } from './lane-mcp-credentials';
 import { ptahMcpServerUrl } from './ptah-mcp-url';
 import { classifyCliStderr } from './cli-stderr-severity';
@@ -392,11 +412,20 @@ export class AntigravityCliAdapter implements CliAdapter {
    */
   private streamJsonInputSupported: boolean | undefined;
   private readonly streamJsonInputSupportByBinary = new Map<string, boolean>();
+  /** `agy --help` text captured by the default stream-json probe, per binary. */
+  private readonly helpTextByBinary = new Map<string, string>();
+  /** Whether the last probed binary runs the ACP lane; undefined until probed. */
+  private acpSupported: boolean | undefined;
+  private readonly acpSupportByBinary = new Map<string, boolean>();
 
+  /**
+   * @param acp - ACP seams for specs and live recordings; production passes none.
+   */
   constructor(
     private readonly spawner?: IProcessSpawner,
     private readonly streamJsonProbe?: (binary: string) => Promise<boolean>,
     private readonly logger?: Logger,
+    private readonly acp: AntigravityAcpSeam = {},
   ) {}
 
   async detect(): Promise<CliDetectionResult> {
@@ -416,6 +445,7 @@ export class AntigravityCliAdapter implements CliAdapter {
         this.spawner,
       );
       await this.probeStreamJsonInput(binaryPath);
+      await this.probeAcp(binaryPath, version);
 
       return {
         cli: 'antigravity',
@@ -439,6 +469,9 @@ export class AntigravityCliAdapter implements CliAdapter {
    * authoritative while a lane is running.
    */
   capabilities(): CliAdapterManifest {
+    if (this.acpSupported === true) {
+      return antigravityAcpManifest(this.roleChannel);
+    }
     return {
       messaging: {
         steer: {
@@ -537,7 +570,11 @@ export class AntigravityCliAdapter implements CliAdapter {
       child.stderr?.setEncoding('utf8');
       child.stdout?.on('data', capture);
       child.stderr?.on('data', capture);
-      child.on('close', () => { childClosed = true; finish(/--input-format\b/.test(help)); });
+      child.on('close', () => {
+        childClosed = true;
+        this.helpTextByBinary.set(binary, help);
+        finish(/--input-format\b/.test(help));
+      });
       child.on('error', () => finish(false));
     });
     this.streamJsonInputSupportByBinary.set(
@@ -545,6 +582,75 @@ export class AntigravityCliAdapter implements CliAdapter {
       this.streamJsonInputSupported,
     );
     return this.streamJsonInputSupported;
+  }
+
+  /**
+   * Whether `binary` runs the ACP lane, cached per binary. Needs a way to
+   * spawn the agent (the host spawner, or a spec transport), `agy --version`
+   * at or above `AGY_ACP_MIN_VERSION`, and `acp` in `agy --help`. The
+   * help text comes from the stream-json probe, so detection spawns nothing
+   * extra; no probe ever spawns `agy acp` itself.
+   */
+  private async probeAcp(
+    binary: string,
+    knownVersion?: string,
+  ): Promise<boolean> {
+    const cached = this.acpSupportByBinary.get(binary);
+    if (cached !== undefined) {
+      this.acpSupported = cached;
+      return cached;
+    }
+    let supported: boolean;
+    if (this.acp.probe) {
+      supported = await this.acp.probe(binary);
+    } else if (!this.spawner && !this.acp.transportFactory) {
+      supported = false;
+    } else {
+      const version =
+        knownVersion ??
+        (await probeCliVersion(binary, undefined, undefined, this.spawner));
+      await this.probeStreamJsonInput(binary);
+      const help = this.helpTextByBinary.get(binary);
+      const listed = agyHelpListsAcp(help);
+      supported = meetsAgyAcpFloor(version) && listed;
+      this.logger?.info('[AntigravityCliAdapter] ACP transport probe', {
+        version,
+        acpListed: listed,
+        supported,
+      });
+    }
+    this.acpSupportByBinary.set(binary, supported);
+    this.acpSupported = supported;
+    return supported;
+  }
+
+  /**
+   * The ACP lane: `agy acp` through the provider-session lane handle. The
+   * folder trust write stays (PF-5 not run); the Ptah MCP entry goes in
+   * `session/new.mcpServers`, so `mcp_config.json` is left alone.
+   */
+  private async runAcp(
+    options: CliCommandOptions,
+    binary: string,
+  ): Promise<SdkHandle> {
+    validateLaneSpawnPolicy(this.name, this.capabilities(), options);
+    if (options.workingDirectory) {
+      await this.ensureFolderTrusted(options.workingDirectory);
+    }
+    this.logger?.info('[AntigravityCliAdapter] lane runs on agy acp', {
+      agentId: options.agentId,
+    });
+    return createProviderSessionLaneHandle({
+      profile: antigravityAcpProfile,
+      options: {
+        ...options,
+        model: options.model ? agyModelId(options.model) : undefined,
+      },
+      command: binary,
+      spawner: this.spawner,
+      transportFactory: this.acp.transportFactory,
+      logger: this.logger,
+    });
   }
 
   parseOutput(raw: string): string {
@@ -779,6 +885,10 @@ export class AntigravityCliAdapter implements CliAdapter {
    * `init` event. stderr and non-zero exit surface as `error` segments.
    */
   async runSdk(options: CliCommandOptions): Promise<SdkHandle> {
+    const acpBinary = options.binaryPath ?? 'agy';
+    if (await this.probeAcp(acpBinary)) {
+      return this.runAcp(options, acpBinary);
+    }
     const policy = translateLaneSpawnPolicy(
       this.name,
       this.capabilities(),

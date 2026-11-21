@@ -20,8 +20,10 @@
  * - Each prompt is bounded by {@link LANE_ACP_PROMPT_TIMEOUT_MS}; a failed
  *   resume falls back to a new session (lanes keep that fallback).
  *
- * Session events reach the lane through `projectToCliSegments`; stderr lines
- * are classified here (`classifyCliStderr`). `done` and every continuation
+ * Session events reach the lane twice: as segments (`projectToCliSegments`,
+ * the text log and lane outcome) and as flat stream events
+ * (`createFlatStreamProjector`, `onStreamEvent`), from which the renderer
+ * builds the lane's execution cards. stderr lines are classified here (`classifyCliStderr`). `done` and every continuation
  * `done` resolve with 0 or 1 and never reject; failures become one `error`
  * segment.
  */
@@ -31,9 +33,15 @@ import type {
   AcpVendorProfile,
 } from '@ptah-extension/acp-runtime';
 import type { IProcessSpawner } from '@ptah-extension/platform-core';
-import { projectToCliSegments } from '@ptah-extension/provider-session-contracts';
+import {
+  createFlatStreamProjector,
+  projectToCliSegments,
+} from '@ptah-extension/provider-session-contracts';
 import type { ProviderSessionEvent } from '@ptah-extension/provider-session-contracts';
-import type { CliOutputSegment } from '@ptah-extension/shared';
+import type {
+  CliOutputSegment,
+  FlatStreamEventUnion,
+} from '@ptah-extension/shared';
 import type { Logger } from '@ptah-extension/vscode-core';
 import { MCP_ATTACHMENT_TIMEOUT_MS } from '../../mcp-attachment-probe.port';
 import type {
@@ -94,6 +102,8 @@ export function createProviderSessionLaneHandle(
   }
 
   const sessionResolved = createBufferedEmitter<string>();
+  const stream = createBufferedEmitter<FlatStreamEventUnion>();
+  const streamProjector = createFlatStreamProjector();
   let mcpTimedOut = false;
   let onMcpTimeout: (() => void) | undefined;
 
@@ -114,6 +124,11 @@ export function createProviderSessionLaneHandle(
       output.emit(`\n[${name}] ${event.error.message}\n`);
     }
     for (const item of projectToCliSegments(event)) segment.emit(item);
+    // A failure already reaches the execution tree as its `error` segment
+    // (the card renders error segments beside the event tree); projecting it
+    // too would show the message twice.
+    if (event.type === 'error') return;
+    for (const item of streamProjector.project(event)) stream.emit(item);
   };
 
   const session = createAcpSession({
@@ -328,6 +343,7 @@ export function createProviderSessionLaneHandle(
     done,
     onOutput: output.subscribe,
     onSegment: segment.subscribe,
+    onStreamEvent: stream.subscribe,
     onMcpAttachmentTimeout: (callback) => {
       onMcpTimeout = callback;
       if (mcpTimedOut) callback();

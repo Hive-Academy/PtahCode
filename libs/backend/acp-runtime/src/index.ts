@@ -76,4 +76,5 @@ export type {
   AcpSdkModule,
 } from './lib/acp-sdk-loader';
 
+export { antigravityAcpProfile } from './lib/profiles/antigravity-acp-profile';
 export { grokAcpProfile } from './lib/profiles/grok-acp-profile';

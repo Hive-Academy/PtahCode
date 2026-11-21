@@ -5,7 +5,11 @@
  * of the former `acp-session-handle.spec.ts`, assertions unchanged; the
  * runtime-only case (SDK load failure) lives in `acp-session-runtime.spec.ts`.
  */
-import type { CliOutputSegment, ProviderAccountBinding } from '@ptah-extension/shared';
+import type {
+  CliOutputSegment,
+  FlatStreamEventUnion,
+  ProviderAccountBinding,
+} from '@ptah-extension/shared';
 import { createMockLogger } from '@ptah-extension/shared/testing';
 import type { MockLogger } from '@ptah-extension/shared/testing';
 import type { Logger } from '@ptah-extension/vscode-core';
@@ -141,7 +145,9 @@ function start(
     errors: () =>
       segments.filter((s) => s.type === 'error').map((s) => s.content),
     infos: () =>
-      segments.filter((s) => s.type === 'info' && !s.turnTelemetry).map((s) => s.content),
+      segments
+        .filter((s) => s.type === 'info' && !s.turnTelemetry)
+        .map((s) => s.content),
     resolvedIds,
     spawn: () => spawn,
     logger,
@@ -182,96 +188,165 @@ afterEach(async () => {
 describe('createProviderSessionLaneHandle — first turn', () => {
   it('separates turn IDs across runs that resume the same ACP session', async () => {
     const script = (agent: FakeAcpAgent): void => {
-      agent.handle('session/prompt', () => ({ result: {
-        stopReason: 'end_turn', _meta: { usage: { inputTokens: 1, outputTokens: 1 } },
-      } }));
+      agent.handle('session/prompt', () => ({
+        result: {
+          stopReason: 'end_turn',
+          _meta: { usage: { inputTokens: 1, outputTokens: 1 } },
+        },
+      }));
     };
     const first = start({ options: { agentId: 'run-a' }, script });
     const resumed = start({ options: { agentId: 'run-b' }, script });
     await expect(first.handle.done).resolves.toBe(0);
     await expect(resumed.handle.done).resolves.toBe(0);
-    expect(first.segments.find((item) => item.turnTelemetry)?.turnTelemetry)
-      .toMatchObject({ status: 'reported', usage: { turnId: 'sess-1:run-a:1' } });
-    expect(resumed.segments.find((item) => item.turnTelemetry)?.turnTelemetry)
-      .toMatchObject({ status: 'reported', usage: { turnId: 'sess-1:run-b:1' } });
+    expect(
+      first.segments.find((item) => item.turnTelemetry)?.turnTelemetry,
+    ).toMatchObject({
+      status: 'reported',
+      usage: { turnId: 'sess-1:run-a:1' },
+    });
+    expect(
+      resumed.segments.find((item) => item.turnTelemetry)?.turnTelemetry,
+    ).toMatchObject({
+      status: 'reported',
+      usage: { turnId: 'sess-1:run-b:1' },
+    });
   });
 
   it('reports prompt _meta.usage and preserves the UI usage segment', async () => {
     const h = start({
       options: { model: 'grok-test' },
-      script: (agent) => agent.handle('session/prompt', () => ({
-        result: { stopReason: 'end_turn', _meta: { usage: {
-          inputTokens: 12, outputTokens: 4, cacheReadTokens: 2, costUsd: 0.03,
-          model: 'grok-billed',
-        } } },
-      })),
+      script: (agent) =>
+        agent.handle('session/prompt', () => ({
+          result: {
+            stopReason: 'end_turn',
+            _meta: {
+              usage: {
+                inputTokens: 12,
+                outputTokens: 4,
+                cacheReadTokens: 2,
+                costUsd: 0.03,
+                model: 'grok-billed',
+              },
+            },
+          },
+        })),
     });
     await expect(h.handle.done).resolves.toBe(0);
     const telemetry = h.segments.filter((segment) => segment.turnTelemetry);
     expect(telemetry).toHaveLength(1);
-    expect(telemetry[0].turnTelemetry).toMatchObject({ status: 'reported', usage: {
-      modelId: 'grok-billed', inputTokens: 12, outputTokens: 4,
-    } });
-    expect(telemetry[0].usage).toMatchObject({ inputTokens: 12, outputTokens: 4 });
-    expect(h.handle).toMatchObject({ outcomeUsageIsTurnTotal: true, usageScope: 'turn' });
+    expect(telemetry[0].turnTelemetry).toMatchObject({
+      status: 'reported',
+      usage: {
+        modelId: 'grok-billed',
+        inputTokens: 12,
+        outputTokens: 4,
+      },
+    });
+    expect(telemetry[0].usage).toMatchObject({
+      inputTokens: 12,
+      outputTokens: 4,
+    });
+    expect(h.handle).toMatchObject({
+      outcomeUsageIsTurnTotal: true,
+      usageScope: 'turn',
+    });
     expect(h.handle.getObservedNativeThreadId?.()).toBe('sess-1');
   });
 
   it('reconciles usage_update metadata when the prompt response omits usage', async () => {
     const h = start({
       options: { model: 'requested-alias' },
-      script: (agent) => agent.handle('session/prompt', async (params, active) => {
-        await active.sessionUpdate(String(params['sessionId']), {
-          sessionUpdate: 'usage_update', used: 25, size: 1000,
-          _meta: { usage: { inputTokens: 12, outputTokens: 4, model: 'billed-model' } },
-        });
-        return { result: { stopReason: 'end_turn' } };
-      }),
+      script: (agent) =>
+        agent.handle('session/prompt', async (params, active) => {
+          await active.sessionUpdate(String(params['sessionId']), {
+            sessionUpdate: 'usage_update',
+            used: 25,
+            size: 1000,
+            _meta: {
+              usage: {
+                inputTokens: 12,
+                outputTokens: 4,
+                model: 'billed-model',
+              },
+            },
+          });
+          return { result: { stopReason: 'end_turn' } };
+        }),
     });
     await expect(h.handle.done).resolves.toBe(0);
     expect(h.segments.filter((item) => item.turnTelemetry)).toEqual([
-      expect.objectContaining({ turnTelemetry: expect.objectContaining({
-        status: 'reported', usage: expect.objectContaining({
-          inputTokens: 12, outputTokens: 4,
-          requestContextTokens: expect.objectContaining({ status: 'reported', value: 25 }),
-          modelId: 'billed-model',
+      expect.objectContaining({
+        turnTelemetry: expect.objectContaining({
+          status: 'reported',
+          usage: expect.objectContaining({
+            inputTokens: 12,
+            outputTokens: 4,
+            requestContextTokens: expect.objectContaining({
+              status: 'reported',
+              value: 25,
+            }),
+            modelId: 'billed-model',
+          }),
         }),
-      }) }),
+      }),
     ]);
   });
 
   it('reconciles usage_update after the prompt response', async () => {
     const h = start({
-      script: (agent) => agent.handle('session/prompt', (params, active) => {
-        setTimeout(() => {
-          void active.sessionUpdate(String(params['sessionId']), {
-            sessionUpdate: 'usage_update', used: 25, size: 1000,
-            _meta: { usage: { inputTokens: 12, outputTokens: 4, model: 'billed-model' } },
-          });
-        }, 150);
-        return { result: { stopReason: 'end_turn' } };
-      }),
+      script: (agent) =>
+        agent.handle('session/prompt', (params, active) => {
+          setTimeout(() => {
+            void active.sessionUpdate(String(params['sessionId']), {
+              sessionUpdate: 'usage_update',
+              used: 25,
+              size: 1000,
+              _meta: {
+                usage: {
+                  inputTokens: 12,
+                  outputTokens: 4,
+                  model: 'billed-model',
+                },
+              },
+            });
+          }, 150);
+          return { result: { stopReason: 'end_turn' } };
+        }),
     });
     await expect(h.handle.done).resolves.toBe(0);
-    expect(h.segments.find((item) => item.turnTelemetry)?.turnTelemetry?.status).toBe('reported');
+    expect(
+      h.segments.find((item) => item.turnTelemetry)?.turnTelemetry?.status,
+    ).toBe('reported');
   });
 
   it('emits one unavailable record per completed turn without usable prompt usage', async () => {
     const h = start({ options: { model: 'grok-test' } });
     await expect(h.handle.done).resolves.toBe(0);
     h.agent.handle('session/prompt', () => ({
-      result: { stopReason: 'end_turn', _meta: { usage: { inputTokens: -1, outputTokens: 2 } } },
+      result: {
+        stopReason: 'end_turn',
+        _meta: { usage: { inputTokens: -1, outputTokens: 2 } },
+      },
     }));
     const next = await h.handle.continue?.('Follow up');
     await expect(next?.done).resolves.toBe(0);
     const telemetry = h.segments.filter((segment) => segment.turnTelemetry);
     expect(telemetry).toHaveLength(2);
     expect(telemetry.map((segment) => segment.turnTelemetry)).toEqual([
-      expect.objectContaining({ status: 'unavailable', reason: 'no-usage-event' }),
-      expect.objectContaining({ status: 'unavailable', reason: 'no-usage-event' }),
+      expect.objectContaining({
+        status: 'unavailable',
+        reason: 'no-usage-event',
+      }),
+      expect.objectContaining({
+        status: 'unavailable',
+        reason: 'no-usage-event',
+      }),
     ]);
     const unavailable = telemetry.flatMap((segment) =>
-      segment.turnTelemetry?.status === 'unavailable' ? [segment.turnTelemetry] : [],
+      segment.turnTelemetry?.status === 'unavailable'
+        ? [segment.turnTelemetry]
+        : [],
     );
     expect(unavailable[0].turnId).not.toBe(unavailable[1].turnId);
   });
@@ -290,7 +365,11 @@ describe('createProviderSessionLaneHandle — first turn', () => {
       options: {
         agentId: 'a-1',
         mcpPort: 51820,
-        attachmentProbe: { get: () => undefined, getAttempt: () => undefined, waitFor },
+        attachmentProbe: {
+          get: () => undefined,
+          getAttempt: () => undefined,
+          waitFor,
+        },
       },
     });
 
@@ -1086,7 +1165,6 @@ describe('createProviderSessionLaneHandle — error rows', () => {
     expect(sent(h.agent, 'session/new')).toHaveLength(0);
     expect(h.transport.killCount).toBe(1);
   });
-
 });
 
 describe('createProviderSessionLaneHandle — handshake timeout', () => {
@@ -1261,7 +1339,10 @@ describe('createProviderSessionLaneHandle — process lifecycle', () => {
 
 describe('createProviderSessionLaneHandle — P2', () => {
   const usageReply = {
-    result: { stopReason: 'end_turn', _meta: { usage: { inputTokens: 1, outputTokens: 1 } } },
+    result: {
+      stopReason: 'end_turn',
+      _meta: { usage: { inputTokens: 1, outputTokens: 1 } },
+    },
   };
 
   it('interrupts the turn via session/cancel, keeps the process, and continues on it', async () => {
@@ -1269,7 +1350,9 @@ describe('createProviderSessionLaneHandle — P2', () => {
     const h = start({
       profile: { cancelBehavior: 'await-reply' },
       script: (agent) =>
-        agent.handle('session/prompt', () => (++prompts === 1 ? { hold: true } : usageReply)),
+        agent.handle('session/prompt', () =>
+          ++prompts === 1 ? { hold: true } : usageReply,
+        ),
     });
     await h.agent.next(byMethod('session/prompt'));
     await settle();
@@ -1294,7 +1377,9 @@ describe('createProviderSessionLaneHandle — P2', () => {
     const h = start({
       profile: { cancelBehavior: 'await-reply' },
       script: (agent) =>
-        agent.handle('session/prompt', () => (++prompts === 1 ? usageReply : { hold: true })),
+        agent.handle('session/prompt', () =>
+          ++prompts === 1 ? usageReply : { hold: true },
+        ),
     });
     await expect(h.handle.done).resolves.toBe(0);
     const second = await h.handle.continue?.('long one');
@@ -1319,7 +1404,8 @@ describe('createProviderSessionLaneHandle — P2', () => {
   });
 
   it('keeps the task prompt first: continue() refuses until it was sent (PR #1444 review)', async () => {
-    let releaseProbe: (value: McpAttachment | undefined) => void = () => undefined;
+    let releaseProbe: (value: McpAttachment | undefined) => void = () =>
+      undefined;
     const attachmentProbe = {
       get: () => undefined,
       waitFor: jest.fn(
@@ -1330,7 +1416,12 @@ describe('createProviderSessionLaneHandle — P2', () => {
       ),
     };
     const h = start({
-      options: { agentId: 'a-1', mcpPort: 51820, mcpToken: 'tok', attachmentProbe },
+      options: {
+        agentId: 'a-1',
+        mcpPort: 51820,
+        mcpToken: 'tok',
+        attachmentProbe,
+      },
       script: (agent) => agent.handle('session/prompt', () => usageReply),
     });
     await h.agent.next(byMethod('session/new'));
@@ -1344,7 +1435,12 @@ describe('createProviderSessionLaneHandle — P2', () => {
       `${NAME} has not sent its task prompt yet; send the message after it`,
     );
 
-    releaseProbe({ agentId: 'a-1', method: 'initialize', port: 51820, time: 1 });
+    releaseProbe({
+      agentId: 'a-1',
+      method: 'initialize',
+      port: 51820,
+      time: 1,
+    });
     await expect(h.handle.done).resolves.toBe(0);
     const prompts = sent(h.agent, 'session/prompt');
     expect(prompts).toHaveLength(1);
@@ -1363,7 +1459,10 @@ describe('createProviderSessionLaneHandle — P2', () => {
     handle.onSegment?.((item) => segments.push(item));
     await expect(handle.done).resolves.toBe(1);
     expect(segments).toEqual([
-      { type: 'error', content: `${NAME} cannot start: no process spawner was supplied for the lane` },
+      {
+        type: 'error',
+        content: `${NAME} cannot start: no process spawner was supplied for the lane`,
+      },
     ]);
     expect(handle.supportsContinuation?.()).toBe(false);
   });
@@ -1389,7 +1488,11 @@ describe('createProviderSessionLaneHandle — account binding (PR #1445 review)'
       order.push('binding');
     });
     const h = start({
-      options: { accountBinding: binding, accountBindingId: 'binding-1', onAccountBinding },
+      options: {
+        accountBinding: binding,
+        accountBindingId: 'binding-1',
+        onAccountBinding,
+      },
       script: (agent) => {
         agentRef = agent;
         agent.handle('session/prompt', () => {
@@ -1421,7 +1524,11 @@ describe('createProviderSessionLaneHandle — account binding (PR #1445 review)'
       throw new Error('binding storage unavailable');
     });
     const h = start({
-      options: { accountBinding: binding, accountBindingId: 'binding-1', onAccountBinding },
+      options: {
+        accountBinding: binding,
+        accountBindingId: 'binding-1',
+        onAccountBinding,
+      },
     });
     await expect(h.handle.done).resolves.toBe(1);
     await settle();
@@ -1434,9 +1541,83 @@ describe('createProviderSessionLaneHandle — account binding (PR #1445 review)'
 
   it('returns 1 without prompting when the binding is incomplete', async () => {
     const onAccountBinding = jest.fn(async () => undefined);
-    const h = start({ options: { accountBindingId: 'binding-1', onAccountBinding } });
+    const h = start({
+      options: { accountBindingId: 'binding-1', onAccountBinding },
+    });
     await expect(h.handle.done).resolves.toBe(1);
     expect(onAccountBinding).not.toHaveBeenCalled();
     expect(sent(h.agent, 'session/prompt')).toHaveLength(0);
+  });
+});
+
+describe('createProviderSessionLaneHandle — stream events (P1 review m-4)', () => {
+  it('projects the turn to flat stream events for the execution cards, beside the segments', async () => {
+    const h = start({
+      script: (agent) =>
+        agent.handle('session/prompt', async (params, a) => {
+          const sessionId = String(params['sessionId']);
+          await a.sessionUpdate(sessionId, {
+            sessionUpdate: 'tool_call',
+            toolCallId: 'call-1',
+            title: 'Run ptah_search',
+            kind: 'other',
+            status: 'in_progress',
+          });
+          await a.sessionUpdate(sessionId, {
+            sessionUpdate: 'tool_call_update',
+            toolCallId: 'call-1',
+            status: 'completed',
+          });
+          await a.sessionUpdate(sessionId, {
+            sessionUpdate: 'agent_message_chunk',
+            content: { type: 'text', text: 'Found it' },
+          });
+          return { result: { stopReason: 'end_turn' } };
+        }),
+    });
+    const stream: FlatStreamEventUnion[] = [];
+    h.handle.onStreamEvent?.((event) => stream.push(event));
+
+    await expect(h.handle.done).resolves.toBe(0);
+
+    expect(stream.map((event) => event.eventType)).toEqual(
+      expect.arrayContaining([
+        'message_start',
+        'tool_start',
+        'tool_result',
+        'text_delta',
+      ]),
+    );
+    expect(
+      stream.find((event) => event.eventType === 'tool_start'),
+    ).toMatchObject({
+      toolCallId: 'call-1',
+      sessionId: SESSION_ID,
+    });
+    expect(h.segments).toContainEqual({ type: 'text', content: 'Found it' });
+  });
+
+  it('leaves a failure to its error segment so the card does not show it twice', async () => {
+    const h = start({
+      script: (agent) =>
+        agent.handle('session/prompt', () => ({
+          error: {
+            code: -32003,
+            message: 'Rate limited',
+            data: 'usage exhausted',
+          },
+        })),
+    });
+    const stream: FlatStreamEventUnion[] = [];
+    h.handle.onStreamEvent?.((event) => stream.push(event));
+
+    await expect(h.handle.done).resolves.toBe(1);
+    expect(h.errors()).toEqual([`${NAME} is rate limited: usage exhausted`]);
+    expect(
+      stream.filter(
+        (event) =>
+          event.eventType === 'text_delta' && event.delta.startsWith('Error:'),
+      ),
+    ).toEqual([]);
   });
 });
