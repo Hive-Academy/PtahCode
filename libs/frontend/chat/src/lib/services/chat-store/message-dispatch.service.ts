@@ -17,6 +17,8 @@ import type { SendMessageOptions, TabState } from '@ptah-extension/chat-types';
 import { PermissionHandlerService } from '@ptah-extension/chat-streaming';
 import { FollowUpQueueService } from './follow-up-queue.service';
 import { ComposerRestoreService } from '../composer-restore.service';
+import type { ComposerDraftImage } from '../composer-draft.store';
+import type { ChatFile } from '../file-picker.service';
 import { isTabBusyGenerating } from './tab-busy';
 
 /**
@@ -127,7 +129,12 @@ export class MessageDispatchService {
       if (earlier) {
         const viewSession = dispatchTab?.claudeSessionId ?? null;
         await earlier;
-        const moved = this.viewMovedOn(resolvedTabId, viewSession, content);
+        const moved = this.viewMovedOn(
+          resolvedTabId,
+          viewSession,
+          content,
+          options,
+        );
         if (moved) return moved;
       }
       // Queue first, always: the message waits as a queued card with
@@ -163,7 +170,7 @@ export class MessageDispatchService {
     // other mid-turn message.
     if (outcome?.turnInFlight === true && resolvedTabId != null) {
       return (
-        this.viewMovedOn(resolvedTabId, sendSession, content) ??
+        this.viewMovedOn(resolvedTabId, sendSession, content, options) ??
         this.queue(resolvedTabId, content, options)
       );
     }
@@ -187,18 +194,20 @@ export class MessageDispatchService {
   /**
    * A message that waited (for its own refusal or an earlier send) must not
    * join a queue that no longer belongs to it. Closed tab: dropped. Tab reset
-   * to another conversation: back to the composer, never sent there. `null`
-   * while the tab still shows the session it was typed for.
+   * to another conversation: back to the composer with its attachments,
+   * never sent there. A tab that only bound its first session meanwhile is
+   * the same conversation. `null` while the message may still queue.
    */
   private viewMovedOn(
     tabId: string,
     sessionId: string | null,
     content: string,
+    options?: SendMessageOptions,
   ): SendOutcome | null {
     const tab = this.tabManager.findTabByIdAcrossWorkspaces(tabId)?.tab;
     if (!tab) return { success: false, cancelled: true };
-    if ((tab.claudeSessionId ?? null) === sessionId) return null;
-    this.returnToComposer(tabId, content);
+    if (sessionId === null || tab.claudeSessionId === sessionId) return null;
+    this.returnToComposer(tabId, content, options);
     return { success: false, cancelled: true };
   }
 
@@ -206,8 +215,33 @@ export class MessageDispatchService {
    * Put the text back in the tab's composer. After this send resolves: the
    * composer clears its submitted draft then, which would wipe it.
    */
-  private returnToComposer(tabId: string, content: string): void {
-    setTimeout(() => this.composerRestore.restore(tabId, [content]), 0);
+  private returnToComposer(
+    tabId: string,
+    content: string,
+    options?: SendMessageOptions,
+  ): void {
+    // Sending reads only a file's path, so a path-only chip resends as is.
+    const files: ChatFile[] = (options?.files ?? []).map((path) => ({
+      path,
+      name: path.split(/[\\/]/).pop() || path,
+      size: 0,
+      type: 'text',
+      isLarge: false,
+      tokenEstimate: 0,
+    }));
+    const images: ComposerDraftImage[] = (options?.images ?? []).map(
+      (image, index) => ({
+        id: `restored-${Date.now()}-${index}`,
+        data: image.data,
+        mediaType: image.mediaType,
+        dataUrl: `data:${image.mediaType};base64,${image.data}`,
+        name: `image-${index + 1}`,
+      }),
+    );
+    setTimeout(() => {
+      this.composerRestore.restore(tabId, [content]);
+      this.composerRestore.restoreAttachments(tabId, files, images);
+    }, 0);
   }
 
   private queue(

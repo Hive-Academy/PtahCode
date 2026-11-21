@@ -354,7 +354,11 @@ describe('MessageDispatchService', () => {
           () => new Promise((resolve) => { refuse = resolve; }),
         );
         const first = service.sendOrQueueMessage('first', { tabId: 'tab-1' });
-        const second = service.sendOrQueueMessage('second', { tabId: 'tab-1' });
+        const second = service.sendOrQueueMessage('second', {
+          tabId: 'tab-1',
+          files: ['D:\\repo\\notes.md'],
+          images: [{ data: 'AAAA', mediaType: 'image/png' }],
+        });
         await Promise.resolve();
         // The tab is reset to a new conversation while the first send runs.
         tabs = [makeTab({ claudeSessionId: 'sess-2' })];
@@ -367,6 +371,14 @@ describe('MessageDispatchService', () => {
         expect(restore.pendingFor('tab-1')).toBeNull();
         jest.runOnlyPendingTimers();
         expect(restore.pendingFor('tab-1')).toBe('first\nsecond');
+        // Attachments come back with the text.
+        const attachments = restore.pendingAttachmentsFor('tab-1');
+        expect(attachments?.files.map((f) => [f.path, f.name])).toEqual([
+          ['D:\\repo\\notes.md', 'notes.md'],
+        ]);
+        expect(attachments?.images.map((i) => i.dataUrl)).toEqual([
+          'data:image/png;base64,AAAA',
+        ]);
 
         sendMock.mockImplementationOnce(
           () => new Promise((resolve) => { refuse = resolve; }),
@@ -383,6 +395,24 @@ describe('MessageDispatchService', () => {
       } finally {
         jest.useRealTimers();
       }
+    });
+
+    it('still queues a waiting message when the first send only bound its session', async () => {
+      tabs = [makeTab({ claudeSessionId: null })];
+      let finish!: (outcome: unknown) => void;
+      sendMock.mockImplementationOnce(
+        () => new Promise((resolve) => { finish = resolve; }),
+      );
+      const first = service.sendOrQueueMessage('first', { tabId: 'tab-1' });
+      const second = service.sendOrQueueMessage('second', { tabId: 'tab-1' });
+      await Promise.resolve();
+      // chat:start binds the tab's first session: same conversation.
+      tabs = [makeTab({ claudeSessionId: 'sess-new' })];
+      finish({ success: true });
+      await first;
+
+      await expect(second).resolves.toMatchObject({ success: true });
+      expect(enqueueMock).toHaveBeenCalledWith('tab-1', 'second', { tabId: 'tab-1' });
     });
 
     it('when not streaming, dispatches via MessageSender.send', async () => {
