@@ -3,8 +3,8 @@
  * agent-scoped URL (`ptahMcpServerUrl`) plus the lane's bearer token. A lane
  * without a port or a token attaches nothing.
  *
- * The attachment carries the token, so it is never logged unredacted (the
- * ACP runtime logs `headers: '[redacted]'`).
+ * The attachment carries the token, so it is never logged (the ACP runtime
+ * logs only each server's name and transport).
  */
 import type { ProviderMcpAttachment } from '@ptah-extension/provider-session-contracts';
 import type { CliCommandOptions } from '../cli-adapter.interface';

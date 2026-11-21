@@ -550,7 +550,7 @@ describe('replayed history through the stream projector', () => {
           ),
     );
 
-    const user = rows.filter((row) => row.messageId === 'agent-1:user:user-message');
+    const user = rows.filter((row) => row.messageId === 'replay:user:user-message-1');
     expect(user.map((row) => row.eventType)).toEqual([
       'message_start',
       'text_delta',
@@ -571,5 +571,159 @@ describe('replayed history through the stream projector', () => {
     expect(assistantText).toBe('OK');
     expect(rows.some((row) => row.eventType === 'thinking_delta')).toBe(true);
     expect(rows.every((row) => row.source === 'history')).toBe(true);
+  });
+
+  it('numbers id-less user turns on each role change and keeps chunks of one turn together (M-1)', () => {
+    const mapper = createEventMapper();
+    const user = (text: string) =>
+      ({ sessionUpdate: 'user_message_chunk', content: { type: 'text', text } }) as SessionUpdate;
+    const agent = (text: string) =>
+      ({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } }) as SessionUpdate;
+    const ids = [user('a'), user('b'), agent('ok'), user('c')].flatMap((update) =>
+      mapper.map(update).flatMap((body) => (body.type === 'userText' ? [body.itemId] : [])),
+    );
+    expect(ids).toEqual(['user-message-1', 'user-message-1', 'user-message-2']);
+  });
+
+  it('keeps one user turn across an update that maps to no event (review M-3)', () => {
+    const mapper = createEventMapper();
+    const user = (text: string) =>
+      ({ sessionUpdate: 'user_message_chunk', content: { type: 'text', text } }) as SessionUpdate;
+    const agent = (text: string) =>
+      ({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text } }) as SessionUpdate;
+    const usage = { sessionUpdate: 'usage_update', used: 1, size: 10 } as unknown as SessionUpdate;
+    const commands = { sessionUpdate: 'available_commands_update', availableCommands: [] } as unknown as SessionUpdate;
+    const ids = [user('a'), usage, commands, user('b'), agent('ok'), user('c')].flatMap((update) =>
+      mapper.map(update).flatMap((body) => (body.type === 'userText' ? [body.itemId] : [])),
+    );
+    expect(ids).toEqual(['user-message-1', 'user-message-1', 'user-message-2']);
+  });
+});
+
+describe('tool metadata lifetime (PR #1445 review)', () => {
+  const started = {
+    sessionUpdate: 'tool_call',
+    toolCallId: 'call-1',
+    title: 'Run tests',
+    kind: 'execute',
+    status: 'pending',
+  } as SessionUpdate;
+  const completed = {
+    sessionUpdate: 'tool_call_update',
+    toolCallId: 'call-1',
+    status: 'completed',
+  } as SessionUpdate;
+  const toolName = (bodies: ReturnType<ReturnType<typeof createEventMapper>['map']>) =>
+    bodies.find((body) => body.type === 'toolCompleted');
+
+  it('uses the remembered title for the final update, then releases it', () => {
+    const mapper = createEventMapper();
+    mapper.map(started);
+    expect(toolName(mapper.map(completed))).toMatchObject({ toolName: 'Run tests', kind: 'execute' });
+    // A duplicate final update no longer finds the released entry.
+    expect(toolName(mapper.map(completed))).toMatchObject({ toolName: undefined, kind: undefined });
+  });
+
+  it('releaseTools forgets tools that never finished', () => {
+    const mapper = createEventMapper();
+    mapper.map(started);
+    mapper.releaseTools();
+    expect(toolName(mapper.map(completed))).toMatchObject({ toolName: undefined });
+  });
+});
+
+describe('tool calls across ACP updates (PR #1450 review)', () => {
+  type Bodies = ReturnType<ReturnType<typeof createEventMapper>['map']>;
+  const completion = (bodies: Bodies) => bodies.find((body) => body.type === 'toolCompleted');
+
+  it('4651900750: a tool_call that arrives failed starts and finishes the tool at once', () => {
+    const mapper = createEventMapper();
+    const bodies = mapper.map({
+      sessionUpdate: 'tool_call',
+      toolCallId: 'call-f',
+      title: 'Read file',
+      kind: 'read',
+      status: 'failed',
+      rawOutput: 'no such file',
+    } as SessionUpdate);
+    expect(bodies.map((body) => body.type)).toEqual(['toolStarted', 'toolCompleted']);
+    expect(completion(bodies)).toMatchObject({
+      toolId: 'call-f',
+      status: 'failed',
+      toolName: 'Read file',
+      kind: 'read',
+      output: 'no such file',
+    });
+    // The final event released the tool: a stray later update finds nothing.
+    expect(
+      completion(
+        mapper.map({
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'call-f',
+          status: 'failed',
+        } as SessionUpdate),
+      ),
+    ).toMatchObject({ toolName: undefined });
+  });
+
+  it('4651900750: a pending tool_call still only starts the tool', () => {
+    const mapper = createEventMapper();
+    const bodies = mapper.map({
+      sessionUpdate: 'tool_call',
+      toolCallId: 'call-p',
+      title: 'Run',
+      kind: 'execute',
+      status: 'pending',
+    } as SessionUpdate);
+    expect(bodies.map((body) => body.type)).toEqual(['toolStarted']);
+  });
+
+  it('4651900758: keeps the output, kind and title of an earlier update for a bare completion', () => {
+    const mapper = createEventMapper();
+    mapper.map({
+      sessionUpdate: 'tool_call',
+      toolCallId: 'call-o',
+      title: 'Run',
+      status: 'pending',
+    } as SessionUpdate);
+    mapper.map({
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'call-o',
+      status: 'in_progress',
+      kind: 'search',
+      title: 'Search the repo',
+      rawOutput: 'done',
+    } as SessionUpdate);
+    expect(
+      completion(
+        mapper.map({
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'call-o',
+          status: 'completed',
+        } as SessionUpdate),
+      ),
+    ).toMatchObject({ output: 'done', kind: 'search', toolName: 'Search the repo' });
+  });
+
+  it('4651900758: an explicit value on the final update wins over the retained one', () => {
+    const mapper = createEventMapper();
+    mapper.map({
+      sessionUpdate: 'tool_call_update',
+      toolCallId: 'call-x',
+      status: 'in_progress',
+      title: 'Old title',
+      rawOutput: 'partial',
+    } as SessionUpdate);
+    expect(
+      completion(
+        mapper.map({
+          sessionUpdate: 'tool_call_update',
+          toolCallId: 'call-x',
+          status: 'completed',
+          title: 'New title',
+          content: [{ type: 'content', content: { type: 'text', text: 'final' } }],
+        } as SessionUpdate),
+      ),
+    ).toMatchObject({ output: 'final', toolName: 'New title' });
   });
 });

@@ -19,7 +19,11 @@
  * - The effort arrives already mapped by the lane spawn policy and is forwarded
  *   as-is; the runner skips it when the active model does not advertise it.
  * - `_x.ai/*` (and `x.ai/*`) notifications are vendor extensions, e.g. the
- *   `retry_state` notices before a rate-limit error; they are ignored.
+ *   `retry_state` notices before a rate-limit error; they are ignored, and
+ *   `_x.ai/mcp/servers_updated` is logged (MCP attachment diagnostics).
+ * - Interrupt: `session/cancel` mid-shell answers the prompt `cancelled` and
+ *   the process keeps running (`grok-p2-cancel-mid-shell.ndjson`), so the
+ *   cancel behaviour is `await-reply`.
  * - Resume keeps the stored model: with the `grokModel` setting cleared no
  *   `model` entry is sent, so a resumed session (`session/resume`) stays on
  *   the model it last ran on rather than resetting to Grok's CLI default.
@@ -27,6 +31,7 @@
  */
 import type { McpServer } from '@agentclientprotocol/sdk';
 import { readAcpErrorDetail } from '../acp-vendor-profile';
+import type { ProviderSessionLogger } from '@ptah-extension/provider-session-contracts';
 import type {
   AcpModelSource,
   AcpRequestFailure,
@@ -44,6 +49,8 @@ const JSONRPC_INVALID_PARAMS = -32602;
 const GROK_ARGS: readonly string[] = ['agent', '--no-leader', 'stdio'];
 
 const EXTENSION_NOTIFICATION = /^_?x\.ai\//;
+const MCP_SERVERS_UPDATED = '_x.ai/mcp/servers_updated';
+const SIGN_IN_HINT = 'run `grok login`';
 
 /** Grok's -32000 auth failures say "Authentication required" / "no auth method id provided". */
 const AUTH_WORDING = /authenticat|auth method/i;
@@ -80,7 +87,7 @@ function describeGrokError(failure: AcpRequestFailure): string | undefined {
     failure.code === GROK_AUTH_REQUIRED &&
     AUTH_WORDING.test(`${failure.message} ${detail ?? ''}`)
   ) {
-    return 'Grok is not signed in: run `grok login`';
+    return `Grok is not signed in: ${SIGN_IN_HINT}`;
   }
 
   if (
@@ -102,7 +109,8 @@ function describeGrokError(failure: AcpRequestFailure): string | undefined {
 export const grokAcpProfile: AcpVendorProfile = {
   vendor: 'grok',
   displayName: 'Grok',
-  resumeStrategy: 'resume',
+  signInHint: SIGN_IN_HINT,
+  cancelBehavior: 'await-reply',
 
   buildSpawn(options: AcpSessionOptions): AcpSpawnSpec {
     return { args: options.permission === 'yolo'
@@ -142,8 +150,23 @@ export const grokAcpProfile: AcpVendorProfile = {
     return entries;
   },
 
-  isExtensionNotification(method: string): boolean {
-    return EXTENSION_NOTIFICATION.test(method);
+  extensions: {
+    notification(
+      method: string,
+      params: Record<string, unknown>,
+      logger: ProviderSessionLogger | undefined,
+    ): boolean {
+      if (method === MCP_SERVERS_UPDATED) {
+        const servers: unknown = params['mcpServers'];
+        logger?.info('[AcpSessionHandle] MCP servers updated notification', {
+          vendor: 'grok',
+          method,
+          serverCount: Array.isArray(servers) ? servers.length : undefined,
+          paramsAvailable: true,
+        });
+      }
+      return EXTENSION_NOTIFICATION.test(method);
+    },
   },
 
   /**

@@ -5,7 +5,7 @@
  * of the former `acp-session-handle.spec.ts`, assertions unchanged; the
  * runtime-only case (SDK load failure) lives in `acp-session-runtime.spec.ts`.
  */
-import type { CliOutputSegment } from '@ptah-extension/shared';
+import type { CliOutputSegment, ProviderAccountBinding } from '@ptah-extension/shared';
 import { createMockLogger } from '@ptah-extension/shared/testing';
 import type { MockLogger } from '@ptah-extension/shared/testing';
 import type { Logger } from '@ptah-extension/vscode-core';
@@ -73,10 +73,10 @@ function createProfile(
   return {
     vendor: 'opencode',
     displayName: NAME,
-    resumeStrategy: 'resume',
+    signInHint: 'run `test login`',
     buildSpawn: () => ({ args: ['agent', '--no-leader', 'stdio'] }),
     buildMcpServers: () => [MCP_SERVER],
-    isExtensionNotification: (method) => /^_?x\.ai\//.test(method),
+    extensions: { notification: (method) => /^_?x\.ai\//.test(method) },
     describeError: describeTestError,
     ...overrides,
   };
@@ -391,7 +391,7 @@ describe('createProviderSessionLaneHandle — first turn', () => {
     await expect(h.handle.done).resolves.toBe(0);
 
     expect(h.spawn()?.args).toEqual(['agent', '--no-leader', 'stdio']);
-    expect(h.spawn()?.env).toBeUndefined();
+    expect(h.spawn()?.env).toMatchObject({ NO_COLOR: '1', FORCE_COLOR: '0' });
     expect(h.resolvedIds).toEqual([SESSION_ID]);
     expect(h.handle.getSessionId?.()).toBe(SESSION_ID);
     expect(h.output()).toContain('Hello from the agent');
@@ -417,28 +417,31 @@ describe('createProviderSessionLaneHandle — first turn', () => {
     expect(h.handle.supportsContinuation?.()).toBe(true);
   });
 
-  it('passes the profile spawn env to the transport', async () => {
+  it('passes the profile spawn env, merged over the lane base env, to the transport', async () => {
     const h = start({
       profile: {
         buildSpawn: () => ({
           args: ['acp'],
-          env: { VENDOR_CONFIG: '{"lane":true}' },
+          env: { mode: 'merge', set: { VENDOR_CONFIG: '{"lane":true}' } },
         }),
       },
     });
 
     await expect(h.handle.done).resolves.toBe(0);
     expect(h.spawn()?.args).toEqual(['acp']);
-    expect(h.spawn()?.env).toEqual({ VENDOR_CONFIG: '{"lane":true}' });
+    expect(h.spawn()?.env).toMatchObject({
+      VENDOR_CONFIG: '{"lane":true}',
+      NO_COLOR: '1',
+      FORCE_COLOR: '0',
+    });
   });
 
-  it('declares no steer, interrupt or supportsInterrupt', async () => {
+  it('declares no steer, and no usable interrupt for a profile that kills on cancel', async () => {
     const h = start();
     await h.handle.done;
 
     expect(h.handle.steer).toBeUndefined();
-    expect(h.handle.interrupt).toBeUndefined();
-    expect(h.handle.supportsInterrupt).toBeUndefined();
+    expect(h.handle.supportsInterrupt?.()).toBe(false);
   });
 
   it('drops updates for another session id', async () => {
@@ -670,7 +673,7 @@ describe('createProviderSessionLaneHandle — extension notifications', () => {
 
   it('reports every unknown method when the profile names no namespace', async () => {
     const h = start({
-      profile: { isExtensionNotification: undefined },
+      profile: { extensions: undefined },
       script: (agent) =>
         agent.handle('session/prompt', async () => {
           await agent.notify('_x.ai/session/setup', {});
@@ -747,7 +750,6 @@ describe('createProviderSessionLaneHandle — resume', () => {
 
   it('drops _meta.isReplay updates on session/load and keeps live ones', async () => {
     const h = start({
-      profile: { resumeStrategy: 'load' },
       options: { resumeSessionId: 'old-session' },
       agent: {
         agentCapabilities: { loadSession: true },
@@ -782,19 +784,12 @@ describe('createProviderSessionLaneHandle — resume', () => {
     expect(h.infos()).toEqual([]);
   });
 
-  it('tries load after a failed resume with resume-then-load', async () => {
-    const h = start({
-      profile: { resumeStrategy: 'resume-then-load' },
-      options: { resumeSessionId: 'old-session' },
-      script: (agent) =>
-        agent.handle('session/resume', () => ({
-          error: { code: -32603, message: 'Internal error' },
-        })),
-    });
+  it('prefers session/resume when the agent advertises both resume and load', async () => {
+    const h = start({ options: { resumeSessionId: 'old-session' } });
 
     await expect(h.handle.done).resolves.toBe(0);
-    expect(sent(h.agent, 'session/load')).toHaveLength(1);
-    expect(sent(h.agent, 'session/new')).toHaveLength(0);
+    expect(sent(h.agent, 'session/resume')).toHaveLength(1);
+    expect(sent(h.agent, 'session/load')).toHaveLength(0);
     expect(h.infos()).toEqual([]);
   });
 });
@@ -1082,11 +1077,11 @@ describe('createProviderSessionLaneHandle — error rows', () => {
   });
 
   it('fails the turn on an unsupported protocol version', async () => {
-    const h = start({ agent: { protocolVersion: 2 } });
+    const h = start({ agent: { protocolVersion: 3 } });
 
     await expect(h.handle.done).resolves.toBe(1);
     expect(h.errors()).toEqual([
-      `${NAME} speaks unsupported ACP protocol version 2`,
+      `${NAME} speaks unsupported ACP protocol version 3`,
     ]);
     expect(sent(h.agent, 'session/new')).toHaveLength(0);
     expect(h.transport.killCount).toBe(1);
@@ -1261,5 +1256,187 @@ describe('createProviderSessionLaneHandle — process lifecycle', () => {
     );
     // Exited on its own: no kill, so a reused pid is never targeted.
     expect(h.transport.killCount).toBe(0);
+  });
+});
+
+describe('createProviderSessionLaneHandle — P2', () => {
+  const usageReply = {
+    result: { stopReason: 'end_turn', _meta: { usage: { inputTokens: 1, outputTokens: 1 } } },
+  };
+
+  it('interrupts the turn via session/cancel, keeps the process, and continues on it', async () => {
+    let prompts = 0;
+    const h = start({
+      profile: { cancelBehavior: 'await-reply' },
+      script: (agent) =>
+        agent.handle('session/prompt', () => (++prompts === 1 ? { hold: true } : usageReply)),
+    });
+    await h.agent.next(byMethod('session/prompt'));
+    await settle();
+    expect(h.handle.supportsInterrupt?.()).toBe(true);
+
+    await h.handle.interrupt?.();
+    // A Ptah interrupt keeps a healthy lane: exit 0, as Cursor's (review S-1).
+    await expect(h.handle.done).resolves.toBe(0);
+    expect(sent(h.agent, 'session/cancel')).toHaveLength(1);
+    expect(h.transport.killCount).toBe(0);
+    expect(h.errors()).toEqual([]);
+
+    const next = await h.handle.continue?.('follow-up');
+    await expect(next?.done).resolves.toBe(0);
+    expect(sent(h.agent, 'session/prompt')).toHaveLength(2);
+    expect(h.handle.getPid?.()).toBe(4242);
+    h.handle.abort.abort();
+  });
+
+  it('interrupts a continuation turn with exit 0, while a lane abort mid-turn stays 1', async () => {
+    let prompts = 0;
+    const h = start({
+      profile: { cancelBehavior: 'await-reply' },
+      script: (agent) =>
+        agent.handle('session/prompt', () => (++prompts === 1 ? usageReply : { hold: true })),
+    });
+    await expect(h.handle.done).resolves.toBe(0);
+    const second = await h.handle.continue?.('long one');
+    while (prompts < 2) await settle();
+    await settle();
+    await h.handle.interrupt?.();
+    await expect(second?.done).resolves.toBe(0);
+
+    const third = await h.handle.continue?.('another long one');
+    while (prompts < 3) await settle();
+    await settle();
+    h.handle.abort.abort();
+    await expect(third?.done).resolves.toBe(1);
+    expect(h.errors()).toEqual([]);
+  });
+
+  it('offers no interrupt when the profile does not keep the process', async () => {
+    const h = start();
+    await expect(h.handle.done).resolves.toBe(0);
+    expect(h.handle.supportsInterrupt?.()).toBe(false);
+    h.handle.abort.abort();
+  });
+
+  it('keeps the task prompt first: continue() refuses until it was sent (PR #1444 review)', async () => {
+    let releaseProbe: (value: McpAttachment | undefined) => void = () => undefined;
+    const attachmentProbe = {
+      get: () => undefined,
+      waitFor: jest.fn(
+        () =>
+          new Promise<McpAttachment | undefined>((resolve) => {
+            releaseProbe = resolve;
+          }),
+      ),
+    };
+    const h = start({
+      options: { agentId: 'a-1', mcpPort: 51820, mcpToken: 'tok', attachmentProbe },
+      script: (agent) => agent.handle('session/prompt', () => usageReply),
+    });
+    await h.agent.next(byMethod('session/new'));
+    await settle();
+    expect(attachmentProbe.waitFor).toHaveBeenCalled();
+    // The router parks a message while the first turn runs (review M-2), so
+    // continuation is offered; continue() itself still keeps the task prompt first.
+    expect(h.handle.supportsContinuation?.()).toBe(true);
+    expect(h.handle.supportsInterrupt?.()).toBe(false);
+    await expect(h.handle.continue?.('too early')).rejects.toThrow(
+      `${NAME} has not sent its task prompt yet; send the message after it`,
+    );
+
+    releaseProbe({ agentId: 'a-1', method: 'initialize', port: 51820, time: 1 });
+    await expect(h.handle.done).resolves.toBe(0);
+    const prompts = sent(h.agent, 'session/prompt');
+    expect(prompts).toHaveLength(1);
+    expect(promptText(prompts[0])).toContain('Summarise the repository');
+    expect(h.handle.supportsContinuation?.()).toBe(true);
+    h.handle.abort.abort();
+  });
+
+  it('fails at once with one error when no process spawner was supplied', async () => {
+    const handle = createProviderSessionLaneHandle({
+      profile: createProfile(),
+      options: { task: 't', workingDirectory: process.cwd() },
+      command: 'test-agent',
+    });
+    const segments: CliOutputSegment[] = [];
+    handle.onSegment?.((item) => segments.push(item));
+    await expect(handle.done).resolves.toBe(1);
+    expect(segments).toEqual([
+      { type: 'error', content: `${NAME} cannot start: no process spawner was supplied for the lane` },
+    ]);
+    expect(handle.supportsContinuation?.()).toBe(false);
+  });
+});
+
+describe('createProviderSessionLaneHandle — account binding (PR #1445 review)', () => {
+  const binding: ProviderAccountBinding = {
+    version: 1,
+    provider: 'grok',
+    profileId: 'profile-1',
+    routeRevision: 1,
+    routeFingerprint: 'fingerprint',
+    authEpoch: 1,
+    runId: 'run-1',
+    identity: { kind: 'unknown' },
+  } as unknown as ProviderAccountBinding;
+
+  it('awaits the binding checkpoint with the session id before the task prompt', async () => {
+    let agentRef: FakeAcpAgent | undefined;
+    const order: string[] = [];
+    const onAccountBinding = jest.fn(async () => {
+      expect(agentRef && sent(agentRef, 'session/prompt')).toHaveLength(0);
+      order.push('binding');
+    });
+    const h = start({
+      options: { accountBinding: binding, accountBindingId: 'binding-1', onAccountBinding },
+      script: (agent) => {
+        agentRef = agent;
+        agent.handle('session/prompt', () => {
+          order.push('prompt');
+          return { result: { stopReason: 'end_turn' } };
+        });
+      },
+    });
+    await expect(h.handle.done).resolves.toBe(0);
+    expect(onAccountBinding).toHaveBeenCalledTimes(1);
+    expect(onAccountBinding).toHaveBeenCalledWith(
+      { accountBinding: binding, accountBindingId: 'binding-1' },
+      SESSION_ID,
+    );
+    expect(order).toEqual(['binding', 'prompt']);
+    h.handle.abort.abort();
+  });
+
+  it('never calls the checkpoint for a default-account lane', async () => {
+    const onAccountBinding = jest.fn(async () => undefined);
+    const h = start({ options: { onAccountBinding } });
+    await expect(h.handle.done).resolves.toBe(0);
+    expect(onAccountBinding).not.toHaveBeenCalled();
+    h.handle.abort.abort();
+  });
+
+  it('returns 1 without sending the task prompt when the checkpoint rejects', async () => {
+    const onAccountBinding = jest.fn(async () => {
+      throw new Error('binding storage unavailable');
+    });
+    const h = start({
+      options: { accountBinding: binding, accountBindingId: 'binding-1', onAccountBinding },
+    });
+    await expect(h.handle.done).resolves.toBe(1);
+    await settle();
+    expect(sent(h.agent, 'session/prompt')).toHaveLength(0);
+    expect(h.errors()).toEqual([
+      `${NAME} did not start: its account binding could not be recorded`,
+    ]);
+    expect(h.handle.supportsContinuation?.()).toBe(false);
+  });
+
+  it('returns 1 without prompting when the binding is incomplete', async () => {
+    const onAccountBinding = jest.fn(async () => undefined);
+    const h = start({ options: { accountBindingId: 'binding-1', onAccountBinding } });
+    await expect(h.handle.done).resolves.toBe(1);
+    expect(onAccountBinding).not.toHaveBeenCalled();
+    expect(sent(h.agent, 'session/prompt')).toHaveLength(0);
   });
 });

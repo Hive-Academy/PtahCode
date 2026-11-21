@@ -147,12 +147,14 @@ describe('GrokCliAdapter', () => {
   });
 
   describe('identity and capabilities', () => {
-    it('is the grok lane with MCP, continuation and no steer or interrupt', () => {
+    it('is the grok lane with MCP, continuation and interrupt but no steer', () => {
       expect(adapter.name).toBe('grok');
       expect(adapter.displayName).toBe('Grok');
       expect(adapter.roleChannel).toBe('task-prompt');
       expect(adapter.supportsMcp).toBe(true);
       expect(adapter.capabilities().messaging.continuation.state).toBe('supported');
+      expect(adapter.capabilities().messaging.interrupt.state).toBe('supported');
+      expect(adapter.capabilities().messaging.steer.state).toBe('unsupported');
       expect(adapter.capabilities().permissionModes.plan?.state).toBe('unsupported');
     });
 
@@ -162,7 +164,7 @@ describe('GrokCliAdapter', () => {
   });
 
   describe('detect()', () => {
-    it('reports the resolved binary and version, with a queue messaging mode', async () => {
+    it('reports the resolved binary and version, with the interrupt messaging mode', async () => {
       mockResolveCliPath.mockResolvedValue('C:\\bin\\grok.exe');
       mockProbeCliVersion.mockResolvedValue('grok 1.0.46');
 
@@ -171,7 +173,7 @@ describe('GrokCliAdapter', () => {
         installed: true,
         path: 'C:\\bin\\grok.exe',
         version: 'grok 1.0.46',
-        messagingMode: 'queue',
+        messagingMode: 'interrupt',
       });
       expect(mockResolveCliPath).toHaveBeenCalledWith('grok');
     });
@@ -181,7 +183,7 @@ describe('GrokCliAdapter', () => {
       await expect(adapter.detect()).resolves.toEqual({
         cli: 'grok',
         installed: false,
-        messagingMode: 'queue',
+        messagingMode: 'interrupt',
       });
     });
 
@@ -403,7 +405,9 @@ describe('GrokCliAdapter', () => {
       expect(args).not.toContain('--always-approve');
       expect(args).not.toContain('-m');
       expect(args).not.toContain('--reasoning-effort');
-      expect(mockSpawnOptions?.env).toBeUndefined();
+      // The lane base environment (host + clean-output variables), no Grok extras.
+      expect(mockSpawnOptions?.env).toMatchObject({ NO_COLOR: '1', FORCE_COLOR: '0' });
+      expect(mockSpawnOptions?.needsConsole).toBe(false);
       handle.abort.abort();
     });
 

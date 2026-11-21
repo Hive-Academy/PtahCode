@@ -3,16 +3,22 @@
  * (`createAcpSession`) needs. Everything vendor-specific lives here, so
  * the runner stays vendor-neutral and a further ACP agent is a new profile only.
  *
- * A profile holds no state and performs no I/O.
+ * A profile holds no state and performs no I/O beyond the logger it is
+ * handed. Vendor names, vendor extension methods and vendor wording live here
+ * and nowhere in the runner.
  *
- * Not supported by the runner yet, so a vendor that needs them needs a runner
- * change, not just a profile: `authenticate` (agents that advertise
- * `authMethods` must already be signed in), and `session/set_model` /
- * `session/set_mode` (model and effort travel through
- * `session/set_config_option` only).
+ * The runner offers `authenticate` (once, when the profile names a method and
+ * `session/new` answers the ACP auth-required error), `session/set_mode` (for
+ * {@link AcpVendorProfile.modeFor}) and `session/set_config_option`. The ACP
+ * SDK has no `session/set_model` request, so a model is always a config
+ * option.
  */
 import type { McpServer } from '@agentclientprotocol/sdk';
-import type { ProviderMcpAttachment } from '@ptah-extension/provider-session-contracts';
+import type {
+  ProviderMcpAttachment,
+  ProviderSessionLogger,
+} from '@ptah-extension/provider-session-contracts';
+import type { AcpSpawnEnv } from './acp-spawn-env';
 import type { CliType, LanePermissionMode } from '@ptah-extension/shared';
 
 /**
@@ -39,6 +45,23 @@ export interface AcpSessionOptions {
   readonly reasoningEffort?: string;
   /** Re-attach to this session instead of starting a new one. */
   readonly resumeSessionId?: string;
+  /**
+   * The re-attach request to prefer: `resume` (no history replay) or `load`
+   * (history replayed into the session's replay). The other one is used when
+   * the agent advertises only that one. Default `resume`.
+   */
+  readonly attachMethod?: 'resume' | 'load';
+  /**
+   * What a failed re-attach does: start a new session with an `info` (lanes,
+   * the default) or fail the setup with `resume-failed` (a chat that must not
+   * silently lose its history).
+   */
+  readonly attachFailure?: 'new-session' | 'error';
+  /**
+   * Bound on one prompt (lanes). On expiry the turn fails with
+   * `prompt-timeout`, the agent is cancelled and then stopped. Omit for none.
+   */
+  readonly promptTimeoutMs?: number;
   /** The lane's agent id: names the run in logs and turn ids. */
   readonly agentId?: string;
   /**
@@ -47,20 +70,6 @@ export interface AcpSessionOptions {
    */
   readonly mcp: readonly ProviderMcpAttachment[];
 }
-
-/**
- * How the runner re-attaches to an earlier session when
- * `options.resumeSessionId` is set:
- * - `resume`: `session/resume` when the agent advertises
- *   `sessionCapabilities.resume` (no history replay);
- * - `load`: `session/load` when the agent advertises `loadSession` (history is
- *   replayed; every update flagged `_meta.isReplay` is dropped);
- * - `resume-then-load`: `resume` first, `load` when resume is unsupported or fails;
- * - `none`: never re-attach; always start a new session.
- *
- * Any failure falls back to `session/new` with an `info` segment.
- */
-export type AcpResumeStrategy = 'resume' | 'load' | 'resume-then-load' | 'none';
 
 /**
  * One `session/set_config_option` call the profile wants before the first prompt.
@@ -85,10 +94,12 @@ export type AcpSessionConfigEntry =
 /** The ACP request that failed, as seen by {@link AcpVendorProfile.describeError}. */
 export type AcpRequestMethod =
   | 'initialize'
+  | 'authenticate'
   | 'session/new'
   | 'session/resume'
   | 'session/load'
   | 'session/set_config_option'
+  | 'session/set_mode'
   | 'session/prompt';
 
 /** A JSON-RPC error answer to one of the runner's requests, with its context. */
@@ -108,15 +119,48 @@ export interface AcpRequestFailure {
   readonly options: AcpSessionOptions;
 }
 
-/** How to start the agent: the argv after the binary, plus optional extra environment. */
+/** How to start the agent: the argv after the binary, its environment and console. */
 export interface AcpSpawnSpec {
   /** E.g. `['agent', 'stdio']`. */
   readonly args: readonly string[];
   /**
-   * Variables merged over the inherited environment (the same merge `spawnCli`
-   * applies for every lane). Omit to inherit the host environment unchanged.
+   * Applied to the caller's `baseEnv` (see `buildAcpSpawnEnv`). Omit to run
+   * with `baseEnv` unchanged.
    */
-  readonly env?: Readonly<Record<string, string>>;
+  readonly env?: AcpSpawnEnv;
+  /** Windows: the agent needs its own hidden console (ConPTY). Default false. */
+  readonly needsConsole?: boolean;
+}
+
+/**
+ * What `interrupt` does after `session/cancel`:
+ * - `await-reply`: the agent answers the cancelled prompt and keeps running,
+ *   so the session takes the next prompt on the same process;
+ * - `kill`: the agent is not trusted to survive a cancel; it is stopped after
+ *   the cancel grace, as on abort (no interrupt is offered).
+ */
+export type AcpCancelBehavior = 'await-reply' | 'kill';
+
+/** Vendor extension hooks. Unknown methods fall through to the runner. */
+export interface AcpExtensionHooks {
+  /**
+   * A vendor notification (e.g. `_vendor/...`). Return true when handled, so
+   * the runner stays silent; false reports the method once as unsupported.
+   */
+  notification?(
+    method: string,
+    params: Record<string, unknown>,
+    logger: ProviderSessionLogger | undefined,
+  ): boolean;
+  /**
+   * A vendor request from the agent. Resolve the result, or `undefined` to
+   * answer method-not-found. Without this hook every agent request is
+   * answered method-not-found.
+   */
+  request?(
+    method: string,
+    params: Record<string, unknown>,
+  ): Promise<Record<string, unknown> | undefined>;
 }
 
 export interface AcpVendorProfile {
@@ -124,7 +168,15 @@ export interface AcpVendorProfile {
   readonly vendor: CliType;
   /** Human name used in every message, e.g. "Grok". */
   readonly displayName: string;
-  readonly resumeStrategy: AcpResumeStrategy;
+  /** What the user runs to sign in; used for `auth-required` (m-3). */
+  readonly signInHint: string;
+  /** Default `kill`: interrupt is offered only for `await-reply`. */
+  readonly cancelBehavior?: AcpCancelBehavior;
+  /**
+   * The `authenticate` method id to try once when `session/new` answers the
+   * ACP auth-required error and the agent advertised that method.
+   */
+  readonly authMethod?: string;
   /**
    * The argv after the binary and any lane-specific environment. The model and
    * effort never go here: they are applied through {@link sessionConfig},
@@ -133,18 +185,26 @@ export interface AcpVendorProfile {
   buildSpawn(options: AcpSessionOptions): AcpSpawnSpec;
   /** The MCP servers attached on `session/new`, `session/resume` and `session/load`. */
   buildMcpServers(options: AcpSessionOptions): readonly McpServer[];
+  /** Optional `_meta` for `initialize`. */
+  initializeMeta?(options: AcpSessionOptions): Record<string, unknown> | undefined;
   /** Optional `_meta` for `session/new`. */
   sessionMeta?(options: AcpSessionOptions): Record<string, unknown> | undefined;
+  /** Optional `_meta` for `session/cancel`. */
+  cancelMeta?(options: AcpSessionOptions): Record<string, unknown> | undefined;
+  /**
+   * The session mode for these options (e.g. from the lane permission), set
+   * through `session/set_mode` when the session advertises it, else through a
+   * `mode` config option. A mode the agent does not offer is skipped with an
+   * `info`.
+   */
+  modeFor?(options: AcpSessionOptions): string | undefined;
   /**
    * Config to apply after session setup and before the first prompt. Entries
    * whose `configId` the session did not advertise are skipped with an `info`.
    */
   sessionConfig?(options: AcpSessionOptions): readonly AcpSessionConfigEntry[];
-  /**
-   * Vendor extension notifications to ignore silently (for example a vendor
-   * namespace such as `_vendor/*`). Omit to report every unknown method once.
-   */
-  isExtensionNotification?(method: string): boolean;
+  /** Vendor extension hooks. Omit to report every unknown notification once. */
+  readonly extensions?: AcpExtensionHooks;
   /** Exit code of a completed `execute` tool call, read from its `rawOutput`. */
   extractExitCode?(rawOutput: unknown): number | undefined;
   /**

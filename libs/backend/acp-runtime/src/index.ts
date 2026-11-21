@@ -7,8 +7,10 @@
  * ESM-only and loads lazily through `loadAcpSdk`/`connectAcp`.
  */
 export {
+  ACP_AUTH_REQUIRED_CODE,
   ACP_CANCEL_GRACE_MS,
   ACP_HANDSHAKE_TIMEOUTS_MS,
+  ACP_INTERRUPT_REPLY_TIMEOUT_MS,
   ACP_USAGE_DRAIN_MS,
   createAcpSession,
 } from './lib/acp-session-runtime';
@@ -21,10 +23,11 @@ export type {
 
 export { readAcpErrorDetail } from './lib/acp-vendor-profile';
 export type {
+  AcpCancelBehavior,
+  AcpExtensionHooks,
   AcpModelSource,
   AcpRequestFailure,
   AcpRequestMethod,
-  AcpResumeStrategy,
   AcpSessionConfigEntry,
   AcpSessionOptions,
   AcpSpawnSpec,
@@ -33,13 +36,32 @@ export type {
 
 export { spawnAcpProcess } from './lib/acp-process-transport';
 export type {
+  AcpCommandPreparer,
+  AcpPreparedCommand,
   AcpProcessExit,
   AcpProcessTransport,
   AcpSpawnOptions,
-  AcpSpawnRequest,
-  AcpSpawnTransport,
   AcpTransportFactory,
 } from './lib/acp-process-transport';
+
+export { buildAcpSpawnEnv } from './lib/acp-spawn-env';
+export type { AcpChildEnv, AcpSpawnEnv } from './lib/acp-spawn-env';
+
+export {
+  ACP_ACCEPTED_PROTOCOL_VERSIONS,
+  ACP_REQUESTED_PROTOCOL_VERSION,
+  checkInitializeReply,
+} from './lib/acp-protocol-negotiation';
+export type { AcpProtocolCheck } from './lib/acp-protocol-negotiation';
+
+export {
+  acpResponseForDecision,
+  requestAcpApproval,
+  toProviderApprovalRequest,
+} from './lib/acp-approval-adapter';
+export type { AcpApprovalOutcome } from './lib/acp-approval-adapter';
+
+export { ACP_MAX_REPLAY_EVENTS } from './lib/acp-replay-collector';
 
 export {
   ACP_MAX_MESSAGE_BYTES,

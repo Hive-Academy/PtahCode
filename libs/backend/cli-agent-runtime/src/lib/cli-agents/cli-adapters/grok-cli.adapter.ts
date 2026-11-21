@@ -9,9 +9,11 @@
  * lives in `grokAcpProfile`.
  *
  * Messaging: an ACP agent queues a prompt sent mid-turn instead of injecting
- * it, and `session/cancel` ends the turn rather than pausing it, so there is no
- * steer and no interrupt. A further message is a new `session/prompt` on the
- * same session (continuation).
+ * it, so there is no steer. Interrupt is `session/cancel`: Grok answers the
+ * cancelled prompt and keeps the process (`grok-p2-cancel-mid-shell`), so the
+ * message is re-submitted as the next `session/prompt` on the same session.
+ * A further message is a new `session/prompt` on the same session
+ * (continuation).
  *
  * Credentials are Grok's own (`grok login` → `~/.grok/auth.json`); Ptah
  * stores none and passes no per-lane env.
@@ -185,7 +187,7 @@ export class GrokCliAdapter implements CliAdapter {
     return {
       messaging: {
         steer: { state: 'unsupported', reason: 'ACP messages begin the next turn.' },
-        interrupt: { state: 'unsupported', reason: 'No run-scoped interrupt is exposed.' },
+        interrupt: { state: 'supported' },
         continuation: { state: 'supported' },
         resume: { state: 'supported' },
       },

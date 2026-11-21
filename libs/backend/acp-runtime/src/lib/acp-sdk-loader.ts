@@ -14,6 +14,8 @@
  */
 import type * as AcpSdk from '@agentclientprotocol/sdk';
 import type {
+  AuthenticateRequest,
+  AuthenticateResponse,
   CancelNotification,
   Client,
   InitializeRequest,
@@ -28,12 +30,14 @@ import type {
   ResumeSessionResponse,
   SetSessionConfigOptionRequest,
   SetSessionConfigOptionResponse,
+  SetSessionModeRequest,
+  SetSessionModeResponse,
 } from '@agentclientprotocol/sdk';
 
 /** The SDK runtime values Ptah uses. */
 export type AcpSdkModule = Pick<
   typeof AcpSdk,
-  'ClientSideConnection' | 'ndJsonStream'
+  'ClientSideConnection' | 'ndJsonStream' | 'RequestError'
 >;
 
 /** Client-side handlers the agent can call (permission requests, session updates, extensions). */
@@ -59,12 +63,14 @@ export interface AcpByteStream {
  */
 export interface AcpConnectionApi {
   initialize(params: InitializeRequest): Promise<InitializeResponse>;
+  authenticate(params: AuthenticateRequest): Promise<AuthenticateResponse>;
   newSession(params: NewSessionRequest): Promise<NewSessionResponse>;
   resumeSession(params: ResumeSessionRequest): Promise<ResumeSessionResponse>;
   loadSession(params: LoadSessionRequest): Promise<LoadSessionResponse>;
   setSessionConfigOption(
     params: SetSessionConfigOptionRequest,
   ): Promise<SetSessionConfigOptionResponse>;
+  setSessionMode(params: SetSessionModeRequest): Promise<SetSessionModeResponse>;
   prompt(params: PromptRequest): Promise<PromptResponse>;
   /** `session/cancel` is a notification: it resolves once written, not when the agent acts. */
   cancel(params: CancelNotification): Promise<void>;
@@ -132,4 +138,16 @@ export async function connectAcp(
     maxMessageBytes: ACP_MAX_MESSAGE_BYTES,
   });
   return new sdk.ClientSideConnection(() => handlers, framed);
+}
+
+/**
+ * The JSON-RPC `-32601` error an unhandled agent-to-client extension request
+ * is answered with. Only an SDK `RequestError` keeps its code on the wire, so
+ * it is built here, where the SDK is loaded.
+ *
+ * @throws AcpUnavailableError when the SDK cannot be loaded.
+ */
+export async function acpMethodNotFound(method: string): Promise<Error> {
+  const sdk = await loadAcpSdk();
+  return sdk.RequestError.methodNotFound(method);
 }

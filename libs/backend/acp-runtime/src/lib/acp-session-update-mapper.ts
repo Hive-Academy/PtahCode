@@ -7,16 +7,28 @@ const TRUNCATION_MARKER = '\n… [output truncated]';
 /** Item ids for chunks that carry no message id of their own. */
 const AGENT_MESSAGE_ITEM = 'agent-message';
 const AGENT_THOUGHT_ITEM = 'agent-thought';
+/** Prefix of a user turn's item id; a counter makes each turn distinct. */
 const USER_MESSAGE_ITEM = 'user-message';
 
+/**
+ * What a tool's updates carried so far. ACP updates omit unchanged fields, so
+ * the terminal update falls back to these (PR #1450 review).
+ */
 interface ToolCallDetails {
   readonly kind?: string;
   readonly title?: string;
+  readonly output?: string;
 }
 
 export interface AcpSessionUpdateMapper {
   /** Never throws; an update with nothing to show maps to `[]`. */
   map(update: SessionUpdate): ProviderSessionEventBody[];
+  /**
+   * Forget the remembered tool metadata. A finished tool's entry is released
+   * when it completes or fails; the runtime calls this at turn, replay and
+   * generation boundaries for tools that never finished.
+   */
+  releaseTools(): void;
 }
 
 export interface AcpSessionUpdateMapperOptions {
@@ -99,15 +111,35 @@ function fileChanges(content: unknown): ProviderSessionEventBody[] {
   });
 }
 
-function outputFromToolUpdate(update: Record<string, unknown>): string {
+/** The output an update carries, or `undefined` when it carries none. */
+function outputFromToolUpdate(
+  update: Record<string, unknown>,
+): string | undefined {
   const content = Array.isArray(update['content'])
     ? update['content']
         .map(textFromContent)
         .filter((text): text is string => text !== undefined)
         .join('')
     : '';
-  return capOutput(content || safeStringify(update['rawOutput']));
+  if (content) return capOutput(content);
+  if (update['rawOutput'] === undefined || update['rawOutput'] === null) {
+    return undefined;
+  }
+  return capOutput(safeStringify(update['rawOutput']));
 }
+
+function isTerminalToolStatus(status: unknown): status is 'completed' | 'failed' {
+  return status === 'completed' || status === 'failed';
+}
+
+/** Updates that belong to the agent's side of a turn. */
+const AGENT_TURN_UPDATES: ReadonlySet<string> = new Set([
+  'agent_message_chunk',
+  'agent_thought_chunk',
+  'tool_call',
+  'tool_call_update',
+  'plan',
+]);
 
 function errorNotice(content: string): AcpStopNotice {
   return { type: 'error', content };
@@ -123,10 +155,64 @@ export function createAcpSessionUpdateMapper(
   options: AcpSessionUpdateMapperOptions = {},
 ): AcpSessionUpdateMapper {
   const tools = new Map<string, ToolCallDetails>();
+  /**
+   * User turns seen so far. A replayed history sends its user chunks without
+   * a message id, so a new user turn is detected by a role change (any other
+   * update since the last user chunk) and numbered (M-1).
+   */
+  let userTurns = 0;
+  let lastWasUser = false;
+
+  /**
+   * Remember what a non-final update carried; on a final status emit the
+   * `toolCompleted`, the update's own values first, and forget the tool.
+   * Shared by `tool_call` (which may already carry a final status) and
+   * `tool_call_update`.
+   */
+  const trackTool = (
+    update: Record<string, unknown>,
+    toolCallId: string,
+  ): ProviderSessionEventBody[] => {
+    const remembered = tools.get(toolCallId);
+    const kind =
+      typeof update['kind'] === 'string' ? update['kind'] : remembered?.kind;
+    const title =
+      typeof update['title'] === 'string' ? update['title'] : remembered?.title;
+    const output = outputFromToolUpdate(update) ?? remembered?.output;
+    const status = update['status'];
+    if (!isTerminalToolStatus(status)) {
+      tools.set(toolCallId, { kind, title, output });
+      return [];
+    }
+    // The final update: its metadata has no further use.
+    tools.delete(toolCallId);
+    const isCommand = status === 'completed' && kind === 'execute';
+    return [
+      {
+        type: 'toolCompleted',
+        toolId: toolCallId,
+        status,
+        toolName: title,
+        kind,
+        output: output ?? '',
+        exitCode: isCommand
+          ? options.extractExitCode?.(update['rawOutput'])
+          : undefined,
+      },
+    ];
+  };
 
   const map = (update: SessionUpdate): ProviderSessionEventBody[] => {
     if (!isRecord(update) || typeof update.sessionUpdate !== 'string') {
       return [];
+    }
+    // Only an agent-side update ends a user turn; one that maps to no event
+    // (usage, commands, ...) must not split a user message in two (M-3).
+    if (update.sessionUpdate === 'user_message_chunk') {
+      if (!lastWasUser) userTurns++;
+      lastWasUser = true;
+    } else if (AGENT_TURN_UPDATES.has(update.sessionUpdate)) {
+      lastWasUser = false;
     }
 
     switch (update.sessionUpdate) {
@@ -174,7 +260,7 @@ export function createAcpSessionUpdateMapper(
           ? [
               {
                 type: 'userText',
-                itemId: itemIdOf(update, USER_MESSAGE_ITEM),
+                itemId: itemIdOf(update, `${USER_MESSAGE_ITEM}-${userTurns}`),
                 text: content['text'],
               },
             ]
@@ -189,10 +275,13 @@ export function createAcpSessionUpdateMapper(
           return fileChanges(update.content);
         }
         const kind = typeof update.kind === 'string' ? update.kind : undefined;
-        tools.set(update.toolCallId, { kind, title: update.title });
         const toolInput = isPlainObject(update.rawInput)
           ? update.rawInput
           : undefined;
+        // The first event may already be final (ACP lets `tool_call` carry
+        // the current status): it completes through the same path as an
+        // update, so a failed call is not left open (PR #1450 review).
+        const completion = trackTool(update, update.toolCallId);
         return [
           {
             type: 'toolStarted',
@@ -202,35 +291,14 @@ export function createAcpSessionUpdateMapper(
             input: toolInput,
           },
           ...fileChanges(update.content),
+          ...completion,
         ];
       }
 
       case 'tool_call_update': {
         const changes = fileChanges(update.content);
         if (typeof update.toolCallId !== 'string') return changes;
-        const remembered = tools.get(update.toolCallId);
-        const kind =
-          typeof update.kind === 'string' ? update.kind : remembered?.kind;
-        const title =
-          typeof update.title === 'string' ? update.title : remembered?.title;
-        if (update.status === 'completed' || update.status === 'failed') {
-          const isCommand = update.status === 'completed' && kind === 'execute';
-          return [
-            {
-              type: 'toolCompleted',
-              toolId: update.toolCallId,
-              status: update.status,
-              toolName: title,
-              kind,
-              output: outputFromToolUpdate(update),
-              exitCode: isCommand
-                ? options.extractExitCode?.(update.rawOutput)
-                : undefined,
-            },
-            ...changes,
-          ];
-        }
-        return changes;
+        return [...trackTool(update, update.toolCallId), ...changes];
       }
 
       case 'plan':
@@ -262,6 +330,9 @@ export function createAcpSessionUpdateMapper(
         // that breaks the mapper shows nothing; the turn itself goes on.
         return [];
       }
+    },
+    releaseTools() {
+      tools.clear();
     },
   };
 }

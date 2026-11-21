@@ -7,10 +7,18 @@
  *   once (Cursor/Pi convention). `done` is the first turn: the handshake,
  *   then the Ptah MCP attachment wait, then the task prompt.
  * - `continue(message)` is a further prompt on the same session.
- * - There is no `steer` or `interrupt`: an ACP agent queues a mid-turn prompt
- *   instead of injecting it, so the message router's own queue is used.
+ * - There is no `steer`: an ACP agent queues a mid-turn prompt instead of
+ *   injecting it. `interrupt` is offered when the profile's cancel behaviour
+ *   keeps the process (`await-reply`): `session/cancel` ends the turn and the
+ *   next `continue` runs on the same process and session. The interrupted
+ *   turn's `done` resolves 0 (Cursor convention), so the lane is not failed.
  * - Abort = `session/cancel` (when a prompt is in flight), a short grace, then
  *   kill; the session stays resumable by id.
+ * - Spawn: through the host `IProcessSpawner` with the lane base environment
+ *   and command preparer (`lane-acp-spawn.ts`). Without a spawner the lane
+ *   fails at once with one error.
+ * - Each prompt is bounded by {@link LANE_ACP_PROMPT_TIMEOUT_MS}; a failed
+ *   resume falls back to a new session (lanes keep that fallback).
  *
  * Session events reach the lane through `projectToCliSegments`; stderr lines
  * are classified here (`classifyCliStderr`). `done` and every continuation
@@ -35,7 +43,11 @@ import type {
 } from '../cli-adapter.interface';
 import { buildTaskPrompt, createBufferedEmitter } from '../cli-adapter.utils';
 import { classifyCliStderr } from '../cli-stderr-severity';
-import { cliAcpSpawnTransport } from './cli-acp-spawn-transport';
+import {
+  LANE_ACP_PROMPT_TIMEOUT_MS,
+  laneAcpBaseEnv,
+  laneAcpCommandPreparer,
+} from './lane-acp-spawn';
 import { buildLaneMcpAttachments } from './lane-mcp-attachments';
 
 export interface ProviderSessionLaneHandleConfig {
@@ -45,7 +57,7 @@ export interface ProviderSessionLaneHandleConfig {
   readonly command: string;
   /** Creates the child off-thread when present (TASK_2026_367). */
   readonly spawner?: IProcessSpawner;
-  /** Defaults to the runtime's process transport; specs pass an in-memory one. */
+  /** Defaults to the runtime's process transport (needs `spawner`); specs pass an in-memory one. */
   readonly transportFactory?: AcpTransportFactory;
   /** Receives the raw failure detail that user-facing segments summarise. */
   readonly logger?: Logger;
@@ -65,11 +77,33 @@ export function createProviderSessionLaneHandle(
   const abort = new AbortController();
   const output = createBufferedEmitter<string>();
   const segment = createBufferedEmitter<CliOutputSegment>();
+
+  if (!config.spawner && !config.transportFactory) {
+    const message = `${name} cannot start: no process spawner was supplied for the lane`;
+    logger?.error('[AcpSessionHandle] lane has no process spawner', logContext);
+    output.emit(`\n[${name}] ${message}\n`);
+    segment.emit({ type: 'error', content: message });
+    return {
+      abort,
+      done: Promise.resolve(1),
+      onOutput: output.subscribe,
+      onSegment: segment.subscribe,
+      getSessionId: () => options.resumeSessionId,
+      supportsContinuation: () => false,
+    };
+  }
+
   const sessionResolved = createBufferedEmitter<string>();
   let mcpTimedOut = false;
   let onMcpTimeout: (() => void) | undefined;
 
+  /** Status of the last turn's `terminal` event. */
+  let lastTerminalStatus: string | undefined;
+  /** {@link interrupt} was called during the current turn. */
+  let interruptRequested = false;
+
   const onEvent = (event: ProviderSessionEvent): void => {
+    if (event.type === 'terminal') lastTerminalStatus = event.status;
     if (event.type === 'diagnostic') {
       output.emit(`[stderr] ${event.line}\n`);
       segment.emit({ type: classifyCliStderr(event.line), content: event.line });
@@ -84,10 +118,17 @@ export function createProviderSessionLaneHandle(
 
   const session = createAcpSession({
     profile,
-    options: { ...options, mcp: buildLaneMcpAttachments(options) },
+    options: {
+      ...options,
+      mcp: buildLaneMcpAttachments(options),
+      attachMethod: 'resume',
+      attachFailure: 'new-session',
+      promptTimeoutMs: LANE_ACP_PROMPT_TIMEOUT_MS,
+    },
     command: config.command,
+    baseEnv: laneAcpBaseEnv(),
     spawner: config.spawner,
-    spawnTransport: cliAcpSpawnTransport,
+    prepareCommand: laneAcpCommandPreparer,
     transportFactory: config.transportFactory,
     logger,
     signal: abort.signal,
@@ -145,12 +186,83 @@ export function createProviderSessionLaneHandle(
     }
   };
 
+  /**
+   * The task prompt goes first: until it is sent (the handshake and the up to
+   * 15 s MCP attachment wait), `continue()` refuses (PR #1444 review). The
+   * router parks a message sent meanwhile, because the first turn is running,
+   * and delivers it once that turn settles.
+   */
+  let taskPromptSent = false;
+
+  /**
+   * Run one prompt. A turn Ptah interrupted to keep the session resolves 0,
+   * as Cursor's does: the lane is healthy and the router continues it, so it
+   * must not be recorded as a failed lane. A whole-lane abort stays 1.
+   */
+  const runTurn = (text: string): Promise<number> => {
+    interruptRequested = false;
+    lastTerminalStatus = undefined;
+    return session
+      .prompt(text)
+      .then((code) =>
+        // Only a turn whose process takes the next prompt is healthy: a
+        // process retired by a failed cancel reports `interrupted` too, but
+        // the lane cannot continue on it (PR #1450 review).
+        code !== 0 &&
+        interruptRequested &&
+        lastTerminalStatus === 'interrupted' &&
+        !session.isClosed() &&
+        !abort.signal.aborted
+          ? 0
+          : code,
+      );
+  };
+
+  /**
+   * The account-binding checkpoint (`CliCommandOptions.onAccountBinding`),
+   * awaited before the task prompt as the Codex lane adapter does, so a named
+   * lane never prompts before its binding to the session id persisted.
+   * Resolves false, after one error segment and stopping the agent, when the
+   * binding is incomplete or the checkpoint rejects.
+   */
+  const persistAccountBinding = async (sessionId: string): Promise<boolean> => {
+    if (options.accountBinding === undefined && options.accountBindingId === undefined) {
+      return true;
+    }
+    try {
+      if (!options.accountBinding || !options.accountBindingId || !options.onAccountBinding) {
+        throw new Error('the lane account binding is incomplete');
+      }
+      await options.onAccountBinding(
+        {
+          accountBinding: options.accountBinding,
+          accountBindingId: options.accountBindingId,
+        },
+        sessionId,
+      );
+      return true;
+    } catch (error: unknown) {
+      logger?.error('[AcpSessionHandle] account binding checkpoint failed', {
+        ...logContext,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      const message = `${name} did not start: its account binding could not be recorded`;
+      output.emit(`\n[${name}] ${message}\n`);
+      segment.emit({ type: 'error', content: message });
+      abort.abort();
+      return false;
+    }
+  };
+
   const runFirstTurn = async (): Promise<number> => {
     const setup = await session.start();
     if (!setup.ok || abort.signal.aborted) return 1;
+    const sessionId = session.getSessionId();
+    if (!sessionId || !(await persistAccountBinding(sessionId))) return 1;
     await awaitMcpAttachment();
     if (abort.signal.aborted || session.isClosed()) return 1;
-    return session.prompt(
+    taskPromptSent = true;
+    return runTurn(
       buildTaskPrompt(
         // A restored session ran its earlier turns in another handle — another
         // process, host or Ptah version — so what they carried (the policy
@@ -190,15 +302,42 @@ export function createProviderSessionLaneHandle(
     if (!session.isSetupComplete() || !session.getSessionId()) {
       return Promise.reject(new Error(`${name} has no ACP session yet`));
     }
+    if (!taskPromptSent) {
+      return Promise.reject(
+        new Error(`${name} has not sent its task prompt yet; send the message after it`),
+      );
+    }
     if (session.isTurnRunning()) {
       return Promise.reject(new Error(`${name} is still running a turn`));
     }
     return Promise.resolve({
-      done: session.prompt(message).catch(onUnexpectedTurnError),
+      done: runTurn(message).catch(onUnexpectedTurnError),
     });
   };
 
-  const done = runFirstTurn().catch(onUnexpectedTurnError);
+  /** Cancel the running turn; the process and session stay for `continue`. */
+  const interrupt = async (): Promise<void> => {
+    interruptRequested = true;
+    const kept = await session.interrupt();
+    logger?.info('[AcpSessionHandle] turn interrupted', {
+      ...logContext,
+      processKept: kept,
+    });
+  };
+
+  /**
+   * A first turn that threw before its task prompt went out leaves a session
+   * that can never take a message (`continue` refuses without the task
+   * prompt). The lane is aborted, so `supportsContinuation()` turns false
+   * and the agent is released instead of idling until the lane's cleanup
+   * (PR #1450 review). Every other early exit of the first turn already
+   * aborts or closes the session.
+   */
+  const done = runFirstTurn().catch((error: unknown) => {
+    const code = onUnexpectedTurnError(error);
+    if (!taskPromptSent) abort.abort();
+    return code;
+  });
 
   return {
     abort,
@@ -213,6 +352,10 @@ export function createProviderSessionLaneHandle(
     onSessionResolved: sessionResolved.subscribe,
     supportsContinuation,
     continue: continueTurn,
+    // Before the task prompt there is no turn to cancel.
+    supportsInterrupt: () =>
+      taskPromptSent && session.supportsInterrupt() && !abort.signal.aborted,
+    interrupt,
     getPid: () => session.getPid(),
     outcomeUsageIsTurnTotal: true,
     usageScope: 'turn',
