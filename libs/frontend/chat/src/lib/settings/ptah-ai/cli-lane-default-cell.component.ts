@@ -358,7 +358,9 @@ let nextTitleId = 0;
               class="text-xs text-base-content-muted"
               tabindex="0"
               [title]="reason()"
-              >Unavailable<span class="sr-only">{{ reason() }}</span></span
+              >Unavailable@if (showReason()) {<span class="defaults-reason">
+                  — {{ reason() }}</span>
+              } @else {<span class="sr-only">{{ reason() }}</span>}</span
             >
           }
           @if (field() !== 'permission' && networks().length) {
@@ -401,7 +403,9 @@ let nextTitleId = 0;
               class="text-xs text-base-content-muted"
               tabindex="0"
               [title]="reason()"
-              >Unavailable<span class="sr-only">{{ reason() }}</span></span
+              >Unavailable@if (showReason()) {<span class="defaults-reason">
+                  — {{ reason() }}</span>
+              } @else {<span class="sr-only">{{ reason() }}</span>}</span
             >
           }
         </div>
@@ -454,6 +458,11 @@ export class CliLaneDefaultCellComponent {
   readonly layout = input<'compact' | 'wide' | 'card' | 'reset'>('compact');
   readonly field = input<'both' | 'permission' | 'network'>('both');
   readonly showCaption = input(true);
+  /**
+   * The lane detail has room for the reason: it shows after "Unavailable" as wrapping text, not as hidden
+   * text. A hidden one-line reason is wider than its 1px box, so it reads as overflow in a narrow detail.
+   */
+  readonly showReason = input(false);
   /**
    * When the `compact` layout shows its reset for a saved default. `auto`: only with the caption.
    * `always`: also with no caption (the Ptah group header of the lanes table).

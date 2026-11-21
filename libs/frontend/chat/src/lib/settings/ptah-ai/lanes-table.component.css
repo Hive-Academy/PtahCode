@@ -473,17 +473,29 @@ ptah-lanes-table .ptah-table[data-order-mode='true'] colgroup > col:first-child 
 ptah-lanes-table td.lane-order-cell {
   position: relative;
 }
+/* 5.25rem (84px) less 2 x 0.25rem padding leaves 76px for the three 24px targets (72px). */
+ptah-lanes-table
+  .ptah-table[data-order-mode='true']
+  .ptah-table-grid
+  > tbody
+  > tr
+  > td.lane-order-cell {
+  padding-inline: var(--ptah-space-1);
+}
 ptah-lanes-table .lane-order-controls {
   display: inline-flex;
   align-items: center;
   gap: 0;
 }
+/* WCAG 2.5.8: the grip and the up / down buttons are each a 24 x 24 px target (default xs footprint).
+   Three targets (72px) fit the 5.25rem order column of Reorder mode and the 3.5rem row. */
 ptah-lanes-table .lane-order-grip {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.25rem;
-  height: 1.5rem;
+  width: var(--ptah-control-h-xs);
+  height: var(--ptah-control-h-xs);
+  flex-shrink: 0;
   cursor: grab;
   color: var(--color-base-content-muted);
 }

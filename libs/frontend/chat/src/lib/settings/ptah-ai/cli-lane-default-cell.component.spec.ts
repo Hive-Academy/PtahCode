@@ -313,6 +313,23 @@ describe('CliLaneDefaultCellComponent', () => {
     expect(fixture.nativeElement.querySelector('[tabindex="0"]')).toBeTruthy();
   });
 
+  it('shows the reason as visible wrapping text, not hidden text, when showReason is set (lane detail)', () => {
+    const fixture = setup();
+    fixture.componentRef.setInput('manifest', undefined);
+    fixture.componentRef.setInput('field', 'permission');
+    fixture.detectChanges();
+    const host = fixture.nativeElement as HTMLElement;
+    expect(host.querySelector('.sr-only')?.textContent).toBe(
+      'No verified mode is available.',
+    );
+    fixture.componentRef.setInput('showReason', true);
+    fixture.detectChanges();
+    expect(host.querySelector('.sr-only')).toBeNull();
+    expect(host.querySelector('.defaults-reason')?.textContent?.trim()).toBe(
+      '— No verified mode is available.',
+    );
+  });
+
   it('explains Cursor permission modes that cannot be selected', () => {
     const fixture = setup('cursor');
     fixture.componentRef.setInput('layout', 'wide');

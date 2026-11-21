@@ -234,7 +234,6 @@
                 type="button"
                 ptahIconButton
                 size="xs"
-                density="compact"
                 data-order-up
                 [label]="'Move ' + row.name + ' up'"
                 [attr.aria-disabled]="
@@ -255,7 +254,6 @@
                 type="button"
                 ptahIconButton
                 size="xs"
-                density="compact"
                 data-order-down
                 [label]="'Move ' + row.name + ' down'"
                 [attr.aria-disabled]="
@@ -484,6 +482,7 @@
                         "
                         field="permission"
                         [showCaption]="false"
+                        [showReason]="true"
                         (selected)="
                           defaultSelected.emit({ row, choice: $event })
                         "
@@ -510,6 +509,7 @@
                         "
                         field="network"
                         [showCaption]="false"
+                        [showReason]="true"
                         (selected)="
                           defaultSelected.emit({ row, choice: $event })
                         "
