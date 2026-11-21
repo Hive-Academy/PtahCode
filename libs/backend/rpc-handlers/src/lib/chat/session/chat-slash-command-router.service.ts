@@ -12,7 +12,7 @@
  */
 
 import { injectable, inject } from 'tsyringe';
-import { Logger, TOKENS } from '@ptah-extension/vscode-core';
+import { Logger, RpcUserError, TOKENS } from '@ptah-extension/vscode-core';
 import { SETTINGS_TOKENS } from '@ptah-extension/settings-core';
 import { SessionChildRegistry } from '@ptah-extension/cli-agent-runtime';
 import type { ModelSettings } from '@ptah-extension/settings-core';
@@ -459,6 +459,10 @@ export class ChatSlashCommandRouterService {
           this.logger.warn('[RPC] slash account admission refused', { code: refusal.accountRefusal.code });
           return { ...refusal, sessionId };
         }
+        // A typed refusal (e.g. PROVIDER_SESSION_UNAVAILABLE) keeps its code:
+        // continueSession maps an RpcUserError to `errorCode`, and the
+        // `finally` below still releases a compact reservation (PR #1450 review).
+        if (slashError instanceof RpcUserError) throw slashError;
         const message =
           slashError instanceof Error ? slashError.message : String(slashError);
         this.logger.warn(

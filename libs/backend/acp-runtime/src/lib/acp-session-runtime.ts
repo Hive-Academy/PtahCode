@@ -288,11 +288,12 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
       method,
       agentId: options.agentId,
       sessionId: session,
+      // Name and transport only: a stdio server's env and args, and an HTTP
+      // server's url and headers, can carry credentials (PR #1450 review).
+      // The configuration sent to the agent is not changed.
       mcpServers: servers.map((server) => ({
-        ...server,
-        ...('headers' in server
-          ? { headers: server.headers.length ? '[redacted]' : [] }
-          : {}),
+        name: server.name,
+        transport: 'type' in server ? server.type : 'stdio',
       })),
     });
   };
@@ -530,8 +531,9 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
     if (promptInFlight && conn && id && !target.closed) {
       // The grace starts once the agent can see the notification; a cancel
       // that fails or does not get written in time kills at once.
+      const settled = promptSettled;
       void cancelPrompt(target, conn, id).then((sent) =>
-        sent ? stopAfterGrace(target, ACP_CANCEL_GRACE_MS) : undefined,
+        sent ? stopAfterGrace(target, ACP_CANCEL_GRACE_MS, settled) : undefined,
       );
       return;
     }
@@ -640,12 +642,14 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
 
   /**
    * Give a cancelled agent up to `graceMs` to stop its tools and answer the
-   * prompt (or exit), then kill. The kill is the backstop for an agent that
-   * ignores the cancel; it is skipped once the child exited.
+   * cancelled prompt (`settled`, captured when the cancel started) or exit,
+   * then kill. The kill is the backstop for an agent that ignores the cancel;
+   * it is skipped once the child exited.
    */
   const stopAfterGrace = async (
     target: Generation,
     graceMs: number,
+    settled: Promise<unknown> | undefined,
   ): Promise<void> => {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const grace = new Promise<void>((resolve) => {
@@ -654,7 +658,7 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
     try {
       await Promise.race([
         target.transport.exited,
-        promptSettled ?? Promise.resolve(),
+        settled ?? Promise.resolve(),
         grace,
       ]);
     } catch (error: unknown) {
@@ -1081,6 +1085,14 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
     );
     const mode = acknowledgedMode ?? profile.modeFor?.(options);
     if (mode) await applyMode(conn, id, mode);
+    // `onSessionResolved` or the config writes may have aborted the session
+    // or retired this process: setup did not succeed then (PR #1450 review).
+    if (signal.aborted || !isLive(target)) {
+      throw new AcpTurnFailure(
+        `${name} was stopped during session setup`,
+        'process-exited',
+      );
+    }
     setupComplete = true;
     return { restoredContext };
   };
@@ -1272,8 +1284,11 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
             `${name} did not finish the turn within ${limit / 1000} s`,
             'prompt-timeout',
           );
+          const settled = promptSettled;
           void cancelPrompt(target, conn, id).then((sent) =>
-            sent ? stopAfterGrace(target, ACP_CANCEL_GRACE_MS) : undefined,
+            sent
+              ? stopAfterGrace(target, ACP_CANCEL_GRACE_MS, settled)
+              : undefined,
           );
         }, limit);
         watchdog.unref?.();
@@ -1345,7 +1360,12 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
               : (signal.aborted || turnCancelledByPtah) && !timedOut
                 ? 'interrupted'
                 : 'failed',
-          disposition: target.closed || timedOut || notStarted ? 'broken' : 'reusable',
+          // A retired process (a failed cancel write, a kill-style interrupt)
+          // takes no further prompt even while it has not exited yet.
+          disposition:
+            target.closed || target.retired || timedOut || notStarted
+              ? 'broken'
+              : 'reusable',
         });
       }
       promptInFlight = false;
@@ -1396,11 +1416,15 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
       // The turn may have ended meanwhile; a late cancel would hit the next one.
       if (promptSettled !== settled || !promptInFlight) return true;
     }
+    // A kill-style agent is stopped after this cancel: reserve the process
+    // for shutdown before anything is awaited, so a prompt sent once the
+    // cancelled turn settles cannot land on it (PR #1450 review).
+    if (cancelBehavior === 'kill') target.retired = true;
     // Bounded: a cancel that fails or stalls behind a pending write has
     // already stopped the agent.
     if (!(await cancelPrompt(target, conn, id))) return false;
     if (cancelBehavior === 'kill') {
-      await stopAfterGrace(target, ACP_CANCEL_GRACE_MS);
+      await stopAfterGrace(target, ACP_CANCEL_GRACE_MS, settled);
       return false;
     }
     let timer: ReturnType<typeof setTimeout> | undefined;
