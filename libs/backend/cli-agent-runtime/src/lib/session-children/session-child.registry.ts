@@ -403,7 +403,11 @@ export class SessionChildRegistry {
     });
   }
 
-  /** A report refused because the parent was not live: counted, never queued. */
+  /**
+   * A report that could not be delivered or queued for its parent: counted.
+   * A known child with an inactive parent is queued by the report router
+   * instead and is not counted here.
+   */
   markReportRefused(
     childSessionId: string,
     summary: string,

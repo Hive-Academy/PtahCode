@@ -226,6 +226,90 @@ describe('mcp-response-formatter › formatAgentReport', () => {
     expect(out).toMatch(/Report NOT Delivered/);
     expect(out).toMatch(/Delivered:\*\* No/);
     expect(out).toMatch(/Reason:\*\* unattributed-caller/);
+    expect(out).toContain(
+      "Ptah could not route this report because the caller's child session identity could not be verified.",
+    );
+  });
+
+  it('renders a queued report with its receipt', () => {
+    const out = formatAgentReport({
+      delivered: false,
+      queued: true,
+      receiptId: 'rcpt-7',
+    });
+    expect(out).toMatch(/Report Queued/);
+    expect(out).toMatch(/Delivered:\*\* No/);
+    expect(out).toMatch(/Queued:\*\* Yes/);
+    expect(out).toMatch(/Receipt:\*\* rcpt-7/);
+    expect(out).toContain(
+      'Ptah queued the child report for its verified parent. Receipt: rcpt-7. Delivery will be attempted when the parent is available.',
+    );
+  });
+
+  it('adds the inactive-parent sentence for parent-session-not-active only', () => {
+    const out = formatAgentReport({
+      delivered: false,
+      reason: 'parent-session-not-active',
+    });
+    expect(out).toMatch(/Reason:\*\* parent-session-not-active/);
+    expect(out).toContain(
+      'Ptah could not save the report for the inactive parent. Keep the report and retry when the parent is available.',
+    );
+  });
+
+  it('uses a generic storage sentence for storage-unavailable', () => {
+    const out = formatAgentReport({
+      delivered: false,
+      reason: 'storage-unavailable',
+    });
+    expect(out).toContain(
+      'Ptah could not save the report. Keep the report and retry.',
+    );
+    expect(out).not.toContain('inactive parent');
+  });
+
+  it.each([
+    [
+      'delivery-in-progress',
+      'sending',
+      'Ptah is sending a saved copy of this report to the parent now. Do not send it again.',
+    ],
+    [
+      'delivery-outcome-unknown',
+      'outcome-unknown',
+      'Ptah sent a saved copy of this report, but could not confirm that the parent received it.',
+    ],
+  ])('renders the receipt and state for %s', (reason, receiptState, sentence) => {
+    const out = formatAgentReport({
+      delivered: false,
+      reason,
+      receiptId: 'rcpt-9',
+      receiptState,
+    });
+    expect(out).toContain(sentence);
+    expect(out).toMatch(/Receipt:\*\* rcpt-9/);
+    expect(out).toContain(`Receipt State:** ${receiptState}`);
+    expect(out).not.toMatch(/Queued:\*\*/);
+  });
+
+  it('shows the receipt state of a queued retryable report', () => {
+    const out = formatAgentReport({
+      delivered: false,
+      queued: true,
+      receiptId: 'rcpt-4',
+      receiptState: 'blocked-retryable',
+    });
+    expect(out).toContain('Receipt State:** blocked-retryable');
+  });
+
+  it('keeps held-for-completion output free of refusal sentences', () => {
+    const out = formatAgentReport({
+      delivered: false,
+      pending: true,
+      reason: 'held-for-completion',
+    });
+    expect(out).toMatch(/Report Pending/);
+    expect(out).not.toContain('Ptah could not');
   });
 });
 

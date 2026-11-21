@@ -29,9 +29,16 @@ import { inject, injectable } from 'tsyringe';
 import { createHash } from 'node:crypto';
 import { TOKENS, Logger } from '@ptah-extension/vscode-core';
 import { SessionId } from '@ptah-extension/shared';
-import type { AgentProcessInfo, IAgentAdapter } from '@ptah-extension/shared';
+import type {
+  AgentProcessInfo,
+  IAgentAdapter,
+  ParentDeliveryState,
+} from '@ptah-extension/shared';
 import { AgentProcessManager } from './agent-process-manager.service';
 import { ParentDeliveryDrainerService } from './parent-delivery/parent-delivery-drainer.service';
+import type { ParentDeliveryEnvelope } from './parent-delivery/parent-envelope-store.service';
+import { PARENT_ENVELOPE_MAX_BODY_CHARS } from './parent-delivery/parent-envelope.schema';
+import type { SessionChildRecord } from '../session-children/session-child.registry';
 import { SessionChildRegistry } from '../session-children/session-child.registry';
 import {
   AgentReportCoalescer,
@@ -118,6 +125,12 @@ export const AGENT_REPORT_HISTORY_SIZE = 8;
 /** Characters of the report echoed onto the tile when no summary was given. */
 const TILE_NOTE_PREVIEW_LENGTH = 160;
 
+/** `originName` limit in the parent envelope schema. */
+const MAX_ORIGIN_NAME_LENGTH = 200;
+
+/** Child ids up to this length appear verbatim in a queued report's dedupe key. */
+const MAX_KEY_ID_LENGTH = 200;
+
 /**
  * Why a report was not delivered. Every value is a state the caller can act
  * on; none of them is "something went wrong".
@@ -145,6 +158,10 @@ export type AgentReportRefusalReason =
   | 'storage-unavailable'
   /** The parent session is being deleted or was deleted. */
   | 'parent-session-deleted'
+  /** A saved copy of this report is being sent right now; do not resend it. */
+  | 'delivery-in-progress'
+  /** A saved copy of this report was sent but its outcome is not known. */
+  | 'delivery-outcome-unknown'
   | 'held-for-completion';
 
 /**
@@ -175,6 +192,15 @@ export interface AgentReportDelivery {
   readonly reason?: AgentReportRefusalReason;
   /** The session the report reached. Present only on a delivery. */
   readonly parentSessionId?: string;
+  /** A child session report saved for its inactive verified parent. */
+  readonly queued?: true;
+  /**
+   * The stored envelope id of a saved report: with `queued`, or with a
+   * `delivery-in-progress` / `delivery-outcome-unknown` refusal.
+   */
+  readonly receiptId?: string;
+  /** The stored state behind `receiptId`. */
+  readonly receiptState?: ParentDeliveryState;
 }
 
 /** Per-agent delivery bookkeeping. Bounded; discarded with the record. */
@@ -231,6 +257,19 @@ function isSessionChildInput(
   return typeof candidate === 'string' && candidate.trim().length > 0;
 }
 
+/** The parent ids a child session was recorded under, trimmed. */
+interface SessionOwnerBinding {
+  readonly tab: string | undefined;
+  readonly sdk: string | undefined;
+}
+
+function sessionOwnerBinding(child: SessionChildRecord): SessionOwnerBinding {
+  return {
+    tab: child.parentSessionId?.trim() || undefined,
+    sdk: child.parentSdkSessionId?.trim() || undefined,
+  };
+}
+
 @injectable()
 export class AgentReportRouter {
   /**
@@ -245,6 +284,9 @@ export class AgentReportRouter {
    * because the 31st delivery inside the window is refused.
    */
   private readonly burstTimestamps = new Map<string, number[]>();
+
+  /** Per canonical child session: the tail of its serialized report chain. */
+  private readonly sessionAdmissions = new Map<string, Promise<void>>();
 
   /**
    * The last {@link AGENT_REPORT_HISTORY_SIZE} delivered bodies per agent, for
@@ -355,8 +397,12 @@ export class AgentReportRouter {
     // uuid arrives and `resolveParentSessionId` backfills it, so a value that
     // is not a session id means the parent never resolved one — there is no
     // session to deliver into, and saying so is the honest answer.
-    const recordedParent = SessionId.safeParse(info.parentSessionId?.trim()) ?? info.parentSessionId?.trim();
-    const parentSessionId = recordedParent ? await this.forwardTarget(recordedParent) : undefined;
+    const recordedParent =
+      SessionId.safeParse(info.parentSessionId?.trim()) ??
+      info.parentSessionId?.trim();
+    const parentSessionId = recordedParent
+      ? await this.forwardTarget(recordedParent)
+      : undefined;
     if (!parentSessionId) {
       return this.refuse('no-parent-recorded', agentId, {
         detail: info.parentSessionId
@@ -641,15 +687,18 @@ export class AgentReportRouter {
    * the same SDK session. Rate and duplicate history is keyed
    * `session:{childSessionId}` so it can never collide with an agent id.
    *
-   * A refusal because the parent is not live is counted on the child record
-   * (for `ptah_session_status`) and returned to the child; it is NOT queued —
-   * a report is a point-in-time message and replaying a backlog into a resumed
-   * conversation would present stale progress as current.
+   * A live parent receives the report directly. An inactive parent whose
+   * owner is unchanged gets the report QUEUED in the durable parent inbox
+   * (`ParentDeliveryDrainerService`), which delivers it once when the parent
+   * becomes active and rechecks the owner before that send. The result is
+   * `queued` with the stored envelope id only after the store confirmed the
+   * write. A host without the durable inbox, a changed owner, or a refused
+   * write is a refusal, counted on the child record for `ptah_session_status`.
    */
   private async deliverFromSessionChild(
     input: SessionChildReportInput,
   ): Promise<AgentReportDelivery> {
-    const { message, summary } = input;
+    const { message } = input;
     const reportedId = input.childSessionId.trim();
 
     const child = this.sessionChildren?.get(reportedId);
@@ -667,8 +716,44 @@ export class AgentReportRouter {
       });
     }
 
-    const candidates = [child.parentSessionId, child.parentSdkSessionId]
-      .map((id) => SessionId.safeParse(id?.trim()))
+    // One report per child at a time: the rate and duplicate bounds read
+    // history that only a finished report writes, so parallel calls from one
+    // child would otherwise all pass them.
+    return this.serializeSessionChild(childSessionId, () =>
+      this.deliverSessionChildReport(input, child),
+    );
+  }
+
+  private serializeSessionChild<T>(
+    childSessionId: string,
+    work: () => Promise<T>,
+  ): Promise<T> {
+    const previous =
+      this.sessionAdmissions.get(childSessionId) ?? Promise.resolve();
+    const run = previous.then(work);
+    // The tail only orders the next report; each caller sees its own result.
+    const tail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.sessionAdmissions.set(childSessionId, tail);
+    void tail.then(() => {
+      if (this.sessionAdmissions.get(childSessionId) === tail)
+        this.sessionAdmissions.delete(childSessionId);
+    });
+    return run;
+  }
+
+  private async deliverSessionChildReport(
+    input: SessionChildReportInput,
+    child: SessionChildRecord,
+  ): Promise<AgentReportDelivery> {
+    const { message, summary } = input;
+    const childSessionId = child.childSessionId;
+    const binding = sessionOwnerBinding(child);
+
+    const candidates = [binding.tab, binding.sdk]
+      .map((id) => SessionId.safeParse(id))
       .filter((id): id is SessionId => !!id);
     if (candidates.length === 0) {
       return this.refuseSessionChild('no-parent-recorded', childSessionId, {
@@ -691,20 +776,20 @@ export class AgentReportRouter {
     const adapter = this.agentAdapter;
     // The first recorded parseable parent is the owner. A later live ID
     // does not authorize rerouting a report from an unreachable owner.
-    let parentSessionId = SessionId.from(await this.forwardTarget(candidates[0]));
-    if (
-      !adapter.isSessionActive(parentSessionId) &&
-      this.handoffAcks
-    ) {
+    const owner = candidates[0];
+    const forwardedOwner = SessionId.from(await this.forwardTarget(owner));
+    let parentSessionId = forwardedOwner;
+    if (!adapter.isSessionActive(parentSessionId) && this.handoffAcks) {
       try {
-        const binding = await this.handoffAcks.findBySuccessor(parentSessionId);
+        const handoff =
+          await this.handoffAcks.findBySuccessor(parentSessionId);
         if (
-          binding?.successorTabId === parentSessionId &&
-          binding.state !== 'starting' &&
-          binding.successorSdkId &&
-          adapter.isSessionActive(SessionId.from(binding.successorSdkId))
+          handoff?.successorTabId === parentSessionId &&
+          handoff.state !== 'starting' &&
+          handoff.successorSdkId &&
+          adapter.isSessionActive(SessionId.from(handoff.successorSdkId))
         )
-          parentSessionId = SessionId.from(binding.successorSdkId);
+          parentSessionId = SessionId.from(handoff.successorSdkId);
       } catch (error: unknown) {
         this.logger.error(
           'Failed to verify handoff report parent',
@@ -712,23 +797,19 @@ export class AgentReportRouter {
         );
       }
     }
+    const refusedSummary =
+      summary?.trim() || firstLine(message, TILE_NOTE_PREVIEW_LENGTH);
     // Both lineage and binding reads are async; refuse a stale owner snapshot.
-    const current = this.sessionChildren?.get(childSessionId);
-    const ownerChanged =
-      current?.parentSessionId?.trim() !== candidates[0] ||
-      current?.parentSdkSessionId?.trim() !== candidates[1];
-    if (ownerChanged || !adapter.isSessionActive(parentSessionId)) {
-      this.sessionChildren?.markReportRefused(
-        childSessionId,
-        summary?.trim() || firstLine(message, TILE_NOTE_PREVIEW_LENGTH),
-      );
+    if (!this.ownerBindingHolds(childSessionId, binding)) {
+      this.sessionChildren?.markReportRefused(childSessionId, refusedSummary);
       return this.refuseSessionChild(
         'parent-session-not-active',
         childSessionId,
-        { parentSessionIds: candidates },
+        { parentSessionIds: candidates, detail: 'the recorded owner changed' },
       );
     }
 
+    // Before the delivery branch, so the bounds also apply to queued reports.
     const rateKey = `session:${childSessionId}`;
     const now = Date.now();
     if (this.recentDeliveryCount(rateKey, now) >= AGENT_REPORT_BURST_LIMIT) {
@@ -754,12 +835,60 @@ export class AgentReportRouter {
       message,
       summary,
     )}\n</agent-report>`;
+    // The stored and the sent body share one cap; a message near the tool
+    // limit plus the wrapper and summary would be saved but never readable.
+    if (envelope.length > PARENT_ENVELOPE_MAX_BODY_CHARS) {
+      return this.refuseSessionChild('report-too-large', childSessionId, {
+        length: envelope.length,
+        cap: PARENT_ENVELOPE_MAX_BODY_CHARS,
+        detail:
+          'the message plus the report wrapper and summary exceed the ' +
+          'parent delivery limit; shorten the message',
+      });
+    }
+    const originName = `session · ${child.label}`;
+
+    if (!adapter.isSessionActive(parentSessionId)) {
+      // An offline owner is addressed by the id it comes back under: a
+      // verified successor when lineage moved it, else the SDK session a
+      // reopened parent keeps on any new tab, else the recorded tab.
+      const sdk = SessionId.safeParse(binding.sdk);
+      const offlineTarget =
+        forwardedOwner !== owner
+          ? forwardedOwner
+          : sdk && sdk !== owner
+            ? SessionId.from(await this.forwardTarget(sdk))
+            : forwardedOwner;
+      if (!this.ownerBindingHolds(childSessionId, binding)) {
+        this.sessionChildren?.markReportRefused(childSessionId, refusedSummary);
+        return this.refuseSessionChild(
+          'parent-session-not-active',
+          childSessionId,
+          {
+            parentSessionIds: candidates,
+            detail: 'the recorded owner changed',
+          },
+        );
+      }
+      return this.queueSessionChildReport({
+        childSessionId,
+        parentSessionId: offlineTarget,
+        binding,
+        rateKey,
+        envelope,
+        originName,
+        message,
+        refusedSummary,
+        candidates,
+      });
+    }
+
     try {
       await adapter.sendMessageToSession(parentSessionId, envelope, {
         origin: {
           kind: 'peer',
           from: `ptah-session:${childSessionId}`,
-          name: `session · ${child.label}`,
+          name: originName,
         },
       });
     } catch (error: unknown) {
@@ -779,6 +908,181 @@ export class AgentReportRouter {
     });
 
     return { delivered: true, parentSessionId };
+  }
+
+  /** The child is still recorded under the owner binding this report validated. */
+  private ownerBindingHolds(
+    childSessionId: string,
+    binding: SessionOwnerBinding,
+  ): boolean {
+    const current = this.sessionChildren?.get(childSessionId);
+    if (!current || current.childSessionId !== childSessionId) return false;
+    const now = sessionOwnerBinding(current);
+    return now.tab === binding.tab && now.sdk === binding.sdk;
+  }
+
+  /**
+   * Save a child report for its inactive verified parent. The dedupe key is
+   * derived from the child id, its owner binding and the report text, so a
+   * repeat to the same owner returns the receipt the store already holds and
+   * the same text after a reparent creates work for the new owner.
+   */
+  private async queueSessionChildReport(report: {
+    readonly childSessionId: string;
+    readonly parentSessionId: string;
+    readonly binding: SessionOwnerBinding;
+    readonly rateKey: string;
+    readonly envelope: string;
+    readonly originName: string;
+    readonly message: string;
+    readonly refusedSummary: string;
+    readonly candidates: readonly string[];
+  }): Promise<AgentReportDelivery> {
+    const { childSessionId, parentSessionId, refusedSummary } = report;
+    if (!this.parentDelivery) {
+      this.sessionChildren?.markReportRefused(childSessionId, refusedSummary);
+      return this.refuseSessionChild(
+        'parent-session-not-active',
+        childSessionId,
+        {
+          parentSessionIds: report.candidates,
+          detail: 'no durable parent inbox is registered in this host',
+        },
+      );
+    }
+    const dedupeKey = AgentReportRouter.sessionReportKey(
+      childSessionId,
+      report.binding,
+      report.message,
+    );
+    const ownsRow = (row: ParentDeliveryEnvelope): boolean =>
+      row.agentId === childSessionId && row.originKind === 'session';
+
+    // A repeat returns its stored outcome without spending report budget.
+    const previous = this.parentDelivery.find(dedupeKey);
+    if (previous && ownsRow(previous))
+      return this.sessionReceipt(previous, childSessionId, refusedSummary);
+
+    const saved = await this.parentDelivery.enqueueAdmitted(
+      {
+        id: `lane-delivery:${dedupeKey}`,
+        dedupeKey,
+        agentId: childSessionId,
+        parentSessionId,
+        kind: 'report',
+        body: report.envelope,
+        createdAt: Date.now(),
+        originName: report.originName.slice(0, MAX_ORIGIN_NAME_LENGTH),
+        originKind: 'session',
+      },
+      // Runs inside the store's serialized write: an owner change after the
+      // checks above must not leave a receipt for the old owner.
+      (existing) =>
+        this.ownerBindingHolds(childSessionId, report.binding) &&
+        (!existing || ownsRow(existing)),
+      () => {
+        this.sessionChildren?.markReportDelivered(childSessionId);
+      },
+    );
+    if ('refused' in saved) {
+      this.sessionChildren?.markReportRefused(childSessionId, refusedSummary);
+      if (saved.refused === 'admission-refused')
+        return this.refuseSessionChild(
+          'parent-session-not-active',
+          childSessionId,
+          {
+            parentSessionIds: report.candidates,
+            detail: 'the recorded owner changed while the report was saved',
+          },
+        );
+      return this.refuseSessionChild(saved.refused, childSessionId, {
+        parentSessionId,
+      });
+    }
+    // The per-child chain means no other caller can write this key between
+    // the pre-check and the store's write, so only a fresh row is pending
+    // here; anything else is a stored outcome, mapped without new budget.
+    if (saved.state !== 'pending')
+      return this.sessionReceipt(saved, childSessionId, refusedSummary);
+    this.remember(report.rateKey, { at: Date.now(), message: report.message });
+    this.logger.info('[AgentReportRouter] Session child report queued', {
+      childSessionId,
+      parentSessionId: saved.parentSessionId,
+      receiptId: saved.id,
+      state: saved.state,
+    });
+    return {
+      delivered: false,
+      queued: true,
+      receiptId: saved.id,
+      receiptState: saved.state,
+    };
+  }
+
+  /** The caller-facing outcome of a stored report, mapped state by state. */
+  private sessionReceipt(
+    saved: ParentDeliveryEnvelope,
+    childSessionId: string,
+    refusedSummary: string,
+  ): AgentReportDelivery {
+    switch (saved.state) {
+      case 'pending':
+      case 'blocked-retryable':
+        return {
+          delivered: false,
+          queued: true,
+          receiptId: saved.id,
+          receiptState: saved.state,
+        };
+      case 'delivered':
+        return { delivered: true, parentSessionId: saved.parentSessionId };
+      case 'sending':
+      case 'outcome-unknown':
+        this.logger.warn('[AgentReportRouter] Session child report refused', {
+          reason: saved.state,
+          childSessionId,
+          receiptId: saved.id,
+        });
+        return {
+          delivered: false,
+          reason:
+            saved.state === 'sending'
+              ? 'delivery-in-progress'
+              : 'delivery-outcome-unknown',
+          receiptId: saved.id,
+          receiptState: saved.state,
+        };
+      case 'cancelled':
+      case 'not-saved':
+        // The store returns the retained record for a repeat of a cancelled
+        // report; that copy will never be sent, so the repeat is not "queued".
+        this.sessionChildren?.markReportRefused(childSessionId, refusedSummary);
+        return this.refuseSessionChild('delivery-failed', childSessionId, {
+          parentSessionId: saved.parentSessionId,
+          receiptId: saved.id,
+          detail: 'an earlier copy of this report was cancelled',
+        });
+    }
+  }
+
+  /**
+   * Deterministic and within the store's `^\S{1,470}$` dedupe key pattern.
+   * Scoped to the owner binding; the summary is not part of the identity.
+   * A JSON tuple keeps field boundaries unambiguous for any text.
+   */
+  private static sessionReportKey(
+    childSessionId: string,
+    binding: SessionOwnerBinding,
+    message: string,
+  ): string {
+    const idPart =
+      /^\S+$/.test(childSessionId) && childSessionId.length <= MAX_KEY_ID_LENGTH
+        ? childSessionId
+        : createHash('sha256').update(childSessionId).digest('hex');
+    const digest = createHash('sha256')
+      .update(JSON.stringify(['v2', binding.tab, binding.sdk ?? '', message]))
+      .digest('hex');
+    return `session-report:v2:${idPart}:${digest}`;
   }
 
   private refuseSessionChild(

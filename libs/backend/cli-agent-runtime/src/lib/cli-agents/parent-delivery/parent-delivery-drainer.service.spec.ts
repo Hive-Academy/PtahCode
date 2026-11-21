@@ -8,6 +8,8 @@ import {
 } from './parent-envelope-store.service';
 import { ParentDeliveryDrainerService, type ParentDeliveryEvent } from './parent-delivery-drainer.service';
 import { PARENT_ENVELOPE_INDEX_KEY } from './parent-envelope.schema';
+import { SessionChildRegistry } from '../../session-children/session-child.registry';
+import type { SessionHandoffAckStore } from '../../session-children/session-handoff-ack.store';
 
 const parent = '11111111-2222-4333-8444-555555555555';
 const other = '99999999-2222-4333-8444-555555555555';
@@ -314,5 +316,273 @@ describe('ParentDeliveryDrainerService', () => {
     h.drainer.clearUnsaved('lane-delivery:unsaved');
     expect(h.events).toEqual([view, { ...view, removed: true }]);
     expect(h.store.list()).toEqual([]);
+  });
+});
+
+describe('ParentDeliveryDrainerService accepted callbacks', () => {
+  it('keeps the accepted callback of a blocked row until it is delivered', async () => {
+    const start = Date.now();
+    let clock = start;
+    const now = jest.spyOn(Date, 'now').mockImplementation(() => clock);
+    try {
+      const h = await harness();
+      const accepted = jest.fn();
+      h.send.mockRejectedValueOnce(new SdkError(`Session not found: ${parent}`));
+      await h.drainer.enqueue(report('blocked'), accepted);
+      await h.drainer.drain(parent);
+      expect(h.store.find('blocked')?.state).toBe('blocked-retryable');
+      await h.drainer.enqueue(report('later'));
+      await h.drainer.drain(parent);
+      clock = start + 60_000;
+      await h.drainer.drain(parent);
+      expect(h.store.find('blocked')?.state).toBe('delivered');
+      expect(accepted).toHaveBeenCalledTimes(1);
+    } finally {
+      now.mockRestore();
+    }
+  });
+});
+
+describe('ParentDeliveryDrainerService child session reports', () => {
+  const child = '33333333-2222-4333-8444-555555555555';
+  const successor = '77777777-2222-4333-8444-555555555555';
+
+  function sessionReport(key: string, parentSessionId = parent): NewParentDeliveryEnvelope {
+    return { ...report(key, parentSessionId), agentId: child, originName: 'auth-fix',
+      originKind: 'session' };
+  }
+
+  function registryWith(
+    owner: { parentSessionId: string; parentSdkSessionId?: string } | null,
+  ): SessionChildRegistry {
+    const registry = new SessionChildRegistry();
+    if (!owner) return registry;
+    const reservation = registry.reserveSlot(3);
+    if (!reservation) throw new Error('expected a slot');
+    registry.add({
+      childSessionId: child, parentSessionId: owner.parentSessionId,
+      ...(owner.parentSdkSessionId ? { parentSdkSessionId: owner.parentSdkSessionId } : {}),
+      label: 'auth-fix', task: 'fix auth', branch: 'feat/auth-fix', baseRef: 'abc',
+      workspaceRoot: '/ws', worktreePath: '/ws-wt/auth-fix', deliverables: [],
+      subagentPtahTools: 'available', startedAt: '2026-10-01T10:00:00.000Z',
+      turnsSettled: 0, reportsDelivered: 0, reportsRefused: 0,
+    }, reservation);
+    return registry;
+  }
+
+  function acks(records: readonly object[]): SessionHandoffAckStore {
+    return { records: jest.fn().mockResolvedValue(records) } as unknown as SessionHandoffAckStore;
+  }
+
+  async function sessionDrainer(
+    registry: SessionChildRegistry,
+    ackStore: SessionHandoffAckStore | null = null,
+  ): Promise<{ h: Harness; drainer: ParentDeliveryDrainerService }> {
+    const h = await harness();
+    const adapter: Pick<IAgentAdapter, 'isSessionActive' | 'sendMessageToSession'> = {
+      isSessionActive: () => h.state.active, sendMessageToSession: h.send,
+    };
+    const drainer = new ParentDeliveryDrainerService(h.log, h.store, adapter as IAgentAdapter,
+      null, null, registry, ackStore);
+    drainers.push(drainer);
+    return { h, drainer };
+  }
+
+  it('sends a session envelope with a ptah-session origin and its name', async () => {
+    const { h, drainer } = await sessionDrainer(registryWith({ parentSessionId: parent }));
+    await drainer.enqueue(sessionReport('s1'));
+    await drainer.drain(parent);
+    expect(h.send).toHaveBeenCalledTimes(1);
+    expect(h.send).toHaveBeenCalledWith(parent, 'body s1', expect.objectContaining({
+      clientMessageId: 'lane-delivery:s1',
+      origin: { kind: 'peer', from: `ptah-session:${child}`, name: 'auth-fix' },
+    }));
+    expect(h.store.find('s1')?.state).toBe('delivered');
+  });
+
+  it('keeps the ptah-agent origin for a lane envelope', async () => {
+    const { h, drainer } = await sessionDrainer(registryWith({ parentSessionId: parent }));
+    await drainer.enqueue({ ...report('lane1'), originName: 'codex · lane' });
+    await drainer.drain(parent);
+    expect(h.send).toHaveBeenCalledWith(parent, 'body lane1', expect.objectContaining({
+      origin: { kind: 'peer', from: 'ptah-agent:lane', name: 'codex · lane' },
+    }));
+  });
+
+  it('cancels a session envelope whose child now has another owner and never sends it', async () => {
+    const { h, drainer } = await sessionDrainer(registryWith({ parentSessionId: other }));
+    await drainer.enqueue(sessionReport('changed'));
+    await drainer.drain(parent);
+    expect(h.send).not.toHaveBeenCalled();
+    expect(h.store.find('changed')?.state).toBe('cancelled');
+    expect(h.log.warn).toHaveBeenCalled();
+  });
+
+  it('defers a session envelope with backoff when the child is not in the registry', async () => {
+    const { h, drainer } = await sessionDrainer(registryWith(null));
+    await drainer.enqueue(sessionReport('unknown'));
+    await drainer.drain(parent);
+    expect(h.send).not.toHaveBeenCalled();
+    const entry = h.store.find('unknown');
+    expect(entry).toMatchObject({ state: 'blocked-retryable', lastError: 'waiting-for-binding' });
+    expect((entry?.nextRetryAt ?? 0) - (entry?.updatedAt ?? 0)).toBe(5_000);
+    await expect(h.store.getBody('lane-delivery:unknown')).resolves.toBe('body unknown');
+  });
+
+  it('defers a session envelope when no registry is wired', async () => {
+    const h = await harness();
+    await h.drainer.enqueue(sessionReport('no-registry'));
+    await h.drainer.drain(parent);
+    expect(h.send).not.toHaveBeenCalled();
+    expect(h.store.find('no-registry')).toMatchObject({
+      state: 'blocked-retryable', lastError: 'waiting-for-binding',
+    });
+  });
+
+  it('grows the binding wait instead of re-arming a zero-delay timer', async () => {
+    const start = Date.now();
+    let clock = start;
+    const now = jest.spyOn(Date, 'now').mockImplementation(() => clock);
+    try {
+      const { h, drainer } = await sessionDrainer(registryWith(null));
+      await drainer.enqueue(sessionReport('wait'));
+      await drainer.drain(parent);
+      await drainer.drain(parent);
+      expect(h.store.find('wait')?.nextRetryAt).toBe(start + 5_000);
+      clock = start + 6_000;
+      await drainer.drain(parent);
+      expect(h.store.find('wait')?.nextRetryAt).toBe(clock + 30_000);
+      expect(h.send).not.toHaveBeenCalled();
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it('cancels a session envelope whose binding stays unknown for 24 hours', async () => {
+    const { h, drainer } = await sessionDrainer(registryWith(null));
+    await drainer.enqueue({ ...sessionReport('stale'), createdAt: Date.now() - 25 * 3_600_000 });
+    await drainer.drain(parent);
+    expect(h.send).not.toHaveBeenCalled();
+    expect(h.store.find('stale')).toMatchObject({
+      state: 'cancelled', lastError: 'binding-unavailable',
+    });
+  });
+
+  it('keeps the body and defers when the handoff lineage read fails, then delivers', async () => {
+    const start = Date.now();
+    let clock = start;
+    const now = jest.spyOn(Date, 'now').mockImplementation(() => clock);
+    try {
+      const ackStore = acks([{ predecessorTabId: other, predecessorSdkId: null,
+        successorTabId: successor, successorSdkId: null, workspaceRoot: '/ws',
+        handoffPath: '/ws/h.md', state: 'recorded' }]);
+      const records = ackStore.records as jest.Mock;
+      records.mockRejectedValueOnce(new Error('ack store unreadable'));
+      const { h, drainer } = await sessionDrainer(registryWith({ parentSessionId: other }), ackStore);
+      await drainer.enqueue(sessionReport('lookup', successor));
+      await drainer.drain(successor);
+      expect(h.send).not.toHaveBeenCalled();
+      expect(h.store.find('lookup')).toMatchObject({
+        state: 'blocked-retryable', lastError: 'owner-lookup-failed',
+      });
+      await expect(h.store.getBody('lane-delivery:lookup')).resolves.toBe('body lookup');
+      clock = start + 6_000;
+      await drainer.drain(successor);
+      expect(h.send).toHaveBeenCalledTimes(1);
+      expect(h.store.find('lookup')?.state).toBe('delivered');
+    } finally {
+      now.mockRestore();
+    }
+  });
+
+  it.each(['markSending', 'getBody'] as const)(
+    'cancels without sending when the child is reparented during %s',
+    async (method) => {
+      const registry = registryWith({ parentSessionId: parent });
+      const { h, drainer } = await sessionDrainer(registry);
+      const original = h.store[method].bind(h.store);
+      jest.spyOn(h.store, method).mockImplementation(async (id: string) => {
+        registry.reparent(child, other, undefined);
+        return original(id) as never;
+      });
+      await drainer.enqueue(sessionReport('moved'));
+      await drainer.drain(parent);
+      expect(h.send).not.toHaveBeenCalled();
+      expect(h.store.find('moved')).toMatchObject({
+        state: 'cancelled', lastError: 'owner-changed',
+      });
+    });
+
+  it('retries a stale-owner cancel whose write failed', async () => {
+    const timer = jest.spyOn(global, 'setTimeout');
+    const { h, drainer } = await sessionDrainer(registryWith({ parentSessionId: other }));
+    const cancel = jest.spyOn(h.store, 'cancel').mockRejectedValueOnce(new Error('disk full'));
+    await drainer.enqueue(sessionReport('retry-cancel'));
+    await drainer.drain(parent);
+    expect(timer).toHaveBeenCalledWith(expect.any(Function), 5_000);
+    expect(h.log.error).toHaveBeenCalledWith(
+      '[ParentDeliveryDrainer] Could not cancel stale child report', expect.any(Error));
+    await drainer.drain(parent);
+    expect(cancel).toHaveBeenCalledTimes(2);
+    expect(h.send).not.toHaveBeenCalled();
+    expect(h.store.find('retry-cancel')).toMatchObject({
+      state: 'cancelled', lastError: 'owner-changed',
+    });
+    timer.mockRestore();
+  });
+
+  it('releases a claimed row whose stale-owner cancel write failed', async () => {
+    const registry = registryWith({ parentSessionId: parent });
+    const { h, drainer } = await sessionDrainer(registry);
+    const original = h.store.getBody.bind(h.store);
+    jest.spyOn(h.store, 'getBody').mockImplementationOnce(async (id: string) => {
+      registry.reparent(child, other, undefined);
+      return original(id);
+    });
+    jest.spyOn(h.store, 'cancel').mockRejectedValueOnce(new Error('disk full'));
+    await drainer.enqueue(sessionReport('claimed'));
+    await drainer.drain(parent);
+    expect(h.send).not.toHaveBeenCalled();
+    expect(h.store.find('claimed')).toMatchObject({
+      state: 'blocked-retryable', lastError: 'owner-changed',
+    });
+  });
+
+  it('sends when the recorded parent tab id owns the child', async () => {
+    const { h, drainer } = await sessionDrainer(
+      registryWith({ parentSessionId: parent, parentSdkSessionId: other }));
+    await drainer.enqueue(sessionReport('tab'));
+    await drainer.drain(parent);
+    expect(h.send).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends when the recorded parent SDK id owns the child', async () => {
+    const { h, drainer } = await sessionDrainer(
+      registryWith({ parentSessionId: 'tab-1', parentSdkSessionId: parent }));
+    await drainer.enqueue(sessionReport('sdk'));
+    await drainer.drain(parent);
+    expect(h.send).toHaveBeenCalledTimes(1);
+  });
+
+  it('sends to the kept handoff successor of the recorded owner', async () => {
+    const { h, drainer } = await sessionDrainer(
+      registryWith({ parentSessionId: other }),
+      acks([{ predecessorTabId: other, predecessorSdkId: null, successorTabId: successor,
+        successorSdkId: null, workspaceRoot: '/ws', handoffPath: '/ws/h.md', state: 'recorded' }]));
+    await drainer.enqueue(sessionReport('succ', successor));
+    await drainer.drain(successor);
+    expect(h.send).toHaveBeenCalledTimes(1);
+    expect(h.send).toHaveBeenCalledWith(successor, 'body succ', expect.anything());
+  });
+
+  it('cancels when the handoff lineage points to a different successor', async () => {
+    const { h, drainer } = await sessionDrainer(
+      registryWith({ parentSessionId: other }),
+      acks([{ predecessorTabId: other, predecessorSdkId: null, successorTabId: successor,
+        successorSdkId: null, workspaceRoot: '/ws', handoffPath: '/ws/h.md', state: 'recorded' }]));
+    await drainer.enqueue(sessionReport('wrong', parent));
+    await drainer.drain(parent);
+    expect(h.send).not.toHaveBeenCalled();
+    expect(h.store.find('wrong')?.state).toBe('cancelled');
   });
 });

@@ -2079,6 +2079,20 @@ export function formatAgentMessage(
   }
 }
 
+/** Plain-language lines for refused reports, keyed by refusal reason. */
+const AGENT_REPORT_REFUSAL_SENTENCES: Record<string, string> = {
+  'unattributed-caller':
+    "Ptah could not route this report because the caller's child session identity could not be verified.",
+  'parent-session-not-active':
+    'Ptah could not save the report for the inactive parent. Keep the report and retry when the parent is available.',
+  'storage-unavailable':
+    'Ptah could not save the report. Keep the report and retry.',
+  'delivery-in-progress':
+    'Ptah is sending a saved copy of this report to the parent now. Do not send it again.',
+  'delivery-outcome-unknown':
+    'Ptah sent a saved copy of this report, but could not confirm that the parent received it. Do not send it again. The parent can check the receipt.',
+};
+
 /**
  * Format ptah_agent_report result
  *
@@ -2090,21 +2104,43 @@ export function formatAgentReport(result: {
   pending?: boolean;
   reason?: string;
   parentSessionId?: string;
+  queued?: boolean;
+  receiptId?: string;
+  receiptState?: string;
 }): string {
   try {
+    const queued = !result.delivered && result.queued === true;
+    const refusalSentence = result.reason
+      ? AGENT_REPORT_REFUSAL_SENTENCES[result.reason]
+      : undefined;
     return json2md([
       {
         h2: result.delivered
           ? 'Report Delivered'
-          : result.pending ? 'Report Pending' : 'Report NOT Delivered',
+          : queued
+            ? 'Report Queued'
+            : result.pending ? 'Report Pending' : 'Report NOT Delivered',
       },
       {
         p: [
           `**Delivered:** ${result.delivered ? 'Yes' : 'No'}`,
+          ...(queued ? ['**Queued:** Yes'] : []),
+          ...(result.receiptId ? [`**Receipt:** ${result.receiptId}`] : []),
+          ...(result.receiptId && result.receiptState
+            ? [`**Receipt State:** ${result.receiptState}`]
+            : []),
+          ...(queued
+            ? [
+                `Ptah queued the child report for its verified parent.${
+                  result.receiptId ? ` Receipt: ${result.receiptId}.` : ''
+                } Delivery will be attempted when the parent is available.`,
+              ]
+            : []),
           ...(result.pending ? ['**Pending:** Yes'] : []),
           ...(result.reason === 'held-for-completion'
             ? ['This report will arrive with the completion signal.'] : []),
           ...(result.reason ? [`**Reason:** ${result.reason}`] : []),
+          ...(refusalSentence ? [refusalSentence] : []),
           ...(result.parentSessionId
             ? [`**Parent Session:** ${result.parentSessionId}`]
             : []),
