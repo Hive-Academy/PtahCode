@@ -98,11 +98,16 @@ export const SDK_FIRST_BYTE_TIMEOUT_ENV = 'CLAUDE_STREAM_FIRST_BYTE_TIMEOUT_MS';
  */
 export const SDK_FIRST_BYTE_TIMEOUT_MS = 150_000;
 
-/** Sets the SDK first-byte wait unless the user already set it. */
+/**
+ * The SDK first-byte wait for a child process: the value the user set in
+ * `env`, else Ptah's default. Always returned, so a sanitized env such as
+ * `buildSafeEnv` keeps a value that is set only in the host process env.
+ */
 export function firstByteTimeoutEnv(
   env: Readonly<Record<string, string | undefined>> = process.env,
 ): Record<string, string> {
-  return env[SDK_FIRST_BYTE_TIMEOUT_ENV]?.trim()
-    ? {}
-    : { [SDK_FIRST_BYTE_TIMEOUT_ENV]: String(SDK_FIRST_BYTE_TIMEOUT_MS) };
+  const userValue = env[SDK_FIRST_BYTE_TIMEOUT_ENV]?.trim();
+  return {
+    [SDK_FIRST_BYTE_TIMEOUT_ENV]: userValue || String(SDK_FIRST_BYTE_TIMEOUT_MS),
+  };
 }

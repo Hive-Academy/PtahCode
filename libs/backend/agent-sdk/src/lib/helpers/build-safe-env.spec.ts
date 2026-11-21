@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import {
   SDK_FIRST_BYTE_TIMEOUT_ENV,
   SDK_FIRST_BYTE_TIMEOUT_MS,
+  buildSafeEnv,
   experimentalBetaEnv,
   firstByteTimeoutEnv,
 } from './build-safe-env';
@@ -60,7 +61,47 @@ describe('firstByteTimeoutEnv (TASK_2026_2288 A)', () => {
 
   it('keeps a value the user set', () => {
     expect(
-      firstByteTimeoutEnv({ [SDK_FIRST_BYTE_TIMEOUT_ENV]: '240000' }),
-    ).toEqual({});
+      firstByteTimeoutEnv({ [SDK_FIRST_BYTE_TIMEOUT_ENV]: ' 240000 ' }),
+    ).toEqual({ [SDK_FIRST_BYTE_TIMEOUT_ENV]: '240000' });
+  });
+
+  it('uses the default for a blank value', () => {
+    expect(firstByteTimeoutEnv({ [SDK_FIRST_BYTE_TIMEOUT_ENV]: '  ' })).toEqual({
+      [SDK_FIRST_BYTE_TIMEOUT_ENV]: String(SDK_FIRST_BYTE_TIMEOUT_MS),
+    });
+  });
+
+  describe('buildSafeEnv', () => {
+    let original: string | undefined;
+
+    beforeEach(() => {
+      original = process.env[SDK_FIRST_BYTE_TIMEOUT_ENV];
+    });
+
+    afterEach(() => {
+      if (original === undefined) delete process.env[SDK_FIRST_BYTE_TIMEOUT_ENV];
+      else process.env[SDK_FIRST_BYTE_TIMEOUT_ENV] = original;
+    });
+
+    it('copies a value that is set only in the host process env', () => {
+      process.env[SDK_FIRST_BYTE_TIMEOUT_ENV] = '240000';
+      expect(buildSafeEnv({})[SDK_FIRST_BYTE_TIMEOUT_ENV]).toBe('240000');
+    });
+
+    it('prefers the provider value to the host process value', () => {
+      process.env[SDK_FIRST_BYTE_TIMEOUT_ENV] = '240000';
+      expect(
+        buildSafeEnv({ [SDK_FIRST_BYTE_TIMEOUT_ENV]: '200000' })[
+          SDK_FIRST_BYTE_TIMEOUT_ENV
+        ],
+      ).toBe('200000');
+    });
+
+    it('sets the default when no value is set', () => {
+      delete process.env[SDK_FIRST_BYTE_TIMEOUT_ENV];
+      expect(buildSafeEnv({})[SDK_FIRST_BYTE_TIMEOUT_ENV]).toBe(
+        String(SDK_FIRST_BYTE_TIMEOUT_MS),
+      );
+    });
   });
 });
