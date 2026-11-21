@@ -7,11 +7,14 @@
  *   assistant reply that follows it projects to its own message.
  * - Consecutive user chunks of one turn (same item id) merge into one
  *   `userText`, so a chunked user message is one message.
- * - Bounded: at most {@link ACP_MAX_REPLAY_EVENTS} events and at most
- *   {@link ACP_MAX_REPLAY_TEXT_CHARS} characters of text across them, merged
- *   user chunks included (one long chunked message is still one event).
- *   Beyond either bound the oldest events are dropped, and text that still
- *   does not fit is cut; one leading `info` says the history was truncated.
+ * - Bounded: at most {@link ACP_MAX_REPLAY_EVENTS} events, the truncation
+ *   notice included, and at most {@link ACP_MAX_REPLAY_TEXT_CHARS} characters
+ *   of payload across them: text (merged user chunks included, so one long
+ *   chunked message is still one event), serialized tool input and plan
+ *   entries. A tool input over {@link ACP_MAX_REPLAY_TOOL_INPUT_CHARS} is
+ *   compacted to its short top-level fields first. Beyond either bound the
+ *   oldest events are dropped, and payload that still does not fit is cut;
+ *   one leading `info` says the history was truncated.
  */
 import type {
   ProviderSessionEvent,
@@ -19,8 +22,15 @@ import type {
 } from '@ptah-extension/provider-session-contracts';
 
 export const ACP_MAX_REPLAY_EVENTS = 5_000;
-/** Text budget of one replay (user text, agent text, reasoning, tool output). */
+/**
+ * Payload budget of one replay: user text, agent text, reasoning, tool
+ * output, serialized tool input and plan entries.
+ */
 export const ACP_MAX_REPLAY_TEXT_CHARS = 2_000_000;
+/** A replayed tool input whose JSON is longer than this is compacted. */
+export const ACP_MAX_REPLAY_TOOL_INPUT_CHARS = 4_096;
+/** A string field a compacted tool input keeps is cut to this length. */
+const COMPACTED_INPUT_FIELD_CHARS = 256;
 
 export interface AcpReplayCollectorIds {
   readonly contextId: string;
@@ -39,7 +49,46 @@ export interface AcpReplayCollector {
   events(): readonly ProviderSessionEvent[];
 }
 
-/** The characters of text an event carries, counted against the budget. */
+/** The JSON length of a tool input; one that cannot be serialized counts as oversized. */
+function serializedLength(input: Record<string, unknown>): number {
+  try {
+    return JSON.stringify(input)?.length ?? 0;
+  } catch {
+    // degradation-audit: optional-capability -- an input that cannot be
+    // serialized is compacted to its primitive fields instead of retained.
+    return Number.POSITIVE_INFINITY;
+  }
+}
+
+/**
+ * The input's top-level primitive fields, strings cut to
+ * {@link COMPACTED_INPUT_FIELD_CHARS}; nested values are left out. `undefined`
+ * when even that does not fit {@link ACP_MAX_REPLAY_TOOL_INPUT_CHARS}.
+ */
+function compactInput(
+  input: Record<string, unknown>,
+): Record<string, unknown> | undefined {
+  const compact: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (typeof value === 'string') {
+      compact[key] =
+        value.length > COMPACTED_INPUT_FIELD_CHARS
+          ? `${value.slice(0, COMPACTED_INPUT_FIELD_CHARS)}…`
+          : value;
+    } else if (
+      typeof value === 'number' ||
+      typeof value === 'boolean' ||
+      value === null
+    ) {
+      compact[key] = value;
+    }
+  }
+  return serializedLength(compact) <= ACP_MAX_REPLAY_TOOL_INPUT_CHARS
+    ? compact
+    : undefined;
+}
+
+/** The characters of payload an event carries, counted against the budget. */
 function textLength(body: ProviderSessionEventBody): number {
   switch (body.type) {
     case 'userText':
@@ -49,12 +98,16 @@ function textLength(body: ProviderSessionEventBody): number {
       return body.delta.length;
     case 'toolCompleted':
       return body.output.length;
+    case 'toolStarted':
+      return body.input ? serializedLength(body.input) : 0;
+    case 'plan':
+      return body.entries.reduce((sum, entry) => sum + entry.content.length, 0);
     default:
       return 0;
   }
 }
 
-/** `body` with its text cut to `chars` characters. */
+/** `body` with its payload cut to `chars` characters. */
 function cutText(
   body: ProviderSessionEventBody,
   chars: number,
@@ -67,6 +120,20 @@ function cutText(
       return { ...body, delta: body.delta.slice(0, chars) };
     case 'toolCompleted':
       return { ...body, output: body.output.slice(0, chars) };
+    case 'toolStarted':
+      // JSON cannot be cut in part: an input that does not fit is left out.
+      return { ...body, input: undefined };
+    case 'plan': {
+      let left = chars;
+      return {
+        ...body,
+        entries: body.entries.map((entry) => {
+          const content = entry.content.slice(0, left);
+          left -= content.length;
+          return { ...entry, content };
+        }),
+      };
+    }
     default:
       return body;
   }
@@ -84,8 +151,10 @@ export function createAcpReplayCollector(
   let dropped = 0;
   /** Text characters held by {@link collected}. */
   let textChars = 0;
-  /** Text characters cut because they did not fit the budget. */
+  /** Payload characters cut because they did not fit the budget. */
   let cutChars = 0;
+  /** Tool inputs compacted because they were over the per-input bound. */
+  let compactedInputs = 0;
   let lastUserItem: string | undefined;
 
   const turnId = (): string => `${ids.sessionId}:replay:${turn}`;
@@ -99,22 +168,35 @@ export function createAcpReplayCollector(
 
   /**
    * Drop the oldest events until `extra` more characters fit, never the last
-   * `keep` events. Returns how many of the `extra` characters fit; the rest
-   * is counted as cut.
+   * `keep` events. Returns how many of the `extra` characters fit.
    */
   const makeRoom = (extra: number, keep: number): number => {
     while (collected.length > keep && textChars + extra > maxTextChars) {
       dropOldest();
     }
-    const room = Math.max(0, Math.min(extra, maxTextChars - textChars));
-    cutChars += extra - room;
-    return room;
+    return Math.max(0, Math.min(extra, maxTextChars - textChars));
   };
 
-  const push = (body: ProviderSessionEventBody): void => {
+  /** A tool input over the per-input bound is compacted before it is counted. */
+  const compacted = (body: ProviderSessionEventBody): ProviderSessionEventBody => {
+    if (
+      body.type !== 'toolStarted' ||
+      !body.input ||
+      serializedLength(body.input) <= ACP_MAX_REPLAY_TOOL_INPUT_CHARS
+    ) {
+      return body;
+    }
+    compactedInputs++;
+    return { ...body, input: compactInput(body.input) };
+  };
+
+  const push = (incoming: ProviderSessionEventBody): void => {
+    const body = compacted(incoming);
     const length = textLength(body);
     const room = makeRoom(length, 0);
     const fitted = room < length ? cutText(body, room) : body;
+    const kept = room < length ? textLength(fitted) : length;
+    cutChars += length - kept;
     collected.push({
       contextId: ids.contextId,
       processGeneration: ids.processGeneration,
@@ -124,7 +206,7 @@ export function createAcpReplayCollector(
       replayed: true,
       ...fitted,
     } as ProviderSessionEvent);
-    textChars += room;
+    textChars += kept;
     while (collected.length > maxEvents) dropOldest();
   };
 
@@ -134,6 +216,7 @@ export function createAcpReplayCollector(
     text: string,
   ): void => {
     const room = makeRoom(text.length, 1);
+    cutChars += text.length - room;
     collected[collected.length - 1] = {
       ...last,
       text: last.text + text.slice(0, room),
@@ -141,12 +224,19 @@ export function createAcpReplayCollector(
     textChars += room;
   };
 
-  const notice = (): string => {
+  const notice = (droppedEvents: number): string => {
     const parts = [
-      ...(dropped > 0 ? [`the oldest ${dropped} events were dropped`] : []),
+      ...(droppedEvents > 0
+        ? [`the oldest ${droppedEvents} events were dropped`]
+        : []),
       ...(cutChars > 0
         ? [
             `${cutChars} characters of text over the ${maxTextChars} character limit were cut`,
+          ]
+        : []),
+      ...(compactedInputs > 0
+        ? [
+            `${compactedInputs} tool inputs over ${ACP_MAX_REPLAY_TOOL_INPUT_CHARS} characters were shortened`,
           ]
         : []),
     ];
@@ -175,7 +265,13 @@ export function createAcpReplayCollector(
       }
     },
     events() {
-      if (dropped === 0 && cutChars === 0) return [...collected];
+      if (dropped === 0 && cutChars === 0 && compactedInputs === 0) {
+        return [...collected];
+      }
+      // The notice takes one of the `maxEvents` slots (PR #1450 review).
+      const kept = collected.slice(
+        Math.max(0, collected.length - Math.max(0, maxEvents - 1)),
+      );
       const truncated: ProviderSessionEvent = {
         contextId: ids.contextId,
         processGeneration: ids.processGeneration,
@@ -183,9 +279,9 @@ export function createAcpReplayCollector(
         sequence: 0,
         replayed: true,
         type: 'info',
-        message: notice(),
+        message: notice(dropped + collected.length - kept.length),
       };
-      return [truncated, ...collected];
+      return [truncated, ...kept];
     },
   };
 }
