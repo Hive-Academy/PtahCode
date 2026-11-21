@@ -14,6 +14,11 @@ import { PtahAlertComponent } from '../../foundation/alert.component';
 let nextFormSectionId = 0;
 
 const DIVIDER_CLASS = '[border-bottom:var(--ptah-border-width)_solid_var(--ptah-border-color)]';
+/**
+ * With glass on, a glass content card owns the inset. The section then has no block padding,
+ * so the padding of the card and the padding of the section do not stack.
+ */
+const FLUSH_IN_GLASS_CLASS = '[[data-glass=on]_&]:py-0';
 const DISABLED_CLASS = 'opacity-[var(--ptah-field-disabled-opacity)]';
 /** Lets the fields column grow to the settings content cap (card grids, tables). */
 const WIDE_CLASS = '[--ptah-form-section-fields-max-w:var(--ptah-settings-content-max-w)]';
@@ -133,6 +138,11 @@ export class PtahFormSectionComponent {
    * or a table. Default false: text fields keep the readable fields cap.
    */
   readonly wide = input(false, { transform: booleanAttribute });
+  /**
+   * Set it when the section is the content of a glass content card. With glass on, the section
+   * then has no block padding. With glass off, the padding stays.
+   */
+  readonly flushInGlass = input(false, { transform: booleanAttribute });
   /** Optional lucide icon before the heading (decorative, `aria-hidden`). */
   readonly icon = input<LucideIconData | null>(null);
 
@@ -148,6 +158,7 @@ export class PtahFormSectionComponent {
   protected readonly sectionToggles = computed(() => ({
     [DIVIDER_CLASS]: this.divider(),
     [WIDE_CLASS]: this.wide(),
+    [FLUSH_IN_GLASS_CLASS]: this.flushInGlass(),
   }));
   protected readonly fieldsToggles = computed(() => ({ [DISABLED_CLASS]: this.disabled() }));
 

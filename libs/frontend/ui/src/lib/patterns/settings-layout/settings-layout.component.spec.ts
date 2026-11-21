@@ -427,14 +427,53 @@ describe('PtahSettingsLayoutComponent', () => {
     expect(icon.nextElementSibling?.tagName).toBe('H2');
   });
 
-  it('shows a state dot and count with an accessible label', () => {
+  it('shows a state dot and count; the mark label is the button description, not part of its name', () => {
     host.navMode.set('navigation');
     host.tabs.set([{ id: 'general', label: 'General', stateMark: { tone: 'warn', count: 2, label: '2 need attention' } }]);
     fixture.detectChanges();
     const mark = q('[data-testid="settings-layout-state-mark"]') as HTMLElement;
-    expect(mark.getAttribute('aria-label')).toBe('2 need attention');
     expect(mark.getAttribute('title')).toBe('2 need attention');
     expect(mark.textContent?.trim()).toBe('2');
-    expect(mark.querySelector('[aria-hidden="true"]')).not.toBeNull();
+    // The whole mark is hidden from assistive technology, so it adds nothing to the button name.
+    expect(mark.getAttribute('aria-hidden')).toBe('true');
+    expect(mark.hasAttribute('aria-label')).toBe(false);
+    expect(mark.hasAttribute('role')).toBe(false);
+    const button = mark.closest('button') as HTMLButtonElement;
+    const name = Array.from(button.childNodes)
+      // Name from content: text and elements only (no template comments), without the aria-hidden parts.
+      .filter((node) => node.nodeType !== Node.COMMENT_NODE)
+      .filter((node) => !(node instanceof Element && node.getAttribute('aria-hidden') === 'true'))
+      .map((node) => node.textContent ?? '')
+      .join('')
+      .trim();
+    expect(name).toBe('General');
+    const describedBy = button.getAttribute('aria-describedby') as string;
+    const description = q(`[id="${describedBy}"]`) as HTMLElement;
+    expect(description.textContent).toBe('2 need attention');
+    expect(description.classList.contains('sr-only')).toBe(true);
+    expect(button.contains(description)).toBe(false);
+  });
+
+  it('describes a disabled tab with a state mark by its reason, then the mark label', () => {
+    host.navMode.set('navigation');
+    host.tabs.set([
+      { id: 'general', label: 'General', disabled: true, disabledReason: 'Not ready.', stateMark: { tone: 'warn', label: 'Needs attention' } },
+    ]);
+    fixture.detectChanges();
+    const button = (q('[data-testid="settings-layout-state-mark"]') as HTMLElement).closest('button') as HTMLButtonElement;
+    const ids = (button.getAttribute('aria-describedby') ?? '').split(' ');
+    expect(ids.map((id) => q(`[id="${id}"]`)?.textContent)).toEqual(['Not ready.', 'Needs attention']);
+  });
+
+  it('adds no description for a tab without a state mark, and none in tabs mode', () => {
+    host.navMode.set('navigation');
+    host.tabs.set([{ id: 'general', label: 'General' }]);
+    fixture.detectChanges();
+    expect(q('[data-testid="settings-layout-tablist"] button')?.hasAttribute('aria-describedby')).toBe(false);
+    host.navMode.set('tabs');
+    host.tabs.set([{ id: 'general', label: 'General', stateMark: { tone: 'warn', label: 'Needs attention' } }]);
+    fixture.detectChanges();
+    expect(q('[data-testid="settings-layout-tablist"] button')?.hasAttribute('aria-describedby')).toBe(false);
+    expect(q('[data-testid="settings-layout-state-mark-text"]')).toBeNull();
   });
 });

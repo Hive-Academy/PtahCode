@@ -174,7 +174,7 @@ const NAV_CLASS = [
                 [attr.aria-selected]="navMode() === 'tabs' ? tab.id === selected() : null"
                 [attr.aria-controls]="navMode() === 'tabs' ? panelId : null"
                 [attr.aria-disabled]="tab.disabled ? 'true' : null"
-                [attr.aria-describedby]="tab.disabled && tab.disabledReason ? reasonId(tab.id) : null"
+                [attr.aria-describedby]="describedBy(tab)"
                 [attr.title]="tab.disabled && tab.disabledReason ? tab.disabledReason : null"
                 [tabIndex]="navMode() === 'tabs' ? (i === focusIndex() ? 0 : -1) : 0"
                 (click)="activate(tab)"
@@ -192,10 +192,11 @@ const NAV_CLASS = [
                 @if (hasBadge(tab.badge)) {
                   <span ptahBadge size="xs" data-testid="settings-layout-badge">{{ tab.badge }}</span>
                 }
+                <!-- The mark is not part of the button name: its label is the button description (the sr-only span below). -->
                 @if (navMode() === 'navigation' && tab.stateMark; as mark) {
-                  <span role="img" class="inline-flex shrink-0 items-center gap-[var(--ptah-gap-label)] text-[length:var(--ptah-text-caption-size)]" [class]="markToneClass(mark.tone)" [attr.aria-label]="mark.label" [attr.title]="mark.label" data-testid="settings-layout-state-mark">
-                    <span class="size-[var(--ptah-icon-xs)] rounded-full bg-current" aria-hidden="true"></span>
-                    @if (mark.count !== undefined) { <span aria-hidden="true">{{ mark.count }}</span> }
+                  <span aria-hidden="true" class="inline-flex shrink-0 items-center gap-[var(--ptah-gap-label)] text-[length:var(--ptah-text-caption-size)]" [class]="markToneClass(mark.tone)" [attr.title]="mark.label" data-testid="settings-layout-state-mark">
+                    <span class="size-[var(--ptah-icon-xs)] rounded-full bg-current"></span>
+                    @if (mark.count !== undefined) { <span>{{ mark.count }}</span> }
                   </span>
                 }
               </button>
@@ -205,6 +206,9 @@ const NAV_CLASS = [
           @for (tab of tabs(); track tab.id) {
             @if (tab.disabled && tab.disabledReason) {
               <span class="sr-only" [id]="reasonId(tab.id)">{{ tab.disabledReason }}</span>
+            }
+            @if (navMode() === 'navigation' && tab.stateMark; as mark) {
+              <span class="sr-only" [id]="markId(tab.id)" data-testid="settings-layout-state-mark-text">{{ mark.label }}</span>
             }
           }
           <div [class]="navFooterClass()"><ng-content select="[nav-footer]" /></div>
@@ -379,6 +383,18 @@ export class PtahSettingsLayoutComponent<TId extends string = string> {
 
   protected tabId(id: TId): string {
     return `${this.baseId}-tab-${id}`;
+  }
+
+  protected markId(id: TId): string {
+    return `${this.tabId(id)}-state`;
+  }
+
+  /** Ids that describe a tab button: the disabled reason, then the state mark label (navigation mode). */
+  protected describedBy(tab: PtahSettingsTab<TId>): string | null {
+    const ids: string[] = [];
+    if (tab.disabled && tab.disabledReason) ids.push(this.reasonId(tab.id));
+    if (this.navMode() === 'navigation' && tab.stateMark) ids.push(this.markId(tab.id));
+    return ids.length > 0 ? ids.join(' ') : null;
   }
 
   protected reasonId(id: TId): string {

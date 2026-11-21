@@ -136,6 +136,27 @@ describe('CodexSandboxSettingComponent', () => {
     expect(byTestId('codex-sandbox-confirm')).toBeNull();
   });
 
+  it('uses the shared form section: the icon and the heading in the aside, the scope note first in the body', async () => {
+    await create();
+    const section = byTestId('codex-sandbox-setting');
+    expect(section?.getAttribute('data-glass-surface')).toBe('content');
+    const formSection = section?.querySelector('ptah-form-section[wide]');
+    expect(formSection?.querySelector('h3')?.textContent?.trim()).toBe('Codex sandbox');
+    expect(formSection?.querySelector('[data-testid="form-section-icon"]')).not.toBeNull();
+    // The region keeps its name: aria-labelledby still resolves to "Codex sandbox".
+    const labelId = section?.getAttribute('aria-labelledby');
+    expect(labelId).toBe('codex-sandbox-heading');
+    expect(host().querySelectorAll('#codex-sandbox-heading').length).toBe(1);
+    expect(host().querySelector('#codex-sandbox-heading')?.textContent?.trim()).toBe('Codex sandbox');
+    // The radios still name the scope note in aria-describedby, and it is the first visible body element.
+    const scope = host().querySelector('#codex-sandbox-scope');
+    expect(scope).toBe(byTestId('codex-sandbox-scope'));
+    expect(byTestId('codex-sandbox-choices')?.getAttribute('aria-describedby')).toContain('codex-sandbox-scope');
+    const fields = formSection?.querySelector('[data-testid="form-section-fields"]');
+    expect(Array.from(fields?.children ?? []).find((child) => !child.classList.contains('sr-only'))).toBe(scope);
+    expect(formSection?.querySelector('[data-testid="form-section-description"]')).toBeNull();
+  });
+
   it('shows Retry when the read fails, then loads again', async () => {
     call.mockImplementationOnce(async () => rpcError('host offline'));
     await create();

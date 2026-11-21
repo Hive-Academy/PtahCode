@@ -31,6 +31,12 @@ import { AgentBehaviourSectionComponent } from './pro-features/agent-behaviour-s
 import { OutputStyleConfigComponent } from './output-style/output-style-config.component';
 import { SettingsSaveFeedbackService } from './feedback/settings-save-feedback.service';
 import {
+  Download,
+  LucideAngularModule,
+  SlidersHorizontal,
+  Upload,
+} from 'lucide-angular';
+import {
   PtahButtonDirective,
   PtahDisclosureComponent,
   PtahFormSectionComponent,
@@ -91,12 +97,15 @@ const KEYED_IMPORT_ERROR = /^(ptah\.|config:)/;
     PtahDisclosureComponent,
     PtahFormSectionComponent,
     PtahInstrumentBandComponent,
+    LucideAngularModule,
   ],
   template: `
     <!-- Each glass section is its own stacking context. The section with focus (an open select
-         panel) is raised, so the next section cannot cover the panel. -->
+         panel) is raised, so the next section cannot cover the panel.
+         F8: one section gap, with and without glass. The list has no bottom padding: the parent owns the gap to Setup. F38: at 1400px or more of the settings layout (the nearest
+         size container) the wide fields column of each section stops at 56rem. -->
     <div
-      class="flex flex-col pb-[var(--ptah-gap-field)] [&>*]:relative [&>*:focus-within]:z-[var(--ptah-z-raised)]"
+      class="flex flex-col gap-[var(--ptah-gap-section)] [&>*]:relative [&>*:focus-within]:z-[var(--ptah-z-raised)] [@container(min-width:1400px)]:[--ptah-settings-content-max-w:56rem]"
       data-advanced-sections
     >
       <ptah-instrument-band
@@ -107,8 +116,8 @@ const KEYED_IMPORT_ERROR = /^(ptah\.|config:)/;
       />
       <ptah-license-status-card>
         <!--
-          M5: the import confirm takes the place of Export / Import inside the header's action row, so the
-          membership badges under the header do not move and the card height stays the same.
+          M5: the import confirm takes the place of Export / Import inside the "Settings backup" row of the
+          card, so the membership badges in the aside do not move.
         -->
         <div membership-actions class="flex flex-wrap items-center gap-[var(--ptah-gap-controls)]">
           @if (confirmingImport()) {
@@ -138,6 +147,7 @@ const KEYED_IMPORT_ERROR = /^(ptah\.|config:)/;
               (click)="exportSettings()"
               aria-label="Export settings"
             >
+              <lucide-angular [img]="DownloadIcon" class="size-[var(--ptah-icon-sm)]" aria-hidden="true" />
               Export settings
             </button>
             <button
@@ -150,6 +160,7 @@ const KEYED_IMPORT_ERROR = /^(ptah\.|config:)/;
               (click)="requestImport()"
               aria-label="Import settings"
             >
+              <lucide-angular [img]="UploadIcon" class="size-[var(--ptah-icon-sm)]" aria-hidden="true" />
               Import settings
             </button>
           }
@@ -171,6 +182,8 @@ const KEYED_IMPORT_ERROR = /^(ptah\.|config:)/;
           [divider]="true"
           description="Upkeep jobs for memory, scheduled jobs and the workspace harness."
           [wide]="true"
+          [icon]="SlidersIcon"
+          flushInGlass
         >
           <div
             class="flex flex-col divide-y divide-base-content/10 border-y border-base-content/10"
@@ -194,6 +207,7 @@ const KEYED_IMPORT_ERROR = /^(ptah\.|config:)/;
                       [groupId]="group.id"
                       [contentSurface]="false"
                       headingStyle="hidden"
+                      rowLayout="aligned"
                     />
                   } @placeholder {
                     <div
@@ -209,12 +223,6 @@ const KEYED_IMPORT_ERROR = /^(ptah\.|config:)/;
       </section>
     </div>
   `,
-  styles: `
-    /* Without glass the sections are separated by their dividers; glass sections are cards, so they need a gap. */
-    :host-context([data-glass='on']) [data-advanced-sections] {
-      gap: var(--ptah-gap-section);
-    }
-  `,
 })
 export class AdvancedSettingsComponent {
   private readonly rpcService = inject(ClaudeRpcService);
@@ -224,6 +232,10 @@ export class AdvancedSettingsComponent {
   private readonly feedback = inject(SettingsSaveFeedbackService);
   private readonly importButton =
     viewChild<ElementRef<HTMLButtonElement>>('importButton');
+
+  protected readonly DownloadIcon = Download;
+  protected readonly UploadIcon = Upload;
+  protected readonly SlidersIcon = SlidersHorizontal;
 
   /** VS Code LM model changes can change which CLIs are usable (#84). */
   readonly modelChanged = output<void>();

@@ -362,6 +362,68 @@ describe('SettingsSaveFeedbackService', () => {
       expect(service.toast()?.canUndo).toBe(false);
     });
 
+    it('a partial failure with keepUndo keeps one alert toast with Undo; Undo runs the given inverse once', async () => {
+      const undo = jest.fn().mockResolvedValue({ ok: true });
+      await expect(service.saveGeneric(genericRequest({
+        label: 'Built-in tools (6 turned on)',
+        write: jest.fn().mockResolvedValue({ ok: false, message: '2 of 6 changes were not saved.', keepUndo: true }),
+        undo,
+      }))).resolves.toBe('failed');
+
+      expect(service.toast()).toEqual({ tone: 'alert', message: '2 of 6 changes were not saved.', canUndo: true });
+      expect(service.saving()).toBe(false);
+
+      await service.undo();
+      expect(undo).toHaveBeenCalledTimes(1);
+      expect(service.toast()).toEqual({ tone: 'status', message: 'Saved Built-in tools (6 turned on).', canUndo: false });
+    });
+
+    it('a success with its own message shows that message in place of "Saved {label}."', async () => {
+      const undo = jest.fn().mockResolvedValue({ ok: true, message: 'Restored Built-in tools (4 turned off).' });
+      await service.saveGeneric(genericRequest({
+        label: 'Built-in tools (6 turned on)',
+        write: jest.fn().mockResolvedValue({ ok: false, message: '2 of 6 changes were not saved.', keepUndo: true }),
+        undo,
+      }));
+
+      await service.undo();
+      expect(service.toast()).toEqual({ tone: 'status', message: 'Restored Built-in tools (4 turned off).', canUndo: false });
+    });
+
+    it('an Undo that fails with keepUndo stays in the toast and runs again; without keepUndo it is dropped', async () => {
+      const undo = jest.fn()
+        .mockResolvedValueOnce({ ok: false, message: 'Nothing was undone. Try Undo again.', keepUndo: true })
+        .mockResolvedValueOnce({ ok: false, message: 'Not undone.' });
+      const write = jest.fn().mockResolvedValue({ ok: true });
+      await service.saveGeneric(genericRequest({ write, undo }));
+
+      await service.undo();
+      expect(service.toast()).toEqual({ tone: 'alert', message: 'Nothing was undone. Try Undo again.', canUndo: true });
+
+      await service.undo();
+      expect(undo).toHaveBeenCalledTimes(2);
+      expect(write).toHaveBeenCalledTimes(1);
+      expect(service.toast()).toEqual({ tone: 'alert', message: 'Not undone.', canUndo: false });
+      await service.undo();
+      expect(undo).toHaveBeenCalledTimes(2);
+    });
+
+    it('keepUndo offers no Undo when the request has none, and a failure without keepUndo drops the Undo', async () => {
+      await service.saveGeneric(genericRequest({
+        write: jest.fn().mockResolvedValue({ ok: false, message: 'Not saved.', keepUndo: true }),
+      }));
+      expect(service.toast()).toEqual({ tone: 'alert', message: 'Not saved.', canUndo: false });
+
+      const undo = jest.fn().mockResolvedValue({ ok: true });
+      await service.saveGeneric(genericRequest({
+        write: jest.fn().mockResolvedValue({ ok: false, message: 'Not saved.' }),
+        undo,
+      }));
+      expect(service.toast()).toEqual({ tone: 'alert', message: 'Not saved.', canUndo: false });
+      await service.undo();
+      expect(undo).not.toHaveBeenCalled();
+    });
+
     it('a failed write shows the failure message and no Undo', async () => {
       await expect(service.saveGeneric(
         genericRequest({ write: jest.fn().mockResolvedValue({ ok: false, message: 'Port must be between 1024 and 65535.' }) }),

@@ -1,0 +1,17 @@
+**Verdict: REVISE**
+
+## Item status
+
+- **(a) Fail closed — not resolved.** A verification GET that times out, fails, returns no data, or returns `unverified` now keeps Undo offered and sends no SET. The cached-policy fast path still bypasses verification. Reproduce by saving the first group row, rejecting the second, and returning a verified recovery read. Leave Advanced and return before the partial Undo toast expires. Let the remounted card’s GET return `unverified`. Click the retained Undo while the new card shows its read-only warning. The toast calls the original card’s closure, which uses its old `verified` value and sends the inverse SET without a GET. Require a fresh, sequence-accepted verification for the partial Undo before writing. `libs/frontend/chat/src/lib/settings/pro-features/claude-builtins-config.component.ts:417`, `libs/frontend/chat/src/lib/settings/pro-features/claude-builtins-config.component.ts:583`, `libs/frontend/chat/src/lib/settings/pro-features/claude-builtins-config.component.ts:699`, `libs/frontend/chat/src/lib/settings/pro-features/claude-builtins-config.component.spec.ts:1296`, `libs/frontend/chat/src/lib/settings/pro-features/claude-builtins-config.component.spec.ts:1599`.
+- **(b) Superseded read — resolved within the card’s read sequence.** The sequence check now protects both `lastPolicy` and the displayed state. With Undo’s verified response held and a newer unverified Retry accepted, releasing the older response sends no SET. The remount bypass in (a) concerns the lifetime of the cached policy. `libs/frontend/chat/src/lib/settings/pro-features/claude-builtins-config.component.ts:593`, `libs/frontend/chat/src/lib/settings/pro-features/claude-builtins-config.component.ts:599`, `libs/frontend/chat/src/lib/settings/pro-features/claude-builtins-config.component.spec.ts:1311`.
+- **(c) Remaining IDs — resolved.** A confirmed restore removes its ID from the retained set. In the regression test, another window turns a restored row back on between attempts, and the re-offered Undo writes only the row whose restoration failed. `libs/frontend/chat/src/lib/settings/pro-features/claude-builtins-config.component.ts:702`, `libs/frontend/chat/src/lib/settings/pro-features/claude-builtins-config.component.ts:806`, `libs/frontend/chat/src/lib/settings/pro-features/claude-builtins-config.component.spec.ts:1348`.
+
+## New defects
+
+None found in the bounded correction. The cached-policy bypass in item (a) remains from the prior guard.
+
+## Checks run
+
+- Focused Jest passed all 115 tests across the component and feedback service specs. ESLint on the two correction files reported zero errors and one `max-lines` warning at `libs/frontend/chat/src/lib/settings/pro-features/claude-builtins-config.component.ts:910`. The module-boundaries rule skipped because no cached project graph was available.
+- Confirmed both feedback files have the same worktree blob IDs as in the round 3 review. The review was read-only apart from this report.
+- **Silent failure:** the retained toast can confirm an Undo whose SET was authorized by a stale policy. **Unexpected action:** remount Advanced, then click the original partial Undo. **Wrong-answer input:** the original card’s valid but obsolete `verified` value. **Dependency failure:** verification failures refuse a write whenever the guard issues a GET. **Unspecified case:** the old toast and remounted card hold separate policy snapshots. The remount sequence was traced through the code and the existing remount test. The combined sequence was not executed.
