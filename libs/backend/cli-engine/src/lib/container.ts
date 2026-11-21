@@ -955,10 +955,10 @@ export class CliDIContainer {
       useValue: new CliPlatformCommands({ verbose, pushSink: pushAdapter }),
     });
     container.register(TOKENS.PLATFORM_AUTH_PROVIDER, {
-      useValue: new CliPlatformAuth(),
+      useValue: new CliPlatformAuth(logger),
     });
     container.register(TOKENS.SAVE_DIALOG_PROVIDER, {
-      useValue: new CliSaveDialog(),
+      useValue: new CliSaveDialog(logger),
     });
     container.register(TOKENS.MODEL_DISCOVERY, {
       useValue: new CliModelDiscovery(),

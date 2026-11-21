@@ -700,6 +700,9 @@ function foldToolInputOntoStart(
   try {
     parsed = JSON.parse(inputJson);
   } catch {
+    // degradation-audit: optional-capability - dropped input bytes that do
+    // not parse are "not a usable object" by contract; false makes the
+    // caller keep them as a synthetic delta, so nothing is lost.
     return false;
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {

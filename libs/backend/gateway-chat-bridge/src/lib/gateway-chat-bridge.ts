@@ -286,6 +286,8 @@ export class GatewayChatBridge {
     try {
       interrupted = this.gateway.claimInterruptedInboundTurns();
     } catch (error: unknown) {
+      // degradation-audit: reported - logged at warn here; no restart notice
+      // is sent for this boot.
       this.logger.warn(
         '[gateway-chat-bridge] could not claim interrupted turns',
         { error: error instanceof Error ? error.message : String(error) },
@@ -367,9 +369,15 @@ export class GatewayChatBridge {
     // busy, and released when the enqueue promise settles — which the
     // watchdog guarantees even for a wedged stream, so busy-state cannot leak.
     this.turnTracker.begin(conversationKey);
+    // degradation-audit: reported - a rejected turn is logged at warn (error
+    // name only, never content); the queue moves on to the next turn.
     void this.queue
       .enqueue(conversationKey, () => this.runTurn(event))
-      .catch(() => undefined)
+      .catch((error: unknown) => {
+        this.logger.warn('[gateway-chat-bridge] inbound turn rejected', {
+          errorName: error instanceof Error ? error.name : typeof error,
+        });
+      })
       .finally(() => this.turnTracker.end(conversationKey));
   }
 
@@ -720,7 +728,13 @@ export class GatewayChatBridge {
     // because an unhandled rejection on this untracked promise would take the
     // host process down over a cosmetic indicator.
     const ping = (): void => {
-      void this.gateway.sendTyping(route).catch(() => undefined);
+      // degradation-audit: reported - an unexpected rejection is logged at
+      // debug (this re-arms every few seconds); the adapters log their own.
+      void this.gateway.sendTyping(route).catch((error: unknown) => {
+        this.logger.debug('[gateway-chat-bridge] typing indicator failed', {
+          errorName: error instanceof Error ? error.name : typeof error,
+        });
+      });
     };
     ping();
     const timer = setInterval(() => {
@@ -742,7 +756,16 @@ export class GatewayChatBridge {
     try {
       await access(root);
       return true;
-    } catch {
+    } catch (error: unknown) {
+      // degradation-audit: optional-capability - a missing root answers false
+      // by contract and the turn fails closed; other access failures are
+      // logged at warn and also return false.
+      const code = (error as NodeJS.ErrnoException | null)?.code;
+      if (code !== 'ENOENT' && code !== 'ENOTDIR') {
+        this.logger.warn('[gateway-chat-bridge] workspace root access failed', {
+          code,
+        });
+      }
       return false;
     }
   }

@@ -89,7 +89,7 @@ export const CLAUDE_SETTINGS_SAFE_ENV_KEYS = [
   'CLAUDE_BASH_MAINTAIN_PROJECT_WORKING_DIR',
 ] as const;
 
-/** Fixed class of a running child's subscription word, safe to log. */
+/** Fixed class of a running child's subscription word, safe to log. `absent`: no plan recorded yet. */
 export type ClaudeLoginSubscriptionClass =
   | 'pro'
   | 'max'
@@ -100,6 +100,9 @@ export type ClaudeLoginSubscriptionClass =
   | 'other'
   | 'absent';
 
+/** Classes a named run accepts: a personal plan, or none recorded yet. */
+const PERSONAL_OR_UNKNOWN_PLANS: ReadonlySet<ClaudeLoginSubscriptionClass> = new Set(['pro', 'max', 'ultra', 'absent']);
+
 /** `pro`, `max`, or `ultra`, alone or with a size suffix such as `_20x` or ` 20x`. */
 const PERSONAL_PLAN = /^(pro|max|ultra)(?:[\s_-]*\d+x)?$/;
 
@@ -107,10 +110,11 @@ const PERSONAL_PLAN = /^(pro|max|ultra)(?:[\s_-]*\d+x)?$/;
  * Classify a raw (`ultra_20x`) or display (`Claude Ultra 20x`) subscription.
  * A personal family needs the whole word to be the plan plus an optional size
  * suffix: any other qualifier (`Ultra Team`, `max-enterprise`) is `other`.
- * A non-personal family is read from the first word only.
+ * A non-personal family is read from the first word only. A missing plan
+ * (`null` or `undefined`) is `absent`; an empty word is `other`.
  */
-export function claudeSubscriptionFamily(word: string | undefined): ClaudeLoginSubscriptionClass {
-  if (word === undefined) return 'absent';
+export function claudeSubscriptionFamily(word: string | null | undefined): ClaudeLoginSubscriptionClass {
+  if (word === undefined || word === null) return 'absent';
   const plan = word.trim().replace(/^Claude\s+/i, '').toLowerCase();
   const personal = PERSONAL_PLAN.exec(plan);
   if (personal) return personal[1] === 'pro' ? 'pro' : personal[1] === 'max' ? 'max' : 'ultra';
@@ -176,6 +180,7 @@ export interface ClaudePersonalLoginCheck {
   readonly apiKeySource: boolean;
   readonly apiProvider: boolean;
   readonly subscription: ClaudeLoginSubscriptionClass;
+  /** A Pro, Max or Ultra plan, or no plan recorded yet; never an org or API plan. */
   readonly personalSubscription: boolean;
 }
 
@@ -183,14 +188,19 @@ export interface ClaudePersonalLoginCheck {
  * Post-init tripwire: classify a running child's login. A personal claude.ai
  * login reports no token source or `claude.ai` (the bundled CLI omits it for a
  * claude.ai subscriber), no API key source or `none`, no provider or
- * `firstParty`, and a personal Pro, Max, or Ultra subscription in either vocabulary. Any other
- * defined token source (`CLAUDE_CODE_OAUTH_TOKEN`, ...), key source, provider
- * or subscription word, an absent subscription included, fails its check.
+ * `firstParty`, and a personal Pro, Max, or Ultra subscription in either
+ * vocabulary or no subscription at all: a fresh `claude auth login` records
+ * the plan only during a later full session. Any other defined token source
+ * (`CLAUDE_CODE_OAUTH_TOKEN`, ...), key source, provider or subscription word
+ * (team, enterprise, api, an unknown or empty word) fails its check.
  */
 export function claudePersonalLoginCheck(
   info: ClaudeRunningLoginInfo,
 ): ClaudePersonalLoginCheck {
-  const subscription = claudeSubscriptionFamily(info.subscriptionType);
+  // The SDK may report JSON null; a value of another type is never absent.
+  const raw: unknown = info.subscriptionType;
+  const subscription = raw === undefined || raw === null ? 'absent'
+    : typeof raw === 'string' ? claudeSubscriptionFamily(raw) : 'other';
   return Object.freeze({
     tokenSource:
       info.tokenSource === undefined || info.tokenSource === 'claude.ai',
@@ -199,7 +209,7 @@ export function claudePersonalLoginCheck(
     apiProvider:
       info.apiProvider === undefined || info.apiProvider === 'firstParty',
     subscription,
-    personalSubscription: subscription === 'pro' || subscription === 'max' || subscription === 'ultra',
+    personalSubscription: PERSONAL_OR_UNKNOWN_PLANS.has(subscription),
   });
 }
 
@@ -459,8 +469,10 @@ function parsedFlagSettings(flagSettings: string): unknown {
   try {
     return JSON.parse(flagSettings) as unknown;
   } catch {
-    // Unparseable flag settings cannot be proved free of an override; the
-    // caller refuses on `malformed`, so nothing is silently accepted.
+    // degradation-audit: optional-capability - unparseable flag settings
+    // become undefined, which claudeSettingsOverride() classifies as
+    // `malformed`; the caller refuses the launch, so nothing is silently
+    // accepted.
     return undefined;
   }
 }

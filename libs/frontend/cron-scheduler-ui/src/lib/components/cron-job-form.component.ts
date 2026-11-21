@@ -92,7 +92,8 @@ function detectUserTimezone(): string {
   try {
     return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC';
   } catch {
-    // Intl can be unavailable or restricted; UTC is the documented fallback.
+    // degradation-audit: optional-capability - Intl can be unavailable or
+    // restricted; the form then defaults the timezone field to UTC.
     return 'UTC';
   }
 }

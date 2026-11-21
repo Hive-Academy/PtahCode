@@ -146,6 +146,9 @@ export interface VitalsRpcSource {
  * Runs one vitals RPC and maps its answer. A failed call, a rejection, or an
  * answer `map` rejects (returns `null`) is logged and becomes `error`. Logs
  * carry only an error code or an error name, never paths or values.
+ *
+ * `WORKSPACE_NOT_OPEN` is not a failure: with no folder open the source does
+ * not apply, so it becomes `empty`, is not logged, and is not retried early.
  */
 export async function settleVitalsRpc<R, T>(
   source: VitalsRpcSource,
@@ -155,6 +158,9 @@ export async function settleVitalsRpc<R, T>(
   const { logger, context, label } = source;
   try {
     const result = await call();
+    if (!result.isSuccess() && result.errorCode === 'WORKSPACE_NOT_OPEN') {
+      return VITALS_EMPTY;
+    }
     if (!result.isSuccess()) {
       logger.error(context, `${label} RPC failed`, {
         errorCode: result.errorCode,

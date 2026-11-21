@@ -35,6 +35,7 @@ import {
   type LanguageCoverage,
   type UnsupportedLanguageAnswer,
 } from '@ptah-extension/platform-core';
+import type { Logger } from '@ptah-extension/vscode-core';
 import {
   ContextNamespace,
   ProjectNamespace,
@@ -70,6 +71,11 @@ export interface AnalysisNamespaceDependencies {
   workspaceProvider: IWorkspaceProvider;
   /** Bounded source discovery for the dependency graph. */
   fileSystemProvider: IFileSystemProvider;
+  /**
+   * Receives a warning when a dependency query fails and answers with an empty
+   * list. Optional, so specs and callers without a logger keep working.
+   */
+  logger?: Pick<Logger, 'warn'>;
 }
 
 /**
@@ -452,13 +458,91 @@ function unsupportedGraphLanguage(
 }
 
 /**
+ * A dependency lookup for a file that the answering graph holds no node for.
+ * The graph never analyzed the file, so `[]` would read as "no imports" or
+ * "unused". The MCP tools catch this one error and answer `[]` beside
+ * `fileInGraph: false` and the coverage census instead (protocol-dispatcher).
+ */
+export class FileNotInGraphError extends Error {
+  override readonly name = 'FileNotInGraph';
+  constructor() {
+    super('Dependency graph unavailable: the file is not in the built graph');
+  }
+}
+
+/**
  * Build dependency graph namespace
  * Import-based file dependency tracking and symbol indexing
  */
 export function buildDependencyNamespace(
   deps: AnalysisNamespaceDependencies,
 ): DependenciesNamespace {
-  const { dependencyGraph, workspaceProvider, fileSystemProvider } = deps;
+  const { dependencyGraph, workspaceProvider, fileSystemProvider, logger } =
+    deps;
+
+  // `[]` means "looked it up, found nothing". A lookup that could not run
+  // throws, so the tool runner reports an error result instead of a list the
+  // agent would read as "this file has no imports / is unused".
+  /** Whether a built graph answers lookups for `resolved`; throws as unavailable. */
+  const coversFile = (
+    operation: 'getDependencies' | 'getDependents',
+    resolved: string,
+  ): boolean => {
+    try {
+      return dependencyGraph.getCoverageReportForFile(resolved) !== undefined;
+    } catch (error: unknown) {
+      const errorName = error instanceof Error ? error.name : typeof error;
+      logger?.warn(`[DependencyNamespace] ${operation} failed`, { errorName });
+      throw new Error(`Dependency graph unavailable: ${errorName}`, {
+        cause: error,
+      });
+    }
+  };
+
+  const queryDependencyGraph = (
+    operation: 'getDependencies' | 'getDependents',
+    filePath: string,
+    query: (resolved: string) => string[],
+  ): string[] => {
+    const trimmed = filePath.trim();
+    if (
+      !isAbsoluteFileArg(trimmed) &&
+      !workspaceProvider.getWorkspaceRoot()
+    ) {
+      logger?.warn(`[DependencyNamespace] ${operation} failed`, {
+        errorName: 'NoWorkspace',
+      });
+      throw new Error('No workspace is open');
+    }
+    const resolved = resolveWorkspaceFilePath(trimmed, workspaceProvider);
+    // No built graph answers this file: the lookup cannot run, so it is not
+    // an empty answer. A covering graph with no edges still gives [].
+    if (!coversFile(operation, resolved)) {
+      logger?.warn(`[DependencyNamespace] ${operation} failed`, {
+        errorName: 'GraphNotBuilt',
+      });
+      throw new Error('Dependency graph unavailable: not built yet');
+    }
+    // With one graph, every path gets its coverage; a file outside its root
+    // has no node there, and the query would answer [] without looking.
+    if (dependencyGraph.resolveNodePath(resolved) === undefined) {
+      logger?.warn(`[DependencyNamespace] ${operation} failed`, {
+        errorName: 'FileNotInGraph',
+      });
+      throw new FileNotInGraphError();
+    }
+    try {
+      return query(resolved);
+    } catch (error: unknown) {
+      const errorName = error instanceof Error ? error.name : typeof error;
+      logger?.warn(`[DependencyNamespace] ${operation} failed`, { errorName });
+      // Only the error name crosses to the agent (the runner sends .message);
+      // the original stays internal as the cause.
+      throw new Error(`Dependency graph unavailable: ${errorName}`, {
+        cause: error,
+      });
+    }
+  };
 
   const readSymbolEntries = (workspaceRoot?: string): SymbolIndexEntry[] => {
     try {
@@ -628,29 +712,15 @@ export function buildDependencyNamespace(
     getDependencies: async (
       filePath: string,
       depth?: number,
-    ): Promise<string[]> => {
-      try {
-        const resolved = resolveWorkspaceFilePath(
-          filePath.trim(),
-          workspaceProvider,
-        );
-        return dependencyGraph.getDependencies(resolved, depth);
-      } catch {
-        return [];
-      }
-    },
+    ): Promise<string[]> =>
+      queryDependencyGraph('getDependencies', filePath, (resolved) =>
+        dependencyGraph.getDependencies(resolved, depth),
+      ),
 
-    getDependents: async (filePath: string): Promise<string[]> => {
-      try {
-        const resolved = resolveWorkspaceFilePath(
-          filePath.trim(),
-          workspaceProvider,
-        );
-        return dependencyGraph.getDependents(resolved);
-      } catch {
-        return [];
-      }
-    },
+    getDependents: async (filePath: string): Promise<string[]> =>
+      queryDependencyGraph('getDependents', filePath, (resolved) =>
+        dependencyGraph.getDependents(resolved),
+      ),
 
     getSymbolIndex,
 
@@ -682,7 +752,7 @@ export function buildDependencyNamespace(
     ): Promise<GraphFileCoverage> => {
       const trimmed = filePath.trim();
       // A relative path with no open workspace cannot be resolved; the
-      // dependency calls answer [] for it, from no graph, so nothing is known.
+      // dependency calls throw for it, from no graph, so nothing is known.
       if (
         !isAbsoluteFileArg(trimmed) &&
         !workspaceProvider.getWorkspaceRoot()

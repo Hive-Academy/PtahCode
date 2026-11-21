@@ -177,7 +177,7 @@ export function createCliUserLayerRefresher(
 }
 
 /**
- * Logs a refresh warning through the container's logger when one is bound.
+ * Logs a harness warning through the container's logger when one is bound.
  * Resolved lazily: the refresher is built in DI phase 2, before every binding
  * exists.
  */
@@ -252,7 +252,12 @@ function resolveWorkspaceRoot(
     );
     const root = workspaceProvider.getWorkspaceRoot();
     return typeof root === 'string' && root.trim() !== '' ? root : undefined;
-  } catch {
+  } catch (error: unknown) {
+    // degradation-audit: reported - logged at warn here when the logger is
+    // bound; the caller gets undefined and skips the boot reconcile.
+    warnRefresh(container, '[CLI harness] Could not resolve the workspace root', {
+      error: error instanceof Error ? error.message : String(error),
+    });
     return undefined;
   }
 }
@@ -277,7 +282,14 @@ export function readCliPreflightTimeoutMs(
       'harness.preflightTimeoutMs',
     );
     return typeof value === 'number' && value > 0 ? value : undefined;
-  } catch {
+  } catch (error: unknown) {
+    // degradation-audit: reported - logged at warn here when the logger is
+    // bound; the caller gets undefined and uses the lib default timeout.
+    warnRefresh(
+      container,
+      '[CLI harness] Could not read harness.preflightTimeoutMs',
+      { error: error instanceof Error ? error.message : String(error) },
+    );
     return undefined;
   }
 }
@@ -298,7 +310,14 @@ export function readCliManageGitignore(
       'harness.manageGitignore',
     );
     return typeof value === 'boolean' ? value : undefined;
-  } catch {
+  } catch (error: unknown) {
+    // degradation-audit: reported - logged at warn here when the logger is
+    // bound; the caller gets undefined and uses the lib default (on).
+    warnRefresh(
+      container,
+      '[CLI harness] Could not read harness.manageGitignore',
+      { error: error instanceof Error ? error.message : String(error) },
+    );
     return undefined;
   }
 }

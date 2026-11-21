@@ -67,6 +67,9 @@ export class CliUserInteraction implements IUserInteraction {
         return false;
       }
     } catch {
+      // degradation-audit: optional-capability - an unparseable URL is
+      // refused like a disallowed protocol: openExternal() answers false
+      // ("not opened") by contract.
       return false;
     }
     return new Promise<boolean>((resolve) => {

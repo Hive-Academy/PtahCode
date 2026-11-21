@@ -93,6 +93,8 @@ export class SessionAgentTrayService {
         ctx.sessionId,
       );
     } catch {
+      // degradation-audit: reported - shown to the user: false makes
+      // SubagentLaneComposer.steer show STEER_FAILED in the composer.
       return false;
     }
   }

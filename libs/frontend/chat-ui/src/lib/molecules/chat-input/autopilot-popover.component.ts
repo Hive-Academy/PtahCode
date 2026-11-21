@@ -286,8 +286,13 @@ export class AutopilotPopoverComponent {
   }
 
   private refreshTabSession(sessionId: SessionId): void {
-    // A failed read keeps the last known state; nothing to surface.
-    this.autopilotState.refreshSession(sessionId).catch(() => undefined);
+    // degradation-audit: reported - logged at warn here; a failed read keeps
+    // the last known level in the popover.
+    this.autopilotState.refreshSession(sessionId).catch((error: unknown) => {
+      console.warn('[AutopilotPopover] Session autopilot level read failed', {
+        errorName: error instanceof Error ? error.name : typeof error,
+      });
+    });
   }
 
   closeDropdown(): void {

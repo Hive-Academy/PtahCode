@@ -33,6 +33,7 @@ import {
   OnDestroy,
   computed,
   effect,
+  inject,
   input,
   output,
   signal,
@@ -40,7 +41,7 @@ import {
   type WritableSignal,
 } from '@angular/core';
 import { LucideAngularModule, Check, Server } from 'lucide-angular';
-import { injectWallClock } from '@ptah-extension/core';
+import { LoggingService, injectWallClock } from '@ptah-extension/core';
 import type { LucideIconData } from 'lucide-angular';
 import { NativeDrawerComponent, MotionStageDirective, ProviderMarkComponent, ProviderModelPickerComponent, PtahButtonDirective, PtahFieldComponent, PtahInputDirective } from '@ptah-extension/ui';
 import type { ProviderModelSelection, ProviderMarkLucideIcon } from '@ptah-extension/ui';
@@ -1510,6 +1511,7 @@ export class ProviderSetupWizardComponent implements OnDestroy {
   private readonly _closeReview = signal(false);
   private readonly _scopeTouched = signal(false);
 
+  private readonly logger = inject(LoggingService);
   private readonly hostElement = viewChild.required<ElementRef<HTMLElement>>(
     'wizardHost',
   );
@@ -2200,9 +2202,13 @@ export class ProviderSetupWizardComponent implements OnDestroy {
     this.probeSettled = true;
     this._probeStartedAt.set(null);
     if (wasChecking && probeId) {
-      void this.cancelDraftVerification()({ probeId }).catch(() => {
-        // Intentional suppression: the invalidated probe is already settled locally; a late cancel failure cannot restore it.
-      });
+      // degradation-audit: reported - logged at debug here; the invalidated probe is already settled
+      // locally, so a late cancel failure cannot restore it.
+      void this.cancelDraftVerification()({ probeId }).catch((error: unknown) =>
+        this.logger.debug('ProviderSetupWizard', 'Draft probe cancel failed', {
+          errorName: error instanceof Error ? error.name : typeof error,
+        }),
+      );
     }
   }
 

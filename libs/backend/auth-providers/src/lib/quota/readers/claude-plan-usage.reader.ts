@@ -216,6 +216,7 @@ export function createClaudePlanUsageReader(
         return invalidSource();
       }
     }
+    if (target.claudeUsageDir) return invalidSource('no-open-session');
     const usage = await probe.readPlanUsage(target.sessionHandle?.sessionId);
     if (usage === null) {
       return {

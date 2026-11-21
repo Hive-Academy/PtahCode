@@ -1030,14 +1030,20 @@ export interface DependenciesNamespace {
    * Get dependencies of a file (what it imports)
    * @param filePath - Absolute file path
    * @param depth - Max traversal depth (1-3, default: 1)
-   * @returns Array of dependent file paths
+   * @returns Array of dependency file paths; `[]` only when the lookup ran
+   *   and found none
+   * @throws Error when no workspace is open for a relative path, or when the
+   *   dependency graph cannot answer
    */
   getDependencies: (filePath: string, depth?: number) => Promise<string[]>;
 
   /**
    * Get reverse dependencies (what files import this file)
    * @param filePath - Absolute file path
-   * @returns Array of file paths that import this file
+   * @returns Array of file paths that import this file; `[]` only when the
+   *   lookup ran and found none
+   * @throws Error when no workspace is open for a relative path, or when the
+   *   dependency graph cannot answer
    */
   getDependents: (filePath: string) => Promise<string[]>;
 

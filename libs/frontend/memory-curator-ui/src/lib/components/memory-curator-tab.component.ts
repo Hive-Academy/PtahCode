@@ -12,7 +12,11 @@ import {
 } from '@angular/core';
 import { Brain, LucideAngularModule } from 'lucide-angular';
 
-import { AppStateManager, VSCodeService } from '@ptah-extension/core';
+import {
+  AppStateManager,
+  LoggingService,
+  VSCodeService,
+} from '@ptah-extension/core';
 import { WorkspaceIndexingService } from '@ptah-extension/workspace-indexing';
 
 import {
@@ -195,6 +199,7 @@ export class MemoryCuratorTabComponent implements OnInit {
   private readonly appState = inject(AppStateManager);
   private readonly indexingService = inject(WorkspaceIndexingService);
   private readonly injector = inject(Injector);
+  private readonly logger = inject(LoggingService);
 
   protected readonly BrainIcon = Brain;
 
@@ -270,6 +275,8 @@ export class MemoryCuratorTabComponent implements OnInit {
     try {
       return new Date(ts).toLocaleString();
     } catch {
+      // degradation-audit: optional-capability - a timestamp the locale API
+      // cannot format renders as the "never" label; the stat is display only.
       return 'never';
     }
   });
@@ -312,7 +319,9 @@ export class MemoryCuratorTabComponent implements OnInit {
         void this.state.loadSymbols();
         const root = this.appState.workspaceInfo()?.path;
         if (root) {
-          void this.indexingService.loadStatus(root).catch(() => undefined);
+          void this.indexingService
+            .loadStatus(root)
+            .catch((error: unknown) => this.logStatusFailure(error));
         }
       });
     });
@@ -337,8 +346,21 @@ export class MemoryCuratorTabComponent implements OnInit {
     void this.state.refresh();
     void this.state.loadSymbols();
     if (path) {
-      void this.indexingService.loadStatus(path).catch(() => undefined);
+      void this.indexingService
+        .loadStatus(path)
+        .catch((error: unknown) => this.logStatusFailure(error));
     }
+  }
+
+  /**
+   * A transport failure of the indexing status read. The banner keeps its
+   * last status; debug is enough because the read runs again on the next
+   * workspace switch or completed run.
+   */
+  private logStatusFailure(error: unknown): void {
+    this.logger.debug('MemoryCuratorTab', 'indexing:getStatus failed', {
+      errorName: error instanceof Error ? error.name : typeof error,
+    });
   }
 
   public ngOnInit(): void {
@@ -348,7 +370,9 @@ export class MemoryCuratorTabComponent implements OnInit {
     void this.state.loadSymbols();
     const root = this.appState.workspaceInfo()?.path;
     if (root) {
-      void this.indexingService.loadStatus(root).catch(() => undefined);
+      void this.indexingService
+        .loadStatus(root)
+        .catch((error: unknown) => this.logStatusFailure(error));
     }
   }
 

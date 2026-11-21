@@ -1251,9 +1251,16 @@ export class PluginCatalogPanelComponent implements OnInit {
     // its own rejection rather than failing the load — a host without this
     // handler, or with no workspace open, must still be able to configure
     // plugins, and the section it feeds simply does not render.
+    // degradation-audit: reported - logged at warn here; null hides the
+    // skill-selection section.
     const selectionRead = this.rpcService
       .call('harness:get-skill-selection', {}, { timeout: 10000 })
-      .catch(() => null);
+      .catch((error: unknown) => {
+        console.warn('[PluginCatalogPanel] Skill selection read failed', {
+          errorName: error instanceof Error ? error.name : typeof error,
+        });
+        return null;
+      });
 
     // Applied BEFORE the catalog is awaited, and never inside its try. These
     // two answers have nothing to do with each other: the selection is the only

@@ -283,6 +283,7 @@ export class SkillSynthesisStateService {
           : {}),
       });
     } catch {
+      // degradation-audit: reported - shown to the user through harvestError.
       // No raw host text in the UI: the failure detail is in the host logs.
       this.lastHarvest.set(null);
       this.harvestError.set(SKILLS_HARVEST_FAILED_MESSAGE);

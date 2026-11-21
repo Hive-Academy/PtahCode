@@ -301,6 +301,8 @@ export class AppShellComponent {
       // direct call was one of three independent boot callers of a 2-5s
       // handler, and the service's single-flight guard could not see it
       // (TASK_2026_342). `loadAuthStatus()` is a no-op once loaded.
+      // degradation-audit: reported - logged at warn here; the user stays on
+      // chat instead of being sent to Settings.
       this.authState
         .loadAuthStatus()
         .then(() => {
@@ -322,7 +324,11 @@ export class AppShellComponent {
             this.appState.setCurrentView('settings');
           }
         })
-        .catch(() => {});
+        .catch((error: unknown) => {
+          console.warn('[AppShell] Boot auth check failed', {
+            errorName: error instanceof Error ? error.name : typeof error,
+          });
+        });
     });
   }
 

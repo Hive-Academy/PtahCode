@@ -281,6 +281,9 @@ export class TaskScannerService {
     try {
       raw = await this.fs.readFile(carrier);
     } catch (error: unknown) {
+      // degradation-audit: reported - a missing carrier is returned as an
+      // excluded 'no_carrier' row (or skipped as residue); other failures are
+      // logged at warn and returned as an excluded 'unreadable' row.
       if (isMissingFileError(error)) {
         if (await this.isResidue(path.join(specsDir, folderName))) return {};
         return { excluded: { folderName, reason: 'no_carrier' } };

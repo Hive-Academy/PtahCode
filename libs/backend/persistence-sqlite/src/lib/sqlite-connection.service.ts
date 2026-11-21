@@ -838,6 +838,8 @@ function safeExistsSync(filePath: string): boolean {
   try {
     return fs.existsSync(filePath);
   } catch (err: unknown) {
+    // degradation-audit: reported - written to stderr here; the diagnostic
+    // records the path as absent (false) and the load attempt still runs.
     const message = err instanceof Error ? err.message : String(err);
     process.stderr.write(
       `[persistence-sqlite] fs.existsSync threw for path=${filePath}: ${message}\n`,

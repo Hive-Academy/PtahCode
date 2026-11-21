@@ -195,7 +195,7 @@ function registerProviderAccountServices(container: DependencyContainer): void {
     useFactory: instanceCachingFactory<ClaudeUsageProfileRoots>((c) =>
       c.isRegistered(PERSISTENCE_TOKENS.SQLITE_CONNECTION, true)
         ? new UsageProfileRootsAdapter(c.resolve(ProviderAccountStore))
-        : { listActiveRoots: async () => [] },
+        : { listActiveRoots: async () => [], listSignedInAccounts: async () => [] },
     ),
   });
   container.register(ProviderAccountService, {

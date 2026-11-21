@@ -170,6 +170,8 @@ export class VecEmbedderRecoveryService implements MessageHandler {
       });
       return null;
     } catch (err: unknown) {
+      // degradation-audit: reported - shown to the user as an error toast
+      // through _lastToast; the caller gets null.
       this.publishToast({
         kind: 'error',
         message: toErrorMessage(err),
@@ -203,6 +205,8 @@ export class VecEmbedderRecoveryService implements MessageHandler {
       });
       return null;
     } catch (err: unknown) {
+      // degradation-audit: reported - shown to the user as an error toast
+      // through _lastToast; the caller gets null.
       this.publishToast({ kind: 'error', message: toErrorMessage(err) });
       return null;
     } finally {
@@ -230,6 +234,8 @@ export class VecEmbedderRecoveryService implements MessageHandler {
       });
       return null;
     } catch (err: unknown) {
+      // degradation-audit: reported - shown to the user as an error toast
+      // through _lastToast; the caller gets null.
       this.publishToast({ kind: 'error', message: toErrorMessage(err) });
       return null;
     }
@@ -249,6 +255,8 @@ export class VecEmbedderRecoveryService implements MessageHandler {
       });
       return true;
     } catch (err: unknown) {
+      // degradation-audit: reported - shown to the user as an error toast
+      // through _lastToast; the caller gets false.
       this.publishToast({
         kind: 'error',
         message: `Could not copy: ${toErrorMessage(err)}`,

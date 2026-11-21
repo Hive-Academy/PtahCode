@@ -6,8 +6,8 @@
   "main": "./src/index.js",
   "types": "./src/index.d.ts",
   "dependencies": {
-    "@types/vscode": "^1.103.0",
-    "tsyringe": "^4.10.0",
+    "@types/vscode": "*",
+    "tsyringe": "*",
     "@ptah-extension/platform-core": "0.0.1",
     "@ptah-extension/vscode-core": "0.0.1",
     "@ptah-extension/shared": "0.0.1",
@@ -16,14 +16,14 @@
     "@ptah-extension/cli-agent-runtime": "0.0.1",
     "@ptah-extension/agent-sdk": "0.0.1",
     "@ptah-extension/tool-output-reducers": "0.0.1",
-    "json2md": "^2.0.1",
-    "minimatch": "10.2.6",
-    "exa-js": "^2.10.2",
-    "@tavily/core": "^0.7.2",
-    "chrome-launcher": "^1.2.1",
-    "chrome-remote-interface": "^0.34.0",
-    "jpeg-js": "^0.4.4",
-    "gifenc": "^1.0.3",
-    "zod": "^4.1.12"
+    "json2md": "*",
+    "minimatch": "*",
+    "exa-js": "*",
+    "@tavily/core": "*",
+    "chrome-launcher": "*",
+    "chrome-remote-interface": "*",
+    "jpeg-js": "*",
+    "gifenc": "*",
+    "zod": "*"
   }
 }

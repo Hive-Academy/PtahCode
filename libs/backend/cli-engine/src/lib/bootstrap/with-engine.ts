@@ -581,7 +581,16 @@ export async function migrateLegacyAuthMethod(
     provider = container.resolve<WorkspaceProviderLite>(
       PLATFORM_TOKENS.WORKSPACE_PROVIDER,
     );
-  } catch {
+  } catch (error: unknown) {
+    // degradation-audit: reported - logged at warn here when the logger is
+    // bound; the migration is skipped and the legacy value stays on disk.
+    if (container.isRegistered(LOGGER_TOKEN)) {
+      container
+        .resolve<Logger>(LOGGER_TOKEN)
+        .warn('[withEngine] authMethod migration skipped: no workspace provider', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+    }
     return;
   }
 

@@ -498,8 +498,12 @@ describe('named SDK bootstrap and final admission', () => {
     expect(f.admission.retainUnresolvedReservation).toHaveBeenCalledTimes(1);
   });
 
-  it('accepts a personal Claude Ultra subscription word', async () => {
-    const f = fixture({ identityPatch: { subscriptionType: 'Claude Ultra' } });
+  it.each<[string, Partial<AccountInfo>]>([
+    ['a personal Claude Ultra subscription word', { subscriptionType: 'Claude Ultra' }],
+    // A login that reports no plan yet is unknown, not refused (TASK_2026_2287).
+    ['no subscription', { subscriptionType: undefined }],
+  ])('accepts %s', async (_name, identityPatch) => {
+    const f = fixture({ identityPatch });
     await f.run();
     await f.flow.dispose();
     expect(f.admission.releaseReservation).toHaveBeenCalledTimes(1);
@@ -510,7 +514,8 @@ describe('named SDK bootstrap and final admission', () => {
     ['api key helper', { apiKeySource: 'apiKeyHelper' }],
     ['team subscription', { subscriptionType: 'team' }],
     ['team-qualified ultra subscription', { subscriptionType: 'Ultra Team' }],
-    ['no subscription', { subscriptionType: undefined }],
+    ['enterprise subscription', { subscriptionType: 'Claude Enterprise' }],
+    ['api subscription', { subscriptionType: 'Claude API' }],
     ['bedrock provider', { apiProvider: 'bedrock' }],
   ])('tripwire refuses %s before the gate opens', async (_name, identityPatch) => {
     const f = fixture({ identityPatch });

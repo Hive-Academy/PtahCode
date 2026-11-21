@@ -38,6 +38,8 @@ export class JsonlSessionResumabilityChecker implements ISessionResumabilityChec
     try {
       dirs = await fs.readdir(projectsDir);
     } catch {
+      // degradation-audit: optional-capability - isResumable() blocks only on
+      // a proven miss; an unreadable projects dir cannot disprove it, so true.
       // No projects dir at all — cannot disprove resumability; do not block.
       return true;
     }

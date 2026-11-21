@@ -4,6 +4,7 @@ import { access, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, delimiter, dirname, join, parse, resolve } from 'node:path';
 import { promisify } from 'node:util';
+import { runProcessToCompletion, type IProcessSpawner } from '@ptah-extension/platform-core';
 
 export const CODEX_MIN_SUPPORTED_VERSION = '0.165.0';
 const PROBE_TIMEOUT_MS = 7_000;
@@ -175,9 +176,19 @@ export class CodexSelectionSnapshot implements CodexSelectionSnapshotPort {
   }
 }
 
+export interface NodeCodexExecutableProbeOptions {
+  /**
+   * Runs `--version` through this spawner. Electron passes its off-thread
+   * spawner: a direct `execFile` is a synchronous `CreateProcessW` on Windows
+   * that blocks the main process. Without one the probe calls `execFile`.
+   */
+  readonly processSpawner?: IProcessSpawner;
+}
+
 /** Host supplies its bundled native path through a callback; no package dependency enters this library. */
 export function createNodeCodexExecutableProbes(
   bundledCandidate: () => Promise<string | undefined>,
+  options: NodeCodexExecutableProbeOptions = {},
 ): CodexExecutableProbes {
   const versionCache = new Map<string, {
     readonly mtimeMs: number;
@@ -207,6 +218,28 @@ export function createNodeCodexExecutableProbes(
     }
     return roots.flatMap((root) => ['bin', 'codex'].map((layout) =>
       join(root, 'vendor', triple, layout, nativeName)));
+  };
+  const runVersion = async (
+    path: string,
+    timeoutMs: number,
+  ): Promise<{ stdout: string; stderr: string }> => {
+    const spawner = options.processSpawner;
+    if (!spawner) {
+      return promisify(execFile)(path, ['--version'], {
+        timeout: timeoutMs, windowsHide: true, shell: false, maxBuffer: 16 * 1024,
+      });
+    }
+    const result = await runProcessToCompletion(
+      spawner,
+      { command: path, args: ['--version'], env: process.env },
+      { timeoutMs, maxOutputBytes: 16 * 1024 },
+    );
+    // Same failures as execFile: a timeout or a non-zero exit rejects.
+    if (result.timedOut)
+      throw new Error(`Codex --version timed out after ${timeoutMs} ms`);
+    if (result.exitCode !== 0)
+      throw new Error(`Codex --version exited with ${result.exitCode ?? result.signal}`);
+    return result;
   };
   return {
     async installedCandidates() {
@@ -257,10 +290,7 @@ export function createNodeCodexExecutableProbes(
       const cached = versionCache.get(path);
       if (cached?.mtimeMs === info.mtimeMs && cached.size === info.size)
         return cached.output;
-      const execFileAsync = promisify(execFile);
-      const { stdout, stderr } = await execFileAsync(path, ['--version'], {
-        timeout: timeoutMs, windowsHide: true, shell: false, maxBuffer: 16 * 1024,
-      });
+      const { stdout, stderr } = await runVersion(path, timeoutMs);
       const output = stdout || stderr;
       const parsedVersion = parseCodexVersion(output);
       // Keep the raw response too: the selector checks prerelease suffixes.

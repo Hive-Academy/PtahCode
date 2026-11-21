@@ -145,6 +145,8 @@ export class CopyCommandButtonComponent {
       this.announcement.set(COPIED_MESSAGE);
       this.scheduleReset();
     } catch (error: unknown) {
+      // degradation-audit: reported - shown to the user through the
+      // announcement signal; the command text is selected for a manual copy.
       if (this.destroyed) return;
       this.cancelFeedbackTimer();
       this.selectCommandText();

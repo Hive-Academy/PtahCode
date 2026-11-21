@@ -7,6 +7,7 @@ import {
   CLAUDE_CODE_NPM_INSTALL_COMMAND,
   CLAUDE_CODE_SIGN_IN_COMMAND,
   CodexSignInService,
+  LoggingService,
   type ProvidersConnection,
   type ProvidersConnectionDraft,
 } from '@ptah-extension/core';
@@ -442,6 +443,7 @@ export class CredentialsTabComponent {
   protected readonly probeResult = signal<AuthVerifyDraftConnectionResult | null>(null);
   private readonly feedback = inject(SettingsSaveFeedbackService);
   private readonly codexSignIn = inject(CodexSignInService);
+  private readonly logger = inject(LoggingService);
   protected readonly codexRunning = computed(() => {
     const status = this.codexSignIn.state()?.status;
     return status === 'starting' || status === 'running' || status === 'awaiting-user';
@@ -647,7 +649,14 @@ export class CredentialsTabComponent {
   private abandonProbe(): void {
     const probeId = this.probeId;
     if (probeId && this.probeState() === 'checking') {
-      void this.cancelDraftVerification()({ probeId }).catch(() => undefined);
+      // degradation-audit: reported - logged at debug here; the probe is already
+      // settled locally and its late result is discarded by probeId.
+      void this.cancelDraftVerification()({ probeId }).catch(
+        (error: unknown) =>
+          this.logger.debug('CredentialsTab', 'Draft probe cancel failed', {
+            errorName: error instanceof Error ? error.name : typeof error,
+          }),
+      );
     }
     this.probeId = null;
     this.probeState.set('idle');

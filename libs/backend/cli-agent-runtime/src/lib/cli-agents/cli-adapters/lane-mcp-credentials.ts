@@ -100,6 +100,8 @@ export function issueLaneMcpToken(
         ),
       );
   } catch {
+    // degradation-audit: reported - logged at warn here; the lane gets no
+    // token (undefined) and spawns without the ptah MCP server.
     logger.warn(
       '[Lane MCP] Credential issuance failed; omitting ptah MCP server',
     );

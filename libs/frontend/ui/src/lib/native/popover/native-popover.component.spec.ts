@@ -300,6 +300,27 @@ describe('NativePopoverComponent', () => {
       expect(panel()?.classList.contains('ptah-popover-capped')).toBe(false);
     });
 
+    it('keeps the cap policy of the open until the next open when capToViewport changes while open', async () => {
+      const position = positionSpy();
+      host.isOpen.set(true);
+      fixture.detectChanges();
+      await flushAll();
+      host.capToViewport.set(false);
+      fixture.detectChanges();
+      expect(panel()?.classList.contains('ptah-popover-capped')).toBe(true);
+
+      host.isOpen.set(false);
+      fixture.detectChanges();
+      await flushAll();
+      host.isOpen.set(true);
+      fixture.detectChanges();
+      await flushAll();
+      expect(position.mock.calls.at(-1)?.[2]).toEqual(
+        expect.objectContaining({ capHeight: false }),
+      );
+      expect(panel()?.classList.contains('ptah-popover-capped')).toBe(false);
+    });
+
     it('defaults capToViewport to true when no binding is set', () => {
       const bare = TestBed.createComponent(NativePopoverComponent);
       expect(bare.componentInstance.capToViewport()).toBe(true);
