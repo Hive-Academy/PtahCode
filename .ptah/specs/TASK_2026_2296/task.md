@@ -1,5 +1,5 @@
 ---
-status: in_progress
+status: in_review
 type: bugfix
 title: One predictable queued-message flow
 description: >-
@@ -12,3 +12,5 @@ description: >-
 
 User decisions (2026-11-21): queue only, never deny permission prompts; card
 in the transcript; Codex keeps native steering labelled "Send now".
+
+Pull request: #1461
