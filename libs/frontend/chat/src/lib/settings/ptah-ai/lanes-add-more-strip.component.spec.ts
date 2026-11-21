@@ -42,6 +42,7 @@ class StateStub {
   readonly commit = signal<ProvidersSettingsCommit>({
     status: 'idle', saved: [], unsaved: [], unconfirmed: [], refreshFailed: false, message: null,
   });
+  readonly cliRedetecting = signal(false);
   readonly cliDetection = signal({ status: 'ready', data: [], error: null });
   readonly redetectClis = jest.fn(async () => true);
 }

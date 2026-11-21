@@ -209,7 +209,7 @@
                 [row]="system"
                 kind="install"
                 [guide]="guides()[system.cli]"
-                [busy]="busy()"
+                [busy]="busy() || detecting()"
                 (redetectRequested)="redetect.emit($event)"
                 (closed)="popoverClosed.emit()"
               />

@@ -623,6 +623,26 @@ describe('LanesTableComponent', () => {
     expect(q(host, 'ptah-inline-confirm')).toBeNull();
   });
 
+  it('keeps focus on the expander that opened another detail while Delete was pending (N1)', async () => {
+    const { fixture, host } = await mount([instance('a'), instance('b')]);
+    expand(fixture, host, 'cli-matrix-row-a');
+    (q(host, '[data-testid="cli-matrix-delete-a"]') as HTMLButtonElement).click();
+    fixture.detectChanges();
+    await fixture.whenStable();
+    const expanderB = q(
+      host,
+      '[data-testid="cli-matrix-row-b"] ptah-table-row-expander button',
+    ) as HTMLButtonElement;
+    expanderB.focus();
+    expanderB.click();
+    fixture.detectChanges();
+    for (let i = 0; i < 4; i += 1) await Promise.resolve();
+    await fixture.whenStable();
+    expect(q(host, 'ptah-inline-confirm')).toBeNull();
+    expect(q(host, '#lane-detail-b ptah-lanes-table-detail')).not.toBeNull();
+    expect(document.activeElement).toBe(expanderB);
+  });
+
   it('focuses the next row actions trigger when Confirm removes the deleted row', async () => {
     const rows = [instance('a'), instance('b')];
     const { fixture, host } = await mount(rows);

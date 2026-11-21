@@ -110,6 +110,8 @@ export class LanesTableDetailComponent {
   readonly testResult = input('');
   readonly testing = input(false);
   readonly busy = input(false);
+  /** A Re-detect runs (any entry, read-backs included): the install guide shows it as pending. */
+  readonly detecting = input(false);
   readonly guides = input<
     Readonly<
       Partial<

@@ -56,7 +56,11 @@ export class LanesRedetectButtonComponent {
 
   private readonly redetecting = signal(false);
   protected readonly detecting = computed(
-    () => this.redetecting() || this.state.cliDetection().status === 'loading',
+    () =>
+      this.redetecting() ||
+      // Shared with the install guides: pending until any running Re-detect's read-backs end.
+      this.state.cliRedetecting() ||
+      this.state.cliDetection().status === 'loading',
   );
 
   protected async redetect(): Promise<void> {

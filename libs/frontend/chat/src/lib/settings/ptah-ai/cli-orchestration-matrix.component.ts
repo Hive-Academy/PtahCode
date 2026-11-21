@@ -171,6 +171,7 @@ const SAVE_SCOPE = 'global';
             [testingRows]="testingRows()"
             [testResults]="tableTestResults()"
             [orderMode]="orderMode()"
+            [detecting]="guideDetecting()"
             [guides]="CLI_INSTALL_GUIDES"
             [error]="laneReadError()"
             (toggled)="toggle($event.row, $event.event)"
@@ -252,7 +253,9 @@ export class CliOrchestrationMatrixComponent {
   private readonly guidePending = signal(false);
   protected readonly guideDetecting = computed(
     () =>
-      this.guidePending() || this.state.cliDetection().status === 'loading',
+      this.guidePending() ||
+      this.state.cliRedetecting() ||
+      this.state.cliDetection().status === 'loading',
   );
 
   protected readonly state = inject(ProvidersSettingsStateService);
@@ -375,13 +378,29 @@ export class CliOrchestrationMatrixComponent {
     );
     this.settleOrder(move, result === 'saved');
   }
+  /**
+   * The announced position comes only from a verified refresh: the rows rank by the refreshed saved order. When the
+   * refresh after the write is incomplete (it dropped `preferredAgentOrder`, so the rows fall back to discovery
+   * order), no position is announced. When no move control of the row is usable then, focus goes to Done.
+   */
   private settleOrder(move: LaneOrderMove, saved: boolean): void {
+    const verified = this.verifiedOrder() !== null;
     this.providerGrid()?.orderSettled({
       id: move.movedId,
       direction: move.direction,
-      saved,
-      order: this.rows().installed.map((row) => row.id),
+      saved: saved && verified,
+      order: verified ? this.rows().installed.map((row) => row.id) : [],
     });
+    // Runs after the table's own focus return (registered first), so it only fills the gap it leaves.
+    afterNextRender(
+      () => {
+        if (this.canReorder()) return;
+        this.element.nativeElement
+          .querySelector<HTMLElement>('[data-testid="lanes-order-edit"]')
+          ?.focus();
+      },
+      { injector: this.injector },
+    );
   }
   protected editLane(row: LaneTableRow): void {
     if (row.kind === 'instance') this.openEdit(row);
@@ -558,6 +577,7 @@ export class CliOrchestrationMatrixComponent {
     }
     if (!detected) {
       this.feedback.announce('Detection failed. Try again.', 'alert');
+      this.keepFocusAfterFailedRead();
       return;
     }
     const installed = this.rows().installed.some(
@@ -586,6 +606,28 @@ export class CliOrchestrationMatrixComponent {
     this.feedback.announce(
       'Detection ran, but the lane list could not be read. Try again.',
       'alert',
+    );
+    this.keepFocusAfterFailedRead();
+  }
+
+  /**
+   * A failed read can destroy the guide (its strip card or detail row goes with the cleared data). When that took
+   * the focus with it, focus goes to the table's Retry, else to the stable matrix region. Focus that the user moved
+   * to another control stays where it is.
+   */
+  private keepFocusAfterFailedRead(): void {
+    afterNextRender(
+      () => {
+        const active = this.element.nativeElement.ownerDocument.activeElement;
+        if (active && active !== active.ownerDocument.body && active.isConnected)
+          return;
+        const root = this.element.nativeElement;
+        (
+          root.querySelector<HTMLElement>('[data-testid="lanes-retry"]') ??
+          root.querySelector<HTMLElement>('[data-testid="cli-matrix"]')
+        )?.focus();
+      },
+      { injector: this.injector },
     );
   }
 

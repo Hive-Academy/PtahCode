@@ -2362,6 +2362,31 @@ describe('ProvidersSettingsStateService', () => {
       expect(service.orchestration().data?.detectedClis).toEqual(detected);
     });
 
+    it('keeps cliRedetecting true through the read-backs, after detection settles', async () => {
+      let finishRead: () => void = () => undefined;
+      handlers.set('agent:detectClis', async () => success({ clis: detected }));
+      handlers.set(
+        'agent:getConfig',
+        () =>
+          new Promise((resolve) => {
+            finishRead = () => resolve(success(fullConfig));
+          }),
+      );
+      handlers.set('ptahCli:list', async () => success({ agents: [] }));
+      handlers.set('settings:get', async () =>
+        success({ success: true, value: [] }),
+      );
+      expect(service.cliRedetecting()).toBe(false);
+      const run = service.redetectClis();
+      expect(service.cliRedetecting()).toBe(true);
+      for (let i = 0; i < 10; i += 1) await Promise.resolve();
+      expect(service.cliDetection().status).toBe('ready');
+      expect(service.cliRedetecting()).toBe(true);
+      finishRead();
+      await run;
+      expect(service.cliRedetecting()).toBe(false);
+    });
+
     it('rereads nothing when detection fails and reports it on cliDetection', async () => {
       handlers.set(
         'agent:detectClis',

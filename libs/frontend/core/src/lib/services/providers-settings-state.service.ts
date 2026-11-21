@@ -169,6 +169,14 @@ export class ProvidersSettingsStateService {
   readonly orchestration = this.view(this.orchestrationStore);
   /** Last explicit CLI re-detection (`redetectClis`); `loading` while it runs. */
   readonly cliDetection = this.view(this.detectionStore);
+  /** Running `redetectClis()` calls, read-backs included. */
+  private readonly redetectRuns = signal(0);
+  /**
+   * `true` from the start of a `redetectClis()` call until its read-backs end. Every Re-detect entry
+   * (section button, install guides) binds its pending state to this, so none starts while another's
+   * reads still run. `cliDetection().status` settles earlier, when the detection call itself ends.
+   */
+  readonly cliRedetecting = computed(() => this.redetectRuns() > 0);
   private readonly customEntries = this.view(this.customEntriesStore);
   readonly tiers = this.view(this.tiersStore);
   readonly verification = this.setup.verification;
@@ -828,22 +836,27 @@ export class ProvidersSettingsStateService {
    * so callers can do the same.
    */
   async redetectClis(): Promise<boolean> {
-    let detected = false;
-    let missingFields: readonly string[] = [];
-    await this.read(this.detectionStore, async () => {
-      const { clis } = await this.require('agent:detectClis', undefined);
-      detected = true;
-      const parsed = parseDetectedClis(clis);
-      missingFields = parsed.missingFields;
-      return parsed.clis;
-    });
-    if (!detected) return false;
-    await Promise.all([
-      this.refreshOrchestration(missingFields),
-      this.refreshCliAgents(),
-      this.refreshCliModels(),
-    ]);
-    return true;
+    this.redetectRuns.update((runs) => runs + 1);
+    try {
+      let detected = false;
+      let missingFields: readonly string[] = [];
+      await this.read(this.detectionStore, async () => {
+        const { clis } = await this.require('agent:detectClis', undefined);
+        detected = true;
+        const parsed = parseDetectedClis(clis);
+        missingFields = parsed.missingFields;
+        return parsed.clis;
+      });
+      if (!detected) return false;
+      await Promise.all([
+        this.refreshOrchestration(missingFields),
+        this.refreshCliAgents(),
+        this.refreshCliModels(),
+      ]);
+      return true;
+    } finally {
+      this.redetectRuns.update((runs) => runs - 1);
+    }
   }
   async refreshTiers(
     params: RpcMethodParams<'provider:getModelTiers'>,

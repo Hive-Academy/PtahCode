@@ -1434,11 +1434,14 @@ for (const host of ['vscode', 'electron'] as const) {
         ).toHaveText(label);
         const title = await identity.getAttribute('title');
         expect(title?.endsWith(` - ${LIVE_VERSIONS[cli]}`)).toBe(true);
-        await expect(
-          page.locator(
-            `#lane-detail-${cli} [data-testid="cli-provider-facts"] dt:text-is("Version")`,
-          ),
-        ).toHaveCount(0);
+        // The detail mounts only when expanded: open it and see its facts, then check that no Version fact repeats
+        // the identity's version.
+        await expandMatrixDetail(page, cli);
+        const facts = page.locator(
+          `#lane-detail-${cli} [data-testid="cli-provider-facts"]`,
+        );
+        await expect(facts).toBeVisible();
+        await expect(facts.locator('dt:text-is("Version")')).toHaveCount(0);
       }
       // 52.2: the Antigravity model cell shows the id once, on at most two lines, with the name in its title.
       const model = page.locator(

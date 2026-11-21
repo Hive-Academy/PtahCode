@@ -9,7 +9,7 @@ import type { LaneOrderMove, LaneOrderSettlement } from './lane-order-drag';
   template: `<ptah-lanes-table [rows]="rows()" [defaults]="defaults()" [ptahDefaults]="ptahDefaults()"
     [busy]="busy()" [canWrite]="canWrite()" [canReorder]="canReorder()" [testingRows]="testingRows()"
     [testResults]="testResults()" [loading]="loading()" [orderMode]="orderMode()"
-    [guides]="guides()" [error]="error()"
+    [detecting]="detecting()" [guides]="guides()" [error]="error()"
     (toggled)="toggled.emit($event)" (reordered)="reordered.emit($event)"
     (test)="test.emit($event)" (edit)="edit.emit($event)"
     (delete)="delete.emit($event)" (signIn)="signIn.emit($event)"
@@ -36,6 +36,7 @@ export class CliProviderGridComponent {
   readonly testResults = input<Readonly<Record<string, string>>>({});
   readonly loading = input(false);
   readonly orderMode = input(false);
+  readonly detecting = input(false);
   readonly error = input<string | null>(null);
   readonly guides = input<Readonly<Partial<Record<CliType, { readonly command: string | null; readonly note: string }>>>>({});
   readonly toggled = output<{ row: LaneTableRow; event: Event }>();

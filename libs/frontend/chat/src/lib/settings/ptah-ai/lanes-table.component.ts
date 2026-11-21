@@ -216,6 +216,8 @@ export class LanesTableComponent {
   } | null>(null);
   readonly orderMode = input(false);
   readonly busy = input(false);
+  /** A Re-detect (any entry) runs, read-backs included: the install guide's Re-detect waits. */
+  readonly detecting = input(false);
   readonly canWrite = input(true);
   /** `false` while the saved order is not verified (failed, partial or running read): no move is requested. */
   readonly canReorder = input(true);
@@ -370,7 +372,7 @@ export class LanesTableComponent {
         untracked(() => {
           this.pendingDelete.set(null);
           this.deleteOrigin = null;
-          this.deleteFocus.cancel();
+          this.deleteFocus.dismiss();
         });
     });
     // Decision 26: Reorder mode shows one flat list; an expanded detail and its popovers close.

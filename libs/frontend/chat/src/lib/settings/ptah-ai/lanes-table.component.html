@@ -58,6 +58,7 @@
               type="button"
               variant="ghost"
               size="xs"
+              data-testid="lanes-retry"
               (click)="retry.emit()"
             >
               <lucide-angular [img]="RetryIcon" class="lanes-state-icon" aria-hidden="true" />
@@ -99,7 +100,8 @@
                 type="button"
                 variant="ghost"
                 size="xs"
-                (click)="retry.emit()"
+                data-testid="lanes-retry"
+              (click)="retry.emit()"
               >
                 <lucide-angular [img]="RetryIcon" class="lanes-state-icon" aria-hidden="true" />
                 Retry
@@ -458,6 +460,7 @@
               [testResult]="testResults()[row.id] ?? ''"
               [testing]="!!testingRows()[row.id]"
               [busy]="busy()"
+              [detecting]="detecting()"
               [guides]="guides()"
               (kindToggled)="toggleInfo(row, $event)"
               (popoverClosed)="infoOpen.set(null)"

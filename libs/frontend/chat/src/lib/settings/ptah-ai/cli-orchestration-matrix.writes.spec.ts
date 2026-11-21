@@ -174,6 +174,7 @@ class StateStub {
     this.cliTest.set(ready(this.testResult));
   });
   readonly clearCliTest = jest.fn((_id: string) => undefined);
+  readonly cliRedetecting = signal(false);
   readonly cliDetection = signal<
     ProvidersSettingsSection<CliDetectionResult[]>
   >(ready([]));
@@ -719,6 +720,30 @@ describe('CliOrchestrationMatrixComponent', () => {
     expect(document.activeElement).toBe(
       q('[data-testid="policy-order-down-codex"]'),
     );
+  });
+
+  it('announces no position when the refresh after a verified write drops the order, and focuses Done (finding 5)', async () => {
+    // The write is verified (saveSettings resolves true with a saved commit); the separate refresh then omits
+    // preferredAgentOrder, so the rows fall back to discovery order.
+    state.saveSettings.mockImplementation(async () => {
+      state.orchestration.set(
+        ready({
+          ...ORCHESTRATION,
+          preferredAgentOrder: [],
+          missingFields: ['preferredAgentOrder'],
+        }),
+      );
+      state.commit.set({ ...idle, status: 'saved' });
+      return true;
+    });
+    enterReorder();
+    q<HTMLButtonElement>('[data-testid="policy-order-down-codex"]')!.click();
+    await flush();
+    _render();
+    await fixture.whenStable();
+    expect(state.saveSettings).toHaveBeenCalledTimes(1);
+    expect(q('[data-testid="policy-order-live"]')?.textContent?.trim()).toBe('');
+    expect(document.activeElement).toBe(q('[data-testid="lanes-order-edit"]'));
   });
 
   it('restores focus with no move announcement when the order save fails (finding 5)', async () => {

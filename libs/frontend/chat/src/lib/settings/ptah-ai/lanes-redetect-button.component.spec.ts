@@ -23,6 +23,7 @@ class StateStub {
     refreshFailed: false,
     message: null,
   });
+  readonly cliRedetecting = signal(false);
   readonly cliDetection = signal<
     ProvidersSettingsSection<CliDetectionResult[]>
   >({ status: 'unloaded', data: null, error: null });
@@ -94,6 +95,14 @@ describe('LanesRedetectButtonComponent', () => {
     expect(button()?.querySelector('lucide-angular')?.className).toContain(
       'animate-spin',
     );
+    button()?.click();
+    expect(state.redetectClis).not.toHaveBeenCalled();
+  });
+
+  it('stays pending and starts nothing while another Re-detect still reads back (finding 6)', () => {
+    state.cliRedetecting.set(true);
+    fixture.detectChanges();
+    expect(isDisabledControl(button())).toBe(true);
     button()?.click();
     expect(state.redetectClis).not.toHaveBeenCalled();
   });

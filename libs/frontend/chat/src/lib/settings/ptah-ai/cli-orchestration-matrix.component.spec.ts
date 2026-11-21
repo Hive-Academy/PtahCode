@@ -172,6 +172,7 @@ class StateStub {
     this.cliTest.set(ready({ ...this.testResult, id: cli }));
   });
   readonly clearCliTest = jest.fn((_id: string) => undefined);
+  readonly cliRedetecting = signal(false);
   readonly cliDetection = signal<
     ProvidersSettingsSection<CliDetectionResult[]>
   >(ready([]));
@@ -679,6 +680,57 @@ describe('CliOrchestrationMatrixComponent', () => {
     expect(state.redetectClis).toHaveBeenCalledTimes(1);
     finish(true);
     await flush();
+  });
+
+  it('moves focus to Retry when a failed read-back destroys the guide that had focus (finding 6)', async () => {
+    q<HTMLButtonElement>('[data-testid="lanes-strip-install-pi"]')?.click();
+    fixture.detectChanges();
+    const redetect = button(q('[data-testid="cli-provider-card-pi"]'), 'Re-detect')!;
+    redetect.focus();
+    state.onRedetect = () =>
+      state.orchestration.set({
+        status: 'error',
+        data: null,
+        error: 'Could not load this section. Retry.',
+      });
+    redetect.click();
+    await flush();
+    await fixture.whenStable();
+    expect(redetect.isConnected).toBe(false);
+    expect(document.activeElement).toBe(q('[data-testid="lanes-retry"]'));
+  });
+
+  it('leaves focus where the user moved it during a failed read-back (finding 6)', async () => {
+    let finish: (value: boolean) => void = () => undefined;
+    state.redetectClis.mockImplementationOnce(
+      () =>
+        new Promise<boolean>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    q<HTMLButtonElement>('[data-testid="lanes-strip-install-pi"]')?.click();
+    fixture.detectChanges();
+    button(q('[data-testid="cli-provider-card-pi"]'), 'Re-detect')?.click();
+    await flush();
+    const elsewhere = q<HTMLButtonElement>('[data-testid="cli-matrix-add"]')!;
+    elsewhere.focus();
+    state.orchestration.set({
+      status: 'error',
+      data: null,
+      error: 'Could not load this section. Retry.',
+    });
+    finish(true);
+    await flush();
+    await fixture.whenStable();
+    expect(document.activeElement).toBe(elsewhere);
+  });
+
+  it('refuses a guide Re-detect while another entry\'s Re-detect still reads back (finding 6)', async () => {
+    state.cliRedetecting.set(true);
+    fixture.detectChanges();
+    await fixture.componentInstance['redetectFromGuide']('pi');
+    await flush();
+    expect(state.redetectClis).not.toHaveBeenCalled();
   });
 
   it('focuses the matrix region when the found lane has no enabled toggle (finding 6)', async () => {
