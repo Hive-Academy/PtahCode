@@ -89,6 +89,10 @@ describe('PlanLimitsPanelComponent', () => {
     expect(textOf(list[0])).toContain('Selected for chat');
     expect(textOf(list[1])).not.toContain('Selected for chat');
     expect(el.querySelectorAll('[data-testid="provider-limit-chip"]')).toHaveLength(1);
+    const chips = el.querySelector('[data-testid="plan-limits-chips"]');
+    expect(textOf(chips?.querySelector('h3') ?? null)).toBe('Without usage readings 1');
+    expect(textOf(el.querySelector('[data-testid="plan-limits-chips-count"]'))).toBe('1');
+    expect(chips?.querySelectorAll('ul > li [data-testid="provider-limit-chip"]')).toHaveLength(1);
   });
 
   it('follows the persisted provider selection and loads for it', () => {

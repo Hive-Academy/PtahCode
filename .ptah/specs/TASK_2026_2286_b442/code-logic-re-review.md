@@ -1,0 +1,41 @@
+# Code Logic Re-review — TASK_2026_2286_b442
+
+Review family: codex (implementer family: claude)
+
+Score: 6/10
+
+Verdict: REVISE
+
+Six findings are fixed, three are partial, and one is still open. The fix round closes the frontend findings and handles an account change when the reader receives the CLI result. A canceled read can still leave another account’s windows in the cache, and the new model-turn latch can miss the same canceled run.
+
+## Original findings
+
+| # | Status | Evidence and remaining work |
+| --- | --- | --- |
+| 1 | PARTIAL | `libs/backend/auth-providers/src/lib/quota/readers/antigravity-cli-usage.adapter.ts:77`, `:127`, `:140–150` reject reported model turns and disable further launches for that path once a live caller receives the reply. The untracked spec at `:77–101` covers the latch across readers, another executable, and zero-turn output. Accept the first-launch exposure as a **minor residual risk** under the stated no-version-probe decision. The captured agy 1.5.13 command was zero-turn (`context.md:16–26`). Other installed versions can still take a turn before Ptah sees a reply. Cancellation can also bypass the latch, as detailed below. |
+| 2 | PARTIAL | `libs/backend/auth-providers/src/lib/quota/readers/antigravity-plan-usage.reader.ts:136–149` checks the store before and after a successful read for all eligible owner kinds. `libs/backend/auth-providers/src/lib/quota/readers/antigravity-cli-usage.adapter.ts:128–133`, `:152–154` move future reads past the rejected cache entry. The reader spec at `:101–132` and adapter spec at `:65–75` cover the completed-read path. **Major remaining:** start under A, switch to B while the CLI runs, and cancel the sole waiter before the CLI returns B’s quota. The runner can cache B’s result under A (`libs/backend/auth-providers/src/lib/quota/readers/fallback-usage.runner.ts:100–107`, `:116–122`) while the reader exits before validation. Switch back to A within the TTL and both store checks pass on the cached result. Validate ownership within the shared execution before admitting a result to the cache. |
+| 3 | PARTIAL | `libs/backend/auth-providers/src/lib/quota/readers/antigravity-plan-usage.reader.ts:57–59`, `:160–165` promote missing CLI, sign-in, timeout, parse, model-turn and backoff failures when the direct sources are absent. The reader spec at `:134–141` covers missing CLI and preservation of a substantive OAuth failure. **Minor remaining:** a nonzero exit without a sign-in hint yields `cli-exit-error` (`libs/backend/auth-providers/src/lib/quota/readers/fallback-usage.runner.ts:186–192`). That cause is omitted from promotion, so the first read still says “Not signed in to Antigravity (OAuth)” even though `libs/frontend/dashboard/src/lib/components/provider-account-card/plan-owner.model.ts:87–95` already supplies the appropriate CLI exit message. Promote `cli-exit-error` and assert the returned snapshot reason for that case. |
+| 4 | FIXED | `libs/frontend/dashboard/src/lib/components/usage-dashboard/usage-kpi-strip.component.ts:84`, `:108–110` use the shared money formatter for raw cost and savings. `libs/frontend/dashboard/src/lib/components/usage-dashboard/usage-dashboard.component.ts:155–162` supplies a precise cost formatter for chart details. `libs/frontend/dashboard/src/lib/components/usage-dashboard/stacked-bar-chart.component.ts:180–187`, `:204–209`, `:252–288` keep compact values on the axis and use precise values in the day labels and readout. The untracked KPI spec at `:34–58` checks sub-cent and lower-bound values. |
+| 5 | FIXED | `libs/frontend/dashboard/src/lib/components/usage-dashboard/usage-cost-summary.component.ts:47–54` derives both caption and width from `shareOfCost` and retains a minimum visible sliver for a tiny positive share. The untracked summary spec at `:30–42` checks 60/40 against both captions and widths, plus zero, unknown and tiny shares. |
+| 6 | NOT FIXED | **Minor:** `libs/backend/auth-providers/src/lib/quota/readers/antigravity-cli-usage.adapter.ts:131–136` passes the waiter signal alone. `libs/backend/auth-providers/src/lib/quota/readers/fallback-usage.runner.ts:116–122` releases a canceled waiter, but `:162–170` checks the separate run signal for launch and termination. A last waiter that cancels during temporary directory creation can leave a process to start and run to its deadline. Give the shared flight its own controller and abort it when the final waiter leaves. Keep the flight running while another waiter remains. |
+| 7 | FIXED | `libs/backend/auth-providers/src/lib/quota/readers/antigravity-usage-json.parser.ts:19–30`, `:51–63` reject explicit error envelopes before extracting windows and validate a supplied turn count as a non-negative integer. The parser spec at `:90` covers failure fields beside otherwise valid buckets. Both the current buckets and legacy windows shapes remain supported. |
+| 8 | FIXED | `libs/frontend/dashboard/src/lib/components/usage-dashboard/usage-breakdown-table.component.ts:69–70`, `:120–134`, `:253–265` use inset dividers and shrinkable segments in both tracks. The divider consumes no layout width, so it no longer pushes a small trailing provider out of the track in the original scenario. Verified in source. |
+| 9 | FIXED | `libs/frontend/dashboard/src/lib/components/usage-dashboard/stacked-bar-chart.geometry.ts:62–73` selects “highest known cost” when any day is unpriced and qualifies a partially priced selected day. `libs/frontend/dashboard/src/lib/components/usage-dashboard/usage-dashboard.component.ts:168–172` omits unknown flags in token mode. The untracked chart geometry spec at `:15–29` covers both wordings and a lower bound. |
+| 10 | FIXED | `libs/backend/auth-providers/src/lib/quota/readers/antigravity-plan-usage.reader.spec.ts:93–99` asserts that both the CLI and the store are untouched in the excluded cases. `libs/frontend/dashboard/src/lib/components/usage-dashboard/usage-dashboard.component.html:174–177` identifies the full-count element, and `libs/frontend/dashboard/src/lib/components/usage-dashboard/usage-dashboard.component.spec.ts:127–129` asserts the label and exact count. |
+
+## New defect
+
+1. **Minor — The model-turn latch can miss the result of a canceled read.**  
+   `libs/backend/auth-providers/src/lib/quota/readers/antigravity-cli-usage.adapter.ts:135–150` sets the latch only after the waiter receives the parsed result. If that waiter cancels after launch, `libs/backend/auth-providers/src/lib/quota/readers/fallback-usage.runner.ts:116–122` returns `cli-unavailable` to it. The CLI can then finish with a positive turn count and the runner can parse it at `:175–179` without latching the executable. A later read for a different owner or after the cache expires can launch the same executable and take another turn in the same Ptah process. Register the latch when the shared execution classifies the reply. Keep it independent of waiter delivery and cover a canceled waiter followed by a new owner read.
+
+## Five logic questions
+
+1. **How does this fail silently?** A canceled read can leave another account’s quota cached under the first account. See finding 2.
+2. **What user action produces unexpected behaviour?** Canceling the final read can leave the CLI running. See finding 6.
+3. **What input produces a wrong answer?** A plain nonzero CLI exit can still be presented as an OAuth sign-in problem. See finding 3.
+4. **What happens when a dependency fails?** Explicit CLI failure envelopes and malformed supplied turn counts are rejected. The ordinary process deadline and output cap remain in the runner. See finding 7 and `libs/backend/auth-providers/src/lib/quota/readers/fallback-usage.runner.ts:133–140`, `:170–179`.
+5. **What safety or lifecycle requirement remains?** Shared execution needs to enforce ownership and register detected model turns before any result is cached or handed off to a waiter. See finding 2 and the new defect.
+
+## Verification
+
+Compared the relevant tracked paths with `main`, read all six named untracked files, and reviewed the four fix reports. The donut geometry spec covers full rings, gaps, tiny slices and unpriced entries. `git diff main --check` passed for tracked changes. The review was static. Tests, typechecks, the CLI and Electron were outside scope.

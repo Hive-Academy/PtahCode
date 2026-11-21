@@ -14,10 +14,12 @@ import {
   PAD_T,
   PLOT_H,
   PLOT_W,
-  SINGLE_DAY_BAR_W,
   VIEW_H,
   VIEW_W,
+  barWidth,
   niceCeiling,
+  peakSummary,
+  roundedTopPath,
   sanitizeSeriesValue,
   type DayColumn,
   type Gridline,
@@ -41,6 +43,8 @@ interface BarRow {
   readonly width: number;
   readonly height: number;
   readonly day: number;
+  /** Rounded-top path when this is the day's last (top) segment, else null. */
+  readonly topPath: string | null;
 }
 
 @Component({
@@ -48,6 +52,9 @@ interface BarRow {
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './stacked-bar-chart.component.html',
+  // The chart grows to the height of its card: host and root are flex
+  // columns and the plot wrapper takes the remaining space.
+  host: { class: 'flex h-full min-h-0 flex-1 flex-col' },
   styles: [
     `
       .ptah-chart-marker {
@@ -66,7 +73,17 @@ export class StackedBarChartComponent {
 
   readonly series = input.required<readonly StackedBarSeries[]>();
   readonly days = input.required<readonly string[]>();
+  /** Compact format for the axis tick labels. */
   readonly valueFormat = input.required<(value: number) => string>();
+  /**
+   * Precise format for the focused-day readout and the per-day accessible
+   * labels, so near values such as $1.24 and $1.20 stay distinct. Defaults
+   * to `valueFormat`.
+   */
+  readonly detailFormat = input<((value: number) => string) | null>(null);
+  private readonly detail = computed(
+    () => this.detailFormat() ?? this.valueFormat(),
+  );
   /**
    * Per day: true when the day's plotted value is a lower bound (cost mode
    * with unpriced facts) rather than an observed total. The chart draws a
@@ -80,6 +97,8 @@ export class StackedBarChartComponent {
    * formatted value.
    */
   readonly unknownSeries = input<readonly (readonly boolean[])[]>([]);
+  /** Plotted metric named in the chart's accessible label, e.g. "cost". */
+  readonly metricLabel = input<string>('');
 
   readonly viewW = VIEW_W;
   readonly viewH = VIEW_H;
@@ -108,15 +127,16 @@ export class StackedBarChartComponent {
     const days = this.days();
     const series = this.clean();
     if (days.length === 0 || series.length === 0) return [];
-    const totals = days.map((_, i) => series.reduce((sum, s) => sum + (s.values[i] ?? 0), 0));
+    const totals = this.dayTotals();
     const yMax = niceCeiling(Math.max(...totals, 0) / 4) * 4;
     const toY = (value: number): number =>
       PAD_T + PLOT_H - (value / yMax) * PLOT_H;
     const bars: BarRow[] = [];
     const slot = PLOT_W / days.length;
-    const width = days.length === 1 ? SINGLE_DAY_BAR_W : Math.max(2, Math.min(28, slot * 0.7));
+    const width = barWidth(days.length);
     for (let i = 0; i < days.length; i++) {
       let level = 0;
+      const dayStart = bars.length;
       for (const s of series) {
         const value = s.values[i] ?? 0;
         if (value <= 0) continue;
@@ -124,10 +144,26 @@ export class StackedBarChartComponent {
         level += value;
         bars.push({ series: s, day: i,
           x: PAD_L + slot * (i + 0.5) - width / 2,
-          y: toY(level), width, height: toY(bottom) - toY(level) });
+          y: toY(level), width, height: toY(bottom) - toY(level), topPath: null });
+      }
+      // Only the top segment of a stack gets the rounded data end.
+      const top = bars.length > dayStart ? bars[bars.length - 1] : undefined;
+      if (top) {
+        bars[bars.length - 1] = {
+          ...top,
+          topPath: roundedTopPath(top.x, top.y, top.width, top.height),
+        };
       }
     }
     return bars;
+  });
+
+  /** Stacked total per day, oldest first, from the sanitized series. */
+  private readonly dayTotals = computed<readonly number[]>(() => {
+    const series = this.clean();
+    return this.days().map((_, i) =>
+      series.reduce((sum, s) => sum + (s.values[i] ?? 0), 0),
+    );
   });
 
   /** Day columns whose plotted value is a lower bound, for the hatch marker. */
@@ -142,15 +178,8 @@ export class StackedBarChartComponent {
   );
 
   readonly gridlines = computed<readonly Gridline[]>(() => {
-    const days = this.days();
-    if (days.length === 0 || this.clean().length === 0) return [];
-    const totals = days.map(() => 0);
-    for (const s of this.clean()) {
-      s.values.forEach((value, i) => {
-        totals[i] = (totals[i] ?? 0) + (value ?? 0);
-      });
-    }
-    const step = niceCeiling(Math.max(...totals, 0) / 4);
+    if (this.days().length === 0 || this.clean().length === 0) return [];
+    const step = niceCeiling(Math.max(...this.dayTotals(), 0) / 4);
     const format = this.valueFormat();
     return [0, 1, 2, 3, 4].map((k) => ({
       y: PAD_T + PLOT_H - (k / 4) * PLOT_H,
@@ -177,7 +206,7 @@ export class StackedBarChartComponent {
     const series = this.clean();
     const n = days.length;
     if (n === 0) return [];
-    const format = this.valueFormat();
+    const format = this.detail();
     const spacing = PLOT_W / n;
     const columns: DayColumn[] = [];
     for (let i = 0; i < n; i++) {
@@ -229,7 +258,7 @@ export class StackedBarChartComponent {
     if (i === null) return null;
     const days = this.days();
     if (i < 0 || i >= days.length) return null;
-    const format = this.valueFormat();
+    const format = this.detail();
     const series = this.clean();
     const total = series.reduce((sum, s) => sum + (s.values[i] ?? 0), 0);
     const unknown = this.unknownDays()[i] === true;
@@ -263,12 +292,21 @@ export class StackedBarChartComponent {
 
   readonly chartAriaLabel = computed(() => {
     const days = this.days();
-    if (days.length === 1) {
-      return `Daily usage stacked bar chart, 1 day: ${days[0]}`;
-    }
-    return `Daily usage stacked bar chart, ${days.length} days from ${
-      days[0] ?? ''
-    } to ${days.at(-1) ?? ''}`;
+    const metric = this.metricLabel() ? `${this.metricLabel()}, ` : '';
+    const range =
+      days.length === 1
+        ? `Daily usage stacked bar chart, ${metric}1 day: ${days[0]}`
+        : `Daily usage stacked bar chart, ${metric}${days.length} days from ${
+            days[0] ?? ''
+          } to ${days.at(-1) ?? ''}`;
+    const totals = this.dayTotals();
+    const peakText = peakSummary(
+      totals,
+      this.unknownDays(),
+      (index) => formatDayShort(days[index] ?? ''),
+      this.detail(),
+    );
+    return `${range}${peakText}. Per-day values are in the Breakdown Day tab.`;
   });
 
   setFocusedDay(index: number | null): void {

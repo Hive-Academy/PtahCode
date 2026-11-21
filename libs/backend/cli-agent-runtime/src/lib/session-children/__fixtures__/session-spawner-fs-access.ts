@@ -13,6 +13,14 @@ export const sessionSpawnerFsAccess: {
   current: ((path: PathLike) => Promise<void>) | null;
 } = { current: null };
 
+/**
+ * Call-time `stat` answer for the same mock. `null`, or an `undefined`
+ * answer for a path, uses the real function for that path.
+ */
+export const sessionSpawnerFsKind: {
+  current: ((path: PathLike) => 'file' | 'directory' | 'missing' | undefined) | null;
+} = { current: null };
+
 /** The handoff file is absent, so succession does not touch the real disk. */
 export function denySessionSpawnerHandoffAccess(): void {
   sessionSpawnerFsAccess.current = async () => {

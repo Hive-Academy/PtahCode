@@ -4,8 +4,8 @@
  * Smart container for the Usage tab of the analytics card (TASK_2026_707
  * PR 2, T3-Code-style): range segmented control (7/30/90 days), refresh, the
  * raw-token-cost summary with provider share rows, the daily stacked bar
- * chart with a cost/tokens toggle, the KPI strip, the model/day breakdown
- * table and the cost-quality panel.
+ * chart with a cost/tokens toggle, the KPI strip, the full-width cost-quality
+ * row, the model/day breakdown table and the top sessions table.
  *
  * Data flow: `AnalyticsUsageStore` owns the RPC request, range and
  * loading/error state; this component folds the summary through the pure
@@ -27,7 +27,15 @@ import { ModelStateService } from '@ptah-extension/core';
 import { AnalyticsUsageStore } from '../../services/analytics-usage.store';
 import { dailyTotals, downsample } from './usage-trend';
 import { buildUsageViewModel, type UsageViewModel } from './usage-summary.view-model';
-import { formatChartUsd, formatCompactTokens, providerDisplayName } from './usage-formatting';
+import { FolderGit2, LucideAngularModule } from 'lucide-angular';
+import {
+  formatChartUsd,
+  formatCompactTokens,
+  formatCount,
+  formatShare,
+  formatTableUsd,
+  providerDisplayName,
+} from './usage-formatting';
 import {
   StackedBarChartComponent,
   type StackedBarSeries,
@@ -51,6 +59,7 @@ import { PtahBadgeDirective, PtahButtonDirective, PtahSectionHeaderComponent, Pt
     UsageBreakdownTableComponent,
     UsageCostQualityComponent,
     UsageTopSessionsComponent,
+    LucideAngularModule,
     PtahButtonDirective,
     PtahBadgeDirective,
     PtahSectionHeaderComponent,
@@ -59,14 +68,26 @@ import { PtahBadgeDirective, PtahButtonDirective, PtahSectionHeaderComponent, Pt
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './usage-dashboard.component.html',
-  // Rows follow the page width (container), not the viewport: 8/4 of 12.
+  // Rows follow the page width (container), not the viewport. From 960 the
+  // chart row is 2fr / at least 20rem; below it the cost share card spans the
+  // row and puts the donut beside the provider list from 560. The tables
+  // stack until 1400, then split 5fr / 7fr so the session table needs no
+  // horizontal scroll. Repositories go two across from 1200 when 2 or more.
   styles: [`
     .usage-dashboard { container-type: inline-size; }
-    @container (min-width: 960px) {
-      .usage-chart-row { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+    .usage-chart-fill { flex: 1 1 auto; min-height: 220px; }
+    @container (min-width: 560px) and (max-width: 959px) {
+      .usage-share-body { flex-direction: row; }
+      .usage-share-body > * { flex: 1 1 0; }
     }
-    @container (min-width: 1280px) {
-      .usage-table-row { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr); }
+    @container (min-width: 960px) {
+      .usage-chart-row { grid-template-columns: minmax(0, 2fr) minmax(20rem, 1fr); }
+    }
+    @container (min-width: 1200px) {
+      .usage-repo-grid-multi { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    }
+    @container (min-width: 1400px) {
+      .usage-table-row { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); }
     }
   `],
 })
@@ -109,6 +130,12 @@ export class UsageDashboardComponent {
 
   protected readonly partialBadgeFocused = signal(false);
 
+  protected readonly repositoryIcon = FolderGit2;
+  protected readonly formatCount = formatCount;
+  protected readonly formatCompactTokens = formatCompactTokens;
+  protected readonly formatShare = formatShare;
+  protected readonly formatTableUsd = formatTableUsd;
+
   protected readonly chartMode = signal<'cost' | 'tokens'>('cost');
 
   protected readonly chartSeries = computed<readonly StackedBarSeries[]>(
@@ -127,6 +154,11 @@ export class UsageDashboardComponent {
 
   protected readonly chartValueFormat = computed<(value: number) => string>(
     () => (this.chartMode() === 'cost' ? formatChartUsd : formatCompactTokens),
+  );
+
+  /** Precise values for the focused-day readout and per-day labels. */
+  protected readonly chartDetailFormat = computed<(value: number) => string>(
+    () => (this.chartMode() === 'cost' ? formatTableUsd : formatCount),
   );
 
   /**

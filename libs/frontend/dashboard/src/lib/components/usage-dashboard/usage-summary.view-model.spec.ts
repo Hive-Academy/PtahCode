@@ -536,12 +536,63 @@ describe('repository usage view model', () => {
     expect(buildUsageViewModel(summary)?.repositories).toEqual([
       expect.objectContaining({
         repositoryId: 'repo-1',
+        displayName: 'repo-1',
         worktreePaths: ['/work/tree'],
         recordedTokens: 15,
+        knownCostUsd: 0.25,
+        // No priced fact in range: the total is unknown, so is the share.
+        knownCostShare: null,
         knownCostLabel: '$0.25',
         hasUnknownTokens: true,
       }),
     ]);
+  });
+
+  it('names a repository by its last path segment and shares its cost of the known total', () => {
+    const summary = UsageSummarySchema.parse({
+      version: 1,
+      generatedAt: '2026-10-20T12:00:00.000Z',
+      timeZone: 'UTC',
+      fromDay: '2026-10-20',
+      untilDayExclusive: '2026-10-21',
+      facts: [usageFact({ day: '2026-10-20', costUsd: 4 })],
+      sources: [],
+      pricing: { source: 'unavailable', asOf: null },
+      repositories: [
+        {
+          repositoryId: '/work/ptah-extension.git',
+          worktreePaths: [],
+          inputTokens: 1_200_000,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          knownCostMicroUsd: 1_000_000,
+          hasUnknownTokens: false,
+        },
+        {
+          repositoryId: 'repo-unpriced',
+          worktreePaths: [],
+          inputTokens: 1,
+          outputTokens: 0,
+          cacheReadTokens: 0,
+          cacheWriteTokens: 0,
+          knownCostMicroUsd: null,
+          hasUnknownTokens: false,
+        },
+      ],
+    });
+    const [priced, unpriced] = buildUsageViewModel(summary)?.repositories ?? [];
+    expect(priced).toEqual(expect.objectContaining({
+      displayName: 'ptah-extension',
+      knownCostUsd: 1,
+      knownCostShare: 0.25,
+      knownCostLabel: '$1.00',
+    }));
+    expect(unpriced).toEqual(expect.objectContaining({
+      knownCostUsd: null,
+      knownCostShare: null,
+      knownCostLabel: 'No priced cost recorded',
+    }));
   });
 
   it('accepts an older summary without repository totals', () => {

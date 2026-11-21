@@ -1,13 +1,13 @@
 import { ChangeDetectionStrategy, Component, computed, input } from '@angular/core';
-import { PtahSparklineComponent } from '@ptah-extension/ui';
+import { PtahSparklineComponent, PtahSurfaceDirective } from '@ptah-extension/ui';
 import type { KpiDeltas } from '../../services/kpi-delta';
 import { type UsageKpis } from './usage-summary.view-model';
-import { formatCompactTokens, formatPercent, formatUsd } from './usage-formatting';
+import { formatCompactTokens, formatCostCell, formatCount, formatPercent } from './usage-formatting';
 
 @Component({
   selector: 'ptah-usage-kpi-strip',
   standalone: true,
-  imports: [PtahSparklineComponent],
+  imports: [PtahSparklineComponent, PtahSurfaceDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [`
     @container (min-width: 900px) {
@@ -18,50 +18,50 @@ import { formatCompactTokens, formatPercent, formatUsd } from './usage-formattin
     }
   `],
   template: `
-    <div class="usage-kpi-grid grid grid-cols-2 gap-3" data-testid="usage-kpis" role="group" aria-label="Usage totals for the selected range">
-      <div class="rounded-lg bg-base-200/40 p-3" data-testid="usage-kpi-cost">
+    <div class="usage-kpi-grid grid grid-cols-2 gap-ptah-field" data-testid="usage-kpis" role="group" aria-label="Usage totals for the selected range">
+      <div ptahSurface variant="inset" padding="sm" data-testid="usage-kpi-cost">
         <p class="text-[11px] text-base-content-muted">Raw token cost</p>
         <p class="mt-1 text-xl font-semibold tabular-nums" data-testid="usage-total-cost" [attr.title]="costTooltip()">{{ costLabel() }}</p>
-        <p class="mt-0.5 text-[10px] text-base-content-muted">{{ savingsSub() }}</p>
+        <p class="mt-0.5 text-[11px] text-base-content-muted">{{ savingsSub() }}</p>
         @if (costDeltaText(); as delta) {
-          <p class="text-[10px] text-base-content-muted tabular-nums" data-testid="usage-kpi-cost-delta">{{ delta }}</p>
+          <p class="text-[11px] text-base-content-muted tabular-nums" data-testid="usage-kpi-cost-delta">{{ delta }}</p>
         }
         @if (costTrend().length > 1) {
           <ptah-sparkline class="mt-1 block" size="xs" [values]="costTrend()" label="Daily cost" tone="accent" [area]="true" />
         }
       </div>
-      <div class="rounded-lg bg-base-200/40 p-3" data-testid="usage-kpi-processed">
+      <div ptahSurface variant="inset" padding="sm" data-testid="usage-kpi-processed">
         <p class="text-[11px] text-base-content-muted">Processed tokens</p>
         <p class="mt-1 text-xl font-semibold tabular-nums">{{ compact(kpis().processedTokens) }}</p>
-        <p class="mt-0.5 text-[10px] text-base-content-muted">{{ processedSub() }}</p>
-        <p class="text-[10px] text-base-content-muted" data-testid="usage-kpi-output">{{ outputSub() }}</p>
+        <p class="mt-0.5 text-[11px] text-base-content-muted">{{ processedSub() }}</p>
+        <p class="text-[11px] text-base-content-muted" data-testid="usage-kpi-output">{{ outputSub() }}</p>
         @if (tokenDeltaText(); as delta) {
-          <p class="text-[10px] text-base-content-muted tabular-nums" data-testid="usage-kpi-tokens-delta">{{ delta }}</p>
+          <p class="text-[11px] text-base-content-muted tabular-nums" data-testid="usage-kpi-tokens-delta">{{ delta }}</p>
         }
         @if (tokenTrend().length > 1) {
           <ptah-sparkline class="mt-1 block" size="xs" [values]="tokenTrend()" label="Daily tokens" tone="accent" [area]="true" />
         }
       </div>
-      <div class="rounded-lg bg-base-200/40 p-3" data-testid="usage-kpi-cached">
+      <div ptahSurface variant="inset" padding="sm" data-testid="usage-kpi-cached">
         <p class="text-[11px] text-base-content-muted">Cached %</p>
         <p class="mt-1 text-xl font-semibold tabular-nums" [attr.title]="cachedShareNote()">{{ cachedShareLabel() }}</p>
-        <p class="mt-0.5 text-[10px] text-base-content-muted">Cached input {{ compact(kpis().cachedInputTokens) }}</p>
-        <p class="text-[10px] text-base-content-muted" data-testid="usage-kpi-uncached">Uncached input {{ compact(kpis().uncachedInputTokens) }} · {{ compact(kpis().cacheWriteTokens) }} cache writes</p>
+        <p class="mt-0.5 text-[11px] text-base-content-muted">Cached input {{ compact(kpis().cachedInputTokens) }}</p>
+        <p class="text-[11px] text-base-content-muted" data-testid="usage-kpi-uncached">Uncached input {{ compact(kpis().uncachedInputTokens) }} · {{ compact(kpis().cacheWriteTokens) }} cache writes</p>
       </div>
-      <div class="rounded-lg bg-base-200/40 p-3" title="Counts include usage sources with session identity in this range">
+      <div ptahSurface variant="inset" padding="sm" title="Counts include usage sources with session identity in this range">
         <p class="text-[11px] text-base-content-muted">Sessions</p>
-        <p class="mt-1 text-xl font-semibold tabular-nums">{{ kpis().sessionCount }}</p>
+        <p class="mt-1 text-xl font-semibold tabular-nums">{{ count(kpis().sessionCount) }}</p>
       </div>
-      <div class="rounded-lg bg-base-200/40 p-3" title="Counts include usage sources with session identity in this range">
+      <div ptahSurface variant="inset" padding="sm" title="Counts include usage sources with session identity in this range">
         <p class="text-[11px] text-base-content-muted">Messages</p>
-        <p class="mt-1 text-xl font-semibold tabular-nums">{{ kpis().messageCount }}</p>
+        <p class="mt-1 text-xl font-semibold tabular-nums">{{ count(kpis().messageCount) }}</p>
       </div>
-      <div class="rounded-lg bg-base-200/40 p-3" title="Counts include usage sources with session identity in this range">
+      <div ptahSurface variant="inset" padding="sm" title="Counts include usage sources with session identity in this range">
         <p class="text-[11px] text-base-content-muted">Subagents</p>
-        <p class="mt-1 text-xl font-semibold tabular-nums">{{ kpis().subagentCount }}</p>
+        <p class="mt-1 text-xl font-semibold tabular-nums">{{ count(kpis().subagentCount) }}</p>
       </div>
     </div>
-    <p class="mt-1.5 text-[10px] text-base-content-muted">* estimated at API rates; not your bill</p>
+    <p class="mt-1.5 text-[11px] text-base-content-muted">* estimated at API rates; not your bill</p>
   `,
 })
 export class UsageKpiStripComponent {
@@ -77,11 +77,12 @@ export class UsageKpiStripComponent {
   readonly deltas = input<KpiDeltas | null>(null);
   readonly rangeDays = input<number>(30);
   protected readonly compact = formatCompactTokens;
+  protected readonly count = formatCount;
 
-  protected readonly costLabel = computed(() => {
-    const cost = this.totalCostUsd();
-    return cost === null ? 'Unknown' : `${this.totalUnpricedFactCount() > 0 ? '≥ ' : ''}${formatUsd(cost)}`;
-  });
+  /** Same money path as the cost quality panel, so $0.0034 never reads as $0.00. */
+  protected readonly costLabel = computed(() =>
+    formatCostCell(this.totalCostUsd(), this.totalUnpricedFactCount() > 0, 'Unknown'),
+  );
 
   protected readonly costTooltip = computed(() => {
     const count = this.totalUnpricedFactCount();
@@ -106,8 +107,7 @@ export class UsageKpiStripComponent {
 
   protected readonly savingsValue = computed(() => {
     const kpis = this.kpis();
-    if (kpis.cacheSavingsUsd === null) return '—';
-    return `${kpis.cacheSavingsUnknownFactCount > 0 ? '≥ ' : ''}${formatUsd(kpis.cacheSavingsUsd)}`;
+    return formatCostCell(kpis.cacheSavingsUsd, kpis.cacheSavingsUnknownFactCount > 0);
   });
 
   protected readonly savingsSub = computed(() => {

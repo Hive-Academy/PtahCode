@@ -11,10 +11,14 @@ function card(overrides: Partial<ProviderLimitCardVm> = {}): ProviderLimitCardVm
   return {
     key: 'claude-cli#account:1',
     providerId: 'claude-cli',
-    label: 'Claude',
+    label: 'Claude Code CLI login · a6b0',
+    titleText: 'Claude',
+    accountLine: 'login · a6b0',
     selected: false,
     state: 'available',
     statusText: 'Available',
+    statusTone: 'ok',
+    statusGlyph: '✓',
     windowLabel: '5-hour',
     ring: { value: 40, tone: 'accent', centerText: '40%', label: 'Claude 5-hour used', fadeArc: false },
     primaryValueText: null,
@@ -54,6 +58,38 @@ describe('ProviderLimitCardComponent', () => {
     expect(el.textContent).toContain('+1 more in Details');
     expect(q(fixture, 'provider-limit-source')?.textContent).toContain('observed 1m ago');
     expect(q(fixture, 'provider-limit-selected')).toBeNull();
+  });
+
+  it('shows the short title with the full label as its tooltip, and the account line', () => {
+    const fixture = render(card());
+    const title = q(fixture, 'provider-limit-title');
+    expect(title?.textContent?.trim()).toBe('Claude');
+    expect(title?.getAttribute('title')).toBe('Claude Code CLI login · a6b0');
+    expect(q(fixture, 'provider-limit-account')?.textContent?.trim()).toBe('login · a6b0');
+  });
+
+  it('omits the account line when there is none', () => {
+    const fixture = render(card({ accountLine: null }));
+    expect(q(fixture, 'provider-limit-account')).toBeNull();
+  });
+
+  it('shows the status badge with its glyph, so colour is not the only cue', () => {
+    const fixture = render(card({ state: 'limit-reached', statusText: 'Limit reached', statusTone: 'err', statusGlyph: '⚠' }));
+    const status = q(fixture, 'provider-limit-status');
+    expect(status?.textContent).toContain('⚠');
+    expect(status?.textContent).toContain('Limit reached');
+    expect(status?.querySelector('[aria-hidden="true"]')?.textContent).toBe('⚠');
+  });
+
+  it('renders no glyph for a neutral status', () => {
+    const fixture = render(card({ statusTone: 'neutral', statusGlyph: null }));
+    expect(q(fixture, 'provider-limit-status')?.querySelector('[aria-hidden="true"]')).toBeNull();
+  });
+
+  it('puts the window name on the ring role', () => {
+    const fixture = render(card());
+    const ring = (fixture.nativeElement as HTMLElement).querySelector('ptah-ring');
+    expect(ring?.querySelector('[aria-label="Claude 5-hour used"]')).not.toBeNull();
   });
 
   it('marks the selected card', () => {
@@ -131,5 +167,7 @@ describe('ProviderLimitChipComponent', () => {
     const text = (fixture.nativeElement as HTMLElement).textContent ?? '';
     expect(text).toContain('Cursor');
     expect(text).toContain('no usage source');
+    expect(text).not.toContain('·');
+    expect(fixture.nativeElement.querySelector('[data-testid="provider-limit-chip"]')).not.toBeNull();
   });
 });
