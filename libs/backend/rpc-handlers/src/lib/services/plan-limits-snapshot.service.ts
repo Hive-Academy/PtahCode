@@ -101,15 +101,6 @@ type AssembledSnapshot = {
   cacheable: boolean;
 };
 
-/**
- * Providers whose usage reader has a zero-cost CLI usage command as its last source.
- * A CLI-only install (no OAuth token file, no language server) has no other source, so
- * the dashboard read must allow it. The flag also makes `PlanUsageService` skip a cached
- * failure, so it stays limited to the readers that use it; the CLI runner has its own
- * result cache and failure backoff.
- */
-const CLI_USAGE_FALLBACK_PROVIDERS: ReadonlySet<string> = new Set(['antigravity']);
-
 @injectable()
 export class PlanLimitsSnapshotService {
   private readonly pendingSnapshots = new Map<string, Promise<AssembledSnapshot>>();
@@ -331,7 +322,6 @@ export class PlanLimitsSnapshotService {
       const read = this.usage.getOwnerSnapshot(target, {
         refresh,
         ...(controller && { signal: controller.signal }),
-        ...(CLI_USAGE_FALLBACK_PROVIDERS.has(target.providerId) && { allowCliFallback: true }),
       });
       if (!controller) return await read;
       const timeout = new Promise<never>((_resolve, reject) => {

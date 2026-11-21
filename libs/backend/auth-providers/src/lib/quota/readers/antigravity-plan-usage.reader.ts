@@ -15,13 +15,8 @@ import {
 } from '@ptah-extension/shared';
 import {
   currentAntigravityStoreOwner,
-  matchesAntigravityStoreAccount,
   observeAntigravityAccount,
 } from '../provider-owner.resolver';
-import {
-  createAntigravityCliUsageReader,
-  type AntigravityCliUsageReader,
-} from './antigravity-cli-usage.adapter';
 import {
   ANTIGRAVITY_CONNECT_PROTOCOL_VERSION,
   ANTIGRAVITY_CSRF_ARGUMENT,
@@ -48,16 +43,9 @@ export const ANTIGRAVITY_USAGE_TIMEOUT_MS = 3_000;
 export const ANTIGRAVITY_CHAIN_TIMEOUT_MS = 11_000;
 const ANTIGRAVITY_OAUTH_STAGE_TIMEOUT_MS = 3_000;
 const MIN_STAGE_MS = 1_000;
-/** Leaves the chain time to settle after the CLI run is stopped. */
-const CLI_DEADLINE_MARGIN_MS = 250;
 export const ANTIGRAVITY_MAX_BODY_BYTES = 1_048_576;
 export const ANTIGRAVITY_MAX_MODEL_LENGTH = 64;
 const MAX_ATTEMPTS = 8;
-/** CLI causes that replace an absent-source reason on the snapshot. */
-const PROMOTED_CLI_CAUSES: ReadonlySet<AntigravitySourceFailure['cause']> = new Set([
-  'cli-not-found', 'cli-not-signed-in', 'cli-timeout', 'cli-parse-failed', 'cli-model-turn', 'cli-backoff',
-  'cli-exit-error',
-]);
 function sourceFailure(source: UsageSourceLabel, reason: UsageFailureReason): UsageSourceResult {
   return { ok: false, source, reason };
 }
@@ -88,8 +76,7 @@ export function createAntigravityPlanUsageReader(
   requestStatus: StatusRequest = defaultRequest,
   observeAccount: (email: string | null) => string = observeAntigravityAccount,
   readOAuth: (signal?: AbortSignal, now?: () => number) => Promise<AntigravityUsageReading | undefined> = (signal, clock) => readAntigravityOAuthQuota(signal, clock, undefined, undefined, undefined, true, logger),
-  readStoreOwner: typeof currentAntigravityStoreOwner = currentAntigravityStoreOwner,
-  readCli: AntigravityCliUsageReader = createAntigravityCliUsageReader({ logger, now }),
+  _readStoreOwner: typeof currentAntigravityStoreOwner = currentAntigravityStoreOwner,
 ): (request: PlanUsageReadRequest) => Promise<AntigravityUsageReading> {
   return async (request) => {
     const { target } = request;
@@ -130,40 +117,14 @@ export function createAntigravityPlanUsageReader(
         if (!stage.allowCliFallback) return sourceFailure('cli-command', 'source-not-applicable');
         if (!['cli-store', 'unknown', 'account'].includes(target.ownerRef.identityKind))
           return sourceFailure('cli-command', 'source-not-applicable');
-        // The CLI reads whichever account is signed in to the store. An account
-        // owner must match the store before the run, and for every owner kind the
-        // store fingerprint after the run must equal the one before it; otherwise
-        // a sign-in during the run would publish another account's windows.
-        const mismatch = (store: QuotaOwnerRef) => target.ownerRef.identityKind === 'account' &&
-          !matchesAntigravityStoreAccount(target.ownerRef, store);
-        const storeOwner = readStoreOwner();
-        if (mismatch(storeOwner))
-          return record(antigravityFailure('cli-command', 'account-mismatch'), 'cli-command');
-        if (chainDeadline - now() < MIN_STAGE_MS)
-          return record(antigravityFailure('cli-command', 'cli-timeout'), 'cli-command');
-        const cli = await readCli({ signal: stage.signal, deadline: chainDeadline - CLI_DEADLINE_MARGIN_MS,
-          ownerKey: target.ownerRef.key, accountFingerprint: storeOwner.key,
-          currentAccountFingerprint: () => readStoreOwner().key });
-        if (!cli.ok) return record(antigravityFailure('cli-command', cli.cause), 'cli-command');
-        const after = readStoreOwner();
-        if (after.key !== storeOwner.key || mismatch(after)) {
-          cli.discard?.();
-          return record(antigravityFailure('cli-command', 'account-mismatch'), 'cli-command');
-        }
-        return { ok: true, source: 'cli-command', readAt: cli.readAt, reading: {
-          status: 'available', fetchedAt: cli.readAt, windowSetEstablished: true, windows: cli.windows } };
+        return record(antigravityFailure('cli-command', 'source-unavailable'), 'cli-command');
       } },
     ];
     const reading = await readUsageSourceChain(sources, request, now, Math.max(0, chainDeadline - now()));
     if (reading.status === 'available') return reading;
-    // An account mismatch or a substantive direct-source failure stays on top. When
-    // the direct sources were only absent and the CLI was attempted, its actionable
-    // cause explains the state better than the OAuth missing-token reason.
     const primary = failures.find((failure) => failure.reason === 'account-unverified') ??
       failures.find((failure) => failure.source !== 'cli-command' && failure.cause !== 'missing-token-file' &&
-        failure.cause !== 'missing-local-server') ??
-      failures.find((failure) => failure.source === 'cli-command' && PROMOTED_CLI_CAUSES.has(failure.cause)) ??
-      failures.find((failure) => failure.source !== 'cli-command');
+        failure.cause !== 'missing-local-server') ?? failures.find((failure) => failure.source !== 'cli-command');
     return { ...reading, ...(primary && primary.reason !== 'source-not-applicable' && { statusReason: primary.reason }), sourceFailures: failures };
   };
   async function probeLocal(

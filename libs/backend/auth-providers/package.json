@@ -17,7 +17,6 @@
     "@openai/codex": "*",
     "axios": "*",
     "zod": "*",
-    "@types/vscode": "*",
-    "which": "*"
+    "@types/vscode": "*"
   }
 }
