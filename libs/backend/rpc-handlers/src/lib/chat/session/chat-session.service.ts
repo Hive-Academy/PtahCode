@@ -118,13 +118,12 @@ import {
 import type { ProviderAccountPortRefusal } from '@ptah-extension/auth-providers-tokens';
 
 import {
-  PROVIDER_SESSION_CHAT_UNAVAILABLE,
-  refuseProviderSessionExecution,
   resolveClaudeExecution,
   storedChatRuntimeIdentity,
   type ChatRuntimeProfileService,
   type ResolvedChatExecution,
 } from './chat-runtime-profile.service';
+import { providerSessionFailure } from './provider-session-failure';
 import { CHAT_TOKENS } from '../tokens';
 import type { ChatSdkContextService } from './chat-sdk-context.service';
 import type { ChatPtahCliService } from '../ptah-cli/chat-ptah-cli.service';
@@ -1071,6 +1070,14 @@ export class ChatSessionService {
   }
 
   /**
+   * The coded failure of either native runtime, Codex first. `undefined`
+   * leaves the error to the caller's generic path.
+   */
+  private nativeFailure(error: unknown): ChatStartResult | undefined {
+    return this.codexFailure(error) ?? providerSessionFailure(error);
+  }
+
+  /**
    * Hand one dispatched user turn to host routing (TASK_2026_857, Req 4).
    *
    * Called only after the turn was dispatched, and never awaited:
@@ -1108,8 +1115,8 @@ export class ChatSessionService {
       });
       return { success: false, error: CARRY_OVER_PROVIDER_CHANGED };
     }
-    const codexFailure = this.codexFailure(error);
-    if (codexFailure) return codexFailure;
+    const nativeFailure = this.nativeFailure(error);
+    if (nativeFailure) return nativeFailure;
     const refusal = mainSessionAccountFailure(error);
     if (refusal) return refusal;
     const safeError = new Error(
@@ -1328,8 +1335,8 @@ export class ChatSessionService {
           error: error.message,
           errorCode: error.errorCode,
         };
-      const codexFailure = this.codexFailure(error);
-      if (codexFailure) return codexFailure;
+      const nativeFailure = this.nativeFailure(error);
+      if (nativeFailure) return nativeFailure;
       const refusal = mainSessionAccountFailure(error);
       if (refusal) return refusal;
       this.logger.error(
@@ -1561,8 +1568,8 @@ export class ChatSessionService {
 
       return toolProfileApplied ? { success: true, toolProfileApplied } : { success: true };
     } catch (error) {
-      const codexFailure = this.codexFailure(error);
-      if (codexFailure) return codexFailure;
+      const nativeFailure = this.nativeFailure(error);
+      if (nativeFailure) return nativeFailure;
       const refusal = mainSessionAccountFailure(error);
       if (refusal) return refusal;
       this.logger.error(
@@ -1669,8 +1676,8 @@ export class ChatSessionService {
 
       return { success: true };
     } catch (error) {
-      const codexFailure = this.codexFailure(error);
-      if (codexFailure) return codexFailure;
+      const nativeFailure = this.nativeFailure(error);
+      if (nativeFailure) return nativeFailure;
       const refusal = mainSessionAccountFailure(error);
       if (refusal) return refusal;
       const kind = safeErrorKind(error);
@@ -1838,7 +1845,6 @@ export class ChatSessionService {
         input.expectedProviderId,
       );
     }
-    refuseProviderSessionExecution(execution);
     input.onCarryOverAdmitted?.();
     this.pendingLineage.set(tabId, {
       executionRoot: this.canonicalRoot(projectPath),
@@ -1869,24 +1875,34 @@ export class ChatSessionService {
             }
           : { model: execution.seed.model }),
       };
-      // By design, Codex does not consume Claude plugin-config roots; persist
-      // them as session policy lineage through its native metadata write.
-      const codexStartConfig = {
+      // By design, native runtimes do not consume Claude plugin-config roots.
+      // Codex persists them as session policy lineage through its native
+      // metadata write; a provider session starts with the plain config.
+      const nativeStartConfig = {
         ...startConfig,
         pluginConfigAncestorRoots: undefined,
       };
-      const startAdapter = () =>
-        execution.runtime === 'codex-app-server'
-          ? this.sessionMetadataStore.withCodexStartLineage(
+      const startAdapter = () => {
+        switch (execution.runtime) {
+          case 'codex-app-server':
+            return this.sessionMetadataStore.withCodexStartLineage(
               input.pluginConfigAncestorRoots ?? [],
-              () => this.sdkAdapter.startChatSession(codexStartConfig),
-            )
-          : this.sdkAdapter.startChatSession(startConfig);
+              () => this.sdkAdapter.startChatSession(nativeStartConfig),
+            );
+          case 'provider-session':
+            return this.sdkAdapter.startChatSession(nativeStartConfig);
+          case 'claude-sdk':
+            return this.sdkAdapter.startChatSession(startConfig);
+        }
+      };
       const stream = input.admissionTiming
         ? await input.admissionTiming.measure('sdkStart', startAdapter)
         : await startAdapter();
+      // A native start wrote the session identity before it returned, so the
+      // pending lineage is no longer the source for child launches.
+      if (execution.runtime !== 'claude-sdk') this.pendingLineage.delete(tabId);
+      // Model-substitution notices are Codex-only.
       if (execution.runtime === 'codex-app-server') {
-        this.pendingLineage.delete(tabId);
         try {
           await this.runtimeProfile?.publishRuntimeNotices(execution, {
             tabId,
@@ -2141,8 +2157,9 @@ export class ChatSessionService {
           sessionId,
           workspacePath,
         );
-      // Native Codex thread resume starts the turn (prompt and attachments).
-      // Claude resume ignores them, so only that Codex turn skips the second send.
+      // A native resume (Codex thread or provider session) starts the turn
+      // (prompt and attachments). Claude resume ignores them, so only a native
+      // turn skips the second send.
       if (promptDelivered) {
         if (followUp) {
           if (followUp.queue.isAbandoned(sessionId, followUp.clientMessageId)) {
@@ -2347,10 +2364,10 @@ export class ChatSessionService {
           errorCode: 'FOLLOW_UP_ID_CONFLICT',
         };
       }
-      const codexFailure = this.codexFailure(error);
-      if (codexFailure) {
-        followUpRefusalCode = codexFailure.errorCode;
-        return codexFailure;
+      const nativeFailure = this.nativeFailure(error);
+      if (nativeFailure) {
+        followUpRefusalCode = nativeFailure.errorCode;
+        return nativeFailure;
       }
       const refusal = mainSessionAccountFailure(error);
       if (refusal) {
@@ -2697,8 +2714,8 @@ export class ChatSessionService {
       timingResult = 'error';
       if (driveAttempt)
         await this.driverLock.abandonDrive(params.sessionId, driveAttempt);
-      const codexFailure = this.codexFailure(error);
-      if (codexFailure) return codexFailure;
+      const nativeFailure = this.nativeFailure(error);
+      if (nativeFailure) return nativeFailure;
       const refusal = mainSessionAccountFailure(error);
       if (refusal) return refusal;
       if (error instanceof RpcUserError) {
@@ -3177,18 +3194,6 @@ export class ChatSessionService {
           return { config, execution };
         },
       );
-      // Refuse up front, coded, before the driver lock or any resume state;
-      // P6 replaces this with the provider-session resume path.
-      if (execution.runtime === 'provider-session') {
-        return {
-          error: {
-            success: false,
-            sessionId,
-            errorCode: 'PROVIDER_SESSION_UNAVAILABLE',
-            error: PROVIDER_SESSION_CHAT_UNAVAILABLE,
-          },
-        };
-      }
       const resumeConfig: AgentSessionResumeConfig = {
         ...config,
         ...(this.sessionChildren?.get(sessionId as string)
@@ -3208,7 +3213,7 @@ export class ChatSessionService {
             }
           : {
               model: execution.seed.model,
-              // Codex thread/resume starts the turn; Claude resume ignores these.
+              // A native resume starts the turn; Claude resume ignores these.
               ...(params.files !== undefined ? { files: params.files } : {}),
               ...(params.images !== undefined ? { images: params.images } : {}),
             }),
@@ -3229,7 +3234,7 @@ export class ChatSessionService {
         };
       }
       const nativeId =
-        options.deliversFollowUp && execution.runtime === 'codex-app-server'
+        options.deliversFollowUp && execution.runtime !== 'claude-sdk'
           ? params.clientMessageId
           : undefined;
       if (nativeId) this.followUpQueue?.commitAdmission(sessionId, nativeId);
@@ -3239,7 +3244,7 @@ export class ChatSessionService {
       try {
         stream = await this.sdkAdapter.resumeSession(
           sessionId,
-          execution.runtime === 'codex-app-server'
+          execution.runtime !== 'claude-sdk'
             ? { ...resumeConfig, pluginConfigAncestorRoots: undefined }
             : resumeConfig,
         );
@@ -3286,13 +3291,13 @@ export class ChatSessionService {
       if (lineage.legacy)
         await this.upgradeLegacyLineage(sessionId, lineage.roots);
       this.logger.info(`[RPC] Session ${sessionId} resumed successfully`);
-      // Native Codex resume starts the follow-up turn even for an empty prompt.
+      // A native resume starts the follow-up turn even for an empty prompt.
       const promptDelivered =
-        options.deliversFollowUp && execution.runtime === 'codex-app-server';
+        options.deliversFollowUp && execution.runtime !== 'claude-sdk';
       return { justResumed: true, promptDelivered };
     } catch (resumeError) {
-      const codexFailure = this.codexFailure(resumeError);
-      if (codexFailure) return { error: codexFailure };
+      const nativeFailure = this.nativeFailure(resumeError);
+      if (nativeFailure) return { error: nativeFailure };
       // A named run's refusal keeps its typed code; the conversation is kept.
       const refusal = mainSessionAccountFailure(resumeError);
       if (refusal) {
@@ -3327,7 +3332,12 @@ export class ChatSessionService {
   ): Promise<void> {
     try {
       const metadata = await this.sessionMetadataStore.get(sessionId);
-      if (metadata?.codexExecution?.runtime === 'codex-app-server') return;
+      // Native sessions keep their lineage in their own runtime metadata.
+      if (
+        metadata?.codexExecution?.runtime === 'codex-app-server' ||
+        metadata?.providerSessionExecution?.runtime === 'provider-session'
+      )
+        return;
       const upgraded =
         await this.sessionMetadataStore.upgradeLegacyPluginConfigAncestorRoots(
           sessionId,

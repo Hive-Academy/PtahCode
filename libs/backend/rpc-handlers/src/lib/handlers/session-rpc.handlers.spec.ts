@@ -1080,6 +1080,46 @@ describe('SessionRpcHandlers', () => {
           );
         });
 
+        it('lists a provider session without a transcript scan and with no stored count', async () => {
+          const providerId = uuidForRow(88);
+          const claudeId = uuidForRow(89);
+          const h = makeHarness({
+            transcriptLines: [userPrompt('hi'), assistant('hello')],
+          });
+          h.metadataStore.getForWorkspace.mockResolvedValue([
+            {
+              ...makeMetadata({ sessionId: providerId }),
+              // Only a Codex row reads this field; it never counts here.
+              codexMessageCount: 6,
+              providerSessionExecution: {
+                version: 1,
+                sessionId: SessionId.from(providerId),
+                runtime: 'provider-session',
+                providerId: 'antigravity-cli',
+                workspaceId: WORKSPACE,
+                providerSession: { profile: 'antigravity' },
+              },
+            },
+            makeMetadata({ sessionId: claudeId }),
+          ]);
+          stubProjectsDir([providerId, claudeId]);
+          mockStat.mockResolvedValue(fileStats as never);
+          h.handlers.register();
+          await call<ListResult>(h, 'session:list', { workspacePath: WORKSPACE });
+          await settleWarm();
+          const warm = await call<ListResult>(h, 'session:list', {
+            workspacePath: WORKSPACE,
+          });
+          expect(countOf(warm, providerId)).toBe(0);
+          expect(countOf(warm, claudeId)).toBe(2);
+          expect(h.jsonlReader.projectJsonlLines).toHaveBeenCalledTimes(1);
+          expect(h.jsonlReader.projectJsonlLines).not.toHaveBeenCalledWith(
+            expect.stringContaining(`${providerId}.jsonl`),
+            expect.any(Function),
+            expect.any(Object),
+          );
+        });
+
         it('returns a cold page at once with 0 and never waits for the reader', async () => {
           const h = makeHarness();
           const id = uuidForRow(83);
@@ -2589,6 +2629,85 @@ describe('SessionRpcHandlers', () => {
                   profileFingerprint: 'native-profile',
                   state: 'inactive',
                 },
+        });
+        h.handlers.register();
+        const result = await call<{ exists: boolean }>(h, 'session:validate', {
+          sessionId: VALID_SESSION_ID,
+          workspacePath: WORKSPACE,
+        });
+        expect(result).toEqual({ exists: false });
+        expect(mockAccess).toHaveBeenCalled();
+      },
+    );
+
+    const providerSessionExecution: NonNullable<
+      SessionMetadata['providerSessionExecution']
+    > = {
+      version: 1,
+      sessionId: VALID_SESSION_ID as SessionId,
+      runtime: 'provider-session',
+      providerId: 'antigravity-cli',
+      workspaceId: WORKSPACE,
+      providerSession: { profile: 'antigravity' },
+    };
+
+    function providerSessionMetadata(): SessionMetadata {
+      return {
+        ...makeMetadata({
+          sessionId: VALID_SESSION_ID,
+          workspaceId: WORKSPACE,
+        }),
+        providerSessionExecution,
+        providerSessionThread: {
+          nativeSessionId: 'agy-native-session',
+          processGeneration: 1,
+        },
+      };
+    }
+
+    it('accepts a provider session with a stored native id without looking for a Claude JSONL', async () => {
+      const h = makeHarness({ workspaceFolders: [WORKSPACE] });
+      h.metadataStore.get.mockResolvedValue(providerSessionMetadata());
+      h.handlers.register();
+      const result = await call<{ exists: boolean; filePath?: string }>(
+        h,
+        'session:validate',
+        { sessionId: VALID_SESSION_ID, workspacePath: WORKSPACE },
+      );
+      expect(result).toEqual({ exists: true });
+      expect(mockAccess).not.toHaveBeenCalled();
+      expect(mockReaddir).not.toHaveBeenCalled();
+    });
+
+    it.each(['missing thread', 'empty native id', 'foreign session binding', 'malformed binding'] as const)(
+      'falls through to the JSONL lookup for a provider session with a %s',
+      async (variant) => {
+        const h = makeHarness({ workspaceFolders: [WORKSPACE] });
+        const metadata = providerSessionMetadata();
+        h.metadataStore.get.mockResolvedValue({
+          ...metadata,
+          ...(variant === 'missing thread'
+            ? { providerSessionThread: undefined }
+            : variant === 'empty native id'
+              ? {
+                  providerSessionThread: {
+                    nativeSessionId: '',
+                    processGeneration: 1,
+                  },
+                }
+              : variant === 'foreign session binding'
+                ? {
+                    providerSessionExecution: {
+                      ...providerSessionExecution,
+                      sessionId: uuidForRow(5) as SessionId,
+                    },
+                  }
+                : {
+                    providerSessionExecution: {
+                      ...providerSessionExecution,
+                      providerSession: { profile: 'not-a-profile' },
+                    } as unknown as SessionMetadata['providerSessionExecution'],
+                  }),
         });
         h.handlers.register();
         const result = await call<{ exists: boolean }>(h, 'session:validate', {

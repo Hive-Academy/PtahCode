@@ -10,6 +10,7 @@ export type DriverErrorCode =
   | 'WORKER_BUSY'
   | 'NO_PROVIDER_READY'
   | 'CODEX_UNAVAILABLE'
+  | 'PROVIDER_SESSION_UNAVAILABLE'
   | 'DRIVER_LOCK_UNAVAILABLE'
   | 'SESSION_LOG_FAILED'
   | 'INTERNAL';
@@ -19,10 +20,28 @@ export class SessionDriverError extends Error {
   }
 }
 
+/** The runtime bindings of a stored session, read structurally. */
+export interface SessionRuntimeMetadata {
+  readonly codexExecution?: { readonly runtime?: string };
+  readonly providerSessionExecution?: { readonly runtime?: string };
+}
+
 export interface SessionMetadataReader {
-  get(
-    sessionId: string,
-  ): Promise<{ codexExecution?: { runtime?: string } } | null>;
+  get(sessionId: string): Promise<SessionRuntimeMetadata | null>;
+}
+
+/**
+ * The native runtime that owns a stored session, if any; the worker-side
+ * structural twin of agent-sdk `nativeExecutionOf`.
+ */
+function nativeRuntimeOf(
+  metadata: SessionRuntimeMetadata | null | undefined,
+): 'codex-app-server' | 'provider-session' | undefined {
+  if (metadata?.codexExecution?.runtime === 'codex-app-server')
+    return 'codex-app-server';
+  if (metadata?.providerSessionExecution?.runtime === 'provider-session')
+    return 'provider-session';
+  return undefined;
 }
 export interface DriverTurn {
   sessionId: string;
@@ -278,7 +297,7 @@ export class SessionDriver {
       writer,
       afterSeq,
       this.driving(sessionId),
-      metadata?.codexExecution?.runtime === 'codex-app-server',
+      nativeRuntimeOf(metadata) !== undefined,
     );
   }
 
@@ -294,8 +313,12 @@ export class SessionDriver {
     } catch {
       throw new SessionDriverError('INTERNAL');
     }
-    if (metadata?.codexExecution?.runtime === 'codex-app-server')
-      throw new SessionDriverError('CODEX_UNAVAILABLE');
+    switch (nativeRuntimeOf(metadata)) {
+      case 'codex-app-server':
+        throw new SessionDriverError('CODEX_UNAVAILABLE');
+      case 'provider-session':
+        throw new SessionDriverError('PROVIDER_SESSION_UNAVAILABLE');
+    }
     if (!this.providerReady())
       throw new SessionDriverError('NO_PROVIDER_READY');
     if (
