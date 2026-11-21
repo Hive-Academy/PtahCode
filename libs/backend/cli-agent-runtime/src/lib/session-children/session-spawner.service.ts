@@ -58,6 +58,7 @@ import {
   type IWorkspaceProvider,
 } from '@ptah-extension/platform-core';
 import {
+  CARRIER_FILE,
   SessionId,
   isLiveAgentStatus,
   normalizeWorkspaceRoot,
@@ -747,7 +748,9 @@ export class SessionSpawnerService implements ISessionSpawner {
         // inside the worktree: a symlink in `.ptah` or `.ptah/specs` must not
         // let an outside entry prove the task. It must be a regular file: a
         // directory named `task.md` is not a task carrier.
-        const carrier = join(taskFolder, 'task.md');
+        const carrier = join(taskFolder, CARRIER_FILE);
+        // degradation-audit: reported - an unresolvable carrier is not
+        // present, so the start is refused with the reason below.
         const provenCarrier = await realpath(carrier).catch(() => undefined);
         const present =
           provenCarrier !== undefined &&
