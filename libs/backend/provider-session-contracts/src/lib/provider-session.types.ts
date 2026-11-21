@@ -13,7 +13,6 @@ import type {
 } from '@ptah-extension/shared';
 import type {
   ProviderApprovalSink,
-  ProviderReplayAttachment,
   ProviderSessionEvent,
 } from './provider-session-events';
 
@@ -92,9 +91,34 @@ export interface ProviderModelInfo {
   readonly isDefault?: boolean;
 }
 
+/**
+ * One image of a turn, as ACP `ContentBlock::Image`: base64 data and its
+ * MIME type. A runtime sends it only when the agent advertised image input
+ * (`capabilities().images`, ACP `promptCapabilities.image`); a consumer must
+ * refuse an image for an agent that did not, never drop it.
+ */
+export interface ProviderTurnImage {
+  readonly mimeType: string;
+  /** Base64 payload, without a `data:` prefix. */
+  readonly data: string;
+}
+
+/**
+ * One file the user referenced, as ACP `ContentBlock::ResourceLink`
+ * (`file://` URI of `path`). Resource links are baseline ACP prompt content,
+ * so every agent accepts them; the agent reads the file itself.
+ */
+export interface ProviderTurnFile {
+  /** Absolute path on the host. */
+  readonly path: string;
+  /** Display name (the file's base name). */
+  readonly name: string;
+}
+
 export interface ProviderTurnInput {
   readonly text: string;
-  readonly images?: readonly ProviderReplayAttachment[];
+  readonly images?: readonly ProviderTurnImage[];
+  readonly files?: readonly ProviderTurnFile[];
 }
 
 export interface ProviderTurnReceipt {

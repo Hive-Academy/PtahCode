@@ -177,9 +177,10 @@ export class AuthStatusCache {
 
   /**
    * Build one `auth:getAuthStatus` payload. The independent probes
-   * (Copilot, Codex, Kimi Code, Claude CLI) run in PARALLEL and each swallows its own
-   * failure, so one broken source degrades a single field instead of the whole
-   * response or the whole latency budget.
+   * (Copilot, Codex, Kimi Code, Claude CLI, provider sessions) run in
+   * PARALLEL and each swallows its own failure, so one broken source
+   * degrades a single field instead of the whole response or the whole
+   * latency budget.
    */
   private async computeAuthStatus(
     safeParams: AuthGetAuthStatusParams,
@@ -194,14 +195,21 @@ export class AuthStatusCache {
     // holding the only configured key must still flip `hasAnyProviderKey`.
     const allProviders = getAllAnthropicProviders();
 
-    const [secrets, copilot, codex, kimiCode, claudeCliInstalled] =
-      await Promise.all([
-        probes.probeSecrets(checkProviderId, allProviders),
-        probes.probeCopilot(),
-        probes.probeCodex(),
-        probes.probeKimiCode(),
-        this.claudeCli.probe(generation),
-      ]);
+    const [
+      secrets,
+      copilot,
+      codex,
+      kimiCode,
+      claudeCliInstalled,
+      providerSessionStatus,
+    ] = await Promise.all([
+      probes.probeSecrets(checkProviderId, allProviders),
+      probes.probeCopilot(),
+      probes.probeCodex(),
+      probes.probeKimiCode(),
+      this.claudeCli.probe(generation),
+      probes.probeProviderSessions(),
+    ]);
 
     // The read model behind BOTH the webview tile grid and the TUI tile
     // list. Sourcing it from the static array is what made user-defined
@@ -238,6 +246,7 @@ export class AuthStatusCache {
       codexTokenStale: codex.codexTokenStale,
       kimiCodeCredentialSource: kimiCode.kimiCodeCredentialSource,
       claudeCliInstalled,
+      providerSessionProfiles: Object.keys(providerSessionStatus ?? {}),
     });
 
     return {
@@ -254,6 +263,8 @@ export class AuthStatusCache {
       codexTokenStale: codex.codexTokenStale,
       ...kimiCode,
       claudeCliInstalled,
+      // Absent unless the host admits a profile: no row, no card.
+      ...(providerSessionStatus ? { providerSessionStatus } : {}),
     };
   }
 }

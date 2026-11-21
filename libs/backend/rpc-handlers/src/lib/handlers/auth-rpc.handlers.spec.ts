@@ -402,6 +402,7 @@ function makeHarness(
     authCommandThrows?: boolean;
     codexLogin?: ICodexLoginService;
     codexReadiness?: ICodexReadinessReader;
+    providerSessionAuth?: import('../chat/provider-session-host/provider-session-auth-status').ProviderSessionAuthStatusProbe;
   } = {},
 ): Harness {
   const logger = createMockLogger();
@@ -477,6 +478,7 @@ function makeHarness(
     undefined,
     opts.codexLogin,
     opts.codexReadiness,
+    opts.providerSessionAuth,
   );
 
   return {
@@ -676,6 +678,30 @@ describe('AuthRpcHandlers', () => {
       // Provider registry was projected into the response
       expect(result.availableProviders.length).toBeGreaterThan(0);
       expect(result.availableProviders[0]).toHaveProperty('id');
+    });
+
+    it('carries no provider-session rows when the host binds no probe', async () => {
+      const h = makeHarness();
+      h.handlers.register();
+      const result = await call<Record<string, unknown>>(h, 'auth:getAuthStatus');
+      expect(result).not.toHaveProperty('providerSessionStatus');
+    });
+
+    it('carries one provider-session row per admitted profile', async () => {
+      const row = {
+        installed: true,
+        authenticated: false,
+        signInHint: 'run `grok login`',
+      };
+      const h = makeHarness({
+        providerSessionAuth: { probe: jest.fn(async () => ({ grok: row })) },
+      });
+      h.handlers.register();
+      const result = await call<{ providerSessionStatus?: unknown }>(
+        h,
+        'auth:getAuthStatus',
+      );
+      expect(result.providerSessionStatus).toEqual({ grok: row });
     });
 
     it('normalises legacy authMethod "vscode-lm" to "claudeCli"', async () => {

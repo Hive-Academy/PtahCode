@@ -15,6 +15,8 @@ export type {
   ProviderSessionPolicy,
   ProviderSessionProfileId,
   ProviderSessionRuntime,
+  ProviderTurnFile,
+  ProviderTurnImage,
   ProviderTurnInput,
   ProviderTurnReceipt,
 } from './lib/provider-session.types';

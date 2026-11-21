@@ -66,6 +66,8 @@ import { InteractiveLoginMethods } from './auth/interactive-login-methods';
 import { CodexReadinessMethod } from './auth/codex-readiness-method';
 import { KimiCodeLoginMethods } from './auth/kimi-code-login-methods';
 import { WorkspaceScopeMethods } from './auth/workspace-scope-methods';
+import type { ProviderSessionAuthStatusProbe } from '../chat/provider-session-host/provider-session-auth-status';
+import { CHAT_TOKENS } from '../chat/tokens';
 
 /**
  * RPC handlers for authentication operations
@@ -171,6 +173,9 @@ export class AuthRpcHandlers {
     private readonly codexLogin?: ICodexLoginService,
     @inject(AUTH_PROVIDERS_TOKENS.SDK_CODEX_READINESS, { isOptional: true })
     private readonly codexReadiness?: ICodexReadinessReader,
+    /** Null unless the host admits provider-session profiles (`registerChatServices` default). */
+    @inject(CHAT_TOKENS.PROVIDER_SESSION_AUTH_STATUS, { isOptional: true })
+    private readonly providerSessionAuth?: ProviderSessionAuthStatusProbe | null,
   ) {
     this.connectionChecker = new ConnectionChecker({
       recorder: connectionChecks,
@@ -201,6 +206,9 @@ export class AuthRpcHandlers {
         codexAuth,
         kimiCodeAuth,
         platformAuth,
+        ...(providerSessionAuth
+          ? { providerSessions: providerSessionAuth }
+          : {}),
       }),
     });
     this.statusMethods = new AuthStatusMethods({
