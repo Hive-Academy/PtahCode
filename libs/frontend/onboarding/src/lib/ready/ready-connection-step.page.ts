@@ -19,9 +19,18 @@ import { LucideAngularModule, PlugZap, RefreshCw } from 'lucide-angular';
 import { OnboardingFlagService } from '../first-run/onboarding-flag.service';
 import { OnboardingAnnouncerService } from '../shell/onboarding-announcer.service';
 import { ConnectionChoiceComponent } from './connection-choice.component';
+import {
+  CONNECTION_GRID_CLASS,
+  CONNECTION_OPTION_LIST,
+  connectionColumns,
+  connectionRole,
+} from './connection-options';
 import { ConnectionChoiceStore } from './connection-choice.store';
 import { ProviderPanelComponent } from './provider-panel.component';
-import type { ProviderReadinessView } from './provider-readiness.derive';
+import type {
+  ProviderKind,
+  ProviderReadinessView,
+} from './provider-readiness.derive';
 import { ProviderReadinessStore } from './provider-readiness.store';
 import { ReadyStripComponent } from './ready-strip.component';
 import { readyStripSettingsWord } from './ready-strip-state';
@@ -65,28 +74,34 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
           tabindex="-1"
           class="text-[1.7rem] font-semibold leading-tight tracking-tight outline-none max-[720px]:text-[1.35rem]"
         >
-          Check Claude Code and Codex
+          Main connection
         </h1>
       </div>
-      <p class="mt-2 max-w-[62ch] text-base-content-muted">
-        Ptah works with Claude Code or Codex. Pick the one you use as your main
-        connection, and make sure it is installed and signed in. If you skip
-        this, you can fix it later.
+      <p
+        class="mt-2 max-w-[72ch] text-base-content-muted"
+        data-testid="ready-connection-intro"
+      >
+        Ptah uses your main connection for chat and agents. Pick
+        {{ optionNames }}, and make sure it is installed and signed in. The
+        others are optional, and you can change this later in Providers. If you
+        skip this step, you can fix it later.
       </p>
       <ptah-connection-choice class="mt-5" />
       <div
-        class="mt-5 grid grid-cols-2 items-start gap-[var(--ptah-gap-field)] max-[720px]:grid-cols-1"
+        class="mt-5 items-stretch gap-[var(--ptah-gap-field)]"
+        [class]="gridClass"
+        [style.--connection-cols]="columns"
+        data-testid="ready-provider-panels"
       >
-        <ptah-provider-panel
-          [view]="store.claude()"
-          [role]="role('claude-cli')"
-          [platform]="platform"
-        />
-        <ptah-provider-panel
-          [view]="store.codex()"
-          [role]="role('openai-codex')"
-          [platform]="platform"
-        />
+        @for (panel of panels(); track panel.option.id) {
+          <ptah-provider-panel
+            [option]="panel.option"
+            [view]="panel.view"
+            [role]="panel.role"
+            [platform]="platform"
+            (recheck)="recheck()"
+          />
+        }
       </div>
       @if (!chosenReady()) {
         <p class="mt-5 text-sm text-base-content-muted">
@@ -161,10 +176,33 @@ export class ReadyConnectionStepPage {
   protected readonly chosenReady = computed(
     () => this.store.chosen().readiness?.state === 'ready',
   );
-  protected readonly mountReading = computed(
-    () =>
-      this.store.claude().state === 'checking' ||
-      this.store.codex().state === 'checking',
+  private readonly options = inject(CONNECTION_OPTION_LIST);
+  protected readonly gridClass = CONNECTION_GRID_CLASS;
+  /** One grid column per option, up to three. */
+  protected readonly columns = connectionColumns(this.options.length);
+  /** "Claude Code or Codex", from the option list. */
+  protected readonly optionNames = joinOr(
+    this.options.map((option) => option.name),
+  );
+  /** Each provider's readiness, keyed by option id. */
+  private readonly readinessOf: Record<
+    ProviderKind,
+    () => ProviderReadinessView
+  > = {
+    'claude-cli': () => this.store.claude(),
+    'openai-codex': () => this.store.codex(),
+  };
+  /** One detail card per option, in list order. */
+  protected readonly panels = computed(() => {
+    const main = this.store.chosen().provider;
+    return this.options.map((option) => ({
+      option,
+      view: this.readinessOf[option.id](),
+      role: connectionRole(main, option.id),
+    }));
+  });
+  protected readonly mountReading = computed(() =>
+    this.panels().some((panel) => panel.view.state === 'checking'),
   );
   private focusWhenReady = false;
   private previousSignInStatus: string | null = null;
@@ -187,23 +225,12 @@ export class ReadyConnectionStepPage {
     void this.store.refresh('mount');
   }
 
-  protected role(
-    provider: ProviderReadinessView['provider'],
-  ): 'main' | 'information' | 'neutral' {
-    const chosen = this.store.chosen();
-    return chosen.provider === provider
-      ? 'main'
-      : chosen.provider === null
-        ? 'neutral'
-        : 'information';
-  }
-
   protected async recheck(): Promise<void> {
     if (this.store.rechecking()) return;
     this.focusWhenReady = !this.chosenReady();
     await this.store.refresh('recheck');
-    this.announce('Claude Code', this.store.claude());
-    this.announce('Codex', this.store.codex());
+    for (const panel of this.panels())
+      this.announce(panel.option.name, panel.view);
     if (this.focusWhenReady && this.chosenReady()) {
       this.focusWhenReady = false;
       this.focusContinue();
@@ -245,4 +272,11 @@ export class ReadyConnectionStepPage {
       ...onboardingReadyTarget('settings').subPath,
     ]);
   }
+}
+
+/** "A", "A or B", "A, B or C". */
+function joinOr(names: readonly string[]): string {
+  return names.length < 2
+    ? (names[0] ?? '')
+    : `${names.slice(0, -1).join(', ')} or ${names[names.length - 1]}`;
 }

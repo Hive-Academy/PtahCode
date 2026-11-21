@@ -48,7 +48,13 @@ export const ONBOARDING_ROUTES: Routes = [
         canMatch: [onboardingReadyHostGuard],
         data: { crumb: 'Get ready' },
         children: [
-          { path: '', pathMatch: 'full', component: ReadyConnectionStepPage },
+          {
+            path: '',
+            pathMatch: 'full',
+            component: ReadyConnectionStepPage,
+            // Room for three main-connection cards side by side on desktop.
+            data: { layout: 'wide' },
+          },
           {
             path: 'settings',
             component: ReadySettingsStepPage,
