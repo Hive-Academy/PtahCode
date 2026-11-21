@@ -1159,6 +1159,8 @@ export class CodeSymbolStore implements ICodeSymbolReader {
     try {
       return executeFtsQueryPlan(plan, limit, run, (row) => row.rowid);
     } catch (err: unknown) {
+      // degradation-audit: reported - logged at warn here; the caller gets no
+      // BM25 hits and ranks on the vector results alone.
       this.logger.warn('[code-symbol-store] BM25 search failed', {
         error: err instanceof Error ? err.message : String(err),
       });
@@ -1372,6 +1374,8 @@ export class CodeSymbolStore implements ICodeSymbolReader {
     try {
       return await this.embedder.embed(texts);
     } catch (err) {
+      // degradation-audit: reported - logged at warn once per process
+      // (embedderWarnedOnce); symbols are stored without vectors.
       if (!this.embedderWarnedOnce) {
         this.embedderWarnedOnce = true;
         this.logger.warn(

@@ -404,6 +404,8 @@ export class ConversationRegistry {
         completedAt: parsed.completedAt ?? 0,
       };
     } catch (error: unknown) {
+      // degradation-audit: reported - logged at warn here; the caller gets
+      // null and the conversation shows no restored compaction marker.
       console.warn(
         '[ConversationRegistry] failed to read persisted compaction marker',
         {

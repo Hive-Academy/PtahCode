@@ -11,6 +11,7 @@ import { TOKENS, type Logger } from '@ptah-extension/vscode-core';
 import { PLATFORM_TOKENS } from '@ptah-extension/platform-core';
 import type {
   IMcpCallerCredentials,
+  IProcessSpawner,
   IWorkspaceProvider,
 } from '@ptah-extension/platform-core';
 import {
@@ -157,13 +158,20 @@ export function createElectronCodexBundledCandidate(
   return resolvedPath;
 }
 
+/**
+ * `processSpawner` runs each `--version` probe off the main thread. Selection
+ * runs during startup detection, readiness and plan limits, and a direct
+ * spawn on Windows blocks the main process for seconds.
+ */
 export function createElectronCodexSelectionSnapshot(
   bundledRoot: string,
   logger: Logger,
+  processSpawner?: IProcessSpawner,
 ): CodexSelectionSnapshotPort {
   const snapshot = new CodexSelectionSnapshot(
-    createNodeCodexExecutableProbes(async () =>
-      createElectronCodexBundledCandidate(bundledRoot),
+    createNodeCodexExecutableProbes(
+      async () => createElectronCodexBundledCandidate(bundledRoot),
+      { processSpawner },
     ),
   );
   let lastLoggedSelection: string | undefined;

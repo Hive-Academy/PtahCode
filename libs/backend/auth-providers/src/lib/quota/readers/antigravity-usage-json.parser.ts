@@ -50,8 +50,11 @@ function slug(value: string): string {
  */
 export function parseAntigravityUsageJson(output: string, observedAt: number): PlanLimitWindow[] | undefined {
   let body: unknown;
-  try { body = JSON.parse(output); } catch {
-    // degradation-audit: optional-capability - non-JSON output is an unparseable reply (cli-parse-failed); never logged.
+  try {
+    body = JSON.parse(output);
+  } catch {
+    // degradation-audit: optional-capability - non-JSON output is an
+    // unparseable reply (cli-parse-failed); it is not logged.
     return undefined;
   }
   const parsed = OutputSchema.safeParse(body);

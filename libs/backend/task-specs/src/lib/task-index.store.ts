@@ -461,6 +461,9 @@ export class SqliteTaskIndexStore implements ITaskIndexStore {
       const parsed = JSON.parse(raw);
       return Array.isArray(parsed) ? parsed.map((v) => String(v)) : [];
     } catch {
+      // degradation-audit: optional-capability - per-row parser of a column
+      // this store wrote; a malformed value reads as an empty list, and the
+      // task files stay the source of truth for the next rebuild.
       return [];
     }
   }
@@ -470,6 +473,9 @@ export class SqliteTaskIndexStore implements ITaskIndexStore {
       const parsed = JSON.parse(raw);
       return Array.isArray(parsed) ? (parsed as TaskValidationIssue[]) : [];
     } catch {
+      // degradation-audit: optional-capability - per-row parser of a column
+      // this store wrote; a malformed value reads as no issues, and the task
+      // files stay the source of truth for the next rebuild.
       return [];
     }
   }

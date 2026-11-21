@@ -56,6 +56,7 @@ interface OwnerMessage {
           placement="top-start"
           [hasBackdrop]="true"
           backdropClass="transparent"
+          [capToViewport]="false"
           (closed)="listOpen.set(false)"
         >
           <button

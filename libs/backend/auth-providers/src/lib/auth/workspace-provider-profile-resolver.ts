@@ -515,6 +515,8 @@ export class WorkspaceProviderProfileResolver {
         requestedModel,
       );
     } catch (error: unknown) {
+      // degradation-audit: reported - logged at warn here; the caller gets
+      // undefined (no isolated snapshot) and uses the global provider.
       this.logger.warn(
         '[WorkspaceProviderProfileResolver] Failed to resolve per-workspace provider profile — no isolated snapshot',
         {

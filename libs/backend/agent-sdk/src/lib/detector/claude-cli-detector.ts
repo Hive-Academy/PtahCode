@@ -28,11 +28,15 @@ import { z } from 'zod';
 import {
   killProcessTree,
   PLATFORM_TOKENS,
+  runProcessToCompletion,
+  type IProcessSpawner,
   type IStateStorage,
 } from '@ptah-extension/platform-core';
 import { ClaudeCliHealth } from '@ptah-extension/shared';
 import { SdkError } from '../errors';
 import { ClaudeCliPathResolver } from './claude-cli-path-resolver';
+import { SDK_TOKENS } from '../di/tokens';
+import { TOKENS, type Logger } from '@ptah-extension/vscode-core';
 
 export interface ClaudeInstallation {
   readonly path: string;
@@ -165,9 +169,19 @@ export class ClaudeCliDetector {
      */
     @inject(PLATFORM_TOKENS.STATE_STORAGE, { isOptional: true })
     private readonly stateStorage?: IStateStorage,
+    /**
+     * Runs every probe command off the main thread when the host registers
+     * one. A direct spawn is a synchronous `CreateProcessW` on Windows that
+     * blocks the Electron main process during startup detection.
+     */
+    @inject(SDK_TOKENS.SDK_PROCESS_SPAWNER, { isOptional: true })
+    private readonly processSpawner?: IProcessSpawner,
+    /** Records probe commands that cannot start. */
+    @inject(TOKENS.LOGGER, { isOptional: true })
+    private readonly logger?: Logger,
   ) {
     this.isWSLEnvironment = this.detectWSLEnvironment();
-    this.pathResolver = new ClaudeCliPathResolver();
+    this.pathResolver = new ClaudeCliPathResolver(processSpawner, logger);
   }
 
   /**
@@ -702,6 +716,9 @@ export class ClaudeCliDetector {
     args: string[],
     options: { timeout?: number } = {},
   ): Promise<CommandResult> {
+    if (this.processSpawner) {
+      return this.executeOffThread(this.processSpawner, command, args, options);
+    }
     return new Promise((resolve) => {
       const { timeout = 30000 } = options;
 
@@ -767,6 +784,48 @@ export class ClaudeCliDetector {
         }
       });
     });
+  }
+
+  /** {@link executeCommand} through the host spawner, with the same results. */
+  private async executeOffThread(
+    spawner: IProcessSpawner,
+    command: string,
+    args: string[],
+    options: { timeout?: number },
+  ): Promise<CommandResult> {
+    try {
+      const result = await runProcessToCompletion(
+        spawner,
+        {
+          command,
+          args,
+          env: process.env,
+          detached: os.platform() !== 'win32',
+        },
+        {
+          timeoutMs: options.timeout ?? 30000,
+          // The default stopProcessTree reaps the tree, also for a late pid.
+        },
+      );
+      if (result.timedOut) {
+        return { success: false, stdout: '', stderr: 'Command timeout', exitCode: -1 };
+      }
+      return {
+        success: result.exitCode === 0,
+        stdout: result.stdout,
+        stderr: result.stderr,
+        exitCode: result.exitCode || 0,
+      };
+    } catch (error: unknown) {
+      // degradation-audit: reported - logged here, and the message reaches the
+      // caller in `stderr` as a failed probe, like the inline 'error' event.
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger?.warn('[ClaudeCliDetector] Probe command could not start', {
+        command,
+        error: message,
+      });
+      return { success: false, stdout: '', stderr: message, exitCode: -1 };
+    }
   }
 
   /**

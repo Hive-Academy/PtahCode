@@ -65,6 +65,8 @@ function parseStringArray(raw: string | null | undefined): readonly string[] {
       return parsed.filter((x): x is string => typeof x === 'string');
     }
   } catch {
+    // degradation-audit: optional-capability - pure row parser; a malformed
+    // JSON column reads as an empty list, the same as an absent one.
     return [];
   }
   return [];

@@ -520,6 +520,8 @@ export abstract class TranslationProxyBase implements ITranslationProxy {
       }
       envelope = result.data;
     } catch (err: unknown) {
+      // degradation-audit: reported - returned to the HTTP client as a 400
+      // (invalid JSON) or 413 (body too large) invalid_request_error.
       const message =
         err instanceof Error && err.message.includes('exceeds')
           ? err.message
@@ -1041,6 +1043,8 @@ export abstract class TranslationProxyBase implements ITranslationProxy {
     try {
       headers = await this.getHeaders();
     } catch (error) {
+      // degradation-audit: reported - returned to the HTTP client as a 401
+      // authentication_error and recorded in the phase timing.
       finishTiming('authentication-error');
       sendErrorResponse(
         res,
@@ -1147,6 +1151,8 @@ export abstract class TranslationProxyBase implements ITranslationProxy {
             this.onAuthFailure()
               .then((success) => {
                 if (success) {
+                  // degradation-audit: reported - the rejection goes to the outer
+                  // promise's reject, so the awaiting proxy request fails with it.
                   retryFn(true).then(resolve).catch(reject);
                 } else {
                   sendErrorResponse(
@@ -1524,7 +1530,10 @@ export abstract class TranslationProxyBase implements ITranslationProxy {
                     outputItem.call_id ??
                     `toolu_${requestId}_${content.length}`,
                   name: toOriginalName(outputItem.name ?? ''),
-                  input: safeJsonParse(outputItem.arguments ?? '{}'),
+                  input: safeJsonParse(
+                    outputItem.arguments ?? '{}',
+                    this.logger,
+                  ),
                 });
               }
             }
@@ -1702,7 +1711,10 @@ export abstract class TranslationProxyBase implements ITranslationProxy {
                 type: 'tool_use',
                 id: toolCall.id ?? `toolu_${requestId}_${content.length}`,
                 name: toolCall.function?.name ?? '',
-                input: safeJsonParse(toolCall.function?.arguments ?? '{}'),
+                input: safeJsonParse(
+                  toolCall.function?.arguments ?? '{}',
+                  this.logger,
+                ),
               });
             }
           }

@@ -90,6 +90,8 @@ export class CliSkillRepropagation implements SkillRepropagationPort {
     try {
       return this.container.resolve<Logger>(TOKENS.LOGGER);
     } catch {
+      // degradation-audit: optional-capability - this resolves the logger
+      // itself; with none bound the caller skips its log line (logger?.warn).
       return null;
     }
   }

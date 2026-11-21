@@ -58,6 +58,7 @@ const TOKEN_NAMES: readonly string[] = [
     'control-px',
     'control-px-md',
     'icon-xs',
+    'icon-lg',
     'icon-sm',
     'icon-md',
     'radius-control',
@@ -131,6 +132,9 @@ const TOKEN_NAMES: readonly string[] = [
     'card-padding-sm',
     'card-padding-md',
     'card-padding-lg',
+    'popover-max-h',
+    'modal-max-h',
+    'lane-row-h',
     'card-gap',
     'card-shadow',
     'card-shadow-raised',
@@ -170,6 +174,12 @@ const TOKEN_VALUES: Readonly<Record<string, string>> = {
   'card-padding-md': 'var(--ptah-space-4)',
   'card-gap': 'var(--ptah-space-3)',
   'card-shadow': '0 0 0 0 transparent',
+  'card-padding-lg': '1.25rem',
+  'surface-pad': 'var(--ptah-space-4)',
+  'popover-max-h': 'min(28rem, calc(100dvh - 2rem))',
+  'modal-max-h': 'calc(100dvh - 2rem)',
+  'lane-row-h': '3.5rem',
+  'icon-lg': '1.25rem',
 };
 
 function listFiles(dir: string): string[] {

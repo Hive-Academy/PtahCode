@@ -13,7 +13,11 @@ import {
 } from '@angular/core';
 import { NgTemplateOutlet } from '@angular/common';
 import { LucideAngularModule, Search } from 'lucide-angular';
-import { AppStateManager, ClaudeRpcService } from '@ptah-extension/core';
+import {
+  AppStateManager,
+  ClaudeRpcService,
+  LoggingService,
+} from '@ptah-extension/core';
 import {
   CatalogCardComponent,
   CatalogCardSkeletonComponent,
@@ -360,6 +364,7 @@ export class SkillShBrowserComponent implements OnInit, OnDestroy {
   private readonly rpcService = inject(ClaudeRpcService);
   private readonly appState = inject(AppStateManager);
   private readonly destroyRef = inject(DestroyRef);
+  private readonly logger = inject(LoggingService);
   private destroyed = false;
 
   /**
@@ -536,6 +541,8 @@ export class SkillShBrowserComponent implements OnInit, OnDestroy {
         this.error.set(result.error || 'Install failed');
       }
     } catch {
+      // degradation-audit: reported - shown to the user through error
+      // ("Install failed — is npx available?"); a destroyed panel drops it.
       if (this.destroyed) return;
       this.error.set('Install failed — is npx available?');
     } finally {
@@ -566,6 +573,8 @@ export class SkillShBrowserComponent implements OnInit, OnDestroy {
         this.error.set(result.data.error || 'Uninstall failed');
       }
     } catch {
+      // degradation-audit: reported - shown to the user through error
+      // ("Uninstall failed"); a destroyed panel drops it.
       if (this.destroyed) return;
       this.error.set('Uninstall failed');
     } finally {
@@ -636,6 +645,8 @@ export class SkillShBrowserComponent implements OnInit, OnDestroy {
         this.searchResults.set([]);
       }
     } catch {
+      // degradation-audit: reported - shown to the user through error
+      // ("Search failed") with an empty result list; a destroyed panel drops it.
       if (this.destroyed) return;
       this.error.set('Search failed');
       this.searchResults.set([]);
@@ -674,8 +685,13 @@ export class SkillShBrowserComponent implements OnInit, OnDestroy {
       if (result.isSuccess()) {
         this.popularSkills.set(this.withDisplayFields(result.data.skills));
       }
-    } catch {
+    } catch (error: unknown) {
+      // degradation-audit: reported - logged at warn here; the popular list
+      // keeps its previous (possibly empty) rows.
       if (this.destroyed) return;
+      this.logger.warn('SkillShBrowser', 'skillsSh:getPopular failed', {
+        errorName: error instanceof Error ? error.name : typeof error,
+      });
     } finally {
       if (!this.destroyed) this.isLoadingPopular.set(false);
     }
@@ -695,8 +711,13 @@ export class SkillShBrowserComponent implements OnInit, OnDestroy {
       if (result.isSuccess() && result.data) {
         this.recommendations.set(result.data);
       }
-    } catch {
+    } catch (error: unknown) {
+      // degradation-audit: reported - logged at warn here; the panel shows
+      // no recommendations.
       if (this.destroyed) return;
+      this.logger.warn('SkillShBrowser', 'skillsSh:detectRecommended failed', {
+        errorName: error instanceof Error ? error.name : typeof error,
+      });
     } finally {
       if (!this.destroyed) this.isLoadingRecommendations.set(false);
     }

@@ -152,6 +152,9 @@ export class CuratorJobQueue {
           () => undefined,
         );
       } catch (error: unknown) {
+        // degradation-audit: reported - a job that throws synchronously is
+        // forwarded to the caller's promise through rejectCaller; the queue
+        // tail resolves so the next job still runs.
         rejectCaller(error);
         return undefined;
       }

@@ -9,8 +9,11 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 import type { ISaveDialogProvider } from '@ptah-extension/rpc-handlers';
+import type { Logger } from '@ptah-extension/vscode-core';
 
 export class CliSaveDialog implements ISaveDialogProvider {
+  constructor(private readonly logger?: Pick<Logger, 'error'>) {}
+
   async showSaveAndWrite(options: {
     defaultFilename: string;
     filters: Record<string, string[]>;
@@ -30,7 +33,13 @@ export class CliSaveDialog implements ISaveDialogProvider {
       await fs.writeFile(filePath, options.content);
 
       return filePath;
-    } catch {
+    } catch (error: unknown) {
+      // degradation-audit: reported - logged at error when a logger is passed
+      // (the CLI container passes one); the caller gets null.
+      this.logger?.error('[CliSaveDialog] Could not write the file', {
+        code: (error as NodeJS.ErrnoException | null)?.code,
+        errorName: error instanceof Error ? error.name : typeof error,
+      });
       return null;
     }
   }

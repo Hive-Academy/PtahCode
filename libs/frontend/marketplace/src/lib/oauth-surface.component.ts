@@ -102,6 +102,8 @@ function isProbableServerUrl(value: string): boolean {
   try {
     return new URL(value).protocol === 'https:';
   } catch {
+    // degradation-audit: optional-capability - a string that does not parse
+    // as a URL is "not worth probing"; the caller skips the probe on false.
     return false;
   }
 }
@@ -665,6 +667,8 @@ export class OAuthSurfaceComponent implements OnInit {
         if (!this.destroyed) this.copied.set(false);
       }, COPIED_FEEDBACK_MS);
     } catch {
+      // degradation-audit: optional-capability - with no clipboard access the
+      // documented fallback selects the field text for a manual copy.
       if (this.destroyed) return;
       field.select();
     }
@@ -733,6 +737,8 @@ export class OAuthSurfaceComponent implements OnInit {
         );
       }
     } catch {
+      // degradation-audit: reported - shown to the user through connectError;
+      // the form keeps its input for a retry.
       if (this.destroyed) return;
       this.connectError.set('Failed to connect server');
     } finally {
@@ -772,6 +778,8 @@ export class OAuthSurfaceComponent implements OnInit {
         );
       }
     } catch {
+      // degradation-audit: reported - shown to the user through connectError;
+      // the row keeps its previous state.
       if (this.destroyed) return;
       this.connectError.set('Failed to reconnect server');
     } finally {
@@ -802,6 +810,8 @@ export class OAuthSurfaceComponent implements OnInit {
         );
       }
     } catch {
+      // degradation-audit: reported - shown to the user through connectError;
+      // the server stays listed.
       if (this.destroyed) return;
       this.connectError.set('Failed to disconnect server');
     } finally {
@@ -837,6 +847,8 @@ export class OAuthSurfaceComponent implements OnInit {
         this.statuses.set(new Map());
       }
     } catch {
+      // degradation-audit: reported - shown to the user through loadError with
+      // a Retry action; the list is emptied.
       if (this.destroyed) return;
       this.loadError.set('Failed to load connected servers');
       this.servers.set([]);

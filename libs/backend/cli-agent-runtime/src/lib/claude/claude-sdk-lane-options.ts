@@ -82,6 +82,7 @@ export function buildClaudeLaneBootstrapOptions(
     tools: [],
     mcpServers: {},
     strictMcpConfig: true,
+    mcpServersDelivery: 'argv',
     persistSession: false,
     maxTurns: 1,
     canUseTool: async () => ({
@@ -277,6 +278,9 @@ export function buildClaudeSdkLaneOptions(
         onStderr: handleChildStderr,
       }),
     hooks: assembly.hooks,
+    // See keepMcpServersOnArgv in agent-sdk: the installed CLI may predate
+    // stdin delivery of MCP configs.
+    mcpServersDelivery: 'argv',
     pathToClaudeCodeExecutable: certified
       ? certified.executable.sdkExecutablePath
       : executable,

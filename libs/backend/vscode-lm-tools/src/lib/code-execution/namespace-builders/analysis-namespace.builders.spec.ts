@@ -91,6 +91,7 @@ import {
   buildProjectNamespace,
   buildRelevanceNamespace,
   buildDependencyNamespace,
+  FileNotInGraphError,
   type AnalysisNamespaceDependencies,
 } from './analysis-namespace.builders';
 import {
@@ -183,7 +184,8 @@ function makeMocks(): AnalysisNamespaceDependencies & {
     isBuilt: jest.fn(),
     getCoverageReport: jest.fn(),
     getCoverageReportForFile: jest.fn(),
-    resolveNodePath: jest.fn(),
+    // Default: every file has a node in the answering graph.
+    resolveNodePath: jest.fn((filePath: string) => filePath),
     graphSpellingsOf: jest.fn().mockReturnValue([]),
     reserveBuild: jest.fn(),
     getBuildState: jest.fn(),
@@ -1452,21 +1454,103 @@ describe('buildDependencyNamespace', () => {
     expect(out.error).toMatch(/bad graph/);
   });
 
-  it('getDependencies / getDependents swallow throws and return []', async () => {
+  it('getDependencies / getDependents reject when no workspace is open for a relative path', async () => {
     const deps = makeMocks();
+    deps._workspaceProvider.getWorkspaceRoot.mockReturnValue(undefined);
+    const warn = jest.fn();
+    const ns = buildDependencyNamespace({ ...deps, logger: { warn } });
+
+    await expect(ns.getDependencies('a.ts')).rejects.toThrow(
+      'No workspace is open',
+    );
+    await expect(ns.getDependents('a.ts')).rejects.toThrow(
+      'No workspace is open',
+    );
+    expect(deps._dependencyGraph.getDependencies).not.toHaveBeenCalled();
+    expect(deps._dependencyGraph.getDependents).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      '[DependencyNamespace] getDependencies failed',
+      { errorName: 'NoWorkspace' },
+    );
+  });
+
+  it('getDependencies / getDependents reject with the error name when the graph fails', async () => {
+    const deps = makeMocks();
+    deps._dependencyGraph.getCoverageReportForFile.mockReturnValue({});
     deps._dependencyGraph.getDependencies.mockImplementation(() => {
-      throw new Error('x');
+      throw new TypeError('secret detail x');
     });
     deps._dependencyGraph.getDependents.mockImplementation(() => {
-      throw new Error('y');
+      throw new RangeError('secret detail y');
     });
+    const warn = jest.fn();
+    const ns = buildDependencyNamespace({ ...deps, logger: { warn } });
+
+    await expect(ns.getDependencies('a.ts')).rejects.toThrow(
+      /^Dependency graph unavailable: TypeError$/,
+    );
+    await expect(ns.getDependents('a.ts')).rejects.toThrow(
+      /^Dependency graph unavailable: RangeError$/,
+    );
+    expect(warn).toHaveBeenCalledWith(
+      '[DependencyNamespace] getDependents failed',
+      { errorName: 'RangeError' },
+    );
+  });
+
+  it('getDependencies / getDependents reject when no built graph covers the file', async () => {
+    const deps = makeMocks();
+    deps._dependencyGraph.getCoverageReportForFile.mockReturnValue(undefined);
+    const warn = jest.fn();
+    const ns = buildDependencyNamespace({ ...deps, logger: { warn } });
+
+    await expect(ns.getDependencies('a.ts')).rejects.toThrow(
+      'Dependency graph unavailable: not built yet',
+    );
+    await expect(ns.getDependents('a.ts')).rejects.toThrow(
+      'Dependency graph unavailable: not built yet',
+    );
+    expect(deps._dependencyGraph.getDependencies).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith('[DependencyNamespace] getDependents failed', {
+      errorName: 'GraphNotBuilt',
+    });
+  });
+
+  it('getDependencies / getDependents reject when the covering graph has no node for the file', async () => {
+    // One graph answers every path, but this file lies outside its root.
+    const deps = makeMocks();
+    deps._dependencyGraph.getCoverageReportForFile.mockReturnValue({});
+    deps._dependencyGraph.resolveNodePath.mockReturnValue(undefined);
+    const warn = jest.fn();
+    const ns = buildDependencyNamespace({ ...deps, logger: { warn } });
+
+    await expect(ns.getDependencies('D:/elsewhere/a.ts')).rejects.toThrow(
+      FileNotInGraphError,
+    );
+    await expect(ns.getDependents('D:/elsewhere/a.ts')).rejects.toThrow(
+      'Dependency graph unavailable: the file is not in the built graph',
+    );
+    expect(deps._dependencyGraph.getDependencies).not.toHaveBeenCalled();
+    expect(deps._dependencyGraph.getDependents).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith('[DependencyNamespace] getDependents failed', {
+      errorName: 'FileNotInGraph',
+    });
+  });
+
+  it('getDependencies / getDependents resolve [] for a lookup that found nothing', async () => {
+    const deps = makeMocks();
+    deps._dependencyGraph.getCoverageReportForFile.mockReturnValue({});
+    deps._dependencyGraph.getDependencies.mockReturnValue([]);
+    deps._dependencyGraph.getDependents.mockReturnValue([]);
     const ns = buildDependencyNamespace(deps);
+
     await expect(ns.getDependencies('a.ts')).resolves.toEqual([]);
     await expect(ns.getDependents('a.ts')).resolves.toEqual([]);
   });
 
   it('getDependencies / getDependents resolve a relative path to absolute before querying the graph', async () => {
     const deps = makeMocks();
+    deps._dependencyGraph.getCoverageReportForFile.mockReturnValue({});
     deps._dependencyGraph.getDependencies.mockReturnValue([]);
     deps._dependencyGraph.getDependents.mockReturnValue([]);
     const ns = buildDependencyNamespace(deps);
@@ -1485,6 +1569,7 @@ describe('buildDependencyNamespace', () => {
 
   it('getDependents passes an absolute path through unchanged', async () => {
     const deps = makeMocks();
+    deps._dependencyGraph.getCoverageReportForFile.mockReturnValue({});
     deps._dependencyGraph.getDependents.mockReturnValue([]);
     const abs = 'D:\\elsewhere\\b.ts';
 

@@ -705,6 +705,29 @@ describe('McpDirectoryRpcHandlers — Smithery Connections API', () => {
 
   // ── deriveSmitheryConnectionId ───────────────────────────────────────────
 
+  describe('getSmitheryKeyStatus', () => {
+    it('answers configured from the secret store', async () => {
+      build();
+      authSecrets.hasProviderKey.mockResolvedValue(false);
+
+      const res = await call('mcpDirectory:getSmitheryKeyStatus', {});
+
+      expect(res.success).toBe(true);
+      expect(res.data).toEqual({ configured: false });
+    });
+
+    it('reports a failed read as an error, never as configured: false', async () => {
+      build();
+      authSecrets.hasProviderKey.mockRejectedValue(new Error('vault locked: detail'));
+
+      const res = await call('mcpDirectory:getSmitheryKeyStatus', {});
+
+      expect(res.success).toBe(false);
+      expect(res.error).toBe('Could not read the Smithery API key status');
+      expect(res.data).toBeUndefined();
+    });
+  });
+
   describe('deriveSmitheryConnectionId', () => {
     it('drops the smithery_ prefix and maps every other character to a dash', () => {
       expect(deriveSmitheryConnectionId('smithery_owner_server')).toBe(

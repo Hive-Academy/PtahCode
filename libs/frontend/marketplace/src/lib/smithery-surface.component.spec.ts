@@ -159,6 +159,91 @@ describe('SmitherySurfaceComponent', () => {
     });
   });
 
+  describe('key status check fails', () => {
+    let warnSpy: jest.SpyInstance;
+
+    beforeEach(() => {
+      warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    });
+
+    afterEach(() => {
+      warnSpy.mockRestore();
+    });
+
+    const errorAlert = (): HTMLElement | null =>
+      hostElement.querySelector('[data-testid="smithery-key-status-error"]');
+
+    it('shows an error with Retry, not the key form, when the RPC throws', async () => {
+      setResponder('mcpDirectory:getSmitheryKeyStatus', () => {
+        throw new Error('transport down');
+      });
+      await createComponent();
+
+      expect(component.keyStatus()).toBe('error');
+      const alert = errorAlert();
+      expect(alert?.querySelector('[role="alert"]')).not.toBeNull();
+      expect(alert?.textContent).toContain(
+        'Could not check the Smithery API key status',
+      );
+      const retry = alert?.querySelector('button[type="button"]');
+      expect(retry?.textContent?.trim()).toBe('Retry');
+      expect(hostElement.querySelector('input[type="password"]')).toBeNull();
+      expect(warnSpy).toHaveBeenCalledWith(
+        '[SmitherySurface] getSmitheryKeyStatus threw',
+        { errorName: 'Error' },
+      );
+      expect(methodsCalled()).not.toContain('mcpDirectory:search');
+    });
+
+    it('shows the error state when the RPC answers with an error', async () => {
+      setResponder('mcpDirectory:getSmitheryKeyStatus', () =>
+        fail('host unavailable'),
+      );
+      await createComponent();
+
+      expect(component.keyStatus()).toBe('error');
+      expect(errorAlert()?.textContent).toContain('host unavailable');
+      expect(hostElement.querySelector('input[type="password"]')).toBeNull();
+    });
+
+    it('re-runs the check on Retry and loads the surface on success', async () => {
+      setResponder('mcpDirectory:getSmitheryKeyStatus', () =>
+        fail('host unavailable'),
+      );
+      await createComponent();
+      expect(component.keyStatus()).toBe('error');
+
+      setResponder('mcpDirectory:getSmitheryKeyStatus', () =>
+        ok({ configured: true }),
+      );
+      setResponder('mcpDirectory:search', () => ok({ servers: [] }));
+      (
+        errorAlert()?.querySelector('button[type="button"]') as HTMLButtonElement
+      ).click();
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      const statusCalls = methodsCalled().filter(
+        (m) => m === 'mcpDirectory:getSmitheryKeyStatus',
+      );
+      expect(statusCalls.length).toBe(2);
+      expect(component.keyStatus()).toBe('configured');
+      expect(errorAlert()).toBeNull();
+      expect(methodsCalled()).toContain('mcpDirectory:search');
+    });
+
+    it('still shows the key form for a successful "no key" answer', async () => {
+      setResponder('mcpDirectory:getSmitheryKeyStatus', () =>
+        ok({ configured: false }),
+      );
+      await createComponent();
+
+      expect(component.keyStatus()).toBe('not-configured');
+      expect(errorAlert()).toBeNull();
+      expect(hostElement.querySelector('input[type="password"]')).toBeTruthy();
+    });
+  });
+
   describe('key configured', () => {
     beforeEach(() => {
       setResponder('mcpDirectory:getSmitheryKeyStatus', () =>

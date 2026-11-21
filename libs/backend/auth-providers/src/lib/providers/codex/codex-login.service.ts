@@ -69,7 +69,13 @@ export class CodexLoginService implements ICodexLoginService {
 
   constructor(private readonly deps: CodexLoginServiceDeps) {
     this.fileExists = deps.fileExists ?? (async path => {
-      try { return (await stat(path)).isFile(); } catch { return false; }
+      try {
+        return (await stat(path)).isFile();
+      } catch {
+        // degradation-audit: optional-capability - fileExists() answers "not
+        // a readable file" as false by contract; callers branch on it.
+        return false;
+      }
     });
     this.killTree = deps.killTree ?? (pid => killProcessTree(pid, 'SIGKILL'));
   }

@@ -28,6 +28,7 @@ import {
   readCopilotToken,
   readCopilotUsername,
 } from '@ptah-extension/auth-providers';
+import type { Logger } from '@ptah-extension/vscode-core';
 
 /** Upper bound on the GitHub `/user` lookup; status polling must stay snappy. */
 const GITHUB_USER_TIMEOUT_MS = 5_000;
@@ -41,6 +42,8 @@ export class CliPlatformAuth implements IPlatformAuthProvider {
    * (revoked, offline, rate-limited) does not re-hit the network on every poll.
    */
   private cachedLogin: { token: string; username: string | null } | null = null;
+
+  constructor(private readonly logger?: Pick<Logger, 'warn'>) {}
 
   async getGitHubUsername(): Promise<string | undefined> {
     const fromFile = await readCopilotUsername();
@@ -90,7 +93,12 @@ export class CliPlatformAuth implements IPlatformAuthProvider {
 
       return typeof login === 'string' && login.length > 0 ? login : null;
     } catch (error: unknown) {
-      void error;
+      // degradation-audit: reported - logged at warn when a logger is passed
+      // (the CLI container passes one); null is cached per token, so this logs
+      // once per token and the caller shows a generic label.
+      this.logger?.warn('[CliPlatformAuth] GitHub /user lookup failed', {
+        errorName: error instanceof Error ? error.name : typeof error,
+      });
       return null;
     }
   }

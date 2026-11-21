@@ -37,6 +37,9 @@ export async function runV2Migration(ptahDir: string): Promise<void> {
   try {
     data = JSON.parse(raw) as Record<string, unknown>;
   } catch {
+    // degradation-audit: reported - a corrupt settings.json skips this
+    // migration; PtahFileSettingsManager.loadSync logs the same unreadable
+    // file at warn when it loads it and starts with empty settings.
     return;
   }
   const modelSelected =

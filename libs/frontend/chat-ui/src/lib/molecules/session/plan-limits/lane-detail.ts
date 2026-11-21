@@ -41,6 +41,8 @@ function zoneOrUtc(timeZone: string | undefined): string | undefined {
     return new Intl.DateTimeFormat('en-US', { timeZone }).resolvedOptions()
       .timeZone;
   } catch {
+    // degradation-audit: optional-capability - an unknown zone renders UTC
+    // by contract, as formatLocalAbsolute does; the time still shows.
     return 'UTC';
   }
 }

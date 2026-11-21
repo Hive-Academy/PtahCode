@@ -78,6 +78,7 @@ const TONE_CLASSES: Readonly<Record<HarnessBadgeTone, string>> = {
       placement="bottom-end"
       [hasBackdrop]="true"
       backdropClass="transparent"
+      [capToViewport]="false"
       (closed)="close()"
     >
       <button

@@ -208,6 +208,8 @@ export class CronStateService {
       this.jobsKey = key;
       this._jobs.set(result.jobs);
     } catch (err) {
+      // degradation-audit: reported - shown to the user through _error; the
+      // error of a stale refresh is dropped because a newer refresh owns the view.
       if (token !== this.refreshSeq) return;
       this._error.set(this.toMessage(err));
     } finally {
@@ -258,6 +260,8 @@ export class CronStateService {
       }
       return result.job;
     } catch (err) {
+      // degradation-audit: reported - shown to the user through _error and
+      // _saveError; the caller gets null and the form stays open.
       this._error.set(this.toMessage(err));
       this._saveError.set(this.toMessage(err));
       return null;
@@ -288,6 +292,8 @@ export class CronStateService {
       }
       return result.job;
     } catch (err) {
+      // degradation-audit: reported - shown to the user through _error and
+      // _saveError; the caller gets null and the form stays open.
       this._error.set(this.toMessage(err));
       this._saveError.set(this.toMessage(err));
       return null;
@@ -309,6 +315,8 @@ export class CronStateService {
       }
       return result.ok;
     } catch (err) {
+      // degradation-audit: reported - shown to the user through _error; the
+      // caller gets false and the row stays in the list.
       this._error.set(this.toMessage(err));
       return false;
     }
@@ -336,6 +344,8 @@ export class CronStateService {
       }
       return result.run;
     } catch (err) {
+      // degradation-audit: reported - shown to the user through _error; the
+      // caller gets null and the run history is unchanged.
       this._error.set(this.toMessage(err));
       return null;
     }

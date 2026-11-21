@@ -31,9 +31,13 @@ import {
   flip,
   shift,
   offset,
+  size,
   autoUpdate,
   Placement,
 } from '@floating-ui/dom';
+
+/** Smallest height (px, 8rem) that a capped panel keeps when the free space on its side is smaller. */
+const CAP_MIN_HEIGHT_PX = 128;
 
 /**
  * Configuration options for positioning floating elements.
@@ -78,6 +82,14 @@ export interface FloatingUIOptions {
    * @default false
    */
   shiftCrossAxis?: boolean;
+
+  /**
+   * Cap the panel height to the free space on the chosen side (floating-ui `size()`). Flip then also picks the side
+   * with the most space (`fallbackStrategy: 'bestFit'`). The cap is `min(var(--ptah-popover-max-h), <free>px)` and
+   * never below 8rem. Leave unset for today's middleware.
+   * @default false
+   */
+  capHeight?: boolean;
 }
 
 /**
@@ -158,11 +170,22 @@ export class FloatingUIService {
       shift: enableShift = true,
       shiftPadding = 8,
       shiftCrossAxis = false,
+      capHeight = false,
       boundary,
     } = options;
-    const middleware = [
+    // Each compute gets its own middleware list, so the size() write checks the liveness of that compute: a
+    // superseded or cancelled compute leaves no stale height on the live panel and writes nothing to a closed one.
+    const middlewareFor = (live: () => boolean) => [
       offset(offsetValue),
-      ...(enableFlip ? [flip({ boundary })] : []),
+      ...(enableFlip
+        ? [
+            flip(
+              capHeight
+                ? { boundary, fallbackStrategy: 'bestFit' as const }
+                : { boundary },
+            ),
+          ]
+        : []),
       ...(enableShift
         ? [
             shift(
@@ -172,14 +195,38 @@ export class FloatingUIService {
             ),
           ]
         : []),
+      ...(capHeight
+        ? [
+            size({
+              boundary,
+              padding: 8,
+              apply: ({ availableHeight, elements }) => {
+                if (!live()) return;
+                const free = Math.max(
+                  CAP_MIN_HEIGHT_PX,
+                  Math.floor(availableHeight),
+                );
+                elements.floating.style.maxHeight = `min(var(--ptah-popover-max-h), ${free}px)`;
+              },
+            }),
+          ]
+        : []),
     ];
     // `fixed` matches the `position: fixed` that applyPosition writes: with the default `absolute`, `x`/`y` carry
     // the page scroll, and a scrolled page put the CLI matrix Cursor panel hundreds of px off. Set it first:
     // floating-ui resolves a fixed element's offset parent from its containing block (a modal box's transform),
     // any other element's from its offsetParent.
     floatingEl.style.position = 'fixed';
-    const config = { placement, middleware, strategy: 'fixed' as const };
-    const { x, y } = await computePosition(referenceEl, floatingEl, config);
+    const configFor = (live: () => boolean) => ({
+      placement,
+      middleware: middlewareFor(live),
+      strategy: 'fixed' as const,
+    });
+    const { x, y } = await computePosition(
+      referenceEl,
+      floatingEl,
+      configFor(() => this.isCurrent(request)),
+    );
     // cleanup() ran or a newer position() started while this one computed: a
     // stale request writes nothing and installs no auto-update, so it can
     // neither leave an observer on a closed panel nor overwrite the live
@@ -193,7 +240,11 @@ export class FloatingUIService {
       const seq = ++this.updateSeq;
       const live = () => this.isCurrent(request) && seq === this.updateSeq;
       try {
-        const result = await computePosition(referenceEl, floatingEl, config);
+        const result = await computePosition(
+          referenceEl,
+          floatingEl,
+          configFor(live),
+        );
         if (live()) this.applyPosition(floatingEl, result.x, result.y);
       } catch (error: unknown) {
         if (!live()) return;

@@ -45,6 +45,7 @@
         placement="bottom-start"
         [hasBackdrop]="true"
         [keepInViewport]="true"
+        [capToViewport]="false"
         backdropClass="transparent"
         (closed)="close()"
         (opened)="editorRef()?.nativeElement?.focus()"

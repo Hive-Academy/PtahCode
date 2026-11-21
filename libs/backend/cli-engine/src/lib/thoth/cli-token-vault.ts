@@ -64,7 +64,15 @@ export class CliTokenVault implements ITokenVault {
       let plaintext = decipher.update(parts[3], 'hex', 'utf-8');
       plaintext += decipher.final('utf-8');
       return plaintext;
-    } catch {
+    } catch (error: unknown) {
+      // degradation-audit: reported - logged through the vault's warn sink
+      // (process warning by default; error name only, never the cipher); the
+      // caller gets null, the ITokenVault "cannot decrypt" answer.
+      this.warn(
+        `[CliTokenVault] Could not decrypt a stored token (${
+          error instanceof Error ? error.name : typeof error
+        }); wrong machine key or damaged data.`,
+      );
       return null;
     }
   }

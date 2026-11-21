@@ -504,6 +504,8 @@ export class OllamaModelDiscoveryService {
 
       return enriched;
     } catch (error) {
+      // degradation-audit: reported - sent to Sentry and logged at warn here;
+      // the caller gets an empty model list.
       this.sentryService.captureException(
         error instanceof Error ? error : new Error(String(error)),
         {

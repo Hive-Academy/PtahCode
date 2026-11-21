@@ -27,7 +27,14 @@ export function readBuildIdentity(
       readFileSync(join(appPath, 'package.json'), 'utf8'),
     );
     return PackageMetadataSchema.parse(raw).ptahBuildIdentity ?? null;
-  } catch {
+  } catch (error: unknown) {
+    // degradation-audit: optional-capability - missing or invalid metadata
+    // means the normal production build by contract (null); file read
+    // failures other than ENOENT are logged at warn and also return null.
+    const code = (error as NodeJS.ErrnoException | null)?.code;
+    if (typeof code === 'string' && code !== 'ENOENT') {
+      console.warn('[BuildIdentity] Could not read package metadata', { code });
+    }
     return null;
   }
 }

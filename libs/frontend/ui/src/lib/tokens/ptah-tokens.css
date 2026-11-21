@@ -42,6 +42,7 @@
   --ptah-icon-xs: 0.75rem;
   --ptah-icon-sm: 0.875rem;
   --ptah-icon-md: 1rem;
+  --ptah-icon-lg: 1.25rem;
 
   /* Type roles: size, leading, weight */
   --ptah-text-page-title-size: 1.25rem;
@@ -418,6 +419,9 @@
   --ptah-card-padding-sm: var(--ptah-space-3);
   --ptah-card-padding-md: var(--ptah-space-4);
   --ptah-card-padding-lg: 1.25rem;
+  --ptah-popover-max-h: min(28rem, calc(100dvh - 2rem));
+  --ptah-modal-max-h: calc(100dvh - 2rem);
+  --ptah-lane-row-h: 3.5rem;
   --ptah-card-gap: var(--ptah-space-3);
   --ptah-card-gap-sm: var(--ptah-space-2);
   /* A valid zero shadow, not "none": the selected ring adds a shadow list. */

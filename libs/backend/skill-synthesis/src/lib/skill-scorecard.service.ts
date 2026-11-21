@@ -91,6 +91,8 @@ export class SkillScorecardService {
         gradedSuccessRate: row.successRate,
       }));
     } catch (error: unknown) {
+      // degradation-audit: reported - logged at warn here; the caller gets an
+      // empty scorecard list, as documented above.
       const message = error instanceof Error ? error.message : String(error);
       this.logger.warn('[skill-synthesis] getPhaseScorecards failed', { error: message });
       return [];

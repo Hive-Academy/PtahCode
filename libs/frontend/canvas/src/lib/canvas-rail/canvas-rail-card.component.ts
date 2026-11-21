@@ -271,6 +271,7 @@ export const SPLIT_ALREADY_FOCUSED_REASON =
           placement="right-start"
           [hasBackdrop]="true"
           backdropClass="transparent"
+          [capToViewport]="false"
           (opened)="onMenuOpened()"
           (closed)="closeMenu()"
         >

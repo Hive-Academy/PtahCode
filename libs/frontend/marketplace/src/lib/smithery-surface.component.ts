@@ -24,6 +24,7 @@ import {
   StorefrontPanelComponent,
   resolveListingBrandSlug,
   type CatalogCardBadge,
+  PtahAlertComponent,
   PtahButtonDirective,
   PtahBadgeDirective,
   PtahInputDirective,
@@ -154,6 +155,7 @@ const VERIFIED_BADGE: CatalogCardBadge = { label: 'Verified', tone: 'info' };
   selector: 'ptah-smithery-surface',
   standalone: true,
   imports: [
+    PtahAlertComponent,
     PtahBadgeDirective,
     PtahButtonDirective,
     PtahInputDirective,
@@ -175,6 +177,26 @@ const VERIFIED_BADGE: CatalogCardBadge = { label: 'Verified', tone: 'info' };
         <div class="flex items-center justify-center py-8">
           <span class="loading loading-spinner loading-md"></span>
         </div>
+      } @else if (keyStatus() === 'error') {
+        <!-- Status check failed: the key may be saved, so no key form here. -->
+        <ptah-alert
+          tone="error"
+          [compact]="true"
+          live="assertive"
+          data-testid="smithery-key-status-error"
+        >
+          <span>{{ keyStatusError() }}</span>
+          <button
+            alertAction
+            ptahButton
+            variant="ghost"
+            size="xs"
+            (click)="retryKeyStatus()"
+            type="button"
+          >
+            Retry
+          </button>
+        </ptah-alert>
       } @else {
         @if (keyStatus() === 'not-configured' || showKeyForm()) {
           <!-- Connect prompt: enter an API key before any browse RPC fires. -->
@@ -692,10 +714,16 @@ export class SmitherySurfaceComponent implements OnInit, OnDestroy {
   /** Curated category chips exposed to the template. */
   protected readonly categories = SMITHERY_CATEGORIES;
 
-  /** 'unknown' until status RPC resolves; gates ALL browse RPC. */
+  /**
+   * 'unknown' until status RPC resolves; gates ALL browse RPC. 'error' means
+   * the status could not be read (a key may still be saved), so the surface
+   * shows a Retry action rather than the API-key form.
+   */
   public readonly keyStatus = signal<
-    'unknown' | 'configured' | 'not-configured'
+    'unknown' | 'configured' | 'not-configured' | 'error'
   >('unknown');
+  /** Why the key status could not be read; set while keyStatus is 'error'. */
+  public readonly keyStatusError = signal<string | null>(null);
 
   public readonly keyInput = signal('');
   public readonly isSavingKey = signal(false);
@@ -844,6 +872,8 @@ export class SmitherySurfaceComponent implements OnInit, OnDestroy {
         );
       }
     } catch {
+      // degradation-audit: reported - shown to the user through keyError; the
+      // key form stays open with its input.
       if (this.destroyed) return;
       this.keyError.set('Failed to save API key');
     } finally {
@@ -885,6 +915,8 @@ export class SmitherySurfaceComponent implements OnInit, OnDestroy {
       this.activeNamespace.set(result.data.activeNamespace);
       this.accountError.set(result.data.error ?? null);
     } catch {
+      // degradation-audit: reported - shown to the user through accountError;
+      // the browse list is left as it is.
       if (this.destroyed) return;
       this.accountError.set('Failed to read Smithery account');
     }
@@ -908,6 +940,8 @@ export class SmitherySurfaceComponent implements OnInit, OnDestroy {
       this.connections.set(result.data.connections);
       this.connectionsError.set(result.data.error ?? null);
     } catch {
+      // degradation-audit: reported - shown to the user through
+      // connectionsError; the browse list is left as it is.
       if (this.destroyed) return;
       this.connectionsError.set('Failed to load Smithery connections');
     }
@@ -948,6 +982,8 @@ export class SmitherySurfaceComponent implements OnInit, OnDestroy {
       }
       await this.loadConnections();
     } catch {
+      // degradation-audit: reported - shown to the user through
+      // connectionsError; the connection row stays unchanged.
       if (this.destroyed) return;
       this.connectionsError.set(
         `Could not open the setup page for ${connection.name}`,
@@ -984,6 +1020,8 @@ export class SmitherySurfaceComponent implements OnInit, OnDestroy {
       this.serverUninstalled.emit(serverKey);
       await Promise.all([this.loadConnections(), this.loadInstalled()]);
     } catch {
+      // degradation-audit: reported - shown to the user through
+      // connectionsError; the connection stays listed.
       if (this.destroyed) return;
       this.connectionsError.set(`Failed to remove ${connection.name}`);
     } finally {
@@ -1166,6 +1204,8 @@ export class SmitherySurfaceComponent implements OnInit, OnDestroy {
         this.detailError.set(result.error ?? 'Failed to load server details');
       }
     } catch {
+      // degradation-audit: reported - shown to the user through detailError;
+      // the setup panel shows no config form.
       if (this.destroyed) return;
       this.detailError.set('Failed to load server details');
     } finally {
@@ -1255,6 +1295,8 @@ export class SmitherySurfaceComponent implements OnInit, OnDestroy {
       // its upstream authorization.
       await Promise.all([this.loadInstalled(), this.loadConnections()]);
     } catch (error: unknown) {
+      // degradation-audit: reported - shown to the user through setupError;
+      // the setup phase returns to idle in finally.
       if (this.destroyed) return;
       this.setupError.set(this.messageOf(error, 'Failed to install server'));
     } finally {
@@ -1291,6 +1333,8 @@ export class SmitherySurfaceComponent implements OnInit, OnDestroy {
         );
       }
     } catch (error: unknown) {
+      // degradation-audit: reported - shown to the user through setupError;
+      // the server stays installed.
       if (this.destroyed) return;
       this.setupError.set(this.messageOf(error, 'Failed to remove server'));
     } finally {
@@ -1333,29 +1377,60 @@ export class SmitherySurfaceComponent implements OnInit, OnDestroy {
 
   // ── Browse / pagination ─────────────────────────────────────────────────────
 
+  /** Public re-entry for the key-status Retry button. */
+  public retryKeyStatus(): void {
+    void this.checkKeyStatus();
+  }
+
   private async checkKeyStatus(): Promise<void> {
+    this.keyStatus.set('unknown');
+    this.keyStatusError.set(null);
+    let configured: boolean;
     try {
       const result = await this.rpc.call(
         'mcpDirectory:getSmitheryKeyStatus',
         {},
       );
       if (this.destroyed) return;
-      const configured = result.isSuccess() && result.data.configured === true;
-      this.keyStatus.set(configured ? 'configured' : 'not-configured');
-      if (configured) {
-        // Four independent reads: the browse list, the manifest, the account
-        // and the connections. None of them gates another.
-        await Promise.all([
-          this.runBrowse(),
-          this.loadInstalled(),
-          this.loadAccount(),
-          this.loadConnections(),
-        ]);
+      if (!result.isSuccess()) {
+        // An error answer says nothing about the key; only a successful
+        // answer may resolve to 'not-configured'.
+        this.failKeyStatus(result.error);
+        return;
       }
-    } catch {
+      configured = result.data.configured === true;
+    } catch (error: unknown) {
+      // degradation-audit: reported - logged at console.warn and shown to the
+      // user through keyStatusError with a Retry action; the key form stays
+      // hidden because a key may already be saved.
       if (this.destroyed) return;
-      this.keyStatus.set('not-configured');
+      console.warn('[SmitherySurface] getSmitheryKeyStatus threw', {
+        errorName: error instanceof Error ? error.name : typeof error,
+      });
+      this.failKeyStatus(undefined);
+      return;
     }
+    this.keyStatus.set(configured ? 'configured' : 'not-configured');
+    if (configured) {
+      // Four independent reads: the browse list, the manifest, the account
+      // and the connections. None of them gates another.
+      await Promise.all([
+        this.runBrowse(),
+        this.loadInstalled(),
+        this.loadAccount(),
+        this.loadConnections(),
+      ]);
+    }
+  }
+
+  /** Enter the 'error' key state with a displayable reason. */
+  private failKeyStatus(reason: string | undefined): void {
+    this.keyStatusError.set(
+      `Could not check the Smithery API key status${
+        reason && reason.trim().length > 0 ? `: ${reason}` : '.'
+      }`,
+    );
+    this.keyStatus.set('error');
   }
 
   /** The query to browse with: free text, else active category, else ''. */
@@ -1385,6 +1460,8 @@ export class SmitherySurfaceComponent implements OnInit, OnDestroy {
         this.servers.set([]);
       }
     } catch {
+      // degradation-audit: reported - shown to the user through browseError;
+      // the server list is emptied.
       if (this.destroyed) return;
       this.browseError.set('Failed to load Smithery servers');
       this.servers.set([]);
@@ -1411,6 +1488,8 @@ export class SmitherySurfaceComponent implements OnInit, OnDestroy {
         this.browseError.set(result.error ?? 'Failed to load more servers');
       }
     } catch {
+      // degradation-audit: reported - shown to the user through browseError;
+      // the loaded pages stay listed.
       if (this.destroyed) return;
       this.browseError.set('Failed to load more servers');
     } finally {
@@ -1437,6 +1516,8 @@ export class SmitherySurfaceComponent implements OnInit, OnDestroy {
         this.servers.set([]);
       }
     } catch {
+      // degradation-audit: reported - shown to the user through browseError;
+      // the server list is emptied.
       if (this.destroyed) return;
       this.browseError.set('Search failed');
       this.servers.set([]);

@@ -44,6 +44,8 @@ import {
   output,
   viewChild,
 } from '@angular/core';
+import { LucideAngularModule, X } from 'lucide-angular';
+import { PtahTooltipDirective } from '../../button/tooltip.directive';
 
 /** Edge the drawer slides in from. */
 export type NativeDrawerSide = 'right' | 'left';
@@ -61,6 +63,7 @@ const FOCUSABLE_SELECTOR = [
 @Component({
   selector: 'ptah-native-drawer',
   standalone: true,
+  imports: [LucideAngularModule, PtahTooltipDirective],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (isOpen()) {
@@ -100,9 +103,11 @@ const FOCUSABLE_SELECTOR = [
                 class="btn btn-ghost btn-sm btn-square -mr-1 flex-shrink-0"
                 data-testid="native-drawer-close"
                 aria-label="Close panel"
+                ptahTooltip="Close panel"
+                [tooltipOnFocus]="false"
                 (click)="requestClose()"
               >
-                <span aria-hidden="true" class="text-base leading-none">×</span>
+                <lucide-angular [img]="XIcon" class="size-4" aria-hidden="true" />
               </button>
             }
           </div>
@@ -195,6 +200,8 @@ const FOCUSABLE_SELECTOR = [
   ],
 })
 export class NativeDrawerComponent implements OnDestroy {
+  protected readonly XIcon = X;
+
   /** Whether the drawer is rendered. Owned by the parent. */
   readonly isOpen = input.required<boolean>();
 

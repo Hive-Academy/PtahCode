@@ -9,15 +9,15 @@
     "@ptah-extension/vscode-core": "0.0.1",
     "@ptah-extension/platform-core": "0.0.1",
     "@ptah-extension/settings-core": "0.0.1",
-    "tsyringe": "^4.10.0",
+    "tsyringe": "*",
     "@ptah-extension/shared": "0.0.1",
     "@ptah-extension/agent-sdk": "0.0.1",
     "@ptah-extension/auth-providers-tokens": "0.0.1",
     "@ptah-extension/codex-runtime": "0.0.1",
-    "@openai/codex": "0.165.0",
-    "axios": "^1.15.0",
-    "zod": "4.6.5",
-    "@types/vscode": "^1.103.0",
-    "which": "^7.0.0"
+    "@openai/codex": "*",
+    "axios": "*",
+    "zod": "*",
+    "@types/vscode": "*",
+    "which": "*"
   }
 }

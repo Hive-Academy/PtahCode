@@ -255,4 +255,21 @@ describe('settleVitalsRpc', () => {
     ]);
     expect(error.mock.calls[2][2]).toEqual({ errorType: 'TypeError' });
   });
+
+  it('answers empty without logging when no workspace is open', async () => {
+    const load = await settleVitalsRpc<{ count: number }, number>(
+      source(),
+      async () =>
+        new RpcResult<{ count: number }>(
+          false,
+          undefined,
+          'No workspace is open.',
+          'WORKSPACE_NOT_OPEN',
+        ),
+      (data) => vitalsReady(data.count),
+    );
+
+    expect(load).toEqual(VITALS_EMPTY);
+    expect(error).not.toHaveBeenCalled();
+  });
 });
