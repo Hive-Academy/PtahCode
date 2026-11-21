@@ -17,6 +17,7 @@
     "@openai/codex": "0.165.0",
     "axios": "^1.15.0",
     "zod": "4.6.5",
-    "@types/vscode": "^1.103.0"
+    "@types/vscode": "^1.103.0",
+    "which": "^7.0.0"
   }
 }

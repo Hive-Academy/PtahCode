@@ -8,6 +8,18 @@ import { createMockLogger } from '@ptah-extension/shared/testing';
 import type { Logger } from '@ptah-extension/vscode-core';
 import { antigravityFailure, type AntigravitySourceFailure, type AntigravityUsageReading } from './antigravity-oauth-plan-usage.reader';
 import { createAntigravityPlanUsageReader, ANTIGRAVITY_CHAIN_TIMEOUT_MS, defaultRequest, readJsonResponse } from './antigravity-plan-usage.reader';
+import type { PlanLimitWindow } from '@ptah-extension/shared';
+import type { AntigravityCliUsageReader } from './antigravity-cli-usage.adapter';
+
+// The default CLI source would spawn a real `agy`; every reader here gets this fake.
+const cliRead = jest.fn<ReturnType<AntigravityCliUsageReader>, Parameters<AntigravityCliUsageReader>>();
+jest.mock('./antigravity-cli-usage.adapter', () => ({
+  createAntigravityCliUsageReader: () => cliRead,
+}));
+beforeEach(() => {
+  cliRead.mockReset();
+  cliRead.mockResolvedValue({ ok: false, cause: 'cli-not-found' });
+});
 
 const owner = quotaOwnerRefFromKey('antigravity#cli-store:fixture');
 const target = { providerId: 'antigravity', ownerRef: owner };
@@ -20,22 +32,125 @@ function setup(oauth: AntigravityUsageReading = antigravityFailure('provider-api
   const logger = createMockLogger();
   const run = jest.fn(async () => processes);
   const readOAuth = jest.fn(async () => oauth);
+  const readStore = jest.fn(() => owner);
   const reader = createAntigravityPlanUsageReader(logger as Partial<Logger> as Logger, Date.now,
-    run, response, observe, readOAuth, () => owner);
-  return { reader, logger, run, readOAuth };
+    run, response, observe, readOAuth, readStore);
+  return { reader, logger, run, readOAuth, readStore };
 }
 
 describe('Antigravity source chain', () => {
-  it('does not consult the account store for the disabled CLI', async () => {
-    const readStore = jest.fn(() => owner);
+  it('skips the CLI when the signed-in store account is a different account', async () => {
+    const readStore = jest.fn(() => quotaOwnerRefFromKey(accountOwnerKey('antigravity', 'other')));
     const reader = createAntigravityPlanUsageReader(createMockLogger() as Partial<Logger> as Logger, () => 1,
       async () => processOutput, async () => ({}), () => owner.key,
       async () => antigravityFailure('provider-api', 'missing-token-file'), readStore);
     const result = await reader({ target: { providerId: 'antigravity',
       ownerRef: quotaOwnerRefFromKey(accountOwnerKey('antigravity', 'fixture')) }, refresh: true, allowCliFallback: true });
+    expect(readStore).toHaveBeenCalled();
+    expect(cliRead).not.toHaveBeenCalled();
+    expect(result.statusReason).toBe('account-unverified');
+    expect(result.sourceFailures).toContainEqual(expect.objectContaining({ source: 'cli-command', cause: 'account-mismatch' }));
+  });
+  it('returns CLI windows for the matching account and checks the store again after the run', async () => {
+    const account = quotaOwnerRefFromKey(accountOwnerKey('antigravity', 'fixture'));
+    const readStore = jest.fn(() => account);
+    const windows: PlanLimitWindow[] = [{ key: 'other:cli-fixture-weekly', kind: 'weekly', label: 'Fixture · Weekly',
+      used: { kind: 'percent', percent: 40 }, observedAt: 5 }];
+    cliRead.mockResolvedValue({ ok: true, windows, readAt: 5 });
+    const reader = createAntigravityPlanUsageReader(createMockLogger() as Partial<Logger> as Logger, Date.now,
+      async () => '', async () => ({}), () => owner.key,
+      async () => antigravityFailure('provider-api', 'missing-token-file'), readStore);
+    const result = await reader({ target: { providerId: 'antigravity', ownerRef: account }, refresh: true,
+      allowCliFallback: true });
+    expect(result).toMatchObject({ status: 'available', windowSetEstablished: true, windows, fetchedAt: 5 });
+    expect(readStore).toHaveBeenCalledTimes(2);
+    expect(cliRead).toHaveBeenCalledWith(expect.objectContaining({ ownerKey: account.key,
+      accountFingerprint: account.key }));
+    expect(cliRead.mock.calls[0][0].deadline).toBeLessThanOrEqual(Date.now() + ANTIGRAVITY_CHAIN_TIMEOUT_MS);
+  });
+  it('rejects CLI windows when the store account changes during the run', async () => {
+    const account = quotaOwnerRefFromKey(accountOwnerKey('antigravity', 'fixture'));
+    const readStore = jest.fn().mockReturnValueOnce(account)
+      .mockReturnValue(quotaOwnerRefFromKey(accountOwnerKey('antigravity', 'other')));
+    cliRead.mockResolvedValue({ ok: true, windows: [], readAt: 5 });
+    const reader = createAntigravityPlanUsageReader(createMockLogger() as Partial<Logger> as Logger, Date.now,
+      async () => '', async () => ({}), () => owner.key,
+      async () => antigravityFailure('provider-api', 'missing-token-file'), readStore);
+    const result = await reader({ target: { providerId: 'antigravity', ownerRef: account }, refresh: true,
+      allowCliFallback: true });
+    expect(result.status).toBe('service-unavailable');
+    expect(result.sourceFailures).toContainEqual(expect.objectContaining({ source: 'cli-command', cause: 'account-mismatch' }));
+  });
+  it.each([
+    ['cli-model-turn', 'cli-parse-failed'], ['cli-timeout', 'cli-timeout'], ['cli-backoff', 'cli-backoff'],
+    ['cli-busy', 'cli-unavailable'],
+  ] as const)('records CLI cause %s as %s', async (cause, reason) => {
+    cliRead.mockResolvedValue({ ok: false, cause });
+    const { reader } = setup();
+    const result = await reader({ target, refresh: true, allowCliFallback: true });
+    expect(result.sourceFailures).toContainEqual({ source: 'cli-command', cause, reason });
+  });
+  it('never runs the CLI without allowCliFallback or for a credential owner', async () => {
+    const { reader, readStore } = setup();
+    await reader({ target, refresh: true });
+    await reader({ target: { providerId: 'antigravity',
+      ownerRef: quotaOwnerRefFromKey('antigravity#credential:fixture') }, refresh: true, allowCliFallback: true });
+    expect(cliRead).not.toHaveBeenCalled();
     expect(readStore).not.toHaveBeenCalled();
-    expect(result.statusReason).toBe('balance-unavailable');
-    expect(result.sourceFailures).toContainEqual(expect.objectContaining({ source: 'cli-command', cause: 'source-unavailable' }));
+  });
+  it('rejects and discards CLI windows when a cli-store target gains a sign-in during the run', async () => {
+    const readStore = jest.fn().mockReturnValueOnce(owner)
+      .mockReturnValue(quotaOwnerRefFromKey(accountOwnerKey('antigravity', 'new-sign-in')));
+    const discard = jest.fn();
+    cliRead.mockResolvedValue({ ok: true, windows: [], readAt: 5, discard });
+    const reader = createAntigravityPlanUsageReader(createMockLogger() as Partial<Logger> as Logger, Date.now,
+      async () => '', async () => ({}), () => owner.key,
+      async () => antigravityFailure('provider-api', 'missing-token-file'), readStore);
+    const result = await reader({ target, refresh: true, allowCliFallback: true });
+    expect(result.status).toBe('service-unavailable');
+    expect(result.statusReason).toBe('account-unverified');
+    expect(result.sourceFailures).toContainEqual(expect.objectContaining({ source: 'cli-command', cause: 'account-mismatch' }));
+    expect(readStore).toHaveBeenCalledTimes(2);
+    expect(discard).toHaveBeenCalledTimes(1);
+  });
+  it('discards rejected account windows so a switch back reads the CLI again', async () => {
+    const account = quotaOwnerRefFromKey(accountOwnerKey('antigravity', 'fixture'));
+    const other = quotaOwnerRefFromKey(accountOwnerKey('antigravity', 'other'));
+    const readStore = jest.fn().mockReturnValueOnce(account).mockReturnValueOnce(other).mockReturnValue(account);
+    const discard = jest.fn();
+    const windows: PlanLimitWindow[] = [{ key: 'other:oauth', kind: 'weekly', label: 'Weekly',
+      used: { kind: 'percent', percent: 20 }, observedAt: 6 }];
+    cliRead.mockResolvedValueOnce({ ok: true, windows: [], readAt: 5, discard })
+      .mockResolvedValueOnce({ ok: true, windows, readAt: 6 });
+    const reader = createAntigravityPlanUsageReader(createMockLogger() as Partial<Logger> as Logger, Date.now,
+      async () => '', async () => ({}), () => owner.key,
+      async () => antigravityFailure('provider-api', 'missing-token-file'), readStore);
+    const request = { target: { providerId: 'antigravity', ownerRef: account }, refresh: true, allowCliFallback: true };
+    expect((await reader(request)).statusReason).toBe('account-unverified');
+    expect(discard).toHaveBeenCalledTimes(1);
+    expect(await reader(request)).toMatchObject({ status: 'available', windows, fetchedAt: 6 });
+    expect(cliRead).toHaveBeenCalledTimes(2);
+  });
+  it('promotes an actionable CLI cause over absent direct sources only', async () => {
+    cliRead.mockResolvedValue({ ok: false, cause: 'cli-not-found' });
+    expect((await setup().reader({ target, refresh: true, allowCliFallback: true })).statusReason).toBe('cli-not-found');
+    expect((await setup().reader({ target, refresh: true })).statusReason).toBe('no-oauth');
+    const oauth = antigravityFailure('provider-api', 'invalid-grant');
+    const substantive = await setup(oauth).reader({ target, refresh: true, allowCliFallback: true });
+    expect(substantive.statusReason).toBe(oauth.statusReason);
+    expect(substantive.sourceFailures).toContainEqual(expect.objectContaining({ source: 'cli-command', cause: 'cli-not-found' }));
+    cliRead.mockResolvedValue({ ok: false, cause: 'cli-exit-error' });
+    const exited = await setup().reader({ target, refresh: true, allowCliFallback: true });
+    expect(exited.statusReason).toBe(antigravityFailure('cli-command', 'cli-exit-error').statusReason);
+    expect(exited.statusReason).not.toBe('no-oauth');
+  });
+  it('keeps an OAuth success when the CLI would fail', async () => {
+    const windows: PlanLimitWindow[] = [{ key: 'other:oauth', kind: 'weekly', label: 'Weekly',
+      used: { kind: 'percent', percent: 10 }, observedAt: 1 }];
+    cliRead.mockResolvedValue({ ok: false, cause: 'cli-exit-error' });
+    const { reader } = setup({ status: 'available', fetchedAt: 1, windowSetEstablished: true, windows });
+    expect(await reader({ target, refresh: true, allowCliFallback: true })).toMatchObject({ status: 'available', windows });
+    expect(cliRead).not.toHaveBeenCalled();
   });
   it('reports timeout when lsof exhausts discovery with no extension port', async () => {
     jest.useFakeTimers();
@@ -56,7 +171,7 @@ describe('Antigravity source chain', () => {
     for (let attempt = 0; attempt < 2; attempt++) {
       expect(await reader({ target, refresh: true, allowCliFallback: true })).toMatchObject({
         status: 'service-unavailable', windowSetEstablished: false, windows: [],
-        sourceFailures: [{ cause: 'missing-token-file' }, { cause: 'missing-local-server' }, { cause: 'source-unavailable' }],
+        sourceFailures: [{ cause: 'missing-token-file' }, { cause: 'missing-local-server' }, { cause: 'cli-not-found' }],
       });
     }
     expect(readOAuth).toHaveBeenCalledTimes(2);
@@ -88,7 +203,7 @@ describe('Antigravity source chain', () => {
     const { reader, run } = setup(antigravityFailure('provider-api', 'invalid-grant', 400));
     expect(await reader({ target, refresh: true, allowCliFallback: true })).toMatchObject({
       status: 'service-unavailable', statusReason: 'usage-auth-rejected',
-      sourceFailures: [{ cause: 'invalid-grant', httpStatus: 400 }, { cause: 'missing-local-server' }, { cause: 'source-unavailable' }],
+      sourceFailures: [{ cause: 'invalid-grant', httpStatus: 400 }, { cause: 'missing-local-server' }, { cause: 'cli-not-found' }],
     });
     expect(run).toHaveBeenCalled();
   });

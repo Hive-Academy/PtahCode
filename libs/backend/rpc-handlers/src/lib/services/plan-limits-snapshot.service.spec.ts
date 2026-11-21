@@ -446,6 +446,38 @@ describe('PlanLimitsSnapshotService', () => {
     }
   });
 
+  it('allows the CLI usage fallback for an Antigravity owner read', async () => {
+    const s = build();
+    const antigravity: QuotaOwnerRef = {
+      key: 'antigravity#cli-store:d4',
+      providerId: 'antigravity',
+      identityKind: 'cli-store',
+      label: 'Antigravity account',
+    };
+    s.discoverTargets.mockResolvedValue([
+      { kind: 'read', origin: 'cli-store', target: { providerId: 'antigravity', ownerRef: antigravity } },
+    ]);
+
+    await s.service.snapshot({});
+
+    expect(s.getOwnerSnapshot).toHaveBeenCalledWith(
+      { providerId: 'antigravity', ownerRef: antigravity },
+      expect.objectContaining({ allowCliFallback: true }),
+    );
+  });
+
+  it('does not set the CLI usage fallback for a provider outside the fallback set', async () => {
+    const s = build();
+    s.discoverTargets.mockResolvedValue([
+      { kind: 'read', origin: 'cli-store', target: { providerId: 'opencode', ownerRef: OPENCODE } },
+    ]);
+
+    await s.service.snapshot({});
+
+    expect(s.getOwnerSnapshot).toHaveBeenCalledTimes(1);
+    expect(s.getOwnerSnapshot.mock.calls[0][1]).not.toHaveProperty('allowCliFallback');
+  });
+
   it('a provider lookup reads only the selected-provider owner and keeps the push scope', async () => {
     const s = build();
     await s.service.snapshot({ providerId: 'claude-cli' });

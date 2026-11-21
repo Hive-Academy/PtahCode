@@ -67,4 +67,45 @@ describe('parseAntigravityUsageJson', () => {
     expect(first?.map((window) => window.key).sort()).toEqual(second?.map((window) => window.key).sort());
     expect(first?.[0].key).toBe('other:cli-placeholder-one-weekly');
   });
+  it('reads the current CLI shape without a type and with buckets', () => {
+    const body = JSON.stringify({ command: { name: 'usage', data: { groups: [{
+      name: 'Placeholder Group', buckets: [
+        { window: 'weekly', remaining_fraction: 0.25 },
+        { window: '5h', remaining_fraction: 0.75 },
+      ],
+    }] } } });
+    const result = parseAntigravityUsageJson(body, 1);
+    expect(result?.map((window) => [window.kind, window.used])).toEqual([
+      ['weekly', { kind: 'percent', percent: 75 }],
+      ['five_hour', { kind: 'percent', percent: 25 }],
+    ]);
+  });
+  it('rejects a result type and a different command name', () => {
+    const groups = [group([{ kind: 'weekly', remaining_fraction: 0.5 }])];
+    expect(parseAntigravityUsageJson(JSON.stringify({ type: 'result', command: {
+      name: 'usage', data: { groups } } }), 1)).toBeUndefined();
+    expect(parseAntigravityUsageJson(JSON.stringify({ type: 'command', command: {
+      name: 'help', data: { groups } } }), 1)).toBeUndefined();
+  });
+  it('rejects an envelope that reports a failure beside valid buckets', () => {
+    const command = { name: 'usage', data: { groups: [group([{ kind: 'weekly', remaining_fraction: 0.5 }])] } };
+    for (const envelope of [{ status: 'ERROR' }, { status: 'error' }, { status: 'failed' }, { is_error: true }]) {
+      expect(parseAntigravityUsageJson(JSON.stringify({ ...envelope, command }), 1)).toBeUndefined();
+    }
+    expect(parseAntigravityUsageJson(JSON.stringify({ status: 'success', is_error: false, num_turns: 0, command }), 1))
+      .toHaveLength(1);
+  });
+  it('rejects a turn count that is not a non-negative integer', () => {
+    const command = { name: 'usage', data: { groups: [group([{ kind: 'weekly', remaining_fraction: 0.5 }])] } };
+    for (const num_turns of [-1, 0.5, '0']) {
+      expect(parseAntigravityUsageJson(JSON.stringify({ num_turns, command }), 1)).toBeUndefined();
+    }
+  });
+  it('still reads the legacy command shape and the live num_turns shape', () => {
+    const rows = [{ kind: 'weekly', remaining_fraction: 0.5 }];
+    expect(parseAntigravityUsageJson(output([group(rows)]), 1)).toHaveLength(1);
+    expect(parseAntigravityUsageJson(JSON.stringify({ num_turns: 0, command: { name: 'usage', data: { groups: [
+      { name: 'Placeholder Group', buckets: [{ window: '5h', remaining_fraction: 0.9 }] },
+    ] } } }), 1)).toHaveLength(1);
+  });
 });

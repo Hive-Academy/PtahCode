@@ -6,6 +6,7 @@ import { z } from 'zod';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type { PlanLimitWindow, PlanWindowKind } from '@ptah-extension/shared';
 import type { PlanUsageReading, UsageFailureReason, UsageSourceLabel } from './plan-usage-reader.types';
+import type { AntigravityCliFailureCause } from './antigravity-cli-usage.adapter';
 
 const TokenSchema = z.object({
   client_id: z.string().min(1),
@@ -53,7 +54,7 @@ export interface AntigravitySourceFailure {
   readonly reason: UsageFailureReason;
   readonly cause: 'missing-token-file' | 'invalid-grant' | 'http-rejection' |
     'schema-mismatch' | 'timeout' | 'missing-local-server' | 'account-mismatch' |
-    'request-failed' | 'source-unavailable';
+    'request-failed' | 'source-unavailable' | AntigravityCliFailureCause;
   readonly httpStatus?: number;
 }
 export type AntigravityUsageReading = PlanUsageReading & {
@@ -69,7 +70,11 @@ export function antigravityFailure(
     : cause === 'schema-mismatch' || cause === 'http-rejection' ? 'balance-unavailable'
     : cause === 'timeout' ? 'usage-budget-exhausted'
     : cause === 'missing-local-server' ? 'no-local-server'
-    : cause === 'account-mismatch' ? 'account-unverified' : 'cli-unavailable';
+    : cause === 'account-mismatch' ? 'account-unverified'
+    : cause === 'cli-model-turn' ? 'cli-parse-failed'
+    : cause === 'cli-not-found' || cause === 'cli-timeout' || cause === 'cli-exit-error' ||
+      cause === 'cli-parse-failed' || cause === 'cli-backoff' || cause === 'cli-not-signed-in' ? cause
+    : 'cli-unavailable';
   return { status: 'service-unavailable',
     statusReason: reason,
     windowSetEstablished: false, windows: [],
