@@ -91,7 +91,9 @@ describe('firstByteTimeoutEnv (TASK_2026_2288 A)', () => {
     it('prefers the provider value to the host process value', () => {
       process.env[SDK_FIRST_BYTE_TIMEOUT_ENV] = '240000';
       expect(
-        buildSafeEnv({ [SDK_FIRST_BYTE_TIMEOUT_ENV]: '200000' })[
+        buildSafeEnv({
+          [SDK_FIRST_BYTE_TIMEOUT_ENV]: '200000',
+        } as Parameters<typeof buildSafeEnv>[0])[
           SDK_FIRST_BYTE_TIMEOUT_ENV
         ],
       ).toBe('200000');
