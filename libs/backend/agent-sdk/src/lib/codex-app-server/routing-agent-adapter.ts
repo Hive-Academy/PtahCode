@@ -1,4 +1,5 @@
 import {
+  getProviderSessionProfile,
   type AgentModelInfo,
   type IAgentAdapter,
   type RuntimeHostCapabilities,
@@ -8,6 +9,13 @@ import {
   resolveSessionRuntimeIdentity,
   type SessionRuntimeIdentityLookup,
 } from './session-runtime-identity';
+
+/**
+ * A provider-session chat whose adapter is not bound, or whose profile this
+ * host does not list, is refused instead of being served on the Claude SDK.
+ */
+export const PROVIDER_SESSION_CHAT_UNAVAILABLE_MESSAGE =
+  'Provider-session chat is not available on this host.';
 
 export class ChatRuntimeAdmissionError extends Error {
   readonly code = 'runtime-admission-mismatch';
@@ -34,18 +42,26 @@ export interface NativeChatAdapter extends IAgentAdapter {
   listSessionModels(sessionId: SessionId): Promise<readonly AgentModelInfo[]>;
 }
 
+const CODEX_UNAVAILABLE_MESSAGE =
+  'Codex chat requires a host with the native Codex runtime.';
+
+type AdmittedRuntime = 'claude-sdk' | 'codex-app-server' | 'provider-session';
+
 /** Capability is supplied by composition from the parity gate / DS1 override.
  * It is an admission hint only: CodexChatAdapter still uses the gated resolver.
+ * `native` is the Codex adapter. Either native adapter is null when its
+ * runtime is not bound on this host.
  */
 export class RoutingAgentAdapter implements IAgentAdapter {
   constructor(
     private readonly identities: SessionRuntimeIdentityLookup,
     private readonly legacy: IAgentAdapter,
-    private readonly native: NativeChatAdapter,
+    private readonly native: NativeChatAdapter | null,
     private readonly admission: RuntimeAdmissionPort,
     private readonly capabilities: RuntimeHostCapabilities = {
       nativeCodex: false,
     },
+    private readonly providerSessions: NativeChatAdapter | null = null,
   ) {}
 
   get providerId() {
@@ -59,9 +75,13 @@ export class RoutingAgentAdapter implements IAgentAdapter {
   }
   dispose(): void {
     try {
-      this.native.dispose();
+      this.native?.dispose();
     } finally {
-      this.legacy.dispose();
+      try {
+        this.providerSessions?.dispose();
+      } finally {
+        this.legacy.dispose();
+      }
     }
   }
   preloadSdk(): Promise<void> {
@@ -77,7 +97,11 @@ export class RoutingAgentAdapter implements IAgentAdapter {
     return this.legacy.getHealth();
   }
   async reset(): Promise<void> {
-    await Promise.all([this.legacy.reset(), this.native.reset()]);
+    await Promise.all([
+      this.legacy.reset(),
+      this.native?.reset(),
+      this.providerSessions?.reset(),
+    ]);
   }
   getSupportedModels(): ReturnType<IAgentAdapter['getSupportedModels']> {
     return this.legacy.getSupportedModels();
@@ -91,9 +115,10 @@ export class RoutingAgentAdapter implements IAgentAdapter {
   async startChatSession(
     ...args: Parameters<IAgentAdapter['startChatSession']>
   ): ReturnType<IAgentAdapter['startChatSession']> {
-    const preparedRuntime = args[0].runtime;
+    const config = args[0];
+    const preparedRuntime = config.runtime;
     const nativeEnabled =
-      args[0].consumer === 'gateway'
+      config.consumer === 'gateway'
         ? this.capabilities.nativeCodexGateway === true
         : this.capabilities.nativeCodex === true;
     if (preparedRuntime) {
@@ -101,8 +126,19 @@ export class RoutingAgentAdapter implements IAgentAdapter {
         preparedRuntime === 'codex-app-server' &&
         (!nativeEnabled || !this.native || !this.admission)
       ) {
+        throw new ChatRuntimeAdmissionError(CODEX_UNAVAILABLE_MESSAGE);
+      }
+      // Mirrors the Codex `nativeEnabled` gate: refused before admission
+      // resolves, so an unresolved serving provider cannot bypass A9 or the
+      // host's profile listing.
+      if (
+        preparedRuntime === 'provider-session' &&
+        (!this.providerSessions ||
+          config.consumer === 'gateway' ||
+          !this.capabilities.providerSessions?.length)
+      ) {
         throw new ChatRuntimeAdmissionError(
-          'Codex chat requires a host with the native Codex runtime.',
+          PROVIDER_SESSION_CHAT_UNAVAILABLE_MESSAGE,
         );
       }
       if (!this.admission) {
@@ -110,22 +146,12 @@ export class RoutingAgentAdapter implements IAgentAdapter {
           'Chat runtime admission is unavailable.',
         );
       }
-      const provider = await this.admission.servingProviderId(args[0]);
-      if (provider === 'openai-codex' && (!nativeEnabled || !this.native)) {
-        throw new ChatRuntimeAdmissionError(
-          'Codex chat requires a host with the native Codex runtime.',
-        );
-      }
-      const admittedRuntime =
-        nativeEnabled && provider === 'openai-codex'
-          ? 'codex-app-server'
-          : 'claude-sdk';
+      const provider = await this.admission.servingProviderId(config);
+      const admittedRuntime = this.admit(provider, config, nativeEnabled);
       if (provider !== undefined && preparedRuntime !== admittedRuntime) {
         throw new ChatRuntimeAdmissionError();
       }
-      return (
-        preparedRuntime === 'codex-app-server' ? this.native : this.legacy
-      ).startChatSession(...args);
+      return this.startAdapter(preparedRuntime).startChatSession(...args);
     }
     // Admission lookup failures propagate: a failed workspace lookup is not consent to switch runtimes.
     if (!this.admission) {
@@ -133,14 +159,10 @@ export class RoutingAgentAdapter implements IAgentAdapter {
         'Chat runtime admission is unavailable.',
       );
     }
-    const provider = await this.admission.servingProviderId(args[0]);
-    const useNative = provider === 'openai-codex';
-    if (useNative && (!nativeEnabled || !this.native)) {
-      throw new ChatRuntimeAdmissionError(
-        'Codex chat requires a host with the native Codex runtime.',
-      );
-    }
-    return (useNative ? this.native : this.legacy).startChatSession(...args);
+    const provider = await this.admission.servingProviderId(config);
+    return this.startAdapter(
+      this.admit(provider, config, nativeEnabled),
+    ).startChatSession(...args);
   }
   resumeSession(
     ...args: Parameters<IAgentAdapter['resumeSession']>
@@ -166,10 +188,13 @@ export class RoutingAgentAdapter implements IAgentAdapter {
     >[0],
   ): () => void {
     const unsubscribeLegacy = this.legacy.onQueuedFollowUpState?.(listener);
-    const unsubscribeNative = this.native.onQueuedFollowUpState?.(listener);
+    const unsubscribeNative = this.native?.onQueuedFollowUpState?.(listener);
+    const unsubscribeProviderSessions =
+      this.providerSessions?.onQueuedFollowUpState?.(listener);
     return () => {
       unsubscribeLegacy?.();
       unsubscribeNative?.();
+      unsubscribeProviderSessions?.();
     };
   }
   withdrawQueuedFollowUp(
@@ -206,8 +231,11 @@ export class RoutingAgentAdapter implements IAgentAdapter {
   }
   /** Confirms a published native thread id, excluding opening tab ids. */
   resolveLiveSessionId(callerId: string): SessionId | undefined {
-    const resolved = this.native?.resolveLiveSessionId?.(callerId);
-    return resolved === callerId ? resolved : undefined;
+    for (const native of [this.native, this.providerSessions]) {
+      const resolved = native?.resolveLiveSessionId?.(callerId);
+      if (resolved === callerId) return resolved;
+    }
+    return undefined;
   }
   getSessionToken(
     ...args: Parameters<IAgentAdapter['getSessionToken']>
@@ -253,13 +281,15 @@ export class RoutingAgentAdapter implements IAgentAdapter {
     ...args: Parameters<IAgentAdapter['setSessionIdResolvedCallback']>
   ): void {
     this.legacy.setSessionIdResolvedCallback(...args);
-    this.native.setSessionIdResolvedCallback(...args);
+    this.native?.setSessionIdResolvedCallback(...args);
+    this.providerSessions?.setSessionIdResolvedCallback(...args);
   }
   setResultStatsCallback(
     ...args: Parameters<IAgentAdapter['setResultStatsCallback']>
   ): void {
     this.legacy.setResultStatsCallback(...args);
-    this.native.setResultStatsCallback(...args);
+    this.native?.setResultStatsCallback(...args);
+    this.providerSessions?.setResultStatsCallback(...args);
   }
   setCompactionStartCallback(
     ...args: Parameters<IAgentAdapter['setCompactionStartCallback']>
@@ -285,38 +315,103 @@ export class RoutingAgentAdapter implements IAgentAdapter {
   }
 
   listSessionModels(sessionId: SessionId): Promise<readonly AgentModelInfo[]> {
-    return this.adapter(sessionId) === this.native
-      ? this.native.listSessionModels(sessionId)
-      : this.legacy.getSupportedModels();
+    const adapter = this.adapter(sessionId);
+    if (this.native && adapter === this.native)
+      return this.native.listSessionModels(sessionId);
+    if (this.providerSessions && adapter === this.providerSessions)
+      return this.providerSessions.listSessionModels(sessionId);
+    return this.legacy.getSupportedModels();
+  }
+
+  /**
+   * Runtime the serving provider is admitted to on this host. Refuses a
+   * native provider whose runtime is not bound or not enabled here.
+   */
+  private admit(
+    provider: string | undefined,
+    config: Parameters<IAgentAdapter['startChatSession']>[0],
+    nativeEnabled: boolean,
+  ): AdmittedRuntime {
+    if (provider === undefined) return 'claude-sdk';
+    const profile = getProviderSessionProfile(provider);
+    if (profile !== undefined) {
+      // A9: messaging-gateway turns never run on a provider session.
+      if (
+        config.consumer === 'gateway' ||
+        !this.providerSessions ||
+        !this.capabilities.providerSessions?.includes(profile)
+      ) {
+        throw new ChatRuntimeAdmissionError(
+          PROVIDER_SESSION_CHAT_UNAVAILABLE_MESSAGE,
+        );
+      }
+      return 'provider-session';
+    }
+    if (provider === 'openai-codex') {
+      if (!nativeEnabled || !this.native)
+        throw new ChatRuntimeAdmissionError(CODEX_UNAVAILABLE_MESSAGE);
+      return 'codex-app-server';
+    }
+    return 'claude-sdk';
+  }
+
+  private startAdapter(runtime: AdmittedRuntime): IAgentAdapter {
+    switch (runtime) {
+      case 'codex-app-server':
+        if (!this.native)
+          throw new ChatRuntimeAdmissionError(CODEX_UNAVAILABLE_MESSAGE);
+        return this.native;
+      case 'provider-session':
+        if (!this.providerSessions)
+          throw new ChatRuntimeAdmissionError(
+            PROVIDER_SESSION_CHAT_UNAVAILABLE_MESSAGE,
+          );
+        return this.providerSessions;
+      case 'claude-sdk':
+        return this.legacy;
+      default: {
+        const unsupported: never = runtime;
+        throw new Error(`Unsupported session runtime: ${unsupported}`);
+      }
+    }
   }
 
   private adapter(id: SessionId, startsOrChangesChat = false): IAgentAdapter {
     if (this.native?.owns(id)) return this.native;
+    if (this.providerSessions?.owns(id)) return this.providerSessions;
     const identity = resolveSessionRuntimeIdentity(this.identities, id);
     if (
       startsOrChangesChat &&
       identity?.providerId === 'openai-codex' &&
       identity.runtime !== 'codex-app-server'
     ) {
-      throw new ChatRuntimeAdmissionError(
-        'Codex chat requires a host with the native Codex runtime.',
-      );
+      throw new ChatRuntimeAdmissionError(CODEX_UNAVAILABLE_MESSAGE);
     }
-    if (identity?.runtime === 'codex-app-server' && !this.native) {
-      throw new ChatRuntimeAdmissionError(
-        'Codex chat requires a host with the native Codex runtime.',
-      );
-    }
-    const runtime = identity?.runtime;
-    switch (runtime) {
+    if (!identity) return this.legacy;
+    switch (identity.runtime) {
       case 'codex-app-server':
+        if (!this.native)
+          throw new ChatRuntimeAdmissionError(CODEX_UNAVAILABLE_MESSAGE);
         return this.native;
       case 'claude-sdk':
-      case undefined:
         return this.legacy;
+      case 'provider-session':
+        // A start or change also needs this host to list the stored profile.
+        if (
+          !this.providerSessions ||
+          (startsOrChangesChat &&
+            !this.capabilities.providerSessions?.includes(
+              identity.providerSession.profile,
+            ))
+        ) {
+          throw new ChatRuntimeAdmissionError(
+            PROVIDER_SESSION_CHAT_UNAVAILABLE_MESSAGE,
+          );
+        }
+        return this.providerSessions;
       default: {
-        const unsupported: never = runtime;
-        throw new Error(`Unsupported session runtime: ${unsupported}`);
+        const unsupported: never = identity;
+        throw new Error(`Unsupported session runtime: ${String(unsupported)}`);
       }
     }
   }

@@ -21,6 +21,7 @@ import {
   isToolUseBlock,
   isToolResultBlock,
   isInterruptSentinelText,
+  isSyntheticNoResponsePlaceholder,
 } from '../types/sdk-types/claude-sdk.types';
 import { generateEventId } from './message-transform-helpers';
 import { toTurnStateEvent } from '../helpers/session-turn-state.registry';
@@ -101,6 +102,14 @@ export class AssistantMessageTransformer {
     ) {
       helpers.logger.debug(
         '[SdkMessageTransformer] Skipping SDK interrupt sentinel message',
+        { messageId },
+      );
+      return [];
+    }
+
+    if (isSyntheticNoResponsePlaceholder(message)) {
+      helpers.logger.debug(
+        '[SdkMessageTransformer] Skipping SDK synthetic no-response placeholder',
         { messageId },
       );
       return [];

@@ -3,20 +3,17 @@ import {
   Component,
   computed,
   input,
+  output,
   signal,
 } from '@angular/core';
 import { RouterLink } from '@angular/router';
 import { NgTemplateOutlet } from '@angular/common';
 import {
-  CLAUDE_CODE_INSTALL_COMMANDS,
   CLAUDE_CODE_SETUP_DOCS_URL,
   CLAUDE_CODE_SIGN_IN_COMMAND,
-  CODEX_INSTALL_COMMANDS,
   CODEX_SETUP_DOCS_URL,
   codexTerminalLoginCommand,
   onboardingReadyTarget,
-  type ClaudeCodeInstallCommand,
-  type ClaudeCodeInstallTab,
 } from '@ptah-extension/core';
 import { CodexSignInBlockComponent } from '@ptah-extension/chat';
 import {
@@ -27,29 +24,22 @@ import {
   Download,
   ExternalLink,
   Info,
+  ListChecks,
   Loader,
   LogIn,
   LucideAngularModule,
   type LucideIconData,
 } from 'lucide-angular';
 import { CommandCopyRowComponent } from './command-copy-row.component';
+import { ConnectionOptionHeadingComponent } from './connection-option-heading.component';
+import type { ConnectionOption, ConnectionRole } from './connection-options';
+import { InstallGuideModalComponent } from './install-guide-modal.component';
 import type {
   ProviderReadinessView,
   ProviderReadinessState,
 } from './provider-readiness.derive';
 import { PtahButtonDirective } from '@ptah-extension/ui';
 
-const OS_TABS: readonly { id: ClaudeCodeInstallTab; label: string }[] = [
-  { id: 'unix', label: 'macOS / Linux' },
-  { id: 'windows', label: 'Windows' },
-  { id: 'npm', label: 'npm' },
-];
-const COPY_LABELS: Record<ClaudeCodeInstallCommand['id'], string> = {
-  unix: 'Copy macOS and Linux install command',
-  powershell: 'Copy Windows PowerShell install command',
-  cmd: 'Copy Windows CMD install command',
-  npm: 'Copy npm install command',
-};
 const CHIP: Record<
   ProviderReadinessState,
   { label: string; icon: LucideIconData; tone: string }
@@ -80,44 +70,33 @@ const CHIP: Record<
     LucideAngularModule,
     CommandCopyRowComponent,
     CodexSignInBlockComponent,
+    ConnectionOptionHeadingComponent,
+    InstallGuideModalComponent,
     PtahButtonDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  host: { class: 'block' },
+  host: { class: 'block h-full' },
   template: `
     <section
-      class="rounded-[22px] border p-5 max-[480px]:p-4"
+      class="h-full rounded-[22px] border p-5 max-[480px]:p-4"
       [class.border-primary]="role() === 'main'"
       [class.bg-base-200]="role() === 'main'"
       [class.border-base-300]="role() !== 'main'"
       [class.bg-base-100]="role() !== 'main'"
-      [attr.data-testid]="
-        view().provider === 'claude-cli'
-          ? 'ready-claude-panel'
-          : 'ready-codex-panel'
-      "
+      [attr.data-testid]="option().panelTestId"
       [attr.data-state]="view().state"
       [attr.aria-busy]="view().state === 'checking' || view().state === 'slow'"
     >
-      <header class="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 class="text-lg font-semibold">{{ name() }}</h2>
-          <p class="text-sm text-base-content-muted">
-            The <span class="font-mono">{{ commandName() }}</span> command on
-            this computer
-          </p>
-          @if (role() === 'main') {
-            <span
-              class="rounded-full border border-primary px-2 text-xs font-semibold"
-              >Main connection</span
-            >
-          } @else if (role() === 'information') {
-            <span
-              class="rounded-full border border-base-300 px-2 text-xs text-base-content-muted"
-              >Not your main connection</span
-            >
-          }
-        </div>
+      <header class="flex flex-col gap-3">
+        <ptah-connection-option-heading
+          [option]="option()"
+          [connectionRole]="role()"
+          [headingLevel]="2"
+        />
+        <div
+          class="flex flex-wrap items-center gap-[var(--ptah-gap-controls)]"
+          data-testid="ready-panel-status-row"
+        >
         <span
           class="inline-flex items-center gap-1.5 rounded-full border border-base-300 px-2.5 py-0.5 text-xs font-medium"
           [class]="
@@ -126,6 +105,7 @@ const CHIP: Record<
               : chip().tone
           "
           data-glass-surface="tile"
+          data-testid="ready-panel-status"
         >
           <lucide-angular
             [img]="
@@ -139,6 +119,23 @@ const CHIP: Record<
             aria-hidden="true"
           />{{ chip().label }}
         </span>
+        @if (installVisible()) {
+          <button
+            ptahButton
+            [variant]="role() === 'information' ? 'ghost' : 'outline'"
+            type="button"
+            aria-haspopup="dialog"
+            data-testid="ready-install-open"
+            (click)="installOpen.set(true)"
+          >
+            <lucide-angular
+              [img]="icons.install"
+              class="size-4"
+              aria-hidden="true"
+            />How to install
+          </button>
+        }
+        </div>
       </header>
       <dl
         class="mt-4 grid grid-cols-[8rem_1fr] gap-x-4 gap-y-2 text-sm max-[480px]:grid-cols-1 max-[480px]:gap-y-1"
@@ -194,85 +191,6 @@ const CHIP: Record<
       <ng-template #help>
         @if (view().provider === 'claude-cli') {
           @switch (view().state) {
-            @case ('missing') {
-              <div
-                class="mt-5 border-t border-base-300 pt-4"
-                data-testid="ready-install-block"
-              >
-                <h3 class="font-semibold">Install Claude Code</h3>
-                <p class="mt-1 text-sm text-base-content-muted">
-                  Open a terminal, paste the command for your system, press
-                  Enter. The installer prints nothing while it downloads. When
-                  the prompt returns, press Re-check.
-                </p>
-                <div
-                  role="tablist"
-                  aria-label="Operating system"
-                  class="mt-3 inline-flex gap-1 rounded-full border border-base-300 p-1"
-                  data-testid="ready-os-tablist"
-                >
-                  @for (tab of osTabs; track tab.id; let i = $index) {
-                    <button
-                      type="button"
-                      role="tab"
-                      class="min-h-8 rounded-full px-3 text-sm"
-                      [class.bg-base-300]="osTab() === tab.id"
-                      [class.font-semibold]="osTab() === tab.id"
-                      [id]="'ready-os-tab-' + tab.id"
-                      [attr.aria-controls]="'ready-os-panel-' + tab.id"
-                      [attr.aria-selected]="osTab() === tab.id"
-                      [attr.tabindex]="osTab() === tab.id ? 0 : -1"
-                      (click)="osTab.set(tab.id)"
-                      (keydown)="onOsTabKey($event, i)"
-                    >
-                      {{ tab.label }}
-                    </button>
-                  }
-                </div>
-                @for (tab of osTabs; track tab.id) {
-                  <div
-                    role="tabpanel"
-                    tabindex="0"
-                    class="mt-3 grid gap-2"
-                    [id]="'ready-os-panel-' + tab.id"
-                    [attr.aria-labelledby]="'ready-os-tab-' + tab.id"
-                    [hidden]="osTab() !== tab.id"
-                    [attr.data-testid]="'ready-os-panel-' + tab.id"
-                  >
-                    @for (row of commandsFor(tab.id); track row.id) {
-                      <p class="text-xs text-base-content-muted">
-                        {{ row.label }}
-                      </p>
-                      <ptah-command-copy-row
-                        [command]="row.command"
-                        [copyLabel]="copyLabels[row.id]"
-                      />
-                    }
-                  </div>
-                }
-                <p class="mt-4 text-sm text-base-content-muted">
-                  Still not found after installing? Open a new terminal, and if
-                  Re-check keeps failing, restart Ptah so it picks up the
-                  updated PATH.
-                </p>
-                <a
-                  ptahButton
-                  variant="ghost"
-                  class="mt-2"
-                  [href]="docsUrl"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  data-testid="ready-docs-link"
-                >
-                  Open the official install guide
-                  <lucide-angular
-                    [img]="icons.externalLink"
-                    class="size-4"
-                    aria-hidden="true"
-                  />
-                </a>
-              </div>
-            }
             @case ('signed-out') {
               <div
                 class="mt-5 border-t border-base-300 pt-4"
@@ -345,68 +263,7 @@ const CHIP: Record<
             }
           }
         } @else {
-          @if (view().state === 'missing' && view().source !== 'bundled') {
-            <div
-              class="mt-5 border-t border-base-300 pt-4"
-              data-testid="ready-install-block"
-            >
-              <h3 class="font-semibold">Install Codex</h3>
-              <div
-                role="tablist"
-                aria-label="Install method for Codex"
-                class="mt-3 inline-flex gap-1 rounded-full border border-base-300 p-1"
-              >
-                @for (tab of codexTabs; track tab.id; let i = $index) {
-                  <button
-                    type="button"
-                    role="tab"
-                    class="min-h-8 rounded-full px-3 text-sm"
-                    [id]="'codex-tab-' + tab.id"
-                    [attr.aria-controls]="'codex-panel-' + tab.id"
-                    [attr.aria-selected]="codexTab() === tab.id"
-                    [attr.tabindex]="codexTab() === tab.id ? 0 : -1"
-                    (click)="codexTab.set(tab.id)"
-                    (keydown)="onCodexTabKey($event, i)"
-                  >
-                    {{ tab.label }}
-                  </button>
-                }
-              </div>
-              @for (tab of codexTabs; track tab.id) {
-                <div
-                  role="tabpanel"
-                  tabindex="0"
-                  [id]="'codex-panel-' + tab.id"
-                  [attr.aria-labelledby]="'codex-tab-' + tab.id"
-                  [hidden]="codexTab() !== tab.id"
-                >
-                  @for (row of codexCommandsFor(tab.id); track row.id) {
-                    <p class="mt-3 text-xs text-base-content-muted">
-                      {{ row.label }}
-                    </p>
-                    <ptah-command-copy-row
-                      [command]="row.command"
-                      [copyLabel]="'Copy ' + row.label + ' install command'"
-                    />
-                  }
-                </div>
-              }
-              <p class="mt-4 text-sm text-base-content-muted">
-                Still not found after installing? Open a new terminal, and if
-                Re-check keeps failing, restart Ptah so it picks up the updated
-                PATH.
-              </p>
-              <a
-                ptahButton
-                variant="ghost"
-                class="mt-2"
-                [href]="codexDocsUrl"
-                target="_blank"
-                rel="noopener noreferrer"
-                >Open the official Codex install guide</a
-              >
-            </div>
-          } @else if (showCodexSignIn()) {
+          @if (showCodexSignIn()) {
             <div
               class="mt-5 border-t border-base-300 pt-4"
               data-testid="ready-sign-in-block"
@@ -452,27 +309,39 @@ const CHIP: Record<
           }
         }
       </ng-template>
+      @if (installVisible()) {
+        <ptah-install-guide-modal
+          [option]="option()"
+          [open]="installOpen()"
+          (closed)="installOpen.set(false)"
+          (recheck)="onInstallRecheck()"
+        />
+      }
     </section>
   `,
 })
 export class ProviderPanelComponent {
+  readonly option = input.required<ConnectionOption>();
   readonly view = input.required<ProviderReadinessView>();
-  readonly role = input.required<'main' | 'information' | 'neutral'>();
+  readonly role = input.required<ConnectionRole>();
   readonly platform = input.required<string>();
+  /** Re-check was pressed inside the install dialog. */
+  readonly recheck = output<void>();
   protected readonly icons = {
     externalLink: ExternalLink,
     info: Info,
     minus: CircleMinus,
+    install: ListChecks,
   } as const;
   protected readonly chip = computed(() => CHIP[this.view().state]);
-  protected readonly name = computed(() =>
-    this.view().provider === 'claude-cli' ? 'Claude Code' : 'Codex',
+  protected readonly name = computed(() => this.option().name);
+  protected readonly commandName = computed(() => this.option().commandName);
+  /** The install dialog is open. */
+  protected readonly installOpen = signal(false);
+  /** The provider is not installed, so "How to install" is offered. */
+  protected readonly installVisible = computed(
+    () => this.view().state === 'missing' && this.view().source !== 'bundled',
   );
-  protected readonly commandName = computed(() =>
-    this.view().provider === 'claude-cli' ? 'claude' : 'codex',
-  );
-  protected readonly osTabs = OS_TABS;
-  protected readonly copyLabels = COPY_LABELS;
   protected readonly docsUrl = CLAUDE_CODE_SETUP_DOCS_URL;
   protected readonly signInCommand = CLAUDE_CODE_SIGN_IN_COMMAND;
   protected readonly accountsLink = {
@@ -487,12 +356,6 @@ export class ProviderPanelComponent {
       'claude-accounts',
     ).queryParams,
   };
-  protected readonly osTab = signal<ClaudeCodeInstallTab>('unix');
-  protected readonly codexTab = signal<'npm' | 'brew'>('npm');
-  protected readonly codexTabs = [
-    { id: 'npm' as const, label: 'npm' },
-    { id: 'brew' as const, label: 'Homebrew' },
-  ];
   protected readonly codexDocsUrl = CODEX_SETUP_DOCS_URL;
   protected readonly terminalCommand = computed(() => {
     const view = this.view();
@@ -511,7 +374,6 @@ export class ProviderPanelComponent {
   );
   protected readonly helpVisible = computed(
     () =>
-      this.view().state === 'missing' ||
       this.view().state === 'signed-out' ||
       this.view().state === 'stale' ||
       this.view().state === 'error',
@@ -540,30 +402,9 @@ export class ProviderPanelComponent {
       ? `${name} did not answer in time. Your sign-in could not be read.`
       : `Ptah could not ask this computer about ${name}.`;
   });
-  protected commandsFor(
-    tab: ClaudeCodeInstallTab,
-  ): readonly ClaudeCodeInstallCommand[] {
-    return CLAUDE_CODE_INSTALL_COMMANDS.filter((row) => row.tab === tab);
-  }
-  protected codexCommandsFor(tab: 'npm' | 'brew') {
-    return CODEX_INSTALL_COMMANDS.filter((row) => row.tab === tab);
-  }
-  protected onOsTabKey(event: KeyboardEvent, index: number): void {
-    const step =
-      event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
-    if (!step) return;
-    event.preventDefault();
-    const next = (index + OS_TABS.length + step) % OS_TABS.length;
-    this.osTab.set(OS_TABS[next].id);
-    (event.currentTarget as HTMLElement).parentElement?.querySelectorAll<HTMLElement>('[role="tab"]')[next]?.focus();
-  }
-  protected onCodexTabKey(event: KeyboardEvent, index: number): void {
-    const step =
-      event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0;
-    if (!step) return;
-    event.preventDefault();
-    const next = (index + this.codexTabs.length + step) % this.codexTabs.length;
-    this.codexTab.set(this.codexTabs[next].id);
-    (event.currentTarget as HTMLElement).parentElement?.querySelectorAll<HTMLElement>('[role="tab"]')[next]?.focus();
+  /** Close the dialog first, so focus returns to its opener, then re-read. */
+  protected onInstallRecheck(): void {
+    this.installOpen.set(false);
+    this.recheck.emit();
   }
 }

@@ -21,3 +21,11 @@ defaults/instances), `evidence/3.png` (Advanced), `evidence/4.png` (Claude Code 
 
 ## Phase flow
 review (2 lanes, findings) -> user checkpoint -> design/prototype -> Gate 1.7 -> batch -> implement -> review -> visual-review -> completion
+
+## Delivery phases
+
+| Phase | Task ID | Pull request | State |
+|---|---|---|---|
+| 1. Shared UI primitives | TASK_2026_2285_304a | #1447 | merged (c67cd3e51) |
+| 2. Advanced page + Claude Code tools & skills | TASK_2026_2285_304a | #1449 | merged (cbcb22ff4) |
+| 3. Providers > Lanes + modals | TASK_2026_2285_304a | PR 3 (branch `feat/settings-lanes-modals`) | in review |

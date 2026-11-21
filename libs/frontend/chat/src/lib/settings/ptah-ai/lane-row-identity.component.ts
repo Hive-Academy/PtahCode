@@ -1,30 +1,37 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  computed,
   input,
-  output,
   ViewEncapsulation,
 } from '@angular/core';
-import type { CliLaneDefaults } from '@ptah-extension/shared';
+import { isCliProcessDump, type CliLaneDefaults } from '@ptah-extension/shared';
 import {
-  PtahButtonDirective,
   ProviderMarkComponent,
   PtahTableRowTitleComponent,
 } from '@ptah-extension/ui';
 import { cliMarkFor } from '@ptah-extension/chat-ui';
 import type { LaneTableRow } from './lanes-table.component';
-import { LaneDefaultWarningComponent } from './lanes-table-status.component';
+import {
+  LaneDefaultWarningComponent,
+  LaneStatusIconComponent,
+} from './lanes-table-status.component';
 
+/**
+ * The Lane cell of a lanes table row. Always two lines: the name with its kind badge, then the
+ * version (CLI agent) or the provider (Ptah CLI), or `--` when there is none, so every row has
+ * the same height.
+ */
 @Component({
   selector: 'ptah-lane-row-identity',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   encapsulation: ViewEncapsulation.None,
   imports: [
-    PtahButtonDirective,
     ProviderMarkComponent,
     PtahTableRowTitleComponent,
     LaneDefaultWarningComponent,
+    LaneStatusIconComponent,
   ],
   styles: `
     ptah-lane-row-identity {
@@ -32,6 +39,14 @@ import { LaneDefaultWarningComponent } from './lanes-table-status.component';
       position: relative;
       container-type: inline-size;
       min-width: 0;
+      /* Badge text inks. The theme tokens give 4.5:1 or more on the dark card surfaces. */
+      --ptah-kind-cli-ink: oklch(var(--in));
+      --ptah-kind-ptah-ink: oklch(var(--s));
+    }
+    /* On the light surfaces the info and secondary tokens are below 4.5:1, so the ink is a darker shade. */
+    [data-theme-mode='light'] ptah-lane-row-identity {
+      --ptah-kind-cli-ink: #1d4ed8;
+      --ptah-kind-ptah-ink: #7a5900;
     }
     ptah-lane-row-identity .ptah-table-row-title-secondary[class] {
       font-size: 0.75rem;
@@ -61,24 +76,28 @@ import { LaneDefaultWarningComponent } from './lanes-table-status.component';
     }
     ptah-lane-row-identity .ptah-table-row-title-kind {
       flex-shrink: 0;
-    }
-    ptah-lane-row-identity
-      .lane-install-guide[data-ptah-button]:is(.btn, #ptah-button) {
-      position: static;
-      display: block;
-      width: fit-content;
-      max-width: 100%;
-      margin: 0;
-      padding: 0;
-      line-height: 1rem;
-      min-height: 1rem;
-      height: auto;
-      font-size: 0.75rem;
+      padding: 0 var(--ptah-gap-inline);
+      border: 1px solid var(--ptah-card-border);
+      border-radius: var(--ptah-radius-chip);
+      font-size: var(--ptah-text-caption-size);
+      font-weight: 400;
       white-space: nowrap;
     }
-    ptah-lane-row-identity[data-uninstalled='true']
-      .ptah-table-row-title-secondary {
-      visibility: hidden;
+    ptah-lane-row-identity .ptah-table-row-title-kind.kind-cli {
+      color: var(--ptah-kind-cli-ink);
+      border-color: color-mix(
+        in oklab,
+        var(--ptah-kind-cli-ink) 50%,
+        transparent
+      );
+    }
+    ptah-lane-row-identity .ptah-table-row-title-kind.kind-ptah {
+      color: var(--ptah-kind-ptah-ink);
+      border-color: color-mix(
+        in oklab,
+        var(--ptah-kind-ptah-ink) 55%,
+        transparent
+      );
     }
     ptah-lane-row-identity[data-collapsed='true'] .ptah-table-row-title-kind {
       position: static;
@@ -87,15 +106,6 @@ import { LaneDefaultWarningComponent } from './lanes-table-status.component';
       justify-self: start;
       line-height: 1rem;
       font-family: var(--ptah-font-sans);
-    }
-    ptah-lane-row-identity[data-collapsed='true']
-      .ptah-table-row-title-secondary[class] {
-      margin-left: 5rem;
-      max-width: calc(100% - 5rem);
-    }
-    ptah-lane-row-identity
-      ptah-table-row-title:not(:has(.ptah-table-row-title-secondary)) {
-      justify-content: center;
     }
     ptah-lane-row-identity[data-collapsed='true'] ptah-table-row-title {
       height: auto;
@@ -112,10 +122,6 @@ import { LaneDefaultWarningComponent } from './lanes-table-status.component';
     ptah-lane-row-identity[data-collapsed='true'] ptah-lane-default-warning {
       flex: 0 0 auto;
     }
-    ptah-lane-row-identity[data-collapsed='true']
-      .ptah-table-row-title-secondary[class] {
-      display: none;
-    }
     ptah-lane-row-identity[data-collapsed='true'] .ptah-table-row-title-name {
       white-space: nowrap;
       overflow: visible;
@@ -131,7 +137,8 @@ import { LaneDefaultWarningComponent } from './lanes-table-status.component';
         line-height: 1rem;
         font-family: var(--ptah-font-sans);
       }
-      ptah-lane-row-identity .ptah-table-row-title-secondary[class] {
+      ptah-lane-row-identity:not([data-collapsed='true'])
+        .ptah-table-row-title-secondary[class] {
         margin-left: 5rem;
         max-width: calc(100% - 5rem);
       }
@@ -139,29 +146,15 @@ import { LaneDefaultWarningComponent } from './lanes-table-status.component';
   `,
   host: {
     '[attr.data-collapsed]': 'collapsed()',
-    '[attr.data-uninstalled]':
-      "row().kind === 'system' && row().status.kind === 'not-installed'",
   },
   template: ` @let row = this.row();
     <ptah-table-row-title
       [attr.data-testid]="
         row.kind === 'system' && row.versionLabel ? 'cli-matrix-version' : null
       "
-      [attr.title]="
-        row.name +
-        (row.kind === 'system' && row.versionLabel
-          ? ' - ' + row.versionLabel
-          : '')
-      "
+      [attr.title]="row.name + (versionTitle() ? ' - ' + versionTitle() : '')"
       [name]="row.name"
-      [kind]="row.kind === 'system' ? 'CLI agent' : 'Ptah CLI'"
-      [secondary]="
-        collapsed()
-          ? ''
-          : row.kind === 'system'
-            ? row.versionLabel || ''
-            : row.provider
-      "
+      [secondary]="secondLine()"
       [mono]="row.kind === 'system'"
     >
       <ptah-provider-mark
@@ -170,31 +163,52 @@ import { LaneDefaultWarningComponent } from './lanes-table-status.component';
         fallback="Terminal"
         size="sm"
       />
+      @if (statusIcon()) {
+        <ptah-lane-status-icon
+          ptahRowInfo
+          [status]="row.status"
+          [label]="row.status.label"
+        />
+      } @else {
+        <span
+          ptahRowInfo
+          class="ptah-table-row-title-kind"
+          [class.kind-cli]="row.kind === 'system'"
+          [class.kind-ptah]="row.kind === 'instance'"
+          >{{ row.kind === 'system' ? 'CLI agent' : 'Ptah CLI' }}</span
+        >
+      }
       <ptah-lane-default-warning
         ptahRowInfo
         [row]="row"
         [saved]="row.kind === 'system' ? defaults()?.[row.cli] : undefined"
       />
-    </ptah-table-row-title>
-    @if (collapsed() && row.status.kind === 'not-installed') {
-      <button
-        type="button"
-        ptahButton
-        variant="link"
-        size="xs"
-        noPadding
-        class="lane-install-guide"
-        (click)="installGuideRequested.emit()"
-      >
-        Install guide
-      </button>
-    }`,
+    </ptah-table-row-title>`,
 })
 export class LaneRowIdentityComponent {
   readonly row = input.required<LaneTableRow>();
   readonly collapsed = input(false);
-  readonly installGuideRequested = output<void>();
+  /**
+   * The narrowest table has no Status column and no kind badge: the state icon then stands beside the name
+   * (with the status as its accessible name) in place of the badge.
+   */
+  readonly statusIcon = input(false);
   readonly defaults = input<CliLaneDefaults>();
+  /** Line 2 is never blank, so a row with no version or provider keeps the two-line height. */
+  protected readonly secondLine = computed(() => {
+    const row = this.row();
+    return (row.kind === 'system' ? row.versionLabel : row.provider) || '--';
+  });
+  /**
+   * P-42: the tooltip keeps the full version line as the CLI printed it ("GitHub Copilot CLI 1.0.83.") while line 2
+   * shows the short label. A banner or multi-line probe output is never a tooltip: the short label stands in for it.
+   */
+  protected readonly versionTitle = computed(() => {
+    const row = this.row();
+    if (row.kind !== 'system' || !row.versionLabel) return '';
+    const full = row.version?.trim();
+    return full && !isCliProcessDump(full) ? full : row.versionLabel;
+  });
   protected markId(providerId: string): string {
     const mark = cliMarkFor('ptah-cli', providerId);
     return mark.kind === 'provider' ? mark.providerId : 'ptah-cli';

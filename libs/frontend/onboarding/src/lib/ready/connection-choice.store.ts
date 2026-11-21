@@ -2,6 +2,7 @@ import { Injectable, computed, inject, signal } from '@angular/core';
 import { AuthStateService, ProvidersSettingsStateService, defaultMainConnectionTarget, mainConnectionTargetWritable } from '@ptah-extension/core';
 import type { ProviderKind, SelectionView } from './provider-readiness.derive';
 import { ProviderReadinessStore } from './provider-readiness.store';
+import { CONNECTION_OPTIONS, connectionOption, isConnectionOptionId } from './connection-options';
 
 export type ChoiceNotice = 6 | 7 | 8 | 9 | 10 | 11 | 12 | null;
 
@@ -70,11 +71,12 @@ export class ConnectionChoiceStore {
   }
 
   nameForPending(): string {
-    return this.pending() === 'openai-codex' ? 'Codex' : 'Claude Code';
+    const pending = this.pending();
+    return pending ? connectionOption(pending).name : CONNECTION_OPTIONS[0].name;
   }
 
   name(selection: SelectionView = this.saved()): string {
-    return selection.kind === 'claude-cli' ? 'Claude Code' : selection.kind === 'openai-codex' ? 'Codex'
+    return isConnectionOptionId(selection.kind) ? connectionOption(selection.kind).name
       : selection.kind === 'other' ? selection.name : 'your previous connection';
   }
 }

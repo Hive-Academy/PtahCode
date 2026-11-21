@@ -176,7 +176,8 @@ function formatValue(
         } @else if (headingStyle() === 'section') {
           <!-- 'section': the shared form section of Context Management (title and description at the left, the
                group at the right); the sr-only span keeps the aria-labelledby id. -->
-          <ptah-form-section wide [heading]="group.title" [description]="group.description">
+          <!-- Glass on with its own plane: the card owns the inset, so the form section has no block padding. -->
+          <ptah-form-section wide [heading]="group.title" [description]="group.description" [flushInGlass]="contentSurface()">
             <span class="sr-only" [id]="idPrefix() + '-heading'">{{ group.title }}</span>
             @if (group.id === 'context-budgets') {
               <p aside class="text-xs text-base-content-muted">Agent limits apply even when compaction is off.</p>
@@ -239,6 +240,8 @@ function formatValue(
                     <ptah-setting-row
                       [label]="setting.label"
                       [controlId]="'advanced-setting-' + setting.key"
+                      [controlAlign]="rowLayout() === 'aligned' ? 'end' : 'start'"
+                      [edgePadding]="rowLayout() === 'aligned' ? 'trim' : 'all'"
                     >
                       @if (setting.apply === 'restart') {
                         <span
@@ -378,9 +381,6 @@ function formatValue(
     .number-grid {
       grid-template-columns: repeat(auto-fill, minmax(min(100%, max(var(--ptah-field-grid-min-md), calc((100% - 2 * var(--ptah-gap-field)) / 3))), 1fr));
     }
-    :host-context([data-glass='on']) [data-glass-surface='content'] {
-      padding: 1.25rem;
-    }
   `,
 })
 export class AdvancedSettingsGroupComponent implements OnInit {
@@ -389,6 +389,11 @@ export class AdvancedSettingsGroupComponent implements OnInit {
   readonly contentSurface = input(true);
   /** 'section' matches the sentence-case section headings of the Context Management tab; 'caps' is the group label. */
   readonly headingStyle = input<'caps' | 'section' | 'hidden'>('caps');
+  /**
+   * 'aligned': each switch row has its control at the right edge and trimmed edge padding (the Fine-tuning rows of
+   * the Advanced page). 'default' keeps the row rendering of the Codex drawer and Context Management.
+   */
+  readonly rowLayout = input<'default' | 'aligned'>('default');
   private readonly vscode = inject(VSCodeService);
   /** The page toast: every write's outcome (with Undo after a save) is said there. */
   private readonly feedback = inject(SettingsSaveFeedbackService);

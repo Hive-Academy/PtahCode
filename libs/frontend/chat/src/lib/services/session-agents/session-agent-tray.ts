@@ -226,6 +226,11 @@ export function fromBackground(
       durationMs: rec?.durationMs ?? bg.duration,
       totalTokens: rec?.totalTokens,
       status,
+      ...(status === 'stopped' &&
+        bg.stoppedBy !== undefined && {
+          stoppedBy: bg.stoppedBy,
+          stopReason: bg.stopReason,
+        }),
       steerable: isRunning && !!bg.sessionId,
       stoppable: isRunning && !!taskId && !!bg.sessionId,
       canBackground: false,

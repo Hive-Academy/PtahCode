@@ -1,201 +1,87 @@
 <div
-  class="mb-2 [container-type:inline-size]"
+  class="policy-host [container-type:inline-size]"
   role="group"
   aria-label="Orchestration policy"
   data-testid="settings-section-orchestration-policy"
 >
-  <!-- Keep one policy row; the strip measures whole chips in the remaining space. -->
+  <!-- One read-only order line under the Lanes header (P-7); the strip measures whole chips in the row. -->
   <div
-    class="policy-bar flex flex-wrap items-center gap-2.5 text-xs text-base-content"
+    class="policy-bar flex items-center text-xs text-base-content"
     data-testid="orchestration-policy-bar"
   >
-    <div class="flex shrink-0 items-center gap-1.5">
-      <ptah-field label="Max Concurrent" size="sm" class="w-48">
-        <input
-          ptahInput
-          size="sm"
-          id="agent-max-concurrent"
-          type="number"
-          min="1"
-          max="100"
-          step="1"
-          inputmode="numeric"
-          [class]="'w-full font-mono text-xs ' + focusRing"
-          [value]="maxConcurrent() ?? ''"
-          [disabled]="maxConcurrent() === null || !canWrite()"
-          aria-label="Max concurrent agents (1 to 100)"
-          data-testid="policy-max-concurrent-input"
-          (change)="saveMaxConcurrent($event)"
-      /></ptah-field>
-    </div>
-
-    <div class="policy-trailing">
-      <div
-        class="policy-order-group relative flex min-w-0 flex-1 items-center gap-1.5"
+    <div class="policy-order-group relative flex min-w-0 flex-1 items-center">
+      <span
+        class="policy-order-label shrink-0 whitespace-nowrap text-sm font-medium text-base-content-muted"
+        aria-hidden="true"
+        >Order:</span
       >
+      @if (chips().length) {
+        <!-- Read-only chips (the prototype's row). Only whole chips that fit are shown, then "+N" for the rest
+             (Batch 53.4, B38-4: never a chip cut mid-glyph). The sr-only line names the whole order for screen readers;
+             the order is edited in the table's Reorder mode (R-3). -->
+        <span class="sr-only" data-testid="policy-order-summary">{{
+          orderSummary()
+        }}</span>
         <span
-          class="policy-order-label shrink-0 whitespace-nowrap text-sm font-medium text-base-content-muted"
+          #orderStrip
+          class="policy-order-strip flex min-w-0 flex-1 items-center overflow-hidden text-xs"
           aria-hidden="true"
-          >Order:</span
+          data-testid="policy-order"
         >
-        @if (chips().length) {
-          <!-- Read-only chips (the prototype's row). Only whole chips that fit are shown, then "+N" for the rest
-                 (Batch 53.4, B38-4: never a chip cut mid-glyph). The Edit button names the whole order for screen readers,
-                 and its popover lists it. -->
-          <span
-            #orderStrip
-            class="flex min-w-0 flex-1 items-center gap-1 overflow-hidden text-xs"
-            aria-hidden="true"
-            data-testid="policy-order"
-          >
-            @for (
-              chip of shownChips();
-              track chip.id;
-              let i = $index, first = $first
-            ) {
-              @if (!first) {
-                <span class="shrink-0 text-xs text-base-content-muted">→</span>
-              }
-              <span
-                [class]="chipClass"
-                [class.text-base-content]="chip.enabled"
-                [class.text-base-content-muted]="!chip.enabled"
-                [attr.data-testid]="'policy-order-chip-' + chip.id"
-                >{{ i + 1 }}. {{ chip.name }}</span
-              >
+          @for (
+            chip of shownChips();
+            track chip.id;
+            let i = $index, first = $first
+          ) {
+            @if (!first) {
+              <span class="shrink-0 text-xs text-base-content-muted">→</span>
             }
-            @if (hiddenCount()) {
-              @if (shownChips().length) {
-                <span class="shrink-0 text-xs text-base-content-muted">→</span>
-              }
-              <span
-                [class]="chipClass + ' text-base-content'"
-                [title]="orderSummary()"
-                data-testid="policy-order-more"
-                >+{{ hiddenCount() }}</span
-              >
-            }
-          </span>
-          <!-- Measuring copy of every chip (invisible, out of the flow): the widths decide how many whole chips fit.
-                 Clipped to the strip: an invisible box still counts as scrollable overflow, and the full chain is wider
-                 than the glass shell's narrower Settings scroller at 1024 px (a page-wide horizontal scrollbar). -->
-          <span
-            #orderMeasure
-            class="pointer-events-none invisible absolute left-0 top-0 flex max-w-full items-center gap-1 overflow-hidden whitespace-nowrap text-xs"
-            aria-hidden="true"
-          >
-            <span data-measure="arrow" class="text-xs">→</span>
-            @for (chip of chips(); track chip.id; let i = $index) {
-              <span data-measure="chip" [class]="chipClass"
-                >{{ i + 1 }}. {{ chip.name }}</span
-              >
-            }
-            <span data-measure="more" [class]="chipClass"
-              >+{{ chips().length }}</span
+            <span
+              [class]="chipClass"
+              [class.text-base-content]="chip.enabled"
+              [class.text-base-content-muted]="!chip.enabled"
+              [attr.data-testid]="'policy-order-chip-' + chip.id"
+              >{{ i + 1 }}. {{ chip.name }}</span
             >
-          </span>
-          <ptah-native-popover
-            class="shrink-0"
-            [isOpen]="orderOpen()"
-            placement="bottom-end"
-            [keepInViewport]="true"
-            [hasBackdrop]="true"
-            backdropClass="transparent"
-            (closed)="closeOrder()"
-            (opened)="focusOrderTitle()"
-          >
-            <button
-              trigger
-              type="button"
-              ptahIconButton
-              [label]="orderSummary() + '. Edit order'"
-              [tooltipOnFocus]="!orderFocusReturning()"
-              aria-haspopup="dialog"
-              [attr.aria-expanded]="orderOpen()"
-              (click)="toggleOrder()"
-              data-testid="policy-order-edit"
-            >
-              <lucide-angular
-                [img]="EditIcon"
-                class="h-3.5 w-3.5"
-                aria-hidden="true"
-              />
-            </button>
-            @if (orderOpen()) {
-              <div
-                content
-                role="dialog"
-                aria-labelledby="policy-order-title"
-                class="flex w-[16rem] max-w-[calc(100vw-2rem)] max-h-[calc(100vh_-_var(--ptah-space-8))] flex-col gap-[var(--ptah-gap-controls)] overflow-y-auto p-[var(--ptah-gap-heading)]"
-                data-testid="policy-order-popover"
-              >
-                <div
-                  class="flex items-center justify-between gap-[var(--ptah-gap-controls)] border-b border-base-300 pb-[var(--ptah-gap-label)]"
-                >
-                  <!-- A plain title, not a heading: the popover sits in the page outline below the tab heading (axe heading-order). -->
-                  <p
-                    id="policy-order-title"
-                    tabindex="-1"
-                    class="text-xs font-bold text-base-content"
-                  >
-                    Preferred order
-                  </p>
-                  <button
-                    type="button"
-                    ptahIconButton
-                    label="Close"
-                    (click)="closeOrder()"
-                  >
-                    <lucide-angular
-                      [img]="CloseIcon"
-                      class="h-3.5 w-3.5"
-                      aria-hidden="true"
-                    />
-                  </button>
-                </div>
-                <ptah-lane-order-list
-                  [chips]="chips()"
-                  [canReorder]="canReorder()"
-                  (reorder)="savePreferredOrder($event)"
-                />
-              </div>
+          }
+          @if (hiddenCount()) {
+            @if (shownChips().length) {
+              <span class="shrink-0 text-xs text-base-content-muted">→</span>
             }
-          </ptah-native-popover>
-        } @else {
-          <span
-            class="text-xs text-base-content-muted"
-            data-testid="policy-order-empty"
+            <span
+              [class]="chipClass + ' text-base-content'"
+              [title]="orderSummary()"
+              data-testid="policy-order-more"
+              >+{{ hiddenCount() }}</span
+            >
+          }
+        </span>
+        <!-- Measuring copy of every chip (invisible, out of the flow): the widths decide how many whole chips fit.
+             Clipped to the strip: an invisible box still counts as scrollable overflow, and the full chain is wider
+             than the glass shell's narrower Settings scroller at 1024 px (a page-wide horizontal scrollbar). -->
+        <span
+          #orderMeasure
+          class="policy-order-strip pointer-events-none invisible absolute left-0 top-0 flex max-w-full items-center overflow-hidden whitespace-nowrap text-xs"
+          aria-hidden="true"
+        >
+          <span data-measure="arrow" class="text-xs">→</span>
+          @for (chip of chips(); track chip.id; let i = $index) {
+            <span data-measure="chip" [class]="chipClass"
+              >{{ i + 1 }}. {{ chip.name }}</span
+            >
+          }
+          <span data-measure="more" [class]="chipClass"
+            >+{{ chips().length }}</span
           >
-            {{ loaded() ? 'No CLI agent installed yet.' : 'Loading…' }}
-          </span>
-        }
-      </div>
-
-      <button
-        type="button"
-        ptahButton
-        class="policy-redetect shrink-0"
-        [busy]="detecting()"
-        (click)="redetectClis()"
-        aria-label="Re-detect CLI agents"
-        title="Re-detect CLI agents"
-        data-testid="policy-redetect"
-      >
-        @if (detecting()) {
-          <span
-            class="loading loading-spinner loading-xs"
-            aria-hidden="true"
-          ></span>
-          <span class="policy-redetect-label">Detecting…</span>
-        } @else {
-          <lucide-angular
-            [img]="RefreshIcon"
-            class="h-3 w-3"
-            aria-hidden="true"
-          />
-          <span class="policy-redetect-label">Re-detect CLIs</span>
-        }
-      </button>
+        </span>
+      } @else {
+        <span
+          class="text-xs text-base-content-muted"
+          data-testid="policy-order-empty"
+        >
+          {{ loaded() ? 'No CLI agent installed yet.' : 'Loading…' }}
+        </span>
+      }
     </div>
   </div>
 </div>

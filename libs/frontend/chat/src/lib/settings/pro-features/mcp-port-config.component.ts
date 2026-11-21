@@ -86,6 +86,7 @@ export const COULD_NOT_LOAD_MCP_CONFIG =
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
+    <!-- Glass on: the card owns the inset (global .settings-page rule), so the form section has no block padding. -->
     <section data-glass-surface="content" aria-labelledby="mcp-browser-heading">
       <h2 id="mcp-browser-heading" class="sr-only">MCP &amp; Browser</h2>
       <ptah-form-section
@@ -95,6 +96,8 @@ export const COULD_NOT_LOAD_MCP_CONFIG =
         description="The local server that gives agents the Ptah tools."
         [level]="2"
         [divider]="true"
+        [icon]="PlugIcon"
+        flushInGlass
       >
         @if (loaded()) {
           <ptah-status aside status="online" [label]="'Port ' + savedPort()" />

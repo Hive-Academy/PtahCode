@@ -87,12 +87,13 @@ class VsCodeLmStub {
   selector: 'ptah-advanced-settings-group',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  template: `<section [attr.data-testid]="'group-' + groupId()"></section>`,
+  template: `<section [attr.data-testid]="'group-' + groupId()" [attr.data-row-layout]="rowLayout()"></section>`,
 })
 class AdvancedGroupStub {
   readonly groupId = input.required<string>();
   readonly contentSurface = input(true);
   readonly headingStyle = input<'caps' | 'section' | 'hidden'>('caps');
+  readonly rowLayout = input<'default' | 'aligned'>('default');
 }
 
 describe('AdvancedSettingsComponent', () => {
@@ -291,6 +292,38 @@ describe('AdvancedSettingsComponent', () => {
     fixture.detectChanges();
     await fixture.whenStable();
     expect(label()).toContain('Check needed');
+  });
+
+  it('F8/F38: separates the sections by one gap with and without glass, and caps the wide fields at 1400px', async () => {
+    await render(false);
+    const sections = element.querySelector('[data-advanced-sections]');
+    expect(sections?.classList.contains('gap-[var(--ptah-gap-section)]')).toBe(true);
+    // The parent owns the gap from Fine-tuning to Setup: the list adds no block padding or margin of its own.
+    expect(Array.from(sections?.classList ?? []).filter((name) => /^(pb|py|mb|my)-/.test(name))).toEqual([]);
+    expect(sections?.lastElementChild?.getAttribute('data-testid')).toBe('fine-tuning-section');
+    expect(
+      sections?.classList.contains('[@container(min-width:1400px)]:[--ptah-settings-content-max-w:56rem]'),
+    ).toBe(true);
+  });
+
+  it('F18: Export and Import are icon + label buttons whose aria-label equals the visible label', async () => {
+    await render(false);
+    for (const label of ['Export settings', 'Import settings']) {
+      const button = element.querySelector<HTMLButtonElement>(`[aria-label="${label}"]`);
+      expect(button?.textContent?.trim()).toBe(label);
+      expect(button?.querySelector('lucide-angular[aria-hidden="true"]')).not.toBeNull();
+    }
+  });
+
+  it('gives the Fine-tuning section its icon and asks its groups for the aligned row layout', async () => {
+    await render(false);
+    const fineTuning = element.querySelector('[data-testid="fine-tuning-section"]');
+    expect(fineTuning?.getAttribute('data-glass-surface')).toBe('content');
+    expect(fineTuning?.querySelector('[data-testid="form-section-icon"]')).not.toBeNull();
+    for (const block of await fixture.getDeferBlocks()) await block.render(DeferBlockState.Complete);
+    const groups = Array.from(element.querySelectorAll('[data-testid^="group-"]'));
+    expect(groups).toHaveLength(3);
+    expect(groups.every((group) => group.getAttribute('data-row-layout') === 'aligned')).toBe(true);
   });
 
   it('keeps the Export settings aria-label and calls ptah.exportSettings in VS Code', async () => {

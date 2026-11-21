@@ -65,6 +65,13 @@ export interface BackgroundAgentEntry {
   result?: string;
   cost?: number;
   duration?: number;
+  /**
+   * Set when Ptah's subagent budget monitor, not the user, stopped the agent.
+   * Only a `stopped` entry carries it.
+   */
+  stoppedBy?: 'budget-monitor';
+  /** Ptah's notice explaining a budget-monitor stop. */
+  stopReason?: string;
 }
 
 const MAX_COMPLETED_AGENTS = 50;
@@ -439,7 +446,14 @@ export class BackgroundAgentStore {
       agentType: entry.agentType,
     };
     if (event.status === 'stopped') {
-      this.onStopped({ ...target, eventType: 'background_agent_stopped' });
+      this.onStopped({
+        ...target,
+        eventType: 'background_agent_stopped',
+        ...(event.stoppedBy !== undefined && {
+          stoppedBy: event.stoppedBy,
+          reason: event.summary || undefined,
+        }),
+      });
       return;
     }
     this.onCompleted({
@@ -456,19 +470,39 @@ export class BackgroundAgentStore {
     this.applyMutation((map) => {
       const [key, agent] = this.locateEntry(map, resolved, event.toolCallId);
 
-      // A `stopped` only comes from a user stop, and the SubagentStop hook
-      // can complete the entry first, so `completed` may still become
-      // `stopped`. Every other terminal status is kept.
-      if (agent && agent.status !== 'running' && agent.status !== 'completed') {
+      // A `stopped` comes from a user stop or from Ptah's budget monitor, and
+      // the SubagentStop hook can complete the entry first, so `completed` may
+      // still become `stopped`. A `stopped` entry with no author learns it
+      // from a later event that names the budget monitor. A budget entry with
+      // no reason (`skip_transcript` empties the first summary) learns it
+      // from the later stop event. Every other terminal status is kept.
+      const enrichesStop =
+        agent?.status === 'stopped' &&
+        event.stoppedBy !== undefined &&
+        (agent.stoppedBy === undefined ||
+          (agent.stoppedBy === event.stoppedBy &&
+            !agent.stopReason &&
+            !!event.reason));
+      if (
+        agent &&
+        agent.status !== 'running' &&
+        agent.status !== 'completed' &&
+        !enrichesStop
+      ) {
         return map;
       }
 
+      const stopAuthor =
+        event.stoppedBy !== undefined
+          ? { stoppedBy: event.stoppedBy, stopReason: event.reason }
+          : {};
       const next = new Map(map);
       if (agent) {
         next.set(key, {
           ...agent,
           status: 'stopped',
-          completedAt: event.timestamp,
+          completedAt: enrichesStop ? agent.completedAt : event.timestamp,
+          ...stopAuthor,
         });
       } else {
         next.set(key, {
@@ -481,6 +515,7 @@ export class BackgroundAgentStore {
           status: 'stopped',
           startedAt: event.timestamp,
           completedAt: event.timestamp,
+          ...stopAuthor,
         });
       }
 

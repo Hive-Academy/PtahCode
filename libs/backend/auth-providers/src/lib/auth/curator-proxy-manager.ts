@@ -1,12 +1,16 @@
 import { inject, injectable } from 'tsyringe';
 import { Logger, TOKENS } from '@ptah-extension/vscode-core';
 import { codexNativeRuntimeRequired } from './codex-native-runtime-refusal';
+import { providerSessionNativeRuntimeRequired } from './provider-session-runtime-refusal';
 import { AUTH_PROVIDERS_TOKENS } from '../di/tokens';
 import type { ITranslationProxy } from '../translation';
 import { COPILOT_PROXY_TOKEN_PLACEHOLDER } from '../providers/copilot';
 import { OPENROUTER_PROXY_TOKEN_PLACEHOLDER } from '../providers/openrouter';
 import { LOCAL_PROXY_TOKEN_PLACEHOLDER } from '../providers/local';
-import { KIMI_CODE_PROXY_TOKEN_PLACEHOLDER } from '@ptah-extension/shared';
+import {
+  KIMI_CODE_PROXY_TOKEN_PLACEHOLDER,
+  isProviderSessionProviderId,
+} from '@ptah-extension/shared';
 
 export interface CuratorProxyHandle {
   readonly url: string;
@@ -65,6 +69,9 @@ export class CuratorProxyManager {
   async ensureProxy(providerId: string): Promise<CuratorProxyHandle> {
     if (providerId === 'openai-codex') {
       throw codexNativeRuntimeRequired();
+    }
+    if (isProviderSessionProviderId(providerId)) {
+      throw providerSessionNativeRuntimeRequired(providerId);
     }
     const entry = this.entries.get(providerId);
     if (!entry) {

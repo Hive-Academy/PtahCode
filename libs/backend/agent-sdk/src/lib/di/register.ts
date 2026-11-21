@@ -171,6 +171,7 @@ import { SDK_TOKENS } from './tokens';
 import {
   SessionHistoryRouter,
   type NativeSessionHistoryPort,
+  type ProviderSessionHistoryPort,
 } from '../codex-app-server/session-history-router';
 
 const noOpModelDispatchProvenanceTap: ModelDispatchProvenanceTap = {
@@ -342,6 +343,12 @@ export function registerSdkServices(
             c.isRegistered(SDK_TOKENS.NATIVE_SESSION_HISTORY_PORT, true)
               ? c.resolve<NativeSessionHistoryPort | null>(
                   SDK_TOKENS.NATIVE_SESSION_HISTORY_PORT,
+                )
+              : undefined,
+          () =>
+            c.isRegistered(SDK_TOKENS.PROVIDER_SESSION_HISTORY_PORT, true)
+              ? c.resolve<ProviderSessionHistoryPort | null>(
+                  SDK_TOKENS.PROVIDER_SESSION_HISTORY_PORT,
                 )
               : undefined,
         ),
@@ -1073,6 +1080,10 @@ export function registerCodexChatServices(
     SDK_TOKENS.NATIVE_SESSION_CONTROLS,
     SDK_TOKENS.NATIVE_SESSION_HISTORY_PORT,
     SDK_TOKENS.RUNTIME_ADMISSION_PORT,
+    SDK_TOKENS.PROVIDER_SESSION_CHAT_PORTS,
+    SDK_TOKENS.PROVIDER_SESSION_CHAT_ADAPTER,
+    SDK_TOKENS.PROVIDER_SESSION_CONTROLS,
+    SDK_TOKENS.PROVIDER_SESSION_HISTORY_PORT,
   ]) {
     if (!container.isRegistered(token, true))
       container.register(token, { useFactory: () => null });
@@ -1097,8 +1108,11 @@ export function registerCodexChatServices(
       const native = c.resolve<NativeSessionControls | null>(
         SDK_TOKENS.NATIVE_SESSION_CONTROLS,
       );
-      return identities && legacy && native
-        ? new SessionRuntimeRouter(identities, legacy, native)
+      const providerSessions = c.resolve<NativeSessionControls | null>(
+        SDK_TOKENS.PROVIDER_SESSION_CONTROLS,
+      );
+      return identities && legacy && (native || providerSessions)
+        ? new SessionRuntimeRouter(identities, legacy, native, providerSessions)
         : null;
     }),
   });
@@ -1112,10 +1126,13 @@ export function registerCodexChatServices(
       const native = c.resolve<NativeChatAdapter | null>(
         SDK_TOKENS.CODEX_CHAT_ADAPTER,
       );
+      const providerSessions = c.resolve<NativeChatAdapter | null>(
+        SDK_TOKENS.PROVIDER_SESSION_CHAT_ADAPTER,
+      );
       const admission = c.resolve<RuntimeAdmissionPort | null>(
         SDK_TOKENS.RUNTIME_ADMISSION_PORT,
       );
-      return identities && native && admission
+      return identities && admission && (native || providerSessions)
         ? new RoutingAgentAdapter(
             identities,
             c.resolve<IAgentAdapter>(SDK_TOKENS.SDK_AGENT_ADAPTER),
@@ -1124,6 +1141,7 @@ export function registerCodexChatServices(
             c.resolve<RuntimeHostCapabilities>(
               SDK_TOKENS.RUNTIME_HOST_CAPABILITIES,
             ),
+            providerSessions,
           )
         : null;
     }),

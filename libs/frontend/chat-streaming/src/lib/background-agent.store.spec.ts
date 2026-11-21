@@ -298,6 +298,111 @@ describe('BackgroundAgentStore', () => {
 
       expect(store.agents()[0].status).toBe('error');
     });
+
+    it('keeps the budget-monitor author and notice of a stop', () => {
+      store.onStarted(startEvent({ agentId: 'a-B', toolCallId: 'tc-B' }));
+      store.onStopped(
+        stoppedEvent({
+          agentId: 'a-B',
+          toolCallId: 'tc-B',
+          stoppedBy: 'budget-monitor',
+          reason: 'Ptah stopped it.',
+        }),
+      );
+
+      expect(store.agents()[0]).toMatchObject({
+        status: 'stopped',
+        stoppedBy: 'budget-monitor',
+        stopReason: 'Ptah stopped it.',
+      });
+    });
+
+    it('adds the budget-monitor author to an earlier stop that had none', () => {
+      store.onStarted(startEvent({ agentId: 'a-B', toolCallId: 'tc-B' }));
+      store.onStopped(
+        stoppedEvent({ agentId: 'a-B', toolCallId: 'tc-B', timestamp: 1_000 }),
+      );
+      store.onStopped(
+        stoppedEvent({
+          agentId: '',
+          toolCallId: 'tc-B',
+          timestamp: 2_000,
+          stoppedBy: 'budget-monitor',
+          reason: 'Ptah stopped it.',
+        }),
+      );
+
+      expect(store.agents()).toHaveLength(1);
+      expect(store.agents()[0]).toMatchObject({
+        status: 'stopped',
+        completedAt: 1_000,
+        stoppedBy: 'budget-monitor',
+        stopReason: 'Ptah stopped it.',
+      });
+    });
+
+    it('fills a missing budget reason from the later stop event (skip_transcript)', () => {
+      store.onStarted(startEvent({ agentId: 'a-B', toolCallId: 'tc-B' }));
+      store.onAgentCompleted(
+        agentCompleted({
+          parentToolUseId: 'tc-B',
+          agentId: 'a-B',
+          status: 'stopped',
+          stoppedBy: 'budget-monitor',
+          summary: '',
+          timestamp: 1_000,
+        }),
+      );
+      store.onStopped(
+        stoppedEvent({
+          agentId: 'a-B',
+          toolCallId: 'tc-B',
+          timestamp: 2_000,
+          stoppedBy: 'budget-monitor',
+          reason: 'Ptah stopped it.',
+        }),
+      );
+
+      expect(store.agents()).toHaveLength(1);
+      expect(store.agents()[0]).toMatchObject({
+        status: 'stopped',
+        completedAt: 1_000,
+        stoppedBy: 'budget-monitor',
+        stopReason: 'Ptah stopped it.',
+      });
+    });
+
+    it('declines a second stop once the author is known', () => {
+      store.onStarted(startEvent({ agentId: 'a-B', toolCallId: 'tc-B' }));
+      store.onStopped(
+        stoppedEvent({
+          agentId: 'a-B',
+          toolCallId: 'tc-B',
+          stoppedBy: 'budget-monitor',
+          reason: 'first',
+        }),
+      );
+      const before = store.revision();
+      store.onStopped(
+        stoppedEvent({
+          agentId: 'a-B',
+          toolCallId: 'tc-B',
+          stoppedBy: 'budget-monitor',
+          reason: 'second',
+        }),
+      );
+
+      expect(store.revision()).toBe(before);
+      expect(store.agents()[0].stopReason).toBe('first');
+    });
+
+    it('leaves a user stop without an author', () => {
+      store.onStarted(startEvent({ agentId: 'a-U', toolCallId: 'tc-U' }));
+      store.onStopped(stoppedEvent({ agentId: 'a-U', toolCallId: 'tc-U' }));
+
+      expect(store.agents()[0]).not.toHaveProperty('stoppedBy');
+      expect(store.agents()[0]).not.toHaveProperty('stopReason');
+    });
   });
 
   describe('hasRealAgentId — synthetic-insert branches (onCompleted/onStopped)', () => {
@@ -715,6 +820,23 @@ describe('BackgroundAgentStore', () => {
       expect(store.findByAgentId('a-2' as BackgroundAgentId)?.status).toBe(
         'stopped',
       );
+    });
+
+    it('keeps the budget-monitor notice of a stopped notification', () => {
+      store.onStarted(startEvent());
+      store.onAgentCompleted(
+        agentCompleted({
+          status: 'stopped',
+          stoppedBy: 'budget-monitor',
+          summary: 'Ptah stopped `Explore`. The user did not stop it.',
+        }),
+      );
+
+      expect(store.findByToolCallId('tc-1')).toMatchObject({
+        status: 'stopped',
+        stoppedBy: 'budget-monitor',
+        stopReason: 'Ptah stopped `Explore`. The user did not stop it.',
+      });
     });
 
     it('creates no entry for a foreground agent', () => {

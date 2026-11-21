@@ -12,7 +12,7 @@
  */
 
 import { injectable, inject } from 'tsyringe';
-import { Logger, TOKENS } from '@ptah-extension/vscode-core';
+import { Logger, RpcUserError, TOKENS } from '@ptah-extension/vscode-core';
 import { SETTINGS_TOKENS } from '@ptah-extension/settings-core';
 import { SessionChildRegistry } from '@ptah-extension/cli-agent-runtime';
 import type { ModelSettings } from '@ptah-extension/settings-core';
@@ -54,12 +54,17 @@ import {
   storedChatRuntimeIdentity,
   type ChatRuntimeProfileService,
 } from './chat-runtime-profile.service';
+import { providerSessionFailure } from './provider-session-failure';
 import { CHAT_TOKENS } from '../tokens';
 import type { ChatSdkContextService } from './chat-sdk-context.service';
 import type {
   ChatStreamBroadcaster,
   WebviewManager,
 } from '../streaming/chat-stream-broadcaster.service';
+
+/** `/compact` on a provider session: the provider owns its own context. */
+export const PROVIDER_SESSION_COMPACT_UNSUPPORTED =
+  'This chat provider does not support /compact.';
 
 /** Local extension until the shared RPC schema carries account selections. */
 export interface MainSessionAccountSelection {
@@ -342,6 +347,18 @@ export class ChatSlashCommandRouterService {
               modelIsStored,
             );
         if (
+          execution.runtime === 'provider-session' &&
+          interceptResult.commandName === 'compact'
+        ) {
+          // Refused before any compaction reservation or adapter call.
+          return {
+            success: false,
+            sessionId,
+            errorCode: 'PROVIDER_SESSION_UNSUPPORTED_OPTION',
+            error: PROVIDER_SESSION_COMPACT_UNSUPPORTED,
+          };
+        }
+        if (
           interceptResult.commandName === 'compact' &&
           this.manualCompactAdmission
         ) {
@@ -395,9 +412,9 @@ export class ChatSlashCommandRouterService {
             sessionConfig: {
               tabId,
               model:
-                execution.runtime === 'codex-app-server'
-                  ? execution.seed.model
-                  : execution.model,
+                execution.runtime === 'claude-sdk'
+                  ? execution.model
+                  : execution.seed.model,
               projectPath: workspacePath,
               ...(params.pluginConfigAncestorRoots !== undefined
                 ? { pluginConfigAncestorRoots: params.pluginConfigAncestorRoots }
@@ -451,12 +468,18 @@ export class ChatSlashCommandRouterService {
           // Busy/unavailable admission failures have not broadcast an error.
           throw slashError;
         }
+        const providerFailure = providerSessionFailure(slashError);
+        if (providerFailure) return { ...providerFailure, sessionId };
         // A named relaunch's refusal keeps its typed code, not AUTH_REQUIRED.
         const refusal = mainSessionAccountFailure(slashError);
         if (refusal) {
           this.logger.warn('[RPC] slash account admission refused', { code: refusal.accountRefusal.code });
           return { ...refusal, sessionId };
         }
+        // Any other typed refusal keeps its code: continueSession maps an
+        // RpcUserError to `errorCode`, and the `finally` below still releases
+        // a compact reservation (PR #1450 review).
+        if (slashError instanceof RpcUserError) throw slashError;
         const message =
           slashError instanceof Error ? slashError.message : String(slashError);
         this.logger.warn(

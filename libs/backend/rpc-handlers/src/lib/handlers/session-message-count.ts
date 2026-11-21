@@ -29,6 +29,7 @@ import {
   isHiddenTranscriptRecord,
   isInterruptSentinelText,
   isSkillOrMetaText,
+  isSyntheticNoResponsePlaceholder,
   type JsonlReaderService,
 } from '@ptah-extension/agent-sdk';
 
@@ -76,6 +77,20 @@ function textOf(content: unknown): string {
       return typeof text === 'string' ? text : '';
     })
     .join('\n');
+}
+
+/** Assistant content of interrupt-sentinel text blocks only, as the replay skips. */
+function isInterruptSentinelOnlyContent(content: unknown): boolean {
+  if (!Array.isArray(content) || content.length === 0) return false;
+  return content.every((raw: unknown) => {
+    const block = asRecord(raw);
+    const text = block?.['text'];
+    return (
+      block?.['type'] === 'text' &&
+      typeof text === 'string' &&
+      isInterruptSentinelText(text)
+    );
+  });
 }
 
 /** A user record the replay drops instead of rendering as a prompt. */
@@ -139,7 +154,14 @@ class TranscriptMessageTally {
       if (isHiddenUserRecord(record, content)) return;
       this.count++;
       this.inAssistantReply = false;
-    } else if (type === 'assistant' && !this.inAssistantReply) {
+    } else if (
+      type === 'assistant' &&
+      !this.inAssistantReply &&
+      // SDK-written entries the replay skips: the resume placeholder and an
+      // interrupt-sentinel-only entry. Neither is a reply.
+      !isSyntheticNoResponsePlaceholder(message) &&
+      !isInterruptSentinelOnlyContent(content)
+    ) {
       this.count++;
       this.inAssistantReply = true;
     }

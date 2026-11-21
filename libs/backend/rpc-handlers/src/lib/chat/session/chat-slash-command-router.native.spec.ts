@@ -25,6 +25,7 @@ jest.mock('@ptah-extension/workspace-intelligence', () => ({
   ContextEnrichmentService: class ContextEnrichmentServiceStub {},
 }));
 import { resolve } from 'node:path';
+import { RpcUserError } from '@ptah-extension/vscode-core';
 import { WorkspaceProviderProfileResolver } from '@ptah-extension/auth-providers';
 import { createMockWorkspaceProvider } from '@ptah-extension/platform-core/testing';
 import type { SessionId, SessionRuntimeIdentity } from '@ptah-extension/shared';
@@ -340,6 +341,19 @@ describe('native slash runtime routing', () => {
     expect(h.compact).not.toHaveBeenCalled();
     expect(h.executeSlashCommand).not.toHaveBeenCalled();
   });
+  it('4651900766: still releases the compact reservation when a typed refusal is rethrown', async () => {
+    const h = harness({
+      runtime: 'claude-sdk',
+      model: 'sonnet',
+      providerProfile: { providerId: 'anthropic', model: 'sonnet', authEnv: {} },
+    });
+    const refusal = new RpcUserError('refused', 'PROVIDER_SESSION_UNAVAILABLE');
+    h.executeSlashCommand.mockRejectedValue(refusal);
+    await expect(h.route()).rejects.toBe(refusal);
+    expect(h.admitManualCompact).toHaveBeenCalledTimes(1);
+    expect(h.releaseManualReservation).toHaveBeenCalledWith(sessionId, 'reservation');
+  });
+
   it('does not publish when a slash relaunch is rejected as busy', async () => {
     const h = harness(native, 'review');
     h.executeSlashCommand.mockRejectedValue(new Error('busy'));

@@ -17,6 +17,7 @@ import {
   AlertCircle,
   Clock,
   Download,
+  FileText,
   LucideAngularModule,
   RotateCw,
   Sparkles,
@@ -66,7 +67,7 @@ const DOWNLOAD_CANCELLED_BY_USER = 'Save cancelled by user';
  * - A15: Regenerate prompt (S-confirm: inline confirm first; inline progress up to 120 s; failure in the page toast)
  * - A16: Download prompt as markdown file (D15: {success:false} or failed RPC shows an alert toast, never silent)
  * - A17: View/Hide prompt preview rendered through {@link MarkdownBlockComponent} (safe DOMPurify chokepoint)
- * - A18: Empty-state guidance when no prompt has been generated yet â€” only after a successful status read
+ * - A18: Empty-state guidance when no prompt has been generated yet — only after a successful status read
  *
  * The host reports a running regeneration in status. The drawer refreshes that status while open.
  *
@@ -127,7 +128,7 @@ const DOWNLOAD_CANCELLED_BY_USER = 'Save cancelled by user';
         @if (error(); as err) {
           <div
             role="alert"
-            class="flex items-center gap-[var(--ptah-gap-label)] rounded border border-error/40 text-xs text-base-content"
+            class="flex items-center gap-[var(--ptah-gap-label)] rounded border border-error/40 p-[var(--ptah-space-3)] text-xs text-base-content"
             data-testid="system-prompt-drawer-error"
           >
             <lucide-angular
@@ -154,7 +155,7 @@ const DOWNLOAD_CANCELLED_BY_USER = 'Save cancelled by user';
         @if (regenerationStartedAt() !== null) {
           <div
             role="status"
-            class="flex items-center gap-[var(--ptah-gap-label)] rounded border border-base-300 text-xs text-base-content"
+            class="flex items-center gap-[var(--ptah-gap-label)] rounded border border-base-300 p-[var(--ptah-space-3)] text-xs text-base-content"
             data-testid="regenerate-may-be-running"
           >
             <lucide-angular
@@ -165,7 +166,7 @@ const DOWNLOAD_CANCELLED_BY_USER = 'Save cancelled by user';
             <span class="flex-1">
               Regeneration may still be running ({{
                 regenerationElapsedSeconds() === null
-                  ? 'â€”'
+                  ? '—'
                   : regenerationElapsedSeconds() + ' s elapsed'
               }}). Regenerate stays off until the host finishes.
             </span>
@@ -189,11 +190,11 @@ const DOWNLOAD_CANCELLED_BY_USER = 'Save cancelled by user';
             role="status"
             data-testid="system-prompt-drawer-loading"
           >
-            Loading system prompt statusâ€¦
+            Loading system prompt status…
           </p>
         } @else if (hasGeneratedPrompt()) {
           <!-- Metadata (A14) -->
-          <div class="rounded border border-base-300 bg-base-200/40">
+          <div class="rounded border border-base-300 bg-base-200/40 p-[var(--ptah-space-3)]">
             @if (generatedAt(); as ts) {
               <div
                 class="flex items-center gap-[var(--ptah-gap-label)] text-xs text-base-content-muted"
@@ -245,7 +246,7 @@ const DOWNLOAD_CANCELLED_BY_USER = 'Save cancelled by user';
               <div
                 class="flex items-center justify-between text-xs text-base-content-muted"
               >
-                <span>Generating fresh guidanceâ€¦</span>
+                <span>Generating fresh guidance…</span>
                 <span>Up to 120 s</span>
               </div>
               <progress
@@ -290,11 +291,11 @@ const DOWNLOAD_CANCELLED_BY_USER = 'Save cancelled by user';
                     class="loading loading-spinner loading-xs"
                     aria-hidden="true"
                   ></span>
-                  <span>Loading prompt contentâ€¦</span>
+                  <span>Loading prompt content…</span>
                 </div>
               } @else if (promptPreviewContent(); as content) {
                 <div
-                  class="max-h-96 overflow-y-auto border border-base-300 rounded bg-base-200/50"
+                  class="max-h-[min(24rem,50dvh)] overflow-y-auto border border-base-300 rounded bg-base-200/50"
                   data-testid="system-prompt-markdown-preview"
                 >
                   <ptah-markdown-block [content]="content" />
@@ -306,7 +307,7 @@ const DOWNLOAD_CANCELLED_BY_USER = 'Save cancelled by user';
           <!-- Empty state guidance (A18): only a successful read can say there is no prompt -->
           <div class="text-center" data-testid="system-prompt-empty-state">
             <lucide-angular
-              [img]="SparklesIcon"
+              [img]="FileTextIcon"
               class="w-8 h-8 text-secondary/40 self-center"
               aria-hidden="true"
             />
@@ -321,7 +322,7 @@ const DOWNLOAD_CANCELLED_BY_USER = 'Save cancelled by user';
       @if (isOpen()) {
         <div
           drawer-footer
-          class="flex items-center justify-between gap-[var(--ptah-gap-controls)] border-t border-base-300"
+          class="flex items-center justify-between gap-[var(--ptah-gap-controls)] border-t border-base-300 px-[calc(var(--ptah-space-4)_+_var(--ptah-space-1))] py-[var(--ptah-space-3)]"
         >
           <div class="flex items-center gap-[var(--ptah-gap-controls)]">
             <button
@@ -344,7 +345,7 @@ const DOWNLOAD_CANCELLED_BY_USER = 'Save cancelled by user';
                   class="loading loading-spinner loading-xs"
                   aria-hidden="true"
                 ></span>
-                <span>Generatingâ€¦</span>
+                <span>Generating…</span>
               } @else {
                 <lucide-angular
                   [img]="RotateCwIcon"
@@ -370,7 +371,7 @@ const DOWNLOAD_CANCELLED_BY_USER = 'Save cancelled by user';
                   class="loading loading-spinner loading-xs"
                   aria-hidden="true"
                 ></span>
-                <span>Downloadingâ€¦</span>
+                <span>Downloading…</span>
               } @else {
                 <lucide-angular
                   [img]="DownloadIcon"
@@ -410,6 +411,7 @@ export class SystemPromptDrawerComponent {
     viewChild<ElementRef<HTMLButtonElement>>('regenerateButton');
 
   readonly SparklesIcon = Sparkles;
+  readonly FileTextIcon = FileText;
   readonly ClockIcon = Clock;
   readonly RotateCwIcon = RotateCw;
   readonly DownloadIcon = Download;
@@ -474,7 +476,7 @@ export class SystemPromptDrawerComponent {
   });
 
   readonly subtitle = computed(() => {
-    if (this.isLoading()) return 'Loading system promptâ€¦';
+    if (this.isLoading()) return 'Loading system prompt…';
     if (this.statusLoadFailed() && this.status() === null)
       return 'Status not loaded';
     if (!this.hasGeneratedPrompt()) return 'No prompt generated yet';

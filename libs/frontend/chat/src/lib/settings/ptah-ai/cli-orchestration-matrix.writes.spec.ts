@@ -1,5 +1,6 @@
 import { By } from '@angular/platform-browser';
 import { LanesTableComponent } from './lanes-table.component';
+import { LanesAddMoreStripComponent } from './lanes-add-more-strip.component';
 import { ApplicationRef, signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import {
@@ -173,6 +174,7 @@ class StateStub {
     this.cliTest.set(ready(this.testResult));
   });
   readonly clearCliTest = jest.fn((_id: string) => undefined);
+  readonly cliRedetecting = signal(false);
   readonly cliDetection = signal<
     ProvidersSettingsSection<CliDetectionResult[]>
   >(ready([]));
@@ -355,6 +357,17 @@ describe('CliOrchestrationMatrixComponent', () => {
     if (!component) throw new Error('Lanes table not mounted');
     return component;
   }
+  /** The numbered (positioned) lane ids, in display order. */
+  function numbered(): string[] {
+    return table()
+      .rows()
+      .filter((item) => item.kind === 'instance' || item.installed)
+      .map((item) => item.id);
+  }
+  function enterReorder(): void {
+    fixture.componentInstance['orderMode'].set(true);
+    fixture.detectChanges();
+  }
   function lane(id: string) {
     const found = table()
       .rows()
@@ -478,7 +491,12 @@ describe('CliOrchestrationMatrixComponent', () => {
       ready({ ...ORCHESTRATION, preferredAgentOrder: originalOrder }),
     );
     fixture.detectChanges();
-    table().moved.emit({ row: lane('codex'), direction: 1 });
+    expect(numbered()).toEqual(['codex', 'antigravity', 'glm-1', 'copilot', 'opencode']);
+    table().reordered.emit({
+      order: ['antigravity', 'codex', 'glm-1', 'copilot', 'opencode'],
+      movedId: 'codex',
+      direction: 'down',
+    });
     await flush();
     expect(state.saveSettings).toHaveBeenCalledWith(
       {
@@ -519,7 +537,11 @@ describe('CliOrchestrationMatrixComponent', () => {
       }),
     );
     fixture.detectChanges();
-    table().moved.emit({ row: lane('codex'), direction: 1 });
+    table().reordered.emit({
+      order: ['antigravity', 'codex', 'glm-1', 'copilot', 'opencode'],
+      movedId: 'codex',
+      direction: 'down',
+    });
     await flush();
     expect(state.saveSettings).toHaveBeenCalledWith(
       {
@@ -535,6 +557,243 @@ describe('CliOrchestrationMatrixComponent', () => {
         },
       },
       CONTEXT,
+    );
+  });
+
+  it('writes the full order from the Reorder up / down buttons, keeps undisplayed ids in their slots, with Undo', async () => {
+    const originalOrder = ['codex', 'cursor', 'antigravity', 'glm-1', 'copilot'];
+    state.orchestration.set(ready({ ...ORCHESTRATION, preferredAgentOrder: originalOrder }));
+    fixture.detectChanges();
+    enterReorder();
+    element()
+      .querySelector<HTMLButtonElement>('[data-testid="policy-order-down-codex"]')
+      ?.click();
+    await flush();
+    expect(state.saveSettings).toHaveBeenCalledTimes(1);
+    expect(state.saveSettings).toHaveBeenCalledWith(
+      {
+        orchestration: {
+          preferredAgentOrder: ['antigravity', 'cursor', 'codex', 'glm-1', 'copilot', 'opencode'],
+        },
+      },
+      CONTEXT,
+    );
+    await feedback.undo();
+    await flush();
+    expect(state.saveSettings).toHaveBeenLastCalledWith(
+      { orchestration: { preferredAgentOrder: originalOrder } },
+      CONTEXT,
+    );
+  });
+
+  it('writes a drag over two positions once, with the undisplayed ids in their slots', async () => {
+    state.orchestration.set(
+      ready({ ...ORCHESTRATION, preferredAgentOrder: ['codex', 'cursor', 'antigravity', 'glm-1', 'copilot'] }),
+    );
+    fixture.detectChanges();
+    enterReorder();
+    const rowOf = (id: string) =>
+      element().querySelector<HTMLElement>(
+        `[data-testid="cli-provider-card-${id}"], [data-testid="cli-matrix-row-${id}"]`,
+      )!;
+    const drag = (type: string, target: Element, clientY = 0) => {
+      const event = new Event(type, { bubbles: true, cancelable: true }) as DragEvent;
+      Object.defineProperty(event, 'clientY', { value: clientY });
+      Object.defineProperty(event, 'dataTransfer', {
+        value: { setData: jest.fn(), effectAllowed: '', dropEffect: '' },
+      });
+      target.dispatchEvent(event);
+    };
+    drag('dragstart', element().querySelector('[data-testid="policy-order-grip-codex"]')!);
+    // jsdom rects are 0-sized: clientY 1 is the lower half of the target row (insert after it).
+    drag('dragover', rowOf('glm-1'), 1);
+    fixture.detectChanges();
+    drag('drop', rowOf('glm-1'), 1);
+    await flush();
+    expect(state.saveSettings).toHaveBeenCalledTimes(1);
+    expect(state.saveSettings).toHaveBeenCalledWith(
+      {
+        orchestration: {
+          preferredAgentOrder: ['antigravity', 'cursor', 'glm-1', 'codex', 'copilot', 'opencode'],
+        },
+      },
+      CONTEXT,
+    );
+  });
+
+  const reorderToggle = () =>
+    q<HTMLButtonElement>('[data-testid="lanes-order-edit"]')!;
+  const MOVE = {
+    order: ['glm-1'],
+    movedId: 'glm-1',
+    direction: 'up' as const,
+  };
+
+  it('blocks Reorder and every move after a failed agent:getConfig with a usable instance list (finding 1)', async () => {
+    state.orchestration.set({ status: 'error', data: null, error: 'Could not load this section. Retry.' });
+    state.cliAgents.set(
+      ready([GLM, { ...GLM, id: 'glm-2', name: 'Glm two' }]),
+    );
+    fixture.detectChanges();
+    expect(numbered()).toEqual(['glm-1', 'glm-2']);
+    expect(reorderToggle().disabled).toBe(true);
+    expect(table().canReorder()).toBe(false);
+    table().reordered.emit({ ...MOVE, order: ['glm-2', 'glm-1'], movedId: 'glm-2' });
+    await flush();
+    expect(state.saveSettings).not.toHaveBeenCalled();
+  });
+
+  it('blocks Reorder when the response omits preferredAgentOrder (finding 1)', async () => {
+    state.orchestration.set(
+      ready({
+        ...ORCHESTRATION,
+        preferredAgentOrder: [],
+        missingFields: ['preferredAgentOrder'],
+      }),
+    );
+    fixture.detectChanges();
+    expect(reorderToggle().disabled).toBe(true);
+    table().reordered.emit({
+      order: ['antigravity', 'codex', 'glm-1', 'copilot', 'opencode'],
+      movedId: 'codex',
+      direction: 'down',
+    });
+    await flush();
+    expect(state.saveSettings).not.toHaveBeenCalled();
+  });
+
+  it('keeps Done operable when the order read fails during Reorder (finding 1)', () => {
+    enterReorder();
+    state.orchestration.set({ status: 'loading', data: ORCHESTRATION, error: null });
+    fixture.detectChanges();
+    expect(reorderToggle().textContent).toContain('Done');
+    expect(reorderToggle().disabled).toBe(false);
+    expect(table().canReorder()).toBe(false);
+    reorderToggle().click();
+    fixture.detectChanges();
+    expect(fixture.componentInstance['orderMode']()).toBe(false);
+  });
+
+  it('offers Reorder only with at least two numbered lanes; Done stays when the count drops (finding 10)', () => {
+    state.orchestration.set(ready({ ...ORCHESTRATION, detectedClis: [] }));
+    state.cliAgents.set(ready([GLM]));
+    fixture.detectChanges();
+    expect(numbered()).toEqual(['glm-1']);
+    expect(reorderToggle().disabled).toBe(true);
+    state.cliAgents.set(ready([GLM, { ...GLM, id: 'glm-2', name: 'Glm two' }]));
+    fixture.detectChanges();
+    expect(reorderToggle().disabled).toBe(false);
+    enterReorder();
+    state.cliAgents.set(ready([GLM]));
+    fixture.detectChanges();
+    expect(reorderToggle().disabled).toBe(false);
+    expect(reorderToggle().textContent).toContain('Done');
+  });
+
+  it('announces the confirmed position and focuses the moved row after an async read-back (finding 5)', async () => {
+    let readBack: () => void = () => undefined;
+    state.saveSettings.mockImplementation(
+      (patch: unknown) =>
+        new Promise<boolean>((resolve) => {
+          readBack = () => {
+            const order = (patch as { orchestration: { preferredAgentOrder: string[] } })
+              .orchestration.preferredAgentOrder;
+            state.orchestration.set(ready({ ...ORCHESTRATION, preferredAgentOrder: order }));
+            state.commit.set({ ...idle, status: 'saved' });
+            resolve(true);
+          };
+        }),
+    );
+    enterReorder();
+    expect(numbered()).toEqual(['codex', 'antigravity', 'glm-1', 'copilot', 'opencode']);
+    q<HTMLButtonElement>('[data-testid="policy-order-down-codex"]')!.click();
+    fixture.detectChanges();
+    await flush();
+    readBack();
+    for (let i = 0; i < 8; i += 1) await Promise.resolve();
+    _render();
+    await fixture.whenStable();
+    expect(numbered()).toEqual(['antigravity', 'codex', 'glm-1', 'copilot', 'opencode']);
+    expect(q('[data-testid="policy-order-live"]')?.textContent?.trim()).toBe(
+      'Codex moved to position 2 of 5',
+    );
+    expect(document.activeElement).toBe(
+      q('[data-testid="policy-order-down-codex"]'),
+    );
+  });
+
+  it('announces no position when the refresh after a verified write drops the order, and focuses Done (finding 5)', async () => {
+    // The write is verified (saveSettings resolves true with a saved commit); the separate refresh then omits
+    // preferredAgentOrder, so the rows fall back to discovery order.
+    state.saveSettings.mockImplementation(async () => {
+      state.orchestration.set(
+        ready({
+          ...ORCHESTRATION,
+          preferredAgentOrder: [],
+          missingFields: ['preferredAgentOrder'],
+        }),
+      );
+      state.commit.set({ ...idle, status: 'saved' });
+      return true;
+    });
+    enterReorder();
+    q<HTMLButtonElement>('[data-testid="policy-order-down-codex"]')!.click();
+    await flush();
+    _render();
+    await fixture.whenStable();
+    expect(state.saveSettings).toHaveBeenCalledTimes(1);
+    expect(q('[data-testid="policy-order-live"]')?.textContent?.trim()).toBe('');
+    expect(document.activeElement).toBe(q('[data-testid="lanes-order-edit"]'));
+  });
+
+  it.each([
+    [
+      'the Ptah CLI instance list is not ready',
+      () => state.cliAgents.set({ status: 'loading', data: [GLM], error: null }),
+    ],
+    [
+      'the Ptah CLI instance list is incomplete',
+      () => state.cliAgents.set(ready(Object.assign([GLM], { missingFields: ['cliAgents'] }))),
+    ],
+    [
+      'a lane joined the numbered lanes during the save',
+      () => state.cliAgents.set(ready([GLM, { ...GLM, id: 'glm-2', name: 'Glm two' }])),
+    ],
+    [
+      'a lane left the numbered lanes during the save',
+      () => state.cliAgents.set(ready([])),
+    ],
+  ])('announces no position after a saved move when %s (PR review C)', async (_name, change) => {
+    state.saveSettings.mockImplementation(async (patch: unknown) => {
+      const order = (patch as { orchestration: { preferredAgentOrder: string[] } })
+        .orchestration.preferredAgentOrder;
+      state.orchestration.set(ready({ ...ORCHESTRATION, preferredAgentOrder: order }));
+      change();
+      state.commit.set({ ...idle, status: 'saved' });
+      return true;
+    });
+    enterReorder();
+    q<HTMLButtonElement>('[data-testid="policy-order-down-codex"]')!.click();
+    await flush();
+    _render();
+    await fixture.whenStable();
+    expect(state.saveSettings).toHaveBeenCalledTimes(1);
+    expect(q('[data-testid="policy-order-live"]')?.textContent?.trim()).toBe('');
+  });
+
+  it('restores focus with no move announcement when the order save fails (finding 5)', async () => {
+    state.saveSettings.mockImplementation(async () => {
+      state.commit.set({ ...idle, status: 'failed' });
+      return false;
+    });
+    enterReorder();
+    q<HTMLButtonElement>('[data-testid="policy-order-down-codex"]')!.click();
+    await flush();
+    _render();
+    await fixture.whenStable();
+    expect(q('[data-testid="policy-order-live"]')?.textContent?.trim()).toBe('');
+    expect(document.activeElement).toBe(
+      q('[data-testid="policy-order-down-codex"]'),
     );
   });
 
@@ -582,8 +841,16 @@ describe('CliOrchestrationMatrixComponent', () => {
         ?.closest('dialog')
         ?.hasAttribute('open'),
     ).toBe(true);
-    table().tiers.emit(lane('glm-1'));
+    // Edit tiers lives in the detail footer only (decision 23).
+    q<HTMLButtonElement>(
+      '[data-testid="cli-matrix-row-glm-1"] ptah-table-row-expander button',
+    )?.click();
     fixture.detectChanges();
+    q<HTMLButtonElement>('[data-testid="cli-matrix-tiers-glm-1"]')?.click();
+    fixture.detectChanges();
+    expect(
+      q('#lane-detail-glm-1 [data-testid="cli-matrix-tiers-glm-1"]'),
+    ).not.toBeNull();
     expect(
       q('[data-testid="cli-tier-mapping-modal"]')
         ?.closest('dialog')
@@ -600,10 +867,17 @@ describe('CliOrchestrationMatrixComponent', () => {
     );
   });
 
-  it('routes install Re-detect and retry to existing state reads', async () => {
-    table().redetect.emit('pi');
+  it('routes install Re-detect (table and strip) and retry to existing state reads', async () => {
+    // The keyless Cursor detail keeps its install guide in the table; not-installed CLIs re-detect from the strip.
+    table().redetect.emit('cursor');
     await flush();
     expect(state.redetectClis).toHaveBeenCalledTimes(1);
+    const strip = fixture.debugElement.query(
+      By.directive(LanesAddMoreStripComponent),
+    )?.componentInstance as LanesAddMoreStripComponent;
+    strip.redetect.emit('pi');
+    await flush();
+    expect(state.redetectClis).toHaveBeenCalledTimes(2);
     table().retry.emit();
     await flush();
     expect(state.refreshOrchestration).toHaveBeenCalledTimes(1);

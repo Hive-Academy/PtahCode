@@ -12,6 +12,7 @@ export * from './lib/types/messages';
 export * from './lib/types/content-block.types';
 export * from './lib/types/permission.types';
 export * from './lib/types/session-runtime.types';
+export * from './lib/types/provider-session-profile.types';
 export * from './lib/types/permission.parsers';
 export * from './lib/types/quality-assessment.types';
 export * from './lib/types/reliable-workflow.types';

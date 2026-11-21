@@ -14,6 +14,7 @@ import {
   type IMcpServerStatus,
   type IWorkspaceProvider,
 } from '@ptah-extension/platform-core';
+import type { ProviderSessionProviderId } from '@ptah-extension/shared';
 import { SDK_TOKENS } from '../di/tokens';
 import type { InternalQueryService } from '../internal-query';
 import {
@@ -23,7 +24,7 @@ import {
 import type { OneShotAuthOverride } from '../helpers/sdk-query-runner.service';
 import type { IProviderAuthResolver } from '../auth/provider-auth-resolver.port';
 import type { IWorkspaceLlmResolver } from '../auth/workspace-llm-resolver.port';
-import { isCodexNativeRuntimeRefusal } from '../errors';
+import { isNativeRuntimeRefusal } from '../errors';
 import {
   isAssistantMessage,
   isErrorResult,
@@ -52,6 +53,9 @@ import {
   QueryNetworkObserver,
   type NetworkFailureSignal,
 } from '../internal-query/network-failure';
+
+/** Providers whose native runtime refuses Ptah's internal model calls. */
+type NativeRuntimeProviderId = 'openai-codex' | ProviderSessionProviderId;
 
 const CURATOR_MODEL_SECTION = 'ptah';
 const CURATOR_MODEL_KEY = 'memory.curatorModel';
@@ -94,7 +98,8 @@ const PROVIDER_QUOTA_ERROR_NAME = 'ProviderQuotaError';
  * What `resolveCuratorAuth` decided. `'ride-active'` is the pre-existing
  * `undefined` — either nothing to override, or the documented auth fallback —
  * and `'cooling-down'` is the quota stop. `'unsupported-provider'` is the
- * deliberate Codex native-runtime refusal: do not go, and do not ride active.
+ * deliberate Codex or provider-session native-runtime refusal: do not go, and
+ * do not ride active.
  *
  * A discriminated result rather than a second `undefined` because the arms mean
  * opposite things to the caller: one says "go, on the active provider", the
@@ -112,7 +117,7 @@ type CuratorAuthDecision =
   | { readonly kind: 'cooling-down'; readonly providerId: string }
   | {
       readonly kind: 'unsupported-provider';
-      readonly providerId: 'openai-codex';
+      readonly providerId: NativeRuntimeProviderId;
     };
 
 /**
@@ -153,12 +158,12 @@ type CuratorQueryOutcome =
    */
   | { readonly kind: 'unreachable'; readonly signal: NetworkFailureSignal }
   /**
-   * The deliberate Codex refusal. No query was sent, or the runner refused
+   * The deliberate Codex or provider-session refusal. No query was sent, or the runner refused
    * before a model id was resolved. Same shape as the auth decision.
    */
   | {
       readonly kind: 'unsupported-provider';
-      readonly providerId: 'openai-codex';
+      readonly providerId: NativeRuntimeProviderId;
     };
 
 /**
@@ -252,15 +257,16 @@ export class SdkInternalQueryCuratorLlm implements ICuratorLLM {
    */
   private skipUnsupportedProvider(error: {
     readonly message: string;
+    readonly providerId: NativeRuntimeProviderId;
   }): {
     readonly kind: 'unsupported-provider';
-    readonly providerId: 'openai-codex';
+    readonly providerId: NativeRuntimeProviderId;
   } {
     this.logger.warn(
       '[memory-curator] curator provider not supported for background curation; pass skipped',
-      { providerId: 'openai-codex', error: error.message },
+      { providerId: error.providerId, error: error.message },
     );
-    return { kind: 'unsupported-provider', providerId: 'openai-codex' };
+    return { kind: 'unsupported-provider', providerId: error.providerId };
   }
 
   private resolveCuratorProviderId(): string {
@@ -287,7 +293,7 @@ export class SdkInternalQueryCuratorLlm implements ICuratorLLM {
         ? { kind: 'override', auth, providerId: curatorProviderId }
         : { kind: 'ride-active' };
     } catch (error: unknown) {
-      if (isCodexNativeRuntimeRefusal(error)) {
+      if (isNativeRuntimeRefusal(error)) {
         return this.skipUnsupportedProvider(error);
       }
       if (error instanceof Error && error.name === PROVIDER_QUOTA_ERROR_NAME) {
@@ -328,7 +334,7 @@ export class SdkInternalQueryCuratorLlm implements ICuratorLLM {
         this.workspaceLlm as IWorkspaceLlmResolver
       ).resolveForPath(workspaceRoot);
     } catch (error: unknown) {
-      if (isCodexNativeRuntimeRefusal(error)) {
+      if (isNativeRuntimeRefusal(error)) {
         return this.skipUnsupportedProvider(error);
       }
       throw error;
@@ -659,7 +665,7 @@ export class SdkInternalQueryCuratorLlm implements ICuratorLLM {
       if (toolUses > 0) return { kind: 'tools-only', toolUses, toolNames };
       return { kind: 'silent' };
     } catch (error: unknown) {
-      if (isCodexNativeRuntimeRefusal(error)) {
+      if (isNativeRuntimeRefusal(error)) {
         return this.skipUnsupportedProvider(error);
       }
       const message = error instanceof Error ? error.message : String(error);

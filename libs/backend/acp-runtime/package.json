@@ -1,0 +1,15 @@
+{
+  "name": "@ptah-extension/acp-runtime",
+  "version": "0.0.1",
+  "private": true,
+  "type": "commonjs",
+  "main": "./index.cjs",
+  "types": "./index.d.ts",
+  "dependencies": {
+    "@agentclientprotocol/sdk": "*",
+    "@ptah-extension/platform-core": "0.0.1",
+    "@ptah-extension/provider-session-contracts": "0.0.1",
+    "@ptah-extension/shared": "0.0.1",
+    "zod": "*"
+  }
+}

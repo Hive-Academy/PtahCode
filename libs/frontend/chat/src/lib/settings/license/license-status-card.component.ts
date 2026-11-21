@@ -16,7 +16,11 @@ import {
   LucideAngularModule,
   Sparkles,
   UserPlus,
-  Key,
+  KeyRound,
+  Layers,
+  CircleCheck,
+  CircleAlert,
+  TriangleAlert,
   ExternalLink,
   LogOut,
   X,
@@ -27,7 +31,6 @@ import {
 import { ClaudeRpcService } from '@ptah-extension/core';
 import {
   NativePopoverComponent,
-  PtahAlertComponent,
   PtahBadgeDirective,
   PtahButtonDirective,
   PtahFieldComponent,
@@ -37,7 +40,7 @@ import {
   PtahInputDirective,
   PtahDescriptionListComponent,
   PtahDescriptionItemComponent,
-  PtahStatusComponent,
+  PtahSettingRowComponent,
 } from '@ptah-extension/ui';
 import { AdvancedOverviewStore } from '../advanced/advanced-overview.store';
 import { ChatStore } from '../../services/chat.store';
@@ -46,6 +49,11 @@ import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.
 /** One fixed sentence per action (F1): no host, server or transport text reaches the UI. */
 const ACTIVATE_KEY_FAILED = 'Could not activate the membership key.';
 const LOGOUT_FAILED = 'Could not log out.';
+/** Hint of the "Membership key" row. */
+const KEY_HINT = 'Enter your key to activate a Ptah Builders membership on this machine.';
+/** The copy of the former "Membership Key Not Active" alert (A-10), now the hint of the same row (M-9). */
+const KEY_NOT_ACTIVE_HINT =
+  "Your membership key could not be verified. Re-enter your key to restore your Ptah Builders membership. Ptah's local features remain available either way.";
 
 /**
  * LicenseStatusCardComponent — the "Membership & data" section card
@@ -55,12 +63,16 @@ const LOGOUT_FAILED = 'Could not log out.';
  * Ptah's local features are free for everyone; this card carries membership
  * identity only — no trial countdowns, no lockouts, no upgrade CTAs.
  *
- * One primary action per region (BRIEF #4): "Create Account" (community) or
- * "Manage Membership" (member) in the header; every other header action is
- * ghost/outline. The Data Portability actions (Export/Import, rows A8/A9)
- * are projected by `AdvancedSettingsComponent` through the
- * `[membership-actions]` / `[membership-notices]` slots — the writes and
- * their results stay owned by that shell.
+ * Layout (TASK_2026_2285_304a): plan and state are two badges in the aside, the one status display.
+ * The fields are setting rows: "Membership key" (community) or "Membership" (member), "Settings backup",
+ * "Ptah Builders" (community) and "Log out" (signed in).
+ *
+ * One primary action per region (BRIEF #4): "Create account" (community) or
+ * "Manage Membership" (member); every other action is ghost or secondary.
+ * The Data Portability actions (Export/Import, rows A8/A9) are projected by
+ * `AdvancedSettingsComponent` into the "Settings backup" row through the
+ * `[membership-actions]` slot (`[membership-notices]` follows the rows) — the
+ * writes and their results stay owned by that shell.
  *
  * The membership key entry is a credential popover (P12): single password
  * field with show/hide, format check plus the `license:setKey` server verify
@@ -83,7 +95,6 @@ const LOGOUT_FAILED = 'Could not log out.';
     LucideAngularModule,
     FormsModule,
     NativePopoverComponent,
-    PtahAlertComponent,
     PtahBadgeDirective,
     PtahButtonDirective,
     PtahFieldComponent,
@@ -93,284 +104,297 @@ const LOGOUT_FAILED = 'Could not log out.';
     PtahInputDirective,
     PtahDescriptionListComponent,
     PtahDescriptionItemComponent,
-    PtahStatusComponent,
+    PtahSettingRowComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
   template: `
     @if (!isLoadingLicenseStatus()) {
+      <!-- Glass on: the card owns the inset (global .settings-page rule), so the form section has no block padding. -->
       <ptah-form-section
         id="advanced-membership"
         heading="Membership &amp; data"
         description="Your plan, your membership key, and a copy of your settings."
         [wide]="true"
         [divider]="true"
+        [icon]="KeyIcon"
+        flushInGlass
         data-glass-surface="content"
       >
-        <!-- Membership (A1, A7): badges and status beside the actions; Export/Import are projected by the Advanced shell (A8/A9). -->
-
-          <span aside class="inline-flex flex-wrap items-center gap-[var(--ptah-gap-controls)]">
-            @if (isPremium()) {
-              <span ptahBadge appearance="outline" tone="accent">
-                <lucide-angular
-                  [img]="SparklesIcon"
-                  class="w-2.5 h-2.5"
-                  aria-hidden="true"
-                />
-                <span>Builder</span>
-              </span>
-            } @else {
-              <span ptahBadge appearance="outline">Community</span>
-            }
-            @if (licenseValid() && !licenseReason()) {
-              <ptah-status status="online" label="Active" appearance="inline" />
-            } @else if (licenseReason()) {
-              <ptah-status
-                status="warning"
-                label="Needs Attention"
-                appearance="inline"
+        <!-- Membership (A1, A7): the one status display. Plan and state are badges in the aside (M-8); the
+             status word keeps the text color, the icon carries the state ink. -->
+        <div aside class="flex flex-col gap-[var(--ptah-gap-controls)]">
+          <span class="inline-flex flex-wrap items-center gap-[var(--ptah-gap-controls)]" data-testid="membership-badges">
+            <span ptahBadge appearance="outline" [tone]="isPremium() ? 'accent' : 'neutral'" data-testid="membership-plan-badge">
+              <lucide-angular
+                [img]="isPremium() ? SparklesIcon : LayersIcon"
+                class="size-3 shrink-0"
+                aria-hidden="true"
               />
-            }
+              <span>{{ isPremium() ? 'Builder' : 'Community' }}</span>
+            </span>
+            <span ptahBadge appearance="outline" [tone]="membershipState().tone" data-testid="membership-state-badge">
+              <lucide-angular
+                [img]="membershipState().icon"
+                class="size-3 shrink-0"
+                [class.text-warning]="membershipState().tone === 'warn'"
+                [class.text-success]="membershipState().tone === 'ok'"
+                [class.text-base-content-muted]="membershipState().tone === 'neutral'"
+                aria-hidden="true"
+              />
+              <span class="text-base-content">{{ membershipState().label }}</span>
+            </span>
           </span>
-        <ptah-description-list density="compact">
-          <div ptahDescriptionItem term="Plan">
-            {{ isPremium() ? 'Builder' : 'Community' }}
-            @if (planDescription(); as description) {
-              @if (description.length <= 80) {
-                <span class="text-base-content-muted">{{ description }}</span>
-              }
+          @if (planDescription(); as description) {
+            @if (description.length <= 80) {
+              <p class="text-xs text-base-content-muted" data-testid="membership-plan-description">{{ description }}</p>
             }
-          </div>
-          <div ptahDescriptionItem term="State">
-            <ptah-status
-              [status]="licenseReason() ? 'warning' : licenseValid() ? 'online' : 'offline'"
-              [label]="licenseReason() ? 'Needs Attention' : licenseValid() ? 'Active' : 'Inactive'"
-              appearance="inline"
-            />
-          </div>
-          @if (userEmail()) {
+          }
+        </div>
+        @if (userEmail()) {
+          <ptah-description-list density="compact">
             <div ptahDescriptionItem term="Account" role="group" aria-label="User profile">
               @if (showUserName()) { <span>{{ userDisplayName() }}</span> }
               <span class="text-base-content-muted">{{ userEmail() }}</span>
             </div>
-          }
-        </ptah-description-list>
-        <div class="flex flex-wrap items-center gap-[var(--ptah-gap-controls)]">
-          <ng-content select="[membership-actions]" />
+          </ptah-description-list>
+        }
+        <!-- A-10: the key warning keeps its announcement. The region is always in the card, so a change of the
+             license status to expired or not active is announced with the recovery instruction. The visible copy is
+             the hint of the "Membership key" row. -->
+        <p class="sr-only" role="alert" aria-live="assertive" aria-atomic="true" data-testid="membership-key-announcement">{{ keyNotActive() ? keyNotActiveAnnouncement : '' }}</p>
+        <!-- One container for the rows: the first row has no top padding and the last row has no divider. -->
+        <div class="flex flex-col" data-testid="membership-rows">
           @if (isPremium()) {
-            <button type="button" ptahButton variant="primary" (click)="openPricing()">
-              <lucide-angular
-                [img]="ExternalLinkIcon"
-                class="w-3 h-3"
-                aria-hidden="true"
-              />
-              <span>Manage Membership</span>
-            </button>
-          } @else {
-            <ptah-native-popover
-              [isOpen]="keyPopoverOpen()"
-              placement="bottom-end"
-              [keepInViewport]="true"
-              [hasBackdrop]="true"
-              backdropClass="transparent"
-              (closed)="closeKeyPopover()"
+            <ptah-setting-row
+              label="Membership"
+              hint="Your plan and billing open in the browser."
+              controlAlign="end"
+              edgePadding="trim"
+              data-testid="membership-manage-row"
             >
-              <button
-                trigger
-                type="button"
-                ptahButton
-                variant="secondary"
-                (click)="openKeyPopover()"
-                data-testid="membership-key-trigger"
-              >
+              <button type="button" ptahButton variant="primary" (click)="openPricing()" data-testid="membership-manage">
                 <lucide-angular
-                  [img]="KeyIcon"
+                  [img]="ExternalLinkIcon"
                   class="w-3 h-3"
                   aria-hidden="true"
                 />
-                <span>Enter Membership Key</span>
+                <span>Manage Membership</span>
               </button>
-              <div
-                content
-                role="dialog"
-                aria-labelledby="membership-key-popover-title"
-                class="flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-[var(--ptah-gap-controls)] p-[var(--ptah-gap-field)] text-xs"
-                data-testid="membership-key-popover"
+            </ptah-setting-row>
+          } @else {
+            <!-- M-9: one key action. The former "Membership Key Not Active" alert is the hint of this row. -->
+            <ptah-setting-row
+              label="Membership key"
+              [hint]="keyNotActive() ? keyNotActiveHint : keyHint"
+              hintElementId="membership-key-hint"
+              controlAlign="end"
+              edgePadding="trim"
+              data-testid="membership-key-row"
+            >
+              <ptah-native-popover
+                [isOpen]="keyPopoverOpen()"
+                placement="bottom-end"
+                [keepInViewport]="true"
+                [hasBackdrop]="true"
+                backdropClass="transparent"
+                (closed)="closeKeyPopover()"
               >
-                <div class="flex items-center justify-between gap-[var(--ptah-gap-controls)]">
-                  <div class="flex items-center gap-[var(--ptah-gap-controls)]">
-                    <lucide-angular
-                      [img]="KeyIcon"
-                      class="w-3.5 h-3.5 text-primary"
-                      aria-hidden="true"
-                    />
-                    <h3
-                      id="membership-key-popover-title"
-                      class="text-xs font-bold text-base-content"
-                    >
-                      Enter Membership Key
-                    </h3>
-                  </div>
-                  <button
-                    type="button"
-                    ptahIconButton
-                    label="Close"
-                    (click)="closeKeyPopover()"
-                  >
-                    <lucide-angular
-                      [img]="CloseIcon"
-                      class="w-3 h-3"
-                      aria-hidden="true"
-                    />
-                  </button>
-                </div>
-                <ptah-field
-                  label="Membership key"
-                  size="sm"
-                  [error]="licenseKeyError() || null"
-                  errorRole="alert"
-                  errorTestId="membership-key-error"
-                >
-                  <input
-                    ptahInput
-                    size="sm"
-                    tone="mono"
-                    id="membership-key-input"
-                    [attr.type]="keyVisible() ? 'text' : 'password'"
-                    autocomplete="off"
-                    spellcheck="false"
-                    class="w-full text-xs text-base-content"
-                    placeholder="ptah_lic_..."
-                    aria-describedby="membership-key-help"
-                    [(ngModel)]="licenseKeyInput"
-                    (keydown.enter)="submitLicenseKey()"
-                    [disabled]="isSubmittingKey()"
-                    data-testid="membership-key-input"
-                  />
-                  <span ptahFieldTrailing class="flex items-center">
-                    <button
-                      type="button"
-                      ptahIconButton
-                      [label]="
-                        keyVisible()
-                          ? 'Hide membership key'
-                          : 'Show membership key'
-                      "
-                      (click)="keyVisible.set(!keyVisible())"
-                      [attr.aria-pressed]="keyVisible()"
-                      data-testid="membership-key-visibility"
-                    >
-                      <lucide-angular
-                        [img]="keyVisible() ? EyeOffIcon : EyeIcon"
-                        class="h-3.5 w-3.5"
-                        aria-hidden="true"
-                      />
-                    </button>
-                  </span>
-                  <p
-                    ptahFieldBeforeHint
-                    id="membership-key-help"
-                    class="text-xs text-base-content-muted"
-                  >
-                    Starts with "ptah_lic_" followed by 64 hex characters.
-                  </p>
-                </ptah-field>
                 <button
+                  trigger
                   type="button"
                   ptahButton
-                  variant="primary"
-                  class="w-full"
-                  (click)="submitLicenseKey()"
-                  [busy]="isSubmittingKey()"
-                  [disabled]="isSubmittingKey() || !licenseKeyInput()"
-                  data-testid="membership-key-activate"
+                  variant="secondary"
+                  (click)="openKeyPopover()"
+                  aria-haspopup="dialog"
+                  aria-describedby="membership-key-hint"
+                  data-testid="membership-key-trigger"
                 >
-                  @if (!isSubmittingKey()) {
-                    <lucide-angular
-                      [img]="CheckIcon"
-                      class="w-3 h-3"
-                      aria-hidden="true"
-                    />
-                  }
-                  <span>{{
-                    isSubmittingKey() ? 'Verifying...' : 'Activate'
-                  }}</span>
+                  <lucide-angular
+                    [img]="KeyIcon"
+                    class="w-3 h-3"
+                    aria-hidden="true"
+                  />
+                  <span>Enter membership key</span>
                 </button>
-              </div>
-            </ptah-native-popover>
-            <button type="button" ptahButton variant="ghost" (click)="openPricing()">
-              <lucide-angular
-                [img]="SparklesIcon"
-                class="w-3 h-3 text-secondary"
-                aria-hidden="true"
-              />
-              <span>Explore Ptah Builders</span>
-            </button>
-            <button type="button" ptahButton variant="primary" (click)="openSignup()">
-              <lucide-angular
-                [img]="UserPlusIcon"
-                class="w-3 h-3"
-                aria-hidden="true"
-              />
-              <span>Create Account</span>
-            </button>
+                  <div
+                    content
+                    role="dialog"
+                    aria-labelledby="membership-key-popover-title"
+                    class="flex w-80 max-w-[calc(100vw-2rem)] flex-col gap-[var(--ptah-gap-controls)] p-[var(--ptah-gap-field)] text-xs"
+                    data-testid="membership-key-popover"
+                  >
+                    <div class="flex items-center justify-between gap-[var(--ptah-gap-controls)]">
+                      <div class="flex items-center gap-[var(--ptah-gap-controls)]">
+                        <lucide-angular
+                          [img]="KeyIcon"
+                          class="w-3.5 h-3.5 text-primary"
+                          aria-hidden="true"
+                        />
+                        <h3
+                          id="membership-key-popover-title"
+                          class="text-xs font-bold text-base-content"
+                        >
+                          Enter Membership Key
+                        </h3>
+                      </div>
+                      <button
+                        type="button"
+                        ptahIconButton
+                        label="Close"
+                        (click)="closeKeyPopover()"
+                      >
+                        <lucide-angular
+                          [img]="CloseIcon"
+                          class="w-3 h-3"
+                          aria-hidden="true"
+                        />
+                      </button>
+                    </div>
+                    <ptah-field
+                      label="Membership key"
+                      size="sm"
+                      [error]="licenseKeyError() || null"
+                      errorRole="alert"
+                      errorTestId="membership-key-error"
+                    >
+                      <input
+                        ptahInput
+                        size="sm"
+                        tone="mono"
+                        id="membership-key-input"
+                        [attr.type]="keyVisible() ? 'text' : 'password'"
+                        autocomplete="off"
+                        spellcheck="false"
+                        class="w-full text-xs text-base-content"
+                        placeholder="ptah_lic_..."
+                        aria-describedby="membership-key-help"
+                        [(ngModel)]="licenseKeyInput"
+                        (keydown.enter)="submitLicenseKey()"
+                        [disabled]="isSubmittingKey()"
+                        data-testid="membership-key-input"
+                      />
+                      <span ptahFieldTrailing class="flex items-center">
+                        <button
+                          type="button"
+                          ptahIconButton
+                          [label]="
+                            keyVisible()
+                              ? 'Hide membership key'
+                              : 'Show membership key'
+                          "
+                          (click)="keyVisible.set(!keyVisible())"
+                          [attr.aria-pressed]="keyVisible()"
+                          data-testid="membership-key-visibility"
+                        >
+                          <lucide-angular
+                            [img]="keyVisible() ? EyeOffIcon : EyeIcon"
+                            class="h-3.5 w-3.5"
+                            aria-hidden="true"
+                          />
+                        </button>
+                      </span>
+                      <p
+                        ptahFieldBeforeHint
+                        id="membership-key-help"
+                        class="text-xs text-base-content-muted"
+                      >
+                        Starts with "ptah_lic_" followed by 64 hex characters.
+                      </p>
+                    </ptah-field>
+                    <button
+                      type="button"
+                      ptahButton
+                      variant="primary"
+                      class="w-full"
+                      (click)="submitLicenseKey()"
+                      [busy]="isSubmittingKey()"
+                      [disabled]="isSubmittingKey() || !licenseKeyInput()"
+                      data-testid="membership-key-activate"
+                    >
+                      @if (!isSubmittingKey()) {
+                        <lucide-angular
+                          [img]="CheckIcon"
+                          class="w-3 h-3"
+                          aria-hidden="true"
+                        />
+                      }
+                      <span>{{
+                        isSubmittingKey() ? 'Verifying...' : 'Activate'
+                      }}</span>
+                    </button>
+                  </div>
+              </ptah-native-popover>
+            </ptah-setting-row>
+          }
+          <!-- Export / Import and the import confirm, projected by the Advanced shell (A8/A9). -->
+          <ptah-setting-row
+            label="Settings backup"
+            hint="Export a copy of your settings, or import one."
+            controlAlign="end"
+            edgePadding="trim"
+            data-testid="membership-backup-row"
+          >
+            <ng-content select="[membership-actions]" />
+          </ptah-setting-row>
+          @if (!isPremium()) {
+            <ptah-setting-row
+              label="Ptah Builders"
+              hint="Create an account to unlock membership features."
+              controlAlign="end"
+              edgePadding="trim"
+              data-testid="membership-builders-row"
+            >
+              <button type="button" ptahButton variant="ghost" (click)="openPricing()" data-testid="membership-explore">
+                <span>Explore Ptah Builders</span>
+                <lucide-angular
+                  [img]="ExternalLinkIcon"
+                  class="w-3 h-3"
+                  aria-hidden="true"
+                />
+              </button>
+              <button type="button" ptahButton variant="primary" (click)="openSignup()" data-testid="membership-create-account">
+                <lucide-angular
+                  [img]="UserPlusIcon"
+                  class="w-3 h-3"
+                  aria-hidden="true"
+                />
+                <span>Create account</span>
+              </button>
+            </ptah-setting-row>
           }
           @if (userEmail()) {
-            <button
-              #logoutButton
-              class="[margin-inline-start:auto]"
-              type="button"
-              ptahButton
-              variant="ghost"
-              (click)="requestLogout()"
-              aria-label="Remove membership key and log out"
-              data-testid="logout-button"
+            <ptah-setting-row
+              label="Log out"
+              hint="Removes the membership key from this machine."
+              controlAlign="end"
+              edgePadding="trim"
+              data-testid="membership-logout-row"
             >
-              <lucide-angular
-                [img]="LogOutIcon"
-                class="w-3 h-3 text-error"
-                aria-hidden="true"
-              />
-              <span>Log Out</span>
-            </button>
+              <button
+                #logoutButton
+                type="button"
+                ptahButton
+                variant="ghost"
+                (click)="requestLogout()"
+                aria-label="Remove membership key and log out"
+                data-testid="logout-button"
+              >
+                <lucide-angular
+                  [img]="LogOutIcon"
+                  class="w-3 h-3 text-error"
+                  aria-hidden="true"
+                />
+                <span>Log Out</span>
+              </button>
+            </ptah-setting-row>
           }
         </div>
 
-        <!-- Import confirm / outcome, projected by the Advanced shell (A9). -->
+        <!-- Import outcome, projected by the Advanced shell (A9). -->
         <ng-content select="[membership-notices]" />
 
-        <!-- Membership key issue: key not found or inactive (A2). -->
-        @if (
-          isCommunity() &&
-          (licenseReason() === 'no_license' || licenseReason() === 'expired')
-        ) {
-          <ptah-alert
-            tone="warning"
-            live="assertive"
-            title="Membership Key Not Active"
-            data-testid="membership-key-alert"
-          >
-            Your membership key could not be verified. Re-enter your key to
-            restore your Ptah Builders membership. Ptah's local features remain
-            available either way.
-            <button
-              alertAction
-              type="button"
-              ptahButton
-              (click)="openKeyPopover()"
-              data-testid="membership-key-alert-action"
-            >
-              <lucide-angular
-                [img]="KeyIcon"
-                class="w-3 h-3 text-warning"
-                aria-hidden="true"
-              />
-              <span>Re-enter Membership Key</span>
-            </button>
-          </ptah-alert>
-        }
-
-        <!-- User profile (A3) with the inline Log out confirm (A4). -->
+        <!-- The inline Log out confirm (A4). -->
         @if (userEmail()) {
           @if (confirmingLogout()) {
             <ptah-inline-confirm
@@ -405,7 +429,12 @@ export class LicenseStatusCardComponent {
 
   readonly SparklesIcon = Sparkles;
   readonly UserPlusIcon = UserPlus;
-  readonly KeyIcon = Key;
+  readonly KeyIcon = KeyRound;
+  readonly LayersIcon = Layers;
+  protected readonly keyHint = KEY_HINT;
+  protected readonly keyNotActiveHint = KEY_NOT_ACTIVE_HINT;
+  /** The former alert title, then its copy. */
+  protected readonly keyNotActiveAnnouncement = `Membership key not active. ${KEY_NOT_ACTIVE_HINT}`;
   readonly ExternalLinkIcon = ExternalLink;
   readonly LogOutIcon = LogOut;
   readonly CloseIcon = X;
@@ -461,6 +490,34 @@ export class LicenseStatusCardComponent {
     () => this.chatStore.licenseStatus()?.reason,
   );
 
+  /** Key not found or inactive (A2): the "Membership key" row explains it and offers the one key action. */
+  readonly keyNotActive = computed(
+    () => this.isCommunity() && !!this.licenseReason(),
+  );
+
+  /** The state badge of the aside: a word in the text color and an icon that carries the state ink. */
+  readonly membershipState = computed(() => {
+    if (this.licenseReason()) {
+      return {
+        label: 'Needs attention',
+        tone: 'warn',
+        icon: TriangleAlert,
+      } as const;
+    }
+    if (this.licenseValid()) {
+      return {
+        label: 'Active',
+        tone: 'ok',
+        icon: CircleCheck,
+      } as const;
+    }
+    return {
+      label: 'Inactive',
+      tone: 'neutral',
+      icon: CircleAlert,
+    } as const;
+  });
+
   readonly userDisplayName = computed(() => {
     const first = this.userFirstName();
     const last = this.userLastName();
@@ -501,7 +558,7 @@ export class LicenseStatusCardComponent {
     });
   }
 
-  /** Opens the key popover from either trigger; a fresh open starts empty. */
+  /** Opens the key popover from its one trigger; a fresh open starts empty. */
   openKeyPopover(): void {
     this.resetKeyState();
     this.keyPopoverOpen.set(true);

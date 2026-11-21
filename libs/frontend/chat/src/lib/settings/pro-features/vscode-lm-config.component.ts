@@ -38,18 +38,20 @@ export const COULD_NOT_SET_DEFAULT_PROVIDER = 'Could not set the default provide
   host: { class: 'block' },
   template: `
     @if (vscodeLmProvider(); as provider) {
+      <!-- Glass on: the card owns the inset (global .settings-page rule), so the form section has no block padding. -->
       <ptah-form-section
         [wide]="true"
         [divider]="true"
         heading="VS Code language model"
         description="Uses models from VS Code's Language Model API. No API key required."
+        [icon]="CpuIcon"
+        flushInGlass
         aria-labelledby="vscode-lm-heading"
         data-glass-surface="content"
       >
         <!-- Provider header row -->
         <div class="flex items-center justify-between gap-[var(--ptah-gap-field)] mb-[var(--ptah-gap-controls)]">
           <div class="flex flex-wrap items-center gap-[var(--ptah-gap-controls)]">
-            <lucide-angular [img]="CpuIcon" class="w-4 h-4 text-secondary shrink-0" aria-hidden="true" />
             <h2 id="vscode-lm-heading" class="sr-only">
               {{ provider.displayName }}
             </h2>

@@ -13,7 +13,6 @@ import type {
 } from '@ptah-extension/shared';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 import { AgentOrchestrationConfigComponent } from './agent-orchestration-config.component';
-import { isDisabledControl } from '../feedback/busy-disabled.testing';
 
 const ready = <T>(data: T): ProvidersSettingsSection<T> => ({
   status: 'ready',
@@ -34,9 +33,6 @@ const idle: ProvidersSettingsCommit = {
   message: null,
 };
 const CONTEXT = { scopeKey: 'workspace', activePath: '/ws' };
-const HOST_ERROR =
-  'EACCES: permission denied, open /home/user/.config/settings.json';
-
 const detected = (
   cli: CliDetectionResult['cli'],
   installed: boolean,
@@ -139,70 +135,12 @@ describe('AgentOrchestrationConfigComponent (policy bar, Batch 33)', () => {
   const element = () => fixture.nativeElement as HTMLElement;
   const q = <T extends HTMLElement = HTMLElement>(selector: string) =>
     element().querySelector(selector) as T | null;
-  const slider = () => q<HTMLInputElement>('#agent-max-concurrent');
-  const value = () => slider()?.value;
   const chips = () =>
     Array.from(
       element().querySelectorAll('[data-testid^="policy-order-chip-"]'),
     ).map((chip) =>
       chip.getAttribute('data-testid')?.replace('policy-order-chip-', ''),
     );
-  const button = (testid: string) =>
-    q<HTMLButtonElement>(`[data-testid="${testid}"]`);
-  const popover = () => q('[data-testid="policy-order-popover"]');
-  const rows = () =>
-    Array.from(
-      element().querySelectorAll('[data-testid^="policy-order-row-"]'),
-    ).map((row) =>
-      row.getAttribute('data-testid')?.replace('policy-order-row-', ''),
-    );
-  async function flush() {
-    for (let i = 0; i < 8; i += 1) await Promise.resolve();
-    fixture.detectChanges();
-  }
-  async function openOrder() {
-    button('policy-order-edit')?.click();
-    fixture.detectChanges();
-    await fixture.whenStable();
-    fixture.detectChanges();
-    if (!popover()) throw new Error('Order popover did not open');
-  }
-  /**
-   * The next write stays in flight (commit `saving`, as the real state reports it) until the returned function is
-   * called; it then applies the patch like the default stub.
-   */
-  function deferNextSave(): (saved: boolean) => void {
-    let finish: (saved: boolean) => void = () => undefined;
-    state.saveSettings.mockImplementationOnce((patch) => {
-      state.commit.set({ ...idle, status: 'saving' });
-      return new Promise<boolean>((resolve) => {
-        finish = (saved) => {
-          const data = state.orchestration().data;
-          if (data)
-            state.orchestration.set(
-              ready({
-                ...data,
-                ...patch.orchestration,
-              } as ProvidersOrchestration),
-            );
-          state.commit.set({
-            ...idle,
-            status: 'saved',
-            saved: ['Orchestration policy'],
-          });
-          resolve(saved);
-        };
-      });
-    });
-    return (saved) => finish(saved);
-  }
-  function slide(to: number, event: 'input' | 'change') {
-    const input = slider();
-    if (!input) throw new Error('No slider');
-    input.value = String(to);
-    input.dispatchEvent(new Event(event));
-  }
-
   beforeEach(() => {
     state = new StateStub();
     // No ClaudeRpcService is provided: the bar has no private RPC path left.
@@ -223,20 +161,25 @@ describe('AgentOrchestrationConfigComponent (policy bar, Batch 33)', () => {
   });
 
   describe('structure (design-spec §1.2 item 2, deviation 5, RUX-9)', () => {
-    it('is one policy bar with the slider, the order chips and Re-detect', () => {
+    it('is one read-only order line: no Max concurrent, no Re-detect, no order editor (moved, R-3)', () => {
       const bar = q('[data-testid="settings-section-orchestration-policy"]');
       expect(bar).not.toBeNull();
-      expect(bar?.querySelector('#agent-max-concurrent')).not.toBeNull();
+      expect(q('[data-testid="orchestration-policy-bar"]')).not.toBeNull();
       expect(bar?.querySelector('[data-testid="policy-order"]')).not.toBeNull();
+      expect(q('#agent-max-concurrent')).toBeNull();
+      expect(q('[data-testid="policy-max-concurrent-input"]')).toBeNull();
+      expect(q('[data-testid="policy-redetect"]')).toBeNull();
+      expect(q('[data-testid="policy-order-edit"]')).toBeNull();
+      expect(q('[data-testid="policy-order-popover"]')).toBeNull();
+      expect(element().querySelectorAll('button, input')).toHaveLength(0);
+    });
+
+    it('owns no scroll area (decision 32, 44: one scroll owner)', () => {
       expect(
-        bar?.querySelector('[data-testid="policy-order-edit"]')?.className,
-      ).toContain('btn-sm');
-      expect(button('policy-redetect')?.getAttribute('aria-label')).toBe(
-        'Re-detect CLI agents',
-      );
-      expect(button('policy-redetect')?.textContent).toContain(
-        'Re-detect CLIs',
-      );
+        element().querySelector(
+          '.overflow-y-auto, .overflow-auto, .overflow-scroll',
+        ),
+      ).toBeNull();
     });
 
     it('keeps none of the old body: no Copilot toggle, no CLI cards, no "Manage … in Providers" repeats (RUX-9)', () => {
@@ -251,7 +194,7 @@ describe('AgentOrchestrationConfigComponent (policy bar, Batch 33)', () => {
       );
     });
 
-    it('shows the order as compact read-only chips with no move buttons on the bar (grip and drag live in the popover only)', () => {
+    it('shows the order as compact read-only chips with no move buttons (Reorder mode of the table moves lanes)', () => {
       const bar = q('[data-testid="settings-section-orchestration-policy"]');
       expect(
         bar?.querySelectorAll(
@@ -278,478 +221,19 @@ describe('AgentOrchestrationConfigComponent (policy bar, Batch 33)', () => {
       expect(element().querySelector('.cursor-grab')).toBeNull();
     });
 
-    it('names the whole order on the trigger (the chips may clip in a narrow box)', () => {
-      const trigger = button('policy-order-edit');
-      expect(trigger?.getAttribute('aria-label')).toBe(
-        'Preferred order: 1. Codex, 2. Antigravity, 3. Glm, 4. Copilot (off), 5. OpenCode. Edit order',
+    it('names the whole order for screen readers (the chips may clip in a narrow box)', () => {
+      expect(
+        q('[data-testid="policy-order-summary"]')?.textContent?.trim(),
+      ).toBe(
+        'Preferred order: 1. Codex, 2. Antigravity, 3. Glm, 4. Copilot (off), 5. OpenCode',
       );
-      expect(trigger?.getAttribute('aria-haspopup')).toBe('dialog');
-      expect(trigger?.getAttribute('aria-expanded')).toBe('false');
+      expect(q('[data-testid="policy-order-summary"]')?.className).toContain(
+        'sr-only',
+      );
     });
   });
 
-  describe('max concurrent agents (#74, plan §3 row 891)', () => {
-    it('is a labelled 1-100 integer number input showing the saved value', () => {
-      expect(slider()?.type).toBe('number');
-      expect(slider()?.min).toBe('1');
-      expect(slider()?.max).toBe('100');
-      expect(slider()?.step).toBe('1');
-      expect(slider()?.valueAsNumber).toBe(3);
-      expect(value()).toBe('3');
-      expect(slider()?.getAttribute('aria-label')).toContain('Max concurrent');
-      expect(q('label[for="agent-max-concurrent"]')?.textContent).toContain(
-        'Max Concurrent',
-      );
-    });
-
-    it('saves nothing until the value is committed', () => {
-      slide(7, 'input');
-      fixture.detectChanges();
-      expect(state.saveSettings).not.toHaveBeenCalled();
-    });
-
-    it('saves on commit through the state, with a toast and an Undo that writes the previous value', async () => {
-      slide(7, 'change');
-      await flush();
-      expect(state.saveSettings).toHaveBeenCalledWith(
-        { orchestration: { maxConcurrentAgents: 7 } },
-        CONTEXT,
-      );
-      expect(value()).toBe('7');
-      expect(feedback.toast()).toEqual({
-        tone: 'status',
-        message: 'Saved max concurrent agents to All Ptah apps.',
-        canUndo: true,
-      });
-      await feedback.undo();
-      await flush();
-      expect(state.saveSettings).toHaveBeenLastCalledWith(
-        { orchestration: { maxConcurrentAgents: 3 } },
-        CONTEXT,
-      );
-      expect(value()).toBe('3');
-    });
-
-    it.each([
-      [100, 100],
-      [250, 100],
-      [0, 1],
-      [-4, 1],
-      [7.6, 8],
-    ])('commits %s as %s (rounded, clamped to 1-100)', async (typed, saved) => {
-      slide(typed, 'change');
-      await flush();
-      expect(state.saveSettings).toHaveBeenCalledWith(
-        { orchestration: { maxConcurrentAgents: saved } },
-        CONTEXT,
-      );
-    });
-
-    it('keeps the previous value when the field is emptied', async () => {
-      const input = slider();
-      if (!input) throw new Error('No input');
-      input.value = '';
-      input.dispatchEvent(new Event('change'));
-      await flush();
-      expect(state.saveSettings).not.toHaveBeenCalled();
-      expect(input.value).toBe('3');
-    });
-
-    it('D15: a failed save shows the saved value again and an alert, never "Saved"', async () => {
-      state.persist = false;
-      slide(9, 'change');
-      await flush();
-      expect(value()).toBe('3');
-      expect(slider()?.valueAsNumber).toBe(3);
-      expect(feedback.toast()?.tone).toBe('alert');
-      expect(feedback.toast()?.message).toContain(
-        'Could not save max concurrent agents.',
-      );
-    });
-
-    it('writes nothing when committed on the saved value or before the state is read', async () => {
-      slide(3, 'change');
-      await flush();
-      expect(state.saveSettings).not.toHaveBeenCalled();
-      state.orchestration.set(unloaded());
-      fixture.detectChanges();
-      expect(value()).toBe('');
-      expect(isDisabledControl(slider())).toBe(true);
-    });
-  });
-
-  describe('preferred order popover (#73, plan §3 row 892)', () => {
-    it('keeps the dialog scrollable and inside the viewport, with initial focus on its title', async () => {
-      await openOrder();
-      expect(popover()?.className).toContain('max-h-[calc(100vh_-_var(--ptah-space-8))]');
-      expect(popover()?.className).toContain('overflow-y-auto');
-      expect(q('#policy-order-title')?.getAttribute('tabindex')).toBe('-1');
-      expect(popover()?.querySelector('button:focus')).toBeNull();
-      expect(button('policy-order-edit')?.getAttribute('aria-label')).toContain('Edit order');
-    });
-    it('turns off the trigger focus tooltip only while the closed popover returns focus', async () => {
-      await openOrder();
-      jest.useFakeTimers();
-      try {
-        const cmp = fixture.componentInstance as unknown as {
-          closeOrder(): void;
-          orderFocusReturning(): boolean;
-        };
-        expect(cmp.orderFocusReturning()).toBe(false);
-        cmp.closeOrder();
-        expect(cmp.orderFocusReturning()).toBe(true);
-        jest.runOnlyPendingTimers();
-        expect(cmp.orderFocusReturning()).toBe(false);
-      } finally {
-        jest.useRealTimers();
-      }
-    });
-    it('opens a dialog listing the installed agents in the matrix order, with 24 px ▲/▼ per row', async () => {
-      await openOrder();
-      expect(popover()?.getAttribute('role')).toBe('dialog');
-      expect(button('policy-order-edit')?.getAttribute('aria-expanded')).toBe(
-        'true',
-      );
-      expect(rows()).toEqual([
-        'codex',
-        'antigravity',
-        'glm-1',
-        'copilot',
-        'opencode',
-      ]);
-      expect(
-        q('[data-testid="policy-order-row-copilot"]')?.textContent,
-      ).toContain('off');
-      const up = button('policy-order-up-antigravity');
-      expect(up?.getAttribute('aria-label')).toBe('Move Antigravity up');
-      expect(
-        button('policy-order-down-antigravity')?.getAttribute('aria-label'),
-      ).toBe('Move Antigravity down');
-      // 32 px square target (btn-sm btn-square), the Settings touch-target floor.
-      for (const size of ['btn-sm', 'btn-square'])
-        expect(up?.className).toContain(size);
-    });
-
-    it('disables ▲ on the first row and ▼ on the last', async () => {
-      await openOrder();
-      expect(isDisabledControl(button('policy-order-up-codex'))).toBe(true);
-      expect(isDisabledControl(button('policy-order-down-codex'))).toBe(false);
-      expect(isDisabledControl(button('policy-order-up-opencode'))).toBe(false);
-      expect(isDisabledControl(button('policy-order-down-opencode'))).toBe(
-        true,
-      );
-    });
-
-    it('moves an agent down, then up, writing the whole order each time, with Undo', async () => {
-      await openOrder();
-      button('policy-order-down-codex')?.click();
-      await flush();
-      expect(state.saveSettings).toHaveBeenLastCalledWith(
-        {
-          orchestration: {
-            preferredAgentOrder: [
-              'antigravity',
-              'codex',
-              'glm-1',
-              'copilot',
-              'opencode',
-            ],
-          },
-        },
-        CONTEXT,
-      );
-      expect(rows()).toEqual([
-        'antigravity',
-        'codex',
-        'glm-1',
-        'copilot',
-        'opencode',
-      ]);
-      expect(chips()).toEqual([
-        'antigravity',
-        'codex',
-        'glm-1',
-        'copilot',
-        'opencode',
-      ]);
-      expect(feedback.toast()?.message).toBe(
-        'Saved preferred agent order to All Ptah apps.',
-      );
-      button('policy-order-up-opencode')?.click();
-      await flush();
-      expect(state.saveSettings).toHaveBeenLastCalledWith(
-        {
-          orchestration: {
-            preferredAgentOrder: [
-              'antigravity',
-              'codex',
-              'glm-1',
-              'opencode',
-              'copilot',
-            ],
-          },
-        },
-        CONTEXT,
-      );
-      await feedback.undo();
-      await flush();
-      expect(state.saveSettings).toHaveBeenLastCalledWith(
-        {
-          orchestration: {
-            preferredAgentOrder: [
-              'antigravity',
-              'codex',
-              'glm-1',
-              'copilot',
-              'opencode',
-            ],
-          },
-        },
-        CONTEXT,
-      );
-      expect(q('[data-testid="policy-order-error"]')).toBeNull();
-    });
-
-    it('keeps focus on the moved row: the button used, or its other one at the end', async () => {
-      await openOrder();
-      button('policy-order-down-glm-1')?.click();
-      await flush();
-      TestBed.tick();
-      expect(document.activeElement).toBe(button('policy-order-down-glm-1'));
-      button('policy-order-down-glm-1')?.click();
-      await flush();
-      TestBed.tick();
-      expect(rows()).toEqual([
-        'codex',
-        'antigravity',
-        'copilot',
-        'opencode',
-        'glm-1',
-      ]);
-      expect(document.activeElement).toBe(button('policy-order-up-glm-1'));
-    });
-
-    it('a dragged row saves the whole new order and announces its new position', async () => {
-      await openOrder();
-      const row = (id: string) => q(`[data-testid="policy-order-row-${id}"]`);
-      const drag = (type: string, target: HTMLElement | null) => {
-        const event = new Event(type, { bubbles: true, cancelable: true });
-        // jsdom has no layout: every row box is 0 high, so each dragover lands after the row.
-        Object.defineProperties(event, {
-          clientY: { value: 0 },
-          dataTransfer: {
-            value: {
-              effectAllowed: 'none',
-              dropEffect: 'none',
-              setData: jest.fn(),
-            },
-          },
-        });
-        target?.dispatchEvent(event);
-        fixture.detectChanges();
-      };
-      drag('dragstart', row('codex'));
-      drag('dragover', row('copilot'));
-      expect(
-        q(
-          '[data-testid="policy-order-row-opencode"] [data-testid="policy-order-drop-indicator"]',
-        ),
-      ).not.toBeNull();
-      drag('drop', row('copilot'));
-      await flush();
-      TestBed.tick();
-      expect(state.saveSettings).toHaveBeenLastCalledWith(
-        {
-          orchestration: {
-            preferredAgentOrder: [
-              'antigravity',
-              'glm-1',
-              'copilot',
-              'codex',
-              'opencode',
-            ],
-          },
-        },
-        CONTEXT,
-      );
-      expect(rows()).toEqual([
-        'antigravity',
-        'glm-1',
-        'copilot',
-        'codex',
-        'opencode',
-      ]);
-      expect(q('[data-testid="policy-order-live"]')?.textContent?.trim()).toBe(
-        'Codex moved to position 4 of 5',
-      );
-      expect(document.activeElement).toBe(button('policy-order-down-codex'));
-    });
-
-    it('D15: a failed move keeps the saved order; the toast reports it, the popover shows no host text', async () => {
-      state.persist = false;
-      state.saveSettings.mockImplementation(async () => {
-        state.commit.set({
-          ...idle,
-          status: 'failed',
-          unsaved: ['Orchestration policy'],
-          message: HOST_ERROR,
-        });
-        return true;
-      });
-      await openOrder();
-      button('policy-order-down-codex')?.click();
-      await flush();
-      expect(rows()).toEqual([
-        'codex',
-        'antigravity',
-        'glm-1',
-        'copilot',
-        'opencode',
-      ]);
-      expect(q('[data-testid="policy-order-error"]')).toBeNull();
-      expect(popover()?.textContent).not.toContain('EACCES');
-      expect(feedback.toast()?.tone).toBe('alert');
-    });
-
-    it('m-1: a refused move is reported by the toast even when commit() still says an earlier save was "saved"', async () => {
-      state.commit.set({
-        ...idle,
-        status: 'saved',
-        saved: ['Orchestration policy'],
-      });
-      state.saveSettings.mockImplementationOnce(async () => false);
-      await openOrder();
-      button('policy-order-down-codex')?.click();
-      await flush();
-      expect(state.commit().status).toBe('saved');
-      expect(rows()).toEqual([
-        'codex',
-        'antigravity',
-        'glm-1',
-        'copilot',
-        'opencode',
-      ]);
-      expect(q('[data-testid="policy-order-error"]')).toBeNull();
-      expect(feedback.toast()).toEqual({
-        tone: 'alert',
-        message: 'Another change is still saving.',
-        canUndo: false,
-      });
-    });
-
-    it('m-1: a write that throws is reported by the toast', async () => {
-      state.commit.set({
-        ...idle,
-        status: 'saved',
-        saved: ['Orchestration policy'],
-      });
-      state.saveSettings.mockImplementationOnce(async () => {
-        throw new Error(HOST_ERROR);
-      });
-      await openOrder();
-      button('policy-order-down-codex')?.click();
-      await flush();
-      expect(q('[data-testid="policy-order-error"]')).toBeNull();
-      expect(popover()?.textContent).not.toContain('EACCES');
-      expect(feedback.toast()?.tone).toBe('alert');
-    });
-
-    it('V36-8: the popover is titled by a non-heading element (no skipped heading level)', async () => {
-      await openOrder();
-      const title = q('#policy-order-title');
-      expect(title?.tagName).toBe('P');
-      expect(title?.textContent?.trim()).toBe('Preferred order');
-      expect(popover()?.getAttribute('aria-labelledby')).toBe(
-        'policy-order-title',
-      );
-      expect(popover()?.querySelector('h1, h2, h3, h4, h5, h6')).toBeNull();
-    });
-
-    it('V36-2: helper text is at least 12 px (text-xs); no 10 or 11 px text anywhere', async () => {
-      await openOrder();
-      const small = Array.from(
-        element().querySelectorAll<HTMLElement>(
-          '[class*="text-[10px]"], [class*="text-[11px]"]',
-        ),
-      );
-      expect(small).toHaveLength(0);
-      expect(q('[data-testid="policy-order"]')?.className).toContain('text-xs');
-    });
-
-    it('closes on Escape and returns focus to the trigger', async () => {
-      const trigger = button('policy-order-edit');
-      trigger?.focus();
-      await openOrder();
-      popover()?.dispatchEvent(
-        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
-      );
-      await flush();
-      expect(popover()).toBeNull();
-      expect(trigger?.getAttribute('aria-expanded')).toBe('false');
-      expect(document.activeElement).toBe(trigger);
-    });
-
-    it('cannot reorder until both the policy and the instances are read (an order from one would drop the other)', async () => {
-      state.cliAgents.set(unloaded());
-      fixture.detectChanges();
-      expect(chips()).toEqual(['codex', 'antigravity', 'copilot', 'opencode']);
-      await openOrder();
-      const down = button('policy-order-down-codex');
-      expect(down?.getAttribute('aria-disabled')).toBe('true');
-      down?.click();
-      await flush();
-      expect(state.saveSettings).not.toHaveBeenCalled();
-    });
-
-    it('cannot reorder while a save runs (D3): the buttons are aria-disabled and ignore clicks, not natively disabled', async () => {
-      await openOrder();
-      expect(
-        button('policy-order-down-codex')?.hasAttribute('aria-disabled'),
-      ).toBe(false);
-      const finish = deferNextSave();
-      button('policy-order-down-codex')?.click();
-      await flush();
-      expect(state.saveSettings).toHaveBeenCalledTimes(1);
-      const down = button('policy-order-down-antigravity');
-      expect(down?.getAttribute('aria-disabled')).toBe('true');
-      // Native `disabled` only marks the ends; a disabled focused button would drop focus to the page (Batch 36).
-      expect(down?.disabled).toBe(false);
-      down?.click();
-      await flush();
-      expect(state.saveSettings).toHaveBeenCalledTimes(1);
-      finish(true);
-      await flush();
-      expect(
-        button('policy-order-down-antigravity')?.hasAttribute('aria-disabled'),
-      ).toBe(false);
-    });
-
-    it('keeps focus on the button used while the save runs, and Esc then closes and returns focus to the trigger', async () => {
-      const trigger = button('policy-order-edit');
-      trigger?.focus();
-      await openOrder();
-      const finish = deferNextSave();
-      const down = button('policy-order-down-codex');
-      down?.focus();
-      down?.click();
-      await flush();
-      // Saving: the button is aria-disabled, still focusable, and keeps focus.
-      expect(down?.getAttribute('aria-disabled')).toBe('true');
-      expect(document.activeElement).toBe(down);
-      popover()?.dispatchEvent(
-        new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
-      );
-      await flush();
-      expect(popover()).toBeNull();
-      expect(document.activeElement).toBe(trigger);
-      // The save finishing later neither reopens the popover nor takes focus from the trigger.
-      finish(true);
-      await flush();
-      TestBed.tick();
-      expect(popover()).toBeNull();
-      expect(document.activeElement).toBe(trigger);
-    });
-
+  describe('empty and loading text', () => {
     it('says so when no agent is installed', () => {
       state.orchestration.set(
         ready({ ...ORCHESTRATION, detectedClis: [detected('pi', false)] }),
@@ -759,69 +243,16 @@ describe('AgentOrchestrationConfigComponent (policy bar, Batch 33)', () => {
       expect(q('[data-testid="policy-order-empty"]')?.textContent?.trim()).toBe(
         'No CLI agent installed yet.',
       );
-      expect(button('policy-order-edit')).toBeNull();
-    });
-  });
-
-  describe('Re-detect (#72)', () => {
-    it('re-detects through the state and announces completion', async () => {
-      button('policy-redetect')?.click();
-      await flush();
-      expect(state.redetectClis).toHaveBeenCalledTimes(1);
-      expect(feedback.toast()).toEqual({
-        tone: 'status',
-        message: 'CLI agents re-detected.',
-        canUndo: false,
-      });
-      expect(q('[data-testid="policy-redetect-error"]')).toBeNull();
     });
 
-    it('is disabled with a spinner while detection runs', () => {
-      state.cliDetection.set({ status: 'loading', data: null, error: null });
+    it('says Loading… before the policy is read', () => {
+      state.orchestration.set({ status: 'loading', data: null, error: null });
+      state.cliAgents.set({ status: 'loading', data: null, error: null });
       fixture.detectChanges();
-      expect(isDisabledControl(button('policy-redetect'))).toBe(true);
-      expect(button('policy-redetect')?.textContent).toContain('Detecting…');
+      expect(q('[data-testid="policy-order-empty"]')?.textContent?.trim()).toBe(
+        'Loading…',
+      );
     });
-
-    it.each([
-      [
-        'a failed detection',
-        async (s: StateStub) => {
-          s.cliDetection.set({
-            status: 'error',
-            data: null,
-            error:
-              HOST_ERROR as string as ProvidersSettingsSection<unknown>['error'],
-          });
-          return false;
-        },
-      ],
-      [
-        'a failed detection while an overlapping one left the section ready',
-        async () => false,
-      ],
-      [
-        'a thrown command',
-        async () => {
-          throw new Error(HOST_ERROR);
-        },
-      ],
-    ])(
-      'announces a fixed sentence after %s, never the host text',
-      async (_label, run) => {
-        state.redetectClis.mockImplementation(() => run(state));
-        button('policy-redetect')?.click();
-        await flush();
-        expect(feedback.toast()).toEqual({
-          tone: 'alert',
-          message:
-            'Could not re-detect CLI agents. Your saved settings have not changed.',
-          canUndo: false,
-        });
-        expect(element().textContent).not.toContain('EACCES');
-        expect(isDisabledControl(button('policy-redetect'))).toBe(false);
-      },
-    );
   });
 
   describe('order strip: only whole chips, then "+N" (Batch 53.4, B38-4)', () => {
@@ -874,7 +305,7 @@ describe('AgentOrchestrationConfigComponent (policy bar, Batch 33)', () => {
       fixture.detectChanges();
     }
 
-    it('a narrow strip shows the whole chips that fit and "+N" for the rest; the Edit button names the whole order', () => {
+    it('a narrow strip shows the whole chips that fit and "+N" for the rest; the summary names the whole order', () => {
       fixture.detectChanges();
       // 5 chips need 60·5 + 4·18 = 372 px. In 200 px: two chips (60 + 78) plus "→ +3" (43) = 181 px.
       layOut(200);
@@ -882,8 +313,11 @@ describe('AgentOrchestrationConfigComponent (policy bar, Batch 33)', () => {
       expect(q('[data-testid="policy-order-more"]')?.textContent?.trim()).toBe(
         '+3',
       );
-      expect(button('policy-order-edit')?.getAttribute('aria-label')).toContain(
-        '5. OpenCode. Edit order',
+      expect(
+        q('[data-testid="policy-order-more"]')?.getAttribute('title'),
+      ).toContain('5. OpenCode');
+      expect(q('[data-testid="policy-order-summary"]')?.textContent).toContain(
+        '5. OpenCode',
       );
     });
 

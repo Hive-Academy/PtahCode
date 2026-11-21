@@ -45,10 +45,12 @@ import {
   type RuntimeHostCapabilities,
   type RuntimeConsumer,
   type CodexProfileSeed,
+  type ProviderSessionSeed,
   sessionRuntimeIdentityMismatch,
   type AnthropicProvider,
   createEmptyAuthEnv,
   getAnthropicProvider,
+  isProviderSessionProviderId,
   getProviderAuthEnvVar,
   OLLAMA_CLOUD_DIRECT_BASE_URL,
   ANTHROPIC_DIRECT_PROVIDER_ID,
@@ -75,10 +77,15 @@ import type { AuthManager } from './auth-manager';
 import type { ModelResolver } from './model-resolver';
 import type { ProviderProxyPool } from './provider-proxy-pool';
 import { isStoredModelOffered } from './stored-model-offer';
+import {
+  providerSessionTargetOf,
+  resolveProviderSessionExecution,
+} from './provider-session-execution';
 import { API_KEY_RECOVERY_HINT } from './auth-method.utils';
 import { ClaudeAmbientLoginStatusReader } from '../accounts/claude-ambient-login-status';
 import { OLLAMA_AUTH_TOKEN_PLACEHOLDER } from '../providers/local';
 import { codexNativeRuntimeRequired } from './codex-native-runtime-refusal';
+import { providerSessionNativeRuntimeRequired } from './provider-session-runtime-refusal';
 
 /**
  * Start a workspace snapshot with every tier-scoped key PRESENT and
@@ -135,6 +142,10 @@ export type ResolvedExecutionProfile =
         readonly used: string;
         readonly reason: 'not-in-catalog' | 'case-mismatch';
       };
+    }
+  | {
+      runtime: 'provider-session';
+      seed: ProviderSessionSeed;
     };
 
 @injectable()
@@ -258,6 +269,17 @@ export class WorkspaceProviderProfileResolver {
           existingIdentity,
         },
       };
+    }
+    const providerSession = providerSessionTargetOf(
+      input,
+      () =>
+        this.activeProviderResolver.resolveActiveAuthForPath(workspacePath)
+          .providerId,
+    );
+    if (providerSession) {
+      return resolveProviderSessionExecution(input, providerSession, (id) =>
+        this.providerModels.getCachedModelIds(id),
+      );
     }
     // A stored session keeps its own provider; only a new session follows the
     // workspace's active provider.
@@ -483,6 +505,9 @@ export class WorkspaceProviderProfileResolver {
     // This also protects callers that bypass resolveExecutionProfile, including
     // hosts whose AGENT_ADAPTER alias points directly at SdkAgentAdapter.
     if (providerId === 'openai-codex') this.rejectLegacyCodexProfile();
+    if (isProviderSessionProviderId(providerId)) {
+      throw providerSessionNativeRuntimeRequired(providerId);
+    }
     try {
       if (authMethod === 'claudeCli') {
         return this.buildNativeAnthropicProfile(requestedModel);

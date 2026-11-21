@@ -16,7 +16,9 @@ export type TurnStopCause =
   | 'parent-steer'
   | 'runtime-cap'
   | 'host-stop'
-  | 'internal-abort';
+  | 'internal-abort'
+  /** "Interrupt & send": the turn was cut to send a queued follow-up now. */
+  | 'send-now';
 
 /**
  * Wire payload for `MESSAGE_TYPES.SESSION_COMPACTION_COMPLETE`

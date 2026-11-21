@@ -1,0 +1,33 @@
+{
+  "name": "@ptah-extension/provider-session-contracts",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "projectType": "library",
+  "sourceRoot": "libs/backend/provider-session-contracts/src",
+  "tags": [
+    "scope:extension",
+    "type:feature"
+  ],
+  "targets": {
+    "build": {
+      "executor": "@nx/esbuild:esbuild",
+      "outputs": [
+        "{options.outputPath}"
+      ],
+      "options": {
+        "outputPath": "dist/libs/backend/provider-session-contracts",
+        "main": "libs/backend/provider-session-contracts/src/index.ts",
+        "tsConfig": "libs/backend/provider-session-contracts/tsconfig.lib.json",
+        "assets": [],
+        "format": [
+          "cjs"
+        ]
+      }
+    },
+    "typecheck": {
+      "executor": "nx:run-commands",
+      "options": {
+        "command": "tsc --noEmit --project libs/backend/provider-session-contracts/tsconfig.lib.json"
+      }
+    }
+  }
+}

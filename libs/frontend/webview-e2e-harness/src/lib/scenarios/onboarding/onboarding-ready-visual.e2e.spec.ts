@@ -162,7 +162,7 @@ async function expectStageOne(page: Page, id: StageOneId): Promise<void> {
   await expect(page.locator(STAGE_ONE)).toBeVisible();
   const panel = page.locator('[data-testid="ready-claude-panel"]');
   await expect(panel).toHaveAttribute('data-state', DERIVED_STATE[id]);
-  await expect(panel.locator('header > span')).toContainText(
+  await expect(panel.getByTestId('ready-panel-status')).toContainText(
     STAGE_ONE_TEXT[id].chip,
   );
   const line = STAGE_ONE_TEXT[id].line;

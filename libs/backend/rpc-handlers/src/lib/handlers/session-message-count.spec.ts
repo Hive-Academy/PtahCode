@@ -173,3 +173,64 @@ describe('SessionMessageCounter', () => {
     expect(second).not.toHaveBeenCalled();
   });
 });
+
+describe('SessionMessageCounter — SDK-written assistant entries (TASK_2026_2288_5a47)', () => {
+  beforeEach(() => {
+    jest.useFakeTimers({
+      doNotFake: ['nextTick', 'setImmediate', 'queueMicrotask'],
+    });
+    mockStat.mockReset().mockResolvedValue(FILE_STATS as never);
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+  });
+
+  const prompt = (text: string): string =>
+    JSON.stringify({ type: 'user', message: { role: 'user', content: text } });
+  const reply = (model: string, text: string): string =>
+    JSON.stringify({
+      type: 'assistant',
+      message: { role: 'assistant', model, content: [{ type: 'text', text }] },
+    });
+
+  async function countOf(lines: readonly string[]): Promise<number | undefined> {
+    const { counter } = makeCounter(async (_filePath, visit) => {
+      lines.forEach((line) => visit(line));
+      return { lines: lines.length, yields: 0 };
+    });
+    counter.peekAndWarm([ref(1)]);
+    await flush();
+    return counter.peekAndWarm([ref(1)]).get('session-1');
+  }
+
+  it('does not count the synthetic no-response placeholder as a reply', async () => {
+    await expect(
+      countOf([
+        prompt('first'),
+        reply('<synthetic>', 'No response requested.'),
+        prompt('second'),
+      ]),
+    ).resolves.toBe(2);
+  });
+
+  it('counts the same text from a real model', async () => {
+    await expect(
+      countOf([
+        prompt('first'),
+        reply('claude-opus-4', 'No response requested.'),
+        prompt('second'),
+      ]),
+    ).resolves.toBe(3);
+  });
+
+  it('does not count an interrupt-sentinel-only assistant entry', async () => {
+    await expect(
+      countOf([
+        prompt('first'),
+        reply('claude-opus-4', '[Request interrupted by user]'),
+        prompt('second'),
+      ]),
+    ).resolves.toBe(2);
+  });
+});

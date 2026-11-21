@@ -317,6 +317,22 @@ describe('MessageFinalizationService', () => {
       expect(finalized[1].streamingState).toBeNull();
     });
 
+    it('labels the placeholder send-now when "Interrupt & send" cut a turn with no reply', () => {
+      const prompt = { id: 'prompt', role: 'user' } as ExecutionChatMessage;
+      const queued = { id: 'queued', role: 'user' } as ExecutionChatMessage;
+      const messages = [prompt, queued];
+      TestBed.inject(QueuedPromptRecord).add('tab-1', queued.id, messages);
+      tabsSignal.set([makeTab({ messages, streamingState: makeStreamingState() })]);
+      activeTabIdSignal.set('tab-1');
+
+      service.finalizeCurrentMessage(undefined, true, true, 'send-now');
+
+      const finalized = tabManager.applyFinalizedTurn.mock.calls[0][1];
+      expect(finalized.map((message) => message.role)).toEqual(['user', 'assistant', 'user']);
+      expect(finalized[1].isInterrupted).toBe(true);
+      expect(finalized[1].stopCause).toBe('send-now');
+    });
+
     it.each([undefined, 'internal-abort'] as const)('does not add a synthetic row for an unlabelled abort (%s)', (stopCause) => {
       const prompt = { id: 'prompt', role: 'user' } as ExecutionChatMessage;
       tabsSignal.set([makeTab({ messages: [prompt], streamingState: makeStreamingState() })]);

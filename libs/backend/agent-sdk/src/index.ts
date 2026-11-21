@@ -53,6 +53,9 @@ export {
   flushSessionMetadataStores,
   SESSION_METADATA_MIGRATION,
   SESSION_METADATA_WORKER_CACHE_EXCLUSIONS,
+  ProviderSessionMetadataError,
+  nativeExecutionOf,
+  parseProviderSessionThreadRecord,
 } from './lib/session-metadata-store';
 export {
   LegacySessionStoreMigrator,
@@ -65,6 +68,8 @@ export type {
   SessionMetadata,
   PersistedAgentOutput,
   TaggedAgentOutputItem,
+  ProviderSessionThreadRecord,
+  ProviderSessionThreadRecordUpdater,
 } from './lib/session-metadata-store';
 export { SessionImporterService } from './lib/session-importer.service';
 export {
@@ -81,6 +86,8 @@ export {
 } from './lib/codex-app-server/session-history-router';
 export type {
   NativeSessionHistoryPort,
+  ProviderSessionHistory,
+  ProviderSessionHistoryPort,
   SessionHistoryReadResult,
   SessionHistoryRouteErrorCode,
 } from './lib/codex-app-server/session-history-router';
@@ -190,6 +197,8 @@ export {
   AuthRequiredError,
   CODEX_NATIVE_RUNTIME_REQUIRED_MESSAGE,
   isCodexNativeRuntimeRefusal,
+  isNativeRuntimeRefusal,
+  isProviderSessionNativeRuntimeRefusal,
   InternalQueryQueueTimeoutError,
 } from './lib/errors';
 // Electron codex-runtime-composition.spec.ts and di/register.ts consume registration; hosts must override only nullable port tokens.
@@ -223,8 +232,18 @@ export {
   isWebviewReportedError,
   type CodexChatAdapterErrorCode,
 } from './lib/codex-app-server/codex-chat-adapter-error';
+export {
+  ProviderSessionChatAdapterError,
+  isProviderSessionChatAdapterError,
+  type ProviderSessionChatAdapterErrorCode,
+  type ProviderSessionChatAdapterErrorOptions,
+} from './lib/provider-session/provider-session-chat-adapter-error';
 export type { RuntimeAdmissionPort } from './lib/codex-app-server/routing-agent-adapter';
-export type { SessionApprovalRouter } from './lib/codex-app-server/session-approval-router';
+export type {
+  SessionApprovalRouter,
+  ProviderSessionApprovalOwnerSink,
+  ProviderSessionApprovalReply,
+} from './lib/codex-app-server/session-approval-router';
 export type {
   NativeSessionControls,
   StreamlessFollowUpAdmission,

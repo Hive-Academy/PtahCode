@@ -39,6 +39,12 @@ export type ResolvedChatExecution =
       readonly cwd: string;
       /** Complete chat inputs for the host's validated Codex profile builder. */
       readonly config: ChatRuntimeConfig;
+    })
+  | (Extract<ResolvedExecutionProfile, { runtime: 'provider-session' }> & {
+      readonly workspacePath: string;
+      readonly cwd: string;
+      /** Complete chat inputs for the provider-session adapter. */
+      readonly config: ChatRuntimeConfig;
     });
 
 /**
@@ -68,21 +74,29 @@ export async function resolveClaudeExecution(
   };
 }
 
-/** Existing sessions without native metadata retain their Claude runtime. */
+/**
+ * Existing sessions without native metadata (Codex or provider session)
+ * retain their Claude runtime.
+ */
 export function storedChatRuntimeIdentity(
   sessionId: SessionId,
   metadata: {
     codexExecution?: SessionRuntimeIdentity;
+    providerSessionExecution?: SessionRuntimeIdentity;
     providerId?: string;
     workspaceId?: string;
   } | null | undefined,
   workspaceId: string,
 ): SessionRuntimeIdentity {
-  return metadata?.codexExecution ?? legacyClaudeSessionRuntimeIdentity({
-    sessionId,
-    providerId: metadata?.providerId,
-    workspaceId: metadata?.workspaceId ?? workspaceId,
-  });
+  return (
+    metadata?.codexExecution ??
+    metadata?.providerSessionExecution ??
+    legacyClaudeSessionRuntimeIdentity({
+      sessionId,
+      providerId: metadata?.providerId,
+      workspaceId: metadata?.workspaceId ?? workspaceId,
+    })
+  );
 }
 
 @injectable()

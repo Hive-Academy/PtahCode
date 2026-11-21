@@ -23,7 +23,7 @@ const CLAUDE_ALIASES: ReadonlySet<string> = new Set([
 ]);
 
 /** A Claude id or alias, case-insensitive, with an optional `[1m]`-style suffix. */
-function isClaudeModel(model: string): boolean {
+export function isClaudeModel(model: string): boolean {
   const base = model.toLowerCase().replace(/\[[^\]]*\]$/, '');
   return CLAUDE_ALIASES.has(base) || base.startsWith('claude-');
 }

@@ -143,7 +143,8 @@ export class TurnEndHandlerService {
    * This is the main terminal signal a background agent has. The
    * transformer's `task_notification` path adds one only for a task it
    * announced from `task_started` (a SendMessage resume), plus a
-   * `background_agent_stopped` for any background task the user stopped. An
+   * `background_agent_stopped` for any background task the user or Ptah's
+   * budget monitor stopped. An
    * entry this method cannot address can therefore stay `running` forever. It could
    * not address one whose `background_agent_started` event arrived without an
    * `agentId`, because the store then keys that entry by its `toolCallId` and
@@ -189,7 +190,8 @@ export class TurnEndHandlerService {
         : null) ?? this.backgroundAgents.findByAgentId(agentKey);
     if (knownEntry) {
       // SubagentStop is the normal-finish hook, so the entry completes. A
-      // user stop arrives as `background_agent_stopped` from the SDK's
+      // user or budget-monitor stop arrives as `background_agent_stopped` (or
+      // a `stopped` `agent_completed`) from the SDK's
       // `task_notification`. Either order ends `stopped`: `onCompleted`
       // keeps an earlier `stopped`, and `onStopped` relabels `completed`.
       this.backgroundAgents.onCompleted({

@@ -85,6 +85,13 @@ describe('AgentContinueInputComponent', () => {
     expect(fixture.nativeElement.textContent).toContain('Stopped');
   });
 
+  it('names the Ptah budget monitor when a budget stop ended the lane', () => {
+    setup(makeAgent({ status: 'stopped', cliSessionId: 'cli-1', stopReason: 'budget' }));
+    expect(fixture.nativeElement.textContent).toContain('Stopped by Ptah budget monitor');
+    setup(makeAgent({ status: 'stopped', cliSessionId: 'cli-1' }));
+    expect(fixture.nativeElement.textContent).not.toContain('budget monitor');
+  });
+
   it('offers Stop but no message composer while the lane is starting', () => {
     setup(
       makeAgent({

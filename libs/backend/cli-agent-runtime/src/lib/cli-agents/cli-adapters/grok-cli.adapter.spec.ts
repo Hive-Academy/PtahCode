@@ -1,21 +1,22 @@
 /**
  * GrokCliAdapter — detection, capabilities, the `grok models` parser and
  * probe, the credential check, and `runSdk` end to end against the fake ACP
- * agent. `runSdk` reaches the real ACP runner; only its `transportFactory`
- * seam is redirected to an in-memory transport, so the argv the runner would
- * spawn is pinned exactly.
+ * agent. `runSdk` reaches the real lane handle and ACP runtime; only its
+ * `transportFactory` seam is redirected to an in-memory transport, so the argv
+ * the runtime would spawn is pinned exactly.
  */
 import { EventEmitter } from 'events';
 import { PassThrough } from 'stream';
 import type { CliOutputSegment } from '@ptah-extension/shared';
 import { createMockLogger } from '@ptah-extension/shared/testing';
 import type { Logger } from '@ptah-extension/vscode-core';
+import type { AcpSpawnOptions } from '@ptah-extension/acp-runtime';
 import {
   createFakeAcpAgent,
   type FakeAcpAgent,
   type FakeAcpMessage,
-} from './acp/__fixtures__/fake-acp-agent';
-import type { AcpSessionHandleConfig, AcpSpawnOptions } from './acp';
+} from '@ptah-extension/acp-runtime/testing';
+import type { ProviderSessionLaneHandleConfig } from './provider-session/provider-session-lane-handle';
 
 const mockSpawnCli = jest.fn();
 const mockResolveCliPath = jest.fn();
@@ -42,21 +43,25 @@ jest.mock('fs/promises', () => ({
 
 /** The fake agent `runSdk` connects to, and what the runner was handed. */
 let mockFakeAgent: FakeAcpAgent | undefined;
-let mockHandleConfig: AcpSessionHandleConfig | undefined;
+let mockHandleConfig: ProviderSessionLaneHandleConfig | undefined;
 let mockSpawnOptions: AcpSpawnOptions | undefined;
 
-jest.mock('./acp', () => {
-  const actual = jest.requireActual<typeof import('./acp')>('./acp');
+jest.mock('./provider-session/provider-session-lane-handle', () => {
+  const actual = jest.requireActual<
+    typeof import('./provider-session/provider-session-lane-handle')
+  >('./provider-session/provider-session-lane-handle');
   const fixtures = jest.requireActual<
-    typeof import('./acp/__fixtures__/fake-acp-agent')
-  >('./acp/__fixtures__/fake-acp-agent');
+    typeof import('@ptah-extension/acp-runtime/testing')
+  >('@ptah-extension/acp-runtime/testing');
   return {
     ...actual,
-    createAcpSessionHandle: (config: AcpSessionHandleConfig) => {
+    createProviderSessionLaneHandle: (
+      config: ProviderSessionLaneHandleConfig,
+    ) => {
       mockHandleConfig = config;
       if (!mockFakeAgent) throw new Error('no fake agent scripted');
       const transport = fixtures.createFakeAcpTransport(mockFakeAgent);
-      return actual.createAcpSessionHandle({
+      return actual.createProviderSessionLaneHandle({
         ...config,
         transportFactory: (options) => {
           mockSpawnOptions = options;
@@ -142,12 +147,14 @@ describe('GrokCliAdapter', () => {
   });
 
   describe('identity and capabilities', () => {
-    it('is the grok lane with MCP, continuation and no steer or interrupt', () => {
+    it('is the grok lane with MCP, continuation and interrupt but no steer', () => {
       expect(adapter.name).toBe('grok');
       expect(adapter.displayName).toBe('Grok');
       expect(adapter.roleChannel).toBe('task-prompt');
       expect(adapter.supportsMcp).toBe(true);
       expect(adapter.capabilities().messaging.continuation.state).toBe('supported');
+      expect(adapter.capabilities().messaging.interrupt.state).toBe('supported');
+      expect(adapter.capabilities().messaging.steer.state).toBe('unsupported');
       expect(adapter.capabilities().permissionModes.plan?.state).toBe('unsupported');
     });
 
@@ -157,7 +164,7 @@ describe('GrokCliAdapter', () => {
   });
 
   describe('detect()', () => {
-    it('reports the resolved binary and version, with a queue messaging mode', async () => {
+    it('reports the resolved binary and version, with the interrupt messaging mode', async () => {
       mockResolveCliPath.mockResolvedValue('C:\\bin\\grok.exe');
       mockProbeCliVersion.mockResolvedValue('grok 1.0.46');
 
@@ -166,7 +173,7 @@ describe('GrokCliAdapter', () => {
         installed: true,
         path: 'C:\\bin\\grok.exe',
         version: 'grok 1.0.46',
-        messagingMode: 'queue',
+        messagingMode: 'interrupt',
       });
       expect(mockResolveCliPath).toHaveBeenCalledWith('grok');
     });
@@ -176,7 +183,7 @@ describe('GrokCliAdapter', () => {
       await expect(adapter.detect()).resolves.toEqual({
         cli: 'grok',
         installed: false,
-        messagingMode: 'queue',
+        messagingMode: 'interrupt',
       });
     });
 
@@ -398,7 +405,9 @@ describe('GrokCliAdapter', () => {
       expect(args).not.toContain('--always-approve');
       expect(args).not.toContain('-m');
       expect(args).not.toContain('--reasoning-effort');
-      expect(mockSpawnOptions?.env).toBeUndefined();
+      // The lane base environment (host + clean-output variables), no Grok extras.
+      expect(mockSpawnOptions?.env).toMatchObject({ NO_COLOR: '1', FORCE_COLOR: '0' });
+      expect(mockSpawnOptions?.needsConsole).toBe(false);
       handle.abort.abort();
     });
 

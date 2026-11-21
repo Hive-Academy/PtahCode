@@ -877,6 +877,9 @@ describe('SubagentBudgetMonitor', () => {
       assistant({ input: 310_000, output: 600_000 }, { id: 'm1' }),
     );
     expect(observed).not.toHaveBeenCalled();
+    // A later user stop of the still-running task is not a budget stop.
+    expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(1);
+    expect(h.stopNotices.noticeFor('task-1')).toBeUndefined();
   });
 
   it('publishes one signal for a record-less safety stop', async () => {
@@ -1338,7 +1341,8 @@ describe('SubagentBudgetMonitor', () => {
       expect.objectContaining({ attempts: MAX_STOP_ATTEMPTS }),
     );
     expect(h.monitor.getSnapshot(SESSION, TOOL_CALL)?.stopped).toBe(false);
-    expect(h.stopNotices.noticeFor('task-1')).toContain('weighted-budget');
+    // No attempt stopped the task: a later stop of it is not a budget stop.
+    expect(h.stopNotices.noticeFor('task-1')).toBeUndefined();
     jest.useRealTimers();
   });
 
