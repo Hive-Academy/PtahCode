@@ -195,8 +195,9 @@ export interface AgentReportDelivery {
   /** A child session report saved for its inactive verified parent. */
   readonly queued?: true;
   /**
-   * The stored envelope id of a saved report: with `queued`, or with a
-   * `delivery-in-progress` / `delivery-outcome-unknown` refusal.
+   * The stored envelope id of a saved report: with `queued`, with a
+   * `delivery-in-progress` / `delivery-outcome-unknown` refusal, or with a
+   * refusal of a repeat whose retained copy was cancelled.
    */
   readonly receiptId?: string;
   /** The stored state behind `receiptId`. */
@@ -719,9 +720,19 @@ export class AgentReportRouter {
     // One report per child at a time: the rate and duplicate bounds read
     // history that only a finished report writes, so parallel calls from one
     // child would otherwise all pass them.
-    return this.serializeSessionChild(childSessionId, () =>
-      this.deliverSessionChildReport(input, child),
-    );
+    // The record is read again inside the chain: an earlier report can move
+    // the child to a verified successor while this one waits its turn.
+    return this.serializeSessionChild(childSessionId, () => {
+      const current = this.sessionChildren?.get(childSessionId);
+      if (!current) {
+        return Promise.resolve(
+          this.refuseSessionChild('unattributed-caller', childSessionId, {
+            detail: 'this session was not started with ptah_session_start',
+          }),
+        );
+      }
+      return this.deliverSessionChildReport(input, current);
+    });
   }
 
   private serializeSessionChild<T>(
@@ -848,6 +859,17 @@ export class AgentReportRouter {
     }
     const originName = `session · ${child.label}`;
 
+    // A saved receipt for this exact report outranks a live parent: a row
+    // that is sending or whose outcome is unknown may already have reached
+    // the parent, so a direct send here could deliver it twice.
+    const stored = this.storedSessionReceipt(
+      childSessionId,
+      binding,
+      message,
+      refusedSummary,
+    );
+    if (stored) return stored;
+
     if (!adapter.isSessionActive(parentSessionId)) {
       // An offline owner is addressed by the id it comes back under: a
       // verified successor when lineage moved it, else the SDK session a
@@ -956,12 +978,16 @@ export class AgentReportRouter {
       report.message,
     );
     const ownsRow = (row: ParentDeliveryEnvelope): boolean =>
-      row.agentId === childSessionId && row.originKind === 'session';
+      AgentReportRouter.ownsSessionRow(row, childSessionId);
 
     // A repeat returns its stored outcome without spending report budget.
-    const previous = this.parentDelivery.find(dedupeKey);
-    if (previous && ownsRow(previous))
-      return this.sessionReceipt(previous, childSessionId, refusedSummary);
+    const previous = this.storedSessionReceipt(
+      childSessionId,
+      report.binding,
+      report.message,
+      refusedSummary,
+    );
+    if (previous) return previous;
 
     const saved = await this.parentDelivery.enqueueAdmitted(
       {
@@ -1019,6 +1045,32 @@ export class AgentReportRouter {
     };
   }
 
+  /**
+   * The mapped outcome of the saved row for this child, owner binding and
+   * text, or `null` when none is saved. A repeat spends no report budget.
+   */
+  private storedSessionReceipt(
+    childSessionId: string,
+    binding: SessionOwnerBinding,
+    message: string,
+    refusedSummary: string,
+  ): AgentReportDelivery | null {
+    if (!this.parentDelivery) return null;
+    const previous = this.parentDelivery.find(
+      AgentReportRouter.sessionReportKey(childSessionId, binding, message),
+    );
+    if (!previous || !AgentReportRouter.ownsSessionRow(previous, childSessionId))
+      return null;
+    return this.sessionReceipt(previous, childSessionId, refusedSummary);
+  }
+
+  private static ownsSessionRow(
+    row: ParentDeliveryEnvelope,
+    childSessionId: string,
+  ): boolean {
+    return row.agentId === childSessionId && row.originKind === 'session';
+  }
+
   /** The caller-facing outcome of a stored report, mapped state by state. */
   private sessionReceipt(
     saved: ParentDeliveryEnvelope,
@@ -1057,11 +1109,15 @@ export class AgentReportRouter {
         // The store returns the retained record for a repeat of a cancelled
         // report; that copy will never be sent, so the repeat is not "queued".
         this.sessionChildren?.markReportRefused(childSessionId, refusedSummary);
-        return this.refuseSessionChild('delivery-failed', childSessionId, {
-          parentSessionId: saved.parentSessionId,
+        return {
+          ...this.refuseSessionChild('delivery-failed', childSessionId, {
+            parentSessionId: saved.parentSessionId,
+            receiptId: saved.id,
+            detail: 'an earlier copy of this report was cancelled',
+          }),
           receiptId: saved.id,
-          detail: 'an earlier copy of this report was cancelled',
-        });
+          receiptState: saved.state,
+        };
     }
   }
 

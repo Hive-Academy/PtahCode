@@ -20,3 +20,20 @@
 
 The first `ptah_agent_report` call to the parent was refused with `parent-session-not-active`
 (parent not live), so this file holds the same text.
+
+## Review round 2 outcome (2026-11-22)
+
+Codex review of HEAD `bfb755ea1`: REVISE 5/10 (`code-logic-review-p3-r2.md`). Fix round:
+
+- Fixed: defect 2 (failed release strands a claim: `unsentClaims` retry), 3 (retry floor after a failed
+  write), 4 (a partial lineage read is `unverified`, held and never cancelled before 24 hours),
+  7 (a saved receipt outranks a live parent), 8 (the child record is read again inside the per-child
+  chain), 9 (receipt id and state on retained terminal refusals).
+- Open, documented limits (not fixed in P3):
+  - Defect 1: a handoff continuation that reparents the child in the microtask gap between the final
+    owner check and the adapter call, while the predecessor stays live, can still send to the
+    predecessor. A binding-revision fence needs a registry change outside P3 scope.
+  - Defect 5: offline routing and drain can disagree for a secondary SDK alias after a forward edge.
+    The drainer holds or cancels as `owner-changed`; the report is not sent to a wrong parent.
+  - Defect 6: a repeat outside the recent-report window after the effective recipient changed, or after
+    the same owner gains its SDK alias, can create a second queued copy. No wrong-parent delivery.

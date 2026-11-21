@@ -39,8 +39,22 @@ const BINDING_WAIT_MS = 24 * 60 * 60 * 1000;
  * `unknown`: the child is not in the in-memory registry (for example after a
  * host restart). `lookup-failed`: the handoff lineage could not be read, or the
  * binding kept moving while it was read. Neither proves a new owner.
+ * `unverified`: the lineage read did not lead to the recipient, but it can be
+ * partial (an unreadable shard drops its edges), so it does not prove a new owner.
  */
-type SessionOwnerState = 'matches' | 'changed' | 'unknown' | 'lookup-failed';
+type SessionOwnerState = 'matches' | 'changed' | 'unknown' | 'lookup-failed' | 'unverified';
+
+const HOLD_REASONS = {
+  unknown: 'waiting-for-binding',
+  'lookup-failed': 'owner-lookup-failed',
+  unverified: 'owner-lineage-unverified',
+} as const;
+
+/** In-memory retry floor after a failed state write; `delayMs` grows through `BACKOFF_MS`. */
+interface RetryFloor {
+  readonly at: number;
+  readonly delayMs: number;
+}
 
 @injectable()
 export class ParentDeliveryDrainerService {
@@ -50,6 +64,14 @@ export class ParentDeliveryDrainerService {
   private readonly retryTickListeners = new Set<ParentRetryTickListener>();
   /** View-only deliveries; bounded by the notifier's pending replay map. */
   private readonly unsaved = new Map<string, ParentDeliveryView>();
+  /**
+   * Claimed (`sending`) rows that were never dispatched and whose release write
+   * failed, with the release reason. Drain passes and retry ticks retry the
+   * release; such a row is never sent. Bounded by the store's rows (pruned there).
+   */
+  private readonly unsentClaims = new Map<string, string>();
+  /** Rows whose last state write failed are not retried before this time. */
+  private readonly retryNotBefore = new Map<string, RetryFloor>();
   private readonly unregisterActivity?: () => void;
   private timer?: ReturnType<typeof setTimeout>;
   private timerAt?: number;
@@ -234,6 +256,7 @@ export class ParentDeliveryDrainerService {
 
   private async drainOnce(parentSessionId: string): Promise<void> {
     await this.store.restore();
+    await this.releaseUnsentClaims();
     if (this.disposed || this.store.isParentFrozen(parentSessionId)) return;
     const id = SessionId.safeParse(parentSessionId);
     if (!id || !this.adapter?.isSessionActive(id)) {
@@ -243,8 +266,10 @@ export class ParentDeliveryDrainerService {
     for (const pending of this.store.list(parentSessionId).filter((entry) =>
       entry.state === 'pending' || entry.state === 'blocked-retryable')) {
       if (this.disposed || this.store.isParentFrozen(parentSessionId)) return;
-      if (pending.nextRetryAt !== undefined && pending.nextRetryAt > Date.now()) {
-        this.schedule(pending.nextRetryAt - Date.now());
+      if (this.unsentClaims.has(pending.id)) continue;
+      const due = Math.max(pending.nextRetryAt ?? 0, this.retryNotBefore.get(pending.id)?.at ?? 0);
+      if (due > Date.now()) {
+        this.schedule(due - Date.now());
         continue;
       }
       if (!this.adapter.isSessionActive(id)) {
@@ -283,6 +308,7 @@ export class ParentDeliveryDrainerService {
           continue;
         }
       }
+      if (this.unsentClaims.has(sending.id)) continue;
       try {
         await this.adapter.sendMessageToSession(id, body, {
           clientMessageId: sending.id,
@@ -317,8 +343,11 @@ export class ParentDeliveryDrainerService {
     const owner = recorded.find((value) => SessionId.safeParse(value));
     if (!owner || !this.handoffAcks) return 'changed';
     let forwarded: string;
+    let recipientForwarded: string;
     try {
-      forwarded = latestDeliveryTarget(await this.handoffAcks.records(), owner);
+      const records = await this.handoffAcks.records();
+      forwarded = latestDeliveryTarget(records, owner);
+      recipientForwarded = latestDeliveryTarget(records, envelope.parentSessionId);
     } catch (error: unknown) {
       this.logger.error('[ParentDeliveryDrainer] Handoff lineage read failed', this.error(error));
       return 'lookup-failed';
@@ -326,7 +355,12 @@ export class ParentDeliveryDrainerService {
     const after = this.recordedOwners(envelope.agentId);
     if (after?.join('\0') !== recorded.join('\0'))
       return retried ? 'lookup-failed' : this.sessionOwner(envelope, true);
-    return forwarded === envelope.parentSessionId ? 'matches' : 'changed';
+    if (forwarded === envelope.parentSessionId) return 'matches';
+    // A read can omit an unreadable shard's edges, so a missing edge proves nothing.
+    // A committed edge out of the recipient into the owner's lineage is positive proof.
+    return recipientForwarded !== envelope.parentSessionId && recipientForwarded === forwarded
+      ? 'changed'
+      : 'unverified';
   }
 
   private recordedOwners(childSessionId: string): readonly string[] | undefined {
@@ -339,7 +373,8 @@ export class ParentDeliveryDrainerService {
 
   /**
    * A report whose owner is not confirmed is never sent. `changed` cancels it;
-   * `unknown` and `lookup-failed` keep the body and wait with bounded backoff.
+   * `unknown`, `unverified` and `lookup-failed` keep the body and wait with
+   * bounded backoff; `unknown` and `unverified` are cancelled after 24 hours.
    * Limitation: a restored binding does not wake the drainer; the next backoff
    * tick (at most 10 minutes) or parent activity picks the entry up.
    * `claimed`: the entry is already `sending`; `snapshot` is its state before the claim.
@@ -353,22 +388,68 @@ export class ParentDeliveryDrainerService {
       await this.cancelStaleSessionReport(snapshot, 'owner-changed', claimed);
       return;
     }
-    if (owner === 'unknown' && Date.now() - snapshot.createdAt > BINDING_WAIT_MS) {
-      await this.cancelStaleSessionReport(snapshot, 'binding-unavailable', claimed);
+    if (owner !== 'lookup-failed' && Date.now() - snapshot.createdAt > BINDING_WAIT_MS) {
+      await this.cancelStaleSessionReport(
+        snapshot, owner === 'unknown' ? 'binding-unavailable' : 'owner-changed', claimed);
       return;
     }
-    const reason = owner === 'unknown' ? 'waiting-for-binding' : 'owner-lookup-failed';
+    const reason = HOLD_REASONS[owner];
     const delay = this.deferral(snapshot, reason);
-    try {
-      const next = claimed
-        ? await this.store.markBlocked(snapshot.id, reason, delay)
-        : await this.store.markDeferred(snapshot.id, reason, delay);
-      if (next) this.emitSafely(next);
-    } catch (error: unknown) {
-      // Degradation: the entry keeps its body; the timer below rechecks the owner.
-      this.logger.error('[ParentDeliveryDrainer] Could not defer child report', this.error(error));
+    if (claimed) {
+      if (await this.releaseClaim(snapshot.id, reason, delay)) this.retryNotBefore.delete(snapshot.id);
+      return;
     }
-    this.schedule(delay);
+    try {
+      const next = await this.store.markDeferred(snapshot.id, reason, delay);
+      this.retryNotBefore.delete(snapshot.id);
+      if (next) this.emitSafely(next);
+      this.schedule(delay);
+    } catch (error: unknown) {
+      // Degradation: the entry keeps its body; the retry floor rechecks the owner later.
+      this.logger.error('[ParentDeliveryDrainer] Could not defer child report', this.error(error));
+      this.holdAfterWriteFailure(snapshot.id);
+    }
+  }
+
+  /**
+   * Moves a claimed, never-dispatched row back to `blocked-retryable`. A failed
+   * write keeps it in `unsentClaims` so later passes retry it. `true` once the
+   * release persisted or the row left `sending` another way.
+   */
+  private async releaseClaim(id: string, reason: string, delayMs: number): Promise<boolean> {
+    try {
+      const next = await this.store.markBlocked(id, reason, delayMs);
+      this.unsentClaims.delete(id);
+      if (next) this.emitSafely(next);
+      this.schedule(delayMs);
+      return true;
+    } catch (error: unknown) {
+      // Degradation: the row stays `sending` but is never sent; drain passes and retry ticks retry the release.
+      this.logger.error('[ParentDeliveryDrainer] Could not release claimed child report', this.error(error));
+      this.unsentClaims.set(id, reason);
+      this.holdAfterWriteFailure(id);
+      return false;
+    }
+  }
+
+  private async releaseUnsentClaims(): Promise<void> {
+    for (const [id, reason] of [...this.unsentClaims]) {
+      if (this.disposed) return;
+      const floor = this.retryNotBefore.get(id)?.at ?? 0;
+      if (floor > Date.now()) {
+        this.schedule(floor - Date.now());
+        continue;
+      }
+      if (await this.releaseClaim(id, reason, BACKOFF_MS[0])) this.retryNotBefore.delete(id);
+    }
+  }
+
+  /** Sets the next retry floor so a failing write never re-arms a zero-delay timer. */
+  private holdAfterWriteFailure(id: string): void {
+    const previous = this.retryNotBefore.get(id)?.delayMs ?? 0;
+    const delayMs = BACKOFF_MS.find((delay) => delay > previous) ?? BACKOFF_MS[BACKOFF_MS.length - 1];
+    this.retryNotBefore.set(id, { at: Date.now() + delayMs, delayMs });
+    this.schedule(delayMs);
   }
 
   /** Grows through `BACKOFF_MS` while the same reason repeats. */
@@ -388,28 +469,33 @@ export class ParentDeliveryDrainerService {
     this.logger.warn('[ParentDeliveryDrainer] Child session report cancelled', {
       parentSessionId: envelope.parentSessionId, childSessionId: envelope.agentId, reason,
     });
+    let result: ParentMutationResult | undefined;
     try {
-      await this.cancel(envelope.id, reason);
-      return;
+      result = await this.cancel(envelope.id, reason);
     } catch (error: unknown) {
-      // Degradation: the body is kept; the retry below rechecks the owner and cancels again.
+      // Degradation: the body is kept; the retry floor rechecks the owner and cancels again.
       this.logger.error('[ParentDeliveryDrainer] Could not cancel stale child report', this.error(error));
     }
-    if (claimed) {
-      // A claimed row left `sending` is never drained again, so release it for the retry.
-      try {
-        const blocked = await this.store.markBlocked(envelope.id, reason, BACKOFF_MS[0]);
-        if (blocked) this.emitSafely(blocked);
-      } catch (error: unknown) {
-        // Degradation: restore turns a stuck `sending` row into outcome-unknown; it is never sent.
-        this.logger.error('[ParentDeliveryDrainer] Could not release stale child report', this.error(error));
-      }
+    if (result && (!('refused' in result) || result.refused === 'storage-unavailable')) {
+      // Cancelled, or the row is gone (`storage-unavailable` means no such row).
+      this.unsentClaims.delete(envelope.id);
+      this.retryNotBefore.delete(envelope.id);
+      return;
     }
-    this.schedule(BACKOFF_MS[0]);
+    if (result) {
+      this.logger.warn('[ParentDeliveryDrainer] Stale child report cancel refused', {
+        parentSessionId: envelope.parentSessionId, refused: result.refused,
+      });
+    }
+    // A claimed row left `sending` is never drained again, so release it for the retry.
+    if (claimed || this.unsentClaims.has(envelope.id))
+      await this.releaseClaim(envelope.id, reason, BACKOFF_MS[0]);
+    this.holdAfterWriteFailure(envelope.id);
   }
 
   /** A failed `delivered` write stays `sending` on disk, which restore makes outcome-unknown. */
   private async recordDelivered(sending: ParentDeliveryEnvelope): Promise<void> {
+    this.retryNotBefore.delete(sending.id);
     try {
       const delivered = await this.store.markDelivered(sending.dedupeKey);
       if (delivered) this.emitSafely(delivered);
@@ -441,11 +527,23 @@ export class ParentDeliveryDrainerService {
     if (next.nextRetryAt !== undefined) this.schedule(next.nextRetryAt - Date.now());
   }
 
+  /** The earliest due row; a retry floor after a failed write moves a row's due time later. */
   private scheduleNext(): void {
-    const next = Math.min(...this.store.list()
-      .filter((entry) => (entry.state === 'pending' || entry.state === 'blocked-retryable') &&
-        entry.nextRetryAt !== undefined && entry.waitingReason !== 'parent-offline')
-      .map((entry) => entry.nextRetryAt ?? Number.POSITIVE_INFINITY));
+    const entries = this.store.list();
+    const live = new Set<string>(entries.map((entry) => entry.id));
+    for (const id of [...this.unsentClaims.keys()]) if (!live.has(id)) this.unsentClaims.delete(id);
+    for (const id of [...this.retryNotBefore.keys()]) if (!live.has(id)) this.retryNotBefore.delete(id);
+    let next = Number.POSITIVE_INFINITY;
+    for (const entry of entries) {
+      const floor = this.retryNotBefore.get(entry.id)?.at;
+      let due: number | undefined;
+      if (entry.state === 'sending' && this.unsentClaims.has(entry.id)) due = floor ?? Date.now();
+      else if ((entry.state === 'pending' || entry.state === 'blocked-retryable') &&
+        entry.waitingReason !== 'parent-offline' &&
+        (entry.nextRetryAt !== undefined || floor !== undefined))
+        due = Math.max(entry.nextRetryAt ?? 0, floor ?? 0);
+      if (due !== undefined) next = Math.min(next, due);
+    }
     if (Number.isFinite(next)) this.schedule(Math.max(0, next - Date.now()));
   }
 
@@ -466,6 +564,7 @@ export class ParentDeliveryDrainerService {
     if (this.disposed) return;
     try {
       await this.store.restore();
+      await this.releaseUnsentClaims();
       const parents = new Set(this.store.list().map((entry) => entry.parentSessionId));
       for (const parentSessionId of parents) await this.drain(parentSessionId);
       await this.store.backfillCompletionKeys();

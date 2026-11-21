@@ -272,12 +272,12 @@ describe('mcp-response-formatter › formatAgentReport', () => {
     [
       'delivery-in-progress',
       'sending',
-      'Ptah is sending a saved copy of this report to the parent now. Do not send it again.',
+      'Ptah is delivering a saved copy of this report. Do not send it again.',
     ],
     [
       'delivery-outcome-unknown',
       'outcome-unknown',
-      'Ptah sent a saved copy of this report, but could not confirm that the parent received it.',
+      'Ptah saved a copy of this report and could not confirm that the parent received it. Do not send it again. Check the receipt.',
     ],
   ])('renders the receipt and state for %s', (reason, receiptState, sentence) => {
     const out = formatAgentReport({
@@ -287,9 +287,35 @@ describe('mcp-response-formatter › formatAgentReport', () => {
       receiptState,
     });
     expect(out).toContain(sentence);
+    expect(out).toMatch(/Report Receipt Pending/);
+    expect(out).not.toMatch(/Report NOT Delivered/);
+    expect(out).toMatch(/Delivered:\*\* No/);
+    expect(out).not.toMatch(/Ptah sent|Ptah is sending/);
     expect(out).toMatch(/Receipt:\*\* rcpt-9/);
     expect(out).toContain(`Receipt State:** ${receiptState}`);
     expect(out).not.toMatch(/Queued:\*\*/);
+  });
+
+  it('shows the retained receipt of a cancelled repeat', () => {
+    const out = formatAgentReport({
+      delivered: false,
+      reason: 'delivery-failed',
+      receiptId: 'rcpt-5',
+      receiptState: 'cancelled',
+    });
+    expect(out).toMatch(/Report NOT Delivered/);
+    expect(out).toMatch(/Receipt:\*\* rcpt-5/);
+    expect(out).toContain('Receipt State:** cancelled');
+  });
+
+  it('shows a receipt state carried without a receipt id', () => {
+    const out = formatAgentReport({
+      delivered: false,
+      reason: 'delivery-failed',
+      receiptState: 'cancelled',
+    });
+    expect(out).toContain('Receipt State:** cancelled');
+    expect(out).not.toMatch(/Receipt:\*\*/);
   });
 
   it('shows the receipt state of a queued retryable report', () => {

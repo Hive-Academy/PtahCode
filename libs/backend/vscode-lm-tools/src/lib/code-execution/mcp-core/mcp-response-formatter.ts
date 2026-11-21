@@ -2088,10 +2088,16 @@ const AGENT_REPORT_REFUSAL_SENTENCES: Record<string, string> = {
   'storage-unavailable':
     'Ptah could not save the report. Keep the report and retry.',
   'delivery-in-progress':
-    'Ptah is sending a saved copy of this report to the parent now. Do not send it again.',
+    'Ptah is delivering a saved copy of this report. Do not send it again.',
   'delivery-outcome-unknown':
-    'Ptah sent a saved copy of this report, but could not confirm that the parent received it. Do not send it again. The parent can check the receipt.',
+    'Ptah saved a copy of this report and could not confirm that the parent received it. Do not send it again. Check the receipt.',
 };
+
+/** Refusals that mean a saved copy exists whose delivery is not settled. */
+const AGENT_REPORT_RECEIPT_PENDING_REASONS: ReadonlySet<string> = new Set([
+  'delivery-in-progress',
+  'delivery-outcome-unknown',
+]);
 
 /**
  * Format ptah_agent_report result
@@ -2119,14 +2125,19 @@ export function formatAgentReport(result: {
           ? 'Report Delivered'
           : queued
             ? 'Report Queued'
-            : result.pending ? 'Report Pending' : 'Report NOT Delivered',
+            : result.pending
+              ? 'Report Pending'
+              : result.reason &&
+                  AGENT_REPORT_RECEIPT_PENDING_REASONS.has(result.reason)
+                ? 'Report Receipt Pending'
+                : 'Report NOT Delivered',
       },
       {
         p: [
           `**Delivered:** ${result.delivered ? 'Yes' : 'No'}`,
           ...(queued ? ['**Queued:** Yes'] : []),
           ...(result.receiptId ? [`**Receipt:** ${result.receiptId}`] : []),
-          ...(result.receiptId && result.receiptState
+          ...(result.receiptState
             ? [`**Receipt State:** ${result.receiptState}`]
             : []),
           ...(queued
