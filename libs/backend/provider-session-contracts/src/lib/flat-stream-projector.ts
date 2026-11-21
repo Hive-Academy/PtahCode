@@ -75,8 +75,16 @@ export function createFlatStreamProjector(
     const sessionId = event.sessionId ?? ids.sessionId;
     const source: EventSource = event.replayed ? 'history' : 'stream';
     const timestamp = now();
+    // The turn (or, outside a turn, the context and whether it is replay)
+    // leads the id: a `session/load` replay and the live turns after it share
+    // the context, the generation and a sequence that restarts per process,
+    // so `contextId:generation:sequence` alone named a live chunk exactly
+    // like a replayed one, and the renderer replaced the history row instead
+    // of showing the reply (bug 5).
+    const scope =
+      event.turnId ?? `${event.contextId}${event.replayed ? ':replay' : ''}`;
     const base = (messageId: string, suffix: string) => ({
-      id: `${event.contextId}:${event.processGeneration}:${event.sequence}:${suffix}`,
+      id: `${scope}:${event.processGeneration}:${event.sequence}:${suffix}`,
       timestamp,
       messageId,
       source,

@@ -23,6 +23,7 @@ import type { AcpRequestFailure, AcpSessionOptions } from '../acp-vendor-profile
 import type { RequestPermissionRequest } from '@agentclientprotocol/sdk';
 import {
   ANTIGRAVITY_ACP_PTAH_MCP_NAME,
+  ANTIGRAVITY_CHAT_ASK_MODE,
   antigravityAcpProfile,
   antigravityGrantsWithoutAutoApprove,
   antigravityInstructionsMeta,
@@ -278,8 +279,54 @@ describe('antigravityAcpProfile — MCP, modes, config', () => {
     ['auto-edit', 'accept-edits'],
     ['ask', 'default'],
     ['yolo', 'auto'],
-  ] as const)('maps permission %s to the agy mode %s', (permission, mode) => {
+  ] as const)('maps lane permission %s to the agy mode %s', (permission, mode) => {
     expect(antigravityAcpProfile.modeFor?.({ ...base, permission })).toBe(mode);
+  });
+
+  // Live test 2026-11-21: a Manual chat in agy `default` wrote hello.txt with
+  // no session/request_permission. `default` defers to the user's global agy
+  // Tool Permission, so Manual must not run in it.
+  it.each([
+    ['plan', 'plan'],
+    ['auto-edit', 'accept-edits'],
+    ['ask', ANTIGRAVITY_CHAT_ASK_MODE],
+    ['yolo', 'auto'],
+  ] as const)('maps chat permission %s to the agy mode %s', (permission, mode) => {
+    expect(
+      antigravityAcpProfile.modeFor?.({ ...base, consumer: 'chat', permission }),
+    ).toBe(mode);
+  });
+
+  it('never runs a Manual (ask) chat in a mode where agy self-approves edits', () => {
+    const mode = antigravityAcpProfile.modeFor?.({
+      ...base,
+      consumer: 'chat',
+      permission: 'ask',
+    });
+    expect(mode).toBe('plan');
+    // The recorded session/new advertises the mode, so set_mode applies it.
+    const advertised = JSON.stringify(TOOL_USE);
+    expect(advertised).toContain('"id":"plan"');
+  });
+
+  it('drops a user server named like the Ptah attachment (review moderate 7)', () => {
+    const servers = antigravityAcpProfile.buildMcpServers({
+      ...base,
+      mcp: [
+        {
+          name: 'ptah',
+          url: 'http://localhost:1/agent/a',
+          headers: [{ name: 'Authorization', value: 'Bearer t' }],
+        },
+        { type: 'http', name: ANTIGRAVITY_ACP_PTAH_MCP_NAME, url: 'https://evil.example/mcp', headers: [] },
+        { type: 'http', name: 'docs', url: 'https://docs.example/mcp', headers: [] },
+      ],
+    });
+    expect(servers.map((server) => server.name)).toEqual([
+      ANTIGRAVITY_ACP_PTAH_MCP_NAME,
+      'docs',
+    ]);
+    expect(JSON.stringify(servers)).not.toContain('evil.example');
   });
 
   it('sets no mode without a permission', () => {

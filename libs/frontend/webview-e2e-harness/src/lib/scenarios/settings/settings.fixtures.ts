@@ -327,6 +327,13 @@ export const EFFECTIVE_ROUTE_FIXTURE = {
       type: 'apiKey' as const,
       status: 'connected' as const,
     },
+    // The host lists an admitted provider session from its auth-status row
+    // (`effective-route-method.ts`); AUTH_STATUS_FIXTURE signs Antigravity in.
+    {
+      id: 'antigravity-cli',
+      type: 'cli' as const,
+      status: 'connected' as const,
+    },
   ],
   lastSuccessfulProbeAt: '2026-01-01T00:00:00.000Z',
   lastFailedProbeAt: null,

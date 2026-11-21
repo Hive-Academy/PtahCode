@@ -45,6 +45,7 @@ import {
   type SettingsSaveResult,
 } from '../feedback/settings-save-feedback.service';
 import { commitToast } from '../feedback/settings-commit-toast';
+import { mainAgentDefaultModelLabel } from './main-agent-default-model-label';
 import {
   DRAWER_WRITE_NO_CONTEXT,
   runDrawerWrite,
@@ -253,11 +254,18 @@ export class MainAgentReassignPopoverComponent {
   protected readonly selectedModel = computed(
     () => this.modelDraft() ?? this.currentModel(),
   );
-  protected readonly defaultModelLabel = computed(() =>
-    this.state.route().data?.resolvedModel.kind === 'unresolved'
-      ? 'Default (chosen by Claude)'
-      : 'Provider default',
-  );
+  protected readonly defaultModelLabel = computed(() => {
+    const providerId = this.providerId();
+    if (isProviderSessionProviderId(providerId)) {
+      const name = this.state
+        .connections()
+        .data?.find((entry) => entry.id === providerId)?.name;
+      return mainAgentDefaultModelLabel(providerId, name);
+    }
+    return this.state.route().data?.resolvedModel.kind === 'unresolved'
+      ? mainAgentDefaultModelLabel(providerId, null)
+      : 'Provider default';
+  });
   protected readonly modelOptions = computed(() =>
     mainAgentModelOptions(this.catalogue().models, this.selectedModel()),
   );

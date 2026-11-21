@@ -26,6 +26,10 @@ import type { ProviderSessionChatPrepared } from './provider-session-chat-ports'
 import { ProviderSessionChatAdapterError } from './provider-session-chat-adapter-error';
 import { providerSessionRuntimeErrorCode } from './provider-session-error-mapping';
 import {
+  ProviderSessionUsageLedger,
+  providerSessionBillingMode,
+} from './provider-session-usage-ledger';
+import {
   confineTurnFiles,
   type ProviderSessionRealpath,
 } from './provider-session-turn-files';
@@ -60,6 +64,8 @@ export interface ProviderSessionChatSession {
   pendingInterrupt: boolean;
   stopRequested: boolean;
   closing?: Promise<void>;
+  /** Session-lifetime usage; created at the first turn with usage. */
+  usage?: ProviderSessionUsageLedger;
 }
 
 export interface ProviderSessionTurnInput {
@@ -346,15 +352,21 @@ function* userEcho(
   };
 }
 
-/** Live per-turn stats (plan A16): no lifetime checkpoint, no restore. */
-function resultStats(
+/**
+ * One turn's result stats plus the session-lifetime snapshot the side panel
+ * shows (`sessionStats`, issue #1459). The context window is the one the
+ * agent reported (ACP `usage_update.size`) when it sent one, else the
+ * provider catalog's; an unknown window reads 0 with `contextCapacity`
+ * 'unknown', never a wrong percentage. Cost comes from the shared rate table
+ * (`ProviderSessionUsageLedger`): an unpriced model is `null`, never 0.
+ */
+export function resultStats(
   session: ProviderSessionChatSession,
   usage: ProviderUsage,
   duration: number,
 ): ResultStatsPayload {
   const model =
     usage.model ?? session.settings.model ?? session.prepared.seed.model;
-  const costUsd = usage.costUsd ?? null;
   const tokens = {
     input: usage.inputTokens,
     output: usage.outputTokens,
@@ -365,16 +377,46 @@ function resultStats(
       ? {}
       : { cacheCreation: usage.cacheWriteTokens }),
   };
-  if (!model) return { sessionId: session.id, turnCost: costUsd, tokens, duration };
-  // An unknown window reads 0 while contextCapacity says 'unknown', so the
-  // header shows an explicit unknown context, never a wrong percentage.
-  const contextCapacity = resolveContextCapacity({
-    route: { kind: 'native', providerId: session.prepared.seed.providerId },
+  const contextCapacity = model
+    ? resolveContextCapacity({
+        route: { kind: 'native', providerId: session.prepared.seed.providerId },
+        model,
+        ...(usage.contextWindow === undefined
+          ? {}
+          : { sdkContextWindow: usage.contextWindow }),
+      })
+    : undefined;
+  session.usage ??= new ProviderSessionUsageLedger(
+    session.id,
+    providerSessionBillingMode(session.prepared.seed.profile),
+    session.prepared.resume !== undefined,
+  );
+  const { turnPrice, snapshot } = session.usage.record(
     model,
-  });
+    usage,
+    duration,
+    contextCapacity,
+  );
+  const pricing = {
+    turnCost: turnPrice.totalCost,
+    costBasis: turnPrice.costBasis,
+    pricingCoverage: turnPrice.pricingCoverage,
+    ...(turnPrice.priceProvenance
+      ? { priceProvenance: [turnPrice.priceProvenance] }
+      : {}),
+  };
+  if (!model || !contextCapacity)
+    return {
+      sessionId: session.id,
+      ...pricing,
+      sessionStats: snapshot,
+      tokens,
+      duration,
+    };
   return {
     sessionId: session.id,
-    turnCost: costUsd,
+    ...pricing,
+    sessionStats: snapshot,
     tokens,
     duration,
     modelUsage: [
@@ -384,7 +426,7 @@ function resultStats(
         outputTokens: usage.outputTokens,
         contextWindow: contextCapacity.tokens ?? 0,
         contextCapacity,
-        costUSD: costUsd,
+        costUSD: turnPrice.totalCost,
         cacheReadInputTokens: usage.cacheReadTokens ?? 0,
         ...(usage.contextTokens === undefined
           ? {}

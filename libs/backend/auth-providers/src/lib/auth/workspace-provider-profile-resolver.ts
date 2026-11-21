@@ -277,8 +277,13 @@ export class WorkspaceProviderProfileResolver {
           .providerId,
     );
     if (providerSession) {
-      return resolveProviderSessionExecution(input, providerSession, (id) =>
-        this.providerModels.getCachedModelIds(id),
+      return resolveProviderSessionExecution(
+        input,
+        providerSession,
+        (id) => this.providerModels.getCachedModelIds(id),
+        () =>
+          this.activeProviderResolver.resolveActiveAuthForPath(workspacePath)
+            .providerId,
       );
     }
     // A stored session keeps its own provider; only a new session follows the

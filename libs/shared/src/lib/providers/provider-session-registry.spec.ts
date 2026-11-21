@@ -17,6 +17,7 @@ jest.mock('./entries/sakana-provider-entry', () => {
 import {
   getProviderSessionProfile,
   isProviderSessionProviderId,
+  planOwnerProviderId,
   providerRuntimeFor,
   providerSessionNativeRuntimeRequiredMessage,
 } from './provider-registry';
@@ -37,6 +38,14 @@ describe('provider-session registry lookups', () => {
   it('answers "not a provider session" for a reserved id with no entry', () => {
     expect(getProviderSessionProfile('grok-cli')).toBeUndefined();
     expect(isProviderSessionProviderId('grok-cli')).toBe(false);
+  });
+
+  it('names the plan-limit owner provider of a main provider (issue #1459)', () => {
+    // Antigravity bills its CLI account, whose owners carry the profile id.
+    expect(planOwnerProviderId('antigravity-cli')).toBe('antigravity');
+    expect(planOwnerProviderId('openai-codex')).toBe('openai-codex');
+    expect(planOwnerProviderId('anthropic')).toBe('anthropic');
+    expect(planOwnerProviderId('grok-cli')).toBe('grok-cli');
   });
 
   it('maps Codex to its app-server runtime', () => {

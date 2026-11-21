@@ -390,9 +390,20 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
   let eventSequence = 0;
   let approvalSequence = 0;
   const budgetRunId = options.agentId ?? randomUUID();
+  /**
+   * Names this runtime instance in its turn and approval ids. `budgetRunId`
+   * is the chat session id, stable across processes, and the prompt and
+   * approval counters restart with every runtime: without it a process opened
+   * after an app restart, an idle close or a history read reused the ids of
+   * turns the renderer already shows, and the reply merged into (or replaced)
+   * an old message instead of rendering (live test 2026-11-21, bug 5).
+   */
+  const runtimeInstance = randomUUID().slice(0, 8);
   let latestUpdateUsage: z.infer<typeof acpPromptUsageSchema> | undefined;
   /** The context size (`used`) of the current turn's last `usage_update`. */
   let latestUpdateUsed: number | undefined;
+  /** The context window (`size`) of the current turn's last `usage_update`. */
+  let latestUpdateSize: number | undefined;
   let resolveUsageUpdate: (() => void) | undefined;
   /** Title of the first request the policy refused during the current prompt. */
   let refusedThisTurn: string | undefined;
@@ -482,7 +493,7 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
     }
     const approval = toProviderApprovalRequest(
       request,
-      `${sessionId ?? budgetRunId}:approval:${++approvalSequence}`,
+      `${sessionId ?? budgetRunId}:${runtimeInstance}:approval:${++approvalSequence}`,
     );
     emit({ type: 'approvalRequested', request: approval });
     const asked = new AbortController();
@@ -535,12 +546,20 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
       }
       if (promptInFlight) {
         const update = acpUsageUpdateSchema.safeParse(notification.update);
-        if (update.success) latestUpdateUsed = update.data.used;
+        if (update.success) {
+          latestUpdateUsed = update.data.used;
+          if (typeof update.data.size === 'number')
+            latestUpdateSize = update.data.size;
+        }
         if (update.success && update.data._meta?.usage) {
           latestUpdateUsage = {
             ...update.data._meta.usage,
             contextTokens:
               update.data._meta.usage.contextTokens ?? update.data.used,
+            ...(update.data._meta.usage.contextWindow === undefined &&
+            typeof update.data.size === 'number'
+              ? { contextWindow: update.data.size }
+              : {}),
           };
           resolveUsageUpdate?.();
         }
@@ -1351,10 +1370,11 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
     input: string | readonly ContentBlock[],
   ): Promise<number> => {
     // Allocated first, so a respawn failure's error carries the turn id too.
-    const turnId = `${sessionId ?? budgetRunId}:${budgetRunId}:${++promptSequence}`;
+    const turnId = `${sessionId ?? budgetRunId}:${budgetRunId}:${runtimeInstance}:${++promptSequence}`;
     currentTurnId = turnId;
     latestUpdateUsage = undefined;
     latestUpdateUsed = undefined;
+    latestUpdateSize = undefined;
     turnCancelledByPtah = false;
     refusedThisTurn = undefined;
     // Tools of an earlier turn that never finished are abandoned.
@@ -1457,6 +1477,7 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
         const standardUsage = readAcpStandardUsage(
           isRecord(response) ? response['usage'] : undefined,
           latestUpdateUsed,
+          latestUpdateSize,
         );
         if (!promptUsage.success && !standardUsage && !latestUpdateUsage) {
           // ACP agents can send usage_update after the prompt response. Wait
@@ -1479,9 +1500,17 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
             resolveUsageUpdate = undefined;
           }
         }
-        const reported = promptUsage.success
+        const counted = promptUsage.success
           ? promptUsage.data
           : (standardUsage ?? latestUpdateUsage);
+        // The window the agent reported in its last `usage_update`, when the
+        // usage itself does not name one (issue #1459: context fill).
+        const reported =
+          counted &&
+          counted.contextWindow === undefined &&
+          latestUpdateSize !== undefined
+            ? { ...counted, contextWindow: latestUpdateSize }
+            : counted;
         // Usage without a model (agy's protocol usage, Grok's extension) names
         // the session's model, so the lane's actual model is not lost.
         const model = reported?.model ?? sessionModel();
@@ -1525,6 +1554,7 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
       resolveUsageUpdate = undefined;
       latestUpdateUsage = undefined;
       latestUpdateUsed = undefined;
+      latestUpdateSize = undefined;
       refusedThisTurn = undefined;
       turnCancelledByPtah = false;
     }

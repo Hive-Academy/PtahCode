@@ -23,7 +23,8 @@
  * - No `authenticate` on the shared profile (PF-4: `session/new` succeeds
  *   without it); a signed-out profile gets the sign-in hint.
  * - Modes (`session/new.modes`): plan -> `plan`, auto-edit -> `accept-edits`,
- *   ask -> `default`, yolo -> `auto`.
+ *   ask -> `default` (lane) or `plan` (chat, see {@link ANTIGRAVITY_CHAT_ASK_MODE}),
+ *   yolo -> `auto`.
  * - Model: `session/set_config_option` `model` takes the full `agy models` id
  *   (`claude-sonnet-5-5-medium`, the effort in the id) and also the base
  *   (`claude-sonnet-5-5`). The effort travels as the `thought_level` option
@@ -70,6 +71,31 @@ const MODES: Readonly<Record<string, string>> = {
   ask: 'default',
   yolo: 'auto',
 };
+
+/**
+ * The agy mode of a chat session whose Ptah permission is `ask` ("Manual").
+ *
+ * Ptah's Manual means no file write and no command runs without the user's
+ * approval, as Claude's `ask` does. agy 1.5.14 has no ACP mode or config
+ * option for that: `session/new` advertises only `default`, `accept-edits`,
+ * `auto` and `plan` (plus the `model`, `thought_level` and `mode` config
+ * options), and `default` is "Ask before edits and commands, per your
+ * permission settings", i.e. the user's global agy Tool Permission
+ * (`always-proceed`, `request-review`, `strict`, `proceed-in-sandbox` in
+ * `settings.json` `toolPermission`). Under the stock setting `default` wrote a
+ * workspace file with no `session/request_permission` (live test, 2026-11-21),
+ * and only `strict` makes agy ask before every edit. The `_meta.antigravity`
+ * hook takes only `systemPrompt`, so Ptah cannot set `strict` per session
+ * without writing the user's global agy settings.
+ *
+ * So a Manual chat runs in `plan`, agy's read-only mode: it researches and
+ * plans, and changes nothing unless the user approves its request to leave
+ * plan mode (a `switch_mode` permission request, shown as an approval card).
+ * Trade-off: after that approval agy runs in `default` and its in-workspace
+ * edits are no longer asked one by one; Auto-edit and yolo keep their modes.
+ * A lane keeps `default` (headless; it has no user to ask).
+ */
+export const ANTIGRAVITY_CHAT_ASK_MODE = 'plan';
 
 /**
  * The ACP server name of the Ptah MCP attachment. agy also loads the shared
@@ -237,17 +263,22 @@ export const antigravityAcpProfile: AcpVendorProfile = {
    * The caller builds the attachments: Ptah's own server (scoped URL plus the
    * session bearer, name `ptah`), which agy takes as an ACP `http` entry (D9)
    * named {@link ANTIGRAVITY_ACP_PTAH_MCP_NAME}, and the user's servers
-   * (`http`, `sse` or `stdio`), which keep their configured names.
+   * (`http`, `sse` or `stdio`), which keep their configured names. A user
+   * server named {@link ANTIGRAVITY_ACP_PTAH_MCP_NAME} is dropped: it would
+   * collide with Ptah's own entry and take over its `mcp_ptah_lane_` tools,
+   * which the plan and auto-edit grants trust.
    */
   buildMcpServers(options: AcpSessionOptions): readonly McpServer[] {
-    return (options.mcp ?? []).map((attachment) =>
-      toAcpMcpServer(
-        attachment,
-        attachment.name === PTAH_MCP_ATTACHMENT_NAME
-          ? ANTIGRAVITY_ACP_PTAH_MCP_NAME
-          : attachment.name,
-      ),
-    );
+    return (options.mcp ?? [])
+      .filter((attachment) => attachment.name !== ANTIGRAVITY_ACP_PTAH_MCP_NAME)
+      .map((attachment) =>
+        toAcpMcpServer(
+          attachment,
+          attachment.name === PTAH_MCP_ATTACHMENT_NAME
+            ? ANTIGRAVITY_ACP_PTAH_MCP_NAME
+            : attachment.name,
+        ),
+      );
   },
 
   instructionsMeta: antigravityInstructionsMeta,
@@ -257,7 +288,11 @@ export const antigravityAcpProfile: AcpVendorProfile = {
   instructionsOnRestore: 'none',
 
   modeFor(options: AcpSessionOptions): string | undefined {
-    return options.permission ? MODES[options.permission] : undefined;
+    if (!options.permission) return undefined;
+    if (options.consumer === 'chat' && options.permission === 'ask') {
+      return ANTIGRAVITY_CHAT_ASK_MODE;
+    }
+    return MODES[options.permission];
   },
 
   sessionConfig(options: AcpSessionOptions): readonly AcpSessionConfigEntry[] {

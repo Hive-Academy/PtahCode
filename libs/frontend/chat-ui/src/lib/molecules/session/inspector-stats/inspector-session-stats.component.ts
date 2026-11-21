@@ -29,6 +29,8 @@ import {
   STATS_EMPTY,
   contextDetailsText,
   costDetailsText,
+  nullCostLabel,
+  nullCostValue,
   durationMsOf,
   knownSubtotalOf,
   tokenDetailsText,
@@ -182,9 +184,9 @@ let nextSessionId = 0;
             } @else if ((s.snapshot?.totalCost ?? null) === null) {
               <span
                 class="text-base-content-muted"
-                [attr.aria-label]="empty.cost"
+                [attr.aria-label]="nullCostLabel(s.snapshot)"
                 [attr.title]="notReported"
-                >{{ empty.value }}</span
+                >{{ nullCostValue(s.snapshot) }}</span
               >
             } @else {
               {{ formatCost(s.snapshot!.totalCost) }}
@@ -403,6 +405,8 @@ export class InspectorSessionStatsComponent {
   protected readonly empty = STATS_EMPTY;
   protected readonly notReported = 'not reported';
   protected readonly formatCost = formatCost;
+  protected readonly nullCostLabel = nullCostLabel;
+  protected readonly nullCostValue = nullCostValue;
   protected readonly formatDuration = formatDuration;
   protected readonly formatOptionalTokens = formatOptionalTokens;
   protected readonly formatTokens = formatTokens;

@@ -37,6 +37,7 @@ import {
   type CliDetectionService,
 } from '@ptah-extension/cli-agent-runtime';
 import {
+  ANTIGRAVITY_ACP_PTAH_MCP_NAME,
   ANTIGRAVITY_ACP_PTAH_MCP_TOOL_PREFIX,
   antigravityAcpProfile,
   createAcpProviderSessionRuntime,
@@ -92,6 +93,8 @@ const PROFILE_TABLE: Readonly<
       readonly acp: AcpVendorProfile;
       readonly load: boolean;
       readonly ptahMcpToolPrefix: string;
+      /** The name the agent gives Ptah's attachment. */
+      readonly ptahMcpServerName: string;
     }
   >
 > = {
@@ -99,6 +102,7 @@ const PROFILE_TABLE: Readonly<
     acp: antigravityAcpProfile,
     load: true,
     ptahMcpToolPrefix: ANTIGRAVITY_ACP_PTAH_MCP_TOOL_PREFIX,
+    ptahMcpServerName: ANTIGRAVITY_ACP_PTAH_MCP_NAME,
   },
 };
 
@@ -351,6 +355,8 @@ export function bindElectronProviderSessionChat(
     baseEnv: input.baseEnv ?? laneAcpBaseEnv,
     ptahMcpToolPrefix: (profile) =>
       isAdmittedProfile(profile) ? PROFILE_TABLE[profile].ptahMcpToolPrefix : undefined,
+    ptahMcpServerName: (profile) =>
+      isAdmittedProfile(profile) ? PROFILE_TABLE[profile].ptahMcpServerName : undefined,
     logger,
   });
   // The resolver admits a provider session only on a host that lists its

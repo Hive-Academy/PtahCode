@@ -817,6 +817,16 @@ export function getProviderSessionProfile(
   return provider?.providerSession;
 }
 
+/**
+ * The provider id a plan-limit owner of `providerId` carries. A
+ * provider-session entry bills its CLI's own account, whose owners are keyed
+ * by the profile (`antigravity-cli` -> `antigravity`); every other provider
+ * keeps its id. Used to match the main agent's provider to its plan owner.
+ */
+export function planOwnerProviderId(providerId: string): string {
+  return getProviderSessionProfile(providerId) ?? providerId;
+}
+
 /** True when `providerId` names a registry entry with a provider session. */
 export function isProviderSessionProviderId(
   providerId: string,

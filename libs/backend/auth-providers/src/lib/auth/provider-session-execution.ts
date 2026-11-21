@@ -11,7 +11,11 @@ import {
   sessionRuntimeIdentityMismatch,
   type ProviderSessionProfileId,
 } from '@ptah-extension/shared';
-import { isClaudeModel, type CachedModelIdsReader } from './stored-model-offer';
+import {
+  isClaudeModel,
+  isStoredModelOffered,
+  type CachedModelIdsReader,
+} from './stored-model-offer';
 import type {
   ExecutionProfileRequest,
   ResolvedExecutionProfile,
@@ -54,6 +58,7 @@ export function resolveProviderSessionExecution(
   input: ExecutionProfileRequest,
   target: ProviderSessionTarget,
   cachedModelIds: CachedModelIdsReader,
+  activeProviderId: () => string,
 ): Extract<ResolvedExecutionProfile, { runtime: 'provider-session' }> {
   const { workspacePath, requestedModel, existingIdentity } = input;
   const { providerId, profile } = target;
@@ -118,9 +123,11 @@ export function resolveProviderSessionExecution(
     }
   }
   const model = providerSessionModel(
-    cachedModelIds(providerId),
+    providerId,
+    cachedModelIds,
     requestedModel,
     input.requestedModelIsStored === true,
+    activeProviderId,
   );
   return {
     runtime: 'provider-session',
@@ -138,18 +145,31 @@ export function resolveProviderSessionExecution(
 
 /**
  * The model a provider session starts on; `undefined` is the provider's own
- * default. Blank, Claude aliases and Claude ids never pass. With a cached
- * catalog only an offered id passes. Without one, an explicit choice passes
- * (the provider is the authority on it) and a stored setting does not: it
- * was saved for another provider's slot.
+ * default. Blank and Claude aliases never pass. With a cached catalog only an
+ * offered id passes (a Claude id too: agy offers `claude-opus-5-5`). Without
+ * one, an explicit choice passes (the provider is the authority on it), and a
+ * stored setting passes only when it was read from this provider's own slot
+ * (the workspace's active provider is the session's provider) and no other
+ * provider is known to offer it. Before that rule a resume right after an app
+ * restart (no catalog warmed yet) dropped the saved model and the session ran
+ * on the provider default (live test: `gemini-4-neon` for a session saved on
+ * `gemini-4-hydrogen-low`).
  */
 function providerSessionModel(
-  catalog: readonly string[] | null,
+  providerId: string,
+  cachedModelIds: CachedModelIdsReader,
   requestedModel: string,
   isStored: boolean,
+  activeProviderId: () => string,
 ): string | undefined {
   const requested = requestedModel.trim();
-  if (!requested || isClaudeModel(requested)) return undefined;
+  if (!requested) return undefined;
+  const catalog = cachedModelIds(providerId);
   if (catalog) return catalog.includes(requested) ? requested : undefined;
-  return isStored ? undefined : requested;
+  if (isClaudeModel(requested)) return undefined;
+  if (!isStored) return requested;
+  return activeProviderId() === providerId &&
+    isStoredModelOffered(requested, providerId, cachedModelIds)
+    ? requested
+    : undefined;
 }

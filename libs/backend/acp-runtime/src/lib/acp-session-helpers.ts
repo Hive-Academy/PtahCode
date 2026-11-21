@@ -16,6 +16,7 @@ export const acpPromptUsageSchema = z
     cacheReadTokens: z.number().int().nonnegative().optional(),
     cacheWriteTokens: z.number().int().nonnegative().optional(),
     contextTokens: z.number().int().nonnegative().optional(),
+    contextWindow: z.number().int().positive().optional(),
     costUsd: z.number().finite().nonnegative().optional(),
   })
   .passthrough();
@@ -38,6 +39,7 @@ const acpStandardUsageSchema = z
 export function readAcpStandardUsage(
   usage: unknown,
   contextTokens: number | undefined,
+  contextWindow?: number,
 ): z.infer<typeof acpPromptUsageSchema> | undefined {
   const parsed = acpStandardUsageSchema.safeParse(usage);
   if (!parsed.success) return undefined;
@@ -53,6 +55,7 @@ export function readAcpStandardUsage(
       ? { cacheWriteTokens: cachedWriteTokens }
       : {}),
     ...(contextTokens === undefined ? {} : { contextTokens }),
+    ...(contextWindow === undefined ? {} : { contextWindow }),
   };
 }
 
@@ -60,6 +63,8 @@ export const acpUsageUpdateSchema = z
   .object({
     sessionUpdate: z.literal('usage_update'),
     used: z.number().int().nonnegative(),
+    /** The context window size (ACP `usage_update.size`). */
+    size: z.number().int().positive().nullish(),
     _meta: z
       .object({ usage: acpPromptUsageSchema.optional() })
       .passthrough()

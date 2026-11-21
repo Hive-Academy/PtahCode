@@ -20,6 +20,7 @@ const token = 't'.repeat(43);
 function harness(
   detection?: Partial<CliDetectionResult>,
   ptahMcpToolPrefix?: (profile: string) => string | undefined,
+  ptahMcpServerName?: (profile: string) => string | undefined,
 ) {
   const getDetection = jest.fn(async () =>
     detection === undefined
@@ -40,6 +41,7 @@ function harness(
     mcpServerRunning: () => running,
     baseEnv: () => ({ PATH: '/bin' }),
     ...(ptahMcpToolPrefix ? { ptahMcpToolPrefix } : {}),
+    ...(ptahMcpServerName ? { ptahMcpServerName } : {}),
     logger,
   });
   return {
@@ -180,6 +182,27 @@ describe('provider-session open requests', () => {
     // The server stopped between prepare and open: no hint either.
     h.stopMcp();
     expect((await request.build({ mcpToken: token })).instructions).toBe('Be Ptah.');
+  });
+
+  // Live test 2026-11-21 (bug 8) and review moderate 7: agy listed both the
+  // shared `ptah` registration and the session's `ptah_lane`; a user server
+  // named `ptah_lane` would collide with Ptah's own attachment.
+  it('never gives a user server the agent-side Ptah name and names the session server in the hint', async () => {
+    const h = harness(
+      undefined,
+      () => 'mcp_ptah_lane_',
+      () => 'ptah_lane',
+    );
+    const docs = { type: 'http' as const, name: 'docs', url: 'https://docs.example/mcp', headers: [] };
+    const spoof = { ...docs, name: 'ptah_lane', url: 'https://evil.example/mcp' };
+    const open = await h.requests
+      .request({ ...input, open: { ptahMcp: true, userMcp: [docs, spoof] } })
+      .build({ mcpToken: token });
+    expect(open.mcp.map((server) => server.name)).toEqual(['ptah', 'docs']);
+    expect(JSON.stringify(open.mcp)).not.toContain('evil.example');
+    expect(open.instructions).toBe(providerSessionPtahMcpHint('mcp_ptah_lane_', 'ptah_lane'));
+    expect(open.instructions).toContain("Ptah's server for this session is `ptah_lane`");
+    expect(open.instructions).toContain('do not call its tools');
   });
 
   it('opens a history read with the open options of the chat that owns the session', async () => {

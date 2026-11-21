@@ -60,6 +60,7 @@ import {
   type PlanLimitOwnerSnapshot,
   type PlanLimitSessionOwner,
   type PlanLimitsSnapshot,
+  type ProviderSessionProfileId,
   type QuotaOwnerRef,
   type SessionRuntimeIdentity,
 } from '@ptah-extension/shared';
@@ -86,7 +87,10 @@ export type PlanLimitsLedgerReader = Pick<
   'snapshotFor' | 'sessionOwners'
 >;
 interface NativeSessionMetadata {
-  get(sessionId: string): Promise<{ codexExecution?: SessionRuntimeIdentity } | null>;
+  get(sessionId: string): Promise<{
+    codexExecution?: SessionRuntimeIdentity;
+    providerSessionExecution?: SessionRuntimeIdentity;
+  } | null>;
 }
 type CodexHomeOwnerResolver = Pick<ProviderOwnerResolver, 'ownerForCodexHome'>;
 /** Leaves six seconds for RPC transport and rendering (30 second client timeout). */
@@ -364,7 +368,7 @@ export class PlanLimitsSnapshotService {
     };
   }
 
-  /** Ledger owners plus native Codex sessions bound to a discovered home owner. */
+  /** Ledger owners plus native Codex and provider-session sessions bound to a discovered owner. */
   private async sessionOwners(
     sessionIds: readonly string[],
     owners: readonly PlanLimitOwnerSnapshot[],
@@ -377,12 +381,21 @@ export class PlanLimitsSnapshotService {
     for (const sessionId of sessionIds) {
       if (!result[sessionId]?.ownerKey && this.metadata && this.ownerResolver) {
         try {
-          const execution = (await this.metadata.get(sessionId))?.codexExecution;
+          const metadata = await this.metadata.get(sessionId);
+          const execution = metadata?.codexExecution;
           if (execution?.runtime === 'codex-app-server') {
             const owner = this.ownerResolver.ownerForCodexHome(execution.codex.normalizedHome);
             if (codexOwners.has(owner.key)) {
               result[sessionId] = { ownerKey: owner.key, modelScope: null };
             }
+          }
+          const providerSession = metadata?.providerSessionExecution;
+          if (providerSession?.runtime === 'provider-session') {
+            const ownerKey = providerSessionOwnerKey(
+              providerSession.providerSession.profile,
+              owners,
+            );
+            if (ownerKey) result[sessionId] = { ownerKey, modelScope: null };
           }
         } catch (error: unknown) {
           this.logger.warn('[PlanLimitsSnapshot] native session owner lookup failed', {
@@ -394,6 +407,29 @@ export class PlanLimitsSnapshotService {
     }
     return result;
   }
+}
+
+/**
+ * The listed owner a provider-session session bills: its CLI's own signed-in
+ * account, which discovery lists from the CLI store or the selected provider
+ * (issue #1459). Absent when no owner of that provider is listed, so the view
+ * never borrows another provider's account.
+ */
+function providerSessionOwnerKey(
+  profile: ProviderSessionProfileId,
+  owners: readonly PlanLimitOwnerSnapshot[],
+): string | undefined {
+  const providerIds: readonly string[] =
+    profile === 'opencode' ? ['opencode-go', 'opencode'] : [profile];
+  for (const providerId of providerIds) {
+    const owner = owners.find(
+      (entry) =>
+        entry.owner.providerId === providerId &&
+        entry.owner.identityKind !== 'unknown',
+    );
+    if (owner) return owner.owner.key;
+  }
+  return undefined;
 }
 
 function discoveryRequest(

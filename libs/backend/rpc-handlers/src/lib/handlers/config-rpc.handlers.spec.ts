@@ -122,7 +122,10 @@ function createMockSdkAdapter(): MockSdkAdapter {
 type MockProviderModels = jest.Mocked<
   Pick<
     ProviderModelsService,
-    'getModelTiers' | 'resolveActiveProviderId' | 'getCachedModelIds'
+    | 'getModelTiers'
+    | 'resolveActiveProviderId'
+    | 'getCachedModelIds'
+    | 'fetchModels'
   >
 >;
 
@@ -133,6 +136,9 @@ function createMockProviderModels(): MockProviderModels {
       .mockReturnValue({ default: null, fast: null, reasoning: null }),
     resolveActiveProviderId: jest.fn().mockReturnValue('anthropic'),
     getCachedModelIds: jest.fn().mockReturnValue(null),
+    fetchModels: jest
+      .fn()
+      .mockResolvedValue({ models: [], totalCount: 0, isStatic: false }),
   };
 }
 
@@ -1103,6 +1109,69 @@ describe('ConfigRpcHandlers', () => {
       expect(result.models[0].providerModelId).toBeNull();
       // No tier lookup should happen for direct Anthropic
       expect(h.providerModels.getModelTiers).not.toHaveBeenCalled();
+    });
+
+    describe('provider-session provider (Antigravity)', () => {
+      const agyCatalog = [
+        { id: 'gemini-4-neon', name: 'Gemini 4 Neon', description: '', contextLength: 0, supportsToolUse: true },
+        { id: 'gemini-4-hydrogen-low', name: 'Gemini 4 Hydrogen (Low)', description: '', contextLength: 0, supportsToolUse: true },
+      ];
+
+      function agyHarness(saved: string): Harness {
+        const h = makeHarness({ modelSelected: saved });
+        h.providerModels.resolveActiveProviderId.mockReturnValue('antigravity-cli');
+        h.providerModels.fetchModels.mockResolvedValue({
+          models: agyCatalog,
+          totalCount: agyCatalog.length,
+          isStatic: false,
+        });
+        return h;
+      }
+
+      it('lists the provider CLI catalog, not the Claude SDK tier slots, with the saved model selected', async () => {
+        // Live test: the composer offered "Default (recommended) / Opus / Sonnet /
+        // Haiku" for an Antigravity session and the saved model was unselected.
+        const h = agyHarness('gemini-4-hydrogen-low');
+        h.handlers.register();
+
+        const result = await call<{
+          models: Array<{ id: string; name: string; isSelected: boolean }>;
+        }>(h, 'config:models-list');
+
+        expect(result.models.map((m) => m.id)).toEqual([
+          'default',
+          'gemini-4-neon',
+          'gemini-4-hydrogen-low',
+        ]);
+        expect(result.models[0].name).toBe('Default (chosen by Antigravity)');
+        expect(result.models.filter((m) => m.isSelected).map((m) => m.id)).toEqual([
+          'gemini-4-hydrogen-low',
+        ]);
+        expect(h.providerModels.fetchModels).toHaveBeenCalledWith('antigravity-cli', null);
+        expect(h.sdkAdapter.getSupportedModels).not.toHaveBeenCalled();
+      });
+
+      it('selects the provider default when nothing is saved', async () => {
+        const h = agyHarness('');
+        h.handlers.register();
+        const result = await call<{
+          models: Array<{ id: string; isSelected: boolean }>;
+        }>(h, 'config:models-list');
+        expect(result.models.filter((m) => m.isSelected).map((m) => m.id)).toEqual(['default']);
+      });
+
+      it('keeps the saved model selectable when the catalog read fails', async () => {
+        const h = agyHarness('gemini-4-hydrogen-low');
+        h.providerModels.fetchModels.mockRejectedValue(new Error('agy models timed out'));
+        h.handlers.register();
+        const result = await call<{
+          models: Array<{ id: string; isSelected: boolean }>;
+        }>(h, 'config:models-list');
+        expect(result.models.map((m) => [m.id, m.isSelected])).toEqual([
+          ['default', false],
+          ['gemini-4-hydrogen-low', true],
+        ]);
+      });
     });
 
     describe('saved model that is not a tier mapping (Codex)', () => {

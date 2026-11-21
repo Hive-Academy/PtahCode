@@ -28,6 +28,7 @@ import {
 import {
   ANTHROPIC_PROVIDERS,
   getAnthropicProvider,
+  isProviderSessionProviderId,
   type AnthropicProvider,
 } from '../providers/provider-registry';
 
@@ -202,8 +203,26 @@ describe('resolveStrategy — live ANTHROPIC_PROVIDERS registry', () => {
     'claude-cli': 'cli',
   };
 
-  it('covers every provider in the registry (no unrouted entries)', () => {
-    const registryIds = REGISTRY.map((p) => p.id).sort();
+  /**
+   * Provider-session entries run as their own native chat runtime and are
+   * refused on every Claude-SDK path before a strategy is chosen
+   * (`providerSessionNativeRuntimeRequired` in auth-providers), so they carry
+   * no route here.
+   */
+  const SDK_REGISTRY = REGISTRY.filter(
+    (p) => !isProviderSessionProviderId(p.id),
+  );
+
+  it('names exactly the provider-session entries that bypass strategy routing', () => {
+    expect(
+      REGISTRY.filter((p) => isProviderSessionProviderId(p.id)).map(
+        (p) => p.id,
+      ),
+    ).toEqual(['antigravity-cli']);
+  });
+
+  it('covers every Claude-SDK provider in the registry (no unrouted entries)', () => {
+    const registryIds = SDK_REGISTRY.map((p) => p.id).sort();
     const pinnedIds = Object.keys(EXPECTED_ROUTE_BY_PROVIDER_ID).sort();
     expect(registryIds).toEqual(pinnedIds);
   });
@@ -225,7 +244,7 @@ describe('resolveStrategy — live ANTHROPIC_PROVIDERS registry', () => {
   });
 
   it('the API-key provider set is exactly {openrouter, z-ai, sakana, requesty, opencode-zen, opencode-go} — regression guard for acceptance criterion 2', () => {
-    const apiKeyRouted = REGISTRY.filter(
+    const apiKeyRouted = SDK_REGISTRY.filter(
       (p) => resolveStrategy('thirdParty', p) === 'api-key',
     )
       .map((p) => p.id)

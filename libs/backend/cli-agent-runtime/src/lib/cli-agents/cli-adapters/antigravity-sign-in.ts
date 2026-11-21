@@ -23,7 +23,7 @@
  * `auth-required` when the session opens.
  */
 import { execFile } from 'node:child_process';
-import { join } from 'node:path';
+import { win32 } from 'node:path';
 
 export type AgySignInState = 'signed-in' | 'signed-out' | 'unknown';
 
@@ -139,7 +139,7 @@ export async function readAgySignIn(
   const query = deps.query ?? nativeQuery;
   if (platform === 'win32') {
     const target = `${AGY_KEYRING_SERVICE}:${AGY_KEYRING_ACCOUNT}`;
-    const cmdkey = join(env['SystemRoot'] ?? 'C:\\Windows', 'System32', 'cmdkey.exe');
+    const cmdkey = win32.join(env['SystemRoot'] ?? 'C:\\Windows', 'System32', 'cmdkey.exe');
     const { stdout, exitCode } = await query(cmdkey, [`/list:${target}`]);
     if (exitCode !== 0) return 'unknown';
     return parseCmdkeyList(stdout, target);

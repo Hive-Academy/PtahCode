@@ -205,9 +205,11 @@ describe('createAcpProviderSessionRuntime: open', () => {
       { id: 'gemini-4-hydrogen-low', name: 'Gemini 4 Hydrogen (Low)' },
       { id: 'gemini-4-hydrogen-high', name: 'Gemini 4 Hydrogen (High)', isDefault: true },
     ]);
-    // The chat's `ask` maps to agy's `default` mode; no approve-everything flag.
+    // The chat's `ask` (Manual) maps to agy's read-only `plan` mode: agy's
+    // `default` self-approves workspace edits (live test 2026-11-21). No
+    // approve-everything flag.
     expect(sent(agent, 'session/set_mode').map((m) => params(m)['modeId'])).toEqual([
-      'default',
+      'plan',
     ]);
     await session.close();
   });
@@ -404,6 +406,30 @@ describe('createAcpProviderSessionRuntime: prompt content', () => {
     await expect(session.prompt({ text: 'second' })).rejects.toThrow('still running a turn');
     await expect(session.interrupt(turnId)).resolves.toBe(true);
     await session.close();
+  });
+
+  // Bug 5 (live test 2026-11-21): after a restart the chat's run id is the
+  // same and the prompt counter restarts, so the loaded process named its
+  // first turn like the first turn of the earlier process. The renderer then
+  // merged the reply into the old message and showed nothing new.
+  it('never reuses the turn id of an earlier process of the same chat run', async () => {
+    const first = harness();
+    const before = await first.open();
+    const { turnId: earlier } = await before.prompt({ text: 'first process' });
+    await before.close();
+    const second = harness({
+      replay: [
+        { sessionUpdate: 'user_message_chunk', content: { type: 'text', text: 'first process' } },
+        { sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'answer' } },
+      ],
+    });
+    const after = await second.open({
+      attach: { nativeSessionId: SESSION_ID, method: 'load', onFailure: 'error' },
+    });
+    const { turnId: later } = await after.prompt({ text: 'after restart' });
+    expect(later).not.toBe(earlier);
+    expect(after.replay.some((event) => event.turnId === later)).toBe(false);
+    await after.close();
   });
 
   it('repeats the turn usage on its terminal', async () => {
@@ -606,7 +632,7 @@ describe('createAcpProviderSessionRuntime: controls', () => {
       revision: 1,
     });
     await expect(session.setEffort('max')).resolves.toMatchObject({ revision: 2 });
-    await expect(session.setPermission('plan')).resolves.toMatchObject({ revision: 3 });
+    await expect(session.setPermission('auto-edit')).resolves.toMatchObject({ revision: 3 });
     const writes = sent(agent, 'session/set_config_option').map((m) => [
       params(m)['configId'],
       params(m)['value'],
@@ -616,8 +642,8 @@ describe('createAcpProviderSessionRuntime: controls', () => {
       ['thought_level', 'xhigh'],
     ]);
     expect(sent(agent, 'session/set_mode').map((m) => params(m)['modeId'])).toEqual([
-      'default',
       'plan',
+      'accept-edits',
     ]);
     await session.close();
   });

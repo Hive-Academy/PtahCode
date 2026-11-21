@@ -117,7 +117,9 @@ describe('createAcpSession', () => {
     expect(h.session.isSetupComplete()).toBe(true);
     await expect(h.session.prompt('hi')).resolves.toBe(0);
 
-    const turnId = `${SESSION_ID}:agent-1:1`;
+    // Session, run, this runtime instance (unique per process), prompt number.
+    const turnId = h.events[0]?.turnId;
+    expect(turnId).toMatch(new RegExp(`^${SESSION_ID}:agent-1:[0-9a-f]{8}:1$`));
     expect(h.events.map((event) => event.type)).toEqual([
       'textDelta',
       'usage',
@@ -192,6 +194,8 @@ describe('createAcpSession', () => {
         outputTokens: 2,
         cacheReadTokens: 5,
         contextTokens: 900,
+        // The window from `usage_update.size` (issue #1459: context fill).
+        contextWindow: 1000,
       },
     });
     const usage = h.events.find((event) => event.type === 'usage');

@@ -134,9 +134,9 @@ function probeResultText(result: AuthVerifyDraftConnectionResult): string {
       @switch (view()) {
         @case ('provider-session') {
           <!-- A provider session (Antigravity) signs in through its own CLI; Ptah stores no credential. -->
-          <div class="space-y-2 rounded border border-base-300 bg-base-200 p-3" data-testid="credentials-provider-session">
+          <div class="space-y-[var(--ptah-gap-controls)] rounded border border-base-300 bg-base-200 p-[var(--ptah-space-3)]" data-testid="credentials-provider-session">
             <p class="font-semibold text-base-content">CLI sign-in session</p>
-            <p class="flex items-center gap-1.5 text-xs text-base-content" data-testid="credentials-provider-session-state">
+            <p class="flex items-center gap-[var(--ptah-gap-inline)] text-xs text-base-content" data-testid="credentials-provider-session-state">
               <span class="h-2 w-2 rounded-full" [class.bg-success]="connection().configured"
                 [class.bg-warning]="!connection().configured" aria-hidden="true"></span>
               {{ connection().configured ? connection().name + ' is signed in on this machine.' : connection().name + ' is not ready. Install it or sign in, then choose Check again.' }}

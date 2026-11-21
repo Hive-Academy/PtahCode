@@ -47,6 +47,11 @@ export interface ProviderSessionOpenRequestDeps {
    * Absent, or `undefined` for a profile: the hint names no prefix.
    */
   ptahMcpToolPrefix?(profile: ProviderSessionProfileId): string | undefined;
+  /**
+   * The name the profile's agent gives Ptah's attachment (agy: `ptah_lane`).
+   * A user server is never given it, and the hint names the server by it.
+   */
+  ptahMcpServerName?(profile: ProviderSessionProfileId): string | undefined;
   readonly logger: Pick<Logger, 'debug' | 'info'>;
 }
 
@@ -55,11 +60,20 @@ export interface ProviderSessionOpenRequestDeps {
  * open (a credential was minted and the server runs), so the model is never
  * told about tools it does not have.
  */
-export function providerSessionPtahMcpHint(toolPrefix?: string): string {
+export function providerSessionPtahMcpHint(
+  toolPrefix?: string,
+  serverName?: string,
+): string {
   const names = toolPrefix
     ? `its tools (named \`${toolPrefix}<tool>\`, for example \`${toolPrefix}ptah_workspace_analyze\`)`
     : 'its ptah_* tools';
-  return `Ptah's MCP server is attached. Prefer ${names} for workspace analysis, file and symbol search, diagnostics and memory over shell equivalents, as its server instructions describe.`;
+  const hint = `Ptah's MCP server is attached. Prefer ${names} for workspace analysis, file and symbol search, diagnostics and memory over shell equivalents, as its server instructions describe.`;
+  // The agent may also load a `ptah` entry from its shared config (agy:
+  // `~/.gemini/config/mcp_config.json`, Ptah's registration for terminal
+  // use). That entry carries the workspace credential, not this session's,
+  // so calls through it skip this session's binding and tool profile.
+  if (!serverName || serverName === 'ptah') return hint;
+  return `${hint} Ptah's server for this session is \`${serverName}\`. If a server named \`ptah\` is also listed, it is the workspace's shared registration: do not call its tools.`;
 }
 
 export interface ProviderSessionOpenInput {
@@ -149,9 +163,15 @@ export function createProviderSessionOpenRequests(
     ];
   };
 
-  /** User servers in attach order; a user server never takes Ptah's name. */
-  const userMcp = (input: ProviderSessionOpenInput) =>
-    (input.open?.userMcp ?? []).filter((server) => server.name !== 'ptah');
+  /**
+   * User servers in attach order; a user server never takes Ptah's name nor
+   * the name the agent gives Ptah's attachment (agy `ptah_lane`, review
+   * moderate 7), which the narrower-mode grants trust.
+   */
+  const userMcp = (input: ProviderSessionOpenInput) => {
+    const reserved = new Set(['ptah', deps.ptahMcpServerName?.(input.profile) ?? 'ptah']);
+    return (input.open?.userMcp ?? []).filter((server) => !reserved.has(server.name));
+  };
 
   /** Ptah's entry first and authoritative: a user server never takes its name. */
   const mcp = (
@@ -190,7 +210,12 @@ export function createProviderSessionOpenRequests(
     const ptahAttached = attachments.some((attachment) => attachment.name === 'ptah');
     const parts = [
       input.open?.instructions ?? '',
-      ptahAttached ? providerSessionPtahMcpHint(deps.ptahMcpToolPrefix?.(input.profile)) : '',
+      ptahAttached
+        ? providerSessionPtahMcpHint(
+            deps.ptahMcpToolPrefix?.(input.profile),
+            deps.ptahMcpServerName?.(input.profile),
+          )
+        : '',
     ].filter((part) => part.length > 0);
     return parts.length > 0 ? parts.join('\n\n') : undefined;
   };

@@ -363,6 +363,21 @@ describe('ProviderSessionChatAdapter', () => {
     expect(h.adapter.canSendFollowUp(id)).toBe(true);
   });
 
+  it('applies the prepared model to the process a history read adopted on resume after a restart', async () => {
+    // Live test: after a restart the history read opened agy with `session/load`
+    // and no model; the follow-up ran on agy's default. The resume's prepared
+    // seed carries the saved model, and the attach sets it on that process.
+    const h = setup();
+    (h.ports.prepare as jest.Mock).mockImplementationOnce(async () => ({
+      seed: { ...seed, model: 'gemini-4-hydrogen-low' },
+      resume: { nativeSessionId: 'native-stored' },
+    }));
+    const id = SessionId.create();
+    await collect(await h.adapter.resumeSession(id, { tabId: 'tab-r' }));
+    expect(h.acquire.mock.calls[0][0].seed.model).toBe('gemini-4-hydrogen-low');
+    expect(h.lives[0].setModel).toHaveBeenCalledWith('gemini-4-hydrogen-low');
+  });
+
   it('resumes the stored native session and fails a mismatched attach as resume-failed', async () => {
     const h = setup();
     const id = SessionId.create();
