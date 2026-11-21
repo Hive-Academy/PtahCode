@@ -6,13 +6,18 @@ import {
   formatRelative,
   FRESHNESS_MS,
   NEAR_LIMIT_PERCENT,
+  ownerKeySuffix,
   type LocalTimeOptions,
   type PlanLimitOwnerSnapshot,
   type PlanLimitWindow,
   type PlanWindowState,
 } from '@ptah-extension/shared';
 import { formatElapsed } from './format-elapsed';
-import type { PtahDescriptionItem, PtahMeterTone } from '@ptah-extension/ui';
+import type {
+  PtahBadgeTone,
+  PtahDescriptionItem,
+  PtahMeterTone,
+} from '@ptah-extension/ui';
 import { buildPlanTile } from '../provider-account-card/plan-tile-view.model';
 import type {
   PlanTileView,
@@ -25,6 +30,7 @@ import {
 } from '../provider-account-card/plan-window.model';
 import {
   evidenceNotice,
+  tileTitleLines,
   USAGE_SOURCE_LABELS,
 } from '../provider-account-card/plan-owner.model';
 
@@ -62,10 +68,19 @@ export interface ProviderLimitMiniRowVm {
 export interface ProviderLimitCardVm {
   readonly key: string;
   readonly providerId: string;
+  /** Full display label ("Claude account · a6b0"); accessible names and sorting. */
   readonly label: string;
+  /** Visible title: the owner label without key suffix or qualifiers. */
+  readonly titleText: string;
+  /** Account sub-line: qualifiers, key suffix and plan; `null` when none exist. */
+  readonly accountLine: string | null;
   readonly selected: boolean;
   readonly state: ProviderLimitCardState;
   readonly statusText: string;
+  /** Badge tone for the status; uncertain states stay neutral. */
+  readonly statusTone: PtahBadgeTone;
+  /** Glyph beside the status text so color never carries it alone. */
+  readonly statusGlyph: string | null;
   readonly windowLabel: string | null;
   /** `null` when the primary window has no usable percent. */
   readonly ring: ProviderLimitRingVm | null;
@@ -107,6 +122,39 @@ const STATUS_TEXT: Readonly<Record<ProviderLimitCardState, string>> = {
   'not-confirmed': 'Not confirmed',
   'estimate-only': 'Estimate only',
 };
+
+const STATUS_BADGES: Readonly<
+  Record<ProviderLimitCardState, { tone: PtahBadgeTone; glyph: string | null }>
+> = {
+  'limit-reached': { tone: 'err', glyph: '⚠' },
+  'near-limit': { tone: 'warn', glyph: '▲' },
+  available: { tone: 'ok', glyph: '✓' },
+  aged: { tone: 'neutral', glyph: null },
+  unknown: { tone: 'neutral', glyph: null },
+  'not-confirmed': { tone: 'neutral', glyph: null },
+  'estimate-only': { tone: 'neutral', glyph: null },
+};
+
+/**
+ * The card header's two parts from existing owner data: the bare owner
+ * label as the title, and qualifiers, key suffix and plan as the account
+ * line, so neither repeats the other.
+ */
+function titleParts(owner: PlanLimitOwnerSnapshot): {
+  titleText: string;
+  accountLine: string | null;
+} {
+  const { name, qualifier } = tileTitleLines(owner.owner.label);
+  const parts = [
+    qualifier,
+    ownerKeySuffix(owner.owner.key),
+    owner.account?.planType ?? null,
+  ].filter((part): part is string => !!part);
+  return {
+    titleText: name,
+    accountLine: parts.length ? parts.join(' · ') : null,
+  };
+}
 
 function cardState(facts: WindowFacts | null): ProviderLimitCardState {
   if (facts === null) return 'unknown';
@@ -215,6 +263,7 @@ function detailItems(
   time: LocalTimeOptions,
 ): PtahDescriptionItem[] {
   const items: PtahDescriptionItem[] = [
+    { key: 'account', term: 'Account', value: tile.label },
     {
       key: 'source',
       term: 'Source',
@@ -397,13 +446,17 @@ export function buildProviderLimitCard(
       ? null
       : ringFor(facts, state, tile.label, primary.label);
   const aged = state === 'aged' || owner.status === 'stale';
+  const badge = STATUS_BADGES[state];
   return {
     key: tile.key,
     providerId: tile.providerId,
     label: tile.label,
+    ...titleParts(owner),
     selected,
     state,
     statusText: STATUS_TEXT[state],
+    statusTone: badge.tone,
+    statusGlyph: badge.glyph,
     windowLabel: primary?.label ?? null,
     ring,
     primaryValueText:

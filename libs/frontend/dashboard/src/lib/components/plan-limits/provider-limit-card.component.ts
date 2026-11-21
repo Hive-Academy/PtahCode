@@ -8,16 +8,19 @@ import {
 import {
   NativePopoverComponent,
   ProviderMarkComponent,
+  PtahBadgeDirective,
   PtahButtonDirective,
   PtahDescriptionListComponent,
   PtahMeterComponent,
   PtahRingComponent,
+  PtahSurfaceDirective,
 } from '@ptah-extension/ui';
 import type { ProviderLimitCardVm } from './provider-limit-card.view-model';
 
 /**
- * Compact plan-limit card: one ring for the primary window, up to two mini
- * bars, one source/age line and a Details popover with absolute times.
+ * Compact plan-limit card: one ring for the primary window (percent in the
+ * center, name on the ring role only), a status badge, up to two mini bars,
+ * one source/age line and a Details popover with absolute times.
  */
 @Component({
   selector: 'ptah-provider-limit-card',
@@ -25,54 +28,91 @@ import type { ProviderLimitCardVm } from './provider-limit-card.view-model';
   imports: [
     NativePopoverComponent,
     ProviderMarkComponent,
+    PtahBadgeDirective,
     PtahButtonDirective,
     PtahDescriptionListComponent,
     PtahMeterComponent,
     PtahRingComponent,
+    PtahSurfaceDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <article
-      class="surface-1 rounded-ptah-surface p-ptah-surface flex flex-col gap-ptah-group h-full border border-[var(--surface-border)]"
+      ptahSurface
+      variant="inset"
+      padding="md"
+      class="flex h-full min-w-0 flex-col gap-ptah-heading"
       [style.border-color]="card().selected ? 'var(--ptah-gold)' : null"
       [attr.aria-label]="card().label + ' plan limits'"
       data-testid="provider-limit-card"
       [attr.data-provider]="card().providerId"
       [attr.data-state]="card().state"
     >
-      <header class="flex items-center gap-ptah-heading min-w-0">
+      <header class="flex items-start gap-ptah-heading min-w-0">
         <ptah-provider-mark [providerId]="card().providerId" aria-hidden="true" />
-        <div class="min-w-0 flex flex-col">
-          <span class="text-sm font-semibold truncate">{{ card().label }}</span>
-          @if (card().selected) {
-            <span class="text-xs text-base-content-muted" data-testid="provider-limit-selected">
-              Selected for chat
+        <div class="min-w-0 flex-1 flex flex-col">
+          <span
+            class="text-sm font-semibold line-clamp-2 break-words"
+            [attr.title]="card().label"
+            data-testid="provider-limit-title"
+          >
+            {{ card().titleText }}
+          </span>
+          @if (card().accountLine; as accountLine) {
+            <span
+              class="text-xs text-base-content-muted line-clamp-2 break-words"
+              [attr.title]="accountLine"
+              data-testid="provider-limit-account"
+            >
+              {{ accountLine }}
             </span>
           }
         </div>
-        <span class="ml-auto text-xs text-base-content-muted" data-testid="provider-limit-status">
-          {{ card().statusText }}
-        </span>
+        @if (card().selected) {
+          <span
+            ptahBadge
+            tone="accent"
+            size="xs"
+            class="shrink-0"
+            title="Selected for chat"
+            data-testid="provider-limit-selected"
+          >
+            Selected<span class="sr-only"> for chat</span>
+          </span>
+        }
       </header>
 
-      <div class="flex items-center gap-ptah-group min-w-0">
+      <div class="flex items-center gap-ptah-field min-w-0">
         @if (card().ring; as ring) {
           <ptah-ring
             size="row"
             [value]="ring.value"
             [max]="100"
             [label]="ring.label"
+            [ariaLabel]="ring.label"
+            [centerOnly]="true"
             [tone]="ring.tone"
             [centerText]="ring.centerText"
             [fadeArc]="ring.fadeArc"
           />
         }
-        <div class="min-w-0 flex flex-col gap-ptah-label">
+        <div class="min-w-0 flex flex-col items-start gap-ptah-label">
+          <span
+            ptahBadge
+            size="xs"
+            [tone]="card().statusTone"
+            data-testid="provider-limit-status"
+          >
+            @if (card().statusGlyph; as glyph) {
+              <span aria-hidden="true">{{ glyph }}</span>
+            }
+            {{ card().statusText }}
+          </span>
           @if (card().windowLabel; as windowLabel) {
-            <span class="text-xs text-base-content-muted">{{ windowLabel }}</span>
+            <span class="text-xs text-base-content-muted break-words">{{ windowLabel }}</span>
           }
           @if (card().primaryValueText; as valueText) {
-            <span class="text-sm font-semibold tabular-nums">{{ valueText }}</span>
+            <span class="text-sm font-semibold tabular-nums break-words">{{ valueText }}</span>
           }
           @if (card().resetLine; as resetLine) {
             <span class="text-xs" data-testid="provider-limit-reset">{{ resetLine }}</span>
@@ -113,11 +153,17 @@ import type { ProviderLimitCardVm } from './provider-limit-card.view-model';
         </div>
       }
 
-      <footer class="mt-auto flex items-center gap-ptah-heading min-w-0">
-        <span class="text-xs text-base-content-muted truncate" data-testid="provider-limit-source">
+      <footer
+        class="mt-auto flex flex-col gap-ptah-controls border-t border-[var(--surface-border)] pt-ptah-heading min-w-0"
+      >
+        <span
+          class="text-xs text-base-content-muted line-clamp-2 break-words"
+          [attr.title]="card().sourceLine"
+          data-testid="provider-limit-source"
+        >
           {{ card().sourceLine }}
         </span>
-        <div class="ml-auto flex items-center gap-ptah-label">
+        <div class="flex items-center justify-end gap-ptah-label">
           @if (card().action; as action) {
             <button
               type="button"

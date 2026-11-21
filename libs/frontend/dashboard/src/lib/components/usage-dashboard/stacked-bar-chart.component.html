@@ -1,12 +1,12 @@
-<div class="w-full" data-testid="usage-chart">
+<div class="flex h-full min-h-0 w-full flex-1 flex-col gap-ptah-heading" data-testid="usage-chart">
   @if (days().length === 0 || series().length === 0) {
     <div
-      class="flex h-36 items-center justify-center text-xs text-base-content-muted"
+      class="flex min-h-[220px] flex-1 items-center justify-center text-xs text-base-content-muted"
     >
       No usage in this range.
     </div>
   } @else {
-    <ul class="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-xs" aria-label="Chart legend">
+    <ul class="flex flex-wrap gap-x-4 gap-y-1 text-xs" aria-label="Chart legend">
       @for (s of series(); track s.id) {
         <li class="flex items-center gap-1.5">
           <span
@@ -29,11 +29,11 @@
       }
     </ul>
 
-    <div class="relative w-full">
+    <div class="relative min-h-[220px] w-full flex-1" data-testid="usage-chart-plot">
     <svg
       [attr.viewBox]="'0 0 ' + viewW + ' ' + viewH"
       preserveAspectRatio="none"
-      class="block h-[clamp(220px,15vw,260px)] w-full text-base-content"
+      class="absolute inset-0 block h-full w-full text-base-content"
       role="img"
       [attr.aria-label]="chartAriaLabel()"
       data-testid="usage-chart-svg"
@@ -63,20 +63,38 @@
           [attr.x2]="padL + plotW"
           [attr.y1]="g.y"
           [attr.y2]="g.y"
-          stroke="currentColor"
-          stroke-opacity="0.12"
+          style="stroke: var(--ptah-meter-track)"
+          stroke-width="1"
+          vector-effect="non-scaling-stroke"
+          aria-hidden="true"
         />
       }
 
       @for (bar of bars(); track bar.day + '-' + bar.series.id) {
-        <rect
-          [attr.x]="bar.x"
-          [attr.y]="bar.y"
-          [attr.width]="bar.width"
-          [attr.height]="bar.height"
-          [attr.fill]="bar.series.color"
-          data-testid="usage-chart-bar"
-        />
+        @if (bar.topPath; as d) {
+          <path
+            [attr.d]="d"
+            [attr.fill]="bar.series.color"
+            class="stroke-base-200"
+            stroke-width="1"
+            vector-effect="non-scaling-stroke"
+            aria-hidden="true"
+            data-testid="usage-chart-bar"
+          />
+        } @else {
+          <rect
+            [attr.x]="bar.x"
+            [attr.y]="bar.y"
+            [attr.width]="bar.width"
+            [attr.height]="bar.height"
+            [attr.fill]="bar.series.color"
+            class="stroke-base-200"
+            stroke-width="1"
+            vector-effect="non-scaling-stroke"
+            aria-hidden="true"
+            data-testid="usage-chart-bar"
+          />
+        }
       }
 
       @for (column of unknownColumns(); track column.index) {
@@ -89,6 +107,7 @@
           stroke="currentColor"
           stroke-opacity="0.35"
           stroke-dasharray="4 3"
+          aria-hidden="true"
           data-testid="usage-chart-unknown-day"
         />
       }
@@ -102,6 +121,8 @@
           [attr.y2]="padT + plotH"
           stroke="currentColor"
           stroke-opacity="0.45"
+          vector-effect="non-scaling-stroke"
+          aria-hidden="true"
         />
       }
 
@@ -124,7 +145,7 @@
         />
       }
     </svg>
-    <div class="pointer-events-none absolute inset-0 text-[11px] text-base-content opacity-80" aria-hidden="true" data-testid="usage-chart-axis-labels">
+    <div class="pointer-events-none absolute inset-0 text-[11px] text-base-content-muted" aria-hidden="true" data-testid="usage-chart-axis-labels">
       @for (g of gridlines(); track $index) {
         <span class="absolute -translate-x-full -translate-y-1/2 whitespace-nowrap" [style.left.%]="(padL - 6) / viewW * 100" [style.top.%]="g.y / viewH * 100">{{ g.label }}</span>
       }
@@ -135,7 +156,7 @@
     </div>
 
     <div
-      class="mt-2 min-h-11 text-xs"
+      class="min-h-11 text-xs"
       role="status"
       aria-live="polite"
       data-testid="usage-chart-readout"

@@ -14,9 +14,11 @@ import {
 } from '@ptah-extension/core';
 import type { LocalTimeOptions } from '@ptah-extension/shared';
 import {
+  PtahBadgeDirective,
   PtahSectionHeaderComponent,
   PtahStatusBadgeComponent,
   PtahStatePanelComponent,
+  PtahSurfaceDirective,
 } from '@ptah-extension/ui';
 import { groupProviderAccounts } from '../provider-account-card/provider-account-grouping.model';
 import { ProviderLimitCardComponent } from './provider-limit-card.component';
@@ -48,17 +50,33 @@ const STATE_ORDER: Readonly<Record<ProviderLimitCardState, number>> = {
   selector: 'ptah-plan-limits-panel',
   standalone: true,
   imports: [
+    PtahBadgeDirective,
     PtahSectionHeaderComponent,
     PtahStatePanelComponent,
     PtahStatusBadgeComponent,
     ProviderLimitCardComponent,
     ProviderLimitChipComponent,
+    PtahSurfaceDirective,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
+  // Cards grow to fill each row: two across, four from 1120px of panel
+  // width, one below 560px. The panel host is the size container.
+  styles: [`
+    :host { container-type: inline-size; }
+    .plan-limit-card-slot { flex: 1 1 calc(50% - 8px); min-width: 15rem; }
+    .plan-limit-chip-slot { flex: 1 1 18rem; min-width: 0; }
+    @container (min-width: 1120px) {
+      .plan-limit-card-slot { flex-basis: calc(25% - 12px); }
+    }
+    @container (max-width: 559px) {
+      .plan-limit-card-slot { flex-basis: 100%; }
+    }
+  `],
   template: `
     <section
-      class="surface-1 rounded-ptah-surface p-ptah-surface flex flex-col gap-ptah-group"
+      ptahSurface
+      class="flex min-w-0 flex-col gap-ptah-group"
       aria-labelledby="plan-limits-heading"
       data-testid="dashboard-section-plan-limits"
     >
@@ -108,9 +126,10 @@ const STATE_ORDER: Readonly<Record<ProviderLimitCardState, number>> = {
           </p>
         }
         @if (cards().length > 0) {
-          <div class="grid gap-ptah-group grid-cols-[repeat(auto-fill,minmax(15rem,1fr))]">
+          <div class="flex flex-wrap gap-ptah-field">
             @for (card of cards(); track card.key) {
               <ptah-provider-limit-card
+                class="plan-limit-card-slot"
                 [card]="card"
                 (openChat)="openChat()"
                 (openSettings)="openSettings($event)"
@@ -119,11 +138,26 @@ const STATE_ORDER: Readonly<Record<ProviderLimitCardState, number>> = {
           </div>
         }
         @if (chips().length > 0) {
-          <div class="flex flex-wrap items-center gap-ptah-label" data-testid="plan-limits-chips">
-            <span class="text-xs text-base-content-muted">Without usage readings:</span>
-            @for (chip of chips(); track chip.key) {
-              <ptah-provider-limit-chip [chip]="chip" />
-            }
+          <div
+            class="flex flex-col gap-ptah-controls border-t border-[var(--surface-border)] pt-ptah-field"
+            data-testid="plan-limits-chips"
+          >
+            <h3
+              id="plan-limits-chips-heading"
+              class="flex items-center gap-ptah-label text-xs font-semibold text-base-content-muted"
+            >
+              Without usage readings
+              <span ptahBadge tone="neutral" size="xs" data-testid="plan-limits-chips-count">
+                {{ chips().length }}
+              </span>
+            </h3>
+            <ul class="flex flex-wrap gap-ptah-controls" aria-labelledby="plan-limits-chips-heading">
+              @for (chip of chips(); track chip.key) {
+                <li class="plan-limit-chip-slot flex">
+                  <ptah-provider-limit-chip class="flex flex-1 min-w-0" [chip]="chip" />
+                </li>
+              }
+            </ul>
           </div>
         }
       }
