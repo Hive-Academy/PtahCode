@@ -1551,6 +1551,24 @@ describe('AgentReportRouter.deliver — session child', () => {
         d.drainer.dispose();
       });
 
+      it('refuses a live-parent report when the saved receipts could not be restored', async () => {
+        const d = await durableSession();
+        d.active.add(PARENT_SDK);
+        jest
+          .spyOn(d.drainer, 'restored')
+          .mockRejectedValueOnce(new Error('state unreadable'));
+        const result = await d.router.deliver({
+          childSessionId: CHILD,
+          message: 'needs restore',
+        });
+        expect(result).toMatchObject({
+          delivered: false,
+          reason: 'delivery-failed',
+        });
+        expect(d.sendMessageToSession).not.toHaveBeenCalled();
+        d.drainer.dispose();
+      });
+
       it('creates a new receipt for the new owner when the same text follows a reparent', async () => {
         const d = await durableSession();
         const first = await d.router.deliver({

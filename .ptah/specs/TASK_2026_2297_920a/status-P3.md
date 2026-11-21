@@ -37,3 +37,17 @@ Codex review of HEAD `bfb755ea1`: REVISE 5/10 (`code-logic-review-p3-r2.md`). Fi
     The drainer holds or cancels as `owner-changed`; the report is not sent to a wrong parent.
   - Defect 6: a repeat outside the recent-report window after the effective recipient changed, or after
     the same owner gains its SDK alias, can create a second queued copy. No wrong-parent delivery.
+
+## PR report (2026-11-22)
+
+PR https://github.com/Hive-Academy/PtahCode/pull/1463 is open (head 7ca90a4e1). Local gate: lint and
+typecheck pass, vscode-lm-tools tests pass, cli-agent-runtime tests pass except the pre-existing
+account-binding spec. CI was pending at the time of this note. Parent report was refused with
+`parent-session-not-active`, so this file holds it. Open limits: defects 1, 5, 6 above.
+
+## PR review round (2026-11-22)
+
+PtahCode review of 7ca90a4e1: two major findings, both fixed in the next commit. The live path waits for
+the store restore before it reads a saved receipt (refuses with `delivery-failed` if the restore
+fails). The drainer follows lineage from every recorded owner alias, which closes the drain side of
+defect 5. CI: only `mcp-bench` `host-launcher.spec.ts` (guard mode, 71 s) failed; it is outside P3.

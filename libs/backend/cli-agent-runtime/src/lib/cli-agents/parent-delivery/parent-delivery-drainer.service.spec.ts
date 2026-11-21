@@ -468,6 +468,19 @@ describe('ParentDeliveryDrainerService child session reports', () => {
     });
   });
 
+  it('delivers to a successor reachable only from the recorded SDK alias', async () => {
+    const sdkAlias = '88888888-2222-4333-8444-555555555555';
+    const ackStore = acks([{ predecessorTabId: null, predecessorSdkId: sdkAlias,
+      successorTabId: successor, successorSdkId: null, workspaceRoot: '/ws',
+      handoffPath: '/ws/h.md', state: 'recorded' }]);
+    const { h, drainer } = await sessionDrainer(
+      registryWith({ parentSessionId: other, parentSdkSessionId: sdkAlias }), ackStore);
+    await drainer.enqueue(sessionReport('alias', successor));
+    await drainer.drain(successor);
+    expect(h.send).toHaveBeenCalledTimes(1);
+    expect(h.store.find('alias')?.state).toBe('delivered');
+  });
+
   it('keeps the body and defers when the handoff lineage read fails, then delivers', async () => {
     const start = Date.now();
     let clock = start;

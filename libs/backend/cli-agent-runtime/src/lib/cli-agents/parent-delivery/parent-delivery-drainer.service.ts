@@ -107,6 +107,11 @@ export class ParentDeliveryDrainerService {
     this.unregisterActivity?.();
   }
 
+  /** Resolves once the saved receipts are loaded; rejects when the restore failed. */
+  restored(): Promise<void> {
+    return this.store.restore();
+  }
+
   find(dedupeKey: string): ParentDeliveryEnvelope | undefined {
     return this.store.find(dedupeKey);
   }
@@ -340,13 +345,15 @@ export class ParentDeliveryDrainerService {
     const recorded = this.recordedOwners(envelope.agentId);
     if (!recorded) return 'unknown';
     if (recorded.includes(envelope.parentSessionId)) return 'matches';
-    const owner = recorded.find((value) => SessionId.safeParse(value));
-    if (!owner || !this.handoffAcks) return 'changed';
-    let forwarded: string;
+    // Every recorded id is an owner alias: the router may have chosen the
+    // successor from the SDK id, so lineage is followed from each of them.
+    const owners = recorded.filter((value) => SessionId.safeParse(value));
+    if (owners.length === 0 || !this.handoffAcks) return 'changed';
+    let forwardedTargets: string[];
     let recipientForwarded: string;
     try {
       const records = await this.handoffAcks.records();
-      forwarded = latestDeliveryTarget(records, owner);
+      forwardedTargets = owners.map((owner) => latestDeliveryTarget(records, owner));
       recipientForwarded = latestDeliveryTarget(records, envelope.parentSessionId);
     } catch (error: unknown) {
       this.logger.error('[ParentDeliveryDrainer] Handoff lineage read failed', this.error(error));
@@ -355,10 +362,11 @@ export class ParentDeliveryDrainerService {
     const after = this.recordedOwners(envelope.agentId);
     if (after?.join('\0') !== recorded.join('\0'))
       return retried ? 'lookup-failed' : this.sessionOwner(envelope, true);
-    if (forwarded === envelope.parentSessionId) return 'matches';
+    if (forwardedTargets.includes(envelope.parentSessionId)) return 'matches';
     // A read can omit an unreadable shard's edges, so a missing edge proves nothing.
     // A committed edge out of the recipient into the owner's lineage is positive proof.
-    return recipientForwarded !== envelope.parentSessionId && recipientForwarded === forwarded
+    return recipientForwarded !== envelope.parentSessionId &&
+      forwardedTargets.includes(recipientForwarded)
       ? 'changed'
       : 'unverified';
   }
