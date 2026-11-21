@@ -49,19 +49,35 @@ describe('antigravityAcpProfile — spawn', () => {
     expect(antigravityAcpProfile.buildSpawn(base).args).toEqual([
       'acp',
       '--dangerously-skip-permissions',
+      '--add-dir',
+      '/w',
     ]);
     expect(antigravityAcpProfile.buildSpawn({ ...base, permission: 'yolo' }).args).toEqual([
       'acp',
       '--dangerously-skip-permissions',
+      '--add-dir',
+      '/w',
     ]);
   });
 
   it('keeps approvals on when auto-approve is off or a narrower mode is set', () => {
-    expect(antigravityAcpProfile.buildSpawn({ ...base, autoApprove: false }).args).toEqual(['acp']);
-    expect(antigravityAcpProfile.buildSpawn({ ...base, permission: 'plan' }).args).toEqual(['acp']);
-    expect(antigravityAcpProfile.buildSpawn({ ...base, permission: 'auto-edit' }).args).toEqual([
-      'acp',
-    ]);
+    for (const options of [
+      { ...base, autoApprove: false },
+      { ...base, permission: 'plan' as const },
+      { ...base, permission: 'auto-edit' as const },
+    ]) {
+      expect(antigravityAcpProfile.buildSpawn(options).args).toEqual(['acp', '--add-dir', '/w']);
+    }
+  });
+
+  it('adds the working directory to the workspace, as stream-json does (round 4)', () => {
+    const dir = 'C:\\work space\\repo';
+    expect(
+      antigravityAcpProfile.buildSpawn({ ...base, workingDirectory: dir, autoApprove: false }).args,
+    ).toEqual(['acp', '--add-dir', dir]);
+    expect(
+      antigravityAcpProfile.buildSpawn({ ...base, workingDirectory: '', autoApprove: false }).args,
+    ).toEqual(['acp']);
   });
 
   it.each([
@@ -88,7 +104,7 @@ describe('antigravityAcpProfile — spawn', () => {
 
   it('gives the agent a console and NODE_PTY_USE_CONPTY=0 on Windows only', () => {
     expect(withPlatform('win32', () => antigravityAcpProfile.buildSpawn(base))).toEqual({
-      args: ['acp', '--dangerously-skip-permissions'],
+      args: ['acp', '--dangerously-skip-permissions', '--add-dir', '/w'],
       env: { mode: 'merge', set: { NODE_PTY_USE_CONPTY: '0' } },
       needsConsole: true,
     });
@@ -336,7 +352,7 @@ describe('antigravityAcpProfile — recorded agy turns', () => {
       });
     });
     await expect(h.session.start()).resolves.toEqual({ ok: true, restoredContext: false });
-    expect(h.spawn().args).toEqual(['acp', '--dangerously-skip-permissions']);
+    expect(h.spawn().args).toEqual(['acp', '--dangerously-skip-permissions', '--add-dir', '/w']);
     const created = h.agent().received.find((message) => message.method === 'session/new');
     expect((created?.params as Record<string, unknown>)['mcpServers']).toEqual([
       expect.objectContaining({ type: 'http', name: 'ptah_lane' }),

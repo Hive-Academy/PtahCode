@@ -27,6 +27,17 @@
  *   setup's own output is held until the outcome is known. Never mid-run: once
  *   a session exists the lane stays on ACP.
  *
+ * - MCP credential (round 4): `options.onMcpConfigRestored` is the
+ *   manager's revoke of the lane's Ptah MCP credential (Antigravity wires it;
+ *   stream-json calls it after restoring `mcp_config.json`). An ACP lane
+ *   writes no config, so it calls the hook once the agent process exits on
+ *   its own: a failed setup or a lost process. An abort is the manager's stop
+ *   or idle release, which revoke the subject themselves
+ *   (`AgentProcessManager.stop`, `releaseSubprocess`); calling the hook from
+ *   that late exit could revoke a credential the manager has meanwhile minted
+ *   for a resumed lane of the same id. A warm process keeps the credential
+ *   for its continuations. After a fallback the fallback transport owns it.
+ *
  * Session events reach the lane twice: as segments (`projectToCliSegments`,
  * the text log and lane outcome) and as flat stream events
  * (`createFlatStreamProjector`, `onStreamEvent`), from which the renderer
@@ -117,6 +128,8 @@ export function createProviderSessionLaneHandle(
     logger?.error('[AcpSessionHandle] lane has no process spawner', logContext);
     output.emit(`\n[${name}] ${message}\n`);
     segment.emit({ type: 'error', content: message });
+    // Nothing will ever use the credential minted for this lane.
+    options.onMcpConfigRestored?.();
     return {
       abort,
       done: Promise.resolve(1),
@@ -426,11 +439,31 @@ export function createProviderSessionLaneHandle(
     return next.done;
   };
 
+  /** Revoke the lane's MCP credential once, when the ACP process is gone. */
+  let credentialReleased = false;
+  const releaseCredential = (): void => {
+    if (credentialReleased || abort.signal.aborted) return;
+    credentialReleased = true;
+    options.onMcpConfigRestored?.();
+  };
+  const releaseCredentialOnExit = (): void => {
+    session.exited.then(releaseCredential, (error: unknown) => {
+      logger?.warn('[AcpSessionHandle] agent exit watch failed; revoking the lane credential', {
+        ...logContext,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      releaseCredential();
+    });
+  };
+
   const runFirstTurn = async (): Promise<number> => {
     const setup = await session.start();
     if (!setup.ok && config.fallback && mayFallBack()) {
       return runFallback(config.fallback);
     }
+    // Decided after the fallback check: a fallback lane still needs the
+    // credential, and its own transport revokes it.
+    releaseCredentialOnExit();
     releaseHeld();
     if (!setup.ok || abort.signal.aborted) return 1;
     const sessionId = session.getSessionId();

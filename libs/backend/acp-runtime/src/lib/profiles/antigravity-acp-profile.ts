@@ -7,7 +7,9 @@
  * - argv is `acp`. No isolation flag (D10): the lane runs on the user's
  *   shared, signed-in profile (default `--app-data-dir`). An unattended lane
  *   (resolved yolo, or no permission with auto-approve on) adds
- *   `--dangerously-skip-permissions`, as the stream-json lane does.
+ *   `--dangerously-skip-permissions`, and every lane adds
+ *   `--add-dir <workingDirectory>`, as the stream-json lane does
+ *   (`agy acp --help` 1.5.14 lists both).
  * - Windows: `NODE_PTY_USE_CONPTY=0` and a hidden console, the same as the
  *   stream-json lane; agy's shell tool runs through a pty.
  * - Ptah MCP (D9): an ACP `http` entry with the lane bearer. agy advertises no
@@ -179,9 +181,15 @@ export const antigravityAcpProfile: AcpVendorProfile = {
   buildSpawn(options: AcpSessionOptions): AcpSpawnSpec {
     const windows = process.platform === 'win32';
     return {
-      args: antigravitySkipsPermissions(options)
-        ? ['acp', '--dangerously-skip-permissions']
-        : ['acp'],
+      args: [
+        'acp',
+        ...(antigravitySkipsPermissions(options)
+          ? ['--dangerously-skip-permissions']
+          : []),
+        ...(options.workingDirectory
+          ? ['--add-dir', options.workingDirectory]
+          : []),
+      ],
       ...(windows
         ? {
             env: { mode: 'merge' as const, set: { NODE_PTY_USE_CONPTY: '0' } },

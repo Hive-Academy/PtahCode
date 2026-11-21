@@ -868,6 +868,56 @@ describe('createProviderSessionLaneHandle — resume', () => {
     expect(h.infos()).toEqual([]);
   });
 
+  const ROLE = {
+    name: 'reviewer',
+    body: 'ROLE-BODY-MARKER',
+    sourcePath: '/ws/reviewer.md',
+    bytes: 16,
+  };
+
+  it('omits project guidance and the role only when agy restored the session (round 4)', async () => {
+    const h = start({ options: { resumeSessionId: 'old-session', role: ROLE } });
+    await expect(h.handle.done).resolves.toBe(0);
+    expect(sent(h.agent, 'session/resume')).toHaveLength(1);
+    const prompt = promptText(sent(h.agent, 'session/prompt')[0]);
+    expect(prompt).not.toContain('PROJECT-GUIDANCE-MARKER');
+    expect(prompt).not.toContain('## Role: reviewer');
+    expect(prompt).toContain('Summarise the repository');
+  });
+
+  it('omits them after a successful session/load too', async () => {
+    const h = start({
+      options: { resumeSessionId: 'old-session', role: ROLE },
+      agent: { agentCapabilities: { loadSession: true } },
+    });
+    await expect(h.handle.done).resolves.toBe(0);
+    expect(sent(h.agent, 'session/load')).toHaveLength(1);
+    const prompt = promptText(sent(h.agent, 'session/prompt')[0]);
+    expect(prompt).not.toContain('PROJECT-GUIDANCE-MARKER');
+    expect(prompt).not.toContain('## Role: reviewer');
+  });
+
+  it.each([
+    [
+      'session/resume fails',
+      {
+        script: (agent: FakeAcpAgent) =>
+          agent.handle('session/resume', () => ({
+            error: { code: -32002, message: 'Resource not found' },
+          })),
+      },
+    ],
+    ['the agent cannot resume', { agent: { agentCapabilities: {} } }],
+  ])('re-sends guidance and the role when %s and a new session starts (round 4)', async (_label, setup) => {
+    const h = start({ options: { resumeSessionId: 'old-session', role: ROLE }, ...setup });
+    await expect(h.handle.done).resolves.toBe(0);
+    expect(sent(h.agent, 'session/new')).toHaveLength(1);
+    const prompt = promptText(sent(h.agent, 'session/prompt')[0]);
+    expect(prompt).toContain('PROJECT-GUIDANCE-MARKER');
+    expect(prompt).toContain('## Role: reviewer');
+    expect(prompt).toContain('ROLE-BODY-MARKER');
+  });
+
   it('prefers session/resume when the agent advertises both resume and load', async () => {
     const h = start({ options: { resumeSessionId: 'old-session' } });
 
@@ -1818,5 +1868,101 @@ describe('createProviderSessionLaneHandle — fallback when the ACP session neve
     await expect(h.handle.done).resolves.toBe(1);
     expect(h.errors()).toHaveLength(1);
     expect(h.errors()[0]).toMatch(/boom/);
+  });
+});
+
+describe('createProviderSessionLaneHandle — MCP credential revoke (round 4)', () => {
+  it('keeps the credential while the warm process can continue', async () => {
+    const onMcpConfigRestored = jest.fn();
+    const h = start({ options: { onMcpConfigRestored } });
+    await expect(h.handle.done).resolves.toBe(0);
+    await settle();
+    expect(h.handle.supportsContinuation?.()).toBe(true);
+    expect(onMcpConfigRestored).not.toHaveBeenCalled();
+    h.handle.abort.abort();
+  });
+
+  it('leaves an abort (stop, idle release) to the manager, which revokes itself', async () => {
+    const onMcpConfigRestored = jest.fn();
+    const h = start({ options: { onMcpConfigRestored } });
+    await expect(h.handle.done).resolves.toBe(0);
+    h.handle.abort.abort();
+    await h.transport.exited;
+    await settle();
+    // AgentProcessManager.stop and releaseSubprocess call revokeSubject; see
+    // agent-process-manager.service.spec.ts "revokes the lane credential when
+    // the idle subprocess is released" and "... when a running lane is stopped".
+    expect(onMcpConfigRestored).not.toHaveBeenCalled();
+  });
+
+  it('revokes once after a failed setup', async () => {
+    const onMcpConfigRestored = jest.fn();
+    const h = start({
+      options: { onMcpConfigRestored },
+      script: (agent) =>
+        agent.handle('initialize', () => ({ error: { code: -32603, message: 'boom' } })),
+    });
+    await expect(h.handle.done).resolves.toBe(1);
+    await h.transport.exited;
+    await settle();
+    h.handle.abort.abort();
+    await settle();
+    expect(onMcpConfigRestored).toHaveBeenCalledTimes(1);
+  });
+
+  it('revokes when the agent process dies after a turn', async () => {
+    const onMcpConfigRestored = jest.fn();
+    const h = start({ options: { onMcpConfigRestored } });
+    await expect(h.handle.done).resolves.toBe(0);
+    await h.transport.exit(1);
+    await settle();
+    expect(onMcpConfigRestored).toHaveBeenCalledTimes(1);
+  });
+
+  it('revokes after a turn that failed and broke the session', async () => {
+    const onMcpConfigRestored = jest.fn();
+    const h = start({
+      options: { onMcpConfigRestored },
+      script: (agent) =>
+        agent.handle('session/prompt', async () => {
+          await h.transport.exit(1);
+          return { hold: true };
+        }),
+    });
+    await expect(h.handle.done).resolves.toBe(1);
+    await settle();
+    expect(onMcpConfigRestored).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves the revoke to the fallback transport, which still needs the credential', async () => {
+    const onMcpConfigRestored = jest.fn();
+    const h = start({
+      options: { onMcpConfigRestored },
+      fallback: {
+        label: 'stream-json',
+        run: async () => ({
+          abort: new AbortController(),
+          done: Promise.resolve(0),
+          onOutput: () => undefined,
+        }),
+      },
+      script: (agent) =>
+        agent.handle('initialize', () => ({ error: { code: -32603, message: 'boom' } })),
+    });
+    await expect(h.handle.done).resolves.toBe(0);
+    await h.transport.exited;
+    await settle();
+    expect(onMcpConfigRestored).not.toHaveBeenCalled();
+  });
+
+  it('revokes at once when the lane has no spawner', async () => {
+    const onMcpConfigRestored = jest.fn();
+    const handle = createProviderSessionLaneHandle({
+      profile: createProfile(),
+      options: { task: 't', workingDirectory: process.cwd(), onMcpConfigRestored },
+      command: 'test-agent',
+    });
+    await expect(handle.done).resolves.toBe(1);
+    expect(onMcpConfigRestored).toHaveBeenCalledTimes(1);
   });
 });

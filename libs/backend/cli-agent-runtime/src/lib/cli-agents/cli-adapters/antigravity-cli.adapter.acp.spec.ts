@@ -444,7 +444,12 @@ describe('AntigravityCliAdapter — ACP lane', () => {
     const lane = await startLane(TOOL_USE, () => 'result');
     await expect(lane.handle.done).resolves.toBe(0);
 
-    expect(lane.spawn().args).toEqual(['acp', '--dangerously-skip-permissions']);
+    expect(lane.spawn().args).toEqual([
+      'acp',
+      '--dangerously-skip-permissions',
+      '--add-dir',
+      join(home, 'work'),
+    ]);
     const created = lane.agent().received.find((message) => message.method === 'session/new');
     expect((created?.params as Record<string, unknown>)['mcpServers']).toEqual([
       {
@@ -616,7 +621,7 @@ describe('AntigravityCliAdapter — ACP lane', () => {
       'refuses a shell request on a %s lane, without the skip flag',
       async (permission) => {
         const { answer, args } = await answerFor({ permission });
-        expect(args).toEqual(['acp']);
+        expect(args).toEqual(['acp', '--add-dir', join(home, 'work')]);
         expect(answer).toEqual({ outcome: { outcome: 'selected', optionId: 'reject' } });
       },
     );
@@ -631,7 +636,7 @@ describe('AntigravityCliAdapter — ACP lane', () => {
       ['unattended default', {}],
     ])('grants on a %s lane', async (_label, options) => {
       const { answer, args } = await answerFor(options);
-      expect(args).toEqual(['acp', '--dangerously-skip-permissions']);
+      expect(args).toEqual(['acp', '--dangerously-skip-permissions', '--add-dir', join(home, 'work')]);
       expect(answer).toEqual({ outcome: { outcome: 'selected', optionId: 'allow' } });
     });
   });
