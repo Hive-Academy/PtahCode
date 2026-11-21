@@ -9,8 +9,15 @@
  *   subcommand, and the host supplied a process spawner. Ptah MCP travels as
  *   an ACP `http` entry (D9), so `mcp_config.json` is not touched;
  *   continuation and interrupt (`session/cancel`, process kept) are supported.
+ *   A lane whose ACP session cannot be opened (spawn, `initialize` or
+ *   `session/new` failed) runs on stream-json instead, with one `info`.
  * - stream-json (the automatic fallback, everything below): below the
  *   version floor, when `acp` is not listed, or without a spawner.
+ *   After such a fallback the binary's lanes stay on stream-json for
+ *   `AGY_ACP_FAILURE_COOLDOWN_MS`. A fallback never resumes an id it cannot
+ *   prove stream-json knows: it starts a fresh conversation.
+ * - `PTAH_AGY_TRANSPORT=acp|stream-json` forces one transport (no probe, no
+ *   fallback, no cooldown); unset or `auto` chooses as above.
  *
  * Spawn-based, structured-JSONL adapter for Google's Antigravity CLI. As of
  * `agy` v1.1.11 print mode supports `--output-format stream-json`, which emits
@@ -103,11 +110,17 @@ import {
   killProcessTree,
   type IProcessSpawner,
 } from '@ptah-extension/platform-core';
-import { antigravityAcpProfile } from '@ptah-extension/acp-runtime';
 import {
+  antigravityAcpProfile,
+  antigravitySkipsPermissions,
+} from '@ptah-extension/acp-runtime';
+import {
+  AGY_ACP_FAILURE_COOLDOWN_MS,
   agyHelpListsAcp,
   antigravityAcpManifest,
   meetsAgyAcpFloor,
+  readAgyTransportOverride,
+  type AgyTransportOverride,
   type AntigravityAcpSeam,
 } from './antigravity-acp-lane';
 import { MCP_ATTACHMENT_TIMEOUT_MS } from '../mcp-attachment-probe.port';
@@ -370,6 +383,18 @@ function formatUsage(
   return details.length > 0 ? `Usage: ${details.join(', ')} tokens` : undefined;
 }
 
+/** `handle` with `info` as the first segment each subscriber receives. */
+function withLeadingInfo(handle: SdkHandle, info: string): SdkHandle {
+  const inner = handle.onSegment;
+  return {
+    ...handle,
+    onSegment: (callback) => {
+      callback({ type: 'info', content: info });
+      inner?.(callback);
+    },
+  };
+}
+
 export class AntigravityCliAdapter implements CliAdapter {
   /**
    * How long a failed startup waits for its child to stop before it releases
@@ -412,11 +437,25 @@ export class AntigravityCliAdapter implements CliAdapter {
    */
   private streamJsonInputSupported: boolean | undefined;
   private readonly streamJsonInputSupportByBinary = new Map<string, boolean>();
-  /** `agy --help` text captured by the default stream-json probe, per binary. */
+  /** Non-empty `agy --help` text, per binary; a timed-out or failed read stores nothing. */
   private readonly helpTextByBinary = new Map<string, string>();
-  /** Whether the last probed binary runs the ACP lane; undefined until probed. */
+  /**
+   * Whether the last probed binary runs the ACP lane; it drives
+   * `capabilities()`, which has no binary argument (one `agy` per host in
+   * practice). A run validates against its own transport's manifest, never
+   * this field.
+   */
   private acpSupported: boolean | undefined;
+  /** Definite ACP answers only (S2): a probe that could not tell is retried. */
   private readonly acpSupportByBinary = new Map<string, boolean>();
+  /** Lanes spawned before the first probe settles share it. */
+  private readonly acpProbesInFlight = new Map<string, Promise<boolean>>();
+  /** The binary `acpSupported` describes, for the cooldown in `capabilities()`. */
+  private lastProbedBinary: string | undefined;
+  /** When each binary's ACP setup last failed over to stream-json (round-2 M2). */
+  private readonly acpFailedAtByBinary = new Map<string, number>();
+  /** An unknown `PTAH_AGY_TRANSPORT` value is reported once per adapter. */
+  private unknownTransportWarned = false;
 
   /**
    * @param acp - ACP seams for specs and live recordings; production passes none.
@@ -469,9 +508,49 @@ export class AntigravityCliAdapter implements CliAdapter {
    * authoritative while a lane is running.
    */
   capabilities(): CliAdapterManifest {
-    if (this.acpSupported === true) {
-      return antigravityAcpManifest(this.roleChannel);
-    }
+    return this.acpTransportActive()
+      ? antigravityAcpManifest(this.roleChannel)
+      : this.streamJsonManifest();
+  }
+
+  private transportOverride(): AgyTransportOverride {
+    return (
+      this.acp.transport ??
+      readAgyTransportOverride(process.env, (value) => {
+        if (this.unknownTransportWarned) return;
+        this.unknownTransportWarned = true;
+        this.logger?.warn(
+          '[AntigravityCliAdapter] unknown PTAH_AGY_TRANSPORT value; choosing the transport automatically',
+          { value, accepted: ['auto', 'acp', 'stream-json'] },
+        );
+      })
+    );
+  }
+
+  private acpTransportActive(): boolean {
+    const override = this.transportOverride();
+    if (override !== 'auto') return override === 'acp';
+    return (
+      this.acpSupported === true &&
+      !(this.lastProbedBinary && this.acpCoolingDown(this.lastProbedBinary))
+    );
+  }
+
+  private now(): number {
+    return (this.acp.now ?? Date.now)();
+  }
+
+  /** Whether `binary` failed an ACP setup within the cooldown. */
+  private acpCoolingDown(binary: string): boolean {
+    const failedAt = this.acpFailedAtByBinary.get(binary);
+    if (failedAt === undefined) return false;
+    if (this.now() - failedAt < AGY_ACP_FAILURE_COOLDOWN_MS) return true;
+    this.acpFailedAtByBinary.delete(binary);
+    return false;
+  }
+
+  /** The stream-json lane's manifest, whatever transport was probed. */
+  private streamJsonManifest(): CliAdapterManifest {
     return {
       messaging: {
         steer: {
@@ -542,15 +621,31 @@ export class AntigravityCliAdapter implements CliAdapter {
       return this.streamJsonInputSupported;
     }
 
-    this.streamJsonInputSupported = await new Promise<boolean>((resolve) => {
+    const help = await this.readAgyHelp(binary);
+    this.streamJsonInputSupported =
+      help !== undefined && /--input-format\b/.test(help);
+    this.streamJsonInputSupportByBinary.set(
+      binary,
+      this.streamJsonInputSupported,
+    );
+    return this.streamJsonInputSupported;
+  }
+
+  /**
+   * `agy --help`, bounded at 8 s. Resolves the text when the child closed
+   * with output (and stores it per binary), `undefined` on a timeout, a spawn
+   * error or empty output, so a caller can tell "not listed" from "not read".
+   */
+  private readAgyHelp(binary: string): Promise<string | undefined> {
+    return new Promise<string | undefined>((resolve) => {
       let help = '';
       let settled = false;
       let childClosed = false;
-      const finish = (supported: boolean): void => {
+      const finish = (text: string | undefined): void => {
         if (settled) return;
         settled = true;
         clearTimeout(timer);
-        resolve(supported);
+        resolve(text);
       };
       const child = spawnCli(binary, ['--help'], { spawner: this.spawner, detached: true });
       const timer = setTimeout(() => {
@@ -561,7 +656,10 @@ export class AntigravityCliAdapter implements CliAdapter {
             });
           }
         });
-        finish(false);
+        this.logger?.warn('[AntigravityCliAdapter] agy --help timed out', {
+          timeoutMs: 8000,
+        });
+        finish(undefined);
       }, 8000);
       const capture = (data: string): void => {
         help += stripAnsiCodes(data);
@@ -570,70 +668,129 @@ export class AntigravityCliAdapter implements CliAdapter {
       child.stderr?.setEncoding('utf8');
       child.stdout?.on('data', capture);
       child.stderr?.on('data', capture);
-      child.on('close', () => {
+      child.on('close', (code: number | null) => {
         childClosed = true;
-        this.helpTextByBinary.set(binary, help);
-        finish(/--input-format\b/.test(help));
+        if (!help.trim()) {
+          if (!settled) {
+            this.logger?.warn('[AntigravityCliAdapter] agy --help printed nothing', {
+              exitCode: code ?? null,
+            });
+          }
+          finish(undefined);
+          return;
+        }
+        if (!settled) this.helpTextByBinary.set(binary, help);
+        finish(help);
       });
-      child.on('error', () => finish(false));
+      child.on('error', (error: Error) => {
+        this.logger?.warn('[AntigravityCliAdapter] agy --help could not be spawned', {
+          error: error.message,
+        });
+        finish(undefined);
+      });
     });
-    this.streamJsonInputSupportByBinary.set(
-      binary,
-      this.streamJsonInputSupported,
-    );
-    return this.streamJsonInputSupported;
   }
 
   /**
-   * Whether `binary` runs the ACP lane, cached per binary. Needs a way to
-   * spawn the agent (the host spawner, or a spec transport), `agy --version`
-   * at or above `AGY_ACP_MIN_VERSION`, and `acp` in `agy --help`. The
-   * help text comes from the stream-json probe, so detection spawns nothing
-   * extra; no probe ever spawns `agy acp` itself.
+   * Whether `binary` runs the ACP lane. Needs a way to spawn the agent (the
+   * host spawner, or a spec transport), `agy --version` at or above
+   * `AGY_ACP_MIN_VERSION`, and `acp` in `agy --help`. The help text is the
+   * one the stream-json probe read, so detection spawns nothing extra; no
+   * probe ever spawns `agy acp` itself. Only a definite answer is cached per
+   * binary: a version or help read that timed out or failed is probed again
+   * on the next lane (S2), and that lane runs on stream-json meanwhile.
+   * `PTAH_AGY_TRANSPORT` overrides the probe.
    */
-  private async probeAcp(
-    binary: string,
-    knownVersion?: string,
-  ): Promise<boolean> {
+  private probeAcp(binary: string, knownVersion?: string): Promise<boolean> {
+    const override = this.transportOverride();
+    if (override !== 'auto') return Promise.resolve(override === 'acp');
     const cached = this.acpSupportByBinary.get(binary);
     if (cached !== undefined) {
       this.acpSupported = cached;
-      return cached;
+      return Promise.resolve(cached);
     }
-    let supported: boolean;
-    if (this.acp.probe) {
-      supported = await this.acp.probe(binary);
-    } else if (!this.spawner && !this.acp.transportFactory) {
-      supported = false;
-    } else {
-      const version =
-        knownVersion ??
-        (await probeCliVersion(binary, undefined, undefined, this.spawner));
-      await this.probeStreamJsonInput(binary);
-      const help = this.helpTextByBinary.get(binary);
-      const listed = agyHelpListsAcp(help);
-      supported = meetsAgyAcpFloor(version) && listed;
-      this.logger?.info('[AntigravityCliAdapter] ACP transport probe', {
+    this.lastProbedBinary = binary;
+    const inFlight = this.acpProbesInFlight.get(binary);
+    if (inFlight) return inFlight;
+    const probe = this.runAcpProbe(binary, knownVersion)
+      .then((supported) => {
+        if (supported !== undefined) {
+          this.acpSupportByBinary.set(binary, supported);
+        }
+        this.acpSupported = supported === true;
+        return supported === true;
+      })
+      .finally(() => this.acpProbesInFlight.delete(binary));
+    this.acpProbesInFlight.set(binary, probe);
+    return probe;
+  }
+
+  /** One ACP probe; `undefined` when it could not tell. */
+  private async runAcpProbe(
+    binary: string,
+    knownVersion: string | undefined,
+  ): Promise<boolean | undefined> {
+    if (this.acp.probe) return this.acp.probe(binary);
+    if (!this.spawner && !this.acp.transportFactory) return false;
+    const version =
+      knownVersion ??
+      (await probeCliVersion(binary, undefined, undefined, this.spawner));
+    if (!/\d+\.\d+\.\d+/.test(version ?? '')) {
+      this.logger?.warn(
+        '[AntigravityCliAdapter] ACP probe could not read the agy version; the next lane probes again',
+        { version: version ?? null },
+      );
+      return undefined;
+    }
+    if (!meetsAgyAcpFloor(version)) {
+      this.logger?.info('[AntigravityCliAdapter] agy is below the ACP floor', {
         version,
-        acpListed: listed,
-        supported,
       });
+      return false;
     }
-    this.acpSupportByBinary.set(binary, supported);
-    this.acpSupported = supported;
-    return supported;
+    const help =
+      this.helpTextByBinary.get(binary) ?? (await this.readAgyHelp(binary));
+    if (help === undefined) {
+      this.logger?.warn(
+        '[AntigravityCliAdapter] ACP probe could not read agy --help; the next lane probes again',
+        { version },
+      );
+      return undefined;
+    }
+    const listed = agyHelpListsAcp(help);
+    if (listed) {
+      this.logger?.info('[AntigravityCliAdapter] ACP transport available', {
+        version,
+      });
+    } else {
+      this.logger?.warn(
+        '[AntigravityCliAdapter] agy is at or above the ACP floor but --help lists no acp; the lane runs on stream-json',
+        { version },
+      );
+    }
+    return listed;
   }
 
   /**
    * The ACP lane: `agy acp` through the provider-session lane handle. The
    * folder trust write stays (PF-5 not run); the Ptah MCP entry goes in
    * `session/new.mcpServers`, so `mcp_config.json` is left alone.
+   *
+   * The headless sink grants a tool approval only when the lane runs
+   * unattended (`antigravitySkipsPermissions`, S1): `plan` and `auto-edit`
+   * lanes are refused, as the stream-json `--mode` lanes are. With
+   * `fallBack`, a session that never opened runs on stream-json (S3).
    */
   private async runAcp(
     options: CliCommandOptions,
     binary: string,
+    fallBack: boolean,
   ): Promise<SdkHandle> {
-    validateLaneSpawnPolicy(this.name, this.capabilities(), options);
+    validateLaneSpawnPolicy(
+      this.name,
+      antigravityAcpManifest(this.roleChannel),
+      options,
+    );
     if (options.workingDirectory) {
       await this.ensureFolderTrusted(options.workingDirectory);
     }
@@ -645,12 +802,52 @@ export class AntigravityCliAdapter implements CliAdapter {
       options: {
         ...options,
         model: options.model ? agyModelId(options.model) : undefined,
+        autoApprove: antigravitySkipsPermissions(options),
       },
       command: binary,
       spawner: this.spawner,
       transportFactory: this.acp.transportFactory,
       logger: this.logger,
+      ...(fallBack
+        ? {
+            fallback: {
+              label: 'stream-json',
+              run: () => this.runStreamJsonFallback(options, binary),
+            },
+          }
+        : {}),
     });
+  }
+
+  /**
+   * The stream-json lane after an ACP setup failure. Starts the binary's
+   * cooldown (round-2 M2). A resume id is dropped (round-2 M3): it may be
+   * an ACP session id, and neither the code nor a recording proves that
+   * `--conversation` accepts one, so the lane starts a fresh conversation
+   * with the full task prompt and says so.
+   */
+  private async runStreamJsonFallback(
+    options: CliCommandOptions,
+    binary: string,
+  ): Promise<SdkHandle> {
+    this.acpFailedAtByBinary.set(binary, this.now());
+    this.logger?.warn(
+      '[AntigravityCliAdapter] ACP setup failed; this binary runs stream-json for the cooldown',
+      { cooldownMs: AGY_ACP_FAILURE_COOLDOWN_MS },
+    );
+    if (!options.resumeSessionId) return this.runStreamJson(options);
+    this.logger?.info(
+      '[AntigravityCliAdapter] stream-json fallback starts a fresh conversation instead of resuming',
+      { agentId: options.agentId },
+    );
+    const handle = await this.runStreamJson({
+      ...options,
+      resumeSessionId: undefined,
+    });
+    return withLeadingInfo(
+      handle,
+      'Antigravity cannot resume the earlier session on stream-json (it may be an ACP session id); this lane starts a fresh conversation.',
+    );
   }
 
   parseOutput(raw: string): string {
@@ -877,6 +1074,26 @@ export class AntigravityCliAdapter implements CliAdapter {
   }
 
   /**
+   * Run the task on `agy acp` when this binary supports it (or the transport
+   * is forced to it), else on the stream-json lane.
+   */
+  async runSdk(options: CliCommandOptions): Promise<SdkHandle> {
+    const binary = options.binaryPath ?? 'agy';
+    if (!(await this.probeAcp(binary))) return this.runStreamJson(options);
+    const auto = this.transportOverride() === 'auto';
+    if (auto && this.acpCoolingDown(binary)) {
+      this.logger?.info('[AntigravityCliAdapter] ACP is cooling down after a setup failure', {
+        agentId: options.agentId,
+      });
+      return withLeadingInfo(
+        await this.runStreamJson(options),
+        `Antigravity runs this lane on stream-json: an earlier ACP session failed to start within the last ${AGY_ACP_FAILURE_COOLDOWN_MS / 60_000} minutes.`,
+      );
+    }
+    return this.runAcp(options, binary, auto);
+  }
+
+  /**
    * Run the task via `agy` print mode with `--output-format stream-json`.
    *
    * Spawns `agy` with the prompt as the value of the trailing `--print` flag,
@@ -884,14 +1101,10 @@ export class AntigravityCliAdapter implements CliAdapter {
    * to structured `CliOutputSegment`s. The conversation id is captured from the
    * `init` event. stderr and non-zero exit surface as `error` segments.
    */
-  async runSdk(options: CliCommandOptions): Promise<SdkHandle> {
-    const acpBinary = options.binaryPath ?? 'agy';
-    if (await this.probeAcp(acpBinary)) {
-      return this.runAcp(options, acpBinary);
-    }
+  private async runStreamJson(options: CliCommandOptions): Promise<SdkHandle> {
     const policy = translateLaneSpawnPolicy(
       this.name,
-      this.capabilities(),
+      this.streamJsonManifest(),
       options,
     );
     if (options.workingDirectory) {

@@ -11,6 +11,39 @@ import type { CliAdapterManifest } from './cli-adapter.interface';
 /** The first `agy` release with a usable `agy acp` (research §2, preflight PF-3). */
 export const AGY_ACP_MIN_VERSION = '1.5.1';
 
+/**
+ * Forces the Antigravity lane transport (S3 escape hatch): `acp` skips the
+ * probe and never falls back; `stream-json` never runs `agy acp`; `auto`
+ * (default, or any other value) probes and falls back to stream-json when
+ * the ACP session cannot be opened.
+ */
+export const AGY_TRANSPORT_ENV = 'PTAH_AGY_TRANSPORT';
+
+export type AgyTransportOverride = 'auto' | 'acp' | 'stream-json';
+
+/**
+ * The override named by {@link AGY_TRANSPORT_ENV}; anything unrecognised is
+ * `auto`, reported through `onUnknown` with the raw value.
+ */
+export function readAgyTransportOverride(
+  env: NodeJS.ProcessEnv = process.env,
+  onUnknown?: (value: string) => void,
+): AgyTransportOverride {
+  const raw = env[AGY_TRANSPORT_ENV];
+  const value = raw?.trim().toLowerCase();
+  if (value === 'acp' || value === 'stream-json') return value;
+  if (raw !== undefined && value !== '' && value !== 'auto') onUnknown?.(raw);
+  return 'auto';
+}
+
+/**
+ * After an ACP setup failure that fell back to stream-json, the binary's
+ * later lanes skip `agy acp` for this long (round-2 M2): each attempt costs
+ * up to the 45 s + 90 s handshake bounds and a runtime unpack.
+ * `PTAH_AGY_TRANSPORT=acp` ignores it.
+ */
+export const AGY_ACP_FAILURE_COOLDOWN_MS = 10 * 60_000;
+
 /** The `acp` row of the `agy --help` subcommand list. */
 const AGY_ACP_SUBCOMMAND = /^\s*acp\s+\S/m;
 
@@ -38,8 +71,15 @@ export function agyHelpListsAcp(help: string | undefined): boolean {
  * replace them.
  */
 export interface AntigravityAcpSeam {
-  /** Whether this binary runs the ACP lane. */
-  readonly probe?: (binary: string) => Promise<boolean>;
+  /**
+   * Whether this binary runs the ACP lane; `undefined` means the probe could
+   * not tell (timeout, spawn error), which is not cached.
+   */
+  readonly probe?: (binary: string) => Promise<boolean | undefined>;
+  /** Replaces {@link readAgyTransportOverride} (specs). */
+  readonly transport?: AgyTransportOverride;
+  /** Clock for {@link AGY_ACP_FAILURE_COOLDOWN_MS}; defaults to `Date.now` (specs). */
+  readonly now?: () => number;
   /** Replaces the ACP process transport (in-memory agent, tee recorder). */
   readonly transportFactory?: AcpTransportFactory;
 }

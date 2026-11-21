@@ -20,6 +20,42 @@ export const acpPromptUsageSchema = z
   })
   .passthrough();
 
+/**
+ * The protocol's own `PromptResponse.usage` (ACP `Usage`), which agy 1.5
+ * sends instead of the `_meta.usage` extension: per-turn counters, the cache
+ * counters named `cached*Tokens`. Mapped onto the extension's shape, with the
+ * context size the turn's last `usage_update` reported.
+ */
+const acpStandardUsageSchema = z
+  .object({
+    inputTokens: z.number().int().nonnegative(),
+    outputTokens: z.number().int().nonnegative(),
+    cachedReadTokens: z.number().int().nonnegative().nullish(),
+    cachedWriteTokens: z.number().int().nonnegative().nullish(),
+  })
+  .passthrough();
+
+export function readAcpStandardUsage(
+  usage: unknown,
+  contextTokens: number | undefined,
+): z.infer<typeof acpPromptUsageSchema> | undefined {
+  const parsed = acpStandardUsageSchema.safeParse(usage);
+  if (!parsed.success) return undefined;
+  const { inputTokens, outputTokens, cachedReadTokens, cachedWriteTokens } =
+    parsed.data;
+  return {
+    inputTokens,
+    outputTokens,
+    ...(typeof cachedReadTokens === 'number'
+      ? { cacheReadTokens: cachedReadTokens }
+      : {}),
+    ...(typeof cachedWriteTokens === 'number'
+      ? { cacheWriteTokens: cachedWriteTokens }
+      : {}),
+    ...(contextTokens === undefined ? {} : { contextTokens }),
+  };
+}
+
 export const acpUsageUpdateSchema = z
   .object({
     sessionUpdate: z.literal('usage_update'),

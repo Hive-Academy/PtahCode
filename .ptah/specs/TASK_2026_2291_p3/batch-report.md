@@ -22,6 +22,12 @@ advertises no `mcpCapabilities`:
   `GET /.well-known/oauth-protected-resource[/agent/x]` without the bearer; the test server
   answered 405 and agy carried on.
 
+User MCP servers (harness sync) on the ACP path: Ptah forwards none in `session/new.mcpServers`;
+agy loads them itself from its shared `~/.gemini/config/mcp_config.json` (D10, the default
+app-data-dir), the same file the stream-json lane relies on, so they reach the lane on both
+transports. That file can also hold a persistent `ptah` entry (`PTAH_SPAWN_MCP_KEY`) without the
+lane bearer, so the ACP lane names its own entry `ptah_lane` (fix round 1, `fix-round-1.md`).
+
 Result: the ACP lane never writes `mcp_config.json`. The stream-json fallback keeps the facet
 write. P3x (stdio bridge) is **not needed** for the lane; P8 chat can use the same http entry.
 

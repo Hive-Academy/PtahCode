@@ -83,6 +83,7 @@ import {
   isRecord,
   isReplayedUpdate,
   readAuthoritativeConfigOptions,
+  readAcpStandardUsage,
   readConfigOptions,
   readJsonRpcError,
   readModeIds,
@@ -331,6 +332,8 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
   let approvalSequence = 0;
   const budgetRunId = options.agentId ?? randomUUID();
   let latestUpdateUsage: z.infer<typeof acpPromptUsageSchema> | undefined;
+  /** The context size (`used`) of the current turn's last `usage_update`. */
+  let latestUpdateUsed: number | undefined;
   let resolveUsageUpdate: (() => void) | undefined;
   /** Title of the first request the policy refused during the current prompt. */
   let refusedThisTurn: string | undefined;
@@ -464,6 +467,7 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
       }
       if (promptInFlight) {
         const update = acpUsageUpdateSchema.safeParse(notification.update);
+        if (update.success) latestUpdateUsed = update.data.used;
         if (update.success && update.data._meta?.usage) {
           latestUpdateUsage = {
             ...update.data._meta.usage,
@@ -888,6 +892,18 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
     );
 
   /**
+   * The model this session runs: the one the agent acknowledged or the lane
+   * bound (a refused binding model fails the turn), else the model option the
+   * agent advertises as current.
+   */
+  const sessionModel = (): string | undefined => {
+    const configured = acknowledgedModel ?? options.model;
+    if (configured) return configured;
+    const current = optionFor('model')?.['currentValue'];
+    return typeof current === 'string' && current ? current : undefined;
+  };
+
+  /**
    * Set `mode` through `session/set_mode` when the session advertised it,
    * else through a `mode` config option. Returns whether it was applied; a
    * mode the agent does not offer, or a refusal, is an `info` (a hint).
@@ -1216,6 +1232,7 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
     const turnId = `${sessionId ?? budgetRunId}:${budgetRunId}:${++promptSequence}`;
     currentTurnId = turnId;
     latestUpdateUsage = undefined;
+    latestUpdateUsed = undefined;
     turnCancelledByPtah = false;
     refusedThisTurn = undefined;
     // Tools of an earlier turn that never finished are abandoned.
@@ -1300,7 +1317,11 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
         const meta = isRecord(response) ? response['_meta'] : undefined;
         const rawUsage = isRecord(meta) ? meta['usage'] : undefined;
         const promptUsage = acpPromptUsageSchema.safeParse(rawUsage);
-        if (!promptUsage.success && !latestUpdateUsage) {
+        const standardUsage = readAcpStandardUsage(
+          isRecord(response) ? response['usage'] : undefined,
+          latestUpdateUsed,
+        );
+        if (!promptUsage.success && !standardUsage && !latestUpdateUsage) {
           // ACP agents can send usage_update after the prompt response. Wait
           // for that notification, with a safety bound for agents omitting it.
           let usageDrainTimer: NodeJS.Timeout | undefined;
@@ -1321,7 +1342,13 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
             resolveUsageUpdate = undefined;
           }
         }
-        const usage = promptUsage.success ? promptUsage.data : latestUpdateUsage;
+        const reported = promptUsage.success
+          ? promptUsage.data
+          : (standardUsage ?? latestUpdateUsage);
+        // Usage without a model (agy's protocol usage, Grok's extension) names
+        // the session's model, so the lane's actual model is not lost.
+        const model = reported?.model ?? sessionModel();
+        const usage = reported && model ? { ...reported, model } : reported;
         emit({ type: 'usage', provider: name, turnId, usage });
       }
       if (mapped.segment?.type === 'error') {
@@ -1353,6 +1380,7 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
       currentTurnId = undefined;
       resolveUsageUpdate = undefined;
       latestUpdateUsage = undefined;
+      latestUpdateUsed = undefined;
       refusedThisTurn = undefined;
       turnCancelledByPtah = false;
     }

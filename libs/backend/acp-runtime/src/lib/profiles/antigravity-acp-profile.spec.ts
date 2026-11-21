@@ -20,7 +20,11 @@ import {
 import type { AcpSpawnOptions } from '../acp-process-transport';
 import { createAcpSession, type AcpSession } from '../acp-session-runtime';
 import type { AcpRequestFailure, AcpSessionOptions } from '../acp-vendor-profile';
-import { antigravityAcpProfile } from './antigravity-acp-profile';
+import {
+  ANTIGRAVITY_ACP_PTAH_MCP_NAME,
+  antigravityAcpProfile,
+  antigravitySkipsPermissions,
+} from './antigravity-acp-profile';
 
 const TOOL_USE = readAcpFixture('antigravity-p3-ptah-mcp-tool-use.ndjson');
 const CANCEL = readAcpFixture('antigravity-p3-cancel-then-continue.ndjson');
@@ -58,6 +62,23 @@ describe('antigravityAcpProfile — spawn', () => {
     ]);
   });
 
+  it.each([
+    [undefined, undefined, true],
+    [undefined, true, true],
+    [undefined, false, false],
+    ['yolo', false, true],
+    ['plan', undefined, false],
+    ['plan', true, false],
+    ['auto-edit', undefined, false],
+    ['auto-edit', true, false],
+    ['ask', undefined, false],
+  ] as const)(
+    'skips permissions for permission %s, autoApprove %s: %s (S1)',
+    (permission, autoApprove, expected) => {
+      expect(antigravitySkipsPermissions({ permission, autoApprove })).toBe(expected);
+    },
+  );
+
   it('adds no isolation flag (D10: shared profile)', () => {
     const args = antigravityAcpProfile.buildSpawn(base).args.join(' ');
     expect(args).not.toMatch(/app-data-dir|gemini-dir|cli_dir_name/);
@@ -91,7 +112,7 @@ describe('antigravityAcpProfile — MCP, modes, config', () => {
     ).toEqual([
       {
         type: 'http',
-        name: 'ptah',
+        name: ANTIGRAVITY_ACP_PTAH_MCP_NAME,
         url: 'http://localhost:1/agent/a',
         headers: [{ name: 'Authorization', value: 'Bearer t' }],
       },
@@ -244,7 +265,7 @@ describe('antigravityAcpProfile — recorded agy turns', () => {
     expect(h.spawn().args).toEqual(['acp', '--dangerously-skip-permissions']);
     const created = h.agent().received.find((message) => message.method === 'session/new');
     expect((created?.params as Record<string, unknown>)['mcpServers']).toEqual([
-      expect.objectContaining({ type: 'http', name: 'ptah' }),
+      expect.objectContaining({ type: 'http', name: 'ptah_lane' }),
     ]);
     await expect(h.session.prompt('call the tool')).resolves.toBe(0);
     expect(h.events).toEqual(
@@ -255,6 +276,17 @@ describe('antigravityAcpProfile — recorded agy turns', () => {
     );
     const reply = h.events.flatMap((event) => (event.type === 'textDelta' ? [event.delta] : []));
     expect(reply.join('')).toBe('TOKEN-ZETA-9917');
+    // agy sends the protocol's `PromptResponse.usage` (no `_meta.usage`, no
+    // model): counted, with the lane's bound model as the actual model.
+    expect(h.events.find((event) => event.type === 'usage')).toMatchObject({
+      usage: {
+        model: 'gemini-3.8-flash-low',
+        inputTokens: 12618,
+        outputTokens: 37,
+        cacheReadTokens: 8415,
+        cacheWriteTokens: 0,
+      },
+    });
     expect(h.events.filter((event) => event.type === 'error')).toEqual([]);
     h.abort.abort();
   });

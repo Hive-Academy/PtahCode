@@ -60,8 +60,26 @@ const MODES: Readonly<Record<string, string>> = {
   yolo: 'auto',
 };
 
-/** Whether the lane runs unattended: every tool approval is granted. */
-function skipsPermissions(options: AcpSessionOptions): boolean {
+/**
+ * The ACP server name of the Ptah MCP attachment. agy also loads the shared
+ * `~/.gemini/config/mcp_config.json`, where Ptah may keep a persistent `ptah`
+ * entry (`PTAH_SPAWN_MCP_KEY`, harness sync) without the lane bearer; a
+ * distinct name keeps the lane's own server from clashing with or being
+ * shadowed by it. agy names the tools `mcp_ptah_lane_<tool>`.
+ */
+export const ANTIGRAVITY_ACP_PTAH_MCP_NAME = 'ptah_lane';
+
+/**
+ * Whether the session runs unattended: resolved yolo, or no permission with
+ * auto-approve on. Only then does `agy acp` get
+ * `--dangerously-skip-permissions`, and only then may the lane's headless
+ * sink grant a `session/request_permission` (`plan` and `auto-edit` lanes
+ * pass `autoApprove: false` from this rule, so they are refused, as the
+ * stream-json lane never granted them).
+ */
+export function antigravitySkipsPermissions(
+  options: Pick<AcpSessionOptions, 'permission' | 'autoApprove'>,
+): boolean {
   if (options.permission === 'yolo') return true;
   return options.permission === undefined && options.autoApprove !== false;
 }
@@ -94,7 +112,7 @@ export const antigravityAcpProfile: AcpVendorProfile = {
   buildSpawn(options: AcpSessionOptions): AcpSpawnSpec {
     const windows = process.platform === 'win32';
     return {
-      args: skipsPermissions(options)
+      args: antigravitySkipsPermissions(options)
         ? ['acp', '--dangerously-skip-permissions']
         : ['acp'],
       ...(windows
@@ -108,12 +126,14 @@ export const antigravityAcpProfile: AcpVendorProfile = {
 
   /**
    * The caller builds the Ptah MCP attachment (scoped URL plus the lane's
-   * bearer); agy takes it as an ACP `http` entry (D9).
+   * bearer); agy takes it as an ACP `http` entry (D9), named
+   * {@link ANTIGRAVITY_ACP_PTAH_MCP_NAME}.
    */
   buildMcpServers(options: AcpSessionOptions): readonly McpServer[] {
     return (options.mcp ?? []).map((attachment) => ({
       type: 'http' as const,
-      name: attachment.name,
+      // The attachment is always Ptah's (`ProviderMcpAttachment.name: 'ptah'`).
+      name: ANTIGRAVITY_ACP_PTAH_MCP_NAME,
       url: attachment.url,
       headers: attachment.headers.map((header) => ({
         name: header.name,

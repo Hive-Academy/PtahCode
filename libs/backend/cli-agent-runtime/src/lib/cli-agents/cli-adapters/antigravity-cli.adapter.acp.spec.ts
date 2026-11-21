@@ -21,6 +21,8 @@ import {
   type FakeAcpTransport,
 } from '@ptah-extension/acp-runtime/testing';
 import type { IProcessSpawner } from '@ptah-extension/platform-core';
+import { createMockLogger } from '@ptah-extension/shared/testing';
+import type { Logger } from '@ptah-extension/vscode-core';
 import type { FlatStreamEventUnion, CliOutputSegment } from '@ptah-extension/shared';
 import type { CliCommandOptions, SdkHandle } from './cli-adapter.interface';
 
@@ -40,7 +42,15 @@ jest.mock('./cli-adapter.utils', () => {
   };
 });
 
-import { meetsAgyAcpFloor } from './antigravity-acp-lane';
+import { classifyLaneLimit } from '../limits/lane-limit-classifier';
+import { matchesApiRateLimit } from '../limits/lane-rate-limit-classifier';
+import {
+  AGY_ACP_FAILURE_COOLDOWN_MS,
+  AGY_TRANSPORT_ENV,
+  meetsAgyAcpFloor,
+  readAgyTransportOverride,
+  type AntigravityAcpSeam,
+} from './antigravity-acp-lane';
 import { AntigravityCliAdapter } from './antigravity-cli.adapter';
 
 const TOOL_USE = readAcpFixture('antigravity-p3-ptah-mcp-tool-use.ndjson');
@@ -72,6 +82,33 @@ function helpChild(stdout: string): EventEmitter & {
     child.stderr.end();
     setImmediate(() => child.emit('close', 0));
   });
+  return child;
+}
+
+/** A `spawnCli` child that never answers and reports no pid (nothing to kill). */
+function hangingChild(): EventEmitter & {
+  stdout: PassThrough;
+  stderr: PassThrough;
+  whenSpawned: Promise<number | undefined>;
+  killed: boolean;
+} {
+  return Object.assign(new EventEmitter(), {
+    stdout: new PassThrough(),
+    stderr: new PassThrough(),
+    whenSpawned: Promise.resolve(undefined),
+    killed: false,
+  });
+}
+
+/** A `spawnCli` child whose spawn fails. */
+function failingChild(): EventEmitter & {
+  stdout: PassThrough;
+  stderr: PassThrough;
+  whenSpawned: Promise<number | undefined>;
+  killed: boolean;
+} {
+  const child = hangingChild();
+  setImmediate(() => child.emit('error', new Error('spawn EBUSY')));
   return child;
 }
 
@@ -142,6 +179,171 @@ describe('AntigravityCliAdapter — transport choice', () => {
     await adapter.detect();
     expect(adapter.capabilities().messaging.interrupt.state).toBe('unsupported');
   });
+
+  describe('a probe that could not tell is not cached (S2)', () => {
+    afterEach(() => jest.useRealTimers());
+
+    it('probes again after `agy --help` timed out, then chooses ACP', async () => {
+      jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick'] });
+      mockProbeCliVersion.mockResolvedValue('1.5.13');
+      mockSpawnCli
+        .mockImplementationOnce(() => hangingChild())
+        .mockImplementationOnce(() => hangingChild())
+        .mockImplementation(() => helpChild(AGY_HELP));
+      const adapter = new AntigravityCliAdapter(fakeSpawner);
+
+      const first = adapter.detect();
+      await jest.advanceTimersByTimeAsync(8_000);
+      await jest.advanceTimersByTimeAsync(8_000);
+      await first;
+      expect(adapter.capabilities().messaging.interrupt.state).toBe('unsupported');
+
+      jest.useRealTimers();
+      await adapter.detect();
+      expect(adapter.capabilities().messaging.interrupt.state).toBe('supported');
+    });
+
+    it('probes again after a spawn error or an unreadable version', async () => {
+      // detect() reads the version, and the ACP probe reads it again when
+      // detect() got none: both fail on the first detect.
+      mockProbeCliVersion
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValueOnce(undefined)
+        .mockResolvedValue('1.5.13');
+      mockSpawnCli
+        .mockImplementationOnce(() => failingChild())
+        .mockImplementation(() => helpChild(AGY_HELP));
+      const adapter = new AntigravityCliAdapter(fakeSpawner);
+      await adapter.detect();
+      expect(adapter.capabilities().messaging.interrupt.state).toBe('unsupported');
+      await adapter.detect();
+      expect(adapter.capabilities().messaging.interrupt.state).toBe('supported');
+    });
+
+    it('logs why --help could not be read (round-2 minor)', async () => {
+      mockProbeCliVersion.mockResolvedValue('1.5.13');
+      mockSpawnCli.mockImplementation(() => failingChild());
+      const logger = createMockLogger();
+      const adapter = new AntigravityCliAdapter(
+        fakeSpawner,
+        undefined,
+        logger as unknown as Logger,
+      );
+      await adapter.detect();
+      expect(logger.warn).toHaveBeenCalledWith(
+        '[AntigravityCliAdapter] agy --help could not be spawned',
+        { error: 'spawn EBUSY' },
+      );
+    });
+
+    it('caches a definite "not listed" answer', async () => {
+      mockProbeCliVersion.mockResolvedValue('1.5.13');
+      mockSpawnCli.mockImplementation(() => helpChild('  --input-format  x\n'));
+      const adapter = new AntigravityCliAdapter(fakeSpawner);
+      await adapter.detect();
+      await adapter.detect();
+      // One --help per binary: the stream-json and ACP answers are both cached.
+      expect(mockSpawnCli).toHaveBeenCalledTimes(1);
+      expect(adapter.capabilities().messaging.interrupt.state).toBe('unsupported');
+    });
+
+    it('re-runs an injected probe that answered undefined, shares one in flight', async () => {
+      let answers = 0;
+      const probe = jest.fn(async () => (answers++ === 0 ? undefined : true));
+      const adapter = new AntigravityCliAdapter(undefined, async () => true, undefined, {
+        probe,
+      });
+      mockProbeCliVersion.mockResolvedValue('1.5.13');
+      await adapter.detect();
+      expect(adapter.capabilities().messaging.interrupt.state).toBe('unsupported');
+      await Promise.all([adapter.detect(), adapter.detect()]);
+      expect(probe).toHaveBeenCalledTimes(2);
+      expect(adapter.capabilities().messaging.interrupt.state).toBe('supported');
+    });
+  });
+
+  describe('transport override (S3)', () => {
+    it.each([
+      [undefined, 'auto'],
+      ['acp', 'acp'],
+      [' STREAM-JSON ', 'stream-json'],
+      ['bogus', 'auto'],
+    ])('%s reads as %s', (value, expected) => {
+      expect(
+        readAgyTransportOverride(value === undefined ? {} : { [AGY_TRANSPORT_ENV]: value }),
+      ).toBe(expected);
+    });
+
+    it('stream-json skips the probe and keeps the stream-json manifest', async () => {
+      mockProbeCliVersion.mockResolvedValue('1.5.13');
+      mockSpawnCli.mockImplementation(() => helpChild(AGY_HELP));
+      const probe = jest.fn(async () => true);
+      const adapter = new AntigravityCliAdapter(fakeSpawner, undefined, undefined, {
+        probe,
+        transport: 'stream-json',
+      });
+      await adapter.detect();
+      expect(probe).not.toHaveBeenCalled();
+      expect(adapter.capabilities().messaging.interrupt.state).toBe('unsupported');
+    });
+
+    it('acp forces the ACP manifest even when the probe says no', async () => {
+      mockProbeCliVersion.mockResolvedValue('1.4.0');
+      mockSpawnCli.mockImplementation(() => helpChild(AGY_HELP));
+      const probe = jest.fn(async () => false);
+      const adapter = new AntigravityCliAdapter(fakeSpawner, undefined, undefined, {
+        probe,
+        transport: 'acp',
+      });
+      await adapter.detect();
+      expect(probe).not.toHaveBeenCalled();
+      expect(adapter.capabilities().messaging.interrupt.state).toBe('supported');
+    });
+
+    it('reports an unknown value through onUnknown, but not auto or blank', () => {
+      const unknown: string[] = [];
+      for (const value of ['acpp', 'auto', '  ', 'ACP']) {
+        readAgyTransportOverride({ [AGY_TRANSPORT_ENV]: value }, (raw) => unknown.push(raw));
+      }
+      expect(unknown).toEqual(['acpp']);
+    });
+
+    it('warns once about an unknown environment value (round-2 minor)', () => {
+      const real = process.env[AGY_TRANSPORT_ENV];
+      process.env[AGY_TRANSPORT_ENV] = 'acpp';
+      const logger = createMockLogger();
+      try {
+        const adapter = new AntigravityCliAdapter(
+          undefined,
+          undefined,
+          logger as unknown as Logger,
+        );
+        adapter.capabilities();
+        adapter.capabilities();
+        const warned = logger.warn.mock.calls.filter(([message]) =>
+          /unknown PTAH_AGY_TRANSPORT/.test(String(message)),
+        );
+        expect(warned).toHaveLength(1);
+        expect(warned[0][1]).toMatchObject({ value: 'acpp' });
+      } finally {
+        if (real === undefined) delete process.env[AGY_TRANSPORT_ENV];
+        else process.env[AGY_TRANSPORT_ENV] = real;
+      }
+    });
+
+    it('is read from the environment by default', () => {
+      const real = process.env[AGY_TRANSPORT_ENV];
+      process.env[AGY_TRANSPORT_ENV] = 'acp';
+      try {
+        expect(new AntigravityCliAdapter().capabilities().messaging.interrupt.state).toBe(
+          'supported',
+        );
+      } finally {
+        if (real === undefined) delete process.env[AGY_TRANSPORT_ENV];
+        else process.env[AGY_TRANSPORT_ENV] = real;
+      }
+    });
+  });
 });
 
 describe('AntigravityCliAdapter — ACP lane', () => {
@@ -172,10 +374,18 @@ describe('AntigravityCliAdapter — ACP lane', () => {
     readonly stream: FlatStreamEventUnion[];
   }
 
+  interface LaneSetup {
+    /** Extra scripting after the recorded handlers (overrides them). */
+    readonly script?: (agent: FakeAcpAgent) => void;
+    readonly seam?: Partial<AntigravityAcpSeam>;
+    readonly adapter?: (adapter: AntigravityCliAdapter) => void;
+  }
+
   async function startLane(
     fixture: ReturnType<typeof readAcpFixture>,
     prompt: (nth: number) => 'result' | 'hold',
     options: Partial<CliCommandOptions> = {},
+    setup: LaneSetup = {},
   ): Promise<Lane> {
     let agent: FakeAcpAgent | undefined;
     let transport: FakeAcpTransport | undefined;
@@ -200,10 +410,13 @@ describe('AntigravityCliAdapter — ACP lane', () => {
             ? { hold: true }
             : { result: recordedResult(fixture, 'session/prompt', nth) };
         });
+        setup.script?.(agent);
         transport = createFakeAcpTransport(agent);
         return transport;
       },
+      ...setup.seam,
     });
+    setup.adapter?.(adapter);
     const handle = await adapter.runSdk({
       task: 'Call the ptah_echo_token MCP tool',
       workingDirectory: join(home, 'work'),
@@ -236,7 +449,9 @@ describe('AntigravityCliAdapter — ACP lane', () => {
     expect((created?.params as Record<string, unknown>)['mcpServers']).toEqual([
       {
         type: 'http',
-        name: 'ptah',
+        // Not `ptah`: agy also loads the persistent `ptah` entry of its shared
+        // mcp_config.json, which has no lane bearer.
+        name: 'ptah_lane',
         url: expect.stringMatching(/^http:\/\/localhost:51820\/agent\/agent-1\/workspace\//),
         headers: [{ name: 'Authorization', value: 'Bearer lane-token' }],
       },
@@ -258,6 +473,15 @@ describe('AntigravityCliAdapter — ACP lane', () => {
     expect(lane.handle.getSessionId?.()).toBe(
       String(recordedResult(TOOL_USE, 'session/new')['sessionId']),
     );
+    // agy's protocol usage carries no model: the lane's model is the actual one.
+    expect(lane.segments.find((segment) => segment.usage)?.usage).toMatchObject({
+      model: 'gemini-3.8-flash-low',
+      inputTokens: 12618,
+      outputTokens: 37,
+    });
+    expect(
+      lane.stream.find((event) => event.eventType === 'message_complete'),
+    ).toMatchObject({ model: 'gemini-3.8-flash-low' });
     lane.handle.abort.abort();
   });
 
@@ -290,10 +514,20 @@ describe('AntigravityCliAdapter — ACP lane', () => {
     await expect(long.done).resolves.toBe(0);
     expect(lane.transport().killCount).toBe(0);
 
+    const before = lane.stream.length;
     const next = await (lane.handle.continue as NonNullable<SdkHandle['continue']>)(
       'Reply with exactly AFTER-INTERRUPT',
     );
     await expect(next.done).resolves.toBe(0);
+    // The cancelled turn left its tool open; the next turn projects afresh.
+    const after = lane.stream.slice(before);
+    expect(after[0]).toMatchObject({ eventType: 'message_start', role: 'assistant' });
+    expect(after.find((event) => event.eventType === 'text_delta')).toMatchObject({
+      delta: 'AFTER-INTERRUPT',
+      blockIndex: 0,
+    });
+    expect(after.some((event) => event.eventType === 'tool_result')).toBe(false);
+    expect(new Set(after.map((event) => event.messageId)).size).toBe(1);
     expect(
       lane.segments.some(
         (segment) => segment.type === 'text' && segment.content.includes('AFTER-INTERRUPT'),
@@ -301,6 +535,271 @@ describe('AntigravityCliAdapter — ACP lane', () => {
     ).toBe(true);
     expect(lane.handle.getPid?.()).toBe(4242);
     lane.handle.abort.abort();
+  });
+
+  describe('tool approvals follow the profile rule (S1)', () => {
+    const PERMISSION_OPTIONS = [
+      { optionId: 'allow', name: 'Allow', kind: 'allow_once' },
+      { optionId: 'reject', name: 'Reject', kind: 'reject_once' },
+    ];
+
+    async function answerFor(
+      options: Partial<CliCommandOptions>,
+    ): Promise<{ answer: unknown; args: readonly string[] }> {
+      let answer: unknown;
+      const lane = await startLane(TOOL_USE, () => 'result', { mcpPort: undefined, ...options }, {
+        script: (agent) =>
+          agent.handle('session/prompt', async (params, fake) => {
+            const reply = await fake.request('session/request_permission', {
+              sessionId: params['sessionId'],
+              toolCall: { toolCallId: 'call-1', title: 'run_command rm -rf build', kind: 'execute' },
+              options: PERMISSION_OPTIONS,
+            });
+            answer = reply.result;
+            return { result: { stopReason: 'end_turn' } };
+          }),
+      });
+      await lane.handle.done;
+      lane.handle.abort.abort();
+      return { answer, args: lane.spawn().args };
+    }
+
+    it.each(['auto-edit', 'plan'] as const)(
+      'refuses a shell request on a %s lane, without the skip flag',
+      async (permission) => {
+        const { answer, args } = await answerFor({ permission });
+        expect(args).toEqual(['acp']);
+        expect(answer).toEqual({ outcome: { outcome: 'selected', optionId: 'reject' } });
+      },
+    );
+
+    it('refuses when auto-approve is off', async () => {
+      const { answer } = await answerFor({ autoApprove: false });
+      expect(answer).toEqual({ outcome: { outcome: 'selected', optionId: 'reject' } });
+    });
+
+    it.each([
+      ['yolo', { permission: 'yolo' as const }],
+      ['unattended default', {}],
+    ])('grants on a %s lane', async (_label, options) => {
+      const { answer, args } = await answerFor(options);
+      expect(args).toEqual(['acp', '--dangerously-skip-permissions']);
+      expect(answer).toEqual({ outcome: { outcome: 'selected', optionId: 'allow' } });
+    });
+  });
+
+  describe('ACP quota and rate-limit errors classify as on stream-json', () => {
+    async function failedLane(data: unknown): Promise<string[]> {
+      const lane = await startLane(TOOL_USE, () => 'result', { mcpPort: undefined }, {
+        script: (agent) =>
+          agent.handle('session/prompt', () => ({
+            error: { code: -32603, message: 'Internal error', data },
+          })),
+      });
+      await expect(lane.handle.done).resolves.toBe(1);
+      lane.handle.abort.abort();
+      return lane.segments
+        .filter((segment) => segment.type === 'error')
+        .map((segment) => segment.content);
+    }
+
+    it('keeps the RESOURCE_EXHAUSTED wording, so the quota classifier reads it', async () => {
+      const wording = 'Error 429 RESOURCE_EXHAUSTED: quota exceeded, reset after 144h24m50s.';
+      const errors = await failedLane({ message: wording });
+      expect(errors).toEqual([expect.stringContaining(wording)]);
+      const observedAt = Date.UTC(2026, 10, 21);
+      const viaAcp = classifyLaneLimit({ cliOrProvider: 'antigravity', texts: errors, observedAt });
+      const viaStreamJson = classifyLaneLimit({
+        cliOrProvider: 'antigravity',
+        texts: [wording],
+        observedAt,
+      });
+      expect(viaAcp).toMatchObject({ failureKind: 'quota' });
+      expect(viaAcp).toEqual(viaStreamJson);
+    });
+
+    it('keeps a 429 rate-limit wording, so the rate-limit matcher reads it', async () => {
+      const wording = 'HTTP 429 Too Many Requests: rate limit exceeded';
+      const errors = await failedLane(wording);
+      expect(matchesApiRateLimit(errors)).toBe(true);
+      expect(
+        classifyLaneLimit({ cliOrProvider: 'antigravity', texts: errors, observedAt: 0 }),
+      ).toBeNull();
+    });
+  });
+
+  describe('a session that never opens falls back to stream-json (S3)', () => {
+    type StreamJsonRun = (options: CliCommandOptions) => Promise<SdkHandle>;
+
+    function stubStreamJson(adapter: AntigravityCliAdapter): jest.Mock {
+      const run = jest.fn<ReturnType<StreamJsonRun>, Parameters<StreamJsonRun>>(async () => ({
+        abort: new AbortController(),
+        done: Promise.resolve(0),
+        onOutput: () => undefined,
+        onSegment: (callback: (segment: CliOutputSegment) => void) =>
+          callback({ type: 'text', content: 'stream-json ran' }),
+      }));
+      (adapter as unknown as { runStreamJson: StreamJsonRun }).runStreamJson = run;
+      return run;
+    }
+
+    const failInitialize = (agent: FakeAcpAgent): void =>
+      agent.handle('initialize', () => ({
+        error: { code: -32603, message: 'agent runtime unpack failed' },
+      }));
+
+    it('runs the stream-json lane with the same options when initialize fails', async () => {
+      let run: jest.Mock | undefined;
+      const lane = await startLane(TOOL_USE, () => 'result', { permission: 'auto-edit' }, {
+        script: failInitialize,
+        adapter: (adapter) => {
+          run = stubStreamJson(adapter);
+        },
+      });
+      await expect(lane.handle.done).resolves.toBe(0);
+      expect(run).toHaveBeenCalledTimes(1);
+      expect(run?.mock.calls[0][0]).toMatchObject({ permission: 'auto-edit', agentId: 'agent-1' });
+      expect(lane.segments.filter((segment) => segment.type === 'error')).toEqual([]);
+      expect(lane.segments).toContainEqual({ type: 'text', content: 'stream-json ran' });
+      expect(lane.segments).toContainEqual({
+        type: 'info',
+        content: expect.stringMatching(/this lane runs on stream-json instead\.$/),
+      });
+    });
+
+    it('starts a fresh conversation instead of resuming an id on stream-json (round-2 M3)', async () => {
+      let run: jest.Mock | undefined;
+      const lane = await startLane(TOOL_USE, () => 'result', { resumeSessionId: 'acp-session-7' }, {
+        script: (agent) => {
+          failInitialize(agent);
+        },
+        adapter: (adapter) => {
+          run = stubStreamJson(adapter);
+        },
+      });
+      await expect(lane.handle.done).resolves.toBe(0);
+      expect(run?.mock.calls[0][0].resumeSessionId).toBeUndefined();
+      expect(run?.mock.calls[0][0]).toMatchObject({ agentId: 'agent-1', task: expect.any(String) });
+      expect(lane.segments).toContainEqual({
+        type: 'info',
+        content: expect.stringMatching(/cannot resume the earlier session on stream-json.*fresh conversation\.$/),
+      });
+    });
+
+    it('does not fall back when the transport is forced to acp', async () => {
+      let run: jest.Mock | undefined;
+      const lane = await startLane(TOOL_USE, () => 'result', {}, {
+        script: failInitialize,
+        seam: { transport: 'acp' },
+        adapter: (adapter) => {
+          run = stubStreamJson(adapter);
+        },
+      });
+      await expect(lane.handle.done).resolves.toBe(1);
+      expect(run).not.toHaveBeenCalled();
+      expect(lane.segments.filter((segment) => segment.type === 'error')).toHaveLength(1);
+    });
+
+    it('runs stream-json directly when the transport is forced to it', async () => {
+      let run: jest.Mock | undefined;
+      const lane = await startLane(TOOL_USE, () => 'result', {}, {
+        seam: { transport: 'stream-json' },
+        adapter: (adapter) => {
+          run = stubStreamJson(adapter);
+        },
+      });
+      await expect(lane.handle.done).resolves.toBe(0);
+      expect(run).toHaveBeenCalledTimes(1);
+      expect(lane.spawn()).toBeUndefined();
+    });
+  });
+
+  describe('ACP failure cooldown (round-2 M2)', () => {
+    type StreamJsonRun = (options: CliCommandOptions) => Promise<SdkHandle>;
+
+    function cooldownAdapter(seam: Partial<AntigravityAcpSeam> = {}): {
+      adapter: AntigravityCliAdapter;
+      spawns: () => number;
+      streamJson: jest.Mock;
+      clock: { now: number };
+    } {
+      const clock = { now: 1_000_000 };
+      let spawns = 0;
+      const adapter = new AntigravityCliAdapter(undefined, undefined, undefined, {
+        probe: async () => true,
+        now: () => clock.now,
+        transportFactory: () => {
+          spawns++;
+          const agent = createFakeAcpAgent();
+          live.push(agent);
+          agent.handle('initialize', () => ({
+            error: { code: -32603, message: 'agent runtime unpack failed' },
+          }));
+          return createFakeAcpTransport(agent);
+        },
+        ...seam,
+      });
+      const streamJson = jest.fn<ReturnType<StreamJsonRun>, Parameters<StreamJsonRun>>(
+        async () => ({
+          abort: new AbortController(),
+          done: Promise.resolve(0),
+          onOutput: () => undefined,
+          onSegment: () => undefined,
+        }),
+      );
+      (adapter as unknown as { runStreamJson: StreamJsonRun }).runStreamJson = streamJson;
+      return { adapter, spawns: () => spawns, streamJson, clock };
+    }
+
+    const run = async (adapter: AntigravityCliAdapter): Promise<CliOutputSegment[]> => {
+      const handle = await adapter.runSdk({
+        task: 'Say hi',
+        workingDirectory: join(home, 'work'),
+        agentId: 'agent-1',
+      });
+      const segments: CliOutputSegment[] = [];
+      handle.onSegment?.((segment) => segments.push(segment));
+      await handle.done;
+      handle.abort.abort();
+      return segments;
+    };
+
+    it('sends later lanes straight to stream-json, with one info, until it expires', async () => {
+      const h = cooldownAdapter();
+      await run(h.adapter);
+      expect(h.spawns()).toBe(1);
+      expect(h.streamJson).toHaveBeenCalledTimes(1);
+
+      h.clock.now += AGY_ACP_FAILURE_COOLDOWN_MS - 1;
+      const cooled = await run(h.adapter);
+      expect(h.spawns()).toBe(1);
+      expect(h.streamJson).toHaveBeenCalledTimes(2);
+      expect(cooled.filter((segment) => segment.type === 'info')).toEqual([
+        {
+          type: 'info',
+          content:
+            'Antigravity runs this lane on stream-json: an earlier ACP session failed to start within the last 10 minutes.',
+        },
+      ]);
+      expect(h.adapter.capabilities().messaging.interrupt.state).toBe('unsupported');
+
+      h.clock.now += 1;
+      await run(h.adapter);
+      expect(h.spawns()).toBe(2);
+    });
+
+    it('is bypassed by PTAH_AGY_TRANSPORT=acp', async () => {
+      const forced = cooldownAdapter({ transport: 'acp' });
+      // A forced lane never records a failure itself, so seed one directly.
+      (forced.adapter as unknown as { acpFailedAtByBinary: Map<string, number> }).acpFailedAtByBinary.set(
+        'agy',
+        forced.clock.now,
+      );
+      const segments = await run(forced.adapter);
+      expect(forced.spawns()).toBe(1);
+      expect(forced.streamJson).not.toHaveBeenCalled();
+      expect(segments.filter((segment) => segment.type === 'error')).toHaveLength(1);
+    });
   });
 
   it('refuses the ask permission on a lane (no approval route)', async () => {

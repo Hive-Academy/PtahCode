@@ -147,6 +147,58 @@ describe('createAcpSession', () => {
     h.abort.abort();
   });
 
+  it('reads the protocol PromptResponse.usage and names the advertised model (no drain wait)', async () => {
+    const h = start(
+      {
+        configOptions: [
+          {
+            id: 'model',
+            category: 'model',
+            type: 'select',
+            currentValue: 'agent-model-1',
+            options: [{ value: 'agent-model-1', name: 'One' }],
+          },
+        ],
+      },
+      (agent) =>
+        agent.handle('session/prompt', async (params, fake) => {
+          await fake.sessionUpdate(String(params['sessionId']), {
+            sessionUpdate: 'usage_update',
+            used: 900,
+            size: 1000,
+          });
+          return {
+            result: {
+              stopReason: 'end_turn',
+              usage: {
+                inputTokens: 7,
+                outputTokens: 2,
+                cachedReadTokens: 5,
+                cachedWriteTokens: null,
+                totalTokens: 14,
+              },
+            },
+          };
+        }),
+    );
+    await h.session.start();
+    const started = Date.now();
+    await expect(h.session.prompt('hi')).resolves.toBe(0);
+    expect(Date.now() - started).toBeLessThan(1_500);
+    expect(h.events.find((event) => event.type === 'usage')).toMatchObject({
+      usage: {
+        model: 'agent-model-1',
+        inputTokens: 7,
+        outputTokens: 2,
+        cacheReadTokens: 5,
+        contextTokens: 900,
+      },
+    });
+    const usage = h.events.find((event) => event.type === 'usage');
+    expect(usage?.type === 'usage' && usage.usage).not.toHaveProperty('cacheWriteTokens');
+    h.abort.abort();
+  });
+
   it('emits trimmed stderr lines as diagnostics and drops blank ones', () => {
     const h = start();
     h.spawn()?.onStderrLine?.('  warming up  ');
