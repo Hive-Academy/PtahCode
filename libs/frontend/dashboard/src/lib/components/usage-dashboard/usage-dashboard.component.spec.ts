@@ -119,10 +119,39 @@ describe('UsageDashboardComponent', () => {
         knownCostMicroUsd: 250000, hasUnknownTokens: true }],
     });
     await settle();
-    expect(text('usage-repository')).toContain('Recorded tokens: 15');
-    expect(text('usage-repository')).toContain('Partial cost (known priced rows only): $0.25');
-    expect(text('usage-repository')).toContain('Token coverage incomplete');
-    expect(text('usage-repository')).toContain('/ws/a/tree');
+    // The section renders without any usage facts.
+    expect(el().querySelector('[data-testid="usage-empty"]')).not.toBeNull();
+    expect(el().querySelector('[data-testid="usage-repositories"]')?.getAttribute('aria-label'))
+      .toBe('Repository usage');
+    expect(text('usage-repository-name')).toBe('repo-a');
+    expect(text('usage-repository-tokens')).toContain('Recorded tokens');
+    expect(text('usage-repository-tokens')).toContain('15');
+    expect(text('usage-repository-token-count')).toBe('15');
+    expect(text('usage-repository-cost')).toContain('Known cost');
+    expect(text('usage-repository-cost')).toContain('$0.25');
+    const partial = el().querySelector('[data-testid="usage-repository-partial"]')!;
+    expect(partial.getAttribute('title')).toBe('Partial cost (known priced rows only)');
+    expect(partial.textContent).toContain('cost (known priced rows only)');
+    // The coverage sentence stays visible text, not only a tooltip.
+    expect(text('usage-repository-coverage')).toBe('Token coverage incomplete; some usage is unknown.');
+    // Worktree paths stay an always-expanded list.
+    const worktrees = el().querySelector('[data-testid="usage-repository"] ul[aria-label="Worktree paths"]');
+    expect(worktrees?.closest('details')).toBeNull();
+    expect(worktrees?.textContent).toContain('/ws/a/tree');
+  });
+
+  it('shows a repository share of the known cost and hides worktrees when there are none', async () => {
+    answerUsage(usageCall(0), {
+      ...usageSummary([factSonnetDay18]),
+      repositories: [{ repositoryId: '/work/ptah-extension.git', worktreePaths: [],
+        inputTokens: 1000, outputTokens: 200, cacheReadTokens: 0, cacheWriteTokens: 0,
+        knownCostMicroUsd: 500000, hasUnknownTokens: false }],
+    });
+    await settle();
+    expect(text('usage-repository-name')).toBe('ptah-extension');
+    expect(text('usage-repository-share')).toBe('25% of $2.00 known cost');
+    expect(el().querySelector('[data-testid="usage-repository-coverage"]')).toBeNull();
+    expect(el().querySelector('ul[aria-label="Worktree paths"]')).toBeNull();
   });
 
   it('renders session counts and a compact priced and unpriced top sessions table', async () => {
@@ -141,6 +170,24 @@ describe('UsageDashboardComponent', () => {
     expect(table?.textContent).toContain('Claude Opus 4.6');
     expect(table?.querySelector('[title="claude-opus-4-6"]')).not.toBeNull();
     expect(table?.querySelector('td[title="Long descriptive session title"]')).not.toBeNull();
+    const headers = Array.from(table?.querySelectorAll('thead th') ?? []);
+    expect(headers.map((th) => th.textContent?.trim())).toEqual([
+      '#Rank', 'Session', 'Model', 'Cost', 'Tokens', 'Last active',
+    ]);
+    expect(headers.every((th) => th.getAttribute('scope') === 'col')).toBe(true);
+    const sessionRows = table?.querySelectorAll('[data-testid="usage-session-row"]') ?? [];
+    expect(sessionRows).toHaveLength(2);
+    expect(sessionRows[0].querySelector('td')?.textContent?.trim()).toBe('1');
+    expect(
+      table?.querySelector('td[title="2026-10-20T00:00:00.000Z"]')?.textContent?.trim(),
+    ).toMatch(/ago$|^Just now$/);
+    const costBars = Array.from(
+      table?.querySelectorAll('[data-testid="usage-session-cost-bar"]') ?? [],
+    );
+    expect(costBars).toHaveLength(2);
+    expect(costBars.every((bar) => bar.getAttribute('aria-hidden') === 'true')).toBe(true);
+    expect(costBars.map((bar) => (bar.firstElementChild as HTMLElement | null)?.style.width))
+      .toEqual(['100%', '0%']);
     expect(text('usage-kpis')).toContain('Subagents1');
   });
 
@@ -189,6 +236,15 @@ describe('UsageDashboardComponent', () => {
     expect(kpi.compareDocumentPosition(chart) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(chart.compareDocumentPosition(share) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(share.compareDocumentPosition(breakdown) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // Cost quality sits in its own row between the charts and the tables.
+    const quality = el().querySelector('[data-testid="usage-quality-row"] [data-testid="usage-cost-quality"]');
+    if (!quality) throw new Error('cost quality is not inside the quality row');
+    expect(el().querySelector('[data-testid="usage-chart-row"] [data-testid="usage-cost-quality"]')).toBeNull();
+    expect(share.compareDocumentPosition(quality) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(quality.compareDocumentPosition(breakdown) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    // The tables sit on their own surface, not on the bare page background.
+    expect(breakdown.hasAttribute('data-ptah-surface')).toBe(true);
+    expect(el().querySelector('[data-testid="usage-top-sessions"]')?.hasAttribute('data-ptah-surface')).toBe(true);
     // Mixed savings: the known sum renders as a lower bound, never zero.
     expect(text('usage-kpi-cost')).toContain('a lower bound');
     expect(
@@ -411,10 +467,10 @@ describe('UsageDashboardComponent', () => {
 
     const firstDay = (): SVGElement =>
       el().querySelectorAll('svg rect[role="img"]')[0] as SVGElement;
-    expect(firstDay().getAttribute('aria-label')).toContain('total $2');
+    expect(firstDay().getAttribute('aria-label')).toContain('total $2.00');
 
     clickButton('Tokens');
-    expect(firstDay().getAttribute('aria-label')).toContain('total 2K');
+    expect(firstDay().getAttribute('aria-label')).toContain('total 2,000');
   });
 
   it('renders fixed-size chart labels outside the scalable SVG', async () => {
@@ -424,7 +480,14 @@ describe('UsageDashboardComponent', () => {
     const chart = el().querySelector('[data-testid="usage-chart"]')!;
     const svg = chart.querySelector('[data-testid="usage-chart-svg"]')!;
     expect(svg.getAttribute('preserveAspectRatio')).toBe('none');
-    expect(svg.classList).toContain('h-[clamp(220px,15vw,260px)]');
+    // The SVG fills a growing wrapper so the chart fills the card height.
+    expect(svg.classList).toContain('absolute');
+    expect(svg.classList).toContain('inset-0');
+    expect(svg.classList).toContain('h-full');
+    const plot = chart.querySelector('[data-testid="usage-chart-plot"]')!;
+    expect(svg.parentElement).toBe(plot);
+    expect(plot.classList).toContain('min-h-[220px]');
+    expect(plot.classList).toContain('flex-1');
     expect(svg.querySelector('text')).toBeNull();
     const labels = chart.querySelector('[data-testid="usage-chart-axis-labels"]')!;
     expect(labels.classList).toContain('text-[11px]');
@@ -444,7 +507,7 @@ describe('UsageDashboardComponent', () => {
       el().querySelectorAll('svg rect[role="img"]')[1] as SVGElement;
     // Day 19 has an unpriced fact: cost mode shows a lower bound, hatched.
     expect(day19().getAttribute('aria-label')).toBe(
-      'Oct 19: at least $3; some usage unpriced',
+      'Oct 19: at least $3.00; some usage unpriced',
     );
     expect(count('[data-testid="usage-chart-unknown-day"]')).toBe(1);
     expect(count('[data-testid="usage-chart-unknown-legend"]')).toBe(1);
@@ -455,8 +518,8 @@ describe('UsageDashboardComponent', () => {
     day19().dispatchEvent(new Event('focus'));
     fixture.detectChanges();
     const costReadout = text('usage-chart-readout') ?? '';
-    expect(costReadout).toContain('at least $3 (some usage unpriced)');
-    expect(costReadout).toContain('Anthropic: $3');
+    expect(costReadout).toContain('at least $3.00 (some usage unpriced)');
+    expect(costReadout).toContain('Anthropic: $3.00');
     expect(costReadout).toContain('OpenCode: unpriced');
     expect(costReadout).not.toContain('OpenCode: $0');
 
@@ -464,12 +527,12 @@ describe('UsageDashboardComponent', () => {
     // Token counts are always known: no hatch, no lower-bound wording, and
     // the focused readout shows plain token values again.
     expect(day19().getAttribute('aria-label')).toBe(
-      'Oct 19: total 1.2K; Anthropic: 200; OpenCode: 1K',
+      'Oct 19: total 1,200; Anthropic: 200; OpenCode: 1,000',
     );
     expect(count('[data-testid="usage-chart-unknown-day"]')).toBe(0);
     expect(count('[data-testid="usage-chart-unknown-legend"]')).toBe(0);
     const tokenReadout = text('usage-chart-readout') ?? '';
-    expect(tokenReadout).toContain('OpenCode: 1K');
+    expect(tokenReadout).toContain('OpenCode: 1,000');
     expect(tokenReadout).not.toContain('unpriced');
   });
 
@@ -613,6 +676,41 @@ describe('StackedBarChartComponent', () => {
     expect(readout).toContain('Oct 19 — 6');
     expect(readout).toContain('A: 2');
     expect(readout).toContain('B: 4');
+  });
+
+  it('formats the readout and day labels with the detail format, the axis with the value format', () => {
+    fixture.componentRef.setInput('valueFormat', (value: number) => `~${Math.round(value)}`);
+    fixture.componentRef.setInput('detailFormat', (value: number) => `$${value.toFixed(2)}`);
+    fixture.componentRef.setInput('series', [
+      { id: 'a', label: 'A', color: '#123456', values: [1.2, 1.24] },
+    ]);
+    fixture.componentInstance.setFocusedDay(1);
+    fixture.detectChanges();
+
+    const readout = text('usage-chart-readout') ?? '';
+    expect(readout).toContain('Oct 19 — $1.24');
+    expect(readout).toContain('A: $1.24');
+    expect(readout).not.toContain('~1');
+    expect(dayColumns()[0].getAttribute('aria-label')).toContain('$1.20');
+    const axis = el().querySelector('[data-testid="usage-chart-axis-labels"]')?.textContent ?? '';
+    expect(axis).toContain('~0');
+    expect(axis).not.toContain('$');
+  });
+
+  it('names the peak only when every day in the range is priced', () => {
+    const chartLabel = (): string =>
+      el().querySelector('[data-testid="usage-chart-svg"]')?.getAttribute('aria-label') ?? '';
+    fixture.componentRef.setInput('series', [
+      { id: 'a', label: 'A', color: '#123456', values: [10, 0] },
+    ]);
+    fixture.detectChanges();
+    expect(chartLabel()).toContain('; peak Oct 18: 10.');
+
+    // Tuesday is wholly unpriced: Monday's $10 is only the highest known cost.
+    fixture.componentRef.setInput('unknownDays', [false, true]);
+    fixture.detectChanges();
+    expect(chartLabel()).toContain('; highest known cost Oct 18: 10.');
+    expect(chartLabel()).not.toContain('peak');
   });
 
   it('moves focus between day columns with the arrow keys', () => {

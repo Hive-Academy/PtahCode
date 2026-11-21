@@ -1,4 +1,4 @@
-<div class="usage-dashboard flex flex-col gap-ptah-section" data-testid="usage-dashboard">
+<div class="usage-dashboard flex flex-col gap-ptah-group" data-testid="usage-dashboard">
   <div class="flex flex-wrap items-center gap-ptah-controls" data-testid="usage-meta">
     <p class="text-xs text-base-content-muted" data-testid="usage-date-span">
       {{ viewModel()?.dateSpanLabel }}
@@ -63,8 +63,8 @@
   @if (viewModel(); as vm) {
     @if (vm.hasUsage) {
       <!-- Row 3: daily usage (8) + cost share (4). -->
-      <div class="usage-chart-row grid grid-cols-1 gap-ptah-section" [class.opacity-60]="isStale()" data-testid="usage-chart-row">
-        <section ptahSurface class="min-w-0" aria-label="Daily usage">
+      <div class="usage-chart-row grid grid-cols-1 gap-ptah-field" [class.opacity-60]="isStale()" data-testid="usage-chart-row">
+        <section ptahSurface class="flex min-w-0 flex-col gap-ptah-heading" aria-label="Daily usage">
           <div class="flex items-center justify-between gap-ptah-heading">
             <ptah-section-header heading="Daily usage" [level]="3" />
             <div class="flex gap-ptah-controls" role="group" aria-label="Chart metric">
@@ -88,60 +88,121 @@
               </button>
             </div>
           </div>
-          <ptah-stacked-bar-chart
-            [series]="chartSeries()"
-            [days]="vm.days"
-            [valueFormat]="chartValueFormat()"
-            [unknownDays]="chartUnknownDays()"
-            [unknownSeries]="chartMode() === 'cost' ? vm.providerSeries.map((p) => p.costUnknownByDay) : []"
-          />
+          <!-- The chart absorbs the height difference to the cost share card. -->
+          <div class="usage-chart-fill flex min-w-0 flex-col">
+            <ptah-stacked-bar-chart
+              class="flex min-h-0 min-w-0 flex-1 flex-col"
+              [series]="chartSeries()"
+              [days]="vm.days"
+              [valueFormat]="chartValueFormat()"
+              [detailFormat]="chartDetailFormat()"
+              [metricLabel]="chartMode() === 'cost' ? 'Cost' : 'Tokens'"
+              [unknownDays]="chartUnknownDays()"
+              [unknownSeries]="chartMode() === 'cost' ? vm.providerSeries.map((p) => p.costUnknownByDay) : []"
+            />
+          </div>
         </section>
-        <div class="flex min-w-0 flex-col gap-ptah-section">
-          <ptah-usage-cost-donut
-            [providers]="vm.providers"
-            [models]="vm.modelRows"
-            [totalCostUsd]="vm.totalCostUsd"
-            [unpricedFactCount]="vm.totalCostUnpricedFactCount"
-          />
-          <ptah-usage-cost-summary
-            [providers]="vm.providers"
-            [totalUnpricedFactCount]="vm.totalCostUnpricedFactCount"
-          />
-          <ptah-usage-cost-quality [quality]="vm.quality" />
-        </div>
+        <section ptahSurface class="flex min-w-0 flex-col" aria-label="Cost share" data-testid="usage-cost-share">
+          <!-- Donut left, provider list right only while the card spans the full row. -->
+          <div class="usage-share-body flex min-w-0 flex-1 flex-col gap-ptah-field">
+            <div class="min-w-0">
+              <ptah-usage-cost-donut
+                [providers]="vm.providers"
+                [models]="vm.modelRows"
+                [totalCostUsd]="vm.totalCostUsd"
+                [unpricedFactCount]="vm.totalCostUnpricedFactCount"
+                [dayCount]="vm.days.length"
+              />
+            </div>
+            <div class="flex min-w-0 flex-col justify-around">
+              <ptah-usage-cost-summary
+                [providers]="vm.providers"
+                [totalUnpricedFactCount]="vm.totalCostUnpricedFactCount"
+              />
+            </div>
+          </div>
+        </section>
       </div>
 
-      <!-- Row 4: breakdown (8) + top sessions (4). -->
-      <div class="usage-table-row grid grid-cols-1 gap-ptah-section" [class.opacity-60]="isStale()" data-testid="usage-table-row">
+      <!-- Row 4: cost quality, four tiles across the full width. -->
+      <div class="usage-quality-row" [class.opacity-60]="isStale()" data-testid="usage-quality-row">
+        <ptah-usage-cost-quality [quality]="vm.quality" />
+      </div>
+
+      <!-- Row 5: breakdown + top sessions; stacked full width until both fit side by side. -->
+      <div class="usage-table-row grid grid-cols-1 gap-ptah-field" [class.opacity-60]="isStale()" data-testid="usage-table-row">
         <ptah-usage-breakdown-table
           [modelRows]="vm.modelRows"
           [dayRows]="vm.dayRows"
+          [days]="vm.days"
+          [providerSeries]="vm.providerSeries"
           [costPartiallyKnown]="vm.totalCostUnpricedFactCount > 0"
         />
-        <ptah-usage-top-sessions [sessions]="vm.topSessions" [generatedAt]="summaryGeneratedAt()" />
+        <ptah-usage-top-sessions
+          [sessions]="vm.topSessions"
+          [generatedAt]="summaryGeneratedAt()"
+          [knownCostUsd]="vm.totalCostUsd"
+        />
       </div>
     }
 
+    <!-- Repository usage renders in every loaded state, with or without usage. -->
     @if (vm.repositories.length > 0) {
-      <section ptahSurface class="text-xs" aria-label="Repository usage" data-testid="usage-repositories">
-        <ptah-section-header heading="Repository usage" [level]="3" />
-        @for (repository of vm.repositories; track repository.repositoryId) {
-          <div class="mt-2" data-testid="usage-repository">
-            <p class="font-medium break-all">{{ repository.repositoryId }}</p>
-            <p>Recorded tokens: {{ repository.recordedTokens }}</p>
-            <p>Partial cost (known priced rows only): {{ repository.knownCostLabel }}</p>
-            @if (repository.hasUnknownTokens) {
-              <p class="text-warning">Token coverage incomplete; some usage is unknown.</p>
-            }
-            @if (repository.worktreePaths.length > 0) {
-              <ul class="mt-1 list-disc ps-4" aria-label="Worktree paths">
-                @for (path of repository.worktreePaths; track path) {
-                  <li class="break-all">{{ path }}</li>
+      <section ptahSurface class="flex flex-col gap-ptah-field" aria-label="Repository usage" data-testid="usage-repositories">
+        <ptah-section-header heading="Repository usage" [level]="3" description="Tokens and known cost by git repository" />
+        <div class="usage-repo-grid grid grid-cols-1 gap-ptah-field" [class.usage-repo-grid-multi]="vm.repositories.length > 1">
+          @for (repository of vm.repositories; track repository.repositoryId) {
+            <div ptahSurface variant="inset" class="flex min-w-0 flex-col gap-ptah-heading" data-testid="usage-repository">
+              <div class="flex items-start justify-between gap-ptah-controls">
+                <div class="flex min-w-0 items-start gap-ptah-controls">
+                  <span class="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-base-content/10 text-base-content-muted" aria-hidden="true">
+                    <lucide-angular [img]="repositoryIcon" class="h-4 w-4" />
+                  </span>
+                  <div class="min-w-0">
+                    <p class="text-sm font-semibold break-all" [attr.title]="repository.repositoryId" data-testid="usage-repository-name">{{ repository.displayName }}</p>
+                    <p class="font-mono text-xs text-base-content-muted break-all">{{ repository.repositoryId }}</p>
+                  </div>
+                </div>
+                @if (repository.hasUnknownTokens) {
+                  <span ptahBadge tone="warn" class="shrink-0" title="Token coverage incomplete; some usage is unknown." aria-hidden="true">&#9650; Coverage incomplete</span>
                 }
-              </ul>
-            }
-          </div>
-        }
+              </div>
+              @if (repository.hasUnknownTokens) {
+                <p class="text-xs text-warning" data-testid="usage-repository-coverage">Token coverage incomplete; some usage is unknown.</p>
+              }
+              <div class="grid grid-cols-[repeat(auto-fit,minmax(10rem,1fr))] gap-ptah-field">
+                <div class="min-w-0" data-testid="usage-repository-tokens">
+                  <p class="text-xs text-base-content-muted">Recorded tokens</p>
+                  <p class="text-xl font-semibold tabular-nums" [attr.title]="formatCount(repository.recordedTokens) + ' tokens'">{{ formatCompactTokens(repository.recordedTokens) }}</p>
+                  <p class="font-mono text-[11px] text-base-content-muted tabular-nums" data-testid="usage-repository-token-count">{{ formatCount(repository.recordedTokens) }}</p>
+                </div>
+                <div class="flex min-w-0 flex-col gap-ptah-label" data-testid="usage-repository-cost">
+                  <p class="text-xs text-base-content-muted">Known cost</p>
+                  <p class="flex flex-wrap items-center gap-ptah-label">
+                    <span class="text-xl font-semibold tabular-nums">{{ repository.knownCostLabel }}</span>
+                    <span ptahBadge tone="neutral" title="Partial cost (known priced rows only)" data-testid="usage-repository-partial">partial<span class="sr-only"> cost (known priced rows only)</span></span>
+                  </p>
+                  @if (repository.knownCostShare !== null && vm.totalCostUsd !== null) {
+                    <div class="h-1.5 w-full overflow-hidden rounded-full bg-base-content/10" aria-hidden="true">
+                      <div class="h-full rounded-full bg-primary" [style.width.%]="repository.knownCostShare * 100"></div>
+                    </div>
+                    <p class="text-xs text-base-content-muted" data-testid="usage-repository-share">{{ formatShare(repository.knownCostShare) }} of {{ formatTableUsd(vm.totalCostUsd) }} known cost</p>
+                  }
+                </div>
+              </div>
+              @if (repository.worktreePaths.length > 0) {
+                <div class="flex flex-col gap-ptah-label">
+                  <p class="text-xs text-base-content-muted">Worktrees ({{ repository.worktreePaths.length }})</p>
+                  <ul class="flex list-none flex-col gap-ptah-label" aria-label="Worktree paths">
+                    @for (path of repository.worktreePaths; track path) {
+                      <li class="rounded-md bg-base-content/10 px-2 py-1 font-mono text-xs break-all">{{ path }}</li>
+                    }
+                  </ul>
+                </div>
+              }
+            </div>
+          }
+        </div>
       </section>
     }
   }

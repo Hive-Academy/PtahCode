@@ -2,7 +2,7 @@
 import type { UsageRangeDays, UsageRepositoryTotals, UsageSourceStatus, UsageSummary, UsageTopSession } from '@ptah-extension/shared';
 import { resolveModelDisplayName } from '@ptah-extension/shared';
 import { providerAccent } from '../provider-account-card/provider-accent';
-import { daySpanLabel, enumerateDays, providerDisplayName } from './usage-formatting';
+import { daySpanLabel, enumerateDays, formatTableUsd, providerDisplayName, repositoryDisplayName } from './usage-formatting';
 import {
   KEY_SEPARATOR, buildDayRows, finalizeCost, finalizeSavings,
   foldUsageSummary, shareOf,
@@ -119,7 +119,13 @@ export interface UsageSessionRow extends UsageTopSession {
 
 export interface UsageViewModel {
   readonly repositories: readonly (UsageRepositoryTotals & {
+    /** Last path segment without ".git"; `repositoryId` stays the identity. */
+    readonly displayName: string;
     readonly recordedTokens: number;
+    /** Known priced cost of the repository; `null` when nothing is priced. */
+    readonly knownCostUsd: number | null;
+    /** Share of the total known cost (at most 1); `null` when either is unknown. */
+    readonly knownCostShare: number | null;
     readonly knownCostLabel: string;
   })[];
   readonly topSessions: readonly UsageSessionRow[];
@@ -285,14 +291,21 @@ export function buildUsageViewModel(
   );
 
   return {
-    repositories: (summary.repositories ?? []).map((repository) => ({
-      ...repository,
-      recordedTokens: (repository.inputTokens ?? 0) + (repository.outputTokens ?? 0) +
-        (repository.cacheReadTokens ?? 0) + (repository.cacheWriteTokens ?? 0),
-      knownCostLabel: repository.knownCostMicroUsd === null
-        ? 'No priced cost recorded'
-        : `$${(repository.knownCostMicroUsd / 1_000_000).toFixed(2)}`,
-    })),
+    repositories: (summary.repositories ?? []).map((repository) => {
+      const knownCostUsd = repository.knownCostMicroUsd === null
+        ? null
+        : repository.knownCostMicroUsd / 1_000_000;
+      const share = shareOf(knownCostUsd, totalCostUsd);
+      return {
+        ...repository,
+        displayName: repositoryDisplayName(repository.repositoryId),
+        recordedTokens: (repository.inputTokens ?? 0) + (repository.outputTokens ?? 0) +
+          (repository.cacheReadTokens ?? 0) + (repository.cacheWriteTokens ?? 0),
+        knownCostUsd,
+        knownCostShare: share === null ? null : Math.min(1, share),
+        knownCostLabel: knownCostUsd === null ? 'No priced cost recorded' : formatTableUsd(knownCostUsd),
+      };
+    }),
     topSessions: (summary.topSessions ?? []).map((session) => ({
       ...session,
       modelDisplayName: resolveModelDisplayName(session.modelId, availableModels),

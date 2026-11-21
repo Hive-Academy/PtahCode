@@ -76,23 +76,88 @@ describe('plan-tile details', () => {
 
   describe('planLimitReasonLabel', () => {
     it('maps the unavailable reason and the typed status reasons from the shared DTO', () => {
-      expect(planLimitReasonLabel('no-open-session')).toBe(
+      expect(planLimitReasonLabel('no-open-session', 'anthropic')).toBe(
         'No open session to read this account’s usage from.',
       );
-      expect(planLimitReasonLabel('api-key-no-subscription-quota')).toBe(
+      expect(planLimitReasonLabel('api-key-no-subscription-quota', 'grok')).toBe(
         'No subscription quota for API-key login; local usage only',
       );
-      expect(planLimitReasonLabel('cli-parse-failed')).toBe(
+      expect(planLimitReasonLabel('cli-parse-failed', 'antigravity')).toBe(
         'Antigravity CLI usage output not recognized',
       );
-      expect(planLimitReasonLabel('balance-unavailable')).toBe(
+      expect(planLimitReasonLabel('balance-unavailable', 'ollama-cloud')).toBe(
         'Plan limits unavailable right now; showing request counts',
       );
-      expect(planLimitReasonLabel('prepaid-balance-unavailable')).toBe(
+      expect(planLimitReasonLabel('prepaid-balance-unavailable', 'ollama-cloud')).toBe(
         'Prepaid balance unavailable right now',
       );
-      expect(planLimitReasonLabel('balance-auth-rejected')).toBe(
+      expect(planLimitReasonLabel('balance-auth-rejected', 'ollama-cloud')).toBe(
         'API key cannot read plan limits; showing request counts',
+      );
+    });
+
+    it('names the provider CLI only for the provider that owns it', () => {
+      // Defect: every provider got the Antigravity sign-in text, so the
+      // Grok chip told the user to run agy.
+      expect(planLimitReasonLabel('cli-not-signed-in', 'antigravity')).toBe(
+        'Sign in to the Antigravity CLI (run agy once)',
+      );
+      expect(planLimitReasonLabel('cli-not-signed-in', 'grok')).toBe(
+        'Sign in to the Grok CLI (run grok login)',
+      );
+      expect(planLimitReasonLabel('cli-not-signed-in', 'kimi-code')).toBe(
+        'Sign in to the provider CLI',
+      );
+    });
+
+    it('never names Antigravity for a shared reason of another provider', () => {
+      const shared: PlanLimitStatusReason[] = [
+        'no-oauth',
+        'no-local-server',
+        'cli-unavailable',
+        'cli-not-found',
+        'cli-timeout',
+        'cli-not-signed-in',
+        'cli-exit-error',
+        'cli-parse-failed',
+        'cli-backoff',
+        'account-unverified',
+      ];
+      for (const reason of shared) {
+        for (const providerId of ['grok', 'anthropic', 'codex', 'unknown']) {
+          const label = planLimitReasonLabel(reason, providerId);
+          expect(label).not.toBeNull();
+          expect(label).not.toMatch(/antigravity|agy/i);
+        }
+        expect(planLimitReasonLabel(reason, 'antigravity')).toMatch(
+          /Antigravity/,
+        );
+      }
+      expect(planLimitReasonLabel('cli-parse-failed', 'grok')).toBe(
+        'Grok CLI usage output not recognized',
+      );
+      expect(planLimitReasonLabel('no-oauth', 'anthropic')).toBe(
+        'Not signed in (OAuth)',
+      );
+    });
+
+    it('shows the Grok sign-in text in a Grok tile pill', () => {
+      const view = buildPlanTile(
+        owner([], {
+          owner: {
+            key: 'grok#cli-store:0123456789abcdef',
+            providerId: 'grok',
+            identityKind: 'cli-store',
+            label: 'Grok account',
+          },
+          status: 'service-unavailable',
+          statusReason: 'cli-not-signed-in',
+        }),
+        NOW,
+        TIME,
+      );
+      expect(view.statusPill?.text).toBe(
+        'Sign in to the Grok CLI (run grok login)',
       );
     });
 
@@ -100,8 +165,8 @@ describe('plan-tile details', () => {
       // The compiled union is exhaustive; a runtime value a newer backend
       // sends must still fall back to null, never to a fabricated sentence.
       const unknown = 'some-new-reason' as PlanLimitStatusReason;
-      expect(planLimitReasonLabel(unknown)).toBeNull();
-      expect(planLimitReasonLabel(undefined)).toBeNull();
+      expect(planLimitReasonLabel(unknown, 'antigravity')).toBeNull();
+      expect(planLimitReasonLabel(undefined, 'antigravity')).toBeNull();
     });
 
     it('prefers the typed reason over the generic status sentence in the pill', () => {

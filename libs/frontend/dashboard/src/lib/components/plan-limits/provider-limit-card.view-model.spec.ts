@@ -59,6 +59,33 @@ describe('provider-limit-card.view-model', () => {
     expect(card.primaryValueText).toBeNull();
   });
 
+  it('splits a short title from the account line and badges the state with a glyph', () => {
+    const card = buildProviderLimitCard(owner([win()]), false, NOW, TIME);
+    expect(card.titleText.length).toBeGreaterThan(0);
+    expect(card.label).toContain(card.titleText);
+    expect(card.accountLine).not.toBeNull();
+    expect(card.statusTone).toBe('ok');
+    expect(card.statusGlyph).toBe('✓');
+    expect(card.details[0]).toEqual({ key: 'account', term: 'Account', value: card.label });
+  });
+
+  it('maps limit and near-limit states to err/warn badges with distinct glyphs', () => {
+    const reached = buildProviderLimitCard(
+      owner([win({ used: { kind: 'percent', percent: 100 }, usedSource: 'provider-api' })]),
+      false,
+      NOW,
+      TIME,
+    );
+    const near = buildProviderLimitCard(
+      owner([win({ used: { kind: 'percent', percent: 95 } })]),
+      false,
+      NOW,
+      TIME,
+    );
+    expect([reached.statusTone, reached.statusGlyph]).toEqual(['err', '⚠']);
+    expect([near.statusTone, near.statusGlyph]).toEqual(['warn', '▲']);
+  });
+
   it('uses the warn tone near the limit', () => {
     const card = buildProviderLimitCard(
       owner([win({ used: { kind: 'percent', percent: 95 } })]),

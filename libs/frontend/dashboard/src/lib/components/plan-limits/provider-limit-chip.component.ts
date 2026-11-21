@@ -2,22 +2,24 @@ import { ChangeDetectionStrategy, Component, input } from '@angular/core';
 import { ProviderMarkComponent } from '@ptah-extension/ui';
 import type { ProviderLimitChipVm } from './provider-limit-card.view-model';
 
-/** Compact chip for a provider that has no plan-limit reading. */
+/** Two-line row (name, then reason) for a provider without a plan-limit reading. */
 @Component({
   selector: 'ptah-provider-limit-chip',
   standalone: true,
   imports: [ProviderMarkComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <span
-      class="inline-flex items-center gap-ptah-label rounded-ptah-surface border border-[var(--surface-border)] px-2 py-0.5 text-xs text-base-content-muted"
+    <div
+      class="flex flex-1 min-w-0 items-start gap-ptah-controls rounded-ptah-chip border border-[var(--surface-border)] px-3 py-2"
       data-testid="provider-limit-chip"
       [attr.data-provider]="chip().providerId"
     >
       <ptah-provider-mark [providerId]="chip().providerId" aria-hidden="true" />
-      <span class="font-semibold">{{ chip().label }}</span>
-      <span>· {{ chip().reason }}</span>
-    </span>
+      <div class="min-w-0 flex flex-col">
+        <span class="text-xs font-semibold break-words">{{ chip().label }}</span>
+        <span class="text-xs text-base-content-muted break-words">{{ chip().reason }}</span>
+      </div>
+    </div>
   `,
 })
 export class ProviderLimitChipComponent {

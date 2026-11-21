@@ -72,6 +72,103 @@ export function formatPercent(value: number): string {
   return percentFormat.format(value);
 }
 
+const tokenCountFormat = new Intl.NumberFormat('en-US', {
+  maximumFractionDigits: 0,
+});
+
+/**
+ * Table cost cells: "$1,234.56", and two significant digits ("$0.0034") for
+ * a positive amount under a cent, so a real cost never reads as "$0.00".
+ */
+export function formatTableUsd(value: number): string {
+  if (value > 0 && value < 0.01) return smallUsdFormat.format(value);
+  return usdFormat.format(value);
+}
+
+/**
+ * One cost cell label: `unknownLabel` when unpriced, "≥ $3.00" when the
+ * known sum is a lower bound, "$3.00" otherwise.
+ */
+export function formatCostCell(
+  costUsd: number | null,
+  lowerBound: boolean,
+  unknownLabel = '—',
+): string {
+  if (costUsd === null) return unknownLabel;
+  const label = formatTableUsd(costUsd);
+  return lowerBound ? `≥ ${label}` : label;
+}
+
+/**
+ * Share cells: "—" when unknown, "<0.1%" for a positive share that would
+ * round to "0%", ">99.9%" for a share under one that would round to "100%".
+ */
+export function formatShare(share: number | null): string {
+  if (share === null) return '—';
+  if (share > 0 && share < 0.001) return '<0.1%';
+  if (share > 0.999 && share < 1) return '>99.9%';
+  return formatPercent(share);
+}
+
+/** "1,200,424,998" — an exact count with thousands separators. */
+export function formatCount(value: number): string {
+  return tokenCountFormat.format(value);
+}
+
+/** "12,345 tokens" — the exact count behind a compact token cell. */
+export function formatTokenCount(value: number): string {
+  return `${formatCount(value)} ${value === 1 ? 'token' : 'tokens'}`;
+}
+
+/**
+ * Short repository name: the last segment of a path or remote id without a
+ * trailing ".git" ("/work/ptah-extension.git" → "ptah-extension",
+ * "git@host:org/repo.git" → "repo"). Falls back to the id itself.
+ */
+export function repositoryDisplayName(repositoryId: string): string {
+  const segments = repositoryId.split(/[\\/:]/).filter((part) => part.length > 0);
+  const last = segments.at(-1) ?? '';
+  const name = last.replace(/\.git$/i, '');
+  return name.length > 0 ? name : repositoryId;
+}
+
+/**
+ * Short age of `fromIso` at `nowIso`: "Just now", "12m ago", "5h ago",
+ * "3d ago", then the UTC day ("Oct 14") after 30 days. "—" when either
+ * timestamp does not parse. A timestamp after `now` counts as "Just now".
+ */
+export function formatRelativeAge(fromIso: string, nowIso: string): string {
+  const from = Date.parse(fromIso);
+  const now = Date.parse(nowIso);
+  if (Number.isNaN(from) || Number.isNaN(now)) return '—';
+  const minutes = Math.floor(Math.max(0, now - from) / 60_000);
+  if (minutes < 1) return 'Just now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days <= 30) return `${days}d ago`;
+  return shortDayFormat.format(from);
+}
+
+// ---------------------------------------------------------------------------
+// Inline bars (decorative next to a text value)
+// ---------------------------------------------------------------------------
+
+/** Smallest drawn width (%) of a positive value, so it never vanishes. */
+const MIN_VISIBLE_BAR_PERCENT = 2;
+
+/**
+ * Bar width in percent of its track for `value` against `max`: 0 for an
+ * unknown, zero or negative value or an unusable max; at least
+ * {@link MIN_VISIBLE_BAR_PERCENT} for a positive value; at most 100.
+ */
+export function barWidthPercent(value: number | null, max: number): number {
+  if (value === null || !(value > 0) || !(max > 0)) return 0;
+  const percent = (value / max) * 100;
+  return Math.min(100, Math.max(MIN_VISIBLE_BAR_PERCENT, percent));
+}
+
 /** "Oct 14" for a "2026-10-14" UTC day. */
 export function formatDayShort(day: string): string {
   const ms = parseUtcDay(day);
