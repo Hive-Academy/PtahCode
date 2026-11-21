@@ -29,7 +29,10 @@ import {
   type WorkspaceLlmResolveOptions,
   type WorkspaceLlmSnapshot,
 } from '@ptah-extension/agent-sdk';
-import type { ProviderProfile } from '@ptah-extension/shared';
+import {
+  isProviderSessionProviderId,
+  type ProviderProfile,
+} from '@ptah-extension/shared';
 import { AUTH_PROVIDERS_TOKENS } from '../di/tokens';
 import type { ProviderModelsService } from '../provider-models.service';
 import type { ActiveProviderResolver } from './active-provider-resolver';
@@ -93,11 +96,14 @@ export class WorkspaceLlmResolver implements IWorkspaceLlmResolver {
         requestedModel ?? savedModel,
       );
     } catch (error: unknown) {
-      // Codex has no Claude-SDK route any more: fail explicitly instead of
-      // letting the one-shot ride another provider's process-wide auth.
+      // Codex and provider sessions have no Claude-SDK route: fail explicitly
+      // instead of letting the one-shot ride another provider's process-wide
+      // auth.
       if (
         error instanceof AuthRequiredError &&
-        error.providerId === 'openai-codex'
+        error.providerId !== null &&
+        (error.providerId === 'openai-codex' ||
+          isProviderSessionProviderId(error.providerId))
       ) {
         throw error;
       }

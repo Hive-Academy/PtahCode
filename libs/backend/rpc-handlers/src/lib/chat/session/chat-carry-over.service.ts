@@ -445,6 +445,8 @@ export class ChatCarryOverService implements CarryOverResolutionTags {
           true,
         )
       : await resolveClaudeExecution(this.profileResolver, folder, model, true);
+    // No chat path serves a provider session before P6: never offer one.
+    if (execution.runtime === 'provider-session') return false;
     if (execution.runtime !== 'codex-app-server') return true;
     return this.codexAuth ? (await this.codexAuth.isAuthenticated()) === true : false;
   }

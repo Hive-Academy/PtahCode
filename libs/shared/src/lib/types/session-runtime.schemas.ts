@@ -1,6 +1,7 @@
 import { z } from 'zod';
 
 import { SessionId } from './branded.types';
+import { PROVIDER_SESSION_PROFILE_IDS } from './provider-session-profile.types';
 import type { SessionRuntimeIdentity } from './session-runtime.types';
 
 /** Lexical fixed point of normalizeCodexHomeKey, without a Node dependency. */
@@ -45,6 +46,22 @@ export const SessionRuntimeIdentitySchema: z.ZodType<SessionRuntimeIdentity> =
         codex: z
           .object({
             normalizedHome: z.string().min(1).refine(isNormalizedHomeKey),
+          })
+          .strict(),
+      })
+      .strict(),
+    z
+      .object({
+        ...identityFields,
+        runtime: z.literal('provider-session'),
+        providerSession: z
+          .object({
+            profile: z.enum(PROVIDER_SESSION_PROFILE_IDS),
+            normalizedHome: z
+              .string()
+              .min(1)
+              .refine(isNormalizedHomeKey)
+              .optional(),
           })
           .strict(),
       })

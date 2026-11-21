@@ -1,8 +1,12 @@
 import type { EffortLevel } from './ai-provider.types';
 import type { SessionId } from './branded.types';
 import type { PermissionLevel } from './model-autopilot.types';
+import type { ProviderSessionProfileId } from './provider-session-profile.types';
 
-export type SessionRuntimeKind = 'claude-sdk' | 'codex-app-server';
+export type SessionRuntimeKind =
+  | 'claude-sdk'
+  | 'codex-app-server'
+  | 'provider-session';
 
 interface SessionRuntimeIdentityBase {
   readonly version: 1;
@@ -11,25 +15,54 @@ interface SessionRuntimeIdentityBase {
   readonly workspaceId: string;
 }
 
-/** Persisted runtime binding; Codex homes are already normalized by the host. */
+/**
+ * Persisted runtime binding; Codex homes are already normalized by the host.
+ * A provider-session binding names its profile; `normalizedHome` is set only
+ * for a profile that runs against an isolated home.
+ */
 export type SessionRuntimeIdentity = SessionRuntimeIdentityBase &
   (
-    | { readonly runtime: 'claude-sdk'; readonly codex?: never }
+    | {
+        readonly runtime: 'claude-sdk';
+        readonly codex?: never;
+        readonly providerSession?: never;
+      }
     | {
         readonly runtime: 'codex-app-server';
         readonly codex: { readonly normalizedHome: string };
+        readonly providerSession?: never;
+      }
+    | {
+        readonly runtime: 'provider-session';
+        readonly providerSession: {
+          readonly profile: ProviderSessionProfileId;
+          readonly normalizedHome?: string;
+        };
+        readonly codex?: never;
       }
   );
+
+export type SessionRuntimeIdentityMismatchField =
+  | 'providerId'
+  | 'workspaceId'
+  | 'runtime'
+  | 'profile'
+  | 'normalizedHome';
 
 /** Compare resume bindings in stable priority order, not their session IDs. */
 export function sessionRuntimeIdentityMismatch(
   a: SessionRuntimeIdentity,
   b: SessionRuntimeIdentity,
-): 'providerId' | 'workspaceId' | 'runtime' | 'normalizedHome' | null {
+): SessionRuntimeIdentityMismatchField | null {
   if (a.providerId !== b.providerId) return 'providerId';
   if (a.workspaceId !== b.workspaceId) return 'workspaceId';
   if (a.runtime !== b.runtime) return 'runtime';
-  if (a.codex?.normalizedHome !== b.codex?.normalizedHome)
+  if (a.providerSession?.profile !== b.providerSession?.profile)
+    return 'profile';
+  if (
+    (a.codex ?? a.providerSession)?.normalizedHome !==
+    (b.codex ?? b.providerSession)?.normalizedHome
+  )
     return 'normalizedHome';
   return null;
 }
@@ -42,6 +75,11 @@ export interface RuntimeHostCapabilities {
    * `nativeCodex` continues to gate main chat.
    */
   readonly nativeCodexGateway?: boolean;
+  /**
+   * Provider-session profiles this host can run as a main-chat runtime.
+   * Absent or empty means none; a profile not listed is refused.
+   */
+  readonly providerSessions?: readonly ProviderSessionProfileId[];
 }
 
 export type RuntimeConsumer = 'chat' | 'gateway' | 'lane';
@@ -56,6 +94,22 @@ export interface CodexProfileSeed {
   /** Normalized identity key. */
   readonly normalizedHome: string;
   readonly model: string;
+  readonly existingIdentity?: SessionRuntimeIdentity;
+}
+
+/**
+ * Credential-free seed for a provider-session chat: never carries tokens,
+ * env, MCP headers or proxy URLs. `model` is absent when the provider's own
+ * default applies (tier aliases and `default` never map to Claude ids).
+ */
+export interface ProviderSessionSeed {
+  readonly providerId: string;
+  readonly profile: ProviderSessionProfileId;
+  readonly consumer: Extract<RuntimeConsumer, 'chat'>;
+  readonly workspacePath: string;
+  /** Normalized identity key of `workspacePath`. */
+  readonly workspaceId: string;
+  readonly model?: string;
   readonly existingIdentity?: SessionRuntimeIdentity;
 }
 

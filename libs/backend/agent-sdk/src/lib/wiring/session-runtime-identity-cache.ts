@@ -2,9 +2,10 @@ import { CodexRuntimeCompositionError } from './codex-runtime-composition-error'
 import { SessionId, type SessionRuntimeIdentity } from '@ptah-extension/shared';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type { SessionRuntimeIdentityLookup } from '../codex-app-server/session-runtime-identity';
-import type {
-  SessionMetadata,
-  SessionMetadataStore,
+import {
+  nativeExecutionOf,
+  type SessionMetadata,
+  type SessionMetadataStore,
 } from '../session-metadata-store';
 
 export interface InitializedSessionRuntimeIdentityLookup extends SessionRuntimeIdentityLookup {
@@ -51,7 +52,7 @@ export async function initializeSessionRuntimeIdentityLookup(
     else workspacePaths.set(id, workspacePath);
     entries.set(
       id,
-      metadata.codexExecution ?? {
+      nativeExecutionOf(metadata) ?? {
         version: 1,
         sessionId: SessionId.from(id),
         runtime: 'claude-sdk',
@@ -162,7 +163,10 @@ export async function initializeSessionRuntimeIdentityLookup(
     },
     incrementCodexMessageCount: (id) => store.incrementCodexMessageCount(id),
     releaseSession: (id) => {
-      if (entries.get(id)?.runtime === 'codex-app-server') return;
+      // Native bindings (Codex or provider session) outlive the live session.
+      const runtime = entries.get(id)?.runtime;
+      if (runtime === 'codex-app-server' || runtime === 'provider-session')
+        return;
       entries.delete(id);
       workspacePaths.delete(id);
       sequences.delete(id);

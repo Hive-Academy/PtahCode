@@ -118,6 +118,8 @@ import {
 import type { ProviderAccountPortRefusal } from '@ptah-extension/auth-providers-tokens';
 
 import {
+  PROVIDER_SESSION_CHAT_UNAVAILABLE,
+  refuseProviderSessionExecution,
   resolveClaudeExecution,
   storedChatRuntimeIdentity,
   type ChatRuntimeProfileService,
@@ -1142,9 +1144,9 @@ export class ChatSessionService {
     }
     // An unset Claude profile means the shared env serves the active provider.
     const served =
-      execution.runtime === 'codex-app-server'
-        ? execution.seed.providerId
-        : (execution.providerProfile?.providerId ?? activeNow);
+      execution.runtime === 'claude-sdk'
+        ? (execution.providerProfile?.providerId ?? activeNow)
+        : execution.seed.providerId;
     if (served !== expectedProviderId) {
       throw new CarryOverProviderChangedError();
     }
@@ -1836,6 +1838,7 @@ export class ChatSessionService {
         input.expectedProviderId,
       );
     }
+    refuseProviderSessionExecution(execution);
     input.onCarryOverAdmitted?.();
     this.pendingLineage.set(tabId, {
       executionRoot: this.canonicalRoot(projectPath),
@@ -3174,6 +3177,18 @@ export class ChatSessionService {
           return { config, execution };
         },
       );
+      // Refuse up front, coded, before the driver lock or any resume state;
+      // P6 replaces this with the provider-session resume path.
+      if (execution.runtime === 'provider-session') {
+        return {
+          error: {
+            success: false,
+            sessionId,
+            errorCode: 'PROVIDER_SESSION_UNAVAILABLE',
+            error: PROVIDER_SESSION_CHAT_UNAVAILABLE,
+          },
+        };
+      }
       const resumeConfig: AgentSessionResumeConfig = {
         ...config,
         ...(this.sessionChildren?.get(sessionId as string)

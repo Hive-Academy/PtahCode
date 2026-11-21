@@ -50,6 +50,7 @@ import { ProviderAccountSelectionSchema } from '@ptah-extension/shared/schemas';
 import type { ProviderAccountPortRefusal } from '@ptah-extension/auth-providers-tokens';
 
 import {
+  refuseProviderSessionExecution,
   resolveClaudeExecution,
   storedChatRuntimeIdentity,
   type ChatRuntimeProfileService,
@@ -341,6 +342,7 @@ export class ChatSlashCommandRouterService {
               requestedModel,
               modelIsStored,
             );
+        refuseProviderSessionExecution(execution);
         if (
           interceptResult.commandName === 'compact' &&
           this.manualCompactAdmission

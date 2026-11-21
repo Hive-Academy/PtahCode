@@ -1,4 +1,5 @@
 import {
+  isProviderSessionProviderId,
   type AgentModelInfo,
   type IAgentAdapter,
   type RuntimeHostCapabilities,
@@ -8,6 +9,13 @@ import {
   resolveSessionRuntimeIdentity,
   type SessionRuntimeIdentityLookup,
 } from './session-runtime-identity';
+
+/**
+ * No host admits a provider-session chat yet (the runtime arm arrives with
+ * its adapter); refuse instead of serving the provider on the Claude SDK.
+ */
+export const PROVIDER_SESSION_CHAT_UNAVAILABLE_MESSAGE =
+  'Provider-session chat is not available on this host.';
 
 export class ChatRuntimeAdmissionError extends Error {
   readonly code = 'runtime-admission-mismatch';
@@ -111,6 +119,11 @@ export class RoutingAgentAdapter implements IAgentAdapter {
         );
       }
       const provider = await this.admission.servingProviderId(args[0]);
+      if (provider !== undefined && isProviderSessionProviderId(provider)) {
+        throw new ChatRuntimeAdmissionError(
+          PROVIDER_SESSION_CHAT_UNAVAILABLE_MESSAGE,
+        );
+      }
       if (provider === 'openai-codex' && (!nativeEnabled || !this.native)) {
         throw new ChatRuntimeAdmissionError(
           'Codex chat requires a host with the native Codex runtime.',
@@ -134,6 +147,11 @@ export class RoutingAgentAdapter implements IAgentAdapter {
       );
     }
     const provider = await this.admission.servingProviderId(args[0]);
+    if (provider !== undefined && isProviderSessionProviderId(provider)) {
+      throw new ChatRuntimeAdmissionError(
+        PROVIDER_SESSION_CHAT_UNAVAILABLE_MESSAGE,
+      );
+    }
     const useNative = provider === 'openai-codex';
     if (useNative && (!nativeEnabled || !this.native)) {
       throw new ChatRuntimeAdmissionError(
@@ -314,6 +332,10 @@ export class RoutingAgentAdapter implements IAgentAdapter {
       case 'claude-sdk':
       case undefined:
         return this.legacy;
+      case 'provider-session':
+        throw new ChatRuntimeAdmissionError(
+          PROVIDER_SESSION_CHAT_UNAVAILABLE_MESSAGE,
+        );
       default: {
         const unsupported: never = runtime;
         throw new Error(`Unsupported session runtime: ${unsupported}`);
