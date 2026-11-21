@@ -1,3 +1,4 @@
+import { QueuedFollowUpsComponent } from '../../molecules/queued-follow-ups/queued-follow-ups.component';
 import {
   Component,
   inject,
@@ -27,7 +28,10 @@ import {
   ExecutionTreeBuilderService,
   SubagentExecutionStore,
 } from '@ptah-extension/chat-streaming';
-import { TabManagerService } from '@ptah-extension/chat-state';
+import {
+  QueuedFollowUpStore,
+  TabManagerService,
+} from '@ptah-extension/chat-state';
 import type { TabViewMode } from '@ptah-extension/chat-types';
 import { DOCUMENT } from '@angular/common';
 import {
@@ -260,6 +264,7 @@ function findAgentNode(
     ArtifactCardComponent,
     SingleChatSubagentViewComponent,
     PtahButtonDirective,
+    QueuedFollowUpsComponent,
   ],
   providers: [
     TranscriptRenderWindow,
@@ -310,6 +315,7 @@ export class ChatTranscriptComponent {
   private readonly injector = inject(Injector);
   private readonly destroyRef = inject(DestroyRef);
   private readonly _tabManager = inject(TabManagerService);
+  private readonly _queuedFollowUps = inject(QueuedFollowUpStore);
   private readonly _treeBuilder = inject(ExecutionTreeBuilderService);
   private readonly laneMonitor = inject(AgentMonitorStore, { optional: true });
   private readonly sessionContext = inject(SESSION_CONTEXT, { optional: true });
@@ -475,6 +481,14 @@ export class ChatTranscriptComponent {
 
   protected readonly sessionId = computed(
     () => this._tab()?.claudeSessionId ?? null,
+  );
+  /**
+   * Whether this view has queued messages to show as cards. The card itself
+   * (and the queue service it needs) mounts only then.
+   */
+  protected readonly hasQueuedFollowUps = computed(
+    () =>
+      this._queuedFollowUps.forView(this.tabId(), this.sessionId()).length > 0,
   );
 
   private readonly _streamingState = computed(

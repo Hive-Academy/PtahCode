@@ -460,6 +460,7 @@ describe.each([
       'accountSelection',
       // Backend-owned follow-up queue (TASK_2026_884).
       'queueIntent',
+      'admission',
     ],
   ],
 ] as const)(

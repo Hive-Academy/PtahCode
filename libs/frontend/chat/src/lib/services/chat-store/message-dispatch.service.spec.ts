@@ -6,7 +6,8 @@
  *   - sendOrQueueMessage: guard does NOT block /compact or /review (all providers)
  *   - sendOrQueueMessage: guard does NOT block when authState.isLoading()
  *   - sendOrQueueMessage: guard does NOT block for apiKey provider
- *   - sendOrQueueMessage: streaming auto-denies permissions with deny_with_message
+ *   - sendOrQueueMessage: queuing never answers an open permission prompt
+ *   - sendOrQueueMessage: a TURN_IN_FLIGHT refusal of a normal send is queued
  *   - sendOrQueueMessage: not streaming dispatches via MessageSender.send
  *   - sendOrQueueMessage: explicit-tabId override beats activeTab
  *   - sendOrQueueMessage: a busy tab, a send-lock-held tab or one with
@@ -29,6 +30,7 @@ import { isTabBusyGenerating } from './tab-busy';
 import { TabManagerService } from '@ptah-extension/chat-state';
 import { MessageSenderService } from '../message-sender.service';
 import { FollowUpQueueService } from './follow-up-queue.service';
+import { ComposerRestoreService } from '../composer-restore.service';
 import {
   AgentMonitorStore,
   MessageFinalizationService,
@@ -76,6 +78,8 @@ describe('MessageDispatchService', () => {
   let handlePermissionResponseMock: jest.Mock;
   let isTabStreamingMock: jest.Mock;
   let isStartPendingMock: jest.Mock;
+  /** `TabManagerService.onTabClosed` listeners, to emit a close or reset. */
+  let closeListeners: ((event: { tabId: string; kind: string }) => void)[];
 
   beforeEach(() => {
     tabs = [makeTab()];
@@ -111,7 +115,12 @@ describe('MessageDispatchService', () => {
     isTabStreamingMock = jest.fn(() => false);
     isStartPendingMock = jest.fn(() => false);
 
+    closeListeners = [];
     const tabManagerMock = {
+      onTabClosed: (listener: (event: { tabId: string; kind: string }) => void) => {
+        closeListeners.push(listener);
+        return () => undefined;
+      },
       tabs: () => tabs,
       setMessages: setMessagesMock,
       setQueuedContent: setQueuedContentMock,
@@ -300,72 +309,155 @@ describe('MessageDispatchService', () => {
       expect(sendMock).toHaveBeenCalledWith('/context', undefined);
     });
 
-    it('when streaming, auto-denies active permissions with deny_with_message', async () => {
+    it('when streaming, queues the message and leaves open permission prompts alone', async () => {
       activeTabStatus.set('streaming');
       permissionRequests.set([{ id: 'perm-1', sessionId: 'sess-1' }]);
       await service.sendOrQueueMessage('hello');
-      expect(handlePermissionResponseMock).toHaveBeenCalledWith({
-        id: 'perm-1',
-        decision: 'deny_with_message',
-        reason: 'hello',
-      });
+      expect(handlePermissionResponseMock).not.toHaveBeenCalled();
       expect(queueOrAppendMock).toHaveBeenCalledWith('hello', undefined);
+      expect(sendMock).not.toHaveBeenCalled();
     });
 
-    it("when streaming, denies only the target tab's prompts and leaves other sessions' prompts pending", async () => {
-      tabs = [
-        makeTab({ id: 'tab-1', claudeSessionId: 'sess-1' }),
-        makeTab({
-          id: 'tab-2',
-          claudeSessionId: 'sess-2',
-          status: 'streaming',
-        }),
-      ];
-      permissionRequests.set([
-        { id: 'own-by-tab', tabId: 'tab-2' },
-        { id: 'own-by-session', sessionId: 'sess-2' },
-        { id: 'own-by-target' },
-        { id: 'other-by-tab', tabId: 'tab-1', sessionId: 'sess-2' },
-        { id: 'other-by-session', sessionId: 'sess-1' },
-        { id: 'other-by-target' },
-        { id: 'unrouted' },
-      ]);
-      promptTargets.set('own-by-target', ['tab-2']);
-      promptTargets.set('other-by-target', ['tab-1']);
+    it('queues an idle-looking send the backend refused as TURN_IN_FLIGHT', async () => {
+      activeTabStatus.set('awaiting-background');
+      sendMock.mockResolvedValue({ success: false, turnInFlight: true });
 
-      await service.sendOrQueueMessage('feedback', { tabId: 'tab-2' });
+      const outcome = await service.sendOrQueueMessage('late', { tabId: 'tab-1' });
 
-      const denied = handlePermissionResponseMock.mock.calls.map(
-        (c) => (c[0] as { id: string }).id,
-      );
-      expect(denied).toEqual(['own-by-tab', 'own-by-session', 'own-by-target']);
-      expect(handlePermissionResponseMock).toHaveBeenCalledWith({
-        id: 'own-by-tab',
-        decision: 'deny_with_message',
-        reason: 'feedback',
+      expect(sendMock).toHaveBeenCalledWith('late', { tabId: 'tab-1', idleOnly: true });
+      expect(enqueueMock).toHaveBeenCalledWith('tab-1', 'late', { tabId: 'tab-1' });
+      expect(outcome).toEqual({
+        success: true,
+        queued: { clientMessageId: 'cm-1', tabId: 'tab-1', sessionId: 'sess-1' },
       });
-      expect(queueOrAppendMock).toHaveBeenCalledWith('feedback', {
-        tabId: 'tab-2',
-      });
+      // No failure bubble: the queued card is the only trace of the message.
+      expect(setMessagesMock).not.toHaveBeenCalled();
     });
 
-    it('does not answer an unrouted prompt when streaming an unrelated active tab', async () => {
-      activeTabStatus.set('streaming');
-      permissionRequests.set([
-        { id: 'unrouted' },
-        { id: 'routed-away', tabId: 'tab-9' },
-      ]);
-      await service.sendOrQueueMessage('hello');
-      const denied = handlePermissionResponseMock.mock.calls.map(
-        (c) => (c[0] as { id: string }).id,
+    it('queues a refused earlier send ahead of a message sent while it was in flight', async () => {
+      let refuse!: (outcome: unknown) => void;
+      sendMock.mockImplementationOnce(
+        () => new Promise((resolve) => { refuse = resolve; }),
       );
-      expect(denied).toEqual([]);
+      const first = service.sendOrQueueMessage('first', { tabId: 'tab-1' });
+      // Sent while the first idle-only send is still in flight.
+      const second = service.sendOrQueueMessage('second', { tabId: 'tab-1' });
+      await Promise.resolve();
+      expect(sendMock).toHaveBeenCalledTimes(1);
+      expect(enqueueMock).not.toHaveBeenCalled();
+
+      refuse({ success: false, turnInFlight: true });
+      await Promise.all([first, second]);
+
+      expect(enqueueMock.mock.calls.map((c) => c[1])).toEqual(['first', 'second']);
+    });
+
+    it('never queues a waiting message into a reset or closed tab', async () => {
+      jest.useFakeTimers();
+      try {
+        const restore = TestBed.inject(ComposerRestoreService);
+        let refuse!: (outcome: unknown) => void;
+        sendMock.mockImplementationOnce(
+          () => new Promise((resolve) => { refuse = resolve; }),
+        );
+        const first = service.sendOrQueueMessage('first', { tabId: 'tab-1' });
+        const second = service.sendOrQueueMessage('second', {
+          tabId: 'tab-1',
+          files: ['D:\\repo\\notes.md'],
+          images: [{ data: 'AAAA', mediaType: 'image/png' }],
+        });
+        await Promise.resolve();
+        // The tab is reset to a new conversation while the first send runs.
+        tabs = [makeTab({ claudeSessionId: 'sess-2' })];
+        refuse({ success: false, turnInFlight: true });
+
+        await expect(first).resolves.toEqual({ success: false, cancelled: true });
+        await expect(second).resolves.toEqual({ success: false, cancelled: true });
+        // Neither is sent into the new conversation; both go back, in order.
+        expect(enqueueMock).not.toHaveBeenCalled();
+        expect(restore.pendingFor('tab-1')).toBeNull();
+        jest.runOnlyPendingTimers();
+        expect(restore.pendingFor('tab-1')).toBe('first\nsecond');
+        // Attachments come back with the text.
+        const attachments = restore.pendingAttachmentsFor('tab-1');
+        expect(attachments?.files.map((f) => [f.path, f.name])).toEqual([
+          ['D:\\repo\\notes.md', 'notes.md'],
+        ]);
+        expect(attachments?.images.map((i) => i.dataUrl)).toEqual([
+          'data:image/png;base64,AAAA',
+        ]);
+
+        sendMock.mockImplementationOnce(
+          () => new Promise((resolve) => { refuse = resolve; }),
+        );
+        enqueueMock.mockClear();
+        const third = service.sendOrQueueMessage('third', { tabId: 'tab-1' });
+        const fourth = service.sendOrQueueMessage('fourth', { tabId: 'tab-1' });
+        await Promise.resolve();
+        tabs = [];
+        refuse({ success: true });
+        await expect(fourth).resolves.toEqual({ success: false, cancelled: true });
+        await third;
+        expect(enqueueMock).not.toHaveBeenCalled();
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('returns a waiting message to the composer when its session-less tab is reset', async () => {
+      jest.useFakeTimers();
+      try {
+        const restore = TestBed.inject(ComposerRestoreService);
+        tabs = [makeTab({ claudeSessionId: null })];
+        let finish!: (outcome: unknown) => void;
+        sendMock.mockImplementationOnce(
+          () => new Promise((resolve) => { finish = resolve; }),
+        );
+        const first = service.sendOrQueueMessage('first', { tabId: 'tab-1' });
+        const second = service.sendOrQueueMessage('second', { tabId: 'tab-1' });
+        await Promise.resolve();
+        // /clear resets the tab, and a new conversation binds its session.
+        for (const listener of closeListeners) listener({ tabId: 'tab-1', kind: 'reset' });
+        tabs = [makeTab({ claudeSessionId: 'sess-other' })];
+        finish({ success: true });
+        await first;
+
+        await expect(second).resolves.toEqual({ success: false, cancelled: true });
+        expect(enqueueMock).not.toHaveBeenCalled();
+        jest.runOnlyPendingTimers();
+        expect(restore.pendingFor('tab-1')).toBe('second');
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('sends a slash command without idle-only admission', async () => {
+      await service.sendOrQueueMessage('/compact', { tabId: 'tab-1' });
+      expect(sendMock).toHaveBeenCalledWith('/compact', { tabId: 'tab-1' });
+    });
+
+    it('still queues a waiting message when the first send only bound its session', async () => {
+      tabs = [makeTab({ claudeSessionId: null })];
+      let finish!: (outcome: unknown) => void;
+      sendMock.mockImplementationOnce(
+        () => new Promise((resolve) => { finish = resolve; }),
+      );
+      const first = service.sendOrQueueMessage('first', { tabId: 'tab-1' });
+      const second = service.sendOrQueueMessage('second', { tabId: 'tab-1' });
+      await Promise.resolve();
+      // chat:start binds the tab's first session: same conversation.
+      tabs = [makeTab({ claudeSessionId: 'sess-new' })];
+      finish({ success: true });
+      await first;
+
+      await expect(second).resolves.toMatchObject({ success: true });
+      expect(enqueueMock).toHaveBeenCalledWith('tab-1', 'second', { tabId: 'tab-1' });
     });
 
     it('when not streaming, dispatches via MessageSender.send', async () => {
       activeTabStatus.set('loaded');
       await service.sendOrQueueMessage('hello');
-      expect(sendMock).toHaveBeenCalledWith('hello', undefined);
+      expect(sendMock).toHaveBeenCalledWith('hello', { idleOnly: true });
     });
 
     it('resolves the outcome: send result passed through, queue accepted, blocked command refused', async () => {
@@ -484,7 +576,7 @@ describe('MessageDispatchService', () => {
       ];
       await service.sendOrQueueMessage('after the error');
 
-      expect(sendMock).toHaveBeenCalledWith('after the error', undefined);
+      expect(sendMock).toHaveBeenCalledWith('after the error', { idleOnly: true });
     });
 
     it.each(['awaiting-background', 'sleeping'] as const)(
@@ -516,7 +608,7 @@ describe('MessageDispatchService', () => {
         await service.sendOrQueueMessage('follow up');
 
         expect(queueOrAppendMock).not.toHaveBeenCalled();
-        expect(sendMock).toHaveBeenCalledWith('follow up', undefined);
+        expect(sendMock).toHaveBeenCalledWith('follow up', { idleOnly: true });
       },
     );
 
@@ -564,7 +656,7 @@ describe('MessageDispatchService', () => {
       await service.sendOrQueueMessage('after the stray event');
 
       expect(queueOrAppendMock).not.toHaveBeenCalled();
-      expect(sendMock).toHaveBeenCalledWith('after the stray event', undefined);
+      expect(sendMock).toHaveBeenCalledWith('after the stray event', { idleOnly: true });
     });
   });
 
@@ -742,6 +834,7 @@ describe('MessageDispatchService with the real StreamingHandler + MessageFinaliz
     streamingTabIdsSignal = signal<Set<string>>(new Set());
 
     const tabManagerFake = {
+      onTabClosed: () => () => undefined,
       tabs: computed(() => tabsSignal()),
       activeTabId: computed(() => activeTabIdSignal()),
       activeTab: computed(
@@ -929,6 +1022,6 @@ describe('MessageDispatchService with the real StreamingHandler + MessageFinaliz
     await dispatch.sendOrQueueMessage('and now this');
 
     expect(queueOrAppendMock).not.toHaveBeenCalled();
-    expect(sendMock).toHaveBeenCalledWith('and now this', undefined);
+    expect(sendMock).toHaveBeenCalledWith('and now this', { idleOnly: true });
   });
 });
