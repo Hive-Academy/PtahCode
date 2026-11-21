@@ -45,16 +45,15 @@ async function setTheme(page: Page, theme: 'dark' | 'light'): Promise<void> {
     if (
       (await page.locator('html').getAttribute('data-theme-mode')) !== theme
     ) {
-      const glass = page
-        .getByRole('button', { name: 'Ptah Glass', exact: true })
-        .first();
-      await (
-        (await glass.isVisible())
-          ? glass
-          : page
-              .getByRole('button', { name: /^Ptah/ })
-              .first()
-      ).click();
+      // The category tab only lists themes; pick the first one in it.
+      await page
+        .getByRole('tabpanel', {
+          name: theme === 'dark' ? 'Dark' : 'Light',
+          exact: true,
+        })
+        .getByRole('button')
+        .first()
+        .click();
     }
     await page.keyboard.press('Escape');
   }
