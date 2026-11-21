@@ -30,6 +30,7 @@ import { isTabBusyGenerating } from './tab-busy';
 import { TabManagerService } from '@ptah-extension/chat-state';
 import { MessageSenderService } from '../message-sender.service';
 import { FollowUpQueueService } from './follow-up-queue.service';
+import { ComposerRestoreService } from '../composer-restore.service';
 import {
   AgentMonitorStore,
   MessageFinalizationService,
@@ -342,6 +343,46 @@ describe('MessageDispatchService', () => {
       await Promise.all([first, second]);
 
       expect(enqueueMock.mock.calls.map((c) => c[1])).toEqual(['first', 'second']);
+    });
+
+    it('never queues a waiting message into a reset or closed tab', async () => {
+      jest.useFakeTimers();
+      try {
+        const restore = TestBed.inject(ComposerRestoreService);
+        let refuse!: (outcome: unknown) => void;
+        sendMock.mockImplementationOnce(
+          () => new Promise((resolve) => { refuse = resolve; }),
+        );
+        const first = service.sendOrQueueMessage('first', { tabId: 'tab-1' });
+        const second = service.sendOrQueueMessage('second', { tabId: 'tab-1' });
+        await Promise.resolve();
+        // The tab is reset to a new conversation while the first send runs.
+        tabs = [makeTab({ claudeSessionId: 'sess-2' })];
+        refuse({ success: false, turnInFlight: true });
+
+        await expect(first).resolves.toEqual({ success: false, cancelled: true });
+        await expect(second).resolves.toEqual({ success: false, cancelled: true });
+        // Neither is sent into the new conversation; both go back, in order.
+        expect(enqueueMock).not.toHaveBeenCalled();
+        expect(restore.pendingFor('tab-1')).toBeNull();
+        jest.runOnlyPendingTimers();
+        expect(restore.pendingFor('tab-1')).toBe('first\nsecond');
+
+        sendMock.mockImplementationOnce(
+          () => new Promise((resolve) => { refuse = resolve; }),
+        );
+        enqueueMock.mockClear();
+        const third = service.sendOrQueueMessage('third', { tabId: 'tab-1' });
+        const fourth = service.sendOrQueueMessage('fourth', { tabId: 'tab-1' });
+        await Promise.resolve();
+        tabs = [];
+        refuse({ success: true });
+        await expect(fourth).resolves.toEqual({ success: false, cancelled: true });
+        await third;
+        expect(enqueueMock).not.toHaveBeenCalled();
+      } finally {
+        jest.useRealTimers();
+      }
     });
 
     it('when not streaming, dispatches via MessageSender.send', async () => {

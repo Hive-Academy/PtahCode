@@ -16,6 +16,7 @@ import {
 import type { SendMessageOptions, TabState } from '@ptah-extension/chat-types';
 import { PermissionHandlerService } from '@ptah-extension/chat-streaming';
 import { FollowUpQueueService } from './follow-up-queue.service';
+import { ComposerRestoreService } from '../composer-restore.service';
 import { isTabBusyGenerating } from './tab-busy';
 
 /**
@@ -47,6 +48,7 @@ export class MessageDispatchService {
    * only after it settles, so a refused earlier send is queued first.
    */
   private readonly idleSends = new Map<string, Promise<void>>();
+  private readonly composerRestore = inject(ComposerRestoreService);
   private readonly sendLock = inject(CommandCenterSendLockService);
 
   /**
@@ -122,13 +124,19 @@ export class MessageDispatchService {
       // An earlier idle-only send may still be refused and queued: wait for
       // its outcome so this message lands behind it, in send order.
       const earlier = this.idleSends.get(resolvedTabId);
-      if (earlier) await earlier;
+      if (earlier) {
+        const viewSession = dispatchTab?.claudeSessionId ?? null;
+        await earlier;
+        const moved = this.viewMovedOn(resolvedTabId, viewSession, content);
+        if (moved) return moved;
+      }
       // Queue first, always: the message waits as a queued card with
       // Interrupt & send / Send now. It never answers an open permission
       // prompt — that stays for the user to decide.
       return this.queue(resolvedTabId, content, options);
     }
     const previousTerminalReason = dispatchTab?.lastTerminalReason;
+    const sendSession = dispatchTab?.claudeSessionId ?? null;
     // Idle-only: only this path can fall back to the queue on a refusal.
     const sending = this.messageSender.send(content, {
       ...options,
@@ -154,7 +162,10 @@ export class MessageDispatchService {
     // idle-only send was refused with nothing sent, so queue it like any
     // other mid-turn message.
     if (outcome?.turnInFlight === true && resolvedTabId != null) {
-      return this.queue(resolvedTabId, content, options);
+      return (
+        this.viewMovedOn(resolvedTabId, sendSession, content) ??
+        this.queue(resolvedTabId, content, options)
+      );
     }
     if (outcome?.cancelled === true) {
       if (resolvedTabId) {
@@ -171,6 +182,32 @@ export class MessageDispatchService {
       );
     }
     return outcome;
+  }
+
+  /**
+   * A message that waited (for its own refusal or an earlier send) must not
+   * join a queue that no longer belongs to it. Closed tab: dropped. Tab reset
+   * to another conversation: back to the composer, never sent there. `null`
+   * while the tab still shows the session it was typed for.
+   */
+  private viewMovedOn(
+    tabId: string,
+    sessionId: string | null,
+    content: string,
+  ): SendOutcome | null {
+    const tab = this.tabManager.findTabByIdAcrossWorkspaces(tabId)?.tab;
+    if (!tab) return { success: false, cancelled: true };
+    if ((tab.claudeSessionId ?? null) === sessionId) return null;
+    this.returnToComposer(tabId, content);
+    return { success: false, cancelled: true };
+  }
+
+  /**
+   * Put the text back in the tab's composer. After this send resolves: the
+   * composer clears its submitted draft then, which would wipe it.
+   */
+  private returnToComposer(tabId: string, content: string): void {
+    setTimeout(() => this.composerRestore.restore(tabId, [content]), 0);
   }
 
   private queue(
