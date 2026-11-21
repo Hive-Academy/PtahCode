@@ -65,6 +65,12 @@ type Service = {
     owner: 'user' | 'recovery',
     run: () => Promise<T>,
   ): Promise<T>;
+  withUserActivation<T>(
+    sessionId: string,
+    tabId: string,
+    run: () => Promise<T>,
+  ): Promise<T | { error: { cancelled?: true } }>;
+  beginUserIntent(keys: readonly string[]): () => void;
 };
 
 /**
@@ -74,7 +80,12 @@ type Service = {
  * launch sets it. `stopAt` models the follow-up queue's stop timestamps.
  */
 function receiver(overrides: Record<string, unknown> = {}) {
-  const state = { live: false, launches: 0, stopAt: new Map<string, number>() };
+  const state = {
+    live: false,
+    launches: 0,
+    stopAt: new Map<string, number>(),
+    stopGen: new Map<string, number>(),
+  };
   const sendMessageToSession = jest.fn(async () => undefined);
   const resolveSessionFolder = jest.fn(async (_id: string) => '/work/tree');
   const gateAccount = jest.fn(async (): Promise<void> => undefined);
@@ -93,6 +104,7 @@ function receiver(overrides: Record<string, unknown> = {}) {
         const stoppedAt = state.stopAt.get(id);
         return stoppedAt !== undefined && stoppedAt >= at;
       },
+      stopGeneration: (id: string) => state.stopGen.get(id) ?? 0,
     },
     hasLiveSessionStream: jest.fn(() => state.live),
     historyRead: { resolveSessionFolder },
@@ -107,13 +119,16 @@ function receiver(overrides: Record<string, unknown> = {}) {
     logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
     ...overrides,
   }) as Service;
-  /** What `continueSession` does: its auto-resume inside the user gate. */
+  /** What `continueSession` does: its auto-resume inside the user activation. */
   const userContinue = () =>
-    self.withActivationGate([INPUT.sessionId, INPUT.tabId], 'user', () =>
+    self.withUserActivation(INPUT.sessionId, INPUT.tabId, () =>
       autoResumeIfInactive(),
     );
   /** What `abortSession` records first, for any source (tab close too). */
-  const abort = (id: string, at: number) => state.stopAt.set(id, at);
+  const abort = (id: string, at: number) => {
+    state.stopAt.set(id, at);
+    state.stopGen.set(id, (state.stopGen.get(id) ?? 0) + 1);
+  };
   return {
     self,
     state,
@@ -140,6 +155,74 @@ describe('ChatSessionService.recoverAfterWatchdogStop (TASK_2026_2288 C)', () =>
       origin: { kind: 'peer', from: 'ptah', name: 'Ptah recovery' },
       admission: 'require-idle',
     });
+  });
+
+  it('a user continue already in its preflight when recovery starts: no activation, no prompt', async () => {
+    const r = receiver();
+    const endIntent = r.self.beginUserIntent([INPUT.sessionId, INPUT.tabId]);
+    await expect(r.recover()).resolves.toEqual({
+      recovered: false,
+      reason: 'already-active',
+    });
+    endIntent();
+    expect(r.autoResumeIfInactive).not.toHaveBeenCalled();
+    expect(r.sendMessageToSession).not.toHaveBeenCalled();
+  });
+
+  it('a user continue that enters its preflight during recovery: recovery sends no prompt', async () => {
+    const r = receiver();
+    const folder = deferred<string>();
+    r.resolveSessionFolder.mockImplementationOnce(() => folder.promise);
+    const recovery = r.recover();
+    await settle();
+    // chat:continue starts: account, folder and MCP preflight, not yet at the gate.
+    const endIntent = r.self.beginUserIntent([INPUT.sessionId, INPUT.tabId]);
+    folder.resolve('/work/tree');
+    await expect(recovery).resolves.toEqual({
+      recovered: false,
+      reason: 'already-active',
+    });
+    endIntent();
+    expect(r.state.launches).toBe(0);
+    expect(r.sendMessageToSession).not.toHaveBeenCalled();
+  });
+
+  it('a continue that waits at the gate behind recovery, then the tab closes: no launch', async () => {
+    const r = receiver();
+    const folder = deferred<string>();
+    r.resolveSessionFolder.mockImplementationOnce(() => folder.promise);
+    const recovery = r.recover();
+    await settle();
+    const waiting = r.userContinue();
+    await settle();
+    r.abort(INPUT.tabId, INPUT.endedAt + 50); // tab close while both wait
+    folder.resolve('/work/tree');
+    await expect(recovery).resolves.toEqual({
+      recovered: false,
+      reason: 'stopped',
+    });
+    await expect(waiting).resolves.toEqual({
+      error: { success: false, cancelled: true, sessionId: INPUT.sessionId },
+    });
+    expect(r.state.launches).toBe(0);
+    expect(r.sendMessageToSession).not.toHaveBeenCalled();
+  });
+
+  it('a continue that waits at the gate with no stop still activates once', async () => {
+    const r = receiver();
+    const folder = deferred<string>();
+    r.resolveSessionFolder.mockImplementationOnce(() => folder.promise);
+    const recovery = r.recover();
+    await settle();
+    const waiting = r.userContinue();
+    folder.resolve('/work/tree');
+    await expect(recovery).resolves.toEqual({
+      recovered: false,
+      reason: 'already-active',
+    });
+    await expect(waiting).resolves.toEqual({ justResumed: true });
+    expect(r.state.launches).toBe(1);
+    expect(r.sendMessageToSession).not.toHaveBeenCalled();
   });
 
   it('finds the session already active: no activation and no prompt', async () => {
