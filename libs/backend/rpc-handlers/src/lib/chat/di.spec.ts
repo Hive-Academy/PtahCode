@@ -63,6 +63,26 @@ describe('registerChatServices child setting router', () => {
   });
 });
 
+describe('registerChatServices provider-session auth status default', () => {
+  // Pins the Electron start-up crash of PR #1458: `{ useValue: null }` is a
+  // class provider to tsyringe, so resolving the null default threw.
+  it('resolves the null default to null', () => {
+    const c = rootContainer.createChildContainer();
+    c.register(OUTPUT_STYLE_TOKENS.SESSION_ACTIVATION, { useValue: {} });
+    registerChatServices(c);
+    expect(c.resolve(CHAT_TOKENS.PROVIDER_SESSION_AUTH_STATUS)).toBeNull();
+  });
+
+  it('keeps a probe the host bound first', () => {
+    const c = rootContainer.createChildContainer();
+    const probe = { probe: jest.fn() };
+    c.register(OUTPUT_STYLE_TOKENS.SESSION_ACTIVATION, { useValue: {} });
+    c.register(CHAT_TOKENS.PROVIDER_SESSION_AUTH_STATUS, { useValue: probe });
+    registerChatServices(c);
+    expect(c.resolve(CHAT_TOKENS.PROVIDER_SESSION_AUTH_STATUS)).toBe(probe);
+  });
+});
+
 describe('registerChatServices — output-style precondition', () => {
   it('throws when registerOutputStyleServices has not run', () => {
     const c = rootContainer.createChildContainer();

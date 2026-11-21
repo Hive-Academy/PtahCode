@@ -64,6 +64,7 @@ describe('host attention ingress', () => {
       'agent-sdk/src/lib/sdk-permission-handler.ts:PERMISSION_REQUEST',
       'cli-agent-runtime/src/lib/wiring/agent-events.ts:AGENT_MONITOR_PERMISSION_REQUEST',
       'rpc-handlers/src/lib/chat/codex-host/codex-chat-approval-presentation.ts:PERMISSION_REQUEST',
+      'rpc-handlers/src/lib/chat/provider-session-host/provider-session-approval-presentation.ts:PERMISSION_REQUEST',
       'vscode-lm-tools/src/lib/code-execution/mcp-core/approval-prompt.handler.ts:PERMISSION_REQUEST',
     ].sort());
   });
