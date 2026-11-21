@@ -32,6 +32,7 @@ import { MEMORY_CONTRACT_TOKENS } from '@ptah-extension/memory-contracts';
 import type { CodeOutliner } from '@ptah-extension/tool-output-reducers';
 import { SdkAgentAdapter } from '../sdk-agent-adapter';
 import {
+  SessionId,
   type RuntimeHostCapabilities,
   type IAgentAdapter,
 } from '@ptah-extension/shared';
@@ -60,6 +61,8 @@ import {
   type CodexChatAdapterPorts,
 } from '../codex-app-server/codex-chat-adapter';
 import { SessionApprovalRouter } from '../codex-app-server/session-approval-router';
+import { ProviderSessionChatAdapter } from '../provider-session/provider-session-chat-adapter';
+import type { ProviderSessionChatPorts } from '../provider-session/provider-session-chat-ports';
 import { SdkTranscriptReaderAdapter } from '../sdk-transcript-reader.adapter';
 import { SessionMetadataStore } from '../session-metadata-store';
 import {
@@ -1081,7 +1084,6 @@ export function registerCodexChatServices(
     SDK_TOKENS.NATIVE_SESSION_HISTORY_PORT,
     SDK_TOKENS.RUNTIME_ADMISSION_PORT,
     SDK_TOKENS.PROVIDER_SESSION_CHAT_PORTS,
-    SDK_TOKENS.PROVIDER_SESSION_CHAT_ADAPTER,
     SDK_TOKENS.PROVIDER_SESSION_CONTROLS,
     SDK_TOKENS.PROVIDER_SESSION_HISTORY_PORT,
   ]) {
@@ -1155,14 +1157,62 @@ export function registerCodexChatServices(
       (c) =>
         new SessionApprovalRouter(
           c.resolve<SdkPermissionHandler>(SDK_TOKENS.SDK_PERMISSION_HANDLER),
-          (payload) =>
-            c
-              .resolve<CodexChatAdapterPorts | null>(
-                SDK_TOKENS.CODEX_CHAT_ADAPTER_PORTS,
-              )
-              ?.presentation.cancelPrompt(payload),
+          (payload) => {
+            // Exactly one host presents each cancellation: the provider-session
+            // host for its own sessions, else Codex (which also presents Claude
+            // prompts), else the provider-session host on a host without Codex.
+            const providerSessionPorts =
+              c.resolve<ProviderSessionChatPorts | null>(
+                SDK_TOKENS.PROVIDER_SESSION_CHAT_PORTS,
+              );
+            const codexPorts = c.resolve<CodexChatAdapterPorts | null>(
+              SDK_TOKENS.CODEX_CHAT_ADAPTER_PORTS,
+            );
+            const providerSessionOwned =
+              !!providerSessionPorts &&
+              SessionId.validate(payload.sessionId) &&
+              c
+                .resolve<NativeChatAdapter | null>(
+                  SDK_TOKENS.PROVIDER_SESSION_CHAT_ADAPTER,
+                )
+                ?.owns(payload.sessionId) === true;
+            const presentation = providerSessionOwned
+              ? providerSessionPorts?.presentation
+              : (codexPorts?.presentation ??
+                providerSessionPorts?.presentation);
+            presentation?.cancelPrompt(payload);
+          },
         ),
     ),
+  });
+  // Null when the host bound no provider-session ports (Claude/Codex-only hosts).
+  container.register(SDK_TOKENS.PROVIDER_SESSION_CHAT_ADAPTER, {
+    useFactory: instanceCachingFactory((c) => {
+      const ports = c.resolve<ProviderSessionChatPorts | null>(
+        SDK_TOKENS.PROVIDER_SESSION_CHAT_PORTS,
+      );
+      if (!ports) return null;
+      return new ProviderSessionChatAdapter(
+        {
+          ...ports,
+          logger: c.resolve<Logger>(TOKENS.LOGGER),
+          approvals: c.resolve<SessionApprovalRouter>(
+            SDK_TOKENS.SESSION_APPROVAL_ROUTER,
+          ),
+        },
+        c.resolve<SessionTurnStateRegistry>(
+          SDK_TOKENS.SDK_SESSION_TURN_STATE_REGISTRY,
+        ),
+        c.isRegistered(
+          SDK_TOKENS.SDK_SESSION_ID_RESOLVED_CALLBACK_REGISTRY,
+          true,
+        )
+          ? c.resolve<SessionIdResolvedCallbackRegistry>(
+              SDK_TOKENS.SDK_SESSION_ID_RESOLVED_CALLBACK_REGISTRY,
+            )
+          : undefined,
+      );
+    }),
   });
   container.register(SDK_TOKENS.CODEX_CHAT_ADAPTER, {
     useFactory: instanceCachingFactory((c) => {

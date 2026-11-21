@@ -10,6 +10,10 @@ import type {
   IKimiCodeAuthService,
 } from '@ptah-extension/auth-providers';
 import type { KimiCodeCredentialSource } from '@ptah-extension/shared';
+import type {
+  ProviderSessionAuthStatusProbe,
+  ProviderSessionAuthStatusRows,
+} from '../../chat/provider-session-host/provider-session-auth-status';
 import { maskKeyHint } from '../../utils/mask-key-hint';
 import { getGitHubUsername } from './github-username';
 import { keyStoreReadFailure } from './key-store-read-failure';
@@ -52,13 +56,18 @@ export interface AuthStatusProbesDeps {
   readonly codexAuth: ICodexAuthService;
   readonly kimiCodeAuth: Pick<IKimiCodeAuthService, 'getStatus'>;
   readonly platformAuth: IPlatformAuthProvider;
+  /** Absent on a host that admits no provider-session profile. */
+  readonly providerSessions?: ProviderSessionAuthStatusProbe;
 }
 
 /**
  * The stateless sources behind `auth:getAuthStatus`: the secret store, Copilot,
- * Codex and Kimi Code. The memoised Claude-CLI probe lives in `ClaudeCliHealthProbe`.
+ * Codex, Kimi Code and the admitted provider-session profiles. The memoised Claude-CLI probe lives in `ClaudeCliHealthProbe`.
  */
 export class AuthStatusProbes {
+  /** The last completed provider-session rows; answers a probe that times out. */
+  private lastProviderSessions: ProviderSessionAuthStatusRows | undefined;
+
   constructor(private readonly deps: AuthStatusProbesDeps) {}
 
   /**
@@ -194,6 +203,31 @@ export class AuthStatusProbes {
       );
       return noKimiCodeCredential();
     }
+  }
+
+  /**
+   * One row per admitted provider-session profile; `undefined` when the host
+   * bound no probe. Each row swallows its own failure. A probe that exceeds
+   * the timeout answers with the last completed rows, or `undefined` (field
+   * omitted, state unknown) before the first one: never an empty set, which
+   * would hide every installed provider's card. The slow probe keeps running
+   * and refreshes the rows for the next caller.
+   */
+  async probeProviderSessions(): Promise<
+    ProviderSessionAuthStatusRows | undefined
+  > {
+    const probe = this.deps.providerSessions;
+    if (!probe) return undefined;
+    const rows = probe.probe().then((value) => {
+      this.lastProviderSessions = value;
+      return value;
+    });
+    return withProbeTimeout(
+      this.deps.logger,
+      'Provider session',
+      rows,
+      () => this.lastProviderSessions,
+    );
   }
 }
 
