@@ -58,6 +58,7 @@ import type {
 import { safeErrorKind } from './safe-error-kind';
 import { SessionHandoffAckStore } from './session-handoff-ack.store';
 import { handoffCloseAckResult } from './session-handoff-close-result';
+import { HandoffWatchdogRecovery } from './handoff-watchdog-recovery';
 import type { ISessionHandoffChain } from './session-handoff-chain.port';
 import type {
   HandoffTurnFlushNotice,
@@ -137,6 +138,8 @@ export class SessionHandoffService
 {
   /** Keyed by the caller's tab id, in insertion order (oldest first). */
   private readonly handedOff = new Map<string, HandedOff>();
+  /** One automatic retry of a successor the watchdog ended (TASK_2026_2288 C). */
+  private readonly watchdogRecovery: HandoffWatchdogRecovery;
   /**
    * Tab ids of callers whose start has not settled. A start that outlives
    * its deadline stays here until it settles, so a retry cannot open a
@@ -220,7 +223,20 @@ export class SessionHandoffService
     @inject(SDK_TOKENS.SDK_SESSION_END_CALLBACK_REGISTRY, { isOptional: true })
     sessionEnds: SessionEndCallbackRegistry | null = null,
   ) {
-    sessionEnds?.register(({ sessionId }) => {
+    this.watchdogRecovery = new HandoffWatchdogRecovery({
+      findSuccessor: async (id) => (await this.ackStore?.findBySuccessor(id)) ?? undefined,
+      isSessionChild: (id) => this.registry.get(id) !== undefined,
+      recover: () => {
+        const host = this.lookupHost();
+        return host?.recoverAfterWatchdogStop
+          ? (input) => host.recoverAfterWatchdogStop!(input)
+          : null;
+      },
+      log: (message) => this.log(message),
+    });
+    sessionEnds?.register((payload) => {
+      const { sessionId } = payload;
+      this.watchdogRecovery.onSessionEnd(payload);
       for (const [tabId, entry] of this.handedOff) {
         if (tabId === sessionId || entry.sdkSessionId === sessionId)
           this.handedOff.delete(tabId);

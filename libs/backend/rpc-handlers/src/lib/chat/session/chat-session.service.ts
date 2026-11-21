@@ -350,6 +350,7 @@ type ChatFollowUpQueue = Pick<
   | 'isAbandoned'
   | 'rejectAdmission'
   | 'stopGeneration'
+  | 'stoppedSince'
   | 'advanceStopGeneration'
   | 'trackSubmission'
   | 'withdrawAllForStop'
@@ -2932,16 +2933,86 @@ export class ChatSessionService {
           error: outcome.error.error ?? 'Auto-resume failed',
         };
       }
-      // outcome.justResumed is `boolean`; when `autoResumeIfInactive` returned
-      // `{ justResumed: false }` it meant "already live", which we already
-      // short-circuited above via `hasLiveSessionStream`. Coerce to `true`.
-      return { resumed: true };
+      // `{ justResumed: false }` means another path made the session live
+      // after the check above, so this call did not resume it.
+      return outcome.justResumed ? { resumed: true } : { alreadyActive: true };
     } catch (error) {
       await this.driverLock.abandonDrive(sessionId, driveAttempt);
       throw error;
     } finally {
       await this.driverLock.settleDrive(sessionId, driveAttempt);
     }
+  }
+
+  /**
+   * Resume a session the no-activity watchdog ended and send it one recovery
+   * prompt (TASK_2026_2288 C). The prompt has a `peer` origin, so the chat and
+   * the transcript show it as an automatic message, never as the user's words.
+   * A session that is live again (the user or another path resumed it) is left
+   * alone. A session stopped after the watchdog end (`chat:abort`, for example
+   * a tab close) is not resumed and gets no prompt.
+   */
+  async recoverAfterWatchdogStop(input: {
+    readonly sessionId: string;
+    readonly tabId: string;
+    readonly prompt: string;
+    readonly senderName: string;
+    readonly endedAt: number;
+  }): Promise<
+    | { readonly recovered: true }
+    | {
+        readonly recovered: false;
+        readonly reason: 'already-active' | 'stopped' | 'resume-failed' | 'send-failed';
+        readonly detail?: string;
+      }
+  > {
+    const sessionId = input.sessionId as SessionId;
+    const stoppedSinceEnd = (): boolean =>
+      [input.sessionId, input.tabId].some(
+        (id) => this.followUpQueue?.stoppedSince(id, input.endedAt) === true,
+      );
+    if (stoppedSinceEnd()) return { recovered: false, reason: 'stopped' };
+    if (this.hasLiveSessionStream(sessionId, input.tabId)) {
+      return { recovered: false, reason: 'already-active' };
+    }
+    let resumed: Awaited<ReturnType<ChatSessionService['ensureSessionActiveForRewind']>>;
+    try {
+      const workspacePath = await this.historyRead.resolveSessionFolder(sessionId);
+      resumed = await this.ensureSessionActiveForRewind(
+        sessionId,
+        input.tabId,
+        workspacePath,
+      );
+    } catch (error: unknown) {
+      return {
+        recovered: false,
+        reason: 'resume-failed',
+        detail: error instanceof Error ? error.message : String(error),
+      };
+    }
+    if ('alreadyActive' in resumed) {
+      return { recovered: false, reason: 'already-active' };
+    }
+    if (!resumed.resumed) {
+      return { recovered: false, reason: 'resume-failed', detail: resumed.error };
+    }
+    if (stoppedSinceEnd()) return { recovered: false, reason: 'stopped' };
+    try {
+      await this.sdkAdapter.sendMessageToSession(sessionId, input.prompt, {
+        origin: { kind: 'peer', from: 'ptah', name: input.senderName },
+      });
+    } catch (error: unknown) {
+      return {
+        recovered: false,
+        reason: 'send-failed',
+        detail: error instanceof Error ? error.message : String(error),
+      };
+    }
+    this.logger.info('[RPC] Session resumed after a no-activity watchdog stop', {
+      sessionId,
+      tabId: input.tabId,
+    });
+    return { recovered: true };
   }
 
   /**

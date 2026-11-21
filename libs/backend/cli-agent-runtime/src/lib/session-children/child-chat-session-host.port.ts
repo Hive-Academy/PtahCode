@@ -87,4 +87,40 @@ export interface IChildChatSessionHost {
   startHandoffSession(
     input: HandoffChatSessionStartInput,
   ): Promise<ChildChatSessionStartOutcome>;
+  /**
+   * Resume a session that the no-activity watchdog ended and send it one
+   * recovery prompt with a non-human origin (TASK_2026_2288 C). Optional: a
+   * host without it never retries automatically.
+   */
+  recoverAfterWatchdogStop?(
+    input: WatchdogRecoveryInput,
+  ): Promise<WatchdogRecoveryOutcome>;
 }
+
+export interface WatchdogRecoveryInput {
+  /** The SDK session id (or the tab id while none is known). */
+  readonly sessionId: string;
+  /** The tab that shows the session. */
+  readonly tabId: string;
+  /** The recovery prompt; it is sent with a `peer` origin, never as the user. */
+  readonly prompt: string;
+  /** The sender name the chat shows for the recovery prompt. */
+  readonly senderName: string;
+  /**
+   * Epoch ms of the watchdog end. A stop of the session at or after it (a
+   * `chat:abort`, for example a tab close) cancels the recovery.
+   */
+  readonly endedAt: number;
+}
+
+export type WatchdogRecoveryOutcome =
+  | { readonly recovered: true }
+  | {
+      readonly recovered: false;
+      /**
+       * `already-active`: the user or another path resumed it first.
+       * `stopped`: the session was stopped after the watchdog end.
+       */
+      readonly reason: 'already-active' | 'stopped' | 'resume-failed' | 'send-failed';
+      readonly detail?: string;
+    };
