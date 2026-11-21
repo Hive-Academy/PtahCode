@@ -107,6 +107,7 @@ import type {
   SymbolIndexPage,
 } from '../types';
 import { parseSymbolIndexQuery } from '../namespace-builders/symbol-index-query';
+import { FileNotInGraphError } from '../namespace-builders/analysis-namespace.builders';
 import { readOnlyCronNamespace } from '../namespace-builders/cron-namespace.builder';
 import { AgentMessageControlIdentityError } from '../namespace-builders/agent-message-control-actor';
 import {
@@ -2864,7 +2865,9 @@ async function handleIndividualTool(
         // Both read the graph service when invoked, in the same turn, so the
         // coverage is that of the graph which answered (not the session's).
         const [dependents, fileCoverage] = await Promise.all([
-          ptahAPI.dependencies.getDependents(resolvedFile),
+          ptahAPI.dependencies
+            .getDependents(resolvedFile)
+            .catch(emptyWhenFileNotInGraph),
           ptahAPI.dependencies.getGraphCoverageForFile(resolvedFile),
         ]);
         return await createToolSuccessResponse(
@@ -2904,7 +2907,9 @@ async function handleIndividualTool(
         );
         // Same graph for answer and coverage, as in ptah_get_dependents.
         const [dependencies, fileCoverage] = await Promise.all([
-          ptahAPI.dependencies.getDependencies(resolvedFile, depth),
+          ptahAPI.dependencies
+            .getDependencies(resolvedFile, depth)
+            .catch(emptyWhenFileNotInGraph),
           ptahAPI.dependencies.getGraphCoverageForFile(resolvedFile),
         ]);
         return await createToolSuccessResponse(
@@ -3798,6 +3803,16 @@ function graphCompleteness(
     return {};
   }
   return { incomplete: true, graphedFiles, discoveredFiles };
+}
+
+/**
+ * The graph holds no node for the file: answer `[]`, which graphFileAnswer
+ * pairs with `fileInGraph: false` and the coverage census, so the empty list
+ * is not read as "no edges". Every other failure still rejects.
+ */
+function emptyWhenFileNotInGraph(error: unknown): string[] {
+  if (error instanceof FileNotInGraphError) return [];
+  throw error;
 }
 
 /**

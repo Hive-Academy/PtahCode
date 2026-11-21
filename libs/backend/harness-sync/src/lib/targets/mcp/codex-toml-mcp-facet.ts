@@ -176,15 +176,7 @@ export class CodexTomlMcpFacet implements IHarnessMcpFacet {
 
   /** Server names declared OUTSIDE any Ptah marker block. */
   foreignServerKeys(workspaceRoot = ''): Set<string> {
-    const content = this.readFile(workspaceRoot);
-    const owned = new Set(ownedServerKeys(content));
-    const foreign = new Set<string>();
-    for (const key of parseMcpServerTables(
-      stripAllOwnedBlocks(content),
-    ).keys()) {
-      if (!owned.has(key)) foreign.add(key);
-    }
-    return foreign;
+    return foreignServerKeysIn(this.readFile(workspaceRoot));
   }
 
   /**
@@ -208,35 +200,55 @@ export class CodexTomlMcpFacet implements IHarnessMcpFacet {
         new Error('Workspace-scoped ~/.codex config needs an open workspace'),
       );
     }
-    return withMcpConfigLock(path, () => {
-      const content = this.readFile(workspaceRoot);
-      if (this.foreignServerKeys(workspaceRoot).has(serverKey)) {
+    return withMcpConfigLock(path, async () => {
+      const content = this.readFileForWrite(path);
+      if (foreignServerKeysIn(content).has(serverKey)) {
         // Two tables with the same name is a TOML parse error, which would take
         // Codex down entirely. Refusing is the only safe answer; the target has
         // already classified this key as foreign and will report it.
-        return Promise.reject(
-          new Error(
-            `${this.configRelPath()} already declares [mcp_servers.${serverKey}] outside Ptah's block`,
-          ),
+        throw new Error(
+          `${this.configRelPath()} already declares [mcp_servers.${serverKey}] outside Ptah's block`,
         );
       }
       this.writeFile(
         workspaceRoot,
         spliceOwnedBlock(content, serverKey, renderBlock(serverKey, config)),
       );
-      return Promise.resolve();
     });
   }
 
   remove(workspaceRoot: string, serverKey: string): Promise<void> {
     const path = this.configPath(workspaceRoot);
     if (path === null) return Promise.resolve();
-    return withMcpConfigLock(path, () => {
-      const content = this.readFile(workspaceRoot);
+    return withMcpConfigLock(path, async () => {
+      const content = this.readFileForWrite(path);
       const next = spliceOwnedBlock(content, serverKey, null);
       if (next !== content) this.writeFile(workspaceRoot, next);
-      return Promise.resolve();
     });
+  }
+
+  /**
+   * The read the write path uses: strict where {@link readFile} is lenient.
+   *
+   * Only ENOENT reads as '' (Codex never configured), so a write creates the
+   * file. Any other failure is REFUSED: splicing one block into '' and writing
+   * that back would drop the user's whole config — every other server, model
+   * and sandbox setting. The message names the failure kind, never contents.
+   */
+  private readFileForWrite(path: string): string {
+    try {
+      return readFileSync(path, 'utf-8');
+    } catch (error: unknown) {
+      if (errorCode(error) === 'ENOENT') return '';
+      this.options.logger?.warn(
+        '[harness-sync] Codex MCP config unreadable; write refused',
+        { scope: this.scope, code: errorCode(error) },
+      );
+      throw new Error(
+        `Refusing to change ${this.configRelPath()}: the file exists but could not be read (${errorCode(error) ?? 'unknown error'}). Fix the file, then retry.`,
+        { cause: error },
+      );
+    }
   }
 
   private readFile(workspaceRoot = ''): string {
@@ -303,6 +315,16 @@ export class CodexTomlMcpFacet implements IHarnessMcpFacet {
     }
     atomicWriteWithRetry(path, content);
   }
+}
+
+/** Server names `content` declares OUTSIDE any Ptah marker block. */
+function foreignServerKeysIn(content: string): Set<string> {
+  const owned = new Set(ownedServerKeys(content));
+  const foreign = new Set<string>();
+  for (const key of parseMcpServerTables(stripAllOwnedBlocks(content)).keys()) {
+    if (!owned.has(key)) foreign.add(key);
+  }
+  return foreign;
 }
 
 // ------------------------------------------------------------------ rendering

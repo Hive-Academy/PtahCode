@@ -215,20 +215,97 @@ export class JsonMcpFacet implements IHarnessMcpFacet {
       );
     }
 
-    return withMcpConfigLock(path, () => {
-      const fileConfig = this.readJson(path);
+    return withMcpConfigLock(path, async () => {
+      const fileConfig = this.readJsonForWrite(path);
       const existing = fileConfig[this.options.rootKey];
+      if (existing !== undefined && !isPlainObject(existing)) {
+        throw new Error(
+          `Refusing to change ${this.configRelPath()}: "${this.options.rootKey}" is not an object. Fix the file, then retry.`,
+        );
+      }
       const servers: Record<string, unknown> =
-        typeof existing === 'object' && existing !== null
-          ? { ...(existing as Record<string, unknown>) }
-          : {};
+        existing === undefined ? {} : { ...existing };
 
-      if (!change(servers)) return Promise.resolve();
+      if (!change(servers)) return;
 
       fileConfig[this.options.rootKey] = servers;
       this.writeJson(path, fileConfig);
-      return Promise.resolve();
     });
+  }
+
+  /**
+   * The read the write path uses: strict where {@link readJson} is lenient.
+   *
+   * Only an absent file (ENOENT) or an empty one reads as `{}`, so the write
+   * creates or fills it. A file that exists but cannot be read, does not
+   * parse, or is not a JSON object is REFUSED: writing `{}` plus one server
+   * back over it would drop every other server the user declared. The thrown
+   * message names the file and the failure kind only, never its contents — a
+   * JSON parse error echoes the text it choked on, and MCP env and headers
+   * hold secrets.
+   */
+  private readJsonForWrite(path: string): Record<string, unknown> {
+    let bytes: Buffer;
+    try {
+      bytes = readFileSync(path);
+    } catch (error: unknown) {
+      if (errorCode(error) === 'ENOENT') return {};
+      this.options.logger?.warn(
+        '[harness-sync] MCP config unreadable; write refused',
+        {
+          target: this.target,
+          code: errorCode(error),
+          errorName: error instanceof Error ? error.name : typeof error,
+        },
+      );
+      throw new Error(
+        `Refusing to change ${this.configRelPath()}: the file exists but could not be read (${errorCode(error) ?? 'unknown error'}). Fix the file, then retry.`,
+        { cause: error },
+      );
+    }
+
+    // Strict decode: a lenient one turns invalid bytes into U+FFFD, the text
+    // still parses, and the rewrite would save the replacement characters.
+    let text: string;
+    try {
+      text = stripBom(STRICT_UTF8.decode(bytes));
+    } catch (error: unknown) {
+      this.options.logger?.warn(
+        '[harness-sync] MCP config is not valid UTF-8; write refused',
+        {
+          target: this.target,
+          errorName: error instanceof Error ? error.name : typeof error,
+        },
+      );
+      throw new Error(
+        `Refusing to change ${this.configRelPath()}: the file is not valid UTF-8 text. Fix the file, then retry.`,
+        { cause: error },
+      );
+    }
+    if (text.trim() === '') return {};
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(text);
+    } catch (error: unknown) {
+      this.options.logger?.warn(
+        '[harness-sync] MCP config malformed; write refused',
+        {
+          target: this.target,
+          errorName: error instanceof Error ? error.name : typeof error,
+        },
+      );
+      throw new Error(
+        `Refusing to change ${this.configRelPath()}: the file is not valid JSON. Fix the file, then retry.`,
+        { cause: error },
+      );
+    }
+    if (!isPlainObject(parsed)) {
+      throw new Error(
+        `Refusing to change ${this.configRelPath()}: the file does not contain a JSON object. Fix the file, then retry.`,
+      );
+    }
+    return parsed;
   }
 
   private readServersObject(path: string): Record<string, unknown> {
@@ -239,14 +316,15 @@ export class JsonMcpFacet implements IHarnessMcpFacet {
   }
 
   /**
-   * The legacy read: every failure — absent, unreadable, malformed — is `{}`.
-   * The reconciler and the write path depend on that; {@link inspect} is the
-   * caller that needs to tell them apart, and reads through
-   * {@link readJsonStatus} instead.
+   * The legacy read, for listing only: every failure — absent, unreadable,
+   * malformed — is `{}`. {@link readAll} depends on that. {@link inspect}
+   * needs to tell them apart and reads through {@link readJsonStatus}; the
+   * write path must refuse a damaged file and reads through
+   * {@link readJsonForWrite}.
    */
   private readJson(path: string): Record<string, unknown> {
     try {
-      const parsed: unknown = JSON.parse(readFileSync(path, 'utf-8'));
+      const parsed: unknown = JSON.parse(stripBom(readFileSync(path, 'utf-8')));
       return typeof parsed === 'object' && parsed !== null
         ? (parsed as Record<string, unknown>)
         : {};
@@ -342,9 +420,11 @@ async function readJsonStatus(
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(text);
-  } catch (error) {
-    return { status: 'error', json: {}, error: describeError(error) };
+    parsed = JSON.parse(stripBom(text));
+  } catch {
+    // degradation-audit: reported - returned as status 'error'. The parser
+    // message is dropped: it can quote the file, and MCP env holds secrets.
+    return { status: 'error', json: {}, error: `${path} is not valid JSON` };
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     return {
@@ -362,6 +442,22 @@ async function readJsonStatus(
  */
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Throws on invalid UTF-8 instead of substituting U+FFFD. `ignoreBOM` keeps
+ * the BOM in the output so {@link stripBom} stays the one place it is removed.
+ */
+const STRICT_UTF8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+
+/** Drop a leading UTF-8 byte order mark: valid in a file, rejected by JSON.parse. */
+function stripBom(text: string): string {
+  return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
+}
+
+/** A non-null, non-array object. */
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 /** Every entry of a server map that is an object, as a config. */

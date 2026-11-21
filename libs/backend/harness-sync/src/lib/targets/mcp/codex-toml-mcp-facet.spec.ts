@@ -324,4 +324,60 @@ describe('CodexTomlMcpFacet (E18)', () => {
       expect(result.servers.size).toBe(0);
     });
   });
+
+  describe('a config that exists but cannot be read is never overwritten (TASK_2026_2288)', () => {
+    const userConfig = [
+      'model = "gpt-5-codex"',
+      '[mcp_servers.mine]',
+      'command = "mine-cmd"',
+      '',
+    ].join('\n');
+
+    it('refuses a write when the file is unreadable (EACCES) and leaves it untouched', async () => {
+      seedConfig(userConfig);
+      denyReadsOf(configPath);
+
+      await expect(makeFacet().write(ws, 'github', stdio('npx'))).rejects.toThrow(
+        /Refusing to change ~\/\.codex\/config\.toml: .*could not be read \(EACCES\)/,
+      );
+      expect(actualFs.readFileSync(configPath, 'utf-8')).toBe(userConfig);
+    });
+
+    it('refuses a remove when the file is unreadable (EACCES) and leaves it untouched', async () => {
+      seedConfig(userConfig);
+      denyReadsOf(configPath);
+
+      await expect(makeFacet().remove(ws, 'mine')).rejects.toThrow(
+        /could not be read \(EACCES\)/,
+      );
+      expect(actualFs.readFileSync(configPath, 'utf-8')).toBe(userConfig);
+    });
+
+    it('refuses a write when the config path is a directory', async () => {
+      mkdirSync(configPath, { recursive: true });
+
+      await expect(makeFacet().write(ws, 'github', stdio('npx'))).rejects.toThrow(
+        /could not be read/,
+      );
+      expect(() => actualFs.readdirSync(configPath)).not.toThrow();
+    });
+
+    it('keeps malformed TOML byte-for-byte: the splice only appends a fenced block', async () => {
+      const malformed = 'model = "unterminated\n[mcp_servers.mine\ncommand = 1\n';
+      seedConfig(malformed);
+
+      await makeFacet().write(ws, 'github', stdio('npx'));
+
+      const content = readFileSync(configPath, 'utf-8');
+      expect(content.startsWith(malformed.trimEnd())).toBe(true);
+      expect(content).toContain('# ptah:begin github');
+    });
+
+    it('creates the file when it does not exist yet (ENOENT)', async () => {
+      await makeFacet().write(ws, 'github', stdio('npx'));
+      expect(readFileSync(configPath, 'utf-8')).toContain(
+        '[mcp_servers.github]',
+      );
+    });
+  });
 });

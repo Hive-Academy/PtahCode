@@ -902,7 +902,10 @@ export class McpDirectoryRpcHandlers {
           errorSource: 'McpDirectoryRpcHandlers.registerGetSmitheryKeyStatus',
         });
         this.logger.error('RPC: mcpDirectory:getSmitheryKeyStatus failed', err);
-        return { configured: false };
+        // Not { configured: false }: that would show the key form as if no key
+        // were saved. The renderer shows an error with Retry instead. A fixed
+        // message: the transport sends .message to the renderer as is.
+        throw new Error('Could not read the Smithery API key status');
       }
     });
   }
