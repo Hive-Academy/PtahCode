@@ -68,3 +68,27 @@ justifications in the Antigravity adapter and JSON parser.
   settles. That cleanup is bounded by the tree-kill timeout and `FALLBACK_CLOSE_GRACE_MS`, plus
   the temporary-directory removal. This matches how such a caller already waits on a live flight.
   This can be reversed.
+
+## Round 2 (answers code-logic-re-review-3.md)
+
+Design, all in `fallback-usage.runner.ts`:
+
+- `callerGone(request, now)` returns `cli-unavailable` for an aborted `signal` or `runSignal` and
+  `cli-timeout` for an expired deadline. It touches no shared state. It runs at entry and again
+  after each `waitForClose`, before the cache read and the slot reservation (Major 1, Minor 2).
+- The flight wraps the executor and records `spawned`. A `cli-timeout` with no spawn sets no
+  backoff (Major 1).
+- A joiner keeps its own deadline timer. Its expiry returns `cli-timeout` and decrements the
+  waiter count but never aborts the flight: the run's own timeout decides CLI health.
+- An owner `runSignal` abort that wins after a success was selected marks the flight disposed:
+  no admission, `cli-unavailable`, no cache entry.
+
+Tests: 4 new cases in `fallback-usage.runner.spec.ts` (deadline at closing-flight settlement,
+unspawned timeout not cached, owner abort during close grace, shorter-deadline joiner).
+
+Decision: no dedicated test for a microtask-ordered `runSignal` abort between close and resume.
+The post-wait `callerGone` check covers it structurally.
+
+Checks: focused Jest 16 suites / 433 tests pass; eslint exit 0; degradation audit exit 0.
+`tsc` of the lib reports only TS2339 at `agent-sdk/.../sdk-query-runner.service.ts:289`, caused
+by the shared `node_modules` holding Claude Agent SDK 0.3.318 while the lockfile pins 0.3.329.

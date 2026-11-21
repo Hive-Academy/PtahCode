@@ -95,10 +95,17 @@ export async function disposeFallbackRuns(): Promise<void> {
 }
 const failure = (reason: FallbackReason, retryAfter?: number): FallbackResult<never> =>
   ({ ok: false, reason, ...(retryAfter !== undefined && { retryAfter }) });
+/** The caller's own end: an aborted signal or an expired deadline. Touches no shared state. */
+function callerGone<T>(request: FallbackRequest<T>, now: () => number): FallbackResult<never> | undefined {
+  if (request.signal?.aborted || request.runSignal?.aborted) return failure('cli-unavailable');
+  if (request.deadline !== undefined && request.deadline <= now()) return failure('cli-timeout');
+  return undefined;
+}
 
 export async function runFallbackUsage<T>(request: FallbackRequest<T>): Promise<FallbackResult<T>> {
   const now = request.now ?? Date.now;
-  if (request.signal?.aborted || request.runSignal?.aborted) return failure('cli-unavailable');
+  const gone = callerGone(request, now);
+  if (gone) return gone;
   const key = JSON.stringify([request.sourceId, request.ownerKey, request.executable,
     request.version, request.accountFingerprint]);
   let flight: Flight | undefined;
@@ -113,7 +120,12 @@ export async function runFallbackUsage<T>(request: FallbackRequest<T>): Promise<
     if (!flight?.controller.signal.aborted) break;
     const left = await waitForClose(flight, request, now);
     if (left) return left;
+    // The settlement can win a same-tick race with the deadline timer or an abort,
+    // so recheck the caller before it reads the cache or reserves a slot.
+    const expired = callerGone(request, now);
+    if (expired) return expired;
   }
+  const created = !flight;
   if (!flight) {
     if (total >= 2 || (running.get(request.sourceId) ?? 0) >= 1)
       return failure('cli-busy');
@@ -126,7 +138,17 @@ export async function runFallbackUsage<T>(request: FallbackRequest<T>): Promise<
     const linkOwner = () => controller.abort();
     ownerSignal?.addEventListener('abort', linkOwner, { once: true });
     const admit = request.admit;
-    const promise = execute({ ...request, runSignal: controller.signal }).then((result) => {
+    // A timeout before any process started says nothing about the CLI.
+    let spawned = false;
+    const executor: FallbackExecutor = { start: (executable, args, cwd) => {
+      spawned = true;
+      return request.executor.start(executable, args, cwd);
+    } };
+    // Owner disposal that wins after a success was selected (for example during the
+    // close grace) still discards it: no admission and no cache write.
+    let disposed = false;
+    const promise = execute({ ...request, executor, runSignal: controller.signal }).then((result) => {
+      if (result.ok && ownerSignal?.aborted) { disposed = true; return failure('cli-unavailable'); }
       if (!result.ok || !admit) return result;
       let admitted = false;
       // Only a literal `true` admits, so a hook that returns a promise fails closed at once.
@@ -141,8 +163,10 @@ export async function runFallbackUsage<T>(request: FallbackRequest<T>): Promise<
     }).catch(() => failure('cli-unavailable')).then((result) => {
       // A run abandoned by its waiters says nothing about the CLI, so it sets no backoff.
       const abandoned = controller.signal.aborted && !ownerSignal?.aborted;
-      const until = result.ok ? now() + FALLBACK_CACHE_MS :
-        result.cwdUnavailable || abandoned ? 0 :
+      const unspawnedTimeout = !result.ok && result.reason === 'cli-timeout' && !spawned;
+      const until = disposed || (result.ok && ownerSignal?.aborted) ? 0 :
+        result.ok ? now() + FALLBACK_CACHE_MS :
+        result.cwdUnavailable || abandoned || unspawnedTimeout ? 0 :
         result.reason === 'cli-parse-failed' ? now() + FALLBACK_PARSE_BACKOFF_MS :
         ['cli-timeout', 'cli-exit-error', 'cli-not-signed-in', 'cli-unavailable'].includes(result.reason)
           ? now() + FALLBACK_SHORT_BACKOFF_MS : 0;
@@ -161,18 +185,33 @@ export async function runFallbackUsage<T>(request: FallbackRequest<T>): Promise<
   const shared = flight;
   const settledFlight = shared.promise as Promise<FallbackResult<T>>;
   shared.waiters++;
-  // A waiter without a signal can never leave, so the flight keeps running for it.
-  if (!request.signal) return settledFlight;
+  // A joiner keeps its own deadline; the creator's deadline already bounds the run itself.
+  const ownDeadline = created ? undefined : request.deadline;
+  // A waiter without a signal or its own deadline can never leave, so the flight keeps running for it.
+  if (!request.signal && ownDeadline === undefined) return settledFlight;
   return new Promise((resolve) => {
-    const abort = () => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let done = false;
+    const finish = (result: FallbackResult<T>) => {
+      if (done) return;
+      done = true;
+      if (timer) clearTimeout(timer);
       request.signal?.removeEventListener('abort', abort);
+      resolve(result);
+    };
+    const abort = () => {
+      if (done) return;
       if (--shared.waiters === 0) shared.controller.abort();
-      resolve(failure('cli-unavailable'));
+      finish(failure('cli-unavailable'));
     };
     request.signal?.addEventListener('abort', abort, { once: true });
     if (request.signal?.aborted) abort();
-    void settledFlight.then((result) => { request.signal?.removeEventListener('abort', abort); resolve(result); },
-      () => { request.signal?.removeEventListener('abort', abort); resolve(failure('cli-unavailable')); });
+    if (ownDeadline !== undefined && !done) timer = setTimeout(() => {
+      // The run's own timeout decides the CLI's health, so a joiner's expiry never aborts it.
+      shared.waiters--;
+      finish(failure('cli-timeout'));
+    }, Math.max(0, ownDeadline - now()));
+    void settledFlight.then(finish, () => finish(failure('cli-unavailable')));
   });
 }
 

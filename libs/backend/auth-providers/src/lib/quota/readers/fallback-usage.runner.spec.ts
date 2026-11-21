@@ -399,4 +399,74 @@ describe('fallback usage runner shared flight ownership', () => {
       .resolves.toMatchObject({ ok: false, reason: 'cli-timeout' });
     expect(start).toHaveBeenCalledTimes(1);
   });
+
+  it('sets no backoff when a retry\'s deadline expires as the cancelled flight settles', async () => {
+    const run = manual();
+    let finishCleanup!: () => void;
+    const cleanup = new Promise<void>((resolve) => { finishCleanup = resolve; });
+    const cancelledHandle: FallbackProcess = { ...run.handle, closed: cleanup, isClosed: () => false,
+      killTree: jest.fn(async () => undefined) };
+    const start = jest.fn().mockReturnValueOnce(cancelledHandle).mockReturnValue(done());
+    const request = { ...base(), executor: { start } };
+    const leaving = new AbortController();
+    const cancelled = runFallbackUsage({ ...request, signal: leaving.signal });
+    await flush();
+    leaving.abort();
+    await expect(cancelled).resolves.toMatchObject({ reason: 'cli-unavailable' });
+    let clock = 1_000;
+    const retry = runFallbackUsage({ ...request, now: () => clock, deadline: 2_000 });
+    await flush();
+    // The settlement and the deadline become ready in the same tick; the settlement wins.
+    clock = 2_000;
+    finishCleanup();
+    await expect(retry).resolves.toMatchObject({ ok: false, reason: 'cli-timeout' });
+    expect(start).toHaveBeenCalledTimes(1);
+    await expect(runFallbackUsage(request)).resolves.toMatchObject({ ok: true, value: 'valid' });
+    expect(start).toHaveBeenCalledTimes(2);
+  });
+
+  it('never caches a timeout that ended before any process started', async () => {
+    const start = jest.fn(() => done());
+    const request = { ...base(), executor: { start }, timeoutMs: 5 };
+    const stuck = runFallbackUsage({ ...request,
+      temporaryCwd: { create: () => new Promise<string>(() => undefined), remove: async () => undefined } });
+    await expect(stuck).resolves.toMatchObject({ ok: false, reason: 'cli-timeout' });
+    expect(start).not.toHaveBeenCalled();
+    await expect(runFallbackUsage(request)).resolves.toMatchObject({ ok: true, value: 'valid' });
+    expect(start).toHaveBeenCalledTimes(1);
+  });
+
+  it('caches nothing when the owner disposes during the close grace of a success', async () => {
+    let close!: () => void;
+    const closed = new Promise<void>((resolve) => { close = resolve; });
+    const graceHandle: FallbackProcess = { result: Promise.resolve('valid'), closed, kill: jest.fn(),
+      isClosed: () => false, killTree: jest.fn(async () => undefined) };
+    const start = jest.fn().mockReturnValueOnce(graceHandle).mockReturnValue(done());
+    const admit = jest.fn(() => true);
+    const request = { ...base(), executor: { start }, admit };
+    const owner = new AbortController();
+    const disposedRun = runFallbackUsage({ ...request, runSignal: owner.signal });
+    await flush();
+    expect(start).toHaveBeenCalledTimes(1);
+    owner.abort();
+    close();
+    await expect(disposedRun).resolves.toMatchObject({ ok: false, reason: 'cli-unavailable' });
+    expect(admit).not.toHaveBeenCalled();
+    await expect(runFallbackUsage(request)).resolves.toMatchObject({ ok: true, value: 'valid' });
+    expect(start).toHaveBeenCalledTimes(2);
+  });
+
+  it('times out a joiner with a shorter deadline at its own deadline', async () => {
+    const run = manual();
+    const start = jest.fn(() => run.handle);
+    const request = { ...base(), executor: { start } };
+    const creator = runFallbackUsage({ ...request, deadline: Date.now() + 5_000 });
+    await flush();
+    const joiner = runFallbackUsage({ ...request, deadline: Date.now() + 20 });
+    await expect(joiner).resolves.toMatchObject({ ok: false, reason: 'cli-timeout' });
+    expect(run.handle.kill).not.toHaveBeenCalled();
+    run.reply('valid');
+    await expect(creator).resolves.toMatchObject({ ok: true, value: 'valid' });
+    expect(start).toHaveBeenCalledTimes(1);
+  });
 });
