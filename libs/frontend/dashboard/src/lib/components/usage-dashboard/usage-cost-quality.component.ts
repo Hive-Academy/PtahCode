@@ -18,13 +18,7 @@ import { type UsageCostQuality } from './usage-summary.view-model';
 import { formatCostCell, formatShare } from './usage-formatting';
 
 /** One hue plus a pattern: status colors stay reserved for state. */
-const SEGMENT_CLASS = {
-  reported: 'bg-primary',
-  priced: 'bg-primary/45',
-  unpriced: 'usage-quality-hatch',
-} as const;
-
-type SegmentKind = keyof typeof SEGMENT_CLASS;
+type SegmentKind = 'reported' | 'priced' | 'unpriced';
 
 let nextQualityId = 0;
 
@@ -45,28 +39,28 @@ let nextQualityId = 0;
       @if (segments().length > 0) {
         <div class="flex h-2.5 w-full gap-[2px] overflow-hidden rounded-full" aria-hidden="true" data-testid="usage-quality-bar">
           @for (segment of segments(); track segment.kind) {
-            <span class="h-full first:rounded-s-full last:rounded-e-full" [class]="segmentClass[segment.kind]" [style.width.%]="segment.percent"></span>
+            <span class="h-full first:rounded-s-full last:rounded-e-full" [class]="segment.kind === 'reported' ? 'bg-primary' : segment.kind === 'priced' ? 'bg-primary/45' : 'usage-quality-hatch'" [style.width.%]="segment.percent"></span>
           }
         </div>
       }
       <div class="usage-quality-cells grid grid-cols-2 gap-ptah-field">
         <div class="usage-quality-cell" data-testid="usage-quality-reported">
           <p class="flex items-center gap-1.5 text-xs text-base-content-muted">
-            <span class="h-2.5 w-2.5 shrink-0 rounded-sm" [class]="segmentClass.reported" aria-hidden="true"></span>Provider reported
+            <span class="h-2.5 w-2.5 shrink-0 rounded-sm bg-primary" aria-hidden="true"></span>Provider reported
           </p>
           <p class="mt-1 text-xl font-semibold tabular-nums">{{ shareLabel(quality().providerReportedTokenShare) }}</p>
           <p class="text-[11px] text-base-content-muted">share of tokens</p>
         </div>
         <div class="usage-quality-cell" data-testid="usage-quality-priced">
           <p class="flex items-center gap-1.5 text-xs text-base-content-muted">
-            <span class="h-2.5 w-2.5 shrink-0 rounded-sm" [class]="segmentClass.priced" aria-hidden="true"></span>Model priced
+            <span class="h-2.5 w-2.5 shrink-0 rounded-sm bg-primary/45" aria-hidden="true"></span>Model priced
           </p>
           <p class="mt-1 text-xl font-semibold tabular-nums">{{ shareLabel(quality().modelPricedTokenShare) }}</p>
           <p class="text-[11px] text-base-content-muted">share of tokens</p>
         </div>
         <div class="usage-quality-cell" data-testid="usage-quality-unpriced">
           <p class="flex items-center gap-1.5 text-xs text-base-content-muted">
-            <span class="h-2.5 w-2.5 shrink-0 rounded-sm" [class]="segmentClass.unpriced" aria-hidden="true"></span>Unpriced
+            <span class="h-2.5 w-2.5 shrink-0 rounded-sm usage-quality-hatch" aria-hidden="true"></span>Unpriced
           </p>
           <p class="mt-1 text-xl font-semibold tabular-nums">{{ shareLabel(quality().unpricedTokenShare) }}</p>
           <p class="text-[11px] text-base-content-muted">share of tokens</p>
@@ -109,7 +103,6 @@ let nextQualityId = 0;
 export class UsageCostQualityComponent {
   readonly quality = input.required<UsageCostQuality>();
 
-  protected readonly segmentClass = SEGMENT_CLASS;
   protected readonly savingsNoteId = `usage-quality-savings-note-${nextQualityId++}`;
   protected readonly shareLabel = formatShare;
 
