@@ -10,9 +10,14 @@ const AGENT_THOUGHT_ITEM = 'agent-thought';
 /** Prefix of a user turn's item id; a counter makes each turn distinct. */
 const USER_MESSAGE_ITEM = 'user-message';
 
+/**
+ * What a tool's updates carried so far. ACP updates omit unchanged fields, so
+ * the terminal update falls back to these (PR #1450 review).
+ */
 interface ToolCallDetails {
   readonly kind?: string;
   readonly title?: string;
+  readonly output?: string;
 }
 
 export interface AcpSessionUpdateMapper {
@@ -106,14 +111,25 @@ function fileChanges(content: unknown): ProviderSessionEventBody[] {
   });
 }
 
-function outputFromToolUpdate(update: Record<string, unknown>): string {
+/** The output an update carries, or `undefined` when it carries none. */
+function outputFromToolUpdate(
+  update: Record<string, unknown>,
+): string | undefined {
   const content = Array.isArray(update['content'])
     ? update['content']
         .map(textFromContent)
         .filter((text): text is string => text !== undefined)
         .join('')
     : '';
-  return capOutput(content || safeStringify(update['rawOutput']));
+  if (content) return capOutput(content);
+  if (update['rawOutput'] === undefined || update['rawOutput'] === null) {
+    return undefined;
+  }
+  return capOutput(safeStringify(update['rawOutput']));
+}
+
+function isTerminalToolStatus(status: unknown): status is 'completed' | 'failed' {
+  return status === 'completed' || status === 'failed';
 }
 
 /** Updates that belong to the agent's side of a turn. */
@@ -146,6 +162,45 @@ export function createAcpSessionUpdateMapper(
    */
   let userTurns = 0;
   let lastWasUser = false;
+
+  /**
+   * Remember what a non-final update carried; on a final status emit the
+   * `toolCompleted`, the update's own values first, and forget the tool.
+   * Shared by `tool_call` (which may already carry a final status) and
+   * `tool_call_update`.
+   */
+  const trackTool = (
+    update: Record<string, unknown>,
+    toolCallId: string,
+  ): ProviderSessionEventBody[] => {
+    const remembered = tools.get(toolCallId);
+    const kind =
+      typeof update['kind'] === 'string' ? update['kind'] : remembered?.kind;
+    const title =
+      typeof update['title'] === 'string' ? update['title'] : remembered?.title;
+    const output = outputFromToolUpdate(update) ?? remembered?.output;
+    const status = update['status'];
+    if (!isTerminalToolStatus(status)) {
+      tools.set(toolCallId, { kind, title, output });
+      return [];
+    }
+    // The final update: its metadata has no further use.
+    tools.delete(toolCallId);
+    const isCommand = status === 'completed' && kind === 'execute';
+    return [
+      {
+        type: 'toolCompleted',
+        toolId: toolCallId,
+        status,
+        toolName: title,
+        kind,
+        output: output ?? '',
+        exitCode: isCommand
+          ? options.extractExitCode?.(update['rawOutput'])
+          : undefined,
+      },
+    ];
+  };
 
   const map = (update: SessionUpdate): ProviderSessionEventBody[] => {
     if (!isRecord(update) || typeof update.sessionUpdate !== 'string') {
@@ -220,10 +275,13 @@ export function createAcpSessionUpdateMapper(
           return fileChanges(update.content);
         }
         const kind = typeof update.kind === 'string' ? update.kind : undefined;
-        tools.set(update.toolCallId, { kind, title: update.title });
         const toolInput = isPlainObject(update.rawInput)
           ? update.rawInput
           : undefined;
+        // The first event may already be final (ACP lets `tool_call` carry
+        // the current status): it completes through the same path as an
+        // update, so a failed call is not left open (PR #1450 review).
+        const completion = trackTool(update, update.toolCallId);
         return [
           {
             type: 'toolStarted',
@@ -233,37 +291,14 @@ export function createAcpSessionUpdateMapper(
             input: toolInput,
           },
           ...fileChanges(update.content),
+          ...completion,
         ];
       }
 
       case 'tool_call_update': {
         const changes = fileChanges(update.content);
         if (typeof update.toolCallId !== 'string') return changes;
-        const remembered = tools.get(update.toolCallId);
-        const kind =
-          typeof update.kind === 'string' ? update.kind : remembered?.kind;
-        const title =
-          typeof update.title === 'string' ? update.title : remembered?.title;
-        if (update.status === 'completed' || update.status === 'failed') {
-          // The final update: its metadata has no further use.
-          tools.delete(update.toolCallId);
-          const isCommand = update.status === 'completed' && kind === 'execute';
-          return [
-            {
-              type: 'toolCompleted',
-              toolId: update.toolCallId,
-              status: update.status,
-              toolName: title,
-              kind,
-              output: outputFromToolUpdate(update),
-              exitCode: isCommand
-                ? options.extractExitCode?.(update.rawOutput)
-                : undefined,
-            },
-            ...changes,
-          ];
-        }
-        return changes;
+        return [...trackTool(update, update.toolCallId), ...changes];
       }
 
       case 'plan':
