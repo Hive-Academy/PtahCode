@@ -181,7 +181,7 @@ describe('SmitherySurfaceComponent', () => {
 
       expect(component.keyStatus()).toBe('error');
       const alert = errorAlert();
-      expect(alert?.getAttribute('role')).toBe('alert');
+      expect(alert?.querySelector('[role="alert"]')).not.toBeNull();
       expect(alert?.textContent).toContain(
         'Could not check the Smithery API key status',
       );

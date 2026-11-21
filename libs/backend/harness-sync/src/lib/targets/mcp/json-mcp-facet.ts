@@ -264,8 +264,7 @@ export class JsonMcpFacet implements IHarnessMcpFacet {
       );
     }
 
-    // A UTF-8 byte order mark is valid in a file but not in JSON.parse.
-    if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
+    text = stripBom(text);
     if (text.trim() === '') return {};
 
     let parsed: unknown;
@@ -308,7 +307,7 @@ export class JsonMcpFacet implements IHarnessMcpFacet {
    */
   private readJson(path: string): Record<string, unknown> {
     try {
-      const parsed: unknown = JSON.parse(readFileSync(path, 'utf-8'));
+      const parsed: unknown = JSON.parse(stripBom(readFileSync(path, 'utf-8')));
       return typeof parsed === 'object' && parsed !== null
         ? (parsed as Record<string, unknown>)
         : {};
@@ -404,7 +403,7 @@ async function readJsonStatus(
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(text);
+    parsed = JSON.parse(stripBom(text));
   } catch (error) {
     return { status: 'error', json: {}, error: describeError(error) };
   }
@@ -424,6 +423,11 @@ async function readJsonStatus(
  */
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/** Drop a leading UTF-8 byte order mark: valid in a file, rejected by JSON.parse. */
+function stripBom(text: string): string {
+  return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
 }
 
 /** A non-null, non-array object. */

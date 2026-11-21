@@ -1474,6 +1474,7 @@ describe('buildDependencyNamespace', () => {
 
   it('getDependencies / getDependents reject with the error name when the graph fails', async () => {
     const deps = makeMocks();
+    deps._dependencyGraph.getCoverageReportForFile.mockReturnValue({});
     deps._dependencyGraph.getDependencies.mockImplementation(() => {
       throw new TypeError('secret detail x');
     });
@@ -1495,8 +1496,27 @@ describe('buildDependencyNamespace', () => {
     );
   });
 
+  it('getDependencies / getDependents reject when no built graph covers the file', async () => {
+    const deps = makeMocks();
+    deps._dependencyGraph.getCoverageReportForFile.mockReturnValue(undefined);
+    const warn = jest.fn();
+    const ns = buildDependencyNamespace({ ...deps, logger: { warn } });
+
+    await expect(ns.getDependencies('a.ts')).rejects.toThrow(
+      'Dependency graph unavailable: not built yet',
+    );
+    await expect(ns.getDependents('a.ts')).rejects.toThrow(
+      'Dependency graph unavailable: not built yet',
+    );
+    expect(deps._dependencyGraph.getDependencies).not.toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith('[DependencyNamespace] getDependents failed', {
+      errorName: 'GraphNotBuilt',
+    });
+  });
+
   it('getDependencies / getDependents resolve [] for a lookup that found nothing', async () => {
     const deps = makeMocks();
+    deps._dependencyGraph.getCoverageReportForFile.mockReturnValue({});
     deps._dependencyGraph.getDependencies.mockReturnValue([]);
     deps._dependencyGraph.getDependents.mockReturnValue([]);
     const ns = buildDependencyNamespace(deps);
@@ -1507,6 +1527,7 @@ describe('buildDependencyNamespace', () => {
 
   it('getDependencies / getDependents resolve a relative path to absolute before querying the graph', async () => {
     const deps = makeMocks();
+    deps._dependencyGraph.getCoverageReportForFile.mockReturnValue({});
     deps._dependencyGraph.getDependencies.mockReturnValue([]);
     deps._dependencyGraph.getDependents.mockReturnValue([]);
     const ns = buildDependencyNamespace(deps);
@@ -1525,6 +1546,7 @@ describe('buildDependencyNamespace', () => {
 
   it('getDependents passes an absolute path through unchanged', async () => {
     const deps = makeMocks();
+    deps._dependencyGraph.getCoverageReportForFile.mockReturnValue({});
     deps._dependencyGraph.getDependents.mockReturnValue([]);
     const abs = 'D:\\elsewhere\\b.ts';
 

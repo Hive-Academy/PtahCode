@@ -56,9 +56,18 @@ export class SecretsFileStore {
    */
   async write(key: string, value: string, masterKey: Buffer): Promise<void> {
     await this.ensureLoaded();
+    this.assertWritable();
     const envelope = encryptValue(value, masterKey, key);
+    const previous = this.entries.get(key);
     this.entries.set(key, envelope);
-    await this.persist();
+    try {
+      await this.persist();
+    } catch (error: unknown) {
+      // The value was never saved, so it must not read back as if it were.
+      if (previous === undefined) this.entries.delete(key);
+      else this.entries.set(key, previous);
+      throw error;
+    }
   }
 
   /**
@@ -67,9 +76,17 @@ export class SecretsFileStore {
    */
   async delete(key: string): Promise<void> {
     await this.ensureLoaded();
-    if (!this.entries.has(key)) return;
+    const previous = this.entries.get(key);
+    if (previous === undefined) return;
+    this.assertWritable();
     this.entries.delete(key);
-    await this.persist();
+    try {
+      await this.persist();
+    } catch (error: unknown) {
+      // The delete was never saved, so the entry is still there on disk.
+      this.entries.set(key, previous);
+      throw error;
+    }
   }
 
   /**
@@ -134,22 +151,11 @@ export class SecretsFileStore {
       throw err;
     }
 
-    let parsed: unknown;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      // degradation-audit: reported - quarantineCorruptFile logs at error
-      // and keeps the unreadable file. The parse error is not logged: its
-      // message can quote file content, and the file holds secrets.
-      await this.quarantineCorruptFile('invalid-json');
+    const parsed = parseSecretsFile(raw);
+    if (typeof parsed === 'string') {
+      await this.quarantineCorruptFile(parsed, raw);
       return;
     }
-
-    if (!isSecretsFileFormat(parsed)) {
-      await this.quarantineCorruptFile('unknown-format');
-      return;
-    }
-
     this.entries = new Map(Object.entries(parsed.entries));
   }
 
@@ -166,9 +172,28 @@ export class SecretsFileStore {
    * thrown read would break every secret lookup for the session.
    */
   private async quarantineCorruptFile(
-    reason: 'invalid-json' | 'unknown-format',
+    reason: CorruptReason,
+    corruptRaw: string,
   ): Promise<void> {
     this.entries = new Map();
+    // Another store instance (CLI, Electron, a migration) may have moved the
+    // file aside and written a valid one since our read. Never move that
+    // one: read again and load it instead. The remaining window is the time
+    // between this read and the rename below.
+    let current: string;
+    try {
+      current = await fsPromises.readFile(this.filePath, 'utf8');
+    } catch (err: unknown) {
+      if (isNodeError(err) && err.code === 'ENOENT') return;
+      throw err;
+    }
+    if (current !== corruptRaw) {
+      const reparsed = parseSecretsFile(current);
+      if (typeof reparsed !== 'string') {
+        this.entries = new Map(Object.entries(reparsed.entries));
+        return;
+      }
+    }
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     const backupPath = `${this.filePath}${CORRUPT_SUFFIX}${stamp}`;
     try {
@@ -225,6 +250,24 @@ export class SecretsFileStore {
       entries,
     };
   }
+}
+
+type CorruptReason = 'invalid-json' | 'unknown-format';
+
+/**
+ * Parse the file text, or name why it is unusable. The parse error itself is
+ * dropped: its message can quote file content, and the file holds secrets.
+ */
+function parseSecretsFile(raw: string): SecretsFileFormat | CorruptReason {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    // degradation-audit: reported - the caller quarantines the file and logs
+    // the reason at error; the parse message is dropped (it quotes content).
+    return 'invalid-json';
+  }
+  return isSecretsFileFormat(parsed) ? parsed : 'unknown-format';
 }
 
 function isNodeError(err: unknown): err is NodeJS.ErrnoException {

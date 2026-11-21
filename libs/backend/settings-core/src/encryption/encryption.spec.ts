@@ -806,6 +806,8 @@ describe('TC-31: SecretsFileStore never destroys a corrupt secrets file', () => 
     await expect(
       store.write('new.key', 'new-secret', masterKey),
     ).rejects.toThrow('refusing to overwrite');
+    // The rejected write must not read back as if it had been saved.
+    await expect(store.read('new.key', masterKey)).resolves.toBeUndefined();
     store.flushSync(masterKey);
 
     expect(fs.readFileSync(secretsPath, 'utf8')).toBe(CORRUPT_JSON);
@@ -814,6 +816,46 @@ describe('TC-31: SecretsFileStore never destroys a corrupt secrets file', () => 
       expect.stringContaining('could not be moved aside'),
       expect.objectContaining({ code: 'EPERM' }),
     );
+  });
+
+  it('loads a valid file that replaced the corrupt one instead of moving it aside', async () => {
+    // Another store instance moved the corrupt file aside and wrote a valid
+    // one between this store's first read and its rename.
+    const masterKey = crypto.randomBytes(32);
+    const writer = new SecretsFileStore(tmpDir);
+    await writer.write('kept.key', 'kept-secret', masterKey);
+    const valid = fs.readFileSync(secretsPath, 'utf8');
+
+    const fspModule = require('fs/promises') as typeof fsPromises;
+    const realReadFile = fspModule.readFile.bind(fspModule);
+    let reads = 0;
+    jest
+      .spyOn(fspModule, 'readFile')
+      .mockImplementation((async (...args: Parameters<typeof realReadFile>) => {
+        reads += 1;
+        if (reads === 1) return CORRUPT_JSON;
+        return realReadFile(...args);
+      }) as typeof realReadFile);
+    const store = new SecretsFileStore(tmpDir);
+
+    await expect(store.read('kept.key', masterKey)).resolves.toBe('kept-secret');
+    expect(fs.readFileSync(secretsPath, 'utf8')).toBe(valid);
+    expect(backupFiles()).toHaveLength(0);
+  });
+
+  it('rolls a write back when saving fails, so it does not read back', async () => {
+    const masterKey = crypto.randomBytes(32);
+    const store = new SecretsFileStore(tmpDir);
+    await store.write('old.key', 'old-secret', masterKey);
+    const fspModule = require('fs/promises') as typeof fsPromises;
+    jest
+      .spyOn(fspModule, 'rename')
+      .mockRejectedValue(Object.assign(new Error('simulated EIO'), { code: 'EIO' }));
+
+    await expect(
+      store.write('old.key', 'new-secret', masterKey),
+    ).rejects.toThrow('simulated EIO');
+    await expect(store.read('old.key', masterKey)).resolves.toBe('old-secret');
   });
 
   it('starts empty without a backup or an error log when the file does not exist', async () => {

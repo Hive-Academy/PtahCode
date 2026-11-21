@@ -286,6 +286,11 @@ describe('Antigravity MCP facet (TASK_2026_285)', () => {
       seedRaw('﻿{ "mcpServers": { "mine": { "command": "mine-cmd" } } }');
       const facet = makeFacet();
 
+      expect([...facet.readAll(ws).keys()]).toEqual(['mine']);
+      const inspection = await facet.inspect(ws);
+      expect(inspection.status).toBe('ok');
+      expect([...inspection.servers.keys()]).toEqual(['mine']);
+
       await facet.write(ws, 'github', stdio('github-server'));
 
       const written = JSON.parse(readFileSync(configPath, 'utf-8')) as {

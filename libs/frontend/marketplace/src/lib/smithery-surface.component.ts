@@ -24,6 +24,7 @@ import {
   StorefrontPanelComponent,
   resolveListingBrandSlug,
   type CatalogCardBadge,
+  PtahAlertComponent,
   PtahButtonDirective,
   PtahBadgeDirective,
   PtahInputDirective,
@@ -154,6 +155,7 @@ const VERIFIED_BADGE: CatalogCardBadge = { label: 'Verified', tone: 'info' };
   selector: 'ptah-smithery-surface',
   standalone: true,
   imports: [
+    PtahAlertComponent,
     PtahBadgeDirective,
     PtahButtonDirective,
     PtahInputDirective,
@@ -177,13 +179,15 @@ const VERIFIED_BADGE: CatalogCardBadge = { label: 'Verified', tone: 'info' };
         </div>
       } @else if (keyStatus() === 'error') {
         <!-- Status check failed: the key may be saved, so no key form here. -->
-        <div
-          class="alert alert-error alert-sm py-1 px-2"
-          role="alert"
+        <ptah-alert
+          tone="error"
+          [compact]="true"
+          live="assertive"
           data-testid="smithery-key-status-error"
         >
-          <span class="text-xs">{{ keyStatusError() }}</span>
+          <span>{{ keyStatusError() }}</span>
           <button
+            alertAction
             ptahButton
             variant="ghost"
             size="xs"
@@ -192,7 +196,7 @@ const VERIFIED_BADGE: CatalogCardBadge = { label: 'Verified', tone: 'info' };
           >
             Retry
           </button>
-        </div>
+        </ptah-alert>
       } @else {
         @if (keyStatus() === 'not-configured' || showKeyForm()) {
           <!-- Connect prompt: enter an API key before any browse RPC fires. -->

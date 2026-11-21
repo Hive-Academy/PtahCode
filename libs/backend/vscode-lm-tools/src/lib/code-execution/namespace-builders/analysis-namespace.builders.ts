@@ -470,6 +470,22 @@ export function buildDependencyNamespace(
   // `[]` means "looked it up, found nothing". A lookup that could not run
   // throws, so the tool runner reports an error result instead of a list the
   // agent would read as "this file has no imports / is unused".
+  /** Whether a built graph answers lookups for `resolved`; throws as unavailable. */
+  const coversFile = (
+    operation: 'getDependencies' | 'getDependents',
+    resolved: string,
+  ): boolean => {
+    try {
+      return dependencyGraph.getCoverageReportForFile(resolved) !== undefined;
+    } catch (error: unknown) {
+      const errorName = error instanceof Error ? error.name : typeof error;
+      logger?.warn(`[DependencyNamespace] ${operation} failed`, { errorName });
+      throw new Error(`Dependency graph unavailable: ${errorName}`, {
+        cause: error,
+      });
+    }
+  };
+
   const queryDependencyGraph = (
     operation: 'getDependencies' | 'getDependents',
     filePath: string,
@@ -486,6 +502,14 @@ export function buildDependencyNamespace(
       throw new Error('No workspace is open');
     }
     const resolved = resolveWorkspaceFilePath(trimmed, workspaceProvider);
+    // No built graph answers this file: the lookup cannot run, so it is not
+    // an empty answer. A covering graph with no edges still gives [].
+    if (!coversFile(operation, resolved)) {
+      logger?.warn(`[DependencyNamespace] ${operation} failed`, {
+        errorName: 'GraphNotBuilt',
+      });
+      throw new Error('Dependency graph unavailable: not built yet');
+    }
     try {
       return query(resolved);
     } catch (error: unknown) {
