@@ -81,6 +81,23 @@ export type SessionChildRecordPatch = {
     MutableRecordFields[K] | undefined;
 };
 
+/** Why {@link SessionChildRegistry.checkAttachTarget} refused a target. */
+export type SessionChildAttachRefusal =
+  | 'not-registered'
+  | 'other-parent'
+  | 'branch-differs'
+  | 'worktree-differs'
+  | 'task-differs';
+
+export type SessionChildAttachCheck =
+  | {
+      readonly ok: true;
+      readonly record: SessionChildRecord;
+      /** The record has no task id; the caller proves the task in the worktree. */
+      readonly taskUnrecorded: boolean;
+    }
+  | { readonly ok: false; readonly reason: SessionChildAttachRefusal };
+
 /** An outstanding claim on one concurrency slot, taken before a child exists. */
 export interface SessionChildReservation {
   readonly id: number;
@@ -289,15 +306,39 @@ export class SessionChildRegistry {
     worktreePath: string,
     callerIds: readonly (string | undefined)[],
   ): SessionChildRecord | undefined {
+    const check = this.checkAttachTarget(id, taskId, branch, worktreePath, callerIds);
+    return check.ok && !check.taskUnrecorded ? check.record : undefined;
+  }
+
+  /**
+   * Like {@link findAttachTarget}, but names the first check that failed.
+   * A child started before its task existed has no `taskId` in its record
+   * (a child often creates its own task folder after the start). Such a
+   * record is admitted with `taskUnrecorded`, and the caller must prove the
+   * task in the worktree. A record with a different `taskId` is never admitted.
+   */
+  checkAttachTarget(
+    id: string,
+    taskId: string,
+    branch: string,
+    worktreePath: string,
+    callerIds: readonly (string | undefined)[],
+  ): SessionChildAttachCheck {
     const record = this.get(id);
-    return record &&
-      record.taskId === taskId &&
-      record.branch === branch &&
-      (callerIds.includes(record.parentSessionId) ||
-        (!!record.parentSdkSessionId && callerIds.includes(record.parentSdkSessionId))) &&
-      this.storedPathKey(record) === pathKey(worktreePath)
-      ? record
-      : undefined;
+    if (!record) return { ok: false, reason: 'not-registered' };
+    const ownedByCaller =
+      callerIds.includes(record.parentSessionId) ||
+      (!!record.parentSdkSessionId && callerIds.includes(record.parentSdkSessionId));
+    if (!ownedByCaller) return { ok: false, reason: 'other-parent' };
+    if (record.branch !== branch) return { ok: false, reason: 'branch-differs' };
+    if (this.storedPathKey(record) !== pathKey(worktreePath)) {
+      return { ok: false, reason: 'worktree-differs' };
+    }
+    if (record.taskId === undefined) {
+      return { ok: true, record, taskUnrecorded: true };
+    }
+    if (record.taskId !== taskId) return { ok: false, reason: 'task-differs' };
+    return { ok: true, record, taskUnrecorded: false };
   }
 
   /**

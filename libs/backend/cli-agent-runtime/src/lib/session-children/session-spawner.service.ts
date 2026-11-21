@@ -22,7 +22,7 @@ import { inject, injectable, type DependencyContainer } from 'tsyringe';
 import { SessionMemoryAdmission, SessionMemoryTicket } from './session-memory-admission';
 import { waitForChildStart } from './session-start-stop-wait';
 import type { ProviderAccountPortRefusal } from '@ptah-extension/auth-providers-tokens';
-import { isAbsolute, resolve } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import { access, readFile, realpath } from 'node:fs/promises';
 import {
   SDK_TOKENS,
@@ -90,6 +90,7 @@ import {
 } from './child-worktree.provisioner';
 import {
   SessionChildRegistry,
+  type SessionChildAttachRefusal,
   type SessionChildRecord,
   type SessionChildReservation,
 } from './session-child.registry';
@@ -232,6 +233,9 @@ export class SessionSpawnerService implements ISessionSpawner {
     Promise<SessionChildStartResult>
   >();
   private readonly disposers: Array<() => void> = [];
+  /** Worktrees an unrecorded-task attach has claimed until its child is live. */
+  private readonly attachClaims = new Set<string>();
+  private readonly attachClaimByReservation = new Map<SessionChildReservation, string>();
   private readonly queuedAdmissions = new Map<string, { ticket: SessionMemoryTicket; reservation: SessionChildReservation; cancelled?: string }>();
   private readonly queuedStartListeners = new Map<string, (child: SessionChildSnapshot) => void>();
 
@@ -351,6 +355,11 @@ export class SessionSpawnerService implements ISessionSpawner {
       const result = await this.provisionAndStart(request, guard);
       return result;
     } finally {
+      const claimed = this.attachClaimByReservation.get(guard.reservation);
+      if (claimed !== undefined) {
+        this.attachClaimByReservation.delete(guard.reservation);
+        this.attachClaims.delete(claimed);
+      }
       // Queued admissions retain their slot until the continuation settles.
       if (![...this.queuedAdmissions.values()].some((entry) => entry.reservation === guard.reservation))
         this.registry.release(guard.reservation);
@@ -684,26 +693,87 @@ export class SessionSpawnerService implements ISessionSpawner {
       } catch {
         return this.refuseStart(
           'branch-exists',
-          'registered attach worktree no longer exists',
+          `attach found no worktree for branch "${branch}" in this workspace (it was removed, or the branch differs from the target child's branch)`,
         );
       }
-      const target = this.registry.findAttachTarget(
+      const check = this.registry.checkAttachTarget(
         request.attachToSessionId,
         request.taskId ?? '',
         branch,
         canonical,
         [guard.caller, this.sdkIdOf(guard.caller)],
       );
+      if (!check.ok) {
+        return this.refuseStart(
+          'branch-exists',
+          `attach requires a registered child with the same taskId, canonical worktree and branch (${ATTACH_REFUSAL_TEXT[check.reason]})`,
+        );
+      }
       // degradation-audit: reported - an unresolvable registered path never
       // equals the canonical path, so the start is refused with the reason below.
       if (
-        !target ||
-        (await realpath(target.worktreePath).catch(() => '')) !== canonical
+        (await realpath(check.record.worktreePath).catch(() => '')) !== canonical
       ) {
         return this.refuseStart(
           'branch-exists',
-          'attach requires a registered child with the same taskId, canonical worktree and branch',
+          `attach requires a registered child with the same taskId, canonical worktree and branch (${ATTACH_REFUSAL_TEXT['worktree-differs']})`,
         );
+      }
+      // A child often starts before its task exists and creates the task
+      // folder itself, so its record has no task id. The task folder in the
+      // worktree then proves the task. The new child records the task id.
+      if (check.taskUnrecorded) {
+        const taskId = request.taskId ?? '';
+        // The caller's schema validates the id; this guard keeps the path
+        // join below inside `.ptah/specs` for any other caller.
+        if (!/^[A-Za-z0-9_-]+$/.test(taskId)) {
+          return this.refuseStart('invalid-arguments', 'taskId has an invalid form');
+        }
+        const taskFolder = join(canonical, '.ptah', 'specs', taskId);
+        // The folder must resolve inside the worktree: a symlink in `.ptah`
+        // or `.ptah/specs` must not let an outside entry prove the task.
+        const provenFolder = await realpath(taskFolder).catch(() => undefined);
+        const present =
+          provenFolder !== undefined &&
+          isPathWithinRoots(provenFolder, [canonical]) &&
+          (await access(provenFolder).then(
+            () => true,
+            () => false,
+          ));
+        if (!present) {
+          return this.refuseStart(
+            'branch-exists',
+            `attach requires a registered child with the same taskId, canonical worktree and branch (the registered child has no task id and the task folder ${taskFolder} is missing or outside the worktree)`,
+          );
+        }
+        // The wait above let the registry change. Decide on the current
+        // state, then claim the worktree in the same synchronous step, so
+        // one worktree never gets two coordinators from this fallback.
+        const current = this.registry.checkAttachTarget(
+          request.attachToSessionId,
+          taskId,
+          branch,
+          canonical,
+          [guard.caller, this.sdkIdOf(guard.caller)],
+        );
+        if (!current.ok) {
+          return this.refuseStart(
+            'branch-exists',
+            `attach requires a registered child with the same taskId, canonical worktree and branch (${ATTACH_REFUSAL_TEXT[current.reason]})`,
+          );
+        }
+        const occupant = this.registry.findByCwd(canonical);
+        if (
+          this.attachClaims.has(canonical) ||
+          (occupant && !occupant.terminalStatus)
+        ) {
+          return this.refuseStart(
+            'branch-exists',
+            `a live session already works in worktree ${canonical}; stop it before you attach a new child to a worktree whose child has no recorded task`,
+          );
+        }
+        this.attachClaims.add(canonical);
+        this.attachClaimByReservation.set(guard.reservation, canonical);
       }
       provisioned = await this.provisioner.attach(root, branch, canonical);
     } else {
@@ -2986,6 +3056,15 @@ function unattributed(): {
     detail: 'this call carries no live chat session id',
   };
 }
+
+const ATTACH_REFUSAL_TEXT: Readonly<Record<SessionChildAttachRefusal, string>> = {
+  'not-registered':
+    'the target session is not a registered child of this host; it may be pruned or the host restarted',
+  'other-parent': 'the target child belongs to another parent session',
+  'branch-differs': 'the target child works on another branch',
+  'worktree-differs': 'the target child works in another worktree',
+  'task-differs': 'the target child is linked to another task',
+};
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
