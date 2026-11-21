@@ -99,6 +99,7 @@ export const SdkTurnFailedPayloadSchema = z.object({
     'runtime-cap',
     'host-stop',
     'internal-abort',
+    'send-now',
   ]).optional(),
   timestamp: z.number().int().nonnegative(),
 });

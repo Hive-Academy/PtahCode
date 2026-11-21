@@ -480,6 +480,110 @@ describe('SessionControl.interruptCurrentTurn', () => {
   });
 });
 
+describe('SessionControl.interruptForQueuedFollowUp — send-now stop cause', () => {
+  function inFlight(h: Harness, interrupt: () => Promise<void>) {
+    const rec = h.registry.register(KEY, makeConfig(), new AbortController());
+    rec.turnInFlight = true;
+    rec.query = { interrupt: jest.fn(interrupt) } as never;
+    return rec;
+  }
+
+  it('logs and records send-now before calling interrupt()', async () => {
+    const h = makeHarness();
+    const record = jest.spyOn(h.events, 'recordStopCause');
+    const rec = inFlight(h, () => Promise.resolve());
+
+    await expect(h.control.interruptForQueuedFollowUp(KEY_ID)).resolves.toBe(true);
+
+    const interrupt = rec.query?.interrupt as unknown as jest.Mock;
+    expect(record).toHaveBeenCalledWith([KEY], 'send-now');
+    expect(record.mock.invocationCallOrder[0]).toBeLessThan(
+      interrupt.mock.invocationCallOrder[0],
+    );
+    expect(h.logger.info).toHaveBeenCalledWith(
+      `[SessionLifecycle] Interrupting current turn to send a queued follow-up (send-now) for session: ${KEY}`,
+    );
+    expect(h.events.peekStopCause(KEY)).toBe('send-now');
+    expect(h.events.takeStopCause(KEY)).toBe('send-now');
+  });
+
+  it('records the cause under the real session id too', async () => {
+    const h = makeHarness();
+    const rec = inFlight(h, () => Promise.resolve());
+    rec.realSessionId = 'real-uuid';
+
+    await h.control.interruptForQueuedFollowUp(KEY_ID);
+
+    expect(h.events.takeStopCause('real-uuid')).toBe('send-now');
+  });
+
+  it('clears the cause and warns when interrupt() times out', async () => {
+    jest.useFakeTimers();
+    try {
+      const h = makeHarness();
+      inFlight(h, () => new Promise<void>(() => undefined));
+      const pending = h.control.interruptForQueuedFollowUp(KEY_ID);
+      await jest.advanceTimersByTimeAsync(3000);
+      await expect(pending).resolves.toBe(false);
+      expect(h.events.peekStopCause(KEY)).toBeUndefined();
+      expect(h.events.takeStopCause(KEY)).toBeUndefined();
+      expect(h.logger.warn).toHaveBeenCalledWith(
+        `[SessionLifecycle] Follow-up interrupt (send-now) timed out (3s) for session: ${KEY}`,
+      );
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('clears the cause when interrupt() throws', async () => {
+    const h = makeHarness();
+    inFlight(h, () => Promise.reject(new Error('interrupt failed')));
+
+    await expect(h.control.interruptForQueuedFollowUp(KEY_ID)).resolves.toBe(false);
+
+    expect(h.events.peekStopCause(KEY)).toBeUndefined();
+    expect(h.events.takeStopCause(KEY)).toBeUndefined();
+  });
+
+  it('does not clear a replacement record stop cause after a failed interrupt', async () => {
+    const h = makeHarness();
+    let fail: ((error: Error) => void) | undefined;
+    inFlight(h, () => new Promise<void>((_resolve, reject) => { fail = reject; }));
+    const pending = h.control.interruptForQueuedFollowUp(KEY_ID);
+    h.registry.register(KEY, makeConfig(), new AbortController());
+    h.events.recordStopCause([KEY], 'runtime-cap');
+    fail?.(new Error('interrupt failed'));
+
+    await expect(pending).resolves.toBe(false);
+
+    expect(h.events.takeStopCause(KEY)).toBe('runtime-cap');
+  });
+
+  it('keeps a newer cause on the same record after a failed interrupt', async () => {
+    const h = makeHarness();
+    let fail: ((error: Error) => void) | undefined;
+    inFlight(h, () => new Promise<void>((_resolve, reject) => { fail = reject; }));
+    const pending = h.control.interruptForQueuedFollowUp(KEY_ID);
+    // A cause-bearing interrupt of the same record while send-now waits.
+    h.events.recordStopCause([KEY], 'runtime-cap');
+    fail?.(new Error('interrupt failed'));
+
+    await expect(pending).resolves.toBe(false);
+
+    expect(h.events.takeStopCause(KEY)).toBe('runtime-cap');
+  });
+
+  it('records nothing when no turn is in flight', async () => {
+    const h = makeHarness();
+    const rec = h.registry.register(KEY, makeConfig(), new AbortController());
+    rec.query = { interrupt: jest.fn().mockResolvedValue(undefined) } as never;
+
+    await expect(h.control.interruptForQueuedFollowUp(KEY_ID)).resolves.toBe(false);
+
+    expect(h.events.takeStopCause(KEY)).toBeUndefined();
+  });
+});
+
 describe('SessionControl.endSessionIfTokenMatches', () => {
   it('refuses a stale token and leaves the REPLACEMENT record intact', async () => {
     const h = makeHarness();

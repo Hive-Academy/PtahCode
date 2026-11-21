@@ -123,17 +123,24 @@ interface SdkAdapterEventMap {
 
 export type SdkAdapterEventName = keyof SdkAdapterEventMap;
 
+/** One recorded stop cause; identity is the ownership token. */
+export interface StopCauseEntry {
+  readonly cause: TurnStopCause;
+}
+
 @injectable()
 export class SdkAdapterEvents {
-  private readonly pendingStopCauses = new Map<string, { cause: TurnStopCause }>();
-  private readonly currentStopCauses = new Map<string, { cause: TurnStopCause }>();
+  private readonly pendingStopCauses = new Map<string, StopCauseEntry>();
+  private readonly currentStopCauses = new Map<string, StopCauseEntry>();
 
-  recordStopCause(ids: readonly string[], cause: TurnStopCause): void {
+  /** Returns the recorded entry, so its owner can clear only its own cause. */
+  recordStopCause(ids: readonly string[], cause: TurnStopCause): StopCauseEntry {
     const entry = { cause };
     for (const id of ids) {
       this.pendingStopCauses.set(id, entry);
       this.currentStopCauses.set(id, entry);
     }
+    return entry;
   }
 
   peekStopCause(id: string): TurnStopCause | undefined {
@@ -154,8 +161,12 @@ export class SdkAdapterEvents {
     return entry.cause;
   }
 
-  clearStopCause(id: string): void {
-    const entry = this.currentStopCauses.get(id) ?? this.pendingStopCauses.get(id);
+  /**
+   * Clear the cause of `id`. With `owned`, clear that entry only: a newer cause
+   * recorded on the same id by another interrupt stays.
+   */
+  clearStopCause(id: string, owned?: StopCauseEntry): void {
+    const entry = owned ?? this.currentStopCauses.get(id) ?? this.pendingStopCauses.get(id);
     if (!entry) return;
     for (const [key, value] of this.currentStopCauses) {
       if (value === entry) this.currentStopCauses.delete(key);

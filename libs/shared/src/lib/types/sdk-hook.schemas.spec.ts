@@ -6,7 +6,7 @@ describe('SdkTurnFailedPayloadSchema', () => {
     error: 'unknown', errorDetails: null, terminalReason: null, timestamp: 1,
   };
 
-  it.each(['user-stop', 'parent-steer', 'runtime-cap', 'host-stop', 'internal-abort'])(
+  it.each(['user-stop', 'parent-steer', 'runtime-cap', 'host-stop', 'internal-abort', 'send-now'])(
     'preserves stop cause %s', (stopCause) => {
       expect(SdkTurnFailedPayloadSchema.parse({ ...payload, stopCause }).stopCause).toBe(stopCause);
     },

@@ -158,6 +158,7 @@ export class MessageBubbleComponent {
       case 'parent-steer': return 'Stopped by parent session';
       case 'runtime-cap': return 'Runtime cap reached';
       case 'host-stop': return 'Stopped by host';
+      case 'send-now': return 'Interrupted to send your queued message';
       default: return this.message().isInterrupted ? 'Response interrupted' : null;
     }
   });
