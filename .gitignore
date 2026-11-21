@@ -231,7 +231,8 @@ tmp-scratch-*
 # ptah:harness:begin
 # Managed by Ptah. Derived copies of ~/.ptah/user — edit the source, not these.
 # Delete this whole block to opt out, or set harness.manageGitignore to false.
-.github/skills/
+.claude/skills/design-taste-frontend/
+.claude/skills/web-design-guidelines/
 # ptah:harness:end
 .opencode/agent/
 .ptah/specs/**/*.log
