@@ -383,6 +383,17 @@ interface RecoveryWatch {
   userArrived: boolean;
 }
 
+/**
+ * An open user `chat:continue` / `chat:resume`, registered at RPC entry. A
+ * stop (`chat:abort`, tab close) of its session or tab sets `stopped`, so the
+ * call never activates the session afterwards. A flag, not a counter sample:
+ * nothing prunes or reuses it while the call is open.
+ */
+interface UserIntent {
+  stopped: boolean;
+  readonly end: () => void;
+}
+
 @injectable()
 export class ChatSessionService {
   /** Activation gates by session or tab id (see `withActivationGate`). */
@@ -400,9 +411,9 @@ export class ChatSessionService {
   }
 
   /** Open user `chat:continue` / `chat:resume` calls by session or tab id. */
-  private userIntentMap?: Map<string, number>;
+  private userIntentMap?: Map<string, Set<UserIntent>>;
 
-  private get userIntents(): Map<string, number> {
+  private get userIntents(): Map<string, Set<UserIntent>> {
     return (this.userIntentMap ??= new Map());
   }
 
@@ -1965,16 +1976,17 @@ export class ChatSessionService {
   ): Promise<ChatContinueResult> {
     // Before any await, so a watchdog recovery sees the user's turn during
     // its account, folder and MCP preflight (TASK_2026_2288 C).
-    const endUserIntent = this.beginUserIntent([params.sessionId, params.tabId]);
+    const intent = this.beginUserIntent([params.sessionId, params.tabId]);
     try {
-      return await this.continueSessionUnderIntent(params);
+      return await this.continueSessionUnderIntent(params, intent);
     } finally {
-      endUserIntent();
+      intent.end();
     }
   }
 
   private async continueSessionUnderIntent(
     params: ChatContinueParams & MainSessionAccountSelection,
+    intent: UserIntent,
   ): Promise<ChatContinueResult> {
     const admissionDeadline = namedAdmissionDeadline();
     const stopGeneration =
@@ -2146,6 +2158,7 @@ export class ChatSessionService {
         await this.driverLock.abandonDrive(sessionId, driveAttempt);
       } else {
         const resumeOutcome = await this.withUserActivation(
+          intent,
           sessionId,
           tabId,
           () =>
@@ -2471,16 +2484,17 @@ export class ChatSessionService {
   async resumeSession(
     params: ChatResumeParams & MainSessionAccountSelection,
   ): Promise<ChatResumeResult> {
-    const endUserIntent = this.beginUserIntent([params.sessionId, params.tabId]);
+    const intent = this.beginUserIntent([params.sessionId, params.tabId]);
     try {
-      return await this.resumeSessionUnderIntent(params);
+      return await this.resumeSessionUnderIntent(params, intent);
     } finally {
-      endUserIntent();
+      intent.end();
     }
   }
 
   private async resumeSessionUnderIntent(
     params: ChatResumeParams & MainSessionAccountSelection,
+    intent: UserIntent,
   ): Promise<ChatResumeResult> {
     const admissionDeadline = namedAdmissionDeadline();
     const timing = new ChatAdmissionTiming(this.logger, 'chat:resume');
@@ -2688,7 +2702,7 @@ export class ChatSessionService {
         if (!driveAttempt) {
           activated = false;
         } else if (!this.hasLiveSessionStream(sessionId, params.tabId)) {
-          const activateResult = await timing.measure('sdkActivation', () => this.withUserActivation(sessionId, params.tabId, () => this.autoResumeIfInactive(
+          const activateResult = await timing.measure('sdkActivation', () => this.withUserActivation(intent, sessionId, params.tabId, () => this.autoResumeIfInactive(
             sessionId,
             params.tabId,
             '',
@@ -2818,6 +2832,9 @@ export class ChatSessionService {
         cause,
       });
       this.followUpQueue?.advanceStopGeneration(sessionId);
+      // Before any await: an open continue or resume of this id never
+      // activates the session after this stop (TASK_2026_2288 C).
+      this.cancelUserIntents(sessionId);
       const customAbortResult = await this.ptahCli.handleAbort(params);
       if (customAbortResult.error !== '__NOT_PTAH_CLI__') {
         return customAbortResult;
@@ -3177,59 +3194,63 @@ export class ChatSessionService {
 
   /**
    * Record an open user `chat:continue` / `chat:resume` for the keys and mark
-   * any watchdog recovery of them, so the recovery stands down. Returns the
-   * function that ends the intent (TASK_2026_2288 C).
+   * any watchdog recovery of them, so the recovery stands down. Call it at RPC
+   * entry, before the first await: a stop of either key from then on cancels
+   * the call's activation (TASK_2026_2288 C).
    */
-  private beginUserIntent(keys: readonly (string | undefined)[]): () => void {
+  private beginUserIntent(keys: readonly (string | undefined)[]): UserIntent {
     const unique = [
       ...new Set(keys.filter((key): key is string => !!key)),
     ];
+    let ended = false;
+    const intent: UserIntent = {
+      stopped: false,
+      end: () => {
+        if (ended) return;
+        ended = true;
+        for (const key of unique) {
+          const intents = this.userIntents.get(key);
+          intents?.delete(intent);
+          if (intents?.size === 0) this.userIntents.delete(key);
+        }
+      },
+    };
     for (const key of unique) {
-      this.userIntents.set(key, (this.userIntents.get(key) ?? 0) + 1);
+      const intents = this.userIntents.get(key) ?? new Set<UserIntent>();
+      intents.add(intent);
+      this.userIntents.set(key, intents);
       for (const watch of this.recoveryWatches.get(key) ?? []) {
         watch.userArrived = true;
       }
     }
-    let ended = false;
-    return () => {
-      if (ended) return;
-      ended = true;
-      for (const key of unique) {
-        const count = (this.userIntents.get(key) ?? 1) - 1;
-        if (count > 0) this.userIntents.set(key, count);
-        else this.userIntents.delete(key);
-      }
-    };
+    return intent;
   }
 
   private hasUserIntent(keys: readonly string[]): boolean {
-    return keys.some((key) => (this.userIntents.get(key) ?? 0) > 0);
+    return keys.some((key) => (this.userIntents.get(key)?.size ?? 0) > 0);
+  }
+
+  /** A stop of `id` cancels the activation of every open user intent for it. */
+  private cancelUserIntents(id: string): void {
+    for (const intent of this.userIntents.get(id) ?? []) intent.stopped = true;
   }
 
   /**
    * A user activation through the gate. A stop (`chat:abort`, tab close) of
-   * the session or tab while the call waits at the gate cancels it, so a
-   * closed tab is not started again by a continue that was queued behind a
-   * recovery (TASK_2026_2288 C).
+   * the session or tab at any time after the RPC registered `intent` cancels
+   * it, so a closed tab is not started again by a continue that was in its
+   * preflight or queued behind a recovery (TASK_2026_2288 C).
    */
   private async withUserActivation<T>(
+    intent: UserIntent,
     sessionId: SessionId,
     tabId: string,
     run: () => Promise<T>,
   ): Promise<T | { error: ChatContinueResult }> {
     const keys = [sessionId, tabId].filter((key) => key.length > 0);
-    const generations = keys.map(
-      (key) => this.followUpQueue?.stopGeneration(key) ?? 0,
-    );
     return this.withActivationGate(keys, 'user', async () => {
-      // Greater, not different: a pruned receipt resets the count to 0 and
-      // must not cancel the user's own activation.
-      const stopped = keys.some(
-        (key, i) =>
-          (this.followUpQueue?.stopGeneration(key) ?? 0) > generations[i],
-      );
-      if (stopped) {
-        this.logger.info('[RPC] Activation cancelled by a stop at the gate', {
+      if (intent.stopped) {
+        this.logger.info('[RPC] Activation cancelled by a stop after the request', {
           sessionId,
           tabId,
         });

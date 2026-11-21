@@ -38,6 +38,7 @@ jest.mock('@ptah-extension/workspace-intelligence', () => ({
 
 import { SessionAdmissionRefusedError } from '@ptah-extension/agent-sdk';
 import { ChatSessionService } from './chat-session.service';
+import { ChatFollowUpQueueService } from '../follow-up/chat-follow-up-queue.service';
 
 const INPUT = {
   sessionId: 'sdk-successor',
@@ -66,12 +67,36 @@ type Service = {
     run: () => Promise<T>,
   ): Promise<T>;
   withUserActivation<T>(
+    intent: UserIntent,
     sessionId: string,
     tabId: string,
     run: () => Promise<T>,
   ): Promise<T | { error: { cancelled?: true } }>;
-  beginUserIntent(keys: readonly string[]): () => void;
+  beginUserIntent(keys: readonly string[]): UserIntent;
+  abortSession: ChatSessionService['abortSession'];
 };
+
+type UserIntent = { stopped: boolean; readonly end: () => void };
+
+/** The real follow-up queue with a settable clock. */
+class ClockedQueue extends ChatFollowUpQueueService {
+  clock = 0;
+  protected override now(): number {
+    return this.clock;
+  }
+}
+
+function realQueue(): ClockedQueue {
+  const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() };
+  return new ClockedQueue(
+    logger as never,
+    { sendMessage: jest.fn(async () => true) } as never,
+    {} as never,
+  );
+}
+
+/** The follow-up queue's stop receipt retention (10 minutes). */
+const RECEIPT_RETENTION_MS = 10 * 60 * 1000;
 
 /**
  * A receiver on the real prototype: the gate, the recovery steps and the
@@ -83,8 +108,8 @@ function receiver(overrides: Record<string, unknown> = {}) {
   const state = {
     live: false,
     launches: 0,
+    now: 0,
     stopAt: new Map<string, number>(),
-    stopGen: new Map<string, number>(),
   };
   const sendMessageToSession = jest.fn(async () => undefined);
   const resolveSessionFolder = jest.fn(async (_id: string) => '/work/tree');
@@ -104,8 +129,12 @@ function receiver(overrides: Record<string, unknown> = {}) {
         const stoppedAt = state.stopAt.get(id);
         return stoppedAt !== undefined && stoppedAt >= at;
       },
-      stopGeneration: (id: string) => state.stopGen.get(id) ?? 0,
+      advanceStopGeneration: (id: string) => {
+        state.stopAt.set(id, state.now);
+      },
     },
+    // `chat:abort` returns right after it records the stop.
+    ptahCli: { handleAbort: jest.fn(async () => ({ success: true })) },
     hasLiveSessionStream: jest.fn(() => state.live),
     historyRead: { resolveSessionFolder },
     gateAccount,
@@ -119,20 +148,31 @@ function receiver(overrides: Record<string, unknown> = {}) {
     logger: { info: jest.fn(), warn: jest.fn(), error: jest.fn() },
     ...overrides,
   }) as Service;
-  /** What `continueSession` does: its auto-resume inside the user activation. */
-  const userContinue = () =>
-    self.withUserActivation(INPUT.sessionId, INPUT.tabId, () =>
-      autoResumeIfInactive(),
-    );
-  /** What `abortSession` records first, for any source (tab close too). */
+  /**
+   * What `continueSession` does: the intent at RPC entry, then (after the
+   * preflight, here none) its auto-resume inside the user activation.
+   */
+  const userContinue = async (
+    intent = self.beginUserIntent([INPUT.sessionId, INPUT.tabId]),
+  ) => {
+    try {
+      return await self.withUserActivation(intent, INPUT.sessionId, INPUT.tabId, () =>
+        autoResumeIfInactive(),
+      );
+    } finally {
+      intent.end();
+    }
+  };
+  /** A real `chat:abort` of `id` at time `at`, for any source (tab close too). */
   const abort = (id: string, at: number) => {
-    state.stopAt.set(id, at);
-    state.stopGen.set(id, (state.stopGen.get(id) ?? 0) + 1);
+    state.now = at;
+    void self.abortSession({ sessionId: id as never });
   };
   return {
     self,
     state,
-    recover: (input = INPUT) => self.recoverAfterWatchdogStop(input),
+    recover: (input: Parameters<Service['recoverAfterWatchdogStop']>[0] = INPUT) =>
+      self.recoverAfterWatchdogStop(input),
     userContinue,
     abort,
     autoResumeIfInactive,
@@ -159,12 +199,12 @@ describe('ChatSessionService.recoverAfterWatchdogStop (TASK_2026_2288 C)', () =>
 
   it('a user continue already in its preflight when recovery starts: no activation, no prompt', async () => {
     const r = receiver();
-    const endIntent = r.self.beginUserIntent([INPUT.sessionId, INPUT.tabId]);
+    const intent = r.self.beginUserIntent([INPUT.sessionId, INPUT.tabId]);
     await expect(r.recover()).resolves.toEqual({
       recovered: false,
       reason: 'already-active',
     });
-    endIntent();
+    intent.end();
     expect(r.autoResumeIfInactive).not.toHaveBeenCalled();
     expect(r.sendMessageToSession).not.toHaveBeenCalled();
   });
@@ -176,13 +216,13 @@ describe('ChatSessionService.recoverAfterWatchdogStop (TASK_2026_2288 C)', () =>
     const recovery = r.recover();
     await settle();
     // chat:continue starts: account, folder and MCP preflight, not yet at the gate.
-    const endIntent = r.self.beginUserIntent([INPUT.sessionId, INPUT.tabId]);
+    const intent = r.self.beginUserIntent([INPUT.sessionId, INPUT.tabId]);
     folder.resolve('/work/tree');
     await expect(recovery).resolves.toEqual({
       recovered: false,
       reason: 'already-active',
     });
-    endIntent();
+    intent.end();
     expect(r.state.launches).toBe(0);
     expect(r.sendMessageToSession).not.toHaveBeenCalled();
   });
@@ -374,5 +414,67 @@ describe('ChatSessionService.recoverAfterWatchdogStop (TASK_2026_2288 C)', () =>
       reason: 'send-failed',
       detail: 'queue closed',
     });
+  });
+
+  it('a real stop during the gate wait after an old stop receipt expired: the continue does not launch', async () => {
+    const queue = realQueue();
+    const r = receiver({ followUpQueue: queue });
+    const recoveryInput = { ...INPUT, endedAt: RECEIPT_RETENTION_MS - 10 };
+    // An old stop of the session, at t=0.
+    void r.self.abortSession({ sessionId: INPUT.sessionId as never });
+    const folder = deferred<string>();
+    r.resolveSessionFolder.mockImplementationOnce(() => folder.promise);
+    queue.clock = recoveryInput.endedAt;
+    const recovery = r.recover(recoveryInput);
+    await settle();
+    // The continue enters while the old receipt is still retained.
+    queue.clock = RECEIPT_RETENTION_MS - 1;
+    const waiting = r.userContinue();
+    await settle();
+    // The old receipt expires; the fresh stop rewrites generation 1.
+    queue.clock = RECEIPT_RETENTION_MS + 5;
+    void r.self.abortSession({ sessionId: INPUT.sessionId as never });
+    expect(queue.stopGeneration(INPUT.sessionId)).toBe(1);
+    folder.resolve('/work/tree');
+
+    await expect(recovery).resolves.toEqual(
+      expect.objectContaining({ recovered: false }),
+    );
+    await expect(waiting).resolves.toEqual({
+      error: { success: false, cancelled: true, sessionId: INPUT.sessionId },
+    });
+    expect(r.state.launches).toBe(0);
+    expect(r.sendMessageToSession).not.toHaveBeenCalled();
+  });
+
+  it('a tab close during the continue preflight, recovery holds the gate: no launch after recovery stands down', async () => {
+    const r = receiver();
+    const folder = deferred<string>();
+    r.resolveSessionFolder.mockImplementationOnce(() => folder.promise);
+    const recovery = r.recover();
+    await settle();
+    // chat:continue enters: intent first, then its preflight (folder, account).
+    const intent = r.self.beginUserIntent([INPUT.sessionId, INPUT.tabId]);
+    r.abort(INPUT.tabId, INPUT.endedAt + 50); // tab close during the preflight
+    // The preflight ends and the continue reaches the gate recovery holds.
+    const waiting = r.userContinue(intent);
+    await settle();
+    folder.resolve('/work/tree');
+
+    await expect(recovery).resolves.toEqual(
+      expect.objectContaining({ recovered: false }),
+    );
+    await expect(waiting).resolves.toEqual({
+      error: { success: false, cancelled: true, sessionId: INPUT.sessionId },
+    });
+    expect(r.state.launches).toBe(0);
+    expect(r.sendMessageToSession).not.toHaveBeenCalled();
+  });
+
+  it('a stop before the continue entered does not cancel it', async () => {
+    const r = receiver();
+    r.abort(INPUT.tabId, 500);
+    await expect(r.userContinue()).resolves.toEqual({ justResumed: true });
+    expect(r.state.launches).toBe(1);
   });
 });
