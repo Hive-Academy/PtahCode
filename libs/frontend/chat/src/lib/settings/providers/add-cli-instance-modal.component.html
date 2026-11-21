@@ -2,14 +2,24 @@
   [isOpen]="open()"
   ariaLabelledby="add-cli-instance-title"
   size="md"
+  layout="shell"
   (closed)="requestClose()"
 >
   <div
     modal-header
-    class="surface-3 -mx-6 -mt-6 mb-4 flex items-center justify-between gap-2 border-b px-5 py-3"
+    class="flex items-center gap-2"
     data-testid="add-cli-instance-modal"
   >
-    <h2 id="add-cli-instance-title" class="text-sm font-bold text-base-content">
+    <lucide-angular
+      [img]="TitleIcon"
+      class="h-4 w-4 shrink-0 text-base-content-muted"
+      aria-hidden="true"
+      data-testid="add-cli-instance-title-icon"
+    />
+    <h2
+      id="add-cli-instance-title"
+      class="min-w-0 flex-1 text-sm font-bold text-base-content"
+    >
       {{
         editing() ? 'Edit ' + editing()?.name : 'Add Ptah CLI Agent Instance'
       }}
@@ -237,7 +247,7 @@
 
   <div
     modal-footer
-    class="surface-3 -mx-6 -mb-6 mt-5 flex items-center justify-between gap-2 border-t px-5 py-3"
+    class="flex items-center justify-end gap-2"
   >
     <button type="button" ptahButton variant="ghost" (click)="requestClose()">
       Cancel

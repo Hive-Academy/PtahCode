@@ -840,7 +840,7 @@ const cliAgents: readonly ReachabilityEntry[] = [
 // Table 4: Agent orchestration policy (#72-79)
 // ---------------------------------------------------------------------------
 
-/** Batch 33: the CLI matrix's policy bar (`orchestration-policy-bar`), on the Providers tab. */
+/** Batch 33: the CLI matrix's order line (`orchestration-policy-bar`), on the Providers tab. */
 const policyBar = (page: Page): Locator =>
   page.locator('[data-testid="orchestration-policy-bar"]');
 
@@ -852,9 +852,8 @@ const orchestrationPolicy: readonly ReachabilityEntry[] = [
     status: 'present',
     reach: async (page) => {
       await agentsRoutingTab(page);
-      const redetect = policyBar(page).getByRole('button', {
-        name: 'Re-detect CLI agents',
-      });
+      // Phase 3: Re-detect moved to the CLI agents group header of the Lanes table (name "Re-detect CLIs").
+      const redetect = page.getByTestId('policy-redetect');
       await visibleEnabled(redetect);
       await redetect.click();
       await visibleEnabled(redetect);
@@ -868,22 +867,22 @@ const orchestrationPolicy: readonly ReachabilityEntry[] = [
     id: '#73',
     capability: 'Preferred agent order (up/down)',
     status: 'present',
-    // Batch 33: the bar's chips open the order popover; ▲/▼ per row (24 px, deviation 5). One move writes the whole
-    // order; Esc returns focus to the chips; the toast's Undo writes the previous order back.
+    // Phase 3 (R-3, decision 18): the Lanes header "Reorder" toggle shows one flat list with ▲/▼ per row. One move
+    // writes the whole order and focus stays on the moved row's button; "Done" returns the groups; the toast's Undo
+    // writes the previous order back and the read-only order line shows it.
     reach: async (page) => {
       await agentsRoutingTab(page);
-      const trigger = policyBar(page).locator(
-        '[data-testid="policy-order-edit"]',
-      );
-      await visibleEnabled(trigger);
-      await trigger.click();
-      const popover = page.locator('[data-testid="policy-order-popover"]');
-      await expect(popover).toBeVisible();
+      const reorder = page.getByTestId('lanes-order-edit');
+      await visibleEnabled(reorder);
+      await expect(reorder).toHaveAttribute('aria-pressed', 'false');
+      await reorder.click();
+      await expect(reorder).toHaveAttribute('aria-pressed', 'true');
+      await expect(page.getByTestId('lanes-group-cli')).toHaveCount(0);
       await expect(
-        popover.getByRole('button', { name: 'Move Codex up' }),
-      ).toBeDisabled();
+        page.getByRole('button', { name: 'Move Codex up' }),
+      ).toHaveAttribute('aria-disabled', 'true');
       const before = getFixtureState(page).calls.length;
-      const down = popover.getByRole('button', { name: 'Move Codex down' });
+      const down = page.getByRole('button', { name: 'Move Codex down' });
       await visibleEnabled(down);
       await down.click();
       await expectCall(page, before, 'agent:setConfig', {
@@ -897,11 +896,12 @@ const orchestrationPolicy: readonly ReachabilityEntry[] = [
         ],
       });
       await expect(
-        popover.getByRole('button', { name: 'Move Codex down' }),
+        page.getByRole('button', { name: 'Move Codex down' }),
       ).toBeFocused();
-      await page.keyboard.press('Escape');
-      await expect(popover).toHaveCount(0);
-      await expect(trigger).toBeFocused();
+      await reorder.click();
+      await expect(reorder).toHaveAttribute('aria-pressed', 'false');
+      await expect(page.getByTestId('lanes-group-cli')).toBeVisible();
+      await expect(reorder).toBeFocused();
       await page.locator('[data-testid="settings-toast-undo"]').click();
       await expectCall(page, before, 'agent:setConfig', {
         preferredAgentOrder: [
@@ -922,7 +922,8 @@ const orchestrationPolicy: readonly ReachabilityEntry[] = [
     status: 'present',
     reach: async (page) => {
       await agentsRoutingTab(page);
-      const field = page.locator('#agent-max-concurrent');
+      // Phase 3: the field moved to the Lanes card header (`ptah-lanes-max-concurrent`).
+      const field = page.locator('[data-testid="policy-max-concurrent-input"]');
       await visibleEnabled(field);
       const before = getFixtureState(page).calls.length;
       await field.fill('5');
@@ -962,8 +963,8 @@ const orchestrationPolicy: readonly ReachabilityEntry[] = [
     id: '#77',
     capability: '"No CLI agents found" install help',
     status: 'present',
-    // A second page where detection finds no CLI installed: each system CLI sits in the Uninstalled group with its
-    // install guide (#71, #77 copy).
+    // A second page where detection finds no CLI installed: each system CLI is a card of the "Add more CLI agents"
+    // strip with its install guide (#71, #77 copy; Phase 3, decision 8).
     reach: (page) =>
       throughVariantBoot(
         page,
@@ -978,14 +979,13 @@ const orchestrationPolicy: readonly ReachabilityEntry[] = [
         },
         'Providers',
         async (variantPage) => {
-          // Gate V 36 decision 1: the Uninstalled group opens from its disclosure first.
           const guide = variantPage.locator(
-            '[data-testid="cli-provider-card-codex"] button:text-is("Install guide")',
+            '[data-testid="lanes-strip"] [data-testid="lanes-strip-install-codex"]',
           );
           await visibleEnabled(guide);
           await guide.click();
           await expect(
-            variantPage.locator('[data-testid="cli-install-popover"]'),
+            variantPage.locator('[data-testid="cli-provider-popover-content"]'),
           ).toContainText('npm install -g @openai/codex');
         },
       ),
@@ -995,34 +995,21 @@ const orchestrationPolicy: readonly ReachabilityEntry[] = [
     capability:
       'Ptah CLI agents managed inside Orchestration (moved to Providers)',
     status: 'present',
-    // V36-7: an instance's Edit sits in its "More actions" popover; Esc closes it again.
+    // Phase 3 (decision 23): an instance's Edit tiers, Edit and Delete sit in its expanded detail footer.
     reach: async (page) => {
       await agentsRoutingTab(page);
       const row = page.locator('[data-testid="cli-matrix-row-glm-instance-1"]');
       const details = row.locator('ptah-table-row-expander button');
-      if (await details.isVisible()) await details.click();
-      else {
-        await row
-          .locator('ptah-table-row-actions button[aria-haspopup="menu"]')
-          .click();
-        await row.getByRole('menuitem', { name: 'Details' }).click();
-      }
-      await page
-        .locator(
-          '[data-testid="cli-matrix-row-glm-instance-1"] ptah-table-row-actions button[aria-haspopup="menu"]',
-        )
-        .click();
-      await visibleEnabled(
-        page.locator(
-          '[data-testid="cli-matrix-row-glm-instance-1"] [role="menuitem"]:text-is("Edit")',
-        ),
+      await visibleEnabled(details);
+      if ((await details.getAttribute('aria-expanded')) !== 'true')
+        await details.click();
+      const footer = page.locator(
+        '#lane-detail-glm-instance-1 [data-testid="lane-detail-footer"]',
       );
-      await page.keyboard.press('Escape');
-      await expect(
-        page.locator(
-          '[data-testid="cli-matrix-row-glm-instance-1"] [role="menu"]',
-        ),
-      ).toHaveCount(0);
+      for (const action of ['tiers', 'edit', 'delete'])
+        await visibleEnabled(
+          footer.locator(`[data-testid="cli-matrix-${action}-glm-instance-1"]`),
+        );
     },
   },
   {
@@ -1036,7 +1023,9 @@ const orchestrationPolicy: readonly ReachabilityEntry[] = [
       await agentsRoutingTab(page);
       await expect(page.locator('[data-read-loading]')).toHaveCount(0);
       await expect(page.locator('[data-read-error]')).toHaveCount(0);
-      await expect(page.locator('#agent-max-concurrent')).toHaveValue('3');
+      await expect(
+        page.locator('[data-testid="policy-max-concurrent-input"]'),
+      ).toHaveValue('3');
       let failing = true;
       await throughVariantBoot(
         page,

@@ -1561,6 +1561,10 @@ describe('ProvidersSettingsComponent', () => {
       expect(
         element.querySelector('[data-testid="catalog-hint-text"]')?.tagName,
       ).toBe('UL');
+      // The capped popover panel is the one vertical scroll owner (decision 32).
+      expect(
+        element.querySelector('[data-testid="catalog-hint-text"]')?.className,
+      ).not.toMatch(/max-h-|overflow-y-auto/);
       hint?.dispatchEvent(
         new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }),
       );

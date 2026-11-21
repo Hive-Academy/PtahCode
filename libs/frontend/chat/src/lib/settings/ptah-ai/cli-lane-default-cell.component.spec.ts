@@ -313,6 +313,23 @@ describe('CliLaneDefaultCellComponent', () => {
     expect(fixture.nativeElement.querySelector('[tabindex="0"]')).toBeTruthy();
   });
 
+  it('shows the reason as visible wrapping text, not hidden text, when showReason is set (lane detail)', () => {
+    const fixture = setup();
+    fixture.componentRef.setInput('manifest', undefined);
+    fixture.componentRef.setInput('field', 'permission');
+    fixture.detectChanges();
+    const host = fixture.nativeElement as HTMLElement;
+    expect(host.querySelector('.sr-only')?.textContent).toBe(
+      'No verified mode is available.',
+    );
+    fixture.componentRef.setInput('showReason', true);
+    fixture.detectChanges();
+    expect(host.querySelector('.sr-only')).toBeNull();
+    expect(host.querySelector('.defaults-reason')?.textContent?.trim()).toBe(
+      '— No verified mode is available.',
+    );
+  });
+
   it('explains Cursor permission modes that cannot be selected', () => {
     const fixture = setup('cursor');
     fixture.componentRef.setInput('layout', 'wide');
@@ -384,29 +401,101 @@ describe('CliLaneDefaultCellComponent', () => {
     expect(selected).not.toHaveBeenCalled();
   });
 
+  const resetControl = (fixture: ReturnType<typeof setup>) =>
+    (fixture.nativeElement as HTMLElement).querySelector<HTMLButtonElement>(
+      'button[aria-label^="Reset to default"]',
+    );
+
   it('resets to the built-in plan default without confirmation', () => {
     const fixture = setup('codex', { permission: 'plan', network: 'deny' });
     const reset = jest.fn();
     fixture.componentInstance.resetRequested.subscribe(reset);
     expect(fixture.nativeElement.textContent).toContain('Saved default');
-    Array.from(
-      fixture.nativeElement.querySelectorAll(
-        'button',
-      ) as NodeListOf<HTMLButtonElement>,
-    )
-      .find((button) => button.textContent?.trim() === 'More default actions')
-      ?.click();
-    fixture.detectChanges();
-    const resetButton = Array.from(
-      fixture.nativeElement.querySelectorAll(
-        'button',
-      ) as NodeListOf<HTMLButtonElement>,
-    ).find((button) => button.textContent?.includes('Reset to default'))!;
-    expect(resetButton.textContent).toContain('Reset to default (plan)');
-    resetButton.click();
+    const resetButton = resetControl(fixture);
+    // Icon-only: the value is in the accessible name and the tooltip, not in visible text.
+    expect(resetButton?.getAttribute('aria-label')).toBe(
+      'Reset to default (plan)',
+    );
+    expect(resetButton?.textContent?.trim()).toBe('');
+    expect(resetButton?.querySelector('lucide-angular')).not.toBeNull();
+    expect(fixture.nativeElement.textContent).not.toContain(
+      'More default actions',
+    );
+    resetButton?.click();
     fixture.detectChanges();
     expect(reset).toHaveBeenCalledTimes(1);
     expect(fixture.nativeElement.querySelector('dialog[open]')).toBeNull();
+  });
+
+  it('shows no reset without a saved default', () => {
+    const fixture = setup('codex');
+    expect(resetControl(fixture)).toBeNull();
+    fixture.componentRef.setInput('resetVisibility', 'always');
+    fixture.detectChanges();
+    expect(resetControl(fixture)).toBeNull();
+  });
+
+  it('resetVisibility "auto" (default) hides the compact reset when the caption is off', () => {
+    const fixture = setup('codex', { permission: 'plan', network: 'deny' });
+    expect(fixture.componentInstance.resetVisibility()).toBe('auto');
+    fixture.componentRef.setInput('showCaption', false);
+    fixture.detectChanges();
+    expect(resetControl(fixture)).toBeNull();
+  });
+
+  it('resetVisibility "always" shows the compact reset without a caption and it emits', () => {
+    const fixture = setup('ptah-cli', { permission: 'plan' });
+    fixture.componentRef.setInput('showCaption', false);
+    fixture.componentRef.setInput('resetVisibility', 'always');
+    fixture.detectChanges();
+    const reset = jest.fn();
+    fixture.componentInstance.resetRequested.subscribe(reset);
+    expect(fixture.nativeElement.textContent).not.toContain('Saved default');
+    const resetButton = resetControl(fixture);
+    expect(resetButton?.getAttribute('aria-label')).toBe(
+      'Reset to default (plan)',
+    );
+    resetButton?.click();
+    expect(reset).toHaveBeenCalledTimes(1);
+  });
+
+  it('disables the reset with the cell and then emits nothing', () => {
+    const fixture = setup('codex', { permission: 'plan', network: 'deny' });
+    fixture.componentRef.setInput('disabled', true);
+    fixture.detectChanges();
+    const reset = jest.fn();
+    fixture.componentInstance.resetRequested.subscribe(reset);
+    expect(resetControl(fixture)?.disabled).toBe(true);
+    fixture.componentInstance.requestReset();
+    expect(reset).not.toHaveBeenCalled();
+  });
+
+  it('the reset layout shows the icon-only reset when the caller projects no control', () => {
+    const fixture = setup('codex', { permission: 'plan', network: 'deny' });
+    fixture.componentRef.setInput('layout', 'reset');
+    fixture.detectChanges();
+    const reset = jest.fn();
+    fixture.componentInstance.resetRequested.subscribe(reset);
+    const resetButton = resetControl(fixture);
+    expect(resetButton?.textContent?.trim()).toBe('');
+    expect(
+      fixture.nativeElement.querySelectorAll(
+        'button[aria-label^="Reset to default"]',
+      ),
+    ).toHaveLength(1);
+    resetButton?.click();
+    expect(reset).toHaveBeenCalledTimes(1);
+    fixture.componentRef.setInput('saved', undefined);
+    fixture.detectChanges();
+    expect(resetControl(fixture)).toBeNull();
+  });
+
+  it('the wide layout keeps its "More default actions" menu', () => {
+    const fixture = setup('codex', { permission: 'plan', network: 'deny' });
+    fixture.componentRef.setInput('layout', 'wide');
+    fixture.detectChanges();
+    expect(resetControl(fixture)).toBeNull();
+    expect(fixture.nativeElement.textContent).toContain('More default actions');
   });
 
   it('emits the confirmed full-auto choice', () => {

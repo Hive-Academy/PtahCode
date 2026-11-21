@@ -314,7 +314,7 @@ test('captures populated Settings Providers gate shots on the real backend', asy
       await remount();
 
       // 1. Collapsed table.
-      // Start at the Lanes section header (title, ring, Edit order, New Ptah CLI instance).
+      // Start at the Lanes section header (title, count, Max concurrent, Reorder).
       // The before build (main) has no section header component: fall back to the matrix.
       const header = page.locator('ptah-lanes-section-header').first();
       await ((await header.count()) ? header : matrix).evaluate((el) =>
@@ -352,12 +352,12 @@ test('captures populated Settings Providers gate shots on the real backend', asy
         const selectTriggers = [
           page
             .locator(
-              '[data-testid="settings-cli-matrix"] [role="combobox"]:not([disabled]):visible',
+              '[data-testid^="cli-provider-card-"] [role="combobox"]:not([disabled]):visible',
             )
             .last(),
           page
             .locator(
-              'ptah-cli-shared-defaults [role="combobox"]:not([disabled]):visible',
+              '[data-testid="lanes-ptah-defaults"] [role="combobox"]:not([disabled]):visible',
             )
             .last(),
           page
@@ -423,7 +423,7 @@ test('captures populated Settings Providers gate shots on the real backend', asy
           .scrollIntoViewIfNeeded();
         await shot('instance-detail', width);
         await remount();
-        const sharedAt = page.locator('#shared-defaults-heading');
+        const sharedAt = page.locator('[data-testid="lanes-group-ptah"]');
         if (await sharedAt.count()) {
           await sharedAt.scrollIntoViewIfNeeded();
           await shot('defaults', width);
@@ -549,7 +549,7 @@ test('captures populated Settings Providers gate shots on the real backend', asy
       }
 
       // 6. Ptah CLI defaults and Background models.
-      const shared = page.locator('#shared-defaults-heading');
+      const shared = page.locator('[data-testid="lanes-group-ptah"]');
       if (await shared.count()) {
         await shared.scrollIntoViewIfNeeded();
         await shot('defaults', width);

@@ -204,6 +204,36 @@ describe('AddCliInstanceModalComponent', () => {
       expect(submit()?.disabled).toBe(true);
     });
 
+    it('uses the modal shell: fixed header and footer, the form in the one scroll body, no negative-margin chrome (B3.1)', () => {
+      const part = (name: string) =>
+        el().querySelector<HTMLElement>(`[data-ptah-modal-part="${name}"]`);
+      expect(el().querySelector('.modal-box')?.className).toContain(
+        'max-h-[var(--ptah-modal-max-h)]',
+      );
+      expect(part('header')?.contains(q('add-cli-instance-modal'))).toBe(true);
+      expect(part('header')?.classList.contains('shrink-0')).toBe(true);
+      const icon = q('add-cli-instance-title-icon');
+      expect(icon?.getAttribute('aria-hidden')).toBe('true');
+      expect(icon?.nextElementSibling?.id).toBe('add-cli-instance-title');
+      expect(
+        part('header')
+          ?.querySelector('button[aria-label="Close"]')
+          ?.querySelector('lucide-angular')
+          ?.getAttribute('aria-hidden'),
+      ).toBe('true');
+      expect(part('body')?.classList.contains('overflow-y-auto')).toBe(true);
+      expect(part('body')?.contains(q('add-cli-instance-form'))).toBe(true);
+      expect(part('footer')?.classList.contains('shrink-0')).toBe(true);
+      expect(part('footer')?.contains(submit())).toBe(true);
+      const buttons = Array.from(
+        part('footer')?.querySelectorAll('button') ?? [],
+      ).map((button) => button.textContent?.trim());
+      expect(buttons).toEqual(['Cancel', 'Create Instance']);
+      expect(el().querySelector('.modal-box [class*="-mx-"]')).toBeNull();
+      expect(el().querySelector('.modal-box [class*="-mt-6"]')).toBeNull();
+      expect(el().querySelector('.modal-box [class*="-mb-6"]')).toBeNull();
+    });
+
     it('keeps its footer toast only while open, so a closed modal leaves no second Undo in the page', () => {
       expect(el().querySelectorAll('ptah-settings-toast').length).toBe(1);
       fixture.componentInstance.open.set(false);
