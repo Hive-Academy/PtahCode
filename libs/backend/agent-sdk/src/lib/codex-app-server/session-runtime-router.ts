@@ -11,6 +11,7 @@ import {
   resolveSessionRuntimeIdentity,
   type SessionRuntimeIdentityLookup,
 } from './session-runtime-identity';
+import { ChatRuntimeAdmissionError } from './routing-agent-adapter';
 
 /** Native controls own persistence/rollback as well as turn lifecycle and failed-interrupt gating.
  * Composition must bind a persistent control adapter, not raw runtime setters. */
@@ -27,10 +28,13 @@ export interface StreamlessFollowUpAdmission {
 export class SessionRuntimeRouter
   implements SessionRuntimeControls, StreamlessFollowUpAdmission
 {
+  /** `native` controls Codex sessions; either native arm is null when its
+   * runtime is not bound on this host. */
   constructor(
     private readonly identities: SessionRuntimeIdentityLookup,
     private readonly legacy: SessionRuntimeControls,
-    private readonly native: NativeSessionControls,
+    private readonly native: NativeSessionControls | null,
+    private readonly providerSessions: NativeSessionControls | null = null,
   ) {}
 
   async setPermission(
@@ -75,9 +79,10 @@ export class SessionRuntimeRouter
   }
 
   canSendFollowUp(sessionId: SessionId): boolean {
-    return this.controls(sessionId) === this.native
-      ? this.native.canSendFollowUp(sessionId)
-      : true;
+    const native = this.nativeControls(sessionId);
+    // A native session whose runtime is not bound here cannot take a turn.
+    if (native === null) return false;
+    return native ? native.canSendFollowUp(sessionId) : true;
   }
 
   /**
@@ -88,22 +93,46 @@ export class SessionRuntimeRouter
    * long-lived stream; without it the record is dead, so legacy answers false.
    */
   acceptsFollowUpWithoutStream(sessionId: SessionId): boolean {
-    return (
-      this.controls(sessionId) === this.native &&
-      this.native.canSendFollowUp(sessionId)
-    );
+    return this.nativeControls(sessionId)?.canSendFollowUp(sessionId) === true;
   }
 
   /** The router retains no session state; release native lifecycle state if present. */
   releaseSession(sessionId: SessionId): void {
-    if (this.controls(sessionId) === this.native)
-      this.native.releaseSession?.(sessionId);
+    this.nativeControls(sessionId)?.releaseSession?.(sessionId);
   }
 
   private controls(sessionId: SessionId): SessionRuntimeControls {
-    return resolveSessionRuntimeIdentity(this.identities, sessionId)
-      ?.runtime === 'codex-app-server'
-      ? this.native
-      : this.legacy;
+    const native = this.nativeControls(sessionId);
+    if (native === null)
+      throw new ChatRuntimeAdmissionError(
+        'Session runtime controls are unavailable on this host.',
+      );
+    return native ?? this.legacy;
+  }
+
+  /**
+   * Native controls of the session's runtime: undefined for a legacy (Claude)
+   * session, null for a native session whose runtime is not bound here.
+   */
+  private nativeControls(
+    sessionId: SessionId,
+  ): NativeSessionControls | null | undefined {
+    const runtime = resolveSessionRuntimeIdentity(
+      this.identities,
+      sessionId,
+    )?.runtime;
+    switch (runtime) {
+      case 'codex-app-server':
+        return this.native;
+      case 'provider-session':
+        return this.providerSessions;
+      case 'claude-sdk':
+      case undefined:
+        return undefined;
+      default: {
+        const unsupported: never = runtime;
+        throw new Error(`Unsupported session runtime: ${unsupported}`);
+      }
+    }
   }
 }

@@ -2,7 +2,11 @@ import 'reflect-metadata';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { ELECTRON_CODEX_BOUND_TOKENS, EXPECTED_RESOLVABLE_TOKENS } from './expected-resolvable';
+import {
+  ELECTRON_CODEX_BOUND_TOKENS,
+  ELECTRON_NATIVE_CHAT_CORE_TOKENS,
+  EXPECTED_RESOLVABLE_TOKENS,
+} from './expected-resolvable';
 import { UsageReconciliationService } from '@ptah-extension/usage-analytics';
 import {
   SKILL_RECOMMENDATION_SERVICE,
@@ -493,21 +497,32 @@ describe('Electron Codex bootstrap composition', () => {
       join(__dirname, 'codex-runtime-composition.ts'),
       'utf8',
     );
+    const literal = (name: string) =>
+      new RegExp(
+        String.raw`container\.register(?:<[\w.]+>)?\(\s*SDK_TOKENS\.${name},\s*\{\s*useValue:`,
+      );
+    const core = readFileSync(
+      join(__dirname, 'native-chat-core-composition.ts'),
+      'utf8',
+    );
+    // A13: the neutral core tokens moved out of the Codex binding.
     for (const name of [
       'SESSION_RUNTIME_IDENTITY_LOOKUP',
-      'CODEX_CHAT_ADAPTER_PORTS',
       'RUNTIME_ADMISSION_PORT',
       'RUNTIME_HOST_CAPABILITIES',
+    ]) {
+      expect(core).toMatch(literal(name));
+      expect(composition).not.toMatch(literal(name));
+    }
+    for (const name of [
+      'CODEX_CHAT_ADAPTER_PORTS',
       'NATIVE_SESSION_CONTROLS',
       'LEGACY_SESSION_CONTROL_PORTS',
       'NATIVE_SESSION_HISTORY_PORT',
     ])
-      expect(composition).toMatch(
-        new RegExp(
-          String.raw`container\.register(?:<[\w.]+>)?\(\s*SDK_TOKENS\.${name},\s*\{\s*useValue:`,
-        ),
-      );
-    expect(ELECTRON_CODEX_BOUND_TOKENS).toHaveLength(8);
+      expect(composition).toMatch(literal(name));
+    expect(ELECTRON_CODEX_BOUND_TOKENS).toHaveLength(5);
+    expect(ELECTRON_NATIVE_CHAT_CORE_TOKENS).toHaveLength(3);
     const bootstrap = readFileSync(
       join(__dirname, '../activation/bootstrap.ts'),
       'utf8',
@@ -516,6 +531,17 @@ describe('Electron Codex bootstrap composition', () => {
       'container.register(CODEX_RUNTIME_TOKENS.SelectionSnapshot,',
     );
     const bound = bootstrap.indexOf('await bindElectronCodexChat(container,');
+    // Order: core, Codex, provider sessions, core finish, then the adapter.
+    const coreAt = bootstrap.indexOf('await bindElectronNativeChatCore(container)');
+    const finishAt = bootstrap.indexOf('finishElectronNativeChatCore(nativeChatCore,');
+    expect(coreAt).toBeGreaterThan(
+      bootstrap.indexOf('container.register(TOKENS.WEBVIEW_MANAGER,'),
+    );
+    expect(coreAt).toBeLessThan(bound);
+    expect(finishAt).toBeGreaterThan(bound);
+    expect(finishAt).toBeLessThan(
+      bootstrap.indexOf('void startAgentAdapterInitialization(container)'),
+    );
     expect(bound).toBeGreaterThan(
       bootstrap.indexOf('await workspaceStateStorage.whenReady()'),
     );

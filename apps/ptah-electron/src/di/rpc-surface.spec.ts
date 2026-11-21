@@ -1,6 +1,7 @@
 import 'reflect-metadata';
 import {
   ELECTRON_CODEX_BOUND_TOKENS,
+  ELECTRON_NATIVE_CHAT_CORE_TOKENS,
   EXPECTED_RUNTIME_TOKENS,
   EXPECTED_RESOLVABLE_TOKENS,
 } from './expected-resolvable';
@@ -192,9 +193,13 @@ describe('Electron RPC surface', () => {
 
 it('includes the complete Electron runtime binding in the DI census', () => {
   expect(EXPECTED_RUNTIME_TOKENS).toEqual(
-    expect.arrayContaining([...ELECTRON_CODEX_BOUND_TOKENS.slice(1)]),
+    expect.arrayContaining([
+      ...ELECTRON_NATIVE_CHAT_CORE_TOKENS,
+      ...ELECTRON_CODEX_BOUND_TOKENS.slice(1),
+    ]),
   );
-  expect(new Set(ELECTRON_CODEX_BOUND_TOKENS).size).toBe(8);
+  expect(new Set(ELECTRON_CODEX_BOUND_TOKENS).size).toBe(5);
+  expect(new Set(ELECTRON_NATIVE_CHAT_CORE_TOKENS).size).toBe(3);
 });
 
 it('includes all shared skill service tokens in the DI census', () => {

@@ -29,7 +29,6 @@ import {
   CHAT_TOKENS,
   createCodexChatHostPorts,
   createCodexChatUserQuestions,
-  createCodexRuntimeAdmission,
   createCodexChatEventCallbacks,
   createCodexSessionSettingsRecord,
   CodexSessionSettingsError,
@@ -49,10 +48,8 @@ import {
   type SessionMetadata,
   type NativeSessionHistoryPort,
   type CodexChatAdapterPorts,
-  initializeSessionRuntimeIdentityLookup,
   resolveCodexNativeBinaryPath,
   type CodexChatScope,
-  type RuntimeAdmissionPort,
 } from '@ptah-extension/agent-sdk';
 import {
   buildCodexExecutionProfile,
@@ -78,6 +75,7 @@ import type {
   ElectronCodexBinding,
   ElectronCodexBindingInput,
   ElectronCodexIdentityLookup,
+  ElectronCodexPendingBinding,
   ElectronCodexRouting,
   ElectronCodexRoutingInput,
   ElectronCodexSessionControls,
@@ -950,18 +948,16 @@ function createElectronCodexAdapterPorts(
   };
 }
 
+/** Codex-only ports. The neutral core tokens (identity lookup, admission,
+ * host capabilities) belong to the native chat core composition. */
 function registerElectronCodexBinding(
   context: BindingContext,
   adapterPorts: CodexChatHostPorts,
-  admission: RuntimeAdmissionPort,
   sessionControls: ElectronCodexSessionControls,
   historyPort: NativeSessionHistoryPort,
 ) {
-  const { container, lookup, routing } = context;
+  const { container } = context;
   const { controls, legacyPorts } = sessionControls;
-  container.register(SDK_TOKENS.SESSION_RUNTIME_IDENTITY_LOOKUP, {
-    useValue: lookup,
-  });
   container.register<CodexChatHostPorts>(SDK_TOKENS.CODEX_CHAT_ADAPTER_PORTS, {
     useValue: adapterPorts,
   });
@@ -971,12 +967,6 @@ function registerElectronCodexBinding(
       useValue: (sessionId) => context.state.tabs.get(sessionId as SessionId),
     },
   );
-  container.register(SDK_TOKENS.RUNTIME_ADMISSION_PORT, {
-    useValue: admission,
-  });
-  container.register(SDK_TOKENS.RUNTIME_HOST_CAPABILITIES, {
-    useValue: routing.capabilities,
-  });
   container.register(SDK_TOKENS.NATIVE_SESSION_CONTROLS, {
     useValue: controls,
   });
@@ -988,19 +978,29 @@ function registerElectronCodexBinding(
   });
 }
 
-/** Bind the whole guarded surface before resolving either adapter. */
+/**
+ * Bind the Codex ports before resolving either adapter. The identity lookup
+ * comes from the native chat core, which outlives a failed Codex binding:
+ * a failure here never disposes it. After success the binding disposes the
+ * lookup on shutdown, as before.
+ */
 export async function bindElectronCodexChat(
   container: DependencyContainer,
   input: ElectronCodexBindingInput,
-): Promise<ElectronCodexBinding> {
+  coreLookup: ElectronCodexIdentityLookup,
+): Promise<ElectronCodexPendingBinding> {
   const logger = container.resolve<Logger>(TOKENS.LOGGER);
   const metadataStore = container.resolve<SessionMetadataStore>(
     SDK_TOKENS.SDK_SESSION_METADATA_STORE,
   );
-  const lookup = await initializeSessionRuntimeIdentityLookup(
-    metadataStore,
-    logger,
-  );
+  // True once the ports are registered; until then the core owns the lookup.
+  let bound = false;
+  const lookup: ElectronCodexIdentityLookup = {
+    ...coreLookup,
+    dispose: () => {
+      if (bound) coreLookup.dispose();
+    },
+  };
   let record: ElectronCodexSettingsRecord | undefined;
   let binding: ElectronCodexBinding | undefined;
   try {
@@ -1038,7 +1038,6 @@ export async function bindElectronCodexChat(
       scope,
       lifecycle,
     );
-    const admission = createCodexRuntimeAdmission(host.deps);
     const baseBinding = createElectronCodexBindingHandle(context);
     binding = {
       ...baseBinding,
@@ -1065,23 +1064,26 @@ export async function bindElectronCodexChat(
       liveProfiles: context.state.profiles,
       logger,
     });
-    registerElectronCodexBinding(
-      context,
-      adapterPorts,
-      admission,
-      sessionControls,
-      historyPort,
-    );
-    return binding;
+    const built = binding;
+    return {
+      ...built,
+      register: () => {
+        if (bound) throw new Error('Codex chat binding is already registered');
+        registerElectronCodexBinding(
+          context,
+          adapterPorts,
+          sessionControls,
+          historyPort,
+        );
+        bound = true;
+      },
+    };
   } catch (error) {
+    // The core lookup stays alive: `lookup.dispose` is a no-op until bound.
     if (binding) {
       await binding.dispose();
     } else {
-      try {
-        record?.dispose();
-      } finally {
-        lookup.dispose();
-      }
+      record?.dispose();
     }
     throw error;
   }

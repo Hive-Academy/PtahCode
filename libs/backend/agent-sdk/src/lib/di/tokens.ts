@@ -50,9 +50,10 @@ export const SDK_TOKENS = {
   CODEX_CHAT_ADAPTER: Symbol.for('CodexChatAdapter'),
   /** Bind a stable instance using registerInstance or a cached factory before adapter resolution. */
   CODEX_CHAT_ADAPTER_PORTS: Symbol.for('CodexChatAdapterPorts'),
-  /** Nullable RuntimeAdmissionPort; native composition is all-or-nothing:
-   * SESSION_RUNTIME_IDENTITY_LOOKUP, CODEX_CHAT_ADAPTER_PORTS,
-   * RUNTIME_ADMISSION_PORT and host RUNTIME_HOST_CAPABILITIES must all be bound.
+  /** Nullable RuntimeAdmissionPort. The native chat core is all-or-nothing:
+   * SESSION_RUNTIME_IDENTITY_LOOKUP, RUNTIME_ADMISSION_PORT and host
+   * RUNTIME_HOST_CAPABILITIES are bound together, and only with at least one
+   * runtime's ports (CODEX_CHAT_ADAPTER_PORTS or PROVIDER_SESSION_CHAT_PORTS).
    * A partial composition throws partial-native-binding naming every missing token.
    * Bind a stable instance using registerInstance or a cached factory before adapter resolution. */
   RUNTIME_ADMISSION_PORT: Symbol.for('RuntimeAdmissionPort'),
@@ -60,8 +61,21 @@ export const SDK_TOKENS = {
   /** Host binding participates in the all-or-nothing native contract even when
    * nativeCodex is false. Only agent-sdk's own default provider is exempt;
    * provenance is tracked by provider execution, never by capability values.
-   * Leave all four defaults untouched for the exact plain SDK adapter. */
+   * Leave every runtime default untouched for the exact plain SDK adapter. */
   RUNTIME_HOST_CAPABILITIES: Symbol.for('RuntimeHostCapabilities'),
+  /** Nullable host ports of the provider-session chat runtime (null default).
+   * Bound only together with the native chat core.
+   * Bind a stable instance using registerInstance or a cached factory before adapter resolution. */
+  PROVIDER_SESSION_CHAT_PORTS: Symbol.for('ProviderSessionChatPorts'),
+  /** Nullable provider-session NativeChatAdapter (null default).
+   * Bind a stable instance using registerInstance or a cached factory before adapter resolution. */
+  PROVIDER_SESSION_CHAT_ADAPTER: Symbol.for('ProviderSessionChatAdapter'),
+  /** Nullable NativeSessionControls of provider sessions (null default); the
+   * SESSION_RUNTIME_ROUTER third arm. Bind before resolving that router. */
+  PROVIDER_SESSION_CONTROLS: Symbol.for('ProviderSessionControls'),
+  /** Nullable ProviderSessionHistoryPort (null default); SESSION_HISTORY_ROUTER
+   * resolves it on each provider-session read. */
+  PROVIDER_SESSION_HISTORY_PORT: Symbol.for('ProviderSessionHistoryPort'),
   SDK_AGENT_ADAPTER: Symbol.for('SdkAgentAdapter'),
   SDK_SESSION_METADATA_STORE: Symbol.for('SdkSessionMetadataStore'),
   HOST_ATTENTION_COORDINATOR: Symbol.for('HostAttentionCoordinator'),

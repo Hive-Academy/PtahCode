@@ -82,3 +82,13 @@ export interface ElectronCodexShutdownStore extends CodexThreadIdentityStore {
 export interface ElectronCodexBinding extends ElectronCodexRouting {
   dispose(): Promise<void>;
 }
+
+/**
+ * A built Codex binding whose ports are not registered yet. The native chat
+ * core finish step calls `register` and registers the core in the same
+ * synchronous step, so no failure can leave Codex ports without the core.
+ */
+export interface ElectronCodexPendingBinding extends ElectronCodexBinding {
+  /** Register the Codex ports; call at most once. */
+  register(): void;
+}

@@ -46,6 +46,13 @@ import {
   createElectronCodexSelectionSnapshot,
   resolveElectronCodexBundledRoot,
 } from '../di/codex-runtime-composition';
+import type { ElectronCodexPendingBinding } from '../di/codex-binding.types';
+import {
+  bindElectronNativeChatCore,
+  finishElectronNativeChatCore,
+  type ElectronNativeChatCore,
+} from '../di/native-chat-core-composition';
+import type { ProviderSessionProfileId } from '@ptah-extension/shared';
 import { ElectronDIContainer } from '../di/container';
 import { restoreWorkspaces } from './workspace-restore';
 import { resolveInitialWorkspaceArg } from './initial-workspace-arg';
@@ -594,7 +601,20 @@ async function runBootstrap(
     env: process.env,
     platform: { platform: process.platform, arch: process.arch },
   };
+  // Native chat order (A13): core, Codex, provider sessions, core finish. All
+  // of it completes before the first ROUTING_AGENT_ADAPTER resolution.
+  let nativeChatCore: ElectronNativeChatCore | undefined;
   try {
+    nativeChatCore = await bindElectronNativeChatCore(container);
+  } catch (error) {
+    container.resolve<Logger>(TOKENS.LOGGER).error(
+      '[Ptah Electron] Native chat core binding failed; continuing Claude-only',
+      error instanceof Error ? error : new Error('Native chat core binding failed'),
+    );
+  }
+  // Built but unregistered: the core finish registers it with the core.
+  let codexBinding: ElectronCodexPendingBinding | undefined;
+  if (nativeChatCore) try {
     const bundledRoot = resolveElectronCodexBundledRoot({
       isPackaged: app.isPackaged,
       resourcesPath: process.resourcesPath,
@@ -614,7 +634,7 @@ async function runBootstrap(
     container.resolve<CodexAccountUsageService>(
       AUTH_PROVIDERS_TOKENS.SDK_CODEX_ACCOUNT_USAGE,
     ).setSelectionSnapshot(selectionSnapshot);
-    await bindElectronCodexChat(container, {
+    codexBinding = await bindElectronCodexChat(container, {
         ...codexRoutingInput,
         bundledRoot,
         selectionSnapshot,
@@ -624,12 +644,38 @@ async function runBootstrap(
         settingsStore: container.resolve<NativeSessionControlsDeps['store']>(
           SETTINGS_TOKENS.SETTINGS_STORE,
         ),
-    });
+    }, nativeChatCore.lookup);
   } catch (error) {
     container.resolve<Logger>(TOKENS.LOGGER).error(
       '[Ptah Electron] Codex chat binding failed; continuing startup',
       error instanceof Error ? error : new Error('Codex chat binding failed'),
     );
+  }
+  // Provider-session binding (P8) goes here in its own try/catch; none in P5.
+  const providerSessionProfiles: readonly ProviderSessionProfileId[] = [];
+  if (nativeChatCore) {
+    try {
+      finishElectronNativeChatCore(nativeChatCore, {
+        codex: codexBinding,
+        providerSessionProfiles,
+      });
+    } catch (error) {
+      // Finish refuses before registering anything, so Claude-only defaults stay.
+      container.resolve<Logger>(TOKENS.LOGGER).error(
+        '[Ptah Electron] Native chat core registration failed; continuing Claude-only',
+        error instanceof Error ? error : new Error('Native chat core registration failed'),
+      );
+      if (codexBinding) {
+        await codexBinding.dispose().catch((disposeError: unknown) => {
+          container.resolve<Logger>(TOKENS.LOGGER).error(
+            '[Ptah Electron] Unregistered Codex chat binding cleanup failed',
+            disposeError instanceof Error
+              ? disposeError
+              : new Error('Codex chat binding cleanup failed'),
+          );
+        });
+      }
+    }
   }
   // Detached Display window (TASK_2026_853_3401). Bound here, beside
   // WEBVIEW_MANAGER, because it needs the bridge; `DisplayWindowRpcHandlers`

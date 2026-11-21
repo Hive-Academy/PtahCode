@@ -86,6 +86,8 @@ export {
 } from './lib/codex-app-server/session-history-router';
 export type {
   NativeSessionHistoryPort,
+  ProviderSessionHistory,
+  ProviderSessionHistoryPort,
   SessionHistoryReadResult,
   SessionHistoryRouteErrorCode,
 } from './lib/codex-app-server/session-history-router';
@@ -231,7 +233,11 @@ export {
   type CodexChatAdapterErrorCode,
 } from './lib/codex-app-server/codex-chat-adapter-error';
 export type { RuntimeAdmissionPort } from './lib/codex-app-server/routing-agent-adapter';
-export type { SessionApprovalRouter } from './lib/codex-app-server/session-approval-router';
+export type {
+  SessionApprovalRouter,
+  ProviderSessionApprovalOwnerSink,
+  ProviderSessionApprovalReply,
+} from './lib/codex-app-server/session-approval-router';
 export type {
   NativeSessionControls,
   StreamlessFollowUpAdmission,
