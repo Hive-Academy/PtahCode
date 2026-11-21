@@ -341,18 +341,6 @@ describe('native slash runtime routing', () => {
     expect(h.compact).not.toHaveBeenCalled();
     expect(h.executeSlashCommand).not.toHaveBeenCalled();
   });
-  it('4651900766: keeps the PROVIDER_SESSION_UNAVAILABLE code of a provider-session refusal', async () => {
-    const h = harness(
-      { runtime: 'provider-session' } as unknown as ResolvedChatExecution,
-      'review',
-    );
-    await expect(h.route()).rejects.toMatchObject({
-      name: 'RpcUserError',
-      errorCode: 'PROVIDER_SESSION_UNAVAILABLE',
-    });
-    expect(h.executeSlashCommand).not.toHaveBeenCalled();
-  });
-
   it('4651900766: still releases the compact reservation when a typed refusal is rethrown', async () => {
     const h = harness({
       runtime: 'claude-sdk',

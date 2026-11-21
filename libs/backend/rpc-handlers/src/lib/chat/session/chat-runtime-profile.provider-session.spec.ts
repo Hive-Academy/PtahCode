@@ -8,9 +8,7 @@ import type { SessionId, SessionRuntimeIdentity } from '@ptah-extension/shared';
 import { createMockWorkspaceProvider } from '@ptah-extension/platform-core/testing';
 import {
   ChatRuntimeProfileService,
-  refuseProviderSessionExecution,
   storedChatRuntimeIdentity,
-  type ResolvedChatExecution,
 } from './chat-runtime-profile.service';
 
 jest.mock('@ptah-extension/agent-sdk', () => ({
@@ -147,31 +145,5 @@ describe('storedChatRuntimeIdentity', () => {
       providerId: 'openrouter',
       workspaceId: workspace,
     });
-  });
-});
-
-describe('refuseProviderSessionExecution', () => {
-  it('refuses a provider-session execution with PROVIDER_SESSION_UNAVAILABLE', () => {
-    const execution = {
-      ...providerSession,
-      workspacePath: workspace,
-      cwd: workspace,
-      config: { tabId: 'tab' },
-    } as ResolvedChatExecution;
-    expect(() => refuseProviderSessionExecution(execution)).toThrow(
-      expect.objectContaining({
-        name: 'RpcUserError',
-        errorCode: 'PROVIDER_SESSION_UNAVAILABLE',
-      }),
-    );
-  });
-
-  it('passes a Claude execution through', () => {
-    const execution: ResolvedChatExecution = {
-      runtime: 'claude-sdk',
-      model: 'sonnet',
-      providerProfile: undefined,
-    };
-    expect(() => refuseProviderSessionExecution(execution)).not.toThrow();
   });
 });

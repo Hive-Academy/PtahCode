@@ -41,8 +41,12 @@ import {
   MESSAGE_ID_NOT_FOUND_PHRASE,
   SessionTurnStateRegistry,
   SessionTitleService,
+  nativeExecutionOf,
+  parseProviderSessionThreadRecord,
   type JsonlReaderService,
+  type SessionMetadata,
 } from '@ptah-extension/agent-sdk';
+import { parseSessionRuntimeIdentity } from '@ptah-extension/shared/schemas';
 import {
   SessionId,
   SessionListParams,
@@ -214,6 +218,37 @@ function storedCodexMessageCount(value: number | undefined): number {
   return value !== undefined && Number.isSafeInteger(value) && value >= 0
     ? value
     : 0;
+}
+
+/**
+ * A native row's listed count, never from a Claude transcript scan. Codex
+ * stores its own count; a provider session has no stored count yet, so it
+ * lists 0, which hides "N msgs".
+ */
+function storedNativeMessageCount(row: SessionMetadata): number {
+  return row.codexExecution?.runtime === 'codex-app-server'
+    ? storedCodexMessageCount(row.codexMessageCount)
+    : 0;
+}
+
+/**
+ * A provider session is resumable without a Claude JSONL when its binding
+ * parses for this session and its native session id is stored.
+ */
+function hasResumableProviderSession(
+  sessionId: string,
+  metadata: SessionMetadata,
+): boolean {
+  const execution = parseSessionRuntimeIdentity(
+    metadata.providerSessionExecution,
+  );
+  return (
+    execution.ok &&
+    execution.value.runtime === 'provider-session' &&
+    execution.value.sessionId === sessionId &&
+    parseProviderSessionThreadRecord(metadata.providerSessionThread) !==
+      undefined
+  );
 }
 
 /**
@@ -598,7 +633,7 @@ export class SessionRpcHandlers {
           // without a count keeps 0, which hides "N msgs".
           const messageCounts = this.messageCounter.peekAndWarm(
             paginated.flatMap((s): SessionTranscriptRef[] => {
-              if (s.codexExecution?.runtime === 'codex-app-server') return [];
+              if (nativeExecutionOf(s)) return [];
               const index = transcriptIndexOf(s.sessionId);
               return index && index.ids.has(s.sessionId)
                 ? [
@@ -654,8 +689,8 @@ export class SessionRpcHandlers {
                 name: s.name,
                 lastActivityAt: s.lastActiveAt,
                 createdAt: s.createdAt,
-                messageCount: s.codexExecution?.runtime === 'codex-app-server'
-                  ? storedCodexMessageCount(s.codexMessageCount)
+                messageCount: nativeExecutionOf(s)
+                  ? storedNativeMessageCount(s)
                   : messageCounts.get(s.sessionId) ?? 0,
                 isActive: false, // Listed sessions are not currently active
                 ...(transcriptIndex
@@ -1371,6 +1406,13 @@ export class SessionRpcHandlers {
             this.logger.debug('RPC: session:validate - native Codex session exists', {
               sessionId,
             });
+            return { exists: true };
+          }
+          if (metadata && hasResumableProviderSession(sessionId, metadata)) {
+            this.logger.debug(
+              'RPC: session:validate - native provider session exists',
+              { sessionId },
+            );
             return { exists: true };
           }
           const resolvedWorkspacePath = await this.resolveTranscriptDirectory(

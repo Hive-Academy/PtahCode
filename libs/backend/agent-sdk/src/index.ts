@@ -232,6 +232,12 @@ export {
   isWebviewReportedError,
   type CodexChatAdapterErrorCode,
 } from './lib/codex-app-server/codex-chat-adapter-error';
+export {
+  ProviderSessionChatAdapterError,
+  isProviderSessionChatAdapterError,
+  type ProviderSessionChatAdapterErrorCode,
+  type ProviderSessionChatAdapterErrorOptions,
+} from './lib/provider-session/provider-session-chat-adapter-error';
 export type { RuntimeAdmissionPort } from './lib/codex-app-server/routing-agent-adapter';
 export type {
   SessionApprovalRouter,
