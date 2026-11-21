@@ -25,14 +25,14 @@ const withHome: SessionRuntimeIdentity = {
   ...base,
   providerId: 'grok-cli',
   runtime: 'provider-session',
-  providerSession: { profile: 'grok', normalizedHome: 'c:\\users\\grok' },
+  providerSession: { profile: 'grok', normalizedHome: 'c:\\users\\dev' },
 };
 
 const codex: SessionRuntimeIdentity = {
   ...base,
   providerId: 'antigravity-cli',
   runtime: 'codex-app-server',
-  codex: { normalizedHome: 'c:\\users\\grok' },
+  codex: { normalizedHome: 'c:\\users\\dev' },
 };
 
 describe('SessionRuntimeIdentitySchema provider-session variant', () => {
@@ -57,7 +57,7 @@ describe('SessionRuntimeIdentitySchema provider-session variant', () => {
       'non-normalized home',
       {
         ...antigravity,
-        providerSession: { profile: 'grok', normalizedHome: 'C:/Users/grok' },
+        providerSession: { profile: 'grok', normalizedHome: 'C:/Users/dev' },
       },
     ],
     [
