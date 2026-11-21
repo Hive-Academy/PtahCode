@@ -362,6 +362,15 @@ export class SessionChildRegistry {
     return live ?? ended;
   }
 
+  /** Every record, live or ended, whose worktree is `path`. */
+  listByCwd(path: string | undefined): readonly SessionChildRecord[] {
+    if (!path?.trim()) return [];
+    const key = pathKey(path);
+    return [...this.records.values()].filter(
+      (record) => this.storedPathKey(record) === key,
+    );
+  }
+
   /** Bind an early SDK event only when cwd identifies one live, unbound child. */
   findUniqueUnboundByCwd(path: string | undefined): SessionChildRecord | undefined {
     if (!path?.trim()) return undefined;

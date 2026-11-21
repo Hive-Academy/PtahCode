@@ -23,7 +23,7 @@ import { SessionMemoryAdmission, SessionMemoryTicket } from './session-memory-ad
 import { waitForChildStart } from './session-start-stop-wait';
 import type { ProviderAccountPortRefusal } from '@ptah-extension/auth-providers-tokens';
 import { isAbsolute, join, resolve } from 'node:path';
-import { access, readFile, realpath } from 'node:fs/promises';
+import { access, readFile, realpath, stat } from 'node:fs/promises';
 import {
   SDK_TOKENS,
   SessionAdmissionRefusedError,
@@ -728,6 +728,12 @@ export class SessionSpawnerService implements ISessionSpawner {
       // A child often starts before its task exists and creates the task
       // folder itself, so its record has no task id. The task folder in the
       // worktree then proves the task. The new child records the task id.
+      //
+      // Only this fallback takes the per-worktree claim and refuses a live
+      // occupant. An attach to a record with the same recorded task id is the
+      // parent's explicit request for one more session of that task in the
+      // worktree, also while the target child is live, so it does not
+      // serialize on the claim.
       if (check.taskUnrecorded) {
         const taskId = request.taskId ?? '';
         // The caller's schema validates the id; this guard keeps the path
@@ -739,14 +745,15 @@ export class SessionSpawnerService implements ISessionSpawner {
         // The task carrier `task.md` proves a real task folder (a plain file
         // or an empty directory at the task path does not). It must resolve
         // inside the worktree: a symlink in `.ptah` or `.ptah/specs` must not
-        // let an outside entry prove the task.
+        // let an outside entry prove the task. It must be a regular file: a
+        // directory named `task.md` is not a task carrier.
         const carrier = join(taskFolder, 'task.md');
         const provenCarrier = await realpath(carrier).catch(() => undefined);
         const present =
           provenCarrier !== undefined &&
           isPathWithinRoots(provenCarrier, [canonical]) &&
-          (await access(provenCarrier).then(
-            () => true,
+          (await stat(provenCarrier).then(
+            (entry) => entry.isFile(),
             () => false,
           ));
         if (!present) {
@@ -771,11 +778,16 @@ export class SessionSpawnerService implements ISessionSpawner {
             `attach requires a registered child with the same taskId, canonical worktree and branch (${ATTACH_REFUSAL_TEXT[current.reason]})`,
           );
         }
-        const occupant = this.registry.findByCwd(canonical);
-        if (
-          this.attachClaims.has(canonical) ||
-          (occupant && !occupant.terminalStatus)
-        ) {
+        // A record that is not ended is a child that starts or works. An
+        // ended record can still have an active session: the user can resume
+        // an ended child from its tab, and the record stays ended.
+        const occupied = this.registry
+          .listByCwd(canonical)
+          .some(
+            (record) =>
+              !record.terminalStatus || this.activeIdOf(record) !== null,
+          );
+        if (this.attachClaims.has(canonical) || occupied) {
           return this.refuseStart(
             'branch-exists',
             `a live session already works in worktree ${canonical}; stop it before you attach a new child to a worktree whose child has no recorded task`,

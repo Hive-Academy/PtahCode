@@ -6,7 +6,7 @@
 import { join } from 'node:path';
 import {
   denySessionSpawnerHandoffAccess,
-  sessionSpawnerFsAccess,
+  sessionSpawnerFsKind,
 } from './__fixtures__/session-spawner-fs-access';
 import { mutableMemoryProbe } from '../__fixtures__/memory-probe';
 import { makeHarness, PARENT } from './session-spawner.service.spec';
@@ -116,10 +116,9 @@ describe('SessionSpawnerService memory admission', () => {
     const first = await h.spawner.start(h.request());
     if (!first.ok) throw new Error('first start failed');
     h.registry.markEnded(first.child.childSessionId, 'failed', 'ended by the watchdog');
-    sessionSpawnerFsAccess.current = async (path) => {
-      if (String(path).endsWith(join('specs', TASK, 'task.md'))) return;
-      throw new Error('ENOENT');
-    };
+    h.active.delete(first.child.childSessionId);
+    sessionSpawnerFsKind.current = (path) =>
+      String(path).endsWith(join('specs', TASK, 'task.md')) ? 'file' : undefined;
     const claims = (): number =>
       (h.spawner as unknown as { attachClaims: Set<string> }).attachClaims.size;
     const attach = () => h.request({ taskId: TASK, attachToSessionId: first.child.childSessionId });
@@ -138,11 +137,11 @@ describe('SessionSpawnerService memory admission', () => {
         expect(claims()).toBe(0);
         if (queued.ok && !failAttach) {
           h.registry.markEnded(queued.child.childSessionId, 'failed', 'ended');
+          h.active.delete(queued.child.childSessionId);
         }
       }
     } finally {
-      sessionSpawnerFsAccess.current = null;
-      denySessionSpawnerHandoffAccess();
+      sessionSpawnerFsKind.current = null;
       h.spawner.dispose();
     }
   });
