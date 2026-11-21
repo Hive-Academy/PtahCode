@@ -780,6 +780,13 @@ export type ProviderSessionErrorCode =
     at P9 start and add any new hit.
   - Brand marks and onboarding readiness (`brand-slugs.ts`, `agent-marks.ts`,
     `provider-readiness.derive.ts`) per phase.
+  - Onboarding main-connection choice (user request 2026-11-21): the "Check Claude Code and
+    Codex" step offers only `claude-cli` and `openai-codex`
+    (`libs/frontend/onboarding/src/lib/ready/connection-choice.component.ts:222-239`). Build the
+    options from the registry so each provider-session entry whose host profile is bound
+    (Antigravity in P9, Grok P10, OpenCode P11c) is a third choice with its own installed,
+    version and signed-in panel (`provider-panel.component.ts`), and retitle the step to a
+    generic one. Spec: the option is listed when the status row exists and hidden otherwise.
 - Failure behaviour: not installed -> card "not installed" + install hint; not signed in ->
   banner with hint; host without the profile -> no card.
 - Quality: signals/`computed` only; OnPush unchanged.
