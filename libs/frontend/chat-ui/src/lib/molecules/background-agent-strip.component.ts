@@ -67,6 +67,13 @@ export interface BackgroundAgentStripEntry {
   readonly totalTokens?: number;
   /** Presentational lifecycle bucket driving the status indicator. */
   readonly status: BackgroundAgentStripStatus;
+  /**
+   * Set on a `stopped` row when Ptah's subagent budget monitor, not the user,
+   * stopped the agent.
+   */
+  readonly stoppedBy?: 'budget-monitor';
+  /** Ptah's full notice for a budget-monitor stop, shown as the row tooltip. */
+  readonly stopReason?: string;
   /** Whether a steer input should be offered (running or background agents). */
   readonly steerable: boolean;
   /** Whether a stop action applies (running or background agents). */
@@ -123,10 +130,19 @@ const STATUS_LABEL: Record<BackgroundAgentStripStatus, string> = {
   stopped: 'Stopped',
 };
 
+/** Short label for a row Ptah's budget monitor stopped; the notice is the tooltip. */
+const BUDGET_STOP_LABEL = 'Stopped by Ptah budget monitor';
+
+function isBudgetStop(entry: BackgroundAgentStripEntry): boolean {
+  return entry.status === 'stopped' && entry.stoppedBy === 'budget-monitor';
+}
+
 interface StripRow {
   readonly entry: BackgroundAgentStripEntry;
   readonly color: string;
   readonly statusLine: string;
+  /** Row tooltip: name and status line, plus the budget-stop notice. */
+  readonly title: string;
   readonly hasActions: boolean;
 }
 
@@ -268,10 +284,10 @@ interface StripRow {
                     'Open agent ' +
                     row.entry.name +
                     ', ' +
-                    statusLabel(row.entry.status) +
+                    statusLabel(row.entry) +
                     (row.statusLine ? ': ' + row.statusLine : '')
                   "
-                  [title]="row.entry.name + ' — ' + row.statusLine"
+                  [title]="row.title"
                   (click)="focusAgent.emit(row.entry.id)"
                 >
                   <span
@@ -442,12 +458,18 @@ export class BackgroundAgentStripComponent {
   }
 
   protected readonly rows = computed<readonly StripRow[]>(() =>
-    this.entries().map((entry) => ({
-      entry,
-      color: generateAgentColor(entry.agentType || entry.name),
-      statusLine: this.buildStatusLine(entry),
-      hasActions: entry.steerable || entry.canBackground || entry.stoppable,
-    })),
+    this.entries().map((entry) => {
+      const statusLine = this.buildStatusLine(entry);
+      const notice = isBudgetStop(entry) ? entry.stopReason?.trim() : undefined;
+      return {
+        entry,
+        color: generateAgentColor(entry.agentType || entry.name),
+        statusLine,
+        title:
+          `${entry.name} — ${statusLine}` + (notice ? `\n${notice}` : ''),
+        hasActions: entry.steerable || entry.canBackground || entry.stoppable,
+      };
+    }),
   );
 
   protected readonly previewRows = computed(() =>
@@ -508,13 +530,17 @@ export class BackgroundAgentStripComponent {
     return status === 'completed' || status === 'error' || status === 'stopped';
   }
 
-  protected statusLabel(status: BackgroundAgentStripStatus): string {
-    return STATUS_LABEL[status];
+  protected statusLabel(entry: BackgroundAgentStripEntry): string {
+    return isBudgetStop(entry) ? BUDGET_STOP_LABEL : STATUS_LABEL[entry.status];
   }
 
   private buildStatusLine(entry: BackgroundAgentStripEntry): string {
+    // A budget stop leads with its label: the agent's last summary would read
+    // as an ordinary end, and the SDK's own reads as a user stop.
     const parts = [
-      entry.description?.trim() || STATUS_LABEL[entry.status],
+      isBudgetStop(entry)
+        ? BUDGET_STOP_LABEL
+        : entry.description?.trim() || STATUS_LABEL[entry.status],
       formatAgentElapsed(entry.durationMs),
       formatAgentTokens(entry.totalTokens),
     ].filter((p): p is string => !!p);

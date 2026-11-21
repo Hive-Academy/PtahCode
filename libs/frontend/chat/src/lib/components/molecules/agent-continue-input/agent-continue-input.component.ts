@@ -2,6 +2,7 @@ import { NgTemplateOutlet } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
 import { LucideAngularModule, Play, Square } from 'lucide-angular';
 import type { MonitoredAgent } from '@ptah-extension/chat-streaming';
+import { isAgentBudgetStopReason } from '@ptah-extension/shared';
 import { LaneComposerComponent } from '@ptah-extension/chat-ui';
 import { laneGuardStopText } from '../agent-card/agent-card-header.component';
 
@@ -72,7 +73,10 @@ export class AgentContinueInputComponent {
   protected readonly stopButtonClass = 'inline-flex items-center justify-center h-7 w-7 flex-shrink-0 rounded-full bg-error/15 text-error hover:bg-error/25 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2';
   protected readonly terminalStatus = computed(() => {
     const agent = this.agent();
-    const status = agent.status === 'failed' ? 'Failed' : agent.status === 'timeout' ? 'Timed out' : agent.status === 'stopped' ? 'Stopped' : '';
+    const status = agent.status === 'failed' ? 'Failed' : agent.status === 'timeout' ? 'Timed out'
+      : agent.status === 'stopped'
+        ? (isAgentBudgetStopReason(agent.stopReason) ? 'Stopped by Ptah budget monitor' : 'Stopped')
+        : '';
     const reason = laneGuardStopText(agent.stopReason);
     return agent.status === 'running' || agent.status === 'starting'
       ? ''

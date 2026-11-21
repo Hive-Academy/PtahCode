@@ -1327,6 +1327,75 @@ describe('SystemMessageTransformer', () => {
       });
     });
 
+    it.each(['stopped', 'killed'])(
+      'reads a %s task with a Ptah notice as a budget-monitor stop',
+      (status) => {
+        const helpers = makeHelpers();
+        const notice =
+          'Ptah stopped `Explore`: handoff size. The user did not stop it.';
+        helpers.stopNotices.record('sess', 'task-budget', notice);
+
+        const [event] = transformer.transformTaskNotification(
+          {
+            task_id: 'task-budget',
+            tool_use_id: 'tool-budget',
+            status,
+            summary: 'Agent "Explore" was stopped by user',
+          } as never,
+          state,
+          helpers,
+        );
+
+        expect(event).toMatchObject({
+          eventType: 'agent_completed',
+          status: 'stopped',
+          summary: notice,
+          stoppedBy: 'budget-monitor',
+        });
+      },
+    );
+
+    it('reads a killed task with no Ptah notice as a user stop', () => {
+      const helpers = makeHelpers();
+
+      const [event] = transformer.transformTaskNotification(
+        {
+          task_id: 'task-user',
+          tool_use_id: 'tool-user',
+          status: 'killed',
+          summary: 'Agent "Explore" was stopped by user',
+        } as never,
+        state,
+        helpers,
+      );
+
+      expect(event).toMatchObject({
+        eventType: 'agent_completed',
+        status: 'stopped',
+        summary: 'Agent "Explore" was stopped by user',
+      });
+      expect(event).not.toHaveProperty('stoppedBy');
+    });
+
+    it('ignores a Ptah notice for a task that completed normally', () => {
+      const helpers = makeHelpers();
+      helpers.stopNotices.record('sess', 'task-done', 'Ptah stopped it.');
+
+      const [event] = transformer.transformTaskNotification(
+        {
+          task_id: 'task-done',
+          tool_use_id: 'tool-done',
+          status: 'completed',
+          summary: 'done',
+        } as never,
+        state,
+        helpers,
+      );
+
+      expect(event).toMatchObject({ status: 'completed', summary: 'done' });
+      expect(event).not.toHaveProperty('stoppedBy');
+    });
+
     it('cleans up taskId mapping and emits agent_completed for a missing notification tool_use_id', () => {
       state.getTaskParentToolUseId.mockReturnValue('tool-n');
       const helpers = makeHelpers();
@@ -1669,7 +1738,52 @@ describe('SystemMessageTransformer', () => {
         agentId: '',
         agentType: 'unknown',
       });
+      expect(events[1]).not.toHaveProperty('stoppedBy');
+      expect(events[1]).not.toHaveProperty('reason');
     });
+
+    it.each(['stopped', 'killed'])(
+      'marks background_agent_stopped as a budget-monitor stop for a %s task with a Ptah notice',
+      (status) => {
+        const helpers = makeHelpers();
+        const notice = 'Ptah stopped `Explore`: budget. The user did not stop it.';
+        helpers.stopNotices.record('sess', 'task-resumed', notice);
+        transformer.transformTaskStarted(
+          {
+            task_id: 'task-resumed',
+            tool_use_id: 'toolu_sendmsg',
+            skip_transcript: false,
+            task_type: 'local_agent',
+            is_backgrounded: true,
+          } as never,
+          state,
+          helpers,
+          'sess' as never,
+        );
+
+        state.getTaskParentToolUseId.mockReturnValue('toolu_sendmsg');
+        const events = transformer.transformTaskNotification(
+          { task_id: 'task-resumed', status } as never,
+          state,
+          helpers,
+          'sess' as never,
+        );
+
+        expect(events.map((e) => e.eventType)).toEqual([
+          'agent_completed',
+          'background_agent_stopped',
+        ]);
+        expect(events[0]).toMatchObject({
+          status: 'stopped',
+          stoppedBy: 'budget-monitor',
+        });
+        expect(events[1]).toMatchObject({
+          toolCallId: 'toolu_sendmsg',
+          stoppedBy: 'budget-monitor',
+          reason: notice,
+        });
+      },
+    );
 
     it('emits NO terminal background event for a task announced via task_updated (SubagentStop owns it)', () => {
       const helpers = makeHelpers();

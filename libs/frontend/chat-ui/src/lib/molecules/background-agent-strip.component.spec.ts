@@ -100,6 +100,44 @@ describe('BackgroundAgentStripComponent', () => {
     expect(query('[data-test="agent-strip-toggle"]')).toBeNull();
   });
 
+  describe('budget-monitor stop', () => {
+    it('labels the row and shows the full notice as its tooltip', () => {
+      render([
+        entry({
+          id: 'b',
+          origin: 'background',
+          status: 'stopped',
+          description: 'Reading files',
+          stoppedBy: 'budget-monitor',
+          stopReason: 'Ptah stopped `b`: budget. The user did not stop it.',
+        }),
+      ]);
+      expand();
+
+      expect(text('[data-test="agent-strip-status-line"]')).toBe(
+        'Stopped by Ptah budget monitor',
+      );
+      const focus = el('[data-test="agent-strip-focus"]');
+      expect(focus.getAttribute('title')).toBe(
+        'b — Stopped by Ptah budget monitor\n' +
+          'Ptah stopped `b`: budget. The user did not stop it.',
+      );
+      expect(focus.getAttribute('aria-label')).toContain(
+        'Stopped by Ptah budget monitor',
+      );
+    });
+
+    it('keeps the plain Stopped label for a user stop', () => {
+      render([entry({ id: 'u', origin: 'background', status: 'stopped' })]);
+      expand();
+
+      expect(text('[data-test="agent-strip-status-line"]')).toBe('Stopped');
+      expect(el('[data-test="agent-strip-focus"]').getAttribute('title')).toBe(
+        'u — Stopped',
+      );
+    });
+  });
+
   describe('summary row', () => {
     // TASK_2026_533: the strip lists a DIFFERENT population from the session
     // AGENTS chip (the backend's lifetime count of unique subagents). It must
