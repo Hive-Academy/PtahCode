@@ -73,7 +73,11 @@ describe('OnboardingShellComponent', () => {
                 path: 'ready',
                 data: { crumb: 'Get ready' },
                 children: [
-                  { path: '', component: StepPageStubComponent },
+                  {
+                    path: '',
+                    component: StepPageStubComponent,
+                    data: { layout: 'wide' },
+                  },
                   { path: 'settings', component: StepPageStubComponent },
                 ],
               },
@@ -103,6 +107,23 @@ describe('OnboardingShellComponent', () => {
     expect(markDismissed).toHaveBeenCalledTimes(1);
     expect(setCurrentView).toHaveBeenCalledWith('chat');
   });
+
+  it.each([
+    ['/onboarding/ready', true],
+    ['/onboarding/ready/settings', false],
+    ['/onboarding/analyze', false],
+  ] as const)(
+    'widens the column only for a wide page route (%s)',
+    async (url, wide) => {
+      const harness = await open(url);
+      const column = query<HTMLElement>(
+        harness,
+        '[data-testid="onboarding-column"]',
+      );
+      expect(column?.classList.contains('max-w-[1440px]')).toBe(wide);
+      expect(column?.classList.contains('max-w-[1120px]')).toBe(!wide);
+    },
+  );
 
   it('returns to Home through the first crumb on any other page', async () => {
     const harness = await open('/onboarding/analyze');

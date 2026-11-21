@@ -6,6 +6,12 @@ import {
   ConnectionChoiceStore,
   type ChoiceNotice,
 } from './connection-choice.store';
+import {
+  CONNECTION_OPTIONS,
+  CONNECTION_OPTION_LIST,
+  connectionColumns,
+  type ConnectionOption,
+} from './connection-options';
 import type { ProviderKind, SelectionView } from './provider-readiness.derive';
 
 interface Case {
@@ -223,7 +229,9 @@ describe('ConnectionChoiceComponent design states 1–13', () => {
     if (scenario.number === 1)
       expect(element.querySelectorAll('input[type="radio"]')).toHaveLength(0);
     else
-      expect(element.querySelectorAll('input[type="radio"]')).toHaveLength(2);
+      expect(element.querySelectorAll('input[type="radio"]')).toHaveLength(
+        CONNECTION_OPTIONS.length,
+      );
     const checked = element.querySelector<HTMLInputElement>(
       'input[type="radio"]:checked',
     );
@@ -239,7 +247,9 @@ describe('ConnectionChoiceComponent design states 1–13', () => {
           ?.getAttribute('aria-disabled'),
       ).toBe('true');
     if (scenario.number === 5)
-      expect(element.querySelectorAll('input:disabled')).toHaveLength(2);
+      expect(element.querySelectorAll('input:disabled')).toHaveLength(
+        CONNECTION_OPTIONS.length,
+      );
     if (scenario.number === 11)
       expect(element.querySelectorAll('[role="alert"]')).toHaveLength(1);
     if (scenario.number === 12) {
@@ -264,5 +274,145 @@ describe('ConnectionChoiceComponent design states 1–13', () => {
         ) ?? element.querySelector<HTMLInputElement>('input[type="radio"]');
       expect(document.activeElement).toBe(radio);
     }
+  });
+});
+
+describe('ConnectionChoiceComponent option list', () => {
+  function render(
+    saved: SelectionView,
+    options?: readonly ConnectionOption[],
+  ): HTMLElement {
+    const savedSignal = signal(saved);
+    const pending = signal<ProviderKind | null>(null);
+    TestBed.configureTestingModule({
+      imports: [ConnectionChoiceComponent],
+      providers: [
+        provideRouter([]),
+        ...(options
+          ? [{ provide: CONNECTION_OPTION_LIST, useValue: options }]
+          : []),
+        {
+          provide: ConnectionChoiceStore,
+          useValue: {
+            saved: savedSignal,
+            pending,
+            phase: signal('idle'),
+            notice: signal<ChoiceNotice>(null),
+            changed: computed(() => false),
+            canConfirm: computed(() => true),
+            target: computed(() => 'workspace'),
+            name: () => 'OpenRouter',
+            nameForPending: () => 'Claude Code',
+            choose: (provider: ProviderKind) => pending.set(provider),
+            cancel: () => pending.set(null),
+            confirm: jest.fn(),
+            retry: jest.fn(),
+          },
+        },
+      ],
+    });
+    const fixture = TestBed.createComponent(ConnectionChoiceComponent);
+    fixture.detectChanges();
+    return fixture.nativeElement as HTMLElement;
+  }
+  const cards = (element: HTMLElement) => [
+    ...element.querySelectorAll<HTMLLabelElement>(
+      '[data-testid="connection-choice-cards"] label',
+    ),
+  ];
+  afterEach(() => TestBed.resetTestingModule());
+
+  it('renders one radio card per option, in list order, with its name and description', () => {
+    const element = render({ kind: 'claude-cli' });
+    const labels = cards(element);
+    expect(labels.map((card) => card.querySelector('input')?.value)).toEqual(
+      CONNECTION_OPTIONS.map((option) => option.id),
+    );
+    labels.forEach((card, index) => {
+      const option = CONNECTION_OPTIONS[index];
+      const name = card.querySelector('[data-testid="connection-option-name"]');
+      expect(name?.textContent?.trim()).toBe(option.name);
+      expect(
+        card
+          .querySelector('[data-testid="connection-option-description"]')
+          ?.textContent?.trim(),
+      ).toBe(option.description);
+      // Inside a label the name is plain text, not a heading.
+      expect(name?.getAttribute('role')).toBeNull();
+    });
+  });
+
+  it('marks the saved option as the main connection and the others as not', () => {
+    const element = render({ kind: 'openai-codex' });
+    const roles = cards(element).map((card) => ({
+      id: card.querySelector('input')?.value,
+      role: card
+        .querySelector('[data-testid="connection-option-role"]')
+        ?.textContent?.trim(),
+    }));
+    expect(roles).toEqual(
+      CONNECTION_OPTIONS.map((option) => ({
+        id: option.id,
+        role:
+          option.id === 'openai-codex'
+            ? 'Main connection'
+            : 'Not your main connection',
+      })),
+    );
+  });
+
+  it('shows no role badge while no option is the saved connection', () => {
+    const element = render({ kind: 'other', name: 'OpenRouter' });
+    expect(
+      element.querySelectorAll('[data-testid="connection-option-role"]'),
+    ).toHaveLength(0);
+    expect(element.textContent).toContain('Your main connection is OpenRouter');
+  });
+
+  it('renders one loading placeholder per option', () => {
+    const element = render({ kind: 'loading' });
+    expect(
+      element.querySelectorAll('[role="status"] .animate-pulse'),
+    ).toHaveLength(CONNECTION_OPTIONS.length);
+  });
+
+  it('sets one grid column per option, so three options render three columns', () => {
+    // Test-only third descriptor; the real list stays at two.
+    const third: ConnectionOption = {
+      ...CONNECTION_OPTIONS[1],
+      id: 'test-third' as ProviderKind,
+      name: 'Third agent',
+      description: 'A test-only coding agent',
+      panelTestId: 'ready-test-third-panel',
+    };
+    const element = render({ kind: 'claude-cli' }, [...CONNECTION_OPTIONS, third]);
+    const grid = element.querySelector<HTMLElement>(
+      '[data-testid="connection-choice-cards"]',
+    );
+    expect(grid?.style.getPropertyValue('--connection-cols')).toBe('3');
+    expect(grid?.className).toContain(
+      'lg:grid-cols-[repeat(var(--connection-cols),minmax(0,1fr))]',
+    );
+    expect(grid?.className).toContain('grid-cols-1');
+    expect(cards(element).map((card) => card.querySelector('input')?.value)).toEqual(
+      ['claude-cli', 'openai-codex', 'test-third'],
+    );
+    expect(
+      cards(element)[2].querySelector('[data-testid="connection-option-name"]')
+        ?.textContent?.trim(),
+    ).toBe('Third agent');
+  });
+
+  it('caps the columns at three and never drops below one', () => {
+    expect([0, 1, 2, 3, 4, 6].map(connectionColumns)).toEqual([1, 1, 2, 3, 3, 3]);
+  });
+
+  it('the real list renders two columns', () => {
+    const grid = render({ kind: 'claude-cli' }).querySelector<HTMLElement>(
+      '[data-testid="connection-choice-cards"]',
+    );
+    expect(grid?.style.getPropertyValue('--connection-cols')).toBe(
+      String(CONNECTION_OPTIONS.length),
+    );
   });
 });
