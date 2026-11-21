@@ -3,7 +3,11 @@
  * is reported as a failed start, the first-turn watchdog, the early
  * `starting` record and the implicit idempotency of a retried start.
  */
-import { denySessionSpawnerHandoffAccess } from './__fixtures__/session-spawner-fs-access';
+import { join } from 'node:path';
+import {
+  denySessionSpawnerHandoffAccess,
+  sessionSpawnerFsKind,
+} from './__fixtures__/session-spawner-fs-access';
 import { mutableMemoryProbe } from '../__fixtures__/memory-probe';
 import { makeHarness, PARENT } from './session-spawner.service.spec';
 import { SESSION_CHILD_FIRST_TURN_TIMEOUT_MS } from './session-child-first-turn.watchdog';
@@ -103,6 +107,43 @@ describe('SessionSpawnerService memory admission', () => {
     expect(created).toHaveBeenCalledTimes(1);
     expect(listed(h)[0].status).not.toBe('queued');
     h.spawner.dispose();
+  });
+
+  it('releases the worktree claim of a queued attach after it starts or fails', async () => {
+    const TASK = 'TASK_2026_2288_5a47';
+    const h = queuedHarness();
+    memory.setBytes(2 * 1024 ** 3);
+    const first = await h.spawner.start(h.request());
+    if (!first.ok) throw new Error('first start failed');
+    h.registry.markEnded(first.child.childSessionId, 'failed', 'ended by the watchdog');
+    h.active.delete(first.child.childSessionId);
+    sessionSpawnerFsKind.current = (path) =>
+      String(path).endsWith(join('specs', TASK, 'task.md')) ? 'file' : undefined;
+    const claims = (): number =>
+      (h.spawner as unknown as { attachClaims: Set<string> }).attachClaims.size;
+    const attach = () => h.request({ taskId: TASK, attachToSessionId: first.child.childSessionId });
+    try {
+      for (const failAttach of [false, true]) {
+        memory.setBytes(0);
+        if (failAttach) {
+          h.provisioner.attach.mockResolvedValueOnce({ ok: false, refusal: 'worktree-failed', detail: 'gone' } as never);
+        }
+        const queued = await h.spawner.start(attach());
+        expect(queued.ok && queued.child.status).toBe('queued');
+        memory.setBytes(2 * 1024 ** 3);
+        jest.advanceTimersByTime(1000);
+        await flush();
+        expect(h.provisioner.attach).toHaveBeenCalled();
+        expect(claims()).toBe(0);
+        if (queued.ok && !failAttach) {
+          h.registry.markEnded(queued.child.childSessionId, 'failed', 'ended');
+          h.active.delete(queued.child.childSessionId);
+        }
+      }
+    } finally {
+      sessionSpawnerFsKind.current = null;
+      h.spawner.dispose();
+    }
   });
 
   it('times out visibly, signals once, and releases its cap', async () => {

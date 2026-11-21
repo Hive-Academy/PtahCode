@@ -28,9 +28,20 @@ jest.mock('node:fs/promises', () => {
       if (override) return override(path);
       return actual.access(path);
     },
+    stat: async (...args: Parameters<typeof actual.stat>) => {
+      const kind = accessHolder.sessionSpawnerFsKind.current?.(args[0]);
+      if (kind === 'missing') throw new Error('ENOENT');
+      if (kind) return { isFile: () => kind === 'file' };
+      return actual.stat(...args);
+    },
   };
 });
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { realpath } from 'node:fs/promises';
+import {
+  sessionSpawnerFsAccess,
+  sessionSpawnerFsKind,
+} from './__fixtures__/session-spawner-fs-access';
 import { tmpdir } from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { join, resolve } from 'path';
@@ -595,6 +606,217 @@ describe('registered same-task attach', () => {
     }
     expect(h.provisioner.attach).not.toHaveBeenCalled();
     h.spawner.dispose();
+  });
+  describe('a child started before its task existed', () => {
+    const TASK = 'TASK_2026_2288_5a47';
+    /** The task carrier exists only at `<worktree>/.ptah/specs/<TASK>/task.md` of `worktree`. */
+    const taskFolderPresent = (
+      worktree: string | null,
+      kind: 'file' | 'directory' = 'file',
+    ): void => {
+      const expected = worktree === null ? null : join(worktree, '.ptah', 'specs', TASK, 'task.md');
+      sessionSpawnerFsKind.current = (path) =>
+        expected !== null && String(path) === expected ? kind : 'missing';
+    };
+    // Other specs import this file and set a shared override once; restore it.
+    let previousAccess: typeof sessionSpawnerFsAccess.current = null;
+    beforeEach(() => {
+      previousAccess = sessionSpawnerFsAccess.current;
+    });
+    afterEach(() => {
+      sessionSpawnerFsAccess.current = previousAccess;
+      sessionSpawnerFsKind.current = null;
+    });
+    it('attaches to an ended child whose record has no task id when the task carrier exists', async () => {
+      const h = makeHarness();
+      const first = await h.spawner.start(h.request());
+      if (!first.ok) throw new Error('first start failed');
+      expect(h.registry.get(first.child.childSessionId)?.taskId).toBeUndefined();
+      h.registry.markEnded(first.child.childSessionId, 'failed', 'ended by the watchdog');
+      h.active.delete(first.child.childSessionId);
+      taskFolderPresent(first.child.worktreePath);
+      const second = await h.spawner.start(
+        h.request({ taskId: TASK, attachToSessionId: first.child.childSessionId }),
+      );
+      expect(second.ok).toBe(true);
+      if (!second.ok) return;
+      expect(second.child.taskId).toBe(TASK);
+      expect(second.child.worktreePath).toBe(first.child.worktreePath);
+      expect(h.provisioner.attach).toHaveBeenCalledTimes(1);
+      h.spawner.dispose();
+    });
+    it('attaches to the handed-off predecessor and to its successor', async () => {
+      const h = makeHarness();
+      const first = await h.spawner.start(h.request());
+      if (!first.ok) throw new Error('first start failed');
+      const predecessor = h.registry.get(first.child.childSessionId);
+      if (!predecessor) throw new Error('predecessor missing');
+      const successorId = randomUUID();
+      h.registry.succeed(
+        predecessor.childSessionId,
+        { ...predecessor, childSessionId: successorId },
+        'handed off',
+      );
+      // The handoff closes the session of the predecessor.
+      h.active.delete(first.child.childSessionId);
+      h.registry.markEnded(successorId, 'failed', 'ended by the watchdog');
+      h.active.delete(successorId);
+      taskFolderPresent(first.child.worktreePath);
+      for (const target of [first.child.childSessionId, successorId]) {
+        const attached = await h.spawner.start(
+          h.request({ taskId: TASK, attachToSessionId: target }),
+        );
+        expect(attached.ok).toBe(true);
+        if (attached.ok) {
+          h.registry.markEnded(attached.child.childSessionId, 'failed', 'done');
+          h.active.delete(attached.child.childSessionId);
+        }
+      }
+      h.spawner.dispose();
+    });
+    it('refuses when the task carrier is missing from the worktree', async () => {
+      const h = makeHarness();
+      const first = await h.spawner.start(h.request());
+      if (!first.ok) throw new Error('first start failed');
+      taskFolderPresent(null);
+      const result = await h.spawner.start(
+        h.request({ taskId: TASK, attachToSessionId: first.child.childSessionId }),
+      );
+      expect(result).toMatchObject({
+        ok: false,
+        refusal: 'branch-exists',
+        detail: expect.stringContaining('task carrier'),
+      });
+      expect(h.provisioner.attach).not.toHaveBeenCalled();
+      h.spawner.dispose();
+    });
+    it('refuses the fallback while a live session works in the worktree', async () => {
+      const h = makeHarness();
+      const first = await h.spawner.start(h.request());
+      if (!first.ok) throw new Error('first start failed');
+      taskFolderPresent(first.child.worktreePath);
+      const result = await h.spawner.start(
+        h.request({ taskId: TASK, attachToSessionId: first.child.childSessionId }),
+      );
+      expect(result).toMatchObject({
+        ok: false,
+        refusal: 'branch-exists',
+        detail: expect.stringContaining('live session'),
+      });
+      expect(h.provisioner.attach).not.toHaveBeenCalled();
+      h.spawner.dispose();
+    });
+    it('refuses the fallback when the user resumed the ended child in its tab', async () => {
+      const h = makeHarness();
+      const first = await h.spawner.start(h.request());
+      if (!first.ok) throw new Error('first start failed');
+      // The record is ended, but its session is active: the user resumed it.
+      h.registry.markEnded(first.child.childSessionId, 'failed', 'ended by the watchdog');
+      taskFolderPresent(first.child.worktreePath);
+      const attach = h.request({ taskId: TASK, attachToSessionId: first.child.childSessionId });
+      expect(await h.spawner.start(attach)).toMatchObject({
+        ok: false,
+        refusal: 'branch-exists',
+        detail: expect.stringContaining('live session'),
+      });
+      expect(h.provisioner.attach).not.toHaveBeenCalled();
+      h.active.delete(first.child.childSessionId);
+      expect((await h.spawner.start(attach)).ok).toBe(true);
+      h.spawner.dispose();
+    });
+    it('refuses a task carrier that is a directory', async () => {
+      const h = makeHarness();
+      const first = await h.spawner.start(h.request());
+      if (!first.ok) throw new Error('first start failed');
+      h.registry.markEnded(first.child.childSessionId, 'failed', 'ended');
+      h.active.delete(first.child.childSessionId);
+      taskFolderPresent(first.child.worktreePath, 'directory');
+      const result = await h.spawner.start(
+        h.request({ taskId: TASK, attachToSessionId: first.child.childSessionId }),
+      );
+      expect(result).toMatchObject({
+        ok: false,
+        refusal: 'branch-exists',
+        detail: expect.stringContaining('task carrier'),
+      });
+      expect(h.provisioner.attach).not.toHaveBeenCalled();
+      h.spawner.dispose();
+    });
+    it('admits only one of two concurrent fallback attaches to the same ended child', async () => {
+      const h = makeHarness();
+      const first = await h.spawner.start(h.request());
+      if (!first.ok) throw new Error('first start failed');
+      h.registry.markEnded(first.child.childSessionId, 'failed', 'ended by the watchdog');
+      h.active.delete(first.child.childSessionId);
+      taskFolderPresent(first.child.worktreePath);
+      const attach = h.request({ taskId: TASK, attachToSessionId: first.child.childSessionId });
+      const results = await Promise.all([h.spawner.start(attach), h.spawner.start(attach)]);
+      expect(results.filter((result) => result.ok)).toHaveLength(1);
+      expect(results.find((result) => !result.ok)).toMatchObject({
+        refusal: 'branch-exists',
+        detail: expect.stringContaining('live session'),
+      });
+      expect(h.provisioner.attach).toHaveBeenCalledTimes(1);
+      h.spawner.dispose();
+    });
+    it('refuses a task carrier that resolves outside the worktree', async () => {
+      const h = makeHarness();
+      const first = await h.spawner.start(h.request());
+      if (!first.ok) throw new Error('first start failed');
+      h.registry.markEnded(first.child.childSessionId, 'failed', 'ended');
+      h.active.delete(first.child.childSessionId);
+      taskFolderPresent(first.child.worktreePath);
+      jest.mocked(realpath).mockImplementation(async (path) =>
+        String(path).endsWith(join('specs', TASK, 'task.md')) ? join('/outside', TASK, 'task.md') : String(path),
+      );
+      try {
+        const result = await h.spawner.start(
+          h.request({ taskId: TASK, attachToSessionId: first.child.childSessionId }),
+        );
+        expect(result).toMatchObject({
+          ok: false,
+          refusal: 'branch-exists',
+          detail: expect.stringContaining('outside the worktree'),
+        });
+        expect(h.provisioner.attach).not.toHaveBeenCalled();
+      } finally {
+        jest.mocked(realpath).mockImplementation(async (path) => String(path));
+        h.spawner.dispose();
+      }
+    });
+    it('refuses a task id that is not a plain id before it builds a path', async () => {
+      const h = makeHarness();
+      const first = await h.spawner.start(h.request());
+      if (!first.ok) throw new Error('first start failed');
+      sessionSpawnerFsAccess.current = async () => undefined;
+      const result = await h.spawner.start(
+        h.request({ taskId: '../../etc', attachToSessionId: first.child.childSessionId }),
+      );
+      expect(result).toMatchObject({ ok: false, refusal: 'invalid-arguments' });
+      expect(h.provisioner.attach).not.toHaveBeenCalled();
+      h.spawner.dispose();
+    });
+    it('names the failed check in the refusal', async () => {
+      const h = makeHarness();
+      const first = await h.spawner.start(h.request({ taskId: 'TASK_2026_584' }));
+      if (!first.ok) throw new Error('first start failed');
+      const cases: readonly [Partial<Parameters<typeof h.request>[0]>, string][] = [
+        [{ taskId: 'TASK_2026_585' }, 'another task'],
+        [{ attachToSessionId: randomUUID() }, 'not a registered child'],
+        [{ branch: 'feat/unrelated' }, 'another branch'],
+      ];
+      for (const [changes, text] of cases) {
+        const result = await h.spawner.start(
+          h.request({
+            taskId: 'TASK_2026_584',
+            attachToSessionId: first.child.childSessionId,
+            ...changes,
+          }),
+        );
+        expect(result).toMatchObject({ ok: false, detail: expect.stringContaining(text) });
+      }
+      h.spawner.dispose();
+    });
   });
   it('refuses another caller attaching to an owned child', async () => {
     const h = makeHarness();
