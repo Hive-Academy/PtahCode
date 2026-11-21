@@ -326,6 +326,24 @@ describe('MessageDispatchService', () => {
       expect(setMessagesMock).not.toHaveBeenCalled();
     });
 
+    it('queues a refused earlier send ahead of a message sent while it was in flight', async () => {
+      let refuse!: (outcome: unknown) => void;
+      sendMock.mockImplementationOnce(
+        () => new Promise((resolve) => { refuse = resolve; }),
+      );
+      const first = service.sendOrQueueMessage('first', { tabId: 'tab-1' });
+      // Sent while the first idle-only send is still in flight.
+      const second = service.sendOrQueueMessage('second', { tabId: 'tab-1' });
+      await Promise.resolve();
+      expect(sendMock).toHaveBeenCalledTimes(1);
+      expect(enqueueMock).not.toHaveBeenCalled();
+
+      refuse({ success: false, turnInFlight: true });
+      await Promise.all([first, second]);
+
+      expect(enqueueMock.mock.calls.map((c) => c[1])).toEqual(['first', 'second']);
+    });
+
     it('when not streaming, dispatches via MessageSender.send', async () => {
       activeTabStatus.set('loaded');
       await service.sendOrQueueMessage('hello');

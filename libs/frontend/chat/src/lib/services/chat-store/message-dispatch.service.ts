@@ -42,6 +42,11 @@ export class MessageDispatchService {
   private readonly messageSender = inject(MessageSenderService);
   private readonly followUps = inject(FollowUpQueueService);
   private readonly permissionHandler = inject(PermissionHandlerService);
+  /**
+   * Per tab, the idle-only send in flight. A message sent meanwhile queues
+   * only after it settles, so a refused earlier send is queued first.
+   */
+  private readonly idleSends = new Map<string, Promise<void>>();
   private readonly sendLock = inject(CommandCenterSendLockService);
 
   /**
@@ -111,8 +116,13 @@ export class MessageDispatchService {
         this.messageSender.isStartPending?.(resolvedTabId) ||
         this.sendLock.isHeld(resolvedTabId, options?.ownerToken) ||
         // Something is already waiting: a normal send would overtake it.
-        this.followUps.hasPending(resolvedTabId))
+        this.followUps.hasPending(resolvedTabId) ||
+        this.idleSends.has(resolvedTabId))
     ) {
+      // An earlier idle-only send may still be refused and queued: wait for
+      // its outcome so this message lands behind it, in send order.
+      const earlier = this.idleSends.get(resolvedTabId);
+      if (earlier) await earlier;
       // Queue first, always: the message waits as a queued card with
       // Interrupt & send / Send now. It never answers an open permission
       // prompt — that stays for the user to decide.
@@ -120,10 +130,26 @@ export class MessageDispatchService {
     }
     const previousTerminalReason = dispatchTab?.lastTerminalReason;
     // Idle-only: only this path can fall back to the queue on a refusal.
-    const outcome = await this.messageSender.send(content, {
+    const sending = this.messageSender.send(content, {
       ...options,
       idleOnly: true,
     });
+    const settled = sending.then(
+      () => undefined,
+      () => undefined,
+    );
+    if (resolvedTabId != null) this.idleSends.set(resolvedTabId, settled);
+    let outcome: SendOutcome;
+    try {
+      outcome = await sending;
+    } finally {
+      if (
+        resolvedTabId != null &&
+        this.idleSends.get(resolvedTabId) === settled
+      ) {
+        this.idleSends.delete(resolvedTabId);
+      }
+    }
     // The renderer saw the tab idle but the backend turn still runs: the
     // idle-only send was refused with nothing sent, so queue it like any
     // other mid-turn message.

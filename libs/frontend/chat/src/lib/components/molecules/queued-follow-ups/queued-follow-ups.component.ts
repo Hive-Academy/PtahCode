@@ -57,8 +57,7 @@ const PREVIEW_LENGTH = 100;
                   }}</span>
                 </header>
                 <p
-                  class="mt-1 whitespace-pre-wrap break-words line-clamp-6 text-base-content"
-                  [title]="item.content"
+                  class="mt-1 whitespace-pre-wrap break-words text-base-content"
                 >{{ item.content }}</p>
                 @if (item.note) {
                   <p class="mt-1 text-xs text-warning" role="status">
