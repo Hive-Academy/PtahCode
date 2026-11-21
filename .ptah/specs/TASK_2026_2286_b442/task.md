@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_2286_b442
-status: in_progress
+status: in_review
 type: BUGFIX
 title: Fix Antigravity usage reader and redesign analytics tables
 depends_on: []
