@@ -65,8 +65,8 @@ Two lanes ran. Each made one agy turn: 23,141 and 24,768 tokens (input plus outp
 The parent pid 26244 is the app's `electron.exe` (child of the Playwright-launched pid 28416):
 
 ```
-25584  parent 26244  C:\Users\abdal\AppData\Local\agy\bin\agy.EXE acp                                  (lane 1, default -> plan)
-28656  parent 26244  C:\Users\abdal\AppData\Local\agy\bin\agy.EXE acp --dangerously-skip-permissions   (lane 2, yolo)
+25584  parent 26244  C:\Users\<user>\AppData\Local\agy\bin\agy.EXE acp                                  (lane 1, default -> plan)
+28656  parent 26244  C:\Users\<user>\AppData\Local\agy\bin\agy.EXE acp --dangerously-skip-permissions   (lane 2, yolo)
 ```
 
 App log (`evidence/app-log-lane-excerpt.log`):
