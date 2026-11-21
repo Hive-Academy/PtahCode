@@ -543,26 +543,74 @@ describe('AntigravityCliAdapter — ACP lane', () => {
       { optionId: 'reject', name: 'Reject', kind: 'reject_once' },
     ];
 
+    const EXEC_CALL = { toolCallId: 'call-1', title: 'run_command rm -rf build', kind: 'execute' };
+
     async function answerFor(
       options: Partial<CliCommandOptions>,
-    ): Promise<{ answer: unknown; args: readonly string[] }> {
+      toolCall: Record<string, unknown> = EXEC_CALL,
+    ): Promise<{ answer: unknown; args: readonly string[]; output: string; infos: string[] }> {
       let answer: unknown;
+      const chunks: string[] = [];
       const lane = await startLane(TOOL_USE, () => 'result', { mcpPort: undefined, ...options }, {
         script: (agent) =>
           agent.handle('session/prompt', async (params, fake) => {
             const reply = await fake.request('session/request_permission', {
               sessionId: params['sessionId'],
-              toolCall: { toolCallId: 'call-1', title: 'run_command rm -rf build', kind: 'execute' },
+              toolCall,
               options: PERMISSION_OPTIONS,
             });
             answer = reply.result;
             return { result: { stopReason: 'end_turn' } };
           }),
       });
+      lane.handle.onOutput((chunk) => chunks.push(chunk));
       await lane.handle.done;
       lane.handle.abort.abort();
-      return { answer, args: lane.spawn().args };
+      return {
+        answer,
+        args: lane.spawn().args,
+        output: chunks.join(''),
+        infos: lane.segments
+          .filter((segment) => segment.type === 'info' && !segment.turnTelemetry)
+          .map((segment) => segment.content),
+      };
     }
+
+    const ALLOW = { outcome: { outcome: 'selected', optionId: 'allow' } };
+    const REJECT = { outcome: { outcome: 'selected', optionId: 'reject' } };
+    const MODE_CASES: ReadonlyArray<[string, Record<string, unknown>, unknown, unknown]> = [
+      // label, toolCall, plan answer, auto-edit answer
+      ['read-only', { toolCallId: 'c', kind: 'read', title: 'Read README.md' }, ALLOW, ALLOW],
+      [
+        'ptah_lane MCP',
+        {
+          toolCallId: 'c',
+          kind: 'other',
+          name: 'mcp_ptah_lane_ptah_search_files',
+          title: 'Run mcp_ptah_lane_ptah_search_files',
+        },
+        ALLOW,
+        ALLOW,
+      ],
+      ['edit', { toolCallId: 'c', kind: 'edit', title: 'Edit src/a.ts' }, REJECT, ALLOW],
+      ['exec', EXEC_CALL, REJECT, REJECT],
+    ];
+
+    it.each(MODE_CASES)('%s request: plan and auto-edit answers (live F1)', async (_label, toolCall, plan, autoEdit) => {
+      expect((await answerFor({ permission: 'plan' }, toolCall)).answer).toEqual(plan);
+      expect((await answerFor({ permission: 'auto-edit' }, toolCall)).answer).toEqual(autoEdit);
+    });
+
+    it.each(MODE_CASES)('%s request: yolo grants', async (_label, toolCall) => {
+      expect((await answerFor({ permission: 'yolo' }, toolCall)).answer).toEqual(ALLOW);
+    });
+
+    it('shows a refusal in the lane output and segments, naming the tool and mode', async () => {
+      const { output, infos } = await answerFor({ permission: 'plan' });
+      const line = 'Refused permission for run_command rm -rf build in plan mode: auto-approve is off';
+      expect(infos).toContain(line);
+      expect(output).toContain(`[Antigravity] ${line}`);
+    });
 
     it.each(['auto-edit', 'plan'] as const)(
       'refuses a shell request on a %s lane, without the skip flag',

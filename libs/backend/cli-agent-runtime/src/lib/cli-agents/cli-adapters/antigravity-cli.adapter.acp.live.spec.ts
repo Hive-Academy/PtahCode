@@ -276,6 +276,50 @@ const text = (segments: readonly CliOutputSegment[]): string =>
     expect(fileHash(MCP_CONFIG)).toBe(before);
   }, 300_000);
 
+  it('calls the ptah_lane MCP tool in plan mode, the default lane permission (live F1)', async () => {
+    const mcp = await startTestMcpServer();
+    try {
+      const run = await startLane(cwd, {
+        task: 'Call the ptah_echo_token MCP tool and reply with exactly the token it returns, nothing else.',
+        mcpPort: mcp.port,
+        mcpToken: MCP_TOKEN,
+        permission: 'plan',
+      });
+      await expect(run.handle.done).resolves.toBe(0);
+      // Without --dangerously-skip-permissions agy asks before an MCP call
+      // (`agy_tool_safety`: unsupported_tool); the lane must grant it.
+      const asked = run.recorder.envelopes.filter(
+        (envelope) => envelope.dir === 'in' && envelope.msg?.['method'] === 'session/request_permission',
+      );
+      expect(asked.length).toBeGreaterThan(0);
+      for (const request of asked) {
+        const params = request.msg?.['params'] as
+          | { options?: Array<Record<string, unknown>> }
+          | undefined;
+        const options = params?.options ?? [];
+        const reply = run.recorder.envelopes.find(
+          // Our answer: same id, no method (our own requests carry one).
+          (envelope) =>
+            envelope.dir === 'out' &&
+            envelope.msg?.['method'] === undefined &&
+            envelope.msg?.['id'] === request.msg?.['id'],
+        );
+        const chosen = (reply?.msg?.['result'] as { outcome?: { optionId?: string } } | undefined)
+          ?.outcome?.optionId;
+        expect(options.find((option) => option['optionId'] === chosen)?.['kind']).toMatch(/^allow_/);
+      }
+      expect(mcp.log.map((entry) => entry.method)).toContain('tools/call');
+      const refusals = run.segments.filter((segment) =>
+        segment.content.startsWith('Refused permission'),
+      );
+      expect(refusals).toEqual([]);
+      expect(text(run.segments)).toContain(TOOL_TOKEN);
+      await stopAndCheckTree(run);
+    } finally {
+      mcp.server.close();
+    }
+  }, 300_000);
+
   it('interrupts mid-turn, keeps the process, runs the next message, and stops the whole tree', async () => {
     const run = await startLane(cwd, {});
     await expect(run.handle.done).resolves.toBe(0);

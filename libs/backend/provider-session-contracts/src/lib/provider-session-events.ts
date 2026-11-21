@@ -144,7 +144,15 @@ export type ProviderSessionEventBody =
     }
   | { readonly type: 'modeChanged'; readonly mode: string }
   | { readonly type: 'configChanged' }
-  | { readonly type: 'info'; readonly message: string }
+  | {
+      readonly type: 'info';
+      readonly message: string;
+      /**
+       * `permission-refused`: a headless lane refused a tool request. A lane
+       * writes it to its output too, so the parent reading the lane sees it.
+       */
+      readonly notice?: 'permission-refused';
+    }
   | { readonly type: 'diagnostic'; readonly stream: 'stderr'; readonly line: string }
   | { readonly type: 'error'; readonly error: ProviderSessionError }
   | {

@@ -20,9 +20,11 @@ import {
 import type { AcpSpawnOptions } from '../acp-process-transport';
 import { createAcpSession, type AcpSession } from '../acp-session-runtime';
 import type { AcpRequestFailure, AcpSessionOptions } from '../acp-vendor-profile';
+import type { RequestPermissionRequest } from '@agentclientprotocol/sdk';
 import {
   ANTIGRAVITY_ACP_PTAH_MCP_NAME,
   antigravityAcpProfile,
+  antigravityGrantsWithoutAutoApprove,
   antigravitySkipsPermissions,
 } from './antigravity-acp-profile';
 
@@ -93,6 +95,78 @@ describe('antigravityAcpProfile — spawn', () => {
     const posix = withPlatform('linux', () => antigravityAcpProfile.buildSpawn(base));
     expect(posix.env).toBeUndefined();
     expect(posix.needsConsole).toBeUndefined();
+  });
+});
+
+describe('antigravityAcpProfile — headless grants in narrower modes (live F1)', () => {
+  const request = (toolCall: Record<string, unknown>): RequestPermissionRequest =>
+    ({
+      sessionId: 's',
+      toolCall: { toolCallId: 'c', ...toolCall },
+      options: [],
+    }) as unknown as RequestPermissionRequest;
+
+  /** Shaped like agy's MCP calls (`antigravity-p3-ptah-mcp-tool-use.ndjson`). */
+  const PTAH_LANE_SEARCH = request({
+    kind: 'other',
+    name: 'mcp_ptah_lane_ptah_search_files',
+    title: 'Run mcp_ptah_lane_ptah_search_files',
+  });
+  const CASES: ReadonlyArray<[string, RequestPermissionRequest, boolean, boolean]> = [
+    // label, request, plan grants, auto-edit grants
+    ['read', request({ kind: 'read', title: 'Read README.md' }), true, true],
+    ['search', request({ kind: 'search', title: 'grep TODO' }), true, true],
+    ['fetch', request({ kind: 'fetch', title: 'Fetch docs' }), true, true],
+    ['think', request({ kind: 'think', title: 'Think' }), true, true],
+    ['ptah_lane MCP tool (name)', PTAH_LANE_SEARCH, true, true],
+    [
+      'ptah_lane MCP tool (title only)',
+      request({ kind: 'other', title: 'Run mcp_ptah_lane_ptah_agent_report' }),
+      true,
+      true,
+    ],
+    [
+      'the persistent `ptah` entry (no lane bearer)',
+      request({ kind: 'other', name: 'mcp_ptah_ptah_search_files', title: 'Run mcp_ptah_ptah_search_files' }),
+      false,
+      false,
+    ],
+    [
+      'another MCP server',
+      request({ kind: 'other', name: 'mcp_github_create_issue', title: 'Run mcp_github_create_issue' }),
+      false,
+      false,
+    ],
+    [
+      'exec titled like a ptah_lane tool',
+      request({ kind: 'execute', name: 'mcp_ptah_lane_x', title: 'Run mcp_ptah_lane_x' }),
+      false,
+      false,
+    ],
+    ['edit', request({ kind: 'edit', title: 'Edit src/a.ts' }), false, true],
+    ['delete', request({ kind: 'delete', title: 'Delete build/' }), false, false],
+    ['move', request({ kind: 'move', title: 'Move a -> b' }), false, false],
+    ['execute', request({ kind: 'execute', title: 'npm test' }), false, false],
+    ['switch_mode', request({ kind: 'switch_mode', title: 'Leave plan' }), false, false],
+    ['no kind, no name', request({ title: 'Something' }), false, false],
+  ];
+
+  it.each(CASES)('%s: plan %s, auto-edit %s', (_label, asked, plan, autoEdit) => {
+    expect(antigravityGrantsWithoutAutoApprove(asked, { permission: 'plan' })).toBe(plan);
+    expect(antigravityGrantsWithoutAutoApprove(asked, { permission: 'auto-edit' })).toBe(autoEdit);
+  });
+
+  it.each([undefined, 'ask', 'yolo'] as const)('grants nothing extra for permission %s', (permission) => {
+    expect(antigravityGrantsWithoutAutoApprove(PTAH_LANE_SEARCH, { permission })).toBe(false);
+  });
+
+  it('never throws on a malformed request', () => {
+    expect(
+      antigravityGrantsWithoutAutoApprove(
+        { toolCall: null } as unknown as RequestPermissionRequest,
+        { permission: 'plan' },
+      ),
+    ).toBe(false);
   });
 });
 

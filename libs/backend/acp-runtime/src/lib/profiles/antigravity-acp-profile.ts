@@ -27,7 +27,10 @@
  *   process keeps running (`antigravity-p3-cancel-then-continue.ndjson`), so
  *   the cancel behaviour is `await-reply`.
  */
-import type { McpServer } from '@agentclientprotocol/sdk';
+import type {
+  McpServer,
+  RequestPermissionRequest,
+} from '@agentclientprotocol/sdk';
 import { readAcpErrorDetail } from '../acp-vendor-profile';
 import type {
   AcpRequestFailure,
@@ -82,6 +85,70 @@ export function antigravitySkipsPermissions(
 ): boolean {
   if (options.permission === 'yolo') return true;
   return options.permission === undefined && options.autoApprove !== false;
+}
+
+/** ACP tool kinds that change nothing: granted in every narrower mode. */
+const READ_ONLY_KINDS: ReadonlySet<string> = new Set([
+  'read',
+  'search',
+  'fetch',
+  'think',
+]);
+
+/**
+ * Kinds each narrower lane permission grants on top of the read-only ones.
+ * `plan` adds nothing (edits, deletes, moves, exec and `switch_mode`, which
+ * would leave plan, stay refused); `auto-edit` adds file edits, as agy's
+ * `accept-edits` mode does, and still refuses exec, deletes and moves.
+ */
+const EXTRA_KINDS: Readonly<Record<string, ReadonlySet<string>>> = {
+  plan: new Set(),
+  'auto-edit': new Set(['edit']),
+};
+
+/** A tool of the lane's own Ptah MCP server, as agy names it (`mcp_ptah_lane_<tool>`). */
+const PTAH_LANE_TOOL = new RegExp(`^mcp_${ANTIGRAVITY_ACP_PTAH_MCP_NAME}_\\w+$`);
+/** agy titles an MCP call `Run <tool name>`. */
+const PTAH_LANE_TITLE = new RegExp(`^Run mcp_${ANTIGRAVITY_ACP_PTAH_MCP_NAME}_\\w+$`);
+
+function recordField(value: unknown, key: string): unknown {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)[key]
+    : undefined;
+}
+
+/**
+ * Whether the request is a call to the lane's own Ptah MCP server. agy sends
+ * MCP calls with kind `other`, its own `name` field (`mcp_ptah_lane_<tool>`)
+ * and the title `Run <name>`. A request of any mutating kind never counts.
+ */
+function isPtahLaneTool(toolCall: unknown): boolean {
+  const kind = recordField(toolCall, 'kind');
+  if (kind !== undefined && kind !== 'other') return false;
+  const name = recordField(toolCall, 'name');
+  if (typeof name === 'string') return PTAH_LANE_TOOL.test(name);
+  const title = recordField(toolCall, 'title');
+  return typeof title === 'string' && PTAH_LANE_TITLE.test(title);
+}
+
+/**
+ * The headless grant of a `plan` or `auto-edit` lane (live F1). Read-only
+ * kinds and the lane's own Ptah MCP tools, which enforce their own access,
+ * are granted; `auto-edit` adds file edits. Everything else is refused, so
+ * S1 holds: no exec, delete or move without yolo.
+ */
+export function antigravityGrantsWithoutAutoApprove(
+  request: RequestPermissionRequest,
+  options: Pick<AcpSessionOptions, 'permission'>,
+): boolean {
+  const extra = options.permission ? EXTRA_KINDS[options.permission] : undefined;
+  if (!extra) return false;
+  const toolCall = recordField(request, 'toolCall');
+  const kind = recordField(toolCall, 'kind');
+  if (typeof kind === 'string' && (READ_ONLY_KINDS.has(kind) || extra.has(kind))) {
+    return true;
+  }
+  return isPtahLaneTool(toolCall);
 }
 
 function describeAntigravityError(
@@ -161,6 +228,8 @@ export const antigravityAcpProfile: AcpVendorProfile = {
     }
     return entries;
   },
+
+  grantsWithoutAutoApprove: antigravityGrantsWithoutAutoApprove,
 
   describeError: describeAntigravityError,
 };

@@ -366,8 +366,11 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
   ): void => {
     emit({ type: 'error', error: { code, message } });
   };
-  const emitInfo = (message: string): void => {
-    emit({ type: 'info', message });
+  const emitInfo = (
+    message: string,
+    notice?: 'permission-refused',
+  ): void => {
+    emit({ type: 'info', message, ...(notice ? { notice } : {}) });
   };
 
   /** Kill a generation's child once, unless it already exited (an exited pid may be reused). */
@@ -405,8 +408,14 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
     if (!config.approvals) {
       const decision = decideAcpPermission(request, {
         autoApprove: options.autoApprove,
+        grant: profile.grantsWithoutAutoApprove
+          ? (asked) => profile.grantsWithoutAutoApprove?.(asked, options) === true
+          : undefined,
+        mode: options.permission,
       });
-      if (decision.info) emitInfo(decision.info);
+      if (decision.info) {
+        emitInfo(decision.info, decision.refused ? 'permission-refused' : undefined);
+      }
       if (decision.refused && promptInFlight && !refusedThisTurn) {
         refusedThisTurn = decision.toolTitle ?? FALLBACK_REFUSED_TITLE;
       }

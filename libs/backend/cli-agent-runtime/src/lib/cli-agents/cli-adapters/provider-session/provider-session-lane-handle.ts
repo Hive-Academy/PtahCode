@@ -174,8 +174,12 @@ export function createProviderSessionLaneHandle(
       return;
     }
     if (event.type === 'textDelta') output.emit(event.delta);
-    if (event.type === 'error') {
-      output.emit(`\n[${name}] ${event.error.message}\n`);
+    // A refused tool request reaches the lane's output too: the parent reads
+    // the output, and a refusal must never look like a silent empty turn.
+    if (event.type === 'error' || (event.type === 'info' && event.notice === 'permission-refused')) {
+      output.emit(
+        `\n[${name}] ${event.type === 'error' ? event.error.message : event.message}\n`,
+      );
     }
     for (const item of projectToCliSegments(event)) segment.emit(item);
     // A failure already reaches the execution tree as its `error` segment

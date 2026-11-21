@@ -79,6 +79,7 @@ export type {
 export {
   ANTIGRAVITY_ACP_PTAH_MCP_NAME,
   antigravityAcpProfile,
+  antigravityGrantsWithoutAutoApprove,
   antigravitySkipsPermissions,
 } from './lib/profiles/antigravity-acp-profile';
 export { grokAcpProfile } from './lib/profiles/grok-acp-profile';

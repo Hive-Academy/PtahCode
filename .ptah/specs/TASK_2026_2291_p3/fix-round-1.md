@@ -86,3 +86,58 @@ Not addressed: the remaining Minor items. These are the `detect()` catch, the se
 - `npx ts-node --transpile-only tools/degradation-audit/check-degradation.ts`: exit 0, `libs/backend/cli-agent-runtime: 1 ok (baseline 1)` (the existing `lane-mcp-credentials.ts:102`) (`.ptah/tmp/p3-r2-degradation.log`).
 - Live `PTAH_LIVE_AGY=1` `antigravity-cli.adapter.acp.live.spec.ts`: `Tests: 2 passed, 2 total` (30.5 s) (`.ptah/tmp/p3-r2-live-lane.log`). Afterwards, `tasklist /FI "IMAGENAME eq agy.exe"` printed `INFO: No tasks are running which match the specified criteria.`
 - All changed files use LF line endings. Nothing is staged or committed.
+
+## Round 3 (live F1)
+
+Input: `electron-live-check.md` finding F1.
+
+- A lane with the default permission resolves to `plan`.
+- In plan mode, agy 1.5.14 sends `session/request_permission` for every MCP call (`agy_tool_safety: unsupported_tool`).
+- S1's `autoApprove: false` refused all of them, including `mcp_ptah_lane_ptah_search_files`.
+- The lane ended `completed`, exit 0, with no output, and `ptah_agent_read` showed nothing.
+
+### Stream-json comparison (what the old lane passed per mode)
+
+Sources: `lane-spawn-policy.ts` `antigravityArgv`, `antigravity-cli.adapter.ts` `buildAntigravityArgs`, and the adapter header note on `--dangerously-skip-permissions`. agy has no `--approval-mode` or `--yolo` flag; those are gemini-cli flags. agy takes `--mode` and `--dangerously-skip-permissions`.
+
+| Lane permission | stream-json argv | Who decided tool approvals | ACP lane now |
+|---|---|---|---|
+| none, auto-approve on | `--dangerously-skip-permissions` | nobody; everything runs | Same flag. agy sends no request. |
+| none, `autoApprove: false` | no flag | agy's interactive prompt. The adapter notes "required or file-writing tool calls hang waiting for interactive approval": there was no Ptah route, so the turn ran into `--print-timeout`. | Every request is refused, and the refusal is shown. |
+| `plan` | `--mode plan`, skip flag removed | agy's plan mode. Anything it prompted for hung as above. | ACP mode `plan`. Ptah grants read-only kinds and `ptah_lane` MCP tools, and refuses the rest visibly. |
+| `auto-edit` | `--mode accept-edits`, skip flag removed | agy's accept-edits mode. Prompts hung as above. | ACP mode `accept-edits`. Also grants `edit`. Exec, delete, move and `switch_mode` are refused. |
+| `yolo` | `--dangerously-skip-permissions` | nobody | Same flag, ACP mode `auto`. The sink grants any request agy still sends. |
+
+The stream-json lane never answered an approval. A tool that needed one either ran under the skip flag or hung until the print timeout. Nobody ever checked live whether `agy -p --mode plan` prompted for MCP tools; the live check says so. The ACP grant set follows each mode's intent instead. Plan mode may read, accept-edits may also edit, and only yolo or an unattended lane may execute.
+
+### Changes
+
+| # | Item | Change | Proving spec |
+|---|---|---|---|
+| 1 | Plan mode refused read-only and Ptah tools | New optional profile hook `AcpVendorProfile.grantsWithoutAutoApprove(request, options)` (`acp-vendor-profile.ts`). The runtime hands it to `decideAcpPermission` as `grant` (`acp-session-runtime.ts`, `answerPermission`). With auto-approve off, a request the hook accepts gets `allow_once`. `antigravityGrantsWithoutAutoApprove` (`antigravity-acp-profile.ts`) grants the kinds `read`, `search`, `fetch` and `think`, plus the lane's own Ptah MCP tools. A Ptah tool must have kind `other` or no kind. Its agy `name` must match `^mcp_ptah_lane_\w+$`; without a `name`, its title must match `^Run mcp_ptah_lane_\w+$`. Any other kind never counts as a Ptah tool, so an `execute` titled like one is still refused. Tools of the persistent `ptah` entry (`mcp_ptah_*`, no lane bearer) and of other MCP servers are refused. Grok has no hook, so its behaviour is unchanged. | `antigravity-acp-profile.spec.ts`, "headless grants in narrower modes (live F1)": 15 request shapes, each in plan and auto-edit. No permission, `ask` and yolo grant nothing extra. A malformed request does not throw. `acp-permission-policy.spec.ts`: `grant` is honoured with auto-approve off. |
+| 2 | Accept-edits | `auto-edit` adds `edit`. `delete`, `move`, `execute` and `switch_mode` stay refused (decision below). | The same table. `antigravity-cli.adapter.acp.spec.ts`, "%s request: plan and auto-edit answers (live F1)", over the real fake-agent wire: read-only is allow/allow, ptah_lane MCP is allow/allow, edit is reject/allow, exec is reject/reject. Yolo grants all four. |
+| 3 | Visible refusals | `decideAcpPermission` now names the lane mode: `Refused permission for <title> in plan mode: auto-approve is off`. The runtime marks that info with `notice: 'permission-refused'`, a new optional field on the `info` event (`provider-session-events.ts`). The lane handle also writes these infos to its output as `[Antigravity] Refused permission …`, so `ptah_agent_read` shows them. The segment stays `info`. | `antigravity-cli.adapter.acp.spec.ts`, "shows a refusal in the lane output and segments, naming the tool and mode". Policy spec, "names the lane mode in a refusal". |
+| 4 | Live proof | New gated live case, "calls the ptah_lane MCP tool in plan mode, the default lane permission (live F1)". It requires at least one `session/request_permission` from agy, each answered with an `allow_*` option. It also requires a `tools/call` at the test MCP server, no `Refused permission` segment, and the token in the reply. | Live run below: passed. |
+
+### Decisions (round 3)
+
+| Decision | Options | Evidence | Reversible |
+|---|---|---|---|
+| The grant lives in a profile hook, not in `decideAcpPermission` | a generic kind ladder in the policy | The mode meanings (`plan`, `auto-edit`) and the `ptah_lane` name are agy-specific. Grok and other ACP agents keep "auto-approve off refuses everything". | yes |
+| `auto-edit` grants `edit` only, not `delete` or `move` | edits plus deletes and moves | The brief: "approve edits too, but not exec". agy names the mode accept-edits, and the brief itself listed deletes and moves separately from edits. This is the narrowest choice. | yes: add the kinds to `EXTRA_KINDS['auto-edit']` |
+| A Ptah tool is recognised by agy's `name` field first, then by the `Run <name>` title | title only | The recordings carry `name: "mcp_ptah_ptah_echo_token"`, `kind: "other"`, `title: "Run …"` (`antigravity-p3-ptah-mcp-tool-use.ndjson`). | yes |
+| A refusal stays an `info` segment plus an output line, not an `error` | an error segment | An `error` segment would feed the failure and rate-limit readers and the failed-terminal de-duplication. A plan lane refusing an edit is policy, not a failure. | yes |
+
+Residual risk: a user MCP server whose name starts with `ptah_lane` (for example `ptah_lane_x` in `mcp_config.json`) would match the prefix and be granted in plan mode. This is unlikely, and that server is the user's own.
+
+### Round 3 checks
+
+- **Typecheck:** `npx tsc --noEmit --project` on `tsconfig.lib.json` and `tsconfig.spec.json` of `provider-session-contracts`, `acp-runtime` and `cli-agent-runtime`: all six `exit 0` (`.ptah/tmp/p3-r3-tsc.log`).
+- **acp-runtime:** `npx jest --config libs/backend/acp-runtime/jest.config.ts --runInBand --coverage=false --runTestsByPath <14 non-live specs>`: `Test Suites: 14 passed, 14 total`, `Tests: 206 passed, 206 total` (`.ptah/tmp/p3-r3-acp-runtime.log`).
+- **provider-session-contracts:** `npx jest --config libs/backend/provider-session-contracts/jest.config.ts … <2 specs>`: `Test Suites: 2 passed`, `Tests: 19 passed, 19 total` (`.ptah/tmp/p3-r3-contracts.log`).
+- **cli-agent-runtime:** `npx jest --config libs/backend/cli-agent-runtime/jest.config.ts … <the same 12 specs as rounds 1-2>`: `Test Suites: 12 passed, 12 total`, `Tests: 555 passed, 555 total` (`.ptah/tmp/p3-r3-cli-agent-runtime.log`).
+- **eslint:** `npx eslint <changed .ts files>`: `✖ 1 problem (0 errors, 1 warning)`. It is the existing `max-lines` warning in `acp-session-runtime.ts` (`.ptah/tmp/p3-r3-eslint.log`).
+- **degradation-audit:** `npx ts-node --transpile-only tools/degradation-audit/check-degradation.ts`: exit 0, `libs/backend/cli-agent-runtime: 1 ok (baseline 1)` (`.ptah/tmp/p3-r3-degradation.log`).
+- **Live:** `PTAH_LIVE_AGY=1 PTAH_AGY_LIVE_MODEL=gemini-4-hydrogen-low` on `antigravity-cli.adapter.acp.live.spec.ts`, agy 1.5.14: `Tests: 3 passed, 3 total` in 46.7 s. The three cases are D9, the new plan-mode F1 case, and interrupt then continue (`.ptah/tmp/p3-r3-live-lane.log`).
+- **agy processes:** `tasklist /FI "IMAGENAME eq agy.exe"` before and after: `INFO: No tasks are running which match the specified criteria.`
+- All changed files use LF line endings. Nothing is staged or committed.
