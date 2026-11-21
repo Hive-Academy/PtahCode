@@ -458,6 +458,19 @@ function unsupportedGraphLanguage(
 }
 
 /**
+ * A dependency lookup for a file that the answering graph holds no node for.
+ * The graph never analyzed the file, so `[]` would read as "no imports" or
+ * "unused". The MCP tools catch this one error and answer `[]` beside
+ * `fileInGraph: false` and the coverage census instead (protocol-dispatcher).
+ */
+export class FileNotInGraphError extends Error {
+  override readonly name = 'FileNotInGraph';
+  constructor() {
+    super('Dependency graph unavailable: the file is not in the built graph');
+  }
+}
+
+/**
  * Build dependency graph namespace
  * Import-based file dependency tracking and symbol indexing
  */
@@ -504,14 +517,19 @@ export function buildDependencyNamespace(
     const resolved = resolveWorkspaceFilePath(trimmed, workspaceProvider);
     // No built graph answers this file: the lookup cannot run, so it is not
     // an empty answer. A covering graph with no edges still gives [].
-    // A covering graph with no node for the file also gives []: the MCP tools
-    // pair it with `fileInGraph: false` and the coverage census
-    // (graphFileAnswer), and code callers read getGraphCoverageForFile.
     if (!coversFile(operation, resolved)) {
       logger?.warn(`[DependencyNamespace] ${operation} failed`, {
         errorName: 'GraphNotBuilt',
       });
       throw new Error('Dependency graph unavailable: not built yet');
+    }
+    // With one graph, every path gets its coverage; a file outside its root
+    // has no node there, and the query would answer [] without looking.
+    if (dependencyGraph.resolveNodePath(resolved) === undefined) {
+      logger?.warn(`[DependencyNamespace] ${operation} failed`, {
+        errorName: 'FileNotInGraph',
+      });
+      throw new FileNotInGraphError();
     }
     try {
       return query(resolved);
