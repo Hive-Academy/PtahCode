@@ -3,6 +3,10 @@ import {
   hasElectronCodexBindings,
 } from '../di/codex-binding-registry';
 import {
+  disposeElectronProviderSessionBindings,
+  hasElectronProviderSessionBindings,
+} from '../di/provider-session-binding-registry';
+import {
   killRunningChecks,
   runningCheckPids,
 } from '@ptah-extension/vscode-lm-tools';
@@ -96,6 +100,12 @@ export const AGENT_REAP_BUDGET_MS = 2000;
 
 /** Bound native session close before SQLite and the final metadata flush. */
 export const CODEX_DISPOSE_BUDGET_MS = 2000;
+/**
+ * Maximum wait for the provider-session agents to close during quit. The
+ * pool bounds each close at 5 s and closes them in parallel; the agents are
+ * detached, so one that outlives the budget is swept on the next start.
+ */
+export const PROVIDER_SESSION_DISPOSE_BUDGET_MS = 2000;
 
 /**
  * How long the chain may wait for the FINAL metadata flush.
@@ -442,6 +452,16 @@ async function disposeAfterPersistence(deps: DisposalDeps): Promise<void> {
     );
   }
 
+  if (hasElectronProviderSessionBindings()) {
+    // Closes every agent the pool owns; the pid ledger removes each row.
+    await withBudget(
+      'Provider-session bindings dispose',
+      disposeElectronProviderSessionBindings,
+      PROVIDER_SESSION_DISPOSE_BUDGET_MS,
+      'continuing shutdown.',
+    );
+  }
+
   if (refs.sessionUsageSink !== null) {
     await withBudget(
       'Session usage drain',
@@ -614,6 +634,7 @@ export function requiresDeferredDisposal(refs: BootRefs): boolean {
   return (
     ElectronDIContainer.isRegistered(AUTH_PROVIDERS_TOKENS.PLAN_USAGE_SERVICE) ||
     hasElectronCodexBindings() ||
+    hasElectronProviderSessionBindings() ||
     refs.laneOutcomesDisposer !== null ||
     refs.sessionUsageSink !== null ||
     refs.sdkAdapter !== null ||

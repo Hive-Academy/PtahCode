@@ -4,6 +4,7 @@ import {
   CustomProviderEntryInputSchema,
   getAnthropicProvider,
   MESSAGE_TYPES,
+  getProviderSessionProfile,
   type KimiCodeLoginState,
   type AuthCancelDraftVerificationParams,
   type AuthCancelDraftVerificationResult,
@@ -252,6 +253,39 @@ export class ProvidersConnectionSetupService implements MessageHandler {
       return action === 'sign-in-cancel'
         ? this.cancelKimiLogin()
         : this.startKimiLogin();
+    }
+    const sessionProfile = providerId
+      ? getProviderSessionProfile(providerId)
+      : undefined;
+    if (providerId && sessionProfile && action !== 'sign-in-cancel') {
+      // A provider session signs in through its own CLI, outside Ptah: re-read its status row and show the
+      // row's sign-in hint until it reports a usable sign-in.
+      this.externalAuthStore.scopeKey = this.workspace.scopeKey();
+      this.externalAuthStore.value.set({
+        status: 'loading',
+        error: null,
+        data: { ...empty, signInState: 'in-flight' },
+      });
+      await this.read(
+        this.externalAuthStore,
+        async (): Promise<ProvidersExternalAuth> => {
+          const result = await this.require('auth:getAuthStatus', { providerId });
+          if (generation !== this.externalAuthGeneration)
+            throw new Error('Superseded sign-in');
+          const row = result.providerSessionStatus?.[sessionProfile];
+          const signedIn = row?.installed === true && row.authenticated;
+          return {
+            ...empty,
+            signInState: signedIn ? 'signed-in' : 'idle',
+            cliInstalled: row?.installed ?? null,
+            message: signedIn
+              ? SIGN_IN_DETECTED
+              : (row?.signInHint ?? 'Complete login outside Ptah, then check again.'),
+          };
+        },
+      );
+      await Promise.all([hooks.refreshConnections(), hooks.refreshRoute()]);
+      return;
     }
     if (
       action === 'sign-in-cancel' ||
@@ -1139,6 +1173,7 @@ export class ProvidersConnectionSetupService implements MessageHandler {
     if (!entry) return false;
     return (
       !!entry.nativeAuth ||
+      !!entry.providerSession ||
       !!entry.isCustom ||
       providerId === 'github-copilot' ||
       providerId === 'openai-codex' ||

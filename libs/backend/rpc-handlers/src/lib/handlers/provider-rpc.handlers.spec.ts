@@ -356,6 +356,7 @@ function makeHarness(
     configSeed?: Record<string, unknown>;
     providerKeysSeed?: Record<string, string>;
     authEnv?: Partial<AuthEnv>;
+    hostCapabilities?: import('@ptah-extension/shared').RuntimeHostCapabilities;
   } = {},
 ): Harness {
   const logger = createMockLogger();
@@ -447,6 +448,7 @@ function makeHarness(
     planLimitsService,
     lmStudioProxy,
     kimiAuth as never,
+    opts.hostCapabilities,
   );
 
   return {
@@ -978,6 +980,56 @@ describe('ProviderRpcHandlers', () => {
           'ollama-cloud',
         ]),
       );
+    });
+
+    it('registers a fetcher only for each admitted provider-session provider', () => {
+      const without = makeHarness();
+      without.handlers.register();
+      expect(
+        without.providerModels.registerDynamicFetcher.mock.calls.map((c) => c[0]),
+      ).not.toContain('antigravity-cli');
+
+      const admitted = makeHarness({
+        hostCapabilities: { nativeCodex: false, providerSessions: ['antigravity'] },
+      });
+      admitted.handlers.register();
+      const ids = admitted.providerModels.registerDynamicFetcher.mock.calls.map(
+        (c) => c[0],
+      );
+      expect(ids).toContain('antigravity-cli');
+      // Grok and OpenCode have no registry entry or admission yet.
+      expect(ids).not.toContain('grok-cli');
+      expect(ids).not.toContain('opencode-cli');
+    });
+
+    it('lists provider-session models from the lane adapter catalog, [] on failure', async () => {
+      const h = makeHarness({
+        hostCapabilities: { nativeCodex: false, providerSessions: ['antigravity'] },
+      });
+      h.handlers.register();
+      const entry = h.providerModels.registerDynamicFetcher.mock.calls.find(
+        ([id]) => id === 'antigravity-cli',
+      );
+      if (!entry) throw new Error('Missing Antigravity fetcher');
+      const listModels = jest.fn(async () => [
+        { id: 'gemini-4-hydrogen-low', name: 'Gemini 4 Hydrogen (low)' },
+      ]);
+      h.cliDetection.getAdapter.mockReturnValue({ listModels } as never);
+      expect(await entry[1]()).toEqual([
+        {
+          id: 'gemini-4-hydrogen-low',
+          name: 'Gemini 4 Hydrogen (low)',
+          description: '',
+          contextLength: 0,
+          supportsToolUse: true,
+        },
+      ]);
+      expect(h.cliDetection.getAdapter).toHaveBeenCalledWith('antigravity');
+
+      listModels.mockRejectedValueOnce(new Error('agy not signed in'));
+      expect(await entry[1]()).toEqual([]);
+      h.cliDetection.getAdapter.mockReturnValue(undefined);
+      expect(await entry[1]()).toEqual([]);
     });
 
     it('uses the Kimi auth service and merges a successful catalog', async () => {

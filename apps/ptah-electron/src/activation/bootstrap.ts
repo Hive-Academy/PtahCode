@@ -52,7 +52,15 @@ import {
   finishElectronNativeChatCore,
   type ElectronNativeChatCore,
 } from '../di/native-chat-core-composition';
-import type { ProviderSessionProfileId } from '@ptah-extension/shared';
+import {
+  bindElectronProviderSessionChat,
+  type ElectronProviderSessionPendingBinding,
+} from '../di/provider-session-composition';
+import { createElectronProviderSessionPidLedgerStore } from '../di/provider-session-pid-ledger-store';
+import {
+  defaultProviderSessionOrphanSweepDeps,
+  startProviderSessionOrphanSweep,
+} from '../di/provider-session-orphan-sweep';
 import { ElectronDIContainer } from '../di/container';
 import { restoreWorkspaces } from './workspace-restore';
 import { resolveInitialWorkspaceArg } from './initial-workspace-arg';
@@ -651,13 +659,49 @@ async function runBootstrap(
       error instanceof Error ? error : new Error('Codex chat binding failed'),
     );
   }
-  // Provider-session binding (P8) goes here in its own try/catch; none in P5.
-  const providerSessionProfiles: readonly ProviderSessionProfileId[] = [];
+  // Provider-session binding (P8): its own try/catch. A failure leaves
+  // `providerSessions: []`; Claude and Codex are unaffected.
+  let providerSessionBinding: ElectronProviderSessionPendingBinding | undefined;
+  if (nativeChatCore) try {
+    const providerSessionLogger = container.resolve<Logger>(TOKENS.LOGGER);
+    const pidLedgerStore = createElectronProviderSessionPidLedgerStore(
+      container.resolve<IStateStorage>(PLATFORM_TOKENS.STATE_STORAGE),
+      providerSessionLogger,
+    );
+    // Agents a crashed run left behind; runs once, in the background.
+    void startProviderSessionOrphanSweep(
+      pidLedgerStore,
+      defaultProviderSessionOrphanSweepDeps(providerSessionLogger),
+      (sweepError) =>
+        providerSessionLogger.error(
+          '[Ptah Electron] Provider-session orphan sweep failed; continuing startup',
+          sweepError,
+        ),
+    );
+    providerSessionBinding = bindElectronProviderSessionChat(
+      container,
+      nativeChatCore,
+      {
+        scopeResolver: container.resolve<WorkspaceScopeResolver>(
+          SETTINGS_TOKENS.WORKSPACE_SCOPE_RESOLVER,
+        ),
+        settingsStore: container.resolve<NativeSessionControlsDeps['store']>(
+          SETTINGS_TOKENS.SETTINGS_STORE,
+        ),
+        pidLedger: pidLedgerStore.ledger,
+      },
+    );
+  } catch (error) {
+    container.resolve<Logger>(TOKENS.LOGGER).error(
+      '[Ptah Electron] Provider-session chat binding failed; continuing startup',
+      error instanceof Error ? error : new Error('Provider-session chat binding failed'),
+    );
+  }
   if (nativeChatCore) {
     try {
       finishElectronNativeChatCore(nativeChatCore, {
         codex: codexBinding,
-        providerSessionProfiles,
+        providerSession: providerSessionBinding,
       });
     } catch (error) {
       // Finish refuses before registering anything, so Claude-only defaults stay.
@@ -672,6 +716,16 @@ async function runBootstrap(
             disposeError instanceof Error
               ? disposeError
               : new Error('Codex chat binding cleanup failed'),
+          );
+        });
+      }
+      if (providerSessionBinding) {
+        await providerSessionBinding.dispose().catch((disposeError: unknown) => {
+          container.resolve<Logger>(TOKENS.LOGGER).error(
+            '[Ptah Electron] Unregistered provider-session chat binding cleanup failed',
+            disposeError instanceof Error
+              ? disposeError
+              : new Error('Provider-session chat binding cleanup failed'),
           );
         });
       }

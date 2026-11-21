@@ -30,12 +30,17 @@ import {
   RUN_CHECK_KILL_BUDGET_MS,
   TASK_END_HOOK_STOP_BUDGET_MS,
   CODEX_DISPOSE_BUDGET_MS,
+  PROVIDER_SESSION_DISPOSE_BUDGET_MS,
   handleWillQuit,
   requiresDeferredDisposal,
   type QuitSequenceDeps,
 } from './shutdown';
 
 import { disposeElectronCodexBindings, hasElectronCodexBindings } from '../di/codex-binding-registry';
+import {
+  disposeElectronProviderSessionBindings,
+  hasElectronProviderSessionBindings,
+} from '../di/provider-session-binding-registry';
 
 // Keep the real binding shutdown helpers without loading unrelated RPC handlers.
 // These control factories are not used by the shutdown scenarios below.
@@ -49,6 +54,11 @@ jest.mock('../di/codex-binding-registry', () => ({
   ...jest.requireActual<typeof import('../di/codex-binding-registry')>('../di/codex-binding-registry'),
   disposeElectronCodexBindings: jest.fn(async () => undefined),
   hasElectronCodexBindings: jest.fn(() => false),
+}));
+
+jest.mock('../di/provider-session-binding-registry', () => ({
+  disposeElectronProviderSessionBindings: jest.fn(async () => undefined),
+  hasElectronProviderSessionBindings: jest.fn(() => false),
 }));
 
 jest.mock('@ptah-extension/vscode-lm-tools', () => ({
@@ -478,6 +488,74 @@ describe('will-quit ? Codex bindings', () => {
     handleWillQuit(deps);
     await flushMicrotasks();
     expect(order).toEqual(['flush', 'markInactive', 'sqliteConnection', 'diagnostics', 'flush']);
+  });
+});
+
+describe('will-quit ? provider-session bindings', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+    pids.mockReturnValue([]);
+    jest.mocked(hasElectronProviderSessionBindings).mockReturnValue(true);
+    jest.mocked(disposeElectronProviderSessionBindings).mockReset();
+  });
+
+  afterEach(() => {
+    jest.mocked(hasElectronProviderSessionBindings).mockReturnValue(false);
+    jest.mocked(hasElectronCodexBindings).mockReturnValue(false);
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
+
+  it('defers disposal while a provider-session binding is live', () => {
+    expect(requiresDeferredDisposal(createEmptyBootRefs())).toBe(true);
+  });
+
+  it('disposes provider sessions right after the Codex bindings, before storage closes', async () => {
+    const order: string[] = [];
+    jest.mocked(hasElectronCodexBindings).mockReturnValue(true);
+    jest.mocked(disposeElectronCodexBindings).mockImplementation(async () => {
+      order.push('codex');
+    });
+    jest.mocked(disposeElectronProviderSessionBindings).mockImplementation(async () => {
+      order.push('providerSessions');
+    });
+    const deps = quitDeps(minimalRefs(order));
+    deps.flushSessionMetadataStores.mockImplementation(async () => { order.push('flush'); });
+    handleWillQuit(deps);
+    await flushMicrotasks();
+    expect(order).toEqual([
+      'flush', 'codex', 'providerSessions', 'sqliteConnection', 'diagnostics', 'flush',
+    ]);
+  });
+
+  it('continues teardown after a rejected or slow provider-session close', async () => {
+    const failure = new Error('agent close failed');
+    jest.mocked(disposeElectronProviderSessionBindings).mockRejectedValue(failure);
+    const order: string[] = [];
+    const deps = quitDeps(minimalRefs(order));
+    deps.flushSessionMetadataStores.mockImplementation(async () => { order.push('flush'); });
+    handleWillQuit(deps);
+    await flushMicrotasks();
+    expect(order).toEqual(['flush', 'sqliteConnection', 'diagnostics', 'flush']);
+    expect(deps.quit).toHaveBeenCalledTimes(1);
+    expect(console.warn).toHaveBeenCalledWith(
+      expect.stringContaining('Provider-session bindings dispose failed'), failure,
+    );
+
+    order.length = 0;
+    jest.mocked(disposeElectronProviderSessionBindings).mockImplementation(
+      () => new Promise<void>(() => undefined),
+    );
+    const slow = quitDeps(minimalRefs(order));
+    slow.flushSessionMetadataStores.mockImplementation(async () => { order.push('flush'); });
+    handleWillQuit(slow);
+    await flushMicrotasks();
+    expect(slow.quit).not.toHaveBeenCalled();
+    await jest.advanceTimersByTimeAsync(PROVIDER_SESSION_DISPOSE_BUDGET_MS);
+    await flushMicrotasks();
+    expect(order).toEqual(['flush', 'sqliteConnection', 'diagnostics', 'flush']);
+    expect(slow.quit).toHaveBeenCalledTimes(1);
   });
 });
 

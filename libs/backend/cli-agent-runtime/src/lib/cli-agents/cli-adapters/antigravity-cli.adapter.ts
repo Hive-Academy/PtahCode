@@ -72,6 +72,7 @@
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import { homedir } from 'os';
 import { join } from 'path';
+import { readAgySignIn, type AgySignInState } from './antigravity-sign-in';
 import {
   createMcpFacet,
   PTAH_SPAWN_MCP_KEY,
@@ -459,12 +460,14 @@ export class AntigravityCliAdapter implements CliAdapter {
 
   /**
    * @param acp - ACP seams for specs and live recordings; production passes none.
+   * @param readSignIn - Sign-in reader (specs); defaults to {@link readAgySignIn}.
    */
   constructor(
     private readonly spawner?: IProcessSpawner,
     private readonly streamJsonProbe?: (binary: string) => Promise<boolean>,
     private readonly logger?: Logger,
     private readonly acp: AntigravityAcpSeam = {},
+    private readonly readSignIn: () => Promise<AgySignInState> = readAgySignIn,
   ) {}
 
   async detect(): Promise<CliDetectionResult> {
@@ -499,6 +502,29 @@ export class AntigravityCliAdapter implements CliAdapter {
         installed: false,
         messagingMode: bestMessagingCapability(this.capabilities()),
       };
+    }
+  }
+
+  /**
+   * Whether agy's own sign-in is usable, from its keyring entry or an
+   * environment credential (see {@link readAgySignIn}). Model-free and never
+   * starts the agent. A state that cannot be read (Linux, a failed or slow
+   * keyring query) answers `true`, the previous optimistic behaviour: the
+   * auth row has no "unknown" value, and a missing sign-in still surfaces as
+   * `auth-required` on open. Never reads or logs the credential itself.
+   */
+  async ensureTokensFresh(): Promise<boolean> {
+    try {
+      const state = await this.readSignIn();
+      if (state === 'unknown')
+        this.logger?.debug('[AntigravityCliAdapter] agy sign-in state unknown; assuming signed in');
+      return state !== 'signed-out';
+    } catch (error: unknown) {
+      // degradation-audit: reported - logged at warn; an unreadable keyring keeps the optimistic answer, and open reports auth-required
+      this.logger?.warn('[AntigravityCliAdapter] agy sign-in check failed; assuming signed in', {
+        error: error instanceof Error ? error.name : 'unknown',
+      });
+      return true;
     }
   }
 

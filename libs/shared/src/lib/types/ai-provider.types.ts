@@ -26,9 +26,16 @@ export type SessionEndCause =
  *
  * `codex-app-server` labels the native Codex App Server chat adapter. It
  * matches the `runtime` value of a native Codex execution profile.
+ * `provider-session` labels the provider-session chat adapter (ACP agents such
+ * as Antigravity) the same way; the session's own provider (for example
+ * `antigravity-cli`) stays on its runtime identity and metadata.
  */
 export type ProviderId =
-  'claude-cli' | 'vscode-lm' | 'ptah-cli' | 'codex-app-server';
+  | 'claude-cli'
+  | 'vscode-lm'
+  | 'ptah-cli'
+  | 'codex-app-server'
+  | 'provider-session';
 
 /**
  * Provider Status Types
@@ -497,7 +504,8 @@ export function isValidProviderId(id: string): id is ProviderId {
     id === 'claude-cli' ||
     id === 'vscode-lm' ||
     id === 'ptah-cli' ||
-    id === 'codex-app-server'
+    id === 'codex-app-server' ||
+    id === 'provider-session'
   );
 }
 
@@ -509,6 +517,7 @@ export const PROVIDER_IDS: readonly ProviderId[] = [
   'vscode-lm',
   'ptah-cli',
   'codex-app-server',
+  'provider-session',
 ] as const;
 
 export const DEFAULT_PROVIDER_CAPABILITIES: ProviderCapabilities = {

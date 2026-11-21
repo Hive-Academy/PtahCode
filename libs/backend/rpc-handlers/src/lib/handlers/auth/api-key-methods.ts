@@ -18,7 +18,10 @@ import type {
   AuthDeleteStoredKeyResult,
   AuthGetApiKeyStatusResult,
 } from '@ptah-extension/shared';
-import { ANTHROPIC_DIRECT_PROVIDER_ID } from '@ptah-extension/shared';
+import {
+  ANTHROPIC_DIRECT_PROVIDER_ID,
+  isProviderSessionProviderId,
+} from '@ptah-extension/shared';
 import { maskKeyHint } from '../../utils/mask-key-hint';
 import type { ConnectionCheckRecorder } from '../../utils/connection-check-recorder';
 import {
@@ -294,7 +297,11 @@ export class ApiKeyMethods {
         'anthropicProviderId',
         DEFAULT_PROVIDER_ID,
       );
-      const all = getAllAnthropicProviders();
+      // A provider session (Antigravity) signs in through its CLI and never
+      // holds a stored key, so it has no key row.
+      const all = getAllAnthropicProviders().filter(
+        (p) => !isProviderSessionProviderId(p.id),
+      );
       // Read once per provider for presence and hint; values stay in this scope.
       const reads = await Promise.allSettled(
         all.map((p) => authSecretsService.getProviderKey(p.id)),

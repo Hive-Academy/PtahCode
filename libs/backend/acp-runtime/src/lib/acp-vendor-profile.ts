@@ -14,6 +14,7 @@
  * option.
  */
 import type {
+  InitializeResponse,
   McpServer,
   RequestPermissionRequest,
 } from '@agentclientprotocol/sdk';
@@ -65,6 +66,13 @@ export interface AcpSessionOptions {
    * `prompt-timeout`, the agent is cancelled and then stopped. Omit for none.
    */
   readonly promptTimeoutMs?: number;
+  /**
+   * Who drives the session. A `chat` asks every permission request through
+   * its approval sink and can change the permission live, so a profile never
+   * bakes an approve-everything flag into a chat's spawn (a later switch to a
+   * narrower permission could not take it back). Absent means a lane.
+   */
+  readonly consumer?: 'chat' | 'lane';
   /** The lane's agent id: names the run in logs and turn ids. */
   readonly agentId?: string;
   /**
@@ -72,6 +80,12 @@ export interface AcpSessionOptions {
    * profile turns them into ACP `McpServer` entries in `buildMcpServers`.
    */
   readonly mcp: readonly ProviderMcpAttachment[];
+  /**
+   * Ptah's instructions for a new session (the chat's system prompt). Sent
+   * once, per {@link AcpVendorProfile.instructionsMeta}; never to a restored
+   * session.
+   */
+  readonly instructions?: string;
 }
 
 /**
@@ -192,6 +206,17 @@ export interface AcpVendorProfile {
   initializeMeta?(options: AcpSessionOptions): Record<string, unknown> | undefined;
   /** Optional `_meta` for `session/new`. */
   sessionMeta?(options: AcpSessionOptions): Record<string, unknown> | undefined;
+  /**
+   * How a new session's instructions travel. Return the `session/new`
+   * `_meta` that carries them when the agent advertised a system-prompt hook
+   * on `initialize`; `undefined` (or no hook) sends them as a delimited
+   * block in front of the first prompt instead. Merged one level deep with
+   * {@link sessionMeta}.
+   */
+  instructionsMeta?(
+    instructions: string,
+    init: InitializeResponse,
+  ): Record<string, unknown> | undefined;
   /** Optional `_meta` for `session/cancel`. */
   cancelMeta?(options: AcpSessionOptions): Record<string, unknown> | undefined;
   /**

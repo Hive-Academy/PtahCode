@@ -767,6 +767,19 @@ describe('PlanLimitOwnerDiscoveryService', () => {
     );
   });
 
+  it('lists a provider-session main provider (Antigravity) as provider-unsupported, never read by key', async () => {
+    const h = createHarness(THIRD_PARTY('antigravity-cli'));
+
+    const [first] = await h.service.discoverTargets({});
+
+    expect(first.kind === 'known' && first.snapshot).toEqual(
+      expect.objectContaining({ status: 'provider-unsupported', windows: [] }),
+    );
+    expect(first.kind === 'known' && first.snapshot.owner.providerId).toBe(
+      'antigravity-cli',
+    );
+  });
+
   it('F72: after an account change the new owner is listed and read; the old one only from the ledger', async () => {
     const h = createHarness(THIRD_PARTY('openai-codex'));
     h.owners.resolveCodexHomeOwner

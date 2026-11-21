@@ -208,7 +208,7 @@ function setup() {
   );
   const ports: ProviderSessionChatPorts = {
     info: {
-      id: 'ptah-cli',
+      id: 'provider-session',
       name: 'Antigravity',
       vendor: 'Google',
       version: '1',
@@ -244,8 +244,15 @@ function setup() {
     publishNotice: jest.fn(async () => undefined),
   };
   const turnState = new SessionTurnStateRegistry();
+  /** Lexical by default; a spec maps a link target or marks a path missing. */
+  const links = new Map<string, string>();
+  const missing = new Set<string>();
+  const realpath = jest.fn(async (path: string) => {
+    if (missing.has(path)) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    return links.get(path) ?? path;
+  });
   const adapter = new ProviderSessionChatAdapter(
-    { ...ports, logger, approvals },
+    { ...ports, logger, approvals, realpath },
     turnState,
   );
   const resolved = jest.fn();
@@ -267,6 +274,8 @@ function setup() {
     stats,
     followUps,
     logger,
+    links,
+    missing,
   };
 }
 
@@ -935,6 +944,20 @@ describe('ProviderSessionChatAdapter', () => {
     await expectCode(h.adapter.sendMessageToSession(id, 'late'), 'unavailable');
   });
 
+  it('gives a history-only process back when its tab closes (no adapter record)', async () => {
+    const h = setup();
+    const id = SessionId.create();
+    h.adapter.endSession(id);
+    await flush();
+    expect(h.ports.release).toHaveBeenCalledWith(id, 'tab-closed');
+
+    const other = SessionId.create();
+    await h.adapter.interruptSession(other, 'user-stop');
+    expect(h.ports.release).not.toHaveBeenCalledWith(other, expect.anything());
+    await h.adapter.interruptSession(other, 'tab-close');
+    expect(h.ports.release).toHaveBeenCalledWith(other, 'tab-closed');
+  });
+
   it('fails queued follow-ups when the session closes', async () => {
     const h = setup();
     const stream = await h.adapter.startChatSession({ tabId: 'tab', prompt: 'first' });
@@ -988,5 +1011,117 @@ describe('ProviderSessionChatAdapter', () => {
     await expectCode(opening, 'cancelled');
     expect(h.ports.release).toHaveBeenCalledWith(expect.any(String), 'tab-closed');
     expect(h.ports.identity.save).not.toHaveBeenCalled();
+  });
+
+  describe('turn attachments (N-1, N-2) and open options', () => {
+    const outside = resolve(seed.workspacePath, '..', 'secret.txt');
+
+    it.each([
+      ['an absolute path outside the workspace', outside],
+      ['a relative path that leaves it', '../secret.txt'],
+      ['a NUL byte', 'src/a\0.ts'],
+    ])('refuses a file reference with %s before the prompt', async (_label, file) => {
+      const h = setup();
+      const { id, live } = await startCompleted(h);
+      const error = await expectCode(
+        h.adapter.sendMessageToSession(id, 'read', { files: [file] }),
+        'unsupported-option',
+      );
+      expect(error.option).toBe('files');
+      expect(live.prompt).toHaveBeenCalledTimes(1);
+    });
+
+    it('refuses a missing file and a link that leaves the workspace', async () => {
+      const h = setup();
+      const { id, live } = await startCompleted(h);
+      const gone = resolve(seed.workspacePath, 'gone.ts');
+      h.missing.add(gone);
+      await expectCode(
+        h.adapter.sendMessageToSession(id, 'read', { files: ['gone.ts'] }),
+        'unsupported-option',
+      );
+      const link = resolve(seed.workspacePath, 'link.ts');
+      h.links.set(link, outside);
+      await expectCode(
+        h.adapter.sendMessageToSession(id, 'read', { files: ['link.ts'] }),
+        'unsupported-option',
+      );
+      expect(live.prompt).toHaveBeenCalledTimes(1);
+      // A reference inside the workspace still goes out as a resource link.
+      await h.adapter.sendMessageToSession(id, 'read', { files: ['src/a.ts'] });
+      await promptedTurn(live, 2);
+      expect(live.prompt).toHaveBeenLastCalledWith({
+        text: 'read',
+        files: [{ path: resolve(seed.workspacePath, 'src/a.ts'), name: 'a.ts' }],
+      });
+      live.emit({ type: 'terminal', status: 'completed', disposition: 'reusable' });
+    });
+
+    it('confines a peer session message the same way', async () => {
+      const h = setup();
+      const { id, live } = await startCompleted(h);
+      await expectCode(
+        h.adapter.sendMessageToSession(id, 'read this', {
+          files: [outside],
+          origin: { kind: 'peer', from: 'other-session', name: 'Peer' },
+        }),
+        'unsupported-option',
+      );
+      expect(live.prompt).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      ['not base64', [{ data: 'not base64!', mediaType: 'image/png' }]],
+      ['not whole base64 quads', [{ data: 'AAA', mediaType: 'image/png' }]],
+      [
+        'larger than the attachment cap',
+        [{ data: 'A'.repeat(((5 * 1024 * 1024) / 3) * 4 + 4), mediaType: 'image/png' }],
+      ],
+      [
+        'more than ten images',
+        Array.from({ length: 11 }, () => ({ data: 'AAAA', mediaType: 'image/png' })),
+      ],
+    ])('refuses images that are %s before anything spawns', async (_label, images) => {
+      const h = setup();
+      const error = await expectCode(
+        h.adapter.startChatSession({ tabId: 'tab', prompt: 'look', images }),
+        'unsupported-option',
+      );
+      expect(error.option).toBe('images');
+      expect(h.acquire).not.toHaveBeenCalled();
+    });
+
+    it('carries the prepared open options to every acquire', async () => {
+      const h = setup();
+      const open = { ptahMcp: true, userMcp: [], instructions: 'Be Ptah.' };
+      (h.ports.prepare as jest.Mock).mockResolvedValueOnce({ seed, open });
+      const { id } = await startCompleted(h);
+      await h.adapter.sendMessageToSession(id, 'again');
+      const opens = h.acquire.mock.calls.map(([request]) => request.open);
+      expect(opens.length).toBeGreaterThan(1);
+      for (const carried of opens) expect(carried).toBe(open);
+    });
+
+    it('releases for good a session closed while its new process attaches (N-4)', async () => {
+      const h = setup();
+      const { id } = await startCompleted(h);
+      h.pool.delete(id);
+      let saved!: () => void;
+      (h.ports.identity.save as jest.Mock).mockImplementationOnce(
+        () => new Promise<void>((done) => (saved = done)),
+      );
+      const sending = h.adapter.sendMessageToSession(id, 'again').then(
+        () => undefined,
+        (reason: unknown) => reason,
+      );
+      for (let i = 0; i < 50 && !saved; i++) await flush();
+      const closing = h.adapter.closeSession(id);
+      saved();
+      await expect(sending).resolves.toBeInstanceOf(ProviderSessionChatAdapterError);
+      await closing;
+      const reasons = (h.ports.release as jest.Mock).mock.calls.map(([, reason]) => reason);
+      expect(reasons).not.toContain('broken');
+      expect(reasons).toContain('tab-closed');
+    });
   });
 });

@@ -37,6 +37,7 @@ import {
   PtahRichSelectComponent,
   type ProviderModelSearchOption,
 } from '@ptah-extension/ui';
+import { isProviderSessionProviderId } from '@ptah-extension/shared';
 import type { EffortLevel, SettingScope } from '@ptah-extension/shared';
 import {
   SAVE_REFUSED_MESSAGE,
@@ -295,7 +296,11 @@ export class MainAgentReassignPopoverComponent {
     const entry = (this.state.connections().data ?? []).find(
       (connection) => connection.id === this.providerId(),
     );
-    return !!entry && connectionKind(entry) === 'claude-cli';
+    return (
+      !!entry &&
+      connectionKind(entry) === 'claude-cli' &&
+      !isProviderSessionProviderId(entry.id)
+    );
   });
   private readonly accountModel = computed(() =>
     this.accounts && this.ambient

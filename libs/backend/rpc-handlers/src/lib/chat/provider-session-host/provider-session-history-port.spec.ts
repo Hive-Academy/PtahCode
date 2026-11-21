@@ -38,7 +38,7 @@ function harness(metadata: unknown = stored()) {
   const deps = {
     metadata: { get: jest.fn(async () => metadata) },
     pool: { acquireForHistory: jest.fn(async () => ({ events })) },
-    openRequests: { request: jest.fn(async () => request) },
+    openRequests: { request: jest.fn(() => request) },
   };
   const port = createProviderSessionHistoryPort(
     deps as unknown as Parameters<typeof createProviderSessionHistoryPort>[0],

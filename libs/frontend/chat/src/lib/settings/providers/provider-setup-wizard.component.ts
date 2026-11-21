@@ -1421,6 +1421,8 @@ export class ProviderSetupWizardComponent implements OnDestroy {
 
   /** Preselects this registry provider on open; the wizard still displays the Provider step. */
   readonly deepLinkProviderId = input<string>('');
+  /** Provider-session connections this host reports; any other provider-session entry is not offered. */
+  readonly offeredProviderSessionIds = input<readonly string[]>([]);
 
   /** True when a working credential is already stored for this provider. */
   readonly existingCredentialPresent = input<boolean>(false);
@@ -1625,7 +1627,10 @@ export class ProviderSetupWizardComponent implements OnDestroy {
 
   protected readonly providerOptions = computed<readonly WizardProviderOption[]>(() => {
     const query = this._search().trim().toLowerCase();
-    const all = getAllAnthropicProviders();
+    const offered = this.offeredProviderSessionIds();
+    const all = getAllAnthropicProviders().filter(
+      (entry) => !entry.providerSession || offered.includes(entry.id),
+    );
     const matched = query
       ? all.filter(
           (entry) => entry.name.toLowerCase().includes(query) || entry.id.includes(query),

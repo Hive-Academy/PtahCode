@@ -1,12 +1,17 @@
-import { InjectionToken } from '@angular/core';
+import { InjectionToken, computed, inject, type Signal } from '@angular/core';
 import {
+  AuthStateService,
   CLAUDE_CODE_INSTALL_COMMANDS,
   CLAUDE_CODE_SETUP_DOCS_URL,
   CODEX_INSTALL_COMMANDS,
   CODEX_SETUP_DOCS_URL,
   type ClaudeCodeInstallCommand,
 } from '@ptah-extension/core';
-import { Code, Terminal, type LucideIconData } from 'lucide-angular';
+import type {
+  ProviderSessionAuthStatus,
+  ProviderSessionProfileId,
+} from '@ptah-extension/shared';
+import { Code, Orbit, Terminal, type LucideIconData } from 'lucide-angular';
 import type { ProviderKind } from './provider-readiness.derive';
 
 /** One copyable install command inside an install guide. */
@@ -49,6 +54,11 @@ export interface ConnectionOption {
   /** `data-testid` of the detail card. */
   readonly panelTestId: string;
   readonly install: ConnectionInstallGuide;
+  /**
+   * The provider-session profile behind this option. Such an option is listed
+   * only while the host reports a status row for the profile.
+   */
+  readonly providerSession?: ProviderSessionProfileId;
 }
 
 /** Whether a card is the saved main connection, another option, or neither is known. */
@@ -114,16 +124,93 @@ export const CONNECTION_OPTIONS: readonly ConnectionOption[] = [
   },
 ];
 
+/** Antigravity CLI installers, from https://antigravity.google/docs/install/. */
+export const ANTIGRAVITY_INSTALL_COMMANDS: readonly ConnectionInstallCommand[] = [
+  {
+    id: 'unix',
+    tab: 'unix',
+    label: 'macOS and Linux',
+    command: 'curl -fsSL https://antigravity.google/cli/install.sh | bash',
+    copyLabel: 'Copy macOS and Linux install command',
+  },
+  {
+    id: 'powershell',
+    tab: 'windows',
+    label: 'Windows PowerShell',
+    command: 'irm https://antigravity.google/cli/install.ps1 | iex',
+    copyLabel: 'Copy Windows PowerShell install command',
+  },
+  {
+    id: 'sign-in',
+    tab: 'sign-in',
+    label: 'Run once in a terminal and follow the prompts',
+    command: 'agy',
+    copyLabel: 'Copy Antigravity sign-in command',
+  },
+];
+
+export const ANTIGRAVITY_SETUP_DOCS_URL = 'https://antigravity.google/docs/install/';
+
+/**
+ * Provider-session choices, each listed only while the host reports its
+ * profile (`auth:getAuthStatus` `providerSessionStatus`).
+ */
+export const PROVIDER_SESSION_CONNECTION_OPTIONS: readonly ConnectionOption[] = [
+  {
+    id: 'antigravity-cli',
+    name: 'Antigravity',
+    description: "Google's coding agent",
+    commandName: 'agy',
+    icon: Orbit,
+    panelTestId: 'ready-antigravity-panel',
+    providerSession: 'antigravity',
+    install: {
+      title: 'Install Antigravity',
+      intro:
+        'Open a terminal, paste the command for your system, press Enter. Then run agy once to sign in with your Google account. When the prompt returns, press Re-check.',
+      tablistLabel: 'Install steps for Antigravity',
+      tabs: [
+        { id: 'unix', label: 'macOS / Linux' },
+        { id: 'windows', label: 'Windows' },
+        { id: 'sign-in', label: 'Sign in' },
+      ],
+      commands: ANTIGRAVITY_INSTALL_COMMANDS,
+      docsUrl: ANTIGRAVITY_SETUP_DOCS_URL,
+      docsLabel: 'Open the official Antigravity install guide',
+    },
+  },
+];
+
+const ALL_CONNECTION_OPTIONS: readonly ConnectionOption[] = [
+  ...CONNECTION_OPTIONS,
+  ...PROVIDER_SESSION_CONNECTION_OPTIONS,
+];
+
 /** The descriptor for a provider; every {@link ProviderKind} has one. */
 export function connectionOption(id: ProviderKind): ConnectionOption {
-  const option = CONNECTION_OPTIONS.find((entry) => entry.id === id);
+  const option = ALL_CONNECTION_OPTIONS.find((entry) => entry.id === id);
   if (!option) throw new Error(`No connection option for ${id}`);
   return option;
 }
 
-/** True when `kind` names one of the listed options. */
+/** True when `kind` names one of the options. */
 export function isConnectionOptionId(kind: string): kind is ProviderKind {
-  return CONNECTION_OPTIONS.some((entry) => entry.id === kind);
+  return ALL_CONNECTION_OPTIONS.some((entry) => entry.id === kind);
+}
+
+/**
+ * The options this host offers: every fixed option, then each
+ * provider-session option whose profile has a status row.
+ */
+export function offeredConnectionOptions(
+  rows: Partial<Record<ProviderSessionProfileId, ProviderSessionAuthStatus>>,
+): readonly ConnectionOption[] {
+  return [
+    ...CONNECTION_OPTIONS,
+    ...PROVIDER_SESSION_CONNECTION_OPTIONS.filter(
+      (option) => option.providerSession && rows[option.providerSession],
+    ),
+  ];
 }
 
 /** The card role of `id` given the provider of the saved main connection. */
@@ -140,13 +227,20 @@ export function connectionRole(
 
 /**
  * The option list the Get ready step renders. Components inject it rather
- * than importing the constant, so a spec can render a longer list.
+ * than importing the constant, so a spec can render a longer list. It follows
+ * the host's provider-session rows, so a profile the host does not report has
+ * no card.
  */
 export const CONNECTION_OPTION_LIST = new InjectionToken<
-  readonly ConnectionOption[]
+  Signal<readonly ConnectionOption[]>
 >('CONNECTION_OPTION_LIST', {
   providedIn: 'root',
-  factory: () => CONNECTION_OPTIONS,
+  factory: () => {
+    const auth = inject(AuthStateService);
+    return computed(() =>
+      offeredConnectionOptions(auth.providerSessionStatus()),
+    );
+  },
 });
 
 /** The most connection cards shown side by side. */

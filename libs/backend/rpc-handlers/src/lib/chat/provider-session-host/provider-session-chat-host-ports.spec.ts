@@ -15,7 +15,9 @@ import type {
 import {
   MESSAGE_TYPES,
   SessionId,
+  type EffectiveCapabilitySet,
   type FlatStreamEventUnion,
+  type ICapabilityResolver,
   type ProviderSessionSeed,
 } from '@ptah-extension/shared';
 import {
@@ -27,6 +29,10 @@ import type {
   ProviderSessionOpenRequests,
 } from './provider-session-open-request';
 import type { ProviderSessionPoolRequest } from './provider-session-pool';
+import {
+  PROVIDER_SESSION_PTAH_IDENTITY,
+  PROVIDER_SESSION_PTAH_MCP_HINT,
+} from './provider-session-start-options';
 
 jest.mock('@ptah-extension/agent-sdk', () => {
   const abort = jest.requireActual<
@@ -39,6 +45,27 @@ jest.mock('@ptah-extension/agent-sdk', () => {
       typeof import('../../../../../agent-sdk/src/lib/provider-session/provider-session-chat-adapter-error')
     >('../../../../../agent-sdk/src/lib/provider-session/provider-session-chat-adapter-error')
       .ProviderSessionChatAdapterError,
+    PTAH_UI_HINT_CODEX: 'PTAH-UI-HINT',
+    // The resolver contract of `resolveSessionCapabilityPolicy`: no resolver
+    // fails closed to an unverified policy that keeps ptah.
+    resolveSessionCapabilityPolicy: async (
+      resolver: ICapabilityResolver | undefined,
+      cwd: string,
+    ) =>
+      resolver
+        ? resolver.resolve(cwd)
+        : {
+            physicalRoot: cwd,
+            policyKey: cwd,
+            status: 'unverified',
+            reasons: [{ path: cwd, error: 'no resolver' }],
+            ptahEnabled: true,
+            deniedMcpServers: [],
+            approvedProjectMcpServers: [],
+            deniedSkillNames: [],
+            disabledPluginIds: [],
+            harnessFingerprint: '',
+          },
   };
 });
 jest.mock('@ptah-extension/auth-providers', () => ({
@@ -68,7 +95,10 @@ describe('provider-session chat host ports', () => {
     };
   }
 
-  function harness(stored?: unknown) {
+  function harness(
+    stored?: unknown,
+    extra: Partial<ProviderSessionChatHostPortsDeps> = {},
+  ) {
     const execution: ResolvedExecutionProfile = {
       runtime: 'provider-session',
       seed: seed(),
@@ -84,7 +114,7 @@ describe('provider-session chat host ports', () => {
       holds: jest.fn(() => true),
     };
     const openRequests: jest.Mocked<ProviderSessionOpenRequests> = {
-      request: jest.fn(async (_input: ProviderSessionOpenInput) => poolRequest),
+      request: jest.fn((_input: ProviderSessionOpenInput) => poolRequest),
       attachApprovals: jest.fn(),
       detachApprovals: jest.fn(),
       detachAll: jest.fn(),
@@ -111,9 +141,9 @@ describe('provider-session chat host ports', () => {
       },
       hostCapabilities: { nativeCodex: false, providerSessions: ['grok'] },
       webviewManager: { broadcastMessage },
-      logger: { warn: jest.fn(), error: jest.fn() },
+      logger: { debug: jest.fn(), info: jest.fn(), warn: jest.fn(), error: jest.fn() },
       info: {
-        id: 'ptah-cli',
+        id: 'provider-session',
         name: 'Grok',
         version: '1.0.0',
         description: 'Provider-session test provider',
@@ -134,11 +164,13 @@ describe('provider-session chat host ports', () => {
       metadata: metadata as unknown as ProviderSessionChatHostPortsDeps['metadata'],
       approvals: { respond },
       broadcaster: { streamEventsToWebview },
+      ...extra,
     };
     const ports = createProviderSessionChatHostPorts(deps);
     const approvals: ProviderApprovalSink = { request: jest.fn() };
     return {
       ports,
+      deps,
       pool,
       openRequests,
       metadata,
@@ -172,7 +204,10 @@ describe('provider-session chat host ports', () => {
     const h = harness();
     await expect(
       h.ports.prepare({ projectPath: workspace, model: 'grok-4' }),
-    ).resolves.toEqual({ seed: seed() });
+    ).resolves.toEqual({
+      seed: seed(),
+      open: { ptahMcp: false, userMcp: [], instructions: PROVIDER_SESSION_PTAH_IDENTITY },
+    });
     expect(h.metadata.get).not.toHaveBeenCalled();
     expect(h.resolveExecutionProfile).toHaveBeenCalledWith(
       expect.objectContaining({ workspacePath: workspace, existingIdentity: undefined }),
@@ -185,6 +220,8 @@ describe('provider-session chat host ports', () => {
     await expect(h.ports.prepare({ projectPath: workspace }, id)).resolves.toEqual({
       seed: seed(),
       resume: { nativeSessionId: 'native-1' },
+      // A restored session gets no instructions.
+      open: { ptahMcp: false, userMcp: [] },
     });
     expect(h.resolveExecutionProfile).toHaveBeenCalledWith(
       expect.objectContaining({ existingIdentity: stored.providerSessionExecution }),
@@ -374,5 +411,108 @@ describe('provider-session chat host ports', () => {
         },
       },
     );
+  });
+
+  describe('session Ptah context (TASK_2026_2297 lane C)', () => {
+    const verified: EffectiveCapabilitySet = {
+      physicalRoot: '/real',
+      policyKey: '/real',
+      status: 'verified',
+      reasons: [],
+      ptahEnabled: true,
+      deniedMcpServers: [],
+      approvedProjectMcpServers: [],
+      deniedSkillNames: [],
+      disabledPluginIds: [],
+      harnessFingerprint: 'fp',
+    };
+
+    it('prepares the open options from the start config and carries them to the open request', async () => {
+      const resolve = jest.fn(async () => verified);
+      const apply = jest.fn(async () => ({ acknowledged: true }));
+      const buildSessionStartBlock = jest.fn(async () => '## Roster');
+      const h = harness(undefined, {
+        capabilityResolver: { resolve } as unknown as ICapabilityResolver,
+        harnessPolicySync: { apply },
+        memory: { buildSessionStartBlock, buildBlock: jest.fn(async () => '') },
+      });
+      const prepared = await h.ports.prepare({
+        tabId: 'tab-1',
+        projectPath: workspace,
+        mcpServerRunning: true,
+        systemPrompt: 'Be brief.',
+        mcpServersOverride: { docs: { type: 'http', url: 'https://docs.example/mcp' } },
+      });
+      expect(apply).toHaveBeenCalledWith('/real', 'fp');
+      expect(buildSessionStartBlock).toHaveBeenCalledWith(workspace);
+      expect(prepared.open).toEqual({
+        ptahMcp: true,
+        userMcp: [{ type: 'http', name: 'docs', url: 'https://docs.example/mcp', headers: [] }],
+        instructions: [
+          '## Roster',
+          PROVIDER_SESSION_PTAH_IDENTITY,
+          PROVIDER_SESSION_PTAH_MCP_HINT,
+          'Be brief.',
+        ].join('\n\n'),
+      });
+      const open = prepared.open;
+      await h.ports.acquire(
+        { sessionId: id, seed: seed(), approvals: h.approvals, ...(open ? { open } : {}) },
+        new AbortController().signal,
+      );
+      expect(h.openRequests.request).toHaveBeenCalledWith(expect.objectContaining({ open }));
+    });
+
+    it('refuses an unsupported option before anything resolves', async () => {
+      const h = harness();
+      await expect(
+        h.ports.prepare({ tabId: 'tab-1', projectPath: workspace, corpusName: 'docs' }),
+      ).rejects.toMatchObject({ code: 'unsupported-option', option: 'corpusName' });
+      expect(h.resolveExecutionProfile).not.toHaveBeenCalled();
+    });
+
+    it('gives the process back and keeps no routing when the tab closes during the acquire (N-4)', async () => {
+      const h = harness();
+      let opened!: (session: ProviderSession) => void;
+      h.pool.acquire.mockImplementationOnce(
+        () => new Promise<ProviderSession>((resolve) => (opened = resolve)),
+      );
+      const acquiring = h.ports.acquire(
+        { sessionId: id, tabId: 'tab-1', seed: seed(), approvals: h.approvals },
+        new AbortController().signal,
+      );
+      await Promise.resolve();
+      await h.ports.release(id, 'tab-closed');
+      opened(h.live);
+      await expect(acquiring).rejects.toMatchObject({ code: 'cancelled' });
+      expect(h.pool.release).toHaveBeenLastCalledWith(id, 'tab-closed');
+      expect(h.ports.tabId(id)).toBe(id);
+      expect(h.openRequests.detachApprovals).toHaveBeenLastCalledWith(id);
+      // The next open of the id starts clean: nothing marked it released.
+      await expect(
+        h.ports.acquire(
+          { sessionId: id, tabId: 'tab-2', seed: seed(), approvals: h.approvals },
+          new AbortController().signal,
+        ),
+      ).resolves.toBe(h.live);
+      expect(h.ports.tabId(id)).toBe('tab-2');
+    });
+
+    it('a broken release during an acquire does not cancel it', async () => {
+      const h = harness();
+      let opened!: (session: ProviderSession) => void;
+      h.pool.acquire.mockImplementationOnce(
+        () => new Promise<ProviderSession>((resolve) => (opened = resolve)),
+      );
+      const acquiring = h.ports.acquire(
+        { sessionId: id, tabId: 'tab-1', seed: seed(), approvals: h.approvals },
+        new AbortController().signal,
+      );
+      await Promise.resolve();
+      await h.ports.release(id, 'broken');
+      opened(h.live);
+      await expect(acquiring).resolves.toBe(h.live);
+      expect(h.ports.tabId(id)).toBe('tab-1');
+    });
   });
 });

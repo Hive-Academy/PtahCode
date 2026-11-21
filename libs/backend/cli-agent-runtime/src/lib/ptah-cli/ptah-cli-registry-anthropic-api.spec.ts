@@ -143,3 +143,14 @@ describe('Ptah CLI direct Claude API credentials', () => {
     expect(JSON.stringify(h.logger.error.mock.calls)).not.toContain('instance-key');
   });
 });
+
+describe('Ptah CLI and provider-session entries', () => {
+  it('never offers or creates an agent on a provider-session entry', async () => {
+    const h = harness();
+    expect(h.registry.getAvailableProviders().map((p) => p.id)).not.toContain('antigravity-cli');
+    await expect(h.registry.createAgent('Agy', 'antigravity-cli')).rejects.toThrow(
+      'Unknown provider: antigravity-cli',
+    );
+    expect(h.configs).toEqual([]);
+  });
+});

@@ -47,6 +47,7 @@ export {
   OPENCODE_ZEN_DEFAULT_TIERS,
   OPENCODE_GO_DEFAULT_TIERS,
 } from './entries/opencode-provider-entry';
+export { ANTIGRAVITY_CLI_PROVIDER_ENTRY } from './entries/provider-session-provider-entries';
 export {
   OPENCODE_MODEL_ROUTES,
   isOpenCodeProviderId,

@@ -51,6 +51,12 @@ export {
   type SelectedProviderDiscovery,
 } from './lib/cli-agents/limits/plan-limit-owner-discovery.service';
 export { CLI_AGENT_RUNTIME_TOKENS } from './lib/di/tokens';
+// The ACP spawn policy every lane uses; the provider-session main chat reuses
+// it so an `agy.cmd` shim spawns the same way on Windows.
+export {
+  laneAcpBaseEnv,
+  laneAcpCommandPreparer,
+} from './lib/cli-agents/cli-adapters/provider-session/lane-acp-spawn';
 export type { CodexAdapterFactory } from './lib/cli-agents/cli-adapters/cli-adapter.interface';
 export {
   CodexAppServerLaneAdapter,

@@ -5,6 +5,8 @@
  */
 export type {
   ProviderMcpAttachment,
+  ProviderHttpMcpAttachment,
+  ProviderStdioMcpAttachment,
   ProviderModelInfo,
   ProviderSession,
   ProviderSessionAttach,

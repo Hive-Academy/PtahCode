@@ -25,8 +25,10 @@ import {
   ANTIGRAVITY_ACP_PTAH_MCP_NAME,
   antigravityAcpProfile,
   antigravityGrantsWithoutAutoApprove,
+  antigravityInstructionsMeta,
   antigravitySkipsPermissions,
 } from './antigravity-acp-profile';
+import type { InitializeResponse } from '@agentclientprotocol/sdk';
 
 const TOOL_USE = readAcpFixture('antigravity-p3-ptah-mcp-tool-use.ndjson');
 const CANCEL = readAcpFixture('antigravity-p3-cancel-then-continue.ndjson');
@@ -94,6 +96,18 @@ describe('antigravityAcpProfile — spawn', () => {
     'skips permissions for permission %s, autoApprove %s: %s (S1)',
     (permission, autoApprove, expected) => {
       expect(antigravitySkipsPermissions({ permission, autoApprove })).toBe(expected);
+    },
+  );
+
+  it.each(['yolo', undefined] as const)(
+    'never skips permissions for a chat (permission %s): the chat asks its sink',
+    (permission) => {
+      expect(
+        antigravitySkipsPermissions({ permission, autoApprove: true, consumer: 'chat' }),
+      ).toBe(false);
+      expect(
+        antigravityAcpProfile.buildSpawn({ ...base, permission, consumer: 'chat' }).args,
+      ).not.toContain('--dangerously-skip-permissions');
     },
   );
 
@@ -186,7 +200,57 @@ describe('antigravityAcpProfile — headless grants in narrower modes (live F1)'
   });
 });
 
+describe('antigravityAcpProfile — instructions', () => {
+  const init = (meta: unknown): InitializeResponse =>
+    ({ protocolVersion: 1, agentCapabilities: { _meta: meta } }) as InitializeResponse;
+
+  it('appends instructions through session/new _meta when agy advertises the hook', () => {
+    // agy 1.5.13 `initialize`: `_meta.antigravity.systemPrompt.append: true`.
+    expect(
+      antigravityInstructionsMeta(
+        'Be brief.',
+        init({ antigravity: { tier: true, systemPrompt: { append: true } } }),
+      ),
+    ).toEqual({ antigravity: { systemPrompt: { append: 'Be brief.' } } });
+  });
+
+  it.each([
+    ['no _meta', undefined],
+    ['no systemPrompt', { antigravity: { tier: true } }],
+    ['append not advertised', { antigravity: { systemPrompt: { append: false } } }],
+    ['malformed', { antigravity: 'yes' }],
+  ])('falls back to the prompt prefix (undefined) with %s', (_label, meta) => {
+    expect(antigravityInstructionsMeta('Be brief.', init(meta))).toBeUndefined();
+  });
+});
+
 describe('antigravityAcpProfile — MCP, modes, config', () => {
+  it('keeps user server names and maps sse and stdio attachments', () => {
+    expect(
+      antigravityAcpProfile.buildMcpServers({
+        ...base,
+        mcp: [
+          { type: 'sse', name: 'docs', url: 'https://docs.example/sse', headers: [] },
+          {
+            type: 'stdio',
+            name: 'files',
+            command: 'npx',
+            args: ['-y', 'files-mcp'],
+            env: [{ name: 'ROOT', value: 'C:/Users/dev' }],
+          },
+        ],
+      }),
+    ).toEqual([
+      { type: 'sse', name: 'docs', url: 'https://docs.example/sse', headers: [] },
+      {
+        name: 'files',
+        command: 'npx',
+        args: ['-y', 'files-mcp'],
+        env: [{ name: 'ROOT', value: 'C:/Users/dev' }],
+      },
+    ]);
+  });
+
   it('attaches Ptah MCP as an http entry with the bearer header (D9)', () => {
     expect(
       antigravityAcpProfile.buildMcpServers({

@@ -154,14 +154,18 @@
         <div class="px-2 py-1">
           @defer (on immediate) {
             <ptah-auth-required-banner
-              [message]="authBanner.message"
+              [message]="authBannerMessage()"
               [providerId]="authBanner.providerId"
+              [reauthBusy]="providerSessionChecking()"
               [carryOverProvider]="carryOverOffer()?.providerName ?? null"
               [carryOverBusy]="carryOverBusy()"
               (reauth)="onAuthReauth()"
               (dismiss)="onAuthBannerDismiss()"
               (carryOver)="onCarryOver()"
             />
+          }
+          @if (providerSessionCheckNote(); as note) {
+            <p role="status" class="mt-2 text-sm text-error" data-testid="provider-session-check-note">{{ note }}</p>
           }
           @if (authBanner.providerId === 'openai-codex' && codexReauthVisible()) {
             <div class="mt-2">
@@ -177,6 +181,38 @@
               }
             </div>
           }
+        </div>
+      }
+
+      @if (resumeFailedNotice(); as resumeNotice) {
+        <div class="px-2 py-1">
+          <div
+            class="rounded border border-warning/40 bg-base-300/30 px-2 py-1.5 text-[11px]"
+            role="alert"
+            data-testid="provider-session-resume-failed"
+          >
+            <p class="text-base-content-muted leading-snug">
+              The provider could not reopen this conversation. Start a new
+              session to continue.
+            </p>
+            <div class="mt-1.5 flex items-center gap-1.5">
+              <button
+                type="button"
+                ptahButton variant="primary" size="xs"
+                data-testid="provider-session-resume-start-new"
+                (click)="onResumeFailedStartNew(resumeNotice.tabId)"
+              >
+                Start a new session in this tab
+              </button>
+              <button
+                type="button"
+                ptahButton variant="ghost" size="xs"
+                (click)="onResumeFailedDismiss(resumeNotice.tabId)"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
         </div>
       }
 

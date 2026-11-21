@@ -56,6 +56,15 @@ export const AUTH_STATUS_FIXTURE = {
   codexAuthenticated: true,
   codexTokenStale: false,
   claudeCliInstalled: true,
+  // The host admits the Antigravity provider session, so its connection is listed (signed in).
+  providerSessionStatus: {
+    antigravity: {
+      installed: true,
+      authenticated: true,
+      version: '1.0.0',
+      signInHint: 'Run `agy` once in a terminal to sign in.',
+    },
+  },
 };
 
 /** The host's masked hint of Kimi Code's stored key (prototype "•••• 8f21"; four U+2022, a space, the last 4). */
@@ -344,6 +353,7 @@ const CHECK_LATENCY_MS: Readonly<Record<string, number | null>> = {
   'claude-cli': null,
   'github-copilot': null,
   'openai-codex': null,
+  'antigravity-cli': null,
 };
 
 /**

@@ -236,6 +236,53 @@ describe('AuthStateService', () => {
     });
   });
 
+  describe('provider-session status rows', () => {
+    it('keeps each admitted row and resolves it by provider id', async () => {
+      const row = {
+        installed: true,
+        authenticated: false,
+        signInHint: 'run `agy` once to sign in',
+      };
+      rpc.call.mockResolvedValueOnce(
+        rpcSuccess(
+          makeAuthStatusResponse({
+            providerSessionStatus: { antigravity: row },
+          }),
+        ),
+      );
+      const service = createService();
+      await service.loadAuthStatus();
+
+      expect(service.providerSessionStatus()).toEqual({ antigravity: row });
+      expect(service.providerSessionRow('antigravity-cli')).toEqual(row);
+      expect(service.providerSessionRow('openai-codex')).toBeNull();
+      expect(service.providerSessionRow(null)).toBeNull();
+    });
+
+    it('drops rows the host no longer reports', async () => {
+      rpc.call
+        .mockResolvedValueOnce(
+          rpcSuccess(
+            makeAuthStatusResponse({
+              providerSessionStatus: {
+                antigravity: {
+                  installed: true,
+                  authenticated: true,
+                  signInHint: 'run `agy`',
+                },
+              },
+            }),
+          ),
+        )
+        .mockResolvedValue(rpcSuccess(makeAuthStatusResponse({})));
+      const service = createService();
+      await service.loadAuthStatus();
+      await service.refreshAuthStatus();
+
+      expect(service.providerSessionRow('antigravity-cli')).toBeNull();
+    });
+  });
+
   describe('auth-required banner', () => {
     it('flagAuthRequired sets the banner and marks codex stale for codex', () => {
       const service = createService();

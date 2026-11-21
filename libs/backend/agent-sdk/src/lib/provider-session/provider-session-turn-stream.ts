@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { basename, resolve } from 'node:path';
 import type { Logger } from '@ptah-extension/vscode-core';
 import {
   createFlatStreamProjector,
@@ -26,6 +25,10 @@ import type { ProviderSessionApprovalSink } from './provider-session-approval-si
 import type { ProviderSessionChatPrepared } from './provider-session-chat-ports';
 import { ProviderSessionChatAdapterError } from './provider-session-chat-adapter-error';
 import { providerSessionRuntimeErrorCode } from './provider-session-error-mapping';
+import {
+  confineTurnFiles,
+  type ProviderSessionRealpath,
+} from './provider-session-turn-files';
 
 /** The adapter's record of one chat session; outlives a broken process. */
 export interface ProviderSessionChatSession {
@@ -66,23 +69,25 @@ export interface ProviderSessionTurnInput {
   readonly files?: readonly string[];
 }
 
-/** The runtime's prompt input: file references become absolute paths. */
-export function providerTurnInput(
+/**
+ * The runtime's prompt input: file references become absolute paths inside
+ * the session's workspace; any other reference is refused
+ * (`unsupported-option`, option `files`) before anything is sent.
+ */
+export async function providerTurnInput(
   session: ProviderSessionChatSession,
   input: ProviderSessionTurnInput,
-): ProviderTurnInput {
-  const cwd = session.prepared.seed.workspacePath;
+  realpath: ProviderSessionRealpath,
+): Promise<ProviderTurnInput> {
+  const files = await confineTurnFiles(
+    input.files ?? [],
+    session.prepared.seed.workspacePath,
+    realpath,
+  );
   return {
     text: input.text,
     ...(input.images?.length ? { images: input.images } : {}),
-    ...(input.files?.length
-      ? {
-          files: input.files.map((file) => {
-            const path = resolve(cwd, file);
-            return { path, name: basename(path) };
-          }),
-        }
-      : {}),
+    ...(files.length ? { files } : {}),
   };
 }
 
@@ -106,6 +111,8 @@ export interface ProviderSessionTurnDependencies {
     'markGenerating' | 'settleTurn' | 'recordFailure' | 'forceIdle'
   >;
   readonly logger: Logger;
+  /** Canonical path of a file reference (`fs.promises.realpath` in production). */
+  readonly realpath: ProviderSessionRealpath;
   /** The live process, re-acquired (respawn + attach) when it broke. */
   live(session: ProviderSessionChatSession): Promise<ProviderSession>;
   stats(payload: ResultStatsPayload): void;
@@ -162,8 +169,9 @@ export async function* streamProviderSessionTurn(
         throw new ProviderSessionChatAdapterError('unsupported-option', 'images', {
           option: 'images',
         });
+      const prompt = await providerTurnInput(session, input, deps.realpath);
       events = live.events(subscription.signal)[Symbol.asyncIterator]();
-      const receipt = await live.prompt(providerTurnInput(session, input));
+      const receipt = await live.prompt(prompt);
       turnId = receipt.turnId;
       session.turnId = turnId;
     } catch (error) {

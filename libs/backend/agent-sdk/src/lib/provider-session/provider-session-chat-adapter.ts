@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
+import { realpath as fsRealpath } from 'node:fs/promises';
 import { z } from 'zod';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type { ProviderSession } from '@ptah-extension/provider-session-contracts';
 import {
+  MAX_IMAGE_SIZE_BYTES,
   SessionId,
   type AgentModelInfo,
   type AgentSessionResumeConfig,
@@ -45,12 +47,15 @@ import {
   type ProviderSessionTurnInput,
   type ProviderSessionTurnOptions,
 } from './provider-session-turn-stream';
+import type { ProviderSessionRealpath } from './provider-session-turn-files';
 
 /** Host ports plus what agent-sdk composition adds (logger, approval router). */
 export interface ProviderSessionChatAdapterDependencies
   extends ProviderSessionChatPorts {
   readonly logger: Logger;
   readonly approvals: Pick<SessionApprovalRouter, 'register' | 'cancelPrompt'>;
+  /** Canonicalises a turn's file references; `fs.promises.realpath` when absent. */
+  readonly realpath?: ProviderSessionRealpath;
 }
 
 const clientMessageIdSchema = z.string().min(1).optional();
@@ -103,8 +108,10 @@ export class ProviderSessionChatAdapter implements NativeChatAdapter {
       failure: (error, operation) => this.failure(error, operation),
       rejectQueued: (session) => this.followUps.rejectAll(session),
     });
+    const realpath = this.ports.realpath ?? ((path: string) => fsRealpath(path));
     this.followUps = new ProviderSessionFollowUpQueue({
       logger: this.ports.logger,
+      realpath,
       publish: (session, input, options) =>
         this.publishTurn(session, input, options),
       failure: (error, operation) => this.failure(error, operation),
@@ -113,6 +120,7 @@ export class ProviderSessionChatAdapter implements NativeChatAdapter {
     this.turnDeps = {
       turnState,
       logger: this.ports.logger,
+      realpath,
       live: (session) => this.live(session),
       stats: (payload) => this.stats?.(payload),
       failure: (error, operation) => this.failure(error, operation),
@@ -316,6 +324,7 @@ export class ProviderSessionChatAdapter implements NativeChatAdapter {
           ? { resume: { nativeSessionId, onFailure: 'error' as const } }
           : {}),
         approvals: session.approvals,
+        ...(session.prepared.open ? { open: session.prepared.open } : {}),
       },
       signal,
     );
@@ -344,7 +353,12 @@ export class ProviderSessionChatAdapter implements NativeChatAdapter {
       if (nativeSessionId && model && live.capabilities().setModel)
         await live.setModel(model);
     } catch (error) {
-      await this.releaseQuietly(session.id, failReason);
+      // A session closed while its process opened is released for good, so
+      // the host forgets its routing instead of keeping it for a re-acquire.
+      await this.releaseQuietly(
+        session.id,
+        session.closing ? 'tab-closed' : failReason,
+      );
       throw error;
     }
     // Prompts of the process the pool replaced cannot be answered any more.
@@ -729,13 +743,40 @@ export class ProviderSessionChatAdapter implements NativeChatAdapter {
   }
 }
 
-/** The chat image shape (`{ data, mediaType }`, base64 without a data: prefix). */
-const turnImagesSchema = z.array(
-  z.object({
-    data: z.string().min(1),
-    mediaType: z.string().regex(/^image\/[\w.+-]+$/),
-  }),
-);
+/** At most this many images per turn, as the chat image picker allows. */
+export const PROVIDER_SESSION_MAX_TURN_IMAGES = 10;
+
+/** Canonical base64: the alphabet, at most two padding characters, whole quads. */
+const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
+
+/** Decoded bytes of a canonical base64 string. */
+function decodedBytes(data: string): number {
+  const padding = data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0;
+  return (data.length / 4) * 3 - padding;
+}
+
+/**
+ * The chat image shape (`{ data, mediaType }`, base64 without a data: prefix).
+ * Each image is canonical base64 within the chat attachment cap
+ * (`MAX_IMAGE_SIZE_BYTES`, decoded), so an oversized or malformed payload is
+ * refused before it is held in the queue or sent.
+ */
+const turnImagesSchema = z
+  .array(
+    z.object({
+      data: z
+        .string()
+        .min(1)
+        .refine((data) => data.length % 4 === 0 && BASE64.test(data), {
+          message: 'image data is not base64',
+        })
+        .refine((data) => decodedBytes(data) <= MAX_IMAGE_SIZE_BYTES, {
+          message: 'image is too large',
+        }),
+      mediaType: z.string().regex(/^image\/[\w.+-]+$/),
+    }),
+  )
+  .max(PROVIDER_SESSION_MAX_TURN_IMAGES);
 const turnFilesSchema = z.array(z.string().trim().min(1));
 
 /** Nothing to send: an open without a first prompt. */

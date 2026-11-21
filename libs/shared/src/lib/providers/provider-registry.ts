@@ -42,6 +42,7 @@ import {
   OPENCODE_ZEN_PROVIDER_ENTRY,
   OPENCODE_GO_PROVIDER_ENTRY,
 } from './entries/opencode-provider-entry';
+import { ANTIGRAVITY_CLI_PROVIDER_ENTRY } from './entries/provider-session-provider-entries';
 
 /**
  * Static model definition for providers without a dynamic models API
@@ -422,6 +423,7 @@ export const ANTHROPIC_PROVIDERS = [
   REQUESTY_PROVIDER_ENTRY,
   OPENCODE_ZEN_PROVIDER_ENTRY,
   OPENCODE_GO_PROVIDER_ENTRY,
+  ANTIGRAVITY_CLI_PROVIDER_ENTRY,
 ] as const satisfies readonly AnthropicProvider[];
 
 /**
@@ -441,7 +443,8 @@ export type AnthropicProviderId =
   | 'sakana'
   | 'requesty'
   | 'opencode-zen'
-  | 'opencode-go';
+  | 'opencode-go'
+  | 'antigravity-cli';
 
 /**
  * Provider ids reserved for provider-session entries (one per profile). An id

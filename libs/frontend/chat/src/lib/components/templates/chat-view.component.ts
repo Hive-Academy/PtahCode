@@ -63,6 +63,7 @@ import {
   ProviderCarryOverService,
   type CarryOverOffer,
 } from '../../services/provider-carry-over.service';
+import { ProviderSessionResumeNoticeService } from '../../services/provider-session-resume-notice.service';
 import { TranscriptRetentionService } from '../../services/transcript-retention.service';
 import { SessionLoaderService } from '../../services/chat-store/session-loader.service';
 import { SessionHistoryReplayer } from '../../services/chat-store/session-history-replayer.service';
@@ -104,7 +105,11 @@ import {
   RpcResult,
   VSCodeService,
 } from '@ptah-extension/core';
-import { SessionId, isLiveAgentStatus } from '@ptah-extension/shared';
+import {
+  SessionId,
+  isLiveAgentStatus,
+  isProviderSessionProviderId,
+} from '@ptah-extension/shared';
 import type {
   ChatSessionSummary,
   SubagentRecord,
@@ -334,6 +339,47 @@ export class ChatViewComponent implements OnDestroy {
   }
 
   private readonly _carryOver = inject(ProviderCarryOverService);
+  private readonly _resumeNotice = inject(ProviderSessionResumeNoticeService);
+
+  /**
+   * Banner text: for a provider session, the host's current sign-in hint for
+   * its profile (`providerSessionStatus`), else the refusal's own message.
+   */
+  protected readonly authBannerMessage = computed(() => {
+    const banner = this.authRequiredBanner();
+    if (!banner) return undefined;
+    return (
+      this._authState.providerSessionRow(banner.providerId)?.signInHint ||
+      banner.message
+    );
+  });
+
+  /** "Check again" of a provider-session banner, bound to the banner it ran for. */
+  private readonly providerSessionCheck = signal<{
+    banner: AuthRequiredBanner;
+    status: 'checking' | 'signed-out' | 'failed';
+  } | null>(null);
+  protected readonly providerSessionChecking = computed(() => {
+    const check = this.providerSessionCheck();
+    return (
+      check?.status === 'checking' &&
+      check.banner === this.authRequiredBanner()
+    );
+  });
+  protected readonly providerSessionCheckNote = computed(() => {
+    const check = this.providerSessionCheck();
+    if (!check || check.banner !== this.authRequiredBanner()) return null;
+    if (check.status === 'signed-out')
+      return 'Still not signed in. Follow the steps above, then check again.';
+    if (check.status === 'failed')
+      return 'Ptah could not check your sign-in. Try again.';
+    return null;
+  });
+
+  /** The resume-failed notice of this view's tab, if its provider session could not be reopened. */
+  protected readonly resumeFailedNotice = computed(() =>
+    this._resumeNotice.noticeFor(this.resolvedTabId()),
+  );
 
   /**
    * The carry-over offer for the banner on screen, shown only in the refused
@@ -421,6 +467,10 @@ export class ChatViewComponent implements OnDestroy {
    */
   protected async onAuthReauth(): Promise<void> {
     const banner = this.authRequiredBanner();
+    if (banner?.providerId && isProviderSessionProviderId(banner.providerId)) {
+      await this.checkProviderSessionSignIn(banner);
+      return;
+    }
     if (banner?.providerId === 'openai-codex') {
       this.codexReauthBanner = banner;
       this.codexReauthFailure.set(null);
@@ -432,8 +482,41 @@ export class ChatViewComponent implements OnDestroy {
     this._authState.clearAuthRequiredBanner();
   }
 
+  /**
+   * Provider sessions sign in through their own CLI, outside Ptah: re-read
+   * `auth:getAuthStatus` and clear the banner only when the profile's row now
+   * reports a usable sign-in. Never starts Codex sign-in.
+   */
+  private async checkProviderSessionSignIn(
+    banner: AuthRequiredBanner,
+  ): Promise<void> {
+    this.providerSessionCheck.set({ banner, status: 'checking' });
+    const read = await this._authState.refreshAuthStatus();
+    if (this.providerSessionCheck()?.banner !== banner) return;
+    const row = this._authState.providerSessionRow(banner.providerId);
+    if (read && row?.installed && row.authenticated) {
+      this.providerSessionCheck.set(null);
+      this._authState.clearAuthRequiredBanner(banner.generation);
+      return;
+    }
+    this.providerSessionCheck.set({
+      banner,
+      status: read ? 'signed-out' : 'failed',
+    });
+  }
+
+  /** "Start a new session in this tab" after a provider session could not be reopened. */
+  protected onResumeFailedStartNew(tabId: string): void {
+    this._resumeNotice.startNewSession(tabId);
+  }
+
+  protected onResumeFailedDismiss(tabId: string): void {
+    this._resumeNotice.dismiss(tabId);
+  }
+
   /** Dismiss the re-auth banner. */
   protected onAuthBannerDismiss(): void {
+    this.providerSessionCheck.set(null);
     this.codexReauthStarted.set(false);
     this.codexReauthFailure.set(null);
     this.codexReauthBanner = null;

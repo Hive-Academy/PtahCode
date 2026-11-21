@@ -14,6 +14,7 @@ import {
 import {
   INTERACTIVE_MCP_CREDENTIAL_MAX_AGE_MS,
   type IMcpCallerCredentials,
+  type McpCallerToolProfile,
 } from '@ptah-extension/platform-core';
 import {
   createFlatStreamProjector,
@@ -61,8 +62,24 @@ export interface ProviderSessionPoolRequest {
   readonly workspaceRoot: string;
   /** Stored native id; attaches with `resume` (send) or `load` (history). */
   readonly nativeSessionId?: string;
-  /** Builds the runtime request; called once per open, inside the mutex. */
-  build(context: ProviderSessionPoolOpenContext): ProviderSessionOpenRequest;
+  /** False: the session attaches no Ptah MCP, so no credential is minted. */
+  readonly ptahMcp?: boolean;
+  /** Bound into the credential; `apps` limits the caller to the Apps tools. */
+  readonly toolProfile?: McpCallerToolProfile;
+  /**
+   * Fingerprint of the open options a running process cannot change (its MCP
+   * set and tool profile). A live entry opened with a different key (a
+   * history read's open, adopted by a send) is reopened by `acquire`.
+   */
+  readonly openOptionsKey?: string;
+  /**
+   * Builds the runtime request; called once per open, inside the mutex and
+   * before a cap slot is taken. A reused live entry never builds, so a send
+   * to a live process never re-runs CLI detection.
+   */
+  build(
+    context: ProviderSessionPoolOpenContext,
+  ): ProviderSessionOpenRequest | Promise<ProviderSessionOpenRequest>;
 }
 
 export interface ProviderSessionPoolHistory {
@@ -84,6 +101,7 @@ type CloseReason =
   | 'idle'
   | 'evicted'
   | 'history-reopen'
+  | 'options-changed'
   | 'shutdown';
 
 export type ProviderSessionHistoryErrorReason =
@@ -122,6 +140,8 @@ interface PoolEntry {
   readonly method: 'new' | 'resume' | 'load';
   /** Revoke key of this process's MCP credential; unique per open. */
   readonly credentialSubject: string;
+  /** The open options it started with (`ProviderSessionPoolRequest.openOptionsKey`). */
+  readonly openOptionsKey: string | undefined;
   pid: number | undefined;
   lastActiveAt: number;
 }
@@ -139,7 +159,12 @@ export class ProviderSessionPool {
 
   constructor(private readonly deps: ProviderSessionPoolDeps) {}
 
-  /** The live session for `sessionId`, opening (or resuming) one when none is live. */
+  /**
+   * The live session for `sessionId`, opening (or resuming) one when none is
+   * live. A live entry whose open options differ (a history read opened it
+   * with Ptah MCP only) is closed and resumed with this request's options,
+   * under this id's lock; only the old process's credential is revoked.
+   */
   acquire(
     sessionId: string,
     request: ProviderSessionPoolRequest,
@@ -147,8 +172,11 @@ export class ProviderSessionPool {
   ): Promise<ProviderSession> {
     return this.withLock(sessionId, async () => {
       const live = this.entries.get(sessionId);
-      if (live) return this.touch(live).session;
+      if (live && !mustReopen(live, request)) return this.touch(live).session;
+      // The runtime is checked before the close: an unbound profile keeps
+      // the live entry rather than leaving the tab with nothing.
       const runtime = this.runtimeOf(request.profile, 'acquire');
+      if (live) await this.closeEntry(live, 'options-changed');
       const attach: ProviderSessionAttach | undefined = request.nativeSessionId
         ? {
             nativeSessionId: request.nativeSessionId,
@@ -257,21 +285,30 @@ export class ProviderSessionPool {
     attach: ProviderSessionAttach | undefined,
     signal: AbortSignal | undefined,
   ): Promise<PoolEntry> {
-    await this.reserveSlot();
     let session: ProviderSession | undefined;
+    let opening: Promise<ProviderSession> | undefined;
+    let reserved = false;
     // One subject per open, so an older process's close (idle, eviction,
     // history reopen; not under this id's lock) never revokes a newer token.
     const credentialSubject = `${sessionId}#${++this.openSequence}`;
-    const opening = Promise.resolve().then(() =>
-      runtime.open(
-        request.build({
-          mcpToken: this.issueCredential(sessionId, credentialSubject, request),
-          attach,
-        }),
-        signal,
-      ),
-    );
     try {
+      // Built before a slot is taken: a refused build (CLI not installed)
+      // evicts nobody.
+      const openRequest = await raceAbort(
+        Promise.resolve().then(() =>
+          request.build({
+            mcpToken:
+              request.ptahMcp === false
+                ? undefined
+                : this.issueCredential(sessionId, credentialSubject, request),
+            attach,
+          }),
+        ),
+        signal,
+      );
+      await this.reserveSlot();
+      reserved = true;
+      opening = Promise.resolve().then(() => runtime.open(openRequest, signal));
       session = await raceAbort(opening, signal);
       if (this.disposed)
         throw new ProviderSessionChatAdapterError('unavailable', 'acquire');
@@ -281,6 +318,7 @@ export class ProviderSessionPool {
         session,
         method: attach?.method ?? 'new',
         credentialSubject,
+        openOptionsKey: request.openOptionsKey,
         pid: undefined,
         lastActiveAt: Date.now(),
       };
@@ -293,10 +331,11 @@ export class ProviderSessionPool {
       // An open that resolved late (timeout, abort, dispose) is closed here;
       // only this open's credential is revoked, so a newer open's stays valid.
       if (session) void this.closeProcess(session);
-      else void opening.then((late) => this.closeProcess(late), () => undefined);
+      else
+        void opening?.then((late) => this.closeProcess(late), () => undefined);
       throw error;
     } finally {
-      this.opening -= 1;
+      if (reserved) this.opening -= 1;
     }
   }
 
@@ -306,7 +345,12 @@ export class ProviderSessionPool {
       const victim = this.lruIdle();
       if (!victim) throw new ProviderSessionChatAdapterError('limit', 'acquire');
       this.opening += 1;
-      await this.closeEntry(victim, 'evicted');
+      try {
+        await this.closeEntry(victim, 'evicted');
+      } catch (error: unknown) {
+        this.opening -= 1;
+        throw error;
+      }
       return;
     }
     this.opening += 1;
@@ -413,6 +457,9 @@ export class ProviderSessionPool {
           kind: 'session',
           sessionId,
           workspaceRoot: request.workspaceRoot,
+          ...(request.toolProfile === 'apps'
+            ? { toolProfile: 'apps' as const }
+            : {}),
           capability: 'privileged',
         },
         credentialSubject,
@@ -478,6 +525,21 @@ export class ProviderSessionPool {
       if (this.locks.get(sessionId) === tail) this.locks.delete(sessionId);
     }
   }
+}
+
+/**
+ * A live entry is reopened for `request` only when both name their options
+ * and they differ, no turn runs on it, and the request can resume the same
+ * native session (so the conversation carries over).
+ */
+function mustReopen(entry: PoolEntry, request: ProviderSessionPoolRequest): boolean {
+  return (
+    request.openOptionsKey !== undefined &&
+    entry.openOptionsKey !== undefined &&
+    entry.openOptionsKey !== request.openOptionsKey &&
+    request.nativeSessionId !== undefined &&
+    !entry.session.isTurnRunning()
+  );
 }
 
 function project(sessionId: string, session: ProviderSession): ProviderSessionPoolHistory {

@@ -349,6 +349,51 @@ describe('ProviderSessionPool history', () => {
     await h.pool.dispose();
   });
 
+  it('reopens an adopted history entry whose open options differ, revoking only the old credential', async () => {
+    const h = harness();
+    const keyed = (key: string): ProviderSessionPoolRequest => ({
+      ...h.request('native-old'),
+      openOptionsKey: key,
+    });
+    await h.pool.acquireForHistory('s1', keyed('ptah-only'));
+    const loaded = h.sessions[0];
+    const oldSubject = h.credentials.issue.mock.calls[0]?.[1];
+
+    const sent = await h.pool.acquire('s1', keyed('ptah+user-servers'));
+
+    expect(sent).not.toBe(loaded);
+    expect(loaded.close).toHaveBeenCalledTimes(1);
+    expect(h.contexts[1].attach).toEqual({
+      nativeSessionId: 'native-old',
+      method: 'resume',
+      onFailure: 'error',
+    });
+    const newSubject = h.credentials.issue.mock.calls[1]?.[1];
+    expect(h.credentials.revokeSubject).toHaveBeenCalledWith(oldSubject);
+    expect(h.credentials.revokeSubject).not.toHaveBeenCalledWith(newSubject);
+    // Same options again: the reopened process is reused.
+    await expect(h.pool.acquire('s1', keyed('ptah+user-servers'))).resolves.toBe(sent);
+    expect(h.open).toHaveBeenCalledTimes(2);
+    await h.pool.dispose();
+  });
+
+  it('keeps an adopted entry when the options match, a turn runs, or no native id can resume', async () => {
+    const h = harness();
+    const keyed = (key: string, native?: string): ProviderSessionPoolRequest => ({
+      ...h.request(native),
+      openOptionsKey: key,
+    });
+    await h.pool.acquireForHistory('s1', keyed('k', 'native-old'));
+    const loaded = h.sessions[0];
+    await expect(h.pool.acquire('s1', keyed('k', 'native-old'))).resolves.toBe(loaded);
+    loaded.running = true;
+    await expect(h.pool.acquire('s1', keyed('other', 'native-old'))).resolves.toBe(loaded);
+    loaded.running = false;
+    await expect(h.pool.acquire('s1', keyed('other'))).resolves.toBe(loaded);
+    expect(h.open).toHaveBeenCalledTimes(1);
+    await h.pool.dispose();
+  });
+
   it('returns history-unavailable without load support or a native id, without an open', async () => {
     const h = harness({ load: false });
     await expect(h.pool.acquireForHistory('s1', h.request('native-old'))).rejects.toEqual(
@@ -477,5 +522,55 @@ describe('ProviderSessionPool pid ledger', () => {
     expect(h.pidLedger.record).toHaveBeenLastCalledWith(expect.objectContaining({ pid: 999 }));
     await h.pool.release('s1', 'tab-closed');
     expect(h.pidLedger.remove).toHaveBeenLastCalledWith(999);
+  });
+});
+
+describe('ProviderSessionPool open request build (N-3, MCP profile)', () => {
+  it('builds only when it opens: a live entry is reused without a build', async () => {
+    const h = harness();
+    const build = jest.fn(async (context: ProviderSessionPoolOpenContext) => ({
+      attach: context.attach,
+    }) as ProviderSessionOpenRequest);
+    const request: ProviderSessionPoolRequest = { profile: PROFILE, workspaceRoot: 'D:/work', build };
+    await h.pool.acquire('s1', request);
+    await h.pool.acquire('s1', request);
+    expect(build).toHaveBeenCalledTimes(1);
+  });
+
+  it('a refused build (CLI gone) takes no slot, evicts nobody and revokes its credential', async () => {
+    const h = harness();
+    await h.pool.acquire('s1', h.request());
+    await h.pool.acquire('s2', h.request());
+    await h.pool.acquire('s3', h.request());
+    const refused: ProviderSessionPoolRequest = {
+      profile: PROFILE,
+      workspaceRoot: 'D:/work',
+      build: async () => {
+        throw new Error('unavailable');
+      },
+    };
+    await expect(h.pool.acquire('s4', refused)).rejects.toThrow('unavailable');
+    expect(h.sessions.every((session) => session.close.mock.calls.length === 0)).toBe(true);
+    expect(h.credentials.revokeSubject).toHaveBeenCalledWith(subjectOf('s4'));
+    // The cap counts no phantom open: one eviction makes room for s5.
+    await h.pool.acquire('s5', h.request());
+    expect(h.sessions[0].close).toHaveBeenCalledTimes(1);
+  });
+
+  it('mints no credential for a session without Ptah MCP', async () => {
+    const h = harness();
+    await h.pool.acquire('s1', { ...h.request(), ptahMcp: false });
+    expect(h.credentials.issue).not.toHaveBeenCalled();
+    expect(h.contexts[0].mcpToken).toBeUndefined();
+  });
+
+  it('binds the apps tool profile into the credential', async () => {
+    const h = harness();
+    await h.pool.acquire('s1', { ...h.request(), toolProfile: 'apps' });
+    expect(h.credentials.issue).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'session', sessionId: 's1', toolProfile: 'apps' }),
+      subjectOf('s1'),
+      expect.any(Number),
+    );
   });
 });

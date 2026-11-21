@@ -33,6 +33,7 @@ describe('IpcBridge Codex permission ownership', () => {
   function setup(
     codexPorts?: Pick<CodexChatHostPorts, 'handlePermissionResponse'> | null,
     mcpService?: Pick<PermissionPromptService, 'resolveRequest'>,
+    providerSessionPorts?: Pick<CodexChatHostPorts, 'handlePermissionResponse'> | null,
   ) {
     const child = container.createChildContainer();
     const handleResponse = jest.fn();
@@ -45,6 +46,11 @@ describe('IpcBridge Codex permission ownership', () => {
     if (codexPorts !== undefined) {
       child.register(SDK_TOKENS.CODEX_CHAT_ADAPTER_PORTS, {
         useFactory: () => codexPorts,
+      });
+    }
+    if (providerSessionPorts !== undefined) {
+      child.register(SDK_TOKENS.PROVIDER_SESSION_CHAT_PORTS, {
+        useFactory: () => providerSessionPorts,
       });
     }
     child.registerInstance(Symbol.for('SdkPermissionHandler'), { handleResponse });
@@ -116,6 +122,44 @@ describe('IpcBridge Codex permission ownership', () => {
     expect(handlePermissionResponse).toHaveBeenCalledWith(response);
     expect(h.handleResponse).toHaveBeenCalledWith(response.id, response);
   });
+
+  it('offers an answer Codex does not own to the provider-session ports next', async () => {
+    const codex = jest.fn(() => false);
+    const providerSession = jest.fn(() => true);
+    const resolveRequest = jest.fn(() => true);
+    const h = setup(
+      { handlePermissionResponse: codex },
+      { resolveRequest },
+      { handlePermissionResponse: providerSession },
+    );
+    const response = { id: 'agy-request', decision: 'allow' };
+    await h.send(response);
+    expect(codex).toHaveBeenCalledWith(response);
+    expect(providerSession).toHaveBeenCalledWith(response);
+    expect(resolveRequest).not.toHaveBeenCalled();
+    expect(h.handleResponse).not.toHaveBeenCalled();
+  });
+
+  it('never asks the provider-session ports for an answer Codex owns', async () => {
+    const providerSession = jest.fn(() => true);
+    const h = setup(
+      { handlePermissionResponse: () => true },
+      undefined,
+      { handlePermissionResponse: providerSession },
+    );
+    await h.send({ id: 'codex-request', decision: 'allow' });
+    expect(providerSession).not.toHaveBeenCalled();
+  });
+
+  it.each([null, { handlePermissionResponse: () => false }])(
+    'falls through to Claude when the provider-session ports do not own it: %j',
+    async (ports) => {
+      const h = setup(null, undefined, ports);
+      const response = { id: 'claude-request', decision: 'allow' };
+      await h.send(response);
+      expect(h.handleResponse).toHaveBeenCalledWith(response.id, response);
+    },
+  );
 
   it('routes an MCP answer to its pending service before the SDK handler', async () => {
     const resolveRequest = jest.fn(() => true);

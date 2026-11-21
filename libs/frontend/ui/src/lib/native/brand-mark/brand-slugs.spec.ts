@@ -410,6 +410,7 @@ describe('brand slug tables', () => {
       cursor: 'cursor',
       copilot: 'github-copilot',
       antigravity: 'antigravity-google',
+      'antigravity-cli': 'antigravity-google',
       opencode: 'opencode',
       'opencode-zen': 'opencode',
       'opencode-go': 'opencode',

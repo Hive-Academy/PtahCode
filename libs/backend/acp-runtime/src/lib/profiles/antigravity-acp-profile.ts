@@ -12,6 +12,8 @@
  *   (`agy acp --help` 1.5.14 lists both).
  * - Windows: `NODE_PTY_USE_CONPTY=0` and a hidden console, the same as the
  *   stream-json lane; agy's shell tool runs through a pty.
+ * - Instructions: `session/new` `_meta.antigravity.systemPrompt.append`
+ *   when `initialize` advertises that hook ({@link antigravityInstructionsMeta}).
  * - Ptah MCP (D9): an ACP `http` entry with the lane bearer. agy advertises no
  *   `mcpCapabilities`, yet it connects to the entry, sends the header, lists
  *   the tools (`mcp_<server>_<tool>`) and calls them; it writes nothing to
@@ -30,9 +32,11 @@
  *   the cancel behaviour is `await-reply`.
  */
 import type {
+  InitializeResponse,
   McpServer,
   RequestPermissionRequest,
 } from '@agentclientprotocol/sdk';
+import { toAcpMcpServer } from '../acp-mcp-servers';
 import { readAcpErrorDetail } from '../acp-vendor-profile';
 import type {
   AcpRequestFailure,
@@ -83,8 +87,10 @@ export const ANTIGRAVITY_ACP_PTAH_MCP_NAME = 'ptah_lane';
  * stream-json lane never granted them).
  */
 export function antigravitySkipsPermissions(
-  options: Pick<AcpSessionOptions, 'permission' | 'autoApprove'>,
+  options: Pick<AcpSessionOptions, 'permission' | 'autoApprove' | 'consumer'>,
 ): boolean {
+  // A chat runs yolo as agy's `auto` mode and asks the rest through its sink.
+  if (options.consumer === 'chat') return false;
   if (options.permission === 'yolo') return true;
   return options.permission === undefined && options.autoApprove !== false;
 }
@@ -172,6 +178,29 @@ function describeAntigravityError(
   return undefined;
 }
 
+/** The name the caller gives Ptah's own MCP attachment. */
+const PTAH_MCP_ATTACHMENT_NAME = 'ptah';
+
+/**
+ * agy's system-prompt hook: `initialize` advertises
+ * `agentCapabilities._meta.antigravity.systemPrompt.append: true`
+ * (`antigravity-p2-handshake.ndjson`), and `session/new` then takes
+ * `_meta.antigravity.systemPrompt.append: "<text>"`, appended to agy's own
+ * system prompt. agy 1.5.14 logs "Ignoring invalid systemPrompt in
+ * _meta.antigravity: 'append' key must be a string" for any other shape, so
+ * the value is always the string. Without the advertisement the runtime
+ * falls back to the prompt prefix.
+ */
+export function antigravityInstructionsMeta(
+  instructions: string,
+  init: InitializeResponse,
+): Record<string, unknown> | undefined {
+  const vendor = recordField(init.agentCapabilities?._meta, 'antigravity');
+  const systemPrompt = recordField(vendor, 'systemPrompt');
+  if (recordField(systemPrompt, 'append') !== true) return undefined;
+  return { antigravity: { systemPrompt: { append: instructions } } };
+}
+
 export const antigravityAcpProfile: AcpVendorProfile = {
   vendor: 'antigravity',
   displayName: 'Antigravity',
@@ -200,22 +229,23 @@ export const antigravityAcpProfile: AcpVendorProfile = {
   },
 
   /**
-   * The caller builds the Ptah MCP attachment (scoped URL plus the lane's
-   * bearer); agy takes it as an ACP `http` entry (D9), named
-   * {@link ANTIGRAVITY_ACP_PTAH_MCP_NAME}.
+   * The caller builds the attachments: Ptah's own server (scoped URL plus the
+   * session bearer, name `ptah`), which agy takes as an ACP `http` entry (D9)
+   * named {@link ANTIGRAVITY_ACP_PTAH_MCP_NAME}, and the user's servers
+   * (`http`, `sse` or `stdio`), which keep their configured names.
    */
   buildMcpServers(options: AcpSessionOptions): readonly McpServer[] {
-    return (options.mcp ?? []).map((attachment) => ({
-      type: 'http' as const,
-      // The attachment is always Ptah's (`ProviderMcpAttachment.name: 'ptah'`).
-      name: ANTIGRAVITY_ACP_PTAH_MCP_NAME,
-      url: attachment.url,
-      headers: attachment.headers.map((header) => ({
-        name: header.name,
-        value: header.value,
-      })),
-    }));
+    return (options.mcp ?? []).map((attachment) =>
+      toAcpMcpServer(
+        attachment,
+        attachment.name === PTAH_MCP_ATTACHMENT_NAME
+          ? ANTIGRAVITY_ACP_PTAH_MCP_NAME
+          : attachment.name,
+      ),
+    );
   },
+
+  instructionsMeta: antigravityInstructionsMeta,
 
   modeFor(options: AcpSessionOptions): string | undefined {
     return options.permission ? MODES[options.permission] : undefined;

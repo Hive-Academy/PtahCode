@@ -42,11 +42,27 @@ export interface ProviderSessionPolicy {
  * One MCP server the session attaches, built by the caller. Secret-bearing:
  * a header carries the lane's bearer token, so it is never logged unredacted.
  */
-export interface ProviderMcpAttachment {
-  readonly name: 'ptah';
+export interface ProviderHttpMcpAttachment {
+  /** Absent means http (the Ptah server and remote user servers). */
+  readonly type?: 'http' | 'sse';
+  /** `'ptah'` for Ptah's own server; a user server keeps its configured name. */
+  readonly name: string;
   readonly url: string;
   readonly headers: readonly { readonly name: string; readonly value: string }[];
 }
+
+/** A user-configured local MCP server, as ACP `McpServer::Stdio`. */
+export interface ProviderStdioMcpAttachment {
+  readonly type: 'stdio';
+  readonly name: string;
+  readonly command: string;
+  readonly args: readonly string[];
+  readonly env: readonly { readonly name: string; readonly value: string }[];
+}
+
+export type ProviderMcpAttachment =
+  | ProviderHttpMcpAttachment
+  | ProviderStdioMcpAttachment;
 
 export interface ProviderSessionAttach {
   readonly nativeSessionId: string;
@@ -63,6 +79,13 @@ export interface ProviderSessionOpenRequest {
   readonly model?: string;
   readonly effort?: string;
   readonly mcp: readonly ProviderMcpAttachment[];
+  /**
+   * Ptah's instructions for the session (identity, user system prompt,
+   * enhanced prompt, output style, memory blocks). The runtime delivers it
+   * per profile: a vendor system-prompt hook when the agent advertises one,
+   * else in front of the first prompt of a new (not restored) session.
+   */
+  readonly instructions?: string;
   readonly attach?: ProviderSessionAttach;
   readonly approvals: ProviderApprovalSink;
   readonly baseEnv: Readonly<Record<string, string | undefined>>;
