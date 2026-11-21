@@ -103,6 +103,7 @@ describe('MessageBubbleComponent — branch/rewind action buttons', () => {
     ['parent-steer', 'Stopped by parent session'],
     ['runtime-cap', 'Runtime cap reached'],
     ['host-stop', 'Stopped by host'],
+    ['send-now', 'Interrupted to send your queued message'],
   ] as const)('shows %s after a partial assistant reply', (stopCause, label) => {
     setMessage(createExecutionChatMessage({
       id: 'partial', role: 'assistant', rawContent: 'Partial reply', isInterrupted: true, stopCause,

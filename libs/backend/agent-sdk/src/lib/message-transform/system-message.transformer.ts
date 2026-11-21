@@ -34,6 +34,15 @@ import type {
 } from './transformer-state';
 import type { TransformerHelpers } from './transformer-helpers';
 
+/**
+ * A `task_notification` status that ends the task by a stop. The SDK's d.ts
+ * lists `stopped`; the runtime also sends `killed` after `Query.stopTask`, so
+ * the value is compared as a plain string.
+ */
+function isStoppedTaskStatus(status: string | undefined): boolean {
+  return status === 'stopped' || status === 'killed';
+}
+
 export class SystemMessageTransformer {
   transformBackgroundTasksChanged(
     msg: SDKBackgroundTasksChangedMessage,
@@ -619,7 +628,8 @@ export class SystemMessageTransformer {
     // A user stop (`subagent:stop` → Query.stopTask) is reported ONLY here.
     // The SubagentStop path completes an entry, so without this a stopped
     // `task_updated`/`task_tool` task would end as `completed`.
-    if (origin !== 'task_started' && msg.status !== 'stopped') {
+    const stopped = isStoppedTaskStatus(msg.status);
+    if (origin !== 'task_started' && !stopped) {
       return null;
     }
 
@@ -637,10 +647,18 @@ export class SystemMessageTransformer {
     const timestamp = Date.now();
     const messageId = state.getMessageId('') ?? `task_${msg.task_id}`;
 
-    if (msg.status === 'stopped') {
+    if (stopped) {
+      // A budget-monitor stop also arrives here (as `stopped`/`killed`, with
+      // the SDK's "stopped by user" summary); the recorded Ptah notice is the
+      // only evidence the user did not stop it.
+      const notice = helpers.stopNotices.noticeFor(msg.task_id);
       helpers.logger.debug(
         '[SdkMessageTransformer] task_notification → background_agent_stopped',
-        { taskId: msg.task_id, toolCallId: parentToolUseId },
+        {
+          taskId: msg.task_id,
+          toolCallId: parentToolUseId,
+          stoppedBy: notice !== undefined ? 'budget-monitor' : 'user',
+        },
       );
       return {
         id,
@@ -651,6 +669,10 @@ export class SystemMessageTransformer {
         toolCallId: parentToolUseId,
         agentId,
         agentType,
+        ...(notice !== undefined && {
+          stoppedBy: 'budget-monitor' as const,
+          reason: notice,
+        }),
       };
     }
 
@@ -673,6 +695,21 @@ export class SystemMessageTransformer {
       result: msg.skip_transcript ? undefined : msg.summary,
       duration: msg.usage?.duration_ms,
     };
+  }
+
+  /**
+   * The Ptah notice for a task the subagent budget monitor stopped, so its
+   * card does not repeat the SDK's "stopped by user" summary. Any status but
+   * an ordinary `completed`/`failed` counts: the SDK reports the kill as
+   * `stopped`, and the runtime as `killed`.
+   */
+  private budgetStopNotice(
+    msg: SDKTaskNotificationMessage,
+    helpers: TransformerHelpers,
+  ): string | undefined {
+    const status: string | undefined = msg.status;
+    if (status === 'completed' || status === 'failed') return undefined;
+    return helpers.stopNotices.noticeFor(msg.task_id);
   }
 
   transformTaskNotification(
@@ -797,6 +834,7 @@ export class SystemMessageTransformer {
     // straight back in as a fake id.
     const resolvedSession = sessionId;
     const workflowRun = state.getWorkflowRun(parentToolUseId);
+    const budgetNotice = this.budgetStopNotice(msg, helpers);
 
     const event: AgentCompletedEvent = {
       id: generateEventId(),
@@ -806,12 +844,17 @@ export class SystemMessageTransformer {
       messageId: state.getMessageId('') ?? `task_${msg.task_id}`,
       parentToolUseId,
       taskId: msg.task_id,
-      status: msg.status ?? 'completed',
-      summary: msg.skip_transcript
-        ? ''
-        : msg.status === 'stopped'
-          ? (helpers.stopNotices.noticeFor(msg.task_id) ?? msg.summary)
-          : msg.summary,
+      // The runtime reports a `stopTask` kill as `killed`, a value the SDK's
+      // d.ts does not list; it is a stop on the wire.
+      status: isStoppedTaskStatus(msg.status)
+        ? 'stopped'
+        : (msg.status ?? 'completed'),
+      summary: msg.skip_transcript ? '' : (budgetNotice ?? msg.summary),
+      // Most background spawns settle from this event alone (no
+      // `background_agent_stopped` follows), so it carries the stop's author.
+      ...(budgetNotice !== undefined && {
+        stoppedBy: 'budget-monitor' as const,
+      }),
       outputFile: msg.skip_transcript ? '' : msg.output_file,
       totalTokens: msg.usage?.total_tokens,
       toolUses: msg.usage?.tool_uses,

@@ -35,6 +35,8 @@ import {
   type ChildChatSessionStartOutcome,
   type HandoffChatSessionStartInput,
   type IChildChatSessionHost,
+  type WatchdogRecoveryInput,
+  type WatchdogRecoveryOutcome,
 } from '@ptah-extension/cli-agent-runtime';
 import {
   SDK_TOKENS,
@@ -79,6 +81,13 @@ export class ChildChatSessionHostAdapter implements IChildChatSessionHost {
     @inject(SDK_TOKENS.SDK_SESSION_LIFECYCLE_MANAGER, { isOptional: true })
     private readonly lifecycle: SessionLifecycleManager | null = null,
   ) {}
+
+  /** One automatic retry after a no-activity watchdog stop (TASK_2026_2288 C). */
+  recoverAfterWatchdogStop(
+    input: WatchdogRecoveryInput,
+  ): Promise<WatchdogRecoveryOutcome> {
+    return this.session.recoverAfterWatchdogStop(input);
+  }
 
   listChildModels(input: { readonly workspaceRoot: string; readonly parentSessionId: string }) {
     return this.session.listAgentChildModels(input);

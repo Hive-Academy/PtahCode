@@ -155,6 +155,12 @@ export class ChatFollowUpQueueService {
     return this.stopGenerations.get(sessionId) ?? 0;
   }
 
+  /** True when a stop (`chat:abort`) of the session occurred at or after `at`. */
+  stoppedSince(sessionId: string, at: number): boolean {
+    const stoppedAt = this.stopAt.get(sessionId);
+    return stoppedAt !== undefined && stoppedAt >= at;
+  }
+
   advanceStopGeneration(sessionId: string): void {
     this.stopGenerations.set(sessionId, this.stopGeneration(sessionId) + 1);
     this.stopAt.delete(sessionId);

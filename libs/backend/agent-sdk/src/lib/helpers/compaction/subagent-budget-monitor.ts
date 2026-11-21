@@ -1544,11 +1544,10 @@ export class SubagentBudgetMonitor {
     }
 
     let stopFailure: { readonly errorType: string } | undefined;
-    this.stopNotices.record(
-      live.sessionId,
-      taskId,
-      redactBudgetSecrets(stopNotice(prepared.handoff.subject, preparedState.stoppedUsage, prepared.record?.path)),
+    const noticeText = redactBudgetSecrets(
+      stopNotice(prepared.handoff.subject, preparedState.stoppedUsage, prepared.record?.path),
     );
+    this.stopNotices.record(live.sessionId, taskId, noticeText);
     preparedState.stopState = 'pending';
     try {
       await this.dispatcher.stopSubagent(live.sessionId, taskId);
@@ -1556,6 +1555,8 @@ export class SubagentBudgetMonitor {
       stopFailure = {
         errorType: error instanceof Error ? error.name : typeof error,
       };
+      // The monitor did not stop the task: a later stop is not its own.
+      this.stopNotices.discard(taskId, noticeText);
     } finally {
       state.stopInFlight = false;
       if (stopFailure) preparedState.stopState = 'none';

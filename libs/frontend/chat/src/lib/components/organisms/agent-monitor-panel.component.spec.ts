@@ -138,6 +138,16 @@ describe('groupAgentsByWorkflowRun', () => {
     expect(groups[0].failed).toBe(1);
   });
 
+  it('rolls up an SDK kill (normalized to stopped) as failed, as killed was', () => {
+    const { groups } = groupAgentsByWorkflowRun([
+      agent({ agentId: 'a', workflowRunId: 'r', status: 'stopped' } as never),
+    ]);
+
+    expect(groups[0].status).toBe('failed');
+    expect(groups[0].failed).toBe(1);
+    expect(groups[0].completed).toBe(0);
+  });
+
   it('sums tokens across a run when agents report a token count', () => {
     const { groups } = groupAgentsByWorkflowRun([
       // MonitoredAgent has no token field today; the grouping reads it

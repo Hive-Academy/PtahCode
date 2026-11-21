@@ -48,7 +48,10 @@ import type {
   ContentBlock,
   SessionHistoryMessage,
 } from './history.types';
-import { isInterruptSentinelText } from '../../types/sdk-types/claude-sdk.types';
+import {
+  isInterruptSentinelText,
+  isSyntheticNoResponsePlaceholder,
+} from '../../types/sdk-types/claude-sdk.types';
 import {
   isHiddenTranscriptRecord,
   isSkillOrMetaContent,
@@ -114,6 +117,26 @@ function parseTaskNotification(text: string): TaskNotification | null {
     summary: field('summary', 240, true) ?? '',
     outputFile: field('output-file', 2048, true) ?? '',
   };
+}
+
+/** True when assistant content is only interrupt-sentinel text blocks. */
+function isInterruptSentinelOnlyContent(content: unknown): boolean {
+  return (
+    Array.isArray(content) &&
+    content.length > 0 &&
+    content.every((block: unknown) => {
+      if (typeof block !== 'object' || block === null) return false;
+      const { type, text } = block as {
+        readonly type?: unknown;
+        readonly text?: unknown;
+      };
+      return (
+        type === 'text' &&
+        typeof text === 'string' &&
+        isInterruptSentinelText(text)
+      );
+    })
+  );
 }
 
 /**
@@ -367,6 +390,15 @@ export class SessionReplayService {
           ),
         );
       } else if (msg.type === 'assistant' && msg.message?.content) {
+        // Entries the SDK wrote itself, not the model: the resume placeholder
+        // and an interrupt-sentinel-only entry. Skipped before the message
+        // start so neither opens an empty assistant bubble.
+        if (
+          isSyntheticNoResponsePlaceholder(msg.message) ||
+          isInterruptSentinelOnlyContent(msg.message.content)
+        ) {
+          continue;
+        }
         const msgTimestamp = msg.timestamp
           ? new Date(msg.timestamp).getTime()
           : Date.now();

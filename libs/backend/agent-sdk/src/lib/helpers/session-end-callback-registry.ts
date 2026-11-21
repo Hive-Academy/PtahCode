@@ -48,6 +48,11 @@ export interface SessionEndPayload {
   workspaceRoot: string;
   /** Why the session ended. `unknown` when the ending path gave none. */
   cause: SessionEndCause;
+  /**
+   * Epoch ms when the teardown started, before its asynchronous interrupt.
+   * A stop recorded at or after it happened during or after the end.
+   */
+  startedAt?: number;
 }
 
 /** Callback type accepted by `SessionEndCallbackRegistry.register()`. */
@@ -86,11 +91,13 @@ export class SessionEndCallbackRegistry {
     sessionId: string;
     workspaceRoot: string;
     cause?: unknown;
+    startedAt?: number;
   }): void {
     const payload: SessionEndPayload = {
       sessionId: data.sessionId,
       workspaceRoot: data.workspaceRoot,
       cause: parseSessionEndCause(data.cause),
+      ...(data.startedAt !== undefined ? { startedAt: data.startedAt } : {}),
     };
     for (const cb of this.callbacks) {
       try {

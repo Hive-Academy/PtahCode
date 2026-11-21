@@ -199,10 +199,28 @@ export class SessionControl {
     }
   }
 
-  /** Interrupt for Send now; the result callback releases the queued next turn. */
+  /**
+   * Interrupt for Send now; the result callback releases the queued next turn.
+   * Records the `send-now` stop cause so the cut turn is labelled as the
+   * user's "Interrupt & send", not as an unexplained interrupt.
+   */
   async interruptForQueuedFollowUp(sessionId: SessionId): Promise<boolean> {
     const rec = this.registry.find(sessionId as string);
     if (!rec?.query || !rec.turnInFlight) return false;
+    this.logger.info(
+      `[SessionLifecycle] Interrupting current turn to send a queued follow-up (send-now) for session: ${sessionId}`,
+    );
+    const owned = this.adapterEvents?.recordStopCause(
+      [rec.tabId, ...(rec.realSessionId ? [rec.realSessionId] : [])],
+      'send-now',
+    );
+    // Same guard as interruptCurrentTurn: never clear a cause that now belongs
+    // to a replacement record or to an end that is already in progress. Clear
+    // only this call's entry: a newer interrupt cause on the record stays.
+    const clearCauseIfCurrent = (): void => {
+      if (owned && this.registry.find(rec.tabId) === rec && !this.endingRecords.has(rec))
+        this.adapterEvents?.clearStopCause(rec.tabId, owned);
+    };
     let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
       const completed = await Promise.race([
@@ -211,10 +229,23 @@ export class SessionControl {
           timeout = setTimeout(() => resolve(false), 3000);
         }),
       ]);
-      return completed && this.registry.find(sessionId as string) === rec;
+      if (!completed) {
+        clearCauseIfCurrent();
+        this.logger.warn(
+          `[SessionLifecycle] Follow-up interrupt (send-now) timed out (3s) for session: ${sessionId}`,
+        );
+        return false;
+      }
+      const current = this.registry.find(sessionId as string) === rec;
+      this.logger.info(
+        `[SessionLifecycle] Follow-up interrupt (send-now) completed for session: ${sessionId}` +
+          (current ? '' : ' (record replaced during interrupt)'),
+      );
+      return current;
     } catch (error: unknown) {
       // degradation-audit: optional-capability - the queued item remains held
       // and the caller reports a recoverable interrupt failure.
+      clearCauseIfCurrent();
       this.logger.warn(
         `[SessionLifecycle] Follow-up interrupt failed for ${sessionId}`,
         error instanceof Error ? error : new Error(String(error)),
@@ -326,6 +357,8 @@ export class SessionControl {
     sessionId: SessionId,
     cause: SessionEndCause = 'unknown',
   ): Promise<void> {
+    // Sampled before any await, so a stop during the interrupt below is later.
+    const startedAt = Date.now();
     this.endingRecords.add(rec);
     this.logger.info(`[SessionLifecycle] Ending session: ${sessionId}`);
     const registrySessionId = rec.realSessionId ?? rec.tabId;
@@ -422,6 +455,7 @@ export class SessionControl {
         sessionId: registrySessionId,
         workspaceRoot,
         cause,
+        ...(cause === 'no-activity-timeout' ? { startedAt } : {}),
       });
     } else {
       this.logger.debug(
