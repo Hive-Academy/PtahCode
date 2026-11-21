@@ -11,7 +11,6 @@ import { RouterLink } from '@angular/router';
 import { ConnectionChoiceStore } from './connection-choice.store';
 import { ConnectionOptionHeadingComponent } from './connection-option-heading.component';
 import {
-  CONNECTION_GRID_CLASS,
   CONNECTION_OPTION_LIST,
   connectionColumns,
   connectionRole,
@@ -52,8 +51,7 @@ import { PtahButtonDirective, PtahStatePanelComponent } from '@ptah-extension/ui
       }
       @if (store.saved().kind === 'loading') {
         <div
-          class="mt-3 gap-[var(--ptah-gap-heading)]"
-          [class]="gridClass"
+          class="mt-3 gap-[var(--ptah-gap-heading)] grid grid-cols-1 lg:grid-cols-[repeat(var(--connection-cols),minmax(0,1fr))]"
           [style.--connection-cols]="columns"
           role="status"
         >
@@ -69,8 +67,7 @@ import { PtahButtonDirective, PtahStatePanelComponent } from '@ptah-extension/ui
           [attr.aria-describedby]="
             store.saved().kind === 'other' ? 'connection-choice-help' : null
           "
-          class="mt-3 gap-[var(--ptah-gap-heading)]"
-          [class]="gridClass"
+          class="mt-3 gap-[var(--ptah-gap-heading)] grid grid-cols-1 lg:grid-cols-[repeat(var(--connection-cols),minmax(0,1fr))]"
           [style.--connection-cols]="columns"
           data-testid="connection-choice-cards"
         >
@@ -227,7 +224,6 @@ export class ConnectionChoiceComponent {
   private readonly injector = inject(Injector);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   protected readonly options = inject(CONNECTION_OPTION_LIST);
-  protected readonly gridClass = CONNECTION_GRID_CLASS;
   /** One grid column per option, up to three. */
   protected readonly columns = connectionColumns(this.options.length);
   /** The provider of the saved main connection, when it is one of the options. */

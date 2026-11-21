@@ -152,15 +152,6 @@ export const CONNECTION_OPTION_LIST = new InjectionToken<
 /** The most connection cards shown side by side. */
 export const MAX_CONNECTION_COLUMNS = 3;
 
-/**
- * The column template both the radio cards and the detail cards use: one
- * column per option (at most {@link MAX_CONNECTION_COLUMNS}) from the `lg`
- * breakpoint, stacked below it. Bind `--connection-cols` with
- * {@link connectionColumns}.
- */
-export const CONNECTION_GRID_CLASS =
-  'grid grid-cols-1 lg:grid-cols-[repeat(var(--connection-cols),minmax(0,1fr))]';
-
 /** The `--connection-cols` value for a list of `count` options. */
 export function connectionColumns(count: number): number {
   return Math.max(1, Math.min(count, MAX_CONNECTION_COLUMNS));

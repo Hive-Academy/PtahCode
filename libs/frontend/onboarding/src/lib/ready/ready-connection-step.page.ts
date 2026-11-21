@@ -20,7 +20,6 @@ import { OnboardingFlagService } from '../first-run/onboarding-flag.service';
 import { OnboardingAnnouncerService } from '../shell/onboarding-announcer.service';
 import { ConnectionChoiceComponent } from './connection-choice.component';
 import {
-  CONNECTION_GRID_CLASS,
   CONNECTION_OPTION_LIST,
   connectionColumns,
   connectionRole,
@@ -88,8 +87,7 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
       </p>
       <ptah-connection-choice class="mt-5" />
       <div
-        class="mt-5 items-stretch gap-[var(--ptah-gap-field)]"
-        [class]="gridClass"
+        class="mt-5 items-stretch gap-[var(--ptah-gap-field)] grid grid-cols-1 lg:grid-cols-[repeat(var(--connection-cols),minmax(0,1fr))]"
         [style.--connection-cols]="columns"
         data-testid="ready-provider-panels"
       >
@@ -177,7 +175,6 @@ export class ReadyConnectionStepPage {
     () => this.store.chosen().readiness?.state === 'ready',
   );
   private readonly options = inject(CONNECTION_OPTION_LIST);
-  protected readonly gridClass = CONNECTION_GRID_CLASS;
   /** One grid column per option, up to three. */
   protected readonly columns = connectionColumns(this.options.length);
   /** "Claude Code or Codex", from the option list. */
