@@ -27,7 +27,6 @@ import {
 } from '@ptah-extension/shared';
 import {
   createCodexChatHostPorts,
-  createCodexRuntimeAdmission,
   CodexChatRoutingError,
   CodexChatMcpServerNameError,
   CodexChatMcpServerUrlError,
@@ -35,6 +34,7 @@ import {
 } from './codex-chat-host-ports';
 import { CodexChatOptionError } from './codex-chat-profile-options';
 import { ChatRuntimeProfileService } from '../session/chat-runtime-profile.service';
+import { createChatRuntimeAdmission } from '../session/chat-runtime-admission';
 
 jest.mock('@ptah-extension/agent-sdk', () => {
   const systemAbort = jest.requireActual<
@@ -912,7 +912,7 @@ describe('Codex chat host ports', () => {
   });
   it('uses the same provider resolver for admission', async () => {
     const h = harness();
-    const admission = createCodexRuntimeAdmission(h.deps);
+    const admission = createChatRuntimeAdmission(h.deps);
     expect(await admission.servingProviderId(config())).toBe(
       (await h.ports.profile(config())).profile.providerId,
     );

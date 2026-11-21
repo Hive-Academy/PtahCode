@@ -19,16 +19,40 @@ export function defaultRuntimeHostCapabilitiesProvider(): FactoryProvider<Runtim
   };
 }
 
-/** Guard cached adapters against late activation and unstable host factories. */
+/** Runtime-neutral chat core: bound together, once, by the host. */
+const CORE_TOKENS = [
+  ['SESSION_RUNTIME_IDENTITY_LOOKUP', SDK_TOKENS.SESSION_RUNTIME_IDENTITY_LOOKUP],
+  ['RUNTIME_ADMISSION_PORT', SDK_TOKENS.RUNTIME_ADMISSION_PORT],
+  ['RUNTIME_HOST_CAPABILITIES', SDK_TOKENS.RUNTIME_HOST_CAPABILITIES],
+] as const;
+
+/** Host ports of each native runtime; any one of them needs the core. */
+const RUNTIME_PORT_TOKENS = [
+  ['CODEX_CHAT_ADAPTER_PORTS', SDK_TOKENS.CODEX_CHAT_ADAPTER_PORTS],
+  ['PROVIDER_SESSION_CHAT_PORTS', SDK_TOKENS.PROVIDER_SESSION_CHAT_PORTS],
+] as const;
+
+/** Adapters built from the ports; resolved only after the binding check. */
+const ADAPTER_TOKENS = [
+  SDK_TOKENS.CODEX_CHAT_ADAPTER,
+  SDK_TOKENS.PROVIDER_SESSION_CHAT_ADAPTER,
+] as const;
+
+/** Name shown when no runtime's ports are bound beside a bound core. */
+const ANY_RUNTIME_PORTS = RUNTIME_PORT_TOKENS.map(([name]) => name).join(' or ');
+
+/**
+ * Guard cached adapters against late activation, unstable host factories and
+ * partial native composition. Rules: the core is all-or-nothing; any runtime's
+ * ports require the core; a bound core requires at least one runtime's ports.
+ */
 export function guardRuntimeComposition(
   container: DependencyContainer,
 ): () => void {
   const tokens = [
-    SDK_TOKENS.SESSION_RUNTIME_IDENTITY_LOOKUP,
-    SDK_TOKENS.CODEX_CHAT_ADAPTER_PORTS,
-    SDK_TOKENS.RUNTIME_ADMISSION_PORT,
-    SDK_TOKENS.RUNTIME_HOST_CAPABILITIES,
-    SDK_TOKENS.CODEX_CHAT_ADAPTER,
+    ...CORE_TOKENS.map(([, token]) => token),
+    ...RUNTIME_PORT_TOKENS.map(([, token]) => token),
+    ...ADAPTER_TOKENS,
   ];
   let snapshot: unknown[] | undefined;
   tokens.forEach((token, index) =>
@@ -42,30 +66,39 @@ export function guardRuntimeComposition(
     }),
   );
   return () => {
-    const current: unknown[] = [];
     defaultCapabilityResolutions.delete(container);
-    for (const token of tokens.slice(0, 4)) {
-      const value = container.resolve<unknown>(token);
-      current.push(value);
-    }
-    const bound = current.map((value, index) =>
-      index === 3
+    const core = CORE_TOKENS.map(([, token]) =>
+      container.resolve<unknown>(token),
+    );
+    const ports = RUNTIME_PORT_TOKENS.map(([, token]) =>
+      container.resolve<unknown>(token),
+    );
+    const coreBound = core.map((value, index) =>
+      CORE_TOKENS[index][1] === SDK_TOKENS.RUNTIME_HOST_CAPABILITIES
         ? value != null && !defaultCapabilityResolutions.has(container)
         : value != null,
     );
-    if (bound.some(Boolean) && !bound.every(Boolean)) {
-      const names = [
-        'SESSION_RUNTIME_IDENTITY_LOOKUP',
-        'CODEX_CHAT_ADAPTER_PORTS',
-        'RUNTIME_ADMISSION_PORT',
-        'RUNTIME_HOST_CAPABILITIES',
+    const anyPorts = ports.some((value) => value != null);
+    const anyCore = coreBound.some(Boolean);
+    if ((anyCore || anyPorts) && !(coreBound.every(Boolean) && anyPorts)) {
+      // Order: identity lookup, runtime ports, admission, capabilities.
+      const missing = [
+        ...(coreBound[0] ? [] : [CORE_TOKENS[0][0]]),
+        ...(anyPorts ? [] : [ANY_RUNTIME_PORTS]),
+        ...CORE_TOKENS.slice(1).flatMap(([name], index) =>
+          coreBound[index + 1] ? [] : [name],
+        ),
       ];
       throw new CodexRuntimeCompositionError(
         'partial-native-binding',
-        names.filter((_name, index) => !bound[index]).join(', '),
+        missing.join(', '),
       );
     }
-    current.push(container.resolve<unknown>(SDK_TOKENS.CODEX_CHAT_ADAPTER));
+    const current = [
+      ...core,
+      ...ports,
+      ...ADAPTER_TOKENS.map((token) => container.resolve<unknown>(token)),
+    ];
     snapshot ??= current;
   };
 }
