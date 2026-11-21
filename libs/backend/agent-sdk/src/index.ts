@@ -238,6 +238,22 @@ export {
   type ProviderSessionChatAdapterErrorCode,
   type ProviderSessionChatAdapterErrorOptions,
 } from './lib/provider-session/provider-session-chat-adapter-error';
+export {
+  /** @internal Composition specs only; hosts resolve PROVIDER_SESSION_CHAT_ADAPTER. */
+  ProviderSessionChatAdapter,
+  type ProviderSessionChatAdapterDependencies,
+} from './lib/provider-session/provider-session-chat-adapter';
+export type {
+  ProviderSessionAcquireRequest,
+  ProviderSessionApprovalPrompt,
+  ProviderSessionChatApprovalPresentation,
+  ProviderSessionChatBinding,
+  ProviderSessionChatIdentityPort,
+  ProviderSessionChatPorts,
+  ProviderSessionChatPrepared,
+  ProviderSessionExecutionIdentity,
+  ProviderSessionReleaseReason,
+} from './lib/provider-session/provider-session-chat-ports';
 export type { RuntimeAdmissionPort } from './lib/codex-app-server/routing-agent-adapter';
 export type {
   SessionApprovalRouter,

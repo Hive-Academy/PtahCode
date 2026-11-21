@@ -139,6 +139,15 @@ export function registerChatServices(container: DependencyContainer): void {
     CLI_AGENT_RUNTIME_TOKENS.CHILD_CHAT_SESSION_HOST,
     ChildChatSessionHostAdapter,
   );
+  // Null default: a host that admits provider-session profiles binds the
+  // probe before the auth handlers resolve; every other host sends no rows.
+  // A factory is required: tsyringe treats `{ useValue: null }` as a class
+  // provider (its check is `useValue != undefined`), so resolving it throws.
+  if (!container.isRegistered(CHAT_TOKENS.PROVIDER_SESSION_AUTH_STATUS, true)) {
+    container.register(CHAT_TOKENS.PROVIDER_SESSION_AUTH_STATUS, {
+      useFactory: () => null,
+    });
+  }
   if (container.isRegistered(LANE_ROUTING_TOKENS.CHILD_SETTING_ROUTER, true)) {
     container.register(CLI_AGENT_RUNTIME_TOKENS.CHILD_SETTING_ROUTER, {
       useToken: LANE_ROUTING_TOKENS.CHILD_SETTING_ROUTER,

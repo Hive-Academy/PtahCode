@@ -203,4 +203,50 @@ export {
   createLegacyCodexSessionSettings,
   type LegacyCodexSessionSettingsDeps,
 } from './lib/chat/codex-host/codex-legacy-session-settings';
+export {
+  ProviderSessionPool,
+  ProviderSessionHistoryError,
+  PROVIDER_SESSION_MAX_LIVE,
+  type ProviderSessionPoolDeps,
+  type ProviderSessionPoolRuntime,
+  type ProviderSessionPoolRequest,
+  type ProviderSessionPoolOpenContext,
+  type ProviderSessionPoolReleaseReason,
+  type ProviderSessionHistoryErrorReason,
+} from './lib/chat/provider-session-host/provider-session-pool';
+export type {
+  ProviderSessionPidEntry,
+  ProviderSessionPidLedger,
+} from './lib/chat/provider-session-host/provider-session-pid-ledger';
+export {
+  createProviderSessionOpenRequests,
+  type ProviderSessionOpenInput,
+  type ProviderSessionOpenRequestDeps,
+  type ProviderSessionOpenRequests,
+} from './lib/chat/provider-session-host/provider-session-open-request';
+export {
+  createProviderSessionChatHostPorts,
+  type ProviderSessionChatHostPorts,
+  type ProviderSessionChatHostPortsDeps,
+} from './lib/chat/provider-session-host/provider-session-chat-host-ports';
+export {
+  createProviderSessionApprovalPresentation,
+  type ProviderSessionApprovalPresentation,
+  type ProviderSessionApprovalPresentationPorts,
+} from './lib/chat/provider-session-host/provider-session-approval-presentation';
+export {
+  createProviderSessionHistoryPort,
+  type ProviderSessionHistoryPortDeps,
+} from './lib/chat/provider-session-host/provider-session-history-port';
+export {
+  createProviderSessionAuthStatusProbe,
+  type ProviderSessionAuthLane,
+  type ProviderSessionAuthProfile,
+  type ProviderSessionAuthStatusProbe,
+  type ProviderSessionAuthStatusRows,
+} from './lib/chat/provider-session-host/provider-session-auth-status';
+export {
+  createProviderSessionNativeControls,
+  type ProviderSessionNativeControlsDeps,
+} from './lib/chat/provider-session-host/provider-session-native-controls';
 

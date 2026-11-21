@@ -191,3 +191,73 @@ describe('provider-session slash routing', () => {
     expect(h.streamEventsToWebview).not.toHaveBeenCalled();
   });
 });
+
+describe('provider-session /clear (P6 review M-1)', () => {
+  function clearHarness(owner: 'provider-session' | 'codex' | 'none') {
+    const calls: string[] = [];
+    const interruptSession = jest.fn(async () => {
+      calls.push('interrupt');
+    });
+    const adapter = (kind: 'provider-session' | 'codex') => ({
+      owns: jest.fn(() => owner === kind),
+      closeSession: jest.fn(async () => {
+        calls.push(`close:${kind}`);
+      }),
+    });
+    const codex = adapter('codex');
+    const providerSessions = adapter('provider-session');
+    const broadcastMessage = jest.fn();
+    const service: ChatSlashCommandRouterService = Object.assign(
+      Object.create(ChatSlashCommandRouterService.prototype),
+      {
+        logger: { info: jest.fn(), warn: jest.fn() },
+        sdkAdapter: { interruptSession },
+        nativeAdapter: codex,
+        providerSessionAdapter: providerSessions,
+        webviewManager: { broadcastMessage },
+        slashCommandInterceptor: {
+          intercept: () => ({ action: 'native', commandName: 'clear' }),
+        },
+      },
+    );
+    const route = () =>
+      service.routeFollowUpSlashCommand('/clear', sessionId, 'tab', '/workspace', {
+        prompt: '/clear',
+        sessionId,
+        tabId: 'tab',
+      });
+    return { route, calls, codex, providerSessions, interruptSession, broadcastMessage };
+  }
+
+  it('interrupts, then closes the provider session so its pool slot is released', async () => {
+    const h = clearHarness('provider-session');
+    await expect(h.route()).resolves.toEqual({ success: true, sessionId });
+    expect(h.calls).toEqual(['interrupt', 'close:provider-session']);
+    expect(h.providerSessions.closeSession).toHaveBeenCalledWith(sessionId);
+    expect(h.codex.closeSession).not.toHaveBeenCalled();
+    expect(h.broadcastMessage).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ command: 'clear', sessionId, tabId: 'tab' }),
+    );
+  });
+
+  it('still closes the provider session when the interrupt fails', async () => {
+    const h = clearHarness('provider-session');
+    h.interruptSession.mockRejectedValueOnce(new Error('interrupt refused'));
+    await expect(h.route()).rejects.toThrow('interrupt refused');
+    expect(h.providerSessions.closeSession).toHaveBeenCalledWith(sessionId);
+  });
+
+  it('keeps the Codex close path for a Codex session', async () => {
+    const h = clearHarness('codex');
+    await h.route();
+    expect(h.calls).toEqual(['interrupt', 'close:codex']);
+    expect(h.providerSessions.closeSession).not.toHaveBeenCalled();
+  });
+
+  it('only interrupts a Claude session', async () => {
+    const h = clearHarness('none');
+    await h.route();
+    expect(h.calls).toEqual(['interrupt']);
+  });
+});

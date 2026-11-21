@@ -63,11 +63,12 @@ export const SDK_TOKENS = {
    * provenance is tracked by provider execution, never by capability values.
    * Leave every runtime default untouched for the exact plain SDK adapter. */
   RUNTIME_HOST_CAPABILITIES: Symbol.for('RuntimeHostCapabilities'),
-  /** Nullable host ports of the provider-session chat runtime (null default).
-   * Bound only together with the native chat core.
+  /** Nullable host ports of the provider-session chat runtime (null default),
+   * a ProviderSessionChatPorts. Bound only together with the native chat core.
    * Bind a stable instance using registerInstance or a cached factory before adapter resolution. */
   PROVIDER_SESSION_CHAT_PORTS: Symbol.for('ProviderSessionChatPorts'),
-  /** Nullable provider-session NativeChatAdapter (null default).
+  /** Nullable provider-session NativeChatAdapter, built by registerCodexChatServices
+   * from PROVIDER_SESSION_CHAT_PORTS (null when no ports are bound).
    * Bind a stable instance using registerInstance or a cached factory before adapter resolution. */
   PROVIDER_SESSION_CHAT_ADAPTER: Symbol.for('ProviderSessionChatAdapter'),
   /** Nullable NativeSessionControls of provider sessions (null default); the

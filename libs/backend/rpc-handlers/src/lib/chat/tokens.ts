@@ -49,4 +49,11 @@ export const CHAT_TOKENS = {
    */
   FOLLOW_UP_QUEUE: Symbol.for('ChatFollowUpQueueService'),
   CODEX_SESSION_OWNER: Symbol.for('ChatCodexSessionOwner'),
+  /**
+   * Nullable `ProviderSessionAuthStatusProbe` behind `auth:getAuthStatus`'s
+   * `providerSessionStatus` rows (null default from `registerChatServices`).
+   * A host that admits a provider-session profile binds it before the auth
+   * handlers resolve; while null, the payload carries no rows.
+   */
+  PROVIDER_SESSION_AUTH_STATUS: Symbol.for('ChatProviderSessionAuthStatus'),
 } as const;

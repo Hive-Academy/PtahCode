@@ -66,6 +66,12 @@ import type {
 export const PROVIDER_SESSION_COMPACT_UNSUPPORTED =
   'This chat provider does not support /compact.';
 
+/** What `/clear` needs of a native chat adapter (Codex or provider session). */
+interface ClosableNativeChatAdapter {
+  owns(sessionId: SessionId): boolean;
+  closeSession(sessionId: SessionId): Promise<void>;
+}
+
 /** Local extension until the shared RPC schema carries account selections. */
 export interface MainSessionAccountSelection {
   readonly accountSelection?: ProviderAccountSelection;
@@ -189,6 +195,8 @@ export class ChatSlashCommandRouterService {
     private readonly runtimeControls: SessionRuntimeControls | null = null,
     @inject(SDK_TOKENS.CODEX_CHAT_ADAPTER, { isOptional: true })
     private readonly nativeAdapter: CodexChatAdapter | null = null,
+    @inject(SDK_TOKENS.PROVIDER_SESSION_CHAT_ADAPTER, { isOptional: true })
+    private readonly providerSessionAdapter: ClosableNativeChatAdapter | null = null,
     @inject(SessionChildRegistry, { isOptional: true })
     private readonly sessionChildren: SessionChildRegistry | undefined = undefined,
   ) {}
@@ -241,8 +249,13 @@ export class ChatSlashCommandRouterService {
       });
 
       if (interceptResult.commandName === 'clear') {
-        const nativeAdapter = this.nativeAdapter;
-        if (nativeAdapter?.owns(sessionId)) {
+        // A native session is closed after the interrupt, so its process
+        // (Codex thread, provider-session pool slot) is released, not kept.
+        const nativeAdapter = [
+          this.nativeAdapter,
+          this.providerSessionAdapter,
+        ].find((adapter) => adapter?.owns(sessionId));
+        if (nativeAdapter) {
           try {
             await this.sdkAdapter.interruptSession(sessionId, 'user-stop');
           } finally {
