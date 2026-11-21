@@ -858,6 +858,65 @@ describe('TC-31: SecretsFileStore never destroys a corrupt secrets file', () => 
     await expect(store.read('old.key', masterKey)).resolves.toBe('old-secret');
   });
 
+  it('keeps a newer saved write when an older overlapping write fails', async () => {
+    const masterKey = crypto.randomBytes(32);
+    const store = new SecretsFileStore(tmpDir);
+    await store.write('k', 'v0', masterKey);
+    const fspModule = require('fs/promises') as typeof fsPromises;
+    const realRename = fspModule.rename.bind(fspModule);
+    let renames = 0;
+    jest
+      .spyOn(fspModule, 'rename')
+      .mockImplementation(async (oldPath, newPath) => {
+        renames += 1;
+        if (renames === 1) {
+          throw Object.assign(new Error('simulated EIO'), { code: 'EIO' });
+        }
+        return realRename(oldPath, newPath);
+      });
+
+    const older = store.write('k', 'v1', masterKey);
+    const newer = store.write('k', 'v2', masterKey);
+    await expect(older).rejects.toThrow('simulated EIO');
+    await expect(newer).resolves.toBeUndefined();
+
+    // The older rollback ran before the newer write, so it cannot undo it.
+    await expect(store.read('k', masterKey)).resolves.toBe('v2');
+    await expect(
+      new SecretsFileStore(tmpDir).read('k', masterKey),
+    ).resolves.toBe('v2');
+  });
+
+  it('keeps reads working and blocks writes when the re-read before the move fails', async () => {
+    fs.writeFileSync(secretsPath, CORRUPT_JSON, 'utf8');
+    const fspModule = require('fs/promises') as typeof fsPromises;
+    const realReadFile = fspModule.readFile.bind(fspModule);
+    let reads = 0;
+    jest
+      .spyOn(fspModule, 'readFile')
+      .mockImplementation((async (...args: Parameters<typeof realReadFile>) => {
+        reads += 1;
+        if (reads === 2) {
+          throw Object.assign(new Error('simulated EACCES'), {
+            code: 'EACCES',
+          });
+        }
+        return realReadFile(...args);
+      }) as typeof realReadFile);
+    const masterKey = crypto.randomBytes(32);
+    const store = new SecretsFileStore(tmpDir);
+
+    await expect(store.read('any.key', masterKey)).resolves.toBeUndefined();
+    await expect(
+      store.write('new.key', 'new-secret', masterKey),
+    ).rejects.toThrow('refusing to overwrite');
+    expect(fs.readFileSync(secretsPath, 'utf8')).toBe(CORRUPT_JSON);
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining('could not be read again'),
+      expect.objectContaining({ code: 'EACCES' }),
+    );
+  });
+
   it('starts empty without a backup or an error log when the file does not exist', async () => {
     const masterKey = crypto.randomBytes(32);
     const store = new SecretsFileStore(tmpDir);

@@ -319,6 +319,29 @@ describe('Antigravity MCP facet (TASK_2026_285)', () => {
       expect((error as Error).message).not.toContain('sk-secret');
     });
 
+    it('keeps the file contents out of the inspect error too', async () => {
+      seedRaw('{ "mcpServers": { "s": { "env": { "TOKEN": sk-secret } } } }');
+
+      const inspection = await makeFacet().inspect(ws);
+      expect(inspection.status).toBe('error');
+      expect(JSON.stringify(inspection)).not.toContain('sk-secret');
+    });
+
+    it('refuses a write over invalid UTF-8 instead of saving replacement characters', async () => {
+      mkdirSync(join(tempHome, '.gemini', 'config'), { recursive: true });
+      const bytes = Buffer.concat([
+        Buffer.from('{ "mcpServers": { "mine": { "command": "a'),
+        Buffer.from([0xc3, 0x28]),
+        Buffer.from('" } } }'),
+      ]);
+      writeFileSync(configPath, bytes);
+
+      await expect(
+        makeFacet().write(ws, 'github', stdio('github-server')),
+      ).rejects.toThrow(/not valid UTF-8/);
+      expect(readFileSync(configPath).equals(bytes)).toBe(true);
+    });
+
     it('refuses a file whose top level is not an object', async () => {
       seedRaw('[1, 2, 3]\n');
 

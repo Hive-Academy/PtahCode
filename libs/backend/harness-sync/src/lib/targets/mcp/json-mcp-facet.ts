@@ -245,9 +245,9 @@ export class JsonMcpFacet implements IHarnessMcpFacet {
    * hold secrets.
    */
   private readJsonForWrite(path: string): Record<string, unknown> {
-    let text: string;
+    let bytes: Buffer;
     try {
-      text = readFileSync(path, 'utf-8');
+      bytes = readFileSync(path);
     } catch (error: unknown) {
       if (errorCode(error) === 'ENOENT') return {};
       this.options.logger?.warn(
@@ -264,7 +264,24 @@ export class JsonMcpFacet implements IHarnessMcpFacet {
       );
     }
 
-    text = stripBom(text);
+    // Strict decode: a lenient one turns invalid bytes into U+FFFD, the text
+    // still parses, and the rewrite would save the replacement characters.
+    let text: string;
+    try {
+      text = stripBom(STRICT_UTF8.decode(bytes));
+    } catch (error: unknown) {
+      this.options.logger?.warn(
+        '[harness-sync] MCP config is not valid UTF-8; write refused',
+        {
+          target: this.target,
+          errorName: error instanceof Error ? error.name : typeof error,
+        },
+      );
+      throw new Error(
+        `Refusing to change ${this.configRelPath()}: the file is not valid UTF-8 text. Fix the file, then retry.`,
+        { cause: error },
+      );
+    }
     if (text.trim() === '') return {};
 
     let parsed: unknown;
@@ -404,8 +421,10 @@ async function readJsonStatus(
   let parsed: unknown;
   try {
     parsed = JSON.parse(stripBom(text));
-  } catch (error) {
-    return { status: 'error', json: {}, error: describeError(error) };
+  } catch {
+    // degradation-audit: reported - returned as status 'error'. The parser
+    // message is dropped: it can quote the file, and MCP env holds secrets.
+    return { status: 'error', json: {}, error: `${path} is not valid JSON` };
   }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     return {
@@ -424,6 +443,12 @@ async function readJsonStatus(
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+/**
+ * Throws on invalid UTF-8 instead of substituting U+FFFD. `ignoreBOM` keeps
+ * the BOM in the output so {@link stripBom} stays the one place it is removed.
+ */
+const STRICT_UTF8 = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
 
 /** Drop a leading UTF-8 byte order mark: valid in a file, rejected by JSON.parse. */
 function stripBom(text: string): string {

@@ -470,13 +470,23 @@ export function buildDependencyNamespace(
   // `[]` means "looked it up, found nothing". A lookup that could not run
   // throws, so the tool runner reports an error result instead of a list the
   // agent would read as "this file has no imports / is unused".
-  /** Whether a built graph answers lookups for `resolved`; throws as unavailable. */
-  const coversFile = (
+  /**
+   * Why no lookup can run for `resolved`, or `undefined` when the answering
+   * graph holds a node for it. The node check matters: with one graph, any
+   * path gets that graph's coverage, and a file outside its root has no node,
+   * so the query would answer [] for a file it never analyzed.
+   */
+  const missingGraphNode = (
     operation: 'getDependencies' | 'getDependents',
     resolved: string,
-  ): boolean => {
+  ): 'GraphNotBuilt' | 'FileNotInGraph' | undefined => {
     try {
-      return dependencyGraph.getCoverageReportForFile(resolved) !== undefined;
+      if (dependencyGraph.getCoverageReportForFile(resolved) === undefined) {
+        return 'GraphNotBuilt';
+      }
+      return dependencyGraph.resolveNodePath(resolved) === undefined
+        ? 'FileNotInGraph'
+        : undefined;
     } catch (error: unknown) {
       const errorName = error instanceof Error ? error.name : typeof error;
       logger?.warn(`[DependencyNamespace] ${operation} failed`, { errorName });
@@ -502,13 +512,18 @@ export function buildDependencyNamespace(
       throw new Error('No workspace is open');
     }
     const resolved = resolveWorkspaceFilePath(trimmed, workspaceProvider);
-    // No built graph answers this file: the lookup cannot run, so it is not
-    // an empty answer. A covering graph with no edges still gives [].
-    if (!coversFile(operation, resolved)) {
+    // No graph node for this file: the lookup cannot run, so it is not an
+    // empty answer. A node with no edges still gives [].
+    const missing = missingGraphNode(operation, resolved);
+    if (missing !== undefined) {
       logger?.warn(`[DependencyNamespace] ${operation} failed`, {
-        errorName: 'GraphNotBuilt',
+        errorName: missing,
       });
-      throw new Error('Dependency graph unavailable: not built yet');
+      throw new Error(
+        missing === 'GraphNotBuilt'
+          ? 'Dependency graph unavailable: not built yet'
+          : 'Dependency graph unavailable: the file is not in the built graph',
+      );
     }
     try {
       return query(resolved);

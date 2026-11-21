@@ -34,6 +34,13 @@ export class SecretsFileStore {
   private loading: Promise<void> | null = null;
   /** True when a corrupt file could not be moved aside; see quarantineCorruptFile. */
   private writesBlocked = false;
+  /**
+   * Tail of the mutation queue. write() and delete() run one at a time so a
+   * failed persist() can roll back only its own change: two overlapping
+   * mutations share the same tmp file, and a stale rollback could otherwise
+   * undo a newer write that did reach disk.
+   */
+  private mutationTail: Promise<void> = Promise.resolve();
 
   constructor(ptahDir: string) {
     this.filePath = path.join(ptahDir, 'secrets.enc.json');
@@ -56,18 +63,20 @@ export class SecretsFileStore {
    */
   async write(key: string, value: string, masterKey: Buffer): Promise<void> {
     await this.ensureLoaded();
-    this.assertWritable();
-    const envelope = encryptValue(value, masterKey, key);
-    const previous = this.entries.get(key);
-    this.entries.set(key, envelope);
-    try {
-      await this.persist();
-    } catch (error: unknown) {
-      // The value was never saved, so it must not read back as if it were.
-      if (previous === undefined) this.entries.delete(key);
-      else this.entries.set(key, previous);
-      throw error;
-    }
+    await this.runExclusive(async () => {
+      this.assertWritable();
+      const envelope = encryptValue(value, masterKey, key);
+      const previous = this.entries.get(key);
+      this.entries.set(key, envelope);
+      try {
+        await this.persist();
+      } catch (error: unknown) {
+        // The value was never saved, so it must not read back as if it were.
+        if (previous === undefined) this.entries.delete(key);
+        else this.entries.set(key, previous);
+        throw error;
+      }
+    });
   }
 
   /**
@@ -76,17 +85,30 @@ export class SecretsFileStore {
    */
   async delete(key: string): Promise<void> {
     await this.ensureLoaded();
-    const previous = this.entries.get(key);
-    if (previous === undefined) return;
-    this.assertWritable();
-    this.entries.delete(key);
-    try {
-      await this.persist();
-    } catch (error: unknown) {
-      // The delete was never saved, so the entry is still there on disk.
-      this.entries.set(key, previous);
-      throw error;
-    }
+    await this.runExclusive(async () => {
+      const previous = this.entries.get(key);
+      if (previous === undefined) return;
+      this.assertWritable();
+      this.entries.delete(key);
+      try {
+        await this.persist();
+      } catch (error: unknown) {
+        // The delete was never saved, so the entry is still there on disk.
+        this.entries.set(key, previous);
+        throw error;
+      }
+    });
+  }
+
+  /** Run one mutation after every earlier one has settled. */
+  private runExclusive(task: () => Promise<void>): Promise<void> {
+    const run = this.mutationTail.then(task);
+    // The queue continues after a failed mutation; the caller gets the error.
+    this.mutationTail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    return run;
   }
 
   /**
@@ -185,7 +207,9 @@ export class SecretsFileStore {
       current = await fsPromises.readFile(this.filePath, 'utf8');
     } catch (err: unknown) {
       if (isNodeError(err) && err.code === 'ENOENT') return;
-      throw err;
+      // Same contract as a failed move: reads stay available, writes refuse.
+      this.blockWrites('could not be read again', reason, err);
+      return;
     }
     if (current !== corruptRaw) {
       const reparsed = parseSecretsFile(current);
@@ -201,21 +225,30 @@ export class SecretsFileStore {
     } catch (err: unknown) {
       // Already gone: nothing is left that a write could overwrite.
       if (isNodeError(err) && err.code === 'ENOENT') return;
-      this.writesBlocked = true;
-      console.error(
-        '[SecretsFileStore] secrets file is corrupt and could not be moved aside; secret writes are disabled for this session',
-        {
-          reason,
-          file: path.basename(this.filePath),
-          code: isNodeError(err) ? err.code : undefined,
-          errorName: err instanceof Error ? err.name : typeof err,
-        },
-      );
+      this.blockWrites('could not be moved aside', reason, err);
       return;
     }
     console.error(
       '[SecretsFileStore] secrets file is corrupt; moved it aside and started with an empty store',
       { reason, backupFile: path.basename(backupPath) },
+    );
+  }
+
+  /** Keep the corrupt file on disk: refuse every write for this session. */
+  private blockWrites(
+    failure: string,
+    reason: CorruptReason,
+    err: unknown,
+  ): void {
+    this.writesBlocked = true;
+    console.error(
+      `[SecretsFileStore] secrets file is corrupt and ${failure}; secret writes are disabled for this session`,
+      {
+        reason,
+        file: path.basename(this.filePath),
+        code: isNodeError(err) ? err.code : undefined,
+        errorName: err instanceof Error ? err.name : typeof err,
+      },
     );
   }
 
