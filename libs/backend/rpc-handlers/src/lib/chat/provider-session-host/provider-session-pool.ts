@@ -22,6 +22,7 @@ import {
   type ProviderSessionAttach,
   type ProviderSessionOpenRequest,
   type ProviderSessionRuntime,
+  type ProviderSessionSpawnedProcess,
 } from '@ptah-extension/provider-session-contracts';
 import type {
   FlatStreamEventUnion,
@@ -142,8 +143,25 @@ interface PoolEntry {
   readonly credentialSubject: string;
   /** The open options it started with (`ProviderSessionPoolRequest.openOptionsKey`). */
   readonly openOptionsKey: string | undefined;
-  pid: number | undefined;
+  readonly row: LedgerRow;
   lastActiveAt: number;
+}
+
+/**
+ * The ledger row of one open's process. `watched`: the runtime reported the
+ * spawn (`onSpawn`), so the row goes when the process exit is observed;
+ * otherwise the pool records `getPid()` after the open and removes the row
+ * only after a close that settled within the bound.
+ */
+interface LedgerRow {
+  pid: number | undefined;
+  watched: boolean;
+}
+
+/** One open in flight; `dispose` aborts it and waits (bounded) for it to settle. */
+interface OpenInFlight {
+  readonly abort: AbortController;
+  settled: Promise<unknown>;
 }
 
 export class ProviderSessionPool {
@@ -152,6 +170,8 @@ export class ProviderSessionPool {
   private readonly locks = new Map<string, Promise<void>>();
   /** Opens in flight; they hold a cap slot before they own an entry. */
   private opening = 0;
+  /** Every open not settled yet, so `dispose` can abort it. */
+  private readonly inFlight = new Set<OpenInFlight>();
   private sweepTimer: ReturnType<typeof setInterval> | undefined;
   private disposed = false;
   /** Makes each open's credential subject unique (see `credentialSubject`). */
@@ -253,11 +273,24 @@ export class ProviderSessionPool {
     await this.closeAll('reset');
   }
 
-  /** Close every entry (each bounded) and stop the sweep; later calls refuse. */
+  /**
+   * Close every entry (each bounded), abort every open in flight (the
+   * runtime stops its process; a late session is closed) and stop the sweep;
+   * later calls refuse. Waits for the aborted opens at most one close bound.
+   */
   async dispose(): Promise<void> {
     this.disposed = true;
     this.stopSweep();
-    await this.closeAll('shutdown');
+    const opens = [...this.inFlight];
+    for (const open of opens)
+      open.abort.abort(new ProviderSessionChatAdapterError('unavailable', 'acquire'));
+    await Promise.all([
+      this.closeAll('shutdown'),
+      withinBound(
+        Promise.allSettled(opens.map((open) => open.settled)),
+        PROVIDER_SESSION_CLOSE_TIMEOUT_MS,
+      ),
+    ]);
   }
 
   private async closeAll(reason: CloseReason): Promise<void> {
@@ -281,9 +314,30 @@ export class ProviderSessionPool {
   private async open(
     sessionId: string,
     request: ProviderSessionPoolRequest,
+    runtime: ProviderSessionPoolRuntime,
+    attach: ProviderSessionAttach | undefined,
+    callerSignal: AbortSignal | undefined,
+  ): Promise<PoolEntry> {
+    // Aborted by the caller or by `dispose`; the runtime stops the process.
+    const abort = new AbortController();
+    const unlink = linkAbort(callerSignal, abort);
+    const opening = this.openTracked(sessionId, request, runtime, attach, abort.signal);
+    const tracked: OpenInFlight = { abort, settled: opening };
+    this.inFlight.add(tracked);
+    try {
+      return await opening;
+    } finally {
+      this.inFlight.delete(tracked);
+      unlink();
+    }
+  }
+
+  private async openTracked(
+    sessionId: string,
+    request: ProviderSessionPoolRequest,
     { runtime }: ProviderSessionPoolRuntime,
     attach: ProviderSessionAttach | undefined,
-    signal: AbortSignal | undefined,
+    signal: AbortSignal,
   ): Promise<PoolEntry> {
     let session: ProviderSession | undefined;
     let opening: Promise<ProviderSession> | undefined;
@@ -291,6 +345,9 @@ export class ProviderSessionPool {
     // One subject per open, so an older process's close (idle, eviction,
     // history reopen; not under this id's lock) never revokes a newer token.
     const credentialSubject = `${sessionId}#${++this.openSequence}`;
+    const row: LedgerRow = { pid: undefined, watched: false };
+    const onSpawn = (spawned: ProviderSessionSpawnedProcess): void =>
+      this.watchSpawn(request.profile, row, spawned);
     try {
       // Built before a slot is taken: a refused build (CLI not installed)
       // evicts nobody.
@@ -308,7 +365,9 @@ export class ProviderSessionPool {
       );
       await this.reserveSlot();
       reserved = true;
-      opening = Promise.resolve().then(() => runtime.open(openRequest, signal));
+      opening = Promise.resolve().then(() =>
+        runtime.open({ ...openRequest, onSpawn }, signal),
+      );
       session = await raceAbort(opening, signal);
       if (this.disposed)
         throw new ProviderSessionChatAdapterError('unavailable', 'acquire');
@@ -319,7 +378,7 @@ export class ProviderSessionPool {
         method: attach?.method ?? 'new',
         credentialSubject,
         openOptionsKey: request.openOptionsKey,
-        pid: undefined,
+        row,
         lastActiveAt: Date.now(),
       };
       this.entries.set(sessionId, entry);
@@ -330,12 +389,44 @@ export class ProviderSessionPool {
       this.revokeCredential(credentialSubject);
       // An open that resolved late (timeout, abort, dispose) is closed here;
       // only this open's credential is revoked, so a newer open's stays valid.
+      // A watched row goes with the process exit; nothing else was recorded.
       if (session) void this.closeProcess(session);
       else
         void opening?.then((late) => this.closeProcess(late), () => undefined);
       throw error;
     } finally {
       if (reserved) this.opening -= 1;
+    }
+  }
+
+  /**
+   * Records the process the runtime just spawned, before its open settles,
+   * and removes the row once its exit is observed, never earlier: a close
+   * that failed or timed out keeps the row for the next start's sweep.
+   */
+  private watchSpawn(
+    profile: ProviderSessionProfileId,
+    row: LedgerRow,
+    { pid, exited }: ProviderSessionSpawnedProcess,
+  ): void {
+    if (row.watched) return;
+    row.watched = true;
+    row.pid = pid;
+    this.ledger(() =>
+      this.deps.pidLedger.record({ pid, profile, startedAt: Date.now() }),
+    );
+    void exited.then(() => {
+      this.ledger(() => this.deps.pidLedger.remove(pid));
+      row.pid = undefined;
+    });
+  }
+
+  /** One ledger call; the ledger is best effort, so a failure is only logged. */
+  private ledger(update: () => void): void {
+    try {
+      update();
+    } catch (error: unknown) {
+      this.deps.logger.error('Provider-session pid ledger update failed.', toError(error));
     }
   }
 
@@ -372,53 +463,70 @@ export class ProviderSessionPool {
     return entry;
   }
 
-  /** Records the current pid; a respawned process replaces the old one. */
+  /**
+   * For a runtime that reports no spawn: records the current pid; a
+   * respawned process replaces the old one. A watched row is left alone.
+   */
   private recordPid(entry: PoolEntry): void {
+    const { row } = entry;
+    if (row.watched) return;
     const pid = entry.session.getPid();
-    if (pid === entry.pid) return;
-    try {
-      if (entry.pid !== undefined) this.deps.pidLedger.remove(entry.pid);
+    if (pid === row.pid) return;
+    const previous = row.pid;
+    this.ledger(() => {
+      if (previous !== undefined) this.deps.pidLedger.remove(previous);
       if (pid !== undefined)
         this.deps.pidLedger.record({ pid, profile: entry.profile, startedAt: Date.now() });
-    } catch (error: unknown) {
-      this.deps.logger.error('Provider-session pid ledger update failed.', toError(error));
-    }
-    entry.pid = pid;
+    });
+    row.pid = pid;
   }
 
-  /** Removes the entry first, so no operation sees a closing session. */
+  /**
+   * Removes the entry first, so no operation sees a closing session. The
+   * ledger row outlives a close whose exit is not confirmed (failed, or past
+   * the bound), so the next start's orphan sweep can still stop the process.
+   */
   private async closeEntry(entry: PoolEntry, reason: CloseReason): Promise<void> {
     if (this.entries.get(entry.sessionId) !== entry) return;
     this.entries.delete(entry.sessionId);
     if (this.entries.size === 0) this.stopSweep();
-    if (entry.pid !== undefined) {
-      try {
-        this.deps.pidLedger.remove(entry.pid);
-      } catch (error: unknown) {
-        this.deps.logger.error('Provider-session pid ledger update failed.', toError(error));
-      }
-    }
     this.deps.logger.debug('Closing provider session.', {
       profile: entry.profile,
       reason,
     });
-    await this.closeSession(entry.credentialSubject, entry.session);
+    const confirmed = await this.closeSession(entry.credentialSubject, entry.session);
+    const { row } = entry;
+    // A watched row goes when the exit is observed (`watchSpawn`).
+    if (row.watched || row.pid === undefined) return;
+    if (!confirmed) {
+      this.deps.logger.warn(
+        'Provider-session close was not confirmed; its pid stays in the ledger for the next start.',
+        { profile: entry.profile, reason },
+      );
+      return;
+    }
+    const pid = row.pid;
+    this.ledger(() => this.deps.pidLedger.remove(pid));
+    row.pid = undefined;
   }
 
   /** Bounded close; the credential is revoked whatever the close does. */
   private async closeSession(
     credentialSubject: string,
     session: ProviderSession,
-  ): Promise<void> {
+  ): Promise<boolean> {
     try {
-      await this.closeProcess(session);
+      return await this.closeProcess(session);
     } finally {
       this.revokeCredential(credentialSubject);
     }
   }
 
-  /** Closes one process within the bound; a failure is logged, never thrown. */
-  private async closeProcess(session: ProviderSession): Promise<void> {
+  /**
+   * Closes one process within the bound. True when the close settled in
+   * time; a failure or the timeout is logged and answers false.
+   */
+  private async closeProcess(session: ProviderSession): Promise<boolean> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       await Promise.race([
@@ -430,8 +538,10 @@ export class ProviderSessionPool {
           );
         }),
       ]);
+      return true;
     } catch (error: unknown) {
       this.deps.logger.error('Provider-session close failed.', toError(error));
+      return false;
     } finally {
       clearTimeout(timer);
     }
@@ -569,6 +679,24 @@ function raceAbort<T>(promise: Promise<T>, signal: AbortSignal | undefined): Pro
 
 function abortReason(signal: AbortSignal): unknown {
   return signal.reason ?? new ProviderSessionChatAdapterError('cancelled', 'acquire');
+}
+
+/** Waits for `promise` at most `ms`; never rejects. */
+async function withinBound(promise: Promise<unknown>, ms: number): Promise<void> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    await Promise.race([
+      promise.then(
+        () => undefined,
+        () => undefined,
+      ),
+      new Promise<void>((resolve) => {
+        timer = setTimeout(resolve, ms);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 /** Forwards the caller's abort to `target`; returns the release of the listener. */

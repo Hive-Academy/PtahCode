@@ -29,10 +29,7 @@ import type {
   ProviderSessionOpenRequests,
 } from './provider-session-open-request';
 import type { ProviderSessionPoolRequest } from './provider-session-pool';
-import {
-  PROVIDER_SESSION_PTAH_IDENTITY,
-  PROVIDER_SESSION_PTAH_MCP_HINT,
-} from './provider-session-start-options';
+import { PROVIDER_SESSION_PTAH_IDENTITY } from './provider-session-start-options';
 
 jest.mock('@ptah-extension/agent-sdk', () => {
   const abort = jest.requireActual<
@@ -220,8 +217,9 @@ describe('provider-session chat host ports', () => {
     await expect(h.ports.prepare({ projectPath: workspace }, id)).resolves.toEqual({
       seed: seed(),
       resume: { nativeSessionId: 'native-1' },
-      // A restored session gets no instructions.
-      open: { ptahMcp: false, userMcp: [] },
+      // Built for a restored session too; the runtime decides per profile
+      // whether the agent is sent them again.
+      open: { ptahMcp: false, userMcp: [], instructions: PROVIDER_SESSION_PTAH_IDENTITY },
     });
     expect(h.resolveExecutionProfile).toHaveBeenCalledWith(
       expect.objectContaining({ existingIdentity: stored.providerSessionExecution }),
@@ -451,7 +449,6 @@ describe('provider-session chat host ports', () => {
         instructions: [
           '## Roster',
           PROVIDER_SESSION_PTAH_IDENTITY,
-          PROVIDER_SESSION_PTAH_MCP_HINT,
           'Be brief.',
         ].join('\n\n'),
       });

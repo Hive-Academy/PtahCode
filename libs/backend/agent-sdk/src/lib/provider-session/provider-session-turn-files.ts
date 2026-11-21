@@ -29,7 +29,10 @@ export async function confineTurnFiles(
     if (!inside(resolve(workspacePath), path)) throw refused();
     const real = await canonical(path, realpath);
     if (!inside(root, real)) throw refused();
-    confined.push({ path, name: basename(path) });
+    // The checked canonical path is sent, so the agent never re-resolves a
+    // link that could be swapped after this check; the name stays the one
+    // the user referenced.
+    confined.push({ path: real, name: basename(path) });
   }
   return confined;
 }

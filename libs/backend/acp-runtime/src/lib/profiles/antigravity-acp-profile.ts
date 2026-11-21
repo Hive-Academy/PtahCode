@@ -13,7 +13,9 @@
  * - Windows: `NODE_PTY_USE_CONPTY=0` and a hidden console, the same as the
  *   stream-json lane; agy's shell tool runs through a pty.
  * - Instructions: `session/new` `_meta.antigravity.systemPrompt.append`
- *   when `initialize` advertises that hook ({@link antigravityInstructionsMeta}).
+ *   when `initialize` advertises that hook ({@link antigravityInstructionsMeta});
+ *   not re-sent on restore (`instructionsOnRestore: 'none'`) until a live
+ *   probe shows whether agy keeps them.
  * - Ptah MCP (D9): an ACP `http` entry with the lane bearer. agy advertises no
  *   `mcpCapabilities`, yet it connects to the entry, sends the header, lists
  *   the tools (`mcp_<server>_<tool>`) and calls them; it writes nothing to
@@ -78,6 +80,9 @@ const MODES: Readonly<Record<string, string>> = {
  */
 export const ANTIGRAVITY_ACP_PTAH_MCP_NAME = 'ptah_lane';
 
+/** What agy puts in front of each Ptah MCP tool name (`mcp_<server>_<tool>`). */
+export const ANTIGRAVITY_ACP_PTAH_MCP_TOOL_PREFIX = `mcp_${ANTIGRAVITY_ACP_PTAH_MCP_NAME}_`;
+
 /**
  * Whether the session runs unattended: resolved yolo, or no permission with
  * auto-approve on. Only then does `agy acp` get
@@ -115,9 +120,9 @@ const EXTRA_KINDS: Readonly<Record<string, ReadonlySet<string>>> = {
 };
 
 /** A tool of the lane's own Ptah MCP server, as agy names it (`mcp_ptah_lane_<tool>`). */
-const PTAH_LANE_TOOL = new RegExp(`^mcp_${ANTIGRAVITY_ACP_PTAH_MCP_NAME}_\\w+$`);
+const PTAH_LANE_TOOL = new RegExp(`^${ANTIGRAVITY_ACP_PTAH_MCP_TOOL_PREFIX}\\w+$`);
 /** agy titles an MCP call `Run <tool name>`. */
-const PTAH_LANE_TITLE = new RegExp(`^Run mcp_${ANTIGRAVITY_ACP_PTAH_MCP_NAME}_\\w+$`);
+const PTAH_LANE_TITLE = new RegExp(`^Run ${ANTIGRAVITY_ACP_PTAH_MCP_TOOL_PREFIX}\\w+$`);
 
 function recordField(value: unknown, key: string): unknown {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -246,6 +251,10 @@ export const antigravityAcpProfile: AcpVendorProfile = {
   },
 
   instructionsMeta: antigravityInstructionsMeta,
+  // Unverified whether agy keeps the `session/new` append across
+  // `session/resume` and `session/load` (live probe pending). 'none' until
+  // the probe answers; 'meta' re-sends the append on every restore.
+  instructionsOnRestore: 'none',
 
   modeFor(options: AcpSessionOptions): string | undefined {
     return options.permission ? MODES[options.permission] : undefined;

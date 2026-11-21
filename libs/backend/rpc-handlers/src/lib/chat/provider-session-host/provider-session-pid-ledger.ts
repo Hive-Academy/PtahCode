@@ -11,8 +11,10 @@ export interface ProviderSessionPidEntry {
 /**
  * Host port recording the pids the {@link ProviderSessionPool} owns, so a
  * later start can sweep processes a crashed host left behind. The pool calls
- * `record` after every open and `remove` on every close; the host binds the
- * persistent implementation (P8). Both calls are synchronous and must not
+ * `record` as soon as a process is spawned and `remove` once its exit is
+ * observed (for a runtime that reports no spawn: after the open, and after a
+ * close confirmed within the bound); the host binds the persistent
+ * implementation (P8). Both calls are synchronous and must not
  * throw for an unknown pid.
  */
 export interface ProviderSessionPidLedger {

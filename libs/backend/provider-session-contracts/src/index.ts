@@ -13,6 +13,7 @@ export type {
   ProviderSessionCapabilities,
   ProviderSessionLogger,
   ProviderSessionOpenRequest,
+  ProviderSessionSpawnedProcess,
   ProviderSessionPermission,
   ProviderSessionPolicy,
   ProviderSessionProfileId,

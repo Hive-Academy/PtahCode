@@ -1047,12 +1047,19 @@ describe('ProviderSessionChatAdapter', () => {
         'unsupported-option',
       );
       expect(live.prompt).toHaveBeenCalledTimes(1);
-      // A reference inside the workspace still goes out as a resource link.
-      await h.adapter.sendMessageToSession(id, 'read', { files: ['src/a.ts'] });
+      // A reference inside the workspace still goes out as a resource link;
+      // a link inside it goes out as its checked target, so the agent never
+      // re-resolves a link swapped after the check.
+      const inner = resolve(seed.workspacePath, 'docs/link.md');
+      h.links.set(inner, resolve(seed.workspacePath, 'docs/real.md'));
+      await h.adapter.sendMessageToSession(id, 'read', { files: ['src/a.ts', 'docs/link.md'] });
       await promptedTurn(live, 2);
       expect(live.prompt).toHaveBeenLastCalledWith({
         text: 'read',
-        files: [{ path: resolve(seed.workspacePath, 'src/a.ts'), name: 'a.ts' }],
+        files: [
+          { path: resolve(seed.workspacePath, 'src/a.ts'), name: 'a.ts' },
+          { path: resolve(seed.workspacePath, 'docs/real.md'), name: 'link.md' },
+        ],
       });
       live.emit({ type: 'terminal', status: 'completed', disposition: 'reusable' });
     });

@@ -72,7 +72,12 @@
 import { readFile, writeFile, mkdir } from 'fs/promises';
 import { homedir } from 'os';
 import { join } from 'path';
-import { readAgySignIn, type AgySignInState } from './antigravity-sign-in';
+import {
+  createCachedAgySignIn,
+  readAgySignIn,
+  type AgySignInState,
+} from './antigravity-sign-in';
+
 import {
   createMcpFacet,
   PTAH_SPAWN_MCP_KEY,
@@ -138,6 +143,9 @@ import {
   redactAgyText,
   safeAgyText,
 } from './antigravity-result-diagnostics';
+
+/** One cached sign-in reader per host: each status check reuses its answer for 30 s. */
+const cachedAgySignIn = createCachedAgySignIn(readAgySignIn);
 
 /**
  * Print-mode wait timeout. `agy` defaults to 5m, which kills most real coding
@@ -460,14 +468,15 @@ export class AntigravityCliAdapter implements CliAdapter {
 
   /**
    * @param acp - ACP seams for specs and live recordings; production passes none.
-   * @param readSignIn - Sign-in reader (specs); defaults to {@link readAgySignIn}.
+   * @param readSignIn - Sign-in reader (specs); defaults to {@link readAgySignIn}
+   *   behind the shared 30 s cache.
    */
   constructor(
     private readonly spawner?: IProcessSpawner,
     private readonly streamJsonProbe?: (binary: string) => Promise<boolean>,
     private readonly logger?: Logger,
     private readonly acp: AntigravityAcpSeam = {},
-    private readonly readSignIn: () => Promise<AgySignInState> = readAgySignIn,
+    private readonly readSignIn: () => Promise<AgySignInState> = cachedAgySignIn,
   ) {}
 
   async detect(): Promise<CliDetectionResult> {

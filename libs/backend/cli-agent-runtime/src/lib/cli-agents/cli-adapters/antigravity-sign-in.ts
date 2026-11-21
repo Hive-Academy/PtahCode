@@ -78,11 +78,51 @@ const nativeQuery: AgyKeyringQuery = (command, args) =>
     child.stdin?.end();
   });
 
-function countOccurrences(text: string, needle: string): number {
-  let count = 0;
-  for (let at = text.indexOf(needle); at !== -1; at = text.indexOf(needle, at + needle.length))
-    count++;
-  return count;
+/** How long one sign-in answer is reused (auth status and connection checks poll it). */
+export const AGY_SIGN_IN_CACHE_TTL_MS = 30_000;
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Reads `cmdkey /list:<target>` output. A stored credential has a line of its
+ * own, `<label>: [<type>:target=]<target>` with the label localized
+ * ("Target", "Ziel", "Cible"), and nothing after the target. The heading
+ * ("Currently stored credentials for <target>:") ends with a colon after the
+ * target, so it never counts. No credential line but the target named
+ * (the heading): signed out. Neither: output not understood, `unknown`.
+ */
+export function parseCmdkeyList(stdout: string, target: string): AgySignInState {
+  const name = escapeRegExp(target);
+  const credentialLine = new RegExp(`^[^:\\r\\n]+:\\s*(?:\\S*?[=:])?${name}\\s*$`, 'im');
+  if (credentialLine.test(stdout)) return 'signed-in';
+  return stdout.toLowerCase().includes(target.toLowerCase()) ? 'signed-out' : 'unknown';
+}
+
+/**
+ * One reader whose answer is reused for {@link AGY_SIGN_IN_CACHE_TTL_MS}, so a
+ * burst of status and connection checks spawns one keyring query. Concurrent
+ * calls share the query in flight; a rejected read is not cached.
+ */
+export function createCachedAgySignIn(
+  read: () => Promise<AgySignInState> = readAgySignIn,
+  ttlMs: number = AGY_SIGN_IN_CACHE_TTL_MS,
+  now: () => number = Date.now,
+): () => Promise<AgySignInState> {
+  let cached: { readonly at: number; readonly answer: Promise<AgySignInState> } | undefined;
+  return () => {
+    if (cached && now() - cached.at < ttlMs) return cached.answer;
+    const answer = read();
+    const entry = { at: now(), answer };
+    cached = entry;
+    // Not a swallow: the caller gets `answer` and its rejection; this only
+    // drops the failed entry so the next call queries again.
+    void answer.catch(() => {
+      if (cached === entry) cached = undefined;
+    });
+    return answer;
+  };
 }
 
 /**
@@ -102,10 +142,7 @@ export async function readAgySignIn(
     const cmdkey = join(env['SystemRoot'] ?? 'C:\\Windows', 'System32', 'cmdkey.exe');
     const { stdout, exitCode } = await query(cmdkey, [`/list:${target}`]);
     if (exitCode !== 0) return 'unknown';
-    // The heading names the target once (localized text around it); a stored
-    // credential names it again on its own line. Counting avoids matching
-    // localized labels such as "Target:" or "* NONE *".
-    return countOccurrences(stdout, target) >= 2 ? 'signed-in' : 'signed-out';
+    return parseCmdkeyList(stdout, target);
   }
   if (platform === 'darwin') {
     const { exitCode } = await query('/usr/bin/security', [

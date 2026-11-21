@@ -83,7 +83,9 @@ export interface ProviderSessionOpenRequest {
    * Ptah's instructions for the session (identity, user system prompt,
    * enhanced prompt, output style, memory blocks). The runtime delivers it
    * per profile: a vendor system-prompt hook when the agent advertises one,
-   * else in front of the first prompt of a new (not restored) session.
+   * else in front of the first prompt of a new session. Whether a restored
+   * (`attach`) session gets them again is the runtime's per-profile choice,
+   * so the caller passes them on every open.
    */
   readonly instructions?: string;
   readonly attach?: ProviderSessionAttach;
@@ -94,6 +96,21 @@ export interface ProviderSessionOpenRequest {
   readonly runId: string;
   /** Lanes bound a prompt; the chat has none (liveness from process exit). */
   readonly promptTimeoutMs?: number;
+  /**
+   * Called once when the agent process exists, normally before the
+   * handshake ends, so the caller can track a process whose open is still
+   * running (crash sweep). It may come after a failed or aborted `open`
+   * settled; never for a process that did not start. A runtime without a
+   * process of its own may never call it.
+   */
+  readonly onSpawn?: (process: ProviderSessionSpawnedProcess) => void;
+}
+
+/** The agent process of one open, as {@link ProviderSessionOpenRequest.onSpawn} reports it. */
+export interface ProviderSessionSpawnedProcess {
+  readonly pid: number;
+  /** Resolves once the process has exited. Never rejects. */
+  readonly exited: Promise<void>;
 }
 
 export interface ProviderSessionCapabilities {

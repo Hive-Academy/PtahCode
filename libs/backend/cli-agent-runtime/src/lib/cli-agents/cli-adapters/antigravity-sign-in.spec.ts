@@ -1,6 +1,12 @@
 import { createMockLogger } from '@ptah-extension/shared/testing';
 import type { Logger } from '@ptah-extension/vscode-core';
-import { readAgySignIn, type AgyKeyringQuery } from './antigravity-sign-in';
+import {
+  AGY_SIGN_IN_CACHE_TTL_MS,
+  createCachedAgySignIn,
+  parseCmdkeyList,
+  readAgySignIn,
+  type AgyKeyringQuery,
+} from './antigravity-sign-in';
 import { AntigravityCliAdapter } from './antigravity-cli.adapter';
 
 const FOUND = `
@@ -80,6 +86,70 @@ describe('readAgySignIn', () => {
       readAgySignIn({ platform: 'linux', env: {}, query: q }),
     ).resolves.toBe('unknown');
     expect(q).not.toHaveBeenCalled();
+  });
+});
+
+describe('parseCmdkeyList', () => {
+  const target = 'gemini:antigravity';
+
+  it('counts only a credential line, never the heading that names the target', () => {
+    // The target appears once, in the heading: no credential is stored.
+    expect(parseCmdkeyList(NONE, target)).toBe('signed-out');
+    expect(parseCmdkeyList(FOUND, target)).toBe('signed-in');
+    // Windows prints generic credentials with their type prefix.
+    expect(
+      parseCmdkeyList('\r\n    Target: LegacyGeneric:target=gemini:antigravity\r\n    Type: Generic\r\n', target),
+    ).toBe('signed-in');
+  });
+
+  it('reads a localized label and any case', () => {
+    const german = `
+Derzeit gespeicherte Anmeldeinformationen für gemini:antigravity:
+
+    Ziel: LegacyGeneric:target=GEMINI:ANTIGRAVITY
+    Typ: Generisch
+`;
+    expect(parseCmdkeyList(german, target)).toBe('signed-in');
+    expect(parseCmdkeyList('    Nom de la cible : gemini:antigravity\n', target)).toBe('signed-in');
+  });
+
+  it('never matches a different target that only starts or ends the same', () => {
+    expect(parseCmdkeyList('    Target: gemini:antigravity-old\n', target)).toBe('signed-out');
+    expect(parseCmdkeyList('    Target: LegacyGeneric:target=xgemini:antigravity\n', target)).toBe(
+      'signed-out',
+    );
+  });
+
+  it('answers unknown for output that does not name the target at all', () => {
+    expect(parseCmdkeyList('', target)).toBe('unknown');
+    expect(parseCmdkeyList('* NONE *', target)).toBe('unknown');
+  });
+});
+
+describe('createCachedAgySignIn', () => {
+  it('reuses one answer for the TTL, shares a read in flight and re-reads after it', async () => {
+    let clock = 0;
+    const read = jest.fn(async () => 'signed-in' as const);
+    const cached = createCachedAgySignIn(read, AGY_SIGN_IN_CACHE_TTL_MS, () => clock);
+    await Promise.all([cached(), cached()]);
+    expect(read).toHaveBeenCalledTimes(1);
+    clock = AGY_SIGN_IN_CACHE_TTL_MS - 1;
+    await expect(cached()).resolves.toBe('signed-in');
+    expect(read).toHaveBeenCalledTimes(1);
+    clock = AGY_SIGN_IN_CACHE_TTL_MS;
+    await cached();
+    expect(read).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not cache a failed read', async () => {
+    const read = jest
+      .fn<Promise<'signed-in'>, []>()
+      .mockRejectedValueOnce(new Error('cmdkey timed out'))
+      .mockResolvedValueOnce('signed-in');
+    const cached = createCachedAgySignIn(read, AGY_SIGN_IN_CACHE_TTL_MS, () => 0);
+    await expect(cached()).rejects.toThrow('cmdkey timed out');
+    await expect(cached()).resolves.toBe('signed-in');
+    expect(read).toHaveBeenCalledTimes(2);
   });
 });
 

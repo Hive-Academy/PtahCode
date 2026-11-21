@@ -19,8 +19,9 @@
  * - Instructions (`options.instructions`) reach a new session once: through
  *   the profile's `instructionsMeta` on `session/new` when the agent
  *   advertised a system-prompt hook, else as a delimited block in front of
- *   the first prompt. A restored (resumed or loaded) session never gets them
- *   again: the agent already holds them.
+ *   the first prompt. A restored (resumed or loaded) session gets them again
+ *   only when the profile sets `instructionsOnRestore: 'meta'` (the same hook
+ *   on `session/resume` / `session/load`); the prompt prefix never repeats.
  * - `interrupt()` sends `session/cancel`; with the profile's `await-reply`
  *   cancel behaviour the agent answers the prompt and the process stays for
  *   the next prompt.
@@ -252,6 +253,11 @@ export interface AcpSession {
   getModels(): readonly AcpModelEntry[];
   /** Resolves when the current agent process ends. Never rejects. */
   readonly exited: Promise<AcpProcessExit>;
+  /**
+   * Resolves with the current agent process's pid once it is spawned, or
+   * `undefined` when it never started or already ended. Never rejects.
+   */
+  readonly spawned: Promise<number | undefined>;
   /**
    * The connection closed or the process exited, or the process is being
    * stopped (the prompt watchdog fired, a kill was started): it takes no
@@ -820,6 +826,13 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
     }
 
     const cwd = options.workingDirectory;
+    // Instructions on a restored session only where the profile opted in
+    // (`instructionsOnRestore: 'meta'`), through the same hook as `session/new`.
+    const restoreMeta =
+      profile.instructionsOnRestore === 'meta' && options.instructions
+        ? profile.instructionsMeta?.(options.instructions, init)
+        : undefined;
+    const meta = restoreMeta ? { _meta: restoreMeta } : {};
     attachingSessionId = resumeId;
     const collector =
       method === 'load'
@@ -839,11 +852,13 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
               sessionId: resumeId,
               cwd,
               mcpServers: [...mcpServers],
+              ...meta,
             })
           : await conn.loadSession({
               sessionId: resumeId,
               cwd,
               mcpServers: [...mcpServers],
+              ...meta,
             });
       // The first replay is the session's history; a respawn's re-load must not
       // replace it (a consumer that appended the first one would duplicate it).
@@ -1678,6 +1693,10 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
     getModels,
     get exited() {
       return gen.transport.exited;
+    },
+    get spawned() {
+      // An in-memory transport (specs) has no spawn to wait for.
+      return gen.transport.spawned ?? Promise.resolve(gen.transport.getPid());
     },
     isClosed: () => !isLive(gen),
     isSetupComplete: () => setupComplete,

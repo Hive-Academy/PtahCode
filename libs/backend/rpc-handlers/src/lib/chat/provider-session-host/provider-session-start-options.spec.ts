@@ -7,7 +7,6 @@ import type {
 import {
   createProviderSessionStartOptions,
   PROVIDER_SESSION_PTAH_IDENTITY,
-  PROVIDER_SESSION_PTAH_MCP_HINT,
   type ProviderSessionStartOptionsDeps,
 } from './provider-session-start-options';
 
@@ -80,14 +79,13 @@ describe('provider-session start options', () => {
           outputStyleBody: 'Style body.',
           enhancedPromptsContent: 'Enhanced guidance.',
         }),
-        { workspacePath: workspace, resumed: false },
+        { workspacePath: workspace },
       );
       expect(open.instructions).toBe(
         [
           '## Session start roster',
           '## Recalled Memory Context',
           PROVIDER_SESSION_PTAH_IDENTITY,
-          PROVIDER_SESSION_PTAH_MCP_HINT,
           'PTAH-UI-HINT',
           'User system prompt.',
           'Style body.',
@@ -103,41 +101,41 @@ describe('provider-session start options', () => {
         expect(PROVIDER_SESSION_PTAH_IDENTITY).not.toContain(claudeOnly);
     });
 
-    it('omits the UI hint for the apps profile and the MCP hint without Ptah MCP', async () => {
+    it('omits the UI hint for the apps profile and never adds the MCP hint itself', async () => {
       const h = harness();
       const open = await h.options.resolve(
         start({ ptahUiFence: true, mcpToolProfile: 'apps' }),
-        { workspacePath: workspace, resumed: false },
+        { workspacePath: workspace },
       );
       expect(open.instructions).not.toContain('PTAH-UI-HINT');
-      expect(open.instructions).not.toContain(PROVIDER_SESSION_PTAH_MCP_HINT);
+      // The hint is added per open, only when the attachment is there.
+      expect(open.instructions).not.toContain("Ptah's MCP server");
       expect(open.mcpToolProfile).toBe('apps');
     });
 
     it('skips the recall block without a first prompt; an empty session-start block (toggle off) adds nothing', async () => {
       const h = harness();
       h.memory.buildSessionStartBlock.mockResolvedValueOnce('');
-      const open = await h.options.resolve(start(), { workspacePath: workspace, resumed: false });
+      const open = await h.options.resolve(start(), { workspacePath: workspace });
       expect(h.memory.buildBlock).not.toHaveBeenCalled();
       expect(open.instructions).toBe(PROVIDER_SESSION_PTAH_IDENTITY);
     });
 
-    it('builds no instructions and reads no memory for a restored session', async () => {
+    it('builds the instructions for a restored session too (the runtime decides delivery)', async () => {
       const h = harness();
       const open = await h.options.resolve(
         start({ prompt: 'continue', systemPrompt: 'x' }),
-        { workspacePath: workspace, resumed: true },
+        { workspacePath: workspace },
       );
-      expect(open.instructions).toBeUndefined();
-      expect(h.memory.buildSessionStartBlock).not.toHaveBeenCalled();
-      expect(h.memory.buildBlock).not.toHaveBeenCalled();
+      expect(open.instructions).toContain(PROVIDER_SESSION_PTAH_IDENTITY);
+      expect(open.instructions).toContain('x');
+      expect(h.memory.buildSessionStartBlock).toHaveBeenCalledWith(workspace);
     });
 
     it('works without a memory injector', async () => {
       const h = harness({ memory: undefined });
       const open = await h.options.resolve(start({ prompt: 'hello there' }), {
         workspacePath: workspace,
-        resumed: false,
       });
       expect(open.instructions).toBe(PROVIDER_SESSION_PTAH_IDENTITY);
     });
@@ -156,7 +154,7 @@ describe('provider-session start options', () => {
 
     it('attaches Ptah MCP only when the session says the server runs', async () => {
       const h = harness();
-      const ctx = { workspacePath: workspace, resumed: false };
+      const ctx = { workspacePath: workspace };
       expect((await h.options.resolve(start({ mcpServerRunning: true }), ctx)).ptahMcp).toBe(true);
       expect((await h.options.resolve(start({ mcpServerRunning: false }), ctx)).ptahMcp).toBe(false);
       expect((await h.options.resolve(start(), ctx)).ptahMcp).toBe(false);
@@ -167,7 +165,7 @@ describe('provider-session start options', () => {
       h.resolve.mockResolvedValueOnce(mockPolicy({ deniedMcpServers: ['off'] }));
       const open = await h.options.resolve(
         start({ mcpServerRunning: true, mcpServersOverride: overrides }),
-        { workspacePath: workspace, resumed: false },
+        { workspacePath: workspace },
       );
       expect(open.userMcp).toEqual([
         {
@@ -188,7 +186,6 @@ describe('provider-session start options', () => {
       h.resolve.mockResolvedValueOnce(mockPolicy({ ptahEnabled: false }));
       const open = await h.options.resolve(start({ mcpServerRunning: true }), {
         workspacePath: workspace,
-        resumed: false,
       });
       expect(open.ptahMcp).toBe(false);
     });
@@ -197,27 +194,37 @@ describe('provider-session start options', () => {
       const h = harness({ capabilityResolver: undefined });
       const open = await h.options.resolve(
         start({ mcpServerRunning: true, mcpServersOverride: overrides }),
-        { workspacePath: workspace, resumed: false },
+        { workspacePath: workspace },
       );
       expect(open.ptahMcp).toBe(true);
       expect(open.userMcp).toEqual([]);
     });
 
-    it('refuses a user server whose URL is not http(s) as unsupported-option', async () => {
+    it('skips a user server whose URL is not http(s) with a warning; the start goes on', async () => {
       const h = harness();
-      await expect(
-        h.options.resolve(
-          start({ mcpServersOverride: { bad: { type: 'http', url: 'file:///etc/passwd' } } }),
-          { workspacePath: workspace, resumed: false },
-        ),
-      ).rejects.toMatchObject({ code: 'unsupported-option', option: 'mcpServersOverride' });
+      const open = await h.options.resolve(
+        start({
+          mcpServersOverride: {
+            bad: { type: 'http', url: 'file:///etc/passwd' },
+            docs: { type: 'http', url: 'https://docs.example/mcp' },
+          },
+        }),
+        { workspacePath: workspace },
+      );
+      expect(open.userMcp.map((server) => server.name)).toEqual(['docs']);
+      expect(h.logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('skipped'),
+        { code: 'provider-session-user-mcp-unsupported', serverNames: ['bad'] },
+      );
+      // Names only: the URL never reaches a log line.
+      expect(JSON.stringify(h.logger.warn.mock.calls)).not.toContain('passwd');
     });
   });
 
   describe('capability policy preflight (item 4)', () => {
     it('syncs the harness to a verified policy before the open', async () => {
       const h = harness();
-      await h.options.resolve(start(), { workspacePath: workspace, resumed: false });
+      await h.options.resolve(start(), { workspacePath: workspace });
       expect(h.resolve).toHaveBeenCalledWith(workspace);
       expect(h.apply).toHaveBeenCalledWith('/real/workspace', 'fp-1');
     });
@@ -226,11 +233,11 @@ describe('provider-session start options', () => {
       const h = harness();
       h.apply.mockResolvedValueOnce({ acknowledged: false });
       await expect(
-        h.options.resolve(start(), { workspacePath: workspace, resumed: false }),
+        h.options.resolve(start(), { workspacePath: workspace }),
       ).resolves.toBeDefined();
       h.apply.mockRejectedValueOnce(new Error('preflight down'));
       await expect(
-        h.options.resolve(start(), { workspacePath: workspace, resumed: true }),
+        h.options.resolve(start(), { workspacePath: workspace }),
       ).resolves.toBeDefined();
       expect(h.logger.warn).toHaveBeenCalledTimes(2);
     });
@@ -238,14 +245,14 @@ describe('provider-session start options', () => {
     it('skips the sync for an unverified policy, as Claude chat does', async () => {
       const h = harness();
       h.resolve.mockResolvedValueOnce(mockPolicy({ status: 'unverified' }));
-      await h.options.resolve(start(), { workspacePath: workspace, resumed: false });
+      await h.options.resolve(start(), { workspacePath: workspace });
       expect(h.apply).not.toHaveBeenCalled();
     });
 
     it('opens without a harness sync dependency', async () => {
       const h = harness({ harnessPolicySync: undefined });
       await expect(
-        h.options.resolve(start(), { workspacePath: workspace, resumed: false }),
+        h.options.resolve(start(), { workspacePath: workspace }),
       ).resolves.toBeDefined();
     });
   });

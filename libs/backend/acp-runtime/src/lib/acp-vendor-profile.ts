@@ -81,9 +81,9 @@ export interface AcpSessionOptions {
    */
   readonly mcp: readonly ProviderMcpAttachment[];
   /**
-   * Ptah's instructions for a new session (the chat's system prompt). Sent
-   * once, per {@link AcpVendorProfile.instructionsMeta}; never to a restored
-   * session.
+   * Ptah's instructions for the session (the chat's system prompt). Sent to
+   * a new session once, per {@link AcpVendorProfile.instructionsMeta}; to a
+   * restored one only per {@link AcpVendorProfile.instructionsOnRestore}.
    */
   readonly instructions?: string;
 }
@@ -217,6 +217,14 @@ export interface AcpVendorProfile {
     instructions: string,
     init: InitializeResponse,
   ): Record<string, unknown> | undefined;
+  /**
+   * Whether a restored session (`session/resume`, `session/load`) is sent its
+   * instructions again: `'meta'` passes the {@link instructionsMeta} `_meta`
+   * on the attach request too (for an agent that rebuilds its system prompt
+   * on restore); `'none'` (the default) sends nothing, for an agent that
+   * keeps the instructions it was created with.
+   */
+  readonly instructionsOnRestore?: 'meta' | 'none';
   /** Optional `_meta` for `session/cancel`. */
   cancelMeta?(options: AcpSessionOptions): Record<string, unknown> | undefined;
   /**

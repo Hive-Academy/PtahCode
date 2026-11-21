@@ -4,7 +4,9 @@ import {
 } from '../di/codex-binding-registry';
 import {
   disposeElectronProviderSessionBindings,
+  flushElectronProviderSessionPidLedgers,
   hasElectronProviderSessionBindings,
+  hasElectronProviderSessionPidLedgers,
 } from '../di/provider-session-binding-registry';
 import {
   killRunningChecks,
@@ -102,10 +104,17 @@ export const AGENT_REAP_BUDGET_MS = 2000;
 export const CODEX_DISPOSE_BUDGET_MS = 2000;
 /**
  * Maximum wait for the provider-session agents to close during quit. The
- * pool bounds each close at 5 s and closes them in parallel; the agents are
- * detached, so one that outlives the budget is swept on the next start.
+ * pool bounds each close at 5 s, closes them in parallel and aborts opens in
+ * flight. Each agent's pid ledger row is removed only once its exit is
+ * observed, so an agent that outlives this budget (detached) keeps its row
+ * and is swept on the next start.
  */
 export const PROVIDER_SESSION_DISPOSE_BUDGET_MS = 2000;
+/**
+ * Maximum wait for the provider-session pid ledger's queued writes after the
+ * agents closed, so the rows on disk match what is still running.
+ */
+export const PROVIDER_SESSION_LEDGER_FLUSH_BUDGET_MS = 1000;
 
 /**
  * How long the chain may wait for the FINAL metadata flush.
@@ -453,12 +462,24 @@ async function disposeAfterPersistence(deps: DisposalDeps): Promise<void> {
   }
 
   if (hasElectronProviderSessionBindings()) {
-    // Closes every agent the pool owns; the pid ledger removes each row.
+    // Closes every agent the pool owns and aborts opens in flight; a row
+    // leaves the pid ledger only once its agent's exit is observed.
     await withBudget(
       'Provider-session bindings dispose',
       disposeElectronProviderSessionBindings,
       PROVIDER_SESSION_DISPOSE_BUDGET_MS,
       'continuing shutdown.',
+    );
+  }
+
+  if (hasElectronProviderSessionPidLedgers()) {
+    // After the closes: the removals they produced, and the rows kept for an
+    // unconfirmed exit, reach storage before quit.
+    await withBudget(
+      'Provider-session pid ledger flush',
+      flushElectronProviderSessionPidLedgers,
+      PROVIDER_SESSION_LEDGER_FLUSH_BUDGET_MS,
+      'the next start re-checks the rows left.',
     );
   }
 

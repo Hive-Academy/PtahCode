@@ -37,6 +37,7 @@ import {
   type CliDetectionService,
 } from '@ptah-extension/cli-agent-runtime';
 import {
+  ANTIGRAVITY_ACP_PTAH_MCP_TOOL_PREFIX,
   antigravityAcpProfile,
   createAcpProviderSessionRuntime,
   type AcpCommandPreparer,
@@ -79,15 +80,33 @@ export const ELECTRON_PROVIDER_SESSION_PROFILES = [
 ] as const satisfies readonly ProviderSessionProfileId[];
 
 /**
- * Per admitted profile: the ACP vendor profile and whether the agent
- * advertises `session/load` (agy does: `loadSession:true`, preflight PF-4).
+ * Per admitted profile: the ACP vendor profile, whether the agent advertises
+ * `session/load` (agy does: `loadSession:true`, preflight PF-4), and the
+ * prefix the agent puts on Ptah MCP tool names (agy: `mcp_ptah_lane_`).
  */
 type AdmittedProfile = (typeof ELECTRON_PROVIDER_SESSION_PROFILES)[number];
 const PROFILE_TABLE: Readonly<
-  Record<AdmittedProfile, { readonly acp: AcpVendorProfile; readonly load: boolean }>
+  Record<
+    AdmittedProfile,
+    {
+      readonly acp: AcpVendorProfile;
+      readonly load: boolean;
+      readonly ptahMcpToolPrefix: string;
+    }
+  >
 > = {
-  antigravity: { acp: antigravityAcpProfile, load: true },
+  antigravity: {
+    acp: antigravityAcpProfile,
+    load: true,
+    ptahMcpToolPrefix: ANTIGRAVITY_ACP_PTAH_MCP_TOOL_PREFIX,
+  },
 };
+
+function isAdmittedProfile(profile: ProviderSessionProfileId): profile is AdmittedProfile {
+  return (ELECTRON_PROVIDER_SESSION_PROFILES as readonly ProviderSessionProfileId[]).includes(
+    profile,
+  );
+}
 
 export interface ElectronProviderSessionBindingInput {
   /** WorkspaceScopeResolver.readForPath; values are unknown until validated. */
@@ -330,6 +349,8 @@ export function bindElectronProviderSessionChat(
         .resolve<{ isMcpServerRunning(): boolean }>(CHAT_TOKENS.SDK_CONTEXT)
         .isMcpServerRunning(),
     baseEnv: input.baseEnv ?? laneAcpBaseEnv,
+    ptahMcpToolPrefix: (profile) =>
+      isAdmittedProfile(profile) ? PROFILE_TABLE[profile].ptahMcpToolPrefix : undefined,
     logger,
   });
   // The resolver admits a provider session only on a host that lists its

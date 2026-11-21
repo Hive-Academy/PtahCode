@@ -472,6 +472,16 @@ describe('ProvidersConnectionSetupService', () => {
       ],
       ['anthropic', { authMethod: 'apiKey', applyTo: 'global' }],
       ['claude-cli', { authMethod: 'claudeCli', applyTo: 'global' }],
+      // Live test of PR #1462: a provider-session 'cli' entry is routed by
+      // id like Codex, never saved as Claude CLI.
+      [
+        'antigravity-cli',
+        {
+          authMethod: 'thirdParty',
+          anthropicProviderId: 'antigravity-cli',
+          applyTo: 'global',
+        },
+      ],
     ])(
       'activates %s with the native-auth rule',
       async (providerId, expected) => {
@@ -482,6 +492,7 @@ describe('ProvidersConnectionSetupService', () => {
             openrouter,
             { ...openrouter, id: 'anthropic' },
             { ...openrouter, id: 'claude-cli', authMode: 'cli' },
+            { ...openrouter, id: 'antigravity-cli', authMode: 'cli' },
           ],
         });
         (hooks.refreshAuthStatus as jest.Mock).mockResolvedValueOnce(true);

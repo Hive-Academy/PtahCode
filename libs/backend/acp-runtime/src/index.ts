@@ -91,6 +91,7 @@ export type {
 
 export {
   ANTIGRAVITY_ACP_PTAH_MCP_NAME,
+  ANTIGRAVITY_ACP_PTAH_MCP_TOOL_PREFIX,
   antigravityAcpProfile,
   antigravityGrantsWithoutAutoApprove,
   antigravityInstructionsMeta,

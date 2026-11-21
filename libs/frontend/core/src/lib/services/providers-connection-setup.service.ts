@@ -16,6 +16,7 @@ import {
   type RpcMethodParams,
   type RpcMethodResult,
   type SettingScope,
+  isProviderSessionProviderId,
 } from '@ptah-extension/shared';
 import { ClaudeRpcService } from './claude-rpc.service';
 import {
@@ -790,6 +791,14 @@ export class ProvidersConnectionSetupService implements MessageHandler {
       return {
         authMethod: 'apiKey',
         ...(anthropicApiKey !== undefined ? { anthropicApiKey } : {}),
+        applyTo,
+      };
+    // A provider-session entry (Antigravity) is a 'cli' connection but runs
+    // its own native runtime, like Codex: route it by provider id.
+    if (isProviderSessionProviderId(providerId))
+      return {
+        authMethod: 'thirdParty',
+        anthropicProviderId: providerId,
         applyTo,
       };
     if (authMode === 'cli' || NATIVE_ANTHROPIC_IDS.has(providerId))

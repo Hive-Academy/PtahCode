@@ -57,6 +57,7 @@ import {
   type ElectronProviderSessionPendingBinding,
 } from '../di/provider-session-composition';
 import { createElectronProviderSessionPidLedgerStore } from '../di/provider-session-pid-ledger-store';
+import { trackElectronProviderSessionPidLedger } from '../di/provider-session-binding-registry';
 import {
   defaultProviderSessionOrphanSweepDeps,
   startProviderSessionOrphanSweep,
@@ -668,6 +669,8 @@ async function runBootstrap(
       container.resolve<IStateStorage>(PLATFORM_TOKENS.STATE_STORAGE),
       providerSessionLogger,
     );
+    // Shutdown awaits its queued writes after the agents closed.
+    trackElectronProviderSessionPidLedger(() => pidLedgerStore.flush());
     // Agents a crashed run left behind; runs once, in the background.
     void startProviderSessionOrphanSweep(
       pidLedgerStore,

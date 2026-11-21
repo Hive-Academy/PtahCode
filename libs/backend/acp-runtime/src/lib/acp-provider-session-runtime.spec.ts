@@ -483,6 +483,79 @@ describe('createAcpProviderSessionRuntime: instructions', () => {
       await session.close();
     },
   );
+
+  it.each(['resume', 'load'] as const)(
+    're-sends the hook _meta on %s only for a profile with instructionsOnRestore meta',
+    async (method) => {
+      const restoring: AcpVendorProfile = {
+        ...antigravityAcpProfile,
+        instructionsOnRestore: 'meta',
+      };
+      const { agent, open } = harness({}, undefined, [restoring]);
+      const session = await open({
+        instructions: INSTRUCTIONS,
+        attach: { nativeSessionId: 'old-4', method, onFailure: 'error' },
+      });
+      expect(params(sent(agent, `session/${method}`)[0])['_meta']).toEqual({
+        antigravity: { systemPrompt: { append: INSTRUCTIONS } },
+      });
+      // Never as a prompt prefix on a restored session.
+      await untilTerminal(session, () => session.prompt({ text: 'continue' }));
+      expect(promptsOf(agent)[0]).toEqual([{ type: 'text', text: 'continue' }]);
+      await session.close();
+    },
+  );
+
+  it('agy sends no instructions on restore until the live probe confirms its behaviour', async () => {
+    expect(antigravityAcpProfile.instructionsOnRestore).toBe('none');
+    const { agent, open } = harness();
+    const session = await open({
+      instructions: INSTRUCTIONS,
+      attach: { nativeSessionId: 'old-5', method: 'resume', onFailure: 'error' },
+    });
+    expect(params(sent(agent, 'session/resume')[0])['_meta']).toBeUndefined();
+    await session.close();
+  });
+});
+
+describe('createAcpProviderSessionRuntime: spawn report', () => {
+  it('reports the pid and the exit of the agent process before open resolves', async () => {
+    let resolveSession!: () => void;
+    const { transport, open } = harness({}, (fake) => {
+      fake.handle(
+        'session/new',
+        () =>
+          new Promise((resolve) => {
+            resolveSession = () => resolve({ result: { sessionId: SESSION_ID } });
+          }),
+      );
+    });
+    const spawned: { pid: number; exited: Promise<void> }[] = [];
+    const opening = open({ onSpawn: (process) => spawned.push(process) });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(spawned.map((process) => process.pid)).toEqual([4242]);
+    let exited = false;
+    void spawned[0]?.exited.then(() => (exited = true));
+    resolveSession();
+    const session = await opening;
+    await Promise.resolve();
+    expect(exited).toBe(false);
+    await session.close();
+    await spawned[0]?.exited;
+    expect(exited).toBe(true);
+    expect(transport.killCount).toBe(1);
+  });
+
+  it('keeps opening when the caller callback throws', async () => {
+    const { open } = harness();
+    const session = await open({
+      onSpawn: () => {
+        throw new Error('ledger down');
+      },
+    });
+    expect(session.nativeSessionId).toBe(SESSION_ID);
+    await session.close();
+  });
 });
 
 describe('createAcpProviderSessionRuntime: MCP attachments', () => {

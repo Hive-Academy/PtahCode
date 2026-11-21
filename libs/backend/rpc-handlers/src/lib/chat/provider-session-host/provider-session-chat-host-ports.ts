@@ -120,7 +120,6 @@ export function createProviderSessionChatHostPorts(
         throw new ProviderSessionChatAdapterError('unavailable', 'prepare');
       const open = await startOptions.resolve(config, {
         workspacePath: execution.seed.workspacePath,
-        resumed: stored !== undefined,
       });
       return {
         seed: execution.seed,

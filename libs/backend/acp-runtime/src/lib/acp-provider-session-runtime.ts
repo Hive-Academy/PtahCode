@@ -18,6 +18,9 @@
  *   `terminal{failed, broken}`; one that exits while idle makes the next
  *   `prompt` reject with `process-exited`, the code the chat adapter reads as
  *   broken. There is no respawn: the pool re-acquires with an attach.
+ * - `request.onSpawn` gets the agent's pid and exit as soon as the process
+ *   exists (normally before `open` settles), so a caller can track an
+ *   opening process.
  * - `close` aborts the session (cancel grace, then kill) and waits at most
  *   {@link ACP_PROVIDER_SESSION_CLOSE_MS} for the process. It revokes no
  *   credential: the pool that minted the MCP bearer owns its revocation.
@@ -65,6 +68,34 @@ export interface AcpProviderSessionRuntimeDeps {
   readonly prepareCommand?: AcpCommandPreparer;
   /** Specs only: an in-memory transport instead of a spawned process. */
   readonly transportFactory?: AcpTransportFactory;
+}
+
+/**
+ * Hands the caller the agent process as soon as it exists (`onSpawn`), so a
+ * pid is tracked while the handshake, a cold start or a history replay still
+ * runs. The chat has no respawn, so only the first process is reported.
+ */
+function reportSpawn(
+  acp: ReturnType<typeof createAcpSession>,
+  request: ProviderSessionOpenRequest,
+  logger: ProviderSessionLogger,
+): void {
+  const onSpawn = request.onSpawn;
+  if (!onSpawn) return;
+  const exited = acp.exited.then(() => undefined);
+  void acp.spawned.then((pid) => {
+    if (pid === undefined) return;
+    try {
+      onSpawn({ pid, exited });
+    } catch (error: unknown) {
+      // degradation-audit: reported - the caller's tracking failed, not the
+      // session; the error is logged and the open continues.
+      logger.error('[AcpProviderSession] onSpawn callback failed', {
+        runId: request.runId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
 }
 
 export function createAcpProviderSessionRuntime(
@@ -134,6 +165,7 @@ async function openAcpProviderSession(
       hub.publish(event);
     },
   });
+  reportSpawn(acp, request, logger);
 
   const cancelOpen = (): void => lifetime.abort();
   signal?.addEventListener('abort', cancelOpen, { once: true });

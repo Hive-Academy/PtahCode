@@ -40,10 +40,6 @@ export type ProviderSessionOpenOptions = NonNullable<
 export const PROVIDER_SESSION_PTAH_IDENTITY =
   "You are running inside Ptah, a desktop app for software engineering work. Your replies render as GitHub-flavored markdown in Ptah's chat panel, not in a terminal: keep them short, and use headings, language-tagged code fences and numbered steps where they help.";
 
-/** Added when Ptah's MCP server is attached to the session. */
-export const PROVIDER_SESSION_PTAH_MCP_HINT =
-  "Ptah's MCP server `ptah` is attached. Prefer its ptah_* tools (workspace analysis, file and symbol search, diagnostics, memory) over shell equivalents, as its server instructions describe.";
-
 export interface ProviderSessionStartOptionsDeps {
   readonly logger: Pick<Logger, 'debug' | 'info' | 'warn'>;
   /** Session-start roster and first-prompt recall; absent: no memory blocks. */
@@ -58,10 +54,12 @@ export interface ProviderSessionStartOptionsDeps {
 }
 
 export interface ProviderSessionStartContext {
-  /** The session's workspace (the seed's), where memory and policy resolve. */
+  /**
+   * The session's workspace (the seed's), where memory and policy resolve.
+   * Instructions are built for a stored session too: the runtime decides per
+   * profile whether a restored session is sent them again.
+   */
   readonly workspacePath: string;
-  /** A stored session: no instructions (the runtime never re-delivers them). */
-  readonly resumed: boolean;
 }
 
 export interface ProviderSessionStartOptions {
@@ -122,7 +120,6 @@ export function createProviderSessionStartOptions(
   const instructions = async (
     config: AgentSessionStartConfig | AgentSessionResumeConfig,
     workspacePath: string,
-    ptahMcp: boolean,
   ): Promise<string | undefined> => {
     // The injector never throws and honours
     // `memory.triggers.sessionStart.injectionEnabled` itself.
@@ -137,7 +134,8 @@ export function createProviderSessionStartOptions(
       sessionStart,
       recall,
       PROVIDER_SESSION_PTAH_IDENTITY,
-      ptahMcp ? PROVIDER_SESSION_PTAH_MCP_HINT : '',
+      // The Ptah MCP hint is added per open, only when the attachment is
+      // there (`providerSessionPtahMcpHint`, provider-session-open-request).
       // As Codex chat: the hint without a skill-file lookup.
       config.ptahUiFence === true && coding ? PTAH_UI_HINT_CODEX : '',
       config.systemPrompt ?? '',
@@ -167,9 +165,7 @@ export function createProviderSessionStartOptions(
         policy,
         deps.logger,
       );
-      const body = context.resumed
-        ? undefined
-        : await instructions(config, context.workspacePath, ptahMcp);
+      const body = await instructions(config, context.workspacePath);
       return {
         ptahMcp,
         ...(config.mcpToolProfile
@@ -184,7 +180,8 @@ export function createProviderSessionStartOptions(
 
 /**
  * The user's MCP servers (Smithery, OAuth, caller overrides) as ACP http
- * attachments, like Codex chat's `userMcpServers`: an http(s) URL only, empty
+ * attachments, like Codex chat's `userMcpServers`: an http(s) URL only (any
+ * other server is skipped with a warning, the chat still starts), empty
  * header values dropped, `ptah` never taken from the user, and every server
  * the capability policy turned off left out. Names only reach the log.
  */
@@ -195,15 +192,17 @@ function userMcpServers(
 ): ProviderHttpMcpAttachment[] {
   const servers: ProviderHttpMcpAttachment[] = [];
   const denied: string[] = [];
+  const unsupported: string[] = [];
   for (const [name, override] of Object.entries(overrides ?? {})) {
     if (name === 'ptah') {
       logger.debug('Ignoring a user MCP server named ptah for provider-session chat.');
       continue;
     }
-    if (!isHttpUrl(override.url))
-      throw new ProviderSessionChatAdapterError('unsupported-option', 'prepare', {
-        option: 'mcpServersOverride',
-      });
+    // The override carries a URL only (no command to run as stdio).
+    if (!isHttpUrl(override.url)) {
+      unsupported.push(name);
+      continue;
+    }
     if (!isMcpServerEnabled(policy, name)) {
       denied.push(name);
       continue;
@@ -217,6 +216,13 @@ function userMcpServers(
         .map(([header, value]) => ({ name: header, value })),
     });
   }
+  if (unsupported.length > 0)
+    // One server the agent cannot reach must not fail the whole chat start;
+    // the warning names the skipped servers.
+    logger.warn('User MCP servers without an http(s) URL are skipped for provider-session chat.', {
+      code: 'provider-session-user-mcp-unsupported',
+      serverNames: unsupported.sort(),
+    });
   if (denied.length > 0)
     logger.info('User MCP servers are off by capability policy for provider-session chat.', {
       code: 'provider-session-user-mcp-denied',

@@ -490,7 +490,12 @@ describe('ProviderSessionPool close paths', () => {
     expect(h.credentials.revokeSubject).toHaveBeenCalledWith(subjectOf('hung'));
     expect(h.credentials.revokeSubject).toHaveBeenCalledWith(subjectOf('broken'));
     expect(h.logger.error).toHaveBeenCalledWith('Provider-session close failed.', expect.any(Error));
-    expect(h.pidLedger.remove).toHaveBeenCalledTimes(2);
+    // Neither exit is confirmed: both rows stay for the next start's sweep (S1).
+    expect(h.pidLedger.remove).not.toHaveBeenCalled();
+    expect(h.logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('stays in the ledger'),
+      expect.objectContaining({ reason: 'shutdown' }),
+    );
     expect(jest.getTimerCount()).toBe(0);
 
     await expect(h.pool.acquire('x', h.request())).rejects.toMatchObject({ code: 'unavailable' });
@@ -522,6 +527,101 @@ describe('ProviderSessionPool pid ledger', () => {
     expect(h.pidLedger.record).toHaveBeenLastCalledWith(expect.objectContaining({ pid: 999 }));
     await h.pool.release('s1', 'tab-closed');
     expect(h.pidLedger.remove).toHaveBeenLastCalledWith(999);
+  });
+});
+
+describe('ProviderSessionPool pid ledger with spawn reports (S1, S3)', () => {
+  /** A runtime that reports its spawn first, then holds the open until the spec settles it. */
+  function spawningHarness() {
+    const h = harness();
+    const exits: Deferred<void>[] = [];
+    const gates: Deferred<FakeSession>[] = [];
+    h.open.mockImplementation(async (request: ProviderSessionOpenRequest, signal?: AbortSignal) => {
+      h.opened.push({ request, signal });
+      const exit = deferred<void>();
+      exits.push(exit);
+      const pid = nextPid++;
+      request.onSpawn?.({ pid, exited: exit.promise });
+      const gate = deferred<FakeSession>();
+      gates.push(gate);
+      signal?.addEventListener('abort', () => {
+        // The runtime stops the process on abort; its exit follows.
+        exit.resolve();
+        gate.reject(new Error('cancelled'));
+      });
+      const session = await gate.promise;
+      session.pid = pid;
+      h.sessions.push(session);
+      return session;
+    });
+    return { ...h, exits, gates };
+  }
+
+  it('records the pid at spawn, before the open resolves', async () => {
+    const h = spawningHarness();
+    const acquiring = h.pool.acquire('s1', h.request());
+    await jest.advanceTimersByTimeAsync(0);
+    expect(h.pidLedger.record).toHaveBeenCalledTimes(1);
+    const pid = h.pidLedger.record.mock.calls[0][0].pid;
+    h.gates[0].resolve(fakeSession('native-1'));
+    await acquiring;
+    // The open does not record the same process again.
+    expect(h.pidLedger.record).toHaveBeenCalledTimes(1);
+    await h.pool.acquire('s1', h.request());
+    expect(h.pidLedger.record).toHaveBeenCalledTimes(1);
+    expect(h.pidLedger.record).toHaveBeenCalledWith(expect.objectContaining({ pid }));
+    const releasing = h.pool.release('s1', 'tab-closed');
+    h.exits[0].resolve();
+    await releasing;
+  });
+
+  it('keeps the row through a close that times out and removes it when the exit is observed', async () => {
+    const h = spawningHarness();
+    const acquiring = h.pool.acquire('s1', h.request());
+    await jest.advanceTimersByTimeAsync(0);
+    h.gates[0].resolve(fakeSession('native-1'));
+    const session = await acquiring;
+    const pid = h.pidLedger.record.mock.calls[0][0].pid;
+    (session.close as jest.Mock).mockReturnValue(new Promise(() => undefined));
+    const releasing = h.pool.release('s1', 'tab-closed');
+    await jest.advanceTimersByTimeAsync(PROVIDER_SESSION_CLOSE_TIMEOUT_MS);
+    await releasing;
+    expect(h.pidLedger.remove).not.toHaveBeenCalled();
+    h.exits[0].resolve();
+    await jest.advanceTimersByTimeAsync(0);
+    expect(h.pidLedger.remove).toHaveBeenCalledWith(pid);
+  });
+
+  it('dispose aborts an open in flight; its process stays tracked until it exits', async () => {
+    const h = spawningHarness();
+    const acquiring = h.pool.acquire('s1', h.request());
+    const rejected = expect(acquiring).rejects.toMatchObject({ code: 'unavailable' });
+    await jest.advanceTimersByTimeAsync(0);
+    const pid = h.pidLedger.record.mock.calls[0][0].pid;
+    expect(h.pidLedger.remove).not.toHaveBeenCalled();
+    await h.pool.dispose();
+    await rejected;
+    expect(h.opened[0].signal?.aborted).toBe(true);
+    expect(h.pidLedger.remove).toHaveBeenCalledWith(pid);
+    expect(h.credentials.revokeSubject).toHaveBeenCalledWith(subjectOf('s1'));
+    expect(jest.getTimerCount()).toBe(0);
+  });
+
+  it('dispose closes a session that resolves after the abort', async () => {
+    const h = harness();
+    const gate = deferred<FakeSession>();
+    h.pending.push(gate);
+    const acquiring = h.pool.acquire('s1', h.request());
+    const rejected = expect(acquiring).rejects.toMatchObject({ code: 'unavailable' });
+    await jest.advanceTimersByTimeAsync(0);
+    const disposing = h.pool.dispose();
+    await rejected;
+    expect(h.opened[0].signal?.aborted).toBe(true);
+    const late = fakeSession('native-late');
+    gate.resolve(late);
+    await disposing;
+    await jest.advanceTimersByTimeAsync(0);
+    expect(late.close).toHaveBeenCalledTimes(1);
   });
 });
 

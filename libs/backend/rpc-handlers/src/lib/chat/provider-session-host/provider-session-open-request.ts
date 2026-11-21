@@ -41,7 +41,25 @@ export interface ProviderSessionOpenRequestDeps {
   mcpServerRunning(): boolean;
   /** Environment the provider process starts from (credential-free). */
   baseEnv(): Readonly<Record<string, string | undefined>>;
+  /**
+   * What the profile's agent puts in front of each Ptah MCP tool name (agy:
+   * `mcp_ptah_lane_`), so the hint names the tools as the model sees them.
+   * Absent, or `undefined` for a profile: the hint names no prefix.
+   */
+  ptahMcpToolPrefix?(profile: ProviderSessionProfileId): string | undefined;
   readonly logger: Pick<Logger, 'debug' | 'info'>;
+}
+
+/**
+ * Added to the instructions only when Ptah's MCP attachment is part of the
+ * open (a credential was minted and the server runs), so the model is never
+ * told about tools it does not have.
+ */
+export function providerSessionPtahMcpHint(toolPrefix?: string): string {
+  const names = toolPrefix
+    ? `its tools (named \`${toolPrefix}<tool>\`, for example \`${toolPrefix}ptah_workspace_analyze\`)`
+    : 'its ptah_* tools';
+  return `Ptah's MCP server is attached. Prefer ${names} for workspace analysis, file and symbol search, diagnostics and memory over shell equivalents, as its server instructions describe.`;
 }
 
 export interface ProviderSessionOpenInput {
@@ -53,7 +71,9 @@ export interface ProviderSessionOpenInput {
   readonly nativeSessionId?: string;
   readonly model?: string;
   /**
-   * The chat session's open options. Absent (a history read): Ptah MCP
+   * The chat session's open options. Absent (a history read): the options
+   * the chat last acquired this session with while it still owns it, so the
+   * next send adopts the history process without a reopen; else Ptah MCP
    * whenever the server runs, no user servers, no instructions.
    */
   readonly open?: NonNullable<ProviderSessionChatPrepared['open']>;
@@ -64,6 +84,7 @@ export interface ProviderSessionOpenRequests {
   request(input: ProviderSessionOpenInput): ProviderSessionPoolRequest;
   /** Route the session's runtime approvals to this chat sink. */
   attachApprovals(sessionId: SessionId, sink: ProviderApprovalSink): void;
+  /** The chat gave the session up: drop its sink and its remembered open options. */
   detachApprovals(sessionId: SessionId): void;
   detachAll(): void;
 }
@@ -75,6 +96,8 @@ export function createProviderSessionOpenRequests(
   deps: ProviderSessionOpenRequestDeps,
 ): ProviderSessionOpenRequests {
   const sinks = new Map<SessionId, ProviderApprovalSink>();
+  /** The open options of each session a chat owns, for its history reads. */
+  const chatOpen = new Map<SessionId, NonNullable<ProviderSessionOpenInput['open']>>();
 
   const relay = (sessionId: SessionId): ProviderApprovalSink => ({
     request(request, signal) {
@@ -142,7 +165,8 @@ export function createProviderSessionOpenRequests(
   /**
    * What a running process cannot change: whether Ptah MCP is attached, its
    * tool profile, and the user servers. Hashed, so header and env values are
-   * not kept as text. A history read (no open options) keys as Ptah MCP only.
+   * not kept as text. A history read keys with the owning chat's options,
+   * or as Ptah MCP only when no chat owns the session.
    */
   const openOptionsKey = (input: ProviderSessionOpenInput): string =>
     createHash('sha256')
@@ -155,8 +179,35 @@ export function createProviderSessionOpenRequests(
       )
       .digest('hex');
 
+  /**
+   * The session's instructions plus the Ptah MCP hint, the hint only when
+   * Ptah's attachment is part of this open.
+   */
+  const instructionsOf = (
+    input: ProviderSessionOpenInput,
+    attachments: readonly ProviderMcpAttachment[],
+  ): string | undefined => {
+    const ptahAttached = attachments.some((attachment) => attachment.name === 'ptah');
+    const parts = [
+      input.open?.instructions ?? '',
+      ptahAttached ? providerSessionPtahMcpHint(deps.ptahMcpToolPrefix?.(input.profile)) : '',
+    ].filter((part) => part.length > 0);
+    return parts.length > 0 ? parts.join('\n\n') : undefined;
+  };
+
+  /** A chat request is remembered; a history read borrows the chat's options. */
+  const withChatOpen = (input: ProviderSessionOpenInput): ProviderSessionOpenInput => {
+    if (input.open) {
+      chatOpen.set(input.sessionId, input.open);
+      return input;
+    }
+    const open = chatOpen.get(input.sessionId);
+    return open ? { ...input, open } : input;
+  };
+
   return {
-    request(input) {
+    request(requested) {
+      const input = withChatOpen(requested);
       const approvals = relay(input.sessionId);
       return {
         profile: input.profile,
@@ -173,6 +224,8 @@ export function createProviderSessionOpenRequests(
           const detection = await deps.cliDetection.getDetection(input.profile);
           if (!detection?.installed || !detection.path)
             throw new ProviderSessionChatAdapterError('unavailable', 'acquire');
+          const attachments = mcp(input, context);
+          const instructions = instructionsOf(input, attachments);
           return {
             profile: input.profile,
             binaryPath: detection.path,
@@ -181,11 +234,10 @@ export function createProviderSessionOpenRequests(
               cwd: input.workspacePath,
             },
             ...(input.model ? { model: input.model } : {}),
-            mcp: mcp(input, context),
-            // A new session only: an attached (restored) one already has them.
-            ...(input.open?.instructions && !context.attach
-              ? { instructions: input.open.instructions }
-              : {}),
+            mcp: attachments,
+            // On every open, an attach too: the runtime decides per profile
+            // whether a restored session is sent them again.
+            ...(instructions ? { instructions } : {}),
             ...(context.attach ? { attach: context.attach } : {}),
             approvals,
             baseEnv: deps.baseEnv(),
@@ -200,9 +252,11 @@ export function createProviderSessionOpenRequests(
     },
     detachApprovals(sessionId) {
       sinks.delete(sessionId);
+      chatOpen.delete(sessionId);
     },
     detachAll() {
       sinks.clear();
+      chatOpen.clear();
     },
   };
 }
