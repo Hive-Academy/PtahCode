@@ -46,6 +46,8 @@ import {
   OnDestroy,
   afterNextRender,
   Injector,
+  computed,
+  untracked,
 } from '@angular/core';
 import { Placement } from '@floating-ui/dom';
 import { DEFAULT_OVERLAY_OFFSET, FloatingUIService } from '../shared';
@@ -104,7 +106,7 @@ type PositionOutcome = 'positioned' | 'failed' | 'timed out';
         <!-- Floating content - starts hidden until positioned -->
         <div
           #floatingRef
-          [class.ptah-popover-capped]="capToViewport()"
+          [class.ptah-popover-capped]="capActive()"
           class="popover-panel surface-3 z-50 rounded-xl p-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[oklch(var(--s))]"
           style="visibility: hidden;"
           tabindex="-1"
@@ -213,6 +215,15 @@ export class NativePopoverComponent implements OnDestroy {
    * @default true
    */
   readonly capToViewport = input<boolean>(true);
+
+  /**
+   * The cap policy of the current open: `capToViewport` read when `isOpen` changes, so the scroll class, the
+   * positioning and the fallback height always agree until the next open.
+   */
+  protected readonly capActive = computed(() => {
+    this.isOpen();
+    return untracked(() => this.capToViewport());
+  });
 
   /**
    * Emitted when popover opens and is positioned.
@@ -382,7 +393,7 @@ export class NativePopoverComponent implements OnDestroy {
       floating.style.top = `${rect.bottom}px`;
     }
     // No size() pass ran: keep the token cap so a failed compute never leaves an uncapped panel.
-    if (this.capToViewport()) {
+    if (this.capActive()) {
       floating.style.maxHeight = 'var(--ptah-popover-max-h)';
     }
     floating.style.visibility = 'visible';
@@ -413,7 +424,7 @@ export class NativePopoverComponent implements OnDestroy {
             flip: true,
             shift: true,
             ...(this.keepInViewport() ? { shiftCrossAxis: true } : {}),
-            capHeight: this.capToViewport(),
+            capHeight: this.capActive(),
           })
           .then((): PositionOutcome => 'positioned'),
         timedOut,
