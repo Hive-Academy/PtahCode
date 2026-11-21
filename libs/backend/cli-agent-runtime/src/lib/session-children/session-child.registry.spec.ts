@@ -65,6 +65,22 @@ describe('SessionChildRegistry', () => {
     expect(registry.findAttachTarget('attached', 'TASK_2026_584', 'feat/other', child.worktreePath, [PARENT])).toBeUndefined();
     expect(registry.findAttachTarget('attached', 'TASK_2026_584', 'feat/shared', resolve('/another/path'), [PARENT])).toBeUndefined();
   });
+  it('names the failed attach check and admits an unrecorded task id', () => {
+    const registry = new SessionChildRegistry();
+    const linked = addChild(registry, 'linked', { taskId: 'TASK_2026_584', branch: 'feat/shared' });
+    const unlinked = addChild(registry, 'unlinked', { branch: 'feat/free', worktreePath: resolve('/free/path') });
+    const check = (id: string, task: string, branch: string, path: string, callers: string[] = [PARENT]) =>
+      registry.checkAttachTarget(id, task, branch, path, callers);
+    expect(check('missing', 'TASK_2026_584', 'feat/shared', linked.worktreePath)).toEqual({ ok: false, reason: 'not-registered' });
+    expect(check('linked', 'TASK_2026_584', 'feat/shared', linked.worktreePath, ['other'])).toEqual({ ok: false, reason: 'other-parent' });
+    expect(check('linked', 'TASK_2026_584', 'feat/other', linked.worktreePath)).toEqual({ ok: false, reason: 'branch-differs' });
+    expect(check('linked', 'TASK_2026_584', 'feat/shared', resolve('/another/path'))).toEqual({ ok: false, reason: 'worktree-differs' });
+    expect(check('linked', 'TASK_2026_585', 'feat/shared', linked.worktreePath)).toEqual({ ok: false, reason: 'task-differs' });
+    expect(check('unlinked', 'TASK_2026_584', 'feat/free', unlinked.worktreePath)).toEqual({ ok: true, record: unlinked, taskUnrecorded: true });
+    // The legacy lookup never admits a record without a task id.
+    expect(registry.findAttachTarget('unlinked', 'TASK_2026_584', 'feat/free', unlinked.worktreePath, [PARENT])).toBeUndefined();
+    expect(check('unlinked', 'TASK_2026_584', 'feat/free', unlinked.worktreePath, ['other'])).toEqual({ ok: false, reason: 'other-parent' });
+  });
   it('matches an alias of a registered worktree by its real path', () => {
     const workspace = mkdtempSync(join(tmpdir(), 'ptah-child-registry-'));
     const alias = `${workspace}-alias`;
