@@ -1,4 +1,4 @@
-import { Injectable, inject } from '@angular/core';
+import { DestroyRef, Injectable, inject } from '@angular/core';
 import { AuthStateService } from '@ptah-extension/core';
 import {
   createExecutionChatMessage,
@@ -38,6 +38,15 @@ import { isTabBusyGenerating } from './tab-busy';
  *   non-Anthropic providers — those commands require Claude-specific runtime
  *   tables.
  */
+/** The backend's slash-command test: a message is a command only when it starts with one. */
+const SLASH_COMMAND = /^\/[a-zA-Z]/;
+
+interface TabView {
+  readonly tabId: string;
+  readonly sessionId: string | null;
+  readonly generation: number;
+}
+
 @Injectable({ providedIn: 'root' })
 export class MessageDispatchService {
   private readonly tabManager = inject(TabManagerService);
@@ -52,6 +61,23 @@ export class MessageDispatchService {
   private readonly idleSends = new Map<string, Promise<void>>();
   private readonly composerRestore = inject(ComposerRestoreService);
   private readonly sendLock = inject(CommandCenterSendLockService);
+  /**
+   * Per tab, how many times it was closed or reset. A message that waited
+   * compares it to tell "same conversation, first session just bound" from
+   * "the tab now holds another conversation", which session ids alone cannot
+   * when the tab had no session yet.
+   */
+  private readonly tabGenerations = new Map<string, number>();
+
+  constructor() {
+    const off = this.tabManager.onTabClosed((event) => {
+      this.tabGenerations.set(
+        event.tabId,
+        (this.tabGenerations.get(event.tabId) ?? 0) + 1,
+      );
+    });
+    inject(DestroyRef).onDestroy(off);
+  }
 
   /**
    * SDK-native slash commands whose output is only correct on a first-party
@@ -127,14 +153,9 @@ export class MessageDispatchService {
       // its outcome so this message lands behind it, in send order.
       const earlier = this.idleSends.get(resolvedTabId);
       if (earlier) {
-        const viewSession = dispatchTab?.claudeSessionId ?? null;
+        const view = this.viewOf(resolvedTabId, dispatchTab);
         await earlier;
-        const moved = this.viewMovedOn(
-          resolvedTabId,
-          viewSession,
-          content,
-          options,
-        );
+        const moved = this.viewMovedOn(view, content, options);
         if (moved) return moved;
       }
       // Queue first, always: the message waits as a queued card with
@@ -143,12 +164,17 @@ export class MessageDispatchService {
       return this.queue(resolvedTabId, content, options);
     }
     const previousTerminalReason = dispatchTab?.lastTerminalReason;
-    const sendSession = dispatchTab?.claudeSessionId ?? null;
-    // Idle-only: only this path can fall back to the queue on a refusal.
-    const sending = this.messageSender.send(content, {
-      ...options,
-      idleOnly: true,
-    });
+    const sendView =
+      resolvedTabId != null ? this.viewOf(resolvedTabId, dispatchTab) : null;
+    // Idle-only, for plain messages: only this path can fall back to the
+    // queue on a refusal. A slash command is never held behind a turn
+    // (the backend does not queue one), so it is sent as before.
+    const sending = this.messageSender.send(
+      content,
+      SLASH_COMMAND.test(content.trim())
+        ? options
+        : { ...options, idleOnly: true },
+    );
     const settled = sending.then(
       () => undefined,
       () => undefined,
@@ -168,9 +194,9 @@ export class MessageDispatchService {
     // The renderer saw the tab idle but the backend turn still runs: the
     // idle-only send was refused with nothing sent, so queue it like any
     // other mid-turn message.
-    if (outcome?.turnInFlight === true && resolvedTabId != null) {
+    if (outcome?.turnInFlight === true && resolvedTabId != null && sendView) {
       return (
-        this.viewMovedOn(resolvedTabId, sendSession, content, options) ??
+        this.viewMovedOn(sendView, content, options) ??
         this.queue(resolvedTabId, content, options)
       );
     }
@@ -199,16 +225,28 @@ export class MessageDispatchService {
    * the same conversation. `null` while the message may still queue.
    */
   private viewMovedOn(
-    tabId: string,
-    sessionId: string | null,
+    view: TabView,
     content: string,
     options?: SendMessageOptions,
   ): SendOutcome | null {
-    const tab = this.tabManager.findTabByIdAcrossWorkspaces(tabId)?.tab;
+    const tab = this.tabManager.findTabByIdAcrossWorkspaces(view.tabId)?.tab;
     if (!tab) return { success: false, cancelled: true };
-    if (sessionId === null || tab.claudeSessionId === sessionId) return null;
-    this.returnToComposer(tabId, content, options);
+    const reset =
+      (this.tabGenerations.get(view.tabId) ?? 0) !== view.generation;
+    const replaced =
+      view.sessionId !== null && tab.claudeSessionId !== view.sessionId;
+    if (!reset && !replaced) return null;
+    this.returnToComposer(view.tabId, content, options);
     return { success: false, cancelled: true };
+  }
+
+  /** What a waiting message was typed for: the tab, its session, its reset count. */
+  private viewOf(tabId: string, tab: TabState | null): TabView {
+    return {
+      tabId,
+      sessionId: tab?.claudeSessionId ?? null,
+      generation: this.tabGenerations.get(tabId) ?? 0,
+    };
   }
 
   /**

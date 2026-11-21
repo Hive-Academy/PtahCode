@@ -78,6 +78,8 @@ describe('MessageDispatchService', () => {
   let handlePermissionResponseMock: jest.Mock;
   let isTabStreamingMock: jest.Mock;
   let isStartPendingMock: jest.Mock;
+  /** `TabManagerService.onTabClosed` listeners, to emit a close or reset. */
+  let closeListeners: ((event: { tabId: string; kind: string }) => void)[];
 
   beforeEach(() => {
     tabs = [makeTab()];
@@ -113,7 +115,12 @@ describe('MessageDispatchService', () => {
     isTabStreamingMock = jest.fn(() => false);
     isStartPendingMock = jest.fn(() => false);
 
+    closeListeners = [];
     const tabManagerMock = {
+      onTabClosed: (listener: (event: { tabId: string; kind: string }) => void) => {
+        closeListeners.push(listener);
+        return () => undefined;
+      },
       tabs: () => tabs,
       setMessages: setMessagesMock,
       setQueuedContent: setQueuedContentMock,
@@ -277,29 +284,29 @@ describe('MessageDispatchService', () => {
     it('does NOT block /compact or /review for non-Anthropic providers', async () => {
       persistedAuthMethod.set('copilot');
       await service.sendOrQueueMessage('/compact');
-      expect(sendMock).toHaveBeenCalledWith('/compact', { idleOnly: true });
+      expect(sendMock).toHaveBeenCalledWith('/compact', undefined);
       sendMock.mockClear();
       await service.sendOrQueueMessage('/review');
-      expect(sendMock).toHaveBeenCalledWith('/review', { idleOnly: true });
+      expect(sendMock).toHaveBeenCalledWith('/review', undefined);
     });
 
     it('does NOT block when authState.isLoading() is true', async () => {
       persistedAuthMethod.set('copilot');
       isLoadingAuth.set(true);
       await service.sendOrQueueMessage('/context');
-      expect(sendMock).toHaveBeenCalledWith('/context', { idleOnly: true });
+      expect(sendMock).toHaveBeenCalledWith('/context', undefined);
     });
 
     it('does NOT block for apiKey provider', async () => {
       persistedAuthMethod.set('apiKey');
       await service.sendOrQueueMessage('/context');
-      expect(sendMock).toHaveBeenCalledWith('/context', { idleOnly: true });
+      expect(sendMock).toHaveBeenCalledWith('/context', undefined);
     });
 
     it('does NOT block for claudeCli provider', async () => {
       persistedAuthMethod.set('claudeCli');
       await service.sendOrQueueMessage('/context');
-      expect(sendMock).toHaveBeenCalledWith('/context', { idleOnly: true });
+      expect(sendMock).toHaveBeenCalledWith('/context', undefined);
     });
 
     it('when streaming, queues the message and leaves open permission prompts alone', async () => {
@@ -395,6 +402,38 @@ describe('MessageDispatchService', () => {
       } finally {
         jest.useRealTimers();
       }
+    });
+
+    it('returns a waiting message to the composer when its session-less tab is reset', async () => {
+      jest.useFakeTimers();
+      try {
+        const restore = TestBed.inject(ComposerRestoreService);
+        tabs = [makeTab({ claudeSessionId: null })];
+        let finish!: (outcome: unknown) => void;
+        sendMock.mockImplementationOnce(
+          () => new Promise((resolve) => { finish = resolve; }),
+        );
+        const first = service.sendOrQueueMessage('first', { tabId: 'tab-1' });
+        const second = service.sendOrQueueMessage('second', { tabId: 'tab-1' });
+        await Promise.resolve();
+        // /clear resets the tab, and a new conversation binds its session.
+        for (const listener of closeListeners) listener({ tabId: 'tab-1', kind: 'reset' });
+        tabs = [makeTab({ claudeSessionId: 'sess-other' })];
+        finish({ success: true });
+        await first;
+
+        await expect(second).resolves.toEqual({ success: false, cancelled: true });
+        expect(enqueueMock).not.toHaveBeenCalled();
+        jest.runOnlyPendingTimers();
+        expect(restore.pendingFor('tab-1')).toBe('second');
+      } finally {
+        jest.useRealTimers();
+      }
+    });
+
+    it('sends a slash command without idle-only admission', async () => {
+      await service.sendOrQueueMessage('/compact', { tabId: 'tab-1' });
+      expect(sendMock).toHaveBeenCalledWith('/compact', { tabId: 'tab-1' });
     });
 
     it('still queues a waiting message when the first send only bound its session', async () => {
@@ -795,6 +834,7 @@ describe('MessageDispatchService with the real StreamingHandler + MessageFinaliz
     streamingTabIdsSignal = signal<Set<string>>(new Set());
 
     const tabManagerFake = {
+      onTabClosed: () => () => undefined,
       tabs: computed(() => tabsSignal()),
       activeTabId: computed(() => activeTabIdSignal()),
       activeTab: computed(

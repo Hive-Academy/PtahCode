@@ -220,7 +220,8 @@ export interface ChatContinueParams {
    * flight and nothing held. A busy session refuses with `TURN_IN_FLIGHT`
    * before anything is sent and the renderer queues the message instead, so
    * a normal send never silently waits behind, or interrupts, a running turn.
-   * Not combined with `queueIntent`.
+   * Not combined with `queueIntent`. Plain messages only: a slash command is
+   * routed before admission and runs as it always has.
    */
   readonly admission?: 'require-idle';
 }
