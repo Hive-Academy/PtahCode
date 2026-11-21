@@ -38,6 +38,7 @@ import {
   LucideAngularModule,
   AlertTriangle,
   Check,
+  Eye,
   Info,
   Pencil,
   Trash2,
@@ -213,7 +214,10 @@ const BUILT_IN_NOTE = 'Built into the agent — Ptah can select it but not chang
                   <div class="flex items-center justify-end gap-[var(--ptah-gap-label)]">
                     @if (style.tier === 'builtin') {
                       <ptah-native-popover [isOpen]="previewName() === style.name" [keepInViewport]="true" (closed)="previewName.set(null)">
-                        <button trigger type="button" ptahButton variant="ghost" size="xs" (click)="previewName.set(style.name)">Preview</button>
+                        <button trigger type="button" ptahIconButton variant="ghost" size="xs" [label]="'Preview ' + style.name"
+                          (click)="previewName.set(style.name)" data-testid="output-style-preview-button">
+                          <lucide-angular [img]="EyeIcon" class="w-3.5 h-3.5" aria-hidden="true" />
+                        </button>
                         <div content class="max-w-xs p-[var(--ptah-gap-field)] text-xs leading-relaxed">
                           <p class="font-semibold">{{ style.name }}</p>
                           <p class="mt-[var(--ptah-gap-controls)]">{{ style.description }}</p>
@@ -224,11 +228,11 @@ const BUILT_IN_NOTE = 'Built into the agent — Ptah can select it but not chang
 
                     <button
                       type="button"
-                      ptahButton variant="ghost" size="xs" class="disabled:bg-transparent disabled:border-transparent disabled:opacity-50 text-base-content"
+                      ptahIconButton variant="ghost" size="xs" class="disabled:bg-transparent disabled:border-transparent disabled:opacity-50 text-base-content"
                       [hidden]="style.tier === 'builtin'"
                       [style.display]="style.tier === 'builtin' ? 'none' : null"
                       [disabled]="!style.editable || saving()"
-                      [attr.aria-label]="'Edit ' + style.name"
+                      [label]="'Edit ' + style.name"
                       [attr.title]="actionTitle(style, 'Edit')"
                       (click)="emitEdit(style)"
                       data-testid="output-style-edit-button"
@@ -238,16 +242,15 @@ const BUILT_IN_NOTE = 'Built into the agent — Ptah can select it but not chang
                         class="w-3.5 h-3.5"
                         aria-hidden="true"
                       />
-                      @if (style.editable) { Edit }
                     </button>
                     <button
                       #deleteBtn
                       type="button"
-                      ptahButton variant="ghost" size="xs" class="disabled:bg-transparent disabled:border-transparent disabled:opacity-50 text-base-content"
+                      ptahIconButton variant="ghost" size="xs" class="disabled:bg-transparent disabled:border-transparent disabled:opacity-50 text-base-content"
                       [hidden]="style.tier === 'builtin'"
                       [style.display]="style.tier === 'builtin' ? 'none' : null"
                       [disabled]="!style.deletable || saving()"
-                      [attr.aria-label]="'Delete ' + style.name"
+                      [label]="'Delete ' + style.name"
                       [attr.title]="actionTitle(style, 'Delete')"
                       (click)="askDelete(style)"
                       data-testid="output-style-delete-button"
@@ -257,7 +260,6 @@ const BUILT_IN_NOTE = 'Built into the agent — Ptah can select it but not chang
                         class="w-3.5 h-3.5"
                         aria-hidden="true"
                       />
-                      @if (style.deletable) { Delete }
                     </button>
                   </div>
                 </div>
@@ -431,6 +433,7 @@ export class OutputStyleListComponent {
 
   readonly AlertTriangleIcon = AlertTriangle;
   readonly CheckIcon = Check;
+  readonly EyeIcon = Eye;
   readonly PencilIcon = Pencil;
   readonly Trash2Icon = Trash2;
   readonly builtInNote = BUILT_IN_NOTE;

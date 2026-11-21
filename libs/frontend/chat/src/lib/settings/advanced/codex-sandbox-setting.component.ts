@@ -18,7 +18,11 @@ import {
   DEFAULT_CODEX_SANDBOX_MODE,
 } from '@ptah-extension/shared';
 import type { CodexSandboxMode } from '@ptah-extension/shared';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { ShieldCheck } from 'lucide-angular';
+import {
+  PtahButtonDirective,
+  PtahFormSectionComponent,
+} from '@ptah-extension/ui';
 import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directive';
 import {
   SettingsSaveFeedbackService,
@@ -110,7 +114,11 @@ function isSandboxMode(value: unknown): value is CodexSandboxMode {
 @Component({
   selector: 'ptah-codex-sandbox-setting',
   standalone: true,
-  imports: [PtahButtonDirective, SettingsBusyDisabledDirective],
+  imports: [
+    PtahButtonDirective,
+    PtahFormSectionComponent,
+    SettingsBusyDisabledDirective,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
@@ -119,21 +127,23 @@ function isSandboxMode(value: unknown): value is CodexSandboxMode {
       aria-labelledby="codex-sandbox-heading"
       data-testid="codex-sandbox-setting"
     >
-      <div class="border-b border-base-content/10 pb-2">
-        <h3
-          id="codex-sandbox-heading"
-          class="text-base font-semibold text-base-content"
-        >
-          Codex sandbox
-        </h3>
-        <p
-          id="codex-sandbox-scope"
-          class="mt-0.5 text-xs text-base-content-muted"
-          data-testid="codex-sandbox-scope"
-        >
-          Applies to all new Codex chat turns and Codex CLI lanes.
-        </p>
-      </div>
+      <!-- The shared section pattern. Glass on: the card owns the inset, so the form section has no block padding. -->
+      <ptah-form-section
+        [level]="3"
+        wide
+        heading="Codex sandbox"
+        [icon]="ShieldCheckIcon"
+        class="[[data-glass=on]_&>section]:py-0"
+      >
+      <!-- The sr-only span keeps the aria-labelledby id of the outer section. -->
+      <span class="sr-only" id="codex-sandbox-heading">Codex sandbox</span>
+      <p
+        id="codex-sandbox-scope"
+        class="text-xs text-base-content-muted"
+        data-testid="codex-sandbox-scope"
+      >
+        Applies to all new Codex chat turns and Codex CLI lanes.
+      </p>
 
       @switch (load()) {
         @case ('loading') {
@@ -295,12 +305,8 @@ function isSandboxMode(value: unknown): value is CodexSandboxMode {
           </p>
         }
       }
+      </ptah-form-section>
     </section>
-  `,
-  styles: `
-    :host-context([data-glass='on']) [data-glass-surface='content'] {
-      padding: 1.25rem;
-    }
   `,
 })
 export class CodexSandboxSettingComponent implements OnInit {
@@ -313,6 +319,7 @@ export class CodexSandboxSettingComponent implements OnInit {
   private readonly modeRadios =
     viewChildren<ElementRef<HTMLInputElement>>('modeRadio');
 
+  protected readonly ShieldCheckIcon = ShieldCheck;
   protected readonly focusRing = FOCUS;
   protected readonly choices = CHOICES;
   protected readonly fullAccess = FULL_ACCESS;

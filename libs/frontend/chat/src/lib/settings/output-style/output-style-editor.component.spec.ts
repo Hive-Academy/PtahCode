@@ -524,7 +524,33 @@ describe('OutputStyleEditorComponent', () => {
       await first;
       fixture.detectChanges();
       expect(dialog()).not.toBeNull();
+      // 2.6: the open stale prompt keeps Save off; Save comes back when the user closes the prompt.
+      expect(isDisabledControl(saveButton())).toBe(true);
+      component.dismissConflict();
+      fixture.detectChanges();
       expect(isDisabledControl(saveButton())).toBe(false);
+    });
+
+    it('Back on the reload confirm returns to the Overwrite / Reload / Cancel variant', async () => {
+      load.mockResolvedValueOnce(FRESH);
+      await component.submit();
+      fixture.detectChanges();
+
+      button('output-style-stale-reload').click();
+      fixture.detectChanges();
+      expect(button('output-style-stale-discard-reload')).not.toBeNull();
+      expect(button('output-style-stale-overwrite')).toBeNull();
+
+      const back = Array.from(dialog()?.querySelectorAll('button') ?? []).find(
+        (candidate) => candidate.textContent?.trim() === 'Back',
+      );
+      back?.click();
+      fixture.detectChanges();
+
+      expect(button('output-style-stale-overwrite')).not.toBeNull();
+      expect(button('output-style-stale-reload')).not.toBeNull();
+      expect(button('output-style-stale-discard-reload')).toBeNull();
+      expect(component.body()).toBe('# Style\n\nMy edit.');
     });
 
     it('offers no Overwrite when the current file cannot be read', async () => {
@@ -559,6 +585,106 @@ describe('OutputStyleEditorComponent', () => {
       expect(component.conflict()).toBeNull();
       expect(cancelled).not.toHaveBeenCalled();
       expect(fixture.nativeElement.querySelector('[data-testid="output-style-drawer"]')).not.toBeNull();
+    });
+  });
+
+  describe('confirm-state guards (2.6)', () => {
+    const FRESH: OutputStyleDetail = { ...EXISTING_STYLE, body: '# Style\n\nChanged.', mtime: 1_700_000_999_000, byteLength: 57 };
+    const by = <T extends HTMLElement = HTMLElement>(testId: string): T | null =>
+      fixture.nativeElement.querySelector(`[data-testid="${testId}"]`);
+    const panel = (): HTMLElement => by('native-drawer-panel') as HTMLElement;
+
+    async function openConfirm(kind: 'discard' | 'conflict' | 'stale'): Promise<string> {
+      fixture.componentRef.setInput('draft', EXISTING_STYLE);
+      fixture.detectChanges();
+      component.body.set('# Style\n\nMy edit.');
+      if (kind === 'discard') {
+        component.requestClose();
+        fixture.detectChanges();
+        return 'output-style-discard-confirm';
+      }
+      if (kind === 'conflict') {
+        save.mockResolvedValueOnce({ code: 'FILE_EXISTS', message: '"x.md" already exists in this tier.' });
+      } else {
+        save.mockResolvedValueOnce({ code: 'STALE_FILE', message: 'changed on disk' });
+        load.mockResolvedValueOnce(FRESH);
+      }
+      await component.submit();
+      fixture.detectChanges();
+      return kind === 'conflict' ? 'output-style-conflict-dialog' : 'output-style-stale-dialog';
+    }
+
+    beforeEach(() => document.body.appendChild(fixture.nativeElement));
+    afterEach(() => fixture.nativeElement.remove());
+
+    it.each(['discard', 'conflict', 'stale'] as const)(
+      'the %s confirm renders after the form, is not modal, and turns Save and Cancel off',
+      async (kind) => {
+        const confirm = by(await openConfirm(kind)) as HTMLElement;
+        const form = fixture.nativeElement.querySelector('#output-style-editor-form') as HTMLElement;
+
+        expect(confirm.getAttribute('role')).toBe('alertdialog');
+        expect(confirm.getAttribute('aria-modal')).toBe('false');
+        expect(confirm.classList).toContain('sticky');
+        expect(form.compareDocumentPosition(confirm) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(form.contains(confirm)).toBe(false);
+        expect(by<HTMLButtonElement>('output-style-save-button')?.disabled).toBe(true);
+        expect(by<HTMLButtonElement>('output-style-cancel-button')?.disabled).toBe(true);
+      },
+    );
+
+    it.each(['discard', 'conflict', 'stale'] as const)(
+      'submit() writes nothing while the %s confirm is open',
+      async (kind) => {
+        await openConfirm(kind);
+        save.mockClear();
+
+        await component.submit();
+        (fixture.nativeElement.querySelector('#output-style-editor-form') as HTMLFormElement).dispatchEvent(
+          new Event('submit', { cancelable: true }),
+        );
+        await fixture.whenStable();
+
+        expect(save).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each(['conflict', 'stale'] as const)(
+      'Esc on the drawer and the backdrop keep an open %s prompt and focus its safe choice',
+      async (kind) => {
+        const cancelled = jest.fn();
+        component.cancelled.subscribe(cancelled);
+        const testId = await openConfirm(kind);
+        const safeChoice = document.activeElement;
+        expect(by(testId)?.contains(safeChoice)).toBe(true);
+
+        panel().dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+        fixture.detectChanges();
+        expect(by(testId)).not.toBeNull();
+        expect(by('output-style-discard-confirm')).toBeNull();
+
+        (by('native-drawer-backdrop') as HTMLElement).click();
+        fixture.detectChanges();
+        expect(by(testId)).not.toBeNull();
+        expect(by('output-style-discard-confirm')).toBeNull();
+        expect(document.activeElement).toBe(safeChoice);
+        expect(cancelled).not.toHaveBeenCalled();
+      },
+    );
+
+    it('the confirm actions still save: "Replace it" writes with overwrite', async () => {
+      await openConfirm('conflict');
+      save.mockClear();
+      save.mockResolvedValueOnce(null);
+
+      const replace = Array.from(by('output-style-conflict-dialog')?.querySelectorAll('button') ?? []).find(
+        (candidate) => candidate.textContent?.trim() === 'Replace it',
+      );
+      replace?.click();
+      await fixture.whenStable();
+
+      expect(save).toHaveBeenCalledTimes(1);
+      expect(save.mock.calls[0][0]).toEqual(expect.objectContaining({ overwrite: true }));
     });
   });
 

@@ -37,6 +37,8 @@ import { SettingsBusyDisabledDirective } from '../feedback/busy-disabled.directi
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
 
 const NUMBER_FORMAT = new Intl.NumberFormat('en-US');
+/** With glass on, removes the block padding of a form section that is the content of a glass card. */
+const FLUSH_IN_GLASS_CARD = '[[data-glass=on]_&>section]:py-0';
 /**
  * A missing host response must reveal Retry instead of leaving the group busy. It bounds both the `rpcCall`
  * response wait and, through the group's own deadline, `rpcCall`'s untimed wait for the host to become ready.
@@ -176,7 +178,8 @@ function formatValue(
         } @else if (headingStyle() === 'section') {
           <!-- 'section': the shared form section of Context Management (title and description at the left, the
                group at the right); the sr-only span keeps the aria-labelledby id. -->
-          <ptah-form-section wide [heading]="group.title" [description]="group.description">
+          <!-- Glass on with its own plane: the card owns the inset, so the form section has no block padding. -->
+          <ptah-form-section wide [heading]="group.title" [description]="group.description" [class]="contentSurface() ? flushInCard : ''">
             <span class="sr-only" [id]="idPrefix() + '-heading'">{{ group.title }}</span>
             @if (group.id === 'context-budgets') {
               <p aside class="text-xs text-base-content-muted">Agent limits apply even when compaction is off.</p>
@@ -239,6 +242,8 @@ function formatValue(
                     <ptah-setting-row
                       [label]="setting.label"
                       [controlId]="'advanced-setting-' + setting.key"
+                      [controlAlign]="rowLayout() === 'aligned' ? 'end' : 'start'"
+                      [edgePadding]="rowLayout() === 'aligned' ? 'trim' : 'all'"
                     >
                       @if (setting.apply === 'restart') {
                         <span
@@ -378,17 +383,20 @@ function formatValue(
     .number-grid {
       grid-template-columns: repeat(auto-fill, minmax(min(100%, max(var(--ptah-field-grid-min-md), calc((100% - 2 * var(--ptah-gap-field)) / 3))), 1fr));
     }
-    :host-context([data-glass='on']) [data-glass-surface='content'] {
-      padding: 1.25rem;
-    }
   `,
 })
 export class AdvancedSettingsGroupComponent implements OnInit {
   readonly openHelp = signal<string | null>(null);
   readonly InfoIcon = Info;
+  protected readonly flushInCard = FLUSH_IN_GLASS_CARD;
   readonly contentSurface = input(true);
   /** 'section' matches the sentence-case section headings of the Context Management tab; 'caps' is the group label. */
   readonly headingStyle = input<'caps' | 'section' | 'hidden'>('caps');
+  /**
+   * 'aligned': each switch row has its control at the right edge and trimmed edge padding (the Fine-tuning rows of
+   * the Advanced page). 'default' keeps the row rendering of the Codex drawer and Context Management.
+   */
+  readonly rowLayout = input<'default' | 'aligned'>('default');
   private readonly vscode = inject(VSCodeService);
   /** The page toast: every write's outcome (with Undo after a save) is said there. */
   private readonly feedback = inject(SettingsSaveFeedbackService);

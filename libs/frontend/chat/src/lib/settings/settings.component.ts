@@ -18,6 +18,8 @@ import {
   SlidersHorizontal,
   AudioLines,
   ShieldCheck,
+  Play,
+  RefreshCw,
 } from 'lucide-angular';
 import {
   MotionStageDirective,
@@ -47,6 +49,7 @@ import { OrchestrationSettingsComponent } from './ptah-ai/orchestration-settings
 import { DecisionMatrixPageComponent } from './ptah-ai/decision-matrix-page.component';
 import { AdvancedSettingsComponent } from './advanced-settings.component';
 import { SearchVoiceSettingsComponent } from './search-voice-settings.component';
+import { ChatStore } from '../services/chat.store';
 import {
   AppStateManager,
   AuthStateService,
@@ -151,10 +154,6 @@ const isAgentsRoutingSection = (
     :host-context([data-glass='on']) .settings-page {
       background-color: transparent;
     }
-    /* The Setup section is a glass card like the Advanced sections above it (same inset as theirs). */
-    :host-context([data-glass='on']) [data-glass-surface='content'] {
-      padding: 1.25rem;
-    }
   `,
 })
 export class SettingsComponent implements OnInit {
@@ -165,23 +164,52 @@ export class SettingsComponent implements OnInit {
   private readonly document = inject(DOCUMENT);
   readonly ArrowLeftIcon = ArrowLeft;
   readonly SecurityIcon = ShieldCheck;
-  /** Card tabs, in order. Each label is the button's exact accessible name (live-app scripts use it). */
-  readonly settingsTabs = [
-    { id: 'claude-auth', label: 'Providers', icon: Plug },
-    { id: 'orchestration', label: 'Context Management', icon: Layers },
-    ...(this.vscodeService.isElectron
-      ? ([
-          {
-            id: 'matrix',
-            label: 'Decision matrix',
-            icon: TableProperties,
-            parent: 'orchestration',
-          },
-        ] as const)
-      : []),
-    { id: 'pro-features', label: 'Advanced', icon: SlidersHorizontal },
-    { id: 'tools', label: 'Search & Voice', icon: AudioLines },
-  ] as const;
+  /** Section icon of Setup: the icon map entry for the other Advanced sections. */
+  readonly SetupIcon = SlidersHorizontal;
+  readonly PlayIcon = Play;
+  readonly RefreshIcon = RefreshCw;
+  private readonly chatStore = inject(ChatStore);
+  /**
+   * Card tabs, in order. Each label is the button's exact accessible name (live-app scripts use it).
+   * Advanced shows a state mark while the membership needs attention (same source as the Membership card).
+   */
+  readonly settingsTabs = computed(() => {
+    const membershipNeedsAttention = !!this.chatStore.licenseStatus()?.reason;
+    return [
+      { id: 'claude-auth', label: 'Providers', icon: Plug },
+      { id: 'orchestration', label: 'Context Management', icon: Layers },
+      ...(this.vscodeService.isElectron
+        ? ([
+            {
+              id: 'matrix',
+              label: 'Decision matrix',
+              icon: TableProperties,
+              parent: 'orchestration',
+            },
+          ] as const)
+        : []),
+      {
+        id: 'pro-features',
+        label: 'Advanced',
+        icon: SlidersHorizontal,
+        ...(membershipNeedsAttention
+          ? ({
+              stateMark: {
+                tone: 'warn',
+                label: 'Membership needs attention',
+              },
+            } as const)
+          : {}),
+      },
+      { id: 'tools', label: 'Search & Voice', icon: AudioLines },
+    ] as const;
+  });
+  /** The icon of the open page, shown before the page title. */
+  readonly activeTabIcon = computed(
+    () =>
+      this.settingsTabs().find((tab) => tab.id === this.selectedSettingsTab())
+        ?.icon ?? null,
+  );
   readonly activeSettingsTab = signal<
     | 'providers'
     | 'claude-auth'
@@ -197,7 +225,7 @@ export class SettingsComponent implements OnInit {
   );
   readonly activeTabTitle = computed(
     () =>
-      this.settingsTabs.find((tab) => tab.id === this.selectedSettingsTab())
+      this.settingsTabs().find((tab) => tab.id === this.selectedSettingsTab())
         ?.label ?? 'Providers',
   );
   readonly activeTabDescription = computed(
@@ -222,7 +250,9 @@ export class SettingsComponent implements OnInit {
     { key: 'app', term: 'App', value: this.appLabel },
   ]);
   readonly settingsTabIndex = computed(() =>
-    this.settingsTabs.findIndex((tab) => tab.id === this.selectedSettingsTab()),
+    this.settingsTabs().findIndex(
+      (tab) => tab.id === this.selectedSettingsTab(),
+    ),
   );
 
   readonly providersTarget = signal<ProvidersSettingsFocusTarget | null>(null);

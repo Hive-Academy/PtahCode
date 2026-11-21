@@ -2,7 +2,7 @@ import { Component, Input, signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { ClaudeRpcService, WorkspaceScopeService } from '@ptah-extension/core';
 import { rpcError, rpcSuccess } from '@ptah-extension/core/testing';
-import { Download, RotateCw } from 'lucide-angular';
+import { Download, FileText, RotateCw, Sparkles } from 'lucide-angular';
 import { MarkdownBlockComponent } from '@ptah-extension/markdown';
 import type { EnhancedPromptsGetStatusResponse } from '@ptah-extension/shared';
 import { SystemPromptDrawerComponent } from './system-prompt-drawer.component';
@@ -138,6 +138,36 @@ describe('SystemPromptDrawerComponent', () => {
       expect(error).not.toBeNull();
       expect(error?.textContent).toContain('Could not load the system prompt status.');
       expect(error?.textContent).not.toContain('Failed to read config');
+    });
+  });
+
+  describe('copy and icons (F24, F41)', () => {
+    const drawer = (): SystemPromptDrawerComponent =>
+      fixture.debugElement.children[0]?.componentInstance as SystemPromptDrawerComponent;
+
+    it('shows "Loading system prompt…" as the subtitle while the status loads', async () => {
+      await render();
+      drawer().isLoading.set(true);
+      fixture.detectChanges();
+
+      expect(drawer().subtitle()).toBe('Loading system prompt…');
+      expect(element.querySelector('[data-testid="system-prompt-drawer-loading"]')?.textContent?.trim()).toBe(
+        'Loading system prompt status…',
+      );
+    });
+
+    it('has no wrongly decoded character in the rendered drawer', async () => {
+      await render({ ...defaultStatus, regenerationStartedAt: new Date().toISOString() });
+
+      expect(element.querySelector('[data-testid="regenerate-may-be-running"]')).not.toBeNull();
+      expect(element.textContent).not.toMatch(/\u00e2\u20ac/);
+    });
+
+    it('uses FileText for the empty state and keeps Sparkles for the header and the preview', async () => {
+      await render();
+
+      expect(drawer().FileTextIcon).toBe(FileText);
+      expect(drawer().SparklesIcon).toBe(Sparkles);
     });
   });
 

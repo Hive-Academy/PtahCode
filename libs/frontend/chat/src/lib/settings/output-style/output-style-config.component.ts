@@ -2,7 +2,7 @@
  * OutputStyleConfigComponent — the output-style section of the Advanced tab (A19-A25).
  *
  * Full-width collection matching the Advanced settings prototype:
- *   - Heading, one-line description and "New style" primary action (A21)
+ *   - `ptah-form-section` heading, one-line description and "New style" secondary action in the aside (A21)
  *   - Body mounts `OutputStyleListComponent` (selectable cards, notices, command-line parity)
  *   - Drawer D-OS (`OutputStyleEditorComponent`) lazily loaded via `@defer (when view() === 'editor')`
  *   - Active style selection is persisted through {@link SettingsSaveFeedbackService.saveGeneric}
@@ -24,7 +24,7 @@ import {
   signal,
   viewChild,
 } from '@angular/core';
-import { LucideAngularModule, Plus } from 'lucide-angular';
+import { LucideAngularModule, Palette, Plus } from 'lucide-angular';
 import type {
   InvalidOutputStyle,
   OutputStyleDetail,
@@ -38,7 +38,7 @@ import {
   type OutputStyleSelectionRequest,
 } from './output-style-list.component';
 import { OutputStyleEditorComponent } from './output-style-editor.component';
-import { PtahButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective, PtahFormSectionComponent } from '@ptah-extension/ui';
 
 const OUTPUT_STYLE_ACTIVATE_FAILED = 'Could not change the active output style.';
 const OUTPUT_STYLE_DELETE_FAILED = 'Could not delete the output style.';
@@ -56,6 +56,7 @@ const OUTPUT_STYLE_PARITY_FAILED =
     OutputStyleListComponent,
     OutputStyleEditorComponent,
     PtahButtonDirective,
+    PtahFormSectionComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
@@ -63,23 +64,26 @@ const OUTPUT_STYLE_PARITY_FAILED =
     <section
       id="advanced-output-style"
       tabindex="-1"
-      class="py-[var(--ptah-gap-group)] border-b border-base-content/10"
       data-glass-surface="content"
-      aria-labelledby="output-style-heading"
+      [attr.aria-labelledby]="formSection.headingId"
       data-testid="output-style-card"
     >
-      <header class="flex flex-wrap items-start justify-between gap-[var(--ptah-gap-controls)] mb-[var(--ptah-gap-heading)]">
-        <div class="min-w-0 flex-1">
-          <h2 id="output-style-heading" class="text-[length:var(--ptah-text-section-title-size)] leading-[var(--ptah-text-section-title-leading)] font-[number:var(--ptah-text-section-title-weight)]">Output style</h2>
-          <p class="mt-[var(--ptah-gap-label)] text-base-content-muted text-[length:var(--ptah-text-hint-size)] leading-[var(--ptah-text-hint-leading)] font-[number:var(--ptah-text-hint-weight)]">How the agent writes its answers. One style is active at a time.</p>
-        </div>
-        <button #newStyleButton type="button" ptahButton variant="primary" size="sm"
+      <ptah-form-section
+        #formSection
+        class="[[data-glass=on]_&>section]:py-0 [[data-glass=on]_&>section]:[border-bottom:0]"
+        heading="Output style"
+        description="How the agent writes its answers. One style is active at a time."
+        [level]="2"
+        [wide]="true"
+        [divider]="true"
+        [icon]="PaletteIcon"
+      >
+        <button aside #newStyleButton type="button" ptahButton variant="secondary" size="sm"
           (click)="onCreate()" [disabled]="store.saving()"
           data-testid="output-style-new-button" aria-label="Create new output style">
           <lucide-angular [img]="PlusIcon" class="w-3.5 h-3.5" aria-hidden="true" />
           New style
         </button>
-      </header>
 
       <ptah-output-style-list
         [styles]="store.styles()"
@@ -101,6 +105,7 @@ const OUTPUT_STYLE_PARITY_FAILED =
         (dismissError)="store.dismissError()"
         (dismissParity)="store.dismissParityOutcome()"
       />
+      </ptah-form-section>
 
       @defer (when view() === 'editor') {
         @if (view() === 'editor') {
@@ -144,6 +149,7 @@ export class OutputStyleConfigComponent implements OnInit {
   private readonly injector = inject(Injector);
 
   readonly PlusIcon = Plus;
+  readonly PaletteIcon = Palette;
 
   readonly view = signal<'list' | 'editor'>('list');
   readonly draft = signal<OutputStyleDetail | null>(null);

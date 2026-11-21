@@ -15,6 +15,7 @@ import {
   input,
   output,
   signal,
+  type WritableSignal,
 } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
@@ -278,6 +279,39 @@ describe('OutputStyleConfigComponent', () => {
         '[data-testid="output-style-row-Terse"] [data-testid="output-style-edit-button"]',
       );
       expect(document.activeElement).toBe(edit);
+    });
+
+    it('"New style" opens the editor for a new draft; it is off while a save runs (A-19)', () => {
+      const newStyle = fixture.nativeElement.querySelector('[data-testid="output-style-new-button"]') as HTMLButtonElement;
+      expect(newStyle.closest('[data-testid="form-section-aside"]')).not.toBeNull();
+      expect(newStyle.getAttribute('aria-label')).toBe('Create new output style');
+      expect(newStyle.textContent?.trim()).toBe('New style');
+
+      newStyle.click();
+      fixture.detectChanges();
+      expect(component.view()).toBe('editor');
+      expect(component.draft()).toBeNull();
+      expect(component.repair()).toBeNull();
+
+      component.showList();
+      (TestBed.inject(OutputStyleStore).saving as unknown as WritableSignal<boolean>).set(true);
+      fixture.detectChanges();
+      expect(newStyle.disabled).toBe(true);
+      newStyle.click();
+      expect(component.view()).toBe('list');
+    });
+
+    it('labels the card with the form-section heading and shows the section icon (F7, F20)', () => {
+      const card = fixture.nativeElement.querySelector('[data-testid="output-style-card"]') as HTMLElement;
+      const heading = card.querySelector('h2') as HTMLElement;
+      expect(heading.textContent?.trim()).toBe('Output style');
+      expect(card.getAttribute('aria-labelledby')).toBe(heading.id);
+      expect(card.id).toBe('advanced-output-style');
+      expect(card.querySelectorAll('h2')).toHaveLength(1);
+      expect(card.querySelector('[data-testid="form-section-icon"]')).not.toBeNull();
+      expect(card.querySelector('[data-testid="form-section-description"]')?.textContent).toContain(
+        'One style is active at a time.',
+      );
     });
 
     it('after a save with no editable row of that name, focuses "New style"', async () => {

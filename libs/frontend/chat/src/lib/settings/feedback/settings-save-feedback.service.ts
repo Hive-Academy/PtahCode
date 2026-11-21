@@ -45,10 +45,23 @@ export interface SettingsGenericSaveRequest {
   /** Field name shown to the user, e.g. "MCP port". */
   readonly label: string;
   /** The save itself; `ok:false` carries the user-facing failure message. */
-  readonly write: () => Promise<{ ok: true } | { ok: false; message: string }>;
+  readonly write: () => Promise<SettingsGenericWriteResult>;
   /** Writes the previous value back. `null` offers no Undo. */
-  readonly undo: (() => Promise<{ ok: true } | { ok: false; message: string }>) | null;
+  readonly undo: (() => Promise<SettingsGenericWriteResult>) | null;
 }
+
+/**
+ * The result of a generic write.
+ * - `ok: true` with `message`: fixed text that replaces "Saved {label}." (for example an Undo of a part of a batch,
+ *   whose count and direction differ from the label of the batch).
+ * - `keepUndo` on a failure of a write of more than one item that saved only a part: the failure toast still offers
+ *   the request's Undo, which must write back only the items that saved.
+ * - `keepUndo` on a failure of an Undo itself (the Undo was refused or did only a part): the failure toast offers the
+ *   same Undo again. The Undo must be safe to run again.
+ */
+export type SettingsGenericWriteResult =
+  | { ok: true; message?: string }
+  | { ok: false; message: string; keepUndo?: boolean };
 
 export interface SettingsToast {
   /** `status` renders `role="status"` (polite); `alert` renders `role="alert"`. */
@@ -152,14 +165,20 @@ export class SettingsSaveFeedbackService {
    * Same D3 disable-while-saving, same 8 s toast timer, and the same Undo contract as `save()`. The
    * success message is scope-less: "Saved {label}.". A failed write never shows "Saved" (D15); the
    * failure message comes straight from the writer. Returns this call's own outcome, like `save()`
-   * (`refused` when another save is in flight).
+   * (`refused` when another save is in flight). A failure with `keepUndo` (a part of the items saved) keeps the one
+   * alert toast and offers the request's Undo with it.
    */
-  async saveGeneric(request: SettingsGenericSaveRequest): Promise<SettingsSaveResult> {
+  saveGeneric(request: SettingsGenericSaveRequest): Promise<SettingsSaveResult> {
+    return this.runGeneric(request, false);
+  }
+
+  /** `undoRun`: `request.write` is the Undo of an earlier save; a failure with `keepUndo` offers that Undo again. */
+  private async runGeneric(request: SettingsGenericSaveRequest, undoRun: boolean): Promise<SettingsSaveResult> {
     if (this.saving()) {
       this.show({ tone: 'alert', message: SAVE_REFUSED_MESSAGE, canUndo: false }, null);
       return 'refused';
     }
-    let result: { ok: true } | { ok: false; message: string };
+    let result: SettingsGenericWriteResult;
     try {
       this.genericSaving.set(true);
       result = await request.write();
@@ -171,13 +190,17 @@ export class SettingsSaveFeedbackService {
     } finally {
       this.genericSaving.set(false);
     }
+    const undo = request.undo;
     if (!result.ok) {
-      this.show({ tone: 'alert', message: result.message, canUndo: false }, null);
+      const keptUndo = result.keepUndo === true ? (undoRun ? request.write : undo) : null;
+      this.show(
+        { tone: 'alert', message: result.message, canUndo: keptUndo !== null },
+        keptUndo ? { ...request, write: keptUndo, undo: null } : null,
+      );
       return 'failed';
     }
-    const undo = request.undo;
     this.show(
-      { tone: 'status', message: `Saved ${request.label}.`, canUndo: undo !== null },
+      { tone: 'status', message: result.message ?? `Saved ${request.label}.`, canUndo: undo !== null },
       undo ? { ...request, write: undo, undo: null } : null,
     );
     return 'saved';
@@ -204,7 +227,7 @@ export class SettingsSaveFeedbackService {
       const result = await this.save(request);
       request.settled?.(result);
     } else {
-      await this.saveGeneric(request);
+      await this.runGeneric(request, true);
     }
   }
 
