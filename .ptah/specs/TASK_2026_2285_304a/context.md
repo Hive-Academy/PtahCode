@@ -27,5 +27,5 @@ review (2 lanes, findings) -> user checkpoint -> design/prototype -> Gate 1.7 ->
 | Phase | Task ID | Pull request | State |
 |---|---|---|---|
 | 1. Shared UI primitives | TASK_2026_2285_304a | #1447 | merged (c67cd3e51) |
-| 2. Advanced page + Claude Code tools & skills | TASK_2026_2285_304a | PR 2 (branch `feat/settings-advanced-tools`) | in review |
-| 3. Providers > Lanes + modals | TASK_2026_2285_304a | - | not started |
+| 2. Advanced page + Claude Code tools & skills | TASK_2026_2285_304a | #1449 | merged (cbcb22ff4) |
+| 3. Providers > Lanes + modals | TASK_2026_2285_304a | PR 3 (branch `feat/settings-lanes-modals`) | in review |
