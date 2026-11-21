@@ -45,10 +45,13 @@ Decisions this implies:
 | Phase | Task ID | Pull request | State |
 |---|---|---|---|
 | Research + plan | TASK_2026_2288_acp1 | (this PR) | in_review |
-| P1 contracts + acp-runtime extraction | TBD | — | in_progress |
-| P2 acp-runtime hardening | TBD | — | planned |
-| P3 Antigravity ACP lane (P3x MCP bridge if needed) | TBD | — | planned |
-| P4–P6 chat foundation A/B/C | TBD | — | planned |
+| P1 contracts + acp-runtime extraction | TASK_2026_2289_p1 | #1444 | in_review |
+| P2 acp-runtime hardening | TASK_2026_2290_p2 | #1445 | in_review |
+| P3 Antigravity ACP lane (P3x not needed, D9 passed) | TASK_2026_2291_p3 | #1451 | in_review |
+| P4 chat foundation A | TASK_2026_2292_p4 | #1450 | in_review |
+| P5 chat foundation B | TASK_2026_2294_p5 | — | in_progress |
+| P6 chat foundation C | TBD | — | planned |
+| Side: onboarding main-connection step | TASK_2026_2293_onboard | — | in_progress |
 | P7 chat backend (adapter, host ports, pool) | TBD | — | planned |
 | P8 Electron composition | TBD | — | planned |
 | P9 Antigravity main chat | TBD | — | planned |
