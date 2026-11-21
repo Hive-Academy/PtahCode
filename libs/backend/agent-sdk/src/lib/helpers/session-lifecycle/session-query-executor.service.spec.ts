@@ -163,7 +163,6 @@ interface Harness {
   buildSpy: jest.Mock;
   getPermissionLevelSpy: jest.Mock;
   cleanupSpy: jest.Mock;
-  recordBudgetStopSpy: jest.Mock;
   sdkQuery: Query;
 }
 
@@ -193,11 +192,9 @@ function makeHarness(
     .fn()
     .mockReturnValue(globalPermissionLevel);
   const cleanupSpy = jest.fn();
-  const recordBudgetStopSpy = jest.fn();
   const permissionHandler = {
     getPermissionLevel: getPermissionLevelSpy,
     cleanupPendingPermissions: cleanupSpy,
-    recordBudgetStop: recordBudgetStopSpy,
     getPendingPermissionCount: () => 2,
   } as unknown as ISdkPermissionHandler;
 
@@ -266,7 +263,6 @@ function makeHarness(
     buildSpy,
     getPermissionLevelSpy,
     cleanupSpy,
-    recordBudgetStopSpy,
     sdkQuery,
   };
 }
@@ -1091,7 +1087,6 @@ describe('SessionQueryExecutor — compaction coordinator wiring (TASK_2026_597 
         makeLogger(),
         config,
         {
-          stopSubagent: jest.fn(),
           pushParentMessage: jest.fn(),
           postMainThreadNotice: jest.fn(),
           withdrawMainThreadNotice: jest.fn(),
@@ -1531,13 +1526,15 @@ describe('SessionQueryExecutor — subagent budget monitor wiring (TASK_2026_597
     recordTaskStarted = jest.fn(),
   ) {
     const release = jest.fn();
+    const recordTaskTerminal = jest.fn().mockResolvedValue(undefined);
     const monitor = {
       observe,
       recordTaskStarted,
+      recordTaskTerminal,
       release,
       currentSessionId: jest.fn((id: string) => id),
     } as unknown as SubagentBudgetSink;
-    return { monitor, observe, recordTaskStarted, release };
+    return { monitor, observe, recordTaskStarted, recordTaskTerminal, release };
   }
 
   const taskStarted = (extra: Record<string, unknown>) =>
@@ -1549,6 +1546,93 @@ describe('SessionQueryExecutor — subagent budget monitor wiring (TASK_2026_597
       description: 'Map auth',
       ...extra,
     });
+
+  it.each([
+    ['stopped', 'stopped'], ['killed', 'stopped'], ['failed', 'failed'], ['completed', 'completed'],
+  ])('routes the SDK task outcome %s to the budget monitor as %s', async (status, expected) => {
+    const { monitor, recordTaskTerminal } = makeMonitor();
+    const { executor } = makeHarness('ask', {} as AuthEnv, { subagentMonitor: monitor });
+    const run = await executor.executeQuery(makeConfig('tab_terminal'));
+    feed(run, init());
+    feed(run, msg({ type: 'system', subtype: 'task_notification', session_id: REAL, task_id: 'task-1', run_id: 'run-1', tool_use_id: 'toolu_1', status }));
+    expect(recordTaskTerminal).toHaveBeenCalledWith(REAL, 'task-1', expected, 'run-1', 'toolu_1', undefined);
+    run.abortController.abort();
+  });
+
+  it('delivers the child report and terminal output path when the record fails final validation', async () => {
+    const logger = makeLogger();
+    const pushParentMessage = jest.fn().mockResolvedValue(undefined);
+    const markScrubbed = jest.fn().mockResolvedValue(false);
+    const lookupTranscript = jest.fn().mockResolvedValue(undefined);
+    const monitor = new SubagentBudgetMonitor(
+      logger,
+      {
+        getAgentBudgetSettings: () => ({
+          warnRatio: 0.85, handoffContextTokens: 150_000, stopWeightedTokens: 3_000_000, maxDurationMin: 90,
+        }),
+      } as unknown as CompactionConfigProvider,
+      {
+        pushParentMessage,
+        postMainThreadNotice: jest.fn(),
+        withdrawMainThreadNotice: jest.fn(),
+        postSubagentNotice: jest.fn(),
+        withdrawSubagentNotice: jest.fn(),
+      },
+      {
+        get: () => ({ agentId: 'a1', agentType: 'Explore', taskId: 'task-1', status: 'running', isBackground: true }),
+        getToolCallIdByAgentId: () => undefined,
+        update: jest.fn(),
+      } as unknown as SubagentRegistryService,
+      noHandoffFiles,
+      { ...memoryHandoffRecords, workspaceOf: () => '/ws', markScrubbed },
+      noHandoffIndex,
+      new SubagentBudgetStopCallbackRegistry(logger),
+      new SubagentStopNotices(),
+      lookupTranscript,
+    );
+    const { executor } = makeHarness('ask', {} as AuthEnv, { subagentMonitor: monitor });
+    const run = await executor.executeQuery(makeConfig('tab_terminal_report'));
+    const send = async (message: SDKMessage) => {
+      run.activityWatchdog.observe(message);
+      await run.onMessage(message);
+    };
+    try {
+      await send(init());
+      await send(taskStarted({ tool_use_id: 'toolu_1', run_id: 'run-1', is_backgrounded: true }));
+      await send(msg({
+        type: 'user', session_id: REAL, parent_tool_use_id: null,
+        message: { content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'Async agent launched' }] },
+      }));
+      await send(msg({
+        type: 'assistant', session_id: REAL, parent_tool_use_id: 'toolu_1',
+        message: {
+          id: 'usage-frame', model: 'claude-sonnet-4-5-20250929', usage: { input_tokens: 310_000, output_tokens: 1 },
+          content: [{ type: 'text', text: 'Still looking for the entry points.' }],
+        },
+      }));
+      expect(monitor.notesGatePhase('a1')).toBe('paused');
+      await send(msg({
+        type: 'assistant', session_id: REAL, parent_tool_use_id: 'toolu_1',
+        message: { id: 'report-frame', content: [{ type: 'text', text: 'The entry point is src/auth.ts.' }] },
+      }));
+      await send(msg({
+        type: 'system', subtype: 'task_notification', session_id: REAL,
+        task_id: 'task-1', run_id: 'run-1', tool_use_id: 'toolu_1', status: 'completed',
+        output_file: '/tmp/sdk/tasks/task-1.output',
+      }));
+
+      expect(lookupTranscript).toHaveBeenCalledTimes(1);
+      expect(markScrubbed).toHaveBeenCalledTimes(1);
+      expect(monitor.notesGatePhase('a1')).toBeUndefined();
+      expect(pushParentMessage).toHaveBeenCalledTimes(1);
+      const [, handoff] = pushParentMessage.mock.calls[0];
+      expect(handoff).toContain('Ptah could not save the handoff record for a1');
+      expect(handoff).toContain('The entry point is src/auth.ts.');
+      expect(handoff).toContain('Subagent output file: /tmp/sdk/tasks/task-1.output');
+    } finally {
+      run.abortController.abort();
+    }
+  });
 
   describe('task_started (TASK_2026_627 R5)', () => {
     it('records the task id of an agent task under the real session id', async () => {
@@ -1563,6 +1647,8 @@ describe('SessionQueryExecutor — subagent budget monitor wiring (TASK_2026_597
         taskStarted({
           tool_use_id: 'toolu_1',
           subagent_type: 'Explore',
+          run_id: 'run-1',
+          is_backgrounded: false,
           task_type: 'local_agent',
         }),
       );
@@ -1572,6 +1658,8 @@ describe('SessionQueryExecutor — subagent budget monitor wiring (TASK_2026_597
         'toolu_1',
         'task-1',
         'Explore',
+        'run-1',
+        false,
       );
       expect(observe).not.toHaveBeenCalled();
       run.abortController.abort();
@@ -1594,6 +1682,8 @@ describe('SessionQueryExecutor — subagent budget monitor wiring (TASK_2026_597
         REAL,
         'toolu_bash',
         'task-1',
+        undefined,
+        undefined,
         undefined,
       );
       run.abortController.abort();
@@ -1623,135 +1713,6 @@ describe('SessionQueryExecutor — subagent budget monitor wiring (TASK_2026_597
       expect(logger.error).not.toHaveBeenCalled();
       run.abortController.abort();
     });
-
-    /** A real monitor that hands off at 1000 context tokens, with spy ports. */
-    function handoffMonitor() {
-      const port = {
-        stopSubagent: jest.fn().mockResolvedValue(undefined),
-        pushParentMessage: jest.fn().mockResolvedValue(undefined),
-        postMainThreadNotice: jest.fn(),
-        withdrawMainThreadNotice: jest.fn(() => false),
-        postSubagentNotice: jest.fn(),
-        withdrawSubagentNotice: jest.fn(),
-      };
-      const registry = {
-        get: jest.fn(() => undefined),
-        getToolCallIdByAgentId: jest.fn(() => undefined),
-        update: jest.fn(),
-      };
-      const monitor = new SubagentBudgetMonitor(
-        makeLogger(),
-        {
-          getAgentBudgetSettings: () => ({ warnRatio: 0.85, handoffContextTokens: 1_000, stopWeightedTokens: Number.MAX_SAFE_INTEGER, maxDurationMin: 90 }),
-          getConfig: () => ({
-            enabled: true,
-            subagentHandoffTokens: 1_000,
-            subagentStopWeightedTokens: Number.MAX_SAFE_INTEGER,
-          }),
-        } as unknown as CompactionConfigProvider,
-        port,
-        registry as unknown as SubagentRegistryService,
-        noHandoffFiles,
-        memoryHandoffRecords,
-        noHandoffIndex,
-        new SubagentBudgetStopCallbackRegistry(makeLogger()),
-        new SubagentStopNotices(),
-      );
-      return { monitor, port, registry };
-    }
-
-    /** One over-budget request of the subagent spawned by `toolu_big`. */
-    const bigSubagentRequest = () =>
-      msg({
-        type: 'assistant',
-        session_id: REAL,
-        parent_tool_use_id: 'toolu_big',
-        message: {
-          id: 'msg_big',
-          model: 'local',
-          usage: {
-            input_tokens: 2_000,
-            output_tokens: 0,
-            cache_read_input_tokens: 0,
-            cache_creation_input_tokens: 0,
-          },
-        },
-      });
-
-    it('streams the handoff as a user turn when the background subagent tool result already returned', async () => {
-      const { monitor, port } = handoffMonitor();
-      const { executor } = makeHarness('ask', {} as AuthEnv, {
-        subagentMonitor: monitor,
-      });
-      const run = await executor.executeQuery(makeConfig('tab_ts5'));
-      feed(run, init());
-      feed(
-        run,
-        taskStarted({ tool_use_id: 'toolu_big', subagent_type: 'Explore' }),
-      );
-      // The background `Agent` call returns at spawn on the main thread.
-      feed(
-        run,
-        msg({
-          type: 'user',
-          session_id: REAL,
-          parent_tool_use_id: null,
-          message: {
-            role: 'user',
-            content: [
-              {
-                type: 'tool_result',
-                tool_use_id: 'toolu_big',
-                content: 'Async agent launched',
-              },
-            ],
-          },
-        }),
-      );
-      await flush();
-      feed(run, bigSubagentRequest());
-      await flush();
-      expect(port.stopSubagent).not.toHaveBeenCalled();
-      // A context-only crossing gets notes time; missing telemetry is independent safety.
-      feed(run, msg({ type: 'assistant', session_id: REAL, parent_tool_use_id: 'toolu_big', message: { id: 'msg_safety' } }));
-      await flush();
-      expect(port.stopSubagent).toHaveBeenCalledWith(REAL, 'task-1');
-      expect(port.pushParentMessage).toHaveBeenCalledTimes(1);
-      expect(port.pushParentMessage).toHaveBeenCalledWith(
-        REAL,
-        expect.stringContaining("Ptah's subagent budget monitor handed off"),
-      );
-      expect(port.postMainThreadNotice).not.toHaveBeenCalled();
-      run.abortController.abort();
-    });
-
-    it('lets a real monitor stop a subagent the registry never recorded and hand off', async () => {
-      const { monitor, port, registry } = handoffMonitor();
-      const { stopSubagent } = port;
-      const { executor } = makeHarness('ask', {} as AuthEnv, {
-        subagentMonitor: monitor,
-      });
-      const run = await executor.executeQuery(makeConfig('tab_ts4'));
-      feed(run, init());
-      feed(
-        run,
-        taskStarted({ tool_use_id: 'toolu_big', subagent_type: 'Explore' }),
-      );
-      feed(run, bigSubagentRequest());
-      await flush();
-      expect(port.stopSubagent).not.toHaveBeenCalled();
-      // A context-only crossing gets notes time; missing telemetry is independent safety.
-      feed(run, msg({ type: 'assistant', session_id: REAL, parent_tool_use_id: 'toolu_big', message: { id: 'msg_safety' } }));
-      await flush();
-      expect(stopSubagent).toHaveBeenCalledWith(REAL, 'task-1');
-      expect(port.pushParentMessage).toHaveBeenCalledWith(
-        REAL,
-        expect.stringContaining('`Explore`'),
-      );
-      expect(port.postMainThreadNotice).not.toHaveBeenCalled();
-      expect(registry.update).not.toHaveBeenCalled();
-      run.abortController.abort();
-    });
   });
 
   it('forwards a subagent message to the monitor and ignores a main-session one', async () => {
@@ -1767,105 +1728,6 @@ describe('SessionQueryExecutor — subagent budget monitor wiring (TASK_2026_597
     feed(run, sub);
     expect(observe).toHaveBeenCalledTimes(1);
     expect(observe).toHaveBeenCalledWith(REAL, sub, { kind: 'native', providerId: 'anthropic' });
-    run.abortController.abort();
-  });
-
-  it('correlates one budget stop with the parent turn despite later messages', async () => {
-    const { monitor } = makeMonitor();
-    Object.assign(monitor, { getAgentBudgetState: () => ({ stopped: true, stopState: 'stopped' }) });
-    const logger = makeLogger();
-    const { executor, recordBudgetStopSpy } = makeHarness('ask', {} as AuthEnv, {
-      subagentMonitor: monitor, logger,
-    });
-    const run = await executor.executeQuery(makeConfig('tab-stop-once'));
-    feed(run, init());
-    feed(run, subAssistant());
-    feed(run, subAssistant());
-    await flush();
-    expect(recordBudgetStopSpy).toHaveBeenCalledTimes(1);
-    expect(logger.info).toHaveBeenCalledWith(
-      '[SessionQueryExecutor] Subagent budget stop parent turn',
-      expect.objectContaining({ sessionId: 'tab-stop-once', tabId: 'tab-stop-once', toolCallId: 'toolu_1', abortSignalAborted: false, pendingPermissionRequests: 2 }),
-    );
-    feed(run, msg({
-      type: 'user', session_id: REAL, parent_tool_use_id: null,
-      message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'read-1', is_error: true, content: 'Permission denied' }] },
-    }));
-    expect(logger.info).toHaveBeenCalledWith(
-      '[SessionQueryExecutor] Tool result error after subagent budget stop',
-      expect.objectContaining({ toolUseId: 'read-1', cause: 'denied' }),
-    );
-    for (const [toolUseId, content, cause] of [
-      ['read-2', [{ type: 'text', text: 'Permission denied' }], 'denied'],
-      [
-        'read-sdk',
-        [{ type: 'text', text: "The user doesn't want to take this action right now." }],
-        'denied',
-      ],
-      [
-        'read-sdk-typographic',
-        [{ type: 'text', text: 'The user doesn’t want to take this action right now.' }],
-        'denied',
-      ],
-      ['read-3', [{ type: 'text', text: 'Request interrupted by user' }], 'interrupted'],
-      ['read-4', [{ type: 'text', text: 'File missing' }], 'other'],
-    ] as const) {
-      feed(run, msg({
-        type: 'user', session_id: REAL, parent_tool_use_id: null,
-        message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, is_error: true, content }] },
-      }));
-      expect(logger.info).toHaveBeenCalledWith(
-        '[SessionQueryExecutor] Tool result error after subagent budget stop',
-        expect.objectContaining({ toolUseId, cause }),
-      );
-    }
-    const longId = 'x'.repeat(200);
-    feed(run, msg({
-      type: 'user', session_id: REAL, parent_tool_use_id: null,
-      message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: longId, is_error: true, content: 'Permission denied' }] },
-    }));
-    expect(logger.info).toHaveBeenCalledWith(
-      '[SessionQueryExecutor] Tool result error after subagent budget stop',
-      expect.objectContaining({ toolUseId: 'x'.repeat(128), cause: 'denied' }),
-    );
-    run.abortController.abort();
-  });
-
-  it('does not latch a pending stop; a later completed stop signals once', async () => {
-    const { monitor } = makeMonitor();
-    let stopState: 'pending' | 'none' | 'stopped' = 'pending';
-    Object.assign(monitor, { getAgentBudgetState: () => ({ stopState }) });
-    const { executor, recordBudgetStopSpy } = makeHarness('ask', {} as AuthEnv, { subagentMonitor: monitor });
-    const run = await executor.executeQuery(makeConfig('tab-pending-stop'));
-    feed(run, init());
-    feed(run, subAssistant());
-    await flush();
-    expect(recordBudgetStopSpy).not.toHaveBeenCalled();
-    stopState = 'none';
-    feed(run, subAssistant());
-    await flush();
-    expect(recordBudgetStopSpy).not.toHaveBeenCalled();
-    stopState = 'stopped';
-    feed(run, subAssistant());
-    feed(run, subAssistant());
-    await flush();
-    expect(recordBudgetStopSpy).toHaveBeenCalledTimes(1);
-    run.abortController.abort();
-  });
-
-  it('does not log error tool results before a budget stop', async () => {
-    const logger = makeLogger();
-    const { executor } = makeHarness('ask', {} as AuthEnv, { logger });
-    const run = await executor.executeQuery(makeConfig('tab-no-stop-log'));
-    feed(run, init());
-    feed(run, msg({
-      type: 'user', session_id: REAL, parent_tool_use_id: null,
-      message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'read-1', is_error: true, content: 'Permission denied' }] },
-    }));
-    expect(logger.info).not.toHaveBeenCalledWith(
-      '[SessionQueryExecutor] Tool result error after subagent budget stop',
-      expect.anything(),
-    );
     run.abortController.abort();
   });
 

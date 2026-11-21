@@ -20,6 +20,8 @@ import {
   type PermissionLevel,
   type AskUserQuestionRequest,
   attentionRequestKey,
+  formatUnattachedLaneIdentity,
+  formatBudgetCeilingDeny,
 } from '@ptah-extension/shared';
 import {
   CanUseTool,
@@ -58,33 +60,61 @@ import type {
   UnattendedSessionPolicyRegistry,
 } from './permission/unattended-session-policy.registry';
 import { SDK_TOKENS } from './di/tokens';
+import type { SessionToolDispositionPort } from './helpers/session-tool-disposition.port';
 import type { SubagentBudgetMonitor } from './helpers/compaction/subagent-budget-monitor';
 import { buildBudgetResumeRefusal } from './helpers/compaction/subagent-resume-advice';
 import type { HostAttentionCoordinator } from './permission/host-attention-coordinator';
 import {
-  buildSystemAbortPermissionMessage,
+  buildHostPermissionDenyMessage,
+  formatHostPermissionDenial,
   UNROUTABLE_PERMISSION_TIMEOUT_MS,
+  type PermissionDecisionOrigin,
 } from './system-abort-permission-message';
 
 /** Tools of Ptah's own MCP server, allowed for unattended sessions (R1). */
 const PTAH_MCP_TOOL_PREFIX = 'mcp__ptah__';
 
 /**
+ * Tools that stay callable while a session is paused: read-only tools, task coordination
+ * that cannot stop or create work, and the handoff and report tools. This list is separate
+ * from SAFE_TOOLS on purpose: `TaskStop`, `KillShell`, `TaskCreate` and `TaskUpdate` are
+ * auto-approved there but must be denied by the pause gate.
+ */
+const PAUSED_SESSION_ALLOWED_TOOLS: ReadonlySet<string> = new Set([
+  'Read',
+  'Grep',
+  'Glob',
+  'TodoWrite',
+  'TaskOutput',
+  'TaskList',
+  'TaskGet',
+  'ListMcpResources',
+  'ReadMcpResource',
+  'ToolSearch',
+  `${PTAH_MCP_TOOL_PREFIX}ptah_session_handoff`,
+  `${PTAH_MCP_TOOL_PREFIX}ptah_session_handoff_ack`,
+  `${PTAH_MCP_TOOL_PREFIX}ptah_agent_report`,
+]);
+
+/** Used when a paused disposition carries no notice. */
+const GENERIC_PAUSED_DENY =
+  'Ptah paused new work tools for this session. Use only the permitted handoff tools, then return normally.';
+
+/**
  * Internal superset of the wire type {@link PermissionResponse}.
  *
- * `systemAbort` marks a response Ptah itself manufactured while tearing a
- * session down (auth/config change, extension deactivation) — NOT a decision a
- * human made. It is deliberately NOT part of `PermissionResponse`: that type is
- * what the WEBVIEW sends, and a system abort never originates there.
+ * `origin` marks a response Ptah itself manufactured (timeout, session
+ * teardown, host disposal) — NOT a decision a person made. Absent means a
+ * person answered in the UI. It is deliberately NOT part of
+ * `PermissionResponse`: that type is what the WEBVIEW sends, and `handleResponse`
+ * clears it so a payload cannot claim a host origin.
  *
- * Without this distinction an abort-deny is indistinguishable from a user deny
- * at the tool-result layer, so the model reads a teardown as a deliberate
- * refusal and correctly stops working. See TASK_2026_247.
+ * Without this distinction a host-closed request is indistinguishable from a
+ * user deny at the tool-result layer, so the model reads it as a deliberate
+ * refusal and stops working. See TASK_2026_247.
  */
 type InternalPermissionResponse = PermissionResponse & {
-  readonly systemAbort?: true;
-  /** Set only by the unroutable deny-window timer. */
-  readonly timedOut?: true;
+  readonly origin?: PermissionDecisionOrigin;
 };
 
 interface PendingRequest {
@@ -171,7 +201,39 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
     const state =
       this.budgetMonitor?.getAgentBudgetState(target, sessionId) ??
       this.budgetMonitor?.getAgentBudgetState(targetName, sessionId);
-    return (state ? buildBudgetResumeRefusal(state) : undefined) ?? undefined;
+    return (state ? buildBudgetResumeRefusal(state, targetName) : undefined) ?? undefined;
+  }
+
+  /**
+   * Ptah deny text when a paused subagent or a paused session may not start this tool,
+   * else undefined. Called by canUseTool and by the PreToolUse hook (bypass-permissions
+   * skips canUseTool). It only denies: it never grants a tool or changes a policy.
+   */
+  async budgetToolDenial(
+    toolName: string,
+    input: unknown,
+    sessionId: string | undefined,
+    agentId: string | undefined,
+    tabId: string | undefined,
+  ): Promise<string | undefined> {
+    if (agentId && this.budgetMonitor?.checkPausedTool) {
+      const text = await this.budgetMonitor.checkPausedTool(
+        sessionId,
+        agentId,
+        toolName,
+        input,
+      );
+      if (text) return text;
+    }
+    const disposition = this.toolDisposition?.lookup({
+      tabId,
+      sdkSessionId: sessionId,
+    });
+    if (disposition?.phase !== 'paused') return undefined;
+    if (PAUSED_SESSION_ALLOWED_TOOLS.has(toolName)) return undefined;
+    return disposition.notice
+      ? formatBudgetCeilingDeny(disposition.notice)
+      : GENERIC_PAUSED_DENY;
   }
 
   logBudgetSendMessageHookDenial(
@@ -250,7 +312,17 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
     private readonly budgetMonitor?: Pick<
       SubagentBudgetMonitor,
       'getAgentBudgetState'
-    >,
+    > & {
+      // Optional so the handler compiles before and after the monitor gains it.
+      checkPausedTool?(
+        sessionId: string | undefined,
+        agentId: string | undefined,
+        toolName: string,
+        input: unknown,
+      ): Promise<string | undefined>;
+    },
+    @inject(SDK_TOKENS.SDK_SESSION_TOOL_DISPOSITION, { isOptional: true })
+    private readonly toolDisposition?: SessionToolDispositionPort,
   ) {
     this.ruleStore = new PermissionRuleStore(this.logger);
 
@@ -400,6 +472,7 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
               decision: 'deny',
               reason:
                 'Permission request could not be delivered to UI (webview not available)',
+              origin: 'host-delivery-failed',
             });
           }
         }
@@ -417,6 +490,7 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
             id: payload.id,
             decision: 'deny',
             reason: 'Failed to send permission request to UI',
+            origin: 'host-delivery-failed',
           });
         }
       });
@@ -461,7 +535,7 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
           id: payload.id,
           decision: 'deny',
           reason: 'Permission lane owner unavailable',
-          systemAbort: true,
+          origin: 'host-teardown',
         });
       });
       return;
@@ -513,6 +587,7 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
               decision: 'deny',
               reason:
                 'Permission request could not be delivered to UI (webview not available)',
+              origin: 'host-delivery-failed',
             });
           }
         }
@@ -530,6 +605,7 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
             id: payload.id,
             decision: 'deny',
             reason: 'Failed to send permission request to UI',
+            origin: 'host-delivery-failed',
           });
         }
       });
@@ -642,6 +718,22 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
           : undefined;
         if (refusal)
           return { behavior: 'deny', message: refusal, interrupt: false };
+      }
+      // A paused subagent or session may not start new work tools. Runs before
+      // every allow rule and auto-approval path below; it only denies.
+      const pausedDenial = await this.budgetToolDenial(
+        toolName,
+        input,
+        resolveSessionId(),
+        options.agentID,
+        tabId,
+      );
+      if (pausedDenial) {
+        this.logger.info(
+          `[SdkPermissionHandler] Denied tool while paused: ${toolName}`,
+          { toolName, toolUseID: options.toolUseID, agentId: options.agentID },
+        );
+        return { behavior: 'deny', message: pausedDenial, interrupt: false };
       }
       this.logger.info(
         `[SdkPermissionHandler] canUseTool invoked: ${toolName}`,
@@ -968,14 +1060,20 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
     if (toolName === 'EnterPlanMode') {
       return {
         behavior: 'deny' as const,
-        message: `Plan mode is unavailable to unattended agent sessions: nobody is watching this session to approve a plan. Write your plan to a file inside ${policy.writableRoot} instead, then carry on with the task.`,
+        message: formatHostPermissionDenial(
+          toolName, 'plan mode is unavailable in an unattended agent session',
+          `Write your plan to a file inside ${policy.writableRoot}, then carry on with the task.`,
+        ),
         interrupt: false,
       };
     }
     if (toolName === 'AskUserQuestion') {
       return {
         behavior: 'deny' as const,
-        message: `Nobody is watching this unattended agent session (started by ${policy.ownerLabel}), so questions cannot be answered. Make the decision yourself, then tell the parent session what you decided and why with ptah_agent_report.`,
+        message: formatHostPermissionDenial(
+          toolName, `nobody is watching this unattended agent session started by ${policy.ownerLabel}`,
+          'Make the decision yourself, then tell the parent session what you decided and why with ptah_agent_report.',
+        ),
         interrupt: false,
       };
     }
@@ -1102,9 +1200,9 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
       policy.bashAllowlist.length > 0
         ? policy.bashAllowlist.map((entry) => `"${entry}"`).join(', ')
         : '(none)';
-    return (
-      `Tool "${toolName}" was not run. This is an unattended agent session started by ${policy.ownerLabel}; ` +
-      `nobody approved this call, which is outside the session policy: ${reason}. ` +
+    return formatHostPermissionDenial(
+      toolName,
+      `this unattended agent session started by ${policy.ownerLabel} requires approval for this call (${reason})`,
       `Bash runs without approval only for a single command (no ; & | \` $( < > or newline) that starts with one of: ${allowlist}. ` +
       `Files can be written without approval only inside ${policy.writableRoot}. ` +
       `Do NOT retry the same call. If this blocks your task, report the blocker to the parent session with ptah_agent_report, then continue with what you can do.`
@@ -1193,11 +1291,12 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
         cliAgentId = cliAgentResolver();
       }
       if (!cliAgentId) {
+        // Ptah could not attribute the request: not a person's decision, so no
+        // `interrupt` (it would make the SDK tell the model to stop and wait).
         return {
           behavior: 'deny',
-          message:
-            'Lane identity was not attached before the permission deadline',
-          interrupt: true,
+          message: formatUnattachedLaneIdentity(toolName),
+          interrupt: false,
         };
       }
     }
@@ -1305,13 +1404,8 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
         response?.decision === 'allow' || response?.decision === 'always_allow'
           ? 'prompt'
           : 'deny',
-      decisionSource: response?.systemAbort
-        ? 'system-abort'
-        : response?.timedOut
-          ? 'timeout'
-          : 'user-response',
-      interrupt:
-        !response || (response.decision === 'deny' && !response.systemAbort),
+      decisionSource: response?.origin ?? (response ? 'user-response' : 'aborted'),
+      interrupt: response?.decision === 'deny' && !response.origin,
       recentSubagentBudgetStop:
         sessionId !== undefined &&
         Date.now() - (this.recentBudgetStops.get(sessionId as string) ?? 0) <
@@ -1329,9 +1423,9 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
         ? 'aborted'
         : response.decision === 'allow' || response.decision === 'always_allow'
           ? 'allowed'
-          : response.timedOut
+          : response.origin === 'host-timeout'
             ? 'timed-out'
-            : response.systemAbort
+            : response.origin
               ? 'aborted'
               : 'denied',
     });
@@ -1339,12 +1433,12 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
     if (!response) {
       this.logger.warn(
         `[SdkPermissionHandler] Permission request ${requestId} aborted`,
-        { decision: 'aborted', interrupt: true },
+        { decision: 'aborted', interrupt: false },
       );
       return {
         behavior: 'deny' as const,
-        message: 'Permission request was aborted',
-        interrupt: true,
+        message: buildHostPermissionDenyMessage(toolName, 'host-teardown'),
+        interrupt: false,
       };
     }
 
@@ -1378,29 +1472,25 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
       };
     }
 
-    // A system abort is NOT a user decision. `interrupt: true` is what makes the
-    // CLI substitute its canned "The user doesn't want to take this action right
-    // now. STOP what you are doing..." string, which launders a teardown into a
-    // deliberate refusal. `deny_with_message` above proves `interrupt: false`
-    // plus a rich message is the path whose text actually reaches the model.
-    // The turn is torn down by the session's abortController regardless, so
-    // dropping `interrupt` here leaves nothing running. See TASK_2026_247.
-    if (response.systemAbort) {
+    // A host-resolved request (timeout, teardown, disposal) is NOT a user
+    // decision. `interrupt: true` is what makes the CLI substitute its canned
+    // "The user doesn't want to take this action right now. STOP what you are
+    // doing..." string, which launders a Ptah action into a deliberate refusal.
+    // `deny_with_message` above proves `interrupt: false` plus a rich message is
+    // the path whose text actually reaches the model. See TASK_2026_247.
+    if (response.origin) {
       this.logger.warn(
-        `[SdkPermissionHandler] Permission request ${requestId} aborted by the system (not a user decision) for tool ${toolName}`,
+        `[SdkPermissionHandler] Permission request ${requestId} closed by the host (${response.origin}) for tool ${toolName}`,
         {
           decision: 'deny',
-          systemAbort: true,
+          origin: response.origin,
           reason: response.reason || 'Session aborted',
           interrupt: false,
         },
       );
       return {
         behavior: 'deny' as const,
-        message: buildSystemAbortPermissionMessage(
-          toolName,
-          response.reason || 'Session aborted',
-        ),
+        message: buildHostPermissionDenyMessage(toolName, response.origin),
         interrupt: false,
       };
     }
@@ -1524,7 +1614,9 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
     this.pendingRequestContext.delete(requestId);
 
     this.pendingRequests.delete(requestId);
-    pending.resolve(effective);
+    // The payload comes from the webview: it must not be able to claim a host
+    // origin, so any `origin` it carries is dropped before the waiter sees it.
+    pending.resolve({ ...effective, origin: undefined });
 
     const isApproved =
       effective.decision === 'allow' || effective.decision === 'always_allow';
@@ -1626,8 +1718,7 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
           pending.resolve({
             id: requestId,
             decision: 'deny',
-            systemAbort: true,
-            timedOut: true,
+            origin: 'host-timeout',
             reason: `Permission request timed out after ${timeoutMs}ms with no answer from the UI — denying to prevent a permanent hang.`,
           });
         }, timeoutMs);
@@ -1644,7 +1735,8 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
       pending.resolve({
         id: requestId,
         decision: 'deny',
-        reason: 'Extension deactivated',
+        reason: 'Host disposed',
+        origin: 'host-disposal',
       });
     }
     this.pendingRequests.clear();
@@ -1660,7 +1752,7 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
     // `undefined` means "all sessions" and is a deliberate call. `''` is not a
     // third mode — it is a caller that lost an id. Without this guard it fell
     // through to the global branch and resolved EVERY pending permission in the
-    // process as deny/systemAbort, which reaches the model as a user refusal in
+    // process as a host-teardown deny in
     // sessions the caller never meant to touch (TASK_2026_295).
     if (sessionId !== undefined && sessionId.trim().length === 0) {
       this.logger.warn(
@@ -1686,7 +1778,7 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
             id: requestId,
             decision: 'deny',
             reason: 'Session aborted',
-            systemAbort: true,
+            origin: 'host-teardown',
           });
           this.pendingRequests.delete(requestId);
           this.pendingRequestContext.delete(requestId);
@@ -1711,7 +1803,7 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
           id: requestId,
           decision: 'deny',
           reason: 'Session aborted',
-          systemAbort: true,
+          origin: 'host-teardown',
         });
       }
       this.pendingRequests.clear();

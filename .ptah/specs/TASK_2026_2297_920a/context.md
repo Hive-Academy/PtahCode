@@ -58,7 +58,7 @@ parent is told, and a person decides the rest.
 
 | Phase | Scope (implementation-plan.md batches) | Fixes | Task / branch | PR | State |
 | --- | --- | --- | --- | --- | --- |
-| P1 | Shared vocabulary + thresholds, subagent budget, permissions (1-7, 21-23) | failures 1, 2 | feat/coop-handoff-p1-subagents | - | planned |
+| P1 | Shared vocabulary + thresholds, subagent budget, permissions (1-7, 21-23) | failures 1, 2 | feat/coop-handoff-p1-subagents | - | in review |
 | P2 | Watchdog, cause propagation, first-turn recovery incl. children, child cap freeze (8-13, 25) | failure 3 | feat/coop-handoff-p2-watchdog | - | planned (after P1) |
 | P3 | Child session report routing (17-18) | failure 4 | feat/coop-handoff-p3-reports | - | planned |
 | P4 | CLI lanes ask-then-pause (14-16, 26) | lane kills | feat/coop-handoff-p4-lanes | - | planned (after P1) |

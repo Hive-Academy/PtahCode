@@ -250,7 +250,7 @@ describe('SdkPermissionHandler — unattended session policy', () => {
         {},
       );
 
-      expect(denyMessage(result)).toMatch(/Plan mode is unavailable/);
+      expect(denyMessage(result)).toContain('Ptah host denied EnterPlanMode because plan mode is unavailable');
       expect(denyMessage(result)).toContain(WRITABLE_ROOT);
       expect(result).toMatchObject({ interrupt: false });
       expect(h.sent).toHaveLength(0);
@@ -264,6 +264,7 @@ describe('SdkPermissionHandler — unattended session policy', () => {
         questions: [],
       });
 
+      expect(denyMessage(result)).toContain('Ptah host denied AskUserQuestion because nobody is watching');
       expect(denyMessage(result)).toContain('ptah_agent_report');
       expect(result).toMatchObject({ interrupt: false });
       expect(h.sent).toHaveLength(0);
@@ -277,7 +278,10 @@ describe('SdkPermissionHandler — unattended session policy', () => {
         command: 'rm -rf build',
       });
 
+      expect(denyMessage(result)).toContain('Ptah host denied Bash');
+      expect(denyMessage(result)).toContain('allowlist');
       expect(denyMessage(result)).toContain('"git status", "npm test"');
+      expect(result).toMatchObject({ interrupt: false });
       expect(h.permissionRequests()).toHaveLength(0);
     });
   });
@@ -335,7 +339,7 @@ describe('SdkPermissionHandler — unattended session policy', () => {
         expect(message).toContain('unattended agent session');
         expect(message).toContain('"git status", "npm test"');
         expect(message).toContain('ptah_agent_report');
-        expect(message).toMatch(/timed out/);
+        expect(message).toMatch(/permission request expired/);
         expect(result).toMatchObject({ interrupt: false });
       },
     );
@@ -384,7 +388,8 @@ describe('SdkPermissionHandler — unattended session policy', () => {
       await flushMicrotasks();
 
       const result = await pending;
-      expect(denyMessage(result)).toMatch(/could not be delivered/);
+      expect(denyMessage(result)).toContain('Ptah host denied Bash because its permission request could not be delivered to the UI');
+      expect(result).toMatchObject({ interrupt: false });
       expect(jest.getTimerCount()).toBe(0);
     });
 
@@ -404,8 +409,10 @@ describe('SdkPermissionHandler — unattended session policy', () => {
 
       await expect(pending).resolves.toMatchObject({
         behavior: 'deny',
-        message: 'Permission request was aborted',
-        interrupt: true,
+        message: expect.stringContaining(
+          'Ptah host closed the permission request for Bash',
+        ),
+        interrupt: false,
       });
     });
   });

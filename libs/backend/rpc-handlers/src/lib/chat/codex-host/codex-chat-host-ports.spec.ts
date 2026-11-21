@@ -1509,7 +1509,7 @@ describe('Codex chat host ports', () => {
         );
         expect(
           systemAbort('Bash', timeoutMs).startsWith(
-            'SYSTEM ABORT — this was NOT a user decision.',
+            'Ptah host closed the permission request',
           ),
         ).toBe(true);
         expect(h.publish).toHaveBeenLastCalledWith({

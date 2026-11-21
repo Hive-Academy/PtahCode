@@ -14,8 +14,8 @@ describe('independent stop evidence and messages', () => {
     expect(independentSafetyCause(initialAgentBudgetSnapshot, 0, settings)).toBeUndefined();
   });
 
-  it.each<SubagentStopCauseKind>(['warning-notes-complete', 'warning-turn-ended', 'notes-timeout', 'context-handoff', 'context-ceiling', 'weighted-budget', 'raw-budget', 'duration', 'telemetry-unavailable'])('uses the same %s evidence in the user notice and durable handoff', (kind) => {
-    const cause = { kind, quantity: 'milliseconds' as const, measured: 600_000, limit: 600_000, forced: kind !== 'warning-turn-ended' };
+  it.each<SubagentStopCauseKind>(['handoff-complete', 'warning-notes-complete', 'warning-turn-ended', 'notes-timeout', 'context-handoff', 'context-ceiling', 'weighted-budget', 'raw-budget', 'duration', 'telemetry-unavailable'])('uses the same %s evidence in the user notice and durable handoff', (kind) => {
+    const cause = { kind, quantity: 'milliseconds' as const, measured: 600_000, limit: 600_000, forced: kind !== 'warning-turn-ended' && kind !== 'handoff-complete' };
     const usage: HandoffUsage = { reason: kind.startsWith('warning') || kind === 'notes-timeout' ? 'handoff' : 'safety',
       contextTokens: 129_970, weightedUsed: 1_000, handoffTokens: 150_000, stopWeightedTokens: 3_000_000, cause };
     const evidence = describeStopCause(cause);
@@ -26,14 +26,24 @@ describe('independent stop evidence and messages', () => {
     expect(handoffMessage(subject, usage, undefined, files)).toContain(`Budget stop reason: ${usage.reason}`);
   });
 
+  it('does not describe a cooperative return as a forced stop', () => {
+    const cause = { kind: 'handoff-complete' as const, quantity: 'milliseconds' as const, measured: 1, limit: 2, forced: false };
+    const usage: HandoffUsage = { reason: 'handoff', contextTokens: 1, weightedUsed: 1, handoffTokens: 150_000, stopWeightedTokens: 3_000_000, cause };
+    for (const text of [describeStopCause(cause), stopNotice(subject, usage), handoffMessage(subject, usage, undefined, files)]) {
+      expect(text).not.toMatch(/forced stop|did not stop it|interruption notice|Your turn ends immediately/);
+    }
+    expect(describeStopCause({ ...cause, kind: 'duration', forced: true })).toContain('forced stop (legacy)');
+  });
+
   it('retains legacy messages when no additive evidence exists', () => {
     expect(stopNotice(subject, { reason: 'safety', contextTokens: 1, weightedUsed: 3_000_000, handoffTokens: 150_000, stopWeightedTokens: 3_000_000 })).toContain('weighted tokens reached the safety limit');
   });
 
-  it('names every explicit permitted path and requests writing before ending the turn', () => {
+  it('names every explicit permitted path and requests writing notes and a normal return', () => {
     const warning = nearBudgetWarning(130_000, 150_000, '/ws/notes.md', 'task', ['/ws/notes.md', '/ws/worktree/review.md']);
     expect(warning).toContain('/ws/notes.md, /ws/worktree/review.md');
-    expect(warning).toContain('Your turn ends immediately after the notes write');
+    expect(warning).toContain('then return normally');
+    expect(warning).not.toContain('Your turn ends immediately');
     expect(warning).toContain('Read, Write or Edit these paths');
     expect(warning).toContain('Deliverables are optional');
     expect(warning).not.toContain('End your turn now');

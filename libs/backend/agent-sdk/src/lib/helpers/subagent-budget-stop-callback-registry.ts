@@ -14,6 +14,11 @@ export interface SubagentBudgetStopPayload {
 export type SubagentBudgetStopCallback =
   CallbackRegistryCallback<SubagentBudgetStopPayload>;
 
+/**
+ * @deprecated No producer remains: the subagent budget monitor never stops a subagent, so it
+ * never notifies this registry. It stays only because the monitor's constructor still takes it;
+ * remove it together with that parameter.
+ */
 @injectable()
 export class SubagentBudgetStopCallbackRegistry extends CallbackRegistryBase<SubagentBudgetStopPayload> {
   constructor(@inject(TOKENS.LOGGER) logger: Logger) {

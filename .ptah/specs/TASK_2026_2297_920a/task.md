@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_2297_920a
-status: in_progress
+status: in_review
 type: REFACTORING
 title: Replace automatic agent stops with cooperative handoff
 depends_on: []

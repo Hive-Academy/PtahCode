@@ -72,6 +72,7 @@ import { SessionStatsReaderService } from '../session-stats';
 import { SessionStatsOwnerService } from '../session-stats/session-stats-owner.service';
 import { SdkPermissionHandler } from '../sdk-permission-handler';
 import { UnattendedSessionPolicyRegistry } from '../permission/unattended-session-policy.registry';
+import { SessionToolDispositionRegistry } from '../helpers/session-tool-disposition.port';
 import { HostAttentionCoordinator } from '../permission/host-attention-coordinator';
 import { SdkMessageTransformer } from '../sdk-message-transformer';
 import { ClaudeCliDetector } from '../detector/claude-cli-detector';
@@ -367,6 +368,13 @@ export function registerSdkServices(
   container.register(
     SDK_TOKENS.SDK_UNATTENDED_SESSION_POLICY_REGISTRY,
     { useClass: UnattendedSessionPolicyRegistry },
+    { lifecycle: Lifecycle.Singleton },
+  );
+
+  // Resolved optionally by the permission handler, so it must be registered first.
+  container.register(
+    SDK_TOKENS.SDK_SESSION_TOOL_DISPOSITION,
+    { useClass: SessionToolDispositionRegistry },
     { lifecycle: Lifecycle.Singleton },
   );
 
@@ -715,8 +723,6 @@ export function registerSdkServices(
           SDK_TOKENS.SDK_COMPACTION_CONFIG_PROVIDER,
         ),
         {
-          stopSubagent: (sessionId, taskId) =>
-            dispatcher().stopSubagent(sessionId, taskId),
           pushParentMessage: (sessionId, content) =>
             dispatcher().pushParentMessage(sessionId, content),
           postMainThreadNotice: (sessionId, text, onDropped) =>
