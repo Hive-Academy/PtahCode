@@ -3,9 +3,12 @@ import { PHASE_KINDS } from '@ptah-extension/shared';
 import type { SessionUsageTotals, UsageExecutorType } from '@ptah-extension/platform-core';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type { SqliteDatabase } from '../sqlite-connection.service';
+import { ledgerWorkspaceKey } from './ledger-workspace-key';
 
 const safeInteger = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 const text = z.string().min(1);
+/** A caller's workspace spelling, folded to the one key every workspace_key column stores. */
+const workspaceKeyInput = text.transform(ledgerWorkspaceKey);
 export const usagePhaseKindSchema = z.enum(PHASE_KINDS);
 export const usageExecutorTypeSchema: z.ZodType<UsageExecutorType> = z.enum(['sdk-subagent', 'session', 'lane']);
 export type { UsageExecutorType } from '@ptah-extension/platform-core';
@@ -269,9 +272,9 @@ export class SessionStatsRepository {
     if (until <= from) throw new Error('Usage range must be increasing');
     const rows: unknown[] = db.prepare(`SELECT DISTINCT t.repository_id AS repositoryId FROM session_usage_turns t
       LEFT JOIN sessions s ON s.session_id = t.session_id
-      WHERE COALESCE(s.workspace_key, t.workspace_key) = ? AND t.repository_id IS NOT NULL AND t.billable = 1
+      WHERE COALESCE(s.ledger_workspace_key, t.workspace_key) = ? AND t.repository_id IS NOT NULL AND t.billable = 1
       AND t.occurred_at_ms >= ? AND t.occurred_at_ms < ? ORDER BY t.repository_id LIMIT 100`)
-      .all(text.parse(workspaceKey), from, until);
+      .all(workspaceKeyInput.parse(workspaceKey), from, until);
     return rows.map((row) => z.object({ repositoryId: text }).parse(row).repositoryId);
   }
 
@@ -385,7 +388,7 @@ export class SessionStatsRepository {
           input.source,
           input.pricingVersion,
           input.revision,
-          input.workspaceKey ?? null,
+          input.workspaceKey == null ? null : ledgerWorkspaceKey(input.workspaceKey),
           input.host ?? null,
           input.nativeThreadId ?? null,
           input.repositoryId ?? null,
@@ -496,7 +499,7 @@ export class SessionStatsRepository {
         finalized_at_ms, status, input_tokens, output_tokens, cache_read_tokens,
         cache_write_tokens, known_cost_micro_usd, has_unpriced, source,
         pricing_version, revision, updated_at_ms, repository_id, worktree_path, missing_reason)
-      SELECT ?, COALESCE(s.host, MAX(t.host), 'unknown'), COALESCE(s.workspace_key, MAX(t.workspace_key)), ?,
+      SELECT ?, COALESCE(s.host, MAX(t.host), 'unknown'), COALESCE(s.ledger_workspace_key, MAX(t.workspace_key)), ?,
         MIN(t.occurred_at_ms), MAX(t.occurred_at_ms), NULL, 'active',
         COALESCE(SUM(t.input_tokens),0), COALESCE(SUM(t.output_tokens),0), COALESCE(SUM(t.cache_read_tokens),0),
         COALESCE(SUM(t.cache_write_tokens),0), SUM(t.known_cost_micro_usd),
@@ -542,7 +545,7 @@ export class SessionStatsRepository {
       }
       const stats = db.prepare('SELECT * FROM session_stats WHERE session_id = ?').get(first.sessionId);
       if (stats !== undefined) statsRowSchema.parse(stats);
-      const workspaceKey = db.prepare(`SELECT COALESCE(s.workspace_key, MAX(t.workspace_key)) AS workspace_key,
+      const workspaceKey = db.prepare(`SELECT COALESCE(s.ledger_workspace_key, MAX(t.workspace_key)) AS workspace_key,
         MIN(t.occurred_at_ms) AS first_at, MAX(t.occurred_at_ms) AS last_at
         FROM session_usage_turns t LEFT JOIN sessions s ON s.session_id = t.session_id
         WHERE t.session_id = ? AND t.billable = 1`).get(first.sessionId) as { workspace_key: string | null; first_at: number | null; last_at: number | null };
@@ -646,8 +649,8 @@ export class SessionStatsRepository {
     const row: unknown = db
       .prepare(`SELECT st.* FROM session_stats st
         LEFT JOIN sessions s ON s.session_id = st.session_id
-        WHERE st.session_id = ? AND COALESCE(s.workspace_key, st.workspace_key) = ?`)
-      .get(text.parse(sessionId), text.parse(workspaceKey));
+        WHERE st.session_id = ? AND COALESCE(s.ledger_workspace_key, st.workspace_key) = ?`)
+      .get(text.parse(sessionId), workspaceKeyInput.parse(workspaceKey));
     return row === undefined ? null : statsRowSchema.parse(row);
   }
 
@@ -717,17 +720,17 @@ export class SessionStatsRepository {
     const row: unknown = db.prepare(`SELECT 1 AS present FROM session_usage_turns t
       LEFT JOIN sessions s ON s.session_id = t.session_id
       WHERE t.producer = 'codex-checkpoint' AND t.run_id = ?
-        AND COALESCE(s.workspace_key, t.workspace_key) = ?
+        AND COALESCE(s.ledger_workspace_key, t.workspace_key) = ?
         AND t.occurred_at_ms >= ? AND t.occurred_at_ms < ?
       UNION ALL
       SELECT 1 AS present FROM session_usage_turns t
       LEFT JOIN sessions s ON s.session_id = t.session_id
       WHERE t.producer = 'cli-lane' AND t.session_id = ?
         AND t.provider_id IN ('codex', 'openai-codex')
-        AND COALESCE(s.workspace_key, t.workspace_key) = ?
+        AND COALESCE(s.ledger_workspace_key, t.workspace_key) = ?
         AND t.occurred_at_ms >= ? AND t.occurred_at_ms < ? LIMIT 1`)
-      .get(text.parse(nativeThreadId), text.parse(workspaceKey), from, until,
-        text.parse(nativeThreadId), text.parse(workspaceKey), from, until);
+      .get(text.parse(nativeThreadId), workspaceKeyInput.parse(workspaceKey), from, until,
+        text.parse(nativeThreadId), workspaceKeyInput.parse(workspaceKey), from, until);
     return row !== undefined;
   }
 
@@ -749,8 +752,8 @@ export class SessionStatsRepository {
       SUM(known_cost_micro_usd) AS known_cost_micro_usd,
       MAX(known_cost_micro_usd IS NULL) AS has_unpriced
       FROM session_usage_turns t LEFT JOIN sessions s ON s.session_id = t.session_id
-      WHERE t.billable = 1 AND t.session_id = ? AND COALESCE(s.workspace_key, t.workspace_key) = ? AND t.occurred_at_ms >= ? AND t.occurred_at_ms < ?
-      GROUP BY t.model_id ORDER BY t.model_id`).all(id, text.parse(workspaceKey), from, until);
+      WHERE t.billable = 1 AND t.session_id = ? AND COALESCE(s.ledger_workspace_key, t.workspace_key) = ? AND t.occurred_at_ms >= ? AND t.occurred_at_ms < ?
+      GROUP BY t.model_id ORDER BY t.model_id`).all(id, workspaceKeyInput.parse(workspaceKey), from, until);
     return rows.map((row) => sessionModelRowSchema.parse(row));
   }
 
@@ -762,7 +765,7 @@ export class SessionStatsRepository {
     const db = await this.store.ready();
     const row: unknown = db.prepare(`SELECT COUNT(DISTINCT producer || ':' || event_key) AS event_count
       FROM session_usage_turns t LEFT JOIN sessions s ON s.session_id = t.session_id
-      WHERE t.billable = 1 AND t.session_id = ? AND COALESCE(s.workspace_key, t.workspace_key) = ? AND t.occurred_at_ms >= ? AND t.occurred_at_ms < ?`).get(id, text.parse(workspaceKey), from, until);
+      WHERE t.billable = 1 AND t.session_id = ? AND COALESCE(s.ledger_workspace_key, t.workspace_key) = ? AND t.occurred_at_ms >= ? AND t.occurred_at_ms < ?`).get(id, workspaceKeyInput.parse(workspaceKey), from, until);
     return z.object({ event_count: safeInteger }).parse(row).event_count;
   }
 
@@ -771,7 +774,7 @@ export class SessionStatsRepository {
     fromMs: number,
     untilMs: number,
   ): Promise<SessionUsageGroup[]> {
-    const scope = text.parse(workspaceKey);
+    const scope = workspaceKeyInput.parse(workspaceKey);
     const from = safeInteger.parse(fromMs);
     const until = safeInteger.parse(untilMs);
     if (until <= from) throw new Error('Usage range must be increasing');
@@ -788,7 +791,7 @@ export class SessionStatsRepository {
       MAX(t.known_cost_micro_usd IS NULL OR t.input_tokens IS NULL OR t.output_tokens IS NULL OR t.cache_read_tokens IS NULL OR t.cache_write_tokens IS NULL) AS has_unpriced,
       COUNT(DISTINCT t.session_id) AS session_count
       FROM session_usage_turns t LEFT JOIN sessions s ON s.session_id = t.session_id
-      WHERE t.billable = 1 AND COALESCE(s.workspace_key, t.workspace_key) = ? AND t.occurred_at_ms >= ? AND t.occurred_at_ms < ?
+      WHERE t.billable = 1 AND COALESCE(s.ledger_workspace_key, t.workspace_key) = ? AND t.occurred_at_ms >= ? AND t.occurred_at_ms < ?
       GROUP BY day, t.provider_id, t.model_id, t.source, t.cost_authority
       ORDER BY day, t.provider_id, t.model_id, t.source, t.cost_authority
       LIMIT 100001`,
@@ -820,7 +823,7 @@ export class SessionStatsRepository {
   async getWorkspaceCoverage(workspaceKey: string): Promise<SessionUsageCoverage | null> {
     const db = await this.store.ready();
     const row: unknown = db.prepare(`SELECT first_captured_at_ms, last_captured_at_ms
-      FROM session_usage_coverage WHERE workspace_key = ?`).get(text.parse(workspaceKey));
+      FROM session_usage_coverage WHERE workspace_key = ?`).get(workspaceKeyInput.parse(workspaceKey));
     return row === undefined ? null : coverageRowSchema.parse(row);
   }
 
@@ -829,7 +832,7 @@ export class SessionStatsRepository {
     fromMs: number,
     untilMs: number,
   ): Promise<TopUsageSession[]> {
-    const scope = text.parse(workspaceKey);
+    const scope = workspaceKeyInput.parse(workspaceKey);
     const from = safeInteger.parse(fromMs);
     const until = safeInteger.parse(untilMs);
     if (until <= from) throw new Error('Usage range must be increasing');
@@ -839,7 +842,7 @@ export class SessionStatsRepository {
         `WITH eligible AS (
           SELECT t.*, COALESCE(s.name, t.session_id) AS name FROM session_usage_turns t
           LEFT JOIN sessions s ON s.session_id = t.session_id
-          WHERE t.billable = 1 AND COALESCE(s.workspace_key, t.workspace_key) = ? AND t.occurred_at_ms >= ? AND t.occurred_at_ms < ?
+          WHERE t.billable = 1 AND COALESCE(s.ledger_workspace_key, t.workspace_key) = ? AND t.occurred_at_ms >= ? AND t.occurred_at_ms < ?
         ), totals AS (
           SELECT session_id, MAX(name) AS title,
             MAX(occurred_at_ms) AS last_active_ms,
@@ -878,14 +881,14 @@ export class SessionStatsRepository {
     fromMs: number,
     untilMs: number,
   ): Promise<number> {
-    const scope = text.parse(workspaceKey);
+    const scope = workspaceKeyInput.parse(workspaceKey);
     const from = safeInteger.parse(fromMs);
     const until = safeInteger.parse(untilMs);
     if (until <= from) throw new Error('Usage range must be increasing');
     const db = await this.store.ready();
     const row: unknown = db.prepare(`SELECT COUNT(DISTINCT t.session_id) AS session_count
       FROM session_usage_turns t LEFT JOIN sessions s ON s.session_id = t.session_id
-      WHERE t.billable = 1 AND COALESCE(s.workspace_key, t.workspace_key) = ? AND t.occurred_at_ms >= ? AND t.occurred_at_ms < ?`).get(scope, from, until);
+      WHERE t.billable = 1 AND COALESCE(s.ledger_workspace_key, t.workspace_key) = ? AND t.occurred_at_ms >= ? AND t.occurred_at_ms < ?`).get(scope, from, until);
     return z.object({ session_count: safeInteger }).parse(row).session_count;
   }
 
@@ -894,14 +897,14 @@ export class SessionStatsRepository {
     fromMs: number,
     untilMs: number,
   ): Promise<number> {
-    const scope = text.parse(workspaceKey);
+    const scope = workspaceKeyInput.parse(workspaceKey);
     const from = safeInteger.parse(fromMs);
     const until = safeInteger.parse(untilMs);
     if (until <= from) throw new Error('Usage range must be increasing');
     const db = await this.store.ready();
     const row: unknown = db.prepare(`SELECT COUNT(DISTINCT t.session_id || ':' || t.producer || ':' || t.event_key) AS message_count
       FROM session_usage_turns t LEFT JOIN sessions s ON s.session_id = t.session_id
-      WHERE t.billable = 1 AND COALESCE(s.workspace_key, t.workspace_key) = ? AND t.occurred_at_ms >= ? AND t.occurred_at_ms < ?`).get(scope, from, until);
+      WHERE t.billable = 1 AND COALESCE(s.ledger_workspace_key, t.workspace_key) = ? AND t.occurred_at_ms >= ? AND t.occurred_at_ms < ?`).get(scope, from, until);
     return z.object({ message_count: safeInteger }).parse(row).message_count;
   }
 }

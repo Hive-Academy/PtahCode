@@ -703,11 +703,12 @@ describe('SessionStatsRepository', () => {
     try {
       const db = await store.ready();
       db.prepare(
-        `INSERT INTO sessions (session_id, workspace_key, workspace_path, host,
+        `INSERT INTO sessions (session_id, workspace_key, ledger_workspace_key, workspace_path, host,
         name, created_at, last_active_at, summary_json, detail_json, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).run(
         'session-a',
+        '/work/a',
         '/work/a',
         '/work/a',
         'electron',
@@ -948,8 +949,8 @@ describe('SessionStatsRepository', () => {
     const store = openTestStore();
     try {
       store.raw.exec(`INSERT INTO sessions
-        (session_id,workspace_key,host,name,created_at,last_active_at,summary_json,detail_json,updated_at)
-        VALUES ('replayed','/work/a','cli','Replay',1,1,'{}','{}',1)`);
+        (session_id,workspace_key,ledger_workspace_key,host,name,created_at,last_active_at,summary_json,detail_json,updated_at)
+        VALUES ('replayed','/work/a','/work/a','cli','Replay',1,1,'{}','{}',1)`);
       const repository = new SessionStatsRepository(store);
       await repository.recordUsage({ ...contribution, sessionId: 'replayed',
         eventKey: 'replay-only', source: 'replay', producer: 'transcript-replay',

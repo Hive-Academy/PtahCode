@@ -17,7 +17,18 @@ import { OpenCodeSource } from './sources/opencode.source';
 import { GrokSource } from './sources/grok.source';
 import { CliSessionSource } from './cli-session.source';
 import type { UsageSource, UsageContribution, UsageSourceResult } from './usage-source.types';
-import { SessionStatsRepository } from '@ptah-extension/persistence-sqlite';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import {
+  SessionStatsRepository,
+  SessionStoreDatabase,
+  SqliteSessionRecordRepository,
+  type SqliteDatabase,
+} from '@ptah-extension/persistence-sqlite';
+import { normalizeWorkspaceRoot } from '@ptah-extension/shared';
+import type { Logger } from '@ptah-extension/vscode-core';
 
 describe('UsageAnalyticsService', () => {
   afterEach(() => jest.restoreAllMocks());
@@ -445,3 +456,52 @@ describe('UsageAnalyticsService', () => {
   });
 });
 
+
+describe('UsageAnalyticsService ledger workspace key', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'ptah-usage-summary-key-'));
+  });
+  afterEach(() => {
+    jest.restoreAllMocks();
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  it.each([
+    ['Windows', 'C:\\Users\\Dev\\Proj'],
+    ['macOS', '/Users/Dev/Proj'],
+  ])('finds %s usage whose session record and usage rows spell the workspace differently', async (_os, root) => {
+    const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() } as unknown as Logger;
+    const store = new SessionStoreDatabase(join(dir, 'sessions.sqlite'), logger,
+      (file) => new DatabaseSync(file) as unknown as SqliteDatabase);
+    try {
+      const today = Math.floor(Date.now() / 86_400_000) * 86_400_000;
+      // The record keeps the real path; the usage producer writes the shared fold.
+      await new SqliteSessionRecordRepository(store, 'electron').upsert({
+        sessionId: 'session-a', workspacePath: root, name: 'Agy session', createdAt: today,
+        lastActiveAt: today, isChild: false, summary: {}, detail: {},
+      });
+      const repository = new SessionStatsRepository(store);
+      await repository.recordUsage({
+        sessionId: 'session-a', producer: 'provider-session', runId: 'run', turnId: 'turn',
+        eventKey: 'result', modelId: 'gemini', providerId: 'antigravity', occurredAtMs: today,
+        inputTokens: 7, outputTokens: 3, cacheReadTokens: 0, cacheWriteTokens: 0,
+        knownCostMicroUsd: 2_000_000, costAuthority: 'model-priced', source: 'live',
+        pricingVersion: 'v1', revision: 1, workspaceKey: normalizeWorkspaceRoot(root), host: 'electron',
+      });
+      const empty = { contributions: [], status: { sourceId: 'external', status: 'complete' as const } };
+      for (const source of [CodexSource, OpenCodeSource, GrokSource, CliSessionSource]) {
+        jest.spyOn(source.prototype, 'read').mockResolvedValue(empty);
+      }
+      const service = new UsageAnalyticsService({ read: async () => empty },
+        { price: async () => ({ costUsd: null, cacheSavingsUsd: null, costSource: 'unpriced', priceSource: 'unavailable' }) },
+        { warn: jest.fn() }, repository);
+      const summary = await service.summarize({ range: 7 }, root);
+      expect(summary.facts).toEqual([expect.objectContaining({ providerId: 'antigravity', costUsd: 2 })]);
+      expect(summary.sessionCount).toBe(1);
+      expect(summary.topSessions?.map((row) => row.sessionId)).toEqual(['session-a']);
+    } finally {
+      store.close();
+    }
+  });
+});
