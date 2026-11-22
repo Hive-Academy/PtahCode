@@ -108,6 +108,30 @@ Notes:
 
 Root: libs/backend. Line numbers read this session.
 
+
+## B.3 Round 6 (head fa33f7235, after the review fixes): goal still met
+
+Rerun of the two ptah arms on a new Electron build that has the round 6 fixes (caller-root
+validation, git and Node engine hardening). Native arms unchanged (round 4). Isolation proved
+(`hashes-r6-before`, `-after-launch`, `-after-run`: user files equal; the user's app kept its pid).
+Rows: `.ptah/tmp/live-test/stage2-r6.jsonl`.
+
+| arm | correct | calls | weighted tokens | time |
+|---|---|---|---|---|
+| ptah-haiku | 8/8 | 11 | 341k | 166 s |
+| native-haiku (round 4) | 8/8 | 31 | 436k | 441 s |
+| ptah-codex | 7/8 | 33 (9 discovery) | 142k | 713 s |
+| native-codex (round 4) | 5/8 | 26 | 137k | 204 s |
+| ptah-codex, 6 tasks where native was valid | 5/6 | 22 | 98k | 433 s |
+| native-codex, same 6 tasks | 5/6 | 26 | 128k | 187 s |
+
+Notes:
+- Haiku: better than round 5 on every measure (no timeout this round).
+- Codex over all 8 tasks used more calls and 4% more tokens than native, but it answered 2 more
+  tasks correctly (native had 2 sandbox failures). On the 6 tasks valid in both, ptah-codex used
+  fewer calls (22 vs 26) and 23% fewer weighted tokens. Round 5 gave 18 calls and 90k there, so
+  codex varies from run to run (read-range task: 7 calls in round 6).
+- Codex is still slower; it still starts with `ptah_workspace_analyze` (fix in PR #1475).
 ## (a) Task / SDK subagents
 - No host code passes `agents:` / AgentDefinition (grep over libs/backend: no hit in agent-sdk or cli-agent-runtime). Subagents are Claude Code filesystem agents (`.claude/agents/*.md`) or built-ins.
 - Main chat loads them via `settingSources`: `['user','project','local']`, or `['project','local']` on a localhost proxy (agent-sdk/.../sdk-query-options-builder.ts:1597-1601); named accounts use certified sources. Lanes/Ptah CLI: `['user','project','local']` (cli-agent-runtime/.../claude-sdk-lane-options.ts:268-270; ptah-cli-spawn-options.service.ts:426).
