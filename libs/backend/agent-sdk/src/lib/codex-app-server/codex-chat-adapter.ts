@@ -61,6 +61,7 @@ import { CodexChatPeerQueue } from './codex-chat-peer-queue';
 import { SessionAdmissionRefusedError } from '../errors/session-admission-refused.error';
 import {
   CodexSessionUsageOwner,
+  type CodexTurnDuration,
   type CodexUsageCheckpoint,
 } from './codex-session-usage-owner';
 
@@ -74,11 +75,14 @@ export interface CodexChatMetadataPort {
   completedTurn?(sessionId: SessionId): Promise<void>;
   readUsage?(sessionId: SessionId): Promise<{
     checkpoint?: unknown;
+    /** Turn time stored beside the checkpoint; absent on older rows. */
+    duration?: unknown;
     messageCount: number;
   }>;
   persistUsage?(
     sessionId: SessionId,
     checkpoint: CodexUsageCheckpoint,
+    duration?: CodexTurnDuration,
   ): Promise<void>;
 }
 
@@ -445,6 +449,8 @@ export class CodexChatAdapter implements NativeChatAdapter {
               context.identity.threadId,
               savedUsage.checkpoint,
             );
+      if (usageOwner.isRestoredCheckpoint())
+        usageOwner.restoreDuration(savedUsage?.duration);
       if (
         readUsageFailed ||
         (resumeId && savedUsage?.checkpoint === undefined)
@@ -929,12 +935,12 @@ export class CodexChatAdapter implements NativeChatAdapter {
           this.ports.metadata.completedTurn?.(id) ?? Promise.resolve(),
         callbacks: (id, turn) => this.ports.callbacks(id, turn),
         stats: (result) => this.stats?.(result),
-        persistUsage: (id, checkpoint) => {
+        persistUsage: (id, checkpoint, duration) => {
           // An unreadable checkpoint may contain threads absent from this owner.
           if (this.usagePersistenceDisabled.has(session.usageOwner))
             return Promise.resolve();
           if (this.ports.metadata.persistUsage) {
-            return this.ports.metadata.persistUsage(id, checkpoint);
+            return this.ports.metadata.persistUsage(id, checkpoint, duration);
           }
           // Optional capability: this host has no durable usage store.
           if (!this.missingUsageStoreReported) {

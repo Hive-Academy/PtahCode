@@ -13,11 +13,12 @@ export function createCodexChatMetadataPort(
         const row = await usageStore.get(sessionId);
         return {
           checkpoint: row?.codexUsageCheckpoint,
+          duration: row?.codexTurnDuration,
           messageCount: row?.codexMessageCount ?? 0,
         };
       },
-      persistUsage: (sessionId, checkpoint) =>
-        usageStore.updateCodexUsageCheckpoint(sessionId, checkpoint),
+      persistUsage: (sessionId, checkpoint, duration) =>
+        usageStore.updateCodexUsageCheckpoint(sessionId, checkpoint, duration),
     } satisfies Pick<CodexChatMetadataPort, 'readUsage' | 'persistUsage'> : {}),
     completedTurn: (sessionId) => store.incrementCodexMessageCount(sessionId),
     save: (sessionId, identity, title) => {

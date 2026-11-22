@@ -404,6 +404,8 @@ export class SessionHistoryReaderService {
             raw.rootThreadId,
             raw,
           );
+          if (owner.isRestoredCheckpoint())
+            owner.restoreDuration(metadata.codexTurnDuration);
           if (owner.getDiagnostics().length) {
             // Use the same legacy totals as the sidebar.
             this.logger.warn(

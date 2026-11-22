@@ -27,6 +27,7 @@ import { SessionApprovalRouter } from './session-approval-router';
 import { SessionTurnStateRegistry } from '../helpers/session-turn-state.registry';
 import {
   CodexSessionUsageOwner,
+  type CodexTurnDuration,
   type CodexUsageCheckpoint,
 } from './codex-session-usage-owner';
 import { codexUsageCheckpointSchema } from './codex-session-usage-owner';
@@ -125,7 +126,7 @@ function setup(
   };
   const persistUsage = jest.fn<
     Promise<void>,
-    [SessionId, CodexUsageCheckpoint]
+    [SessionId, CodexUsageCheckpoint, CodexTurnDuration?]
   >(async () => undefined);
   const lifecycle = { opened: jest.fn(), closed: jest.fn() };
   const scope = container.createChildContainer();
@@ -294,11 +295,19 @@ describe('Codex chat turn lifecycle', () => {
       first.persistUsage.mock.lastCall?.[1],
     );
     expect(checkpoint.pricing?.basis).toBe('estimated');
+    // Turn time is persisted beside the strict checkpoint, never inside it.
+    expect(checkpoint).not.toHaveProperty('duration');
+    expect(first.persistUsage.mock.lastCall?.[2]).toMatchObject({
+      completedMs: 0, turnId: 'turn',
+    });
     await first.adapter.dispose();
 
     translator.setThreadModel(id, 'gpt-4o-mini');
     translator.setTurnModel(id, 'turn-2', 'gpt-4o-mini');
     const second = setup('chat', 'subscription', 'gpt-4o-mini', checkpoint);
+    second.ports.metadata.readUsage = jest.fn(async () => ({
+      checkpoint, duration: { completedMs: 60_000, turnMs: 0 }, messageCount: 0,
+    }));
     second.context.startTurn.mockResolvedValue({
       threadId: id,
       turnId: 'turn-2',
@@ -322,6 +331,8 @@ describe('Codex chat turn lifecycle', () => {
       },
     });
     expect(result?.turnCost).toBeGreaterThan(0);
+    // The restored turn time carries into the resumed session's Time.
+    expect(result?.sessionStats.durationMs).toBeGreaterThanOrEqual(60_000);
     const saved = codexUsageCheckpointSchema.parse(
       second.persistUsage.mock.lastCall?.[1],
     );

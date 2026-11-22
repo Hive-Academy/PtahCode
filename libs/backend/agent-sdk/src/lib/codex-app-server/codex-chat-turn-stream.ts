@@ -14,7 +14,7 @@ import type {
   SessionId,
 } from '@ptah-extension/shared';
 import { calculateExactMessageCost, resolveContextCapacity } from '@ptah-extension/shared';
-import type { CodexSessionUsageOwner, CodexUsageCheckpoint } from './codex-session-usage-owner';
+import type { CodexSessionUsageOwner, CodexTurnDuration, CodexUsageCheckpoint } from './codex-session-usage-owner';
 import type {
   CodexChatAdapterPorts,
   CodexChatScope,
@@ -104,7 +104,11 @@ interface CodexChatTurnDependencies {
   completedTurn(id: SessionId): Promise<void>;
   callbacks: CodexChatAdapterPorts['callbacks'];
   stats: Parameters<IAgentAdapter['setResultStatsCallback']>[0];
-  persistUsage(id: SessionId, checkpoint: CodexUsageCheckpoint): Promise<void>;
+  persistUsage(
+    id: SessionId,
+    checkpoint: CodexUsageCheckpoint,
+    duration?: CodexTurnDuration,
+  ): Promise<void>;
   interrupt(id: SessionId): Promise<boolean>;
   close(session: CodexChatSession): Promise<void>;
   notifyCompaction(session: CodexChatSession, trigger: 'auto'): void;
@@ -206,6 +210,9 @@ export async function* streamCodexChatTurn(
       const usage = result.usage;
       if (turnTerminalObserved && !turnUsageObserved)
         session.usageOwner.markMissingEvidence();
+      // Codex Time is wall time per turn (approval waits included).
+      const elapsed = Date.now() - started;
+      session.usageOwner.recordTurnDuration(receipt.turnId, elapsed);
       const lifetime = session.usageOwner.snapshot(session.messageCount);
       const checkpoint = session.usageOwner.serialize();
       const turnTokens = {
@@ -241,7 +248,11 @@ export async function* streamCodexChatTurn(
       }
       const lifetimePrice = session.usageOwner.lifetimePrice();
       try {
-        await deps.persistUsage(session.id, session.usageOwner.serialize());
+        await deps.persistUsage(
+          session.id,
+          session.usageOwner.serialize(),
+          session.usageOwner.serializeDuration(),
+        );
       } catch (error) {
         deps.logger.error(
           '[CodexChatAdapter] Native usage checkpoint persistence failed.',
@@ -289,7 +300,7 @@ export async function* streamCodexChatTurn(
             ? { costUnavailableReason: 'rate-missing' as const } : {}),
         },
         tokens,
-        duration: Date.now() - started,
+        duration: elapsed,
         ...(model && contextCapacity
           ? {
               // The same per-model row the Claude path sends, from native
@@ -570,6 +581,10 @@ export async function* streamCodexChatTurn(
   } finally {
     clearTimeout(backgroundTimer);
     finishCompaction?.();
+    // Every admitted turn exit counts its wall time, including a cancel or a
+    // failure that never reached publishStats; the next persist stores it.
+    if (admitted && session.turnId)
+      session.usageOwner.recordTurnDuration(session.turnId, Date.now() - started);
     // A consumer can detach between message_complete and its settlement event.
     if (terminal) settleTurn();
     if (session.turnId) session.sink.endTurn(session.id, session.turnId);

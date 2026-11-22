@@ -43,6 +43,45 @@ describe('CodexSessionUsageOwner', () => {
     });
   });
 
+  it('reports the session duration in the snapshot and keeps it across restore', () => {
+    const owner = new CodexSessionUsageOwner(SESSION, ROOT);
+    owner.accept(evidence(ROOT, 'turn-1', totals(10, 2), { terminalState: 'completed' }));
+    expect(owner.snapshot().durationMs).toBeNull();
+    owner.recordTurnDuration('turn-1', 1_000);
+    // A turn that publishes stats twice counts its time once.
+    owner.recordTurnDuration('turn-1', 1_500);
+    owner.recordTurnDuration('turn-2', 2_000);
+    expect(owner.snapshot().durationMs).toBe(3_500);
+    const restored = CodexSessionUsageOwner.restore(SESSION, ROOT, owner.serialize());
+    restored.restoreDuration(owner.serializeDuration());
+    expect(restored.isRestoredCheckpoint()).toBe(true);
+    expect(restored.snapshot().durationMs).toBe(3_500);
+    restored.recordTurnDuration('turn-3', 500);
+    expect(restored.snapshot().durationMs).toBe(4_000);
+  });
+
+  it('keeps turn time out of the strict version-2 checkpoint shape', () => {
+    const owner = new CodexSessionUsageOwner(SESSION, ROOT);
+    owner.accept(evidence(ROOT, 'turn-1', totals(10, 2), { terminalState: 'completed' }));
+    owner.recordTurnDuration('turn-1', 1_000);
+    const checkpoint = owner.serialize();
+    expect(checkpoint).not.toHaveProperty('duration');
+    // A checkpoint carrying an unknown key is what an older build rejects.
+    expect(codexUsageCheckpointSchema.safeParse(checkpoint).success).toBe(true);
+  });
+
+  it('ignores an invalid turn time and treats a missing record as unknown', () => {
+    const owner = new CodexSessionUsageOwner(SESSION, ROOT);
+    owner.recordTurnDuration('turn-1', Number.NaN);
+    owner.recordTurnDuration('turn-1', -5);
+    expect(owner.snapshot().durationMs).toBeNull();
+    const restored = CodexSessionUsageOwner.restore(SESSION, ROOT, owner.serialize());
+    restored.restoreDuration(undefined);
+    restored.restoreDuration({ completedMs: -1, turnMs: 0 });
+    expect(restored.isRestoredCheckpoint()).toBe(true);
+    expect(restored.snapshot().durationMs).toBeNull();
+  });
+
   it('restores an API-key price as an estimate', () => {
     const owner = new CodexSessionUsageOwner(SESSION, ROOT);
     owner.accept(evidence(ROOT, 'turn-1', totals(7_435, 7, 12_672), {
