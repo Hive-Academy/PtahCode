@@ -42,3 +42,9 @@ two Major findings:
    decision by the nav owner: keep literal semantics for existing callers, or accept it and
    document it.
 The nav branch moved to 4c0689842 (docs only); not merged here.
+
+## Batch 5 report (to parent)
+- vscode-lm-tools gate passed for 2086f0675. Pushed 2086f0675 and 3c83c5724 to PR #1475.
+- Posted a PR comment on the ptah_grep pattern finding. Updated the PR body.
+- Open: the nav-owned regex inference finding (nav/grep-engine.ts:110,142, nav/grep.ts:491) needs the nav owner.
+- CI does not run until the PR retargets main.
