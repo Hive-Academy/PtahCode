@@ -18,6 +18,13 @@ export type SessionEndCause =
   | 'workspace-close'
   | 'compaction-abort'
   | 'no-activity-timeout'
+  /**
+   * The provider sent no response inside a confirmed open turn (TASK_2026_2297_920a P2).
+   * Replaces `no-activity-timeout` for new watchdog ends; the old value stays decodable.
+   */
+  | 'provider-no-response'
+  /** The provider input channel closed mid-turn; the turn was ended for recovery. */
+  | 'provider-input-closed'
   | 'host-shutdown'
   | 'unknown';
 
