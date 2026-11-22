@@ -58,3 +58,9 @@ export {
   createGrokSessionUsageReader,
   type GrokCommandRunner,
 } from './readers/grok-session-usage.reader';
+// Antigravity (agy) sign-in presence: shared by the agy lane adapter and the
+// plan-usage CLI source, so one keyring query answers both.
+export {
+  readCachedAgySignIn,
+  type AgySignInState,
+} from './readers/antigravity-sign-in';

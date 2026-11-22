@@ -938,6 +938,42 @@ describe('buildStatsLimitViewModel', () => {
     });
   });
 
+  describe('session owner status reason (issue 1459)', () => {
+    const AGY = owner('antigravity', 'cli-store', 'dddddddddddddddd', 'Antigravity account');
+
+    it('names the typed reason in the dashboard words, never the raw status', () => {
+      const vm = buildStatsLimitViewModel(input({
+        sessionOwnerKey: AGY.key,
+        owners: [snapshot(AGY, {
+          status: 'service-unavailable', statusReason: 'cli-not-found',
+          windowSetEstablished: false, windows: [],
+        })],
+      }));
+      expect(vm.planTiles).toEqual([expect.objectContaining({
+        value: 'Unavailable',
+        detailLines: ['Antigravity CLI (agy) not found',
+          'Plan usage could not be read: Antigravity CLI (agy) not found.'],
+      })]);
+      expect(JSON.stringify(vm.planTiles)).not.toContain('service-unavailable');
+    });
+
+    it('uses the neutral label for another provider and a status sentence without a reason', () => {
+      const timedOut = buildStatsLimitViewModel(input({
+        owners: [snapshot(CLAUDE_A, {
+          status: 'service-unavailable', statusReason: 'cli-timeout',
+          windowSetEstablished: false, windows: [],
+        })],
+      }));
+      expect(timedOut.planTiles[0].detailLines).toContain(
+        'Plan usage could not be read: Usage read did not respond in time.');
+      const bare = buildStatsLimitViewModel(input({
+        owners: [snapshot(CLAUDE_A, { status: 'service-unavailable', windowSetEstablished: false, windows: [] })],
+      }));
+      expect(bare.planTiles[0].detailLines).toContain(
+        'Plan usage could not be read: The usage service is unavailable.');
+    });
+  });
+
   describe('lane notes and face', () => {
     it('model-scope-unknown and estimated-limit are informational notes', () => {
       const codex = snapshot(CODEX, {

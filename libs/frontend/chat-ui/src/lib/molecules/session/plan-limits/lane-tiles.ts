@@ -30,6 +30,8 @@ import {
   evidenceLine,
   evidenceSources,
   PLAN_EMPTY,
+  planStatusSentence,
+  planUnavailableCause,
   windowChip,
   windowDetail,
   type SessionPlan,
@@ -452,17 +454,6 @@ function lastKnownFace(
  * last-known evidence (`showsLastKnownEvidence`), never a live failure; a
  * same-owner status is on the plan tiles.
  */
-function humanStatus(status: string): string {
-  const sentences = new Map([
-    ['unsupported-config', 'This configuration does not support plan usage'],
-    ['provider-unsupported', 'This provider does not report plan usage'],
-    ['cli-unavailable', 'The CLI is unavailable'],
-    ['cli-version-unsupported', 'This CLI version does not support plan usage'],
-    ['service-unavailable', 'The usage service is unavailable'],
-  ]);
-  return sentences.get(status) ?? 'The latest usage could not be retrieved';
-}
-
 function ownerStatusNote(
   snapshot: PlanLimitOwnerSnapshot | undefined,
   same: boolean,
@@ -519,7 +510,7 @@ function ownerStatusNote(
     case 'service-unavailable':
       return {
         tone: 'neutral',
-        text: `${PLAN_EMPTY.usage}: ${humanStatus(snapshot.status)}`,
+        text: `${PLAN_EMPTY.usage}: ${planUnavailableCause(snapshot)}`,
       };
     default: {
       // Compile-time exhaustiveness only: a new ProviderAccountUsageStatus
@@ -530,7 +521,7 @@ function ownerStatusNote(
       const unhandled: never = snapshot.status;
       return {
         tone: 'neutral',
-        text: `${PLAN_EMPTY.usage}: ${humanStatus(unhandled)}`,
+        text: `${PLAN_EMPTY.usage}: ${planStatusSentence(unhandled)}`,
       };
     }
   }

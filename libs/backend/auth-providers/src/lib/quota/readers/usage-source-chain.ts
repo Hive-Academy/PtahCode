@@ -16,7 +16,7 @@ const FAILURE_RANK: Record<UsageFailureReason, number> = {
   'cli-unavailable': 1, 'no-local-server': 2, 'no-oauth': 3,
   'usage-auth-rejected': 3, 'balance-auth-rejected': 3,
   'balance-unavailable': 3, 'prepaid-balance-unavailable': 3, 'usage-budget-exhausted': 3,
-  'api-key-no-subscription-quota': 3, 'source-not-applicable': 99,
+  'api-key-no-subscription-quota': 3, 'no-usage-windows': 3, 'source-not-applicable': 99,
 };
 function rank(reason: UsageFailureReason): number { return FAILURE_RANK[reason]; }
 

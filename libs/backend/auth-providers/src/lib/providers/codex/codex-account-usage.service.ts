@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import { inject, injectable } from 'tsyringe';
 import type {
@@ -8,6 +9,7 @@ import type { PlanLimitWindow, QuotaOwnerRef } from '@ptah-extension/shared';
 import { Logger, TOKENS } from '@ptah-extension/vscode-core';
 import {
   CODEX_INITIALIZE_TIMEOUT_MS,
+  codexAccountIdentityDigest,
   normalizeCodexHomeKey,
   type CodexSelectionSnapshotPort,
   type CodexAccountUsageClient,
@@ -42,6 +44,44 @@ const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_LINE_BYTES = 1024 * 1024;
 const LIVE_REFRESH_MIN_INTERVAL_MS = 1_000;
 const MAX_RELEASED_LIVE_CONTEXTS = 256;
+
+/**
+ * The canonical `openai-codex#account:<fp>` owner key over the shared Codex
+ * identity digest. The legacy App Server read and the shared usage client
+ * both resolve through it, so one account keeps one key whichever answered.
+ */
+export function codexOwnerKey(
+  home: string,
+  identity: Parameters<typeof codexAccountIdentityDigest>[1],
+): string | null {
+  let normalizedHome: string;
+  try {
+    normalizedHome = normalizeCodexHomeKey(home, process.platform);
+  } catch {
+    // degradation-audit: optional-capability - an unnormalizable home names no account; the owner stays unresolved.
+    return null;
+  }
+  const digest = codexAccountIdentityDigest(normalizedHome, identity);
+  return digest ? accountOwnerKey('openai-codex', digest) : null;
+}
+
+/** Comparison-only digest of the signed-in account; never stored as an owner. */
+function signedInDigest(account: {
+  readonly email?: string | null;
+  readonly planType?: string;
+}): string {
+  const email = account.email?.trim().toLowerCase() ?? '';
+  const material = `chatgpt\0${email}\0${account.planType ?? ''}`;
+  return createHash('sha256').update(material, 'utf8').digest('hex');
+}
+
+function coreOwnerKey(
+  client: CodexAccountUsageClient,
+  home: string,
+): string | null {
+  const digest = client.currentAccountDigest(home);
+  return digest ? accountOwnerKey('openai-codex', digest) : null;
+}
 
 class AppServerError extends Error {
   constructor(readonly kind: 'cli' | 'unavailable' | 'method') {
@@ -138,6 +178,14 @@ export class CodexAccountUsageService implements ICodexAccountUsageService {
   private cached: CodexAccountUsageResult | null = null;
   private ownerKey: string | null = null;
   /**
+   * Digest of what `account/read` says about the signed-in account (type,
+   * email, plan). It detects an account switch before quota is read, including
+   * a same-email personal to team switch, which changes the plan.
+   */
+  private signedInKey: string | null = null;
+  /** `ownerKey` came from a rate-limits account id; a later read without one keeps it. */
+  private ownerFromAccountId = false;
+  /**
    * Bumped by `clearCache`. A read that started before the bump finishes for
    * its own callers but is not cached, so an account change (auth file
    * rewritten mid-read) never re-installs the previous account's data or key.
@@ -185,7 +233,8 @@ export class CodexAccountUsageService implements ICodexAccountUsageService {
     this.liveClosed = false;
     this.releasedLiveContexts.clear();
     this.cached = null;
-    this.ownerKey = null;
+    // The owner key stays: both readers derive it from the same identity
+    // digest, so attaching the shared client does not change the account.
     this.generation += 1;
     this.readInFlight = null;
     this.lastMiss = null;
@@ -222,6 +271,7 @@ export class CodexAccountUsageService implements ICodexAccountUsageService {
     if (kind === 'explicit') return;
     this.cached = null;
     this.ownerKey = null;
+    this.ownerFromAccountId = false;
     this.generation += 1;
     // Later callers start a fresh read instead of joining one begun before the change.
     this.readInFlight = null;
@@ -232,7 +282,7 @@ export class CodexAccountUsageService implements ICodexAccountUsageService {
     const kind = this.homeKind(home);
     if (kind === 'invalid') return null;
     if (this.coreClient) {
-      const coreKey = this.coreClient.currentOwnerKey(home ?? this.codexHome.path);
+      const coreKey = coreOwnerKey(this.coreClient, home ?? this.codexHome.path);
       return kind === 'default' ? coreKey ?? this.ownerKey : coreKey;
     }
     if (home !== undefined && kind === 'explicit') return null;
@@ -365,7 +415,7 @@ export class CodexAccountUsageService implements ICodexAccountUsageService {
       cached.fetchedAt === undefined
     )
       return null;
-    const ownerKey = client.currentOwnerKey(home);
+    const ownerKey = coreOwnerKey(client, home);
     if (!ownerKey || (context.ownerKey && context.ownerKey !== ownerKey))
       return null;
     context.ownerKey = ownerKey;
@@ -400,7 +450,7 @@ export class CodexAccountUsageService implements ICodexAccountUsageService {
       this.liveClosed ||
       this.liveContexts.get(update.contextId) !== context ||
       result.fetchedAt === undefined ||
-      client.currentOwnerKey(home) !== ownerKey
+      coreOwnerKey(client, home) !== ownerKey
     )
       return null;
     const reading = mapCodexAccountUsage(result, result.fetchedAt);
@@ -518,19 +568,35 @@ export class CodexAccountUsageService implements ICodexAccountUsageService {
           ownerKey: null,
         };
       }
-      // The email is identity material only: hashed here, never returned or logged.
-      const email = account.account.email?.trim();
-      const ownerKey = email
-        ? accountOwnerKey('openai-codex', `${this.codexHome.path}\0${email}`)
-        : null;
-      if (generation === this.generation && this.ownerKey !== ownerKey) {
+      // A different signed-in account drops the previous account's cache and
+      // owner first, so a failed quota read cannot serve its data as this one.
+      const signedInKey = signedInDigest(account.account);
+      if (generation === this.generation && this.signedInKey !== signedInKey) {
         this.cached = null;
-        this.ownerKey = ownerKey;
+        this.ownerKey = null;
+        this.ownerFromAccountId = false;
+        this.signedInKey = signedInKey;
       }
       stage = 'rate-limits';
       const quota = codexRateLimitsResponseSchema.parse(
         await rpc.request(3, 'account/rateLimits/read'),
       );
+      // Account id and email are identity material only: hashed, never returned or logged.
+      // The optional id, once it named this account, stays its owner material.
+      const accountId = quota.accountId?.trim();
+      const keepIdOwner =
+        !accountId && this.ownerFromAccountId && this.ownerKey !== null;
+      const ownerKey = keepIdOwner
+        ? this.ownerKey
+        : codexOwnerKey(this.codexHome.path, {
+            accountId,
+            email: account.account.email,
+          });
+      if (generation === this.generation) {
+        if (this.ownerKey !== ownerKey) this.cached = null;
+        this.ownerKey = ownerKey;
+        this.ownerFromAccountId = !!accountId || keepIdOwner;
+      }
       const limits = quota.rateLimitsByLimitId?.['codex'] ?? quota.rateLimits;
       let activity:
         ReturnType<typeof codexTokenUsageResponseSchema.parse> | undefined;

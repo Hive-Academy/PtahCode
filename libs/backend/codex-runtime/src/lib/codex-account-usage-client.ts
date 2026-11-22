@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { normalizeCodexHomeKey } from './codex-home-path';
+import { codexAccountIdentityDigest } from './codex-account-identity';
 import type { CodexExecutionProfile } from './codex-runtime.types';
 import type { IDisposable } from '@ptah-extension/platform-core';
 import type {
@@ -20,6 +21,8 @@ import {
 
 const PROVIDER = 'openai-codex';
 const CACHE_MS = 30_000;
+/** The `account/read` identity fallback may not hold a fetched quota longer than this. */
+const IDENTITY_TIMEOUT_MS = 3_000;
 const MISS_MS = 30_000;
 const LIMITS_UPDATED =
   'account/rateLimits/updated' satisfies CodexNotificationMethod;
@@ -35,13 +38,50 @@ interface HomeState {
   generation: number;
   watcher?: IDisposable;
   cached?: CodexAccountUsageResult;
-  ownerKey?: string;
+  accountDigest?: string;
+  /**
+   * The digest came from a rate-limits `accountId`. It then stays the owner
+   * for this home until the auth file changes (clearCache), even when a later
+   * read omits the optional id, so one account never alternates keys.
+   */
+  accountDigestFromId?: boolean;
   miss?: { readonly at: number; readonly result: CodexAccountUsageResult };
   flight?: Flight;
 }
 
 function unavailable(): CodexAccountUsageResult {
   return { status: 'service-unavailable', providerId: PROVIDER };
+}
+
+/**
+ * The ChatGPT email of the signed-in account, for a rate-limits read that
+ * names no account id. Identity only: an unreadable account leaves the owner
+ * unresolved and never fails the usage read itself.
+ */
+async function accountEmail(
+  child: CodexAppServerProcess,
+  timeoutMs: number,
+): Promise<string | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    // A hung identity call must not hold the fetched quota; closing the child
+    // afterwards abandons the request.
+    const read = await Promise.race([
+      child.request('account/read', { refreshToken: false }),
+      new Promise<undefined>((resolveTimeout) => {
+        timer = setTimeout(() => resolveTimeout(undefined), timeoutMs);
+        timer.unref?.();
+      }),
+    ]);
+    return read?.account?.type === 'chatgpt'
+      ? (read.account.email ?? undefined)
+      : undefined;
+  } catch {
+    // degradation-audit: optional-capability - the owner stays unresolved; quota from the same read still publishes.
+    return undefined;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 function abortError(): Error {
@@ -309,6 +349,7 @@ export class CodexAccountUsageClient {
       handlers: CodexAppServerHandlers,
     ) => CodexAppServerProcess,
     private readonly now: () => number = Date.now,
+    private readonly identityTimeoutMs = IDENTITY_TIMEOUT_MS,
   ) {}
 
   async read(
@@ -365,18 +406,23 @@ export class CodexAccountUsageClient {
     if (!state) return;
     state.generation++;
     state.cached = undefined;
-    state.ownerKey = undefined;
+    state.accountDigest = undefined;
+    state.accountDigestFromId = undefined;
     state.miss = undefined;
     const flight = state.flight;
     state.flight = undefined;
     flight?.controller.abort();
   }
 
-  /** Opaque, per-home identity only. Raw server account identifiers never escape. */
-  currentOwnerKey(home: string): string | null {
+  /**
+   * The last read's {@link codexAccountIdentityDigest} for this home: opaque
+   * identity material the quota layer turns into the canonical owner key.
+   * Raw server account identifiers never escape.
+   */
+  currentAccountDigest(home: string): string | null {
     return (
-      this.homes.get(normalizeCodexHomeKey(home, process.platform))?.ownerKey ??
-      null
+      this.homes.get(normalizeCodexHomeKey(home, process.platform))
+        ?.accountDigest ?? null
     );
   }
 
@@ -425,7 +471,8 @@ export class CodexAccountUsageClient {
       if (!current()) return unavailable();
       if (eligibility !== 'supported') {
         state.cached = undefined;
-        state.ownerKey = undefined;
+        state.accountDigest = undefined;
+        state.accountDigestFromId = undefined;
         state.miss = undefined;
         return { status: eligibility, providerId: PROVIDER };
       }
@@ -464,16 +511,25 @@ export class CodexAccountUsageClient {
       )
         return unavailable();
       const response = await child.request('account/rateLimits/read', {});
+      const accountId = response.accountId?.trim();
+      // The protocol makes accountId optional. Once an id named this home's
+      // owner, keep it; otherwise account/read's email names the owner.
+      const keepIdOwner =
+        !accountId && state.accountDigestFromId === true && !!state.accountDigest;
+      const email =
+        accountId || keepIdOwner || !current()
+          ? undefined
+          : await accountEmail(child, this.identityTimeoutMs);
       // Complete process cleanup before publishing a result into the cache.
       await child.close();
       if (!current()) return unavailable();
-      const owner =
-        response.accountId == null
-          ? undefined
-          : `${PROVIDER}#account:${createHash('sha256').update(`${home}\0${response.accountId}`).digest('hex')}`;
+      const digest = keepIdOwner
+        ? state.accountDigest
+        : codexAccountIdentityDigest(home, { accountId, email });
       const result = usageResult(response, this.now());
       state.cached = result;
-      state.ownerKey = owner;
+      state.accountDigest = digest ?? undefined;
+      state.accountDigestFromId = !!accountId || keepIdOwner;
       state.miss = undefined;
       return result;
     } catch {

@@ -260,7 +260,7 @@ export class PlanUsageService {
           return sessionless ? failed : live;
         }
       },
-      'openai-codex': createCodexPlanUsageReader(codexUsage, now),
+      'openai-codex': createCodexPlanUsageReader(codexUsage, now, undefined, undefined, logger),
       'ollama-cloud': createOllamaCloudPlanUsageReader(logger, now),
       antigravity: createAntigravityPlanUsageReader(logger, now),
       opencode: createOpenCodeLocalUsageReader(logger, now),
