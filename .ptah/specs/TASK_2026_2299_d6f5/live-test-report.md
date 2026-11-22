@@ -59,6 +59,51 @@ Facts are in appendix 3. This is a plan only. Nothing was started.
 
 ---
 
+# Part B: stage 2 benchmark (8 navigation tasks, isolated test instance)
+
+Raw rows: `.ptah/tmp/live-test/stage2-results.jsonl` (round 5 rows also in `stage2-r5.jsonl`).
+Weighted tokens = new input + 1.25 x cache write + 0.1 x cache read + output (codex: no cache
+write; `input_tokens` includes cached input). Native arms are from round 4 (native tools did not
+change). Isolation proved before launch, after launch and after the run (`hashes-r5-*.txt`).
+
+## B.1 Round 4 (head 569011f8e): goal not met
+
+| arm | correct | calls | tool-result chars |
+|---|---|---|---|
+| ptah-haiku | 8/8 | 38 | 138k |
+| native-haiku | 8/8 | 31 | 172k |
+| ptah-codex | 4/8 | 28 (8 discovery) | 195k |
+| native-codex | 5/8 (2 runs invalid: sandbox) | 26 | 177k |
+
+Causes: `regex` default false (`a|b` found nothing), flat outline without class members,
+`ptah_workspace_analyze` "use FIRST", cold symbol index.
+
+## B.2 Round 5 (head 5dbf8ce3f): goal met for both models
+
+Changes: regex inference, inline enclosing bodies in ptah_grep, class members in the outline,
+batched embeddings.
+
+| arm | correct | calls | chars | weighted tokens | time |
+|---|---|---|---|---|---|
+| ptah-haiku | 8/8 | 12 | 25k | 367k | 392 s |
+| native-haiku | 8/8 | 31 | 172k | 436k | 441 s |
+| ptah-codex | 7/8 | 26 (9 discovery) | 219k | 125k | 577 s |
+| native-codex | 5/8 | 26 | 177k | 137k | 204 s |
+| ptah-codex, 6 tasks where native was valid | 5/6 | 18 | 135k | 90k | 454 s |
+| native-codex, same 6 tasks | 5/6 | 26 | 177k | 128k | 187 s |
+
+Notes:
+- One ptah-haiku run (concept-clamp-read-tail) timed out with 0 calls (the model did not
+  start); the retry passed with 1 call. The table uses the retry.
+- The codex WRONG in both arms is usages-symbol-pending-permission-count: both miss
+  `permission.types.ts` (strict scoring).
+- Codex is slower: each codex run starts its lane through one extra haiku turn, and codex still
+  calls `ptah_workspace_analyze` first in 2 tasks. The new description (PR #1475) is not in this
+  build. Discovery output is most of the codex chars.
+- The new index run went at 0.37-0.75 files/s; the store kept 49,646 symbols from the earlier
+  run, so search was warm. Skip-unchanged indexing is a follow-up
+  (`followup-index-skip-unchanged.md`).
+
 # Appendix 1: subagents, child sessions, server instructions
 
 Root: libs/backend. Line numbers read this session.
