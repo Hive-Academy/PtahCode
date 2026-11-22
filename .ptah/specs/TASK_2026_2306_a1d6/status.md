@@ -29,3 +29,16 @@ Pushed refactor/tool-guidance-single-source and opened PR #1475
 The body records: degradation-audit:lint item (fixed on the nav branch), item 7 open, the
 pre-existing account-binding failure, and the expected ptah_grep budget/snapshot merge conflict.
 CI watch is running (`gh pr checks 1475 --watch`, log .ptah/tmp/ci-watch.log).
+
+# Status (batch 4)
+
+PR #1475 at 8cf45a905 (fenced-heading fix, review thread resolved). The bot review on 0be87307a had
+two Major findings:
+1. Pattern text "literal unless regex is true" was stale (my file). Fixed in the next commit
+   (pattern text now matches the regex inference rule; snapshot updated).
+2. NOT FIXED here, belongs to the nav work: implicit regex inference turns a literal unspaced
+   `a|b` (regex omitted) into alternation (nav/grep-engine.ts:110, :142; nav/grep.ts:491). The nav
+   session was unreachable when I tried to forward it (SendMessage: no such agent). Needs a
+   decision by the nav owner: keep literal semantics for existing callers, or accept it and
+   document it.
+The nav branch moved to 4c0689842 (docs only); not merged here.
