@@ -69,6 +69,7 @@ import {
   CLAUDE_TARGET,
   type PtahMcpSlot,
 } from './ptah-mcp-slots';
+import { sweepRetiredPtahMcpEntries } from './retired-ptah-mcp-slots';
 import { extractAuthToken } from './mcp-http-gate';
 import {
   McpCallerTokenRegistry,
@@ -701,6 +702,7 @@ export class CodeExecutionMCP
       if (desired.has(owned)) continue;
       if (await this.unregisterFromSlot(owned)) needsRetry = true;
     }
+    await this.removeRetiredEntries();
 
     for (const [configPath, slot] of desired) {
       const outcome = await this.registerInSlot(slot, port);
@@ -835,6 +837,29 @@ export class CodeExecutionMCP
         this.cliDetector?.isInstalled(target) ?? Promise.resolve(false),
     });
     return new Map(slots.map((slot) => [slot.configPath, slot]));
+  }
+
+  /**
+   * Take back the persistent `ptah` entries an earlier Ptah wrote into config
+   * files it no longer plans (Antigravity, TASK_2026_2297), and drop their
+   * credentials. Every full reconcile runs it, because a stream-json lane that
+   * was running during an earlier pass may restore the old entry when it ends.
+   * Failures are logged and retried by the next full reconcile; they do not
+   * mark the registration for retry. See `retired-ptah-mcp-slots.ts`.
+   */
+  private removeRetiredEntries(): Promise<void> {
+    return sweepRetiredPtahMcpEntries({
+      workspaceRoots: [
+        ...this.workspaceProvider.getWorkspaceFolders(),
+        this.workspaceProvider.getWorkspaceRoot() ?? '',
+        ...this.retainedRoots.keys(),
+      ],
+      isInstalled: (target) =>
+        this.cliDetector?.isInstalled(target) ?? Promise.resolve(false),
+      revokeCredential: (configPath) =>
+        this.callerCredentials.revokePersistent(configPath),
+      logger: this.logger,
+    });
   }
 
   /**

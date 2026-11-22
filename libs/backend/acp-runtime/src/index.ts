@@ -1,7 +1,8 @@
 /**
  * The ACP runtime: one Agent Client Protocol agent process per session,
  * mapped to `ProviderSessionEvent`s. A vendor supplies an `AcpVendorProfile`;
- * a consumer calls `createAcpSession` and projects the events it receives.
+ * a lane calls `createAcpSession` and projects the events it receives; the
+ * chat opens sessions through `createAcpProviderSessionRuntime`.
  *
  * Nothing here re-exports an SDK runtime value: `@agentclientprotocol/sdk` is
  * ESM-only and loads lazily through `loadAcpSdk`/`connectAcp`.
@@ -12,14 +13,26 @@ export {
   ACP_HANDSHAKE_TIMEOUTS_MS,
   ACP_INTERRUPT_REPLY_TIMEOUT_MS,
   ACP_USAGE_DRAIN_MS,
+  acpInstructionsPrefix,
   createAcpSession,
 } from './lib/acp-session-runtime';
 export type {
   AcpHandshakePhase,
+  AcpModelEntry,
   AcpSession,
   AcpSessionConfig,
   AcpSessionStart,
 } from './lib/acp-session-runtime';
+
+export {
+  ACP_PROVIDER_SESSION_CLOSE_MS,
+  AcpProviderSessionError,
+  createAcpProviderSessionRuntime,
+} from './lib/acp-provider-session-runtime';
+export type { AcpProviderSessionRuntimeDeps } from './lib/acp-provider-session-runtime';
+
+export { acpFileUri, toAcpPromptContent } from './lib/acp-prompt-content';
+export { toAcpMcpServer } from './lib/acp-mcp-servers';
 
 export { readAcpErrorDetail } from './lib/acp-vendor-profile';
 export type {
@@ -78,8 +91,10 @@ export type {
 
 export {
   ANTIGRAVITY_ACP_PTAH_MCP_NAME,
+  ANTIGRAVITY_ACP_PTAH_MCP_TOOL_PREFIX,
   antigravityAcpProfile,
   antigravityGrantsWithoutAutoApprove,
+  antigravityInstructionsMeta,
   antigravitySkipsPermissions,
 } from './lib/profiles/antigravity-acp-profile';
 export { grokAcpProfile } from './lib/profiles/grok-acp-profile';

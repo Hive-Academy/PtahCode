@@ -472,6 +472,16 @@ describe('ProvidersConnectionSetupService', () => {
       ],
       ['anthropic', { authMethod: 'apiKey', applyTo: 'global' }],
       ['claude-cli', { authMethod: 'claudeCli', applyTo: 'global' }],
+      // Live test of PR #1462: a provider-session 'cli' entry is routed by
+      // id like Codex, never saved as Claude CLI.
+      [
+        'antigravity-cli',
+        {
+          authMethod: 'thirdParty',
+          anthropicProviderId: 'antigravity-cli',
+          applyTo: 'global',
+        },
+      ],
     ])(
       'activates %s with the native-auth rule',
       async (providerId, expected) => {
@@ -482,6 +492,7 @@ describe('ProvidersConnectionSetupService', () => {
             openrouter,
             { ...openrouter, id: 'anthropic' },
             { ...openrouter, id: 'claude-cli', authMode: 'cli' },
+            { ...openrouter, id: 'antigravity-cli', authMode: 'cli' },
           ],
         });
         (hooks.refreshAuthStatus as jest.Mock).mockResolvedValueOnce(true);
@@ -581,6 +592,32 @@ describe('ProvidersConnectionSetupService', () => {
       });
       expect(events).toEqual(['refreshConnections', 'refreshRoute']);
     });
+
+    it.each([
+      [{ installed: true, authenticated: false }, 'idle', 'Run `agy` once to sign in.'],
+      [{ installed: true, authenticated: true }, 'signed-in', 'Sign-in detected'],
+    ] as const)(
+      'checks an Antigravity sign-in from its status row %#, never starting a login',
+      async (row, signInState, message) => {
+        handlers.set('auth:getAuthStatus', async () =>
+          success({
+            providerSessionStatus: {
+              antigravity: { ...row, signInHint: 'Run `agy` once to sign in.' },
+            },
+          }),
+        );
+        await service.performExternalAuth('antigravity-cli', 'sign-in', hooks);
+        expect(codexStart).not.toHaveBeenCalled();
+        expect(methods()).toEqual(['auth:getAuthStatus']);
+        expect(service.externalAuth().data).toMatchObject({
+          providerId: 'antigravity-cli',
+          signInState,
+          cliInstalled: true,
+        });
+        expect(service.externalAuth().data?.message).toContain(message);
+        expect(events).toEqual(['refreshConnections', 'refreshRoute']);
+      },
+    );
   });
 
   describe('in-app Kimi Code sign-in', () => {

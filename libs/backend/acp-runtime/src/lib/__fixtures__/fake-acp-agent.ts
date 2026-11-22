@@ -56,6 +56,8 @@ export interface FakeAcpAgentOptions {
   readonly sessionId?: string;
   /** Advertised by `session/new`, `session/resume` and `session/load`. Default none. */
   readonly configOptions?: readonly unknown[];
+  /** `modes` of the `session/new`, `session/resume` and `session/load` replies. Default none. */
+  readonly modes?: unknown;
   /** Replayed on `session/load`, each flagged `_meta.isReplay: true`. */
   readonly replay?: readonly unknown[];
 }
@@ -112,6 +114,7 @@ export function createFakeAcpAgent(
   let clientGone = false;
 
   const configOptions = options.configOptions ?? [];
+  const modes = options.modes === undefined ? {} : { modes: options.modes };
   const sessionId = options.sessionId ?? DEFAULT_SESSION_ID;
 
   const send = async (message: object): Promise<void> => {
@@ -148,8 +151,8 @@ export function createFakeAcpAgent(
         authMethods: [],
       },
     }),
-    'session/new': () => ({ result: { sessionId, configOptions } }),
-    'session/resume': () => ({ result: { configOptions } }),
+    'session/new': () => ({ result: { sessionId, configOptions, ...modes } }),
+    'session/resume': () => ({ result: { configOptions, ...modes } }),
     'session/load': async (params, agent) => {
       const target =
         typeof params['sessionId'] === 'string'
@@ -158,7 +161,7 @@ export function createFakeAcpAgent(
       for (const update of options.replay ?? []) {
         await agent.sessionUpdate(target, update, { isReplay: true });
       }
-      return { result: { configOptions } };
+      return { result: { configOptions, ...modes } };
     },
     'session/set_config_option': () => ({ result: { configOptions } }),
     'session/prompt': () => ({ result: { stopReason: 'end_turn' } }),

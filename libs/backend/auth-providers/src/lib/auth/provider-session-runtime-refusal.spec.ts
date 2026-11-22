@@ -4,19 +4,9 @@
  * refusal, and global auth configuration never starts another provider's
  * flow (Copilot OAuth) for it.
  *
- * No registry entry carries `providerSession` yet, so the registry lookups
- * are mocked: `antigravity-cli` is the provider-session provider here.
+ * `antigravity-cli` is the live registry's provider-session entry, named
+ * "Antigravity" in every user-facing message.
  */
-jest.mock('@ptah-extension/shared', () => {
-  const actual = jest.requireActual('@ptah-extension/shared');
-  return {
-    ...actual,
-    getProviderSessionProfile: (id: string) =>
-      id === 'antigravity-cli' ? 'antigravity' : undefined,
-    isProviderSessionProviderId: (id: string) => id === 'antigravity-cli',
-  };
-});
-
 import 'reflect-metadata';
 import { resolve } from 'node:path';
 import {
@@ -67,7 +57,7 @@ import type { CuratorProxyManager as CuratorProxyManagerType } from './curator-p
 
 const PROVIDER = 'antigravity-cli';
 const REFUSAL =
-  "antigravity-cli runs only as a chat or agent runtime; it cannot serve Ptah's internal model calls.";
+  "Antigravity runs only as a chat or agent runtime; it cannot serve Ptah's internal model calls.";
 
 function logger(): Logger {
   return {
@@ -97,7 +87,7 @@ describe('providerSessionNativeRuntimeRequired', () => {
   it('builds the deliberate refusal that the agent-sdk recognises', () => {
     const error = providerSessionNativeRuntimeRequired(PROVIDER);
     expectRefusal(error);
-    expect(error.recoveryHint).toContain('antigravity-cli');
+    expect(error.recoveryHint).toContain('Antigravity');
     expect(isNativeRuntimeRefusal(error)).toBe(true);
     expect(isCodexNativeRuntimeRefusal(error)).toBe(false);
   });
@@ -339,7 +329,7 @@ describe('OAuthProxyStrategy with a provider-session id', () => {
     const result = await strategy.configure({ providerId: PROVIDER, authEnv });
     expect(result).toEqual({
       configured: false,
-      details: ['antigravity-cli authentication is owned by its native runtime.'],
+      details: ['Antigravity authentication is owned by its native runtime.'],
     });
     expect(copilotAuth.isAuthenticated).not.toHaveBeenCalled();
     expect(copilotProxy.start).not.toHaveBeenCalled();
@@ -409,7 +399,7 @@ describe('AuthManager with a provider-session active provider', () => {
 
     expect(result).toEqual({
       configured: false,
-      details: ['antigravity-cli authentication is owned by its native runtime.'],
+      details: ['Antigravity authentication is owned by its native runtime.'],
     });
     for (const strategy of Object.values(strategies)) {
       expect(strategy.configure).not.toHaveBeenCalled();

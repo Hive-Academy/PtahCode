@@ -25,6 +25,7 @@ import {
   type ProvidersEditContext,
   type ProvidersExternalAuthAction,
 } from '@ptah-extension/core';
+import { isProviderSessionProviderId } from '@ptah-extension/shared';
 import type {
   SettingScope,
   AuthVerifyDraftConnectionParams,
@@ -586,6 +587,7 @@ const CONTROL =
           <ptah-provider-setup-wizard
             [open]="true"
             [deepLinkProviderId]="wizardProviderId()"
+            [offeredProviderSessionIds]="offeredProviderSessionIds()"
             [existingCredentialPresent]="wizardCredentialStored()"
             [verifyDraftConnection]="verifyDraftConnection"
             [cancelDraftVerification]="cancelDraftVerification"
@@ -676,8 +678,18 @@ export class ProvidersSettingsComponent implements OnInit, OnDestroy {
         )
       : null,
   );
+  /** Provider-session connections the host reports (the state lists one only with its status row). */
+  protected readonly offeredProviderSessionIds = computed(() =>
+    (this.state.connections().data ?? [])
+      .map((connection) => connection.id)
+      .filter((id) => isProviderSessionProviderId(id)),
+  );
+  /** The Claude CLI connection; a provider session (Antigravity) shares the `cli` auth mode but not Claude accounts. */
   protected isClaudeCli(connection: ProvidersConnection): boolean {
-    return connectionKind(connection) === 'claude-cli';
+    return (
+      connectionKind(connection) === 'claude-cli' &&
+      !isProviderSessionProviderId(connection.id)
+    );
   }
   private readonly element = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly injector = inject(Injector);

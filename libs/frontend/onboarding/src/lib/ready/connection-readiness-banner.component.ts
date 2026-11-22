@@ -74,6 +74,28 @@ const COPY: Record<
       homeIcon: RefreshCw,
     },
   },
+  'antigravity-cli': {
+    missing: {
+      lead: 'Antigravity is not installed.',
+      homeAction: 'Install Antigravity',
+      homeIcon: Download,
+    },
+    'signed-out': {
+      lead: 'Antigravity is not signed in.',
+      homeAction: 'Sign in',
+      homeIcon: LogIn,
+    },
+    stale: {
+      lead: 'Antigravity is not signed in.',
+      homeAction: 'Sign in',
+      homeIcon: LogIn,
+    },
+    error: {
+      lead: 'Ptah could not check Antigravity.',
+      homeAction: 'Check again',
+      homeIcon: RefreshCw,
+    },
+  },
 };
 
 @Component({

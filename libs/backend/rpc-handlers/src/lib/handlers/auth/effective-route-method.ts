@@ -1,4 +1,8 @@
 import { z } from 'zod';
+import {
+  getProviderSessionProfile,
+  PROVIDER_SESSION_PROVIDER_IDS,
+} from '@ptah-extension/shared';
 import { RpcUserError } from '@ptah-extension/vscode-core';
 import type {
   ConfigManager,
@@ -58,6 +62,12 @@ export class EffectiveRouteMethod {
       kimiCodeTokenStale: z.boolean().optional(),
       kimiCodeCredentialSource: z
         .enum(['cli-login', 'api-key', 'none'])
+        .optional(),
+      providerSessionStatus: z
+        .record(
+          z.string(),
+          z.object({ installed: z.boolean(), authenticated: z.boolean() }),
+        )
         .optional(),
     });
     const providersSchema = z.object({
@@ -191,6 +201,27 @@ export class EffectiveRouteMethod {
                 status: provider.hasApiKey ? 'connected' : 'skipped',
               };
             });
+          // Provider-session entries (Antigravity) are not in the API-key
+          // catalogue; their verdict is the host's auth-status row, and an
+          // entry is listed only when the host admits its profile.
+          for (const id of PROVIDER_SESSION_PROVIDER_IDS) {
+            const profile = getProviderSessionProfile(id);
+            const row = profile
+              ? auth.data.providerSessionStatus?.[profile]
+              : undefined;
+            if (!row || providers.some((provider) => provider.id === id)) {
+              continue;
+            }
+            providers.push({
+              id,
+              type: 'cli',
+              status: !row.installed
+                ? 'not-installed'
+                : row.authenticated
+                  ? 'connected'
+                  : 'unauthenticated',
+            });
+          }
           if (!providers.some((provider) => provider.id === 'claude-cli')) {
             providers.push({
               id: 'claude-cli',

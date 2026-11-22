@@ -104,6 +104,12 @@ describe('isValidProviderId', () => {
     }
   });
 
+  it('names the native chat runtimes by their runtime value', () => {
+    expect(PROVIDER_IDS).toEqual(
+      expect.arrayContaining(['codex-app-server', 'provider-session']),
+    );
+  });
+
   it('stays in step with PROVIDER_IDS', () => {
     // The guard is a hand-written disjunction; this is what catches an id
     // added to the constant and forgotten in the guard.

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { PHASE_KINDS } from '@ptah-extension/shared';
-import type { UsageExecutorType } from '@ptah-extension/platform-core';
+import type { SessionUsageTotals, UsageExecutorType } from '@ptah-extension/platform-core';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type { SqliteDatabase } from '../sqlite-connection.service';
 
@@ -127,6 +127,24 @@ const sessionModelRowSchema = z.object({
   has_unpriced: z.number().int().min(0).max(1),
 });
 export type SessionModelUsageRow = z.infer<typeof sessionModelRowSchema>;
+
+const producerModelTotalsSchema = z.object({
+  model_id: z.string(),
+  input_tokens: safeInteger,
+  output_tokens: safeInteger,
+  cache_read_tokens: safeInteger,
+  cache_write_tokens: safeInteger,
+  known_cost_micro_usd: safeInteger.nullable(),
+  events: safeInteger,
+  unpriced_events: safeInteger,
+  authorities: z.string().nullable(),
+});
+const producerEventTotalsSchema = z.object({
+  events: safeInteger,
+  max_revision: safeInteger,
+  duration_ms: safeInteger,
+});
+const costAuthoritySchema = z.enum(['provider-reported', 'model-priced', 'unpriced']);
 
 const coverageRowSchema = z.object({
   first_captured_at_ms: safeInteger,
@@ -639,6 +657,55 @@ export class SessionStatsRepository {
     const row: unknown = db.prepare('SELECT 1 AS present FROM session_stats WHERE session_id = ?')
       .get(text.parse(sessionId));
     return row !== undefined;
+  }
+
+  /**
+   * Everything one producer persisted for one session, whatever its
+   * workspace: a resumed owner seeds its lifetime totals from it. Null when
+   * the producer persisted nothing for the session.
+   */
+  async getProducerUsageTotals(sessionId: string, producer: string): Promise<SessionUsageTotals | null> {
+    const id = text.parse(sessionId);
+    const owner = text.parse(producer);
+    const db = await this.store.ready();
+    const eventRow: unknown = db.prepare(`SELECT COUNT(*) AS events,
+      COALESCE(MAX(revision), 0) AS max_revision, COALESCE(SUM(span), 0) AS duration_ms
+      FROM (SELECT event_key, MAX(revision) AS revision,
+        MAX(MAX(COALESCE(coverage_end_ms - coverage_start_ms, 0), 0)) AS span
+        FROM session_usage_turns WHERE session_id = ? AND producer = ? GROUP BY event_key)`)
+      .get(id, owner);
+    const events = producerEventTotalsSchema.parse(eventRow);
+    if (events.events === 0) return null;
+    const rows: unknown[] = db.prepare(`SELECT model_id,
+      COALESCE(SUM(input_tokens),0) AS input_tokens, COALESCE(SUM(output_tokens),0) AS output_tokens,
+      COALESCE(SUM(cache_read_tokens),0) AS cache_read_tokens,
+      COALESCE(SUM(cache_write_tokens),0) AS cache_write_tokens,
+      SUM(known_cost_micro_usd) AS known_cost_micro_usd,
+      COUNT(DISTINCT event_key) AS events,
+      COUNT(DISTINCT CASE WHEN known_cost_micro_usd IS NULL THEN event_key END) AS unpriced_events,
+      GROUP_CONCAT(DISTINCT cost_authority) AS authorities
+      FROM session_usage_turns WHERE session_id = ? AND producer = ?
+      GROUP BY model_id ORDER BY model_id`).all(id, owner);
+    return {
+      events: events.events,
+      maxRevision: events.max_revision,
+      durationMs: events.duration_ms,
+      models: rows.map((raw) => {
+        const row = producerModelTotalsSchema.parse(raw);
+        return {
+          modelId: row.model_id === '__unattributed__' ? null : row.model_id,
+          inputTokens: row.input_tokens,
+          outputTokens: row.output_tokens,
+          cacheReadTokens: row.cache_read_tokens,
+          cacheCreationTokens: row.cache_write_tokens,
+          knownCostMicroUsd: row.known_cost_micro_usd,
+          events: row.events,
+          unpricedEvents: row.unpriced_events,
+          costAuthorities: (row.authorities ?? '').split(',').filter((value) => value !== '')
+            .map((value) => costAuthoritySchema.parse(value)),
+        };
+      }),
+    };
   }
 
   /** Match Codex's native thread identity, which differs from the Ptah session id. */

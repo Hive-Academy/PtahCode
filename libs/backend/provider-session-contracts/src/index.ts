@@ -5,12 +5,15 @@
  */
 export type {
   ProviderMcpAttachment,
+  ProviderHttpMcpAttachment,
+  ProviderStdioMcpAttachment,
   ProviderModelInfo,
   ProviderSession,
   ProviderSessionAttach,
   ProviderSessionCapabilities,
   ProviderSessionLogger,
   ProviderSessionOpenRequest,
+  ProviderSessionSpawnedProcess,
   ProviderSessionPermission,
   ProviderSessionPolicy,
   ProviderSessionProfileId,

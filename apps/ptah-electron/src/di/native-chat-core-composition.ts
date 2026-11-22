@@ -25,6 +25,12 @@ export interface ElectronNativeRuntimeRegistration extends ElectronCodexRouting 
   register(): void;
 }
 
+/** The built provider-session binding and the profiles it admits. */
+export interface ElectronProviderSessionRegistration {
+  readonly profiles: readonly ProviderSessionProfileId[];
+  register(): void;
+}
+
 /**
  * The runtime-neutral native chat core (A13): the identity lookup every
  * native runtime binding writes through. Created before any runtime binding,
@@ -37,8 +43,8 @@ export interface ElectronNativeChatCore {
 export interface ElectronNativeChatCoreFinishInput {
   /** The built, not yet registered Codex binding; undefined when it failed. */
   readonly codex: ElectronNativeRuntimeRegistration | undefined;
-  /** Provider-session profiles whose binding succeeded (none in P5). */
-  readonly providerSessionProfiles: readonly ProviderSessionProfileId[];
+  /** The built, not yet registered provider-session binding; undefined when it failed. */
+  readonly providerSession: ElectronProviderSessionRegistration | undefined;
 }
 
 export class ElectronNativeChatCoreError extends Error {
@@ -106,10 +112,11 @@ export async function bindElectronNativeChatCore(
 }
 
 /**
- * Register the Codex ports and the core tokens in one synchronous step, only
+ * Register the Codex and provider-session ports and the core tokens in one
+ * synchronous step, only
  * when at least one native runtime bound. Every refusal happens before any
  * registration, so a failure leaves the consistent Claude-only defaults and
- * disposes the lookup; the caller disposes the unregistered Codex binding.
+ * disposes the lookup; the caller disposes the unregistered runtime bindings.
  * Must run before the first ROUTING_AGENT_ADAPTER resolution.
  * Returns the registered capabilities, or undefined when nothing bound.
  */
@@ -126,10 +133,11 @@ export function finishElectronNativeChatCore(
     core.lookup.dispose();
     throw new ElectronNativeChatCoreError('late-registration');
   }
-  // TODO(P8): register only profiles whose provider-session binding returned
-  // success; a listed profile without bound ports trips partial-native-binding.
-
-  const providerSessions = [...new Set(input.providerSessionProfiles)];
+  // Only a built binding lists its profiles, and it registers its ports in
+  // this same step, so no listed profile is ever left without ports.
+  const providerSessions = [
+    ...new Set(input.providerSession?.profiles ?? []),
+  ];
   if (!input.codex && providerSessions.length === 0) {
     core.lookup.dispose();
     return undefined;
@@ -149,6 +157,7 @@ export function finishElectronNativeChatCore(
   });
   const { container } = state;
   input.codex?.register();
+  if (providerSessions.length > 0) input.providerSession?.register();
   container.register(SDK_TOKENS.SESSION_RUNTIME_IDENTITY_LOOKUP, {
     useValue: core.lookup,
   });

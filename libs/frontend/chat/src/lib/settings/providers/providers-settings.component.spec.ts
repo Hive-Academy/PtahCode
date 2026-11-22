@@ -85,6 +85,7 @@ const SHELL_LOADER = {
 class WizardStub {
   readonly open = input(false);
   readonly deepLinkProviderId = input('');
+  readonly offeredProviderSessionIds = input<readonly string[]>([]);
   readonly existingCredentialPresent = input(false);
   readonly verifyDraftConnection = input.required<DraftVerifyConnectionFn>();
   readonly cancelDraftVerification =

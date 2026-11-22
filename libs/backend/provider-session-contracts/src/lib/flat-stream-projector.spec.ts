@@ -96,6 +96,50 @@ describe('createFlatStreamProjector', () => {
     expect(rows.every((row) => row.timestamp === 1000)).toBe(true);
   });
 
+  // Bug 5 (live test 2026-11-21): after an app restart the history read's
+  // `session/load` replay and the next live turn shared context, generation
+  // and a restarted sequence, so the live chunks carried the replayed rows'
+  // ids and the reply never rendered.
+  it('never gives a live turn the ids of the replay it follows', () => {
+    const replay = createFlatStreamProjector().project(
+      event(
+        { type: 'textDelta', itemId: 'm1', delta: 'old reply' },
+        { turnId: 'sess-1:replay:1', sequence: 1, replayed: true },
+      ),
+    );
+    const live = createFlatStreamProjector().project(
+      event(
+        { type: 'textDelta', itemId: 'm1', delta: 'new reply' },
+        { turnId: 'sess-1:agent-1:a1b2c3d4:1', sequence: 1 },
+      ),
+    );
+    const replayIds = new Set(replay.map((row) => row.id));
+    expect(live.length).toBeGreaterThan(0);
+    expect(live.some((row) => replayIds.has(row.id))).toBe(false);
+    expect(new Set(live.map((row) => row.messageId))).not.toEqual(
+      new Set(replay.map((row) => row.messageId)),
+    );
+  });
+
+  it('keeps setup rows of a replay and of a live process apart', () => {
+    const projector = createFlatStreamProjector();
+    const [replayed] = projector.project(
+      event(
+        { type: 'error', error: { code: 'turn-failed', message: 'x' } },
+        { turnId: undefined, sequence: 1, replayed: true },
+      ),
+    );
+    const [live] = createFlatStreamProjector().project(
+      event(
+        { type: 'error', error: { code: 'turn-failed', message: 'x' } },
+        { turnId: undefined, sequence: 1 },
+      ),
+    );
+    expect(replayed?.id).toBeDefined();
+    expect(live?.id).toBeDefined();
+    expect(live?.id).not.toBe(replayed?.id);
+  });
+
   it('starts a new text block when the message item changes', () => {
     const projector = createFlatStreamProjector();
     const rows = [

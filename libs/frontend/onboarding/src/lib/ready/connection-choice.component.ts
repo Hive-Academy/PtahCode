@@ -52,11 +52,11 @@ import { PtahButtonDirective, PtahStatePanelComponent } from '@ptah-extension/ui
       @if (store.saved().kind === 'loading') {
         <div
           class="mt-3 gap-[var(--ptah-gap-heading)] grid grid-cols-1 lg:grid-cols-[repeat(var(--connection-cols),minmax(0,1fr))]"
-          [style.--connection-cols]="columns"
+          [style.--connection-cols]="columns()"
           role="status"
         >
           <span class="sr-only">Loading your saved connection</span>
-          @for (option of options; track option.id) {
+          @for (option of options(); track option.id) {
             <div class="h-20 animate-pulse rounded-[14px] bg-base-200"></div>
           }
         </div>
@@ -68,10 +68,10 @@ import { PtahButtonDirective, PtahStatePanelComponent } from '@ptah-extension/ui
             store.saved().kind === 'other' ? 'connection-choice-help' : null
           "
           class="mt-3 gap-[var(--ptah-gap-heading)] grid grid-cols-1 lg:grid-cols-[repeat(var(--connection-cols),minmax(0,1fr))]"
-          [style.--connection-cols]="columns"
+          [style.--connection-cols]="columns()"
           data-testid="connection-choice-cards"
         >
-          @for (card of options; track card.id) {
+          @for (card of options(); track card.id) {
             <label
               class="flex cursor-pointer items-start gap-[var(--ptah-gap-heading)] rounded-[14px] border bg-base-200 px-[var(--ptah-surface-pad)] py-3 focus-within:ring-2 focus-within:ring-base-content focus-within:ring-offset-2"
               [class.border-primary]="selected() === card.id"
@@ -225,7 +225,9 @@ export class ConnectionChoiceComponent {
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   protected readonly options = inject(CONNECTION_OPTION_LIST);
   /** One grid column per option, up to three. */
-  protected readonly columns = connectionColumns(this.options.length);
+  protected readonly columns = computed(() =>
+    connectionColumns(this.options().length),
+  );
   /** The provider of the saved main connection, when it is one of the options. */
   private readonly savedProvider = computed(() => {
     const kind = this.store.saved().kind;
@@ -238,7 +240,7 @@ export class ConnectionChoiceComponent {
   protected readonly roles = computed(() => {
     const saved = this.savedProvider();
     return Object.fromEntries(
-      this.options.map((option) => [option.id, connectionRole(saved, option.id)]),
+      this.options().map((option) => [option.id, connectionRole(saved, option.id)]),
     ) as Readonly<Record<string, ConnectionRole>>;
   });
   protected async save(): Promise<void> {

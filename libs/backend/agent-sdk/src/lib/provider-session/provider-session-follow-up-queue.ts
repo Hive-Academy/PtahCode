@@ -6,6 +6,7 @@ import type {
   SteerQueuedFollowUpResult,
 } from '@ptah-extension/shared';
 import { ProviderSessionChatAdapterError } from './provider-session-chat-adapter-error';
+import type { ProviderSessionRealpath } from './provider-session-turn-files';
 import {
   providerTurnInput,
   type ProviderSessionChatSession as Session,
@@ -32,6 +33,8 @@ export interface ProviderSessionQueuedTurn {
 
 interface FollowUpQueueDependencies {
   readonly logger: Logger;
+  /** Confines a steered turn's file references like a prompt's. */
+  readonly realpath: ProviderSessionRealpath;
   /** Publish one turn; resolves at admission (the prompt receipt). */
   publish(
     session: Session,
@@ -168,7 +171,10 @@ export class ProviderSessionFollowUpQueue {
         throw new ProviderSessionChatAdapterError('unsupported-option', 'steer', {
           option: 'images',
         });
-      await live.steer(providerTurnInput(session, item.input), turnId);
+      await live.steer(
+        await providerTurnInput(session, item.input, this.deps.realpath),
+        turnId,
+      );
     } catch (error) {
       this.deps.failure(error, 'steer');
       this.requeue(session, item, index);

@@ -142,6 +142,19 @@ const STATS_PAGE_BUDGET_MS = 20_000;
 /** `session:list` calls slower than this log one warn line (AC1, L13). */
 const SESSION_LIST_SLOW_MS = 200;
 
+/**
+ * Host port that stops a provider-session agent when its chat session is
+ * deleted (`ProviderSessionPool.release(id, 'deleted')`). Bound only by a host
+ * that admits provider sessions (Electron); absent elsewhere.
+ */
+export interface ProviderSessionDeleteRelease {
+  release(sessionId: SessionId): Promise<void>;
+}
+
+export const SESSION_DELETE_TOKENS = {
+  PROVIDER_SESSION_RELEASE: Symbol.for('SessionDeleteProviderSessionRelease'),
+} as const;
+
 // The metadata parser is internal to agent-sdk; validate the persisted resume
 // fields here before treating a native session as available without a JSONL.
 const CodexThreadResumeSchema = z.object({
@@ -362,6 +375,9 @@ export class SessionRpcHandlers {
     private readonly statsRepository: SessionStatsRepository | null = null,
     @inject(SessionHandoffCloser, { isOptional: true })
     private readonly handoffCloser: SessionHandoffCloser | null = null,
+    /** Stops a deleted provider session's agent; absent without provider sessions. */
+    @inject(SESSION_DELETE_TOKENS.PROVIDER_SESSION_RELEASE, { isOptional: true })
+    private readonly providerSessionRelease: ProviderSessionDeleteRelease | null = null,
   ) {
     this.messageCounter = new SessionMessageCounter(jsonlReader, logger);
   }
@@ -934,6 +950,7 @@ export class SessionRpcHandlers {
         this.logger.info('RPC: session:delete called', { sessionId });
         const metadata = await this.metadataStore.get(sessionId);
         const workspacePath = metadata?.workspaceId;
+        await this.releaseProviderSession(sessionId, metadata);
         await this.beginMessagingPurge(sessionId);
         const transcriptCleanup = await this.sessionFileLock.run(
           sessionId,
@@ -971,6 +988,31 @@ export class SessionRpcHandlers {
         };
       }
     });
+  }
+
+  /**
+   * Stop the agent of a deleted provider session before its metadata goes.
+   * Never fails the delete: a release failure is logged, and the pool's idle
+   * sweep closes the process later.
+   */
+  private async releaseProviderSession(
+    sessionId: string,
+    metadata: SessionMetadata | null | undefined,
+  ): Promise<void> {
+    if (
+      !this.providerSessionRelease ||
+      metadata?.providerSessionExecution?.runtime !== 'provider-session'
+    )
+      return;
+    try {
+      await this.providerSessionRelease.release(SessionId.from(sessionId));
+    } catch (error: unknown) {
+      // degradation-audit: reported - the delete proceeds; the idle sweep closes the agent.
+      this.logger.error(
+        'RPC: session:delete - provider session not released',
+        error instanceof Error ? error : new Error(String(error)),
+      );
+    }
   }
 
   /**

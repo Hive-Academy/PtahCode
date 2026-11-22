@@ -15,6 +15,8 @@
  *    - `anthropic` on an API key → `unsupported-auth`, never read.
  *    - `openai-codex` → the Codex account home, no credential reference.
  *    - `ollama-cloud`, `opencode-go`, `opencode-zen` → the stored provider key.
+ *    - a provider-session entry (`antigravity-cli`, `grok-cli`, OpenCode) →
+ *      its CLI's own account owner, read like its CLI-store card.
  *    - anything else → `provider-unsupported`, never read.
  * 2. **Local CLI stores**: installed `opencode`, `antigravity`, and `grok`.
  * 3. **Stored named Claude accounts**, read from their usage directories.
@@ -83,9 +85,11 @@ import {
   limitLookupDeadlineMs,
   LIMIT_LOOKUP_DEADLINE_MS,
   getAllAnthropicProviders,
+  getProviderSessionProfile,
   type AnthropicProvider,
   type CliDetectionResult,
   type PlanLimitOwnerSnapshot,
+  type ProviderSessionProfileId,
   type PtahCliSummary,
   type QuotaOwnerRef,
 } from '@ptah-extension/shared';
@@ -463,6 +467,12 @@ export class PlanLimitOwnerDiscoveryService {
         origin,
       );
     }
+    // A provider-session main agent bills its CLI's own account, the owner its
+    // CLI-store card reads, never an "owner unknown" placeholder (#1459).
+    const profile = getProviderSessionProfile(driver);
+    if (profile !== undefined) {
+      return this.entryFor(this.providerSessionOwner(profile), origin);
+    }
     return this.known(
       quotaOwnerRefFromKey(
         unknownOwnerKey(driver, `selected-provider:${driver}`),
@@ -470,6 +480,18 @@ export class PlanLimitOwnerDiscoveryService {
       { status: 'provider-unsupported' },
       origin,
     );
+  }
+
+  /** The owner a provider-session profile bills, as its lane does. */
+  private providerSessionOwner(profile: ProviderSessionProfileId): QuotaOwnerRef {
+    switch (profile) {
+      case 'antigravity':
+        return this.owners.ownerForAntigravity();
+      case 'grok':
+        return this.owners.ownerForCliStore('grok');
+      case 'opencode':
+        return this.owners.ownerForOpenCode();
+    }
   }
 
   private async cliStores(

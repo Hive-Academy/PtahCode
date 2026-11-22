@@ -10,6 +10,7 @@ import {
   deriveChosen,
   deriveClaudeReadiness,
   deriveCodexReadiness,
+  deriveProviderSessionReadiness,
   deriveSelection,
   type ProviderKind,
 } from './provider-readiness.derive';
@@ -30,6 +31,9 @@ export class ProviderReadinessStore {
   private readonly codexReadFailed = signal(false);
   private readonly activeRechecks = signal(0);
   private readonly notConfirmed = signal(false);
+  /** A recheck of the provider-session rows (`auth:getAuthStatus`) is running. */
+  private readonly sessionReading = signal(false);
+  private readonly sessionReadFailed = signal(false);
   private readonly _slowStarted = signal<{ provider: ProviderKind; mountId: number } | null>(null);
   private mountId = 0;
   private destroyed = false;
@@ -50,6 +54,14 @@ export class ProviderReadinessStore {
     provider: 'openai-codex' as const, state: 'error' as const, errorCause: 'local' as const,
     failedFact: 'sign-in' as const, path: null, version: null, source: null,
   } : deriveCodexReadiness(this.codexService.view(), this.codexRetrying()));
+  /** Antigravity's readiness, from the host's `antigravity` provider-session row. */
+  readonly antigravity = computed(() => deriveProviderSessionReadiness({
+    provider: 'antigravity-cli',
+    row: this.auth.providerSessionRow('antigravity-cli'),
+    authLoaded: this.auth.isLoaded(),
+    reading: this.sessionReading(),
+    readFailed: this.sessionReadFailed(),
+  }));
   readonly selection = computed(() => this.notConfirmed() ? { kind: 'not-confirmed' as const } :
     deriveSelection({
       isLoading: this.auth.isLoading(),
@@ -58,7 +70,8 @@ export class ProviderReadinessStore {
       providerId: this.auth.persistedProviderId(),
       availableProviders: this.auth.availableProviders(),
     }));
-  readonly chosen = computed(() => deriveChosen(this.selection(), this.claude(), this.codex()));
+  readonly chosen = computed(() => deriveChosen(this.selection(), this.claude(), this.codex(),
+    { 'antigravity-cli': this.antigravity() }));
   readonly rechecking = computed(() => this.activeRechecks() > 0);
   readonly slowStarted = this._slowStarted.asReadonly();
 
@@ -116,7 +129,24 @@ export class ProviderReadinessStore {
     await Promise.all([
       this.start('claude-cli', 'recheck', ++this.mountId),
       this.start('openai-codex', 'recheck', ++this.mountId),
+      this.recheckProviderSessions(),
     ]);
+  }
+
+  /** Provider-session rows come with the auth status; a recheck reads it again. */
+  private async recheckProviderSessions(): Promise<void> {
+    this.activeRechecks.update((count) => count + 1);
+    this.sessionReading.set(true);
+    try {
+      const ok = await this.auth.refreshAuthStatus();
+      if (!this.destroyed) this.sessionReadFailed.set(!ok);
+    } catch {
+      // degradation-audit: reported - the provider-session cards show "Could not check".
+      if (!this.destroyed) this.sessionReadFailed.set(true);
+    } finally {
+      this.sessionReading.set(false);
+      this.activeRechecks.update((count) => count - 1);
+    }
   }
 
   private start(provider: ProviderKind, kind: 'mount' | 'recheck', mountId: number): Promise<void> {

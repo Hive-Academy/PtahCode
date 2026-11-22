@@ -81,6 +81,12 @@ export interface AcpProcessTransport {
   getPid(): number | undefined;
   /** Resolves when the child ends. Never rejects. */
   readonly exited: Promise<AcpProcessExit>;
+  /**
+   * Resolves with the child's pid once it is spawned, or `undefined` when it
+   * never started or ended before its spawn was confirmed. Never rejects.
+   * Optional: an in-memory transport has no spawn to wait for.
+   */
+  readonly spawned?: Promise<number | undefined>;
   /** Graceful stop then tree-kill. Idempotent. */
   kill(): void;
 }
@@ -271,6 +277,12 @@ export const spawnAcpProcess: AcpTransportFactory = (
   const exited = new Promise<AcpProcessExit>((resolve) => {
     settleExited = resolve;
   });
+  let settleSpawned!: (pid: number | undefined) => void;
+  const spawned = new Promise<number | undefined>((resolve) => {
+    settleSpawned = resolve;
+  });
+  // A child that ended first reports no pid: an exited pid may be reused.
+  void exited.then(() => settleSpawned(undefined));
 
   let drainTimer: ReturnType<typeof setTimeout> | undefined;
   const clearDrainTimer = (): void => {
@@ -466,6 +478,10 @@ export const spawnAcpProcess: AcpTransportFactory = (
 
   const attachChild = (spawned: SpawnedProcessHandle): void => {
     child = spawned;
+    void spawned.whenSpawned.then(
+      (pid) => settleSpawned(pid === null || processGone ? undefined : pid),
+      () => settleSpawned(undefined),
+    );
     const stdout = spawned.stdout;
     if (stdout) {
       stdout.on('data', onStdoutData);
@@ -568,6 +584,7 @@ export const spawnAcpProcess: AcpTransportFactory = (
     stream: { readable, writable },
     getPid: () => (processGone ? undefined : child?.pid),
     exited,
+    spawned,
     kill,
   };
 };

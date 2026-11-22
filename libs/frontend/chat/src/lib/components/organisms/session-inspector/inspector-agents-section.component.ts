@@ -462,6 +462,7 @@ export class InspectorAgentsSectionComponent {
         tokens: card?.tokens ?? null,
         tokensPartial: false,
         cost: card?.cost ?? null,
+        costNotPriced: card?.costNotPriced === true,
         costPartial: false,
         costEstimated: false,
         input: split?.input ?? null,

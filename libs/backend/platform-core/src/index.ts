@@ -464,6 +464,8 @@ export type {
   SessionUsageSink,
   SessionUsageContribution,
   SessionUsageModelDelta,
+  SessionUsageModelTotals,
+  SessionUsageTotals,
   UsageScope,
   UsageMissingReason,
   UsageReconciliationTrigger,

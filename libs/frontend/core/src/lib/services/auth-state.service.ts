@@ -14,6 +14,7 @@ import { ModelStateService } from './model-state.service';
 import { EffortStateService } from './effort-state.service';
 import { PlanLimitsStore } from './plan-limits.store';
 import { KIMI_CODE_ID, kimiCredentialSource } from './kimi-code-login';
+import { getProviderSessionProfile } from '@ptah-extension/shared';
 import type {
   KimiCodeCredentialSource,
   SettingScope,
@@ -24,8 +25,14 @@ import type {
   CustomProviderEntry,
   CustomProviderEntryInput,
   CustomProviderEntryChanges,
+  ProviderSessionAuthStatus,
+  ProviderSessionProfileId,
   SessionId,
 } from '@ptah-extension/shared';
+
+type ProviderSessionStatusRows = Partial<
+  Record<ProviderSessionProfileId, ProviderSessionAuthStatus>
+>;
 
 type ApplyTo = 'global' | 'app' | 'workspace';
 
@@ -214,6 +221,11 @@ export class AuthStateService {
   /** Whether Claude CLI is installed and detected on the system */
   private readonly _claudeCliInstalled = signal(false);
 
+  /** One row per provider-session profile the host admits (`auth:getAuthStatus`). */
+  private readonly _providerSessionStatus = signal<ProviderSessionStatusRows>(
+    {},
+  );
+
   /**
    * Whether ANY provider — not just the selected one — holds a key.
    *
@@ -366,6 +378,15 @@ export class AuthStateService {
 
   /** Whether Claude CLI is installed on the system */
   readonly claudeCliInstalled = this._claudeCliInstalled.asReadonly();
+
+  /** Provider-session status rows; a profile with no row is not offered by this host. */
+  readonly providerSessionStatus = this._providerSessionStatus.asReadonly();
+
+  /** The status row of a provider-session provider id, or null (not one, or not admitted). */
+  providerSessionRow(providerId: string | null): ProviderSessionAuthStatus | null {
+    const profile = providerId ? getProviderSessionProfile(providerId) : undefined;
+    return (profile && this._providerSessionStatus()[profile]) ?? null;
+  }
 
   /** Whether ANY provider holds a key (not just the selected one) */
   readonly hasAnyProviderKey = this._hasAnyProviderKey.asReadonly();
@@ -1409,6 +1430,7 @@ export class AuthStateService {
     );
     this._claudeCliInstalled.set(response.claudeCliInstalled ?? false);
     this._hasAnyProviderKey.set(response.hasAnyProviderKey ?? false);
+    this._providerSessionStatus.set(response.providerSessionStatus ?? {});
 
     // Clear a stale Codex auth banner once credentials are healthy again.
     const banner = this._authRequiredBanner();

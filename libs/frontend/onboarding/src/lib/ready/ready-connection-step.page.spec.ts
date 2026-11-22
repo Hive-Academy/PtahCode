@@ -8,6 +8,7 @@ import type { ChosenConnectionView, ProviderReadinessState, ProviderReadinessVie
 import { ProviderReadinessStore } from './provider-readiness.store';
 import { ReadyConnectionStepPage } from './ready-connection-step.page';
 import { CONNECTION_OPTIONS } from './connection-options';
+import type { ProviderSessionAuthStatus } from '@ptah-extension/shared';
 
 const view = (provider: ProviderReadinessView['provider'], state: ProviderReadinessState): ProviderReadinessView => ({
   provider, state, errorCause: null, failedFact: null,
@@ -28,7 +29,11 @@ describe('ReadyConnectionStepPage parity rows 20–38', () => {
   let announce: jest.Mock<void, [string]>;
   let navigate: jest.SpyInstance;
 
-  function render(claudeState: ProviderReadinessState = 'checking', codexState: ProviderReadinessState = 'checking', chosen: SelectionView = { kind: 'claude-cli' }): HTMLElement {
+  let antigravity: WritableSignal<ProviderReadinessView>;
+  let sessionRows: WritableSignal<{ antigravity?: ProviderSessionAuthStatus }>;
+  function render(claudeState: ProviderReadinessState = 'checking', codexState: ProviderReadinessState = 'checking', chosen: SelectionView = { kind: 'claude-cli' }, rows: { antigravity?: ProviderSessionAuthStatus } = {}): HTMLElement {
+    antigravity = signal({ ...view('antigravity-cli', 'signed-out'), path: null });
+    sessionRows = signal(rows);
     claude = signal(view('claude-cli', claudeState));
     codex = signal(view('openai-codex', codexState));
     selection = signal(chosen);
@@ -46,13 +51,13 @@ describe('ReadyConnectionStepPage parity rows 20–38', () => {
     };
     TestBed.configureTestingModule({ imports: [ReadyConnectionStepPage], providers: [
       provideRouter([]),
-      { provide: ProviderReadinessStore, useValue: { claude, codex, selection, chosen: chosenView, rechecking, refresh, recheckCodex, available: true } },
+      { provide: ProviderReadinessStore, useValue: { claude, codex, antigravity, selection, chosen: chosenView, rechecking, refresh, recheckCodex, available: true } },
       { provide: OnboardingFlagService, useValue: { flag: signal<OnboardingFlag>({}), markReady } },
       { provide: OnboardingAnnouncerService, useValue: { announce } },
       { provide: CodexSignInService, useValue: { state: signIn, nothingSeen: signal(false), refreshFailed: signal(false) } },
       { provide: VSCodeService, useValue: { isElectron: true, config: signal({ platform: 'linux' }) } },
       { provide: ProvidersSettingsStateService, useValue: { reviewContext: signal(null), open: jest.fn(), commit: signal({ status: 'idle' }) } },
-      { provide: AuthStateService, useValue: { refreshAuthStatus: jest.fn() } },
+      { provide: AuthStateService, useValue: { refreshAuthStatus: jest.fn(), providerSessionStatus: sessionRows } },
     ] });
     navigate = jest.spyOn(TestBed.inject(Router), 'navigate').mockResolvedValue(true);
     fixture = TestBed.createComponent(ReadyConnectionStepPage);
@@ -128,6 +133,36 @@ describe('ReadyConnectionStepPage parity rows 20–38', () => {
   it('detail cards share the column count and stretch to equal height', () => { const el = render('ready', 'missing'); const grid = el.querySelector<HTMLElement>('[data-testid="ready-provider-panels"]'); expect(grid?.style.getPropertyValue('--connection-cols')).toBe(String(CONNECTION_OPTIONS.length)); expect(grid?.classList.contains('items-stretch')).toBe(true); expect(el.querySelector('ptah-provider-panel')?.classList.contains('h-full')).toBe(true); expect(panel(el, 'claude')?.classList.contains('h-full')).toBe(true); });
   it('builds one detail card per option, in list order', () => { const el = render('ready', 'missing'); expect([...el.querySelectorAll('[data-testid="ready-provider-panels"] [data-testid$="-panel"]')].map(node => node.getAttribute('data-testid'))).toEqual(CONNECTION_OPTIONS.map((option) => option.panelTestId)); });
   it('radio cards and detail cards share each option name and description', () => { const el = render('ready', 'ready'); const texts = (root: Element | null) => [...(root?.querySelectorAll('[data-testid="connection-option-name"], [data-testid="connection-option-description"]') ?? [])].map((node) => node.textContent?.trim()); const expected = CONNECTION_OPTIONS.flatMap((option) => [option.name, option.description]); expect(texts(el.querySelector('[data-testid="connection-choice-cards"]'))).toEqual(expected); expect(texts(el.querySelector('[data-testid="ready-provider-panels"]'))).toEqual(expected); });
+  it('offers no Antigravity card when the host reports no Antigravity row', () => {
+    const el = render('ready', 'ready');
+    expect(el.querySelector('[data-testid="ready-antigravity-panel"]')).toBeNull();
+    expect(el.querySelector('input[value="antigravity-cli"]')).toBeNull();
+  });
+  it('adds an Antigravity card, radio and sign-in help when the host reports the profile', () => {
+    const el = render('ready', 'ready', { kind: 'claude-cli' }, {
+      antigravity: { installed: true, authenticated: false, signInHint: 'run agy' },
+    });
+    const card = el.querySelector<HTMLElement>('[data-testid="ready-antigravity-panel"]');
+    expect(card).not.toBeNull();
+    expect(el.querySelector('input[value="antigravity-cli"]')).not.toBeNull();
+    expect(el.querySelector('[data-testid="ready-connection-intro"]')?.textContent?.replace(/\s+/g, ' ')).toContain('Pick Claude Code, Codex or Antigravity');
+    expect(el.querySelector<HTMLElement>('[data-testid="ready-provider-panels"]')?.style.getPropertyValue('--connection-cols')).toBe('3');
+    expect(card?.textContent).toContain('agy');
+  });
+  it('Antigravity missing offers its install guide with the sign-in step', () => {
+    const el = render('ready', 'ready', { kind: 'claude-cli' }, {
+      antigravity: { installed: false, authenticated: false, signInHint: 'run agy' },
+    });
+    antigravity.set({ ...view('antigravity-cli', 'missing'), path: null, source: null });
+    fixture.detectChanges();
+    const card = el.querySelector<HTMLElement>('[data-testid="ready-antigravity-panel"]');
+    card?.querySelector<HTMLButtonElement>('[data-testid="ready-install-open"]')?.click();
+    fixture.detectChanges();
+    const modal = card?.querySelector<HTMLDialogElement>('dialog[open]');
+    expect(modal?.textContent).toContain('Install Antigravity');
+    expect(modal?.textContent).toContain('run agy once to sign in');
+    expect(modal?.querySelector<HTMLAnchorElement>('a[href^="https:"]')?.rel).toContain('noopener');
+  });
   it('does not offer Continue for an unconfirmed or unready selection', () => { const el = render('ready', 'ready', { kind: 'unreadable' }); expect(button(el, 'Continue')).toBeUndefined(); expect(button(el, 'Continue anyway')).toBeDefined(); });
   it('bundled ready Codex has no install help', () => { const el = render('missing', 'ready', { kind: 'openai-codex' }); codex.set({ ...codex(), source: 'bundled' }); fixture.detectChanges(); expect(panel(el, 'codex')?.querySelector('[data-testid="ready-install-block"]')).toBeNull(); expect(button(el, 'Continue')).toBeDefined(); });
   it('Codex missing shows install rows and a safe official guide link', () => { const el = render('ready', 'missing', { kind: 'openai-codex' }); const modal = openInstall(el, 'codex'); expect(modal?.querySelector('ptah-command-copy-row')).not.toBeNull(); expect(modal?.querySelector<HTMLAnchorElement>('a[href^="https:"]')?.rel).toContain('noopener'); });

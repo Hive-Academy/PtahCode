@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { basename, resolve } from 'node:path';
 import type { Logger } from '@ptah-extension/vscode-core';
 import {
   createFlatStreamProjector,
@@ -26,6 +25,17 @@ import type { ProviderSessionApprovalSink } from './provider-session-approval-si
 import type { ProviderSessionChatPrepared } from './provider-session-chat-ports';
 import { ProviderSessionChatAdapterError } from './provider-session-chat-adapter-error';
 import { providerSessionRuntimeErrorCode } from './provider-session-error-mapping';
+import {
+  ProviderSessionUsageLedger,
+  providerSessionBillingMode,
+  type ProviderSessionTurnUsage,
+  type ProviderSessionUsageSeed,
+} from './provider-session-usage-ledger';
+import type { ProviderSessionUsagePersistence } from './provider-session-usage-capture';
+import {
+  confineTurnFiles,
+  type ProviderSessionRealpath,
+} from './provider-session-turn-files';
 
 /** The adapter's record of one chat session; outlives a broken process. */
 export interface ProviderSessionChatSession {
@@ -57,6 +67,8 @@ export interface ProviderSessionChatSession {
   pendingInterrupt: boolean;
   stopRequested: boolean;
   closing?: Promise<void>;
+  /** Session-lifetime usage; created at the first turn with usage. */
+  usage?: ProviderSessionUsageLedger;
 }
 
 export interface ProviderSessionTurnInput {
@@ -66,23 +78,25 @@ export interface ProviderSessionTurnInput {
   readonly files?: readonly string[];
 }
 
-/** The runtime's prompt input: file references become absolute paths. */
-export function providerTurnInput(
+/**
+ * The runtime's prompt input: file references become absolute paths inside
+ * the session's workspace; any other reference is refused
+ * (`unsupported-option`, option `files`) before anything is sent.
+ */
+export async function providerTurnInput(
   session: ProviderSessionChatSession,
   input: ProviderSessionTurnInput,
-): ProviderTurnInput {
-  const cwd = session.prepared.seed.workspacePath;
+  realpath: ProviderSessionRealpath,
+): Promise<ProviderTurnInput> {
+  const files = await confineTurnFiles(
+    input.files ?? [],
+    session.prepared.seed.workspacePath,
+    realpath,
+  );
   return {
     text: input.text,
     ...(input.images?.length ? { images: input.images } : {}),
-    ...(input.files?.length
-      ? {
-          files: input.files.map((file) => {
-            const path = resolve(cwd, file);
-            return { path, name: basename(path) };
-          }),
-        }
-      : {}),
+    ...(files.length ? { files } : {}),
   };
 }
 
@@ -106,9 +120,18 @@ export interface ProviderSessionTurnDependencies {
     'markGenerating' | 'settleTurn' | 'recordFailure' | 'forceIdle'
   >;
   readonly logger: Logger;
+  /** Canonical path of a file reference (`fs.promises.realpath` in production). */
+  readonly realpath: ProviderSessionRealpath;
   /** The live process, re-acquired (respawn + attach) when it broke. */
   live(session: ProviderSessionChatSession): Promise<ProviderSession>;
   stats(payload: ResultStatsPayload): void;
+  /** Durable usage; absent on a host without a usage sink. */
+  readonly usage?: Pick<ProviderSessionUsagePersistence, 'record'>;
+  /**
+   * Resolves once the runtime price table may be read (the OpenRouter
+   * catalog warmup settled, or a bounded wait elapsed). Never rejects.
+   */
+  pricingReady?(): Promise<void>;
   failure(error: unknown, operation: string): ProviderSessionChatAdapterError;
   /** The process is gone: release it, publish one notice, keep the session. */
   broken(session: ProviderSessionChatSession): void;
@@ -162,8 +185,9 @@ export async function* streamProviderSessionTurn(
         throw new ProviderSessionChatAdapterError('unsupported-option', 'images', {
           option: 'images',
         });
+      const prompt = await providerTurnInput(session, input, deps.realpath);
       events = live.events(subscription.signal)[Symbol.asyncIterator]();
-      const receipt = await live.prompt(providerTurnInput(session, input));
+      const receipt = await live.prompt(prompt);
       turnId = receipt.turnId;
       session.turnId = turnId;
     } catch (error) {
@@ -214,7 +238,24 @@ export async function* streamProviderSessionTurn(
         yield mapped;
       }
       if (event.type !== 'terminal') continue;
-      if (usage) deps.stats(resultStats(session, usage, Date.now() - started));
+      if (usage) {
+        // Timestamps first: the catalog wait is not part of the turn.
+        const ended = Date.now();
+        await deps.pricingReady?.();
+        const turn = recordTurnUsage(session, usage, ended - started);
+        deps.stats(turn.payload);
+        deps.usage?.record({
+          sessionId: session.id,
+          providerId: session.prepared.seed.providerId,
+          workspacePath: session.prepared.seed.workspacePath,
+          turnId,
+          model: turn.model,
+          usage,
+          recorded: turn.recorded,
+          startedAtMs: started,
+          endedAtMs: ended,
+        });
+      }
       yield {
         ...toTurnStateEvent(session.id, settle(session.id, event, deps)),
         ...consumed,
@@ -338,15 +379,51 @@ function* userEcho(
   };
 }
 
-/** Live per-turn stats (plan A16): no lifetime checkpoint, no restore. */
-function resultStats(
+/**
+ * One turn's result stats plus the session-lifetime snapshot the side panel
+ * shows (`sessionStats`, issue #1459). The context window is the one the
+ * agent reported (ACP `usage_update.size`) when it sent one, else the
+ * provider catalog's; an unknown window reads 0 with `contextCapacity`
+ * 'unknown', never a wrong percentage. Cost comes from the shared rate table
+ * (`ProviderSessionUsageLedger`): an unpriced model is `null`, never 0.
+ */
+export function resultStats(
   session: ProviderSessionChatSession,
   usage: ProviderUsage,
   duration: number,
 ): ResultStatsPayload {
+  return recordTurnUsage(session, usage, duration).payload;
+}
+
+/**
+ * The session's usage ledger. A restored session is seeded with its
+ * persisted totals (`seed`); without one its snapshot stays partial.
+ */
+export function createProviderSessionUsageLedger(
+  session: ProviderSessionChatSession,
+  seed?: ProviderSessionUsageSeed | null,
+): ProviderSessionUsageLedger {
+  const { profile } = session.prepared.seed;
+  return new ProviderSessionUsageLedger(
+    session.id,
+    providerSessionBillingMode(profile),
+    session.prepared.resume !== undefined,
+    { profile, seed },
+  );
+}
+
+/** Count one turn in the session ledger: the payload plus what to persist. */
+function recordTurnUsage(
+  session: ProviderSessionChatSession,
+  usage: ProviderUsage,
+  duration: number,
+): {
+  payload: ResultStatsPayload;
+  recorded: ProviderSessionTurnUsage;
+  model: string | undefined;
+} {
   const model =
     usage.model ?? session.settings.model ?? session.prepared.seed.model;
-  const costUsd = usage.costUsd ?? null;
   const tokens = {
     input: usage.inputTokens,
     output: usage.outputTokens,
@@ -357,16 +434,42 @@ function resultStats(
       ? {}
       : { cacheCreation: usage.cacheWriteTokens }),
   };
-  if (!model) return { sessionId: session.id, turnCost: costUsd, tokens, duration };
-  // An unknown window reads 0 while contextCapacity says 'unknown', so the
-  // header shows an explicit unknown context, never a wrong percentage.
-  const contextCapacity = resolveContextCapacity({
-    route: { kind: 'native', providerId: session.prepared.seed.providerId },
-    model,
-  });
-  return {
+  const contextCapacity = model
+    ? resolveContextCapacity({
+        route: { kind: 'native', providerId: session.prepared.seed.providerId },
+        model,
+        ...(usage.contextWindow === undefined
+          ? {}
+          : { sdkContextWindow: usage.contextWindow }),
+      })
+    : undefined;
+  session.usage ??= createProviderSessionUsageLedger(session);
+  const recorded = session.usage.record(model, usage, duration, contextCapacity);
+  const { turnPrice, snapshot } = recorded;
+  const pricing = {
+    turnCost: turnPrice.totalCost,
+    costBasis: turnPrice.costBasis,
+    pricingCoverage: turnPrice.pricingCoverage,
+    ...(turnPrice.priceProvenance
+      ? { priceProvenance: [turnPrice.priceProvenance] }
+      : {}),
+  };
+  if (!model || !contextCapacity)
+    return {
+      model,
+      recorded,
+      payload: {
+        sessionId: session.id,
+        ...pricing,
+        sessionStats: snapshot,
+        tokens,
+        duration,
+      },
+    };
+  const payload: ResultStatsPayload = {
     sessionId: session.id,
-    turnCost: costUsd,
+    ...pricing,
+    sessionStats: snapshot,
     tokens,
     duration,
     modelUsage: [
@@ -376,7 +479,7 @@ function resultStats(
         outputTokens: usage.outputTokens,
         contextWindow: contextCapacity.tokens ?? 0,
         contextCapacity,
-        costUSD: costUsd,
+        costUSD: turnPrice.totalCost,
         cacheReadInputTokens: usage.cacheReadTokens ?? 0,
         ...(usage.contextTokens === undefined
           ? {}
@@ -384,6 +487,7 @@ function resultStats(
       },
     ],
   };
+  return { model, recorded, payload };
 }
 
 /** One projector per chat session (turn state lives in it). */

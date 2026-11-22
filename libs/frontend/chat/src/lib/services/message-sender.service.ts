@@ -66,6 +66,7 @@ import {
   ProviderCarryOverService,
   type CarryOverCompactResult,
 } from './provider-carry-over.service';
+import { ProviderSessionResumeNoticeService } from './provider-session-resume-notice.service';
 
 /**
  * `/compact` fails closed with this text when its carry-over check failed and
@@ -143,6 +144,19 @@ export function mapChatSendFailureText(
     case 'CODEX_UNAVAILABLE':
     case 'CODEX_RUNTIME_FAILED':
       return 'Codex chat could not start.';
+    case 'PROVIDER_SESSION_BUSY':
+      return 'The provider is busy, try again when the current operation finishes';
+    case 'PROVIDER_SESSION_LIMIT':
+      return 'Too many provider sessions are open. Close one and try again.';
+    case 'PROVIDER_SESSION_UNAVAILABLE':
+      return 'The provider is not connected. Reconnect and try again.';
+    case 'PROVIDER_SESSION_RUNTIME_FAILED':
+      return 'The provider chat could not complete the request.';
+    case 'PROVIDER_SESSION_RESUME_FAILED':
+      return 'The provider could not reopen this conversation. Start a new session to continue.';
+    case 'PROVIDER_SESSION_UNSUPPORTED_OPTION':
+      // The host names the option in fixed copy; it carries no runtime cause.
+      return error ?? 'This chat provider does not support the requested option.';
     default:
       return error ?? fallback;
   }
@@ -173,6 +187,7 @@ export class MessageSenderService {
   private readonly ultracode = inject(UltracodeStateService);
   private readonly sendLock = inject(CommandCenterSendLockService);
   private readonly carryOver = inject(ProviderCarryOverService);
+  private readonly resumeNotice = inject(ProviderSessionResumeNoticeService);
 
   /** Grace-window expiry timers for timed-out starts, by tab. */
   private readonly startGraceTimers = new Map<
@@ -384,12 +399,14 @@ export class MessageSenderService {
     return `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
   }
 
-  private isCodexFailure(code: string | undefined): boolean {
+  /** A coded failure of a native runtime (Codex app-server or a provider session). */
+  private isNativeRuntimeFailure(code: string | undefined): boolean {
     return (
       code === 'CODEX_BUSY' ||
       code === 'CODEX_UNSUPPORTED_OPTION' ||
       code === 'CODEX_UNAVAILABLE' ||
-      code === 'CODEX_RUNTIME_FAILED'
+      code === 'CODEX_RUNTIME_FAILED' ||
+      (code?.startsWith('PROVIDER_SESSION_') ?? false)
     );
   }
 
@@ -829,7 +846,7 @@ export class MessageSenderService {
         if (
           result.errorCode === 'SESSION_ENDED' ||
           result.data?.errorCode === 'SESSION_ENDED' ||
-          this.isCodexFailure(result.errorCode ?? result.data?.errorCode)
+          this.isNativeRuntimeFailure(result.errorCode ?? result.data?.errorCode)
         ) {
           this.tabManager.setLastTerminalReason(activeTabId, 'api_error');
         }
@@ -1096,6 +1113,16 @@ export class MessageSenderService {
         { signal: abortSignal },
       );
 
+      // The tab was wiped to a fresh chat while this continue was in flight:
+      // `/clear` resets it on its CHAT_COMPLETE before the RPC answers, which
+      // aborts the call with `tab-reset`. The transcript this send wrote to no
+      // longer exists, so nothing of the tab is touched and no delivery
+      // failure is shown on the fresh chat. Any other abort still fails below.
+      if (abortSignal?.aborted && abortSignal.reason === ABORT_REASON_TAB_RESET) {
+        this.sessionManager.setStatus('loaded');
+        return { success: true, settled: true };
+      }
+
       if ((result.data?.errorCode ?? result.errorCode) === 'TURN_IN_FLIGHT') {
         this.withdrawRefusedPrompt(
           activeTabId,
@@ -1140,6 +1167,11 @@ export class MessageSenderService {
         console.error(
           '[MessageSender] Failed to continue chat:',
           result.data?.error ?? result.error,
+        );
+        this.resumeNotice.flagIfResumeFailed(
+          result.errorCode ?? result.data?.errorCode,
+          activeTabId,
+          sessionId,
         );
         this.rollBackUnsentPrompt(activeTabId, userMessage.id);
         this.tabManager.markLoaded(activeTabId);

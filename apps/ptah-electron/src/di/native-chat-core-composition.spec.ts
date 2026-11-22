@@ -66,6 +66,14 @@ function pendingCodex(scope: DependencyContainer) {
   };
 }
 
+/** A built provider-session binding double whose `register` binds the ports. */
+function pendingProviderSession(scope: DependencyContainer) {
+  return {
+    profiles: ['antigravity'] as const,
+    register: jest.fn(() => bindProviderSessionPorts(scope)),
+  };
+}
+
 /** A provider-session adapter double; P7 supplies the real one. */
 function bindProviderSessionPorts(scope: DependencyContainer): void {
   scope.registerInstance(SDK_TOKENS.PROVIDER_SESSION_CHAT_PORTS, {});
@@ -79,12 +87,13 @@ describe('Electron native chat core composition', () => {
   it('Codex failed, provider sessions bound: the core is registered without Codex', async () => {
     const h = harness();
     const core = await bindElectronNativeChatCore(h.scope);
-    bindProviderSessionPorts(h.scope);
+    const providerSession = pendingProviderSession(h.scope);
 
     const capabilities = finishElectronNativeChatCore(core, {
       codex: undefined,
-      providerSessionProfiles: ['antigravity'],
+      providerSession,
     });
+    expect(providerSession.register).toHaveBeenCalledTimes(1);
 
     expect(capabilities).toEqual({
       nativeCodex: false,
@@ -117,7 +126,7 @@ describe('Electron native chat core composition', () => {
     const codex = pendingCodex(h.scope);
     const capabilities = finishElectronNativeChatCore(core, {
       codex,
-      providerSessionProfiles: [],
+      providerSession: undefined,
     });
     expect(codex.register).toHaveBeenCalledTimes(1);
     expect(capabilities).toEqual({ nativeCodex: true, nativeCodexGateway: true });
@@ -128,6 +137,25 @@ describe('Electron native chat core composition', () => {
     expect(h.unsubscribe).not.toHaveBeenCalled();
   });
 
+  it('Codex and provider sessions bound: both register with one core', async () => {
+    const h = harness();
+    const core = await bindElectronNativeChatCore(h.scope);
+    const codex = pendingCodex(h.scope);
+    const providerSession = pendingProviderSession(h.scope);
+    const capabilities = finishElectronNativeChatCore(core, {
+      codex,
+      providerSession,
+    });
+    expect(codex.register).toHaveBeenCalledTimes(1);
+    expect(providerSession.register).toHaveBeenCalledTimes(1);
+    expect(capabilities).toEqual({
+      nativeCodex: true,
+      nativeCodexGateway: true,
+      providerSessions: ['antigravity'],
+    });
+    expect(h.scope.resolve(SDK_TOKENS.ROUTING_AGENT_ADAPTER)).not.toBeNull();
+  });
+
   it('both failed -> defaults: registers nothing and disposes the lookup', async () => {
     const h = harness();
     const core = await bindElectronNativeChatCore(h.scope);
@@ -135,7 +163,7 @@ describe('Electron native chat core composition', () => {
     expect(
       finishElectronNativeChatCore(core, {
         codex: undefined,
-        providerSessionProfiles: [],
+        providerSession: undefined,
       }),
     ).toBeUndefined();
 
@@ -153,11 +181,12 @@ describe('Electron native chat core composition', () => {
     const h = harness();
     const core = await bindElectronNativeChatCore(h.scope);
     expect(h.scope.resolve(SDK_TOKENS.ROUTING_AGENT_ADAPTER)).toBeNull();
+    const lateProviderSession = pendingProviderSession(h.scope);
 
     expect(() =>
       finishElectronNativeChatCore(core, {
         codex: undefined,
-        providerSessionProfiles: ['antigravity'],
+        providerSession: lateProviderSession,
       }),
     ).toThrow(
       expect.objectContaining({
@@ -165,6 +194,7 @@ describe('Electron native chat core composition', () => {
         code: 'late-registration',
       }),
     );
+    expect(lateProviderSession.register).not.toHaveBeenCalled();
     expect(h.scope.resolve(SDK_TOKENS.RUNTIME_ADMISSION_PORT)).toBeNull();
     // FM-2: nothing was registered, so the lookup is released.
     expect(h.unsubscribe).toHaveBeenCalledTimes(1);
@@ -179,7 +209,7 @@ describe('Electron native chat core composition', () => {
     expect(() =>
       finishElectronNativeChatCore(core, {
         codex,
-        providerSessionProfiles: [],
+        providerSession: undefined,
       }),
     ).toThrow(expect.objectContaining({ code: 'late-registration' }));
 
@@ -203,15 +233,14 @@ describe('Electron native chat core composition', () => {
   it('registers the core once', async () => {
     const h = harness();
     const core = await bindElectronNativeChatCore(h.scope);
-    bindProviderSessionPorts(h.scope);
     finishElectronNativeChatCore(core, {
       codex: undefined,
-      providerSessionProfiles: ['antigravity'],
+      providerSession: pendingProviderSession(h.scope),
     });
     expect(() =>
       finishElectronNativeChatCore(core, {
         codex: undefined,
-        providerSessionProfiles: ['antigravity'],
+        providerSession: pendingProviderSession(h.scope),
       }),
     ).toThrow(ElectronNativeChatCoreError);
   });
