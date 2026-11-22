@@ -200,12 +200,16 @@ interface IgnoreRule {
   readonly dirOnly: boolean;
   /** Matched against the root-relative path, else against the entry name. */
   readonly anchored: boolean;
+  /** A `!` rule: a match re-includes the entry. */
+  readonly negated: boolean;
 }
 
 /**
  * Root `.gitignore` rules for the Node walk, as a test of one entry. Only
- * the root file and plain (non-negated) patterns are applied; nested ignore
- * files and `!` rules are not, so the walk may search a little more than rg.
+ * the root file is read; nested ignore files are not, so the walk may search
+ * a little more than rg. The last matching rule wins, as in git, so a `!`
+ * rule re-includes an entry. The walk never enters an ignored directory, so
+ * a file under one stays out, as in git.
  */
 async function loadRootIgnore(
   rootReal: string,
@@ -221,27 +225,36 @@ async function loadRootIgnore(
   const rules: IgnoreRule[] = [];
   for (const raw of text.split(/\r?\n/)) {
     const line = raw.trim();
-    if (line === '' || line.startsWith('#') || line.startsWith('!')) {
+    if (line === '' || line.startsWith('#')) {
       continue;
     }
-    const dirOnly = line.endsWith('/');
-    const pattern = line.replace(/\/+$/, '').replace(/^\//, '');
+    const negated = line.startsWith('!');
+    const rule = negated ? line.slice(1) : line;
+    const dirOnly = rule.endsWith('/');
+    const pattern = rule.replace(/\/+$/, '').replace(/^\//, '');
     if (pattern === '') {
       continue;
     }
-    const anchored = line.replace(/\/+$/, '').includes('/');
+    const anchored = rule.replace(/\/+$/, '').includes('/');
     rules.push({
       regex: anchored ? globToAnchoredRegExp(pattern) : globToRegExp(pattern),
       dirOnly,
       anchored,
+      negated,
     });
   }
-  return (relative, name, isDir) =>
-    rules.some(
-      (rule) =>
+  return (relative, name, isDir) => {
+    let ignored = false;
+    for (const rule of rules) {
+      if (
         (!rule.dirOnly || isDir) &&
-        rule.regex.test(rule.anchored ? relative : name),
-    );
+        rule.regex.test(rule.anchored ? relative : name)
+      ) {
+        ignored = !rule.negated;
+      }
+    }
+    return ignored;
+  };
 }
 
 /** First `rg` binary on PATH, or `undefined`. */

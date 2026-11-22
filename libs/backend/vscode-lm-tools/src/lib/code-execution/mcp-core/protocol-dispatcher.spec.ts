@@ -10664,3 +10664,74 @@ describe('protocol-handlers › phase tool profile', () => {
     expect(appsNames).toContain(otherAppsTool);
   });
 });
+
+describe('protocol-handlers › navigation tools bind workspaceRoot to a known root (TASK_2026_2299)', () => {
+  let root: string;
+  let outside: string;
+
+  beforeEach(() => {
+    root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ptah-nav-')));
+    outside = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), 'ptah-nav-out-')),
+    );
+    fs.mkdirSync(path.join(root, 'sub'));
+    fs.writeFileSync(path.join(root, 'sub', 'a.txt'), 'needle here\n');
+    fs.writeFileSync(path.join(outside, 'b.txt'), 'needle there\n');
+  });
+
+  afterEach(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  });
+
+  async function grep(workspaceRoot: string | undefined): Promise<{
+    text: string;
+    isError: boolean;
+  }> {
+    const res = await handleMCPRequest(
+      makeRequest({
+        id: 'nav-root',
+        method: 'tools/call',
+        params: {
+          name: 'ptah_grep',
+          arguments: {
+            pattern: 'needle',
+            ...(workspaceRoot ? { workspaceRoot } : {}),
+          },
+        },
+      }),
+      buildDeps({
+        ptahAPI: buildPtahAPIStub({
+          workspace: { getInfo: async () => ({ path: root }) },
+        }),
+      }),
+    );
+    const result = res.result as {
+      content: Array<{ text: string }>;
+      isError?: boolean;
+    };
+    return { text: result.content[0].text, isError: result.isError === true };
+  }
+
+  it('refuses a workspaceRoot outside the open workspace before any read', async () => {
+    const reply = await grep(outside);
+    expect(reply.isError).toBe(true);
+    expect(reply.text).toContain('"workspaceRoot" is not inside');
+    expect(reply.text).not.toContain('needle there');
+  });
+
+  it('accepts the open workspace and a folder inside it', async () => {
+    const same = await grep(root);
+    expect(same.isError).toBe(false);
+    expect(same.text).toContain('a.txt');
+    const inner = await grep(path.join(root, 'sub'));
+    expect(inner.isError).toBe(false);
+    expect(inner.text).toContain('a.txt');
+  });
+
+  it('uses the open workspace when no workspaceRoot is passed', async () => {
+    const reply = await grep(undefined);
+    expect(reply.isError).toBe(false);
+    expect(reply.text).toContain('a.txt');
+  });
+});

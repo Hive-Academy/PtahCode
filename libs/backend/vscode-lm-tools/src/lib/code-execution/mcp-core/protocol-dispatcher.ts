@@ -1149,6 +1149,24 @@ async function handleIndividualTool(
             getCallerWorkspaceRoot() ??
             (await ptahAPI.workspace.getInfo())?.path,
         };
+        // A supplied `workspaceRoot` is the containment boundary of the
+        // handlers, so it must lie inside a root the host or the caller
+        // already has. With no known root there is nothing to compare with.
+        const suppliedRoot = (args as { workspaceRoot?: unknown })
+          .workspaceRoot;
+        if (typeof suppliedRoot === 'string' && suppliedRoot.trim() !== '') {
+          const allowedRoots = [
+            getCallerWorkspaceRoot(),
+            (await ptahAPI.workspace.getInfo())?.path,
+            ...knownWorkspaceFolders(deps),
+          ].filter((root): root is string => !!root && root.trim() !== '');
+          if (!(await isInsideKnownRoot(suppliedRoot.trim(), allowedRoots))) {
+            return toolErrorResponse(
+              request,
+              'Error: "workspaceRoot" is not inside the open workspace or the caller workspace. Omit it to use the current workspace.',
+            );
+          }
+        }
         const reply =
           name === GREP_TOOL_NAME
             ? await handleGrep(args, navDeps)
@@ -4429,6 +4447,32 @@ async function findKnownWorkspaceFolder(
     }
   }
   return undefined;
+}
+
+/**
+ * True when `candidate` is one of `roots` or lies inside one, compared
+ * canonically ({@link canonicalFolderKey}); true when `roots` is empty
+ * (nothing to compare with).
+ */
+async function isInsideKnownRoot(
+  candidate: string,
+  roots: readonly string[],
+): Promise<boolean> {
+  if (roots.length === 0) {
+    return true;
+  }
+  const plain = stripExtendedLengthPrefix(candidate);
+  if (!path.isAbsolute(plain)) {
+    return false;
+  }
+  const target = await canonicalFolderKey(plain);
+  for (const root of roots) {
+    const key = await canonicalFolderKey(root);
+    if (target === key || target.startsWith(key + path.sep)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**

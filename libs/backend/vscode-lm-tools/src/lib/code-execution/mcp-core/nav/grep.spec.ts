@@ -271,6 +271,20 @@ describe('handleGrep (node engine)', () => {
     expect(reply.text).not.toContain('src/b.md');
   });
 
+  it('re-includes a file that a later ! rule names, and keeps the last rule', async () => {
+    await writeFile(
+      path.join(root, '.gitignore'),
+      '*.log\n!keep.log\n*.tmp\n!drop.tmp\ndrop.tmp\n',
+    );
+    await writeFile(path.join(root, 'src', 'keep.log'), 'LIMIT kept\n');
+    await writeFile(path.join(root, 'src', 'other.log'), 'LIMIT other\n');
+    await writeFile(path.join(root, 'src', 'drop.tmp'), 'LIMIT dropped\n');
+    const reply = await handleGrep({ pattern: 'LIMIT' }, deps);
+    expect(reply.text).toContain('src/keep.log');
+    expect(reply.text).not.toContain('other.log');
+    expect(reply.text).not.toContain('drop.tmp');
+  });
+
   it('stops a backtracking regular expression instead of freezing the host', async () => {
     await writeFile(path.join(root, 'src', 'slow.txt'), `${'a'.repeat(40)}!\n`);
     const started = Date.now();
