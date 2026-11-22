@@ -39,7 +39,7 @@ import {
   type FallbackExecutor,
   type FallbackReason,
 } from './fallback-usage.runner';
-import { FALLBACK_CACHE_MS, FALLBACK_PARSE_BACKOFF_MS, FALLBACK_SHORT_BACKOFF_MS } from './fallback-usage.constants';
+import { FALLBACK_PARSE_BACKOFF_MS, FALLBACK_SHORT_BACKOFF_MS } from './fallback-usage.constants';
 import { parseAntigravityUsageGroups, parseAntigravityUsageTsv } from './antigravity-usage.parser';
 import type { AntigravityCliCause, AntigravityUsageReading } from './antigravity-oauth-plan-usage.reader';
 import { createCachedAgySignIn, readAgySignIn, type AgySignInState } from './antigravity-sign-in';
@@ -338,8 +338,6 @@ function trip(cause: 'billed' | 'killed', logger: Logger): void {
 }
 
 function backoffFor(reading: AntigravityUsageReading): number {
-  const cause = reading.sourceFailures?.[0]?.cause;
-  if (cause === 'cli-deferred') return FALLBACK_CACHE_MS;
   return reading.statusReason === 'cli-parse-failed' ? FALLBACK_PARSE_BACKOFF_MS : FALLBACK_SHORT_BACKOFF_MS;
 }
 
@@ -356,8 +354,11 @@ export async function readAntigravityCliUsage(
   const reading = await readOnce(signal, options, now);
   const cause = reading.sourceFailures?.[0]?.cause;
   // No backoff for a success, the breaker, a run still owned by another
-  // caller, or a caller that stopped waiting (its run goes on and settles).
-  if (reading.status === 'available' || cause === 'cli-disabled' || cause === 'cli-busy' || signal?.aborted)
+  // caller, a caller that stopped waiting (its run goes on and settles), or a
+  // deferral: the short budget belonged to that request, and the next one
+  // with a full window must run.
+  if (reading.status === 'available' || cause === 'cli-disabled' || cause === 'cli-busy'
+    || cause === 'cli-deferred' || signal?.aborted)
     backoff.delete(key);
   else backoff.set(key, { until: now() + backoffFor(reading), reading });
   return reading;

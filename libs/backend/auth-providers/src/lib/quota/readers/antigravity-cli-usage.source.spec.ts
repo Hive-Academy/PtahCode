@@ -210,6 +210,10 @@ describe('readAntigravityCliUsage', () => {
     expect(await readAntigravityCliUsage(undefined, options({ budgetMs: ANTIGRAVITY_CLI_TIMEOUT_MS - 1 })))
       .toMatchObject({ statusReason: 'usage-budget-exhausted', sourceFailures: [{ cause: 'cli-deferred' }] });
     expect(spawnProcess).not.toHaveBeenCalled();
+    // The deferral is not cached: the next request with a full window runs.
+    expect(await readAntigravityCliUsage(undefined, options({ budgetMs: ANTIGRAVITY_CLI_TIMEOUT_MS })))
+      .toMatchObject({ status: 'available' });
+    expect(spawnProcess).toHaveBeenCalledTimes(1);
   });
 
   it('spawns with the full window, never a squeezed timeout', async () => {
