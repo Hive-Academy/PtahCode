@@ -10734,6 +10734,74 @@ describe('protocol-handlers › navigation tools bind workspaceRoot to a known r
     expect(reply.isError).toBe(false);
     expect(reply.text).toContain('a.txt');
   });
+
+  /** One `ptah_grep` call against a host whose open workspace is `open`. */
+  async function grepWithHost(
+    workspaceRoot: string,
+    open: string | undefined,
+  ): Promise<{ text: string; isError: boolean }> {
+    const res = await handleMCPRequest(
+      makeRequest({
+        id: 'nav-root-host',
+        method: 'tools/call',
+        params: {
+          name: 'ptah_grep',
+          arguments: { pattern: 'needle', workspaceRoot },
+        },
+      }),
+      buildDeps({
+        ptahAPI: buildPtahAPIStub({
+          workspace: {
+            getInfo: async () => (open ? { path: open } : undefined),
+          },
+        }),
+      }),
+    );
+    const result = res.result as {
+      content: Array<{ text: string }>;
+      isError?: boolean;
+    };
+    return { text: result.content[0].text, isError: result.isError === true };
+  }
+
+  it('refuses a supplied workspaceRoot when no root is known (fail closed)', async () => {
+    const reply = await grepWithHost(outside, undefined);
+    expect(reply.isError).toBe(true);
+    expect(reply.text).toContain('"workspaceRoot" cannot be checked');
+    expect(reply.text).not.toContain('needle there');
+  });
+
+  // UNC keys compare lexically, but the handlers use the real path of the
+  // root; the guard must check the same real location. win32 only: a UNC
+  // path is not absolute on POSIX. `realpath` is stubbed for the share.
+  (process.platform === 'win32' ? it : it.skip)(
+    'checks a UNC workspaceRoot by real path, and keeps a plain UNC subdirectory (win32 only)',
+    async () => {
+      const share = '\\\\srv\\share\\repo';
+      const actual = fs.promises.realpath.bind(fs.promises);
+      const realpath = jest
+        .spyOn(fs.promises, 'realpath')
+        .mockImplementation(async (p) => {
+          const text = String(p).toLowerCase();
+          if (text === `${share}\\link`.toLowerCase()) {
+            return '\\\\srv\\share\\elsewhere';
+          }
+          if (text.startsWith(share.toLowerCase())) {
+            return String(p);
+          }
+          return actual(p);
+        });
+      try {
+        const link = await grepWithHost(`${share}\\link`, share);
+        expect(link.isError).toBe(true);
+        expect(link.text).toContain('"workspaceRoot" is not inside');
+        const sub = await grepWithHost(`${share}\\sub`, share);
+        expect(sub.text).not.toContain('"workspaceRoot" is not inside');
+      } finally {
+        realpath.mockRestore();
+      }
+    },
+  );
   /**
    * A caller without a shell: a read-only capability that declares its root
    * in the URL. It can call the read-only ptah tools and nothing else.

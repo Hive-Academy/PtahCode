@@ -205,6 +205,35 @@ interface IgnoreRule {
 }
 
 /**
+ * Text of the root `.gitignore`, or `undefined` when it is absent, not a
+ * regular file (a FIFO or device would block the read) or over the file
+ * size cap. The open is non-blocking and the type is checked on the open
+ * handle, so a swap after a path check cannot make the read hang.
+ */
+async function readRootIgnoreText(
+  rootReal: string,
+): Promise<string | undefined> {
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    handle = await open(
+      path.join(rootReal, '.gitignore'),
+      fsConstants.O_RDONLY | (fsConstants.O_NONBLOCK ?? 0),
+    );
+    const info = await handle.stat();
+    if (!info.isFile() || info.size > GREP_MAX_FILE_BYTES) {
+      return undefined;
+    }
+    return await handle.readFile('utf8');
+  } catch {
+    // degradation-audit: optional-capability - no readable .gitignore means
+    // no extra rules; the fixed skip list still applies.
+    return undefined;
+  } finally {
+    await handle?.close();
+  }
+}
+
+/**
  * Root `.gitignore` rules for the Node walk, as a test of one entry. Only
  * the root file is read; nested ignore files are not, so the walk may search
  * a little more than rg. The last matching rule wins, as in git, so a `!`
@@ -214,12 +243,8 @@ interface IgnoreRule {
 async function loadRootIgnore(
   rootReal: string,
 ): Promise<(relative: string, name: string, isDir: boolean) => boolean> {
-  let text: string;
-  try {
-    text = await readFile(path.join(rootReal, '.gitignore'), 'utf8');
-  } catch {
-    // degradation-audit: optional-capability - no readable .gitignore means
-    // no extra rules; the fixed skip list still applies.
+  const text = await readRootIgnoreText(rootReal);
+  if (text === undefined) {
     return () => false;
   }
   const rules: IgnoreRule[] = [];
@@ -426,8 +451,17 @@ export function runRipgrep(
         consume(pending);
       }
       // Exit 1 = no match; 2 = an error, though matches may still stand.
-      if (code === 2 && !incomplete && total === 0) {
-        finish(stderr.trim().split('\n')[0] || 'rg exited with an error');
+      // With matches, rg skipped what it could not read: the result is
+      // partial, so it is marked incomplete and carries the rg error text.
+      if (code === 2 && !incomplete) {
+        const reason =
+          stderr.trim().split('\n')[0] || 'rg exited with an error';
+        if (total > 0) {
+          incomplete = true;
+          finish(`rg reported an error, so matches may be partial: ${reason}`);
+          return;
+        }
+        finish(reason);
         return;
       }
       finish();

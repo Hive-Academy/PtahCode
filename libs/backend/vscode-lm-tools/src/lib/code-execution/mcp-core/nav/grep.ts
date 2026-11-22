@@ -225,7 +225,8 @@ export async function renderGrepResult(
       `+ ${notShown} more matches not shown; narrow with path/glob or a longer pattern`,
     );
   }
-  if (result.incomplete) {
+  // An engine error explains the early stop itself (Engine note below).
+  if (result.incomplete && !result.error) {
     footer.push(
       'The search stopped early (output, time or file limit); narrow with path/glob.',
     );
@@ -255,7 +256,7 @@ export async function handleGrep(
   const root = args.workspaceRoot ?? (await deps.defaultWorkspaceRoot());
   if (!root) {
     return fail(
-      'Error: no workspace is open; pass "workspaceRoot" as an absolute path.',
+      'Error: no workspace is open. Open a workspace folder first; a "workspaceRoot" argument must lie inside an open workspace.',
     );
   }
   const resolved = await resolveNavWorkspacePath(args.path ?? '.', root);

@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import {
   chmod,
   mkdtemp,
@@ -16,7 +17,7 @@ import {
   isCaseInsensitive,
   type GrepRequest,
 } from './grep-engine';
-import { GREP_MAX_CHARS } from './grep.limits';
+import { GREP_MAX_CHARS, GREP_MAX_FILE_BYTES } from './grep.limits';
 
 jest.mock('../route-tool-handlers', () => ({
   describeZodIssues: (error: {
@@ -285,6 +286,27 @@ describe('handleGrep (node engine)', () => {
     expect(reply.text).not.toContain('drop.tmp');
   });
 
+  (process.platform === 'win32' ? it.skip : it)(
+    'skips a .gitignore that is a FIFO instead of blocking on the read',
+    async () => {
+      execFileSync('mkfifo', [path.join(root, '.gitignore')]);
+      const reply = await handleGrep({ pattern: 'LIMIT', path: 'src' }, deps);
+      expect(reply.isError).toBe(false);
+      expect(reply.text).toContain('src/a.ts');
+    },
+    10_000,
+  );
+
+  it('skips a .gitignore over the size cap', async () => {
+    await writeFile(
+      path.join(root, '.gitignore'),
+      `*.log\n${'#'.repeat(GREP_MAX_FILE_BYTES)}\n`,
+    );
+    await writeFile(path.join(root, 'src', 'run.log'), 'LIMIT in a log\n');
+    const reply = await handleGrep({ pattern: 'LIMIT' }, deps);
+    expect(reply.text).toContain('src/run.log');
+  });
+
   it('stops a backtracking regular expression instead of freezing the host', async () => {
     await writeFile(path.join(root, 'src', 'slow.txt'), `${'a'.repeat(40)}!\n`);
     const started = Date.now();
@@ -363,6 +385,37 @@ describe('handleGrep (rg engine)', () => {
         },
       );
       expect(reply.text).toContain('(engine: node)');
+    },
+  );
+
+  itPosix(
+    'marks matches partial and shows the rg error when rg exits 2 after matching',
+    async () => {
+      const match = JSON.stringify({
+        type: 'match',
+        data: {
+          path: { text: './src/a.ts' },
+          lines: { text: 'export const LIMIT = 3;\n' },
+          line_number: 1,
+        },
+      });
+      const bin = await fakeRg(
+        `cat <<'EOF'\n${match}\nEOF\necho "src/locked: Permission denied (os error 13)" >&2; exit 2`,
+      );
+      const reply = await handleGrep(
+        { pattern: 'LIMIT' },
+        {
+          analyze: jest.fn().mockResolvedValue(OUTLINE),
+          defaultWorkspaceRoot: async () => root,
+          findRipgrep: async () => bin,
+        },
+      );
+      expect(reply.text.split('\n')[0]).toBe(
+        'at least 1 match in at least 1 file (engine: rg)',
+      );
+      expect(reply.text).toContain(
+        'Engine note: rg reported an error, so matches may be partial: src/locked: Permission denied (os error 13)',
+      );
     },
   );
 });

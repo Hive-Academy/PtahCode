@@ -182,7 +182,7 @@ export function renderSymbolSearchText(
     result.extractUnavailable > 0
   ) {
     lines.push(
-      `[${result.extractUnavailable} hit(s) without a range: the index row is older than the file]`,
+      `[${result.extractUnavailable} hit(s) without a code extract: the source file is missing, unreadable or too large, or the indexed range no longer matches the file]`,
     );
   }
   if (result.hits.length === 0) {

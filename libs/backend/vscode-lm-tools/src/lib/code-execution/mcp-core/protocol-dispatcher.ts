@@ -1151,7 +1151,7 @@ async function handleIndividualTool(
         };
         // A supplied `workspaceRoot` is the containment boundary of the
         // handlers, so it must lie inside a root the host or the caller
-        // already has. With no known root there is nothing to compare with.
+        // already has. With no known root it is refused (fail closed).
         const suppliedRoot = (args as { workspaceRoot?: unknown })
           .workspaceRoot;
         if (typeof suppliedRoot === 'string' && suppliedRoot.trim() !== '') {
@@ -1160,6 +1160,12 @@ async function handleIndividualTool(
             (await ptahAPI.workspace.getInfo())?.path,
             ...knownWorkspaceFolders(deps),
           ].filter((root): root is string => !!root && root.trim() !== '');
+          if (allowedRoots.length === 0) {
+            return toolErrorResponse(
+              request,
+              'Error: "workspaceRoot" cannot be checked: no workspace is open and the caller declared none, so a supplied root is refused. Open a workspace folder first.',
+            );
+          }
           if (!(await isInsideKnownRoot(suppliedRoot.trim(), allowedRoots))) {
             return toolErrorResponse(
               request,
@@ -4451,24 +4457,74 @@ async function findKnownWorkspaceFolder(
 
 /**
  * True when `candidate` is one of `roots` or lies inside one, compared
- * canonically ({@link canonicalFolderKey}); true when `roots` is empty
- * (nothing to compare with).
+ * canonically ({@link canonicalFolderKey}). False when `roots` is empty:
+ * with nothing to compare with, a caller-named root is refused (fail closed).
+ * A UNC candidate keys lexically there, but the navigation handlers use the
+ * real path of the root, so a UNC candidate is also checked by real path; it
+ * is resolved only after it matched a known root lexically, so only a share
+ * the host already knows is touched. One that cannot be resolved is refused.
  */
 async function isInsideKnownRoot(
   candidate: string,
   roots: readonly string[],
 ): Promise<boolean> {
   if (roots.length === 0) {
-    return true;
+    return false;
   }
   const plain = stripExtendedLengthPrefix(candidate);
   if (!path.isAbsolute(plain)) {
     return false;
   }
-  const target = await canonicalFolderKey(plain);
+  if (!(await keyInsideAnyRoot(await canonicalFolderKey(plain), roots))) {
+    return false;
+  }
+  const resolved = path.resolve(plain);
+  if (!isUncPath(resolved)) {
+    // Not UNC: `canonicalFolderKey` already used the real path.
+    return true;
+  }
+  try {
+    const realKey = folderKeyOf(
+      stripExtendedLengthPrefix(await fs.promises.realpath(resolved)),
+    );
+    return await keyInsideAnyRoot(realKey, roots, true);
+  } catch {
+    // degradation-audit: reported - a UNC root that cannot be resolved is
+    // refused; the caller gets an error reply that says so.
+    return false;
+  }
+}
+
+/**
+ * Whether `key` equals or lies inside one of `roots`, each keyed by
+ * {@link canonicalFolderKey}, or by its real path when `real` is set (a root
+ * whose real path cannot be read then matches nothing).
+ */
+async function keyInsideAnyRoot(
+  key: string,
+  roots: readonly string[],
+  real = false,
+): Promise<boolean> {
   for (const root of roots) {
-    const key = await canonicalFolderKey(root);
-    if (target === key || target.startsWith(key + path.sep)) {
+    let rootKey: string;
+    if (real) {
+      try {
+        rootKey = folderKeyOf(
+          stripExtendedLengthPrefix(
+            await fs.promises.realpath(
+              path.resolve(stripExtendedLengthPrefix(root)),
+            ),
+          ),
+        );
+      } catch {
+        // degradation-audit: reported - an unreadable root matches nothing;
+        // when no root matches, the caller refuses with an error reply.
+        continue;
+      }
+    } else {
+      rootKey = await canonicalFolderKey(root);
+    }
+    if (key === rootKey || key.startsWith(rootKey + path.sep)) {
       return true;
     }
   }
@@ -4495,6 +4551,11 @@ async function canonicalFolderKey(folder: string): Promise<string> {
       // Does not exist (yet): the lexical form is the key.
     }
   }
+  return folderKeyOf(resolved);
+}
+
+/** `resolved` without trailing separators, case folded on win32. */
+function folderKeyOf(resolved: string): string {
   const trimmed = resolved.replace(/[\\/]+$/, '');
   return process.platform === 'win32' ? trimmed.toLowerCase() : trimmed;
 }

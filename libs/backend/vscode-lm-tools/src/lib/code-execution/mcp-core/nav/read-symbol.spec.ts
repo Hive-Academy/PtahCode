@@ -326,13 +326,13 @@ describe('handleReadSymbol', () => {
     expect(reply.text).toBe('notes.txt:1-1 (500 lines)\n1| line 1');
   });
 
-  it('asks for workspaceRoot when no workspace is open', async () => {
+  it('says no workspace is open when there is no root', async () => {
     deps.defaultWorkspaceRoot.mockResolvedValue(undefined);
     const reply = await handleReadSymbol(
       { file: 'notes.txt', startLine: 1 },
       deps,
     );
     expect(reply.isError).toBe(true);
-    expect(reply.text).toContain('workspaceRoot');
+    expect(reply.text).toContain('no workspace is open');
   });
 });

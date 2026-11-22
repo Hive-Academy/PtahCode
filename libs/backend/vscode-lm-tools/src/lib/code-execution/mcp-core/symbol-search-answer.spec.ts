@@ -121,6 +121,18 @@ describe('renderSymbolSearchText', () => {
     expect(text).toContain('reindex started');
   });
 
+  it('names both causes when hits have no code extract', () => {
+    const text = renderSymbolSearchText(result({ extractUnavailable: 2 }));
+    expect(text).toContain('2 hit(s) without a code extract');
+    expect(text).toContain('missing, unreadable or too large');
+    expect(text).toContain('indexed range no longer matches');
+  });
+
+  it('says nothing about extracts when all of them were read', () => {
+    const text = renderSymbolSearchText(result({ extractUnavailable: 0 }));
+    expect(text).not.toContain('without a code extract');
+  });
+
   it('reports an error with the header', () => {
     const text = renderSymbolSearchText({
       index: result().index,

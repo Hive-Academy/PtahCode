@@ -295,7 +295,7 @@ export async function handleReadSymbol(
   const root = args.workspaceRoot ?? (await deps.defaultWorkspaceRoot());
   if (!root) {
     return fail(
-      'Error: no workspace is open; pass "workspaceRoot" as an absolute path.',
+      'Error: no workspace is open. Open a workspace folder first; a "workspaceRoot" argument must lie inside an open workspace.',
     );
   }
   const resolved = await resolveNavWorkspacePath(args.file, root);
