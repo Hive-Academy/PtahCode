@@ -33,9 +33,9 @@ import { innermostSymbolAt, toNavSymbols, type NavSymbol } from './nav-symbols';
 
 export const GrepArgsSchema = z
   .object({
-    pattern: z.string().min(1),
+    pattern: z.string().min(1).max(1000),
     path: z.string().trim().min(1).optional(),
-    glob: z.string().trim().min(1).optional(),
+    glob: z.string().trim().min(1).max(200).optional(),
     regex: z.boolean().optional(),
     caseSensitive: z.boolean().optional(),
     context: z.number().int().min(0).max(GREP_MAX_CONTEXT).optional(),
@@ -194,7 +194,6 @@ export async function renderGrepResult(
 
   const body: string[] = [];
   let chars = header.length;
-  let cut = false;
   for (const [file, matches] of shown) {
     const symbols = await loadSymbols(deps, rootReal, file);
     const fileLines = args.context > 0 ? await readLines(rootReal, file) : [];
@@ -207,13 +206,11 @@ export async function renderGrepResult(
       // Keep whole lines of this file group while they fit.
       for (const line of block) {
         if (chars + line.length + 1 > GREP_MAX_CHARS) {
-          cut = true;
           break;
         }
         body.push(line);
         chars += line.length + 1;
       }
-      cut = true;
       break;
     }
     body.push(...block);
@@ -232,6 +229,9 @@ export async function renderGrepResult(
     footer.push(
       'The search stopped early (output, time or file limit); narrow with path/glob.',
     );
+  }
+  if (result.skippedNote) {
+    footer.push(`Note: ${result.skippedNote}.`);
   }
   if (result.error) {
     footer.push(`Engine note: ${result.error}`);
@@ -303,7 +303,7 @@ export async function handleGrep(
       ? ' The search stopped early (time or file limit) before it matched anything, so the text may still exist; narrow with path/glob.'
       : '';
     return ok(
-      `0 matches (engine: ${result.engine}).${stopped} Try regex:true for a pattern, includeIgnored:true with a scoped path for node_modules, or a different glob.` +
+      `0 matches (engine: ${result.engine}).${stopped}${result.skippedNote ? ` Note: ${result.skippedNote}.` : ''} Try regex:true for a pattern, includeIgnored:true with a scoped path for node_modules, or a different glob.` +
         (result.error ? `\nEngine note: ${result.error}` : ''),
     );
   }

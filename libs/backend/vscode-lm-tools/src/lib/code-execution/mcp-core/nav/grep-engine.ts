@@ -5,10 +5,18 @@
  */
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import type { Readable } from 'node:stream';
-import { access, open, readdir, readFile, stat } from 'node:fs/promises';
+import {
+  access,
+  open,
+  readdir,
+  readFile,
+  realpath,
+  stat,
+} from 'node:fs/promises';
 import { constants as fsConstants, type Dirent } from 'node:fs';
 import * as path from 'node:path';
 import * as vm from 'node:vm';
+import { canonicalPathInsideRoot } from '../../namespace-builders/browser-file-url';
 import { toPosixRelative } from './nav-workspace-path';
 import {
   GREP_COLLECT_CAP,
@@ -52,6 +60,8 @@ export interface GrepEngineResult {
   readonly totalMatches: number;
   /** The engine stopped early (cap, time or file limit). */
   readonly incomplete: boolean;
+  /** What the engine could not search, in words; absent when nothing. */
+  readonly skippedNote?: string;
   /** Set when the search failed; `matches` may then be partial. */
   readonly error?: string;
 }
@@ -136,7 +146,10 @@ export function isNegatedGlob(glob: string): boolean {
   return glob.startsWith('!');
 }
 
-function globToRegExpBody(glob: string): RegExp {
+function globToRegExpBody(rawGlob: string): RegExp {
+  // `***` and longer star runs mean the same as `**`; collapsing them keeps
+  // the generated expression free of stacked quantifiers.
+  const glob = rawGlob.replace(/\*{3,}/g, '**');
   let out = '';
   let braceDepth = 0;
   for (let i = 0; i < glob.length; i++) {
@@ -172,6 +185,63 @@ function globToRegExpBody(glob: string): RegExp {
   }
   // A glob without a slash matches the file name anywhere, like rg.
   return new RegExp(glob.includes('/') ? `^${out}$` : `(?:^|/)${out}$`);
+}
+
+/** Glob to a RegExp anchored at both ends of a root-relative path. */
+function globToAnchoredRegExp(glob: string): RegExp {
+  const body = globToRegExpBody(glob.includes('/') ? glob : `/${glob}`).source;
+  // `body` is `^...$` when the glob holds a slash; the leading `/` marker
+  // makes a slash-less glob take that form too, then the marker is dropped.
+  return new RegExp(body.replace(/^\^\\\//, '^'));
+}
+
+interface IgnoreRule {
+  readonly regex: RegExp;
+  readonly dirOnly: boolean;
+  /** Matched against the root-relative path, else against the entry name. */
+  readonly anchored: boolean;
+}
+
+/**
+ * Root `.gitignore` rules for the Node walk, as a test of one entry. Only
+ * the root file and plain (non-negated) patterns are applied; nested ignore
+ * files and `!` rules are not, so the walk may search a little more than rg.
+ */
+async function loadRootIgnore(
+  rootReal: string,
+): Promise<(relative: string, name: string, isDir: boolean) => boolean> {
+  let text: string;
+  try {
+    text = await readFile(path.join(rootReal, '.gitignore'), 'utf8');
+  } catch {
+    // degradation-audit: optional-capability - no readable .gitignore means
+    // no extra rules; the fixed skip list still applies.
+    return () => false;
+  }
+  const rules: IgnoreRule[] = [];
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (line === '' || line.startsWith('#') || line.startsWith('!')) {
+      continue;
+    }
+    const dirOnly = line.endsWith('/');
+    const pattern = line.replace(/\/+$/, '').replace(/^\//, '');
+    if (pattern === '') {
+      continue;
+    }
+    const anchored = line.replace(/\/+$/, '').includes('/');
+    rules.push({
+      regex: anchored ? globToAnchoredRegExp(pattern) : globToRegExp(pattern),
+      dirOnly,
+      anchored,
+    });
+  }
+  return (relative, name, isDir) =>
+    rules.some(
+      (rule) =>
+        (!rule.dirOnly || isDir) &&
+        rule.regex.test(rule.anchored ? relative : name),
+    );
 }
 
 /** First `rg` binary on PATH, or `undefined`. */
@@ -375,6 +445,11 @@ export async function runNodeSearch(
   let total = 0;
   let visited = 0;
   let incomplete = false;
+  let skippedLargeFiles = 0;
+  let skippedLongLines = 0;
+  const isIgnored = request.includeIgnored
+    ? () => false
+    : await loadRootIgnore(request.rootReal);
 
   const searchFile = async (absolute: string): Promise<void> => {
     const relative = toPosixRelative(request.rootReal, absolute);
@@ -383,14 +458,19 @@ export async function runNodeSearch(
     }
     visited++;
     const info = await stat(absolute);
-    if (info.size > GREP_MAX_FILE_BYTES || (await isBinary(absolute))) {
+    if (info.size > GREP_MAX_FILE_BYTES) {
+      skippedLargeFiles++;
+      return;
+    }
+    if (await isBinary(absolute)) {
       return;
     }
     const lines = (await readFile(absolute, 'utf8')).split(/\r?\n/);
     for (let i = 0; i < lines.length; i++) {
-      // A very long line (minified code) is skipped: a backtracking pattern
-      // on it could block the event loop, and rg would print it unreadable.
-      if (lines[i].length > GREP_MAX_SEARCHED_LINE_CHARS) {
+      // A regular expression skips a very long line (minified code), counted
+      // and reported; a literal pattern cannot backtrack and searches it.
+      if (request.regex && lines[i].length > GREP_MAX_SEARCHED_LINE_CHARS) {
+        skippedLongLines++;
         continue;
       }
       if (i % 1000 === 999 && Date.now() > deadline) {
@@ -413,6 +493,12 @@ export async function runNodeSearch(
   const walk = async (dir: string): Promise<void> => {
     let entries: Dirent[];
     try {
+      // The entry was a directory when it was listed; confirm that its real
+      // path is still inside the root before it is opened (a swapped symlink
+      // must not lead the walk out of the workspace).
+      if (!canonicalPathInsideRoot(await realpath(dir), request.rootReal)) {
+        return;
+      }
       entries = await readdir(dir, { withFileTypes: true });
     } catch {
       // degradation-audit: optional-capability - an unreadable directory is
@@ -429,15 +515,21 @@ export async function runNodeSearch(
         return;
       }
       const absolute = path.join(dir, entry.name);
+      const relative = toPosixRelative(request.rootReal, absolute);
       if (entry.isDirectory()) {
         const skipped = request.includeIgnored
           ? entry.name === '.git'
-          : NODE_SKIPPED_DIRS.has(entry.name) || entry.name.startsWith('.');
+          : NODE_SKIPPED_DIRS.has(entry.name) ||
+            entry.name.startsWith('.') ||
+            isIgnored(relative, entry.name, true);
         if (!skipped) {
           await walk(absolute);
         }
       } else if (entry.isFile()) {
-        if (!request.includeIgnored && entry.name.startsWith('.')) {
+        if (
+          !request.includeIgnored &&
+          (entry.name.startsWith('.') || isIgnored(relative, entry.name, false))
+        ) {
           continue;
         }
         try {
@@ -467,5 +559,21 @@ export async function runNodeSearch(
       error: error instanceof Error ? error.message : String(error),
     };
   }
-  return { engine: 'node', matches, totalMatches: total, incomplete };
+  const notes = [
+    skippedLargeFiles > 0
+      ? `${skippedLargeFiles} file(s) over ${GREP_MAX_FILE_BYTES / (1024 * 1024)} MB`
+      : '',
+    skippedLongLines > 0
+      ? `${skippedLongLines} line(s) over ${GREP_MAX_SEARCHED_LINE_CHARS} chars (regex only)`
+      : '',
+  ].filter((note) => note !== '');
+  return {
+    engine: 'node',
+    matches,
+    totalMatches: total,
+    incomplete,
+    ...(notes.length > 0
+      ? { skippedNote: `not searched: ${notes.join('; ')}` }
+      : {}),
+  };
 }

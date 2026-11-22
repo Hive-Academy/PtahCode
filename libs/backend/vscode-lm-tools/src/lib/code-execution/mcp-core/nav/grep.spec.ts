@@ -223,16 +223,52 @@ describe('handleGrep (node engine)', () => {
     expect(reply.text).not.toMatch(/ 12- /);
   });
 
-  it('skips lines too long to search safely', async () => {
+  it('searches a long line for a literal, and reports the lines a regex skipped', async () => {
     await writeFile(
       path.join(root, 'src', 'min.js'),
       'a'.repeat(20_000) + ' needle\nneedle\n',
     );
-    const reply = await handleGrep(
+    const literal = await handleGrep(
       { pattern: 'needle', path: 'src/min.js' },
       deps,
     );
-    expect(reply.text.split('\n')[0]).toBe('1 match in 1 file (engine: node)');
+    expect(literal.text.split('\n')[0]).toBe(
+      '2 matches in 1 file (engine: node)',
+    );
+    const regex = await handleGrep(
+      { pattern: 'needl+e', regex: true, path: 'src/min.js' },
+      deps,
+    );
+    expect(regex.text.split('\n')[0]).toBe('1 match in 1 file (engine: node)');
+    expect(regex.text).toContain('not searched: 1 line(s) over 10000 chars');
+  });
+
+  it('says when a file over 1 MB was not searched', async () => {
+    await writeFile(
+      path.join(root, 'src', 'huge.txt'),
+      'x'.repeat(1_100_000) + '\nneedle\n',
+    );
+    const reply = await handleGrep(
+      { pattern: 'needle', path: 'src/huge.txt' },
+      deps,
+    );
+    expect(reply.text).toMatch(/^0 matches/);
+    expect(reply.text).toContain('not searched: 1 file(s) over 1 MB');
+  });
+
+  it('applies the root .gitignore in the Node walk', async () => {
+    await writeFile(
+      path.join(root, '.gitignore'),
+      'build/\n*.log\n/src/b.md\n',
+    );
+    await mkdir(path.join(root, 'build'));
+    await writeFile(path.join(root, 'build', 'out.js'), 'const LIMIT = 1;\n');
+    await writeFile(path.join(root, 'src', 'run.log'), 'LIMIT in a log\n');
+    const reply = await handleGrep({ pattern: 'LIMIT' }, deps);
+    expect(reply.text).toContain('src/a.ts');
+    expect(reply.text).not.toContain('build/out.js');
+    expect(reply.text).not.toContain('run.log');
+    expect(reply.text).not.toContain('src/b.md');
   });
 
   it('stops a backtracking regular expression instead of freezing the host', async () => {
