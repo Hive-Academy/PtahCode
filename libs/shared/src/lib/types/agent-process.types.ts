@@ -1,3 +1,5 @@
+import type { AgentActionNotice } from './agent-action.types';
+import type { AgentDeliveryReceipt } from './agent-messaging.types';
 /**
  * Agent Process Types for Async Agent Orchestration
  *
@@ -317,6 +319,7 @@ export interface AgentProcessInfo {
   stopReason?: LaneStopReason;
   /** Durable completed-turn counters used by the CLI budget resume gate. */
   readonly agentBudget?: AgentBudgetRecord;
+  readonly notice?: AgentActionNotice;
   /** Known provider reset time, in Unix milliseconds, for a usage-limit exit. */
   stopResetAt?: number;
   /**
@@ -697,6 +700,7 @@ export interface CliSessionReference {
   /** Why the host stopped this lane, when known. Persisted with an interrupted restore. */
   readonly stopReason?: LaneStopReason;
   readonly agentBudget?: AgentBudgetRecord;
+  readonly notice?: AgentActionNotice;
   /** Epoch milliseconds when a usage-limit stop resets, when known. */
   readonly stopResetAt?: number;
   /**
@@ -788,6 +792,8 @@ export type LaneCompletionVerdict =
 
 /** The payload pushed to the session that spawned the lane. */
 export interface LaneCompletionSignal {
+  readonly notice?: AgentActionNotice;
+  readonly receipt?: AgentDeliveryReceipt;
   /** A budget warning was held after the turn and has not reached the lane. */
   readonly heldBudgetWarning?: boolean;
   readonly mcpAttachmentWarning?: string;

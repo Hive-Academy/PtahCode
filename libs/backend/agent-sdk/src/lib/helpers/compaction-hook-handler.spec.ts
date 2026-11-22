@@ -504,7 +504,7 @@ describe('CompactionHookHandler — attempt timing and the bounded watchdog (TAS
     ]);
   }
 
-  it('a delayed 216 s compaction reaches PostCompact and clears state while the watchdog reports overdue-but-continuing at 180 s', async () => {
+  it('a 216 s compaction reaches PostCompact before the watchdog dwell notice', async () => {
     jest.useFakeTimers();
     const logger = makeLogger();
     const { stub, emitted } = makeEvents();
@@ -532,13 +532,13 @@ describe('CompactionHookHandler — attempt timing and the bounded watchdog (TAS
         await hooks[event]?.[0]?.hooks?.[0]?.(input, undefined, { signal });
       }
     };
+    watchdog.beginTurn();
     watchdog.start();
 
     await fire('PreCompact', preCompact());
     jest.advanceTimersByTime(180_000);
 
-    // Overdue, reported, and NOT aborted: 216 s is inside the 300 s bound.
-    expect(onOverdue).toHaveBeenCalledWith(['compaction']);
+    expect(onOverdue).not.toHaveBeenCalled();
     expect(onTimeout).not.toHaveBeenCalled();
 
     jest.advanceTimersByTime(36_000);
@@ -567,14 +567,13 @@ describe('CompactionHookHandler — attempt timing and the bounded watchdog (TAS
     expect(logs).not.toContain(SECRET_SUMMARY);
     expect(logs).not.toContain(SECRET_INSTRUCTIONS);
 
-    // The compaction no longer accounts for silence: the next unaccounted
-    // window is a real no-activity timeout again.
+    // Completing compaction starts a fresh provider quiet window.
     jest.advanceTimersByTime(NO_ACTIVITY_TIMEOUT_MS);
-    expect(onTimeout).toHaveBeenCalledTimes(1);
+    expect(onTimeout).toHaveBeenCalledWith('provider-no-response');
     watchdog.stop();
   });
 
-  it('a compaction still open at COMPACTION_MAX_DWELL_MS (300 s) takes the watchdog timeout path where the coordinator controls the session', async () => {
+  it('a compaction still open at the dwell threshold reports overdue and continues', async () => {
     jest.useFakeTimers();
     const handler = new CompactionHookHandler(
       makeLogger(),
@@ -583,15 +582,16 @@ describe('CompactionHookHandler — attempt timing and the bounded watchdog (TAS
       makeEvents().stub,
     );
     const onTimeout = jest.fn();
+    const onOverdue = jest.fn();
     const watchdog = new NoActivityWatchdog(
       NO_ACTIVITY_TIMEOUT_MS,
       onTimeout,
-      jest.fn(),
-      () => true,
+      onOverdue,
     );
     const handlerHooks = handler.createHooks('sess-slow', '/repo', jest.fn());
     const watchdogHooks = watchdog.lifecycleHooks();
     const signal = new AbortController().signal;
+    watchdog.beginTurn();
     watchdog.start();
     for (const hooks of [watchdogHooks, handlerHooks]) {
       await hooks.PreCompact?.[0]?.hooks?.[0]?.(preCompact(), undefined, {
@@ -600,10 +600,13 @@ describe('CompactionHookHandler — attempt timing and the bounded watchdog (TAS
     }
 
     jest.advanceTimersByTime(COMPACTION_MAX_DWELL_MS - 1);
-    expect(onTimeout).not.toHaveBeenCalled();
+    expect(onOverdue).not.toHaveBeenCalled();
     jest.advanceTimersByTime(1);
-    expect(onTimeout).toHaveBeenCalledTimes(1);
-    expect(onTimeout).toHaveBeenCalledWith('compaction-dwell');
+    expect(onOverdue).toHaveBeenCalledWith(['compaction']);
+    jest.advanceTimersByTime(NO_ACTIVITY_TIMEOUT_MS);
+    expect(onOverdue).toHaveBeenCalledTimes(1);
+    expect(onTimeout).not.toHaveBeenCalled();
+    expect(watchdog.isTurnOpen).toBe(true);
     watchdog.stop();
   });
 

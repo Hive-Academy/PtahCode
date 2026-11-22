@@ -63,16 +63,18 @@ import {
   ResultModelUsage,
   type StreamTransformConfig,
 } from './stream-transformer';
-import type { NoActivityWatchdog } from './no-activity-watchdog';
+import { NoActivityWatchdog, ProviderTurnEndError } from './no-activity-watchdog';
 
 interface FakeWatchdog {
   start: jest.Mock;
   observe: jest.Mock;
+  endTurn: jest.Mock;
+  noteOutwardEvent: jest.Mock;
   stop: jest.Mock;
 }
 
 function makeFakeWatchdog(): FakeWatchdog {
-  return { start: jest.fn(), observe: jest.fn(), stop: jest.fn() };
+  return { start: jest.fn(), observe: jest.fn(), endTurn: jest.fn(), stop: jest.fn(), noteOutwardEvent: jest.fn() };
 }
 
 // ---------------------------------------------------------------------------
@@ -1503,6 +1505,23 @@ describe('StreamTransformer — no-activity watchdog wiring (TASK_2026_190)', ()
     );
   });
 
+  it('disqualifies a retry when raw partial output yields no flat events', async () => {
+    const { transformer, messageTransformer } = makeHarness();
+    messageTransformer.transform.mockReturnValue([]);
+    const watchdog = new NoActivityWatchdog(180_000, jest.fn());
+    const events: FlatStreamEventUnion[] = [];
+    for await (const event of transformer.transform({
+      sdkQuery: asAsyncIterable([messageStart(MODEL, { input_tokens: 100 })]),
+      sessionId: 'sess-1' as SessionId,
+      initialModel: MODEL,
+      activityWatchdog: watchdog,
+    })) {
+      events.push(event);
+    }
+    expect(events).toEqual([]);
+    expect(watchdog.zeroOutwardEvents).toBe(false);
+  });
+
   it('stops the watchdog even when the stream throws (error teardown path)', async () => {
     const { transformer } = makeHarness();
     const watchdog = makeFakeWatchdog();
@@ -1552,7 +1571,10 @@ describe('StreamTransformer — task_* forwarding (workflow watch gate)', () => 
       subtype: 'background_tasks_changed',
       uuid: '00000000-0000-0000-0000-000000000001',
       session_id: 'sess-1',
-      tasks: [{ task_id: 'bash-1', task_type: 'local_bash', description: 'Compile' }],
+      tasks: [
+        { task_id: 'bash-1', task_type: 'local_bash', description: 'Compile' },
+        { task_id: 'watcher-1', task_type: 'monitor', description: 'Watcher', ambient: true },
+      ],
     };
     const snapshot: FlatStreamEventUnion = {
       id: 'snapshot-1',
@@ -1564,14 +1586,20 @@ describe('StreamTransformer — task_* forwarding (workflow watch gate)', () => 
     };
     messageTransformer.transform.mockReturnValue([snapshot]);
 
+    const watchdog = makeFakeWatchdog();
     const events: FlatStreamEventUnion[] = [];
     for await (const event of transformer.transform({
+      activityWatchdog: watchdog as unknown as NoActivityWatchdog,
       sdkQuery: asAsyncIterable([message]),
       sessionId: 'sess-1' as SessionId,
       initialModel: MODEL,
       onResultStats: jest.fn(),
     })) events.push(event);
 
+    expect(watchdog.observe).toHaveBeenCalledWith(message, { deferResult: true });
+    expect(watchdog.observe.mock.invocationCallOrder[0]).toBeLessThan(
+      messageTransformer.transform.mock.invocationCallOrder[0],
+    );
     expect(messageTransformer.transform).toHaveBeenCalledWith(message, 'sess-1');
     expect(events).toEqual([
       snapshot,
@@ -2246,6 +2274,8 @@ describe('StreamTransformer - result turn_state ordering (TASK_2026_360)', () =>
     const { transformer, messageTransformer } = makeHarness();
     const onTurnEnd = jest.fn();
     const onResultStats = jest.fn();
+    const watchdog = new NoActivityWatchdog(180_000, jest.fn());
+    watchdog.beginTurn();
     let resultCount = 0;
     let late = false;
     messageTransformer.transform.mockReturnValue([{ eventType: 'turn_state' } as never]);
@@ -2258,16 +2288,23 @@ describe('StreamTransformer - result turn_state ordering (TASK_2026_360)', () =>
     for await (const event of transformer.transform({
       sdkQuery: asAsyncIterable([pResult, qResult]),
       sessionId: 'sess-1' as SessionId, initialModel: MODEL,
+      activityWatchdog: watchdog,
       onTurnEnd,
       onResultStats,
       turnIdentity: {
-        takeAtResult: () => { late = ++resultCount === 1; return late ? null : 'Q'; },
+        takeAtResult: () => {
+          expect(watchdog.zeroOutwardEvents).toBe(false);
+          expect(watchdog.isTurnOpen).toBe(true);
+          late = ++resultCount === 1;
+          return late ? null : 'Q';
+        },
         wasLastResultInterruptedLate: () => late,
         takeInterruptRetirement: () => null,
       },
     })) events.push(event);
     expect(onTurnEnd).toHaveBeenCalledTimes(1);
     expect(onResultStats).toHaveBeenCalledTimes(2);
+    expect(watchdog.isTurnOpen).toBe(false);
     expect(events).toEqual([expect.objectContaining({ consumedClientMessageId: 'Q' })]);
   });
 
@@ -3601,31 +3638,50 @@ describe('StreamTransformer — onCompactBoundary (TASK_2026_597 N7)', () => {
 });
 
 describe('StreamTransformer — onMessage / onStreamEnd (TASK_2026_614 D.11)', () => {
-  it.each([
-    ['no-activity', 'no stream activity'],
-    ['compaction-dwell', 'compaction did not finish'],
-  ] as const)('replaces a generic SDK abort after %s watchdog fire', async (cause, phrase) => {
+  it('does not settle a teardown result after an accepted provider timeout', async () => {
     const { transformer } = makeHarness();
-    const original = new Error('Operation aborted');
-    const watchdog = { ...makeFakeWatchdog(), firedCause: cause };
-    const sdkQuery: AsyncIterable<SDKMessage> = {
-      [Symbol.asyncIterator]: () => ({ next: () => Promise.reject(original) }),
-    };
-    try {
-      await drain(transformer.transform({
-        sdkQuery,
+    const failure = new ProviderTurnEndError('provider-no-response');
+    const watchdog = new NoActivityWatchdog(180_000, jest.fn());
+    watchdog.recordFailure(failure);
+    const takeAtResult = jest.fn();
+    const onTurnEnd = jest.fn();
+    await expect(drain(transformer.transform({
+      sdkQuery: asAsyncIterable([resultMessage(MODEL, { inputTokens: 0, outputTokens: 0 })]),
+      sessionId: 'sess-1' as SessionId,
+      initialModel: MODEL,
+      activityWatchdog: watchdog,
+      turnIdentity: { takeAtResult, takeInterruptRetirement: () => null },
+      onTurnEnd,
+    }))).rejects.toBe(failure);
+    expect(takeAtResult).not.toHaveBeenCalled();
+    expect(onTurnEnd).not.toHaveBeenCalled();
+    expect(watchdog.zeroOutwardEvents).toBe(true);
+  });
+
+  it.each(['provider-no-response', 'provider-input-closed'] as const)(
+    'propagates %s even when transport completion drops the abort reason',
+    async (cause) => {
+      const { transformer } = makeHarness();
+      const original = new Error('Operation aborted');
+      const failure = new ProviderTurnEndError(cause);
+      const watchdog = new NoActivityWatchdog(180_000, jest.fn());
+      watchdog.recordFailure(failure);
+      const sdkQuery: AsyncIterable<SDKMessage> = {
+        [Symbol.asyncIterator]: () => ({ next: () => Promise.reject(original) }),
+      };
+      const streamConfig = {
         sessionId: 'sess-1' as SessionId,
         initialModel: MODEL,
-        activityWatchdog: watchdog as unknown as NoActivityWatchdog,
-      }));
-      throw new Error('expected timeout error');
-    } catch (error) {
-      if (!(error instanceof Error)) throw error;
-      expect(error.message.toLowerCase()).toContain(phrase);
-      expect(error.message.toLowerCase()).not.toContain('abort');
-      expect(error.cause).toBe(original);
-    }
-  });
+        activityWatchdog: watchdog,
+      };
+      await expect(drain(transformer.transform({ ...streamConfig, sdkQuery }))).rejects.toBe(failure);
+      await expect(drain(transformer.transform({
+        ...streamConfig,
+        sdkQuery: asAsyncIterable([]),
+      }))).rejects.toBe(failure);
+      expect(watchdog.zeroOutwardEvents).toBe(true);
+    },
+  );
 
   it('preserves the original SDK abort when the watchdog has not fired', async () => {
     const { transformer } = makeHarness();

@@ -69,6 +69,7 @@ import {
   KIMI_CODE_PROXY_TOKEN_PLACEHOLDER,
   OPENROUTER_PROXY_TOKEN_PLACEHOLDER,
   NAMED_ACCOUNT_ADMISSION_BUDGET_MS,
+  formatActivityOverdue,
   type ContextCapacityRoute,
 } from '@ptah-extension/shared';
 import type { UsageCostSource } from '../../session-stats/session-stats-owner.service';
@@ -79,11 +80,7 @@ import {
   type SDKMessage,
 } from '../../types/sdk-types/claude-sdk.types';
 import type { CompactionCoordinator } from '../compaction/compaction-coordinator';
-import {
-  COMPACTION_MAX_DWELL_MS,
-  CompactionState,
-  type CompactionSessionClass,
-} from '../compaction/compaction-state.types';
+import type { CompactionSessionClass } from '../compaction/compaction-state.types';
 import type {
   ContextUsageReading,
   IContextUsagePort,
@@ -102,12 +99,13 @@ import type {
   ExecuteQueryResult,
   Query,
 } from '../session-lifecycle-manager';
-import type { SessionRegistry } from './session-registry.service';
+import type { SessionRecord, SessionRegistry } from './session-registry.service';
 import type { SessionStreamPump } from './session-stream-pump.service';
 import { PERMISSION_MODE_MAP } from './permission-mode-map';
 import type { SdkQueryRunner } from '../sdk-query-runner.service';
 import {
   NoActivityWatchdog,
+  ProviderTurnEndError,
   NO_ACTIVITY_TIMEOUT_MS,
 } from '../no-activity-watchdog';
 import type { HarnessPolicySync } from '../../harness/harness-policy-sync';
@@ -406,18 +404,6 @@ class CompactionSessionTap {
     if (!id) return null;
     this.subagentIds.add(id);
     return id;
-  }
-
-  /**
-   * Whether the coordinator acts on this run's session (any state but
-   * OBSERVE_ONLY). Gates the watchdog's compaction dwell bound; an unknown
-   * session counts as observe-only, which never cuts a compaction.
-   */
-  controlsSession(): boolean {
-    const sessionId = this.sessionId;
-    if (this.released || !this.coordinator || sessionId === null) return false;
-    const state = this.coordinator.getState(sessionId);
-    return state !== undefined && state !== CompactionState.OBSERVE_ONLY;
   }
 
   /**
@@ -1617,14 +1603,6 @@ export class SessionQueryExecutor {
         `[SessionLifecycle] Queued initial prompt for session ${sessionId}`,
       );
     }
-    // No-stream-activity watchdog. Replaces the old stderr-pattern
-    // `onProviderError` abort: rather than guessing "stuck" from stderr text
-    // (brittle in both directions), we surface a stuck session when the SDK
-    // query produces no stream activity for the window. The watchdog is
-    // started/kicked/stopped by the StreamTransformer as it consumes the
-    // stream (kick on every event → reset), so a long-but-alive turn (long
-    // tool call, extended thinking, slow stream) never trips it. Declared
-    // before the try so the init-failure rollback can stop() it.
     const providerBaseUrl =
       effectiveAuthEnv.ANTHROPIC_BASE_URL?.trim() || 'default';
     const providerModel = sessionConfig?.model ?? 'unknown';
@@ -1652,100 +1630,33 @@ export class SessionQueryExecutor {
     const activityWatchdog = new NoActivityWatchdog(
       NO_ACTIVITY_TIMEOUT_MS,
       (cause) => {
-        if (abortController.signal.aborted) {
-          return;
-        }
-        const seconds = Math.round(NO_ACTIVITY_TIMEOUT_MS / 1000);
-        const dwellSeconds = Math.round(COMPACTION_MAX_DWELL_MS / 1000);
+        if (abortController.signal.aborted) return;
+        const error = new ProviderTurnEndError(cause);
+        if (!this.registry.recordProviderTurnEnd(rec, error)) return;
         this.logger.error(
-          cause === 'compaction-dwell'
-            ? `[SessionLifecycle] Session ${sessionId} compaction did not finish within ${dwellSeconds}s — ` +
-                `stopping for recovery (requestedModel=${providerModel}, resolvedModel=${rec.currentModel})`
-            : `[SessionLifecycle] Session ${sessionId} produced no stream activity for ${seconds}s — ` +
-                `recovering unaccounted silence; liveness unknown (requestedModel=${providerModel}, resolvedModel=${rec.currentModel})`,
-        );
-        // Invariant (session-lifecycle-abort / stream-closed-abort): resolve
-        // pending permissions BEFORE the abort tears down the CLI stream, so
-        // an in-flight can_use_tool cannot wedge the UI, and the CLI-internal
-        // "Stream closed" rejection stays benign teardown rather than a real
-        // error. Mirrors endSession()'s cleanup-first ordering.
-        try {
-          this.permissionHandler.cleanupPendingPermissions(rec.tabId);
-        } catch (cleanupErr) {
-          this.logger.warn(
-            '[SessionLifecycle] Failed to clean up pending permissions on no-activity timeout',
-            cleanupErr instanceof Error
-              ? cleanupErr
-              : new Error(String(cleanupErr)),
-          );
-        }
-        // Descriptive, non-"abort" wording on purpose: the StreamTransformer
-        // catch classifies messages containing "abort"/"cancel" as benign
-        // user aborts (debug-level, suppressed). A stuck-session timeout must
-        // surface to the UI as a real error instead.
-        try {
-          abortController.abort(
-            new Error(
-              cause === 'compaction-dwell'
-                ? `Compaction did not finish within ${dwellSeconds}s ` +
-                    `(baseUrl="${providerBaseUrl}", model="${providerModel}"). ` +
-                    `Stopping for recovery; retry the turn.`
-                : `No stream activity for ${seconds}s — no response from provider ` +
-                    `(baseUrl="${providerBaseUrl}", model="${providerModel}"). ` +
-                    `Unaccounted root inactivity; liveness is unknown. Stopping for recovery. The provider may be ` +
-                    `unreachable or overloaded — check configuration or retry.`,
-            ),
-          );
-        } catch (abortErr) {
-          this.logger.warn(
-            '[SessionLifecycle] Failed to abort on no-activity timeout',
-            abortErr instanceof Error ? abortErr : new Error(String(abortErr)),
-          );
-        }
-      },
-      (operations) =>
-        this.logger.warn(
-          '[SessionLifecycle] Operation overdue; liveness unknown, continuing',
+          `[SessionLifecycle] ${error.message}`,
           {
             sessionId,
-            operations,
-            requestedModel: providerModel,
+            providerBaseUrl,
+            providerModel,
             resolvedModel: rec.currentModel,
           },
-        ),
-      // The dwell bound applies only where the coordinator acts (TASK_2026_597
-      // S1); an OBSERVE_ONLY session keeps B8's "report overdue, keep waiting".
-      () => compactionTap.controlsSession(),
+        );
+        this.endBrokenProviderTurn(rec, error);
+      },
+      (operations) => {
+        for (const operation of operations) {
+          this.logger.warn(formatActivityOverdue(operation), { sessionId });
+        }
+      },
     );
-    abortController.signal.addEventListener(
-      'abort',
-      () => activityWatchdog.stop(),
-      { once: true },
-    );
-    // The turn state owns one hold on this watchdog: taken while no turn is in
-    // flight, released by `markTurnStarted`, re-taken by `markTurnEnded`. A
-    // fresh record has `turnInFlight === false`, so the initial idle hold is
-    // taken here and the pump's first yield releases it. Without it the
-    // watchdog fired exactly 180 s after every `result` and marked every
-    // running subagent interrupted (2026-08-31 log, session 314c9c90: result
-    // 00:37:02Z → kill 00:40:02Z; TASK_2026_363).
+    abortController.signal.addEventListener('abort', () => activityWatchdog.stop(), {
+      once: true,
+    });
     rec.activityHold = activityWatchdog;
-    // A queued initial prompt is startup work, NOT between-turn idle. Bound
-    // even a CLI that never pulls its input iterator. Empty resumes may idle.
-    //
-    // A slash-command prompt is queued content like any other since
-    // TASK_2026_472, so it takes no idle hold here and the watchdog still arms
-    // on `start()`. What moved is the OTHER end of the accounting: the pump now
-    // yields the command, so `markTurnStarted` runs and `markTurnEnded` re-takes
-    // the idle hold on the `result`. Before the change the slash string never
-    // reached the pump, `turnInFlight` stayed false, and `markTurnEnded` skipped
-    // the re-hold — harmless only because the query was already closing. A
-    // persistent slash session without that re-hold would be aborted after 180 s
-    // of healthy idle time.
-    if (!initialContent) {
-      activityWatchdog.endTurn();
-      activityWatchdog.hold();
-    }
+    // Startup with a queued host prompt is a confirmed turn even before the
+    // SDK pulls the initial input. An empty resume waits for provider evidence.
+    if (initialContent) activityWatchdog.beginTurn();
     try {
       // ONE policy snapshot for both the harness sync and the options build,
       // so the skill copies the harness writes and the flags the builder emits
@@ -1838,6 +1749,10 @@ export class SessionQueryExecutor {
       const queryOptions = await (named
         ? named.wait(buildOptions)
         : buildOptions);
+      const sdkOptions: Options = {
+        ...(queryOptions.options as Options),
+        includeHookEvents: true,
+      };
       const isResume = !!resumeSessionId;
       // Never a raw string. A string prompt is what sets the SDK's
       // `isSingleUserTurn`, and that flag closes the transport input on the
@@ -1860,7 +1775,7 @@ export class SessionQueryExecutor {
             sdkQuery: await named.launch(
               namedQueryFn ?? queryFn,
               userMessageStream,
-              queryOptions.options as Options,
+              sdkOptions,
               registerKey,
               {
                 name: sessionConfig?.sessionName ?? 'Session',
@@ -1875,7 +1790,7 @@ export class SessionQueryExecutor {
         : this.queryRunner.invokeWithLoadedQuery(
             queryFn,
             effectivePrompt,
-            queryOptions.options as Options,
+            sdkOptions,
           );
       const sdkQuery: Query = runResult.sdkQuery;
       compactionTap.attachQuery(sdkQuery);
@@ -1883,12 +1798,14 @@ export class SessionQueryExecutor {
       rec.currentModel = initialModel;
       if (isResume && !named) {
         sdkQuery.streamInput(userMessageStream).catch((err: unknown) => {
-          this.onInputChannelFailed(
-            err,
-            sessionId as string,
-            rec.tabId,
-            abortController,
+          if (abortController.signal.aborted) return;
+          const error = new ProviderTurnEndError('provider-input-closed');
+          if (!this.registry.recordProviderTurnEnd(rec, error)) return;
+          this.logger.error(
+            `[SessionLifecycle] Session ${sessionId} lost its SDK input channel`,
+            err instanceof Error ? err : new Error(String(err)),
           );
+          this.endBrokenProviderTurn(rec, error);
         });
         this.logger.info(
           `[SessionLifecycle] Connected streamInput for session: ${sessionId} (${promptMode})`,
@@ -1942,73 +1859,17 @@ export class SessionQueryExecutor {
     }
   }
 
-  /**
-   * End a session whose SDK input channel died.
-   *
-   * On the resumed path `streamInput(userMessageStream)` is the session's ONLY
-   * delivery channel — the query itself was started with an idle iterable that
-   * never yields. If that promise rejects, nothing the user types, and no slash
-   * command, can ever reach the CLI again.
-   *
-   * This used to be a `logger.warn` and nothing else, so `executeQuery` still
-   * returned a query and the RPC layer still reported the session as started.
-   * The session then sat inert until the no-activity watchdog aborted it 180 s
-   * later — a real failure reported as a timeout, three minutes late
-   * (TASK_2026_472, codex logic review F1).
-   *
-   * A rejection here is always abnormal, never teardown. The SDK's own
-   * `streamInput` catch rethrows only NON-abort errors (`catch(Q){if(!(Q
-   * instanceof W6))throw Q}`, sdk.mjs 0.3.150, where `W6` is its abort error
-   * class), so an aborted session resolves instead of rejecting. The two
-   * reachable rejections are `ProcessTransport is not ready for writing` and
-   * `Cannot write to terminated process` — the second fires when the CLI child
-   * dies mid-session, which is exactly the case that must not be swallowed.
-   *
-   * Ordering and wording copy the watchdog's abort policy above, for the same
-   * two reasons: resolve pending permissions BEFORE the abort tears the stream
-   * down so an in-flight `can_use_tool` cannot wedge the UI, and keep the words
-   * "abort" and "cancel" out of the message, because `StreamTransformer`
-   * classifies those as benign user aborts and suppresses them. The underlying
-   * error goes to the log, never into the abort reason, so a provider message
-   * that happens to contain "abort" cannot silence a real failure.
-   */
-  private onInputChannelFailed(
-    err: unknown,
-    sessionId: string,
-    tabId: string,
-    abortController: AbortController,
-  ): void {
-    if (abortController.signal.aborted) {
-      return;
-    }
-    this.logger.error(
-      `[SessionLifecycle] Session ${sessionId} lost its SDK input channel; ` +
-        `no further message can be delivered`,
-      err instanceof Error ? err : new Error(String(err)),
-    );
+  /** Resolve pending permissions before closing the SDK transport. */
+  private endBrokenProviderTurn(rec: SessionRecord, error: ProviderTurnEndError): void {
     try {
-      this.permissionHandler.cleanupPendingPermissions(tabId);
+      this.permissionHandler.cleanupPendingPermissions(rec.tabId);
     } catch (cleanupErr: unknown) {
       this.logger.warn(
-        '[SessionLifecycle] Failed to clean up pending permissions on input-channel failure',
-        cleanupErr instanceof Error
-          ? cleanupErr
-          : new Error(String(cleanupErr)),
+        '[SessionLifecycle] Failed to clean up pending permissions after a provider failure',
+        cleanupErr instanceof Error ? cleanupErr : new Error(String(cleanupErr)),
       );
     }
-    try {
-      abortController.abort(
-        new Error(
-          'The session lost its connection to the provider and can no longer ' +
-            'receive messages. Stopping for recovery — start a new message to retry.',
-        ),
-      );
-    } catch (abortErr: unknown) {
-      this.logger.warn(
-        '[SessionLifecycle] Failed to stop session on input-channel failure',
-        abortErr instanceof Error ? abortErr : new Error(String(abortErr)),
-      );
-    }
+    rec.abortController.abort(error);
   }
 
   /**

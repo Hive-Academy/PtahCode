@@ -17,6 +17,7 @@ describe('query operation ownership', () => {
     const overdue = jest.fn();
     const wd = new NoActivityWatchdog(WINDOW, timeout, overdue);
     const hooks = wd.lifecycleHooks();
+    wd.beginTurn();
     wd.start();
     const hook = async (input: HookInput) => {
       await hooks[input.hook_event_name]?.[0].hooks[0](input, undefined, {
@@ -35,7 +36,7 @@ describe('query operation ownership', () => {
   };
 
   it.each(['manual', 'auto'] as const)(
-    '%s compaction is accounted until its explicit terminal within the A8 dwell bound',
+    '%s compaction is accounted until an explicit terminal status',
     async (trigger) => {
       const { wd, hook, timeout } = harness();
       await hook({
@@ -50,8 +51,6 @@ describe('query operation ownership', () => {
         trigger,
         custom_instructions: null,
       });
-      // Where the coordinator controls the session the watchdog times out past
-      // COMPACTION_MAX_DWELL_MS; that bound is pinned in no-activity-watchdog.spec.ts.
       jest.advanceTimersByTime(WINDOW - 1);
       expect(timeout).not.toHaveBeenCalled();
       wd.observe({
@@ -117,6 +116,9 @@ describe('query operation ownership', () => {
     expect(timeout).not.toHaveBeenCalled();
     wd.release();
     jest.advanceTimersByTime(WINDOW);
+    expect(timeout).not.toHaveBeenCalled();
+    wd.beginTurn();
+    jest.advanceTimersByTime(WINDOW);
     expect(timeout).toHaveBeenCalledTimes(1);
   });
 
@@ -135,7 +137,7 @@ describe('query operation ownership', () => {
     expect(overdue).not.toHaveBeenCalled();
   });
 
-  it('unaccounted startup silence still invokes bounded recovery once', () => {
+  it('silence during a confirmed startup turn invokes bounded recovery once', () => {
     const { timeout } = harness();
     jest.advanceTimersByTime(WINDOW * 20);
     expect(timeout).toHaveBeenCalledTimes(1);

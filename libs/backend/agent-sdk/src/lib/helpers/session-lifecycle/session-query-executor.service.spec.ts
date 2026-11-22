@@ -99,7 +99,7 @@ import type {
   IContextUsagePort,
 } from '../compaction/context-usage.port';
 import type { SDKMessage } from '../../types/sdk-types/claude-sdk.types';
-import { NO_ACTIVITY_TIMEOUT_MS } from '../no-activity-watchdog';
+import { NO_ACTIVITY_TIMEOUT_MS, ProviderTurnEndError } from '../no-activity-watchdog';
 import { SessionRegistry } from './session-registry.service';
 import { SessionStreamPump } from './session-stream-pump.service';
 import type { SdkModuleLoader } from '../sdk-module-loader';
@@ -164,6 +164,7 @@ interface Harness {
   getPermissionLevelSpy: jest.Mock;
   cleanupSpy: jest.Mock;
   sdkQuery: Query;
+  queryRunner: SdkQueryRunner;
 }
 
 function makeHarness(
@@ -264,6 +265,7 @@ function makeHarness(
     getPermissionLevelSpy,
     cleanupSpy,
     sdkQuery,
+    queryRunner,
   };
 }
 
@@ -579,10 +581,18 @@ describe('SessionQueryExecutor — usage cost authority (TASK_2026_533)', () => 
 
 describe('SessionQueryExecutor — no-activity watchdog policy (TASK_2026_190)', () => {
   it('returns a watchdog that, on timeout, cleans up pending permissions then aborts with a surfaced error', async () => {
-    const { executor, registry, cleanupSpy } = makeHarness('ask');
+    const { executor, registry, cleanupSpy, queryRunner } = makeHarness('ask');
 
-    const result = await executor.executeQuery(makeConfig('tab-timeout'));
+    const result = await executor.executeQuery(makeConfig('tab-timeout', {
+      authEnvOverride: { ANTHROPIC_BASE_URL: 'https://private-provider.example' } as AuthEnv,
+      sessionConfig: { model: 'private-model' },
+    }));
     startFirstTurn(registry, 'tab-timeout');
+    expect(queryRunner.invokeWithLoadedQuery).toHaveBeenCalledWith(
+      expect.any(Function),
+      expect.anything(),
+      expect.objectContaining({ includeHookEvents: true }),
+    );
 
     // Not aborted before the window elapses.
     expect(result.abortController.signal.aborted).toBe(false);
@@ -599,16 +609,13 @@ describe('SessionQueryExecutor — no-activity watchdog policy (TASK_2026_190)',
     expect(cleanupSpy).toHaveBeenCalledTimes(1);
     expect(cleanupSpy).toHaveBeenCalledWith('tab-timeout');
 
-    // The controller is aborted with a descriptive Error…
     expect(result.abortController.signal.aborted).toBe(true);
-    const reason = result.abortController.signal.reason as Error;
-    expect(reason).toBeInstanceOf(Error);
-    // …whose wording is NOT classified as a benign user abort by the
-    // StreamTransformer catch (so it surfaces as a real error).
-    const msg = reason.message.toLowerCase();
-    expect(msg).not.toContain('abort');
-    expect(msg).not.toContain('cancel');
-    expect(msg).toContain('no stream activity');
+    const reason = result.abortController.signal.reason as ProviderTurnEndError;
+    expect(reason).toBeInstanceOf(ProviderTurnEndError);
+    expect(reason.endCause).toBe('provider-no-response');
+    expect(reason.message).toBe(result.activityWatchdog.failure?.message);
+    expect(reason.message).toContain('Ptah watchdog');
+    expect(reason.message).not.toMatch(/private-provider|private-model|abort|cancel/i);
   });
 
   it('does not fire the watchdog (no cleanup, no abort) when it is kicked within the window', async () => {
@@ -1381,7 +1388,7 @@ describe('SessionQueryExecutor — compaction coordinator wiring (TASK_2026_597 
     });
   });
 
-  describe('compaction dwell bound scope (TASK_2026_597 S1)', () => {
+  describe('compaction overdue notices', () => {
     /** Starts the watchdog under fake timers and opens a root compaction. */
     async function openCompaction(
       coordinator: CompactionCoordinator,
@@ -1419,22 +1426,20 @@ describe('SessionQueryExecutor — compaction coordinator wiring (TASK_2026_597 
       run.abortController.abort();
     });
 
-    it('a controlled session times out at the 300 s bound with its own message', async () => {
+    it('continues an acting compaction beyond the dwell threshold', async () => {
       const coordinator = actingCoordinator();
       const run = await openCompaction(coordinator, 'tab_dwell_acting');
       expect(coordinator.getState(REAL)).not.toBe('OBSERVE_ONLY');
 
-      jest.advanceTimersByTime(COMPACTION_MAX_DWELL_MS - 1);
+      jest.advanceTimersByTime(COMPACTION_MAX_DWELL_MS * 3);
+      expect(run.abortController.signal.aborted).toBe(false);
+      expect(run.activityWatchdog.failure).toBeUndefined();
+
+      feed(run, boundary());
+      jest.advanceTimersByTime(NO_ACTIVITY_TIMEOUT_MS - 1);
       expect(run.abortController.signal.aborted).toBe(false);
       jest.advanceTimersByTime(1);
-
-      expect(run.abortController.signal.aborted).toBe(true);
-      const message = (run.abortController.signal.reason as Error).message;
-      expect(message).toContain(
-        `Compaction did not finish within ${COMPACTION_MAX_DWELL_MS / 1000}s`,
-      );
-      expect(message.toLowerCase()).not.toContain('no stream activity');
-      expect(message.toLowerCase()).not.toContain('abort');
+      expect(run.activityWatchdog.failure?.endCause).toBe('provider-no-response');
     });
 
     it('a controlled session still completes a 216 s compaction (B8 measurement)', async () => {

@@ -50,6 +50,7 @@ import {
 } from '@ptah-extension/shared';
 
 import { CHAT_TOKENS } from '../tokens';
+import type { ChatFollowUpQueueService } from '../follow-up/chat-follow-up-queue.service';
 import type { ChatSessionService } from './chat-session.service';
 
 /**
@@ -80,7 +81,13 @@ export class ChildChatSessionHostAdapter implements IChildChatSessionHost {
     private readonly session: ChatSessionService,
     @inject(SDK_TOKENS.SDK_SESSION_LIFECYCLE_MANAGER, { isOptional: true })
     private readonly lifecycle: SessionLifecycleManager | null = null,
+    @inject(CHAT_TOKENS.FOLLOW_UP_QUEUE, { isOptional: true })
+    private readonly followUpQueue: Pick<ChatFollowUpQueueService, 'stoppedSince'> | null = null,
   ) {}
+
+  wasStoppedSince(tabId: string, sinceMs: number): boolean {
+    return this.followUpQueue?.stoppedSince(tabId, sinceMs) ?? false;
+  }
 
   /** One automatic retry after a no-activity watchdog stop (TASK_2026_2288 C). */
   recoverAfterWatchdogStop(

@@ -26,8 +26,14 @@ describe('session end cause boundary', () => {
     registry.notifyAll(data);
     registry.notifyAll({ ...data, cause: 'invalid' });
     registry.notifyAll({ ...data, cause: 'user-stop' });
+    registry.notifyAll({
+      ...data, cause: 'provider-no-response', startedAt: 123, zeroOutwardEvents: true,
+    });
+    registry.notifyAll({ ...data, cause: 'provider-input-closed', zeroOutwardEvents: false });
     expect(callback.mock.calls.map(([payload]) => payload.cause)).toEqual([
-      'unknown', 'unknown', 'user-stop',
+      'unknown', 'unknown', 'user-stop', 'provider-no-response', 'provider-input-closed',
     ]);
+    expect(callback.mock.calls[3][0]).toMatchObject({ startedAt: 123, zeroOutwardEvents: true });
+    expect(callback.mock.calls[4][0]).toMatchObject({ zeroOutwardEvents: false });
   });
 });
