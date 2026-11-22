@@ -73,10 +73,9 @@ import { readFile, writeFile, mkdir } from 'fs/promises';
 import { homedir } from 'os';
 import { join } from 'path';
 import {
-  createCachedAgySignIn,
-  readAgySignIn,
+  readCachedAgySignIn,
   type AgySignInState,
-} from './antigravity-sign-in';
+} from '@ptah-extension/auth-providers';
 
 import {
   createMcpFacet,
@@ -143,9 +142,6 @@ import {
   redactAgyText,
   safeAgyText,
 } from './antigravity-result-diagnostics';
-
-/** One cached sign-in reader per host: each status check reuses its answer for 30 s. */
-const cachedAgySignIn = createCachedAgySignIn(readAgySignIn);
 
 /**
  * Print-mode wait timeout. `agy` defaults to 5m, which kills most real coding
@@ -468,7 +464,7 @@ export class AntigravityCliAdapter implements CliAdapter {
 
   /**
    * @param acp - ACP seams for specs and live recordings; production passes none.
-   * @param readSignIn - Sign-in reader (specs); defaults to {@link readAgySignIn}
+   * @param readSignIn - Sign-in reader (specs); defaults to the shared `readCachedAgySignIn`
    *   behind the shared 30 s cache.
    */
   constructor(
@@ -476,7 +472,7 @@ export class AntigravityCliAdapter implements CliAdapter {
     private readonly streamJsonProbe?: (binary: string) => Promise<boolean>,
     private readonly logger?: Logger,
     private readonly acp: AntigravityAcpSeam = {},
-    private readonly readSignIn: () => Promise<AgySignInState> = cachedAgySignIn,
+    private readonly readSignIn: () => Promise<AgySignInState> = readCachedAgySignIn,
   ) {}
 
   async detect(): Promise<CliDetectionResult> {
@@ -516,7 +512,7 @@ export class AntigravityCliAdapter implements CliAdapter {
 
   /**
    * Whether agy's own sign-in is usable, from its keyring entry or an
-   * environment credential (see {@link readAgySignIn}). Model-free and never
+   * environment credential (see `readAgySignIn` in auth-providers). Model-free and never
    * starts the agent. A state that cannot be read (Linux, a failed or slow
    * keyring query) answers `true`, the previous optimistic behaviour: the
    * auth row has no "unknown" value, and a missing sign-in still surfaces as

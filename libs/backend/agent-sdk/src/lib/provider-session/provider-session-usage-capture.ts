@@ -10,7 +10,6 @@
  */
 import type { Logger } from '@ptah-extension/vscode-core';
 import type { ProviderUsage } from '@ptah-extension/provider-session-contracts';
-import { normalizeWorkspaceRoot } from '@ptah-extension/shared';
 import {
   parseSessionUsageContribution,
   usdToMicroUsd,
@@ -90,10 +89,9 @@ export function providerSessionUsageContribution(
     totalCostMicroUsd: knownCostMicroUsd,
     totalCostAuthority: costAuthority,
     pricingVersion: pricingVersion ? pricingVersion : null,
-    // Fallback only: the sessions row's workspace key wins in every read.
-    ...(turn.workspacePath
-      ? { workspaceKey: normalizeWorkspaceRoot(turn.workspacePath) }
-      : {}),
+    // Fallback only: the sessions row's workspace key wins in every read. The
+    // raw path: the ledger derives its own key and keeps POSIX case.
+    ...(turn.workspacePath ? { workspaceKey: turn.workspacePath } : {}),
     source: 'live',
     coverageStartMs: Math.min(turn.startedAtMs, turn.endedAtMs),
     coverageEndMs: turn.endedAtMs,

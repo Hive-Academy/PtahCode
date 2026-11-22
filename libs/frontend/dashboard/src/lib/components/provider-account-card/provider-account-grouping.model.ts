@@ -2,6 +2,7 @@ import {
   activeWindowExhaustion,
   activeEstimatedExhaustion,
   isActiveLimitEvidence,
+  planOwnerProviderId,
   usedPercent,
   type PlanLimitOwnerSnapshot,
   type LocalTimeOptions,
@@ -20,6 +21,9 @@ export function groupProviderAccounts(
   now: number,
   time: LocalTimeOptions,
 ) {
+  // The chat provider id names a runtime (`antigravity-cli`); its plan owners
+  // carry the provider-session profile (`antigravity`).
+  const selectedOwnerId = planOwnerProviderId(activeProviderId);
   const seen = new Set<string>();
   const records = owners
     .filter((owner) => {
@@ -29,7 +33,7 @@ export function groupProviderAccounts(
     })
     .map<GroupedProviderAccount>((owner) => {
       const view = buildPlanTile(owner, now, time);
-      const isSelectedProvider = owner.owner.providerId === activeProviderId;
+      const isSelectedProvider = owner.owner.providerId === selectedOwnerId;
       const hasReading =
         owner.windows.some(
           (window) =>

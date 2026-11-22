@@ -1,12 +1,12 @@
 ---
 id: TASK_2026_2302_usage
-status: backlog
+status: in_review
 type: BUGFIX
 title: Antigravity usage on the analytics page and repricing (rest of issue 1459)
 depends_on: [TASK_2026_2297_agy]
 relatesTo: [TASK_2026_2286_b442]
 created: '2026-11-22T12:00:00.000Z'
-updated: '2026-11-22T12:00:00.000Z'
+updated: '2026-11-22T15:00:00.000Z'
 description: >-
   GitHub issue 1459 remainder after PR 1462 (which prices agy turns from
   the live OpenRouter catalog and writes them to session_usage_turns with

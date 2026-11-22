@@ -9,7 +9,7 @@
 
 import { injectable, inject } from 'tsyringe';
 import { SessionHandoffCloser } from './session-handoff-closer';
-import { claudeProjectDir, normalizeWorkspaceRoot, HANDOFF_CLOSE_BLOCKER_CODES, type HandoffCloseBlockerCode } from '@ptah-extension/shared';
+import { claudeProjectDir, HANDOFF_CLOSE_BLOCKER_CODES, type HandoffCloseBlockerCode } from '@ptah-extension/shared';
 import { SYSTEM_PROMPT_MAX_LENGTH } from './chat-rpc.schema';
 import {
   Logger,
@@ -1692,7 +1692,7 @@ export class SessionRpcHandlers {
         if (scope.kind === 'range' && this.statsRepository) {
           for (const sessionId of sessionIds) {
             try {
-              const entry = await readSessionStatsRangeFromLedger(this.statsRepository, sessionId, normalizeWorkspaceRoot(workspacePath), scope.since, scope.until);
+              const entry = await readSessionStatsRangeFromLedger(this.statsRepository, sessionId, workspacePath, scope.since, scope.until);
               if (entry) fromLedger.set(sessionId, entry);
               else if (await this.statsRepository.hasSessionStats(sessionId)) {
                 fromLedger.set(sessionId, {

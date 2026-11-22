@@ -4,6 +4,7 @@ import { resolve } from 'node:path';
 import { PassThrough, Writable } from 'node:stream';
 import type { SpawnedProcessHandle } from '@ptah-extension/platform-core';
 import { CodexAccountUsageClient, usageResult } from './codex-account-usage-client';
+import { codexAccountIdentityDigest } from './codex-account-identity';
 import { CodexAppServerProcess } from './codex-app-server-process';
 import type {
   CodexHomeAuthEvent,
@@ -33,6 +34,8 @@ class UsageChild extends EventEmitter implements SpawnedProcessHandle {
   readonly stdin: Writable;
   requestId?: number;
   response: unknown = { rateLimits: {} };
+  /** `account/read` result; `undefined` answers with a JSON-RPC error, `'hang'` never answers. */
+  account: unknown = { account: null, requiresOpenaiAuth: true };
   hold = false;
   fail = false;
   notification = false;
@@ -71,6 +74,16 @@ class UsageChild extends EventEmitter implements SpawnedProcessHandle {
               });
             if (!this.hold) this.respond();
           }
+          if (
+            frame['method'] === 'account/read' &&
+            typeof frame['id'] === 'number' &&
+            this.account !== 'hang'
+          )
+            this.send(
+              this.account === undefined
+                ? { id: frame['id'], error: { code: -1, message: 'no account' } }
+                : { id: frame['id'], result: this.account },
+            );
         });
       },
     });
@@ -172,6 +185,7 @@ describe('CodexAccountUsageClient', () => {
         );
       },
       () => now,
+      50,
     );
   });
 
@@ -267,18 +281,22 @@ describe('CodexAccountUsageClient', () => {
     expect(await client.read(homeA)).toEqual(a);
     expect(await client.read(homeB)).toEqual(b);
     expect(children).toHaveLength(2);
-    expect(client.currentOwnerKey(homeA)).toMatch(
-      /^openai-codex#account:[a-f0-9]{64}$/,
+    expect(client.currentAccountDigest(homeA)).toBe(
+      codexAccountIdentityDigest(key(homeA), { accountId: 'private-account' }),
     );
-    expect(client.currentOwnerKey(homeA)).not.toBe(
-      client.currentOwnerKey(homeB),
+    expect(client.currentAccountDigest(homeA)).toMatch(/^[a-f0-9]{64}$/);
+    expect(client.currentAccountDigest(homeA)).not.toBe(
+      client.currentAccountDigest(homeB),
     );
-    expect(JSON.stringify([a, b, client.currentOwnerKey(homeA)])).not.toContain(
+    expect(JSON.stringify([a, b, client.currentAccountDigest(homeA)])).not.toContain(
       'private-account',
     );
   });
 
-  it('coalesces lexical home aliases and uses only the supported usage request', async () => {
+  it('coalesces lexical home aliases and uses only the supported usage and identity requests', async () => {
+    configure = (child) => {
+      child.response = { rateLimits: {}, accountId: 'private-account' };
+    };
     await Promise.all([
       client.read(homeA),
       client.read(resolve(homeA, 'nested', '..')),
@@ -288,7 +306,171 @@ describe('CodexAccountUsageClient', () => {
       'initialize',
       'initialized',
       'account/rateLimits/read',
+      // Records the signed-in account once for the new account-id owner.
+      'account/read',
     ]);
+  });
+
+  it('names the owner from account/read when the rate-limits read has no account id', async () => {
+    configure = (child) => {
+      child.response = { rateLimits: { primary: { usedPercent: 7 } }, accountId: null };
+      child.account = {
+        account: { type: 'chatgpt', email: 'Private@Example.test', planType: 'plus' },
+        requiresOpenaiAuth: true,
+      };
+    };
+    const result = await client.read(homeA);
+    expect(result.quota?.primary?.usedPercent).toBe(7);
+    expect(children[0].frames.map((frame) => frame['method'])).toEqual([
+      'initialize',
+      'initialized',
+      'account/rateLimits/read',
+      'account/read',
+    ]);
+    expect(client.currentAccountDigest(homeA)).toBe(
+      codexAccountIdentityDigest(key(homeA), { email: 'private@example.test' }),
+    );
+    expect(JSON.stringify([result, client.currentAccountDigest(homeA)])).not.toMatch(
+      /private@example/i,
+    );
+  });
+
+  it('never reports an account-id owner for an id-less read and restores it with the id', async () => {
+    configure = (child) => {
+      child.response = { rateLimits: { primary: { usedPercent: 1 } }, accountId: 'acct-1' };
+      child.account = {
+        account: { type: 'chatgpt', email: 'private@example.test' },
+      };
+    };
+    await client.read(homeA);
+    const byId = client.currentAccountDigest(homeA);
+    expect(byId).toBe(codexAccountIdentityDigest(key(homeA), { accountId: 'acct-1' }));
+    configure = (child) => {
+      child.response = { rateLimits: { primary: { usedPercent: 2 } } };
+      child.account = {
+        account: { type: 'chatgpt', email: 'private@example.test' },
+      };
+    };
+    expect((await client.read(homeA, { refresh: true })).quota?.primary?.usedPercent).toBe(2);
+    // The same type, email and plan cannot prove the same account.
+    expect(client.currentAccountDigest(homeA)).toBeNull();
+    // account/read still runs, to detect a sign-out or a switch.
+    expect(children[1].frames.map((frame) => frame['method'])).toContain('account/read');
+    configure = (child) => {
+      child.response = { rateLimits: { primary: { usedPercent: 3 } }, accountId: 'acct-1' };
+      child.account = {
+        account: { type: 'chatgpt', email: 'private@example.test' },
+      };
+    };
+    await client.read(homeA, { refresh: true });
+    expect(client.currentAccountDigest(homeA)).toBe(byId);
+    // After an auth change, the first id-less read is named by email.
+    configure = (child) => {
+      child.response = { rateLimits: { primary: { usedPercent: 4 } } };
+      child.account = {
+        account: { type: 'chatgpt', email: 'private@example.test' },
+      };
+    };
+    // An auth change ends the account: the next id-less read names it by email.
+    invalidate(homeA);
+    await client.read(homeA);
+    expect(client.currentAccountDigest(homeA)).toBe(
+      codexAccountIdentityDigest(key(homeA), { email: 'private@example.test' }),
+    );
+  });
+
+  it.each([
+    ['a different signed-in account', { account: { type: 'chatgpt', email: 'other@example.test' } }],
+    ['the same email on another plan', { account: { type: 'chatgpt', email: 'private@example.test', planType: 'team' } }],
+    ['a signed-out home', { account: null }],
+  ])('drops an account-id owner when an id-less read finds %s', async (_case, account) => {
+    configure = (child) => {
+      child.response = { rateLimits: { primary: { usedPercent: 1 } }, accountId: 'acct-1' };
+      child.account = {
+        account: { type: 'chatgpt', email: 'private@example.test' },
+      };
+    };
+    await client.read(homeA);
+    expect(client.currentAccountDigest(homeA)).not.toBeNull();
+    configure = (child) => {
+      child.response = { rateLimits: { primary: { usedPercent: 2 } } };
+      child.account = account;
+    };
+    // The new quota publishes without an owner, never under the old one.
+    expect((await client.read(homeA, { refresh: true })).quota?.primary?.usedPercent).toBe(2);
+    expect(client.currentAccountDigest(homeA)).toBeNull();
+    expect((await client.read(homeA)).quota?.primary?.usedPercent).toBe(2);
+  });
+
+  it.each([
+    ['fails', undefined],
+    ['times out', 'hang'],
+  ])('keeps the account-id owner recorded when an id-less account/read %s', async (_case, account) => {
+    const sameAccount = {
+      account: { type: 'chatgpt', email: 'private@example.test' },
+    };
+    configure = (child) => {
+      child.response = { rateLimits: { primary: { usedPercent: 1 } }, accountId: 'acct-1' };
+      child.account = sameAccount;
+    };
+    await client.read(homeA);
+    const byId = client.currentAccountDigest(homeA);
+    expect(byId).not.toBeNull();
+    configure = (child) => {
+      child.response = { rateLimits: { primary: { usedPercent: 2 } } };
+      child.account = account;
+    };
+    // This read publishes without an owner, never under a guessed one.
+    expect((await client.read(homeA, { refresh: true })).quota?.primary?.usedPercent).toBe(2);
+    expect(client.currentAccountDigest(homeA)).toBeNull();
+    // A readable same-account id-less read still reports no owner.
+    configure = (child) => {
+      child.response = { rateLimits: { primary: { usedPercent: 3 } } };
+      child.account = sameAccount;
+    };
+    expect((await client.read(homeA, { refresh: true })).quota?.primary?.usedPercent).toBe(3);
+    expect(client.currentAccountDigest(homeA)).toBeNull();
+    // The next read that carries the id restores the same key.
+    configure = (child) => {
+      child.response = { rateLimits: { primary: { usedPercent: 3 } }, accountId: 'acct-1' };
+      child.account = sameAccount;
+    };
+    await client.read(homeA, { refresh: true });
+    expect(client.currentAccountDigest(homeA)).toBe(byId);
+    // A readable different account after that still drops it.
+    configure = (child) => {
+      child.response = { rateLimits: { primary: { usedPercent: 4 } } };
+      child.account = { account: { type: 'chatgpt', email: 'other@example.test' } };
+    };
+    await client.read(homeA, { refresh: true });
+    expect(client.currentAccountDigest(homeA)).toBeNull();
+    // Dropped, not retained: a later id-less read names the new account by email.
+    await client.read(homeA, { refresh: true });
+    expect(client.currentAccountDigest(homeA)).toBe(
+      codexAccountIdentityDigest(key(homeA), { email: 'other@example.test' }),
+    );
+  });
+
+  it('bounds a hung identity call and still publishes the quota', async () => {
+    configure = (child) => {
+      child.response = { rateLimits: { primary: { usedPercent: 9 } } };
+      child.account = 'hang';
+    };
+    const started = Date.now();
+    expect((await client.read(homeA)).quota?.primary?.usedPercent).toBe(9);
+    expect(Date.now() - started).toBeLessThan(2_000);
+    expect(client.currentAccountDigest(homeA)).toBeNull();
+    expect(await client.read(homeA)).toMatchObject({ status: 'available' });
+    expect(children).toHaveLength(1);
+  });
+
+  it('keeps the usage read when the identity fallback fails', async () => {
+    configure = (child) => {
+      child.response = { rateLimits: { primary: { usedPercent: 7 } } };
+      child.account = undefined;
+    };
+    expect((await client.read(homeA)).status).toBe('available');
+    expect(client.currentAccountDigest(homeA)).toBeNull();
   });
 
   it('leaves missing quota, plan, activity and owner fields absent', async () => {
@@ -297,7 +479,7 @@ describe('CodexAccountUsageClient', () => {
       providerId: 'openai-codex',
       fetchedAt: 1000,
     });
-    expect(client.currentOwnerKey(homeA)).toBeNull();
+    expect(client.currentAccountDigest(homeA)).toBeNull();
   });
 
   it('prefers the codex limit bucket and preserves zero and nullable reported values', async () => {
@@ -517,7 +699,7 @@ describe('CodexAccountUsageClient', () => {
     await client.read(homeA);
     eligibility.set(key(homeA), 'unsupported-auth');
     expect((await client.read(homeA)).status).toBe('unsupported-auth');
-    expect(client.currentOwnerKey(homeA)).toBeNull();
+    expect(client.currentAccountDigest(homeA)).toBeNull();
   });
 
   it('refreshes explicitly or after TTL and does not let callers mutate cached quotas', async () => {
@@ -658,7 +840,7 @@ describe('CodexAccountUsageClient', () => {
     wrongEcho = true;
     expect((await client.read(homeA)).status).toBe('service-unavailable');
     expect(children[0].frames).toHaveLength(1);
-    expect(client.currentOwnerKey(homeA)).toBeNull();
+    expect(client.currentAccountDigest(homeA)).toBeNull();
   });
 
   it('sanitizes malformed provider results instead of returning their data', async () => {

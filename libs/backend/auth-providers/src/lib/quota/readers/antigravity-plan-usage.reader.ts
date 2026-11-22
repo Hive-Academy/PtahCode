@@ -15,6 +15,7 @@ import {
 } from '@ptah-extension/shared';
 import {
   currentAntigravityStoreOwner,
+  matchesAntigravityStoreAccount,
   observeAntigravityAccount,
 } from '../provider-owner.resolver';
 import {
@@ -36,6 +37,7 @@ import type {
   PlanUsageReadRequest,
 } from './plan-usage-reader.types';
 import { antigravityFailure, type AntigravityUsageReading, type AntigravitySourceFailure, readAntigravityOAuthQuota } from './antigravity-oauth-plan-usage.reader';
+import { readAntigravityCliUsage } from './antigravity-cli-usage.source';
 import { readUsageSourceChain } from './usage-source-chain';
 import type { UsageSource, UsageSourceResult, UsageFailureReason, UsageSourceLabel } from './plan-usage-reader.types';
 
@@ -43,6 +45,8 @@ export const ANTIGRAVITY_USAGE_TIMEOUT_MS = 3_000;
 export const ANTIGRAVITY_CHAIN_TIMEOUT_MS = 11_000;
 const ANTIGRAVITY_OAUTH_STAGE_TIMEOUT_MS = 3_000;
 const MIN_STAGE_MS = 1_000;
+/** Time the CLI stage leaves for its own cleanup before the chain deadline. */
+const CLI_STAGE_MARGIN_MS = 250;
 export const ANTIGRAVITY_MAX_BODY_BYTES = 1_048_576;
 export const ANTIGRAVITY_MAX_MODEL_LENGTH = 64;
 const MAX_ATTEMPTS = 8;
@@ -56,6 +60,10 @@ type StatusRequest = (
   csrfToken: string,
   signal: AbortSignal,
 ) => Promise<unknown>;
+type CliUsageRead = (
+  signal: AbortSignal | undefined,
+  options: { ownerKey: string; accountFingerprint: string; budgetMs: number },
+) => Promise<AntigravityUsageReading>;
 type ProbeCommandRunner = (
   command: string,
   args: readonly string[],
@@ -76,7 +84,9 @@ export function createAntigravityPlanUsageReader(
   requestStatus: StatusRequest = defaultRequest,
   observeAccount: (email: string | null) => string = observeAntigravityAccount,
   readOAuth: (signal?: AbortSignal, now?: () => number) => Promise<AntigravityUsageReading | undefined> = (signal, clock) => readAntigravityOAuthQuota(signal, clock, undefined, undefined, undefined, true, logger),
-  _readStoreOwner: typeof currentAntigravityStoreOwner = currentAntigravityStoreOwner,
+  readStoreOwner: typeof currentAntigravityStoreOwner = currentAntigravityStoreOwner,
+  readCli: CliUsageRead = (signal, options) =>
+    readAntigravityCliUsage(signal, { ...options, logger, now }),
 ): (request: PlanUsageReadRequest) => Promise<AntigravityUsageReading> {
   return async (request) => {
     const { target } = request;
@@ -113,18 +123,25 @@ export function createAntigravityPlanUsageReader(
         return record(reading === 'account-changed'
           ? antigravityFailure('local-rpc', 'account-mismatch') : reading, 'local-rpc');
       } },
+      // The only quota source for a plain `agy acp` install, so it runs on
+      // every chain read (not only `allowCliFallback` ones); its own cache,
+      // backoff and circuit breaker keep it off the per-turn path.
       { id: 'antigravity-cli', label: 'cli-command', read: async (stage) => {
-        if (!stage.allowCliFallback) return sourceFailure('cli-command', 'source-not-applicable');
         if (!['cli-store', 'unknown', 'account'].includes(target.ownerRef.identityKind))
           return sourceFailure('cli-command', 'source-not-applicable');
-        return record(antigravityFailure('cli-command', 'source-unavailable'), 'cli-command');
+        // agy reads its active keyring account: an account owner must be that account.
+        const storeOwner = readStoreOwner();
+        if (target.ownerRef.identityKind === 'account' &&
+          !matchesAntigravityStoreAccount(target.ownerRef, storeOwner))
+          return record(antigravityFailure('cli-command', 'account-mismatch'), 'cli-command');
+        return record(await readCli(stage.signal, { ownerKey: target.ownerRef.key,
+          accountFingerprint: storeOwner.key,
+          budgetMs: chainDeadline - now() - CLI_STAGE_MARGIN_MS }), 'cli-command');
       } },
     ];
     const reading = await readUsageSourceChain(sources, request, now, Math.max(0, chainDeadline - now()));
     if (reading.status === 'available') return reading;
-    const primary = failures.find((failure) => failure.reason === 'account-unverified') ??
-      failures.find((failure) => failure.source !== 'cli-command' && failure.cause !== 'missing-token-file' &&
-        failure.cause !== 'missing-local-server') ?? failures.find((failure) => failure.source !== 'cli-command');
+    const primary = primaryFailure(failures);
     return { ...reading, ...(primary && primary.reason !== 'source-not-applicable' && { statusReason: primary.reason }), sourceFailures: failures };
   };
   async function probeLocal(
@@ -235,6 +252,22 @@ export function createAntigravityPlanUsageReader(
       controller.abort();
     }
   }
+}
+
+/**
+ * The cause the owner shows when no source answered. An absent token file or
+ * IDE says nothing about the agy sign-in, so a CLI cause (its keyring check,
+ * a missing binary, a paused read) outranks them; "not signed in" comes only
+ * from the CLI stage's sign-in check or agy itself.
+ */
+function primaryFailure(failures: readonly AntigravitySourceFailure[]): AntigravitySourceFailure | undefined {
+  const absent = (failure: AntigravitySourceFailure) =>
+    failure.cause === 'missing-token-file' || failure.cause === 'missing-local-server';
+  return failures.find((failure) => failure.reason === 'account-unverified') ??
+    failures.find((failure) => failure.source !== 'cli-command' && !absent(failure)) ??
+    failures.find((failure) => failure.source === 'cli-command') ??
+    failures.find((failure) => failure.cause === 'missing-local-server') ??
+    failures[0];
 }
 
 async function discoverServer(

@@ -224,7 +224,9 @@ export type PlanLimitStatusReason =
   | 'balance-unavailable'
   | 'prepaid-balance-unavailable'
   | 'balance-auth-rejected'
-  | 'usage-auth-rejected';
+  | 'usage-auth-rejected'
+  /** The provider answered, but reported no usage window for this account. */
+  | 'no-usage-windows';
 
 /** Origin of an owner's plan reading, distinct from per-window evidence. */
 export type UsageSourceLabel =

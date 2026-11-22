@@ -90,14 +90,17 @@ function escapeRegExp(text: string): string {
  * own, `<label>: [<type>:target=]<target>` with the label localized
  * ("Target", "Ziel", "Cible"), and nothing after the target. The heading
  * ("Currently stored credentials for <target>:") ends with a colon after the
- * target, so it never counts. No credential line but the target named
- * (the heading): signed out. Neither: output not understood, `unknown`.
+ * target, so it never counts. Signed out only on the positive empty-list
+ * marker (`* NONE *`) together with the target named. Anything else (a
+ * localized or unexpected layout) is `unknown`, so a signed-in user is never
+ * told to sign in.
  */
 export function parseCmdkeyList(stdout: string, target: string): AgySignInState {
   const name = escapeRegExp(target);
   const credentialLine = new RegExp(`^[^:\\r\\n]+:\\s*(?:\\S*?[=:])?${name}\\s*$`, 'im');
   if (credentialLine.test(stdout)) return 'signed-in';
-  return stdout.toLowerCase().includes(target.toLowerCase()) ? 'signed-out' : 'unknown';
+  const namesTarget = stdout.toLowerCase().includes(target.toLowerCase());
+  return namesTarget && /^\s*\*\s*NONE\s*\*\s*$/m.test(stdout) ? 'signed-out' : 'unknown';
 }
 
 /**
@@ -124,6 +127,13 @@ export function createCachedAgySignIn(
     return answer;
   };
 }
+
+/**
+ * The one cached sign-in reader per host process. The agy lane adapter and
+ * the plan-usage CLI source share it, so one keyring query answers both for
+ * {@link AGY_SIGN_IN_CACHE_TTL_MS}.
+ */
+export const readCachedAgySignIn = createCachedAgySignIn(() => readAgySignIn());
 
 /**
  * The sign-in state of agy. Rejects when the keyring query cannot run; the

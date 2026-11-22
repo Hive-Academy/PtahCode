@@ -1,5 +1,3 @@
-import { createMockLogger } from '@ptah-extension/shared/testing';
-import type { Logger } from '@ptah-extension/vscode-core';
 import {
   AGY_SIGN_IN_CACHE_TTL_MS,
   createCachedAgySignIn,
@@ -7,7 +5,6 @@ import {
   readAgySignIn,
   type AgyKeyringQuery,
 } from './antigravity-sign-in';
-import { AntigravityCliAdapter } from './antigravity-cli.adapter';
 
 const FOUND = `
 Currently stored credentials for gemini:antigravity:
@@ -114,15 +111,30 @@ Derzeit gespeicherte Anmeldeinformationen für gemini:antigravity:
   });
 
   it('never matches a different target that only starts or ends the same', () => {
-    expect(parseCmdkeyList('    Target: gemini:antigravity-old\n', target)).toBe('signed-out');
+    expect(parseCmdkeyList('    Target: gemini:antigravity-old\n', target)).toBe('unknown');
     expect(parseCmdkeyList('    Target: LegacyGeneric:target=xgemini:antigravity\n', target)).toBe(
-      'signed-out',
+      'unknown',
     );
+    expect(parseCmdkeyList(`    Target: gemini:antigravity-old\n${NONE}`, target)).toBe('signed-out');
   });
 
   it('answers unknown for output that does not name the target at all', () => {
     expect(parseCmdkeyList('', target)).toBe('unknown');
     expect(parseCmdkeyList('* NONE *', target)).toBe('unknown');
+  });
+
+  it('answers unknown, never signed out, for a layout it cannot read', () => {
+    // Review FM3: a credential line in a layout the regex misses (full-width
+    // colon, extra tokens) used to read as signed out from the heading alone.
+    const fullWidth = `
+現在保存されている gemini:antigravity の資格情報:
+
+    ターゲット：gemini:antigravity
+    種類: 汎用
+`;
+    expect(parseCmdkeyList(fullWidth, target)).toBe('unknown');
+    expect(parseCmdkeyList('Currently stored credentials for gemini:antigravity:\n\n    Target: gemini:antigravity (local)\n',
+      target)).toBe('unknown');
   });
 });
 
@@ -150,38 +162,5 @@ describe('createCachedAgySignIn', () => {
     await expect(cached()).rejects.toThrow('cmdkey timed out');
     await expect(cached()).resolves.toBe('signed-in');
     expect(read).toHaveBeenCalledTimes(2);
-  });
-});
-
-describe('AntigravityCliAdapter.ensureTokensFresh', () => {
-  const adapter = (read: () => Promise<'signed-in' | 'signed-out' | 'unknown'>) => {
-    const logger = createMockLogger();
-    return {
-      logger,
-      lane: new AntigravityCliAdapter(
-        undefined,
-        undefined,
-        logger as unknown as Logger,
-        {},
-        read,
-      ),
-    };
-  };
-
-  it('is false only for a definite signed-out state', async () => {
-    expect(await adapter(async () => 'signed-in').lane.ensureTokensFresh()).toBe(true);
-    expect(await adapter(async () => 'signed-out').lane.ensureTokensFresh()).toBe(false);
-    expect(await adapter(async () => 'unknown').lane.ensureTokensFresh()).toBe(true);
-  });
-
-  it('keeps the optimistic answer when the read fails, logging only the error type', async () => {
-    const { lane, logger } = adapter(async () => {
-      throw new Error('secret-looking text');
-    });
-    expect(await lane.ensureTokensFresh()).toBe(true);
-    expect(logger.warn).toHaveBeenCalledWith(
-      expect.stringContaining('sign-in check failed'),
-      { error: 'Error' },
-    );
   });
 });

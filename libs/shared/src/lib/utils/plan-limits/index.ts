@@ -71,3 +71,10 @@ export {
   type PlanLimitField,
   type PlanLimitFieldSourceGroup,
 } from './plan-limit-format';
+// Status reason text shared by the dashboard and the chat sidebar
+export {
+  NO_OPEN_SESSION_LABEL,
+  PLAN_LIMIT_REASON_LABELS,
+  planLimitReasonLabel,
+  PROVIDER_REASON_LABELS,
+} from './plan-limit-reason-labels';

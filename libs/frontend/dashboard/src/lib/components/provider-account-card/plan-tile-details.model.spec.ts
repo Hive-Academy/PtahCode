@@ -1,15 +1,15 @@
-import type {
-  LocalTimeOptions,
-  PlanLimitOwnerSnapshot,
-  PlanLimitStatusReason,
-  PlanLimitWindow,
-  ProviderAccountUsageStatus,
+import {
+  planLimitReasonLabel,
+  type LocalTimeOptions,
+  type PlanLimitOwnerSnapshot,
+  type PlanLimitStatusReason,
+  type PlanLimitWindow,
+  type ProviderAccountUsageStatus,
 } from '@ptah-extension/shared';
 import {
   buildPlanTile,
   compactCount,
   compactTokens,
-  planLimitReasonLabel,
   tileTitleLines,
 } from './plan-tile-view.model';
 

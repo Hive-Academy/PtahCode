@@ -2,7 +2,6 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { z } from 'zod';
 import type { IFileSystemProvider, SessionUsageContribution } from '@ptah-extension/platform-core';
-import { normalizeWorkspaceRoot } from '@ptah-extension/shared';
 import type { UsageCollector, UsageSourceCursor } from './usage-collector.interface';
 
 const MAX_READ = 256 * 1024;
@@ -146,7 +145,7 @@ export class ClaudeJsonlUsageCollector implements UsageCollector {
           producer: 'transcript-replay', runId: sessionId, nativeThreadId: sessionId,
           turnId: null, eventKey, parentSessionId: owner.subagent ? (valid ? sessionId : owner.parent) : null,
           subagentId: owner.subagent, providerId: 'claude',
-          workspaceKey: record.cwd && path.isAbsolute(record.cwd) ? normalizeWorkspaceRoot(record.cwd) : null,
+          workspaceKey: record.cwd && path.isAbsolute(record.cwd) ? record.cwd : null,
           worktreePath: record.cwd && path.isAbsolute(record.cwd) ? record.cwd : null,
           occurredAtMs: Number.isFinite(occurredAtMs) ? occurredAtMs : Math.floor(stat.mtime),
           revision: lineOffset, models: [{

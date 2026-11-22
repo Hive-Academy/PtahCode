@@ -3,19 +3,22 @@ import type { SessionStatsRepository, SessionModelUsageRow } from '@ptah-extensi
 
 const MICRO_USD = 1_000_000;
 
-/** A range projection of accepted live events. Null means this session has no ledger row. */
+/**
+ * A range projection of accepted live events. Null means this session has no
+ * ledger row. `workspacePath` is the raw path; the repository derives its key.
+ */
 export async function readSessionStatsRangeFromLedger(
   repository: SessionStatsRepository,
   sessionId: string,
-  workspaceKey: string,
+  workspacePath: string,
   since: number,
   until: number,
 ): Promise<SessionStatsEntry | null> {
-  const stats = await repository.getSessionStats(sessionId, workspaceKey);
+  const stats = await repository.getSessionStats(sessionId, workspacePath);
   if (!stats) return null;
   const [models, messageCount] = await Promise.all([
-    repository.getSessionModelUsage(sessionId, workspaceKey, since, until),
-    repository.getSessionUsageEventCount(sessionId, workspaceKey, since, until),
+    repository.getSessionModelUsage(sessionId, workspacePath, since, until),
+    repository.getSessionUsageEventCount(sessionId, workspacePath, since, until),
   ]);
   const totals = models.reduce((sum, row) => ({
     input: checkedSum(sum.input, row.input_tokens),

@@ -1,6 +1,11 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { normalizeCodexHomeKey } from './codex-home-path';
+import {
+  codexAccountIdentityDigest,
+  codexSignedInDigest,
+  type CodexSignedInAccount,
+} from './codex-account-identity';
 import type { CodexExecutionProfile } from './codex-runtime.types';
 import type { IDisposable } from '@ptah-extension/platform-core';
 import type {
@@ -20,6 +25,8 @@ import {
 
 const PROVIDER = 'openai-codex';
 const CACHE_MS = 30_000;
+/** The `account/read` identity fallback may not hold a fetched quota longer than this. */
+const IDENTITY_TIMEOUT_MS = 3_000;
 const MISS_MS = 30_000;
 const LIMITS_UPDATED =
   'account/rateLimits/updated' satisfies CodexNotificationMethod;
@@ -35,13 +42,58 @@ interface HomeState {
   generation: number;
   watcher?: IDisposable;
   cached?: CodexAccountUsageResult;
-  ownerKey?: string;
+  accountDigest?: string;
+  /**
+   * The digest came from a rate-limits `accountId`. It stays recorded until
+   * an auth change, a sign-out or a different signed-in account, so the next
+   * read that carries the id names the same key. A read without the id never
+   * reports it: two accounts can share type, email and plan, so the
+   * signed-in digest cannot prove the same account.
+   */
+  accountDigestFromId?: boolean;
+  /**
+   * {@link codexSignedInDigest} recorded with the account-id owner; used only
+   * to detect a switch, never to confirm the owner.
+   */
+  signedInDigest?: string;
+  /** The last read named no account id: the recorded id owner is not reported. */
+  ownerUnconfirmed?: boolean;
   miss?: { readonly at: number; readonly result: CodexAccountUsageResult };
   flight?: Flight;
 }
 
 function unavailable(): CodexAccountUsageResult {
   return { status: 'service-unavailable', providerId: PROVIDER };
+}
+
+/**
+ * The signed-in account `account/read` reports: `null` when none is signed
+ * in, `undefined` when the read failed or timed out. Identity only: an
+ * unreadable account leaves the owner unresolved and never fails the usage
+ * read itself.
+ */
+async function readSignedInAccount(
+  child: CodexAppServerProcess,
+  timeoutMs: number,
+): Promise<CodexSignedInAccount | null | undefined> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    // A hung identity call must not hold the fetched quota; closing the child
+    // afterwards abandons the request.
+    const read = await Promise.race([
+      child.request('account/read', { refreshToken: false }),
+      new Promise<undefined>((resolveTimeout) => {
+        timer = setTimeout(() => resolveTimeout(undefined), timeoutMs);
+        timer.unref?.();
+      }),
+    ]);
+    return read === undefined ? undefined : read.account;
+  } catch {
+    // degradation-audit: optional-capability - the owner stays unresolved; quota from the same read still publishes.
+    return undefined;
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
 }
 
 function abortError(): Error {
@@ -309,6 +361,7 @@ export class CodexAccountUsageClient {
       handlers: CodexAppServerHandlers,
     ) => CodexAppServerProcess,
     private readonly now: () => number = Date.now,
+    private readonly identityTimeoutMs = IDENTITY_TIMEOUT_MS,
   ) {}
 
   async read(
@@ -365,19 +418,24 @@ export class CodexAccountUsageClient {
     if (!state) return;
     state.generation++;
     state.cached = undefined;
-    state.ownerKey = undefined;
+    state.accountDigest = undefined;
+    state.accountDigestFromId = undefined;
+    state.signedInDigest = undefined;
+    state.ownerUnconfirmed = undefined;
     state.miss = undefined;
     const flight = state.flight;
     state.flight = undefined;
     flight?.controller.abort();
   }
 
-  /** Opaque, per-home identity only. Raw server account identifiers never escape. */
-  currentOwnerKey(home: string): string | null {
-    return (
-      this.homes.get(normalizeCodexHomeKey(home, process.platform))?.ownerKey ??
-      null
-    );
+  /**
+   * The last read's {@link codexAccountIdentityDigest} for this home: opaque
+   * identity material the quota layer turns into the canonical owner key.
+   * Raw server account identifiers never escape.
+   */
+  currentAccountDigest(home: string): string | null {
+    const state = this.homes.get(normalizeCodexHomeKey(home, process.platform));
+    return state?.ownerUnconfirmed ? null : (state?.accountDigest ?? null);
   }
 
   async close(): Promise<void> {
@@ -425,7 +483,10 @@ export class CodexAccountUsageClient {
       if (!current()) return unavailable();
       if (eligibility !== 'supported') {
         state.cached = undefined;
-        state.ownerKey = undefined;
+        state.accountDigest = undefined;
+        state.accountDigestFromId = undefined;
+        state.signedInDigest = undefined;
+        state.ownerUnconfirmed = undefined;
         state.miss = undefined;
         return { status: eligibility, providerId: PROVIDER };
       }
@@ -464,16 +525,30 @@ export class CodexAccountUsageClient {
       )
         return unavailable();
       const response = await child.request('account/rateLimits/read', {});
+      const usageChild = child;
+      const owner = await this.resolveOwner(
+        home,
+        state,
+        response.accountId?.trim() || undefined,
+        async () =>
+          current()
+            ? readSignedInAccount(usageChild, this.identityTimeoutMs)
+            : undefined,
+      );
       // Complete process cleanup before publishing a result into the cache.
       await child.close();
       if (!current()) return unavailable();
-      const owner =
-        response.accountId == null
-          ? undefined
-          : `${PROVIDER}#account:${createHash('sha256').update(`${home}\0${response.accountId}`).digest('hex')}`;
       const result = usageResult(response, this.now());
       state.cached = result;
-      state.ownerKey = owner;
+      if (owner.unconfirmed) {
+        // Publish unresolved; keep the id owner for a later confirming read.
+        state.ownerUnconfirmed = true;
+      } else {
+        state.accountDigest = owner.digest;
+        state.accountDigestFromId = owner.fromId;
+        state.signedInDigest = owner.signedInDigest;
+        state.ownerUnconfirmed = undefined;
+      }
       state.miss = undefined;
       return result;
     } catch {
@@ -491,6 +566,58 @@ export class CodexAccountUsageClient {
       // Shared process close is idempotent and resolves after stdio has closed.
       await child?.close();
     }
+  }
+
+  /**
+   * The owner of one read. A rate-limits account id names it. Without one,
+   * a recorded account-id owner is never reported: the bounded account/read
+   * only detects a sign-out or a different account, which drop it; otherwise
+   * it stays recorded and this read's owner is unresolved. With no account-id
+   * owner since the last auth change, the email names it.
+   */
+  private async resolveOwner(
+    home: string,
+    state: HomeState,
+    accountId: string | undefined,
+    readAccount: () => Promise<CodexSignedInAccount | null | undefined>,
+  ): Promise<{
+    readonly digest?: string;
+    readonly fromId: boolean;
+    readonly signedInDigest?: string;
+    readonly unconfirmed?: true;
+  }> {
+    const signedInOf = (account: CodexSignedInAccount | null | undefined) =>
+      account ? codexSignedInDigest(account) : undefined;
+    if (accountId) {
+      const digest = codexAccountIdentityDigest(home, { accountId }) ?? undefined;
+      // Record the signed-in account once per account-id owner.
+      const recorded =
+        state.accountDigestFromId && state.accountDigest === digest
+          ? state.signedInDigest
+          : undefined;
+      return {
+        digest,
+        fromId: true,
+        signedInDigest: recorded ?? signedInOf(await readAccount()),
+      };
+    }
+    const account = await readAccount();
+    const signedIn = signedInOf(account);
+    if (state.accountDigestFromId && state.accountDigest) {
+      const switched =
+        account === null ||
+        (signedIn !== undefined &&
+          state.signedInDigest !== undefined &&
+          signedIn !== state.signedInDigest);
+      // An unreadable or matching account is not proof of the same account.
+      return switched ? { fromId: false } : { fromId: true, unconfirmed: true };
+    }
+    const email = account?.type === 'chatgpt' ? account.email : undefined;
+    return {
+      digest: codexAccountIdentityDigest(home, { email }) ?? undefined,
+      fromId: false,
+      ...(signedIn !== undefined && { signedInDigest: signedIn }),
+    };
   }
 
   private join(
