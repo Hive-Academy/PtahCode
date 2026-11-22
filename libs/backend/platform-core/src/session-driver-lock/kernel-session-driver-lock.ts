@@ -117,6 +117,14 @@ export class KernelSessionDriverLock implements ISessionDriverLock {
     } catch (error) {
       return { ok: false, unavailable: String(error) };
     }
+    if (this.disposed) {
+      // dispose() ran while the control endpoint was registering, so it saw no
+      // endpoint to leave. Leave it here, or it stays bound with a dead source.
+      const control = this.control;
+      this.control = undefined;
+      await control?.unregister(this);
+      return { ok: false, unavailable: 'Session driver lock disposed' };
+    }
     const server = net.createServer((socket) => {
       // A peer that resets or never closes must neither crash the process nor
       // hold the connection open and stall server.close() during release.
@@ -309,6 +317,6 @@ export class KernelSessionDriverLock implements ISessionDriverLock {
       Array.from(this.entries.values(), (entry) => this.closeEntry(entry)),
     );
     process.removeListener('exit', this.onExit);
-    this.control?.unregister(this);
+    await this.control?.unregister(this);
   }
 }

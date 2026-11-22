@@ -36,8 +36,33 @@ export interface ControlListing {
 
 let active: ControlEndpoint | undefined;
 let starting: Promise<ControlEndpoint> | undefined;
+// A Windows named pipe keeps its name while any accepted instance is open, so
+// a new endpoint in this process must wait for the previous one to close.
+let closing: Promise<void> | undefined;
+const CLOSE_WAIT_MS = 2000;
+
+/** Waits for the previous endpoint to close, but never longer than the bound. */
+async function previousClose(): Promise<void> {
+  const pending = closing;
+  if (!pending) return;
+  let timer: NodeJS.Timeout | undefined;
+  const timedOut = await Promise.race([
+    pending.then(() => false),
+    new Promise<boolean>((resolve) => {
+      timer = setTimeout(() => resolve(true), CLOSE_WAIT_MS);
+      timer.unref();
+    }),
+  ]);
+  clearTimeout(timer);
+  // A bind that still collides then fails as an ordinary listen error.
+  if (timedOut)
+    console.warn(
+      `[driver-lock] previous control endpoint still closing after ${CLOSE_WAIT_MS}ms pid=${process.pid}`,
+    );
+}
 export class ControlEndpoint {
   private readonly sources = new Set<ControlLockSource>();
+  private readonly connections = new Set<net.Socket>();
   private readonly server: net.Server;
   private readonly discovery: ControlDiscovery;
   private readonly onExit = (): void => {
@@ -75,6 +100,7 @@ export class ControlEndpoint {
   private static async start(
     kind: ControlDiscovery['kind'],
   ): Promise<ControlEndpoint> {
+    await previousClose();
     const discovery = writeControlKey(kind);
     const server = net.createServer();
     const endpoint = new ControlEndpoint(server, discovery);
@@ -99,17 +125,30 @@ export class ControlEndpoint {
     }
   }
 
-  unregister(source: ControlLockSource): void {
+  /** Resolves once the endpoint name is free to bind again. */
+  unregister(source: ControlLockSource): Promise<void> {
     this.sources.delete(source);
-    if (this.sources.size || this.closed) return;
+    if (this.sources.size || this.closed) return closing ?? Promise.resolve();
     this.closed = true;
     active = undefined;
-    this.server.close();
+    // close() waits for open connections; with no source left, their replies
+    // no longer matter, so end them instead of waiting for their timeout.
+    const closed = new Promise<void>((resolve) =>
+      this.server.close(() => resolve()),
+    );
+    for (const socket of this.connections) socket.destroy();
+    const current = closed.finally(() => {
+      if (closing === current) closing = undefined;
+    });
+    closing = current;
     process.removeListener('exit', this.onExit);
     removeControlKey(this.discovery.key);
+    return current;
   }
 
   private handle(socket: net.Socket): void {
+    this.connections.add(socket);
+    socket.once('close', () => this.connections.delete(socket));
     let data = '';
     socket.setTimeout(500, () => socket.destroy());
     socket.on('data', (chunk: Buffer) => {
