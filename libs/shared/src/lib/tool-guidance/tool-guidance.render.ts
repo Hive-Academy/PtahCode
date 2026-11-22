@@ -151,12 +151,32 @@ export function applyAgentToolingRules(
   blockText: string,
   options?: ToolGuidanceRenderOptions,
 ): string {
-  // Line-anchored: `### Working rules` or a mention in prose is not the heading.
-  const heading = /^## Working rules[ \t]*\r?$/m.exec(blockText);
+  // Line-anchored and outside code fences: `### Working rules`, a mention in
+  // prose or a `## ` line inside a fenced example is not a section heading.
+  const headings = sectionHeadings(blockText);
+  const heading = headings.find((candidate) =>
+    /^## Working rules[ \t]*\r?$/.test(candidate.text),
+  );
   if (!heading) return blockText;
-  const start = heading.index;
-  const after = start + heading[0].length;
-  const next = /^## /m.exec(blockText.slice(after));
-  const rest = next ? `\n\n${blockText.slice(after + next.index)}` : '';
-  return `${blockText.slice(0, start)}${renderAgentToolingRules(options)}${rest}`;
+  const next = headings.find((candidate) => candidate.start > heading.start);
+  const rest = next ? `\n\n${blockText.slice(next.start)}` : '';
+  return `${blockText.slice(0, heading.start)}${renderAgentToolingRules(options)}${rest}`;
+}
+
+/** The `## ` heading lines of a Markdown text, skipping fenced code blocks. */
+function sectionHeadings(text: string): Array<{ start: number; text: string }> {
+  const headings: Array<{ start: number; text: string }> = [];
+  let fence: string | undefined;
+  let offset = 0;
+  for (const line of text.split('\n')) {
+    const marker = /^\s*(```|~~~)/.exec(line)?.[1];
+    if (marker) {
+      if (!fence) fence = marker;
+      else if (fence === marker) fence = undefined;
+    } else if (!fence && line.startsWith('## ')) {
+      headings.push({ start: offset, text: line });
+    }
+    offset += line.length + 1;
+  }
+  return headings;
 }

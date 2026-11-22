@@ -240,6 +240,33 @@ describe('applyAgentToolingRules', () => {
     expect(out).toContain('## Skill use\r\n\r\n- keep');
   });
 
+  it('ignores headings inside fenced code blocks', () => {
+    const text = [
+      '```md',
+      '## Working rules',
+      '```',
+      '',
+      '## Working rules',
+      '',
+      '- old',
+      '',
+      '```md',
+      '## Not a section',
+      '```',
+      '',
+      '## Skill use',
+      '',
+      '- keep',
+      '',
+    ].join('\n');
+    const out = applyAgentToolingRules(text);
+    expect(out.startsWith('```md\n## Working rules\n```\n\n')).toBe(true);
+    expect(out).toContain(renderAgentToolingRules());
+    expect(out).not.toContain('- old');
+    expect(out).not.toContain('## Not a section');
+    expect(out.endsWith('## Skill use\n\n- keep\n')).toBe(true);
+  });
+
   it('returns a text without the heading unchanged', () => {
     expect(applyAgentToolingRules('## Other\n\ntext')).toBe('## Other\n\ntext');
   });
