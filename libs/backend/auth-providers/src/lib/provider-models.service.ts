@@ -522,12 +522,22 @@ export class ProviderModelsService {
       this.generationOf(providerId) === generation;
 
     const signedIn = this.fetcherSignIn.get(providerId);
+    const requestStartedAt = Date.now();
     if (
       signedIn &&
       (await this.readFetcherSignIn(providerId, signedIn)) === false
     ) {
-      this.modelCache.delete(providerId);
-      this.catalogCredential.set(providerId, null);
+      // The sign-in read awaits: a clear or a newer request may have
+      // written state since. Only a current request may drop the list, and
+      // only one cached before this request started.
+      const cachedNow = this.modelCache.get(providerId);
+      if (
+        isCurrent() &&
+        (!cachedNow || cachedNow.timestamp <= requestStartedAt)
+      ) {
+        this.modelCache.delete(providerId);
+        this.catalogCredential.set(providerId, null);
+      }
       this.logger.warn('[ProviderModelsService] No usable model list', {
         providerId,
         source: 'unavailable',

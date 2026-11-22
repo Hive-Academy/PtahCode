@@ -166,6 +166,27 @@ describe('ProviderModelsService credential scope', () => {
       expect(service.getCachedModelIds(FETCHER)).toBeNull();
     });
 
+    it('a stale signed-out answer does not drop a list a newer request cached', async () => {
+      const { service } = makeService();
+      let releaseStale!: (value: boolean) => void;
+      const answers: Array<Promise<boolean>> = [
+        new Promise<boolean>((resolve) => (releaseStale = resolve)),
+        Promise.resolve(true),
+      ];
+      service.registerDynamicFetcher(FETCHER, async () => [model('live-a')], {
+        signedIn: () => answers.shift() ?? Promise.resolve(true),
+      });
+
+      const stale = service.fetchModels(FETCHER, null);
+      jest.spyOn(Date, 'now').mockReturnValue(NOW + 1000);
+      expect((await service.fetchModels(FETCHER, null)).source).toBe('live');
+      expect(service.getCachedModelIds(FETCHER)).toEqual(['live-a']);
+
+      releaseStale(false);
+      expect((await stale).failureReason).toBe('not-signed-in');
+      expect(service.getCachedModelIds(FETCHER)).toEqual(['live-a']);
+    });
+
     it('an unreadable or unknown state lets the chain continue', async () => {
       const { service } = makeService();
       service.registerDynamicFetcher(FETCHER, async () => [model('live-a')], {
