@@ -1,12 +1,12 @@
 ---
 id: TASK_2026_2297_agy
-status: in_progress
+status: in_review
 type: FEATURE
 title: Antigravity as a main-chat provider (P8 + P7b + P9 for agy)
 depends_on: [TASK_2026_2296_p7]
 relatesTo: [TASK_2026_2288_acp1]
 created: '2026-11-21T20:30:00.000Z'
-updated: '2026-11-21T20:30:00.000Z'
+updated: '2026-11-22T12:00:00.000Z'
 description: >-
   User-prioritised slice of TASK_2026_2288_acp1 for a local release:
   Antigravity only. Lanes: (A) ACP ProviderSessionRuntime over

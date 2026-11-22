@@ -44,17 +44,18 @@ Decisions this implies:
 
 | Phase | Task ID | Pull request | State |
 |---|---|---|---|
-| Research + plan | TASK_2026_2288_acp1 | (this PR) | in_review |
-| P1 contracts + acp-runtime extraction | TASK_2026_2289_p1 | #1444 | in_review |
-| P2 acp-runtime hardening | TASK_2026_2290_p2 | #1445 | in_review |
-| P3 Antigravity ACP lane (P3x not needed, D9 passed) | TASK_2026_2291_p3 | #1451 | in_review |
-| P4 chat foundation A | TASK_2026_2292_p4 | #1450 | in_review |
-| P5 chat foundation B | TASK_2026_2294_p5 | — | in_progress |
-| P6 chat foundation C | TBD | — | planned |
-| Side: onboarding main-connection step | TASK_2026_2293_onboard | — | in_progress |
-| P7 chat backend (adapter, host ports, pool) | TBD | — | planned |
-| P8 Electron composition | TBD | — | planned |
-| P9 Antigravity main chat | TBD | — | planned |
-| P10 Grok main chat | TBD | — | planned (live-unverified) |
-| P11a–c OpenCode | TBD | — | blocked on PF-6 (CLI not installed) |
-| P12 consolidation | TBD | — | planned (removals need user approval) |
+| Research + plan | TASK_2026_2288_acp1 | #1443 | done |
+| P1 contracts + acp-runtime extraction | TASK_2026_2289_p1 | #1444 | done |
+| P2 acp-runtime hardening | TASK_2026_2290_p2 | #1445 | done |
+| P3 Antigravity ACP lane (P3x not needed, D9 passed) | TASK_2026_2291_p3 | #1451 | done |
+| P4 chat foundation A | TASK_2026_2292_p4 | #1450 | done |
+| P5 chat foundation B | TASK_2026_2294_p5 | #1453 | done |
+| P6 chat foundation C | TASK_2026_2295_p6 | #1456 | done |
+| Side: onboarding main-connection step | TASK_2026_2293_onboard | #1452 | done |
+| P7 chat backend (adapter, host ports, pool) | TASK_2026_2296_p7 | #1458 | done |
+| P8 + P9 Electron composition, Antigravity main chat | TASK_2026_2297_agy | #1462 | in_review |
+| Side: Antigravity follow-ups | TASK_2026_2301_agyfu | — | backlog |
+| Side: agy analytics and repricing (issue 1459) | TASK_2026_2302_usage | — | backlog |
+| P10 Grok main chat | TASK_2026_2298_p10 | — | backlog (live-unverified) |
+| P11a–c OpenCode | TASK_2026_2299_p11 | — | backlog, blocked on PF-6 (CLI not installed) |
+| P12 consolidation | TASK_2026_2300_p12 | — | backlog (removals need user approval) |
