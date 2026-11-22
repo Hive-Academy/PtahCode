@@ -75,8 +75,10 @@ function legacyLedgerKey(
  * `sessions.workspace_key` itself is left alone: the session list keeps
  * matching it exactly.
  *
- * Windows-style keys fold on every host, and every key folds on a Windows or
- * macOS host. On a case-sensitive host POSIX keys keep their case, so two
+ * Every stored key goes through {@link ledgerWorkspaceKey}: Windows keys
+ * (drive letter or UNC prefix, or any key on a Windows host) fold, every key
+ * folds case on a macOS host, and a backslash in a POSIX key stays a filename
+ * character. On a case-sensitive host POSIX keys keep their case, so two
  * folders that differ only by case stay apart. Legacy usage keys the old
  * producers had already lowercased cannot regain their case on their own:
  * each takes the case of the single session folder that folds to it, and

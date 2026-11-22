@@ -7,13 +7,15 @@
  * path, and the store applies this function to every ledger input itself, so
  * a writer and a reader of one folder always agree.
  *
- * Trailing separators are stripped and `\` becomes `/`. Case is folded only
- * where the file system ignores it: for a Windows-style path (drive letter or
- * backslash) on any host, and for every path on a Windows or macOS host. A
- * POSIX path on a case-sensitive host (Linux) keeps its case, so `/home/u/Proj`
- * and `/home/u/proj` stay two workspaces. Applying it twice returns the same
- * key. It does not resolve the path: resolving a key against this host would
- * change it.
+ * A Windows path is one on a Windows host, or one with a drive letter
+ * (`C:`) or a UNC prefix (`\\server`) on any host. For it, trailing `\` and
+ * `/` are stripped, `\` becomes `/`, and case folds. Any other path is POSIX:
+ * only trailing `/` is stripped, a `\` stays a literal filename character, and
+ * case folds only on a macOS host. So on Linux `/home/u/Proj`, `/home/u/proj`
+ * and `/srv/a\b` versus `/srv/a/b` all stay distinct workspaces.
+ *
+ * Applying it twice returns the same key. It does not resolve the path:
+ * resolving a key against this host would change it.
  *
  * The session list does not use this key. It matches `sessions.workspace_key`
  * (platform-core `normalizeWorkspaceRoot`) exactly.
@@ -22,7 +24,11 @@ export function ledgerWorkspaceKey(
   root: string,
   platform: NodeJS.Platform = process.platform,
 ): string {
-  const key = root.replace(/[\\/]+$/, '').replace(/\\/g, '/') || '/';
+  const windows = isWindowsPath(root, platform);
+  const trimmed = windows
+    ? root.replace(/[\\/]+$/, '').replace(/\\/g, '/')
+    : root.replace(/\/+$/, '');
+  const key = trimmed || '/';
   return ledgerKeyFoldsCase(root, platform) ? key.toLowerCase() : key;
 }
 
@@ -31,9 +37,9 @@ export function ledgerKeyFoldsCase(
   root: string,
   platform: NodeJS.Platform = process.platform,
 ): boolean {
-  return platform === 'win32' || platform === 'darwin' || isWindowsStylePath(root);
+  return platform === 'darwin' || isWindowsPath(root, platform);
 }
 
-function isWindowsStylePath(root: string): boolean {
-  return /^[a-zA-Z]:/.test(root) || root.includes('\\');
+function isWindowsPath(root: string, platform: NodeJS.Platform): boolean {
+  return platform === 'win32' || /^[a-zA-Z]:/.test(root) || root.startsWith('\\\\');
 }

@@ -72,13 +72,28 @@ describe('ledgerWorkspaceKey', () => {
     ['/home/u/Proj//', 'linux', '/home/u/Proj'],
     ['/home/u/proj', 'linux', '/home/u/proj'],
     ['/', 'linux', '/'],
+    // On a POSIX host a backslash is a filename character, not a separator.
+    ['/srv/a\\b', 'linux', '/srv/a\\b'],
+    ['/srv/Data\\Set\\', 'linux', '/srv/Data\\Set\\'],
+    ['/srv/Data\\Set/', 'darwin', '/srv/data\\set'],
+    ['\\\\Server\\Share', 'darwin', '//server/share'],
+    ['\\\\Server\\Share', 'win32', '//server/share'],
+    ['/X/Y\\Z', 'win32', '/x/y/z'],
   ])('%s on %s is %s, and applying it again changes nothing', (input, platform, key) => {
     expect(ledgerWorkspaceKey(input, platform)).toBe(key);
     expect(ledgerWorkspaceKey(key, platform)).toBe(key);
   });
 
-  it('folds case only for Windows-style paths or on a Windows or macOS host', () => {
+  it('keeps a Linux path with a backslash apart from the path with a slash', () => {
+    expect(ledgerWorkspaceKey('/srv/a\\b', 'linux')).not.toBe(ledgerWorkspaceKey('/srv/a/b', 'linux'));
+    expect(ledgerWorkspaceKey('/srv/A\\b', 'linux')).not.toBe(ledgerWorkspaceKey('/srv/a\\b', 'linux'));
+    expect(ledgerWorkspaceKey('/srv/a\\b', 'win32')).toBe(ledgerWorkspaceKey('/srv/a/b', 'win32'));
+  });
+
+  it('folds case only for Windows paths or on a Windows or macOS host', () => {
     expect(ledgerKeyFoldsCase('/home/u/Proj', 'linux')).toBe(false);
+    expect(ledgerKeyFoldsCase('/srv/a\\B', 'linux')).toBe(false);
+    expect(ledgerKeyFoldsCase('\\\\server\\share', 'linux')).toBe(true);
     expect(ledgerKeyFoldsCase('d:/x', 'linux')).toBe(true);
     expect(ledgerKeyFoldsCase('/home/u/Proj', 'darwin')).toBe(true);
     expect(ledgerKeyFoldsCase('/home/u/Proj', 'win32')).toBe(true);
@@ -158,6 +173,13 @@ describe('session store workspace key round trip', () => {
       }
       expect(await stats.getSessionStats('upper', '/home/u/proj')).toBeNull();
       expect(await stats.getWorkspaceSessionCount('/HOME/U/PROJ', 0, DAY_MS)).toBe(0);
+
+      await sink.recordUsage(liveEvent('backslash', '/srv/a\\b', 'cli-lane'));
+      await sink.recordUsage(liveEvent('slash', '/srv/a/b', 'cli-lane'));
+      expect(await stats.getWorkspaceTopSessions('/srv/a\\b', 0, DAY_MS))
+        .toEqual([expect.objectContaining({ session_id: 'backslash' })]);
+      expect(await stats.getWorkspaceTopSessions('/srv/a/b', 0, DAY_MS))
+        .toEqual([expect.objectContaining({ session_id: 'slash' })]);
     }));
 
   it('folds a Windows-style path on Linux, so a renderer echo and a lane cwd meet', () =>
@@ -271,6 +293,27 @@ describe('S0010 ledger workspace key rewrite', () => {
     rewriteLedgerWorkspaceKeys(db, 'linux');
     expect(keys(db, TURN_KEYS)).toHaveLength(5);
     expect(keys(db, COVERAGE)).toEqual(coverage);
+  });
+
+  it.each<[NodeJS.Platform, unknown[], unknown[]]>([
+    ['linux',
+      [{ id: 'bs', key: '/srv/Data\\Set' }, { id: 'plain', key: '/srv/data/set' }],
+      [{ key: '/srv/Data\\Set', first: 1, last: 2 }, { key: '/srv/data/set', first: 3, last: 4 }]],
+    ['win32',
+      [{ id: 'bs', key: '/srv/data/set' }, { id: 'plain', key: '/srv/data/set' }],
+      [{ key: '/srv/data/set', first: 1, last: 4 }]],
+  ])('on %s treats a backslash in a POSIX key by the host rule', (platform, turns, coverage) => {
+    const db = legacyDb(
+      [['bs', '/srv/Data\\Set']],
+      [['bs', '/srv/data\\set'], ['plain', '/srv/data/set']],
+      [],
+      [['/srv/Data\\Set', 1, 2], ['/srv/data/set', 3, 4]],
+    );
+    rewriteLedgerWorkspaceKeys(db, platform);
+    expect(keys(db, TURN_KEYS)).toEqual(turns);
+    expect(keys(db, COVERAGE)).toEqual(coverage);
+    rewriteLedgerWorkspaceKeys(db, platform);
+    expect(keys(db, TURN_KEYS)).toEqual(turns);
   });
 
   it('runs as S0010 when a version-8 store opens, and keeps the workspace indexes', async () => {
