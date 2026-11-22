@@ -5,13 +5,14 @@ import {
   ParentEnvelopeStoreService,
   type NewParentDeliveryEnvelope,
   type ParentDeliveryEnvelope,
-  type ParentEnqueueResult,
+  type ParentAdmittedEnqueueResult,
 } from './parent-envelope-store.service';
 import {
   PARENT_COMPLETION_KEYS_PREFIX,
   PARENT_COMPLETION_OUTBOX_PREFIX,
   PARENT_ENVELOPE_BODY_PREFIX,
   PARENT_ENVELOPE_INDEX_KEY,
+  PARENT_ENVELOPE_MAX_BODY_CHARS,
   PARENT_TOMBSTONE_KEY,
   ParentTombstonePersistError,
   type ParentCompletionOutboxEntry,
@@ -61,7 +62,7 @@ async function open(storage: FakeStateStorage): Promise<ParentEnvelopeStoreServi
   return store;
 }
 
-function saved(result: ParentEnqueueResult): ParentDeliveryEnvelope {
+function saved(result: ParentAdmittedEnqueueResult): ParentDeliveryEnvelope {
   if ('refused' in result) throw new Error(`refused: ${result.refused}`);
   return result;
 }
@@ -84,6 +85,16 @@ describe('ParentEnvelopeStoreService persistence', () => {
     expect(saved(await restarted.enqueue(report(1))).id).toBe(first.id);
     expect(restarted.list(PARENT)).toHaveLength(2);
     expect(await restarted.getBody(first.id)).toBe('<agent-report>body 1</agent-report>');
+  });
+
+  it('persists originKind through enqueue, the body and a restart', async () => {
+    const storage = new FakeStateStorage();
+    const store = await open(storage);
+    const entry = saved(await store.enqueue({ ...report(1), originName: 'auth-fix', originKind: 'session' }));
+    expect(entry.originKind).toBe('session');
+    const restarted = await open(storage);
+    expect(restarted.findById(entry.id)).toMatchObject({ originKind: 'session', originName: 'auth-fix' });
+    expect(saved(await store.enqueue(report(2))).originKind).toBeUndefined();
   });
 
   it('keeps the existing report and completion id formats', async () => {
@@ -138,6 +149,58 @@ describe('ParentEnvelopeStoreService persistence', () => {
     expect(await store.retry(entry.id)).toEqual({ refused: 'confirmation-required' });
     expect(await store.retry(entry.id, { confirmDuplicateRisk: true }))
       .toMatchObject({ state: 'pending' });
+  });
+});
+
+describe('ParentEnvelopeStoreService admission, body validation and deferral', () => {
+  it('refuses an oversize body as storage-unavailable and indexes nothing', async () => {
+    const storage = new FakeStateStorage();
+    const store = await open(storage);
+    const input = { ...report(1), body: 'x'.repeat(PARENT_ENVELOPE_MAX_BODY_CHARS + 1) };
+    expect(await store.enqueue(input)).toEqual({ refused: 'storage-unavailable' });
+    expect(store.find(input.dedupeKey)).toBeUndefined();
+    expect(storage.values.has(`${PARENT_ENVELOPE_BODY_PREFIX}${input.id}`)).toBe(false);
+    expect((await open(storage)).list()).toHaveLength(0);
+  });
+
+  it('refuses admission inside the write and stores nothing', async () => {
+    const storage = new FakeStateStorage();
+    const store = await open(storage);
+    const admit = jest.fn(() => false);
+    expect(await store.enqueueAdmitted(report(1), admit)).toEqual({ refused: 'admission-refused' });
+    expect(admit).toHaveBeenCalledWith(undefined);
+    expect(store.list()).toHaveLength(0);
+    expect(storage.values.has(`${PARENT_ENVELOPE_BODY_PREFIX}${report(1).id}`)).toBe(false);
+  });
+
+  it('passes the dedupe hit to admit and returns it only when admitted', async () => {
+    const store = await open(new FakeStateStorage());
+    const first = saved(await store.enqueueAdmitted(report(1), () => true));
+    const admit = jest.fn((existing?: ParentDeliveryEnvelope) => existing?.agentId !== AGENT);
+    expect(await store.enqueueAdmitted(report(1), admit)).toEqual({ refused: 'admission-refused' });
+    expect(admit).toHaveBeenCalledWith(expect.objectContaining({ id: first.id }));
+    expect(saved(await store.enqueueAdmitted(report(1), () => true)).id).toBe(first.id);
+  });
+
+  it('defers an unclaimed entry, keeps its body, and ignores a cancelled one', async () => {
+    const store = await open(new FakeStateStorage());
+    const entry = saved(await store.enqueue(report(1)));
+    const deferred = await store.markDeferred(entry.id, 'waiting-for-binding', 30_000);
+    expect(deferred).toMatchObject({
+      state: 'blocked-retryable', lastError: 'waiting-for-binding', nextRetryAt: now + 30_000,
+      updatedAt: now, attempts: 0,
+    });
+    expect(await store.getBody(entry.id)).toBe('<agent-report>body 1</agent-report>');
+    await store.cancel(entry.id);
+    expect(await store.markDeferred(entry.id, 'waiting-for-binding', 5_000)).toBeUndefined();
+  });
+
+  it('records a cancel reason as lastError', async () => {
+    const store = await open(new FakeStateStorage());
+    const entry = saved(await store.enqueue(report(1)));
+    expect(await store.cancel(entry.id, 'owner-changed')).toMatchObject({
+      state: 'cancelled', lastError: 'owner-changed',
+    });
   });
 });
 

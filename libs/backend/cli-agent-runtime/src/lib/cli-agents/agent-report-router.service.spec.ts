@@ -856,12 +856,18 @@ describe('AgentReportRouter.deliver — session child', () => {
       null,
       null,
       options.findBySuccessor
-        ? ({ findBySuccessor: options.findBySuccessor, records: jest.fn().mockResolvedValue([]) } as never)
+        ? ({
+            findBySuccessor: options.findBySuccessor,
+            records: jest.fn().mockResolvedValue([]),
+          } as never)
         : options.handoffBinding
           ? ({
               findBySuccessor: jest
                 .fn()
-                .mockResolvedValue({ ...options.handoffBinding, state: 'recorded' }),
+                .mockResolvedValue({
+                  ...options.handoffBinding,
+                  state: 'recorded',
+                }),
               records: jest.fn().mockResolvedValue([]),
             } as never)
           : null,
@@ -909,15 +915,35 @@ describe('AgentReportRouter.deliver — session child', () => {
     const h = createSessionHarness({ activeIds: [PARENT_SDK] });
     const storage = new FakeStateStorage();
     const handoffs = new SessionHandoffAckStore(storage);
-    await handoffs.record({ predecessorTabId: PARENT, predecessorSdkId: null,
-      successorTabId: PARENT_SDK, successorSdkId: null, workspaceRoot: '/ws',
-      handoffPath: '/ws/HANDOFF.md', state: 'recorded' });
-    const router = new AgentReportRouter(h.logger, h.manager,
-      { isSessionActive: h.isSessionActive, sendMessageToSession: h.sendMessageToSession } as never,
-      h.registry, null, null, new SessionHandoffAckStore(storage));
-    expect(await router.deliver({ childSessionId: CHILD, message: 'done' }))
-      .toMatchObject({ delivered: true, parentSessionId: PARENT_SDK });
-    expect(h.sendMessageToSession).toHaveBeenCalledWith(PARENT_SDK, expect.any(String), expect.any(Object));
+    await handoffs.record({
+      predecessorTabId: PARENT,
+      predecessorSdkId: null,
+      successorTabId: PARENT_SDK,
+      successorSdkId: null,
+      workspaceRoot: '/ws',
+      handoffPath: '/ws/HANDOFF.md',
+      state: 'recorded',
+    });
+    const router = new AgentReportRouter(
+      h.logger,
+      h.manager,
+      {
+        isSessionActive: h.isSessionActive,
+        sendMessageToSession: h.sendMessageToSession,
+      } as never,
+      h.registry,
+      null,
+      null,
+      new SessionHandoffAckStore(storage),
+    );
+    expect(
+      await router.deliver({ childSessionId: CHILD, message: 'done' }),
+    ).toMatchObject({ delivered: true, parentSessionId: PARENT_SDK });
+    expect(h.sendMessageToSession).toHaveBeenCalledWith(
+      PARENT_SDK,
+      expect.any(String),
+      expect.any(Object),
+    );
   });
   it('delivers an adopted child report to the active successor tab', async () => {
     const successor = 'dddddddd-2222-4333-8444-555555555555';
@@ -986,7 +1012,11 @@ describe('AgentReportRouter.deliver — session child', () => {
       h.registry.reparent(CHILD, next, nextSdk);
       // The former owner tab comes back to life during the lookup.
       h.active.add(successor);
-      return { successorTabId: successor, successorSdkId: successorSdk, state: 'recorded' };
+      return {
+        successorTabId: successor,
+        successorSdkId: successorSdk,
+        state: 'recorded',
+      };
     });
     expect(
       await h.router.deliver({
@@ -1063,7 +1093,7 @@ describe('AgentReportRouter.deliver — session child', () => {
     expect(h.isSessionActive).not.toHaveBeenCalled();
   });
 
-  it('counts and does not queue a report while the parent is not live', async () => {
+  it('counts and does not queue a report while the parent is not live and no durable inbox exists', async () => {
     const h = createSessionHarness({ activeIds: [] });
 
     const result = await h.router.deliver({
@@ -1178,5 +1208,633 @@ describe('AgentReportRouter.deliver — session child', () => {
     expect(result.reason).toBe('delivery-failed');
     expect(h.registry.get(CHILD)?.reportsDelivered).toBe(0);
     expect(h.registry.get(CHILD)?.reportsRefused).toBe(0);
+  });
+
+  describe('durable parent inbox', () => {
+    const SUCCESSOR = 'dddddddd-2222-4333-8444-555555555555';
+
+    async function durableSession(
+      options: {
+        activeIds?: readonly string[];
+        storage?: FakeStateStorage;
+      } = {},
+    ) {
+      const h = createSessionHarness({ activeIds: options.activeIds ?? [] });
+      const storage = options.storage ?? new FakeStateStorage();
+      const store = new ParentEnvelopeStoreService(h.logger, storage);
+      await store.ready;
+      const handoffs = new SessionHandoffAckStore(storage);
+      const adapter = {
+        isSessionActive: h.isSessionActive,
+        sendMessageToSession: h.sendMessageToSession,
+      } as never;
+      const drainer = new ParentDeliveryDrainerService(
+        h.logger,
+        store,
+        adapter,
+        null,
+        null,
+        h.registry,
+        handoffs,
+      );
+      const router = new AgentReportRouter(
+        h.logger,
+        h.manager,
+        adapter,
+        h.registry,
+        drainer,
+        null,
+        handoffs,
+      );
+      return { ...h, storage, store, handoffs, drainer, router };
+    }
+
+    afterEach(() => jest.restoreAllMocks());
+
+    it('queues a report for an inactive parent and delivers it once when the parent is active', async () => {
+      const d = await durableSession();
+      const result = await d.router.deliver({
+        childSessionId: CHILD,
+        message: 'queued body',
+      });
+      expect(result).toEqual({
+        delivered: false,
+        queued: true,
+        receiptId: expect.any(String),
+        receiptState: 'pending',
+      });
+      const [entry] = d.store.list(PARENT_SDK);
+      expect(entry).toMatchObject({
+        id: result.receiptId,
+        originKind: 'session',
+        agentId: CHILD,
+        state: 'pending',
+      });
+      expect(d.sendMessageToSession).not.toHaveBeenCalled();
+      expect(d.registry.get(CHILD)?.reportsDelivered).toBe(0);
+
+      d.active.add(PARENT_SDK);
+      await d.drainer.drain(PARENT_SDK);
+      await d.drainer.drain(PARENT_SDK);
+      expect(d.sendMessageToSession).toHaveBeenCalledTimes(1);
+      expect(d.sendMessageToSession).toHaveBeenCalledWith(
+        PARENT_SDK,
+        expect.stringContaining('queued body'),
+        expect.objectContaining({
+          origin: expect.objectContaining({
+            kind: 'peer',
+            from: `ptah-session:${CHILD}`,
+            name: 'session · auth-fix',
+          }),
+        }),
+      );
+      expect(d.registry.get(CHILD)?.reportsDelivered).toBe(1);
+      expect(d.registry.get(CHILD)?.reportsRefused).toBe(0);
+      d.drainer.dispose();
+    });
+
+    it('replays a report queued for a predecessor to its successor exactly once', async () => {
+      const d = await durableSession();
+      await d.handoffs.record({
+        predecessorTabId: PARENT,
+        predecessorSdkId: null,
+        successorTabId: SUCCESSOR,
+        successorSdkId: null,
+        workspaceRoot: '/ws',
+        handoffPath: '/ws/HANDOFF.md',
+        state: 'recorded',
+      });
+      const result = await d.router.deliver({
+        childSessionId: CHILD,
+        message: 'for successor',
+      });
+      expect(result).toMatchObject({ delivered: false, queued: true });
+      expect(d.store.list(SUCCESSOR)).toHaveLength(1);
+
+      d.active.add(SUCCESSOR);
+      await d.drainer.drain(SUCCESSOR);
+      await d.drainer.drain(SUCCESSOR);
+      expect(d.sendMessageToSession).toHaveBeenCalledTimes(1);
+      expect(d.sendMessageToSession).toHaveBeenCalledWith(
+        SUCCESSOR,
+        expect.any(String),
+        expect.any(Object),
+      );
+      expect(d.registry.get(CHILD)?.reportsDelivered).toBe(1);
+      d.drainer.dispose();
+    });
+
+    it('refuses an unknown caller without queueing', async () => {
+      const d = await durableSession();
+      expect(
+        await d.router.deliver({ childSessionId: 'nobody', message: 'x' }),
+      ).toEqual({ delivered: false, reason: 'unattributed-caller' });
+      expect(d.store.list()).toHaveLength(0);
+      d.drainer.dispose();
+    });
+
+    it('keeps a queued report unsent when its owner changed before the parent came back', async () => {
+      const d = await durableSession();
+      const result = await d.router.deliver({
+        childSessionId: CHILD,
+        message: 'stale',
+      });
+      expect(result).toMatchObject({ queued: true });
+      d.registry.reparent(
+        CHILD,
+        SUCCESSOR,
+        'eeeeeeee-2222-4333-8444-555555555555',
+      );
+
+      d.active.add(PARENT_SDK);
+      await d.drainer.drain(PARENT_SDK);
+      expect(d.sendMessageToSession).not.toHaveBeenCalled();
+      // No handoff edge proves the change, and a partial lineage read can hide
+      // one, so the report waits (never sent) instead of being cancelled.
+      expect(d.store.list(PARENT_SDK)).toEqual([
+        expect.objectContaining({
+          id: result.receiptId,
+          state: 'blocked-retryable',
+          lastError: 'owner-lineage-unverified',
+        }),
+      ]);
+      expect(d.registry.get(CHILD)?.reportsDelivered).toBe(0);
+      d.drainer.dispose();
+    });
+
+    it('refuses an owner change seen before queueing', async () => {
+      const d = await durableSession();
+      const findBySuccessor = jest.fn(async () => {
+        d.registry.reparent(
+          CHILD,
+          SUCCESSOR,
+          'eeeeeeee-2222-4333-8444-555555555555',
+        );
+        return undefined;
+      });
+      jest
+        .spyOn(d.handoffs, 'findBySuccessor')
+        .mockImplementation(findBySuccessor as never);
+      expect(
+        await d.router.deliver({ childSessionId: CHILD, message: 'raced' }),
+      ).toMatchObject({
+        delivered: false,
+        reason: 'parent-session-not-active',
+      });
+      expect(d.store.list()).toHaveLength(0);
+      expect(d.registry.get(CHILD)?.reportsRefused).toBe(1);
+      d.drainer.dispose();
+    });
+
+    it('applies the burst limit and duplicate check to queued reports', async () => {
+      const d = await durableSession();
+      for (let n = 0; n < AGENT_REPORT_BURST_LIMIT; n++) {
+        expect(
+          await d.router.deliver({ childSessionId: CHILD, message: `q-${n}` }),
+        ).toMatchObject({ delivered: false, queued: true });
+      }
+      expect(
+        await d.router.deliver({ childSessionId: CHILD, message: 'one more' }),
+      ).toMatchObject({ delivered: false, reason: 'rate-limited' });
+      expect(d.store.list(PARENT_SDK)).toHaveLength(AGENT_REPORT_BURST_LIMIT);
+      d.drainer.dispose();
+
+      const e = await durableSession();
+      const firstSame = await e.router.deliver({
+        childSessionId: CHILD,
+        message: 'same',
+      });
+      expect(firstSame).toMatchObject({ queued: true });
+      // A repeat of a saved report returns its receipt, not a duplicate refusal.
+      expect(
+        await e.router.deliver({ childSessionId: CHILD, message: 'same' }),
+      ).toMatchObject({ queued: true, receiptId: firstSame.receiptId });
+      expect(e.store.list(PARENT_SDK)).toHaveLength(1);
+      e.drainer.dispose();
+    });
+
+    it('returns the same receipt for a repeat outside the duplicate window', async () => {
+      const d = await durableSession();
+      const first = await d.router.deliver({
+        childSessionId: CHILD,
+        message: 'again',
+      });
+      const now = Date.now();
+      jest
+        .spyOn(Date, 'now')
+        .mockReturnValue(now + AGENT_REPORT_BURST_WINDOW_MS + 1);
+      const second = await d.router.deliver({
+        childSessionId: CHILD,
+        message: 'again',
+      });
+      expect(second).toEqual({
+        delivered: false,
+        queued: true,
+        receiptId: first.receiptId,
+        receiptState: 'pending',
+      });
+      expect(d.store.list(PARENT_SDK)).toHaveLength(1);
+      d.drainer.dispose();
+    });
+
+    it('does not report a repeat of a cancelled report as queued', async () => {
+      const d = await durableSession();
+      const first = await d.router.deliver({
+        childSessionId: CHILD,
+        message: 'dropped',
+      });
+      await d.drainer.cancel(first.receiptId as string);
+      const now = Date.now();
+      jest
+        .spyOn(Date, 'now')
+        .mockReturnValue(now + AGENT_REPORT_BURST_WINDOW_MS + 1);
+      expect(
+        await d.router.deliver({ childSessionId: CHILD, message: 'dropped' }),
+      ).toEqual({
+        delivered: false,
+        reason: 'delivery-failed',
+        receiptId: first.receiptId,
+        receiptState: 'cancelled',
+      });
+      expect(d.registry.get(CHILD)?.reportsRefused).toBe(1);
+      d.drainer.dispose();
+    });
+
+    it('maps a failed persist to storage-unavailable and counts it as refused', async () => {
+      const storage = new FakeStateStorage();
+      const d = await durableSession({ storage });
+      storage.failWrites = () => true;
+      expect(
+        await d.router.deliver({ childSessionId: CHILD, message: 'x' }),
+      ).toEqual({ delivered: false, reason: 'storage-unavailable' });
+      expect(d.registry.get(CHILD)?.reportsRefused).toBe(1);
+      storage.failWrites = () => false;
+      expect(
+        await d.router.deliver({ childSessionId: CHILD, message: 'x' }),
+      ).toMatchObject({ queued: true });
+      d.drainer.dispose();
+    });
+
+    it('maps a frozen parent to parent-session-deleted and counts it as refused', async () => {
+      const d = await durableSession();
+      await d.store.markIntent(PARENT_SDK);
+      expect(
+        await d.router.deliver({ childSessionId: CHILD, message: 'x' }),
+      ).toEqual({ delivered: false, reason: 'parent-session-deleted' });
+      expect(d.registry.get(CHILD)?.reportsRefused).toBe(1);
+      d.drainer.dispose();
+    });
+
+    it('maps a full parent inbox to parent-inbox-full and counts it as refused', async () => {
+      const d = await durableSession();
+      for (let n = 0; n < 64; n++)
+        await d.store.enqueue({
+          id: `lane-delivery:report:other:${n}:h`,
+          dedupeKey: `report:other:${n}:h`,
+          agentId: 'other',
+          parentSessionId: PARENT_SDK,
+          kind: 'report',
+          body: 'b',
+          createdAt: n,
+        });
+      expect(
+        await d.router.deliver({ childSessionId: CHILD, message: 'x' }),
+      ).toEqual({ delivered: false, reason: 'parent-inbox-full' });
+      expect(d.registry.get(CHILD)?.reportsRefused).toBe(1);
+      d.drainer.dispose();
+    });
+
+    describe('review fixes (TASK_2026_2297 P3)', () => {
+      const NEW_SDK = 'ffffffff-2222-4333-8444-555555555555';
+      const afterWindow = () => {
+        const now = Date.now();
+        jest
+          .spyOn(Date, 'now')
+          .mockReturnValue(now + AGENT_REPORT_BURST_WINDOW_MS + 1);
+      };
+
+      it('refuses a report whose owner changes while the store write is held', async () => {
+        const d = await durableSession();
+        const original = d.store.enqueueAdmitted.bind(d.store);
+        jest
+          .spyOn(d.store, 'enqueueAdmitted')
+          .mockImplementation(async (input, admit) => {
+            d.registry.reparent(CHILD, SUCCESSOR, NEW_SDK);
+            return original(input, admit);
+          });
+        expect(
+          await d.router.deliver({ childSessionId: CHILD, message: 'held' }),
+        ).toEqual({ delivered: false, reason: 'parent-session-not-active' });
+        expect(d.store.list()).toHaveLength(0);
+        expect(d.registry.get(CHILD)?.reportsRefused).toBe(1);
+        d.drainer.dispose();
+      });
+
+      it('admits a waiting report against the owner it has after an earlier report moved the child', async () => {
+        const d = await durableSession();
+        const original = d.store.enqueueAdmitted.bind(d.store);
+        jest
+          .spyOn(d.store, 'enqueueAdmitted')
+          .mockImplementationOnce(async (input, admit) => {
+            d.registry.reparent(CHILD, SUCCESSOR, NEW_SDK);
+            return original(input, admit);
+          });
+        const [first, second] = await Promise.all([
+          d.router.deliver({ childSessionId: CHILD, message: 'first' }),
+          d.router.deliver({ childSessionId: CHILD, message: 'second' }),
+        ]);
+        expect(first).toEqual({
+          delivered: false,
+          reason: 'parent-session-not-active',
+        });
+        expect(second).toMatchObject({ queued: true, receiptState: 'pending' });
+        expect(d.store.list(NEW_SDK)).toEqual([
+          expect.objectContaining({ id: second.receiptId }),
+        ]);
+        d.drainer.dispose();
+      });
+
+      it('returns the saved receipt for an immediate repeat instead of a duplicate refusal', async () => {
+        const d = await durableSession();
+        const first = await d.router.deliver({
+          childSessionId: CHILD,
+          message: 'repeat now',
+        });
+        const second = await d.router.deliver({
+          childSessionId: CHILD,
+          message: 'repeat now',
+        });
+        expect(second).toMatchObject({
+          queued: true,
+          receiptId: first.receiptId,
+        });
+        expect(d.store.list(PARENT_SDK)).toHaveLength(1);
+        d.drainer.dispose();
+      });
+
+      it('refuses a live-parent report when the saved receipts could not be restored', async () => {
+        const d = await durableSession();
+        d.active.add(PARENT_SDK);
+        jest
+          .spyOn(d.drainer, 'restored')
+          .mockRejectedValueOnce(new Error('state unreadable'));
+        const result = await d.router.deliver({
+          childSessionId: CHILD,
+          message: 'needs restore',
+        });
+        expect(result).toMatchObject({
+          delivered: false,
+          reason: 'delivery-failed',
+        });
+        expect(d.sendMessageToSession).not.toHaveBeenCalled();
+        d.drainer.dispose();
+      });
+
+      it('creates a new receipt for the new owner when the same text follows a reparent', async () => {
+        const d = await durableSession();
+        const first = await d.router.deliver({
+          childSessionId: CHILD,
+          message: 'same text',
+        });
+        d.registry.reparent(CHILD, SUCCESSOR, NEW_SDK);
+        afterWindow();
+        const second = await d.router.deliver({
+          childSessionId: CHILD,
+          message: 'same text',
+        });
+        expect(second).toMatchObject({ queued: true, receiptState: 'pending' });
+        expect(second.receiptId).not.toBe(first.receiptId);
+        expect(d.store.list(PARENT_SDK)).toEqual([
+          expect.objectContaining({ id: first.receiptId }),
+        ]);
+        expect(d.store.list(NEW_SDK)).toEqual([
+          expect.objectContaining({ id: second.receiptId, state: 'pending' }),
+        ]);
+        d.drainer.dispose();
+      });
+
+      it('keeps reports apart whose text and summary only differ at a NUL boundary', async () => {
+        const d = await durableSession();
+        const one = await d.router.deliver({
+          childSessionId: CHILD,
+          message: 'a\0b',
+          summary: 'c',
+        });
+        const two = await d.router.deliver({
+          childSessionId: CHILD,
+          message: 'a',
+          summary: 'b\0c',
+        });
+        expect(one.receiptId).toBeDefined();
+        expect(two.receiptId).toBeDefined();
+        expect(two.receiptId).not.toBe(one.receiptId);
+        expect(d.store.list(PARENT_SDK)).toHaveLength(2);
+
+        const key = (
+          AgentReportRouter as unknown as {
+            sessionReportKey(
+              id: string,
+              binding: { tab?: string; sdk?: string },
+              message: string,
+            ): string;
+          }
+        ).sessionReportKey;
+        expect(key(CHILD, { tab: PARENT, sdk: 'a\0b' }, 'c')).not.toBe(
+          key(CHILD, { tab: PARENT, sdk: 'a' }, 'b\0c'),
+        );
+        expect(key(CHILD, { tab: PARENT, sdk: PARENT_SDK }, 'm')).toMatch(
+          /^session-report:v2:/,
+        );
+        d.drainer.dispose();
+      });
+
+      it('refuses a message at the tool limit whose rendered envelope exceeds the stored body cap', async () => {
+        const d = await durableSession();
+        const result = await d.router.deliver({
+          childSessionId: CHILD,
+          message: 'x'.repeat(MAX_AGENT_REPORT_LENGTH),
+        });
+        expect(result).toEqual({
+          delivered: false,
+          reason: 'report-too-large',
+        });
+        expect(d.store.list()).toHaveLength(0);
+        expect(d.sendMessageToSession).not.toHaveBeenCalled();
+        d.drainer.dispose();
+
+        const live = createSessionHarness();
+        expect(
+          await live.router.deliver({
+            childSessionId: CHILD,
+            message: 'x'.repeat(MAX_AGENT_REPORT_LENGTH),
+          }),
+        ).toEqual({ delivered: false, reason: 'report-too-large' });
+        expect(live.sendMessageToSession).not.toHaveBeenCalled();
+      });
+
+      it('keys an offline report to the parent SDK id so a reopen on a new tab delivers it', async () => {
+        const d = await durableSession();
+        const result = await d.router.deliver({
+          childSessionId: CHILD,
+          message: 'for the reopened parent',
+        });
+        expect(result).toMatchObject({ queued: true });
+        expect(d.store.list(PARENT)).toHaveLength(0);
+        expect(d.store.list(PARENT_SDK)).toEqual([
+          expect.objectContaining({ id: result.receiptId }),
+        ]);
+
+        // The parent reopens on a new tab without a handoff; its SDK session
+        // is the same, so its activity drains the SDK-keyed inbox.
+        d.active.add(PARENT_SDK);
+        await d.drainer.drain(PARENT_SDK);
+        expect(d.sendMessageToSession).toHaveBeenCalledTimes(1);
+        expect(d.sendMessageToSession).toHaveBeenCalledWith(
+          PARENT_SDK,
+          expect.stringContaining('for the reopened parent'),
+          expect.any(Object),
+        );
+        expect(d.registry.get(CHILD)?.reportsDelivered).toBe(1);
+        d.drainer.dispose();
+      });
+
+      it('accepts exactly the burst limit from parallel reports of one child', async () => {
+        const d = await durableSession();
+        const results = await Promise.all(
+          Array.from({ length: AGENT_REPORT_BURST_LIMIT + 1 }, (_, n) =>
+            d.router.deliver({ childSessionId: CHILD, message: `p-${n}` }),
+          ),
+        );
+        expect(results.filter((r) => r.queued === true)).toHaveLength(
+          AGENT_REPORT_BURST_LIMIT,
+        );
+        expect(results.filter((r) => r.reason === 'rate-limited')).toHaveLength(
+          1,
+        );
+        expect(d.store.list(PARENT_SDK)).toHaveLength(AGENT_REPORT_BURST_LIMIT);
+        d.drainer.dispose();
+      });
+
+      it('returns one receipt for the same message with a different summary and spends no budget on it', async () => {
+        const d = await durableSession();
+        const remember = jest.spyOn(
+          d.router as unknown as { remember: (...args: unknown[]) => void },
+          'remember',
+        );
+        const first = await d.router.deliver({
+          childSessionId: CHILD,
+          message: 'one row',
+          summary: 'first summary',
+        });
+        afterWindow();
+        const second = await d.router.deliver({
+          childSessionId: CHILD,
+          message: 'one row',
+          summary: 'second summary',
+        });
+        expect(second).toEqual({
+          delivered: false,
+          queued: true,
+          receiptId: first.receiptId,
+          receiptState: 'pending',
+        });
+        expect(d.store.list(PARENT_SDK)).toHaveLength(1);
+        expect(remember).toHaveBeenCalledTimes(1);
+        d.drainer.dispose();
+      });
+
+      it('maps each stored receipt state of a repeat explicitly', async () => {
+        const d = await durableSession();
+        const first = await d.router.deliver({
+          childSessionId: CHILD,
+          message: 'stateful',
+        });
+        const id = first.receiptId as string;
+        afterWindow();
+        const repeat = () =>
+          d.router.deliver({ childSessionId: CHILD, message: 'stateful' });
+
+        await d.store.markDeferred(id, 'waiting-for-binding', 60_000);
+        expect(await repeat()).toEqual({
+          delivered: false,
+          queued: true,
+          receiptId: id,
+          receiptState: 'blocked-retryable',
+        });
+
+        await d.store.markSending(id);
+        expect(await repeat()).toEqual({
+          delivered: false,
+          reason: 'delivery-in-progress',
+          receiptId: id,
+          receiptState: 'sending',
+        });
+
+        await d.store.markOutcomeUnknown(id, 'send-timeout');
+        expect(await repeat()).toEqual({
+          delivered: false,
+          reason: 'delivery-outcome-unknown',
+          receiptId: id,
+          receiptState: 'outcome-unknown',
+        });
+        expect(d.registry.get(CHILD)?.reportsRefused).toBe(0);
+        d.drainer.dispose();
+      });
+
+      it.each([
+        ['outcome-unknown', 'delivery-outcome-unknown'],
+        ['sending', 'delivery-in-progress'],
+      ] as const)(
+        'does not send a repeat directly to an active parent while its saved receipt is %s',
+        async (state, reason) => {
+          const d = await durableSession();
+          const remember = jest.spyOn(
+            d.router as unknown as { remember: (...args: unknown[]) => void },
+            'remember',
+          );
+          const first = await d.router.deliver({
+            childSessionId: CHILD,
+            message: 'maybe sent',
+          });
+          const id = first.receiptId as string;
+          await d.store.markSending(id);
+          if (state === 'outcome-unknown')
+            await d.store.markOutcomeUnknown(id, 'send-timeout');
+          d.isSessionActive.mockImplementation(() => true);
+          afterWindow();
+          expect(
+            await d.router.deliver({
+              childSessionId: CHILD,
+              message: 'maybe sent',
+            }),
+          ).toEqual({
+            delivered: false,
+            reason,
+            receiptId: id,
+            receiptState: state,
+          });
+          expect(d.sendMessageToSession).not.toHaveBeenCalled();
+          expect(remember).toHaveBeenCalledTimes(1);
+          expect(d.store.list(PARENT_SDK)).toHaveLength(1);
+          d.drainer.dispose();
+        },
+      );
+
+      it('reports a delivered repeat as delivered to the stored parent', async () => {
+        const d = await durableSession();
+        const first = await d.router.deliver({
+          childSessionId: CHILD,
+          message: 'done once',
+        });
+        await d.store.markSending(first.receiptId as string);
+        const entry = d.store.list(PARENT_SDK)[0];
+        await d.store.markDelivered(entry.dedupeKey);
+        afterWindow();
+        expect(
+          await d.router.deliver({ childSessionId: CHILD, message: 'done once' }),
+        ).toEqual({ delivered: true, parentSessionId: PARENT_SDK });
+        d.drainer.dispose();
+      });
+    });
   });
 });
