@@ -407,6 +407,31 @@ describe('agent action notice broadcast', () => {
     );
   });
 
+  it('keeps a remaining pause visible when another notice clears', () => {
+    const broadcastMessage = jest.fn().mockResolvedValue(undefined);
+    const events = new EventEmitter();
+    const container = buildContainer([
+      [TOKENS.AGENT_PROCESS_MANAGER, { events, findAgentInfo: () => undefined }],
+      [TOKENS.WEBVIEW_MANAGER, { broadcastMessage }],
+    ]);
+    wireAgentEventListeners(container, {
+      logger: Object.assign(Object.create(null) as Logger, createMockLogger()),
+      platform: 'electron',
+    });
+    const paused = {
+      actor: 'ptah-budget', action: 'paused', reason: 'weighted-budget', nextStep: 'review-live-agent',
+    } as const;
+    events.emit('agent:action-notice-cleared', {
+      info: { agentId: 'lane-1', actionNotice: paused },
+      notice: null,
+      text: '',
+    });
+    expect(broadcastMessage).toHaveBeenCalledWith(
+      MESSAGE_TYPES.AGENT_MONITOR_ACTION_NOTICE,
+      { agentId: 'lane-1', notice: paused, text: '' },
+    );
+  });
+
   it('logs a failed broadcast and keeps running', async () => {
     const broadcastMessage = jest.fn().mockRejectedValue(new Error('renderer gone'));
     const events = new EventEmitter();
