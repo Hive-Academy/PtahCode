@@ -44,8 +44,12 @@ export async function readUsageSourceChain(
     if (remaining <= 0) { applicable = true; failure ??= 'cli-timeout'; break; }
     const controller = new AbortController();
     const abort = () => controller.abort();
+    // The chain's own timer firing is the timeout signal. Re-reading the
+    // wall clock is not: setTimeout runs on a monotonic clock and can fire
+    // a millisecond before Date.now() reaches the deadline.
+    let timedOut = false;
     request.signal?.addEventListener('abort', abort, { once: true });
-    const timer = setTimeout(abort, remaining);
+    const timer = setTimeout(() => { timedOut = true; abort(); }, remaining);
     try {
       const result = await Promise.race([
         source.read({ ...request, signal: controller.signal }),
@@ -55,7 +59,7 @@ export async function readUsageSourceChain(
         }),
       ]);
       if (!result || controller.signal.aborted) {
-        if (!request.signal?.aborted && deadline - now() <= 0) {
+        if (!request.signal?.aborted && (timedOut || deadline - now() <= 0)) {
           applicable = true;
           failure ??= 'cli-timeout';
         }
