@@ -218,8 +218,10 @@ export async function* streamCodexChatTurn(
     // slow exit) is worth a second write; a few ms of cleanup is not.
     if (persistedDurationTotal === undefined ||
       total - persistedDurationTotal >= TURN_TIME_MIN_GAIN_MS) {
-      persistedDurationTotal = total;
-      await persistTurnDuration(session.id, duration, deps);
+      // Marked stored only on success, so a failed or timed-out write is
+      // retried once by the turn's final store.
+      if (await persistTurnDuration(session.id, duration, deps))
+        persistedDurationTotal = total;
     }
     if (final && !statsPublished) {
       statsPublished = true;
@@ -753,30 +755,36 @@ export const TURN_DURATION_PERSIST_WAIT_MS = 2_000;
  * Write the turn-time record and wait for it, at most
  * {@link TURN_DURATION_PERSIST_WAIT_MS}. Never rejects: a failure is logged;
  * a write still running at the bound finishes (and is logged) on its own.
+ * Resolves `true` only when the write completed inside the bound.
  */
 export async function persistTurnDuration(
   id: SessionId,
   duration: CodexTurnDuration,
   deps: Pick<CodexChatTurnDependencies, 'persistDuration' | 'logger'>,
-): Promise<void> {
+): Promise<boolean> {
   const write = Promise.resolve()
     .then(() => deps.persistDuration(id, duration))
-    .catch((error: unknown) => {
+    .then(() => true, (error: unknown) => {
       deps.logger.warn(
         '[CodexChatAdapter] Native turn time persistence failed.',
         { error: error instanceof Error ? error.message : String(error) },
       );
+      return false;
     });
   let timer: ReturnType<typeof setTimeout> | undefined;
   const bound = new Promise<'timeout'>((resolve) => {
     timer = setTimeout(() => resolve('timeout'), TURN_DURATION_PERSIST_WAIT_MS);
   });
   try {
-    if (await Promise.race([write.then(() => 'done' as const), bound]) === 'timeout')
+    const outcome = await Promise.race([write, bound]);
+    if (outcome === 'timeout') {
       deps.logger.warn(
         '[CodexChatAdapter] Native turn time persistence is slow; the turn settles without waiting.',
         { sessionId: id },
       );
+      return false;
+    }
+    return outcome;
   } finally {
     clearTimeout(timer);
   }

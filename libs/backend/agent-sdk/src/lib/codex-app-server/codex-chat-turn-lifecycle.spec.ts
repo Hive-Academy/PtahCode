@@ -1331,16 +1331,26 @@ describe('Codex chat turn lifecycle', () => {
       await h.adapter.dispose();
     });
 
-    it('swallows and logs a failed duration write without changing the turn outcome', async () => {
+    it('logs a failed duration write and retries it once in the final store', async () => {
       const h = setup();
       h.persistDuration.mockRejectedValueOnce(new Error('disk full'));
       await dyingTurn(h);
-      expect(h.persistDuration).toHaveBeenCalledTimes(1);
+      // The catch-path write failed; the finally store retried it and stored.
+      expect(h.persistDuration).toHaveBeenCalledTimes(2);
+      await expect(h.persistDuration.mock.results[1].value).resolves.toBeUndefined();
+      expect(h.persistDuration.mock.calls[1][1]).toMatchObject({ turnId: 'turn' });
       expect(h.ports.logger.warn).toHaveBeenCalledWith(
         expect.stringContaining('turn time persistence failed'),
         { error: 'disk full' },
       );
       expect(h.adapter.isSessionActive(id)).toBe(false);
+      await h.adapter.dispose();
+    });
+
+    it('does not retry a duration write that succeeded', async () => {
+      const h = setup();
+      await dyingTurn(h);
+      expect(h.persistDuration).toHaveBeenCalledTimes(1);
       await h.adapter.dispose();
     });
 
@@ -1405,13 +1415,15 @@ describe('Codex chat turn lifecycle', () => {
             persistDuration: () => new Promise<void>(() => undefined),
             logger: { warn } as unknown as Parameters<typeof persistTurnDuration>[2]['logger'],
           },
-        ).then(() => {
+        ).then((stored) => {
           settled = true;
+          return stored;
         });
         await jest.advanceTimersByTimeAsync(TURN_DURATION_PERSIST_WAIT_MS - 1);
         expect(settled).toBe(false);
         await jest.advanceTimersByTimeAsync(1);
-        await pending;
+        // A timed-out write is not stored: the final store may retry it.
+        await expect(pending).resolves.toBe(false);
         expect(settled).toBe(true);
         expect(warn).toHaveBeenCalledWith(
           expect.stringContaining('persistence is slow'),
