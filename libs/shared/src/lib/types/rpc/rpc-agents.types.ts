@@ -400,7 +400,7 @@ export interface AgentOrchestrationConfig {
   claudeReasoningEffort?: string;
   /** @deprecated Codex always runs in full-auto headless mode. Kept for backward compat. */
   codexAutoApprove: boolean;
-  /** Count of identical lane tool calls at which the lane is stopped. Default: `FILE_BASED_SETTINGS_DEFAULTS`. */
+  /** Count of identical lane tool calls at which the lane is asked to hand off (paused at twice the count). Default: `FILE_BASED_SETTINGS_DEFAULTS`. */
   laneRepeatCallStopAt?: number;
   /** Codex lane web search (`web_search` "live" when true, "disabled" when false; default true). */
   codexWebSearch?: boolean;
@@ -647,7 +647,7 @@ export interface AgentSetConfigParams {
   copilotAutoApprove?: boolean;
   /** Codex reasoning effort override */
   codexReasoningEffort?: string;
-  /** Count of identical lane tool calls at which the lane is stopped. Rejected, never clamped, when invalid. */
+  /** Count of identical lane tool calls at which the lane is asked to hand off (paused at twice the count). Rejected, never clamped, when invalid. */
   laneRepeatCallStopAt?: number;
   /** Codex lane web search on/off. */
   codexWebSearch?: boolean;

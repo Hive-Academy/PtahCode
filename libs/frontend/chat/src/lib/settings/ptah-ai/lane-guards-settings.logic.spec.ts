@@ -30,6 +30,14 @@ describe('lane guard settings logic', () => {
     expect(LANE_GUARD_DEFAULTS).toEqual({ laneRepeatCallStopAt: 20 });
   });
 
+  it('labels the field as a handoff threshold that pauses and never stops', () => {
+    const [field] = LANE_GUARD_FIELDS;
+    expect(field.label).toBe('Repeat-call handoff at');
+    expect(field.info).toContain('asks a lane to hand off');
+    expect(field.info).toContain('pauses its new tool calls');
+    expect(field.info).not.toMatch(/guard stops a lane|next turn stops/);
+  });
+
   it('accepts a whole number at or above the field minimum', () => {
     expect(parseLaneGuardInteger('2', 2)).toEqual({ ok: true, value: 2 });
     expect(parseLaneGuardInteger(' 2_0 ', 2)).toEqual({ ok: true, value: 20 });

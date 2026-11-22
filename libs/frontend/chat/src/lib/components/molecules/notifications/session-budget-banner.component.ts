@@ -10,7 +10,11 @@ import type {
   SessionBudgetStage,
   SessionBudgetState,
 } from '@ptah-extension/shared';
-import { budgetAmount, formatPercent } from './session-budget-format';
+import {
+  AUTO_HANDOFF_EXHAUSTED_NOTICE,
+  budgetAmount,
+  formatPercent,
+} from './session-budget-format';
 
 import { PtahButtonDirective } from '@ptah-extension/ui';
 /** Stages that show a banner. */
@@ -87,6 +91,14 @@ let nextBannerId = 0;
             <span data-testid="session-budget-title">{{ title() }}</span>
             @if (percentLabel(); as percent) {
               <span class="text-base-content-muted"> · {{ percent }}</span>
+            }
+            @if (handoffFailed()) {
+              <span
+                class="text-error"
+                role="status"
+                data-testid="session-budget-handoff-failed"
+                >&nbsp;· {{ failedNotice }}</span
+              >
             }
             @if (autoHandoffQueued()) {
               <span
@@ -173,6 +185,9 @@ export class SessionBudgetBannerComponent {
     return `${BODY} ${LIFETIME_NOTE}${measure === 'tokens' ? RAW_NOTE : ''}`;
   });
   protected readonly GaugeIcon = Gauge;
+  /** Ptah-labeled copy for a handoff that could not be queued. */
+  protected readonly failedNotice = AUTO_HANDOFF_EXHAUSTED_NOTICE;
+  protected readonly handoffFailed = computed(() => this.handoffLabel() === 'Handoff failed');
   /** Id of the screen-reader advice text that the banner and its actions point to. */
   protected readonly bodyId = `session-budget-body-${nextBannerId++}`;
 

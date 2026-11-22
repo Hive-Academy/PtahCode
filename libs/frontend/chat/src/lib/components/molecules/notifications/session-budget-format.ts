@@ -70,3 +70,12 @@ export function budgetAmount(budget: SessionBudgetState): string {
       return `${formatUsd(budget.used)} of ${formatUsd(budget.limit)} of cost`;
   }
 }
+
+/**
+ * Banner copy for a handoff in the failed state. The state covers a send that failed, a command
+ * that ran but left no record, and a long compaction wait, so the copy does not claim which. The
+ * user keeps the manual control. The hand-off button is disabled in this state, so the copy
+ * names Retry, and asks for a look at the transcript first because the command may have run.
+ */
+export const AUTO_HANDOFF_EXHAUSTED_NOTICE =
+  'Ptah budget monitor could not complete the session handoff. Check the transcript, then use Retry handoff to try again.';

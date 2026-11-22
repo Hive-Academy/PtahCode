@@ -21,6 +21,8 @@ import {
   MESSAGE_TYPES,
   attentionRequestKey,
   retryWithBackoff,
+  type AgentActionNotice,
+  type AgentMonitorActionNoticePayload,
   type AgentProcessInfo,
   type AgentOutputDelta,
   type AgentPermissionRequest,
@@ -356,6 +358,42 @@ function wireAgentMonitorListeners(
         });
     },
   );
+
+  // A Ptah monitor asked a live lane for a handoff or paused its new work, or later released
+  // that notice. The lane stays alive, so the card needs these pushes: no spawn or exit event
+  // follows them (TASK_2026_2297_920a). A release carries the remaining notice or `null`.
+  for (const eventName of ['agent:action-notice', 'agent:action-notice-cleared'] as const) {
+    agentProcessManager.events.on(
+      eventName,
+      (event: {
+        info: AgentProcessInfo;
+        notice: AgentActionNotice | null;
+        text: string;
+      }) => {
+        // The card shows the lane's current notice. Another monitor can hold a higher phase than
+        // the notice that was just announced, and `info.actionNotice` already mirrors the
+        // highest one. The host text fits only the announced notice.
+        const notice = event.info.actionNotice ?? event.notice;
+        const announced = event.notice;
+        const payload: AgentMonitorActionNoticePayload = {
+          agentId: String(event.info.agentId),
+          notice,
+          text:
+            notice && announced && notice.action === announced.action && notice.reason === announced.reason
+              ? event.text
+              : '',
+        };
+        webviewManager
+          .broadcastMessage(MESSAGE_TYPES.AGENT_MONITOR_ACTION_NOTICE, payload)
+          .catch((error: unknown) => {
+            logger.error(
+              `${tag} Failed to send agent-monitor:action-notice to webview`,
+              error instanceof Error ? error : new Error(String(error)),
+            );
+          });
+      },
+    );
+  }
 
   agentProcessManager.events.on('agent:output', (delta: AgentOutputDelta) => {
     webviewManager
