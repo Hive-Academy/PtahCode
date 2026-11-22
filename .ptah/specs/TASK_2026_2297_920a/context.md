@@ -58,8 +58,28 @@ parent is told, and a person decides the rest.
 
 | Phase | Scope (implementation-plan.md batches) | Fixes | Task / branch | PR | State |
 | --- | --- | --- | --- | --- | --- |
-| P1 | Shared vocabulary + thresholds, subagent budget, permissions (1-7, 21-23) | failures 1, 2 | feat/coop-handoff-p1-subagents | #1464 | in review |
-| P2 | Watchdog, cause propagation, first-turn recovery incl. children, child cap freeze (8-13, 25) | failure 3 | feat/coop-handoff-p2-watchdog | - | planned (after P1) |
-| P3 | Child session report routing (17-18) | failure 4 | feat/coop-handoff-p3-reports | - | in_review |
+| P1 | Shared vocabulary + thresholds, subagent budget, permissions (1-7, 21, 23) | failures 1, 2 | feat/coop-handoff-p1-subagents | #1464 | merged |
+| P2 | Watchdog, cause propagation, first-turn recovery incl. children, child cap freeze (8-13, 22, 25) | failure 3 | feat/coop-handoff-p2-watchdog | this PR | in review |
+| P3 | Child session report routing (17-18) | failure 4 | feat/coop-handoff-p3-reports | #1463 | merged |
 | P4 | CLI lanes ask-then-pause (14-16, 26) | lane kills | feat/coop-handoff-p4-lanes | - | planned (after P1) |
 | P5 | Electron UI rendering and handoff banner (19-20) | UI labels | feat/coop-handoff-p5-ui | - | planned (after P2, P4) |
+
+## Follow-ups
+
+Items found during P1-P3 that no phase of this program covers yet.
+
+- (a) Notes gate keyed by agent ID only (pre-existing on main). Scope the gate by parent session and
+  invocation, so a reused agent ID cannot inherit an earlier gate state.
+- (b) Tool-less resumed start frame that the executor drops (found in P1). A resumed subagent can start
+  with a frame that has no tool list, and the executor drops it.
+- (c) P3 limits:
+  - The child registry is in memory only, so it is empty after a restart.
+  - Pre-dispatch claim versus outcome-unknown on restore.
+  - `markDelivered` can overwrite a cancelled row.
+  - Handoff reparent gap.
+  - SDK alias routing and de-duplication.
+- (d) Ambient and Monitor open tasks hide a real provider hang. The watchdog counts them as open work, so
+  a hang shows only as overdue log warnings. Show the overdue notice in the UI (P5).
+- (e) A child predecessor that reached the runtime cap has no retirement timer after a cooperative
+  handoff (review finding m8 in `review-P2-B.md`).
+- (f) Other minor review findings of P2 are in `review-P2-A.md` and `review-P2-B.md`.

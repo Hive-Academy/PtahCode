@@ -502,6 +502,15 @@ describe('persistCliSessionReference — completion time', () => {
       }));
   });
 
+  it('persists an optional action notice with the lane reference', () => {
+    const addCliSession = jest.fn().mockResolvedValue(undefined);
+    const notice = {
+      actor: 'ptah-budget', action: 'paused', reason: 'runtime-cap', nextStep: 'review-live-agent',
+    } as const;
+    persist(buildInfo({ parentSessionId: PARENT_SESSION, notice }), addCliSession);
+    expect(addCliSession).toHaveBeenCalledWith(PARENT_SESSION, expect.objectContaining({ notice }));
+  });
+
   it('writes the exit completion time on the reference', () => {
     const addCliSession = jest.fn().mockResolvedValue(undefined);
     const info = buildInfo({

@@ -30,6 +30,8 @@ export const SESSION_END_CAUSES = [
   'workspace-close',
   'compaction-abort',
   'no-activity-timeout',
+  'provider-no-response',
+  'provider-input-closed',
   'host-shutdown',
   'unknown',
 ] as const;
@@ -53,6 +55,8 @@ export interface SessionEndPayload {
    * A stop recorded at or after it happened during or after the end.
    */
   startedAt?: number;
+  /** Whether the query ended without raw SDK work or a yielded event. */
+  zeroOutwardEvents?: boolean;
 }
 
 /** Callback type accepted by `SessionEndCallbackRegistry.register()`. */
@@ -92,12 +96,16 @@ export class SessionEndCallbackRegistry {
     workspaceRoot: string;
     cause?: unknown;
     startedAt?: number;
+    zeroOutwardEvents?: boolean;
   }): void {
     const payload: SessionEndPayload = {
       sessionId: data.sessionId,
       workspaceRoot: data.workspaceRoot,
       cause: parseSessionEndCause(data.cause),
       ...(data.startedAt !== undefined ? { startedAt: data.startedAt } : {}),
+      ...(data.zeroOutwardEvents !== undefined
+        ? { zeroOutwardEvents: data.zeroOutwardEvents }
+        : {}),
     };
     for (const cb of this.callbacks) {
       try {

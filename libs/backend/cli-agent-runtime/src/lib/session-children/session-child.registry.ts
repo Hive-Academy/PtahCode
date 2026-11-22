@@ -1,3 +1,4 @@
+import type { AgentActionNotice } from '@ptah-extension/shared';
 /**
  * In-memory link between parent chat sessions and the child sessions they
  * started (TASK_2026_584).
@@ -49,6 +50,8 @@ export interface SessionChildRecord extends Omit<
   readonly toolProfileApplied?: boolean;
   /** Set once by {@link SessionChildRegistry.markEnded}; never cleared. */
   readonly terminalStatus?: SessionChildTerminalStatus;
+  readonly paused?: true;
+  readonly notice?: AgentActionNotice;
   /**
    * Machine end cause, set with the terminal status (TASK_2026_932). Internal:
    * the snapshot exposes it only through `outcome.cause`.
@@ -154,6 +157,7 @@ function filterByParent(
 export class SessionChildRegistry {
   /** Keyed by child tab id (`childSessionId`). Insertion order = start order. */
   private readonly records = new Map<string, SessionChildRecord>();
+  private readonly reparentListeners = new Set<(record: SessionChildRecord) => void>();
   /** SDK session id → child tab id. */
   private readonly bySdkId = new Map<string, string>();
   /** Canonical keys for stored paths; record updates retain the cached key. */
@@ -423,13 +427,18 @@ export class SessionChildRegistry {
     const record = this.records.get(childSessionId);
     const parent = parentSessionId.trim();
     if (!record || !parent) return undefined;
-    const next: SessionChildRecord = { ...record, parentSessionId: parent };
-    const sdkId = parentSdkSessionId?.trim();
-    if (sdkId) {
-      return this.replace({ ...next, parentSdkSessionId: sdkId });
-    }
-    delete (next as { parentSdkSessionId?: string }).parentSdkSessionId;
-    return this.replace(next);
+    const sdkId = parentSdkSessionId?.trim() || undefined;
+    if (record.parentSessionId === parent && record.parentSdkSessionId === sdkId) return record;
+    const next = { ...record, parentSessionId: parent, parentSdkSessionId: sdkId };
+    if (!sdkId) delete next.parentSdkSessionId;
+    const updated = this.replace(next);
+    for (const listener of this.reparentListeners) listener(updated);
+    return updated;
+  }
+
+  onReparent(listener: (record: SessionChildRecord) => void): () => void {
+    this.reparentListeners.add(listener);
+    return () => this.reparentListeners.delete(listener);
   }
 
   /** Every child not yet ended, in start order. */
@@ -489,6 +498,20 @@ export class SessionChildRegistry {
     });
   }
 
+  /** A live pause keeps the child registered and retains its concurrency slot. */
+  markPaused(childSessionId: string, notice: AgentActionNotice): boolean {
+    const record = this.records.get(childSessionId);
+    if (!record || record.terminalStatus ||
+      (record.paused && record.notice?.reason === notice.reason)) return false;
+    this.replace({ ...record, paused: true, notice });
+    return true;
+  }
+
+  clearPause(childSessionId: string): void {
+    const child = this.records.get(childSessionId);
+    if (child?.paused || child?.notice) this.update(childSessionId, { paused: undefined, notice: undefined });
+  }
+
   /** Apply a patch; a key set to `undefined` clears that field. */
   update(
     childSessionId: string,
@@ -535,6 +558,7 @@ export class SessionChildRegistry {
       ...(endCause !== undefined ? { endCause } : {}),
     };
     delete (next as { pendingPermission?: unknown }).pendingPermission;
+    delete (next as { paused?: true }).paused;
     const ended = this.replace(next);
     this.endedOrder.push(childSessionId);
     this.pruneEnded();

@@ -1,3 +1,4 @@
+import type { AgentActionNotice } from './agent-action.types';
 import type {
   AgentId,
   EffectiveLaneCapabilities,
@@ -264,5 +265,6 @@ export interface ParentDeliveryView {
   /** At most 160 characters. */
   readonly preview?: string;
   readonly verdict?: LaneCompletionVerdict;
+  readonly notice?: AgentActionNotice;
   readonly stopReason?: LaneStopReason;
 }

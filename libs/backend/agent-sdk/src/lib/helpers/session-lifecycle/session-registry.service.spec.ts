@@ -31,6 +31,7 @@ import {
   type SessionRecord,
 } from './session-registry.service';
 import type { Query } from '../session-lifecycle-manager';
+import { NoActivityWatchdog, NO_ACTIVITY_TIMEOUT_MS } from '../no-activity-watchdog';
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -64,6 +65,47 @@ function makeRegistry(): { registry: SessionRegistry; logger: Logger } {
 // ---------------------------------------------------------------------------
 
 describe('SessionRegistry', () => {
+  it('preserves a permission hold across the transition to an open provider turn', () => {
+    jest.useFakeTimers();
+    try {
+      const { registry } = makeRegistry();
+      const rec = registry.register('permission-hold', makeConfig(), new AbortController());
+      const onTimeout = jest.fn();
+      const watchdog = new NoActivityWatchdog(NO_ACTIVITY_TIMEOUT_MS, onTimeout);
+      rec.activityHold = watchdog;
+      watchdog.start();
+      watchdog.hold();
+      registry.markTurnStarted(rec);
+      expect(watchdog.isTurnOpen).toBe(true);
+      jest.advanceTimersByTime(2 * NO_ACTIVITY_TIMEOUT_MS);
+      expect(onTimeout).not.toHaveBeenCalled();
+
+      watchdog.release();
+      jest.advanceTimersByTime(NO_ACTIVITY_TIMEOUT_MS - 1);
+      expect(onTimeout).not.toHaveBeenCalled();
+      jest.advanceTimersByTime(1);
+      expect(onTimeout).toHaveBeenCalledWith('provider-no-response');
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('evicts the oldest ended stop context after 256 entries', () => {
+    const { registry } = makeRegistry();
+    for (let i = 0; i <= 256; i++) {
+      const rec = registry.register('old-tab', makeConfig(), new AbortController(), `sdk-${i}`);
+      registry.recordExplicitUserStop(rec, true);
+      registry.remove(rec);
+    }
+    const resume = (id: string) =>
+      registry.register(`resume-${id}`, makeConfig(), new AbortController(), id);
+    expect(registry.takeStopContext(resume('sdk-0'))).toBeUndefined();
+    expect(registry.takeStopContext(resume('sdk-1'))).toMatch(/explicit user stop/);
+    const newest = resume('sdk-256');
+    expect(registry.takeStopContext(newest)).toMatch(/explicit user stop/);
+    expect(registry.takeStopContext(newest)).toBeUndefined();
+  });
+
   // -------------------------------------------------------------------------
   // Case 1: register() inserts into byTabId only
   // -------------------------------------------------------------------------

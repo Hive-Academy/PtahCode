@@ -1,123 +1,211 @@
-/**
- * One automatic retry for a top-level handoff successor that the no-activity
- * watchdog ended (TASK_2026_2288 C).
- *
- * A handoff successor runs unattended: its predecessor is closed and no parent
- * session waits for it. When the provider sends no response and the watchdog
- * ends the session, nothing retries the turn, so the task stops until a human
- * types. This helper resumes such a session one time and sends it a recovery
- * prompt with a `peer` origin, so the transcript never shows it as user input.
- *
- * Out of scope on purpose:
- * - A session child: the spawner already reports a watchdog end to the parent
- *   (`session ended while it worked: no stream activity …`) and owns it.
- * - Any other end cause: a user stop, a tab close or a provider error is not
- *   retried.
- * - A second watchdog end of the same successor: it is retried at most once.
- */
 import type { SessionEndPayload } from '@ptah-extension/agent-sdk';
+import {
+  formatWatchdogFinalFailure,
+  formatWatchdogNoSafeRetry,
+  formatWatchdogRetry,
+  type SessionEndCause,
+} from '@ptah-extension/shared';
 import type {
   WatchdogRecoveryInput,
   WatchdogRecoveryOutcome,
 } from './child-chat-session-host.port';
 import type { HandoffAckRecord } from './session-handoff-ack.store';
 
-/** Wait after the session end, so its teardown settles before the resume. */
 export const WATCHDOG_RECOVERY_DELAY_MS = 5_000;
-
-/** Origin name the transcript and the chat show for the recovery prompt. */
 export const WATCHDOG_RECOVERY_SENDER = 'Ptah recovery';
+export const WATCHDOG_RECOVERY_PROMPT = formatWatchdogRetry();
 
-export const WATCHDOG_RECOVERY_PROMPT =
-  'Ptah recovery: the previous turn stopped because the provider sent no ' +
-  'response in time (no-activity watchdog). This is an automatic retry, ' +
-  'not a message from the user. Check the current state of your work, ' +
-  'then continue the task from where it stopped.';
+type WatchdogEnd = Pick<SessionEndPayload, 'sessionId' | 'startedAt' | 'zeroOutwardEvents'> & {
+  readonly cause: SessionEndCause;
+};
+
+export function isProviderNoResponse(cause: SessionEndCause): boolean {
+  return cause === 'provider-no-response' || cause === 'no-activity-timeout';
+}
+
+export function watchdogReplayPrompt(firstInput: string): string {
+  return `${WATCHDOG_RECOVERY_PROMPT}\n\n${firstInput}`;
+}
+
+export interface FirstTurnRecoveryAttempt {
+  /** Identity of the original input, shared by its retry. */
+  readonly key: string;
+  readonly ended: WatchdogEnd;
+  readonly eligible: boolean;
+  /** The same execution still owns recovery and there is no live replacement. */
+  isCurrent(): boolean;
+  recover(endedAt: number): Promise<WatchdogRecoveryOutcome>;
+  fail(retried: boolean): void;
+}
+
+interface Reservation {
+  readonly startedAt?: number;
+  phase: 'reserved' | 'replaying' | 'used' | 'settled';
+  cancelTimer?: () => void;
+}
 
 export interface HandoffWatchdogRecoveryDeps {
-  /** The handoff record whose successor is this tab or SDK id. */
-  findSuccessor(
+  findSuccessor?(
     id: string,
   ): Promise<
-    Pick<HandoffAckRecord, 'successorTabId' | 'successorSdkId'> | undefined
+    (Pick<HandoffAckRecord, 'successorTabId' | 'successorSdkId'> &
+      Partial<Pick<HandoffAckRecord, 'predecessorTabId' | 'generation'>>) | undefined
   >;
-  /** True when the id names a session child (the spawner owns it). */
-  isSessionChild(id: string): boolean;
-  /** The chat host's recovery entry; null when the host has none. */
-  recover():
+  isSessionChild?(id: string): boolean;
+  recover?():
     | ((input: WatchdogRecoveryInput) => Promise<WatchdogRecoveryOutcome>)
     | null;
   log(message: string): void;
   delayMs?: number;
-  schedule?: (run: () => void, ms: number) => void;
-  /** Clock for the watchdog end time; defaults to `Date.now`. */
+  schedule?: (run: () => void, ms: number) => void | (() => void);
   now?: () => number;
 }
 
+/** One owner for reservation, replay and final failure for an unattended first input. */
 export class HandoffWatchdogRecovery {
-  /** Successor tab ids already retried in this process. */
-  private readonly retried = new Set<string>();
+  private readonly reservations = new Map<string, Reservation>();
+  private readonly successorKeys = new Map<string, string>();
+  private readonly pendingSuccessors = new Set<Set<string>>();
 
   constructor(private readonly deps: HandoffWatchdogRecoveryDeps) {}
 
-  /** Session-end hook. Never throws; every outcome is logged. */
-  onSessionEnd(
-    payload: Pick<SessionEndPayload, 'sessionId' | 'cause' | 'startedAt'>,
-  ): void {
-    if (payload.cause !== 'no-activity-timeout') return;
-    const sessionId = payload.sessionId.trim();
-    if (!sessionId) return;
-    // The cancellation cutoff is the start of the watchdog teardown, not this
-    // hook: a tab close during the teardown's interrupt must cancel the retry.
-    const endedAt = payload.startedAt ?? (this.deps.now ?? Date.now)();
-    const schedule =
-      this.deps.schedule ??
-      ((run: () => void, ms: number) => {
-        setTimeout(run, ms).unref?.();
-      });
-    schedule(() => {
-      void this.recover(sessionId, endedAt).catch((error: unknown) =>
-        this.deps.log(
-          `watchdog recovery of ${sessionId} failed: ${error instanceof Error ? error.message : String(error)}`,
-        ),
-      );
-    }, this.deps.delayMs ?? WATCHDOG_RECOVERY_DELAY_MS);
+  owns(key: string): boolean {
+    const phase = this.reservations.get(key)?.phase;
+    return phase === 'reserved' || phase === 'replaying';
   }
 
-  private async recover(sessionId: string, endedAt: number): Promise<void> {
-    if (this.deps.isSessionChild(sessionId)) return;
-    const record = await this.deps.findSuccessor(sessionId);
-    if (!record) return;
-    const tabId = record.successorTabId;
-    if (this.deps.isSessionChild(tabId)) return;
-    if (this.retried.has(tabId)) {
-      this.deps.log(
-        `handoff successor ${tabId} ended by the watchdog again; no second automatic retry`,
-      );
+  cancelScheduled(key: string): void {
+    if (this.reservations.get(key)?.phase === 'reserved') this.cancel(key);
+  }
+
+  cancel(key: string): void {
+    const reservation = this.reservations.get(key);
+    if (!reservation) return;
+    reservation.phase = 'settled';
+    reservation.cancelTimer?.();
+    reservation.cancelTimer = undefined;
+  }
+
+  forget(key: string): void {
+    this.cancel(key);
+    this.reservations.delete(key);
+  }
+
+  /** Reserve synchronously so grace timers and duplicate callbacks see the same owner. */
+  reserve(
+    attempt: FirstTurnRecoveryAttempt,
+    endedAt = attempt.ended.startedAt ?? (this.deps.now ?? Date.now)(),
+  ): void {
+    const { key, ended } = attempt;
+    if (!isProviderNoResponse(ended.cause)) return;
+    const previous = this.reservations.get(key);
+    if (previous) {
+      if (
+        previous.phase === 'settled' || previous.phase === 'reserved' ||
+        (previous.phase === 'replaying' && ended.startedAt === undefined) ||
+        (ended.startedAt !== undefined && ended.startedAt === previous.startedAt)
+      ) return;
+      previous.phase = 'settled';
+      attempt.fail(true);
       return;
     }
-    const recover = this.deps.recover();
-    if (!recover) {
-      this.deps.log(
-        `handoff successor ${tabId} ended by the watchdog; this host cannot retry it`,
-      );
+    if (!attempt.eligible || ended.zeroOutwardEvents !== true || !attempt.isCurrent()) {
+      this.reservations.set(key, { startedAt: ended.startedAt, phase: 'settled' });
+      attempt.fail(false);
       return;
     }
-    this.retried.add(tabId);
-    this.deps.log(
-      `handoff successor ${tabId} ended by the watchdog; retrying one time`,
-    );
-    const outcome = await recover({
-      sessionId: record.successorSdkId ?? sessionId,
-      tabId,
-      prompt: WATCHDOG_RECOVERY_PROMPT,
-      senderName: WATCHDOG_RECOVERY_SENDER,
-      endedAt,
+    const reservation: Reservation = { startedAt: ended.startedAt, phase: 'reserved' };
+    this.reservations.set(key, reservation);
+    const schedule = this.deps.schedule ?? ((run: () => void, ms: number) => {
+      const timer = setTimeout(run, ms);
+      timer.unref?.();
+      return () => clearTimeout(timer);
     });
-    this.deps.log(
-      outcome.recovered
-        ? `handoff successor ${tabId} resumed after the watchdog stop`
-        : `handoff successor ${tabId} was not retried (${outcome.reason}${outcome.detail ? `: ${outcome.detail}` : ''})`,
-    );
+    reservation.cancelTimer = schedule(() => {
+      reservation.cancelTimer = undefined;
+      void this.replay(attempt, reservation, endedAt);
+    }, this.deps.delayMs ?? WATCHDOG_RECOVERY_DELAY_MS) ?? undefined;
+  }
+
+  private async replay(
+    attempt: FirstTurnRecoveryAttempt,
+    reservation: Reservation,
+    endedAt: number,
+  ): Promise<void> {
+    if (reservation.phase !== 'reserved' || this.reservations.get(attempt.key) !== reservation) return;
+    if (!attempt.isCurrent()) {
+      reservation.phase = 'settled';
+      this.deps.log(`watchdog recovery of ${attempt.ended.sessionId} skipped: the ended attempt no longer owns recovery`);
+      return;
+    }
+    reservation.phase = 'replaying';
+    let outcome: WatchdogRecoveryOutcome;
+    try {
+      outcome = await attempt.recover(endedAt);
+    } catch (error: unknown) {
+      this.deps.log(`watchdog recovery of ${attempt.ended.sessionId} failed: ${String(error)}`);
+      outcome = { recovered: false, reason: 'resume-failed' };
+    }
+    if (reservation.phase !== 'replaying' || this.reservations.get(attempt.key) !== reservation) return;
+    if (outcome.recovered) {
+      reservation.phase = 'used';
+      this.deps.log(`${attempt.ended.sessionId} resumed after the watchdog stop`);
+      return;
+    }
+    reservation.phase = 'settled';
+    this.deps.log(`watchdog recovery of ${attempt.ended.sessionId} did not resume (${outcome.reason}${outcome.detail ? `: ${outcome.detail}` : ''})`);
+    if (outcome.reason !== 'already-active' && outcome.reason !== 'stopped') {
+      attempt.fail(true);
+    }
+  }
+
+  /** Top-level entry point from the handoff service's existing end subscription. */
+  onSessionEnd(payload: WatchdogEnd): void {
+    if (!isProviderNoResponse(payload.cause)) {
+      const key = this.successorKeys.get(payload.sessionId);
+      if (key) this.cancel(key);
+      for (const stopped of this.pendingSuccessors) stopped.add(payload.sessionId);
+      return;
+    }
+    if (this.deps.isSessionChild?.(payload.sessionId)) return;
+    const endedAt = payload.startedAt ?? (this.deps.now ?? Date.now)();
+    const stopped = new Set<string>();
+    this.pendingSuccessors.add(stopped);
+    void this.reserveSuccessor(payload, stopped, endedAt)
+      .catch((error: unknown) =>
+        this.deps.log(`watchdog recovery of ${payload.sessionId} failed: ${String(error)}`),
+      )
+      .finally(() => this.pendingSuccessors.delete(stopped));
+  }
+
+  private async reserveSuccessor(
+    payload: WatchdogEnd,
+    stopped: ReadonlySet<string>,
+    endedAt: number,
+  ): Promise<void> {
+    const record = await this.deps.findSuccessor?.(payload.sessionId);
+    if (!record || this.deps.isSessionChild?.(record.successorTabId)) return;
+    const tabId = record.successorTabId;
+    if ([payload.sessionId, tabId, record.successorSdkId].some((id) => id && stopped.has(id))) return;
+    const recover = this.deps.recover?.();
+    const key = JSON.stringify([record.predecessorTabId ?? tabId, record.generation ?? 0, tabId]);
+    this.successorKeys.set(tabId, key);
+    if (record.successorSdkId) this.successorKeys.set(record.successorSdkId, key);
+    this.reserve({
+      key,
+      ended: payload,
+      eligible: !!recover,
+      isCurrent: () => !this.deps.isSessionChild?.(tabId),
+      recover: async (cutoff) => recover?.({
+        sessionId: record.successorSdkId ?? payload.sessionId,
+        tabId,
+        prompt: WATCHDOG_RECOVERY_PROMPT,
+        senderName: WATCHDOG_RECOVERY_SENDER,
+        endedAt: cutoff,
+      }) ?? { recovered: false, reason: 'resume-failed' },
+      fail: (retried) => this.deps.log(
+        retried ? formatWatchdogFinalFailure(tabId) : formatWatchdogNoSafeRetry(tabId),
+      ),
+    }, endedAt);
   }
 }

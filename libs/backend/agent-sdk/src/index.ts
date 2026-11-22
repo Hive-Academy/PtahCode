@@ -694,3 +694,5 @@ export {
   SDK_SESSION_IMPORT_BINDING_LOOKUP,
   type SessionImportBindingLookup,
 } from './lib/session-importer.service';
+
+export { ProviderTurnEndError } from './lib/helpers/no-activity-watchdog';

@@ -2,11 +2,11 @@
  * Chat stream broadcaster.
  *
  * Owns the webview broadcast loop (`streamEventsToWebview`). Moves
- * byte-identically from `chat-rpc.handlers.ts`. The streaming lifecycle
+ * the events from `chat-rpc.handlers.ts` to each host. The streaming lifecycle
  * preserves:
  *
- *   - `isUserAbort` substring match (`'aborted by user' | 'abort' | 'cancelled' | 'canceled'`).
- *   - `isCorruptedResume` cleanup path (`eventCount === 0 && !isUserAbort`).
+ *   - Typed provider failures and legacy abort classification.
+ *   - Token-owned cleanup on stream exit, including a failed start or resume.
  *   - Every `MESSAGE_TYPES.CHAT_*` payload shape.
  *   - Ptah-CLI child-session metadata save.
  *   - Background-agent registration on `background_agent_started` events.
@@ -52,6 +52,7 @@ import {
 import type { SentryService } from '@ptah-extension/vscode-core';
 import {
   SDK_TOKENS,
+  ProviderTurnEndError,
   SessionMetadataStore,
   SessionTurnStateRegistry,
   toTurnStateEvent,
@@ -59,6 +60,7 @@ import {
 } from '@ptah-extension/agent-sdk';
 import type {
   IAgentAdapter,
+  SessionEndCause,
   SessionId,
   FlatStreamEventUnion,
   BackgroundAgentStartedEvent,
@@ -160,12 +162,7 @@ export class ChatStreamBroadcaster {
     let childMetadataSaved = false;
     const isPtahCliSession = this.ptahCli.hasSession(tabId);
     let streamExitedNormally = false;
-    let endCause:
-      | 'stream-exit'
-      | 'provider-error'
-      | 'internal-abort'
-      | 'compaction-abort'
-      | 'no-activity-timeout' = 'stream-exit';
+    let endCause: SessionEndCause = 'stream-exit';
     let recordReplaced = false;
     let sessionConfirmedEnded = false;
     // The id the turn state is keyed under. `sessionId` is the tabId for a
@@ -359,18 +356,21 @@ export class ChatStreamBroadcaster {
       const errorMessage =
         error instanceof Error ? error.message : String(error);
       const lowerMessage = errorMessage.toLowerCase();
-      const isUserAbort =
-        lowerMessage.includes('aborted by user') ||
+      const providerFailure = error instanceof ProviderTurnEndError ? error : null;
+      const isUserAbort = !providerFailure && (
         lowerMessage.includes('abort') ||
         lowerMessage.includes('cancelled') ||
-        lowerMessage.includes('canceled');
-      endCause = lowerMessage.includes('compaction did not finish')
-        ? 'compaction-abort'
-        : lowerMessage.includes('no stream activity')
-          ? 'no-activity-timeout'
-          : isUserAbort
-            ? 'internal-abort'
-            : 'provider-error';
+        lowerMessage.includes('canceled')
+      );
+      endCause = providerFailure?.endCause ?? (
+        lowerMessage.includes('compaction did not finish')
+          ? 'compaction-abort'
+          : lowerMessage.includes('no stream activity')
+            ? 'no-activity-timeout'
+            : isUserAbort
+              ? 'internal-abort'
+              : 'provider-error'
+      );
 
       if (isUserAbort) {
         this.logger.info(
@@ -403,29 +403,34 @@ export class ChatStreamBroadcaster {
       if (isZeroEventFailure) {
         this.logger.warn(
           isFailedStart
-            ? `[RPC] Session ${sessionId} failed to start (0 events), cleaning up dead session. Original error: ${errorMessage}`
-            : `[RPC] Session ${sessionId} failed during resume (0 events), cleaning up dead session. Original error: ${errorMessage}`,
+            ? `[RPC] Session ${sessionId} failed to start (0 events). Original error: ${errorMessage}`
+            : `[RPC] Session ${sessionId} failed during resume (0 events). Original error: ${errorMessage}`,
         );
-        try {
-          this.sdkAdapter.endSession(sessionId, 'provider-error');
-        } catch (cleanupErr) {
-          this.logger.warn(
-            `[RPC] Failed to clean up failed session ${sessionId}`,
-            cleanupErr instanceof Error
-              ? cleanupErr
-              : new Error(String(cleanupErr)),
-          );
+        // Token-owned streams use the single atomic teardown in finally.
+        // Preserve cleanup for adapters that do not expose a token. The SDK
+        // adapter has no record to end when neither token lookup finds one.
+        if (recordToken === null && this.sdkAdapter.getSessionToken(sessionId) === null) {
+          try {
+            await this.sdkAdapter.endSession(sessionId, endCause);
+          } catch (cleanupErr) {
+            this.logger.warn(
+              `[RPC] Failed to clean up failed session ${sessionId}`,
+              cleanupErr instanceof Error
+                ? cleanupErr
+                : new Error(String(cleanupErr)),
+            );
+          }
         }
       }
       if (!isUserAbort && !isWebviewReportedError(error)) {
         await publishTerminal(MESSAGE_TYPES.CHAT_ERROR, {
           tabId,
           sessionId,
-          error: isFailedStart
-            ? `The session could not start: ${errorMessage}`
-            : isZeroEventFailure
-              ? 'Session could not be resumed. The conversation data may be corrupted. Please start a new session.'
-              : errorMessage,
+          error: providerFailure || !isZeroEventFailure
+            ? errorMessage
+            : isFailedStart
+              ? `The session could not start: ${errorMessage}`
+              : 'Session could not be resumed. The conversation data may be corrupted. Please start a new session.',
           ...(surfaceMode ? { surfaceMode: true } : {}),
         });
       }
