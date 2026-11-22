@@ -62,7 +62,7 @@ parent is told, and a person decides the rest.
 | P2 | Watchdog, cause propagation, first-turn recovery incl. children, child cap freeze (8-13, 22, 25) | failure 3 | feat/coop-handoff-p2-watchdog | #1472 | merged |
 | P3 | Child session report routing (17-18) | failure 4 | feat/coop-handoff-p3-reports | #1463 | merged |
 | P4 | CLI lanes ask-then-pause (14-16, 26) | lane kills | feat/coop-handoff-p4-lanes | [#1476](https://github.com/Hive-Academy/PtahCode/pull/1476) | merged |
-| P5 | Electron UI rendering and handoff banner (19-20) | UI labels | feat/coop-handoff-p5-ui | PR pending | in review |
+| P5 | Electron UI rendering and handoff banner (19-20) | UI labels | feat/coop-handoff-p5-ui | [#1479](https://github.com/Hive-Academy/PtahCode/pull/1479) | in review |
 
 ## Follow-ups
 
