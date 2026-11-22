@@ -135,6 +135,10 @@ const SUGGESTED_CHARS_PER_CONTEXT_TOKEN = 2;
  */
 const MODEL_LOAD_FAILED = 'Could not load models for this provider.';
 
+/** Shown for a saved (`persisted`) list when the host sent no notice text. */
+const SAVED_LIST_NOTICE =
+  'Showing the saved model list. The live list could not be loaded.';
+
 /** Multi-line or banner text from a CLI probe. A short status sentence stays. */
 function isProcessDump(value: string): boolean {
   return value.includes('\n') || value.includes('\r') || value.length > 180;
@@ -144,6 +148,13 @@ function isProcessDump(value: string): boolean {
 function visibleLoadError(raw: string): string {
   const line = raw.split(/\r?\n/, 1)[0]?.trim() ?? '';
   if (!line || isProcessDump(raw)) return MODEL_LOAD_FAILED;
+  return line;
+}
+
+/** The host's saved-list sentence, or the fixed one when it is missing or a dump. */
+function visibleNotice(raw: string | undefined): string {
+  const line = raw?.trim() ?? '';
+  if (!line || isProcessDump(line)) return SAVED_LIST_NOTICE;
   return line;
 }
 
@@ -340,6 +351,25 @@ function buildDefaultModelLabel(
             Retry
           </button>
         </div>
+      } @else if (modelsNotice(); as notice) {
+        <div class="flex flex-wrap items-center gap-2 px-3 pb-2">
+          <p
+            class="text-xs text-warning"
+            role="status"
+            data-testid="provider-model-picker-notice"
+          >
+            {{ notice }}
+          </p>
+          <button
+            type="button"
+            class="btn btn-ghost btn-sm min-h-9 text-base-content"
+            data-testid="provider-model-picker-notice-retry"
+            [disabled]="disabled()"
+            (click)="refreshCatalog()"
+          >
+            Retry
+          </button>
+        </div>
       }
 
       @if (!disabled()) {
@@ -514,6 +544,8 @@ export class ProviderModelPickerComponent {
   private readonly _models = signal<readonly ProviderModelInfo[]>([]);
   private readonly _modelsLoading = signal<boolean>(false);
   private readonly _modelsError = signal<string | null>(null);
+  /** Set when the host answered with the saved list instead of a live one. */
+  private readonly _modelsNotice = signal<string | null>(null);
   /** A load for the current provider has finished (before the first one, nothing is known). */
   private readonly _modelsLoaded = signal<boolean>(false);
   private readonly _manualDraft = signal<string>('');
@@ -522,6 +554,7 @@ export class ProviderModelPickerComponent {
   protected readonly models = this._models.asReadonly();
   protected readonly modelsLoading = this._modelsLoading.asReadonly();
   protected readonly modelsError = this._modelsError.asReadonly();
+  protected readonly modelsNotice = this._modelsNotice.asReadonly();
 
   /**
    * What the two `<select>`s render as selected — deliberately the INTERNAL
@@ -746,7 +779,7 @@ export class ProviderModelPickerComponent {
 
   /**
    * Re-runs the model catalogue load for the current provider. The error row
-   * renders a Retry wired to this.
+   * and the saved-list notice row each render a Retry wired to this.
    */
   refreshCatalog(): void {
     void this.loadModels(this._provider());
@@ -765,6 +798,7 @@ export class ProviderModelPickerComponent {
     this._modelsLoading.set(true);
     this._modelsLoaded.set(false);
     this._modelsError.set(null);
+    this._modelsNotice.set(null);
     try {
       // `''` is this component's "inherit" sentinel, not a provider id; the
       // loader's own contract spells that case `undefined`.
@@ -779,6 +813,8 @@ export class ProviderModelPickerComponent {
         this._modelsError.set(MODEL_LOAD_FAILED);
       } else if (result.error) {
         this._modelsError.set(visibleLoadError(result.error));
+      } else if (result.source === 'persisted') {
+        this._modelsNotice.set(visibleNotice(result.notice));
       }
     } catch (error: unknown) {
       // degradation-audit: reported - shown to the user through _modelsError;

@@ -102,6 +102,7 @@ const CATALOGUE: ProviderListModelsResult = {
     },
   ],
   totalCount: 2,
+  source: 'live',
 };
 
 class StateStub {

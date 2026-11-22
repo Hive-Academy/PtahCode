@@ -49,7 +49,7 @@ describe('ProviderModelPickerComponent', () => {
   const result = (models: ProviderModelInfo[]): ProviderListModelsResult => ({
     models,
     totalCount: models.length,
-    isStatic: true,
+    source: 'live',
   });
 
   beforeEach(async () => {
@@ -330,7 +330,8 @@ describe('ProviderModelPickerComponent', () => {
       listModels.mockResolvedValue({
         models: [],
         totalCount: 0,
-        isStatic: false,
+        source: 'unavailable',
+        failureReason: 'auth-rejected',
         error: 'auth failed',
       });
       const fixture = await create({ provider: ANTHROPIC_PROVIDERS[0].id });
@@ -905,6 +906,101 @@ describe('ProviderModelPickerComponent', () => {
       expect(select(fixture, 'provider-model-picker-model').getAttribute('aria-disabled')).toBe(
         'true',
       );
+    });
+  });
+
+  describe('saved-list notice', () => {
+    const saved = (notice?: string): ProviderListModelsResult => ({
+      models: [model({ id: 'm-1', name: 'One' })],
+      totalCount: 1,
+      source: 'persisted',
+      failureReason: 'network',
+      savedAt: Date.UTC(2026, 10, 1),
+      notice,
+    });
+
+    it('shows the notice as a polite status row, with the saved list', async () => {
+      listModels.mockResolvedValue(saved('Showing the list saved on 1 Nov.'));
+      const fixture = await create({ provider: ANTHROPIC_PROVIDERS[0].id });
+
+      const notice = el(fixture, 'provider-model-picker-notice');
+      expect(notice?.textContent).toContain('Showing the list saved on 1 Nov.');
+      expect(notice?.getAttribute('role')).toBe('status');
+      expect(el(fixture, 'provider-model-picker-error')).toBeNull();
+      expect(
+        Array.from(select(fixture, 'provider-model-picker-model').options).map(
+          (o) => o.value,
+        ),
+      ).toEqual(['', 'm-1']);
+    });
+
+    it('falls back to fixed copy when the saved list carries no notice text', async () => {
+      listModels.mockResolvedValue(saved());
+      const fixture = await create({ provider: ANTHROPIC_PROVIDERS[0].id });
+      expect(el(fixture, 'provider-model-picker-notice')?.textContent).toContain(
+        'Showing the saved model list.',
+      );
+    });
+
+    it('hides the notice for a live list', async () => {
+      listModels.mockResolvedValue(result([model({ id: 'm-1', name: 'One' })]));
+      const fixture = await create({ provider: ANTHROPIC_PROVIDERS[0].id });
+      expect(el(fixture, 'provider-model-picker-notice')).toBeNull();
+      expect(el(fixture, 'provider-model-picker-error')).toBeNull();
+    });
+
+    it('shows the error row, not the notice, when no usable list exists', async () => {
+      listModels.mockResolvedValue({
+        models: [],
+        totalCount: 0,
+        source: 'unavailable',
+        failureReason: 'network',
+        error: 'Could not reach the provider.',
+      });
+      const fixture = await create({ provider: ANTHROPIC_PROVIDERS[0].id });
+      expect(el(fixture, 'provider-model-picker-notice')).toBeNull();
+      const error = el(fixture, 'provider-model-picker-error');
+      expect(error?.textContent).toContain('Could not reach the provider.');
+      expect(error?.getAttribute('role')).toBe('alert');
+    });
+
+    it('re-calls the loader from the notice Retry and clears the notice on a live answer', async () => {
+      listModels
+        .mockResolvedValueOnce(saved('Saved list.'))
+        .mockResolvedValueOnce(result([model({ id: 'm-2', name: 'Two' })]));
+      const fixture = await create({ provider: ANTHROPIC_PROVIDERS[0].id });
+      const callsAfterFirstLoad = listModels.mock.calls.length;
+
+      const retry = el(
+        fixture,
+        'provider-model-picker-notice-retry',
+      ) as HTMLButtonElement;
+      expect(retry.tagName).toBe('BUTTON');
+      expect(retry.classList).toContain('min-h-9');
+      retry.click();
+      await fixture.whenStable();
+      fixture.detectChanges();
+
+      expect(listModels.mock.calls.length).toBe(callsAfterFirstLoad + 1);
+      expect(el(fixture, 'provider-model-picker-notice')).toBeNull();
+      expect(
+        Array.from(select(fixture, 'provider-model-picker-model').options).map(
+          (o) => o.value,
+        ),
+      ).toEqual(['', 'm-2']);
+    });
+
+    it('disables the notice Retry when the picker is disabled', async () => {
+      listModels.mockResolvedValue(saved('Saved list.'));
+      const fixture = await create({
+        provider: ANTHROPIC_PROVIDERS[0].id,
+        disabled: true,
+      });
+      const retry = el(
+        fixture,
+        'provider-model-picker-notice-retry',
+      ) as HTMLButtonElement;
+      expect(retry.disabled).toBe(true);
     });
   });
 

@@ -106,8 +106,8 @@ test.describe('Thoth - Skills Library', () => {
       'provider:listCustomEntries': { entries: [] },
       'provider:listModels': `(params) => params && params.providerId === 'kimi-code'
         ? { models: [{ id: 'k3', name: 'K3', description: 'Kimi Code K3',
-              contextLength: 200000, supportsToolUse: true }], totalCount: 1, isStatic: true }
-        : { models: [], totalCount: 0, isStatic: true }`,
+              contextLength: 200000, supportsToolUse: true }], totalCount: 1, source: 'live' }
+        : { models: [], totalCount: 0, source: 'live' }`,
       'llm:getProviderBaseUrl': { baseUrl: null, defaultBaseUrl: null },
       'provider:getModelTiers': { sonnet: null, opus: null, haiku: null },
     });

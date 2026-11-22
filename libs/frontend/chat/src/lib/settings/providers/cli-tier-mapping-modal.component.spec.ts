@@ -20,6 +20,7 @@ const CATALOGUE: ProviderListModelsResult = {
     { id: 'glm-4.7', name: '', description: '', contextLength: 1, supportsToolUse: true },
   ],
   totalCount: 2,
+  source: 'live',
 };
 
 class StateStub {
@@ -180,7 +181,7 @@ describe('CliTierMappingModalComponent', () => {
   });
 
   it('offers Retry when the catalogue fails, and still accepts a model ID', async () => {
-    loader.listModels.mockResolvedValueOnce({ models: [], totalCount: 0, error: 'unreachable' });
+    loader.listModels.mockResolvedValueOnce({ models: [], totalCount: 0, source: 'unavailable', failureReason: 'network', error: 'unreachable' });
     fixture.componentInstance.target.set(null);
     fixture.detectChanges();
     fixture.componentInstance.target.set(GLM);

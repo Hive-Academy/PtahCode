@@ -131,7 +131,7 @@ describe('MemoryDiagnosticsAccordionComponent', () => {
     startPollingMock = jest.fn();
     stopPollingMock = jest.fn();
     listModelsMock = jest.fn(() =>
-      Promise.resolve({ models: [], totalCount: 0, isStatic: true }),
+      Promise.resolve({ models: [], totalCount: 0, source: 'live' }),
     );
 
     await TestBed.configureTestingModule({
