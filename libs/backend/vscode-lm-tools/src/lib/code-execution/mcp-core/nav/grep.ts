@@ -122,7 +122,8 @@ async function loadSymbols(
     }
     return toNavSymbols(await deps.analyze(absolute));
   } catch {
-    // A parse failure only costs the label.
+    // degradation-audit: optional-capability - a parse failure only costs
+    // the enclosing-symbol label; the match is still shown.
     return [];
   }
 }
@@ -137,6 +138,8 @@ async function readLines(rootReal: string, file: string): Promise<string[]> {
     }
     return lines;
   } catch {
+    // degradation-audit: optional-capability - context lines are an extra;
+    // the match lines come from the engine, not from this read.
     return [];
   }
 }

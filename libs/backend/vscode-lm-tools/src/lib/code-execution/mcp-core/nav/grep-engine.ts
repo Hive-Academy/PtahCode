@@ -198,6 +198,8 @@ function parseRgLine(line: string): RgJsonLine | undefined {
   try {
     return JSON.parse(line) as RgJsonLine;
   } catch {
+    // degradation-audit: optional-capability - one malformed rg line is
+    // skipped; the other matches still count.
     return undefined;
   }
 }
@@ -229,6 +231,8 @@ export function runRipgrep(
         windowsHide: true,
       });
     } catch (error: unknown) {
+      // degradation-audit: reported - the spawn error text is returned in
+      // `error`, and the handler then runs the Node walk instead.
       resolve({
         engine: 'rg',
         matches: [],
@@ -373,7 +377,8 @@ export async function runNodeSearch(
     try {
       entries = await readdir(dir, { withFileTypes: true });
     } catch {
-      // An unreadable directory is skipped, like rg does; the search goes on.
+      // degradation-audit: optional-capability - an unreadable directory is
+      // skipped, like rg does; the search goes on.
       return;
     }
     entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
