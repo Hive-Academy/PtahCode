@@ -200,6 +200,7 @@ describe('ConnectionChoiceComponent design states 1–13', () => {
       imports: [ConnectionChoiceComponent],
       providers: [
         provideRouter([]),
+        { provide: CONNECTION_OPTION_LIST, useValue: signal(CONNECTION_OPTIONS) },
         { provide: ConnectionChoiceStore, useValue: store },
       ],
     });
@@ -288,9 +289,10 @@ describe('ConnectionChoiceComponent option list', () => {
       imports: [ConnectionChoiceComponent],
       providers: [
         provideRouter([]),
-        ...(options
-          ? [{ provide: CONNECTION_OPTION_LIST, useValue: options }]
-          : []),
+        {
+          provide: CONNECTION_OPTION_LIST,
+          useValue: signal(options ?? CONNECTION_OPTIONS),
+        },
         {
           provide: ConnectionChoiceStore,
           useValue: {

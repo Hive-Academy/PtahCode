@@ -792,6 +792,9 @@ describe('TC-18: Isolation guarantee — zero unauthorized consumers', () => {
       /apps[\\/]ptah-electron[\\/]src[\\/]activation[\\/]/,
       // DI smoke specs register SETTINGS_TOKENS.MODEL_SETTINGS for resolution drift checks.
       /apps[\\/]ptah-electron[\\/]src[\\/]di[\\/]container\.smoke\.spec\.ts$/,
+      // Electron composition root for provider-session chat reads the per-provider
+      // model and reasoning-effort setting definitions it binds for those sessions.
+      /apps[\\/]ptah-electron[\\/]src[\\/]di[\\/]provider-session-composition\.ts$/,
       /libs[\\/]backend[\\/]agent-generation[\\/]/,
       /libs[\\/]backend[\\/]agent-sdk[\\/]/,
       /libs[\\/]backend[\\/]rpc-handlers[\\/]/,

@@ -471,15 +471,25 @@ export class ProvidersSettingsStateService {
               }),
           ),
         );
-        const connections: ProvidersConnection[] = entries.map(
+        // A provider-session entry is offered only when this host reports its profile's status row.
+        const offered = entries.filter(
+          (entry) =>
+            !entry.providerSession ||
+            auth.providerSessionStatus?.[entry.providerSession] !== undefined,
+        );
+        const connections: ProvidersConnection[] = offered.map(
           (entry): ProvidersConnection => {
+            const sessionRow = entry.providerSession
+              ? auth.providerSessionStatus?.[entry.providerSession]
+              : undefined;
             const host = status.providers.find(
               (provider) => provider.provider === entry.id,
             );
             // Native CLI auth has no stored setup of its own; an installed CLI is the connection.
             // Kimi Code counts as signed in only through its CLI login; its stored key is `hasKey`.
-            const authenticated =
-              entry.id === 'github-copilot'
+            const authenticated = sessionRow
+              ? sessionRow.installed && sessionRow.authenticated
+              : entry.id === 'github-copilot'
                 ? auth.copilotAuthenticated === true
                 : entry.id === 'openai-codex'
                   ? auth.codexAuthenticated === true && !auth.codexTokenStale
@@ -503,15 +513,16 @@ export class ProvidersSettingsStateService {
                 authenticated,
               custom: customIds.has(entry.id),
               defaultsResolvable: !!entry.defaultTiers,
-              authMode: entry.nativeAuth
-                ? 'cli'
-                : entry.authType === 'oauth'
-                  ? 'oauth'
-                  : entry.isLocal
-                    ? entry.requiresProxy
-                      ? 'local-proxy'
-                      : 'local-native'
-                    : 'apiKey',
+              authMode:
+                entry.nativeAuth || entry.providerSession
+                  ? 'cli'
+                  : entry.authType === 'oauth'
+                    ? 'oauth'
+                    : entry.isLocal
+                      ? entry.requiresProxy
+                        ? 'local-proxy'
+                        : 'local-native'
+                      : 'apiKey',
               accountLabel:
                 entry.id === 'github-copilot' &&
                 auth.copilotAuthenticated === true

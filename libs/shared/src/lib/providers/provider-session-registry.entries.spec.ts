@@ -7,10 +7,12 @@ import {
 const entries: readonly AnthropicProvider[] = ANTHROPIC_PROVIDERS;
 
 describe('built-in provider-session entries', () => {
-  it('has none before an admitting phase adds one', () => {
+  it('admits only Antigravity so far', () => {
     expect(
-      entries.filter((provider) => provider.providerSession !== undefined),
-    ).toEqual([]);
+      entries
+        .filter((provider) => provider.providerSession !== undefined)
+        .map((provider) => [provider.id, provider.providerSession]),
+    ).toEqual([['antigravity-cli', 'antigravity']]);
   });
 
   it('gives every provider-session entry a reserved id', () => {

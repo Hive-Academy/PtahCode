@@ -19,7 +19,10 @@ import {
   MAX_AGENT_REPORT_LENGTH,
   type AgentReportInput,
 } from './agent-report-router.service';
-import { SessionChildRegistry } from '../session-children/session-child.registry';
+import {
+  SessionChildRegistry,
+  type SessionChildRecord,
+} from '../session-children/session-child.registry';
 import { SessionHandoffAckStore } from '../session-children/session-handoff-ack.store';
 import { ParentEnvelopeStoreService } from './parent-delivery/parent-envelope-store.service';
 import { ParentDeliveryDrainerService } from './parent-delivery/parent-delivery-drainer.service';
@@ -811,6 +814,8 @@ describe('AgentReportRouter.deliver — session child', () => {
       withRegistry?: boolean;
       handoffBinding?: { successorTabId: string; successorSdkId: string };
       findBySuccessor?: jest.Mock;
+      /** Session lifecycle records: tab id → SDK session id. */
+      lifecycleSessions?: Readonly<Record<string, string>>;
     } = {},
   ) {
     const logger = createLogger();
@@ -871,6 +876,14 @@ describe('AgentReportRouter.deliver — session child', () => {
               records: jest.fn().mockResolvedValue([]),
             } as never)
           : null,
+      options.lifecycleSessions
+        ? ({
+            find: jest.fn((id: string) => {
+              const realSessionId = options.lifecycleSessions?.[id];
+              return realSessionId ? { tabId: id, realSessionId } : undefined;
+            }),
+          } as never)
+        : null,
     );
     return {
       router,
@@ -1835,6 +1848,112 @@ describe('AgentReportRouter.deliver — session child', () => {
         ).toEqual({ delivered: true, parentSessionId: PARENT_SDK });
         d.drainer.dispose();
       });
+    });
+  });
+
+  describe('a child resumed in a new tab (TASK_2026_2298)', () => {
+    const NEW_TAB = '12121212-2222-4333-8444-555555555555';
+    const C1 = 'c1c1c1c1-2222-4333-8444-555555555555';
+    const C2 = 'c2c2c2c2-2222-4333-8444-555555555555';
+    const C2_SDK = 'd2d2d2d2-2222-4333-8444-555555555555';
+    const P1 = 'a1a1a1a1-2222-4333-8444-555555555555';
+    const P1_SDK = 'b1b1b1b1-2222-4333-8444-555555555555';
+    const P2 = 'a2a2a2a2-2222-4333-8444-555555555555';
+    const P2_SDK = 'b2b2b2b2-2222-4333-8444-555555555555';
+
+    const successor = (
+      h: ReturnType<typeof createSessionHarness>,
+      id: string,
+    ): SessionChildRecord => ({
+      ...(h.registry.get(CHILD) as SessionChildRecord),
+      childSessionId: id,
+      sdkSessionId: undefined,
+      worktreePath: `/ws-wt/${id}`,
+    });
+
+    it('attributes an ended child resumed in a new tab through its SDK id', async () => {
+      const h = createSessionHarness({ lifecycleSessions: { [NEW_TAB]: CHILD_SDK } });
+      h.registry.markEnded(CHILD, 'ended', 'provider-error');
+
+      const result = await h.router.deliver({ childSessionId: NEW_TAB, message: 'back' });
+
+      expect(result).toEqual({ delivered: true, parentSessionId: PARENT });
+      expect(String(h.sendMessageToSession.mock.calls[0][1])).toContain(
+        `agent-id="${CHILD}"`,
+      );
+      expect(h.registry.get(CHILD)?.reportsDelivered).toBe(1);
+    });
+
+    it('reaches the latest parent from the resumed last child of a two-hop chain', async () => {
+      const h = createSessionHarness({
+        activeIds: [P2],
+        lifecycleSessions: { [NEW_TAB]: C2_SDK },
+      });
+      h.registry.succeed(CHILD, successor(h, C1), 'continued');
+      h.registry.succeed(C1, successor(h, C2), 'continued');
+      h.registry.bindSdkSessionId(C2, C2_SDK);
+      h.registry.reparent(C2, P1, P1_SDK);
+      h.registry.reparent(C2, P2, P2_SDK);
+      h.registry.markEnded(C2, 'ended', 'provider-error');
+
+      const result = await h.router.deliver({ childSessionId: NEW_TAB, message: 'both' });
+
+      expect(result).toEqual({ delivered: true, parentSessionId: P2 });
+      expect(h.sendMessageToSession.mock.calls.map((c) => c[0])).toEqual([P2]);
+    });
+
+    it('does not attribute through an SDK id inferred from the worktree path', async () => {
+      const h = createSessionHarness({ lifecycleSessions: { [NEW_TAB]: C2_SDK } });
+      const reservation = h.registry.reserveSlot(3);
+      if (!reservation) throw new Error('expected a slot');
+      h.registry.add(successor(h, C1), reservation);
+      h.registry.bindSdkSessionId(C1, C2_SDK, { inferred: true });
+
+      // Another chat in the same worktree, with its own tab and that SDK id.
+      const viaTab = await h.router.deliver({ childSessionId: NEW_TAB, message: 'x' });
+      const viaSdk = await h.router.deliver({ childSessionId: C2_SDK, message: 'y' });
+      expect(viaTab.reason).toBe('unattributed-caller');
+      expect(viaSdk.reason).toBe('unattributed-caller');
+      expect(h.sendMessageToSession).not.toHaveBeenCalled();
+
+      // The child's own session-id event confirms the binding.
+      h.registry.bindSdkSessionId(C1, C2_SDK);
+      expect(
+        (await h.router.deliver({ childSessionId: NEW_TAB, message: 'z' })).delivered,
+      ).toBe(true);
+    });
+
+    it('names the possible causes when no record matches', async () => {
+      const h = createSessionHarness({ lifecycleSessions: {} });
+      const result = await h.router.deliver({ childSessionId: NEW_TAB, message: 'x' });
+      expect(result.reason).toBe('unattributed-caller');
+      expect(h.logger.warn).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({
+          detail: expect.stringContaining('lost at a host restart'),
+        }),
+      );
+    });
+
+    it('refuses as unattributed-caller when the lifecycle read throws', async () => {
+      const h = createSessionHarness();
+      const router = new AgentReportRouter(
+        h.logger,
+        h.manager,
+        { isSessionActive: h.isSessionActive, sendMessageToSession: h.sendMessageToSession } as never,
+        h.registry,
+        null,
+        null,
+        null,
+        {
+          find: jest.fn(() => {
+            throw new Error('boom');
+          }),
+        } as never,
+      );
+      const result = await router.deliver({ childSessionId: NEW_TAB, message: 'x' });
+      expect(result.reason).toBe('unattributed-caller');
+      expect(h.logger.error).toHaveBeenCalled();
     });
   });
 });

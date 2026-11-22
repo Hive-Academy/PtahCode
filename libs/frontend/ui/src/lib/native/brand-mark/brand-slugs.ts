@@ -78,6 +78,8 @@ export const PROVIDER_BRAND_SLUGS: Readonly<Record<string, string>> = {
   cursor: 'cursor',
   copilot: 'github-copilot',
   antigravity: 'antigravity-google',
+  // The Antigravity main-chat provider (provider session) shares the CLI's art.
+  'antigravity-cli': 'antigravity-google',
   opencode: 'opencode',
   'opencode-zen': 'opencode',
   'opencode-go': 'opencode',

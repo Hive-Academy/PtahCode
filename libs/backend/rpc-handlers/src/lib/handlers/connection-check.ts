@@ -12,6 +12,11 @@
  * - Sign-in and CLI connections (Copilot, Codex, Claude CLI) are checked by
  *   their existing token read or CLI detection. No request is made, so they
  *   record `latencyMs: null`.
+ * - Provider-session connections (Antigravity) answer from the host's
+ *   provider-session auth status row (install and sign-in, read from disk).
+ *   No agent process is spawned and no model turn is sent, so they record
+ *   `latencyMs: null`; a host that does not admit the profile has no row and
+ *   records `not-installed`.
  * - Kimi Code is checked by the credential that serves it: a CLI sign-in by
  *   its token read and refresh (no request), the stored-key fallback by the
  *   stored-key probe above.
@@ -40,6 +45,7 @@ import {
   ANTHROPIC_DIRECT_PROVIDER_ID,
   getAnthropicProvider,
   getCustomProviderEntry,
+  getProviderSessionProfile,
 } from '@ptah-extension/shared';
 import type {
   AuthVerifyDraftConnectionResult,
@@ -52,6 +58,7 @@ import type {
   ConnectionCheckRecorder,
   ConnectionCheckTicket,
 } from '../utils/connection-check-recorder';
+import type { ProviderSessionAuthStatusProbe } from '../chat/provider-session-host/provider-session-auth-status';
 import {
   probeCustomProvider,
   type CustomProviderProbeResult,
@@ -64,7 +71,8 @@ export type ConnectionCheckKind =
   | 'copilot'
   | 'codex'
   | 'kimi-code'
-  | 'claude-cli';
+  | 'claude-cli'
+  | 'provider-session';
 
 const COPILOT_PROVIDER_ID = 'github-copilot';
 const CODEX_PROVIDER_ID = 'openai-codex';
@@ -78,6 +86,7 @@ export function connectionCheckKind(
   const provider = getAnthropicProvider(providerId);
   if (!provider) return undefined;
   if (provider.nativeAuth) return 'claude-cli';
+  if (getProviderSessionProfile(provider.id)) return 'provider-session';
   if (provider.id === COPILOT_PROVIDER_ID) return 'copilot';
   if (provider.id === CODEX_PROVIDER_ID) return 'codex';
   if (provider.id === KIMI_CODE_PROVIDER_ID) return 'kimi-code';
@@ -98,6 +107,8 @@ export interface ConnectionCheckerDeps {
     'getStatus' | 'ensureFresh' | 'clearCache'
   >;
   readonly cliDetector: Pick<ClaudeCliDetector, 'performHealthCheck'>;
+  /** The provider-session auth rows; absent on a host that admits no profile. */
+  readonly providerSessionAuth?: Pick<ProviderSessionAuthStatusProbe, 'probe'>;
   /** Stored key of a custom entry, for its probe (`IAuthSecretsService.getProviderKey`). */
   readonly readProviderKey: (providerId: string) => Promise<string | undefined>;
   readonly logger: Logger;
@@ -211,7 +222,26 @@ export class ConnectionChecker {
         return (await this.deps.cliDetector.performHealthCheck()).available
           ? verified(null)
           : failedCheck('not-installed');
+      case 'provider-session':
+        return this.probeProviderSession(providerId);
     }
+  }
+
+  /**
+   * A provider session is checked by its auth status row: the CLI's install
+   * and its on-disk sign-in. Starting the agent (`agy acp` unpacks its
+   * runtime) or sending a model turn is never part of a check.
+   */
+  private async probeProviderSession(
+    providerId: string,
+  ): Promise<ConnectionCheckRecord> {
+    const profile = getProviderSessionProfile(providerId);
+    const row =
+      profile && this.deps.providerSessionAuth
+        ? (await this.deps.providerSessionAuth.probe())[profile]
+        : undefined;
+    if (!row?.installed) return failedCheck('not-installed');
+    return row.authenticated ? verified(null) : failedCheck('signed-out');
   }
 
   /**

@@ -2,6 +2,7 @@ import type { ClaudeAmbientStatusView, CodexReadinessView, ProvidersSettingsSect
 import type { CliDetectionResult } from '@ptah-extension/shared';
 import {
   deriveClaudeReadiness, deriveCodexReadiness, deriveSelection, deriveChosen,
+  deriveProviderSessionReadiness,
 } from './provider-readiness.derive';
 
 const row: CliDetectionResult = {
@@ -101,6 +102,42 @@ describe('provider readiness derivation', () => {
     expect(deriveSelection({ ...base, isLoaded: false })).toEqual({ kind: 'unreadable' });
     expect(deriveSelection({ ...base, authMethod: 'apiKey' })).toEqual({
       kind: 'other', name: 'Anthropic API key',
+    });
+  });
+
+  describe('provider-session (Antigravity) readiness', () => {
+    const row = (installed: boolean, authenticated: boolean, version?: string) =>
+      ({ installed, authenticated, signInHint: 'run agy', ...(version ? { version } : {}) });
+    const base = { provider: 'antigravity-cli' as const, authLoaded: true, reading: false, readFailed: false };
+
+    it.each([
+      ['auth not loaded', { ...base, authLoaded: false, row: row(true, true) }, 'checking'],
+      ['first read running', { ...base, reading: true, row: null }, 'checking'],
+      ['not installed', { ...base, row: row(false, false) }, 'missing'],
+      ['installed, signed out', { ...base, row: row(true, false) }, 'signed-out'],
+      ['installed, signed in', { ...base, row: row(true, true) }, 'ready'],
+      ['read failed', { ...base, readFailed: true, row: row(true, true) }, 'error'],
+    ])('%s', (_name, input, state) => {
+      expect(deriveProviderSessionReadiness(input).state).toBe(state);
+    });
+
+    it('keeps the version and marks the binary as found on PATH', () => {
+      expect(deriveProviderSessionReadiness({ ...base, row: row(true, true, '1.2.3') })).toMatchObject({
+        provider: 'antigravity-cli', version: '1.2.3', source: 'installed', path: null,
+      });
+    });
+
+    it('selects Antigravity as the main connection and reads its readiness', () => {
+      const selection = deriveSelection({ isLoading: false, isLoaded: true, authMethod: 'thirdParty',
+        providerId: 'antigravity-cli', availableProviders: [] });
+      expect(selection).toEqual({ kind: 'antigravity-cli' });
+      const ready = deriveProviderSessionReadiness({ ...base, row: row(true, true) });
+      const chosen = deriveChosen(selection,
+        deriveClaudeReadiness({ detection, ambient: ambient(null, { localFailure: true }) }),
+        deriveCodexReadiness(codex(response('signed-out'))),
+        { 'antigravity-cli': ready });
+      expect(chosen).toMatchObject({ provider: 'antigravity-cli', name: 'Antigravity' });
+      expect(chosen.readiness?.state).toBe('ready');
     });
   });
 });

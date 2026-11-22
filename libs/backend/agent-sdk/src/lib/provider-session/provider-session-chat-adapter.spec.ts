@@ -12,7 +12,9 @@ import type {
   ProviderTurnInput,
 } from '@ptah-extension/provider-session-contracts';
 import {
+  resetPricingMapForTesting,
   SessionId,
+  updatePricingMap,
   type AppliedSettings,
   type FlatStreamEventUnion,
   type ProviderSessionSeed,
@@ -22,7 +24,11 @@ import {
 import { SessionApprovalRouter } from '../codex-app-server/session-approval-router';
 import { SessionTurnStateRegistry } from '../helpers/session-turn-state.registry';
 import { SessionAdmissionRefusedError } from '../errors/session-admission-refused.error';
-import { ProviderSessionChatAdapter } from './provider-session-chat-adapter';
+import {
+  ProviderSessionChatAdapter,
+  type ProviderSessionChatAdapterDependencies,
+} from './provider-session-chat-adapter';
+import type { SessionUsageSink } from '../session-stats/session-usage-sink';
 import {
   ProviderSessionChatAdapterError,
   type ProviderSessionChatAdapterErrorCode,
@@ -177,7 +183,9 @@ async function promptedTurn(live: FakeProviderSession, turns = 1): Promise<void>
   expect(live.turns).toBe(turns);
 }
 
-function setup() {
+function setup(
+  extra: Pick<ProviderSessionChatAdapterDependencies, 'usageSink' | 'pricing'> = {},
+) {
   const logger: Logger = Object.assign(
     Object.create(Logger.prototype),
     createMockLogger(),
@@ -208,7 +216,7 @@ function setup() {
   );
   const ports: ProviderSessionChatPorts = {
     info: {
-      id: 'ptah-cli',
+      id: 'provider-session',
       name: 'Antigravity',
       vendor: 'Google',
       version: '1',
@@ -244,8 +252,15 @@ function setup() {
     publishNotice: jest.fn(async () => undefined),
   };
   const turnState = new SessionTurnStateRegistry();
+  /** Lexical by default; a spec maps a link target or marks a path missing. */
+  const links = new Map<string, string>();
+  const missing = new Set<string>();
+  const realpath = jest.fn(async (path: string) => {
+    if (missing.has(path)) throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    return links.get(path) ?? path;
+  });
   const adapter = new ProviderSessionChatAdapter(
-    { ...ports, logger, approvals },
+    { ...ports, logger, approvals, realpath, ...extra },
     turnState,
   );
   const resolved = jest.fn();
@@ -267,6 +282,8 @@ function setup() {
     stats,
     followUps,
     logger,
+    links,
+    missing,
   };
 }
 
@@ -352,6 +369,21 @@ describe('ProviderSessionChatAdapter', () => {
     expect(events[5]).toMatchObject({ consumedClientMessageId: 'client-1' });
     expect(h.adapter.owns(id)).toBe(true);
     expect(h.adapter.canSendFollowUp(id)).toBe(true);
+  });
+
+  it('applies the prepared model to the process a history read adopted on resume after a restart', async () => {
+    // Live test: after a restart the history read opened agy with `session/load`
+    // and no model; the follow-up ran on agy's default. The resume's prepared
+    // seed carries the saved model, and the attach sets it on that process.
+    const h = setup();
+    (h.ports.prepare as jest.Mock).mockImplementationOnce(async () => ({
+      seed: { ...seed, model: 'gemini-4-hydrogen-low' },
+      resume: { nativeSessionId: 'native-stored' },
+    }));
+    const id = SessionId.create();
+    await collect(await h.adapter.resumeSession(id, { tabId: 'tab-r' }));
+    expect(h.acquire.mock.calls[0][0].seed.model).toBe('gemini-4-hydrogen-low');
+    expect(h.lives[0].setModel).toHaveBeenCalledWith('gemini-4-hydrogen-low');
   });
 
   it('resumes the stored native session and fails a mismatched attach as resume-failed', async () => {
@@ -935,6 +967,20 @@ describe('ProviderSessionChatAdapter', () => {
     await expectCode(h.adapter.sendMessageToSession(id, 'late'), 'unavailable');
   });
 
+  it('gives a history-only process back when its tab closes (no adapter record)', async () => {
+    const h = setup();
+    const id = SessionId.create();
+    h.adapter.endSession(id);
+    await flush();
+    expect(h.ports.release).toHaveBeenCalledWith(id, 'tab-closed');
+
+    const other = SessionId.create();
+    await h.adapter.interruptSession(other, 'user-stop');
+    expect(h.ports.release).not.toHaveBeenCalledWith(other, expect.anything());
+    await h.adapter.interruptSession(other, 'tab-close');
+    expect(h.ports.release).toHaveBeenCalledWith(other, 'tab-closed');
+  });
+
   it('fails queued follow-ups when the session closes', async () => {
     const h = setup();
     const stream = await h.adapter.startChatSession({ tabId: 'tab', prompt: 'first' });
@@ -988,5 +1034,349 @@ describe('ProviderSessionChatAdapter', () => {
     await expectCode(opening, 'cancelled');
     expect(h.ports.release).toHaveBeenCalledWith(expect.any(String), 'tab-closed');
     expect(h.ports.identity.save).not.toHaveBeenCalled();
+  });
+
+  describe('turn attachments (N-1, N-2) and open options', () => {
+    const outside = resolve(seed.workspacePath, '..', 'secret.txt');
+
+    it.each([
+      ['an absolute path outside the workspace', outside],
+      ['a relative path that leaves it', '../secret.txt'],
+      ['a NUL byte', 'src/a\0.ts'],
+    ])('refuses a file reference with %s before the prompt', async (_label, file) => {
+      const h = setup();
+      const { id, live } = await startCompleted(h);
+      const error = await expectCode(
+        h.adapter.sendMessageToSession(id, 'read', { files: [file] }),
+        'unsupported-option',
+      );
+      expect(error.option).toBe('files');
+      expect(live.prompt).toHaveBeenCalledTimes(1);
+    });
+
+    it('refuses a missing file and a link that leaves the workspace', async () => {
+      const h = setup();
+      const { id, live } = await startCompleted(h);
+      const gone = resolve(seed.workspacePath, 'gone.ts');
+      h.missing.add(gone);
+      await expectCode(
+        h.adapter.sendMessageToSession(id, 'read', { files: ['gone.ts'] }),
+        'unsupported-option',
+      );
+      const link = resolve(seed.workspacePath, 'link.ts');
+      h.links.set(link, outside);
+      await expectCode(
+        h.adapter.sendMessageToSession(id, 'read', { files: ['link.ts'] }),
+        'unsupported-option',
+      );
+      expect(live.prompt).toHaveBeenCalledTimes(1);
+      // A reference inside the workspace still goes out as a resource link;
+      // a link inside it goes out as its checked target, so the agent never
+      // re-resolves a link swapped after the check.
+      const inner = resolve(seed.workspacePath, 'docs/link.md');
+      h.links.set(inner, resolve(seed.workspacePath, 'docs/real.md'));
+      await h.adapter.sendMessageToSession(id, 'read', { files: ['src/a.ts', 'docs/link.md'] });
+      await promptedTurn(live, 2);
+      expect(live.prompt).toHaveBeenLastCalledWith({
+        text: 'read',
+        files: [
+          { path: resolve(seed.workspacePath, 'src/a.ts'), name: 'a.ts' },
+          { path: resolve(seed.workspacePath, 'docs/real.md'), name: 'link.md' },
+        ],
+      });
+      live.emit({ type: 'terminal', status: 'completed', disposition: 'reusable' });
+    });
+
+    it('confines a peer session message the same way', async () => {
+      const h = setup();
+      const { id, live } = await startCompleted(h);
+      await expectCode(
+        h.adapter.sendMessageToSession(id, 'read this', {
+          files: [outside],
+          origin: { kind: 'peer', from: 'other-session', name: 'Peer' },
+        }),
+        'unsupported-option',
+      );
+      expect(live.prompt).toHaveBeenCalledTimes(1);
+    });
+
+    it.each([
+      ['not base64', [{ data: 'not base64!', mediaType: 'image/png' }]],
+      ['not whole base64 quads', [{ data: 'AAA', mediaType: 'image/png' }]],
+      [
+        'larger than the attachment cap',
+        [{ data: 'A'.repeat(((5 * 1024 * 1024) / 3) * 4 + 4), mediaType: 'image/png' }],
+      ],
+      [
+        'more than ten images',
+        Array.from({ length: 11 }, () => ({ data: 'AAAA', mediaType: 'image/png' })),
+      ],
+    ])('refuses images that are %s before anything spawns', async (_label, images) => {
+      const h = setup();
+      const error = await expectCode(
+        h.adapter.startChatSession({ tabId: 'tab', prompt: 'look', images }),
+        'unsupported-option',
+      );
+      expect(error.option).toBe('images');
+      expect(h.acquire).not.toHaveBeenCalled();
+    });
+
+    it('carries the prepared open options to every acquire', async () => {
+      const h = setup();
+      const open = { ptahMcp: true, userMcp: [], instructions: 'Be Ptah.' };
+      (h.ports.prepare as jest.Mock).mockResolvedValueOnce({ seed, open });
+      const { id } = await startCompleted(h);
+      await h.adapter.sendMessageToSession(id, 'again');
+      const opens = h.acquire.mock.calls.map(([request]) => request.open);
+      expect(opens.length).toBeGreaterThan(1);
+      for (const carried of opens) expect(carried).toBe(open);
+    });
+
+    it('releases for good a session closed while its new process attaches (N-4)', async () => {
+      const h = setup();
+      const { id } = await startCompleted(h);
+      h.pool.delete(id);
+      let saved!: () => void;
+      (h.ports.identity.save as jest.Mock).mockImplementationOnce(
+        () => new Promise<void>((done) => (saved = done)),
+      );
+      const sending = h.adapter.sendMessageToSession(id, 'again').then(
+        () => undefined,
+        (reason: unknown) => reason,
+      );
+      for (let i = 0; i < 50 && !saved; i++) await flush();
+      const closing = h.adapter.closeSession(id);
+      saved();
+      await expect(sending).resolves.toBeInstanceOf(ProviderSessionChatAdapterError);
+      await closing;
+      const reasons = (h.ports.release as jest.Mock).mock.calls.map(([, reason]) => reason);
+      expect(reasons).not.toContain('broken');
+      expect(reasons).toContain('tab-closed');
+    });
+  });
+});
+
+describe('ProviderSessionChatAdapter durable usage', () => {
+  afterEach(() => resetPricingMapForTesting());
+
+  const turnUsage = {
+    model: 'gemini-pro',
+    inputTokens: 120,
+    outputTokens: 30,
+    cacheReadTokens: 10,
+  };
+
+  type Read = NonNullable<SessionUsageSink['readSessionUsage']>;
+  type Record_ = SessionUsageSink['recordUsage'];
+  function fakeSink(impl: { record?: Record_; read?: Read } = {}) {
+    return {
+      recordUsage: jest.fn<ReturnType<Record_>, Parameters<Record_>>(
+        impl.record ?? (async () => undefined),
+      ),
+      resumeSession: jest.fn(async () => undefined),
+      readSessionUsage: jest.fn<ReturnType<Read>, Parameters<Read>>(
+        impl.read ?? (async () => null),
+      ),
+    };
+  }
+
+  /** Run one turn of an open session to its terminal with usage. */
+  async function usageTurn(
+    stream: AsyncIterable<FlatStreamEventUnion>,
+    live: FakeProviderSession,
+    turns: number,
+  ) {
+    const events = collect(stream);
+    await promptedTurn(live, turns);
+    live.emit({
+      type: 'terminal',
+      status: 'completed',
+      disposition: 'reusable',
+      usage: turnUsage,
+    });
+    return events;
+  }
+
+  it('persists one provider-session contribution per completed turn', async () => {
+    const sink = fakeSink();
+    const h = setup({ usageSink: sink });
+    const first = await h.adapter.startChatSession({ tabId: 'tab', prompt: 'hi' });
+    await usageTurn(first, h.lives[0], 1);
+    const id = h.resolved.mock.calls[0][1] as SessionId;
+    await usageTurn(await h.adapter.resumeSession(id, { prompt: 'again' }), h.lives[0], 2);
+
+    expect(sink.recordUsage).toHaveBeenCalledTimes(2);
+    const [one, two] = sink.recordUsage.mock.calls.map(([c]) => c);
+    expect(one).toMatchObject({
+      sessionId: id,
+      producer: 'provider-session',
+      executorType: 'session',
+      providerId: 'antigravity-cli',
+      eventKey: `${one.runId}#1`,
+      workspaceKey: 'c:/repo',
+      source: 'live',
+      models: [
+        {
+          modelId: 'gemini-pro',
+          inputTokens: 120,
+          outputTokens: 30,
+          cacheReadTokens: 10,
+          cacheCreationTokens: 0,
+          knownCostMicroUsd: null,
+          costAuthority: 'unpriced',
+        },
+      ],
+      totalCostMicroUsd: null,
+      totalCostAuthority: 'unpriced',
+      pricingVersion: null,
+    });
+    expect(one.turnId).toEqual(expect.any(String));
+    expect(one.coverageEndMs).toBeGreaterThanOrEqual(one.coverageStartMs ?? 0);
+    expect(two).toMatchObject({ runId: one.runId, eventKey: `${one.runId}#2` });
+    expect(two.revision).toBeGreaterThan(one.revision);
+  });
+
+  it('persists a priced turn in micro-USD as model-priced', async () => {
+    updatePricingMap({
+      'gemini-pro': { inputCostPerToken: 1e-6, outputCostPerToken: 2e-6, cacheReadCostPerToken: 1e-7 },
+    });
+    const sink = fakeSink();
+    const h = setup({ usageSink: sink });
+    await usageTurn(await h.adapter.startChatSession({ tabId: 'tab', prompt: 'hi' }), h.lives[0], 1);
+    const [contribution] = sink.recordUsage.mock.calls[0];
+    const micro = Math.round((120 * 1e-6 + 30 * 2e-6 + 10 * 1e-7) * 1e6);
+    expect(contribution.models[0]).toMatchObject({
+      knownCostMicroUsd: micro,
+      costAuthority: 'model-priced',
+    });
+    expect(contribution).toMatchObject({
+      totalCostMicroUsd: micro,
+      totalCostAuthority: 'model-priced',
+    });
+  });
+
+  it('keeps the turn when the sink rejects or throws', async () => {
+    const rejecting = fakeSink({
+      record: async () => {
+        throw new Error('disk full');
+      },
+    });
+    const h = setup({ usageSink: rejecting });
+    const events = await usageTurn(
+      await h.adapter.startChatSession({ tabId: 'tab', prompt: 'hi' }),
+      h.lives[0],
+      1,
+    );
+    await flush();
+    expect(h.stats).toHaveBeenCalledTimes(1);
+    expect(events.some((e) => e.eventType === 'turn_state')).toBe(true);
+    expect(h.logger.error).toHaveBeenCalledWith(
+      '[ProviderSessionChatAdapter] Usage capture failed',
+      expect.any(Error),
+    );
+
+    const throwing = fakeSink({
+      record: () => {
+        throw new Error('closed');
+      },
+    });
+    const t = setup({ usageSink: throwing });
+    await usageTurn(await t.adapter.startChatSession({ tabId: 'tab', prompt: 'hi' }), t.lives[0], 1);
+    expect(t.stats).toHaveBeenCalledTimes(1);
+    expect(t.adapter.canSendFollowUp(t.resolved.mock.calls[0][1] as SessionId)).toBe(true);
+  });
+
+  it('seeds a resumed session with its persisted totals, as partial coverage', async () => {
+    const sink = fakeSink({
+      read: async () => ({
+        events: 2,
+        maxRevision: 2,
+        durationMs: 500,
+        models: [
+          {
+            modelId: 'gemini-pro',
+            inputTokens: 1000,
+            outputTokens: 200,
+            cacheReadTokens: 50,
+            cacheCreationTokens: 0,
+            knownCostMicroUsd: null,
+            events: 2,
+            unpricedEvents: 2,
+            costAuthorities: ['unpriced' as const],
+          },
+        ],
+      }),
+    });
+    const h = setup({ usageSink: sink });
+    const id = SessionId.create();
+    const stream = await h.adapter.resumeSession(id, { tabId: 'tab-r', prompt: 'hi' });
+    await usageTurn(stream, h.lives[0], 1);
+
+    expect(sink.readSessionUsage).toHaveBeenCalledWith(id, 'provider-session');
+    expect(sink.resumeSession).toHaveBeenCalledWith(id);
+    const stats = h.stats.mock.calls[0][0].sessionStats;
+    // A contiguous seed cannot prove no trailing turn was lost: never complete.
+    expect(stats).toMatchObject({
+      tokens: { input: 1120, output: 230, cacheRead: 60, cacheCreation: 0 },
+      messageCount: 3,
+      coverage: 'partial',
+      totalCost: null,
+      costUnavailableReason: 'rate-missing',
+    });
+    expect(stats?.turnCount).toBeUndefined();
+    expect(sink.recordUsage.mock.calls[0][0].revision).toBeGreaterThan(2);
+  });
+
+  it('resumes without a seed when the persisted read fails', async () => {
+    const sink = fakeSink({
+      read: async () => {
+        throw new Error('locked');
+      },
+    });
+    const h = setup({ usageSink: sink });
+    const id = SessionId.create();
+    await usageTurn(await h.adapter.resumeSession(id, { tabId: 'tab-r', prompt: 'hi' }), h.lives[0], 1);
+    expect(h.stats.mock.calls[0][0].sessionStats).toMatchObject({
+      coverage: 'partial',
+      tokens: { input: 120 },
+    });
+  });
+
+  it('keeps the catalog wait out of the turn duration and coverage window', async () => {
+    let hydrate!: (value: boolean) => void;
+    const ensureHydrated = jest.fn(
+      () => new Promise<boolean>((resolve) => (hydrate = resolve)),
+    );
+    const sink = fakeSink();
+    const h = setup({ usageSink: sink, pricing: { ensureHydrated } });
+    // Started at construction, so the wait overlaps the first turn.
+    expect(ensureHydrated).toHaveBeenCalledTimes(1);
+    const events = usageTurn(
+      await h.adapter.startChatSession({ tabId: 'tab', prompt: 'hi' }),
+      h.lives[0],
+      1,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    const hydratedAt = Date.now();
+    hydrate(true);
+    await events;
+    expect(h.stats.mock.calls[0][0].duration).toBeLessThan(150);
+    expect(sink.recordUsage.mock.calls[0][0].coverageEndMs).toBeLessThan(hydratedAt);
+  });
+
+  it('waits once for the price catalog before pricing the first turn', async () => {
+    const ensureHydrated = jest.fn(async () => {
+      updatePricingMap({
+        'gemini-pro': { inputCostPerToken: 1e-6, outputCostPerToken: 2e-6, cacheReadCostPerToken: 1e-7 },
+      });
+      return true;
+    });
+    const h = setup({ pricing: { ensureHydrated } });
+    const first = await h.adapter.startChatSession({ tabId: 'tab', prompt: 'hi' });
+    await usageTurn(first, h.lives[0], 1);
+    const id = h.resolved.mock.calls[0][1] as SessionId;
+    await usageTurn(await h.adapter.resumeSession(id, { prompt: 'again' }), h.lives[0], 2);
+    expect(h.stats.mock.calls[0][0].turnCost).not.toBeNull();
+    expect(ensureHydrated).toHaveBeenCalledTimes(1);
   });
 });

@@ -71,7 +71,7 @@ export const AGENT_ROW_COLUMNS =
       <span
         class="truncate text-right text-[10.5px] tabular-nums"
         data-testid="agent-row-cost"
-        [class.text-base-content-muted]="r.cost === dash"
+        [class.text-base-content-muted]="r.cost === dash || r.usage.costNotPriced === true"
         [attr.title]="r.cost === dash ? notReported : r.cost"
         >{{ r.cost }}</span
       >

@@ -56,6 +56,15 @@ export const AUTH_STATUS_FIXTURE = {
   codexAuthenticated: true,
   codexTokenStale: false,
   claudeCliInstalled: true,
+  // The host admits the Antigravity provider session, so its connection is listed (signed in).
+  providerSessionStatus: {
+    antigravity: {
+      installed: true,
+      authenticated: true,
+      version: '1.0.0',
+      signInHint: 'Run `agy` once in a terminal to sign in.',
+    },
+  },
 };
 
 /** The host's masked hint of Kimi Code's stored key (prototype "•••• 8f21"; four U+2022, a space, the last 4). */
@@ -318,6 +327,13 @@ export const EFFECTIVE_ROUTE_FIXTURE = {
       type: 'apiKey' as const,
       status: 'connected' as const,
     },
+    // The host lists an admitted provider session from its auth-status row
+    // (`effective-route-method.ts`); AUTH_STATUS_FIXTURE signs Antigravity in.
+    {
+      id: 'antigravity-cli',
+      type: 'cli' as const,
+      status: 'connected' as const,
+    },
   ],
   lastSuccessfulProbeAt: '2026-01-01T00:00:00.000Z',
   lastFailedProbeAt: null,
@@ -344,6 +360,7 @@ const CHECK_LATENCY_MS: Readonly<Record<string, number | null>> = {
   'claude-cli': null,
   'github-copilot': null,
   'openai-codex': null,
+  'antigravity-cli': null,
 };
 
 /**

@@ -28,6 +28,7 @@
 import { inject, injectable } from 'tsyringe';
 import { createHash } from 'node:crypto';
 import { TOKENS, Logger } from '@ptah-extension/vscode-core';
+import { SDK_TOKENS, type SessionLifecycleManager } from '@ptah-extension/agent-sdk';
 import { SessionId } from '@ptah-extension/shared';
 import type {
   AgentProcessInfo,
@@ -271,6 +272,11 @@ function sessionOwnerBinding(child: SessionChildRecord): SessionOwnerBinding {
   };
 }
 
+const UNATTRIBUTED_SESSION_CHILD_DETAIL =
+  'this host holds no child-session record for this caller: the session was ' +
+  'not started with ptah_session_start, or the in-memory record was lost at ' +
+  'a host restart or pruned from the ended history';
+
 @injectable()
 export class AgentReportRouter {
   /**
@@ -325,6 +331,9 @@ export class AgentReportRouter {
       isOptional: true,
     })
     private readonly handoffAcks: SessionHandoffAckStore | null = null,
+    /** Maps a resumed child's new tab id to its SDK session id. */
+    @inject(SDK_TOKENS.SDK_SESSION_LIFECYCLE_MANAGER, { isOptional: true })
+    private readonly lifecycle: Pick<SessionLifecycleManager, 'find'> | null = null,
   ) {}
 
   /** Delivery only: a report addressed to a handed-off session goes to its successor. */
@@ -702,10 +711,10 @@ export class AgentReportRouter {
     const { message } = input;
     const reportedId = input.childSessionId.trim();
 
-    const child = this.sessionChildren?.get(reportedId);
+    const child = this.findSessionChild(reportedId);
     if (!child) {
       return this.refuseSessionChild('unattributed-caller', reportedId, {
-        detail: 'this session was not started with ptah_session_start',
+        detail: UNATTRIBUTED_SESSION_CHILD_DETAIL,
       });
     }
     const childSessionId = child.childSessionId;
@@ -733,6 +742,38 @@ export class AgentReportRouter {
       }
       return this.deliverSessionChildReport(input, current);
     });
+  }
+
+  /**
+   * The record of the calling session, by its tab id or its SDK session id.
+   * A child resumed from the sidebar runs under a new tab id but the same SDK
+   * session, and the MCP URL carries the new tab id, so the session lifecycle
+   * maps that tab to its SDK id. An SDK id inferred from the worktree path
+   * can belong to another chat in the same worktree and never attributes.
+   */
+  private findSessionChild(reportedId: string): SessionChildRecord | undefined {
+    const registry = this.sessionChildren;
+    if (!registry) return undefined;
+    const trusted = (record: SessionChildRecord | undefined) =>
+      record &&
+      (record.childSessionId === reportedId || !record.sdkSessionIdInferred)
+        ? record
+        : undefined;
+    const direct = registry.get(reportedId);
+    if (direct || !this.lifecycle) return trusted(direct);
+    try {
+      const sdkId = this.lifecycle.find(reportedId)?.realSessionId ?? undefined;
+      const resumed = registry.get(sdkId);
+      return resumed?.sdkSessionIdInferred ? undefined : resumed;
+    } catch (error: unknown) {
+      // degradation-audit: reported - logged here, and the caller refuses the
+      // report as `unattributed-caller`, which the child and the log both see.
+      this.logger.error(
+        '[AgentReportRouter] Session lifecycle read failed',
+        error instanceof Error ? error : new Error(String(error)),
+      );
+      return undefined;
+    }
   }
 
   private serializeSessionChild<T>(

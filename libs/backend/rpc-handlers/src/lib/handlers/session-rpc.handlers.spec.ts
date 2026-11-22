@@ -416,6 +416,7 @@ function makeHarness(
     };
     transcriptLines?: string[];
     webviewManager?: { broadcastMessage: jest.Mock };
+    providerSessionRelease?: { release: jest.Mock };
   } = {},
 ): Harness {
   const logger = createMockLogger();
@@ -465,6 +466,9 @@ function makeHarness(
     (opts.organization ?? null) as SessionOrganizationService | null,
     (opts.taskIndex ?? null) as TaskIndexService | null,
     (opts.webviewManager ?? null) as never,
+    null,
+    null,
+    (opts.providerSessionRelease ?? null) as never,
   );
 
   return {
@@ -2046,6 +2050,71 @@ describe('SessionRpcHandlers', () => {
 
       expect(result.success).toBe(true);
       expect(h.metadataStore.delete).toHaveBeenCalledWith(VALID_SESSION_ID);
+    });
+
+    it('stops a provider session before its metadata is deleted; Claude rows skip it', async () => {
+      const order: string[] = [];
+      const providerSessionRelease = {
+        release: jest.fn(async () => {
+          order.push('release');
+        }),
+      };
+      const h = makeHarness({ providerSessionRelease });
+      h.metadataStore.delete.mockImplementation(async () => {
+        order.push('delete');
+      });
+      h.metadataStore.get.mockResolvedValue(
+        makeMetadata({
+          sessionId: VALID_SESSION_ID,
+          workspaceId: WORKSPACE,
+          providerSessionExecution: {
+            version: 1,
+            runtime: 'provider-session',
+            sessionId: VALID_SESSION_ID,
+            providerId: 'antigravity-cli',
+            workspaceId: WORKSPACE,
+            providerSession: { profile: 'antigravity' },
+          },
+        } as never) as never,
+      );
+      h.handlers.register();
+
+      const result = await call<{ success: boolean }>(h, 'session:delete', {
+        sessionId: VALID_SESSION_ID,
+      });
+      expect(result.success).toBe(true);
+      expect(providerSessionRelease.release).toHaveBeenCalledWith(VALID_SESSION_ID);
+      expect(order).toEqual(['release', 'delete']);
+
+      providerSessionRelease.release.mockClear();
+      h.metadataStore.get.mockResolvedValue(
+        makeMetadata({ sessionId: VALID_SESSION_ID, workspaceId: WORKSPACE }) as never,
+      );
+      await call(h, 'session:delete', { sessionId: VALID_SESSION_ID });
+      expect(providerSessionRelease.release).not.toHaveBeenCalled();
+    });
+
+    it('still deletes a provider session whose release failed', async () => {
+      const failure = new Error('agent close failed');
+      const providerSessionRelease = { release: jest.fn(async () => { throw failure; }) };
+      const h = makeHarness({ providerSessionRelease });
+      h.metadataStore.get.mockResolvedValue(
+        makeMetadata({
+          sessionId: VALID_SESSION_ID,
+          workspaceId: WORKSPACE,
+          providerSessionExecution: { runtime: 'provider-session' },
+        } as never) as never,
+      );
+      h.handlers.register();
+      const result = await call<{ success: boolean }>(h, 'session:delete', {
+        sessionId: VALID_SESSION_ID,
+      });
+      expect(result.success).toBe(true);
+      expect(h.metadataStore.delete).toHaveBeenCalledWith(VALID_SESSION_ID);
+      expect(h.logger.error).toHaveBeenCalledWith(
+        'RPC: session:delete - provider session not released',
+        failure,
+      );
     });
 
     it("removes the session's turn change sets alongside its metadata", async () => {

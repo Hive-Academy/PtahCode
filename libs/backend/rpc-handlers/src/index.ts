@@ -86,6 +86,11 @@ export {
 // Provider accounts (TASK_2026_712), next to LanePlanLimitsRpcHandlers above.
 // Imported from its file: `lib/handlers/index.ts` is outside Batch 27b.
 export { ProviderAccountRpcHandlers } from './lib/handlers/provider-account-rpc.handlers';
+// Provider-session delete release (TASK_2026_2297 P8), bound by Electron.
+export {
+  SESSION_DELETE_TOKENS,
+  type ProviderSessionDeleteRelease,
+} from './lib/handlers/session-rpc.handlers';
 /**
  * Path-policy surface exported for the HOSTS that must apply the same rules.
  *

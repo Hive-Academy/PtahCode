@@ -40,6 +40,7 @@ describe('ProviderReadinessStore', () => {
   let claudeRead: jest.Mock;
   let codexRead: jest.Mock;
   let refreshAuthStatus: jest.Mock;
+  const sessionRow = signal<{ installed: boolean; authenticated: boolean; signInHint: string } | null>(null);
 
   function create(isElectron = true): ProviderReadinessStore {
     ambientView.set(connected);
@@ -60,6 +61,8 @@ describe('ProviderReadinessStore', () => {
           isLoading: signal(false), isLoaded: signal(true),
           persistedAuthMethod: signal('thirdParty'), persistedProviderId: signal('openai-codex'),
           availableProviders: signal([]), refreshAuthStatus,
+          providerSessionRow: (id: string | null) =>
+            id === 'antigravity-cli' ? sessionRow() : null,
         } },
       ],
     });
@@ -80,6 +83,30 @@ describe('ProviderReadinessStore', () => {
     expect(claudeRead).toHaveBeenCalledTimes(2);
     expect(codexRead).toHaveBeenCalledTimes(2);
     expect(store.rechecking()).toBe(false);
+  });
+
+  it('derives Antigravity from its status row and re-reads it on Re-check', async () => {
+    const store = create();
+    sessionRow.set({ installed: true, authenticated: false, signInHint: 'run agy' });
+    expect(store.antigravity().state).toBe('signed-out');
+    refreshAuthStatus.mockImplementation(async () => {
+      sessionRow.set({ installed: true, authenticated: true, signInHint: 'run agy' });
+      return true;
+    });
+    await store.refresh('recheck');
+    expect(refreshAuthStatus).toHaveBeenCalled();
+    expect(store.antigravity().state).toBe('ready');
+    expect(store.rechecking()).toBe(false);
+    sessionRow.set(null);
+  });
+
+  it('marks Antigravity "could not check" when the Re-check read fails', async () => {
+    const store = create();
+    sessionRow.set({ installed: true, authenticated: true, signInHint: 'run agy' });
+    refreshAuthStatus.mockResolvedValue(false);
+    await store.refresh('recheck');
+    expect(store.antigravity().state).toBe('error');
+    sessionRow.set(null);
   });
 
   it('keeps selection unconfirmed when refresh returns false after an earlier load', async () => {

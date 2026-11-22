@@ -48,6 +48,14 @@ export function nullCostLabel(s: SessionStatsEntry | null): string {
     : STATS_EMPTY.cost;
 }
 
+/**
+ * Visible value of a null session cost: "Not priced" when the backend names a
+ * missing published rate (an unpriced model is neither "—" nor $0), else "—".
+ */
+export function nullCostValue(s: SessionStatsEntry | null): string {
+  return nullCostLabel(s) === NOT_PRICED ? NOT_PRICED : STATS_EMPTY.value;
+}
+
 const ESTIMATE_LINE =
   'Live estimate while the turn runs; final figures replace it when it ends.';
 
@@ -182,7 +190,7 @@ export function compactSessionMetrics(stats: SessionStatsInputs): readonly Compa
     {
       id: 'cost', label: 'Cost',
       value: cost === null
-        ? STATS_EMPTY.value
+        ? nullCostValue(snapshot)
         : `${estimate}${subtotal ? '≥' : ''}${formatCost(cost)}${basis ? ` ${basis}` : ''}`,
       ariaLabel: cost === null
         ? nullCostLabel(snapshot)

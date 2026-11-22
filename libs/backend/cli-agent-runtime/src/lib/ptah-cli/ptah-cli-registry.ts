@@ -24,6 +24,7 @@ import {
   OLLAMA_CLOUD_DIRECT_BASE_URL,
   PTAH_CLI_PERMISSION_CAPABILITIES,
   getPtahCliLaneProvider,
+  isProviderSessionProviderId,
 } from '@ptah-extension/shared';
 import {
   Logger,
@@ -96,9 +97,12 @@ import {
 
 /**
  * Resolves the provider definition for a Ptah CLI lane. The direct Anthropic
- * lane is lane-only and lives outside the main-agent provider registry.
+ * lane is lane-only and lives outside the main-agent provider registry. A
+ * provider-session entry (Antigravity) has no base URL, key or proxy for the
+ * Claude SDK, so it never backs a Ptah CLI agent.
  */
 function resolveLaneProvider(id: string): AnthropicProvider | undefined {
+  if (isProviderSessionProviderId(id)) return undefined;
   return id === 'anthropic-api'
     ? getPtahCliLaneProvider(id)
     : getAnthropicProvider(id);
@@ -767,7 +771,9 @@ export class PtahCliRegistry {
    * back a spawned Ptah CLI agent.
    */
   getAvailableProviders(): AnthropicProvider[] {
-    return getAllAnthropicProviders();
+    return getAllAnthropicProviders().filter(
+      (provider) => !isProviderSessionProviderId(provider.id),
+    );
   }
 
   /**

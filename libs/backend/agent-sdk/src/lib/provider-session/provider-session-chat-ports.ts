@@ -13,12 +13,14 @@
 import type {
   ProviderApprovalRequest,
   ProviderApprovalSink,
+  ProviderMcpAttachment,
   ProviderSession,
 } from '@ptah-extension/provider-session-contracts';
 import type {
   AgentSessionResumeConfig,
   AgentSessionStartConfig,
   FlatStreamEventUnion,
+  McpToolProfile,
   PermissionPromptCancelledPayload,
   ProviderInfo,
   ProviderSessionSeed,
@@ -37,6 +39,29 @@ export type ProviderSessionReleaseReason =
   /** `reset()`: every session is closed, the adapter stays usable. */
   | 'reset';
 
+/**
+ * What the host resolved from the session's start options for each open of
+ * its process. The adapter carries it unchanged to every `acquire`; the pool
+ * uses it only when it opens a process.
+ */
+export interface ProviderSessionOpenOptions {
+  /**
+   * Ptah's instructions for a new session (identity, user system prompt,
+   * enhanced prompt, output style, memory blocks). Absent on a resume: the
+   * runtime never delivers instructions to a restored session.
+   */
+  readonly instructions?: string;
+  /** Attach Ptah's own MCP server (the session's `mcpServerRunning` and policy). */
+  readonly ptahMcp: boolean;
+  /** Ptah MCP tool profile; `apps` scopes the URL and the credential. */
+  readonly mcpToolProfile?: McpToolProfile;
+  /**
+   * The user's MCP servers, already filtered by the capability policy; never
+   * one named `ptah`. Secret-bearing (headers): never logged.
+   */
+  readonly userMcp: readonly ProviderMcpAttachment[];
+}
+
 /** What the host resolved for one start or resume, credential-free. */
 export interface ProviderSessionChatPrepared {
   readonly seed: ProviderSessionSeed;
@@ -45,6 +70,8 @@ export interface ProviderSessionChatPrepared {
    * reads it from `providerSessionThread`); absent on a fresh start.
    */
   readonly resume?: { readonly nativeSessionId: string };
+  /** Absent: the host opens with its defaults (Ptah MCP only, no instructions). */
+  readonly open?: ProviderSessionOpenOptions;
 }
 
 export interface ProviderSessionAcquireRequest {
@@ -64,6 +91,8 @@ export interface ProviderSessionAcquireRequest {
   };
   /** Where the runtime sends permission requests for this session. */
   readonly approvals: ProviderApprovalSink;
+  /** `ProviderSessionChatPrepared.open` of this session. */
+  readonly open?: ProviderSessionOpenOptions;
 }
 
 /** One approval request, addressed for the renderer and the router. */

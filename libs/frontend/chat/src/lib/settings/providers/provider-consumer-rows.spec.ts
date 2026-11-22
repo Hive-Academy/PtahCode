@@ -87,11 +87,12 @@ describe('provider consumer rows', () => {
     expect(providerReadiness('', [], false)).toEqual(expect.objectContaining({ blocking: true }));
   });
 
-  it('lists Codex as unsupported for the Memory curator only', () => {
-    expect(CURATOR_UNSUPPORTED_PROVIDER_IDS).toEqual(['openai-codex']);
+  it('lists Codex as unsupported for the Memory curator only, and provider sessions for every role', () => {
+    const sessions = ['antigravity-cli', 'grok-cli', 'opencode-cli'];
+    expect(CURATOR_UNSUPPORTED_PROVIDER_IDS).toEqual(['openai-codex', ...sessions]);
     const [curator, enhancement] = buildConsumerRows(sources(), route, () => null);
-    expect(curator.unsupportedProviders).toEqual(['openai-codex']);
-    expect(enhancement.unsupportedProviders).toEqual([]);
+    expect(curator.unsupportedProviders).toEqual(['openai-codex', ...sessions]);
+    expect(enhancement.unsupportedProviders).toEqual(sessions);
   });
 
   it('blocks an unsupported provider even when it is connected, with no setup action', () => {

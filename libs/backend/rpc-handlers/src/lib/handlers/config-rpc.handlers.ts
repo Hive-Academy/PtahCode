@@ -55,6 +55,7 @@ import {
   DEFAULT_PROVIDER_ID,
   getModelPricingDescription,
   getPricingMap,
+  getProviderSessionProfile,
   normalizeAuthMethod,
   isDirectAnthropic,
   type AuthEnv,
@@ -71,6 +72,7 @@ import {
 import { configRuntimeControls } from './config-runtime-controls';
 import { isTierAlias, savedModelOption } from './config-saved-model-option';
 import { modelPickerGroups } from './model-picker-groups';
+import { providerSessionModelOptions } from './config-provider-session-models';
 
 /**
  * Copy of an auth env taken for one `config:models-list` request.
@@ -526,6 +528,22 @@ export class ConfigRpcHandlers {
           this.logger.debug('RPC: config:models-list called', {
             workspacePath: scope.workspacePath,
           });
+          // A provider-session provider never serves the Claude SDK: list its
+          // own CLI catalog, not the SDK tier slots (live test: the composer
+          // showed Opus / Sonnet / Haiku for an Antigravity session).
+          if (getProviderSessionProfile(scope.providerId)) {
+            const models = await providerSessionModelOptions(
+              scope.providerId,
+              scope.savedModel,
+              (providerId) => this.providerModels.fetchModels(providerId, null),
+              (error) =>
+                this.logger.warn(
+                  'RPC: config:models-list - provider catalog unavailable',
+                  { providerId: scope.providerId, error: error.message },
+                ),
+            );
+            return { models, workspacePath: scope.workspacePath };
+          }
           const sdkModels = await this.sdkAdapter.getSupportedModels();
           const apiModels = await this.sdkAdapter.getApiModels();
 

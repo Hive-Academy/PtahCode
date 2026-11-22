@@ -78,6 +78,7 @@ import {
   ProviderCarryOverService,
   type CarryOverOffer,
 } from '../../services/provider-carry-over.service';
+import { ProviderSessionResumeNoticeService } from '../../services/provider-session-resume-notice.service';
 import { SessionHistoryReplayer } from '../../services/chat-store/session-history-replayer.service';
 import { HistoryPagingService } from '../../services/chat-store/history-paging.service';
 import {
@@ -330,6 +331,7 @@ function makeHarness(
   const createTabMock = jest.fn().mockReturnValue('tab-new');
   const findTabsBySessionIdMock = jest.fn().mockReturnValue([]);
   const findTabByIdAcrossWorkspacesMock = jest.fn();
+  const resetTabToFreshMock = jest.fn();
   const closeTabMock = jest.fn().mockResolvedValue(undefined);
   const forgetWorkflowSessionMock = jest.fn();
   const rebindTabSessionMock = jest.fn();
@@ -392,6 +394,7 @@ function makeHarness(
     onTabClosed: jest.fn(() => () => undefined),
     removedWorkspace$: signal(null).asReadonly(),
     findTabByIdAcrossWorkspaces: findTabByIdAcrossWorkspacesMock,
+    resetTabToFresh: resetTabToFreshMock,
     clearRemovedWorkspace: jest.fn(),
     clearPendingSessionLoad: jest.fn(),
   } as unknown as TabManagerService;
@@ -582,7 +585,14 @@ function makeHarness(
   const clearAuthRequiredBannerMock = jest.fn(() =>
     authRequiredBannerSig.set(null),
   );
+  const providerSessionRowSig = signal<{
+    installed: boolean;
+    authenticated: boolean;
+    signInHint: string;
+  } | null>(null);
   const authStateStub = {
+    providerSessionRow: (providerId: string | null) =>
+      providerId === 'antigravity-cli' ? providerSessionRowSig() : null,
     authRequiredBanner: authRequiredBannerSig.asReadonly(),
     codexAuthenticated: codexAuthenticatedSig.asReadonly(),
     codexTokenStale: codexTokenStaleSig.asReadonly(),
@@ -779,6 +789,8 @@ function makeHarness(
     codexCancelMock,
     refreshAuthStatusMock,
     clearAuthRequiredBannerMock,
+    providerSessionRowSig,
+    resetTabToFreshMock,
     sessionId,
     layoutStub,
     displayWindowStub,
@@ -1174,6 +1186,94 @@ describe('ChatViewComponent — Codex re-auth', () => {
     h.fixture.detectChanges();
     expect(h.clearAuthRequiredBannerMock).not.toHaveBeenCalled();
     expect(h.authRequiredBannerSig()?.providerId).toBe('anthropic');
+  });
+});
+
+describe('ChatViewComponent — provider-session sign-in and resume', () => {
+  afterEach(() => TestBed.resetTestingModule());
+
+  const banner = {
+    providerId: 'antigravity-cli',
+    message: 'Sign in to the provider, then try again.',
+    generation: 3,
+    origin: null,
+  };
+  const reauth = (h: ReturnType<typeof makeHarness>) =>
+    (h.component as unknown as { onAuthReauth(): Promise<void> }).onAuthReauth();
+
+  it('shows the row hint and clears the banner once "Check again" finds a sign-in', async () => {
+    const h = makeHarness({ renderAuthBannerTemplate: true });
+    h.providerSessionRowSig.set({
+      installed: true,
+      authenticated: false,
+      signInHint: 'Run `agy` once to sign in.',
+    });
+    h.authRequiredBannerSig.set(banner);
+    // The banner itself is deferred; its bound text is the row's hint.
+    expect(
+      (h.component as unknown as { authBannerMessage(): string | undefined })
+        .authBannerMessage(),
+    ).toBe('Run `agy` once to sign in.');
+
+    h.refreshAuthStatusMock.mockImplementationOnce(async () => {
+      h.providerSessionRowSig.set({
+        installed: true,
+        authenticated: true,
+        signInHint: 'Run `agy` once to sign in.',
+      });
+      return true;
+    });
+    await reauth(h);
+
+    expect(h.refreshAuthStatusMock).toHaveBeenCalled();
+    expect(h.codexStartMock).not.toHaveBeenCalled();
+    expect(h.clearAuthRequiredBannerMock).toHaveBeenCalledWith(3);
+  });
+
+  it('keeps the banner with a note while the CLI is still signed out', async () => {
+    const h = makeHarness({ renderAuthBannerTemplate: true });
+    h.providerSessionRowSig.set({
+      installed: true,
+      authenticated: false,
+      signInHint: 'Run `agy` once to sign in.',
+    });
+    h.authRequiredBannerSig.set(banner);
+    await reauth(h);
+    h.fixture.detectChanges();
+
+    expect(h.codexStartMock).not.toHaveBeenCalled();
+    expect(h.clearAuthRequiredBannerMock).not.toHaveBeenCalled();
+    expect(
+      h.fixture.nativeElement.querySelector(
+        '[data-testid="provider-session-check-note"]',
+      )?.textContent,
+    ).toContain('Still not signed in');
+  });
+
+  it('offers "Start a new session in this tab" after a resume failure, never automatically', () => {
+    const h = makeHarness({ renderAuthBannerTemplate: true });
+    h.activeTabIdSig.set('tab-1');
+    h.findTabByIdAcrossWorkspacesMock.mockImplementation((tabId: string) =>
+      tabId === 'tab-1' ? { tab: { id: 'tab-1', claudeSessionId: 'sess-1' } } : null,
+    );
+    const notices = TestBed.inject(ProviderSessionResumeNoticeService);
+    notices.flagIfResumeFailed('PROVIDER_SESSION_RESUME_FAILED', 'tab-1', 'sess-1');
+    h.fixture.detectChanges();
+
+    expect(h.resetTabToFreshMock).not.toHaveBeenCalled();
+    const start = h.fixture.nativeElement.querySelector(
+      'button[data-testid="provider-session-resume-start-new"]',
+    ) as HTMLButtonElement | null;
+    expect(start?.textContent).toContain('Start a new session in this tab');
+    start?.click();
+    h.fixture.detectChanges();
+
+    expect(h.resetTabToFreshMock).toHaveBeenCalledWith('tab-1');
+    expect(
+      h.fixture.nativeElement.querySelector(
+        '[data-testid="provider-session-resume-failed"]',
+      ),
+    ).toBeNull();
   });
 });
 

@@ -255,6 +255,16 @@ describe('AuthRpcHandlers — auth:getApiKeyStatus keyHint', () => {
     expectNoKeyMaterial(JSON.stringify(response), Object.values(seeded));
   });
 
+  it('has no key row and no key read for a provider-session entry (Antigravity)', async () => {
+    const h = makeHarness({ providerKeysSeed: seeded });
+
+    const response = await rpc(h, 'auth:getApiKeyStatus');
+    const result = response.data as AuthGetApiKeyStatusResult;
+
+    expect(result.providers.map((p) => p.provider)).not.toContain('antigravity-cli');
+    expect(h.authSecrets.getProviderKey).not.toHaveBeenCalledWith('antigravity-cli');
+  });
+
   it('gives no keyHint (and omits the field) for an absent, 11-character or whitespace-only key', async () => {
     const h = makeHarness({
       providerKeysSeed: { openrouter: SHORT_KEY, 'kimi-code': '     \t   ' },

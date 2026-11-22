@@ -767,6 +767,21 @@ describe('PlanLimitOwnerDiscoveryService', () => {
     );
   });
 
+  it('reads a provider-session main provider (Antigravity) as its CLI account, never "owner unknown" (issue #1459)', async () => {
+    const h = createHarness(THIRD_PARTY('antigravity-cli'));
+
+    const [first] = await h.service.discoverTargets({});
+
+    // The same owner the CLI-store card reads; the provider is named, and a
+    // missing usage source shows on that owner, never provider-unsupported.
+    expect(first).toEqual(
+      expect.objectContaining({ kind: 'read', origin: 'selected-provider' }),
+    );
+    expect(ownerKeyOf(first)).toBe(ANTIGRAVITY.key);
+    expect(providerOf(first)).toBe('antigravity');
+    expect(h.owners.ownerForProviderKey).not.toHaveBeenCalledWith('antigravity-cli');
+  });
+
   it('F72: after an account change the new owner is listed and read; the old one only from the ledger', async () => {
     const h = createHarness(THIRD_PARTY('openai-codex'));
     h.owners.resolveCodexHomeOwner

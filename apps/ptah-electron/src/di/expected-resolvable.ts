@@ -25,7 +25,7 @@ import {
   UsageRpcHandlers,
 } from '@ptah-extension/rpc-handlers';
 import { SKILL_FILE_WRITER_TOKEN } from '@ptah-extension/skill-synthesis';
-import { CHAT_TOKENS } from '@ptah-extension/rpc-handlers';
+import { CHAT_TOKENS, SESSION_DELETE_TOKENS } from '@ptah-extension/rpc-handlers';
 import {
   SKILL_RECOMMENDATION_SERVICE,
   SKILL_RANKING_SERVICE,
@@ -87,6 +87,9 @@ export const EXPECTED_RESOLVABLE_TOKENS = [
   ],
   // Backend-owned follow-up queue (TASK_2026_884), bound by registerChatServices.
   ['FOLLOW_UP_QUEUE', CHAT_TOKENS.FOLLOW_UP_QUEUE],
+  // Null default from registerChatServices; the provider-session binding
+  // replaces it with the probe before AuthRpcHandlers resolves (P8).
+  ['PROVIDER_SESSION_AUTH_STATUS', CHAT_TOKENS.PROVIDER_SESSION_AUTH_STATUS],
   ['HOST_ROUTING_SETTING', LANE_ROUTING_TOKENS.HOST_ROUTING_SETTING],
   ['LANE_TASK_KIND_CLASSIFIER', LANE_ROUTING_TOKENS.TASK_KIND_CLASSIFIER],
   ['OUTCOME_TASK_KIND_CLASSIFIER', LANE_OUTCOME_TOKENS.TASK_KIND_CLASSIFIER],
@@ -254,6 +257,15 @@ export const ELECTRON_NATIVE_CHAT_CORE_TOKENS = [
   SDK_TOKENS.SESSION_RUNTIME_IDENTITY_LOOKUP,
   SDK_TOKENS.RUNTIME_ADMISSION_PORT,
   SDK_TOKENS.RUNTIME_HOST_CAPABILITIES,
+] as const;
+
+/** Bound by the provider-session binding's `register` (P8, component 11). */
+export const ELECTRON_PROVIDER_SESSION_BOUND_TOKENS = [
+  SDK_TOKENS.PROVIDER_SESSION_CHAT_PORTS,
+  SDK_TOKENS.PROVIDER_SESSION_HISTORY_PORT,
+  SDK_TOKENS.PROVIDER_SESSION_CONTROLS,
+  CHAT_TOKENS.PROVIDER_SESSION_AUTH_STATUS,
+  SESSION_DELETE_TOKENS.PROVIDER_SESSION_RELEASE,
 ] as const;
 
 export const ELECTRON_CODEX_BOUND_TOKENS = [

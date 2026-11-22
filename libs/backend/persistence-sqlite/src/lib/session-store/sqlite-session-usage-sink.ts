@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type {
   SessionUsageContribution as LiveUsageContribution,
   SessionUsageSink,
+  SessionUsageTotals,
 } from '@ptah-extension/platform-core';
 import type { Logger } from '@ptah-extension/vscode-core';
 import {
@@ -17,7 +18,7 @@ const authority = z.enum(['provider-reported', 'model-priced', 'unpriced']);
 const liveContributionSchema = z
   .object({
     sessionId: identifier,
-    producer: z.enum(['sdk-owner', 'codex-checkpoint', 'cli-lane', 'transcript-replay']),
+    producer: z.enum(['sdk-owner', 'codex-checkpoint', 'cli-lane', 'provider-session', 'transcript-replay']),
     runId: identifier,
     nativeThreadId: identifier.nullable().optional(),
     turnId: identifier.nullable(),
@@ -106,6 +107,15 @@ export class SqliteSessionUsageSink implements SessionUsageSink {
         error instanceof Error ? error : new Error(String(error)));
     });
     return write;
+  }
+
+  /** Reads after every write accepted before this call; a failed write does not block it. */
+  async readSessionUsage(
+    sessionId: string,
+    producer: LiveUsageContribution['producer'],
+  ): Promise<SessionUsageTotals | null> {
+    await this.tail;
+    return this.repository.getProducerUsageTotals(sessionId, producer);
   }
 
   requestFinalization(sessionId: string): Promise<void> {

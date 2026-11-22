@@ -136,12 +136,30 @@ describe('planPtahMcpSlots', () => {
       },
     );
 
-    it.each<HarnessTargetId>(['cursor', 'codex', 'antigravity'])(
+    it.each<HarnessTargetId>(['cursor', 'codex'])(
       'includes %s when its CLI is installed',
       async (target) => {
         expect(await targets({ installed: [target] })).toContain(target);
       },
     );
+
+    it('never plans antigravity, even when agy is installed (TASK_2026_2297)', async () => {
+      // An agy session Ptah spawns gets the server per session (`ptah_lane`);
+      // a home-global `ptah` entry would hand every agy run a long-lived
+      // credential. `retired-ptah-mcp-slots.ts` removes the old entries.
+      const slots = await plan({
+        roots: [WS_A, WS_B],
+        installed: ['antigravity'],
+      });
+
+      expect(slots.map((slot) => slot.target)).toEqual([
+        CLAUDE_TARGET,
+        CLAUDE_TARGET,
+      ]);
+      expect(
+        slots.some((slot) => slot.configPath.includes('mcp_config.json')),
+      ).toBe(false);
+    });
   });
 
   describe('scope', () => {
@@ -214,38 +232,6 @@ describe('planPtahMcpSlots', () => {
         ].sort(),
       );
     });
-
-    it('resolves antigravity BOTH globally and per workspace folder', async () => {
-      // Antigravity is two products. The EDITOR documents
-      // `{ws}/.agents/mcp_config.json`; the `agy` CLI does not read it — `agy
-      // mcp list` reported `No MCP servers configured` with that file present
-      // and listed the server the moment the same entry went in the global
-      // file, its bundled docs define Global and Plugin scopes only, and the
-      // binary carries no `.agents/mcp_config.json` literal. Workspace-only
-      // would therefore break the CLI silently.
-      const slots = (
-        await plan({ roots: [WS_A, WS_B], installed: ['antigravity'] })
-      ).filter((slot) => slot.target === 'antigravity');
-
-      expect(slots.map((slot) => slot.configPath).sort()).toEqual(
-        [
-          join(tempHome, '.gemini', 'config', 'mcp_config.json'),
-          join(WS_A, '.agents', 'mcp_config.json'),
-          join(WS_B, '.agents', 'mcp_config.json'),
-        ].sort(),
-      );
-    });
-
-    it('writes the antigravity workspace entry in `agy` dialect', async () => {
-      // `serverUrl`, not `url` — an entry spelled `url` parses and never
-      // connects. The facet owns that; this asserts the right facet was chosen.
-      const slot = (
-        await plan({ roots: [WS_A], installed: ['antigravity'] })
-      ).find((s) => s.configPath.includes('.agents'));
-
-      expect(slot).toBeDefined();
-      expect(slot?.facet.configRelPath()).toBe('.agents/mcp_config.json');
-    });
   });
 
   describe('targets deliberately absent', () => {
@@ -267,6 +253,23 @@ describe('planPtahMcpSlots', () => {
 
       expect(all).not.toContain('vscode');
     });
+  });
+
+  it('keeps the other targets unchanged when antigravity is retired', async () => {
+    trustCodexProjects([WS_A]);
+
+    const slots = await plan({
+      roots: [WS_A],
+      installed: ['cursor', 'codex', 'antigravity', 'copilot', 'vscode'],
+    });
+
+    expect(
+      slots.map((slot) => [slot.target, slot.configPath]),
+    ).toEqual([
+      [CLAUDE_TARGET, join(WS_A, '.mcp.json')],
+      ['cursor', join(WS_A, '.cursor', 'mcp.json')],
+      ['codex', join(WS_A, '.codex', 'config.toml')],
+    ]);
   });
 
   it('gives every slot a distinct config path', async () => {

@@ -1,5 +1,5 @@
 import type { SessionStatsEntry } from '@ptah-extension/shared';
-import { compactSessionMetrics, contextDetailsText, costDetailsText, sessionContextCue, tokenDetailsText, type SessionStatsInputs } from './session-stats-view';
+import { compactSessionMetrics, contextDetailsText, costDetailsText, nullCostValue, sessionContextCue, tokenDetailsText, type SessionStatsInputs } from './session-stats-view';
 import type { LiveModelStats } from './session-stats-summary.component';
 
 const liveContext: LiveModelStats = {
@@ -108,7 +108,9 @@ describe('compactSessionMetrics', () => {
       costUnavailableReason: 'rate-missing' as const,
     };
     const cost = compactSessionMetrics({ ...empty, snapshot: unpriced })[2];
-    expect(cost).toMatchObject({ unavailable: true, ariaLabel: 'Not priced' });
+    // Visible "Not priced", never "—" or $0 (issue #1459).
+    expect(cost).toMatchObject({ unavailable: true, ariaLabel: 'Not priced', value: 'Not priced' });
+    expect(nullCostValue(unpriced)).toBe('Not priced');
     expect(costDetailsText(unpriced, null)).toContain('Not priced');
     expect(costDetailsText(unpriced, null)).not.toContain('Cost unavailable');
   });
@@ -120,7 +122,8 @@ describe('compactSessionMetrics', () => {
       costUnavailableReason: 'usage-incomplete' as const,
     };
     const cost = compactSessionMetrics({ ...empty, snapshot: incomplete })[2];
-    expect(cost).toMatchObject({ unavailable: true, ariaLabel: 'Cost unavailable' });
+    expect(cost).toMatchObject({ unavailable: true, ariaLabel: 'Cost unavailable', value: '—' });
+    expect(nullCostValue(incomplete)).toBe('—');
     expect(costDetailsText(incomplete, null)).toContain('Cost unavailable');
     expect(costDetailsText(incomplete, null)).not.toContain('Not priced');
   });
