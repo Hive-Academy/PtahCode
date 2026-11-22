@@ -563,6 +563,8 @@ describe('ProviderSessionPool pid ledger with spawn reports (S1, S3)', () => {
     await jest.advanceTimersByTimeAsync(0);
     expect(h.pidLedger.record).toHaveBeenCalledTimes(1);
     const pid = h.pidLedger.record.mock.calls[0][0].pid;
+    // Spawn-time rows qualify for the orphan sweep's start-time window.
+    expect(h.pidLedger.record.mock.calls[0][0].atSpawn).toBe(true);
     h.gates[0].resolve(fakeSession('native-1'));
     await acquiring;
     // The open does not record the same process again.

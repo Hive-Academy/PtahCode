@@ -2,63 +2,151 @@
  * Start-up sweep of provider-session agents a crashed host left behind
  * (plan component 11). The pool records each process in the pid ledger; a
  * clean shutdown removes every row, so a row found at start belongs to a run
- * that did not close its agents. A row is killed only when the live process
- * with that pid also started when the row says, so a reused pid is never
- * signalled:
- * - Windows: one CIM snapshot (`queryWindowsProcesses`); the matching
- *   process tree is killed with `killProcessTree` (taskkill /T /F).
- * - POSIX: `ps -o lstart= -p <pid>`; the agent runs detached, so its process
- *   group is signalled (`groupOnly`, never the bare pid). Without `ps` the row
- *   is skipped and logged.
+ * that did not close its agents.
+ *
+ * A row is signalled only when the live process with that pid is provably
+ * the recorded one, so a reused pid is never signalled:
+ * - a probed identity (creation time and image name the ledger store read
+ *   with the same probe after the spawn) must match exactly; otherwise
+ * - for a row recorded at spawn, the live image must be the profile's
+ *   expected binary and its creation time within
+ *   {@link ORPHAN_SPAWN_WINDOW_MS} of the spawn-time `startedAt`.
+ * A row that has neither cannot be verified and is never signalled.
+ *
+ * Probes:
+ * - Windows: `Get-CimInstance Win32_Process -Filter 'ProcessId=<pid>'
+ *   -ErrorAction Stop` (Name, CreationDate in ms), with an explicit marker for
+ *   "no such process", so a CIM failure is never read as a gone process; the
+ *   matching process tree is killed with `killProcessTree` (taskkill /T /F).
+ * - POSIX (Linux, macOS): `ps -o lstart= -o comm= -p <pid>` under `LC_ALL=C`
+ *   (start time to the second, command name); the agent runs detached, so its
+ *   process group is signalled (`groupOnly`, never the bare pid).
+ *
+ * Each row gets an outcome. A row is settled (forgotten) when its process is
+ * gone, its pid now belongs to another process, or it was stopped. A row
+ * whose probe or kill failed, or whose live process cannot be verified, is
+ * kept for the next start, up to {@link MAX_ORPHAN_SWEEP_ATTEMPTS} starts;
+ * then it is dropped and logged.
  *
  * Honest limit: between a crash and the next Ptah start, agents can outlive
  * the host. Every failure is logged; the sweep never fails startup.
  */
-import {
-  defaultOrphanCleanupDependencies,
-  killProcessTree,
-  type ProcessQuery,
-} from '@ptah-extension/platform-core';
+import { killProcessTree } from '@ptah-extension/platform-core';
 import type { Logger } from '@ptah-extension/vscode-core';
-import type { ProviderSessionPidEntry } from '@ptah-extension/rpc-handlers';
+import { z } from 'zod';
+import type { ProviderSessionProfileId } from '@ptah-extension/shared';
+import type {
+  ProcessIdentity,
+  StoredProviderSessionPidEntry,
+} from './provider-session-pid-ledger-store';
 
 /**
- * The pool records a pid after its open resolved, which includes the agent's
- * handshake and, for a history read, its replay (bounded at 90 s). The process
- * therefore started up to this long before `startedAt`.
+ * Allowed difference between the recorded and the live creation time. Both
+ * come from the same probe, so this only absorbs rounding (`ps` reports whole
+ * seconds).
  */
-export const ORPHAN_OPEN_WINDOW_MS = 120_000;
-/** Clock skew allowed after `startedAt` (CIM and `ps` round to the second). */
 export const ORPHAN_TIME_TOLERANCE_MS = 1_000;
-/** Bound on one `ps` probe. */
-const PS_TIMEOUT_MS = 3_000;
+/**
+ * Allowed difference between a spawn-time `startedAt` and the live creation
+ * time, for a row without a probed identity: the pool records the row as the
+ * runtime reports the spawn, and `ps` truncates to whole seconds.
+ */
+export const ORPHAN_SPAWN_WINDOW_MS = 3_000;
+/** Starts that may fail to stop a row before it is dropped. */
+export const MAX_ORPHAN_SWEEP_ATTEMPTS = 3;
+/** Bound on one probe (PowerShell start-up dominates on Windows). */
+const PROBE_TIMEOUT_MS = 5_000;
+/** Printed by the Windows probe when no process has the pid. */
+export const WINDOWS_NO_PROCESS_MARKER = 'PTAH_NO_PROCESS';
 
-export type ProcessRows = Awaited<ReturnType<ProcessQuery>>;
+/** The binary each provider-session profile spawns (Windows adds `.exe`). */
+const PROFILE_BINARIES: Readonly<Record<ProviderSessionProfileId, string>> = {
+  antigravity: 'agy',
+  grok: 'grok',
+  opencode: 'opencode',
+};
+
+/** The image name a live agent of `profile` reports on `platform`. */
+export function expectedProviderSessionImage(
+  profile: ProviderSessionProfileId,
+  platform: NodeJS.Platform,
+): string {
+  const binary = PROFILE_BINARIES[profile];
+  return platform === 'win32' ? `${binary}.exe` : binary;
+}
+
+/**
+ * The identity of the live process with `pid`, or undefined when no process
+ * has that pid. Throws when the probe itself failed.
+ */
+export type ProcessIdentityProbe = (pid: number) => Promise<ProcessIdentity | undefined>;
 
 export interface ProviderSessionOrphanSweepDeps {
   readonly platform: NodeJS.Platform;
   readonly logger: Pick<Logger, 'info' | 'warn'>;
-  /** Windows: one snapshot of every live process. */
-  readonly queryWindows: ProcessQuery;
-  /** POSIX: the start time (epoch ms) of `pid`, or undefined when it is gone. */
-  readonly posixStartTime: (pid: number) => Promise<number | undefined>;
+  readonly identify: ProcessIdentityProbe;
   /** Kill the process tree (Windows) or the process group (POSIX) of `pid`. */
   readonly kill: (pid: number) => Promise<void>;
 }
 
+export type ProviderSessionOrphanOutcome =
+  /** The matching process was signalled. */
+  | 'stopped'
+  /** No process has the pid any more. */
+  | 'gone'
+  /** The pid belongs to a process with another identity. */
+  | 'reused'
+  /** The live process cannot be verified; never signalled, kept (bounded). */
+  | 'unverifiable'
+  /** The probe or the kill failed; the row is kept for the next start. */
+  | 'retry'
+  /** The probe or the kill failed on the last allowed start; the row is dropped. */
+  | 'abandoned';
+
 export interface ProviderSessionOrphanSweepResult {
-  readonly killed: number;
-  readonly skipped: number;
+  readonly outcomes: ReadonlyArray<{
+    readonly pid: number;
+    readonly outcome: ProviderSessionOrphanOutcome;
+  }>;
+  /** Rows to keep for the next start, with their attempt count raised. */
+  readonly retained: readonly StoredProviderSessionPidEntry[];
 }
 
-/** Whether a live process start matches a ledger row's open window. */
-export function startedWithin(
-  createdAtMs: number,
-  entry: ProviderSessionPidEntry,
+/** Whether a live process is the one the ledger recorded. */
+export function identityMatches(
+  live: ProcessIdentity,
+  recorded: ProcessIdentity,
+  platform: NodeJS.Platform,
 ): boolean {
+  const sameImage =
+    platform === 'win32'
+      ? live.image.toLowerCase() === recorded.image.toLowerCase()
+      : live.image === recorded.image;
   return (
-    createdAtMs >= entry.startedAt - ORPHAN_OPEN_WINDOW_MS &&
-    createdAtMs <= entry.startedAt + ORPHAN_TIME_TOLERANCE_MS
+    sameImage &&
+    Math.abs(live.createdAtMs - recorded.createdAtMs) <= ORPHAN_TIME_TOLERANCE_MS
+  );
+}
+
+/** Image basename, compared case-insensitively on Windows. */
+function imageKey(image: string, platform: NodeJS.Platform): string {
+  const base = image.split(/[\\/]/).pop() ?? image;
+  return platform === 'win32' ? base.toLowerCase() : base;
+}
+
+/**
+ * Fallback for a row without a probed identity: the live process runs the
+ * profile's binary and was created when the pool reported its spawn.
+ */
+export function spawnWindowMatches(
+  live: ProcessIdentity,
+  entry: StoredProviderSessionPidEntry,
+  platform: NodeJS.Platform,
+): boolean {
+  if (!entry.atSpawn || !entry.expectedImage) return false;
+  return (
+    imageKey(live.image, platform) === imageKey(entry.expectedImage, platform) &&
+    Math.abs(live.createdAtMs - entry.startedAt) <= ORPHAN_SPAWN_WINDOW_MS
   );
 }
 
@@ -71,72 +159,176 @@ export function cimCreationTime(value: string | null): number | undefined {
 }
 
 export async function sweepProviderSessionOrphans(
-  entries: readonly ProviderSessionPidEntry[],
+  entries: readonly StoredProviderSessionPidEntry[],
   deps: ProviderSessionOrphanSweepDeps,
 ): Promise<ProviderSessionOrphanSweepResult> {
-  if (entries.length === 0) return { killed: 0, skipped: 0 };
-  const startTimeOf =
-    deps.platform === 'win32'
-      ? await windowsStartTimes(deps)
-      : (pid: number) => deps.posixStartTime(pid);
-  let killed = 0;
-  let skipped = 0;
+  const outcomes: Array<{ pid: number; outcome: ProviderSessionOrphanOutcome }> = [];
+  const retained: StoredProviderSessionPidEntry[] = [];
   for (const entry of entries) {
+    let outcome: ProviderSessionOrphanOutcome;
+    let reason = 'live process cannot be verified as the recorded agent';
     try {
-      const createdAtMs = await startTimeOf(entry.pid);
-      if (createdAtMs === undefined || !startedWithin(createdAtMs, entry)) {
-        skipped++;
-        continue;
-      }
-      await deps.kill(entry.pid);
-      killed++;
+      outcome = await sweepOne(entry, deps);
     } catch (error) {
-      // degradation-audit: reported - one row's failure leaves the others swept.
-      skipped++;
-      deps.logger.warn('[ProviderSessionOrphanSweep] Orphan not stopped', {
-        pid: entry.pid,
-        profile: entry.profile,
-        error: error instanceof Error ? error.message : String(error),
-      });
+      // degradation-audit: reported - the row is kept (bounded) and retried at
+      // the next start; the other rows are still swept.
+      outcome = 'retry';
+      reason = error instanceof Error ? error.message : String(error);
     }
+    if (outcome === 'retry' || outcome === 'unverifiable') {
+      const attempts = (entry.sweepAttempts ?? 0) + 1;
+      const detail = { pid: entry.pid, profile: entry.profile, attempts, error: reason };
+      if (attempts >= MAX_ORPHAN_SWEEP_ATTEMPTS) {
+        outcome = 'abandoned';
+        deps.logger.warn(
+          '[ProviderSessionOrphanSweep] Orphan not stopped; giving up on this row',
+          detail,
+        );
+      } else {
+        retained.push({ ...entry, sweepAttempts: attempts });
+        deps.logger.warn(
+          '[ProviderSessionOrphanSweep] Orphan not stopped; retrying next start',
+          detail,
+        );
+      }
+    }
+    outcomes.push({ pid: entry.pid, outcome });
   }
   deps.logger.info('[ProviderSessionOrphanSweep] Sweep finished', {
     rows: entries.length,
-    killed,
-    skipped,
+    ...countOutcomes(outcomes),
   });
-  return { killed, skipped };
+  return { outcomes, retained };
 }
 
-async function windowsStartTimes(
-  deps: Pick<ProviderSessionOrphanSweepDeps, 'queryWindows'>,
-): Promise<(pid: number) => Promise<number | undefined>> {
-  const rows = await deps.queryWindows();
-  const byPid = new Map<number, number | undefined>();
-  for (const row of rows) byPid.set(row.ProcessId, cimCreationTime(row.CreationDate));
-  return async (pid) => byPid.get(pid);
+/** One row; throws when the probe or the kill failed. */
+async function sweepOne(
+  entry: StoredProviderSessionPidEntry,
+  deps: ProviderSessionOrphanSweepDeps,
+): Promise<ProviderSessionOrphanOutcome> {
+  const live = await deps.identify(entry.pid);
+  if (!live) return 'gone';
+  if (entry.identity) {
+    if (!identityMatches(live, entry.identity, deps.platform)) return 'reused';
+  } else if (!spawnWindowMatches(live, entry, deps.platform)) {
+    // Without a probed identity a mismatch proves nothing either way.
+    return 'unverifiable';
+  }
+  await deps.kill(entry.pid);
+  return 'stopped';
 }
 
-/** `ps -o lstart= -p <pid>`; undefined when the pid is gone or `ps` fails. */
-export async function readPosixStartTime(pid: number): Promise<number | undefined> {
-  const { execFile } = await import('node:child_process');
-  const output = await new Promise<string | undefined>((resolve, reject) => {
-    execFile(
-      'ps',
-      ['-o', 'lstart=', '-p', String(pid)],
-      { timeout: PS_TIMEOUT_MS, windowsHide: true },
-      (error, stdout) => {
-        if (!error) return resolve(String(stdout));
-        // `ps` exits 1 when no process has that pid: nothing to sweep.
-        if ('code' in error && error.code === 1) return resolve(undefined);
-        reject(error);
-      },
-    );
-  });
-  const text = output?.trim();
+function countOutcomes(
+  outcomes: ReadonlyArray<{ outcome: ProviderSessionOrphanOutcome }>,
+): Partial<Record<ProviderSessionOrphanOutcome, number>> {
+  const counts: Partial<Record<ProviderSessionOrphanOutcome, number>> = {};
+  for (const { outcome } of outcomes) counts[outcome] = (counts[outcome] ?? 0) + 1;
+  return counts;
+}
+
+const cimRowSchema = z.object({
+  ProcessId: z.number(),
+  Name: z.string().nullable(),
+  CreationDate: z.string().nullable(),
+});
+
+/**
+ * Parses the Windows probe output: undefined only for the explicit
+ * {@link WINDOWS_NO_PROCESS_MARKER}; empty or unreadable output throws.
+ */
+export function parseWindowsIdentity(
+  output: string,
+  pid: number,
+): ProcessIdentity | undefined {
+  const text = output.trim();
+  if (text === WINDOWS_NO_PROCESS_MARKER) return undefined;
+  if (!text) throw new Error(`Process probe for ${pid} printed nothing`);
+  const parsed = z
+    .union([cimRowSchema, z.array(cimRowSchema)])
+    .parse(JSON.parse(text));
+  const row = (Array.isArray(parsed) ? parsed : [parsed]).find(
+    (candidate) => candidate.ProcessId === pid,
+  );
+  if (!row) throw new Error(`Process probe for ${pid} returned another process`);
+  const createdAtMs = cimCreationTime(row.CreationDate);
+  // A live process whose identity cannot be read is a probe failure, not a
+  // gone process: the caller must not treat it as safe to forget or to kill.
+  if (createdAtMs === undefined || !row.Name)
+    throw new Error(`Process ${pid} has no readable creation time or name`);
+  return { createdAtMs, image: row.Name };
+}
+
+/** Parses `ps -o lstart= -o comm=` output: five lstart tokens, then the command. */
+export function parsePosixIdentity(output: string, pid: number): ProcessIdentity | undefined {
+  const text = output.trim();
   if (!text) return undefined;
-  const parsed = Date.parse(text);
-  return Number.isFinite(parsed) ? parsed : undefined;
+  const tokens = text.split(/\s+/);
+  const createdAtMs = Date.parse(tokens.slice(0, 5).join(' '));
+  const image = tokens.slice(5).join(' ');
+  if (!Number.isFinite(createdAtMs) || !image)
+    throw new Error(`Process ${pid} has no readable start time or command`);
+  return { createdAtMs, image };
+}
+
+/**
+ * The Windows probe: a JSON row, the no-process marker, or exit 2 on any CIM
+ * error (`Stop` makes a non-terminating error terminating, so it is caught).
+ */
+export function windowsProbeScript(pid: number): string {
+  return [
+    "$ErrorActionPreference = 'Stop'",
+    "$ProgressPreference = 'SilentlyContinue'",
+    'try {',
+    `  $p = Get-CimInstance Win32_Process -Filter 'ProcessId=${pid}' -ErrorAction Stop`,
+    `  if ($null -eq $p) { '${WINDOWS_NO_PROCESS_MARKER}' }`,
+    '  else { $p | Select-Object ProcessId,Name,CreationDate | ConvertTo-Json -Compress }',
+    '} catch { [Console]::Error.WriteLine($_.Exception.Message); exit 2 }',
+  ].join('\n');
+}
+
+/** Production probe for this platform. */
+export function createProcessIdentityProbe(
+  platform: NodeJS.Platform = process.platform,
+): ProcessIdentityProbe {
+  return async (pid) => {
+    if (!Number.isSafeInteger(pid) || pid <= 0) return undefined;
+    const { execFile } = await import('node:child_process');
+    if (platform === 'win32') {
+      const systemRoot = process.env['SystemRoot'] ?? process.env['windir'];
+      const executable = systemRoot
+        ? String.raw`${systemRoot}\System32\WindowsPowerShell\v1.0\powershell.exe`
+        : 'powershell.exe';
+      // `pid` is a validated positive integer; nothing else enters the
+      // script. -EncodedCommand avoids any argv quoting of it.
+      const encoded = Buffer.from(windowsProbeScript(pid), 'utf16le').toString('base64');
+      const output = await new Promise<string>((resolve, reject) => {
+        execFile(
+          executable,
+          ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded],
+          { timeout: PROBE_TIMEOUT_MS, windowsHide: true },
+          // stderr is not a failure signal: PowerShell writes CLIXML progress
+          // records there. The script turns every CIM error into exit 2.
+          (error, stdout) => (error ? reject(error) : resolve(String(stdout))),
+        );
+      });
+      return parseWindowsIdentity(output, pid);
+    }
+    const output = await new Promise<string | undefined>((resolve, reject) => {
+      execFile(
+        'ps',
+        ['-o', 'lstart=', '-o', 'comm=', '-p', String(pid)],
+        // `lstart` is localised; C keeps it parseable by Date.parse.
+        { timeout: PROBE_TIMEOUT_MS, windowsHide: true, env: { ...process.env, LC_ALL: 'C' } },
+        (error, stdout) => {
+          if (!error) return resolve(String(stdout));
+          // `ps` exits 1 when no process has that pid.
+          if ('code' in error && error.code === 1) return resolve(undefined);
+          reject(error);
+        },
+      );
+    });
+    return output === undefined ? undefined : parsePosixIdentity(output, pid);
+  };
 }
 
 /** Production dependencies for this platform. */
@@ -147,8 +339,7 @@ export function defaultProviderSessionOrphanSweepDeps(
   return {
     platform,
     logger,
-    queryWindows: defaultOrphanCleanupDependencies.query,
-    posixStartTime: readPosixStartTime,
+    identify: createProcessIdentityProbe(platform),
     kill: async (pid) => {
       let failure: Error | undefined;
       await killProcessTree(
@@ -167,15 +358,15 @@ export function defaultProviderSessionOrphanSweepDeps(
 
 /**
  * Sweep the rows a previous run left, in the background: the binding does not
- * wait for the process snapshot (seconds on Windows). A new agent never
- * matches an old row (other start time), and only the previous run's rows are
- * settled, so the sweep and the live pool never race on a row. A sweep that
- * could not run keeps the rows for the next start.
+ * wait for the probes. A new agent never matches an old row (other identity),
+ * and only the previous run's rows are settled, so the sweep and the live pool
+ * never race on a row. Rows whose cleanup failed stay persisted (bounded) for
+ * the next start.
  */
 export function startProviderSessionOrphanSweep(
   store: {
-    previous(): readonly ProviderSessionPidEntry[];
-    settlePrevious(): Promise<void>;
+    previous(): readonly StoredProviderSessionPidEntry[];
+    settlePrevious(retained: readonly StoredProviderSessionPidEntry[]): Promise<void>;
   },
   deps: ProviderSessionOrphanSweepDeps,
   onError: (error: Error) => void,
@@ -183,7 +374,7 @@ export function startProviderSessionOrphanSweep(
   const rows = store.previous();
   if (rows.length === 0) return Promise.resolve();
   return sweepProviderSessionOrphans(rows, deps)
-    .then(() => store.settlePrevious())
+    .then((result) => store.settlePrevious(result.retained))
     .catch((error: unknown) => {
       onError(error instanceof Error ? error : new Error(String(error)));
     });

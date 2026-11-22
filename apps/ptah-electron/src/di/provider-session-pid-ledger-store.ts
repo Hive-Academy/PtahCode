@@ -4,9 +4,18 @@
  * start can sweep agents a crashed host left behind
  * (`provider-session-orphan-sweep.ts`).
  *
+ * When the pool records a pid, the row is persisted at once with what needs
+ * no probe: the profile's expected binary image and whether `startedAt` was
+ * taken at spawn. The store then reads the process identity (creation time
+ * and image name) with the same probe the sweep uses and adds it to the row.
+ * The sweep signals a process only when the probed identity matches, or,
+ * without one, when the image and the spawn time match; so a reused pid is
+ * never signalled and a crash before the probe finished still sweeps.
+ *
  * The rows a previous run left are loaded once, at construction, as the
  * sweep's input; they stay persisted until the sweep settles them, so a host
  * that crashes again before the sweep finishes still sweeps them next time.
+ * `settlePrevious` keeps the rows whose cleanup failed for the next start.
  * `record` and `remove` are synchronous and never throw: the write is queued
  * and a failed write is logged (the ledger is best effort, the pool must keep
  * working without it).
@@ -19,14 +28,45 @@ import type {
   ProviderSessionPidEntry,
   ProviderSessionPidLedger,
 } from '@ptah-extension/rpc-handlers';
+import {
+  createProcessIdentityProbe,
+  expectedProviderSessionImage,
+  type ProcessIdentityProbe,
+} from './provider-session-orphan-sweep';
 
 /** Global state key of the ledger. */
 export const PROVIDER_SESSION_PID_LEDGER_KEY = 'ptah.providerSession.pidLedger';
+/** How long `flush` waits for identity probes before it writes what is ready. */
+export const FLUSH_PROBE_WAIT_MS = 1_000;
+
+/** What identifies one process beyond its (reusable) pid. */
+export interface ProcessIdentity {
+  /** Process creation time, epoch ms, as the probe reports it. */
+  readonly createdAtMs: number;
+  /** Image name (Windows) or command name (POSIX). */
+  readonly image: string;
+}
+
+/** One persisted row. */
+export interface StoredProviderSessionPidEntry extends ProviderSessionPidEntry {
+  /** Absent when the probe could not read the process at record time. */
+  readonly identity?: ProcessIdentity;
+  /** The image the profile's agent runs as, known without a probe. */
+  readonly expectedImage?: string;
+  /** Starts whose sweep failed to stop this row. */
+  readonly sweepAttempts?: number;
+}
 
 const entrySchema = z.object({
   pid: z.number().int().positive(),
   profile: z.enum(PROVIDER_SESSION_PROFILE_IDS),
   startedAt: z.number(),
+  atSpawn: z.boolean().optional(),
+  expectedImage: z.string().min(1).optional(),
+  identity: z
+    .object({ createdAtMs: z.number(), image: z.string().min(1) })
+    .optional(),
+  sweepAttempts: z.number().int().nonnegative().optional(),
 });
 const ledgerSchema = z.object({
   version: z.literal(1),
@@ -37,19 +77,36 @@ export interface ElectronProviderSessionPidLedgerStore {
   /** The port the pool records through. */
   readonly ledger: ProviderSessionPidLedger;
   /** Rows a previous run left behind (the orphan sweep input). */
-  previous(): readonly ProviderSessionPidEntry[];
-  /** Forget the previous run's rows once the sweep handled them. */
-  settlePrevious(): Promise<void>;
-  /** Wait for queued writes (specs and shutdown). */
+  previous(): readonly StoredProviderSessionPidEntry[];
+  /**
+   * Replace the previous run's rows with the ones the sweep could not settle
+   * (empty once every row was handled).
+   */
+  settlePrevious(retained: readonly StoredProviderSessionPidEntry[]): Promise<void>;
+  /**
+   * Wait for identity probes (at most `flushProbeWaitMs`) and then for the
+   * queued writes (specs and shutdown).
+   */
   flush(): Promise<void>;
+}
+
+export interface ElectronProviderSessionPidLedgerStoreOptions {
+  readonly platform?: NodeJS.Platform;
+  readonly identify?: ProcessIdentityProbe;
+  readonly flushProbeWaitMs?: number;
 }
 
 export function createElectronProviderSessionPidLedgerStore(
   storage: Pick<IStateStorage, 'get' | 'update'>,
   logger: Pick<Logger, 'warn' | 'error'>,
+  options: ElectronProviderSessionPidLedgerStoreOptions = {},
 ): ElectronProviderSessionPidLedgerStore {
-  let previous = loadPrevious(storage, logger);
-  const live = new Map<number, ProviderSessionPidEntry>();
+  const platform = options.platform ?? process.platform;
+  const identify = options.identify ?? createProcessIdentityProbe(platform);
+  const flushProbeWaitMs = options.flushProbeWaitMs ?? FLUSH_PROBE_WAIT_MS;
+  let previous: readonly StoredProviderSessionPidEntry[] = loadPrevious(storage, logger);
+  const live = new Map<number, StoredProviderSessionPidEntry>();
+  const probes = new Set<Promise<void>>();
   let pending: Promise<void> = Promise.resolve();
 
   const persist = (): Promise<void> => {
@@ -72,11 +129,40 @@ export function createElectronProviderSessionPidLedgerStore(
     return pending;
   };
 
+  /** Attach the identity of a just-recorded process to its row. */
+  const capture = (row: StoredProviderSessionPidEntry): void => {
+    const probe = identify(row.pid)
+      .then((identity) => {
+        // Gone already, or removed / replaced meanwhile: nothing to attach.
+        if (!identity || live.get(row.pid) !== row) return;
+        live.set(row.pid, { ...row, identity });
+        void persist();
+      })
+      .catch((error: unknown) => {
+        // degradation-audit: reported - without an identity the next start's
+        // sweep never signals this pid; the pool keeps working.
+        logger.warn('[ProviderSessionPidLedger] Process identity not recorded', {
+          pid: row.pid,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      })
+      .finally(() => probes.delete(probe));
+    probes.add(probe);
+  };
+
   return {
     ledger: {
       record(entry) {
-        live.set(entry.pid, { ...entry });
+        const row: StoredProviderSessionPidEntry = {
+          pid: entry.pid,
+          profile: entry.profile,
+          startedAt: entry.startedAt,
+          ...(entry.atSpawn ? { atSpawn: true } : {}),
+          expectedImage: expectedProviderSessionImage(entry.profile, platform),
+        };
+        live.set(entry.pid, row);
         void persist();
+        capture(row);
       },
       remove(pid) {
         if (!live.delete(pid)) return;
@@ -84,19 +170,31 @@ export function createElectronProviderSessionPidLedgerStore(
       },
     },
     previous: () => previous,
-    settlePrevious() {
-      if (previous.length === 0) return pending;
-      previous = [];
+    settlePrevious(retained) {
+      if (previous.length === 0 && retained.length === 0) return pending;
+      previous = retained.map((row) => ({ ...row }));
       return persist();
     },
-    flush: () => pending,
+    flush: async () => {
+      // Shutdown must not wait for a slow probe: a row without its probed
+      // identity is still swept by image and spawn time.
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      await Promise.race([
+        Promise.all([...probes]),
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, flushProbeWaitMs);
+        }),
+      ]);
+      clearTimeout(timer);
+      await pending;
+    },
   };
 }
 
 function loadPrevious(
   storage: Pick<IStateStorage, 'get'>,
   logger: Pick<Logger, 'warn'>,
-): ProviderSessionPidEntry[] {
+): StoredProviderSessionPidEntry[] {
   let raw: unknown;
   try {
     raw = storage.get<unknown>(PROVIDER_SESSION_PID_LEDGER_KEY);
@@ -114,7 +212,7 @@ function loadPrevious(
     return [];
   }
   // A malformed row is dropped alone; the others are still swept.
-  const byPid = new Map<number, ProviderSessionPidEntry>();
+  const byPid = new Map<number, StoredProviderSessionPidEntry>();
   for (const row of parsed.data.entries) {
     const entry = entrySchema.safeParse(row);
     if (entry.success) byPid.set(entry.data.pid, entry.data);

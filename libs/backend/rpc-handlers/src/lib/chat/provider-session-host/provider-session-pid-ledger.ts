@@ -6,6 +6,12 @@ export interface ProviderSessionPidEntry {
   readonly profile: ProviderSessionProfileId;
   /** Epoch milliseconds when the pool recorded the process. */
   readonly startedAt: number;
+  /**
+   * True when the row was recorded as the runtime reported the spawn, so
+   * `startedAt` is within moments of the process creation time. A row the
+   * pool recorded after the open (`getPid`) leaves it unset.
+   */
+  readonly atSpawn?: boolean;
 }
 
 /**

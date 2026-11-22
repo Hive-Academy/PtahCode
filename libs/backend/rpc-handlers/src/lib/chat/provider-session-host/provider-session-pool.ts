@@ -413,7 +413,7 @@ export class ProviderSessionPool {
     row.watched = true;
     row.pid = pid;
     this.ledger(() =>
-      this.deps.pidLedger.record({ pid, profile, startedAt: Date.now() }),
+      this.deps.pidLedger.record({ pid, profile, startedAt: Date.now(), atSpawn: true }),
     );
     void exited.then(() => {
       this.ledger(() => this.deps.pidLedger.remove(pid));
