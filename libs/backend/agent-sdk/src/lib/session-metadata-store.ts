@@ -1893,6 +1893,32 @@ export class SessionMetadataStore {
   }
 
   /**
+   * Store only the Codex turn-time record, for a turn that ended without a
+   * usage persist. Max wins against the stored record; the checkpoint, the
+   * sidebar totals and the usage sink are untouched.
+   */
+  async updateCodexTurnDuration(
+    sessionId: SessionId,
+    duration: CodexTurnDuration,
+  ): Promise<void> {
+    const offered = codexTurnDurationSchema.parse(duration);
+    await this.enqueueWrite(async () => {
+      const current = await this.get(sessionId);
+      if (current?.codexExecution?.runtime !== 'codex-app-server') {
+        throw new CodexSessionMetadataError(
+          'invalid-identity',
+          'Cannot store native turn time for a non-native session',
+        );
+      }
+      const next = nextTurnDuration(offered, current.codexTurnDuration);
+      // Nothing new: the stored record already wins (or equals the offer).
+      if (!next || JSON.stringify(next) === JSON.stringify(current.codexTurnDuration)) return;
+      await this.persistMetadata({ ...current, codexTurnDuration: next });
+      await this.flush();
+    });
+  }
+
+  /**
    * Mirror one accepted native usage revision to the durable usage sink
    * (TASK_2026_870 Phase 1). Best effort by contract: the sink never throws
    * and owns the logging of every real write failure, so this synchronous

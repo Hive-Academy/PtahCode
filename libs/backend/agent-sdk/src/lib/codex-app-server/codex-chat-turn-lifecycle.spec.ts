@@ -128,6 +128,10 @@ function setup(
     Promise<void>,
     [SessionId, CodexUsageCheckpoint, CodexTurnDuration?]
   >(async () => undefined);
+  const persistDuration = jest.fn<
+    Promise<void>,
+    [SessionId, CodexTurnDuration]
+  >(async () => undefined);
   const lifecycle = { opened: jest.fn(), closed: jest.fn() };
   const scope = container.createChildContainer();
   const open = jest.fn(async () => context);
@@ -199,6 +203,7 @@ function setup(
       save: jest.fn(async () => undefined),
       readUsage: jest.fn(async () => ({ checkpoint, messageCount: 0 })),
       persistUsage,
+      persistDuration,
     },
     approvals,
     presentation: {
@@ -225,6 +230,7 @@ function setup(
     dispose,
     callbacks,
     persistUsage,
+    persistDuration,
     lifecycle,
     sink: () => {
       if (!sink) throw new Error('Expected an approval sink after opening');
@@ -1248,6 +1254,73 @@ describe('Codex chat turn lifecycle', () => {
       await h.adapter.dispose();
     },
   );
+
+  describe('turn time on an exit without stats', () => {
+    /** A turn admitted with a receipt whose runtime dies before any terminal. */
+    async function dyingTurn(h: ReturnType<typeof setup>) {
+      h.context.events.mockImplementation(() => ({
+        [Symbol.asyncIterator]: () => ({
+          next: async () => {
+            throw new Error('process died');
+          },
+        }),
+      }));
+      // Each clock read is one second later, so the turn has a real length.
+      let clock = 1_000_000;
+      const now = jest.spyOn(Date, 'now').mockImplementation(() => (clock += 1_000));
+      try {
+        await expect(
+          collect(await h.adapter.startChatSession({ tabId, prompt: 'hello' })),
+        ).rejects.toMatchObject({ code: 'runtime-failed' });
+      } finally {
+        now.mockRestore();
+      }
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+
+    it('persists the duration of a failed turn that published no stats', async () => {
+      const h = setup();
+      await dyingTurn(h);
+      expect(h.persistUsage).not.toHaveBeenCalled();
+      expect(h.persistDuration).toHaveBeenCalledTimes(1);
+      const [sessionId, duration] = h.persistDuration.mock.calls[0];
+      expect(sessionId).toBe(id);
+      expect(duration).toMatchObject({ completedMs: 0, turnId: 'turn' });
+      expect(duration.turnMs).toBeGreaterThan(0);
+      await h.adapter.dispose();
+    });
+
+    it('swallows and logs a failed duration write without changing the turn outcome', async () => {
+      const h = setup();
+      h.persistDuration.mockRejectedValueOnce(new Error('disk full'));
+      await dyingTurn(h);
+      expect(h.persistDuration).toHaveBeenCalledTimes(1);
+      expect(h.ports.logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('turn time persistence failed'),
+        { error: 'disk full' },
+      );
+      expect(h.adapter.isSessionActive(id)).toBe(false);
+      await h.adapter.dispose();
+    });
+
+    it('does not write the duration again after a stats publish stored it', async () => {
+      const h = setup('chat', 'api-key', 'gpt-4o');
+      h.context.events.mockImplementation(() =>
+        (async function* () {
+          yield { ...terminal, evidence };
+        })(),
+      );
+      await collect(await h.adapter.startChatSession({ tabId }));
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(h.persistUsage).toHaveBeenCalled();
+      const persisted = h.persistUsage.mock.lastCall?.[2];
+      // The finally block re-measures the turn; it writes only a longer time.
+      for (const [, duration] of h.persistDuration.mock.calls) {
+        expect(duration.turnMs).toBeGreaterThan(persisted?.turnMs ?? -1);
+      }
+      await h.adapter.dispose();
+    });
+  });
 
   it('keeps an unexpected end of the runtime stream classified as a failure', async () => {
     const h = setup();

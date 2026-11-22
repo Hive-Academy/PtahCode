@@ -43,4 +43,22 @@ describe('native metadata port', () => {
     ).rejects.toThrow('Codex session/thread identity mismatch');
     expect(updateCodexExecution).toHaveBeenCalledTimes(1);
   });
+
+  it('sends a duration-only write to the store and reads the stored time', async () => {
+    const sessionId = SessionId.from('44444444-4444-4444-8444-444444444444');
+    const duration = { completedMs: 3_000, turnId: 'turn-2', turnMs: 500 };
+    const usageStore = {
+      get: jest.fn(async () => ({ codexTurnDuration: duration, codexMessageCount: 2 })),
+      updateCodexUsageCheckpoint: jest.fn(async () => undefined),
+      updateCodexTurnDuration: jest.fn(async () => undefined),
+    } as unknown as Parameters<typeof createCodexChatMetadataPort>[1];
+    const port = createCodexChatMetadataPort(
+      { updateCodexExecution: jest.fn(), incrementCodexMessageCount: jest.fn() },
+      usageStore,
+    );
+    await port.persistDuration?.(sessionId, duration);
+    expect(usageStore?.updateCodexTurnDuration).toHaveBeenCalledWith(sessionId, duration);
+    expect(usageStore?.updateCodexUsageCheckpoint).not.toHaveBeenCalled();
+    await expect(port.readUsage?.(sessionId)).resolves.toMatchObject({ duration });
+  });
 });

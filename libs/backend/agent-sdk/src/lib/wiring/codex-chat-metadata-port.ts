@@ -5,7 +5,10 @@ import type { CodexChatMetadataPort } from '../codex-app-server/codex-chat-adapt
 /** Pass the initialized lookup as the writer so persistence also updates routing. */
 export function createCodexChatMetadataPort(
   store: Pick<SessionMetadataStore, 'updateCodexExecution' | 'incrementCodexMessageCount'>,
-  usageStore?: Pick<SessionMetadataStore, 'get' | 'updateCodexUsageCheckpoint'>,
+  usageStore?: Pick<
+    SessionMetadataStore,
+    'get' | 'updateCodexUsageCheckpoint' | 'updateCodexTurnDuration'
+  >,
 ): CodexChatMetadataPort {
   return {
     ...(usageStore ? {
@@ -19,7 +22,12 @@ export function createCodexChatMetadataPort(
       },
       persistUsage: (sessionId, checkpoint, duration) =>
         usageStore.updateCodexUsageCheckpoint(sessionId, checkpoint, duration),
-    } satisfies Pick<CodexChatMetadataPort, 'readUsage' | 'persistUsage'> : {}),
+      persistDuration: (sessionId, duration) =>
+        usageStore.updateCodexTurnDuration(sessionId, duration),
+    } satisfies Pick<
+      CodexChatMetadataPort,
+      'readUsage' | 'persistUsage' | 'persistDuration'
+    > : {}),
     completedTurn: (sessionId) => store.incrementCodexMessageCount(sessionId),
     save: (sessionId, identity, title) => {
       if (sessionId !== identity.threadId) {

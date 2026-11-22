@@ -84,6 +84,11 @@ export interface CodexChatMetadataPort {
     checkpoint: CodexUsageCheckpoint,
     duration?: CodexTurnDuration,
   ): Promise<void>;
+  /** Store only the turn-time record (max wins). Optional for older hosts. */
+  persistDuration?(
+    sessionId: SessionId,
+    duration: CodexTurnDuration,
+  ): Promise<void>;
 }
 
 /** Composition owns registration; every scope must bind this sink before resolving runtime. */
@@ -951,6 +956,13 @@ export class CodexChatAdapter implements NativeChatAdapter {
             );
           }
           return Promise.resolve();
+        },
+        persistDuration: (id, duration) => {
+          // Same rule as usage: an unreadable stored row is never written.
+          if (this.usagePersistenceDisabled.has(session.usageOwner))
+            return Promise.resolve();
+          return this.ports.metadata.persistDuration?.(id, duration) ??
+            Promise.resolve();
         },
         interrupt: (id) => this.interruptCurrentTurn(id),
         close: (active) => this.close(active),

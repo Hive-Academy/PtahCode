@@ -29,10 +29,12 @@ describe('Codex runtime composition', () => {
     const sessionId = SessionId.from('55555555-5555-4555-8555-555555555555');
     const readUsage = jest.fn(async () => ({ messageCount: 3 }));
     const persistUsage = jest.fn(async () => undefined);
+    const persistDuration = jest.fn(async () => undefined);
     const metadata = {
       save: jest.fn(async () => undefined),
       readUsage,
       persistUsage,
+      persistDuration,
     };
     scope.registerInstance(TOKENS.LOGGER, mockLogger());
     scope.registerInstance(SDK_TOKENS.SDK_PERMISSION_HANDLER, {});
@@ -96,6 +98,7 @@ describe('Codex runtime composition', () => {
     expect(adapter).toBeInstanceOf(CodexChatAdapter);
     expect(adapter).toHaveProperty('ports.metadata.readUsage', readUsage);
     expect(adapter).toHaveProperty('ports.metadata.persistUsage', persistUsage);
+    expect(adapter).toHaveProperty('ports.metadata.persistDuration', persistDuration);
     const registeredPorts: unknown = Reflect.get(adapter, 'ports');
     if (
       !registeredPorts ||

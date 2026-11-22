@@ -14,7 +14,12 @@ import type {
   SessionId,
 } from '@ptah-extension/shared';
 import { calculateExactMessageCost, resolveContextCapacity } from '@ptah-extension/shared';
-import type { CodexSessionUsageOwner, CodexTurnDuration, CodexUsageCheckpoint } from './codex-session-usage-owner';
+import {
+  codexTurnDurationTotal,
+  type CodexSessionUsageOwner,
+  type CodexTurnDuration,
+  type CodexUsageCheckpoint,
+} from './codex-session-usage-owner';
 import type {
   CodexChatAdapterPorts,
   CodexChatScope,
@@ -109,6 +114,12 @@ interface CodexChatTurnDependencies {
     checkpoint: CodexUsageCheckpoint,
     duration?: CodexTurnDuration,
   ): Promise<void>;
+  /**
+   * Store only the turn-time record beside the checkpoint (max wins). Used
+   * when a turn exits without a stats publish; never touches the checkpoint,
+   * its revision or the usage sink.
+   */
+  persistDuration(id: SessionId, duration: CodexTurnDuration): Promise<void>;
   interrupt(id: SessionId): Promise<boolean>;
   close(session: CodexChatSession): Promise<void>;
   notifyCompaction(session: CodexChatSession, trigger: 'auto'): void;
@@ -179,6 +190,8 @@ export async function* streamCodexChatTurn(
   let terminalStateEmitted = false;
   let compactionActive = false;
   let admitted = false;
+  /** Turn-time total the last successful usage persist stored. */
+  let persistedDurationTotal: number | undefined;
   let finishCompaction: (() => void) | undefined;
   let drainUsage: {
     readonly publishStats: (result: CodexChatResult) => Promise<void>;
@@ -248,11 +261,13 @@ export async function* streamCodexChatTurn(
       }
       const lifetimePrice = session.usageOwner.lifetimePrice();
       try {
+        const duration = session.usageOwner.serializeDuration();
         await deps.persistUsage(
           session.id,
           session.usageOwner.serialize(),
-          session.usageOwner.serializeDuration(),
+          duration,
         );
+        persistedDurationTotal = codexTurnDurationTotal(duration);
       } catch (error) {
         deps.logger.error(
           '[CodexChatAdapter] Native usage checkpoint persistence failed.',
@@ -582,9 +597,15 @@ export async function* streamCodexChatTurn(
     clearTimeout(backgroundTimer);
     finishCompaction?.();
     // Every admitted turn exit counts its wall time, including a cancel or a
-    // failure that never reached publishStats; the next persist stores it.
-    if (admitted && session.turnId)
+    // failure that never reached publishStats. Time no usage persist stored
+    // yet is written on its own, best effort: a failed write is logged and
+    // never changes how the turn settles.
+    if (admitted && session.turnId) {
       session.usageOwner.recordTurnDuration(session.turnId, Date.now() - started);
+      const duration = session.usageOwner.serializeDuration();
+      if (codexTurnDurationTotal(duration) !== persistedDurationTotal)
+        persistTurnDuration(session.id, duration, deps);
+    }
     // A consumer can detach between message_complete and its settlement event.
     if (terminal) settleTurn();
     if (session.turnId) session.sink.endTurn(session.id, session.turnId);
@@ -631,6 +652,21 @@ export async function* streamCodexChatTurn(
     }
   }
 }
+function persistTurnDuration(
+  id: SessionId,
+  duration: CodexTurnDuration,
+  deps: Pick<CodexChatTurnDependencies, 'persistDuration' | 'logger'>,
+): void {
+  void Promise.resolve()
+    .then(() => deps.persistDuration(id, duration))
+    .catch((error: unknown) => {
+      deps.logger.warn(
+        '[CodexChatAdapter] Native turn time persistence failed.',
+        { error: error instanceof Error ? error.message : String(error) },
+      );
+    });
+}
+
 const REFUSED_INTERRUPT_DRAIN_MS = 5_000;
 
 /** The next event, or undefined when none arrives within `ms` (or `ms` <= 0). */
