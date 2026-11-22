@@ -35,14 +35,11 @@ import type { ExtractedImport, LanguageModule } from './types';
  * them costs more noise than the recall is worth; add them here (not in the
  * extraction layer) if that judgement turns out to be wrong.
  *
- * Known limitation: C# writes the type before the parameter name
- * (`(Guid id)`), and the shared `extractParamsFromText` splits on commas and
- * keeps the first token of each part. C# signatures therefore render their
- * parameter TYPES where JS/TS render names, and a generic argument list gets
- * split on its own comma (`Func<Invoice, T> selector` -> `Func<Invoice`, `T>`).
- * That is still useful in a signature summary, and fixing it would mean making
- * the shared extractor language-aware. Pinned by
- * `csharp-grammar.integration.spec.ts` so it stays a known cost.
+ * Parameters: C# writes the type before the name (`(Guid id)`). The shared
+ * `extractParameterNames` reads type-first languages by their last identifier
+ * outside generic arguments, so `Func<Invoice, T> selector` renders as
+ * `selector` and the extension-method `this` modifier is dropped. Pinned by
+ * `csharp-grammar.integration.spec.ts`.
  */
 const CSHARP_FUNCTION_QUERY = `
 ; Methods (also interface members): public Task<T> Foo(int x) { }

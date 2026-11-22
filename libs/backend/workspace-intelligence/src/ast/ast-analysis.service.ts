@@ -21,6 +21,7 @@ import {
   moduleStringValue,
 } from './export-extraction';
 import { cDeclaratorName } from './c-declarator';
+import { extractParameterNames } from './parameter-names';
 import { LANGUAGE_MODULES } from './languages';
 import type { LanguageExtraction } from './languages/types';
 
@@ -223,7 +224,7 @@ export class AstAnalysisService {
         );
       }
       const { functions, unextractedDeclarations } =
-        this.extractFunctionsFromMatches(map.get('functions') ?? []);
+        this.extractFunctionsFromMatches(map.get('functions') ?? [], language);
       const classes: ClassInfo[] = this.extractClassesFromMatches(
         map.get('classes') ?? [],
       );
@@ -369,7 +370,10 @@ export class AstAnalysisService {
    * and is named by walking it (`cDeclaratorName`); a declarator that names
    * nothing is listed in `unextractedDeclarations`, never dropped silently.
    */
-  private extractFunctionsFromMatches(matches: QueryMatch[]): {
+  private extractFunctionsFromMatches(
+    matches: QueryMatch[],
+    language: SupportedLanguage,
+  ): {
     functions: FunctionInfo[];
     unextractedDeclarations: string[];
   } {
@@ -413,7 +417,7 @@ export class AstAnalysisService {
       }
 
       if (paramsCapture) {
-        params = this.extractParamsFromText(paramsCapture.text);
+        params = extractParameterNames(paramsCapture.text, language);
       }
 
       const declaratorCapture = captures.get('function.declarator');
@@ -428,7 +432,7 @@ export class AstAnalysisService {
           params =
             declared.parameters === undefined
               ? []
-              : this.extractParamsFromText(declared.parameters.text);
+              : extractParameterNames(declared.parameters.text, language);
           namePosition = declaratorCapture.startPosition;
         }
       }
@@ -660,34 +664,6 @@ export class AstAnalysisService {
       }
     }
     return imports;
-  }
-
-  /**
-   * Extracts parameter names from a formal_parameters text.
-   * E.g., "(a, b, c)" -> ["a", "b", "c"]
-   */
-  private extractParamsFromText(paramsText: string): string[] {
-    // Delimiters are stripped only when present: Ruby may omit them
-    // (`def needle alpha, beta`; Batch 31 r1 R31-05).
-    const text = paramsText.trim();
-    const inner = (
-      text.startsWith('(') && text.endsWith(')') ? text.slice(1, -1) : text
-    ).trim();
-    if (!inner) return [];
-    return inner
-      .split(',')
-      .map((param) => {
-        const trimmed = param.trim();
-        if (trimmed.startsWith('...')) {
-          const name = trimmed
-            .slice(3)
-            .split(/[:\s=]/)[0]
-            .trim();
-          return `...${name}`;
-        }
-        return trimmed.split(/[:\s=?]/)[0].trim();
-      })
-      .filter(Boolean);
   }
 
   /**

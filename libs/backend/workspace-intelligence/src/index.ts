@@ -95,7 +95,10 @@ export {
   type EditDelta,
 } from './ast/tree-sitter-parser.service';
 export { AstAnalysisService } from './ast/ast-analysis.service';
-export { formatAstAnalysisResult } from './ast/ast-result-format';
+export {
+  formatAstAnalysisResult,
+  type AstResultFormatOptions,
+} from './ast/ast-result-format';
 export {
   extractExportsFromMatches,
   exportSymbolNames,
@@ -131,6 +134,7 @@ export {
   type LanguageRegistryEntry,
 } from './ast/language-registry';
 export { cDeclaratorName, type DeclaredName } from './ast/c-declarator';
+export { extractParameterNames } from './ast/parameter-names';
 export {
   CodeSymbolIndexer,
   type CodeSymbolIndexerOptions,
