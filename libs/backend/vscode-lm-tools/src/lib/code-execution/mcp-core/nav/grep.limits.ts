@@ -17,7 +17,7 @@ export const GREP_RESULT_BUDGET_TOKENS = 6_000;
 export const GREP_MAX_CHARS = 15_000;
 /** Time limit of one search, in ms. */
 export const GREP_TIMEOUT_MS = 15_000;
-/** Most stdout kept from `rg`, in bytes. */
+/** Most stdout kept from a search binary (`rg`, `git grep`), in bytes. */
 export const GREP_MAX_ENGINE_BYTES = 4 * 1024 * 1024;
 /** Matches kept per search before grouping; the rest is only counted. */
 export const GREP_COLLECT_CAP = 5_000;

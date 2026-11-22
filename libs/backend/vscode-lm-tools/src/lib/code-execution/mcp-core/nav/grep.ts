@@ -11,7 +11,10 @@ import type { AstCodeInsights } from '../../types';
 import { describeZodIssues } from '../route-tool-handlers';
 import {
   buildMatcher,
+  findGit,
   findRipgrep,
+  isGitWorkTree,
+  runGitGrep,
   runNodeSearch,
   runRipgrep,
   type GrepEngineResult,
@@ -59,6 +62,8 @@ export interface GrepDeps {
   readonly defaultWorkspaceRoot: () => Promise<string | undefined>;
   /** Locate `rg`; replaced in tests. */
   readonly findRipgrep?: () => Promise<string | undefined>;
+  /** Locate `git`; replaced in tests. */
+  readonly findGit?: () => Promise<string | undefined>;
 }
 
 export interface GrepReply {
@@ -292,8 +297,20 @@ export async function handleGrep(
   const rg = await (deps.findRipgrep ?? findRipgrep)();
   let result = rg ? await runRipgrep(rg, request) : undefined;
   if (result?.error && result.totalMatches === 0) {
-    // The binary failed (for example a regex dialect it rejects): use the walk.
+    // The binary failed (for example a regex dialect it rejects): go on.
     result = undefined;
+  }
+  if (!result) {
+    // rg is absent or failed: `git grep` is a child process too, so a large
+    // repository does not stall this process's event loop like the walk.
+    const git = await (deps.findGit ?? findGit)();
+    if (git && (await isGitWorkTree(git, request.rootReal))) {
+      result = await runGitGrep(git, request);
+      if (result.error && result.totalMatches === 0) {
+        // For example a git built without PCRE rejects `-P`: use the walk.
+        result = undefined;
+      }
+    }
   }
   result ??= await runNodeSearch(request);
 

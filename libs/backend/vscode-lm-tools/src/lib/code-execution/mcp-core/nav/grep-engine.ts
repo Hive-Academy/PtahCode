@@ -1,9 +1,14 @@
 /**
- * Search engines of `ptah_grep`: `rg --json` when a ripgrep binary is on
- * PATH, else a bounded Node walk. Both return the same shape, so the
- * handler renders one result form. No shell is used; `rg` gets an argv.
+ * Search engines of `ptah_grep`, tried in order: `rg --json` when a ripgrep
+ * binary is on PATH, `git grep` when the root is in a git work tree and git
+ * is on PATH, else a bounded Node walk. All return the same shape, so the
+ * handler renders one result form. No shell is used; binaries get an argv.
  */
-import { spawn, type ChildProcessByStdio } from 'node:child_process';
+import {
+  execFile,
+  spawn,
+  type ChildProcessByStdio,
+} from 'node:child_process';
 import type { Readable } from 'node:stream';
 import {
   access,
@@ -28,7 +33,7 @@ import {
   GREP_TIMEOUT_MS,
 } from './grep.limits';
 
-export type GrepEngineName = 'rg' | 'node';
+export type GrepEngineName = 'rg' | 'git' | 'node';
 
 export interface GrepRequest {
   readonly pattern: string;
@@ -282,15 +287,14 @@ async function loadRootIgnore(
   };
 }
 
-/** First `rg` binary on PATH, or `undefined`. */
-export async function findRipgrep(
-  envPath: string | undefined = process.env['PATH'],
+/** First executable named one of `names` on PATH, or `undefined`. */
+async function findOnPath(
+  names: readonly string[],
+  envPath: string | undefined,
 ): Promise<string | undefined> {
   if (!envPath) {
     return undefined;
   }
-  // `.cmd` is not spawnable without a shell, so only the real binary counts.
-  const names = process.platform === 'win32' ? ['rg.exe'] : ['rg'];
   for (const dir of envPath.split(path.delimiter)) {
     for (const name of names) {
       const candidate = path.join(dir, name);
@@ -303,6 +307,56 @@ export async function findRipgrep(
     }
   }
   return undefined;
+}
+
+/** First `rg` binary on PATH, or `undefined`. */
+export function findRipgrep(
+  envPath: string | undefined = process.env['PATH'],
+): Promise<string | undefined> {
+  // `.cmd` is not spawnable without a shell, so only the real binary counts.
+  return findOnPath(process.platform === 'win32' ? ['rg.exe'] : ['rg'], envPath);
+}
+
+/** First `git` binary on PATH, or `undefined`. */
+export function findGit(
+  envPath: string | undefined = process.env['PATH'],
+): Promise<string | undefined> {
+  return findOnPath(
+    process.platform === 'win32' ? ['git.exe'] : ['git'],
+    envPath,
+  );
+}
+
+/** Time limit of the work-tree probe, in ms. */
+const GIT_PROBE_TIMEOUT_MS = 5_000;
+
+/** Probe results by `<git binary>\0<root>`; a root rarely changes state. */
+const gitWorkTreeCache = new Map<string, Promise<boolean>>();
+
+/**
+ * True when `rootReal` is inside a git work tree, by one
+ * `git rev-parse --is-inside-work-tree`. Cached per binary and root.
+ */
+export function isGitWorkTree(
+  gitBinary: string,
+  rootReal: string,
+): Promise<boolean> {
+  const key = `${gitBinary}\0${rootReal}`;
+  let probe = gitWorkTreeCache.get(key);
+  if (!probe) {
+    probe = new Promise<boolean>((resolve) => {
+      execFile(
+        gitBinary,
+        ['-C', rootReal, 'rev-parse', '--is-inside-work-tree'],
+        { timeout: GIT_PROBE_TIMEOUT_MS, windowsHide: true },
+        // degradation-audit: optional-capability - a failed probe (not a
+        // repository, git broken) means "not a work tree": the Node walk runs.
+        (error, stdout) => resolve(!error && stdout.trim() === 'true'),
+      );
+    });
+    gitWorkTreeCache.set(key, probe);
+  }
+  return probe;
 }
 
 /** argv for `rg`; the pattern and the path follow `--`. */
@@ -350,16 +404,26 @@ function parseRgLine(line: string): RgJsonLine | undefined {
   }
 }
 
-/** Run ripgrep; kills it at the output cap or the time limit. */
-export function runRipgrep(
-  binary: string,
-  request: GrepRequest,
-): Promise<GrepEngineResult> {
-  const relativeTarget = toPosixRelative(
-    request.rootReal,
-    request.targetAbsolute,
-  );
-  const args = buildRipgrepArgs(request, relativeTarget);
+/** One search child process: what to run and how to read its output. */
+interface ProcessSearch {
+  readonly engine: Exclude<GrepEngineName, 'node'>;
+  readonly binary: string;
+  readonly args: readonly string[];
+  readonly cwd: string;
+  /** One `\n`-terminated stdout record to a match; `undefined` skips it. */
+  readonly parse: (record: string) => GrepMatch | undefined;
+  /** True for an exit code that means the search failed. */
+  readonly isErrorExit: (code: number | null) => boolean;
+}
+
+/**
+ * Run a search binary without a shell; kills it at the output cap or the
+ * time limit. A failed exit with matches marks the result partial and
+ * carries the first stderr line; without matches the stderr line is the
+ * error, and the handler then tries the next engine.
+ */
+function runProcessSearch(spec: ProcessSearch): Promise<GrepEngineResult> {
+  const { engine } = spec;
   return new Promise((resolve) => {
     const matches: GrepMatch[] = [];
     let total = 0;
@@ -371,20 +435,20 @@ export function runRipgrep(
 
     let child: ChildProcessByStdio<null, Readable, Readable>;
     try {
-      child = spawn(binary, args, {
-        cwd: request.rootReal,
+      child = spawn(spec.binary, [...spec.args], {
+        cwd: spec.cwd,
         stdio: ['ignore', 'pipe', 'pipe'],
         windowsHide: true,
       });
     } catch (error: unknown) {
       // degradation-audit: reported - the spawn error text is returned in
-      // `error`, and the handler then runs the Node walk instead.
+      // `error`, and the handler then runs the next engine instead.
       resolve({
-        engine: 'rg',
+        engine,
         matches: [],
         totalMatches: 0,
         incomplete: false,
-        error: `rg failed to start: ${error instanceof Error ? error.message : String(error)}`,
+        error: `${engine} failed to start: ${error instanceof Error ? error.message : String(error)}`,
       });
       return;
     }
@@ -395,7 +459,7 @@ export function runRipgrep(
       settled = true;
       clearTimeout(timer);
       resolve({
-        engine: 'rg',
+        engine,
         matches,
         totalMatches: total,
         incomplete,
@@ -408,23 +472,14 @@ export function runRipgrep(
     };
     const timer = setTimeout(stop, GREP_TIMEOUT_MS);
 
-    const consume = (line: string): void => {
-      const parsed = parseRgLine(line);
-      if (parsed?.type !== 'match' || !parsed.data) {
-        return;
-      }
-      const file = parsed.data.path?.text;
-      const lineNumber = parsed.data.line_number;
-      if (file === undefined || lineNumber === undefined) {
+    const consume = (record: string): void => {
+      const match = spec.parse(record);
+      if (!match) {
         return;
       }
       total++;
       if (matches.length < GREP_COLLECT_CAP) {
-        matches.push({
-          file: file.replace(/^\.\//, '').split(path.sep).join('/'),
-          line: lineNumber,
-          text: (parsed.data.lines?.text ?? '').replace(/\r?\n$/, ''),
-        });
+        matches.push(match);
       }
     };
 
@@ -444,21 +499,20 @@ export function runRipgrep(
       }
     });
     child.on('error', (error) =>
-      finish(`rg failed to start: ${error.message}`),
+      finish(`${engine} failed to start: ${error.message}`),
     );
     child.on('close', (code) => {
       if (pending.length > 0 && !incomplete) {
         consume(pending);
       }
-      // Exit 1 = no match; 2 = an error, though matches may still stand.
-      // With matches, rg skipped what it could not read: the result is
-      // partial, so it is marked incomplete and carries the rg error text.
-      if (code === 2 && !incomplete) {
+      if (spec.isErrorExit(code) && !incomplete) {
         const reason =
-          stderr.trim().split('\n')[0] || 'rg exited with an error';
+          stderr.trim().split('\n')[0] || `${engine} exited with an error`;
         if (total > 0) {
           incomplete = true;
-          finish(`rg reported an error, so matches may be partial: ${reason}`);
+          finish(
+            `${engine} reported an error, so matches may be partial: ${reason}`,
+          );
           return;
         }
         finish(reason);
@@ -469,15 +523,181 @@ export function runRipgrep(
   });
 }
 
-async function isBinary(filePath: string): Promise<boolean> {
-  const handle = await open(filePath, 'r');
-  try {
-    const buffer = Buffer.alloc(4096);
-    const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
-    return buffer.subarray(0, bytesRead).includes(0);
-  } finally {
-    await handle.close();
+/** Run ripgrep; kills it at the output cap or the time limit. */
+export function runRipgrep(
+  binary: string,
+  request: GrepRequest,
+): Promise<GrepEngineResult> {
+  const relativeTarget = toPosixRelative(
+    request.rootReal,
+    request.targetAbsolute,
+  );
+  return runProcessSearch({
+    engine: 'rg',
+    binary,
+    args: buildRipgrepArgs(request, relativeTarget),
+    cwd: request.rootReal,
+    parse: (record) => {
+      const parsed = parseRgLine(record);
+      if (parsed?.type !== 'match' || !parsed.data) {
+        return undefined;
+      }
+      const file = parsed.data.path?.text;
+      const lineNumber = parsed.data.line_number;
+      if (file === undefined || lineNumber === undefined) {
+        return undefined;
+      }
+      return {
+        file: file.replace(/^\.\//, '').split(path.sep).join('/'),
+        line: lineNumber,
+        text: (parsed.data.lines?.text ?? '').replace(/\r?\n$/, ''),
+      };
+    },
+    // Exit 1 = no match; 2 = an error, though matches may still stand.
+    isErrorExit: (code) => code === 2,
+  });
+}
+
+/** Escape glob metacharacters so a path is matched literally in a glob. */
+function escapeGlobPath(value: string): string {
+  return value.replace(/[*?[\]\\]/g, '\\$&');
+}
+
+/**
+ * Pathspecs of a `git grep` search. The target is always one literal
+ * pathspec (a `[id]` directory is not a wildcard). A plain glob narrows
+ * that target: git ORs positive pathspecs, so a slash-less glob is joined
+ * under the target directory (`src/**\/*.ts`, matching at any depth like
+ * rg) and a glob with a slash, which is root-relative, replaces the target.
+ * A negated glob becomes an exclude pathspec. Braces are not git glob
+ * syntax, so a brace glob only filters the output (see `runGitGrep`).
+ */
+export function buildGitPathspecs(
+  request: GrepRequest,
+  relativeTarget: string,
+): string[] {
+  // `toPosixRelative` gives `.` for the root itself.
+  const atRoot = relativeTarget === '.';
+  const glob = request.glob;
+  if (!glob || glob.includes('{')) {
+    return [`:(literal)${relativeTarget}`];
   }
+  if (isNegatedGlob(glob)) {
+    const body = glob.slice(1);
+    return [
+      `:(literal)${relativeTarget}`,
+      `:(exclude,glob)${body.includes('/') ? body : `**/${body}`}`,
+    ];
+  }
+  if (glob.includes('/')) {
+    return [`:(glob)${glob}`];
+  }
+  if (!request.targetIsDirectory) {
+    return [`:(literal)${relativeTarget}`];
+  }
+  const prefix = atRoot ? '' : `${escapeGlobPath(relativeTarget)}/`;
+  return [`:(glob)${prefix}**/${glob}`];
+}
+
+/**
+ * argv for `git grep`. `-c` overrides keep user config (full names, column
+ * numbers, colour, pattern type) from changing the output form.
+ */
+export function buildGitGrepArgs(
+  request: GrepRequest,
+  relativeTarget: string,
+): string[] {
+  const args = [
+    '-C',
+    request.rootReal,
+    '-c',
+    'grep.fullName=false',
+    '-c',
+    'grep.column=false',
+    '-c',
+    'grep.lineNumber=true',
+    'grep',
+    '--no-color',
+    '-n',
+    '-I',
+    '--null',
+    '--untracked',
+  ];
+  if (request.includeIgnored) {
+    args.push('--no-exclude-standard');
+  }
+  if (isCaseInsensitive(request.pattern, request.caseSensitive)) {
+    args.push('-i');
+  }
+  args.push(request.regex ? '-P' : '-F', '-e', request.pattern, '--');
+  args.push(...buildGitPathspecs(request, relativeTarget));
+  return args;
+}
+
+/**
+ * Run `git grep` in a git work tree (tracked and untracked files). Ignored
+ * files are left out by git's standard excludes, which read every nested
+ * `.gitignore`, `.git/info/exclude` and the global excludes file; unlike the
+ * Node walk there is no fixed hidden-dir or NODE_SKIPPED_DIRS skip list,
+ * because git's ignore rules already cover what a repository wants skipped.
+ * `.git` itself is never searched. A PCRE-less git fails a `-P` search with
+ * no matches, so the handler falls through to the Node walk.
+ */
+export function runGitGrep(
+  binary: string,
+  request: GrepRequest,
+): Promise<GrepEngineResult> {
+  const relativeTarget = toPosixRelative(
+    request.rootReal,
+    request.targetAbsolute,
+  );
+  // The pathspecs narrow the search; this filter makes the result exact
+  // (brace globs, a slash glob outside a scoped target), with the same
+  // glob reading as the Node walk.
+  const globMatcher = request.glob ? globToRegExp(request.glob) : undefined;
+  const globNegated = request.glob ? isNegatedGlob(request.glob) : false;
+  const inTarget = (file: string): boolean =>
+    relativeTarget === '.' ||
+    file === relativeTarget ||
+    (request.targetIsDirectory && file.startsWith(`${relativeTarget}/`));
+  return runProcessSearch({
+    engine: 'git',
+    binary,
+    args: buildGitGrepArgs(request, relativeTarget),
+    cwd: request.rootReal,
+    parse: (record) => {
+      // `--null -n` record: path NUL line NUL text.
+      const fileEnd = record.indexOf('\0');
+      const lineEnd = fileEnd < 0 ? -1 : record.indexOf('\0', fileEnd + 1);
+      if (lineEnd < 0) {
+        return undefined;
+      }
+      const file = record.slice(0, fileEnd).split(path.sep).join('/');
+      const line = Number(record.slice(fileEnd + 1, lineEnd));
+      if (
+        !Number.isInteger(line) ||
+        !inTarget(file) ||
+        (globMatcher && globMatcher.test(file) === globNegated)
+      ) {
+        return undefined;
+      }
+      return {
+        file,
+        line,
+        text: record
+          .slice(lineEnd + 1)
+          .replace(/\r$/, '')
+          .slice(0, GREP_MAX_LINE_CHARS * 2),
+      };
+    },
+    // Exit 1 = no match; anything else non-zero (128 = fatal) is an error.
+    isErrorExit: (code) => code !== 0 && code !== 1,
+  });
+}
+
+/** True when the first 4 KB of `content` hold a NUL byte, as rg decides. */
+function isBinaryContent(content: Buffer): boolean {
+  return content.subarray(0, 4096).includes(0);
 }
 
 /** Bounded Node search used when `rg` is not on PATH. */
@@ -509,10 +729,12 @@ export async function runNodeSearch(
       skippedLargeFiles++;
       return;
     }
-    if (await isBinary(absolute)) {
+    // One read per file: the binary test looks at the head of the buffer.
+    const content = await readFile(absolute);
+    if (isBinaryContent(content)) {
       return;
     }
-    const lines = (await readFile(absolute, 'utf8')).split(/\r?\n/);
+    const lines = content.toString('utf8').split(/\r?\n/);
     for (let i = 0; i < lines.length; i++) {
       // A regular expression skips a very long line (minified code), counted
       // and reported; a literal pattern cannot backtrack and searches it.

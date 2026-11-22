@@ -12,6 +12,7 @@ import * as path from 'node:path';
 import type { AstCodeInsights } from '../../types';
 import { handleGrep, type GrepDeps } from './grep';
 import {
+  buildGitPathspecs,
   buildRipgrepArgs,
   globToRegExp,
   isCaseInsensitive,
@@ -420,6 +421,104 @@ describe('handleGrep (rg engine)', () => {
   );
 });
 
+const hasGit = ((): boolean => {
+  try {
+    execFileSync('git', ['--version'], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+})();
+const itGit = hasGit && process.platform !== 'win32' ? it : it.skip;
+
+describe('handleGrep (git engine)', () => {
+  let root: string;
+  let deps: GrepDeps;
+
+  beforeEach(async () => {
+    root = await mkdtemp(path.join(os.tmpdir(), 'grep-git-'));
+    await mkdir(path.join(root, 'src'));
+    await writeFile(path.join(root, 'src', 'a.ts'), SOURCE + '\n');
+    await writeFile(path.join(root, 'src', 'new.ts'), 'LIMIT untracked\n');
+    // A nested ignore file: the Node walk reads only the root one.
+    await writeFile(path.join(root, 'src', '.gitignore'), 'skip.ts\n');
+    await writeFile(path.join(root, 'src', 'skip.ts'), 'LIMIT ignored\n');
+    if (hasGit) {
+      execFileSync('git', ['init', '-q'], { cwd: root });
+      execFileSync('git', ['add', 'src/a.ts'], { cwd: root });
+    }
+    deps = {
+      analyze: jest.fn().mockResolvedValue(OUTLINE),
+      defaultWorkspaceRoot: async () => root,
+      findRipgrep: async () => undefined,
+    };
+  });
+
+  afterEach(async () => {
+    await rm(root, { recursive: true, force: true });
+  });
+
+  itGit(
+    'finds tracked and untracked files and leaves out a nested-ignored one',
+    async () => {
+      const reply = await handleGrep({ pattern: 'LIMIT' }, deps);
+      expect(reply.isError).toBe(false);
+      expect(reply.text.split('\n')[0]).toBe(
+        '4 matches in 2 files (engine: git)',
+      );
+      expect(reply.text).toContain('src/a.ts');
+      expect(reply.text).toContain('src/new.ts');
+      expect(reply.text).not.toContain('skip.ts');
+    },
+  );
+
+  itGit('searches the ignored file with includeIgnored', async () => {
+    const reply = await handleGrep(
+      { pattern: 'LIMIT', path: 'src', includeIgnored: true },
+      deps,
+    );
+    expect(reply.text).toContain('(engine: git)');
+    expect(reply.text).toContain('src/skip.ts');
+  });
+
+  itGit('applies a glob and a negated glob', async () => {
+    const only = await handleGrep({ pattern: 'LIMIT', glob: 'new.*' }, deps);
+    expect(only.text.split('\n')[0]).toBe('1 match in 1 file (engine: git)');
+    expect(only.text).toContain('src/new.ts');
+    const without = await handleGrep(
+      { pattern: 'LIMIT', glob: '!new.ts' },
+      deps,
+    );
+    expect(without.text.split('\n')[0]).toBe(
+      '3 matches in 1 file (engine: git)',
+    );
+    expect(without.text).not.toContain('src/new.ts');
+  });
+
+  itGit('reads git exit 1 as zero matches, not an error', async () => {
+    const reply = await handleGrep({ pattern: 'NOT_IN_ANY_FILE' }, deps);
+    expect(reply.isError).toBe(false);
+    expect(reply.text.startsWith('0 matches (engine: git).')).toBe(true);
+    expect(reply.text).not.toContain('Engine note');
+  });
+
+  itGit('falls back to the Node walk outside a git work tree', async () => {
+    const plain = await mkdtemp(path.join(os.tmpdir(), 'grep-plain-'));
+    try {
+      await writeFile(path.join(plain, 'a.ts'), 'LIMIT plain\n');
+      const reply = await handleGrep(
+        { pattern: 'LIMIT' },
+        { ...deps, defaultWorkspaceRoot: async () => plain },
+      );
+      expect(reply.text.split('\n')[0]).toBe(
+        '1 match in 1 file (engine: node)',
+      );
+    } finally {
+      await rm(plain, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('grep engine helpers', () => {
   const base: GrepRequest = {
     pattern: 'a b',
@@ -453,6 +552,22 @@ describe('grep engine helpers', () => {
       true,
     );
     expect(globToRegExp('*.{ts,js}').test('x.js')).toBe(true);
+  });
+
+  it('maps the target and globs to git pathspecs', () => {
+    expect(buildGitPathspecs(base, 'src')).toEqual([':(literal)src']);
+    expect(buildGitPathspecs({ ...base, glob: '*.ts' }, 'src')).toEqual([
+      ':(glob)src/**/*.ts',
+    ]);
+    expect(buildGitPathspecs({ ...base, glob: '*.ts' }, '.')).toEqual([
+      ':(glob)**/*.ts',
+    ]);
+    expect(buildGitPathspecs({ ...base, glob: '!*.spec.ts' }, 'src')).toEqual(
+      [':(literal)src', ':(exclude,glob)**/*.spec.ts'],
+    );
+    expect(buildGitPathspecs({ ...base, glob: '*.{ts,js}' }, 'src')).toEqual([
+      ':(literal)src',
+    ]);
   });
 
   it('uses smart case', () => {
