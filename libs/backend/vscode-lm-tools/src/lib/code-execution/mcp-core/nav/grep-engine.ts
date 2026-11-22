@@ -4,11 +4,7 @@
  * is on PATH, else a bounded Node walk. All return the same shape, so the
  * handler renders one result form. No shell is used; binaries get an argv.
  */
-import {
-  execFile,
-  spawn,
-  type ChildProcessByStdio,
-} from 'node:child_process';
+import { execFile, spawn, type ChildProcessByStdio } from 'node:child_process';
 import type { Readable } from 'node:stream';
 import {
   access,
@@ -102,6 +98,73 @@ export function buildMatcher(request: GrepRequest): RegExp {
     source,
     isCaseInsensitive(request.pattern, request.caseSensitive) ? 'i' : '',
   );
+}
+
+/**
+ * Regular-expression syntax that a code literal rarely contains. A lone `.`,
+ * a plain call `f(x)`, an index `a[0]` or a bare `x+y` / `a?.b` is not on
+ * the list: read as a regex they would miss the literal text the caller
+ * typed. `(?<!\\)` skips an escaped character.
+ */
+const REGEX_SYNTAX: readonly RegExp[] = [
+  /(?<!\\)\|/, // alternation: a|b
+  /\\[bBwWdDsS]/, // \b \w \d \s and their negations
+  /(?<!\\)\[(?:\^|[^\]]*(?:\w-\w|\\))[^\]]*\]/, // [^x] [a-z] [\w-]
+  /(?<!\\)\(\?:/, // (?: non-capturing group
+  /(?<!\\)[)\]][*+?]/, // quantified group or class: (ab)+ [xy]*
+  /(?<!\\)\.[*+?]/, // .* .+ .?
+  /(?<!\\)\{\d+(?:,\d*)?\}/, // {2} {2,} {2,4}
+  /^\^/, // anchored at the start
+  /(?<!\\)\$$/, // anchored at the end
+];
+
+/**
+ * Text that keeps a pattern literal even when it carries regex syntax:
+ * lookaround and back-references (rg runs without PCRE, so they would fail
+ * where the literal search works) and a Windows path (`C:\dev\src` holds
+ * `\d` and `\s`).
+ */
+const REGEX_BLOCKERS: readonly RegExp[] = [
+  /\(\?<?[=!]/, // (?= (?! (?<= (?<!
+  /\\[1-9]/, // \1 back-reference
+  /\b[A-Za-z]:\\/, // C:\
+];
+
+/**
+ * An alternation infers regex mode only when every alternative is a
+ * non-empty word without edge spaces: `a|b` does, `x || y` (an empty
+ * alternative matches every line) and a union `A | B` do not.
+ */
+function alternativesAreWords(pattern: string): boolean {
+  const alternatives = pattern.split(/(?<!\\)\|/);
+  return (
+    alternatives.length === 1 ||
+    alternatives.every((part) => part !== '' && part.trim() === part)
+  );
+}
+
+/**
+ * Whether a pattern given without `regex` should run as a regular
+ * expression: it carries regex syntax (`REGEX_SYNTAX`) and compiles as a
+ * JavaScript `RegExp`. Models write rg/Grep patterns, so `a|b` searched as
+ * a literal would find nothing.
+ */
+export function inferRegexMode(pattern: string): boolean {
+  if (
+    !REGEX_SYNTAX.some((syntax) => syntax.test(pattern)) ||
+    REGEX_BLOCKERS.some((blocker) => blocker.test(pattern)) ||
+    !alternativesAreWords(pattern)
+  ) {
+    return false;
+  }
+  try {
+    new RegExp(pattern);
+    return true;
+  } catch {
+    // degradation-audit: optional-capability - a pattern that does not
+    // compile is read as the literal text it is.
+    return false;
+  }
 }
 
 /** Time limit of one regular-expression test on one line, in ms. */
@@ -314,7 +377,10 @@ export function findRipgrep(
   envPath: string | undefined = process.env['PATH'],
 ): Promise<string | undefined> {
   // `.cmd` is not spawnable without a shell, so only the real binary counts.
-  return findOnPath(process.platform === 'win32' ? ['rg.exe'] : ['rg'], envPath);
+  return findOnPath(
+    process.platform === 'win32' ? ['rg.exe'] : ['rg'],
+    envPath,
+  );
 }
 
 /** First `git` binary on PATH, or `undefined`. */
@@ -349,7 +415,7 @@ export function isGitWorkTree(
         gitBinary,
         ['-C', rootReal, 'rev-parse', '--is-inside-work-tree'],
         { timeout: GIT_PROBE_TIMEOUT_MS, windowsHide: true },
-        // degradation-audit: optional-capability - a failed probe (not a
+        // A failed probe (not a
         // repository, git broken) means "not a work tree": the Node walk runs.
         (error, stdout) => resolve(!error && stdout.trim() === 'true'),
       );
