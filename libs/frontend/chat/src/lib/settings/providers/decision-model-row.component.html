@@ -209,6 +209,14 @@
                 >
                   {{ modelHelp() }}
                 </p>
+                @if (suggestions().notice; as notice) {
+                  <ptah-provider-models-notice
+                    testId="decision-model-notice"
+                    [notice]="notice"
+                    [disabled]="busy() || disabled()"
+                    (retry)="retrySuggestions()"
+                  />
+                }
                 @if (fieldError('model'); as message) {
                   <p
                     id="decision-model-model-error"

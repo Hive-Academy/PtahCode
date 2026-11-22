@@ -306,46 +306,41 @@ export class CursorCliAdapter implements CliAdapter {
     return stripAnsiCodes(raw);
   }
 
-  /** Fallback model list when the Cursor models API is unreachable. */
-  private static readonly FALLBACK_MODELS: CliModelInfo[] = [
-    { id: 'composer-2.5', name: 'Composer 2.5', isFallback: true },
-    { id: 'composer-2', name: 'Composer 2', isFallback: true },
-  ];
-
   /**
-   * List models available to the authenticated key via Cursor.models.list().
-   * Falls back to a curated list when the API is unreachable or no key is set.
+   * List models available to the authenticated key via Cursor.models.list(),
+   * the only source. No key means the lane is not configured and lists
+   * nothing. A failed request throws a redacted error; callers report it and
+   * omit the CLI (`CliDetectionService.listModelsForAll`).
    */
   async listModels(): Promise<CliModelInfo[]> {
     const apiKey = await this.resolveCursorApiKey();
     if (!apiKey) {
-      return CursorCliAdapter.FALLBACK_MODELS;
+      this.logger?.debug(
+        '[CursorCliAdapter] No Cursor API key; the lane is not configured and lists no models',
+      );
+      return [];
     }
+    let models: Array<{ id: string; displayName?: string }>;
     try {
       const sdk = await getCursorSdk();
-      const models = await sdk.Cursor.models.list({ apiKey });
-      const mapped = models
-        .filter((m) => typeof m.id === 'string' && m.id.length > 0)
-        .map((m) => ({ id: m.id, name: m.displayName ?? m.id }));
-      if (mapped.length > 0) return mapped;
-      this.logger?.warn(
-        '[CursorCliAdapter] Cursor models.list() returned no models; showing the fallback list',
-      );
-      return CursorCliAdapter.FALLBACK_MODELS;
+      models = await sdk.Cursor.models.list({ apiKey });
     } catch (error: unknown) {
-      // degradation-audit: reported - logged with the redacted SDK message;
-      // the curated list keeps the picker usable until the API answers.
-      this.logger?.warn(
-        '[CursorCliAdapter] Cursor models.list() failed; showing the fallback list',
-        {
-          error: redactSecrets(
-            error instanceof Error ? error.message : String(error),
-            [apiKey],
-          ),
-        },
-      );
-      return CursorCliAdapter.FALLBACK_MODELS;
+      this.logger?.debug('[CursorCliAdapter] Cursor models.list() failed', {
+        error: redactSecrets(
+          error instanceof Error ? error.message : String(error),
+          [apiKey],
+        ),
+      });
+      // No `cause`: the SDK error may carry the key; its redacted text is logged above.
+      throw new Error('Cursor models.list() failed');
     }
+    const mapped = models
+      .filter((m) => typeof m.id === 'string' && m.id.length > 0)
+      .map((m) => ({ id: m.id, name: m.displayName ?? m.id }));
+    if (mapped.length === 0) {
+      this.logger?.warn('[CursorCliAdapter] Cursor models.list() returned no models');
+    }
+    return mapped;
   }
 
   /**

@@ -1,5 +1,4 @@
 import { ANTHROPIC_RATE_CARD, findAnthropicRate } from './anthropic-rate-card';
-import { CLAUDE_CLI_PROVIDER_ENTRY } from '../providers/entries/claude-cli-provider-entry';
 import { calculateExactMessageCost, calculateMessageCost, getPricingMap, registerProviderPricing, resetPricingMapForTesting } from './pricing.utils';
 
 afterEach(() => resetPricingMapForTesting());
@@ -44,16 +43,6 @@ describe('Haiku context tiers', () => {
     expect(calculateExactMessageCost('claude-haiku-5-5', { input: 1, output: 1 }, options).totalCost).toBeNull();
     expect(findAnthropicRate('claude-haiku-5-5', 100_001)).toMatchObject({ inputCostPerToken: .5e-6, cacheCreation1hCostPerToken: 1e-6 });
   });
-});
-
-it('keeps every unconditional Claude provider entry in sync with the rate card', () => {
-  for (const [id, rate] of Object.entries(ANTHROPIC_RATE_CARD)) {
-    const model = CLAUDE_CLI_PROVIDER_ENTRY.staticModels?.find(entry => entry.id === id);
-    expect(model).toBeDefined();
-    for (const field of ['inputCostPerToken', 'outputCostPerToken', 'cacheReadCostPerToken', 'cacheCreationCostPerToken'] as const) {
-      expect(model?.[field]).toBeCloseTo(rate[field] ?? 0, 14);
-    }
-  }
 });
 
 describe('dotted catalog replacement', () => {

@@ -2125,6 +2125,10 @@ describe('AuthRpcHandlers', () => {
 
       expect(result.success).toBe(true);
       expect(h.copilot.logout).toHaveBeenCalledTimes(1);
+      // The signed-out account's model list must not answer for the next one.
+      expect(h.providerModels.clearCache).toHaveBeenCalledWith(
+        'github-copilot',
+      );
     });
 
     /**

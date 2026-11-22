@@ -9,8 +9,6 @@
  * tier. These helpers decide when a saved value matches a listed entry and
  * when it must be offered as an entry of its own.
  */
-import { getAnthropicProvider } from '@ptah-extension/agent-sdk';
-
 const TIER_ALIASES: ReadonlySet<string> = new Set(['opus', 'sonnet', 'haiku']);
 
 /** Whether `model` is a bare tier alias (`opus` / `sonnet` / `haiku`). */
@@ -29,31 +27,16 @@ export interface SavedModelOption {
  * The saved model as a picker entry, or `null` when it must not be offered.
  *
  * Offered only when it is a concrete model id (not `default`, not a tier
- * alias) that the active provider declares: its last live catalog when one
- * is on hand, otherwise the registry's static model list. An unknown id is
- * never invented into the list; the frontend's validity fallback handles it.
+ * alias) that the provider's cached catalog lists. Without a catalog nothing
+ * is offered: an id is never invented into the list, and the frontend's
+ * validity fallback handles it.
  */
 export function savedModelOption(
-  providerId: string,
   savedModel: string,
   cachedModelIds: readonly string[] | null,
 ): SavedModelOption | null {
   if (!savedModel || savedModel.toLowerCase() === 'default') return null;
   if (isTierAlias(savedModel)) return null;
-
-  const staticModel = getAnthropicProvider(providerId)?.staticModels?.find(
-    (model) => model.id === savedModel,
-  );
-  // A live catalog, when on hand, decides alone: the static list may still
-  // name a model the provider has withdrawn.
-  const offered = cachedModelIds
-    ? cachedModelIds.includes(savedModel)
-    : !!staticModel;
-  if (!offered) return null;
-
-  return {
-    id: savedModel,
-    name: staticModel?.name ?? savedModel,
-    description: staticModel?.description ?? '',
-  };
+  if (!cachedModelIds?.includes(savedModel)) return null;
+  return { id: savedModel, name: savedModel, description: '' };
 }

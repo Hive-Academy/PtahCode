@@ -65,7 +65,10 @@ export interface LaneAccountBindingPort {
 export interface CliModelInfo {
   readonly id: string;
   readonly name: string;
-  /** A curated row the CLI did not report. */
+  /**
+   * Set by classification when no account source confirmed the CLI's id.
+   * Adapters never set it; no adapter carries a hardcoded list.
+   */
   readonly isFallback?: boolean;
 }
 

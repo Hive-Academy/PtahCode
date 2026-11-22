@@ -79,6 +79,9 @@ export class InteractiveLoginMethods {
           };
         }
         const username = await getGitHubUsername(this.deps.platformAuth);
+        // The fetcher's list is not keyed by account: a list of the account
+        // signed in before must not answer for this one.
+        this.deps.providerModels.clearCache('github-copilot');
         await autoMapProviderTiers(
           this.deps.providerModels,
           logger,
@@ -130,6 +133,8 @@ export class InteractiveLoginMethods {
         // report success before the write landed and could lose it entirely
         // if the host exited right after.
         await copilotAuth.logout();
+        // No list of the signed-out account may answer for the next one.
+        this.deps.providerModels.clearCache('github-copilot');
         this.deps.invalidateAuthStatusCache();
         logger.info('RPC: auth:copilotLogout succeeded');
         return { success: true };
@@ -240,6 +245,8 @@ export class InteractiveLoginMethods {
           };
         }
         codexAuth.clearCache();
+        // The fetcher's list is not keyed by account (see copilotLogin).
+        this.deps.providerModels.clearCache('openai-codex');
         await sdkAdapter.reset();
         this.deps.invalidateAuthStatusCache();
         return { success: true };
@@ -267,6 +274,7 @@ export class InteractiveLoginMethods {
     if (state.status === 'succeeded') {
       try {
         this.deps.codexAuth.clearCache();
+        this.deps.providerModels.clearCache('openai-codex');
         void this.deps.sdkAdapter.reset().catch(() => {
           this.deps.logger.error('RPC: auth:codexLogin adapter reset failed');
         });

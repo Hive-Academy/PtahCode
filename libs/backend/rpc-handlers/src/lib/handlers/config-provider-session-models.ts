@@ -9,16 +9,21 @@
  * CLI catalog instead (the same source as `provider:listModels`), which also
  * warms the cached catalog the provider-session model resolution reads.
  */
+import { ModelListError } from '@ptah-extension/auth-providers';
 import {
   getAnthropicProvider,
+  type ModelListFailureReason,
   type ProviderModelInfo,
+  type ProviderModelListSource,
   type SdkModelInfo,
 } from '@ptah-extension/shared';
 
 /** The provider catalog read: `ProviderModelsService.fetchModels`. */
-export type ProviderCatalogReader = (
-  providerId: string,
-) => Promise<{ models: readonly ProviderModelInfo[] }>;
+export type ProviderCatalogReader = (providerId: string) => Promise<{
+  models: readonly ProviderModelInfo[];
+  source: ProviderModelListSource;
+  failureReason?: ModelListFailureReason;
+}>;
 
 /** The `default` entry: the provider picks its own model. */
 export function providerDefaultModelName(providerId: string): string {
@@ -30,8 +35,10 @@ export function providerDefaultModelName(providerId: string): string {
  * Picker entries for a provider-session provider: `default` first, then the
  * provider's catalog. Exactly one entry is selected: the saved model when the
  * catalog (or the saved value itself, while the catalog is unavailable) names
- * it, else `default`. A catalog failure lists only `default` and the saved
- * model, so the composer still shows the user's choice.
+ * it, else `default`. A catalog failure (a throw, or an `unavailable` list)
+ * lists only `default` and the saved model, so the composer still shows the
+ * user's choice; `onCatalogFailure` receives a `ModelListError` with the
+ * list's reason. A `persisted` list is listed like a live one.
  */
 export async function providerSessionModelOptions(
   providerId: string,
@@ -41,15 +48,21 @@ export async function providerSessionModelOptions(
 ): Promise<SdkModelInfo[]> {
   const saved = savedModel.trim();
   let catalog: readonly ProviderModelInfo[] = [];
-  let catalogFailed = false;
+  let failure: Error | null = null;
   try {
-    catalog = (await readCatalog(providerId)).models;
+    const list = await readCatalog(providerId);
+    if (list.source === 'unavailable') {
+      failure = new ModelListError(list.failureReason ?? 'unexpected');
+    } else {
+      catalog = list.models;
+    }
   } catch (error: unknown) {
     // degradation-audit: reported - the picker falls back to `default` plus
     // the saved model; the caller logs the failure.
-    catalogFailed = true;
-    onCatalogFailure(error instanceof Error ? error : new Error(String(error)));
+    failure = error instanceof Error ? error : new Error(String(error));
   }
+  const catalogFailed = failure !== null;
+  if (failure) onCatalogFailure(failure);
   const models: SdkModelInfo[] = [
     {
       id: 'default',

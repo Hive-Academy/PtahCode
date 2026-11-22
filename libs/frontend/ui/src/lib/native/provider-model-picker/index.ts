@@ -18,4 +18,10 @@ export type {
 export { ProviderModelSearchFieldComponent } from './provider-model-search-field.component';
 export type { ProviderModelSearchOption } from './provider-model-search-field.component';
 export { PROVIDER_MODELS_LOADER } from './provider-models-loader.port';
+// The saved-list disclosure (`source: 'persisted'`), shared by every surface that lists models through the loader.
+export { ProviderModelsNoticeComponent } from './provider-models-notice.component';
+export {
+  SAVED_LIST_NOTICE,
+  savedModelListNotice,
+} from './saved-model-list-notice';
 export type { ProviderModelsLoader } from './provider-models-loader.port';

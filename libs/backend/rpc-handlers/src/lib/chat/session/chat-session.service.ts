@@ -426,6 +426,9 @@ export class ChatSessionService {
     }
   >();
 
+  /** Set once the native child catalog pass-through has been logged. */
+  private nativeChildPassThroughWarned = false;
+
   constructor(
     @inject(TOKENS.LOGGER) private readonly logger: Logger,
     @inject(TOKENS.WEBVIEW_MANAGER)
@@ -1461,6 +1464,8 @@ export class ChatSessionService {
     // Set once a workspace provider profile is in use: from then on, logs and
     // child-facing errors must not carry provider-supplied text.
     let profileProbe = false;
+    // Set once the profile is known to be the native Claude login.
+    let native = false;
     try {
       const account = await this.gateAccount({
         workspacePath: input.workspaceRoot,
@@ -1493,10 +1498,13 @@ export class ChatSessionService {
           input.workspaceRoot,
           input.model,
         );
-      const native = isNativeChildModelProfile(profile);
+      native = isNativeChildModelProfile(profile);
       profileProbe = Boolean(profile) && !native;
       const acceptedModels = await childModelIds(this.childModelCatalog, profile);
       if (acceptedModels.length === 0) {
+        // Revision 2 S-C: the native login validates its own models, so an
+        // empty catalog must not refuse every native child spawn.
+        if (native) return this.passNativeChildModelThrough(input.model);
         this.logger.warn(
           '[ChatSessionService] Provider returned an empty model catalog',
         );
@@ -1507,7 +1515,7 @@ export class ChatSessionService {
         };
       }
       const resolvedModel = native
-        ? resolveNativeTierAlias(input.model)
+        ? resolveNativeTierAlias(input.model, acceptedModels, this.logger)
         : this.childModelCatalog.resolveModelId(
             input.model,
             profile?.authEnv,
@@ -1523,6 +1531,11 @@ export class ChatSessionService {
       }
       return { accepted: true, resolvedModel };
     } catch (error: unknown) {
+      if (native) {
+        // The native catalog read failed: the model passes through with a
+        // warn and the Claude runtime validates it.
+        return this.passNativeChildModelThrough(input.model);
+      }
       if (profileProbe) {
         this.logger.error(
           '[ChatSessionService] Child model catalog unavailable',
@@ -1544,6 +1557,31 @@ export class ChatSessionService {
         message: error instanceof Error ? error.message : String(error),
       };
     }
+  }
+
+  /**
+   * Admit a native child model unchecked when the native Claude catalog is
+   * empty or unreadable (Revision 2 S-C): the requested model passes through
+   * unchanged and the Claude runtime validates it at launch. Warns once per
+   * service lifetime; later pass-throughs log at debug.
+   */
+  private passNativeChildModelThrough(model: string): {
+    readonly accepted: true;
+    readonly resolvedModel: string;
+  } {
+    if (!this.nativeChildPassThroughWarned) {
+      this.nativeChildPassThroughWarned = true;
+      this.logger.warn(
+        '[ChatSessionService] Native Claude model catalog is empty or unavailable; passing the requested child model through for the Claude runtime to validate',
+        { model },
+      );
+    } else {
+      this.logger.debug(
+        '[ChatSessionService] Native child model passed through without a catalog',
+        { model },
+      );
+    }
+    return { accepted: true, resolvedModel: model };
   }
 
   /**

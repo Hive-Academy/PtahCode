@@ -1,4 +1,4 @@
-import { getAnthropicProvider } from '@ptah-extension/shared';
+import { getDiscoveredContextWindow } from '@ptah-extension/shared';
 
 export type ChildModelTier = 0 | 1 | 2 | 3;
 
@@ -37,12 +37,13 @@ export function compareChildModelVersions(a: string, b: string): number {
 }
 
 /**
- * Known context window of an id. Only native Claude ids (the `claude-cli` static list) and the
- * 200k families below are known; other provider ids return undefined, so for them the 1M
- * preference cannot apply and version order alone decides.
+ * Known context window of an id: the window the live `claude-cli` catalogue reported for it, a
+ * `[1m]` id (1M by name), or the 200k families below. Other ids return undefined, so for them
+ * the 1M preference cannot apply and version order alone decides.
  */
 export function childModelWindow(model: string): number | undefined {
-  const known = getAnthropicProvider('claude-cli')?.staticModels?.find((entry) => entry.id === model)?.contextLength;
+  const known =
+    getDiscoveredContextWindow(model, 'claude-cli') || (/\[1m\]$/i.test(model) ? 1_000_000 : 0);
   if (known) return known;
   if (/^claude-(?:haiku-4-5|3)/i.test(model)) return 200_000;
   return undefined;

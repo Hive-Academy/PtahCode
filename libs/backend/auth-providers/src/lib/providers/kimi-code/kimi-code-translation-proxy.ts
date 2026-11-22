@@ -100,10 +100,6 @@ export class KimiCodeTranslationProxy extends TranslationProxyBase {
     return modelId;
   }
 
-  protected getStaticModels(): Array<{ id: string }> {
-    return KIMI_CODE_PROVIDER_ENTRY.staticModels ?? [];
-  }
-
   protected override getAuthFailureMessage(): string {
     return 'Kimi Code rejected the credential. Run `kimi login` again, or update the Kimi Code API key in Settings.';
   }
@@ -127,8 +123,12 @@ export class KimiCodeTranslationProxy extends TranslationProxyBase {
     try {
       const credential = await this.kimiAuth.resolveRequestCredential();
       const raw =
-        credential.kind === 'oauth' ? credential.accessToken : credential.apiKey;
-      return createHash('sha256').update(`${credential.kind}:${raw}`).digest('hex');
+        credential.kind === 'oauth'
+          ? credential.accessToken
+          : credential.apiKey;
+      return createHash('sha256')
+        .update(`${credential.kind}:${raw}`)
+        .digest('hex');
     } catch {
       // degradation-audit: reported - no credential means no retry; the base
       // then answers the client 401 with getAuthFailureMessage().

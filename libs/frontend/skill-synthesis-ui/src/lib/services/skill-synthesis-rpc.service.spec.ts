@@ -42,7 +42,7 @@ describe('SkillSynthesisRpcService', () => {
   });
 
   it('listModels() calls the GENERIC provider:listModels with no provider id', async () => {
-    const payload = { models: [], totalCount: 0, isStatic: true };
+    const payload = { models: [], totalCount: 0, source: 'live' };
     rpcCall.mockResolvedValue(okResult(payload));
 
     const result = await service.listModels();

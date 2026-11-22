@@ -13,13 +13,26 @@ import { ProviderAccountStore } from '../accounts/provider-account.store';
 import { UsageProfileRootsAdapter } from '../accounts/usage-profile-roots.adapter';
 import { ProviderAccountService } from '../accounts/provider-account.service';
 import { ProviderAccountActionsService } from '../accounts/provider-account-actions.service';
-import { accountActionResult, ClaudeAccountCommand } from '../accounts/claude-account-command';
-import { ClaudeRouteCertifier, type ClaudeRouteCertifierFs } from '../accounts/claude-route-certifier';
+import {
+  accountActionResult,
+  ClaudeAccountCommand,
+} from '../accounts/claude-account-command';
+import {
+  ClaudeRouteCertifier,
+  type ClaudeRouteCertifierFs,
+} from '../accounts/claude-route-certifier';
 import { CLAUDE_SETTINGS_MAX_BYTES } from '../accounts/claude-auth-settings-scan';
 import { readRegularFileUtf8 } from '../accounts/read-regular-file';
 import { ClaudeLoginConsole } from '../accounts/claude-login-console';
-import { ClaudeAmbientLoginStatusReader, NODE_AMBIENT_STATUS_HOST } from '../accounts/claude-ambient-login-status';
-import type { ClaudeAccountSelectionReader, ClaudeUsageProfileRoots, ProviderAccountAdmissionPort } from '@ptah-extension/auth-providers-tokens';
+import {
+  ClaudeAmbientLoginStatusReader,
+  NODE_AMBIENT_STATUS_HOST,
+} from '../accounts/claude-ambient-login-status';
+import type {
+  ClaudeAccountSelectionReader,
+  ClaudeUsageProfileRoots,
+  ProviderAccountAdmissionPort,
+} from '@ptah-extension/auth-providers-tokens';
 import { AUTH_PROVIDERS_TOKENS } from './tokens';
 import { ProviderModelsService } from '../provider-models.service';
 import { AuthManager } from '../auth/auth-manager';
@@ -45,6 +58,7 @@ import { CuratorProxyManager } from '../auth/curator-proxy-manager';
 import { ProviderAuthResolver } from '../auth/provider-auth-resolver';
 import { DraftVerificationService } from '../auth/draft-verification.service';
 import { providerQuotaStore } from '../auth/provider-quota.store';
+import { openCodeLiveRoutes } from '../providers/opencode/opencode-live-routes';
 import { ProviderOwnerResolver } from '../quota/provider-owner.resolver';
 import { PlanLimitLedgerService } from '../quota/plan-limit-ledger.service';
 import { PlanCredentialSource } from '../quota/plan-credential.source';
@@ -64,6 +78,20 @@ export function registerAuthProvidersServices(
     { useClass: ProviderModelsService },
     { lifecycle: Lifecycle.Singleton },
   );
+  // OpenCode request routing reads and writes the same versioned persisted
+  // catalog as the model picker. Resolved lazily, at the first routed
+  // request: nothing is resolved at registration, so registration order
+  // does not matter. A resolution failure is caught by the routes and
+  // treated as "no saved catalog".
+  const providerModels = (): ProviderModelsService =>
+    container.resolve<ProviderModelsService>(
+      AUTH_PROVIDERS_TOKENS.SDK_PROVIDER_MODELS,
+    );
+  openCodeLiveRoutes.usePersistedCatalog({
+    read: (providerId) => providerModels().getPersistedCatalog(providerId),
+    write: (providerId, models) =>
+      providerModels().savePersistedCatalog(providerId, models),
+  });
   // `registerInstance` and not `useClass`: the translation proxies reach the
   // store by import (two of the six are built per provider id at runtime, not
   // by the container), so a container-minted second instance would leave the
@@ -166,41 +194,72 @@ const certifierFs: ClaudeRouteCertifierFs = {
 
 function registerProviderAccountServices(container: DependencyContainer): void {
   container.register(ClaudeAccountCommand, {
-    useFactory: instanceCachingFactory((c) => new ClaudeAccountCommand(
-      c.resolve(SDK_TOKENS.SDK_CLI_DETECTOR), c.resolve(SDK_TOKENS.SDK_PROCESS_SPAWNER),
-    )),
+    useFactory: instanceCachingFactory(
+      (c) =>
+        new ClaudeAccountCommand(
+          c.resolve(SDK_TOKENS.SDK_CLI_DETECTOR),
+          c.resolve(SDK_TOKENS.SDK_PROCESS_SPAWNER),
+        ),
+    ),
   });
   // Not decorated: the host (process env and clock) is a runtime value, not a token.
   container.register(ClaudeAmbientLoginStatusReader, {
-    useFactory: instanceCachingFactory((c) => new ClaudeAmbientLoginStatusReader(
-      c.resolve(ClaudeAccountCommand), NODE_AMBIENT_STATUS_HOST, c.resolve<Logger>(TOKENS.LOGGER),
-    )),
+    useFactory: instanceCachingFactory(
+      (c) =>
+        new ClaudeAmbientLoginStatusReader(
+          c.resolve(ClaudeAccountCommand),
+          NODE_AMBIENT_STATUS_HOST,
+          c.resolve<Logger>(TOKENS.LOGGER),
+        ),
+    ),
   });
   // Neither class is decorated: the platform is a runtime value, not a token.
   container.register(ClaudeRouteCertifier, {
-    useFactory: instanceCachingFactory((c) => new ClaudeRouteCertifier(
-      c.resolve(ClaudeAccountCommand), process.platform, certifierFs,
-      c.isRegistered(TOKENS.LOGGER, true) ? c.resolve<Logger>(TOKENS.LOGGER) : null,
-    )),
+    useFactory: instanceCachingFactory(
+      (c) =>
+        new ClaudeRouteCertifier(
+          c.resolve(ClaudeAccountCommand),
+          process.platform,
+          certifierFs,
+          c.isRegistered(TOKENS.LOGGER, true)
+            ? c.resolve<Logger>(TOKENS.LOGGER)
+            : null,
+        ),
+    ),
   });
   container.register(ClaudeLoginConsole, {
-    useFactory: instanceCachingFactory((c) => new ClaudeLoginConsole(
-      c.resolve(SDK_TOKENS.SDK_PROCESS_SPAWNER), process.platform,
-    )),
+    useFactory: instanceCachingFactory(
+      (c) =>
+        new ClaudeLoginConsole(
+          c.resolve(SDK_TOKENS.SDK_PROCESS_SPAWNER),
+          process.platform,
+        ),
+    ),
   });
-  container.register(ProviderAccountStore, {
-    useClass: ProviderAccountStore,
-  }, { lifecycle: Lifecycle.Singleton });
+  container.register(
+    ProviderAccountStore,
+    {
+      useClass: ProviderAccountStore,
+    },
+    { lifecycle: Lifecycle.Singleton },
+  );
   container.register(AUTH_PROVIDERS_TOKENS.SDK_CLAUDE_USAGE_PROFILE_ROOTS, {
     useFactory: instanceCachingFactory<ClaudeUsageProfileRoots>((c) =>
       c.isRegistered(PERSISTENCE_TOKENS.SQLITE_CONNECTION, true)
         ? new UsageProfileRootsAdapter(c.resolve(ProviderAccountStore))
-        : { listActiveRoots: async () => [], listSignedInAccounts: async () => [] },
+        : {
+            listActiveRoots: async () => [],
+            listSignedInAccounts: async () => [],
+          },
     ),
   });
-  container.register(ProviderAccountService, {
-    useClass: ProviderAccountService,
-  }, { lifecycle: Lifecycle.Singleton });
+  container.register(
+    ProviderAccountService,
+    {
+      useClass: ProviderAccountService,
+    },
+    { lifecycle: Lifecycle.Singleton },
+  );
   // Hosts without account storage refuse every admission with a typed code
   // and summary, so optional consumers construct and fail closed.
   function storagelessProviderAccountAdmission(): ProviderAccountAdmissionPort {
@@ -229,18 +288,32 @@ function registerProviderAccountServices(container: DependencyContainer): void {
   });
   // Without storage no named account can be stored, so the stored selection
   // is the default route.
-  container.register(AUTH_PROVIDERS_TOKENS.SDK_PROVIDER_ACCOUNT_SELECTION_READER, {
-    useFactory: instanceCachingFactory<ClaudeAccountSelectionReader>((c) =>
-      c.isRegistered(PERSISTENCE_TOKENS.SQLITE_CONNECTION, true)
-        ? c.resolve(ProviderAccountService)
-        : { readStoredSelection: async () => ({ profileId: null, revision: -1 }) },
-    ),
-  });
-  container.register(ProviderAccountActionsService, {
-    useClass: ProviderAccountActionsService,
-  }, { lifecycle: Lifecycle.Singleton });
+  container.register(
+    AUTH_PROVIDERS_TOKENS.SDK_PROVIDER_ACCOUNT_SELECTION_READER,
+    {
+      useFactory: instanceCachingFactory<ClaudeAccountSelectionReader>((c) =>
+        c.isRegistered(PERSISTENCE_TOKENS.SQLITE_CONNECTION, true)
+          ? c.resolve(ProviderAccountService)
+          : {
+              readStoredSelection: async () => ({
+                profileId: null,
+                revision: -1,
+              }),
+            },
+      ),
+    },
+  );
+  container.register(
+    ProviderAccountActionsService,
+    {
+      useClass: ProviderAccountActionsService,
+    },
+    { lifecycle: Lifecycle.Singleton },
+  );
   container.register(AUTH_PROVIDERS_TOKENS.SDK_PROVIDER_ACCOUNT_ACTIONS, {
-    useFactory: instanceCachingFactory((c) => c.resolve(ProviderAccountActionsService)),
+    useFactory: instanceCachingFactory((c) =>
+      c.resolve(ProviderAccountActionsService),
+    ),
   });
 }
 

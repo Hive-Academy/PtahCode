@@ -58,7 +58,7 @@ import {
 import {
   ALL_TIER_ENV_KEYS,
   AuthRequiredError,
-  buildStaticTierCapabilityEnv,
+  buildTierCapabilityEnv,
 } from '@ptah-extension/agent-sdk';
 import { AUTH_PROVIDERS_TOKENS } from '../di/tokens';
 import {
@@ -588,7 +588,7 @@ export class WorkspaceProviderProfileResolver {
     snapshot.ANTHROPIC_API_KEY = '';
     snapshot.ANTHROPIC_AUTH_TOKEN = '';
     snapshot.ANTHROPIC_BASE_URL = '';
-    const model = this.resolveModel(requestedModel, snapshot, undefined);
+    const model = this.resolveModel(requestedModel, snapshot);
     return {
       providerId: ANTHROPIC_DIRECT_PROVIDER_ID,
       authEnv: snapshot,
@@ -611,7 +611,7 @@ export class WorkspaceProviderProfileResolver {
     snapshot.ANTHROPIC_API_KEY = apiKey;
     snapshot.ANTHROPIC_AUTH_TOKEN = '';
     snapshot.ANTHROPIC_BASE_URL = '';
-    const model = this.resolveModel(requestedModel, snapshot, undefined);
+    const model = this.resolveModel(requestedModel, snapshot);
     return {
       providerId: ANTHROPIC_DIRECT_PROVIDER_ID,
       authEnv: snapshot,
@@ -663,7 +663,7 @@ export class WorkspaceProviderProfileResolver {
       }
       snapshot.ANTHROPIC_API_KEY = '';
       this.applyProviderTiers(snapshot, providerId);
-      const model = this.resolveModel(requestedModel, snapshot, provider);
+      const model = this.resolveModel(requestedModel, snapshot);
       return {
         providerId,
         authEnv: snapshot,
@@ -694,7 +694,7 @@ export class WorkspaceProviderProfileResolver {
     snapshot.ANTHROPIC_BASE_URL = baseUrl;
     snapshot[authEnvVar as keyof AuthEnv] = providerKey;
     this.applyProviderTiers(snapshot, providerId);
-    const model = this.resolveModel(requestedModel, snapshot, provider);
+    const model = this.resolveModel(requestedModel, snapshot);
     return { providerId, authEnv: snapshot, model, baseUrl };
   }
 
@@ -738,7 +738,7 @@ export class WorkspaceProviderProfileResolver {
     snapshot.ANTHROPIC_AUTH_TOKEN = acquired.authToken;
     snapshot.ANTHROPIC_API_KEY = '';
     this.applyProviderTiers(snapshot, providerId);
-    const model = this.resolveModel(requestedModel, snapshot, provider);
+    const model = this.resolveModel(requestedModel, snapshot);
 
     this.logger.info(
       '[WorkspaceProviderProfileResolver] Pinned workspace session to isolated proxy',
@@ -853,55 +853,31 @@ export class WorkspaceProviderProfileResolver {
     if (haiku) snapshot.ANTHROPIC_DEFAULT_HAIKU_MODEL = haiku;
     Object.assign(
       snapshot,
-      buildStaticTierCapabilityEnv(providerId, { opus, sonnet, haiku }),
+      buildTierCapabilityEnv(providerId, { opus, sonnet, haiku }),
     );
   }
 
   /**
    * Resolve the requested model against the SNAPSHOT env (not the global one) so
    * a tier alias / 'default' maps to the workspace provider's model, then fall
-   * back to a concrete static id if the alias survives (direct-Anthropic keeps
+   * back to a snapshot tier id if the alias survives (direct-Anthropic keeps
    * 'default', which is a valid SDK sentinel).
    *
-   * ## The post-fallback ladder NARROWS; it does not go away
+   * Ladder: snapshot opus -> sonnet -> haiku -> the requested alias.
    *
-   * TASK_2026_262 gave {@link applyProviderTiers} a third link, so the snapshot
-   * now carries tier values for the providers that previously left it empty and
-   * `modelResolver.resolve` maps the alias itself. This ladder is therefore
-   * reached far less often — but it is reached, so it stays. What it does NOT
-   * keep is a rung that can never decide:
-   *
-   *  - `provider?.defaultTiers?.opus` is **removed**. It was already
-   *    unreachable, before this change and after it. Every call site that
-   *    passes a defined `provider` runs `applyProviderTiers` with that same
-   *    `provider` first, and that method writes
-   *    `persisted ?? defaults ?? derived` into the snapshot — so the three
-   *    snapshot rungs above are falsy only when `defaults.opus` is falsy too.
-   *    A rung that fires exactly when its own value is empty is noise, and
-   *    worse, it implies the snapshot might NOT already include `defaultTiers`,
-   *    which is the one thing a reader must not conclude here. The subsumption
-   *    is pinned by a spec rather than left to this paragraph.
-   *  - `provider?.staticModels?.[0]?.id` **stays**, and is now the only real
-   *    backstop. It is not subsumed: the tier derivation reads the provider's
-   *    LIVE catalogue and deliberately refuses `staticModels` (a repo literal
-   *    frozen at release time), so an entry carrying static models but no
-   *    `defaultTiers` and no fetched catalogue reaches this rung with nothing
-   *    above it having fired. No registry entry is shaped that way TODAY — the
-   *    only two with `staticModels` also declare `defaultTiers` — but that is a
-   *    fact about the data, which the next entry can change, whereas the rung
-   *    removed above is dead by construction whatever the registry contains.
-   *    Delete only what cannot fire; keep what merely does not.
+   *  - No `provider.defaultTiers` rung: every caller with a provider runs
+   *    {@link applyProviderTiers} first, which writes
+   *    `persisted ?? defaults ?? derived` into the snapshot, so such a rung
+   *    could never decide. The subsumption is pinned by a spec.
+   *  - No repository model-list rung: model lists are live only. A provider
+   *    with no tiers and no catalogue on hand reaches the terminal.
    *  - `model` stays as the terminal. Sending the tier word verbatim is the
    *    residual TASK_2026_262 Q2 decided NOT to convert into a failure channel:
    *    this method has no error route, and a profile that refused to build
    *    would take the workspace's chat down rather than let the endpoint say
    *    what is wrong.
    */
-  private resolveModel(
-    requestedModel: string,
-    snapshot: AuthEnv,
-    provider: AnthropicProvider | undefined,
-  ): string {
+  private resolveModel(requestedModel: string, snapshot: AuthEnv): string {
     const requested = requestedModel?.trim() || 'default';
     let model = this.modelResolver.resolve(requested, snapshot);
     if (this.isTierAliasOrDefault(model)) {
@@ -909,7 +885,6 @@ export class WorkspaceProviderProfileResolver {
         snapshot.ANTHROPIC_DEFAULT_OPUS_MODEL ||
         snapshot.ANTHROPIC_DEFAULT_SONNET_MODEL ||
         snapshot.ANTHROPIC_DEFAULT_HAIKU_MODEL ||
-        provider?.staticModels?.[0]?.id ||
         model;
     }
     return model;

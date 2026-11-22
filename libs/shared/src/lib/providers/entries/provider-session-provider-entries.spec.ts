@@ -6,9 +6,7 @@ import {
   isProviderSessionProviderId,
   isSubscriptionCoveredProvider,
   providerRuntimeFor,
-  seedStaticModelPricing,
 } from '../provider-registry';
-import { getPricingMap } from '../../utils/pricing.utils';
 
 describe('ANTIGRAVITY_CLI_PROVIDER_ENTRY', () => {
   it('is a provider-session entry with no endpoint, proxy or key', () => {
@@ -20,7 +18,6 @@ describe('ANTIGRAVITY_CLI_PROVIDER_ENTRY', () => {
       pricingModel: 'subscription',
       providerSession: 'antigravity',
     });
-    expect(ANTIGRAVITY_CLI_PROVIDER_ENTRY.staticModels).toBeUndefined();
   });
 
   it('is registered as a built-in provider-session provider', () => {
@@ -33,10 +30,7 @@ describe('ANTIGRAVITY_CLI_PROVIDER_ENTRY', () => {
     expect(providerRuntimeFor('antigravity-cli')).toBe('provider-session');
   });
 
-  it('is subscription-covered and seeds no static pricing', () => {
+  it('is subscription-covered', () => {
     expect(isSubscriptionCoveredProvider('antigravity-cli')).toBe(true);
-    const before = getPricingMap();
-    seedStaticModelPricing('antigravity-cli');
-    expect(getPricingMap()).toEqual(before);
   });
 });

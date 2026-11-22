@@ -9,41 +9,14 @@
  * provider combining `authType: 'apiKey'` (a user-provided remote key) with
  * `requiresProxy: true` (a local translation proxy converts Anthropic
  * Messages -> OpenAI Chat Completions). Tier mapping is driven entirely by
- * `defaultTiers`; the static model list provides tool-use metadata and an
- * offline/no-key fallback while `modelsEndpoint` enables live model discovery
- * (including dated aliases such as `fugu-ultra-20260615`).
+ * `defaultTiers`. No built-in model list: `modelsEndpoint` is the only model list
+ * (including dated aliases such as `fugu-ultra-20260615`); without a key or
+ * offline the picker reports the saved or unavailable list.
  *
- * Pricing is unpublished, so cost fields are intentionally omitted —
- * `seedStaticModelPricing` safely skips models without cost data.
+ * Pricing is unpublished, so cost is unknown.
  */
 
-import type {
-  AnthropicProvider,
-  ProviderStaticModel,
-} from '../provider-registry';
-
-/**
- * Static model list for Sakana — used as the always-available fallback (no key
- * / offline) and as the source of tool-use + context metadata that the OpenAI
- * `/v1/models` response omits. `mergeStaticMetadata` ORs `supportsToolUse: true`
- * back into the dynamic list.
- */
-const SAKANA_STATIC_MODELS: ProviderStaticModel[] = [
-  {
-    id: 'fugu',
-    name: 'Fugu',
-    description: 'Sakana Fugu — default routing model',
-    contextLength: 200000,
-    supportsToolUse: true,
-  },
-  {
-    id: 'fugu-ultra',
-    name: 'Fugu Ultra',
-    description: 'Sakana Fugu Ultra — highest-capability model',
-    contextLength: 200000,
-    supportsToolUse: true,
-  },
-];
+import type { AnthropicProvider } from '../provider-registry';
 
 /**
  * Default model tier mappings for Sakana.
@@ -85,5 +58,4 @@ export const SAKANA_PROVIDER_ENTRY: AnthropicProvider = {
   maskedKeyDisplay: '••••••••••••',
   modelsEndpoint: 'https://api.sakana.ai/v1/models',
   defaultTiers: SAKANA_DEFAULT_TIERS,
-  staticModels: SAKANA_STATIC_MODELS,
 };

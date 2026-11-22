@@ -81,11 +81,9 @@ jest.mock('@ptah-extension/agent-sdk', () => {
       description: '',
       keyPlaceholder: '',
       maskedKeyDisplay: '',
-      staticModels: [{ id: 'fugu', name: 'Fugu' }],
       defaultTiers: { sonnet: 'fugu', opus: 'fugu-ultra', haiku: 'fugu' },
     })),
     getProviderAuthEnvVar: jest.fn(() => 'ANTHROPIC_AUTH_TOKEN'),
-    seedStaticModelPricing: jest.fn(),
     buildSafeEnv: jest.fn((env: unknown) => env),
   };
 });
@@ -105,6 +103,8 @@ const SAKANA_CONFIG: PtahCliConfig = {
 
 interface LeaseHarness {
   registry: PtahCliRegistry;
+  /** The tier resolver the registry reads (`ProviderModelsService`). */
+  resolveEffectiveTiers: jest.Mock;
   /** Change the key the secret store answers with (a fingerprint change). */
   setStoredKey: (key: string) => void;
 }
@@ -123,6 +123,8 @@ function buildHarness(): LeaseHarness {
   } as unknown as IAuthSecretsService;
 
   const providerModels = {
+    resolveEffectiveTiers: jest.fn(specTierPreferences),
+    getCachedModelIds: jest.fn(() => null),
     getModelTiers: jest
       .fn()
       .mockReturnValue({ sonnet: null, opus: null, haiku: null }),
@@ -152,16 +154,57 @@ function buildHarness(): LeaseHarness {
 
   return {
     registry,
+    resolveEffectiveTiers: (
+      providerModels as unknown as { resolveEffectiveTiers: jest.Mock }
+    ).resolveEffectiveTiers,
     setStoredKey: (key: string) => {
       storedKey = key;
     },
   };
 }
 
+/**
+ * Stand-in for `ProviderModelsService.resolveEffectiveTiers` with no live
+ * catalogue on hand: the caller's tier, else the provider's preference (read
+ * from the provider lookup this spec mocks).
+ */
+function specTierPreferences(
+  providerId: string,
+  user: Partial<Record<'sonnet' | 'opus' | 'haiku', string | null | undefined>>,
+): Partial<Record<'sonnet' | 'opus' | 'haiku', string>> {
+  const { getAnthropicProvider } = jest.requireMock<
+    typeof import('@ptah-extension/agent-sdk')
+  >('@ptah-extension/agent-sdk');
+  const preferred = getAnthropicProvider(providerId)?.defaultTiers;
+  const pick = (tier: 'sonnet' | 'opus' | 'haiku'): string | undefined =>
+    user[tier] || preferred?.[tier];
+  return { sonnet: pick('sonnet'), opus: pick('opus'), haiku: pick('haiku') };
+}
+
 describe('PtahCliRegistry.getProfile — translation-proxy leases', () => {
   beforeEach(() => {
     createdProxies.length = 0;
     createSakanaProxyForKey.mockClear();
+  });
+
+  it('writes the tiers its lease fingerprint was taken from, even if the catalog warms meanwhile', async () => {
+    const { registry, resolveEffectiveTiers } = buildHarness();
+    // The first resolution is the one getProfile captures; any later one
+    // sees a catalog that warmed while the proxy started.
+    resolveEffectiveTiers
+      .mockReturnValueOnce({
+        sonnet: 'fugu',
+        opus: 'fugu-ultra',
+        haiku: 'fugu',
+      })
+      .mockReturnValue({ sonnet: 'warm', opus: 'warm', haiku: 'warm' });
+
+    const profile = await registry.getProfile(SAKANA_CONFIG.id, 'tab-1');
+
+    expect(profile?.model).toBe('fugu');
+    expect(profile?.authEnv.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('fugu');
+    expect(profile?.authEnv.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe('fugu-ultra');
+    expect(resolveEffectiveTiers).toHaveBeenCalledTimes(1);
   });
 
   it('shares ONE proxy across three sessions and stops it only on the last release', async () => {

@@ -107,6 +107,8 @@ describe("OpenRouter chat path — the chat's 'default' to the id on the wire", 
     const configValues = withCatalog
       ? {
           'provider.openrouter.modelCatalog': {
+            schema: 2,
+            origin: 'live',
             models: CATALOG,
             timestamp: Date.now(),
           },

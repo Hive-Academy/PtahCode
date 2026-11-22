@@ -48,6 +48,8 @@ export function mainAgentModelOptions(
 export interface ModelCatalogue {
   readonly status: 'loading' | 'ready' | 'error';
   readonly models: readonly ProviderModelInfo[];
+  /** The saved-list disclosure when the host served a saved (`persisted`) list; `null` for a live one. */
+  readonly notice: string | null;
 }
 export type MainAgentPatch = Parameters<
   ProvidersSettingsStateService['saveSettings']

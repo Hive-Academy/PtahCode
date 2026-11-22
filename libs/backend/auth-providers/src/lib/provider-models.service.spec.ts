@@ -48,7 +48,10 @@ import {
 } from '@ptah-extension/shared';
 import type { Logger } from '@ptah-extension/vscode-core';
 
-import { ProviderModelsService } from './provider-models.service';
+import {
+  ProviderModelsService,
+  credentialFingerprint,
+} from './provider-models.service';
 import { ActiveProviderResolver } from './auth/active-provider-resolver';
 import type { WorkspaceScopeResolver } from '@ptah-extension/settings-core';
 
@@ -68,17 +71,93 @@ function makeActiveProviderResolver(
 
 const PROVIDER = 'z-ai';
 
+/** A persisted catalog record in the versioned shape `persistCatalog` writes. */
+function liveCatalog(
+  models: readonly unknown[],
+  timestamp: number | null = Date.now(),
+): Record<string, unknown> {
+  return {
+    schema: 2,
+    origin: 'live',
+    models,
+    ...(timestamp !== null && { timestamp }),
+  };
+}
+
 describe('Anthropic API lane catalog and tiers', () => {
-  it('returns its static models without a key', async () => {
+  it('lists nothing without a key: unavailable with no-key', async () => {
     const { service } = makeService({});
-    const entry = getPtahCliLaneProvider('anthropic-api');
     const result = await service.fetchModels('anthropic-api', null);
-    expect(result.isStatic).toBe(true);
-    expect(result.totalCount).toBe(entry?.staticModels?.length);
-    expect(result.models.map((model) => model.id)).toEqual(
-      entry?.staticModels?.map((model) => model.id),
-    );
+    expect(result).toEqual({
+      models: [],
+      totalCount: 0,
+      source: 'unavailable',
+      failureReason: 'no-key',
+    });
     expect(getAnthropicProvider('anthropic-api')).toBeUndefined();
+  });
+
+  it('fetches the live list with the Anthropic key headers', async () => {
+    const entry = getPtahCliLaneProvider('anthropic-api');
+    expect(entry?.modelsEndpoint).toBe(
+      'https://api.anthropic.com/v1/models?limit=1000',
+    );
+    expect(entry?.modelsAuthScheme).toBe('anthropic');
+    const get = jest.spyOn(axios, 'get').mockResolvedValue({
+      data: {
+        data: [
+          {
+            id: 'claude-opus-5-5',
+            display_name: 'Claude Opus 5.5',
+            type: 'model',
+          },
+        ],
+        has_more: false,
+      },
+    });
+    try {
+      const { service } = makeService({});
+      const result = await service.fetchModels('anthropic-api', 'sk-ant-test');
+      expect(get).toHaveBeenCalledWith(
+        'https://api.anthropic.com/v1/models?limit=1000',
+        expect.objectContaining({
+          timeout: 10_000,
+          headers: expect.objectContaining({
+            'x-api-key': 'sk-ant-test',
+            'anthropic-version': '2023-06-01',
+          }),
+        }),
+      );
+      const headers = (get.mock.calls[0][1] as { headers: object }).headers;
+      expect(headers).not.toHaveProperty('Authorization');
+      expect(result.source).toBe('live');
+      expect(result.models).toEqual([
+        expect.objectContaining({
+          id: 'claude-opus-5-5',
+          name: 'Claude Opus 5.5',
+          supportsToolUse: false,
+          toolUseUnknown: true,
+        }),
+      ]);
+    } finally {
+      get.mockRestore();
+    }
+  });
+
+  it('keeps the Bearer header for an endpoint provider without a scheme', async () => {
+    const get = jest
+      .spyOn(axios, 'get')
+      .mockResolvedValue({ data: { data: [{ id: 'glm-live' }] } });
+    try {
+      const { service } = makeService({});
+      await service.fetchModels('z-ai', 'zai-key');
+      const headers = (get.mock.calls[0][1] as { headers: object }).headers;
+      expect(headers).toMatchObject({ Authorization: 'Bearer zai-key' });
+      expect(headers).not.toHaveProperty('x-api-key');
+      expect(headers).not.toHaveProperty('anthropic-version');
+    } finally {
+      get.mockRestore();
+    }
   });
 
   it('persists scoped CLI tiers and uses lane defaults', async () => {
@@ -190,22 +269,33 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('ProviderModelsService.getCachedModelIds', () => {
-  it('distinguishes static fallback from a persisted live catalog', async () => {
+  it('reads only a versioned live catalog, never a failed fetch', async () => {
     const { service } = makeService({});
-    expect((await service.fetchModels('z-ai', null)).isStatic).toBe(true);
+    expect((await service.fetchModels('z-ai', null)).source).toBe(
+      'unavailable',
+    );
     expect(service.getCachedModelIds('z-ai')).toBeNull();
 
     const reloaded = makeService({
       configValues: {
-        'provider.z-ai.modelCatalog': {
-          models: [{ id: 'provider-live-id', name: 'Provider live id' }],
-          timestamp: Date.now(),
-        },
+        'provider.z-ai.modelCatalog': liveCatalog([
+          { id: 'provider-live-id', name: 'Provider live id' },
+        ]),
       },
     });
     expect(reloaded.service.getCachedModelIds('z-ai')).toEqual([
       'provider-live-id',
     ]);
+
+    const preVersion = makeService({
+      configValues: {
+        'provider.z-ai.modelCatalog': {
+          models: [{ id: 'static-row', name: 'Static row' }],
+          timestamp: Date.now(),
+        },
+      },
+    });
+    expect(preVersion.service.getCachedModelIds('z-ai')).toBeNull();
   });
 });
 
@@ -235,17 +325,15 @@ describe('ProviderModelsService — discovered context windows', () => {
     },
   );
 
-  it('does not promote static or legacy persisted context lengths into provider evidence', async () => {
-    const model = getAnthropicProvider('z-ai')?.staticModels?.[0];
-    expect(model).toBeDefined();
-    if (!model) throw new Error('Z.AI fixture requires a static model');
+  it('does not invent capacity evidence for a live row that reports no window', async () => {
+    const modelId = 'glm-no-window-418';
     const get = jest
       .spyOn(axios, 'get')
-      .mockResolvedValue({ data: { data: [{ id: model.id }] } });
+      .mockResolvedValue({ data: { data: [{ id: modelId }] } });
     try {
       const { service, config } = makeService({});
       const live = await service.fetchModels('z-ai', 'test-key');
-      expect(live.models[0].contextLength).toBe(model.contextLength);
+      expect(live.models[0].contextLength).toBe(0);
       expect(live.models[0]).not.toHaveProperty('contextLengthSource');
       const persisted = config.set.mock.calls.find(
         ([key]) => key === 'provider.z-ai.modelCatalog',
@@ -253,12 +341,10 @@ describe('ProviderModelsService — discovered context windows', () => {
       const reloaded = makeService({
         configValues: { 'provider.z-ai.modelCatalog': persisted },
       });
-      expect(
-        (await reloaded.service.fetchModels('z-ai', null)).models[0].id,
-      ).toBe(model.id);
+      expect(reloaded.service.getCachedModelIds('z-ai')).toEqual([modelId]);
       const lookup: (model: string, provider?: string) => number =
         getDiscoveredContextWindow;
-      expect(lookup(model.id, 'z-ai')).toBe(0);
+      expect(lookup(modelId, 'z-ai')).toBe(0);
     } finally {
       get.mockRestore();
     }
@@ -345,32 +431,29 @@ describe('ProviderModelsService — discovered context windows', () => {
     );
     const { service } = makeService({
       configValues: {
-        'provider.z-ai.modelCatalog': { models, timestamp: Date.now() },
+        'provider.z-ai.modelCatalog': liveCatalog(models),
       },
     });
-    const restored = await service.fetchModels('z-ai', null);
-    expect(restored.models).toHaveLength(5);
+    const restored = service.getPersistedCatalog('z-ai');
+    expect(restored?.models).toHaveLength(5);
     expect(getDiscoveredContextWindow(models[0].id, 'z-ai')).toBe(400000);
     for (const model of models.slice(1))
       expect(getDiscoveredContextWindow(model.id, 'z-ai')).toBe(0);
   });
 
-  it('a legacy persisted catalog remains selectable without capacity evidence', () => {
+  it('a persisted row without provider evidence stays without capacity evidence', () => {
     const modelId = 'gpt-ctx-persisted-catalog-414';
     const { service } = makeService({
       configValues: {
-        'provider.codex.modelCatalog': {
-          models: [
-            {
-              id: modelId,
-              name: 'Persisted',
-              description: '',
-              contextLength: 272_000,
-              supportsToolUse: true,
-            },
-          ],
-          timestamp: Date.now(),
-        },
+        'provider.codex.modelCatalog': liveCatalog([
+          {
+            id: modelId,
+            name: 'Persisted',
+            description: '',
+            contextLength: 272_000,
+            supportsToolUse: true,
+          },
+        ]),
       },
     });
     expect(getDiscoveredContextWindow(modelId, 'codex')).toBe(0);
@@ -447,10 +530,10 @@ describe('ProviderModelsService — Requesty catalog shape', () => {
         outputCostPerToken: 0.000003,
       });
       // A non-finite price is no price, so it never reaches the pricing map.
-      expect(byId.get('broken/non-finite-price')).toMatchObject({
-        inputCostPerToken: undefined,
-        outputCostPerToken: undefined,
-      });
+      const broken = byId.get('broken/non-finite-price');
+      expect(broken).toBeDefined();
+      expect(broken).not.toHaveProperty('inputCostPerToken');
+      expect(broken).not.toHaveProperty('outputCostPerToken');
     } finally {
       get.mockRestore();
     }
@@ -973,59 +1056,6 @@ describe('ProviderModelsService.resolveActiveProviderId', () => {
 // clearCache
 // ---------------------------------------------------------------------------
 
-describe('OpenCode settings catalog', () => {
-  it('keeps served static rows and adds only routed live IDs', async () => {
-    const { openCodeLiveRoutes } =
-      await import('./providers/opencode/opencode-live-routes');
-    const live = new Map<
-      string,
-      import('./providers/opencode/opencode-live-routes').OpenCodeLiveModel
-    >([
-      [
-        'claude-fable-5-1',
-        {
-          id: 'claude-fable-5-1',
-          name: 'Static',
-          contextLength: 0,
-          protocol: 'messages' as const,
-        },
-      ],
-      [
-        'new-id',
-        {
-          id: 'new-id',
-          name: 'New',
-          contextLength: 128000,
-          supportsToolUse: true,
-          protocol: 'responses' as const,
-        },
-      ],
-      ['google-id', { id: 'google-id', name: 'Google', contextLength: 128000 }],
-    ]);
-    const list = jest
-      .spyOn(openCodeLiveRoutes, 'list')
-      .mockResolvedValueOnce(live);
-    try {
-      const result = await makeService({}).service.fetchModels(
-        'opencode-zen',
-        null,
-      );
-      expect(result.isStatic).toBe(false);
-      expect(result.models.map((m) => m.id)).toEqual([
-        'claude-fable-5-1',
-        'new-id',
-      ]);
-      expect(result.models[1]).toMatchObject({
-        name: 'New',
-        contextLength: 128000,
-        supportsToolUse: true,
-      });
-    } finally {
-      list.mockRestore();
-    }
-  });
-});
-
 describe('ProviderModelsService.clearCache', () => {
   it('clears cache for a specific provider when an id is passed', () => {
     const { service } = makeService({});
@@ -1035,6 +1065,115 @@ describe('ProviderModelsService.clearCache', () => {
   it('clears all caches when no id is passed', () => {
     const { service } = makeService({});
     expect(() => service.clearCache()).not.toThrow();
+  });
+
+  const SAVED_KEY = 'provider.claude-cli.modelCatalog';
+  const savedRow = {
+    id: 'previous-account-model',
+    name: 'Previous account model',
+    description: '',
+    contextLength: 200000,
+    supportsToolUse: true,
+  };
+
+  it('hides the saved catalog at once and after a failed deletion', async () => {
+    const { service, config } = makeService({
+      configValues: { [SAVED_KEY]: liveCatalog([savedRow]) },
+    });
+    service.registerDynamicFetcher('claude-cli', async () => {
+      throw Object.assign(new Error('offline'), { code: 'ECONNRESET' });
+    });
+    expect(service.getCachedModelIds('claude-cli')).toEqual([
+      'previous-account-model',
+    ]);
+    config.set.mockRejectedValueOnce(new Error('disk full'));
+
+    service.clearCache('claude-cli');
+    // Before the deferred deletion runs.
+    expect(service.getCachedModelIds('claude-cli')).toBeNull();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    // The deletion failed, so the record is still on disk; it stays unread.
+    expect(config.get(SAVED_KEY)).toBeTruthy();
+    expect(service.getCachedModelIds('claude-cli')).toBeNull();
+    const result = await service.fetchModels('claude-cli', null);
+    expect(result.source).toBe('unavailable');
+    expect(service.getCachedModelIds('claude-cli')).toBeNull();
+  });
+
+  it('reads saved catalogs again once a new live list is saved', async () => {
+    const { service } = makeService({
+      configValues: { [SAVED_KEY]: liveCatalog([savedRow]) },
+    });
+    let fail = false;
+    service.registerDynamicFetcher('claude-cli', async () => {
+      if (fail) throw new Error('offline');
+      return [{ ...savedRow, id: 'new-account-model' }];
+    });
+    service.clearCache('claude-cli');
+    await service.fetchModels('claude-cli', null);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    fail = true;
+    service.clearCache();
+    const result = await service.fetchModels('claude-cli', null);
+    expect(result.source).toBe('persisted');
+    expect(result.models.map((m) => m.id)).toEqual(['new-account-model']);
+  });
+
+  it.each([
+    ['for the provider', 'claude-cli'],
+    ['for every provider', undefined],
+  ])(
+    'a list request in flight during a clear %s writes nothing',
+    async (_label, clearId) => {
+      const { service, config } = makeService({});
+      let release!: (rows: (typeof savedRow)[]) => void;
+      service.registerDynamicFetcher(
+        'claude-cli',
+        () =>
+          new Promise((resolve) => {
+            release = resolve;
+          }),
+      );
+      const pending = service.fetchModels('claude-cli', null);
+      await new Promise((resolve) => setImmediate(resolve));
+      service.clearCache(clearId);
+      release([savedRow]);
+      await pending;
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(service.getCachedModelIds('claude-cli')).toBeNull();
+      expect(config.set).not.toHaveBeenCalledWith(
+        SAVED_KEY,
+        expect.objectContaining({ origin: 'live' }),
+      );
+    },
+  );
+});
+
+describe('ProviderModelsService credential-scoped catalog reads', () => {
+  const REQUESTY_KEY = 'provider.requesty.modelCatalog';
+
+  it('answers a scoped read only from the list of that credential', () => {
+    const { service } = makeService({
+      configValues: {
+        [REQUESTY_KEY]: {
+          ...liveCatalog([{ id: 'key-a-model', name: 'Key A model' }]),
+          credential: credentialFingerprint('key-a'),
+        },
+      },
+    });
+
+    expect(service.getCachedModelIds('requesty', { apiKey: 'key-a' })).toEqual([
+      'key-a-model',
+    ]);
+    expect(
+      service.getCachedModelIds('requesty', { apiKey: 'key-b' }),
+    ).toBeNull();
+    expect(
+      service.resolveEffectiveTiers('requesty', {}, { apiKey: 'key-b' }),
+    ).toEqual({ sonnet: undefined, opus: undefined, haiku: undefined });
   });
 });
 
@@ -1060,17 +1199,15 @@ describe('ProviderModelsService.registerDynamicFetcher', () => {
     const result = await service.fetchModels('z-ai', null);
 
     expect(fetcher).toHaveBeenCalledTimes(1);
-    expect(result.isStatic).toBe(false);
+    expect(result.source).toBe('live');
     expect(result.models).toHaveLength(1);
     expect(result.models[0].id).toBe('dyn-model');
   });
 
-  it('does not cache or persist an empty dynamic result, and reports the static list', async () => {
-    // The Kimi Code fetcher returns [] on every failure path (transient 401,
-    // timeout, unknown payload shape) precisely because this consumer caches
-    // and persists any NON-EMPTY result as a live catalog for the full cache
-    // TTL. An empty result must fall through to the static models, reported
-    // as static, and leave the cache cold so the next call retries live.
+  it('does not cache or persist an empty dynamic result, and reports it as empty', async () => {
+    // This consumer caches and persists any NON-EMPTY result as a live
+    // catalog for the full cache TTL. An empty result is `empty`: no list, no
+    // invented rows, and the cache stays cold so the next call retries live.
     const { service, config } = makeService({});
     const fetcher = jest.fn().mockResolvedValue([]);
     service.registerDynamicFetcher('kimi-code', fetcher);
@@ -1078,8 +1215,11 @@ describe('ProviderModelsService.registerDynamicFetcher', () => {
     const result = await service.fetchModels('kimi-code', null);
     await Promise.resolve();
 
-    expect(result.isStatic).toBe(true);
-    expect(result.models.map((m) => m.id)).toContain('kimi-for-coding');
+    expect(result).toMatchObject({
+      models: [],
+      source: 'unavailable',
+      failureReason: 'empty',
+    });
     expect(config.set).not.toHaveBeenCalled();
 
     // No cache entry was written for the failure: the second call goes back
@@ -1115,16 +1255,20 @@ describe('ProviderModelsService persisted model catalog', () => {
     expect(config.set).toHaveBeenCalledWith(
       CATALOG_KEY,
       expect.objectContaining({
+        schema: 2,
+        origin: 'live',
         models: [expect.objectContaining({ id: 'opus[1m]' })],
+        timestamp: expect.any(Number),
       }),
     );
   });
 
-  it('falls back to the persisted catalog instead of the hardcoded staticModels', async () => {
+  it('falls back to the persisted live catalog when the live fetch fails', async () => {
+    const savedAt = Date.now() - 1000;
     const { service } = makeService({
       configValues: {
-        [CATALOG_KEY]: {
-          models: [
+        [CATALOG_KEY]: liveCatalog(
+          [
             {
               id: 'opus[1m]',
               name: 'Opus (1M context)',
@@ -1140,8 +1284,8 @@ describe('ProviderModelsService persisted model catalog', () => {
               supportsToolUse: true,
             },
           ],
-          timestamp: Date.now(),
-        },
+          savedAt,
+        ),
       },
     });
     service.registerDynamicFetcher('claude-cli', async () => {
@@ -1154,19 +1298,23 @@ describe('ProviderModelsService persisted model catalog', () => {
       'opus[1m]',
       'claude-fable-5[1m]',
     ]);
-    expect(result.isStatic).toBe(false);
+    expect(result).toMatchObject({
+      source: 'persisted',
+      failureReason: 'unexpected',
+      savedAt,
+    });
   });
 
   it.each([
     ['older than 30 days', Date.now() - 31 * 24 * 60 * 60 * 1000],
-    ['without a timestamp', undefined],
+    ['without a timestamp', null],
   ])(
-    'ignores a persisted catalog %s and uses staticModels instead',
+    'ignores a persisted catalog %s: unavailable',
     async (_case, timestamp) => {
       const { service } = makeService({
         configValues: {
-          [CATALOG_KEY]: {
-            models: [
+          [CATALOG_KEY]: liveCatalog(
+            [
               {
                 id: 'retired-model',
                 name: 'Retired',
@@ -1175,8 +1323,8 @@ describe('ProviderModelsService persisted model catalog', () => {
                 supportsToolUse: true,
               },
             ],
-            ...(timestamp !== undefined && { timestamp }),
-          },
+            timestamp,
+          ),
         },
       });
       service.registerDynamicFetcher('claude-cli', async () => {
@@ -1185,12 +1333,12 @@ describe('ProviderModelsService persisted model catalog', () => {
 
       const result = await service.fetchModels('claude-cli', null);
 
-      expect(result.isStatic).toBe(true);
-      expect(result.models.map((m) => m.id)).not.toContain('retired-model');
+      expect(result.source).toBe('unavailable');
+      expect(result.models).toEqual([]);
     },
   );
 
-  it('still falls back to staticModels when nothing is persisted', async () => {
+  it('is unavailable when nothing is persisted', async () => {
     const { service } = makeService({});
     service.registerDynamicFetcher('claude-cli', async () => {
       throw new Error('SDK bridge unavailable');
@@ -1198,14 +1346,18 @@ describe('ProviderModelsService persisted model catalog', () => {
 
     const result = await service.fetchModels('claude-cli', null);
 
-    expect(result.isStatic).toBe(true);
-    expect(result.models.length).toBeGreaterThan(0);
+    expect(result).toEqual({
+      models: [],
+      totalCount: 0,
+      source: 'unavailable',
+      failureReason: 'unexpected',
+    });
   });
 
   it('ignores a malformed persisted catalog rather than serving junk', async () => {
     const { service } = makeService({
       configValues: {
-        [CATALOG_KEY]: { models: [{ nope: true }, 'garbage'] },
+        [CATALOG_KEY]: liveCatalog([{ nope: true }, 'garbage']),
       },
     });
     service.registerDynamicFetcher('claude-cli', async () => {
@@ -1214,7 +1366,8 @@ describe('ProviderModelsService persisted model catalog', () => {
 
     const result = await service.fetchModels('claude-cli', null);
 
-    expect(result.isStatic).toBe(true);
+    expect(result.source).toBe('unavailable');
+    expect(result.models).toEqual([]);
   });
 });
 
@@ -1277,14 +1430,49 @@ describe('ProviderModelsService live-catalog tier derivation', () => {
       expect(service.resolveEffectiveTiers('z-ai', {}).opus).toBe(staticOpus);
     });
 
-    it('keeps static defaults for providers with filtered catalogues', () => {
+    it('keeps tier preferences for providers with filtered catalogues', () => {
       const { service } = makeService({});
       const read = jest.spyOn(service, 'getCachedModelIds');
-      const expected = getAnthropicProvider('opencode-go')?.defaultTiers?.opus;
-      expect(service.resolveEffectiveTiers('opencode-go', {}).opus).toBe(
+      const expected =
+        getAnthropicProvider('github-copilot')?.defaultTiers?.opus;
+      expect(service.resolveEffectiveTiers('github-copilot', {}).opus).toBe(
         expected,
       );
       expect(read).not.toHaveBeenCalled();
+    });
+
+    it('checks OpenCode preferences against its live catalog', () => {
+      const { service } = makeService({});
+      const read = jest
+        .spyOn(service, 'getCachedModelIds')
+        .mockReturnValue(['kimi-k3-1', 'glm-5.3']);
+      expect(service.resolveEffectiveTiers('opencode-go', {}).opus).toBe(
+        'kimi-k3-1',
+      );
+      expect(read).toHaveBeenCalledWith('opencode-go', undefined);
+    });
+
+    it('prefers the closest same-family live id over the derived tier', () => {
+      const { service, logger } = makeService({});
+      jest
+        .spyOn(service, 'getCachedModelIds')
+        .mockReturnValue(['claude-sonnet-5-1', 'claude-sonnet-6', 'other']);
+      jest
+        .spyOn(service, 'getLiveDerivedTiers')
+        .mockReturnValue({ sonnet: 'other' });
+      expect(service.resolveEffectiveTiers('opencode-zen', {}).sonnet).toBe(
+        'claude-sonnet-5-1',
+      );
+      expect(logger.warn).toHaveBeenCalledWith(
+        '[provider-auth] tier preference not in live catalog',
+        {
+          providerId: 'opencode-zen',
+          tier: 'sonnet',
+          preferred: getAnthropicProvider('opencode-zen')?.defaultTiers?.sonnet,
+          resolved: 'claude-sonnet-5-1',
+          rule: 'family',
+        },
+      );
     });
 
     it('lets a non-empty user tier win', () => {
@@ -1294,15 +1482,33 @@ describe('ProviderModelsService live-catalog tier derivation', () => {
       ).toBe('user-opus');
     });
 
-    it('logs a replacement once across repeated calls', () => {
+    it('warns once per provider and tier across repeated calls', () => {
+      // The warn-once set is per process; sakana is used by no other tier
+      // case in this file.
       const { service, logger } = makeService({});
       jest.spyOn(service, 'getCachedModelIds').mockReturnValue(['live-sonnet']);
       jest.spyOn(service, 'getLiveDerivedTiers').mockReturnValue({
         sonnet: 'live-sonnet',
       });
-      service.resolveEffectiveTiers('z-ai', {});
-      service.resolveEffectiveTiers('z-ai', {});
-      expect(logger.info).toHaveBeenCalledTimes(1);
+      service.resolveEffectiveTiers('sakana', {});
+      service.resolveEffectiveTiers('sakana', {});
+      const warned = logger.warn.mock.calls.filter(
+        ([message, context]) =>
+          message === '[provider-auth] tier preference not in live catalog' &&
+          (context as { tier?: string }).tier === 'sonnet',
+      );
+      expect(warned).toEqual([
+        [
+          '[provider-auth] tier preference not in live catalog',
+          {
+            providerId: 'sakana',
+            tier: 'sonnet',
+            preferred: getPtahCliLaneProvider('sakana')?.defaultTiers?.sonnet,
+            resolved: 'live-sonnet',
+            rule: 'derived',
+          },
+        ],
+      ]);
     });
   });
   /** Catalogue shape a router returns: it names the tiers itself. */
@@ -1370,10 +1576,7 @@ describe('ProviderModelsService live-catalog tier derivation', () => {
     // reads ANTHROPIC_DEFAULT_OPUS_MODEL — which used to be unset.
     const { service, authEnv } = makeService({
       configValues: {
-        'provider.openrouter.modelCatalog': {
-          models: ROUTER_MODELS,
-          timestamp: Date.now(),
-        },
+        'provider.openrouter.modelCatalog': liveCatalog(ROUTER_MODELS),
       },
     });
 
@@ -1395,10 +1598,7 @@ describe('ProviderModelsService live-catalog tier derivation', () => {
     // microtask is a tier that is not there when the message is built.
     const { service, authEnv } = makeService({
       configValues: {
-        'provider.openrouter.modelCatalog': {
-          models: ROUTER_MODELS,
-          timestamp: Date.now(),
-        },
+        'provider.openrouter.modelCatalog': liveCatalog(ROUTER_MODELS),
       },
     });
 
@@ -1411,10 +1611,7 @@ describe('ProviderModelsService live-catalog tier derivation', () => {
     const { service, authEnv } = makeService({
       configValues: {
         'provider.openrouter.mainAgent.modelTier.opus': 'openai/gpt-5.3-codex',
-        'provider.openrouter.modelCatalog': {
-          models: ROUTER_MODELS,
-          timestamp: Date.now(),
-        },
+        'provider.openrouter.modelCatalog': liveCatalog(ROUTER_MODELS),
       },
     });
 
@@ -1428,16 +1625,13 @@ describe('ProviderModelsService live-catalog tier derivation', () => {
     await settle();
   });
 
-  it('replaces a static default absent from the known live catalogue', async () => {
+  it('replaces a tier preference absent from the known live catalogue', async () => {
     const expected = getAnthropicProvider(PROVIDER)?.defaultTiers?.opus;
     expect(expected).toBeTruthy();
 
     const { service, authEnv } = makeService({
       configValues: {
-        [`provider.${PROVIDER}.modelCatalog`]: {
-          models: ROUTER_MODELS,
-          timestamp: Date.now(),
-        },
+        [`provider.${PROVIDER}.modelCatalog`]: liveCatalog(ROUTER_MODELS),
       },
     });
 
@@ -1455,10 +1649,7 @@ describe('ProviderModelsService live-catalog tier derivation', () => {
     // picker would have shown the raw id.
     const { service, authEnv } = makeService({
       configValues: {
-        'provider.openrouter.modelCatalog': {
-          models: ROUTER_MODELS,
-          timestamp: Date.now(),
-        },
+        'provider.openrouter.modelCatalog': liveCatalog(ROUTER_MODELS),
       },
     });
 
@@ -1471,9 +1662,9 @@ describe('ProviderModelsService live-catalog tier derivation', () => {
     await settle();
   });
 
-  it('declares static capabilities for a static-only provider with no catalogue', async () => {
-    // Kimi Code ships no models endpoint, so there is never a live catalogue.
-    // Without the static fallback the runtime would drop effort for its ids.
+  it('declares the provider live-model capabilities while no catalogue is on hand', async () => {
+    // Kimi Code declares one capability allowlist for every live model
+    // (`liveModelCapabilities`). A cold catalogue must not drop effort.
     const { service, authEnv } = makeService({});
     const capabilities =
       'thinking,interleaved_thinking,effort,xhigh_effort,max_effort';
@@ -1490,14 +1681,14 @@ describe('ProviderModelsService live-catalog tier derivation', () => {
     expect(authEnv.ANTHROPIC_DEFAULT_HAIKU_MODEL_SUPPORTED_CAPABILITIES).toBe(
       capabilities,
     );
-    // Only the capability env falls back to the static entry; labels stay
-    // catalogue-only (see the z-ai case below).
+    // Only the capability env falls back to the provider declaration;
+    // labels stay catalogue-only (see the z-ai case below).
     expect(authEnv.ANTHROPIC_DEFAULT_OPUS_MODEL_NAME).toBeUndefined();
     expect(authEnv.ANTHROPIC_DEFAULT_OPUS_MODEL_DESCRIPTION).toBeUndefined();
     await settle();
   });
 
-  it('writes no capability var for a static provider that declares none', async () => {
+  it('writes no capability var for a provider that declares none', async () => {
     const { service, authEnv } = makeService({});
 
     service.applyPersistedTiers('z-ai');
@@ -1515,10 +1706,9 @@ describe('ProviderModelsService live-catalog tier derivation', () => {
     await settle();
   });
 
-  it('does not relabel tiers from staticModels when no catalogue exists', async () => {
-    // The static fallback is for capabilities only. Publishing `_NAME` /
-    // `_DESCRIPTION` from a release-time static list would change the tier
-    // labels of every provider that ships one (Z.AI, Ollama).
+  it('does not relabel tiers when no catalogue exists', async () => {
+    // Labels come only from a list the provider returned; with none on hand
+    // `_NAME` / `_DESCRIPTION` stay unset.
     const { service, authEnv } = makeService({});
 
     service.applyPersistedTiers('z-ai');
@@ -1876,7 +2066,7 @@ describe('ProviderModelsService.reapplyTiersForWarmedCatalog', () => {
     expect(authEnv.ANTHROPIC_DEFAULT_OPUS_MODEL).toBeUndefined();
   });
 
-  it('replaces a static default the warmed catalog retired', async () => {
+  it('replaces a tier preference the warmed catalog retired', async () => {
     // The hole the old guard left: on a cold start `resolveEffectiveTiers`
     // keeps the static default (no catalogue is known), so activation wrote
     // it into all three tier env vars — and the old guard then returned early

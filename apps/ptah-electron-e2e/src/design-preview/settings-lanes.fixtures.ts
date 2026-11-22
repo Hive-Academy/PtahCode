@@ -228,7 +228,7 @@ export const staticMocks = {
       },
     ],
     totalCount: 2,
-    isStatic: true,
+    source: 'live',
   },
   'provider:getPlanLimits': {
     generatedAt: 1794873600000,

@@ -22,6 +22,8 @@ import {
   NativeModalComponent,
   PROVIDER_MODELS_LOADER,
   ProviderModelSearchFieldComponent,
+  ProviderModelsNoticeComponent,
+  savedModelListNotice,
   type ProviderModelSearchOption,
 } from '@ptah-extension/ui';
 import type { ProviderModelInfo } from '@ptah-extension/shared';
@@ -63,6 +65,8 @@ const MODEL_ID_PATTERN = /^\S+$/;
 interface Catalogue {
   readonly status: 'loading' | 'ready' | 'error';
   readonly models: readonly ProviderModelInfo[];
+  /** The saved-list disclosure when the host served a saved (`persisted`) list; `null` for a live one. */
+  readonly notice: string | null;
 }
 
 /**
@@ -90,6 +94,7 @@ interface Catalogue {
     LucideAngularModule,
     NativeModalComponent,
     ProviderModelSearchFieldComponent,
+    ProviderModelsNoticeComponent,
     SettingsToastComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -121,6 +126,7 @@ export class CliTierMappingModalComponent {
   protected readonly catalogue = signal<Catalogue>({
     status: 'loading',
     models: [],
+    notice: null,
   });
   /** The tier whose search is swapped for a model-ID field, if any. */
   protected readonly manualTier = signal<Tier | null>(null);
@@ -217,17 +223,18 @@ export class CliTierMappingModalComponent {
     const providerId = this.target()?.providerId;
     if (!providerId) return;
     const request = ++this.catalogueRequest;
-    this.catalogue.set({ status: 'loading', models: [] });
+    this.catalogue.set({ status: 'loading', models: [], notice: null });
     try {
       const result = await this.loader.listModels(providerId);
       if (request !== this.catalogueRequest) return;
       this.catalogue.set({
         status: result.error ? 'error' : 'ready',
         models: result.models ?? [],
+        notice: savedModelListNotice(result),
       });
     } catch {
       if (request === this.catalogueRequest)
-        this.catalogue.set({ status: 'error', models: [] });
+        this.catalogue.set({ status: 'error', models: [], notice: null });
     }
   }
 

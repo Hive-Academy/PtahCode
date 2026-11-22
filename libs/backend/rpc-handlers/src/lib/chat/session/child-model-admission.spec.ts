@@ -5,43 +5,101 @@ import {
   resolveNativeTierAlias,
 } from './child-model-admission';
 
+/** The claude-cli tier preference; a preference, never an admitted list. */
+function preferred(tier: 'opus' | 'sonnet' | 'haiku'): string {
+  const id = getAnthropicProvider('claude-cli')?.defaultTiers?.[tier];
+  if (!id) throw new Error(`claude-cli has no ${tier} preference`);
+  return id;
+}
+
 describe('native child model admission', () => {
-  it('unions old catalog IDs, static IDs and tier IDs without duplicates', () => {
-    const provider = getAnthropicProvider('claude-cli');
-    const catalog = [{ value: 'old-sdk-model' }, { value: 'claude-opus-5-5' }];
-    const ids = nativeChildModelIds(catalog);
-    expect(ids).toEqual(
-      expect.arrayContaining([
+  describe('nativeChildModelIds', () => {
+    it('returns the catalog ids only, without duplicates', () => {
+      const catalog = [
+        { value: 'old-sdk-model' },
+        { value: 'claude-live-model' },
+        { value: 'old-sdk-model' },
+      ];
+      expect(nativeChildModelIds(catalog)).toEqual([
         'old-sdk-model',
-        ...(provider?.staticModels ?? []).map((model) => model.id),
-        ...Object.values(provider?.defaultTiers ?? {}),
-      ]),
-    );
-    expect(new Set(ids).size).toBe(ids.length);
-    expect(catalog).toHaveLength(2);
+        'claude-live-model',
+      ]);
+    });
+
+    it('adds no repository ids when discovery returns no models', () => {
+      expect(nativeChildModelIds([])).toEqual([]);
+    });
   });
 
-  it('retains verified native IDs when discovery returns no models', () => {
-    expect(nativeChildModelIds([])).toEqual(
-      expect.arrayContaining([
-        'claude-opus-5-5',
-        'claude-sonnet-5-5',
-        'claude-haiku-5-5',
-        'claude-fable-5-2',
-      ]),
+  describe('resolveNativeTierAlias', () => {
+    it.each(['opus', 'sonnet', 'haiku'] as const)(
+      'resolves %s to its preference when the catalog lists it',
+      (tier) => {
+        const warn = jest.fn();
+        const catalog = [preferred('opus'), preferred('sonnet'), preferred('haiku')];
+        expect(resolveNativeTierAlias(tier, catalog, { warn })).toBe(
+          preferred(tier),
+        );
+        expect(warn).not.toHaveBeenCalled();
+      },
     );
-  });
 
-  it.each([
-    ['opus', 'claude-opus-5-5'],
-    ['sonnet', 'claude-sonnet-5-5'],
-    ['haiku', 'claude-haiku-5-5'],
-    ['fable', 'claude-fable-5-2'],
-    ['default', 'default'],
-    ['claude-opus-4-8', 'claude-opus-4-8'],
-    ['unknown', 'unknown'],
-  ])('resolves %s to %s', (model, expected) => {
-    expect(resolveNativeTierAlias(model)).toBe(expected);
+    it('admits the live successor of a retired preference and warns with both ids', () => {
+      const warn = jest.fn();
+      const catalog = ['claude-opus-99-2', 'claude-opus-99-0', 'claude-sonnet-99-0'];
+      const resolved = resolveNativeTierAlias('opus', catalog, { warn });
+      expect(resolved).toBe('claude-opus-99-0');
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('Native tier preference is not live'),
+        { tier: 'opus', preferred: preferred('opus'), resolved: 'claude-opus-99-0' },
+      );
+    });
+
+    it('prefers the successor version over an older one; suffixed ids are not candidates', () => {
+      const warn = jest.fn();
+      const catalog = ['claude-haiku-3', 'claude-haiku-10', 'claude-haiku-9[1m]'];
+      expect(resolveNativeTierAlias('haiku', catalog, { warn })).toBe(
+        'claude-haiku-10',
+      );
+      expect(warn).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps the alias when the catalog has no id of that tier', () => {
+      const warn = jest.fn();
+      expect(
+        resolveNativeTierAlias('sonnet', ['claude-opus-99-0', 'sonnet[1m]'], {
+          warn,
+        }),
+      ).toBe('sonnet');
+      expect(warn).not.toHaveBeenCalled();
+    });
+
+    it('resolves fable to the newest live claude-fable id by numeric compare', () => {
+      expect(
+        resolveNativeTierAlias('fable', [
+          'claude-fable-5-2',
+          'claude-fable-5-10',
+          'claude-fable-5[1m]',
+          'claude-fable-preview',
+        ]),
+      ).toBe('claude-fable-5-10');
+    });
+
+    it('keeps fable when the catalog lists no claude-fable id', () => {
+      expect(resolveNativeTierAlias('fable', ['claude-opus-99-0'])).toBe(
+        'fable',
+      );
+    });
+
+    it.each(['default', 'claude-opus-4-8', 'unknown'])(
+      'returns %s unchanged',
+      (model) => {
+        expect(resolveNativeTierAlias(model, ['claude-opus-99-0'])).toBe(
+          model,
+        );
+      },
+    );
   });
 
   it('recognizes only an explicit profile without provider auth overrides as native', () => {

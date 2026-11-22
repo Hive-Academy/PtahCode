@@ -104,15 +104,9 @@ export class SakanaTranslationProxy extends TranslationProxyBase {
    * Sakana v1 routes through Chat Completions (the lower-risk, fully-exercised
    * path); the Responses API is a fast-follow if needed.
    */
-  protected override resolveUpstreamProtocol(_modelId: string): 'chat/completions' {
+  protected override resolveUpstreamProtocol(
+    _modelId: string,
+  ): 'chat/completions' {
     return 'chat/completions';
-  }
-
-  /**
-   * Return the static model list from the Sakana provider entry — the
-   * always-available fallback shown when no key is configured / offline.
-   */
-  protected getStaticModels(): Array<{ id: string }> {
-    return SAKANA_PROVIDER_ENTRY.staticModels ?? [];
   }
 }

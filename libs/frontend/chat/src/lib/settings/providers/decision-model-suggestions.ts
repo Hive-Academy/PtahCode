@@ -1,5 +1,8 @@
 import type { ClaudeRpcService } from '@ptah-extension/core';
-import type { ProviderModelsLoader } from '@ptah-extension/ui';
+import {
+  savedModelListNotice,
+  type ProviderModelsLoader,
+} from '@ptah-extension/ui';
 import type {
   DecisionModelCatalogFilter,
   DecisionModelCatalogSource,
@@ -31,6 +34,11 @@ export interface DecisionSuggestions {
   readonly ids: readonly string[];
   /** How far the decision filter applied; `null` for lists without one (structured, idle). */
   readonly filter: DecisionModelCatalogFilter | null;
+  /**
+   * The saved-list disclosure when the provider catalogue came back as a saved (`persisted`) list; absent or `null`
+   * for a live list and for the decision catalogs, which have no saved list.
+   */
+  readonly notice?: string | null;
 }
 
 export const IDLE_SUGGESTIONS: DecisionSuggestions = {
@@ -116,6 +124,7 @@ export async function loadDecisionSuggestions(
     status: listed.error ? 'error' : 'ready',
     ids: listed.models.map((model) => model.id),
     filter: null,
+    notice: savedModelListNotice(listed),
   };
 }
 

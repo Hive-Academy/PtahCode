@@ -1037,6 +1037,201 @@ describe('SdkModelService — persisted catalog', () => {
   });
 });
 
+describe('SdkModelService — persisted catalog record and live reads', () => {
+  const MODELS: ModelInfo[] = [
+    { value: 'opus', displayName: 'Opus', description: '' },
+  ];
+  const DAY_MS = 24 * 60 * 60 * 1000;
+
+  afterEach(() => jest.restoreAllMocks());
+
+  /** The one saved entry of a store that holds exactly one key. */
+  function onlyEntry(state: Map<string, unknown>): Record<string, unknown> {
+    const store = state.get('ptah.sdk.modelCatalog') as Record<string, unknown>;
+    const values = Object.values(store);
+    expect(values).toHaveLength(1);
+    return values[0] as Record<string, unknown>;
+  }
+
+  it('stamps each saved entry with schema 2, origin live and savedAt', async () => {
+    jest.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
+    const h = makeHarness({ authMethod: 'claudeCli', sdkModels: MODELS });
+    await h.service.getSupportedModels();
+    expect(onlyEntry(h.state)).toEqual({
+      schema: 2,
+      origin: 'live',
+      savedAt: 1_700_000_000_000,
+      models: MODELS,
+    });
+  });
+
+  it('ignores an unstamped entry written by an older release', async () => {
+    const state = new Map<string, unknown>();
+    await makeHarness({
+      authMethod: 'claudeCli',
+      sdkModels: MODELS,
+      state,
+    }).service.getSupportedModels();
+    const store = state.get('ptah.sdk.modelCatalog') as Record<string, unknown>;
+    for (const key of Object.keys(store)) store[key] = MODELS;
+
+    const next = makeHarness({
+      authMethod: 'claudeCli',
+      sdkModels: MODELS,
+      state,
+    });
+    await next.service.getSupportedModels();
+    expect(next.spawnEnvs).toHaveLength(1);
+  });
+
+  it.each([
+    { origin: 'static', schema: 2 },
+    { origin: 'live', schema: 1 },
+  ])(
+    'ignores an entry with origin $origin and schema $schema',
+    async (stamp) => {
+      const state = new Map<string, unknown>();
+      await makeHarness({
+        authMethod: 'claudeCli',
+        sdkModels: MODELS,
+        state,
+      }).service.getSupportedModels();
+      Object.assign(onlyEntry(state), stamp);
+
+      const next = makeHarness({
+        authMethod: 'claudeCli',
+        sdkModels: MODELS,
+        state,
+      });
+      await next.service.getSupportedModels();
+      expect(next.spawnEnvs).toHaveLength(1);
+    },
+  );
+
+  it('serves an entry up to 30 days old and ignores an older one', async () => {
+    const savedAt = 1_700_000_000_000;
+    const now = jest.spyOn(Date, 'now').mockReturnValue(savedAt);
+    const state = new Map<string, unknown>();
+    await makeHarness({
+      authMethod: 'claudeCli',
+      sdkModels: MODELS,
+      state,
+    }).service.getSupportedModels();
+
+    now.mockReturnValue(savedAt + 30 * DAY_MS);
+    const within = makeHarness({
+      authMethod: 'claudeCli',
+      sdkModels: MODELS,
+      state,
+    });
+    expect(await within.service.getSupportedModels()).toEqual(MODELS);
+    expect(within.spawnEnvs).toHaveLength(0);
+    within.service.clearCache();
+
+    await makeHarness({
+      authMethod: 'claudeCli',
+      sdkModels: MODELS,
+      state,
+    }).service.getSupportedModels();
+    now.mockReturnValue(savedAt + 30 * DAY_MS + 30 * DAY_MS + 1);
+    const tooOld = makeHarness({
+      authMethod: 'claudeCli',
+      sdkModels: MODELS,
+      state,
+    });
+    await tooOld.service.getSupportedModels();
+    expect(tooOld.spawnEnvs).toHaveLength(1);
+  });
+
+  it('getLiveSupportedModels fetches instead of answering from restored rows', async () => {
+    const state = new Map<string, unknown>();
+    const saved: ModelInfo[] = [
+      { value: 'old', displayName: 'Old', description: '' },
+    ];
+    await makeHarness({
+      authMethod: 'claudeCli',
+      sdkModels: saved,
+      state,
+    }).service.getSupportedModels();
+
+    const h = makeHarness({
+      authMethod: 'claudeCli',
+      sdkModels: MODELS,
+      state,
+    });
+    expect(await h.service.getSupportedModels()).toEqual(saved);
+    expect(h.spawnEnvs).toHaveLength(0);
+
+    expect(await h.service.getLiveSupportedModels()).toEqual(MODELS);
+    expect(h.spawnEnvs).toHaveLength(1);
+    // Fetched live this boot: served from memory, no second spawn.
+    expect(await h.service.getLiveSupportedModels()).toEqual(MODELS);
+    expect(h.spawnEnvs).toHaveLength(1);
+  });
+
+  it('getLiveSupportedModels answers [] (not the restored rows) when the live fetch fails', async () => {
+    const state = new Map<string, unknown>();
+    await makeHarness({
+      authMethod: 'claudeCli',
+      sdkModels: MODELS,
+      state,
+    }).service.getSupportedModels();
+
+    const h = makeHarness({ authMethod: 'claudeCli', sdkModels: [], state });
+    expect(await h.service.getSupportedModels()).toEqual(MODELS);
+    expect(await h.service.getLiveSupportedModels()).toEqual([]);
+  });
+
+  it('getLiveNativeClaudeModels fetches instead of answering from the restored native entry', async () => {
+    const authEnv = { ANTHROPIC_BASE_URL: 'http://127.0.0.1:58306' };
+    const state = new Map<string, unknown>();
+    const saved: ModelInfo[] = [
+      { value: 'old', displayName: 'Old', description: '' },
+    ];
+    await makeHarness({
+      authMethod: 'thirdParty',
+      authEnv,
+      sdkModels: saved,
+      state,
+    }).service.getNativeClaudeModels();
+
+    const h = makeHarness({
+      authMethod: 'thirdParty',
+      authEnv,
+      sdkModels: MODELS,
+      state,
+    });
+    expect(await h.service.getNativeClaudeModels()).toEqual(saved);
+    expect(h.spawnEnvs).toHaveLength(0);
+    expect(await h.service.getLiveNativeClaudeModels()).toEqual(MODELS);
+    expect(h.spawnEnvs).toHaveLength(1);
+  });
+
+  it('serves the revalidated entry to the live read without a second spawn', async () => {
+    jest.useFakeTimers();
+    try {
+      const state = new Map<string, unknown>();
+      await makeHarness({
+        authMethod: 'claudeCli',
+        sdkModels: MODELS,
+        state,
+      }).service.getSupportedModels();
+      const h = makeHarness({
+        authMethod: 'claudeCli',
+        sdkModels: MODELS,
+        state,
+      });
+      await h.service.getSupportedModels();
+      await jest.advanceTimersByTimeAsync(10_000);
+      expect(h.spawnEnvs).toHaveLength(1);
+      expect(await h.service.getLiveSupportedModels()).toEqual(MODELS);
+      expect(h.spawnEnvs).toHaveLength(1);
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+});
+
 describe('SdkModelService — background catalog revalidation', () => {
   const saved: ModelInfo[] = [
     { value: 'opus', displayName: 'Opus', description: '' },
@@ -1235,5 +1430,278 @@ describe('SdkModelService — background catalog revalidation', () => {
       '[SdkModelService] Discarding the degraded API-key fallback on the revalidation path',
       { authMethod: 'apiKey' },
     );
+  });
+});
+
+describe('SdkModelService — getLiveApiModels', () => {
+  const realFetch = global.fetch;
+  afterEach(() => {
+    global.fetch = realFetch;
+  });
+
+  function withFetch(impl: () => Promise<Response>): jest.Mock {
+    const mock = jest.fn(impl);
+    global.fetch = mock as unknown as typeof fetch;
+    return mock;
+  }
+
+  function apiKeyHarness(): Harness {
+    return makeHarness({
+      authMethod: 'apiKey',
+      authEnv: { ANTHROPIC_API_KEY: 'fixture-key' },
+      sdkModels: [],
+    });
+  }
+
+  it.each([
+    [401, 'auth-rejected'],
+    [403, 'auth-rejected'],
+    [500, 'http-error'],
+  ] as const)('maps HTTP %s to %s', async (status, reason) => {
+    withFetch(async () => new Response('{}', { status }));
+    await expect(apiKeyHarness().service.getLiveApiModels()).resolves.toEqual({
+      ok: false,
+      reason,
+    });
+  });
+
+  it('maps a connection failure to network and a timeout to timeout', async () => {
+    const h = apiKeyHarness();
+    withFetch(async () => {
+      throw new TypeError('fetch failed');
+    });
+    await expect(h.service.getLiveApiModels()).resolves.toEqual({
+      ok: false,
+      reason: 'network',
+    });
+    withFetch(async () => {
+      throw new DOMException('The operation timed out.', 'TimeoutError');
+    });
+    await expect(h.service.getLiveApiModels()).resolves.toEqual({
+      ok: false,
+      reason: 'timeout',
+    });
+  });
+
+  it('maps a body without data to bad-response and no Claude rows to empty', async () => {
+    const h = apiKeyHarness();
+    withFetch(async () => new Response('{"nope":1}', { status: 200 }));
+    await expect(h.service.getLiveApiModels()).resolves.toEqual({
+      ok: false,
+      reason: 'bad-response',
+    });
+    withFetch(
+      async () =>
+        new Response('{"data":[{"id":"other-model"}]}', { status: 200 }),
+    );
+    await expect(h.service.getLiveApiModels()).resolves.toEqual({
+      ok: false,
+      reason: 'empty',
+    });
+  });
+
+  it('returns the Claude rows of a good response', async () => {
+    withFetch(
+      async () =>
+        new Response(
+          '{"data":[{"id":"claude-opus-9","display_name":"Opus 9"}]}',
+          { status: 200 },
+        ),
+    );
+    await expect(apiKeyHarness().service.getLiveApiModels()).resolves.toEqual({
+      ok: true,
+      models: [
+        { value: 'claude-opus-9', displayName: 'Opus 9', description: '' },
+      ],
+    });
+  });
+
+  it('reports no-key without calling /v1/models when no credential is set', async () => {
+    const fetchMock = withFetch(async () => new Response('{}'));
+    const h = makeHarness({ authMethod: 'apiKey', sdkModels: [] });
+    await expect(h.service.getLiveApiModels()).resolves.toEqual({
+      ok: false,
+      reason: 'no-key',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});
+
+describe('SdkModelService — CodeRabbit round 1 (PR #1478)', () => {
+  const realFetch = global.fetch;
+  const MODELS: ModelInfo[] = [
+    { value: 'opus', displayName: 'Opus', description: '' },
+  ];
+  const HOUR_MS = 60 * 60 * 1000;
+  const DAY_MS = 24 * HOUR_MS;
+
+  afterEach(() => {
+    global.fetch = realFetch;
+    jest.restoreAllMocks();
+  });
+
+  function withFetch(
+    impl: (url: string) => Promise<Response>,
+  ): jest.Mock<Promise<Response>, [string]> {
+    const mock = jest.fn(impl);
+    global.fetch = mock as unknown as typeof fetch;
+    return mock;
+  }
+
+  function apiKeyHarness(): Harness {
+    return makeHarness({
+      authMethod: 'apiKey',
+      authEnv: { ANTHROPIC_API_KEY: 'fixture-key' },
+      sdkModels: [],
+    });
+  }
+
+  const page = (body: unknown): Response =>
+    new Response(JSON.stringify(body), { status: 200 });
+
+  it('/v1/models follows has_more with after_id and returns every page', async () => {
+    const fetchMock = withFetch(async (url) =>
+      url.includes('after_id=')
+        ? page({ data: [{ id: 'claude-b' }], has_more: false })
+        : page({
+            data: [{ id: 'claude-a' }],
+            has_more: true,
+            last_id: 'claude-a',
+          }),
+    );
+    const read = await apiKeyHarness().service.getLiveApiModels();
+    expect(read).toEqual({
+      ok: true,
+      models: [
+        { value: 'claude-a', displayName: 'claude-a', description: '' },
+        { value: 'claude-b', displayName: 'claude-b', description: '' },
+      ],
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[1][0]).toBe(
+      'https://api.anthropic.com/v1/models?limit=100&after_id=claude-a',
+    );
+  });
+
+  it.each([
+    ['an empty cursor', ''],
+    ['a repeated cursor', 'claude-a'],
+  ])('/v1/models rejects %s as bad-response', async (_label, next) => {
+    let call = 0;
+    withFetch(async () =>
+      call++ === 0
+        ? page({
+            data: [{ id: 'claude-a' }],
+            has_more: true,
+            last_id: 'claude-a',
+          })
+        : page({ data: [{ id: 'claude-b' }], has_more: true, last_id: next }),
+    );
+    await expect(apiKeyHarness().service.getLiveApiModels()).resolves.toEqual({
+      ok: false,
+      reason: 'bad-response',
+    });
+  });
+
+  it('/v1/models classifies a JSON null body as bad-response, not network', async () => {
+    withFetch(async () => new Response('null', { status: 200 }));
+    await expect(apiKeyHarness().service.getLiveApiModels()).resolves.toEqual({
+      ok: false,
+      reason: 'bad-response',
+    });
+  });
+
+  it('/v1/models keeps only string metadata', async () => {
+    withFetch(async () =>
+      page({ data: [{ id: 'claude-test', display_name: 17, created_at: 5 }] }),
+    );
+    await expect(apiKeyHarness().service.getLiveApiModels()).resolves.toEqual({
+      ok: true,
+      models: [
+        { value: 'claude-test', displayName: 'claude-test', description: '' },
+      ],
+    });
+  });
+
+  it('a /v1/models response that lands after an auth change is not cached', async () => {
+    const h = apiKeyHarness();
+    let release: (r: Response) => void = () => undefined;
+    const fetchMock = withFetch(
+      () =>
+        new Promise<Response>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const first = h.service.getLiveApiModels();
+    await Promise.resolve();
+    h.service.invalidateForAuthChange();
+    release(page({ data: [{ id: 'claude-old-account' }] }));
+    await first;
+
+    fetchMock.mockImplementation(async () =>
+      page({ data: [{ id: 'claude-new-account' }] }),
+    );
+    const second = await h.service.getLiveApiModels();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(second).toEqual({
+      ok: true,
+      models: [
+        {
+          value: 'claude-new-account',
+          displayName: 'claude-new-account',
+          description: '',
+        },
+      ],
+    });
+  });
+
+  it('a live read refetches a memory entry older than the live-read limit', async () => {
+    const now = jest.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000);
+    const h = makeHarness({ authMethod: 'claudeCli', sdkModels: MODELS });
+    await h.service.getLiveSupportedModels();
+    expect(h.spawnEnvs).toHaveLength(1);
+    now.mockReturnValue(1_700_000_000_000 + HOUR_MS / 2);
+    await h.service.getLiveSupportedModels();
+    expect(h.spawnEnvs).toHaveLength(1);
+    now.mockReturnValue(1_700_000_000_000 + 2 * HOUR_MS);
+    await h.service.getLiveSupportedModels();
+    expect(h.spawnEnvs).toHaveLength(2);
+  });
+
+  it('a restored entry expires in memory once it passes the 30-day limit', async () => {
+    const savedAt = 1_700_000_000_000;
+    const now = jest.spyOn(Date, 'now').mockReturnValue(savedAt);
+    const state = new Map<string, unknown>();
+    await makeHarness({
+      authMethod: 'claudeCli',
+      sdkModels: MODELS,
+      state,
+    }).service.getSupportedModels();
+
+    now.mockReturnValue(savedAt + 30 * DAY_MS - HOUR_MS);
+    const h = makeHarness({ authMethod: 'claudeCli', sdkModels: [], state });
+    expect(await h.service.getSupportedModels()).toEqual(MODELS);
+    expect(h.spawnEnvs).toHaveLength(0);
+
+    now.mockReturnValue(savedAt + 30 * DAY_MS + HOUR_MS);
+    expect(h.service.hasCachedModels()).toBe(false);
+    expect(await h.service.getSupportedModels()).toEqual([]);
+    expect(h.spawnEnvs).toHaveLength(1);
+    // Cancels the revalidation the restore scheduled.
+    h.service.clearCache();
+  });
+
+  it('a live read probes with the env its cache key was taken from', async () => {
+    const h = makeHarness({ authMethod: 'claudeCli', sdkModels: MODELS });
+    const read = h.service.getLiveSupportedModels();
+    // A workspace switch mutates the shared env while the probe starts.
+    h.authEnv.ANTHROPIC_BASE_URL = 'https://other.example';
+    // The identity moved: the caller gets nothing to publish.
+    expect(await read).toEqual([]);
+    expect(h.spawnEnvs[0]?.['ANTHROPIC_BASE_URL']).toBeUndefined();
+    // The first identity's catalog was cached under its own key.
+    delete h.authEnv.ANTHROPIC_BASE_URL;
+    expect(await h.service.getLiveSupportedModels()).toEqual(MODELS);
+    expect(h.spawnEnvs).toHaveLength(1);
   });
 });

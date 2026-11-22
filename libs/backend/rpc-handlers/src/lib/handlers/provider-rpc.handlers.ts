@@ -2,7 +2,7 @@
  * Provider RPC Handlers (generalized from OpenRouterRpcHandlers).
  *
  * Handles provider-related RPC methods for model listing and tier configuration:
- * - provider:listModels - Fetch models from provider API (or return static list)
+ * - provider:listModels - The provider's model list, live or saved
  * - provider:setModelTier - Set model for a tier (Sonnet/Opus/Haiku)
  * - provider:getModelTiers - Get current tier mappings
  * - provider:clearModelTier - Clear a tier override (reset to default)
@@ -58,8 +58,12 @@ import {
 import {
   AUTH_PROVIDERS_TOKENS,
   ProviderModelsService,
-  COPILOT_PROVIDER_ENTRY,
   CODEX_PROVIDER_ENTRY,
+  KimiCodeAuthUnavailableError,
+  ModelListError,
+  ClaudeAmbientLoginStatusReader,
+  classifyModelListFailure,
+  type ProviderModelList,
   OllamaModelDiscoveryService,
   CopilotAuthService,
   CodexAuthService,
@@ -94,14 +98,18 @@ import {
   getModelPricingDescription,
   getModelContextWindow,
   isDirectAnthropic,
-  isKimiCodeModelsPayload,
-  mergeKimiCodeModels,
+  parseKimiCodeModels,
+  modelListErrorText,
+  modelListNoticeText,
   getAnthropicProvider,
   getPtahCliLaneProvider,
   getProviderSessionProfile,
   PROVIDER_SESSION_PROVIDER_IDS,
 } from '@ptah-extension/shared';
-import type { RuntimeHostCapabilities } from '@ptah-extension/shared';
+import type {
+  ModelListFailureReason,
+  RuntimeHostCapabilities,
+} from '@ptah-extension/shared';
 import type { AuthEnv } from '@ptah-extension/shared';
 import type { RpcMethodName } from '@ptah-extension/shared';
 
@@ -173,6 +181,8 @@ export class ProviderRpcHandlers {
     private readonly lmStudioProxy: {
       listModels(): Promise<ProviderModelInfo[]>;
     },
+    @inject(ClaudeAmbientLoginStatusReader)
+    private readonly ambientLogin: Pick<ClaudeAmbientLoginStatusReader, 'read'>,
     @inject(AUTH_PROVIDERS_TOKENS.SDK_KIMI_CODE_AUTH, { isOptional: true })
     private readonly kimiAuth?: IKimiCodeAuthService,
     /**
@@ -288,16 +298,20 @@ export class ProviderRpcHandlers {
   /**
    * Register a dynamic fetcher for GitHub Copilot models.
    *
-   * Uses a unified cascade that matches what the user actually has access to:
-   * 1. VS Code LM API (selectChatModels) — subscription-filtered, most reliable
-   * 2. Copilot CLI SDK (client.listModels) — also subscription-filtered
-   * 3. Static fallback list from COPILOT_PROVIDER_ENTRY
+   * Live sources only, in order; the first non-empty answer wins:
+   * 1. Host LM discovery (`getCopilotModels`), subscription-filtered.
+   * 2. The Copilot account `/models` endpoint (`CopilotAuthService.listModels`).
+   * 3. The Copilot CLI adapter (`listModels`).
    *
-   * This ensures the model selector only shows models the user can actually use,
-   * preventing "model not supported" errors at runtime.
+   * When none answers, the fetcher throws a `ModelListError`:
+   * `not-signed-in` when the account source has no Copilot session, else the
+   * classified reason of the last source that failed (`empty` when every
+   * source answered with no models). `ProviderModelsService` turns that into a
+   * persisted or unavailable list; nothing here substitutes a repository list.
    */
   private registerCopilotDynamicFetcher(): void {
     this.providerModels.registerDynamicFetcher('github-copilot', async () => {
+      let lastFailure: ModelListFailureReason = 'empty';
       try {
         const platformModels = await this.modelDiscovery.getCopilotModels();
         if (platformModels.length > 0) {
@@ -318,6 +332,8 @@ export class ProviderRpcHandlers {
           }));
         }
       } catch (error) {
+        // degradation-audit: reported - the classified reason is thrown below when no later source answers.
+        lastFailure = classifyModelListFailure(error);
         this.logger.debug(
           `[ProviderRpc] Platform model discovery unavailable: ${
             error instanceof Error ? error.message : String(error)
@@ -333,6 +349,8 @@ export class ProviderRpcHandlers {
           return authModels;
         }
       } catch (error) {
+        // degradation-audit: reported - the classified reason is thrown below when no later source answers.
+        lastFailure = classifyModelListFailure(error);
         this.logger.debug(
           `[ProviderRpc] Copilot auth service model listing unavailable: ${
             error instanceof Error ? error.message : String(error)
@@ -357,22 +375,23 @@ export class ProviderRpcHandlers {
           }
         }
       } catch (error) {
+        // degradation-audit: reported - the classified reason is thrown below.
+        lastFailure = classifyModelListFailure(error);
         this.logger.debug(
           `[ProviderRpc] Copilot CLI SDK unavailable: ${
             error instanceof Error ? error.message : String(error)
           }`,
         );
       }
-      this.logger.info(
-        '[ProviderRpc] Using static Copilot model list (VS Code LM and CLI both unavailable)',
+      const signedIn = await this.readSignIn('Copilot', () =>
+        this.copilotAuthService.isAuthenticated(),
       );
-      return (COPILOT_PROVIDER_ENTRY.staticModels ?? []).map((m) => ({
-        id: m.id,
-        name: m.name,
-        description: m.description ?? '',
-        contextLength: m.contextLength ?? 0,
-        supportsToolUse: m.supportsToolUse ?? false,
-      }));
+      const reason: ModelListFailureReason =
+        signedIn === false ? 'not-signed-in' : lastFailure;
+      this.logger.info('[ProviderRpc] No live Copilot model source answered', {
+        reason,
+      });
+      throw new ModelListError(reason);
     });
   }
 
@@ -387,12 +406,16 @@ export class ProviderRpcHandlers {
    * 2. The account API (`CodexAuthService.listModels`), a separate dynamic
    *    source for when no app-server catalog is available.
    *
-   * When both sources fail or return nothing, the list is empty: there is no
-   * static fallback, because a hardcoded ID list would hide every model that
+   * When neither source lists a model, the fetcher throws a `ModelListError`:
+   * `not-signed-in` when the Codex account reports no login, else the
+   * classified reason of the last source that failed. Only when every source
+   * answered with no models is the result `[]` (reported as `empty`). There is
+   * no static fallback: a hardcoded ID list would hide every model that
    * shipped after it.
    */
   private registerCodexDynamicFetcher(): void {
     this.providerModels.registerDynamicFetcher('openai-codex', async () => {
+      let lastFailure: ModelListFailureReason | undefined;
       try {
         const adapter = this.cliDetection.getAdapter('codex');
         const catalog = adapter?.listModels
@@ -411,6 +434,8 @@ export class ProviderRpcHandlers {
           }));
         }
       } catch (error) {
+        // degradation-audit: reported - the classified reason is thrown below when the account API does not answer.
+        lastFailure = classifyModelListFailure(error);
         this.logger.debug(
           `[ProviderRpc] Codex app-server model catalog unavailable: ${
             error instanceof Error ? error.message : String(error)
@@ -426,13 +451,30 @@ export class ProviderRpcHandlers {
           return authModels;
         }
       } catch (error) {
+        // degradation-audit: reported - the classified reason is thrown below.
+        lastFailure = classifyModelListFailure(error);
         this.logger.debug(
           `[ProviderRpc] Codex auth service model listing unavailable: ${
             error instanceof Error ? error.message : String(error)
           }`,
         );
       }
-      this.logger.info('[ProviderRpc] No dynamic Codex model source available');
+      const signedIn = await this.readSignIn('Codex', () =>
+        this.codexAuthService.isAuthenticated(),
+      );
+      if (signedIn === false) {
+        this.logger.info(
+          '[ProviderRpc] Codex is not signed in; no live model list',
+        );
+        throw new ModelListError('not-signed-in');
+      }
+      if (lastFailure) {
+        this.logger.info('[ProviderRpc] No live Codex model source answered', {
+          reason: lastFailure,
+        });
+        throw new ModelListError(lastFailure);
+      }
+      this.logger.info('[ProviderRpc] Every Codex model source listed nothing');
       return [];
     });
   }
@@ -441,9 +483,13 @@ export class ProviderRpcHandlers {
    * Model fetchers for each provider-session provider this host admits, so
    * the model picker works before a session exists. The catalog is the
    * CLI's own list (`listModels()` of the profile's lane adapter, the profile
-   * id is its CLI type). Every failure returns [] (never a static list, see
-   * the Kimi fetcher below): the consumer then falls back to its persisted
-   * catalog.
+   * id is its CLI type); never a repository list.
+   *
+   * - No adapter or no `listModels` -> `no-live-source`.
+   * - No models and the adapter's sign-in check (`ensureTokensFresh`) says
+   *   `false` -> `not-signed-in`, so no saved list of another account shows.
+   * - A thrown `listModels` -> its classified reason.
+   * - A clean empty answer -> `[]` (reported as `empty`).
    */
   private registerProviderSessionDynamicFetchers(): void {
     const admitted = this.hostCapabilities?.providerSessions ?? [];
@@ -451,11 +497,24 @@ export class ProviderRpcHandlers {
       const profile = getProviderSessionProfile(providerId);
       if (!profile || !admitted.includes(profile)) continue;
       this.providerModels.registerDynamicFetcher(providerId, async () => {
+        const adapter = this.cliDetection.getAdapter(profile);
+        if (!adapter?.listModels) throw new ModelListError('no-live-source');
+        let catalog: Awaited<
+          ReturnType<NonNullable<typeof adapter.listModels>>
+        > = [];
+        let failure: ModelListFailureReason | undefined;
         try {
-          const adapter = this.cliDetection.getAdapter(profile);
-          const catalog = adapter?.listModels
-            ? await adapter.listModels()
-            : [];
+          catalog = await adapter.listModels();
+        } catch (error) {
+          // degradation-audit: reported - rethrown below as a classified ModelListError unless sign-in decides first.
+          failure = classifyModelListFailure(error);
+          this.logger.debug(
+            `[ProviderRpc] ${providerId} model catalog unavailable: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+        if (catalog.length > 0) {
           this.logger.debug(
             `[ProviderRpc] Fetched ${catalog.length} ${providerId} models from the CLI catalog`,
           );
@@ -466,82 +525,122 @@ export class ProviderRpcHandlers {
             contextLength: 0,
             supportsToolUse: true,
           }));
-        } catch (error) {
-          // degradation-audit: reported - an empty list falls back to the persisted catalog.
-          this.logger.debug(
-            `[ProviderRpc] ${providerId} model catalog unavailable: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          );
-          return [];
         }
+        const ensureTokensFresh = adapter.ensureTokensFresh?.bind(adapter);
+        const signedIn = ensureTokensFresh
+          ? await this.readSignIn(providerId, ensureTokensFresh)
+          : undefined;
+        if (signedIn === false) throw new ModelListError('not-signed-in');
+        if (failure) throw new ModelListError(failure);
+        return [];
       });
     }
   }
 
+  /**
+   * A provider's sign-in state for a model-list failure: `true`/`false` from
+   * `check`, `undefined` when the check itself throws (the caller then keeps
+   * the reason it already has).
+   */
+  private async readSignIn(
+    label: string,
+    check: () => Promise<boolean>,
+  ): Promise<boolean | undefined> {
+    try {
+      return await check();
+    } catch (error) {
+      // degradation-audit: reported - an unreadable sign-in state leaves the classified fetch reason in place.
+      this.logger.debug(`[ProviderRpc] ${label} sign-in state unreadable`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return undefined;
+    }
+  }
+
+  /**
+   * Live Kimi Code catalog (`/coding/v1/models`), parsed by
+   * `parseKimiCodeModels`. Every failure throws a `ModelListError`, never a
+   * list: `ProviderModelsService` caches and persists any non-empty answer as
+   * a live catalog, so a failure reported as rows would poison both.
+   *
+   * - No auth service or no base URL -> `no-live-source`.
+   * - No CLI login and no stored key -> `not-signed-in`.
+   * - HTTP 401/403 -> `auth-rejected`; any other non-OK status -> `http-error`.
+   * - A payload the parser cannot read (`null`) -> `bad-response`.
+   * - A thrown fetch (timeout, network) -> its classified reason.
+   */
   private registerKimiCodeDynamicFetcher(): void {
     this.providerModels.registerDynamicFetcher('kimi-code', async () => {
-      // Every failure path returns [] — never the static list. The consumer
-      // (`ProviderModelsService.fetchModels`) caches and persists any
-      // non-empty result as a LIVE catalog for the full cache TTL, so a
-      // transient 401 or timeout reported as a list would poison the cache
-      // and the persisted store with static data. An empty result falls
-      // through to the persisted catalog and then the static models.
+      if (!this.kimiAuth) throw new ModelListError('no-live-source');
+      const baseUrl = getAnthropicProvider('kimi-code')?.baseUrl;
+      if (!baseUrl) throw new ModelListError('no-live-source');
+      let credential: Awaited<
+        ReturnType<IKimiCodeAuthService['resolveRequestCredential']>
+      >;
       try {
-        if (!this.kimiAuth) return [];
-        const baseUrl = getAnthropicProvider('kimi-code')?.baseUrl;
-        if (!baseUrl) return [];
-        const credential = await this.kimiAuth.resolveRequestCredential();
-        const headers: Record<string, string> =
-          credential.kind === 'oauth'
-            ? {
-                Authorization: `Bearer ${credential.accessToken}`,
-                'x-api-key': credential.accessToken,
-              }
-            : { 'x-api-key': credential.apiKey };
-        const response = await fetch(
-          `${baseUrl.replace(/\/+$/, '')}/v1/models`,
-          {
-            headers,
-            signal: AbortSignal.timeout(10_000),
-          },
-        );
-        if (!response.ok) {
-          this.logger.debug(
-            '[ProviderRpc] Kimi Code model catalog unavailable',
-            {
-              status: response.status,
-            },
-          );
-          return [];
-        }
-        const payload: unknown = await response.json();
-        if (!isKimiCodeModelsPayload(payload)) {
-          // The live payload shape is not confirmed. Record the shape (never
-          // the content) so that a wrong schema is visible in the log. An
-          // unknown shape is a failed live fetch, not a live catalog.
-          this.logger.debug(
-            '[ProviderRpc] Kimi Code model catalog has an unknown shape',
-            {
-              payloadType: Array.isArray(payload) ? 'array' : typeof payload,
-              keys:
-                payload !== null &&
-                typeof payload === 'object' &&
-                !Array.isArray(payload)
-                  ? Object.keys(payload).slice(0, 10)
-                  : [],
-            },
-          );
-          return [];
-        }
-        return mergeKimiCodeModels(payload);
+        credential = await this.kimiAuth.resolveRequestCredential();
       } catch (error) {
-        // degradation-audit: optional-capability - the live Kimi list is optional; an auth or catalog error keeps the static models.
+        if (error instanceof KimiCodeAuthUnavailableError) {
+          throw new ModelListError('not-signed-in');
+        }
+        throw error;
+      }
+      const headers: Record<string, string> =
+        credential.kind === 'oauth'
+          ? {
+              Authorization: `Bearer ${credential.accessToken}`,
+              'x-api-key': credential.accessToken,
+            }
+          : { 'x-api-key': credential.apiKey };
+      let response: Response;
+      try {
+        response = await fetch(`${baseUrl.replace(/\/+$/, '')}/v1/models`, {
+          headers,
+          signal: AbortSignal.timeout(10_000),
+        });
+      } catch (error) {
+        // degradation-audit: reported - rethrown as a classified ModelListError; the raw message stays in the debug log.
         this.logger.debug('[ProviderRpc] Kimi Code model catalog unavailable', {
           error: error instanceof Error ? error.message : String(error),
         });
-        return [];
+        throw new ModelListError(classifyModelListFailure(error));
       }
+      if (!response.ok) {
+        this.logger.debug('[ProviderRpc] Kimi Code model catalog unavailable', {
+          status: response.status,
+        });
+        throw new ModelListError(
+          response.status === 401 || response.status === 403
+            ? 'auth-rejected'
+            : 'http-error',
+        );
+      }
+      const payload: unknown = await response.json().catch((error: unknown) => {
+        // degradation-audit: reported - an unreadable body is reported as bad-response by the parse below.
+        this.logger.debug('[ProviderRpc] Kimi Code model catalog is not JSON', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return undefined;
+      });
+      const models = parseKimiCodeModels(payload);
+      if (models === null) {
+        // The live row shape is not confirmed. Record the shape (never the
+        // content) so that a wrong schema is visible in the log.
+        this.logger.debug(
+          '[ProviderRpc] Kimi Code model catalog has an unknown shape',
+          {
+            payloadType: Array.isArray(payload) ? 'array' : typeof payload,
+            keys:
+              payload !== null &&
+              typeof payload === 'object' &&
+              !Array.isArray(payload)
+                ? Object.keys(payload).slice(0, 10)
+                : [],
+          },
+        );
+        throw new ModelListError('bad-response');
+      }
+      return models;
     });
   }
 
@@ -552,13 +651,19 @@ export class ProviderRpcHandlers {
    * users — it is NOT in the ANTHROPIC_PROVIDERS registry.
    *
    * Cascade:
-   * 1. API key present → /v1/models API (returns specific model versions)
-   * 2. SDK supportedModels() (works for all auth methods including CLI/OAuth)
+   * 1. API key present → /v1/models API (returns specific model versions).
+   *    Its failure is final: no SDK fall-through under the same key.
+   * 2. No API key → SDK supportedModels() (CLI/OAuth), read under the native
+   *    Claude login while a third-party provider owns the auth env (its proxy
+   *    would answer with that provider's models). A signed-out native Claude
+   *    login is reported as `not-signed-in`.
    *
    * Both paths populate contextLength from the pricing map as a selection
-   * hint only. Neither supplies provider capacity evidence.
-   * SdkModelService.getSupportedModels() provides its own static fallback
-   * when all dynamic sources fail, so no hardcoded tier list is needed here.
+   * hint only. Neither supplies provider capacity evidence. No repository
+   * list backs either path: a failure reaches `ProviderModelsService`, which
+   * reports a persisted or unavailable list. The SDK reads are the live ones
+   * (`getLive*`): the service saves what a fetcher returns as live, so a
+   * catalog the SDK restored from its cross-boot store must not reach it.
    */
   private registerAnthropicDirectFetcher(): void {
     const fetcher = async (): Promise<ProviderModelInfo[]> => {
@@ -568,57 +673,82 @@ export class ProviderRpcHandlers {
       const hasApiKey =
         !!this.authEnv.ANTHROPIC_API_KEY && isDirectAnthropic(this.authEnv);
 
-      try {
-        if (hasApiKey) {
-          const apiModels = await this.sdkAdapter.getApiModels();
-          if (apiModels.length > 0) {
-            this.logger.info(
-              `[ProviderRpc] Fetched ${apiModels.length} models from /v1/models (API key)`,
-            );
-            return apiModels.map((m) => ({
-              id: m.value,
-              name: m.displayName,
-              description: getModelPricingDescription(m.value),
-              contextLength: getModelContextWindow(m.value),
-              supportsToolUse: true,
-            }));
-          }
+      if (hasApiKey) {
+        // The key is the identity: a refused key, an outage or a bad
+        // payload is reported as such. Falling on to the SDK would answer
+        // with its tier aliases under the same key, which the chain would
+        // show and save as the live list.
+        const read = await this.sdkAdapter.getLiveApiModels();
+        if (!read.ok) {
+          this.logger.warn(
+            `[ProviderRpc] Anthropic /v1/models unavailable (${read.reason})`,
+          );
+          throw new ModelListError(read.reason);
         }
-
-        const sdkModels = await this.sdkAdapter.getSupportedModels();
         this.logger.info(
-          `[ProviderRpc] Fetched ${sdkModels.length} models from SDK supportedModels()`,
+          `[ProviderRpc] Fetched ${read.models.length} models from /v1/models (API key)`,
         );
-        return sdkModels.map((m) => ({
+        return read.models.map((m) => ({
           id: m.value,
           name: m.displayName,
-          description: m.description || getModelPricingDescription(m.value),
-          contextLength: getModelContextWindow(m.value),
-          supportsToolUse: true,
-        }));
-      } catch (error) {
-        this.logger.warn(
-          `[ProviderRpc] Failed to fetch Anthropic direct models, falling back to SDK: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-        const fallbackModels = await this.sdkAdapter.getSupportedModels();
-        return fallbackModels.map((m) => ({
-          id: m.value,
-          name: m.displayName,
-          description: m.description || getModelPricingDescription(m.value),
+          description: getModelPricingDescription(m.value),
           contextLength: getModelContextWindow(m.value),
           supportsToolUse: true,
         }));
       }
+
+      // Direct Anthropic auth reads the active env (OAuth token or the host
+      // login). Any other active provider routes the SDK through its own
+      // proxy, so the direct list is read under the native Claude login.
+      const direct = isDirectAnthropic(this.authEnv);
+      const sdkModels = direct
+        ? await this.sdkAdapter.getLiveSupportedModels()
+        : await this.sdkAdapter.getLiveNativeClaudeModels();
+      if (sdkModels.length === 0) {
+        // The SDK bridge answers `[]` for every failure; Claude always lists
+        // models, so `[]` is a failure, not an empty catalog. With no key or
+        // token in the env the credential is the host's Claude login.
+        const usesNativeLogin = !direct || !this.authEnv.ANTHROPIC_AUTH_TOKEN;
+        throw new ModelListError(
+          usesNativeLogin
+            ? await this.nativeClaudeFailureReason()
+            : 'unexpected',
+        );
+      }
+      this.logger.info(
+        `[ProviderRpc] Fetched ${sdkModels.length} models from SDK supportedModels()`,
+      );
+      return sdkModels.map((m) => ({
+        id: m.value,
+        name: m.displayName,
+        description: m.description || getModelPricingDescription(m.value),
+        contextLength: getModelContextWindow(m.value),
+        supportsToolUse: true,
+      }));
     };
 
     // The virtual 'anthropic' direct provider and the native 'claude-cli'
     // ptah-cli provider share the same auth path — both resolve models from the
     // host's Claude login via the SDK (no API key needed).
+    // While the native Claude login supplies the credential (the fetcher's
+    // `usesNativeLogin` case), a login signed out since the last fetch must
+    // not serve the cached list. An API key or OAuth token authenticates for
+    // itself and is not gated.
+    const anthropicSignedIn = async (): Promise<boolean | undefined> => {
+      const direct = isDirectAnthropic(this.authEnv);
+      if (
+        direct &&
+        (this.authEnv.ANTHROPIC_API_KEY || this.authEnv.ANTHROPIC_AUTH_TOKEN)
+      ) {
+        return undefined;
+      }
+      const status = await this.ambientLogin.read();
+      return status.state === 'signed-out' ? false : undefined;
+    };
     this.providerModels.registerDynamicFetcher(
       ANTHROPIC_DIRECT_PROVIDER_ID,
       fetcher,
+      { signedIn: anthropicSignedIn },
     );
 
     // 'claude-cli' is a `nativeAuth` provider: an agent running on it ALWAYS
@@ -629,25 +759,55 @@ export class ProviderRpcHandlers {
     // owns ANTHROPIC_BASE_URL and the SDK reports THAT catalog instead. Ask the
     // SDK under the native login so this list always matches what the agent
     // actually runs on, whatever the active provider happens to be.
-    this.providerModels.registerDynamicFetcher('claude-cli', async () => {
-      const models = await this.sdkAdapter.getNativeClaudeModels();
-      if (models.length === 0) {
-        this.logger.debug(
-          '[ProviderRpc] claude-cli: native Claude login returned no models — falling back to the static catalog',
+    // The sign-in reader runs before any list is served, a cached one too, so
+    // a native login signed out since the last fetch shows no list.
+    const claudeCliSignedIn = async (): Promise<boolean | undefined> => {
+      const status = await this.ambientLogin.read();
+      return status.state === 'signed-out' ? false : undefined;
+    };
+    this.providerModels.registerDynamicFetcher(
+      'claude-cli',
+      async () => {
+        const models = await this.sdkAdapter.getLiveNativeClaudeModels();
+        if (models.length === 0) {
+          // The SDK bridge answers `[]` for every failure (no CLI, a failed or
+          // timed-out probe) and Claude always lists models, so `[]` is a
+          // failure whose reason the bridge did not keep, not an empty catalog.
+          throw new ModelListError(await this.nativeClaudeFailureReason());
+        }
+        this.logger.info(
+          `[ProviderRpc] Fetched ${models.length} claude-cli models from the native Claude login`,
         );
-        return [];
-      }
-      this.logger.info(
-        `[ProviderRpc] Fetched ${models.length} claude-cli models from the native Claude login`,
-      );
-      return models.map((m) => ({
-        id: m.value,
-        name: m.displayName,
-        description: m.description || getModelPricingDescription(m.value),
-        contextLength: getModelContextWindow(m.value),
-        supportsToolUse: true,
-      }));
-    });
+        return models.map((m) => ({
+          id: m.value,
+          name: m.displayName,
+          description: m.description || getModelPricingDescription(m.value),
+          contextLength: getModelContextWindow(m.value),
+          supportsToolUse: true,
+        }));
+      },
+      { signedIn: claudeCliSignedIn },
+    );
+  }
+
+  /**
+   * Why the native Claude login listed no models, from `claude auth status`
+   * (the reader `provider:listAccounts` uses). Signed out, or no Claude CLI
+   * to sign in with, is a credential failure: the saved list may belong to
+   * the previous login and is not shown. A status that could not be read
+   * proves nothing about the login and stays `unexpected`.
+   */
+  private async nativeClaudeFailureReason(): Promise<ModelListFailureReason> {
+    const status = await this.ambientLogin.read();
+    this.logger.debug(
+      '[ProviderRpc] claude-cli: native Claude login returned no models',
+      { loginState: status.state },
+    );
+    if (status.state === 'signed-out') return 'not-signed-in';
+    if (status.state === 'unknown' && status.reason === 'cli-missing') {
+      return 'not-signed-in';
+    }
+    return 'unexpected';
   }
 
   /**
@@ -661,9 +821,9 @@ export class ProviderRpcHandlers {
    *
    * Registering at startup (same pattern as Copilot, Codex, Anthropic direct)
    * makes the dropdown populate as soon as the UI queries it, independent of
-   * which provider is currently active. The discovery service tolerates Ollama
-   * being offline — it simply returns an empty array and ProviderModelsService
-   * falls back to `staticModels` on OLLAMA_PROVIDER_ENTRY.
+   * which provider is currently active. An unreachable daemon throws a
+   * classified `ModelListError`; `ProviderModelsService` then reports the
+   * persisted or unavailable list.
    */
   private registerOllamaDynamicFetchers(): void {
     this.providerModels.registerDynamicFetcher('ollama', () =>
@@ -703,15 +863,21 @@ export class ProviderRpcHandlers {
   }
 
   /**
-   * provider:listModels - Fetch models from provider API (or return static list)
+   * provider:listModels - The provider's model list, live or saved.
    *
-   * Provider ID routing:
-   * - Registry providers (openrouter, kimi-code, z-ai, github-copilot, openai-codex, etc.):
-   *   Resolved via ANTHROPIC_PROVIDERS registry → fetchModels() handles static/dynamic paths.
-   * - 'anthropic' (virtual provider for direct OAuth/API key auth):
-   *   NOT in the registry. Handled via dynamic fetcher registered by
-   *   registerAnthropicDirectFetcher() — ProviderModelsService.fetchModels() checks
-   *   dynamic fetchers before the registry lookup, so this works without a registry entry.
+   * `ProviderModelsService.fetchModels` owns the chain (live route, then the
+   * persisted catalog) and never throws for a vendor failure: it returns a
+   * typed `ProviderModelList`. This handler maps it onto the RPC result:
+   * - `live` -> `{ models, totalCount, source }`
+   * - `persisted` -> plus `failureReason`, `savedAt` and a fixed-copy `notice`
+   * - `unavailable` -> `{ models: [], totalCount: 0, source, failureReason,
+   *   error }` with fixed-copy `error`
+   *
+   * Only an unknown provider id (or an internal fault) throws; that reaches
+   * the RPC boundary after a Sentry capture.
+   *
+   * 'anthropic' (virtual provider for direct OAuth/API key auth) is not in the
+   * registry; its dynamic fetcher (registerAnthropicDirectFetcher) answers.
    */
   private registerListModels(): void {
     this.rpcHandler.registerMethod<
@@ -727,19 +893,6 @@ export class ProviderRpcHandlers {
           toolUseOnly: validated.toolUseOnly,
         });
         const apiKey = await this.authSecretsService.getProviderKey(providerId);
-        if (!apiKey) {
-          const provider = getPtahCliLaneProvider(providerId);
-          const isPurelyDynamic =
-            provider?.modelsEndpoint &&
-            (!provider.staticModels || provider.staticModels.length === 0);
-          if (isPurelyDynamic) {
-            this.logger.debug(
-              'RPC: provider:listModels skipped - no API key for dynamic provider',
-              { providerId },
-            );
-            return { models: [], totalCount: 0, isStatic: false };
-          }
-        }
         const result = await this.providerModels.fetchModels(
           providerId,
           apiKey ?? null,
@@ -750,7 +903,8 @@ export class ProviderRpcHandlers {
           providerId,
           count: result.models.length,
           totalCount: result.totalCount,
-          isStatic: result.isStatic,
+          source: result.source,
+          failureReason: result.failureReason,
         });
 
         // Opening the picker warms both catalog caches, which is exactly what
@@ -764,30 +918,8 @@ export class ProviderRpcHandlers {
           this.providerModels.reapplyTiersForWarmedCatalog(providerId);
         }
 
-        return result;
+        return this.toListModelsResult(providerId, result);
       } catch (error) {
-        const errorMsg = error instanceof Error ? error.message : String(error);
-        if (
-          errorMsg.includes('401') ||
-          errorMsg.includes('403') ||
-          errorMsg.includes('Unauthorized') ||
-          errorMsg.includes('Forbidden') ||
-          errorMsg.includes('invalid or expired')
-        ) {
-          const provider = getPtahCliLaneProvider(providerId);
-          const providerName = provider?.name ?? providerId;
-          this.logger.warn(
-            'RPC: provider:listModels - auth failed, returning empty result',
-            { providerId, error: errorMsg },
-          );
-          return {
-            models: [],
-            totalCount: 0,
-            isStatic: false,
-            error: `API key is invalid or expired. Delete and re-enter your ${providerName} key.`,
-          };
-        }
-
         this.logger.error(
           'RPC: provider:listModels failed',
           error instanceof Error ? error : new Error(String(error)),
@@ -799,6 +931,37 @@ export class ProviderRpcHandlers {
         throw error;
       }
     });
+  }
+
+  /** Map the service's typed list onto the `provider:listModels` result. */
+  private toListModelsResult(
+    providerId: string,
+    result: ProviderModelList,
+  ): ProviderListModelsResult {
+    const { models, totalCount, source, failureReason, savedAt } = result;
+    if (source === 'live' || !failureReason) {
+      return { models, totalCount, source };
+    }
+    const providerName = getPtahCliLaneProvider(providerId)?.name ?? providerId;
+    if (source === 'persisted') {
+      return {
+        models,
+        totalCount,
+        source,
+        failureReason,
+        ...(savedAt !== undefined && {
+          savedAt,
+          notice: modelListNoticeText(failureReason, providerName, savedAt),
+        }),
+      };
+    }
+    return {
+      models: [],
+      totalCount: 0,
+      source,
+      failureReason,
+      error: modelListErrorText(failureReason, providerName),
+    };
   }
 
   /**

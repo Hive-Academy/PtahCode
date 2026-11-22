@@ -453,7 +453,10 @@ export class CliDetectionService {
 
   /**
    * List available models for all installed CLIs that support listModels().
-   * Results are cached until invalidateCache() is called.
+   * Results are cached until invalidateCache() is called, except a read in
+   * which any CLI failed: that map is returned but not cached, so the next
+   * call retries the failed CLI instead of omitting it for the process
+   * lifetime.
    */
   async listModelsForAll(): Promise<Record<string, CliModelInfo[]>> {
     if (this.modelCache) {
@@ -477,6 +480,7 @@ export class CliDetectionService {
     const generation = this.generation;
     const detections = await this.detectAll();
     const cache = new Map<CliType, CliModelInfo[]>();
+    let failed = false;
 
     for (const detection of detections) {
       if (!detection.installed) continue;
@@ -489,6 +493,7 @@ export class CliDetectionService {
         cache.set(detection.cli, models);
       } catch (error) {
         // degradation-audit: reported - model lookup failure is captured and omitted from the model map.
+        failed = true;
         const err = error instanceof Error ? error : new Error(String(error));
         this.sentryService.captureException(err, {
           errorSource: 'CliDetectionService.listModelsForAll',
@@ -500,7 +505,7 @@ export class CliDetectionService {
       }
     }
 
-    if (this.generation === generation) this.modelCache = cache;
+    if (this.generation === generation && !failed) this.modelCache = cache;
 
     const result: Record<string, CliModelInfo[]> = {};
     for (const [cli, models] of cache) {

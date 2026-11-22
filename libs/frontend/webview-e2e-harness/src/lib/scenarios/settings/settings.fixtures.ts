@@ -140,7 +140,7 @@ export const PROVIDER_MODELS_FIXTURE = {
     },
   ],
   totalCount: 3,
-  isStatic: true,
+  source: 'live',
 };
 
 /** `agent:getConfig` — system CLIs + Ptah CLI instance policy (BRIEF:63-68). */

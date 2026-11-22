@@ -301,7 +301,9 @@ describe('WorkspaceProviderProfileResolver provider-session branch', () => {
     ['explicit, no catalog yet', 'gemini-3-pro', false, null, 'gemini-3-pro'],
     ['stored, catalog offers it', 'gemini-3-pro', true, ['gemini-3-pro'], 'gemini-3-pro'],
     ['stored, catalog lacks it', 'gpt-6-luna', true, ['gemini-3-pro'], undefined],
-    ['stored, no catalog yet', 'gpt-6-luna', true, null, undefined],
+    // M8 (documented regression): with no catalogue on hand no provider
+    // claims the id, so it is kept and the vendor answers it.
+    ['stored, no catalog yet', 'gpt-6-luna', true, null, 'gpt-6-luna'],
     // Live test: a resume right after a restart has no warmed catalog; the
     // model saved in the provider's own slot must still apply.
     ['stored own-slot model, no catalog yet', 'gemini-4-hydrogen-low', true, null, 'gemini-4-hydrogen-low'],

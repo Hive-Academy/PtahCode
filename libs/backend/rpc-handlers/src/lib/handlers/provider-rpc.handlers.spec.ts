@@ -21,11 +21,11 @@
  *     `MockRpcHandler` maps to `{ success: false, error }`).
  *
  *   - `provider:listModels`: routes `providerId` through
- *     `resolveProviderId()` (param > config > DEFAULT_PROVIDER_ID). For
- *     purely-dynamic providers without an API key it short-circuits to an
- *     empty result (not an error). Auth-failure errors (`401`, `403`,
- *     `Unauthorized`) are mapped to a user-facing "API key invalid" error
- *     message instead of throwing.
+ *     `resolveProviderId()` (param > config > DEFAULT_PROVIDER_ID) and maps
+ *     the service's typed list (`live` / `persisted` / `unavailable`) onto
+ *     the result with fixed-copy `notice` / `error`. A vendor failure is
+ *     never an RPC failure; only a service throw (unknown provider) is,
+ *     after a Sentry capture.
  *
  *   - `provider:setModelTier` / `provider:clearModelTier`: on success the
  *     handler MUST call `sdkAdapter.clearModelCache()` so the next
@@ -100,8 +100,13 @@ import type {
 import {
   LIMIT_LOOKUP_DEADLINE_MS,
   SLOW_LIMIT_LOOKUP_DEADLINE_MS,
-  mergeKimiCodeModels,
+  modelListErrorText,
+  modelListNoticeText,
 } from '@ptah-extension/shared';
+import {
+  KimiCodeAuthUnavailableError,
+  ModelListError,
+} from '@ptah-extension/auth-providers';
 import {
   createMockLogger,
   type MockLogger,
@@ -222,18 +227,20 @@ type MockSdkAdapter = jest.Mocked<
   Pick<
     SdkAgentAdapter,
     | 'clearModelCache'
-    | 'getApiModels'
-    | 'getSupportedModels'
-    | 'getNativeClaudeModels'
+    | 'getLiveApiModels'
+    | 'getLiveSupportedModels'
+    | 'getLiveNativeClaudeModels'
   >
 >;
 
 function createMockSdkAdapter(): MockSdkAdapter {
   return {
     clearModelCache: jest.fn(),
-    getApiModels: jest.fn().mockResolvedValue([]),
-    getSupportedModels: jest.fn().mockResolvedValue([]),
-    getNativeClaudeModels: jest.fn().mockResolvedValue([]),
+    getLiveApiModels: jest
+      .fn()
+      .mockResolvedValue({ ok: false, reason: 'empty' }),
+    getLiveSupportedModels: jest.fn().mockResolvedValue([]),
+    getLiveNativeClaudeModels: jest.fn().mockResolvedValue([]),
   };
 }
 
@@ -275,17 +282,25 @@ function createMockOllamaDiscovery(): MockOllamaDiscovery {
 }
 
 type MockCopilotAuthService = jest.Mocked<
-  Pick<CopilotAuthService, 'listModels'>
+  Pick<CopilotAuthService, 'listModels' | 'isAuthenticated'>
 >;
 
 function createMockCopilotAuthService(): MockCopilotAuthService {
-  return { listModels: jest.fn().mockResolvedValue([]) };
+  return {
+    listModels: jest.fn().mockResolvedValue([]),
+    isAuthenticated: jest.fn().mockResolvedValue(true),
+  };
 }
 
-type MockCodexAuthService = jest.Mocked<Pick<CodexAuthService, 'listModels'>>;
+type MockCodexAuthService = jest.Mocked<
+  Pick<CodexAuthService, 'listModels' | 'isAuthenticated'>
+>;
 
 function createMockCodexAuthService(): MockCodexAuthService {
-  return { listModels: jest.fn().mockResolvedValue([]) };
+  return {
+    listModels: jest.fn().mockResolvedValue([]),
+    isAuthenticated: jest.fn().mockResolvedValue(true),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -296,6 +311,7 @@ interface Harness {
   handlers: ProviderRpcHandlers;
   kimiAuth: { resolveRequestCredential: jest.Mock };
   lmStudioProxy: { listModels: jest.Mock };
+  ambientLogin: { read: jest.Mock };
   logger: MockLogger;
   rpcHandler: MockRpcHandler;
   configManager: MockConfigManager;
@@ -415,6 +431,14 @@ function makeHarness(
       },
     ]),
   };
+  // `claude auth status` as the ambient reader reports it; signed in unless
+  // a case says otherwise.
+  const ambientLogin = {
+    read: jest.fn(async () => ({
+      state: 'connected' as const,
+      checkedAt: '2026-01-01T00:00:00.000Z',
+    })),
+  };
   const handlers = new ProviderRpcHandlers(
     logger as unknown as Logger,
     rpcHandler as unknown as import('@ptah-extension/vscode-core').RpcHandler,
@@ -447,6 +471,7 @@ function makeHarness(
     new ConnectionCheckRecorder(),
     planLimitsService,
     lmStudioProxy,
+    ambientLogin as never,
     kimiAuth as never,
     opts.hostCapabilities,
   );
@@ -456,6 +481,7 @@ function makeHarness(
     lmStudioProxy,
     handlers,
     kimiAuth,
+    ambientLogin,
     logger,
     rpcHandler,
     configManager,
@@ -986,11 +1012,16 @@ describe('ProviderRpcHandlers', () => {
       const without = makeHarness();
       without.handlers.register();
       expect(
-        without.providerModels.registerDynamicFetcher.mock.calls.map((c) => c[0]),
+        without.providerModels.registerDynamicFetcher.mock.calls.map(
+          (c) => c[0],
+        ),
       ).not.toContain('antigravity-cli');
 
       const admitted = makeHarness({
-        hostCapabilities: { nativeCodex: false, providerSessions: ['antigravity'] },
+        hostCapabilities: {
+          nativeCodex: false,
+          providerSessions: ['antigravity'],
+        },
       });
       admitted.handlers.register();
       const ids = admitted.providerModels.registerDynamicFetcher.mock.calls.map(
@@ -1002,9 +1033,12 @@ describe('ProviderRpcHandlers', () => {
       expect(ids).not.toContain('opencode-cli');
     });
 
-    it('lists provider-session models from the lane adapter catalog, [] on failure', async () => {
+    it('lists provider-session models from the lane adapter catalog and classifies failures', async () => {
       const h = makeHarness({
-        hostCapabilities: { nativeCodex: false, providerSessions: ['antigravity'] },
+        hostCapabilities: {
+          nativeCodex: false,
+          providerSessions: ['antigravity'],
+        },
       });
       h.handlers.register();
       const entry = h.providerModels.registerDynamicFetcher.mock.calls.find(
@@ -1026,13 +1060,57 @@ describe('ProviderRpcHandlers', () => {
       ]);
       expect(h.cliDetection.getAdapter).toHaveBeenCalledWith('antigravity');
 
-      listModels.mockRejectedValueOnce(new Error('agy not signed in'));
+      // A failed probe is a classified failure, never an empty list.
+      listModels.mockRejectedValueOnce(
+        Object.assign(new Error('agy models timed out'), { code: 'ETIMEDOUT' }),
+      );
+      await expect(entry[1]()).rejects.toEqual(new ModelListError('timeout'));
+      // A clean empty answer from a CLI with no sign-in check stays [].
+      listModels.mockResolvedValueOnce([]);
       expect(await entry[1]()).toEqual([]);
       h.cliDetection.getAdapter.mockReturnValue(undefined);
-      expect(await entry[1]()).toEqual([]);
+      await expect(entry[1]()).rejects.toEqual(
+        new ModelListError('no-live-source'),
+      );
     });
 
-    it('uses the Kimi auth service and merges a successful catalog', async () => {
+    it('reports a signed-out provider-session CLI as not-signed-in, whether it failed or listed nothing', async () => {
+      const h = makeHarness({
+        hostCapabilities: {
+          nativeCodex: false,
+          providerSessions: ['antigravity'],
+        },
+      });
+      h.handlers.register();
+      const entry = h.providerModels.registerDynamicFetcher.mock.calls.find(
+        ([id]) => id === 'antigravity-cli',
+      );
+      if (!entry) throw new Error('Missing Antigravity fetcher');
+      const listModels = jest.fn().mockResolvedValue([]);
+      const ensureTokensFresh = jest.fn().mockResolvedValue(false);
+      h.cliDetection.getAdapter.mockReturnValue({
+        listModels,
+        ensureTokensFresh,
+      } as never);
+
+      await expect(entry[1]()).rejects.toEqual(
+        new ModelListError('not-signed-in'),
+      );
+      listModels.mockRejectedValueOnce(
+        new Error('agy models exited with code 1'),
+      );
+      await expect(entry[1]()).rejects.toEqual(
+        new ModelListError('not-signed-in'),
+      );
+      // An unreadable sign-in state keeps the fetch's own reason.
+      ensureTokensFresh.mockRejectedValueOnce(new Error('keyring locked'));
+      listModels.mockRejectedValueOnce(
+        Object.assign(new Error('down'), { code: 'ECONNREFUSED' }),
+      );
+      await expect(entry[1]()).rejects.toEqual(new ModelListError('network'));
+    });
+
+    it('uses the Kimi auth service and lists only the live catalog rows', async () => {
       const h = makeHarness();
       h.handlers.register();
       const entry = h.providerModels.registerDynamicFetcher.mock.calls.find(
@@ -1050,10 +1128,7 @@ describe('ProviderRpcHandlers', () => {
       global.fetch = fetchMock;
       try {
         const result = await entry[1]();
-        expect(result.map((model) => model.id)).toEqual([
-          ...mergeKimiCodeModels(undefined).map((model) => model.id),
-          'future-kimi',
-        ]);
+        expect(result.map((model) => model.id)).toEqual(['future-kimi']);
         expect(fetchMock).toHaveBeenCalledWith(
           'https://api.kimi.ai/coding/v1/models',
           expect.objectContaining({ signal: expect.any(AbortSignal) }),
@@ -1065,17 +1140,20 @@ describe('ProviderRpcHandlers', () => {
     });
 
     it.each([
-      { status: 500, payload: {} },
-      { status: 200, payload: { data: [{ bad: true }] } },
+      { status: 500, payload: {}, reason: 'http-error' as const },
+      { status: 401, payload: {}, reason: 'auth-rejected' as const },
+      {
+        status: 200,
+        payload: { data: [{ bad: true }] },
+        reason: 'bad-response' as const,
+      },
+      { status: 200, payload: [], reason: 'bad-response' as const },
     ])(
-      'reports no live Kimi catalog on HTTP failure or malformed payload',
-      async ({ status, payload }) => {
-        // A failure must return [] — never the static list. The consumer
+      'throws ModelListError($reason) on HTTP $status or an unreadable payload, never a list',
+      async ({ status, payload, reason }) => {
+        // A failure must never be reported as rows: the consumer
         // (`ProviderModelsService.fetchModels`) caches and persists any
-        // non-empty result as a LIVE catalog for the full cache TTL, so a
-        // transient failure reported as a list would poison the cache with
-        // static data. The static models still reach the caller, through the
-        // consumer's static fallback.
+        // non-empty result as a LIVE catalog.
         const h = makeHarness();
         h.handlers.register();
         const entry = h.providerModels.registerDynamicFetcher.mock.calls.find(
@@ -1087,11 +1165,11 @@ describe('ProviderRpcHandlers', () => {
           async () => new Response(JSON.stringify(payload), { status }),
         );
         try {
-          expect(await entry[1]()).toEqual([]);
-          if (status === 500) {
+          await expect(entry[1]()).rejects.toEqual(new ModelListError(reason));
+          if (status !== 200) {
             expect(h.logger.debug).toHaveBeenCalledWith(
               '[ProviderRpc] Kimi Code model catalog unavailable',
-              { status: 500 },
+              { status },
             );
             expect(JSON.stringify(h.logger.debug.mock.calls)).not.toContain(
               'fake-access-token',
@@ -1099,7 +1177,9 @@ describe('ProviderRpcHandlers', () => {
           } else {
             expect(h.logger.debug).toHaveBeenCalledWith(
               '[ProviderRpc] Kimi Code model catalog has an unknown shape',
-              { payloadType: 'object', keys: ['data'] },
+              expect.objectContaining({
+                payloadType: Array.isArray(payload) ? 'array' : 'object',
+              }),
             );
           }
         } finally {
@@ -1108,7 +1188,30 @@ describe('ProviderRpcHandlers', () => {
       },
     );
 
-    it('logs a thrown Kimi fetch error without the credential and reports no live catalog', async () => {
+    it('throws not-signed-in when Kimi has no CLI login and no key', async () => {
+      const h = makeHarness();
+      h.kimiAuth.resolveRequestCredential.mockRejectedValue(
+        new KimiCodeAuthUnavailableError('signed-out'),
+      );
+      h.handlers.register();
+      const entry = h.providerModels.registerDynamicFetcher.mock.calls.find(
+        ([id]) => id === 'kimi-code',
+      );
+      if (!entry) throw new Error('Missing Kimi fetcher');
+      const originalFetch = global.fetch;
+      const fetchMock = jest.fn();
+      global.fetch = fetchMock;
+      try {
+        await expect(entry[1]()).rejects.toEqual(
+          new ModelListError('not-signed-in'),
+        );
+        expect(fetchMock).not.toHaveBeenCalled();
+      } finally {
+        global.fetch = originalFetch;
+      }
+    });
+
+    it('logs a thrown Kimi fetch error without the credential and throws a classified reason', async () => {
       const h = makeHarness();
       h.handlers.register();
       const entry = h.providerModels.registerDynamicFetcher.mock.calls.find(
@@ -1117,10 +1220,12 @@ describe('ProviderRpcHandlers', () => {
       if (!entry) throw new Error('Missing Kimi fetcher');
       const originalFetch = global.fetch;
       global.fetch = jest.fn(async () => {
-        throw new Error('network unavailable');
+        throw Object.assign(new Error('network unavailable'), {
+          code: 'ECONNREFUSED',
+        });
       });
       try {
-        expect(await entry[1]()).toEqual([]);
+        await expect(entry[1]()).rejects.toEqual(new ModelListError('network'));
         expect(h.logger.debug).toHaveBeenCalledWith(
           '[ProviderRpc] Kimi Code model catalog unavailable',
           { error: 'network unavailable' },
@@ -1146,14 +1251,11 @@ describe('ProviderRpcHandlers', () => {
       expect(h.lmStudioProxy.listModels).toHaveBeenCalledTimes(1);
     });
 
-    it.each(['api', 'sdk', 'fallback', 'claude-cli'])(
+    it.each(['api', 'sdk', 'claude-cli'])(
       'does not declare provider capacity for Anthropic-direct %s model entries',
       async (source) => {
         const h = makeHarness({
-          authEnv:
-            source === 'api' || source === 'fallback'
-              ? { ANTHROPIC_API_KEY: 'fixture-key' }
-              : {},
+          authEnv: source === 'api' ? { ANTHROPIC_API_KEY: 'fixture-key' } : {},
         });
         const models = [
           {
@@ -1162,11 +1264,9 @@ describe('ProviderRpcHandlers', () => {
             description: '',
           },
         ];
-        h.sdkAdapter.getApiModels.mockResolvedValue(models);
-        h.sdkAdapter.getSupportedModels.mockResolvedValue(models);
-        h.sdkAdapter.getNativeClaudeModels.mockResolvedValue(models);
-        if (source === 'fallback')
-          h.sdkAdapter.getApiModels.mockRejectedValue(new Error('offline'));
+        h.sdkAdapter.getLiveApiModels.mockResolvedValue({ ok: true, models });
+        h.sdkAdapter.getLiveSupportedModels.mockResolvedValue(models);
+        h.sdkAdapter.getLiveNativeClaudeModels.mockResolvedValue(models);
         h.handlers.register();
         const providerId = source === 'claude-cli' ? 'claude-cli' : 'anthropic';
         const entry = h.providerModels.registerDynamicFetcher.mock.calls.find(
@@ -1189,7 +1289,7 @@ describe('ProviderRpcHandlers', () => {
           ANTHROPIC_API_KEY: 'kimi-fixture-key',
         },
       });
-      h.sdkAdapter.getSupportedModels.mockResolvedValue([
+      h.sdkAdapter.getLiveNativeClaudeModels.mockResolvedValue([
         { value: 'claude-sonnet-4-5', displayName: 'Sonnet', description: '' },
       ]);
       h.handlers.register();
@@ -1200,12 +1300,98 @@ describe('ProviderRpcHandlers', () => {
 
       const result = await entry[1]();
 
-      expect(h.sdkAdapter.getApiModels).not.toHaveBeenCalled();
-      expect(h.sdkAdapter.getSupportedModels).toHaveBeenCalledTimes(1);
+      expect(h.sdkAdapter.getLiveApiModels).not.toHaveBeenCalled();
+      // The active env belongs to the third-party proxy: the direct list is
+      // read under the native Claude login, never through that proxy.
+      expect(h.sdkAdapter.getLiveSupportedModels).not.toHaveBeenCalled();
+      expect(h.sdkAdapter.getLiveNativeClaudeModels).toHaveBeenCalledTimes(1);
       expect(result).toHaveLength(1);
     });
 
-    it('declares platform API capacity but leaves the static Copilot fallback unverified', async () => {
+    it('lists no-key direct Anthropic models from the active env when it is direct', async () => {
+      const h = makeHarness({ authEnv: {} });
+      h.sdkAdapter.getLiveSupportedModels.mockResolvedValue([
+        { value: 'claude-sonnet-4-5', displayName: 'Sonnet', description: '' },
+      ]);
+      h.handlers.register();
+      const entry = h.providerModels.registerDynamicFetcher.mock.calls.find(
+        ([id]) => id === 'anthropic',
+      );
+      if (!entry) throw new Error('Missing Anthropic fetcher');
+
+      expect(await entry[1]()).toHaveLength(1);
+      expect(h.sdkAdapter.getLiveSupportedModels).toHaveBeenCalledTimes(1);
+      expect(h.sdkAdapter.getLiveNativeClaudeModels).not.toHaveBeenCalled();
+    });
+
+    it('registers a claude-cli sign-in reader that reports only a signed-out login', async () => {
+      const h = makeHarness();
+      h.handlers.register();
+      const entry = h.providerModels.registerDynamicFetcher.mock.calls.find(
+        ([id]) => id === 'claude-cli',
+      );
+      if (!entry) throw new Error('Missing claude-cli fetcher');
+      const options = entry[2] as
+        { signedIn?: () => Promise<boolean | undefined> } | undefined;
+      if (!options?.signedIn) throw new Error('Missing sign-in reader');
+
+      await expect(options.signedIn()).resolves.toBeUndefined();
+      h.ambientLogin.read.mockResolvedValueOnce({
+        state: 'signed-out',
+        checkedAt: '2026-01-01T00:00:00.000Z',
+      } as never);
+      await expect(options.signedIn()).resolves.toBe(false);
+      h.ambientLogin.read.mockResolvedValueOnce({
+        state: 'unknown',
+        reason: 'timeout',
+        checkedAt: '2026-01-01T00:00:00.000Z',
+      } as never);
+      await expect(options.signedIn()).resolves.toBeUndefined();
+    });
+
+    function anthropicSignInReader(
+      h: ReturnType<typeof makeHarness>,
+    ): () => Promise<boolean | undefined> {
+      const entry = h.providerModels.registerDynamicFetcher.mock.calls.find(
+        ([id]) => id === 'anthropic',
+      );
+      const options = entry?.[2] as
+        { signedIn?: () => Promise<boolean | undefined> } | undefined;
+      if (!options?.signedIn)
+        throw new Error('Missing Anthropic sign-in reader');
+      return options.signedIn;
+    }
+
+    it('gates the anthropic list on the native Claude login it reads', async () => {
+      const h = makeHarness();
+      h.handlers.register();
+      h.ambientLogin.read.mockResolvedValueOnce({
+        state: 'signed-out',
+        checkedAt: '2026-01-01T00:00:00.000Z',
+      } as never);
+
+      await expect(anthropicSignInReader(h)()).resolves.toBe(false);
+    });
+
+    it.each([
+      ['an API key', { ANTHROPIC_API_KEY: 'fixture-key' }],
+      ['an OAuth token', { ANTHROPIC_AUTH_TOKEN: 'fixture-token' }],
+    ])(
+      'does not gate the anthropic list on the Claude login for %s',
+      async (_label, authEnv) => {
+        const h = makeHarness({ authEnv });
+        h.handlers.register();
+        h.ambientLogin.read.mockResolvedValue({
+          state: 'signed-out',
+          checkedAt: '2026-01-01T00:00:00.000Z',
+        } as never);
+
+        await expect(anthropicSignInReader(h)()).resolves.toBeUndefined();
+        expect(h.ambientLogin.read).not.toHaveBeenCalled();
+      },
+    );
+
+    it('declares platform API capacity for Copilot models from platform discovery', async () => {
       const h = makeHarness();
       h.modelDiscovery.getCopilotModels.mockResolvedValueOnce([
         { id: 'api-model-418', name: 'API model', contextLength: 200000 },
@@ -1219,10 +1405,53 @@ describe('ProviderRpcHandlers', () => {
         contextLength: 200000,
         contextLengthSource: 'provider',
       });
-      const fallback = await entry[1]();
-      expect(fallback.length).toBeGreaterThan(0);
-      for (const model of fallback)
-        expect(model).not.toHaveProperty('contextLengthSource');
+    });
+
+    describe('Copilot fetcher with no live answer', () => {
+      function copilotFetcher(h: Harness): () => Promise<unknown[]> {
+        const entry = h.providerModels.registerDynamicFetcher.mock.calls.find(
+          ([id]) => id === 'github-copilot',
+        );
+        if (!entry) throw new Error('Missing Copilot fetcher');
+        return entry[1];
+      }
+
+      it('throws not-signed-in when the account source has no session', async () => {
+        const h = makeHarness();
+        h.copilotAuthService.isAuthenticated.mockResolvedValue(false);
+        h.handlers.register();
+        await expect(copilotFetcher(h)()).rejects.toEqual(
+          new ModelListError('not-signed-in'),
+        );
+      });
+
+      it('throws empty when signed in and every source listed nothing', async () => {
+        const h = makeHarness();
+        h.handlers.register();
+        await expect(copilotFetcher(h)()).rejects.toEqual(
+          new ModelListError('empty'),
+        );
+      });
+
+      it('throws the classified reason of the last failing source when signed in', async () => {
+        const h = makeHarness();
+        h.modelDiscovery.getCopilotModels.mockRejectedValue(
+          Object.assign(new Error('slow'), { code: 'ETIMEDOUT' }),
+        );
+        const cliAdapter: Pick<CliAdapter, 'name' | 'listModels'> = {
+          name: 'copilot',
+          listModels: jest
+            .fn()
+            .mockRejectedValue(
+              Object.assign(new Error('down'), { code: 'ECONNREFUSED' }),
+            ),
+        };
+        h.cliDetection.getAdapter.mockReturnValue(cliAdapter as CliAdapter);
+        h.handlers.register();
+        await expect(copilotFetcher(h)()).rejects.toEqual(
+          new ModelListError('network'),
+        );
+      });
     });
 
     it('lists the selected app-server catalog for Codex, including a future ID', async () => {
@@ -1294,14 +1523,54 @@ describe('ProviderRpcHandlers', () => {
       ]);
     });
 
-    it('returns an empty list when both dynamic sources fail, never a static fallback', async () => {
+    it('throws the classified reason when both dynamic sources fail, never a static fallback', async () => {
       const h = makeHarness();
       h.cliDetection.getAdapter.mockReturnValue(
         codexCatalogAdapter(
           jest.fn().mockRejectedValue(new Error('unavailable')),
         ),
       );
-      h.codexAuthService.listModels.mockRejectedValue(new Error('unavailable'));
+      h.codexAuthService.listModels.mockRejectedValue(
+        Object.assign(new Error('unavailable'), { code: 'ENOTFOUND' }),
+      );
+      h.handlers.register();
+      const entry = h.providerModels.registerDynamicFetcher.mock.calls.find(
+        ([id]) => id === 'openai-codex',
+      );
+      if (!entry) throw new Error('Missing Codex fetcher');
+
+      await expect(entry[1]()).rejects.toEqual(new ModelListError('network'));
+      expect(h.logger.debug).toHaveBeenCalledWith(
+        expect.stringContaining('Codex app-server model catalog unavailable'),
+      );
+      expect(h.logger.debug).toHaveBeenCalledWith(
+        expect.stringContaining('Codex auth service model listing unavailable'),
+      );
+    });
+
+    it('throws not-signed-in for a signed-out Codex account instead of an empty list', async () => {
+      const h = makeHarness();
+      h.cliDetection.getAdapter.mockReturnValue(
+        codexCatalogAdapter(jest.fn().mockResolvedValue([])),
+      );
+      h.codexAuthService.listModels.mockRejectedValue(new Error('401'));
+      h.codexAuthService.isAuthenticated.mockResolvedValue(false);
+      h.handlers.register();
+      const entry = h.providerModels.registerDynamicFetcher.mock.calls.find(
+        ([id]) => id === 'openai-codex',
+      );
+      if (!entry) throw new Error('Missing Codex fetcher');
+
+      await expect(entry[1]()).rejects.toEqual(
+        new ModelListError('not-signed-in'),
+      );
+    });
+
+    it('returns [] only when every Codex source answered with no models while signed in', async () => {
+      const h = makeHarness();
+      h.cliDetection.getAdapter.mockReturnValue(
+        codexCatalogAdapter(jest.fn().mockResolvedValue([])),
+      );
       h.handlers.register();
       const entry = h.providerModels.registerDynamicFetcher.mock.calls.find(
         ([id]) => id === 'openai-codex',
@@ -1309,12 +1578,89 @@ describe('ProviderRpcHandlers', () => {
       if (!entry) throw new Error('Missing Codex fetcher');
 
       await expect(entry[1]()).resolves.toEqual([]);
-      expect(h.logger.debug).toHaveBeenCalledWith(
-        expect.stringContaining('Codex app-server model catalog unavailable'),
+    });
+
+    it('keeps the last source reason when the Copilot sign-in check throws', async () => {
+      const h = makeHarness();
+      h.modelDiscovery.getCopilotModels.mockRejectedValue(
+        Object.assign(new Error('slow'), { code: 'ETIMEDOUT' }),
       );
-      expect(h.logger.debug).toHaveBeenCalledWith(
-        expect.stringContaining('Codex auth service model listing unavailable'),
+      h.copilotAuthService.isAuthenticated.mockRejectedValue(
+        new Error('token store unreadable'),
       );
+      h.handlers.register();
+      const entry = h.providerModels.registerDynamicFetcher.mock.calls.find(
+        ([id]) => id === 'github-copilot',
+      );
+      if (!entry) throw new Error('Missing Copilot fetcher');
+
+      await expect(entry[1]()).rejects.toEqual(new ModelListError('timeout'));
+    });
+
+    /** SDK tier aliases, what the SDK answers under a key /v1/models refused. */
+    const SDK_ALIAS_ROWS = [
+      { value: 'default', displayName: 'Default', description: '' },
+      { value: 'sonnet', displayName: 'Sonnet', description: '' },
+    ];
+
+    function anthropicFetcher(h: Harness): () => Promise<unknown[]> {
+      const entry = h.providerModels.registerDynamicFetcher.mock.calls.find(
+        ([id]) => id === 'anthropic',
+      );
+      if (!entry) throw new Error('Missing Anthropic fetcher');
+      return entry[1] as () => Promise<unknown[]>;
+    }
+
+    it.each([
+      'auth-rejected',
+      'network',
+      'timeout',
+      'http-error',
+      'bad-response',
+      'empty',
+    ] as const)(
+      'reports a %s /v1/models read for an API key and never lists the SDK aliases',
+      async (reason) => {
+        const h = makeHarness({
+          authEnv: { ANTHROPIC_API_KEY: 'fixture-key' },
+        });
+        // The real read resolves with a reason; it does not throw.
+        h.sdkAdapter.getLiveApiModels.mockResolvedValue({ ok: false, reason });
+        h.sdkAdapter.getLiveSupportedModels.mockResolvedValue(SDK_ALIAS_ROWS);
+        h.handlers.register();
+
+        await expect(anthropicFetcher(h)()).rejects.toEqual(
+          new ModelListError(reason),
+        );
+        expect(h.sdkAdapter.getLiveSupportedModels).not.toHaveBeenCalled();
+      },
+    );
+
+    it('reports not-signed-in when the native Claude login lists nothing and is signed out', async () => {
+      const h = makeHarness();
+      h.sdkAdapter.getLiveSupportedModels.mockResolvedValue([]);
+      h.ambientLogin.read.mockResolvedValue({
+        state: 'signed-out',
+        checkedAt: '2026-01-01T00:00:00.000Z',
+      });
+      h.handlers.register();
+
+      await expect(anthropicFetcher(h)()).rejects.toEqual(
+        new ModelListError('not-signed-in'),
+      );
+    });
+
+    it('does not read the Claude login for an OAuth token that lists nothing', async () => {
+      const h = makeHarness({
+        authEnv: { ANTHROPIC_AUTH_TOKEN: 'fixture-token' },
+      });
+      h.sdkAdapter.getLiveSupportedModels.mockResolvedValue([]);
+      h.handlers.register();
+
+      await expect(anthropicFetcher(h)()).rejects.toEqual(
+        new ModelListError('unexpected'),
+      );
+      expect(h.ambientLogin.read).not.toHaveBeenCalled();
     });
 
     /**
@@ -1335,7 +1681,7 @@ describe('ProviderRpcHandlers', () => {
 
       it('lists the native Claude login models', async () => {
         const h = makeHarness();
-        h.sdkAdapter.getNativeClaudeModels.mockResolvedValue([
+        h.sdkAdapter.getLiveNativeClaudeModels.mockResolvedValue([
           {
             value: 'claude-opus-4-8',
             displayName: 'Claude Opus 4.8',
@@ -1356,7 +1702,7 @@ describe('ProviderRpcHandlers', () => {
         const h = makeHarness({
           authEnv: { ANTHROPIC_BASE_URL: 'http://127.0.0.1:58306' },
         });
-        h.sdkAdapter.getNativeClaudeModels.mockResolvedValue([
+        h.sdkAdapter.getLiveNativeClaudeModels.mockResolvedValue([
           {
             value: 'opus[1m]',
             displayName: 'Opus (1M context)',
@@ -1369,7 +1715,7 @@ describe('ProviderRpcHandlers', () => {
           },
         ]);
         // The active-provider list must never be the source for this provider.
-        h.sdkAdapter.getSupportedModels.mockResolvedValue([
+        h.sdkAdapter.getLiveSupportedModels.mockResolvedValue([
           {
             value: 'gpt-5.6-luna',
             displayName: 'gpt-5.6-luna',
@@ -1382,15 +1728,61 @@ describe('ProviderRpcHandlers', () => {
           expect.objectContaining({ id: 'opus[1m]' }),
           expect.objectContaining({ id: 'claude-fable-5[1m]' }),
         ]);
-        expect(h.sdkAdapter.getSupportedModels).not.toHaveBeenCalled();
+        expect(h.sdkAdapter.getLiveSupportedModels).not.toHaveBeenCalled();
       });
 
-      it('returns empty (→ static Claude catalog) when the native login reports nothing', async () => {
+      it('throws unexpected when the bridge answers no models and the login is signed in', async () => {
+        // The bridge answers [] for every failure, so [] is not an empty
+        // catalog; a signed-in login gives no credential reason.
         const h = makeHarness();
-        h.sdkAdapter.getNativeClaudeModels.mockResolvedValue([]);
+        h.sdkAdapter.getLiveNativeClaudeModels.mockResolvedValue([]);
         h.handlers.register();
 
-        await expect(claudeCliFetcher(h)()).resolves.toEqual([]);
+        await expect(claudeCliFetcher(h)()).rejects.toEqual(
+          new ModelListError('unexpected'),
+        );
+      });
+
+      it.each([
+        [
+          'signed out',
+          { state: 'signed-out', checkedAt: '2026-01-01T00:00:00.000Z' },
+        ],
+        [
+          'without a Claude CLI',
+          {
+            state: 'unknown',
+            reason: 'cli-missing',
+            checkedAt: '2026-01-01T00:00:00.000Z',
+          },
+        ],
+      ])(
+        'throws not-signed-in when the native login is %s',
+        async (_label, status) => {
+          const h = makeHarness();
+          h.sdkAdapter.getLiveNativeClaudeModels.mockResolvedValue([]);
+          h.ambientLogin.read.mockResolvedValue(status);
+          h.handlers.register();
+
+          await expect(claudeCliFetcher(h)()).rejects.toEqual(
+            new ModelListError('not-signed-in'),
+          );
+        },
+      );
+
+      it('throws unexpected when the login status could not be read', async () => {
+        const h = makeHarness();
+        h.sdkAdapter.getLiveNativeClaudeModels.mockResolvedValue([]);
+        h.ambientLogin.read.mockResolvedValue({
+          state: 'unknown',
+          reason: 'timeout',
+          checkedAt: null,
+        });
+        h.handlers.register();
+
+        await expect(claudeCliFetcher(h)()).rejects.toEqual(
+          new ModelListError('unexpected'),
+        );
       });
     });
   });
@@ -1400,35 +1792,112 @@ describe('ProviderRpcHandlers', () => {
   // -------------------------------------------------------------------------
 
   describe('provider:listModels', () => {
-    it('returns the Anthropic API lane static catalog without a key', async () => {
+    const liveRow = {
+      id: 'model-live-a',
+      name: 'Model A',
+      description: '',
+      contextLength: 200000,
+      supportsToolUse: true,
+    };
+
+    it('maps a live list to { models, totalCount, source }', async () => {
       const h = makeHarness();
-      const models = [
-        {
-          id: 'claude-sonnet-test',
-          name: 'Sonnet test',
-          description: 'Test',
-          contextLength: 200000,
-          supportsToolUse: true,
-        },
-      ];
       h.providerModels.fetchModels.mockResolvedValue({
-        models,
+        models: [liveRow],
         totalCount: 1,
-        isStatic: true,
+        source: 'live',
       });
       h.handlers.register();
 
-      const result = await call<{
-        models: typeof models;
-        totalCount: number;
-        isStatic: boolean;
-      }>(h, 'provider:listModels', { providerId: 'anthropic-api' });
+      const result = await call<Record<string, unknown>>(
+        h,
+        'provider:listModels',
+        { providerId: 'anthropic-api' },
+      );
       expect(h.providerModels.fetchModels).toHaveBeenCalledWith(
         'anthropic-api',
         null,
         false,
       );
-      expect(result).toMatchObject({ models, totalCount: 1, isStatic: true });
+      expect(result).toEqual({
+        models: [liveRow],
+        totalCount: 1,
+        source: 'live',
+      });
+    });
+
+    it('maps a persisted list with failureReason, savedAt and the fixed notice', async () => {
+      const h = makeHarness({ providerKeysSeed: { openrouter: 'sk-or' } });
+      const savedAt = Date.UTC(2026, 10, 1, 12);
+      h.providerModels.fetchModels.mockResolvedValue({
+        models: [liveRow],
+        totalCount: 1,
+        source: 'persisted',
+        failureReason: 'timeout',
+        savedAt,
+      });
+      h.handlers.register();
+
+      const result = await call<Record<string, unknown>>(
+        h,
+        'provider:listModels',
+        { providerId: 'openrouter' },
+      );
+      expect(result).toEqual({
+        models: [liveRow],
+        totalCount: 1,
+        source: 'persisted',
+        failureReason: 'timeout',
+        savedAt,
+        notice: modelListNoticeText('timeout', 'OpenRouter', savedAt),
+      });
+      expect(result['notice']).toContain('2026-11-01');
+    });
+
+    it('maps an unavailable list to an empty result with the fixed error, never an RPC failure', async () => {
+      const h = makeHarness();
+      h.providerModels.fetchModels.mockResolvedValue({
+        models: [],
+        totalCount: 0,
+        source: 'unavailable',
+        failureReason: 'no-key',
+      });
+      h.handlers.register();
+
+      const result = await call<Record<string, unknown>>(
+        h,
+        'provider:listModels',
+        { providerId: 'openrouter' },
+      );
+      expect(h.providerModels.fetchModels).toHaveBeenCalledWith(
+        'openrouter',
+        null,
+        false,
+      );
+      expect(result).toEqual({
+        models: [],
+        totalCount: 0,
+        source: 'unavailable',
+        failureReason: 'no-key',
+        error: modelListErrorText('no-key', 'OpenRouter'),
+      });
+      expect(h.sentry.captureException).not.toHaveBeenCalled();
+    });
+
+    it('uses the provider id as the name for a provider outside the registry', async () => {
+      const h = makeHarness();
+      h.providerModels.fetchModels.mockResolvedValue({
+        models: [],
+        totalCount: 0,
+        source: 'unavailable',
+        failureReason: 'empty',
+      });
+      h.handlers.register();
+
+      const result = await call<{ error?: string }>(h, 'provider:listModels', {
+        providerId: 'anthropic',
+      });
+      expect(result.error).toBe(modelListErrorText('empty', 'anthropic'));
     });
 
     it('resolves providerId from params override', async () => {
@@ -1436,7 +1905,7 @@ describe('ProviderRpcHandlers', () => {
       h.providerModels.fetchModels.mockResolvedValue({
         models: [],
         totalCount: 0,
-        isStatic: true,
+        source: 'live',
       });
       h.handlers.register();
 
@@ -1457,7 +1926,7 @@ describe('ProviderRpcHandlers', () => {
       h.providerModels.fetchModels.mockResolvedValue({
         models: [],
         totalCount: 0,
-        isStatic: true,
+        source: 'live',
       });
       h.handlers.register();
 
@@ -1471,16 +1940,13 @@ describe('ProviderRpcHandlers', () => {
     });
 
     it('forwards toolUseOnly flag to the service', async () => {
-      // Seed a key for openrouter — it is a purely dynamic provider
-      // (modelsEndpoint set, no static fallback), so absent a key the handler
-      // short-circuits to an empty result without ever invoking the service.
       const h = makeHarness({
         providerKeysSeed: { openrouter: 'sk-or-test' },
       });
       h.providerModels.fetchModels.mockResolvedValue({
         models: [],
         totalCount: 0,
-        isStatic: true,
+        source: 'live',
       });
       h.handlers.register();
 
@@ -1510,17 +1976,9 @@ describe('ProviderRpcHandlers', () => {
         providerKeysSeed: { 'z-ai': 'key-z' },
       });
       h.providerModels.fetchModels.mockResolvedValue({
-        models: [
-          {
-            id: 'kimi-k2',
-            name: 'Kimi K2',
-            description: '',
-            contextLength: 200000,
-            supportsToolUse: true,
-          },
-        ],
+        models: [liveRow],
         totalCount: 1,
-        isStatic: false,
+        source: 'live',
       });
       h.handlers.register();
 
@@ -1532,14 +1990,13 @@ describe('ProviderRpcHandlers', () => {
     });
 
     it('does not claim a warm when the provider returned no catalog at all', async () => {
-      // Nothing landed, so there is nothing new to derive from. Saying
-      // otherwise would push the service into re-applying against the same
-      // hole and scheduling a fetch the user's own just failed to satisfy.
+      // Nothing landed, so there is nothing new to derive from.
       const h = makeHarness({ providerKeysSeed: { 'kimi-code': 'key-m' } });
       h.providerModels.fetchModels.mockResolvedValue({
         models: [],
         totalCount: 0,
-        isStatic: false,
+        source: 'unavailable',
+        failureReason: 'network',
       });
       h.handlers.register();
 
@@ -1550,58 +2007,43 @@ describe('ProviderRpcHandlers', () => {
       ).not.toHaveBeenCalled();
     });
 
-    it('short-circuits to empty result for purely-dynamic providers without an API key', async () => {
-      // OpenRouter has `modelsEndpoint` set and no static fallback beyond
-      // what a key would unlock — the handler must not call fetchModels.
+    it('asks the service even without a key: the chain decides, no handler pre-check', async () => {
       const h = makeHarness();
+      h.providerModels.fetchModels.mockResolvedValue({
+        models: [],
+        totalCount: 0,
+        source: 'unavailable',
+        failureReason: 'no-key',
+      });
       h.handlers.register();
 
-      const result = await call<{
-        models: unknown[];
-        totalCount: number;
-        isStatic: boolean;
-      }>(h, 'provider:listModels', { providerId: 'openrouter' });
+      await call(h, 'provider:listModels', { providerId: 'sakana' });
 
-      expect(result).toEqual({ models: [], totalCount: 0, isStatic: false });
-      expect(h.providerModels.fetchModels).not.toHaveBeenCalled();
+      expect(h.providerModels.fetchModels).toHaveBeenCalledWith(
+        'sakana',
+        null,
+        false,
+      );
     });
 
-    it('Sakana with a bare key → reaches the dynamic fetch path (fetchModels invoked with the key)', async () => {
-      // Sakana has modelsEndpoint set, so a present key unlocks the dynamic
-      // /v1/models list (incl. dated aliases like fugu-ultra-20260615).
+    it('Sakana with a bare key → reaches the live path (fetchModels invoked with the key)', async () => {
       const h = makeHarness({ providerKeysSeed: { sakana: 'sakana-key' } });
       h.providerModels.fetchModels.mockResolvedValue({
         models: [
           {
-            id: 'fugu',
-            name: 'Fugu',
-            description: '',
-            contextLength: 200000,
-            supportsToolUse: true,
-          },
-          {
-            id: 'fugu-ultra',
-            name: 'Fugu Ultra',
-            description: '',
-            contextLength: 200000,
-            supportsToolUse: true,
-          },
-          {
+            ...liveRow,
             id: 'fugu-ultra-20260615',
             name: 'fugu-ultra-20260615',
-            description: '',
-            contextLength: 200000,
-            supportsToolUse: true,
           },
         ],
-        totalCount: 3,
-        isStatic: false,
+        totalCount: 1,
+        source: 'live',
       });
       h.handlers.register();
 
       const result = await call<{
         models: { id: string }[];
-        isStatic: boolean;
+        source?: string;
       }>(h, 'provider:listModels', { providerId: 'sakana' });
 
       expect(h.providerModels.fetchModels).toHaveBeenCalledWith(
@@ -1609,87 +2051,25 @@ describe('ProviderRpcHandlers', () => {
         'sakana-key',
         false,
       );
-      expect(result.isStatic).toBe(false);
-      expect(result.models.map((m) => m.id)).toContain('fugu-ultra-20260615');
+      expect(result.source).toBe('live');
+      expect(result.models.map((m) => m.id)).toEqual(['fugu-ultra-20260615']);
     });
 
-    it('Sakana without a key → does NOT short-circuit (has staticModels) and returns the static fallback', async () => {
-      // isPurelyDynamic is false for Sakana (staticModels present), so the
-      // handler must fall through to fetchModels(null) and serve fugu/fugu-ultra.
+    it('captures a service throw (unknown provider) to Sentry and re-throws to the RPC boundary', async () => {
       const h = makeHarness();
-      h.providerModels.fetchModels.mockResolvedValue({
-        models: [
-          {
-            id: 'fugu',
-            name: 'Fugu',
-            description: '',
-            contextLength: 200000,
-            supportsToolUse: true,
-          },
-          {
-            id: 'fugu-ultra',
-            name: 'Fugu Ultra',
-            description: '',
-            contextLength: 200000,
-            supportsToolUse: true,
-          },
-        ],
-        totalCount: 2,
-        isStatic: true,
-      });
-      h.handlers.register();
-
-      const result = await call<{
-        models: { id: string }[];
-        isStatic: boolean;
-      }>(h, 'provider:listModels', { providerId: 'sakana' });
-
-      expect(h.providerModels.fetchModels).toHaveBeenCalledWith(
-        'sakana',
-        null,
-        false,
-      );
-      expect(result.models.map((m) => m.id)).toEqual(['fugu', 'fugu-ultra']);
-      expect(result.models.length).toBeGreaterThan(0);
-    });
-
-    it('maps 401-ish errors to a friendly "invalid key" response (no throw)', async () => {
-      const h = makeHarness({
-        providerKeysSeed: { openrouter: 'stale-key' },
-      });
       h.providerModels.fetchModels.mockRejectedValue(
-        new Error('HTTP 401 Unauthorized'),
-      );
-      h.handlers.register();
-
-      const result = await call<{
-        models: unknown[];
-        error?: string;
-      }>(h, 'provider:listModels', { providerId: 'openrouter' });
-
-      expect(result.models).toEqual([]);
-      expect(result.error).toMatch(/invalid or expired/i);
-      // Auth errors are NOT captured to Sentry (expected negative path).
-      expect(h.sentry.captureException).not.toHaveBeenCalled();
-    });
-
-    it('captures non-auth errors to Sentry and re-throws to the RPC boundary', async () => {
-      const h = makeHarness({
-        providerKeysSeed: { openrouter: 'key' },
-      });
-      h.providerModels.fetchModels.mockRejectedValue(
-        new Error('ECONNRESET on provider API'),
+        new Error('Unknown provider: nope'),
       );
       h.handlers.register();
 
       const response = await h.rpcHandler.handleMessage({
         method: 'provider:listModels',
-        params: { providerId: 'openrouter' },
+        params: { providerId: 'nope' },
         correlationId: 'corr',
       });
 
       expect(response.success).toBe(false);
-      expect(response.error).toMatch(/ECONNRESET/);
+      expect(response.error).toMatch(/Unknown provider/);
       expect(h.sentry.captureException).toHaveBeenCalled();
     });
   });

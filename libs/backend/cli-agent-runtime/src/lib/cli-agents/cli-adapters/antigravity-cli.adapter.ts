@@ -134,7 +134,11 @@ import { laneMcpAuthUrl } from './lane-mcp-credentials';
 import { ptahMcpServerUrl } from './ptah-mcp-url';
 import { classifyCliStderr } from './cli-stderr-severity';
 import { z } from 'zod';
-import { completedTurnTelemetry, turnIdentity } from '@ptah-extension/shared';
+import {
+  closestLiveModel,
+  completedTurnTelemetry,
+  turnIdentity,
+} from '@ptah-extension/shared';
 import type { Logger } from '@ptah-extension/vscode-core';
 import {
   formatAgyDiagnostics,
@@ -153,26 +157,30 @@ const PRINT_TIMEOUT = '3600s';
 /** Values `agy --effort` accepts. Anything else is dropped. */
 const AGY_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
 
+export type AgyEffort = (typeof AGY_EFFORTS)[number];
+
+function isAgyEffort(value: string | undefined): value is AgyEffort {
+  return value !== undefined && (AGY_EFFORTS as readonly string[]).includes(value);
+}
+
 const AGY_EFFORT_SUFFIX = /-(?:low|medium|high|xhigh|max)$/;
 
-/**
- * Bases represented by the live `agy models` catalogue on 2026-10-08. Only
- * these bases can safely be combined with an effort suffix; an unknown model
- * is still passed through unchanged, but never with a conflicting `--effort`.
- */
-const AGY_EFFORT_MODEL_BASES = new Set([
-  'gemini-3.8-flash',
-  'gemini-3.7-flash',
-  'gemini-3.6-flash',
-  'gemini-3.1-pro',
-  'claude-opus-5-5',
-  'claude-sonnet-5-5',
-]);
+/** How long the ids of the last successful `agy models` read stay current. */
+const AGY_MODEL_IDS_FRESH_MS = 10 * 60_000;
 
-/** Historical default removed from `agy models`; retain saved settings safely. */
-const AGY_STALE_MODEL_IDS: Readonly<Record<string, string>> = {
-  'claude-sonnet-4-6': 'claude-sonnet-5-5-medium',
-};
+/** Budget of the `agy models` probe. */
+const AGY_MODELS_PROBE_TIMEOUT_MS = 8000;
+
+/** How long spawns skip the `agy models` probe after one listed nothing or failed. */
+const AGY_MODEL_IDS_RETRY_MS = 60_000;
+
+/** What one `agy models` run produced. */
+type AgyModelsProbe =
+  | { readonly kind: 'output'; readonly stdout: string; readonly exitCode: number | null }
+  | { readonly kind: 'timeout' }
+  | { readonly kind: 'error'; readonly code: string | undefined };
+
+type AgyModelLogger = Pick<Logger, 'debug' | 'warn'>;
 
 /** Token/cost accounting attached to `agent_response` / `checkpoint` / `result`. */
 const AgyUsageSchema = z
@@ -318,23 +326,90 @@ export function parseAgyModels(stdout: string): CliModelInfo[] {
 }
 
 /**
- * The value for `--model`. A model saved from the earlier parse is the whole
- * `id<TAB>name` line; only its id is passed (Batch 52.2).
+ * Effort variants tried, in order, when a replacement base is not itself live
+ * and no chosen effort is: a middle effort first.
  */
-export function agyModelId(value: string): string {
+const AGY_DEFAULT_EFFORT_ORDER: readonly AgyEffort[] = ['medium', 'high', 'low', 'xhigh', 'max'];
+
+/**
+ * The value for `--model` (and the ACP `model` option). A model saved from the
+ * earlier parse is the whole `id<TAB>name` line; only its id is passed
+ * (Batch 52.2).
+ *
+ * `liveIds` are the ids of the last `agy models` read (`null` when none could
+ * be read). A saved id agy no longer lists is replaced by a live id of the
+ * closest live base (a live id with its effort suffix removed), logged at
+ * `warn`. The replacement is always a member of `liveIds`, tried in order:
+ * `<base>-<chosen effort>` (the saved id's own effort suffix, else `effort`),
+ * then the unsuffixed `<base>`, then `<base>-<effort>` over
+ * {@link AGY_DEFAULT_EFFORT_ORDER}. With no live ids, or no close base, the
+ * id passes unchanged and agy reports it.
+ */
+export function agyModelId(
+  value: string,
+  liveIds: ReadonlySet<string> | null,
+  logger?: AgyModelLogger,
+  effort?: AgyEffort,
+): string {
   const modelId = value.split('\t')[0].trim();
-  return AGY_STALE_MODEL_IDS[modelId] ?? modelId;
+  if (!liveIds || liveIds.size === 0 || liveIds.has(modelId)) return modelId;
+  const savedEffort = AGY_EFFORT_SUFFIX.exec(modelId)?.[0].slice(1);
+  const chosenEffort = isAgyEffort(savedEffort) ? savedEffort : effort;
+  const bases = [...new Set([...liveIds].map((id) => id.replace(AGY_EFFORT_SUFFIX, '')))];
+  const base = closestLiveModel(modelId.replace(AGY_EFFORT_SUFFIX, ''), bases);
+  if (base === null) return modelId;
+  const candidates = [
+    ...(chosenEffort ? [`${base}-${chosenEffort}`] : []),
+    base,
+    ...AGY_DEFAULT_EFFORT_ORDER.map((variant) => `${base}-${variant}`),
+  ];
+  // `base` came from a live id, so one candidate is live unless that id's
+  // suffix is outside AGY_EFFORT_SUFFIX, which the base strip cannot produce.
+  const model = candidates.find((id) => liveIds.has(id));
+  if (model === undefined) return modelId;
+  logger?.warn(
+    '[AntigravityCliAdapter] agy no longer lists the saved model; using the closest live model',
+    { saved: modelId, model },
+  );
+  return model;
 }
 
-function agyModelWithEffort(model: string, effort: string | undefined): string {
+/**
+ * Encode the effort in the model id when agy lists `<model>-<effort>`. An id
+ * that already carries an effort is unchanged. Otherwise the model passes
+ * unchanged and the effort is not appended (and no conflicting `--effort` is
+ * sent): logged at `warn` when the live ids lack the combination, at `debug`
+ * when no live ids are known.
+ */
+export function agyModelWithEffort(
+  model: string,
+  effort: AgyEffort | undefined,
+  liveIds: ReadonlySet<string> | null,
+  logger?: AgyModelLogger,
+): string {
   if (!effort || AGY_EFFORT_SUFFIX.test(model)) return model;
-  return AGY_EFFORT_MODEL_BASES.has(model) ? `${model}-${effort}` : model;
+  const withEffort = `${model}-${effort}`;
+  if (liveIds?.has(withEffort)) return withEffort;
+  if (liveIds && liveIds.size > 0) {
+    logger?.warn(
+      '[AntigravityCliAdapter] agy lists no effort variant of the model; the effort is not applied',
+      { model, effort },
+    );
+  } else {
+    logger?.debug(
+      '[AntigravityCliAdapter] no agy model ids known; the effort is not encoded in the model',
+      { model, effort },
+    );
+  }
+  return model;
 }
 
 function buildAntigravityArgs(
   options: CliCommandOptions,
   taskPrompt: string,
   useStreamInput: boolean,
+  liveIds: ReadonlySet<string> | null,
+  logger?: AgyModelLogger,
 ): string[] {
   const args = useStreamInput
     ? [
@@ -349,14 +424,12 @@ function buildAntigravityArgs(
     args.push('--dangerously-skip-permissions');
   }
   args.push('--print-timeout', PRINT_TIMEOUT);
-  const effort =
-    options.reasoningEffort &&
-    (AGY_EFFORTS as readonly string[]).includes(options.reasoningEffort)
-      ? options.reasoningEffort
-      : undefined;
-  const model = options.model ? agyModelId(options.model) : '';
+  const effort = isAgyEffort(options.reasoningEffort)
+    ? options.reasoningEffort
+    : undefined;
+  const model = options.model ? agyModelId(options.model, liveIds, logger, effort) : '';
   if (model) {
-    args.push('--model', agyModelWithEffort(model, effort));
+    args.push('--model', agyModelWithEffort(model, effort, liveIds, logger));
   } else if (effort) {
     args.push('--effort', effort);
   }
@@ -461,6 +534,21 @@ export class AntigravityCliAdapter implements CliAdapter {
   private readonly acpFailedAtByBinary = new Map<string, number>();
   /** An unknown `PTAH_AGY_TRANSPORT` value is reported once per adapter. */
   private unknownTransportWarned = false;
+  /**
+   * Ids of the last successful `agy models` read, per binary (process
+   * lifetime): two `agy` builds can accept different ids.
+   */
+  private readonly lastModelIds = new Map<
+    string,
+    { ids: ReadonlySet<string>; at: number }
+  >();
+  /** Spawns of one binary that need ids while none are current share one probe. */
+  private readonly modelIdsInFlight = new Map<
+    string,
+    Promise<ReadonlySet<string> | null>
+  >();
+  /** When a binary's spawn probe last listed nothing or failed (see AGY_MODEL_IDS_RETRY_MS). */
+  private readonly modelIdsMissedAt = new Map<string, number>();
 
   /**
    * @param acp - ACP seams for specs and live recordings; production passes none.
@@ -828,11 +916,19 @@ export class AntigravityCliAdapter implements CliAdapter {
     this.logger?.info('[AntigravityCliAdapter] lane runs on agy acp', {
       agentId: options.agentId,
     });
+    const model = options.model
+      ? agyModelId(
+          options.model,
+          await this.currentModelIds(binary),
+          this.logger,
+          isAgyEffort(options.reasoningEffort) ? options.reasoningEffort : undefined,
+        )
+      : undefined;
     return createProviderSessionLaneHandle({
       profile: antigravityAcpProfile,
       options: {
         ...options,
-        model: options.model ? agyModelId(options.model) : undefined,
+        model,
         autoApprove: antigravitySkipsPermissions(options),
       },
       command: binary,
@@ -899,27 +995,101 @@ export class AntigravityCliAdapter implements CliAdapter {
 
   /**
    * List available models by parsing `agy models` stdout (`parseAgyModels`).
-   * Falls back to an empty list when the probe fails — the caller treats a
-   * bare binary on PATH as "installed".
+   * A probe that times out, cannot start or exits non-zero throws (the
+   * timeout with code `ETIMEDOUT`, a start failure with the spawn error's
+   * code), so a caller can tell a failure from an empty answer: rows printed
+   * before a failing exit or a signal may be incomplete and are not used. A
+   * clean exit that lists nothing is `[]` and drops that binary's earlier
+   * ids. A non-empty answer becomes the ids spawns of that binary read
+   * ({@link currentModelIds}).
    */
   async listModels(): Promise<CliModelInfo[]> {
     const binaryPath = (await resolveCliPath('agy')) ?? 'agy';
-    const raw = await this.probeModels(binaryPath);
-    if (!raw) {
-      return [];
+    return this.readModels(binaryPath);
+  }
+
+  private async readModels(binary: string): Promise<CliModelInfo[]> {
+    const probe = await this.probeModels(binary, AGY_MODELS_PROBE_TIMEOUT_MS);
+    if (probe.kind === 'timeout') {
+      throw Object.assign(new Error('agy models timed out'), { code: 'ETIMEDOUT' });
     }
-    return parseAgyModels(stripAnsiCodes(raw));
+    if (probe.kind === 'error') {
+      throw Object.assign(new Error('agy models could not start'), { code: probe.code });
+    }
+    // Only a clean exit is a complete answer. A signal-terminated probe closes
+    // with a `null` code and may have printed part of the list.
+    if (probe.exitCode !== 0) {
+      throw new Error(
+        probe.exitCode === null
+          ? 'agy models was terminated by a signal'
+          : `agy models exited with code ${probe.exitCode}`,
+      );
+    }
+    const models = parseAgyModels(stripAnsiCodes(probe.stdout));
+    if (models.length > 0) {
+      this.lastModelIds.set(binary, { ids: new Set(models.map((m) => m.id)), at: this.now() });
+    } else {
+      // A clean empty answer replaces an earlier list: spawns must not keep
+      // deriving their model from ids the binary no longer reports.
+      this.lastModelIds.delete(binary);
+      this.modelIdsMissedAt.set(binary, this.now());
+    }
+    return models;
   }
 
   /**
-   * Run `agy models` and capture stdout. Never throws — resolves undefined on
-   * timeout/error/no output. Separate from probeCliVersion because we need the
-   * full multi-line stdout, not just the first line.
+   * The live model ids a spawn derives its model value from: the last read
+   * while it is under 10 minutes old, otherwise one `agy models` probe shared
+   * by every spawn waiting on it. `null` when the probe lists nothing or
+   * fails; that answer is kept for {@link AGY_MODEL_IDS_RETRY_MS}, so spawns
+   * in that window do not each wait out the probe budget again.
    */
-  private probeModels(
-    binary: string,
-    timeoutMs = 8000,
-  ): Promise<string | undefined> {
+  private currentModelIds(binary: string): Promise<ReadonlySet<string> | null> {
+    const last = this.lastModelIds.get(binary);
+    if (last && this.now() - last.at < AGY_MODEL_IDS_FRESH_MS) {
+      return Promise.resolve(last.ids);
+    }
+    const missed = this.modelIdsMissedAt.get(binary);
+    if (missed !== undefined && this.now() - missed < AGY_MODEL_IDS_RETRY_MS) {
+      return Promise.resolve(null);
+    }
+    let inFlight = this.modelIdsInFlight.get(binary);
+    if (!inFlight) {
+      inFlight = this.readModels(binary)
+        .then((models) => {
+          if (models.length > 0) {
+            this.modelIdsMissedAt.delete(binary);
+            return new Set(models.map((m) => m.id));
+          }
+          this.modelIdsMissedAt.set(binary, this.now());
+          this.logger?.debug(
+            '[AntigravityCliAdapter] agy models listed nothing; the model passes as chosen',
+          );
+          return null;
+        })
+        .catch((error: unknown) => {
+          // degradation-audit: reported - logged at warn; without live ids the model passes as chosen and agy validates it
+          this.modelIdsMissedAt.set(binary, this.now());
+          this.logger?.warn('[AntigravityCliAdapter] agy models probe failed; the model passes as chosen', {
+            error: error instanceof Error ? error.message : String(error),
+          });
+          return null;
+        })
+        .finally(() => {
+          this.modelIdsInFlight.delete(binary);
+        });
+      this.modelIdsInFlight.set(binary, inFlight);
+    }
+    return inFlight;
+  }
+
+  /**
+   * Run `agy models` and capture stdout. Never rejects: a timeout, a start
+   * error and the exit are each reported as an {@link AgyModelsProbe}.
+   * Separate from probeCliVersion because we need the full multi-line
+   * stdout, not just the first line.
+   */
+  private probeModels(binary: string, timeoutMs: number): Promise<AgyModelsProbe> {
     return new Promise((resolve) => {
       let stdout = '';
       let childClosed = false;
@@ -932,21 +1102,22 @@ export class AntigravityCliAdapter implements CliAdapter {
             });
           }
         });
-        resolve(undefined);
+        resolve({ kind: 'timeout' });
       }, timeoutMs);
 
       child.stdout?.setEncoding('utf8');
       child.stdout?.on('data', (data: string) => {
         stdout += data;
       });
-      child.on('close', () => {
+      child.on('close', (code: number | null) => {
         childClosed = true;
         clearTimeout(timer);
-        resolve(stdout.trim() || undefined);
+        resolve({ kind: 'output', stdout: stdout.trim(), exitCode: code ?? null });
       });
-      child.on('error', () => {
+      child.on('error', (error: Error) => {
         clearTimeout(timer);
-        resolve(undefined);
+        const code = (error as { code?: unknown }).code;
+        resolve({ kind: 'error', code: typeof code === 'string' ? code : undefined });
       });
     });
   }
@@ -1157,8 +1328,9 @@ export class AntigravityCliAdapter implements CliAdapter {
     const prompt = useStreamInput
       ? taskPrompt
       : buildArgvTaskPrompt(options, this.name);
+    const liveIds = options.model ? await this.currentModelIds(binary) : null;
     const args = applyLaneArgvPolicy(
-      buildAntigravityArgs(options, prompt, useStreamInput),
+      buildAntigravityArgs(options, prompt, useStreamInput, liveIds, this.logger),
       policy.cli === 'antigravity'
         ? policy.argv
         : { addArgs: [], removeArgs: [] },

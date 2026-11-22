@@ -5,7 +5,10 @@
  */
 
 import { z } from 'zod';
-import type { CliLaneDefaults, CliLaneDefaultsPatch } from '../cli-lane-defaults.types';
+import type {
+  CliLaneDefaults,
+  CliLaneDefaultsPatch,
+} from '../cli-lane-defaults.types';
 import type { CodexSandboxMode } from '../advanced-settings.types';
 import type { PtahCliSummary } from '../ptah-cli.types';
 import type { AgentPermissionDecision } from '../agent-permission.types';
@@ -24,6 +27,10 @@ import type {
 } from '../provider-account.types';
 import type { CapabilityPolicyStatus } from '../capability-toggle.types';
 import type { CapabilityScope } from '../mcp-directory.types';
+import type {
+  ModelListFailureReason,
+  ProviderModelListSource,
+} from './rpc-providers.types';
 
 export type AgentSendMessageParams = AgentMessageRequest;
 export type AgentSendMessageResult = AgentMessageOutcome;
@@ -505,7 +512,11 @@ export interface AgentSetClaudeBuiltinResult {
 export interface CliModelOption {
   readonly id: string;
   readonly name: string;
-  /** When true, this model came from a hardcoded fallback list (API was unreachable). */
+  /**
+   * Set by classification when no account source confirmed the CLI's id.
+   * A classification marker only; it never means the id came from a
+   * hardcoded list.
+   */
   readonly isFallback?: boolean;
 }
 
@@ -588,9 +599,7 @@ export function isClaudeReasoningEffortSetting(
  *   present but unreadable. Refuse before spawn.
  */
 export type AgentResumeAccountSelectionDecision =
-  | 'inherit'
-  | 'conflict'
-  | 'invalid';
+  'inherit' | 'conflict' | 'invalid';
 
 /**
  * Classify a resume's supplied selection against the stored binding.
@@ -832,7 +841,14 @@ export interface PtahCliListModelsResult {
     description?: string;
     contextLength?: number;
   }>;
-  isStatic: boolean;
+  /** Where `models` came from. */
+  source: ProviderModelListSource;
+  /** Set when `source` is `'persisted'` or `'unavailable'`. */
+  failureReason?: ModelListFailureReason;
+  /** `source: 'persisted'` only: epoch ms at which the saved list was fetched. */
+  savedAt?: number;
+  /** `source: 'persisted'` only: fixed-copy sentence explaining the saved list. */
+  notice?: string;
   error?: string;
 }
 export type { AgentPermissionDecision };

@@ -40,7 +40,6 @@ import type { ITranslationProxy } from '../../translation';
 import {
   KIMI_CODE_PROXY_TOKEN_PLACEHOLDER,
   isProviderSessionProviderId,
-  seedStaticModelPricing,
   type AuthEnv,
 } from '@ptah-extension/shared';
 
@@ -163,7 +162,6 @@ export class OAuthProxyStrategy implements IAuthStrategy {
     process.env['ANTHROPIC_AUTH_TOKEN'] = KIMI_CODE_PROXY_TOKEN_PLACEHOLDER;
     delete process.env['ANTHROPIC_API_KEY'];
     this.providerModels.switchActiveProvider(providerId);
-    seedStaticModelPricing(providerId);
 
     const source =
       status.credentialSource === 'cli-login'
@@ -256,7 +254,6 @@ export class OAuthProxyStrategy implements IAuthStrategy {
     process.env['ANTHROPIC_BASE_URL'] = proxyUrl;
     process.env['ANTHROPIC_AUTH_TOKEN'] = COPILOT_PROXY_TOKEN_PLACEHOLDER;
     this.providerModels.switchActiveProvider(providerId);
-    seedStaticModelPricing(providerId);
 
     this.logger.info(
       `[${this.name}] Using GitHub Copilot via translation proxy (${proxyUrl})`,

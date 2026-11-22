@@ -23,8 +23,6 @@ import type { ModelCapability } from '../types/auth-env.types';
 import type { ProviderSessionProfileId } from '../types/provider-session-profile.types';
 import type { SessionRuntimeKind } from '../types/session-runtime.types';
 
-import { updatePricingMap } from '../utils/pricing.utils';
-import { staticModelPricing } from './static-model-pricing';
 import { isValidProviderBaseUrl } from './provider-base-url';
 import { COPILOT_PROVIDER_ENTRY } from './entries/copilot-provider-entry';
 import { CODEX_PROVIDER_ENTRY } from './entries/codex-provider-entry';
@@ -43,40 +41,6 @@ import {
   OPENCODE_GO_PROVIDER_ENTRY,
 } from './entries/opencode-provider-entry';
 import { ANTIGRAVITY_CLI_PROVIDER_ENTRY } from './entries/provider-session-provider-entries';
-
-/**
- * Static model definition for providers without a dynamic models API
- */
-export interface ProviderStaticModel {
-  /** Model ID as used in API calls */
-  id: string;
-  /** Human-readable display name */
-  name: string;
-  /** Short description */
-  description: string;
-  /** Maximum context length in tokens */
-  contextLength: number;
-  /** Whether this model supports tool use */
-  supportsToolUse: boolean;
-  /** Cost per input token in USD (optional - for pricing override) */
-  inputCostPerToken?: number;
-  /** Cost per output token in USD (optional - for pricing override) */
-  outputCostPerToken?: number;
-  /** Cost per cache read token in USD (optional) */
-  cacheReadCostPerToken?: number;
-  /** Cost per cache creation token in USD (optional) */
-  cacheCreationCostPerToken?: number;
-  cacheCreation1hCostPerToken?: number;
-  /**
-   * Capabilities this model supports, when the provider documents them.
-   *
-   * Published to the SDK as `ANTHROPIC_DEFAULT_<TIER>_MODEL_SUPPORTED_CAPABILITIES`
-   * when the model is mapped to a tier. Leave undefined unless the provider
-   * really supports this — the SDK treats the env var as an allowlist, so a
-   * partial list turns off everything omitted from it.
-   */
-  capabilities?: readonly ModelCapability[];
-}
 
 /**
  * Which environment variable carries the provider's API key.
@@ -109,8 +73,22 @@ export interface AnthropicProvider {
   maskedKeyDisplay: string;
   /** URL for /v1/models endpoint (if provider supports dynamic listing) */
   modelsEndpoint?: string;
-  /** Hardcoded models for providers without a dynamic API */
-  staticModels?: ProviderStaticModel[];
+  /**
+   * How the `modelsEndpoint` request carries the key.
+   *
+   * - absent or `'bearer'`: `Authorization: Bearer <key>`.
+   * - `'anthropic'`: `x-api-key: <key>` plus `anthropic-version`.
+   *
+   * Built-in entries only; `customEntryToAnthropicProvider` never sets it.
+   */
+  modelsAuthScheme?: 'bearer' | 'anthropic';
+  /**
+   * Capabilities every live model of this provider declares to the SDK
+   * (`ANTHROPIC_DEFAULT_<TIER>_MODEL_SUPPORTED_CAPABILITIES`), for vendors
+   * whose model rows do not report them. An SDK allowlist only: never a model
+   * list and never a tool-use flag. Built-in entries only.
+   */
+  liveModelCapabilities?: readonly ModelCapability[];
   /**
    * Authentication type
    * - 'apiKey': Traditional API key input (default if not set)
@@ -254,164 +232,6 @@ export const ANTHROPIC_PROVIDERS = [
       opus: 'glm-5.3',
       haiku: 'glm-5.3-flash',
     },
-    // Fallback when the live list cannot be read. Synced with models.dev's
-    // `zai` list on 2026-10-07 (glm-5.3 family added; glm-5-code, glm-4.5-x
-    // and glm-4.5-airx, no longer listed, removed).
-    staticModels: [
-      {
-        id: 'glm-5.3',
-        name: 'GLM-5.3',
-        description: 'Latest flagship GLM model (1M context)',
-        contextLength: 1000000,
-        supportsToolUse: true,
-        inputCostPerToken: 1.4e-6, // $1.40 per 1M tokens
-        outputCostPerToken: 4.4e-6, // $4.40 per 1M tokens
-        cacheReadCostPerToken: 0.26e-6, // $0.26 per 1M tokens (cache hit)
-      },
-      {
-        id: 'glm-5.3-flashx',
-        name: 'GLM-5.3-FlashX',
-        description: 'Fast GLM-5.3 tier (1M context)',
-        contextLength: 1000000,
-        supportsToolUse: true,
-        inputCostPerToken: 0.37e-6, // $0.37 per 1M tokens
-        outputCostPerToken: 1.25e-6, // $1.25 per 1M tokens
-        cacheReadCostPerToken: 0.075e-6, // $0.075 per 1M tokens (cache hit)
-      },
-      {
-        id: 'glm-5.3-flash',
-        name: 'GLM-5.3-Flash',
-        description: 'Lightweight GLM-5.3 tier (1M context)',
-        contextLength: 1000000,
-        supportsToolUse: true,
-        inputCostPerToken: 0.15e-6, // $0.15 per 1M tokens
-        outputCostPerToken: 0.5e-6, // $0.50 per 1M tokens
-        cacheReadCostPerToken: 0.03e-6, // $0.03 per 1M tokens (cache hit)
-      },
-      {
-        id: 'glm-5.2',
-        name: 'GLM-5.2',
-        description:
-          'Flagship coding model, 744B params, strongest open-source coding (1M context)',
-        contextLength: 1000000,
-        supportsToolUse: true,
-        inputCostPerToken: 1.4e-6, // $1.40 per 1M tokens
-        outputCostPerToken: 4.4e-6, // $4.40 per 1M tokens
-        cacheReadCostPerToken: 0.26e-6, // $0.26 per 1M tokens (cache hit)
-        cacheCreationCostPerToken: 1.75e-6, // 125% of input
-      },
-      {
-        id: 'glm-5.1',
-        name: 'GLM-5.1',
-        description:
-          'Latest flagship model, 94% of Opus 4.6 coding (200K context)',
-        contextLength: 200000,
-        supportsToolUse: true,
-        inputCostPerToken: 1.0e-6, // $1.00 per 1M tokens (estimated, standalone API pricing TBD)
-        outputCostPerToken: 3.2e-6, // $3.20 per 1M tokens (estimated, standalone API pricing TBD)
-        cacheReadCostPerToken: 0.1e-6, // 10% of input
-        cacheCreationCostPerToken: 1.25e-6, // 125% of input
-      },
-      {
-        id: 'glm-5',
-        name: 'GLM-5',
-        description: 'Opus-class high-intelligence model (200K context)',
-        contextLength: 200000,
-        supportsToolUse: true,
-        inputCostPerToken: 1.0e-6, // $1.00 per 1M tokens
-        outputCostPerToken: 3.2e-6, // $3.20 per 1M tokens
-        cacheReadCostPerToken: 0.1e-6, // 10% of input
-        cacheCreationCostPerToken: 1.25e-6, // 125% of input
-      },
-      {
-        id: 'glm-5-turbo',
-        name: 'GLM-5 Turbo',
-        description: 'Optimized performance variant (200K context)',
-        contextLength: 200000,
-        supportsToolUse: true,
-        inputCostPerToken: 1.2e-6, // $1.20 per 1M tokens
-        outputCostPerToken: 4.0e-6, // $4.00 per 1M tokens
-        cacheReadCostPerToken: 0.12e-6, // 10% of input
-        cacheCreationCostPerToken: 1.5e-6, // 125% of input
-      },
-      {
-        id: 'glm-4.7',
-        name: 'GLM-4.7',
-        description: 'Sonnet-class flagship model (200K context)',
-        contextLength: 200000,
-        supportsToolUse: true,
-        inputCostPerToken: 0.6e-6, // $0.60 per 1M tokens
-        outputCostPerToken: 2.2e-6, // $2.20 per 1M tokens
-        cacheReadCostPerToken: 0.06e-6, // 10% of input
-        cacheCreationCostPerToken: 0.75e-6, // 125% of input
-      },
-      {
-        id: 'glm-4.7-flashx',
-        name: 'GLM-4.7 FlashX',
-        description: 'Fast performance (200K context)',
-        contextLength: 200000,
-        supportsToolUse: true,
-        inputCostPerToken: 0.07e-6, // $0.07 per 1M tokens
-        outputCostPerToken: 0.4e-6, // $0.40 per 1M tokens
-        cacheReadCostPerToken: 0.007e-6, // 10% of input
-        cacheCreationCostPerToken: 0.0875e-6, // 125% of input
-      },
-      {
-        id: 'glm-4.7-flash',
-        name: 'GLM-4.7 Flash',
-        description: 'Free lightweight model (200K context)',
-        contextLength: 200000,
-        supportsToolUse: true,
-        inputCostPerToken: 0, // Free
-        outputCostPerToken: 0, // Free
-        cacheReadCostPerToken: 0, // Free
-        cacheCreationCostPerToken: 0, // Free
-      },
-      {
-        id: 'glm-4.6',
-        name: 'GLM-4.6',
-        description: 'Unified reasoning (200K context)',
-        contextLength: 200000,
-        supportsToolUse: true,
-        inputCostPerToken: 0.6e-6, // $0.60 per 1M tokens
-        outputCostPerToken: 2.2e-6, // $2.20 per 1M tokens
-        cacheReadCostPerToken: 0.06e-6, // 10% of input
-        cacheCreationCostPerToken: 0.75e-6, // 125% of input
-      },
-      {
-        id: 'glm-4.5',
-        name: 'GLM-4.5',
-        description: 'Hybrid thinking (128K context)',
-        contextLength: 128000,
-        supportsToolUse: true,
-        inputCostPerToken: 0.6e-6, // $0.60 per 1M tokens
-        outputCostPerToken: 2.2e-6, // $2.20 per 1M tokens
-        cacheReadCostPerToken: 0.06e-6, // 10% of input
-        cacheCreationCostPerToken: 0.75e-6, // 125% of input
-      },
-      {
-        id: 'glm-4.5-air',
-        name: 'GLM-4.5 Air',
-        description: 'Lightweight MoE (128K context)',
-        contextLength: 128000,
-        supportsToolUse: true,
-        inputCostPerToken: 0.2e-6, // $0.20 per 1M tokens
-        outputCostPerToken: 1.1e-6, // $1.10 per 1M tokens
-        cacheReadCostPerToken: 0.02e-6, // 10% of input
-        cacheCreationCostPerToken: 0.25e-6, // 125% of input
-      },
-      {
-        id: 'glm-4.5-flash',
-        name: 'GLM-4.5 Flash',
-        description: 'Free lightweight model (128K context)',
-        contextLength: 128000,
-        supportsToolUse: true,
-        inputCostPerToken: 0, // Free
-        outputCostPerToken: 0, // Free
-        cacheReadCostPerToken: 0, // Free
-        cacheCreationCostPerToken: 0, // Free
-      },
-    ],
   },
   COPILOT_PROVIDER_ENTRY,
   CODEX_PROVIDER_ENTRY,
@@ -501,7 +321,8 @@ export const CUSTOM_PROVIDER_ID_PATTERN = /^[a-z0-9][a-z0-9-]*$/;
  * is not in `ANTHROPIC_PROVIDERS` but is just as reserved.
  */
 export function isBuiltInProviderId(id: string): boolean {
-  if (id === ANTHROPIC_DIRECT_PROVIDER_ID || id === ANTHROPIC_API_LANE_ENTRY.id) return true;
+  if (id === ANTHROPIC_DIRECT_PROVIDER_ID || id === ANTHROPIC_API_LANE_ENTRY.id)
+    return true;
   return ANTHROPIC_PROVIDERS.some((provider) => provider.id === id);
 }
 
@@ -809,7 +630,9 @@ export function getAnthropicProvider(
 export function getProviderSessionProfile(
   providerId: string,
 ): ProviderSessionProfileId | undefined {
-  if (!(PROVIDER_SESSION_PROVIDER_IDS as readonly string[]).includes(providerId))
+  if (
+    !(PROVIDER_SESSION_PROVIDER_IDS as readonly string[]).includes(providerId)
+  )
     return undefined;
   const provider: AnthropicProvider | undefined = ANTHROPIC_PROVIDERS.find(
     (p) => p.id === providerId,
@@ -856,10 +679,24 @@ export function providerRuntimeFor(providerId: string): SessionRuntimeKind {
 }
 
 /** Resolve a CLI lane without exposing lane-only entries to main-agent routes. */
-export function getPtahCliLaneProvider(id: string): AnthropicProvider | undefined {
+export function getPtahCliLaneProvider(
+  id: string,
+): AnthropicProvider | undefined {
   return id === ANTHROPIC_API_LANE_ENTRY.id
     ? ANTHROPIC_API_LANE_ENTRY
     : getAnthropicProvider(id);
+}
+
+/**
+ * Capabilities a provider declares for every live model, or undefined when
+ * the provider declares none. Resolves CLI lane entries too.
+ *
+ * @param providerId - Provider ID
+ */
+export function getProviderLiveModelCapabilities(
+  providerId: string,
+): readonly ModelCapability[] | undefined {
+  return getPtahCliLaneProvider(providerId)?.liveModelCapabilities;
 }
 
 /**
@@ -894,25 +731,6 @@ export function getProviderAuthEnvVar(id: string): ProviderAuthEnvVar {
 }
 
 /**
- * Capabilities a provider's static model declares, by exact (case-insensitive)
- * model id. A suffixed id such as `k3.1-pro[1m]` matches only its own entry.
- *
- * @param providerId - Provider ID
- * @param modelId - Model ID as mapped to a tier
- * @returns The declared list, or undefined when the provider, the model or the
- *   declaration is missing
- */
-export function getStaticModelCapabilities(
-  providerId: string,
-  modelId: string,
-): readonly ModelCapability[] | undefined {
-  const wanted = modelId.toLowerCase();
-  return getAnthropicProvider(providerId)?.staticModels?.find(
-    (model) => model.id.toLowerCase() === wanted,
-  )?.capabilities;
-}
-
-/**
  * Whether a provider bills a flat subscription instead of per token.
  *
  * The one place this policy is read. Always asked about the ACTIVE provider —
@@ -925,29 +743,4 @@ export function isSubscriptionCoveredProvider(
 ): boolean {
   if (!providerId) return false;
   return getAnthropicProvider(providerId)?.pricingModel === 'subscription';
-}
-
-/**
- * Seed the pricing map with static model pricing from a provider.
- *
- * Called during provider activation as a fallback for models not on OpenRouter.
- * Creates pricing map entries with both exact and normalized keys.
- *
- * Subscription-billed providers are skipped: their static entries carry $0,
- * and publishing that under a bare model id makes the next session on a
- * usage-billed provider serving the same id read as free. They take their
- * rates from the catalog like everyone else.
- *
- * @param providerId - Provider ID to seed pricing for
- */
-export function seedStaticModelPricing(providerId: string): void {
-  if (isSubscriptionCoveredProvider(providerId)) return;
-  const provider = getAnthropicProvider(providerId);
-  if (!provider?.staticModels) return;
-
-  const entries = staticModelPricing(providerId, provider.staticModels);
-
-  if (Object.keys(entries).length > 0) {
-    updatePricingMap(entries);
-  }
 }
