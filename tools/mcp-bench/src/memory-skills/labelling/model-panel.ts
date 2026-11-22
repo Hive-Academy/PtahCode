@@ -16,9 +16,7 @@ import {
   CODEX_DEFAULT_TIERS,
   COPILOT_DEFAULT_TIERS,
   OPENCODE_GO_DEFAULT_TIERS,
-  OPENCODE_MODEL_ROUTES,
   OPENCODE_ZEN_DEFAULT_TIERS,
-  isOpenCodeProviderId,
 } from '@ptah-extension/shared';
 
 import type { GroundTruthMethod } from '../../scorecard/suite-kinds';
@@ -336,8 +334,10 @@ function familyFromModel(modelId: string): string | null {
 }
 
 /**
- * Canonical family of a lane. Tier aliases resolve first, then an OpenCode
- * route must name the model. Unknown provider/model pairs are ineligible.
+ * Canonical family of a lane. Tier aliases resolve first, then the model id
+ * must match a known family. Unknown provider/model pairs are ineligible.
+ * There is no repo model list to check OpenCode ids against: the gateway's
+ * live catalog decides which ids exist.
  */
 export function resolveCanonicalFamily(
   provider: string,
@@ -351,15 +351,6 @@ export function resolveCanonicalFamily(
     const resolved = table?.[tier];
     if (resolved === undefined) return null;
     modelId = resolved;
-  }
-  if (isOpenCodeProviderId(providerId)) {
-    const routes = OPENCODE_MODEL_ROUTES[providerId];
-    if (!Object.hasOwn(routes, modelId)) {
-      if (isOpenAiFamily(providerId) || isOpenAiFamily(modelId)) {
-        return { provider: providerId, modelId, family: 'OpenAI' };
-      }
-      return null;
-    }
   }
   if (isOpenAiFamily(providerId) || isOpenAiFamily(modelId)) {
     return { provider: providerId, modelId, family: 'OpenAI' };
