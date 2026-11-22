@@ -70,6 +70,8 @@ import {
 
 import { ProviderMarkComponent } from '../provider-mark/provider-mark.component';
 import { PROVIDER_MODELS_LOADER } from './provider-models-loader.port';
+import { ProviderModelsNoticeComponent } from './provider-models-notice.component';
+import { isProcessDump, savedModelListNotice } from './saved-model-list-notice';
 import {
   ProviderModelSearchFieldComponent,
   type ProviderModelSearchOption,
@@ -135,26 +137,10 @@ const SUGGESTED_CHARS_PER_CONTEXT_TOKEN = 2;
  */
 const MODEL_LOAD_FAILED = 'Could not load models for this provider.';
 
-/** Shown for a saved (`persisted`) list when the host sent no notice text. */
-const SAVED_LIST_NOTICE =
-  'Showing the saved model list. The live list could not be loaded.';
-
-/** Multi-line or banner text from a CLI probe. A short status sentence stays. */
-function isProcessDump(value: string): boolean {
-  return value.includes('\n') || value.includes('\r') || value.length > 180;
-}
-
 /** One short sentence for the page. A probe dump becomes the fixed status. */
 function visibleLoadError(raw: string): string {
   const line = raw.split(/\r?\n/, 1)[0]?.trim() ?? '';
   if (!line || isProcessDump(raw)) return MODEL_LOAD_FAILED;
-  return line;
-}
-
-/** The host's saved-list sentence, or the fixed one when it is missing or a dump. */
-function visibleNotice(raw: string | undefined): string {
-  const line = raw?.trim() ?? '';
-  if (!line || isProcessDump(line)) return SAVED_LIST_NOTICE;
   return line;
 }
 
@@ -172,7 +158,11 @@ function buildDefaultModelLabel(
 @Component({
   selector: 'ptah-provider-model-picker',
   standalone: true,
-  imports: [ProviderMarkComponent, ProviderModelSearchFieldComponent],
+  imports: [
+    ProviderMarkComponent,
+    ProviderModelSearchFieldComponent,
+    ProviderModelsNoticeComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <section
@@ -352,24 +342,13 @@ function buildDefaultModelLabel(
           </button>
         </div>
       } @else if (modelsNotice(); as notice) {
-        <div class="flex flex-wrap items-center gap-2 px-3 pb-2">
-          <p
-            class="text-xs text-warning"
-            role="status"
-            data-testid="provider-model-picker-notice"
-          >
-            {{ notice }}
-          </p>
-          <button
-            type="button"
-            class="btn btn-ghost btn-sm min-h-9 text-base-content"
-            data-testid="provider-model-picker-notice-retry"
-            [disabled]="disabled()"
-            (click)="refreshCatalog()"
-          >
-            Retry
-          </button>
-        </div>
+        <ptah-provider-models-notice
+          class="px-3 pb-2"
+          testId="provider-model-picker-notice"
+          [notice]="notice"
+          [disabled]="disabled()"
+          (retry)="refreshCatalog()"
+        />
       }
 
       @if (!disabled()) {
@@ -813,8 +792,8 @@ export class ProviderModelPickerComponent {
         this._modelsError.set(MODEL_LOAD_FAILED);
       } else if (result.error) {
         this._modelsError.set(visibleLoadError(result.error));
-      } else if (result.source === 'persisted') {
-        this._modelsNotice.set(visibleNotice(result.notice));
+      } else {
+        this._modelsNotice.set(savedModelListNotice(result));
       }
     } catch (error: unknown) {
       // degradation-audit: reported - shown to the user through _modelsError;

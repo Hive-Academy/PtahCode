@@ -194,6 +194,26 @@ describe('CliTierMappingModalComponent', () => {
     expect(q('cli-tier-models-error')).toBeNull();
   });
 
+  it('discloses a saved (persisted) list with a status row whose Retry reloads; a live list shows none (S2)', async () => {
+    expect(q('cli-tier-models-notice')).toBeNull();
+    loader.listModels.mockResolvedValueOnce({ ...CATALOGUE, source: 'persisted', failureReason: 'network', savedAt: 1, notice: 'Showing the list saved on 1 Nov.' });
+    fixture.componentInstance.target.set(null);
+    fixture.detectChanges();
+    fixture.componentInstance.target.set(GLM);
+    fixture.detectChanges();
+    await flush();
+    const notice = q('cli-tier-models-notice');
+    expect(notice?.getAttribute('role')).toBe('status');
+    expect(notice?.textContent).toContain('Showing the list saved on 1 Nov.');
+    expect(notice?.classList).toContain('text-warning');
+    expect(q('cli-tier-models-error')).toBeNull();
+    expect(field('sonnet')?.options().map((o) => o.id)).toContain('glm-4.7');
+    q<HTMLButtonElement>('cli-tier-models-notice-retry')?.click();
+    await flush();
+    expect(loader.listModels).toHaveBeenCalledTimes(3);
+    expect(q('cli-tier-models-notice')).toBeNull();
+  });
+
   it('waits for the instance mapping before offering fields, and says when the inherited tiers could not be read', () => {
     state.tiers.set({ status: 'error', data: null, error: 'Could not load this section. Retry.' });
     fixture.detectChanges();

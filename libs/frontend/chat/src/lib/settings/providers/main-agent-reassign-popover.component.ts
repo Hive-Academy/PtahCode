@@ -31,10 +31,12 @@ import {
   NativePopoverComponent,
   PROVIDER_MODELS_LOADER,
   ProviderModelSearchFieldComponent,
+  ProviderModelsNoticeComponent,
   PtahButtonDirective,
   PtahIconButtonDirective,
   PtahInputDirective,
   PtahRichSelectComponent,
+  savedModelListNotice,
   type ProviderModelSearchOption,
 } from '@ptah-extension/ui';
 import { isProviderSessionProviderId } from '@ptah-extension/shared';
@@ -91,6 +93,7 @@ const LABEL = 'block text-xs font-semibold text-base-content-muted';
     LucideAngularModule,
     NativePopoverComponent,
     ProviderModelSearchFieldComponent,
+    ProviderModelsNoticeComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   // Angular owns (and removes) this listener with the component.
@@ -156,6 +159,7 @@ export class MainAgentReassignPopoverComponent {
   protected readonly catalogue = signal<ModelCatalogue>({
     status: 'loading',
     models: [],
+    notice: null,
   });
   private readonly outcome = signal<DrawerWriteOutcome | null>(null);
   protected readonly saving = signal(false);
@@ -447,17 +451,18 @@ export class MainAgentReassignPopoverComponent {
   async loadModels(): Promise<void> {
     const request = ++this.catalogueRequest,
       provider = this.providerId();
-    this.catalogue.set({ status: 'loading', models: [] });
+    this.catalogue.set({ status: 'loading', models: [], notice: null });
     try {
       const result = await this.loader.listModels(provider);
       if (request !== this.catalogueRequest) return;
       this.catalogue.set({
         status: result.error ? 'error' : 'ready',
         models: result.models ?? [],
+        notice: savedModelListNotice(result),
       });
     } catch {
       if (request === this.catalogueRequest)
-        this.catalogue.set({ status: 'error', models: [] });
+        this.catalogue.set({ status: 'error', models: [], notice: null });
     }
   }
   protected onProvider(id: string): void {

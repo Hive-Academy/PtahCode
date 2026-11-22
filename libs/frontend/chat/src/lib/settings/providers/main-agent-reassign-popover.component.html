@@ -285,6 +285,12 @@
               Retry
             </button>
           </p>
+        } @else if (catalogue().notice; as notice) {
+          <ptah-provider-models-notice
+            testId="main-agent-model-notice"
+            [notice]="notice"
+            (retry)="loadModels()"
+          />
         }
       </div>
       <div class="grid gap-1">

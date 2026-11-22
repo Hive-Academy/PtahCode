@@ -52,6 +52,12 @@
             Retry
           </button>
         </p>
+      } @else if (catalogue().notice; as notice) {
+        <ptah-provider-models-notice
+          testId="cli-tier-models-notice"
+          [notice]="notice"
+          (retry)="loadModels()"
+        />
       }
       @if (mappings() === null && mappingsFailed()) {
         <!-- M5: a failed (or missing) read ends in a fixed error with its own Retry, never an endless loading line. -->
