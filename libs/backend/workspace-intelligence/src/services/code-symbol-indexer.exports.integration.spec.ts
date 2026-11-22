@@ -489,6 +489,33 @@ describe('CodeSymbolIndexer — every TS/JS export kind (real tree-sitter WASM)'
     60_000,
   );
 
+  it('indexes a class method once, under its bare name', async () => {
+    const filePath = `${ROOT}/src/members.ts`;
+    const { sink } = await indexAll(
+      new Map([
+        [
+          filePath,
+          'export class C {\n  run() {}\n  private static helper() {}\n}',
+        ],
+      ]),
+    );
+
+    const rows = sink
+      .forFile(filePath)
+      .map((row) => [row.symbolName, row.kind])
+      .sort();
+    expect(rows).toEqual(
+      [
+        ['C', 'class'],
+        ['helper', 'function'],
+        ['run', 'function'],
+      ].sort(),
+    );
+    expect(sink.exactName('run').map((row) => row.filePath)).toEqual([
+      filePath,
+    ]);
+  }, 60_000);
+
   it('never counts a file with an unextracted CommonJS export as cleanly analysed', async () => {
     const partial = `${ROOT}/src/partial.js`;
     const whole = `${ROOT}/src/whole.js`;

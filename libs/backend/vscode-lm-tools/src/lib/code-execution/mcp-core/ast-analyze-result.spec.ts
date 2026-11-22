@@ -34,6 +34,7 @@ import type { AstNamespace } from '../types';
 import {
   AST_ANALYZE_TRUNCATION_HINT,
   renderAstAnalyzeResult,
+  shapeAstAnalyzeResult,
 } from './ast-analyze-output';
 import { getToolResultBudget } from './tool-result-budget';
 
@@ -143,21 +144,35 @@ const BROKEN_SOURCE = [
 function decode(text: string): Record<string, unknown> {
   const out = JSON.parse(text) as Record<string, unknown>;
   for (const [key, value] of Object.entries(out)) {
-    if (!isTable(value)) {
-      continue;
+    if (isTable(value)) {
+      out[key] = decodeTable(value);
     }
-    const [header, ...rows] = value;
-    out[key] = rows.map((row) => {
-      const record: Record<string, unknown> = {};
-      header.forEach((column, i) => {
-        if (i < row.length && row[i] !== null) {
-          record[column] = row[i];
-        }
-      });
-      return record;
-    });
   }
   return out;
+}
+
+/** Records of one table; a cell that is a table (class members) nests. */
+function decodeTable([header, ...rows]: [string[], ...unknown[][]]): Record<
+  string,
+  unknown
+>[] {
+  return rows.map((row) => {
+    const record: Record<string, unknown> = {};
+    header.forEach((column, i) => {
+      if (i < row.length && row[i] !== null) {
+        const cell = row[i];
+        record[column] = isTable(cell) ? decodeTable(cell) : cell;
+      }
+    });
+    return record;
+  });
+}
+
+/** The lists of the served shape, as plain JSON. */
+function shapedLists(
+  result: Parameters<typeof shapeAstAnalyzeResult>[0],
+): Record<string, unknown> {
+  return JSON.parse(JSON.stringify(shapeAstAnalyzeResult(result, [ROOT])));
 }
 
 function isTable(value: unknown): value is [string[], ...unknown[][]] {
@@ -256,9 +271,44 @@ describe('ptah_ast_analyze result text (real parser)', () => {
       'imports',
       'functions',
     ]);
-    expect(decode(text)['functions']).toEqual(
-      JSON.parse(JSON.stringify(result.functions)),
-    );
+    expect(decode(text)['functions']).toEqual(shapedLists(result)['functions']);
+  });
+
+  it('lists class methods under their class as members, out of functions', async () => {
+    const result = await ast.analyze(`${ROOT}/src/record-store.ts`);
+    const text = renderAstAnalyzeResult(result, [ROOT]);
+    const parsed = JSON.parse(text) as { classes: unknown[][] };
+
+    expect(parsed.classes[0]).toEqual([
+      'name',
+      'startLine',
+      'endLine',
+      'members',
+    ]);
+    const [name, startLine, endLine, members] = parsed.classes[1] as [
+      string,
+      number,
+      number,
+      unknown[][],
+    ];
+    expect([name, startLine, endLine]).toEqual(['RecordStore', 4, 37]);
+    expect(members[0]).toEqual([
+      'name',
+      'parameters',
+      'startLine',
+      'endLine',
+      'modifiers',
+    ]);
+    expect(members[1]).toEqual(['constructor', ['logger'], 6, 6]);
+    expect(members[2]).toEqual(['load0', ['key', 'fallback'], 7, 11, 'async']);
+    expect(members).toHaveLength(8);
+
+    const functions = decode(text)['functions'] as { name: string }[];
+    const names = functions.map((fn) => fn.name);
+    expect(names).not.toContain('constructor');
+    expect(names.some((fn) => fn.startsWith('load'))).toBe(false);
+    expect(names).toContain('transformRecord0');
+    expect(functions).toHaveLength(result.functions.length - 7);
   });
 
   it('cuts functions at a record boundary to fit the budget, and says so', async () => {
@@ -278,15 +328,16 @@ describe('ptah_ast_analyze result text (real parser)', () => {
     );
     expect(parsed.hint).toBe(AST_ANALYZE_TRUNCATION_HINT);
     const cut = parsed.truncated['functions'];
-    expect(cut.total).toBe(result.functions.length);
     expect(cut.shown).toBeGreaterThan(0);
     expect(cut.shown).toBeLessThan(cut.total);
     const decoded = decode(text);
+    const shaped = shapedLists(result);
+    expect(cut.total).toBe((shaped['functions'] as unknown[]).length);
     expect(decoded['functions']).toEqual(
-      JSON.parse(JSON.stringify(result.functions.slice(0, cut.shown))),
+      (shaped['functions'] as unknown[]).slice(0, cut.shown),
     );
     for (const list of ['classes', 'exports', 'imports'] as const) {
-      expect(decoded[list]).toEqual(JSON.parse(JSON.stringify(result[list])));
+      expect(decoded[list]).toEqual(shaped[list]);
     }
   });
 

@@ -395,7 +395,16 @@ describe('AstAnalysisService', () => {
             {
               name: 'class.declaration',
               text: 'class MyClass {}',
-              node: {} as GenericAstNode,
+              // A real declaration node: class membership reads its body.
+              node: {
+                type: 'class_declaration',
+                text: 'class MyClass {}',
+                startPosition: { row: 0, column: 0 },
+                endPosition: { row: 0, column: 16 },
+                isNamed: true,
+                fieldName: null,
+                children: [],
+              },
               startPosition: { row: 0, column: 0 },
               endPosition: { row: 0, column: 16 },
             },

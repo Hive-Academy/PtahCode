@@ -11,12 +11,18 @@
  * (`formatAstAnalysisResult`); when the whole text is over the budget,
  * `functions` loses trailing records first (then `imports`, ...), and the
  * text carries `truncated` and a one-line `hint` before the first list.
+ *
+ * A TS/JS class lists its own methods as `members` (name, parameters, line
+ * range, `modifiers` such as `private static` or `get`), written as a nested
+ * table; those methods are left out of `functions`, which keeps the module
+ * functions and the methods no class claims (object-literal methods, and
+ * the methods of languages that do not attach them).
  */
 import * as path from 'node:path';
 import { compactCoverage } from '@ptah-extension/platform-core';
 import { fitsBudget } from '@ptah-extension/tool-output-reducers';
 import { formatAstAnalysisResult } from '@ptah-extension/workspace-intelligence';
-import type { AstCodeInsights } from '../types';
+import type { AstClassInfo, AstCodeInsights, AstFunctionInfo } from '../types';
 import { getToolResultBudget } from './tool-result-budget';
 
 const TOOL_NAME = 'ptah_ast_analyze';
@@ -58,6 +64,18 @@ export function relativeToWorkspace(
   return file;
 }
 
+function rangeKey(info: AstFunctionInfo): string {
+  return `${info.name}:${info.startLine ?? ''}:${info.endLine ?? ''}`;
+}
+
+/** A class with its methods as `members`; no key when it has none. */
+function shapeClass({
+  methods,
+  ...rest
+}: AstClassInfo): Record<string, unknown> {
+  return methods && methods.length > 0 ? { ...rest, members: methods } : rest;
+}
+
 /** The analysis result in the documented key order, quiet fields dropped. */
 export function shapeAstAnalyzeResult(
   result: AstCodeInsights,
@@ -81,10 +99,15 @@ export function shapeAstAnalyzeResult(
   }
   shaped['file'] = relativeToWorkspace(result.file, roots);
   shaped['language'] = result.language;
-  shaped['classes'] = result.classes;
+  const members = new Set(
+    result.classes.flatMap((info) => (info.methods ?? []).map(rangeKey)),
+  );
+  shaped['classes'] = result.classes.map(shapeClass);
   shaped['exports'] = result.exports;
   shaped['imports'] = result.imports;
-  shaped['functions'] = result.functions;
+  shaped['functions'] = result.functions.filter(
+    (info) => !members.has(rangeKey(info)),
+  );
   return shaped;
 }
 

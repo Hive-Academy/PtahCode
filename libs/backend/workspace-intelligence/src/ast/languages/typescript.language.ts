@@ -6,6 +6,7 @@
  */
 import type { LanguageModule } from './types';
 import {
+  CLASS_MEMBER_PATTERN,
   FILE_EDGES,
   JS_TS_EXPORT_QUERY,
   JS_TS_FUNCTION_QUERY,
@@ -14,7 +15,8 @@ import {
 import { TS_JS_IMPORT_RESOLVER } from '../import-resolution/ts-js-import-resolver';
 
 /**
- * TypeScript class query — uses extends_clause which TS grammar adds on top of JS.
+ * TypeScript class query — uses extends_clause which TS grammar adds on top of JS,
+ * and captures abstract classes and class members (`CLASS_MEMBER_PATTERN`).
  */
 const TS_CLASS_QUERY = `
 ; Class declarations: class Foo {}
@@ -32,7 +34,14 @@ const TS_CLASS_QUERY = `
       (class_heritage
         (extends_clause
           value: (_) @class_expr.extends))?))) @class_expr.declaration
-`;
+
+; Abstract class declarations: abstract class Foo {}
+(abstract_class_declaration
+  name: (_) @class.name
+  (class_heritage
+    (extends_clause
+      value: (_) @class.extends))?) @class.declaration
+${CLASS_MEMBER_PATTERN}`;
 
 /**
  * TypeScript-only export declarations, appended to JS_TS_EXPORT_QUERY for the

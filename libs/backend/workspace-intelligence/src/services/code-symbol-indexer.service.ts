@@ -1511,9 +1511,14 @@ export class CodeSymbolIndexer {
       subjects.add(subject);
       return subject;
     };
+    // TS/JS list each class method in `functions` too (with its bare name, so
+    // an exact-name search finds it); a `method` chunk for the same name and
+    // line would only embed the symbol twice.
+    const functionKeys = new Set<string>();
     for (const fn of insights.functions) {
       const name = fn.name;
       const startLine = fn.startLine ?? 0;
+      functionKeys.add(`${name}:${startLine}`);
       const endLine = fn.endLine ?? startLine;
       const text = `function ${name} in ${relPath}:${startLine}-${endLine}`;
       chunks.push({
@@ -1550,6 +1555,7 @@ export class CodeSymbolIndexer {
         for (const method of cls.methods) {
           const methodName = method.name;
           const methodStartLine = method.startLine ?? 0;
+          if (functionKeys.has(`${methodName}:${methodStartLine}`)) continue;
           const methodEndLine = method.endLine ?? methodStartLine;
           const methodText = `method ${className}.${methodName} in ${relPath}:${methodStartLine}-${methodEndLine}`;
           chunks.push({
