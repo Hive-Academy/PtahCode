@@ -13,6 +13,7 @@ import {
   SDK_TOKENS,
   type McpServerBackoffService,
   type PluginLoaderService,
+  type SessionToolDispositionRegistry,
 } from '@ptah-extension/agent-sdk';
 import {
   PLATFORM_TOKENS,
@@ -160,11 +161,29 @@ export function createClaudeLaneReadOnlyBindings(
   };
 }
 
+/**
+ * Seam for the session tool disposition (TASK_2026_2297_920a). The SDK registers a default
+ * registry whose answer is "running" for every session, and its permission handler and
+ * PreToolUse hook consult it on each tool call. This runtime owns child-session cap state,
+ * so the child spawner writes to the same registry on pause and clears it on release.
+ * Returns undefined when the host registered no SDK default.
+ */
+export function registerSessionToolDispositionFeed(
+  container: DependencyContainer,
+): SessionToolDispositionRegistry | undefined {
+  return container.isRegistered(SDK_TOKENS.SDK_SESSION_TOOL_DISPOSITION, true)
+    ? container.resolve<SessionToolDispositionRegistry>(
+        SDK_TOKENS.SDK_SESSION_TOOL_DISPOSITION,
+      )
+    : undefined;
+}
+
 export function registerCliAgentRuntimeServices(
   container: DependencyContainer,
   logger: Logger,
 ): void {
   logger.info('[CliAgentRuntime] Registering CLI agent runtime services...');
+  registerSessionToolDispositionFeed(container);
 
   container.register(ClaudeSdkLaneRunner, {
     useFactory: instanceCachingFactory(

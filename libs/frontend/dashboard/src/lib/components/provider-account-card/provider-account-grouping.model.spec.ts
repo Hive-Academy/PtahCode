@@ -33,6 +33,21 @@ describe('provider hierarchy', () => {
     expect(groups.other).toHaveLength(1);
     expect(groups.withoutReadings).toHaveLength(0);
   });
+  // grok-cli and opencode-cli are reserved provider-session ids with no
+  // registry entry yet, so only antigravity-cli is a live chat provider here.
+  it.each([
+    ['antigravity-cli', 'antigravity'],
+  ])('selects the %s chat provider by its plan owner id %s', (chatProviderId, ownerProviderId) => {
+    const owner = ownerFixture({
+      owner: { key: `${ownerProviderId}#cli-store:x`, providerId: ownerProviderId,
+        identityKind: 'cli-store', label: 'Account' },
+      status: 'service-unavailable',
+      windows: [],
+    });
+    const groups = groupProviderAccounts([owner, ownerFixture()], chatProviderId, NOW, TIME);
+    expect(groups.selected.map((record) => record.owner.owner.key)).toEqual([owner.owner.key]);
+    expect(groups.selected[0]?.groupingReason).toBe('Selected for chat');
+  });
   it('does not fabricate an owner for an unmatched selection', () => {
     expect(
       groupProviderAccounts([ownerFixture()], 'missing', NOW, TIME).selected,

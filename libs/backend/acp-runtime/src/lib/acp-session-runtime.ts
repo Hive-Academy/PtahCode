@@ -14,8 +14,14 @@
  *   retry when the profile names a method) → `session/set_config_option` and
  *   `session/set_mode`. Each handshake phase has its own deadline
  *   ({@link ACP_HANDSHAKE_TIMEOUTS_MS}).
- * - `prompt(text)` is one `session/prompt`, optionally bounded by
- *   `options.promptTimeoutMs` (lanes).
+ * - `prompt(input)` is one `session/prompt` (text, or ACP content blocks),
+ *   optionally bounded by `options.promptTimeoutMs` (lanes).
+ * - Instructions (`options.instructions`) reach a new session once: through
+ *   the profile's `instructionsMeta` on `session/new` when the agent
+ *   advertised a system-prompt hook, else as a delimited block in front of
+ *   the first prompt. A restored (resumed or loaded) session gets them again
+ *   only when the profile sets `instructionsOnRestore: 'meta'` (the same hook
+ *   on `session/resume` / `session/load`); the prompt prefix never repeats.
  * - `interrupt()` sends `session/cancel`; with the profile's `await-reply`
  *   cancel behaviour the agent answers the prompt and the process stays for
  *   the next prompt.
@@ -35,18 +41,22 @@
  */
 import { randomUUID } from 'node:crypto';
 import type {
+  AgentCapabilities,
+  ContentBlock,
   InitializeResponse,
   McpServer,
   RequestPermissionRequest,
   RequestPermissionResponse,
 } from '@agentclientprotocol/sdk';
 import type { IProcessSpawner } from '@ptah-extension/platform-core';
+import type { LanePermissionMode } from '@ptah-extension/shared';
 import type {
   ProviderApprovalSink,
   ProviderSessionErrorCode,
   ProviderSessionEvent,
   ProviderSessionEventBody,
   ProviderSessionLogger,
+  ProviderUsage,
 } from '@ptah-extension/provider-session-contracts';
 import type { z } from 'zod';
 import {
@@ -82,12 +92,16 @@ import {
   errorText,
   isRecord,
   isReplayedUpdate,
+  mergeAcpMeta,
+  modelEntriesOf,
   readAuthoritativeConfigOptions,
   readAcpStandardUsage,
   readConfigOptions,
   readJsonRpcError,
   readModeIds,
+  readModels,
 } from './acp-session-helpers';
+import type { AcpModelEntryShape } from './acp-session-helpers';
 import { buildAcpSpawnEnv } from './acp-spawn-env';
 import {
   createAcpSessionUpdateMapper,
@@ -200,12 +214,16 @@ export interface AcpSession {
   /** Handshake and session setup. Never rejects; stops the agent on failure. */
   start(): Promise<AcpSessionStart>;
   /**
-   * One `session/prompt`. Resolves with the lane exit code (0 or 1); an agent
-   * failure is an `error` event, never a rejection. Prompts do not overlap: a
-   * call while an earlier prompt has not settled rejects at once and sends
-   * nothing.
+   * One `session/prompt`: a text, or ACP content blocks (the caller checked
+   * the agent's prompt capabilities). Resolves with the lane exit code (0 or
+   * 1); an agent failure is an `error` event, never a rejection. Prompts do
+   * not overlap: a call while an earlier prompt has not settled rejects at
+   * once and sends nothing. The turn id is allocated synchronously, so
+   * {@link getTurnId} names it as soon as this returns.
    */
-  prompt(text: string): Promise<number>;
+  prompt(input: string | readonly ContentBlock[]): Promise<number>;
+  /** The running turn's id (the `turnId` its events carry), else undefined. */
+  getTurnId(): string | undefined;
   /**
    * Cancel the running turn. Resolves true when the turn ended and the agent
    * process is still running (the session takes the next prompt); false when
@@ -216,10 +234,37 @@ export interface AcpSession {
   supportsInterrupt(): boolean;
   /** Switch the session mode (`session/set_mode`, else a `mode` config option). */
   setMode(mode: string): Promise<boolean>;
+  /**
+   * Record the permission the session now runs under (the chat changed it).
+   * It selects the profile's per-turn start mode and approval titles; the
+   * mode itself is switched with {@link setMode}.
+   */
+  trackPermission(permission: LanePermissionMode | undefined): void;
   /** Switch the model (a `model` config option; ACP has no `session/set_model`). */
   setModel(model: string): Promise<boolean>;
+  /**
+   * Apply a reasoning effort through the profile's non-model config entries
+   * (hint semantics: an unadvertised or refused value is an `info`). Resolves
+   * whether every entry was applied; `undefined` applies nothing.
+   */
+  setEffort(effort: string | undefined): Promise<boolean>;
+  /** What the current process advertised on `initialize` (absent before it answered). */
+  getAgentCapabilities(): AgentCapabilities | undefined;
+  /** The session's mode ids: `modes.availableModes`, else a `mode` config option's values. */
+  getModes(): readonly string[];
+  /**
+   * The session's models: `models.availableModels` of the session reply,
+   * else the values of the `model` config option. `isDefault` marks the
+   * current one.
+   */
+  getModels(): readonly AcpModelEntry[];
   /** Resolves when the current agent process ends. Never rejects. */
   readonly exited: Promise<AcpProcessExit>;
+  /**
+   * Resolves with the current agent process's pid once it is spawned, or
+   * `undefined` when it never started or already ended. Never rejects.
+   */
+  readonly spawned: Promise<number | undefined>;
   /**
    * The connection closed or the process exited, or the process is being
    * stopped (the prompt watchdog fired, a kill was started): it takes no
@@ -238,6 +283,17 @@ export interface AcpSession {
   getProcessGeneration(): number;
   /** History replayed by `session/load`, flagged `replayed` (empty otherwise). */
   getReplay(): readonly ProviderSessionEvent[];
+}
+
+/** One model the session offers (see {@link AcpSession.getModels}). */
+export type AcpModelEntry = AcpModelEntryShape;
+
+/**
+ * The delimited block that carries a session's instructions in front of its
+ * first prompt, for an agent without a system-prompt hook.
+ */
+export function acpInstructionsPrefix(instructions: string): string {
+  return `<ptah-session-instructions>\n${instructions}\n</ptah-session-instructions>`;
 }
 
 /** A turn failure whose message is already user-facing. */
@@ -320,9 +376,20 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
   let sentMcpServers = false;
   let advertisedConfig: readonly Record<string, unknown>[] = [];
   let advertisedModes: readonly string[] = [];
+  /** `models` of the session reply (`session/new|resume|load`), read defensively. */
+  let advertisedModels: readonly AcpModelEntry[] = [];
+  /**
+   * Instructions still owed to a new session that took none on `session/new`:
+   * sent in front of its first prompt, then cleared.
+   */
+  let pendingInstructions: string | undefined;
+  /** The effort `setEffort` last applied; a respawn reapplies it. */
+  let acknowledgedEffort: { readonly value: string | undefined } | undefined;
   /** The last model and mode the agent acknowledged after setup; a respawn reapplies them. */
   let acknowledgedModel: string | undefined;
   let acknowledgedMode: string | undefined;
+  /** The permission the session runs under; the chat may change it ({@link AcpSession.trackPermission}). */
+  let livePermission = options.permission;
   let handshakePhase: AcpHandshakePhase = 'initialize';
   /** Set while {@link withHandshakeTimeout} runs; re-arms its timer for a phase. */
   let enterHandshakePhase: ((phase: AcpHandshakePhase) => void) | undefined;
@@ -332,9 +399,20 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
   let eventSequence = 0;
   let approvalSequence = 0;
   const budgetRunId = options.agentId ?? randomUUID();
+  /**
+   * Names this runtime instance in its turn and approval ids. `budgetRunId`
+   * is the chat session id, stable across processes, and the prompt and
+   * approval counters restart with every runtime: without it a process opened
+   * after an app restart, an idle close or a history read reused the ids of
+   * turns the renderer already shows, and the reply merged into (or replaced)
+   * an old message instead of rendering (live test 2026-11-21, bug 5).
+   */
+  const runtimeInstance = randomUUID().slice(0, 8);
   let latestUpdateUsage: z.infer<typeof acpPromptUsageSchema> | undefined;
   /** The context size (`used`) of the current turn's last `usage_update`. */
   let latestUpdateUsed: number | undefined;
+  /** The context window (`size`) of the current turn's last `usage_update`. */
+  let latestUpdateSize: number | undefined;
   let resolveUsageUpdate: (() => void) | undefined;
   /** Title of the first request the policy refused during the current prompt. */
   let refusedThisTurn: string | undefined;
@@ -422,10 +500,12 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
       }
       return decision.response;
     }
-    const approval = toProviderApprovalRequest(
+    const neutral = toProviderApprovalRequest(
       request,
-      `${sessionId ?? budgetRunId}:approval:${++approvalSequence}`,
+      `${sessionId ?? budgetRunId}:${runtimeInstance}:approval:${++approvalSequence}`,
     );
+    const title = profile.approvalTitle?.(request, { ...options, permission: livePermission });
+    const approval = title ? { ...neutral, title } : neutral;
     emit({ type: 'approvalRequested', request: approval });
     const asked = new AbortController();
     const stopAsking = (): void => asked.abort();
@@ -477,12 +557,20 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
       }
       if (promptInFlight) {
         const update = acpUsageUpdateSchema.safeParse(notification.update);
-        if (update.success) latestUpdateUsed = update.data.used;
+        if (update.success) {
+          latestUpdateUsed = update.data.used;
+          if (typeof update.data.size === 'number')
+            latestUpdateSize = update.data.size;
+        }
         if (update.success && update.data._meta?.usage) {
           latestUpdateUsage = {
             ...update.data._meta.usage,
             contextTokens:
               update.data._meta.usage.contextTokens ?? update.data.used,
+            ...(update.data._meta.usage.contextWindow === undefined &&
+            typeof update.data.size === 'number'
+              ? { contextWindow: update.data.size }
+              : {}),
           };
           resolveUsageUpdate?.();
         }
@@ -768,6 +856,13 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
     }
 
     const cwd = options.workingDirectory;
+    // Instructions on a restored session only where the profile opted in
+    // (`instructionsOnRestore: 'meta'`), through the same hook as `session/new`.
+    const restoreMeta =
+      profile.instructionsOnRestore === 'meta' && options.instructions
+        ? profile.instructionsMeta?.(options.instructions, init)
+        : undefined;
+    const meta = restoreMeta ? { _meta: restoreMeta } : {};
     attachingSessionId = resumeId;
     const collector =
       method === 'load'
@@ -787,11 +882,13 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
               sessionId: resumeId,
               cwd,
               mcpServers: [...mcpServers],
+              ...meta,
             })
           : await conn.loadSession({
               sessionId: resumeId,
               cwd,
               mcpServers: [...mcpServers],
+              ...meta,
             });
       // The first replay is the session's history; a respawn's re-load must not
       // replace it (a consumer that appended the first one would duplicate it).
@@ -855,13 +952,20 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
    * allowed values vary per model) is a hint, skipped with an info when the
    * setting or value is not advertised or when the agent rejects it.
    */
-  const applySessionConfig = async (
+  const applySessionConfig = (
     conn: AcpConnectionApi,
     id: string,
     sessionOptions: AcpSessionOptions,
-  ): Promise<void> => {
-    const entries: readonly AcpSessionConfigEntry[] =
-      profile.sessionConfig?.(sessionOptions) ?? [];
+  ): Promise<boolean> =>
+    applyConfigEntries(conn, id, profile.sessionConfig?.(sessionOptions) ?? []);
+
+  /** Apply config entries (rules above); resolves whether none was skipped. */
+  const applyConfigEntries = async (
+    conn: AcpConnectionApi,
+    id: string,
+    entries: readonly AcpSessionConfigEntry[],
+  ): Promise<boolean> => {
+    let applied = true;
     for (const entry of entries) {
       const binding = entry.binding === true;
       const option = advertisedConfig.find(
@@ -871,6 +975,7 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
         emitInfo(
           `${name} does not offer the "${entry.configId}" setting, so ${String(entry.value)} was not applied`,
         );
+        applied = false;
         continue;
       }
       const values = option ? advertisedValuesOf(option) : [];
@@ -883,6 +988,7 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
         emitInfo(
           `${name} does not offer ${entry.value} for "${entry.configId}" (available: ${values.join(', ')}), so it was not applied`,
         );
+        applied = false;
         continue;
       }
       try {
@@ -892,8 +998,10 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
         emitInfo(
           `${error.message}; continuing without the "${entry.configId}" setting`,
         );
+        applied = false;
       }
     }
+    return applied;
   };
 
   /** The advertised config option of a category (or with that id). */
@@ -926,6 +1034,29 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
     id: string,
     mode: string,
   ): Promise<boolean> => {
+    const outcome = await switchMode(conn, id, mode);
+    if (outcome.ok) return true;
+    emitInfo(
+      outcome.unoffered
+        ? `${name} does not offer the "${mode}" mode, so it was not applied`
+        : `${outcome.reason}; continuing without the "${mode}" mode`,
+    );
+    return false;
+  };
+
+  /**
+   * Switch to `mode` as {@link applyMode} does, without the hint: the caller
+   * decides what a refusal means. An ACP error answer is a refusal; any other
+   * failure (e.g. the connection closed) propagates.
+   */
+  const switchMode = async (
+    conn: AcpConnectionApi,
+    id: string,
+    mode: string,
+  ): Promise<
+    | { readonly ok: true }
+    | { readonly ok: false; readonly unoffered: boolean; readonly reason: string }
+  > => {
     try {
       if (advertisedModes.includes(mode)) {
         await call('session/set_mode', () =>
@@ -935,29 +1066,42 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
         const option = optionFor('mode');
         const values = option ? advertisedValuesOf(option) : [];
         if (!option || typeof option['id'] !== 'string' || !values.includes(mode)) {
-          emitInfo(`${name} does not offer the "${mode}" mode, so it was not applied`);
-          return false;
+          return {
+            ok: false,
+            unoffered: true,
+            reason: `${name} does not offer the "${mode}" mode`,
+          };
         }
         await writeConfig(conn, id, option['id'], mode, values);
       }
       emit({ type: 'modeChanged', mode });
-      return true;
+      return { ok: true };
     } catch (error: unknown) {
       if (!(error instanceof AcpTurnFailure)) throw error;
-      emitInfo(`${error.message}; continuing without the "${mode}" mode`);
-      return false;
+      return { ok: false, unoffered: false, reason: error.message };
     }
   };
 
-  /** `session/new`, with one `authenticate` retry on the ACP auth-required error. */
+  /**
+   * `session/new`, with one `authenticate` retry on the ACP auth-required
+   * error. `instructionsInMeta`: the instructions travelled in its `_meta`.
+   */
   const createSession = async (
     conn: AcpConnectionApi,
     init: InitializeResponse,
     mcpServers: readonly McpServer[],
-  ): Promise<unknown> => {
-    const create = (): Promise<unknown> => {
+  ): Promise<{ response: unknown; instructionsInMeta: boolean }> => {
+    const instructionsMeta = options.instructions
+      ? profile.instructionsMeta?.(options.instructions, init)
+      : undefined;
+    const meta = mergeAcpMeta(profile.sessionMeta?.(options), instructionsMeta);
+    const instructionsInMeta = instructionsMeta !== undefined;
+    const create = async (): Promise<{
+      response: unknown;
+      instructionsInMeta: boolean;
+    }> => ({ response: await createOnce(), instructionsInMeta });
+    const createOnce = (): Promise<unknown> => {
       logMcpRequest('session/new', mcpServers);
-      const meta = profile.sessionMeta?.(options);
       return call('session/new', () =>
         conn.newSession({
           cwd: options.workingDirectory,
@@ -1084,8 +1228,11 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
       }
     }
 
+    let instructionsInMeta = false;
     if (!id) {
-      response = await createSession(conn, init, mcpServers);
+      const created = await createSession(conn, init, mcpServers);
+      response = created.response;
+      instructionsInMeta = created.instructionsInMeta;
       const createdId = isRecord(response) ? response['sessionId'] : undefined;
       if (typeof createdId !== 'string' || !createdId) {
         throw new AcpTurnFailure(`${name} did not return a session id`);
@@ -1094,6 +1241,7 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
     }
     advertisedConfig = readConfigOptions(response);
     advertisedModes = readModeIds(response);
+    advertisedModels = readModels(response);
 
     sessionId = id;
     // Reported before the config is applied on purpose: a refused config fails
@@ -1101,13 +1249,13 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
     config.onSessionResolved?.(id);
     // A respawn re-applies what the agent last acknowledged (`setModel`,
     // `setMode`), not the values the session was opened with (PR #1445 review).
-    await applySessionConfig(
-      conn,
-      id,
-      acknowledgedModel === undefined
-        ? options
-        : { ...options, model: acknowledgedModel },
-    );
+    await applySessionConfig(conn, id, {
+      ...options,
+      ...(acknowledgedModel === undefined ? {} : { model: acknowledgedModel }),
+      ...(acknowledgedEffort === undefined
+        ? {}
+        : { reasoningEffort: acknowledgedEffort.value }),
+    });
     const mode = acknowledgedMode ?? profile.modeFor?.(options);
     if (mode) await applyMode(conn, id, mode);
     // `onSessionResolved` or the config writes may have aborted the session
@@ -1119,6 +1267,12 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
       );
     }
     setupComplete = true;
+    // Only a session created here is owed its instructions; a restored one
+    // already holds them, and so does one whose `session/new` carried them.
+    pendingInstructions =
+      !restoredContext && !instructionsInMeta && options.instructions
+        ? options.instructions
+        : undefined;
     return { restoredContext };
   };
 
@@ -1248,18 +1402,23 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
    * One accepted prompt. Every path, including a failed respawn, a missing
    * session and a prompt after abort, ends with exactly one `terminal`.
    */
-  const runPromptTurn = async (text: string): Promise<number> => {
+  const runPromptTurn = async (
+    input: string | readonly ContentBlock[],
+  ): Promise<number> => {
     // Allocated first, so a respawn failure's error carries the turn id too.
-    const turnId = `${sessionId ?? budgetRunId}:${budgetRunId}:${++promptSequence}`;
+    const turnId = `${sessionId ?? budgetRunId}:${budgetRunId}:${runtimeInstance}:${++promptSequence}`;
     currentTurnId = turnId;
     latestUpdateUsage = undefined;
     latestUpdateUsed = undefined;
+    latestUpdateSize = undefined;
     turnCancelledByPtah = false;
     refusedThisTurn = undefined;
     // Tools of an earlier turn that never finished are abandoned.
     mapper.releaseTools();
     let target = gen;
     let exitCode = 1;
+    /** The usage this turn reported; repeated on its terminal (the chat's turn stats). */
+    let turnUsage: ProviderUsage | undefined;
     let timedOut = false;
     /** The turn ended before `session/prompt`: the session cannot take it. */
     let notStarted = false;
@@ -1319,8 +1478,39 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
         }, limit);
         watchdog.unref?.();
       }
+      // An approval the agent got in an earlier turn (e.g. leaving plan mode)
+      // must not carry into this one: the turn starts in the profile's mode,
+      // or is not sent at all. Set on every prompt, never from a cached mode:
+      // the agent can change mode without telling the client (an approval
+      // with no `kind`, a standing grant), and one `set_mode` per turn is cheap.
+      const startMode = profile.turnStartMode?.({ ...options, permission: livePermission });
+      if (startMode) {
+        const switched = await switchMode(conn, id, startMode);
+        if (dropStale(target, 'session/set_mode reply')) return 1;
+        // Interrupted, timed out or aborted while switching: nothing is sent.
+        if (timedOut || turnCancelledByPtah || signal.aborted) return 1;
+        if (!switched.ok) {
+          emitError(
+            `${name} could not switch back to the "${startMode}" mode (${switched.reason}), ` +
+              'so the message was not sent: without it the agent could change files or ' +
+              'run commands without asking. Try again, or pick another permission.',
+            'request-failed',
+          );
+          return 1;
+        }
+      }
+      const content: ContentBlock[] =
+        typeof input === 'string' ? [{ type: 'text', text: input }] : [...input];
+      const owed = pendingInstructions;
+      // Sent once: whatever this prompt's outcome, the agent has seen them.
+      pendingInstructions = undefined;
       const response: unknown = await call('session/prompt', () =>
-        conn.prompt({ sessionId: id, prompt: [{ type: 'text', text }] }),
+        conn.prompt({
+          sessionId: id,
+          prompt: owed
+            ? [{ type: 'text', text: acpInstructionsPrefix(owed) }, ...content]
+            : content,
+        }),
       );
       // The answer is in: the watchdog can no longer fire during the usage drain.
       clearTimeout(watchdog);
@@ -1344,6 +1534,7 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
         const standardUsage = readAcpStandardUsage(
           isRecord(response) ? response['usage'] : undefined,
           latestUpdateUsed,
+          latestUpdateSize,
         );
         if (!promptUsage.success && !standardUsage && !latestUpdateUsage) {
           // ACP agents can send usage_update after the prompt response. Wait
@@ -1366,13 +1557,22 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
             resolveUsageUpdate = undefined;
           }
         }
-        const reported = promptUsage.success
+        const counted = promptUsage.success
           ? promptUsage.data
           : (standardUsage ?? latestUpdateUsage);
+        // The window the agent reported in its last `usage_update`, when the
+        // usage itself does not name one (issue #1459: context fill).
+        const reported =
+          counted &&
+          counted.contextWindow === undefined &&
+          latestUpdateSize !== undefined
+            ? { ...counted, contextWindow: latestUpdateSize }
+            : counted;
         // Usage without a model (agy's protocol usage, Grok's extension) names
         // the session's model, so the lane's actual model is not lost.
         const model = reported?.model ?? sessionModel();
         const usage = reported && model ? { ...reported, model } : reported;
+        turnUsage = usage;
         emit({ type: 'usage', provider: name, turnId, usage });
       }
       if (mapped.segment?.type === 'error') {
@@ -1402,6 +1602,7 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
             target.closed || target.retired || timedOut || notStarted
               ? 'broken'
               : 'reusable',
+          ...(turnUsage ? { usage: turnUsage } : {}),
         });
       }
       promptInFlight = false;
@@ -1410,6 +1611,7 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
       resolveUsageUpdate = undefined;
       latestUpdateUsage = undefined;
       latestUpdateUsed = undefined;
+      latestUpdateSize = undefined;
       refusedThisTurn = undefined;
       turnCancelledByPtah = false;
     }
@@ -1417,7 +1619,7 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
 
   /** A prompt was accepted and has not settled (covers a respawn before it). */
   let turnAccepted = false;
-  const prompt = (text: string): Promise<number> => {
+  const prompt = (input: string | readonly ContentBlock[]): Promise<number> => {
     if (turnAccepted) {
       // Overlapping prompts would share one turn's state (PR #1444 review).
       return Promise.reject(
@@ -1425,7 +1627,7 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
       );
     }
     turnAccepted = true;
-    const pending = runPromptTurn(text).finally(() => {
+    const pending = runPromptTurn(input).finally(() => {
       turnAccepted = false;
     });
     promptSettled = pending;
@@ -1512,6 +1714,42 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
     }
   };
 
+  const setEffort = async (effort: string | undefined): Promise<boolean> => {
+    const conn = gen.connection;
+    const id = sessionId;
+    if (!conn || !id || !setupComplete || !isLive(gen)) return false;
+    const modelId = optionFor('model')?.['id'];
+    // The model entry is the binding one; an effort change never resends it.
+    const entries = (
+      profile.sessionConfig?.({
+        ...options,
+        model: sessionModel(),
+        reasoningEffort: effort,
+      }) ?? []
+    ).filter((entry) => entry.configId !== 'model' && entry.configId !== modelId);
+    const applied = await applyConfigEntries(conn, id, entries);
+    acknowledgedEffort = { value: effort };
+    if (entries.length > 0) emit({ type: 'configChanged' });
+    return applied;
+  };
+
+  /** Mode ids: the session's `modes`, else the values of a `mode` config option. */
+  const getModes = (): readonly string[] => {
+    if (advertisedModes.length > 0) return advertisedModes;
+    const option = optionFor('mode');
+    return option ? advertisedValuesOf(option) : [];
+  };
+
+  const getModels = (): readonly AcpModelEntry[] => {
+    if (advertisedModels.length > 0) return advertisedModels;
+    const option = optionFor('model');
+    if (!option) return [];
+    const current = option['currentValue'];
+    return modelEntriesOf(option).map((entry) =>
+      entry.id === current ? { ...entry, isDefault: true } : entry,
+    );
+  };
+
   /**
    * The first generation's setup, shared by every `start()` call: a second
    * concurrent setup would open another SDK connection on the same byte
@@ -1533,10 +1771,22 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
       setupComplete &&
       isLive(gen) &&
       !signal.aborted,
+    getTurnId: () => currentTurnId,
     setMode: setModeOnSession,
+    trackPermission: (permission) => {
+      livePermission = permission;
+    },
     setModel,
+    setEffort,
+    getAgentCapabilities: () => gen.init?.agentCapabilities ?? undefined,
+    getModes,
+    getModels,
     get exited() {
       return gen.transport.exited;
+    },
+    get spawned() {
+      // An in-memory transport (specs) has no spawn to wait for.
+      return gen.transport.spawned ?? Promise.resolve(gen.transport.getPid());
     },
     isClosed: () => !isLive(gen),
     isSetupComplete: () => setupComplete,

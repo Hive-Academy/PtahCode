@@ -18,6 +18,7 @@ import {
   runGitGrep,
   runNodeSearch,
   runRipgrep,
+  isGlobTimeoutMessage,
   type GrepEngineResult,
   type GrepMatch,
   type GrepRequest,
@@ -33,6 +34,7 @@ import {
   GREP_MAX_CHARS,
   GREP_MAX_CONTEXT,
   GREP_MAX_FILES,
+  GREP_MAX_FILE_BYTES,
   GREP_MAX_LABEL_FILE_BYTES,
   GREP_MAX_LINE_CHARS,
   GREP_TOOL_NAME,
@@ -42,7 +44,16 @@ import { innermostSymbolAt, toNavSymbols, type NavSymbol } from './nav-symbols';
 
 export const GrepArgsSchema = z
   .object({
-    pattern: z.string().min(1).max(1000),
+    // One line at a time: a line break never matches, and git would split
+    // the pattern into several patterns at it.
+    pattern: z
+      .string()
+      .min(1)
+      .max(1000)
+      .refine((value) => !/[\r\n]/.test(value), {
+        message:
+          'must be one line: the search matches single lines, so a line break never matches',
+      }),
     path: z.string().trim().min(1).optional(),
     glob: z.string().trim().min(1).max(200).optional(),
     regex: z.boolean().optional(),
@@ -147,6 +158,11 @@ async function loadSymbols(
 
 async function readLines(rootReal: string, file: string): Promise<string[]> {
   try {
+    // An oversized file gets no context lines: rg and the Node walk skip
+    // it, and git grep (no size option) shows only its match lines.
+    if ((await stat(path.join(rootReal, file))).size > GREP_MAX_FILE_BYTES) {
+      return [];
+    }
     const lines = (await readFile(path.join(rootReal, file), 'utf8')).split(
       /\r?\n/,
     );
@@ -516,7 +532,12 @@ export async function handleGrep(
     const git = await (deps.findGit ?? findGit)();
     if (git && (await isGitWorkTree(git, request.rootReal))) {
       result = await runGitGrep(git, request);
-      if (result.error && result.totalMatches === 0) {
+      if (
+        result.error &&
+        result.totalMatches === 0 &&
+        // The walk runs the same glob and would time out again.
+        !isGlobTimeoutMessage(result.error)
+      ) {
         // For example a git built without PCRE rejects `-P`: use the walk.
         result = undefined;
       }

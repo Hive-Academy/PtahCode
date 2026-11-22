@@ -158,15 +158,17 @@ describe('startAndRegisterLaneOutcomes', () => {
     container.register(SDK_TOKENS.SDK_SUBAGENT_STOP_CALLBACK_REGISTRY, {
       useValue: { register: () => unsubscribe },
     });
-    container.register(SDK_TOKENS.SDK_SUBAGENT_BUDGET_STOP_CALLBACK_REGISTRY, {
+    container.register(SDK_TOKENS.SDK_ADAPTER_EVENTS, {
       useValue: {
-        register: () => {
+        onSubagentEnded: () => {
           throw new Error('second registration failed');
         },
       },
     });
 
-    startAndRegisterLaneOutcomes(container, logger);
+    startAndRegisterLaneOutcomes(container, logger, {
+      observeSubagentEnded: true,
+    });
 
     expect(unsubscribe).toHaveBeenCalledTimes(1);
     expect(logger.warn).toHaveBeenCalledWith(

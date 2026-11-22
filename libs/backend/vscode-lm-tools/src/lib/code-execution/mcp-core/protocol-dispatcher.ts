@@ -1141,25 +1141,34 @@ async function handleIndividualTool(
       case READ_SYMBOL_TOOL_NAME:
       case GREP_TOOL_NAME: {
         // Validation, path containment and bounds live in the handlers.
+        // The caller-declared root is a URL segment (caller input), so it
+        // is used only once it resolves inside an open folder of the host.
+        const callerRoot = await resolveNavCallerRoot(deps);
+        if ('error' in callerRoot) {
+          return toolErrorResponse(request, callerRoot.error);
+        }
         const navDeps = {
           analyze: (absolutePath: string) => ptahAPI.ast.analyze(absolutePath),
           // The caller's own root first: a lane in a git worktree must read
           // its worktree, not the main checkout.
           defaultWorkspaceRoot: async () =>
-            getCallerWorkspaceRoot() ??
-            (await ptahAPI.workspace.getInfo())?.path,
+            callerRoot.root ?? (await ptahAPI.workspace.getInfo())?.path,
         };
         // A supplied `workspaceRoot` is the containment boundary of the
         // handlers, so it must lie inside a root the host or the caller
-        // already has. With no known root it is refused (fail closed).
+        // already has. A caller with a declared root is held to that root.
+        // With no known root it is refused (fail closed).
         const suppliedRoot = (args as { workspaceRoot?: unknown })
           .workspaceRoot;
         if (typeof suppliedRoot === 'string' && suppliedRoot.trim() !== '') {
-          const allowedRoots = [
-            getCallerWorkspaceRoot(),
-            (await ptahAPI.workspace.getInfo())?.path,
-            ...knownWorkspaceFolders(deps),
-          ].filter((root): root is string => !!root && root.trim() !== '');
+          const allowedRoots = (
+            callerRoot.root !== undefined
+              ? [callerRoot.root]
+              : [
+                  (await ptahAPI.workspace.getInfo())?.path,
+                  ...knownWorkspaceFolders(deps),
+                ]
+          ).filter((root): root is string => !!root && root.trim() !== '');
           if (allowedRoots.length === 0) {
             return toolErrorResponse(
               request,
@@ -4324,6 +4333,36 @@ function clampRunCheckWaitSummary(text: string): string {
   return text.length <= WAIT_SUMMARY_MAX_CHARS
     ? text
     : `${text.slice(0, WAIT_SUMMARY_MAX_CHARS - 1)}…`;
+}
+
+/**
+ * The navigation tools' caller root. A caller that declares no root gets
+ * `{ root: undefined }` (the host's open workspace applies). A declared root
+ * (a URL segment, so caller input) is used only when it is an open folder of
+ * the host or an existing directory inside one, and then by its validated
+ * path; otherwise the call is refused, so a declared `/` cannot widen the
+ * containment boundary of `ptah_grep` or `ptah_read_symbol`.
+ */
+async function resolveNavCallerRoot(
+  deps: ProtocolHandlerDependencies,
+): Promise<{ readonly root: string | undefined } | { readonly error: string }> {
+  const declared = getCallerWorkspaceRoot()?.trim();
+  if (declared === undefined || declared === '') {
+    return { root: undefined };
+  }
+  const known = knownWorkspaceFolders(deps);
+  const match =
+    (await findKnownWorkspaceFolder(declared, known)) ??
+    (await findDirectoryInsideKnownFolder(declared, known));
+  if (match !== undefined) {
+    return { root: match };
+  }
+  return {
+    error:
+      `Error: the caller declared workspace '${declared}', which is not an open folder of this ` +
+      `host or a directory inside one, so nothing was read. Re-read the 'ptah' entry in ` +
+      `.mcp.json of the tree you mean to search.`,
+  };
 }
 
 async function resolveRunCheckRoot(

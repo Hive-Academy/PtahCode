@@ -52,6 +52,11 @@ export interface OrchestratorCardModel {
   readonly contextWindow: number | null;
   readonly tokens: number | null;
   readonly cost: number | null;
+  /**
+   * The null `cost` is a model without a published rate (the snapshot's
+   * `costUnavailableReason: 'rate-missing'`): shown "Not priced", not `—`.
+   */
+  readonly costNotPriced?: boolean;
   readonly turns: number | null;
   /** Orchestrator-owned requests, FIFO. */
   readonly requests: readonly InspectorRequest[];

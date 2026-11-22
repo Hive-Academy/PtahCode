@@ -23,10 +23,14 @@ import type { AcpRequestFailure, AcpSessionOptions } from '../acp-vendor-profile
 import type { RequestPermissionRequest } from '@agentclientprotocol/sdk';
 import {
   ANTIGRAVITY_ACP_PTAH_MCP_NAME,
+  ANTIGRAVITY_CHAT_ASK_MODE,
+  ANTIGRAVITY_PLAN_EXIT_TITLE,
   antigravityAcpProfile,
   antigravityGrantsWithoutAutoApprove,
+  antigravityInstructionsMeta,
   antigravitySkipsPermissions,
 } from './antigravity-acp-profile';
+import type { InitializeResponse } from '@agentclientprotocol/sdk';
 
 const TOOL_USE = readAcpFixture('antigravity-p3-ptah-mcp-tool-use.ndjson');
 const CANCEL = readAcpFixture('antigravity-p3-cancel-then-continue.ndjson');
@@ -94,6 +98,18 @@ describe('antigravityAcpProfile — spawn', () => {
     'skips permissions for permission %s, autoApprove %s: %s (S1)',
     (permission, autoApprove, expected) => {
       expect(antigravitySkipsPermissions({ permission, autoApprove })).toBe(expected);
+    },
+  );
+
+  it.each(['yolo', undefined] as const)(
+    'never skips permissions for a chat (permission %s): the chat asks its sink',
+    (permission) => {
+      expect(
+        antigravitySkipsPermissions({ permission, autoApprove: true, consumer: 'chat' }),
+      ).toBe(false);
+      expect(
+        antigravityAcpProfile.buildSpawn({ ...base, permission, consumer: 'chat' }).args,
+      ).not.toContain('--dangerously-skip-permissions');
     },
   );
 
@@ -186,7 +202,57 @@ describe('antigravityAcpProfile — headless grants in narrower modes (live F1)'
   });
 });
 
+describe('antigravityAcpProfile — instructions', () => {
+  const init = (meta: unknown): InitializeResponse =>
+    ({ protocolVersion: 1, agentCapabilities: { _meta: meta } }) as InitializeResponse;
+
+  it('appends instructions through session/new _meta when agy advertises the hook', () => {
+    // agy 1.5.13 `initialize`: `_meta.antigravity.systemPrompt.append: true`.
+    expect(
+      antigravityInstructionsMeta(
+        'Be brief.',
+        init({ antigravity: { tier: true, systemPrompt: { append: true } } }),
+      ),
+    ).toEqual({ antigravity: { systemPrompt: { append: 'Be brief.' } } });
+  });
+
+  it.each([
+    ['no _meta', undefined],
+    ['no systemPrompt', { antigravity: { tier: true } }],
+    ['append not advertised', { antigravity: { systemPrompt: { append: false } } }],
+    ['malformed', { antigravity: 'yes' }],
+  ])('falls back to the prompt prefix (undefined) with %s', (_label, meta) => {
+    expect(antigravityInstructionsMeta('Be brief.', init(meta))).toBeUndefined();
+  });
+});
+
 describe('antigravityAcpProfile — MCP, modes, config', () => {
+  it('keeps user server names and maps sse and stdio attachments', () => {
+    expect(
+      antigravityAcpProfile.buildMcpServers({
+        ...base,
+        mcp: [
+          { type: 'sse', name: 'docs', url: 'https://docs.example/sse', headers: [] },
+          {
+            type: 'stdio',
+            name: 'files',
+            command: 'npx',
+            args: ['-y', 'files-mcp'],
+            env: [{ name: 'ROOT', value: 'C:/Users/dev' }],
+          },
+        ],
+      }),
+    ).toEqual([
+      { type: 'sse', name: 'docs', url: 'https://docs.example/sse', headers: [] },
+      {
+        name: 'files',
+        command: 'npx',
+        args: ['-y', 'files-mcp'],
+        env: [{ name: 'ROOT', value: 'C:/Users/dev' }],
+      },
+    ]);
+  });
+
   it('attaches Ptah MCP as an http entry with the bearer header (D9)', () => {
     expect(
       antigravityAcpProfile.buildMcpServers({
@@ -214,8 +280,102 @@ describe('antigravityAcpProfile — MCP, modes, config', () => {
     ['auto-edit', 'accept-edits'],
     ['ask', 'default'],
     ['yolo', 'auto'],
-  ] as const)('maps permission %s to the agy mode %s', (permission, mode) => {
+  ] as const)('maps lane permission %s to the agy mode %s', (permission, mode) => {
     expect(antigravityAcpProfile.modeFor?.({ ...base, permission })).toBe(mode);
+  });
+
+  // Live test 2026-11-21: a Manual chat in agy `default` wrote hello.txt with
+  // no session/request_permission. `default` defers to the user's global agy
+  // Tool Permission, so Manual must not run in it.
+  it.each([
+    ['plan', 'plan'],
+    ['auto-edit', 'accept-edits'],
+    ['ask', ANTIGRAVITY_CHAT_ASK_MODE],
+    ['yolo', 'auto'],
+  ] as const)('maps chat permission %s to the agy mode %s', (permission, mode) => {
+    expect(
+      antigravityAcpProfile.modeFor?.({ ...base, consumer: 'chat', permission }),
+    ).toBe(mode);
+  });
+
+  it('never runs a Manual (ask) chat in a mode where agy self-approves edits', () => {
+    const mode = antigravityAcpProfile.modeFor?.({
+      ...base,
+      consumer: 'chat',
+      permission: 'ask',
+    });
+    expect(mode).toBe('plan');
+    // The recorded session/new advertises the mode, so set_mode applies it.
+    const advertised = JSON.stringify(TOOL_USE);
+    expect(advertised).toContain('"id":"plan"');
+  });
+
+  it('drops a user server named like the Ptah attachment (review moderate 7)', () => {
+    const servers = antigravityAcpProfile.buildMcpServers({
+      ...base,
+      mcp: [
+        {
+          name: 'ptah',
+          url: 'http://localhost:1/agent/a',
+          headers: [{ name: 'Authorization', value: 'Bearer t' }],
+        },
+        { type: 'http', name: ANTIGRAVITY_ACP_PTAH_MCP_NAME, url: 'https://evil.example/mcp', headers: [] },
+        { type: 'http', name: 'docs', url: 'https://docs.example/mcp', headers: [] },
+      ],
+    });
+    expect(servers.map((server) => server.name)).toEqual([
+      ANTIGRAVITY_ACP_PTAH_MCP_NAME,
+      'docs',
+    ]);
+    expect(JSON.stringify(servers)).not.toContain('evil.example');
+  });
+
+  it('starts every Manual chat turn in plan mode, and nothing else (review: per-turn plan exit)', () => {
+    expect(
+      antigravityAcpProfile.turnStartMode?.({ ...base, consumer: 'chat', permission: 'ask' }),
+    ).toBe(ANTIGRAVITY_CHAT_ASK_MODE);
+    for (const permission of [undefined, 'plan', 'auto-edit', 'yolo'] as const) {
+      expect(
+        antigravityAcpProfile.turnStartMode?.({ ...base, consumer: 'chat', permission }),
+      ).toBeUndefined();
+    }
+    // A CLI lane keeps its mode for the whole run.
+    for (const consumer of ['lane', undefined] as const) {
+      expect(
+        antigravityAcpProfile.turnStartMode?.({ ...base, consumer, permission: 'ask' }),
+      ).toBeUndefined();
+    }
+  });
+
+  it('titles the plan-exit approval of a Manual chat plainly', () => {
+    const switchMode = {
+      sessionId: 's',
+      toolCall: { toolCallId: 'c', kind: 'switch_mode', title: 'Leave plan' },
+      options: [],
+    } as unknown as RequestPermissionRequest;
+    const edit = {
+      sessionId: 's',
+      toolCall: { toolCallId: 'c', kind: 'edit', title: 'Edit a.ts' },
+      options: [],
+    } as unknown as RequestPermissionRequest;
+    const manual = { ...base, consumer: 'chat' as const, permission: 'ask' as const };
+    expect(antigravityAcpProfile.approvalTitle?.(switchMode, manual)).toBe(
+      ANTIGRAVITY_PLAN_EXIT_TITLE,
+    );
+    expect(ANTIGRAVITY_PLAN_EXIT_TITLE).toMatch(/this turn without asking for each one/);
+    expect(antigravityAcpProfile.approvalTitle?.(edit, manual)).toBeUndefined();
+    expect(
+      antigravityAcpProfile.approvalTitle?.(switchMode, { ...manual, consumer: 'lane' }),
+    ).toBeUndefined();
+    expect(
+      antigravityAcpProfile.approvalTitle?.(switchMode, { ...manual, permission: 'auto-edit' }),
+    ).toBeUndefined();
+    expect(
+      antigravityAcpProfile.approvalTitle?.(
+        { toolCall: null } as unknown as RequestPermissionRequest,
+        manual,
+      ),
+    ).toBeUndefined();
   });
 
   it('sets no mode without a permission', () => {

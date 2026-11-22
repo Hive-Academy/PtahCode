@@ -16,6 +16,7 @@ import { createMockLogger } from '@ptah-extension/shared/testing';
 import {
   CODEX_INITIALIZE_TIMEOUT_MS,
   CodexAccountUsageClient,
+  codexAccountIdentityDigest,
   normalizeCodexHomeKey,
   type CodexAccountUsageResult,
   type CodexHomeAuthReader,
@@ -26,7 +27,10 @@ import type {
   ProcessSpawnRequest,
   SpawnedProcessHandle,
 } from '@ptah-extension/platform-core';
-import { CodexAccountUsageService } from './codex-account-usage.service';
+import {
+  CodexAccountUsageService,
+  codexOwnerKey,
+} from './codex-account-usage.service';
 import {
   CODEX_ACCOUNT_USAGE_DAILY_INT64_FIELDS,
   CODEX_ACCOUNT_USAGE_INT64_FIELDS,
@@ -34,7 +38,11 @@ import {
   codexTokenUsageResponseSchema,
 } from './codex-account.schemas';
 import { CodexHomeResolver } from './codex-home-resolver';
-import { accountOwnerKey } from '../../quota/provider-owner.resolver';
+import {
+  accountOwnerKey,
+  ProviderOwnerResolver,
+} from '../../quota/provider-owner.resolver';
+import { parseQuotaOwnerRef } from '@ptah-extension/agent-sdk';
 import type { ICodexAuthService } from './codex-provider.types';
 
 interface Scenario {
@@ -46,6 +54,8 @@ interface Scenario {
   holdMethod?: string;
   activityResultRaw?: string;
   initializedHome?: string;
+  /** `account/rateLimits/read` account id; absent by default. */
+  accountId?: string | null;
   /** `account/read` answer; `null` is a signed-out home. Defaults to a ChatGPT account. */
   account?: Record<string, unknown> | null;
   rateLimitReachedType?: string;
@@ -145,6 +155,9 @@ function harness(
                         }
                       : method === 'account/rateLimits/read'
                         ? {
+                            ...(scenario.accountId !== undefined && {
+                              accountId: scenario.accountId,
+                            }),
                             rateLimits: {
                               primary: {
                                 usedPercent: 25,
@@ -264,7 +277,7 @@ describe('CodexAccountUsageService', () => {
     const clear = jest
       .spyOn(core, 'clearCache')
       .mockImplementation(() => undefined);
-    const owner = jest.spyOn(core, 'currentOwnerKey').mockReturnValue('owner');
+    const owner = jest.spyOn(core, 'currentAccountDigest').mockReturnValue('owner');
     const h = harness({}, core);
     expect(await h.service.getAccountUsage({ home: h.syntheticHome })).toBe(
       result,
@@ -277,8 +290,8 @@ describe('CodexAccountUsageService', () => {
       [h.syntheticHome, { refresh: undefined, signal: undefined }],
       [otherHome, { refresh: undefined, signal: undefined }],
     ]);
-    expect(h.service.currentOwnerKey()).toBe('owner');
-    expect(h.service.currentOwnerKey(h.syntheticHome)).toBe('owner');
+    expect(h.service.currentOwnerKey()).toBe(accountOwnerKey('openai-codex', 'owner'));
+    expect(h.service.currentOwnerKey(h.syntheticHome)).toBe(accountOwnerKey('openai-codex', 'owner'));
     h.service.clearCache(h.syntheticHome);
     expect(clear).toHaveBeenCalledWith(h.syntheticHome);
     expect(h.requests).toHaveLength(0);
@@ -354,7 +367,7 @@ describe('CodexAccountUsageService', () => {
         requestedHome === home ? result : defaultResult,
       );
     const owner = jest
-      .spyOn(core, 'currentOwnerKey')
+      .spyOn(core, 'currentAccountDigest')
       .mockImplementation((requestedHome) =>
         requestedHome === home ? 'other-owner' : 'default-owner',
       );
@@ -369,11 +382,11 @@ describe('CodexAccountUsageService', () => {
       await h.service.getAccountUsage({ home, refresh: true, signal }),
     ).toBe(result);
     expect(read).toHaveBeenCalledWith(home, { refresh: true, signal });
-    expect(h.service.currentOwnerKey(home)).toBe('other-owner');
+    expect(h.service.currentOwnerKey(home)).toBe(accountOwnerKey('openai-codex', 'other-owner'));
     expect(owner).toHaveBeenCalledWith(home);
     h.service.clearCache(home);
     expect(clear).toHaveBeenCalledWith(home);
-    expect(h.service.currentOwnerKey()).toBe('default-owner');
+    expect(h.service.currentOwnerKey()).toBe(accountOwnerKey('openai-codex', 'default-owner'));
     expect(await h.service.getAccountUsage()).toBe(cached);
     expect(h.requests).toHaveLength(0);
     await h.service.close();
@@ -418,7 +431,7 @@ describe('CodexAccountUsageService', () => {
         .spyOn(core, 'read')
         .mockResolvedValue(usageResult(100));
       const owner = jest
-        .spyOn(core, 'currentOwnerKey')
+        .spyOn(core, 'currentAccountDigest')
         .mockReturnValue('default-owner');
       const clear = jest.spyOn(core, 'clearCache');
       const h = harness({}, hasClient ? core : null);
@@ -465,8 +478,8 @@ describe('CodexAccountUsageService', () => {
       usageResult(options?.refresh ? 200 : 100, home === keyA ? 20 : 80),
     );
     jest
-      .spyOn(core, 'currentOwnerKey')
-      .mockImplementation((home) => (home === keyA ? ownerA : ownerB));
+      .spyOn(core, 'currentAccountDigest')
+      .mockImplementation((home) => (home === keyA ? 'owner-a' : 'owner-b'));
     const h = harness({}, core);
 
     const a = await h.service.applyRateLimitsUpdated({
@@ -491,8 +504,8 @@ describe('CodexAccountUsageService', () => {
     const core = client();
     const read = jest.spyOn(core, 'read').mockResolvedValue(usageResult(200));
     jest
-      .spyOn(core, 'currentOwnerKey')
-      .mockReturnValue(accountOwnerKey('openai-codex', 'owner'));
+      .spyOn(core, 'currentAccountDigest')
+      .mockReturnValue('owner');
     const h = harness({}, core);
     await expect(
       h.service.applyRateLimitsUpdated({
@@ -514,8 +527,8 @@ describe('CodexAccountUsageService', () => {
       .mockResolvedValueOnce(usageResult(100))
       .mockResolvedValueOnce(usageResult(120));
     jest
-      .spyOn(core, 'currentOwnerKey')
-      .mockReturnValue(accountOwnerKey('openai-codex', 'owner'));
+      .spyOn(core, 'currentAccountDigest')
+      .mockReturnValue('owner');
     const h = harness({}, core);
     await expect(
       h.service.applyRateLimitsUpdated({
@@ -531,13 +544,12 @@ describe('CodexAccountUsageService', () => {
     const core = client();
     const home = resolve('home-a');
     const ownerA = accountOwnerKey('openai-codex', 'owner-a');
-    const ownerB = accountOwnerKey('openai-codex', 'owner-b');
     const read = jest
       .spyOn(core, 'read')
       .mockImplementation(async (_home, options) =>
         usageResult(options?.refresh ? 200 : 100),
       );
-    const owner = jest.spyOn(core, 'currentOwnerKey').mockReturnValue(ownerA);
+    const owner = jest.spyOn(core, 'currentAccountDigest').mockReturnValue('owner-a');
     const h = harness({}, core);
     await expect(
       h.service.applyRateLimitsUpdated({
@@ -555,7 +567,7 @@ describe('CodexAccountUsageService', () => {
     ).resolves.toBeNull();
     expect(read).toHaveBeenCalledTimes(2);
 
-    owner.mockReturnValue(ownerB);
+    owner.mockReturnValue('owner-b');
     await expect(
       h.service.applyRateLimitsUpdated({
         contextId: 'context',
@@ -577,8 +589,8 @@ describe('CodexAccountUsageService', () => {
       .mockResolvedValueOnce(usageResult(100))
       .mockReturnValueOnce(refreshed);
     jest
-      .spyOn(core, 'currentOwnerKey')
-      .mockReturnValue(accountOwnerKey('openai-codex', 'owner'));
+      .spyOn(core, 'currentAccountDigest')
+      .mockReturnValue('owner');
     const h = harness({}, core);
     const update = {
       contextId: 'context',
@@ -604,8 +616,8 @@ describe('CodexAccountUsageService', () => {
       .mockResolvedValueOnce(usageResult(200, 70))
       .mockResolvedValueOnce(usageResult(200, 70));
     jest
-      .spyOn(core, 'currentOwnerKey')
-      .mockReturnValue(accountOwnerKey('openai-codex', 'owner'));
+      .spyOn(core, 'currentAccountDigest')
+      .mockReturnValue('owner');
     const h = harness({}, core);
     const update = {
       contextId: 'context',
@@ -650,8 +662,8 @@ describe('CodexAccountUsageService', () => {
         usageResult(options?.refresh ? 200 : 100),
       );
     jest
-      .spyOn(core, 'currentOwnerKey')
-      .mockReturnValue(accountOwnerKey('openai-codex', 'owner'));
+      .spyOn(core, 'currentAccountDigest')
+      .mockReturnValue('owner');
     const h = harness({}, core);
     const update = {
       contextId: 'context',
@@ -694,8 +706,8 @@ describe('CodexAccountUsageService', () => {
       .mockResolvedValueOnce(refreshed)
       .mockResolvedValueOnce(refreshed);
     jest
-      .spyOn(core, 'currentOwnerKey')
-      .mockReturnValue(accountOwnerKey('openai-codex', 'owner'));
+      .spyOn(core, 'currentAccountDigest')
+      .mockReturnValue('owner');
     const h = harness({}, core);
     const live = await h.service.applyRateLimitsUpdated({
       contextId: 'context',
@@ -1138,7 +1150,7 @@ describe('CodexAccountUsageService', () => {
 
   describe('owner key (F30)', () => {
     const ownerOf = (home: string, email: string) =>
-      accountOwnerKey('openai-codex', `${home}\0${email}`);
+      codexOwnerKey(home, { email });
 
     it('is null before the first read, the hashed home+email after it, and null after clearCache', async () => {
       const h = harness();
@@ -1215,9 +1227,8 @@ describe('CodexAccountUsageService', () => {
         status: 'cli-version-unsupported',
         providerId: 'openai-codex',
       });
-      expect(h.service.currentOwnerKey()).toBe(
-        ownerOf(h.syntheticHome, 'other@example.test'),
-      );
+      // B's owner needs its quota read (it may name an account id); A's is gone.
+      expect(h.service.currentOwnerKey()).toBeNull();
     });
 
     it('propagates cancellation during the optional activity read', async () => {
@@ -1273,6 +1284,183 @@ describe('CodexAccountUsageService', () => {
       expect(h.service.currentOwnerKey()).toBe(
         ownerOf(h.syntheticHome, 'private@example.test'),
       );
+    });
+
+    describe('one canonical key for the legacy and shared readers', () => {
+      const CANONICAL = /^openai-codex#account:[0-9a-f]{16}$/;
+      const digestOf = (home: string, accountId: string) =>
+        codexAccountIdentityDigest(
+          normalizeCodexHomeKey(home, process.platform),
+          { accountId },
+        );
+
+      it('prefers the rate-limits account id and matches the shared client key', async () => {
+        const h = harness({ accountId: 'acct-1' });
+        await h.service.getAccountUsage();
+        const legacyKey = h.service.currentOwnerKey();
+        expect(legacyKey).toMatch(CANONICAL);
+        expect(legacyKey).not.toBe(
+          ownerOf(h.syntheticHome, 'private@example.test'),
+        );
+
+        const core = client();
+        jest
+          .spyOn(core, 'currentAccountDigest')
+          .mockReturnValue(digestOf(h.syntheticHome, 'acct-1'));
+        const shared = harness({}, core);
+        expect(shared.service.currentOwnerKey()).toBe(legacyKey);
+        expect(JSON.stringify([legacyKey, h.logger])).not.toContain('acct-1');
+      });
+
+      it('falls back to the account/read email when no account id is reported', async () => {
+        const h = harness({ accountId: null });
+        await h.service.getAccountUsage();
+        expect(h.service.currentOwnerKey()).toBe(
+          ownerOf(h.syntheticHome, 'private@example.test'),
+        );
+        expect(h.service.currentOwnerKey()).toMatch(CANONICAL);
+      });
+
+      it('keeps the owner key when the shared client attaches and after its first read', async () => {
+        const h = harness({ accountId: 'acct-1' });
+        await h.service.getAccountUsage();
+        const before = h.service.currentOwnerKey();
+        const core = client();
+        const digest = jest
+          .spyOn(core, 'currentAccountDigest')
+          .mockReturnValue(null);
+        jest.spyOn(core, 'read').mockResolvedValue(usageResult(200));
+
+        h.service.attachCoreClient(core);
+        expect(h.service.currentOwnerKey()).toBe(before);
+
+        await h.service.getAccountUsage();
+        digest.mockReturnValue(digestOf(h.syntheticHome, 'acct-1'));
+        expect(h.service.currentOwnerKey()).toBe(before);
+        expect(h.requests).toHaveLength(1);
+      });
+
+      it('does not replace an unresolved shared-client owner with the retained legacy owner', async () => {
+        const h = harness({ accountId: 'acct-1' });
+        await h.service.getAccountUsage();
+        const legacyOwner = h.service.currentOwnerKey();
+        expect(legacyOwner).not.toBeNull();
+        const core = client();
+        const digest = jest
+          .spyOn(core, 'currentAccountDigest')
+          .mockReturnValue(null);
+        const reads: Array<string | null> = [
+          digestOf(h.syntheticHome, 'acct-1'),
+          null,
+        ];
+        let status: CodexAccountUsageResult['status'] = 'available';
+        jest.spyOn(core, 'read').mockImplementation(async () => {
+          digest.mockReturnValue(reads.shift() ?? null);
+          return status === 'available'
+            ? usageResult(400)
+            : { status, providerId: 'openai-codex' };
+        });
+        h.service.attachCoreClient(core);
+
+        // Shared read with account id A: confirmed, same key as the legacy owner.
+        await h.service.getAccountUsage();
+        expect(h.service.currentOwnerKey()).toBe(legacyOwner);
+        // Shared id-less read: unresolved stays unresolved.
+        await h.service.getAccountUsage({ refresh: true });
+        expect(h.service.currentOwnerKey()).toBeNull();
+        expect(h.requests).toHaveLength(1);
+
+        // Only when the legacy reader answers does its owner stand in.
+        status = 'service-unavailable';
+        await h.service.getAccountUsage({ refresh: true });
+        expect(h.requests).toHaveLength(2);
+        expect(h.service.currentOwnerKey()).toBe(legacyOwner);
+      });
+
+      it('reports no owner for an id-less read after an id owner and restores it with the id', async () => {
+        const h = harness({ accountId: 'acct-1' });
+        await h.service.getAccountUsage();
+        const byId = h.service.currentOwnerKey();
+        h.scenario.accountId = null;
+        await h.service.getAccountUsage({ refresh: true });
+        // Same type, email and plan cannot prove the same account.
+        expect(h.service.currentOwnerKey()).toBeNull();
+        h.scenario.accountId = 'acct-1';
+        await h.service.getAccountUsage({ refresh: true });
+        expect(h.service.currentOwnerKey()).toBe(byId);
+        h.scenario.accountId = null;
+        // An auth change ends the account; an id-less read then uses the email.
+        h.authChanged();
+        await h.service.getAccountUsage();
+        expect(h.service.currentOwnerKey()).toBe(
+          ownerOf(h.syntheticHome, 'private@example.test'),
+        );
+      });
+
+      it('does not carry an account-id owner to a switched account read without an id', async () => {
+        const h = harness({ accountId: 'acct-1' });
+        await h.service.getAccountUsage();
+        const byId = h.service.currentOwnerKey();
+        h.scenario.accountId = null;
+        h.scenario.account = {
+          type: 'chatgpt',
+          email: 'other@example.test',
+          planType: 'plus',
+        };
+        await h.service.getAccountUsage({ refresh: true });
+        expect(h.service.currentOwnerKey()).not.toBe(byId);
+        expect(h.service.currentOwnerKey()).toBe(
+          ownerOf(h.syntheticHome, 'other@example.test'),
+        );
+      });
+
+      it('treats a same-email plan change as an account switch before a failed quota read', async () => {
+        const h = harness({ accountId: 'personal' });
+        await h.service.getAccountUsage();
+        expect(h.service.currentOwnerKey()).not.toBeNull();
+        h.scenario.account = {
+          type: 'chatgpt',
+          email: 'private@example.test',
+          planType: 'team',
+        };
+        h.scenario.methodMissing = 'account/rateLimits/read';
+        const result = await h.service.getAccountUsage({ refresh: true });
+        expect(result).toEqual({
+          status: 'cli-version-unsupported',
+          providerId: 'openai-codex',
+        });
+        expect(h.service.currentOwnerKey()).toBeNull();
+      });
+
+      it('resolves the discovered core-client owner for a session on the normalized home', async () => {
+        const core = client();
+        const digest = jest
+          .spyOn(core, 'currentAccountDigest')
+          .mockReturnValue(null);
+        jest.spyOn(core, 'read').mockImplementation(async (home) => {
+          digest.mockReturnValue(digestOf(home, 'acct-1'));
+          return usageResult(300);
+        });
+        const h = harness({}, core);
+        const resolver = new ProviderOwnerResolver(
+          h.logger as unknown as Logger,
+          { getProviderKey: async () => undefined } as never,
+          {} as never,
+          h.service,
+          new CodexHomeResolver(h.syntheticHome),
+        );
+        // Discovery establishes the owner; persistence restores it as canonical.
+        const discovered = await resolver.resolveCodexHomeOwner();
+        expect(discovered.key).toMatch(CANONICAL);
+        expect(parseQuotaOwnerRef(discovered)).toEqual(discovered);
+        // The snapshot maps a codex-app-server session by its normalizedHome.
+        const sessionHome = normalizeCodexHomeKey(
+          h.syntheticHome,
+          process.platform,
+        );
+        expect(resolver.ownerForCodexHome(sessionHome).key).toBe(discovered.key);
+        expect(h.requests).toHaveLength(0);
+      });
     });
   });
 });

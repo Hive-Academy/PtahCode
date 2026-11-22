@@ -15,6 +15,9 @@
  * - A bucket reached type exhausts windows at 100%. A denied ordinary-usage
  *   gate supplies owner evidence only without an exhausted window or usable credits.
  *   Window resets do not expire that owner evidence because no window explains the gate.
+ * - An `available` read with no window, allowance or owner-gate evidence is not
+ *   a reading: it reports `no-usage-windows` instead of an empty provider
+ *   reading. One debug line per read records bucket and window counts only.
  * - Every non-`available` status passes through. A `stale` answer (the
  *   service's own cache after a failed read) keeps its windows at the time
  *   they were originally read, never the time they were re-served.
@@ -27,6 +30,7 @@ import {
   type PlanLimitAllowance,
   type PlanLimitWindow,
 } from '@ptah-extension/shared';
+import type { Logger } from '@ptah-extension/vscode-core';
 import type {
   CodexAccountUsageResult,
   ICodexAccountUsageService,
@@ -59,6 +63,7 @@ export function createCodexPlanUsageReader(
   now: () => number = Date.now,
   homeSource?: () => string | undefined,
   rolloutFs?: CodexRolloutFileSystem,
+  logger?: Pick<Logger, 'debug'>,
 ): PlanUsageReader {
   const home = homeSource ?? (() => new CodexHomeResolver().path);
   const rollout = createCodexRolloutUsageSource(home, now, rolloutFs);
@@ -77,9 +82,15 @@ export function createCodexPlanUsageReader(
         lastResult = result;
         const readAt = result.fetchedAt ?? now();
         const reading = mapCodexAccountUsage(result, now());
-        return result.status === 'available'
-          ? { ok: true, source: 'provider-api', readAt, reading }
-          : { ok: false, source: 'provider-api', reason: 'source-not-applicable' };
+        if (result.status !== 'available')
+          return { ok: false, source: 'provider-api', reason: 'source-not-applicable' };
+        logger?.debug('[PlanUsage] Codex App Server usage read', {
+          buckets: result.buckets?.length ?? (result.quota ? 1 : 0),
+          windows: reading.windows.length,
+        });
+        return emptyReading(reading)
+          ? { ok: false, source: 'provider-api', reason: 'no-usage-windows' }
+          : { ok: true, source: 'provider-api', readAt, reading };
       } catch (error: unknown) {
         // degradation-audit: optional-capability - local rollout may still answer after App Server fails.
         lastError = error;
@@ -99,12 +110,32 @@ export function createCodexPlanUsageReader(
     const reading = await readUsageSourceChain([appServer, guardedRollout], request, now, CODEX_USAGE_CHAIN_DEADLINE_MS);
     if (reading.status === 'available') return reading;
     if (lastError) throw lastError;
-    if (lastResult) return {
-      ...mapCodexAccountUsage(lastResult, now()),
+    const mapped = lastResult && mapCodexAccountUsage(lastResult, now());
+    if (lastResult?.status === 'available' && mapped && emptyReading(mapped)) {
+      // The failure keeps its reason; the safe plan and activity still show.
+      return {
+        ...reading,
+        ...(mapped.account && { account: mapped.account }),
+        ...(mapped.activity && { activity: mapped.activity }),
+      };
+    }
+    if (lastResult && mapped) return {
+      ...mapped,
       ...(lastResult.status === 'available' && { source: 'provider-api' as const, readAt: lastResult.fetchedAt ?? now() }),
     };
     return reading;
   };
+}
+
+/** An available read with no window, allowance or owner-gate evidence: no limit to show. */
+function emptyReading(reading: PlanUsageReading): boolean {
+  return (
+    reading.windows.length === 0 &&
+    !reading.providerOwnerEvidence &&
+    !reading.allowances?.length &&
+    !reading.credits &&
+    !reading.individualAllowance
+  );
 }
 
 /** Map one Codex account result; `readAt` stands in for a missing `fetchedAt`. */

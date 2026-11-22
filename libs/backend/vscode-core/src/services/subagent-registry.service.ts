@@ -922,6 +922,11 @@ export class SubagentRegistryService {
     this.store.holdUnboundStart({ ...start, startedAt: Date.now() });
   }
 
+  /** Check a held foreground start without consuming it. */
+  hasHeldUnboundStart(agentId: string, parentSessionId: string): boolean {
+    return this.store.getHeldUnboundStarts(agentId).some((held) => held.parentSessionId === parentSessionId);
+  }
+
   /** Whether any unbound SubagentStart is waiting for its Task tool result. */
   hasHeldUnboundStarts(): boolean {
     return this.store.hasHeldUnboundStarts;

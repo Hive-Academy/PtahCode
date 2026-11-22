@@ -1,3 +1,5 @@
+import type { AgentActionNotice } from './agent-action.types';
+import type { AgentDeliveryReceipt } from './agent-messaging.types';
 /**
  * Agent Process Types for Async Agent Orchestration
  *
@@ -317,6 +319,7 @@ export interface AgentProcessInfo {
   stopReason?: LaneStopReason;
   /** Durable completed-turn counters used by the CLI budget resume gate. */
   readonly agentBudget?: AgentBudgetRecord;
+  readonly notice?: AgentActionNotice;
   /** Known provider reset time, in Unix milliseconds, for a usage-limit exit. */
   stopResetAt?: number;
   /**
@@ -339,6 +342,11 @@ export interface AgentProcessInfo {
   readonly toolProfileAdapter?: import('./phase-contract.types').ToolProfileAdapterResultV1;
   /** Phase assigned when this lane was spawned. */
   readonly phaseKind?: import('./phase-contract.types').PhaseKind;
+  /**
+   * Latest Ptah ask or pause notice for a live lane (TASK_2026_2297, P4). A paused lane stays
+   * alive; absent means no Ptah threshold is active.
+   */
+  actionNotice?: AgentActionNotice;
 }
 
 const AGENT_BUDGET_STOP_REASONS = ['budget', 'telemetry-unavailable', 'duration'] as const;
@@ -697,6 +705,7 @@ export interface CliSessionReference {
   /** Why the host stopped this lane, when known. Persisted with an interrupted restore. */
   readonly stopReason?: LaneStopReason;
   readonly agentBudget?: AgentBudgetRecord;
+  readonly notice?: AgentActionNotice;
   /** Epoch milliseconds when a usage-limit stop resets, when known. */
   readonly stopResetAt?: number;
   /**
@@ -788,6 +797,8 @@ export type LaneCompletionVerdict =
 
 /** The payload pushed to the session that spawned the lane. */
 export interface LaneCompletionSignal {
+  readonly notice?: AgentActionNotice;
+  readonly receipt?: AgentDeliveryReceipt;
   /** A budget warning was held after the turn and has not reached the lane. */
   readonly heldBudgetWarning?: boolean;
   readonly mcpAttachmentWarning?: string;
@@ -820,6 +831,11 @@ export interface LaneCompletionSignal {
   readonly cliSessionId?: string;
   /** Why the host stopped the lane. Absent when it ended on its own or the caller stopped it. */
   readonly stopReason?: LaneStopReason;
+  /**
+   * The latest Ptah action notice the lane received before it ended, as context
+   * only: the lane's own ending stays its cause.
+   */
+  readonly actionNotice?: AgentActionNotice;
   /** Short read hint for work interrupted by an agent budget stop. */
   readonly progressPointer?: string;
   readonly budgetLimit?: string;

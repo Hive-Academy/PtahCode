@@ -24,6 +24,7 @@ import {
   OLLAMA_CLOUD_DIRECT_BASE_URL,
   PTAH_CLI_PERMISSION_CAPABILITIES,
   getPtahCliLaneProvider,
+  isProviderSessionProviderId,
 } from '@ptah-extension/shared';
 import {
   Logger,
@@ -32,6 +33,7 @@ import {
   type IAuthSecretsService,
 } from '@ptah-extension/vscode-core';
 import type { SdkHandle } from '../cli-agents/cli-adapters';
+import type { LaneToolGate } from '../cli-agents/cli-adapters/cli-adapter.interface';
 import {
   SDK_TOKENS,
   AuthRequiredError,
@@ -95,9 +97,12 @@ import {
 
 /**
  * Resolves the provider definition for a Ptah CLI lane. The direct Anthropic
- * lane is lane-only and lives outside the main-agent provider registry.
+ * lane is lane-only and lives outside the main-agent provider registry. A
+ * provider-session entry (Antigravity) has no base URL, key or proxy for the
+ * Claude SDK, so it never backs a Ptah CLI agent.
  */
 function resolveLaneProvider(id: string): AnthropicProvider | undefined {
+  if (isProviderSessionProviderId(id)) return undefined;
   return id === 'anthropic-api'
     ? getPtahCliLaneProvider(id)
     : getAnthropicProvider(id);
@@ -766,7 +771,9 @@ export class PtahCliRegistry {
    * back a spawned Ptah CLI agent.
    */
   getAvailableProviders(): AnthropicProvider[] {
-    return getAllAnthropicProviders();
+    return getAllAnthropicProviders().filter(
+      (provider) => !isProviderSessionProviderId(provider.id),
+    );
   }
 
   /**
@@ -779,6 +786,8 @@ export class PtahCliRegistry {
     options?: {
       workingDirectory?: string;
       resumeSessionId?: string;
+      /** Rejects a newly paused resume owner before starting the SDK. */
+      checkResumeOwner?: () => void;
       /** Parent session ID for permission routing. Permissions from this agent
        *  will be scoped to this session for cleanup purposes. */
       parentSessionId?: string;
@@ -802,6 +811,12 @@ export class PtahCliRegistry {
       parentLevel?: import('@ptah-extension/shared').LanePermissionMode;
       resumePolicy?: EffectiveLanePolicy;
       phase?: import('@ptah-extension/shared').PhaseDispatchV1;
+      /**
+       * Manager pause probe. Every provider route here launches through the
+       * Claude Code SDK, so the shared lane options gate its tool calls and
+       * the handle reports `honorsLaneToolGate`. Absent: no gate, flag unset.
+       */
+      laneToolGate?: LaneToolGate;
     },
   ): Promise<
     | {
@@ -986,7 +1001,9 @@ export class PtahCliRegistry {
         logger: this.logger,
         processSpawner: this.processSpawner,
         executable: (await this.moduleLoader.getCliJsPath()) ?? undefined,
+        laneToolGate: options?.laneToolGate,
       });
+      options?.checkResumeOwner?.();
       const { handle, setAgentId: attachAgentId } = new ClaudeSdkLaneRunner(
         this.logger,
         this.messageTransformer,
@@ -1024,7 +1041,9 @@ export class PtahCliRegistry {
       );
 
       return {
-        handle,
+        handle: options?.laneToolGate
+          ? { ...handle, honorsLaneToolGate: true }
+          : handle,
         agentName: agentConfig.name,
         potentialCapabilities: this.capabilities(agentConfig.providerId),
         effectivePolicy: lanePolicy.requested,

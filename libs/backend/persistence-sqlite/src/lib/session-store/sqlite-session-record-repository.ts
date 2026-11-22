@@ -6,6 +6,7 @@ import {
   type SessionRecordInput,
   type SessionRecordListOptions,
 } from '@ptah-extension/platform-core';
+import { ledgerWorkspaceKey } from './ledger-workspace-key';
 import type { SessionStoreDatabase } from './session-store-database';
 
 interface SessionRow {
@@ -24,11 +25,12 @@ const COLUMNS =
   'session_id, workspace_path, host, name, created_at, last_active_at, is_child, summary_json, detail_json';
 
 const UPSERT = `
-INSERT INTO sessions (session_id, workspace_key, workspace_path, host, name, created_at,
-  last_active_at, is_child, summary_json, detail_json, updated_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+INSERT INTO sessions (session_id, workspace_key, ledger_workspace_key, workspace_path, host,
+  name, created_at, last_active_at, is_child, summary_json, detail_json, updated_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (session_id) DO UPDATE SET
   workspace_key = excluded.workspace_key,
+  ledger_workspace_key = excluded.ledger_workspace_key,
   workspace_path = excluded.workspace_path,
   host = excluded.host,
   name = excluded.name,
@@ -75,6 +77,10 @@ export class SqliteSessionRecordRepository implements ISessionRecordRepository {
       record.workspacePath === null
         ? null
         : normalizeWorkspaceRoot(record.workspacePath),
+      // The usage ledger joins on this key; the session list keeps workspace_key.
+      record.workspacePath === null
+        ? null
+        : ledgerWorkspaceKey(record.workspacePath),
       record.workspacePath,
       this.host,
       record.name,

@@ -98,6 +98,11 @@ describe('grokAcpProfile', () => {
       const args = grokAcpProfile.buildSpawn({ ...BASE_OPTIONS, permission: 'yolo', resumeSessionId: 'sess-1' }).args;
       expect(args).toEqual(['agent', '--always-approve', '--no-leader', 'stdio']);
     });
+    it('never gives a chat native yolo approval (the chat asks its sink)', () => {
+      expect(
+        grokAcpProfile.buildSpawn({ ...BASE_OPTIONS, permission: 'yolo', consumer: 'chat' }).args,
+      ).not.toContain('--always-approve');
+    });
     it('spawns exactly `agent --no-leader stdio` with no extra environment', () => {
       const spec = grokAcpProfile.buildSpawn(BASE_OPTIONS);
       expect(spec.args).toEqual(['agent', '--no-leader', 'stdio']);
@@ -144,6 +149,15 @@ describe('grokAcpProfile', () => {
           headers: [{ name: 'Authorization', value: 'Bearer lane-token' }],
         },
       ]);
+    });
+
+    it('maps a user stdio server, name kept', () => {
+      expect(
+        grokAcpProfile.buildMcpServers({
+          ...BASE_OPTIONS,
+          mcp: [{ type: 'stdio', name: 'local', command: 'node', args: ['s.js'], env: [] }],
+        }),
+      ).toEqual([{ name: 'local', command: 'node', args: ['s.js'], env: [] }]);
     });
 
     it('attaches nothing when the caller built no attachment', () => {

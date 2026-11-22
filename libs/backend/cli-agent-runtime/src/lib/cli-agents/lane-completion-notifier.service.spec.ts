@@ -403,7 +403,7 @@ describe('LaneCompletionNotifier.signal', () => {
         sessionId: 'native-thread',
         producer: 'cli-lane',
         providerId: 'codex',
-        workspaceKey: 'c:/workspace/root',
+        workspaceKey: 'C:/Workspace/Root',
         host: 'cli',
       }),
     );
@@ -538,7 +538,7 @@ describe('LaneCompletionNotifier.signal', () => {
       });
       expect(result.signal?.heldBudgetWarning).toBe(true);
       expect(h.envelope()).toContain(
-        'Budget warning: this lane passed its warning threshold',
+        'Budget warning: Ptah budget monitor asked this lane for a handoff',
       );
     });
 
@@ -1831,5 +1831,113 @@ describe('LaneCompletionNotifier review capture', () => {
     );
     await flushCapture();
     expect(h.captureReview).not.toHaveBeenCalled();
+  });
+});
+
+describe('LaneCompletionNotifier.notifyActionNotice', () => {
+  const PAUSE = {
+    actor: 'ptah-budget',
+    action: 'paused',
+    reason: 'weighted-budget',
+    nextStep: 'write-notes-and-return',
+  } as const;
+  const RUNNING = { status: 'running', completedAt: undefined, exitCode: undefined } as const;
+
+  function withDrainer(
+    h: Harness,
+    enqueue: jest.Mock = jest.fn().mockResolvedValue({ id: 'saved' }),
+  ): { notifier: LaneCompletionNotifier; enqueue: jest.Mock } {
+    const adapter = { isSessionActive: h.isSessionActive, sendMessageToSession: h.sendMessageToSession } as never;
+    const store = new ParentEnvelopeStoreService(h.logger, new FakeStateStorage());
+    const drainer = new ParentDeliveryDrainerService(h.logger, store, adapter, null, null);
+    jest.spyOn(drainer, 'enqueue').mockImplementation(enqueue);
+    const notifier = new LaneCompletionNotifier(
+      h.logger,
+      { exists: h.exists, stat: h.stat } as never,
+      adapter,
+      () => null,
+      drainer,
+    );
+    return { notifier, enqueue };
+  }
+
+  it('enqueues one report envelope through the drainer and dedupes by action and reason', async () => {
+    const h = createHarness();
+    const { notifier, enqueue } = withDrainer(h);
+    const info = createInfo(RUNNING);
+
+    await expect(notifier.notifyActionNotice(info, PAUSE, 'Paused text')).resolves.toBe('queued');
+    await expect(notifier.notifyActionNotice(info, PAUSE, 'Paused text')).resolves.toBe('duplicate');
+
+    const key = `${AGENT_ID}:notice:paused:weighted-budget`;
+    expect(enqueue).toHaveBeenCalledTimes(1);
+    expect(enqueue.mock.calls[0]?.[0]).toMatchObject({
+      id: `lane-delivery:${key}`,
+      dedupeKey: key,
+      agentId: AGENT_ID,
+      parentSessionId: PARENT,
+      kind: 'report',
+      body: 'Paused text',
+    });
+    expect(h.sendMessageToSession).not.toHaveBeenCalled();
+
+    await expect(
+      notifier.notifyActionNotice(info, { ...PAUSE, reason: 'duration' }, 'Duration text'),
+    ).resolves.toBe('queued');
+    expect(enqueue).toHaveBeenCalledTimes(2);
+  });
+
+  it('logs only and returns no-parent without a parent session', async () => {
+    const h = createHarness();
+    const { notifier, enqueue } = withDrainer(h);
+
+    const result = await notifier.notifyActionNotice(createInfo({ ...RUNNING, parentSessionId: undefined }), PAUSE, 'x');
+
+    expect(result).toBe('no-parent');
+    expect(enqueue).not.toHaveBeenCalled();
+    expect(h.sendMessageToSession).not.toHaveBeenCalled();
+    expect(h.logger.info).toHaveBeenCalledWith(
+      '[LaneCompletionNotifier] Lane notice has no parent',
+      expect.objectContaining({ agentId: AGENT_ID, action: 'paused', reason: 'weighted-budget' }),
+    );
+  });
+
+  it('falls back to sendMessageToSession without a drainer', async () => {
+    const h = createHarness();
+
+    await expect(h.notifier.notifyActionNotice(createInfo(RUNNING), PAUSE, 'Direct text')).resolves.toBe('delivered');
+
+    expect(h.sendMessageToSession).toHaveBeenCalledTimes(1);
+    expect(h.sendMessageToSession.mock.calls[0]?.[0]).toBe(PARENT);
+    expect(h.sendMessageToSession.mock.calls[0]?.[1]).toBe('Direct text');
+    expect(h.sendMessageToSession.mock.calls[0]?.[2]).toMatchObject({
+      origin: { kind: 'peer', from: `ptah-agent:${AGENT_ID}` },
+    });
+  });
+
+  it('forgets the key after a failed direct send so a later notice retries', async () => {
+    const h = createHarness({ sendImpl: () => Promise.reject(new Error('offline')) });
+    const info = createInfo(RUNNING);
+
+    await expect(h.notifier.notifyActionNotice(info, PAUSE, 'x')).resolves.toBe('failed');
+    expect(h.logger.error).toHaveBeenCalledWith('[LaneCompletionNotifier] Lane notice delivery failed', expect.any(Error));
+
+    h.sendMessageToSession.mockResolvedValueOnce(undefined);
+    await expect(h.notifier.notifyActionNotice(info, PAUSE, 'x')).resolves.toBe('delivered');
+    expect(h.sendMessageToSession).toHaveBeenCalledTimes(2);
+  });
+
+  it('fails and retries when the parent is inactive or the drainer refuses', async () => {
+    const inactive = createHarness({ sessionActive: false });
+    await expect(inactive.notifier.notifyActionNotice(createInfo(RUNNING), PAUSE, 'x')).resolves.toBe('failed');
+    expect(inactive.sendMessageToSession).not.toHaveBeenCalled();
+
+    const h = createHarness();
+    const enqueue = jest.fn().mockResolvedValueOnce({ refused: 'capacity' }).mockResolvedValueOnce({ id: 'saved' });
+    const { notifier } = withDrainer(h, enqueue);
+    const info = createInfo(RUNNING);
+    await expect(notifier.notifyActionNotice(info, PAUSE, 'x')).resolves.toBe('failed');
+    await expect(notifier.notifyActionNotice(info, PAUSE, 'x')).resolves.toBe('queued');
+    expect(enqueue).toHaveBeenCalledTimes(2);
   });
 });

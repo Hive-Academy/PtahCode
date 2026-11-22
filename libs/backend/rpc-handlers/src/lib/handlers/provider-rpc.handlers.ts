@@ -98,7 +98,10 @@ import {
   mergeKimiCodeModels,
   getAnthropicProvider,
   getPtahCliLaneProvider,
+  getProviderSessionProfile,
+  PROVIDER_SESSION_PROVIDER_IDS,
 } from '@ptah-extension/shared';
+import type { RuntimeHostCapabilities } from '@ptah-extension/shared';
 import type { AuthEnv } from '@ptah-extension/shared';
 import type { RpcMethodName } from '@ptah-extension/shared';
 
@@ -172,6 +175,13 @@ export class ProviderRpcHandlers {
     },
     @inject(AUTH_PROVIDERS_TOKENS.SDK_KIMI_CODE_AUTH, { isOptional: true })
     private readonly kimiAuth?: IKimiCodeAuthService,
+    /**
+     * The host's admitted runtimes. The Electron bootstrap registers the final
+     * value before the RPC surface (and so this handler) is resolved; absent in
+     * unit harnesses, which then admit no provider session.
+     */
+    @inject(SDK_TOKENS.RUNTIME_HOST_CAPABILITIES, { isOptional: true })
+    private readonly hostCapabilities?: RuntimeHostCapabilities,
   ) {}
 
   /**
@@ -181,6 +191,7 @@ export class ProviderRpcHandlers {
     this.registerCopilotDynamicFetcher();
     this.registerCodexDynamicFetcher();
     this.registerKimiCodeDynamicFetcher();
+    this.registerProviderSessionDynamicFetchers();
     this.registerAnthropicDirectFetcher();
     this.registerOllamaDynamicFetchers();
     this.registerListModels();
@@ -424,6 +435,48 @@ export class ProviderRpcHandlers {
       this.logger.info('[ProviderRpc] No dynamic Codex model source available');
       return [];
     });
+  }
+
+  /**
+   * Model fetchers for each provider-session provider this host admits, so
+   * the model picker works before a session exists. The catalog is the
+   * CLI's own list (`listModels()` of the profile's lane adapter, the profile
+   * id is its CLI type). Every failure returns [] (never a static list, see
+   * the Kimi fetcher below): the consumer then falls back to its persisted
+   * catalog.
+   */
+  private registerProviderSessionDynamicFetchers(): void {
+    const admitted = this.hostCapabilities?.providerSessions ?? [];
+    for (const providerId of PROVIDER_SESSION_PROVIDER_IDS) {
+      const profile = getProviderSessionProfile(providerId);
+      if (!profile || !admitted.includes(profile)) continue;
+      this.providerModels.registerDynamicFetcher(providerId, async () => {
+        try {
+          const adapter = this.cliDetection.getAdapter(profile);
+          const catalog = adapter?.listModels
+            ? await adapter.listModels()
+            : [];
+          this.logger.debug(
+            `[ProviderRpc] Fetched ${catalog.length} ${providerId} models from the CLI catalog`,
+          );
+          return catalog.map((m) => ({
+            id: m.id,
+            name: m.name,
+            description: '',
+            contextLength: 0,
+            supportsToolUse: true,
+          }));
+        } catch (error) {
+          // degradation-audit: reported - an empty list falls back to the persisted catalog.
+          this.logger.debug(
+            `[ProviderRpc] ${providerId} model catalog unavailable: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+          return [];
+        }
+      });
+    }
   }
 
   private registerKimiCodeDynamicFetcher(): void {

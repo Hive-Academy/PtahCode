@@ -164,6 +164,12 @@ export {
   type UnattendedSessionPolicy,
 } from './lib/permission/unattended-session-policy.registry';
 export {
+  SessionToolDispositionRegistry,
+  type SessionToolDisposition,
+  type SessionToolDispositionIds,
+  type SessionToolDispositionPort,
+} from './lib/helpers/session-tool-disposition.port';
+export {
   PLAN_LANE_PTAH_TOOLS,
   isPlanLaneAllowedPtahTool,
 } from './lib/permission/plan-lane-tool-policy';
@@ -688,3 +694,5 @@ export {
   SDK_SESSION_IMPORT_BINDING_LOOKUP,
   type SessionImportBindingLookup,
 } from './lib/session-importer.service';
+
+export { ProviderTurnEndError } from './lib/helpers/no-activity-watchdog';

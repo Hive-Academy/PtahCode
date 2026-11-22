@@ -28,6 +28,7 @@ import {
 } from '@ptah-extension/ui';
 import {
   ANTHROPIC_API_LANE_ENTRY,
+  PROVIDER_SESSION_PROVIDER_IDS,
   getAnthropicProvider,
 } from '@ptah-extension/shared';
 import { SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
@@ -41,8 +42,14 @@ export interface CliInstanceEditTarget {
   readonly providerName: string;
 }
 
-/** Connections a Ptah CLI instance cannot use (the rule of the instance manager retired in Batch 34). */
-const EXCLUDED_PROVIDERS: ReadonlySet<string> = new Set(['openai-codex']);
+/**
+ * Connections a Ptah CLI instance cannot use (the rule of the instance manager retired in Batch 34). A provider
+ * session runs only as a native chat runtime and never serves a Ptah CLI lane.
+ */
+const EXCLUDED_PROVIDERS: ReadonlySet<string> = new Set([
+  'openai-codex',
+  ...PROVIDER_SESSION_PROVIDER_IDS,
+]);
 const COPILOT = 'github-copilot';
 const MODALITY: Readonly<Record<string, string>> = {
   apiKey: 'API key',

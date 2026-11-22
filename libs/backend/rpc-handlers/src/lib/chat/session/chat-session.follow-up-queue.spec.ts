@@ -57,6 +57,7 @@ import { createMockLogger } from '@ptah-extension/shared/testing';
 import { createMockWorkspaceProvider } from '@ptah-extension/platform-core/testing';
 
 import { createMockModelSettings } from '../../../test-utils/mock-settings';
+import { SessionAdmissionRefusedError } from '@ptah-extension/agent-sdk';
 import { ChatFollowUpQueueService } from '../follow-up/chat-follow-up-queue.service';
 import { ChatSessionService } from './chat-session.service';
 import { SessionMcpStatusRegistry } from './session-mcp-status.registry';
@@ -457,6 +458,72 @@ describe('ChatSessionService — backend-owned follow-up queue', () => {
       h.service.continueSession({ tabId: TAB_ID, sessionId: SESSION_ID, prompt: 'more' }),
     ).resolves.toEqual({ success: true, sessionId: SESSION_ID, enqueued: true });
     expect(h.sendMessageToSession.mock.calls[0][2]).not.toHaveProperty('queueIntent');
+  });
+
+  it('refuses an idle-only send on a busy session with TURN_IN_FLIGHT', async () => {
+    const h = makeHarness({
+      busy: true,
+      sendMessageToSession: jest
+        .fn()
+        .mockRejectedValue(new SessionAdmissionRefusedError('busy', SESSION_ID)),
+    });
+
+    await expect(
+      h.service.continueSession({
+        tabId: TAB_ID,
+        sessionId: SESSION_ID,
+        prompt: 'more',
+        admission: 'require-idle',
+      }),
+    ).resolves.toEqual({
+      success: false,
+      sessionId: SESSION_ID,
+      errorCode: 'TURN_IN_FLIGHT',
+      error: 'A turn is running. The message was not sent.',
+    });
+    expect(h.sendMessageToSession.mock.calls[0][2]).toMatchObject({
+      admission: 'require-idle',
+    });
+    expect(h.sendMessageToSession.mock.calls[0][2]).not.toHaveProperty('queueIntent');
+  });
+
+  it('reports SESSION_ENDED when an idle-only send finds the session gone', async () => {
+    const h = makeHarness({
+      busy: true,
+      sendMessageToSession: jest
+        .fn()
+        .mockRejectedValue(new SessionAdmissionRefusedError('session-ended', SESSION_ID)),
+    });
+
+    await expect(
+      h.service.continueSession({
+        tabId: TAB_ID,
+        sessionId: SESSION_ID,
+        prompt: 'more',
+        admission: 'require-idle',
+      }),
+    ).resolves.toMatchObject({ success: false, errorCode: 'SESSION_ENDED' });
+  });
+
+  it('never interrupts the running turn for a stop-like idle-only send', async () => {
+    const h = makeHarness({
+      busy: true,
+      autopilot: true,
+      sendMessageToSession: jest
+        .fn()
+        .mockRejectedValue(new SessionAdmissionRefusedError('busy', SESSION_ID)),
+    });
+
+    await expect(
+      h.service.continueSession({
+        tabId: TAB_ID,
+        sessionId: SESSION_ID,
+        prompt: 'stop',
+        admission: 'require-idle',
+      }),
+    ).resolves.toMatchObject({ success: false, errorCode: 'TURN_IN_FLIGHT' });
+    expect(h.interruptCurrentTurn).not.toHaveBeenCalled();
+    expect(h.interruptSession).not.toHaveBeenCalled();
   });
 
   it('refuses a session registered to another tab without sending', async () => {

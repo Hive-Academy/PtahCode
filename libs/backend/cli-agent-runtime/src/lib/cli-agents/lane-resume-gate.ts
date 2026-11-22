@@ -24,11 +24,17 @@ import type {
   AgentBudgetSettings,
   LaneStopReason,
   AgentBudgetRecord,
+  AgentActionNotice,
 } from '@ptah-extension/shared';
 import { AgentBudgetPolicy, initialAgentBudgetSnapshot } from '@ptah-extension/shared';
 import type { IOutputChannel } from '@ptah-extension/platform-core';
 import { classifyProviderAccountBinding } from '@ptah-extension/shared/schemas';
-import { PROVIDER_ACCOUNT_RESULT_CODES, isAgentBudgetStopReason } from '@ptah-extension/shared';
+import {
+  PROVIDER_ACCOUNT_RESULT_CODES,
+  formatAgentActionReason,
+  formatAgentActorLabel,
+  isAgentBudgetStopReason,
+} from '@ptah-extension/shared';
 import type {
   LaneAccountBindingPort,
   LaneAccountReference,
@@ -66,7 +72,10 @@ const LOG_PREFIX = '[LaneResumeGate]';
 export interface LaneResumeGateInput {
   readonly budget?: AgentBudgetRecord;
   readonly budgetSettings?: AgentBudgetSettings;
+  /** Historical stop reason; a persisted budget stop still refuses the resume. */
   readonly stopReason?: LaneStopReason;
+  /** The budget pause the lane ended under. Its CLI session never resumes. */
+  readonly pausedBudgetNotice?: AgentActionNotice;
   readonly cli: CliType | 'claude';
   readonly accountReference?: {
     readonly accountBinding?: unknown;
@@ -115,6 +124,18 @@ export class LaneResumeGate {
   ) {}
 
   async evaluate(input: LaneResumeGateInput): Promise<LaneResumeDecision> {
+    // Identity is checked before the cost gate can read context or make a
+    // handoff. A fresh-context decision must retain this same account.
+    const accountReference = await resolveLaneAccountResume(input);
+    const account = accountReference ? { accountReference } : {};
+    if (input.pausedBudgetNotice) {
+      const notice = input.pausedBudgetNotice;
+      return {
+        decision: 'fresh',
+        reason: `${formatAgentActorLabel(notice)} paused new work because ${formatAgentActionReason(notice)}. This CLI session cannot resume. Start a fresh lane with the remaining work.`,
+        contextTokens: null, source: 'estimate', idleMs: null, ...account,
+      };
+    }
     const budgetStop = isAgentBudgetStopReason(input.stopReason);
     const total = input.budget?.weightedTokens ?? 0;
     const nearLimit = input.budgetSettings !== undefined && new AgentBudgetPolicy(input.budgetSettings, { laneAccounting: true }).assess({
@@ -126,14 +147,12 @@ export class LaneResumeGate {
       this.now() - input.budget.startedAtMs >= input.budgetSettings.maxDurationMin * 60_000;
     if (budgetStop || nearLimit || expired) {
       const reason = budgetStop
-        ? `budget stop: CLI session cannot resume after ${input.stopReason} stop`
-        : expired ? 'lane lifetime budget expired' :
-          `near-limit (warning reached): CLI session has reached its budget warning threshold (${Math.round(total)} tokens)`;
-      return { decision: 'fresh', reason, contextTokens: null, source: 'estimate', idleMs: null };
+        ? `Ptah budget monitor stopped this CLI session (${input.stopReason}), so it cannot resume. Start a fresh lane with the remaining work.`
+        : expired
+          ? 'Ptah budget monitor found that the lane lifetime budget expired. Start a fresh lane with the remaining work.'
+          : `Ptah budget monitor found that the lane reached its budget warning threshold (${Math.round(total)} tokens). Start a fresh lane with the remaining work.`;
+      return { decision: 'fresh', reason, contextTokens: null, source: 'estimate', idleMs: null, ...account };
     }
-    // Identity is checked before the cost gate can read context or make a
-    // handoff. A fresh-context decision must retain this same account.
-    const accountReference = await resolveLaneAccountResume(input);
     const figure = await this.contextFigure(input);
     const lastActivityAt = input.lastActivityAt ?? figure.modifiedAtMs;
     const idleMs =
@@ -153,7 +172,7 @@ export class LaneResumeGate {
       contextTokens: figure.tokens,
       source: figure.source,
       idleMs,
-      ...(accountReference ? { accountReference } : {}),
+      ...account,
     };
     this.output.appendLine(
       `${LOG_PREFIX} ${result.decision}: ${input.cli} session ${input.cliSessionId} — ` +

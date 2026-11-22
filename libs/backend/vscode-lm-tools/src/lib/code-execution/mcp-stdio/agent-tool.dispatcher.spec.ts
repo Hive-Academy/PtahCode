@@ -237,7 +237,10 @@ describe('AgentToolDispatcher — agent_spawn schema', () => {
     });
 
     expect(toolResult(response).isError).toBeUndefined();
-    expect(spawn).toHaveBeenCalledWith(expect.objectContaining({ cli }), undefined);
+    expect(spawn).toHaveBeenCalledWith(
+      expect.objectContaining({ cli }),
+      undefined,
+    );
   });
 
   it('accepts cli: antigravity specifically', async () => {
@@ -515,11 +518,11 @@ describe('AgentToolDispatcher — agent_list roles', () => {
   it('forwards a user role name on spawn', async () => {
     const { dispatcher, spawn } = createHarness();
 
-    await dispatcher.dispatch(
-      'agent_spawn',
-      request,
-      { task: 'Review the diff', cli: 'antigravity', role: 'reviewer' },
-    );
+    await dispatcher.dispatch('agent_spawn', request, {
+      task: 'Review the diff',
+      cli: 'antigravity',
+      role: 'reviewer',
+    });
 
     expect(spawn).toHaveBeenCalledWith(
       expect.objectContaining({ role: 'reviewer' }),
@@ -584,7 +587,14 @@ describe('AgentToolDispatcher — agent_list roles', () => {
  * miss rather than fall back, so a stale `instruction` key is corrected rather
  * than silently dropped.
  */
-function createMessagingHarness(callerAgentId?: string): {
+function createMessagingHarness(
+  callerAgentId?: string,
+  callerSessionId?: string,
+  reportResult: Record<string, unknown> = {
+    delivered: true,
+    parentSessionId: 'sess-1',
+  },
+): {
   dispatcher: AgentToolDispatcher;
   message: jest.Mock;
   messageStatus: jest.Mock;
@@ -592,9 +602,7 @@ function createMessagingHarness(callerAgentId?: string): {
 } {
   const message = jest.fn().mockResolvedValue({ mode: 'steer' });
   const messageStatus = jest.fn().mockResolvedValue({ status: 'delivered' });
-  const report = jest
-    .fn()
-    .mockResolvedValue({ delivered: true, parentSessionId: 'sess-1' });
+  const report = jest.fn().mockResolvedValue(reportResult);
   const logger = {
     info: jest.fn(),
     warn: jest.fn(),
@@ -608,7 +616,7 @@ function createMessagingHarness(callerAgentId?: string): {
     dispatcher: new AgentToolDispatcher(
       ptahAPI,
       logger,
-      undefined,
+      callerSessionId,
       callerAgentId,
     ),
     message,
@@ -793,6 +801,103 @@ describe('AgentToolDispatcher — agent_report', () => {
       delivered: false,
       reason: 'unattributed-caller',
     });
+  });
+
+  it('lane identity wins over the launcher session id', async () => {
+    const { dispatcher, report } = createMessagingHarness(
+      'lane-1',
+      'host-session',
+    );
+    await dispatcher.dispatch('agent_report', request, { message: 'm' });
+    expect(report).toHaveBeenCalledWith({
+      agentId: 'lane-1',
+      message: 'm',
+      summary: undefined,
+    });
+  });
+
+  it('reports as a child session when only the launcher session id is set', async () => {
+    const { dispatcher, report } = createMessagingHarness(
+      undefined,
+      '  child-session  ',
+    );
+    await dispatcher.dispatch('agent_report', request, {
+      message: 'm',
+      summary: 's',
+      final: true,
+    });
+    // No `final`: children ignore it.
+    expect(report).toHaveBeenCalledWith({
+      childSessionId: 'child-session',
+      message: 'm',
+      summary: 's',
+    });
+  });
+
+  it('refuses with the unattributed sentence when neither id is set', async () => {
+    const { dispatcher, report } = createMessagingHarness(undefined, '   ');
+    const response = await dispatcher.dispatch('agent_report', request, {
+      message: 'm',
+    });
+    expect(report).not.toHaveBeenCalled();
+    expect(toolResult(response).structuredContent).toMatchObject({
+      delivered: false,
+      reason: 'unattributed-caller',
+    });
+    expect(JSON.stringify(response)).toContain(
+      'child session identity could not be verified',
+    );
+  });
+
+  it('never accepts a child session id from the arguments', async () => {
+    const { dispatcher, report } = createMessagingHarness(undefined, 'host');
+    const response = await dispatcher.dispatch('agent_report', request, {
+      childSessionId: 'someone-else',
+      message: 'm',
+    });
+    expect(report).not.toHaveBeenCalled();
+    expect(toolResult(response).isError).toBe(true);
+    expect(JSON.stringify(response)).toContain(
+      'There is no \\"agentId\\" argument',
+    );
+  });
+
+  it('renders a queued result and returns queued/receiptId structured', async () => {
+    const { dispatcher } = createMessagingHarness(undefined, 'child', {
+      delivered: false,
+      queued: true,
+      receiptId: 'rcpt-1',
+    });
+    const response = await dispatcher.dispatch('agent_report', request, {
+      message: 'm',
+    });
+    expect(toolResult(response).structuredContent).toEqual({
+      delivered: false,
+      queued: true,
+      receiptId: 'rcpt-1',
+    });
+    const text = JSON.stringify(response);
+    expect(text).toContain('Report Queued');
+    expect(text).toContain('rcpt-1');
+  });
+
+  it('passes the receipt state of a stored report through structured content', async () => {
+    const { dispatcher } = createMessagingHarness(undefined, 'child', {
+      delivered: false,
+      queued: true,
+      receiptId: 'rcpt-2',
+      receiptState: 'blocked-retryable',
+    });
+    const response = await dispatcher.dispatch('agent_report', request, {
+      message: 'm',
+    });
+    expect(toolResult(response).structuredContent).toEqual({
+      delivered: false,
+      queued: true,
+      receiptId: 'rcpt-2',
+      receiptState: 'blocked-retryable',
+    });
+    expect(JSON.stringify(response)).toContain('blocked-retryable');
   });
 
   it('rejects a summary longer than 200 characters', async () => {

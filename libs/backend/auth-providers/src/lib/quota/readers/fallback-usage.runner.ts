@@ -40,6 +40,8 @@ export interface FallbackRequest<T> {
   /** Created only for a new flight and removed after its process closes. */
   readonly temporaryCwd?: { create(): Promise<string>; remove(cwd: string): Promise<void> };
   readonly timeoutMs?: number;
+  /** How long a successful reading is reused; defaults to `FALLBACK_CACHE_MS`. */
+  readonly cacheMs?: number;
   readonly executor: FallbackExecutor;
   readonly parse: (output: string, readAt: number) => T | undefined;
   readonly signal?: AbortSignal;
@@ -98,7 +100,7 @@ export async function runFallbackUsage<T>(request: FallbackRequest<T>): Promise<
     total++;
     running.set(request.sourceId, 1);
     flight = execute(request).catch(() => failure('cli-unavailable')).then((result) => {
-      const until = result.ok ? now() + FALLBACK_CACHE_MS :
+      const until = result.ok ? now() + (request.cacheMs ?? FALLBACK_CACHE_MS) :
         result.cwdUnavailable ? 0 :
         result.reason === 'cli-parse-failed' ? now() + FALLBACK_PARSE_BACKOFF_MS :
         ['cli-timeout', 'cli-exit-error', 'cli-not-signed-in', 'cli-unavailable'].includes(result.reason)

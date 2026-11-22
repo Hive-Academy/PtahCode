@@ -23,11 +23,7 @@ import {
   evidenceNotice,
 } from './plan-owner.model';
 export * from './plan-tile.types';
-export {
-  planLimitReasonLabel,
-  tileTitleLines,
-  PLAN_LIMIT_REASON_LABELS,
-} from './plan-owner.model';
+export { tileTitleLines } from './plan-owner.model';
 export { compactCount, compactTokens } from './plan-accounting.model';
 
 export function buildPlanTile(

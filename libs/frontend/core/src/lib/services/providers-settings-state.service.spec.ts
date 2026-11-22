@@ -2770,6 +2770,47 @@ describe('ProvidersSettingsStateService', () => {
       expect(byId('github-copilot')?.accountLabel).toBeNull();
     });
 
+    describe('provider-session connections', () => {
+      const byId = (id: string) =>
+        service.connections().data?.find((entry) => entry.id === id);
+
+      it('hides the Antigravity entry when the host reports no status row', async () => {
+        handlers.set('auth:getAuthStatus', async () =>
+          success({ authMethod: 'apiKey', hasApiKey: false }),
+        );
+        await service.refreshConnections();
+        expect(service.connections().data).not.toBeNull();
+        expect(byId('antigravity-cli')).toBeUndefined();
+      });
+
+      it.each([
+        { row: { installed: true, authenticated: true }, configured: true },
+        { row: { installed: true, authenticated: false }, configured: false },
+        { row: { installed: false, authenticated: false }, configured: false },
+      ])(
+        'lists Antigravity as a CLI connection from its row %#',
+        async ({ row, configured }) => {
+          handlers.set('auth:getAuthStatus', async () =>
+            success({
+              authMethod: 'apiKey',
+              hasApiKey: false,
+              providerSessionStatus: {
+                antigravity: { ...row, signInHint: 'run `agy` once' },
+              },
+            }),
+          );
+          await service.refreshConnections();
+          expect(byId('antigravity-cli')).toMatchObject({
+            name: 'Antigravity',
+            authMode: 'cli',
+            configured,
+            tokenStale: false,
+            hasKey: false,
+          });
+        },
+      );
+    });
+
     it.each([
       {
         name: 'CLI login only',

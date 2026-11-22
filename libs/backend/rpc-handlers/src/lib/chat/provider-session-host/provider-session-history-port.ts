@@ -45,7 +45,7 @@ export function createProviderSessionHistoryPort(
         !workspacePath
       )
         throw new ProviderSessionHistoryError('history-unavailable');
-      const request = await deps.openRequests.request({
+      const request = deps.openRequests.request({
         sessionId: id,
         profile: execution.providerSession.profile,
         workspacePath,

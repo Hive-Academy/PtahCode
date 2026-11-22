@@ -21,11 +21,13 @@
 import { inject, injectable } from 'tsyringe';
 import { randomUUID } from 'node:crypto';
 import { TOKENS, Logger } from '@ptah-extension/vscode-core';
-import type {
-  AgentMessageOutcome,
-  AgentProcessInfo,
+import {
+  formatBudgetPauseNotice,
+  type AgentMessageOutcome,
+  type AgentProcessInfo,
 } from '@ptah-extension/shared';
 import { CliDetectionService } from './cli-detection.service';
+import { currentLaneNotice, isLanePaused, type TrackedAgent } from './tracked-agent';
 import type {
   AgentMessagingCapabilities,
   SdkHandle,
@@ -65,6 +67,14 @@ export class AgentMessageError extends Error {
   }
 }
 
+/** Admission changed before a continuation could start. */
+export class AgentLanePausedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'AgentLanePausedError';
+  }
+}
+
 export class AgentInterruptedDeliveryError extends Error {
   constructor(message: string) {
     super(message);
@@ -93,6 +103,8 @@ export interface MessageRoutableAgent {
   currentTurnDone?: Promise<number>;
   /** Messages waiting for the current turn to end. Capped at {@link MAX_PENDING_MESSAGES}. */
   pendingMessages: PendingAgentMessage[];
+  /** Ptah ask/pause notices; while one is a pause, new work is held in the queue. */
+  laneAdmission?: TrackedAgent['laneAdmission'];
 }
 
 export interface PendingAgentMessage {
@@ -104,6 +116,8 @@ export interface PendingAgentMessage {
    * journals it before dispatch. A router-generated id has no envelope.
    */
   readonly journaled?: boolean;
+  /** A paused dispatch retains its existing durable dispatch reservation. */
+  readonly dispatchReserved?: boolean;
 }
 
 export type AgentMessageStatus =
@@ -182,6 +196,9 @@ export class AgentMessageRouter {
         detail: 'The lane is starting; try again when its handle is ready.',
       };
     }
+    // Host-generated handoff asks use the manager's separate delivery path.
+    if (isLanePaused(tracked)) return this.hold(agentId, tracked, message, messageId);
+
     const handle = tracked.sdkHandle;
     const caps = this.resolveCapabilities(tracked);
     const turnInFlight = tracked.info.status === 'running';
@@ -214,7 +231,7 @@ export class AgentMessageRouter {
       if (turnInFlight && caps.interrupt && caps.continuation && handle?.interrupt) {
         if (!allowPartialTurnLoss)
           return { mode: 'unsupported', reasonCode: 'confirmation-required', detail: 'Confirm partial turn work loss before interrupting.' };
-        return this.interruptAndResume(agentId, tracked, message, dispatcher);
+        return this.interruptAndResume(agentId, tracked, message, dispatcher, messageId);
       }
       return { mode: 'unsupported', reasonCode: 'immediate-unavailable', detail: 'No immediate delivery mechanism is available.' };
     }
@@ -222,7 +239,7 @@ export class AgentMessageRouter {
     if (caps.continuation) {
       return turnInFlight
         ? this.park(tracked, message, messageId)
-        : this.startNewTurn(agentId, tracked, message, dispatcher);
+        : this.startNewTurn(agentId, tracked, message, dispatcher, messageId);
     }
 
     return {
@@ -249,6 +266,7 @@ export class AgentMessageRouter {
     tracked: MessageRoutableAgent,
     message: string,
     dispatcher: ContinuationDispatcher,
+    messageId?: string,
   ): Promise<AgentMessageOutcome> {
     this.interrupting.add(agentId);
     try {
@@ -271,6 +289,7 @@ export class AgentMessageRouter {
       await dispatcher.continueConversation(agentId, message);
       resubmitted = true;
     } catch (error: unknown) {
+      if (error instanceof AgentLanePausedError) return this.hold(agentId, tracked, message, messageId);
       throw new AgentInterruptedDeliveryError(
         `The ${tracked.info.cli} turn was interrupted but the message could not be re-submitted: ${describeError(error)}.`,
       );
@@ -322,16 +341,40 @@ export class AgentMessageRouter {
     };
   }
 
+  /** Queue a message on a paused lane; the outcome carries the Ptah hold text. */
+  private hold(
+    agentId: string,
+    tracked: MessageRoutableAgent,
+    message: string,
+    messageId?: string,
+  ): AgentMessageOutcome {
+    const outcome = this.park(tracked, message, messageId);
+    if (outcome.mode !== 'queue-next-turn') return outcome;
+    const notice = currentLaneNotice(tracked);
+    const holdText = notice ? formatBudgetPauseNotice(notice, agentId) : '';
+    this.logger.info('[AgentMessageRouter] Message held by a lane pause', {
+      agentId,
+      messageId: outcome.messageId,
+      reason: notice?.reason,
+    });
+    return {
+      ...outcome,
+      detail: `${holdText} ${outcome.detail} It dispatches once the pause clears.`.trim(),
+    };
+  }
+
   /** The agent finished its turn but is still alive — start a new one now. */
   private async startNewTurn(
     agentId: string,
     tracked: MessageRoutableAgent,
     message: string,
     dispatcher: ContinuationDispatcher,
+    messageId?: string,
   ): Promise<AgentMessageOutcome> {
     try {
       await dispatcher.continueConversation(agentId, message);
     } catch (error: unknown) {
+      if (error instanceof AgentLanePausedError) return this.hold(agentId, tracked, message, messageId);
       return {
         mode: 'unsupported',
         reasonCode: 'start-turn-failed',
@@ -361,6 +404,8 @@ export class AgentMessageRouter {
     dispatcher: ContinuationDispatcher,
   ): Promise<void> {
     if (tracked.pendingMessages.length === 0 || this.flushing.has(agentId) || this.interrupting.has(agentId)) return;
+    // Held while paused; the manager releases the queue when the pause clears.
+    if (isLanePaused(tracked)) return;
 
     if (tracked.subprocessReleased) {
       const dropped = tracked.pendingMessages.length;
@@ -397,10 +442,14 @@ export class AgentMessageRouter {
     // put it back; this attempt starts from a clean status.
     this.terminal.delete(`${agentId}:${next.messageId}`);
     let journal: JournalResult = 'refused';
-    let rejected = false;
+    let offerNext = false;
     try {
       journal = await this.journalDispatch(agentId, tracked, next);
       if (journal === 'ok' && this.terminal.get(`${agentId}:${next.messageId}`)?.status !== 'failed') {
+        if (isLanePaused(tracked)) {
+          tracked.pendingMessages.unshift({ ...next, dispatchReserved: true });
+          return;
+        }
         await dispatcher.continueConversation(agentId, next.text, next.messageId);
         if (this.terminal.get(`${agentId}:${next.messageId}`)?.status !== 'failed')
           this.setTerminal(agentId, next.messageId, { status: 'delivered' });
@@ -411,30 +460,32 @@ export class AgentMessageRouter {
         });
       }
     } catch (error: unknown) {
-      const reason = classifyContinuationFailure(error);
-      // Only this entry failed; the reconciler decides between a backoff retry
-      // and a permanent hold with the body kept. A transient refusal (busy) is
-      // followed by a settle, which offers the next entry; a permanent one
-      // started no turn, so the next entry is offered below.
-      rejected = reason === 'continuation_rejected';
-      this.setTerminal(agentId, next.messageId, { status: 'failed', reason });
-      this.logger.error(
-        '[AgentMessageRouter] Queued message could not be delivered',
-        {
+      if (error instanceof AgentLanePausedError) {
+        if (this.terminal.get(`${agentId}:${next.messageId}`)?.status !== 'failed') {
+          tracked.pendingMessages.unshift({ ...next, dispatchReserved: true });
+          // Settings can release the hold before the continuation's rejection reaches us.
+          offerNext = !isLanePaused(tracked);
+        }
+      } else {
+        const reason = classifyContinuationFailure(error);
+        // The reconciler decides between a backoff retry and a permanent hold.
+        offerNext = reason === 'continuation_rejected';
+        this.setTerminal(agentId, next.messageId, { status: 'failed', reason });
+        this.logger.error('[AgentMessageRouter] Queued message could not be delivered', {
           agentId,
           cli: tracked.info.cli,
           error: error instanceof Error ? error.name : 'unknown',
           reason,
           remaining: tracked.pendingMessages.length,
-        },
-      );
+        });
+      }
     } finally {
       this.inFlight.delete(agentId);
       this.flushing.delete(agentId);
     }
     // A withdrawn or permanently rejected entry ran nothing, so no settle will
     // follow: offer the next one now.
-    if (journal === 'withdrawn' || rejected) await this.flushPending(agentId, tracked, dispatcher);
+    if (journal === 'withdrawn' || offerNext) await this.flushPending(agentId, tracked, dispatcher);
   }
 
   /**
@@ -451,7 +502,7 @@ export class AgentMessageRouter {
     tracked: MessageRoutableAgent,
     entry: PendingAgentMessage,
   ): Promise<JournalResult> {
-    if (!this.journal || !entry.journaled) return 'ok';
+    if (!this.journal || !entry.journaled || entry.dispatchReserved) return 'ok';
     try {
       await this.journal.markDispatching(entry.messageId);
       return 'ok';
@@ -474,6 +525,10 @@ export class AgentMessageRouter {
       );
       return 'refused';
     }
+  }
+
+  hasPendingWork(agentId: string, tracked: MessageRoutableAgent): boolean {
+    return tracked.pendingMessages.length > 0 || this.inFlight.has(agentId);
   }
 
   /** Forget anything still queued for a record that can no longer receive it. */

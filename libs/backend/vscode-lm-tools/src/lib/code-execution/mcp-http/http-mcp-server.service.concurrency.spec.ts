@@ -62,6 +62,15 @@ jest.mock('../../permission/permission-prompt.service', () => ({
 
 jest.mock('../mcp-core', () => ({ handleMCPRequest: jest.fn() }));
 
+// The retired-slot suite below points `~` at a temp home. The facets read it
+// through `os.homedir()`, and on Windows that ignores a changed USERPROFILE
+// inside jest, so the module is wrapped here. Unset, it is the real function.
+let mockHome: string | undefined;
+jest.mock('os', () => {
+  const actual = jest.requireActual<typeof import('os')>('os');
+  return { ...actual, homedir: () => mockHome ?? actual.homedir() };
+});
+
 jest.mock('./http-server.handler', () => ({
   startHttpServer: jest.fn(),
   stopHttpServer: jest.fn(),
@@ -69,9 +78,16 @@ jest.mock('./http-server.handler', () => ({
 }));
 
 import type * as http from 'http';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
-import { tmpdir } from 'os';
-import { join } from 'path';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'fs';
+import { homedir, tmpdir } from 'os';
+import { dirname, join } from 'path';
 
 import type { Logger } from '@ptah-extension/vscode-core';
 import type {
@@ -88,7 +104,9 @@ import {
   CodexTomlMcpFacet,
   createMcpFacet,
   withMcpConfigLock,
+  type IHarnessCliDetector,
 } from '@ptah-extension/harness-sync';
+import type { HarnessTargetId } from '@ptah-extension/shared';
 import type { PtahMcpSlot } from './ptah-mcp-slots';
 
 import { CodeExecutionMCP } from './http-mcp-server.service';
@@ -461,5 +479,123 @@ describe('chat registration queue behavior', () => {
     await second;
     expect(calls).toBe(2);
     service['syncMcpJsonRegistration'] = original;
+  });
+});
+
+describe('retired Antigravity slots (TASK_2026_2297)', () => {
+  const TOKEN = 'B'.repeat(43);
+  let home: string;
+  let detected: Set<HarnessTargetId>;
+  let agyService: CodeExecutionMCP;
+
+  const homeFile = () => join(home, '.gemini', 'config', 'mcp_config.json');
+  const wsFile = () => join(workspaceRoot, '.agents', 'mcp_config.json');
+
+  function writeJson(path: string, value: unknown): void {
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify(value, null, 2) + '\n', 'utf-8');
+  }
+
+  function servers(path: string): Record<string, unknown> {
+    return (
+      JSON.parse(readFileSync(path, 'utf-8')) as {
+        mcpServers: Record<string, unknown>;
+      }
+    ).mcpServers;
+  }
+
+  beforeEach(async () => {
+    home = mkdtempSync(join(tmpdir(), 'ptah-mcp-agy-home-'));
+    // The spec must never reach the developer's real home directory: the
+    // guard fails the test before the service touches anything.
+    mockHome = home;
+    expect(homedir()).toBe(home);
+    detected = new Set<HarnessTargetId>(['antigravity']);
+    const detector = {
+      isInstalled: (target: HarnessTargetId) =>
+        Promise.resolve(detected.has(target)),
+    } as unknown as IHarnessCliDetector;
+    agyService = new CodeExecutionMCP(
+      {
+        build: jest.fn((): PtahAPI => ({}) as unknown as PtahAPI),
+        hasSymbolAndMemoryLayer: jest.fn(() => false),
+      } as unknown as PtahAPIBuilder,
+      createMockLogger() as unknown as Logger,
+      createMockStateStorage() as unknown as IStateStorage,
+      createMockWorkspaceProvider({
+        folders: [workspaceRoot],
+      }) as unknown as IWorkspaceProvider,
+      {} as unknown as PermissionPromptService,
+      undefined,
+      undefined,
+      detector,
+    );
+    await agyService.start();
+  });
+
+  afterEach(async () => {
+    await agyService.disposeAsync();
+    mockHome = undefined;
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  it('writes no antigravity entry when agy is installed, and claude is unchanged', async () => {
+    await expect(agyService.ensureRegisteredForSubagents()).resolves.toEqual({
+      registered: true,
+    });
+
+    expect(existsSync(dirname(homeFile()))).toBe(false);
+    expect(existsSync(dirname(wsFile()))).toBe(false);
+    expect((serversOnDisk()['ptah'] as { url: string }).url).toMatch(
+      /^http:\/\/localhost:51820\/auth\/[A-Za-z0-9_-]{43}\/workspace\//,
+    );
+  });
+
+  it('removes the Ptah-owned entries an earlier Ptah wrote and keeps user servers', async () => {
+    const github = { command: 'npx', args: ['-y', 'github-mcp'] };
+    const docs = { serverUrl: 'https://docs.example/mcp' };
+    writeJson(homeFile(), {
+      mcpServers: {
+        github,
+        ptah: { serverUrl: `http://localhost:${PORT}/auth/${TOKEN}` },
+      },
+    });
+    writeJson(wsFile(), {
+      mcpServers: {
+        docs,
+        ptah: {
+          serverUrl: `http://localhost:${PORT}/auth/${TOKEN}/workspace/${encodeURIComponent(workspaceRoot)}`,
+        },
+      },
+    });
+
+    await agyService.ensureRegisteredForSubagents();
+
+    expect(servers(homeFile())).toEqual({ github });
+    expect(servers(wsFile())).toEqual({ docs });
+  });
+
+  it("keeps a running stream-json lane's entry and a user's own `ptah` server", async () => {
+    const lane = {
+      serverUrl: `http://localhost:${PORT}/auth/${TOKEN}/agent/a1/workspace/${encodeURIComponent(workspaceRoot)}`,
+    };
+    const userPtah = { serverUrl: 'https://mcp.example.com/ptah' };
+    writeJson(homeFile(), { mcpServers: { ptah: lane } });
+    writeJson(wsFile(), { mcpServers: { ptah: userPtah } });
+
+    await agyService.ensureRegisteredForSubagents();
+
+    expect(servers(homeFile())).toEqual({ ptah: lane });
+    expect(servers(wsFile())).toEqual({ ptah: userPtah });
+  });
+
+  it('leaves the files alone when agy is not detected', async () => {
+    detected.clear();
+    const stale = { serverUrl: `http://localhost:${PORT}` };
+    writeJson(homeFile(), { mcpServers: { ptah: stale } });
+
+    await agyService.ensureRegisteredForSubagents();
+
+    expect(servers(homeFile())).toEqual({ ptah: stale });
   });
 });

@@ -56,12 +56,17 @@ import {
 } from '@ptah-extension/chat-streaming';
 import { MessageValidationService } from './message-validation.service';
 import { UltracodeStateService } from './ultracode-state.service';
-import type { SendMessageOptions, TabState } from '@ptah-extension/chat-types';
+import type {
+  SendMessageOptions,
+  SessionStatus,
+  TabState,
+} from '@ptah-extension/chat-types';
 import {
   CARRY_OVER_BUSY_TEXT,
   ProviderCarryOverService,
   type CarryOverCompactResult,
 } from './provider-carry-over.service';
+import { ProviderSessionResumeNoticeService } from './provider-session-resume-notice.service';
 
 /**
  * `/compact` fails closed with this text when its carry-over check failed and
@@ -115,6 +120,12 @@ export interface SendOutcome {
   queued?: QueuedFollowUpRef;
   /** The backend ran the message to its end inside the send: no turn streams after it. */
   settled?: boolean;
+  /**
+   * The backend refused the idle-only send because a turn is still running
+   * (`TURN_IN_FLIGHT`). Nothing was sent and nothing is left in the
+   * transcript; the dispatcher queues the message instead.
+   */
+  turnInFlight?: boolean;
 }
 
 /**
@@ -133,6 +144,19 @@ export function mapChatSendFailureText(
     case 'CODEX_UNAVAILABLE':
     case 'CODEX_RUNTIME_FAILED':
       return 'Codex chat could not start.';
+    case 'PROVIDER_SESSION_BUSY':
+      return 'The provider is busy, try again when the current operation finishes';
+    case 'PROVIDER_SESSION_LIMIT':
+      return 'Too many provider sessions are open. Close one and try again.';
+    case 'PROVIDER_SESSION_UNAVAILABLE':
+      return 'The provider is not connected. Reconnect and try again.';
+    case 'PROVIDER_SESSION_RUNTIME_FAILED':
+      return 'The provider chat could not complete the request.';
+    case 'PROVIDER_SESSION_RESUME_FAILED':
+      return 'The provider could not reopen this conversation. Start a new session to continue.';
+    case 'PROVIDER_SESSION_UNSUPPORTED_OPTION':
+      // The host names the option in fixed copy; it carries no runtime cause.
+      return error ?? 'This chat provider does not support the requested option.';
     default:
       return error ?? fallback;
   }
@@ -163,6 +187,7 @@ export class MessageSenderService {
   private readonly ultracode = inject(UltracodeStateService);
   private readonly sendLock = inject(CommandCenterSendLockService);
   private readonly carryOver = inject(ProviderCarryOverService);
+  private readonly resumeNotice = inject(ProviderSessionResumeNoticeService);
 
   /** Grace-window expiry timers for timed-out starts, by tab. */
   private readonly startGraceTimers = new Map<
@@ -374,12 +399,14 @@ export class MessageSenderService {
     return `msg_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
   }
 
-  private isCodexFailure(code: string | undefined): boolean {
+  /** A coded failure of a native runtime (Codex app-server or a provider session). */
+  private isNativeRuntimeFailure(code: string | undefined): boolean {
     return (
       code === 'CODEX_BUSY' ||
       code === 'CODEX_UNSUPPORTED_OPTION' ||
       code === 'CODEX_UNAVAILABLE' ||
-      code === 'CODEX_RUNTIME_FAILED'
+      code === 'CODEX_RUNTIME_FAILED' ||
+      (code?.startsWith('PROVIDER_SESSION_') ?? false)
     );
   }
 
@@ -611,7 +638,7 @@ export class MessageSenderService {
    */
   async send(
     content: string,
-    options?: SendMessageOptions & { ownerToken?: string },
+    options?: SendMessageOptions & { ownerToken?: string; idleOnly?: boolean },
   ): Promise<SendOutcome> {
     if (this.isHeld(options))
       return { success: false, error: 'Message held by Command Center' };
@@ -819,7 +846,7 @@ export class MessageSenderService {
         if (
           result.errorCode === 'SESSION_ENDED' ||
           result.data?.errorCode === 'SESSION_ENDED' ||
-          this.isCodexFailure(result.errorCode ?? result.data?.errorCode)
+          this.isNativeRuntimeFailure(result.errorCode ?? result.data?.errorCode)
         ) {
           this.tabManager.setLastTerminalReason(activeTabId, 'api_error');
         }
@@ -869,7 +896,7 @@ export class MessageSenderService {
   private async continueConversation(
     content: string,
     sessionId: SessionId,
-    options?: SendMessageOptions & { ownerToken?: string },
+    options?: SendMessageOptions & { ownerToken?: string; idleOnly?: boolean },
   ): Promise<SendOutcome> {
     if (this.isHeld(options))
       return { success: false, error: 'Message held by Command Center' };
@@ -933,7 +960,9 @@ export class MessageSenderService {
   private async runContinueConversation(
     content: string,
     sessionId: SessionId,
-    options: (SendMessageOptions & { ownerToken?: string }) | undefined,
+    options:
+      | (SendMessageOptions & { ownerToken?: string; idleOnly?: boolean })
+      | undefined,
     abortSignal: AbortSignal | undefined,
   ): Promise<SendOutcome> {
     const files = options?.files;
@@ -1037,6 +1066,7 @@ export class MessageSenderService {
         if (this.isHeld(options))
           return { success: false, error: 'Message held by Command Center' };
       }
+      const previousTabStatus = activeTab?.status ?? null;
       this.sessionManager.setStatus('resuming');
       this.tabManager.markResuming(activeTabId);
       const userMessage = createExecutionChatMessage({
@@ -1075,9 +1105,32 @@ export class MessageSenderService {
           files: files ?? [],
           ...(images && images.length > 0 ? { images } : {}),
           ...(effectiveEffort ? { effort: effectiveEffort } : {}),
+          // Idle-only (the dispatcher's sends): a turn the renderer did not
+          // see as running refuses the send (TURN_IN_FLIGHT) instead of
+          // holding it unseen. Direct callers keep the backend hold.
+          ...(options?.idleOnly ? { admission: 'require-idle' as const } : {}),
         },
         { signal: abortSignal },
       );
+
+      // The tab was wiped to a fresh chat while this continue was in flight:
+      // `/clear` resets it on its CHAT_COMPLETE before the RPC answers, which
+      // aborts the call with `tab-reset`. The transcript this send wrote to no
+      // longer exists, so nothing of the tab is touched and no delivery
+      // failure is shown on the fresh chat. Any other abort still fails below.
+      if (abortSignal?.aborted && abortSignal.reason === ABORT_REASON_TAB_RESET) {
+        this.sessionManager.setStatus('loaded');
+        return { success: true, settled: true };
+      }
+
+      if ((result.data?.errorCode ?? result.errorCode) === 'TURN_IN_FLIGHT') {
+        this.withdrawRefusedPrompt(
+          activeTabId,
+          userMessage.id,
+          previousTabStatus,
+        );
+        return { success: false, turnInFlight: true };
+      }
 
       if (result.data?.cancelled === true) {
         this.rollBackUnsentPrompt(activeTabId, userMessage.id);
@@ -1114,6 +1167,11 @@ export class MessageSenderService {
         console.error(
           '[MessageSender] Failed to continue chat:',
           result.data?.error ?? result.error,
+        );
+        this.resumeNotice.flagIfResumeFailed(
+          result.errorCode ?? result.data?.errorCode,
+          activeTabId,
+          sessionId,
         );
         this.rollBackUnsentPrompt(activeTabId, userMessage.id);
         this.tabManager.markLoaded(activeTabId);
@@ -1168,5 +1226,35 @@ export class MessageSenderService {
    */
   private rollBackUnsentPrompt(tabId: string, messageId: string): void {
     this.streamingHandler.removeUserPromptBoundary(tabId, messageId);
+  }
+
+  /**
+   * Undo a send the backend refused as `TURN_IN_FLIGHT`. Unlike a failure, the
+   * bubble goes too (the message is queued, and its card shows instead), and
+   * the tab keeps the status it had: the backend turn is still running, so
+   * marking the tab loaded would hide its Stop.
+   */
+  private withdrawRefusedPrompt(
+    tabId: string,
+    messageId: string,
+    previousTabStatus: SessionStatus | null,
+  ): void {
+    this.streamingHandler.removeUserPromptBoundary(tabId, messageId);
+    const tab = this.tabManager.findTabByIdAcrossWorkspaces(tabId)?.tab;
+    if (tab) {
+      this.tabManager.setMessages(
+        tabId,
+        tab.messages.filter((message) => message.id !== messageId),
+      );
+    }
+    // Only undo our own `resuming`: a turn_state that arrived while the RPC
+    // was in flight is newer and wins.
+    if (tab?.status !== 'resuming') return;
+    const status = previousTabStatus ?? 'loaded';
+    this.tabManager.setStatus(tabId, status);
+    // The session manager mirrors the active tab only.
+    if (this.tabManager.activeTabId() === tabId) {
+      this.sessionManager.setStatus(status);
+    }
   }
 }

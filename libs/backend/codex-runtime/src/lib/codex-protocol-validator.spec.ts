@@ -140,6 +140,11 @@ const requests: [string, unknown, unknown][] = [
     },
   ],
   [
+    'account/read',
+    { refreshToken: false },
+    { account: { type: 'chatgpt', email: null }, requiresOpenaiAuth: true },
+  ],
+  [
     'item/commandExecution/requestApproval',
     { ...approval, command: 'echo test', cwd: '/work' },
     { decision: 'decline' },
@@ -1076,6 +1081,16 @@ describe('tolerant nested command actions', () => {
     expect(() => validateCodexParams(method, { misspelled: true })).toThrow(
       CodexProtocolError,
     );
+  });
+  it('accepts an account/read result from a server that omits optional fields', () => {
+    expect(
+      validateCodexResult('account/read', {
+        account: { type: 'chatgpt', email: null },
+      }),
+    ).toEqual({ account: { type: 'chatgpt', email: null } });
+    expect(validateCodexResult('account/read', { account: null })).toEqual({
+      account: null,
+    });
   });
   it('covers every modeled method in the fixtures', () => {
     expect(requests.map(([method]) => method).sort()).toEqual(

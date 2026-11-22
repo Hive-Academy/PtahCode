@@ -1,6 +1,6 @@
 /**
- * SubagentHandoffDelivery — hands the parent the handoff of a subagent
- * stopped by the `SubagentBudgetMonitor`.
+ * SubagentHandoffDelivery — hands the parent the handoff
+ * of a subagent that returned after the `SubagentBudgetMonitor` asked for a handoff.
  *
  * Routes:
  *
@@ -49,13 +49,13 @@ export interface HandoffDeliveryPort {
   ): void;
 }
 
-/** A stopped subagent's handoff message and where its record is. */
+/** The handoff message of a returned subagent (the shared normal-return copy) and where its record is. */
 export interface Handoff {
   /** The handoff message (`handoffMessage`). */
   readonly text: string;
   /** The subagent and task the handoff names. */
   readonly subject: HandoffSubject;
-  /** The handoff record; absent when a safety stop could not write one. */
+  /** The handoff record; absent when the record could not be written (the text then carries the record-failure copy). */
   readonly recordPath?: string;
 }
 

@@ -12,7 +12,7 @@
  */
 
 import type { Logger } from '@ptah-extension/vscode-core';
-import type { AISessionConfig, SessionId } from '@ptah-extension/shared';
+import { formatExplicitUserStopContext, type AISessionConfig, type SessionId } from '@ptah-extension/shared';
 
 import { SdkError, SessionAdmissionRefusedError } from '../../errors';
 import { SessionRegistry } from './session-registry.service';
@@ -93,6 +93,35 @@ function settle<T>(p: Promise<T>): Promise<T | typeof PENDING> {
 }
 
 describe('SessionStreamPump — one message per turn (TASK_2026_294)', () => {
+  it('prepends the attributed explanation only to the first input after an explicit stop', async () => {
+    const h = makeHarness();
+    const first = h.registry.find(TAB);
+    if (!first) throw new Error('missing session record');
+    h.registry.recordExplicitUserStop(first, false);
+    await h.pump.sendMessage(TAB, 'continue');
+    await h.pump.sendMessage(TAB, 'next');
+    expect((await h.iterator.next()).value?.message.content).toEqual([
+      { type: 'text', text: formatExplicitUserStopContext() },
+      { type: 'text', text: 'continue' },
+    ]);
+    h.registry.markTurnEnded(TAB);
+    expect((await h.iterator.next()).value?.message.content).toBe('next');
+  });
+
+  it('keeps a slash command eligible for dispatch after a stop', async () => {
+    const h = makeHarness();
+    const record = h.registry.find(TAB);
+    if (!record) throw new Error('missing session record');
+    h.registry.recordExplicitUserStop(record, false);
+    await h.pump.sendMessage(TAB, '/compact');
+    expect((await h.iterator.next()).value).toMatchObject({
+      shouldQuery: false,
+      isSynthetic: true,
+      message: { content: formatExplicitUserStopContext() },
+    });
+    expect((await h.iterator.next()).value?.message.content).toBe('/compact');
+  });
+
   it('deduplicates accepted lane delivery IDs without changing ordinary IDs', async () => {
     const h = makeHarness();
     const options = { clientMessageId: 'lane-delivery:one' };

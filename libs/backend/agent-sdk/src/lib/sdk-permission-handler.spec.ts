@@ -131,16 +131,16 @@ describe('SDK SendMessage budget gate', () => {
     expect(monitor.getAgentBudgetState).toHaveBeenCalledWith('reviewer', session);
   });
 
-  it('denies during the pending safety-stop window even with low context', async () => {
-    const { handler } = makeHandler(undefined, undefined, { getAgentBudgetState: () => ({ contextTokens: 0, stopped: true, stopState: 'pending', handoffTokens: 1000, warningRatio: 0.85 }) });
+  it('denies while a handoff is being finalized even with low context', async () => {
+    const { handler } = makeHandler(undefined, undefined, { getAgentBudgetState: () => ({ contextTokens: 0, stopped: true, stopState: 'pending', lifecycle: 'finalizing', handoffTokens: 1000, warningRatio: 0.85 }) });
     const result = await handler.createCallback(session)('SendMessage', { to: 'reviewer' }, { signal: new AbortController().signal, toolUseID: 'pending-send', requestId: 'pending-send' });
     expect(result).toEqual(expect.objectContaining({ behavior: 'deny', interrupt: false }));
   });
 
-  it('denies a warned running agent before the stop', async () => {
-    const { handler } = makeHandler(undefined, undefined, { getAgentBudgetState: () => ({ contextTokens: 850, stopped: false, warned: true, stopState: 'none', running: true, handoffTokens: 1000, warningRatio: 0.85 }) });
+  it('allows steering an agent that was asked for a handoff', async () => {
+    const { handler } = makeHandler(undefined, undefined, { getAgentBudgetState: () => ({ contextTokens: 850, stopped: false, warned: true, stopState: 'none', running: true, lifecycle: 'asked', handoffTokens: 1000, warningRatio: 0.85 }) });
     handler.setPermissionLevel('yolo');
-    expect((await handler.createCallback(session)('SendMessage', { to: 'reviewer' }, { signal: new AbortController().signal, toolUseID: 'send-5', requestId: 'send-5' }))?.behavior).toBe('deny');
+    expect((await handler.createCallback(session)('SendMessage', { to: 'reviewer' }, { signal: new AbortController().signal, toolUseID: 'send-5', requestId: 'send-5' }))?.behavior).toBe('allow');
   });
 
   it.each([{}, { to: 42 }])('keeps the existing policy when to is missing or not a string', async (input) => {
@@ -149,6 +149,19 @@ describe('SDK SendMessage budget gate', () => {
     handler.setPermissionLevel('yolo');
     expect((await handler.createCallback(session)('SendMessage', input, { signal: new AbortController().signal, toolUseID: 'send-6', requestId: 'send-6' }))?.behavior).toBe('allow');
     expect(monitor.getAgentBudgetState).not.toHaveBeenCalled();
+  });
+
+  it('refuses new work for a paused live agent with Ptah copy and without implying a stop', () => {
+    if (!session) throw new Error('Expected a valid fixture session');
+    const monitor = { getAgentBudgetState: jest.fn(() => ({
+      contextTokens: 1200, stopped: false, stopState: 'none' as const, running: true,
+      admission: 'paused' as const, handoffTokens: 1000, warningRatio: 0.85,
+    })) };
+    const { handler } = makeHandler(undefined, undefined, monitor);
+    const refusal = handler.budgetSendMessageRefusal('paused-agent', session);
+    expect(refusal).toContain('Ptah budget monitor paused new work for paused-agent');
+    expect(refusal).toContain('The execution remains live');
+    expect(refusal).not.toMatch(/stopped|interrupted|the user/i);
   });
 
   it('shares the budget refusal with the PreToolUse route and logs its denial', () => {
@@ -1418,8 +1431,8 @@ describe('SdkPermissionHandler - F2 unroutable deny-timeout (TASK_2026_155, Task
       // "the user doesn't want to take this action" string, which is how this
       // path used to read to the model as a deliberate deny (TASK_2026_247).
       expect(result.interrupt).toBe(false);
-      expect(result.message).toMatch(/NOT a user decision/i);
-      expect(result.message).not.toMatch(/denied by user/i);
+      expect(result.message).toMatch(/^Ptah host denied Bash/);
+      expect(result.message).not.toMatch(/user|SYSTEM ABORT/i);
 
       const warnedTimeout = (logger.warn as jest.Mock).mock.calls.some((call) =>
         String(call[0]).toLowerCase().includes('timed out'),
@@ -1556,7 +1569,8 @@ describe('SdkPermissionHandler - F2 unroutable deny-timeout (TASK_2026_155, Task
       // A timeout is a system abort, not a refusal — same contract as the
       // unroutable window, so the model is not told the user objected.
       expect(result.interrupt).toBe(false);
-      expect(result.message).toMatch(/NOT a user decision/i);
+      expect(result.message).toMatch(/^Ptah host denied Bash/);
+      expect(result.message).not.toMatch(/user|SYSTEM ABORT/i);
 
       const warnedTimeout = (logger.warn as jest.Mock).mock.calls.some((call) =>
         String(call[0]).toLowerCase().includes('timed out'),
@@ -1703,7 +1717,7 @@ describe('SdkPermissionHandler - F2 unroutable deny-timeout (TASK_2026_155, Task
       // itself, we abort it ourselves.
       ac.abort();
       const result = await pending;
-      expect(result).toMatchObject({ behavior: 'deny', interrupt: true });
+      expect(result).toMatchObject({ behavior: 'deny', interrupt: false });
     } finally {
       jest.useRealTimers();
     }
@@ -1854,7 +1868,9 @@ describe('SdkPermissionHandler - system abort vs user deny mapping', () => {
     return (broadcast!.payload as unknown as PermissionRequestPayload).id;
   }
 
-  it('a system-aborted request yields interrupt:false and a message that says it was NOT a user decision', async () => {
+  const NO_HOST_WORDING = /user|SYSTEM ABORT|Extension deactivated/i;
+
+  it('a teardown-closed request yields interrupt:false and Ptah-labeled copy', async () => {
     const { handler, sent } = makeHandler();
     const pending = startRequest(handler, sent);
     await flushMicrotasks();
@@ -1867,16 +1883,10 @@ describe('SdkPermissionHandler - system abort vs user deny mapping', () => {
     expect(result.behavior).toBe('deny');
 
     // interrupt:true is what makes the CLI swap in its canned user-denial
-    // string. A system abort MUST NOT take that path.
+    // string. A host-closed request MUST NOT take that path.
     expect(result.interrupt).toBe(false);
-
-    // The message must state, in words that reach the model, that no human
-    // decided this and that the operation is retryable.
-    expect(result.message).toMatch(/NOT a user decision/i);
-    expect(result.message).toMatch(/retried/i);
-
-    // And it must not read as a refusal.
-    expect(result.message).not.toMatch(/denied by user/i);
+    expect(result.message).toMatch(/^Ptah host closed the permission request for Bash/);
+    expect(result.message).not.toMatch(NO_HOST_WORDING);
   });
 
   it('a genuine user deny still yields interrupt:true and the user’s own reason', async () => {
@@ -1899,11 +1909,11 @@ describe('SdkPermissionHandler - system abort vs user deny mapping', () => {
     expect(result.message).toBe(
       'I do not want you running shell commands here',
     );
-    // It must NOT be relabelled as a system abort.
-    expect(result.message).not.toMatch(/NOT a user decision/i);
+    // It must NOT be relabelled as a host action.
+    expect(result.message).not.toMatch(/Ptah host/);
   });
 
-  it('the global (no-arg) cleanup also marks its denials as system aborts', async () => {
+  it('the global (no-arg) cleanup also relabels its denials as host actions', async () => {
     const { handler, sent } = makeHandler();
     const pending = startRequest(handler, sent);
     await flushMicrotasks();
@@ -1913,7 +1923,93 @@ describe('SdkPermissionHandler - system abort vs user deny mapping', () => {
     const result = (await pending) as unknown as DenyResult;
     expect(result.behavior).toBe('deny');
     expect(result.interrupt).toBe(false);
-    expect(result.message).toMatch(/NOT a user decision/i);
+    expect(result.message).toMatch(/^Ptah host closed the permission request for Bash/);
+    expect(result.message).not.toMatch(NO_HOST_WORDING);
+  });
+
+  it('dispose() resolves pending requests as a non-interrupting host-shutdown deny', async () => {
+    const { handler, sent } = makeHandler();
+    const pending = startRequest(handler, sent);
+    await flushMicrotasks();
+
+    handler.dispose();
+
+    const result = (await pending) as unknown as DenyResult;
+    expect(result.behavior).toBe('deny');
+    expect(result.interrupt).toBe(false);
+    expect(result.message).toMatch(/the host is shutting down/);
+    expect(result.message).not.toMatch(NO_HOST_WORDING);
+  });
+
+  it('an aborted signal yields a non-interrupting cancelled deny', async () => {
+    const { handler, sent } = makeHandler();
+    const ac = new AbortController();
+    const pending = handler.createCallback(
+      asSessionId(SESSION_UUID),
+      undefined,
+      asTabId(TAB_ID),
+    )(
+      'Bash',
+      { command: 'ls' },
+      { signal: ac.signal, toolUseID: 'abort-tool', requestId: 'abort-tool' },
+    );
+    await flushMicrotasks();
+    expect(sent.length).toBeGreaterThan(0);
+    ac.abort();
+
+    const result = (await pending) as unknown as DenyResult;
+    expect(result.behavior).toBe('deny');
+    expect(result.interrupt).toBe(false);
+    expect(result.message).toMatch(/the permission request was cancelled/);
+    expect(result.message).not.toMatch(NO_HOST_WORDING);
+  });
+
+  it('a webview payload cannot claim a host origin on a user deny', async () => {
+    const { handler, sent } = makeHandler();
+    const pending = startRequest(handler, sent);
+    await flushMicrotasks();
+
+    const requestId = requestIdOf(sent);
+    handler.handleResponse(requestId, {
+      id: requestId,
+      decision: 'deny',
+      reason: 'No shell here',
+      origin: 'host-timeout',
+    } as never);
+
+    const result = (await pending) as unknown as DenyResult;
+    expect(result.interrupt).toBe(true);
+    expect(result.message).toBe('No shell here');
+  });
+
+  it('a lane whose identity never attaches gets a non-interrupting Ptah deny', async () => {
+    jest.useFakeTimers();
+    try {
+      const { handler } = makeHandler();
+      const pending = handler.createCallback(
+        asSessionId(SESSION_UUID),
+        () => undefined,
+      )(
+        'Bash',
+        { command: 'ls' },
+        {
+          signal: new AbortController().signal,
+          toolUseID: 'lane-tool',
+          requestId: 'lane-tool',
+        },
+      );
+      await jest.advanceTimersByTimeAsync(10_100);
+
+      const result = (await pending) as unknown as DenyResult;
+      expect(result.behavior).toBe('deny');
+      expect(result.interrupt).toBe(false);
+      expect(result.message).toMatch(
+        /^Ptah host denied Bash because the lane identity was unavailable/,
+      );
+      expect(result.message).not.toMatch(NO_HOST_WORDING);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });
 
@@ -2066,5 +2162,95 @@ describe('CLI lane callback level override', () => {
       toolUseID: 'lane-edit',
       requestId: 'lane-edit',
     })).resolves.toMatchObject({ behavior: 'allow' });
+  });
+});
+
+describe('SdkPermissionHandler - paused tool gate (TASK_2026_2297_920a)', () => {
+  const session = asSessionId('11111111-2222-4333-8444-555555555555');
+  const opts = (id: string) => ({
+    signal: new AbortController().signal,
+    toolUseID: id,
+    requestId: id,
+  });
+  const notice = {
+    actor: 'ptah-budget-monitor',
+    action: 'paused',
+    reason: 'context-ceiling',
+    nextStep: 'handoff',
+  } as never;
+
+  function makePausedHandler(
+    disposition: { phase: 'running' | 'asked-handoff' | 'paused'; notice?: never },
+    monitor?: unknown,
+  ) {
+    const made = makeHandler(undefined, undefined, monitor as never);
+    const lookup = jest.fn(() => disposition);
+    (made.handler as unknown as { toolDisposition: unknown }).toolDisposition = { lookup };
+    made.handler.setPermissionLevel('yolo');
+    return { ...made, lookup };
+  }
+
+  it('denies a work tool of a paused session without interrupting and without user or stop wording', async () => {
+    const { handler, lookup } = makePausedHandler({ phase: 'paused', notice });
+    const result = await handler.createCallback(session)('Bash', { command: 'ls' }, opts('p-1'));
+    expect(result).toEqual(expect.objectContaining({ behavior: 'deny', interrupt: false }));
+    const message = (result as { message: string }).message;
+    expect(message).toMatch(/^Ptah /);
+    expect(message).not.toMatch(/\buser\b|\bstop/i);
+    expect(lookup).toHaveBeenCalledWith(expect.objectContaining({ sdkSessionId: session }));
+  });
+
+  it('uses a generic Ptah sentence when the paused disposition has no notice', async () => {
+    const { handler } = makePausedHandler({ phase: 'paused' });
+    const result = await handler.createCallback(session)('Write', {}, opts('p-2'));
+    expect((result as { message: string }).message).toMatch(/^Ptah paused/);
+  });
+
+  it.each(['Read', 'Grep', 'mcp__ptah__ptah_session_handoff', 'mcp__ptah__ptah_session_handoff_ack', 'mcp__ptah__ptah_agent_report'])(
+    'keeps %s allowed while paused',
+    async (tool) => {
+      const { handler } = makePausedHandler({ phase: 'paused', notice });
+      const result = await handler.createCallback(session)(tool, {}, opts('p-3'));
+      expect(result?.behavior).toBe('allow');
+    },
+  );
+
+  it.each(['TaskStop', 'KillShell', 'TaskCreate', 'TaskUpdate'])(
+    'denies the task-changing tool %s while paused with the Ptah reason, without interrupting',
+    async (tool) => {
+      const { handler } = makePausedHandler({ phase: 'paused' });
+      const direct = await handler.budgetToolDenial(tool, {}, session, undefined, undefined);
+      expect(direct).toMatch(/^Ptah paused/);
+      const result = await handler.createCallback(session)(tool, {}, opts('p-stop'));
+      expect(result).toEqual(expect.objectContaining({ behavior: 'deny', interrupt: false }));
+      expect((result as { message: string }).message).toMatch(/^Ptah paused/);
+    },
+  );
+
+  it.each(['running', 'asked-handoff'] as const)('changes nothing for a %s session', async (phase) => {
+    const { handler } = makePausedHandler({ phase });
+    const result = await handler.createCallback(session)('Bash', { command: 'ls' }, opts('p-4'));
+    expect(result?.behavior).toBe('allow');
+  });
+
+  it('returns the monitor text for a paused subagent', async () => {
+    const checkPausedTool = jest.fn(async () => 'Ptah paused this subagent.');
+    const { handler } = makePausedHandler(
+      { phase: 'running' },
+      { getAgentBudgetState: () => undefined, checkPausedTool },
+    );
+    const result = await handler.createCallback(session)('Bash', {}, { ...opts('p-5'), agentID: 'agent-1' });
+    expect(result).toEqual({ behavior: 'deny', message: 'Ptah paused this subagent.', interrupt: false });
+    expect(checkPausedTool).toHaveBeenCalledWith(session, 'agent-1', 'Bash', {});
+  });
+
+  it('does not consult the monitor for the main thread', async () => {
+    const checkPausedTool = jest.fn(async () => 'Ptah paused this subagent.');
+    const { handler } = makePausedHandler(
+      { phase: 'running' },
+      { getAgentBudgetState: () => undefined, checkPausedTool },
+    );
+    await handler.createCallback(session)('Bash', {}, opts('p-6'));
+    expect(checkPausedTool).not.toHaveBeenCalled();
   });
 });

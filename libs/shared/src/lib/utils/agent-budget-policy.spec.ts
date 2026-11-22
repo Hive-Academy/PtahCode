@@ -1,5 +1,5 @@
 import { AgentTurnUsage } from '../types/agent-turn-usage.types';
-import { AgentBudgetPolicy, MAX_CONSECUTIVE_UNAVAILABLE_TURNS, initialAgentBudgetSnapshot, parseAgentBudgetSetting, resolveAgentTurnCost } from './agent-budget-policy';
+import { AGENT_BUDGET_PAUSE_MULTIPLIER, AgentBudgetPolicy, DEFAULT_AGENT_BUDGET_SETTINGS, MAX_CONSECUTIVE_UNAVAILABLE_TURNS, agentBudgetAdmissionLimits, initialAgentBudgetSnapshot, parseAgentBudgetSetting, resolveAgentTurnCost } from './agent-budget-policy';
 import { registerProviderPricing, resetPricingMapForTesting } from './pricing.utils';
 
 const reported = (value: number) => ({ status: 'reported', value, source: 'stream' } as const);
@@ -226,5 +226,107 @@ describe('AgentBudgetPolicy', () => {
       cacheWriteTokens: reported(0), requestContextTokens: reported(100),
     } }, 0, null).stopReason).toBe('budget');
     expect(policy.assess(initialAgentBudgetSnapshot, 120_000)).toMatchObject({ stopReason: 'duration' });
+  });
+});
+
+describe('AgentBudgetPolicy.assessAdmission', () => {
+  // ask at 0.8 x limit, pause at 2 x limit: weighted 80/200, context 40/100, duration 96s/240s
+  const settings = { warnRatio: 0.8, stopWeightedTokens: 100, handoffContextTokens: 50, maxDurationMin: 2 };
+  const admission = new AgentBudgetPolicy(settings);
+  const snap = (patch: Partial<typeof initialAgentBudgetSnapshot> = {}) => ({ ...initialAgentBudgetSnapshot, ...patch });
+
+  it('exposes the pause multiplier and per-dimension limits', () => {
+    expect(AGENT_BUDGET_PAUSE_MULTIPLIER).toBe(2);
+    expect(agentBudgetAdmissionLimits(settings)).toEqual({
+      'weighted-budget': { limit: 100, askAt: 80, pauseAt: 200, unit: 'tokens' },
+      'raw-budget': { limit: 100, askAt: 80, pauseAt: 200, unit: 'tokens' },
+      'context-budget': { limit: 50, askAt: 40, pauseAt: 100, unit: 'tokens' },
+      duration: { limit: 120_000, askAt: 96_000, pauseAt: 240_000, unit: 'milliseconds' },
+    });
+    expect(admission.admissionLimits()).toEqual(agentBudgetAdmissionLimits(settings));
+  });
+
+  it('runs below every threshold and reports no dimension', () => {
+    expect(admission.assessAdmission(snap({ weightedTokens: 79, rawTokens: 79 }), 95_999, 39)).toEqual({ phase: 'running' });
+  });
+
+  it('uses inclusive boundaries for each dimension', () => {
+    expect(admission.assessAdmission(snap({ weightedTokens: 80 }), 0))
+      .toEqual({ phase: 'asked-handoff', reason: 'weighted-budget', measured: 80, limit: 100, unit: 'tokens' });
+    expect(admission.assessAdmission(snap({ weightedTokens: 199 }), 0).phase).toBe('asked-handoff');
+    expect(admission.assessAdmission(snap({ weightedTokens: 200 }), 0))
+      .toEqual({ phase: 'paused', reason: 'weighted-budget', measured: 200, limit: 100, unit: 'tokens' });
+    expect(admission.assessAdmission(snap({ rawTokens: 80 }), 0))
+      .toMatchObject({ phase: 'asked-handoff', reason: 'raw-budget' });
+    expect(admission.assessAdmission(snap({ rawTokens: 200 }), 0))
+      .toMatchObject({ phase: 'paused', reason: 'raw-budget' });
+    expect(admission.assessAdmission(snap(), 0, 40))
+      .toEqual({ phase: 'asked-handoff', reason: 'context-budget', measured: 40, limit: 50, unit: 'tokens' });
+    expect(admission.assessAdmission(snap(), 0, 99).phase).toBe('asked-handoff');
+    expect(admission.assessAdmission(snap(), 0, 100)).toMatchObject({ phase: 'paused', reason: 'context-budget' });
+    expect(admission.assessAdmission(snap(), 96_000))
+      .toEqual({ phase: 'asked-handoff', reason: 'duration', measured: 96_000, limit: 120_000, unit: 'milliseconds' });
+    expect(admission.assessAdmission(snap(), 239_999).phase).toBe('asked-handoff');
+    expect(admission.assessAdmission(snap(), 240_000)).toMatchObject({ phase: 'paused', reason: 'duration' });
+  });
+
+  it('keeps weighted and raw lifetime usage independent', () => {
+    expect(admission.assessAdmission(snap({ weightedTokens: 10, rawTokens: 200 }), 0))
+      .toMatchObject({ phase: 'paused', reason: 'raw-budget', measured: 200 });
+    expect(admission.assessAdmission(snap({ weightedTokens: 200, rawTokens: 10 }), 0))
+      .toMatchObject({ phase: 'paused', reason: 'weighted-budget' });
+  });
+
+  it('skips the raw dimension for lane accounting', () => {
+    const lane = new AgentBudgetPolicy(settings, { laneAccounting: true });
+    expect(lane.assessAdmission(snap({ rawTokens: 500 }), 0)).toEqual({ phase: 'running' });
+    expect(lane.assessAdmission(snap({ weightedTokens: 80 }), 0)).toMatchObject({ phase: 'asked-handoff', reason: 'weighted-budget' });
+  });
+
+  it('lets the highest phase win and reports the dimension that caused it', () => {
+    expect(admission.assessAdmission(snap({ weightedTokens: 85 }), 240_000, 45))
+      .toMatchObject({ phase: 'paused', reason: 'duration' });
+    expect(admission.assessAdmission(snap({ weightedTokens: 85 }), 0, 100))
+      .toMatchObject({ phase: 'paused', reason: 'context-budget' });
+  });
+
+  it('breaks a tie between equal phases in weighted, raw, context, duration, telemetry order', () => {
+    expect(admission.assessAdmission(snap({ weightedTokens: 85, rawTokens: 85 }), 100_000, 45)).toMatchObject({ phase: 'asked-handoff', reason: 'weighted-budget' });
+    expect(admission.assessAdmission(snap({ rawTokens: 85 }), 100_000, 45)).toMatchObject({ phase: 'asked-handoff', reason: 'raw-budget' });
+    expect(admission.assessAdmission(snap(), 100_000, 45)).toMatchObject({ phase: 'asked-handoff', reason: 'context-budget' });
+    expect(admission.assessAdmission(snap({ unavailableTurns: 1 }), 100_000)).toMatchObject({ phase: 'asked-handoff', reason: 'duration' });
+  });
+
+  it('jumps straight to paused when a single measurement crosses both thresholds', () => {
+    expect(admission.assessAdmission(snap({ weightedTokens: 10_000 }), 0)).toMatchObject({ phase: 'paused', reason: 'weighted-budget', measured: 10_000 });
+  });
+
+  it('asks on the first unavailable turn and pauses at the consecutive limit', () => {
+    expect(admission.assessAdmission(snap({ unavailableTurns: 0 }), 0)).toEqual({ phase: 'running' });
+    expect(admission.assessAdmission(snap({ unavailableTurns: 1 }), 0))
+      .toEqual({ phase: 'asked-handoff', reason: 'telemetry-unavailable', measured: 1, limit: MAX_CONSECUTIVE_UNAVAILABLE_TURNS, unit: 'turns' });
+    expect(admission.assessAdmission(snap({ unavailableTurns: MAX_CONSECUTIVE_UNAVAILABLE_TURNS - 1 }), 0).phase).toBe('asked-handoff');
+    expect(admission.assessAdmission(snap({ unavailableTurns: MAX_CONSECUTIVE_UNAVAILABLE_TURNS }), 0))
+      .toMatchObject({ phase: 'paused', reason: 'telemetry-unavailable' });
+  });
+
+  it('ignores the legacy stopped bit, which the caller latches', () => {
+    expect(admission.assessAdmission(snap({ stopped: true }), 0)).toEqual({ phase: 'running' });
+    expect(admission.assessAdmission(snap({ stopped: true, weightedTokens: 80 }), 0).phase).toBe('asked-handoff');
+  });
+
+  it('applies the shipped defaults', () => {
+    const defaults = new AgentBudgetPolicy(DEFAULT_AGENT_BUDGET_SETTINGS);
+    const { warnRatio, stopWeightedTokens, handoffContextTokens, maxDurationMin } = DEFAULT_AGENT_BUDGET_SETTINGS;
+    expect(defaults.assessAdmission(snap({ weightedTokens: stopWeightedTokens * warnRatio }), 0).phase).toBe('asked-handoff');
+    expect(defaults.assessAdmission(snap({ weightedTokens: stopWeightedTokens * warnRatio - 1 }), 0).phase).toBe('running');
+    expect(defaults.assessAdmission(snap({ weightedTokens: 6_000_000 }), 0).phase).toBe('paused');
+    expect(defaults.assessAdmission(snap(), 0, handoffContextTokens * 2).phase).toBe('paused');
+    expect(defaults.assessAdmission(snap(), maxDurationMin * 60_000 * warnRatio).phase).toBe('asked-handoff');
+    expect(defaults.assessAdmission(snap(), maxDurationMin * 2 * 60_000).phase).toBe('paused');
+  });
+
+  it('leaves the existing assess decision unchanged', () => {
+    expect(admission.assess(snap({ weightedTokens: 100 }), 0).stopReason).toBe('budget');
   });
 });

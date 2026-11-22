@@ -275,8 +275,10 @@ function makeHarness(storage?: IStateStorage) {
     notifyResolved,
     notifyEnded: (sessionId: string) =>
       endListeners.forEach((cb) => cb({ sessionId })),
-    notifyEndedWith: (sessionId: string, cause: string) =>
-      endListeners.forEach((cb) => cb({ sessionId, cause } as { sessionId: string })),
+    notifyEndedWith: (sessionId: string, cause: string, zeroOutwardEvents?: boolean) =>
+      endListeners.forEach((cb) =>
+        cb({ sessionId, cause, zeroOutwardEvents } as { sessionId: string }),
+      ),
   };
 }
 
@@ -684,7 +686,7 @@ describe('SessionHandoffService', () => {
       await jest.advanceTimersByTimeAsync(10_000);
       expect(recoverAfterWatchdogStop).not.toHaveBeenCalled();
 
-      h.notifyEndedWith(result.tabId, 'no-activity-timeout');
+      h.notifyEndedWith(result.tabId, 'provider-no-response', true);
       await jest.advanceTimersByTimeAsync(10_000);
       expect(recoverAfterWatchdogStop).toHaveBeenCalledTimes(1);
       expect(recoverAfterWatchdogStop).toHaveBeenCalledWith(

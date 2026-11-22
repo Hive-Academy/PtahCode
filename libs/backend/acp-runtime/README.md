@@ -10,6 +10,12 @@ Runs one Agent Client Protocol (ACP) agent process per session and maps its
   capture, `session/set_config_option` / `session/set_mode`, prompts with an
   optional watchdog, interrupt that keeps the process, approval sink, process
   generations with respawn, usage drain, cancel grace.
+- `createAcpProviderSessionRuntime` — the chat `ProviderSessionRuntime`
+  over `createAcpSession`: open (attach `resume`/`load`, replay), capabilities
+  from the agent's advertisement, text/image/file prompt content, instructions
+  through the profile's `instructionsMeta` (agy:
+  `session/new` `_meta.antigravity.systemPrompt.append`) or a first-prompt
+  prefix, never on a restored session; bounded `close`.
 - `spawnAcpProcess` — the child-process byte stream, spawned through
   `IProcessSpawner` with the complete environment (`buildAcpSpawnEnv`); the
   caller supplies the command-line policy (`AcpCommandPreparer`).
@@ -19,7 +25,8 @@ Runs one Agent Client Protocol (ACP) agent process per session and maps its
 - `@ptah-extension/acp-runtime/testing` — the scripted fake ACP agent and the
   recorded-fixture reader for specs.
 - Live check: `PTAH_LIVE_AGY=1` runs `src/lib/live/agy-acp.live.spec.ts`
-  against a signed-in `agy acp` (skipped otherwise).
+  against a signed-in `agy acp` (skipped otherwise); `agy-chat-runtime.live.spec.ts`
+  checks the chat runtime (instructions hook, file links) the same way.
 
 The ACP SDK (`@agentclientprotocol/sdk`, ESM only) is loaded lazily by
 `acp-sdk-loader.ts`; no other file imports an SDK runtime value.

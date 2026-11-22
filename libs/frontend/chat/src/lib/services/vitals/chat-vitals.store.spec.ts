@@ -207,6 +207,17 @@ describe('ChatVitalsStore', () => {
     );
   });
 
+  it('draws the Antigravity account for an antigravity-cli main agent (issue #1459)', () => {
+    auth.activeProviderId.set('antigravity-cli');
+    const store = create();
+    plan.snapshot.set(
+      planSnapshot([owner('claude', 40), owner('agy', 30, 'antigravity')]),
+    );
+    expect(store.planRing()).toEqual(
+      vitalsReady({ percent: 30, label: '5-hour', resetsInMs: null }),
+    );
+  });
+
   it('draws nothing when the auth status could not be read', () => {
     auth.isLoaded.set(false);
     const store = create();

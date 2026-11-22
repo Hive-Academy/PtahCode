@@ -3,9 +3,23 @@ import type {
   CodexReadinessView,
   ProvidersSettingsSection,
 } from '@ptah-extension/core';
-import type { AnthropicProviderInfo, CliDetectionResult } from '@ptah-extension/shared';
+import type {
+  AnthropicProviderInfo,
+  CliDetectionResult,
+  ProviderSessionAuthStatus,
+} from '@ptah-extension/shared';
 
-export type ProviderKind = 'claude-cli' | 'openai-codex';
+/** Main connections with an onboarding card: two native ones and each provider session. */
+export type ProviderKind = 'claude-cli' | 'openai-codex' | 'antigravity-cli';
+
+/** Provider-session kinds, which sign in through their own CLI. */
+const PROVIDER_SESSION_KINDS: readonly ProviderKind[] = ['antigravity-cli'];
+
+const PROVIDER_NAMES: Record<ProviderKind, string> = {
+  'claude-cli': 'Claude Code',
+  'openai-codex': 'Codex',
+  'antigravity-cli': 'Antigravity',
+};
 export type ProviderReadinessState =
   | 'checking' | 'slow' | 'ready' | 'missing' | 'signed-out' | 'stale' | 'error';
 export type ProviderReadinessErrorCause =
@@ -106,6 +120,34 @@ export function deriveCodexReadiness(
   }
 }
 
+export interface ProviderSessionReadinessInputs {
+  readonly provider: ProviderKind;
+  /** The host's row for the profile; null when the host reports none. */
+  readonly row: ProviderSessionAuthStatus | null;
+  readonly authLoaded: boolean;
+  /** A read of `auth:getAuthStatus` is running. */
+  readonly reading: boolean;
+  /** The last read failed. */
+  readonly readFailed: boolean;
+}
+
+/**
+ * Readiness of a provider-session connection from its auth-status row. The
+ * row carries no path: the CLI is found on PATH by the host.
+ */
+export function deriveProviderSessionReadiness(
+  input: ProviderSessionReadinessInputs,
+): ProviderReadinessView {
+  const { provider, row } = input;
+  if (!input.authLoaded || (input.reading && !row)) return view(provider, 'checking');
+  if (input.readFailed || !row) return view(provider, 'error', null, null, null, 'local', 'binary');
+  const version = row.version ?? null;
+  if (!row.installed) return view(provider, 'missing');
+  return row.authenticated
+    ? view(provider, 'ready', null, version, 'installed')
+    : view(provider, 'signed-out', null, version, 'installed');
+}
+
 export type SelectionView =
   | { readonly kind: 'loading' | 'unreadable' | 'not-confirmed' }
   | { readonly kind: ProviderKind }
@@ -125,6 +167,8 @@ export function deriveSelection(input: SelectionInputs): SelectionView {
   if (input.authMethod === 'thirdParty' && input.providerId === 'openai-codex') {
     return { kind: 'openai-codex' };
   }
+  const session = PROVIDER_SESSION_KINDS.find((kind) => kind === input.providerId);
+  if (input.authMethod === 'thirdParty' && session) return { kind: session };
   return { kind: 'other', name: input.authMethod === 'apiKey'
     ? 'Anthropic API key'
     : input.availableProviders.find((entry) => entry.id === input.providerId)?.name ?? input.providerId };
@@ -141,15 +185,20 @@ export function deriveChosen(
   selection: SelectionView,
   claude: ProviderReadinessView,
   codex: ProviderReadinessView,
+  sessions: Partial<Record<ProviderKind, ProviderReadinessView>> = {},
 ): ChosenConnectionView {
-  const provider = selection.kind === 'claude-cli' || selection.kind === 'openai-codex'
-    ? selection.kind : null;
+  const provider = Object.hasOwn(PROVIDER_NAMES, selection.kind)
+    ? (selection.kind as ProviderKind) : null;
+  const readiness: Partial<Record<ProviderKind, ProviderReadinessView>> = {
+    ...sessions,
+    'claude-cli': claude,
+    'openai-codex': codex,
+  };
   return {
     selection,
     provider,
-    name: provider === 'claude-cli' ? 'Claude Code'
-      : provider === 'openai-codex' ? 'Codex'
+    name: provider ? PROVIDER_NAMES[provider]
       : selection.kind === 'other' ? selection.name : 'Connection',
-    readiness: provider === 'claude-cli' ? claude : provider === 'openai-codex' ? codex : null,
+    readiness: provider ? readiness[provider] ?? null : null,
   };
 }

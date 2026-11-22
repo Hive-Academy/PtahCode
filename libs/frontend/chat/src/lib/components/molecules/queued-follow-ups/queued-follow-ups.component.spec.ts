@@ -56,10 +56,10 @@ describe('QueuedFollowUpsComponent', () => {
     store = TestBed.inject(QueuedFollowUpStore);
   });
 
-  it('renders nothing without items, and reconciles the session view on open', () => {
+  it('renders nothing without items, and leaves reconciling to the chat view', () => {
     const fixture = render();
     expect(fixture.nativeElement.querySelector('section')).toBeNull();
-    expect(followUps.reconcile).toHaveBeenCalledWith('tab-1', S1);
+    expect(followUps.reconcile).not.toHaveBeenCalled();
   });
 
   it('lists only this tab and session as text, with a status per item', () => {
@@ -88,7 +88,7 @@ describe('QueuedFollowUpsComponent', () => {
     );
   });
 
-  it('shows Send now only for a Codex session and only for a queued item', async () => {
+  it('shows the immediate action on every card, enabled only once the backend holds it', async () => {
     store.add(entry('a'));
     store.add(entry('b', { phase: 'held' }));
     let fixture = render();
@@ -101,13 +101,27 @@ describe('QueuedFollowUpsComponent', () => {
     fixture = render();
     const buttons = fixture.nativeElement.querySelectorAll(
       '[data-testid="queued-follow-up-send-now"]',
-    );
-    expect(buttons.length).toBe(1);
+    ) as NodeListOf<HTMLButtonElement>;
+    expect(buttons.length).toBe(2);
+    expect(buttons[0].disabled).toBe(false);
+    expect(buttons[0].textContent).toContain('Send now');
+    expect(buttons[1].disabled).toBe(true);
+    expect(buttons[1].title).toBe('Waiting to queue');
     buttons[0].click();
     await fixture.whenStable();
+    expect(followUps.sendNow).toHaveBeenCalledTimes(1);
     expect(followUps.sendNow).toHaveBeenCalledWith(
       expect.objectContaining({ clientMessageId: 'a' }),
     );
+  });
+
+  it('renders the full message text on the card, not a 100-character preview', () => {
+    const long = 'x'.repeat(240);
+    store.add(entry('a', { content: long }));
+    const fixture = render();
+    const card = fixture.nativeElement.querySelector('[data-testid="queued-follow-up-item"]');
+    expect(card.textContent).toContain(long);
+    expect(card.textContent).toContain('Queued');
   });
 
   it('labels Claude Send now as Interrupt & send with an accessible preview', () => {

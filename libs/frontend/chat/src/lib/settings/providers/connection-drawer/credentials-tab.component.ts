@@ -13,6 +13,7 @@ import {
 } from '@ptah-extension/core';
 import {
   getAnthropicProvider,
+  isProviderSessionProviderId,
   type AuthCancelDraftVerificationParams, type AuthCancelDraftVerificationResult,
   type AuthVerifyDraftConnectionParams, type AuthVerifyDraftConnectionResult, type KimiCodeLoginState,
   type ProbeFailureReason,
@@ -131,6 +132,20 @@ function probeResultText(result: AuthVerifyDraftConnectionResult): string {
   template: `
     <div class="space-y-4 text-sm" data-testid="connection-credentials">
       @switch (view()) {
+        @case ('provider-session') {
+          <!-- A provider session (Antigravity) signs in through its own CLI; Ptah stores no credential. -->
+          <div class="space-y-[var(--ptah-gap-controls)] rounded border border-base-300 bg-base-200 p-[var(--ptah-space-3)]" data-testid="credentials-provider-session">
+            <p class="font-semibold text-base-content">CLI sign-in session</p>
+            <p class="flex items-center gap-[var(--ptah-gap-inline)] text-xs text-base-content" data-testid="credentials-provider-session-state">
+              <span class="h-2 w-2 rounded-full" [class.bg-success]="connection().configured"
+                [class.bg-warning]="!connection().configured" aria-hidden="true"></span>
+              {{ connection().configured ? connection().name + ' is signed in on this machine.' : connection().name + ' is not ready. Install it or sign in, then choose Check again.' }}
+            </p>
+            <p class="text-xs text-base-content-muted">Sign-in is managed by the {{ connection().name }} CLI. No API key is stored on this machine. It runs as a chat and agent runtime only.</p>
+            <button type="button" ptahButton [busy]="busy() || externalBusy()" (click)="externalActionRequested.emit('cli-check')"
+              data-testid="credentials-provider-session-check">{{ externalBusy() ? 'Checking…' : 'Check again' }}</button>
+          </div>
+        }
         @case ('cli') {
           <div class="space-y-2 rounded border border-base-300 bg-base-200 p-3" data-testid="credentials-cli">
             <p class="font-semibold text-base-content">CLI subscription session</p>
@@ -460,6 +475,7 @@ export class CredentialsTabComponent {
     if (connection.id === 'github-copilot') return 'copilot';
     if (connection.id === 'openai-codex') return 'codex';
     if (connection.id === 'kimi-code') return 'kimi-code';
+    if (isProviderSessionProviderId(connection.id)) return 'provider-session';
     switch (this.kind()) {
       case 'claude-cli': return 'cli';
       case 'oauth': return 'oauth';

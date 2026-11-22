@@ -653,6 +653,40 @@ describe('LlmRpcHandlers', () => {
     });
   });
 
+  describe('provider-session entries (Antigravity)', () => {
+    it('are not listed by llm:getProviderStatus', async () => {
+      const h = makeHarness();
+      h.handlers.register();
+      const result = await call<{ providers: Array<{ name: string }> }>(
+        h,
+        'llm:getProviderStatus',
+      );
+      expect(result.providers.map((p) => p.name)).not.toContain('antigravity-cli');
+    });
+
+    it('refuse a key, a base URL and the internal default provider', async () => {
+      const h = makeHarness();
+      h.handlers.register();
+      const refused = expect.objectContaining({
+        success: false,
+        error: expect.stringContaining("cannot serve Ptah's internal model calls"),
+      });
+      await expect(
+        call(h, 'llm:setApiKey', { provider: 'antigravity-cli', apiKey: 'k'.repeat(30) }),
+      ).resolves.toEqual(refused);
+      await expect(
+        call(h, 'llm:setDefaultProvider', { provider: 'antigravity-cli' }),
+      ).resolves.toEqual(refused);
+      await expect(
+        call(h, 'llm:setProviderBaseUrl', {
+          provider: 'antigravity-cli',
+          baseUrl: 'https://example.com',
+        }),
+      ).resolves.toEqual(refused);
+      expect(h.configManager.set).not.toHaveBeenCalled();
+    });
+  });
+
   describe('llm:setDefaultModel', () => {
     it('writes the model under the provider-scoped config key', async () => {
       const h = makeHarness();

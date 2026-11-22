@@ -1,13 +1,15 @@
 /**
  * Pure view model of the inspector AGENTS list: one row per agent (the
  * Orchestrator included) with model, tokens (In / out in the tooltip), cost
- * and status. A figure nobody reported renders `—`, never 0.
+ * and status. A figure nobody reported renders `—`, never 0; a cost whose
+ * model has no published rate renders "Not priced".
  */
 import {
   AGENT_KIND_LABEL,
   agentAccessibleLabel,
   formatCost,
   formatTokenCount,
+  NOT_PRICED,
   type AgentStatusWord,
 } from '@ptah-extension/chat-ui';
 import { formatDuration } from '@ptah-extension/ui';
@@ -56,6 +58,8 @@ export interface AgentUsageFigures {
   readonly tokens: number | null;
   readonly tokensPartial: boolean;
   readonly cost: number | null;
+  /** A null `cost` is a model without a published rate: "Not priced". */
+  readonly costNotPriced?: boolean;
   readonly costPartial: boolean;
   /** Estimated lane cost (`~$`) rather than a reported session cost. */
   readonly costEstimated: boolean;
@@ -93,7 +97,7 @@ function tokensText(value: number | null, partial: boolean): string | null {
 }
 
 function costText(usage: AgentUsageFigures): string | null {
-  if (!finite(usage.cost)) return null;
+  if (!finite(usage.cost)) return usage.costNotPriced ? NOT_PRICED : null;
   return `${usage.costPartial ? '≥ ' : ''}${usage.costEstimated ? '~' : ''}${formatCost(usage.cost)}`;
 }
 
@@ -127,6 +131,8 @@ export function agentListTotal(rows: readonly AgentListRow[]): AgentListTotal {
   const tokensValue = tokenCount
     ? (tokensText(tokens, tokensPartial) ?? NOT_REPORTED_VALUE)
     : NOT_REPORTED_VALUE;
+  const allNotPriced =
+    rows.length > 0 && rows.every((row) => row.usage.costNotPriced === true);
   const costValue = costCount
     ? (costText({
         tokens: null,
@@ -137,7 +143,9 @@ export function agentListTotal(rows: readonly AgentListRow[]): AgentListTotal {
         input: null,
         output: null,
       }) ?? NOT_REPORTED_VALUE)
-    : NOT_REPORTED_VALUE;
+    : allNotPriced
+      ? NOT_PRICED
+      : NOT_REPORTED_VALUE;
   const title = `Total of ${rows.length} agents · ${rows.length - tokenCount} without token data · ${rows.length - costCount} without cost data`;
   return {
     tokens: tokensValue,
@@ -169,7 +177,13 @@ export function agentListRow(input: AgentRowInput): AgentListRow {
     tokens === null
       ? 'Tokens not reported'
       : `${tokens} tokens${inOut === null ? '' : ` (${inOut})`}`
-  }; ${cost === null ? 'Cost not reported' : `cost ${cost}`}`;
+  }; ${
+    cost === null
+      ? 'Cost not reported'
+      : cost === NOT_PRICED
+        ? 'Cost not priced'
+        : `cost ${cost}`
+  }`;
   const usageLabel = input.name ? `${name}. ${usageFacts}` : usageFacts;
   // The second line shows a model only when one is known (it has a title).
   const model =

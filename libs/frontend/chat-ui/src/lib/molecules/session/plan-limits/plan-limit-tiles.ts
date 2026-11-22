@@ -19,6 +19,7 @@ import {
   ownerDisplayLabel,
   ownerKeySuffix,
   PLAN_LIMIT_SOURCE_LABELS,
+  planLimitReasonLabel,
   resetPassage,
   usedPercent,
   windowObservedAt,
@@ -268,18 +269,49 @@ function statusTiles(
     ];
   }
   if (snapshot.status === 'available' || windowCount > 0) return [];
-  const reason =
-    snapshot.unavailableReason === 'no-open-session'
-      ? 'no open session'
-      : snapshot.status;
+  if (snapshot.unavailableReason === 'no-open-session') {
+    return [
+      {
+        ...unavailableTile(id, 'Usage', 'no open session', [
+          'Plan usage could not be read (no open session).',
+        ]),
+        ...caption,
+      },
+    ];
+  }
+  const cause = planUnavailableCause(snapshot);
   return [
     {
-      ...unavailableTile(id, 'Usage', reason, [
-        `Plan usage could not be read (${reason}).`,
+      ...unavailableTile(id, 'Usage', cause, [
+        `Plan usage could not be read: ${cause}.`,
       ]),
       ...caption,
     },
   ];
+}
+
+/** A sentence for a window-less owner status, never the raw status value. */
+export function planStatusSentence(status: string): string {
+  const sentences = new Map([
+    ['unsupported-config', 'This configuration does not support plan usage'],
+    ['provider-unsupported', 'This provider does not report plan usage'],
+    ['cli-unavailable', 'The CLI is unavailable'],
+    ['cli-version-unsupported', 'This CLI version does not support plan usage'],
+    ['service-unavailable', 'The usage service is unavailable'],
+  ]);
+  return sentences.get(status) ?? 'The latest usage could not be retrieved';
+}
+
+/**
+ * Why an owner has no plan windows: its typed `statusReason` in the
+ * dashboard's words ("Antigravity CLI (agy) not found"), else the sentence
+ * for its status.
+ */
+export function planUnavailableCause(snapshot: PlanLimitOwnerSnapshot): string {
+  return (
+    planLimitReasonLabel(snapshot.statusReason, snapshot.owner.providerId) ??
+    planStatusSentence(snapshot.status)
+  );
 }
 
 function unavailableTile(

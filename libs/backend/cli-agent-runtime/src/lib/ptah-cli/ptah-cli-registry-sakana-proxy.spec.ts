@@ -225,6 +225,19 @@ describe('PtahCliRegistry.spawnAgent — Sakana proxy lifecycle', () => {
     expect(env?.ANTHROPIC_AUTH_TOKEN).toBe('sakana-proxy-token');
   });
 
+  it('checks the original resume owner before the SDK query and cleans up on refusal', async () => {
+    const harness = buildHarness(SAKANA_CONFIG);
+    const checkResumeOwner = jest.fn(() => { throw new Error('Ptah watchdog paused new work.'); });
+
+    await expect(harness.registry.spawnAgent(SAKANA_CONFIG.id, 'fresh handoff', {
+      checkResumeOwner,
+    })).rejects.toThrow('Ptah watchdog paused new work.');
+
+    expect(checkResumeOwner).toHaveBeenCalledTimes(1);
+    expect(harness.getCapturedEnv()).toBeUndefined();
+    expect(proxyStop).toHaveBeenCalledTimes(1);
+  });
+
   it('stops the proxy when the spawn stream loop resolves', async () => {
     const harness = buildHarness(SAKANA_CONFIG);
 

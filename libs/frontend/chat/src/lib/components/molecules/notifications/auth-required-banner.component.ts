@@ -7,6 +7,7 @@ import {
 } from '@angular/core';
 import { LucideAngularModule, KeyRound, X } from 'lucide-angular';
 
+import { isProviderSessionProviderId } from '@ptah-extension/shared';
 import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
 let nextId = 0;
 
@@ -73,7 +74,8 @@ let nextId = 0;
           }
           <button
             type="button"
-            ptahButton variant="primary" size="xs"
+            ptahButton variant="primary" size="xs" [busy]="reauthBusy()"
+            [disabled]="reauthBusy()"
             (click)="reauth.emit()"
             [attr.aria-label]="reauthLabel()"
           >
@@ -107,6 +109,8 @@ export class AuthRequiredBannerComponent {
   readonly carryOverProvider = input<string | null>(null);
   /** A carry-over for this banner's tab or session is starting. */
   readonly carryOverBusy = input<boolean>(false);
+  /** The re-authenticate action is running (a provider session's "Check again"). */
+  readonly reauthBusy = input<boolean>(false);
 
   /** User asked to re-authenticate. */
   readonly reauth = output<void>();
@@ -119,11 +123,14 @@ export class AuthRequiredBannerComponent {
   protected readonly disclosureId =
     `auth-required-carry-over-disclosure-${nextId++}`;
 
-  protected readonly reauthLabel = computed(() =>
-    this.providerId() === 'openai-codex'
-      ? 'Re-authenticate in terminal'
-      : 'Open Settings',
-  );
+  /** Provider sessions sign in through their own CLI, so their action re-reads the status. */
+  protected readonly reauthLabel = computed(() => {
+    const providerId = this.providerId();
+    if (providerId === 'openai-codex') return 'Re-authenticate in terminal';
+    return providerId && isProviderSessionProviderId(providerId)
+      ? 'Check again'
+      : 'Open Settings';
+  });
 
   protected readonly KeyRoundIcon = KeyRound;
   protected readonly XIcon = X;

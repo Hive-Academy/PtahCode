@@ -8,6 +8,7 @@ import {
   PtahAlertComponent, PtahBadgeDirective, PtahButtonDirective, PtahDescriptionItemComponent, PtahDescriptionListComponent,
   PtahSkeletonComponent, type PtahBadgeTone,
 } from '@ptah-extension/ui';
+import { mainAgentDefaultModelLabel } from './main-agent-default-model-label';
 
 type MainAgentTone = 'success' | 'warning' | 'neutral';
 
@@ -142,13 +143,13 @@ export class MainAgentSectionComponent {
     const state = route.status === 'error' ? 'error' : route.status === 'ready' && route.data ? 'ready' : 'loading';
     const data = route.data;
     const driver = data && data.driverProviderId && data.route !== 'unresolved' ? data.driverProviderId : null;
-    const model = !data ? '' : data.resolvedModel.kind === 'model' ? data.resolvedModel.id
-      : data.resolvedModel.kind === 'tier' ? `${data.resolvedModel.tier} tier` : 'Default (chosen by Claude)';
-    const effortText = effort.status === 'ready' ? effort.data?.effort ?? 'Provider default' : '…';
-    const tone: MainAgentTone = !driver ? 'neutral' : data?.ready ? 'success' : 'warning';
     const provider = driver
       ? (this.state.connections().data?.find((entry) => entry.id === driver)?.name ?? driver)
       : null;
+    const model = !data ? '' : data.resolvedModel.kind === 'model' ? data.resolvedModel.id
+      : data.resolvedModel.kind === 'tier' ? `${data.resolvedModel.tier} tier` : mainAgentDefaultModelLabel(driver, provider);
+    const effortText = effort.status === 'ready' ? effort.data?.effort ?? 'Provider default' : '…';
+    const tone: MainAgentTone = !driver ? 'neutral' : data?.ready ? 'success' : 'warning';
     return {
       state, tone, model, provider, modelIsId: data?.resolvedModel.kind === 'model',
       status: !driver ? 'Not set' : data?.ready ? 'Active' : 'Needs attention',

@@ -2,7 +2,8 @@
  * Host side of the provider-session main chat (Antigravity, Grok, OpenCode):
  * the `ProviderSessionChatPorts` the agent-sdk adapter is built from, over
  * the host's {@link ProviderSessionPool}. Mirrors `codex-host`: preparation
- * through the chat runtime profile service, streaming through the chat
+ * through the chat runtime profile service plus the session's Ptah context
+ * (`provider-session-start-options.ts`), streaming through the chat
  * broadcaster, identity through the session metadata store. Electron binds
  * it to `SDK_TOKENS.PROVIDER_SESSION_CHAT_PORTS` (P8).
  */
@@ -29,10 +30,18 @@ import type { ChatStreamBroadcaster } from '../streaming/chat-stream-broadcaster
 import { createProviderSessionApprovalPresentation } from './provider-session-approval-presentation';
 import type { ProviderSessionOpenRequests } from './provider-session-open-request';
 import type { ProviderSessionPool } from './provider-session-pool';
+import {
+  createProviderSessionStartOptions,
+  type ProviderSessionStartOptionsDeps,
+} from './provider-session-start-options';
 
 export interface ProviderSessionChatHostPortsDeps
-  extends ChatRuntimeAdmissionDeps {
-  readonly logger: Pick<Logger, 'warn' | 'error'>;
+  extends ChatRuntimeAdmissionDeps,
+    Pick<
+      ProviderSessionStartOptionsDeps,
+      'memory' | 'capabilityResolver' | 'harnessPolicySync'
+    > {
+  readonly logger: Pick<Logger, 'debug' | 'info' | 'warn' | 'error'>;
   readonly info: ProviderInfo;
   readonly pool: Pick<
     ProviderSessionPool,
@@ -60,9 +69,20 @@ export function createProviderSessionChatHostPorts(
   deps: ProviderSessionChatHostPortsDeps,
 ): ProviderSessionChatHostPorts {
   const service = createChatRuntimeProfileService(deps);
+  const startOptions = createProviderSessionStartOptions(deps);
   const tabs = new Map<SessionId, string>();
   /** Sessions with a successful acquire; only `release` forgets their routing. */
   const acquired = new Set<SessionId>();
+  /**
+   * Acquires in flight. A final release (tab closed, session ended, reset)
+   * during one marks it, so the acquire gives its process back and leaves no
+   * routing behind instead of re-adding what the release removed.
+   */
+  const inFlight = new Map<SessionId, Set<{ released: boolean }>>();
+  const markReleased = (sessionId?: SessionId) => {
+    const sets = sessionId ? [inFlight.get(sessionId)] : [...inFlight.values()];
+    for (const set of sets) for (const token of set ?? []) token.released = true;
+  };
   const tabId = (sessionId: SessionId) => tabs.get(sessionId) ?? sessionId;
   const approval = createProviderSessionApprovalPresentation({
     logger: deps.logger,
@@ -92,22 +112,33 @@ export function createProviderSessionChatHostPorts(
   return {
     info: deps.info,
     async prepare(config, sessionId) {
+      // Refused before anything resolves or spawns.
+      startOptions.check(config);
       const stored = sessionId ? await storedBinding(sessionId) : undefined;
       const execution = await service.prepare(config, stored?.identity);
       if (execution.runtime !== 'provider-session')
         throw new ProviderSessionChatAdapterError('unavailable', 'prepare');
+      const open = await startOptions.resolve(config, {
+        workspacePath: execution.seed.workspacePath,
+      });
       return {
         seed: execution.seed,
         ...(stored ? { resume: { nativeSessionId: stored.nativeSessionId } } : {}),
+        open,
       };
     },
     async acquire(request, signal) {
       const { sessionId, seed } = request;
+      const token = { released: false };
+      const tokens = inFlight.get(sessionId) ?? new Set();
+      tokens.add(token);
+      inFlight.set(sessionId, tokens);
       // A failed open of a session the pool holds nothing for leaves no
       // routing state behind (the adapter never releases an id it never got).
       if (request.tabId) tabs.set(sessionId, request.tabId);
       try {
-        const poolRequest = await deps.openRequests.request({
+        // Builds nothing yet: a live entry is reused without CLI detection.
+        const poolRequest = deps.openRequests.request({
           sessionId,
           profile: seed.profile,
           workspacePath: seed.workspacePath,
@@ -115,22 +146,34 @@ export function createProviderSessionChatHostPorts(
             ? { nativeSessionId: request.resume.nativeSessionId }
             : {}),
           ...(seed.model ? { model: seed.model } : {}),
+          ...(request.open ? { open: request.open } : {}),
         });
         // Before the open: the agent may ask for approval while it starts.
         deps.openRequests.attachApprovals(sessionId, request.approvals);
         const live = await deps.pool.acquire(sessionId, poolRequest, signal);
+        if (token.released) {
+          // Closed while it opened: the release ran before the pool held it.
+          await deps.pool.release(sessionId, 'tab-closed');
+          throw new ProviderSessionChatAdapterError('cancelled', 'acquire');
+        }
         acquired.add(sessionId);
         return live;
       } catch (error) {
-        if (!acquired.has(sessionId)) {
+        if (!acquired.has(sessionId) || token.released) {
+          acquired.delete(sessionId);
           deps.openRequests.detachApprovals(sessionId);
           tabs.delete(sessionId);
         }
         throw error;
+      } finally {
+        tokens.delete(token);
+        if (tokens.size === 0 && inFlight.get(sessionId) === tokens)
+          inFlight.delete(sessionId);
       }
     },
     holds: (sessionId, session) => deps.pool.holds(sessionId, session),
     async release(sessionId, reason) {
+      if (reason !== 'broken') markReleased(sessionId);
       try {
         await deps.pool.release(sessionId, reason);
       } finally {
@@ -144,6 +187,7 @@ export function createProviderSessionChatHostPorts(
       }
     },
     async releaseAll() {
+      markReleased();
       try {
         await deps.pool.releaseAll();
       } finally {

@@ -59,6 +59,7 @@ import {
 } from '../../test-utils/kimi-code-fakes';
 import { ConnectionCheckRecorder } from '../utils/connection-check-recorder';
 import { AuthRpcHandlers } from './auth-rpc.handlers';
+import type { ProviderSessionAuthStatusProbe } from '../chat/provider-session-host/provider-session-auth-status';
 
 const KEY = 'FAKE0KEY1QQQ2WWW3ZZZ4XXX';
 
@@ -70,6 +71,7 @@ interface Harness {
 
 function makeHarness(
   verified: Partial<AuthVerifyDraftConnectionResult> = {},
+  providerSessionAuth?: ProviderSessionAuthStatusProbe,
 ): Harness {
   const rpcHandler = createMockRpcHandler();
   const store = new Map<string, unknown>([['authMethod', 'apiKey']]);
@@ -145,6 +147,12 @@ function makeHarness(
     scopeResolver as unknown as WorkspaceScopeResolver,
     { verify, cancel: jest.fn() } as unknown as DraftVerificationService,
     recorder,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    providerSessionAuth,
   );
   handlers.register();
   // The route composes this catalogue read; a real host registers it in LlmRpcHandlers.
@@ -413,5 +421,37 @@ describe('a key change forgets the last check (revise round 1, S-1)', () => {
 
     expect(h.recorder.get('kimi-code')).toBeUndefined();
     expect(await routeProvider(h, 'kimi-code')).not.toHaveProperty('lastCheck');
+  });
+});
+
+describe('auth:getEffectiveRoute - provider-session entries', () => {
+  // Live test of PR #1462: Antigravity is not in the API-key catalogue, so
+  // the route never listed it and the main-agent picker could not offer it.
+  const probe = (row: { installed: boolean; authenticated: boolean }) =>
+    ({
+      probe: jest.fn(async () => ({
+        antigravity: { ...row, signInHint: 'Run agy once.' },
+      })),
+    }) as unknown as ProviderSessionAuthStatusProbe;
+
+  it('lists an installed, signed-in profile as a connected cli route', async () => {
+    const h = makeHarness({}, probe({ installed: true, authenticated: true }));
+    expect(await routeProvider(h, 'antigravity-cli')).toMatchObject({
+      id: 'antigravity-cli',
+      type: 'cli',
+      status: 'connected',
+    });
+  });
+
+  it('reports a signed-out profile as unauthenticated', async () => {
+    const h = makeHarness({}, probe({ installed: true, authenticated: false }));
+    expect((await routeProvider(h, 'antigravity-cli'))?.status).toBe(
+      'unauthenticated',
+    );
+  });
+
+  it('omits the entry when the host admits no provider-session profile', async () => {
+    const h = makeHarness();
+    expect(await routeProvider(h, 'antigravity-cli')).toBeUndefined();
   });
 });

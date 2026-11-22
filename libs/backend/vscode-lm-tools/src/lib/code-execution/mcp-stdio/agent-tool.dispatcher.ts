@@ -910,10 +910,14 @@ export class AgentToolDispatcher {
         { tool: 'agent_report', issues: parsed.issues },
       );
     }
-    // Identity from the transport, never from the arguments. No id means the
-    // report is refused, not attributed to a guess.
+    // Identity from the transport, never from the arguments. A lane id wins;
+    // without one, the launcher-provided host session id reports as a child
+    // session (the router accepts only a registered child). No id at all means
+    // the report is refused, not attributed to a guess.
     const callerAgentId = this.callerAgentId;
-    if (callerAgentId === undefined || callerAgentId.length === 0) {
+    const callerSessionId = this.callerSessionId?.trim() || undefined;
+    const hasAgentId = callerAgentId !== undefined && callerAgentId.length > 0;
+    if (!hasAgentId && callerSessionId === undefined) {
       const refusal = {
         delivered: false,
         reason: 'unattributed-caller' as const,
@@ -926,14 +930,17 @@ export class AgentToolDispatcher {
       );
     }
     try {
-      const delivery = await this.ptahAPI.agent.report({
-        agentId: callerAgentId,
-        message: parsed.data.message,
-        summary: parsed.data.summary,
-        ...(parsed.data.final !== undefined
-          ? { final: parsed.data.final }
-          : {}),
-      });
+      const { message, summary, final } = parsed.data;
+      const delivery = await this.ptahAPI.agent.report(
+        hasAgentId
+          ? {
+              agentId: callerAgentId,
+              message,
+              summary,
+              ...(final !== undefined ? { final } : {}),
+            }
+          : { childSessionId: callerSessionId as string, message, summary },
+      );
       return await this.toolSuccess(
         request,
         'agent_report',
@@ -946,6 +953,13 @@ export class AgentToolDispatcher {
           ...(delivery.reason !== undefined ? { reason: delivery.reason } : {}),
           ...(delivery.parentSessionId !== undefined
             ? { parentSessionId: delivery.parentSessionId }
+            : {}),
+          ...(delivery.queued !== undefined ? { queued: delivery.queued } : {}),
+          ...(delivery.receiptId !== undefined
+            ? { receiptId: delivery.receiptId }
+            : {}),
+          ...(delivery.receiptState !== undefined
+            ? { receiptState: delivery.receiptState }
             : {}),
         },
       );

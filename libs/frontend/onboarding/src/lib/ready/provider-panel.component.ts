@@ -156,6 +156,9 @@ const CHIP: Record<
             ><br />Yes. Ptah's bundled copy is used.
           } @else if (view().path) {
             <span class="font-mono">{{ view().path }}</span>
+          } @else if (view().source === 'installed') {
+            Yes. <span class="font-mono">{{ commandName() }}</span> is on your
+            PATH.
           } @else {
             Unknown
           }
@@ -261,6 +264,35 @@ const CHIP: Record<
                 </details>
               </div>
             }
+          }
+        } @else if (view().provider === 'antigravity-cli') {
+          @if (view().state === 'signed-out') {
+            <div
+              class="mt-5 border-t border-base-300 pt-4"
+              data-testid="ready-sign-in-block"
+            >
+              <h3 class="font-semibold">Sign in to {{ name() }}</h3>
+              <p class="mt-1 text-sm text-base-content-muted">
+                Run this once in a terminal and follow the prompts to sign in
+                with your Google account. Then press Re-check.
+              </p>
+              <p class="mt-3 text-xs text-base-content-muted">Terminal</p>
+              <ptah-command-copy-row
+                class="mt-1"
+                [command]="commandName()"
+                copyLabel="Copy Antigravity sign-in command"
+              />
+            </div>
+          } @else if (view().state === 'error') {
+            <div
+              class="mt-5 border-t border-base-300 pt-4"
+              data-testid="ready-error-block"
+            >
+              <h3 class="font-semibold">Ptah could not check {{ name() }}</h3>
+              <p class="text-sm text-base-content-muted">
+                This is not the same as being signed out. Press Re-check.
+              </p>
+            </div>
           }
         } @else {
           @if (showCodexSignIn()) {
@@ -385,7 +417,7 @@ export class ProviderPanelComponent {
     if (v.state === 'ready')
       return v.provider === 'claude-cli'
         ? 'Yes. Your Claude account is connected.'
-        : 'Yes. Codex is signed in.';
+        : `Yes. ${name} is signed in.`;
     if (v.state === 'missing') return `Install ${name} first.`;
     if (v.state === 'signed-out') return `No. Sign in to use ${name}.`;
     if (v.state === 'stale')

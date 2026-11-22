@@ -171,3 +171,13 @@ describe('childOutcomeOf (TASK_2026_932)', () => {
     });
   });
 });
+
+it('omits a terminal outcome for a live paused child', () => {
+  expect(childOutcomeOf({ paused: true })).toBeUndefined();
+});
+
+it.each(['no-activity-timeout', 'provider-no-response'] as const)(
+  'uses the Ptah watchdog message for %s',
+  (endCause) => expect(childOutcomeOf({ terminalStatus: 'failed', endCause }))
+    .toMatchObject({ kind: 'failed', cause: endCause, reason: expect.stringContaining('Ptah watchdog ended the turn') }),
+);

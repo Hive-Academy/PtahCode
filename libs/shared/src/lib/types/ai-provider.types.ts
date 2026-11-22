@@ -18,6 +18,13 @@ export type SessionEndCause =
   | 'workspace-close'
   | 'compaction-abort'
   | 'no-activity-timeout'
+  /**
+   * The provider sent no response inside a confirmed open turn (TASK_2026_2297_920a P2).
+   * Replaces `no-activity-timeout` for new watchdog ends; the old value stays decodable.
+   */
+  | 'provider-no-response'
+  /** The provider input channel closed mid-turn; the turn was ended for recovery. */
+  | 'provider-input-closed'
   | 'host-shutdown'
   | 'unknown';
 
@@ -26,9 +33,16 @@ export type SessionEndCause =
  *
  * `codex-app-server` labels the native Codex App Server chat adapter. It
  * matches the `runtime` value of a native Codex execution profile.
+ * `provider-session` labels the provider-session chat adapter (ACP agents such
+ * as Antigravity) the same way; the session's own provider (for example
+ * `antigravity-cli`) stays on its runtime identity and metadata.
  */
 export type ProviderId =
-  'claude-cli' | 'vscode-lm' | 'ptah-cli' | 'codex-app-server';
+  | 'claude-cli'
+  | 'vscode-lm'
+  | 'ptah-cli'
+  | 'codex-app-server'
+  | 'provider-session';
 
 /**
  * Provider Status Types
@@ -497,7 +511,8 @@ export function isValidProviderId(id: string): id is ProviderId {
     id === 'claude-cli' ||
     id === 'vscode-lm' ||
     id === 'ptah-cli' ||
-    id === 'codex-app-server'
+    id === 'codex-app-server' ||
+    id === 'provider-session'
   );
 }
 
@@ -509,6 +524,7 @@ export const PROVIDER_IDS: readonly ProviderId[] = [
   'vscode-lm',
   'ptah-cli',
   'codex-app-server',
+  'provider-session',
 ] as const;
 
 export const DEFAULT_PROVIDER_CAPABILITIES: ProviderCapabilities = {

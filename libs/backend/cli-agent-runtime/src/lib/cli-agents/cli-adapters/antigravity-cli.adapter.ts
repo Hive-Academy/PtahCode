@@ -73,6 +73,11 @@ import { readFile, writeFile, mkdir } from 'fs/promises';
 import { homedir } from 'os';
 import { join } from 'path';
 import {
+  readCachedAgySignIn,
+  type AgySignInState,
+} from '@ptah-extension/auth-providers';
+
+import {
   createMcpFacet,
   PTAH_SPAWN_MCP_KEY,
   type IHarnessMcpFacet,
@@ -459,12 +464,15 @@ export class AntigravityCliAdapter implements CliAdapter {
 
   /**
    * @param acp - ACP seams for specs and live recordings; production passes none.
+   * @param readSignIn - Sign-in reader (specs); defaults to the shared `readCachedAgySignIn`
+   *   behind the shared 30 s cache.
    */
   constructor(
     private readonly spawner?: IProcessSpawner,
     private readonly streamJsonProbe?: (binary: string) => Promise<boolean>,
     private readonly logger?: Logger,
     private readonly acp: AntigravityAcpSeam = {},
+    private readonly readSignIn: () => Promise<AgySignInState> = readCachedAgySignIn,
   ) {}
 
   async detect(): Promise<CliDetectionResult> {
@@ -499,6 +507,29 @@ export class AntigravityCliAdapter implements CliAdapter {
         installed: false,
         messagingMode: bestMessagingCapability(this.capabilities()),
       };
+    }
+  }
+
+  /**
+   * Whether agy's own sign-in is usable, from its keyring entry or an
+   * environment credential (see `readAgySignIn` in auth-providers). Model-free and never
+   * starts the agent. A state that cannot be read (Linux, a failed or slow
+   * keyring query) answers `true`, the previous optimistic behaviour: the
+   * auth row has no "unknown" value, and a missing sign-in still surfaces as
+   * `auth-required` on open. Never reads or logs the credential itself.
+   */
+  async ensureTokensFresh(): Promise<boolean> {
+    try {
+      const state = await this.readSignIn();
+      if (state === 'unknown')
+        this.logger?.debug('[AntigravityCliAdapter] agy sign-in state unknown; assuming signed in');
+      return state !== 'signed-out';
+    } catch (error: unknown) {
+      // degradation-audit: reported - logged at warn; an unreadable keyring keeps the optimistic answer, and open reports auth-required
+      this.logger?.warn('[AntigravityCliAdapter] agy sign-in check failed; assuming signed in', {
+        error: error instanceof Error ? error.name : 'unknown',
+      });
+      return true;
     }
   }
 
@@ -1039,12 +1070,11 @@ export class AntigravityCliAdapter implements CliAdapter {
    * Put the `ptah` key back the way this run found it, so no stale localhost
    * port is left pointing at a closed server.
    *
-   * **RESTORE, not delete.** It used to remove the key unconditionally, which
-   * was right while this adapter was the only thing that ever wrote it. It no
-   * longer is: `CodeExecutionMCP` keeps a PERSISTENT entry here for as long as
-   * its HTTP server is up, so that `agy` sessions the USER starts have Ptah
-   * tools too. An unconditional delete would silently revoke that every time a
-   * Ptah-spawned agent finished.
+   * **RESTORE, not delete.** The key may hold an entry this run did not write:
+   * a user's own `ptah` server, or a persistent entry an older Ptah left
+   * (`CodeExecutionMCP` no longer writes one, TASK_2026_2297, and its
+   * reconcile removes the leftover). An unconditional delete would drop the
+   * user's server every time a Ptah-spawned agent finished.
    *
    * Restoring needs no knowledge of who the other writer is: `prior` is
    * whatever was in the file before this run. Absent means nobody owned the

@@ -16,6 +16,7 @@ export const acpPromptUsageSchema = z
     cacheReadTokens: z.number().int().nonnegative().optional(),
     cacheWriteTokens: z.number().int().nonnegative().optional(),
     contextTokens: z.number().int().nonnegative().optional(),
+    contextWindow: z.number().int().positive().optional(),
     costUsd: z.number().finite().nonnegative().optional(),
   })
   .passthrough();
@@ -38,6 +39,7 @@ const acpStandardUsageSchema = z
 export function readAcpStandardUsage(
   usage: unknown,
   contextTokens: number | undefined,
+  contextWindow?: number,
 ): z.infer<typeof acpPromptUsageSchema> | undefined {
   const parsed = acpStandardUsageSchema.safeParse(usage);
   if (!parsed.success) return undefined;
@@ -53,6 +55,7 @@ export function readAcpStandardUsage(
       ? { cacheWriteTokens: cachedWriteTokens }
       : {}),
     ...(contextTokens === undefined ? {} : { contextTokens }),
+    ...(contextWindow === undefined ? {} : { contextWindow }),
   };
 }
 
@@ -60,6 +63,8 @@ export const acpUsageUpdateSchema = z
   .object({
     sessionUpdate: z.literal('usage_update'),
     used: z.number().int().nonnegative(),
+    /** The context window size (ACP `usage_update.size`). */
+    size: z.number().int().positive().nullish(),
     _meta: z
       .object({ usage: acpPromptUsageSchema.optional() })
       .passthrough()
@@ -157,4 +162,73 @@ export function describeExit(exit: AcpProcessExit): string {
   if (exit.code !== null) return `code ${exit.code}`;
   if (exit.signal) return `signal ${exit.signal}`;
   return 'code unknown';
+}
+
+/** One model of a session, as `AcpSession.getModels` reports it. */
+export interface AcpModelEntryShape {
+  readonly id: string;
+  readonly name?: string;
+  readonly isDefault?: boolean;
+}
+
+/**
+ * The models a session reply advertises in `models.availableModels` (agy
+ * lists the full `agy models` ids there), `currentModelId` marked default.
+ */
+export function readModels(response: unknown): readonly AcpModelEntryShape[] {
+  if (!isRecord(response) || !isRecord(response['models'])) return [];
+  const { availableModels, currentModelId } = response['models'];
+  if (!Array.isArray(availableModels)) return [];
+  return availableModels.flatMap((model: unknown): AcpModelEntryShape[] => {
+    if (!isRecord(model) || typeof model['modelId'] !== 'string') return [];
+    const id = model['modelId'];
+    return [
+      {
+        id,
+        ...(typeof model['name'] === 'string' ? { name: model['name'] } : {}),
+        ...(id === currentModelId ? { isDefault: true } : {}),
+      },
+    ];
+  });
+}
+
+/** The entries of a select config option (grouped options flattened), with names. */
+export function modelEntriesOf(
+  option: Record<string, unknown>,
+): AcpModelEntryShape[] {
+  const entries = Array.isArray(option['options']) ? option['options'] : [];
+  const toEntry = (entry: unknown): AcpModelEntryShape[] =>
+    isRecord(entry) && typeof entry['value'] === 'string'
+      ? [
+          {
+            id: entry['value'],
+            ...(typeof entry['name'] === 'string' ? { name: entry['name'] } : {}),
+          },
+        ]
+      : [];
+  return entries.flatMap((entry: unknown) =>
+    isRecord(entry) && Array.isArray(entry['options'])
+      ? entry['options'].flatMap(toEntry)
+      : toEntry(entry),
+  );
+}
+
+/**
+ * Merge two `_meta` objects one level deep, so two contributions under the
+ * same vendor key (e.g. `antigravity`) both survive. `undefined` when both
+ * are absent.
+ */
+export function mergeAcpMeta(
+  base: Record<string, unknown> | undefined,
+  extra: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (!base) return extra;
+  if (!extra) return base;
+  const merged: Record<string, unknown> = { ...base };
+  for (const [key, value] of Object.entries(extra)) {
+    const existing = merged[key];
+    merged[key] =
+      isRecord(existing) && isRecord(value) ? { ...existing, ...value } : value;
+  }
+  return merged;
 }

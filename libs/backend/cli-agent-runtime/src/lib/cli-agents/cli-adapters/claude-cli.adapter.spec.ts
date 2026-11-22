@@ -1431,3 +1431,79 @@ describe('named Claude lane certified launch boundaries', () => {
     },
   );
 });
+
+describe('ClaudeCliAdapter lane tool gate (TASK_2026_2297 P4)', () => {
+  const paused = () => ({
+    actor: 'ptah-budget' as const,
+    action: 'asked-handoff' as const,
+    reason: 'context-budget' as const,
+    nextStep: 'write-notes-and-return' as const,
+  });
+  type RunOptions = ClaudeSdkLaneRunContext['options'];
+  const preToolUse = async (options: RunOptions, toolName: string) => {
+    const results: unknown[] = [];
+    for (const matcher of options.hooks?.PreToolUse ?? []) {
+      for (const hook of matcher.hooks) {
+        results.push(
+          await hook(
+            { hook_event_name: 'PreToolUse', tool_name: toolName, tool_input: {},
+              tool_use_id: 't', session_id: 's', transcript_path: '/t', cwd: '/workspace' } as never,
+            't',
+            { signal: new AbortController().signal },
+          ),
+        );
+      }
+    }
+    return results;
+  };
+  const deniedByPtah = expect.objectContaining({
+    hookSpecificOutput: expect.objectContaining({
+      permissionDecision: 'deny',
+      permissionDecisionReason: expect.stringMatching(/^Ptah budget monitor paused new work tools/),
+    }),
+  });
+
+  it('reports honorsLaneToolGate and hands the runner gated options', async () => {
+    const f = fixture();
+    const handle = await f.adapter.runSdk({ ...f.input, laneToolGate: paused });
+    expect(handle.honorsLaneToolGate).toBe(true);
+    const options = f.run.mock.calls[0][0].options;
+    await expect(preToolUse(options, 'Bash')).resolves.toEqual([deniedByPtah]);
+    await expect(preToolUse(options, 'mcp__ptah__ptah_agent_report')).resolves.toEqual([{}]);
+    f.finish(0);
+    await handle.done;
+  });
+
+  it('leaves honorsLaneToolGate unset and adds no hook without a gate', async () => {
+    const f = fixture();
+    const handle = await f.adapter.runSdk(f.input);
+    expect(handle.honorsLaneToolGate).toBeUndefined();
+    expect(f.run.mock.calls[0][0].options.hooks?.PreToolUse).toBeUndefined();
+    f.finish(0);
+    await handle.done;
+  });
+
+  it('gates the routed ask callback installed after the builder', async () => {
+    const f = fixture();
+    const handle = await f.adapter.runSdk({ ...f.input, permission: 'ask', laneToolGate: paused });
+    const options = f.run.mock.calls[0][0].options;
+    expect(f.permissionHandler.createCallback).toHaveBeenCalled();
+    await expect(
+      options.canUseTool?.('Bash', {}, { signal: new AbortController().signal } as never),
+    ).resolves.toMatchObject({ behavior: 'deny', interrupt: false });
+    f.finish(0);
+    await handle.done;
+  });
+
+  it('keeps a yolo lane gated by the PreToolUse hook', async () => {
+    const f = fixture();
+    const handle = await f.adapter.runSdk({ ...f.input, permission: 'yolo', laneToolGate: paused });
+    const options = f.run.mock.calls[0][0].options;
+    expect(options.permissionMode).toBe('bypassPermissions');
+    expect(options.canUseTool).toBeUndefined();
+    expect(handle.honorsLaneToolGate).toBe(true);
+    await expect(preToolUse(options, 'Write')).resolves.toEqual([deniedByPtah]);
+    f.finish(0);
+    await handle.done;
+  });
+});

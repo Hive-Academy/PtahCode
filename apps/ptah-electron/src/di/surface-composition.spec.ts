@@ -539,6 +539,12 @@ describe('Electron Codex bootstrap composition', () => {
     );
     expect(coreAt).toBeLessThan(bound);
     expect(finishAt).toBeGreaterThan(bound);
+    // P8: the provider-session binding runs after Codex, before the finish.
+    const providerSessionAt = bootstrap.indexOf(
+      'providerSessionBinding = bindElectronProviderSessionChat(',
+    );
+    expect(providerSessionAt).toBeGreaterThan(bound);
+    expect(providerSessionAt).toBeLessThan(finishAt);
     expect(finishAt).toBeLessThan(
       bootstrap.indexOf('void startAgentAdapterInitialization(container)'),
     );

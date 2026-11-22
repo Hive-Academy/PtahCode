@@ -30,6 +30,7 @@
  *   Set the model explicitly to switch a resumed session.
  */
 import type { McpServer } from '@agentclientprotocol/sdk';
+import { toAcpMcpServer } from '../acp-mcp-servers';
 import { readAcpErrorDetail } from '../acp-vendor-profile';
 import type { ProviderSessionLogger } from '@ptah-extension/provider-session-contracts';
 import type {
@@ -113,25 +114,18 @@ export const grokAcpProfile: AcpVendorProfile = {
   cancelBehavior: 'await-reply',
 
   buildSpawn(options: AcpSessionOptions): AcpSpawnSpec {
-    return { args: options.permission === 'yolo'
+    // A chat never gets `--always-approve` (`AcpSessionOptions.consumer`).
+    return { args: options.permission === 'yolo' && options.consumer !== 'chat'
       ? ['agent', '--always-approve', '--no-leader', 'stdio'] : GROK_ARGS };
   },
 
   /**
-   * The caller builds the Ptah MCP attachment (scoped URL plus the lane's
-   * bearer, `buildLaneMcpAttachments` in `cli-agent-runtime`); Grok takes it
-   * as an ACP `http` entry.
+   * The caller builds the attachments (Ptah's scoped URL plus the lane's
+   * bearer, `buildLaneMcpAttachments` in `cli-agent-runtime`, and any user
+   * server); Grok takes each as the matching ACP entry, names kept.
    */
   buildMcpServers(options: AcpSessionOptions): readonly McpServer[] {
-    return (options.mcp ?? []).map((attachment) => ({
-      type: 'http' as const,
-      name: attachment.name,
-      url: attachment.url,
-      headers: attachment.headers.map((header) => ({
-        name: header.name,
-        value: header.value,
-      })),
-    }));
+    return (options.mcp ?? []).map((attachment) => toAcpMcpServer(attachment));
   },
 
   sessionConfig(options: AcpSessionOptions): readonly AcpSessionConfigEntry[] {

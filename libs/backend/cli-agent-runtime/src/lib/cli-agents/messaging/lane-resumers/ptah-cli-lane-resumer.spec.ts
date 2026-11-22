@@ -45,12 +45,14 @@ function harness(parentLevel?: (id: string | undefined) => 'plan' | undefined) {
     startedAt: '2026-11-07T00:01:00.000Z',
     cliSessionId: 'cli-session',
   };
+  const laneToolGate = jest.fn(() => undefined);
   const manager: PtahCliLaneResumerManager = {
     prepareSdkHandleSpawn: jest.fn(async () => ({
       task: 'prepared task',
       resumeSessionId: 'cli-session',
     })),
     reserveAgentId: jest.fn(() => NEW_AGENT_ID),
+    laneToolGateFor: jest.fn(() => laneToolGate),
     spawnFromSdkHandle: jest.fn(async () => spawned),
   };
   const setAgentId = jest.fn();
@@ -82,10 +84,31 @@ function harness(parentLevel?: (id: string | undefined) => 'plan' | undefined) {
     logger,
     parentLevel,
   );
-  return { handle, onSessionResolved, manager, registry, sessionMetadata, setAgentId, resumer, spawned };
+  return { handle, laneToolGate, onSessionResolved, manager, registry, sessionMetadata, setAgentId, resumer, spawned };
 }
 
 describe('PtahCliLaneResumer', () => {
+  it('hands the lane tool gate for the reserved agent id to the registry', async () => {
+    const h = harness();
+    await h.resumer.resume(info, 'continue');
+    expect(h.manager.laneToolGateFor).toHaveBeenCalledWith(NEW_AGENT_ID);
+    expect(h.registry.spawnAgent).toHaveBeenCalledWith('ptah-config', 'prepared task',
+      expect.objectContaining({ laneToolGate: h.laneToolGate }));
+  });
+  it('forwards a launch-time resume owner check even when the registry is starting a fresh handoff', async () => {
+    const h = harness();
+    const checkResumeOwner = jest.fn(() => { throw new Error('Ptah watchdog paused new work.'); });
+    jest.mocked(h.manager.prepareSdkHandleSpawn).mockResolvedValueOnce({ task: 'fresh handoff', checkResumeOwner });
+    jest.mocked(h.registry.spawnAgent).mockImplementationOnce(async (_id, _task, options) => {
+      options?.checkResumeOwner?.();
+      throw new Error('Expected a paused owner refusal');
+    });
+
+    await expect(h.resumer.resume(info, 'continue')).rejects.toThrow('Ptah watchdog paused new work.');
+    expect(checkResumeOwner).toHaveBeenCalledTimes(1);
+    expect(h.manager.spawnFromSdkHandle).not.toHaveBeenCalled();
+  });
+
   it('uses the live parent level for a registry resume', async () => {
     const h = harness((id) => id === 'parent-session' ? 'plan' : undefined);
     await h.resumer.resume({ ...info, effectivePolicy: { permission: 'yolo', network: 'allow' } }, 'continue');
@@ -133,6 +156,7 @@ describe('PtahCliLaneResumer', () => {
         resumeSessionId: 'cli-session',
         parentSessionId: 'parent-session',
         agentId: NEW_AGENT_ID,
+        laneToolGate: h.laneToolGate,
       },
     );
     expect(h.manager.spawnFromSdkHandle).toHaveBeenCalledWith(

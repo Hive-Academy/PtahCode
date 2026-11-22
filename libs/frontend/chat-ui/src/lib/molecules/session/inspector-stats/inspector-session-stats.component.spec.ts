@@ -275,4 +275,30 @@ describe(InspectorSessionStatsComponent.name, () => {
     expect(root.textContent).not.toContain('5-hour 94%');
     expect(root.querySelector('button')?.textContent ?? '').not.toContain('Plan limits');
   });
+
+  it('shows "Not priced" for an unpriced model, never "—" or $0 (issue #1459)', () => {
+    TestBed.configureTestingModule({
+      imports: [InspectorSessionStatsComponent],
+      providers: [{ provide: ModelStateService, useValue: { availableModels: signal([]) } }],
+    });
+    const fixture = TestBed.createComponent(InspectorSessionStatsComponent);
+    const snapshot = {
+      sessionId: 's', model: 'gemini-4-hydrogen-low', tokenCount: 31_660, totalCost: null,
+      pricingCoverage: 'none', costUnavailableReason: 'rate-missing',
+      tokens: { input: 31_539, output: 121, cacheRead: 0, cacheCreation: 0 },
+      messageCount: 1, status: 'ok',
+    } as unknown as NonNullable<SessionStatsInputs['snapshot']>;
+    fixture.componentRef.setInput('stats', {
+      sessionId: 's', snapshot, cache: null, liveModelStats: null,
+      compactionCount: 0, limits: null, budget: null,
+      context: { hasLive: false, known: false, percent: null, label: '—', usedTokens: null },
+      limitSummary: { state: 'none', text: null, extra: 0, source: null, fullText: null },
+    } satisfies SessionStatsInputs);
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+    const cost = root.querySelector('[aria-label="Not priced"]');
+    expect(cost?.textContent?.trim()).toBe('Not priced');
+    expect(root.querySelector('[aria-label="Cost unavailable"]')).toBeNull();
+    expect(root.querySelector('[data-testid="inspector-stats-grid"]')?.textContent).toContain('31.7k');
+  });
 });

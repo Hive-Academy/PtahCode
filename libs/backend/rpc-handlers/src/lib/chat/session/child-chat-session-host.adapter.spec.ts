@@ -112,7 +112,10 @@ interface Harness {
   order: string[];
 }
 
-function makeHarness(lifecycle: { find: jest.Mock } | null = null): Harness {
+function makeHarness(
+  lifecycle: { find: jest.Mock } | null = null,
+  followUpQueue: { stoppedSince: jest.Mock } | null = null,
+): Harness {
   const order: string[] = [];
   const broadcastMessage = jest.fn(async (type: string) => {
     order.push(`broadcast:${type}`);
@@ -144,6 +147,7 @@ function makeHarness(lifecycle: { find: jest.Mock } | null = null): Harness {
       startHandoffSession,
     } as unknown as ChatSessionService,
     lifecycle as unknown as SessionLifecycleManager | null,
+    followUpQueue,
   );
   return {
     adapter,
@@ -165,6 +169,17 @@ function chatErrorCalls(h: Harness): unknown[][] {
 }
 
 describe('ChildChatSessionHostAdapter', () => {
+  it('uses the chat stop history for the watchdog cutoff', () => {
+    const stoppedSince = jest.fn()
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(false);
+    const { adapter } = makeHarness(null, { stoppedSince });
+    expect(adapter.wasStoppedSince(CHILD_TAB, 1_000)).toBe(true);
+    expect(adapter.wasStoppedSince(CHILD_TAB, 2_000)).toBe(false);
+    expect(stoppedSince.mock.calls).toEqual([[CHILD_TAB, 1_000], [CHILD_TAB, 2_000]]);
+    expect(makeHarness().adapter.wasStoppedSince(CHILD_TAB, 1_000)).toBe(false);
+  });
+
   it('passes effort to the chat session start', async () => {
     const h = makeHarness();
     await h.adapter.startChildSession({ ...input, effort: 'high' });

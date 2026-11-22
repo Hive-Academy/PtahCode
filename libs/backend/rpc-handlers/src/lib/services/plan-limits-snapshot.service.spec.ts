@@ -65,7 +65,12 @@ function available(owner: QuotaOwnerRef): PlanLimitOwnerSnapshot {
 }
 
 function build(
-  metadata?: { get(sessionId: string): Promise<{ codexExecution?: SessionRuntimeIdentity } | null> },
+  metadata?: {
+    get(sessionId: string): Promise<{
+      codexExecution?: SessionRuntimeIdentity;
+      providerSessionExecution?: SessionRuntimeIdentity;
+    } | null>;
+  },
   ownerResolver?: { ownerForCodexHome(home?: string): QuotaOwnerRef },
 ) {
   const logger: MockLogger = createMockLogger();
@@ -306,6 +311,49 @@ describe('PlanLimitsSnapshotService', () => {
         [nativeId]: { ownerKey: ambientOwner.key },
         [otherId]: { ownerKey: null },
       } });
+  });
+
+  it('binds a provider-session (Antigravity) session to its listed CLI account (issue #1459)', async () => {
+    const agyId = SessionId.from('32345678-1234-4234-8234-123456789abc');
+    const antigravity: QuotaOwnerRef = {
+      key: 'antigravity#cli-store:d4', providerId: 'antigravity',
+      identityKind: 'cli-store', label: 'Antigravity CLI login',
+    };
+    const metadata = { get: jest.fn(async (sessionId: string) => ({
+      providerSessionExecution: {
+        version: 1 as const, sessionId: SessionId.from(sessionId),
+        runtime: 'provider-session' as const,
+        providerId: 'antigravity-cli', workspaceId: '/work',
+        providerSession: { profile: 'antigravity' as const },
+      },
+    })) };
+    const s = build(metadata, { ownerForCodexHome: jest.fn(() => CODEX) });
+    s.discoverTargets.mockResolvedValue([
+      { kind: 'known', origin: 'selected-provider', snapshot: available(CODEX) },
+      { kind: 'known', origin: 'cli-store', snapshot: available(antigravity) },
+    ]);
+    await expect(s.service.snapshot({ sessionIds: [agyId] }))
+      .resolves.toMatchObject({ sessionOwners: {
+        [agyId]: { ownerKey: antigravity.key, modelScope: null },
+      } });
+  });
+
+  it('leaves a provider-session session unresolved when its provider has no listed owner', async () => {
+    const agyId = SessionId.from('42345678-1234-4234-8234-123456789abc');
+    const metadata = { get: jest.fn(async (sessionId: string) => ({
+      providerSessionExecution: {
+        version: 1 as const, sessionId: SessionId.from(sessionId),
+        runtime: 'provider-session' as const,
+        providerId: 'antigravity-cli', workspaceId: '/work',
+        providerSession: { profile: 'antigravity' as const },
+      },
+    })) };
+    const s = build(metadata, { ownerForCodexHome: jest.fn(() => CODEX) });
+    s.discoverTargets.mockResolvedValue([
+      { kind: 'known', origin: 'selected-provider', snapshot: available(CODEX) },
+    ]);
+    await expect(s.service.snapshot({ sessionIds: [agyId] }))
+      .resolves.toMatchObject({ sessionOwners: { [agyId]: { ownerKey: null } } });
   });
 
   it('warns when native metadata lookup fails and leaves the session unresolved', async () => {

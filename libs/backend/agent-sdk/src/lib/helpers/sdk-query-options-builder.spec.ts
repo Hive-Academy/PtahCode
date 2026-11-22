@@ -422,6 +422,12 @@ describe('SdkQueryOptionsBuilder.build — file checkpointing wiring', () => {
           ? 'Start a fresh agent.'
           : undefined;
       }),
+      budgetToolDenial: jest.fn(async (toolName: string) => {
+        if (toolName === 'boom_tool') throw new Error('pause lookup failed');
+        return toolName === 'Bash'
+          ? 'Ptah budget monitor paused new work tools.'
+          : undefined;
+      }),
       logBudgetSendMessageHookDenial: jest.fn(
         (_sessionId: string, _tabId: unknown, toolUseID: string) =>
           logger.debug('[SdkPermissionHandler] Permission decision', {
@@ -679,6 +685,69 @@ describe('SdkQueryOptionsBuilder.build — file checkpointing wiring', () => {
       expect.objectContaining({
         toolUseId: 'send-2',
         error: 'budget lookup failed',
+      }),
+    );
+  });
+
+  it('denies a tool in the matcher-less paused-tool hook and allows the rest', async () => {
+    const { options } = await buildWithLogger({ sessionId: 'session-1' });
+    const gate = options.hooks?.PreToolUse?.[1];
+    expect(gate?.matcher).toBeUndefined();
+    const base = {
+      hook_event_name: 'PreToolUse' as const,
+      session_id: 'session-1',
+      transcript_path: '',
+      cwd: 'D:/tmp/ws',
+      tool_use_id: 'pause-1',
+      tool_input: {},
+    };
+    const context = { signal: new AbortController().signal };
+    expect(
+      await gate?.hooks[0](
+        { ...base, tool_name: 'Bash' },
+        'pause-1',
+        context,
+      ),
+    ).toEqual({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+        permissionDecisionReason: 'Ptah budget monitor paused new work tools.',
+      },
+    });
+    expect(
+      await gate?.hooks[0](
+        { ...base, tool_name: 'Read' },
+        'pause-2',
+        context,
+      ),
+    ).toEqual({});
+  });
+
+  it('fails open with a warning when the paused-tool hook throws', async () => {
+    const { options, logger } = await buildWithLogger({
+      sessionId: 'session-1',
+    });
+    const hook = options.hooks?.PreToolUse?.[1]?.hooks[0];
+    const result = await hook?.(
+      {
+        hook_event_name: 'PreToolUse',
+        session_id: 'session-1',
+        transcript_path: '',
+        cwd: 'D:/tmp/ws',
+        tool_name: 'boom_tool',
+        tool_use_id: 'pause-3',
+        tool_input: {},
+      },
+      'pause-3',
+      { signal: new AbortController().signal },
+    );
+    expect(result).toEqual({});
+    expect(logger.warn).toHaveBeenCalledWith(
+      '[SdkQueryOptionsBuilder] Paused-tool gate failed; allowing the call',
+      expect.objectContaining({
+        toolUseId: 'pause-3',
+        error: 'pause lookup failed',
       }),
     );
   });

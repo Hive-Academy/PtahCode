@@ -2097,6 +2097,10 @@ export class ChatSessionService {
         followUp.queue.assertTabOwnsSession(sessionId, tabId);
       }
       let followUpIdentity = followUp?.queue.liveIdentity(sessionId);
+      // Idle-only normal send: a running turn refuses it with TURN_IN_FLIGHT
+      // and the renderer queues it instead, so it neither waits unseen behind
+      // the turn nor interrupts it.
+      const requireIdle = !followUp && params.admission === 'require-idle';
       driveAttempt = await this.driverLock.beginDrive(sessionId, tabId);
       await this.gateAccount({
         sessionId,
@@ -2285,7 +2289,13 @@ export class ChatSessionService {
       try {
         // A queued follow-up never interrupts the running turn, even when its
         // text reads like a stop request: Stop is the explicit control.
-        if (!justResumed && !followUp && hasStopIntent(prompt)) {
+        // An idle-only send has no turn to stop: a busy session refuses it.
+        if (
+          !justResumed &&
+          !followUp &&
+          !requireIdle &&
+          hasStopIntent(prompt)
+        ) {
           const autopilotEnabled = this.configManager.getWithDefault<boolean>(
             'autopilot.enabled',
             false,
@@ -2375,6 +2385,7 @@ export class ChatSessionService {
             images,
             clientMessageId: params.clientMessageId,
             ...(followUp ? { queueIntent: 'next-turn' as const } : {}),
+            ...(requireIdle ? { admission: 'require-idle' as const } : {}),
           },
         );
         if (followUp) followUp.queue.trackSubmission(sessionId, submission);
@@ -2433,6 +2444,34 @@ export class ChatSessionService {
     } catch (error) {
       await this.driverLock.abandonDrive(params.sessionId, driveAttempt);
       if (error instanceof RpcUserError) followUpRefusalCode = error.errorCode;
+      if (
+        error instanceof SessionAdmissionRefusedError &&
+        error.reason === 'session-ended' &&
+        params.admission === 'require-idle'
+      ) {
+        return {
+          success: false,
+          sessionId: params.sessionId,
+          errorCode: 'SESSION_ENDED',
+          error: 'The session ended before the message was sent.',
+        };
+      }
+      if (
+        error instanceof SessionAdmissionRefusedError &&
+        error.reason === 'busy' &&
+        params.admission === 'require-idle'
+      ) {
+        this.logger.info('RPC: chat:continue - turn in flight, not admitted', {
+          sessionId: params.sessionId,
+          tabId: params.tabId,
+        });
+        return {
+          success: false,
+          sessionId: params.sessionId,
+          errorCode: 'TURN_IN_FLIGHT',
+          error: 'A turn is running. The message was not sent.',
+        };
+      }
       if (
         error instanceof Error &&
         error.message.includes('FOLLOW_UP_ID_CONFLICT')

@@ -48,3 +48,21 @@ describe('executor completion result', () => {
       .toBeNull();
   });
 });
+
+it('carries a pause notice alongside the existing completion verdict', () => {
+  const notice = {
+    actor: 'ptah-budget', action: 'paused', reason: 'runtime-cap', nextStep: 'review-live-agent',
+  } as const;
+  const receipt = {
+    id: 'completion-receipt', agentId: AgentId.create(), state: 'settled',
+    mode: 'queue-next-turn', delivery: 'queue', createdAt: 1, updatedAt: 2,
+  } as const;
+  expect(buildLaneCompletionResult({
+    signal: { verdict: 'unverified', deliverables: [], notice, receipt },
+    executorId: 'claude', phaseKind: null, parentSignal: 'lane result',
+  })).toMatchObject({ notice, receipt, verdict: 'unverified' });
+  expect(buildSessionCompletionResult({
+    notice, deliverableCheck: [], verdict: 'unverified',
+    executorId: 'session', phaseKind: null, parentSignal: 'child result',
+  })).toMatchObject({ notice, verdict: 'unverified' });
+});

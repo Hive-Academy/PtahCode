@@ -151,6 +151,21 @@ export class McpCallerTokenRegistry {
     }
   }
 
+  /**
+   * Forget the persistent credential of a config file Ptah no longer writes
+   * (a retired slot). The token stops authorizing at once, in memory, even
+   * when durable storage then fails. Returns whether a record was dropped.
+   */
+  async revokePersistent(configPath: string): Promise<boolean> {
+    if (this.findPersistent(configPath) === undefined) return false;
+    const next = this.persistent.filter(
+      (record) => record.configPath !== configPath,
+    );
+    this.persistent = next;
+    await this.persist(next);
+    return true;
+  }
+
   /** `stop()`: lane and session tokens die. Persistent hashes stay on disk. */
   revokeEphemeral(): void {
     for (const removed of this.laneRecords.splice(0)) this.notifyExclusiveOwnerRevoked(removed);

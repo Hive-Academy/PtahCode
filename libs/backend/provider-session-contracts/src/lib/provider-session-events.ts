@@ -16,6 +16,11 @@ export interface ProviderUsage {
   readonly cacheReadTokens?: number;
   readonly cacheWriteTokens?: number;
   readonly contextTokens?: number;
+  /**
+   * The context window the agent reported for the session (ACP
+   * `usage_update.size`); absent when it reported none.
+   */
+  readonly contextWindow?: number;
   readonly costUsd?: number;
 }
 

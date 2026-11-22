@@ -223,10 +223,13 @@ export class SessionStreamPump {
           }
           if (
             session.abortController.signal.aborted ||
+            session.ending ||
             session.token !== ownerToken
           )
             return;
-          while (session.messageQueue.length > 0 && !session.turnInFlight) {
+          while (
+            !session.ending && session.messageQueue.length > 0 && !session.turnInFlight
+          ) {
             const turn = session.messageQueue.shift();
             if (turn) {
               if (turn.recordToken && turn.recordToken !== session.token) {
@@ -278,10 +281,42 @@ export class SessionStreamPump {
               logger.debug(
                 `[SessionLifecycle] Yielding message (${session.messageQueue.length} held)`,
               );
-              yield turn.message;
+              const stopContext = registry.takeStopContext(session);
+              if (!stopContext) {
+                yield turn.message;
+              } else {
+                const { message } = turn.message;
+                const content = typeof message.content === 'string'
+                  ? [{ type: 'text' as const, text: message.content }]
+                  : message.content;
+                const firstText = content.find((block) => block.type === 'text');
+                if (firstText?.text.trimStart().startsWith('/')) {
+                  // Keep the slash command at the start of its own input so
+                  // the SDK can dispatch it. This context does not open a turn.
+                  yield {
+                    type: 'user',
+                    parent_tool_use_id: null,
+                    session_id: turn.message.session_id,
+                    isSynthetic: true,
+                    shouldQuery: false,
+                    message: { role: 'user', content: stopContext },
+                  };
+                  if (abortController.signal.aborted || session.ending) return;
+                  yield turn.message;
+                } else {
+                  yield {
+                    ...turn.message,
+                    message: {
+                      ...message,
+                      content: [{ type: 'text', text: stopContext }, ...content],
+                    },
+                  };
+                }
+              }
             }
             if (abortController.signal.aborted) return;
           }
+          if (session.ending) return;
           const waitResult = await new Promise<'message' | 'aborted'>(
             (resolve) => {
               const abortHandler = () => resolve('aborted');

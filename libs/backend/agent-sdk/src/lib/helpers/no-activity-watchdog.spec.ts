@@ -19,6 +19,7 @@ import {
   API_RETRY_MAX_ACCOUNTED_MS,
   BACKGROUND_TASK_QUIET_TIMEOUT_MS,
   NoActivityWatchdog,
+  ProviderTurnEndError,
 } from './no-activity-watchdog';
 import { COMPACTION_MAX_DWELL_MS } from './compaction/compaction-state.types';
 import type {
@@ -120,8 +121,12 @@ describe('NoActivityWatchdog', () => {
   });
 
   it('fires onTimeout once after a fully silent window (stuck stream)', () => {
-    const onTimeout = jest.fn();
+    const onTimeout = jest.fn((cause: 'provider-no-response') => {
+      wd.recordFailure(new ProviderTurnEndError(cause));
+    });
     const wd = new NoActivityWatchdog(WINDOW, onTimeout);
+
+    wd.beginTurn();
 
     wd.start();
     expect(wd.firedCause).toBeNull();
@@ -134,16 +139,32 @@ describe('NoActivityWatchdog', () => {
     // Deadline reached with zero activity → fire exactly once.
     jest.advanceTimersByTime(1);
     expect(onTimeout).toHaveBeenCalledTimes(1);
-    expect(wd.firedCause).toBe('no-activity');
+    expect(wd.firedCause).toBe('provider-no-response');
+    wd.observe({ type: 'result' } as SDKMessage);
+    wd.noteOutwardEvent();
+    expect(wd.zeroOutwardEvents).toBe(true);
 
     // No further fires even if time keeps advancing.
     jest.advanceTimersByTime(WINDOW * 3);
     expect(onTimeout).toHaveBeenCalledTimes(1);
   });
 
+  it('leaves an unaccepted timeout without a terminal failure', () => {
+    const onTimeout = jest.fn();
+    const wd = new NoActivityWatchdog(WINDOW, onTimeout);
+    wd.beginTurn();
+    wd.start();
+    jest.advanceTimersByTime(2 * WINDOW);
+    expect(onTimeout).toHaveBeenCalledTimes(1);
+    expect(wd.firedCause).toBeNull();
+    expect(wd.failure).toBeUndefined();
+  });
+
   it('does NOT fire while kicked before each deadline (slow-but-active stream)', () => {
     const onTimeout = jest.fn();
     const wd = new NoActivityWatchdog(WINDOW, onTimeout);
+
+    wd.beginTurn();
 
     wd.start();
 
@@ -165,6 +186,8 @@ describe('NoActivityWatchdog', () => {
     const onTimeout = jest.fn();
     const wd = new NoActivityWatchdog(WINDOW, onTimeout);
 
+    wd.beginTurn();
+
     wd.start();
     jest.advanceTimersByTime(WINDOW - 10);
     wd.kick(); // reset — a fresh full window is now required
@@ -179,6 +202,8 @@ describe('NoActivityWatchdog', () => {
     const onTimeout = jest.fn();
     const wd = new NoActivityWatchdog(WINDOW, onTimeout);
 
+    wd.beginTurn();
+
     wd.start();
     jest.advanceTimersByTime(WINDOW - 1);
     wd.stop();
@@ -190,6 +215,7 @@ describe('NoActivityWatchdog', () => {
 
     // Post-stop kick()/start() must not re-arm.
     wd.kick();
+    wd.beginTurn();
     wd.start();
     jest.advanceTimersByTime(WINDOW * 2);
     expect(onTimeout).not.toHaveBeenCalled();
@@ -198,6 +224,8 @@ describe('NoActivityWatchdog', () => {
   it('stop() is idempotent and safe to call from multiple teardown paths', () => {
     const onTimeout = jest.fn();
     const wd = new NoActivityWatchdog(WINDOW, onTimeout);
+
+    wd.beginTurn();
 
     wd.start();
     expect(() => {
@@ -215,6 +243,7 @@ describe('NoActivityWatchdog', () => {
 
     // No kick at all — the pre-first-message stuck case (provider never
     // forwards anything).
+    wd.beginTurn();
     wd.start();
     jest.advanceTimersByTime(WINDOW);
     expect(onTimeout).toHaveBeenCalledTimes(1);
@@ -232,6 +261,8 @@ describe('NoActivityWatchdog', () => {
       const onTimeout = jest.fn();
       const wd = new NoActivityWatchdog(WINDOW, onTimeout);
 
+      wd.beginTurn();
+
       wd.start();
       wd.hold(); // canUseTool parked on an AskUserQuestion card
 
@@ -243,6 +274,8 @@ describe('NoActivityWatchdog', () => {
     it('release() starts a FULL fresh window — time spent waiting is not charged to the provider', () => {
       const onTimeout = jest.fn();
       const wd = new NoActivityWatchdog(WINDOW, onTimeout);
+
+      wd.beginTurn();
 
       wd.start();
       jest.advanceTimersByTime(WINDOW - 1); // nearly out of window already
@@ -261,6 +294,8 @@ describe('NoActivityWatchdog', () => {
       const onTimeout = jest.fn();
       const wd = new NoActivityWatchdog(WINDOW, onTimeout);
 
+      wd.beginTurn();
+
       wd.start();
       wd.hold();
       wd.hold();
@@ -277,6 +312,8 @@ describe('NoActivityWatchdog', () => {
     it('kick() during a hold does not re-arm the window', () => {
       const onTimeout = jest.fn();
       const wd = new NoActivityWatchdog(WINDOW, onTimeout);
+
+      wd.beginTurn();
 
       wd.start();
       wd.hold();
@@ -301,6 +338,8 @@ describe('NoActivityWatchdog', () => {
       const onTimeout = jest.fn();
       const wd = new NoActivityWatchdog(WINDOW, onTimeout);
 
+      wd.beginTurn();
+
       wd.start();
       wd.stop();
       wd.hold();
@@ -314,6 +353,7 @@ describe('NoActivityWatchdog', () => {
       const wd = new NoActivityWatchdog(WINDOW, onTimeout);
 
       wd.hold();
+      wd.beginTurn();
       wd.start();
       jest.advanceTimersByTime(WINDOW * 2);
       expect(onTimeout).not.toHaveBeenCalled();
@@ -324,475 +364,396 @@ describe('NoActivityWatchdog', () => {
     });
   });
 
-  describe('compaction dwell bound (TASK_2026_597 A8)', () => {
-    const signal = new AbortController().signal;
+  async function fireHook(wd: NoActivityWatchdog, input: Record<string, unknown>) {
+    const event = input['hook_event_name'] as HookEvent;
+    await wd.lifecycleHooks()[event]?.[0]?.hooks[0](
+      input as unknown as HookInput,
+      undefined,
+      { signal: new AbortController().signal },
+    );
+  }
 
-    async function fireHook(
-      wd: NoActivityWatchdog,
-      input: Record<string, unknown>,
-    ): Promise<void> {
-      const event = input['hook_event_name'] as HookEvent;
-      const hooks = wd.lifecycleHooks();
-      await hooks[event]?.[0]?.hooks?.[0]?.(
-        input as unknown as HookInput,
-        undefined,
-        { signal },
-      );
-    }
+  function snapshot(...tasks: { task_id: string; run_id?: string; task_type: string; ambient?: boolean; parent_task_id?: string }[]): SDKMessage {
+    return {
+      ...ENVELOPE,
+      type: 'system',
+      subtype: 'background_tasks_changed',
+      tasks: tasks.map((task) => ({ ...task, description: task.task_type })),
+    };
+  }
 
-    const preCompact = { hook_event_name: 'PreCompact', trigger: 'auto' };
-    const postCompact = { hook_event_name: 'PostCompact', trigger: 'auto' };
-    /** The coordinator controls the session, so the dwell bound applies. */
-    const enforced = () => true;
-
-    it('reports an open compaction as overdue, then stops re-arming at COMPACTION_MAX_DWELL_MS and times out', async () => {
-      const onTimeout = jest.fn();
-      const onOverdue = jest.fn();
-      const wd = new NoActivityWatchdog(10_000, onTimeout, onOverdue, enforced);
-      wd.start();
-
-      await fireHook(wd, preCompact);
-      jest.advanceTimersByTime(COMPACTION_MAX_DWELL_MS - 1);
-      expect(onOverdue).toHaveBeenCalledWith(['compaction']);
-      const overdueCalls = onOverdue.mock.calls.length;
-      expect(overdueCalls).toBe(29);
-      expect(onTimeout).not.toHaveBeenCalled();
-
-      jest.advanceTimersByTime(1);
-      expect(onTimeout).toHaveBeenCalledTimes(1);
-      expect(onTimeout).toHaveBeenCalledWith('compaction-dwell');
-      expect(wd.firedCause).toBe('compaction-dwell');
-      expect(onOverdue).toHaveBeenCalledTimes(overdueCalls);
-
-      // Fired once: no timer is left to re-arm.
-      jest.advanceTimersByTime(COMPACTION_MAX_DWELL_MS);
-      expect(onTimeout).toHaveBeenCalledTimes(1);
-      expect(onOverdue).toHaveBeenCalledTimes(overdueCalls);
+  describe('zero-event retry evidence', () => {
+    const toolMessage = (content: Extract<SDKMessage, { type: 'user' }>['message']['content']): SDKMessage => ({
+      ...ENVELOPE,
+      type: 'user',
+      parent_tool_use_id: 'nested',
+      message: { role: 'user', content },
     });
 
-    it('with the production window, an open compaction is overdue at 180 s and times out at the 300 s bound', async () => {
-      const onTimeout = jest.fn();
-      const onOverdue = jest.fn();
-      const wd = new NoActivityWatchdog(WINDOW, onTimeout, onOverdue, enforced);
-      wd.start();
+    const workMessages: Array<[string, SDKMessage]> = [
+      ['nested assistant', assistantMessage('nested')],
+      ['nested partial', {
+        ...ENVELOPE,
+        type: 'stream_event',
+        parent_tool_use_id: 'nested',
+        event: { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'output' } },
+      }],
+      ['nested tool use', toolMessage([{ type: 'tool_use', id: 'tool', name: 'Bash', input: {} }])],
+      ['nested tool result', toolMessage([{ type: 'tool_result', tool_use_id: 'tool' }])],
+      ['tool progress', {
+        ...ENVELOPE, type: 'tool_progress', tool_use_id: 'tool', tool_name: 'Bash',
+        parent_tool_use_id: null, elapsed_time_seconds: 1,
+      }],
+      ['tool summary', {
+        ...ENVELOPE, type: 'tool_use_summary', summary: 'done', preceding_tool_use_ids: ['tool'],
+      }],
+      ['thinking progress', {
+        ...ENVELOPE, type: 'system', subtype: 'thinking_tokens',
+        estimated_tokens: 2, estimated_tokens_delta: 1,
+      }],
+      ['empty task snapshot', snapshot()],
+      ['compaction start', {
+        ...ENVELOPE, type: 'system', subtype: 'status', status: 'compacting',
+      }],
+      ['compaction result', {
+        ...ENVELOPE, type: 'system', subtype: 'status', status: null, compact_result: 'failed',
+      }],
+      ['compaction boundary', {
+        ...ENVELOPE, type: 'system', subtype: 'compact_boundary',
+        compact_metadata: { trigger: 'auto', pre_tokens: 100 },
+      }],
+      ['PreToolUse frame', {
+        ...ENVELOPE, type: 'system', subtype: 'hook_started',
+        hook_id: 'hook', hook_name: 'PreToolUse:Bash', hook_event: 'PreToolUse',
+      }],
+      ['PostToolUse frame', {
+        ...ENVELOPE, type: 'system', subtype: 'hook_progress',
+        hook_id: 'hook', hook_name: 'PostToolUse:Bash', hook_event: 'PostToolUse',
+        stdout: '', stderr: '', output: '',
+      }],
+      ['PostToolUseFailure frame', {
+        ...ENVELOPE, type: 'system', subtype: 'hook_response',
+        hook_id: 'hook', hook_name: 'PostToolUseFailure:Bash', hook_event: 'PostToolUseFailure',
+        stdout: '', stderr: '', output: '', outcome: 'success',
+      }],
+    ];
 
-      await fireHook(wd, preCompact);
-      jest.advanceTimersByTime(WINDOW);
-      expect(onOverdue).toHaveBeenCalledWith(['compaction']);
-      expect(onTimeout).not.toHaveBeenCalled();
-
-      jest.advanceTimersByTime(COMPACTION_MAX_DWELL_MS - WINDOW - 1);
-      expect(onTimeout).not.toHaveBeenCalled();
-      jest.advanceTimersByTime(1);
-      expect(onTimeout).toHaveBeenCalledTimes(1);
-      expect(onOverdue).toHaveBeenCalledTimes(1);
-    });
-
-    it('root activity during the compaction does not push the deadline past the dwell bound', async () => {
-      const onTimeout = jest.fn();
-      const wd = new NoActivityWatchdog(WINDOW, onTimeout, undefined, enforced);
-      wd.start();
-
-      await fireHook(wd, preCompact);
-      jest.advanceTimersByTime(COMPACTION_MAX_DWELL_MS - 10_000);
-      wd.observe({
-        type: 'system',
-        subtype: 'status',
-        status: 'compacting',
-      } as unknown as SDKMessage);
-      jest.advanceTimersByTime(10_000);
-
-      expect(onTimeout).toHaveBeenCalledTimes(1);
-    });
-
-    it('a compaction closed before the bound restores the normal window, and the next one gets a fresh bound', async () => {
-      const onTimeout = jest.fn();
-      const onOverdue = jest.fn();
-      const wd = new NoActivityWatchdog(10_000, onTimeout, onOverdue, enforced);
-      wd.start();
-
-      await fireHook(wd, preCompact);
-      jest.advanceTimersByTime(100_000);
-      await fireHook(wd, postCompact);
-      await fireHook(wd, preCompact);
-      jest.advanceTimersByTime(COMPACTION_MAX_DWELL_MS - 1);
-      expect(onTimeout).not.toHaveBeenCalled();
-
-      jest.advanceTimersByTime(1);
-      expect(onTimeout).toHaveBeenCalledTimes(1);
-    });
-
-    it('a re-announced compaction keeps its original start', async () => {
-      const onTimeout = jest.fn();
-      const wd = new NoActivityWatchdog(10_000, onTimeout, jest.fn(), enforced);
-      wd.start();
-
-      await fireHook(wd, preCompact);
-      jest.advanceTimersByTime(COMPACTION_MAX_DWELL_MS / 2);
-      await fireHook(wd, preCompact);
-      jest.advanceTimersByTime(COMPACTION_MAX_DWELL_MS / 2);
-
-      expect(onTimeout).toHaveBeenCalledTimes(1);
-    });
-
-    it('without enforcement (OBSERVE_ONLY) a 400 s compaction is reported overdue, never cut', async () => {
-      const onTimeout = jest.fn();
-      const onOverdue = jest.fn();
-      const wd = new NoActivityWatchdog(WINDOW, onTimeout, onOverdue);
-      wd.start();
-
-      await fireHook(wd, preCompact);
-      jest.advanceTimersByTime(400_000);
-      expect(onOverdue).toHaveBeenCalledTimes(2);
-      expect(onOverdue).toHaveBeenLastCalledWith(['compaction']);
-      expect(onTimeout).not.toHaveBeenCalled();
-
-      // Closing it restores the plain no-activity window.
-      await fireHook(wd, postCompact);
-      jest.advanceTimersByTime(WINDOW);
-      expect(onTimeout).toHaveBeenCalledTimes(1);
-      expect(onTimeout).toHaveBeenCalledWith('no-activity');
-    });
-
-    it('an enforced compaction closed at 216 s (B8 measurement) completes', async () => {
-      const onTimeout = jest.fn();
-      const wd = new NoActivityWatchdog(WINDOW, onTimeout, jest.fn(), enforced);
-      wd.start();
-
-      await fireHook(wd, preCompact);
-      jest.advanceTimersByTime(216_000);
-      await fireHook(wd, postCompact);
-      jest.advanceTimersByTime(WINDOW - 1);
-      expect(onTimeout).not.toHaveBeenCalled();
-    });
-
-    it('an outstanding root tool is still not capped', async () => {
-      const onTimeout = jest.fn();
-      const onOverdue = jest.fn();
-      const wd = new NoActivityWatchdog(WINDOW, onTimeout, onOverdue);
-      wd.start();
-
-      await fireHook(wd, {
-        hook_event_name: 'PreToolUse',
-        tool_use_id: 'tool-1',
-        tool_name: 'Bash',
-      });
-      jest.advanceTimersByTime(WINDOW * 3);
-
-      expect(onOverdue).toHaveBeenCalledTimes(3);
-      expect(onOverdue).toHaveBeenLastCalledWith(['Bash']);
-      expect(onTimeout).not.toHaveBeenCalled();
-    });
-
-    it('holds an open root tool seen in the stream until its result arrives', () => {
-      const onTimeout = jest.fn();
-      const onOverdue = jest.fn();
-      const wd = new NoActivityWatchdog(WINDOW, onTimeout, onOverdue);
-      wd.start();
-
-      wd.observe({
-        type: 'assistant',
-        message: {
-          content: [
-            { type: 'tool_use', id: 'tool-2', name: 'Bash', input: {} },
-          ],
-        },
-      } as unknown as SDKMessage);
-      jest.advanceTimersByTime(WINDOW * 3);
-      expect(onOverdue).toHaveBeenCalledTimes(3);
-      expect(onOverdue).toHaveBeenLastCalledWith(['Bash']);
-      expect(onTimeout).not.toHaveBeenCalled();
-      expect(wd.firedCause).toBeNull();
-
-      wd.observe({
-        type: 'user',
-        message: {
-          content: [
-            { type: 'tool_result', tool_use_id: 'tool-2', content: 'done' },
-          ],
-        },
-      } as unknown as SDKMessage);
-      jest.advanceTimersByTime(WINDOW);
-      expect(onTimeout).toHaveBeenCalledWith('no-activity');
-    });
-
-    it('drops a stale tool from a late message when the next turn begins', () => {
-      const onTimeout = jest.fn();
-      const wd = new NoActivityWatchdog(WINDOW, onTimeout);
-      wd.start();
-      wd.observe({ type: 'result' } as unknown as SDKMessage);
-      wd.hold();
-      wd.observe({
-        type: 'assistant',
-        message: {
-          content: [{ type: 'tool_use', id: 'late', name: 'Bash', input: {} }],
-        },
-      } as unknown as SDKMessage);
+    it.each(workMessages)('counts raw %s without outward events', (_label, message) => {
+      const wd = new NoActivityWatchdog(WINDOW, jest.fn());
+      expect(wd.zeroOutwardEvents).toBe(true);
+      wd.observe(message);
+      wd.endTurn();
       wd.beginTurn();
-      wd.release();
-      jest.advanceTimersByTime(WINDOW);
-      expect(onTimeout).toHaveBeenCalledWith('no-activity');
+      wd.stop();
+      expect(wd.zeroOutwardEvents).toBe(false);
     });
 
-    describe('background SDK tasks', () => {
-      async function startBackgroundTask(
-        wd: NoActivityWatchdog,
-        toolId: string,
-        taskId: string,
-        extra: Partial<SDKTaskStartedMessage> = {},
-      ): Promise<void> {
-        await fireHook(wd, {
-          hook_event_name: 'PreToolUse',
-          tool_use_id: toolId,
-          tool_name: 'Task',
-        });
-        wd.observe(
-          taskStarted(taskId, toolId, { is_backgrounded: false, ...extra }),
-        );
-        wd.observe(
-          taskUpdated(taskId, { is_backgrounded: true }, extra.run_id),
-        );
-      }
+    it.each(['PreToolUse', 'PostToolUse', 'PostToolUseFailure'] as const)(
+      'counts nested %s callbacks',
+      async (hook_event_name) => {
+        const wd = new NoActivityWatchdog(WINDOW, jest.fn());
+        await fireHook(wd, { hook_event_name, agent_id: 'child', tool_use_id: 'tool', tool_name: 'Bash' });
+        expect(wd.zeroOutwardEvents).toBe(false);
+      },
+    );
 
-      it('reproduces a root abort while a background task is active', async () => {
-        const onTimeout = jest.fn();
-        const wd = new NoActivityWatchdog(WINDOW, onTimeout);
-        wd.start();
-        await startBackgroundTask(wd, 'tool-a', 'task-a');
-        await startBackgroundTask(wd, 'tool-b', 'task-b');
-        jest.advanceTimersByTime(60_000);
-        wd.observe(taskProgress('task-b'));
-        jest.advanceTimersByTime(30_000);
-        wd.observe(taskNotification('task-a', 'completed'));
-        jest.advanceTimersByTime(30_000);
-        wd.observe(assistantMessage('tool-b'));
-        jest.advanceTimersByTime(30_000);
-        wd.observe(taskUpdated('task-b', { status: 'running' }));
-        jest.advanceTimersByTime(31_000);
-        expect(onTimeout).not.toHaveBeenCalled();
+    it('allows a zero-event retry after a prompt echo and an idle status frame', () => {
+      const wd = new NoActivityWatchdog(WINDOW, jest.fn());
+      wd.observe(toolMessage('prompt echo'));
+      wd.observe({
+        ...ENVELOPE, type: 'system', subtype: 'status', status: null,
       });
-
-      it('progress, updates and correlated child messages keep a backgrounded root turn alive past 180 s', async () => {
-        const onTimeout = jest.fn();
-        const onOverdue = jest.fn();
-        const wd = new NoActivityWatchdog(WINDOW, onTimeout, onOverdue);
-        wd.start();
-        await startBackgroundTask(wd, 'tool-a', 'task-a');
-
-        // 400 s of child activity only, each gap well inside the quiet bound.
-        jest.advanceTimersByTime(150_000);
-        wd.observe(taskProgress('task-a'));
-        jest.advanceTimersByTime(150_000);
-        wd.observe(taskUpdated('task-a', { status: 'running' }));
-        jest.advanceTimersByTime(150_000);
-        wd.observe(assistantMessage('tool-a'));
-        jest.advanceTimersByTime(250_000);
-
-        expect(onTimeout).not.toHaveBeenCalled();
-        expect(onOverdue).toHaveBeenLastCalledWith(['background task']);
-        expect(wd.firedCause).toBeNull();
-      });
-
-      it('a terminal notification restores a full normal window', async () => {
-        const onTimeout = jest.fn();
-        const wd = new NoActivityWatchdog(WINDOW, onTimeout, jest.fn());
-        wd.start();
-        await startBackgroundTask(wd, 'tool-a', 'task-a');
-        jest.advanceTimersByTime(400_000);
-        expect(onTimeout).not.toHaveBeenCalled();
-
-        wd.observe(taskNotification('task-a', 'completed'));
-        jest.advanceTimersByTime(WINDOW - 1);
-        expect(onTimeout).not.toHaveBeenCalled();
-        jest.advanceTimersByTime(1);
-        expect(onTimeout).toHaveBeenCalledTimes(1);
-        expect(onTimeout).toHaveBeenCalledWith('no-activity');
-      });
-
-      it('a stale run_id does not close or refresh a newer run', async () => {
-        const onTimeout = jest.fn();
-        const wd = new NoActivityWatchdog(WINDOW, onTimeout, jest.fn());
-        wd.start();
-        await startBackgroundTask(wd, 'tool-a', 'task-a', { run_id: 'run-2' });
-
-        jest.advanceTimersByTime(100_000);
-        wd.observe(taskNotification('task-a', 'completed', 'run-1'));
-        wd.observe(taskUpdated('task-a', { status: 'killed' }, 'run-1'));
-        jest.advanceTimersByTime(300_000);
-        // Still accounted: the stale terminal events did not close run-2.
-        expect(onTimeout).not.toHaveBeenCalled();
-
-        // Stale progress does not refresh it: the quiet bound counts from 0 s.
-        wd.observe(taskProgress('task-a', 'run-1'));
-        jest.advanceTimersByTime(199_999);
-        expect(onTimeout).not.toHaveBeenCalled();
-        jest.advanceTimersByTime(1);
-        expect(onTimeout).toHaveBeenCalledTimes(1);
-      });
-
-      it('a matching run_id notification closes the run', async () => {
-        const onTimeout = jest.fn();
-        const wd = new NoActivityWatchdog(WINDOW, onTimeout, jest.fn());
-        wd.start();
-        await startBackgroundTask(wd, 'tool-a', 'task-a', { run_id: 'run-2' });
-        jest.advanceTimersByTime(100_000);
-        wd.observe(taskNotification('task-a', 'failed', 'run-2'));
-        jest.advanceTimersByTime(WINDOW);
-        expect(onTimeout).toHaveBeenCalledWith('no-activity');
-      });
-
-      it('a dead background task times out exactly once with no-activity at 600 s quiet', async () => {
-        const onTimeout = jest.fn();
-        const wd = new NoActivityWatchdog(WINDOW, onTimeout, jest.fn());
-        wd.start();
-        await startBackgroundTask(wd, 'tool-a', 'task-a');
-
-        jest.advanceTimersByTime(BACKGROUND_TASK_QUIET_TIMEOUT_MS - 1);
-        expect(onTimeout).not.toHaveBeenCalled();
-        jest.advanceTimersByTime(1);
-        expect(onTimeout).toHaveBeenCalledTimes(1);
-        expect(onTimeout).toHaveBeenCalledWith('no-activity');
-        expect(wd.firedCause).toBe('no-activity');
-
-        jest.advanceTimersByTime(BACKGROUND_TASK_QUIET_TIMEOUT_MS * 2);
-        expect(onTimeout).toHaveBeenCalledTimes(1);
-      });
-
-      it('unknown task and unrelated child traffic cannot keep a dead task alive', async () => {
-        const onTimeout = jest.fn();
-        const wd = new NoActivityWatchdog(WINDOW, onTimeout, jest.fn());
-        wd.start();
-        await startBackgroundTask(wd, 'tool-a', 'task-a');
-
-        for (let i = 0; i < 5; i += 1) {
-          jest.advanceTimersByTime(100_000);
-          wd.observe(taskProgress('task-unknown'));
-          wd.observe(taskUpdated('task-unknown', { status: 'running' }));
-          wd.observe(assistantMessage('tool-unknown'));
-        }
-        jest.advanceTimersByTime(99_999);
-        expect(onTimeout).not.toHaveBeenCalled();
-        jest.advanceTimersByTime(1);
-        expect(onTimeout).toHaveBeenCalledTimes(1);
-        expect(onTimeout).toHaveBeenCalledWith('no-activity');
-      });
-
-      it('ambient and skip_transcript tasks get no background extension', async () => {
-        for (const extra of [{ ambient: true }, { skip_transcript: true }]) {
-          const onTimeout = jest.fn();
-          const wd = new NoActivityWatchdog(WINDOW, onTimeout, jest.fn());
-          wd.start();
-          await startBackgroundTask(wd, 'tool-a', 'task-a', extra);
-
-          jest.advanceTimersByTime(100_000);
-          wd.observe(taskProgress('task-a'));
-          wd.observe(assistantMessage('tool-a'));
-          // Today's rule: 180 s after the last root kick (the backgrounding).
-          jest.advanceTimersByTime(WINDOW - 100_000);
-          expect(onTimeout).toHaveBeenCalledTimes(1);
-          expect(onTimeout).toHaveBeenCalledWith('no-activity');
-          wd.stop();
-        }
-      });
-
-      it('the end of an excluded background task does not reset the deadline', async () => {
-        const ends = [
-          () => taskNotification('task-a', 'completed'),
-          () => taskUpdated('task-a', { status: 'completed' }),
-        ];
-        for (const end of ends) {
-          const onTimeout = jest.fn();
-          const wd = new NoActivityWatchdog(WINDOW, onTimeout, jest.fn());
-          wd.start();
-          await startBackgroundTask(wd, 'tool-a', 'task-a', { ambient: true });
-
-          jest.advanceTimersByTime(170_000);
-          wd.observe(end());
-          // The deadline stays 180 s after the backgrounding, not after the end.
-          jest.advanceTimersByTime(WINDOW - 170_000);
-          expect(onTimeout).toHaveBeenCalledTimes(1);
-          expect(onTimeout).toHaveBeenCalledWith('no-activity');
-          wd.stop();
-        }
-      });
-
-      it('a root assistant message during a silent background task never times out earlier than 180 s after it', async () => {
-        const onTimeout = jest.fn();
-        const wd = new NoActivityWatchdog(WINDOW, onTimeout, jest.fn());
-        wd.start();
-        await startBackgroundTask(wd, 'tool-a', 'task-a');
-
-        jest.advanceTimersByTime(590_000);
-        wd.observe(assistantMessage(null));
-        // The quiet bound passed at 600 s, but the root kick at 590 s owns
-        // a full normal window.
-        jest.advanceTimersByTime(WINDOW - 1);
-        expect(onTimeout).not.toHaveBeenCalled();
-        jest.advanceTimersByTime(1);
-        expect(onTimeout).toHaveBeenCalledTimes(1);
-        expect(onTimeout).toHaveBeenCalledWith('no-activity');
-      });
-
-      it('a root tool during a silent background task keeps the normal uncapped tool rule', async () => {
-        const onTimeout = jest.fn();
-        const onOverdue = jest.fn();
-        const wd = new NoActivityWatchdog(WINDOW, onTimeout, onOverdue);
-        wd.start();
-        await startBackgroundTask(wd, 'tool-a', 'task-a');
-
-        jest.advanceTimersByTime(500_000);
-        await fireHook(wd, {
-          hook_event_name: 'PreToolUse',
-          tool_use_id: 'tool-bash',
-          tool_name: 'Bash',
-        });
-        jest.advanceTimersByTime(WINDOW * 3);
-        expect(onOverdue).toHaveBeenLastCalledWith(['Bash']);
-        expect(onTimeout).not.toHaveBeenCalled();
-
-        await fireHook(wd, {
-          hook_event_name: 'PostToolUse',
-          tool_use_id: 'tool-bash',
-          tool_name: 'Bash',
-        });
-        jest.advanceTimersByTime(WINDOW - 1);
-        expect(onTimeout).not.toHaveBeenCalled();
-        jest.advanceTimersByTime(1);
-        expect(onTimeout).toHaveBeenCalledWith('no-activity');
-      });
-
-      it('endTurn clears the records: a task that outlives its turn cannot affect the next turn', async () => {
-        const onTimeout = jest.fn();
-        const wd = new NoActivityWatchdog(WINDOW, onTimeout, jest.fn());
-        wd.start();
-        await startBackgroundTask(wd, 'tool-a', 'task-a');
-        wd.observe(assistantMessage(null));
-        wd.endTurn();
-        // Idle between turns, as the executor holds the watchdog.
-        wd.hold();
-        jest.advanceTimersByTime(BACKGROUND_TASK_QUIET_TIMEOUT_MS * 2);
-        wd.beginTurn();
-        wd.release();
-        expect(onTimeout).not.toHaveBeenCalled();
-
-        // Root activity keeps the new turn alive past the old quiet bound.
-        for (let i = 0; i < 4; i += 1) {
-          jest.advanceTimersByTime(WINDOW - 1);
-          wd.observe(assistantMessage(null));
-        }
-        expect(onTimeout).not.toHaveBeenCalled();
-
-        // The old task's traffic no longer extends the deadline.
-        jest.advanceTimersByTime(100_000);
-        wd.observe(taskProgress('task-a'));
-        wd.observe(assistantMessage('tool-a'));
-        jest.advanceTimersByTime(WINDOW - 100_000 - 1);
-        expect(onTimeout).not.toHaveBeenCalled();
-        jest.advanceTimersByTime(1);
-        expect(onTimeout).toHaveBeenCalledTimes(1);
-        expect(onTimeout).toHaveBeenCalledWith('no-activity');
-      });
+      expect(wd.zeroOutwardEvents).toBe(true);
+      wd.noteOutwardEvent();
+      expect(wd.zeroOutwardEvents).toBe(false);
     });
+  });
+
+  it.each([
+    assistantMessage(null),
+    taskStarted('task', 'tool'),
+    taskUpdated('task', { status: 'running' }),
+    taskProgress('task'),
+    taskNotification('task', 'completed'),
+    snapshot({ task_id: 'task', run_id: 'run-1', task_type: 'monitor', ambient: true }),
+    { type: 'result' },
+  ] as SDKMessage[])('disqualifies a retry on raw $type $subtype', (message) => {
+    const wd = new NoActivityWatchdog(WINDOW, jest.fn());
+    expect(wd.zeroOutwardEvents).toBe(true);
+    wd.observe(message);
+    expect(wd.zeroOutwardEvents).toBe(false);
+  });
+
+  it.each(['PreToolUse', 'PostToolUse', 'PostToolUseFailure'])(
+    'disqualifies a retry on a root %s hook without a rendered event',
+    async (hook_event_name) => {
+      const wd = new NoActivityWatchdog(WINDOW, jest.fn());
+      expect(wd.zeroOutwardEvents).toBe(true);
+      await fireHook(wd, { hook_event_name, tool_use_id: 'tool', tool_name: 'Bash' });
+      expect(wd.zeroOutwardEvents).toBe(false);
+    },
+  );
+
+  it('disqualifies a retry on a raw tool result but allows a plain user echo', () => {
+    const wd = new NoActivityWatchdog(WINDOW, jest.fn());
+    wd.observe({
+      ...ENVELOPE,
+      type: 'user',
+      parent_tool_use_id: null,
+      message: { role: 'user', content: 'prompt' },
+    });
+    expect(wd.zeroOutwardEvents).toBe(true);
+    wd.observe({
+      ...ENVELOPE,
+      type: 'user',
+      parent_tool_use_id: null,
+      message: {
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: 'tool', content: 'done' }],
+      },
+    });
+    expect(wd.zeroOutwardEvents).toBe(false);
+  });
+
+  it('only starts an idle provider turn on reliable SDK evidence or host input', async () => {
+    const timeout = jest.fn();
+    const wd = new NoActivityWatchdog(WINDOW, timeout);
+    wd.start();
+    wd.observe(taskStarted('task-a', 'tool-a'));
+    wd.observe(taskUpdated('task-a', { status: 'completed' }));
+    wd.observe(assistantMessage(null)); // May be a buffered complete message.
+    jest.advanceTimersByTime(WINDOW * 2);
+    expect(timeout).not.toHaveBeenCalled();
+
+    await fireHook(wd, { hook_event_name: 'PreToolUse', agent_id: 'child', tool_use_id: 'child-tool' });
+    jest.advanceTimersByTime(WINDOW);
+    expect(timeout).not.toHaveBeenCalled();
+
+    await fireHook(wd, { hook_event_name: 'PreToolUse', tool_use_id: 'root-tool', tool_name: 'Bash' });
+    jest.advanceTimersByTime(WINDOW * 2);
+    expect(timeout).not.toHaveBeenCalled();
+    await fireHook(wd, { hook_event_name: 'PostToolUse', tool_use_id: 'root-tool' });
+    jest.advanceTimersByTime(WINDOW);
+    expect(timeout).toHaveBeenCalledWith('provider-no-response');
+  });
+
+  it('opens a provider turn on a root partial message start', () => {
+    const timeout = jest.fn();
+    const wd = new NoActivityWatchdog(WINDOW, timeout);
+    wd.start();
+    wd.observe({
+      ...ENVELOPE, type: 'stream_event', parent_tool_use_id: null,
+      event: { type: 'message_start', message: assistantMessage(null).message },
+    } as SDKMessage);
+    jest.advanceTimersByTime(WINDOW);
+    expect(timeout).toHaveBeenCalledWith('provider-no-response');
+  });
+
+  it('reports compaction overdue at its dwell threshold and backs off without ending', async () => {
+    const timeout = jest.fn();
+    const overdue = jest.fn();
+    const wd = new NoActivityWatchdog(WINDOW, timeout, overdue);
+    wd.beginTurn();
+    wd.start();
+    await fireHook(wd, { hook_event_name: 'PreCompact' });
+    expect(wd.zeroOutwardEvents).toBe(false);
+    jest.advanceTimersByTime(COMPACTION_MAX_DWELL_MS - 1);
+    await fireHook(wd, { hook_event_name: 'PreCompact' });
+    expect(overdue).not.toHaveBeenCalled();
+    jest.advanceTimersByTime(1);
+    expect(overdue).toHaveBeenCalledWith(['compaction']);
+    jest.advanceTimersByTime(2 * COMPACTION_MAX_DWELL_MS - 1);
+    expect(overdue).toHaveBeenCalledTimes(1);
+    jest.advanceTimersByTime(1);
+    expect(overdue).toHaveBeenCalledTimes(2);
+    expect(timeout).not.toHaveBeenCalled();
+
+    await fireHook(wd, { hook_event_name: 'PostCompact' });
+    jest.advanceTimersByTime(WINDOW - 1);
+    expect(timeout).not.toHaveBeenCalled();
+    jest.advanceTimersByTime(1);
+    expect(timeout).toHaveBeenCalledWith('provider-no-response');
+  });
+
+  it('keeps a root UserPromptSubmit hook open for two watchdog windows', () => {
+    const timeout = jest.fn();
+    const overdue = jest.fn();
+    const wd = new NoActivityWatchdog(WINDOW, timeout, overdue);
+    const hook = {
+      ...ENVELOPE, type: 'system', hook_id: 'submit-hook',
+      hook_name: 'UserPromptSubmit:memory', hook_event: 'UserPromptSubmit',
+    } as const;
+    wd.beginTurn();
+    wd.start();
+    wd.observe({ ...hook, subtype: 'hook_started' } as const);
+    expect(wd.zeroOutwardEvents).toBe(false);
+    jest.advanceTimersByTime(WINDOW - 1);
+    wd.observe({
+      ...hook, subtype: 'hook_progress', stdout: '', stderr: '', output: '',
+    } as const);
+    jest.advanceTimersByTime(1);
+    expect(overdue).not.toHaveBeenCalled();
+    jest.advanceTimersByTime(WINDOW - 1);
+    expect(overdue).toHaveBeenCalledWith(['UserPromptSubmit hook']);
+    wd.observe({
+      ...hook, subtype: 'hook_response', hook_id: 'different-hook',
+      stdout: '', stderr: '', output: '', outcome: 'success',
+    } as const);
+    jest.advanceTimersByTime(1);
+    expect(timeout).not.toHaveBeenCalled();
+    expect(overdue).toHaveBeenCalledTimes(1);
+    wd.observe({
+      ...hook, subtype: 'hook_response',
+      stdout: '', stderr: '', output: '', outcome: 'success',
+    } as const);
+    jest.advanceTimersByTime(WINDOW - 1);
+    expect(timeout).not.toHaveBeenCalled();
+    jest.advanceTimersByTime(1);
+    expect(timeout).toHaveBeenCalledWith('provider-no-response');
+  });
+
+  it('keeps a root tool seen in the stream until its matching result arrives', () => {
+    const timeout = jest.fn();
+    const overdue = jest.fn();
+    const wd = new NoActivityWatchdog(WINDOW, timeout, overdue);
+    wd.beginTurn();
+    wd.start();
+    wd.observe({
+      ...assistantMessage(null),
+      message: {
+        content: [{ type: 'tool_use', id: 'wait', name: 'Bash', input: {} }],
+      },
+    } as SDKAssistantMessage);
+    jest.advanceTimersByTime(WINDOW * 3);
+    expect(overdue).toHaveBeenCalledTimes(3);
+    expect(overdue).toHaveBeenLastCalledWith(['Bash']);
+    expect(timeout).not.toHaveBeenCalled();
+
+    wd.observe({
+      ...ENVELOPE,
+      type: 'user',
+      parent_tool_use_id: null,
+      message: {
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: 'wait', content: 'done' }],
+      },
+    });
+    jest.advanceTimersByTime(WINDOW - 1);
+    expect(timeout).not.toHaveBeenCalled();
+    jest.advanceTimersByTime(1);
+    expect(timeout).toHaveBeenCalledWith('provider-no-response');
+  });
+
+  it('accounts for Monitor, ambient and background shell tasks before root tool correlation', () => {
+    const timeout = jest.fn();
+    const overdue = jest.fn();
+    const wd = new NoActivityWatchdog(WINDOW, timeout, overdue);
+    wd.beginTurn();
+    wd.start();
+    wd.observe(snapshot(
+      { task_id: 'monitor', run_id: 'run-1', task_type: 'monitor' },
+      { task_id: 'ambient', run_id: 'run-1', task_type: 'monitor', ambient: true, parent_task_id: 'other' },
+      { task_id: 'shell', run_id: 'run-1', task_type: 'local_bash' },
+    ));
+    // The lifecycle event can arrive before the assistant tool-use block.
+    wd.observe(taskStarted('monitor', 'root-monitor', { run_id: 'run-1' }));
+    wd.observe({
+      ...assistantMessage(null),
+      message: { content: [{ type: 'tool_use', id: 'root-monitor', name: 'Monitor', input: {} }] },
+    } as SDKAssistantMessage);
+    jest.advanceTimersByTime(WINDOW);
+    expect(overdue).not.toHaveBeenCalled();
+    jest.advanceTimersByTime(BACKGROUND_TASK_QUIET_TIMEOUT_MS - WINDOW);
+    expect(overdue).toHaveBeenCalledWith(['3 open tasks (local_bash, monitor)']);
+    jest.advanceTimersByTime(BACKGROUND_TASK_QUIET_TIMEOUT_MS);
+    expect(overdue).toHaveBeenCalledTimes(1);
+    expect(timeout).not.toHaveBeenCalled();
+
+    wd.observe(taskNotification('monitor', 'completed', 'run-1'));
+    wd.observe(taskUpdated('shell', { status: 'completed' }, 'run-1'));
+    jest.advanceTimersByTime(WINDOW * 2);
+    expect(timeout).not.toHaveBeenCalled(); // The remaining task is ambient.
+    wd.observe(snapshot());
+    jest.advanceTimersByTime(WINDOW - 1);
+    expect(timeout).not.toHaveBeenCalled();
+    jest.advanceTimersByTime(1);
+    expect(timeout).toHaveBeenCalledWith('provider-no-response');
+  });
+
+  it('keeps reporting an ambient Monitor overdue with increasing intervals', () => {
+    const timeout = jest.fn();
+    const overdue = jest.fn();
+    const wd = new NoActivityWatchdog(WINDOW, timeout, overdue);
+    wd.beginTurn();
+    wd.start();
+    wd.observe(snapshot({ task_id: 'ambient', task_type: 'monitor', ambient: true }));
+
+    for (const [index, multiplier] of [1, 2, 4, 6].entries()) {
+      jest.advanceTimersByTime(multiplier * BACKGROUND_TASK_QUIET_TIMEOUT_MS - 1);
+      expect(overdue).toHaveBeenCalledTimes(index);
+      jest.advanceTimersByTime(1);
+      expect(overdue).toHaveBeenCalledTimes(index + 1);
+      expect(overdue).toHaveBeenLastCalledWith(['1 open task (monitor)']);
+      expect(timeout).not.toHaveBeenCalled();
+    }
+  });
+
+  it('ignores snapshots of an unversioned finished task until another start', () => {
+    const timeout = jest.fn();
+    const wd = new NoActivityWatchdog(WINDOW, timeout);
+    const frame = snapshot({ task_id: 'monitor', task_type: 'monitor' });
+    wd.beginTurn();
+    wd.start();
+    wd.observe(frame);
+    wd.observe(taskNotification('monitor', 'completed'));
+    wd.observe(frame);
+    jest.advanceTimersByTime(WINDOW - 1);
+    expect(timeout).not.toHaveBeenCalled();
+    wd.observe(taskStarted('monitor', 'new-tool', { task_type: 'monitor' }));
+    wd.observe(frame);
+    jest.advanceTimersByTime(WINDOW);
+    expect(timeout).not.toHaveBeenCalled();
+    wd.observe(taskNotification('monitor', 'completed'));
+    wd.observe(frame);
+    jest.advanceTimersByTime(WINDOW);
+    expect(timeout).toHaveBeenCalledWith('provider-no-response');
+  });
+
+  it('preserves tasks through idle and ignores stale runs and stopped query generations', async () => {
+    const oldTimeout = jest.fn();
+    const old = new NoActivityWatchdog(WINDOW, oldTimeout);
+    old.beginTurn();
+    old.start();
+    old.stop();
+    await fireHook(old, { hook_event_name: 'PreToolUse', tool_use_id: 'old', tool_name: 'Bash' });
+
+    const timeout = jest.fn();
+    const overdue = jest.fn();
+    const wd = new NoActivityWatchdog(WINDOW, timeout, overdue);
+    wd.beginTurn();
+    wd.start();
+    wd.observe(snapshot({ task_id: 'watch', run_id: 'run-2', task_type: 'monitor' }));
+    await fireHook(wd, { hook_event_name: 'PreToolUse', tool_use_id: 'root-tool', tool_name: 'Bash' });
+    wd.endTurn();
+    wd.observe(taskProgress('watch', 'run-2'));
+    jest.advanceTimersByTime(BACKGROUND_TASK_QUIET_TIMEOUT_MS);
+    expect(overdue).not.toHaveBeenCalled();
+    expect(timeout).not.toHaveBeenCalled();
+
+    wd.beginTurn();
+    wd.observe(snapshot({ task_id: 'watch', run_id: 'run-1', task_type: 'monitor' }));
+    wd.observe(taskUpdated('watch', { status: 'completed' }, 'run-1'));
+    wd.observe(taskNotification('watch', 'completed', 'run-1'));
+    wd.observe(taskProgress('watch', 'run-1'));
+    jest.advanceTimersByTime(WINDOW * 2);
+    expect(overdue.mock.calls).toEqual([[['1 open task (monitor)']]]);
+    expect(timeout).not.toHaveBeenCalled();
+    expect(oldTimeout).not.toHaveBeenCalled();
+
+    wd.observe(taskNotification('watch', 'completed', 'run-2'));
+    wd.observe(snapshot({ task_id: 'watch', run_id: 'run-1', task_type: 'monitor' }));
+    jest.advanceTimersByTime(WINDOW);
+    expect(timeout).toHaveBeenCalledWith('provider-no-response');
   });
 
   describe('SDK api_retry (TASK_2026_2288 A)', () => {
@@ -815,6 +776,7 @@ describe('NoActivityWatchdog', () => {
     it('accounts the first-byte wait of an announced retry (incident 2026-11-20)', () => {
       const onTimeout = jest.fn();
       const wd = new NoActivityWatchdog(WINDOW, onTimeout);
+      wd.beginTurn();
       wd.start();
 
       // The SDK first wait ends before the window and announces one retry
@@ -831,12 +793,13 @@ describe('NoActivityWatchdog', () => {
       jest.advanceTimersByTime(599_000 + API_RETRY_MARGIN_MS - WINDOW - 1);
       expect(onTimeout).not.toHaveBeenCalled();
       jest.advanceTimersByTime(1);
-      expect(onTimeout).toHaveBeenCalledWith('no-activity');
+      expect(onTimeout).toHaveBeenCalledWith('provider-no-response');
     });
 
     it('accounts the announced retry delay', () => {
       const onTimeout = jest.fn();
       const wd = new NoActivityWatchdog(WINDOW, onTimeout);
+      wd.beginTurn();
       wd.start();
       wd.observe(apiRetry({ retry_delay_ms: 400_000 }));
 
@@ -849,6 +812,7 @@ describe('NoActivityWatchdog', () => {
     it('never arms less than the normal window for a short retry', () => {
       const onTimeout = jest.fn();
       const wd = new NoActivityWatchdog(WINDOW, onTimeout);
+      wd.beginTurn();
       wd.start();
       wd.observe(apiRetry({ retry_delay_ms: 2_000 }));
 
@@ -861,6 +825,7 @@ describe('NoActivityWatchdog', () => {
     it('keeps the retry window through a hold and an unrelated kick', () => {
       const onTimeout = jest.fn();
       const wd = new NoActivityWatchdog(WINDOW, onTimeout);
+      wd.beginTurn();
       wd.start();
       wd.observe(apiRetry({ retry_delay_ms: 400_000 }));
 
@@ -876,12 +841,13 @@ describe('NoActivityWatchdog', () => {
       jest.advanceTimersByTime(400_000 + API_RETRY_MARGIN_MS - 30_000 - 1);
       expect(onTimeout).not.toHaveBeenCalled();
       jest.advanceTimersByTime(1);
-      expect(onTimeout).toHaveBeenCalledWith('no-activity');
+      expect(onTimeout).toHaveBeenCalledWith('provider-no-response');
     });
 
     it('returns to the normal window after root output of the retry', () => {
       const onTimeout = jest.fn();
       const wd = new NoActivityWatchdog(WINDOW, onTimeout);
+      wd.beginTurn();
       wd.start();
       wd.observe(apiRetry({ retry_delay_ms: 400_000 }));
       jest.advanceTimersByTime(1_000);
@@ -901,6 +867,7 @@ describe('NoActivityWatchdog', () => {
     it('caps the window one retry can account for and ignores bad values', () => {
       const onTimeout = jest.fn();
       const wd = new NoActivityWatchdog(WINDOW, onTimeout);
+      wd.beginTurn();
       wd.start();
       wd.observe(
         apiRetry({

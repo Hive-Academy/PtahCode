@@ -55,6 +55,7 @@ import { SessionLivenessReconcilerService } from './session-liveness-reconciler.
 import { StreamViewportController } from '../stream-viewport-controller.service';
 import { HistoryPagingService } from './history-paging.service';
 import { mapChatSendFailureText } from '../message-sender.service';
+import { ProviderSessionResumeNoticeService } from '../provider-session-resume-notice.service';
 import {
   createEmptyStreamingState,
   type TabState,
@@ -244,6 +245,7 @@ export class SessionLoaderService {
   private readonly historyPaging = inject(HistoryPagingService);
   private readonly livenessReconciler = inject(SessionLivenessReconcilerService);
   private readonly streamViewport = inject(StreamViewportController);
+  private readonly resumeNotice = inject(ProviderSessionResumeNoticeService);
 
   private readonly _sessions = signal<readonly ChatSessionSummary[]>([]);
   private readonly _hasMoreSessions = signal(false);
@@ -1515,6 +1517,11 @@ export class SessionLoaderService {
     }
     const tab = this.tabManager.findTabByIdAcrossWorkspaces(tabId)?.tab;
     if (!tab) return;
+    this.resumeNotice.flagIfResumeFailed(
+      data.activationErrorCode,
+      tabId,
+      tab.claudeSessionId,
+    );
     const text = mapChatSendFailureText(
       data.activationErrorCode,
       activationError,

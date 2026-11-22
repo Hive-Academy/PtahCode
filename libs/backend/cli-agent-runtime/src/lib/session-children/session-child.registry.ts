@@ -1,3 +1,4 @@
+import type { AgentActionNotice } from '@ptah-extension/shared';
 /**
  * In-memory link between parent chat sessions and the child sessions they
  * started (TASK_2026_584).
@@ -49,12 +50,20 @@ export interface SessionChildRecord extends Omit<
   readonly toolProfileApplied?: boolean;
   /** Set once by {@link SessionChildRegistry.markEnded}; never cleared. */
   readonly terminalStatus?: SessionChildTerminalStatus;
+  readonly paused?: true;
+  readonly notice?: AgentActionNotice;
   /**
    * Machine end cause, set with the terminal status (TASK_2026_932). Internal:
    * the snapshot exposes it only through `outcome.cause`.
    */
   readonly endCause?: SessionChildEndCause;
   readonly heldCompletion?: SessionChildHeldCompletion;
+  /**
+   * The SDK id was inferred from the worktree path, not from the child's own
+   * session-id event. Report attribution does not trust it. Kept off the
+   * public snapshot.
+   */
+  readonly sdkSessionIdInferred?: boolean;
 }
 
 /** Fields a caller may change. Identity, link and end state are not among them. */
@@ -70,6 +79,7 @@ type MutableRecordFields = Omit<
   | 'succeeds'
   | 'succeededBy'
   | 'successionCount'
+  | 'sdkSessionIdInferred'
 >;
 
 /**
@@ -147,6 +157,7 @@ function filterByParent(
 export class SessionChildRegistry {
   /** Keyed by child tab id (`childSessionId`). Insertion order = start order. */
   private readonly records = new Map<string, SessionChildRecord>();
+  private readonly reparentListeners = new Set<(record: SessionChildRecord) => void>();
   /** SDK session id → child tab id. */
   private readonly bySdkId = new Map<string, string>();
   /** Canonical keys for stored paths; record updates retain the cached key. */
@@ -416,13 +427,18 @@ export class SessionChildRegistry {
     const record = this.records.get(childSessionId);
     const parent = parentSessionId.trim();
     if (!record || !parent) return undefined;
-    const next: SessionChildRecord = { ...record, parentSessionId: parent };
-    const sdkId = parentSdkSessionId?.trim();
-    if (sdkId) {
-      return this.replace({ ...next, parentSdkSessionId: sdkId });
-    }
-    delete (next as { parentSdkSessionId?: string }).parentSdkSessionId;
-    return this.replace(next);
+    const sdkId = parentSdkSessionId?.trim() || undefined;
+    if (record.parentSessionId === parent && record.parentSdkSessionId === sdkId) return record;
+    const next = { ...record, parentSessionId: parent, parentSdkSessionId: sdkId };
+    if (!sdkId) delete next.parentSdkSessionId;
+    const updated = this.replace(next);
+    for (const listener of this.reparentListeners) listener(updated);
+    return updated;
+  }
+
+  onReparent(listener: (record: SessionChildRecord) => void): () => void {
+    this.reparentListeners.add(listener);
+    return () => this.reparentListeners.delete(listener);
   }
 
   /** Every child not yet ended, in start order. */
@@ -434,14 +450,25 @@ export class SessionChildRegistry {
   bindSdkSessionId(
     childSessionId: string,
     sdkSessionId: string,
+    options: { readonly inferred?: boolean } = {},
   ): SessionChildRecord | undefined {
     const record = this.records.get(childSessionId);
     const sdkId = sdkSessionId.trim();
     if (!record || !sdkId) return undefined;
-    if (record.sdkSessionId === sdkId) return record;
+    const inferred = options.inferred === true;
+    if (record.sdkSessionId === sdkId) {
+      // The child's own session-id event confirms an inferred binding.
+      if (inferred || !record.sdkSessionIdInferred) return record;
+      const confirmed: SessionChildRecord = { ...record };
+      delete (confirmed as { sdkSessionIdInferred?: boolean }).sdkSessionIdInferred;
+      return this.replace(confirmed);
+    }
     if (record.sdkSessionId) this.bySdkId.delete(record.sdkSessionId);
     this.bySdkId.set(sdkId, childSessionId);
-    return this.replace({ ...record, sdkSessionId: sdkId });
+    const next: SessionChildRecord = { ...record, sdkSessionId: sdkId };
+    if (inferred) return this.replace({ ...next, sdkSessionIdInferred: true });
+    delete (next as { sdkSessionIdInferred?: boolean }).sdkSessionIdInferred;
+    return this.replace(next);
   }
 
   markReportDelivered(childSessionId: string): SessionChildRecord | undefined {
@@ -453,7 +480,11 @@ export class SessionChildRegistry {
     });
   }
 
-  /** A report refused because the parent was not live: counted, never queued. */
+  /**
+   * A report that could not be delivered or queued for its parent: counted.
+   * A known child with an inactive parent is queued by the report router
+   * instead and is not counted here.
+   */
   markReportRefused(
     childSessionId: string,
     summary: string,
@@ -465,6 +496,20 @@ export class SessionChildRegistry {
       reportsRefused: record.reportsRefused + 1,
       lastRefusedReport: summary,
     });
+  }
+
+  /** A live pause keeps the child registered and retains its concurrency slot. */
+  markPaused(childSessionId: string, notice: AgentActionNotice): boolean {
+    const record = this.records.get(childSessionId);
+    if (!record || record.terminalStatus ||
+      (record.paused && record.notice?.reason === notice.reason)) return false;
+    this.replace({ ...record, paused: true, notice });
+    return true;
+  }
+
+  clearPause(childSessionId: string): void {
+    const child = this.records.get(childSessionId);
+    if (child?.paused || child?.notice) this.update(childSessionId, { paused: undefined, notice: undefined });
   }
 
   /** Apply a patch; a key set to `undefined` clears that field. */
@@ -513,6 +558,7 @@ export class SessionChildRegistry {
       ...(endCause !== undefined ? { endCause } : {}),
     };
     delete (next as { pendingPermission?: unknown }).pendingPermission;
+    delete (next as { paused?: true }).paused;
     const ended = this.replace(next);
     this.endedOrder.push(childSessionId);
     this.pruneEnded();

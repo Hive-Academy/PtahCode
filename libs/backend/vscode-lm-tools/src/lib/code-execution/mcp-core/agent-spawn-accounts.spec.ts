@@ -88,6 +88,7 @@ function makeHarness(): Harness {
     spawnFromSdkHandle,
     prepareSdkHandleSpawn,
     reserveAgentId: jest.fn().mockReturnValue('reserved-1'),
+    laneToolGateFor: jest.fn().mockReturnValue(undefined),
   };
   const detection: Partial<CliDetectionService> = {
     detectAll: jest.fn().mockResolvedValue([]),

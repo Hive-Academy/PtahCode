@@ -248,6 +248,22 @@ export const codexRequestSchemas = {
       rateLimitUpsell: json.optional(),
     }),
   },
+  // Usage identity fallback only: read when a rate-limits read names no account.
+  // Only `account` (nullable for a signed-out home) is required; the owner key
+  // needs nothing else, so older servers that omit other fields still validate.
+  'account/read': {
+    params: z.strictObject({ refreshToken: z.boolean().nullish() }),
+    result: z.object({
+      account: z
+        .object({
+          type: string,
+          email: string.nullish(),
+          planType: string.nullish(),
+        })
+        .nullable(),
+      requiresOpenaiAuth: z.boolean().nullish(),
+    }),
+  },
 } as const;
 
 export const codexServerRequestSchemas = {

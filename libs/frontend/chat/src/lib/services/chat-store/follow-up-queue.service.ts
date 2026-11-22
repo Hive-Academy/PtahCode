@@ -15,6 +15,7 @@ import {
   createExecutionChatMessage,
   SessionId,
   parseRpcUserErrorCode,
+  providerRuntimeFor,
   type QueuedFollowUpSnapshot,
 } from '@ptah-extension/shared';
 import {
@@ -41,7 +42,6 @@ import { isTabBusyGenerating } from './tab-busy';
 
 /** The backend's slash-command test: a message is a command only when it starts with one. */
 const SLASH_COMMAND = /^\/[a-zA-Z]/;
-const CODEX_PROVIDER_ID = 'openai-codex';
 const LOG = 'FollowUpQueueService';
 const RECEIPT_RECHECK_DELAYS_MS = [2000, 4000, 8000, 16000, 30000] as const;
 const COMMITTED_RECEIPT_DEADLINE_MS = 10 * 60 * 1000;
@@ -314,21 +314,22 @@ export class FollowUpQueueService {
     }
   }
 
-  /** Send now is available for Codex steering and Claude interruption. */
+  /** Send now is available for native-runtime steering and Claude interruption. */
   canSendNow(tabId: string): boolean {
     return !!this.findTab(tabId)?.claudeSessionId;
   }
 
   /**
-   * Every non-Codex chat session runs on the Claude Agent SDK, whose
-   * "Send now" is interrupt-and-send. The active provider id for Claude is
-   * `anthropic` (AuthStateService.activeProviderId), so do not match a
-   * Claude-specific id here; the backend refuses an unsupported session.
+   * A session on the Claude Agent SDK, whose "Send now" is interrupt-and-send.
+   * Native runtimes (Codex, provider sessions) steer instead. The active
+   * provider id for Claude is `anthropic` (AuthStateService.activeProviderId),
+   * which resolves to the Claude SDK like every other non-native id; the
+   * backend refuses an unsupported session.
    */
   isClaudeSession(tabId: string): boolean {
     const tab = this.findTab(tabId);
     return !!tab?.claudeSessionId &&
-      (tab.providerId ?? this.authState.activeProviderId()) !== CODEX_PROVIDER_ID;
+      providerRuntimeFor(tab.providerId ?? this.authState.activeProviderId()) === 'claude-sdk';
   }
 
   /**

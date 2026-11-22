@@ -197,6 +197,29 @@ describe('SessionInspectorStore', () => {
     expect(store.modelFor(current.id)().orchestrator.turns).toBe(expected);
   });
 
+  it('flags a null cost from a missing published rate as not priced', () => {
+    const unpriced = tab({
+      sessionStats: stats({ totalCost: null, costUnavailableReason: 'rate-missing' }),
+    });
+    put(unpriced);
+    expect(store.modelFor(unpriced.id)().orchestrator).toMatchObject({
+      cost: null, costNotPriced: true,
+    });
+  });
+
+  it('does not flag a priced or otherwise unavailable cost as not priced', () => {
+    const priced = tab({ sessionStats: stats({ totalCost: 0.5 }) });
+    put(priced);
+    expect(store.modelFor(priced.id)().orchestrator).toMatchObject({
+      cost: 0.5, costNotPriced: false,
+    });
+    const unknown = tab({
+      sessionStats: stats({ totalCost: null, costUnavailableReason: 'billing-unknown' }),
+    });
+    put(unknown);
+    expect(store.modelFor(unknown.id)().orchestrator.costNotPriced).toBe(false);
+  });
+
   it('reports unknown turns before a restored session loads messages or host stats', () => {
     const current = tab({ sessionStats: null, messages: [] });
     put(current);

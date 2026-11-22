@@ -1,4 +1,5 @@
 import {
+  PROVIDER_SESSION_PROVIDER_IDS,
   getAnthropicProvider,
   type ProviderModelTier,
 } from '@ptah-extension/shared';
@@ -66,7 +67,16 @@ export function formatProviderDisplayName(id: string): string {
  * curation (`libs/backend/auth-providers/src/lib/auth/provider-auth-resolver.ts:165-167`, `codexNativeRuntimeRequired`):
  * Codex runs only through its native runtime. The picker hides it and readiness blocks a save.
  */
-export const CURATOR_UNSUPPORTED_PROVIDER_IDS = ['openai-codex'] as const;
+export const CURATOR_UNSUPPORTED_PROVIDER_IDS = [
+  'openai-codex',
+  ...PROVIDER_SESSION_PROVIDER_IDS,
+] as const;
+
+/**
+ * A provider session (Antigravity) runs only as a chat or agent runtime; the backend refuses it for every
+ * SDK-internal query (`providerSessionNativeRuntimeRequiredMessage`), so no background role can use it.
+ */
+export const BACKGROUND_UNSUPPORTED_PROVIDER_IDS = PROVIDER_SESSION_PROVIDER_IDS;
 
 /** One background-consumer row descriptor for view rendering. */
 export interface BackgroundConsumerRow {
@@ -266,7 +276,7 @@ export function buildConsumerRows(
       modelKey: 'skills.enhancement.model',
       section: enhancement,
       retryKey: 'enhancement',
-      unsupportedProviders: [],
+      unsupportedProviders: BACKGROUND_UNSUPPORTED_PROVIDER_IDS,
     },
     route,
     scopeOf,
