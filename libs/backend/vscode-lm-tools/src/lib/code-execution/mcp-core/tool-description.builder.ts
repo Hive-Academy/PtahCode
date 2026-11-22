@@ -561,7 +561,7 @@ export function buildReadSymbolTool(): MCPToolDefinition {
 export function buildGrepTool(): MCPToolDefinition {
   return {
     name: GREP_TOOL_NAME,
-    description: withToolCue(GREP_TOOL_NAME, `Search file contents for a text or regex (strings, constants, comments, any usage). Matches are grouped by file and show the line number, the enclosing function/class in [brackets] and the trimmed line. Literal by default; smart case. Default ${GREP_DEFAULT_MAX_MATCHES} matches (max ${GREP_HARD_MAX_MATCHES}), ${GREP_MAX_FILES} files; a cut result says what was left out. Skips ignored paths, binary files and files over 1 MB; set \`includeIgnored\` with a scoped \`path\` (e.g. "node_modules/zod") to search them. Use ptah_code_search_symbols to find a declaration by name.`),
+    description: withToolCue(GREP_TOOL_NAME, `Search file contents for a text or regex (strings, constants, comments, any usage). Matches are grouped by file and show the line number, the enclosing function/class in [brackets] and the trimmed line. Literal by default; smart case. Default ${GREP_DEFAULT_MAX_MATCHES} matches (max ${GREP_HARD_MAX_MATCHES}), ${GREP_MAX_FILES} files; a cut result says what was left out. Skips ignored paths, binary files and files over 1 MB; set \`includeIgnored\` with a scoped \`path\` (e.g. "node_modules/zod") to search them. A small result (≤3 matches in ≤2 declarations) inlines each enclosing body, so no follow-up read is needed. Use ptah_code_search_symbols to find a declaration by name.`),
     inputSchema: {
       type: 'object',
       properties: {
@@ -582,7 +582,7 @@ export function buildGrepTool(): MCPToolDefinition {
         regex: {
           type: 'boolean',
           description:
-            'Optional. Omitted: read as a regex when the pattern has clear regex syntax (a|b, \\b, \\w, (..), [..]), otherwise literal. true or false forces the mode.',
+            'Optional. Omit it and a pattern with regex syntax (a|b, \\b, \\d, [a-z], .*, ^, $) runs as a regex; a literal-looking pattern, lookaround, back-references, `x || y` or a Windows path stays literal. Set true or false to force.',
         },
         caseSensitive: {
           type: 'boolean',
@@ -605,6 +605,11 @@ export function buildGrepTool(): MCPToolDefinition {
           type: 'boolean',
           description:
             'Also search ignored and hidden paths such as node_modules. Needs a scoped `path`.',
+        },
+        inlineBody: {
+          type: 'boolean',
+          description:
+            'Default true. A result of at most 3 matches in at most 2 functions/classes also shows each enclosing body (max 60 lines each, 150 in all; a cut names the lines left out). Pass false for match lines only.',
         },
         workspaceRoot: {
           type: 'string',

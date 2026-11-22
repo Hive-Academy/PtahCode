@@ -2666,8 +2666,8 @@ describe('MCP dispatcher contract sweep (TASK_2026_559 Batch 21, Task 21.1)', ()
       // +12 (Batch 33): the registry publicSymbols list gained ", python, go".
       ptah_ast_analyze: 626,
       // TASK_2026_2299, measured: 476 and 394 chars; ceil(n * 1.1) + 10.
-      // The cue "Use instead of shell grep or rg." leads the description: 543 chars; ceil(len * 1.1) + 10.
-      ptah_grep: 608,
+      // Cue "Use instead of shell grep or rg." and the inline-body sentence: 651 chars; ceil(len * 1.1) + 10.
+      ptah_grep: 727,
       ptah_read_symbol: 444,
       ptah_task_create: 498,
       ptah_agent_status: 445,
