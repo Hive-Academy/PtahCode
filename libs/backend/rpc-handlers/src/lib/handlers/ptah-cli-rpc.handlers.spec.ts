@@ -142,7 +142,10 @@ import {
 } from '@ptah-extension/vscode-core/testing';
 import type { PtahCliRegistry } from '@ptah-extension/cli-agent-runtime';
 import type { ProviderModelsService } from '@ptah-extension/auth-providers';
-import { modelListErrorText } from '@ptah-extension/shared';
+import {
+  modelListErrorText,
+  modelListNoticeText,
+} from '@ptah-extension/shared';
 import type {
   CliAdapterManifest,
   PtahCliSummary,
@@ -603,6 +606,8 @@ describe('PtahCliRpcHandlers', () => {
       models: Array<{ id: string; name: string }>;
       source?: string;
       failureReason?: string;
+      savedAt?: number;
+      notice?: string;
       error?: string;
     };
     const liveRow = {
@@ -743,6 +748,10 @@ describe('PtahCliRpcHandlers', () => {
       expect(result.failureReason).toBe('network');
       expect(result.models.map((m) => m.id)).toEqual(['vendor/model-a']);
       expect(result.error).toBeUndefined();
+      expect(result.savedAt).toBe(1);
+      expect(result.notice).toBe(
+        modelListNoticeText('network', 'OpenRouter', 1),
+      );
     });
 
     it('returns an error when the provider lookup fails', async () => {

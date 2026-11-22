@@ -25,6 +25,7 @@ import type {
 import {
   getPtahCliLaneProvider,
   modelListErrorText,
+  modelListNoticeText,
 } from '@ptah-extension/shared';
 import {
   CLI_AGENT_RUNTIME_TOKENS,
@@ -373,10 +374,19 @@ export class PtahCliRpcHandlers {
           return { models, source: result.source };
         }
         if (result.source === 'persisted') {
+          const { savedAt } = result;
           return {
             models,
             source: result.source,
             failureReason: result.failureReason,
+            ...(savedAt !== undefined && {
+              savedAt,
+              notice: modelListNoticeText(
+                result.failureReason,
+                provider.name,
+                savedAt,
+              ),
+            }),
           };
         }
         return {

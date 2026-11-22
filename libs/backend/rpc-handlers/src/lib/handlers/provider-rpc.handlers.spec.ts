@@ -227,7 +227,7 @@ type MockSdkAdapter = jest.Mocked<
   Pick<
     SdkAgentAdapter,
     | 'clearModelCache'
-    | 'getApiModels'
+    | 'getLiveApiModels'
     | 'getLiveSupportedModels'
     | 'getLiveNativeClaudeModels'
   >
@@ -236,7 +236,9 @@ type MockSdkAdapter = jest.Mocked<
 function createMockSdkAdapter(): MockSdkAdapter {
   return {
     clearModelCache: jest.fn(),
-    getApiModels: jest.fn().mockResolvedValue([]),
+    getLiveApiModels: jest
+      .fn()
+      .mockResolvedValue({ ok: false, reason: 'empty' }),
     getLiveSupportedModels: jest.fn().mockResolvedValue([]),
     getLiveNativeClaudeModels: jest.fn().mockResolvedValue([]),
   };
@@ -309,6 +311,7 @@ interface Harness {
   handlers: ProviderRpcHandlers;
   kimiAuth: { resolveRequestCredential: jest.Mock };
   lmStudioProxy: { listModels: jest.Mock };
+  ambientLogin: { read: jest.Mock };
   logger: MockLogger;
   rpcHandler: MockRpcHandler;
   configManager: MockConfigManager;
@@ -428,6 +431,14 @@ function makeHarness(
       },
     ]),
   };
+  // `claude auth status` as the ambient reader reports it; signed in unless
+  // a case says otherwise.
+  const ambientLogin = {
+    read: jest.fn(async () => ({
+      state: 'connected' as const,
+      checkedAt: '2026-01-01T00:00:00.000Z',
+    })),
+  };
   const handlers = new ProviderRpcHandlers(
     logger as unknown as Logger,
     rpcHandler as unknown as import('@ptah-extension/vscode-core').RpcHandler,
@@ -460,6 +471,7 @@ function makeHarness(
     new ConnectionCheckRecorder(),
     planLimitsService,
     lmStudioProxy,
+    ambientLogin as never,
     kimiAuth as never,
     opts.hostCapabilities,
   );
@@ -469,6 +481,7 @@ function makeHarness(
     lmStudioProxy,
     handlers,
     kimiAuth,
+    ambientLogin,
     logger,
     rpcHandler,
     configManager,
@@ -1238,14 +1251,11 @@ describe('ProviderRpcHandlers', () => {
       expect(h.lmStudioProxy.listModels).toHaveBeenCalledTimes(1);
     });
 
-    it.each(['api', 'sdk', 'fallback', 'claude-cli'])(
+    it.each(['api', 'sdk', 'claude-cli'])(
       'does not declare provider capacity for Anthropic-direct %s model entries',
       async (source) => {
         const h = makeHarness({
-          authEnv:
-            source === 'api' || source === 'fallback'
-              ? { ANTHROPIC_API_KEY: 'fixture-key' }
-              : {},
+          authEnv: source === 'api' ? { ANTHROPIC_API_KEY: 'fixture-key' } : {},
         });
         const models = [
           {
@@ -1254,11 +1264,9 @@ describe('ProviderRpcHandlers', () => {
             description: '',
           },
         ];
-        h.sdkAdapter.getApiModels.mockResolvedValue(models);
+        h.sdkAdapter.getLiveApiModels.mockResolvedValue({ ok: true, models });
         h.sdkAdapter.getLiveSupportedModels.mockResolvedValue(models);
         h.sdkAdapter.getLiveNativeClaudeModels.mockResolvedValue(models);
-        if (source === 'fallback')
-          h.sdkAdapter.getApiModels.mockRejectedValue(new Error('offline'));
         h.handlers.register();
         const providerId = source === 'claude-cli' ? 'claude-cli' : 'anthropic';
         const entry = h.providerModels.registerDynamicFetcher.mock.calls.find(
@@ -1292,7 +1300,7 @@ describe('ProviderRpcHandlers', () => {
 
       const result = await entry[1]();
 
-      expect(h.sdkAdapter.getApiModels).not.toHaveBeenCalled();
+      expect(h.sdkAdapter.getLiveApiModels).not.toHaveBeenCalled();
       expect(h.sdkAdapter.getLiveSupportedModels).toHaveBeenCalledTimes(1);
       expect(result).toHaveLength(1);
     });
@@ -1503,21 +1511,70 @@ describe('ProviderRpcHandlers', () => {
       await expect(entry[1]()).rejects.toEqual(new ModelListError('timeout'));
     });
 
-    it('does not fall back to the SDK list when the Anthropic API key is rejected', async () => {
-      const h = makeHarness({ authEnv: { ANTHROPIC_API_KEY: 'fixture-key' } });
-      h.sdkAdapter.getApiModels.mockRejectedValue(
-        new ModelListError('auth-rejected'),
-      );
-      h.handlers.register();
+    /** SDK tier aliases, what the SDK answers under a key /v1/models refused. */
+    const SDK_ALIAS_ROWS = [
+      { value: 'default', displayName: 'Default', description: '' },
+      { value: 'sonnet', displayName: 'Sonnet', description: '' },
+    ];
+
+    function anthropicFetcher(h: Harness): () => Promise<unknown[]> {
       const entry = h.providerModels.registerDynamicFetcher.mock.calls.find(
         ([id]) => id === 'anthropic',
       );
       if (!entry) throw new Error('Missing Anthropic fetcher');
+      return entry[1] as () => Promise<unknown[]>;
+    }
 
-      await expect(entry[1]()).rejects.toEqual(
-        new ModelListError('auth-rejected'),
+    it.each([
+      'auth-rejected',
+      'network',
+      'timeout',
+      'http-error',
+      'bad-response',
+      'empty',
+    ] as const)(
+      'reports a %s /v1/models read for an API key and never lists the SDK aliases',
+      async (reason) => {
+        const h = makeHarness({
+          authEnv: { ANTHROPIC_API_KEY: 'fixture-key' },
+        });
+        // The real read resolves with a reason; it does not throw.
+        h.sdkAdapter.getLiveApiModels.mockResolvedValue({ ok: false, reason });
+        h.sdkAdapter.getLiveSupportedModels.mockResolvedValue(SDK_ALIAS_ROWS);
+        h.handlers.register();
+
+        await expect(anthropicFetcher(h)()).rejects.toEqual(
+          new ModelListError(reason),
+        );
+        expect(h.sdkAdapter.getLiveSupportedModels).not.toHaveBeenCalled();
+      },
+    );
+
+    it('reports not-signed-in when the native Claude login lists nothing and is signed out', async () => {
+      const h = makeHarness();
+      h.sdkAdapter.getLiveSupportedModels.mockResolvedValue([]);
+      h.ambientLogin.read.mockResolvedValue({
+        state: 'signed-out',
+        checkedAt: '2026-01-01T00:00:00.000Z',
+      });
+      h.handlers.register();
+
+      await expect(anthropicFetcher(h)()).rejects.toEqual(
+        new ModelListError('not-signed-in'),
       );
-      expect(h.sdkAdapter.getLiveSupportedModels).not.toHaveBeenCalled();
+    });
+
+    it('does not read the Claude login for an OAuth token that lists nothing', async () => {
+      const h = makeHarness({
+        authEnv: { ANTHROPIC_AUTH_TOKEN: 'fixture-token' },
+      });
+      h.sdkAdapter.getLiveSupportedModels.mockResolvedValue([]);
+      h.handlers.register();
+
+      await expect(anthropicFetcher(h)()).rejects.toEqual(
+        new ModelListError('unexpected'),
+      );
+      expect(h.ambientLogin.read).not.toHaveBeenCalled();
     });
 
     /**
@@ -1588,11 +1645,53 @@ describe('ProviderRpcHandlers', () => {
         expect(h.sdkAdapter.getLiveSupportedModels).not.toHaveBeenCalled();
       });
 
-      it('throws unexpected when the native SDK bridge answers no models', async () => {
+      it('throws unexpected when the bridge answers no models and the login is signed in', async () => {
         // The bridge answers [] for every failure, so [] is not an empty
-        // catalog; the reason was lost inside the bridge.
+        // catalog; a signed-in login gives no credential reason.
         const h = makeHarness();
         h.sdkAdapter.getLiveNativeClaudeModels.mockResolvedValue([]);
+        h.handlers.register();
+
+        await expect(claudeCliFetcher(h)()).rejects.toEqual(
+          new ModelListError('unexpected'),
+        );
+      });
+
+      it.each([
+        [
+          'signed out',
+          { state: 'signed-out', checkedAt: '2026-01-01T00:00:00.000Z' },
+        ],
+        [
+          'without a Claude CLI',
+          {
+            state: 'unknown',
+            reason: 'cli-missing',
+            checkedAt: '2026-01-01T00:00:00.000Z',
+          },
+        ],
+      ])(
+        'throws not-signed-in when the native login is %s',
+        async (_label, status) => {
+          const h = makeHarness();
+          h.sdkAdapter.getLiveNativeClaudeModels.mockResolvedValue([]);
+          h.ambientLogin.read.mockResolvedValue(status);
+          h.handlers.register();
+
+          await expect(claudeCliFetcher(h)()).rejects.toEqual(
+            new ModelListError('not-signed-in'),
+          );
+        },
+      );
+
+      it('throws unexpected when the login status could not be read', async () => {
+        const h = makeHarness();
+        h.sdkAdapter.getLiveNativeClaudeModels.mockResolvedValue([]);
+        h.ambientLogin.read.mockResolvedValue({
+          state: 'unknown',
+          reason: 'timeout',
+          checkedAt: null,
+        });
         h.handlers.register();
 
         await expect(claudeCliFetcher(h)()).rejects.toEqual(

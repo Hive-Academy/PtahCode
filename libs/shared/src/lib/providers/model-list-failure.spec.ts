@@ -7,7 +7,7 @@ import {
 } from './model-list-failure';
 
 const COPY: Record<ModelListFailureReason, string> = {
-  'no-key': 'add your Z.AI API key in Settings',
+  'no-key': 'add an API key for Z.AI in Settings',
   'not-signed-in': 'sign in to Z.AI in Settings',
   'auth-rejected':
     'Z.AI rejected the API key; delete it and enter a valid one in Settings',

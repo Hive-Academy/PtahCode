@@ -139,6 +139,7 @@ function buildSuite(activeProviderId = 'anthropic'): Suite {
       })),
     },
     { listModels: jest.fn(async () => []) },
+    { read: jest.fn() },
   );
   handlers.register();
 

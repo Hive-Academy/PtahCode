@@ -26,6 +26,7 @@ import {
   getProviderLiveModelCapabilities,
   getAllAnthropicProviders,
   isDirectAnthropic,
+  type ModelListFailureReason,
   type ProviderProfile,
 } from '@ptah-extension/shared';
 import { SDK_TOKENS } from '../di/tokens';
@@ -51,6 +52,29 @@ interface ApiModelEntry {
   id: string;
   displayName: string;
   createdAt: string;
+}
+
+/** A /v1/models read: the rows, or why there are none. */
+export type ApiModelsRead<T> =
+  | { readonly ok: true; readonly models: T[] }
+  | { readonly ok: false; readonly reason: ModelListFailureReason };
+
+/**
+ * Reason for a thrown /v1/models `fetch`: the `AbortSignal.timeout` rejection
+ * is a `TimeoutError`, undici reports a connection failure as a `TypeError`
+ * ("fetch failed"), and an unparsable body is a `SyntaxError`.
+ */
+function classifyApiModelsError(error: unknown): ModelListFailureReason {
+  // The timeout rejection is a DOMException, which is not an `Error`
+  // instance in every realm, so its name is read structurally.
+  const name =
+    error && typeof error === 'object'
+      ? (error as { name?: unknown }).name
+      : undefined;
+  if (name === 'TimeoutError' || name === 'AbortError') return 'timeout';
+  if (error instanceof SyntaxError) return 'bad-response';
+  if (error instanceof TypeError) return 'network';
+  return 'unexpected';
 }
 
 /** Valid tier names for model resolution */
@@ -1502,12 +1526,39 @@ export class SdkModelService {
    * @returns Array of ApiModelEntry, or empty array on failure/skip
    */
   async fetchApiModels(envOverride?: AuthEnv): Promise<ApiModelEntry[]> {
+    const read = await this.readApiModels(envOverride);
+    return read.ok ? read.models : [];
+  }
+
+  /**
+   * /v1/models for the active direct-Anthropic API key, with the reason when
+   * it fails. For the provider model-list chain: a refused key must surface
+   * as `auth-rejected`, never as an empty list that sends the caller on to
+   * the SDK tier aliases (which the chain would then save as live).
+   */
+  async getLiveApiModels(): Promise<ApiModelsRead<ModelInfo>> {
+    const read = await this.readApiModels();
+    if (!read.ok) return read;
+    return {
+      ok: true,
+      models: read.models.map((m) => ({
+        value: m.id,
+        displayName: m.displayName,
+        description: '',
+      })),
+    };
+  }
+
+  /** {@link fetchApiModels} with the failure reason kept. */
+  private async readApiModels(
+    envOverride?: AuthEnv,
+  ): Promise<ApiModelsRead<ApiModelEntry>> {
     if (
       !envOverride &&
       this.cachedApiModels &&
       Date.now() - this.apiModelsCacheTime < API_MODELS_CACHE_TTL
     ) {
-      return this.cachedApiModels;
+      return { ok: true, models: this.cachedApiModels };
     }
     const env = envOverride ?? this.authEnv;
     const baseUrl = env.ANTHROPIC_BASE_URL;
@@ -1515,13 +1566,13 @@ export class SdkModelService {
       this.logger.debug(
         '[SdkModelService] Skipping /v1/models for local proxy',
       );
-      return [];
+      return { ok: false, reason: 'no-live-source' };
     }
     const apiKey = env.ANTHROPIC_API_KEY;
     const authToken = env.ANTHROPIC_AUTH_TOKEN;
     if (!apiKey && !authToken) {
       this.logger.debug('[SdkModelService] No auth credentials for /v1/models');
-      return [];
+      return { ok: false, reason: 'no-key' };
     }
 
     try {
@@ -1547,7 +1598,13 @@ export class SdkModelService {
           `[SdkModelService] /v1/models returned ${response.status}`,
           { status: response.status },
         );
-        return [];
+        return {
+          ok: false,
+          reason:
+            response.status === 401 || response.status === 403
+              ? 'auth-rejected'
+              : 'http-error',
+        };
       }
 
       const body = (await response.json()) as {
@@ -1561,20 +1618,15 @@ export class SdkModelService {
 
       if (!body.data || !Array.isArray(body.data)) {
         this.logger.warn('[SdkModelService] /v1/models returned no data');
-        return [];
+        return { ok: false, reason: 'bad-response' };
       }
       const models: ApiModelEntry[] = body.data
-        .filter((m) => m.id.startsWith('claude-'))
+        .filter((m) => typeof m?.id === 'string' && m.id.startsWith('claude-'))
         .map((m) => ({
           id: m.id,
           displayName: m.display_name || m.id,
           createdAt: m.created_at || '',
         }));
-
-      if (!envOverride) {
-        this.cachedApiModels = models;
-        this.apiModelsCacheTime = Date.now();
-      }
 
       this.logger.info('[SdkModelService] Fetched models from /v1/models API', {
         total: body.data.length,
@@ -1582,11 +1634,17 @@ export class SdkModelService {
         ...(!envOverride && { ids: models.map((m) => m.id) }),
       });
 
-      return models;
+      if (models.length === 0) return { ok: false, reason: 'empty' };
+
+      if (!envOverride) {
+        this.cachedApiModels = models;
+        this.apiModelsCacheTime = Date.now();
+      }
+      return { ok: true, models };
     } catch (error) {
-      // degradation-audit: optional-capability - /v1/models is an optional
-      // catalog source reached over the network; [] is the same answer as a
-      // response with no data and sends the caller to the SDK source.
+      // degradation-audit: reported - the failure is returned as a classified
+      // reason (callers that treat /v1/models as optional map it to []); the
+      // raw error stays in this warn log.
       this.logger.warn(
         '[SdkModelService] Failed to fetch /v1/models',
         envOverride
@@ -1595,7 +1653,7 @@ export class SdkModelService {
             ? error
             : new Error(String(error)),
       );
-      return [];
+      return { ok: false, reason: classifyApiModelsError(error) };
     }
   }
 

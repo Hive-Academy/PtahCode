@@ -78,6 +78,7 @@ import {
   StreamTransformer,
   SdkModuleLoader,
   SdkModelService,
+  type ApiModelsRead,
   SessionForkService,
   SdkAdapterCallbackRegistry,
   SessionIdResolvedCallbackRegistry,
@@ -917,6 +918,14 @@ export class SdkAgentAdapter implements IAgentAdapter {
 
   async getApiModels(): Promise<ModelInfo[]> {
     return this.modelService.getApiModelsNormalized();
+  }
+
+  /**
+   * /v1/models for the active API key, with the failure reason kept, for the
+   * provider model-list chain (see `SdkModelService.getLiveApiModels`).
+   */
+  async getLiveApiModels(): Promise<ApiModelsRead<ModelInfo>> {
+    return this.modelService.getLiveApiModels();
   }
 
   /**

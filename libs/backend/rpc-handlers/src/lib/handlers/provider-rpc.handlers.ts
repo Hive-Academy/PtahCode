@@ -61,6 +61,7 @@ import {
   CODEX_PROVIDER_ENTRY,
   KimiCodeAuthUnavailableError,
   ModelListError,
+  ClaudeAmbientLoginStatusReader,
   classifyModelListFailure,
   type ProviderModelList,
   OllamaModelDiscoveryService,
@@ -100,7 +101,6 @@ import {
   parseKimiCodeModels,
   modelListErrorText,
   modelListNoticeText,
-  CREDENTIAL_FAILURE_REASONS,
   getAnthropicProvider,
   getPtahCliLaneProvider,
   getProviderSessionProfile,
@@ -181,6 +181,8 @@ export class ProviderRpcHandlers {
     private readonly lmStudioProxy: {
       listModels(): Promise<ProviderModelInfo[]>;
     },
+    @inject(ClaudeAmbientLoginStatusReader)
+    private readonly ambientLogin: Pick<ClaudeAmbientLoginStatusReader, 'read'>,
     @inject(AUTH_PROVIDERS_TOKENS.SDK_KIMI_CODE_AUTH, { isOptional: true })
     private readonly kimiAuth?: IKimiCodeAuthService,
     /**
@@ -649,8 +651,10 @@ export class ProviderRpcHandlers {
    * users — it is NOT in the ANTHROPIC_PROVIDERS registry.
    *
    * Cascade:
-   * 1. API key present → /v1/models API (returns specific model versions)
-   * 2. SDK supportedModels() (works for all auth methods including CLI/OAuth)
+   * 1. API key present → /v1/models API (returns specific model versions).
+   *    Its failure is final: no SDK fall-through under the same key.
+   * 2. No API key → SDK supportedModels() (CLI/OAuth). A signed-out native
+   *    Claude login is reported as `not-signed-in`.
    *
    * Both paths populate contextLength from the pricing map as a selection
    * hint only. Neither supplies provider capacity evidence. No repository
@@ -667,70 +671,53 @@ export class ProviderRpcHandlers {
       const hasApiKey =
         !!this.authEnv.ANTHROPIC_API_KEY && isDirectAnthropic(this.authEnv);
 
-      try {
-        if (hasApiKey) {
-          const apiModels = await this.sdkAdapter.getApiModels();
-          if (apiModels.length > 0) {
-            this.logger.info(
-              `[ProviderRpc] Fetched ${apiModels.length} models from /v1/models (API key)`,
-            );
-            return apiModels.map((m) => ({
-              id: m.value,
-              name: m.displayName,
-              description: getModelPricingDescription(m.value),
-              contextLength: getModelContextWindow(m.value),
-              supportsToolUse: true,
-            }));
-          }
+      if (hasApiKey) {
+        // The key is the identity: a refused key, an outage or a bad
+        // payload is reported as such. Falling on to the SDK would answer
+        // with its tier aliases under the same key, which the chain would
+        // show and save as the live list.
+        const read = await this.sdkAdapter.getLiveApiModels();
+        if (!read.ok) {
+          this.logger.warn(
+            `[ProviderRpc] Anthropic /v1/models unavailable (${read.reason})`,
+          );
+          throw new ModelListError(read.reason);
         }
-
-        const sdkModels = await this.sdkAdapter.getLiveSupportedModels();
         this.logger.info(
-          `[ProviderRpc] Fetched ${sdkModels.length} models from SDK supportedModels()`,
+          `[ProviderRpc] Fetched ${read.models.length} models from /v1/models (API key)`,
         );
-        return sdkModels.map((m) => ({
+        return read.models.map((m) => ({
           id: m.value,
           name: m.displayName,
-          description: m.description || getModelPricingDescription(m.value),
-          contextLength: getModelContextWindow(m.value),
-          supportsToolUse: true,
-        }));
-      } catch (error) {
-        const reason = classifyModelListFailure(error);
-        this.logger.warn(
-          `[ProviderRpc] Failed to fetch Anthropic direct models, falling back to SDK: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        );
-        // A refused or missing credential is final: the SDK list under the
-        // same credential would be the wrong answer, and a saved list is
-        // never shown for it.
-        if (CREDENTIAL_FAILURE_REASONS.has(reason)) {
-          throw new ModelListError(reason);
-        }
-        let fallbackModels: Awaited<
-          ReturnType<SdkAgentAdapter['getLiveSupportedModels']>
-        >;
-        try {
-          fallbackModels = await this.sdkAdapter.getLiveSupportedModels();
-        } catch (fallbackError) {
-          // degradation-audit: reported - the first failure's classified reason is thrown; the fallback's message stays in the debug log.
-          this.logger.debug('[ProviderRpc] SDK model fallback also failed', {
-            error:
-              fallbackError instanceof Error
-                ? fallbackError.message
-                : String(fallbackError),
-          });
-          throw new ModelListError(reason);
-        }
-        return fallbackModels.map((m) => ({
-          id: m.value,
-          name: m.displayName,
-          description: m.description || getModelPricingDescription(m.value),
+          description: getModelPricingDescription(m.value),
           contextLength: getModelContextWindow(m.value),
           supportsToolUse: true,
         }));
       }
+
+      const sdkModels = await this.sdkAdapter.getLiveSupportedModels();
+      if (sdkModels.length === 0) {
+        // The SDK bridge answers `[]` for every failure; Claude always lists
+        // models, so `[]` is a failure, not an empty catalog. With no key or
+        // token in the env the credential is the host's Claude login.
+        const usesNativeLogin =
+          isDirectAnthropic(this.authEnv) && !this.authEnv.ANTHROPIC_AUTH_TOKEN;
+        throw new ModelListError(
+          usesNativeLogin
+            ? await this.nativeClaudeFailureReason()
+            : 'unexpected',
+        );
+      }
+      this.logger.info(
+        `[ProviderRpc] Fetched ${sdkModels.length} models from SDK supportedModels()`,
+      );
+      return sdkModels.map((m) => ({
+        id: m.value,
+        name: m.displayName,
+        description: m.description || getModelPricingDescription(m.value),
+        contextLength: getModelContextWindow(m.value),
+        supportsToolUse: true,
+      }));
     };
 
     // The virtual 'anthropic' direct provider and the native 'claude-cli'
@@ -755,11 +742,7 @@ export class ProviderRpcHandlers {
         // The SDK bridge answers `[]` for every failure (no CLI, a failed or
         // timed-out probe) and Claude always lists models, so `[]` is a
         // failure whose reason the bridge did not keep, not an empty catalog.
-        // The login state is not observable here, so no sign-in claim.
-        this.logger.debug(
-          '[ProviderRpc] claude-cli: native Claude login returned no models',
-        );
-        throw new ModelListError('unexpected');
+        throw new ModelListError(await this.nativeClaudeFailureReason());
       }
       this.logger.info(
         `[ProviderRpc] Fetched ${models.length} claude-cli models from the native Claude login`,
@@ -772,6 +755,26 @@ export class ProviderRpcHandlers {
         supportsToolUse: true,
       }));
     });
+  }
+
+  /**
+   * Why the native Claude login listed no models, from `claude auth status`
+   * (the reader `provider:listAccounts` uses). Signed out, or no Claude CLI
+   * to sign in with, is a credential failure: the saved list may belong to
+   * the previous login and is not shown. A status that could not be read
+   * proves nothing about the login and stays `unexpected`.
+   */
+  private async nativeClaudeFailureReason(): Promise<ModelListFailureReason> {
+    const status = await this.ambientLogin.read();
+    this.logger.debug(
+      '[ProviderRpc] claude-cli: native Claude login returned no models',
+      { loginState: status.state },
+    );
+    if (status.state === 'signed-out') return 'not-signed-in';
+    if (status.state === 'unknown' && status.reason === 'cli-missing') {
+      return 'not-signed-in';
+    }
+    return 'unexpected';
   }
 
   /**

@@ -515,7 +515,7 @@ export {
   MemoryPromptInjector,
   CodeSymbolPromptInjector,
 } from './lib/helpers';
-export type { ModelTier, EnvMappedTier } from './lib/helpers';
+export type { ModelTier, EnvMappedTier, ApiModelsRead } from './lib/helpers';
 export {
   ANTHROPIC_PROVIDERS,
   DEFAULT_PROVIDER_ID,

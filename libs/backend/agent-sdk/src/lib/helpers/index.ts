@@ -231,6 +231,7 @@ export {
   buildTierCapabilityEnv,
   type ModelTier,
   type EnvMappedTier,
+  type ApiModelsRead,
 } from './sdk-model-service';
 export {
   SlashCommandInterceptor,

@@ -1421,3 +1421,97 @@ describe('SdkModelService — background catalog revalidation', () => {
     );
   });
 });
+
+describe('SdkModelService — getLiveApiModels', () => {
+  const realFetch = global.fetch;
+  afterEach(() => {
+    global.fetch = realFetch;
+  });
+
+  function withFetch(impl: () => Promise<Response>): jest.Mock {
+    const mock = jest.fn(impl);
+    global.fetch = mock as unknown as typeof fetch;
+    return mock;
+  }
+
+  function apiKeyHarness(): Harness {
+    return makeHarness({
+      authMethod: 'apiKey',
+      authEnv: { ANTHROPIC_API_KEY: 'fixture-key' },
+      sdkModels: [],
+    });
+  }
+
+  it.each([
+    [401, 'auth-rejected'],
+    [403, 'auth-rejected'],
+    [500, 'http-error'],
+  ] as const)('maps HTTP %s to %s', async (status, reason) => {
+    withFetch(async () => new Response('{}', { status }));
+    await expect(apiKeyHarness().service.getLiveApiModels()).resolves.toEqual({
+      ok: false,
+      reason,
+    });
+  });
+
+  it('maps a connection failure to network and a timeout to timeout', async () => {
+    const h = apiKeyHarness();
+    withFetch(async () => {
+      throw new TypeError('fetch failed');
+    });
+    await expect(h.service.getLiveApiModels()).resolves.toEqual({
+      ok: false,
+      reason: 'network',
+    });
+    withFetch(async () => {
+      throw new DOMException('The operation timed out.', 'TimeoutError');
+    });
+    await expect(h.service.getLiveApiModels()).resolves.toEqual({
+      ok: false,
+      reason: 'timeout',
+    });
+  });
+
+  it('maps a body without data to bad-response and no Claude rows to empty', async () => {
+    const h = apiKeyHarness();
+    withFetch(async () => new Response('{"nope":1}', { status: 200 }));
+    await expect(h.service.getLiveApiModels()).resolves.toEqual({
+      ok: false,
+      reason: 'bad-response',
+    });
+    withFetch(
+      async () =>
+        new Response('{"data":[{"id":"other-model"}]}', { status: 200 }),
+    );
+    await expect(h.service.getLiveApiModels()).resolves.toEqual({
+      ok: false,
+      reason: 'empty',
+    });
+  });
+
+  it('returns the Claude rows of a good response', async () => {
+    withFetch(
+      async () =>
+        new Response(
+          '{"data":[{"id":"claude-opus-9","display_name":"Opus 9"}]}',
+          { status: 200 },
+        ),
+    );
+    await expect(apiKeyHarness().service.getLiveApiModels()).resolves.toEqual({
+      ok: true,
+      models: [
+        { value: 'claude-opus-9', displayName: 'Opus 9', description: '' },
+      ],
+    });
+  });
+
+  it('reports no-key without calling /v1/models when no credential is set', async () => {
+    const fetchMock = withFetch(async () => new Response('{}'));
+    const h = makeHarness({ authMethod: 'apiKey', sdkModels: [] });
+    await expect(h.service.getLiveApiModels()).resolves.toEqual({
+      ok: false,
+      reason: 'no-key',
+    });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+});

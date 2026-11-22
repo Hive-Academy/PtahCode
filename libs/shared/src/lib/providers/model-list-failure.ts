@@ -28,7 +28,9 @@ export function describeModelListFailure(
 ): string {
   switch (reason) {
     case 'no-key':
-      return `add your ${providerName} API key in Settings`;
+      // Display names can already end in "API" ("Claude API"), so the name
+      // never sits directly before "API key".
+      return `add an API key for ${providerName} in Settings`;
     case 'not-signed-in':
       return `sign in to ${providerName} in Settings`;
     case 'auth-rejected':

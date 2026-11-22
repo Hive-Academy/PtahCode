@@ -845,6 +845,10 @@ export interface PtahCliListModelsResult {
   source: ProviderModelListSource;
   /** Set when `source` is `'persisted'` or `'unavailable'`. */
   failureReason?: ModelListFailureReason;
+  /** `source: 'persisted'` only: epoch ms at which the saved list was fetched. */
+  savedAt?: number;
+  /** `source: 'persisted'` only: fixed-copy sentence explaining the saved list. */
+  notice?: string;
   error?: string;
 }
 export type { AgentPermissionDecision };
