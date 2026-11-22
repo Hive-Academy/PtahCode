@@ -89,6 +89,13 @@ export async function resolveNavWorkspacePath(
   }
 
   const info = await stat(absolutePath);
+  // A FIFO or a device would block the read until a writer appears.
+  if (!info.isDirectory() && !info.isFile()) {
+    return {
+      ok: false,
+      error: `Error: "${target}" is not a regular file or a directory.`,
+    };
+  }
   return {
     ok: true,
     value: {

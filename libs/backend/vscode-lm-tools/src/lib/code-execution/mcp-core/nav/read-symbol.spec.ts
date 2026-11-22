@@ -275,6 +275,20 @@ describe('handleReadSymbol', () => {
     expect(deps.analyze).not.toHaveBeenCalled();
   });
 
+  (process.platform === 'win32' ? it.skip : it)(
+    'refuses a FIFO instead of blocking on it',
+    async () => {
+      const { execFileSync } = await import('node:child_process');
+      execFileSync('mkfifo', [path.join(root, 'pipe.ts')]);
+      const reply = await handleReadSymbol(
+        { file: 'pipe.ts', startLine: 1 },
+        deps,
+      );
+      expect(reply.isError).toBe(true);
+      expect(reply.text).toContain('not a regular file');
+    },
+  );
+
   it('refuses a relative path with .. segments', async () => {
     const reply = await handleReadSymbol(
       { file: `../${path.basename(outside)}/secret.ts`, startLine: 1 },
