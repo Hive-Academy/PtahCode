@@ -64,8 +64,6 @@ interface ProviderModelFetch {
     models: readonly { readonly id: string }[];
     totalCount: number;
     source: ProviderModelListSource;
-    /** @deprecated Always false; removed in B6.3 with the service field. */
-    isStatic?: boolean;
   }>;
 }
 

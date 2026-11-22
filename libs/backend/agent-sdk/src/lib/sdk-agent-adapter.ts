@@ -897,6 +897,20 @@ export class SdkAgentAdapter implements IAgentAdapter {
     return this.modelService.getNativeClaudeModels();
   }
 
+  /**
+   * {@link getSupportedModels} from a live fetch only, never a catalog
+   * restored from the cross-boot store. For the provider model-list chain,
+   * which saves what it is given as live.
+   */
+  async getLiveSupportedModels(): Promise<ModelInfo[]> {
+    return this.modelService.getLiveSupportedModels();
+  }
+
+  /** {@link getNativeClaudeModels} from a live fetch only (see above). */
+  async getLiveNativeClaudeModels(): Promise<ModelInfo[]> {
+    return this.modelService.getLiveNativeClaudeModels();
+  }
+
   async getDefaultModel(): Promise<string> {
     return this.modelService.getDefaultModel();
   }

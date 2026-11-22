@@ -5,7 +5,10 @@
  */
 
 import { z } from 'zod';
-import type { CliLaneDefaults, CliLaneDefaultsPatch } from '../cli-lane-defaults.types';
+import type {
+  CliLaneDefaults,
+  CliLaneDefaultsPatch,
+} from '../cli-lane-defaults.types';
 import type { CodexSandboxMode } from '../advanced-settings.types';
 import type { PtahCliSummary } from '../ptah-cli.types';
 import type { AgentPermissionDecision } from '../agent-permission.types';
@@ -596,9 +599,7 @@ export function isClaudeReasoningEffortSetting(
  *   present but unreadable. Refuse before spawn.
  */
 export type AgentResumeAccountSelectionDecision =
-  | 'inherit'
-  | 'conflict'
-  | 'invalid';
+  'inherit' | 'conflict' | 'invalid';
 
 /**
  * Classify a resume's supplied selection against the stored binding.
@@ -841,11 +842,9 @@ export interface PtahCliListModelsResult {
     contextLength?: number;
   }>;
   /** Where `models` came from. */
-  source?: ProviderModelListSource;
+  source: ProviderModelListSource;
   /** Set when `source` is `'persisted'` or `'unavailable'`. */
   failureReason?: ModelListFailureReason;
-  /** Whether the model list is static. To be removed. */
-  isStatic?: boolean;
   error?: string;
 }
 export type { AgentPermissionDecision };

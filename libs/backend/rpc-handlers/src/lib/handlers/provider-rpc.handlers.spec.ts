@@ -228,8 +228,8 @@ type MockSdkAdapter = jest.Mocked<
     SdkAgentAdapter,
     | 'clearModelCache'
     | 'getApiModels'
-    | 'getSupportedModels'
-    | 'getNativeClaudeModels'
+    | 'getLiveSupportedModels'
+    | 'getLiveNativeClaudeModels'
   >
 >;
 
@@ -237,8 +237,8 @@ function createMockSdkAdapter(): MockSdkAdapter {
   return {
     clearModelCache: jest.fn(),
     getApiModels: jest.fn().mockResolvedValue([]),
-    getSupportedModels: jest.fn().mockResolvedValue([]),
-    getNativeClaudeModels: jest.fn().mockResolvedValue([]),
+    getLiveSupportedModels: jest.fn().mockResolvedValue([]),
+    getLiveNativeClaudeModels: jest.fn().mockResolvedValue([]),
   };
 }
 
@@ -999,11 +999,16 @@ describe('ProviderRpcHandlers', () => {
       const without = makeHarness();
       without.handlers.register();
       expect(
-        without.providerModels.registerDynamicFetcher.mock.calls.map((c) => c[0]),
+        without.providerModels.registerDynamicFetcher.mock.calls.map(
+          (c) => c[0],
+        ),
       ).not.toContain('antigravity-cli');
 
       const admitted = makeHarness({
-        hostCapabilities: { nativeCodex: false, providerSessions: ['antigravity'] },
+        hostCapabilities: {
+          nativeCodex: false,
+          providerSessions: ['antigravity'],
+        },
       });
       admitted.handlers.register();
       const ids = admitted.providerModels.registerDynamicFetcher.mock.calls.map(
@@ -1017,7 +1022,10 @@ describe('ProviderRpcHandlers', () => {
 
     it('lists provider-session models from the lane adapter catalog and classifies failures', async () => {
       const h = makeHarness({
-        hostCapabilities: { nativeCodex: false, providerSessions: ['antigravity'] },
+        hostCapabilities: {
+          nativeCodex: false,
+          providerSessions: ['antigravity'],
+        },
       });
       h.handlers.register();
       const entry = h.providerModels.registerDynamicFetcher.mock.calls.find(
@@ -1055,7 +1063,10 @@ describe('ProviderRpcHandlers', () => {
 
     it('reports a signed-out provider-session CLI as not-signed-in, whether it failed or listed nothing', async () => {
       const h = makeHarness({
-        hostCapabilities: { nativeCodex: false, providerSessions: ['antigravity'] },
+        hostCapabilities: {
+          nativeCodex: false,
+          providerSessions: ['antigravity'],
+        },
       });
       h.handlers.register();
       const entry = h.providerModels.registerDynamicFetcher.mock.calls.find(
@@ -1072,7 +1083,9 @@ describe('ProviderRpcHandlers', () => {
       await expect(entry[1]()).rejects.toEqual(
         new ModelListError('not-signed-in'),
       );
-      listModels.mockRejectedValueOnce(new Error('agy models exited with code 1'));
+      listModels.mockRejectedValueOnce(
+        new Error('agy models exited with code 1'),
+      );
       await expect(entry[1]()).rejects.toEqual(
         new ModelListError('not-signed-in'),
       );
@@ -1242,8 +1255,8 @@ describe('ProviderRpcHandlers', () => {
           },
         ];
         h.sdkAdapter.getApiModels.mockResolvedValue(models);
-        h.sdkAdapter.getSupportedModels.mockResolvedValue(models);
-        h.sdkAdapter.getNativeClaudeModels.mockResolvedValue(models);
+        h.sdkAdapter.getLiveSupportedModels.mockResolvedValue(models);
+        h.sdkAdapter.getLiveNativeClaudeModels.mockResolvedValue(models);
         if (source === 'fallback')
           h.sdkAdapter.getApiModels.mockRejectedValue(new Error('offline'));
         h.handlers.register();
@@ -1268,7 +1281,7 @@ describe('ProviderRpcHandlers', () => {
           ANTHROPIC_API_KEY: 'kimi-fixture-key',
         },
       });
-      h.sdkAdapter.getSupportedModels.mockResolvedValue([
+      h.sdkAdapter.getLiveSupportedModels.mockResolvedValue([
         { value: 'claude-sonnet-4-5', displayName: 'Sonnet', description: '' },
       ]);
       h.handlers.register();
@@ -1280,7 +1293,7 @@ describe('ProviderRpcHandlers', () => {
       const result = await entry[1]();
 
       expect(h.sdkAdapter.getApiModels).not.toHaveBeenCalled();
-      expect(h.sdkAdapter.getSupportedModels).toHaveBeenCalledTimes(1);
+      expect(h.sdkAdapter.getLiveSupportedModels).toHaveBeenCalledTimes(1);
       expect(result).toHaveLength(1);
     });
 
@@ -1504,7 +1517,7 @@ describe('ProviderRpcHandlers', () => {
       await expect(entry[1]()).rejects.toEqual(
         new ModelListError('auth-rejected'),
       );
-      expect(h.sdkAdapter.getSupportedModels).not.toHaveBeenCalled();
+      expect(h.sdkAdapter.getLiveSupportedModels).not.toHaveBeenCalled();
     });
 
     /**
@@ -1525,7 +1538,7 @@ describe('ProviderRpcHandlers', () => {
 
       it('lists the native Claude login models', async () => {
         const h = makeHarness();
-        h.sdkAdapter.getNativeClaudeModels.mockResolvedValue([
+        h.sdkAdapter.getLiveNativeClaudeModels.mockResolvedValue([
           {
             value: 'claude-opus-4-8',
             displayName: 'Claude Opus 4.8',
@@ -1546,7 +1559,7 @@ describe('ProviderRpcHandlers', () => {
         const h = makeHarness({
           authEnv: { ANTHROPIC_BASE_URL: 'http://127.0.0.1:58306' },
         });
-        h.sdkAdapter.getNativeClaudeModels.mockResolvedValue([
+        h.sdkAdapter.getLiveNativeClaudeModels.mockResolvedValue([
           {
             value: 'opus[1m]',
             displayName: 'Opus (1M context)',
@@ -1559,7 +1572,7 @@ describe('ProviderRpcHandlers', () => {
           },
         ]);
         // The active-provider list must never be the source for this provider.
-        h.sdkAdapter.getSupportedModels.mockResolvedValue([
+        h.sdkAdapter.getLiveSupportedModels.mockResolvedValue([
           {
             value: 'gpt-5.6-luna',
             displayName: 'gpt-5.6-luna',
@@ -1572,14 +1585,14 @@ describe('ProviderRpcHandlers', () => {
           expect.objectContaining({ id: 'opus[1m]' }),
           expect.objectContaining({ id: 'claude-fable-5[1m]' }),
         ]);
-        expect(h.sdkAdapter.getSupportedModels).not.toHaveBeenCalled();
+        expect(h.sdkAdapter.getLiveSupportedModels).not.toHaveBeenCalled();
       });
 
       it('throws unexpected when the native SDK bridge answers no models', async () => {
         // The bridge answers [] for every failure, so [] is not an empty
         // catalog; the reason was lost inside the bridge.
         const h = makeHarness();
-        h.sdkAdapter.getNativeClaudeModels.mockResolvedValue([]);
+        h.sdkAdapter.getLiveNativeClaudeModels.mockResolvedValue([]);
         h.handlers.register();
 
         await expect(claudeCliFetcher(h)()).rejects.toEqual(
@@ -1602,13 +1615,12 @@ describe('ProviderRpcHandlers', () => {
       supportsToolUse: true,
     };
 
-    it('maps a live list to { models, totalCount, source } without isStatic', async () => {
+    it('maps a live list to { models, totalCount, source }', async () => {
       const h = makeHarness();
       h.providerModels.fetchModels.mockResolvedValue({
         models: [liveRow],
         totalCount: 1,
         source: 'live',
-        isStatic: false,
       });
       h.handlers.register();
 
@@ -1638,7 +1650,6 @@ describe('ProviderRpcHandlers', () => {
         source: 'persisted',
         failureReason: 'timeout',
         savedAt,
-        isStatic: false,
       });
       h.handlers.register();
 
@@ -1665,7 +1676,6 @@ describe('ProviderRpcHandlers', () => {
         totalCount: 0,
         source: 'unavailable',
         failureReason: 'no-key',
-        isStatic: false,
       });
       h.handlers.register();
 
@@ -1696,7 +1706,6 @@ describe('ProviderRpcHandlers', () => {
         totalCount: 0,
         source: 'unavailable',
         failureReason: 'empty',
-        isStatic: false,
       });
       h.handlers.register();
 
@@ -1712,7 +1721,6 @@ describe('ProviderRpcHandlers', () => {
         models: [],
         totalCount: 0,
         source: 'live',
-        isStatic: false,
       });
       h.handlers.register();
 
@@ -1734,7 +1742,6 @@ describe('ProviderRpcHandlers', () => {
         models: [],
         totalCount: 0,
         source: 'live',
-        isStatic: false,
       });
       h.handlers.register();
 
@@ -1755,7 +1762,6 @@ describe('ProviderRpcHandlers', () => {
         models: [],
         totalCount: 0,
         source: 'live',
-        isStatic: false,
       });
       h.handlers.register();
 
@@ -1788,7 +1794,6 @@ describe('ProviderRpcHandlers', () => {
         models: [liveRow],
         totalCount: 1,
         source: 'live',
-        isStatic: false,
       });
       h.handlers.register();
 
@@ -1807,7 +1812,6 @@ describe('ProviderRpcHandlers', () => {
         totalCount: 0,
         source: 'unavailable',
         failureReason: 'network',
-        isStatic: false,
       });
       h.handlers.register();
 
@@ -1825,7 +1829,6 @@ describe('ProviderRpcHandlers', () => {
         totalCount: 0,
         source: 'unavailable',
         failureReason: 'no-key',
-        isStatic: false,
       });
       h.handlers.register();
 
@@ -1850,7 +1853,6 @@ describe('ProviderRpcHandlers', () => {
         ],
         totalCount: 1,
         source: 'live',
-        isStatic: false,
       });
       h.handlers.register();
 
@@ -1865,7 +1867,6 @@ describe('ProviderRpcHandlers', () => {
         false,
       );
       expect(result.source).toBe('live');
-      expect(result).not.toHaveProperty('isStatic');
       expect(result.models.map((m) => m.id)).toEqual(['fugu-ultra-20260615']);
     });
 

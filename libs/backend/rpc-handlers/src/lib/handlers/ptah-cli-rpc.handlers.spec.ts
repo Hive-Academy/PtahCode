@@ -143,7 +143,10 @@ import {
 import type { PtahCliRegistry } from '@ptah-extension/cli-agent-runtime';
 import type { ProviderModelsService } from '@ptah-extension/auth-providers';
 import { modelListErrorText } from '@ptah-extension/shared';
-import type { CliAdapterManifest, PtahCliSummary } from '@ptah-extension/shared';
+import type {
+  CliAdapterManifest,
+  PtahCliSummary,
+} from '@ptah-extension/shared';
 import {
   createMockLogger,
   type MockLogger,
@@ -193,7 +196,9 @@ const manifest: CliAdapterManifest = {
   mcp: { state: 'unsupported', reason: 'No fixture transport.' },
 };
 
-function makeSummary(overrides: Partial<PtahCliSummary> = {}): PtahCliSummary & { manifest: CliAdapterManifest } {
+function makeSummary(
+  overrides: Partial<PtahCliSummary> = {},
+): PtahCliSummary & { manifest: CliAdapterManifest } {
   return {
     id: 'agent-1',
     name: 'Test Agent',
@@ -233,7 +238,6 @@ function makeHarness(): Harness {
       models: [],
       totalCount: 0,
       source: 'live',
-      isStatic: false,
     }),
   };
   const authSecrets = {
@@ -599,7 +603,6 @@ describe('PtahCliRpcHandlers', () => {
       models: Array<{ id: string; name: string }>;
       source?: string;
       failureReason?: string;
-      isStatic?: boolean;
       error?: string;
     };
     const liveRow = {
@@ -637,7 +640,6 @@ describe('PtahCliRpcHandlers', () => {
         models: [liveRow],
         totalCount: 1,
         source: 'live',
-        isStatic: false,
       });
       h.handlers.register();
 
@@ -663,7 +665,6 @@ describe('PtahCliRpcHandlers', () => {
         ],
         source: 'live',
       });
-      expect(result).not.toHaveProperty('isStatic');
     });
 
     it('reads the host API key for a shared-connection Claude API lane', async () => {
@@ -700,7 +701,6 @@ describe('PtahCliRpcHandlers', () => {
         totalCount: 0,
         source: 'unavailable',
         failureReason: 'no-key',
-        isStatic: false,
       });
       h.handlers.register();
 
@@ -732,7 +732,6 @@ describe('PtahCliRpcHandlers', () => {
         source: 'persisted',
         failureReason: 'network',
         savedAt: 1,
-        isStatic: false,
       });
       h.handlers.register();
 

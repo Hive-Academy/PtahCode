@@ -44,10 +44,6 @@ export {
   KIMI_CODE_DEFAULT_TIERS,
   KIMI_CODE_MODEL_CAPABILITIES,
 } from './entries/kimi-code-provider-entry';
-export {
-  isKimiCodeModelsPayload,
-  mergeKimiCodeModels,
-} from './entries/kimi-code-model-merge';
 export { parseKimiCodeModels } from './entries/kimi-code-models';
 export {
   OPENCODE_ZEN_PROVIDER_ENTRY,
@@ -59,8 +55,3 @@ export {
   type OpenCodeProtocol,
 } from './entries/opencode-provider-entry';
 export { ANTIGRAVITY_CLI_PROVIDER_ENTRY } from './entries/provider-session-provider-entries';
-export {
-  OPENCODE_MODEL_ROUTES,
-  getOpenCodeModelProtocol,
-  type OpenCodeModelRoutes,
-} from './entries/opencode-model-routes';

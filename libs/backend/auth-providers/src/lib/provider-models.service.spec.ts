@@ -90,7 +90,6 @@ describe('Anthropic API lane catalog and tiers', () => {
       totalCount: 0,
       source: 'unavailable',
       failureReason: 'no-key',
-      isStatic: false,
     });
     expect(getAnthropicProvider('anthropic-api')).toBeUndefined();
   });
@@ -1240,7 +1239,6 @@ describe('ProviderModelsService persisted model catalog', () => {
       totalCount: 0,
       source: 'unavailable',
       failureReason: 'unexpected',
-      isStatic: false,
     });
   });
 

@@ -58,7 +58,6 @@ describe('ProviderModelsService OpenCode catalog', () => {
       expect(result).toMatchObject({
         source: 'live',
         totalCount: 3,
-        isStatic: false,
       });
       expect(result.failureReason).toBeUndefined();
       expect(result.models).toEqual(live);
@@ -112,7 +111,6 @@ describe('ProviderModelsService OpenCode catalog', () => {
       totalCount: 0,
       source: 'unavailable',
       failureReason: 'bad-response',
-      isStatic: false,
     });
   });
 

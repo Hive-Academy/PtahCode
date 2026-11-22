@@ -461,7 +461,9 @@ export class ProviderRpcHandlers {
         this.codexAuthService.isAuthenticated(),
       );
       if (signedIn === false) {
-        this.logger.info('[ProviderRpc] Codex is not signed in; no live model list');
+        this.logger.info(
+          '[ProviderRpc] Codex is not signed in; no live model list',
+        );
         throw new ModelListError('not-signed-in');
       }
       if (lastFailure) {
@@ -495,7 +497,9 @@ export class ProviderRpcHandlers {
       this.providerModels.registerDynamicFetcher(providerId, async () => {
         const adapter = this.cliDetection.getAdapter(profile);
         if (!adapter?.listModels) throw new ModelListError('no-live-source');
-        let catalog: Awaited<ReturnType<NonNullable<typeof adapter.listModels>>> = [];
+        let catalog: Awaited<
+          ReturnType<NonNullable<typeof adapter.listModels>>
+        > = [];
         let failure: ModelListFailureReason | undefined;
         try {
           catalog = await adapter.listModels();
@@ -651,7 +655,9 @@ export class ProviderRpcHandlers {
    * Both paths populate contextLength from the pricing map as a selection
    * hint only. Neither supplies provider capacity evidence. No repository
    * list backs either path: a failure reaches `ProviderModelsService`, which
-   * reports a persisted or unavailable list.
+   * reports a persisted or unavailable list. The SDK reads are the live ones
+   * (`getLive*`): the service saves what a fetcher returns as live, so a
+   * catalog the SDK restored from its cross-boot store must not reach it.
    */
   private registerAnthropicDirectFetcher(): void {
     const fetcher = async (): Promise<ProviderModelInfo[]> => {
@@ -678,7 +684,7 @@ export class ProviderRpcHandlers {
           }
         }
 
-        const sdkModels = await this.sdkAdapter.getSupportedModels();
+        const sdkModels = await this.sdkAdapter.getLiveSupportedModels();
         this.logger.info(
           `[ProviderRpc] Fetched ${sdkModels.length} models from SDK supportedModels()`,
         );
@@ -703,10 +709,10 @@ export class ProviderRpcHandlers {
           throw new ModelListError(reason);
         }
         let fallbackModels: Awaited<
-          ReturnType<SdkAgentAdapter['getSupportedModels']>
+          ReturnType<SdkAgentAdapter['getLiveSupportedModels']>
         >;
         try {
-          fallbackModels = await this.sdkAdapter.getSupportedModels();
+          fallbackModels = await this.sdkAdapter.getLiveSupportedModels();
         } catch (fallbackError) {
           // degradation-audit: reported - the first failure's classified reason is thrown; the fallback's message stays in the debug log.
           this.logger.debug('[ProviderRpc] SDK model fallback also failed', {
@@ -744,7 +750,7 @@ export class ProviderRpcHandlers {
     // SDK under the native login so this list always matches what the agent
     // actually runs on, whatever the active provider happens to be.
     this.providerModels.registerDynamicFetcher('claude-cli', async () => {
-      const models = await this.sdkAdapter.getNativeClaudeModels();
+      const models = await this.sdkAdapter.getLiveNativeClaudeModels();
       if (models.length === 0) {
         // The SDK bridge answers `[]` for every failure (no CLI, a failed or
         // timed-out probe) and Claude always lists models, so `[]` is a

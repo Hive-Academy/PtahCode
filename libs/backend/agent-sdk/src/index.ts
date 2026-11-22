@@ -510,7 +510,6 @@ export {
   TIER_METADATA_ENV_VAR_MAP,
   ALL_TIER_ENV_KEYS,
   buildTierEnvDefaults,
-  buildStaticTierCapabilityEnv,
   buildTierCapabilityEnv,
   SdkModelService,
   MemoryPromptInjector,
@@ -525,7 +524,6 @@ export {
   getAllAnthropicProviders,
   getProviderBaseUrl,
   getProviderAuthEnvVar,
-  seedStaticModelPricing,
   setCustomProviderEntries,
   clearCustomProviderEntries,
   getCustomProviderEntries,
@@ -539,7 +537,6 @@ export {
 export type {
   AnthropicProvider,
   AnthropicProviderId,
-  ProviderStaticModel,
   CustomProviderEntry,
   CustomProviderLane,
   CustomProviderPricing,

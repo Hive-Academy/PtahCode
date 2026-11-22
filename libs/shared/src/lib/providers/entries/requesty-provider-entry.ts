@@ -16,7 +16,7 @@
  *   blog post shows `rqy_…` while the quickstart example shows `sk-…`. Encoding
  *   either one would reject half of all real keys at the validation hint, so we
  *   encode neither (same choice Kimi Code and Z.AI already make).
- * - No `defaultTiers` and no `staticModels`. The only model slug seen in the
+ * - No `defaultTiers` and no built-in model list. The only model slug seen in the
  *   docs (`anthropic/claude-sonnet-4-5-20250514`) appears on the OpenAI-compat
  *   lane, not on the Anthropic passthrough lane this entry uses. Shipping an
  *   unverified tier map would silently break every "Default (recommended)"

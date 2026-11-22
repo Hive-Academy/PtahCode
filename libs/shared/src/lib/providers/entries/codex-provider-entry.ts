@@ -25,7 +25,7 @@ export const CODEX_DEFAULT_TIERS = {
  * - `authType: 'oauth'` -- uses file-based OAuth from Codex CLI
  * - `requiresProxy: true` -- needs the translation proxy to convert protocols
  *
- * No `staticModels`: a hardcoded ID list would hide every future OpenAI model
+ * No built-in model list: a hardcoded ID list would hide every future OpenAI model
  * until a Ptah release. Visible models come only from dynamic discovery: the
  * selected app-server catalog (`model/list`) and the account API
  * (`CodexAuthService.listModels`, codex-home-auth.service.ts). A model that

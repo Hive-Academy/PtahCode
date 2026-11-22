@@ -97,8 +97,6 @@ export interface ProviderModelList {
   /** Epoch ms at which a persisted list was fetched live. */
   savedAt?: number;
   failureReason?: ModelListFailureReason;
-  /** @deprecated always false; deleted in B6.3. Keeps rpc-handlers compiling. */
-  isStatic: false;
 }
 
 /** A persisted catalog read back: the saved rows and when they were fetched. */
@@ -423,14 +421,15 @@ export class ProviderModelsService {
       totalCount: models.length,
       source,
       ...extra,
-      isStatic: false,
     });
 
     // Only the `/v1/models` route sends `apiKey`. A fetcher reads its own
     // credential and the OpenCode gateway catalog is credential-free, so
     // their lists are scoped to no key (`''`).
     const usesApiKey =
-      !fetcher && !isOpenCodeProviderId(providerId) && !!provider?.modelsEndpoint;
+      !fetcher &&
+      !isOpenCodeProviderId(providerId) &&
+      !!provider?.modelsEndpoint;
     const credential = usesApiKey ? credentialFingerprint(apiKey) : '';
     const cached = this.modelCache.get(providerId);
     if (

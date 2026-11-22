@@ -140,11 +140,8 @@ export interface ProviderListModelsResult {
   models: ProviderModelInfo[];
   /** Total count before filtering */
   totalCount: number;
-  /**
-   * Where `models` came from. Optional until every producer sets it; then it
-   * becomes required.
-   */
-  source?: ProviderModelListSource;
+  /** Where `models` came from. */
+  source: ProviderModelListSource;
   /** Set when `source` is `'persisted'` or `'unavailable'`. */
   failureReason?: ModelListFailureReason;
   /** `source: 'persisted'` only: epoch ms at which the saved list was fetched. */
@@ -156,8 +153,6 @@ export interface ProviderListModelsResult {
    * saying why no usable list exists.
    */
   error?: string;
-  /** Whether the model list is static (no Refresh needed). To be removed. */
-  isStatic?: boolean;
 }
 
 /** Parameters for provider:setModelTier RPC method */

@@ -140,7 +140,6 @@ function createMockProviderModels(): MockProviderModels {
       models: [],
       totalCount: 0,
       source: 'live',
-      isStatic: false,
     }),
   };
 }
@@ -1127,7 +1126,6 @@ describe('ConfigRpcHandlers', () => {
           models: agyCatalog,
           totalCount: agyCatalog.length,
           source: 'live',
-          isStatic: false,
         });
         return h;
       }
@@ -1171,7 +1169,6 @@ describe('ConfigRpcHandlers', () => {
           totalCount: 0,
           source: 'unavailable',
           failureReason: 'not-signed-in',
-          isStatic: false,
         });
         h.handlers.register();
         const result = await call<{

@@ -164,7 +164,6 @@ describe('ProviderModelsService model-list chain', () => {
         source: 'persisted',
         savedAt,
         failureReason: reason,
-        isStatic: false,
       });
     },
   );
@@ -279,7 +278,6 @@ describe('ProviderModelsService model-list chain', () => {
       totalCount: 0,
       source: 'unavailable',
       failureReason: 'network',
-      isStatic: false,
     });
   });
 

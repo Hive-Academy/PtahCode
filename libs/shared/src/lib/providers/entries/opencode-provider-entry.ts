@@ -17,20 +17,15 @@
  * - Kept OUT of the shared pricing map (`isSubscriptionCoveredProvider` guard)
  * - Multi-protocol routing via local translation proxy
  *
- * Both entries omit `modelsEndpoint` in this release, serving static models
- * derived strictly from the reviewed routing tables.
- *
- * Excluded models (7 Google generateContent, 2 Jev systemone) are omitted
- * from static models and default tiers.
+ * No built-in model list or routing table: the models and each model's
+ * upstream protocol come from the public gateway catalog at runtime
+ * (`OpenCodeLiveRoutes` in auth-providers). A model whose protocol cannot be
+ * routed (Google generateContent, Jev systemone) is not listed.
  *
  * @see TASK_2026_526
  */
 
-import type {
-  AnthropicProvider,
-  ProviderStaticModel,
-} from '../provider-registry';
-import { OPENCODE_MODEL_ROUTES } from './opencode-model-routes';
+import type { AnthropicProvider } from '../provider-registry';
 
 /** The two OpenCode subscriptions. */
 export type OpenCodeProviderId = 'opencode-zen' | 'opencode-go';
@@ -66,52 +61,6 @@ export const OPENCODE_GO_DEFAULT_TIERS = {
 } as const;
 
 /**
- * Build static models for an OpenCode subscription from its route table.
- *
- * `supportsToolUse: true` is MEASURED, not assumed. The opencode background
- * service was probed at `GET /api/model` on 2026-09-22 (opencode 2.0.12) and
- * every one of the 103 models it reported carried `capabilities.tools: true`
- * — both subscriptions, all three protocols. `false` was the actively harmful
- * value: `fetchModels(..., toolUseOnly)` filters on this flag, so a `false`
- * here empties the OpenCode list entirely on any surface that asks for
- * tool-capable models, which for a coding-agent gateway is every model it
- * sells. No in-repo caller passes `toolUseOnly: true` today, so this was
- * latent rather than live — but it is still the wrong answer.
- *
- * `contextLength: 0` stays as the unverified default, deliberately. The probe
- * reports real per-model windows (128K to 1.05M), but only for the subset this
- * account can reach, and neither entry declares a `modelsEndpoint` to correct
- * a guess later. Zero is safe rather than wrong: `registerModelContextWindows`
- * skips any entry `<= 0` (`pricing.utils.ts:404`), so these models are treated
- * as "window unknown" instead of "window zero". Populating it needs the full
- * 97-model table, which is follow-up work.
- *
- * These rows are the reviewed fallback and metadata source; the public gateway
- * catalog can add newly routed IDs at runtime.
- * Cost fields are intentionally omitted so `seedStaticModelPricing` never
- * seeds unverified prices.
- */
-function buildOpenCodeStaticModels(
-  providerId: OpenCodeProviderId,
-  subscriptionLabel: string,
-): ProviderStaticModel[] {
-  const routes = OPENCODE_MODEL_ROUTES[providerId];
-  return Object.keys(routes).map((id) => ({
-    id,
-    name: id,
-    description: `${id} via OpenCode ${subscriptionLabel}`,
-    contextLength: 0,
-    supportsToolUse: true,
-  }));
-}
-
-export const OPENCODE_ZEN_STATIC_MODELS: ProviderStaticModel[] =
-  buildOpenCodeStaticModels('opencode-zen', 'Zen');
-
-export const OPENCODE_GO_STATIC_MODELS: ProviderStaticModel[] =
-  buildOpenCodeStaticModels('opencode-go', 'Go');
-
-/**
  * OpenCode Zen provider entry.
  */
 export const OPENCODE_ZEN_PROVIDER_ENTRY: AnthropicProvider = {
@@ -130,7 +79,6 @@ export const OPENCODE_ZEN_PROVIDER_ENTRY: AnthropicProvider = {
   maskedKeyDisplay: '••••••••',
   pricingModel: 'usage',
   defaultTiers: OPENCODE_ZEN_DEFAULT_TIERS,
-  staticModels: OPENCODE_ZEN_STATIC_MODELS,
 };
 
 /**
@@ -155,5 +103,4 @@ export const OPENCODE_GO_PROVIDER_ENTRY: AnthropicProvider = {
   maskedKeyDisplay: '••••••••',
   pricingModel: 'subscription',
   defaultTiers: OPENCODE_GO_DEFAULT_TIERS,
-  staticModels: OPENCODE_GO_STATIC_MODELS,
 };

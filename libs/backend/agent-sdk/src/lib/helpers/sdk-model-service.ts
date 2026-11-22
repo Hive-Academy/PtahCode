@@ -23,7 +23,6 @@ import {
 import {
   AuthEnv,
   CODEX_PROXY_TOKEN_PLACEHOLDER,
-  getStaticModelCapabilities,
   getProviderLiveModelCapabilities,
   getAllAnthropicProviders,
   isDirectAnthropic,
@@ -158,39 +157,6 @@ export const ALL_TIER_ENV_KEYS: ReadonlyArray<keyof AuthEnv> = [
 ];
 
 /**
- * Build the tier `_SUPPORTED_CAPABILITIES` env from a provider's static
- * registry models.
- *
- * The runtime gates effort and thinking per model id and does not recognise
- * non-Claude ids, so a provider that only ships a static catalog must declare
- * the capabilities itself. Writes a tier's key only when its model declares a
- * non-empty list; never a partial or guessed one, because the runtime treats
- * the value as an allowlist.
- *
- * @param providerId - Registry provider ID
- * @param tiers - Resolved model id per tier (missing tiers are skipped)
- * @returns The capability env keys to merge (empty when nothing is declared)
- */
-export function buildStaticTierCapabilityEnv(
-  providerId: string,
-  tiers: Partial<Record<EnvMappedTier, string>>,
-): AuthEnv {
-  const env: AuthEnv = {};
-  for (const tier of Object.keys(
-    TIER_METADATA_ENV_VAR_MAP,
-  ) as EnvMappedTier[]) {
-    const modelId = tiers[tier];
-    if (!modelId) continue;
-    const capabilities = getStaticModelCapabilities(providerId, modelId);
-    if (capabilities && capabilities.length > 0) {
-      env[TIER_METADATA_ENV_VAR_MAP[tier].capabilities] =
-        capabilities.join(',');
-    }
-  }
-  return env;
-}
-
-/**
  * Build the tier `_SUPPORTED_CAPABILITIES` env from the capabilities a
  * provider declares for its live models (`liveModelCapabilities`).
  *
@@ -316,6 +282,25 @@ const persistedCatalogSchema = z
   .min(1);
 
 /**
+ * Version of one persisted entry. An entry with another version, without
+ * `origin: 'live'`, or older than {@link PERSISTED_CATALOG_MAX_AGE_MS} is
+ * ignored: it predates live-only lists or is too old to stand in for the
+ * account's catalog (the same rule as `provider.<id>.modelCatalog`).
+ */
+const PERSISTED_CATALOG_SCHEMA = 2;
+
+/** Vendors retire models; a saved catalog older than this is not served. */
+const PERSISTED_CATALOG_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** One versioned entry: `{schema: 2, origin: 'live', savedAt, models}`. */
+const persistedRecordSchema = z.object({
+  schema: z.literal(PERSISTED_CATALOG_SCHEMA),
+  origin: z.literal('live'),
+  savedAt: z.number().finite(),
+  models: persistedCatalogSchema,
+});
+
+/**
  * The store itself: cache key → catalog, each entry validated separately.
  *
  * Kept as `unknown` values on purpose. Validating the whole store at once
@@ -421,6 +406,13 @@ export class SdkModelService {
    * credential, base URL or tier mapping misses by construction.
    */
   private readonly modelsCache = new Map<string, ModelInfo[]>();
+  /**
+   * Keys whose {@link modelsCache} entry was restored from the cross-boot
+   * store and not yet confirmed by a live fetch. The live reads
+   * ({@link getLiveSupportedModels}, {@link getLiveNativeClaudeModels}) do not
+   * answer from these entries.
+   */
+  private readonly restoredKeys = new Set<string>();
 
   /**
    * In-flight fetches, keyed the same way, so concurrent callers asking the
@@ -815,6 +807,7 @@ export class SdkModelService {
       return false;
     }
     this.modelsCache.set(key, models);
+    this.restoredKeys.delete(key);
     this.persistCatalog(key, models);
     return true;
   }
@@ -835,6 +828,7 @@ export class SdkModelService {
     const entry = this.readPersistedEntry(key);
     if (!entry) return null;
     this.modelsCache.set(key, entry);
+    this.restoredKeys.add(key);
     this.logger.debug(
       '[SdkModelService] Restored model catalog from persisted store',
       { models: entry.length },
@@ -882,12 +876,16 @@ export class SdkModelService {
         savedLive.success &&
         isDeepStrictEqual(savedPrevious.data, savedLive.data)
       ) {
+        // Confirmed live; the saved entry keeps its `savedAt`, so it still
+        // ages out 30 days after the fetch that wrote it.
+        this.restoredKeys.delete(key);
         this.logger.debug(
           '[SdkModelService] Revalidated model catalog unchanged',
         );
         return;
       }
       this.modelsCache.set(key, models);
+      this.restoredKeys.delete(key);
       this.persistCatalog(key, models);
       const pairs = (rows: ModelInfo[] | undefined) =>
         rows?.map(({ value, displayName }) => ({ value, displayName })) ?? [];
@@ -909,17 +907,25 @@ export class SdkModelService {
     const store = this.readPersistedStore();
     if (!store || !(key in store)) return null;
 
-    const parsed = persistedCatalogSchema.safeParse(store[key]);
+    const parsed = persistedRecordSchema.safeParse(store[key]);
     if (!parsed.success) {
       // Ignored, not repaired: a partially valid catalog is a wrong answer,
-      // while a miss is one fetch. The entry is left in place — the next
+      // while a miss is one fetch. An unstamped entry (an older release's
+      // bare row array) lands here too. The entry is left in place — the next
       // successful fetch for this key overwrites it.
       this.logger.warn(
         '[SdkModelService] Ignoring a malformed persisted model catalog',
       );
       return null;
     }
-    return parsed.data;
+    if (Date.now() - parsed.data.savedAt > PERSISTED_CATALOG_MAX_AGE_MS) {
+      this.logger.debug(
+        '[SdkModelService] Ignoring a persisted model catalog that is too old',
+        { savedAt: parsed.data.savedAt },
+      );
+      return null;
+    }
+    return parsed.data.models;
   }
 
   private readPersistedStore(): Record<string, unknown> | null {
@@ -959,7 +965,12 @@ export class SdkModelService {
       if (!isPersistableCatalogKey(storedKey)) delete next[storedKey];
     }
     delete next[key];
-    next[key] = models;
+    next[key] = {
+      schema: PERSISTED_CATALOG_SCHEMA,
+      origin: 'live',
+      savedAt: Date.now(),
+      models,
+    };
 
     const keys = Object.keys(next);
     for (const stale of keys.slice(
@@ -1038,14 +1049,61 @@ export class SdkModelService {
     const restored = this.restorePersistedCatalog(NATIVE_MODELS_CACHE_KEY);
     if (restored) return restored;
 
-    return this.startFetch(NATIVE_MODELS_CACHE_KEY, async () => {
-      const generation = this.cacheGeneration;
-      const models = await this.fetchModelsViaSdk(NATIVE_CLAUDE_AUTH_ENV);
-      if (models.length > 0) {
-        this.cacheModels(NATIVE_MODELS_CACHE_KEY, generation, models);
-      }
-      return models;
-    });
+    return this.startFetch(NATIVE_MODELS_CACHE_KEY, () =>
+      this.fetchNativeModels(),
+    );
+  }
+
+  /**
+   * The active identity's catalog from a live fetch, never from the
+   * cross-boot store.
+   *
+   * For the provider model-list chain (`ProviderModelsService`), which saves
+   * every list a fetcher returns as live with a fresh timestamp. A restored
+   * entry handed to it would be re-saved as fresh and escape the 30-day rule,
+   * so this read fetches instead of answering from a restored entry. An entry
+   * fetched live this boot (or confirmed by the revalidation) is served from
+   * memory, and an in-flight fetch is joined.
+   *
+   * @returns live rows; `[]` when every source failed (the chain then reports
+   *   its own persisted list)
+   */
+  async getLiveSupportedModels(): Promise<ModelInfo[]> {
+    const key = this.authFingerprint();
+    const cached = this.modelsCache.get(key);
+    if (cached && cached.length > 0 && !this.restoredKeys.has(key)) {
+      return cached;
+    }
+    const inFlight = this.pendingModels.get(key);
+    if (inFlight) return inFlight;
+    return this.startFetch(key, () => this.fetchSupportedModelsInternal(key));
+  }
+
+  /**
+   * {@link getNativeClaudeModels} from a live fetch, never from the
+   * cross-boot store. Same contract as {@link getLiveSupportedModels}.
+   */
+  async getLiveNativeClaudeModels(): Promise<ModelInfo[]> {
+    if (isDirectAnthropic(this.authEnv) && !this.authEnv.ANTHROPIC_API_KEY) {
+      return this.getLiveSupportedModels();
+    }
+    const key = NATIVE_MODELS_CACHE_KEY;
+    const cached = this.modelsCache.get(key);
+    if (cached && cached.length > 0 && !this.restoredKeys.has(key)) {
+      return cached;
+    }
+    const inFlight = this.pendingModels.get(key);
+    if (inFlight) return inFlight;
+    return this.startFetch(key, () => this.fetchNativeModels());
+  }
+
+  private async fetchNativeModels(): Promise<ModelInfo[]> {
+    const generation = this.cacheGeneration;
+    const models = await this.fetchModelsViaSdk(NATIVE_CLAUDE_AUTH_ENV);
+    if (models.length > 0) {
+      this.cacheModels(NATIVE_MODELS_CACHE_KEY, generation, models);
+    }
+    return models;
   }
 
   private async fetchSupportedModelsInternal(
@@ -1616,6 +1674,7 @@ export class SdkModelService {
     for (const probe of this.accountProbes.values()) probe.controller.abort();
     this.accountProbes.clear();
     this.modelsCache.clear();
+    this.restoredKeys.clear();
     this.pendingModels.clear();
     this.clearApiModelsCache();
     // The persisted copy goes with it. `clearCache()` is the "I have no idea
