@@ -26,19 +26,3 @@ export function ledgerWorkspaceKey(root: string): string {
   // The fold strips every trailing separator, which empties the POSIX root.
   return key === '' ? '/' : key;
 }
-
-/**
- * The same spelling with its case kept: what distinguishes two folders on a
- * case-sensitive file system after separators are made uniform.
- */
-export function caseKeptWorkspaceKey(root: string): string {
-  const key = root.replace(/[\\/]+$/, '').replace(/\\/g, '/');
-  return key === '' ? '/' : key;
-}
-
-/** Windows and macOS file systems ignore case by default; Linux does not. */
-export function isCaseSensitiveWorkspaceHost(
-  platform: NodeJS.Platform = process.platform,
-): boolean {
-  return platform !== 'win32' && platform !== 'darwin';
-}

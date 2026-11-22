@@ -56,9 +56,11 @@ Restore a CLI source for Antigravity plan usage, guarded so it never bills:
 The usage ledger keeps folding case on every OS (the four usage producers
 have always written the shared, lowercased fold). On Linux two folders
 that differ only by case therefore share Analytics totals; the session list
-stays exact. Migration S0010 never merges existing case-only pairs on a
-case-sensitive host. Making POSIX ledger keys case-exact needs the
-producers to pass raw paths; not done.
+stays exact. Migration S0010 folds every stored key the same way on every
+host (an earlier "keep case-only pairs apart on Linux" rule was dropped: it
+left the sessions key folded while the usage rows were not, so those rows
+became unreachable, and it failed CI on Linux). Making POSIX ledger keys
+case-exact needs the producers to pass raw paths; not done.
 
 ## Known limits
 

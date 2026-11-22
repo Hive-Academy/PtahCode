@@ -1,9 +1,5 @@
 import type { SqliteDatabase } from '../sqlite-connection.service';
-import {
-  caseKeptWorkspaceKey,
-  isCaseSensitiveWorkspaceHost,
-  ledgerWorkspaceKey,
-} from './ledger-workspace-key';
+import { ledgerWorkspaceKey } from './ledger-workspace-key';
 
 type MigrationDb = Pick<SqliteDatabase, 'exec' | 'prepare'>;
 
@@ -51,11 +47,6 @@ function groupByLedgerKey(keys: readonly string[]): Map<string, string[]> {
   return groups;
 }
 
-/** Two spellings that differ by more than separators: separate folders where case matters. */
-function differOnlyByCase(spellings: readonly string[]): boolean {
-  return new Set(spellings.map(caseKeptWorkspaceKey)).size > 1;
-}
-
 /**
  * S0010: fill `sessions.ledger_workspace_key` and rewrite the usage tables'
  * keys to {@link ledgerWorkspaceKey}.
@@ -66,16 +57,14 @@ function differOnlyByCase(spellings: readonly string[]): boolean {
  * for any path with an uppercase letter. `sessions.workspace_key` itself is
  * left alone: the session list keeps matching it exactly.
  *
- * On a case-sensitive host, stored keys of one table that fold together but
- * differ by case may be two real folders. Those keys are left as they are, so
- * the migration never merges them; {@link countLedgerKeyCaseCollisions}
- * reports them. Everything else that folds together merges, and coverage
- * windows merge to their widest span. A second run changes nothing.
+ * Every stored key folds the same way on every host, the way the usage
+ * producers have always written theirs, so the sessions key and the usage
+ * rows of one folder always agree. On a case-sensitive host two folders that
+ * differ only by case therefore share Analytics totals (a documented trade-off,
+ * TASK_2026_2302_usage); the session list stays exact. Coverage windows merge
+ * to their widest span. A second run changes nothing.
  */
-export function rewriteLedgerWorkspaceKeys(
-  db: MigrationDb,
-  caseSensitiveHost = isCaseSensitiveWorkspaceHost(),
-): void {
+export function rewriteLedgerWorkspaceKeys(db: MigrationDb): void {
   db.exec('BEGIN IMMEDIATE');
   try {
     const fill = db.prepare('UPDATE sessions SET ledger_workspace_key = ? WHERE session_id = ?');
@@ -89,7 +78,6 @@ export function rewriteLedgerWorkspaceKeys(
       const rewrite = db.prepare(table.rewrite);
       const keys = (db.prepare(table.distinct).all() as { key: string }[]).map((row) => row.key);
       for (const [canonical, spellings] of groupByLedgerKey(keys)) {
-        if (caseSensitiveHost && differOnlyByCase(spellings)) continue;
         for (const spelling of spellings) {
           if (spelling !== canonical) rewrite.run(canonical, spelling);
         }
@@ -101,7 +89,6 @@ export function rewriteLedgerWorkspaceKeys(
     const drop = db.prepare('DELETE FROM session_usage_coverage WHERE workspace_key = ?');
     const merge = db.prepare(MERGE_COVERAGE);
     for (const [canonical, spellings] of groupByLedgerKey([...byKey.keys()])) {
-      if (caseSensitiveHost && differOnlyByCase(spellings)) continue;
       for (const spelling of spellings) {
         if (spelling === canonical) continue;
         const row = byKey.get(spelling);
@@ -115,22 +102,4 @@ export function rewriteLedgerWorkspaceKeys(
     db.exec('ROLLBACK');
     throw error;
   }
-}
-
-/**
- * Ledger keys whose stored spellings still differ only by case, counted once
- * per folded key across the usage tables. Non-zero only on a case-sensitive
- * host after {@link rewriteLedgerWorkspaceKeys} kept them apart.
- */
-export function countLedgerKeyCaseCollisions(db: MigrationDb): number {
-  const collided = new Set<string>();
-  const queries = [...USAGE_TABLES.map((table) => table.distinct),
-    'SELECT workspace_key AS key FROM session_usage_coverage'];
-  for (const query of queries) {
-    const keys = (db.prepare(query).all() as { key: string }[]).map((row) => row.key);
-    for (const [canonical, spellings] of groupByLedgerKey(keys)) {
-      if (differOnlyByCase(spellings)) collided.add(canonical);
-    }
-  }
-  return collided.size;
 }

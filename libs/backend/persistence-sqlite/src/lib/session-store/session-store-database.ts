@@ -7,12 +7,7 @@ import {
   type SqliteDatabase,
   type SqliteDatabaseFactory,
 } from '../sqlite-connection.service';
-import { isCaseSensitiveWorkspaceHost } from './ledger-workspace-key';
-import { countLedgerKeyCaseCollisions } from './ledger-workspace-key-rewrite';
 import { SESSION_STORE_MIGRATIONS } from './session-store-migrations';
-
-/** S0010_ledger_workspace_key_rewrite. */
-const LEDGER_KEY_REWRITE_VERSION = 10;
 
 // No mmap or temp_store tuning: this file holds small rows. Applied with exec
 // so a test can run on node:sqlite, which has no pragma() method.
@@ -74,14 +69,6 @@ export class SessionStoreDatabase {
         applied: result.appliedVersions,
         finalVersion: result.finalVersion,
       });
-      if (result.appliedVersions.includes(LEDGER_KEY_REWRITE_VERSION) && isCaseSensitiveWorkspaceHost()) {
-        const collisions = countLedgerKeyCaseCollisions(db);
-        if (collisions > 0) {
-          this.logger.warn('[persistence-sqlite] usage ledger kept workspace keys that differ only by case apart', {
-            collisions,
-          });
-        }
-      }
     } catch (error: unknown) {
       db.close();
       throw error;

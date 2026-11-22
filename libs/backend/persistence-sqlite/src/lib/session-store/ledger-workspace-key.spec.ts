@@ -12,12 +12,9 @@ import type { Logger } from '@ptah-extension/vscode-core';
 import type { SqliteDatabase } from '../sqlite-connection.service';
 import { SqliteMigrationRunner } from '../migration-runner';
 import {
-  caseKeptWorkspaceKey,
-  isCaseSensitiveWorkspaceHost,
   ledgerWorkspaceKey,
 } from './ledger-workspace-key';
 import {
-  countLedgerKeyCaseCollisions,
   rewriteLedgerWorkspaceKeys,
 } from './ledger-workspace-key-rewrite';
 import { SessionStoreDatabase } from './session-store-database';
@@ -72,13 +69,6 @@ describe('ledgerWorkspaceKey', () => {
     for (const root of ['C:\\Users\\Dev\\Proj', '/Users/Dev/Proj', '/home/dev/proj']) {
       expect(ledgerWorkspaceKey(root)).toBe(sharedWorkspaceKey(root));
     }
-  });
-
-  it('keeps case in the case-kept spelling and knows which hosts ignore case', () => {
-    expect(caseKeptWorkspaceKey('C:\\Users\\Dev\\Proj\\')).toBe('C:/Users/Dev/Proj');
-    expect(isCaseSensitiveWorkspaceHost('linux')).toBe(true);
-    expect(isCaseSensitiveWorkspaceHost('win32')).toBe(false);
-    expect(isCaseSensitiveWorkspaceHost('darwin')).toBe(false);
   });
 });
 
@@ -239,37 +229,17 @@ describe('S0009/S0010 ledger workspace key migration', () => {
       expect(indexes).toEqual(expect.arrayContaining(['idx_sessions_host_workspace', 'idx_sessions_workspace_key',
         'idx_sessions_ledger_workspace_key', 'idx_session_usage_workspace_time', 'idx_session_stats_workspace_time']));
 
-      rewriteLedgerWorkspaceKeys(db, false);
+      rewriteLedgerWorkspaceKeys(db);
       expect(coverageRows(db)).toEqual(coverage);
     } finally {
       store.close();
     }
   });
 
-  it('logs one line when opening a store on Linux leaves case-only key pairs apart', async () => {
-    const file = path.join(dir, 'sessions.sqlite');
-    const legacy = openDb(file);
-    await new SqliteMigrationRunner(legacy, logger).applyAll(
-      SESSION_STORE_MIGRATIONS.filter((migration) => migration.version <= 8),
-      { vecExtensionLoaded: false },
-    );
-    legacy.exec(`INSERT INTO session_usage_coverage VALUES ('/home/u/Proj', 1, 2), ('/home/u/proj', 3, 4)`);
-    legacy.close();
-    const platform = Object.getOwnPropertyDescriptor(process, 'platform');
-    Object.defineProperty(process, 'platform', { value: 'linux' });
-    const warn = jest.fn();
-    const store = new SessionStoreDatabase(file, { ...logger, warn } as unknown as Logger, openDb);
-    try {
-      await store.ready();
-      expect(warn).toHaveBeenCalledTimes(1);
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining('differ only by case'), { collisions: 1 });
-    } finally {
-      store.close();
-      if (platform) Object.defineProperty(process, 'platform', platform);
-    }
-  });
-
-  it('on a case-sensitive host keeps keys that differ only by case apart and counts them', () => {
+  it('folds keys that differ only by case on every host, like the usage producers', () => {
+    // Documented trade-off (TASK_2026_2302_usage): the producers have always
+    // written the lowercased fold, so the sessions key and the usage rows of one
+    // folder agree only if every stored key folds the same way.
     const raw = new DatabaseSync(':memory:');
     try {
       for (const migration of SESSION_STORE_MIGRATIONS) if (migration.sql) raw.exec(migration.sql);
@@ -284,27 +254,17 @@ describe('S0009/S0010 ledger workspace key migration', () => {
         INSERT INTO session_usage_coverage (workspace_key, first_captured_at_ms, last_captured_at_ms)
         VALUES ('/home/u/Proj', 10, 20), ('/home/u/proj', 30, 40), ('/home/u/Other/', 5, 6);`);
 
-      rewriteLedgerWorkspaceKeys(db, true);
+      rewriteLedgerWorkspaceKeys(db);
       expect(raw.prepare('SELECT session_id AS id, workspace_key AS key FROM session_stats ORDER BY session_id').all())
         .toEqual([
           { id: 'alone', key: '/home/u/other' },
           { id: 'lower', key: '/home/u/proj' },
-          { id: 'upper', key: '/home/u/Proj' },
+          { id: 'upper', key: '/home/u/proj' },
         ]);
-      expect(coverageRows(db)).toEqual([
-        { key: '/home/u/Proj', first: 10, last: 20 },
-        { key: '/home/u/other', first: 5, last: 6 },
-        { key: '/home/u/proj', first: 30, last: 40 },
-      ]);
-      expect(countLedgerKeyCaseCollisions(db)).toBe(1);
-
-      // A case-insensitive host treats the same pair as one folder.
-      rewriteLedgerWorkspaceKeys(db, false);
       expect(coverageRows(db)).toEqual([
         { key: '/home/u/other', first: 5, last: 6 },
         { key: '/home/u/proj', first: 10, last: 40 },
       ]);
-      expect(countLedgerKeyCaseCollisions(db)).toBe(0);
     } finally {
       raw.close();
     }
