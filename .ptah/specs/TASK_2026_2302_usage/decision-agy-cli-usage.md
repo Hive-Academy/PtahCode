@@ -51,16 +51,16 @@ Restore a CLI source for Antigravity plan usage, guarded so it never bills:
   was created. Codex shows a weekly window (3 %). The chat sidebar shows the
   Antigravity tile.
 
-## Linux case decision
+## Linux case decision (revised after PR review)
 
-The usage ledger keeps folding case on every OS (the four usage producers
-have always written the shared, lowercased fold). On Linux two folders
-that differ only by case therefore share Analytics totals; the session list
-stays exact. Migration S0010 folds every stored key the same way on every
-host (an earlier "keep case-only pairs apart on Linux" rule was dropped: it
-left the sessions key folded while the usage rows were not, so those rows
-became unreachable, and it failed CI on Linux). Making POSIX ledger keys
-case-exact needs the producers to pass raw paths; not done.
+Ledger keys fold case only for Windows-style paths (drive letter or
+backslash) and on Windows and macOS hosts, whose file systems ignore case.
+POSIX paths on Linux keep their case, so two folders that differ only by
+case have separate Analytics totals. The usage producers and readers pass
+raw workspace paths so the case reaches the repository. Migration S0010
+restores a legacy Linux key that the old producers lowercased to the single
+session folder it matches; an ambiguous or orphan key stays as it is. The
+session list keeps its exact match.
 
 ## Known limits
 
