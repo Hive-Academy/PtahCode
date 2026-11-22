@@ -1,12 +1,12 @@
 ---
 id: TASK_2026_2301_agyfu
-status: backlog
+status: in_review
 type: BUGFIX
 title: Antigravity chat follow-ups after PR 1462 (resume instructions, review moderates)
 depends_on: [TASK_2026_2297_agy]
 relatesTo: [TASK_2026_2288_acp1]
 created: '2026-11-22T12:00:00.000Z'
-updated: '2026-11-22T12:00:00.000Z'
+updated: '2026-11-22T16:00:00.000Z'
 description: >-
   Open items from TASK_2026_2297_agy reviews and live tests.
   (1) S2: instructions on restored sessions - verify that agy keeps the

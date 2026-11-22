@@ -39,7 +39,12 @@ export interface ProviderSessionOpenRequestDeps {
   readSavedPermissionLevel(workspacePath: string): PermissionLevel;
   /** Whether the Ptah MCP server is running now (read at each open). */
   mcpServerRunning(): boolean;
-  /** Environment the provider process starts from (credential-free). */
+  /**
+   * Environment the provider process starts from. Electron passes
+   * `laneAcpBaseEnv`: the host environment plus `CLI_CLEAN_ENV`, the same
+   * base every CLI lane gets, so host variables (secrets included) reach the
+   * agent as they reach a lane. Ptah's MCP bearer is never put in it.
+   */
   baseEnv(): Readonly<Record<string, string | undefined>>;
   /**
    * What the profile's agent puts in front of each Ptah MCP tool name (agy:
