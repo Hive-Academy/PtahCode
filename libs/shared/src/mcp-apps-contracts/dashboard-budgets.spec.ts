@@ -251,34 +251,118 @@ describe('dashboard budgets — at the limit passes, above it is rejected', () =
       },
     );
 
-    it('returns a rejection for a tree so deep that measuring it overflows too', () => {
-      // At 5,000 levels even `JSON.stringify` overflows, so the byte counter
-      // throws before the structural walk runs and only the outer catch can
-      // answer. Any rejection is correct here; an exception is not.
-      const spec = deepChain(5_000);
-      expect(() => dashboardJsonBytes(spec)).toThrow(RangeError);
+    /**
+     * A byte counter that recurses over the value, as `JSON.stringify` did on
+     * the V8 of Node 24 and earlier. Newer V8 (Node 26) serialises without
+     * recursing and no longer overflows at these depths, and the webview's
+     * counter runs on Chromium's V8, so the outer-catch path is proven with a
+     * counter that overflows on every runtime instead of with the host's one.
+     */
+    const recursiveJsonBytes = (value: unknown): number => {
+      if (Array.isArray(value)) {
+        return value.reduce<number>(
+          (bytes, item, index) =>
+            bytes + (index > 0 ? 1 : 0) + recursiveJsonBytes(item),
+          2,
+        );
+      }
+      if (typeof value === 'object' && value !== null) {
+        return Object.entries(value).reduce<number>(
+          (bytes, [key, item], index) =>
+            bytes +
+            (index > 0 ? 1 : 0) +
+            dashboardJsonBytes(key) +
+            1 +
+            recursiveJsonBytes(item),
+          2,
+        );
+      }
+      return dashboardJsonBytes(value);
+    };
 
-      const result = validate(spec);
+    /** The smallest doubling of `start` at which `recursiveJsonBytes` overflows. */
+    const overflowingDepth = (
+      start: number,
+      build: (depth: number) => unknown,
+    ): number => {
+      for (let depth = start; depth <= 4_000_000; depth *= 2) {
+        try {
+          recursiveJsonBytes(build(depth));
+        } catch (error: unknown) {
+          if (error instanceof RangeError) return depth;
+          throw error;
+        }
+      }
+      throw new Error('recursiveJsonBytes never overflowed');
+    };
+
+    it('measures like the real counter on an ordinary spec', () => {
+      const spec = deepChain(9);
+      expect(recursiveJsonBytes(spec)).toBe(dashboardJsonBytes(spec));
+    });
+
+    it('returns a rejection for a tree so deep that measuring it overflows too', () => {
+      // At this depth the byte counter throws before the structural walk runs
+      // and only the outer catch can answer. Any rejection is correct here; an
+      // exception is not.
+      const spec = deepChain(overflowingDepth(5_000, deepChain));
+      expect(() => recursiveJsonBytes(spec)).toThrow(RangeError);
+
+      const result = validateDashboardSpec(spec, recursiveJsonBytes);
       expect(result.ok).toBe(false);
-      expect(result.ok ? '' : result.reason.length).toBeGreaterThan(0);
+      expect(result.ok ? '' : result.reason).toContain(
+        'could not be validated',
+      );
+
+      // The host counter either overflows the same way or measures the tree,
+      // which the byte cap or the structural walk then rejects.
+      const hosted = validate(spec);
+      expect(hosted.ok).toBe(false);
+      expect(hosted.ok ? '' : hosted.reason.length).toBeGreaterThan(0);
     });
 
     it('rejects, without throwing, a nesting depth that overflows the byte counter itself', () => {
-      // `jsonUtf8Bytes` is `JSON.stringify`, which recurses over the WHOLE
-      // value — including a key the schema never visits. This input throws
-      // inside the byte count, before any budget has been read, so only the
-      // validator's outer catch can turn it into an answer.
-      let blob: unknown = 1;
-      for (let level = 0; level < 200_000; level++) blob = { a: blob };
-      expect(() => dashboardJsonBytes(blob)).toThrow(RangeError);
+      // A recursive byte counter recurses over the WHOLE value — including a
+      // key the schema never visits. This input throws inside the byte count,
+      // before any budget has been read, so only the validator's outer catch
+      // can turn it into an answer.
+      const nested = (depth: number): unknown => {
+        let blob: unknown = 1;
+        for (let level = 0; level < depth; level++) blob = { a: blob };
+        return blob;
+      };
+      const blob = nested(overflowingDepth(200_000, nested));
+      const spec = { ...makeDashboardSpec(), bogus: blob };
 
-      const result = validate({ ...makeDashboardSpec(), bogus: blob });
+      const result = validateDashboardSpec(spec, recursiveJsonBytes);
       expect(result.ok).toBe(false);
       expect(result.ok ? '' : result.reason).toContain(
         'could not be validated',
       );
       // Unmeasurable, and says so rather than reporting a made-up 0.
       expect(result.ok ? 0 : result.bytes).toBeUndefined();
+
+      // With the host counter: the same outer-catch answer where it overflows,
+      // otherwise a measured rejection over the byte cap.
+      let measurable = true;
+      try {
+        dashboardJsonBytes(spec);
+      } catch (error: unknown) {
+        if (!(error instanceof RangeError)) throw error;
+        measurable = false;
+      }
+      const hosted = validate(spec);
+      expect(hosted.ok).toBe(false);
+      if (measurable) {
+        expect(hosted.ok ? 0 : hosted.bytes).toBeGreaterThan(
+          DASHBOARD_LIMITS.maxSpecBytes,
+        );
+      } else {
+        expect(hosted.ok ? '' : hosted.reason).toContain(
+          'could not be validated',
+        );
+        expect(hosted.ok ? 0 : hosted.bytes).toBeUndefined();
+      }
     });
 
     it('still rejects an over-depth tree through the zod refinement for a parseable one', () => {
