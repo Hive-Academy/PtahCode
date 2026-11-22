@@ -79,9 +79,27 @@ describe('ledgerWorkspaceKey', () => {
     ['\\\\Server\\Share', 'darwin', '//server/share'],
     ['\\\\Server\\Share', 'win32', '//server/share'],
     ['/X/Y\\Z', 'win32', '/x/y/z'],
+    // Dot segments and repeated separators collapse as the session list's key does.
+    ['/home/u/./Proj/', 'linux', '/home/u/Proj'],
+    ['/home/u/x/../Proj', 'linux', '/home/u/Proj'],
+    ['/home//u/Proj', 'linux', '/home/u/Proj'],
+    ['/srv/a\\.\\b', 'linux', '/srv/a\\.\\b'],
+    ['C:\\a\\.\\b', 'linux', 'c:/a/b'],
+    ['C:\\a\\x\\..\\b\\', 'win32', 'c:/a/b'],
+    ['c:/a//b', 'darwin', 'c:/a/b'],
+    ['C:', 'win32', 'c:'],
+    ['C:\\', 'linux', 'c:'],
+    ['//server/share', 'linux', '//server/share'],
+    ['/', 'win32', '/'],
   ])('%s on %s is %s, and applying it again changes nothing', (input, platform, key) => {
     expect(ledgerWorkspaceKey(input, platform)).toBe(key);
     expect(ledgerWorkspaceKey(key, platform)).toBe(key);
+  });
+
+  it('gives C:\\a\\.\\b and C:\\a\\b one key on every host', () => {
+    for (const platform of ['linux', 'darwin', 'win32'] as const) {
+      expect(ledgerWorkspaceKey('C:\\a\\.\\b', platform)).toBe(ledgerWorkspaceKey('C:\\a\\b', platform));
+    }
   });
 
   it('keeps a Linux path with a backslash apart from the path with a slash', () => {
@@ -173,6 +191,14 @@ describe('session store workspace key round trip', () => {
       }
       expect(await stats.getSessionStats('upper', '/home/u/proj')).toBeNull();
       expect(await stats.getWorkspaceSessionCount('/HOME/U/PROJ', 0, DAY_MS)).toBe(0);
+
+      // Spellings with dot segments reach the same folder as the session list does.
+      await records.upsert(session('dots', '/home/u/./Proj/'));
+      await sink.recordUsage(liveEvent('dots', '/home/u/x/../Proj'));
+      expect((await records.listForWorkspace('/home/u/Proj')).map((row) => row.sessionId).sort())
+        .toEqual(['dots', 'upper']);
+      expect(await stats.getWorkspaceSessionCount('/home/u/Proj', 0, DAY_MS)).toBe(2);
+      expect(await stats.getSessionStats('dots', '/home/u/./Proj')).toMatchObject({ input_tokens: 7 });
 
       await sink.recordUsage(liveEvent('backslash', '/srv/a\\b', 'cli-lane'));
       await sink.recordUsage(liveEvent('slash', '/srv/a/b', 'cli-lane'));
@@ -314,6 +340,23 @@ describe('S0010 ledger workspace key rewrite', () => {
     expect(keys(db, COVERAGE)).toEqual(coverage);
     rewriteLedgerWorkspaceKeys(db, platform);
     expect(keys(db, TURN_KEYS)).toEqual(turns);
+  });
+
+  it('collapses dot segments in stored usage keys and session paths', () => {
+    const db = legacyDb(
+      [['dots', '/home/u/./Proj/'], ['win', 'C:\\a\\.\\b']],
+      [['dots', '/home/u/x/../Proj'], ['win', 'c:/a/./b']],
+      [['dots', '/home/u//Proj']],
+      [['/home/u/Proj', 10, 20], ['/home/u/./Proj', 5, 15], ['C:\\a\\x\\..\\b', 1, 2]],
+    );
+    rewriteLedgerWorkspaceKeys(db, 'linux');
+    expect(keys(db, SESSION_KEYS)).toEqual([{ id: 'dots', key: '/home/u/Proj' }, { id: 'win', key: 'c:/a/b' }]);
+    expect(keys(db, TURN_KEYS)).toEqual([{ id: 'dots', key: '/home/u/Proj' }, { id: 'win', key: 'c:/a/b' }]);
+    expect(keys(db, STATS_KEYS)).toEqual([{ id: 'dots', key: '/home/u/Proj' }]);
+    expect(keys(db, COVERAGE)).toEqual([
+      { key: '/home/u/Proj', first: 5, last: 20 },
+      { key: 'c:/a/b', first: 1, last: 2 },
+    ]);
   });
 
   it('runs as S0010 when a version-8 store opens, and keeps the workspace indexes', async () => {
