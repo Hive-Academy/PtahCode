@@ -328,6 +328,31 @@ describe('InspectorAgentsSectionComponent (B+ agents list)', () => {
     expect(tokens?.getAttribute('title')).toBe('not reported');
   });
 
+  it('shows the session duration as the Orchestrator time (Codex main agent)', () => {
+    const fixture = mount([]);
+    fixture.componentRef.setInput('orchestrator', {
+      ...CARD, model: 'gpt-5.5', durationMs: 12_500,
+    } satisfies OrchestratorCardModel);
+    fixture.detectChanges();
+    const time = (fixture.nativeElement as HTMLElement).querySelector(
+      '[data-agent-key="orchestrator"] [data-testid="agent-row-time"]',
+    );
+    expect(time?.textContent?.trim()).toBe('12s');
+  });
+
+  it.each([undefined, null])(
+    'keeps the Orchestrator time a dash only when the duration is unknown (%p)',
+    (durationMs) => {
+      const fixture = mount([]);
+      fixture.componentRef.setInput('orchestrator', { ...CARD, durationMs });
+      fixture.detectChanges();
+      const time = (fixture.nativeElement as HTMLElement).querySelector(
+        '[data-agent-key="orchestrator"] [data-testid="agent-row-time"]',
+      );
+      expect(time?.textContent?.trim()).toBe('—');
+    },
+  );
+
   it('acquires the shared clock only while an agent runs and advances elapsed time', () => {
     jest.useFakeTimers({
       doNotFake: ['setTimeout', 'clearTimeout', 'requestAnimationFrame', 'cancelAnimationFrame'],

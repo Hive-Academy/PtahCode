@@ -220,6 +220,15 @@ describe('SessionInspectorStore', () => {
     expect(store.modelFor(unknown.id)().orchestrator.costNotPriced).toBe(false);
   });
 
+  it('carries the snapshot session duration to the Orchestrator card', () => {
+    const timed = tab({ sessionStats: stats({ durationMs: 9_000 }) });
+    put(timed);
+    expect(store.modelFor(timed.id)().orchestrator.durationMs).toBe(9_000);
+    const untimed = tab({ sessionStats: stats({ durationMs: null }) });
+    put(untimed);
+    expect(store.modelFor(untimed.id)().orchestrator.durationMs).toBeNull();
+  });
+
   it('reports unknown turns before a restored session loads messages or host stats', () => {
     const current = tab({ sessionStats: null, messages: [] });
     put(current);

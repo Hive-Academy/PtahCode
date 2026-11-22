@@ -468,7 +468,9 @@ export class InspectorAgentsSectionComponent {
         input: split?.input ?? null,
         output: split?.output ?? null,
       },
-      durationMs: null,
+      // The main agent's run time is the session duration the backend
+      // reports; unknown stays null (Time `—`), never 0.
+      durationMs: card?.durationMs ?? null,
       requests: [],
       tray: null,
       hasActions: false,
