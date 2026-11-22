@@ -91,7 +91,8 @@ describe('buildCodeNamespace.searchSymbols', () => {
 
     expect(reader.searchSymbols).toHaveBeenCalledWith(
       'validate token',
-      5,
+      // Twice the page size: the shaper re-ranks by name and keeps 5.
+      10,
       '/ws',
     );
     expect(result.bm25Only).toBe(false);

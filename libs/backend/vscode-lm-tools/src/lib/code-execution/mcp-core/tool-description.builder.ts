@@ -17,6 +17,19 @@ import {
 } from '../namespace-builders/symbol-index-query';
 import { HTTP_MAX_AGENT_WAIT_SEC } from './wait-tools-args.schema';
 import {
+  READ_SYMBOL_DEFAULT_MAX_LINES,
+  READ_SYMBOL_HARD_MAX_LINES,
+  READ_SYMBOL_MAX_CHARS,
+  READ_SYMBOL_TOOL_NAME,
+} from './nav/read-symbol.limits';
+import {
+  GREP_DEFAULT_MAX_MATCHES,
+  GREP_HARD_MAX_MATCHES,
+  GREP_MAX_CONTEXT,
+  GREP_MAX_FILES,
+  GREP_TOOL_NAME,
+} from './nav/grep.limits';
+import {
   TASK_CHECK_ENTRY_CAP,
   TASK_LIST_DEFAULT_LIMIT,
   TASK_LIST_MAX_LIMIT,
@@ -477,6 +490,127 @@ export function buildSearchFilesTool(): MCPToolDefinition {
         },
       },
       required: ['pattern'],
+    },
+    annotations: { readOnlyHint: true },
+  };
+}
+
+/**
+ * Build the ptah_read_symbol tool definition: one declaration by name, or a
+ * line range, of a workspace file, as numbered plain text.
+ */
+export function buildReadSymbolTool(): MCPToolDefinition {
+  return {
+    name: READ_SYMBOL_TOOL_NAME,
+    description: `Read code without reading the whole file. Two forms: \`name\` returns that declaration (function, method, class; \`Class.method\` works) with its doc comment and 1-based line numbers, or lists the matches when the name is ambiguous; \`startLine\`/\`endLine\` returns that range (any text file). At most \`maxLines\` lines (default ${READ_SYMBOL_DEFAULT_MAX_LINES}, max ${READ_SYMBOL_HARD_MAX_LINES}) and about ${READ_SYMBOL_MAX_CHARS} chars; a cut result says where to continue.`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        file: {
+          type: 'string',
+          description:
+            'File path, workspace-relative or absolute inside the workspace.',
+        },
+        name: {
+          type: 'string',
+          description:
+            'Declaration name, e.g. "handleRequest" or "MyClass.handleRequest".',
+        },
+        kind: {
+          type: 'string',
+          enum: ['class', 'method', 'function'],
+          description: 'Optional: only declarations of this kind.',
+        },
+        startLine: {
+          type: 'integer',
+          minimum: 1,
+          description:
+            'Range start (1-based). With `name`, picks among ambiguous matches.',
+        },
+        endLine: {
+          type: 'integer',
+          minimum: 1,
+          description:
+            'Range end (1-based, inclusive; clamped to the file length).',
+        },
+        maxLines: {
+          type: 'integer',
+          minimum: 1,
+          maximum: READ_SYMBOL_HARD_MAX_LINES,
+          default: READ_SYMBOL_DEFAULT_MAX_LINES,
+          description: 'Most lines to return.',
+        },
+        workspaceRoot: {
+          type: 'string',
+          description:
+            'Optional absolute workspace root to resolve `file` against.',
+        },
+      },
+      required: ['file'],
+      additionalProperties: false,
+    },
+    annotations: { readOnlyHint: true },
+  };
+}
+
+/**
+ * Build the ptah_grep tool definition: free-text search of the workspace,
+ * grouped by file, each match labelled with its enclosing declaration.
+ */
+export function buildGrepTool(): MCPToolDefinition {
+  return {
+    name: GREP_TOOL_NAME,
+    description: `Search file contents for a text or regex (strings, constants, comments, any usage). Matches are grouped by file and show the line number, the enclosing function/class in [brackets] and the trimmed line. Literal by default; smart case. Default ${GREP_DEFAULT_MAX_MATCHES} matches (max ${GREP_HARD_MAX_MATCHES}), ${GREP_MAX_FILES} files; a cut result says what was left out. Skips ignored paths; set \`includeIgnored\` with a scoped \`path\` (e.g. "node_modules/zod") to search them. Use ptah_code_search_symbols to find a declaration by name.`,
+    inputSchema: {
+      type: 'object',
+      properties: {
+        pattern: {
+          type: 'string',
+          description: 'Text to find (literal unless `regex` is true).',
+        },
+        path: {
+          type: 'string',
+          description:
+            'File or directory to search, workspace-relative or absolute inside the workspace. Default: the workspace root.',
+        },
+        glob: {
+          type: 'string',
+          description:
+            'Only files matching this glob, e.g. "*.ts" or "libs/**/*.spec.ts".',
+        },
+        regex: {
+          type: 'boolean',
+          description: 'Treat `pattern` as a regular expression.',
+        },
+        caseSensitive: {
+          type: 'boolean',
+          description: 'Force case sensitivity on or off. Default: smart case.',
+        },
+        context: {
+          type: 'integer',
+          minimum: 0,
+          maximum: GREP_MAX_CONTEXT,
+          description: 'Lines of context before and after each match.',
+        },
+        maxMatches: {
+          type: 'integer',
+          minimum: 1,
+          maximum: GREP_HARD_MAX_MATCHES,
+          default: GREP_DEFAULT_MAX_MATCHES,
+          description: 'Most matches to show.',
+        },
+        includeIgnored: {
+          type: 'boolean',
+          description:
+            'Also search ignored and hidden paths such as node_modules. Needs a scoped `path`.',
+        },
+        workspaceRoot: {
+          type: 'string',
+          description: 'Optional absolute workspace root.',
+        },
+      },
+      required: ['pattern'],
+      additionalProperties: false,
     },
     annotations: { readOnlyHint: true },
   };
@@ -1985,7 +2119,7 @@ export function buildAstAnalyzeTool(): MCPToolDefinition {
       languagesNote('parse') +
       '; exports only for ' +
       languagesNote('publicSymbols') +
-      '. Use it before reading a file. Prefer an absolute file path; when multiple workspaces are open, either pass an absolute path or set workspaceRoot so a relative path resolves against the intended workspace.',
+      '. Lists are tables; on a large file they are cut at a record boundary (see `truncated`). Use it before reading a file. Prefer an absolute file path; when multiple workspaces are open, either pass an absolute path or set workspaceRoot so a relative path resolves against the intended workspace.',
     inputSchema: {
       type: 'object',
       properties: {

@@ -1825,7 +1825,7 @@ describe('protocol-handlers › tools/call individual tool routing', () => {
   });
 
   // TASK_2026_559 Batch 20.2p: per-record JSON keys cost the promised saving.
-  it('writes ptah_ast_analyze records as tables behind parse status and coverage', async () => {
+  it('writes ptah_ast_analyze records as tables behind parse status, functions last', async () => {
     const analyze = jest.fn().mockResolvedValue({
       parseStatus: 'ok',
       errorNodeCount: 0,
@@ -1873,13 +1873,13 @@ describe('protocol-handlers › tools/call individual tool routing', () => {
     const content = (
       res.result as { content: Array<{ type: string; text: string }> }
     ).content;
+    // TASK_2026_2299: a zero error count and a plain clean coverage are
+    // dropped; classes, exports and imports come before functions.
     expect(content[0].text).toBe(
-      '{"parseStatus":"ok","errorNodeCount":0,"errorNodeCountCapped":false,' +
-        '"coverage":{"clean":true,"analyzed":1},"file":"src/a.ts",' +
-        '"language":"typescript",' +
-        '"functions":[["name","parameters","startLine","endLine"],["load",["id"],1,4],["save",[],6,9]],' +
-        '"classes":[],"imports":[["source","importedSymbols"],["node:path",["join"]]],' +
-        '"exports":[["name","kind"],["load","function"]]}',
+      '{"parseStatus":"ok","file":"src/a.ts","language":"typescript",' +
+        '"classes":[],"exports":[["name","kind"],["load","function"]],' +
+        '"imports":[["source","importedSymbols"],["node:path",["join"]]],' +
+        '"functions":[["name","parameters","startLine","endLine"],["load",["id"],1,4],["save",[],6,9]]}',
     );
   });
 
@@ -9368,9 +9368,10 @@ describe('MCP tool profile listing, eager loading and dispatch', () => {
       // ptah_session_handoff, always-on (TASK_2026_655). +1:
       // ptah_agent_message_control (P1-E). +1: ptah_agent_message_ack (P2-G).
       // +1: ptah_session_clear_finished (TASK_2026_932). +4: the ptah_cron_*
-      // read tools (issue #1400); the five write tools are hidden from a
+      // read tools (issue #1400); +2 in TASK_2026_2299 (ptah_read_symbol and
+      // ptah_grep); the five write tools are hidden from a
       // caller whose credential has no `cronWriteApproval`.
-      expect(coding).toHaveLength(hasIDECapabilities ? 78 : 75);
+      expect(coding).toHaveLength(hasIDECapabilities ? 80 : 77);
       expect(coding.map((tool) => tool.name)).toContain(
         'ptah_artifact_publish',
       );
@@ -9382,6 +9383,21 @@ describe('MCP tool profile listing, eager loading and dispatch', () => {
           'anthropic/alwaysLoad'
         ],
       ).toBeUndefined();
+      // TASK_2026_2299: the navigation tools load eagerly, so a shell command
+      // is never cheaper than a tool-search round trip.
+      for (const name of [
+        'ptah_read_symbol',
+        'ptah_grep',
+        'ptah_get_dependents',
+        'ptah_get_symbol_index',
+        'ptah_relevance_rank_files',
+      ]) {
+        expect(
+          coding.find((tool) => tool.name === name)?._meta?.[
+            'anthropic/alwaysLoad'
+          ],
+        ).toBe(true);
+      }
       expect(
         apps.filter((tool) => !APPS_ONLY_TOOL_NAMES.has(tool.name)),
       ).toEqual(coding);

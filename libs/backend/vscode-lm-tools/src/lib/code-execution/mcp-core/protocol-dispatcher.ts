@@ -29,7 +29,6 @@ import type {
   McpInstallTarget,
   McpServerConfig,
 } from '@ptah-extension/shared';
-import { formatAstAnalysisResult } from '@ptah-extension/workspace-intelligence';
 import {
   countTokensPiecewise,
   fitsBudget,
@@ -107,6 +106,7 @@ import type {
   SymbolIndexPage,
 } from '../types';
 import { parseSymbolIndexQuery } from '../namespace-builders/symbol-index-query';
+import { toSymbolSearchWireAnswer } from './symbol-search-answer';
 import { FileNotInGraphError } from '../namespace-builders/analysis-namespace.builders';
 import { readOnlyCronNamespace } from '../namespace-builders/cron-namespace.builder';
 import { AgentMessageControlIdentityError } from '../namespace-builders/agent-message-control-actor';
@@ -221,6 +221,10 @@ import { handleSessionToolCall } from './session-tool-handlers';
 import { lifecycleTools } from './lifecycle-tools';
 import { ROUTE_DECIDE_TOOL_NAME, buildRouteDecideTool } from './route-tools';
 import { describeZodIssues, handleRouteToolCall } from './route-tool-handlers';
+import { handleGrep } from './nav/grep';
+import { GREP_TOOL_NAME } from './nav/grep.limits';
+import { handleReadSymbol } from './nav/read-symbol';
+import { READ_SYMBOL_TOOL_NAME } from './nav/read-symbol.limits';
 import {
   OUTCOME_REPORT_TOOL_NAME,
   buildOutcomeReportTool,
@@ -239,6 +243,7 @@ import {
   isMcpRequestInFlight,
   runWithMcpRequestContext,
 } from './mcp-request-context';
+import { renderAstAnalyzeResult } from './ast-analyze-output';
 import {
   resolveMcpCaller,
   type McpCaller,
@@ -619,13 +624,22 @@ const APPROVAL_PROMPT_TOOL_NAME = 'approval_prompt';
  *
  * Lane discovery and spawning are eager so delegation is visible without
  * tool search. Other agent tools, route_decide and outcome_report stay deferred.
+ * The navigation tools (read, grep, outline, dependents, symbol index) are
+ * eager for the same reason: a deferred tool loses to a shell command.
  */
 const ALWAYS_EAGER_TOOLS: ReadonlySet<string> = new Set([
   'ptah_search_files',
+  READ_SYMBOL_TOOL_NAME,
+  GREP_TOOL_NAME,
   'ptah_ast_analyze',
   'ptah_context_enrich_file',
   'ptah_get_diagnostics',
   'ptah_workspace_analyze',
+  // Navigation set (TASK_2026_2299): measured, one deferred tool cost an
+  // agent a tool-search round trip, so it ran `rg` instead.
+  'ptah_get_dependents',
+  'ptah_get_symbol_index',
+  'ptah_relevance_rank_files',
   'ptah_agent_list',
   'ptah_agent_spawn',
 ]);
@@ -1119,6 +1133,26 @@ async function handleIndividualTool(
           formatSearchFiles(files.slice(0, limit), files.length > limit),
           deps,
         );
+      }
+
+      case READ_SYMBOL_TOOL_NAME:
+      case GREP_TOOL_NAME: {
+        // Validation, path containment and bounds live in the handlers.
+        const navDeps = {
+          analyze: (absolutePath: string) => ptahAPI.ast.analyze(absolutePath),
+          // The caller's own root first: a lane in a git worktree must read
+          // its worktree, not the main checkout.
+          defaultWorkspaceRoot: async () =>
+            getCallerWorkspaceRoot() ??
+            (await ptahAPI.workspace.getInfo())?.path,
+        };
+        const reply =
+          name === GREP_TOOL_NAME
+            ? await handleGrep(args, navDeps)
+            : await handleReadSymbol(args, navDeps);
+        return reply.isError
+          ? toolErrorResponse(request, reply.text)
+          : await createToolSuccessResponse(request, reply.text, deps);
       }
 
       case 'ptah_get_diagnostics': {
@@ -2812,14 +2846,17 @@ async function handleIndividualTool(
         if (!file || typeof file !== 'string' || !file.trim()) {
           return missingStringArgResponse(request, 'file');
         }
-        const result = await ptahAPI.ast.analyze(
-          file.trim(),
-          typeof workspaceRoot === 'string' ? workspaceRoot.trim() : undefined,
-        );
-        // Records as tables: the lossless form that meets the promised token saving.
+        const root =
+          typeof workspaceRoot === 'string' ? workspaceRoot.trim() : undefined;
+        const result = await ptahAPI.ast.analyze(file.trim(), root);
+        // Records as tables, cut at a record boundary to fit the budget.
         return await createToolSuccessResponse(
           request,
-          formatAstAnalysisResult(withCompactCoverage(result)),
+          renderAstAnalyzeResult(result, [
+            root,
+            getCallerWorkspaceRoot(),
+            ...knownWorkspaceFolders(deps),
+          ]),
           deps,
         );
       }
@@ -2954,7 +2991,7 @@ async function handleIndividualTool(
         return await createToolSuccessResponse(
           request,
           JSON.stringify(
-            'coverage' in result ? withCompactCoverage(result) : result,
+            'coverage' in result ? toSymbolSearchWireAnswer(result) : result,
           ),
           deps,
         );

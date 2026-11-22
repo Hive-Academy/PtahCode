@@ -118,6 +118,14 @@ const MANDATE_MAP: Readonly<Record<string, Mapping>> = {
     'libs/backend/vscode-lm-tools/src/lib/code-execution/mcp-core/mcp-contract.sweep.spec.ts',
     'HTTP, IDE capabilities, anonymous caller: every tool succeeds, stays within its declared TOKEN budget, and — where the generic budget layer runs — names its reducer, spools byte-equal raw text, and keeps its marker',
   ),
+  ptah_grep: guard(
+    'libs/backend/vscode-lm-tools/src/lib/code-execution/mcp-core/nav/grep.spec.ts',
+    'groups matches by file with the enclosing symbol and relative paths',
+  ),
+  ptah_read_symbol: guard(
+    'libs/backend/vscode-lm-tools/src/lib/code-execution/mcp-core/nav/read-symbol.spec.ts',
+    'returns a named declaration with its doc comment and a relative header',
+  ),
   ptah_get_diagnostics: [
     guard(
       'libs/backend/platform-core/src/testing/contracts/run-diagnostics-provider-contract.ts',
@@ -238,6 +246,14 @@ const CLAIM_SUITE: Readonly<Record<string, ClaimSuite>> = {
   ptah_project_detect_monorepo: {
     noSuite:
       'deterministic project detection, no retrieval ground truth; pinned by mcp-contract.bench.spec.ts',
+  },
+  ptah_grep: {
+    noSuite:
+      'a free-text search: the benchmark has no retrieval ground truth for it; measured by scripts/nav-benchmark',
+  },
+  ptah_read_symbol: {
+    noSuite:
+      'a bounded source read: the benchmark has no retrieval ground truth for it; measured by scripts/nav-benchmark',
   },
   ptah_get_diagnostics: {
     noSuite:

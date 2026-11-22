@@ -34,6 +34,7 @@ import {
   type IWorkspaceProvider,
 } from '@ptah-extension/platform-core';
 import { handleMCPRequest } from './protocol-dispatcher';
+import { renderAstAnalyzeResult } from './ast-analyze-output';
 import type { ProtocolHandlerDependencies } from './protocol-dispatcher';
 import { buildAstNamespace } from '../namespace-builders/ast-namespace.builder';
 import {
@@ -240,6 +241,28 @@ describe('export-extraction gaps reach every consumer (real tree-sitter WASM)', 
       ).rejects.toThrow(
         /unsupported-syntax[\s\S]*line 3: exports[\s\S]*ptah\.ast\.analyze/,
       );
+    }, 60_000);
+
+    // TASK_2026_2299: the served text drops a plain clean coverage, so a
+    // partial extraction must keep its coverage and the unread forms.
+    it('R5-01: the served ptah_ast_analyze text keeps the disclosure ahead of the lists', async () => {
+      files.set(`${ROOT}/src/mixed.js`, MIXED);
+      const result = await astNamespace().analyze(`${ROOT}/src/mixed.js`);
+
+      const served = JSON.parse(renderAstAnalyzeResult(result, [ROOT])) as {
+        coverage?: Record<string, unknown>;
+        unextractedExports?: string[];
+      };
+      expect(Object.keys(served).slice(0, 3)).toEqual([
+        'parseStatus',
+        'coverage',
+        'unextractedExports',
+      ]);
+      expect(served.coverage).toMatchObject({
+        clean: false,
+        failedByReason: { 'unsupported-syntax': 1 },
+      });
+      expect(served.unextractedExports).toEqual(['line 3: exports']);
     }, 60_000);
 
     it('R5-01: queryExports still returns the array for a complete extraction', async () => {

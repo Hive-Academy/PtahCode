@@ -118,9 +118,15 @@ describe('buildServerInstructions (shipped mandate)', () => {
     }
   });
 
+  it('names the text search and the symbol read tools in the 512-char window', () => {
+    expect(mappedTools(instructions)).toEqual(
+      expect.arrayContaining(['ptah_grep', 'ptah_read_symbol']),
+    );
+  });
+
   it('carries the fallback line from the section, without Markdown emphasis', () => {
     expect(instructions).toContain(
-      'Fall back to Bash, Grep or Glob only for writes, build/test/git, free text, a ptah error, or one Grep after zero hits.',
+      'Fall back to Bash, Grep or Glob only for writes, build/test/git, a ptah error, or one Grep after zero hits.',
     );
     expect(instructions).not.toContain('**');
   });

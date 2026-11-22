@@ -35,6 +35,12 @@ import {
   supportedLanguagesFor,
   type CodeSymbolIndexer,
 } from '@ptah-extension/workspace-intelligence';
+import {
+  shapeSymbolHits,
+  symbolCandidateCount,
+  type RawSymbolHit,
+  type ShapedSymbolHit,
+} from './symbol-hit-format';
 
 /**
  * An index whose newest symbol is older than this is stale. It is also the
@@ -67,14 +73,13 @@ export interface CodeNamespaceDependencies {
   now?: () => number;
 }
 
-export interface SymbolHit {
-  readonly subject: string | null;
-  readonly filePath: string;
-  readonly symbolName: string;
-  readonly kind: string;
-  readonly text: string;
-  readonly score: number;
-}
+/**
+ * One search hit. The index fields (`subject`, absolute `filePath`,
+ * `symbolName`, `text`) stay for `execute_code` callers; the navigation
+ * fields (`file`, `name`, lines, `signature`, `extract`) were added by
+ * TASK_2026_2299 and are what the MCP tool returns.
+ */
+export type SymbolHit = ShapedSymbolHit;
 
 /**
  * How current the symbol index is, returned with every symbol search so a
@@ -100,6 +105,8 @@ export interface SymbolSearchResult {
   /** What the index covers right now; `unknown` never reads as complete. */
   coverage: LanguageCoverage;
   bm25Only: boolean;
+  /** Hits whose source file could not be read for a signature or extract; absent when 0. */
+  extractUnavailable?: number;
   hits: readonly SymbolHit[];
 }
 
@@ -380,10 +387,10 @@ export function buildCodeNamespace(
         try {
           const page = await codeReader.searchSymbols(
             query,
-            maxResults,
+            symbolCandidateCount(maxResults),
             workspaceRoot,
           );
-          const hits: SymbolHit[] = page.hits
+          const raw: RawSymbolHit[] = page.hits
             .filter((h) =>
               options.filePath != null
                 ? h.filePath.includes(options.filePath)
@@ -401,7 +408,7 @@ export function buildCodeNamespace(
             index,
             coverage: coverageNow(),
             bm25Only: page.bm25Only ?? false,
-            hits,
+            ...(await shapedHits(raw, query, maxResults, workspaceRoot)),
           };
         } catch (err) {
           return {
@@ -427,14 +434,18 @@ export function buildCodeNamespace(
         };
       }
       try {
-        const page = await reader.search(query, maxResults, workspaceRoot);
+        const page = await reader.search(
+          query,
+          symbolCandidateCount(maxResults),
+          workspaceRoot,
+        );
         const codeHits = page.hits.filter(
           (hit: MemoryHit) =>
             hit.tier === 'archival' &&
             typeof hit.subject === 'string' &&
             hit.subject.startsWith('code:'),
         );
-        const hits: SymbolHit[] = codeHits
+        const raw: RawSymbolHit[] = codeHits
           .filter((h) =>
             options.filePath != null
               ? (h.subject ?? '').includes(options.filePath)
@@ -452,7 +463,7 @@ export function buildCodeNamespace(
           index,
           coverage: coverageNow(),
           bm25Only: page.bm25Only ?? false,
-          hits,
+          ...(await shapedHits(raw, query, maxResults, workspaceRoot)),
         };
       } catch (err) {
         return {
@@ -542,6 +553,25 @@ export function startIndexFreshnessCheck(
       // fixed text (namespace errors can carry paths).
       logger.debug('[ptah.code] index freshness check could not start');
     });
+}
+
+/**
+ * The ranked, shaped hits and the `extractUnavailable` count (only when
+ * some source file could not be read), in wire order before `hits`.
+ */
+async function shapedHits(
+  raw: readonly RawSymbolHit[],
+  query: string,
+  maxResults: number,
+  workspaceRoot: string,
+): Promise<{ extractUnavailable?: number; hits: SymbolHit[] }> {
+  const { hits, extractUnavailable } = await shapeSymbolHits(
+    raw,
+    query,
+    maxResults,
+    workspaceRoot,
+  );
+  return extractUnavailable > 0 ? { extractUnavailable, hits } : { hits };
 }
 
 /**
