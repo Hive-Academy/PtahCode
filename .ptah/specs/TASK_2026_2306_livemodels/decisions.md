@@ -17,3 +17,4 @@
 | 13 | B1.1+B1.2 committed together: both edit providers/index.ts. dashboard-budgets.spec.ts fails 2 tests identically on clean main (pre-existing, unrelated; RangeError stack-depth test) | b1-gate.log, budgets-main.log |
 | 14 | B2.1-B2.3 committed as one commit (one plan batch; sub-batch files interleave in provider-models.service.ts). 4 out-of-set spec fixtures added to B2 by coordinator | b2-gate.log |
 | 15 | rpc-handlers spec-only typecheck (tsconfig.spec) has 9 errors from the B1/B2 isStatic/ProviderModelList contract; the nx typecheck target (lib) is green. B4a owns those specs and must clear them | batch-B4b-report.md |
+| 16 | B4a: kept additive auth-providers barrel exports (ModelListError, classifyModelListFailure, ProviderModelList). Coordinator replaced an orphaned degradation-audit marker in chat-session.service.ts:1535 with a plain comment (the catch is not a flagged site) | b4a-da.log |

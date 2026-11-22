@@ -76,7 +76,12 @@ export {
 export {
   ProviderModelsService,
   type DynamicModelFetcher,
+  type ProviderModelList,
 } from './lib/provider-models.service';
+export {
+  ModelListError,
+  classifyModelListFailure,
+} from './lib/model-list-error';
 export {
   OpenAIResponseTranslator,
   TranslationProxyBase,

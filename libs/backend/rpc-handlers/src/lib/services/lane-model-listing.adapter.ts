@@ -20,11 +20,11 @@ import {
   type Logger,
 } from '@ptah-extension/vscode-core';
 import {
-  getPtahCliLaneProvider,
   type AgentModelEntry,
   type AgentModelProvider,
   type CliDetectionResult,
   type PtahCliConfig,
+  type ProviderModelListSource,
   type SystemCliType,
 } from '@ptah-extension/shared';
 import { CliModelListService } from './cli-model-list.service';
@@ -39,11 +39,8 @@ interface ListedModel {
 interface DiscoveryModels {
   readonly kind: 'models';
   readonly models: readonly { readonly id: string }[];
-  readonly isStatic: boolean;
-}
-
-interface DiscoverySkipped {
-  readonly kind: 'skipped';
+  /** `fallback` for a persisted list, `reported` for a live one. */
+  readonly provenance: 'reported' | 'fallback';
 }
 
 interface DiscoveryEmpty {
@@ -56,8 +53,7 @@ interface DiscoveryFailed {
   readonly reason: 'threw' | 'threw-unknown';
 }
 
-type DiscoveryOutcome =
-  DiscoveryModels | DiscoverySkipped | DiscoveryEmpty | DiscoveryFailed;
+type DiscoveryOutcome = DiscoveryModels | DiscoveryEmpty | DiscoveryFailed;
 
 interface ProviderModelFetch {
   fetchModels(
@@ -67,7 +63,9 @@ interface ProviderModelFetch {
   ): Promise<{
     models: readonly { readonly id: string }[];
     totalCount: number;
-    isStatic: boolean;
+    source: ProviderModelListSource;
+    /** @deprecated Always false; removed in B6.3 with the service field. */
+    isStatic?: boolean;
   }>;
 }
 
@@ -190,12 +188,11 @@ export class LaneModelListingAdapter {
         this.sharedDiscovery(providerId),
         signal,
       );
-      if (outcome.kind === 'skipped') return base;
       if (outcome.kind === 'empty' || outcome.kind === 'error') {
         this.logMiss(row.ptahCliId, providerId, outcome.reason);
         return base;
       }
-      return this.mergeDiscovery(base, outcome.models, outcome.isStatic);
+      return this.mergeDiscovery(base, outcome.models, outcome.provenance);
     } catch (error: unknown) {
       // degradation-audit: optional-capability - the row deadline or a
       // discovery failure leaves the saved configured and tier entries.
@@ -235,13 +232,10 @@ export class LaneModelListingAdapter {
   private mergeDiscovery(
     base: readonly ListedModel[],
     models: readonly { readonly id: string }[],
-    isStatic: boolean,
+    provenance: DiscoveryModels['provenance'],
   ): ListedModel[] {
     const entries = base.map((entry) => ({ ...entry }));
     const seen = new Set(entries.map((entry) => entry.id));
-    const provenance: ListedModel['provenance'] = isStatic
-      ? 'fallback'
-      : 'reported';
     for (const model of models) {
       const id = model.id.trim();
       if (id.length === 0 || seen.has(id)) continue;
@@ -270,37 +264,37 @@ export class LaneModelListingAdapter {
     return pending;
   }
 
+  /**
+   * One `fetchModels` call. The service owns the chain and never throws for a
+   * vendor failure: `unavailable` becomes an `error` outcome, a `persisted`
+   * list keeps its rows as `fallback`, a `live` list as `reported`.
+   */
   private async runDiscovery(providerId: string): Promise<DiscoveryOutcome> {
     try {
       const apiKey = await this.authSecrets.getProviderKey(providerId);
-      if (!apiKey && this.isPurelyDynamic(providerId)) {
-        return { kind: 'skipped' };
-      }
       const result = await this.providerModels.fetchModels(
         providerId,
         apiKey ?? null,
         false,
       );
+      if (result.source === 'unavailable') {
+        return { kind: 'error', reason: 'threw' };
+      }
       const models = result.models.filter(
         (model) => model.id.trim().length > 0,
       );
       if (models.length === 0) return { kind: 'empty', reason: 'empty' };
-      return { kind: 'models', models, isStatic: result.isStatic };
+      return {
+        kind: 'models',
+        models,
+        provenance: result.source === 'persisted' ? 'fallback' : 'reported',
+      };
     } catch (error: unknown) {
       // degradation-audit: optional-capability - provider discovery can fail
       // or hang; the row keeps configured and tier entries. The raw error is
       // not logged because a provider client can echo the request.
       return { kind: 'error', reason: failureReason(error) };
     }
-  }
-
-  /** Same guard as `provider:listModels`: no key and no static catalog. */
-  private isPurelyDynamic(providerId: string): boolean {
-    const provider = getPtahCliLaneProvider(providerId);
-    return Boolean(
-      provider?.modelsEndpoint &&
-      (!provider.staticModels || provider.staticModels.length === 0),
-    );
   }
 
   private awaitWithSignal<T>(

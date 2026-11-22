@@ -21,11 +21,11 @@
  *     `MockRpcHandler` maps to `{ success: false, error }`).
  *
  *   - `provider:listModels`: routes `providerId` through
- *     `resolveProviderId()` (param > config > DEFAULT_PROVIDER_ID). For
- *     purely-dynamic providers without an API key it short-circuits to an
- *     empty result (not an error). Auth-failure errors (`401`, `403`,
- *     `Unauthorized`) are mapped to a user-facing "API key invalid" error
- *     message instead of throwing.
+ *     `resolveProviderId()` (param > config > DEFAULT_PROVIDER_ID) and maps
+ *     the service's typed list (`live` / `persisted` / `unavailable`) onto
+ *     the result with fixed-copy `notice` / `error`. A vendor failure is
+ *     never an RPC failure; only a service throw (unknown provider) is,
+ *     after a Sentry capture.
  *
  *   - `provider:setModelTier` / `provider:clearModelTier`: on success the
  *     handler MUST call `sdkAdapter.clearModelCache()` so the next
@@ -100,8 +100,13 @@ import type {
 import {
   LIMIT_LOOKUP_DEADLINE_MS,
   SLOW_LIMIT_LOOKUP_DEADLINE_MS,
-  mergeKimiCodeModels,
+  modelListErrorText,
+  modelListNoticeText,
 } from '@ptah-extension/shared';
+import {
+  KimiCodeAuthUnavailableError,
+  ModelListError,
+} from '@ptah-extension/auth-providers';
 import {
   createMockLogger,
   type MockLogger,
@@ -275,11 +280,14 @@ function createMockOllamaDiscovery(): MockOllamaDiscovery {
 }
 
 type MockCopilotAuthService = jest.Mocked<
-  Pick<CopilotAuthService, 'listModels'>
+  Pick<CopilotAuthService, 'listModels' | 'isAuthenticated'>
 >;
 
 function createMockCopilotAuthService(): MockCopilotAuthService {
-  return { listModels: jest.fn().mockResolvedValue([]) };
+  return {
+    listModels: jest.fn().mockResolvedValue([]),
+    isAuthenticated: jest.fn().mockResolvedValue(true),
+  };
 }
 
 type MockCodexAuthService = jest.Mocked<Pick<CodexAuthService, 'listModels'>>;
@@ -1032,7 +1040,7 @@ describe('ProviderRpcHandlers', () => {
       expect(await entry[1]()).toEqual([]);
     });
 
-    it('uses the Kimi auth service and merges a successful catalog', async () => {
+    it('uses the Kimi auth service and lists only the live catalog rows', async () => {
       const h = makeHarness();
       h.handlers.register();
       const entry = h.providerModels.registerDynamicFetcher.mock.calls.find(
@@ -1050,10 +1058,7 @@ describe('ProviderRpcHandlers', () => {
       global.fetch = fetchMock;
       try {
         const result = await entry[1]();
-        expect(result.map((model) => model.id)).toEqual([
-          ...mergeKimiCodeModels(undefined).map((model) => model.id),
-          'future-kimi',
-        ]);
+        expect(result.map((model) => model.id)).toEqual(['future-kimi']);
         expect(fetchMock).toHaveBeenCalledWith(
           'https://api.kimi.ai/coding/v1/models',
           expect.objectContaining({ signal: expect.any(AbortSignal) }),
@@ -1065,17 +1070,20 @@ describe('ProviderRpcHandlers', () => {
     });
 
     it.each([
-      { status: 500, payload: {} },
-      { status: 200, payload: { data: [{ bad: true }] } },
+      { status: 500, payload: {}, reason: 'http-error' as const },
+      { status: 401, payload: {}, reason: 'auth-rejected' as const },
+      {
+        status: 200,
+        payload: { data: [{ bad: true }] },
+        reason: 'bad-response' as const,
+      },
+      { status: 200, payload: [], reason: 'bad-response' as const },
     ])(
-      'reports no live Kimi catalog on HTTP failure or malformed payload',
-      async ({ status, payload }) => {
-        // A failure must return [] — never the static list. The consumer
+      'throws ModelListError($reason) on HTTP $status or an unreadable payload, never a list',
+      async ({ status, payload, reason }) => {
+        // A failure must never be reported as rows: the consumer
         // (`ProviderModelsService.fetchModels`) caches and persists any
-        // non-empty result as a LIVE catalog for the full cache TTL, so a
-        // transient failure reported as a list would poison the cache with
-        // static data. The static models still reach the caller, through the
-        // consumer's static fallback.
+        // non-empty result as a LIVE catalog.
         const h = makeHarness();
         h.handlers.register();
         const entry = h.providerModels.registerDynamicFetcher.mock.calls.find(
@@ -1087,11 +1095,11 @@ describe('ProviderRpcHandlers', () => {
           async () => new Response(JSON.stringify(payload), { status }),
         );
         try {
-          expect(await entry[1]()).toEqual([]);
-          if (status === 500) {
+          await expect(entry[1]()).rejects.toEqual(new ModelListError(reason));
+          if (status !== 200) {
             expect(h.logger.debug).toHaveBeenCalledWith(
               '[ProviderRpc] Kimi Code model catalog unavailable',
-              { status: 500 },
+              { status },
             );
             expect(JSON.stringify(h.logger.debug.mock.calls)).not.toContain(
               'fake-access-token',
@@ -1099,7 +1107,9 @@ describe('ProviderRpcHandlers', () => {
           } else {
             expect(h.logger.debug).toHaveBeenCalledWith(
               '[ProviderRpc] Kimi Code model catalog has an unknown shape',
-              { payloadType: 'object', keys: ['data'] },
+              expect.objectContaining({
+                payloadType: Array.isArray(payload) ? 'array' : 'object',
+              }),
             );
           }
         } finally {
@@ -1108,7 +1118,30 @@ describe('ProviderRpcHandlers', () => {
       },
     );
 
-    it('logs a thrown Kimi fetch error without the credential and reports no live catalog', async () => {
+    it('throws not-signed-in when Kimi has no CLI login and no key', async () => {
+      const h = makeHarness();
+      h.kimiAuth.resolveRequestCredential.mockRejectedValue(
+        new KimiCodeAuthUnavailableError('signed-out'),
+      );
+      h.handlers.register();
+      const entry = h.providerModels.registerDynamicFetcher.mock.calls.find(
+        ([id]) => id === 'kimi-code',
+      );
+      if (!entry) throw new Error('Missing Kimi fetcher');
+      const originalFetch = global.fetch;
+      const fetchMock = jest.fn();
+      global.fetch = fetchMock;
+      try {
+        await expect(entry[1]()).rejects.toEqual(
+          new ModelListError('not-signed-in'),
+        );
+        expect(fetchMock).not.toHaveBeenCalled();
+      } finally {
+        global.fetch = originalFetch;
+      }
+    });
+
+    it('logs a thrown Kimi fetch error without the credential and throws a classified reason', async () => {
       const h = makeHarness();
       h.handlers.register();
       const entry = h.providerModels.registerDynamicFetcher.mock.calls.find(
@@ -1117,10 +1150,12 @@ describe('ProviderRpcHandlers', () => {
       if (!entry) throw new Error('Missing Kimi fetcher');
       const originalFetch = global.fetch;
       global.fetch = jest.fn(async () => {
-        throw new Error('network unavailable');
+        throw Object.assign(new Error('network unavailable'), {
+          code: 'ECONNREFUSED',
+        });
       });
       try {
-        expect(await entry[1]()).toEqual([]);
+        await expect(entry[1]()).rejects.toEqual(new ModelListError('network'));
         expect(h.logger.debug).toHaveBeenCalledWith(
           '[ProviderRpc] Kimi Code model catalog unavailable',
           { error: 'network unavailable' },
@@ -1205,7 +1240,7 @@ describe('ProviderRpcHandlers', () => {
       expect(result).toHaveLength(1);
     });
 
-    it('declares platform API capacity but leaves the static Copilot fallback unverified', async () => {
+    it('declares platform API capacity for Copilot models from platform discovery', async () => {
       const h = makeHarness();
       h.modelDiscovery.getCopilotModels.mockResolvedValueOnce([
         { id: 'api-model-418', name: 'API model', contextLength: 200000 },
@@ -1219,10 +1254,53 @@ describe('ProviderRpcHandlers', () => {
         contextLength: 200000,
         contextLengthSource: 'provider',
       });
-      const fallback = await entry[1]();
-      expect(fallback.length).toBeGreaterThan(0);
-      for (const model of fallback)
-        expect(model).not.toHaveProperty('contextLengthSource');
+    });
+
+    describe('Copilot fetcher with no live answer', () => {
+      function copilotFetcher(h: Harness): () => Promise<unknown[]> {
+        const entry = h.providerModels.registerDynamicFetcher.mock.calls.find(
+          ([id]) => id === 'github-copilot',
+        );
+        if (!entry) throw new Error('Missing Copilot fetcher');
+        return entry[1];
+      }
+
+      it('throws not-signed-in when the account source has no session', async () => {
+        const h = makeHarness();
+        h.copilotAuthService.isAuthenticated.mockResolvedValue(false);
+        h.handlers.register();
+        await expect(copilotFetcher(h)()).rejects.toEqual(
+          new ModelListError('not-signed-in'),
+        );
+      });
+
+      it('throws empty when signed in and every source listed nothing', async () => {
+        const h = makeHarness();
+        h.handlers.register();
+        await expect(copilotFetcher(h)()).rejects.toEqual(
+          new ModelListError('empty'),
+        );
+      });
+
+      it('throws the classified reason of the last failing source when signed in', async () => {
+        const h = makeHarness();
+        h.modelDiscovery.getCopilotModels.mockRejectedValue(
+          Object.assign(new Error('slow'), { code: 'ETIMEDOUT' }),
+        );
+        const cliAdapter: Pick<CliAdapter, 'name' | 'listModels'> = {
+          name: 'copilot',
+          listModels: jest
+            .fn()
+            .mockRejectedValue(
+              Object.assign(new Error('down'), { code: 'ECONNREFUSED' }),
+            ),
+        };
+        h.cliDetection.getAdapter.mockReturnValue(cliAdapter as CliAdapter);
+        h.handlers.register();
+        await expect(copilotFetcher(h)()).rejects.toEqual(
+          new ModelListError('network'),
+        );
+      });
     });
 
     it('lists the selected app-server catalog for Codex, including a future ID', async () => {
@@ -1385,7 +1463,7 @@ describe('ProviderRpcHandlers', () => {
         expect(h.sdkAdapter.getSupportedModels).not.toHaveBeenCalled();
       });
 
-      it('returns empty (→ static Claude catalog) when the native login reports nothing', async () => {
+      it('returns [] (reported as empty) when the native login reports nothing', async () => {
         const h = makeHarness();
         h.sdkAdapter.getNativeClaudeModels.mockResolvedValue([]);
         h.handlers.register();
@@ -1400,35 +1478,116 @@ describe('ProviderRpcHandlers', () => {
   // -------------------------------------------------------------------------
 
   describe('provider:listModels', () => {
-    it('returns the Anthropic API lane static catalog without a key', async () => {
+    const liveRow = {
+      id: 'model-live-a',
+      name: 'Model A',
+      description: '',
+      contextLength: 200000,
+      supportsToolUse: true,
+    };
+
+    it('maps a live list to { models, totalCount, source } without isStatic', async () => {
       const h = makeHarness();
-      const models = [
-        {
-          id: 'claude-sonnet-test',
-          name: 'Sonnet test',
-          description: 'Test',
-          contextLength: 200000,
-          supportsToolUse: true,
-        },
-      ];
       h.providerModels.fetchModels.mockResolvedValue({
-        models,
+        models: [liveRow],
         totalCount: 1,
-        isStatic: true,
+        source: 'live',
+        isStatic: false,
       });
       h.handlers.register();
 
-      const result = await call<{
-        models: typeof models;
-        totalCount: number;
-        isStatic: boolean;
-      }>(h, 'provider:listModels', { providerId: 'anthropic-api' });
+      const result = await call<Record<string, unknown>>(
+        h,
+        'provider:listModels',
+        { providerId: 'anthropic-api' },
+      );
       expect(h.providerModels.fetchModels).toHaveBeenCalledWith(
         'anthropic-api',
         null,
         false,
       );
-      expect(result).toMatchObject({ models, totalCount: 1, isStatic: true });
+      expect(result).toEqual({
+        models: [liveRow],
+        totalCount: 1,
+        source: 'live',
+      });
+    });
+
+    it('maps a persisted list with failureReason, savedAt and the fixed notice', async () => {
+      const h = makeHarness({ providerKeysSeed: { openrouter: 'sk-or' } });
+      const savedAt = Date.UTC(2026, 10, 1, 12);
+      h.providerModels.fetchModels.mockResolvedValue({
+        models: [liveRow],
+        totalCount: 1,
+        source: 'persisted',
+        failureReason: 'timeout',
+        savedAt,
+        isStatic: false,
+      });
+      h.handlers.register();
+
+      const result = await call<Record<string, unknown>>(
+        h,
+        'provider:listModels',
+        { providerId: 'openrouter' },
+      );
+      expect(result).toEqual({
+        models: [liveRow],
+        totalCount: 1,
+        source: 'persisted',
+        failureReason: 'timeout',
+        savedAt,
+        notice: modelListNoticeText('timeout', 'OpenRouter', savedAt),
+      });
+      expect(result['notice']).toContain('2026-11-01');
+    });
+
+    it('maps an unavailable list to an empty result with the fixed error, never an RPC failure', async () => {
+      const h = makeHarness();
+      h.providerModels.fetchModels.mockResolvedValue({
+        models: [],
+        totalCount: 0,
+        source: 'unavailable',
+        failureReason: 'no-key',
+        isStatic: false,
+      });
+      h.handlers.register();
+
+      const result = await call<Record<string, unknown>>(
+        h,
+        'provider:listModels',
+        { providerId: 'openrouter' },
+      );
+      expect(h.providerModels.fetchModels).toHaveBeenCalledWith(
+        'openrouter',
+        null,
+        false,
+      );
+      expect(result).toEqual({
+        models: [],
+        totalCount: 0,
+        source: 'unavailable',
+        failureReason: 'no-key',
+        error: modelListErrorText('no-key', 'OpenRouter'),
+      });
+      expect(h.sentry.captureException).not.toHaveBeenCalled();
+    });
+
+    it('uses the provider id as the name for a provider outside the registry', async () => {
+      const h = makeHarness();
+      h.providerModels.fetchModels.mockResolvedValue({
+        models: [],
+        totalCount: 0,
+        source: 'unavailable',
+        failureReason: 'empty',
+        isStatic: false,
+      });
+      h.handlers.register();
+
+      const result = await call<{ error?: string }>(h, 'provider:listModels', {
+        providerId: 'anthropic',
+      });
+      expect(result.error).toBe(modelListErrorText('empty', 'anthropic'));
     });
 
     it('resolves providerId from params override', async () => {
@@ -1436,7 +1595,8 @@ describe('ProviderRpcHandlers', () => {
       h.providerModels.fetchModels.mockResolvedValue({
         models: [],
         totalCount: 0,
-        isStatic: true,
+        source: 'live',
+        isStatic: false,
       });
       h.handlers.register();
 
@@ -1457,7 +1617,8 @@ describe('ProviderRpcHandlers', () => {
       h.providerModels.fetchModels.mockResolvedValue({
         models: [],
         totalCount: 0,
-        isStatic: true,
+        source: 'live',
+        isStatic: false,
       });
       h.handlers.register();
 
@@ -1471,16 +1632,14 @@ describe('ProviderRpcHandlers', () => {
     });
 
     it('forwards toolUseOnly flag to the service', async () => {
-      // Seed a key for openrouter — it is a purely dynamic provider
-      // (modelsEndpoint set, no static fallback), so absent a key the handler
-      // short-circuits to an empty result without ever invoking the service.
       const h = makeHarness({
         providerKeysSeed: { openrouter: 'sk-or-test' },
       });
       h.providerModels.fetchModels.mockResolvedValue({
         models: [],
         totalCount: 0,
-        isStatic: true,
+        source: 'live',
+        isStatic: false,
       });
       h.handlers.register();
 
@@ -1510,16 +1669,9 @@ describe('ProviderRpcHandlers', () => {
         providerKeysSeed: { 'z-ai': 'key-z' },
       });
       h.providerModels.fetchModels.mockResolvedValue({
-        models: [
-          {
-            id: 'kimi-k2',
-            name: 'Kimi K2',
-            description: '',
-            contextLength: 200000,
-            supportsToolUse: true,
-          },
-        ],
+        models: [liveRow],
         totalCount: 1,
+        source: 'live',
         isStatic: false,
       });
       h.handlers.register();
@@ -1532,13 +1684,13 @@ describe('ProviderRpcHandlers', () => {
     });
 
     it('does not claim a warm when the provider returned no catalog at all', async () => {
-      // Nothing landed, so there is nothing new to derive from. Saying
-      // otherwise would push the service into re-applying against the same
-      // hole and scheduling a fetch the user's own just failed to satisfy.
+      // Nothing landed, so there is nothing new to derive from.
       const h = makeHarness({ providerKeysSeed: { 'kimi-code': 'key-m' } });
       h.providerModels.fetchModels.mockResolvedValue({
         models: [],
         totalCount: 0,
+        source: 'unavailable',
+        failureReason: 'network',
         isStatic: false,
       });
       h.handlers.register();
@@ -1550,58 +1702,45 @@ describe('ProviderRpcHandlers', () => {
       ).not.toHaveBeenCalled();
     });
 
-    it('short-circuits to empty result for purely-dynamic providers without an API key', async () => {
-      // OpenRouter has `modelsEndpoint` set and no static fallback beyond
-      // what a key would unlock — the handler must not call fetchModels.
+    it('asks the service even without a key: the chain decides, no handler pre-check', async () => {
       const h = makeHarness();
+      h.providerModels.fetchModels.mockResolvedValue({
+        models: [],
+        totalCount: 0,
+        source: 'unavailable',
+        failureReason: 'no-key',
+        isStatic: false,
+      });
       h.handlers.register();
 
-      const result = await call<{
-        models: unknown[];
-        totalCount: number;
-        isStatic: boolean;
-      }>(h, 'provider:listModels', { providerId: 'openrouter' });
+      await call(h, 'provider:listModels', { providerId: 'sakana' });
 
-      expect(result).toEqual({ models: [], totalCount: 0, isStatic: false });
-      expect(h.providerModels.fetchModels).not.toHaveBeenCalled();
+      expect(h.providerModels.fetchModels).toHaveBeenCalledWith(
+        'sakana',
+        null,
+        false,
+      );
     });
 
-    it('Sakana with a bare key → reaches the dynamic fetch path (fetchModels invoked with the key)', async () => {
-      // Sakana has modelsEndpoint set, so a present key unlocks the dynamic
-      // /v1/models list (incl. dated aliases like fugu-ultra-20260615).
+    it('Sakana with a bare key → reaches the live path (fetchModels invoked with the key)', async () => {
       const h = makeHarness({ providerKeysSeed: { sakana: 'sakana-key' } });
       h.providerModels.fetchModels.mockResolvedValue({
         models: [
           {
-            id: 'fugu',
-            name: 'Fugu',
-            description: '',
-            contextLength: 200000,
-            supportsToolUse: true,
-          },
-          {
-            id: 'fugu-ultra',
-            name: 'Fugu Ultra',
-            description: '',
-            contextLength: 200000,
-            supportsToolUse: true,
-          },
-          {
+            ...liveRow,
             id: 'fugu-ultra-20260615',
             name: 'fugu-ultra-20260615',
-            description: '',
-            contextLength: 200000,
-            supportsToolUse: true,
           },
         ],
-        totalCount: 3,
+        totalCount: 1,
+        source: 'live',
         isStatic: false,
       });
       h.handlers.register();
 
       const result = await call<{
         models: { id: string }[];
-        isStatic: boolean;
+        source?: string;
       }>(h, 'provider:listModels', { providerId: 'sakana' });
 
       expect(h.providerModels.fetchModels).toHaveBeenCalledWith(
@@ -1609,87 +1748,26 @@ describe('ProviderRpcHandlers', () => {
         'sakana-key',
         false,
       );
-      expect(result.isStatic).toBe(false);
-      expect(result.models.map((m) => m.id)).toContain('fugu-ultra-20260615');
+      expect(result.source).toBe('live');
+      expect(result).not.toHaveProperty('isStatic');
+      expect(result.models.map((m) => m.id)).toEqual(['fugu-ultra-20260615']);
     });
 
-    it('Sakana without a key → does NOT short-circuit (has staticModels) and returns the static fallback', async () => {
-      // isPurelyDynamic is false for Sakana (staticModels present), so the
-      // handler must fall through to fetchModels(null) and serve fugu/fugu-ultra.
+    it('captures a service throw (unknown provider) to Sentry and re-throws to the RPC boundary', async () => {
       const h = makeHarness();
-      h.providerModels.fetchModels.mockResolvedValue({
-        models: [
-          {
-            id: 'fugu',
-            name: 'Fugu',
-            description: '',
-            contextLength: 200000,
-            supportsToolUse: true,
-          },
-          {
-            id: 'fugu-ultra',
-            name: 'Fugu Ultra',
-            description: '',
-            contextLength: 200000,
-            supportsToolUse: true,
-          },
-        ],
-        totalCount: 2,
-        isStatic: true,
-      });
-      h.handlers.register();
-
-      const result = await call<{
-        models: { id: string }[];
-        isStatic: boolean;
-      }>(h, 'provider:listModels', { providerId: 'sakana' });
-
-      expect(h.providerModels.fetchModels).toHaveBeenCalledWith(
-        'sakana',
-        null,
-        false,
-      );
-      expect(result.models.map((m) => m.id)).toEqual(['fugu', 'fugu-ultra']);
-      expect(result.models.length).toBeGreaterThan(0);
-    });
-
-    it('maps 401-ish errors to a friendly "invalid key" response (no throw)', async () => {
-      const h = makeHarness({
-        providerKeysSeed: { openrouter: 'stale-key' },
-      });
       h.providerModels.fetchModels.mockRejectedValue(
-        new Error('HTTP 401 Unauthorized'),
-      );
-      h.handlers.register();
-
-      const result = await call<{
-        models: unknown[];
-        error?: string;
-      }>(h, 'provider:listModels', { providerId: 'openrouter' });
-
-      expect(result.models).toEqual([]);
-      expect(result.error).toMatch(/invalid or expired/i);
-      // Auth errors are NOT captured to Sentry (expected negative path).
-      expect(h.sentry.captureException).not.toHaveBeenCalled();
-    });
-
-    it('captures non-auth errors to Sentry and re-throws to the RPC boundary', async () => {
-      const h = makeHarness({
-        providerKeysSeed: { openrouter: 'key' },
-      });
-      h.providerModels.fetchModels.mockRejectedValue(
-        new Error('ECONNRESET on provider API'),
+        new Error('Unknown provider: nope'),
       );
       h.handlers.register();
 
       const response = await h.rpcHandler.handleMessage({
         method: 'provider:listModels',
-        params: { providerId: 'openrouter' },
+        params: { providerId: 'nope' },
         correlationId: 'corr',
       });
 
       expect(response.success).toBe(false);
-      expect(response.error).toMatch(/ECONNRESET/);
+      expect(response.error).toMatch(/Unknown provider/);
       expect(h.sentry.captureException).toHaveBeenCalled();
     });
   });

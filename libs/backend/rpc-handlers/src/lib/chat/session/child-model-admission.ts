@@ -1,5 +1,14 @@
-import { getAnthropicProvider } from '@ptah-extension/shared';
+import { closestLiveModel, getAnthropicProvider } from '@ptah-extension/shared';
 import type { SdkModelService } from '@ptah-extension/agent-sdk';
+import type { Logger } from '@ptah-extension/vscode-core';
+
+const NATIVE_TIERS = ['opus', 'sonnet', 'haiku'] as const;
+
+type NativeTier = (typeof NATIVE_TIERS)[number];
+
+function isNativeTier(model: string): model is NativeTier {
+  return (NATIVE_TIERS as readonly string[]).includes(model);
+}
 
 /** Match the native login boundary used by child model listing and admission. */
 export function isNativeChildModelProfile(
@@ -19,35 +28,62 @@ export function isNativeChildModelProfile(
   );
 }
 
-/** Keep discovered IDs while admitting the repository's verified native IDs. */
+/** The native login's own catalog ids; nothing is added from the repository. */
 export function nativeChildModelIds(
   catalog: readonly { readonly value: string }[],
 ): string[] {
-  const provider = getAnthropicProvider('claude-cli');
-  return [
-    ...new Set([
-      ...catalog.map((model) => model.value),
-      ...(provider?.staticModels ?? []).map((model) => model.id),
-      ...Object.values(provider?.defaultTiers ?? {}),
-    ]),
-  ];
+  return [...new Set(catalog.map((model) => model.value))];
 }
 
-/** Resolve native aliases independently of a potentially stale SDK catalog. */
-export function resolveNativeTierAlias(model: string): string {
-  const provider = getAnthropicProvider('claude-cli');
-  if (model === 'opus' || model === 'sonnet' || model === 'haiku') {
-    return provider?.defaultTiers?.[model] ?? model;
-  }
-  if (model === 'fable') {
-    return (
-      (provider?.staticModels ?? [])
-        .map((entry) => entry.id)
-        .filter((id) => /^claude-fable-\d+(?:-\d+)*$/.test(id))
-        .sort((a, b) => b.localeCompare(a, 'en', { numeric: true }))[0] ?? model
+/**
+ * The newest `claude-<family>-<n>[-<n>...]` id in the catalog, by numeric
+ * compare; ids with a `[...]` suffix or any other tail are not candidates.
+ */
+function newestFamilyId(
+  family: string,
+  catalogIds: readonly string[],
+): string | undefined {
+  const pattern = new RegExp(`^claude-${family}-\\d+(?:-\\d+)*$`);
+  return catalogIds
+    .filter((id) => pattern.test(id))
+    .sort((a, b) => b.localeCompare(a, 'en', { numeric: true }))[0];
+}
+
+/**
+ * Resolve a native alias against the live catalog.
+ *
+ * - `opus` / `sonnet` / `haiku`: the `claude-cli` tier preference when the
+ *   catalog lists it, else the closest live id to that preference
+ *   (`closestLiveModel`), else the newest `claude-<tier>-*` in the catalog,
+ *   else the alias unchanged.
+ * - `fable`: the newest `claude-fable-*` in the catalog, else the alias.
+ * - Anything else: unchanged.
+ *
+ * Tier preferences never admit a model (D6): every result other than the
+ * alias itself is a catalog id. A preference replaced by another id is
+ * logged at `warn` with both ids.
+ */
+export function resolveNativeTierAlias(
+  model: string,
+  catalogIds: readonly string[],
+  logger?: Pick<Logger, 'warn'>,
+): string {
+  if (model === 'fable') return newestFamilyId('fable', catalogIds) ?? model;
+  if (!isNativeTier(model)) return model;
+
+  const preferred = getAnthropicProvider('claude-cli')?.defaultTiers?.[model];
+  if (preferred && catalogIds.includes(preferred)) return preferred;
+  const resolved =
+    (preferred ? closestLiveModel(preferred, catalogIds) : null) ??
+    newestFamilyId(model, catalogIds);
+  if (!resolved) return model;
+  if (preferred) {
+    logger?.warn(
+      '[ChildModelAdmission] Native tier preference is not live; using the live catalog id',
+      { tier: model, preferred, resolved },
     );
   }
-  return model;
+  return resolved;
 }
 
 /** Use the same provider boundary for child ranking and explicit admission. */

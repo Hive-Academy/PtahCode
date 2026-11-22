@@ -28,7 +28,8 @@ import { LaneModelListingAdapter } from './lane-model-listing.adapter';
 type FetchResult = {
   models: readonly { readonly id: string }[];
   totalCount: number;
-  isStatic: boolean;
+  source: 'live' | 'persisted' | 'unavailable';
+  failureReason?: string;
 };
 
 function emptyListed(): AgentListCliModelsResult {
@@ -96,7 +97,7 @@ function makeHarness(options?: {
   const fetchModels = jest.fn(
     (_providerId: string, _apiKey: string | null, _toolUseOnly?: boolean) =>
       options?.fetch?.() ??
-      Promise.resolve({ models: [], totalCount: 0, isStatic: false }),
+      Promise.resolve<FetchResult>({ models: [], totalCount: 0, source: 'live' }),
   );
   const getProviderKey = jest.fn(() => Promise.resolve(options?.apiKey));
   const debug = jest.fn();
@@ -175,7 +176,7 @@ describe('LaneModelListingAdapter', () => {
         Promise.resolve({
           models: [{ id: 'chosen' }, { id: 'tier-s' }, { id: 'live-new' }],
           totalCount: 3,
-          isStatic: false,
+          source: 'live',
         }),
     });
 
@@ -193,15 +194,16 @@ describe('LaneModelListingAdapter', () => {
     ]);
   });
 
-  it('tags static discovery ids as fallback', async () => {
+  it('tags persisted discovery ids as fallback', async () => {
     const { adapter } = makeHarness({
       configs: [ptahConfig({ selectedModel: 'chosen', tierMappings: {} })],
       apiKey: 'sk-test',
       fetch: () =>
         Promise.resolve({
-          models: [{ id: 'static-id' }],
+          models: [{ id: 'saved-id' }],
           totalCount: 1,
-          isStatic: true,
+          source: 'persisted',
+          failureReason: 'network',
         }),
     });
 
@@ -212,7 +214,7 @@ describe('LaneModelListingAdapter', () => {
       ),
     ).resolves.toEqual([
       { id: 'chosen', provenance: 'configured' },
-      { id: 'static-id', provenance: 'fallback' },
+      { id: 'saved-id', provenance: 'fallback' },
     ]);
   });
 
@@ -241,10 +243,17 @@ describe('LaneModelListingAdapter', () => {
     );
   });
 
-  it('does not call fetchModels when a purely dynamic provider has no key', async () => {
+  it('maps an unavailable list to a threw miss and keeps the saved entries', async () => {
     const { adapter, fetchModels, debug } = makeHarness({
       configs: [ptahConfig({ providerId: 'openrouter' })],
       apiKey: undefined,
+      fetch: () =>
+        Promise.resolve({
+          models: [],
+          totalCount: 0,
+          source: 'unavailable',
+          failureReason: 'no-key',
+        }),
     });
 
     const entries = await adapter.list(
@@ -252,8 +261,12 @@ describe('LaneModelListingAdapter', () => {
       new AbortController().signal,
     );
 
-    expect(fetchModels).not.toHaveBeenCalled();
-    expect(debug).not.toHaveBeenCalled();
+    // No handler-side key pre-check: the chain decides.
+    expect(fetchModels).toHaveBeenCalledWith('openrouter', null, false);
+    expect(debug).toHaveBeenCalledWith(
+      '[LaneModelListing] discovery unavailable',
+      { ptahCliId: 'cli-1', providerId: 'openrouter', reason: 'threw' },
+    );
     expect(entries.map((entry) => entry.provenance)).toEqual([
       'configured',
       'tier',
@@ -262,32 +275,12 @@ describe('LaneModelListingAdapter', () => {
     ]);
   });
 
-  it('still fetches when a provider with a static catalog has no key', async () => {
-    const { adapter, fetchModels } = makeHarness({
-      configs: [ptahConfig({ providerId: 'kimi-code', selectedModel: 'kimi' })],
-      apiKey: undefined,
-      fetch: () =>
-        Promise.resolve({
-          models: [{ id: 'kimi-k3' }],
-          totalCount: 1,
-          isStatic: true,
-        }),
-    });
-
-    await adapter.list(
-      cliRow('ptah-cli', { ptahCliId: 'cli-1', providerId: 'kimi-code' }),
-      new AbortController().signal,
-    );
-
-    expect(fetchModels).toHaveBeenCalledWith('kimi-code', null, false);
-  });
-
   it('logs empty and keeps configured and tier entries when discovery returns nothing', async () => {
     const { adapter, debug } = makeHarness({
       configs: [ptahConfig({ tierMappings: { sonnet: 'tier-s' } })],
       apiKey: 'sk-test',
       fetch: () =>
-        Promise.resolve({ models: [], totalCount: 0, isStatic: false }),
+        Promise.resolve({ models: [], totalCount: 0, source: 'live' }),
     });
 
     await expect(
@@ -338,7 +331,7 @@ describe('LaneModelListingAdapter', () => {
     release({
       models: [{ id: 'live-new' }],
       totalCount: 1,
-      isStatic: false,
+      source: 'live',
     });
 
     await expect(first).resolves.toEqual([
@@ -363,7 +356,7 @@ describe('LaneModelListingAdapter', () => {
         Promise.resolve({
           models: [{ id: 'live-new' }],
           totalCount: 1,
-          isStatic: false,
+          source: 'live',
         }),
     });
     const row = cliRow('ptah-cli', { ptahCliId: 'cli-1' });

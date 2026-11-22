@@ -64,6 +64,7 @@ import type {
   SubagentRegistryService,
 } from '@ptah-extension/vscode-core';
 import type { IWorkspaceProvider } from '@ptah-extension/platform-core';
+import { getAnthropicProvider } from '@ptah-extension/shared';
 import { createMockLogger } from '@ptah-extension/shared/testing';
 import { createMockWorkspaceProvider } from '@ptah-extension/platform-core/testing';
 import type { ModelSettings } from '@ptah-extension/settings-core';
@@ -338,66 +339,155 @@ describe('ChatSessionService — SDK launch identity (TASK_2026_584)', () => {
         }),
       ).resolves.toEqual({ accepted: true, resolvedModel: 'claude-sonnet-4' });
     });
-    it.each([
-      ['claude-opus-5-5', 'claude-opus-5-5'],
-      ['claude-sonnet-5-5', 'claude-sonnet-5-5'],
-      ['claude-haiku-5-5', 'claude-haiku-5-5'],
-      ['claude-fable-5-2', 'claude-fable-5-2'],
-      ['opus', 'claude-opus-5-5'],
-      ['sonnet', 'claude-sonnet-5-5'],
-      ['haiku', 'claude-haiku-5-5'],
-      ['fable', 'claude-fable-5-2'],
-    ])(
-      'admits native %s as %s despite an old SDK catalog',
-      async (model, resolvedModel) => {
+    describe('native Claude profile', () => {
+      const tiers: Partial<Record<'opus' | 'sonnet' | 'haiku', string>> =
+        getAnthropicProvider('claude-cli')?.defaultTiers ?? {};
+      const preferred = (tier: 'opus' | 'sonnet' | 'haiku'): string => {
+        const id = tiers[tier];
+        if (!id) throw new Error(`claude-cli has no ${tier} preference`);
+        return id;
+      };
+      function nativeHarness(catalog: readonly string[]): Harness {
         const h = makeHarness();
         h.resolveProviderProfileForWorkspace.mockResolvedValue({
           providerId: 'claude-cli',
           authEnv: {},
         });
-        await expect(
-          h.service.resolveAgentChildModel({ ...input, model }),
-        ).resolves.toEqual({ accepted: true, resolvedModel });
-        expect(h.modelCatalog.getNativeClaudeModels).toHaveBeenCalled();
-        expect(h.modelCatalog.resolveModelId).not.toHaveBeenCalled();
-        expect(h.modelCatalog.getSupportedModels).not.toHaveBeenCalled();
-        expect(
-          h.modelCatalog.getModelsForProviderProfile,
-        ).not.toHaveBeenCalled();
-      },
-    );
-    it('lists both discovered and verified native IDs without duplicates', async () => {
-      const h = makeHarness();
-      h.resolveProviderProfileForWorkspace.mockResolvedValue({
-        providerId: 'claude-cli',
-        authEnv: {},
-      });
-      h.modelCatalog.getNativeClaudeModels.mockResolvedValue([
-        { value: 'claude-opus-4' },
-        { value: 'claude-opus-5-5' },
-      ]);
-      const models = await h.service.listAgentChildModels(input);
-      expect(models).toEqual(
-        expect.arrayContaining([
-          'claude-opus-4',
-          'claude-opus-5-5',
-          'claude-sonnet-5-5',
-          'claude-haiku-5-5',
-          'claude-fable-5-2',
-        ]),
+        h.modelCatalog.getNativeClaudeModels.mockResolvedValue(
+          catalog.map((value) => ({ value })),
+        );
+        return h;
+      }
+
+      it.each(['opus', 'sonnet', 'haiku'] as const)(
+        'admits %s as its preference when the live catalog lists it',
+        async (tier) => {
+          const h = nativeHarness([
+            preferred('opus'),
+            preferred('sonnet'),
+            preferred('haiku'),
+          ]);
+          await expect(
+            h.service.resolveAgentChildModel({ ...input, model: tier }),
+          ).resolves.toEqual({ accepted: true, resolvedModel: preferred(tier) });
+          expect(h.modelCatalog.getNativeClaudeModels).toHaveBeenCalled();
+          expect(h.modelCatalog.resolveModelId).not.toHaveBeenCalled();
+          expect(h.modelCatalog.getSupportedModels).not.toHaveBeenCalled();
+          expect(
+            h.modelCatalog.getModelsForProviderProfile,
+          ).not.toHaveBeenCalled();
+        },
       );
-      expect(new Set(models).size).toBe(models.length);
+
+      it('admits the live successor of a retired preference and warns', async () => {
+        const h = nativeHarness(['claude-opus-99-1', 'claude-opus-99-0']);
+        await expect(
+          h.service.resolveAgentChildModel({ ...input, model: 'opus' }),
+        ).resolves.toEqual({
+          accepted: true,
+          resolvedModel: 'claude-opus-99-0',
+        });
+        expect(h.logger.warn).toHaveBeenCalledWith(
+          expect.stringContaining('Native tier preference is not live'),
+          expect.objectContaining({ tier: 'opus', preferred: preferred('opus') }),
+        );
+      });
+
+      it('admits fable as the newest live claude-fable id', async () => {
+        const h = nativeHarness([
+          'claude-fable-5-2',
+          'claude-fable-5-10',
+          'claude-fable-5[1m]',
+        ]);
+        await expect(
+          h.service.resolveAgentChildModel({ ...input, model: 'fable' }),
+        ).resolves.toEqual({ accepted: true, resolvedModel: 'claude-fable-5-10' });
+      });
+
+      it('admits a concrete live id and refuses one the catalog does not list', async () => {
+        const h = nativeHarness(['claude-live-model']);
+        await expect(
+          h.service.resolveAgentChildModel({
+            ...input,
+            model: 'claude-live-model',
+          }),
+        ).resolves.toEqual({ accepted: true, resolvedModel: 'claude-live-model' });
+        await expect(
+          h.service.resolveAgentChildModel({
+            ...input,
+            model: 'claude-not-listed',
+          }),
+        ).resolves.toMatchObject({
+          accepted: false,
+          code: 'invalid-model',
+          acceptedModels: ['claude-live-model'],
+        });
+      });
+
+      it('lists only the discovered native ids, without duplicates', async () => {
+        const h = nativeHarness([
+          'claude-opus-4',
+          'claude-opus-4',
+          'claude-live-model',
+        ]);
+        await expect(h.service.listAgentChildModels(input)).resolves.toEqual([
+          'claude-opus-4',
+          'claude-live-model',
+        ]);
+      });
+
+      it('passes the requested model through on an empty catalog and warns once (S-C)', async () => {
+        const h = nativeHarness([]);
+        await expect(
+          h.service.resolveAgentChildModel({ ...input, model: 'opus' }),
+        ).resolves.toEqual({ accepted: true, resolvedModel: 'opus' });
+        await expect(
+          h.service.resolveAgentChildModel({
+            ...input,
+            model: 'claude-any-model',
+          }),
+        ).resolves.toEqual({ accepted: true, resolvedModel: 'claude-any-model' });
+        const passThroughWarns = h.logger.warn.mock.calls.filter(([message]) =>
+          String(message).includes('passing the requested child model through'),
+        );
+        expect(passThroughWarns).toHaveLength(1);
+        expect(h.logger.warn).not.toHaveBeenCalledWith(
+          '[ChatSessionService] Provider returned an empty model catalog',
+        );
+      });
+
+      it('passes the requested model through when the native catalog read throws (S-C)', async () => {
+        const h = nativeHarness([]);
+        h.modelCatalog.getNativeClaudeModels.mockRejectedValue(
+          new Error('native login offline'),
+        );
+        await expect(
+          h.service.resolveAgentChildModel({ ...input, model: 'sonnet' }),
+        ).resolves.toEqual({ accepted: true, resolvedModel: 'sonnet' });
+      });
     });
-    it('admits verified native models with an empty SDK catalog', async () => {
+    it('still refuses an empty catalog for a non-native profile', async () => {
       const h = makeHarness();
       h.resolveProviderProfileForWorkspace.mockResolvedValue({
-        providerId: 'claude-cli',
-        authEnv: {},
+        providerId: 'workspace-provider',
+        authEnv: { ANTHROPIC_API_KEY: 'test-key' },
       });
-      h.modelCatalog.getNativeClaudeModels.mockResolvedValue([]);
-      await expect(h.service.resolveAgentChildModel(input)).resolves.toEqual({
-        accepted: true,
-        resolvedModel: 'claude-opus-5-5',
+      h.modelCatalog.getModelsForProviderProfile.mockResolvedValue([]);
+      await expect(
+        h.service.resolveAgentChildModel({ ...input, model: 'opus' }),
+      ).resolves.toMatchObject({
+        accepted: false,
+        code: 'model-catalog-unavailable',
+      });
+    });
+    it('still refuses an empty ambient catalog without a profile', async () => {
+      const h = makeHarness();
+      h.modelCatalog.getSupportedModels.mockResolvedValue([]);
+      await expect(
+        h.service.resolveAgentChildModel(input),
+      ).resolves.toMatchObject({
+        accepted: false,
+        code: 'model-catalog-unavailable',
       });
     });
     it('does not add native models or aliases to a third-party profile', async () => {

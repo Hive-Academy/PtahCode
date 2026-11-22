@@ -32,11 +32,11 @@
  *     structured negatives). Only actual throws are caught and mapped to
  *     `{ success: false, error }`.
  *
- *   - `ptahCli:listModels`: looks up the agent by id, resolves its
- *     provider via `getAnthropicProvider`, and maps the provider's static
- *     model list into the response. Missing agent / missing provider both
- *     return a structured error (never throw). `isStatic` reflects whether
- *     the provider has a dynamic `modelsEndpoint`.
+ *   - `ptahCli:listModels`: looks up the agent by id, reads its key by the
+ *     registry's credential-source rule, and maps
+ *     `ProviderModelsService.fetchModels` onto `{ models, source,
+ *     failureReason?, error? }`. Missing agent / missing provider both
+ *     return a structured error with `source: 'unavailable'` (never throw).
  *
  * Mocking posture: direct constructor injection, narrow
  * `jest.Mocked<Pick<T,...>>` surfaces, no `as any` casts, no tsyringe
@@ -141,6 +141,8 @@ import {
   type MockSentryService,
 } from '@ptah-extension/vscode-core/testing';
 import type { PtahCliRegistry } from '@ptah-extension/cli-agent-runtime';
+import type { ProviderModelsService } from '@ptah-extension/auth-providers';
+import { modelListErrorText } from '@ptah-extension/shared';
 import type { CliAdapterManifest, PtahCliSummary } from '@ptah-extension/shared';
 import {
   createMockLogger,
@@ -217,6 +219,8 @@ interface Harness {
   rpcHandler: MockRpcHandler;
   registry: MockPtahCliRegistry;
   sentry: MockSentryService;
+  providerModels: jest.Mocked<Pick<ProviderModelsService, 'fetchModels'>>;
+  authSecrets: { getCredential: jest.Mock; getProviderKey: jest.Mock };
 }
 
 function makeHarness(): Harness {
@@ -224,15 +228,37 @@ function makeHarness(): Harness {
   const rpcHandler = createMockRpcHandler();
   const registry = createMockPtahCliRegistry();
   const sentry = createMockSentryService();
+  const providerModels: Harness['providerModels'] = {
+    fetchModels: jest.fn().mockResolvedValue({
+      models: [],
+      totalCount: 0,
+      source: 'live',
+      isStatic: false,
+    }),
+  };
+  const authSecrets = {
+    getCredential: jest.fn().mockResolvedValue(undefined),
+    getProviderKey: jest.fn().mockResolvedValue(undefined),
+  };
 
   const handlers = new PtahCliRpcHandlers(
     logger as unknown as Logger,
     rpcHandler as unknown as import('@ptah-extension/vscode-core').RpcHandler,
     registry as unknown as PtahCliRegistry,
     sentry as unknown as SentryService,
+    providerModels,
+    authSecrets,
   );
 
-  return { handlers, logger, rpcHandler, registry, sentry };
+  return {
+    handlers,
+    logger,
+    rpcHandler,
+    registry,
+    sentry,
+    providerModels,
+    authSecrets,
+  };
 }
 
 async function call<TResult>(
@@ -569,41 +595,155 @@ describe('PtahCliRpcHandlers', () => {
   // -------------------------------------------------------------------------
 
   describe('ptahCli:listModels', () => {
-    it('returns { success=false-ish, error } when the agent id is unknown', async () => {
+    type ListResult = {
+      models: Array<{ id: string; name: string }>;
+      source?: string;
+      failureReason?: string;
+      isStatic?: boolean;
+      error?: string;
+    };
+    const liveRow = {
+      id: 'vendor/model-a',
+      name: 'Model A',
+      description: '',
+      contextLength: 128000,
+      supportsToolUse: true,
+    };
+
+    it('returns the not-found text with source unavailable when the agent id is unknown', async () => {
       const h = makeHarness();
       h.registry.listAgents.mockResolvedValue([makeSummary({ id: 'other' })]);
       h.handlers.register();
 
-      const result = await call<{
-        models: unknown[];
-        isStatic: boolean;
-        error?: string;
-      }>(h, 'ptahCli:listModels', { id: 'missing' });
+      const result = await call<ListResult>(h, 'ptahCli:listModels', {
+        id: 'missing',
+      });
 
-      expect(result.models).toEqual([]);
-      expect(result.isStatic).toBe(true);
-      expect(result.error).toBe('Agent not found');
+      expect(result).toEqual({
+        models: [],
+        source: 'unavailable',
+        error: 'Agent not found',
+      });
+      expect(h.providerModels.fetchModels).not.toHaveBeenCalled();
     });
 
-    it('returns the provider static model list for a known agent (registry provider)', async () => {
-      // 'openrouter' is a well-known provider in ANTHROPIC_PROVIDERS — we
-      // assert only that static models come back and that the flag
-      // correctly reflects "this provider has a dynamic endpoint".
+    it('lists the live catalog through the chain with the agent key', async () => {
       const h = makeHarness();
       h.registry.listAgents.mockResolvedValue([
         makeSummary({ id: 'a1', providerId: 'openrouter' }),
       ]);
+      h.authSecrets.getProviderKey.mockResolvedValue('agent-key');
+      h.providerModels.fetchModels.mockResolvedValue({
+        models: [liveRow],
+        totalCount: 1,
+        source: 'live',
+        isStatic: false,
+      });
       h.handlers.register();
 
-      const result = await call<{
-        models: Array<{ id: string; name: string }>;
-        isStatic: boolean;
-        error?: string;
-      }>(h, 'ptahCli:listModels', { id: 'a1' });
+      const result = await call<ListResult>(h, 'ptahCli:listModels', {
+        id: 'a1',
+      });
 
+      expect(h.authSecrets.getProviderKey).toHaveBeenCalledWith('ptahCli.a1');
+      expect(h.authSecrets.getCredential).not.toHaveBeenCalled();
+      expect(h.providerModels.fetchModels).toHaveBeenCalledWith(
+        'openrouter',
+        'agent-key',
+        false,
+      );
+      expect(result).toEqual({
+        models: [
+          {
+            id: 'vendor/model-a',
+            name: 'Model A',
+            description: '',
+            contextLength: 128000,
+          },
+        ],
+        source: 'live',
+      });
+      expect(result).not.toHaveProperty('isStatic');
+    });
+
+    it('reads the host API key for a shared-connection Claude API lane', async () => {
+      const h = makeHarness();
+      h.registry.listAgents.mockResolvedValue([
+        makeSummary({
+          id: 'a1',
+          providerId: 'anthropic-api',
+          credentialSource: 'shared-connection',
+        }),
+      ]);
+      h.authSecrets.getCredential.mockResolvedValue('host-key');
+      h.handlers.register();
+
+      await call<ListResult>(h, 'ptahCli:listModels', { id: 'a1' });
+
+      expect(h.authSecrets.getCredential).toHaveBeenCalledWith('apiKey');
+      expect(h.authSecrets.getProviderKey).not.toHaveBeenCalled();
+      expect(h.providerModels.fetchModels).toHaveBeenCalledWith(
+        'anthropic-api',
+        'host-key',
+        false,
+      );
+    });
+
+    it('passes null when no key is stored and maps unavailable to the fixed error', async () => {
+      const h = makeHarness();
+      h.registry.listAgents.mockResolvedValue([
+        makeSummary({ id: 'a1', providerId: 'openrouter' }),
+      ]);
+      h.authSecrets.getProviderKey.mockResolvedValue('   ');
+      h.providerModels.fetchModels.mockResolvedValue({
+        models: [],
+        totalCount: 0,
+        source: 'unavailable',
+        failureReason: 'no-key',
+        isStatic: false,
+      });
+      h.handlers.register();
+
+      const result = await call<ListResult>(h, 'ptahCli:listModels', {
+        id: 'a1',
+      });
+
+      expect(h.providerModels.fetchModels).toHaveBeenCalledWith(
+        'openrouter',
+        null,
+        false,
+      );
+      expect(result).toEqual({
+        models: [],
+        source: 'unavailable',
+        failureReason: 'no-key',
+        error: modelListErrorText('no-key', 'OpenRouter'),
+      });
+    });
+
+    it('returns a persisted list with its failure reason', async () => {
+      const h = makeHarness();
+      h.registry.listAgents.mockResolvedValue([
+        makeSummary({ id: 'a1', providerId: 'openrouter' }),
+      ]);
+      h.providerModels.fetchModels.mockResolvedValue({
+        models: [liveRow],
+        totalCount: 1,
+        source: 'persisted',
+        failureReason: 'network',
+        savedAt: 1,
+        isStatic: false,
+      });
+      h.handlers.register();
+
+      const result = await call<ListResult>(h, 'ptahCli:listModels', {
+        id: 'a1',
+      });
+
+      expect(result.source).toBe('persisted');
+      expect(result.failureReason).toBe('network');
+      expect(result.models.map((m) => m.id)).toEqual(['vendor/model-a']);
       expect(result.error).toBeUndefined();
-      // OpenRouter has a dynamic modelsEndpoint, so isStatic MUST be false.
-      expect(result.isStatic).toBe(false);
     });
 
     it('returns an error when the provider lookup fails', async () => {
@@ -616,15 +756,15 @@ describe('PtahCliRpcHandlers', () => {
       ]);
       h.handlers.register();
 
-      const result = await call<{
-        models: unknown[];
-        isStatic: boolean;
-        error?: string;
-      }>(h, 'ptahCli:listModels', { id: 'a1' });
+      const result = await call<ListResult>(h, 'ptahCli:listModels', {
+        id: 'a1',
+      });
 
-      expect(result.models).toEqual([]);
-      expect(result.isStatic).toBe(true);
-      expect(result.error).toBe('Provider not found');
+      expect(result).toEqual({
+        models: [],
+        source: 'unavailable',
+        error: 'Provider not found',
+      });
     });
 
     it('captures exceptions from registry.listAgents to Sentry and returns error', async () => {
@@ -632,16 +772,36 @@ describe('PtahCliRpcHandlers', () => {
       h.registry.listAgents.mockRejectedValue(new Error('kaboom'));
       h.handlers.register();
 
-      const result = await call<{
-        models: unknown[];
-        isStatic: boolean;
-        error?: string;
-      }>(h, 'ptahCli:listModels', { id: 'a1' });
+      const result = await call<ListResult>(h, 'ptahCli:listModels', {
+        id: 'a1',
+      });
 
       expect(result.models).toEqual([]);
-      expect(result.isStatic).toBe(true);
+      expect(result.source).toBe('unavailable');
       expect(result.error).toBe('Could not load the model list.');
       expect(h.sentry.captureException).toHaveBeenCalled();
+    });
+
+    it('never puts the agent key into a log line or the result', async () => {
+      const h = makeHarness();
+      h.registry.listAgents.mockResolvedValue([
+        makeSummary({ id: 'a1', providerId: 'openrouter' }),
+      ]);
+      h.authSecrets.getProviderKey.mockResolvedValue('sk-agent-SECRET');
+      h.handlers.register();
+
+      const result = await call<ListResult>(h, 'ptahCli:listModels', {
+        id: 'a1',
+      });
+
+      const logged = JSON.stringify([
+        h.logger.debug.mock.calls,
+        h.logger.info.mock.calls,
+        h.logger.warn.mock.calls,
+        h.logger.error.mock.calls,
+      ]);
+      expect(logged).not.toContain('sk-agent-SECRET');
+      expect(JSON.stringify(result)).not.toContain('sk-agent-SECRET');
     });
   });
 
