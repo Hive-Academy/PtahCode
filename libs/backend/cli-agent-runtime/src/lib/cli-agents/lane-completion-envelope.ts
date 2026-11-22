@@ -1,8 +1,14 @@
 import type {
+  AgentActionNotice,
+  AgentActionReason,
   LaneCompletionSignal,
   LaneDeliverableCheck,
 } from '@ptah-extension/shared';
-import { isAgentBudgetStopReason } from '@ptah-extension/shared';
+import {
+  formatAgentActionReason,
+  formatAgentActorLabel,
+  isAgentBudgetStopReason,
+} from '@ptah-extension/shared';
 
 function escape(value: string): string {
   return value
@@ -27,11 +33,14 @@ function deliverableLine(check: LaneDeliverableCheck): string {
   return `- ${check.path} — ${check.bytes} bytes${stale}`;
 }
 
-/** Who stopped the lane and why, for a lane the host stopped. */
+/**
+ * Who stopped the lane and why, for a lane the host stopped. Decodes historical
+ * stop reasons only: new code never stamps a budget or repeat-call stop.
+ */
 function hostStopLine(signal: LaneCompletionSignal): string | undefined {
   if (!signal.stopReason) return undefined;
   if (isAgentBudgetStop(signal))
-    return `Stopped by Ptah (agent budget), not by the user: ${signal.stopReason}; limit: ${signal.budgetLimit ?? 'configured limit'}.${signal.stopReason === 'budget' ? ' Budget warning: finish current work, report progress, and prepare a short handoff before a fresh lane.' : ''}`;
+    return `Stopped by Ptah (agent budget), not by the caller: ${signal.stopReason}; limit: ${signal.budgetLimit ?? 'configured limit'}.${signal.stopReason === 'budget' ? ' Budget warning: finish current work, report progress, and prepare a short handoff before a fresh lane.' : ''}`;
   const calls =
     signal.toolCalls !== undefined ? ` (${signal.toolCalls} tool calls)` : '';
   const why =
@@ -39,6 +48,29 @@ function hostStopLine(signal: LaneCompletionSignal): string | undefined {
       ? `repeated the same call ${signal.repeatedCalls} times`
       : 'repeated the same call';
   return `Stopped by Ptah: ${why}${calls}. The caller did not stop it.`;
+}
+
+/** Reasons whose pause outlives the lane: the lifetime ledger stays over its limit. */
+const LEDGER_PAUSE_REASONS: ReadonlySet<AgentActionReason> = new Set<AgentActionReason>([
+  'weighted-budget', 'raw-budget', 'context-budget', 'duration', 'telemetry-unavailable',
+]);
+
+/**
+ * The lane's last Ptah notice, in the past tense: the lane has already returned, so it is
+ * context for the parent, not a live state.
+ */
+function actionNoticeLine(notice: AgentActionNotice, agentId: string): string {
+  const actor = formatAgentActorLabel(notice);
+  const because = formatAgentActionReason(notice);
+  if (notice.action === 'asked-handoff')
+    return `Ptah notice: ${actor} asked ${agentId} for a handoff because ${because}. The lane has since returned; check that its report covers the remaining work.`;
+  if (notice.action === 'paused') {
+    const next = LEDGER_PAUSE_REASONS.has(notice.reason)
+      ? 'A resume of this CLI session starts a fresh lane instead.'
+      : 'Review its report before you resume it.';
+    return `Ptah notice: ${actor} paused new work for ${agentId} because ${because}. The lane has since returned. ${next}`;
+  }
+  return `Ptah notice: ${actor} ended ${agentId} because ${because}.`;
 }
 
 function isAgentBudgetStop(signal: LaneCompletionSignal): boolean {
@@ -85,7 +117,7 @@ export function buildLaneCompletionEnvelope(
   else if (signal.toolCalls !== undefined)
     lines.push(`Tool calls: ${signal.toolCalls}.`);
   if (signal.heldBudgetWarning && !isAgentBudgetStop(signal))
-    lines.push('Budget warning: this lane passed its warning threshold; its next accounted turn stops it. The lane has not received this warning yet.');
+    lines.push('Budget warning: Ptah budget monitor asked this lane for a handoff, but the request had not reached the lane when it returned.');
   if (signal.queuedMessagesDropped)
     lines.push(
       `Queued messages dropped by the stop: ${signal.queuedMessagesDropped}. Send them again if they still matter.`,
@@ -109,6 +141,9 @@ export function buildLaneCompletionEnvelope(
       : `CLI Session ID: ${signal.cliSessionId} — pass it as resume_session_id to continue this lane instead of respawning it.`);
   if (isAgentBudgetStop(signal))
     lines.push(`Progress pointer: ${(signal.progressPointer ?? `CLI Session ID ${signal.cliSessionId ?? 'unavailable'}; inspect lane ${signal.agentId} output`).slice(0, 240)}`);
+  // The latest action notice is context only: the lane's own ending is its cause.
+  if (signal.actionNotice)
+    lines.push(actionNoticeLine(signal.actionNotice, signal.agentId));
   lines.push(nextAction(signal));
   return `<agent-lane-completed ${attrs}>\n${lines.join('\n')}\n</agent-lane-completed>`;
 }

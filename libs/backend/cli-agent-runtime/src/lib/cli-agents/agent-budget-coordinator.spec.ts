@@ -16,42 +16,65 @@ describe('AgentBudgetCoordinator', () => {
   it('reassesses changed limits without losing charged turns or restarting duration', () => {
     const coordinator = new AgentBudgetCoordinator({ ...settings, stopWeightedTokens: 200 }, 1_000);
     coordinator.accept({ status: 'reported', usage: { ...usage, inputTokens: 30, outputTokens: 10 } }, 2_000);
-    expect(coordinator.updateSettings({ ...settings, stopWeightedTokens: 50 }, 3_000).stopReason).toBeUndefined();
-    expect(coordinator.updateSettings({ ...settings, stopWeightedTokens: 35 }, 4_000).stopReason).toBe('budget');
+    expect(coordinator.updateSettings({ ...settings, stopWeightedTokens: 60 }, 3_000).phase).toBe('running');
+    expect(coordinator.updateSettings({ ...settings, stopWeightedTokens: 50 }, 3_000)).toMatchObject({ phase: 'asked-handoff', reason: 'weighted-budget' });
+    expect(coordinator.updateSettings({ ...settings, stopWeightedTokens: 15 }, 4_000)).toMatchObject({ phase: 'paused', reason: 'weighted-budget' });
+    expect(coordinator.counters.stopped).toBe(false);
     expect(coordinator.turnCount).toBe(1);
     expect(coordinator.counters.rawTokens).toBe(40);
     expect(coordinator.startedAtMs).toBe(1_000);
-    expect(coordinator.record().stopWeightedTokens).toBe(35);
+    expect(coordinator.record().stopWeightedTokens).toBe(15);
   });
 
   it('applies a shorter lifetime to the existing start time', () => {
     const coordinator = new AgentBudgetCoordinator(settings, 1_000);
-    expect(coordinator.updateSettings({ ...settings, maxDurationMin: 1 }, 61_000).stopReason).toBe('duration');
-    expect(coordinator.remainingMs(61_000)).toBe(0);
+    expect(coordinator.updateSettings({ ...settings, maxDurationMin: 1 }, 61_000)).toMatchObject({
+      phase: 'asked-handoff', reason: 'duration', unit: 'milliseconds', limit: 60_000,
+    });
+    // Ask at 0.8 x 60 s, pause at 2 x 60 s, both from the original start.
+    expect(coordinator.nextAdmissionDeadlineMs(61_000)).toBe(60_000);
+    expect(coordinator.admission(121_000)).toMatchObject({ phase: 'paused', reason: 'duration' });
+    expect(coordinator.nextAdmissionDeadlineMs(121_000)).toBeUndefined();
   });
-  it('warns once, deduplicates turn IDs, and stops at the limit', () => {
+
+  it('schedules the next duration point: ask first, then pause', () => {
+    const coordinator = new AgentBudgetCoordinator(settings, 1_000);
+    expect(coordinator.nextAdmissionDeadlineMs(2_000)).toBe(95_000);
+    expect(coordinator.nextAdmissionDeadlineMs(97_000)).toBe(144_000);
+    expect(coordinator.nextAdmissionDeadlineMs(0)).toBe(96_000);
+  });
+
+  it('asks at the threshold, deduplicates turn IDs, and pauses at twice the limit', () => {
     const coordinator = new AgentBudgetCoordinator(settings, 0);
     const first = coordinator.accept({ status: 'reported', usage }, 10);
-    expect(first.warning).toBe(true);
+    expect(first.admission).toMatchObject({ phase: 'asked-handoff', reason: 'weighted-budget', measured: 80, limit: 100 });
     expect(first.costUnavailable).toBe(true);
     expect(coordinator.turnCount).toBe(1);
-    expect(coordinator.accept({ status: 'reported', usage }, 11).warning).toBe(false);
+    expect(coordinator.accept({ status: 'reported', usage }, 11).admission.phase).toBe('asked-handoff');
     expect(coordinator.turnCount).toBe(1);
     expect(coordinator.counters.rawTokens).toBe(80);
-    const crossing = coordinator.accept({ status: 'reported', usage: { ...usage, turnId: 'turn-2' } }, 12);
-    expect(crossing.warning).toBe(true);
-    expect(crossing.stopReason).toBeUndefined();
+    expect(coordinator.accept({ status: 'reported', usage: { ...usage, turnId: 'turn-2' } }, 12).admission.phase).toBe('asked-handoff');
     expect(coordinator.turnCount).toBe(2);
-    expect(coordinator.accept({ status: 'reported', usage: { ...usage, turnId: 'turn-3' } }, 13).stopReason).toBe('budget');
+    expect(coordinator.accept({ status: 'reported', usage: { ...usage, turnId: 'turn-3' } }, 13).admission)
+      .toMatchObject({ phase: 'paused', reason: 'weighted-budget', measured: 240 });
     expect(coordinator.turnCount).toBe(3);
   });
 
-  it('allows one missing total and expires at the original deadline', () => {
+  it('keeps accounting after a pause', () => {
+    const coordinator = new AgentBudgetCoordinator(settings, 0);
+    coordinator.accept({ status: 'reported', usage: { ...usage, inputTokens: 200 } }, 10);
+    expect(coordinator.admission(10).phase).toBe('paused');
+    coordinator.accept({ status: 'reported', usage: { ...usage, turnId: 'turn-2' } }, 20);
+    expect(coordinator.counters.stopped).toBe(false);
+    expect(coordinator.counters.rawTokens).toBe(300);
+    expect(coordinator.turnCount).toBe(2);
+  });
+
+  it('asks after one missing total', () => {
     const coordinator = new AgentBudgetCoordinator(settings, 1_000);
-    expect(coordinator.accept({ status: 'unavailable', turnId: 'missing', modelId: 'unknown', source: 'stream', reason: 'missing' }, 2_000).stopReason).toBeUndefined();
+    expect(coordinator.accept({ status: 'unavailable', turnId: 'missing', modelId: 'unknown', source: 'stream', reason: 'missing' }, 2_000).admission)
+      .toMatchObject({ phase: 'asked-handoff', reason: 'telemetry-unavailable', measured: 1, unit: 'turns' });
     expect(coordinator.record().unavailableTurns).toBe(1);
-    expect(coordinator.expired(120_999)).toBe(false);
-    expect(coordinator.expired(121_000)).toBe(true);
   });
 
   it('persists the unavailable streak and carries the newer count across a ledger rebind', () => {
@@ -67,8 +90,10 @@ describe('AgentBudgetCoordinator', () => {
     expect(resumed.counters.unavailableTurns).toBe(2);
     expect(resumed.record().turnIds).toEqual(['old', 'new']);
     expect(resumed.turnCount).toBe(2);
-    expect(resumed.accept(missingTurn('last'), 2_300).stopReason).toBe('telemetry-unavailable');
+    expect(resumed.accept(missingTurn('last'), 2_300).admission).toMatchObject({ phase: 'paused', reason: 'telemetry-unavailable' });
     expect(resumed.counters.unavailableTurns).toBe(3);
+    resumed.accept(missingTurn('after-pause'), 2_400);
+    expect(resumed.counters.unavailableTurns).toBe(4);
   });
 
   it('adds unavailable streaks across distinct ledgers without a reported reset', () => {
@@ -100,19 +125,18 @@ describe('AgentBudgetCoordinator', () => {
     expect(coordinator.counters.turnIds).toEqual(['native:1', 'turn-1']);
     expect(coordinator.turnCount).toBe(2);
     expect(coordinator.startedAtMs).toBe(1_000);
-    expect(coordinator.remainingMs(6_000)).toBe(115_000);
+    expect(coordinator.nextAdmissionDeadlineMs(6_000)).toBe(91_000);
     expect(coordinator.record().rawTokens).toBe(110);
-    expect(decision.stopReason).toBe('budget');
-    expect(coordinator.stopReason).toBe('budget');
+    expect(decision).toMatchObject({ phase: 'asked-handoff', reason: 'weighted-budget', measured: 120 });
+    expect(coordinator.counters.stopped).toBe(false);
   });
 
-  it('warns immediately when a late ledger merge crosses the warning threshold', () => {
+  it('asks immediately when a late ledger merge crosses the ask threshold', () => {
     const coordinator = new AgentBudgetCoordinator(settings, Date.now());
     coordinator.accept({ status: 'reported', usage: { ...usage, inputTokens: 30, outputTokens: 10 } });
     const decision = coordinator.rebindRecord({ weightedTokens: 45, rawTokens: 45,
       turnIds: ['native:1'], turnCount: 1, startedAtMs: Date.now(),
       stopWeightedTokens: 100, maxDurationMin: 2 });
-    expect(decision).toEqual({ warning: true });
-    expect(coordinator.counters.warned).toBe(true);
+    expect(decision).toMatchObject({ phase: 'asked-handoff', reason: 'weighted-budget', measured: 85 });
   });
 });

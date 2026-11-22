@@ -25,6 +25,8 @@ import { blankToUndefined } from '../ptah-cli/helpers/ptah-cli-registry.utils';
 import { stripAnsiCodes } from '../cli-agents/cli-adapters/cli-adapter.utils';
 import { classifyCliStderr } from '../cli-agents/cli-adapters/cli-stderr-severity';
 import type { ISdkProcessSpawner } from '../spawn/sdk-process-spawner.port';
+import type { LaneToolGate } from '../cli-agents/cli-adapters/cli-adapter.interface';
+import { withLaneToolGate } from './lane-admission-gate';
 
 /**
  * Child env for a lane. Ambient lanes keep the safe env. A named lane gets the
@@ -126,6 +128,11 @@ export interface ClaudeSdkLaneOptionsInput {
   phase?: {
     readonly toolProfile?: { readonly disallowedTools?: readonly string[] };
   };
+  /**
+   * Manager pause probe. When present, new tool calls are denied while it
+   * returns a notice (see `withLaneToolGate`); absent leaves the options as is.
+   */
+  laneToolGate?: LaneToolGate;
 }
 
 /**
@@ -222,7 +229,7 @@ export function buildClaudeSdkLaneOptions(
     );
   }
 
-  return {
+  const options: Options = {
     abortController,
     model,
     effort: effort || undefined,
@@ -285,6 +292,8 @@ export function buildClaudeSdkLaneOptions(
       ? certified.executable.sdkExecutablePath
       : executable,
   };
+  // Last, so the gate sees the final hooks and permission callback.
+  return withLaneToolGate(options, input.laneToolGate);
 }
 
 export function resolveClaudeLanePermissionOptions(

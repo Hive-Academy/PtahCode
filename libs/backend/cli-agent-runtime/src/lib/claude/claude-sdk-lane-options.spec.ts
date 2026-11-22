@@ -431,3 +431,85 @@ describe('Claude lane approval routing and policy translation', () => {
     },
   );
 });
+
+describe('buildClaudeSdkLaneOptions — lane tool gate (TASK_2026_2297 P4)', () => {
+  const paused = () => ({
+    actor: 'ptah-budget' as const,
+    action: 'asked-handoff' as const,
+    reason: 'context-budget' as const,
+    nextStep: 'write-notes-and-return' as const,
+  });
+  const preToolUse = async (
+    options: ReturnType<typeof buildClaudeSdkLaneOptions>,
+    toolName: string,
+  ): Promise<unknown[]> => {
+    const results: unknown[] = [];
+    for (const matcher of options.hooks?.PreToolUse ?? []) {
+      for (const hook of matcher.hooks) {
+        results.push(
+          await hook(
+            { hook_event_name: 'PreToolUse', tool_name: toolName, tool_input: {},
+              tool_use_id: 't', session_id: 's', transcript_path: '/t', cwd: CWD } as never,
+            't',
+            { signal: new AbortController().signal },
+          ),
+        );
+      }
+    }
+    return results;
+  };
+  const deniedByPtah = expect.objectContaining({
+    hookSpecificOutput: expect.objectContaining({
+      permissionDecision: 'deny',
+      permissionDecisionReason: expect.stringMatching(/^Ptah budget monitor paused new work tools/),
+    }),
+  });
+
+  it('adds no hook without a gate', () => {
+    const options = buildClaudeSdkLaneOptions(laneInput(assemblyFor(verifiedPolicy())));
+    expect(options.hooks?.PreToolUse).toBeUndefined();
+  });
+
+  it('ambient ask lane: hook and canUseTool deny new work while paused', async () => {
+    const input = laneInput(assemblyFor(verifiedPolicy()));
+    input.laneToolGate = paused;
+    const options = buildClaudeSdkLaneOptions(input);
+    await expect(preToolUse(options, 'Bash')).resolves.toEqual([deniedByPtah]);
+    await expect(preToolUse(options, 'Read')).resolves.toEqual([{}]);
+    await expect(
+      options.canUseTool?.('Bash', {}, { signal: new AbortController().signal } as never),
+    ).resolves.toMatchObject({ behavior: 'deny', interrupt: false });
+  });
+
+  it('yolo lane: bypassPermissions has no canUseTool and the hook still denies', async () => {
+    const input = laneInput(assemblyFor(verifiedPolicy()));
+    input.permissionHandler.getPermissionLevel = jest.fn(() => 'yolo');
+    input.laneToolGate = paused;
+    const options = buildClaudeSdkLaneOptions(input);
+    expect(options.permissionMode).toBe('bypassPermissions');
+    expect(options.canUseTool).toBeUndefined();
+    await expect(preToolUse(options, 'Write')).resolves.toEqual([deniedByPtah]);
+  });
+
+  it('named lane: the gate does not change the certified launch', async () => {
+    const launch = certifiedLaunch();
+    const input = laneInput(assemblyFor(verifiedPolicy()));
+    input.accountRoute = {
+      kind: 'named',
+      provider: 'claude',
+      profileId: 'profile',
+      canonicalConfigDir: 'D:/accounts/selected',
+      routeFingerprint: 'fingerprint',
+      routeRevision: 0,
+      authEpoch: 0,
+      runId: 'run',
+    } as ClaudeAccountNamedRoute;
+    input.launch = launch;
+    input.laneToolGate = paused;
+    const options = buildClaudeSdkLaneOptions(input);
+    expect(() =>
+      assertCertifiedLaunch(launch, claudeActualLaunch(options), 'final'),
+    ).not.toThrow();
+    await expect(preToolUse(options, 'Bash')).resolves.toEqual([deniedByPtah]);
+  });
+});

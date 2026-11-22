@@ -133,6 +133,7 @@ interface Harness {
     spawnFromSdkHandle: jest.Mock;
     spawn: jest.Mock;
     reserveAgentId: jest.Mock;
+    laneToolGateFor: jest.Mock;
     prepareSdkHandleSpawn: jest.Mock;
   };
   metadataStore: { createChild: jest.Mock; get: jest.Mock };
@@ -158,6 +159,7 @@ function makeHarness(): Harness {
     // The resume path reserves the record's id BEFORE the handle is built, so
     // the MCP URL the resumed agent calls back on can name it (TASK_2026_402).
     reserveAgentId: jest.fn().mockReturnValue('reserved-agent-id'),
+    laneToolGateFor: jest.fn().mockReturnValue(undefined),
     // Resume gate + blocked-model check (TASK_2026_614 E.4 / B-m2); the
     // default lets the resume through unchanged.
     prepareSdkHandleSpawn: jest.fn(

@@ -13,6 +13,7 @@
 import 'reflect-metadata';
 import type { IWorkspaceProvider } from '@ptah-extension/platform-core';
 import type {
+  AgentActionNotice,
   AgentProcessInfo,
   CliOutputSegment,
   SpawnAgentRequest,
@@ -38,6 +39,8 @@ interface Harness {
   readonly logger: Record<'info' | 'warn' | 'error' | 'debug', jest.Mock>;
   /** The completion notifier's `signal`: `(info, context)`. */
   readonly signal: jest.Mock;
+  /** The notifier's non-terminal parent notice: `(info, notice, text)`. */
+  readonly notifyActionNotice: jest.Mock;
 }
 
 function makeHarness(): Harness {
@@ -64,6 +67,7 @@ function makeHarness(): Harness {
   const cliDetection = { getAdapter: jest.fn() } as unknown as Args[1];
   const sentryService = { captureException: jest.fn() };
   const signal = jest.fn();
+  const notifyActionNotice = jest.fn().mockResolvedValue('queued');
   const environment = new AgentSpawnEnvironment(
     logger as unknown as Args[0],
     cliDetection,
@@ -85,7 +89,7 @@ function makeHarness(): Harness {
     new AgentMessageRouter(logger as unknown as Args[0], cliDetection),
     environment,
     new AgentOutputBuffer(logger as unknown as Args[0]),
-    { signal } as unknown as Args[7],
+    { signal, notifyActionNotice } as unknown as Args[7],
     { evaluate: jest.fn() } as unknown as Args[8],
     // No quota owner and no ledger: plan limits are pinned by the manager spec.
     { ownerForLane: jest.fn(() => undefined) } as unknown as Args[9],
@@ -95,7 +99,7 @@ function makeHarness(): Harness {
       recordSuccess: jest.fn(),
     } as unknown as Args[10],
   );
-  return { manager, logger, signal };
+  return { manager, logger, signal, notifyActionNotice };
 }
 
 interface FakeLane {
@@ -204,69 +208,95 @@ describe('AgentProcessManager lane repeat-call guard', () => {
     expect(info.stopReason).toBeUndefined();
   });
 
-  it('stops a lane repeating one identical call and surfaces stopReason in status', async () => {
-    const { manager } = makeHarness();
+  it('asks at N identical calls and pauses at 2N without stopping the lane', async () => {
+    const { manager, signal, notifyActionNotice } = makeHarness();
     const { lane, agentId } = await startLane(manager);
     const stop = jest.spyOn(manager, 'stop');
     const exited: AgentProcessInfo[] = [];
     manager.events.on('agent:exited', (info: AgentProcessInfo) =>
       exited.push(info),
     );
+    const notices: AgentActionNotice[] = [];
+    manager.events.on(
+      'agent:action-notice',
+      (event: { notice: AgentActionNotice }) => notices.push(event.notice),
+    );
 
     lane.emit(toolCall('read', 'other'));
     for (let i = 0; i < 3; i++) lane.emit(toolCall('read', 'same'));
     await settle();
-
-    expect(stop).toHaveBeenCalledTimes(1);
-    expect(stop).toHaveBeenCalledWith(agentId);
-    const info = statusOf(manager, agentId);
-    expect(info.status).toBe('stopped');
-    expect(info.stopReason).toBe('repeat-call');
-    expect(exited).toEqual([
-      expect.objectContaining({ status: 'stopped', stopReason: 'repeat-call' }),
+    expect(notices).toEqual([
+      expect.objectContaining({
+        actor: 'ptah-budget',
+        action: 'asked-handoff',
+        reason: 'repeat-call',
+        measured: 3,
+        limit: 3,
+        unit: 'calls',
+      }),
     ]);
-  });
+    expect(statusOf(manager, agentId).actionNotice?.action).toBe(
+      'asked-handoff',
+    );
 
-  it('passes the call count and the repeat count to the completion signal', async () => {
-    const { manager, signal } = makeHarness();
-    const { lane, agentId } = await startLane(manager);
-
-    lane.emit(toolCall('read', 'other'));
     for (let i = 0; i < 3; i++) lane.emit(toolCall('read', 'same'));
     await settle();
+    expect(notices.map((n) => n.action)).toEqual(['asked-handoff', 'paused']);
+    expect(notices[1]).toEqual(
+      expect.objectContaining({ reason: 'repeat-call', limit: 6 }),
+    );
 
-    // `stop` signals before the kill and `handleExit` signals again for the
-    // same ending; the real notifier collapses both on agentId + completedAt.
-    const endings = new Set(
-      signal.mock.calls.map(([call]: [AgentProcessInfo]) => call.completedAt),
+    // Further repeats keep the latched pause and announce nothing new.
+    for (let i = 0; i < 4; i++) lane.emit(toolCall('read', 'same'));
+    await settle();
+    expect(notices).toHaveLength(2);
+
+    const info = statusOf(manager, agentId);
+    expect(info.status).toBe('running');
+    expect(info.stopReason).toBeUndefined();
+    expect(info.actionNotice).toEqual(
+      expect.objectContaining({ action: 'paused', reason: 'repeat-call' }),
     );
-    expect(endings.size).toBe(1);
-    const [info, context] = signal.mock.calls[0];
-    expect(info).toEqual(
-      expect.objectContaining({ agentId, stopReason: 'repeat-call' }),
+    expect(stop).not.toHaveBeenCalled();
+    expect(lane.handle.abort.signal.aborted).toBe(false);
+    expect(exited).toEqual([]);
+    expect(signal).not.toHaveBeenCalled();
+    // One parent notice per announced phase (ask, then pause).
+    expect(notifyActionNotice).toHaveBeenCalledTimes(notices.length);
+    expect(notifyActionNotice).toHaveBeenLastCalledWith(
+      expect.objectContaining({ agentId }),
+      expect.objectContaining({ action: 'paused', reason: 'repeat-call' }),
+      expect.any(String),
     );
-    expect(context).toEqual(
-      expect.objectContaining({ toolCalls: 4, repeatedCalls: 3 }),
-    );
-    expect(context).not.toHaveProperty('queuedMessagesDropped');
+    expect(guardCount(manager)).toBe(1);
   });
 
-  it('reports the queued caller messages a host stop dropped', async () => {
+  it('keeps queued caller messages when the repeat guard pauses a lane', async () => {
     const { manager, signal } = makeHarness();
     // Continuation without steer or interrupt: a mid-turn message is parked.
     const { lane, agentId } = await startLane(manager, { continuation: true });
-    const outcome = await manager.sendToAgent(agentId, 'one more thing');
-    expect(outcome.mode).toBe('queue-next-turn');
+    const first = await manager.sendToAgent(agentId, 'one more thing');
+    expect(first.mode).toBe('queue-next-turn');
     await manager.sendToAgent(agentId, 'and another');
 
-    for (let i = 0; i < 3; i++) lane.emit(toolCall('read', 'same'));
+    for (let i = 0; i < 6; i++) lane.emit(toolCall('read', 'same'));
     await settle();
 
-    expect(statusOf(manager, agentId).stopReason).toBe('repeat-call');
-    const [, context] = signal.mock.calls[signal.mock.calls.length - 1];
-    expect(context).toEqual(
-      expect.objectContaining({ toolCalls: 3, queuedMessagesDropped: 2 }),
+    const internals = manager as unknown as {
+      agents: Map<string, { pendingMessages: unknown[] }>;
+    };
+    expect(internals.agents.get(agentId)?.pendingMessages).toHaveLength(2);
+    expect(statusOf(manager, agentId).status).toBe('running');
+
+    lane.finish(0);
+    await settle();
+
+    expect(signal.mock.calls[0][0].actionNotice).toEqual(
+      expect.objectContaining({ action: 'paused', reason: 'repeat-call' }),
     );
+    expect(lane.handle.continue).toHaveBeenCalledWith(expect.stringContaining('one more thing'));
+    expect(manager.getAgentMessageStatus(agentId, first.messageId ?? '')).toEqual({ status: 'delivered' });
+    expect(internals.agents.get(agentId)?.pendingMessages).toHaveLength(1);
   });
 
   it('passes the call count, without a stop, for a lane that ends on its own', async () => {
@@ -300,16 +330,6 @@ describe('AgentProcessManager lane repeat-call guard', () => {
     await settle();
     expect(send).not.toHaveBeenCalled();
     expect(statusOf(manager, agentId).stopReason).toBeUndefined();
-  });
-
-  it('releases the guard when the lane is stopped by the guard', async () => {
-    const { manager } = makeHarness();
-    const { lane } = await startLane(manager);
-
-    for (let i = 0; i < 3; i++) lane.emit(toolCall('read', 'same'));
-    await settle();
-
-    expect(guardCount(manager)).toBe(0);
   });
 
   it('gives a new caller task a fresh call count and repeat history', async () => {

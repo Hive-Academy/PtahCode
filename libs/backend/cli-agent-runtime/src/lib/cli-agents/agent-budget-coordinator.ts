@@ -1,10 +1,11 @@
 import {
   AgentBudgetPolicy,
+  agentBudgetAdmissionLimits,
   initialAgentBudgetSnapshot,
   findModelPricing,
+  type AgentAdmissionAssessment,
   type AgentBudgetSettings,
   type AgentBudgetSnapshot,
-  type AgentBudgetStopReason,
   type AgentTurnTelemetry,
   type AgentBudgetRecord,
 } from '@ptah-extension/shared';
@@ -13,12 +14,19 @@ export function turnCountOf(record: AgentBudgetRecord): number {
   return record.turnCount ?? record.turnIds.length;
 }
 
-/** Lifetime accounting for one CLI session, including resumed turns. */
+/** Longest delay `setTimeout` accepts. */
+const MAX_TIMER_MS = 2_147_483_647;
+
+/**
+ * Lifetime accounting for one CLI session, including resumed turns. It never stops a lane:
+ * each change returns the admission assessment (ask at the threshold, pause at twice it) and
+ * the caller decides what to send. The stored snapshot keeps `stopped: false` so accounting
+ * continues after a pause.
+ */
 export class AgentBudgetCoordinator {
   private snapshot: AgentBudgetSnapshot;
   private policy: AgentBudgetPolicy;
   private _startedAtMs: number;
-  private _stopReason?: AgentBudgetStopReason;
   private _turnCount: number;
 
   constructor(
@@ -29,23 +37,34 @@ export class AgentBudgetCoordinator {
   ) {
     this.policy = new AgentBudgetPolicy(settings, { laneAccounting: true });
     this._startedAtMs = startedAtMs;
-    this.snapshot = { ...snapshot, turnIds: snapshot.turnIds.slice(-256) };
+    this.snapshot = { ...snapshot, stopped: false, turnIds: snapshot.turnIds.slice(-256) };
     this._turnCount = turnCount;
   }
 
   get startedAtMs(): number { return this._startedAtMs; }
-  get stopReason(): AgentBudgetStopReason | undefined { return this._stopReason; }
   get turnCount(): number { return this._turnCount; }
   get counters(): AgentBudgetSnapshot { return this.snapshot; }
 
-  updateSettings(settings: AgentBudgetSettings, nowMs = Date.now()): { warning: boolean; stopReason?: AgentBudgetStopReason } {
+  /** Current ask/pause phase of the lifetime ledger and the elapsed runtime. */
+  admission(nowMs = Date.now()): AgentAdmissionAssessment {
+    return this.policy.assessAdmission(this.snapshot, Math.max(0, nowMs - this.startedAtMs));
+  }
+
+  /**
+   * Milliseconds until the next duration ask or pause point, or undefined once the runtime is
+   * past the pause point. Bounded to the longest delay a timer accepts.
+   */
+  nextAdmissionDeadlineMs(nowMs = Date.now()): number | undefined {
+    const { askAt, pauseAt } = agentBudgetAdmissionLimits(this.settings).duration;
+    const elapsed = Math.max(0, nowMs - this.startedAtMs);
+    const next = elapsed < askAt ? askAt : elapsed < pauseAt ? pauseAt : undefined;
+    return next === undefined ? undefined : Math.min(next - elapsed, MAX_TIMER_MS);
+  }
+
+  updateSettings(settings: AgentBudgetSettings, nowMs = Date.now()): AgentAdmissionAssessment {
     this.settings = settings;
     this.policy = new AgentBudgetPolicy(settings, { laneAccounting: true });
-    const decision = this.policy.assess(this.snapshot, Math.max(0, nowMs - this.startedAtMs));
-    this.snapshot = { ...this.snapshot, warned: this.snapshot.warned || decision.warning,
-      stopped: this.snapshot.stopped || decision.stopReason !== undefined };
-    this._stopReason ??= decision.stopReason;
-    return { warning: decision.warning, ...(decision.stopReason ? { stopReason: decision.stopReason } : {}) };
+    return this.admission(nowMs);
   }
 
   record(): AgentBudgetRecord {
@@ -62,7 +81,7 @@ export class AgentBudgetCoordinator {
     };
   }
 
-  rebindRecord(record: AgentBudgetRecord, nowMs = Date.now()): { warning: boolean; stopReason?: AgentBudgetStopReason } {
+  rebindRecord(record: AgentBudgetRecord, nowMs = Date.now()): AgentAdmissionAssessment {
     const current = this.snapshot;
     const priorIds = new Set(record.turnIds);
     const novelIds = current.turnIds.filter((id) => !priorIds.has(id));
@@ -77,26 +96,21 @@ export class AgentBudgetCoordinator {
         : current.rawTokens > 0 ? current.unavailableTurns ?? 0
         : (record.unavailableTurns ?? 0) + (current.unavailableTurns ?? 0),
       turnIds: [...record.turnIds, ...novelIds],
-      elapsedMs: 0, warned: current.warned, stopped: current.stopped,
+      elapsedMs: 0, warned: current.warned, stopped: false,
     }, turnCountOf(record) + (sameLedger ? 0 : this.turnCount));
-    const { warning, stopReason } = this.policy.assess(this.snapshot, Math.max(0, nowMs - this.startedAtMs));
-    this.snapshot = { ...this.snapshot, warned: this.snapshot.warned || warning,
-      stopped: this.snapshot.stopped || stopReason !== undefined };
-    this._stopReason ??= stopReason;
-    return { warning, ...(stopReason ? { stopReason } : {}) };
+    return this.admission(nowMs);
   }
 
   /** Bind a late native session ID, including turns charged before it arrived. */
   private rebind(startedAtMs: number, snapshot: AgentBudgetSnapshot, turnCount = snapshot.turnIds.length): void {
     this._startedAtMs = startedAtMs;
-    this.snapshot = { ...snapshot, turnIds: snapshot.turnIds.slice(-256) };
+    this.snapshot = { ...snapshot, stopped: false, turnIds: snapshot.turnIds.slice(-256) };
     this._turnCount = turnCount;
   }
 
   /** A completed turn is charged once by its normalized turn ID. */
   accept(telemetry: AgentTurnTelemetry, nowMs = Date.now()): {
-    warning: boolean;
-    stopReason?: AgentBudgetStopReason;
+    admission: AgentAdmissionAssessment;
     costUnavailable: boolean;
     costAuthority: 'provider' | 'catalog' | 'unavailable';
   } {
@@ -108,23 +122,14 @@ export class AgentBudgetCoordinator {
     const turnId = telemetry.status === 'reported' ? telemetry.usage.turnId : telemetry.turnId;
     if (!this.snapshot.turnIds.includes(turnId)) this._turnCount++;
     // Bound metadata and long-lived memory; an ancient duplicate is charged
-    // again conservatively rather than allowing unbounded turn IDs.
-    this.snapshot = { ...result.snapshot, turnIds: result.snapshot.turnIds.slice(-256) };
-    this._stopReason ??= result.stopReason;
+    // again conservatively rather than allowing unbounded turn IDs. `stopped` stays false:
+    // a stopped snapshot would stop counting unavailable turns.
+    this.snapshot = { ...result.snapshot, stopped: false, turnIds: result.snapshot.turnIds.slice(-256) };
     return {
-      warning: result.warning,
-      ...(result.stopReason ? { stopReason: result.stopReason } : {}),
+      admission: this.admission(nowMs),
       costUnavailable: result.cost.status === 'unavailable',
       costAuthority: result.cost.status === 'reported' ? result.cost.source : 'unavailable',
     };
-  }
-
-  expired(nowMs = Date.now()): boolean {
-    return nowMs - this.startedAtMs >= this.settings.maxDurationMin * 60_000;
-  }
-
-  remainingMs(nowMs = Date.now()): number {
-    return Math.max(0, this.settings.maxDurationMin * 60_000 - (nowMs - this.startedAtMs));
   }
 
 }

@@ -184,29 +184,39 @@ const FALLBACK_ID = 'the agent';
 const FALLBACK_TOOL = 'the tool';
 const FALLBACK_POINTER = 'its final report in the execution transcript';
 
+/** Ptah label for the monitor that acted: the lane watchdog or the budget monitor. */
+export function formatAgentActorLabel(notice: AgentActionNotice): string {
+  return notice.actor === 'ptah-watchdog' ? 'Ptah watchdog' : 'Ptah budget monitor';
+}
+
 /** Budget ask, writable. */
 export function formatBudgetAskWritable(notice: AgentActionNotice, notesPath: string): string {
-  return `Ptah budget monitor asked for a handoff because ${formatAgentActionReason(notice)}. Finish the current step, write progress and remaining work to ${notesPath}, then return normally.`;
+  return `${formatAgentActorLabel(notice)} asked for a handoff because ${formatAgentActionReason(notice)}. Finish the current step, write progress and remaining work to ${notesPath}, then return normally.`;
 }
 
 /** Budget ask, read-only role or notes path unavailable. */
 export function formatBudgetAskReadOnly(notice: AgentActionNotice): string {
-  return `Ptah budget monitor asked for a handoff because ${formatAgentActionReason(notice)}. Finish the current step and return your progress, findings, and remaining work in your final report.`;
+  return `${formatAgentActorLabel(notice)} asked for a handoff because ${formatAgentActionReason(notice)}. Finish the current step and return your progress, findings, and remaining work in your final report.`;
 }
 
 /** Budget ceiling deny, for a role that may write handoff notes. */
 export function formatBudgetCeilingDeny(notice: AgentActionNotice): string {
-  return `Ptah budget monitor paused new work tools because ${formatAgentActionReason(notice)}. Use only the permitted handoff tools, then return normally.`;
+  return `${formatAgentActorLabel(notice)} paused new work tools because ${formatAgentActionReason(notice)}. Use only the permitted handoff tools, then return normally.`;
 }
 
 /** Budget ceiling deny, for a read-only role. */
 export function formatBudgetReadOnlyCeilingDeny(notice: AgentActionNotice): string {
-  return `Ptah budget monitor paused new work tools because ${formatAgentActionReason(notice)}. You may use your permitted Read, Grep, and Glob tools and return your findings in your final report.`;
+  return `${formatAgentActorLabel(notice)} paused new work tools because ${formatAgentActionReason(notice)}. You may use your permitted Read, Grep, and Glob tools and return your findings in your final report.`;
 }
 
 /** Parent and UI copy for a paused execution. */
 export function formatBudgetPauseNotice(notice: AgentActionNotice, id: string): string {
-  return `Ptah budget monitor paused new work for ${id} because ${formatAgentActionReason(notice)}. The execution remains live. Review its progress and decide how it should continue.`;
+  return `${formatAgentActorLabel(notice)} paused new work for ${id} because ${formatAgentActionReason(notice)}. The execution remains live. Review its progress and decide how it should continue.`;
+}
+
+/** Parent and UI copy for a paused lane whose CLI cannot block its own tool calls. */
+export function formatLaneToolGateUnavailable(notice: AgentActionNotice, id: string): string {
+  return `${formatAgentActorLabel(notice)} paused new work for ${id} because ${formatAgentActionReason(notice)}. This CLI has no verified tool gate and may still be running tools. Review its progress and decide whether to let it finish or stop it explicitly.`;
 }
 
 /** The handoff is still outstanding after the overdue window (10 minutes). */
@@ -315,6 +325,8 @@ export function formatAgentActionNotice(
       return formatPermissionTeardown(context.tool ?? FALLBACK_TOOL, notice);
     case 'user-stop':
       return formatExplicitUserStopContext();
+    case 'tool-gate-unavailable':
+      return formatLaneToolGateUnavailable(notice, context.id ?? FALLBACK_ID);
     case 'provider-no-response':
       return formatProviderHang(
         notice.unit === 'milliseconds' && notice.measured !== undefined

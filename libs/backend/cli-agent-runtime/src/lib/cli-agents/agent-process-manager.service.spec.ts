@@ -127,6 +127,7 @@ import {
 } from './agent-process-manager-helpers';
 import { CliDetectionService } from './cli-detection.service';
 import { AgentMessageRouter } from './agent-message-router.service';
+import { createLaneBudget } from './lane-budget-deadline';
 import { AgentSpawnEnvironment } from './agent-spawn-environment.service';
 import { AgentOutputBuffer } from './agent-output-buffer.service';
 import {
@@ -151,7 +152,13 @@ import type {
 } from '@ptah-extension/platform-core';
 import type { HostAttentionCoordinator } from '@ptah-extension/agent-sdk';
 import { SYSTEM_CLI_TYPES } from '@ptah-extension/shared';
+import {
+  announceLaneNotice,
+  clearLaneAdmission,
+  type TrackedAgent,
+} from './tracked-agent';
 import type {
+  AgentActionNotice,
   AgentProcessInfo,
   CliAdapterManifest,
   AgentRoleDefinition,
@@ -443,7 +450,7 @@ interface ManagerHarness {
   manager: AgentProcessManager;
   outputBuffer: AgentOutputBuffer;
   /** The stubbed lane completion notifier (TASK_2026_515). */
-  laneCompletion: { signal: jest.Mock };
+  laneCompletion: { signal: jest.Mock; notifyActionNotice: jest.Mock };
   /** The stubbed resume gate (TASK_2026_597, R9.1); resumes by default. */
   resumeGate: { evaluate: jest.Mock };
   laneOwners: LaneOwnersStub;
@@ -483,6 +490,7 @@ function createManager(deps: {
       reason: 'chat-runtime-unavailable',
     })),
     replayOutbox: jest.fn(async () => undefined),
+    notifyActionNotice: jest.fn().mockResolvedValue('queued'),
   };
   const resumeGate = {
     evaluate: jest.fn(async () => ({
@@ -541,8 +549,9 @@ function createManager(deps: {
 
 describe('AgentProcessManager - SDK Execution Path', () => {
   let manager: AgentProcessManager;
+  let onBudgetSettingsChanged: () => void;
   let outputBuffer: AgentOutputBuffer;
-  let laneCompletion: { signal: jest.Mock };
+  let laneCompletion: { signal: jest.Mock; notifyActionNotice: jest.Mock };
   let resumeGate: { evaluate: jest.Mock };
   let laneOwners: LaneOwnersStub;
   let planLimits: PlanLimitsStub;
@@ -567,6 +576,11 @@ describe('AgentProcessManager - SDK Execution Path', () => {
     cliDetection = createMockCliDetection(sdkAdapter);
 
     setupVscodeConfig();
+    const workspaceProvider = createMockWorkspaceProvider();
+    workspaceProvider['onDidChangeConfiguration'] = jest.fn((listener) => {
+      onBudgetSettingsChanged = () => listener({ affectsConfiguration: () => true });
+      return { dispose: jest.fn() };
+    });
 
     reasoningEffortGet = jest.fn(() => '');
     getMcpPort = jest.fn<number | null, []>(() => null);
@@ -589,7 +603,7 @@ describe('AgentProcessManager - SDK Execution Path', () => {
     } = createManager({
       logger,
       cliDetection,
-      workspaceProvider: createMockWorkspaceProvider(),
+      workspaceProvider,
       reasoningSettings: { effort: { get: reasoningEffortGet } },
       harnessPreflight: null,
       mcpServerStatus: { getPort: getMcpPort },
@@ -600,6 +614,330 @@ describe('AgentProcessManager - SDK Execution Path', () => {
 
   afterEach(() => {
     jest.useRealTimers();
+  });
+
+  describe('lane admission seams (P4)', () => {
+    const SESSION_ID = 'budget-session';
+    const PAUSE_NOTICE: AgentActionNotice = {
+      actor: 'ptah-budget',
+      action: 'paused',
+      reason: 'weighted-budget',
+      nextStep: 'review-live-agent',
+    };
+    type ManagerInternals = {
+      agents: Map<string, TrackedAgent>;
+      releaseHeldWork(agentId: string, tracked: TrackedAgent): void;
+      publishLaneNotice(
+        agentId: string,
+        source: 'budget',
+        notice: AgentActionNotice,
+      ): boolean;
+      budgetTelemetry: {
+        dispatch(
+          agentId: string,
+          tracked: TrackedAgent,
+          decision: { admission: { phase: string; reason?: string } },
+        ): void;
+      };
+    };
+    const internals = () => manager as unknown as ManagerInternals;
+
+    function restoreBudgetLane(weightedTokens: number): TrackedAgent {
+      const startedAt = '2026-10-04T08:00:00.000Z';
+      manager.restoreAgents(
+        [
+          {
+            cliSessionId: SESSION_ID,
+            cli: 'codex',
+            agentId: 'budget-lane' as CliSessionReference['agentId'],
+            task: 'Implement the parser',
+            startedAt,
+            completedAt: '2026-10-04T08:05:00.000Z',
+            status: 'completed',
+            agentBudget: {
+              weightedTokens,
+              rawTokens: 0,
+              turnIds: [],
+              startedAtMs: Date.parse(startedAt),
+            },
+          },
+        ],
+        '/workspace/root',
+      );
+      const tracked = internals().agents.get('budget-lane');
+      if (!tracked) throw new Error('restored lane missing');
+      return tracked;
+    }
+
+    function useBudgetSettings(): void {
+      jest
+        .spyOn(AgentSpawnEnvironment.prototype, 'resolveAgentBudgetSettings')
+        .mockReturnValue({
+          warnRatio: 0.85,
+          stopWeightedTokens: 1_000,
+          handoffContextTokens: 1_000_000,
+          maxDurationMin: 10,
+        });
+    }
+
+    afterEach(() => jest.restoreAllMocks());
+
+    it('resumes an ended lane under its ceiling however long ago it ended', async () => {
+      useBudgetSettings();
+      restoreBudgetLane(100);
+      // Weeks past 2x maxDuration on the wall clock; measured at completedAt
+      // the lane ran 5 of its 10 minutes.
+      await manager.spawn({
+        task: 'Continue',
+        cli: 'codex',
+        workingDirectory: '/workspace/root',
+        resumeSessionId: SESSION_ID,
+      });
+      expect(resumeGate.evaluate).toHaveBeenCalledTimes(1);
+      expect(resumeGate.evaluate.mock.calls[0][0]).not.toHaveProperty(
+        'pausedBudgetNotice',
+      );
+    });
+
+    it('passes the pause notice to the resume gate at 2x the weighted budget', async () => {
+      useBudgetSettings();
+      restoreBudgetLane(2_000);
+      await manager.spawn({
+        task: 'Continue',
+        cli: 'codex',
+        workingDirectory: '/workspace/root',
+        resumeSessionId: SESSION_ID,
+      });
+      expect(resumeGate.evaluate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pausedBudgetNotice: expect.objectContaining({
+            action: 'paused',
+            reason: 'weighted-budget',
+          }),
+        }),
+      );
+    });
+
+    it('applies lower budget settings to an idle lane and keeps its receipt through the idle release deadline', async () => {
+      const settings = {
+        warnRatio: 0.85,
+        stopWeightedTokens: 10_000,
+        handoffContextTokens: 1_000_000,
+        maxDurationMin: 10,
+      };
+      const resolveSettings = jest
+        .spyOn(AgentSpawnEnvironment.prototype, 'resolveAgentBudgetSettings')
+        .mockReturnValue(settings);
+      jest.spyOn(AgentSpawnEnvironment.prototype, 'sdkIdleReleaseMs').mockReturnValue(100);
+      const controls = createMockSdkHandle({ supportsContinuation: true });
+      sdkAdapter.runSdk.mockResolvedValue({ ...controls.handle, getSessionId: () => SESSION_ID });
+      const { agentId } = await manager.spawn({
+        task: 'Start work', cli: 'codex', workingDirectory: '/workspace/root',
+      });
+      const tracked = internals().agents.get(agentId);
+      if (!tracked) throw new Error('Expected a continuation-capable lane');
+      tracked.budget = createLaneBudget(settings, tracked.info.startedAt, {
+        weightedTokens: 2000, rawTokens: 0, turnIds: [], startedAtMs: Date.parse(tracked.info.startedAt),
+      });
+      controls.resolve(0);
+      await controls.handle.done;
+      expect(tracked.info.status).toBe('completed');
+      expect(tracked.info.actionNotice).toBeUndefined();
+
+      resolveSettings.mockReturnValue({ ...settings, stopWeightedTokens: 1000 });
+      onBudgetSettingsChanged();
+
+      const receipt = await manager.sendToAgent(agentId, 'follow up');
+      expect(receipt.mode).toBe('queue-next-turn');
+      expect(receipt.detail).toContain('Ptah budget monitor paused new work');
+      jest.advanceTimersByTime(500);
+      expect(manager.getAgentMessageStatus(agentId, receipt.messageId ?? '')).toEqual({ status: 'pending' });
+      expect(controls.continueMessages).toEqual([]);
+      expect(controls.abortController.signal.aborted).toBe(false);
+
+      resolveSettings.mockReturnValue({ ...settings, stopWeightedTokens: 1500 });
+      onBudgetSettingsChanged();
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+      expect(manager.getAgentMessageStatus(agentId, receipt.messageId ?? '')).toEqual({ status: 'delivered' });
+      expect(controls.continueMessages).toEqual(['follow up']);
+    });
+
+    it.each(['repeat', 'inactivity'] as const)(
+      'refuses adapter and registry resume while the matching live owner is paused by %s',
+      async (source) => {
+        const tracked = restoreBudgetLane(0);
+        tracked.info = { ...tracked.info, status: 'running' };
+        const notice: AgentActionNotice = source === 'repeat'
+          ? { actor: 'ptah-budget', action: 'paused', reason: 'repeat-call', unit: 'calls',
+            nextStep: 'review-live-agent', measured: 6, limit: 3 }
+          : { actor: 'ptah-watchdog', action: 'paused', reason: 'lane-inactive', unit: 'milliseconds',
+            nextStep: 'review-live-agent', measured: 2_000, limit: 2_000 };
+        announceLaneNotice(tracked, source, notice);
+
+        await expect(manager.spawn({
+          task: 'Continue', cli: 'codex', workingDirectory: '/workspace/root', resumeSessionId: SESSION_ID,
+        })).rejects.toThrow(/Ptah .*Resume is refused while that lane is paused/);
+        tracked.info = { ...tracked.info, cli: 'ptah-cli' };
+        await expect(manager.prepareSdkHandleSpawn({
+          task: 'Continue', cli: 'ptah-cli', resumeSessionId: SESSION_ID,
+        })).rejects.toThrow(/Ptah .*Resume is refused while that lane is paused/);
+        expect(resumeGate.evaluate).not.toHaveBeenCalled();
+        expect(sdkAdapter.runSdk).not.toHaveBeenCalled();
+      },
+    );
+
+    it('rechecks the original owner before a registry launch even after a fresh handoff decision', async () => {
+      const tracked = restoreBudgetLane(0);
+      tracked.info = { ...tracked.info, status: 'running', cli: 'ptah-cli' };
+      resumeGate.evaluate.mockResolvedValueOnce({
+        decision: 'fresh', reason: 'context limit', contextTokens: null, source: 'estimate', idleMs: null,
+      });
+      const prepared = await manager.prepareSdkHandleSpawn({
+        task: 'Continue', cli: 'ptah-cli', resumeSessionId: SESSION_ID,
+      });
+      expect(prepared.resumeSessionId).toBeUndefined();
+      announceLaneNotice(tracked, 'budget', PAUSE_NOTICE);
+      expect(prepared.checkResumeOwner).toThrow(/Ptah .*Resume is refused/);
+    });
+
+    it('retries a failed parent enqueue without announcing the lane notice twice', async () => {
+      const tracked = restoreBudgetLane(0);
+      tracked.info = { ...tracked.info, parentSessionId: 'parent-session' };
+      const announced = jest.fn();
+      manager.events.on('agent:action-notice', announced);
+      laneCompletion.notifyActionNotice.mockResolvedValueOnce('failed').mockResolvedValueOnce('queued');
+
+      internals().publishLaneNotice('budget-lane', 'budget', PAUSE_NOTICE);
+      await jest.advanceTimersByTimeAsync(4999);
+      expect(laneCompletion.notifyActionNotice).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(1);
+      expect(laneCompletion.notifyActionNotice).toHaveBeenCalledTimes(2);
+      expect(laneCompletion.notifyActionNotice.mock.calls[1]).toEqual(
+        laneCompletion.notifyActionNotice.mock.calls[0],
+      );
+      expect(announced).toHaveBeenCalledTimes(1);
+    });
+
+    it('cancels pending parent retries on dispose', async () => {
+      restoreBudgetLane(0);
+      laneCompletion.notifyActionNotice.mockResolvedValueOnce('failed');
+      internals().publishLaneNotice('budget-lane', 'budget', PAUSE_NOTICE);
+      await Promise.resolve();
+
+      await manager.disposeAll();
+      await jest.advanceTimersByTimeAsync(5000);
+      expect(laneCompletion.notifyActionNotice).toHaveBeenCalledTimes(1);
+    });
+
+    it('gates tools only while the lane is paused', () => {
+      const tracked = restoreBudgetLane(0);
+      const gate = manager.laneToolGateFor('budget-lane');
+      expect(gate()).toBeUndefined();
+      announceLaneNotice(tracked, 'budget', PAUSE_NOTICE);
+      expect(gate()).toEqual(PAUSE_NOTICE);
+      clearLaneAdmission(tracked, 'budget');
+      expect(gate()).toBeUndefined();
+      expect(manager.laneToolGateFor('unknown-lane')()).toBeUndefined();
+    });
+
+    it('releases held work once the pause clears, never while paused', async () => {
+      const flushPending = jest
+        .spyOn(AgentMessageRouter.prototype, 'flushPending')
+        .mockResolvedValue(undefined);
+      const tracked = restoreBudgetLane(0);
+      tracked.pendingMessages = [
+        { messageId: 'held-1' } as unknown as TrackedAgent['pendingMessages'][number],
+      ];
+      announceLaneNotice(tracked, 'budget', PAUSE_NOTICE);
+      internals().releaseHeldWork('budget-lane', tracked);
+      expect(flushPending).not.toHaveBeenCalled();
+
+      clearLaneAdmission(tracked, 'budget');
+      internals().releaseHeldWork('budget-lane', tracked);
+      expect(flushPending).toHaveBeenCalledTimes(1);
+      expect(flushPending).toHaveBeenCalledWith('budget-lane', tracked, manager);
+    });
+
+    it('does not release held work on a running lane', () => {
+      const flushPending = jest
+        .spyOn(AgentMessageRouter.prototype, 'flushPending')
+        .mockResolvedValue(undefined);
+      const tracked = restoreBudgetLane(0);
+      tracked.pendingMessages = [
+        { messageId: 'held-1' } as unknown as TrackedAgent['pendingMessages'][number],
+      ];
+      tracked.info = { ...tracked.info, status: 'running' };
+      internals().releaseHeldWork('budget-lane', tracked);
+      expect(flushPending).not.toHaveBeenCalled();
+    });
+
+    it('notifies the parent once per notice', () => {
+      const tracked = restoreBudgetLane(0);
+      internals().publishLaneNotice('budget-lane', 'budget', PAUSE_NOTICE);
+      internals().publishLaneNotice('budget-lane', 'budget', PAUSE_NOTICE);
+      expect(laneCompletion.notifyActionNotice).toHaveBeenCalledTimes(1);
+      expect(laneCompletion.notifyActionNotice).toHaveBeenCalledWith(
+        tracked.info,
+        PAUSE_NOTICE,
+        expect.any(String),
+      );
+    });
+
+    it('emits one event and one parent notice per budget phase', () => {
+      const tracked = restoreBudgetLane(0);
+      tracked.info = { ...tracked.info, status: 'running' };
+      const events: AgentActionNotice[] = [];
+      manager.events.on(
+        'agent:action-notice',
+        (event: { notice: AgentActionNotice }) => events.push(event.notice),
+      );
+      const { budgetTelemetry } = internals();
+      const ask = { phase: 'asked-handoff', reason: 'weighted-budget' };
+      const pause = { phase: 'paused', reason: 'weighted-budget' };
+      budgetTelemetry.dispatch('budget-lane', tracked, { admission: ask });
+      budgetTelemetry.dispatch('budget-lane', tracked, { admission: ask });
+      budgetTelemetry.dispatch('budget-lane', tracked, { admission: pause });
+      budgetTelemetry.dispatch('budget-lane', tracked, { admission: pause });
+      expect(events.map((n) => n.action)).toEqual(['asked-handoff', 'paused']);
+      expect(
+        laneCompletion.notifyActionNotice.mock.calls.map(
+          ([, notice]: [unknown, AgentActionNotice]) => notice.action,
+        ),
+      ).toEqual(['asked-handoff', 'paused']);
+    });
+
+    it('keeps the monitor and trigger in the pause text of a lane without a tool gate', () => {
+      restoreBudgetLane(0);
+      internals().publishLaneNotice('budget-lane', 'budget', {
+        ...PAUSE_NOTICE,
+        measured: 2_100,
+        limit: 1_000,
+        unit: 'tokens',
+      });
+      const text = laneCompletion.notifyActionNotice.mock.calls[0][2] as string;
+      expect(text).toContain(
+        'Ptah budget monitor paused new work for budget-lane because weighted lifetime usage reached 2100 of 1000 tokens.',
+      );
+      expect(text).toContain('This CLI has no verified tool gate');
+      expect(text).not.toContain('no verified tool gate is available');
+    });
+
+    it('logs a failed parent notice and keeps the lane', async () => {
+      restoreBudgetLane(0);
+      laneCompletion.notifyActionNotice.mockRejectedValueOnce(
+        new Error('parent gone'),
+      );
+      expect(() =>
+        internals().publishLaneNotice('budget-lane', 'budget', PAUSE_NOTICE),
+      ).not.toThrow();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(logger.error).toHaveBeenCalledWith(
+        '[AgentProcessManager] Lane notice delivery failed',
+        expect.objectContaining({ message: 'parent gone' }),
+      );
+      expect(internals().agents.get('budget-lane')).toBeDefined();
+    });
   });
 
   describe('spawn() with SDK adapter', () => {
@@ -2517,6 +2855,7 @@ describe('AgentProcessManager - SDK Execution Path', () => {
         expect(prepared).toEqual({
           task: 'Fix the lexer tests',
           resumeSessionId: SESSION,
+          checkResumeOwner: expect.any(Function),
           resumeDecision: {
             decision: 'resumed',
             reason: expect.any(String),
@@ -2941,28 +3280,130 @@ describe('AgentProcessManager - SDK Execution Path', () => {
   });
 
   describe('inactivity watchdog for SDK agents', () => {
-    it('should trigger handleTimeout when the agent is silent for the whole window', async () => {
+    it('asks at W of silence, pauses at 2W, and never ends the lane', async () => {
+      const notices: Array<Record<string, unknown>> = [];
+      manager.events.on('agent:action-notice', (event: { notice: Record<string, unknown> }) =>
+        notices.push(event.notice));
+      const exited = jest.fn();
+      manager.events.on('agent:exited', exited);
       const result = await manager.spawn({
-        task: 'Slow task',
-        cli: 'codex',
-        workingDirectory: '/workspace/root',
-        timeout: 5000, // 5 second inactivity window
+        task: 'Slow task', cli: 'codex', workingDirectory: '/workspace/root', timeout: 5000,
       });
+      const gate = (sdkAdapter.runSdk as jest.Mock).mock.calls.at(-1)[0]
+        .laneToolGate as () => unknown;
+      expect(gate()).toBeUndefined();
 
-      // Advance past the timeout
-      jest.advanceTimersByTime(6000);
-
-      // Wait for async handleTimeout to process
+      jest.advanceTimersByTime(5000);
       await Promise.resolve();
-      await Promise.resolve();
+      expect(notices).toEqual([expect.objectContaining({
+        actor: 'ptah-watchdog', action: 'asked-handoff', reason: 'lane-inactive',
+        measured: 5000, unit: 'milliseconds',
+      })]);
+      expect(gate()).toBeUndefined();
 
-      const status = manager.getStatus(result.agentId);
-      expect(status).toHaveProperty('status', 'timeout');
+      jest.advanceTimersByTime(5000);
+      await Promise.resolve();
+      expect(notices.map((n) => n['action'])).toEqual(['asked-handoff', 'paused']);
+      expect(gate()).toEqual(expect.objectContaining({ action: 'paused', reason: 'lane-inactive' }));
+      const status = manager.getStatus(result.agentId) as AgentProcessInfo;
+      expect(status.status).toBe('running');
+      expect(status.actionNotice).toEqual(expect.objectContaining({ action: 'paused' }));
+      expect(sdkControls.handle.abort.signal.aborted).toBe(false);
+      expect(exited).not.toHaveBeenCalled();
+      expect(laneCompletion.signal).not.toHaveBeenCalled();
+
+      // Real output clears the inactivity notice and re-arms from W.
+      sdkControls.emitOutput('back again');
+      jest.advanceTimersByTime(OUTPUT_FLUSH_INTERVAL);
+      expect((manager.getStatus(result.agentId) as AgentProcessInfo).actionNotice).toBeUndefined();
+      expect(gate()).toBeUndefined();
+      jest.advanceTimersByTime(5000);
+      expect(notices.map((n) => n['action'])).toEqual(['asked-handoff', 'paused', 'asked-handoff']);
+    });
+    it('counts real output received immediately before 2W even while it is buffered', async () => {
+      const notices = jest.fn();
+      manager.events.on('agent:action-notice', notices);
+      await manager.spawn({
+        task: 'Slow task', cli: 'codex', workingDirectory: '/workspace/root', timeout: 5000,
+      });
+      jest.advanceTimersByTime(9999);
+      expect(notices).toHaveBeenCalledTimes(1);
+
+      sdkControls.emitOutput('still working');
+      jest.advanceTimersByTime(1);
+
+      expect(notices).toHaveBeenCalledTimes(1);
+      expect(sdkControls.abortController.signal.aborted).toBe(false);
     });
 
-    // The window is SILENCE, not wall clock. A job that keeps working outlives
-    // any window, which is the whole point: the predecessor killed a healthy
-    // agent one hour after spawn and reported it as a timeout.
+    it.each([1_200_000_000, 2_200_000_000])('honors both inactivity deadlines for W = %d ms', async (window) => {
+      const onNotice = jest.fn();
+      manager.events.on('agent:action-notice', onNotice);
+      await manager.spawn({
+        task: 'Long silence', cli: 'codex', workingDirectory: '/workspace/root', timeout: window,
+      });
+      const inactivityActions = () => onNotice.mock.calls
+        .map(([event]) => event.notice as AgentActionNotice)
+        .filter((notice) => notice.reason === 'lane-inactive')
+        .map((notice) => notice.action);
+      jest.advanceTimersByTime(window - 1);
+      expect(inactivityActions()).toEqual([]);
+      jest.advanceTimersByTime(1);
+      expect(inactivityActions()).toEqual(['asked-handoff']);
+      jest.advanceTimersByTime(window - 1);
+      expect(inactivityActions()).toEqual(['asked-handoff']);
+      jest.advanceTimersByTime(1);
+      expect(inactivityActions()).toEqual(['asked-handoff', 'paused']);
+    });
+
+    it.each(['stop', 'dispose'] as const)('invalidates inactivity timers before %s finishes', async (teardown) => {
+      const notices = jest.fn();
+      manager.events.on('agent:action-notice', notices);
+      const { agentId } = await manager.spawn({
+        task: 'Pending teardown', cli: 'codex', workingDirectory: '/workspace/root', timeout: 50,
+      });
+      const pending = teardown === 'stop' ? manager.stop(agentId) : manager.disposeAll();
+      sdkControls.emitOutput('teardown output');
+      jest.advanceTimersByTime(100);
+
+      expect(notices).not.toHaveBeenCalled();
+      sdkControls.resolve(0);
+      await pending;
+    });
+
+    it('never attaches a failed inactivity steer to pending or later caller messages', async () => {
+      const controls = createMockSdkHandle({ supportsContinuation: true });
+      const queueForNextTurn = jest.fn();
+      let rejectSteer!: (reason: Error) => void;
+      const steer = jest.fn(() => new Promise<void>((_resolve, reject) => { rejectSteer = reject; }));
+      sdkAdapter.runSdk.mockResolvedValue({
+        ...controls.handle,
+        getSessionId: () => 'inactivity-session',
+        steer,
+        queueForNextTurn,
+      });
+      const { agentId } = await manager.spawn({
+        task: 'Slow task', cli: 'codex', workingDirectory: '/workspace/root', timeout: 5000,
+      });
+      expect((await manager.sendToAgent(agentId, 'first caller message')).mode).toBe('queue-next-turn');
+      jest.advanceTimersByTime(5000);
+      expect(steer).toHaveBeenCalledWith(expect.stringContaining('Ptah watchdog'));
+
+      controls.emitOutput('work resumed');
+      rejectSteer(new Error('steer unavailable'));
+      await Promise.resolve();
+      await Promise.resolve();
+      expect((await manager.sendToAgent(agentId, 'second caller message')).mode).toBe('queue-next-turn');
+
+      controls.resolve(0);
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+      expect(queueForNextTurn).not.toHaveBeenCalled();
+      expect(controls.continueMessages).toEqual(['first caller message']);
+      controls.resolveContinue(0);
+      for (let i = 0; i < 10; i++) await Promise.resolve();
+      expect(controls.continueMessages).toEqual(['first caller message', 'second caller message']);
+    });
+
     it('re-arms the window on output, so a working agent outlives it', async () => {
       const result = await manager.spawn({
         task: 'Long task',
@@ -3004,6 +3445,9 @@ describe('AgentProcessManager - SDK Execution Path', () => {
         'status',
         'running',
       );
+      expect(
+        (manager.getStatus(result.agentId) as AgentProcessInfo).actionNotice,
+      ).toBeUndefined();
     });
 
     // The old ceiling clamped a larger request back down to one hour and said
@@ -3057,21 +3501,21 @@ describe('AgentProcessManager - SDK Execution Path', () => {
         startedAtMs: firstStarted, turnCount: 1,
       });
     });
-    it('stops at 90 minutes even when the inactivity watchdog is disabled', async () => {
+    it('pauses at 2x the duration limit without stopping, even with no inactivity watchdog', async () => {
       setupVscodeConfig({ 'agentBudget.maxDurationMin': 90 });
       const result = await manager.spawn({
         task: 'Long running task', cli: 'codex',
         workingDirectory: '/workspace/root', timeout: 0,
       });
 
-      jest.advanceTimersByTime(90 * 60_000 - 1);
-      expect(manager.getStatus(result.agentId)).toHaveProperty('status', 'running');
-      jest.advanceTimersByTime(1);
+      jest.advanceTimersByTime(2 * 90 * 60_000);
       await Promise.resolve();
       await Promise.resolve();
-      expect(manager.getStatus(result.agentId)).toEqual(expect.objectContaining({
-        stopReason: 'duration', status: 'stopped',
-      }));
+      const info = manager.getStatus(result.agentId) as AgentProcessInfo;
+      expect(info.status).toBe('running');
+      expect(info.stopReason).toBeUndefined();
+      expect(info.actionNotice).toEqual(expect.objectContaining({ action: 'paused', reason: 'duration' }));
+      expect(sdkControls.handle.abort.signal.aborted).toBe(false);
     });
   });
 
@@ -3172,35 +3616,6 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       expect(order).toEqual(['output', 'completion']);
     });
 
-    it('flushes buffered output before signalling a timeout or emitting exit', async () => {
-      const result = await manager.spawn({
-        task: 'Task',
-        cli: 'codex',
-        workingDirectory: '/workspace/root',
-        timeout: 5000,
-      });
-      const order: string[] = [];
-      manager.events.on('agent:output', () => order.push('output'));
-      manager.events.on('agent:exited', () => order.push('exit'));
-      laneCompletion.signal.mockImplementation(() => {
-        order.push('completion');
-        return Promise.resolve({
-          delivered: false,
-          reason: 'chat-runtime-unavailable',
-        });
-      });
-
-      jest.advanceTimersByTime(4999);
-      sdkControls.emitOutput('last words');
-      jest.advanceTimersByTime(1);
-
-      expect(order).toEqual(['output', 'completion', 'exit']);
-      expect(manager.getStatus(result.agentId)).toHaveProperty(
-        'status',
-        'timeout',
-      );
-    });
-
     it('signals a normal completion with the terminal status', async () => {
       const result = await manager.spawn({
         task: 'Task',
@@ -3237,23 +3652,6 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       expect(laneCompletion.signal.mock.calls[0][0]).toMatchObject({
         status: 'failed',
         exitCode: 1,
-      });
-    });
-
-    it('signals a timeout without waiting for the abort to settle', async () => {
-      await manager.spawn({
-        task: 'Slow task',
-        cli: 'codex',
-        workingDirectory: '/workspace/root',
-        timeout: 5000,
-      });
-
-      jest.advanceTimersByTime(6000);
-      await Promise.resolve();
-
-      expect(laneCompletion.signal).toHaveBeenCalled();
-      expect(laneCompletion.signal.mock.calls[0][0]).toMatchObject({
-        status: 'timeout',
       });
     });
 
@@ -3867,29 +4265,6 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       expect(planLimits.recordOwnerEvidence).not.toHaveBeenCalled();
       expect(planLimits.recordWindowEvidence).not.toHaveBeenCalled();
       expect(planLimits.recordSuccess).not.toHaveBeenCalled();
-    });
-
-    it('never classifies a timeout, even with quota wording in the output', async () => {
-      laneOwners.ownerForLane.mockReturnValue(codexAccount);
-      const agentId = (
-        await manager.spawn({
-          task: 'Slow task',
-          cli: 'codex',
-          workingDirectory: '/workspace/root',
-          timeout: 5000,
-        })
-      ).agentId;
-      sdkControls.emitOutput('usage limit reached, try again at 5:05 PM\n');
-      jest.advanceTimersByTime(OUTPUT_FLUSH_INTERVAL);
-
-      jest.advanceTimersByTime(6000);
-      sdkControls.resolve(1);
-      await settle();
-
-      const status = manager.getStatus(agentId) as AgentProcessInfo;
-      expect(status.status).toBe('timeout');
-      expect(status.failureKind).toBeUndefined();
-      expect(planLimits.recordOwnerEvidence).not.toHaveBeenCalled();
     });
 
     it('keeps the exit handling intact when the ledger write throws', async () => {
@@ -4836,7 +5211,7 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       expect(manager.getStatus(agentId)).toHaveProperty('status', 'running');
     });
 
-    it('reinstalls the running timeout on continue so the continued turn can time out', async () => {
+    it('re-arms the inactivity ask on continue without ending the continued turn', async () => {
       const agentId = await spawnContinuable();
       await completeTurn1();
 
@@ -4846,9 +5221,12 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       await Promise.resolve();
       await Promise.resolve();
 
-      expect(manager.getStatus(agentId)).toHaveProperty('status', 'timeout');
+      const info = manager.getStatus(agentId) as AgentProcessInfo;
+      expect(info.status).toBe('running');
+      expect(info.actionNotice).toEqual(
+        expect.objectContaining({ action: 'asked-handoff', reason: 'lane-inactive' }),
+      );
     });
-
     it('fires the abort path when stopping a continued (re-running) agent', async () => {
       const agentId = await spawnContinuable();
       await completeTurn1();
@@ -5281,6 +5659,7 @@ describe('AgentProcessManager - SDK Execution Path', () => {
   describe('resolveParentSessionId()', () => {
     const spawnWithParent = async (
       parentSessionId: string | undefined,
+      timeout?: number,
     ): Promise<string> => {
       const controls = createMockSdkHandle();
       (sdkAdapter.runSdk as jest.Mock).mockResolvedValue(controls.handle);
@@ -5289,6 +5668,7 @@ describe('AgentProcessManager - SDK Execution Path', () => {
         cli: 'codex',
         workingDirectory: '/workspace/root',
         parentSessionId,
+        timeout,
       });
       return result.agentId;
     };
@@ -5417,6 +5797,7 @@ describe('AgentProcessManager - SDK Execution Path', () => {
 
     const spawnWithParent = async (
       parentSessionId: string | undefined,
+      timeout?: number,
     ): Promise<{ agentId: string; controls: MockSdkHandleControls }> => {
       const controls = createMockSdkHandle();
       (sdkAdapter.runSdk as jest.Mock).mockResolvedValue(controls.handle);
@@ -5425,6 +5806,7 @@ describe('AgentProcessManager - SDK Execution Path', () => {
         cli: 'codex',
         workingDirectory: '/workspace/root',
         parentSessionId,
+        timeout,
       });
       return { agentId: result.agentId, controls };
     };
@@ -5513,6 +5895,22 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       expect(signalsFor(lane.agentId)).toHaveLength(1);
       expect(signalsFor(lane.agentId)[0][0].parentSessionId).toBe(NEW_TAB);
       expect(infoOf(lane.agentId).parentSessionId).toBe(NEW_TAB);
+    });
+
+    it('keeps the settled pause notice while waiting for parent adoption to resolve', async () => {
+      const lane = await spawnWithParent(OLD_TAB, 5000);
+      manager.adoptLanes([OLD_TAB], NEW_TAB);
+      jest.advanceTimersByTime(10000);
+      await finish(lane);
+      expect(manager.getStatus(lane.agentId)).not.toHaveProperty('actionNotice');
+      expect(signalsFor(lane.agentId)).toHaveLength(0);
+
+      manager.settleLaneAdoption([lane.agentId], 'kept');
+
+      expect(signalsFor(lane.agentId)[0][0]).toEqual(expect.objectContaining({
+        parentSessionId: NEW_TAB,
+        actionNotice: expect.objectContaining({ action: 'paused', reason: 'lane-inactive' }),
+      }));
     });
 
     it('gives the lane its previous parent back on revert and sends the held signal there', async () => {

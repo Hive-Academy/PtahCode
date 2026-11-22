@@ -32,10 +32,15 @@ function run(
   return actions;
 }
 
-const repeatStop = (repeats: number): LaneBudgetAction => ({
-  kind: 'stop',
-  stopReason: 'repeat-call',
+const repeatAsk = (repeats: number, limit = repeats): LaneBudgetAction => ({
+  kind: 'ask',
   repeats,
+  limit,
+});
+const repeatPause = (repeats: number, limit = repeats): LaneBudgetAction => ({
+  kind: 'pause',
+  repeats,
+  limit,
 });
 
 describe('LaneBudgetGuard', () => {
@@ -47,14 +52,15 @@ describe('LaneBudgetGuard', () => {
     expect(guard.toolCallCount).toBe(500);
   });
 
-  it('stops with repeat-call when one identical call reaches 20', () => {
+  it('asks for a handoff when one identical call reaches 20, and keeps counting', () => {
     const guard = new LaneBudgetGuard(DEFAULTS);
     const segments = Array.from({ length: 30 }, () =>
       call('read', { toolInput: { path: 'same.ts' } }),
     );
 
-    expect(run(guard, segments)).toEqual([{ at: 20, action: repeatStop(20) }]);
-    expect(guard.toolCallCount).toBe(20);
+    expect(run(guard, segments)).toEqual([{ at: 20, action: repeatAsk(20) }]);
+    expect(guard.toolCallCount).toBe(30);
+    expect(guard.currentPhase).toBe('asked');
   });
 
   it('honours a custom repeat threshold', () => {
@@ -64,7 +70,10 @@ describe('LaneBudgetGuard', () => {
         guard,
         Array.from({ length: 10 }, () => call('bash', { toolArgs: 'ls' })),
       ),
-    ).toEqual([{ at: 4, action: repeatStop(4) }]);
+    ).toEqual([
+      { at: 4, action: repeatAsk(4) },
+      { at: 8, action: repeatPause(8) },
+    ]);
   });
 
   it('ignores segments that are not tool calls', () => {
@@ -85,7 +94,7 @@ describe('LaneBudgetGuard', () => {
     ).toEqual({ kind: 'none' });
     expect(
       guard.observe(call('grep', { toolInput: { path: 'a', pattern: 'x' } })),
-    ).toEqual(repeatStop(2));
+    ).toEqual(repeatAsk(2));
   });
 
   it('keys on toolArgs without toolInput, and on the name alone without either', () => {
@@ -97,18 +106,29 @@ describe('LaneBudgetGuard', () => {
       kind: 'none',
     });
     expect(byArgs.observe(call('bash', { toolArgs: 'ls' }))).toEqual(
-      repeatStop(2),
+      repeatAsk(2),
     );
 
     const byName = new LaneBudgetGuard({ repeatAt: 2 });
     expect(byName.observe(call('todo'))).toEqual({ kind: 'none' });
-    expect(byName.observe(call('todo'))).toEqual(repeatStop(2));
+    expect(byName.observe(call('todo'))).toEqual(repeatAsk(2));
   });
 
-  it('returns none for every segment after a stop', () => {
+  it('asks once at N, pauses once at 2N, then only counts', () => {
     const guard = new LaneBudgetGuard({ repeatAt: 2 });
-    run(guard, [distinct(1), distinct(1)]);
-    expect(run(guard, [distinct(3), distinct(3)])).toEqual([]);
+    expect(run(guard, Array.from({ length: 6 }, () => distinct(1)))).toEqual([
+      { at: 2, action: repeatAsk(2) },
+      { at: 4, action: repeatPause(4) },
+    ]);
+    expect(run(guard, [distinct(3), distinct(3), distinct(3), distinct(3)])).toEqual([]);
+    expect(guard.toolCallCount).toBe(10);
+    expect(guard.currentPhase).toBe('paused');
+  });
+
+  it('never returns a stop action', () => {
+    const guard = new LaneBudgetGuard({ repeatAt: 1 });
+    const kinds = run(guard, Array.from({ length: 50 }, () => distinct(1))).map((a) => a.action.kind);
+    expect(kinds).toEqual(['ask', 'pause']);
   });
 
   it('leaves file-edit calls out of the repeat check but counts them', () => {
@@ -135,15 +155,19 @@ describe('LaneBudgetGuard', () => {
       // The earlier two repeats of key 1 are forgotten.
       expect(run(guard, [distinct(1), distinct(1), distinct(3)])).toEqual([]);
       expect(run(guard, [distinct(1)])).toEqual([
-        { at: 1, action: repeatStop(3) },
+        { at: 1, action: repeatAsk(3) },
       ]);
     });
 
-    it('does not revive a guard that already asked for a stop', () => {
+    it('clears the ask and pause latch, so a new turn can ask again', () => {
       const guard = new LaneBudgetGuard({ repeatAt: 2 });
-      run(guard, [distinct(1), distinct(1)]);
+      run(guard, Array.from({ length: 4 }, () => distinct(1)));
+      expect(guard.currentPhase).toBe('paused');
       guard.reset();
-      expect(run(guard, [distinct(3), distinct(3)])).toEqual([]);
+      expect(guard.currentPhase).toBe('running');
+      expect(run(guard, [distinct(3), distinct(3)])).toEqual([
+        { at: 2, action: repeatAsk(2) },
+      ]);
     });
   });
 
@@ -163,12 +187,12 @@ describe('LaneBudgetGuard', () => {
       expect(guard.toolCallCount).toBe(80);
     });
 
-    it('OpenCode-style command segments with one command line trip the repeat stop', () => {
+    it('OpenCode-style command segments with one command line trip the repeat ask', () => {
       const guard = new LaneBudgetGuard({ repeatAt: 3 });
       const segments = Array.from({ length: 5 }, (_, i) =>
         command(`c${i}`, 'ls'),
       );
-      expect(run(guard, segments)).toEqual([{ at: 3, action: repeatStop(3) }]);
+      expect(run(guard, segments)).toEqual([{ at: 3, action: repeatAsk(3) }]);
     });
 
     it('a tool-call plus a command with the same id counts once', () => {
@@ -196,16 +220,20 @@ describe('LaneBudgetGuard', () => {
   });
 
   describe('glob loops (Batch 10 finding b)', () => {
-    it('a long run of identical glob calls stops at the repeat threshold', () => {
+    it('a long run of identical glob calls asks at the threshold and pauses at twice it', () => {
       const guard = new LaneBudgetGuard(DEFAULTS);
       const segments = Array.from({ length: 200 }, () =>
         call('glob', { toolInput: { pattern: '**/*.ts', path: 'libs' } }),
       );
 
-      expect(run(guard, segments)).toEqual([{ at: 20, action: repeatStop(20) }]);
+      expect(run(guard, segments)).toEqual([
+        { at: 20, action: repeatAsk(20) },
+        { at: 40, action: repeatPause(40) },
+      ]);
+      expect(guard.toolCallCount).toBe(200);
     });
 
-    it('glob calls with varied args are never stopped', () => {
+    it('glob calls with varied args are never asked or paused', () => {
       const guard = new LaneBudgetGuard(DEFAULTS);
       const segments = Array.from({ length: 200 }, (_, i) =>
         call('glob', { toolInput: { pattern: `**/*.${i}.ts` } }),
