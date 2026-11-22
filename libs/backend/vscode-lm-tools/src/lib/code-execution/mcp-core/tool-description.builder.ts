@@ -447,7 +447,7 @@ export function buildWorkspaceAnalyzeTool(): MCPToolDefinition {
   return {
     name: 'ptah_workspace_analyze',
     description:
-      'Analyze the entire workspace in one call. Returns project type, frameworks, directory structure, and architecture overview. Use this FIRST when starting any task to understand the project.',
+      'Analyze the entire workspace in one call. Returns project type, frameworks, directory structure, and architecture overview. Use it for a broad overview of a project you do not know yet. Do not call it as a first step before a focused search: to find a file or a symbol, use ptah_search_files, ptah_code_search_symbols or ptah_grep.',
     inputSchema: {
       type: 'object',
       properties: {},
@@ -581,7 +581,8 @@ export function buildGrepTool(): MCPToolDefinition {
         },
         regex: {
           type: 'boolean',
-          description: 'Treat `pattern` as a regular expression.',
+          description:
+            'Optional. Omitted: read as a regex when the pattern has clear regex syntax (a|b, \\b, \\w, (..), [..]), otherwise literal. true or false forces the mode.',
         },
         caseSensitive: {
           type: 'boolean',

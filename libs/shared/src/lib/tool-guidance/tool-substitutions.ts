@@ -50,7 +50,8 @@ export interface ToolSubstitution {
   readonly tool: string;
   readonly namespace: ToolGuidanceNamespace;
   /**
-   * 1 = must appear in every size-limited rendering (no `omit`).
+   * 1 = must appear in the core prompt and the lane table (no `omit`). The
+   *     512-char server instructions keep core table order instead.
    * 2 = normal. 3 = first to drop when a rendering is short of room.
    */
   readonly priority: 1 | 2 | 3;

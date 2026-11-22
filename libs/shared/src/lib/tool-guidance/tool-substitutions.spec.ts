@@ -88,6 +88,21 @@ describe('renderCoreSubstitutionBlock', () => {
     );
   });
 
+  it('pins the text of the rows that carry the substitution mandate', () => {
+    expect(block).toContain(
+      '| `grep` / `rg` | ptah_grep { pattern, path?, glob? } | Text and constants, grouped by file with the enclosing function; `includeIgnored` + scoped `path` reaches node_modules |',
+    );
+    expect(block).toContain(
+      '| `sed -n` / `cat` | ptah_read_symbol { file, name } | One declaration, or a line range (startLine/endLine); numbered, bounded |',
+    );
+    expect(block).toContain(
+      'Fall back to Bash, Grep or Glob only for **writes**, build/test/git, a ptah error, or one Grep after zero hits.',
+    );
+    expect(block).toContain(
+      '> **Symbol and AST lookups are MANDATORY via ptah before Grep/Glob.**',
+    );
+  });
+
   it('derives the free-text line from the shell commands of its rows', () => {
     expect(block).toContain(
       'Free text and line ranges: ptah_grep and ptah_read_symbol, not shell grep, rg, sed -n or cat.',
@@ -210,6 +225,19 @@ describe('applyAgentToolingRules', () => {
     expect(applyAgentToolingRules('## Working rules\n\n- old\n')).toBe(
       renderAgentToolingRules(),
     );
+  });
+
+  it('matches only a line that is exactly the heading', () => {
+    const text = '### Working rules\n\nA mention of ## Working rules in prose.\n';
+    expect(applyAgentToolingRules(text)).toBe(text);
+  });
+
+  it('keeps the rest of a block that uses CRLF line ends', () => {
+    const out = applyAgentToolingRules(
+      '## Working rules\r\n\r\n- old\r\n\r\n## Skill use\r\n\r\n- keep\r\n',
+    );
+    expect(out).not.toContain('- old');
+    expect(out).toContain('## Skill use\r\n\r\n- keep');
   });
 
   it('returns a text without the heading unchanged', () => {

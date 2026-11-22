@@ -140,6 +140,15 @@ describe('(a) every tool a rendered text names is in the effective tool list', (
     ).toBeLessThanOrEqual(AGENT_TOOLING_RULES_MAX_BYTES);
   });
 
+  it('does not present ptah_workspace_analyze as the first step of every task', () => {
+    const description =
+      buildToolDefinitions({ hasIDECapabilities: true }).find(
+        (tool) => tool.name === 'ptah_workspace_analyze',
+      )?.description ?? '';
+    expect(description).not.toMatch(/\bFIRST\b/);
+    expect(description).toContain('broad overview');
+  });
+
   it('puts the cue of every row that has one in that tool description', () => {
     const definitions = buildToolDefinitions({ hasIDECapabilities: true });
     for (const row of TOOL_SUBSTITUTIONS.filter((r) => r.cue)) {

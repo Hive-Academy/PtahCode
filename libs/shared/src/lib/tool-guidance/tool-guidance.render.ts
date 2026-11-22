@@ -1,8 +1,9 @@
 /**
  * Renderers for the tool substitution rows. Each is a pure function of
  * `TOOL_SUBSTITUTIONS`; the text a renderer cannot derive from a row (the
- * fallback line, the MANDATORY callout) is fixed here, next to the rows, so
- * that it cannot name a tool the rows do not have.
+ * fallback line, the MANDATORY callout) is fixed here, next to the rows. That
+ * fixed text names a few tools itself; `tool-guidance-drift.spec.ts` in
+ * `vscode-lm-tools` fails when it names one that the tool list does not have.
  */
 import {
   TOOL_SUBSTITUTIONS,
@@ -129,14 +130,14 @@ export function renderAgentToolingRules(
     AGENT_TOOLING_HEADING,
     '',
     '- `ptah_*` tools first; `ptah_get_diagnostics` after edits. A deferred ptah tool counts as listed: if your client defers tool schemas, load it with its tool-search tool (Claude Code: `ToolSearch` `select:<name>`), otherwise call it directly. A tool that is not listed at all: use the native one, do not probe.',
-    `- ${FALLBACK_LINE.replace(/\*\*/g, '')} Then name the empty tool.`,
+    '- Use native Bash, Grep or Glob only for writes, build and test commands, a ptah error, or one Grep after zero hits; then name the tool that returned nothing.',
     `- ${freeTextLine()}`,
     '',
     '| Native step | Ptah tool |',
     '| --- | --- |',
     ...rows,
     '',
-    'write, build, test and git stay native',
+    'Writes, build and test commands stay native.',
   ].join('\n');
 }
 
@@ -150,9 +151,12 @@ export function applyAgentToolingRules(
   blockText: string,
   options?: ToolGuidanceRenderOptions,
 ): string {
-  const start = blockText.indexOf(AGENT_TOOLING_HEADING);
-  if (start < 0) return blockText;
-  const next = blockText.indexOf('\n## ', start + AGENT_TOOLING_HEADING.length);
-  const rest = next < 0 ? '' : `\n\n${blockText.slice(next + 1)}`;
+  // Line-anchored: `### Working rules` or a mention in prose is not the heading.
+  const heading = /^## Working rules[ \t]*\r?$/m.exec(blockText);
+  if (!heading) return blockText;
+  const start = heading.index;
+  const after = start + heading[0].length;
+  const next = /^## /m.exec(blockText.slice(after));
+  const rest = next ? `\n\n${blockText.slice(after + next.index)}` : '';
   return `${blockText.slice(0, start)}${renderAgentToolingRules(options)}${rest}`;
 }

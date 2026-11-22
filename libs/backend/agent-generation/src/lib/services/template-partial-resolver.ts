@@ -96,6 +96,16 @@ const DERIVED_BLOCKS: Readonly<Record<string, (templateId: string) => string>> =
       renderTaskSpecAgentBlock(taskSpecAudienceFor(templateId)),
   };
 
+/**
+ * Block ids whose `_shared/` file is read, then rewritten by a renderer. The
+ * file supplies the sections the host does not generate; the generated part
+ * cannot go stale on disk.
+ */
+const POST_PROCESSED_BLOCKS: Readonly<Record<string, (raw: string) => string>> =
+  {
+    TOOLING_PRECEDENCE: (raw) => applyAgentToolingRules(raw),
+  };
+
 /** `<id>` → `_shared/<id-in-kebab-case>.md`. */
 export function partialFileName(id: string): string {
   return `${id.toLowerCase().replace(/_/g, '-')}.md`;
@@ -314,9 +324,7 @@ export class TemplatePartialResolver {
     const registered = (SHARED_BLOCK_IDS as readonly string[]).includes(id);
     try {
       const raw = await readFile(filePath, 'utf-8');
-      // The tool table is generated; the downloaded copy only supplies the
-      // sections around it, so a stale table on disk cannot reach an agent.
-      const text = id === 'TOOLING_PRECEDENCE' ? applyAgentToolingRules(raw) : raw;
+      const text = POST_PROCESSED_BLOCKS[id]?.(raw) ?? raw;
       this.partialCache.set(fileName, text);
       return Result.ok(text);
     } catch (error: unknown) {
