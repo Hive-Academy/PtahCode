@@ -15,6 +15,7 @@ import {
   buildGitPathspecs,
   buildRipgrepArgs,
   globToRegExp,
+  inferRegexMode,
   isCaseInsensitive,
   type GrepRequest,
 } from './grep-engine';
@@ -129,6 +130,55 @@ describe('handleGrep (node engine)', () => {
     expect(regex.text.split('\n')[0]).toContain('1 match');
   });
 
+  it('infers regex mode for an rg-style pattern when regex is omitted', async () => {
+    await writeFile(
+      path.join(root, 'src', 'tabs.ts'),
+      'const tab = findTabBySession(id);\nconst SessionId = 1;\n',
+    );
+    const alternation = await handleGrep(
+      {
+        pattern: 'findTabBySession|tabForSession|tabIdFor|bySessionId|findTab',
+        path: 'src/tabs.ts',
+      },
+      deps,
+    );
+    expect(alternation.text.split('\n')[0]).toBe(
+      '1 match in 1 file (engine: node) (pattern read as regex; pass regex:false for a literal search)',
+    );
+    const second = await handleGrep(
+      { pattern: 'sessionId|session_id|SessionId', path: 'src/tabs.ts' },
+      deps,
+    );
+    expect(second.text.split('\n')[0]).toContain('1 match in 1 file');
+    expect(second.text).toContain('2| const SessionId = 1;');
+  });
+
+  it('keeps a pattern literal when regex is explicit, not compilable or a lone dot', async () => {
+    await writeFile(
+      path.join(root, 'src', 'lit.ts'),
+      'a|b\nfoo(\nfooXbar\nfoo.bar\n',
+    );
+    const explicit = await handleGrep(
+      { pattern: 'a|b', regex: false, path: 'src/lit.ts' },
+      deps,
+    );
+    expect(explicit.text.split('\n')[0]).toBe(
+      '1 match in 1 file (engine: node)',
+    );
+    const open = await handleGrep(
+      { pattern: 'foo(', path: 'src/lit.ts' },
+      deps,
+    );
+    expect(open.isError).toBe(false);
+    expect(open.text.split('\n')[0]).toBe('1 match in 1 file (engine: node)');
+    const dot = await handleGrep(
+      { pattern: 'foo.bar', path: 'src/lit.ts', inlineBody: false },
+      deps,
+    );
+    expect(dot.text).toContain('4| [check] foo.bar');
+    expect(dot.text).not.toContain('fooXbar');
+  });
+
   it('rejects an invalid regular expression with a tool error', async () => {
     const reply = await handleGrep({ pattern: '(', regex: true }, deps);
     expect(reply.isError).toBe(true);
@@ -144,7 +194,7 @@ describe('handleGrep (node engine)', () => {
 
   it('adds context lines and separators', async () => {
     const reply = await handleGrep(
-      { pattern: 'return', path: 'src/a.ts', context: 1 },
+      { pattern: 'return', path: 'src/a.ts', context: 1, inlineBody: false },
       deps,
     );
     const lines = reply.text.split('\n');
@@ -362,7 +412,7 @@ describe('handleGrep (rg engine)', () => {
       `cat <<'EOF'\n${json(1, 'export const LIMIT = 3;')}\n${json(4, '  return n > LIMIT;')}\n{"type":"summary"}\nEOF`,
     );
     const reply = await handleGrep(
-      { pattern: 'LIMIT' },
+      { pattern: 'LIMIT', inlineBody: false },
       {
         analyze: jest.fn().mockResolvedValue(OUTLINE),
         defaultWorkspaceRoot: async () => root,
@@ -562,12 +612,55 @@ describe('grep engine helpers', () => {
     expect(buildGitPathspecs({ ...base, glob: '*.ts' }, '.')).toEqual([
       ':(glob)**/*.ts',
     ]);
-    expect(buildGitPathspecs({ ...base, glob: '!*.spec.ts' }, 'src')).toEqual(
-      [':(literal)src', ':(exclude,glob)**/*.spec.ts'],
-    );
+    expect(buildGitPathspecs({ ...base, glob: '!*.spec.ts' }, 'src')).toEqual([
+      ':(literal)src',
+      ':(exclude,glob)**/*.spec.ts',
+    ]);
     expect(buildGitPathspecs({ ...base, glob: '*.{ts,js}' }, 'src')).toEqual([
       ':(literal)src',
     ]);
+  });
+
+  it('infers regex mode only from regex syntax that compiles', () => {
+    for (const pattern of [
+      'a|b',
+      '\\bword\\b',
+      '\\d+',
+      '[a-z]+',
+      '[^"]',
+      '(?:x)',
+      '(ab)+',
+      'foo.*bar',
+      '^export',
+      'end$',
+      'x{2,3}',
+    ]) {
+      expect([pattern, inferRegexMode(pattern)]).toEqual([pattern, true]);
+    }
+    for (const pattern of [
+      'foo.bar',
+      'foo(',
+      'check(n)',
+      'arr[0]',
+      'a?.b',
+      'x + y',
+      'a\\|b',
+      '(a|',
+      'x || y',
+      '|leading',
+      'A | B',
+      'foo(?=bar)',
+      'x(?<!y)z',
+      '(a)\\1',
+      'C:\\dev\\src',
+    ]) {
+      expect([pattern, inferRegexMode(pattern)]).toEqual([pattern, false]);
+    }
+  });
+
+  it('hands an inferred regex to rg as a regex', () => {
+    const request = { ...base, pattern: 'a|b', regex: inferRegexMode('a|b') };
+    expect(buildRipgrepArgs(request, 'src')).not.toContain('--fixed-strings');
   });
 
   it('uses smart case', () => {

@@ -37,10 +37,23 @@ export const JS_TS_FUNCTION_QUERY = `
     value: (arrow_function
       parameters: (formal_parameters)? @arrow_var.params))) @arrow_var.declaration
 
-; Method definitions in classes/objects
+; Method definitions in classes/objects, including #private ones
 (method_definition
-  name: (property_identifier) @method.name
+  name: [(property_identifier) (private_property_identifier)] @method.name
   parameters: (formal_parameters) @method.params) @method.declaration
+`;
+
+/**
+ * Class membership of methods (`class-members.ts`): each `method_definition`
+ * directly in a `class_body`, with the body's opening brace (a one-character
+ * capture, so a large class is not copied once per member). Shared with the
+ * TypeScript class query.
+ */
+export const CLASS_MEMBER_PATTERN = `
+; Class members: the body's \`{\` and each method directly in it
+(class_body
+  "{" @class_member.open
+  (method_definition) @class_member.declaration)
 `;
 
 /**
@@ -61,7 +74,7 @@ const JS_CLASS_QUERY = `
     value: (class
       (class_heritage
         (_) @class_expr.extends)?))) @class_expr.declaration
-`;
+${CLASS_MEMBER_PATTERN}`;
 
 /**
  * JavaScript/TypeScript import query

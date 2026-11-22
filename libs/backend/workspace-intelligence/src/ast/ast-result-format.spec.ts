@@ -80,23 +80,61 @@ describe('formatAstAnalysisResult', () => {
     });
   });
 
-  it('leaves empty lists, non-record lists and nested records as JSON writes them', () => {
+  it('leaves empty lists and non-record lists as JSON writes them', () => {
     const input = {
       imports: [],
       supportedLanguages: ['typescript', 'python'],
-      classes: [
-        {
-          name: 'Box',
-          methods: [{ name: 'open', parameters: [] }],
-        },
-      ],
+      classes: [{ name: 'Box', members: [] }],
     };
     expect(parse(formatAstAnalysisResult(input))).toEqual({
       imports: [],
       supportedLanguages: ['typescript', 'python'],
       classes: [
-        ['name', 'methods'],
-        ['Box', [{ name: 'open', parameters: [] }]],
+        ['name', 'members'],
+        ['Box', []],
+      ],
+    });
+  });
+
+  it('writes a nested list of records (class members) as a nested table', () => {
+    const input = {
+      classes: [
+        {
+          name: 'Box',
+          startLine: 0,
+          members: [
+            { name: 'open', parameters: [], modifiers: 'private static' },
+            { name: 'close', parameters: ['force'] },
+          ],
+        },
+        { name: 'Empty', startLine: 9 },
+      ],
+    };
+    expect(parse(formatAstAnalysisResult(input))).toEqual({
+      classes: [
+        ['name', 'startLine', 'members'],
+        [
+          'Box',
+          0,
+          [
+            ['name', 'parameters', 'modifiers'],
+            ['open', [], 'private static'],
+            ['close', ['force']],
+          ],
+        ],
+        ['Empty', 9],
+      ],
+    });
+  });
+
+  it('leaves a nested list with a real null as objects', () => {
+    const input = {
+      classes: [{ name: 'Box', members: [{ name: 'open', note: null }] }],
+    };
+    expect(parse(formatAstAnalysisResult(input))).toEqual({
+      classes: [
+        ['name', 'members'],
+        ['Box', [{ name: 'open', note: null }]],
       ],
     });
   });

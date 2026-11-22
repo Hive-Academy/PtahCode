@@ -29,3 +29,16 @@ export const GREP_MAX_FILE_BYTES = 1024 * 1024;
 export const GREP_MAX_FILES_VISITED = 20_000;
 /** Files above this size get no enclosing-symbol labels. */
 export const GREP_MAX_LABEL_FILE_BYTES = 512 * 1024;
+/**
+ * A result this small inlines the body of each match's enclosing declaration,
+ * so the caller needs no follow-up read: at most this many matches in all...
+ */
+export const GREP_INLINE_MAX_MATCHES = 3;
+/** ...inside at most this many distinct enclosing declarations. */
+export const GREP_INLINE_MAX_SYMBOLS = 2;
+/** Most lines of one inlined body; a longer one is cut around its matches. */
+export const GREP_INLINE_MAX_BODY_LINES = 60;
+/** Most inlined body lines of one result. */
+export const GREP_INLINE_MAX_TOTAL_LINES = 150;
+/** Lines kept above the first match when a long body is cut. */
+export const GREP_INLINE_LEAD_LINES = 3;

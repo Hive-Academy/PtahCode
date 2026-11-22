@@ -13,6 +13,7 @@ import {
   buildMatcher,
   findGit,
   findRipgrep,
+  inferRegexMode,
   isGitWorkTree,
   runGitGrep,
   runNodeSearch,
@@ -24,6 +25,11 @@ import {
 import {
   GREP_DEFAULT_MAX_MATCHES,
   GREP_HARD_MAX_MATCHES,
+  GREP_INLINE_LEAD_LINES,
+  GREP_INLINE_MAX_BODY_LINES,
+  GREP_INLINE_MAX_MATCHES,
+  GREP_INLINE_MAX_SYMBOLS,
+  GREP_INLINE_MAX_TOTAL_LINES,
   GREP_MAX_CHARS,
   GREP_MAX_CONTEXT,
   GREP_MAX_FILES,
@@ -49,6 +55,8 @@ export const GrepArgsSchema = z
       .max(GREP_HARD_MAX_MATCHES)
       .optional(),
     includeIgnored: z.boolean().optional(),
+    /** `false` turns off the enclosing-body inlining of a small result. */
+    inlineBody: z.boolean().optional(),
     workspaceRoot: z.string().trim().min(1).optional(),
   })
   .strict();
@@ -70,6 +78,10 @@ export interface GrepReply {
   readonly isError: boolean;
   readonly text: string;
 }
+
+/** Header note of a call whose `regex` mode was inferred from the pattern. */
+export const REGEX_INFERRED_NOTE =
+  '(pattern read as regex; pass regex:false for a literal search)';
 
 const fail = (text: string): GrepReply => ({ isError: true, text });
 const ok = (text: string): GrepReply => ({ isError: false, text });
@@ -149,6 +161,168 @@ async function readLines(rootReal: string, file: string): Promise<string[]> {
   }
 }
 
+/** One enclosing declaration inlined into a small result, cut to `first..last`. */
+interface InlineBody {
+  readonly symbol: NavSymbol;
+  /** 1-based lines of the shown window, inside the declaration. */
+  readonly first: number;
+  readonly last: number;
+}
+
+/**
+ * The window of a declaration to show: all of it when it fits `maxLines`,
+ * else a cut that keeps every match. `undefined` when the matches alone span
+ * more than `maxLines`.
+ */
+function bodyWindow(
+  symbol: NavSymbol,
+  matchLines: readonly number[],
+  fileLength: number,
+  maxLines: number,
+): { first: number; last: number } | undefined {
+  const start = symbol.startLine;
+  const end = Math.min(symbol.endLine, fileLength);
+  const firstMatch = Math.min(...matchLines);
+  const lastMatch = Math.max(...matchLines);
+  if (end < start || maxLines < 1 || lastMatch - firstMatch + 1 > maxLines) {
+    return undefined;
+  }
+  if (end - start + 1 <= maxLines) {
+    return { first: start, last: end };
+  }
+  if (lastMatch <= start + maxLines - 1) {
+    return { first: start, last: start + maxLines - 1 };
+  }
+  const first = Math.max(
+    lastMatch - maxLines + 1,
+    Math.min(firstMatch - GREP_INLINE_LEAD_LINES, end - maxLines + 1),
+  );
+  return { first, last: first + maxLines - 1 };
+}
+
+/**
+ * Bodies to inline per file: only for a complete result of at most
+ * GREP_INLINE_MAX_MATCHES matches in at most GREP_INLINE_MAX_SYMBOLS
+ * enclosing declarations, one body per declaration, within the line budget.
+ */
+function planInlineBodies(
+  shown: ReadonlyMap<string, readonly GrepMatch[]>,
+  symbolsByFile: ReadonlyMap<string, readonly NavSymbol[]>,
+  linesByFile: ReadonlyMap<string, readonly string[]>,
+): Map<string, InlineBody[]> {
+  const groups: { file: string; symbol: NavSymbol; lines: number[] }[] = [];
+  for (const [file, matches] of shown) {
+    const bySymbol = new Map<NavSymbol, number[]>();
+    for (const match of matches) {
+      const symbol = innermostSymbolAt(
+        symbolsByFile.get(file) ?? [],
+        match.line,
+      );
+      if (symbol) {
+        bySymbol.set(symbol, [...(bySymbol.get(symbol) ?? []), match.line]);
+      }
+    }
+    // A declaration inside another shown one (a method of a matched class)
+    // joins the outer group: its lines are already part of the outer body.
+    const entries = [...bySymbol];
+    for (const [symbol, lines] of entries) {
+      const outer = entries.find(
+        ([other]) =>
+          other !== symbol &&
+          other.startLine <= symbol.startLine &&
+          other.endLine >= symbol.endLine,
+      );
+      if (outer) {
+        outer[1].push(...lines);
+      }
+    }
+    for (const [symbol, lines] of entries) {
+      const nested = entries.some(
+        ([other]) =>
+          other !== symbol &&
+          other.startLine <= symbol.startLine &&
+          other.endLine >= symbol.endLine,
+      );
+      if (!nested) {
+        groups.push({ file, symbol, lines });
+      }
+    }
+  }
+  const plan = new Map<string, InlineBody[]>();
+  if (groups.length === 0 || groups.length > GREP_INLINE_MAX_SYMBOLS) {
+    return plan;
+  }
+  let budget = GREP_INLINE_MAX_TOTAL_LINES;
+  for (const { file, symbol, lines } of groups) {
+    const fileLength = linesByFile.get(file)?.length ?? 0;
+    const window = bodyWindow(
+      symbol,
+      lines,
+      fileLength,
+      Math.min(GREP_INLINE_MAX_BODY_LINES, budget),
+    );
+    if (!window) {
+      continue;
+    }
+    budget -= window.last - window.first + 1;
+    plan.set(file, [...(plan.get(file) ?? []), { symbol, ...window }]);
+  }
+  return plan;
+}
+
+function clipBodyLine(text: string): string {
+  const trimmed = text.trimEnd();
+  return trimmed.length > GREP_MAX_LINE_CHARS
+    ? `${trimmed.slice(0, GREP_MAX_LINE_CHARS)}…`
+    : trimmed;
+}
+
+/**
+ * An inlined body: a `[name] kind start-end` marker, then numbered lines with
+ * the common indent removed, `|` on match lines and `-` on the others. A cut
+ * says which lines were left out and how to read them.
+ */
+function renderBody(
+  body: InlineBody,
+  matchLines: ReadonlySet<number>,
+  fileLines: readonly string[],
+): string[] {
+  const { symbol, first, last } = body;
+  // An outline can end past the file (stale or off-by-one): clamp like bodyWindow.
+  const end = Math.min(symbol.endLine, fileLines.length);
+  const cut = first > symbol.startLine || last < end;
+  const out = [
+    `  [${symbol.qualifiedName}] ${symbol.kind} ${symbol.startLine}-${end}${cut ? `, showing ${first}-${last}` : ''}`,
+  ];
+  if (first > symbol.startLine) {
+    out.push(`    … lines ${symbol.startLine}-${first - 1} not shown`);
+  }
+  const slice = fileLines.slice(first - 1, last);
+  const indent = Math.min(
+    ...slice
+      .filter((text) => text.trim() !== '')
+      .map((text) => text.length - text.trimStart().length),
+  );
+  slice.forEach((text, i) => {
+    const n = first + i;
+    const shownText = clipBodyLine(
+      Number.isFinite(indent) ? text.slice(indent) : text,
+    );
+    // A match line keeps `| ` even when empty: the footer counts those lines.
+    out.push(
+      matchLines.has(n)
+        ? `  ${n}| ${shownText}`
+        : `  ${n}-${shownText ? ` ${shownText}` : ''}`,
+    );
+  });
+  if (last < end) {
+    out.push(
+      `    … lines ${last + 1}-${end} not shown; read them with ptah_read_symbol (name "${symbol.qualifiedName}" or startLine ${last + 1})`,
+    );
+  }
+  return out;
+}
+
 /** Lines of one file group: matches with labels, context lines, gap marks. */
 function renderFileGroup(
   matches: readonly GrepMatch[],
@@ -187,7 +361,12 @@ function renderFileGroup(
 /** Render engine output as the tool's plain-text answer. */
 export async function renderGrepResult(
   result: GrepEngineResult,
-  args: { maxMatches: number; context: number },
+  args: {
+    maxMatches: number;
+    context: number;
+    regexInferred?: boolean;
+    inlineBody?: boolean;
+  },
   deps: GrepDeps,
   rootReal: string,
 ): Promise<string> {
@@ -195,16 +374,44 @@ export async function renderGrepResult(
   const fileCount = new Set(result.matches.map((m) => m.file)).size;
   const atLeast =
     result.incomplete || result.totalMatches > result.matches.length;
-  const header = `${atLeast ? 'at least ' : ''}${plural(result.totalMatches, 'match')} in ${atLeast ? 'at least ' : ''}${plural(fileCount, 'file')} (engine: ${result.engine})`;
+  const header = `${atLeast ? 'at least ' : ''}${plural(result.totalMatches, 'match')} in ${atLeast ? 'at least ' : ''}${plural(fileCount, 'file')} (engine: ${result.engine})${args.regexInferred ? ` ${REGEX_INFERRED_NOTE}` : ''}`;
+
+  // Bodies are inlined only when every match is shown and the result is small.
+  const inline =
+    args.inlineBody !== false &&
+    !atLeast &&
+    result.totalMatches <= Math.min(GREP_INLINE_MAX_MATCHES, args.maxMatches);
+  const symbolsByFile = new Map<string, NavSymbol[]>();
+  const linesByFile = new Map<string, string[]>();
+  for (const file of shown.keys()) {
+    symbolsByFile.set(file, await loadSymbols(deps, rootReal, file));
+    linesByFile.set(
+      file,
+      args.context > 0 || inline ? await readLines(rootReal, file) : [],
+    );
+  }
+  const bodies = inline
+    ? planInlineBodies(shown, symbolsByFile, linesByFile)
+    : new Map<string, InlineBody[]>();
 
   const body: string[] = [];
   let chars = header.length;
   for (const [file, matches] of shown) {
-    const symbols = await loadSymbols(deps, rootReal, file);
-    const fileLines = args.context > 0 ? await readLines(rootReal, file) : [];
+    const symbols = symbolsByFile.get(file) ?? [];
+    const fileLines = linesByFile.get(file) ?? [];
+    const fileBodies = bodies.get(file) ?? [];
+    const inBody = (line: number): boolean =>
+      fileBodies.some((b) => b.first <= line && line <= b.last);
+    const matchLines = new Set(matches.map((m) => m.line));
     const block = [
       `${file} (${plural(matches.length, 'match')})`,
-      ...renderFileGroup(matches, symbols, fileLines, args.context),
+      ...renderFileGroup(
+        matches.filter((m) => !inBody(m.line)),
+        symbols,
+        fileLines,
+        args.context,
+      ),
+      ...fileBodies.flatMap((b) => renderBody(b, matchLines, fileLines)),
     ];
     const blockChars = block.reduce((sum, line) => sum + line.length + 1, 0);
     if (chars + blockChars > GREP_MAX_CHARS) {
@@ -276,9 +483,12 @@ export async function handleGrep(
     );
   }
 
+  // An explicit `regex` wins; an omitted one is inferred from the pattern.
+  const regexInferred =
+    args.regex === undefined && inferRegexMode(args.pattern);
   const request: GrepRequest = {
     pattern: args.pattern,
-    regex: args.regex === true,
+    regex: args.regex ?? regexInferred,
     caseSensitive: args.caseSensitive,
     glob: args.glob,
     includeIgnored,
@@ -320,15 +530,20 @@ export async function handleGrep(
     const stopped = result.incomplete
       ? ' The search stopped early (time or file limit) before it matched anything, so the text may still exist; narrow with path/glob.'
       : '';
+    const modeHint = regexInferred
+      ? 'The pattern was read as regex. Try regex:false for a literal search,'
+      : request.regex
+        ? 'Try regex:false for a literal search,'
+        : 'Try regex:true for a pattern,';
     return ok(
-      `0 matches (engine: ${result.engine}).${stopped}${result.skippedNote ? ` Note: ${result.skippedNote}.` : ''} Try regex:true for a pattern, includeIgnored:true with a scoped path for node_modules, or a different glob.` +
+      `0 matches (engine: ${result.engine}).${stopped}${result.skippedNote ? ` Note: ${result.skippedNote}.` : ''} ${modeHint} includeIgnored:true with a scoped path for node_modules, or a different glob.` +
         (result.error ? `\nEngine note: ${result.error}` : ''),
     );
   }
   return ok(
     await renderGrepResult(
       result,
-      { maxMatches, context },
+      { maxMatches, context, regexInferred, inlineBody: args.inlineBody },
       deps,
       target.rootReal,
     ),

@@ -19,8 +19,12 @@
  *   plain object, or has a real `null` value — is written unchanged as an
  *   array of objects. An empty list stays `[]`.
  *
- * Nothing else changes: nested values (parameter lists, imported symbols,
- * coverage) are written exactly as `JSON.stringify` writes them.
+ * - A field whose value is itself a list of records (a class's `members`) is
+ *   written as a table by the same rules, nested in the cell
+ *   (TASK_2026_2299): `["Store",0,9,[["name","startLine"],["load",2]]]`.
+ *
+ * Nothing else changes: other nested values (parameter lists, imported
+ * symbols, coverage) are written exactly as `JSON.stringify` writes them.
  */
 
 type JsonRecord = Record<string, unknown>;
@@ -191,7 +195,12 @@ function tabulate(list: readonly unknown[]): unknown[][] | undefined {
     }
   }
   const rows = list.map((record) => {
-    const row = columns.map((field) => record[field] ?? null);
+    const row = columns.map((field) => {
+      const value = record[field];
+      return Array.isArray(value)
+        ? (tabulate(value) ?? value)
+        : (value ?? null);
+    });
     while (row.length > 0 && row[row.length - 1] === null) {
       row.pop();
     }
