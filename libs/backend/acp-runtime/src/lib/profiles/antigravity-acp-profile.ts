@@ -99,10 +99,11 @@ export const ANTIGRAVITY_CHAT_ASK_MODE = 'plan';
 
 /**
  * The ACP server name of the Ptah MCP attachment. agy also loads the shared
- * `~/.gemini/config/mcp_config.json`, where Ptah may keep a persistent `ptah`
- * entry (`PTAH_SPAWN_MCP_KEY`, harness sync) without the lane bearer; a
- * distinct name keeps the lane's own server from clashing with or being
- * shadowed by it. agy names the tools `mcp_ptah_lane_<tool>`.
+ * `~/.gemini/config/mcp_config.json`. Ptah no longer keeps a persistent `ptah`
+ * entry there (TASK_2026_2297), but a user's own server or an older Ptah's
+ * leftover may still use that key; a distinct name keeps the lane's own
+ * server from clashing with or being shadowed by it. agy names the tools
+ * `mcp_ptah_lane_<tool>`.
  */
 export const ANTIGRAVITY_ACP_PTAH_MCP_NAME = 'ptah_lane';
 

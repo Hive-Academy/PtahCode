@@ -1445,6 +1445,61 @@ describe('MessageSenderService', () => {
     });
   });
 
+  // `/clear`: the backend closes the session, broadcasts CHAT_COMPLETE
+  // `command: 'clear'` (the tab resets to fresh, aborting this continue with
+  // `tab-reset`) and only then answers the RPC. The aborted RPC is the clear
+  // completing, not a delivery failure.
+  describe('a continue aborted by a tab reset (/clear)', () => {
+    /** `chat:continue` aborts its signal with `reason`, then resolves aborted. */
+    function abortContinueWith(reason: string): AbortController {
+      const controller = new AbortController();
+      tabManager.createAbortController.mockReturnValueOnce(controller.signal);
+      rpcCall.mockImplementation((method: string): Promise<unknown> => {
+        if (method === 'session:validate') {
+          return Promise.resolve({ success: true, data: { exists: true } });
+        }
+        if (method === 'chat:continue') {
+          controller.abort(reason);
+          return Promise.resolve({
+            success: false,
+            error: 'RPC aborted: chat:continue',
+          });
+        }
+        return Promise.resolve({ success: true });
+      });
+      return controller;
+    }
+
+    beforeEach(() => {
+      tabsSignal.set([makeTab({ id: 'tab-1', claudeSessionId: 'sess-X' })]);
+    });
+
+    it('settles successfully and leaves the fresh tab untouched', async () => {
+      abortContinueWith(ABORT_REASON_TAB_RESET);
+
+      const outcome = await service.send('/clear', { tabId: 'tab-1' });
+
+      expect(outcome).toEqual({ success: true, settled: true });
+      expect(tabManager.markStreaming).not.toHaveBeenCalled();
+      expect(tabManager.markLoaded).not.toHaveBeenCalled();
+      expect(removeBoundary).not.toHaveBeenCalled();
+      expect(sessionManager.setStatus).toHaveBeenLastCalledWith('loaded');
+    });
+
+    it('still fails a continue aborted by a tab close', async () => {
+      abortContinueWith('tab-close');
+
+      const outcome = await service.send('/clear', { tabId: 'tab-1' });
+
+      expect(outcome).toEqual(
+        expect.objectContaining({
+          success: false,
+          error: expect.stringContaining('RPC aborted: chat:continue'),
+        }),
+      );
+    });
+  });
+
   describe('abort listener (superseded by a newer send)', () => {
     it('does not send chat:abort when the controller was replaced, not closed', () => {
       rpcCall.mockImplementation(() => Promise.resolve({ success: true }));

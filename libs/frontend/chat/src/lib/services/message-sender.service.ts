@@ -1096,6 +1096,16 @@ export class MessageSenderService {
         { signal: abortSignal },
       );
 
+      // The tab was wiped to a fresh chat while this continue was in flight:
+      // `/clear` resets it on its CHAT_COMPLETE before the RPC answers, which
+      // aborts the call with `tab-reset`. The transcript this send wrote to no
+      // longer exists, so nothing of the tab is touched and no delivery
+      // failure is shown on the fresh chat. Any other abort still fails below.
+      if (abortSignal?.aborted && abortSignal.reason === ABORT_REASON_TAB_RESET) {
+        this.sessionManager.setStatus('loaded');
+        return { success: true, settled: true };
+      }
+
       if (result.data?.cancelled === true) {
         this.rollBackUnsentPrompt(activeTabId, userMessage.id);
         this.tabManager.markLoaded(activeTabId);

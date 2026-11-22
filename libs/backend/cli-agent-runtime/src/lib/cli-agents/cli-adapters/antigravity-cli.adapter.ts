@@ -1074,12 +1074,11 @@ export class AntigravityCliAdapter implements CliAdapter {
    * Put the `ptah` key back the way this run found it, so no stale localhost
    * port is left pointing at a closed server.
    *
-   * **RESTORE, not delete.** It used to remove the key unconditionally, which
-   * was right while this adapter was the only thing that ever wrote it. It no
-   * longer is: `CodeExecutionMCP` keeps a PERSISTENT entry here for as long as
-   * its HTTP server is up, so that `agy` sessions the USER starts have Ptah
-   * tools too. An unconditional delete would silently revoke that every time a
-   * Ptah-spawned agent finished.
+   * **RESTORE, not delete.** The key may hold an entry this run did not write:
+   * a user's own `ptah` server, or a persistent entry an older Ptah left
+   * (`CodeExecutionMCP` no longer writes one, TASK_2026_2297, and its
+   * reconcile removes the leftover). An unconditional delete would drop the
+   * user's server every time a Ptah-spawned agent finished.
    *
    * Restoring needs no knowledge of who the other writer is: `prior` is
    * whatever was in the file before this run. Absent means nobody owned the

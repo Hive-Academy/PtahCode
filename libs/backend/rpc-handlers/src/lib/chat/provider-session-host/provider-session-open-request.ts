@@ -68,12 +68,11 @@ export function providerSessionPtahMcpHint(
     ? `its tools (named \`${toolPrefix}<tool>\`, for example \`${toolPrefix}ptah_workspace_analyze\`)`
     : 'its ptah_* tools';
   const hint = `Ptah's MCP server is attached. Prefer ${names} for workspace analysis, file and symbol search, diagnostics and memory over shell equivalents, as its server instructions describe.`;
-  // The agent may also load a `ptah` entry from its shared config (agy:
-  // `~/.gemini/config/mcp_config.json`, Ptah's registration for terminal
-  // use). That entry carries the workspace credential, not this session's,
-  // so calls through it skip this session's binding and tool profile.
+  // Ptah keeps no persistent `ptah` entry in agy's shared config any more
+  // (TASK_2026_2297), so the session's attachment is the only Ptah server
+  // the agent lists. The hint names it so the model finds its tools.
   if (!serverName || serverName === 'ptah') return hint;
-  return `${hint} Ptah's server for this session is \`${serverName}\`. If a server named \`ptah\` is also listed, it is the workspace's shared registration: do not call its tools.`;
+  return `${hint} Ptah's server for this session is \`${serverName}\`.`;
 }
 
 export interface ProviderSessionOpenInput {

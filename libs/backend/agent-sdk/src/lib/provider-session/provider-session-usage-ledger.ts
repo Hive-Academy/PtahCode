@@ -183,9 +183,11 @@ export class ProviderSessionUsageLedger {
         : this.bases.size === 1
           ? [...this.bases][0]
           : 'estimated';
+    // The cause holds for a restored session too: the turns it counted have
+    // no published rate, whatever ran before the restore. Only a session
+    // with a priced turn (a partial known subtotal) loses the label.
     const costUnavailableReason: SessionCostUnavailableReason | undefined =
       totalCost === null &&
-      complete &&
       pricingCoverage === 'none' &&
       this.unpricedTurns > 0 &&
       this.onlyRateMissing

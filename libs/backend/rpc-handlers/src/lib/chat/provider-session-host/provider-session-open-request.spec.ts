@@ -184,9 +184,10 @@ describe('provider-session open requests', () => {
     expect((await request.build({ mcpToken: token })).instructions).toBe('Be Ptah.');
   });
 
-  // Live test 2026-11-21 (bug 8) and review moderate 7: agy listed both the
-  // shared `ptah` registration and the session's `ptah_lane`; a user server
-  // named `ptah_lane` would collide with Ptah's own attachment.
+  // Live test 2026-11-21 (bug 8) and review moderate 7: a user server named
+  // `ptah_lane` would collide with Ptah's own attachment. TASK_2026_2297:
+  // Ptah no longer registers a shared `ptah` server for agy, so the hint
+  // names the session server and says nothing about ignoring another one.
   it('never gives a user server the agent-side Ptah name and names the session server in the hint', async () => {
     const h = harness(
       undefined,
@@ -202,7 +203,8 @@ describe('provider-session open requests', () => {
     expect(JSON.stringify(open.mcp)).not.toContain('evil.example');
     expect(open.instructions).toBe(providerSessionPtahMcpHint('mcp_ptah_lane_', 'ptah_lane'));
     expect(open.instructions).toContain("Ptah's server for this session is `ptah_lane`");
-    expect(open.instructions).toContain('do not call its tools');
+    expect(open.instructions).not.toContain('do not call its tools');
+    expect(open.instructions).not.toContain('shared registration');
   });
 
   it('opens a history read with the open options of the chat that owns the session', async () => {

@@ -21,8 +21,6 @@
  * | cursor      | `{ws}/.cursor/mcp.json`            | workspace | yes                |
  * | codex       | `{ws}/.codex/config.toml`          | workspace | yes, if TRUSTED    |
  * | codex       | `~/.codex/config.toml`             | home      | yes, if UNTRUSTED  |
- * | antigravity | `~/.gemini/config/mcp_config.json` | home      | yes                |
- * | antigravity | `{ws}/.agents/mcp_config.json`     | workspace | yes                |
  *
  * Workspace scope is preferred wherever it exists, because a home-global entry
  * is a change to a tool in every project on the machine.
@@ -57,24 +55,15 @@
  * home entry, so the last registration wins. An untrusted workspace is one the
  * user has not yet run Codex in, which makes that both rare and transient.
  *
- * **Antigravity is TWO products with different answers, so it gets both files.**
- * The Antigravity EDITOR documents a workspace config at
- * `{ws}/.agents/mcp_config.json` beside the global one. The `agy` CLI does not
- * read it, and three independent sources agree: `agy mcp list` reported
- * `No MCP servers configured` with that exact file on disk and then listed a
- * server the moment the same entry was put in the global file; the CLI's own
- * bundled documentation
- * (`~/.gemini/antigravity-cli/builtin/skills/agy-customizations/docs/mcp_servers.md`)
- * defines a Global and a Plugin scope and no workspace one; and the `agy`
- * binary carries string literals for `.agents/skills`, `.agents/rules`,
- * `.agents/hooks.json`, `.agents/plugins`, `.agents/workflows` and
- * `.agents/agents` — and none for `.agents/mcp_config.json`.
+ * ## Antigravity is retired, not absent (TASK_2026_2297)
  *
- * So workspace-ONLY would silently break the CLI, which is the surface Ptah
- * detects and spawns. Both slots are planned instead: the home file is what
- * makes `agy` work, the workspace file is what makes the editor work, and both
- * are retracted together when the server stops. `{ws}/.agents` is already a
- * Ptah-managed directory and is already in the `.gitignore` block.
+ * Ptah used to keep a persistent entry in `~/.gemini/config/mcp_config.json`
+ * (read by the `agy` CLI) and in `{ws}/.agents/mcp_config.json` (read by the
+ * Antigravity editor). It no longer plans either slot: an `agy` session Ptah
+ * spawns gets the server per session (`ptah_lane` in ACP `session/new`, or the
+ * stream-json lane's own entry), and a home-global file must not carry a
+ * long-lived Ptah credential. `retired-ptah-mcp-slots.ts` removes the entries
+ * an earlier Ptah wrote. An `agy` run from a terminal gets no Ptah tools.
  *
  * ## Copilot is deliberately absent, and that is not a gap
  *
@@ -101,8 +90,8 @@
  *
  * Writing `{ws}/.codex/config.toml` or `{ws}/.cursor/mcp.json` for a user who
  * runs neither adds files to their repository, and writing
- * `~/.gemini/config/mcp_config.json` on a machine with no `agy` CREATES that
- * file. None is a config the tool would otherwise have.
+ * `~/.codex/config.toml` on a machine with no Codex CREATES that file. None is
+ * a config the tool would otherwise have.
  * `claude` is the exception because it is not one consumer: `.mcp.json` is read
  * by Claude Code, by Copilot CLI and by `ptah-cli`, so "is Claude installed" is
  * the wrong question to gate it on — and it has always been written
@@ -114,8 +103,6 @@ import {
   codexProjectTrusted,
   createMcpFacet,
   CodexTomlMcpFacet,
-  JsonMcpFacet,
-  ANTIGRAVITY_URL_KEY,
   type IHarnessMcpFacet,
 } from '@ptah-extension/harness-sync';
 
@@ -152,8 +139,9 @@ interface SlotSpec {
 }
 
 /**
- * Every slot, in a stable order. A target may appear twice when the tool reads
- * two files — see the Antigravity and Codex notes in the header.
+ * Every slot, in a stable order. A target may appear twice when its scope
+ * depends on the workspace — see the Codex note in the header. Antigravity is
+ * retired; see `retired-ptah-mcp-slots.ts`.
  */
 const SLOT_SPECS: readonly SlotSpec[] = [
   { target: CLAUDE_TARGET, scope: 'workspace' },
@@ -170,8 +158,6 @@ const SLOT_SPECS: readonly SlotSpec[] = [
     appliesTo: (root, homeDir) =>
       !codexProjectTrusted(root, homeDir === undefined ? {} : { homeDir }),
   },
-  { target: 'antigravity', scope: 'home' },
-  { target: 'antigravity', scope: 'workspace' },
 ];
 
 /**
@@ -180,7 +166,8 @@ const SLOT_SPECS: readonly SlotSpec[] = [
  * `createMcpFacet` answers for the scope the RECONCILER wants, which is the
  * right default and not always the one wanted here: a server the user INSTALLED
  * is a machine-wide choice, while Ptah's own server is bound to one workspace's
- * Ptah process. The two overrides are the two places those differ.
+ * Ptah process. Codex, whose scope is chosen per workspace, is where those
+ * differ.
  */
 function facetFor(
   spec: SlotSpec,
@@ -188,19 +175,6 @@ function facetFor(
 ): IHarnessMcpFacet {
   if (spec.target === 'codex') {
     return new CodexTomlMcpFacet({ ...options, scope: spec.scope });
-  }
-  if (spec.target === 'antigravity' && spec.scope === 'workspace') {
-    return new JsonMcpFacet({
-      target: 'antigravity',
-      mcpTarget: 'antigravity',
-      scope: 'workspace',
-      segments: ['.agents', 'mcp_config.json'],
-      rootKey: 'mcpServers',
-      includeType: false,
-      // `agy` and the Antigravity editor both spell a remote endpoint
-      // `serverUrl`. An entry written with `url` parses and never connects.
-      urlKey: ANTIGRAVITY_URL_KEY,
-    });
   }
   return createMcpFacet(spec.target, options);
 }
@@ -247,17 +221,14 @@ export function ptahMcpUrl(port: number, workspaceRoot: string): string {
 /**
  * The entry to declare, identical for every target.
  *
- * `http` rather than `sse` even for Antigravity, and that is load-bearing
- * rather than a simplification. `configToJson` drops the discriminant for every
- * target but VS Code, so both spellings put the same bytes on disk — but
+ * `http`, and that is load-bearing rather than a simplification.
+ * `configToJson` drops the discriminant for every target but VS Code, but
  * `jsonToConfig` reads the transport back from the URL (`inferTransportType`:
  * `sse` only when the URL contains `/sse`), so an entry WRITTEN as `sse` reads
  * back as `http` and the read-compare-write below would find a difference and
  * rewrite the file on every single pass. The `/workspace/...` segment keeps
  * that property — see `ptahMcpUrl` — so a scoped entry still reads back as
- * `http` and the round trip stays byte-stable. `AntigravityCliAdapter` passes
- * `sse` at spawn time and produces the same `{ serverUrl }` shape, so the two
- * writers still agree on disk.
+ * `http` and the round trip stays byte-stable.
  */
 export function ptahMcpEntry(
   port: number,

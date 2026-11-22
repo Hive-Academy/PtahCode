@@ -146,6 +146,28 @@ describe('ProviderSessionUsageLedger (issue #1459)', () => {
     expect(snapshot.tokens.input).toBe(10);
   });
 
+  it('still names a missing rate for a restored session of an unpriced model', () => {
+    // A chat reopened from history (or continued after the pool closed its
+    // process) is restored; its unpriced model must read "Not priced", not "—".
+    const ledger = new ProviderSessionUsageLedger('s1', 'subscription', true);
+    const { snapshot } = ledger.record(
+      'gemini-4-hydrogen-low',
+      { inputTokens: 100, outputTokens: 10, cacheReadTokens: 50 },
+      1000,
+      undefined,
+    );
+    expect(snapshot.totalCost).toBeNull();
+    expect(snapshot.coverage).toBe('partial');
+    expect(snapshot.costUnavailableReason).toBe('rate-missing');
+  });
+
+  it('names no cause once an unpriced turn had no model to price', () => {
+    const ledger = new ProviderSessionUsageLedger('s1', 'subscription', false);
+    ledger.record('gemini-4-hydrogen-low', { inputTokens: 1, outputTokens: 1 }, 1, undefined);
+    const { snapshot } = ledger.record(undefined, { inputTokens: 1, outputTokens: 1 }, 1, undefined);
+    expect(snapshot.costUnavailableReason).toBeUndefined();
+  });
+
   it('records the latest context frame against the agent-reported window', () => {
     const ledger = new ProviderSessionUsageLedger('s1', 'subscription', false);
     const capacity = resolveContextCapacity({
