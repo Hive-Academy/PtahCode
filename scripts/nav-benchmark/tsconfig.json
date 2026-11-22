@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "module": "commonjs",
+    "moduleResolution": "node",
+    "baseUrl": "../..",
+    "target": "ES2022",
+    "types": ["jest", "node"],
+    "experimentalDecorators": true,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "ignoreDeprecations": "6.0",
+    "noEmit": true
+  },
+  "include": ["./ptah-runner.bench.ts", "./bench-mocks/*.ts"]
+}
