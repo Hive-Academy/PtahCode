@@ -17,6 +17,7 @@ import {
   type AgentOutputDelta,
   type AgentPermissionRequest,
   type AgentMonitorReparentedPayload,
+  type AgentMonitorActionNoticePayload,
   AgentMonitorMessageReceiptPayloadSchema,
   AgentMonitorParentDeliveryPayloadSchema,
   AgentId,
@@ -57,6 +58,41 @@ export function parseAgentMonitorReparented(
   return { agentIds: [...agentIds], parentSessionId };
 }
 
+const NOTICE_ACTIONS: readonly string[] = ['asked-handoff', 'paused', 'ended'];
+
+/**
+ * Validate an `agent-monitor:action-notice` payload (TASK_2026_2297_920a): a non-empty
+ * `agentId`, a `text` string and a notice with string `actor`, `reason`, `nextStep` and a known
+ * `action`. Returns `null` for anything else. Hand-written to keep Zod out of the initial bundle.
+ */
+export function parseAgentMonitorActionNotice(
+  value: unknown,
+): AgentMonitorActionNoticePayload | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const p = value as Record<string, unknown>;
+  const notice = p['notice'];
+  if (
+    !isNonEmptyString(p['agentId']) ||
+    typeof p['text'] !== 'string' ||
+    !notice ||
+    typeof notice !== 'object' ||
+    Array.isArray(notice)
+  ) {
+    return null;
+  }
+  const n = notice as Record<string, unknown>;
+  if (
+    typeof n['action'] !== 'string' ||
+    !NOTICE_ACTIONS.includes(n['action']) ||
+    !isNonEmptyString(n['actor']) ||
+    !isNonEmptyString(n['reason']) ||
+    !isNonEmptyString(n['nextStep'])
+  ) {
+    return null;
+  }
+  return value as AgentMonitorActionNoticePayload;
+}
+
 /** Type and top-level keys of a refused payload; never its values. */
 function describePayload(payload: unknown): string {
   if (payload === null) return 'null';
@@ -88,6 +124,7 @@ export class AgentMonitorMessageHandler implements MessageHandler {
     MESSAGE_TYPES.AGENT_MONITOR_EXPIRED,
     MESSAGE_TYPES.AGENT_MONITOR_PERMISSION_REQUEST,
     MESSAGE_TYPES.AGENT_MONITOR_REPARENTED,
+    MESSAGE_TYPES.AGENT_MONITOR_ACTION_NOTICE,
     MESSAGE_TYPES.AGENT_MONITOR_MESSAGE_RECEIPT,
     MESSAGE_TYPES.AGENT_MONITOR_PARENT_DELIVERY,
   ] as const;
@@ -135,6 +172,18 @@ export class AgentMonitorMessageHandler implements MessageHandler {
           break;
         }
         this.store.reparentAgents(parsed.agentIds, parsed.parentSessionId);
+        break;
+      }
+      case MESSAGE_TYPES.AGENT_MONITOR_ACTION_NOTICE: {
+        const parsed = parseAgentMonitorActionNotice(message.payload);
+        if (!parsed) {
+          console.warn(
+            '[AgentMonitorMessageHandler] agent-monitor:action-notice payload rejected — dropped',
+            describePayload(message.payload),
+          );
+          break;
+        }
+        this.store.onAgentActionNotice(parsed);
         break;
       }
       case MESSAGE_TYPES.AGENT_MONITOR_MESSAGE_RECEIPT: {

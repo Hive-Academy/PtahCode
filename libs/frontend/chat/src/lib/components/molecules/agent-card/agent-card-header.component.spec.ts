@@ -96,6 +96,38 @@ describe('AgentCardHeaderComponent — prompt cache (N6)', () => {
     expect(plain.querySelector('[data-testid="lane-stop-reason"]')).toBeNull();
   });
 
+  describe('Ptah action notice chip (TASK_2026_2297_920a)', () => {
+    const ask = {
+      actor: 'ptah-budget',
+      action: 'asked-handoff',
+      reason: 'weighted-budget',
+      nextStep: 'return-report',
+    } as const;
+    const pause = { ...ask, action: 'paused', nextStep: 'review-live-agent' } as const;
+    const chip = (el: HTMLElement) => el.querySelector('[data-testid="lane-action-notice"]');
+
+    it('shows a handoff request on a running lane', () => {
+      const el = setup(lane({ actionNotice: ask }));
+      expect(chip(el)?.textContent).toContain('Handoff requested');
+      expect(chip(el)?.getAttribute('title')).toContain('Ptah budget monitor');
+    });
+
+    it('says a paused lane is still running and keeps Stop for the user', () => {
+      const el = setup(
+        lane({ actionNotice: pause, actionNoticeText: 'Ptah budget monitor paused new work for agent-1.' }),
+      );
+      expect(chip(el)?.textContent).toContain('Paused · still running');
+      expect(chip(el)?.getAttribute('title')).toBe('Ptah budget monitor paused new work for agent-1.');
+      expect(el.querySelector('[aria-label="Stop agent"]')).not.toBeNull();
+    });
+
+    it('shows no chip without a notice, after the lane left running, or for an ended notice', () => {
+      expect(chip(setup(lane()))).toBeNull();
+      expect(chip(setup(lane({ status: 'completed', actionNotice: pause })))).toBeNull();
+      expect(chip(setup(lane({ actionNotice: { ...ask, action: 'ended' } })))).toBeNull();
+    });
+  });
+
   it('keeps card controls by default and removes repeated labels in flat presentation', () => {
     const value = lane({ displayName: 'Worker Alpha', model: 'gpt-5', cliSessionId: 'session-123' });
     const card = setup(value);

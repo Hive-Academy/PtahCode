@@ -11,6 +11,7 @@ import { MESSAGE_TYPES } from '@ptah-extension/shared';
 import { TabManagerService } from '@ptah-extension/chat-state';
 import {
   AgentMonitorMessageHandler,
+  parseAgentMonitorActionNotice,
   parseAgentMonitorReparented,
 } from './agent-monitor-message-handler.service';
 import { AgentDeliveryStore, AgentMonitorStore } from '@ptah-extension/chat-streaming';
@@ -24,6 +25,7 @@ type StoreSlice = Pick<
   | 'onAgentExpired'
   | 'onPermissionRequest'
   | 'reparentAgents'
+  | 'onAgentActionNotice'
 >;
 type DeliverySlice = Pick<AgentDeliveryStore, 'onMessageReceipt' | 'onParentDelivery' | 'hydrate'>;
 
@@ -48,6 +50,7 @@ describe('AgentMonitorMessageHandler', () => {
       onAgentExpired: jest.fn(),
       onPermissionRequest: jest.fn(),
       reparentAgents: jest.fn(),
+      onAgentActionNotice: jest.fn(),
     } as jest.Mocked<StoreSlice>;
 
     TestBed.configureTestingModule({
@@ -66,7 +69,7 @@ describe('AgentMonitorMessageHandler', () => {
     TestBed.resetTestingModule();
   });
 
-  it('declares the eight AGENT_MONITOR_* message types', () => {
+  it('declares the nine AGENT_MONITOR_* message types', () => {
     expect(handler.handledMessageTypes).toEqual([
       MESSAGE_TYPES.AGENT_MONITOR_SPAWNED,
       MESSAGE_TYPES.AGENT_MONITOR_OUTPUT,
@@ -74,6 +77,7 @@ describe('AgentMonitorMessageHandler', () => {
       MESSAGE_TYPES.AGENT_MONITOR_EXPIRED,
       MESSAGE_TYPES.AGENT_MONITOR_PERMISSION_REQUEST,
       MESSAGE_TYPES.AGENT_MONITOR_REPARENTED,
+      MESSAGE_TYPES.AGENT_MONITOR_ACTION_NOTICE,
       MESSAGE_TYPES.AGENT_MONITOR_MESSAGE_RECEIPT,
       MESSAGE_TYPES.AGENT_MONITOR_PARENT_DELIVERY,
     ]);
@@ -108,6 +112,44 @@ describe('AgentMonitorMessageHandler', () => {
     expect(delivery.onMessageReceipt).toHaveBeenCalledWith(receipt);
     handler.handleMessage({ type: MESSAGE_TYPES.AGENT_MONITOR_MESSAGE_RECEIPT, payload: { receipt: { ...receipt, message: 'private' } } });
     expect(delivery.onMessageReceipt).toHaveBeenCalledTimes(1);
+  });
+
+  describe('agent-monitor:action-notice (TASK_2026_2297_920a)', () => {
+    const notice = {
+      actor: 'ptah-budget',
+      action: 'paused',
+      reason: 'weighted-budget',
+      nextStep: 'review-live-agent',
+    };
+
+    it('applies a valid payload to the store', () => {
+      const payload = { agentId: 'lane-1', notice, text: 'Ptah paused lane-1.' };
+      handler.handleMessage({ type: MESSAGE_TYPES.AGENT_MONITOR_ACTION_NOTICE, payload });
+      expect(store.onAgentActionNotice).toHaveBeenCalledWith(payload);
+    });
+
+    it.each([
+      ['undefined', undefined],
+      ['an array', []],
+      ['an empty agent id', { agentId: '', notice, text: 't' }],
+      ['a missing text', { agentId: 'lane-1', notice }],
+      ['a missing notice', { agentId: 'lane-1', text: 't' }],
+      ['an unknown action', { agentId: 'lane-1', notice: { ...notice, action: 'killed' }, text: 't' }],
+      ['an empty reason', { agentId: 'lane-1', notice: { ...notice, reason: '' }, text: 't' }],
+    ])('drops %s with a shape-only warning', (_label, payload) => {
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+      try {
+        expect(parseAgentMonitorActionNotice(payload)).toBeNull();
+        handler.handleMessage({ type: MESSAGE_TYPES.AGENT_MONITOR_ACTION_NOTICE, payload });
+        expect(store.onAgentActionNotice).not.toHaveBeenCalled();
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringContaining('agent-monitor:action-notice payload rejected'),
+          expect.any(String),
+        );
+      } finally {
+        warn.mockRestore();
+      }
+    });
   });
 
   describe('agent-monitor:reparented (TASK_2026_876)', () => {

@@ -652,8 +652,12 @@ export class AgentProcessManager {
       measured: notice.measured,
       limit: notice.limit,
     });
-    this.events.emit('agent:action-notice', { info: tracked.info, notice });
     const parentText = this.laneNoticeParentText(agentId, tracked, notice);
+    this.events.emit('agent:action-notice', {
+      info: tracked.info,
+      notice,
+      text: parentText,
+    });
     void this.deliverLaneNoticeToParent(agentId, tracked, source, notice, parentText);
     return true;
   }

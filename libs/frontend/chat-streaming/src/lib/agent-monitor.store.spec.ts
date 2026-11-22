@@ -118,6 +118,58 @@ describe('AgentMonitorStore', () => {
     });
   });
 
+  describe('Ptah action notice (TASK_2026_2297_920a)', () => {
+    const base = (agentId: string): AgentProcessInfo => ({
+      agentId: agentId as AgentId,
+      cli: 'codex',
+      task: 'Work',
+      workingDirectory: '/workspace/root',
+      startedAt: '2026-10-01T10:00:00.000Z',
+      status: 'running',
+    });
+    const pause = {
+      actor: 'ptah-budget',
+      action: 'paused',
+      reason: 'weighted-budget',
+      nextStep: 'review-live-agent',
+    } as const;
+
+    it('keeps the pushed notice and text on a live card', () => {
+      store.onAgentSpawned(base('lane'));
+      store.onAgentActionNotice({ agentId: 'lane', notice: pause, text: 'Ptah paused lane.' });
+      const card = store.agents()[0];
+      expect(card.status).toBe('running');
+      expect(card.actionNotice).toEqual(pause);
+      expect(card.actionNoticeText).toBe('Ptah paused lane.');
+    });
+
+    it('ignores a notice for an unknown card', () => {
+      store.onAgentActionNotice({ agentId: 'ghost', notice: pause, text: 't' });
+      expect(store.agents()).toHaveLength(0);
+    });
+
+    it('keeps the text while a spawn payload repeats the same notice', () => {
+      store.onAgentSpawned(base('lane'));
+      store.onAgentActionNotice({ agentId: 'lane', notice: pause, text: 'Ptah paused lane.' });
+      store.onAgentSpawned({ ...base('lane'), actionNotice: pause });
+      expect(store.agents()[0].actionNoticeText).toBe('Ptah paused lane.');
+    });
+
+    it('clears the notice when a resumed lane spawns without one', () => {
+      store.onAgentSpawned(base('lane'));
+      store.onAgentActionNotice({ agentId: 'lane', notice: pause, text: 'Ptah paused lane.' });
+      store.onAgentSpawned(base('lane'));
+      expect(store.agents()[0].actionNotice).toBeUndefined();
+      expect(store.agents()[0].actionNoticeText).toBeUndefined();
+    });
+
+    it('takes the notice that an exit payload carries', () => {
+      store.onAgentSpawned(base('lane'));
+      store.onAgentExited({ ...base('lane'), status: 'completed', actionNotice: pause });
+      expect(store.agents()[0].actionNotice).toEqual(pause);
+    });
+  });
+
   describe('CLI turn and resume lifecycle', () => {
     const info = (
       agentId: string,

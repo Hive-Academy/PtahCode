@@ -332,6 +332,60 @@ describe('agent delivery push sinks', () => {
   });
 });
 
+describe('agent action notice broadcast', () => {
+  it('forwards a lane ask or pause on the monitor channel with the host text', () => {
+    const broadcastMessage = jest.fn().mockResolvedValue(undefined);
+    const events = new EventEmitter();
+    const container = buildContainer([
+      [TOKENS.AGENT_PROCESS_MANAGER, { events, findAgentInfo: () => undefined }],
+      [TOKENS.WEBVIEW_MANAGER, { broadcastMessage }],
+    ]);
+    wireAgentEventListeners(container, {
+      logger: Object.assign(Object.create(null) as Logger, createMockLogger()),
+      platform: 'electron',
+    });
+    const notice = {
+      actor: 'ptah-budget',
+      action: 'paused',
+      reason: 'weighted-budget',
+      nextStep: 'review-live-agent',
+    } as const;
+    events.emit('agent:action-notice', {
+      info: { agentId: 'lane-1' },
+      notice,
+      text: 'Ptah budget monitor paused new work for lane-1.',
+    });
+    expect(broadcastMessage).toHaveBeenCalledWith(
+      MESSAGE_TYPES.AGENT_MONITOR_ACTION_NOTICE,
+      { agentId: 'lane-1', notice, text: 'Ptah budget monitor paused new work for lane-1.' },
+    );
+  });
+
+  it('logs a failed broadcast and keeps running', async () => {
+    const broadcastMessage = jest.fn().mockRejectedValue(new Error('renderer gone'));
+    const events = new EventEmitter();
+    const logger = Object.assign(Object.create(null) as Logger, createMockLogger());
+    const container = buildContainer([
+      [TOKENS.AGENT_PROCESS_MANAGER, { events, findAgentInfo: () => undefined }],
+      [TOKENS.WEBVIEW_MANAGER, { broadcastMessage }],
+    ]);
+    wireAgentEventListeners(container, { logger, platform: 'electron' });
+    expect(() =>
+      events.emit('agent:action-notice', {
+        info: { agentId: 'lane-1' },
+        notice: { actor: 'ptah-budget', action: 'asked-handoff', reason: 'duration', nextStep: 'return-report' },
+        text: 'x',
+      }),
+    ).not.toThrow();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('agent-monitor:action-notice'),
+      expect.any(Error),
+    );
+  });
+});
+
 describe('persistCliSessionReference — missing parent session', () => {
   it('warns and names the agent instead of dropping it silently', () => {
     const logger = createMockLogger();

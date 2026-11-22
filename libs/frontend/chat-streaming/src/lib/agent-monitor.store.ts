@@ -24,6 +24,8 @@ import {
   OnDestroy,
 } from '@angular/core';
 import type {
+  AgentActionNotice,
+  AgentMonitorActionNoticePayload,
   AgentProcessInfo,
   AgentOutputDelta,
   AgentStatus,
@@ -104,6 +106,26 @@ interface WorkflowRunFields {
 function readWorkflowFields(src: unknown): WorkflowRunFields {
   const s = (src ?? {}) as WorkflowRunFields;
   return { workflowRunId: s.workflowRunId, workflowName: s.workflowName };
+}
+
+/**
+ * Notice fields for a card that a spawn or exit payload updates. The payload is authoritative:
+ * a payload without a notice clears the card's notice. The host text of the push stays only
+ * while the notice itself is unchanged.
+ */
+function carriedActionNotice(
+  existing: Pick<MonitoredAgent, 'actionNotice' | 'actionNoticeText'>,
+  info: Pick<AgentProcessInfo, 'actionNotice'>,
+): Pick<MonitoredAgent, 'actionNotice' | 'actionNoticeText'> {
+  const notice = info.actionNotice;
+  if (!notice) return { actionNotice: undefined, actionNoticeText: undefined };
+  const same =
+    existing.actionNotice?.action === notice.action &&
+    existing.actionNotice.reason === notice.reason;
+  return {
+    actionNotice: notice,
+    actionNoticeText: same ? existing.actionNoticeText : undefined,
+  };
 }
 
 /**
@@ -586,6 +608,14 @@ export interface MonitoredAgent {
    * Copied from `AgentProcessInfo.stopReason` or derived during history restore.
    */
   stopReason?: LaneStopReason;
+  /**
+   * Latest Ptah ask or pause notice for the live lane (TASK_2026_2297_920a, P5). The lane stays
+   * alive: a pause only holds new work. Copied from `AgentProcessInfo.actionNotice` and from the
+   * `agent-monitor:action-notice` push. Absent means no Ptah threshold is active.
+   */
+  actionNotice?: AgentActionNotice;
+  /** Host-rendered Ptah sentence for {@link actionNotice}, when the push carried it. */
+  actionNoticeText?: string;
   /**
    * ISO time a host restart cut this restored lane's output at, from
    * `CliSessionReference.outputLostAfter`. Absent when nothing was lost.
@@ -1552,6 +1582,7 @@ export class AgentMonitorStore implements OnDestroy {
           role: info.role ?? existing.role,
           failureKind: info.failureKind,
           stopReason: info.stopReason,
+          ...carriedActionNotice(existing, info),
           quotaOwner: info.quotaOwner ?? existing.quotaOwner,
           // The backend always sends the run's resolved model scope (spawn and
           // exit share the same tracked.info), so `null` is authoritative and
@@ -1611,6 +1642,7 @@ export class AgentMonitorStore implements OnDestroy {
           role: info.role,
           failureKind: info.failureKind,
           stopReason: info.stopReason,
+          ...(info.actionNotice ? { actionNotice: info.actionNotice } : {}),
           quotaOwner: info.quotaOwner,
           modelScope: info.modelScope ?? null,
           accountProfileId: laneAccountProfileId(info),
@@ -1649,6 +1681,7 @@ export class AgentMonitorStore implements OnDestroy {
         role: info.role,
         failureKind: info.failureKind,
         stopReason: info.stopReason,
+        ...(info.actionNotice ? { actionNotice: info.actionNotice } : {}),
         quotaOwner: info.quotaOwner,
         modelScope: info.modelScope ?? null,
         accountProfileId: laneAccountProfileId(info),
@@ -1889,6 +1922,7 @@ export class AgentMonitorStore implements OnDestroy {
         role: info.role ?? agent.role,
         failureKind: info.failureKind,
         stopReason: info.stopReason,
+        ...carriedActionNotice(agent, info),
         // The backend may only upgrade an unknown owner to a known one, or a
         // cli-store owner to an account of the same provider, so the exit
         // payload's owner wins; keep the spawn-time one if absent.
@@ -1901,6 +1935,25 @@ export class AgentMonitorStore implements OnDestroy {
         accountProfileId: mergedLaneAccount(info, agent.accountProfileId),
       };
       return this.evictOldCompletedAgents(next);
+    });
+  }
+
+  /**
+   * A Ptah monitor asked a live lane for a handoff or paused its new work. The card keeps the
+   * latest notice and the lane stays alive. An unknown id is a no-op: the notice follows the
+   * spawn event, so a missing card was already evicted and a new one would show a ghost.
+   */
+  onAgentActionNotice(payload: AgentMonitorActionNoticePayload): void {
+    this.updateAgents((list) => {
+      const index = list.findIndex((a) => a.agentId === payload.agentId);
+      if (index === -1) return list;
+      const next = [...list];
+      next[index] = {
+        ...next[index],
+        actionNotice: payload.notice,
+        actionNoticeText: payload.text,
+      };
+      return next;
     });
   }
 

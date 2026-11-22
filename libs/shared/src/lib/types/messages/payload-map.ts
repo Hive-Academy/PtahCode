@@ -116,6 +116,7 @@ import type { SessionMcpStatusPayload } from './session-mcp-status';
 import type { PlanLimitsSnapshot } from '../plan-limit.types';
 import type { AgentSessionOpenedPayload } from './agent-session';
 import type {
+  AgentMonitorActionNoticePayload,
   AgentMonitorMessageReceiptPayload,
   AgentMonitorParentDeliveryPayload,
   AgentMonitorReparentedPayload,
@@ -468,6 +469,7 @@ export interface MessagePayloadMap {
   'sessionHandoff:closePredecessor': SessionHandoffClosePredecessorPayload;
   'sessionHandoff:linked': SessionHandoffLinkedPayload;
   'agent-monitor:reparented': AgentMonitorReparentedPayload;
+  'agent-monitor:action-notice': AgentMonitorActionNoticePayload;
   'agent-monitor:message-receipt': AgentMonitorMessageReceiptPayload;
   'agent-monitor:parent-delivery': AgentMonitorParentDeliveryPayload;
   'indexing:progress': IndexingProgressEvent;

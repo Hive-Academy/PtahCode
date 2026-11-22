@@ -1,3 +1,4 @@
+import type { AgentActionNotice } from '../agent-action.types';
 import type {
   AgentDeliveryReceipt,
   AgentId,
@@ -42,4 +43,18 @@ export interface AgentMonitorParentDeliveryPayload {
 export interface AgentMonitorReparentedPayload {
   readonly agentIds: readonly string[];
   readonly parentSessionId: string;
+}
+
+/**
+ * Payload for `agent-monitor:action-notice` (TASK_2026_2297_920a, P5).
+ *
+ * A Ptah monitor asked a live lane for a handoff or paused its new work. The lane stays alive.
+ * `text` is the host-rendered Ptah sentence for the parent and the card; it holds only trusted
+ * values. Later `agent-monitor:spawned` and `agent-monitor:exited` payloads carry the current
+ * notice in `AgentProcessInfo.actionNotice`, and a payload without it clears the card state.
+ */
+export interface AgentMonitorActionNoticePayload {
+  readonly agentId: string;
+  readonly notice: AgentActionNotice;
+  readonly text: string;
 }
