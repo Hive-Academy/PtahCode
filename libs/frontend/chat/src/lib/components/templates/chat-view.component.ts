@@ -26,7 +26,6 @@ import {
 import {
   connectDisplayWindowSource,
 } from './display-window-wiring';
-import { QueuedFollowUpsComponent } from '../molecules/queued-follow-ups/queued-follow-ups.component';
 import { ChatInputComponent } from '../molecules/chat-input/chat-input.component';
 import { BackgroundTaskTilesContainerComponent } from '../molecules/background-task-tiles/background-task-tiles-container.component';
 import { ChatSessionLayoutComponent } from './chat-session-layout.component';
@@ -66,6 +65,7 @@ import {
 import { ProviderSessionResumeNoticeService } from '../../services/provider-session-resume-notice.service';
 import { TranscriptRetentionService } from '../../services/transcript-retention.service';
 import { SessionLoaderService } from '../../services/chat-store/session-loader.service';
+import { FollowUpQueueService } from '../../services/chat-store/follow-up-queue.service';
 import { SessionHistoryReplayer } from '../../services/chat-store/session-history-replayer.service';
 import { HistoryPagingService } from '../../services/chat-store/history-paging.service';
 import {
@@ -217,7 +217,6 @@ const VIEW_PANEL_KEY = '';
     CompactSessionCardComponent,
     AgentOriginBannerComponent,
     HarnessProposalBannerComponent,
-    QueuedFollowUpsComponent,
     PtahButtonDirective,
   ],
   templateUrl: './chat-view.component.html',
@@ -1158,6 +1157,7 @@ export class ChatViewComponent implements OnDestroy {
   }
 
   private readonly _harnessProposals = inject(HarnessChatProposalStore);
+  private readonly _followUps = inject(FollowUpQueueService);
 
   /** Staged harness proposal scoped to this view's resolved session. */
   protected readonly resolvedHarnessProposal = computed(() =>
@@ -1448,6 +1448,14 @@ export class ChatViewComponent implements OnDestroy {
   });
 
   constructor() {
+    // Load the backend's queued messages of the session view this renderer
+    // missed (after a reload or another window), so their cards show.
+    effect(() => {
+      const tabId = this.resolvedTabId();
+      const sessionId = this.resolvedSessionId();
+      if (!tabId || !sessionId) return;
+      untracked(() => void this._followUps.reconcile(tabId, sessionId));
+    });
     effect((onCleanup) => {
       const tabId = this.resolvedTabId();
       const dock = this.displayDock;

@@ -123,9 +123,18 @@ export const ChatContinueParamsSchema = z
     accountSelection: ProviderAccountSelectionSchema.optional(),
     /** Backend-owned follow-up (TASK_2026_884). */
     queueIntent: z.literal('next-turn').optional(),
+    /** Idle-only admission of a normal send; refused with TURN_IN_FLIGHT. */
+    admission: z.literal('require-idle').optional(),
   })
   .passthrough()
   .superRefine((value, ctx) => {
+    if (value.queueIntent !== undefined && value.admission !== undefined) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['admission'],
+        message: 'admission cannot be combined with queueIntent',
+      });
+    }
     if (value.queueIntent !== undefined) {
       const parsed = QueuedPayloadSchema.safeParse(value);
       if (!parsed.success)
