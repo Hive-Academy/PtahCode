@@ -591,4 +591,14 @@ describe('SessionChildRegistry', () => {
       expect(registry.pendingOf([PARENT])).toEqual([]);
     });
   });
+
+  it('marks a cwd-inferred SDK binding until the child confirms it (TASK_2026_2298)', () => {
+    const registry = new SessionChildRegistry();
+    addChild(registry, 'a');
+    expect(registry.bindSdkSessionId('a', 'sdk-a', { inferred: true })?.sdkSessionIdInferred).toBe(true);
+    expect(registry.bindSdkSessionId('a', 'sdk-a', { inferred: true })?.sdkSessionIdInferred).toBe(true);
+    expect(registry.bindSdkSessionId('a', 'sdk-a')?.sdkSessionIdInferred).toBeUndefined();
+    expect(registry.get('sdk-a')?.childSessionId).toBe('a');
+    expect(registry.bindSdkSessionId('a', 'sdk-b')?.sdkSessionIdInferred).toBeUndefined();
+  });
 });

@@ -55,6 +55,12 @@ export interface SessionChildRecord extends Omit<
    */
   readonly endCause?: SessionChildEndCause;
   readonly heldCompletion?: SessionChildHeldCompletion;
+  /**
+   * The SDK id was inferred from the worktree path, not from the child's own
+   * session-id event. Report attribution does not trust it. Kept off the
+   * public snapshot.
+   */
+  readonly sdkSessionIdInferred?: boolean;
 }
 
 /** Fields a caller may change. Identity, link and end state are not among them. */
@@ -70,6 +76,7 @@ type MutableRecordFields = Omit<
   | 'succeeds'
   | 'succeededBy'
   | 'successionCount'
+  | 'sdkSessionIdInferred'
 >;
 
 /**
@@ -434,14 +441,25 @@ export class SessionChildRegistry {
   bindSdkSessionId(
     childSessionId: string,
     sdkSessionId: string,
+    options: { readonly inferred?: boolean } = {},
   ): SessionChildRecord | undefined {
     const record = this.records.get(childSessionId);
     const sdkId = sdkSessionId.trim();
     if (!record || !sdkId) return undefined;
-    if (record.sdkSessionId === sdkId) return record;
+    const inferred = options.inferred === true;
+    if (record.sdkSessionId === sdkId) {
+      // The child's own session-id event confirms an inferred binding.
+      if (inferred || !record.sdkSessionIdInferred) return record;
+      const confirmed: SessionChildRecord = { ...record };
+      delete (confirmed as { sdkSessionIdInferred?: boolean }).sdkSessionIdInferred;
+      return this.replace(confirmed);
+    }
     if (record.sdkSessionId) this.bySdkId.delete(record.sdkSessionId);
     this.bySdkId.set(sdkId, childSessionId);
-    return this.replace({ ...record, sdkSessionId: sdkId });
+    const next: SessionChildRecord = { ...record, sdkSessionId: sdkId };
+    if (inferred) return this.replace({ ...next, sdkSessionIdInferred: true });
+    delete (next as { sdkSessionIdInferred?: boolean }).sdkSessionIdInferred;
+    return this.replace(next);
   }
 
   markReportDelivered(childSessionId: string): SessionChildRecord | undefined {
