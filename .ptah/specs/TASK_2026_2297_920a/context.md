@@ -61,8 +61,8 @@ parent is told, and a person decides the rest.
 | P1 | Shared vocabulary + thresholds, subagent budget, permissions (1-7, 21, 23) | failures 1, 2 | feat/coop-handoff-p1-subagents | #1464 | merged |
 | P2 | Watchdog, cause propagation, first-turn recovery incl. children, child cap freeze (8-13, 22, 25) | failure 3 | feat/coop-handoff-p2-watchdog | #1472 | merged |
 | P3 | Child session report routing (17-18) | failure 4 | feat/coop-handoff-p3-reports | #1463 | merged |
-| P4 | CLI lanes ask-then-pause (14-16, 26) | lane kills | feat/coop-handoff-p4-lanes | [#1476](https://github.com/Hive-Academy/PtahCode/pull/1476) | in review |
-| P5 | Electron UI rendering and handoff banner (19-20) | UI labels | feat/coop-handoff-p5-ui | - | planned (after P2, P4) |
+| P4 | CLI lanes ask-then-pause (14-16, 26) | lane kills | feat/coop-handoff-p4-lanes | [#1476](https://github.com/Hive-Academy/PtahCode/pull/1476) | merged |
+| P5 | Electron UI rendering and handoff banner (19-20) | UI labels | feat/coop-handoff-p5-ui | PR pending | in review |
 
 ## Follow-ups
 
@@ -79,7 +79,15 @@ Items found during P1-P3 that no phase of this program covers yet.
   - Handoff reparent gap.
   - SDK alias routing and de-duplication.
 - (d) Ambient and Monitor open tasks hide a real provider hang. The watchdog counts them as open work, so
-  a hang shows only as overdue log warnings. Show the overdue notice in the UI (P5).
+  a hang shows only as overdue log warnings. P5 does not cover this: it renders lane notices only.
+  The overdue callback in `session-query-executor.service.ts` still only logs. A UI notice needs a
+  new path from the SDK session to the host (adapter callback, like `setCompactionStartCallback`),
+  a message type and a banner in the chat view. Open for a later phase.
+- (g) SDK subagent ask and pause notices (P1) still reach only the parent text and the agent. No
+  event carries them to the renderer, so a paused subagent shows no chip. Lane notices show a chip (P5).
+- (h) `agent-process-manager.account-binding.spec.ts` ("stays ambient when the stored lane selection
+  is the default route") fails inside any linked worktree: `worktreeMainRoot` makes a second read.
+  CI is not affected. Make the spec independent of the checkout location.
 - (e) A child predecessor that reached the runtime cap has no retirement timer after a cooperative
   handoff (review finding m8 in `review-P2-B.md`).
 - (f) Other minor review findings of P2 are in `review-P2-A.md` and `review-P2-B.md`.
