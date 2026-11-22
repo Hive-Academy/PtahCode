@@ -2089,6 +2089,7 @@ export function formatAgentReport(result: {
   delivered: boolean;
   pending?: boolean;
   reason?: string;
+  detail?: string;
   parentSessionId?: string;
 }): string {
   try {
@@ -2105,6 +2106,7 @@ export function formatAgentReport(result: {
           ...(result.reason === 'held-for-completion'
             ? ['This report will arrive with the completion signal.'] : []),
           ...(result.reason ? [`**Reason:** ${result.reason}`] : []),
+          ...(result.detail ? [`**Detail:** ${result.detail}`] : []),
           ...(result.parentSessionId
             ? [`**Parent Session:** ${result.parentSessionId}`]
             : []),

@@ -2198,7 +2198,9 @@ export class SessionSpawnerService implements ISessionSpawner {
       child = byCwd;
       if (!byCwd.sdkSessionId && sessionId) {
         child =
-          this.registry.bindSdkSessionId(byCwd.childSessionId, sessionId) ??
+          this.registry.bindSdkSessionId(byCwd.childSessionId, sessionId, {
+            inferred: true,
+          }) ??
           byCwd;
         this.log(
           `${byCwd.childSessionId} bound to SDK session ${sessionId} by cwd`,
@@ -2327,6 +2329,8 @@ export class SessionSpawnerService implements ISessionSpawner {
     delete snapshot['terminalStatus'];
     delete snapshot['endCause'];
     delete snapshot['heldCompletion'];
+    delete snapshot['heldReports'];
+    delete snapshot['sdkSessionIdInferred'];
     delete snapshot['phaseKind'];
     delete snapshot['phaseDisallowedTools'];
     delete snapshot['toolProfileApplied'];

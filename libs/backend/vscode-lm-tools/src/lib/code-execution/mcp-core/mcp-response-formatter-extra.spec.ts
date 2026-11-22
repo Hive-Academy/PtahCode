@@ -226,6 +226,19 @@ describe('mcp-response-formatter › formatAgentReport', () => {
     expect(out).toMatch(/Report NOT Delivered/);
     expect(out).toMatch(/Delivered:\*\* No/);
     expect(out).toMatch(/Reason:\*\* unattributed-caller/);
+    expect(out).not.toMatch(/Detail:/);
+  });
+
+  it('renders a held report as pending, with its detail', () => {
+    const out = formatAgentReport({
+      delivered: false,
+      pending: true,
+      reason: 'parent-session-not-active',
+      detail: 'the report is held',
+    });
+    expect(out).toMatch(/Report Pending/);
+    expect(out).toMatch(/Pending:\*\* Yes/);
+    expect(out).toMatch(/Detail:\*\* the report is held/);
   });
 });
 

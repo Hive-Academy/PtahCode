@@ -2839,6 +2839,21 @@ describe('SessionSpawnerService — snapshot outcome & endCause privacy (Defect 
     expect('endCause' in snap).toBe(false);
   });
 
+  it('keeps held reports off the snapshot', async () => {
+    const h = makeHarness();
+    const child = await h.startChild();
+    h.registry.holdReport(child.childSessionId, {
+      heldSince: '2026-10-01T10:00:00.000Z',
+      message: 'held',
+    });
+    const status = h.spawner.status({
+      callerSessionId: PARENT,
+      childSessionId: child.childSessionId,
+    });
+    if (!status.ok) throw new Error('expected status');
+    expect('heldReports' in status.children[0]).toBe(false);
+  });
+
   it('omits outcome on live snapshots and records parent-stop on stop', async () => {
     const h = makeHarness();
     const child = await h.startChild();

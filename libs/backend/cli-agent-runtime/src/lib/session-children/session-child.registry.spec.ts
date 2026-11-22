@@ -14,6 +14,7 @@ import { resolve } from 'path';
 
 import {
   SESSION_CHILD_ENDED_HISTORY_SIZE,
+  SESSION_CHILD_HELD_REPORT_LIMIT,
   SessionChildRegistry,
   type SessionChildRecord,
 } from './session-child.registry';
@@ -504,6 +505,141 @@ describe('SessionChildRegistry', () => {
       expect(registry.get('ended')).toBeUndefined();
       expect(registry.get('sdk-ended')).toBeUndefined();
       expect(registry.isChild('ended')).toBe(false);
+    });
+  });
+
+  describe('held reports', () => {
+    const held = (n: number) => ({
+      heldSince: `2026-10-01T10:0${n}:00.000Z`,
+      message: `m ${n}`,
+    });
+
+    it('indexes the records that hold reports', () => {
+      const registry = new SessionChildRegistry();
+      addChild(registry, 'a');
+      addChild(registry, 'b');
+      expect(registry.hasHeldReports()).toBe(false);
+      registry.holdReport('b', held(0));
+      expect(registry.hasHeldReports()).toBe(true);
+      expect(registry.withHeldReports().map((r) => r.childSessionId)).toEqual(['b']);
+      registry.takeHeldReports('b');
+      expect(registry.hasHeldReports()).toBe(false);
+      registry.restoreHeldReports('b', [held(1)]);
+      expect(registry.withHeldReports().map((r) => r.childSessionId)).toEqual(['b']);
+    });
+
+    it('keeps an ended record with held reports out of pruning and clearing', () => {
+      const registry = new SessionChildRegistry();
+      addChild(registry, 'keep');
+      registry.holdReport('keep', held(0));
+      registry.markEnded('keep', 'ended', 'done');
+      for (let i = 0; i < 3; i++) {
+        addChild(registry, `e${i}`);
+        registry.markEnded(`e${i}`, 'ended', 'done');
+      }
+      registry.pruneEnded(1);
+      expect(registry.get('keep')?.heldReports).toHaveLength(1);
+      expect(registry.get('e0')).toBeUndefined();
+      expect(registry.get('e1')).toBeUndefined();
+      // The kept record still counts toward the history size.
+      expect(registry.get('e2')).toBeUndefined();
+      expect(registry.removeEnded('keep')).toBe(false);
+
+      registry.takeHeldReports('keep');
+      expect(registry.removeEnded('keep')).toBe(true);
+      expect(registry.hasHeldReports()).toBe(false);
+    });
+
+    it('carries held reports of a rolled-back successor back to the predecessor', () => {
+      const registry = new SessionChildRegistry();
+      addChild(registry, 'a');
+      registry.holdReport('a', held(0));
+      registry.succeed('a', record('b'), 'continued');
+      registry.holdReport('b', held(1));
+      const restored = registry.revertSuccession('a', 'b');
+      expect(restored?.heldReports?.map((r) => r.message)).toEqual(['m 0', 'm 1']);
+      expect(registry.withHeldReports().map((r) => r.childSessionId)).toEqual(['a']);
+    });
+
+    it('marks a cwd-inferred SDK binding until the child confirms it', () => {
+      const registry = new SessionChildRegistry();
+      addChild(registry, 'a');
+      expect(registry.bindSdkSessionId('a', 'sdk-a', { inferred: true })?.sdkSessionIdInferred).toBe(true);
+      expect(registry.bindSdkSessionId('a', 'sdk-a', { inferred: true })?.sdkSessionIdInferred).toBe(true);
+      expect(registry.bindSdkSessionId('a', 'sdk-a')?.sdkSessionIdInferred).toBeUndefined();
+      expect(registry.get('sdk-a')?.childSessionId).toBe('a');
+    });
+
+    it('holds, takes and clears reports in order', () => {
+      const registry = new SessionChildRegistry();
+      addChild(registry, 'a');
+      expect(registry.holdReport('a', held(0))?.dropped).toEqual([]);
+      registry.holdReport('a', { ...held(1), summary: 's1' });
+      expect(registry.get('a')?.heldReports).toHaveLength(2);
+      expect(registry.takeHeldReports('a')).toEqual([
+        held(0),
+        { ...held(1), summary: 's1' },
+      ]);
+      expect(registry.get('a')?.heldReports).toBeUndefined();
+      expect(registry.takeHeldReports('a')).toEqual([]);
+      expect(registry.takeHeldReports('missing')).toEqual([]);
+      expect(registry.holdReport('missing', held(0))).toBeUndefined();
+    });
+
+    it('drops the oldest report beyond the limit', () => {
+      const registry = new SessionChildRegistry();
+      addChild(registry, 'a');
+      for (let i = 0; i < SESSION_CHILD_HELD_REPORT_LIMIT; i++) {
+        registry.holdReport('a', held(i));
+      }
+      const result = registry.holdReport('a', held(9));
+      expect(result?.dropped).toEqual([held(0)]);
+      expect(result?.record.heldReports).toHaveLength(
+        SESSION_CHILD_HELD_REPORT_LIMIT,
+      );
+      expect(result?.record.heldReports?.[0]).toEqual(held(1));
+    });
+
+    it('restores unsent reports in front, bounded by the limit', () => {
+      const registry = new SessionChildRegistry();
+      addChild(registry, 'a');
+      registry.holdReport('a', held(5));
+      expect(registry.restoreHeldReports('a', [held(1), held(2)])).toEqual([]);
+      expect(registry.get('a')?.heldReports).toEqual([
+        held(1),
+        held(2),
+        held(5),
+      ]);
+      expect(
+        registry.restoreHeldReports('a', [held(3), held(4), held(6)]),
+      ).toEqual([held(3)]);
+      expect(registry.get('a')?.heldReports?.map((r) => r.message)).toEqual([
+        'm 4',
+        'm 6',
+        'm 1',
+        'm 2',
+        'm 5',
+      ]);
+    });
+
+    it('keeps held reports across reparent', () => {
+      const registry = new SessionChildRegistry();
+      addChild(registry, 'a', { parentSdkSessionId: PARENT_SDK });
+      registry.holdReport('a', held(0));
+      registry.reparent('a', '22222222-2222-4333-8444-555555555555', undefined);
+      expect(registry.get('a')?.heldReports).toEqual([held(0)]);
+    });
+
+    it('leaves held reports on the predecessor at succession', () => {
+      const registry = new SessionChildRegistry();
+      addChild(registry, 'a');
+      registry.holdReport('a', held(0));
+      registry.succeed('a', record('b'), 'continued');
+      expect(registry.get('a')?.heldReports).toEqual([held(0)]);
+      expect(registry.get('b')?.heldReports).toBeUndefined();
+      expect(
+        registry.childrenOf([PARENT]).filter((r) => r.heldReports?.length),
+      ).toHaveLength(1);
     });
   });
 

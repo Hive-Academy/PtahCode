@@ -336,7 +336,8 @@ the parent.
 - **Call `ptah_session_status` after a resume.** Children keep running while you are not live and a
   completion that arrived then is held, not lost. Every `ptah_session_*` result ends with those held
   completions under "Held while this session was not live". A child's `ptah_agent_report` while you
-  are not live is refused and counted, not queued.
+  are not live is held (at most 5 per child) and delivered, marked `held="true"` with its
+  `reported-at` time, when you are next active.
 - **Permissions.** There is no permission, path or parent argument. The child starts at your
   session's autopilot level as it is at `ptah_session_start`. In full autopilot (YOLO) it runs
   without prompts. At any other level, file edits inside the worktree and allowlisted Bash
