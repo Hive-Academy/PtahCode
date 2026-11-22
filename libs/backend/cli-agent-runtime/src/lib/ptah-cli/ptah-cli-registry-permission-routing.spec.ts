@@ -285,3 +285,79 @@ describe('PtahCliRegistry.spawnAgent — permission routing identity', () => {
     expect(createCallback.mock.calls[0][0]).toBe(resumed);
   });
 });
+
+describe('PtahCliRegistry.spawnAgent — lane tool gate (TASK_2026_2297 P4)', () => {
+  const paused = () => ({
+    actor: 'ptah-budget' as const,
+    action: 'asked-handoff' as const,
+    reason: 'context-budget' as const,
+    nextStep: 'write-notes-and-return' as const,
+  });
+  type QueryArg = {
+    options: {
+      permissionMode?: string;
+      canUseTool?: unknown;
+      hooks?: Record<string, { hooks: ((...args: unknown[]) => Promise<unknown>)[] }[]>;
+    };
+  };
+  const preToolUse = async (queryFn: jest.Mock, toolName: string) => {
+    const [arg] = queryFn.mock.calls[0] as unknown as [QueryArg];
+    const results: unknown[] = [];
+    for (const matcher of arg.options.hooks?.['PreToolUse'] ?? []) {
+      for (const hook of matcher.hooks) {
+        results.push(
+          await hook(
+            { hook_event_name: 'PreToolUse', tool_name: toolName, tool_input: {},
+              tool_use_id: 't', session_id: 's', transcript_path: '/t', cwd: '/w' },
+            't',
+            { signal: new AbortController().signal },
+          ),
+        );
+      }
+    }
+    return { arg, results };
+  };
+  const deniedByPtah = expect.objectContaining({
+    hookSpecificOutput: expect.objectContaining({
+      permissionDecision: 'deny',
+      permissionDecisionReason: expect.stringMatching(/^Ptah budget monitor paused new work tools/),
+    }),
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('reports honorsLaneToolGate and gates the SDK options when a gate is supplied', async () => {
+    const { registry, queryFn } = buildHarness();
+    const result = await registry.spawnAgent(BASE_CONFIG.id, 'do work', {
+      permission: 'ask',
+      laneToolGate: paused,
+    });
+    expect('handle' in result && result.handle.honorsLaneToolGate).toBe(true);
+    const { results } = await preToolUse(queryFn, 'Bash');
+    expect(results).toEqual([deniedByPtah]);
+  });
+
+  it('leaves the flag unset and adds no hook for a non-Claude provider without a gate', async () => {
+    // BASE_CONFIG routes to the z-ai Anthropic-compatible provider.
+    const { registry, queryFn } = buildHarness();
+    const result = await registry.spawnAgent(BASE_CONFIG.id, 'do work', { permission: 'ask' });
+    expect('handle' in result && result.handle.honorsLaneToolGate).toBeUndefined();
+    const { arg } = await preToolUse(queryFn, 'Bash');
+    expect(arg.options.hooks?.['PreToolUse']).toBeUndefined();
+  });
+
+  it('keeps a yolo lane gated by the PreToolUse hook', async () => {
+    const { registry, queryFn } = buildHarness();
+    const result = await registry.spawnAgent(BASE_CONFIG.id, 'do work', {
+      permission: 'yolo',
+      laneToolGate: paused,
+    });
+    expect('handle' in result && result.handle.honorsLaneToolGate).toBe(true);
+    const { arg, results } = await preToolUse(queryFn, 'Write');
+    expect(arg.options.permissionMode).toBe('bypassPermissions');
+    expect(arg.options.canUseTool).toBeUndefined();
+    expect(results).toEqual([deniedByPtah]);
+  });
+});

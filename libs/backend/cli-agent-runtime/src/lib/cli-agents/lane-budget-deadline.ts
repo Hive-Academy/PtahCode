@@ -18,14 +18,24 @@ export function createLaneBudget(settings: AgentBudgetSettings, startedAt: strin
   );
 }
 
-export function armLaneBudgetDeadline(tracked: TrackedAgent, isCurrent: () => boolean, stop: () => void): void {
+/**
+ * Arm one timer at the lane's next duration ask or pause point (measured from its original
+ * start). When it fires for the current running lane, `onDeadline` re-assesses admission and
+ * the timer re-arms for the following point. Re-arming clears the prior timer, so a settings
+ * change can call it again. No timer is armed once the lane is past the pause point.
+ */
+export function armLaneBudgetDeadline(tracked: TrackedAgent, isCurrent: () => boolean, onDeadline: () => void): void {
   if (!tracked.budget) return;
   clearTimeout(tracked.budgetTimer);
+  tracked.budgetTimer = undefined;
+  const delay = tracked.budget.nextAdmissionDeadlineMs();
+  if (delay === undefined) return;
   const timer = setTimeout(() => {
+    tracked.budgetTimer = undefined;
     if (!isCurrent() || tracked.info.status !== 'running') return;
-    if (tracked.budget?.remainingMs() === 0) stop();
-    else armLaneBudgetDeadline(tracked, isCurrent, stop);
-  }, Math.min(tracked.budget.remainingMs(), 2_147_483_647));
+    onDeadline();
+    armLaneBudgetDeadline(tracked, isCurrent, onDeadline);
+  }, delay);
   timer.unref();
   tracked.budgetTimer = timer;
 }

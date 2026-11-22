@@ -13,7 +13,7 @@ it('merges a late native ID and preserves the replaced Codex thread', () => {
     budget: new AgentBudgetCoordinator({ warnRatio: 0.8, stopWeightedTokens: 100,
       handoffContextTokens: 50, maxDurationMin: 2 }, now) } as TrackedAgent;
   const decision = bindLaneSessionId(tracked, 'native', [previous, tracked]);
-  expect(decision).toEqual({ warning: true });
+  expect(decision).toMatchObject({ phase: 'asked-handoff', reason: 'weighted-budget', measured: 90 });
   expect(tracked.info.replacesCliSessionIds).toEqual(['fallback']);
   expect(tracked.info.agentBudget?.rawTokens).toBe(90);
 });

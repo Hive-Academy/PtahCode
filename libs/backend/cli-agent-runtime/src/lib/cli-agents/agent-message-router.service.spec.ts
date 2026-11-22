@@ -34,7 +34,12 @@ import type {
   SdkHandle,
 } from './cli-adapters/cli-adapter.interface';
 import type { Logger } from '@ptah-extension/vscode-core';
-import type { AgentProcessInfo, CliType } from '@ptah-extension/shared';
+import {
+  formatBudgetPauseNotice,
+  type AgentActionNotice,
+  type AgentProcessInfo,
+  type CliType,
+} from '@ptah-extension/shared';
 
 function createLogger(): jest.Mocked<Logger> {
   return {
@@ -671,5 +676,131 @@ describe('AgentMessageRouter durable flush (dispatch journal)', () => {
       .toEqual({ status: 'failed', reason: 'continuation_rejected' });
     expect(router.messageStatus(AGENT_ID, tracked, 'env-2')).toEqual({ status: 'delivered' });
     expect(tracked.pendingMessages).toEqual([]);
+  });
+});
+
+describe('AgentMessageRouter pause hold', () => {
+  const PAUSE: AgentActionNotice = {
+    actor: 'ptah-budget',
+    action: 'paused',
+    reason: 'weighted-budget',
+    nextStep: 'write-notes-and-return',
+    measured: 900,
+    limit: 800,
+    unit: 'tokens',
+  };
+
+  const pausedRecord = (status: AgentProcessInfo['status']): MessageRoutableAgent => {
+    const tracked = createRecord({ laneAdmission: { budget: PAUSE } });
+    tracked.info = { ...tracked.info, status };
+    tracked.sdkHandle = {
+      supportsContinuation: () => true,
+      supportsInterrupt: () => true,
+      interrupt: jest.fn(),
+      continue: jest.fn(),
+      steer: jest.fn().mockResolvedValue(undefined),
+    } as unknown as SdkHandle;
+    return tracked;
+  };
+
+  it('parks a queued message on an idle paused lane with the Ptah hold text', async () => {
+    const router = new AgentMessageRouter(createLogger(), createDetection({ steer: true, interrupt: true, continuation: true }));
+    const tracked = pausedRecord('completed');
+    const dispatcher = createDispatcher();
+
+    const outcome = await router.route(AGENT_ID, tracked, 'next task', dispatcher);
+
+    expect(outcome.mode).toBe('queue-next-turn');
+    expect(outcome.detail?.startsWith(formatBudgetPauseNotice(PAUSE, AGENT_ID))).toBe(true);
+    expect(outcome.detail).toContain('It dispatches once the pause clears.');
+    expect(tracked.pendingMessages.map((entry) => entry.text)).toEqual(['next task']);
+    expect(dispatcher.continueConversation).not.toHaveBeenCalled();
+    expect(router.messageStatus(AGENT_ID, tracked, outcome.messageId ?? '')).toEqual({ status: 'pending' });
+  });
+
+  it('holds a now message that would interrupt a running paused lane', async () => {
+    const router = new AgentMessageRouter(createLogger(), createDetection({ steer: false, interrupt: true, continuation: true }));
+    const tracked = pausedRecord('running');
+    tracked.sdkHandle = { ...tracked.sdkHandle, steer: undefined } as unknown as SdkHandle;
+    const dispatcher = createDispatcher();
+
+    const outcome = await router.route(AGENT_ID, tracked, 'urgent', dispatcher, 'now', undefined, true);
+
+    expect(outcome.mode).toBe('queue-next-turn');
+    expect(tracked.sdkHandle?.interrupt).not.toHaveBeenCalled();
+    expect(tracked.pendingMessages).toHaveLength(1);
+  });
+
+  it.each(['steer', 'now'] as const)('parks caller %s on a steer-capable paused lane', async (delivery) => {
+    const router = new AgentMessageRouter(createLogger(), createDetection({ steer: true, interrupt: true, continuation: true }));
+    const tracked = pausedRecord('running');
+
+    const outcome = await router.route(AGENT_ID, tracked, 'caller message', createDispatcher(), delivery, 'env-1');
+
+    expect(outcome).toEqual(expect.objectContaining({ mode: 'queue-next-turn', messageId: 'env-1' }));
+    expect(tracked.sdkHandle?.steer).not.toHaveBeenCalled();
+    expect(tracked.pendingMessages.map((entry) => entry.text)).toEqual(['caller message']);
+    expect(router.messageStatus(AGENT_ID, tracked, 'env-1')).toEqual({ status: 'pending' });
+  });
+
+  it('retains the same receipt and journal reservation when paused during the journal write', async () => {
+    let finishJournal!: () => void;
+    const journal = {
+      markDispatching: jest.fn(() => new Promise<void>((resolve) => { finishJournal = resolve; })),
+    };
+    const router = new AgentMessageRouter(createLogger(), createDetection({ steer: false, interrupt: false, continuation: true }), journal);
+    const tracked = pausedRecord('running');
+    tracked.laneAdmission = {};
+    const dispatcher = createDispatcher();
+    await router.route(AGENT_ID, tracked, 'first', dispatcher, 'queue', 'env-1');
+    tracked.info = { ...tracked.info, status: 'completed' };
+
+    const flush = router.flushPending(AGENT_ID, tracked, dispatcher);
+    tracked.laneAdmission = { budget: PAUSE };
+    finishJournal();
+    await flush;
+
+    expect(dispatcher.continueConversation).not.toHaveBeenCalled();
+    expect(router.messageStatus(AGENT_ID, tracked, 'env-1')).toEqual({ status: 'pending' });
+
+    tracked.laneAdmission = {};
+    await router.flushPending(AGENT_ID, tracked, dispatcher);
+    expect(journal.markDispatching).toHaveBeenCalledTimes(1);
+    expect(dispatcher.continueConversation).toHaveBeenCalledWith(AGENT_ID, 'first', 'env-1');
+    expect(router.messageStatus(AGENT_ID, tracked, 'env-1')).toEqual({ status: 'delivered' });
+  });
+
+  it('holds flushPending while paused without dropping, then flushes after the pause clears', async () => {
+    const router = new AgentMessageRouter(createLogger(), createDetection({ steer: true, interrupt: true, continuation: true }));
+    const tracked = pausedRecord('completed');
+    const dispatcher = createDispatcher();
+    const first = await router.route(AGENT_ID, tracked, 'first', dispatcher);
+    const second = await router.route(AGENT_ID, tracked, 'second', dispatcher);
+
+    await router.flushPending(AGENT_ID, tracked, dispatcher);
+
+    expect(dispatcher.continueConversation).not.toHaveBeenCalled();
+    expect(tracked.pendingMessages.map((entry) => entry.text)).toEqual(['first', 'second']);
+    expect(router.messageStatus(AGENT_ID, tracked, first.messageId ?? '')).toEqual({ status: 'pending' });
+
+    tracked.laneAdmission = {};
+    await router.flushPending(AGENT_ID, tracked, dispatcher);
+
+    expect(dispatcher.continueConversation).toHaveBeenCalled();
+    expect(dispatcher.continueConversation.mock.calls[0]?.[1]).toContain('first');
+    expect(router.messageStatus(AGENT_ID, tracked, first.messageId ?? '')).toEqual({ status: 'delivered' });
+    expect(tracked.pendingMessages.map((entry) => entry.text)).toEqual(['second']);
+
+    await router.flushPending(AGENT_ID, tracked, dispatcher);
+    expect(router.messageStatus(AGENT_ID, tracked, second.messageId ?? '')).toEqual({ status: 'delivered' });
+    expect(tracked.pendingMessages).toEqual([]);
+  });
+
+  it('does not hold on an ask notice', async () => {
+    const router = new AgentMessageRouter(createLogger(), createDetection({ steer: true, interrupt: true, continuation: true }));
+    const tracked = pausedRecord('completed');
+    tracked.laneAdmission = { budget: { ...PAUSE, action: 'asked-handoff' } };
+    const outcome = await router.route(AGENT_ID, tracked, 'go on', createDispatcher());
+    expect(outcome.detail ?? '').not.toContain('paused new work');
   });
 });

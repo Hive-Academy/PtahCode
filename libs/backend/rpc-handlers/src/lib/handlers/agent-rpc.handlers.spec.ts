@@ -134,6 +134,7 @@ interface Harness {
     spawn: jest.Mock;
     spawnFromSdkHandle: jest.Mock;
     reserveAgentId: jest.Mock;
+    laneToolGateFor: jest.Mock;
     prepareSdkHandleSpawn: jest.Mock;
     continueConversation: jest.Mock;
     findAgentInfo: jest.Mock;
@@ -216,6 +217,7 @@ function makeHarness(options: HarnessOptions = {}): Harness {
     spawn: jest.fn().mockResolvedValue({ agentId: 'a-1' }),
     spawnFromSdkHandle: jest.fn().mockResolvedValue({ agentId: 'a-2' }),
     reserveAgentId: jest.fn().mockReturnValue('reserved-agent-id'),
+    laneToolGateFor: jest.fn().mockReturnValue(undefined),
     prepareSdkHandleSpawn: jest.fn(
       async (input: { task: string; resumeSessionId?: string }) => ({
         task: input.task,

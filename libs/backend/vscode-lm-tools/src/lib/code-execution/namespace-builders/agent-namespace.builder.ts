@@ -190,6 +190,8 @@ interface PtahCliRegistryLike {
       model?: string;
       /** Reserved agent id — rides the spawn's MCP URL as `/agent/{id}`. */
       agentId?: string;
+      /** Holds the lane's tools while a Ptah pause is active. */
+      laneToolGate?: ReturnType<AgentProcessManager['laneToolGateFor']>;
       role?: AgentRoleDefinition;
       permission?: SpawnAgentRequest['permission'];
       network?: SpawnAgentRequest['network'];
@@ -589,10 +591,12 @@ export function buildAgentNamespace(
             {
               workingDirectory,
               resumeSessionId: prepared.resumeSessionId,
+              ...(prepared.checkResumeOwner ? { checkResumeOwner: prepared.checkResumeOwner } : {}),
               parentSessionId: activeSessionId,
               modelTier: request.modelTier,
               model: request.model,
               agentId,
+              laneToolGate: agentProcessManager.laneToolGateFor(agentId),
               role: roleDefinition,
               permission: request.permission,
               network: request.network,

@@ -1,25 +1,28 @@
 /**
- * Lane repeat-call guard (TASK_2026_597, component 16, R9.3/R9.4).
+ * Lane repeat-call guard (TASK_2026_597, component 16, R9.3/R9.4; TASK_2026_2297 P4).
  *
- * Stops a looping lane by watching its `tool-call` segments. There is no
+ * Watches a lane's `tool-call` segments for a repeat loop. There is no
  * tool-call budget: the vendor CLIs manage their own context, and a count
  * says little about cost. The guard only counts calls (the count is reported
  * in the completion signal) and catches a repeat loop:
  *
  * - When one identical call (tool name plus normalised `toolInput` JSON, else
  *   `toolArgs`, else the tool name alone) reaches `repeatAt` occurrences it
- *   asks for a stop with `repeat-call`. Cursor's adapter redacts or drops
- *   `toolInput`, so its keys can be coarser; that is accepted.
+ *   asks for a handoff (`ask`), and at twice that it asks for a pause
+ *   (`pause`). It never asks for a stop: Ptah pauses a lane, it does not end
+ *   it. Cursor's adapter redacts or drops `toolInput`, so its keys can be
+ *   coarser; that is accepted.
  * - File-edit calls (Write, Edit, Delete, ...) count toward the call count but
  *   not toward the repeat check: some adapters (Codex file changes) report only
  *   the path, so repeated normal edits to one file would share a key.
  *
- * The guard only decides. The manager performs the stop. One guard per
- * tracked lane, dropped with the lane, and {@link reset} when the caller starts a new turn on it. No timers; each segment costs one
- * map update.
+ * Each action is returned once; counting continues after both. The guard only
+ * decides. The manager performs the ask or pause. One guard per tracked lane,
+ * dropped with the lane, and {@link reset} when the caller starts a new turn on
+ * it. No timers; each segment costs one map update.
  */
 
-import type { CliOutputSegment, LaneStopReason } from '@ptah-extension/shared';
+import type { CliOutputSegment } from '@ptah-extension/shared';
 
 /** Tool names (lower-cased) that edit files; left out of the repeat check. */
 const FILE_EDIT_TOOLS: ReadonlySet<string> = new Set([
@@ -34,8 +37,11 @@ const FILE_EDIT_TOOLS: ReadonlySet<string> = new Set([
 /** Bound on remembered call ids; the oldest id is dropped past this. */
 const MAX_COUNTED_IDS = 512;
 
+/** The pause point is this multiple of `repeatAt`. */
+const REPEAT_PAUSE_MULTIPLIER = 2;
+
 export interface LaneBudgetThresholds {
-  /** Occurrences of one identical call after which the lane is stopped. */
+  /** Occurrences of one identical call after which the lane is asked for a handoff. */
   readonly repeatAt: number;
 }
 
@@ -43,10 +49,11 @@ export interface LaneBudgetThresholds {
 export type LaneBudgetAction =
   | { readonly kind: 'none' }
   | {
-      readonly kind: 'stop';
-      readonly stopReason: LaneStopReason;
-      /** How many times the repeated call ran when the stop was asked for. */
+      readonly kind: 'ask' | 'pause';
+      /** How many times the repeated call ran when the action was asked for. */
       readonly repeats: number;
+      /** The occurrence count that triggered this action. */
+      readonly limit: number;
     };
 
 const NONE: LaneBudgetAction = { kind: 'none' };
@@ -57,7 +64,7 @@ const NONE: LaneBudgetAction = { kind: 'none' };
  */
 export class LaneBudgetGuard {
   private toolCalls = 0;
-  private stopped = false;
+  private phase: 'running' | 'asked' | 'paused' = 'running';
   private readonly repeats = new Map<string, number>();
   /** Call ids already counted, so start + completion segments count once. */
   private readonly countedIds = new Set<string>();
@@ -69,33 +76,43 @@ export class LaneBudgetGuard {
     return this.toolCalls;
   }
 
+  /** Highest action already returned since the last {@link reset}. */
+  get currentPhase(): 'running' | 'asked' | 'paused' {
+    return this.phase;
+  }
+
   /**
-   * Count one segment. Only `tool-call` and id-carrying `command` segments count. After a stop has
-   * been asked for, every later segment returns `none`.
+   * Count one segment. Only `tool-call` and id-carrying `command` segments count. Returns
+   * `ask` once when one call reaches `repeatAt`, and `pause` once at twice that.
    */
   observe(segment: CliOutputSegment): LaneBudgetAction {
-    if (this.stopped || !this.isNewCall(segment)) return NONE;
+    if (!this.isNewCall(segment)) return NONE;
 
     this.toolCalls += 1;
-    if (!isFileEdit(segment)) {
-      const key = callKey(segment);
-      const repeats = (this.repeats.get(key) ?? 0) + 1;
-      this.repeats.set(key, repeats);
-      if (repeats >= this.thresholds.repeatAt) {
-        return this.stop('repeat-call', repeats);
-      }
+    if (isFileEdit(segment)) return NONE;
+    const key = callKey(segment);
+    const repeats = (this.repeats.get(key) ?? 0) + 1;
+    this.repeats.set(key, repeats);
+    const askAt = this.thresholds.repeatAt;
+    const pauseAt = askAt * REPEAT_PAUSE_MULTIPLIER;
+    if (repeats >= pauseAt && this.phase !== 'paused') {
+      this.phase = 'paused';
+      return { kind: 'pause', repeats, limit: pauseAt };
+    }
+    if (repeats >= askAt && this.phase === 'running') {
+      this.phase = 'asked';
+      return { kind: 'ask', repeats, limit: askAt };
     }
     return NONE;
   }
 
   /**
-   * Start counting afresh for a new task the caller sent to the lane: counts
-   * and repeats are cleared. A guard that already asked
-   * for a stop stays stopped.
+   * Start counting afresh for a new task the caller sent to the lane: counts,
+   * repeats and the ask/pause latch are cleared.
    */
   reset(): void {
-    if (this.stopped) return;
     this.toolCalls = 0;
+    this.phase = 'running';
     this.repeats.clear();
     this.countedIds.clear();
   }
@@ -125,12 +142,6 @@ export class LaneBudgetGuard {
       if (!oldest.done) this.countedIds.delete(oldest.value);
     }
     this.countedIds.add(id);
-  }
-
-  private stop(stopReason: LaneStopReason, repeats: number): LaneBudgetAction {
-    this.stopped = true;
-    this.repeats.clear();
-    return { kind: 'stop', stopReason, repeats };
   }
 }
 

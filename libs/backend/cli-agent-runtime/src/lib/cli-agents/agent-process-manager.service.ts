@@ -36,6 +36,11 @@ import {
   CliType,
   normalizeWorkspaceRoot,
   isAgentBudgetStopReason,
+  formatBudgetAskReadOnly,
+  formatBudgetPauseNotice,
+  formatAgentActionNotice,
+  formatLaneToolGateUnavailable,
+  type AgentActionNotice,
 } from '@ptah-extension/shared';
 import type {
   AgentMessageOutcome,
@@ -47,7 +52,6 @@ import type {
   CliSessionReference,
   FlatStreamEventUnion,
   QuotaOwnerRef,
-  LaneStopReason,
   OutcomeTaskKind,
   OutcomeRoutingSource,
   ProviderAccountSelection,
@@ -78,6 +82,7 @@ import {
 import { CliDetectionService } from './cli-detection.service';
 import {
   AgentMessageError,
+  AgentLanePausedError,
   AgentMessageRouter,
   type MessageRoutableAgent,
 } from './agent-message-router.service';
@@ -85,6 +90,7 @@ import { resolveEffectiveLaneCapabilities } from './messaging/agent-effective-ca
 import type {
   CliCommandOptions,
   SdkHandle,
+  LaneToolGate,
   LaneAccountBindingFields,
   LaneAccountReference,
   LaneAccountBindingPort,
@@ -122,8 +128,11 @@ import { AgentBudgetCoordinator } from './agent-budget-coordinator';
 import { createLaneBudget } from './lane-budget-deadline';
 import {
   deliverLaneBudgetWarning,
+  laneBudgetNotice,
   LaneBudgetTelemetry,
+  releaseLaneBudgetNotice,
   takeHeldBudgetWarning,
+  type LaneBudgetWarningOutcome,
 } from './lane-budget-telemetry';
 import { bindLaneSessionId } from './lane-session-binding';
 import type { AgentOutputJournal } from './agent-output-journal.service';
@@ -144,7 +153,14 @@ import {
 import { findBlockedLaneModel } from './lane-spawn-policy';
 import { CLI_AGENT_RUNTIME_TOKENS } from '../di/tokens';
 import { MCP_ATTACHMENT_TIMEOUT_MS } from './mcp-attachment-probe.port';
-import type { TrackedAgent } from './tracked-agent';
+import {
+  announceLaneNotice,
+  clearLaneAdmission,
+  currentLaneNotice,
+  isLanePaused,
+  type LaneAdmissionSource,
+  type TrackedAgent,
+} from './tracked-agent';
 import { startingAgent, armSpawnAdmissionWatchdog, type SpawnAdmission } from './agent-spawn-admission';
 import { AgentSpawnMemoryGate } from './agent-spawn-memory-gate';
 import {
@@ -246,6 +262,7 @@ interface SdkSpawnOptions {
   /** Claude lanes only: the named route to admit; absent means ambient. */
   readonly accountAdmission?: ClaudeAccountAdmissionRequest;
   readonly accountBindings?: LaneAccountBindingPort;
+  readonly checkResumeOwner?: () => void;
   readonly expectsMcp?: boolean;
   readonly runSdk: (options: CliCommandOptions) => Promise<SdkHandle>;
   readonly request: SpawnAgentRequest;
@@ -270,6 +287,8 @@ interface SdkSpawnOptions {
  * and the decision to report to the caller.
  */
 export interface GatedResume {
+  /** Revalidate the original session immediately before a registry launch. */
+  readonly checkResumeOwner?: () => void;
   readonly accountReference?: LaneAccountReference;
   readonly task: string;
   readonly resumeSessionId?: string;
@@ -344,6 +363,9 @@ export interface AgentWaitResult {
   readonly entries: readonly AgentWaitEntry[];
 }
 
+const MAX_INACTIVITY_TIMER_MS = 2_147_483_647;
+const LANE_NOTICE_RETRY_DELAYS_MS = [5_000, 30_000, 120_000] as const;
+
 export class AgentContinueError extends Error {
   constructor(
     readonly code: AgentContinueErrorCode,
@@ -387,7 +409,7 @@ export class AgentProcessManager {
    */
   private readonly pendingAdoptions = new Map<
     string,
-    { readonly previousParent: string; signalHeld: boolean }
+    { readonly previousParent: string; completions: Array<(parentSessionId?: string) => void> }
   >();
   /**
    * One repeat-call guard per running lane (TASK_2026_597, component 16),
@@ -397,6 +419,8 @@ export class AgentProcessManager {
   private readonly laneGuards = new Map<string, LaneBudgetGuard>();
   private readonly completionClaims = new Set<string>();
   private readonly budgetTelemetry: LaneBudgetTelemetry;
+  private disposing = false;
+  private readonly laneNoticeRetryTimers = new Set<NodeJS.Timeout>();
   private readonly budgetSettingsSubscription?: { dispose(): void };
   /** Counter for in-flight spawn operations (not yet in agents map) */
   private spawning = 0;
@@ -503,52 +527,198 @@ export class AgentProcessManager {
     this.events.on('agent:exited', () => this.memoryGate.wake());
     this.budgetTelemetry = new LaneBudgetTelemetry(
       this.logger,
-      async (agentId) => {
-        const tracked = this.agents.get(agentId);
-        return deliverLaneBudgetWarning(
-          agentId,
-          tracked?.sdkHandle,
-          tracked?.info.status === 'running' && !tracked.hasExited,
-          tracked
-            ? (warning) => {
-                const pending = tracked.pendingMessages[0];
-                if (!pending) return false;
-                if (tracked.sdkHandle?.queueForNextTurn)
-                  tracked.sdkHandle.queueForNextTurn(warning);
-                else
-                  tracked.pendingMessages[0] = {
-                    ...pending,
-                    text: `${warning}\n\n${pending.text}`,
-                  };
-                return true;
-              }
-            : undefined,
-        );
-      },
-      (agentId, reason) => {
-        void this.stopLaneForGuard(agentId, reason, 0, 0);
-      },
+      (agentId, notice) => this.publishLaneNotice(agentId, 'budget', notice),
+      (agentId, text) => this.deliverLaneAsk(agentId, text),
     );
     this.budgetSettingsSubscription =
       this.spawnEnvironment.onAgentBudgetSettingsChanged?.(() => {
         const settings = this.spawnEnvironment.resolveAgentBudgetSettings();
         for (const [agentId, tracked] of this.agents) {
-          if (tracked.info.status !== 'running' || !tracked.budget) continue;
-          const decision = tracked.budget.updateSettings(settings);
+          if (!tracked.budget) continue;
+          if (tracked.info.status !== 'running') {
+            // Update settled ledgers before any continuation can consult them.
+            const completedAt = Date.parse(tracked.info.completedAt ?? '');
+            const idle = tracked.budget.updateSettings(
+              settings,
+              Number.isFinite(completedAt) ? completedAt : Date.now(),
+            );
+            tracked.info = { ...tracked.info, agentBudget: tracked.budget.record() };
+            const latch = tracked.laneAdmission?.budget;
+            if (latch?.action === 'paused' && latch.reason === 'telemetry-unavailable') continue;
+            const notice = laneBudgetNotice(idle);
+            if (notice?.action === 'paused')
+              this.publishLaneNotice(agentId, 'budget', notice);
+            else if (latch && releaseLaneBudgetNotice(tracked))
+              this.releaseHeldWork(agentId, tracked);
+            continue;
+          }
+          const admission = tracked.budget.updateSettings(settings);
           tracked.info = {
             ...tracked.info,
             agentBudget: tracked.budget.record(),
           };
-          if (decision.stopReason) clearTimeout(tracked.budgetTimer);
-          else
-            this.budgetTelemetry.armDeadline(
-              agentId,
-              tracked,
-              () => this.agents.get(agentId) === tracked,
-            );
-          this.budgetTelemetry.dispatch(agentId, tracked, decision);
+          // Re-armed for every phase: a raised limit moves both the ask and
+          // the pause point, and a paused lane still keeps its deadline.
+          this.budgetTelemetry.armDeadline(
+            agentId,
+            tracked,
+            () => this.agents.get(agentId) === tracked,
+          );
+          this.budgetTelemetry.dispatch(agentId, tracked, { admission });
         }
       });
+  }
+
+  /**
+   * Send a Ptah-labeled ask to the lane: steer a live turn, else attach it to
+   * the next queued message, else report it held for the parent's next send.
+   */
+  private deliverLaneAsk(
+    agentId: string,
+    message: string,
+    allowNextTurn = true,
+  ): Promise<LaneBudgetWarningOutcome> {
+    const tracked = this.agents.get(agentId);
+    return deliverLaneBudgetWarning(
+      agentId,
+      tracked?.sdkHandle,
+      tracked?.info.status === 'running' && !tracked.hasExited,
+      message,
+      tracked && allowNextTurn
+        ? (warning) => {
+            const pending = tracked.pendingMessages[0];
+            if (!pending) return false;
+            if (tracked.sdkHandle?.queueForNextTurn)
+              tracked.sdkHandle.queueForNextTurn(warning);
+            else
+              tracked.pendingMessages[0] = {
+                ...pending,
+                text: `${warning}\n\n${pending.text}`,
+              };
+            return true;
+          }
+        : undefined,
+    );
+  }
+
+  /**
+   * Inactivity describes the active turn only. Keep a failed inactivity ask
+   * in its notice, without attaching it to a future turn.
+   */
+  private askLaneForHandoff(
+    agentId: string,
+    tracked: TrackedAgent,
+    notice: AgentActionNotice,
+  ): void {
+    const text = formatBudgetAskReadOnly(notice);
+    const inactivityAsk = notice.reason === 'lane-inactive';
+    void this.deliverLaneAsk(agentId, text, !inactivityAsk)
+      .then((outcome) => {
+        if (!inactivityAsk && outcome.mode === 'held' && this.agents.get(agentId) === tracked)
+          tracked.heldBudgetWarning = text;
+        this.logger.info('[AgentProcessManager] Lane handoff ask', {
+          agentId,
+          reason: notice.reason,
+          mode: outcome.mode,
+        });
+      })
+      .catch((error: unknown) => {
+        this.logger.error(
+          '[AgentProcessManager] Lane handoff ask failed',
+          error instanceof Error ? error : new Error(String(error)),
+        );
+      });
+  }
+
+  /**
+   * Record one monitor's notice on the lane, once per (source, phase,
+   * reason), and announce it. Never stops the lane: a pause only holds new
+   * work (dispatch hold, tool gate) until a person decides. Returns false
+   * when the notice was already announced; this is the only deduplication.
+   */
+  private publishLaneNotice(
+    agentId: string,
+    source: LaneAdmissionSource,
+    notice: AgentActionNotice,
+  ): boolean {
+    const tracked = this.agents.get(agentId);
+    if (!tracked) return false;
+    if (!announceLaneNotice(tracked, source, notice)) return false;
+    this.logger.warn('[AgentProcessManager] Lane admission notice', {
+      agentId,
+      source,
+      action: notice.action,
+      reason: notice.reason,
+      measured: notice.measured,
+      limit: notice.limit,
+    });
+    this.events.emit('agent:action-notice', { info: tracked.info, notice });
+    const parentText = this.laneNoticeParentText(agentId, tracked, notice);
+    void this.deliverLaneNoticeToParent(agentId, tracked, source, notice, parentText);
+    return true;
+  }
+
+  private async deliverLaneNoticeToParent(
+    agentId: string,
+    tracked: TrackedAgent,
+    source: LaneAdmissionSource,
+    notice: AgentActionNotice,
+    text: string,
+    attempt = 0,
+  ): Promise<void> {
+    const stillCurrent = () => {
+      const current = tracked.laneAdmission?.[source];
+      return !this.disposing && this.agents.get(agentId) === tracked &&
+        tracked.info.status !== 'stopped' &&
+        current?.action === notice.action && current.reason === notice.reason;
+    };
+    if (!stillCurrent()) return;
+    try {
+      const result = await this.laneCompletion.notifyActionNotice(tracked.info, notice, text);
+      if (result !== 'failed') return;
+    } catch (error: unknown) {
+      this.logger.error(
+        '[AgentProcessManager] Lane notice delivery failed',
+        error instanceof Error ? error : new Error(String(error)),
+      );
+    }
+    const delay = LANE_NOTICE_RETRY_DELAYS_MS[attempt];
+    if (delay === undefined || !stillCurrent()) return;
+    const timer = this.unrefTimer(setTimeout(() => {
+      this.laneNoticeRetryTimers.delete(timer);
+      void this.deliverLaneNoticeToParent(agentId, tracked, source, notice, text, attempt + 1);
+    }, delay));
+    this.laneNoticeRetryTimers.add(timer);
+  }
+
+  /**
+   * The tool gate for one lane: the current Ptah notice while the lane is
+   * paused, otherwise undefined. Shared by `runSdk` lanes and Ptah CLI lanes
+   * that spawn through the registry with an already-reserved agent id.
+   */
+  laneToolGateFor(agentId: string): LaneToolGate {
+    return () => {
+      const current = this.agents.get(agentId);
+      return current && isLanePaused(current)
+        ? currentLaneNotice(current)
+        : undefined;
+    };
+  }
+
+  /**
+   * Parent copy for a notice. A pause without a verified tool gate keeps the
+   * monitor and its trigger and adds that the CLI may still run tools.
+   */
+  private laneNoticeParentText(
+    agentId: string,
+    tracked: TrackedAgent,
+    notice: AgentActionNotice,
+  ): string {
+    if (notice.action !== 'paused')
+      return formatAgentActionNotice(notice, { id: agentId });
+    if (tracked.sdkHandle?.honorsLaneToolGate)
+      return formatBudgetPauseNotice(notice, agentId);
+    return formatLaneToolGateUnavailable(notice, agentId);
   }
 
   /**
@@ -756,6 +926,7 @@ export class AgentProcessManager {
       accountBindings: adapter.accountBindings,
       resumeDecision: gated?.resumeDecision,
       originalTask: gated?.originalTask,
+      checkResumeOwner: gated?.checkResumeOwner,
       runSdk: adapter.runSdk.bind(adapter),
       request: {
         ...request,
@@ -910,11 +1081,49 @@ export class AgentProcessManager {
    * records this host holds for that session: the new message, the original
    * task, the previous final text and the files it changed. No git process.
    */
+  /** The pause notice when the lane's persisted ledger is at its pause ceiling. */
+  private pausedBudgetNotice(
+    latest: TrackedAgent | undefined,
+  ): AgentActionNotice | undefined {
+    const record = latest?.info.agentBudget;
+    if (!latest || !record) return undefined;
+    // Measured at the lane's last activity, not now: an ended lane is not
+    // paused only because wall-clock time passed since it stopped.
+    const { completedAt, lastActivityAt, startedAt } = latest.info;
+    const endedAt = Date.parse(completedAt ?? lastActivityAt ?? startedAt);
+    const measuredAt = Number.isFinite(endedAt)
+      ? endedAt
+      : Date.parse(startedAt);
+    const notice = laneBudgetNotice(
+      createLaneBudget(
+        this.spawnEnvironment.resolveAgentBudgetSettings(),
+        startedAt,
+        record,
+      ).admission(measuredAt),
+    );
+    return notice?.action === 'paused' ? notice : undefined;
+  }
+
+  private assertResumeOwnerNotPaused(cli: CliType, resumeSessionId: string): void {
+    for (const tracked of this.agents.values()) {
+      const { info } = tracked;
+      if (info.cli !== cli || info.cliSessionId !== resumeSessionId) continue;
+      if (info.status !== 'running' && info.status !== 'starting') continue;
+      const notice = isLanePaused(tracked) ? currentLaneNotice(tracked) : undefined;
+      if (notice)
+        throw new AgentLanePausedError(
+          `${formatBudgetPauseNotice(notice, info.agentId)} Resume is refused while that lane is paused.`,
+        );
+    }
+  }
+
   private async gateResume(
     task: string,
     resumeSessionId: string,
     cli: CliType,
   ): Promise<GatedResume> {
+    const checkResumeOwner = () => this.assertResumeOwnerNotPaused(cli, resumeSessionId);
+    checkResumeOwner();
     const lane = laneRecordsForSession(this.agents.values(), resumeSessionId);
     const latest = lane[lane.length - 1];
     const lastActivityAt = latest
@@ -928,10 +1137,12 @@ export class AgentProcessManager {
       .reverse()
       .find((tracked) => tracked.info.lastRequestContext !== undefined)
       ?.info.lastRequestContext;
+    const pausedBudgetNotice = this.pausedBudgetNotice(latest);
 
     const gate = await this.resumeGate.evaluate({
       cli,
       cliSessionId: resumeSessionId,
+      ...(pausedBudgetNotice ? { pausedBudgetNotice } : {}),
       ...(latest?.info.agentBudget ||
       isAgentBudgetStopReason(latest?.info.stopReason)
         ? {
@@ -955,6 +1166,7 @@ export class AgentProcessManager {
         : {}),
       ...(lastRequestContext ? { lastRequestContext } : {}),
     });
+    checkResumeOwner();
     this.logger.info('[AgentProcessManager] Resume gate', {
       cli,
       resumeSessionId,
@@ -970,6 +1182,7 @@ export class AgentProcessManager {
       return {
         task,
         resumeSessionId,
+        checkResumeOwner,
         ...(gate.accountReference
           ? { accountReference: gate.accountReference }
           : {}),
@@ -1002,6 +1215,7 @@ export class AgentProcessManager {
     const first = lane[0]?.info;
     const originalTask = first ? (first.originalTask ?? first.task) : undefined;
     return {
+      checkResumeOwner,
       task: buildLaneHandoffTask({
         message: task,
         reason: gate.reason,
@@ -1265,7 +1479,9 @@ export class AgentProcessManager {
             )
           : undefined;
       issuedMcpToken = mcpToken || undefined;
+      options.checkResumeOwner?.();
       sdkHandle = await runSdk({
+        laneToolGate: this.laneToolGateFor(agentId),
         ...options.accountReference,
         // Claude adapter field (`ClaudeCliCommandOptions`); set for Claude only.
         ...(options.accountAdmission
@@ -1625,15 +1841,6 @@ export class AgentProcessManager {
       };
     const inactivityTimeoutMs =
       AgentProcessManager.resolveInactivityTimeout(requestedTimeout);
-    const timeoutHandle =
-      inactivityTimeoutMs === undefined
-        ? undefined
-        : this.unrefTimer(
-            setTimeout(() => {
-              if (this.agents.get(agentId)?.sdkHandle !== sdkHandle) return;
-              this.handleTimeout(agentId);
-            }, inactivityTimeoutMs),
-          );
     const supportsContinuation = sdkHandle.supportsContinuation?.() === true;
     // Recorded at spawn so the `agent:spawned` reference already carries it.
     const quotaOwner =
@@ -1657,7 +1864,6 @@ export class AgentProcessManager {
       sdkAbortController: sdkHandle.abort,
       stdoutBuffer: '',
       stderrBuffer: '',
-      timeoutHandle,
       inactivityTimeoutMs,
       stdoutLineCount: 0,
       stderrLineCount: 0,
@@ -1698,6 +1904,8 @@ export class AgentProcessManager {
     tracked.budget = budget;
     tracked.info = { ...tracked.info, agentBudget: budget.record() };
     this.agents.set(agentId, tracked);
+    // Ask at W of silence, pause at 2W; armed once the lane is registered.
+    this.armInactivityWatchdog(agentId, tracked);
     this.budgetTelemetry.armDeadline(
       agentId,
       tracked,
@@ -1722,12 +1930,15 @@ export class AgentProcessManager {
           tracked,
           () => this.agents.get(agentId) === tracked,
         );
-        this.budgetTelemetry.dispatch(agentId, tracked, decision);
+        this.budgetTelemetry.dispatch(agentId, tracked, {
+          admission: decision,
+        });
       }
     };
     sdkHandle.onOutput((data: string) => {
       const current = this.agents.get(agentId);
       if (current !== tracked) return;
+      if (data.length > 0) this.recordInactivityActivity(agentId, tracked);
       this.outputBuffer.appendOutput(
         agentId,
         current,
@@ -1820,6 +2031,7 @@ export class AgentProcessManager {
       );
       sdkHandle.onSegment((segment: CliOutputSegment) => {
         if (this.agents.get(agentId) !== tracked) return;
+        this.recordInactivityActivity(agentId, tracked);
         if (captureSessionId) updateCliSessionId(captureSessionId());
         if (sdkHandle.outcomeUsageIsTurnTotal && segment.usage) {
           tracked.outcomeUsage = this.laneUsageNormalizer.accept(
@@ -1847,6 +2059,7 @@ export class AgentProcessManager {
     if (sdkHandle.onStreamEvent) {
       sdkHandle.onStreamEvent((event: FlatStreamEventUnion) => {
         if (this.agents.get(agentId) !== tracked) return;
+        this.recordInactivityActivity(agentId, tracked);
         this.outputBuffer.appendStreamEvent(
           agentId,
           this.agents.get(agentId),
@@ -1948,58 +2161,23 @@ export class AgentProcessManager {
     if (!guard) return;
     if (this.agents.get(agentId)?.info.status !== 'running') return;
 
-    const action = guard.observe(segment);
-    if (action.kind === 'stop') {
-      void this.stopLaneForGuard(
-        agentId,
-        action.stopReason,
-        action.repeats,
-        guard.toolCallCount,
-      );
-    }
-  }
-
-  /**
-   * Stop a lane the guard gave up on, through the ordinary {@link stop} path,
-   * with `stopReason` stamped on the record.
-   */
-  private async stopLaneForGuard(
-    agentId: string,
-    stopReason: LaneStopReason,
-    repeats: number,
-    toolCalls: number,
-  ): Promise<void> {
     const tracked = this.agents.get(agentId);
-    if (!tracked || tracked.info.status !== 'running') return;
-
-    this.logger.warn(
-      isAgentBudgetStopReason(stopReason)
-        ? '[AgentProcessManager] Agent budget tripped; stopping'
-        : '[AgentProcessManager] Lane repeat guard tripped; stopping',
-      {
-        agentId,
-        stopReason,
-        repeats,
-        toolCalls,
-      },
-    );
-    tracked.repeatedCalls = repeats;
-    // Stamped before `stop`, which spreads `tracked.info` into the terminal
-    // record, the completion signal and `agent:exited`.
-    tracked.info = { ...tracked.info, stopReason };
-    // A queued caller message must not start a new turn once the lane is
-    // stopped. The count goes on the completion signal, so the caller knows.
-    const dropped = this.messageRouter.discardPending(agentId, tracked);
-    if (dropped > 0) tracked.queuedMessagesDropped = dropped;
-    try {
-      await this.stop(agentId);
-    } catch (error: unknown) {
-      this.logger.error('[AgentProcessManager] Lane guard stop failed', {
-        agentId,
-        stopReason,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
+    const action = guard.observe(segment);
+    if (!tracked || action.kind === 'none') return;
+    tracked.repeatedCalls = action.repeats;
+    const paused = action.kind === 'pause';
+    const notice: AgentActionNotice = {
+      actor: 'ptah-budget',
+      action: paused ? 'paused' : 'asked-handoff',
+      reason: 'repeat-call',
+      nextStep: paused ? 'review-live-agent' : 'return-report',
+      measured: action.repeats,
+      limit: action.limit,
+      unit: 'calls',
+    };
+    // Queued messages stay queued: the dispatch hold keeps them for review.
+    this.publishLaneNotice(agentId, 'repeat', notice);
+    if (!paused) this.askLaneForHandoff(agentId, tracked, notice);
   }
 
   /**
@@ -2710,7 +2888,7 @@ export class AgentProcessManager {
       }
       this.pendingAdoptions.set(tracked.info.agentId, {
         previousParent: parent,
-        signalHeld: false,
+        completions: [],
       });
       tracked.info.parentSessionId = to;
       adopted.push(tracked.info.agentId);
@@ -2752,7 +2930,7 @@ export class AgentProcessManager {
           kept.set(parentSessionId, ids);
         }
       }
-      if (pending.signalHeld) this.signalLaneCompletion(tracked);
+      for (const deliver of pending.completions) deliver(tracked.info.parentSessionId);
     }
     if (outcome !== 'kept') return;
     for (const [parentSessionId, keptIds] of kept) {
@@ -3003,6 +3181,10 @@ export class AgentProcessManager {
       );
     }
 
+    const currentPause = currentLaneNotice(tracked);
+    if (currentPause?.action === 'paused')
+      throw new AgentLanePausedError(formatBudgetPauseNotice(currentPause, agentId));
+
     if (tracked.info.status === 'running' || tracked.info.status === 'starting') {
       throw new AgentContinueError(
         'busy',
@@ -3010,13 +3192,17 @@ export class AgentProcessManager {
       );
     }
 
-    if (
-      tracked.budget?.expired() ||
-      isAgentBudgetStopReason(tracked.info.stopReason)
-    ) {
+    const admission = tracked.budget?.admission();
+    const ceiling = admission ? laneBudgetNotice(admission) : undefined;
+    if (ceiling?.action === 'paused') {
+      this.publishLaneNotice(agentId, 'budget', ceiling);
+      throw new AgentLanePausedError(formatBudgetPauseNotice(ceiling, agentId));
+    }
+    // Historical records only: new code never stamps a budget stop reason.
+    if (isAgentBudgetStopReason(tracked.info.stopReason)) {
       throw new AgentContinueError(
         'released',
-        'Lane budget exhausted; start a fresh lane.',
+        'Ptah budget monitor recorded an exhausted lane budget. Start a fresh lane.',
       );
     }
 
@@ -3060,6 +3246,7 @@ export class AgentProcessManager {
     // Every turn started here carries a caller's message, so the new task
     // gets a fresh call count and repeat history.
     this.laneGuards.get(agentId)?.reset();
+    clearLaneAdmission(tracked, 'repeat');
     tracked.guardToolCalls = undefined;
     tracked.repeatedCalls = undefined;
     tracked.queuedMessagesDropped = undefined;
@@ -3196,6 +3383,7 @@ export class AgentProcessManager {
       completedAt: stoppedAt,
       lastActivityAt: stoppedAt,
     };
+    this.clearInactivityTimers(tracked);
     const droppedIds = tracked.pendingMessages.map((entry) => entry.messageId);
     this.messageRouter.discardPending(agentId, tracked);
     this.events.emit('agent:turn-settled', {
@@ -3216,7 +3404,6 @@ export class AgentProcessManager {
     this.mcpCredentials?.revokeSubject(agentId);
     await this.removeInstructionFiles(agentId);
     this.clearIdleRelease(tracked);
-    clearTimeout(tracked.timeoutHandle);
     this.outputBuffer.discard(agentId);
 
     this.scheduleCleanup(agentId);
@@ -3245,8 +3432,12 @@ export class AgentProcessManager {
    * tree-kill and the host stops waiting on it.
    */
   async disposeAll(): Promise<void> {
+    this.disposing = true;
     this.budgetSettingsSubscription?.dispose();
+    for (const timer of this.laneNoticeRetryTimers) clearTimeout(timer);
+    this.laneNoticeRetryTimers.clear();
     const entries = Array.from(this.agents.entries());
+    for (const [, tracked] of entries) this.clearInactivityTimers(tracked);
     this.logger.info('[AgentProcessManager] Disposing all agents...', {
       agents: entries.length,
       running: entries.filter(([, t]) => t.info.status === 'running' || t.info.status === 'starting').length,
@@ -3272,7 +3463,7 @@ export class AgentProcessManager {
       if (tracked.exitEmitHandle) {
         clearTimeout(tracked.exitEmitHandle);
       }
-      clearTimeout(tracked.timeoutHandle);
+      this.clearInactivityTimers(tracked);
       clearTimeout(tracked.budgetTimer);
       this.clearIdleRelease(tracked);
       this.outputBuffer.discard(agentId);
@@ -3382,16 +3573,12 @@ export class AgentProcessManager {
     const delta = this.outputBuffer.takeDelta(agentId, tracked);
     if (!tracked || !delta) return;
 
-    // Output IS the liveness signal, and this is the one funnel every kind of
-    // it passes through — stdout, stderr, segments and stream events alike.
-    // Throttled to OUTPUT_FLUSH_INTERVAL, so re-arming here costs one timer per
-    // 200 ms rather than one per token.
+    // Keep the published activity timestamp on the throttled output path.
     if (tracked.info.status === 'running') {
       tracked.info = {
         ...tracked.info,
         lastActivityAt: new Date().toISOString(),
       };
-      this.armInactivityWatchdog(agentId, tracked);
     }
 
     this.events.emit('agent:output', delta);
@@ -3416,60 +3603,80 @@ export class AgentProcessManager {
     return requested === 0 ? undefined : requested;
   }
 
-  /**
-   * Re-arm the inactivity watchdog. Called on every output flush, so the window
-   * measures SILENCE rather than the run's total duration.
-   */
-  private armInactivityWatchdog(agentId: string, tracked: TrackedAgent): void {
-    clearTimeout(tracked.timeoutHandle);
-    tracked.timeoutHandle = undefined;
-    const window = tracked.inactivityTimeoutMs;
-    if (window === undefined) return;
-    tracked.timeoutHandle = this.unrefTimer(
-      setTimeout(() => {
-        if (this.agents.get(agentId) !== tracked) return;
-        this.handleTimeout(agentId);
-      }, window),
-    );
+  /** Record adapter activity before the output buffer's throttled flush. */
+  private recordInactivityActivity(agentId: string, tracked: TrackedAgent): void {
+    if (tracked.inactivitySinceMs === undefined) return;
+    tracked.inactivitySinceMs = Date.now();
+    if (!tracked.laneAdmission?.inactivity) return;
+    clearLaneAdmission(tracked, 'inactivity');
+    this.armInactivityWatchdog(agentId, tracked);
   }
 
-  private async handleTimeout(agentId: string): Promise<void> {
-    const tracked = this.agents.get(agentId);
-    if (!tracked || tracked.info.status !== 'running') return;
-    clearTimeout(tracked.budgetTimer);
+  private armInactivityWatchdog(agentId: string, tracked: TrackedAgent): void {
+    this.clearInactivityTimers(tracked);
+    const window = tracked.inactivityTimeoutMs;
+    if (window === undefined || this.disposing) return;
+    tracked.inactivitySinceMs = Date.now();
+    this.scheduleInactivityStep(agentId, tracked, 'asked-handoff', window, window);
+  }
 
-    this.logger.warn(
-      '[AgentProcessManager] Agent produced no output for the whole inactivity window — treating it as hung',
-      { agentId, inactivityTimeoutMs: tracked.inactivityTimeoutMs },
-    );
-    this.flushDelta(agentId);
+  private scheduleInactivityStep(
+    agentId: string,
+    tracked: TrackedAgent,
+    phase: 'asked-handoff' | 'paused',
+    silenceRequired: number,
+    delay: number,
+  ): void {
+    const timer = this.unrefTimer(setTimeout(() => {
+      if (this.agents.get(agentId) !== tracked || tracked.timeoutHandle !== timer ||
+          tracked.inactivitySinceMs === undefined) return;
+      const remaining = silenceRequired - (Date.now() - tracked.inactivitySinceMs);
+      if (remaining > 0) {
+        this.scheduleInactivityStep(agentId, tracked, phase, silenceRequired, remaining);
+        return;
+      }
+      this.handleTimeout(agentId, phase);
+      if (phase === 'asked-handoff' && tracked.timeoutHandle === timer) {
+        const remainingToPause = 2 * silenceRequired - (Date.now() - tracked.inactivitySinceMs);
+        this.scheduleInactivityStep(agentId, tracked, 'paused', 2 * silenceRequired, remainingToPause);
+      }
+    }, Math.max(1, Math.min(delay, MAX_INACTIVITY_TIMER_MS))));
+    tracked.timeoutHandle = timer;
+  }
+
+  private clearInactivityTimers(tracked: TrackedAgent): void {
     clearTimeout(tracked.timeoutHandle);
-    const timedOutAt = new Date().toISOString();
-    tracked.info = {
-      ...tracked.info,
-      status: 'timeout',
-      completedAt: timedOutAt,
-      lastActivityAt: timedOutAt,
+    tracked.timeoutHandle = undefined;
+    tracked.inactivitySinceMs = undefined;
+  }
+
+  /**
+   * A silent lane is asked for a handoff at W and paused at 2W. It is never
+   * killed or marked `timeout`: the process stays alive until a person stops
+   * it, and real output clears the inactivity notice and re-arms from W.
+   */
+  private handleTimeout(
+    agentId: string,
+    phase: 'asked-handoff' | 'paused',
+  ): void {
+    const tracked = this.agents.get(agentId);
+    if (!tracked || tracked.info.status !== 'running' || tracked.hasExited)
+      return;
+    const window = tracked.inactivityTimeoutMs;
+    if (window === undefined) return;
+    const silentMs = phase === 'paused' ? window * 2 : window;
+    const notice: AgentActionNotice = {
+      actor: 'ptah-watchdog',
+      action: phase,
+      reason: 'lane-inactive',
+      nextStep: phase === 'paused' ? 'review-live-agent' : 'return-report',
+      measured: silentMs,
+      limit: silentMs,
+      unit: 'milliseconds',
     };
-    this.releaseLaneGuard(agentId);
-    // BEFORE the kill, not after: on the SDK path the kill is an abort whose
-    // `done` promise is what reaches `handleExit`, and an adapter that never
-    // settles it would leave the timeout unsignalled — the exact silence this
-    // signal exists to end. `handleExit` stamps the same `completedAt`, so the
-    // notifier's duplicate guard collapses the two into one signal.
-    this.signalLaneCompletion(tracked);
-    // Also before the kill, for the same reason: `agent:exited` is what
-    // `waitForAgents` settles on, and an abort that never settles would never
-    // reach `handleExit`. Marking the lane exited makes a later real exit take
-    // `handleExit`'s early return, so this ending is emitted exactly once.
-    tracked.hasExited = true;
-    this.events.emit('agent:exited', tracked.info);
-    await this.killProcess(tracked);
-    tracked.subprocessReleased = true;
-    await this.removeInstructionFiles(agentId);
-    this.clearIdleRelease(tracked);
-    this.outputBuffer.discard(agentId);
-    this.scheduleCleanup(agentId);
+    this.publishLaneNotice(agentId, 'inactivity', notice);
+    if (phase === 'asked-handoff' && tracked.laneAdmission?.inactivity === notice)
+      this.askLaneForHandoff(agentId, tracked, notice);
   }
 
   /**
@@ -3494,9 +3701,18 @@ export class AgentProcessManager {
     tracked.idleReleaseHandle = this.unrefTimer(
       setTimeout(() => {
         if (this.agents.get(agentId) !== tracked) return;
+        // Cancellation can remove the last held receipt without a settings event.
+        if (this.holdsQueuedWork(agentId, tracked)) {
+          this.scheduleIdleRelease(agentId);
+          return;
+        }
         void this.releaseTracked(agentId, 'idle');
       }, idleMs),
     );
+  }
+
+  private holdsQueuedWork(agentId: string, tracked: TrackedAgent): boolean {
+    return isLanePaused(tracked) && this.messageRouter.hasPendingWork(agentId, tracked);
   }
 
   private clearIdleRelease(tracked: TrackedAgent): void {
@@ -3511,8 +3727,14 @@ export class AgentProcessManager {
   async releaseIdleForResume(agentId: string): Promise<void> {
     const tracked = this.agents.get(agentId);
     if (!tracked || tracked.subprocessReleased || tracked.restored) return;
-    if (tracked.info.status === 'running' || tracked.info.status === 'starting')
-      throw new AgentContinueError('busy', 'The lane is still running.');
+    const active = tracked.info.status === 'running' || tracked.info.status === 'starting';
+    if (active && tracked.info.cliSessionId)
+      this.assertResumeOwnerNotPaused(tracked.info.cli, tracked.info.cliSessionId);
+    if (active) throw new AgentContinueError('busy', 'The lane is still running.');
+    if (this.holdsQueuedWork(agentId, tracked)) {
+      const notice = currentLaneNotice(tracked);
+      if (notice) throw new AgentLanePausedError(formatBudgetPauseNotice(notice, agentId));
+    }
     await this.releaseTracked(agentId, 'idle');
   }
 
@@ -3578,6 +3800,7 @@ export class AgentProcessManager {
     // Set BEFORE the await: killProcess yields, and a second caller arriving in
     // that window would issue a duplicate abort and a duplicate tree-kill.
     tracked.subprocessReleased = true;
+    this.clearInactivityTimers(tracked);
     this.mcpCredentials?.revokeSubject(agentId);
     this.releaseLaneGuard(agentId);
     // Nothing can deliver a queued message once the process is gone. Say so in
@@ -3646,7 +3869,7 @@ export class AgentProcessManager {
     }
 
     this.flushDelta(agentId);
-    clearTimeout(tracked.timeoutHandle);
+    this.clearInactivityTimers(tracked);
     // A continuation-capable lane can start another caller turn on this
     // record, so its guard is kept (and reset by `continueConversation`) until
     // the subprocess is released, stopped or timed out.
@@ -3764,6 +3987,10 @@ export class AgentProcessManager {
       turnSeq: tracked.info.turnSeq,
     });
     this.signalLaneCompletion(tracked);
+    clearLaneAdmission(tracked, 'repeat');
+    clearLaneAdmission(tracked, 'inactivity');
+    if (tracked.laneAdmission?.budget?.action === 'paused' && tracked.budget?.admission().phase !== 'paused')
+      releaseLaneBudgetNotice(tracked);
     this.outputBuffer.discard(agentId);
 
     this.scheduleCleanup(agentId);
@@ -3798,7 +4025,13 @@ export class AgentProcessManager {
     // The single settle point, and therefore the only place a queued message
     // can be delivered: the status is now terminal, so `continueConversation`
     // will not refuse it as `busy`. One entry per settle — the turn this
-    // starts settles again and drains the next.
+    // starts settles again and drains the next. A paused lane holds its queue
+    // here (the router refuses to flush); `releaseHeldWork` drains it later.
+    this.flushQueuedMessages(agentId, tracked);
+  }
+
+  /** Deliver one queued message and report the queue's failures. */
+  private flushQueuedMessages(agentId: string, tracked: TrackedAgent): void {
     const queuedIds = tracked.pendingMessages.map((entry) => entry.messageId);
     void this.messageRouter
       .flushPending(agentId, tracked, this)
@@ -3823,6 +4056,25 @@ export class AgentProcessManager {
             : new Error('Queued message flush failed'),
         );
       });
+  }
+
+  /**
+   * Dispatch work held by a pause once the pause has cleared. Only an idle
+   * lane drains here; a running lane drains at its own settle point.
+   */
+  private releaseHeldWork(agentId: string, tracked: TrackedAgent): void {
+    if (this.agents.get(agentId) !== tracked) return;
+    if (isLanePaused(tracked)) return;
+    const status = tracked.info.status;
+    if (status === 'running' || status === 'starting') return;
+    this.scheduleCleanup(agentId);
+    this.scheduleIdleRelease(agentId);
+    if (tracked.pendingMessages.length === 0) return;
+    this.logger.info('[AgentProcessManager] Releasing work held by a pause', {
+      agentId,
+      held: tracked.pendingMessages.length,
+    });
+    this.flushQueuedMessages(agentId, tracked);
   }
 
   /**
@@ -4042,13 +4294,6 @@ export class AgentProcessManager {
     if (outcome) {
       this.logger.info('[AgentProcessManager] Lane model outcome', outcome);
     }
-    const pending = this.pendingAdoptions.get(tracked.info.agentId);
-    if (pending) {
-      // A handoff is still deciding this lane's parent; settleLaneAdoption
-      // sends the signal once it has.
-      pending.signalHeld = true;
-      return;
-    }
     const info = { ...tracked.info };
     const reportsDelivered = tracked.reportsDelivered;
     const reportClaimsCompletion = this.completionClaims.delete(info.agentId);
@@ -4074,31 +4319,39 @@ export class AgentProcessManager {
         tracked.turnStartedAt,
       );
     }
-    void Promise.resolve(
-      this.laneCompletion.signal(info, {
-        reportsDelivered,
-        reportAttempts: tracked.reportAttempts ?? 0,
-        reportsFailed: tracked.reportsFailed ?? 0,
-        ...(tracked.heldBudgetWarning ? { heldBudgetWarning: true } : {}),
-        ...(reportClaimsCompletion ? { reportClaimsCompletion: true } : {}),
-        ...(tracked.outcomeUsage ? { usage: tracked.outcomeUsage } : {}),
-        authMatched: tracked.authMatched ?? false,
-        ...(tracked.rateLimitMatched ? { rateLimited: true } : {}),
-        ...(toolCalls !== undefined ? { toolCalls } : {}),
-        ...(tracked.queuedMessagesDropped
-          ? { queuedMessagesDropped: tracked.queuedMessagesDropped }
-          : {}),
-        ...(tracked.repeatedCalls
-          ? { repeatedCalls: tracked.repeatedCalls }
-          : {}),
-      }),
-    ).then((result) => this.externalCompletions?.recordFromSignal(info, tracked.externalOwner, result))
-      .catch((error: unknown) => {
-      this.logger.error(
-        '[AgentProcessManager] Completion signal failed',
-        error instanceof Error ? error : new Error('Completion signal failed'),
-      );
-    });
+    const context = {
+      reportsDelivered,
+      reportAttempts: tracked.reportAttempts ?? 0,
+      reportsFailed: tracked.reportsFailed ?? 0,
+      ...(tracked.heldBudgetWarning ? { heldBudgetWarning: true } : {}),
+      ...(reportClaimsCompletion ? { reportClaimsCompletion: true } : {}),
+      ...(tracked.outcomeUsage ? { usage: tracked.outcomeUsage } : {}),
+      authMatched: tracked.authMatched ?? false,
+      ...(tracked.rateLimitMatched ? { rateLimited: true } : {}),
+      ...(toolCalls !== undefined ? { toolCalls } : {}),
+      ...(tracked.queuedMessagesDropped
+        ? { queuedMessagesDropped: tracked.queuedMessagesDropped }
+        : {}),
+      ...(tracked.repeatedCalls ? { repeatedCalls: tracked.repeatedCalls } : {}),
+    };
+    const externalOwner = tracked.externalOwner;
+    const deliver = (parentSessionId?: string) => {
+      const completion = { ...info, parentSessionId };
+      void Promise.resolve(this.laneCompletion.signal(completion, context))
+        .then((result) => this.externalCompletions?.recordFromSignal(completion, externalOwner, result))
+        .catch((error: unknown) => {
+          this.logger.error(
+            '[AgentProcessManager] Completion signal failed',
+            error instanceof Error ? error : new Error('Completion signal failed'),
+          );
+        });
+    };
+
+    // Capture the settled turn now even if parent adoption is still deciding
+    // where to deliver it. The lane can clear its hold and start another turn.
+    const pending = this.pendingAdoptions.get(info.agentId);
+    if (pending) pending.completions.push(deliver);
+    else deliver(info.parentSessionId);
   }
 
   /**
@@ -4121,6 +4374,10 @@ export class AgentProcessManager {
         // below stays synchronous for callers reading the map right after.
         const record = this.agents.get(agentId);
         if (record !== tracked) return;
+        if (this.holdsQueuedWork(agentId, tracked)) {
+          this.scheduleCleanup(agentId);
+          return;
+        }
         if (record) {
           void this.releaseSubprocess(agentId, record, 'expired').catch(
             (error: unknown) => {

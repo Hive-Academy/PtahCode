@@ -32,6 +32,7 @@ import {
   type IAuthSecretsService,
 } from '@ptah-extension/vscode-core';
 import type { SdkHandle } from '../cli-agents/cli-adapters';
+import type { LaneToolGate } from '../cli-agents/cli-adapters/cli-adapter.interface';
 import {
   SDK_TOKENS,
   AuthRequiredError,
@@ -779,6 +780,8 @@ export class PtahCliRegistry {
     options?: {
       workingDirectory?: string;
       resumeSessionId?: string;
+      /** Rejects a newly paused resume owner before starting the SDK. */
+      checkResumeOwner?: () => void;
       /** Parent session ID for permission routing. Permissions from this agent
        *  will be scoped to this session for cleanup purposes. */
       parentSessionId?: string;
@@ -802,6 +805,12 @@ export class PtahCliRegistry {
       parentLevel?: import('@ptah-extension/shared').LanePermissionMode;
       resumePolicy?: EffectiveLanePolicy;
       phase?: import('@ptah-extension/shared').PhaseDispatchV1;
+      /**
+       * Manager pause probe. Every provider route here launches through the
+       * Claude Code SDK, so the shared lane options gate its tool calls and
+       * the handle reports `honorsLaneToolGate`. Absent: no gate, flag unset.
+       */
+      laneToolGate?: LaneToolGate;
     },
   ): Promise<
     | {
@@ -986,7 +995,9 @@ export class PtahCliRegistry {
         logger: this.logger,
         processSpawner: this.processSpawner,
         executable: (await this.moduleLoader.getCliJsPath()) ?? undefined,
+        laneToolGate: options?.laneToolGate,
       });
+      options?.checkResumeOwner?.();
       const { handle, setAgentId: attachAgentId } = new ClaudeSdkLaneRunner(
         this.logger,
         this.messageTransformer,
@@ -1024,7 +1035,9 @@ export class PtahCliRegistry {
       );
 
       return {
-        handle,
+        handle: options?.laneToolGate
+          ? { ...handle, honorsLaneToolGate: true }
+          : handle,
         agentName: agentConfig.name,
         potentialCapabilities: this.capabilities(agentConfig.providerId),
         effectivePolicy: lanePolicy.requested,

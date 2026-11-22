@@ -75,6 +75,7 @@ import {
   unsavedCompletionView,
 } from './lane-completion-replay';
 import type {
+  AgentActionNotice,
   AgentProcessInfo,
   CliOutputSegment,
   IAgentAdapter,
@@ -435,6 +436,64 @@ export class LaneCompletionNotifier {
     return deliveryTarget(this.handoffs, target, (error) =>
       this.logger.error('Handoff delivery lineage read failed', error),
     );
+  }
+
+  /**
+   * Tell the parent about a Ptah ask/pause notice on a live lane. Non-terminal:
+   * no completion, outcome or checkpoint. One message per
+   * `${agentId}:notice:${action}:${reason}`; a lane without a parent is logged only.
+   */
+  async notifyActionNotice(
+    info: AgentProcessInfo,
+    notice: AgentActionNotice,
+    text: string,
+  ): Promise<'delivered' | 'queued' | 'duplicate' | 'no-parent' | 'failed'> {
+    const key = `${info.agentId}:notice:${notice.action}:${notice.reason}`;
+    if (this.signalledKeys.includes(key)) return 'duplicate';
+    const recorded = info.parentSessionId?.trim();
+    if (!recorded) {
+      this.logger.info('[LaneCompletionNotifier] Lane notice has no parent', {
+        agentId: info.agentId,
+        action: notice.action,
+        reason: notice.reason,
+      });
+      return 'no-parent';
+    }
+    this.remember(key);
+    try {
+      const parentSessionId = await this.forwardTarget(recorded);
+      const originName = `${info.cli} · ${laneLabel(info)}`;
+      if (this.parentDelivery) {
+        const saved = await this.parentDelivery.enqueue({
+          id: `lane-delivery:${key}`,
+          dedupeKey: key,
+          agentId: info.agentId,
+          parentSessionId,
+          kind: 'report',
+          body: text,
+          createdAt: Date.now(),
+          originName,
+        });
+        if (!('refused' in saved)) return 'queued';
+        throw new Error(`Lane notice enqueue refused: ${saved.refused}`);
+      }
+      const target = SessionId.safeParse(parentSessionId);
+      if (!this.agentAdapter || !target || !this.agentAdapter.isSessionActive(target))
+        throw new Error('Parent session is not active');
+      await this.agentAdapter.sendMessageToSession(target, text, {
+        origin: { kind: 'peer', from: `ptah-agent:${info.agentId}`, name: originName },
+      });
+      return 'delivered';
+    } catch (error: unknown) {
+      // Forget the key so a later crossing of the same notice can retry delivery.
+      const index = this.signalledKeys.indexOf(key);
+      if (index >= 0) this.signalledKeys.splice(index, 1);
+      this.logger.error(
+        '[LaneCompletionNotifier] Lane notice delivery failed',
+        error instanceof Error ? error : new Error(String(error)),
+      );
+      return 'failed';
+    }
   }
 
   /**

@@ -10,6 +10,7 @@ import {
   formatHandoffNormalReturn,
   formatHandoffNotesDelay,
   formatHandoffRecordFailure,
+  formatLaneToolGateUnavailable,
   formatPermissionExpired,
   formatPermissionTeardown,
   formatUnattachedLaneIdentity,
@@ -156,5 +157,28 @@ describe('formatAgentActionNotice', () => {
   it('uses neutral fallbacks for missing context values', () => {
     expect(formatAgentActionNotice(notice('notes-overdue'))).toContain('waiting for the agent to return');
     expect(formatAgentActionNotice(notice('permission-timeout', { action: 'ended' }))).toContain('denied the tool because');
+  });
+});
+
+describe('Ptah actor labels and tool gate notice', () => {
+  const watchdog = notice('lane-inactive', { actor: 'ptah-watchdog', measured: 3_600_000, unit: 'milliseconds' });
+
+  it('labels watchdog notices as the Ptah watchdog', () => {
+    expect(formatBudgetAskReadOnly(watchdog)).toMatch(/^Ptah watchdog asked for a handoff because the lane produced no output for 60 minutes\./);
+    expect(formatBudgetCeilingDeny({ ...watchdog, action: 'paused' })).toMatch(/^Ptah watchdog paused new work tools/);
+    expect(formatBudgetPauseNotice({ ...watchdog, action: 'paused' }, 'agent-1')).toMatch(/^Ptah watchdog paused new work for agent-1/);
+  });
+
+  it('keeps the budget monitor label for budget notices', () => {
+    expect(formatBudgetAskReadOnly(notice('repeat-call'))).toMatch(/^Ptah budget monitor asked/);
+  });
+
+  it('formats the parent notice for a paused lane without a tool gate', () => {
+    const gate = notice('tool-gate-unavailable', { action: 'paused', nextStep: 'review-live-agent' });
+    const text =
+      'Ptah budget monitor paused new work for agent-1 because no verified tool gate is available. This CLI has no verified tool gate and may still be running tools. Review its progress and decide whether to let it finish or stop it explicitly.';
+    expect(formatLaneToolGateUnavailable(gate, 'agent-1')).toBe(text);
+    expect(formatAgentActionNotice(gate, { id: 'agent-1', audience: 'parent' })).toBe(text);
+    expect(formatAgentActionNotice(gate)).toContain('paused new work for the agent because');
   });
 });

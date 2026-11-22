@@ -16,6 +16,7 @@ import type {
   OutcomeTaskKind,
 } from './lane-outcome.types';
 import type { AgentMessagingCapability } from './agent-messaging.types';
+import type { AgentActionNotice } from './agent-action.types';
 
 /**
  * Branded AgentId type - prevents mixing with other string IDs
@@ -339,6 +340,11 @@ export interface AgentProcessInfo {
   readonly toolProfileAdapter?: import('./phase-contract.types').ToolProfileAdapterResultV1;
   /** Phase assigned when this lane was spawned. */
   readonly phaseKind?: import('./phase-contract.types').PhaseKind;
+  /**
+   * Latest Ptah ask or pause notice for a live lane (TASK_2026_2297, P4). A paused lane stays
+   * alive; absent means no Ptah threshold is active.
+   */
+  actionNotice?: AgentActionNotice;
 }
 
 const AGENT_BUDGET_STOP_REASONS = ['budget', 'telemetry-unavailable', 'duration'] as const;
@@ -820,6 +826,11 @@ export interface LaneCompletionSignal {
   readonly cliSessionId?: string;
   /** Why the host stopped the lane. Absent when it ended on its own or the caller stopped it. */
   readonly stopReason?: LaneStopReason;
+  /**
+   * The latest Ptah action notice the lane received before it ended, as context
+   * only: the lane's own ending stays its cause.
+   */
+  readonly actionNotice?: AgentActionNotice;
   /** Short read hint for work interrupted by an agent budget stop. */
   readonly progressPointer?: string;
   readonly budgetLimit?: string;

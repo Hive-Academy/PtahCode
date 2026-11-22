@@ -17,6 +17,7 @@ import type {
   ProviderAccountAdmissionPort,
 } from '@ptah-extension/auth-providers-tokens';
 import type { ClaudeLaneAccountPersistence } from '../claude/claude-sdk-lane-runner';
+import { announceLaneNotice } from './tracked-agent';
 import { AgentProcessManager } from './agent-process-manager.service';
 import {
   LaneAccountResumeError,
@@ -346,6 +347,27 @@ describe('AgentProcessManager account reference lifecycle', () => {
     expect(laneAccountFields(manager.findAgentInfo(manager.listTrackedAgents()[0].agentId)!)).toEqual(reference);
   });
 
+  it('starts an over-ceiling fresh handoff on the original named account with selection omitted', async () => {
+    const registry = port();
+    const { manager, adapter } = harness(registry);
+    manager.restoreAgents([ref({
+      agentBudget: {
+        weightedTokens: 210_000_000, rawTokens: 0, turnIds: [],
+        startedAtMs: Date.parse('2026-01-01T00:00:00Z'),
+      },
+    })], ROOT);
+    adapter.runSdk = jest.fn().mockResolvedValue(lane().handle);
+
+    const result = await manager.spawn({ cli: CLAUDE, task: 'next', resumeSessionId: 'sdk-session', timeout: 0 });
+
+    expect(result.resumeDecision?.decision).toBe('fresh');
+    expect(registry.validateResume).toHaveBeenCalledWith(reference);
+    expect(adapter.runSdk).toHaveBeenCalledWith(expect.objectContaining({
+      resumeSessionId: undefined,
+      accountAdmission: expect.objectContaining({ selection: { kind: 'named', profileId: binding.profileId } }),
+    }));
+  });
+
   it('does not retry a failed named persistence checkpoint as ambient', async () => {
     const registry = port();
     registry.persistReference.mockRejectedValue(new Error('storage unavailable'));
@@ -370,6 +392,30 @@ describe('AgentProcessManager account reference lifecycle', () => {
     await expect(manager.spawn({ cli: CLAUDE, task: 'next', resumeSessionId: 'sdk-session' })).rejects.toMatchObject({ code: 'invalid-bound' });
     expect(registry.persistReference).not.toHaveBeenCalled();
     expect(adapter.runSdk).toHaveBeenCalledTimes(1);
+  });
+
+  it('rechecks the host pause after awaiting account validation for a continuation', async () => {
+    const registry = port();
+    const validation = deferred<{ code: 'ok' }>();
+    registry.validateResume.mockReturnValueOnce(validation.promise);
+    const { manager, spawnHandle } = harness(registry);
+    const running = lane(reference);
+    await spawnHandle(running.handle);
+    running.done.resolve(0);
+    await settle();
+
+    const continuation = manager.continueConversation(ID, 'next');
+    const tracked = manager.getMessageRoutableAgent(ID);
+    if (!tracked) throw new Error('Expected the tracked Claude lane');
+    announceLaneNotice(tracked, 'budget', {
+      actor: 'ptah-budget', action: 'paused', reason: 'weighted-budget',
+      nextStep: 'review-live-agent', measured: 2000, limit: 1000, unit: 'tokens',
+    });
+    validation.resolve({ code: 'ok' });
+
+    await expect(continuation).rejects.toThrow('Ptah budget monitor paused new work');
+    expect(registry.validateResume).toHaveBeenCalledWith(reference);
+    expect(running.handle.continue).not.toHaveBeenCalled();
   });
 
   it('revalidates live turns and idle-release resume without a parent', async () => {
