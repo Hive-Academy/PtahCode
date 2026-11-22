@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_2307_1d64
-status: backlog
+status: in_review
 type: REFACTORING
 title: Polish the Providers settings page and settings sidebar
 depends_on: []
