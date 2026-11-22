@@ -11,9 +11,11 @@
  *      list-models endpoint exposed by ollama.com. It returns the cloud models
  *      available to the authenticated account, reported as BASE names with no
  *      routing suffix (`glm-5.2`, not `glm-5.2:cloud`); `toCloudId()` normalizes
- *      each into the `:cloud`/`-cloud` id Ollama routes on. The
- *      OllamaModelDiscoveryService merges these over the static
- *      KNOWN_CLOUD_MODELS catalog.
+ *      each into the `:cloud`/`-cloud` id Ollama routes on. Each entry also
+ *      carries the `capabilities` ollama.com declares for it (`completion`,
+ *      `tools`, `thinking`, `vision`, ...). OllamaModelDiscoveryService builds
+ *      the Ollama Cloud model list from these tags and the local daemon's
+ *      cloud tags; there is no bundled list.
  *
  *   2. Pricing fetch: sourced from OpenRouter's public model catalog
  *      (`https://openrouter.ai/api/v1/models`, no auth required). Ollama does
@@ -33,10 +35,11 @@
  *   - tag ending `-cloud` e.g., `gpt-oss:120b-cloud`, `qwen3-coder:480b-cloud`
  * We accept both via `isCloudTag()`.
  *
- * Tags + OpenRouter responses are cached in-memory with a 1-hour TTL. The
- * service is resilient: network errors NEVER throw to callers — they degrade
- * to `[]` and log a warning with the HTTP status + body snippet so failures
- * are visible in the output channel. Inference is unaffected: with a stored
+ * Tags + OpenRouter responses are cached in-memory with a 1-hour TTL. A
+ * failed tags fetch throws `ModelListError` with a closed reason and is not
+ * cached, so the next call retries; the raw HTTP status and body snippet go
+ * to the debug log only. A successful empty list is cached as `[]`.
+ * Inference is unaffected: with a stored
  * API key it goes direct to ollama.com (LocalNativeStrategy direct mode);
  * without one it proxies through the local daemon at 127.0.0.1:11434.
  *
@@ -54,6 +57,7 @@ import {
   type ModelPricing,
 } from '@ptah-extension/shared';
 import { AUTH_PROVIDERS_TOKENS } from '../../di/tokens';
+import { ModelListError } from '../../model-list-error';
 import type { OpenRouterPricingService } from '../openrouter';
 
 /** TTL for cached tags response (ms) */
@@ -73,8 +77,9 @@ const DEFAULT_CLOUD_CONTEXT = 128_000;
 
 /**
  * `https://ollama.com/api/tags` response shape — mirrors the local daemon's
- * /api/tags. We only need `models[].name` (and optionally `models[].model`).
- * Other fields (size, digest, modified_at, details) are present but ignored.
+ * /api/tags. We read `models[].name` (or `models[].model`) and
+ * `models[].capabilities`. Other fields (size, digest, modified_at, details)
+ * are present but ignored.
  *
  * @see https://docs.ollama.com/api/tags
  */
@@ -82,6 +87,7 @@ interface OllamaCloudTagsResponse {
   models?: Array<{
     name?: string;
     model?: string;
+    capabilities?: unknown;
   }>;
 }
 
@@ -93,6 +99,18 @@ export interface OllamaCloudTag {
    *   - tag ending in `-cloud`  e.g., `gpt-oss:120b-cloud`
    */
   readonly id: string;
+  /**
+   * What ollama.com declares the model can do (`completion`, `tools`,
+   * `thinking`, `vision`, ...). Present only when the entry reports a string
+   * array; absent means the capabilities are unknown.
+   */
+  readonly capabilities?: readonly string[];
+}
+
+function isStringArray(value: unknown): value is readonly string[] {
+  return (
+    Array.isArray(value) && value.every((item) => typeof item === 'string')
+  );
 }
 
 /**
@@ -178,17 +196,15 @@ export class OllamaCloudMetadataService {
   ) {}
 
   /**
-   * Fetch live cloud model tags from `https://ollama.com/api/tags`. Cached
-   * for 1 hour. Returns `[]` on any error (logged as a warning with HTTP
-   * status + body snippet).
+   * Fetch live cloud model tags from `https://ollama.com/api/tags`. A
+   * successful answer (including an empty one) is cached for 1 hour.
    *
-   * NOTE: This endpoint returns models the AUTHENTICATED USER has access to
-   * (typically what they have pulled or run via `ollama pull`/`ollama run`).
-   * It is NOT the full public catalog at https://ollama.com/search?c=cloud.
-   * Callers should treat the result as a supplement to a static catalog, not
-   * as the canonical source of all cloud models.
+   * NOTE: with an API key this endpoint returns the models the account can
+   * use; without one it returns the public cloud catalog.
    *
    * @param apiKey - ollama.com API key (sent as `Authorization: Bearer <key>`)
+   * @throws ModelListError `http-error`, `bad-response`, `network` or
+   *   `timeout` when the list cannot be read. Nothing is cached then.
    */
   async fetchCloudTags(apiKey?: string | null): Promise<OllamaCloudTag[]> {
     if (this.tagsCache && this.isFresh(this.tagsCache)) {
@@ -205,71 +221,62 @@ export class OllamaCloudMetadataService {
       `[OllamaCloudMetadata] Fetching cloud model catalog: GET ${url}`,
     );
 
-    try {
-      const data = await this.httpJson<OllamaCloudTagsResponse>(
-        url,
-        apiKey ?? null,
+    const data = await this.httpJson<OllamaCloudTagsResponse>(
+      url,
+      apiKey ?? null,
+    );
+
+    const models = Array.isArray(data?.models) ? data.models : null;
+    if (!models) {
+      this.logger.debug(
+        `[OllamaCloudMetadata] ${url} response missing top-level "models" array. ` +
+          `Got keys: [${data && typeof data === 'object' ? Object.keys(data).join(', ') : String(data)}]`,
       );
-
-      const models = Array.isArray(data?.models) ? data.models : null;
-      if (!models) {
-        this.logger.warn(
-          `[OllamaCloudMetadata] ${url} response missing top-level "models" array. ` +
-            `Got keys: [${data ? Object.keys(data).join(', ') : 'null'}]. Falling back to static catalog.`,
-        );
-        this.tagsCache = { value: [], fetchedAt: Date.now() };
-        return [];
-      }
-
-      const tags: OllamaCloudTag[] = [];
-      const seen = new Set<string>();
-      const allNames: string[] = [];
-
-      for (const m of models) {
-        const name =
-          typeof m?.name === 'string' && m.name.length > 0
-            ? m.name
-            : typeof m?.model === 'string' && m.model.length > 0
-              ? m.model
-              : null;
-        if (!name) continue;
-        allNames.push(name);
-        const cloudId = toCloudId(name);
-        if (seen.has(cloudId)) continue;
-        seen.add(cloudId);
-        tags.push({ id: cloudId });
-      }
-
-      this.tagsCache = { value: tags, fetchedAt: Date.now() };
-      this.logger.info(
-        `[OllamaCloudMetadata] ollama.com/api/tags returned ${models.length} model entries. ` +
-          `Full tag list: [${allNames.join(', ')}]`,
-      );
-
-      if (tags.length === 0) {
-        this.logger.warn(
-          `[OllamaCloudMetadata] ${url} returned ${models.length} entries but none ` +
-            `yielded a usable model name. Falling back to the bundled static catalog.`,
-        );
-      } else {
-        this.logger.info(
-          `[OllamaCloudMetadata] Discovered ${tags.length} live cloud model(s) from ollama.com. ` +
-            `Cloud ids: [${tags.map((t) => t.id).join(', ')}]`,
-        );
-      }
-
-      return tags;
-    } catch (error) {
-      // degradation-audit: reported - logged at warn here; the empty result is
-      // cached and callers fall back to the bundled static catalog.
-      this.logger.warn(
-        `[OllamaCloudMetadata] ${url} fetch failed — will fall back to bundled static catalog. ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-      this.tagsCache = { value: [], fetchedAt: Date.now() };
-      return [];
+      throw new ModelListError('bad-response');
     }
+
+    const tags: OllamaCloudTag[] = [];
+    const seen = new Set<string>();
+    const allNames: string[] = [];
+
+    for (const m of models) {
+      const name =
+        typeof m?.name === 'string' && m.name.length > 0
+          ? m.name
+          : typeof m?.model === 'string' && m.model.length > 0
+            ? m.model
+            : null;
+      if (!name) continue;
+      allNames.push(name);
+      const cloudId = toCloudId(name);
+      if (seen.has(cloudId)) continue;
+      seen.add(cloudId);
+      tags.push(
+        isStringArray(m.capabilities)
+          ? { id: cloudId, capabilities: [...m.capabilities] }
+          : { id: cloudId },
+      );
+    }
+
+    this.tagsCache = { value: tags, fetchedAt: Date.now() };
+    this.logger.info(
+      `[OllamaCloudMetadata] ollama.com/api/tags returned ${models.length} model entries. ` +
+        `Full tag list: [${allNames.join(', ')}]`,
+    );
+
+    if (tags.length === 0) {
+      this.logger.warn(
+        `[OllamaCloudMetadata] ${url} returned ${models.length} entries but none ` +
+          `yielded a usable model name.`,
+      );
+    } else {
+      this.logger.info(
+        `[OllamaCloudMetadata] Discovered ${tags.length} live cloud model(s) from ollama.com. ` +
+          `Cloud ids: [${tags.map((t) => t.id).join(', ')}]`,
+      );
+    }
+
+    return tags;
   }
 
   /**
@@ -431,7 +438,7 @@ export class OllamaCloudMetadataService {
    * {@link refresh()} via OpenRouter; this method is a thin wrapper that
    * ensures pricing was registered for whatever tags are currently cached.
    *
-   * Never throws — pricing fetch is best-effort metadata.
+   * Throws `ModelListError` when the cloud tags cannot be fetched.
    */
   async fetchAndRegisterPricing(
     apiKey: string,
@@ -453,7 +460,8 @@ export class OllamaCloudMetadataService {
   /**
    * Force-refresh cached tags AND OpenRouter pricing, then register per-tag
    * prices. Logs start + summary so the user can verify in the output channel
-   * that discovery and pricing overlay actually ran.
+   * that discovery and pricing overlay actually ran. Rejects with
+   * `ModelListError` when the cloud tags cannot be fetched.
    */
   async refresh(apiKey: string): Promise<void> {
     this.tagsCache = null;
@@ -495,11 +503,11 @@ export class OllamaCloudMetadataService {
 
   /**
    * Lightweight JSON GET using Node 18+ global `fetch`. When `apiKey` is a
-   * non-empty string we attach `Authorization: Bearer <key>`; when null we
-   * skip auth entirely (for endpoints like OpenRouter's public catalog).
-   * Throws on non-2xx or invalid JSON; the error message includes the HTTP
-   * status code and a short body snippet for debugging. Callers catch to
-   * degrade.
+   * non-empty string we attach `Authorization: Bearer <key>`. Every failure
+   * throws `ModelListError`: non-2xx -> `http-error`, empty or non-JSON body
+   * -> `bad-response`, abort after {@link REQUEST_TIMEOUT_MS} -> `timeout`,
+   * any other request failure -> `network`. The raw status and a short body
+   * snippet go to the debug log only.
    */
   private async httpJson<T>(url: string, apiKey: string | null): Promise<T> {
     const controller = new AbortController();
@@ -512,33 +520,50 @@ export class OllamaCloudMetadataService {
       if (apiKey && apiKey.trim().length > 0) {
         headers['Authorization'] = `Bearer ${apiKey}`;
       }
-      const res = await fetch(url, {
-        method: 'GET',
-        headers,
-        signal: controller.signal,
-      });
+      let res: Response;
+      try {
+        res = await fetch(url, {
+          method: 'GET',
+          headers,
+          signal: controller.signal,
+        });
+      } catch (error) {
+        this.logger.debug(
+          `[OllamaCloudMetadata] GET ${url} failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+        throw new ModelListError(
+          controller.signal.aborted ? 'timeout' : 'network',
+        );
+      }
       // degradation-audit: reported - an unreadable body leaves text empty, so
-      // this method throws below (HTTP status or "Empty body") and the callers
-      // that catch it log at warn.
+      // this method throws ModelListError below (http-error or bad-response)
+      // and the raw detail goes to the debug log.
       const text = await res.text().catch(() => '');
       if (!res.ok) {
         const snippet = this.truncate(text);
-        throw new Error(
-          `HTTP ${res.status} ${res.statusText} from ${url}` +
+        this.logger.debug(
+          `[OllamaCloudMetadata] HTTP ${res.status} ${res.statusText} from ${url}` +
             (snippet ? ` — body: ${snippet}` : ''),
         );
+        throw new ModelListError('http-error');
       }
       if (!text) {
-        throw new Error(`Empty body from ${url} (HTTP ${res.status})`);
+        this.logger.debug(
+          `[OllamaCloudMetadata] Empty body from ${url} (HTTP ${res.status})`,
+        );
+        throw new ModelListError('bad-response');
       }
       try {
         return JSON.parse(text) as T;
       } catch {
-        throw new Error(
-          `Non-JSON body from ${url} (HTTP ${res.status}) — first ${ERROR_BODY_SNIPPET_LEN} chars: ${this.truncate(
+        this.logger.debug(
+          `[OllamaCloudMetadata] Non-JSON body from ${url} (HTTP ${res.status}) — first ${ERROR_BODY_SNIPPET_LEN} chars: ${this.truncate(
             text,
           )}`,
         );
+        throw new ModelListError('bad-response');
       }
     } finally {
       clearTimeout(timer);

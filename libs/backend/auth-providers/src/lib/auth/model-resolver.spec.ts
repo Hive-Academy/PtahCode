@@ -104,10 +104,9 @@ describe('ModelResolver', () => {
 
   describe('resolveForCost', () => {
     it('prices a subscription turn at published rates, not zero', () => {
-      // Subscription models are absent from the
-      // pricing map by design (seedStaticModelPricing skips subscription
-      // providers, so their $0 statics cannot pin a shared slug), and their
-      // rates come from the catalog like everyone else's.
+      // Subscription models are absent from the pricing map by design (no
+      // strategy seeds prices from a repository model list), and their rates
+      // come from the catalog like everyone else's.
       const resolver = makeResolver(
         copilotEnv({ ANTHROPIC_DEFAULT_SONNET_MODEL: 'gpt-5.3-codex' }),
       );

@@ -43,7 +43,6 @@ import {
   getAnthropicProvider,
   getProviderBaseUrl,
   getProviderAuthEnvVar,
-  seedStaticModelPricing,
   ANTHROPIC_DIRECT_PROVIDER_ID,
 } from '@ptah-extension/shared';
 import type { ITranslationProxy } from '../../translation';
@@ -440,7 +439,6 @@ export class ApiKeyStrategy implements IAuthStrategy {
     this.providerModels.switchActiveProvider(providerId, {
       apiKey: providerKey.trim(),
     });
-    seedStaticModelPricing(providerId);
 
     this.logger.info(
       `[${this.name}] Using ${providerName} via translation proxy (${proxyUrl})`,
@@ -608,7 +606,6 @@ export class ApiKeyStrategy implements IAuthStrategy {
         this.providerModels.switchActiveProvider(providerId, {
           apiKey: trimmed,
         });
-        seedStaticModelPricing(providerId);
 
         this.logger.info(
           `[${this.name}] Using ${providerName} via environment fallback (routing via ${baseUrl})`,
@@ -654,7 +651,6 @@ export class ApiKeyStrategy implements IAuthStrategy {
     this.providerModels.switchActiveProvider(providerId, {
       apiKey: providerKey.trim(),
     });
-    seedStaticModelPricing(providerId);
 
     this.logger.info(
       `[${this.name}] Using ${providerName} (routing via ${baseUrl})`,

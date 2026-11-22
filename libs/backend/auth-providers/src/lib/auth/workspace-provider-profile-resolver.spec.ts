@@ -384,8 +384,8 @@ describe('WorkspaceProviderProfileResolver — the post-fallback ladder', () => 
 
   it('still sends the tier word when nothing anywhere can name a model', async () => {
     // The residual TASK_2026_262 Q2 declined to turn into a failure channel:
-    // no user tier, no `defaultTiers`, no catalogue ever fetched, no static
-    // models. The profile still builds — a resolver that refused here would
+    // no user tier, no `defaultTiers`, no catalogue ever fetched, and no
+    // repository model list to fall back to. The profile still builds — a resolver that refused here would
     // take the workspace's chat down instead of letting the endpoint say why.
     const { resolver } = createHarness({
       workspaceSettings: {
@@ -1428,10 +1428,13 @@ describe('WorkspaceProviderProfileResolver — resolveStoredModel', () => {
     timestamp: Date.now(),
   });
 
-  it('replaces a Codex static id on Claude CLI with the default and logs it', () => {
+  it('replaces a Codex id on Claude CLI with the default and logs it', () => {
     // The M3 case: Codex -> Claude must not send `gpt-6-luna` to Anthropic.
     const { resolver, logger } = createHarness({
       workspaceSettings: { authMethod: 'claudeCli' },
+      configValues: {
+        'provider.openai-codex.modelCatalog': catalog(['gpt-6-luna']),
+      },
     });
 
     expect(resolver.resolveStoredModel(WORKSPACE, 'gpt-6-luna')).toBe(
@@ -1462,6 +1465,9 @@ describe('WorkspaceProviderProfileResolver — resolveStoredModel', () => {
       workspaceSettings: {
         authMethod: 'thirdParty',
         anthropicProviderId: 'kimi-code',
+      },
+      configValues: {
+        'provider.openai-codex.modelCatalog': catalog(['gpt-6-luna']),
       },
     });
 
@@ -1523,7 +1529,7 @@ describe('WorkspaceProviderProfileResolver — resolveStoredModel', () => {
     expect(resolver.resolveStoredModel(WORKSPACE, '')).toBe('default');
   });
 
-  it('uses the serving provider catalogue instead of a removed static list', () => {
+  it('uses only catalogues on hand, never a repository model list', () => {
     const { resolver } = createHarness({
       workspaceSettings: CODEX,
       configValues: {
@@ -1534,8 +1540,10 @@ describe('WorkspaceProviderProfileResolver — resolveStoredModel', () => {
     expect(resolver.resolveStoredModel(WORKSPACE, 'gpt-7-nova')).toBe(
       'gpt-7-nova',
     );
+    // No catalogue on hand lists it, so no provider claims it: it is kept
+    // and the vendor answers it.
     expect(resolver.resolveStoredModel(WORKSPACE, 'gpt-6-luna')).toBe(
-      'default',
+      'gpt-6-luna',
     );
   });
 
@@ -1564,7 +1572,6 @@ describe('WorkspaceProviderProfileResolver — resolveStoredModel', () => {
   );
 
   it('passes the stored model through when no provider knows it', () => {
-    expect(getAnthropicProvider('requesty')?.staticModels).toBeUndefined();
     const { resolver } = createHarness({
       workspaceSettings: {
         authMethod: 'thirdParty',

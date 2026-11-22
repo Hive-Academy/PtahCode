@@ -24,6 +24,7 @@ import {
   AuthEnv,
   CODEX_PROXY_TOKEN_PLACEHOLDER,
   getStaticModelCapabilities,
+  getProviderLiveModelCapabilities,
   getAllAnthropicProviders,
   isDirectAnthropic,
   type ProviderProfile,
@@ -185,6 +186,37 @@ export function buildStaticTierCapabilityEnv(
       env[TIER_METADATA_ENV_VAR_MAP[tier].capabilities] =
         capabilities.join(',');
     }
+  }
+  return env;
+}
+
+/**
+ * Build the tier `_SUPPORTED_CAPABILITIES` env from the capabilities a
+ * provider declares for its live models (`liveModelCapabilities`).
+ *
+ * The runtime gates effort and thinking per model id and does not recognise
+ * non-Claude ids, so a provider must declare the capabilities itself. Writes a
+ * tier's key only when the tier has a model id and the provider declares a
+ * non-empty list; never a partial or guessed one, because the runtime treats
+ * the value as an allowlist. A provider that declares nothing gets no key.
+ *
+ * @param providerId - Registry provider ID (CLI lane entries resolve too)
+ * @param tiers - Resolved model id per tier (missing tiers are skipped)
+ * @returns The capability env keys to merge (empty when nothing is declared)
+ */
+export function buildTierCapabilityEnv(
+  providerId: string,
+  tiers: Partial<Record<EnvMappedTier, string>>,
+): AuthEnv {
+  const env: AuthEnv = {};
+  const capabilities = getProviderLiveModelCapabilities(providerId);
+  if (!capabilities || capabilities.length === 0) return env;
+  const value = capabilities.join(',');
+  for (const tier of Object.keys(
+    TIER_METADATA_ENV_VAR_MAP,
+  ) as EnvMappedTier[]) {
+    if (!tiers[tier]) continue;
+    env[TIER_METADATA_ENV_VAR_MAP[tier].capabilities] = value;
   }
   return env;
 }

@@ -55,7 +55,10 @@ export {
   isPreCompactHook,
   isPostCompactHook,
 } from './compaction-hook-handler';
-export type { SubagentBudgetMonitor, AgentBudgetState } from './compaction/subagent-budget-monitor';
+export type {
+  SubagentBudgetMonitor,
+  AgentBudgetState,
+} from './compaction/subagent-budget-monitor';
 export {
   adviseSubagentResume,
   buildBudgetResumeRefusal,
@@ -226,6 +229,7 @@ export {
   ALL_TIER_ENV_KEYS,
   buildTierEnvDefaults,
   buildStaticTierCapabilityEnv,
+  buildTierCapabilityEnv,
   type ModelTier,
   type EnvMappedTier,
 } from './sdk-model-service';

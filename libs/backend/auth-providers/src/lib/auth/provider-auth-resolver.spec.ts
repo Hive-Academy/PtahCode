@@ -884,9 +884,11 @@ describe('ProviderAuthResolver — live-catalogue tiers for a lane (TASK_2026_26
     });
     const first = await resolver.resolve('kimi-code', 'lane');
     expect(first?.env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('catalogue-new');
+    // Kimi declares its capabilities for every live model, so the live
+    // replacement id carries them too.
     expect(
       first?.env.ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES,
-    ).toBeUndefined();
+    ).toBe(getAnthropicProvider('kimi-code')?.liveModelCapabilities?.join(','));
     const replacementWarnings = () =>
       (logger.warn as jest.Mock).mock.calls.filter(
         ([message]) =>

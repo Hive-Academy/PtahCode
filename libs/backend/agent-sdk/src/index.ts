@@ -511,6 +511,7 @@ export {
   ALL_TIER_ENV_KEYS,
   buildTierEnvDefaults,
   buildStaticTierCapabilityEnv,
+  buildTierCapabilityEnv,
   SdkModelService,
   MemoryPromptInjector,
   CodeSymbolPromptInjector,

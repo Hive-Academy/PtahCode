@@ -7,7 +7,7 @@ import {
 } from '@ptah-extension/vscode-core';
 import {
   ALL_TIER_ENV_KEYS,
-  buildStaticTierCapabilityEnv,
+  buildTierCapabilityEnv,
 } from '@ptah-extension/agent-sdk';
 import type { OneShotAuthOverride } from '@ptah-extension/agent-sdk';
 import type { IProviderAuthResolver } from '@ptah-extension/agent-sdk';
@@ -437,7 +437,7 @@ export class ProviderAuthResolver implements IProviderAuthResolver {
     if (haiku) tiers.ANTHROPIC_DEFAULT_HAIKU_MODEL = haiku;
     Object.assign(
       tiers,
-      buildStaticTierCapabilityEnv(providerId, { opus, sonnet, haiku }),
+      buildTierCapabilityEnv(providerId, { opus, sonnet, haiku }),
     );
 
     if (!haiku) {
