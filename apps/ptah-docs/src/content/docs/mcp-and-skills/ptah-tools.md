@@ -11,6 +11,8 @@ The [built-in MCP server](/mcp-and-skills/built-in-mcp-server/) gives agents a s
 | ------------------------ | -------------------------------------------------------------- |
 | `ptah_workspace_analyze` | Returns the project type, frameworks, and structure            |
 | `ptah_search_files`      | Finds files by glob pattern                                    |
+| `ptah_grep`              | Searches file contents (text or regex), grouped by file, with the enclosing symbol of each match |
+| `ptah_read_symbol`       | Reads one declaration by name, or a line range, with line numbers |
 | `ptah_get_diagnostics`   | Returns errors and warnings. Pass `files` to make it faster    |
 | `ptah_count_tokens`      | Counts the tokens of a file                                    |
 | `ptah_web_search`        | Searches the web                                               |
