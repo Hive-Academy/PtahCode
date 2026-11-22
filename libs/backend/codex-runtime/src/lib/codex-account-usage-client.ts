@@ -52,6 +52,12 @@ interface HomeState {
   accountDigestFromId?: boolean;
   /** {@link codexSignedInDigest} recorded with the account-id owner. */
   signedInDigest?: string;
+  /**
+   * The last read could not confirm the retained account-id owner (its
+   * account/read failed or timed out). The owner stays recorded for the next
+   * confirming read but is not reported for this one.
+   */
+  ownerUnconfirmed?: boolean;
   miss?: { readonly at: number; readonly result: CodexAccountUsageResult };
   flight?: Flight;
 }
@@ -415,6 +421,7 @@ export class CodexAccountUsageClient {
     state.accountDigest = undefined;
     state.accountDigestFromId = undefined;
     state.signedInDigest = undefined;
+    state.ownerUnconfirmed = undefined;
     state.miss = undefined;
     const flight = state.flight;
     state.flight = undefined;
@@ -427,10 +434,8 @@ export class CodexAccountUsageClient {
    * Raw server account identifiers never escape.
    */
   currentAccountDigest(home: string): string | null {
-    return (
-      this.homes.get(normalizeCodexHomeKey(home, process.platform))
-        ?.accountDigest ?? null
-    );
+    const state = this.homes.get(normalizeCodexHomeKey(home, process.platform));
+    return state?.ownerUnconfirmed ? null : (state?.accountDigest ?? null);
   }
 
   async close(): Promise<void> {
@@ -481,6 +486,7 @@ export class CodexAccountUsageClient {
         state.accountDigest = undefined;
         state.accountDigestFromId = undefined;
         state.signedInDigest = undefined;
+        state.ownerUnconfirmed = undefined;
         state.miss = undefined;
         return { status: eligibility, providerId: PROVIDER };
       }
@@ -534,9 +540,15 @@ export class CodexAccountUsageClient {
       if (!current()) return unavailable();
       const result = usageResult(response, this.now());
       state.cached = result;
-      state.accountDigest = owner.digest;
-      state.accountDigestFromId = owner.fromId;
-      state.signedInDigest = owner.signedInDigest;
+      if (owner.unconfirmed) {
+        // Publish unresolved; keep the id owner for a later confirming read.
+        state.ownerUnconfirmed = true;
+      } else {
+        state.accountDigest = owner.digest;
+        state.accountDigestFromId = owner.fromId;
+        state.signedInDigest = owner.signedInDigest;
+        state.ownerUnconfirmed = undefined;
+      }
       state.miss = undefined;
       return result;
     } catch {
@@ -559,9 +571,9 @@ export class CodexAccountUsageClient {
   /**
    * The owner of one read. A rate-limits account id names it. Without one,
    * the bounded account/read decides: a recorded account-id owner stays only
-   * while the same account is signed in. A different, signed-out or
-   * unreadable account leaves the owner unresolved rather than keeping the
-   * old one. With no account-id owner recorded, the email names it.
+   * while the same account is signed in; a readable different or signed-out
+   * account drops it. An unreadable account/read keeps it recorded but leaves
+   * this read's owner unresolved. With no account-id owner, the email names it.
    */
   private async resolveOwner(
     home: string,
@@ -572,6 +584,7 @@ export class CodexAccountUsageClient {
     readonly digest?: string;
     readonly fromId: boolean;
     readonly signedInDigest?: string;
+    readonly unconfirmed?: true;
   }> {
     const signedInOf = (account: CodexSignedInAccount | null | undefined) =>
       account ? codexSignedInDigest(account) : undefined;
@@ -591,6 +604,9 @@ export class CodexAccountUsageClient {
     const account = await readAccount();
     const signedIn = signedInOf(account);
     if (state.accountDigestFromId && state.accountDigest) {
+      // Unreadable is not a switch: only a readable different account or a
+      // sign-out drops the retained owner.
+      if (account === undefined) return { fromId: true, unconfirmed: true };
       return signedIn !== undefined && signedIn === state.signedInDigest
         ? { digest: state.accountDigest, fromId: true, signedInDigest: signedIn }
         : { fromId: false };

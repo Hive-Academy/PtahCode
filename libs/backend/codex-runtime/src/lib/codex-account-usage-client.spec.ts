@@ -367,8 +367,6 @@ describe('CodexAccountUsageClient', () => {
     ['a different signed-in account', { account: { type: 'chatgpt', email: 'other@example.test' } }],
     ['the same email on another plan', { account: { type: 'chatgpt', email: 'private@example.test', planType: 'team' } }],
     ['a signed-out home', { account: null }],
-    ['a failed account read', undefined],
-    ['a hung account read', 'hang'],
   ])('drops an account-id owner when an id-less read finds %s', async (_case, account) => {
     configure = (child) => {
       child.response = { rateLimits: { primary: { usedPercent: 1 } }, accountId: 'acct-1' };
@@ -386,6 +384,43 @@ describe('CodexAccountUsageClient', () => {
     expect((await client.read(homeA, { refresh: true })).quota?.primary?.usedPercent).toBe(2);
     expect(client.currentAccountDigest(homeA)).toBeNull();
     expect((await client.read(homeA)).quota?.primary?.usedPercent).toBe(2);
+  });
+
+  it.each([
+    ['fails', undefined],
+    ['times out', 'hang'],
+  ])('keeps the account-id owner recorded when an id-less account/read %s', async (_case, account) => {
+    const sameAccount = {
+      account: { type: 'chatgpt', email: 'private@example.test' },
+    };
+    configure = (child) => {
+      child.response = { rateLimits: { primary: { usedPercent: 1 } }, accountId: 'acct-1' };
+      child.account = sameAccount;
+    };
+    await client.read(homeA);
+    const byId = client.currentAccountDigest(homeA);
+    expect(byId).not.toBeNull();
+    configure = (child) => {
+      child.response = { rateLimits: { primary: { usedPercent: 2 } } };
+      child.account = account;
+    };
+    // This read publishes without an owner, never under a guessed one.
+    expect((await client.read(homeA, { refresh: true })).quota?.primary?.usedPercent).toBe(2);
+    expect(client.currentAccountDigest(homeA)).toBeNull();
+    // The next readable same-account read restores the same id owner.
+    configure = (child) => {
+      child.response = { rateLimits: { primary: { usedPercent: 3 } } };
+      child.account = sameAccount;
+    };
+    expect((await client.read(homeA, { refresh: true })).quota?.primary?.usedPercent).toBe(3);
+    expect(client.currentAccountDigest(homeA)).toBe(byId);
+    // A readable different account after that still drops it.
+    configure = (child) => {
+      child.response = { rateLimits: { primary: { usedPercent: 4 } } };
+      child.account = { account: { type: 'chatgpt', email: 'other@example.test' } };
+    };
+    await client.read(homeA, { refresh: true });
+    expect(client.currentAccountDigest(homeA)).toBeNull();
   });
 
   it('bounds a hung identity call and still publishes the quota', async () => {
