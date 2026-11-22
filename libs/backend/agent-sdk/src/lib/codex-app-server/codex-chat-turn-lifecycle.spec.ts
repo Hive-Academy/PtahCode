@@ -429,6 +429,43 @@ describe('Codex chat turn lifecycle', () => {
     },
   );
 
+  it('publishes a detached terminal once when the detach itself took time', async () => {
+    // Regression: the detach exit stored a non-zero time and sent a
+    // time-only result before the drain published the terminal's stats.
+    const h = setup('chat', 'api-key', 'gpt-4o');
+    const stats = jest.fn();
+    h.adapter.setResultStatsCallback(stats);
+    let finish: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    h.context.events.mockImplementation(() =>
+      (async function* () {
+        yield delta;
+        await gate;
+        yield { ...terminal, evidence, usage: { inputTokens: 100, outputTokens: 20 } };
+      })(),
+    );
+    let clock = 1_000_000;
+    const now = jest.spyOn(Date, 'now').mockImplementation(() => (clock += 10));
+    try {
+      const iterator = (await h.adapter.startChatSession({ tabId }))[Symbol.asyncIterator]();
+      await iterator.next();
+      await iterator.return?.();
+      finish?.();
+      for (let i = 0; i < 5; i += 1)
+        await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(stats).toHaveBeenCalledTimes(1);
+      expect(stats.mock.calls[0][0].turnCost).not.toBeNull();
+      // The detach and the drain end both stored time; no extra result.
+      expect(h.persistDuration.mock.calls.length).toBeLessThanOrEqual(1);
+    } finally {
+      now.mockRestore();
+      finish?.();
+      await h.adapter.dispose();
+    }
+  });
+
   it('retries a failed price write and never adds the same turn twice', () => {
     const owner = new CodexSessionUsageOwner(id, id);
     const price = calculateExactMessageCost(
@@ -1271,7 +1308,7 @@ describe('Codex chat turn lifecycle', () => {
       }));
       // Each clock read is one second later, so the turn has a real length.
       let clock = 1_000_000;
-      const now = jest.spyOn(Date, 'now').mockImplementation(() => (clock += 1_000));
+      const now = jest.spyOn(Date, 'now').mockImplementation(() => (clock += 10));
       try {
         await expect(
           collect(await h.adapter.startChatSession({ tabId, prompt: 'hello' })),
@@ -1322,7 +1359,7 @@ describe('Codex chat turn lifecycle', () => {
         }),
       }));
       let clock = 1_000_000;
-      const now = jest.spyOn(Date, 'now').mockImplementation(() => (clock += 1_000));
+      const now = jest.spyOn(Date, 'now').mockImplementation(() => (clock += 10));
       try {
         await expect(
           collect(await h.adapter.startChatSession({ tabId, prompt: 'hello' })),
@@ -1395,11 +1432,56 @@ describe('Codex chat turn lifecycle', () => {
       await collect(await h.adapter.startChatSession({ tabId }));
       await new Promise((resolve) => setImmediate(resolve));
       expect(h.persistUsage).toHaveBeenCalled();
-      const persisted = h.persistUsage.mock.lastCall?.[2];
-      // The finally block re-measures the turn; it writes only a longer time.
-      for (const [, duration] of h.persistDuration.mock.calls) {
-        expect(duration.turnMs).toBeGreaterThan(persisted?.turnMs ?? -1);
+      // The stats publish stored the time; the exit adds no second write.
+      expect(h.persistDuration).not.toHaveBeenCalled();
+      await h.adapter.dispose();
+    });
+
+    it('stores the time before yielding the failed turn_state', async () => {
+      const h = setup();
+      h.context.events.mockImplementation(() => ({
+        [Symbol.asyncIterator]: () => ({
+          next: async () => {
+            throw new Error('process died');
+          },
+        }),
+      }));
+      let clock = 1_000_000;
+      const now = jest.spyOn(Date, 'now').mockImplementation(() => (clock += 10));
+      try {
+        const stream = await h.adapter.startChatSession({ tabId, prompt: 'hello' });
+        const iterator = stream[Symbol.asyncIterator]();
+        let event = await iterator.next();
+        while (!event.done && event.value.eventType !== 'turn_state')
+          event = await iterator.next();
+        expect(event.value).toMatchObject({ eventType: 'turn_state', phase: 'failed' });
+        // The consumer stops here: the write already happened.
+        expect(h.persistDuration).toHaveBeenCalledTimes(1);
+        await iterator.return?.(undefined);
+      } finally {
+        now.mockRestore();
       }
+      await h.adapter.dispose();
+    });
+
+    it('publishes one time-only result for a turn that ended without stats', async () => {
+      const h = setup();
+      const stats = jest.fn();
+      h.adapter.setResultStatsCallback(stats);
+      await dyingTurn(h);
+      expect(stats).toHaveBeenCalledTimes(1);
+      const payload = stats.mock.calls[0][0];
+      expect(payload.sessionId).toBe(id);
+      expect(payload.sessionStats.durationMs).toBeGreaterThan(0);
+      // Nothing new is counted: unknown turn cost, no observed tokens, and
+      // the owner's lifetime figures as they were.
+      expect(payload.turnCost).toBeNull();
+      expect(payload.tokens).toEqual({ input: 0, output: 0, cacheRead: 0, cacheCreation: 0 });
+      expect(payload.sessionStats.tokens).toEqual({
+        input: 0, output: 0, cacheRead: 0, cacheCreation: 0,
+      });
+      expect(payload.sessionStats.totalCost).toBeNull();
+      expect(payload).not.toHaveProperty('modelUsage');
       await h.adapter.dispose();
     });
   });
@@ -1746,7 +1828,18 @@ describe('Codex chat turn lifecycle', () => {
         phase: 'idle',
         terminalReason: 'aborted_streaming',
       });
-      expect(stats).not.toHaveBeenCalled();
+      // No usage result arrived; the only result is the time-only one, with
+      // unknown cost and no tokens, so nothing is counted twice.
+      expect(stats).toHaveBeenCalledTimes(1);
+      expect(stats.mock.calls[0][0]).toMatchObject({
+        turnCost: null,
+        tokens: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 },
+      });
+      expect(stats.mock.calls[0][0].sessionStats.durationMs).toBeGreaterThanOrEqual(5_000);
+      // The drain's 5 s wait is part of the turn: stored before release.
+      expect(h.persistDuration).toHaveBeenCalledTimes(1);
+      expect(h.persistDuration.mock.calls[0][1]).toMatchObject({ turnId: 'turn' });
+      expect(h.persistDuration.mock.calls[0][1].turnMs).toBeGreaterThanOrEqual(5_000);
     } finally {
       jest.useRealTimers();
       finish?.();
