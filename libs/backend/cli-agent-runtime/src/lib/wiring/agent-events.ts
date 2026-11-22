@@ -370,10 +370,18 @@ function wireAgentMonitorListeners(
         notice: AgentActionNotice | null;
         text: string;
       }) => {
+        // The card shows the lane's current notice. Another monitor can hold a higher phase than
+        // the notice that was just announced, and `info.actionNotice` already mirrors the
+        // highest one. The host text fits only the announced notice.
+        const notice = event.info.actionNotice ?? event.notice;
+        const announced = event.notice;
         const payload: AgentMonitorActionNoticePayload = {
           agentId: String(event.info.agentId),
-          notice: event.notice,
-          text: event.text,
+          notice,
+          text:
+            notice && announced && notice.action === announced.action && notice.reason === announced.reason
+              ? event.text
+              : '',
         };
         webviewManager
           .broadcastMessage(MESSAGE_TYPES.AGENT_MONITOR_ACTION_NOTICE, payload)

@@ -361,6 +361,34 @@ describe('agent action notice broadcast', () => {
     );
   });
 
+  it('sends the current notice when another monitor already holds a higher phase', () => {
+    const broadcastMessage = jest.fn().mockResolvedValue(undefined);
+    const events = new EventEmitter();
+    const container = buildContainer([
+      [TOKENS.AGENT_PROCESS_MANAGER, { events, findAgentInfo: () => undefined }],
+      [TOKENS.WEBVIEW_MANAGER, { broadcastMessage }],
+    ]);
+    wireAgentEventListeners(container, {
+      logger: Object.assign(Object.create(null) as Logger, createMockLogger()),
+      platform: 'electron',
+    });
+    const paused = {
+      actor: 'ptah-budget', action: 'paused', reason: 'weighted-budget', nextStep: 'review-live-agent',
+    } as const;
+    const ask = {
+      actor: 'ptah-watchdog', action: 'asked-handoff', reason: 'lane-inactive', nextStep: 'return-report',
+    } as const;
+    events.emit('agent:action-notice', {
+      info: { agentId: 'lane-1', actionNotice: paused },
+      notice: ask,
+      text: 'Ptah watchdog asked lane-1 for a handoff.',
+    });
+    expect(broadcastMessage).toHaveBeenCalledWith(
+      MESSAGE_TYPES.AGENT_MONITOR_ACTION_NOTICE,
+      { agentId: 'lane-1', notice: paused, text: '' },
+    );
+  });
+
   it('forwards a release of the notice as a null notice', () => {
     const broadcastMessage = jest.fn().mockResolvedValue(undefined);
     const events = new EventEmitter();
