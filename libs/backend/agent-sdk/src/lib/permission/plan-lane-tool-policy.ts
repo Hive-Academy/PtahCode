@@ -26,6 +26,8 @@ export const PLAN_LANE_PTAH_TOOLS: ReadonlySet<string> = new Set(
     // Workspace search and code intelligence (read-only).
     'ptah_workspace_analyze',
     'ptah_search_files',
+    'ptah_grep',
+    'ptah_read_symbol',
     'ptah_code_search_symbols',
     'ptah_get_symbol_index',
     'ptah_get_dependents',
