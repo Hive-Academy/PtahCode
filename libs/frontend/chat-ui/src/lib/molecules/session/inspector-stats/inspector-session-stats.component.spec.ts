@@ -301,4 +301,85 @@ describe(InspectorSessionStatsComponent.name, () => {
     expect(root.querySelector('[aria-label="Cost unavailable"]')).toBeNull();
     expect(root.querySelector('[data-testid="inspector-stats-grid"]')?.textContent).toContain('31.7k');
   });
+
+  describe('Codex main-agent snapshot (TASK_2026_2303)', () => {
+    const base = {
+      cache: null, liveModelStats: null, compactionCount: 0, limits: null, budget: null,
+      context: { hasLive: false, known: false, percent: null, label: '—', usedTokens: null },
+      limitSummary: { state: 'none', text: null, extra: 0, source: null, fullText: null },
+    } as const;
+    const codexSnapshot = (extra: Record<string, unknown>) => ({
+      sessionId: 'codex-1', model: 'gpt-5.5', totalCost: 0.42, knownCost: 0.42,
+      tokens: { input: 1_000, output: 200, cacheRead: 0, cacheCreation: 0 },
+      tokenCount: 1_200, messageCount: 2, status: 'ok', pricingCoverage: 'full',
+      scope: 'session', coverage: 'complete',
+      ...extra,
+    }) as unknown as NonNullable<SessionStatsInputs['snapshot']>;
+    const render = (snapshot: NonNullable<SessionStatsInputs['snapshot']>) => {
+      TestBed.configureTestingModule({
+        imports: [InspectorSessionStatsComponent],
+        providers: [{ provide: ModelStateService, useValue: { availableModels: signal([]) } }],
+      });
+      const fixture = TestBed.createComponent(InspectorSessionStatsComponent);
+      fixture.componentRef.setInput('stats', { sessionId: 'codex-1', snapshot, ...base } satisfies SessionStatsInputs);
+      fixture.detectChanges();
+      return fixture;
+    };
+
+    it('shows the session time when the snapshot carries durationMs', () => {
+      const root = render(codexSnapshot({ durationMs: 12_500 })).nativeElement as HTMLElement;
+      const time = root.querySelector('[data-testid="inspector-session-time"]');
+      expect(time?.textContent).toContain('12.5s');
+      expect(time?.textContent).not.toContain('—');
+    });
+
+    it.each([undefined, null, 0])('shows "—" only when the duration is unknown (%p)', (durationMs) => {
+      const root = render(codexSnapshot({ durationMs })).nativeElement as HTMLElement;
+      const time = root.querySelector('[data-testid="inspector-session-time"] > div:nth-child(2)');
+      expect(time?.textContent?.trim()).toBe('—');
+      expect(time?.getAttribute('title')).toBe('not reported');
+    });
+
+    const openModels = (fixture: ReturnType<typeof render>) => {
+      const root = fixture.nativeElement as HTMLElement;
+      [...root.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Models')?.click();
+      fixture.detectChanges();
+      return {
+        root,
+        rows: [...root.querySelectorAll('[aria-label="Per-model usage"] [role="listitem"]')],
+        total: root.querySelector('[aria-label="Per-model usage"] > div:last-child'),
+      };
+    };
+
+    it('keeps "—" for a partly priced row and labels the known subtotal', () => {
+      const { root, rows, total } = openModels(render(codexSnapshot({
+        totalCost: null, knownCost: 0.42, pricingCoverage: 'partial',
+        modelUsageList: [
+          { model: 'gpt-5.5', inputTokens: 900, outputTokens: 150, cacheRead: 0, cacheCreation: 0, costUSD: 0.42 },
+          { model: 'other-model', inputTokens: 100, outputTokens: 50, cacheRead: 0, cacheCreation: 0, costUSD: null },
+        ],
+      })));
+      expect(rows).toHaveLength(2);
+      expect(rows[0].textContent).toContain('$0.42');
+      expect(rows[1].textContent).toContain('—');
+      expect(rows[1].textContent).not.toMatch(/Not priced|\$0\.00/);
+      expect(total?.textContent).toContain('known subtotal $0.42');
+      // The header keeps its known-subtotal label as before.
+      expect(root.textContent).toContain('known subtotal $0.42');
+    });
+
+    it('labels rows "Not priced" when the session names a missing rate', () => {
+      const { rows, total } = openModels(render(codexSnapshot({
+        totalCost: null, knownCost: null, pricingCoverage: 'none',
+        costUnavailableReason: 'rate-missing',
+        modelUsageList: [
+          { model: 'model-a', inputTokens: 900, outputTokens: 150, cacheRead: 0, cacheCreation: 0, costUSD: null },
+          { model: 'model-b', inputTokens: 100, outputTokens: 50, cacheRead: 0, cacheCreation: 0, costUSD: null },
+        ],
+      })));
+      expect(rows).toHaveLength(2);
+      for (const row of rows) expect(row.textContent).toContain('Not priced');
+      expect(total?.textContent).toContain('Not priced');
+    });
+  });
 });

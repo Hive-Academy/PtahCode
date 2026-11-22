@@ -57,6 +57,11 @@ export interface OrchestratorCardModel {
    * `costUnavailableReason: 'rate-missing'`): shown "Not priced", not `—`.
    */
   readonly costNotPriced?: boolean;
+  /**
+   * Session duration from the backend snapshot (`durationMs`); `null` or
+   * absent when the backend does not know it, shown as the Time `—`.
+   */
+  readonly durationMs?: number | null;
   readonly turns: number | null;
   /** Orchestrator-owned requests, FIFO. */
   readonly requests: readonly InspectorRequest[];

@@ -1254,6 +1254,7 @@ export function registerCodexChatServices(
             ...createCodexChatMetadataPort(identities),
             readUsage: ports.metadata.readUsage,
             persistUsage: ports.metadata.persistUsage,
+            persistDuration: ports.metadata.persistDuration,
           },
         },
         c.resolve<SessionTurnStateRegistry>(

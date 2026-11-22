@@ -12,6 +12,7 @@ import type { SessionStatus, TabState } from '@ptah-extension/chat-types';
 import {
   isRunningAgentWord,
   NOT_PRICED,
+  durationMsOf,
   nullCostLabel,
   sessionContextCue,
 } from '@ptah-extension/chat-ui';
@@ -153,6 +154,7 @@ function orchestratorCard(
     tokens: sessionTokenTotal(stats),
     cost: finiteOrNull(stats?.totalCost),
     costNotPriced: nullCostLabel(stats) === NOT_PRICED,
+    durationMs: durationMsOf(stats),
     turns,
     requests,
   };

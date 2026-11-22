@@ -522,6 +522,7 @@ describe('CodexChatAdapter', () => {
     expect(persistUsage).toHaveBeenCalledWith(
       id,
       expect.objectContaining({ sessionId: id }),
+      expect.objectContaining({ completedMs: expect.any(Number) }),
     );
     h.adapter.dispose();
   });

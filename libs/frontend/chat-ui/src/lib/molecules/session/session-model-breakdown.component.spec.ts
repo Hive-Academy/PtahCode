@@ -78,4 +78,71 @@ describe('SessionModelBreakdownComponent', () => {
       root.querySelector('[data-testid="model-usage-total"]')?.textContent,
     ).toContain('$38.18');
   });
+
+  function mountBreakdown(snapshot: SessionStatsEntry) {
+    TestBed.configureTestingModule({
+      imports: [SessionModelBreakdownComponent],
+      providers: [
+        { provide: ModelStateService, useValue: { availableModels: signal([]) } },
+      ],
+    });
+    const fixture = TestBed.createComponent(SessionModelBreakdownComponent);
+    fixture.componentRef.setInput('snapshot', snapshot);
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+    const costCell = (row: Element) =>
+      row.querySelector('[role="cell"]:last-child') as HTMLElement;
+    return {
+      cells: [...root.querySelectorAll('[data-testid="model-usage-row"]')].map(costCell),
+      total: costCell(root.querySelector('[data-testid="model-usage-total"]') as Element),
+    };
+  }
+
+  it('labels rows "Not priced" when the session names a missing rate', () => {
+    const { cells, total } = mountBreakdown({
+      ...SNAPSHOT,
+      totalCost: null,
+      knownCost: null,
+      pricingCoverage: 'none',
+      costUnavailableReason: 'rate-missing',
+      modelUsageList: SNAPSHOT.modelUsageList?.map((row) => ({ ...row, costUSD: null })),
+    });
+    for (const cell of cells) {
+      expect(cell.textContent?.trim()).toBe('Not priced');
+      expect(cell.classList.contains('text-success')).toBe(false);
+    }
+    expect(total.textContent?.trim()).toBe('Not priced');
+  });
+
+  it('keeps "—" for a partly priced row and labels the known subtotal Total', () => {
+    const rows = SNAPSHOT.modelUsageList ?? [];
+    const { cells, total } = mountBreakdown({
+      ...SNAPSHOT,
+      totalCost: null,
+      knownCost: 38,
+      pricingCoverage: 'partial',
+      modelUsageList: [rows[0], { ...rows[1], costUSD: null }],
+    });
+    expect(cells[0].textContent?.trim()).toBe('$38.00');
+    expect(cells[0].classList.contains('text-success')).toBe(true);
+    expect(cells[1].textContent?.trim()).toBe('—');
+    expect(cells[1].getAttribute('title')).toBe('not reported');
+    expect(cells[1].classList.contains('text-success')).toBe(false);
+    expect(total.textContent?.trim()).toBe('known subtotal $38.00');
+    expect(total.classList.contains('text-success')).toBe(false);
+  });
+
+  it('does not colour an absent (undefined) row cost as priced', () => {
+    const rows = SNAPSHOT.modelUsageList ?? [];
+    const { cells } = mountBreakdown({
+      ...SNAPSHOT,
+      modelUsageList: [
+        rows[0],
+        { ...rows[1], costUSD: undefined as unknown as number | null },
+      ],
+    });
+    expect(cells[1].textContent?.trim()).toBe('—');
+    expect(cells[1].classList.contains('text-success')).toBe(false);
+    expect(cells[0].textContent?.trim()).toBe('$38.00');
+  });
 });

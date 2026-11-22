@@ -45,6 +45,24 @@ const pricingSchema = z.object({
   basis: basisSchema.optional(),
   segments: z.array(pricingSegmentSchema).max(MAX_USAGE_THREADS).optional(),
 }).strict();
+/**
+ * Codex session Time: wall-clock time per turn, from turn start to its last
+ * stats publish or exit, approval waits included. The finished turns' sum and
+ * the latest turn are kept apart so a turn that publishes stats more than once
+ * is counted once. Stored beside the checkpoint, never inside its strict
+ * version-2 shape, so an older build still reads and writes the checkpoint.
+ */
+export const codexTurnDurationSchema = z.object({
+  completedMs: count,
+  turnId: z.string().min(1).optional(),
+  turnMs: count,
+});
+export type CodexTurnDuration = z.infer<typeof codexTurnDurationSchema>;
+
+/** Total milliseconds of a stored turn-time record. */
+export function codexTurnDurationTotal(duration: CodexTurnDuration | undefined): number {
+  return duration ? duration.completedMs + duration.turnMs : 0;
+}
 export const codexUsageCheckpointSchema = z.object({
   version: z.literal(2),
   sessionId: z.string().min(1),
@@ -103,6 +121,7 @@ export class CodexSessionUsageOwner {
   private pricing: z.infer<typeof pricingSchema> = {
     throughRevision: 0, knownCost: 0, complete: true, provenance: [],
   };
+  private duration: CodexTurnDuration = { completedMs: 0, turnMs: 0 };
 
   constructor(readonly sessionId: string, readonly rootThreadId: string,
     private readonly childInclusion: 'disjoint' | 'unverified' = 'unverified') {}
@@ -238,6 +257,44 @@ export class CodexSessionUsageOwner {
       basis: this.pricing.basis === undefined ? basis
         : this.pricing.basis === basis ? this.pricing.basis : 'unknown',
     };
+  }
+
+  /**
+   * Restore the turn time stored beside the checkpoint. An absent or invalid
+   * record leaves the time unknown; it never affects usage coverage.
+   */
+  restoreDuration(raw: unknown): void {
+    const parsed = codexTurnDurationSchema.safeParse(raw);
+    if (parsed.success &&
+      Number.isSafeInteger(codexTurnDurationTotal(parsed.data)))
+      this.duration = parsed.data;
+  }
+
+  /** The turn-time record to persist beside the checkpoint. */
+  serializeDuration(): CodexTurnDuration {
+    return { ...this.duration };
+  }
+
+  /**
+   * Record a turn's wall-clock elapsed time. A repeated call for the same turn replaces
+   * that turn's figure (a turn may publish stats more than once); a new turn
+   * folds the previous one into the finished sum.
+   */
+  recordTurnDuration(turnId: string, ms: number): void {
+    if (!Number.isFinite(ms) || ms < 0) return;
+    const turnMs = Math.round(ms);
+    if (this.duration.turnId === turnId) {
+      this.duration = { ...this.duration, turnMs: Math.max(this.duration.turnMs, turnMs) };
+      return;
+    }
+    const completedMs = this.duration.completedMs + this.duration.turnMs;
+    if (!Number.isSafeInteger(completedMs + turnMs)) return;
+    this.duration = { completedMs, turnId, turnMs };
+  }
+
+  private durationMs(): number | null {
+    const total = this.duration.completedMs + this.duration.turnMs;
+    return total > 0 ? total : null;
   }
 
   lifetimePrice(): {
@@ -388,6 +445,7 @@ export class CodexSessionUsageOwner {
       tokenCount: this.total.uncachedInputTokens + this.total.outputTokens + this.total.cacheReadTokens + this.total.cacheCreationTokens,
       messageCount, status: this.threads.size ? 'ok' : 'empty',
       coverage: this.coverage, scope: 'session',
+      durationMs: this.durationMs(),
     };
   }
 

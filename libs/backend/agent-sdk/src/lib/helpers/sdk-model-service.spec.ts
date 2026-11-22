@@ -962,7 +962,18 @@ describe('SdkModelService — persisted catalog', () => {
       state,
     });
     second.setProviderId('other-provider');
-    await second.service.getSupportedModels().catch(() => undefined);
+    // An API-key identity first asks /v1/models. Answer it locally: a real
+    // request to api.anthropic.com waits up to its own 5 s abort, the same
+    // as Jest's default test timeout, so a slow network failed this test.
+    const fetchSpy = jest
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(null, { status: 401 }));
+    try {
+      await second.service.getSupportedModels().catch(() => undefined);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      fetchSpy.mockRestore();
+    }
 
     expect(
       second.spawnEnvs.length + second.offThreadSpawns.length,

@@ -40,6 +40,37 @@ export const STATS_EMPTY = { value: '—', context: 'Context unavailable', token
  */
 export const NOT_PRICED = 'Not priced';
 
+/** A cost that can be shown as dollars: a finite number, never null or undefined. */
+export function isKnownCost(cost: number | null | undefined): cost is number {
+  return typeof cost === 'number' && Number.isFinite(cost);
+}
+
+/**
+ * A per-model row cost. A row's null cost has several causes (no published
+ * rate, usage not observed, a model only partly priced), and the row carries
+ * no reason of its own. It reads "Not priced" only when the session names a
+ * missing rate as its one cause; every other null keeps "—" ("not reported"),
+ * so a partly priced or unobserved model is never labelled as unpriced.
+ */
+export function formatModelCost(
+  cost: number | null | undefined,
+  snapshot: SessionStatsEntry | null,
+): string {
+  if (isKnownCost(cost)) return formatCost(cost);
+  return nullCostValue(snapshot);
+}
+
+/**
+ * The Total of a per-model list: the session cost, else its labelled known
+ * subtotal when pricing is partial, else the null-cost value.
+ */
+export function formatModelTotal(snapshot: SessionStatsEntry | null): string {
+  const total = snapshot?.totalCost;
+  if (isKnownCost(total)) return formatCost(total);
+  const known = knownSubtotalOf(snapshot);
+  return known ? `known subtotal ${formatCost(known.value)}` : nullCostValue(snapshot);
+}
+
 /** Accessible label for a null session cost, by its backend-named cause. */
 export function nullCostLabel(s: SessionStatsEntry | null): string {
   return s !== null && s.totalCost === null &&
