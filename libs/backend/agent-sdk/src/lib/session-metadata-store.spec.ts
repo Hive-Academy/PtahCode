@@ -3053,6 +3053,17 @@ describe('Codex metadata identity', () => {
     expect(restored.snapshot().durationMs).toBe(7_000);
   });
 
+  it('accepts a duration-only write for a native session with no checkpoint yet', async () => {
+    const { storage, store } = fixture();
+    await store.updateCodexExecution(threadId, () => execution);
+    expect((await store.get(threadId))?.codexUsageCheckpoint).toBeUndefined();
+    await store.updateCodexTurnDuration(threadId, { completedMs: 0, turnId: 'turn-1', turnMs: 3_000 });
+    const reloaded = new SessionMetadataStore(storage, asLogger(createMockLogger()));
+    const row = await reloaded.get(threadId);
+    expect(row?.codexUsageCheckpoint).toBeUndefined();
+    expect(row?.codexTurnDuration).toEqual({ completedMs: 0, turnId: 'turn-1', turnMs: 3_000 });
+  });
+
   it('refuses a duration-only write for a session that is not native Codex', async () => {
     const { store } = fixture();
     await expect(store.updateCodexTurnDuration(

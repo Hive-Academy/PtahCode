@@ -454,8 +454,9 @@ export class CodexChatAdapter implements NativeChatAdapter {
               context.identity.threadId,
               savedUsage.checkpoint,
             );
-      if (usageOwner.isRestoredCheckpoint())
-        usageOwner.restoreDuration(savedUsage?.duration);
+      // Turn time is kept on its own: a session whose only turns ended
+      // before any usage has a duration record and no checkpoint.
+      usageOwner.restoreDuration(savedUsage?.duration);
       if (
         readUsageFailed ||
         (resumeId && savedUsage?.checkpoint === undefined)

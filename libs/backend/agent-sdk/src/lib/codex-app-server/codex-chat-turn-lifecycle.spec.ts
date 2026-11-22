@@ -31,7 +31,11 @@ import {
   type CodexUsageCheckpoint,
 } from './codex-session-usage-owner';
 import { codexUsageCheckpointSchema } from './codex-session-usage-owner';
-import { recordTurnPriceOnce } from './codex-chat-turn-stream';
+import {
+  persistTurnDuration,
+  recordTurnPriceOnce,
+  TURN_DURATION_PERSIST_WAIT_MS,
+} from './codex-chat-turn-stream';
 
 const id = SessionId.from('11111111-1111-4111-8111-111111111111');
 const tabId = SessionId.from('22222222-2222-4222-8222-222222222222');
@@ -1301,6 +1305,84 @@ describe('Codex chat turn lifecycle', () => {
       );
       expect(h.adapter.isSessionActive(id)).toBe(false);
       await h.adapter.dispose();
+    });
+
+    it('settles the turn only after its duration write finished', async () => {
+      const h = setup();
+      let stored = false;
+      h.persistDuration.mockImplementation(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        stored = true;
+      });
+      h.context.events.mockImplementation(() => ({
+        [Symbol.asyncIterator]: () => ({
+          next: async () => {
+            throw new Error('process died');
+          },
+        }),
+      }));
+      let clock = 1_000_000;
+      const now = jest.spyOn(Date, 'now').mockImplementation(() => (clock += 1_000));
+      try {
+        await expect(
+          collect(await h.adapter.startChatSession({ tabId, prompt: 'hello' })),
+        ).rejects.toMatchObject({ code: 'runtime-failed' });
+      } finally {
+        now.mockRestore();
+      }
+      // No flush: the turn's end already waited for the write.
+      expect(stored).toBe(true);
+      await h.adapter.dispose();
+    });
+
+    it('restores a duration stored without any usage checkpoint on reopen', async () => {
+      const h = setup('chat', 'api-key', 'gpt-4o');
+      h.ports.metadata.readUsage = jest.fn(async () => ({
+        duration: { completedMs: 45_000, turnId: 'old-turn', turnMs: 0 },
+        messageCount: 0,
+      }));
+      const stats = jest.fn();
+      h.adapter.setResultStatsCallback(stats);
+      h.context.events.mockImplementation(() =>
+        (async function* () {
+          yield { ...terminal, evidence };
+        })(),
+      );
+      await collect(await h.adapter.resumeSession(id, { tabId }));
+      const sessionStats = stats.mock.lastCall?.[0].sessionStats;
+      expect(sessionStats.durationMs).toBeGreaterThanOrEqual(45_000);
+      // Without a checkpoint the usage stays partial, never complete.
+      expect(sessionStats.coverage).toBe('partial');
+      await h.adapter.dispose();
+    });
+
+    it('bounds the wait for a hung duration write and logs it', async () => {
+      jest.useFakeTimers();
+      try {
+        const warn = jest.fn();
+        let settled = false;
+        const pending = persistTurnDuration(
+          id,
+          { completedMs: 0, turnId: 'turn', turnMs: 1_000 },
+          {
+            persistDuration: () => new Promise<void>(() => undefined),
+            logger: { warn } as unknown as Parameters<typeof persistTurnDuration>[2]['logger'],
+          },
+        ).then(() => {
+          settled = true;
+        });
+        await jest.advanceTimersByTimeAsync(TURN_DURATION_PERSIST_WAIT_MS - 1);
+        expect(settled).toBe(false);
+        await jest.advanceTimersByTimeAsync(1);
+        await pending;
+        expect(settled).toBe(true);
+        expect(warn).toHaveBeenCalledWith(
+          expect.stringContaining('persistence is slow'),
+          { sessionId: id },
+        );
+      } finally {
+        jest.useRealTimers();
+      }
     });
 
     it('does not write the duration again after a stats publish stored it', async () => {

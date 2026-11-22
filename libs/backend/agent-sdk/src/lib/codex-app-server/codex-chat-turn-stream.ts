@@ -598,13 +598,15 @@ export async function* streamCodexChatTurn(
     finishCompaction?.();
     // Every admitted turn exit counts its wall time, including a cancel or a
     // failure that never reached publishStats. Time no usage persist stored
-    // yet is written on its own, best effort: a failed write is logged and
-    // never changes how the turn settles.
+    // yet is written on its own before the turn settles, so a caller that
+    // sees the settle and then closes or reopens finds it stored. Best
+    // effort and bounded: a failed or slow write is logged and never changes
+    // how the turn settles.
     if (admitted && session.turnId) {
       session.usageOwner.recordTurnDuration(session.turnId, Date.now() - started);
       const duration = session.usageOwner.serializeDuration();
       if (codexTurnDurationTotal(duration) !== persistedDurationTotal)
-        persistTurnDuration(session.id, duration, deps);
+        await persistTurnDuration(session.id, duration, deps);
     }
     // A consumer can detach between message_complete and its settlement event.
     if (terminal) settleTurn();
@@ -652,12 +654,20 @@ export async function* streamCodexChatTurn(
     }
   }
 }
-function persistTurnDuration(
+/** Upper bound on how long a turn's settle waits for its turn-time write. */
+export const TURN_DURATION_PERSIST_WAIT_MS = 2_000;
+
+/**
+ * Write the turn-time record and wait for it, at most
+ * {@link TURN_DURATION_PERSIST_WAIT_MS}. Never rejects: a failure is logged;
+ * a write still running at the bound finishes (and is logged) on its own.
+ */
+export async function persistTurnDuration(
   id: SessionId,
   duration: CodexTurnDuration,
   deps: Pick<CodexChatTurnDependencies, 'persistDuration' | 'logger'>,
-): void {
-  void Promise.resolve()
+): Promise<void> {
+  const write = Promise.resolve()
     .then(() => deps.persistDuration(id, duration))
     .catch((error: unknown) => {
       deps.logger.warn(
@@ -665,6 +675,19 @@ function persistTurnDuration(
         { error: error instanceof Error ? error.message : String(error) },
       );
     });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const bound = new Promise<'timeout'>((resolve) => {
+    timer = setTimeout(() => resolve('timeout'), TURN_DURATION_PERSIST_WAIT_MS);
+  });
+  try {
+    if (await Promise.race([write.then(() => 'done' as const), bound]) === 'timeout')
+      deps.logger.warn(
+        '[CodexChatAdapter] Native turn time persistence is slow; the turn settles without waiting.',
+        { sessionId: id },
+      );
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 const REFUSED_INTERRUPT_DRAIN_MS = 5_000;
