@@ -273,13 +273,16 @@ export class ProviderSessionUsageLedger {
       cacheRead += totals.cacheRead;
       cacheCreation += totals.cacheCreation;
     }
+    const complete = this.complete;
+    // A restored session cannot vouch for turns it may have lost, so a
+    // priced restored session is 'partial': the renderer then shows the
+    // labeled known subtotal instead of "Cost unavailable".
     const pricingCoverage: SessionStatsPricingCoverage =
-      this.unpricedTurns === 0 && this.pricedTurns > 0
+      complete && this.unpricedTurns === 0 && this.pricedTurns > 0
         ? 'full'
         : this.pricedTurns > 0
           ? 'partial'
           : 'none';
-    const complete = this.complete;
     // A restored session's uncounted earlier turns: never a total.
     const totalCost =
       complete && pricingCoverage === 'full' ? round(this.knownCost) : null;

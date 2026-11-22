@@ -337,7 +337,8 @@ describe('ProviderSessionUsageLedger persistence identity and seed', () => {
       messageCount: 3,
       durationMs: 50,
       tokens: { input: 11, output: 6 },
-      pricingCoverage: 'full',
+      // Partial, so the renderer shows the known subtotal (knownSubtotalOf).
+      pricingCoverage: 'partial',
       totalCost: null,
     });
     expect(turn.snapshot.turnCount).toBeUndefined();
