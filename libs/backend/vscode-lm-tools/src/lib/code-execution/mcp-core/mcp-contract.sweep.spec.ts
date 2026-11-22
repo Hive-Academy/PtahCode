@@ -2637,7 +2637,8 @@ describe('MCP dispatcher contract sweep (TASK_2026_559 Batch 21, Task 21.1)', ()
       // the Batch 24d kinds, the code-index / export-index distinction),
       // asserted item by item in tool-description.builder.spec.ts.
       // +12 (Batch 33): the registry publicSymbols list gained ", python, go".
-      ptah_code_search_symbols: 714,
+      // 714 + 56 (TASK_2026_2299): text hits, header line, `includeCoverage`.
+      ptah_code_search_symbols: 770,
       // +12 (Batch 33): the registry graphEdges list gained ", python, go".
       ptah_get_dependencies: 701,
       ptah_dashboard_propose_spec: 671,

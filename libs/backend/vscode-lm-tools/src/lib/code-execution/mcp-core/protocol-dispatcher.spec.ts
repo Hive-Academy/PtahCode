@@ -7131,7 +7131,10 @@ describe('protocol-handlers › ptah_code_reindex and index freshness (TASK_2026
     expect(resultOf(res).isError).toBe(true);
   });
 
-  it('ptah_code_search_symbols runs the freshness check and surfaces the index block', async () => {
+  it.each([
+    ['includeCoverage returns the index block as JSON', true],
+    ['the default text form names the index in one header line', false],
+  ])('ptah_code_search_symbols runs the freshness check; %s', async (_label, includeCoverage) => {
     let indexing = false;
     const indexWorkspace = jest.fn(() => {
       indexing = true;
@@ -7156,7 +7159,7 @@ describe('protocol-handlers › ptah_code_reindex and index freshness (TASK_2026
 
     const res = await callTool(
       'ptah_code_search_symbols',
-      { query: 'login' },
+      { query: 'login', ...(includeCoverage ? { includeCoverage } : {}) },
       { ptahAPI: buildPtahAPIStub({ code }) },
     );
     await flush();
@@ -7165,13 +7168,21 @@ describe('protocol-handlers › ptah_code_reindex and index freshness (TASK_2026
     expect(indexWorkspace).toHaveBeenCalledWith('/ws', {
       userInitiated: false,
     });
-    const body = JSON.parse(resultOf(res).text) as { index: unknown };
-    expect(body.index).toEqual({
-      symbolCount: 0,
-      indexAgeMs: null,
-      reindexStarted: true,
-      reindexInFlight: true,
-    });
+    if (includeCoverage) {
+      const body = JSON.parse(resultOf(res).text) as { index: unknown };
+      expect(body.index).toEqual({
+        symbolCount: 0,
+        indexAgeMs: null,
+        reindexStarted: true,
+        reindexInFlight: true,
+      });
+    } else {
+      const text = resultOf(res).text;
+      expect(text).toContain('index 0 symbols');
+      expect(text).toContain('reindex started');
+      expect(text).toContain('No symbols found.');
+      expect(text).not.toContain('supportedLanguages');
+    }
   });
 });
 

@@ -783,7 +783,9 @@ describe('Batch 24c fix round — shortened code index descriptions keep their r
   ];
 
   // 702 + 12 (Batch 33): the registry publicSymbols list gained ", python, go".
-  it('ptah_code_search_symbols keeps every required item within 714 chars', () => {
+  // 714 + 56 (TASK_2026_2299): text hits, the header line and `includeCoverage`
+  // replaced `Hits: path/kind/name/score` and the index field list.
+  it('ptah_code_search_symbols keeps every required item within 770 chars', () => {
     const { description } = buildCodeSearchSymbolsTool();
     const required = [
       'SQLite code index', // which store it searches
@@ -794,15 +796,16 @@ describe('Batch 24c fix round — shortened code index descriptions keep their r
       'exported interfaces/types/enums/variables/namespaces/export-clause names (`export`): ' +
         `${describedLanguages('publicSymbols')}.`,
       'ptah_get_symbol_index (graph export index)', // the other store
-      'Hits: path/kind/name/score',
-      'index: symbolCount/indexAgeMs/reindexStarted/reindexInFlight',
+      'Hits: path:start-end kind name + signature/extract', // text form
+      'Header line only if index not clean/stale (size, age, coverage counts)',
+      '`includeCoverage`: JSON with full index+coverage', // the full block
       'Empty/>24h index: background reindex',
       'stale 0 hits inconclusive',
       '"index unavailable": ptah_search_files/Grep', // runtimes without SQLite
       ...LEGEND_ITEMS,
     ];
     expect(required.filter((item) => !description.includes(item))).toEqual([]);
-    expect(description.length).toBeLessThanOrEqual(714);
+    expect(description.length).toBeLessThanOrEqual(770);
   });
 
   it('ptah_code_reindex keeps every required item within 536 chars', () => {
@@ -847,7 +850,7 @@ describe('Batch 31 — compact language lists keep every pin', () => {
   // The planned end state (required keys, Decisions 18/19): every language
   // in the code index, every language but Kotlin with public symbols (no
   // `publicSymbols:kotlin` key).
-  it('with every planned language listed, search and reindex stay within 702 and 536', () => {
+  it('with every planned language listed, search and reindex stay within 790 and 536', () => {
     jest.isolateModules(() => {
       jest.doMock('@ptah-extension/workspace-intelligence', () => ({
         ...jest.requireActual<
@@ -868,7 +871,7 @@ describe('Batch 31 — compact language lists keep every pin', () => {
       expect(search).toContain(
         '(`export`): ts,js,tsx,py,go,cs,java,rs,php,rb,cpp.',
       );
-      expect(search.length).toBeLessThanOrEqual(702);
+      expect(search.length).toBeLessThanOrEqual(790);
       expect(reindex).toContain(`unsupported-language outside ${all}.`);
       expect(reindex.length).toBeLessThanOrEqual(536);
     });

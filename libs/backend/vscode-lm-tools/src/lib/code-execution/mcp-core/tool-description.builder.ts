@@ -2267,7 +2267,7 @@ export function buildCodeSearchSymbolsTool(): MCPToolDefinition {
       languagesNote('codeIndex') +
       '; exported interfaces/types/enums/variables/namespaces/export-clause names (`export`): ' +
       languagesNote('publicSymbols') +
-      '. Exports: ptah_get_symbol_index (graph export index). Hits: path/kind/name/score; index: symbolCount/indexAgeMs/reindexStarted/reindexInFlight. Empty/>24h index: background reindex; stale 0 hits inconclusive. "index unavailable": ptah_search_files/Grep. ' +
+      '. Exports: ptah_get_symbol_index (graph export index). Hits: path:start-end kind name + signature/extract. Header line only if index not clean/stale (size, age, coverage counts); `includeCoverage`: JSON with full index+coverage. Empty/>24h index: background reindex; stale 0 hits inconclusive. "index unavailable": ptah_search_files/Grep. ' +
       COVERAGE_LEGEND,
     inputSchema: {
       type: 'object',
@@ -2285,6 +2285,11 @@ export function buildCodeSearchSymbolsTool(): MCPToolDefinition {
           type: 'string',
           description:
             'Optional: restrict results to symbols in this file path',
+        },
+        includeCoverage: {
+          type: 'boolean',
+          description:
+            'Return JSON with the full index and coverage blocks instead of the text form',
         },
       },
       required: ['query'],

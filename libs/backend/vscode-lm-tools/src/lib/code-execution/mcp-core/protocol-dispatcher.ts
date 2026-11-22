@@ -106,7 +106,10 @@ import type {
   SymbolIndexPage,
 } from '../types';
 import { parseSymbolIndexQuery } from '../namespace-builders/symbol-index-query';
-import { toSymbolSearchWireAnswer } from './symbol-search-answer';
+import {
+  renderSymbolSearchText,
+  toSymbolSearchWireAnswer,
+} from './symbol-search-answer';
 import { FileNotInGraphError } from '../namespace-builders/analysis-namespace.builders';
 import { readOnlyCronNamespace } from '../namespace-builders/cron-namespace.builder';
 import { AgentMessageControlIdentityError } from '../namespace-builders/agent-message-control-actor';
@@ -2972,10 +2975,11 @@ async function handleIndividualTool(
             deps,
           );
         }
-        const { query, maxResults, filePath } = args as {
+        const { query, maxResults, filePath, includeCoverage } = args as {
           query: string;
           maxResults?: number;
           filePath?: string;
+          includeCoverage?: boolean;
         };
         if (!query || typeof query !== 'string' || !query.trim()) {
           return missingStringArgResponse(request, 'query');
@@ -2988,13 +2992,15 @@ async function handleIndividualTool(
           maxResults,
           filePath,
         });
-        return await createToolSuccessResponse(
-          request,
-          JSON.stringify(
-            'coverage' in result ? toSymbolSearchWireAnswer(result) : result,
-          ),
-          deps,
-        );
+        // Text by default; `includeCoverage` returns the JSON form with the
+        // index block and the compact coverage block.
+        const text =
+          'coverage' in result
+            ? includeCoverage === true
+              ? JSON.stringify(toSymbolSearchWireAnswer(result, true))
+              : renderSymbolSearchText(result)
+            : JSON.stringify(result);
+        return await createToolSuccessResponse(request, text, deps);
       }
 
       case 'ptah_code_reindex': {
