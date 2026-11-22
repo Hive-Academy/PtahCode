@@ -7134,56 +7134,61 @@ describe('protocol-handlers › ptah_code_reindex and index freshness (TASK_2026
   it.each([
     ['includeCoverage returns the index block as JSON', true],
     ['the default text form names the index in one header line', false],
-  ])('ptah_code_search_symbols runs the freshness check; %s', async (_label, includeCoverage) => {
-    let indexing = false;
-    const indexWorkspace = jest.fn(() => {
-      indexing = true;
-      return new Promise<never>(() => undefined);
-    });
-    const isIndexing = jest.fn(() => indexing);
-    const reader: ICodeSymbolReader = {
-      searchSymbols: jest.fn().mockResolvedValue({ hits: [], bm25Only: false }),
-      getIndexFreshness: jest
-        .fn()
-        .mockResolvedValue({ symbolCount: 0, newestUpdatedAt: null }),
-    };
-    const code = buildCodeNamespace({
-      getCodeSymbolSearch: () => reader,
-      getMemorySearch: () => undefined,
-      getSymbolIndexer: () =>
-        ({ indexWorkspace, isIndexing }) as unknown as CodeSymbolIndexer,
-      getWorkspaceRoot: () => '/ws',
-      getHostWorkspaceRoots: () => ['/ws'],
-      logger: { warn: jest.fn() },
-    });
-
-    const res = await callTool(
-      'ptah_code_search_symbols',
-      { query: 'login', ...(includeCoverage ? { includeCoverage } : {}) },
-      { ptahAPI: buildPtahAPIStub({ code }) },
-    );
-    await flush();
-
-    expect(reader.getIndexFreshness).toHaveBeenCalledWith('/ws');
-    expect(indexWorkspace).toHaveBeenCalledWith('/ws', {
-      userInitiated: false,
-    });
-    if (includeCoverage) {
-      const body = JSON.parse(resultOf(res).text) as { index: unknown };
-      expect(body.index).toEqual({
-        symbolCount: 0,
-        indexAgeMs: null,
-        reindexStarted: true,
-        reindexInFlight: true,
+  ])(
+    'ptah_code_search_symbols runs the freshness check; %s',
+    async (_label, includeCoverage) => {
+      let indexing = false;
+      const indexWorkspace = jest.fn(() => {
+        indexing = true;
+        return new Promise<never>(() => undefined);
       });
-    } else {
-      const text = resultOf(res).text;
-      expect(text).toContain('index 0 symbols');
-      expect(text).toContain('reindex started');
-      expect(text).toContain('No symbols found.');
-      expect(text).not.toContain('supportedLanguages');
-    }
-  });
+      const isIndexing = jest.fn(() => indexing);
+      const reader: ICodeSymbolReader = {
+        searchSymbols: jest
+          .fn()
+          .mockResolvedValue({ hits: [], bm25Only: false }),
+        getIndexFreshness: jest
+          .fn()
+          .mockResolvedValue({ symbolCount: 0, newestUpdatedAt: null }),
+      };
+      const code = buildCodeNamespace({
+        getCodeSymbolSearch: () => reader,
+        getMemorySearch: () => undefined,
+        getSymbolIndexer: () =>
+          ({ indexWorkspace, isIndexing }) as unknown as CodeSymbolIndexer,
+        getWorkspaceRoot: () => '/ws',
+        getHostWorkspaceRoots: () => ['/ws'],
+        logger: { warn: jest.fn() },
+      });
+
+      const res = await callTool(
+        'ptah_code_search_symbols',
+        { query: 'login', ...(includeCoverage ? { includeCoverage } : {}) },
+        { ptahAPI: buildPtahAPIStub({ code }) },
+      );
+      await flush();
+
+      expect(reader.getIndexFreshness).toHaveBeenCalledWith('/ws');
+      expect(indexWorkspace).toHaveBeenCalledWith('/ws', {
+        userInitiated: false,
+      });
+      if (includeCoverage) {
+        const body = JSON.parse(resultOf(res).text) as { index: unknown };
+        expect(body.index).toEqual({
+          symbolCount: 0,
+          indexAgeMs: null,
+          reindexStarted: true,
+          reindexInFlight: true,
+        });
+      } else {
+        const text = resultOf(res).text;
+        expect(text).toContain('index 0 symbols');
+        expect(text).toContain('reindex started');
+        expect(text).toContain('No symbols found.');
+        expect(text).not.toContain('supportedLanguages');
+      }
+    },
+  );
 });
 
 describe('protocol-handlers › ptah_get_symbol_index paging (TASK_2026_559 Batch 9)', () => {
@@ -10771,6 +10776,63 @@ describe('protocol-handlers › navigation tools bind workspaceRoot to a known r
     expect(reply.text).not.toContain('needle there');
   });
 
+  /** One `ptah_grep` call from a caller whose URL declares `declared`. */
+  async function grepAsCaller(
+    declared: string,
+    workspaceRoot?: string,
+  ): Promise<{ text: string; isError: boolean }> {
+    const res = await handleMCPRequest(
+      makeRequest({
+        id: 'nav-root-caller',
+        method: 'tools/call',
+        params: {
+          name: 'ptah_grep',
+          arguments: {
+            pattern: 'needle',
+            ...(workspaceRoot ? { workspaceRoot } : {}),
+          },
+        },
+        _callerWorkspaceRoot: declared,
+      }),
+      buildDeps({
+        workspaceProvider: knownFolders(root),
+        ptahAPI: buildPtahAPIStub({
+          workspace: { getInfo: async () => ({ path: declared }) },
+        }),
+      }),
+    );
+    const result = res.result as {
+      content: Array<{ text: string }>;
+      isError?: boolean;
+    };
+    return { text: result.content[0].text, isError: result.isError === true };
+  }
+
+  // The declared root is a URL segment (caller input): it must not widen
+  // the containment boundary (PR #1465 review).
+  it('refuses a declared caller root outside every open folder', async () => {
+    for (const declared of ['/', outside]) {
+      const reply = await grepAsCaller(declared);
+      expect(reply.isError).toBe(true);
+      expect(reply.text).toContain('not an open folder of this host');
+      expect(reply.text).not.toContain('needle there');
+      const supplied = await grepAsCaller(declared, outside);
+      expect(supplied.isError).toBe(true);
+      expect(supplied.text).not.toContain('needle there');
+    }
+  });
+
+  it('holds a caller with a declared root inside an open folder to that root', async () => {
+    const sub = path.join(root, 'sub');
+    const own = await grepAsCaller(sub);
+    expect(own.isError).toBe(false);
+    expect(own.text).toContain('a.txt');
+    // The open folder itself is wider than the caller's own root.
+    const wider = await grepAsCaller(sub, root);
+    expect(wider.isError).toBe(true);
+    expect(wider.text).toContain('"workspaceRoot" is not inside');
+  });
+
   // UNC keys compare lexically, but the handlers use the real path of the
   // root; the guard must check the same real location. win32 only: a UNC
   // path is not absolute on POSIX. `realpath` is stubbed for the share.
@@ -10888,5 +10950,4 @@ describe('protocol-handlers › navigation tools bind workspaceRoot to a known r
     expect(reply.isError).toBe(false);
     expect(enrichFile).toHaveBeenCalledWith(outsideFile, undefined);
   });
-
 });
