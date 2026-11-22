@@ -389,7 +389,14 @@ async function readOnce(
       accountFingerprint: options.accountFingerprint, args: ANTIGRAVITY_CLI_ARGS, executor,
       temporaryCwd: options.temporaryCwd ?? productionCwd, timeoutMs: ANTIGRAVITY_CLI_TIMEOUT_MS,
       deadline: now() + ANTIGRAVITY_CLI_TIMEOUT_MS, cacheMs: ANTIGRAVITY_CLI_CACHE_MS,
-      parse: parseAgyUsageOutput, signal, now, logger,
+      // Trip inside the shared flight: a caller that stopped waiting never
+      // sees the billed result, but the flight still parses and caches it.
+      parse: (run: string, observedAt: number) => {
+        const parsed = parseAgyUsageOutput(run, observedAt);
+        if (parsed.kind === 'billed') trip('billed', logger);
+        return parsed;
+      },
+      signal, now, logger,
     });
     if (result.ok) {
       const output = result.value;

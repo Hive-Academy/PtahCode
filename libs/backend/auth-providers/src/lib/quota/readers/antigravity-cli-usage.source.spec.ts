@@ -205,6 +205,29 @@ describe('readAntigravityCliUsage', () => {
     } finally { jest.useRealTimers(); }
   });
 
+  it('trips the breaker inside the shared run when its caller stopped waiting', async () => {
+    let release: (() => void) | undefined;
+    const late: Behaviour = (child) => {
+      release = () => {
+        child.stdout.emit('data', Buffer.from(JSON.stringify(antigravityUsageJsonFixture({ num_turns: 1 }))));
+        close(child, 0);
+      };
+    };
+    const { options, spawnProcess } = harness([late]);
+    const caller = new AbortController();
+    const pending = readAntigravityCliUsage(caller.signal, options());
+    for (let i = 0; i < 20 && !release; i++) await new Promise((resolve) => setImmediate(resolve));
+    expect(spawnProcess).toHaveBeenCalledTimes(1);
+    caller.abort();
+    await pending;
+    release?.();
+    for (let i = 0; i < 20; i++) await new Promise((resolve) => setImmediate(resolve));
+    // The billed run settled after its caller left; the breaker is still tripped.
+    expect(await readAntigravityCliUsage(undefined, options({ ownerKey: 'antigravity#cli-store:after' })))
+      .toMatchObject({ sourceFailures: [{ cause: 'cli-disabled' }] });
+    expect(spawnProcess).toHaveBeenCalledTimes(1);
+  });
+
   it('defers without spawning when the chain has less than the full window left', async () => {
     const { options, spawnProcess } = harness([answer(antigravityUsageJsonFixture())]);
     expect(await readAntigravityCliUsage(undefined, options({ budgetMs: ANTIGRAVITY_CLI_TIMEOUT_MS - 1 })))
