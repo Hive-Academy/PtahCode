@@ -46,6 +46,7 @@ import { join } from 'path';
 import { Logger, TOKENS } from '@ptah-extension/vscode-core';
 import {
   Result,
+  applyAgentToolingRules,
   renderTaskSpecAgentBlock,
   type TaskSpecAgentAudience,
 } from '@ptah-extension/shared';
@@ -312,7 +313,10 @@ export class TemplatePartialResolver {
     const filePath = join(partialsDir, fileName);
     const registered = (SHARED_BLOCK_IDS as readonly string[]).includes(id);
     try {
-      const text = await readFile(filePath, 'utf-8');
+      const raw = await readFile(filePath, 'utf-8');
+      // The tool table is generated; the downloaded copy only supplies the
+      // sections around it, so a stale table on disk cannot reach an agent.
+      const text = id === 'TOOLING_PRECEDENCE' ? applyAgentToolingRules(raw) : raw;
       this.partialCache.set(fileName, text);
       return Result.ok(text);
     } catch (error: unknown) {

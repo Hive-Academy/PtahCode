@@ -20,6 +20,8 @@ import { PTAH_LANE_POLICY } from '@ptah-extension/cli-agent-runtime';
 import { PTAH_CORE_SYSTEM_PROMPT } from '@ptah-extension/agent-sdk';
 import {
   TOOL_SUBSTITUTIONS,
+  AGENT_TOOLING_RULES_MAX_BYTES,
+  renderAgentToolingRules,
   renderCoreSubstitutionBlock,
   renderLaneToolTable,
   toolDescriptionCue,
@@ -70,6 +72,7 @@ describe('(a) every tool a rendered text names is in the effective tool list', (
     ['core substitution block', renderCoreSubstitutionBlock()],
     ['lane policy', PTAH_LANE_POLICY],
     ['lane table', renderLaneToolTable()],
+    ['agent file working rules', renderAgentToolingRules()],
     ['server instructions', buildServerInstructions()],
     [
       'agent-lanes skill',
@@ -131,9 +134,19 @@ describe('(a) every tool a rendered text names is in the effective tool list', (
     },
   );
 
-  it('has a cue only for a tool that exists', () => {
-    for (const row of TOOL_SUBSTITUTIONS) {
-      if (toolDescriptionCue(row.tool)) expect(ALL_TOOLS.has(row.tool)).toBe(true);
+  it('keeps the agent file working rules within their byte budget', () => {
+    expect(
+      Buffer.byteLength(renderAgentToolingRules(), 'utf8'),
+    ).toBeLessThanOrEqual(AGENT_TOOLING_RULES_MAX_BYTES);
+  });
+
+  it('puts the cue of every row that has one in that tool description', () => {
+    const definitions = buildToolDefinitions({ hasIDECapabilities: true });
+    for (const row of TOOL_SUBSTITUTIONS.filter((r) => r.cue)) {
+      const cue = toolDescriptionCue(row.tool);
+      expect(cue).toBeDefined();
+      const definition = definitions.find((tool) => tool.name === row.tool);
+      expect(definition?.description.startsWith(cue as string)).toBe(true);
     }
   });
 });

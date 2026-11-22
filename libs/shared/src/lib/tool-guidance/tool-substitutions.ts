@@ -348,3 +348,6 @@ export const LANE_POLICY_MAX_BYTES = 3500;
 
 /** Codex reads only the first ~512 characters of the MCP server instructions. */
 export const SERVER_INSTRUCTIONS_MAX_CHARS = 512;
+
+/** The generated agent-file "Working rules" part stays within this many UTF-8 bytes. */
+export const AGENT_TOOLING_RULES_MAX_BYTES = 3000;

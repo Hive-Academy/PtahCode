@@ -7,11 +7,15 @@ import {
   TOOL_SUBSTITUTIONS,
   LANE_POLICY_MAX_BYTES,
   SERVER_INSTRUCTIONS_MAX_CHARS,
+  AGENT_TOOLING_RULES_MAX_BYTES,
 } from './tool-substitutions';
 import {
+  applyAgentToolingRules,
+  renderAgentToolingRules,
   renderCoreSubstitutionBlock,
   renderLaneToolTable,
   toolDescriptionCue,
+  withToolCue,
 } from './tool-guidance.render';
 
 const MIN_REASON_LENGTH = 10;
@@ -142,8 +146,74 @@ describe('toolDescriptionCue', () => {
     }
   });
 
+  it('leads a description with the cue, or leaves it as it is', () => {
+    expect(withToolCue('ptah_grep', 'Search.')).toBe(
+      'Use instead of shell grep or rg. Search.',
+    );
+    expect(withToolCue('ptah_search_files', 'Find.')).toBe('Find.');
+  });
+
   it('throws for a tool that has no row', () => {
     expect(() => toolDescriptionCue('ptah_nope')).toThrow(/ptah_nope/);
+  });
+});
+
+describe('renderAgentToolingRules', () => {
+  const rules = renderAgentToolingRules();
+
+  it('lists every row that has a core wording, once, and stays inside its budget', () => {
+    for (const row of TOOL_SUBSTITUTIONS.filter((r) => r.core)) {
+      expect(rules.split(`| ${row.core?.call} |`)).toHaveLength(2);
+    }
+    expect(Buffer.byteLength(rules, 'utf8')).toBeLessThanOrEqual(
+      AGENT_TOOLING_RULES_MAX_BYTES,
+    );
+  });
+
+  it('teaches the text search and read tools, not the native free-text search', () => {
+    expect(rules).toContain(
+      'Free text and line ranges: ptah_grep and ptah_read_symbol, not shell grep, rg, sed -n or cat.',
+    );
+    expect(rules).not.toMatch(/Native read\/search only for free-text/);
+  });
+});
+
+describe('applyAgentToolingRules', () => {
+  const stale = [
+    '## Working rules',
+    '',
+    '- old text',
+    '',
+    '| Native step | Ptah tool |',
+    '| --- | --- |',
+    '| Grep/Glob for function | ptah_code_search_symbols |',
+    '',
+    '## Skill use',
+    '',
+    '- keep me',
+    '',
+  ].join('\n');
+
+  it('replaces the working rules and keeps the other sections', () => {
+    const out = applyAgentToolingRules(stale);
+    expect(out.startsWith(renderAgentToolingRules())).toBe(true);
+    expect(out).not.toContain('old text');
+    expect(out.endsWith('## Skill use\n\n- keep me\n')).toBe(true);
+  });
+
+  it('is idempotent', () => {
+    const once = applyAgentToolingRules(stale);
+    expect(applyAgentToolingRules(once)).toBe(once);
+  });
+
+  it('handles a block with only the working rules', () => {
+    expect(applyAgentToolingRules('## Working rules\n\n- old\n')).toBe(
+      renderAgentToolingRules(),
+    );
+  });
+
+  it('returns a text without the heading unchanged', () => {
+    expect(applyAgentToolingRules('## Other\n\ntext')).toBe('## Other\n\ntext');
   });
 });
 

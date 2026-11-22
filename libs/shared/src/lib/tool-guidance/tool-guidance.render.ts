@@ -42,6 +42,16 @@ function shellCommandsOf(...tools: string[]): string[] {
   return tools.flatMap((tool) => [...(findRow(tool).shell ?? [])]);
 }
 
+const FALLBACK_LINE =
+  'Fall back to Bash, Grep or Glob only for **writes**, build/test/git, a ptah error, or one Grep after zero hits.';
+
+/** "Free text and line ranges: ptah_grep and ptah_read_symbol, not shell grep, rg, sed -n or cat." */
+function freeTextLine(): string {
+  const textTools = ['ptah_grep', 'ptah_read_symbol'] as const;
+  const shell = joinOr(shellCommandsOf(...textTools));
+  return `Free text and line ranges: ${textTools[0]} and ${textTools[1]}, not shell ${shell}.`;
+}
+
 /**
  * The core prompt block: substitution table, fallback line, free-text line and
  * the MANDATORY callout. It starts with the "Required Substitutions" heading and
@@ -54,8 +64,6 @@ export function renderCoreSubstitutionBlock(
   const rows = enabledRows(options).flatMap((row) =>
     row.core ? [`| ${row.core.insteadOf} | ${row.core.call} | ${row.core.why} |`] : [],
   );
-  const textTools = ['ptah_grep', 'ptah_read_symbol'] as const;
-  const shell = joinOr(shellCommandsOf(...textTools));
   return [
     '### Required Substitutions — Use These Tools Directly',
     '',
@@ -63,8 +71,8 @@ export function renderCoreSubstitutionBlock(
     '|------|------|------|',
     ...rows,
     '',
-    'Fall back to Bash, Grep or Glob only for **writes**, build/test/git, a ptah error, or one Grep after zero hits.',
-    `Free text and line ranges: ${textTools[0]} and ${textTools[1]}, not shell ${shell}.`,
+    FALLBACK_LINE,
+    freeTextLine(),
     '',
     '> [!IMPORTANT]',
     '> **Symbol and AST lookups are MANDATORY via ptah before Grep/Glob.** To find a function, class, method or type, call `ptah_code_search_symbols` or `ptah_ast_analyze` FIRST, then read the body with `ptah_read_symbol`. Fall back to Grep only after those return no results or an error.',
@@ -93,4 +101,58 @@ export function toolDescriptionCue(tool: string): string | undefined {
   const row = findRow(tool);
   if (!row.cue || !row.shell?.length) return undefined;
   return `Use instead of shell ${joinOr(row.shell)}.`;
+}
+
+/** `description`, led by the tool's cue when its row has one. */
+export function withToolCue(tool: string, description: string): string {
+  const cue = toolDescriptionCue(tool);
+  return cue ? `${cue} ${description}` : description;
+}
+
+/** Heading of the generated part of the agent-file tooling block. */
+export const AGENT_TOOLING_HEADING = '## Working rules';
+
+/**
+ * The "Working rules" part of the agent-file tooling block: the ptah-first
+ * rule, the fallback rule and one table of native step -> ptah tool.
+ * Starts with {@link AGENT_TOOLING_HEADING}; no trailing newline.
+ */
+export function renderAgentToolingRules(
+  options?: ToolGuidanceRenderOptions,
+): string {
+  const rows = enabledRows(options).flatMap((row) =>
+    row.core
+      ? [`| ${row.core.insteadOf.replace(/\*\*/g, '')} | ${row.core.call} |`]
+      : [],
+  );
+  return [
+    AGENT_TOOLING_HEADING,
+    '',
+    '- `ptah_*` tools first; `ptah_get_diagnostics` after edits. A deferred ptah tool counts as listed: if your client defers tool schemas, load it with its tool-search tool (Claude Code: `ToolSearch` `select:<name>`), otherwise call it directly. A tool that is not listed at all: use the native one, do not probe.',
+    `- ${FALLBACK_LINE.replace(/\*\*/g, '')} Then name the empty tool.`,
+    `- ${freeTextLine()}`,
+    '',
+    '| Native step | Ptah tool |',
+    '| --- | --- |',
+    ...rows,
+    '',
+    'write, build, test and git stay native',
+  ].join('\n');
+}
+
+/**
+ * Replace the "Working rules" part of a downloaded `tooling-precedence` block
+ * with the generated rules and keep every other section. A text with no
+ * "Working rules" heading is returned unchanged, so a template set that
+ * dropped the heading still loads.
+ */
+export function applyAgentToolingRules(
+  blockText: string,
+  options?: ToolGuidanceRenderOptions,
+): string {
+  const start = blockText.indexOf(AGENT_TOOLING_HEADING);
+  if (start < 0) return blockText;
+  const next = blockText.indexOf('\n## ', start + AGENT_TOOLING_HEADING.length);
+  const rest = next < 0 ? '' : `\n\n${blockText.slice(next + 1)}`;
+  return `${blockText.slice(0, start)}${renderAgentToolingRules(options)}${rest}`;
 }
