@@ -115,3 +115,6 @@ export { SCOPED_SETTING_KEYS } from './lib/types/rpc/rpc-auth.types';
 export type { ApiLaneSpend, LaneSpend, LaneSpendPeriod, PlanLaneUsage } from './lib/types/rpc-lane-spend.types';
 
 export type { AgentLaneSpendResult } from './lib/types/rpc/rpc-lane-plan-limits.types';
+
+export * from './lib/tool-guidance/tool-substitutions';
+export * from './lib/tool-guidance/tool-guidance.render';
