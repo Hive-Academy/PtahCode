@@ -4,6 +4,7 @@ jest.mock('@ptah-extension/cli-agent-runtime', () => ({
   CLI_AGENT_RUNTIME_TOKENS: {
     SDK_PTAH_CLI_CONFIG_PERSISTENCE: Symbol.for('SdkPtahCliConfigPersistence'),
   },
+  PTAH_CLI_KEY_PREFIX: 'ptahCli',
 }));
 
 jest.mock('@ptah-extension/auth-providers', () => ({
@@ -85,6 +86,10 @@ function makeHarness(options?: {
   classified?: Record<AgentModelProvider, AgentModelEntry[]>;
   configs?: PtahCliConfig[];
   apiKey?: string | undefined;
+  /** Keys per secret slot; overrides `apiKey` for `getProviderKey`. */
+  keysBySlot?: Record<string, string | undefined>;
+  /** The shared connection key (`getCredential('apiKey')`). */
+  sharedKey?: string;
   fetch?: () => Promise<FetchResult>;
 }) {
   const listAll = jest.fn(() =>
@@ -97,9 +102,18 @@ function makeHarness(options?: {
   const fetchModels = jest.fn(
     (_providerId: string, _apiKey: string | null, _toolUseOnly?: boolean) =>
       options?.fetch?.() ??
-      Promise.resolve<FetchResult>({ models: [], totalCount: 0, source: 'live' }),
+      Promise.resolve<FetchResult>({
+        models: [],
+        totalCount: 0,
+        source: 'live',
+      }),
   );
-  const getProviderKey = jest.fn(() => Promise.resolve(options?.apiKey));
+  const getProviderKey = jest.fn((slot: string) =>
+    Promise.resolve(
+      options?.keysBySlot ? options.keysBySlot[slot] : options?.apiKey,
+    ),
+  );
+  const getCredential = jest.fn(() => Promise.resolve(options?.sharedKey));
   const debug = jest.fn();
   const logger: Pick<Logger, 'debug'> = { debug };
   const cliModels: Pick<
@@ -111,7 +125,7 @@ function makeHarness(options?: {
     cliModels,
     { loadConfigs },
     { fetchModels },
-    { getProviderKey },
+    { getProviderKey, getCredential },
   );
   return {
     adapter,
@@ -120,6 +134,7 @@ function makeHarness(options?: {
     loadConfigs,
     fetchModels,
     getProviderKey,
+    getCredential,
     debug,
   };
 }
@@ -298,6 +313,73 @@ describe('LaneModelListingAdapter', () => {
     );
   });
 
+  it('lists with the instance key, not the provider-wide slot', async () => {
+    const { adapter, fetchModels, getProviderKey } = makeHarness({
+      configs: [ptahConfig({ id: 'cli-1' })],
+      keysBySlot: { 'ptahCli.cli-1': 'sk-instance', openrouter: 'sk-other' },
+    });
+
+    await adapter.list(
+      cliRow('ptah-cli', { ptahCliId: 'cli-1', providerId: 'openrouter' }),
+      new AbortController().signal,
+    );
+
+    expect(getProviderKey).toHaveBeenCalledWith('ptahCli.cli-1');
+    expect(fetchModels).toHaveBeenCalledWith(
+      'openrouter',
+      'sk-instance',
+      false,
+    );
+  });
+
+  it('lists a shared-connection anthropic-api instance with the shared key', async () => {
+    const { adapter, fetchModels, getCredential } = makeHarness({
+      configs: [
+        ptahConfig({
+          id: 'cli-1',
+          providerId: 'anthropic-api',
+          credentialSource: 'shared-connection',
+        }),
+      ],
+      sharedKey: 'sk-shared',
+    });
+
+    await adapter.list(
+      cliRow('ptah-cli', { ptahCliId: 'cli-1', providerId: 'anthropic-api' }),
+      new AbortController().signal,
+    );
+
+    expect(getCredential).toHaveBeenCalledWith('apiKey');
+    expect(fetchModels).toHaveBeenCalledWith(
+      'anthropic-api',
+      'sk-shared',
+      false,
+    );
+  });
+
+  it('does not share one discovery between instances with different keys', async () => {
+    const { adapter, fetchModels } = makeHarness({
+      configs: [ptahConfig({ id: 'cli-1' }), ptahConfig({ id: 'cli-2' })],
+      keysBySlot: { 'ptahCli.cli-1': 'sk-a', 'ptahCli.cli-2': 'sk-b' },
+    });
+    const signal = new AbortController().signal;
+
+    await Promise.all([
+      adapter.list(
+        cliRow('ptah-cli', { ptahCliId: 'cli-1', providerId: 'openrouter' }),
+        signal,
+      ),
+      adapter.list(
+        cliRow('ptah-cli', { ptahCliId: 'cli-2', providerId: 'openrouter' }),
+        signal,
+      ),
+    ]);
+
+    expect(fetchModels).toHaveBeenCalledTimes(2);
+    expect(fetchModels).toHaveBeenCalledWith('openrouter', 'sk-a', false);
+    expect(fetchModels).toHaveBeenCalledWith('openrouter', 'sk-b', false);
+  });
+
   it('shares one in-flight fetch across two rows on the same provider', async () => {
     let release: (result: FetchResult) => void = () => undefined;
     const pending = new Promise<FetchResult>((resolve) => {
@@ -325,7 +407,8 @@ describe('LaneModelListingAdapter', () => {
       cliRow('ptah-cli', { ptahCliId: 'cli-2', providerId: 'openrouter' }),
       signal,
     );
-    await Promise.resolve();
+    // Each row reads its key first, then joins the shared discovery.
+    await new Promise((resolve) => setImmediate(resolve));
     expect(fetchModels).toHaveBeenCalledTimes(1);
 
     release({

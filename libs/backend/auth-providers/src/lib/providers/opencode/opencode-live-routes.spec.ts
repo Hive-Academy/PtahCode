@@ -66,11 +66,14 @@ const persistedRow = (
 describe('OpenCode live routes', () => {
   afterEach(() => jest.useRealTimers());
 
-  it('refreshes list after five minutes and retains a fresh last good map on failure', async () => {
+  it('refreshes list after five minutes; a failed refresh fails the listing but keeps routing', async () => {
     jest.useFakeTimers().setSystemTime(new Date('2026-01-01T00:00:00Z'));
     let fail = false;
     const getJson = jest.fn(async () => {
-      if (fail) throw new Error('offline');
+      if (fail)
+        throw Object.assign(new Error('getaddrinfo ENOTFOUND'), {
+          code: 'ENOTFOUND',
+        });
       return { data: [model('good-id', 'messages')] };
     });
     const routes = new OpenCodeLiveRoutes(getJson);
@@ -82,10 +85,15 @@ describe('OpenCode live routes', () => {
     expect(getJson).toHaveBeenCalledTimes(1);
     jest.advanceTimersByTime(2 * 60 * 1000);
     fail = true;
-    expect((await routes.list('opencode-zen')).map((m) => m.id)).toEqual([
-      'good-id',
-    ]);
+    // The retained map is not a fresh live answer: the caller would save it
+    // as one and show no saved-list notice.
+    expect(await reasonOf(routes.list('opencode-zen'))).toBe('network');
     expect(getJson).toHaveBeenCalledTimes(2);
+    // Request routing still uses the last good map.
+    await expect(routes.resolve('opencode-zen', 'good-id')).resolves.toEqual({
+      outcome: 'routed',
+      protocol: 'messages',
+    });
   });
 
   it('throws the classified reason when no good map exists or it has expired', async () => {

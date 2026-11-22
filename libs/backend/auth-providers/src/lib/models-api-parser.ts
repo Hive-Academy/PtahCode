@@ -34,16 +34,21 @@ function positiveFinite(value: unknown): number | undefined {
     : undefined;
 }
 
+/** A whole decimal number string, optionally in exponent notation. */
+const PRICE_STRING = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/;
+
 /**
  * Parse a price field. OpenRouter sends strings (`"0.000005"` = $5 / 1M
- * tokens); Requesty sends numbers.
+ * tokens); Requesty sends numbers. A string must be a number as a whole:
+ * `"0.000005 USD"` is not a price.
  *
  * @returns the price, or undefined when empty, invalid, non-finite or negative
  */
 function parsePricingField(value: unknown): number | undefined {
   if (typeof value !== 'string' && typeof value !== 'number') return undefined;
-  if (value === '') return undefined;
-  const parsed = typeof value === 'number' ? value : Number.parseFloat(value);
+  if (typeof value === 'string' && !PRICE_STRING.test(value.trim()))
+    return undefined;
+  const parsed = typeof value === 'number' ? value : Number(value.trim());
   if (!Number.isFinite(parsed) || parsed < 0) return undefined;
   return parsed;
 }

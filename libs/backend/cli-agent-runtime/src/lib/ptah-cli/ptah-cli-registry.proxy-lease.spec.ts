@@ -103,6 +103,8 @@ const SAKANA_CONFIG: PtahCliConfig = {
 
 interface LeaseHarness {
   registry: PtahCliRegistry;
+  /** The tier resolver the registry reads (`ProviderModelsService`). */
+  resolveEffectiveTiers: jest.Mock;
   /** Change the key the secret store answers with (a fingerprint change). */
   setStoredKey: (key: string) => void;
 }
@@ -152,6 +154,9 @@ function buildHarness(): LeaseHarness {
 
   return {
     registry,
+    resolveEffectiveTiers: (
+      providerModels as unknown as { resolveEffectiveTiers: jest.Mock }
+    ).resolveEffectiveTiers,
     setStoredKey: (key: string) => {
       storedKey = key;
     },
@@ -180,6 +185,26 @@ describe('PtahCliRegistry.getProfile — translation-proxy leases', () => {
   beforeEach(() => {
     createdProxies.length = 0;
     createSakanaProxyForKey.mockClear();
+  });
+
+  it('writes the tiers its lease fingerprint was taken from, even if the catalog warms meanwhile', async () => {
+    const { registry, resolveEffectiveTiers } = buildHarness();
+    // The first resolution is the one getProfile captures; any later one
+    // sees a catalog that warmed while the proxy started.
+    resolveEffectiveTiers
+      .mockReturnValueOnce({
+        sonnet: 'fugu',
+        opus: 'fugu-ultra',
+        haiku: 'fugu',
+      })
+      .mockReturnValue({ sonnet: 'warm', opus: 'warm', haiku: 'warm' });
+
+    const profile = await registry.getProfile(SAKANA_CONFIG.id, 'tab-1');
+
+    expect(profile?.model).toBe('fugu');
+    expect(profile?.authEnv.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('fugu');
+    expect(profile?.authEnv.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe('fugu-ultra');
+    expect(resolveEffectiveTiers).toHaveBeenCalledTimes(1);
   });
 
   it('shares ONE proxy across three sessions and stops it only on the last release', async () => {

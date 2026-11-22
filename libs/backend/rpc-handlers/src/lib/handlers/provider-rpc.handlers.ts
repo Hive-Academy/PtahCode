@@ -653,8 +653,10 @@ export class ProviderRpcHandlers {
    * Cascade:
    * 1. API key present → /v1/models API (returns specific model versions).
    *    Its failure is final: no SDK fall-through under the same key.
-   * 2. No API key → SDK supportedModels() (CLI/OAuth). A signed-out native
-   *    Claude login is reported as `not-signed-in`.
+   * 2. No API key → SDK supportedModels() (CLI/OAuth), read under the native
+   *    Claude login while a third-party provider owns the auth env (its proxy
+   *    would answer with that provider's models). A signed-out native Claude
+   *    login is reported as `not-signed-in`.
    *
    * Both paths populate contextLength from the pricing map as a selection
    * hint only. Neither supplies provider capacity evidence. No repository
@@ -695,13 +697,18 @@ export class ProviderRpcHandlers {
         }));
       }
 
-      const sdkModels = await this.sdkAdapter.getLiveSupportedModels();
+      // Direct Anthropic auth reads the active env (OAuth token or the host
+      // login). Any other active provider routes the SDK through its own
+      // proxy, so the direct list is read under the native Claude login.
+      const direct = isDirectAnthropic(this.authEnv);
+      const sdkModels = direct
+        ? await this.sdkAdapter.getLiveSupportedModels()
+        : await this.sdkAdapter.getLiveNativeClaudeModels();
       if (sdkModels.length === 0) {
         // The SDK bridge answers `[]` for every failure; Claude always lists
         // models, so `[]` is a failure, not an empty catalog. With no key or
         // token in the env the credential is the host's Claude login.
-        const usesNativeLogin =
-          isDirectAnthropic(this.authEnv) && !this.authEnv.ANTHROPIC_AUTH_TOKEN;
+        const usesNativeLogin = !direct || !this.authEnv.ANTHROPIC_AUTH_TOKEN;
         throw new ModelListError(
           usesNativeLogin
             ? await this.nativeClaudeFailureReason()
@@ -736,25 +743,35 @@ export class ProviderRpcHandlers {
     // owns ANTHROPIC_BASE_URL and the SDK reports THAT catalog instead. Ask the
     // SDK under the native login so this list always matches what the agent
     // actually runs on, whatever the active provider happens to be.
-    this.providerModels.registerDynamicFetcher('claude-cli', async () => {
-      const models = await this.sdkAdapter.getLiveNativeClaudeModels();
-      if (models.length === 0) {
-        // The SDK bridge answers `[]` for every failure (no CLI, a failed or
-        // timed-out probe) and Claude always lists models, so `[]` is a
-        // failure whose reason the bridge did not keep, not an empty catalog.
-        throw new ModelListError(await this.nativeClaudeFailureReason());
-      }
-      this.logger.info(
-        `[ProviderRpc] Fetched ${models.length} claude-cli models from the native Claude login`,
-      );
-      return models.map((m) => ({
-        id: m.value,
-        name: m.displayName,
-        description: m.description || getModelPricingDescription(m.value),
-        contextLength: getModelContextWindow(m.value),
-        supportsToolUse: true,
-      }));
-    });
+    // The sign-in reader runs before any list is served, a cached one too, so
+    // a native login signed out since the last fetch shows no list.
+    const claudeCliSignedIn = async (): Promise<boolean | undefined> => {
+      const status = await this.ambientLogin.read();
+      return status.state === 'signed-out' ? false : undefined;
+    };
+    this.providerModels.registerDynamicFetcher(
+      'claude-cli',
+      async () => {
+        const models = await this.sdkAdapter.getLiveNativeClaudeModels();
+        if (models.length === 0) {
+          // The SDK bridge answers `[]` for every failure (no CLI, a failed or
+          // timed-out probe) and Claude always lists models, so `[]` is a
+          // failure whose reason the bridge did not keep, not an empty catalog.
+          throw new ModelListError(await this.nativeClaudeFailureReason());
+        }
+        this.logger.info(
+          `[ProviderRpc] Fetched ${models.length} claude-cli models from the native Claude login`,
+        );
+        return models.map((m) => ({
+          id: m.value,
+          name: m.displayName,
+          description: m.description || getModelPricingDescription(m.value),
+          contextLength: getModelContextWindow(m.value),
+          supportsToolUse: true,
+        }));
+      },
+      { signedIn: claudeCliSignedIn },
+    );
   }
 
   /**

@@ -1289,7 +1289,7 @@ describe('ProviderRpcHandlers', () => {
           ANTHROPIC_API_KEY: 'kimi-fixture-key',
         },
       });
-      h.sdkAdapter.getLiveSupportedModels.mockResolvedValue([
+      h.sdkAdapter.getLiveNativeClaudeModels.mockResolvedValue([
         { value: 'claude-sonnet-4-5', displayName: 'Sonnet', description: '' },
       ]);
       h.handlers.register();
@@ -1301,8 +1301,52 @@ describe('ProviderRpcHandlers', () => {
       const result = await entry[1]();
 
       expect(h.sdkAdapter.getLiveApiModels).not.toHaveBeenCalled();
-      expect(h.sdkAdapter.getLiveSupportedModels).toHaveBeenCalledTimes(1);
+      // The active env belongs to the third-party proxy: the direct list is
+      // read under the native Claude login, never through that proxy.
+      expect(h.sdkAdapter.getLiveSupportedModels).not.toHaveBeenCalled();
+      expect(h.sdkAdapter.getLiveNativeClaudeModels).toHaveBeenCalledTimes(1);
       expect(result).toHaveLength(1);
+    });
+
+    it('lists no-key direct Anthropic models from the active env when it is direct', async () => {
+      const h = makeHarness({ authEnv: {} });
+      h.sdkAdapter.getLiveSupportedModels.mockResolvedValue([
+        { value: 'claude-sonnet-4-5', displayName: 'Sonnet', description: '' },
+      ]);
+      h.handlers.register();
+      const entry = h.providerModels.registerDynamicFetcher.mock.calls.find(
+        ([id]) => id === 'anthropic',
+      );
+      if (!entry) throw new Error('Missing Anthropic fetcher');
+
+      expect(await entry[1]()).toHaveLength(1);
+      expect(h.sdkAdapter.getLiveSupportedModels).toHaveBeenCalledTimes(1);
+      expect(h.sdkAdapter.getLiveNativeClaudeModels).not.toHaveBeenCalled();
+    });
+
+    it('registers a claude-cli sign-in reader that reports only a signed-out login', async () => {
+      const h = makeHarness();
+      h.handlers.register();
+      const entry = h.providerModels.registerDynamicFetcher.mock.calls.find(
+        ([id]) => id === 'claude-cli',
+      );
+      if (!entry) throw new Error('Missing claude-cli fetcher');
+      const options = entry[2] as
+        { signedIn?: () => Promise<boolean | undefined> } | undefined;
+      if (!options?.signedIn) throw new Error('Missing sign-in reader');
+
+      await expect(options.signedIn()).resolves.toBeUndefined();
+      h.ambientLogin.read.mockResolvedValueOnce({
+        state: 'signed-out',
+        checkedAt: '2026-01-01T00:00:00.000Z',
+      } as never);
+      await expect(options.signedIn()).resolves.toBe(false);
+      h.ambientLogin.read.mockResolvedValueOnce({
+        state: 'unknown',
+        reason: 'timeout',
+        checkedAt: '2026-01-01T00:00:00.000Z',
+      } as never);
+      await expect(options.signedIn()).resolves.toBeUndefined();
     });
 
     it('declares platform API capacity for Copilot models from platform discovery', async () => {

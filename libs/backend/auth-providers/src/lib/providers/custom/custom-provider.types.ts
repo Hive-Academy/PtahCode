@@ -55,9 +55,9 @@ export interface CustomOpenAiProxyConfig {
   helpUrl?: string;
 
   /**
-   * Models advertised on the proxy's own `/v1/models` route. Custom entries
-   * usually have none (models come from `defaultTiers` or the user's typed
-   * slug), so this defaults to an empty list.
+   * Models advertised on the proxy's own `/v1/models` route. Constructor-only:
+   * Settings-created entries do not carry it (models come from `defaultTiers`
+   * or the user's typed slug), so this defaults to an empty list.
    */
   staticModels?: ReadonlyArray<{ id: string }>;
 }

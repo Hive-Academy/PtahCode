@@ -397,6 +397,15 @@ describe('AntigravityCliAdapter', () => {
       await expect(models).rejects.toThrow('agy models exited with code 1');
     });
 
+    it('rows printed before a failing exit are not a catalog', async () => {
+      mockResolveCliPath.mockResolvedValue('/usr/local/bin/agy');
+      const models = adapter.listModels();
+      await Promise.resolve();
+      currentChild?.stdout.write('gemini-3-pro-medium\tGemini 3 Pro (Medium)\n');
+      currentChild?.emitClose(1);
+      await expect(models).rejects.toThrow('agy models exited with code 1');
+    });
+
     it('throws with the spawn error code when agy cannot start', async () => {
       mockResolveCliPath.mockResolvedValue('/usr/local/bin/agy');
       const models = adapter.listModels();
@@ -587,6 +596,32 @@ describe('AntigravityCliAdapter', () => {
         ([, args]) => (args as string[])[0] === 'models',
       );
       expect(probes).toHaveLength(1);
+    });
+
+    it('scopes the live ids to the binary: another binary probes its own', async () => {
+      mockResolveCliPath.mockResolvedValue('/usr/local/bin/agy');
+      await adapter.listModels();
+      expect(modelProbeCount()).toBe(1);
+
+      for (const binaryPath of ['/usr/local/bin/agy', '/opt/other/agy']) {
+        const handle = await adapter.runSdk({
+          ...baseOptions,
+          model: 'm-1',
+          binaryPath,
+        });
+        collect(handle);
+        currentChild?.emitClose(0);
+        await handle.done;
+      }
+
+      // The same binary reuses the listing's ids; the other one probes.
+      const probes = (
+        mockSpawnCli.mock.calls as Array<[string, string[]]>
+      ).filter(([, args]) => args[0] === 'models');
+      expect(probes.map(([binary]) => binary)).toEqual([
+        '/usr/local/bin/agy',
+        '/opt/other/agy',
+      ]);
     });
 
     it('applies the effort to a retired id through its closest live base', async () => {

@@ -565,10 +565,15 @@ export class OllamaCloudMetadataService {
           controller.signal.aborted ? 'timeout' : 'network',
         );
       }
+      let bodyFailed = false;
       // degradation-audit: reported - an unreadable body leaves text empty, so
-      // this method throws ModelListError below (http-error or bad-response)
-      // and the raw detail goes to the debug log.
-      const text = await res.text().catch(() => '');
+      // this method throws ModelListError below (the HTTP status reason, the
+      // deadline as timeout, else network) and the raw detail goes to the
+      // debug log.
+      const text = await res.text().catch(() => {
+        bodyFailed = true;
+        return '';
+      });
       if (!res.ok) {
         const snippet = this.truncate(text);
         this.logger.debug(
@@ -579,6 +584,14 @@ export class OllamaCloudMetadataService {
           res.status === 401 || res.status === 403
             ? 'auth-rejected'
             : 'http-error',
+        );
+      }
+      if (bodyFailed) {
+        this.logger.debug(
+          `[OllamaCloudMetadata] Body read failed from ${url} (HTTP ${res.status})`,
+        );
+        throw new ModelListError(
+          controller.signal.aborted ? 'timeout' : 'network',
         );
       }
       if (!text) {

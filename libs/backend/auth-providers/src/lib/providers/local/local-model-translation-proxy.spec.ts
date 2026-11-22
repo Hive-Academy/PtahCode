@@ -43,7 +43,10 @@ describe('LmStudioTranslationProxy.listModels', () => {
   }
 
   it('lists the served model ids', async () => {
-    answer(200, JSON.stringify({ data: [{ id: 'qwen3-coder-30b' }, { x: 1 }] }));
+    answer(
+      200,
+      JSON.stringify({ data: [{ id: 'qwen3-coder-30b' }, { x: 1 }] }),
+    );
     const models = await proxy().listModels();
     expect(models.map((m) => m.id)).toEqual(['qwen3-coder-30b']);
   });
@@ -58,6 +61,12 @@ describe('LmStudioTranslationProxy.listModels', () => {
     ['a 401', 401, 'no', 'auth-rejected'],
     ['a non-JSON body', 200, '<html>', 'bad-response'],
     ['a body without a model array', 200, '{"ok":true}', 'bad-response'],
+    [
+      'a model array with no valid row',
+      200,
+      '{"data":[{"id":42}]}',
+      'bad-response',
+    ],
   ])('throws ModelListError for %s', async (_label, status, body, reason) => {
     answer(status, body);
     const failure = proxy().listModels();

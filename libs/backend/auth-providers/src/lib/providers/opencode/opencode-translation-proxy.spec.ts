@@ -380,21 +380,21 @@ describe('OpenCodeTranslationProxy', () => {
       );
     });
 
-    it('falls back to the tier derived from the live ids when no family member is live', async () => {
+    it('keeps the preference instead of switching family when no family member is live', async () => {
       liveRoutes = {
         ...LIVE_ROUTES,
         'opencode-go': { 'deepseek-v4': 'chat/completions' },
       };
       const { p } = await proxy('opencode-go');
-      expect(await p.resolveRequestModelIdPublic('opus')).toBe('deepseek-v4');
+      expect(await p.resolveRequestModelIdPublic('opus')).toBe('kimi-k3');
       expect(logger.warn).toHaveBeenCalledWith(
         '[provider-auth] tier preference not in live catalog',
         {
           providerId: 'opencode-go',
           tier: 'opus',
           preferred: 'kimi-k3',
-          resolved: 'deepseek-v4',
-          rule: 'derived',
+          resolved: 'kimi-k3',
+          rule: 'none',
         },
       );
     });

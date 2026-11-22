@@ -538,12 +538,21 @@ export class AntigravityCliAdapter implements CliAdapter {
   private readonly acpFailedAtByBinary = new Map<string, number>();
   /** An unknown `PTAH_AGY_TRANSPORT` value is reported once per adapter. */
   private unknownTransportWarned = false;
-  /** Ids of the last successful `agy models` read (process lifetime). */
-  private lastModelIds: { ids: ReadonlySet<string>; at: number } | undefined;
-  /** Spawns that need ids while none are current share one probe. */
-  private modelIdsInFlight: Promise<ReadonlySet<string> | null> | undefined;
-  /** When a spawn's probe last listed nothing or failed (see AGY_MODEL_IDS_RETRY_MS). */
-  private modelIdsMissedAt: number | undefined;
+  /**
+   * Ids of the last successful `agy models` read, per binary (process
+   * lifetime): two `agy` builds can accept different ids.
+   */
+  private readonly lastModelIds = new Map<
+    string,
+    { ids: ReadonlySet<string>; at: number }
+  >();
+  /** Spawns of one binary that need ids while none are current share one probe. */
+  private readonly modelIdsInFlight = new Map<
+    string,
+    Promise<ReadonlySet<string> | null>
+  >();
+  /** When a binary's spawn probe last listed nothing or failed (see AGY_MODEL_IDS_RETRY_MS). */
+  private readonly modelIdsMissedAt = new Map<string, number>();
 
   /**
    * @param acp - ACP seams for specs and live recordings; production passes none.
@@ -990,11 +999,12 @@ export class AntigravityCliAdapter implements CliAdapter {
 
   /**
    * List available models by parsing `agy models` stdout (`parseAgyModels`).
-   * A probe that times out, cannot start or exits non-zero without a model
-   * throws (the timeout with code `ETIMEDOUT`, a start failure with the spawn
-   * error's code), so a caller can tell a failure from an empty answer. A
-   * clean exit that lists nothing is `[]`. A non-empty answer becomes the ids
-   * spawns read ({@link currentModelIds}).
+   * A probe that times out, cannot start or exits non-zero throws (the
+   * timeout with code `ETIMEDOUT`, a start failure with the spawn error's
+   * code), so a caller can tell a failure from an empty answer: rows printed
+   * before a failing exit may be incomplete and are not used. A clean exit
+   * that lists nothing is `[]`. A non-empty answer becomes the ids spawns of
+   * that binary read ({@link currentModelIds}).
    */
   async listModels(): Promise<CliModelInfo[]> {
     const binaryPath = (await resolveCliPath('agy')) ?? 'agy';
@@ -1009,15 +1019,14 @@ export class AntigravityCliAdapter implements CliAdapter {
     if (probe.kind === 'error') {
       throw Object.assign(new Error('agy models could not start'), { code: probe.code });
     }
-    const models = parseAgyModels(stripAnsiCodes(probe.stdout));
-    if (models.length > 0) {
-      this.lastModelIds = { ids: new Set(models.map((m) => m.id)), at: this.now() };
-      return models;
-    }
     if (probe.exitCode !== null && probe.exitCode !== 0) {
       throw new Error(`agy models exited with code ${probe.exitCode}`);
     }
-    return [];
+    const models = parseAgyModels(stripAnsiCodes(probe.stdout));
+    if (models.length > 0) {
+      this.lastModelIds.set(binary, { ids: new Set(models.map((m) => m.id)), at: this.now() });
+    }
+    return models;
   }
 
   /**
@@ -1028,22 +1037,23 @@ export class AntigravityCliAdapter implements CliAdapter {
    * in that window do not each wait out the probe budget again.
    */
   private currentModelIds(binary: string): Promise<ReadonlySet<string> | null> {
-    const last = this.lastModelIds;
+    const last = this.lastModelIds.get(binary);
     if (last && this.now() - last.at < AGY_MODEL_IDS_FRESH_MS) {
       return Promise.resolve(last.ids);
     }
-    const missed = this.modelIdsMissedAt;
+    const missed = this.modelIdsMissedAt.get(binary);
     if (missed !== undefined && this.now() - missed < AGY_MODEL_IDS_RETRY_MS) {
       return Promise.resolve(null);
     }
-    if (!this.modelIdsInFlight) {
-      this.modelIdsInFlight = this.readModels(binary)
+    let inFlight = this.modelIdsInFlight.get(binary);
+    if (!inFlight) {
+      inFlight = this.readModels(binary)
         .then((models) => {
           if (models.length > 0) {
-            this.modelIdsMissedAt = undefined;
+            this.modelIdsMissedAt.delete(binary);
             return new Set(models.map((m) => m.id));
           }
-          this.modelIdsMissedAt = this.now();
+          this.modelIdsMissedAt.set(binary, this.now());
           this.logger?.debug(
             '[AntigravityCliAdapter] agy models listed nothing; the model passes as chosen',
           );
@@ -1051,17 +1061,18 @@ export class AntigravityCliAdapter implements CliAdapter {
         })
         .catch((error: unknown) => {
           // degradation-audit: reported - logged at warn; without live ids the model passes as chosen and agy validates it
-          this.modelIdsMissedAt = this.now();
+          this.modelIdsMissedAt.set(binary, this.now());
           this.logger?.warn('[AntigravityCliAdapter] agy models probe failed; the model passes as chosen', {
             error: error instanceof Error ? error.message : String(error),
           });
           return null;
         })
         .finally(() => {
-          this.modelIdsInFlight = undefined;
+          this.modelIdsInFlight.delete(binary);
         });
+      this.modelIdsInFlight.set(binary, inFlight);
     }
-    return this.modelIdsInFlight;
+    return inFlight;
   }
 
   /**

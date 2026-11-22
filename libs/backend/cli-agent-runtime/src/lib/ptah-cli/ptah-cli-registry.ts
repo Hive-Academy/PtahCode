@@ -878,14 +878,15 @@ export class PtahCliRegistry {
     // A supplied lane id is authoritative before the SDK query can request permission.
     // Generated ids attach through setAgentId; the SDK handler waits for that attachment.
     const agentIdHolder: { value?: string } = { value: options?.agentId };
+    const spawnTiers = this.resolveEffectiveTiers(agentConfig);
     const { authEnv, stopProxy } = await this.buildProxyAuthEnv(
       agentConfig,
       provider,
       credential,
+      spawnTiers,
     );
     try {
       const tier: ModelTier = options?.modelTier ?? 'sonnet';
-      const spawnTiers = this.resolveEffectiveTiers(agentConfig);
       const spawnFromTiers = spawnTiers?.[tier];
       const modelOverride = options?.model?.trim();
       const model =
@@ -1278,6 +1279,7 @@ export class PtahCliRegistry {
         agentConfig,
         provider,
         credential,
+        effectiveTiers,
       );
       // The tab moved to an un-pooled profile (e.g. a key was added to a
       // key-less Kimi Code agent): give back the lease it held, AFTER the
@@ -1338,10 +1340,13 @@ export class PtahCliRegistry {
       }
     }
 
+    // The tiers written to the env are the ones in the fingerprint: a catalog
+    // that warms while the proxy starts must not make the two disagree.
     const { authEnv, stopProxy } = await this.buildProxyAuthEnv(
       agentConfig,
       provider,
       credential,
+      effectiveTiers,
     );
     const lease: ProfileProxyLease = {
       fingerprint,
@@ -1396,6 +1401,9 @@ export class PtahCliRegistry {
     agentConfig: PtahCliConfig,
     provider: AnthropicProvider,
     credential: AgentCredential,
+    tiers: PtahCliConfig['tierMappings'] = this.resolveEffectiveTiers(
+      agentConfig,
+    ),
   ): Promise<{ authEnv: AuthEnv; stopProxy: () => Promise<void> }> {
     // A key-less Kimi Code agent runs on the host's Kimi Code connection
     // through its own proxy. Never a direct fallback: there is no key to send.
@@ -1404,6 +1412,7 @@ export class PtahCliRegistry {
         agentConfig,
         provider,
         this.createKimiConnectionProxy(),
+        tiers,
       );
     }
 
@@ -1422,7 +1431,7 @@ export class PtahCliRegistry {
       usesDirectAgentKey(provider, credential)
     ) {
       return {
-        authEnv: this.buildAuthEnv(agentConfig, provider, apiKey),
+        authEnv: this.buildAuthEnv(agentConfig, provider, apiKey, tiers),
         stopProxy: noopStop,
       };
     }
@@ -1433,12 +1442,12 @@ export class PtahCliRegistry {
         `[PtahCliRegistry] No proxy factory for proxy-requiring provider '${provider.id}'; falling back to direct base URL`,
       );
       return {
-        authEnv: this.buildAuthEnv(agentConfig, provider, apiKey),
+        authEnv: this.buildAuthEnv(agentConfig, provider, apiKey, tiers),
         stopProxy: noopStop,
       };
     }
 
-    return this.startProxyAuthEnv(agentConfig, provider, created);
+    return this.startProxyAuthEnv(agentConfig, provider, created, tiers);
   }
 
   /**
@@ -1449,6 +1458,7 @@ export class PtahCliRegistry {
     agentConfig: PtahCliConfig,
     provider: AnthropicProvider,
     created: { proxy: ITranslationProxy; placeholder: string },
+    tiers: PtahCliConfig['tierMappings'],
   ): Promise<{ authEnv: AuthEnv; stopProxy: () => Promise<void> }> {
     const { proxy, placeholder } = created;
     const { url: proxyUrl } = await proxy.start();
@@ -1459,7 +1469,7 @@ export class PtahCliRegistry {
     const authEnv = createEmptyAuthEnv();
     authEnv.ANTHROPIC_BASE_URL = proxyUrl;
     authEnv.ANTHROPIC_AUTH_TOKEN = placeholder;
-    this.applyTierEnv(authEnv, agentConfig, provider);
+    this.applyTierEnv(authEnv, provider, tiers);
 
     const stopProxy = async (): Promise<void> => {
       if (!proxy.isRunning()) {
@@ -1539,14 +1549,14 @@ export class PtahCliRegistry {
 
   /**
    * Apply per-agent tier env vars to an AuthEnv (shared by the direct and proxy
-   * auth-env paths).
+   * auth-env paths). `effectiveTiers` is the caller's one resolution, so the
+   * env and whatever else the caller derives from it agree.
    */
   private applyTierEnv(
     authEnv: AuthEnv,
-    agentConfig: PtahCliConfig,
     provider: AnthropicProvider,
+    effectiveTiers: PtahCliConfig['tierMappings'],
   ): void {
-    const effectiveTiers = this.resolveEffectiveTiers(agentConfig);
     if (effectiveTiers) {
       if (effectiveTiers.sonnet) {
         authEnv.ANTHROPIC_DEFAULT_SONNET_MODEL = effectiveTiers.sonnet;
@@ -1573,6 +1583,9 @@ export class PtahCliRegistry {
     agentConfig: PtahCliConfig,
     provider: AnthropicProvider,
     apiKey: string,
+    tiers: PtahCliConfig['tierMappings'] = this.resolveEffectiveTiers(
+      agentConfig,
+    ),
   ): AuthEnv {
     const authEnv = createEmptyAuthEnv();
 
@@ -1598,7 +1611,7 @@ export class PtahCliRegistry {
       : getProviderAuthEnvVar(agentConfig.providerId);
     authEnv[authEnvVar] = apiKey;
 
-    this.applyTierEnv(authEnv, agentConfig, provider);
+    this.applyTierEnv(authEnv, provider, tiers);
 
     return authEnv;
   }

@@ -18,7 +18,6 @@ import {
   type ProviderModelTier,
 } from '@ptah-extension/shared';
 import { TranslationProxyBase } from '../../translation';
-import { deriveTiersFromCatalog } from '../../model-tier-derivation';
 import type { IOpenCodeAuthService } from './opencode-provider.types';
 import { openCodeLiveRoutes } from './opencode-live-routes';
 
@@ -74,8 +73,8 @@ export class OpenCodeTranslationProxy extends TranslationProxyBase {
   /**
    * `default`/`sonnet`/`opus`/`haiku` resolve to the entry's tier preference
    * when the gateway still lists it. A retired preference resolves to the
-   * closest live id of the same family, else the tier derived from the live
-   * ids, else stays as is (routing then explains why it cannot be served).
+   * closest live id of the same family, else stays as is: routing then
+   * reports that it is not listed. A tier never moves to another family.
    * With no catalog on hand the preference is used unverified.
    */
   protected override async resolveRequestModelId(
@@ -90,19 +89,8 @@ export class OpenCodeTranslationProxy extends TranslationProxyBase {
     const ids = await openCodeLiveRoutes.modelIds(this.providerId);
     if (!ids || ids.includes(preferred)) return preferred;
     const family = closestLiveModel(preferred, ids);
-    const derived = family
-      ? undefined
-      : deriveTiersFromCatalog(
-          ids.map((id) => ({
-            id,
-            name: id,
-            description: '',
-            contextLength: 0,
-            supportsToolUse: false,
-          })),
-        )[tier];
-    const resolved = family ?? derived ?? preferred;
-    const rule = family ? 'family' : derived ? 'derived' : 'none';
+    const resolved = family ?? preferred;
+    const rule = family ? 'family' : 'none';
     const key = `${this.providerId}:${tier}`;
     if (!loggedTierReplacements.has(key)) {
       loggedTierReplacements.add(key);

@@ -236,26 +236,28 @@ export class OllamaModelDiscoveryService {
    */
   async listCloudModels(): Promise<ProviderModelInfo[]> {
     const apiKey = await this.getOllamaCloudApiKey();
-    const [remote, local] = await Promise.allSettled([
-      this.cloudMetadata.fetchCloudTags(apiKey),
-      this.listModels('ollama-cloud', (name) => isCloudTag(name)),
-    ]);
-
-    if (local.status === 'rejected') {
-      // Expected in direct mode (no daemon); the reason is already captured
-      // and logged by listModels.
-      this.logger.debug(
-        `[OllamaModelDiscovery] listCloudModels: local daemon cloud tags unavailable (${classifyModelListFailure(local.reason)})`,
-      );
-    }
-    const localModels = local.status === 'fulfilled' ? local.value : [];
-
-    if (remote.status === 'rejected') {
-      const reason = classifyModelListFailure(remote.reason);
+    // Both start now; the daemon's /api/show enrichment is awaited only once
+    // ollama.com has answered, so an ollama.com failure is reported at once.
+    const localPending = this.listModels('ollama-cloud', (name) =>
+      isCloudTag(name),
+    ).then(
+      (models) => models,
+      (error: unknown) => {
+        // Expected in direct mode (no daemon): listModels already captured
+        // and logged the reason, and ollama.com alone answers.
+        this.logger.debug(
+          `[OllamaModelDiscovery] listCloudModels: local daemon cloud tags unavailable (${classifyModelListFailure(error)})`,
+        );
+        return [] as ProviderModelInfo[];
+      },
+    );
+    let remoteTags: OllamaCloudTag[];
+    try {
+      remoteTags = await this.cloudMetadata.fetchCloudTags(apiKey);
+    } catch (error: unknown) {
+      const reason = classifyModelListFailure(error);
       this.sentryService.captureException(
-        remote.reason instanceof Error
-          ? remote.reason
-          : new Error(String(remote.reason)),
+        error instanceof Error ? error : new Error(String(error)),
         {
           errorSource: 'OllamaModelDiscoveryService.listCloudModels',
           activeProvider: 'ollama-cloud',
@@ -263,30 +265,38 @@ export class OllamaModelDiscoveryService {
       );
       this.logger.warn(
         `[OllamaModelDiscovery] listCloudModels: ollama.com/api/tags failed (${reason}); ` +
-          `not listing the ${localModels.length} local daemon cloud model(s) alone`,
+          `not listing local daemon cloud models alone`,
       );
       throw new ModelListError(reason);
     }
 
-    const chatTags = remote.value.filter(
+    const chatTags = remoteTags.filter(
       (tag) => !tag.capabilities || tag.capabilities.includes('completion'),
+    );
+    // A tag ollama.com describes as non-chat stays out even when the daemon
+    // lists it too.
+    const nonChatIds = new Set(
+      remoteTags
+        .filter((tag) => !chatTags.includes(tag))
+        .map((tag) => toCloudId(tag.id)),
     );
     const remoteModels = await this.inBatches(chatTags, (tag) =>
       this.toCloudModel(tag),
     );
+    const localModels = await localPending;
     const byId = new Map<string, ProviderModelInfo>();
     for (const model of remoteModels) byId.set(toCloudId(model.id), model);
     const localOnly: string[] = [];
     for (const model of localModels) {
       const key = toCloudId(model.id);
-      if (byId.has(key)) continue;
+      if (byId.has(key) || nonChatIds.has(key)) continue;
       byId.set(key, model);
       localOnly.push(model.id);
     }
 
     this.logger.info(
       `[OllamaModelDiscovery] listCloudModels: ${byId.size} model(s): ` +
-        `${remoteModels.length} from ollama.com (${remote.value.length - chatTags.length} non-chat skipped), ` +
+        `${remoteModels.length} from ollama.com (${remoteTags.length - chatTags.length} non-chat skipped), ` +
         `${localOnly.length} only on the local daemon${localOnly.length > 0 ? ` [${localOnly.join(', ')}]` : ''}`,
     );
     return Array.from(byId.values());
@@ -378,20 +388,43 @@ export class OllamaModelDiscoveryService {
         : new ModelListError(reason);
     }
 
-    if (!tagsResponse?.models?.length) {
+    const rawTags: unknown =
+      tagsResponse && typeof tagsResponse === 'object'
+        ? (tagsResponse as { models?: unknown }).models
+        : undefined;
+    if (!Array.isArray(rawTags)) {
+      this.logger.debug(
+        `[OllamaModelDiscovery] /api/tags for ${providerId} has no models array`,
+      );
+      throw new ModelListError('bad-response');
+    }
+    const tags = rawTags.filter(
+      (m): m is OllamaModelTag =>
+        !!m &&
+        typeof m === 'object' &&
+        typeof (m as { name?: unknown }).name === 'string' &&
+        (m as { name: string }).name.length > 0,
+    );
+    if (tags.length === 0) {
+      if (rawTags.length > 0) {
+        this.logger.debug(
+          `[OllamaModelDiscovery] /api/tags for ${providerId} has no valid model row`,
+        );
+        throw new ModelListError('bad-response');
+      }
       this.logger.debug(
         `[OllamaModelDiscovery] No models returned from /api/tags`,
       );
       return [];
     }
-    const filtered = tagsResponse.models.filter((m) => filter(m.name));
+    const filtered = tags.filter((m) => filter(m.name));
     const enriched = await this.inBatches(filtered, (model) =>
       this.enrichModel(baseUrl, model),
     );
 
     this.logger.debug(
       `[OllamaModelDiscovery] Discovered ${enriched.length} models for ${providerId}`,
-      { total: tagsResponse.models.length, filtered: enriched.length },
+      { total: tags.length, filtered: enriched.length },
     );
 
     return enriched;
@@ -628,6 +661,23 @@ export class OllamaModelDiscoveryService {
         parsedUrl,
         { method, headers, timeout: 5000 },
         (res) => {
+          const status = res.statusCode;
+          if (!status || status < 200 || status >= 300) {
+            // The status decides; the body of a refusal is not read.
+            this.logger.debug(
+              `[OllamaModelDiscovery] ${url} returned ${status}`,
+            );
+            reject(
+              new ModelListError(
+                status === 401 || status === 403
+                  ? 'auth-rejected'
+                  : 'http-error',
+              ),
+            );
+            res.resume();
+            req.destroy();
+            return;
+          }
           const chunks: Buffer[] = [];
           let received = 0;
           res.on('data', (c: Buffer) => {
@@ -644,30 +694,13 @@ export class OllamaModelDiscoveryService {
           });
           res.on('end', () => {
             if (received > MAX_RESPONSE_BYTES) return;
-            if (
-              res.statusCode &&
-              res.statusCode >= 200 &&
-              res.statusCode < 300
-            ) {
-              try {
-                resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));
-              } catch {
-                this.logger.debug(
-                  `[OllamaModelDiscovery] Invalid JSON response from ${url}`,
-                );
-                reject(new ModelListError('bad-response'));
-              }
-            } else {
+            try {
+              resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+            } catch {
               this.logger.debug(
-                `[OllamaModelDiscovery] ${url} returned ${res.statusCode}`,
+                `[OllamaModelDiscovery] Invalid JSON response from ${url}`,
               );
-              reject(
-                new ModelListError(
-                  res.statusCode === 401 || res.statusCode === 403
-                    ? 'auth-rejected'
-                    : 'http-error',
-                ),
-              );
+              reject(new ModelListError('bad-response'));
             }
           });
         },

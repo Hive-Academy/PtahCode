@@ -64,7 +64,11 @@ describe('OllamaCloudMetadataService.fetchCloudTags', () => {
 
   it.each<[string, () => Promise<Response>, string]>([
     ['a non-2xx status', async () => jsonResponse('nope', 503), 'http-error'],
-    ['HTTP 401', async () => jsonResponse('unauthorized', 401), 'auth-rejected'],
+    [
+      'HTTP 401',
+      async () => jsonResponse('unauthorized', 401),
+      'auth-rejected',
+    ],
     ['HTTP 403', async () => jsonResponse('forbidden', 403), 'auth-rejected'],
     [
       'a missing models array',
@@ -118,6 +122,45 @@ describe('OllamaCloudMetadataService.fetchCloudTags', () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+
+  it('reports timeout when the body stalls past the deadline after a 200', async () => {
+    jest.useFakeTimers();
+    try {
+      fetchMock.mockImplementation(
+        async (_url: string, init: { signal: AbortSignal }) =>
+          ({
+            ok: true,
+            status: 200,
+            statusText: 'OK',
+            text: () =>
+              new Promise<string>((_resolve, reject) => {
+                init.signal.addEventListener('abort', () =>
+                  reject(new DOMException('aborted', 'AbortError')),
+                );
+              }),
+          }) as unknown as Response,
+      );
+      const failure = expect(
+        service().fetchCloudTags(null),
+      ).rejects.toMatchObject({ reason: 'timeout' });
+      await jest.advanceTimersByTimeAsync(10_000);
+      await failure;
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('keeps the HTTP status authoritative when a refused body cannot be read', async () => {
+    fetchMock.mockResolvedValue({
+      ok: false,
+      status: 401,
+      statusText: 'Unauthorized',
+      text: () => Promise.reject(new TypeError('terminated')),
+    } as unknown as Response);
+    await expect(service().fetchCloudTags('key')).rejects.toMatchObject({
+      reason: 'auth-rejected',
+    });
   });
 
   it('scopes the tags cache to the API key, never serving one account to another', async () => {

@@ -341,7 +341,10 @@ export class OpenCodeLiveRoutes {
   /**
    * The live catalog rows. Refreshes when the cache is missing or older than
    * {@link OPENCODE_LIVE_RETRY_MS}. Throws `ModelListError` with the reason
-   * of the last failure when no live map younger than the TTL exists.
+   * of the last failure when that refresh failed, or when no live map younger
+   * than the TTL exists. The map a failed refresh retains keeps serving
+   * request routing ({@link resolve}), never this listing: the caller saves
+   * what it returns as a fresh live list.
    */
   async list(
     providerId: OpenCodeProviderId,
@@ -350,7 +353,11 @@ export class OpenCodeLiveRoutes {
     const cache = this.caches.get(providerId);
     if (!cache || Date.now() - cache.updatedAt >= OPENCODE_LIVE_RETRY_MS)
       await this.refresh(providerId, options);
-    const live = this.liveModels(providerId);
+    const after = this.caches.get(providerId);
+    const live =
+      after && after.failedAt > after.updatedAt
+        ? undefined
+        : this.liveModels(providerId);
     if (live) return [...live.values()];
     throw new ModelListError(
       this.caches.get(providerId)?.failureReason ?? 'unexpected',

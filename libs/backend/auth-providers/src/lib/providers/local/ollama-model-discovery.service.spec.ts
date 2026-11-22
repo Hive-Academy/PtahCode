@@ -159,6 +159,35 @@ describe('Ollama local discovery', () => {
 });
 
 describe('Ollama Cloud discovery', () => {
+  it('reports an ollama.com failure without waiting for daemon enrichment', async () => {
+    const { service, post } = harness({
+      cloudTags: new ModelListError('auth-rejected'),
+      localTags: [{ name: 'qwen3-coder:480b-cloud' }],
+    });
+    // The daemon's /api/show never answers.
+    post.mockImplementation(() => new Promise(() => undefined));
+
+    await expect(service.listCloudModels()).rejects.toMatchObject({
+      reason: 'auth-rejected',
+    });
+  });
+
+  it('keeps a tag ollama.com marks non-chat out even when the daemon lists it', async () => {
+    const { service, post } = harness({
+      cloudTags: [
+        { id: 'glm-5.3:cloud', capabilities: ['completion'] },
+        { id: 'clef:27b', capabilities: ['embedding'] },
+      ],
+      localTags: [{ name: 'clef:27b-cloud' }, { name: 'only-local:cloud' }],
+    });
+    post.mockResolvedValue({});
+
+    const ids = (await service.listCloudModels()).map((m) => m.id);
+    expect(ids).toContain('glm-5.3:cloud');
+    expect(ids).toContain('only-local:cloud');
+    expect(ids.some((id) => id.startsWith('clef:27b'))).toBe(false);
+  });
+
   it('lists the union of ollama.com and local cloud tags, ollama.com fields winning', async () => {
     const { service, post } = harness({
       cloudTags: [
@@ -273,6 +302,36 @@ describe('Ollama Cloud discovery', () => {
   });
 });
 
+describe('Ollama daemon tag validation', () => {
+  it('keeps valid tags of a mixed response', async () => {
+    const { service, get, post } = harness();
+    post.mockResolvedValue({});
+    get.mockResolvedValue({ models: [null, { name: 'llama3:latest' }, {}] });
+    const models = await service.listLocalModels();
+    expect(models.map((m) => m.id)).toEqual(['llama3:latest']);
+  });
+
+  it.each([
+    ['no models array', { other: true }],
+    ['only invalid rows', { models: [null, { name: 42 }] }],
+  ])(
+    'reports %s as bad-response, not an empty inventory',
+    async (_label, body) => {
+      const { service, get } = harness();
+      get.mockResolvedValue(body);
+      await expect(service.listLocalModels()).rejects.toMatchObject({
+        reason: 'bad-response',
+      });
+    },
+  );
+
+  it('keeps {"models":[]} a clean empty list', async () => {
+    const { service, get } = harness();
+    get.mockResolvedValue({ models: [] });
+    await expect(service.listLocalModels()).resolves.toEqual([]);
+  });
+});
+
 describe('Ollama HTTP transport', () => {
   let server: http.Server;
   let baseUrl: string;
@@ -317,6 +376,16 @@ describe('Ollama HTTP transport', () => {
     };
     await expect(realService().listLocalModels()).rejects.toMatchObject({
       reason: 'http-error',
+    });
+  });
+
+  it('classifies an oversized 403 from its status, not its body size', async () => {
+    respond = (res) => {
+      res.writeHead(403, { 'Content-Type': 'text/plain' });
+      res.end('x'.repeat(1024 * 1024 + 16));
+    };
+    await expect(realService().listLocalModels()).rejects.toMatchObject({
+      reason: 'auth-rejected',
     });
   });
 

@@ -22,6 +22,7 @@ import axios from 'axios';
 import { Logger, ConfigManager, TOKENS } from '@ptah-extension/vscode-core';
 import type {
   AuthEnv,
+  ModelCapability,
   ModelListFailureReason,
   ProviderModelInfo,
   ProviderModelListSource,
@@ -82,6 +83,16 @@ export function credentialFingerprint(apiKey: string | null): string {
 /** Callback type for dynamic model fetchers (e.g., Copilot SDK listModels) */
 export type DynamicModelFetcher = () => Promise<ProviderModelInfo[]>;
 
+/** Optional hooks a dynamic fetcher registers with its route. */
+export interface DynamicFetcherOptions {
+  /**
+   * The account's sign-in state, read before any list is served (also a
+   * cached one): `false` returns `unavailable` / `not-signed-in` and drops the
+   * cached list; `true` or `undefined` (unknown) lets the chain continue.
+   */
+  signedIn?: () => Promise<boolean | undefined>;
+}
+
 /**
  * One provider's model list and how sure the service is about it.
  *
@@ -126,6 +137,24 @@ const UPSTREAM_PROTOCOLS: ReadonlySet<string> = new Set([
 /** Anthropic `/v1/models` pagination bound; one page at `limit=1000` today. */
 const MAX_MODELS_API_PAGES = 10;
 
+/** Every capability name; the compiler keeps it complete. */
+const MODEL_CAPABILITY_NAMES: Readonly<Record<ModelCapability, true>> = {
+  adaptive_thinking: true,
+  effort: true,
+  interleaved_thinking: true,
+  max_effort: true,
+  temperature: true,
+  thinking: true,
+  xhigh_effort: true,
+};
+
+function isModelCapability(value: unknown): value is ModelCapability {
+  return (
+    typeof value === 'string' &&
+    Object.prototype.hasOwnProperty.call(MODEL_CAPABILITY_NAMES, value)
+  );
+}
+
 /**
  * These catalogues hide models for reasons other than availability, so a
  * preference missing from them is not evidence that the model is retired.
@@ -147,7 +176,8 @@ function stripContextSuffix(id: string): string {
  * Validate one persisted row. The record survives across releases, so every
  * field that drives behaviour is re-checked: `upstreamProtocol` is kept only
  * when it is one of the three routable literals, `toolUseUnknown` only when it
- * is exactly `true`.
+ * is exactly `true`, `capabilities` only as an array of known capability
+ * names (otherwise dropped, so the provider's declared capabilities apply).
  */
 function persistedRow(row: unknown): ProviderModelInfo | null {
   if (!row || typeof row !== 'object') return null;
@@ -157,13 +187,18 @@ function persistedRow(row: unknown): ProviderModelInfo | null {
     typeof candidate['name'] !== 'string'
   )
     return null;
-  const { upstreamProtocol, toolUseUnknown, ...rest } =
+  const { upstreamProtocol, toolUseUnknown, capabilities, ...rest } =
     candidate as unknown as ProviderModelInfo;
+  const savedCapabilities: unknown = capabilities;
   return {
     ...rest,
     ...(typeof upstreamProtocol === 'string' &&
       UPSTREAM_PROTOCOLS.has(upstreamProtocol) && { upstreamProtocol }),
     ...(toolUseUnknown === true && { toolUseUnknown: true as const }),
+    ...(Array.isArray(savedCapabilities) &&
+      savedCapabilities.every(isModelCapability) && {
+        capabilities: [...savedCapabilities],
+      }),
   };
 }
 
@@ -184,6 +219,20 @@ export class ProviderModelsService {
 
   /** Per-provider dynamic model fetcher callbacks */
   private readonly dynamicFetchers = new Map<string, DynamicModelFetcher>();
+  /** Sign-in readers registered with a fetcher ({@link DynamicFetcherOptions}). */
+  private readonly fetcherSignIn = new Map<
+    string,
+    NonNullable<DynamicFetcherOptions['signedIn']>
+  >();
+
+  /**
+   * The credential fingerprint of each provider's latest list request, or
+   * `null` when that request failed for a credential reason. The synchronous
+   * catalog reads ({@link readLiveCatalog}) answer only from a list saved
+   * under this credential, and nothing after a credential failure. No entry
+   * (no request yet this boot) accepts the saved list as it is.
+   */
+  private readonly catalogCredential = new Map<string, string | null>();
 
   /**
    * Providers whose catalogue is being refreshed for tier derivation right now.
@@ -213,8 +262,14 @@ export class ProviderModelsService {
   registerDynamicFetcher(
     providerId: string,
     fetcher: DynamicModelFetcher,
+    options: DynamicFetcherOptions = {},
   ): void {
     this.dynamicFetchers.set(providerId, fetcher);
+    if (options.signedIn) {
+      this.fetcherSignIn.set(providerId, options.signedIn);
+    } else {
+      this.fetcherSignIn.delete(providerId);
+    }
     this.logger.debug(
       '[ProviderModelsService] Registered dynamic model fetcher',
       { providerId },
@@ -320,7 +375,6 @@ export class ProviderModelsService {
       .map(persistedRow)
       .filter((m): m is ProviderModelInfo => m !== null);
     if (models.length === 0) return null;
-    this.recordContextWindows(models, providerId);
     const credential = record['credential'];
     return {
       models,
@@ -334,7 +388,9 @@ export class ProviderModelsService {
    * at DI registration). Same rules as the model-list chain's persisted rung.
    */
   getPersistedCatalog(providerId: string): PersistedModelCatalog | null {
-    return this.readPersistedCatalog(providerId);
+    const saved = this.readPersistedCatalog(providerId);
+    if (saved) this.recordContextWindows(saved.models, providerId);
+    return saved;
   }
 
   /**
@@ -431,6 +487,22 @@ export class ProviderModelsService {
       !isOpenCodeProviderId(providerId) &&
       !!provider?.modelsEndpoint;
     const credential = usesApiKey ? credentialFingerprint(apiKey) : '';
+
+    const signedIn = this.fetcherSignIn.get(providerId);
+    if (
+      signedIn &&
+      (await this.readFetcherSignIn(providerId, signedIn)) === false
+    ) {
+      this.modelCache.delete(providerId);
+      this.catalogCredential.set(providerId, null);
+      this.logger.warn('[ProviderModelsService] No usable model list', {
+        providerId,
+        source: 'unavailable',
+        failureReason: 'not-signed-in',
+      });
+      return shape([], 'unavailable', { failureReason: 'not-signed-in' });
+    }
+
     const cached = this.modelCache.get(providerId);
     if (
       cached &&
@@ -453,6 +525,7 @@ export class ProviderModelsService {
           timestamp: Date.now(),
           credential,
         });
+        this.catalogCredential.set(providerId, credential);
         this.recordContextWindows(models, providerId);
         // The OpenCode routes write their own refreshes through the attached
         // store (DI), so a second write here would only repeat it.
@@ -472,6 +545,13 @@ export class ProviderModelsService {
       });
     }
 
+    // A credential failure hides every list of this provider from the
+    // synchronous reads too; any other failure scopes them to this request's
+    // credential.
+    this.catalogCredential.set(
+      providerId,
+      CREDENTIAL_FAILURE_REASONS.has(failureReason) ? null : credential,
+    );
     if (!CREDENTIAL_FAILURE_REASONS.has(failureReason)) {
       const saved = this.readPersistedCatalog(providerId);
       // A list saved under another key belongs to another account.
@@ -483,6 +563,7 @@ export class ProviderModelsService {
         );
       }
       if (persisted) {
+        this.recordContextWindows(persisted.models, providerId);
         this.logger.info(
           '[ProviderModelsService] Live fetch unavailable — using the last catalog this provider returned',
           {
@@ -504,6 +585,26 @@ export class ProviderModelsService {
       failureReason,
     });
     return shape([], 'unavailable', { failureReason });
+  }
+
+  /**
+   * A fetcher's sign-in state; `undefined` when the reader throws (the
+   * chain then decides from the fetch itself).
+   */
+  private async readFetcherSignIn(
+    providerId: string,
+    signedIn: NonNullable<DynamicFetcherOptions['signedIn']>,
+  ): Promise<boolean | undefined> {
+    try {
+      return await signedIn();
+    } catch (error: unknown) {
+      // degradation-audit: reported - an unreadable sign-in state proves nothing; the live route still reports its own classified failure.
+      this.logger.debug('[ProviderModelsService] Sign-in state unreadable', {
+        providerId,
+        error: errorMessage(error),
+      });
+      return undefined;
+    }
   }
 
   /**
@@ -590,6 +691,7 @@ export class ProviderModelsService {
     );
     const headers = this.modelsRequestHeaders(provider, apiKey);
     const rows: unknown[] = [];
+    const followed = new Set<string>();
     let url = endpoint;
     for (let page = 1; ; page++) {
       const { data } = await axios.get<unknown>(url, {
@@ -609,8 +711,15 @@ export class ProviderModelsService {
       )
         break;
       const lastId = envelope['last_id'];
-      if (typeof lastId !== 'string' || page >= MAX_MODELS_API_PAGES)
+      // An empty or repeated cursor would restart the listing.
+      if (
+        typeof lastId !== 'string' ||
+        lastId.length === 0 ||
+        followed.has(lastId) ||
+        page >= MAX_MODELS_API_PAGES
+      )
         throw new ModelListError('bad-response');
+      followed.add(lastId);
       const next = new URL(endpoint);
       next.searchParams.set('after_id', lastId);
       url = next.toString();
@@ -775,9 +884,22 @@ export class ProviderModelsService {
    * feeds it has to be readable without awaiting.
    */
   private readLiveCatalog(providerId: string): ProviderModelInfo[] | null {
+    // Only a list fetched under the provider's current credential counts,
+    // and none after a credential failure ({@link catalogCredential}).
+    const active = this.catalogCredential.get(providerId);
+    if (active === null) return null;
     const cached = this.modelCache.get(providerId);
-    if (cached && cached.models.length > 0) return cached.models;
-    return this.readPersistedCatalog(providerId)?.models ?? null;
+    if (
+      cached &&
+      cached.models.length > 0 &&
+      (active === undefined || (cached.credential ?? '') === active)
+    )
+      return cached.models;
+    const saved = this.readPersistedCatalog(providerId);
+    if (!saved || (active !== undefined && saved.credential !== active))
+      return null;
+    this.recordContextWindows(saved.models, providerId);
+    return saved.models;
   }
 
   /**
@@ -1208,11 +1330,26 @@ export class ProviderModelsService {
   }
 
   /**
-   * Clear cache for a specific provider (or all if no ID provided)
+   * Clear cache for a specific provider (or all if no ID provided).
+   *
+   * For one provider (its key or connection changed) the saved catalog goes
+   * too: a list fetched with the previous credential must not answer for the
+   * new one, in the chain or in the synchronous reads.
    */
   clearCache(providerId?: string): void {
     if (providerId) {
       this.modelCache.delete(providerId);
+      this.catalogCredential.delete(providerId);
+      const catalogKey = this.getCatalogConfigKey(providerId);
+      void Promise.resolve()
+        .then(() => this.config.set(catalogKey, undefined))
+        .catch((error: unknown) => {
+          // degradation-audit: reported - logged; the saved list stays credential-checked by fetchModels, and the next live success overwrites it.
+          this.logger.debug(
+            '[ProviderModelsService] Failed to drop a saved model catalog',
+            { providerId, error: errorMessage(error) },
+          );
+        });
     } else {
       this.modelCache.clear();
     }
@@ -1277,6 +1414,11 @@ export class ProviderModelsService {
         }
 
         const models = parseModelsApiRows(rows);
+        if (rows.length > 0 && models.length === 0) {
+          // A payload with no valid row would replace the published windows
+          // with nothing; retry instead.
+          throw new ModelListError('bad-response');
+        }
         this.modelCache.set(PREFETCH_CACHE_KEY, {
           models,
           timestamp: Date.now(),

@@ -24,12 +24,15 @@ import { Logger, ConfigManager, TOKENS } from '@ptah-extension/vscode-core';
 import { TranslationProxyBase } from '../../translation';
 import { SdkError } from '@ptah-extension/agent-sdk';
 import { getAnthropicProvider } from '@ptah-extension/shared';
-import { ModelListError, classifyModelListFailure } from '../../model-list-error';
+import {
+  ModelListError,
+  classifyModelListFailure,
+} from '../../model-list-error';
 
 /**
  * The model rows of a `/v1/models` body (`data`, or `models`), or `null` when
- * the body is not JSON or holds no such array. Rows without a string `id`
- * are dropped.
+ * the body is not JSON, holds no such array, or holds a non-empty array with
+ * no valid row. Rows without a string `id` are dropped; `[]` is an empty list.
  */
 function parseLocalModelRows(body: string): Array<{ id: string }> | null {
   let parsed: unknown;
@@ -43,13 +46,14 @@ function parseLocalModelRows(body: string): Array<{ id: string }> | null {
   const record = parsed as { data?: unknown; models?: unknown };
   const rows = record.data ?? record.models;
   if (!Array.isArray(rows)) return null;
-  return rows.filter(
+  const valid = rows.filter(
     (row): row is { id: string } =>
       !!row &&
       typeof row === 'object' &&
       typeof (row as { id?: unknown }).id === 'string' &&
       (row as { id: string }).id.length > 0,
   );
+  return rows.length > 0 && valid.length === 0 ? null : valid;
 }
 
 /**

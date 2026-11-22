@@ -1,6 +1,20 @@
 import { parseModelsApiRows } from './models-api-parser';
 
 describe('parseModelsApiRows', () => {
+  it('rejects a price string with trailing text, keeps decimals and exponents', () => {
+    const [truncated, exponent, zero] = parseModelsApiRows([
+      { id: 'a', pricing: { prompt: '0.000005 USD', completion: '0.00001' } },
+      { id: 'b', pricing: { prompt: '5e-6', completion: '1E-5' } },
+      { id: 'c', pricing: { prompt: 0, completion: '0' } },
+    ]);
+    expect(truncated.inputCostPerToken).toBeUndefined();
+    expect(exponent).toMatchObject({
+      inputCostPerToken: 5e-6,
+      outputCostPerToken: 1e-5,
+    });
+    expect(zero).toMatchObject({ inputCostPerToken: 0, outputCostPerToken: 0 });
+  });
+
   it('maps an OpenRouter row with pricing strings and tool parameters', () => {
     expect(
       parseModelsApiRows([

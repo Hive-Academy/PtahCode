@@ -244,6 +244,17 @@ export function buildTierEnvDefaults(authEnv: AuthEnv): Record<string, string> {
 /** Cache TTL for API models (5 minutes) */
 const API_MODELS_CACHE_TTL = 5 * 60 * 1000;
 
+/** Most `/v1/models` pages followed for one catalog read. */
+const MAX_API_MODELS_PAGES = 10;
+
+/**
+ * How old an in-memory catalog may be and still answer a live read
+ * (`getLive*`). The provider model-list chain saves what a live read returns
+ * with the current time, so an entry fetched long ago would be re-stamped as
+ * fresh; past this age the live read fetches again.
+ */
+const LIVE_READ_MAX_AGE_MS = 60 * 60 * 1000;
+
 /** Timeout for SDK bridge initialization when fetching supported models */
 const SDK_MODELS_TIMEOUT_MS = 15_000;
 
@@ -432,11 +443,14 @@ export class SdkModelService {
   private readonly modelsCache = new Map<string, ModelInfo[]>();
   /**
    * Keys whose {@link modelsCache} entry was restored from the cross-boot
-   * store and not yet confirmed by a live fetch. The live reads
-   * ({@link getLiveSupportedModels}, {@link getLiveNativeClaudeModels}) do not
-   * answer from these entries.
+   * store and not yet confirmed by a live fetch, with the `savedAt` of the
+   * saved entry. The live reads ({@link getLiveSupportedModels},
+   * {@link getLiveNativeClaudeModels}) do not answer from these entries, and
+   * every memory read drops one once it passes the 30-day limit.
    */
-  private readonly restoredKeys = new Set<string>();
+  private readonly restoredKeys = new Map<string, number>();
+  /** When each live (non-restored) {@link modelsCache} entry was fetched. */
+  private readonly liveFetchedAt = new Map<string, number>();
 
   /**
    * In-flight fetches, keyed the same way, so concurrent callers asking the
@@ -459,6 +473,14 @@ export class SdkModelService {
    */
   private cachedApiModels: ApiModelEntry[] | null = null;
   private apiModelsCacheTime = 0;
+  /**
+   * Bumped whenever {@link cachedApiModels} is cleared. A `/v1/models` read
+   * writes the unkeyed slot only when this is unchanged since it started, so
+   * a response for the previous credentials cannot land after an auth change
+   * cleared the slot. Separate from {@link cacheGeneration}, which would also
+   * discard the keyed catalogs an auth change keeps.
+   */
+  private apiModelsGeneration = 0;
 
   constructor(
     @inject(TOKENS.LOGGER) private readonly logger: Logger,
@@ -736,10 +758,8 @@ export class SdkModelService {
     }
     const key = this.authFingerprint();
 
-    const cached = this.modelsCache.get(key);
-    if (cached && cached.length > 0) {
-      return cached;
-    }
+    const cached = this.memoryCatalog(key);
+    if (cached) return cached;
 
     const inFlight = this.pendingModels.get(key);
     if (!inFlight) {
@@ -832,8 +852,46 @@ export class SdkModelService {
     }
     this.modelsCache.set(key, models);
     this.restoredKeys.delete(key);
+    this.liveFetchedAt.set(key, Date.now());
     this.persistCatalog(key, models);
     return true;
+  }
+
+  /**
+   * The in-memory catalog for `key`, or `null`. A restored entry that has
+   * passed the 30-day limit since its fetch is dropped here and reads as a
+   * miss, so an unconfirmed saved catalog cannot outlive the rule in memory.
+   */
+  private memoryCatalog(key: string): ModelInfo[] | null {
+    const cached = this.modelsCache.get(key);
+    if (!cached || cached.length === 0) return null;
+    const savedAt = this.restoredKeys.get(key);
+    if (
+      savedAt !== undefined &&
+      Date.now() - savedAt > PERSISTED_CATALOG_MAX_AGE_MS
+    ) {
+      this.modelsCache.delete(key);
+      this.restoredKeys.delete(key);
+      return null;
+    }
+    return cached;
+  }
+
+  /**
+   * The in-memory catalog for `key` when a live read may hand it out: fetched
+   * live (not restored) within {@link LIVE_READ_MAX_AGE_MS}.
+   */
+  private liveMemoryCatalog(key: string): ModelInfo[] | null {
+    const cached = this.modelsCache.get(key);
+    if (!cached || cached.length === 0 || this.restoredKeys.has(key))
+      return null;
+    const fetchedAt = this.liveFetchedAt.get(key);
+    if (
+      fetchedAt === undefined ||
+      Date.now() - fetchedAt > LIVE_READ_MAX_AGE_MS
+    )
+      return null;
+    return cached;
   }
 
   /**
@@ -851,16 +909,16 @@ export class SdkModelService {
   private restorePersistedCatalog(key: string): ModelInfo[] | null {
     const entry = this.readPersistedEntry(key);
     if (!entry) return null;
-    this.modelsCache.set(key, entry);
-    this.restoredKeys.add(key);
+    this.modelsCache.set(key, entry.models);
+    this.restoredKeys.set(key, entry.savedAt);
     this.logger.debug(
       '[SdkModelService] Restored model catalog from persisted store',
-      { models: entry.length },
+      { models: entry.models.length },
     );
     // Each restore path (`getSupportedModels`, `getNativeClaudeModels`,
     // `hasCachedModels`) must start the one revalidation of this key.
     this.scheduleCatalogRevalidation(key);
-    return entry;
+    return entry.models;
   }
 
   private scheduleCatalogRevalidation(key: string): void {
@@ -903,6 +961,7 @@ export class SdkModelService {
         // Confirmed live; the saved entry keeps its `savedAt`, so it still
         // ages out 30 days after the fetch that wrote it.
         this.restoredKeys.delete(key);
+        this.liveFetchedAt.set(key, Date.now());
         this.logger.debug(
           '[SdkModelService] Revalidated model catalog unchanged',
         );
@@ -910,6 +969,7 @@ export class SdkModelService {
       }
       this.modelsCache.set(key, models);
       this.restoredKeys.delete(key);
+      this.liveFetchedAt.set(key, Date.now());
       this.persistCatalog(key, models);
       const pairs = (rows: ModelInfo[] | undefined) =>
         rows?.map(({ value, displayName }) => ({ value, displayName })) ?? [];
@@ -925,7 +985,9 @@ export class SdkModelService {
     }
   }
 
-  private readPersistedEntry(key: string): ModelInfo[] | null {
+  private readPersistedEntry(
+    key: string,
+  ): { models: ModelInfo[]; savedAt: number } | null {
     if (!isPersistableCatalogKey(key)) return null;
     if (!this.stateStorage) return null;
     const store = this.readPersistedStore();
@@ -949,7 +1011,7 @@ export class SdkModelService {
       );
       return null;
     }
-    return parsed.data.models;
+    return { models: parsed.data.models, savedAt: parsed.data.savedAt };
   }
 
   private readPersistedStore(): Record<string, unknown> | null {
@@ -1060,10 +1122,8 @@ export class SdkModelService {
       return this.getSupportedModels();
     }
 
-    const cached = this.modelsCache.get(NATIVE_MODELS_CACHE_KEY);
-    if (cached && cached.length > 0) {
-      return cached;
-    }
+    const cached = this.memoryCatalog(NATIVE_MODELS_CACHE_KEY);
+    if (cached) return cached;
 
     const inFlight = this.pendingModels.get(NATIVE_MODELS_CACHE_KEY);
     if (inFlight) {
@@ -1094,13 +1154,20 @@ export class SdkModelService {
    */
   async getLiveSupportedModels(): Promise<ModelInfo[]> {
     const key = this.authFingerprint();
-    const cached = this.modelsCache.get(key);
-    if (cached && cached.length > 0 && !this.restoredKeys.has(key)) {
-      return cached;
+    const cached = this.liveMemoryCatalog(key);
+    if (cached) return cached;
+    const models = await (this.pendingModels.get(key) ??
+      this.startFetch(key, () => this.fetchSupportedModelsInternal(key)));
+    // The answer belongs to the identity the read started under. When the
+    // active auth moved while it ran, the caller would publish it for the new
+    // identity, so it gets nothing instead.
+    if (this.authFingerprint() !== key) {
+      this.logger.debug(
+        '[SdkModelService] Discarding a live catalog read that outlived its auth identity',
+      );
+      return [];
     }
-    const inFlight = this.pendingModels.get(key);
-    if (inFlight) return inFlight;
-    return this.startFetch(key, () => this.fetchSupportedModelsInternal(key));
+    return models;
   }
 
   /**
@@ -1112,10 +1179,8 @@ export class SdkModelService {
       return this.getLiveSupportedModels();
     }
     const key = NATIVE_MODELS_CACHE_KEY;
-    const cached = this.modelsCache.get(key);
-    if (cached && cached.length > 0 && !this.restoredKeys.has(key)) {
-      return cached;
-    }
+    const cached = this.liveMemoryCatalog(key);
+    if (cached) return cached;
     const inFlight = this.pendingModels.get(key);
     if (inFlight) return inFlight;
     return this.startFetch(key, () => this.fetchNativeModels());
@@ -1136,22 +1201,27 @@ export class SdkModelService {
   ): Promise<ModelInfo[]> {
     const generation = this.cacheGeneration;
     const { authMethod } = this.authProvider.resolveActiveAuth();
+    // `this.authEnv` is mutated in place by the auth strategies. The cache
+    // key was taken from it in this same tick, so the probe, the tier mapping
+    // and the key describe one identity only if they all read this snapshot.
+    const env: AuthEnv = { ...this.authEnv };
 
     this.logger.info('[SdkModelService] Fetching models', {
       authMethod,
-      hasApiKey: !!this.authEnv.ANTHROPIC_API_KEY,
-      hasBaseUrl: !!this.authEnv.ANTHROPIC_BASE_URL,
+      hasApiKey: !!env.ANTHROPIC_API_KEY,
+      hasBaseUrl: !!env.ANTHROPIC_BASE_URL,
     });
 
     let models: ModelInfo[];
 
     if (authMethod === 'claudeCli') {
-      models = await this.fetchModelsViaSdk();
+      models = await this.fetchModelsViaSdk(env);
     } else if (authMethod === 'apiKey') {
-      models = await this.fetchModelsForApiKey();
+      models = await this.fetchModelsForApiKey(env);
     } else {
-      const sdkModels = await this.fetchModelsViaSdk();
-      models = sdkModels.length > 0 ? this.applyTierMapping(sdkModels) : [];
+      const sdkModels = await this.fetchModelsViaSdk(env);
+      models =
+        sdkModels.length > 0 ? this.applyTierMapping(sdkModels, env) : [];
     }
 
     if (models.length > 0) {
@@ -1195,7 +1265,7 @@ export class SdkModelService {
    * API key auth: try /v1/models first (full versioned list), fall back to
    * SDK tier slots. No tier mapping — Anthropic native auth, IDs are valid as-is.
    */
-  private async fetchModelsForApiKey(): Promise<ModelInfo[]> {
+  private async fetchModelsForApiKey(env: AuthEnv): Promise<ModelInfo[]> {
     const apiModels = await this.fetchModelsViaApi();
     if (apiModels.length > 0) {
       this.logger.info('[SdkModelService] Models from /v1/models API', {
@@ -1206,7 +1276,7 @@ export class SdkModelService {
     this.logger.warn(
       '[SdkModelService] /v1/models failed for API key auth, trying SDK',
     );
-    return await this.fetchModelsViaSdk();
+    return await this.fetchModelsViaSdk(env);
   }
 
   /**
@@ -1561,6 +1631,7 @@ export class SdkModelService {
       return { ok: true, models: this.cachedApiModels };
     }
     const env = envOverride ?? this.authEnv;
+    const generation = this.apiModelsGeneration;
     const baseUrl = env.ANTHROPIC_BASE_URL;
     if (baseUrl && baseUrl.includes('127.0.0.1')) {
       this.logger.debug(
@@ -1576,7 +1647,7 @@ export class SdkModelService {
     }
 
     try {
-      const url = `${baseUrl || 'https://api.anthropic.com'}/v1/models?limit=100`;
+      const endpoint = `${baseUrl || 'https://api.anthropic.com'}/v1/models`;
       const headers: Record<string, string> = {
         'anthropic-version': '2023-06-01',
       };
@@ -1587,56 +1658,92 @@ export class SdkModelService {
         headers['Authorization'] = `Bearer ${authToken}`;
       }
 
-      const response = await fetch(url, {
-        method: 'GET',
-        headers,
-        signal: AbortSignal.timeout(5000),
+      // Follow `last_id` until `has_more` is false: one page is not the
+      // catalog. An empty or repeated cursor would restart the listing.
+      const rows: unknown[] = [];
+      const followed = new Set<string>();
+      let afterId: string | undefined;
+      for (let page = 1; ; page++) {
+        const url = new URL(endpoint);
+        url.searchParams.set('limit', '100');
+        if (afterId) url.searchParams.set('after_id', afterId);
+        const response = await fetch(url.toString(), {
+          method: 'GET',
+          headers,
+          signal: AbortSignal.timeout(5000),
+        });
+
+        if (!response.ok) {
+          this.logger.warn(
+            `[SdkModelService] /v1/models returned ${response.status}`,
+            { status: response.status },
+          );
+          return {
+            ok: false,
+            reason:
+              response.status === 401 || response.status === 403
+                ? 'auth-rejected'
+                : 'http-error',
+          };
+        }
+
+        const body: unknown = await response.json();
+        const envelope =
+          body && typeof body === 'object' && !Array.isArray(body)
+            ? (body as Record<string, unknown>)
+            : undefined;
+        const pageRows = envelope?.['data'];
+        if (!Array.isArray(pageRows)) {
+          this.logger.warn('[SdkModelService] /v1/models returned no data');
+          return { ok: false, reason: 'bad-response' };
+        }
+        rows.push(...pageRows);
+        if (envelope?.['has_more'] !== true) break;
+        const lastId = envelope['last_id'];
+        if (
+          typeof lastId !== 'string' ||
+          lastId.length === 0 ||
+          followed.has(lastId) ||
+          page >= MAX_API_MODELS_PAGES
+        ) {
+          this.logger.warn(
+            '[SdkModelService] /v1/models pagination cannot continue',
+            { page },
+          );
+          return { ok: false, reason: 'bad-response' };
+        }
+        followed.add(lastId);
+        afterId = lastId;
+      }
+
+      const models: ApiModelEntry[] = rows.flatMap((row) => {
+        if (!row || typeof row !== 'object') return [];
+        const m = row as Record<string, unknown>;
+        const id = m['id'];
+        if (typeof id !== 'string' || !id.startsWith('claude-')) return [];
+        const displayName = m['display_name'];
+        const createdAt = m['created_at'];
+        return [
+          {
+            id,
+            displayName:
+              typeof displayName === 'string' && displayName ? displayName : id,
+            createdAt: typeof createdAt === 'string' ? createdAt : '',
+          },
+        ];
       });
 
-      if (!response.ok) {
-        this.logger.warn(
-          `[SdkModelService] /v1/models returned ${response.status}`,
-          { status: response.status },
-        );
-        return {
-          ok: false,
-          reason:
-            response.status === 401 || response.status === 403
-              ? 'auth-rejected'
-              : 'http-error',
-        };
-      }
-
-      const body = (await response.json()) as {
-        data?: Array<{
-          id: string;
-          display_name?: string;
-          created_at?: string;
-          type?: string;
-        }>;
-      };
-
-      if (!body.data || !Array.isArray(body.data)) {
-        this.logger.warn('[SdkModelService] /v1/models returned no data');
-        return { ok: false, reason: 'bad-response' };
-      }
-      const models: ApiModelEntry[] = body.data
-        .filter((m) => typeof m?.id === 'string' && m.id.startsWith('claude-'))
-        .map((m) => ({
-          id: m.id,
-          displayName: m.display_name || m.id,
-          createdAt: m.created_at || '',
-        }));
-
       this.logger.info('[SdkModelService] Fetched models from /v1/models API', {
-        total: body.data.length,
+        total: rows.length,
         claudeModels: models.length,
         ...(!envOverride && { ids: models.map((m) => m.id) }),
       });
 
       if (models.length === 0) return { ok: false, reason: 'empty' };
 
-      if (!envOverride) {
+      // An auth change cleared the slot while this read ran: these rows
+      // belong to the previous credentials, so they are not cached.
+      if (!envOverride && generation === this.apiModelsGeneration) {
         this.cachedApiModels = models;
         this.apiModelsCacheTime = Date.now();
       }
@@ -1705,8 +1812,7 @@ export class SdkModelService {
    */
   hasCachedModels(): boolean {
     const key = this.authFingerprint();
-    const cached = this.modelsCache.get(key);
-    if (cached && cached.length > 0) return true;
+    if (this.memoryCatalog(key)) return true;
     // A persisted catalog is just as free as an in-memory one, and answering
     // `false` beside one would send the pre-flight into a spawn it does not
     // need. Restoring here is the same read the next `getSupportedModels()`
@@ -1733,6 +1839,7 @@ export class SdkModelService {
     this.accountProbes.clear();
     this.modelsCache.clear();
     this.restoredKeys.clear();
+    this.liveFetchedAt.clear();
     this.pendingModels.clear();
     this.clearApiModelsCache();
     // The persisted copy goes with it. `clearCache()` is the "I have no idea
@@ -1786,5 +1893,6 @@ export class SdkModelService {
   private clearApiModelsCache(): void {
     this.cachedApiModels = null;
     this.apiModelsCacheTime = 0;
+    this.apiModelsGeneration++;
   }
 }

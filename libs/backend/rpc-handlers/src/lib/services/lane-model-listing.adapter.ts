@@ -11,8 +11,12 @@
  * provider, raced against the row's signal.
  */
 
+import { createHash } from 'node:crypto';
 import { inject, injectable } from 'tsyringe';
-import { CLI_AGENT_RUNTIME_TOKENS } from '@ptah-extension/cli-agent-runtime';
+import {
+  CLI_AGENT_RUNTIME_TOKENS,
+  PTAH_CLI_KEY_PREFIX,
+} from '@ptah-extension/cli-agent-runtime';
 import { AUTH_PROVIDERS_TOKENS } from '@ptah-extension/auth-providers';
 import {
   TOKENS,
@@ -106,7 +110,10 @@ export class LaneModelListingAdapter {
     @inject(AUTH_PROVIDERS_TOKENS.SDK_PROVIDER_MODELS)
     private readonly providerModels: ProviderModelFetch,
     @inject(TOKENS.AUTH_SECRETS_SERVICE)
-    private readonly authSecrets: Pick<IAuthSecretsService, 'getProviderKey'>,
+    private readonly authSecrets: Pick<
+      IAuthSecretsService,
+      'getProviderKey' | 'getCredential'
+    >,
   ) {}
 
   async list(
@@ -183,7 +190,7 @@ export class LaneModelListingAdapter {
 
     try {
       const outcome = await this.awaitWithSignal(
-        this.sharedDiscovery(providerId),
+        this.discoveryFor(providerId, config),
         signal,
       );
       if (outcome.kind === 'empty' || outcome.kind === 'error') {
@@ -244,18 +251,61 @@ export class LaneModelListingAdapter {
   }
 
   /**
-   * One discovery promise per provider until it settles. Each row races its
-   * own signal against that shared promise, so one abort does not cancel
-   * another row on the same provider.
+   * The key this lane sends, resolved the way `ptahCli:listModels` resolves
+   * it: the shared connection key for an `anthropic-api` instance set to use
+   * it, else the instance's own `ptahCli.<id>` slot. A row without a saved
+   * config falls back to the provider's slot.
    */
-  private sharedDiscovery(providerId: string): Promise<DiscoveryOutcome> {
-    const existing = this.discoveryInFlight.get(providerId);
+  private async laneKey(
+    providerId: string,
+    config: PtahCliConfig | undefined,
+  ): Promise<string | null> {
+    const key = !config
+      ? await this.authSecrets.getProviderKey(providerId)
+      : config.providerId === 'anthropic-api' &&
+          config.credentialSource === 'shared-connection'
+        ? await this.authSecrets.getCredential('apiKey')
+        : await this.authSecrets.getProviderKey(
+            `${PTAH_CLI_KEY_PREFIX}.${config.id}`,
+          );
+    return key?.trim() ? key : null;
+  }
+
+  private async discoveryFor(
+    providerId: string,
+    config: PtahCliConfig | undefined,
+  ): Promise<DiscoveryOutcome> {
+    let apiKey: string | null;
+    try {
+      apiKey = await this.laneKey(providerId, config);
+    } catch (error: unknown) {
+      // degradation-audit: optional-capability - an unreadable secret store leaves the saved configured and tier entries; the raw error is not logged.
+      return { kind: 'error', reason: failureReason(error) };
+    }
+    return this.sharedDiscovery(providerId, apiKey);
+  }
+
+  /**
+   * One discovery promise per provider and key until it settles. Each row
+   * races its own signal against that shared promise, so one abort does not
+   * cancel another row on the same provider. Rows with different keys never
+   * share one: each key may see a different catalog.
+   */
+  private sharedDiscovery(
+    providerId: string,
+    apiKey: string | null,
+  ): Promise<DiscoveryOutcome> {
+    const credential = apiKey
+      ? createHash('sha256').update(apiKey).digest('hex').slice(0, 16)
+      : '';
+    const slot = `${providerId}:${credential}`;
+    const existing = this.discoveryInFlight.get(slot);
     if (existing) return existing;
-    const pending = this.runDiscovery(providerId);
-    this.discoveryInFlight.set(providerId, pending);
+    const pending = this.runDiscovery(providerId, apiKey);
+    this.discoveryInFlight.set(slot, pending);
     const release = (): void => {
-      if (this.discoveryInFlight.get(providerId) === pending) {
-        this.discoveryInFlight.delete(providerId);
+      if (this.discoveryInFlight.get(slot) === pending) {
+        this.discoveryInFlight.delete(slot);
       }
     };
     void pending.then(release, release);
@@ -267,12 +317,14 @@ export class LaneModelListingAdapter {
    * vendor failure: `unavailable` becomes an `error` outcome, a `persisted`
    * list keeps its rows as `fallback`, a `live` list as `reported`.
    */
-  private async runDiscovery(providerId: string): Promise<DiscoveryOutcome> {
+  private async runDiscovery(
+    providerId: string,
+    apiKey: string | null,
+  ): Promise<DiscoveryOutcome> {
     try {
-      const apiKey = await this.authSecrets.getProviderKey(providerId);
       const result = await this.providerModels.fetchModels(
         providerId,
-        apiKey ?? null,
+        apiKey,
         false,
       );
       if (result.source === 'unavailable') {
