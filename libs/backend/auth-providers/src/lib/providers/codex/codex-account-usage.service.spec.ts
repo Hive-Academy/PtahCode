@@ -1340,13 +1340,18 @@ describe('CodexAccountUsageService', () => {
         expect(h.requests).toHaveLength(1);
       });
 
-      it('keeps an account-id owner when a later read of the same account omits the id', async () => {
+      it('reports no owner for an id-less read after an id owner and restores it with the id', async () => {
         const h = harness({ accountId: 'acct-1' });
         await h.service.getAccountUsage();
         const byId = h.service.currentOwnerKey();
         h.scenario.accountId = null;
         await h.service.getAccountUsage({ refresh: true });
+        // Same type, email and plan cannot prove the same account.
+        expect(h.service.currentOwnerKey()).toBeNull();
+        h.scenario.accountId = 'acct-1';
+        await h.service.getAccountUsage({ refresh: true });
         expect(h.service.currentOwnerKey()).toBe(byId);
+        h.scenario.accountId = null;
         // An auth change ends the account; an id-less read then uses the email.
         h.authChanged();
         await h.service.getAccountUsage();

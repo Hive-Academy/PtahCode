@@ -44,19 +44,19 @@ interface HomeState {
   cached?: CodexAccountUsageResult;
   accountDigest?: string;
   /**
-   * The digest came from a rate-limits `accountId`. A later read that omits
-   * the optional id keeps it only while `account/read` still reports the
-   * account recorded in `signedInDigest`, so one account never alternates
-   * keys and a switched account never inherits the old owner.
+   * The digest came from a rate-limits `accountId`. It stays recorded until
+   * an auth change, a sign-out or a different signed-in account, so the next
+   * read that carries the id names the same key. A read without the id never
+   * reports it: two accounts can share type, email and plan, so the
+   * signed-in digest cannot prove the same account.
    */
   accountDigestFromId?: boolean;
-  /** {@link codexSignedInDigest} recorded with the account-id owner. */
-  signedInDigest?: string;
   /**
-   * The last read could not confirm the retained account-id owner (its
-   * account/read failed or timed out). The owner stays recorded for the next
-   * confirming read but is not reported for this one.
+   * {@link codexSignedInDigest} recorded with the account-id owner; used only
+   * to detect a switch, never to confirm the owner.
    */
+  signedInDigest?: string;
+  /** The last read named no account id: the recorded id owner is not reported. */
   ownerUnconfirmed?: boolean;
   miss?: { readonly at: number; readonly result: CodexAccountUsageResult };
   flight?: Flight;
@@ -570,10 +570,10 @@ export class CodexAccountUsageClient {
 
   /**
    * The owner of one read. A rate-limits account id names it. Without one,
-   * the bounded account/read decides: a recorded account-id owner stays only
-   * while the same account is signed in; a readable different or signed-out
-   * account drops it. An unreadable account/read keeps it recorded but leaves
-   * this read's owner unresolved. With no account-id owner, the email names it.
+   * a recorded account-id owner is never reported: the bounded account/read
+   * only detects a sign-out or a different account, which drop it; otherwise
+   * it stays recorded and this read's owner is unresolved. With no account-id
+   * owner since the last auth change, the email names it.
    */
   private async resolveOwner(
     home: string,
@@ -604,12 +604,13 @@ export class CodexAccountUsageClient {
     const account = await readAccount();
     const signedIn = signedInOf(account);
     if (state.accountDigestFromId && state.accountDigest) {
-      // Unreadable is not a switch: only a readable different account or a
-      // sign-out drops the retained owner.
-      if (account === undefined) return { fromId: true, unconfirmed: true };
-      return signedIn !== undefined && signedIn === state.signedInDigest
-        ? { digest: state.accountDigest, fromId: true, signedInDigest: signedIn }
-        : { fromId: false };
+      const switched =
+        account === null ||
+        (signedIn !== undefined &&
+          state.signedInDigest !== undefined &&
+          signedIn !== state.signedInDigest);
+      // An unreadable or matching account is not proof of the same account.
+      return switched ? { fromId: false } : { fromId: true, unconfirmed: true };
     }
     const email = account?.type === 'chatgpt' ? account.email : undefined;
     return {

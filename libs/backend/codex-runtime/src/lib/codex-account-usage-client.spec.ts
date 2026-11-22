@@ -335,7 +335,7 @@ describe('CodexAccountUsageClient', () => {
     );
   });
 
-  it('keeps an account-id owner when a later read of the same auth omits the id', async () => {
+  it('never reports an account-id owner for an id-less read and restores it with the id', async () => {
     configure = (child) => {
       child.response = { rateLimits: { primary: { usedPercent: 1 } }, accountId: 'acct-1' };
       child.account = {
@@ -352,9 +352,25 @@ describe('CodexAccountUsageClient', () => {
       };
     };
     expect((await client.read(homeA, { refresh: true })).quota?.primary?.usedPercent).toBe(2);
-    expect(client.currentAccountDigest(homeA)).toBe(byId);
-    // The id-less read revalidates the signed-in account before keeping the owner.
+    // The same type, email and plan cannot prove the same account.
+    expect(client.currentAccountDigest(homeA)).toBeNull();
+    // account/read still runs, to detect a sign-out or a switch.
     expect(children[1].frames.map((frame) => frame['method'])).toContain('account/read');
+    configure = (child) => {
+      child.response = { rateLimits: { primary: { usedPercent: 3 } }, accountId: 'acct-1' };
+      child.account = {
+        account: { type: 'chatgpt', email: 'private@example.test' },
+      };
+    };
+    await client.read(homeA, { refresh: true });
+    expect(client.currentAccountDigest(homeA)).toBe(byId);
+    // After an auth change, the first id-less read is named by email.
+    configure = (child) => {
+      child.response = { rateLimits: { primary: { usedPercent: 4 } } };
+      child.account = {
+        account: { type: 'chatgpt', email: 'private@example.test' },
+      };
+    };
     // An auth change ends the account: the next id-less read names it by email.
     invalidate(homeA);
     await client.read(homeA);
@@ -407,12 +423,19 @@ describe('CodexAccountUsageClient', () => {
     // This read publishes without an owner, never under a guessed one.
     expect((await client.read(homeA, { refresh: true })).quota?.primary?.usedPercent).toBe(2);
     expect(client.currentAccountDigest(homeA)).toBeNull();
-    // The next readable same-account read restores the same id owner.
+    // A readable same-account id-less read still reports no owner.
     configure = (child) => {
       child.response = { rateLimits: { primary: { usedPercent: 3 } } };
       child.account = sameAccount;
     };
     expect((await client.read(homeA, { refresh: true })).quota?.primary?.usedPercent).toBe(3);
+    expect(client.currentAccountDigest(homeA)).toBeNull();
+    // The next read that carries the id restores the same key.
+    configure = (child) => {
+      child.response = { rateLimits: { primary: { usedPercent: 3 } }, accountId: 'acct-1' };
+      child.account = sameAccount;
+    };
+    await client.read(homeA, { refresh: true });
     expect(client.currentAccountDigest(homeA)).toBe(byId);
     // A readable different account after that still drops it.
     configure = (child) => {
@@ -421,6 +444,11 @@ describe('CodexAccountUsageClient', () => {
     };
     await client.read(homeA, { refresh: true });
     expect(client.currentAccountDigest(homeA)).toBeNull();
+    // Dropped, not retained: a later id-less read names the new account by email.
+    await client.read(homeA, { refresh: true });
+    expect(client.currentAccountDigest(homeA)).toBe(
+      codexAccountIdentityDigest(key(homeA), { email: 'other@example.test' }),
+    );
   });
 
   it('bounds a hung identity call and still publishes the quota', async () => {

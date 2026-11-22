@@ -173,8 +173,15 @@ export class CodexAccountUsageService implements ICodexAccountUsageService {
    * a same-email personal to team switch, which changes the plan.
    */
   private signedInKey: string | null = null;
-  /** `ownerKey` came from a rate-limits account id; a later read without one keeps it. */
+  /** `ownerKey` came from a rate-limits account id; it stays recorded until an account change. */
   private ownerFromAccountId = false;
+  /**
+   * The last read named no account id while an id owner is recorded. The
+   * signed-in digest cannot prove the same account (two accounts can share
+   * type, email and plan), so that read reports no owner; the next read that
+   * carries the id reports the recorded key again.
+   */
+  private ownerUnconfirmed = false;
   /**
    * Bumped by `clearCache`. A read that started before the bump finishes for
    * its own callers but is not cached, so an account change (auth file
@@ -262,6 +269,7 @@ export class CodexAccountUsageService implements ICodexAccountUsageService {
     this.cached = null;
     this.ownerKey = null;
     this.ownerFromAccountId = false;
+    this.ownerUnconfirmed = false;
     this.generation += 1;
     // Later callers start a fresh read instead of joining one begun before the change.
     this.readInFlight = null;
@@ -273,10 +281,14 @@ export class CodexAccountUsageService implements ICodexAccountUsageService {
     if (kind === 'invalid') return null;
     if (this.coreClient) {
       const coreKey = coreOwnerKey(this.coreClient, home ?? this.codexHome.path);
-      return kind === 'default' ? coreKey ?? this.ownerKey : coreKey;
+      return kind === 'default' ? coreKey ?? this.reportedOwnerKey() : coreKey;
     }
     if (home !== undefined && kind === 'explicit') return null;
-    return this.ownerKey;
+    return this.reportedOwnerKey();
+  }
+
+  private reportedOwnerKey(): string | null {
+    return this.ownerUnconfirmed ? null : this.ownerKey;
   }
 
   async getAccountUsage(
@@ -565,6 +577,7 @@ export class CodexAccountUsageService implements ICodexAccountUsageService {
         this.cached = null;
         this.ownerKey = null;
         this.ownerFromAccountId = false;
+        this.ownerUnconfirmed = false;
         this.signedInKey = signedInKey;
       }
       stage = 'rate-limits';
@@ -572,11 +585,12 @@ export class CodexAccountUsageService implements ICodexAccountUsageService {
         await rpc.request(3, 'account/rateLimits/read'),
       );
       // Account id and email are identity material only: hashed, never returned or logged.
-      // The optional id, once it named this account, stays its owner material.
+      // Once an id named this account, an id-less read keeps that owner
+      // recorded but unresolved; the email names an owner only before any id.
       const accountId = quota.accountId?.trim();
-      const keepIdOwner =
+      const retainIdOwner =
         !accountId && this.ownerFromAccountId && this.ownerKey !== null;
-      const ownerKey = keepIdOwner
+      const ownerKey = retainIdOwner
         ? this.ownerKey
         : codexOwnerKey(this.codexHome.path, {
             accountId,
@@ -585,7 +599,8 @@ export class CodexAccountUsageService implements ICodexAccountUsageService {
       if (generation === this.generation) {
         if (this.ownerKey !== ownerKey) this.cached = null;
         this.ownerKey = ownerKey;
-        this.ownerFromAccountId = !!accountId || keepIdOwner;
+        this.ownerFromAccountId = !!accountId || retainIdOwner;
+        this.ownerUnconfirmed = retainIdOwner;
       }
       const limits = quota.rateLimitsByLimitId?.['codex'] ?? quota.rateLimits;
       let activity:
