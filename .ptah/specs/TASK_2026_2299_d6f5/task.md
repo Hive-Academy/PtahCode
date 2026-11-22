@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_2299_d6f5
-status: backlog
+status: in_review
 type: FEATURE
 title: Improve ptah MCP navigation tools and benchmark them
 depends_on: []
