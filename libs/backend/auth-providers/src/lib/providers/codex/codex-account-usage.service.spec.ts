@@ -1355,6 +1355,23 @@ describe('CodexAccountUsageService', () => {
         );
       });
 
+      it('does not carry an account-id owner to a switched account read without an id', async () => {
+        const h = harness({ accountId: 'acct-1' });
+        await h.service.getAccountUsage();
+        const byId = h.service.currentOwnerKey();
+        h.scenario.accountId = null;
+        h.scenario.account = {
+          type: 'chatgpt',
+          email: 'other@example.test',
+          planType: 'plus',
+        };
+        await h.service.getAccountUsage({ refresh: true });
+        expect(h.service.currentOwnerKey()).not.toBe(byId);
+        expect(h.service.currentOwnerKey()).toBe(
+          ownerOf(h.syntheticHome, 'other@example.test'),
+        );
+      });
+
       it('treats a same-email plan change as an account switch before a failed quota read', async () => {
         const h = harness({ accountId: 'personal' });
         await h.service.getAccountUsage();

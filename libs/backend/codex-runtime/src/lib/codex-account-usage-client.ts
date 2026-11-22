@@ -1,7 +1,11 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { normalizeCodexHomeKey } from './codex-home-path';
-import { codexAccountIdentityDigest } from './codex-account-identity';
+import {
+  codexAccountIdentityDigest,
+  codexSignedInDigest,
+  type CodexSignedInAccount,
+} from './codex-account-identity';
 import type { CodexExecutionProfile } from './codex-runtime.types';
 import type { IDisposable } from '@ptah-extension/platform-core';
 import type {
@@ -40,11 +44,14 @@ interface HomeState {
   cached?: CodexAccountUsageResult;
   accountDigest?: string;
   /**
-   * The digest came from a rate-limits `accountId`. It then stays the owner
-   * for this home until the auth file changes (clearCache), even when a later
-   * read omits the optional id, so one account never alternates keys.
+   * The digest came from a rate-limits `accountId`. A later read that omits
+   * the optional id keeps it only while `account/read` still reports the
+   * account recorded in `signedInDigest`, so one account never alternates
+   * keys and a switched account never inherits the old owner.
    */
   accountDigestFromId?: boolean;
+  /** {@link codexSignedInDigest} recorded with the account-id owner. */
+  signedInDigest?: string;
   miss?: { readonly at: number; readonly result: CodexAccountUsageResult };
   flight?: Flight;
 }
@@ -54,14 +61,15 @@ function unavailable(): CodexAccountUsageResult {
 }
 
 /**
- * The ChatGPT email of the signed-in account, for a rate-limits read that
- * names no account id. Identity only: an unreadable account leaves the owner
- * unresolved and never fails the usage read itself.
+ * The signed-in account `account/read` reports: `null` when none is signed
+ * in, `undefined` when the read failed or timed out. Identity only: an
+ * unreadable account leaves the owner unresolved and never fails the usage
+ * read itself.
  */
-async function accountEmail(
+async function readSignedInAccount(
   child: CodexAppServerProcess,
   timeoutMs: number,
-): Promise<string | undefined> {
+): Promise<CodexSignedInAccount | null | undefined> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     // A hung identity call must not hold the fetched quota; closing the child
@@ -73,9 +81,7 @@ async function accountEmail(
         timer.unref?.();
       }),
     ]);
-    return read?.account?.type === 'chatgpt'
-      ? (read.account.email ?? undefined)
-      : undefined;
+    return read === undefined ? undefined : read.account;
   } catch {
     // degradation-audit: optional-capability - the owner stays unresolved; quota from the same read still publishes.
     return undefined;
@@ -408,6 +414,7 @@ export class CodexAccountUsageClient {
     state.cached = undefined;
     state.accountDigest = undefined;
     state.accountDigestFromId = undefined;
+    state.signedInDigest = undefined;
     state.miss = undefined;
     const flight = state.flight;
     state.flight = undefined;
@@ -473,6 +480,7 @@ export class CodexAccountUsageClient {
         state.cached = undefined;
         state.accountDigest = undefined;
         state.accountDigestFromId = undefined;
+        state.signedInDigest = undefined;
         state.miss = undefined;
         return { status: eligibility, providerId: PROVIDER };
       }
@@ -511,25 +519,24 @@ export class CodexAccountUsageClient {
       )
         return unavailable();
       const response = await child.request('account/rateLimits/read', {});
-      const accountId = response.accountId?.trim();
-      // The protocol makes accountId optional. Once an id named this home's
-      // owner, keep it; otherwise account/read's email names the owner.
-      const keepIdOwner =
-        !accountId && state.accountDigestFromId === true && !!state.accountDigest;
-      const email =
-        accountId || keepIdOwner || !current()
-          ? undefined
-          : await accountEmail(child, this.identityTimeoutMs);
+      const usageChild = child;
+      const owner = await this.resolveOwner(
+        home,
+        state,
+        response.accountId?.trim() || undefined,
+        async () =>
+          current()
+            ? readSignedInAccount(usageChild, this.identityTimeoutMs)
+            : undefined,
+      );
       // Complete process cleanup before publishing a result into the cache.
       await child.close();
       if (!current()) return unavailable();
-      const digest = keepIdOwner
-        ? state.accountDigest
-        : codexAccountIdentityDigest(home, { accountId, email });
       const result = usageResult(response, this.now());
       state.cached = result;
-      state.accountDigest = digest ?? undefined;
-      state.accountDigestFromId = !!accountId || keepIdOwner;
+      state.accountDigest = owner.digest;
+      state.accountDigestFromId = owner.fromId;
+      state.signedInDigest = owner.signedInDigest;
       state.miss = undefined;
       return result;
     } catch {
@@ -547,6 +554,53 @@ export class CodexAccountUsageClient {
       // Shared process close is idempotent and resolves after stdio has closed.
       await child?.close();
     }
+  }
+
+  /**
+   * The owner of one read. A rate-limits account id names it. Without one,
+   * the bounded account/read decides: a recorded account-id owner stays only
+   * while the same account is signed in. A different, signed-out or
+   * unreadable account leaves the owner unresolved rather than keeping the
+   * old one. With no account-id owner recorded, the email names it.
+   */
+  private async resolveOwner(
+    home: string,
+    state: HomeState,
+    accountId: string | undefined,
+    readAccount: () => Promise<CodexSignedInAccount | null | undefined>,
+  ): Promise<{
+    readonly digest?: string;
+    readonly fromId: boolean;
+    readonly signedInDigest?: string;
+  }> {
+    const signedInOf = (account: CodexSignedInAccount | null | undefined) =>
+      account ? codexSignedInDigest(account) : undefined;
+    if (accountId) {
+      const digest = codexAccountIdentityDigest(home, { accountId }) ?? undefined;
+      // Record the signed-in account once per account-id owner.
+      const recorded =
+        state.accountDigestFromId && state.accountDigest === digest
+          ? state.signedInDigest
+          : undefined;
+      return {
+        digest,
+        fromId: true,
+        signedInDigest: recorded ?? signedInOf(await readAccount()),
+      };
+    }
+    const account = await readAccount();
+    const signedIn = signedInOf(account);
+    if (state.accountDigestFromId && state.accountDigest) {
+      return signedIn !== undefined && signedIn === state.signedInDigest
+        ? { digest: state.accountDigest, fromId: true, signedInDigest: signedIn }
+        : { fromId: false };
+    }
+    const email = account?.type === 'chatgpt' ? account.email : undefined;
+    return {
+      digest: codexAccountIdentityDigest(home, { email }) ?? undefined,
+      fromId: false,
+      ...(signedIn !== undefined && { signedInDigest: signedIn }),
+    };
   }
 
   private join(

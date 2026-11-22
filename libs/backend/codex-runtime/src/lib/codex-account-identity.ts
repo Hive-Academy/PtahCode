@@ -34,3 +34,22 @@ export function codexAccountIdentityDigest(
         .update(`${normalizedHome}\0${material}`, 'utf8')
         .digest('hex');
 }
+
+/** What `account/read` reports about the signed-in account. */
+export interface CodexSignedInAccount {
+  readonly type: string;
+  readonly email?: string | null;
+  readonly planType?: string | null;
+}
+
+/**
+ * Comparison-only digest of the `account/read` account (type, email, plan).
+ * It is never an owner: it tells whether the account signed in now is the one
+ * that was signed in when an account-id owner was recorded. A same-email
+ * switch from a personal to a team account changes the plan and so the digest.
+ */
+export function codexSignedInDigest(account: CodexSignedInAccount): string {
+  const email = account.email?.trim().toLowerCase() ?? '';
+  const material = [account.type, email, account.planType ?? ''].join('\u0000');
+  return createHash('sha256').update(material, 'utf8').digest('hex');
+}

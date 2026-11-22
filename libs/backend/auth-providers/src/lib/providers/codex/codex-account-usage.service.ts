@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 import { inject, injectable } from 'tsyringe';
 import type {
@@ -10,6 +9,7 @@ import { Logger, TOKENS } from '@ptah-extension/vscode-core';
 import {
   CODEX_INITIALIZE_TIMEOUT_MS,
   codexAccountIdentityDigest,
+  codexSignedInDigest,
   normalizeCodexHomeKey,
   type CodexSelectionSnapshotPort,
   type CodexAccountUsageClient,
@@ -63,16 +63,6 @@ export function codexOwnerKey(
   }
   const digest = codexAccountIdentityDigest(normalizedHome, identity);
   return digest ? accountOwnerKey('openai-codex', digest) : null;
-}
-
-/** Comparison-only digest of the signed-in account; never stored as an owner. */
-function signedInDigest(account: {
-  readonly email?: string | null;
-  readonly planType?: string;
-}): string {
-  const email = account.email?.trim().toLowerCase() ?? '';
-  const material = `chatgpt\0${email}\0${account.planType ?? ''}`;
-  return createHash('sha256').update(material, 'utf8').digest('hex');
 }
 
 function coreOwnerKey(
@@ -570,7 +560,7 @@ export class CodexAccountUsageService implements ICodexAccountUsageService {
       }
       // A different signed-in account drops the previous account's cache and
       // owner first, so a failed quota read cannot serve its data as this one.
-      const signedInKey = signedInDigest(account.account);
+      const signedInKey = codexSignedInDigest(account.account);
       if (generation === this.generation && this.signedInKey !== signedInKey) {
         this.cached = null;
         this.ownerKey = null;
