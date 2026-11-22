@@ -63,6 +63,11 @@ interface ProviderCache {
   timestamp: number;
   /** {@link credentialFingerprint} of the key the list was fetched with. */
   credential?: string;
+  /**
+   * Monotonic write sequence (`ProviderModelsService.cacheRevision`). Unlike
+   * `timestamp`, two writes in the same millisecond still differ.
+   */
+  revision?: number;
 }
 
 /**
@@ -219,6 +224,8 @@ export class ProviderModelsService {
   /** Providers whose pre-version persisted record was reported, per process. */
   private static readonly loggedIgnoredCatalogs = new Set<string>();
   private readonly modelCache = new Map<string, ProviderCache>();
+  /** Bumped on every `modelCache` write; see {@link ProviderCache.revision}. */
+  private cacheRevision = 0;
   private readonly CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
   /**
    * A persisted catalog older than this is not used: vendors retire models
@@ -522,18 +529,19 @@ export class ProviderModelsService {
       this.generationOf(providerId) === generation;
 
     const signedIn = this.fetcherSignIn.get(providerId);
-    const requestStartedAt = Date.now();
+    const revisionAtStart = this.cacheRevision;
     if (
       signedIn &&
       (await this.readFetcherSignIn(providerId, signedIn)) === false
     ) {
       // The sign-in read awaits: a clear or a newer request may have
       // written state since. Only a current request may drop the list, and
-      // only one cached before this request started.
+      // only one cached before this request started (by write sequence, not
+      // by clock, so a write in the same millisecond still counts as newer).
       const cachedNow = this.modelCache.get(providerId);
       if (
         isCurrent() &&
-        (!cachedNow || cachedNow.timestamp <= requestStartedAt)
+        (!cachedNow || (cachedNow.revision ?? 0) <= revisionAtStart)
       ) {
         this.modelCache.delete(providerId);
         this.catalogCredential.set(providerId, null);
@@ -574,6 +582,7 @@ export class ProviderModelsService {
           models,
           timestamp: Date.now(),
           credential,
+          revision: ++this.cacheRevision,
         });
         this.catalogCredential.set(providerId, credential);
         this.recordContextWindows(models, providerId);
@@ -1524,6 +1533,7 @@ export class ProviderModelsService {
         this.modelCache.set(PREFETCH_CACHE_KEY, {
           models,
           timestamp: Date.now(),
+          revision: ++this.cacheRevision,
         });
 
         const pricedCount = this.feedPricingMap(models);

@@ -177,8 +177,9 @@ describe('ProviderModelsService credential scope', () => {
         signedIn: () => answers.shift() ?? Promise.resolve(true),
       });
 
+      // Same clock value for both requests: only a write sequence can tell
+      // the newer cache entry apart.
       const stale = service.fetchModels(FETCHER, null);
-      jest.spyOn(Date, 'now').mockReturnValue(NOW + 1000);
       expect((await service.fetchModels(FETCHER, null)).source).toBe('live');
       expect(service.getCachedModelIds(FETCHER)).toEqual(['live-a']);
 
