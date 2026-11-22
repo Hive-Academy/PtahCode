@@ -3,6 +3,7 @@ import {
   chmod,
   mkdtemp,
   mkdir,
+  realpath,
   rm,
   symlink,
   writeFile,
@@ -12,11 +13,13 @@ import * as path from 'node:path';
 import type { AstCodeInsights } from '../../types';
 import { handleGrep, type GrepDeps } from './grep';
 import {
+  buildGitGrepArgs,
   buildGitPathspecs,
   buildRipgrepArgs,
   globToRegExp,
   inferRegexMode,
   isCaseInsensitive,
+  isGitWorkTree,
   type GrepRequest,
 } from './grep-engine';
 import { GREP_MAX_CHARS, GREP_MAX_FILE_BYTES } from './grep.limits';
@@ -374,6 +377,23 @@ describe('handleGrep (node engine)', () => {
     const reply = await handleGrep({ pattern: 'x', surprise: true }, deps);
     expect(reply.isError).toBe(true);
   });
+
+  const canChmod = process.platform !== 'win32' && process.getuid?.() !== 0;
+  (canChmod ? it : it.skip)(
+    'counts an unreadable folder in the not-searched note',
+    async () => {
+      const locked = path.join(root, 'src', 'locked');
+      await mkdir(locked);
+      await writeFile(path.join(locked, 'x.ts'), 'LIMIT locked\n');
+      await chmod(locked, 0o000);
+      try {
+        const reply = await handleGrep({ pattern: 'LIMIT locked' }, deps);
+        expect(reply.text).toContain('1 unreadable file(s) or folder(s)');
+      } finally {
+        await chmod(locked, 0o755);
+      }
+    },
+  );
 });
 
 const itPosix = process.platform === 'win32' ? it.skip : it;
@@ -552,6 +572,105 @@ describe('handleGrep (git engine)', () => {
     expect(reply.text).not.toContain('Engine note');
   });
 
+  itGit('leaves out hidden files and directories, like rg', async () => {
+    await mkdir(path.join(root, '.cache'));
+    await writeFile(path.join(root, '.cache', 'x.ts'), 'LIMIT hidden\n');
+    await writeFile(path.join(root, '.env.ts'), 'LIMIT hidden\n');
+    const reply = await handleGrep({ pattern: 'LIMIT hidden' }, deps);
+    expect(reply.text.startsWith('0 matches (engine: git).')).toBe(true);
+    // A hidden target is searched when it is named.
+    const named = await handleGrep(
+      { pattern: 'LIMIT hidden', path: '.cache' },
+      deps,
+    );
+    expect(named.text).toContain('.cache/x.ts');
+  });
+
+  itGit('skips hidden entries below a named hidden target', async () => {
+    await mkdir(path.join(root, '.config', '.inner'), { recursive: true });
+    await writeFile(path.join(root, '.config', 'a.ts'), 'LIMIT cfg\n');
+    await writeFile(
+      path.join(root, '.config', '.inner', 'b.ts'),
+      'LIMIT cfg\n',
+    );
+    const reply = await handleGrep(
+      { pattern: 'LIMIT cfg', path: '.config' },
+      deps,
+    );
+    expect(reply.text.split('\n')[0]).toBe('1 match in 1 file (engine: git)');
+    expect(reply.text).not.toContain('.inner');
+  });
+
+  itGit(
+    'does not run a timed-out git glob again in the Node walk',
+    async () => {
+      await writeFile(
+        path.join(root, 'src', `${'a'.repeat(120)}.ts`),
+        'LIMIT slow\n',
+      );
+      // A brace glob is not a git pathspec, so it filters git's output.
+      const reply = await handleGrep(
+        { pattern: 'LIMIT slow', glob: `{x,${'*a'.repeat(25)}*b}` },
+        deps,
+      );
+      expect(reply.text).toContain('(engine: git)');
+      expect(reply.text).toContain('the glob is too slow');
+    },
+    20_000,
+  );
+
+  itGit('probes again after a negative work-tree result', async () => {
+    const plain = await mkdtemp(path.join(os.tmpdir(), 'grep-probe-'));
+    try {
+      const real = await realpath(plain);
+      expect(await isGitWorkTree('git', real)).toBe(false);
+      execFileSync('git', ['init', '-q'], { cwd: real });
+      expect(await isGitWorkTree('git', real)).toBe(true);
+    } finally {
+      await rm(plain, { recursive: true, force: true });
+    }
+  });
+
+  itGit('keeps a path that holds a line break in one match', async () => {
+    if (process.platform === 'win32') {
+      return;
+    }
+    await writeFile(path.join(root, 'src', 'a\nb.ts'), 'LIMIT split\n');
+    const reply = await handleGrep({ pattern: 'LIMIT split' }, deps);
+    expect(reply.text.split('\n')[0]).toBe('1 match in 1 file (engine: git)');
+    expect(reply.text).toContain('LIMIT split');
+  });
+
+  itGit('reads a bracket glob literally, like the other engines', async () => {
+    await writeFile(path.join(root, 'src', 'f[1].ts'), 'LIMIT bracket\n');
+    await writeFile(path.join(root, 'src', 'f1.ts'), 'LIMIT bracket\n');
+    const reply = await handleGrep(
+      { pattern: 'LIMIT bracket', glob: 'f[1].ts' },
+      deps,
+    );
+    expect(reply.text.split('\n')[0]).toBe('1 match in 1 file (engine: git)');
+    expect(reply.text).toContain('src/f[1].ts');
+  });
+
+  // git filters a glob by itself; the Node walk runs it as a regex.
+  it('ends a Node walk whose glob backtracks, with a reason', async () => {
+    const plain = await mkdtemp(path.join(os.tmpdir(), 'grep-slow-'));
+    try {
+      await writeFile(
+        path.join(plain, `${'a'.repeat(120)}.ts`),
+        'LIMIT slow\n',
+      );
+      const reply = await handleGrep(
+        { pattern: 'LIMIT slow', glob: `${'*a'.repeat(25)}*b` },
+        { ...deps, defaultWorkspaceRoot: async () => plain },
+      );
+      expect(reply.text).toContain('(engine: node)');
+      expect(reply.text).toContain('the glob is too slow');
+    } finally {
+      await rm(plain, { recursive: true, force: true });
+    }
+  }, 20_000);
+
   itGit('falls back to the Node walk outside a git work tree', async () => {
     const plain = await mkdtemp(path.join(os.tmpdir(), 'grep-plain-'));
     try {
@@ -619,6 +738,47 @@ describe('grep engine helpers', () => {
     expect(buildGitPathspecs({ ...base, glob: '*.{ts,js}' }, 'src')).toEqual([
       ':(literal)src',
     ]);
+    // A bracket is a literal for rg and the Node walk: filter only.
+    expect(buildGitPathspecs({ ...base, glob: 'f[1].ts' }, 'src')).toEqual([
+      ':(literal)src',
+    ]);
+    // A slash glob in a scoped target filters, so siblings are not read.
+    expect(buildGitPathspecs({ ...base, glob: 'src/**/*.ts' }, 'src')).toEqual([
+      ':(literal)src',
+    ]);
+    expect(buildGitPathspecs({ ...base, glob: 'src/**/*.ts' }, '.')).toEqual([
+      ':(glob)src/**/*.ts',
+    ]);
+  });
+
+  it('turns off submodule recursion and excludes hidden paths for git', () => {
+    const args = buildGitGrepArgs(base, 'src');
+    expect(args).toEqual(
+      expect.arrayContaining(['-c', 'submodule.recurse=false']),
+    );
+    expect(args.slice(-2)).toEqual([
+      ':(exclude,glob)**/.*',
+      ':(exclude,glob)**/.*/**',
+    ]);
+    expect(
+      buildGitGrepArgs({ ...base, includeIgnored: true }, 'src'),
+    ).not.toContain(':(exclude,glob)**/.*');
+    expect(buildGitGrepArgs(base, '.github/workflows')).not.toContain(
+      ':(exclude,glob)**/.*',
+    );
+  });
+
+  it('refuses a pattern with a line break', async () => {
+    const reply = await handleGrep(
+      { pattern: 'alpha\nbeta' },
+      {
+        analyze: jest.fn(),
+        defaultWorkspaceRoot: async () => os.tmpdir(),
+        findRipgrep: async () => undefined,
+      },
+    );
+    expect(reply.isError).toBe(true);
+    expect(reply.text).toContain('must be one line');
   });
 
   it('infers regex mode only from regex syntax that compiles', () => {

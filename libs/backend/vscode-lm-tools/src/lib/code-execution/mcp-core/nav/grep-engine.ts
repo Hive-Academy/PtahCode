@@ -6,6 +6,7 @@
  */
 import { execFile, spawn, type ChildProcessByStdio } from 'node:child_process';
 import type { Readable } from 'node:stream';
+import { StringDecoder } from 'node:string_decoder';
 import {
   access,
   open,
@@ -170,10 +171,18 @@ export function inferRegexMode(pattern: string): boolean {
 /** Time limit of one regular-expression test on one line, in ms. */
 const REGEX_TEST_TIMEOUT_MS = 100;
 
+/** Subject of a {@link RegexTimeoutError} raised by a glob test. */
+export const GLOB_TIMEOUT_SUBJECT = 'the glob';
+
+/** True for the error text of a glob that ran past its time limit. */
+export function isGlobTimeoutMessage(message: string | undefined): boolean {
+  return message?.startsWith(`${GLOB_TIMEOUT_SUBJECT} is too slow`) ?? false;
+}
+
 /** Thrown when a user regular expression runs past its time limit. */
 export class RegexTimeoutError extends Error {
-  constructor() {
-    super('the regular expression is too slow (catastrophic backtracking)');
+  constructor(subject = 'the regular expression') {
+    super(`${subject} is too slow (catastrophic backtracking)`);
     this.name = 'RegexTimeoutError';
   }
 }
@@ -186,6 +195,7 @@ export class RegexTimeoutError extends Error {
 export function buildLineTester(
   matcher: RegExp,
   userRegex: boolean,
+  subject?: string,
 ): (line: string) => boolean {
   if (!userRegex) {
     return (line) => matcher.test(line);
@@ -199,7 +209,7 @@ export function buildLineTester(
         timeout: REGEX_TEST_TIMEOUT_MS,
       }) as boolean;
     } catch {
-      throw new RegexTimeoutError();
+      throw new RegexTimeoutError(subject);
     }
   };
 }
@@ -396,7 +406,7 @@ export function findGit(
 /** Time limit of the work-tree probe, in ms. */
 const GIT_PROBE_TIMEOUT_MS = 5_000;
 
-/** Probe results by `<git binary>\0<root>`; a root rarely changes state. */
+/** Positive probe results (and probes in flight) by `<git binary>\0<root>`. */
 const gitWorkTreeCache = new Map<string, Promise<boolean>>();
 
 /**
@@ -417,7 +427,15 @@ export function isGitWorkTree(
         { timeout: GIT_PROBE_TIMEOUT_MS, windowsHide: true },
         // A failed probe (not a
         // repository, git broken) means "not a work tree": the Node walk runs.
-        (error, stdout) => resolve(!error && stdout.trim() === 'true'),
+        (error, stdout) => {
+          const inside = !error && stdout.trim() === 'true';
+          // Only a positive result is kept: `git init` can make the root a
+          // work tree later, and the next search must see that.
+          if (!inside) {
+            gitWorkTreeCache.delete(key);
+          }
+          resolve(inside);
+        },
       );
     });
     gitWorkTreeCache.set(key, probe);
@@ -539,7 +557,20 @@ function runProcessSearch(spec: ProcessSearch): Promise<GrepEngineResult> {
     const timer = setTimeout(stop, GREP_TIMEOUT_MS);
 
     const consume = (record: string): void => {
-      const match = spec.parse(record);
+      // After a stop the result is resolved: later records are dropped.
+      if (settled) {
+        return;
+      }
+      let match: GrepMatch | undefined;
+      try {
+        match = spec.parse(record);
+      } catch (error: unknown) {
+        // degradation-audit: reported - a glob that runs past its time
+        // limit ends the search as partial, and the reason is returned.
+        stop();
+        finish(error instanceof Error ? error.message : String(error));
+        return;
+      }
       if (!match) {
         return;
       }
@@ -549,9 +580,15 @@ function runProcessSearch(spec: ProcessSearch): Promise<GrepEngineResult> {
       }
     };
 
+    // A decoder keeps a multibyte character that a chunk boundary splits.
+    const stdoutDecoder = new StringDecoder('utf8');
+    const stderrDecoder = new StringDecoder('utf8');
     child.stdout.on('data', (chunk: Buffer) => {
+      if (settled) {
+        return;
+      }
       bytes += chunk.length;
-      pending += chunk.toString('utf8');
+      pending += stdoutDecoder.write(chunk);
       const parts = pending.split('\n');
       pending = parts.pop() ?? '';
       parts.forEach(consume);
@@ -561,13 +598,15 @@ function runProcessSearch(spec: ProcessSearch): Promise<GrepEngineResult> {
     });
     child.stderr.on('data', (chunk: Buffer) => {
       if (stderr.length < 2000) {
-        stderr += chunk.toString('utf8');
+        stderr += stderrDecoder.write(chunk);
       }
     });
     child.on('error', (error) =>
       finish(`${engine} failed to start: ${error.message}`),
     );
     child.on('close', (code) => {
+      pending += stdoutDecoder.end();
+      stderr += stderrDecoder.end();
       if (pending.length > 0 && !incomplete) {
         consume(pending);
       }
@@ -619,8 +658,10 @@ export function runRipgrep(
         text: (parsed.data.lines?.text ?? '').replace(/\r?\n$/, ''),
       };
     },
-    // Exit 1 = no match; 2 = an error, though matches may still stand.
-    isErrorExit: (code) => code === 2,
+    // Exit 1 = no match; 2 = an error, though matches may still stand. A
+    // null code (killed by a signal) is an error too; an intended stop sets
+    // `incomplete` first and is not reported as one.
+    isErrorExit: (code) => code !== 0 && code !== 1,
   });
 }
 
@@ -645,7 +686,9 @@ export function buildGitPathspecs(
   // `toPosixRelative` gives `.` for the root itself.
   const atRoot = relativeTarget === '.';
   const glob = request.glob;
-  if (!glob || glob.includes('{')) {
+  // Braces are not git glob syntax, and git reads `[` as a class where
+  // the other engines read it literally: both only filter the output.
+  if (!glob || glob.includes('{') || glob.includes('[')) {
     return [`:(literal)${relativeTarget}`];
   }
   if (isNegatedGlob(glob)) {
@@ -656,7 +699,10 @@ export function buildGitPathspecs(
     ];
   }
   if (glob.includes('/')) {
-    return [`:(glob)${glob}`];
+    // A root-relative glob replaces the target only at the root; in a
+    // scoped target it only filters, so files outside the target are not
+    // read and do not use the output budget.
+    return atRoot ? [`:(glob)${glob}`] : [`:(literal)${relativeTarget}`];
   }
   if (!request.targetIsDirectory) {
     return [`:(literal)${relativeTarget}`];
@@ -682,6 +728,9 @@ export function buildGitGrepArgs(
     'grep.column=false',
     '-c',
     'grep.lineNumber=true',
+    // `--untracked` cannot run with submodule recursion (fatal exit 128).
+    '-c',
+    'submodule.recurse=false',
     'grep',
     '--no-color',
     '-n',
@@ -697,16 +746,37 @@ export function buildGitGrepArgs(
   }
   args.push(request.regex ? '-P' : '-F', '-e', request.pattern, '--');
   args.push(...buildGitPathspecs(request, relativeTarget));
+  if (!request.includeIgnored) {
+    // rg and the Node walk skip hidden files and directories by default. A
+    // named hidden target is searched, but hidden entries below it are not.
+    if (!hasHiddenSegment(relativeTarget)) {
+      args.push(':(exclude,glob)**/.*', ':(exclude,glob)**/.*/**');
+    } else if (request.targetIsDirectory) {
+      const below = `${escapeGlobPath(relativeTarget)}/**`;
+      args.push(`:(exclude,glob)${below}/.*`, `:(exclude,glob)${below}/.*/**`);
+    }
+  }
   return args;
+}
+
+/** True when a segment of a root-relative POSIX path is hidden (`.x`). */
+function hasHiddenSegment(relative: string): boolean {
+  return relative
+    .split('/')
+    .some(
+      (segment) =>
+        segment.startsWith('.') && segment !== '.' && segment !== '..',
+    );
 }
 
 /**
  * Run `git grep` in a git work tree (tracked and untracked files). Ignored
  * files are left out by git's standard excludes, which read every nested
- * `.gitignore`, `.git/info/exclude` and the global excludes file; unlike the
- * Node walk there is no fixed hidden-dir or NODE_SKIPPED_DIRS skip list,
- * because git's ignore rules already cover what a repository wants skipped.
- * `.git` itself is never searched. A PCRE-less git fails a `-P` search with
+ * `.gitignore`, `.git/info/exclude` and the global excludes file. Hidden
+ * files and directories are excluded by pathspec, as rg and the Node walk
+ * skip them, unless the target itself is hidden. Unlike the Node walk there
+ * is no NODE_SKIPPED_DIRS list, because git's ignore rules already cover
+ * what a repository wants skipped. `.git` itself is never searched. A PCRE-less git fails a `-P` search with
  * no matches, so the handler falls through to the Node walk.
  */
 export function runGitGrep(
@@ -718,10 +788,29 @@ export function runGitGrep(
     request.targetAbsolute,
   );
   // The pathspecs narrow the search; this filter makes the result exact
-  // (brace globs, a slash glob outside a scoped target), with the same
-  // glob reading as the Node walk.
-  const globMatcher = request.glob ? globToRegExp(request.glob) : undefined;
+  // (brace and bracket globs, a slash glob in a scoped target), with the
+  // same glob reading as the Node walk. A glob runs under the same time
+  // limit as a user regex: `*a*a*a…b` backtracks on a long path. git
+  // prints the lines of one file together, so one test serves them all.
+  const globTester = request.glob
+    ? buildLineTester(globToRegExp(request.glob), true, GLOB_TIMEOUT_SUBJECT)
+    : undefined;
   const globNegated = request.glob ? isNegatedGlob(request.glob) : false;
+  let lastFile: string | undefined;
+  let lastExcluded = false;
+  const globExcludes = (file: string): boolean => {
+    if (!globTester) {
+      return false;
+    }
+    if (file !== lastFile) {
+      lastFile = file;
+      lastExcluded = globTester(file) === globNegated;
+    }
+    return lastExcluded;
+  };
+  // A path that holds LF arrives split over two records: the part before
+  // the LF has no NUL, so it is kept and put in front of the next record.
+  let carry = '';
   const inTarget = (file: string): boolean =>
     relativeTarget === '.' ||
     file === relativeTarget ||
@@ -733,6 +822,14 @@ export function runGitGrep(
     cwd: request.rootReal,
     parse: (record) => {
       // `--null -n` record: path NUL line NUL text.
+      if (carry !== '') {
+        record = `${carry}\n${record}`;
+        carry = '';
+      }
+      if (!record.includes('\0')) {
+        carry = record.slice(0, 4096);
+        return undefined;
+      }
       const fileEnd = record.indexOf('\0');
       const lineEnd = fileEnd < 0 ? -1 : record.indexOf('\0', fileEnd + 1);
       if (lineEnd < 0) {
@@ -740,11 +837,7 @@ export function runGitGrep(
       }
       const file = record.slice(0, fileEnd).split(path.sep).join('/');
       const line = Number(record.slice(fileEnd + 1, lineEnd));
-      if (
-        !Number.isInteger(line) ||
-        !inTarget(file) ||
-        (globMatcher && globMatcher.test(file) === globNegated)
-      ) {
+      if (!Number.isInteger(line) || !inTarget(file) || globExcludes(file)) {
         return undefined;
       }
       return {
@@ -771,7 +864,11 @@ export async function runNodeSearch(
   request: GrepRequest,
 ): Promise<GrepEngineResult> {
   const matchLine = buildLineTester(buildMatcher(request), request.regex);
-  const globMatcher = request.glob ? globToRegExp(request.glob) : undefined;
+  // A glob runs under the same time limit as a user regex: `*a*a*a…b`
+  // backtracks on a long path.
+  const globMatcher = request.glob
+    ? buildLineTester(globToRegExp(request.glob), true, GLOB_TIMEOUT_SUBJECT)
+    : undefined;
   const globNegated = request.glob ? isNegatedGlob(request.glob) : false;
   const deadline = Date.now() + GREP_TIMEOUT_MS;
   const matches: GrepMatch[] = [];
@@ -780,13 +877,14 @@ export async function runNodeSearch(
   let incomplete = false;
   let skippedLargeFiles = 0;
   let skippedLongLines = 0;
+  let unreadable = 0;
   const isIgnored = request.includeIgnored
     ? () => false
     : await loadRootIgnore(request.rootReal);
 
   const searchFile = async (absolute: string): Promise<void> => {
     const relative = toPosixRelative(request.rootReal, absolute);
-    if (globMatcher && globMatcher.test(relative) === globNegated) {
+    if (globMatcher && globMatcher(relative) === globNegated) {
       return;
     }
     visited++;
@@ -836,8 +934,9 @@ export async function runNodeSearch(
       }
       entries = await readdir(dir, { withFileTypes: true });
     } catch {
-      // degradation-audit: optional-capability - an unreadable directory is
-      // skipped, like rg does; the search goes on.
+      // degradation-audit: reported - an unreadable directory is skipped,
+      // like rg does, and counted in the `not searched:` note.
+      unreadable++;
       return;
     }
     entries.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
@@ -873,7 +972,8 @@ export async function runNodeSearch(
           if (error instanceof RegexTimeoutError) {
             throw error;
           }
-          // An unreadable file is skipped, like rg does.
+          // An unreadable file is skipped, like rg does, and counted.
+          unreadable++;
         }
       }
     }
@@ -901,6 +1001,7 @@ export async function runNodeSearch(
     skippedLongLines > 0
       ? `${skippedLongLines} line(s) over ${GREP_MAX_SEARCHED_LINE_CHARS} chars (regex only)`
       : '',
+    unreadable > 0 ? `${unreadable} unreadable file(s) or folder(s)` : '',
   ].filter((note) => note !== '');
   return {
     engine: 'node',
