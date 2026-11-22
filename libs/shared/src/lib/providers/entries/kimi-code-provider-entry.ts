@@ -138,5 +138,6 @@ export const KIMI_CODE_PROVIDER_ENTRY: AnthropicProvider = {
   maskedKeyDisplay: '••••••••••••',
   pricingModel: 'subscription',
   defaultTiers: KIMI_CODE_DEFAULT_TIERS,
+  liveModelCapabilities: KIMI_CODE_MODEL_CAPABILITIES,
   staticModels: KIMI_CODE_STATIC_MODELS,
 };

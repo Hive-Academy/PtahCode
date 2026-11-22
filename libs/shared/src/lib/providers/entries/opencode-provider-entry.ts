@@ -30,10 +30,20 @@ import type {
   AnthropicProvider,
   ProviderStaticModel,
 } from '../provider-registry';
-import {
-  OPENCODE_MODEL_ROUTES,
-  type OpenCodeProviderId,
-} from './opencode-model-routes';
+import { OPENCODE_MODEL_ROUTES } from './opencode-model-routes';
+
+/** The two OpenCode subscriptions. */
+export type OpenCodeProviderId = 'opencode-zen' | 'opencode-go';
+
+/** The upstream APIs OpenCode routes a model to. */
+export type OpenCodeProtocol = 'messages' | 'chat/completions' | 'responses';
+
+/**
+ * Type guard for OpenCodeProviderId.
+ */
+export function isOpenCodeProviderId(id: string): id is OpenCodeProviderId {
+  return id === 'opencode-zen' || id === 'opencode-go';
+}
 
 /**
  * Default model tier mappings for OpenCode Zen.

@@ -24,6 +24,10 @@ import type {
 } from '../provider-account.types';
 import type { CapabilityPolicyStatus } from '../capability-toggle.types';
 import type { CapabilityScope } from '../mcp-directory.types';
+import type {
+  ModelListFailureReason,
+  ProviderModelListSource,
+} from './rpc-providers.types';
 
 export type AgentSendMessageParams = AgentMessageRequest;
 export type AgentSendMessageResult = AgentMessageOutcome;
@@ -505,7 +509,11 @@ export interface AgentSetClaudeBuiltinResult {
 export interface CliModelOption {
   readonly id: string;
   readonly name: string;
-  /** When true, this model came from a hardcoded fallback list (API was unreachable). */
+  /**
+   * Set by classification when no account source confirmed the CLI's id.
+   * A classification marker only; it never means the id came from a
+   * hardcoded list.
+   */
   readonly isFallback?: boolean;
 }
 
@@ -832,7 +840,12 @@ export interface PtahCliListModelsResult {
     description?: string;
     contextLength?: number;
   }>;
-  isStatic: boolean;
+  /** Where `models` came from. */
+  source?: ProviderModelListSource;
+  /** Set when `source` is `'persisted'` or `'unavailable'`. */
+  failureReason?: ModelListFailureReason;
+  /** Whether the model list is static. To be removed. */
+  isStatic?: boolean;
   error?: string;
 }
 export type { AgentPermissionDecision };

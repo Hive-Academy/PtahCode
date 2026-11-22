@@ -17,8 +17,12 @@
  * @see TASK_2026_526
  */
 
-export type OpenCodeProviderId = 'opencode-zen' | 'opencode-go';
-export type OpenCodeProtocol = 'messages' | 'chat/completions' | 'responses';
+import type {
+  OpenCodeProtocol,
+  OpenCodeProviderId,
+} from './opencode-provider-entry';
+
+export type { OpenCodeProtocol, OpenCodeProviderId };
 export type OpenCodeModelRoutes = Readonly<
   Record<OpenCodeProviderId, Readonly<Record<string, OpenCodeProtocol>>>
 >;
@@ -171,13 +175,6 @@ export const OPENCODE_MODEL_ROUTES: OpenCodeModelRoutes = Object.freeze({
 });
 
 /**
- * Type guard for OpenCodeProviderId.
- */
-export function isOpenCodeProviderId(id: string): id is OpenCodeProviderId {
-  return id === 'opencode-zen' || id === 'opencode-go';
-}
-
-/**
  * Resolve the upstream protocol for a model ID under a specific OpenCode subscription.
  *
  * Strict own-property lookup: `constructor`, `toString`, `__proto__`, or unknown IDs
@@ -188,7 +185,9 @@ export function getOpenCodeModelProtocol(
   providerId: OpenCodeProviderId,
   modelId: string,
 ): OpenCodeProtocol | undefined {
-  if (!isOpenCodeProviderId(providerId)) {
+  if (
+    !Object.prototype.hasOwnProperty.call(OPENCODE_MODEL_ROUTES, providerId)
+  ) {
     return undefined;
   }
   const routes = OPENCODE_MODEL_ROUTES[providerId];
@@ -197,3 +196,8 @@ export function getOpenCodeModelProtocol(
   }
   return undefined;
 }
+
+// Kept for existing importers of this file. Deliberately the last statement:
+// opencode-provider-entry reads OPENCODE_MODEL_ROUTES while it loads, so under
+// CommonJS this file must define the table before it requires the entry.
+export { isOpenCodeProviderId } from './opencode-provider-entry';

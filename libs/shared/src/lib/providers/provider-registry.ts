@@ -109,6 +109,22 @@ export interface AnthropicProvider {
   maskedKeyDisplay: string;
   /** URL for /v1/models endpoint (if provider supports dynamic listing) */
   modelsEndpoint?: string;
+  /**
+   * How the `modelsEndpoint` request carries the key.
+   *
+   * - absent or `'bearer'`: `Authorization: Bearer <key>`.
+   * - `'anthropic'`: `x-api-key: <key>` plus `anthropic-version`.
+   *
+   * Built-in entries only; `customEntryToAnthropicProvider` never sets it.
+   */
+  modelsAuthScheme?: 'bearer' | 'anthropic';
+  /**
+   * Capabilities every live model of this provider declares to the SDK
+   * (`ANTHROPIC_DEFAULT_<TIER>_MODEL_SUPPORTED_CAPABILITIES`), for vendors
+   * whose model rows do not report them. An SDK allowlist only: never a model
+   * list and never a tool-use flag. Built-in entries only.
+   */
+  liveModelCapabilities?: readonly ModelCapability[];
   /** Hardcoded models for providers without a dynamic API */
   staticModels?: ProviderStaticModel[];
   /**
@@ -860,6 +876,18 @@ export function getPtahCliLaneProvider(id: string): AnthropicProvider | undefine
   return id === ANTHROPIC_API_LANE_ENTRY.id
     ? ANTHROPIC_API_LANE_ENTRY
     : getAnthropicProvider(id);
+}
+
+/**
+ * Capabilities a provider declares for every live model, or undefined when
+ * the provider declares none. Resolves CLI lane entries too.
+ *
+ * @param providerId - Provider ID
+ */
+export function getProviderLiveModelCapabilities(
+  providerId: string,
+): readonly ModelCapability[] | undefined {
+  return getPtahCliLaneProvider(providerId)?.liveModelCapabilities;
 }
 
 /**
