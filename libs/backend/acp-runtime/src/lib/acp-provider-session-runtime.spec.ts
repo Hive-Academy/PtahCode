@@ -31,6 +31,7 @@ import { acpInstructionsPrefix } from './acp-session-runtime';
 import type { AcpVendorProfile } from './acp-vendor-profile';
 import {
   ANTIGRAVITY_ACP_PTAH_MCP_NAME,
+  ANTIGRAVITY_PLAN_EXIT_TITLE,
   antigravityAcpProfile,
 } from './profiles/antigravity-acp-profile';
 
@@ -114,6 +115,8 @@ function harness(
   const agent = createFakeAcpAgent({
     sessionId: SESSION_ID,
     agentCapabilities: AGY_CAPABILITIES,
+    // agy advertises its modes on every session reply; a Manual chat needs `plan`.
+    modes: AGY_SESSION_REPLY.modes,
     ...agentOptions,
   });
   live.push(agent);
@@ -740,5 +743,200 @@ describe('createAcpProviderSessionRuntime: process lifetime', () => {
     await expect(session.prompt({ text: 'after close' })).rejects.toMatchObject({
       code: 'cancelled',
     });
+  });
+});
+
+describe('createAcpProviderSessionRuntime: Manual chat plan exit covers one turn (PR #1462 review)', () => {
+  /** agy's request to leave plan mode, as a Manual chat sees it (`kind` is optional in ACP). */
+  const planExit = (sessionId: unknown, withKind: boolean) => ({
+    sessionId,
+    toolCall: {
+      toolCallId: 'exit-1',
+      title: 'Leave plan',
+      ...(withKind ? { kind: 'switch_mode' } : {}),
+    },
+    options: [
+      { optionId: 'allow', kind: 'allow_once', name: 'Allow' },
+      { optionId: 'reject', kind: 'reject_once', name: 'Reject' },
+    ],
+  });
+
+  /**
+   * Turn 1 asks to leave plan mode (the sink accepts) and, when `report` is
+   * set, reports the switch to `default` as agy does; later turns just end.
+   */
+  function scriptPlanExit(report: boolean, withKind = true) {
+    return (agent: FakeAcpAgent): void => {
+      agent.handle('session/new', () => ({ result: AGY_SESSION_REPLY }));
+      let turns = 0;
+      agent.handle('session/prompt', async (prompt, fake) => {
+        if (++turns === 1) {
+          await fake.request(
+            'session/request_permission',
+            planExit(prompt['sessionId'], withKind),
+          );
+          if (report) {
+            await fake.sessionUpdate(String(prompt['sessionId']), {
+              sessionUpdate: 'current_mode_update',
+              currentModeId: 'default',
+            });
+          }
+        }
+        // Usage on the reply: no usage-drain wait per turn.
+        return {
+          result: { stopReason: 'end_turn', _meta: { usage: { inputTokens: 1, outputTokens: 1 } } },
+        };
+      });
+    };
+  }
+
+  /** The `session/set_mode` and `session/prompt` requests the agent received, in order. */
+  const modeAndPrompts = (agent: FakeAcpAgent): string[] =>
+    agent.received
+      .filter((m) => m.method === 'session/set_mode' || m.method === 'session/prompt')
+      .map((m) =>
+        m.method === 'session/set_mode' ? `set_mode:${String(params(m)['modeId'])}` : 'prompt',
+      );
+
+  const accepting = (): ProviderApprovalSink => ({
+    request: jest.fn(async () => 'accept' as const),
+  });
+
+  it.each([
+    ['agy reports the switch (current_mode_update)', true, true],
+    ['agy does not report the switch', false, true],
+    ['the approval has no kind and agy does not report the switch', false, false],
+  ])(
+    'turn 2 starts in plan mode after a plan exit approved in turn 1: %s',
+    async (_label, report, withKind) => {
+      const { agent, open } = harness({}, scriptPlanExit(report, withKind));
+      const sink = accepting();
+      const session = await open({ approvals: sink });
+
+      const first = await untilTerminal(session, () => session.prompt({ text: 'plan it' }));
+      expect(first.at(-1)).toMatchObject({ type: 'terminal', status: 'completed' });
+      if (withKind) {
+        // The card says plainly what approving allows.
+        expect(sink.request).toHaveBeenCalledWith(
+          expect.objectContaining({ kind: 'switch_mode', title: ANTIGRAVITY_PLAN_EXIT_TITLE }),
+          expect.anything(),
+        );
+      }
+      const second = await untilTerminal(session, () => session.prompt({ text: 'next' }));
+      expect(second.at(-1)).toMatchObject({ type: 'terminal', status: 'completed' });
+
+      // Open sets plan; every prompt re-enters plan first, whatever happened before.
+      expect(modeAndPrompts(agent)).toEqual([
+        'set_mode:plan',
+        'set_mode:plan',
+        'prompt',
+        'set_mode:plan',
+        'prompt',
+      ]);
+      await session.close();
+    },
+  );
+
+  it('sets plan mode before every Manual prompt even when no approval happened', async () => {
+    const { agent, open } = harness({}, (fake) => {
+      fake.handle('session/new', () => ({ result: AGY_SESSION_REPLY }));
+      fake.handle('session/prompt', () => ({
+        result: { stopReason: 'end_turn', _meta: { usage: { inputTokens: 1, outputTokens: 1 } } },
+      }));
+    });
+    const session = await open({ approvals: accepting() });
+    for (const text of ['one', 'two', 'three']) {
+      await untilTerminal(session, () => session.prompt({ text }));
+    }
+    expect(modeAndPrompts(agent)).toEqual([
+      'set_mode:plan',
+      'set_mode:plan',
+      'prompt',
+      'set_mode:plan',
+      'prompt',
+      'set_mode:plan',
+      'prompt',
+    ]);
+    await session.close();
+  });
+
+  it('does not send the prompt when agy refuses to go back to plan mode', async () => {
+    const { agent, open } = harness({}, scriptPlanExit(true));
+    const session = await open({ approvals: accepting() });
+    await untilTerminal(session, () => session.prompt({ text: 'plan it' }));
+    agent.handle('session/set_mode', () => ({
+      error: { code: -32603, message: 'mode switch failed' },
+    }));
+
+    const events = await untilTerminal(session, () => session.prompt({ text: 'next' }));
+    expect(sent(agent, 'session/prompt')).toHaveLength(1);
+    const error = events.find((event) => event.type === 'error');
+    expect(error).toMatchObject({ error: { code: 'request-failed' } });
+    expect(error?.type === 'error' ? error.error.message : '').toMatch(
+      /could not switch back to the "plan" mode.*not sent/,
+    );
+    expect(events.at(-1)).toMatchObject({
+      type: 'terminal',
+      status: 'failed',
+      disposition: 'reusable',
+    });
+
+    // The session stays usable: once the switch works, the next prompt goes out in plan.
+    agent.handle('session/set_mode', () => ({ result: {} }));
+    const retry = await untilTerminal(session, () => session.prompt({ text: 'again' }));
+    expect(retry.at(-1)).toMatchObject({ type: 'terminal', status: 'completed' });
+    expect(modeAndPrompts(agent).slice(-2)).toEqual(['set_mode:plan', 'prompt']);
+    await session.close();
+  });
+
+  it.each(['auto-edit', 'yolo', 'plan'] as const)(
+    'leaves a %s chat in its mode across turns',
+    async (permission) => {
+      const { agent, open } = harness({}, scriptPlanExit(true));
+      const session = await open({
+        approvals: accepting(),
+        policy: { permission, cwd: process.cwd() },
+      });
+      await untilTerminal(session, () => session.prompt({ text: 'one' }));
+      await untilTerminal(session, () => session.prompt({ text: 'two' }));
+      const steps = modeAndPrompts(agent);
+      expect(steps.filter((step) => step !== 'prompt')).toHaveLength(1);
+      expect(steps.slice(-2)).toEqual(['prompt', 'prompt']);
+      await session.close();
+    },
+  );
+
+  it('follows a permission change: Manual guards from then on, another permission stops it', async () => {
+    const { agent, open } = harness({}, scriptPlanExit(true));
+    const session = await open({
+      approvals: accepting(),
+      policy: { permission: 'auto-edit', cwd: process.cwd() },
+    });
+    await session.setPermission('ask');
+    await untilTerminal(session, () => session.prompt({ text: 'plan it' }));
+    await untilTerminal(session, () => session.prompt({ text: 'next' }));
+    await session.setPermission('auto-edit');
+    await untilTerminal(session, () => session.prompt({ text: 'edit' }));
+    expect(modeAndPrompts(agent)).toEqual([
+      'set_mode:accept-edits',
+      'set_mode:plan',
+      'set_mode:plan',
+      'prompt',
+      'set_mode:plan',
+      'prompt',
+      'set_mode:accept-edits',
+      'prompt',
+    ]);
+    await session.close();
+  });
+
+  it('leaves a CLI lane consumer in its mode across turns', async () => {
+    const { agent, open } = harness({}, scriptPlanExit(true));
+    const session = await open({ approvals: accepting(), consumer: 'lane' });
+    await untilTerminal(session, () => session.prompt({ text: 'one' }));
+    await untilTerminal(session, () => session.prompt({ text: 'two' }));
+    // A lane's ask is agy's `default`, set once at open.
+    expect(modeAndPrompts(agent)).toEqual(['set_mode:default', 'prompt', 'prompt']);
+    await session.close();
   });
 });

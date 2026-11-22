@@ -235,6 +235,26 @@ export interface AcpVendorProfile {
    */
   modeFor?(options: AcpSessionOptions): string | undefined;
   /**
+   * The mode every prompt of a session with these options must start in, or
+   * `undefined` for none. Before each `session/prompt` the runtime sets it
+   * (`session/set_mode`, else a `mode` config option), whatever mode it last
+   * saw, since an agent can switch modes without reporting it. When that
+   * fails the prompt is not sent and the turn fails. Use it when an
+   * approval the agent asks for (e.g. leaving a read-only mode) must cover
+   * only the turn it was given in.
+   */
+  turnStartMode?(options: AcpSessionOptions): string | undefined;
+  /**
+   * A user-facing title for a `session/request_permission` shown to the
+   * approval sink, replacing the agent's tool title, e.g. to say plainly
+   * what approving a mode switch allows. Return `undefined` to keep the
+   * agent's title. The request is untrusted: read it defensively, never throw.
+   */
+  approvalTitle?(
+    request: RequestPermissionRequest,
+    options: AcpSessionOptions,
+  ): string | undefined;
+  /**
    * Config to apply after session setup and before the first prompt. Entries
    * whose `configId` the session did not advertise are skipped with an `info`.
    */

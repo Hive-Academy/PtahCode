@@ -310,6 +310,8 @@ async function openAcpProviderSession(
       requireOpen('setPermission');
       const mode = profile.modeFor?.({ ...options, permission: next });
       if (mode && !(await acp.setMode(mode))) throw refused(`${next} permission`);
+      // The per-turn start mode follows the permission (Manual re-enters plan).
+      acp.trackPermission(next);
       if (next !== permission) {
         logger.info('[AcpProviderSession] permission changed', {
           vendor: profile.vendor,

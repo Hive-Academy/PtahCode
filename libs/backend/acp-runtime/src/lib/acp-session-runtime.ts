@@ -49,6 +49,7 @@ import type {
   RequestPermissionResponse,
 } from '@agentclientprotocol/sdk';
 import type { IProcessSpawner } from '@ptah-extension/platform-core';
+import type { LanePermissionMode } from '@ptah-extension/shared';
 import type {
   ProviderApprovalSink,
   ProviderSessionErrorCode,
@@ -233,6 +234,12 @@ export interface AcpSession {
   supportsInterrupt(): boolean;
   /** Switch the session mode (`session/set_mode`, else a `mode` config option). */
   setMode(mode: string): Promise<boolean>;
+  /**
+   * Record the permission the session now runs under (the chat changed it).
+   * It selects the profile's per-turn start mode and approval titles; the
+   * mode itself is switched with {@link setMode}.
+   */
+  trackPermission(permission: LanePermissionMode | undefined): void;
   /** Switch the model (a `model` config option; ACP has no `session/set_model`). */
   setModel(model: string): Promise<boolean>;
   /**
@@ -381,6 +388,8 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
   /** The last model and mode the agent acknowledged after setup; a respawn reapplies them. */
   let acknowledgedModel: string | undefined;
   let acknowledgedMode: string | undefined;
+  /** The permission the session runs under; the chat may change it ({@link AcpSession.trackPermission}). */
+  let livePermission = options.permission;
   let handshakePhase: AcpHandshakePhase = 'initialize';
   /** Set while {@link withHandshakeTimeout} runs; re-arms its timer for a phase. */
   let enterHandshakePhase: ((phase: AcpHandshakePhase) => void) | undefined;
@@ -491,10 +500,12 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
       }
       return decision.response;
     }
-    const approval = toProviderApprovalRequest(
+    const neutral = toProviderApprovalRequest(
       request,
       `${sessionId ?? budgetRunId}:${runtimeInstance}:approval:${++approvalSequence}`,
     );
+    const title = profile.approvalTitle?.(request, { ...options, permission: livePermission });
+    const approval = title ? { ...neutral, title } : neutral;
     emit({ type: 'approvalRequested', request: approval });
     const asked = new AbortController();
     const stopAsking = (): void => asked.abort();
@@ -1023,6 +1034,29 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
     id: string,
     mode: string,
   ): Promise<boolean> => {
+    const outcome = await switchMode(conn, id, mode);
+    if (outcome.ok) return true;
+    emitInfo(
+      outcome.unoffered
+        ? `${name} does not offer the "${mode}" mode, so it was not applied`
+        : `${outcome.reason}; continuing without the "${mode}" mode`,
+    );
+    return false;
+  };
+
+  /**
+   * Switch to `mode` as {@link applyMode} does, without the hint: the caller
+   * decides what a refusal means. An ACP error answer is a refusal; any other
+   * failure (e.g. the connection closed) propagates.
+   */
+  const switchMode = async (
+    conn: AcpConnectionApi,
+    id: string,
+    mode: string,
+  ): Promise<
+    | { readonly ok: true }
+    | { readonly ok: false; readonly unoffered: boolean; readonly reason: string }
+  > => {
     try {
       if (advertisedModes.includes(mode)) {
         await call('session/set_mode', () =>
@@ -1032,17 +1066,19 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
         const option = optionFor('mode');
         const values = option ? advertisedValuesOf(option) : [];
         if (!option || typeof option['id'] !== 'string' || !values.includes(mode)) {
-          emitInfo(`${name} does not offer the "${mode}" mode, so it was not applied`);
-          return false;
+          return {
+            ok: false,
+            unoffered: true,
+            reason: `${name} does not offer the "${mode}" mode`,
+          };
         }
         await writeConfig(conn, id, option['id'], mode, values);
       }
       emit({ type: 'modeChanged', mode });
-      return true;
+      return { ok: true };
     } catch (error: unknown) {
       if (!(error instanceof AcpTurnFailure)) throw error;
-      emitInfo(`${error.message}; continuing without the "${mode}" mode`);
-      return false;
+      return { ok: false, unoffered: false, reason: error.message };
     }
   };
 
@@ -1442,6 +1478,27 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
         }, limit);
         watchdog.unref?.();
       }
+      // An approval the agent got in an earlier turn (e.g. leaving plan mode)
+      // must not carry into this one: the turn starts in the profile's mode,
+      // or is not sent at all. Set on every prompt, never from a cached mode:
+      // the agent can change mode without telling the client (an approval
+      // with no `kind`, a standing grant), and one `set_mode` per turn is cheap.
+      const startMode = profile.turnStartMode?.({ ...options, permission: livePermission });
+      if (startMode) {
+        const switched = await switchMode(conn, id, startMode);
+        if (dropStale(target, 'session/set_mode reply')) return 1;
+        // Interrupted, timed out or aborted while switching: nothing is sent.
+        if (timedOut || turnCancelledByPtah || signal.aborted) return 1;
+        if (!switched.ok) {
+          emitError(
+            `${name} could not switch back to the "${startMode}" mode (${switched.reason}), ` +
+              'so the message was not sent: without it the agent could change files or ' +
+              'run commands without asking. Try again, or pick another permission.',
+            'request-failed',
+          );
+          return 1;
+        }
+      }
       const content: ContentBlock[] =
         typeof input === 'string' ? [{ type: 'text', text: input }] : [...input];
       const owed = pendingInstructions;
@@ -1716,6 +1773,9 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
       !signal.aborted,
     getTurnId: () => currentTurnId,
     setMode: setModeOnSession,
+    trackPermission: (permission) => {
+      livePermission = permission;
+    },
     setModel,
     setEffort,
     getAgentCapabilities: () => gen.init?.agentCapabilities ?? undefined,

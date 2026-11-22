@@ -24,6 +24,7 @@ import type { RequestPermissionRequest } from '@agentclientprotocol/sdk';
 import {
   ANTIGRAVITY_ACP_PTAH_MCP_NAME,
   ANTIGRAVITY_CHAT_ASK_MODE,
+  ANTIGRAVITY_PLAN_EXIT_TITLE,
   antigravityAcpProfile,
   antigravityGrantsWithoutAutoApprove,
   antigravityInstructionsMeta,
@@ -327,6 +328,54 @@ describe('antigravityAcpProfile — MCP, modes, config', () => {
       'docs',
     ]);
     expect(JSON.stringify(servers)).not.toContain('evil.example');
+  });
+
+  it('starts every Manual chat turn in plan mode, and nothing else (review: per-turn plan exit)', () => {
+    expect(
+      antigravityAcpProfile.turnStartMode?.({ ...base, consumer: 'chat', permission: 'ask' }),
+    ).toBe(ANTIGRAVITY_CHAT_ASK_MODE);
+    for (const permission of [undefined, 'plan', 'auto-edit', 'yolo'] as const) {
+      expect(
+        antigravityAcpProfile.turnStartMode?.({ ...base, consumer: 'chat', permission }),
+      ).toBeUndefined();
+    }
+    // A CLI lane keeps its mode for the whole run.
+    for (const consumer of ['lane', undefined] as const) {
+      expect(
+        antigravityAcpProfile.turnStartMode?.({ ...base, consumer, permission: 'ask' }),
+      ).toBeUndefined();
+    }
+  });
+
+  it('titles the plan-exit approval of a Manual chat plainly', () => {
+    const switchMode = {
+      sessionId: 's',
+      toolCall: { toolCallId: 'c', kind: 'switch_mode', title: 'Leave plan' },
+      options: [],
+    } as unknown as RequestPermissionRequest;
+    const edit = {
+      sessionId: 's',
+      toolCall: { toolCallId: 'c', kind: 'edit', title: 'Edit a.ts' },
+      options: [],
+    } as unknown as RequestPermissionRequest;
+    const manual = { ...base, consumer: 'chat' as const, permission: 'ask' as const };
+    expect(antigravityAcpProfile.approvalTitle?.(switchMode, manual)).toBe(
+      ANTIGRAVITY_PLAN_EXIT_TITLE,
+    );
+    expect(ANTIGRAVITY_PLAN_EXIT_TITLE).toMatch(/this turn without asking for each one/);
+    expect(antigravityAcpProfile.approvalTitle?.(edit, manual)).toBeUndefined();
+    expect(
+      antigravityAcpProfile.approvalTitle?.(switchMode, { ...manual, consumer: 'lane' }),
+    ).toBeUndefined();
+    expect(
+      antigravityAcpProfile.approvalTitle?.(switchMode, { ...manual, permission: 'auto-edit' }),
+    ).toBeUndefined();
+    expect(
+      antigravityAcpProfile.approvalTitle?.(
+        { toolCall: null } as unknown as RequestPermissionRequest,
+        manual,
+      ),
+    ).toBeUndefined();
   });
 
   it('sets no mode without a permission', () => {

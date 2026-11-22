@@ -23,8 +23,8 @@
  * - No `authenticate` on the shared profile (PF-4: `session/new` succeeds
  *   without it); a signed-out profile gets the sign-in hint.
  * - Modes (`session/new.modes`): plan -> `plan`, auto-edit -> `accept-edits`,
- *   ask -> `default` (lane) or `plan` (chat, see {@link ANTIGRAVITY_CHAT_ASK_MODE}),
- *   yolo -> `auto`.
+ *   ask -> `default` (lane) or `plan` (chat, see {@link ANTIGRAVITY_CHAT_ASK_MODE};
+ *   re-set before every chat prompt), yolo -> `auto`.
  * - Model: `session/set_config_option` `model` takes the full `agy models` id
  *   (`claude-sonnet-5-5-medium`, the effort in the id) and also the base
  *   (`claude-sonnet-5-5`). The effort travels as the `thought_level` option
@@ -90,12 +90,28 @@ const MODES: Readonly<Record<string, string>> = {
  *
  * So a Manual chat runs in `plan`, agy's read-only mode: it researches and
  * plans, and changes nothing unless the user approves its request to leave
- * plan mode (a `switch_mode` permission request, shown as an approval card).
- * Trade-off: after that approval agy runs in `default` and its in-workspace
- * edits are no longer asked one by one; Auto-edit and yolo keep their modes.
+ * plan mode (a `switch_mode` permission request, shown as an approval card
+ * titled {@link ANTIGRAVITY_PLAN_EXIT_TITLE}). After that approval agy runs in
+ * `default` and its in-workspace edits are no longer asked one by one, so the
+ * approval covers only the turn it was given in: every prompt starts in
+ * `plan` again ({@link AcpVendorProfile.turnStartMode}), and a prompt is not
+ * sent when agy refuses the switch back. Auto-edit and yolo keep their modes.
  * A lane keeps `default` (headless; it has no user to ask).
  */
 export const ANTIGRAVITY_CHAT_ASK_MODE = 'plan';
+
+/** The approval card title of agy's request to leave plan mode in a Manual chat. */
+export const ANTIGRAVITY_PLAN_EXIT_TITLE =
+  'Leave plan mode and carry out the plan. Approving lets Antigravity edit files ' +
+  'and run commands for the rest of this turn without asking for each one. ' +
+  'Your next message starts in plan mode again.';
+
+/** Whether these options are a Manual chat, which runs agy in plan mode. */
+function isManualChat(
+  options: Pick<AcpSessionOptions, 'permission' | 'consumer'>,
+): boolean {
+  return options.consumer === 'chat' && options.permission === 'ask';
+}
 
 /**
  * The ACP server name of the Ptah MCP attachment. agy also loads the shared
@@ -290,10 +306,21 @@ export const antigravityAcpProfile: AcpVendorProfile = {
 
   modeFor(options: AcpSessionOptions): string | undefined {
     if (!options.permission) return undefined;
-    if (options.consumer === 'chat' && options.permission === 'ask') {
-      return ANTIGRAVITY_CHAT_ASK_MODE;
-    }
+    if (isManualChat(options)) return ANTIGRAVITY_CHAT_ASK_MODE;
     return MODES[options.permission];
+  },
+
+  turnStartMode(options: AcpSessionOptions): string | undefined {
+    return isManualChat(options) ? ANTIGRAVITY_CHAT_ASK_MODE : undefined;
+  },
+
+  approvalTitle(
+    request: RequestPermissionRequest,
+    options: AcpSessionOptions,
+  ): string | undefined {
+    if (!isManualChat(options)) return undefined;
+    const kind = recordField(recordField(request, 'toolCall'), 'kind');
+    return kind === 'switch_mode' ? ANTIGRAVITY_PLAN_EXIT_TITLE : undefined;
   },
 
   sessionConfig(options: AcpSessionOptions): readonly AcpSessionConfigEntry[] {
