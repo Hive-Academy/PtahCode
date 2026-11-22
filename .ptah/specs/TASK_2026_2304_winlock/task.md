@@ -1,11 +1,11 @@
 ---
 id: TASK_2026_2304_winlock
-status: backlog
+status: in_review
 type: BUGFIX
 title: platform-core session-driver-lock specs fail on Windows (handle cannot be sent)
 depends_on: []
 created: '2026-11-22T12:00:00.000Z'
-updated: '2026-11-22T12:00:00.000Z'
+updated: '2026-11-22T17:00:00.000Z'
 description: >-
   On main 7d900a6b3 on a Windows dev machine, two specs in
   libs/backend/platform-core/src/session-driver-lock fail with
