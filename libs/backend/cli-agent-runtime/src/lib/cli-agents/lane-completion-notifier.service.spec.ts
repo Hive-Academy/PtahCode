@@ -403,7 +403,7 @@ describe('LaneCompletionNotifier.signal', () => {
         sessionId: 'native-thread',
         producer: 'cli-lane',
         providerId: 'codex',
-        workspaceKey: 'c:/workspace/root',
+        workspaceKey: 'C:/Workspace/Root',
         host: 'cli',
       }),
     );

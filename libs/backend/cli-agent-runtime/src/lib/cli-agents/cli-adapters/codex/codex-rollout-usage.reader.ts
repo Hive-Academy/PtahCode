@@ -26,7 +26,7 @@ import { isAbsolute } from 'node:path';
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
 import { codexHomeDir } from '@ptah-extension/harness-sync';
-import { normalizeWorkspaceRoot, type AgentUsageDatum } from '@ptah-extension/shared';
+import type { AgentUsageDatum } from '@ptah-extension/shared';
 import type { IFileSystemProvider, SessionUsageContribution } from '@ptah-extension/platform-core';
 import type { UsageCollector, UsageSourceCursor } from '@ptah-extension/agent-sdk';
 
@@ -170,7 +170,7 @@ export class CodexRolloutUsageCollector implements UsageCollector {
                   sessionId: threadId, producer: 'transcript-replay', runId: threadId,
                   nativeThreadId: threadId, turnId: null, eventKey,
                   parentSessionId: null, subagentId: null, providerId: 'codex',
-                  workspaceKey: worktreePath ? normalizeWorkspaceRoot(worktreePath) : null,
+                  workspaceKey: worktreePath ?? null,
                   worktreePath,
                   occurredAtMs: Number.isFinite(occurredAt) ? occurredAt : Math.floor(stat.mtime),
                    revision: lineOffset, models: [{ modelId: null, inputTokens: Math.max(0, input - cache),

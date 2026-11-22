@@ -39,8 +39,8 @@ describe('CodexRolloutUsageCollector', () => {
     const cwd = join(tmpdir(), 'codex-worktree');
     const replay = fixture([JSON.stringify({ type: 'session_meta', payload: { id: thread, cwd } }), count(1, 1)]);
     const result = await replay.collector.collect(file, null, 4096);
-    expect(result.events[0]).toMatchObject({ worktreePath: cwd,
-      workspaceKey: cwd.replace(/\\/g, '/').toLowerCase() });
+    // The raw path: the ledger derives its own key and keeps POSIX case.
+    expect(result.events[0]).toMatchObject({ worktreePath: cwd, workspaceKey: cwd });
   });
   it('deltas cumulative counts and keeps native thread ownership', async () => {
     const replay = fixture([meta, count(10, 2, 3), count(18, 5, 7)]);

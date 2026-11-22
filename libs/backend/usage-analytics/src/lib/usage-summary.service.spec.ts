@@ -27,7 +27,6 @@ import {
   SqliteSessionRecordRepository,
   type SqliteDatabase,
 } from '@ptah-extension/persistence-sqlite';
-import { normalizeWorkspaceRoot } from '@ptah-extension/shared';
 import type { Logger } from '@ptah-extension/vscode-core';
 
 describe('UsageAnalyticsService', () => {
@@ -467,28 +466,42 @@ describe('UsageAnalyticsService ledger workspace key', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it.each([
-    ['Windows', 'C:\\Users\\Dev\\Proj'],
-    ['macOS', '/Users/Dev/Proj'],
-  ])('finds %s usage whose session record and usage rows spell the workspace differently', async (_os, root) => {
+  it.each<[NodeJS.Platform, string, string]>([
+    // [host, Analytics workspace path, the workspace key a producer wrote]
+    ['win32', 'C:\\Users\\Dev\\Proj', 'C:\\Users\\Dev\\Proj'],
+    ['win32', 'C:\\Users\\Dev\\Proj', 'c:\\Users\\Dev\\Proj'],
+    ['win32', 'C:\\Users\\Dev\\Proj', 'c:/users/dev/proj'],
+    ['darwin', '/Users/Dev/Proj', '/Users/Dev/Proj'],
+    ['darwin', '/Users/Dev/Proj', '/users/dev/proj'],
+    ['linux', '/home/u/Proj', '/home/u/Proj'],
+    ['linux', '/home/u/Proj', '/home/u/Proj/'],
+  ])('on %s finds usage for %s written as %s, with and without a session record', async (platform, root, written) => {
+    const original = Object.getOwnPropertyDescriptor(process, 'platform');
+    Object.defineProperty(process, 'platform', { value: platform });
     const logger = { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() } as unknown as Logger;
     const store = new SessionStoreDatabase(join(dir, 'sessions.sqlite'), logger,
       (file) => new DatabaseSync(file) as unknown as SqliteDatabase);
     try {
       const today = Math.floor(Date.now() / 86_400_000) * 86_400_000;
-      // The record keeps the real path; the usage producer writes the shared fold.
+      // A provider session keeps its real path in its record; a lane has no record.
       await new SqliteSessionRecordRepository(store, 'electron').upsert({
         sessionId: 'session-a', workspacePath: root, name: 'Agy session', createdAt: today,
         lastActiveAt: today, isChild: false, summary: {}, detail: {},
       });
       const repository = new SessionStatsRepository(store);
-      await repository.recordUsage({
-        sessionId: 'session-a', producer: 'provider-session', runId: 'run', turnId: 'turn',
-        eventKey: 'result', modelId: 'gemini', providerId: 'antigravity', occurredAtMs: today,
+      const usage = {
+        runId: 'run', turnId: 'turn', modelId: 'gemini', providerId: 'antigravity', occurredAtMs: today,
         inputTokens: 7, outputTokens: 3, cacheReadTokens: 0, cacheWriteTokens: 0,
-        knownCostMicroUsd: 2_000_000, costAuthority: 'model-priced', source: 'live',
-        pricingVersion: 'v1', revision: 1, workspaceKey: normalizeWorkspaceRoot(root), host: 'electron',
-      });
+        knownCostMicroUsd: 1_000_000, costAuthority: 'model-priced' as const, source: 'live' as const,
+        pricingVersion: 'v1', revision: 1, workspaceKey: written, host: 'electron',
+      };
+      await repository.recordUsage({ ...usage, sessionId: 'session-a', producer: 'provider-session', eventKey: 'a' });
+      await repository.recordUsage({ ...usage, sessionId: 'lane-b', producer: 'cli-lane', eventKey: 'b' });
+      if (platform === 'linux') {
+        // Another folder on a case-sensitive file system.
+        await repository.recordUsage({ ...usage, sessionId: 'lane-c', producer: 'cli-lane', eventKey: 'c',
+          workspaceKey: '/home/u/proj' });
+      }
       const empty = { contributions: [], status: { sourceId: 'external', status: 'complete' as const } };
       for (const source of [CodexSource, OpenCodeSource, GrokSource, CliSessionSource]) {
         jest.spyOn(source.prototype, 'read').mockResolvedValue(empty);
@@ -498,10 +511,11 @@ describe('UsageAnalyticsService ledger workspace key', () => {
         { warn: jest.fn() }, repository);
       const summary = await service.summarize({ range: 7 }, root);
       expect(summary.facts).toEqual([expect.objectContaining({ providerId: 'antigravity', costUsd: 2 })]);
-      expect(summary.sessionCount).toBe(1);
-      expect(summary.topSessions?.map((row) => row.sessionId)).toEqual(['session-a']);
+      expect(summary.sessionCount).toBe(2);
+      expect(summary.topSessions?.map((row) => row.sessionId).sort()).toEqual(['lane-b', 'session-a']);
     } finally {
       store.close();
+      if (original) Object.defineProperty(process, 'platform', original);
     }
   });
 });

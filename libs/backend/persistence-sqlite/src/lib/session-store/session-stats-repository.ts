@@ -7,8 +7,8 @@ import { ledgerWorkspaceKey } from './ledger-workspace-key';
 
 const safeInteger = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 const text = z.string().min(1);
-/** A caller's workspace spelling, folded to the one key every workspace_key column stores. */
-const workspaceKeyInput = text.transform(ledgerWorkspaceKey);
+/** A caller's raw workspace path, turned into the key every ledger workspace_key column stores. */
+const workspaceKeyInput = text.transform((root) => ledgerWorkspaceKey(root));
 export const usagePhaseKindSchema = z.enum(PHASE_KINDS);
 export const usageExecutorTypeSchema: z.ZodType<UsageExecutorType> = z.enum(['sdk-subagent', 'session', 'lane']);
 export type { UsageExecutorType } from '@ptah-extension/platform-core';

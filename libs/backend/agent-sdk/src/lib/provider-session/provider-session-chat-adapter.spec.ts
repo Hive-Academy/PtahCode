@@ -1213,7 +1213,7 @@ describe('ProviderSessionChatAdapter durable usage', () => {
       executorType: 'session',
       providerId: 'antigravity-cli',
       eventKey: `${one.runId}#1`,
-      workspaceKey: 'c:/repo',
+      workspaceKey: 'C:\\Repo',
       source: 'live',
       models: [
         {

@@ -1,5 +1,5 @@
 import type { SqliteDatabase } from '../sqlite-connection.service';
-import { ledgerWorkspaceKey } from './ledger-workspace-key';
+import { ledgerKeyFoldsCase, ledgerWorkspaceKey } from './ledger-workspace-key';
 
 type MigrationDb = Pick<SqliteDatabase, 'exec' | 'prepare'>;
 
@@ -35,11 +35,11 @@ const MERGE_COVERAGE = `INSERT INTO session_usage_coverage
     first_captured_at_ms = MIN(first_captured_at_ms, excluded.first_captured_at_ms),
     last_captured_at_ms = MAX(last_captured_at_ms, excluded.last_captured_at_ms)`;
 
-/** Stored spellings grouped by the ledger key they fold to. */
-function groupByLedgerKey(keys: readonly string[]): Map<string, string[]> {
+/** Stored spellings grouped by the key they are rewritten to. */
+function groupByTarget(keys: readonly string[], target: (key: string) => string): Map<string, string[]> {
   const groups = new Map<string, string[]>();
   for (const key of keys) {
-    const canonical = ledgerWorkspaceKey(key);
+    const canonical = target(key);
     const group = groups.get(canonical);
     if (group) group.push(key);
     else groups.set(canonical, [key]);
@@ -48,36 +48,71 @@ function groupByLedgerKey(keys: readonly string[]): Map<string, string[]> {
 }
 
 /**
+ * The ledger key for a stored legacy key. The old producers lowercased every
+ * key, so on a case-sensitive host a lowercase POSIX key may have lost its
+ * case: it takes the case-kept key of the one session folder that folds to
+ * it, and stays as it is when no session folder or more than one does.
+ */
+function legacyLedgerKey(
+  stored: string,
+  platform: NodeJS.Platform,
+  sessionKeysByLowercase: ReadonlyMap<string, ReadonlySet<string>>,
+): string {
+  const key = ledgerWorkspaceKey(stored, platform);
+  if (ledgerKeyFoldsCase(stored, platform) || key !== key.toLowerCase()) return key;
+  const candidates = sessionKeysByLowercase.get(key);
+  return candidates?.size === 1 ? [...candidates][0] : key;
+}
+
+/**
  * S0010: fill `sessions.ledger_workspace_key` and rewrite the usage tables'
  * keys to {@link ledgerWorkspaceKey}.
  *
  * Before it, the ledger reads matched `sessions.workspace_key` (platform-core
- * form: real case, native separators) against the folded shared key, so
- * Analytics and the sidebar found no usage on Windows and macOS, and on Linux
- * for any path with an uppercase letter. `sessions.workspace_key` itself is
- * left alone: the session list keeps matching it exactly.
+ * form: real case, native separators) against the lowercased shared key the
+ * producers wrote, so Analytics and the sidebar found no usage on Windows and
+ * macOS, and on Linux for any path with an uppercase letter.
+ * `sessions.workspace_key` itself is left alone: the session list keeps
+ * matching it exactly.
  *
- * Every stored key folds the same way on every host, the way the usage
- * producers have always written theirs, so the sessions key and the usage
- * rows of one folder always agree. On a case-sensitive host two folders that
- * differ only by case therefore share Analytics totals (a documented trade-off,
- * TASK_2026_2302_usage); the session list stays exact. Coverage windows merge
- * to their widest span. A second run changes nothing.
+ * Windows-style keys fold on every host, and every key folds on a Windows or
+ * macOS host. On a case-sensitive host POSIX keys keep their case, so two
+ * folders that differ only by case stay apart. Legacy usage keys the old
+ * producers had already lowercased cannot regain their case on their own:
+ * each takes the case of the single session folder that folds to it, and
+ * stays lowercase when none or several do (those rows then match only a
+ * lowercase folder, or, for rows of a session with a sessions row, the read
+ * join on that row's key). Coverage windows that meet on one key merge to
+ * their widest span. A second run changes nothing.
  */
-export function rewriteLedgerWorkspaceKeys(db: MigrationDb): void {
+export function rewriteLedgerWorkspaceKeys(
+  db: MigrationDb,
+  platform: NodeJS.Platform = process.platform,
+): void {
   db.exec('BEGIN IMMEDIATE');
   try {
     const fill = db.prepare('UPDATE sessions SET ledger_workspace_key = ? WHERE session_id = ?');
     const sessions = db
-      .prepare(`SELECT session_id AS id, workspace_path AS path FROM sessions
-        WHERE workspace_path IS NOT NULL AND ledger_workspace_key IS NULL`)
+      .prepare('SELECT session_id AS id, workspace_path AS path FROM sessions WHERE workspace_path IS NOT NULL')
       .all() as { id: string; path: string }[];
-    for (const row of sessions) fill.run(ledgerWorkspaceKey(row.path), row.id);
+    for (const row of sessions) fill.run(ledgerWorkspaceKey(row.path, platform), row.id);
+
+    const sessionKeysByLowercase = new Map<string, Set<string>>();
+    const sessionKeys = db
+      .prepare('SELECT DISTINCT ledger_workspace_key AS key FROM sessions WHERE ledger_workspace_key IS NOT NULL')
+      .all() as { key: string }[];
+    for (const { key } of sessionKeys) {
+      const folded = key.toLowerCase();
+      const group = sessionKeysByLowercase.get(folded);
+      if (group) group.add(key);
+      else sessionKeysByLowercase.set(folded, new Set([key]));
+    }
+    const target = (key: string) => legacyLedgerKey(key, platform, sessionKeysByLowercase);
 
     for (const table of USAGE_TABLES) {
       const rewrite = db.prepare(table.rewrite);
       const keys = (db.prepare(table.distinct).all() as { key: string }[]).map((row) => row.key);
-      for (const [canonical, spellings] of groupByLedgerKey(keys)) {
+      for (const [canonical, spellings] of groupByTarget(keys, target)) {
         for (const spelling of spellings) {
           if (spelling !== canonical) rewrite.run(canonical, spelling);
         }
@@ -88,7 +123,7 @@ export function rewriteLedgerWorkspaceKeys(db: MigrationDb): void {
     const byKey = new Map(coverage.map((row) => [row.key, row]));
     const drop = db.prepare('DELETE FROM session_usage_coverage WHERE workspace_key = ?');
     const merge = db.prepare(MERGE_COVERAGE);
-    for (const [canonical, spellings] of groupByLedgerKey([...byKey.keys()])) {
+    for (const [canonical, spellings] of groupByTarget([...byKey.keys()], target)) {
       for (const spelling of spellings) {
         if (spelling === canonical) continue;
         const row = byKey.get(spelling);
