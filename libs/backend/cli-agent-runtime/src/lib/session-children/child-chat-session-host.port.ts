@@ -87,10 +87,12 @@ export interface IChildChatSessionHost {
   startHandoffSession(
     input: HandoffChatSessionStartInput,
   ): Promise<ChildChatSessionStartOutcome>;
+  /** Check for an explicit stop or tab close at or after the watchdog cutoff. */
+  wasStoppedSince?(tabId: string, sinceMs: number): boolean;
   /**
    * Resume a session that the no-activity watchdog ended and send it one
-   * recovery prompt with a non-human origin (TASK_2026_2288 C). Optional: a
-   * host without it never retries automatically.
+   * recovery prompt with a non-human origin (TASK_2026_2288 C). Hosts that
+   * omit it cannot automatically resume a bound session.
    */
   recoverAfterWatchdogStop?(
     input: WatchdogRecoveryInput,

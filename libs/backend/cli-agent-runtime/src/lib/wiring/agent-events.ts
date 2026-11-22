@@ -396,7 +396,7 @@ function wireAgentMonitorListeners(
   });
 
   agentProcessManager.events.on('agent:turn-settled', (info: AgentProcessInfo) => {
-    if (persistCliSession && info.cliSessionId && info.agentBudget) {
+    if (persistCliSession && info.cliSessionId && (info.agentBudget || info.notice)) {
       persistCliSessionReference(container, logger, tag, info, getSdkSessionId);
     }
   });
@@ -763,6 +763,7 @@ export function persistCliSessionReference(
       ...(info.requestedPolicy ? { requestedPolicy: info.requestedPolicy } : {}),
       ...(info.stopReason ? { stopReason: info.stopReason } : {}),
       ...(info.agentBudget ? { agentBudget: info.agentBudget } : {}),
+      ...(info.notice ? { notice: info.notice } : {}),
       ...(typeof info.stopResetAt === 'number' &&
       Number.isFinite(info.stopResetAt) &&
       info.stopResetAt > 0

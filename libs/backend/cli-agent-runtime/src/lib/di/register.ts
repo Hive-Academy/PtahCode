@@ -165,8 +165,8 @@ export function createClaudeLaneReadOnlyBindings(
  * Seam for the session tool disposition (TASK_2026_2297_920a). The SDK registers a default
  * registry whose answer is "running" for every session, and its permission handler and
  * PreToolUse hook consult it on each tool call. This runtime owns child-session cap state,
- * so phase P2 feeds it through the registry returned here (`set` on a cap, `clear` on
- * release). It adds no data yet. Returns undefined when the host registered no SDK default.
+ * so the child spawner writes to the same registry on pause and clears it on release.
+ * Returns undefined when the host registered no SDK default.
  */
 export function registerSessionToolDispositionFeed(
   container: DependencyContainer,

@@ -10,6 +10,8 @@ import {
 } from './__fixtures__/session-spawner-fs-access';
 import { mutableMemoryProbe } from '../__fixtures__/memory-probe';
 import { makeHarness, PARENT } from './session-spawner.service.spec';
+import { formatWatchdogRetry } from '@ptah-extension/shared';
+import { ProviderTurnEndError } from '@ptah-extension/agent-sdk';
 import { SESSION_CHILD_FIRST_TURN_TIMEOUT_MS } from './session-child-first-turn.watchdog';
 import { SESSION_CHILD_STOP_START_WAIT_MS } from './session-start-stop-wait';
 import type { SessionChildStartResult } from './session-spawner.port';
@@ -436,96 +438,286 @@ describe('SessionSpawnerService — failed first turn on session end', () => {
 });
 
 describe('SessionSpawnerService — first-turn watchdog', () => {
-  it('fails a child with no SDK id, no turn and no running turn after the timeout', async () => {
+  it.each(['idle', 'generating'] as const)('leaves an unbound %s child live while the end is uncertain', async (phase) => {
     const h = makeHarness();
     const child = await h.startChild();
-    jest.advanceTimersByTime(SESSION_CHILD_FIRST_TURN_TIMEOUT_MS - 1);
+    h.phases.set(child.childSessionId, phase);
+    if (phase === 'idle') h.lifecycleIds.set(child.childSessionId, null);
+    jest.advanceTimersByTime(SESSION_CHILD_FIRST_TURN_TIMEOUT_MS);
     await flush();
-    expect(h.registry.get(child.childSessionId)?.terminalStatus).toBeUndefined();
 
+    expect(h.registry.get(child.childSessionId)?.terminalStatus).toBeUndefined();
+    expect(h.lines.join(' ')).toContain('awaiting a confirmed provider end');
+    expect(h.adapter.interruptSession).not.toHaveBeenCalled();
+    expect(failedSettles(h)).toHaveLength(0);
+  });
+
+  it('fails a child with no SDK id, no turn and no running turn', async () => {
+    const h = makeHarness();
+    const child = await h.startChild();
+    h.active.delete(child.childSessionId);
+    h.phases.set(child.childSessionId, 'idle');
+    jest.advanceTimersByTime(SESSION_CHILD_FIRST_TURN_TIMEOUT_MS);
+    await flush();
+
+    expect(h.registry.get(child.childSessionId)).toMatchObject({
+      terminalStatus: 'failed',
+      endCause: 'first-turn-not-started',
+      endReason: expect.stringContaining('no first turn after 120s'),
+    });
+    expect(failedSettles(h)).toHaveLength(1);
+    expect(h.adapter.interruptSession).not.toHaveBeenCalled();
+    expect(h.adapter.endSession).not.toHaveBeenCalled();
+  });
+
+  it('defers a watchdog-generated turn failure to the typed session end', async () => {
+    const h = makeHarness();
+    const child = await h.startChild();
+    const abortController = new AbortController();
+    const reason = new ProviderTurnEndError('provider-no-response');
+    abortController.abort(reason);
+    h.lifecycle.find.mockImplementationOnce(() => ({
+      realSessionId: null,
+      permissionLevel: 'yolo',
+      abortController,
+    }));
+    h.adapterEvents.emitTurnFailed({
+      sessionId: child.childSessionId,
+      cwd: child.worktreePath,
+      lastAssistantMessage: null,
+      error: 'unknown' as never,
+      errorDetails: null,
+      terminalReason: null,
+      timestamp: Date.now(),
+    });
+    await flush();
+    expect(failedSettles(h)).toHaveLength(0);
+
+    h.active.delete(child.childSessionId);
+    h.sessionEnd.notifyAll({
+      sessionId: child.childSessionId,
+      workspaceRoot: child.worktreePath,
+      cause: reason.endCause,
+      startedAt: reason.startedAt,
+      zeroOutwardEvents: true,
+    });
+    jest.advanceTimersByTime(5_000);
+    await flush();
+    expect(h.host.startChildSession).toHaveBeenCalledTimes(2);
+    expect(failedSettles(h)).toHaveLength(0);
+  });
+
+  it.each([false, true])('settles an unbound retry once, with parent changed = %s', async (reparent) => {
+    const h = makeHarness();
+    const child = await h.startChild();
+    const original = h.host.startChildSession.mock.calls[0][0];
+    const end = (startedAt: number) => {
+      h.active.delete(child.childSessionId);
+      h.sessionEnd.notifyAll({
+        sessionId: child.childSessionId,
+        workspaceRoot: child.worktreePath,
+        cause: 'provider-no-response',
+        startedAt,
+        zeroOutwardEvents: true,
+      });
+    };
+    end(Date.now());
+    jest.advanceTimersByTime(4_999);
+    expect(h.host.startChildSession).toHaveBeenCalledTimes(1);
     jest.advanceTimersByTime(1);
     await flush();
-    const record = h.registry.get(child.childSessionId);
-    expect(record?.terminalStatus).toBe('failed');
-    expect(record?.endCause).toBe('first-turn-not-started');
-    expect(record?.endReason).toContain('turn phase none');
-    expect(record?.endReason).toContain('lifecycle record present: no');
-    expect(record?.endReason).toContain('SDK session id absent');
+    expect(h.host.startChildSession).toHaveBeenCalledTimes(2);
+    expect(h.host.startChildSession.mock.calls[1][0]).toEqual({
+      ...original,
+      prompt: `${formatWatchdogRetry()}\n\n${original.prompt}`,
+    });
+    expect(h.host.recoverAfterWatchdogStop).not.toHaveBeenCalled();
+
+    if (reparent) {
+      h.registry.reparent(child.childSessionId, CHILD_SDK_ID, undefined);
+    }
+    end(Date.now());
+    jest.advanceTimersByTime(30_000);
+    await flush();
+    expect(h.host.startChildSession).toHaveBeenCalledTimes(2);
     expect(failedSettles(h)).toHaveLength(1);
-    expect(h.adapter.interruptSession).toHaveBeenCalled();
+    expect(h.notifier.signalSessionChild).toHaveBeenCalledWith(
+      expect.objectContaining({ parentSessionIds: expect.arrayContaining([reparent ? CHILD_SDK_ID : PARENT]) }),
+      expect.objectContaining({ status: 'failed' }),
+    );
+    expect(h.registry.get(child.childSessionId)).toMatchObject({
+      terminalStatus: 'failed',
+      endReason: expect.stringContaining('could not recover the first turn'),
+    });
   });
 
-  it('records the lifecycle record and phase as evidence', async () => {
+  it('reserves recovery for a bound child successor across the end-grace window', async () => {
     const h = makeHarness();
-    const child = await h.startChild();
-    h.lifecycleIds.set(child.childSessionId, '');
-    h.phases.set(child.childSessionId, 'idle');
-    jest.advanceTimersByTime(SESSION_CHILD_FIRST_TURN_TIMEOUT_MS);
+    const original = await h.startChild();
+    const result = await h.spawner.succeed({
+      callerSessionId: original.childSessionId,
+      handoffPath: 'HANDOFF.md',
+      prompt: 'Continue the work from the notes',
+    });
+    if (!result.ok) throw new Error(result.detail);
+    const successor = result.successor;
+    const id = successor.childSessionId;
+    h.idResolved.notifyAll({ tabId: id, realSessionId: CHILD_SDK_ID, timestamp: 1 });
+    let finish: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => { finish = resolve; });
+    h.host.recoverAfterWatchdogStop.mockImplementationOnce(async () => {
+      await gate;
+      h.active.add(id);
+      return { recovered: true };
+    });
+    h.active.delete(id);
+    h.sessionEnd.notifyAll({
+      sessionId: CHILD_SDK_ID,
+      workspaceRoot: successor.worktreePath,
+      cause: 'provider-no-response',
+      zeroOutwardEvents: true,
+    });
+
+    jest.advanceTimersByTime(30_000);
     await flush();
-    const reason = h.registry.get(child.childSessionId)?.endReason;
-    expect(reason).toContain('turn phase idle');
-    expect(reason).toContain('lifecycle record present: yes');
+    expect(h.host.recoverAfterWatchdogStop).toHaveBeenCalledTimes(1);
+    expect(h.host.recoverAfterWatchdogStop).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: CHILD_SDK_ID,
+      tabId: id,
+      prompt: expect.stringContaining('Continue the work from the notes'),
+      senderName: 'Ptah recovery',
+    }));
+    expect(h.registry.get(id)?.terminalStatus).toBeUndefined();
+    expect(h.host.startChildSession).toHaveBeenCalledTimes(2);
+    expect(failedSettles(h)).toHaveLength(0);
+    finish();
+    await flush();
   });
 
-  it('leaves a child alone once its SDK id is bound', async () => {
+  it.each(['stopped', 'already-active', 'resume-failed'] as const)(
+    'rechecks end grace when a replay returns %s after 31 seconds',
+    async (reason) => {
+      const h = makeHarness();
+      const child = await h.startChild();
+      const id = child.childSessionId;
+      h.idResolved.notifyAll({ tabId: id, realSessionId: CHILD_SDK_ID, timestamp: 1 });
+      h.host.recoverAfterWatchdogStop.mockImplementationOnce(async () => {
+        await new Promise<void>((resolve) => { setTimeout(resolve, 26_000); });
+        return { recovered: false, reason };
+      });
+      h.active.delete(id);
+      h.sessionEnd.notifyAll({
+        sessionId: CHILD_SDK_ID,
+        workspaceRoot: child.worktreePath,
+        cause: 'provider-no-response',
+        zeroOutwardEvents: true,
+      });
+      jest.advanceTimersByTime(31_000);
+      await flush();
+
+      expect(h.host.recoverAfterWatchdogStop).toHaveBeenCalledTimes(1);
+      expect(h.registry.get(id)?.terminalStatus).toBeUndefined();
+      jest.advanceTimersByTime(29_000);
+      await flush();
+      expect(h.registry.get(id)?.terminalStatus).toBeDefined();
+      expect(failedSettles(h)).toHaveLength(reason === 'resume-failed' ? 1 : 0);
+    },
+  );
+
+  it('settles a first turn with unclear progress and skips replay', async () => {
     const h = makeHarness();
     const child = await h.startChild();
-    h.idResolved.notifyAll({ tabId: child.childSessionId, realSessionId: CHILD_SDK_ID, timestamp: 1 });
-    jest.advanceTimersByTime(SESSION_CHILD_FIRST_TURN_TIMEOUT_MS);
+    h.active.delete(child.childSessionId);
+    h.sessionEnd.notifyAll({
+      sessionId: child.childSessionId,
+      workspaceRoot: child.worktreePath,
+      cause: 'provider-no-response',
+    });
+    jest.advanceTimersByTime(30_000);
     await flush();
-    expect(h.registry.get(child.childSessionId)?.terminalStatus).toBeUndefined();
+
+    expect(h.host.recoverAfterWatchdogStop).not.toHaveBeenCalled();
+    expect(h.host.startChildSession).toHaveBeenCalledTimes(1);
+    expect(failedSettles(h)).toHaveLength(1);
+    expect(h.registry.get(child.childSessionId)?.endReason).toContain('could not safely retry');
+  });
+
+  it('lets explicit close cancel a reserved retry', async () => {
+    const h = makeHarness();
+    const child = await h.startChild();
+    h.active.delete(child.childSessionId);
+    for (const cause of ['provider-no-response', 'tab-close'] as const) {
+      h.sessionEnd.notifyAll({
+        sessionId: child.childSessionId,
+        workspaceRoot: child.worktreePath,
+        cause,
+        zeroOutwardEvents: true,
+      });
+    }
+    jest.advanceTimersByTime(30_000);
+    await flush();
+    expect(h.host.startChildSession).toHaveBeenCalledTimes(1);
     expect(failedSettles(h)).toHaveLength(0);
   });
 
-  it('leaves a child alone while it awaits permission', async () => {
-    const h = makeHarness();
+  it('honors a tab close during the retry delay even without a second end callback', async () => {
+    const wasStoppedSince = jest.fn((_id: string, _at: number) => false);
+    const h = makeHarness({ wasStoppedSince });
     const child = await h.startChild();
-    h.emitPermission({
-      phase: 'requested',
-      requestId: 'req-1',
-      routingHint: child.childSessionId,
-      toolName: 'Bash',
-      description: 'run tests',
-    } as never);
-    jest.advanceTimersByTime(SESSION_CHILD_FIRST_TURN_TIMEOUT_MS);
+    const startedAt = Date.now();
+    h.active.delete(child.childSessionId);
+    h.sessionEnd.notifyAll({
+      sessionId: child.childSessionId,
+      workspaceRoot: child.worktreePath,
+      cause: 'provider-no-response',
+      startedAt,
+      zeroOutwardEvents: true,
+    });
+    jest.advanceTimersByTime(2_000);
+    wasStoppedSince.mockReturnValue(true);
+    jest.advanceTimersByTime(3_000);
     await flush();
-    expect(h.registry.get(child.childSessionId)?.terminalStatus).toBeUndefined();
+
+    expect(wasStoppedSince).toHaveBeenCalledWith(child.childSessionId, startedAt);
+    expect(h.host.startChildSession).toHaveBeenCalledTimes(1);
   });
 
-  it('re-arms once while the child generates, then fails it when it stops', async () => {
+  it('cancels a reserved retry when a parent handoff changes ownership, even if it rolls back', async () => {
     const h = makeHarness();
     const child = await h.startChild();
-    h.phases.set(child.childSessionId, 'generating');
-    jest.advanceTimersByTime(SESSION_CHILD_FIRST_TURN_TIMEOUT_MS);
+    h.active.delete(child.childSessionId);
+    h.sessionEnd.notifyAll({
+      sessionId: child.childSessionId,
+      workspaceRoot: child.worktreePath,
+      cause: 'provider-no-response',
+      zeroOutwardEvents: true,
+    });
+    const formerOwner = h.registry.get(child.childSessionId);
+    if (!formerOwner) throw new Error('expected registered child');
+    h.registry.reparent(child.childSessionId, CHILD_SDK_ID, undefined);
+    h.registry.reparent(child.childSessionId, formerOwner.parentSessionId, formerOwner.parentSdkSessionId);
+    jest.advanceTimersByTime(5_000);
     await flush();
-    expect(h.registry.get(child.childSessionId)?.terminalStatus).toBeUndefined();
-    expect(h.lines.join('\n')).toContain('watchdog re-armed once');
 
-    h.phases.set(child.childSessionId, 'idle');
-    jest.advanceTimersByTime(SESSION_CHILD_FIRST_TURN_TIMEOUT_MS);
-    await flush();
-    expect(h.registry.get(child.childSessionId)?.terminalStatus).toBe('failed');
-  });
-
-  it('re-arms only one time and leaves a child that still generates running', async () => {
-    const h = makeHarness();
-    const child = await h.startChild();
-    h.phases.set(child.childSessionId, 'generating');
-    jest.advanceTimersByTime(SESSION_CHILD_FIRST_TURN_TIMEOUT_MS * 3);
-    await flush();
-    expect(h.registry.get(child.childSessionId)?.terminalStatus).toBeUndefined();
-    expect(h.lines.join('\n')).toContain('left running');
-    expect(failedSettles(h)).toHaveLength(0);
+    expect(h.host.startChildSession).toHaveBeenCalledTimes(1);
   });
 
   it('clears the watchdog when the parent stops the child', async () => {
     const h = makeHarness();
     const child = await h.startChild();
+    h.active.delete(child.childSessionId);
+    h.sessionEnd.notifyAll({
+      sessionId: child.childSessionId,
+      workspaceRoot: child.worktreePath,
+      cause: 'provider-no-response',
+      zeroOutwardEvents: true,
+    });
     await h.spawner.stop({ callerSessionId: PARENT, childSessionId: child.childSessionId });
     jest.advanceTimersByTime(SESSION_CHILD_FIRST_TURN_TIMEOUT_MS);
     await flush();
     const record = h.registry.get(child.childSessionId);
     expect(record?.endCause).not.toBe('first-turn-not-started');
+    expect(h.host.startChildSession).toHaveBeenCalledTimes(1);
     expect(failedSettles(h)).toHaveLength(0);
   });
 
