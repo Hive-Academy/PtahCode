@@ -10,7 +10,7 @@
  *   - onAuthFailure()  → false (user-provided key, not refreshable)
  *   - normalizeModelId → tier aliases mapped via SAKANA_DEFAULT_TIERS, else pass-through
  *   - resolveUpstreamProtocol -> chat/completions (Chat Completions for v1)
- *   - getStaticModels  → fugu / fugu-ultra from the registry entry
+ *   - getListedModels  → empty: `/v1/models` lists nothing; the picker reads the live list
  */
 
 import 'reflect-metadata';
@@ -34,11 +34,13 @@ class TestableSakanaProxy extends SakanaTranslationProxy {
   public normalizeModelIdPublic(modelId: string): string {
     return this.normalizeModelId(modelId);
   }
-  public resolveUpstreamProtocolPublic(modelId: string): 'messages' | 'chat/completions' | 'responses' | undefined {
+  public resolveUpstreamProtocolPublic(
+    modelId: string,
+  ): 'messages' | 'chat/completions' | 'responses' | undefined {
     return this.resolveUpstreamProtocol(modelId);
   }
-  public getStaticModelsPublic(): Array<{ id: string }> {
-    return this.getStaticModels();
+  public getListedModelsPublic(): Array<{ id: string }> {
+    return this.getListedModels();
   }
 }
 
@@ -82,8 +84,12 @@ describe('SakanaTranslationProxy', () => {
 
   it('routes through Chat Completions (never the Responses API)', () => {
     const proxy = makeProxy();
-    expect(proxy.resolveUpstreamProtocolPublic('fugu')).toBe('chat/completions');
-    expect(proxy.resolveUpstreamProtocolPublic('fugu-ultra')).toBe('chat/completions');
+    expect(proxy.resolveUpstreamProtocolPublic('fugu')).toBe(
+      'chat/completions',
+    );
+    expect(proxy.resolveUpstreamProtocolPublic('fugu-ultra')).toBe(
+      'chat/completions',
+    );
   });
 
   describe('normalizeModelId', () => {
@@ -119,11 +125,16 @@ describe('SakanaTranslationProxy', () => {
     });
   });
 
-  it('returns the static fugu / fugu-ultra model list', () => {
-    const ids = makeProxy()
-      .getStaticModelsPublic()
-      .map((m) => m.id);
-    expect(ids).toContain('fugu');
-    expect(ids).toContain('fugu-ultra');
+  it('lists no models on /v1/models (no repo-literal list)', async () => {
+    const proxy = makeProxy();
+    expect(proxy.getListedModelsPublic()).toEqual([]);
+    const { url } = await proxy.start();
+    try {
+      const response = await fetch(`${url}/v1/models`);
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ object: 'list', data: [] });
+    } finally {
+      await proxy.stop();
+    }
   });
 });

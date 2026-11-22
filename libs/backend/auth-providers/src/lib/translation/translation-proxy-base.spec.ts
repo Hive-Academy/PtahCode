@@ -8,7 +8,7 @@
  *   - Routing:
  *       * GET  /health         â†’ 200 { status: 'ok' }
  *       * GET  /v1/models      â†’ 200 { object: 'list', data: [...] } derived
- *                                from `getStaticModels()`.
+ *                                from `getListedModels()` (empty by default).
  *       * POST /v1/messages    â†’ delegates to the translator pipeline.
  *       * any other path       â†’ 404 with Anthropic-shaped error body.
  *   - Error shape: `sendErrorResponse()` always emits
@@ -98,14 +98,14 @@ class FakeTranslationProxy extends TranslationProxyBase {
   public readonly getApiEndpointMock = jest.fn(
     async () => 'http://127.0.0.1:1', // intentionally-unreachable port for forwarding tests
   );
-  public readonly getHeadersMock = jest.fn(async (): Promise<
-    Record<string, string>
-  > => ({
-    authorization: 'Bearer fake',
-    'content-type': 'application/json',
-  }));
+  public readonly getHeadersMock = jest.fn(
+    async (): Promise<Record<string, string>> => ({
+      authorization: 'Bearer fake',
+      'content-type': 'application/json',
+    }),
+  );
   public readonly onAuthFailureMock = jest.fn(async () => false);
-  public readonly getStaticModelsMock = jest.fn(() => [
+  public readonly getListedModelsMock = jest.fn(() => [
     { id: 'fake-model-a' },
     { id: 'fake-model-b' },
   ]);
@@ -119,8 +119,8 @@ class FakeTranslationProxy extends TranslationProxyBase {
   protected override onAuthFailure(): Promise<boolean> {
     return this.onAuthFailureMock();
   }
-  protected override getStaticModels(): Array<{ id: string }> {
-    return this.getStaticModelsMock();
+  protected override getListedModels(): Array<{ id: string }> {
+    return this.getListedModelsMock();
   }
   protected override getUpstreamTimeoutMs(): number {
     return this.upstreamTimeoutMs;
@@ -287,7 +287,7 @@ describe('TranslationProxyBase â€” routing', () => {
     }
   });
 
-  it('GET /v1/models returns the static model list from getStaticModels()', async () => {
+  it('GET /v1/models returns the list from getListedModels()', async () => {
     const h = await startProxy();
     try {
       const res = await request(`${h.url}/v1/models`);
@@ -302,6 +302,49 @@ describe('TranslationProxyBase â€” routing', () => {
         'fake-model-b',
       ]);
       expect(body.data[0].object).toBe('model');
+    } finally {
+      await h.stop();
+    }
+  });
+
+  it('lists no models on GET /v1/models unless a subclass overrides getListedModels()', () => {
+    const listed = (
+      TranslationProxyBase.prototype as unknown as {
+        getListedModels(): Array<{ id: string }>;
+      }
+    ).getListedModels();
+    expect(listed).toEqual([]);
+  });
+
+  it('awaits resolveRequestModelId before routing and forwards its answer', async () => {
+    const h = await startProxy();
+    const resolved: string[] = [];
+    jest
+      .spyOn(
+        h.proxy as unknown as {
+          resolveRequestModelId(id: string): Promise<string>;
+        },
+        'resolveRequestModelId',
+      )
+      .mockImplementation(async (id) => {
+        await Promise.resolve();
+        return `${id}-resolved`;
+      });
+    jest
+      .spyOn(h.proxy, 'resolveUpstreamProtocol')
+      .mockImplementation((model) => {
+        resolved.push(model);
+        return undefined;
+      });
+    try {
+      const result = await request(`${h.url}/v1/messages`, {
+        method: 'POST',
+        body: MESSAGES_BODY,
+      });
+      expect(resolved).toEqual(['fake-model-a-resolved']);
+      expect(JSON.parse(result.body).error.message).toBe(
+        "Model 'fake-model-a-resolved' is not supported by Fake.",
+      );
     } finally {
       await h.stop();
     }
@@ -1127,10 +1170,7 @@ describe('TranslationProxyBase — quota owner key at the response boundary (TAS
   );
 
   it('headers without a credential give a null (unattributed) owner', async () => {
-    await run(
-      rateLimited,
-      withHeaders({ 'content-type': 'application/json' }),
-    );
+    await run(rateLimited, withHeaders({ 'content-type': 'application/json' }));
 
     expect(rateLimits).toHaveLength(1);
     expect(rateLimits[0].ownerKey).toBeNull();
@@ -1629,7 +1669,9 @@ describe('TranslationProxyBase upstream context overflow', () => {
           APIError.generate(400, body, undefined, new Headers()).message,
         ).toContain('prompt is too long');
         expect(h.logger.warn).toHaveBeenCalledWith(
-          expect.stringContaining('upstream 400 classified as context overflow'),
+          expect.stringContaining(
+            'upstream 400 classified as context overflow',
+          ),
         );
         const logged = JSON.stringify([
           h.logger.warn.mock.calls,
@@ -1666,7 +1708,9 @@ describe('TranslationProxyBase upstream context overflow', () => {
       });
       expect(result.status).toBe(400);
       const message = JSON.parse(result.body).error.message as string;
-      expect(message).toBe('prompt is too long: 130532 tokens > 128000 maximum');
+      expect(message).toBe(
+        'prompt is too long: 130532 tokens > 128000 maximum',
+      );
       expect(message).toMatch(
         /prompt is too long[^0-9]*(\d+)\s*tokens?\s*>\s*(\d+)/i,
       );
@@ -1681,7 +1725,10 @@ describe('TranslationProxyBase upstream context overflow', () => {
     'keeps a non-overflow 400 byte-identical to the legacy api_error body (%s)',
     async (protocol) => {
       const upstreamBody = JSON.stringify({
-        error: { code: 'invalid_request', message: 'Unsupported parameter: foo' },
+        error: {
+          code: 'invalid_request',
+          message: 'Unsupported parameter: foo',
+        },
       });
       const upstream = await startUpstream((_req, res) => {
         res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -1804,7 +1851,10 @@ function terminalRow(
   };
 }
 
-const stop = (stopReason: string): ParityOutcome => ({ kind: 'stop', stopReason });
+const stop = (stopReason: string): ParityOutcome => ({
+  kind: 'stop',
+  stopReason,
+});
 const failure = (
   status: number,
   type: string,
@@ -1817,31 +1867,118 @@ const failedWith = (code?: string) =>
 
 const PARITY_ROWS: ParityRow[] = [
   terminalRow('completed text', 'response.completed', {}, stop('end_turn')),
-  terminalRow('completed tool call', 'response.completed', {}, stop('tool_use'), '{"path":"a"}'),
-  terminalRow('max_output_tokens, no tools', 'response.incomplete', incompleteFor('max_output_tokens'), stop('max_tokens')),
-  terminalRow('max_output_tokens, valid args', 'response.incomplete', incompleteFor('max_output_tokens'), stop('max_tokens'), '{"path":"a"}'),
-  terminalRow('max_output_tokens, invalid args', 'response.incomplete', incompleteFor('max_output_tokens'), failure(502, 'api_error', INCOMPLETE_TOOL_INPUT), '{"x":'),
-  terminalRow('content_filter, no tools', 'response.incomplete', incompleteFor('content_filter'), stop('refusal')),
-  terminalRow('content_filter, valid args', 'response.incomplete', incompleteFor('content_filter'), stop('refusal'), '{"path":"a"}'),
-  terminalRow('content_filter, invalid args', 'response.incomplete', incompleteFor('content_filter'), failure(502, 'api_error', INCOMPLETE_TOOL_INPUT), '{"x":'),
-  terminalRow('other incomplete reason', 'response.incomplete', incompleteFor('other_reason'), failure(502, 'api_error', 'upstream_incomplete: Upstream Responses response incomplete')),
-  terminalRow('failed context_length_exceeded', 'response.failed', failedWith('context_length_exceeded'), failure(400, 'invalid_request_error', PROMPT_TOO_LONG_DEFAULT)),
-  terminalRow('failed rate_limit_exceeded', 'response.failed', failedWith('rate_limit_exceeded'), failure(429, 'rate_limit_error', 'Upstream rate limit exceeded')),
-  terminalRow('failed server_error', 'response.failed', failedWith('server_error'), failure(502, 'api_error', 'Upstream Responses request failed (server_error)')),
-  terminalRow('failed invalid_prompt', 'response.failed', failedWith('invalid_prompt'), failure(400, 'invalid_request_error', 'Upstream rejected the request (invalid_prompt)')),
-  terminalRow('failed without error', 'response.failed', failedWith(), failure(502, 'api_error', 'Upstream Responses request failed (unknown)')),
+  terminalRow(
+    'completed tool call',
+    'response.completed',
+    {},
+    stop('tool_use'),
+    '{"path":"a"}',
+  ),
+  terminalRow(
+    'max_output_tokens, no tools',
+    'response.incomplete',
+    incompleteFor('max_output_tokens'),
+    stop('max_tokens'),
+  ),
+  terminalRow(
+    'max_output_tokens, valid args',
+    'response.incomplete',
+    incompleteFor('max_output_tokens'),
+    stop('max_tokens'),
+    '{"path":"a"}',
+  ),
+  terminalRow(
+    'max_output_tokens, invalid args',
+    'response.incomplete',
+    incompleteFor('max_output_tokens'),
+    failure(502, 'api_error', INCOMPLETE_TOOL_INPUT),
+    '{"x":',
+  ),
+  terminalRow(
+    'content_filter, no tools',
+    'response.incomplete',
+    incompleteFor('content_filter'),
+    stop('refusal'),
+  ),
+  terminalRow(
+    'content_filter, valid args',
+    'response.incomplete',
+    incompleteFor('content_filter'),
+    stop('refusal'),
+    '{"path":"a"}',
+  ),
+  terminalRow(
+    'content_filter, invalid args',
+    'response.incomplete',
+    incompleteFor('content_filter'),
+    failure(502, 'api_error', INCOMPLETE_TOOL_INPUT),
+    '{"x":',
+  ),
+  terminalRow(
+    'other incomplete reason',
+    'response.incomplete',
+    incompleteFor('other_reason'),
+    failure(
+      502,
+      'api_error',
+      'upstream_incomplete: Upstream Responses response incomplete',
+    ),
+  ),
+  terminalRow(
+    'failed context_length_exceeded',
+    'response.failed',
+    failedWith('context_length_exceeded'),
+    failure(400, 'invalid_request_error', PROMPT_TOO_LONG_DEFAULT),
+  ),
+  terminalRow(
+    'failed rate_limit_exceeded',
+    'response.failed',
+    failedWith('rate_limit_exceeded'),
+    failure(429, 'rate_limit_error', 'Upstream rate limit exceeded'),
+  ),
+  terminalRow(
+    'failed server_error',
+    'response.failed',
+    failedWith('server_error'),
+    failure(
+      502,
+      'api_error',
+      'Upstream Responses request failed (server_error)',
+    ),
+  ),
+  terminalRow(
+    'failed invalid_prompt',
+    'response.failed',
+    failedWith('invalid_prompt'),
+    failure(
+      400,
+      'invalid_request_error',
+      'Upstream rejected the request (invalid_prompt)',
+    ),
+  ),
+  terminalRow(
+    'failed without error',
+    'response.failed',
+    failedWith(),
+    failure(502, 'api_error', 'Upstream Responses request failed (unknown)'),
+  ),
   {
     name: 'standalone error, top-level code',
     sse:
       streamedItems() +
-      upstreamSse('error', { code: 'context_length_exceeded', message: SENTINEL }),
+      upstreamSse('error', {
+        code: 'context_length_exceeded',
+        message: SENTINEL,
+      }),
     expected: failure(400, 'invalid_request_error', PROMPT_TOO_LONG_DEFAULT),
   },
   {
     name: 'standalone error, nested code',
     sse:
       streamedItems() +
-      upstreamSse('error', { error: { code: 'rate_limit_exceeded', message: SENTINEL } }),
+      upstreamSse('error', {
+        error: { code: 'rate_limit_exceeded', message: SENTINEL },
+      }),
     expected: failure(429, 'rate_limit_error', 'Upstream rate limit exceeded'),
   },
 ];
@@ -2054,7 +2191,9 @@ describe('TranslationProxyBase Responses terminal parity', () => {
   it('ends with exactly one SSE error and a clean end when the upstream socket aborts mid-stream', async () => {
     const { result, frames, records } = await streamThrough((_req, res) => {
       res.writeHead(200, { 'Content-Type': 'text/event-stream' });
-      res.write(upstreamSse('response.output_text.delta', { delta: 'partial' }));
+      res.write(
+        upstreamSse('response.output_text.delta', { delta: 'partial' }),
+      );
       setTimeout(() => res.socket?.destroy(), 30);
     });
     expect(result.status).toBe(200);
@@ -2074,7 +2213,9 @@ describe('TranslationProxyBase Responses terminal parity', () => {
     const { result, frames, records } = await streamThrough(
       (_req, res) => {
         res.writeHead(200, { 'Content-Type': 'text/event-stream' });
-        res.write(upstreamSse('response.output_text.delta', { delta: 'partial' }));
+        res.write(
+          upstreamSse('response.output_text.delta', { delta: 'partial' }),
+        );
         // Then go silent until the proxy's idle timeout fires.
       },
       (proxy) => {
@@ -2131,7 +2272,10 @@ describe('TranslationProxyBase Responses terminal parity', () => {
 
   it('answers a response.failed overflow split across chunks before any output with HTTP 400', async () => {
     const wire = upstreamSse('response.failed', {
-      response: { status: 'failed', error: { code: 'context_length_exceeded', message: SENTINEL } },
+      response: {
+        status: 'failed',
+        error: { code: 'context_length_exceeded', message: SENTINEL },
+      },
     });
     const { result, records } = await streamThrough((_req, res) => {
       res.writeHead(200, { 'Content-Type': 'text/event-stream' });
@@ -2154,7 +2298,9 @@ describe('TranslationProxyBase Responses terminal parity', () => {
       res.end(
         upstreamSse('response.output_text.delta', { delta: 'partial' }) +
           upstreamSse('response.failed', {
-            response: { error: { code: 'context_length_exceeded', message: SENTINEL } },
+            response: {
+              error: { code: 'context_length_exceeded', message: SENTINEL },
+            },
           }),
       );
     });
@@ -2167,7 +2313,10 @@ describe('TranslationProxyBase Responses terminal parity', () => {
     ]);
     expect(frames.at(-1)?.data).toEqual({
       type: 'error',
-      error: { type: 'invalid_request_error', message: PROMPT_TOO_LONG_DEFAULT },
+      error: {
+        type: 'invalid_request_error',
+        message: PROMPT_TOO_LONG_DEFAULT,
+      },
     });
     expect(records).toHaveLength(1);
     expect(records[0].status).toBe('invalid-response');
@@ -2213,7 +2362,9 @@ describe('TranslationProxyBase Responses terminal parity', () => {
   it('releases an upstream that stays open after an error-first HTTP answer', async () => {
     const upstream = openUpstream(
       upstreamSse('response.failed', {
-        response: { error: { code: 'context_length_exceeded', message: SENTINEL } },
+        response: {
+          error: { code: 'context_length_exceeded', message: SENTINEL },
+        },
       }),
     );
     const { result, records } = await streamThrough(upstream.handler);
@@ -2229,9 +2380,12 @@ describe('TranslationProxyBase Responses terminal parity', () => {
     const upstream = openUpstream(
       upstreamSse('response.created', { response: { status: 'in_progress' } }),
     );
-    const { result, records } = await streamThrough(upstream.handler, (proxy) => {
-      proxy.upstreamTimeoutMs = 50;
-    });
+    const { result, records } = await streamThrough(
+      upstream.handler,
+      (proxy) => {
+        proxy.upstreamTimeoutMs = 50;
+      },
+    );
     expect(result.status).toBe(504);
     expect(JSON.parse(result.body).error).toEqual({
       type: 'api_error',
@@ -2479,7 +2633,10 @@ describe('TranslationProxyBase native Messages lane', () => {
         body: MESSAGES_BODY,
       });
       expect(result.status).toBe(400);
-      expect(result.body).toContain('not supported');
+      expect(JSON.parse(result.body).error).toEqual({
+        type: 'invalid_request_error',
+        message: "Model 'fake-model-a' is not supported by Fake.",
+      });
       expect(h.proxy.getHeadersMock).not.toHaveBeenCalled();
       expect(h.proxy.getApiEndpointMock).not.toHaveBeenCalled();
     } finally {
@@ -2696,32 +2853,57 @@ describe('TranslationProxyBase Responses tool-name guard', () => {
   const VALID_NAME = /^[a-zA-Z0-9_-]{1,64}$/;
   const aliasOf = (name: string) =>
     `${name.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 53)}_${createHash('sha256')
-      .update(name, 'utf16le').digest('hex').slice(0, 10)}`;
+      .update(name, 'utf16le')
+      .digest('hex')
+      .slice(0, 10)}`;
 
-  function guardBody(stream: boolean, toolNames: string[] = [LONG_MCP, 'Read']): string {
+  function guardBody(
+    stream: boolean,
+    toolNames: string[] = [LONG_MCP, 'Read'],
+  ): string {
     return JSON.stringify({
       model: 'fake-model-a',
       max_tokens: 16,
       stream,
       messages: [
         { role: 'user', content: 'use the tool' },
-        { role: 'assistant', content: [
-          { type: 'tool_use', id: 'call_hist', name: toolNames[0], input: { value: '1' } },
-        ] },
-        { role: 'user', content: [
-          { type: 'tool_result', tool_use_id: 'call_hist', content: 'one' },
-        ] },
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'tool_use',
+              id: 'call_hist',
+              name: toolNames[0],
+              input: { value: '1' },
+            },
+          ],
+        },
+        {
+          role: 'user',
+          content: [
+            { type: 'tool_result', tool_use_id: 'call_hist', content: 'one' },
+          ],
+        },
       ],
       tools: toolNames.map((name) => ({
-        name, description: 'a tool', input_schema: { type: 'object' },
+        name,
+        description: 'a tool',
+        input_schema: { type: 'object' },
       })),
     });
   }
 
-  interface Recorded { raw: string; body: Record<string, unknown> }
+  interface Recorded {
+    raw: string;
+    body: Record<string, unknown>;
+  }
 
   /** Upstream that answers with a function_call named as tools[0] was sent. */
-  function toolCallingUpstream(path: ParityPath, recorded: Recorded[], statuses: number[] = []) {
+  function toolCallingUpstream(
+    path: ParityPath,
+    recorded: Recorded[],
+    statuses: number[] = [],
+  ) {
     return startUpstream((req, res) => {
       const chunks: Buffer[] = [];
       req.on('data', (chunk: Buffer) => chunks.push(chunk));
@@ -2736,9 +2918,16 @@ describe('TranslationProxyBase Responses tool-name guard', () => {
           return;
         }
         const item = {
-          type: 'function_call', call_id: 'call_new', name: body.tools[0].name, arguments: '{"value":"42"}',
+          type: 'function_call',
+          call_id: 'call_new',
+          name: body.tools[0].name,
+          arguments: '{"value":"42"}',
         };
-        const response = { status: 'completed', output: [item], usage: PARITY_USAGE };
+        const response = {
+          status: 'completed',
+          output: [item],
+          usage: PARITY_USAGE,
+        };
         if (path === 'json') {
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(response));
@@ -2746,22 +2935,38 @@ describe('TranslationProxyBase Responses tool-name guard', () => {
         }
         res.writeHead(200, { 'Content-Type': 'text/event-stream' });
         res.end(
-          upstreamSse('response.output_item.added', { output_index: 0, item: { ...item, arguments: '' } }) +
-          upstreamSse('response.function_call_arguments.delta', { output_index: 0, delta: item.arguments }) +
-          upstreamSse('response.output_item.done', { output_index: 0, item }) +
-          upstreamSse('response.completed', { response }),
+          upstreamSse('response.output_item.added', {
+            output_index: 0,
+            item: { ...item, arguments: '' },
+          }) +
+            upstreamSse('response.function_call_arguments.delta', {
+              output_index: 0,
+              delta: item.arguments,
+            }) +
+            upstreamSse('response.output_item.done', {
+              output_index: 0,
+              item,
+            }) +
+            upstreamSse('response.completed', { response }),
         );
       });
     });
   }
 
   /** The tool_use block the client received, from SSE or JSON. */
-  function clientToolUse(path: ParityPath, body: string): Record<string, unknown> | undefined {
+  function clientToolUse(
+    path: ParityPath,
+    body: string,
+  ): Record<string, unknown> | undefined {
     if (path !== 'stream') {
-      const content = (JSON.parse(body) as { content: Array<Record<string, unknown>> }).content;
+      const content = (
+        JSON.parse(body) as { content: Array<Record<string, unknown>> }
+      ).content;
       return content.find((block) => block['type'] === 'tool_use');
     }
-    const start = parseSseBody(body).find((frame) => frame.event === 'content_block_start');
+    const start = parseSseBody(body).find(
+      (frame) => frame.event === 'content_block_start',
+    );
     return start?.data['content_block'] as Record<string, unknown> | undefined;
   }
 
@@ -2774,7 +2979,10 @@ describe('TranslationProxyBase Responses tool-name guard', () => {
     h.proxy.getApiEndpointMock.mockResolvedValue(upstream.origin);
     h.proxy.onAuthFailureMock.mockResolvedValue(true);
     try {
-      const result = await request(`${h.url}/v1/messages`, { method: 'POST', body });
+      const result = await request(`${h.url}/v1/messages`, {
+        method: 'POST',
+        body,
+      });
       return { result, recorded, proxy: h.proxy };
     } finally {
       await h.stop();
@@ -2782,62 +2990,97 @@ describe('TranslationProxyBase Responses tool-name guard', () => {
     }
   }
 
-  it.each(PARITY_PATHS)('a 70-character MCP name round-trips via %s, including replayed history', async (path) => {
-    expect(LONG_MCP).toHaveLength(70);
-    const alias = aliasOf(LONG_MCP);
-    const { result, recorded } = await run(path, guardBody(path === 'stream'));
+  it.each(PARITY_PATHS)(
+    'a 70-character MCP name round-trips via %s, including replayed history',
+    async (path) => {
+      expect(LONG_MCP).toHaveLength(70);
+      const alias = aliasOf(LONG_MCP);
+      const { result, recorded } = await run(
+        path,
+        guardBody(path === 'stream'),
+      );
 
-    expect(recorded).toHaveLength(1);
-    const sent = recorded[0].body as {
-      tools: Array<{ name: string }>;
-      input: Array<{ type?: string; name?: string; call_id?: string }>;
-    };
-    expect(sent.tools.map((tool) => tool.name)).toEqual([alias, 'Read']);
-    expect(alias).toMatch(VALID_NAME);
-    const history = sent.input.find((item) => item.type === 'function_call');
-    expect(history).toMatchObject({ call_id: 'call_hist', name: alias });
-    expect(recorded[0].raw).not.toContain(LONG_MCP);
+      expect(recorded).toHaveLength(1);
+      const sent = recorded[0].body as {
+        tools: Array<{ name: string }>;
+        input: Array<{ type?: string; name?: string; call_id?: string }>;
+      };
+      expect(sent.tools.map((tool) => tool.name)).toEqual([alias, 'Read']);
+      expect(alias).toMatch(VALID_NAME);
+      const history = sent.input.find((item) => item.type === 'function_call');
+      expect(history).toMatchObject({ call_id: 'call_hist', name: alias });
+      expect(recorded[0].raw).not.toContain(LONG_MCP);
 
-    expect(result.status).toBe(200);
-    expect(clientToolUse(path, result.body)).toMatchObject({ id: 'call_new', name: LONG_MCP });
-    expect(result.body).not.toContain(alias);
-  });
+      expect(result.status).toBe(200);
+      expect(clientToolUse(path, result.body)).toMatchObject({
+        id: 'call_new',
+        name: LONG_MCP,
+      });
+      expect(result.body).not.toContain(alias);
+    },
+  );
 
-  it.each([false, true])('valid names give a byte-identical upstream request (stream=%s)', async (stream) => {
-    const body = guardBody(stream, ['Read', 'mcp__srv__tool']);
-    const { result, recorded } = await run(stream ? 'stream' : 'json', body);
-    expect(result.status).toBe(200);
-    expect(recorded[0].raw).toBe(JSON.stringify(
-      translateAnthropicToResponses(JSON.parse(body) as AnthropicMessagesRequest, { modelPrefix: '' })));
-  });
+  it.each([false, true])(
+    'valid names give a byte-identical upstream request (stream=%s)',
+    async (stream) => {
+      const body = guardBody(stream, ['Read', 'mcp__srv__tool']);
+      const { result, recorded } = await run(stream ? 'stream' : 'json', body);
+      expect(result.status).toBe(200);
+      expect(recorded[0].raw).toBe(
+        JSON.stringify(
+          translateAnthropicToResponses(
+            JSON.parse(body) as AnthropicMessagesRequest,
+            { modelPrefix: '' },
+          ),
+        ),
+      );
+    },
+  );
 
   it.each([
     ['alias equals another tool original name', [LONG_MCP, aliasOf(LONG_MCP)]],
     ['history name equals an alias', [aliasOf(LONG_MCP), LONG_MCP]],
-  ])('a collision (%s) is a 400 sent before any upstream call', async (_case, names) => {
-    const { result, recorded, proxy } = await run('stream', guardBody(true, names));
-    expect(recorded).toHaveLength(0);
-    expect(proxy.getApiEndpointMock).not.toHaveBeenCalled();
-    expect(proxy.getHeadersMock).not.toHaveBeenCalled();
-    expect(result.status).toBe(400);
-    expect(JSON.parse(result.body)).toEqual({
-      type: 'error',
-      error: {
-        type: 'invalid_request_error',
-        message: `Tool name collision after Responses name normalization: ${aliasOf(LONG_MCP)}`,
-      },
-    });
-  });
+  ])(
+    'a collision (%s) is a 400 sent before any upstream call',
+    async (_case, names) => {
+      const { result, recorded, proxy } = await run(
+        'stream',
+        guardBody(true, names),
+      );
+      expect(recorded).toHaveLength(0);
+      expect(proxy.getApiEndpointMock).not.toHaveBeenCalled();
+      expect(proxy.getHeadersMock).not.toHaveBeenCalled();
+      expect(result.status).toBe(400);
+      expect(JSON.parse(result.body)).toEqual({
+        type: 'error',
+        error: {
+          type: 'invalid_request_error',
+          message: `Tool name collision after Responses name normalization: ${aliasOf(LONG_MCP)}`,
+        },
+      });
+    },
+  );
 
-  it.each(PARITY_PATHS)('the 401 retry keeps the alias and its reverse map via %s', async (path) => {
-    const alias = aliasOf(LONG_MCP);
-    const { result, recorded, proxy } = await run(path, guardBody(path === 'stream'), [401]);
-    expect(proxy.onAuthFailureMock).toHaveBeenCalledTimes(1);
-    expect(recorded).toHaveLength(2);
-    expect(recorded[1].raw).toBe(recorded[0].raw);
-    expect((recorded[1].body as { tools: Array<{ name: string }> }).tools[0].name).toBe(alias);
-    expect(result.status).toBe(200);
-    expect(clientToolUse(path, result.body)).toMatchObject({ name: LONG_MCP });
-    expect(result.body).not.toContain(alias);
-  });
+  it.each(PARITY_PATHS)(
+    'the 401 retry keeps the alias and its reverse map via %s',
+    async (path) => {
+      const alias = aliasOf(LONG_MCP);
+      const { result, recorded, proxy } = await run(
+        path,
+        guardBody(path === 'stream'),
+        [401],
+      );
+      expect(proxy.onAuthFailureMock).toHaveBeenCalledTimes(1);
+      expect(recorded).toHaveLength(2);
+      expect(recorded[1].raw).toBe(recorded[0].raw);
+      expect(
+        (recorded[1].body as { tools: Array<{ name: string }> }).tools[0].name,
+      ).toBe(alias);
+      expect(result.status).toBe(200);
+      expect(clientToolUse(path, result.body)).toMatchObject({
+        name: LONG_MCP,
+      });
+      expect(result.body).not.toContain(alias);
+    },
+  );
 });

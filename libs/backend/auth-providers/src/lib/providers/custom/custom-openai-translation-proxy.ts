@@ -181,11 +181,10 @@ export class CustomOpenAiTranslationProxy extends TranslationProxyBase {
   }
 
   /**
-   * Custom entries normally advertise no static catalog — models come from the
-   * entry's `defaultTiers` or whatever slug the user types. Returns whatever
-   * the entry declared, else an empty list.
+   * The models the user declared on this custom entry (user configuration,
+   * not a repo literal), else an empty list. Served on `GET /v1/models`.
    */
-  protected getStaticModels(): Array<{ id: string }> {
+  protected override getListedModels(): Array<{ id: string }> {
     return [...(this.customConfig.staticModels ?? [])];
   }
 }

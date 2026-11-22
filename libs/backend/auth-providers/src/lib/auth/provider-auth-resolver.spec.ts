@@ -887,17 +887,25 @@ describe('ProviderAuthResolver — live-catalogue tiers for a lane (TASK_2026_26
     expect(
       first?.env.ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES,
     ).toBeUndefined();
-    expect(logger.info).toHaveBeenCalledWith(
-      '[provider-auth] replaced static tier default',
-      {
-        providerId: 'kimi-code',
-        tier: 'sonnet',
-        staticId: fallback,
-        liveId: 'catalogue-new',
-      },
-    );
+    const replacementWarnings = () =>
+      (logger.warn as jest.Mock).mock.calls.filter(
+        ([message]) =>
+          message === '[provider-auth] tier preference not in live catalog',
+      );
+    expect(replacementWarnings()).toEqual([
+      [
+        '[provider-auth] tier preference not in live catalog',
+        {
+          providerId: 'kimi-code',
+          tier: 'sonnet',
+          preferred: fallback,
+          resolved: 'catalogue-new',
+          rule: 'derived',
+        },
+      ],
+    ]);
     await resolver.resolve('kimi-code', 'lane');
-    expect(logger.info).toHaveBeenCalledTimes(1);
+    expect(replacementWarnings()).toHaveLength(1);
   });
 
   it('keeps a static default when no live tier can replace it', async () => {

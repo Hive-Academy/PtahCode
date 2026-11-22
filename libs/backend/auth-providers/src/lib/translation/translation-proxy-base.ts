@@ -199,6 +199,9 @@ interface RequestTimingContext {
   requestParsedAt: number;
 }
 
+/** Why a per-request protocol lookup refused a model. */
+export type UnroutedModelOutcome = 'not-listed' | 'catalog-unavailable';
+
 export abstract class TranslationProxyBase implements ITranslationProxy {
   private server: http.Server | null = null;
   private port: number | null = null;
@@ -242,10 +245,14 @@ export abstract class TranslationProxyBase implements ITranslationProxy {
   protected abstract onAuthFailure(): Promise<boolean>;
 
   /**
-   * Get the static list of models supported by this provider.
-   * Used for the /v1/models endpoint response.
+   * Models this proxy itself lists on `GET /v1/models`. Empty by default: the
+   * model picker reads each vendor's live list, never this route. Only a
+   * proxy whose list is user configuration (custom OpenAI-compatible entries)
+   * overrides it.
    */
-  protected abstract getStaticModels(): Array<{ id: string }>;
+  protected getListedModels(): Array<{ id: string }> {
+    return [];
+  }
 
   /** Kept overridable only so timing tests do not wait ten minutes. */
   protected getUpstreamTimeoutMs(): number {
@@ -463,7 +470,7 @@ export abstract class TranslationProxyBase implements ITranslationProxy {
       return;
     }
     if (url === '/v1/models' && method === 'GET') {
-      const models = this.getStaticModels().map((m) => ({
+      const models = this.getListedModels().map((m) => ({
         id: m.id,
         object: 'model' as const,
         created: 0,
@@ -532,22 +539,29 @@ export abstract class TranslationProxyBase implements ITranslationProxy {
       return;
     }
     const suppliedModel = envelope.model;
-    envelope.model = this.normalizeModelId(suppliedModel);
+    envelope.model = await this.resolveRequestModelId(suppliedModel);
     const requestTiming: RequestTimingContext = {
       requestReceivedAt,
       requestParsedAt: this.timing.now(),
     };
 
-    const protocol = await this.resolveUpstreamProtocolForRequest(envelope.model);
-    if (protocol === undefined) {
+    const resolution = await this.resolveUpstreamProtocolForRequest(
+      envelope.model,
+    );
+    if (
+      resolution === undefined ||
+      resolution === 'not-listed' ||
+      resolution === 'catalog-unavailable'
+    ) {
       sendErrorResponse(
         res,
         400,
         'invalid_request_error',
-        `Model '${envelope.model}' is not supported by ${this.config.name} in this Ptah version. Choose a listed model or update Ptah.`,
+        this.getUnsupportedModelMessage(envelope.model, resolution),
       );
       return;
     }
+    const protocol = resolution;
 
     this.logger.debug(
       `${this.logPrefix} [${requestId}] Forwarding request for model: ${envelope.model}, ` +
@@ -705,10 +719,38 @@ export abstract class TranslationProxyBase implements ITranslationProxy {
     return 'chat/completions';
   }
 
+  /**
+   * The model id forwarded upstream for the id the client sent. Async so a
+   * provider can resolve tier aliases against its live catalog. Default: the
+   * synchronous {@link normalizeModelId}.
+   */
+  protected async resolveRequestModelId(modelId: string): Promise<string> {
+    return this.normalizeModelId(modelId);
+  }
+
+  /**
+   * Per-request protocol. `undefined`, `'not-listed'` and
+   * `'catalog-unavailable'` refuse the request with a 400 worded by
+   * {@link getUnsupportedModelMessage}; the last two say why.
+   */
   protected async resolveUpstreamProtocolForRequest(
     modelId: string,
-  ): Promise<'messages' | 'chat/completions' | 'responses' | undefined> {
+  ): Promise<
+    | 'messages'
+    | 'chat/completions'
+    | 'responses'
+    | UnroutedModelOutcome
+    | undefined
+  > {
     return this.resolveUpstreamProtocol(modelId);
+  }
+
+  /** The 400 text for a model this proxy will not route. */
+  protected getUnsupportedModelMessage(
+    modelId: string,
+    _outcome?: UnroutedModelOutcome,
+  ): string {
+    return `Model '${modelId}' is not supported by ${this.config.name}.`;
   }
 
   protected getAuthFailureMessage(): string {
@@ -1289,7 +1331,8 @@ export abstract class TranslationProxyBase implements ITranslationProxy {
               // keep the shared path. An owning handler answers a failure
               // before its headers with an HTTP error, never a destroyed socket.
               streamingHandlerOwnsFailure =
-                !!originalRequest.stream && !!params.streamingOwnsUpstreamFailure;
+                !!originalRequest.stream &&
+                !!params.streamingOwnsUpstreamFailure;
               // The owning handler defers its headers until client-visible
               // output. Upstream heartbeats keep the socket-idle timeout
               // alive, so bound the wait for headers separately.

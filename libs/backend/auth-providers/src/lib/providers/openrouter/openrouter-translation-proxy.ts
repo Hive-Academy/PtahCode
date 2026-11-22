@@ -99,18 +99,9 @@ export class OpenRouterTranslationProxy extends TranslationProxyBase {
    * models. It does not expose the newer /responses (Responses API) surface,
    * so every request routes through Chat Completions.
    */
-  protected override resolveUpstreamProtocol(_modelId: string): 'chat/completions' {
+  protected override resolveUpstreamProtocol(
+    _modelId: string,
+  ): 'chat/completions' {
     return 'chat/completions';
-  }
-
-  /**
-   * OpenRouter has no static model list — the full catalog (200+ models) is
-   * fetched dynamically via ProviderModelsService using the
-   * https://openrouter.ai/api/v1/models endpoint. Return empty so the base
-   * class's /v1/models proxy route reports no pre-baked models (consumers
-   * should query ProviderModelsService directly).
-   */
-  protected getStaticModels(): Array<{ id: string }> {
-    return [];
   }
 }

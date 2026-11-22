@@ -15,3 +15,4 @@
 | 11 | S-C: native child spawn passes the model through when the Claude catalog is empty (runtime validates); refusing all native spawns on a fetch failure would be a regression and pass-through is not a repo literal | plan-review-2.md, user rule |
 | 12 | USER APPROVED Gate 2 (plan incl. Revision 1+2 and removals in parity-inventory.md) | user message 2026-11-22 'approved' |
 | 13 | B1.1+B1.2 committed together: both edit providers/index.ts. dashboard-budgets.spec.ts fails 2 tests identically on clean main (pre-existing, unrelated; RangeError stack-depth test) | b1-gate.log, budgets-main.log |
+| 14 | B2.1-B2.3 committed as one commit (one plan batch; sub-batch files interleave in provider-models.service.ts). 4 out-of-set spec fixtures added to B2 by coordinator | b2-gate.log |

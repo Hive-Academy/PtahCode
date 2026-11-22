@@ -2,10 +2,15 @@ import axios from 'axios';
 import { z } from 'zod';
 import {
   getAnthropicProvider,
-  getOpenCodeModelProtocol,
   type OpenCodeProtocol,
   type OpenCodeProviderId,
+  type ModelListFailureReason,
+  type ProviderModelInfo,
 } from '@ptah-extension/shared';
+import {
+  ModelListError,
+  classifyModelListFailure,
+} from '../../model-list-error';
 
 export const OPENCODE_LIVE_TTL_MS = 6 * 60 * 60 * 1000;
 export const OPENCODE_LIVE_RETRY_MS = 5 * 60 * 1000;
@@ -25,8 +30,7 @@ const NPM_PROTOCOL: Readonly<Record<string, OpenCodeProtocol>> = {
  * Own-property lookup for keys that arrive from the remote gateway payload.
  * A plain `table[key]` returns an inherited `Object.prototype` member for a
  * key such as `constructor`, `toString` or `__proto__` — truthy, and then
- * used as the model's protocol. The same guard `getOpenCodeModelProtocol`
- * already applies to its static route table.
+ * used as the model's protocol.
  */
 function ownProtocol(
   table: Readonly<Record<string, OpenCodeProtocol>>,
@@ -44,6 +48,8 @@ export function protocolFromNpm(npm: string): OpenCodeProtocol | undefined {
 const modelSchema = z.object({
   id: z.string().min(1),
   name: z.string().optional(),
+  type: z.string().optional(),
+  recommended_api: z.string().optional(),
   limit: z.object({ context: z.number().nonnegative().optional() }).optional(),
   capabilities: z
     .object({ tools: z.object({ supported: z.boolean() }).optional() })
@@ -59,13 +65,27 @@ const apiEntrySchema = z.object({
   sdk: z.object({ aisdk: z.string() }).optional(),
 });
 
-export type OpenCodeLiveModel = {
-  id: string;
-  name: string;
-  contextLength: number;
-  supportsToolUse?: boolean;
-  protocol?: OpenCodeProtocol;
+/** A routable OpenCode chat model, in the shape the model picker lists. */
+export type OpenCodeLiveModel = ProviderModelInfo & {
+  upstreamProtocol: OpenCodeProtocol;
 };
+
+/**
+ * Where the versioned persisted catalog is read from and written to. Attached
+ * once at DI registration (`usePersistedCatalog`); the gateway catalog itself
+ * stays credential-free.
+ */
+export interface OpenCodeCatalogStore {
+  read(
+    providerId: OpenCodeProviderId,
+  ): { models: ProviderModelInfo[]; savedAt: number } | null;
+  write(providerId: OpenCodeProviderId, models: ProviderModelInfo[]): void;
+}
+
+/** How a request for one model id is routed. */
+export type OpenCodeRouteResolution =
+  | { outcome: 'routed'; protocol: OpenCodeProtocol }
+  | { outcome: 'not-listed' | 'catalog-unavailable' };
 
 export function protocolFromGatewayApi(
   api: Record<string, unknown> | undefined,
@@ -82,10 +102,22 @@ export function protocolFromGatewayApi(
     : undefined;
 }
 
+/** `recommended_api` first; otherwise the single-`api`-key rule. */
+function rowProtocol(
+  row: z.infer<typeof modelSchema>,
+): OpenCodeProtocol | undefined {
+  const recommended =
+    row.recommended_api !== undefined
+      ? ownProtocol(API_PROTOCOL, row.recommended_api)
+      : undefined;
+  return recommended ?? protocolFromGatewayApi(row.api);
+}
+
 type Cache = {
   models: ReadonlyMap<string, OpenCodeLiveModel>;
   updatedAt: number;
   failedAt: number;
+  failureReason?: ModelListFailureReason;
 };
 type LiveRoutesLogger = {
   debug(message: string, context?: Record<string, unknown>): void;
@@ -95,6 +127,7 @@ type LiveRoutesLogger = {
 export class OpenCodeLiveRoutes {
   private readonly caches = new Map<OpenCodeProviderId, Cache>();
   private readonly inFlight = new Map<OpenCodeProviderId, Promise<void>>();
+  private store: OpenCodeCatalogStore | null = null;
 
   constructor(
     private readonly getJson: (url: string) => Promise<unknown> = async (
@@ -110,62 +143,166 @@ export class OpenCodeLiveRoutes {
     private readonly options: { logger?: LiveRoutesLogger } = {},
   ) {}
 
+  /** Attach the versioned persisted catalog. Called once at DI registration. */
+  usePersistedCatalog(store: OpenCodeCatalogStore): void {
+    this.store = store;
+  }
+
   private endpoint(providerId: OpenCodeProviderId): string | undefined {
     const baseUrl = getAnthropicProvider(providerId)?.baseUrl;
     return baseUrl ? `${baseUrl.replace(/\/+$/, '')}/models` : undefined;
   }
 
-  async refresh(providerId: OpenCodeProviderId): Promise<void> {
+  private debug(message: string, context: Record<string, unknown>): void {
+    this.options.logger?.debug(message, context);
+  }
+
+  private readPersisted(
+    providerId: OpenCodeProviderId,
+  ): { models: ProviderModelInfo[]; savedAt: number } | null {
+    if (!this.store) return null;
+    try {
+      return this.store.read(providerId);
+    } catch (error: unknown) {
+      // degradation-audit: optional-capability - a failed store read only means no saved catalog; routing continues on the live catalog or reports catalog-unavailable.
+      this.debug('OpenCode persisted catalog read failed', {
+        providerId,
+        message: error instanceof Error ? error.message : 'Unknown error',
+      });
+      return null;
+    }
+  }
+
+  private writePersisted(
+    providerId: OpenCodeProviderId,
+    models: ProviderModelInfo[],
+  ): void {
+    if (!this.store) return;
+    try {
+      this.store.write(providerId, models);
+    } catch (error: unknown) {
+      // degradation-audit: optional-capability - the live catalog is already cached in memory; a failed write only loses the offline copy.
+      this.debug('OpenCode persisted catalog write failed', {
+        providerId,
+        message: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }
+
+  /** The live map, when one younger than the TTL is cached. */
+  private liveModels(
+    providerId: OpenCodeProviderId,
+  ): ReadonlyMap<string, OpenCodeLiveModel> | null {
+    const cache = this.caches.get(providerId);
+    return cache?.updatedAt &&
+      cache.models.size > 0 &&
+      Date.now() - cache.updatedAt < OPENCODE_LIVE_TTL_MS
+      ? cache.models
+      : null;
+  }
+
+  private parseCatalog(
+    providerId: OpenCodeProviderId,
+    payload: unknown,
+  ): Map<string, OpenCodeLiveModel> {
+    const parsed = gatewaySchema.safeParse(payload);
+    if (!parsed.success) throw new ModelListError('bad-response');
+    const providerName = getAnthropicProvider(providerId)?.name ?? 'OpenCode';
+    const models = new Map<string, OpenCodeLiveModel>();
+    let skipped = 0;
+    for (const raw of parsed.data.data) {
+      const entry = modelSchema.safeParse(raw);
+      const row = entry.success ? entry.data : undefined;
+      const protocol = row ? rowProtocol(row) : undefined;
+      if (
+        !row ||
+        (row.type !== undefined && row.type !== 'chat') ||
+        !protocol
+      ) {
+        skipped++;
+        continue;
+      }
+      const name = row.name ?? row.id;
+      const contextLength = row.limit?.context ?? 0;
+      const tools = row.capabilities?.tools?.supported;
+      models.set(row.id, {
+        id: row.id,
+        name,
+        description: `${name} via ${providerName}`,
+        contextLength,
+        ...(contextLength > 0 && { contextLengthSource: 'provider' as const }),
+        ...(tools === undefined
+          ? { supportsToolUse: false, toolUseUnknown: true as const }
+          : { supportsToolUse: tools }),
+        upstreamProtocol: protocol,
+      });
+    }
+    if (skipped > 0) {
+      this.debug('OpenCode live model refresh skipped catalog entries', {
+        providerId,
+        kept: models.size,
+        skipped,
+      });
+    }
+    if (models.size === 0) throw new ModelListError('bad-response');
+    return models;
+  }
+
+  /**
+   * Fetch the gateway catalog. Joins an in-flight refresh. Without `force`, a
+   * failure within the last {@link OPENCODE_LIVE_RETRY_MS} suppresses a new
+   * attempt; `force` (a user Retry) skips that backoff. A success also writes
+   * the catalog through the attached store, so request routing alone keeps
+   * the persisted copy fresh.
+   */
+  async refresh(
+    providerId: OpenCodeProviderId,
+    options: { force?: boolean } = {},
+  ): Promise<void> {
     const existing = this.inFlight.get(providerId);
     if (existing) return existing;
     const cache = this.caches.get(providerId);
-    if (cache && Date.now() - cache.failedAt < OPENCODE_LIVE_RETRY_MS) return;
+    if (
+      !options.force &&
+      cache &&
+      Date.now() - cache.failedAt < OPENCODE_LIVE_RETRY_MS
+    )
+      return;
     const endpoint = this.endpoint(providerId);
-    if (!endpoint) return;
+    if (!endpoint) {
+      this.caches.set(providerId, {
+        models: cache?.models ?? new Map(),
+        updatedAt: cache?.updatedAt ?? 0,
+        failedAt: Date.now(),
+        failureReason: 'no-live-source',
+      });
+      return;
+    }
     const promise = (async () => {
       try {
-        const parsed = gatewaySchema.parse(await this.getJson(endpoint));
-        const models = new Map<string, OpenCodeLiveModel>();
-        let skipped = 0;
-        for (const raw of parsed.data) {
-          const entry = modelSchema.safeParse(raw);
-          if (!entry.success) {
-            skipped++;
-            continue;
-          }
-          const model = entry.data;
-          models.set(model.id, {
-            id: model.id,
-            name: model.name ?? model.id,
-            contextLength: model.limit?.context ?? 0,
-            supportsToolUse: model.capabilities?.tools?.supported,
-            protocol: protocolFromGatewayApi(model.api),
-          });
-        }
-        if (models.size === 0) throw new Error('No valid models in catalog');
-        if (skipped > 0 && this.options.logger) {
-          this.options.logger.debug(
-            'OpenCode live model refresh skipped invalid catalog entries',
-            { providerId, kept: models.size, skipped },
-          );
-        }
+        const models = this.parseCatalog(
+          providerId,
+          await this.getJson(endpoint),
+        );
         this.caches.set(providerId, {
           models,
           updatedAt: Date.now(),
           failedAt: 0,
         });
+        this.writePersisted(providerId, [...models.values()]);
       } catch (error: unknown) {
-        // degradation-audit: optional-capability - retain the last good map and rate-limit failed public refreshes.
-        if (this.options.logger) {
-          this.options.logger.debug('OpenCode live model refresh failed', {
-            providerId,
-            message: error instanceof Error ? error.message : 'Unknown error',
-          });
-        }
+        // degradation-audit: reported - the classified reason is kept on the cache and surfaced by list() as ModelListError; the last good map is retained and failed public refreshes are rate-limited.
+        const failureReason = classifyModelListFailure(error);
+        this.debug('OpenCode live model refresh failed', {
+          providerId,
+          failureReason,
+          message: error instanceof Error ? error.message : 'Unknown error',
+        });
         this.caches.set(providerId, {
           models: cache?.models ?? new Map(),
           updatedAt: cache?.updatedAt ?? 0,
           failedAt: Date.now(),
+          failureReason,
         });
       } finally {
         this.inFlight.delete(providerId);
@@ -175,12 +312,52 @@ export class OpenCodeLiveRoutes {
     return promise;
   }
 
+  /**
+   * The live catalog rows. Refreshes when the cache is missing or older than
+   * {@link OPENCODE_LIVE_RETRY_MS}. Throws `ModelListError` with the reason
+   * of the last failure when no live map younger than the TTL exists.
+   */
+  async list(
+    providerId: OpenCodeProviderId,
+    options: { force?: boolean } = {},
+  ): Promise<OpenCodeLiveModel[]> {
+    const cache = this.caches.get(providerId);
+    if (!cache || Date.now() - cache.updatedAt >= OPENCODE_LIVE_RETRY_MS)
+      await this.refresh(providerId, options);
+    const live = this.liveModels(providerId);
+    if (live) return [...live.values()];
+    throw new ModelListError(
+      this.caches.get(providerId)?.failureReason ?? 'unexpected',
+    );
+  }
+
+  /**
+   * Model ids to resolve aliases against: the live catalog, else one awaited
+   * refresh under the backoff rule, else the persisted catalog, else `null`.
+   */
+  async modelIds(
+    providerId: OpenCodeProviderId,
+  ): Promise<readonly string[] | null> {
+    if (!this.liveModels(providerId)) await this.refresh(providerId);
+    const live = this.liveModels(providerId);
+    if (live) return [...live.keys()];
+    const persisted = this.readPersisted(providerId);
+    return persisted && persisted.models.length > 0
+      ? persisted.models.map((m) => m.id)
+      : null;
+  }
+
+  /**
+   * Route one request: a live hit; otherwise, when the cache is missing,
+   * expired, or misses the id and is older than the backoff, one awaited
+   * refresh and a second live lookup; then the persisted row's protocol.
+   * `not-listed` when a catalog is on hand without the id, otherwise
+   * `catalog-unavailable`.
+   */
   async resolve(
     providerId: OpenCodeProviderId,
     modelId: string,
-  ): Promise<OpenCodeProtocol | undefined> {
-    const staticProtocol = getOpenCodeModelProtocol(providerId, modelId);
-    if (staticProtocol) return staticProtocol;
+  ): Promise<OpenCodeRouteResolution> {
     const cache = this.caches.get(providerId);
     if (
       !cache ||
@@ -190,20 +367,18 @@ export class OpenCodeLiveRoutes {
     ) {
       await this.refresh(providerId);
     }
-    return this.caches.get(providerId)?.models.get(modelId)?.protocol;
-  }
-
-  async list(
-    providerId: OpenCodeProviderId,
-  ): Promise<ReadonlyMap<string, OpenCodeLiveModel> | null> {
-    const cache = this.caches.get(providerId);
-    if (!cache || Date.now() - cache.updatedAt >= OPENCODE_LIVE_RETRY_MS)
-      await this.refresh(providerId);
-    const current = this.caches.get(providerId);
-    return current?.updatedAt &&
-      Date.now() - current.updatedAt < OPENCODE_LIVE_TTL_MS
-      ? current.models
-      : null;
+    const live = this.liveModels(providerId);
+    const hit = live?.get(modelId);
+    if (hit) return { outcome: 'routed', protocol: hit.upstreamProtocol };
+    if (live) return { outcome: 'not-listed' };
+    const persisted = this.readPersisted(providerId);
+    if (!persisted || persisted.models.length === 0)
+      return { outcome: 'catalog-unavailable' };
+    const row = persisted.models.find((m) => m.id === modelId);
+    if (!row) return { outcome: 'not-listed' };
+    return row.upstreamProtocol
+      ? { outcome: 'routed', protocol: row.upstreamProtocol }
+      : { outcome: 'catalog-unavailable' };
   }
 }
 

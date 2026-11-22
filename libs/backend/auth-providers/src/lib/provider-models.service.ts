@@ -4,11 +4,11 @@
  * Fetches available models from any Anthropic-compatible provider and manages
  * model tier mappings for Sonnet/Opus/Haiku overrides.
  *
- * Supports:
- * - Dynamic model listing via API (OpenRouter)
- * - Hybrid: dynamic with static fallback (Z.AI)
- * - Static only (Kimi Code, OpenCode Go)
- * - Per-provider model cache and tier config persistence
+ * Every provider's list comes from one live route (the OpenCode gateway, a
+ * registered dynamic fetcher, or the provider's `/v1/models` endpoint). When
+ * the live fetch fails, the list saved from the last live success is used;
+ * otherwise the answer is an explicit `unavailable` with a closed failure
+ * reason. There is no repo-literal model list anywhere in this chain.
  *
  * Environment Variables Set:
  * - ANTHROPIC_DEFAULT_SONNET_MODEL
@@ -21,14 +21,23 @@ import axios from 'axios';
 import { Logger, ConfigManager, TOKENS } from '@ptah-extension/vscode-core';
 import type {
   AuthEnv,
+  ModelListFailureReason,
   ProviderModelInfo,
+  ProviderModelListSource,
   ProviderModelTier,
   ProviderTierScope,
   ModelPricing,
 } from '@ptah-extension/shared';
 import {
+  CREDENTIAL_FAILURE_REASONS,
+  closestLiveModel,
+  getAnthropicProvider,
+  getProviderLiveModelCapabilities,
+  getPtahCliLaneProvider,
+  isOpenCodeProviderId,
   replaceProviderContextWindows,
   updatePricingMap,
+  type AnthropicProvider,
 } from '@ptah-extension/shared';
 import {
   SdkError,
@@ -36,14 +45,6 @@ import {
   TIER_METADATA_ENV_VAR_MAP,
   ALL_TIER_ENV_KEYS,
 } from '@ptah-extension/agent-sdk';
-import {
-  getAnthropicProvider,
-  getPtahCliLaneProvider,
-  getStaticModelCapabilities,
-  isOpenCodeProviderId,
-  getOpenCodeModelProtocol,
-  type AnthropicProvider,
-} from '@ptah-extension/shared';
 import { AUTH_PROVIDERS_TOKENS } from './di/tokens';
 import { openCodeLiveRoutes } from './providers/opencode/opencode-live-routes';
 import { ActiveProviderResolver } from './auth/active-provider-resolver';
@@ -51,40 +52,8 @@ import {
   deriveTiersFromCatalog,
   type DerivedTierMap,
 } from './model-tier-derivation';
-
-/**
- * Raw model response from OpenRouter-style /v1/models API.
- * OpenRouter uses this format. Requesty differs: it reports tool
- * support as `supports_tool_calling`, per-token prices as top-level
- * `input_price` / `output_price`, and `pricing` as an array of price tiers.
- */
-interface ModelsApiModel {
-  id: string;
-  name?: string;
-  description?: string;
-  context_length?: number;
-  context_window?: number;
-  supported_parameters?: string[];
-  supports_tool_calling?: boolean;
-  input_price?: number;
-  output_price?: number;
-  architecture?: {
-    input_modalities?: string[];
-    output_modalities?: string[];
-  };
-  pricing?:
-    | {
-        prompt?: string;
-        completion?: string;
-        input_cache_read?: string;
-        input_cache_write?: string;
-      }
-    | unknown[];
-}
-
-interface ModelsApiResponse {
-  data: ModelsApiModel[];
-}
+import { ModelListError, classifyModelListFailure } from './model-list-error';
+import { parseModelsApiRows } from './models-api-parser';
 
 /** Per-provider cache entry */
 interface ProviderCache {
@@ -95,23 +64,100 @@ interface ProviderCache {
 /** Callback type for dynamic model fetchers (e.g., Copilot SDK listModels) */
 export type DynamicModelFetcher = () => Promise<ProviderModelInfo[]>;
 
-/** These catalogues hide models for reasons other than availability. */
+/**
+ * One provider's model list and how sure the service is about it.
+ *
+ * `failureReason` is set exactly when `source !== 'live'`. `savedAt` is set
+ * only for `source: 'persisted'`.
+ */
+export interface ProviderModelList {
+  /** After the `toolUseOnly` filter (rows with unknown tool support kept). */
+  models: ProviderModelInfo[];
+  /** Size of the full, unfiltered list. */
+  totalCount: number;
+  source: ProviderModelListSource;
+  /** Epoch ms at which a persisted list was fetched live. */
+  savedAt?: number;
+  failureReason?: ModelListFailureReason;
+  /** @deprecated always false; deleted in B6.3. Keeps rpc-handlers compiling. */
+  isStatic: false;
+}
+
+/** A persisted catalog read back: the saved rows and when they were fetched. */
+export interface PersistedModelCatalog {
+  models: ProviderModelInfo[];
+  savedAt: number;
+}
+
+/**
+ * Version of the persisted `provider.<id>.modelCatalog` record. Records with
+ * any other version, or without `origin: 'live'`, predate live-only lists
+ * (they may hold the static rows of an older release) and are ignored.
+ */
+const PERSISTED_CATALOG_SCHEMA = 2;
+
+const UPSTREAM_PROTOCOLS: ReadonlySet<string> = new Set([
+  'messages',
+  'chat/completions',
+  'responses',
+]);
+
+/** Anthropic `/v1/models` pagination bound; one page at `limit=1000` today. */
+const MAX_MODELS_API_PAGES = 10;
+
+/**
+ * These catalogues hide models for reasons other than availability, so a
+ * preference missing from them is not evidence that the model is retired.
+ */
 const FILTERED_TIER_CATALOG_PROVIDERS = new Set([
   'openai-codex',
   'github-copilot',
-  'opencode-zen',
-  'opencode-go',
 ]);
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function stripContextSuffix(id: string): string {
+  return id.replace(/\[[^\]]*\]$/, '');
+}
+
+/**
+ * Validate one persisted row. The record survives across releases, so every
+ * field that drives behaviour is re-checked: `upstreamProtocol` is kept only
+ * when it is one of the three routable literals, `toolUseUnknown` only when it
+ * is exactly `true`.
+ */
+function persistedRow(row: unknown): ProviderModelInfo | null {
+  if (!row || typeof row !== 'object') return null;
+  const candidate = row as Record<string, unknown>;
+  if (
+    typeof candidate['id'] !== 'string' ||
+    typeof candidate['name'] !== 'string'
+  )
+    return null;
+  const { upstreamProtocol, toolUseUnknown, ...rest } =
+    candidate as unknown as ProviderModelInfo;
+  return {
+    ...rest,
+    ...(typeof upstreamProtocol === 'string' &&
+      UPSTREAM_PROTOCOLS.has(upstreamProtocol) && { upstreamProtocol }),
+    ...(toolUseUnknown === true && { toolUseUnknown: true as const }),
+  };
+}
 
 @injectable()
 export class ProviderModelsService {
+  /** `${providerId}:${tier}` pairs whose preference replacement was logged. */
   private static readonly loggedTierReplacements = new Set<string>();
+  /** Providers whose pre-version persisted record was reported, per process. */
+  private static readonly loggedIgnoredCatalogs = new Set<string>();
   private readonly modelCache = new Map<string, ProviderCache>();
   private readonly CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
   /**
    * A persisted catalog older than this is not used: vendors retire models
    * within weeks, so an old saved answer would offer IDs that now fail. The
-   * static list, which the model-list drift check keeps current, takes over.
+   * list is then `unavailable` until the next live success.
    */
   private readonly PERSISTED_CATALOG_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -137,10 +183,11 @@ export class ProviderModelsService {
 
   /**
    * Register a dynamic model fetcher for a specific provider.
-   * When registered, fetchModels() will call this instead of using staticModels.
-   * Falls back to staticModels if the fetcher throws. Capacity evidence must
-   * be declared by the fetcher at the provider response boundary; a positive
-   * selection hint alone does not establish provider provenance.
+   * When registered, it is that provider's live route in fetchModels(). A
+   * throw is classified into a failure reason; an empty result is `empty`.
+   * Capacity evidence must be declared by the fetcher at the provider
+   * response boundary; a positive selection hint alone does not establish
+   * provider provenance.
    */
   registerDynamicFetcher(
     providerId: string,
@@ -178,8 +225,8 @@ export class ProviderModelsService {
   }
 
   /**
-   * Remember the catalog a provider just returned so a later fetch failure can
-   * fall back to real data instead of the hardcoded `staticModels` snapshot.
+   * Remember the full catalog a provider just returned live, as a versioned
+   * record, so a later fetch failure can show real data.
    *
    * Fire-and-forget: a failed write must never break the fetch that produced
    * the data, so this swallows its own errors after logging.
@@ -190,32 +237,49 @@ export class ProviderModelsService {
   ): Promise<void> {
     try {
       await this.config.set(this.getCatalogConfigKey(providerId), {
+        schema: PERSISTED_CATALOG_SCHEMA,
+        origin: 'live',
         models,
         timestamp: Date.now(),
       });
     } catch (error: unknown) {
+      // degradation-audit: reported - logged below; only the offline copy is lost and the next live success writes it again.
       this.logger.debug(
         '[ProviderModelsService] Failed to persist model catalog',
-        {
-          providerId,
-          error: error instanceof Error ? error.message : String(error),
-        },
+        { providerId, error: errorMessage(error) },
       );
     }
   }
 
   /**
-   * Read the persisted catalog. Returns null when absent, malformed, or older
-   * than PERSISTED_CATALOG_MAX_AGE_MS (a missing timestamp counts as too old):
-   * the value survives across releases, so treat it as untrusted.
+   * Read the persisted catalog synchronously. Returns null when absent, not a
+   * `{schema: 2, origin: 'live'}` record, older than
+   * PERSISTED_CATALOG_MAX_AGE_MS (a missing timestamp counts as too old), or
+   * without one valid row: the value survives across releases, so treat it as
+   * untrusted. Never writes; the next live success overwrites an old record.
    */
-  private readPersistedCatalog(providerId: string): ProviderModelInfo[] | null {
-    const stored = this.config.get<{ models?: unknown; timestamp?: unknown }>(
+  private readPersistedCatalog(
+    providerId: string,
+  ): PersistedModelCatalog | null {
+    const stored = this.config.get<unknown>(
       this.getCatalogConfigKey(providerId),
     );
-    const models = stored?.models;
-    if (!Array.isArray(models)) return null;
-    const savedAt = stored?.timestamp;
+    if (!stored || typeof stored !== 'object') return null;
+    const record = stored as Record<string, unknown>;
+    if (
+      record['schema'] !== PERSISTED_CATALOG_SCHEMA ||
+      record['origin'] !== 'live'
+    ) {
+      if (!ProviderModelsService.loggedIgnoredCatalogs.has(providerId)) {
+        ProviderModelsService.loggedIgnoredCatalogs.add(providerId);
+        this.logger.debug(
+          '[ProviderModelsService] Ignoring a catalog saved before live-only lists',
+          { providerId },
+        );
+      }
+      return null;
+    }
+    const savedAt = record['timestamp'];
     if (
       typeof savedAt !== 'number' ||
       !Number.isFinite(savedAt) ||
@@ -227,25 +291,37 @@ export class ProviderModelsService {
       );
       return null;
     }
-    const valid = models.filter(
-      (m): m is ProviderModelInfo =>
-        !!m &&
-        typeof m === 'object' &&
-        typeof (m as ProviderModelInfo).id === 'string' &&
-        typeof (m as ProviderModelInfo).name === 'string',
-    );
-    if (valid.length === 0) return null;
-    this.recordContextWindows(valid, providerId);
-    return valid;
+    const rows = record['models'];
+    if (!Array.isArray(rows)) return null;
+    const models = rows
+      .map(persistedRow)
+      .filter((m): m is ProviderModelInfo => m !== null);
+    if (models.length === 0) return null;
+    this.recordContextWindows(models, providerId);
+    return { models, savedAt };
+  }
+
+  /**
+   * The versioned persisted catalog, for OpenCode request routing (attached
+   * at DI registration). Same rules as the model-list chain's persisted rung.
+   */
+  getPersistedCatalog(providerId: string): PersistedModelCatalog | null {
+    return this.readPersistedCatalog(providerId);
+  }
+
+  /**
+   * Save a live catalog fetched outside {@link fetchModels} (OpenCode
+   * request routing). Fire-and-forget, like every catalog write.
+   */
+  savePersistedCatalog(providerId: string, models: ProviderModelInfo[]): void {
+    void this.persistCatalog(providerId, models);
   }
 
   /**
    * Feed discovered context windows into the shared exact-match registry.
    * Unlike {@link feedPricingMap} this does not require a price: a provider
    * that reports `context_window` for an unpriced model (every Codex
-   * subscription model) is still the authority on that model's window. Never
-   * called for `staticModels` — those are release-time literals, not the
-   * provider's own answer.
+   * subscription model) is still the authority on that model's window.
    *
    * Every caller passes the provider's COMPLETE catalog, so this replaces that
    * provider's evidence: a model the refreshed catalog drops, or now reports
@@ -275,342 +351,228 @@ export class ProviderModelsService {
   }
 
   /**
-   * Fetch models for a provider
+   * Fetch a provider's model list.
    *
-   * For providers with modelsEndpoint: fetches from API (with caching)
-   * For providers with staticModels: returns the static list
+   * Chain: memory cache younger than CACHE_TTL_MS -> the provider's one live
+   * route -> (unless the failure is a credential reason) the persisted live
+   * catalog -> `unavailable`. Never throws for a vendor failure; throws only
+   * for an unknown provider.
+   *
+   * Persisted and unavailable answers are not memory-cached, so a Retry runs
+   * the live route again.
    *
    * @param providerId - Provider ID to fetch models for
-   * @param apiKey - Provider API key (not needed for static-model providers)
-   * @param toolUseOnly - Filter to only models supporting tool use
-   * @returns Array of model info with metadata
+   * @param apiKey - Provider API key (endpoint providers only)
+   * @param toolUseOnly - Keep only models that support tool use or do not
+   *   report it; applied to the returned copy only
    */
   async fetchModels(
     providerId: string,
     apiKey: string | null,
     toolUseOnly = false,
-  ): Promise<{
-    models: ProviderModelInfo[];
-    totalCount: number;
-    isStatic: boolean;
-  }> {
-    // The public gateway decides which IDs still exist. The reviewed static
-    // rows retain their metadata; newly routed live IDs join the list.
-    if (isOpenCodeProviderId(providerId)) {
-      const openCode = getAnthropicProvider(providerId);
-      const routed: ProviderModelInfo[] = (openCode?.staticModels ?? []).map(
-        (m) => ({
-          id: m.id,
-          name: m.name,
-          description: m.description,
-          contextLength: m.contextLength,
-          supportsToolUse: m.supportsToolUse,
-        }),
-      );
-      const liveModels = await openCodeLiveRoutes.list(providerId);
-      const models = liveModels
-        ? routed.filter((m) => liveModels.has(m.id))
-        : routed;
-      if (liveModels) {
-        const staticIds = new Set(routed.map((m) => m.id));
-        for (const live of liveModels.values()) {
-          if (!live.protocol || staticIds.has(live.id)) continue;
-          const siblings = routed.filter(
-            (row) =>
-              getOpenCodeModelProtocol(providerId, row.id) === live.protocol,
-          );
-          models.push({
-            id: live.id,
-            name: live.name,
-            description: `${live.name} via ${openCode?.name ?? 'OpenCode'}`,
-            contextLength: live.contextLength,
-            ...(live.contextLength > 0 && {
-              contextLengthSource: 'provider' as const,
-            }),
-            supportsToolUse:
-              live.supportsToolUse ??
-              (siblings.length > 0 &&
-                siblings.every((row) => row.supportsToolUse)),
-          });
-        }
-      }
-      return {
-        models: toolUseOnly ? models.filter((m) => m.supportsToolUse) : models,
-        totalCount: models.length,
-        isStatic: liveModels === null,
-      };
-    }
-    const dynamicFetcher = this.dynamicFetchers.get(providerId);
-    if (dynamicFetcher) {
-      try {
-        const cached = this.modelCache.get(providerId);
-        const now = Date.now();
-        if (
-          cached &&
-          cached.models.length > 0 &&
-          now - cached.timestamp < this.CACHE_TTL_MS
-        ) {
-          const filtered = toolUseOnly
-            ? cached.models.filter((m) => m.supportsToolUse)
-            : cached.models;
-          return {
-            models: filtered,
-            totalCount: cached.models.length,
-            isStatic: false,
-          };
-        }
-
-        const models = (await dynamicFetcher()).map(
-          ({ contextLengthSource, ...model }) => ({
-            ...model,
-            ...(contextLengthSource === 'provider' &&
-            typeof model.contextLength === 'number' &&
-            Number.isFinite(model.contextLength) &&
-            model.contextLength > 0
-              ? { contextLengthSource: 'provider' as const }
-              : {}),
-          }),
-        );
-        if (models.length > 0) {
-          this.modelCache.set(providerId, { models, timestamp: now });
-          this.recordContextWindows(models, providerId);
-          void this.persistCatalog(providerId, models);
-
-          const filtered = toolUseOnly
-            ? models.filter((m) => m.supportsToolUse)
-            : models;
-          return {
-            models: filtered,
-            totalCount: models.length,
-            isStatic: false,
-          };
-        }
-      } catch (error: unknown) {
-        this.logger.warn(
-          '[ProviderModelsService] Dynamic fetcher failed, falling back to static models',
-          {
-            providerId,
-            error: error instanceof Error ? error.message : String(error),
-          },
-        );
-      }
-      if (!getPtahCliLaneProvider(providerId)) {
-        return { models: [], totalCount: 0, isStatic: false };
-      }
-    }
-
+  ): Promise<ProviderModelList> {
     const provider = getPtahCliLaneProvider(providerId);
-    if (!provider) {
+    const fetcher = this.dynamicFetchers.get(providerId);
+    if (!provider && !fetcher) {
       throw new SdkError(`Unknown provider: ${providerId}`);
     }
-    if (provider.modelsEndpoint && apiKey) {
-      try {
-        const result = await this.fetchDynamicModels(
-          providerId,
-          provider,
-          apiKey,
-          toolUseOnly,
-        );
-        result.models = this.mergeStaticMetadata(result.models, provider);
-        if (result.models.length > 0) {
-          void this.persistCatalog(providerId, result.models);
-        }
-        return result;
-      } catch (error: unknown) {
-        this.logger.warn(
-          '[ProviderModelsService] Dynamic fetch failed, falling back to static models',
-          {
-            providerId,
-            error: error instanceof Error ? error.message : String(error),
-          },
-        );
-      }
-    }
-    // Prefer the last catalog this provider actually returned over the
-    // hardcoded one. `staticModels` is a snapshot frozen at release time and
-    // goes stale on every provider model launch; a persisted catalog is real
-    // provider data that merely isn't live.
-    const persisted = this.readPersistedCatalog(providerId);
-    if (persisted && persisted.length > 0) {
-      this.logger.info(
-        '[ProviderModelsService] Live fetch unavailable — using the last catalog this provider returned',
-        { providerId, count: persisted.length },
-      );
-      const filtered = toolUseOnly
-        ? persisted.filter((m) => m.supportsToolUse)
-        : persisted;
-      return {
-        models: filtered,
-        totalCount: persisted.length,
-        isStatic: false,
-      };
-    }
+    const shape = (
+      models: ProviderModelInfo[],
+      source: ProviderModelListSource,
+      extra: Pick<ProviderModelList, 'savedAt' | 'failureReason'> = {},
+    ): ProviderModelList => ({
+      models: toolUseOnly
+        ? models.filter((m) => m.supportsToolUse || m.toolUseUnknown === true)
+        : models,
+      totalCount: models.length,
+      source,
+      ...extra,
+      isStatic: false,
+    });
 
-    if (provider.staticModels && provider.staticModels.length > 0) {
-      const models: ProviderModelInfo[] = provider.staticModels.map((m) => ({
-        id: m.id,
-        name: m.name,
-        description: m.description,
-        contextLength: m.contextLength,
-        supportsToolUse: m.supportsToolUse,
-        capabilities: m.capabilities ? [...m.capabilities] : undefined,
-      }));
-
-      const filtered = toolUseOnly
-        ? models.filter((m) => m.supportsToolUse)
-        : models;
-
-      return { models: filtered, totalCount: models.length, isStatic: true };
-    }
-    this.logger.debug(
-      '[ProviderModelsService] No models available for provider',
-      {
-        providerId,
-        hasEndpoint: !!provider.modelsEndpoint,
-        hasStatic: !!provider.staticModels?.length,
-        hasKey: !!apiKey,
-      },
-    );
-    return { models: [], totalCount: 0, isStatic: false };
-  }
-
-  /**
-   * Fetch models from a provider's /v1/models API endpoint
-   */
-  private async fetchDynamicModels(
-    providerId: string,
-    provider: AnthropicProvider,
-    apiKey: string | null,
-    toolUseOnly: boolean,
-  ): Promise<{
-    models: ProviderModelInfo[];
-    totalCount: number;
-    isStatic: boolean;
-  }> {
-    const now = Date.now();
     const cached = this.modelCache.get(providerId);
     if (
       cached &&
       cached.models.length > 0 &&
-      now - cached.timestamp < this.CACHE_TTL_MS
+      Date.now() - cached.timestamp < this.CACHE_TTL_MS
     ) {
-      this.logger.debug(
-        `[ProviderModelsService] Returning cached models for ${providerId}`,
-        {
-          count: cached.models.length,
-        },
-      );
-      const filtered = toolUseOnly
-        ? cached.models.filter((m) => m.supportsToolUse)
-        : cached.models;
-      return {
-        models: filtered,
-        totalCount: cached.models.length,
-        isStatic: false,
-      };
+      return shape(cached.models, 'live');
     }
 
-    if (!apiKey) {
-      throw new SdkError(
-        `${provider.name} API key not configured. Please add your key in Settings.`,
-      );
-    }
-
+    let failureReason: ModelListFailureReason;
     try {
-      this.logger.info(
-        `[ProviderModelsService] Fetching models from ${provider.name} API`,
+      const models = this.withLiveCapabilities(
+        providerId,
+        await this.fetchLive(providerId, provider, fetcher, apiKey),
       );
-
-      const { data } = await axios.get<ModelsApiResponse>(
-        provider.modelsEndpoint as string,
-        {
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            'Content-Type': 'application/json',
-            'User-Agent': 'Ptah-Extension/1.0',
-          },
-          timeout: 10_000,
-        },
-      );
-
-      if (!data.data || !Array.isArray(data.data)) {
-        throw new SdkError(`Invalid response format from ${provider.name} API`);
-      }
-      const models = this.transformApiModels(data.data);
-      this.feedPricingMap(models);
-      this.recordContextWindows(models, providerId);
-      this.modelCache.set(providerId, { models, timestamp: now });
-
-      this.logger.info(
-        `[ProviderModelsService] Fetched models from ${provider.name}`,
-        {
-          total: models.length,
-          withToolUse: models.filter((m) => m.supportsToolUse).length,
-        },
-      );
-
-      const filtered = toolUseOnly
-        ? models.filter((m) => m.supportsToolUse)
-        : models;
-
-      return { models: filtered, totalCount: models.length, isStatic: false };
-    } catch (error: unknown) {
-      if (axios.isAxiosError(error) && error.response) {
-        if (error.response.status === 401 || error.response.status === 403) {
-          throw new SdkError(
-            `${provider.name} API key is invalid or expired. Please delete your key and re-enter a valid one.`,
-          );
+      if (models.length > 0) {
+        this.modelCache.set(providerId, { models, timestamp: Date.now() });
+        this.recordContextWindows(models, providerId);
+        // The OpenCode routes write their own refreshes through the attached
+        // store (DI), so a second write here would only repeat it.
+        if (!isOpenCodeProviderId(providerId)) {
+          void this.persistCatalog(providerId, models);
         }
-        throw new SdkError(
-          `${provider.name} API error: ${error.response.status} ${error.response.statusText}`,
-        );
+        return shape(models, 'live');
       }
-      this.logger.error(
-        `[ProviderModelsService] Failed to fetch models from ${provider.name}`,
-        error instanceof Error ? error : new Error(String(error)),
-      );
-      throw error;
+      failureReason = 'empty';
+    } catch (error: unknown) {
+      // degradation-audit: reported - classified into a closed failure reason that the returned list carries to the RPC caller; the raw message stays in the debug log.
+      failureReason = classifyModelListFailure(error);
+      this.logger.debug('[ProviderModelsService] Live model list failed', {
+        providerId,
+        failureReason,
+        error: errorMessage(error),
+      });
     }
+
+    if (!CREDENTIAL_FAILURE_REASONS.has(failureReason)) {
+      const persisted = this.readPersistedCatalog(providerId);
+      if (persisted) {
+        this.logger.info(
+          '[ProviderModelsService] Live fetch unavailable — using the last catalog this provider returned',
+          {
+            providerId,
+            source: 'persisted',
+            failureReason,
+            count: persisted.models.length,
+          },
+        );
+        return shape(persisted.models, 'persisted', {
+          savedAt: persisted.savedAt,
+          failureReason,
+        });
+      }
+    }
+    this.logger.warn('[ProviderModelsService] No usable model list', {
+      providerId,
+      source: 'unavailable',
+      failureReason,
+    });
+    return shape([], 'unavailable', { failureReason });
   }
 
   /**
-   * Merge static model metadata (pricing, toolUse, descriptions) into
-   * dynamically fetched models. OpenAI-format /v1/models responses typically
-   * lack pricing and tool-use information, so we enrich them from the
-   * hardcoded static definitions when available.
+   * The provider's single live route. Throws `ModelListError('no-key')` for
+   * an endpoint provider without a key and `ModelListError('no-live-source')`
+   * when the provider has no route at all.
    */
-  private mergeStaticMetadata(
-    dynamicModels: ProviderModelInfo[],
-    provider: AnthropicProvider,
-  ): ProviderModelInfo[] {
-    if (!provider.staticModels?.length) return dynamicModels;
-
-    const staticMap = new Map(
-      provider.staticModels.map((m) => [m.id.toLowerCase(), m]),
-    );
-
-    return dynamicModels.map((model) => {
-      const staticInfo = staticMap.get(model.id.toLowerCase());
-      if (!staticInfo) return model;
-
-      return {
+  private async fetchLive(
+    providerId: string,
+    provider: AnthropicProvider | undefined,
+    fetcher: DynamicModelFetcher | undefined,
+    apiKey: string | null,
+  ): Promise<ProviderModelInfo[]> {
+    if (isOpenCodeProviderId(providerId)) {
+      return openCodeLiveRoutes.list(providerId, { force: true });
+    }
+    if (fetcher) {
+      return (await fetcher()).map(({ contextLengthSource, ...model }) => ({
         ...model,
-        supportsToolUse: model.supportsToolUse || staticInfo.supportsToolUse,
-        inputCostPerToken:
-          model.inputCostPerToken ?? staticInfo.inputCostPerToken,
-        outputCostPerToken:
-          model.outputCostPerToken ?? staticInfo.outputCostPerToken,
-        cacheReadCostPerToken:
-          model.cacheReadCostPerToken ?? staticInfo.cacheReadCostPerToken,
-        cacheCreationCostPerToken:
-          model.cacheCreationCostPerToken ??
-          staticInfo.cacheCreationCostPerToken,
-        name:
-          model.name !== model.id ? model.name : staticInfo.name || model.name,
-        description: model.description || staticInfo.description,
-        contextLength: model.contextLength || staticInfo.contextLength,
-      };
-    });
+        ...(contextLengthSource === 'provider' &&
+        typeof model.contextLength === 'number' &&
+        Number.isFinite(model.contextLength) &&
+        model.contextLength > 0
+          ? { contextLengthSource: 'provider' as const }
+          : {}),
+      }));
+    }
+    if (provider?.modelsEndpoint) {
+      if (!apiKey) throw new ModelListError('no-key');
+      return this.fetchDynamicModels(provider, provider.modelsEndpoint, apiKey);
+    }
+    throw new ModelListError('no-live-source');
+  }
+
+  /**
+   * Attach the capabilities a provider declares for every live model (Kimi's
+   * SDK allowlist) to rows that report none.
+   */
+  private withLiveCapabilities(
+    providerId: string,
+    models: ProviderModelInfo[],
+  ): ProviderModelInfo[] {
+    const capabilities = getProviderLiveModelCapabilities(providerId);
+    if (!capabilities) return models;
+    return models.map((m) =>
+      m.capabilities ? m : { ...m, capabilities: [...capabilities] },
+    );
+  }
+
+  /**
+   * Request headers for a `modelsEndpoint` call. Absent or `'bearer'` scheme:
+   * `Authorization: Bearer` (every existing and custom provider).
+   * `'anthropic'`: `x-api-key` plus `anthropic-version`.
+   */
+  private modelsRequestHeaders(
+    provider: AnthropicProvider,
+    apiKey: string,
+  ): Record<string, string> {
+    const auth: Record<string, string> =
+      provider.modelsAuthScheme === 'anthropic'
+        ? { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' }
+        : { Authorization: `Bearer ${apiKey}` };
+    return {
+      ...auth,
+      'Content-Type': 'application/json',
+      'User-Agent': 'Ptah-Extension/1.0',
+    };
+  }
+
+  /**
+   * Fetch models from a provider's `/v1/models` endpoint. An envelope without
+   * a `data` array, or a non-empty `data` with no valid row, is
+   * `bad-response`. Anthropic-scheme pages with `has_more` are followed by
+   * `after_id`; a missing `last_id` or more than MAX_MODELS_API_PAGES pages
+   * is `bad-response`, never a partial list.
+   */
+  private async fetchDynamicModels(
+    provider: AnthropicProvider,
+    endpoint: string,
+    apiKey: string,
+  ): Promise<ProviderModelInfo[]> {
+    this.logger.info(
+      `[ProviderModelsService] Fetching models from ${provider.name} API`,
+    );
+    const headers = this.modelsRequestHeaders(provider, apiKey);
+    const rows: unknown[] = [];
+    let url = endpoint;
+    for (let page = 1; ; page++) {
+      const { data } = await axios.get<unknown>(url, {
+        headers,
+        timeout: 10_000,
+      });
+      const envelope =
+        data && typeof data === 'object'
+          ? (data as Record<string, unknown>)
+          : undefined;
+      const pageRows = envelope?.['data'];
+      if (!Array.isArray(pageRows)) throw new ModelListError('bad-response');
+      rows.push(...pageRows);
+      if (
+        provider.modelsAuthScheme !== 'anthropic' ||
+        envelope?.['has_more'] !== true
+      )
+        break;
+      const lastId = envelope['last_id'];
+      if (typeof lastId !== 'string' || page >= MAX_MODELS_API_PAGES)
+        throw new ModelListError('bad-response');
+      const next = new URL(endpoint);
+      next.searchParams.set('after_id', lastId);
+      url = next.toString();
+    }
+    const models = parseModelsApiRows(rows);
+    if (rows.length > 0 && models.length === 0)
+      throw new ModelListError('bad-response');
+    this.feedPricingMap(models);
+    this.logger.info(
+      `[ProviderModelsService] Fetched models from ${provider.name}`,
+      {
+        total: models.length,
+        withToolUse: models.filter((m) => m.supportsToolUse).length,
+      },
+    );
+    return models;
   }
 
   /**
@@ -749,10 +711,10 @@ export class ProviderModelsService {
 
   /**
    * The most recent catalogue this provider itself returned, read
-   * SYNCHRONOUSLY. In-memory cache first, then the copy persisted by
-   * {@link persistCatalog}. Never the hardcoded `staticModels` snapshot: that
-   * is a repo literal frozen at release time, and the whole point of deriving
-   * tiers from a catalogue is that the provider vouched for the ids.
+   * SYNCHRONOUSLY. In-memory cache first, then the versioned copy persisted
+   * by {@link persistCatalog}. Both hold only lists the provider itself
+   * returned live: the whole point of deriving tiers from a catalogue is that
+   * the provider vouched for the ids.
    *
    * Synchronous by requirement, not by preference. `ModelResolver.resolve` is
    * `string`-returning and sits on per-message hot paths, so everything that
@@ -761,7 +723,7 @@ export class ProviderModelsService {
   private readLiveCatalog(providerId: string): ProviderModelInfo[] | null {
     const cached = this.modelCache.get(providerId);
     if (cached && cached.models.length > 0) return cached.models;
-    return this.readPersistedCatalog(providerId);
+    return this.readPersistedCatalog(providerId)?.models ?? null;
   }
 
   /**
@@ -806,7 +768,16 @@ export class ProviderModelsService {
     return deriveTiersFromCatalog(this.readLiveCatalog(providerId));
   }
 
-  /** Resolve user, static and live tiers consistently for every runtime path. */
+  /**
+   * Resolve user tiers, registry tier preferences and live-derived tiers
+   * consistently for every runtime path.
+   *
+   * A user tier wins. Otherwise the registry preference, when no catalogue is
+   * on hand (it then only fills an SDK env slot, unverified) or when the
+   * catalogue lists it. A preference the catalogue lacks resolves to the
+   * closest same-family live id, else the live-derived tier, else stays; each
+   * replacement warns once per provider and tier.
+   */
   resolveEffectiveTiers(
     providerId: string,
     userTiers: Partial<Record<ProviderModelTier, string | null | undefined>>,
@@ -841,30 +812,29 @@ export class ProviderModelsService {
         continue;
       }
       const ids = knownCatalog();
-      const normalized = fallback.replace(/\[[^\]]*\]$/, '');
-      if (
-        !ids ||
-        ids.some((id) => id.replace(/\[[^\]]*\]$/, '') === normalized)
-      ) {
+      const normalized = stripContextSuffix(fallback);
+      if (!ids || ids.some((id) => stripContextSuffix(id) === normalized)) {
         effective[tier] = fallback;
         continue;
       }
-      const live = derivedFor(tier);
-      if (!live) {
-        effective[tier] = fallback;
-        continue;
-      }
+      const family = closestLiveModel(fallback, ids);
+      const live = family ? undefined : derivedFor(tier);
+      const resolved = family ?? live ?? fallback;
       const key = `${providerId}:${tier}`;
       if (!ProviderModelsService.loggedTierReplacements.has(key)) {
         ProviderModelsService.loggedTierReplacements.add(key);
-        this.logger.info('[provider-auth] replaced static tier default', {
-          providerId,
-          tier,
-          staticId: fallback,
-          liveId: live,
-        });
+        this.logger.warn(
+          '[provider-auth] tier preference not in live catalog',
+          {
+            providerId,
+            tier,
+            preferred: fallback,
+            resolved,
+            rule: family ? 'family' : live ? 'derived' : 'none',
+          },
+        );
       }
-      effective[tier] = live;
+      effective[tier] = resolved;
     }
     return effective;
   }
@@ -887,9 +857,10 @@ export class ProviderModelsService {
    * lane-alias path and the pinned-id path at once, because all three read
    * these same three env vars.
    *
-   * A non-empty user tier wins. A static default wins while no live catalogue
-   * is known or when that catalogue contains it. Otherwise a live-derived
-   * tier replaces the static default when available.
+   * A non-empty user tier wins. A registry preference wins while no live
+   * catalogue is known or when that catalogue contains it. Otherwise the
+   * closest same-family live id, then a live-derived tier, replaces it
+   * ({@link resolveEffectiveTiers}).
    *
    * @param providerId provider whose tiers should populate the runtime env
    * @param options.apiKey the provider's API key, when the caller has it in
@@ -952,8 +923,8 @@ export class ProviderModelsService {
    * `switchActiveProvider` (`local-proxy.strategy.ts:101-102`,
    * `local-native.strategy.ts:153-161`), so looking for a fetcher in the same
    * synchronous turn would always miss it and LM Studio — the provider with no
-   * `modelsEndpoint` and no static models, i.e. the one with nowhere else to
-   * get a catalogue — would never resolve.
+   * `modelsEndpoint`, i.e. the one with nowhere else to get a catalogue —
+   * would never resolve.
    */
   private async refreshTiersFromLiveCatalog(
     providerId: string,
@@ -970,7 +941,7 @@ export class ProviderModelsService {
       if (!hasRoute) return;
 
       this.logger.debug(
-        '[ProviderModelsService] Tiers unresolved from static data — refreshing the live catalog',
+        '[ProviderModelsService] Tiers unresolved from registry preferences — refreshing the live catalog',
         { providerId, unresolved },
       );
       const { models } = await this.fetchModels(providerId, apiKey);
@@ -1028,7 +999,7 @@ export class ProviderModelsService {
    *    (the pick IS what the derivation selects), and `applyPersistedTiers`'
    *    own `userTiers ?? providerDefaults ?? liveDerived` order would rank it
    *    above the derivation anyway. Comparing against the derivation is what
-   *    lets a warmed catalogue retire a static default that activation wrote
+   *    lets a warmed catalogue retire a tier preference that activation wrote
    *    while no catalogue was known. Tiers the derivation still cannot
    *    resolve are excluded from the comparison: `applyPersistedTiers`
    *    writes only resolved tiers, so re-applying for them could neither fix
@@ -1087,13 +1058,10 @@ export class ProviderModelsService {
    * model id and shows Claude's own description. Resolved from the provider's
    * last known model list, so it is only available for models we've actually
    * listed — a tier pointing at a hand-typed custom id keeps the bare id.
-   * Capabilities alone also fall back to the provider's static registry
-   * declaration (the same source `buildStaticTierCapabilityEnv` reads for the
-   * workspace and lane snapshots), so a static-only provider (Kimi Code) still
-   * declares them and effort reaches the runtime. `_NAME`/`_DESCRIPTION` do
-   * NOT fall back to `staticModels`: that would relabel tiers for every
-   * provider that ships a static list (Z.AI, Ollama) when no catalogue exists.
-   * That lookup reads the same cache-then-persisted catalogue the tier
+   * Capabilities alone also fall back to the capabilities the provider
+   * declares for every live model (`liveModelCapabilities`, Kimi Code), so
+   * effort reaches the runtime even while the catalogue is cold. That lookup
+   * reads the same cache-then-persisted catalogue the tier
    * derivation does: a live-derived tier is by construction an id from that
    * catalogue, so it must not lose its label just because the in-memory cache
    * is cold on this run.
@@ -1113,7 +1081,7 @@ export class ProviderModelsService {
       (m) => m.id === modelId,
     );
     const capabilities =
-      model?.capabilities ?? getStaticModelCapabilities(providerId, modelId);
+      model?.capabilities ?? getProviderLiveModelCapabilities(providerId);
 
     const write = (key: keyof AuthEnv, value: string | undefined): void => {
       if (value) {
@@ -1239,21 +1207,22 @@ export class ProviderModelsService {
           { attempt },
         );
 
-        const { data } = await axios.get<ModelsApiResponse>(
-          openRouter.modelsEndpoint,
-          {
-            headers: {
-              'Content-Type': 'application/json',
-              'User-Agent': 'Ptah-Extension/1.0',
-            },
-            timeout: 15_000,
+        const { data } = await axios.get<unknown>(openRouter.modelsEndpoint, {
+          headers: {
+            'Content-Type': 'application/json',
+            'User-Agent': 'Ptah-Extension/1.0',
           },
-        );
-        if (!data.data || !Array.isArray(data.data)) {
+          timeout: 15_000,
+        });
+        const rows =
+          data && typeof data === 'object'
+            ? (data as Record<string, unknown>)['data']
+            : undefined;
+        if (!Array.isArray(rows)) {
           return 0;
         }
 
-        const models = this.transformApiModels(data.data);
+        const models = parseModelsApiRows(rows);
         this.modelCache.set(PREFETCH_CACHE_KEY, {
           models,
           timestamp: Date.now(),
@@ -1294,57 +1263,6 @@ export class ProviderModelsService {
     }
 
     return 0;
-  }
-
-  /**
-   * Transform raw API models to ProviderModelInfo with pricing extraction.
-   * Shared by both fetchDynamicModels() and prefetchPricing().
-   */
-  private transformApiModels(rawModels: ModelsApiModel[]): ProviderModelInfo[] {
-    return rawModels.map((model) => {
-      const pricing = Array.isArray(model.pricing) ? undefined : model.pricing;
-      return {
-        id: model.id,
-        name: model.name || model.id,
-        description: model.description || '',
-        contextLength: model.context_length || model.context_window || 0,
-        ...(Number.isFinite(model.context_length || model.context_window) &&
-        (model.context_length || model.context_window || 0) > 0
-          ? { contextLengthSource: 'provider' as const }
-          : {}),
-        supportsToolUse:
-          model.supported_parameters?.includes('tools') ??
-          model.supports_tool_calling ??
-          false,
-        inputCostPerToken:
-          this.parsePricingField(pricing?.prompt) ??
-          this.parsePricingField(model.input_price),
-        outputCostPerToken:
-          this.parsePricingField(pricing?.completion) ??
-          this.parsePricingField(model.output_price),
-        cacheReadCostPerToken: this.parsePricingField(
-          pricing?.input_cache_read,
-        ),
-        cacheCreationCostPerToken: this.parsePricingField(
-          pricing?.input_cache_write,
-        ),
-      };
-    });
-  }
-
-  /**
-   * Parse a pricing field string to a number.
-   * OpenRouter returns pricing as strings (e.g., "0.000005" for $5/1M tokens).
-   *
-   * @returns Parsed number, or undefined if empty/invalid/non-finite/negative
-   */
-  private parsePricingField(
-    value: string | number | undefined,
-  ): number | undefined {
-    if (value === undefined || value === '') return undefined;
-    const parsed = typeof value === 'number' ? value : Number.parseFloat(value);
-    if (!Number.isFinite(parsed) || parsed < 0) return undefined;
-    return parsed;
   }
 
   /**

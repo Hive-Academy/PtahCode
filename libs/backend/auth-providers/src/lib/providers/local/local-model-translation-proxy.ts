@@ -97,14 +97,6 @@ export class LocalModelTranslationProxy extends TranslationProxyBase {
   }
 
   /**
-   * Return empty static model list -- local providers use dynamic model fetching.
-   * The ProviderModelsService uses the registered dynamic fetcher instead.
-   */
-  protected getStaticModels(): Array<{ id: string }> {
-    return [];
-  }
-
-  /**
    * Fetch available models from the local server's /v1/models endpoint.
    * Used as a DynamicModelFetcher registered with ProviderModelsService.
    * Also serves as a health check -- if this succeeds, the server is running.

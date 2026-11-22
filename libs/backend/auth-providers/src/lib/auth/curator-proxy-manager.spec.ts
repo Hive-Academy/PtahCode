@@ -33,9 +33,6 @@ class StubTranslationProxy extends TranslationProxyBase {
   protected async onAuthFailure(): Promise<boolean> {
     return false;
   }
-  protected getStaticModels(): Array<{ id: string }> {
-    return [{ id: 'stub-model' }];
-  }
   protected getProviderId(): string {
     return 'stub-provider';
   }

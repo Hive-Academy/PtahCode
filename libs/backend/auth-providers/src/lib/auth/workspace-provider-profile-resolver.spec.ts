@@ -218,6 +218,8 @@ describe('WorkspaceProviderProfileResolver — live-catalogue tiers', () => {
       },
       configValues: {
         'provider.requesty.modelCatalog': {
+          schema: 2,
+          origin: 'live',
           models: ROUTER_MODELS,
           timestamp: Date.now(),
         },
@@ -247,6 +249,8 @@ describe('WorkspaceProviderProfileResolver — live-catalogue tiers', () => {
       },
       configValues: {
         'provider.openrouter.modelCatalog': {
+          schema: 2,
+          origin: 'live',
           models: ROUTER_MODELS,
           timestamp: Date.now(),
         },
@@ -273,6 +277,8 @@ describe('WorkspaceProviderProfileResolver — live-catalogue tiers', () => {
       },
       configValues: {
         'provider.requesty.modelCatalog': {
+          schema: 2,
+          origin: 'live',
           models: ROUTER_MODELS,
           timestamp: Date.now(),
         },
@@ -296,6 +302,8 @@ describe('WorkspaceProviderProfileResolver — live-catalogue tiers', () => {
       configValues: {
         'provider.requesty.mainAgent.modelTier.opus': 'openai/gpt-5.3-codex',
         'provider.requesty.modelCatalog': {
+          schema: 2,
+          origin: 'live',
           models: ROUTER_MODELS,
           timestamp: Date.now(),
         },
@@ -326,6 +334,8 @@ describe('WorkspaceProviderProfileResolver — live-catalogue tiers', () => {
       },
       configValues: {
         'provider.kimi-code.modelCatalog': {
+          schema: 2,
+          origin: 'live',
           models: ROUTER_MODELS,
           timestamp: Date.now(),
         },
@@ -402,6 +412,8 @@ describe('WorkspaceProviderProfileResolver — the post-fallback ladder', () => 
       },
       configValues: {
         'provider.requesty.modelCatalog': {
+          schema: 2,
+          origin: 'live',
           models: ROUTER_MODELS,
           timestamp: Date.now(),
         },
@@ -1410,6 +1422,8 @@ describe('WorkspaceProviderProfileResolver — resolveStoredModel', () => {
   const FALLBACK_LOG =
     '[WorkspaceProviderProfileResolver] Stored model belongs to another provider — using the workspace provider default';
   const catalog = (ids: string[]) => ({
+    schema: 2,
+    origin: 'live',
     models: ids.map((id) => ({ id, name: id })),
     timestamp: Date.now(),
   });

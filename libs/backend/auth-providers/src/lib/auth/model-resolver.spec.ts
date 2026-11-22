@@ -370,6 +370,8 @@ describe('ModelResolver', () => {
       ];
       const configValues = {
         'provider.openrouter.modelCatalog': {
+          schema: 2,
+          origin: 'live',
           models: CATALOG,
           timestamp: Date.now(),
         },
