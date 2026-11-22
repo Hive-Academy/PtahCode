@@ -567,7 +567,8 @@ export function buildGrepTool(): MCPToolDefinition {
       properties: {
         pattern: {
           type: 'string',
-          description: 'Text to find (literal unless `regex` is true).',
+          description:
+            'Text to find. Literal, or a regex when it has clear regex syntax (see `regex`).',
         },
         path: {
           type: 'string',
