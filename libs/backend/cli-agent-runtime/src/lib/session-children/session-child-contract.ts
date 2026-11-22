@@ -41,10 +41,9 @@ export function renderSessionChildContract(
       'assumption, and continue.',
     PTAH_MCP_TOOL_GUIDANCE,
     'Report progress, decisions and blockers to the parent with ' +
-      'ptah_agent_report. A pending report is held while the parent is not ' +
-      'running and is delivered when the parent is next active; do not send ' +
-      'it again. If a report is refused, repeat its content in your final ' +
-      'message of the turn so the parent reads it later.',
+      'ptah_agent_report. If a report is refused because the parent is not ' +
+      'live, repeat its content in your final message of the turn so the ' +
+      'parent reads it later.',
     'You cannot start sessions of your own (ptah_session_start is refused for ' +
       'child sessions).',
     'This session has a runtime cap and a usage budget. When the host warns ' +

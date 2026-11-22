@@ -28,16 +28,16 @@ it('uses native SDK result usage and falls back when capacity or route is unknow
 it('warns at the effective threshold and deduplicates streamed blocks without a context stop', () => {
   registerModelContextWindows([{ id: 'batch2-model', contextLength: 200_000 }], route.providerId);
   const limits = new SubagentContextLimits();
-  const state = { policySnapshot: { ...initialAgentBudgetSnapshot }, startedAt: Date.now(), requestSequence: 0,
+  const state = { policySnapshot: { ...initialAgentBudgetSnapshot }, startedAt: Date.now(), requestOrder: new Map<string, number>(), lastResolvedRequest: 0,
     lastWeighted: 0, lastRaw: 0, weightedUsed: 0, contextTokens: 0, costUnavailableLogged: false,
     stopFired: false, stopInFlight: false, initialContext: undefined as number | undefined, warningRequestCount: undefined as number | undefined };
   const effective = limits.settings(settings, state, message, route);
   const usage = { inputTokens: 153_000, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 };
   const logger = { info: jest.fn(), warn: jest.fn() };
-  for (let i = 0; i < 2; i++) countSubagentUsage(state, { id: 'request1', model: 'batch2-model' }, usage, effective, new AgentBudgetPolicy(effective), 'session', 'task', logger);
+  for (let i = 0; i < 2; i++) countSubagentUsage(state, { id: 'request1', model: 'batch2-model' }, usage, effective, new AgentBudgetPolicy(effective), 'spawn', 'session', 'task', logger);
   expect(state.policySnapshot.warned).toBe(true);
   expect(state.warningRequestCount).toBe(1);
-  expect(state.requestSequence).toBe(1);
+  expect(state.requestOrder.size).toBe(1);
   expect(state.initialContext).toBe(153_000);
   expect(state.policySnapshot.stopped).toBe(false);
 });
@@ -59,4 +59,20 @@ it('keeps exact model variants separate and takes the smaller conflicting window
   expect(limits.settings(settings, {}, { message: { model: 'model' } }, native).handoffContextTokens).toBe(180_000);
   expect(limits.settings(settings, {}, { message: { model: 'model[1m]' } }, native).handoffContextTokens).toBe(650_000);
   expect(limits.settings(settings, {}, { message: { model: 'other' } }, native).handoffContextTokens).toBe(650_000);
+});
+
+it('treats a detected provider context limit as a warning threshold that pauses nothing by itself', () => {
+  registerModelContextWindows([{ id: 'batch2-model', contextLength: 200_000 }], route.providerId);
+  const limits = new SubagentContextLimits();
+  const state = { policySnapshot: { ...initialAgentBudgetSnapshot }, startedAt: Date.now(), requestOrder: new Map<string, number>(), lastResolvedRequest: 0,
+    lastWeighted: 0, lastRaw: 0, weightedUsed: 0, contextTokens: 0, costUnavailableLogged: false,
+    stopFired: false, stopInFlight: false, initialContext: undefined as number | undefined, warningRequestCount: undefined as number | undefined };
+  const effective = limits.settings(settings, state, message, route);
+  expect(effective.handoffContextTokens).toBe(180_000);
+  const usage = { inputTokens: 185_000, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 };
+  countSubagentUsage(state, { id: 'over-limit', model: 'batch2-model' }, usage, effective, new AgentBudgetPolicy(effective), 'spawn', 'session', 'task', { info: jest.fn(), warn: jest.fn() });
+  // Reaching the detected limit marks the warning; the agent is neither finalized nor forced to stop here.
+  expect(state.policySnapshot.warned).toBe(true);
+  expect(state.stopFired).toBe(false);
+  expect(state.stopInFlight).toBe(false);
 });

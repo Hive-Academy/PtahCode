@@ -147,6 +147,11 @@
       }
       </div>
     }
+    <!-- Messages sent while a turn runs: queued cards at the end of the
+         transcript until a turn takes them (TASK_2026_884). -->
+    @if (hasQueuedFollowUps()) {
+      <ptah-queued-follow-ups [tabId]="tabId()" [sessionId]="sessionId()" />
+    }
   </div>
 </div>
 

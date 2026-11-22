@@ -60,9 +60,8 @@ export function nearBudgetWarning(
   return (
     `Ptah budget notice: your context is at ${contextTokens} tokens; the handoff limit is ${handoffTokens} tokens. ` +
     `Task id: ${taskId ?? 'unknown'}. Permitted paths: ${summarizeSubagentPaths(permittedPaths)}; ` +
-    `You may Read, Write or Edit these paths. Deliverables are optional; write progress and next steps to the notes file last at ${notesPath}. ` +
-    `Your turn ends immediately after the notes write. ` +
-    `Other tools and paths are not permitted during this notes phase.`
+    `You may Read, Write or Edit these paths. Deliverables are optional; write progress and next steps to the notes file last at ${notesPath}, ` +
+    `then return normally.`
   );
 }
 
@@ -83,8 +82,8 @@ export function stopNotice(
     `Ptah's budget monitor ${usage.cause?.forced === false ? 'received a cooperative return from' : 'stopped'} ${name}: ${why}. ` +
     `Usage: ${usage.contextTokens} context tokens of ${usage.handoffTokens}; ` +
     `${Math.round(usage.weightedUsed)} weighted tokens of ${usage.stopWeightedTokens}. ` +
-    `Reason: ${usage.reason}. Record: ${recordPath ?? 'unknown'}. The user did not stop it. ` +
-    `It cannot be resumed; start a fresh agent with a handoff. ` +
+    `Reason: ${usage.reason}. Record: ${recordPath ?? 'unknown'}. ` +
+    (usage.cause?.forced === false ? '' : 'The user did not stop it. It cannot be resumed; start a fresh agent with a handoff. ') +
     `Its partial output is in the transcript.`
   );
 }
@@ -118,7 +117,7 @@ export function handoffMessage(
   const { paths, taskSaved, notesWritten, notesInferred, unavailable } = files;
   const lines = [
     `Ptah's subagent budget monitor handed off subagent ${name} ${usage.cause ? 'because ' : ''}${why}. ` +
-      (usage.cause?.forced === false ? `The subagent returned cooperatively during Ptah's notes phase. ` : `The interruption notice in the Agent result came from Ptah's subagent budget monitor, not the user. `) +
+      (usage.cause?.forced === false ? `The subagent returned normally after Ptah's handoff request. ` : `The interruption notice in the Agent result came from Ptah's subagent budget monitor, not the user. `) +
       `No user input is needed; continue autonomously now.`,
   ];
   lines.push(`Budget stop reason: ${usage.reason}; SDK agent: ${subject.agentId ?? 'unknown'}; SDK task: ${subject.taskId}.`);
@@ -127,7 +126,7 @@ export function handoffMessage(
   if (recordPath) {
     lines.push(recordLine(recordPath), continuationInstructions(recordPath));
   }
-  lines.push(
+  if (usage.cause?.forced !== false) lines.push(
     `If a Read or Glob right after this handoff fails with "The user doesn't want to take this action right now" ` +
       `and you saw no permission prompt the user declined, retry that call once; ` +
       `if it fails the same way, stop and report to the user.`,
@@ -163,10 +162,10 @@ export function handoffMessage(
     : `a fresh \`${subject.agentType}\` subagent`;
   const resumeFiles =
     paths && unavailable
-      ? `If ${paths.notes} exists, read it first and continue from it; otherwise check the files the stopped subagent changed. Do not redo finished work.`
+      ? `If ${paths.notes} exists, read it first and continue from it; otherwise check the files the subagent changed. Do not redo finished work.`
       : paths && notesWritten
         ? `Read ${paths.notes} first and continue from it; do not redo finished work.`
-        : 'Check the files the stopped subagent changed and continue from them; do not redo finished work.';
+        : 'Check the files the subagent changed and continue from them; do not redo finished work.';
   const resume = recordPath
     ? `${resumeFiles} ${recordLine(recordPath)}`
     : resumeFiles;

@@ -94,3 +94,20 @@ it('rejects untrusted, oversized, markerless and invalid records and warns once 
     expect(logger.warn).toHaveBeenCalledTimes(2);
   } finally { await fs.rm(workspace, { recursive: true, force: true }); }
 });
+
+it('judges a settled or paused predecessor lineage by progress, and its guard copy never says an agent was stopped', async () => {
+  // A predecessor that reached the warning (paused or returned) and produced no deliverable keeps the chain exhausted only without progress.
+  expect(successorLineage({ ...previous, exhausted: true }, { ...previous, requestCount: 9, initialContext: 100_000 }).exhausted).toBe(true);
+  expect(successorLineage({ ...previous, exhausted: true }, { ...previous, requestCount: 9, initialContext: 50_000 }).exhausted).toBe(false);
+  expect(successorLineage({ ...previous, exhausted: true }, { ...previous, completedDeliverable: true }).exhausted).toBe(false);
+  const workspace = await fs.mkdtemp(path.join(os.tmpdir(), 'ptah-lineage-copy-'));
+  try {
+    const directory = path.join(workspace, '.ptah', 'subagent-handoffs');
+    await fs.mkdir(directory, { recursive: true });
+    const record = path.join(directory, 'settled.handoff.md');
+    await fs.writeFile(record, renderLineage({ ...previous, exhausted: true }));
+    const guard = await guardSuccessor(workspace, { prompt: `Continue\nPtah predecessor handoff: ${record}` }, { debug: jest.fn(), warn: jest.fn() });
+    expect(guard).toContain('lineage exhausted');
+    expect(guard).not.toMatch(/stopped|interrupted|the user/i);
+  } finally { await fs.rm(workspace, { recursive: true, force: true }); }
+});

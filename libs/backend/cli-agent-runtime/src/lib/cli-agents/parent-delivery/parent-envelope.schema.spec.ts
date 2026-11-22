@@ -1,5 +1,6 @@
 import { AgentId, LANE_STOP_REASONS } from '@ptah-extension/shared';
 import {
+  PARENT_ENVELOPE_MAX_BODY_CHARS,
   ParentEnvelopeRecordSchema,
   ParentEnvelopeBodySchema,
   ParentCompletionOutboxEntrySchema,
@@ -26,5 +27,44 @@ describe('parent completion stop reason persistence', () => {
       stopReason, originName: common.originName, createdAt: common.createdAt,
       completedAt: '2026-11-08T00:00:00.000Z', body: 'body',
     }).stopReason).toBe(stopReason);
+  });
+});
+
+describe('parent envelope originKind', () => {
+  const agentId = AgentId.create();
+  const common = {
+    parentSessionId: 'session', agentId, kind: 'report' as const, dedupeKey: 'key', createdAt: 1,
+  };
+  const record = { ...common, id: 'lane-delivery:key', updatedAt: 1,
+    state: 'pending', attempts: 0, bodyBytes: 1 };
+  const body = { ...common, text: 'body', envelopeId: 'lane-delivery:key' };
+
+  it('parses without originKind for records written before child sessions queued reports', () => {
+    expect(ParentEnvelopeRecordSchema.parse(record).originKind).toBeUndefined();
+    expect(ParentEnvelopeBodySchema.parse(body).originKind).toBeUndefined();
+  });
+
+  it.each(['agent', 'session'] as const)('parses originKind %s', (originKind) => {
+    expect(ParentEnvelopeRecordSchema.parse({ ...record, originKind }).originKind).toBe(originKind);
+    expect(ParentEnvelopeBodySchema.parse({ ...body, originKind }).originKind).toBe(originKind);
+  });
+
+  it('rejects an unknown originKind', () => {
+    expect(ParentEnvelopeRecordSchema.safeParse({ ...record, originKind: 'human' }).success).toBe(false);
+    expect(ParentEnvelopeBodySchema.safeParse({ ...body, originKind: 'human' }).success).toBe(false);
+  });
+});
+
+describe('parent envelope body limit', () => {
+  const body = {
+    text: '', envelopeId: 'lane-delivery:key', parentSessionId: 'session', agentId: 'agent',
+    kind: 'report' as const, dedupeKey: 'key', createdAt: 1,
+  };
+
+  it('accepts a body of exactly the exported limit and rejects one more character', () => {
+    expect(PARENT_ENVELOPE_MAX_BODY_CHARS).toBe(1_048_576);
+    const limit = 'x'.repeat(PARENT_ENVELOPE_MAX_BODY_CHARS);
+    expect(ParentEnvelopeBodySchema.safeParse({ ...body, text: limit }).success).toBe(true);
+    expect(ParentEnvelopeBodySchema.safeParse({ ...body, text: `${limit}x` }).success).toBe(false);
   });
 });

@@ -28,20 +28,19 @@
 import { inject, injectable } from 'tsyringe';
 import { createHash } from 'node:crypto';
 import { TOKENS, Logger } from '@ptah-extension/vscode-core';
+import { SDK_TOKENS, type SessionLifecycleManager } from '@ptah-extension/agent-sdk';
 import { SessionId } from '@ptah-extension/shared';
-import {
-  SDK_TOKENS,
-  SessionActivityRegistry,
-  type SessionLifecycleManager,
-} from '@ptah-extension/agent-sdk';
-import type { AgentProcessInfo, IAgentAdapter } from '@ptah-extension/shared';
+import type {
+  AgentProcessInfo,
+  IAgentAdapter,
+  ParentDeliveryState,
+} from '@ptah-extension/shared';
 import { AgentProcessManager } from './agent-process-manager.service';
 import { ParentDeliveryDrainerService } from './parent-delivery/parent-delivery-drainer.service';
-import {
-  SessionChildRegistry,
-  type SessionChildHeldReport,
-  type SessionChildRecord,
-} from '../session-children/session-child.registry';
+import type { ParentDeliveryEnvelope } from './parent-delivery/parent-envelope-store.service';
+import { PARENT_ENVELOPE_MAX_BODY_CHARS } from './parent-delivery/parent-envelope.schema';
+import type { SessionChildRecord } from '../session-children/session-child.registry';
+import { SessionChildRegistry } from '../session-children/session-child.registry';
 import {
   AgentReportCoalescer,
   type HeldReport,
@@ -127,6 +126,12 @@ export const AGENT_REPORT_HISTORY_SIZE = 8;
 /** Characters of the report echoed onto the tile when no summary was given. */
 const TILE_NOTE_PREVIEW_LENGTH = 160;
 
+/** `originName` limit in the parent envelope schema. */
+const MAX_ORIGIN_NAME_LENGTH = 200;
+
+/** Child ids up to this length appear verbatim in a queued report's dedupe key. */
+const MAX_KEY_ID_LENGTH = 200;
+
 /**
  * Why a report was not delivered. Every value is a state the caller can act
  * on; none of them is "something went wrong".
@@ -136,12 +141,7 @@ export type AgentReportRefusalReason =
   | 'unattributed-caller'
   /** The agent exists but was spawned with no parent session recorded. */
   | 'no-parent-recorded'
-  /**
-   * The parent session is recorded but is not live in memory. A lane report
-   * is refused. A child session's report is held (`pending`) and delivered
-   * when the parent is next active; it is refused only when the owner changed
-   * while the report was routed.
-   */
+  /** The parent session is recorded but is no longer live in memory. */
   | 'parent-session-not-active'
   /** Body exceeds {@link MAX_AGENT_REPORT_LENGTH}. */
   | 'report-too-large'
@@ -159,6 +159,10 @@ export type AgentReportRefusalReason =
   | 'storage-unavailable'
   /** The parent session is being deleted or was deleted. */
   | 'parent-session-deleted'
+  /** A saved copy of this report is being sent right now; do not resend it. */
+  | 'delivery-in-progress'
+  /** A saved copy of this report was sent but its outcome is not known. */
+  | 'delivery-outcome-unknown'
   | 'held-for-completion';
 
 /**
@@ -189,8 +193,16 @@ export interface AgentReportDelivery {
   readonly reason?: AgentReportRefusalReason;
   /** The session the report reached. Present only on a delivery. */
   readonly parentSessionId?: string;
-  /** What the caller can do about a refusal or a pending result. */
-  readonly detail?: string;
+  /** A child session report saved for its inactive verified parent. */
+  readonly queued?: true;
+  /**
+   * The stored envelope id of a saved report: with `queued`, with a
+   * `delivery-in-progress` / `delivery-outcome-unknown` refusal, or with a
+   * refusal of a repeat whose retained copy was cancelled.
+   */
+  readonly receiptId?: string;
+  /** The stored state behind `receiptId`. */
+  readonly receiptState?: ParentDeliveryState;
 }
 
 /** Per-agent delivery bookkeeping. Bounded; discarded with the record. */
@@ -240,73 +252,30 @@ type SessionChildReportInput = Extract<
   { readonly childSessionId: string }
 >;
 
-/** The session that owns a child now, and whether a report can reach it. */
-interface SessionChildOwner {
-  /** The recorded parent ids that parse: tab id first, then SDK id. */
-  readonly candidates: readonly SessionId[];
-  readonly parentSessionId: SessionId;
-  /** The child was re-parented while the owner was resolved. */
-  readonly ownerChanged: boolean;
-  readonly live: boolean;
-}
-
-const UNATTRIBUTED_SESSION_CHILD_DETAIL =
-  'this host holds no child-session record for this caller: the session was ' +
-  'not started with ptah_session_start, or the in-memory record was lost at ' +
-  'a host restart or pruned from the ended history';
-
-const OWNER_CHANGED_DETAIL =
-  'the recorded parent changed while the report was routed; send the report again';
-
-const DELIVERY_FAILED_DETAIL =
-  'the parent session did not accept the report; send it again later';
-
-const HELD_SESSION_CHILD_DETAIL =
-  'the parent session is not running; the report is held and is delivered ' +
-  'when the parent session is next active';
-
-function parentCandidates(child: SessionChildRecord): SessionId[] {
-  return [child.parentSessionId, child.parentSdkSessionId]
-    .map((id) => SessionId.safeParse(id?.trim()))
-    .filter((id): id is SessionId => !!id);
-}
-
-/** `heldSince` marks a report that waited for its parent, with the time it was sent. */
-function sessionChildEnvelope(
-  child: SessionChildRecord,
-  message: string,
-  summary?: string,
-  heldSince?: string,
-): string {
-  const attrs = [
-    `agent-id="${escapeAttribute(child.childSessionId)}"`,
-    `agent="${escapeAttribute(child.label)}"`,
-    `cli="ptah-session"`,
-    ...(heldSince
-      ? [`reported-at="${escapeAttribute(heldSince)}"`, `held="true"`]
-      : []),
-  ].join(' ');
-  return `<agent-report ${attrs}>\n${reportBody(message, summary)}\n</agent-report>`;
-}
-
-function sessionChildOrigin(child: SessionChildRecord): {
-  kind: 'peer';
-  from: string;
-  name: string;
-} {
-  return {
-    kind: 'peer',
-    from: `ptah-session:${child.childSessionId}`,
-    name: `session · ${child.label}`,
-  };
-}
-
 function isSessionChildInput(
   input: AgentReportInput,
 ): input is SessionChildReportInput {
   const candidate = (input as { childSessionId?: unknown }).childSessionId;
   return typeof candidate === 'string' && candidate.trim().length > 0;
 }
+
+/** The parent ids a child session was recorded under, trimmed. */
+interface SessionOwnerBinding {
+  readonly tab: string | undefined;
+  readonly sdk: string | undefined;
+}
+
+function sessionOwnerBinding(child: SessionChildRecord): SessionOwnerBinding {
+  return {
+    tab: child.parentSessionId?.trim() || undefined,
+    sdk: child.parentSdkSessionId?.trim() || undefined,
+  };
+}
+
+const UNATTRIBUTED_SESSION_CHILD_DETAIL =
+  'this host holds no child-session record for this caller: the session was ' +
+  'not started with ptah_session_start, or the in-memory record was lost at ' +
+  'a host restart or pruned from the ended history';
 
 @injectable()
 export class AgentReportRouter {
@@ -323,6 +292,9 @@ export class AgentReportRouter {
    */
   private readonly burstTimestamps = new Map<string, number[]>();
 
+  /** Per canonical child session: the tail of its serialized report chain. */
+  private readonly sessionAdmissions = new Map<string, Promise<void>>();
+
   /**
    * The last {@link AGENT_REPORT_HISTORY_SIZE} delivered bodies per agent, for
    * identical-repeat suppression. Bodies are capped at
@@ -330,16 +302,6 @@ export class AgentReportRouter {
    * what bounds the memory an agent's history can cost.
    */
   private readonly recentBodies = new Map<string, ReportHistoryEntry[]>();
-
-  private readonly unregisterActivity?: () => void;
-
-  /** The tail of the admissions and flushes of each child, for {@link serialize}. */
-  private readonly childTurns = new Map<string, Promise<void>>();
-
-  private disposed = false;
-
-  /** Children with a flush already waiting its turn; repeated activity joins it. */
-  private readonly flushQueued = new Set<string>();
 
   constructor(
     @inject(TOKENS.LOGGER) private readonly logger: Logger,
@@ -372,20 +334,7 @@ export class AgentReportRouter {
     /** Maps a resumed child's new tab id to its SDK session id. */
     @inject(SDK_TOKENS.SDK_SESSION_LIFECYCLE_MANAGER, { isOptional: true })
     private readonly lifecycle: Pick<SessionLifecycleManager, 'find'> | null = null,
-    /** Parent activity delivers the reports held for that parent. */
-    @inject(SDK_TOKENS.SDK_SESSION_ACTIVITY_REGISTRY, { isOptional: true })
-    activity: SessionActivityRegistry | null = null,
-  ) {
-    this.unregisterActivity = activity?.register(() => {
-      void this.flushHeldSessionChildReports();
-    });
-  }
-
-  /** Stop the activity subscription; a running flush sends no more reports. */
-  dispose(): void {
-    this.disposed = true;
-    this.unregisterActivity?.();
-  }
+  ) {}
 
   /** Delivery only: a report addressed to a handed-off session goes to its successor. */
   private forwardTarget(target: string): Promise<string> {
@@ -458,8 +407,12 @@ export class AgentReportRouter {
     // uuid arrives and `resolveParentSessionId` backfills it, so a value that
     // is not a session id means the parent never resolved one — there is no
     // session to deliver into, and saying so is the honest answer.
-    const recordedParent = SessionId.safeParse(info.parentSessionId?.trim()) ?? info.parentSessionId?.trim();
-    const parentSessionId = recordedParent ? await this.forwardTarget(recordedParent) : undefined;
+    const recordedParent =
+      SessionId.safeParse(info.parentSessionId?.trim()) ??
+      info.parentSessionId?.trim();
+    const parentSessionId = recordedParent
+      ? await this.forwardTarget(recordedParent)
+      : undefined;
     if (!parentSessionId) {
       return this.refuse('no-parent-recorded', agentId, {
         detail: info.parentSessionId
@@ -735,141 +688,299 @@ export class AgentReportRouter {
   }
 
   /**
-   * Child chat session → parent session (TASK_2026_584, TASK_2026_2298).
+   * Child chat session → parent session (TASK_2026_584).
    *
-   * The same checks as the agent branch, against the link
-   * `SessionChildRegistry` recorded at `ptah_session_start`. The owner is the
-   * first recorded parent id, followed through the handoff lineage. A live
-   * recorded SDK id alone never receives a report. Rate and duplicate history
-   * is keyed `session:{childSessionId}` so it can never collide with an agent id.
+   * The same checks as the agent branch, in the same order, against the link
+   * `SessionChildRegistry` recorded at `ptah_session_start`. The parent is the
+   * recorded parent TAB id while that tab is live, else the recorded parent
+   * SDK id — a parent reopened from the sidebar runs under a new tab id but
+   * the same SDK session. Rate and duplicate history is keyed
+   * `session:{childSessionId}` so it can never collide with an agent id.
    *
-   * An owner that is not active (an idle parent whose SDK stream ended) does
-   * not lose the report: it is held on the child record, at most
-   * `SESSION_CHILD_HELD_REPORT_LIMIT` per child, and delivered with its
-   * `reported-at` time when that owner is next active. The hold is in memory,
-   * like the link itself. An owner that changed during the lookup is refused.
+   * A live parent receives the report directly. An inactive parent whose
+   * owner is unchanged gets the report QUEUED in the durable parent inbox
+   * (`ParentDeliveryDrainerService`), which delivers it once when the parent
+   * becomes active and rechecks the owner before that send. The result is
+   * `queued` with the stored envelope id only after the store confirmed the
+   * write. A host without the durable inbox, a changed owner, or a refused
+   * write is a refusal, counted on the child record for `ptah_session_status`.
    */
   private async deliverFromSessionChild(
     input: SessionChildReportInput,
   ): Promise<AgentReportDelivery> {
-    const { message, summary } = input;
+    const { message } = input;
     const reportedId = input.childSessionId.trim();
 
     const child = this.findSessionChild(reportedId);
     if (!child) {
-      return this.refuseSessionChild('unattributed-caller', reportedId, undefined, {
+      return this.refuseSessionChild('unattributed-caller', reportedId, {
         detail: UNATTRIBUTED_SESSION_CHILD_DETAIL,
       });
     }
     const childSessionId = child.childSessionId;
-    const note = summary?.trim() || firstLine(message, TILE_NOTE_PREVIEW_LENGTH);
-    const refuse = (
-      reason: AgentReportRefusalReason,
-      context: Record<string, unknown> = {},
-    ): AgentReportDelivery =>
-      this.refuseSessionChild(reason, childSessionId, note, context);
 
     if (message.length > MAX_AGENT_REPORT_LENGTH) {
-      return refuse('report-too-large', {
+      return this.refuseSessionChild('report-too-large', childSessionId, {
         length: message.length,
         cap: MAX_AGENT_REPORT_LENGTH,
       });
     }
 
-    if (parentCandidates(child).length === 0) {
-      return refuse('no-parent-recorded', {
+    // One report per child at a time: the rate and duplicate bounds read
+    // history that only a finished report writes, so parallel calls from one
+    // child would otherwise all pass them.
+    // The record is read again inside the chain: an earlier report can move
+    // the child to a verified successor while this one waits its turn.
+    return this.serializeSessionChild(childSessionId, () => {
+      const current = this.sessionChildren?.get(childSessionId);
+      if (!current) {
+        return Promise.resolve(
+          this.refuseSessionChild('unattributed-caller', childSessionId, {
+            detail: 'this session was not started with ptah_session_start',
+          }),
+        );
+      }
+      return this.deliverSessionChildReport(input, current);
+    });
+  }
+
+  /**
+   * The record of the calling session, by its tab id or its SDK session id.
+   * A child resumed from the sidebar runs under a new tab id but the same SDK
+   * session, and the MCP URL carries the new tab id, so the session lifecycle
+   * maps that tab to its SDK id. An SDK id inferred from the worktree path
+   * can belong to another chat in the same worktree and never attributes.
+   */
+  private findSessionChild(reportedId: string): SessionChildRecord | undefined {
+    const registry = this.sessionChildren;
+    if (!registry) return undefined;
+    const trusted = (record: SessionChildRecord | undefined) =>
+      record &&
+      (record.childSessionId === reportedId || !record.sdkSessionIdInferred)
+        ? record
+        : undefined;
+    const direct = registry.get(reportedId);
+    if (direct || !this.lifecycle) return trusted(direct);
+    try {
+      const sdkId = this.lifecycle.find(reportedId)?.realSessionId ?? undefined;
+      const resumed = registry.get(sdkId);
+      return resumed?.sdkSessionIdInferred ? undefined : resumed;
+    } catch (error: unknown) {
+      // degradation-audit: reported - logged here, and the caller refuses the
+      // report as `unattributed-caller`, which the child and the log both see.
+      this.logger.error(
+        '[AgentReportRouter] Session lifecycle read failed',
+        error instanceof Error ? error : new Error(String(error)),
+      );
+      return undefined;
+    }
+  }
+
+  private serializeSessionChild<T>(
+    childSessionId: string,
+    work: () => Promise<T>,
+  ): Promise<T> {
+    const previous =
+      this.sessionAdmissions.get(childSessionId) ?? Promise.resolve();
+    const run = previous.then(work);
+    // The tail only orders the next report; each caller sees its own result.
+    const tail = run.then(
+      () => undefined,
+      () => undefined,
+    );
+    this.sessionAdmissions.set(childSessionId, tail);
+    void tail.then(() => {
+      if (this.sessionAdmissions.get(childSessionId) === tail)
+        this.sessionAdmissions.delete(childSessionId);
+    });
+    return run;
+  }
+
+  private async deliverSessionChildReport(
+    input: SessionChildReportInput,
+    child: SessionChildRecord,
+  ): Promise<AgentReportDelivery> {
+    const { message, summary } = input;
+    const childSessionId = child.childSessionId;
+    const binding = sessionOwnerBinding(child);
+
+    const candidates = [binding.tab, binding.sdk]
+      .map((id) => SessionId.safeParse(id))
+      .filter((id): id is SessionId => !!id);
+    if (candidates.length === 0) {
+      return this.refuseSessionChild('no-parent-recorded', childSessionId, {
         detail: 'the parent recorded at ptah_session_start is not a session id',
       });
     }
 
     if (!this.agentAdapter) {
-      return refuse('chat-runtime-unavailable', {
-        detail:
-          'no agent adapter is registered in this host, so no chat session ' +
-          'can be driven',
-      });
+      return this.refuseSessionChild(
+        'chat-runtime-unavailable',
+        childSessionId,
+        {
+          detail:
+            'no agent adapter is registered in this host, so no chat session ' +
+            'can be driven',
+        },
+      );
     }
 
     const adapter = this.agentAdapter;
-    // One admission or flush at a time for each child: the rate, duplicate and
-    // order checks below read state that the previous send changes.
-    return this.serialize(childSessionId, () =>
-      this.admitSessionChildReport(childSessionId, input, adapter, refuse),
+    // The first recorded parseable parent is the owner. A later live ID
+    // does not authorize rerouting a report from an unreachable owner.
+    const owner = candidates[0];
+    const forwardedOwner = SessionId.from(await this.forwardTarget(owner));
+    let parentSessionId = forwardedOwner;
+    if (!adapter.isSessionActive(parentSessionId) && this.handoffAcks) {
+      try {
+        const handoff =
+          await this.handoffAcks.findBySuccessor(parentSessionId);
+        if (
+          handoff?.successorTabId === parentSessionId &&
+          handoff.state !== 'starting' &&
+          handoff.successorSdkId &&
+          adapter.isSessionActive(SessionId.from(handoff.successorSdkId))
+        )
+          parentSessionId = SessionId.from(handoff.successorSdkId);
+      } catch (error: unknown) {
+        this.logger.error(
+          'Failed to verify handoff report parent',
+          error instanceof Error ? error : new Error(String(error)),
+        );
+      }
+    }
+    const refusedSummary =
+      summary?.trim() || firstLine(message, TILE_NOTE_PREVIEW_LENGTH);
+    // Both lineage and binding reads are async; refuse a stale owner snapshot.
+    if (!this.ownerBindingHolds(childSessionId, binding)) {
+      this.sessionChildren?.markReportRefused(childSessionId, refusedSummary);
+      return this.refuseSessionChild(
+        'parent-session-not-active',
+        childSessionId,
+        { parentSessionIds: candidates, detail: 'the recorded owner changed' },
+      );
+    }
+
+    // A saved receipt for this exact report outranks the report bounds and a
+    // live parent: a repeat gets its receipt, and a row
+    // that is sending or whose outcome is unknown may already have reached
+    // the parent, so a direct send here could deliver it twice.
+    // The lookup reads the in-memory index, so the restore must be done first.
+    if (this.parentDelivery) {
+      try {
+        await this.parentDelivery.restored();
+      } catch (error: unknown) {
+        this.sessionChildren?.markReportRefused(childSessionId, refusedSummary);
+        return this.refuseSessionChild('delivery-failed', childSessionId, {
+          parentSessionId,
+          detail: `saved reports could not be read: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        });
+      }
+      if (!this.ownerBindingHolds(childSessionId, binding)) {
+        this.sessionChildren?.markReportRefused(childSessionId, refusedSummary);
+        return this.refuseSessionChild(
+          'parent-session-not-active',
+          childSessionId,
+          { parentSessionIds: candidates, detail: 'the recorded owner changed' },
+        );
+      }
+    }
+    const stored = this.storedSessionReceipt(
+      childSessionId,
+      binding,
+      message,
+      refusedSummary,
     );
-  }
+    if (stored) return stored;
 
-  private async admitSessionChildReport(
-    childSessionId: string,
-    input: SessionChildReportInput,
-    adapter: IAgentAdapter,
-    refuse: (
-      reason: AgentReportRefusalReason,
-      context?: Record<string, unknown>,
-    ) => AgentReportDelivery,
-  ): Promise<AgentReportDelivery> {
-    const { message, summary } = input;
-    const child = this.sessionChildren?.get(childSessionId);
-    if (!child) {
-      return this.refuseSessionChild('unattributed-caller', childSessionId, undefined, {
-        detail: UNATTRIBUTED_SESSION_CHILD_DETAIL,
-      });
-    }
-    const owner = await this.resolveOwner(child, adapter);
-    if (!owner || owner.ownerChanged) {
-      return refuse('parent-session-not-active', {
-        detail: OWNER_CHANGED_DETAIL,
-        parentSessionIds: owner?.candidates ?? [],
-      });
-    }
-
+    // Before the delivery branch, so the bounds also apply to queued reports.
     const rateKey = `session:${childSessionId}`;
     const now = Date.now();
     if (this.recentDeliveryCount(rateKey, now) >= AGENT_REPORT_BURST_LIMIT) {
-      return refuse('rate-limited', {
+      return this.refuseSessionChild('rate-limited', childSessionId, {
         limit: AGENT_REPORT_BURST_LIMIT,
         windowMs: AGENT_REPORT_BURST_WINDOW_MS,
       });
     }
     if (
-      this.recentBodyEntries(rateKey, now).some((e) => e.message === message) ||
-      this.sessionChildren
-        ?.get(childSessionId)
-        ?.heldReports?.some((report) => report.message === message)
+      this.recentBodyEntries(rateKey, now).some((e) => e.message === message)
     ) {
-      return refuse('duplicate-report', {
-        detail: 'an identical report from this session was delivered or held recently',
+      return this.refuseSessionChild('duplicate-report', childSessionId, {
+        detail: 'an identical report from this session was delivered recently',
       });
     }
 
-    if (!owner.live) {
-      return this.holdSessionChildReport(childSessionId, owner, input, now, rateKey, refuse);
+    const attrs = [
+      `agent-id="${escapeAttribute(childSessionId)}"`,
+      `agent="${escapeAttribute(child.label)}"`,
+      `cli="ptah-session"`,
+    ].join(' ');
+    const envelope = `<agent-report ${attrs}>\n${reportBody(
+      message,
+      summary,
+    )}\n</agent-report>`;
+    // The stored and the sent body share one cap; a message near the tool
+    // limit plus the wrapper and summary would be saved but never readable.
+    if (envelope.length > PARENT_ENVELOPE_MAX_BODY_CHARS) {
+      return this.refuseSessionChild('report-too-large', childSessionId, {
+        length: envelope.length,
+        cap: PARENT_ENVELOPE_MAX_BODY_CHARS,
+        detail:
+          'the message plus the report wrapper and summary exceed the ' +
+          'parent delivery limit; shorten the message',
+      });
     }
+    const originName = `session · ${child.label}`;
 
-    // Older held reports go first, so the parent reads them in order.
-    const flushed = await this.flushHeldReports(child, owner, adapter);
-    if (flushed === 'failed' && this.sameOwner(childSessionId, owner)) {
-      // The older reports went back on the record; this one waits behind them.
-      return this.holdSessionChildReport(childSessionId, owner, input, now, rateKey, refuse);
-    }
-    if (flushed === 'owner-changed' || !this.sameOwner(childSessionId, owner)) {
-      return refuse('parent-session-not-active', {
-        detail: OWNER_CHANGED_DETAIL,
-        parentSessionIds: owner.candidates,
+    if (!adapter.isSessionActive(parentSessionId)) {
+      // An offline owner is addressed by the id it comes back under: a
+      // verified successor when lineage moved it, else the SDK session a
+      // reopened parent keeps on any new tab, else the recorded tab.
+      const sdk = SessionId.safeParse(binding.sdk);
+      const offlineTarget =
+        forwardedOwner !== owner
+          ? forwardedOwner
+          : sdk && sdk !== owner
+            ? SessionId.from(await this.forwardTarget(sdk))
+            : forwardedOwner;
+      if (!this.ownerBindingHolds(childSessionId, binding)) {
+        this.sessionChildren?.markReportRefused(childSessionId, refusedSummary);
+        return this.refuseSessionChild(
+          'parent-session-not-active',
+          childSessionId,
+          {
+            parentSessionIds: candidates,
+            detail: 'the recorded owner changed',
+          },
+        );
+      }
+      return this.queueSessionChildReport({
+        childSessionId,
+        parentSessionId: offlineTarget,
+        binding,
+        rateKey,
+        envelope,
+        originName,
+        message,
+        refusedSummary,
+        candidates,
       });
     }
 
-    const parentSessionId = owner.parentSessionId;
     try {
-      await adapter.sendMessageToSession(
-        parentSessionId,
-        sessionChildEnvelope(child, message, summary),
-        { origin: sessionChildOrigin(child) },
-      );
+      await adapter.sendMessageToSession(parentSessionId, envelope, {
+        origin: {
+          kind: 'peer',
+          from: `ptah-session:${childSessionId}`,
+          name: originName,
+        },
+      });
     } catch (error: unknown) {
-      return refuse('delivery-failed', {
-        deliveryTarget: parentSessionId,
-        detail: DELIVERY_FAILED_DETAIL,
-        error: error instanceof Error ? error.message : String(error),
+      return this.refuseSessionChild('delivery-failed', childSessionId, {
+        parentSessionId,
+        detail: error instanceof Error ? error.message : String(error),
       });
     }
 
@@ -885,321 +996,226 @@ export class AgentReportRouter {
     return { delivered: true, parentSessionId };
   }
 
-  /** Hold a report on the child record until its owner parent is active. */
-  private holdSessionChildReport(
+  /** The child is still recorded under the owner binding this report validated. */
+  private ownerBindingHolds(
     childSessionId: string,
-    owner: SessionChildOwner,
-    input: SessionChildReportInput,
-    now: number,
-    rateKey: string,
-    refuse: (
-      reason: AgentReportRefusalReason,
-      context?: Record<string, unknown>,
-    ) => AgentReportDelivery,
-  ): AgentReportDelivery {
-    const { message, summary } = input;
-    const held = this.sessionChildren?.holdReport(childSessionId, {
-      heldSince: new Date(now).toISOString(),
-      message,
-      ...(summary !== undefined ? { summary } : {}),
-    });
-    if (!held) {
-      return refuse('parent-session-not-active', {
-        parentSessionIds: owner.candidates,
-      });
-    }
-    this.remember(rateKey, { at: now, message });
-    this.countDroppedHeldReports(childSessionId, held.dropped);
-    this.logger.info(
-      '[AgentReportRouter] Session child report held for an inactive parent',
-      {
+    binding: SessionOwnerBinding,
+  ): boolean {
+    const current = this.sessionChildren?.get(childSessionId);
+    if (!current || current.childSessionId !== childSessionId) return false;
+    const now = sessionOwnerBinding(current);
+    return now.tab === binding.tab && now.sdk === binding.sdk;
+  }
+
+  /**
+   * Save a child report for its inactive verified parent. The dedupe key is
+   * derived from the child id, its owner binding and the report text, so a
+   * repeat to the same owner returns the receipt the store already holds and
+   * the same text after a reparent creates work for the new owner.
+   */
+  private async queueSessionChildReport(report: {
+    readonly childSessionId: string;
+    readonly parentSessionId: string;
+    readonly binding: SessionOwnerBinding;
+    readonly rateKey: string;
+    readonly envelope: string;
+    readonly originName: string;
+    readonly message: string;
+    readonly refusedSummary: string;
+    readonly candidates: readonly string[];
+  }): Promise<AgentReportDelivery> {
+    const { childSessionId, parentSessionId, refusedSummary } = report;
+    if (!this.parentDelivery) {
+      this.sessionChildren?.markReportRefused(childSessionId, refusedSummary);
+      return this.refuseSessionChild(
+        'parent-session-not-active',
         childSessionId,
-        parentSessionIds: owner.candidates,
-        held: held.record.heldReports?.length ?? 0,
+        {
+          parentSessionIds: report.candidates,
+          detail: 'no durable parent inbox is registered in this host',
+        },
+      );
+    }
+    const dedupeKey = AgentReportRouter.sessionReportKey(
+      childSessionId,
+      report.binding,
+      report.message,
+    );
+    const ownsRow = (row: ParentDeliveryEnvelope): boolean =>
+      AgentReportRouter.ownsSessionRow(row, childSessionId);
+
+    // A repeat returns its stored outcome without spending report budget.
+    const previous = this.storedSessionReceipt(
+      childSessionId,
+      report.binding,
+      report.message,
+      refusedSummary,
+    );
+    if (previous) return previous;
+
+    const saved = await this.parentDelivery.enqueueAdmitted(
+      {
+        id: `lane-delivery:${dedupeKey}`,
+        dedupeKey,
+        agentId: childSessionId,
+        parentSessionId,
+        kind: 'report',
+        body: report.envelope,
+        createdAt: Date.now(),
+        originName: report.originName.slice(0, MAX_ORIGIN_NAME_LENGTH),
+        originKind: 'session',
+      },
+      // Runs inside the store's serialized write: an owner change after the
+      // checks above must not leave a receipt for the old owner.
+      (existing) =>
+        this.ownerBindingHolds(childSessionId, report.binding) &&
+        (!existing || ownsRow(existing)),
+      () => {
+        this.sessionChildren?.markReportDelivered(childSessionId);
       },
     );
-    return {
-      delivered: false,
-      pending: true,
-      reason: 'parent-session-not-active',
-      detail: HELD_SESSION_CHILD_DETAIL,
-    };
-  }
-
-  /** Run `task` after every earlier admission or flush of the same child. */
-  private async serialize<T>(childSessionId: string, task: () => Promise<T>): Promise<T> {
-    const prior = this.childTurns.get(childSessionId) ?? Promise.resolve();
-    const run = prior.then(task);
-    const tail = run.then(
-      () => undefined,
-      () => undefined,
-    );
-    this.childTurns.set(childSessionId, tail);
-    try {
-      return await run;
-    } finally {
-      if (this.childTurns.get(childSessionId) === tail) {
-        this.childTurns.delete(childSessionId);
-      }
-    }
-  }
-
-  /** The recorded parent ids are still the ones `owner` was resolved from. */
-  private sameOwner(childSessionId: string, owner: SessionChildOwner): boolean {
-    const current = this.sessionChildren?.get(childSessionId);
-    return (
-      current?.parentSessionId?.trim() === owner.candidates[0] &&
-      current?.parentSdkSessionId?.trim() === owner.candidates[1]
-    );
-  }
-
-  /**
-   * Deliver held reports whose owner parent is now active. Called for every
-   * message of every session, so the path without held reports is one
-   * synchronous check. Never rejects.
-   */
-  async flushHeldSessionChildReports(): Promise<void> {
-    const registry = this.sessionChildren;
-    const adapter = this.agentAdapter;
-    if (!registry || !adapter || this.disposed || !registry.hasHeldReports()) return;
-    try {
-      // Every waiting child is checked, not only the children recorded under
-      // the active id: an owner reached through the handoff lineage has a
-      // different id than the one on the record.
-      // Each child drains on its own, so a parent that is slow to accept a
-      // send does not delay the children of another parent.
-      await Promise.all(
-        registry.withHeldReports().map((waiting) => {
-          const id = waiting.childSessionId;
-          if (this.flushQueued.has(id)) return undefined;
-          this.flushQueued.add(id);
-          return this.serialize(id, async () => {
-            this.flushQueued.delete(id);
-            const child = registry.get(id);
-            if (this.disposed || !child?.heldReports?.length) return;
-            const owner = await this.resolveOwner(child, adapter);
-            if (!owner || owner.ownerChanged || !owner.live) return;
-            await this.flushHeldReports(child, owner, adapter);
-          });
-        }),
-      );
-    } catch (error: unknown) {
-      this.logger.error(
-        '[AgentReportRouter] Held session child report flush failed',
-        error instanceof Error ? error : new Error(String(error)),
-      );
-    }
-  }
-
-  /** The record of the calling session, by its tab id or its SDK session id. */
-  private findSessionChild(reportedId: string): SessionChildRecord | undefined {
-    const registry = this.sessionChildren;
-    if (!registry) return undefined;
-    // An SDK id inferred from the worktree path can belong to another chat in
-    // the same worktree, so it never attributes a report.
-    const trusted = (record: SessionChildRecord | undefined) =>
-      record && (record.childSessionId === reportedId || !record.sdkSessionIdInferred)
-        ? record
-        : undefined;
-    const direct = registry.get(reportedId);
-    if (direct || !this.lifecycle) return trusted(direct);
-    // A child resumed from the sidebar runs under a new tab id but the same
-    // SDK session, and the MCP URL carries the new tab id.
-    try {
-      const resumed = registry.get(
-        this.lifecycle.find(reportedId)?.realSessionId ?? undefined,
-      );
-      return resumed?.sdkSessionIdInferred ? undefined : resumed;
-    } catch (error: unknown) {
-      // degradation-audit: reported - logged here, and the caller refuses the
-      // report as `unattributed-caller`, which the child and the log both see.
-      this.logger.error(
-        '[AgentReportRouter] Session lifecycle read failed',
-        error instanceof Error ? error : new Error(String(error)),
-      );
-      return undefined;
-    }
-  }
-
-  /**
-   * The session that owns the child now. The first recorded parseable parent
-   * is the owner; a later live id does not authorize rerouting a report from
-   * an unreachable owner. `ownerChanged` reports a re-parent during the async
-   * lineage and binding reads.
-   */
-  private async resolveOwner(
-    child: SessionChildRecord,
-    adapter: IAgentAdapter,
-  ): Promise<SessionChildOwner | undefined> {
-    const candidates = parentCandidates(child);
-    if (candidates.length === 0) return undefined;
-    let parentSessionId = SessionId.from(await this.forwardTarget(candidates[0]));
-    if (!adapter.isSessionActive(parentSessionId) && this.handoffAcks) {
-      try {
-        const binding = await this.handoffAcks.findBySuccessor(parentSessionId);
-        if (
-          binding?.successorTabId === parentSessionId &&
-          binding.state !== 'starting' &&
-          binding.successorSdkId &&
-          adapter.isSessionActive(SessionId.from(binding.successorSdkId))
-        )
-          parentSessionId = SessionId.from(binding.successorSdkId);
-      } catch (error: unknown) {
-        this.logger.error(
-          'Failed to verify handoff report parent',
-          error instanceof Error ? error : new Error(String(error)),
-        );
-      }
-    }
-    const current = this.sessionChildren?.get(child.childSessionId);
-    const ownerChanged =
-      current?.parentSessionId?.trim() !== candidates[0] ||
-      current?.parentSdkSessionId?.trim() !== candidates[1];
-    return {
-      candidates,
-      parentSessionId,
-      ownerChanged,
-      live: adapter.isSessionActive(parentSessionId),
-    };
-  }
-
-  /**
-   * Send the held reports of one child, oldest first. Before each send the
-   * owner is checked again; a changed owner or a failed send puts the unsent
-   * reports back for the current owner.
-   */
-  private async flushHeldReports(
-    child: SessionChildRecord,
-    owner: SessionChildOwner,
-    adapter: IAgentAdapter,
-  ): Promise<'done' | 'owner-changed' | 'failed'> {
-    const childSessionId = child.childSessionId;
-    const parentSessionId = owner.parentSessionId;
-    const held = this.sessionChildren?.takeHeldReports(childSessionId) ?? [];
-    const putBack = (index: number) => {
-      const unsent = held.slice(index);
-      if (unsent.length > 0 && !this.sessionChildren?.get(childSessionId)) {
-        // The record was removed during the send: nothing can hold these now.
-        for (const report of unsent) {
-          this.logger.warn('[AgentReportRouter] Held session child report dropped', {
-            reason: 'held-report-dropped',
-            cause: 'child-record-removed',
-            childSessionId,
-            parentSessionId: child.parentSessionId,
-            parentSdkSessionId: child.parentSdkSessionId,
-            heldSince: report.heldSince,
-          });
-        }
-        return;
-      }
-      this.countDroppedHeldReports(
-        childSessionId,
-        this.sessionChildren?.restoreHeldReports(childSessionId, unsent) ?? [],
-      );
-    };
-    for (let index = 0; index < held.length; index++) {
-      if (this.disposed || !this.sameOwner(childSessionId, owner)) {
-        putBack(index);
-        this.logger.info('[AgentReportRouter] Held session child reports kept', {
+    if ('refused' in saved) {
+      this.sessionChildren?.markReportRefused(childSessionId, refusedSummary);
+      if (saved.refused === 'admission-refused')
+        return this.refuseSessionChild(
+          'parent-session-not-active',
           childSessionId,
-          parentSessionId,
-          unsent: held.length - index,
-          cause: this.disposed ? 'router-disposed' : 'owner-changed',
-        });
-        return 'owner-changed';
-      }
-      const report = held[index];
-      try {
-        await adapter.sendMessageToSession(
-          parentSessionId,
-          sessionChildEnvelope(
-            child,
-            report.message,
-            report.summary,
-            report.heldSince,
-          ),
-          { origin: sessionChildOrigin(child) },
-        );
-      } catch (error: unknown) {
-        // degradation-audit: reported - the unsent reports go back on the
-        // record for the next flush, and the failure is logged with both ids.
-        putBack(index);
-        this.logger.warn(
-          '[AgentReportRouter] Held session child report delivery failed',
           {
-            childSessionId,
-            parentSessionId,
-            unsent: held.length - index,
-            detail: error instanceof Error ? error.message : String(error),
+            parentSessionIds: report.candidates,
+            detail: 'the recorded owner changed while the report was saved',
           },
         );
-        return 'failed';
-      }
-      this.sessionChildren?.markReportDelivered(childSessionId);
-    }
-    if (held.length > 0) {
-      this.logger.info('[AgentReportRouter] Held session child reports delivered', {
-        childSessionId,
+      return this.refuseSessionChild(saved.refused, childSessionId, {
         parentSessionId,
-        count: held.length,
       });
     }
-    return 'done';
+    // The per-child chain means no other caller can write this key between
+    // the pre-check and the store's write, so only a fresh row is pending
+    // here; anything else is a stored outcome, mapped without new budget.
+    if (saved.state !== 'pending')
+      return this.sessionReceipt(saved, childSessionId, refusedSummary);
+    this.remember(report.rateKey, { at: Date.now(), message: report.message });
+    this.logger.info('[AgentReportRouter] Session child report queued', {
+      childSessionId,
+      parentSessionId: saved.parentSessionId,
+      receiptId: saved.id,
+      state: saved.state,
+    });
+    return {
+      delivered: false,
+      queued: true,
+      receiptId: saved.id,
+      receiptState: saved.state,
+    };
   }
 
-  /** A held report pushed out by the limit is a refused report: counted and logged. */
-  private countDroppedHeldReports(
+  /**
+   * The mapped outcome of the saved row for this child, owner binding and
+   * text, or `null` when none is saved. A repeat spends no report budget.
+   */
+  private storedSessionReceipt(
     childSessionId: string,
-    dropped: readonly SessionChildHeldReport[],
-  ): void {
-    for (const report of dropped) {
-      const record = this.sessionChildren?.markReportRefused(
-        childSessionId,
-        report.summary?.trim() ||
-          firstLine(report.message, TILE_NOTE_PREVIEW_LENGTH),
-      );
-      this.logger.warn('[AgentReportRouter] Held session child report dropped', {
-        reason: 'held-report-dropped',
-        childSessionId,
-        parentSessionId: record?.parentSessionId,
-        parentSdkSessionId: record?.parentSdkSessionId,
-        heldSince: report.heldSince,
-      });
+    binding: SessionOwnerBinding,
+    message: string,
+    refusedSummary: string,
+  ): AgentReportDelivery | null {
+    if (!this.parentDelivery) return null;
+    const previous = this.parentDelivery.find(
+      AgentReportRouter.sessionReportKey(childSessionId, binding, message),
+    );
+    if (!previous || !AgentReportRouter.ownsSessionRow(previous, childSessionId))
+      return null;
+    return this.sessionReceipt(previous, childSessionId, refusedSummary);
+  }
+
+  private static ownsSessionRow(
+    row: ParentDeliveryEnvelope,
+    childSessionId: string,
+  ): boolean {
+    return row.agentId === childSessionId && row.originKind === 'session';
+  }
+
+  /** The caller-facing outcome of a stored report, mapped state by state. */
+  private sessionReceipt(
+    saved: ParentDeliveryEnvelope,
+    childSessionId: string,
+    refusedSummary: string,
+  ): AgentReportDelivery {
+    switch (saved.state) {
+      case 'pending':
+      case 'blocked-retryable':
+        return {
+          delivered: false,
+          queued: true,
+          receiptId: saved.id,
+          receiptState: saved.state,
+        };
+      case 'delivered':
+        return { delivered: true, parentSessionId: saved.parentSessionId };
+      case 'sending':
+      case 'outcome-unknown':
+        this.logger.warn('[AgentReportRouter] Session child report refused', {
+          reason: saved.state,
+          childSessionId,
+          receiptId: saved.id,
+        });
+        return {
+          delivered: false,
+          reason:
+            saved.state === 'sending'
+              ? 'delivery-in-progress'
+              : 'delivery-outcome-unknown',
+          receiptId: saved.id,
+          receiptState: saved.state,
+        };
+      case 'cancelled':
+      case 'not-saved':
+        // The store returns the retained record for a repeat of a cancelled
+        // report; that copy will never be sent, so the repeat is not "queued".
+        this.sessionChildren?.markReportRefused(childSessionId, refusedSummary);
+        return {
+          ...this.refuseSessionChild('delivery-failed', childSessionId, {
+            parentSessionId: saved.parentSessionId,
+            receiptId: saved.id,
+            detail: 'an earlier copy of this report was cancelled',
+          }),
+          receiptId: saved.id,
+          receiptState: saved.state,
+        };
     }
   }
 
   /**
-   * Refuse a child session's report. With a record (`note` given) the refusal
-   * is counted on it, and the log line carries the reason and both parent ids,
-   * because the parent sees nothing of a refused report.
+   * Deterministic and within the store's `^\S{1,470}$` dedupe key pattern.
+   * Scoped to the owner binding; the summary is not part of the identity.
+   * A JSON tuple keeps field boundaries unambiguous for any text.
    */
+  private static sessionReportKey(
+    childSessionId: string,
+    binding: SessionOwnerBinding,
+    message: string,
+  ): string {
+    const idPart =
+      /^\S+$/.test(childSessionId) && childSessionId.length <= MAX_KEY_ID_LENGTH
+        ? childSessionId
+        : createHash('sha256').update(childSessionId).digest('hex');
+    const digest = createHash('sha256')
+      .update(JSON.stringify(['v2', binding.tab, binding.sdk ?? '', message]))
+      .digest('hex');
+    return `session-report:v2:${idPart}:${digest}`;
+  }
+
   private refuseSessionChild(
     reason: AgentReportRefusalReason,
     childSessionId: string,
-    note: string | undefined,
     context: Record<string, unknown> = {},
   ): AgentReportDelivery {
-    const record =
-      note === undefined
-        ? undefined
-        : this.sessionChildren?.markReportRefused(childSessionId, note);
     this.logger.warn('[AgentReportRouter] Session child report refused', {
       reason,
       childSessionId,
-      ...(record
-        ? {
-            parentSessionId: record.parentSessionId,
-            parentSdkSessionId: record.parentSdkSessionId,
-          }
-        : {}),
       ...context,
     });
-    const detail = context['detail'];
-    return {
-      delivered: false,
-      reason,
-      ...(typeof detail === 'string' ? { detail } : {}),
-    };
+    return { delivered: false, reason };
   }
 
   /**

@@ -23,6 +23,18 @@ function makeLogger(): jest.Mocked<Logger> {
   } as unknown as jest.Mocked<Logger>;
 }
 
+describe('SubagentRegistryService.hasHeldUnboundStart', () => {
+  it('matches the agent and parent session without consuming the held start', () => {
+    const service = new SubagentRegistryService(makeLogger());
+    service.holdUnboundStart({ agentId: 'a-1', agentType: 'Explore', parentSessionId: 'parent-1' });
+    expect(service.hasHeldUnboundStart('a-1', 'parent-1')).toBe(true);
+    expect(service.hasHeldUnboundStart('a-1', 'parent-2')).toBe(false);
+    expect(service.hasHeldUnboundStart('a-2', 'parent-1')).toBe(false);
+    expect(service.bindHeldStartToToolCall('tc-1', 'a-1')).toBe('bound');
+    expect(service.hasHeldUnboundStart('a-1', 'parent-1')).toBe(false);
+  });
+});
+
 describe('SubagentRegistryService.pruneSession (TASK_2026_109 A4 + C4)', () => {
   let service: SubagentRegistryService;
   let logger: jest.Mocked<Logger>;

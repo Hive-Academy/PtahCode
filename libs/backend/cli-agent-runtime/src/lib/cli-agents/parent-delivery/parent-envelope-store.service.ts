@@ -50,6 +50,8 @@ export interface ParentDeliveryEnvelope {
   readonly verdict?: LaneCompletionVerdict;
   readonly stopReason?: LaneStopReason;
   readonly originName?: string;
+  /** `session` for a child chat session report; absent for a lane. */
+  readonly originKind?: 'agent' | 'session';
   readonly createdAt: number;
   readonly completedAt?: string;
   readonly updatedAt: number;
@@ -75,6 +77,15 @@ export type ParentEnvelopeRefusal =
   | 'parent-session-deleted';
 export type ParentEnqueueResult = ParentDeliveryEnvelope | {
   readonly refused: ParentEnvelopeRefusal;
+};
+/**
+ * Re-checked inside the store's serialization, before dedupe, so an owner change
+ * between the caller's check and the write cannot queue a row for the old owner.
+ * `existing` is the row already stored under the same dedupe key, if any.
+ */
+export type ParentEnqueueAdmission = (existing: ParentDeliveryEnvelope | undefined) => boolean;
+export type ParentAdmittedEnqueueResult = ParentEnqueueResult | {
+  readonly refused: 'admission-refused';
 };
 export type ParentMutationResult = ParentDeliveryEnvelope | {
   readonly refused: ParentEnvelopeRefusal | 'confirmation-required';
@@ -154,6 +165,25 @@ export class ParentEnvelopeStoreService implements ParentEnvelopeStore {
   }
 
   async enqueue(input: NewParentDeliveryEnvelope): Promise<ParentEnqueueResult> {
+    const result = await this.enqueueWith(input, undefined);
+    // Unreachable: only an `admit` callback can refuse admission.
+    if ('refused' in result && result.refused === 'admission-refused')
+      throw new Error('Parent envelope admission refused without a check');
+    return result;
+  }
+
+  /** `enqueue` whose `admit` runs inside the serialized write, before the dedupe lookup. */
+  enqueueAdmitted(
+    input: NewParentDeliveryEnvelope,
+    admit: ParentEnqueueAdmission,
+  ): Promise<ParentAdmittedEnqueueResult> {
+    return this.enqueueWith(input, admit);
+  }
+
+  private async enqueueWith(
+    input: NewParentDeliveryEnvelope,
+    admit: ParentEnqueueAdmission | undefined,
+  ): Promise<ParentAdmittedEnqueueResult> {
     try {
       await this.restore();
     } catch (error: unknown) {
@@ -165,6 +195,7 @@ export class ParentEnvelopeStoreService implements ParentEnvelopeStore {
       await this.pruneSafelyLocked();
       if (this.isParentFrozen(input.parentSessionId)) return { refused: 'parent-session-deleted' };
       const existing = this.entries.get(input.dedupeKey);
+      if (admit && !admit(existing)) return { refused: 'admission-refused' };
       if (existing) {
         if (existing.kind === 'completion') await this.finalizeCompletionLocked(existing);
         return existing;
@@ -185,6 +216,12 @@ export class ParentEnvelopeStoreService implements ParentEnvelopeStore {
         updatedAt: now,
         bodyBytes: Buffer.byteLength(input.body, 'utf8'),
       });
+      const body = ParentEnvelopeBodySchema.safeParse(this.bodyDocument(record, input.body));
+      if (!body.success) {
+        // Fail closed: restore would drop an invalid body, so nothing is written or indexed.
+        this.logger.error('[ParentEnvelopeStore] Envelope body rejected', body.error);
+        return { refused: 'storage-unavailable' };
+      }
       try {
         await this.writeBodyLocked(record, input.body);
         this.entries.set(record.dedupeKey, record);
@@ -275,6 +312,29 @@ export class ParentEnvelopeStoreService implements ParentEnvelopeStore {
     });
   }
 
+  /**
+   * Holds an unclaimed entry (`pending` or `blocked-retryable`) for `delayMs`
+   * without a send attempt; the body is kept. Returns `undefined` when the
+   * entry is gone or in another state.
+   */
+  async markDeferred(
+    id: string,
+    reason: string,
+    delayMs: number,
+  ): Promise<ParentDeliveryEnvelope | undefined> {
+    await this.restore();
+    return this.serialize(async () => {
+      const existing = this.findById(id);
+      if (!existing || (existing.state !== 'pending' && existing.state !== 'blocked-retryable'))
+        return undefined;
+      const now = Date.now();
+      return this.replaceLocked(existing, {
+        state: 'blocked-retryable', lastError: reason,
+        nextRetryAt: now + Math.max(0, delayMs), waitingReason: undefined,
+      }, now);
+    });
+  }
+
   async markWaiting(parentSessionId: string): Promise<void> {
     await this.restore();
     return this.serialize(async () => {
@@ -290,7 +350,8 @@ export class ParentEnvelopeStoreService implements ParentEnvelopeStore {
     });
   }
 
-  async cancel(id: string): Promise<ParentMutationResult> {
+  /** `reason`, when given, is kept as the entry's `lastError`. */
+  async cancel(id: string, reason?: string): Promise<ParentMutationResult> {
     await this.restore();
     return this.serialize(async () => {
       const existing = this.findById(id);
@@ -298,7 +359,7 @@ export class ParentEnvelopeStoreService implements ParentEnvelopeStore {
       if (this.isParentFrozen(existing.parentSessionId))
         return { refused: 'parent-session-deleted' };
       if (existing.state === 'delivered' || existing.state === 'cancelled') return existing;
-      return this.cancelLocked(existing);
+      return this.cancelLocked(existing, reason);
     });
   }
 
@@ -593,7 +654,14 @@ export class ParentEnvelopeStoreService implements ParentEnvelopeStore {
   }
 
   private async writeBodyLocked(record: ParentEnvelopeRecord, text: string): Promise<void> {
-    await this.storage.update(`${PARENT_ENVELOPE_BODY_PREFIX}${record.id}`, {
+    await this.storage.update(
+      `${PARENT_ENVELOPE_BODY_PREFIX}${record.id}`,
+      this.bodyDocument(record, text),
+    );
+  }
+
+  private bodyDocument(record: ParentEnvelopeRecord, text: string): Record<string, unknown> {
+    return {
       text,
       envelopeId: record.id,
       parentSessionId: record.parentSessionId,
@@ -603,8 +671,9 @@ export class ParentEnvelopeStoreService implements ParentEnvelopeStore {
       ...(record.verdict ? { verdict: record.verdict } : {}),
       ...(record.stopReason ? { stopReason: record.stopReason } : {}),
       ...(record.originName ? { originName: record.originName } : {}),
+      ...(record.originKind ? { originKind: record.originKind } : {}),
       createdAt: record.createdAt,
-    });
+    };
   }
 
   private async pruneSafelyLocked(): Promise<void> {
@@ -638,11 +707,12 @@ export class ParentEnvelopeStoreService implements ParentEnvelopeStore {
   private async replaceLocked(
     existing: ParentDeliveryEnvelope,
     patch: Partial<ParentDeliveryEnvelope>,
+    now = Date.now(),
   ): Promise<ParentDeliveryEnvelope> {
     const next = this.toRecord({
       ...existing,
       ...patch,
-      updatedAt: Date.now(),
+      updatedAt: now,
     });
     this.entries.set(next.dedupeKey, next);
     try {
@@ -654,10 +724,14 @@ export class ParentEnvelopeStoreService implements ParentEnvelopeStore {
     return next;
   }
 
-  private async cancelLocked(existing: ParentDeliveryEnvelope): Promise<ParentDeliveryEnvelope> {
+  private async cancelLocked(
+    existing: ParentDeliveryEnvelope,
+    reason?: string,
+  ): Promise<ParentDeliveryEnvelope> {
     let cancelled = await this.replaceLocked(existing, {
       state: 'cancelled', cancelledAt: Date.now(), nextRetryAt: undefined,
       waitingReason: undefined,
+      ...(reason ? { lastError: reason } : {}),
     });
     if (existing.bodyBytes > 0) {
       try {

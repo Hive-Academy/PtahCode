@@ -2,7 +2,6 @@ import type { DependencyContainer } from 'tsyringe';
 import {
   SDK_TOKENS,
   type SdkAdapterEvents,
-  type SubagentBudgetStopCallbackRegistry,
   type SubagentStopCallbackRegistry,
 } from '@ptah-extension/agent-sdk';
 import { LaneOutcomeRecorder } from '../lane-outcome-recorder.service';
@@ -104,20 +103,6 @@ export function startLaneOutcomes(
       );
       unsubs.push(
         registry.register((payload) => recorder().recordSubagentStop(payload)),
-      );
-    }
-    if (
-      container.isRegistered(
-        SDK_TOKENS.SDK_SUBAGENT_BUDGET_STOP_CALLBACK_REGISTRY,
-      )
-    ) {
-      const registry = container.resolve<SubagentBudgetStopCallbackRegistry>(
-        SDK_TOKENS.SDK_SUBAGENT_BUDGET_STOP_CALLBACK_REGISTRY,
-      );
-      unsubs.push(
-        registry.register((payload) =>
-          recorder().markSubagentBudgetStop(payload.agentId),
-        ),
       );
     }
     if (

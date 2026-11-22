@@ -1477,8 +1477,42 @@ export class SdkQueryOptionsBuilder {
         return {};
       }
     };
+    // Bypass-permissions skips canUseTool, so a paused subagent or session is also
+    // denied here. Matcher-less: it sees every tool call, and does one cheap lookup.
+    const pausedToolGate: HookCallback = async (hookInput) => {
+      if (hookInput.hook_event_name !== 'PreToolUse') return {};
+      try {
+        const denial = await this.permissionHandler.budgetToolDenial(
+          hookInput.tool_name,
+          hookInput.tool_input,
+          sessionIdResolver?.() ?? sessionId,
+          hookInput.agent_id,
+          routingTabId ?? undefined,
+        );
+        if (!denial) return {};
+        return {
+          hookSpecificOutput: {
+            hookEventName: 'PreToolUse',
+            permissionDecision: 'deny',
+            permissionDecisionReason: denial,
+          },
+        };
+      } catch (error: unknown) {
+        // degradation-audit: reported - logged at warn; the pause gate fails
+        // open so a defect in it never blocks every tool call.
+        this.logger.warn(
+          '[SdkQueryOptionsBuilder] Paused-tool gate failed; allowing the call',
+          {
+            toolUseId: hookInput.tool_use_id,
+            error: error instanceof Error ? error.message : String(error),
+          },
+        );
+        return {};
+      }
+    };
     hooks.PreToolUse = [
       { matcher: 'SendMessage', hooks: [budgetMessageGate] },
+      { hooks: [pausedToolGate] },
       cronApprovalGate.hookMatcher,
       ...(hooks.PreToolUse ?? []),
     ];

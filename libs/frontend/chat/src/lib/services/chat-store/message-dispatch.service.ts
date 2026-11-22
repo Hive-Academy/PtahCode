@@ -1,4 +1,4 @@
-import { Injectable, inject } from '@angular/core';
+import { DestroyRef, Injectable, inject } from '@angular/core';
 import { AuthStateService } from '@ptah-extension/core';
 import {
   createExecutionChatMessage,
@@ -16,6 +16,9 @@ import {
 import type { SendMessageOptions, TabState } from '@ptah-extension/chat-types';
 import { PermissionHandlerService } from '@ptah-extension/chat-streaming';
 import { FollowUpQueueService } from './follow-up-queue.service';
+import { ComposerRestoreService } from '../composer-restore.service';
+import type { ComposerDraftImage } from '../composer-draft.store';
+import type { ChatFile } from '../file-picker.service';
 import { isTabBusyGenerating } from './tab-busy';
 
 /**
@@ -26,13 +29,24 @@ import { isTabBusyGenerating } from './tab-busy';
  *   (MessageSender); a busy tab, one held by the Command Center send lock, or
  *   one with follow-ups already waiting hands the message to
  *   `FollowUpQueueService`, which gives it to the backend queue of the
- *   captured session at once (TASK_2026_884). Busy: the tab's in-flight
- *   permissions are auto-denied with the user's content as the
- *   `deny_with_message` reason.
+ *   captured session at once (TASK_2026_884). Open permission prompts are
+ *   left untouched. A normal send is idle-only: when the backend still runs
+ *   a turn the renderer did not see, it refuses with `TURN_IN_FLIGHT` and
+ *   the message is queued too, so every mid-turn message gets the same
+ *   queued card.
  * - Blocks SDK-native slash commands (`/context`, `/cost`) for
  *   non-Anthropic providers — those commands require Claude-specific runtime
  *   tables.
  */
+/** The backend's slash-command test: a message is a command only when it starts with one. */
+const SLASH_COMMAND = /^\/[a-zA-Z]/;
+
+interface TabView {
+  readonly tabId: string;
+  readonly sessionId: string | null;
+  readonly generation: number;
+}
+
 @Injectable({ providedIn: 'root' })
 export class MessageDispatchService {
   private readonly tabManager = inject(TabManagerService);
@@ -40,7 +54,30 @@ export class MessageDispatchService {
   private readonly messageSender = inject(MessageSenderService);
   private readonly followUps = inject(FollowUpQueueService);
   private readonly permissionHandler = inject(PermissionHandlerService);
+  /**
+   * Per tab, the idle-only send in flight. A message sent meanwhile queues
+   * only after it settles, so a refused earlier send is queued first.
+   */
+  private readonly idleSends = new Map<string, Promise<void>>();
+  private readonly composerRestore = inject(ComposerRestoreService);
   private readonly sendLock = inject(CommandCenterSendLockService);
+  /**
+   * Per tab, how many times it was closed or reset. A message that waited
+   * compares it to tell "same conversation, first session just bound" from
+   * "the tab now holds another conversation", which session ids alone cannot
+   * when the tab had no session yet.
+   */
+  private readonly tabGenerations = new Map<string, number>();
+
+  constructor() {
+    const off = this.tabManager.onTabClosed((event) => {
+      this.tabGenerations.set(
+        event.tabId,
+        (this.tabGenerations.get(event.tabId) ?? 0) + 1,
+      );
+    });
+    inject(DestroyRef).onDestroy(off);
+  }
 
   /**
    * SDK-native slash commands whose output is only correct on a first-party
@@ -109,30 +146,60 @@ export class MessageDispatchService {
         this.messageSender.isStartPending?.(resolvedTabId) ||
         this.sendLock.isHeld(resolvedTabId, options?.ownerToken) ||
         // Something is already waiting: a normal send would overtake it.
-        this.followUps.hasPending(resolvedTabId))
+        this.followUps.hasPending(resolvedTabId) ||
+        this.idleSends.has(resolvedTabId))
     ) {
-      // The message steers ITS tab's turn, so only that tab's pending prompts
-      // are answered with it. The queue is global: denying every request would
-      // reject another session's prompt with this tab's text as the reason.
-      for (const perm of isStreaming
-        ? this.permissionHandler.permissionRequests()
-        : []) {
-        if (!this.isPermissionForTab(perm, resolvedTabId, dispatchTab)) {
-          continue;
-        }
-        this.permissionHandler.handlePermissionResponse({
-          id: perm.id,
-          decision: 'deny_with_message',
-          reason: content,
-        });
+      // An earlier idle-only send may still be refused and queued: wait for
+      // its outcome so this message lands behind it, in send order.
+      const earlier = this.idleSends.get(resolvedTabId);
+      if (earlier) {
+        const view = this.viewOf(resolvedTabId, dispatchTab);
+        await earlier;
+        const moved = this.viewMovedOn(view, content, options);
+        if (moved) return moved;
       }
-      const queued = this.followUps.enqueue(resolvedTabId, content, options);
-      return queued
-        ? { success: true, queued }
-        : { success: false, error: 'Invalid message content' };
+      // Queue first, always: the message waits as a queued card with
+      // Interrupt & send / Send now. It never answers an open permission
+      // prompt — that stays for the user to decide.
+      return this.queue(resolvedTabId, content, options);
     }
     const previousTerminalReason = dispatchTab?.lastTerminalReason;
-    const outcome = await this.messageSender.send(content, options);
+    const sendView =
+      resolvedTabId != null ? this.viewOf(resolvedTabId, dispatchTab) : null;
+    // Idle-only, for plain messages: only this path can fall back to the
+    // queue on a refusal. A slash command is never held behind a turn
+    // (the backend does not queue one), so it is sent as before.
+    const sending = this.messageSender.send(
+      content,
+      SLASH_COMMAND.test(content.trim())
+        ? options
+        : { ...options, idleOnly: true },
+    );
+    const settled = sending.then(
+      () => undefined,
+      () => undefined,
+    );
+    if (resolvedTabId != null) this.idleSends.set(resolvedTabId, settled);
+    let outcome: SendOutcome;
+    try {
+      outcome = await sending;
+    } finally {
+      if (
+        resolvedTabId != null &&
+        this.idleSends.get(resolvedTabId) === settled
+      ) {
+        this.idleSends.delete(resolvedTabId);
+      }
+    }
+    // The renderer saw the tab idle but the backend turn still runs: the
+    // idle-only send was refused with nothing sent, so queue it like any
+    // other mid-turn message.
+    if (outcome?.turnInFlight === true && resolvedTabId != null && sendView) {
+      return (
+        this.viewMovedOn(sendView, content, options) ??
+        this.queue(resolvedTabId, content, options)
+      );
+    }
     if (outcome?.cancelled === true) {
       if (resolvedTabId) {
         this.restoreCancelledSend(resolvedTabId, previousTerminalReason);
@@ -148,6 +215,82 @@ export class MessageDispatchService {
       );
     }
     return outcome;
+  }
+
+  /**
+   * A message that waited (for its own refusal or an earlier send) must not
+   * join a queue that no longer belongs to it. Closed tab: dropped. Tab reset
+   * to another conversation: back to the composer with its attachments,
+   * never sent there. A tab that only bound its first session meanwhile is
+   * the same conversation. `null` while the message may still queue.
+   */
+  private viewMovedOn(
+    view: TabView,
+    content: string,
+    options?: SendMessageOptions,
+  ): SendOutcome | null {
+    const tab = this.tabManager.findTabByIdAcrossWorkspaces(view.tabId)?.tab;
+    if (!tab) return { success: false, cancelled: true };
+    const reset =
+      (this.tabGenerations.get(view.tabId) ?? 0) !== view.generation;
+    const replaced =
+      view.sessionId !== null && tab.claudeSessionId !== view.sessionId;
+    if (!reset && !replaced) return null;
+    this.returnToComposer(view.tabId, content, options);
+    return { success: false, cancelled: true };
+  }
+
+  /** What a waiting message was typed for: the tab, its session, its reset count. */
+  private viewOf(tabId: string, tab: TabState | null): TabView {
+    return {
+      tabId,
+      sessionId: tab?.claudeSessionId ?? null,
+      generation: this.tabGenerations.get(tabId) ?? 0,
+    };
+  }
+
+  /**
+   * Put the text back in the tab's composer. After this send resolves: the
+   * composer clears its submitted draft then, which would wipe it.
+   */
+  private returnToComposer(
+    tabId: string,
+    content: string,
+    options?: SendMessageOptions,
+  ): void {
+    // Sending reads only a file's path, so a path-only chip resends as is.
+    const files: ChatFile[] = (options?.files ?? []).map((path) => ({
+      path,
+      name: path.split(/[\\/]/).pop() || path,
+      size: 0,
+      type: 'text',
+      isLarge: false,
+      tokenEstimate: 0,
+    }));
+    const images: ComposerDraftImage[] = (options?.images ?? []).map(
+      (image, index) => ({
+        id: `restored-${Date.now()}-${index}`,
+        data: image.data,
+        mediaType: image.mediaType,
+        dataUrl: `data:${image.mediaType};base64,${image.data}`,
+        name: `image-${index + 1}`,
+      }),
+    );
+    setTimeout(() => {
+      this.composerRestore.restore(tabId, [content]);
+      this.composerRestore.restoreAttachments(tabId, files, images);
+    }, 0);
+  }
+
+  private queue(
+    tabId: string,
+    content: string,
+    options?: SendMessageOptions & { ownerToken?: string },
+  ): SendOutcome {
+    const queued = this.followUps.enqueue(tabId, content, options);
+    return queued
+      ? { success: true, queued }
+      : { success: false, error: 'Invalid message content' };
   }
 
   private restoreCancelledSend(
@@ -170,9 +313,8 @@ export class MessageDispatchService {
    * routing at all is shown globally, so it is treated as the active tab's.
    */
   /**
-   * Whether a pending permission prompt belongs to the tab: the prompts
-   * {@link sendOrQueueMessage} answers (denies) when it queues a message on
-   * it. Reactive: reads the prompt list and the prompt routing revision.
+   * Whether a pending permission prompt belongs to the tab. Reactive: reads
+   * the prompt list and the prompt routing revision.
    */
   hasPendingPermissionForTab(tabId: string): boolean {
     this.permissionHandler.routingTargetRevision();

@@ -2,33 +2,29 @@
 
 ## Causes (failing tests first)
 
-- A. An idle owner parent (SDK stream ended after its turn) made `isSessionActive` false, and
-  the child route refused the report (`parent-session-not-active`) without holding it.
+- A. An idle owner parent made the child route refuse the report. Fixed on `main` by PR #1463
+  (durable parent inbox, TASK_2026_2297 P3) while this PR was in review. Not changed here.
 - B. A child that ended and was resumed in a new tab reported with the new tab id. The
-  registry knew only the old tab id and the SDK id (`unattributed-caller`).
+  registry knew only the old tab id and the SDK id, so the report was `unattributed-caller`.
 
-17 new router tests failed on the old code. The registry held-report tests were written after
-the registry change.
+## Changes (after the merge with `main`)
 
-## Changes
-
-- `session-child.registry.ts`: held reports on the record (limit 5), an index of records with
-  held reports, prune and clear keep such records, rollback moves them back, and an
-  `sdkSessionIdInferred` mark for cwd-inferred SDK bindings.
-- `agent-report-router.service.ts`: caller lookup through the session lifecycle (tab id to SDK
-  id), hold for an inactive owner, flush on any activity for every waiting child through the
-  lineage, per-child serialization, owner check before each send, fixed failure text,
-  `dispose()`.
-- `session-spawner.service.ts`: snapshot strips the new fields; the cwd binding is marked inferred.
-- Contract text, agent-lanes skill, docs and the MCP formatter (`**Detail:**`) describe the hold.
+- `agent-report-router.service.ts`: `findSessionChild` maps an unknown tab id to its SDK
+  session id through the session lifecycle (`SDK_SESSION_LIFECYCLE_MANAGER`, optional). An SDK
+  id inferred from the worktree path never attributes a report. The `unattributed-caller`
+  detail names the causes (not a child, record lost at a host restart, record pruned).
+- `session-child.registry.ts`: `sdkSessionIdInferred` mark; `bindSdkSessionId(..., { inferred })`;
+  the child's own session-id event clears it.
+- `session-spawner.service.ts`: the cwd binding is marked inferred; the snapshot strips the mark.
+- Tests: resumed tab, resumed last child of a two-hop child chain with a two-hop parent chain,
+  inferred binding refused then confirmed, unattributed detail, lifecycle read failure.
 
 ## Review
 
-codex code-logic review: REVISE 4/10. Findings 1, 2, 3, 5, 6, 7, 8, 9, 11 fixed with tests;
-10 partly; 4 deferred. See `decisions.md` rows 8-14.
+The earlier in-memory hold design had a codex review (REVISE 4/10, fixed, re-reviewed). That
+design was dropped at the merge (decision 16). The remaining lookup and trust rule were
+part of that review (finding 2: fixed).
 
 ## Follow-ups
 
 - TASK_2026_580: durable parent-child link across a host restart.
-- SDK peer send: identity check against a displaced session record (agent-sdk).
-- Call `AgentReportRouter.dispose()` from Electron and CLI shutdown.

@@ -107,6 +107,7 @@ describe('MessageSenderService', () => {
     setLastTerminalReason: jest.Mock;
     markStreaming: jest.Mock;
     markResuming: jest.Mock;
+    setStatus: jest.Mock;
     detachSessionAndMarkLoaded: jest.Mock;
     setMessages: jest.Mock;
     consumeFirstMessagePreamble: jest.Mock;
@@ -212,6 +213,9 @@ describe('MessageSenderService', () => {
       ),
       markResuming: jest.fn((tabId: string) =>
         applyPatch(tabId, { status: 'resuming' }),
+      ),
+      setStatus: jest.fn((tabId: string, status: TabState['status']) =>
+        applyPatch(tabId, { status }),
       ),
       detachSessionAndMarkLoaded: jest.fn((tabId: string) =>
         applyPatch(tabId, { claudeSessionId: null, status: 'loaded' }),
@@ -462,6 +466,74 @@ describe('MessageSenderService', () => {
       expect(tabManager.markTabStreaming).toHaveBeenCalledWith('tab-1');
       expect(sessionManager.setStatus).toHaveBeenLastCalledWith('streaming');
       expect(removeBoundary).not.toHaveBeenCalled();
+    });
+
+    it('asks for idle-only admission only when the caller opts in', async () => {
+      tabsSignal.set([makeTab({ id: 'tab-1', claudeSessionId: 'sess-X' })]);
+      rpcCall.mockImplementation((method: string): Promise<unknown> =>
+        Promise.resolve(
+          method === 'session:validate'
+            ? { success: true, data: { exists: true } }
+            : { success: true, data: { success: true } },
+        ),
+      );
+      await service.send('hello', { tabId: 'tab-1', idleOnly: true });
+      const payload = rpcCall.mock.calls.find((c) => c[0] === 'chat:continue')?.[1];
+      expect(payload.admission).toBe('require-idle');
+
+      rpcCall.mockClear();
+      await service.send('direct', { tabId: 'tab-1' });
+      const direct = rpcCall.mock.calls.find((c) => c[0] === 'chat:continue')?.[1];
+      expect(direct).not.toHaveProperty('admission');
+      expect(payload.queueIntent).toBeUndefined();
+    });
+
+    it('withdraws the bubble and keeps the tab status when the backend says TURN_IN_FLIGHT', async () => {
+      tabsSignal.set([
+        makeTab({ id: 'tab-1', claudeSessionId: 'sess-X', status: 'awaiting-background' }),
+      ]);
+      rpcCall.mockImplementation((method: string): Promise<unknown> =>
+        Promise.resolve(
+          method === 'session:validate'
+            ? { success: true, data: { exists: true } }
+            : {
+                success: true,
+                data: { success: false, errorCode: 'TURN_IN_FLIGHT', error: 'busy' },
+              },
+        ),
+      );
+
+      const outcome = await service.send('late', { tabId: 'tab-1', idleOnly: true });
+
+      expect(outcome).toEqual({ success: false, turnInFlight: true });
+      expect(tabsSignal()[0].messages).toEqual([]);
+      expect(tabsSignal()[0].status).toBe('awaiting-background');
+      expect(removeBoundary).toHaveBeenCalled();
+      expect(tabManager.markLoaded).not.toHaveBeenCalled();
+      expect(tabManager.markTabIdle).not.toHaveBeenCalled();
+      expect(sessionManager.setStatus).toHaveBeenLastCalledWith('awaiting-background');
+    });
+
+    it('keeps a newer turn status that arrived while the refused send was in flight', async () => {
+      tabsSignal.set([
+        makeTab({ id: 'tab-1', claudeSessionId: 'sess-X', status: 'loaded' }),
+      ]);
+      rpcCall.mockImplementation((method: string): Promise<unknown> => {
+        if (method === 'session:validate') {
+          return Promise.resolve({ success: true, data: { exists: true } });
+        }
+        // A turn_state for the running turn lands before the refusal.
+        tabManager.markStreaming('tab-1');
+        return Promise.resolve({
+          success: true,
+          data: { success: false, errorCode: 'TURN_IN_FLIGHT' },
+        });
+      });
+
+      await service.send('late', { tabId: 'tab-1', idleOnly: true });
+
+      expect(tabsSignal()[0].status).toBe('streaming');
+      expect(tabsSignal()[0].messages).toEqual([]);
     });
 
     describe('a continue whose prompt never reaches the backend', () => {

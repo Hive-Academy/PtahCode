@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import { formatHandoffRecordFailure } from '@ptah-extension/shared';
 import { RpcUserError, type Logger } from '@ptah-extension/vscode-core';
 import { MainThreadNoticeQueue } from '../main-thread-notice-queue';
 import {
@@ -135,6 +136,22 @@ describe('SubagentHandoffDelivery', () => {
       expect.stringContaining('no durable record'),
       expect.anything(),
     );
+  });
+
+  it('send: a handoff whose record write failed still retries and carries the inline fallback once delivered', async () => {
+    const h = makeHarness();
+    const text = `${formatHandoffRecordFailure('agent-1')}\nFinal response: done; files: src/a.ts`;
+    h.port.pushParentMessage.mockRejectedValueOnce(new Error('inactive'));
+
+    const sent = h.delivery.send(SESSION, TOOL_CALL, { text, subject: HANDOFF.subject });
+    await jest.advanceTimersByTimeAsync(ALL_RETRIES_MS);
+    await sent;
+
+    expect(h.port.pushParentMessage).toHaveBeenCalledTimes(2);
+    expect(h.port.pushParentMessage).toHaveBeenLastCalledWith(SESSION, text);
+    expect(h.port.postMainThreadNotice).not.toHaveBeenCalled();
+    expect(text).toContain('Ptah could not save the handoff record for agent-1');
+    expect(text).not.toMatch(/stopped|interrupted|the user did not/i);
   });
 
   it('send: a timed-out push has unconfirmed acceptance and is not retried or queued', async () => {

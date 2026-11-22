@@ -8,10 +8,16 @@ export const PARENT_COMPLETION_KEYS_PREFIX = 'ptah:parent-completion-keys:v1:';
 export const PARENT_TOMBSTONE_KEY = 'ptah:deleted-parent-sessions:v1';
 
 /** Same limit as `MAX_AGENT_REPORT_LENGTH` (agent-report-router); not imported to avoid a cycle. */
-const MAX_BODY_CHARS = 1_048_576;
+export const PARENT_ENVELOPE_MAX_BODY_CHARS = 1_048_576;
+const MAX_BODY_CHARS = PARENT_ENVELOPE_MAX_BODY_CHARS;
 const timestamp = z.number().int().nonnegative();
 const deliveryId = z.string().regex(/^lane-delivery:\S{1,480}$/)
   .transform((value) => value as `lane-delivery:${string}`);
+/**
+ * Who produced an envelope. Absent on records written before child sessions
+ * could queue reports; absent means a lane (`agent`).
+ */
+const originKind = z.enum(['agent', 'session']).optional();
 const agentIdSchema = z.string().refine(AgentId.validate).transform(AgentId.from);
 
 export const ParentEnvelopeRecordSchema = z.object({
@@ -23,6 +29,7 @@ export const ParentEnvelopeRecordSchema = z.object({
   verdict: z.enum(['delivered', 'no-deliverable', 'unverified', 'failed']).optional(),
   stopReason: z.enum(LANE_STOP_REASONS).optional(),
   originName: z.string().min(1).max(200).optional(),
+  originKind,
   createdAt: timestamp,
   updatedAt: timestamp,
   state: z.enum([
@@ -55,6 +62,7 @@ export const ParentEnvelopeBodySchema = z.object({
   verdict: z.enum(['delivered', 'no-deliverable', 'unverified', 'failed']).optional(),
   stopReason: z.enum(LANE_STOP_REASONS).optional(),
   originName: z.string().min(1).max(200).optional(),
+  originKind,
   createdAt: timestamp,
 }).strict();
 export type ParentEnvelopeBody = z.infer<typeof ParentEnvelopeBodySchema>;

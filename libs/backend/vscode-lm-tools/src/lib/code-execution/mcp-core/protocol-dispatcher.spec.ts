@@ -4361,6 +4361,52 @@ describe('protocol-handlers › ptah_agent_report', () => {
     });
   });
 
+  it('never accepts childSessionId from the arguments', async () => {
+    const report = jest.fn();
+    const res = await handleMCPRequest(
+      makeRequest({
+        id: 'ar-args-id',
+        method: 'tools/call',
+        params: {
+          name: 'ptah_agent_report',
+          arguments: { childSessionId: 'spoofed', message: 'x' },
+        },
+        _callerSessionId: 'tab-abc',
+      }),
+      buildDeps({
+        ptahAPI: buildPtahAPIStub({
+          agent: { report } as unknown as PtahAPI['agent'],
+        }),
+      }),
+    );
+
+    expect(report).not.toHaveBeenCalled();
+    expect(agentToolResult(res).isError).toBe(true);
+  });
+
+  it('renders a queued child report with its receipt', async () => {
+    const report = jest
+      .fn()
+      .mockResolvedValue({ delivered: false, queued: true, receiptId: 'r-9' });
+    const res = await handleMCPRequest(
+      makeRequest({
+        id: 'ar-queued',
+        method: 'tools/call',
+        params: { name: 'ptah_agent_report', arguments: { message: 'x' } },
+        _callerSessionId: 'tab-abc',
+      }),
+      buildDeps({
+        ptahAPI: buildPtahAPIStub({
+          agent: { report } as unknown as PtahAPI['agent'],
+        }),
+      }),
+    );
+
+    const { text } = agentToolResult(res);
+    expect(text).toMatch(/Report Queued/);
+    expect(text).toMatch(/Receipt:\*\* r-9/);
+  });
+
   it('treats a whitespace session id as absent (unattributed-caller, no call)', async () => {
     const report = jest.fn();
     const res = await handleMCPRequest(

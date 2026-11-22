@@ -327,6 +327,14 @@ export const SDK_TOKENS = {
   SDK_UNATTENDED_SESSION_POLICY_REGISTRY: Symbol.for(
     'SdkUnattendedSessionPolicyRegistry',
   ),
+
+  /**
+   * Synchronous lookup of whether new tool calls of a session may run
+   * (SessionToolDispositionPort). Resolved optionally by SdkPermissionHandler, so
+   * it is registered before the handler. The CLI agent runtime may re-register it
+   * to feed child-session cap state.
+   */
+  SDK_SESSION_TOOL_DISPOSITION: Symbol.for('SdkSessionToolDisposition'),
 } as const;
 
 /**

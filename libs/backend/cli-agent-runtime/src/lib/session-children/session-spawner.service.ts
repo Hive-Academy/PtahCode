@@ -2329,7 +2329,6 @@ export class SessionSpawnerService implements ISessionSpawner {
     delete snapshot['terminalStatus'];
     delete snapshot['endCause'];
     delete snapshot['heldCompletion'];
-    delete snapshot['heldReports'];
     delete snapshot['sdkSessionIdInferred'];
     delete snapshot['phaseKind'];
     delete snapshot['phaseDisallowedTools'];

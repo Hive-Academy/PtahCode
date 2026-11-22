@@ -24,17 +24,6 @@ import type { SessionChildEndCause } from './session-child-outcome';
 /** Ended records kept for `ptah_session_status`; older ones are pruned. */
 export const SESSION_CHILD_ENDED_HISTORY_SIZE = 20;
 
-/** Reports held per child while its owner parent is inactive; the oldest drop first. */
-export const SESSION_CHILD_HELD_REPORT_LIMIT = 5;
-
-/** A report held for the owner parent, which was not active when it was sent. */
-export interface SessionChildHeldReport {
-  /** ISO time the child sent the report. */
-  readonly heldSince: string;
-  readonly message: string;
-  readonly summary?: string;
-}
-
 /** A completion the parent has not yet received (it was not live at settle time). */
 export interface SessionChildHeldCompletion {
   readonly heldSince: string;
@@ -66,12 +55,10 @@ export interface SessionChildRecord extends Omit<
    */
   readonly endCause?: SessionChildEndCause;
   readonly heldCompletion?: SessionChildHeldCompletion;
-  /** Reports held for an inactive owner parent. Kept off the public snapshot. */
-  readonly heldReports?: readonly SessionChildHeldReport[];
   /**
    * The SDK id was inferred from the worktree path, not from the child's own
-   * session-id event. Report attribution through the lifecycle does not trust it.
-   * Kept off the public snapshot.
+   * session-id event. Report attribution does not trust it. Kept off the
+   * public snapshot.
    */
   readonly sdkSessionIdInferred?: boolean;
 }
@@ -89,7 +76,6 @@ type MutableRecordFields = Omit<
   | 'succeeds'
   | 'succeededBy'
   | 'successionCount'
-  | 'heldReports'
   | 'sdkSessionIdInferred'
 >;
 
@@ -191,8 +177,6 @@ export class SessionChildRegistry {
    * child that has no worktree or tab yet; {@link add} replaces the entry.
    */
   private readonly pending = new Map<string, SessionChildRecord>();
-  /** Child ids whose record holds reports, so activity checks cost nothing when empty. */
-  private readonly heldIds = new Set<string>();
 
   /**
    * Claim one slot synchronously, or `null` when `max` is already taken by
@@ -295,7 +279,6 @@ export class SessionChildRegistry {
     if (!record) return false;
     this.records.delete(childSessionId);
     this.storedPathKeys.delete(childSessionId);
-    this.heldIds.delete(childSessionId);
     if (record.sdkSessionId) this.bySdkId.delete(record.sdkSessionId);
     const index = this.endedOrder.indexOf(childSessionId);
     if (index >= 0) this.endedOrder.splice(index, 1);
@@ -304,13 +287,11 @@ export class SessionChildRegistry {
 
   /**
    * Remove a terminal child from the registry (TASK_2026_932). Live children
-   * are refused; `bySdkId` and `endedOrder` are cleaned. A child that still
-   * holds reports for its parent is kept, so a pending report is not lost.
+   * are refused; `bySdkId` and `endedOrder` are cleaned.
    */
   removeEnded(childSessionId: string): boolean {
     const record = this.records.get(childSessionId);
     if (!record || !record.terminalStatus) return false;
-    if (record.heldReports?.length) return false;
     return this.remove(childSessionId);
   }
 
@@ -490,7 +471,11 @@ export class SessionChildRegistry {
     });
   }
 
-  /** A refused report: counted, with its summary kept as the last refusal. */
+  /**
+   * A report that could not be delivered or queued for its parent: counted.
+   * A known child with an inactive parent is queued by the report router
+   * instead and is not counted here.
+   */
   markReportRefused(
     childSessionId: string,
     summary: string,
@@ -502,72 +487,6 @@ export class SessionChildRegistry {
       reportsRefused: record.reportsRefused + 1,
       lastRefusedReport: summary,
     });
-  }
-
-  /** True when some child holds reports. Synchronous and O(1). */
-  hasHeldReports(): boolean {
-    return this.heldIds.size > 0;
-  }
-
-  /** Every record (live or ended) that holds reports for its parent. */
-  withHeldReports(): readonly SessionChildRecord[] {
-    const out: SessionChildRecord[] = [];
-    for (const id of this.heldIds) {
-      const record = this.records.get(id);
-      if (record?.heldReports?.length) out.push(record);
-    }
-    return out;
-  }
-
-  /**
-   * Hold a report for the owner parent. Beyond
-   * {@link SESSION_CHILD_HELD_REPORT_LIMIT} the oldest reports drop and are
-   * returned in `dropped`.
-   */
-  holdReport(
-    childSessionId: string,
-    report: SessionChildHeldReport,
-  ):
-    | {
-        readonly record: SessionChildRecord;
-        readonly dropped: readonly SessionChildHeldReport[];
-      }
-    | undefined {
-    const record = this.records.get(childSessionId);
-    if (!record) return undefined;
-    const all = [...(record.heldReports ?? []), report];
-    const excess = Math.max(all.length - SESSION_CHILD_HELD_REPORT_LIMIT, 0);
-    return {
-      record: this.replace({ ...record, heldReports: all.slice(excess) }),
-      dropped: all.slice(0, excess),
-    };
-  }
-
-  /** Remove and return the held reports, oldest first. */
-  takeHeldReports(childSessionId: string): readonly SessionChildHeldReport[] {
-    const record = this.records.get(childSessionId);
-    const held = record?.heldReports;
-    if (!record || !held?.length) return [];
-    const next: SessionChildRecord = { ...record };
-    delete (next as { heldReports?: unknown }).heldReports;
-    this.replace(next);
-    return held;
-  }
-
-  /**
-   * Put unsent reports back in front of any held since (a failed flush). The
-   * limit still applies; the oldest drop and are returned.
-   */
-  restoreHeldReports(
-    childSessionId: string,
-    reports: readonly SessionChildHeldReport[],
-  ): readonly SessionChildHeldReport[] {
-    const record = this.records.get(childSessionId);
-    if (!record || reports.length === 0) return [];
-    const all = [...reports, ...(record.heldReports ?? [])];
-    const excess = Math.max(all.length - SESSION_CHILD_HELD_REPORT_LIMIT, 0);
-    this.replace({ ...record, heldReports: all.slice(excess) });
-    return all.slice(0, excess);
   }
 
   /** Apply a patch; a key set to `undefined` clears that field. */
@@ -683,22 +602,7 @@ export class SessionChildRegistry {
       return undefined;
     }
     this.remove(successorId);
-    // Reports held on the successor go back to the predecessor, after its own.
-    const held = [
-      ...(predecessor.heldReports ?? []),
-      ...(successor.heldReports ?? []),
-    ];
-    const excess = Math.max(held.length - SESSION_CHILD_HELD_REPORT_LIMIT, 0);
-    const restored: SessionChildRecord = {
-      ...predecessor,
-      ...(held.length > 0 ? { heldReports: held.slice(excess) } : {}),
-      ...(excess > 0
-        ? {
-            reportsRefused: predecessor.reportsRefused + excess,
-            lastRefusedReport: 'held report dropped at a handoff rollback',
-          }
-        : {}),
-    };
+    const restored: SessionChildRecord = { ...predecessor };
     delete (restored as { terminalStatus?: SessionChildTerminalStatus })
       .terminalStatus;
     delete (restored as { endedAt?: string }).endedAt;
@@ -733,21 +637,12 @@ export class SessionChildRegistry {
    * longer attributed (`unattributed-caller`) and, if the user resumes it from
    * its tab, it is no longer depth-guarded by {@link isChild}. TASK_2026_580's
    * durable link removes that gap.
-   *
-   * A record that still holds reports is skipped and kept until its reports
-   * are delivered (at most `SESSION_CHILD_HELD_REPORT_LIMIT` each).
    */
   pruneEnded(keep: number = SESSION_CHILD_ENDED_HISTORY_SIZE): void {
-    let excess = this.endedOrder.length - Math.max(keep, 0);
-    for (let index = 0; excess > 0 && index < this.endedOrder.length; ) {
-      const id = this.endedOrder[index];
+    const excess = this.endedOrder.length - Math.max(keep, 0);
+    if (excess <= 0) return;
+    for (const id of this.endedOrder.splice(0, excess)) {
       const record = this.records.get(id);
-      if (record?.heldReports?.length) {
-        index++;
-        continue;
-      }
-      this.endedOrder.splice(index, 1);
-      excess--;
       if (!record) continue;
       this.records.delete(id);
       this.storedPathKeys.delete(id);
@@ -769,8 +664,6 @@ export class SessionChildRegistry {
       this.storedPathKeys.set(record.childSessionId, pathKey(record.worktreePath));
     }
     this.records.set(record.childSessionId, record);
-    if (record.heldReports?.length) this.heldIds.add(record.childSessionId);
-    else this.heldIds.delete(record.childSessionId);
     return record;
   }
 }

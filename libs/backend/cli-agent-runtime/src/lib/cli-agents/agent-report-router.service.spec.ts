@@ -20,7 +20,6 @@ import {
   type AgentReportInput,
 } from './agent-report-router.service';
 import {
-  SESSION_CHILD_HELD_REPORT_LIMIT,
   SessionChildRegistry,
   type SessionChildRecord,
 } from '../session-children/session-child.registry';
@@ -808,34 +807,6 @@ describe('AgentReportRouter.deliver — session child', () => {
   const CHILD_SDK = 'bbbbbbbb-2222-4333-8444-555555555555';
   const PARENT_SDK = 'cccccccc-2222-4333-8444-555555555555';
 
-  function childRecord(
-    childSessionId: string,
-    overrides: Partial<SessionChildRecord> = {},
-  ): SessionChildRecord {
-    return {
-      childSessionId,
-      parentSessionId: PARENT,
-      parentSdkSessionId: PARENT_SDK,
-      label: 'auth-fix',
-      task: 'fix auth',
-      branch: 'feat/auth-fix',
-      baseRef: 'abc',
-      workspaceRoot: '/ws',
-      worktreePath: `/ws-wt/${childSessionId}`,
-      deliverables: [],
-      subagentPtahTools: 'available',
-      startedAt: '2026-10-01T10:00:00.000Z',
-      turnsSettled: 0,
-      reportsDelivered: 0,
-      reportsRefused: 0,
-      ...overrides,
-    };
-  }
-
-  /** Let the activity callback's async flush settle. */
-  const settle = (): Promise<void> =>
-    new Promise((resolve) => setImmediate(resolve));
-
   function createSessionHarness(
     options: {
       activeIds?: readonly string[];
@@ -843,8 +814,8 @@ describe('AgentReportRouter.deliver — session child', () => {
       withRegistry?: boolean;
       handoffBinding?: { successorTabId: string; successorSdkId: string };
       findBySuccessor?: jest.Mock;
-      /** Committed handoff edges returned by the ack store's `records()`. */
-      ackRecords?: readonly unknown[];
+      /** Session lifecycle records: tab id → SDK session id. */
+      lifecycleSessions?: Readonly<Record<string, string>>;
     } = {},
   ) {
     const logger = createLogger();
@@ -862,32 +833,26 @@ describe('AgentReportRouter.deliver — session child', () => {
     const reservation = registry.reserveSlot(3);
     if (!reservation) throw new Error('expected a slot');
     registry.add(
-      childRecord(CHILD, {
+      {
+        childSessionId: CHILD,
         sdkSessionId: CHILD_SDK,
+        parentSessionId: PARENT,
+        parentSdkSessionId: PARENT_SDK,
+        label: 'auth-fix',
+        task: 'fix auth',
+        branch: 'feat/auth-fix',
+        baseRef: 'abc',
+        workspaceRoot: '/ws',
         worktreePath: '/ws-wt/auth-fix',
-      }),
+        deliverables: [],
+        subagentPtahTools: 'available',
+        startedAt: '2026-10-01T10:00:00.000Z',
+        turnsSettled: 0,
+        reportsDelivered: 0,
+        reportsRefused: 0,
+      },
       reservation,
     );
-    // Session lifecycle records: tab id and SDK id resolve to one record.
-    const sessions = new Map<string, { tabId: string; realSessionId?: string }>();
-    const addSession = (tabId: string, realSessionId?: string): void => {
-      const entry = { tabId, realSessionId };
-      sessions.set(tabId, entry);
-      if (realSessionId) sessions.set(realSessionId, entry);
-    };
-    addSession(PARENT, PARENT_SDK);
-    const lifecycle = { find: jest.fn((id: string) => sessions.get(id)) };
-    const activityCallbacks: ((payload: { sessionId: string }) => void)[] = [];
-    const activity = {
-      register: jest.fn((callback: (payload: { sessionId: string }) => void) => {
-        activityCallbacks.push(callback);
-        return () => undefined;
-      }),
-    };
-    const fireActivity = async (sessionId: string): Promise<void> => {
-      for (const callback of activityCallbacks) callback({ sessionId });
-      await settle();
-    };
     const router = new AgentReportRouter(
       logger,
       manager,
@@ -896,22 +861,29 @@ describe('AgentReportRouter.deliver — session child', () => {
       null,
       null,
       options.findBySuccessor
-        ? ({ findBySuccessor: options.findBySuccessor, records: jest.fn().mockResolvedValue([]) } as never)
+        ? ({
+            findBySuccessor: options.findBySuccessor,
+            records: jest.fn().mockResolvedValue([]),
+          } as never)
         : options.handoffBinding
           ? ({
               findBySuccessor: jest
                 .fn()
-                .mockResolvedValue({ ...options.handoffBinding, state: 'recorded' }),
+                .mockResolvedValue({
+                  ...options.handoffBinding,
+                  state: 'recorded',
+                }),
               records: jest.fn().mockResolvedValue([]),
             } as never)
-          : options.ackRecords
-            ? ({
-                findBySuccessor: jest.fn().mockResolvedValue(undefined),
-                records: jest.fn().mockResolvedValue(options.ackRecords),
-              } as never)
-            : null,
-      lifecycle as never,
-      activity as never,
+          : null,
+      options.lifecycleSessions
+        ? ({
+            find: jest.fn((id: string) => {
+              const realSessionId = options.lifecycleSessions?.[id];
+              return realSessionId ? { tabId: id, realSessionId } : undefined;
+            }),
+          } as never)
+        : null,
     );
     return {
       router,
@@ -921,9 +893,6 @@ describe('AgentReportRouter.deliver — session child', () => {
       active,
       isSessionActive,
       sendMessageToSession,
-      lifecycle,
-      addSession,
-      fireActivity,
     };
   }
 
@@ -959,15 +928,35 @@ describe('AgentReportRouter.deliver — session child', () => {
     const h = createSessionHarness({ activeIds: [PARENT_SDK] });
     const storage = new FakeStateStorage();
     const handoffs = new SessionHandoffAckStore(storage);
-    await handoffs.record({ predecessorTabId: PARENT, predecessorSdkId: null,
-      successorTabId: PARENT_SDK, successorSdkId: null, workspaceRoot: '/ws',
-      handoffPath: '/ws/HANDOFF.md', state: 'recorded' });
-    const router = new AgentReportRouter(h.logger, h.manager,
-      { isSessionActive: h.isSessionActive, sendMessageToSession: h.sendMessageToSession } as never,
-      h.registry, null, null, new SessionHandoffAckStore(storage));
-    expect(await router.deliver({ childSessionId: CHILD, message: 'done' }))
-      .toMatchObject({ delivered: true, parentSessionId: PARENT_SDK });
-    expect(h.sendMessageToSession).toHaveBeenCalledWith(PARENT_SDK, expect.any(String), expect.any(Object));
+    await handoffs.record({
+      predecessorTabId: PARENT,
+      predecessorSdkId: null,
+      successorTabId: PARENT_SDK,
+      successorSdkId: null,
+      workspaceRoot: '/ws',
+      handoffPath: '/ws/HANDOFF.md',
+      state: 'recorded',
+    });
+    const router = new AgentReportRouter(
+      h.logger,
+      h.manager,
+      {
+        isSessionActive: h.isSessionActive,
+        sendMessageToSession: h.sendMessageToSession,
+      } as never,
+      h.registry,
+      null,
+      null,
+      new SessionHandoffAckStore(storage),
+    );
+    expect(
+      await router.deliver({ childSessionId: CHILD, message: 'done' }),
+    ).toMatchObject({ delivered: true, parentSessionId: PARENT_SDK });
+    expect(h.sendMessageToSession).toHaveBeenCalledWith(
+      PARENT_SDK,
+      expect.any(String),
+      expect.any(Object),
+    );
   });
   it('delivers an adopted child report to the active successor tab', async () => {
     const successor = 'dddddddd-2222-4333-8444-555555555555';
@@ -1036,7 +1025,11 @@ describe('AgentReportRouter.deliver — session child', () => {
       h.registry.reparent(CHILD, next, nextSdk);
       // The former owner tab comes back to life during the lookup.
       h.active.add(successor);
-      return { successorTabId: successor, successorSdkId: successorSdk, state: 'recorded' };
+      return {
+        successorTabId: successor,
+        successorSdkId: successorSdk,
+        state: 'recorded',
+      };
     });
     expect(
       await h.router.deliver({
@@ -1086,13 +1079,7 @@ describe('AgentReportRouter.deliver — session child', () => {
       message: 'hi',
     });
 
-    expect(result).toEqual({
-      delivered: false,
-      reason: 'unattributed-caller',
-      detail: expect.stringContaining('was not started with ptah_session_start'),
-    });
-    expect(result.detail).toContain('host restart');
-    expect(result.detail).toContain('pruned');
+    expect(result).toEqual({ delivered: false, reason: 'unattributed-caller' });
     expect(h.sendMessageToSession).not.toHaveBeenCalled();
   });
 
@@ -1119,7 +1106,7 @@ describe('AgentReportRouter.deliver — session child', () => {
     expect(h.isSessionActive).not.toHaveBeenCalled();
   });
 
-  it('holds a report while the parent is not live and counts no refusal', async () => {
+  it('counts and does not queue a report while the parent is not live and no durable inbox exists', async () => {
     const h = createSessionHarness({ activeIds: [] });
 
     const result = await h.router.deliver({
@@ -1129,20 +1116,15 @@ describe('AgentReportRouter.deliver — session child', () => {
 
     expect(result).toEqual({
       delivered: false,
-      pending: true,
       reason: 'parent-session-not-active',
-      detail: 'the parent session is not running; the report is held and is delivered when the parent session is next active',
     });
     expect(h.sendMessageToSession).not.toHaveBeenCalled();
     const child = h.registry.get(CHILD);
-    expect(child?.reportsRefused).toBe(0);
-    expect(child?.lastRefusedReport).toBeUndefined();
+    expect(child?.reportsRefused).toBe(1);
+    expect(child?.lastRefusedReport).toBe('long body');
     expect(child?.reportsDelivered).toBe(0);
-    expect(child?.heldReports?.map((r) => r.message)).toEqual([
-      'long body\nsecond line',
-    ]);
 
-    // Liveness alone sends nothing: only a parent activity event flushes.
+    // Nothing was queued: the parent coming back does not replay it.
     h.active.add(PARENT);
     expect(h.sendMessageToSession).not.toHaveBeenCalled();
   });
@@ -1155,31 +1137,29 @@ describe('AgentReportRouter.deliver — session child', () => {
       message: 'finished',
     });
 
-    expect(result).toMatchObject({
+    expect(result).toEqual({
       delivered: false,
-      pending: true,
       reason: 'parent-session-not-active',
     });
     expect(h.isSessionActive).toHaveBeenCalledWith(PARENT);
     expect(h.isSessionActive).not.toHaveBeenCalledWith(PARENT_SDK);
     expect(h.sendMessageToSession).not.toHaveBeenCalled();
-    expect(h.registry.get(CHILD)?.heldReports?.[0]?.message).toBe('finished');
+    expect(h.registry.get(CHILD)?.lastRefusedReport).toBe('finished');
   });
 
   it('records the given summary as the last refused report', async () => {
-    const h = createSessionHarness();
+    const h = createSessionHarness({ activeIds: [] });
 
     await h.router.deliver({
       childSessionId: CHILD,
-      message: 'x'.repeat(MAX_AGENT_REPORT_LENGTH + 1),
+      message: 'body',
       summary: '  blocked on creds ',
     });
 
     expect(h.registry.get(CHILD)?.lastRefusedReport).toBe('blocked on creds');
-    expect(h.registry.get(CHILD)?.reportsRefused).toBe(1);
   });
 
-  it('holds, and never sends to the SDK id, when the recorded parent tab is gone despite a live SDK id', async () => {
+  it('refuses when the recorded parent tab is gone despite a live SDK id', async () => {
     const h = createSessionHarness({ activeIds: [PARENT_SDK] });
 
     const result = await h.router.deliver({
@@ -1187,16 +1167,11 @@ describe('AgentReportRouter.deliver — session child', () => {
       message: 'hi',
     });
 
-    expect(result).toMatchObject({
+    expect(result).toEqual({
       delivered: false,
-      pending: true,
       reason: 'parent-session-not-active',
     });
     expect(h.sendMessageToSession).not.toHaveBeenCalled();
-    // An activity event of the live SDK id does not make it the owner.
-    await h.fireActivity(PARENT_SDK);
-    expect(h.sendMessageToSession).not.toHaveBeenCalled();
-    expect(h.registry.get(CHILD)?.heldReports).toHaveLength(1);
   });
 
   it('applies the shared burst limit under its own session key', async () => {
@@ -1233,7 +1208,7 @@ describe('AgentReportRouter.deliver — session child', () => {
     expect(h.sendMessageToSession).toHaveBeenCalledTimes(1);
   });
 
-  it('reports delivery-failed and counts one refusal when the runtime rejects the turn', async () => {
+  it('reports delivery-failed and counts nothing when the runtime rejects the turn', async () => {
     const h = createSessionHarness({
       sendImpl: () => Promise.reject(new Error('session busy')),
     });
@@ -1244,19 +1219,640 @@ describe('AgentReportRouter.deliver — session child', () => {
     });
 
     expect(result.reason).toBe('delivery-failed');
-    expect(result.detail).toBe(
-      'the parent session did not accept the report; send it again later',
-    );
-    expect(h.logger.warn).toHaveBeenCalledWith(
-      '[AgentReportRouter] Session child report refused',
-      expect.objectContaining({ reason: 'delivery-failed', error: 'session busy' }),
-    );
     expect(h.registry.get(CHILD)?.reportsDelivered).toBe(0);
-    expect(h.registry.get(CHILD)?.reportsRefused).toBe(1);
+    expect(h.registry.get(CHILD)?.reportsRefused).toBe(0);
   });
 
-  describe('after a handoff or an idle parent (TASK_2026_2298)', () => {
-    const T2 = '12121212-2222-4333-8444-555555555555';
+  describe('durable parent inbox', () => {
+    const SUCCESSOR = 'dddddddd-2222-4333-8444-555555555555';
+
+    async function durableSession(
+      options: {
+        activeIds?: readonly string[];
+        storage?: FakeStateStorage;
+      } = {},
+    ) {
+      const h = createSessionHarness({ activeIds: options.activeIds ?? [] });
+      const storage = options.storage ?? new FakeStateStorage();
+      const store = new ParentEnvelopeStoreService(h.logger, storage);
+      await store.ready;
+      const handoffs = new SessionHandoffAckStore(storage);
+      const adapter = {
+        isSessionActive: h.isSessionActive,
+        sendMessageToSession: h.sendMessageToSession,
+      } as never;
+      const drainer = new ParentDeliveryDrainerService(
+        h.logger,
+        store,
+        adapter,
+        null,
+        null,
+        h.registry,
+        handoffs,
+      );
+      const router = new AgentReportRouter(
+        h.logger,
+        h.manager,
+        adapter,
+        h.registry,
+        drainer,
+        null,
+        handoffs,
+      );
+      return { ...h, storage, store, handoffs, drainer, router };
+    }
+
+    afterEach(() => jest.restoreAllMocks());
+
+    it('queues a report for an inactive parent and delivers it once when the parent is active', async () => {
+      const d = await durableSession();
+      const result = await d.router.deliver({
+        childSessionId: CHILD,
+        message: 'queued body',
+      });
+      expect(result).toEqual({
+        delivered: false,
+        queued: true,
+        receiptId: expect.any(String),
+        receiptState: 'pending',
+      });
+      const [entry] = d.store.list(PARENT_SDK);
+      expect(entry).toMatchObject({
+        id: result.receiptId,
+        originKind: 'session',
+        agentId: CHILD,
+        state: 'pending',
+      });
+      expect(d.sendMessageToSession).not.toHaveBeenCalled();
+      expect(d.registry.get(CHILD)?.reportsDelivered).toBe(0);
+
+      d.active.add(PARENT_SDK);
+      await d.drainer.drain(PARENT_SDK);
+      await d.drainer.drain(PARENT_SDK);
+      expect(d.sendMessageToSession).toHaveBeenCalledTimes(1);
+      expect(d.sendMessageToSession).toHaveBeenCalledWith(
+        PARENT_SDK,
+        expect.stringContaining('queued body'),
+        expect.objectContaining({
+          origin: expect.objectContaining({
+            kind: 'peer',
+            from: `ptah-session:${CHILD}`,
+            name: 'session · auth-fix',
+          }),
+        }),
+      );
+      expect(d.registry.get(CHILD)?.reportsDelivered).toBe(1);
+      expect(d.registry.get(CHILD)?.reportsRefused).toBe(0);
+      d.drainer.dispose();
+    });
+
+    it('replays a report queued for a predecessor to its successor exactly once', async () => {
+      const d = await durableSession();
+      await d.handoffs.record({
+        predecessorTabId: PARENT,
+        predecessorSdkId: null,
+        successorTabId: SUCCESSOR,
+        successorSdkId: null,
+        workspaceRoot: '/ws',
+        handoffPath: '/ws/HANDOFF.md',
+        state: 'recorded',
+      });
+      const result = await d.router.deliver({
+        childSessionId: CHILD,
+        message: 'for successor',
+      });
+      expect(result).toMatchObject({ delivered: false, queued: true });
+      expect(d.store.list(SUCCESSOR)).toHaveLength(1);
+
+      d.active.add(SUCCESSOR);
+      await d.drainer.drain(SUCCESSOR);
+      await d.drainer.drain(SUCCESSOR);
+      expect(d.sendMessageToSession).toHaveBeenCalledTimes(1);
+      expect(d.sendMessageToSession).toHaveBeenCalledWith(
+        SUCCESSOR,
+        expect.any(String),
+        expect.any(Object),
+      );
+      expect(d.registry.get(CHILD)?.reportsDelivered).toBe(1);
+      d.drainer.dispose();
+    });
+
+    it('refuses an unknown caller without queueing', async () => {
+      const d = await durableSession();
+      expect(
+        await d.router.deliver({ childSessionId: 'nobody', message: 'x' }),
+      ).toEqual({ delivered: false, reason: 'unattributed-caller' });
+      expect(d.store.list()).toHaveLength(0);
+      d.drainer.dispose();
+    });
+
+    it('keeps a queued report unsent when its owner changed before the parent came back', async () => {
+      const d = await durableSession();
+      const result = await d.router.deliver({
+        childSessionId: CHILD,
+        message: 'stale',
+      });
+      expect(result).toMatchObject({ queued: true });
+      d.registry.reparent(
+        CHILD,
+        SUCCESSOR,
+        'eeeeeeee-2222-4333-8444-555555555555',
+      );
+
+      d.active.add(PARENT_SDK);
+      await d.drainer.drain(PARENT_SDK);
+      expect(d.sendMessageToSession).not.toHaveBeenCalled();
+      // No handoff edge proves the change, and a partial lineage read can hide
+      // one, so the report waits (never sent) instead of being cancelled.
+      expect(d.store.list(PARENT_SDK)).toEqual([
+        expect.objectContaining({
+          id: result.receiptId,
+          state: 'blocked-retryable',
+          lastError: 'owner-lineage-unverified',
+        }),
+      ]);
+      expect(d.registry.get(CHILD)?.reportsDelivered).toBe(0);
+      d.drainer.dispose();
+    });
+
+    it('refuses an owner change seen before queueing', async () => {
+      const d = await durableSession();
+      const findBySuccessor = jest.fn(async () => {
+        d.registry.reparent(
+          CHILD,
+          SUCCESSOR,
+          'eeeeeeee-2222-4333-8444-555555555555',
+        );
+        return undefined;
+      });
+      jest
+        .spyOn(d.handoffs, 'findBySuccessor')
+        .mockImplementation(findBySuccessor as never);
+      expect(
+        await d.router.deliver({ childSessionId: CHILD, message: 'raced' }),
+      ).toMatchObject({
+        delivered: false,
+        reason: 'parent-session-not-active',
+      });
+      expect(d.store.list()).toHaveLength(0);
+      expect(d.registry.get(CHILD)?.reportsRefused).toBe(1);
+      d.drainer.dispose();
+    });
+
+    it('applies the burst limit and duplicate check to queued reports', async () => {
+      const d = await durableSession();
+      for (let n = 0; n < AGENT_REPORT_BURST_LIMIT; n++) {
+        expect(
+          await d.router.deliver({ childSessionId: CHILD, message: `q-${n}` }),
+        ).toMatchObject({ delivered: false, queued: true });
+      }
+      expect(
+        await d.router.deliver({ childSessionId: CHILD, message: 'one more' }),
+      ).toMatchObject({ delivered: false, reason: 'rate-limited' });
+      expect(d.store.list(PARENT_SDK)).toHaveLength(AGENT_REPORT_BURST_LIMIT);
+      d.drainer.dispose();
+
+      const e = await durableSession();
+      const firstSame = await e.router.deliver({
+        childSessionId: CHILD,
+        message: 'same',
+      });
+      expect(firstSame).toMatchObject({ queued: true });
+      // A repeat of a saved report returns its receipt, not a duplicate refusal.
+      expect(
+        await e.router.deliver({ childSessionId: CHILD, message: 'same' }),
+      ).toMatchObject({ queued: true, receiptId: firstSame.receiptId });
+      expect(e.store.list(PARENT_SDK)).toHaveLength(1);
+      e.drainer.dispose();
+    });
+
+    it('returns the same receipt for a repeat outside the duplicate window', async () => {
+      const d = await durableSession();
+      const first = await d.router.deliver({
+        childSessionId: CHILD,
+        message: 'again',
+      });
+      const now = Date.now();
+      jest
+        .spyOn(Date, 'now')
+        .mockReturnValue(now + AGENT_REPORT_BURST_WINDOW_MS + 1);
+      const second = await d.router.deliver({
+        childSessionId: CHILD,
+        message: 'again',
+      });
+      expect(second).toEqual({
+        delivered: false,
+        queued: true,
+        receiptId: first.receiptId,
+        receiptState: 'pending',
+      });
+      expect(d.store.list(PARENT_SDK)).toHaveLength(1);
+      d.drainer.dispose();
+    });
+
+    it('does not report a repeat of a cancelled report as queued', async () => {
+      const d = await durableSession();
+      const first = await d.router.deliver({
+        childSessionId: CHILD,
+        message: 'dropped',
+      });
+      await d.drainer.cancel(first.receiptId as string);
+      const now = Date.now();
+      jest
+        .spyOn(Date, 'now')
+        .mockReturnValue(now + AGENT_REPORT_BURST_WINDOW_MS + 1);
+      expect(
+        await d.router.deliver({ childSessionId: CHILD, message: 'dropped' }),
+      ).toEqual({
+        delivered: false,
+        reason: 'delivery-failed',
+        receiptId: first.receiptId,
+        receiptState: 'cancelled',
+      });
+      expect(d.registry.get(CHILD)?.reportsRefused).toBe(1);
+      d.drainer.dispose();
+    });
+
+    it('maps a failed persist to storage-unavailable and counts it as refused', async () => {
+      const storage = new FakeStateStorage();
+      const d = await durableSession({ storage });
+      storage.failWrites = () => true;
+      expect(
+        await d.router.deliver({ childSessionId: CHILD, message: 'x' }),
+      ).toEqual({ delivered: false, reason: 'storage-unavailable' });
+      expect(d.registry.get(CHILD)?.reportsRefused).toBe(1);
+      storage.failWrites = () => false;
+      expect(
+        await d.router.deliver({ childSessionId: CHILD, message: 'x' }),
+      ).toMatchObject({ queued: true });
+      d.drainer.dispose();
+    });
+
+    it('maps a frozen parent to parent-session-deleted and counts it as refused', async () => {
+      const d = await durableSession();
+      await d.store.markIntent(PARENT_SDK);
+      expect(
+        await d.router.deliver({ childSessionId: CHILD, message: 'x' }),
+      ).toEqual({ delivered: false, reason: 'parent-session-deleted' });
+      expect(d.registry.get(CHILD)?.reportsRefused).toBe(1);
+      d.drainer.dispose();
+    });
+
+    it('maps a full parent inbox to parent-inbox-full and counts it as refused', async () => {
+      const d = await durableSession();
+      for (let n = 0; n < 64; n++)
+        await d.store.enqueue({
+          id: `lane-delivery:report:other:${n}:h`,
+          dedupeKey: `report:other:${n}:h`,
+          agentId: 'other',
+          parentSessionId: PARENT_SDK,
+          kind: 'report',
+          body: 'b',
+          createdAt: n,
+        });
+      expect(
+        await d.router.deliver({ childSessionId: CHILD, message: 'x' }),
+      ).toEqual({ delivered: false, reason: 'parent-inbox-full' });
+      expect(d.registry.get(CHILD)?.reportsRefused).toBe(1);
+      d.drainer.dispose();
+    });
+
+    describe('review fixes (TASK_2026_2297 P3)', () => {
+      const NEW_SDK = 'ffffffff-2222-4333-8444-555555555555';
+      const afterWindow = () => {
+        const now = Date.now();
+        jest
+          .spyOn(Date, 'now')
+          .mockReturnValue(now + AGENT_REPORT_BURST_WINDOW_MS + 1);
+      };
+
+      it('refuses a report whose owner changes while the store write is held', async () => {
+        const d = await durableSession();
+        const original = d.store.enqueueAdmitted.bind(d.store);
+        jest
+          .spyOn(d.store, 'enqueueAdmitted')
+          .mockImplementation(async (input, admit) => {
+            d.registry.reparent(CHILD, SUCCESSOR, NEW_SDK);
+            return original(input, admit);
+          });
+        expect(
+          await d.router.deliver({ childSessionId: CHILD, message: 'held' }),
+        ).toEqual({ delivered: false, reason: 'parent-session-not-active' });
+        expect(d.store.list()).toHaveLength(0);
+        expect(d.registry.get(CHILD)?.reportsRefused).toBe(1);
+        d.drainer.dispose();
+      });
+
+      it('admits a waiting report against the owner it has after an earlier report moved the child', async () => {
+        const d = await durableSession();
+        const original = d.store.enqueueAdmitted.bind(d.store);
+        jest
+          .spyOn(d.store, 'enqueueAdmitted')
+          .mockImplementationOnce(async (input, admit) => {
+            d.registry.reparent(CHILD, SUCCESSOR, NEW_SDK);
+            return original(input, admit);
+          });
+        const [first, second] = await Promise.all([
+          d.router.deliver({ childSessionId: CHILD, message: 'first' }),
+          d.router.deliver({ childSessionId: CHILD, message: 'second' }),
+        ]);
+        expect(first).toEqual({
+          delivered: false,
+          reason: 'parent-session-not-active',
+        });
+        expect(second).toMatchObject({ queued: true, receiptState: 'pending' });
+        expect(d.store.list(NEW_SDK)).toEqual([
+          expect.objectContaining({ id: second.receiptId }),
+        ]);
+        d.drainer.dispose();
+      });
+
+      it('returns the saved receipt for an immediate repeat instead of a duplicate refusal', async () => {
+        const d = await durableSession();
+        const first = await d.router.deliver({
+          childSessionId: CHILD,
+          message: 'repeat now',
+        });
+        const second = await d.router.deliver({
+          childSessionId: CHILD,
+          message: 'repeat now',
+        });
+        expect(second).toMatchObject({
+          queued: true,
+          receiptId: first.receiptId,
+        });
+        expect(d.store.list(PARENT_SDK)).toHaveLength(1);
+        d.drainer.dispose();
+      });
+
+      it('refuses a live-parent report when the saved receipts could not be restored', async () => {
+        const d = await durableSession();
+        d.active.add(PARENT_SDK);
+        jest
+          .spyOn(d.drainer, 'restored')
+          .mockRejectedValueOnce(new Error('state unreadable'));
+        const result = await d.router.deliver({
+          childSessionId: CHILD,
+          message: 'needs restore',
+        });
+        expect(result).toMatchObject({
+          delivered: false,
+          reason: 'delivery-failed',
+        });
+        expect(d.sendMessageToSession).not.toHaveBeenCalled();
+        d.drainer.dispose();
+      });
+
+      it('creates a new receipt for the new owner when the same text follows a reparent', async () => {
+        const d = await durableSession();
+        const first = await d.router.deliver({
+          childSessionId: CHILD,
+          message: 'same text',
+        });
+        d.registry.reparent(CHILD, SUCCESSOR, NEW_SDK);
+        afterWindow();
+        const second = await d.router.deliver({
+          childSessionId: CHILD,
+          message: 'same text',
+        });
+        expect(second).toMatchObject({ queued: true, receiptState: 'pending' });
+        expect(second.receiptId).not.toBe(first.receiptId);
+        expect(d.store.list(PARENT_SDK)).toEqual([
+          expect.objectContaining({ id: first.receiptId }),
+        ]);
+        expect(d.store.list(NEW_SDK)).toEqual([
+          expect.objectContaining({ id: second.receiptId, state: 'pending' }),
+        ]);
+        d.drainer.dispose();
+      });
+
+      it('keeps reports apart whose text and summary only differ at a NUL boundary', async () => {
+        const d = await durableSession();
+        const one = await d.router.deliver({
+          childSessionId: CHILD,
+          message: 'a\0b',
+          summary: 'c',
+        });
+        const two = await d.router.deliver({
+          childSessionId: CHILD,
+          message: 'a',
+          summary: 'b\0c',
+        });
+        expect(one.receiptId).toBeDefined();
+        expect(two.receiptId).toBeDefined();
+        expect(two.receiptId).not.toBe(one.receiptId);
+        expect(d.store.list(PARENT_SDK)).toHaveLength(2);
+
+        const key = (
+          AgentReportRouter as unknown as {
+            sessionReportKey(
+              id: string,
+              binding: { tab?: string; sdk?: string },
+              message: string,
+            ): string;
+          }
+        ).sessionReportKey;
+        expect(key(CHILD, { tab: PARENT, sdk: 'a\0b' }, 'c')).not.toBe(
+          key(CHILD, { tab: PARENT, sdk: 'a' }, 'b\0c'),
+        );
+        expect(key(CHILD, { tab: PARENT, sdk: PARENT_SDK }, 'm')).toMatch(
+          /^session-report:v2:/,
+        );
+        d.drainer.dispose();
+      });
+
+      it('refuses a message at the tool limit whose rendered envelope exceeds the stored body cap', async () => {
+        const d = await durableSession();
+        const result = await d.router.deliver({
+          childSessionId: CHILD,
+          message: 'x'.repeat(MAX_AGENT_REPORT_LENGTH),
+        });
+        expect(result).toEqual({
+          delivered: false,
+          reason: 'report-too-large',
+        });
+        expect(d.store.list()).toHaveLength(0);
+        expect(d.sendMessageToSession).not.toHaveBeenCalled();
+        d.drainer.dispose();
+
+        const live = createSessionHarness();
+        expect(
+          await live.router.deliver({
+            childSessionId: CHILD,
+            message: 'x'.repeat(MAX_AGENT_REPORT_LENGTH),
+          }),
+        ).toEqual({ delivered: false, reason: 'report-too-large' });
+        expect(live.sendMessageToSession).not.toHaveBeenCalled();
+      });
+
+      it('keys an offline report to the parent SDK id so a reopen on a new tab delivers it', async () => {
+        const d = await durableSession();
+        const result = await d.router.deliver({
+          childSessionId: CHILD,
+          message: 'for the reopened parent',
+        });
+        expect(result).toMatchObject({ queued: true });
+        expect(d.store.list(PARENT)).toHaveLength(0);
+        expect(d.store.list(PARENT_SDK)).toEqual([
+          expect.objectContaining({ id: result.receiptId }),
+        ]);
+
+        // The parent reopens on a new tab without a handoff; its SDK session
+        // is the same, so its activity drains the SDK-keyed inbox.
+        d.active.add(PARENT_SDK);
+        await d.drainer.drain(PARENT_SDK);
+        expect(d.sendMessageToSession).toHaveBeenCalledTimes(1);
+        expect(d.sendMessageToSession).toHaveBeenCalledWith(
+          PARENT_SDK,
+          expect.stringContaining('for the reopened parent'),
+          expect.any(Object),
+        );
+        expect(d.registry.get(CHILD)?.reportsDelivered).toBe(1);
+        d.drainer.dispose();
+      });
+
+      it('accepts exactly the burst limit from parallel reports of one child', async () => {
+        const d = await durableSession();
+        const results = await Promise.all(
+          Array.from({ length: AGENT_REPORT_BURST_LIMIT + 1 }, (_, n) =>
+            d.router.deliver({ childSessionId: CHILD, message: `p-${n}` }),
+          ),
+        );
+        expect(results.filter((r) => r.queued === true)).toHaveLength(
+          AGENT_REPORT_BURST_LIMIT,
+        );
+        expect(results.filter((r) => r.reason === 'rate-limited')).toHaveLength(
+          1,
+        );
+        expect(d.store.list(PARENT_SDK)).toHaveLength(AGENT_REPORT_BURST_LIMIT);
+        d.drainer.dispose();
+      });
+
+      it('returns one receipt for the same message with a different summary and spends no budget on it', async () => {
+        const d = await durableSession();
+        const remember = jest.spyOn(
+          d.router as unknown as { remember: (...args: unknown[]) => void },
+          'remember',
+        );
+        const first = await d.router.deliver({
+          childSessionId: CHILD,
+          message: 'one row',
+          summary: 'first summary',
+        });
+        afterWindow();
+        const second = await d.router.deliver({
+          childSessionId: CHILD,
+          message: 'one row',
+          summary: 'second summary',
+        });
+        expect(second).toEqual({
+          delivered: false,
+          queued: true,
+          receiptId: first.receiptId,
+          receiptState: 'pending',
+        });
+        expect(d.store.list(PARENT_SDK)).toHaveLength(1);
+        expect(remember).toHaveBeenCalledTimes(1);
+        d.drainer.dispose();
+      });
+
+      it('maps each stored receipt state of a repeat explicitly', async () => {
+        const d = await durableSession();
+        const first = await d.router.deliver({
+          childSessionId: CHILD,
+          message: 'stateful',
+        });
+        const id = first.receiptId as string;
+        afterWindow();
+        const repeat = () =>
+          d.router.deliver({ childSessionId: CHILD, message: 'stateful' });
+
+        await d.store.markDeferred(id, 'waiting-for-binding', 60_000);
+        expect(await repeat()).toEqual({
+          delivered: false,
+          queued: true,
+          receiptId: id,
+          receiptState: 'blocked-retryable',
+        });
+
+        await d.store.markSending(id);
+        expect(await repeat()).toEqual({
+          delivered: false,
+          reason: 'delivery-in-progress',
+          receiptId: id,
+          receiptState: 'sending',
+        });
+
+        await d.store.markOutcomeUnknown(id, 'send-timeout');
+        expect(await repeat()).toEqual({
+          delivered: false,
+          reason: 'delivery-outcome-unknown',
+          receiptId: id,
+          receiptState: 'outcome-unknown',
+        });
+        expect(d.registry.get(CHILD)?.reportsRefused).toBe(0);
+        d.drainer.dispose();
+      });
+
+      it.each([
+        ['outcome-unknown', 'delivery-outcome-unknown'],
+        ['sending', 'delivery-in-progress'],
+      ] as const)(
+        'does not send a repeat directly to an active parent while its saved receipt is %s',
+        async (state, reason) => {
+          const d = await durableSession();
+          const remember = jest.spyOn(
+            d.router as unknown as { remember: (...args: unknown[]) => void },
+            'remember',
+          );
+          const first = await d.router.deliver({
+            childSessionId: CHILD,
+            message: 'maybe sent',
+          });
+          const id = first.receiptId as string;
+          await d.store.markSending(id);
+          if (state === 'outcome-unknown')
+            await d.store.markOutcomeUnknown(id, 'send-timeout');
+          d.isSessionActive.mockImplementation(() => true);
+          afterWindow();
+          expect(
+            await d.router.deliver({
+              childSessionId: CHILD,
+              message: 'maybe sent',
+            }),
+          ).toEqual({
+            delivered: false,
+            reason,
+            receiptId: id,
+            receiptState: state,
+          });
+          expect(d.sendMessageToSession).not.toHaveBeenCalled();
+          expect(remember).toHaveBeenCalledTimes(1);
+          expect(d.store.list(PARENT_SDK)).toHaveLength(1);
+          d.drainer.dispose();
+        },
+      );
+
+      it('reports a delivered repeat as delivered to the stored parent', async () => {
+        const d = await durableSession();
+        const first = await d.router.deliver({
+          childSessionId: CHILD,
+          message: 'done once',
+        });
+        await d.store.markSending(first.receiptId as string);
+        const entry = d.store.list(PARENT_SDK)[0];
+        await d.store.markDelivered(entry.dedupeKey);
+        afterWindow();
+        expect(
+          await d.router.deliver({ childSessionId: CHILD, message: 'done once' }),
+        ).toEqual({ delivered: true, parentSessionId: PARENT_SDK });
+        d.drainer.dispose();
+      });
+    });
+  });
+
+  describe('a child resumed in a new tab (TASK_2026_2298)', () => {
+    const NEW_TAB = '12121212-2222-4333-8444-555555555555';
     const C1 = 'c1c1c1c1-2222-4333-8444-555555555555';
     const C2 = 'c2c2c2c2-2222-4333-8444-555555555555';
     const C2_SDK = 'd2d2d2d2-2222-4333-8444-555555555555';
@@ -1265,463 +1861,99 @@ describe('AgentReportRouter.deliver — session child', () => {
     const P2 = 'a2a2a2a2-2222-4333-8444-555555555555';
     const P2_SDK = 'b2b2b2b2-2222-4333-8444-555555555555';
 
-    const sentTo = (h: { sendMessageToSession: jest.Mock }): string[] =>
-      h.sendMessageToSession.mock.calls.map((call) => String(call[0]));
+    const successor = (
+      h: ReturnType<typeof createSessionHarness>,
+      id: string,
+    ): SessionChildRecord => ({
+      ...(h.registry.get(CHILD) as SessionChildRecord),
+      childSessionId: id,
+      sdkSessionId: undefined,
+      worktreePath: `/ws-wt/${id}`,
+    });
 
     it('attributes an ended child resumed in a new tab through its SDK id', async () => {
-      const h = createSessionHarness();
+      const h = createSessionHarness({ lifecycleSessions: { [NEW_TAB]: CHILD_SDK } });
       h.registry.markEnded(CHILD, 'ended', 'provider-error');
-      h.addSession(T2, CHILD_SDK);
 
-      const result = await h.router.deliver({
-        childSessionId: T2,
-        message: 'resumed and done',
-      });
+      const result = await h.router.deliver({ childSessionId: NEW_TAB, message: 'back' });
 
       expect(result).toEqual({ delivered: true, parentSessionId: PARENT });
-      expect(h.sendMessageToSession.mock.calls[0][1]).toContain(
+      expect(String(h.sendMessageToSession.mock.calls[0][1])).toContain(
         `agent-id="${CHILD}"`,
       );
       expect(h.registry.get(CHILD)?.reportsDelivered).toBe(1);
     });
 
-    it('treats a lifecycle read failure as an unattributed caller', async () => {
-      const h = createSessionHarness();
-      h.lifecycle.find.mockImplementation(() => {
-        throw new Error('registry gone');
-      });
-      const result = await h.router.deliver({ childSessionId: T2, message: 'x' });
-      expect(result.reason).toBe('unattributed-caller');
-      expect(h.logger.error).toHaveBeenCalled();
-    });
-
-    it('holds a report for an idle parent and delivers it once at the next parent activity', async () => {
-      const h = createSessionHarness({ activeIds: [] });
-
-      const result = await h.router.deliver({
-        childSessionId: CHILD,
-        message: 'batch 1 done',
-        summary: 'batch 1',
-      });
-      expect(result).toMatchObject({ delivered: false, pending: true });
-      expect(h.sendMessageToSession).not.toHaveBeenCalled();
-      expect(h.registry.get(CHILD)?.reportsRefused).toBe(0);
-
-      h.active.add(PARENT);
-      await h.fireActivity(PARENT_SDK);
-
-      expect(h.sendMessageToSession).toHaveBeenCalledTimes(1);
-      const [target, content, opts] = h.sendMessageToSession.mock.calls[0];
-      expect(target).toBe(PARENT);
-      expect(content).toMatch(
-        new RegExp(
-          `^<agent-report agent-id="${CHILD}" agent="auth-fix" cli="ptah-session" ` +
-            'reported-at="[^"]+" held="true">\n',
-        ),
-      );
-      expect(content).toContain('batch 1\n\nbatch 1 done');
-      expect(opts.origin).toEqual({
-        kind: 'peer',
-        from: `ptah-session:${CHILD}`,
-        name: 'session · auth-fix',
-      });
-      const child = h.registry.get(CHILD);
-      expect(child?.reportsDelivered).toBe(1);
-      expect(child?.reportsRefused).toBe(0);
-      expect(child?.heldReports).toBeUndefined();
-
-      await h.fireActivity(PARENT_SDK);
-      expect(h.sendMessageToSession).toHaveBeenCalledTimes(1);
-    });
-
-    it('flushes held reports before a new report once the parent is live', async () => {
-      const h = createSessionHarness({ activeIds: [] });
-      await h.router.deliver({ childSessionId: CHILD, message: 'old' });
-      h.active.add(PARENT);
-      await h.router.deliver({ childSessionId: CHILD, message: 'new' });
-      const bodies = h.sendMessageToSession.mock.calls.map((c) => String(c[1]));
-      expect(bodies).toHaveLength(2);
-      expect(bodies[0]).toContain('held="true"');
-      expect(bodies[0]).toContain('\nold\n');
-      expect(bodies[1]).not.toContain('held="true"');
-      expect(h.registry.get(CHILD)?.reportsDelivered).toBe(2);
-    });
-
-    it('reaches the parent from every record of a two-hop child handoff chain', async () => {
-      const h = createSessionHarness();
-      h.registry.succeed(CHILD, childRecord(C1), 'continued');
-      h.registry.succeed(C1, childRecord(C2), 'continued');
-      h.registry.bindSdkSessionId(C2, C2_SDK);
-
-      for (const [id, message] of [
-        [C2, 'from tab'],
-        [C2_SDK, 'from sdk'],
-        [CHILD, 'from the ended C0'],
-      ] as const) {
-        expect(await h.router.deliver({ childSessionId: id, message })).toEqual({
-          delivered: true,
-          parentSessionId: PARENT,
-        });
-      }
-      const bodies = h.sendMessageToSession.mock.calls.map((c) => String(c[1]));
-      expect(bodies[0]).toContain(`agent-id="${C2}"`);
-      expect(bodies[1]).toContain(`agent-id="${C2}"`);
-      expect(bodies[2]).toContain(`agent-id="${CHILD}"`);
-      expect(sentTo(h)).toEqual([PARENT, PARENT, PARENT]);
-    });
-
-    it('delivers to the latest parent after two reparent hops only', async () => {
-      const h = createSessionHarness({ activeIds: [PARENT, P1, P2] });
-      h.registry.reparent(CHILD, P1, P1_SDK);
-      h.registry.reparent(CHILD, P2, P2_SDK);
-      expect(
-        await h.router.deliver({ childSessionId: CHILD, message: 'hop' }),
-      ).toEqual({ delivered: true, parentSessionId: P2 });
-      expect(sentTo(h)).toEqual([P2]);
-    });
-
-    it('follows two committed handoff edges from the recorded parent', async () => {
-      const edge = (from: string, to: string) => ({
-        predecessorTabId: from,
-        predecessorSdkId: null,
-        successorTabId: to,
-        successorSdkId: null,
-        workspaceRoot: '/ws',
-        handoffPath: '/ws/HANDOFF.md',
-        state: 'recorded',
-      });
+    it('reaches the latest parent from the resumed last child of a two-hop chain', async () => {
       const h = createSessionHarness({
         activeIds: [P2],
-        ackRecords: [edge(PARENT, P1), edge(P1, P2)],
+        lifecycleSessions: { [NEW_TAB]: C2_SDK },
       });
-      expect(
-        await h.router.deliver({ childSessionId: CHILD, message: 'edge' }),
-      ).toEqual({ delivered: true, parentSessionId: P2 });
-      expect(sentTo(h)).toEqual([P2]);
-    });
-
-    it('reaches P2 from the latest child when both chains have two hops', async () => {
-      const h = createSessionHarness({ activeIds: [P2] });
-      h.registry.succeed(CHILD, childRecord(C1), 'continued');
-      h.registry.succeed(C1, childRecord(C2), 'continued');
+      h.registry.succeed(CHILD, successor(h, C1), 'continued');
+      h.registry.succeed(C1, successor(h, C2), 'continued');
       h.registry.bindSdkSessionId(C2, C2_SDK);
       h.registry.reparent(C2, P1, P1_SDK);
       h.registry.reparent(C2, P2, P2_SDK);
+      h.registry.markEnded(C2, 'ended', 'provider-error');
+
+      const result = await h.router.deliver({ childSessionId: NEW_TAB, message: 'both' });
+
+      expect(result).toEqual({ delivered: true, parentSessionId: P2 });
+      expect(h.sendMessageToSession.mock.calls.map((c) => c[0])).toEqual([P2]);
+    });
+
+    it('does not attribute through an SDK id inferred from the worktree path', async () => {
+      const h = createSessionHarness({ lifecycleSessions: { [NEW_TAB]: C2_SDK } });
+      const reservation = h.registry.reserveSlot(3);
+      if (!reservation) throw new Error('expected a slot');
+      h.registry.add(successor(h, C1), reservation);
+      h.registry.bindSdkSessionId(C1, C2_SDK, { inferred: true });
+
+      // Another chat in the same worktree, with its own tab and that SDK id.
+      const viaTab = await h.router.deliver({ childSessionId: NEW_TAB, message: 'x' });
+      const viaSdk = await h.router.deliver({ childSessionId: C2_SDK, message: 'y' });
+      expect(viaTab.reason).toBe('unattributed-caller');
+      expect(viaSdk.reason).toBe('unattributed-caller');
+      expect(h.sendMessageToSession).not.toHaveBeenCalled();
+
+      // The child's own session-id event confirms the binding.
+      h.registry.bindSdkSessionId(C1, C2_SDK);
       expect(
-        await h.router.deliver({ childSessionId: C2_SDK, message: 'both' }),
-      ).toEqual({ delivered: true, parentSessionId: P2 });
-      expect(sentTo(h)).toEqual([P2]);
+        (await h.router.deliver({ childSessionId: NEW_TAB, message: 'z' })).delivered,
+      ).toBe(true);
     });
 
-    it('delivers a held report to the adopting parent, never to the old one', async () => {
-      const h = createSessionHarness({ activeIds: [] });
-      await h.router.deliver({ childSessionId: CHILD, message: 'held early' });
-
-      h.registry.reparent(CHILD, P1, P1_SDK);
-      h.addSession(P1, P1_SDK);
-      h.active.add(PARENT);
-      // The old parent's activity no longer owns the child.
-      await h.fireActivity(PARENT_SDK);
-      expect(h.sendMessageToSession).not.toHaveBeenCalled();
-
-      h.active.add(P1);
-      await h.fireActivity(P1_SDK);
-      expect(sentTo(h)).toEqual([P1]);
-      expect(h.registry.get(CHILD)?.heldReports).toBeUndefined();
-    });
-
-    it('refuses, and does not hold, when the owner changes during the lookup', async () => {
-      const findBySuccessor = jest.fn();
-      const h = createSessionHarness({ activeIds: [], findBySuccessor });
-      findBySuccessor.mockImplementation(async () => {
-        h.registry.reparent(CHILD, P1, P1_SDK);
-        return undefined;
-      });
-      const result = await h.router.deliver({ childSessionId: CHILD, message: 'raced' });
-      expect(result).toMatchObject({
-        delivered: false,
-        reason: 'parent-session-not-active',
-        detail: 'the recorded parent changed while the report was routed; send the report again',
-      });
-      expect(result.pending).toBeUndefined();
-      expect(h.registry.get(CHILD)?.heldReports).toBeUndefined();
-      expect(h.registry.get(CHILD)?.reportsRefused).toBe(1);
-      expect(h.sendMessageToSession).not.toHaveBeenCalled();
-    });
-
-    it('drops the oldest held report beyond the limit and counts it refused', async () => {
-      const h = createSessionHarness({ activeIds: [] });
-      for (let i = 0; i <= SESSION_CHILD_HELD_REPORT_LIMIT; i++) {
-        const r = await h.router.deliver({ childSessionId: CHILD, message: `m ${i}` });
-        expect(r.pending).toBe(true);
-      }
-      const child = h.registry.get(CHILD);
-      expect(child?.heldReports?.map((r) => r.message)).toEqual(
-        Array.from({ length: SESSION_CHILD_HELD_REPORT_LIMIT }, (_, i) => `m ${i + 1}`),
-      );
-      expect(child?.reportsRefused).toBe(1);
-      expect(child?.lastRefusedReport).toBe('m 0');
+    it('names the possible causes when no record matches', async () => {
+      const h = createSessionHarness({ lifecycleSessions: {} });
+      const result = await h.router.deliver({ childSessionId: NEW_TAB, message: 'x' });
+      expect(result.reason).toBe('unattributed-caller');
       expect(h.logger.warn).toHaveBeenCalledWith(
         expect.any(String),
-        expect.objectContaining({ reason: 'held-report-dropped', childSessionId: CHILD }),
+        expect.objectContaining({
+          detail: expect.stringContaining('lost at a host restart'),
+        }),
       );
     });
 
-    it('refuses a repeat of a held report as duplicate-report', async () => {
-      const h = createSessionHarness({ activeIds: [] });
-      await h.router.deliver({ childSessionId: CHILD, message: 'same' });
-      const again = await h.router.deliver({ childSessionId: CHILD, message: 'same' });
-      expect(again.reason).toBe('duplicate-report');
-      expect(again.pending).toBeUndefined();
-      expect(h.registry.get(CHILD)?.heldReports).toHaveLength(1);
-    });
-
-    it('applies the burst limit before holding', async () => {
+    it('refuses as unattributed-caller when the lifecycle read throws', async () => {
       const h = createSessionHarness();
-      for (let i = 0; i < AGENT_REPORT_BURST_LIMIT; i++) {
-        await h.router.deliver({ childSessionId: CHILD, message: `n ${i}` });
-      }
-      h.active.delete(PARENT);
-      const over = await h.router.deliver({ childSessionId: CHILD, message: 'more' });
-      expect(over.reason).toBe('rate-limited');
-      expect(h.registry.get(CHILD)?.heldReports).toBeUndefined();
-    });
-
-    it('restores held reports when the flush send fails, then sends them in order', async () => {
-      const h = createSessionHarness({ activeIds: [] });
-      await h.router.deliver({ childSessionId: CHILD, message: 'first' });
-      await h.router.deliver({ childSessionId: CHILD, message: 'second' });
-      h.active.add(PARENT);
-      h.sendMessageToSession.mockRejectedValueOnce(new Error('busy'));
-
-      await h.fireActivity(PARENT_SDK);
-      expect(h.registry.get(CHILD)?.heldReports?.map((r) => r.message)).toEqual([
-        'first',
-        'second',
-      ]);
-      expect(h.registry.get(CHILD)?.reportsDelivered).toBe(0);
-      expect(h.logger.warn).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.objectContaining({ childSessionId: CHILD, parentSessionId: PARENT }),
-      );
-
-      await h.fireActivity(PARENT_SDK);
-      const bodies = h.sendMessageToSession.mock.calls.slice(1).map((c) => String(c[1]));
-      expect(bodies).toHaveLength(2);
-      expect(bodies[0]).toContain('\nfirst\n');
-      expect(bodies[1]).toContain('\nsecond\n');
-      expect(h.registry.get(CHILD)?.reportsDelivered).toBe(2);
-      expect(h.registry.get(CHILD)?.heldReports).toBeUndefined();
-    });
-
-    it('counts every refusal that has a record and logs the reason and both parent ids', async () => {
-      const h = createSessionHarness();
-      await h.router.deliver({ childSessionId: CHILD, message: 'same' });
-      await h.router.deliver({ childSessionId: CHILD, message: 'same' });
-      await h.router.deliver({
-        childSessionId: CHILD,
-        message: 'x'.repeat(MAX_AGENT_REPORT_LENGTH + 1),
-      });
-      expect(h.registry.get(CHILD)?.reportsRefused).toBe(2);
-      for (const reason of ['duplicate-report', 'report-too-large']) {
-        expect(h.logger.warn).toHaveBeenCalledWith(
-          '[AgentReportRouter] Session child report refused',
-          expect.objectContaining({
-            reason,
-            childSessionId: CHILD,
-            parentSessionId: PARENT,
-            parentSdkSessionId: PARENT_SDK,
+      const router = new AgentReportRouter(
+        h.logger,
+        h.manager,
+        { isSessionActive: h.isSessionActive, sendMessageToSession: h.sendMessageToSession } as never,
+        h.registry,
+        null,
+        null,
+        null,
+        {
+          find: jest.fn(() => {
+            throw new Error('boom');
           }),
-        );
-      }
-    });
-
-    describe('review round: ordering, owner checks and trust (TASK_2026_2298)', () => {
-      const lineageEdge = (from: string, to: string) => ({
-        predecessorTabId: from,
-        predecessorSdkId: null,
-        successorTabId: to,
-        successorSdkId: null,
-        workspaceRoot: '/ws',
-        handoffPath: '/ws/HANDOFF.md',
-        state: 'recorded',
-      });
-      const deferred = () => {
-        let resolve!: () => void;
-        let reject!: (error: Error) => void;
-        const promise = new Promise<void>((res, rej) => {
-          resolve = res;
-          reject = rej;
-        });
-        return { promise, resolve, reject };
-      };
-
-      it('keeps the rest of a drain for the new owner when the child is re-parented mid-drain', async () => {
-        const h = createSessionHarness({ activeIds: [] });
-        await h.router.deliver({ childSessionId: CHILD, message: 'A' });
-        await h.router.deliver({ childSessionId: CHILD, message: 'B' });
-        h.active.add(PARENT);
-        const first = deferred();
-        h.sendMessageToSession.mockImplementationOnce(() => first.promise);
-
-        const drain = h.router.flushHeldSessionChildReports();
-        await settle();
-        expect(sentTo(h)).toEqual([PARENT]);
-        h.registry.reparent(CHILD, P1, P1_SDK);
-        first.resolve();
-        await drain;
-
-        expect(sentTo(h)).toEqual([PARENT]);
-        expect(h.registry.get(CHILD)?.heldReports?.map((r) => r.message)).toEqual(['B']);
-
-        h.addSession(P1, P1_SDK);
-        h.active.add(P1);
-        await h.fireActivity(P1_SDK);
-        expect(sentTo(h)).toEqual([PARENT, P1]);
-        expect(h.registry.get(CHILD)?.heldReports).toBeUndefined();
-      });
-
-      it('flushes for an owner reached only through two lineage edges', async () => {
-        const h = createSessionHarness({
-          activeIds: [],
-          ackRecords: [lineageEdge(PARENT, P1), lineageEdge(P1, P2)],
-        });
-        expect(
-          (await h.router.deliver({ childSessionId: CHILD, message: 'wait' })).pending,
-        ).toBe(true);
-        h.active.add(P2);
-        // The event carries P2's id, which no child record names.
-        await h.fireActivity(P2);
-        expect(sentTo(h)).toEqual([P2]);
-        expect(h.registry.get(CHILD)?.heldReports).toBeUndefined();
-      });
-
-      it('sends a fresh report after older held ones, and holds it behind them after a middle failure', async () => {
-        const h = createSessionHarness({ activeIds: [] });
-        for (const m of ['one', 'two', 'three']) {
-          await h.router.deliver({ childSessionId: CHILD, message: m });
-        }
-        h.active.add(PARENT);
-        h.sendMessageToSession
-          .mockImplementationOnce(() => Promise.resolve())
-          .mockImplementationOnce(() => Promise.reject(new Error('busy')));
-
-        const fresh = await h.router.deliver({ childSessionId: CHILD, message: 'four' });
-        expect(fresh).toMatchObject({ delivered: false, pending: true });
-        expect(h.registry.get(CHILD)?.heldReports?.map((r) => r.message)).toEqual([
-          'two',
-          'three',
-          'four',
-        ]);
-        expect(h.registry.get(CHILD)?.reportsDelivered).toBe(1);
-
-        await h.fireActivity(PARENT_SDK);
-        const bodies = h.sendMessageToSession.mock.calls.map((c) => String(c[1]));
-        expect(bodies.map((b) => b.match(/\n(\w+)\n/)?.[1])).toEqual([
-          'one',
-          'two',
-          'two',
-          'three',
-          'four',
-        ]);
-        expect(h.registry.get(CHILD)?.heldReports).toBeUndefined();
-      });
-
-      it('runs two concurrent reports one after the other, so a duplicate is refused', async () => {
-        const h = createSessionHarness();
-        const gate = deferred();
-        h.sendMessageToSession.mockImplementationOnce(() => gate.promise);
-        const a = h.router.deliver({ childSessionId: CHILD, message: 'twin' });
-        const b = h.router.deliver({ childSessionId: CHILD, message: 'twin' });
-        await settle();
-        gate.resolve();
-        const results = await Promise.all([a, b]);
-        expect(results.map((r) => r.delivered)).toEqual([true, false]);
-        expect(results[1].reason).toBe('duplicate-report');
-        expect(h.sendMessageToSession).toHaveBeenCalledTimes(1);
-      });
-
-      it('does not attribute a report through an SDK id inferred from the worktree path', async () => {
-        const h = createSessionHarness();
-        const reservation = h.registry.reserveSlot(3);
-        if (!reservation) throw new Error('expected a slot');
-        h.registry.add(childRecord(C1), reservation);
-        h.registry.bindSdkSessionId(C1, C2_SDK, { inferred: true });
-        // Another chat in the same worktree, with its own tab and that SDK id.
-        h.addSession(T2, C2_SDK);
-
-        const viaTab = await h.router.deliver({ childSessionId: T2, message: 'x' });
-        const viaSdk = await h.router.deliver({ childSessionId: C2_SDK, message: 'y' });
-        expect(viaTab.reason).toBe('unattributed-caller');
-        expect(viaSdk.reason).toBe('unattributed-caller');
-        expect(h.sendMessageToSession).not.toHaveBeenCalled();
-
-        // The child's own session-id event confirms the binding.
-        h.registry.bindSdkSessionId(C1, C2_SDK);
-        expect((await h.router.deliver({ childSessionId: T2, message: 'z' })).delivered).toBe(
-          true,
-        );
-      });
-
-      it('refuses a fresh report when the owner changes during a failed drain', async () => {
-        const h = createSessionHarness({ activeIds: [] });
-        await h.router.deliver({ childSessionId: CHILD, message: 'A' });
-        h.active.add(PARENT);
-        const first = deferred();
-        h.sendMessageToSession.mockImplementationOnce(() => first.promise);
-        const fresh = h.router.deliver({ childSessionId: CHILD, message: 'B' });
-        await settle();
-        h.registry.reparent(CHILD, P1, P1_SDK);
-        first.reject(new Error('busy'));
-        const result = await fresh;
-        expect(result).toMatchObject({
-          delivered: false,
-          reason: 'parent-session-not-active',
-          detail: 'the recorded parent changed while the report was routed; send the report again',
-        });
-        expect(result.pending).toBeUndefined();
-        expect(h.registry.get(CHILD)?.heldReports?.map((r) => r.message)).toEqual(['A']);
-      });
-
-      it('drains each waiting child on its own, so a busy parent blocks no other child', async () => {
-        const h = createSessionHarness({ activeIds: [] });
-        const reservation = h.registry.reserveSlot(3);
-        if (!reservation) throw new Error('expected a slot');
-        h.registry.add(
-          childRecord(C1, { parentSessionId: P1, parentSdkSessionId: P1_SDK }),
-          reservation,
-        );
-        await h.router.deliver({ childSessionId: CHILD, message: 'to parent' });
-        await h.router.deliver({ childSessionId: C1, message: 'to p1' });
-        h.active.add(PARENT);
-        h.active.add(P1);
-        const busy = deferred();
-        h.sendMessageToSession.mockImplementationOnce(() => busy.promise);
-        await h.fireActivity(P1_SDK);
-        expect(sentTo(h)).toEqual([PARENT, P1]);
-        expect(h.registry.get(C1)?.heldReports).toBeUndefined();
-        busy.resolve();
-        await settle();
-        expect(h.registry.get(CHILD)?.heldReports).toBeUndefined();
-      });
-
-      it('sends no held report after dispose', async () => {
-        const h = createSessionHarness({ activeIds: [] });
-        await h.router.deliver({ childSessionId: CHILD, message: 'late' });
-        h.active.add(PARENT);
-        h.router.dispose();
-        await h.router.flushHeldSessionChildReports();
-        expect(h.sendMessageToSession).not.toHaveBeenCalled();
-        expect(h.registry.get(CHILD)?.heldReports).toHaveLength(1);
-      });
-
-      it('returns fixed failure text and keeps the runtime error in the log only', async () => {
-        const h = createSessionHarness({
-          sendImpl: () => Promise.reject(new Error('session 1234 not found')),
-        });
-        const result = await h.router.deliver({ childSessionId: CHILD, message: 'x' });
-        expect(result.detail).not.toContain('1234');
-      });
+        } as never,
+      );
+      const result = await router.deliver({ childSessionId: NEW_TAB, message: 'x' });
+      expect(result.reason).toBe('unattributed-caller');
+      expect(h.logger.error).toHaveBeenCalled();
     });
   });
 });

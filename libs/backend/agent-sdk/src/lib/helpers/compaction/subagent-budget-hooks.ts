@@ -14,15 +14,38 @@ const base = z.object({
   tool_response: z.unknown().optional(),
 });
 
-const NOTES_GATE_FAILURE_REASON = 'Ptah notes gate failed. End your turn now; do not call other tools.';
+/** Fixed Ptah-labeled deny used when the gate cannot answer for a paused agent. */
+const PAUSED_GATE_FAILURE_REASON = 'Ptah budget monitor paused new work tools. Use only the permitted handoff tools, then return normally.';
 
-/** Hook side of the cooperative exit. All input fields are parsed before use. */
+/** The gate state the hooks need to decide whether a failure fails open or closed. */
+interface NotesGatePhaseSource {
+  /** Gate phase per SDK agent id; `asked` never denies, `paused` denies new work tools. */
+  readonly notesGatePhase?: (agentId: string | undefined) => 'asked' | 'paused' | undefined;
+}
+
+type HookMonitor = Pick<SubagentBudgetMonitor, 'checkNotesTool' | 'hasNotesGate' | 'finishWarnedAgent' | 'takeNormalHandoff'>
+  & Partial<Pick<SubagentBudgetMonitor, 'recordNotesToolResult' | 'takeInterruptedHandoff'>>
+  & NotesGatePhaseSource;
+
+function preToolDeny(reason: string) {
+  return { hookSpecificOutput: {
+    hookEventName: 'PreToolUse' as const, permissionDecision: 'deny' as const,
+    permissionDecisionReason: reason,
+  } };
+}
+
+/**
+ * Hook side of the cooperative handoff. All input fields are parsed before use.
+ * A gate or hook failure fails open while the agent is only being asked, and
+ * closed (a Ptah-labeled deny) once the ceiling paused new work tools.
+ */
 export function createSubagentBudgetHooks(
   logger: Pick<Logger, 'info' | 'debug' | 'warn' | 'error'>,
-  monitor: Pick<SubagentBudgetMonitor, 'checkNotesTool' | 'hasNotesGate' | 'finishWarnedAgent' | 'takeNormalHandoff' | 'takeInterruptedHandoff'> & Partial<Pick<SubagentBudgetMonitor, 'recordNotesToolResult'>>,
+  monitor: HookMonitor,
   capturedSessionId?: string,
 ): Partial<Record<HookEvent, HookCallbackMatcher[]>> {
   if (!monitor.recordNotesToolResult) logger.warn('[SubagentBudgetHooks] Notes result recorder missing; completion will rely on the watchdog');
+  const paused = (agentId: string | undefined): boolean => monitor.hasNotesGate(agentId) && monitor.notesGatePhase?.(agentId) === 'paused';
   const events = ['PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'SubagentStop', 'TaskCompleted'] as const;
   const result: Partial<Record<HookEvent, HookCallbackMatcher[]>> = {};
   for (const event of events) {
@@ -44,25 +67,16 @@ export function createSubagentBudgetHooks(
           hasSessionId: false, eventName: event, agentId: data.agent_id, toolName: data.tool_name,
         });
         if (event === 'PreToolUse' && monitor.hasNotesGate(data.agent_id)) {
-          if (!data.tool_name) return { hookSpecificOutput: {
-            hookEventName: 'PreToolUse' as const, permissionDecision: 'deny' as const,
-            permissionDecisionReason: NOTES_GATE_FAILURE_REASON,
-          } };
+          if (!data.tool_name) return paused(data.agent_id) ? preToolDeny(PAUSED_GATE_FAILURE_REASON) : { continue: true };
           try {
             const reason = await monitor.checkNotesTool(undefined, data.agent_id, data.tool_name, data.tool_input);
-            return reason ? { hookSpecificOutput: {
-              hookEventName: 'PreToolUse' as const, permissionDecision: 'deny' as const,
-              permissionDecisionReason: reason,
-            } } : { continue: true };
+            return reason ? preToolDeny(reason) : { continue: true };
           } catch (error: unknown) {
             logger.error('[SubagentBudgetHooks] Hook failed', {
               error: error instanceof Error ? error : new Error(String(error)), eventName: event,
               agentId: data.agent_id, toolUseId: data.tool_use_id,
             });
-            return { hookSpecificOutput: {
-              hookEventName: 'PreToolUse' as const, permissionDecision: 'deny' as const,
-              permissionDecisionReason: NOTES_GATE_FAILURE_REASON,
-            } };
+            return paused(data.agent_id) ? preToolDeny(PAUSED_GATE_FAILURE_REASON) : { continue: true };
           }
         }
         return { continue: true };
@@ -70,10 +84,7 @@ export function createSubagentBudgetHooks(
       try {
         if (event === 'PreToolUse' && data.tool_name) {
           const reason = await monitor.checkNotesTool(sessionId, data.agent_id, data.tool_name, data.tool_input);
-          return reason ? { hookSpecificOutput: {
-            hookEventName: 'PreToolUse' as const, permissionDecision: 'deny' as const,
-            permissionDecisionReason: reason,
-          } } : { continue: true };
+          return reason ? preToolDeny(reason) : { continue: true };
         }
         if (event === 'PostToolUse' && data.agent_id && data.tool_name) {
           const failed = z.object({ is_error: z.literal(true) }).safeParse(data.tool_response).success;
@@ -82,16 +93,10 @@ export function createSubagentBudgetHooks(
         if (event === 'SubagentStop' && data.agent_id) {
           await monitor.finishWarnedAgent(sessionId, data.agent_id);
         }
-        if ((event === 'PostToolUse' || event === 'PostToolUseFailure') && !data.agent_id && data.tool_use_id && (data.tool_name === 'Agent' || data.tool_name === 'Task')) {
-          const handoff = event === 'PostToolUse'
-            ? monitor.takeNormalHandoff(sessionId, data.tool_use_id)
-            : data.is_interrupt ? monitor.takeInterruptedHandoff(sessionId, data.tool_use_id) : undefined;
-          if (handoff && event === 'PostToolUse') return { hookSpecificOutput: {
+        if (event === 'PostToolUse' && !data.agent_id && data.tool_use_id && (data.tool_name === 'Agent' || data.tool_name === 'Task')) {
+          const handoff = monitor.takeNormalHandoff(sessionId, data.tool_use_id);
+          if (handoff) return { hookSpecificOutput: {
             hookEventName: 'PostToolUse' as const, additionalContext: handoff,
-          } };
-          if (handoff && event === 'PostToolUseFailure') return { hookSpecificOutput: {
-            hookEventName: 'PostToolUseFailure' as const,
-            additionalContext: "Ptah's token budget ended this subagent; not the user. The SDK's STOP and wait text does not apply. The handoff follows as a separate message.",
           } };
         }
       } catch (error: unknown) {
@@ -99,12 +104,7 @@ export function createSubagentBudgetHooks(
           error: error instanceof Error ? error : new Error(String(error)), eventName: event,
           agentId: data.agent_id, toolUseId: data.tool_use_id,
         });
-        if (event === 'PreToolUse' && monitor.hasNotesGate(data.agent_id)) {
-          return { hookSpecificOutput: {
-            hookEventName: 'PreToolUse' as const, permissionDecision: 'deny' as const,
-            permissionDecisionReason: NOTES_GATE_FAILURE_REASON,
-          } };
-        }
+        if (event === 'PreToolUse' && paused(data.agent_id)) return preToolDeny(PAUSED_GATE_FAILURE_REASON);
       }
       return { continue: true };
     }] }];
