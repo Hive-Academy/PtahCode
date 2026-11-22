@@ -70,3 +70,10 @@ export function budgetAmount(budget: SessionBudgetState): string {
       return `${formatUsd(budget.used)} of ${formatUsd(budget.limit)} of cost`;
   }
 }
+
+/**
+ * Banner copy when the automatic handoff could not be queued after its retries. The user keeps
+ * the manual control. The hand-off button is disabled in this state, so the copy names Retry.
+ */
+export const AUTO_HANDOFF_EXHAUSTED_NOTICE =
+  'Ptah budget monitor could not queue the session handoff. Use Retry handoff to try again.';

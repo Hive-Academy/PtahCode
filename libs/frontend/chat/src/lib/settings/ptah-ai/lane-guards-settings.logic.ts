@@ -1,7 +1,8 @@
 /**
  * Lane repeat-call guard value (`agentOrchestration.laneRepeatCallStopAt`).
- * Lanes have no tool-call budget; the host stops a lane only when it repeats
- * one identical call this many times. Bounds match `isLaneRepeatCallStopAt`
+ * Lanes have no tool-call budget. The host asks a lane to hand off when it repeats
+ * one identical call this many times, and pauses its new tool calls at twice that
+ * count. The lane stays alive. The storage key keeps its historic name. Bounds match `isLaneRepeatCallStopAt`
  * in agent-rpc.handlers.ts: a safe integer >= 2.
  */
 
@@ -20,10 +21,10 @@ export interface LaneGuardField {
 export const LANE_GUARD_FIELDS: readonly LaneGuardField[] = [
   {
     key: 'laneRepeatCallStopAt',
-    label: 'Repeat-call stop at',
+    label: 'Repeat-call handoff at',
     min: 2,
     testId: 'lane-guards-repeat',
-    info: 'This guard stops a lane when it repeats the same call this many times. Lanes also have a weighted token budget and a duration limit. A lane gets an early warning when it reaches the budget warning ratio, or when one more turn of its largest size would cross the limit. The first turn that crosses the token limit is a grace turn: the lane is warned again, and its next turn stops it. A lane stopped by its budget does not resume; start a fresh lane for the remaining work.',
+    info: 'This guard asks a lane to hand off when it repeats the same call this many times. If the lane keeps repeating the call up to twice this count, Ptah pauses its new tool calls. A paused lane stays alive: review its progress and decide how it continues. Lanes also have a weighted token budget and a duration limit. A lane gets a handoff request when it reaches the budget warning ratio, and Ptah pauses its new work at twice the limit. Ptah never stops a lane for its budget.',
   },
 ];
 

@@ -13,7 +13,7 @@ import { SESSION_HANDOFF_COMMAND } from './session-handoff-prompts';
 
 const TAB = 'tab-1';
 const SESSION = '11111111-1111-4111-8111-111111111111';
-const COMMAND = '/session-handoff This session has used 41.2M tokens.';
+const COMMAND = '/session-handoff Ptah budget monitor requested a handoff because this session used 41.2M tokens.';
 const BUDGET: SessionBudgetState = {
   sessionId: SESSION, stage: 'handoff', unit: 'tokens', measure: 'tokens',
   used: 41_200_000, limit: 50_000_000, percent: 82.4, lowerBound: false,

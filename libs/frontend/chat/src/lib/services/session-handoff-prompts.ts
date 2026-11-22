@@ -33,10 +33,14 @@ export function buildWrapUpPrompt(budget: SessionBudgetState | null): string {
  */
 export const SESSION_HANDOFF_COMMAND = '/session-handoff';
 
-/** `/session-handoff` with the session's usage as its argument. */
+/**
+ * `/session-handoff` with an attributed reason as its argument. The text names the Ptah budget
+ * monitor, so the agent and the transcript show who asked and why (TASK_2026_2297_920a).
+ */
 export function buildHandoffCommand(budget: SessionBudgetState | null): string {
-  return `${SESSION_HANDOFF_COMMAND} This session has used ${usedFigure(budget)} tokens.`;
+  return `${SESSION_HANDOFF_COMMAND} Ptah budget monitor requested a handoff because this session used ${usedFigure(budget)} tokens.`;
 }
+
 
 /** `41.2M`, or `$8.96 worth of` for a cost budget, so "… {used} tokens" reads. */
 function usedFigure(budget: SessionBudgetState | null): string {

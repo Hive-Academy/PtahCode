@@ -328,7 +328,7 @@ describe('SessionBudgetActionsService', () => {
     it('builds the slash command with the usage figure', () => {
       expect(SESSION_HANDOFF_COMMAND).toBe('/session-handoff');
       expect(buildHandoffCommand(BUDGET)).toBe(
-        '/session-handoff This session has used 41.2M tokens.',
+        '/session-handoff Ptah budget monitor requested a handoff because this session used 41.2M tokens.',
       );
     });
 

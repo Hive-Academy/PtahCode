@@ -73,6 +73,19 @@ describe('SessionBudgetBannerComponent', () => {
       expect(Boolean(byTestId(host, 'session-budget-retry'))).toBe(label === 'Handoff failed');
     });
 
+    it('explains a failed hand-off with Ptah-labeled copy that names the retry control', () => {
+      const failed = render(LIMIT, { handoffLabel: 'Handoff failed' });
+      expect(byTestId(failed, 'session-budget-handoff-failed')?.textContent).toContain(
+        'Ptah budget monitor could not queue the session handoff. Use Retry handoff to try again.',
+      );
+      expect(byTestId(failed, 'session-budget-retry')).not.toBeNull();
+    });
+
+    it('shows no failure copy for a recorded hand-off', () => {
+      const host = render(LIMIT, { handoffLabel: 'Handoff recorded' });
+      expect(byTestId(host, 'session-budget-handoff-failed')).toBeNull();
+    });
+
     it('shows nothing about it unless it is queued', () => {
       const host = render(LIMIT);
       expect(byTestId(host, 'session-budget-auto-queued')).toBeNull();
