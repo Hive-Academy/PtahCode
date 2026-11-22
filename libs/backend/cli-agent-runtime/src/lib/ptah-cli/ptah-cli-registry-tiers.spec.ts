@@ -25,6 +25,7 @@ import type { AnthropicProvider } from '@ptah-extension/agent-sdk';
 import type { ProviderModelsService } from '@ptah-extension/auth-providers';
 import {
   KIMI_CODE_PROVIDER_ENTRY,
+  getPtahCliLaneProvider,
   type AuthEnv,
   type PtahCliConfig,
 } from '@ptah-extension/shared';
@@ -32,15 +33,30 @@ import { PtahCliRegistry } from './ptah-cli-registry';
 import { createFakeSdkProcessSpawner } from './testing/fake-sdk-process-spawner';
 
 // ---------------------------------------------------------------------------
-// Narrow mock — only the method resolveEffectiveTiers() touches
+// Narrow mock — only the methods resolveEffectiveTiers() touches
 // ---------------------------------------------------------------------------
 
 type MockProviderModels = jest.Mocked<
-  Pick<ProviderModelsService, 'getModelTiers'>
+  Pick<ProviderModelsService, 'getModelTiers' | 'resolveEffectiveTiers'>
 >;
+
+/**
+ * Stand-in for `ProviderModelsService.resolveEffectiveTiers` with no live
+ * catalogue on hand: the caller's tier, else the registry preference.
+ */
+function specTierPreferences(
+  providerId: string,
+  user: Partial<Record<'sonnet' | 'opus' | 'haiku', string | null | undefined>>,
+): Partial<Record<'sonnet' | 'opus' | 'haiku', string>> {
+  const preferred = getPtahCliLaneProvider(providerId)?.defaultTiers;
+  const pick = (tier: 'sonnet' | 'opus' | 'haiku'): string | undefined =>
+    user[tier] || preferred?.[tier];
+  return { sonnet: pick('sonnet'), opus: pick('opus'), haiku: pick('haiku') };
+}
 
 function createMockProviderModels(): MockProviderModels {
   return {
+    resolveEffectiveTiers: jest.fn(specTierPreferences),
     getModelTiers: jest.fn().mockReturnValue({
       sonnet: null,
       opus: null,
@@ -108,10 +124,7 @@ type ResolvedTiers =
   | undefined;
 
 type RegistryInternals = {
-  resolveEffectiveTiers: (
-    config: PtahCliConfig,
-    provider: AnthropicProvider,
-  ) => ResolvedTiers;
+  resolveEffectiveTiers: (config: PtahCliConfig) => ResolvedTiers;
 };
 
 describe('PtahCliRegistry.resolveEffectiveTiers', () => {
@@ -121,7 +134,6 @@ describe('PtahCliRegistry.resolveEffectiveTiers', () => {
 
     (registry as unknown as RegistryInternals).resolveEffectiveTiers(
       BASE_AGENT_CONFIG,
-      KIMI_CODE,
     );
 
     expect(providerModels.getModelTiers).toHaveBeenCalledWith(
@@ -153,7 +165,7 @@ describe('PtahCliRegistry.resolveEffectiveTiers', () => {
     const registry = makeRegistry(providerModels);
     const resolved = (
       registry as unknown as RegistryInternals
-    ).resolveEffectiveTiers(BASE_AGENT_CONFIG, KIMI_CODE);
+    ).resolveEffectiveTiers(BASE_AGENT_CONFIG);
 
     // Must reflect cliAgent values, not mainAgent values.
     expect(resolved?.sonnet).toBe('cli-sonnet');
@@ -179,7 +191,7 @@ describe('PtahCliRegistry.resolveEffectiveTiers', () => {
     const registry = makeRegistry(providerModels);
     const resolved = (
       registry as unknown as RegistryInternals
-    ).resolveEffectiveTiers(configWithTiers, KIMI_CODE);
+    ).resolveEffectiveTiers(configWithTiers);
 
     // Per-agent config must win over the cliAgent scope from providerModels.
     expect(resolved?.sonnet).toBe('agent-specific-sonnet');
@@ -198,9 +210,14 @@ describe('PtahCliRegistry.resolveEffectiveTiers', () => {
     const registry = makeRegistry(providerModels);
     const resolved = (
       registry as unknown as RegistryInternals
-    ).resolveEffectiveTiers(BASE_AGENT_CONFIG, KIMI_CODE);
+    ).resolveEffectiveTiers(BASE_AGENT_CONFIG);
 
-    // Should fall through to KIMI_CODE.defaultTiers.
+    // Should fall through to KIMI_CODE.defaultTiers, via the service.
+    expect(providerModels.resolveEffectiveTiers).toHaveBeenCalledWith('kimi-code', {
+      sonnet: null,
+      opus: null,
+      haiku: null,
+    });
     expect(resolved?.sonnet).toBe('k3');
     expect(resolved?.haiku).toBe('kimi-for-coding');
   });

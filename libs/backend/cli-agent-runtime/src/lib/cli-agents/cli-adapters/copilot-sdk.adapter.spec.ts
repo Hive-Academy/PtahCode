@@ -97,8 +97,7 @@ import type {
   AgentRoleDefinition,
   CliOutputSegment,
 } from '@ptah-extension/shared';
-import { COPILOT_MODELS, CopilotSdkAdapter } from './copilot-sdk.adapter';
-import { COPILOT_PROVIDER_ENTRY } from '@ptah-extension/shared';
+import { CopilotSdkAdapter } from './copilot-sdk.adapter';
 import {
   buildTaskPrompt,
   CliCommandLineTooLongError,
@@ -187,17 +186,8 @@ describe('CopilotSdkAdapter', () => {
   });
 
   describe('listModels() / capabilities() / parseOutput()', () => {
-    it('returns the curated Copilot model list', async () => {
-      const models = await adapter.listModels();
-      expect(models).toEqual(COPILOT_MODELS);
-      expect(models.some((m) => m.id === 'claude-sonnet-5.5')).toBe(true);
-    });
-
-    it('derives the lane fallback from the provider list in the same order', async () => {
-      const providerModels = COPILOT_PROVIDER_ENTRY.staticModels ?? [];
-      const models = await adapter.listModels();
-      expect(models.map((m) => m.id)).toEqual(providerModels.map((m) => m.id));
-      expect(models).toEqual(providerModels.map(({ id, name }) => ({ id, name })));
+    it('lists no models (no repository list; live sources are the host LM API and account /models)', async () => {
+      await expect(adapter.listModels()).resolves.toEqual([]);
     });
 
     it('reports continuation only', () => {

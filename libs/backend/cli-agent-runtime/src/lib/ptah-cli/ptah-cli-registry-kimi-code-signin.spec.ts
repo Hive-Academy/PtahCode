@@ -72,7 +72,6 @@ jest.mock('@ptah-extension/agent-sdk', () => {
   return {
     ...actual,
     getAnthropicProvider: jest.fn(() => entry),
-    seedStaticModelPricing: jest.fn(),
     buildSafeEnv: jest.fn((env: unknown) => env),
   };
 });
@@ -167,6 +166,8 @@ function buildHarness(
     setProviderKey,
   } as unknown as IAuthSecretsService;
   const providerModels = {
+    resolveEffectiveTiers: jest.fn(specTierPreferences),
+    getCachedModelIds: jest.fn(() => null),
     getModelTiers: jest
       .fn()
       .mockReturnValue({ sonnet: null, opus: null, haiku: null }),
@@ -230,6 +231,24 @@ beforeEach(() => {
   kimiProxyCtor.mockClear();
   proxyRunning = false;
 });
+
+/**
+ * Stand-in for `ProviderModelsService.resolveEffectiveTiers` with no live
+ * catalogue on hand: the caller's tier, else the provider's preference (read
+ * from the provider lookup this spec mocks).
+ */
+function specTierPreferences(
+  providerId: string,
+  user: Partial<Record<'sonnet' | 'opus' | 'haiku', string | null | undefined>>,
+): Partial<Record<'sonnet' | 'opus' | 'haiku', string>> {
+  const { getAnthropicProvider } = jest.requireMock<
+    typeof import('@ptah-extension/agent-sdk')
+  >('@ptah-extension/agent-sdk');
+  const preferred = getAnthropicProvider(providerId)?.defaultTiers;
+  const pick = (tier: 'sonnet' | 'opus' | 'haiku'): string | undefined =>
+    user[tier] || preferred?.[tier];
+  return { sonnet: pick('sonnet'), opus: pick('opus'), haiku: pick('haiku') };
+}
 
 describe('PtahCliRegistry.spawnAgent — kimi-code without a stored key', () => {
   it('runs through a per-agent proxy bound to the shared auth service', async () => {

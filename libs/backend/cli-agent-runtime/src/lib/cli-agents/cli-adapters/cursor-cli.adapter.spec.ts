@@ -199,6 +199,7 @@ describe('CursorCliAdapter', () => {
     it('never reads ~/.ptah/settings.json for the key', async () => {
       delete process.env['CURSOR_API_KEY'];
       resolveKey.mockResolvedValue('secret-key');
+      mockModelsList.mockResolvedValue([]);
 
       await adapter.detect();
       await adapter.ensureTokensFresh();
@@ -246,11 +247,39 @@ describe('CursorCliAdapter', () => {
       expect(models.every((model) => model.isFallback !== true)).toBe(true);
     });
 
-    it('falls back to the curated list when the API throws', async () => {
+    it('lists nothing without an API key and never calls the SDK', async () => {
+      delete process.env['CURSOR_API_KEY'];
+      const debugMock = jest.fn();
+      const warnMock = jest.fn();
+      const logged = new CursorCliAdapter(
+        { debug: debugMock, info: jest.fn(), warn: warnMock, error: jest.fn() } as unknown as Logger,
+        resolveKey,
+      );
+
+      await expect(logged.listModels()).resolves.toEqual([]);
+      expect(mockModelsList).not.toHaveBeenCalled();
+      expect(debugMock).toHaveBeenCalledWith(expect.stringContaining('not configured'));
+      expect(warnMock).not.toHaveBeenCalled();
+    });
+
+    it('returns [] and warns (without a fallback) when the API lists nothing', async () => {
+      mockModelsList.mockResolvedValue([{ id: '' }]);
+      const warnMock = jest.fn();
+      const logged = new CursorCliAdapter(
+        { debug: jest.fn(), info: jest.fn(), warn: warnMock, error: jest.fn() } as unknown as Logger,
+        resolveKey,
+      );
+
+      await expect(logged.listModels()).resolves.toEqual([]);
+      expect(warnMock).toHaveBeenCalledWith(expect.stringContaining('returned no models'));
+      expect(JSON.stringify(warnMock.mock.calls)).not.toMatch(/fallback/i);
+    });
+
+    it('rethrows a fixed error when the API throws', async () => {
       mockModelsList.mockRejectedValue(new Error('network'));
-      const models = await adapter.listModels();
-      expect(models.some((m) => m.id === 'composer-2.5')).toBe(true);
-      expect(models.every((model) => model.isFallback === true)).toBe(true);
+      await expect(adapter.listModels()).rejects.toThrow(
+        new Error('Cursor models.list() failed'),
+      );
     });
   });
 
@@ -1184,17 +1213,22 @@ describe('CursorCliAdapter', () => {
         new Error(`models request rejected for ${SECRET}`),
       );
 
-      const models = await guarded.listModels();
-      expect(models.some((m) => m.id === 'composer-2.5')).toBe(true);
+      const thrown = await guarded.listModels().then(
+        () => undefined,
+        (error: unknown) => error,
+      );
+      expect(thrown).toBeInstanceOf(Error);
+      expect((thrown as Error).message).toBe('Cursor models.list() failed');
 
-      // The fallback is no longer silent, and the warning is redacted.
-      expect(warnMock).toHaveBeenCalledWith(
-        expect.stringContaining('showing the fallback list'),
+      // The SDK message reaches the debug log redacted.
+      expect(debugMock).toHaveBeenCalledWith(
+        expect.stringContaining('models.list() failed'),
         expect.anything(),
       );
-      expect(JSON.stringify(warnMock.mock.calls)).toContain(
+      expect(JSON.stringify(debugMock.mock.calls)).toContain(
         'models request rejected',
       );
+      expect(JSON.stringify(debugMock.mock.calls)).toContain('[REDACTED]');
       expect(JSON.stringify(debugMock.mock.calls)).not.toContain(SECRET);
       expect(JSON.stringify(warnMock.mock.calls)).not.toContain(SECRET);
       expect(JSON.stringify(errorMock.mock.calls)).not.toContain(SECRET);

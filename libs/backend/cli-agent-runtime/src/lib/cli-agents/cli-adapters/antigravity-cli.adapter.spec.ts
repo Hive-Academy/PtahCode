@@ -87,6 +87,71 @@ function createFakeChild(): FakeChildControls {
 
 let currentChild: FakeChildControls | null = null;
 
+/**
+ * `agy models` stdout as agy 1.5.14 printed it on 2026-11-22 (A7: suffixed
+ * ids, `id<TAB>name`; the "Fetching available models..." status line goes to
+ * stderr). The spawn derives `--model` from these ids.
+ */
+const AGY_MODELS_STDOUT = [
+  'gemini-4-neon-high\tGemini 4 Neon (High)',
+  'gemini-4-neon-xhigh\tGemini 4 Neon (XHigh)',
+  'gemini-4-neon-medium\tGemini 4 Neon (Medium)',
+  'gemini-4-neon-low\tGemini 4 Neon (Low)',
+  'gemini-4-carbon-medium\tGemini 4 Carbon (Medium)',
+  'gemini-4-carbon-high\tGemini 4 Carbon (High)',
+  'gemini-4-carbon-low\tGemini 4 Carbon (Low)',
+  'gemini-4-argon-medium\tGemini 4 Argon (Medium)',
+  'gemini-4-argon-high\tGemini 4 Argon (High)',
+  'gemini-4-argon-low\tGemini 4 Argon (Low)',
+  'gemini-4-hydrogen-high\tGemini 4 Hydrogen (High)',
+  'gemini-4-hydrogen-xhigh\tGemini 4 Hydrogen (XHigh)',
+  'gemini-4-hydrogen-medium\tGemini 4 Hydrogen (Medium)',
+  'gemini-4-hydrogen-low\tGemini 4 Hydrogen (Low)',
+  'gemini-pro-orchestrator-neon\tOrchestrator (Neon)',
+  'gemini-pro-orchestrator\tOrchestrator (Carbon)',
+  'gemini-pro-orchestrator-argon\tOrchestrator (Argon)',
+  'gemini-3.8-flash-high\tGemini 3.8 Flash (High)',
+  'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)',
+  'gemini-3.8-flash-low\tGemini 3.8 Flash (Low)',
+  'claude-opus-5-5-low\tClaude Opus 5.5 (Low)',
+  'claude-opus-5-5-medium\tClaude Opus 5.5 (Medium)',
+  'claude-opus-5-5-high\tClaude Opus 5.5 (High)',
+  'claude-sonnet-5-5-low\tClaude Sonnet 5.5 (Low)',
+  'claude-sonnet-5-5-medium\tClaude Sonnet 5.5 (Medium)',
+  'claude-sonnet-5-5-high\tClaude Sonnet 5.5 (High)',
+  'gpt-oss-120b-medium\tGPT-OSS 120B (Medium)',
+  '',
+].join('\r\n');
+
+/**
+ * What an `agy models` spawn prints in the runSdk specs; `undefined` routes the
+ * probe to `currentChild` like any other spawn (the listModels specs drive it).
+ */
+let servedModels: string | undefined;
+
+/** A child that prints `stdout` and closes, outside `currentChild`. */
+function servingChild(stdout: string): FakeChildControls['child'] {
+  const fake = createFakeChild();
+  setImmediate(() => {
+    fake.stdout.end(stdout);
+    setImmediate(() => fake.emitClose(0));
+  });
+  return fake.child;
+}
+
+/** The spawnCli calls other than the `agy models` probe. */
+function runSpawnCalls(): Array<[string, string[]]> {
+  return (mockSpawnCli.mock.calls as Array<[string, string[]]>).filter(
+    ([, args]) => args[0] !== 'models',
+  );
+}
+
+/** How many `agy models` probes were spawned. */
+function modelProbeCount(): number {
+  return mockSpawnCli.mock.calls.filter(([, args]) => (args as string[])[0] === 'models')
+    .length;
+}
+
 const mockSpawnCli = jest.fn();
 const mockResolveCliPath = jest.fn();
 const mockProbeCliVersion = jest.fn();
@@ -151,7 +216,11 @@ describe('AntigravityCliAdapter', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     currentChild = null;
-    mockSpawnCli.mockImplementation(() => {
+    servedModels = AGY_MODELS_STDOUT;
+    mockSpawnCli.mockImplementation((_binary: string, args: string[]) => {
+      if (args[0] === 'models' && servedModels !== undefined) {
+        return servingChild(servedModels);
+      }
       currentChild = createFakeChild();
       return currentChild.child;
     });
@@ -231,6 +300,19 @@ describe('AntigravityCliAdapter', () => {
   });
 
   describe('listModels()', () => {
+    beforeEach(() => {
+      servedModels = undefined;
+    });
+
+    it('parses the pinned agy 1.5.14 `agy models` output (A7)', async () => {
+      mockResolveCliPath.mockResolvedValue('/usr/local/bin/agy');
+      servedModels = AGY_MODELS_STDOUT;
+      const models = await adapter.listModels();
+      expect(models).toHaveLength(27);
+      expect(models[0]).toEqual({ id: 'gemini-4-neon-high', name: 'Gemini 4 Neon (High)' });
+      expect(models).toContainEqual({ id: 'gemini-pro-orchestrator', name: 'Orchestrator (Carbon)' });
+    });
+
     it('tree-kills the model probe once on timeout', async () => {
       // The worker has not forwarded exit; the fake child deliberately emits no exit event.
       jest.useFakeTimers();
@@ -366,7 +448,7 @@ describe('AntigravityCliAdapter', () => {
       currentChild?.emitClose(0);
       await handle.done;
 
-      const [binaryArg, argsArg] = mockSpawnCli.mock.calls[0] as [
+      const [binaryArg, argsArg] = runSpawnCalls()[0] as [
         string,
         string[],
       ];
@@ -390,7 +472,7 @@ describe('AntigravityCliAdapter', () => {
     it('uses the attached empty --print value and sends the task as validated NDJSON', async () => {
       const handle = await adapter.runSdk(baseOptions);
 
-      const [, argsArg] = mockSpawnCli.mock.calls[0] as [string, string[]];
+      const [, argsArg] = runSpawnCalls()[0] as [string, string[]];
       expect(argsArg).toContain('--print=');
       expect(argsArg).toContain('--input-format');
       expect(argsArg[argsArg.indexOf('--input-format') + 1]).toBe(
@@ -434,14 +516,21 @@ describe('AntigravityCliAdapter', () => {
       currentChild?.emitClose(0);
       await handle.done;
 
-      const [, argsArg] = mockSpawnCli.mock.calls[0] as [string, string[]];
+      const [, argsArg] = runSpawnCalls()[0] as [string, string[]];
       expect(argsArg[argsArg.indexOf('--model') + 1]).toBe(
         'Gemini 3.1 Pro (High)',
       );
     });
 
-    it('migrates the stale saved default while extracting a model id from `id<TAB>name`', async () => {
-      const handle = await adapter.runSdk({
+    it('replaces a retired saved id with the closest live base, from `id<TAB>name`', async () => {
+      const warn = jest.fn();
+      const logged = new AntigravityCliAdapter(undefined, async () => true, {
+        debug: jest.fn(),
+        info: jest.fn(),
+        warn,
+        error: jest.fn(),
+      } as unknown as Logger);
+      const handle = await logged.runSdk({
         ...baseOptions,
         model: 'claude-sonnet-4-6\tClaude Sonnet 4.6 (Thinking)',
       });
@@ -449,10 +538,98 @@ describe('AntigravityCliAdapter', () => {
       currentChild?.emitClose(0);
       await handle.done;
 
-      const [, argsArg] = mockSpawnCli.mock.calls[0] as [string, string[]];
-      expect(argsArg[argsArg.indexOf('--model') + 1]).toBe(
-        'claude-sonnet-5-5-medium',
+      const [, argsArg] = runSpawnCalls()[0] as [string, string[]];
+      expect(argsArg[argsArg.indexOf('--model') + 1]).toBe('claude-sonnet-5-5');
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('closest live model'),
+        { saved: 'claude-sonnet-4-6', model: 'claude-sonnet-5-5' },
       );
+    });
+
+    it('applies the effort to a retired id through its closest live base', async () => {
+      const handle = await adapter.runSdk({
+        ...baseOptions,
+        model: 'claude-opus-4-8',
+        reasoningEffort: 'high',
+      });
+      collect(handle);
+      currentChild?.emitClose(0);
+      await handle.done;
+
+      const [, argsArg] = runSpawnCalls()[0] as [string, string[]];
+      expect(argsArg[argsArg.indexOf('--model') + 1]).toBe('claude-opus-5-5-high');
+    });
+
+    it('passes the model unchanged and appends no effort when agy lists no ids', async () => {
+      servedModels = '';
+      const handle = await adapter.runSdk({
+        ...baseOptions,
+        model: 'claude-sonnet-4-6',
+        reasoningEffort: 'high',
+      });
+      collect(handle);
+      currentChild?.emitClose(0);
+      await handle.done;
+
+      const [, argsArg] = runSpawnCalls()[0] as [string, string[]];
+      expect(argsArg[argsArg.indexOf('--model') + 1]).toBe('claude-sonnet-4-6');
+      expect(argsArg).not.toContain('--effort');
+    });
+
+    it('does not append an effort agy does not list for that base, and warns', async () => {
+      const warn = jest.fn();
+      const logged = new AntigravityCliAdapter(undefined, async () => true, {
+        debug: jest.fn(),
+        info: jest.fn(),
+        warn,
+        error: jest.fn(),
+      } as unknown as Logger);
+      const handle = await logged.runSdk({
+        ...baseOptions,
+        model: 'gemini-pro-orchestrator',
+        reasoningEffort: 'high',
+      });
+      collect(handle);
+      currentChild?.emitClose(0);
+      await handle.done;
+
+      const [, argsArg] = runSpawnCalls()[0] as [string, string[]];
+      expect(argsArg[argsArg.indexOf('--model') + 1]).toBe('gemini-pro-orchestrator');
+      expect(argsArg).not.toContain('--effort');
+      expect(warn).toHaveBeenCalledWith(
+        expect.stringContaining('no effort variant'),
+        { model: 'gemini-pro-orchestrator', effort: 'high' },
+      );
+    });
+
+    it('probes `agy models` at most once per freshness window and shares one probe', async () => {
+      const first = adapter.runSdk({ ...baseOptions, model: 'claude-sonnet-5-5' });
+      const second = adapter.runSdk({ ...baseOptions, model: 'claude-opus-5-5' });
+      const handles = await Promise.all([first, second]);
+      expect(modelProbeCount()).toBe(1);
+      const third = await adapter.runSdk({ ...baseOptions, model: 'claude-sonnet-5-5-low' });
+      expect(modelProbeCount()).toBe(1);
+      for (const handle of [...handles, third]) handle.abort.abort();
+    });
+
+    it('re-probes once the last ids are older than 10 minutes', async () => {
+      const clock = { now: 1_000_000 };
+      const timed = new AntigravityCliAdapter(undefined, async () => true, undefined, {
+        now: () => clock.now,
+      });
+      (await timed.runSdk({ ...baseOptions, model: 'claude-sonnet-5-5' })).abort.abort();
+      clock.now += 10 * 60_000 - 1;
+      (await timed.runSdk({ ...baseOptions, model: 'claude-sonnet-5-5' })).abort.abort();
+      expect(modelProbeCount()).toBe(1);
+      clock.now += 1;
+      (await timed.runSdk({ ...baseOptions, model: 'claude-sonnet-5-5' })).abort.abort();
+      expect(modelProbeCount()).toBe(2);
+    });
+
+    it('does not probe `agy models` when no model is chosen', async () => {
+      const handle = await adapter.runSdk({ ...baseOptions, reasoningEffort: 'high' });
+      handle.abort.abort();
+      expect(modelProbeCount()).toBe(0);
     });
 
     it('adds --effort for a value agy accepts when no model is set', async () => {
@@ -464,7 +641,7 @@ describe('AntigravityCliAdapter', () => {
       currentChild?.emitClose(0);
       await handle.done;
 
-      const [, argsArg] = mockSpawnCli.mock.calls[0] as [string, string[]];
+      const [, argsArg] = runSpawnCalls()[0] as [string, string[]];
       expect(argsArg[argsArg.indexOf('--effort') + 1]).toBe('high');
     });
 
@@ -478,14 +655,14 @@ describe('AntigravityCliAdapter', () => {
       currentChild?.emitClose(0);
       await handle.done;
 
-      const [, argsArg] = mockSpawnCli.mock.calls[0] as [string, string[]];
+      const [, argsArg] = runSpawnCalls()[0] as [string, string[]];
       expect(argsArg[argsArg.indexOf('--model') + 1]).toBe(
         'claude-sonnet-5-5-low',
       );
       expect(argsArg).not.toContain('--effort');
     });
 
-    it('encodes requested effort in a known base model id', async () => {
+    it('encodes requested effort when agy lists `<model>-<effort>`', async () => {
       const handle = await adapter.runSdk({
         ...baseOptions,
         model: 'claude-sonnet-5-5',
@@ -495,7 +672,7 @@ describe('AntigravityCliAdapter', () => {
       currentChild?.emitClose(0);
       await handle.done;
 
-      const [, argsArg] = mockSpawnCli.mock.calls[0] as [string, string[]];
+      const [, argsArg] = runSpawnCalls()[0] as [string, string[]];
       expect(argsArg[argsArg.indexOf('--model') + 1]).toBe(
         'claude-sonnet-5-5-high',
       );
@@ -511,7 +688,7 @@ describe('AntigravityCliAdapter', () => {
       currentChild?.emitClose(0);
       await handle.done;
 
-      const [, argsArg] = mockSpawnCli.mock.calls[0] as [string, string[]];
+      const [, argsArg] = runSpawnCalls()[0] as [string, string[]];
       expect(argsArg).not.toContain('--effort');
     });
 
@@ -524,7 +701,7 @@ describe('AntigravityCliAdapter', () => {
       currentChild?.emitClose(0);
       await handle.done;
 
-      const [, argsArg] = mockSpawnCli.mock.calls[0] as [string, string[]];
+      const [, argsArg] = runSpawnCalls()[0] as [string, string[]];
       expect(argsArg[argsArg.indexOf('--effort') + 1]).toBe('xhigh');
     });
 
@@ -537,7 +714,7 @@ describe('AntigravityCliAdapter', () => {
       currentChild?.emitClose(0);
       await handle.done;
 
-      const [, argsArg] = mockSpawnCli.mock.calls[0] as [string, string[]];
+      const [, argsArg] = runSpawnCalls()[0] as [string, string[]];
       expect(argsArg[argsArg.indexOf('--conversation') + 1]).toBe('abc-123');
     });
 
@@ -550,7 +727,7 @@ describe('AntigravityCliAdapter', () => {
       currentChild?.emitClose(0);
       await handle.done;
 
-      const [, argsArg] = mockSpawnCli.mock.calls[0] as [string, string[]];
+      const [, argsArg] = runSpawnCalls()[0] as [string, string[]];
       expect(argsArg).not.toContain('--dangerously-skip-permissions');
     });
 
@@ -563,7 +740,7 @@ describe('AntigravityCliAdapter', () => {
       currentChild?.emitClose(0);
       await handle.done;
 
-      const [binaryArg] = mockSpawnCli.mock.calls[0] as [string, string[]];
+      const [binaryArg] = runSpawnCalls()[0] as [string, string[]];
       expect(binaryArg).toBe('C:/agy/bin/agy.exe');
     });
 
@@ -666,7 +843,8 @@ describe('AntigravityCliAdapter', () => {
         }),
       ).rejects.toBeInstanceOf(CliCommandLineTooLongError);
       expect(mcpWrite).not.toHaveBeenCalled();
-      expect(mockSpawnCli).not.toHaveBeenCalled();
+      // Only the `agy models` probe ran; the lane itself never spawned.
+      expect(runSpawnCalls()).toHaveLength(0);
     });
 
     it('still writes the MCP entry before spawning a role-carrying run', async () => {
@@ -684,8 +862,11 @@ describe('AntigravityCliAdapter', () => {
       await handle.done;
 
       expect(mcpWrite).toHaveBeenCalledTimes(1);
+      const laneSpawn = mockSpawnCli.mock.calls.findIndex(
+        ([, args]) => (args as string[])[0] !== 'models',
+      );
       expect(mcpWrite.mock.invocationCallOrder[0]).toBeLessThan(
-        mockSpawnCli.mock.invocationCallOrder[0],
+        mockSpawnCli.mock.invocationCallOrder[laneSpawn],
       );
     });
 
@@ -700,8 +881,8 @@ describe('AntigravityCliAdapter', () => {
       currentChild?.emitClose(0);
       await second.done;
 
-      const [, roleless] = mockSpawnCli.mock.calls[0] as [string, string[]];
-      const [, withRole] = mockSpawnCli.mock.calls[1] as [string, string[]];
+      const [, roleless] = runSpawnCalls()[0] as [string, string[]];
+      const [, withRole] = runSpawnCalls()[1] as [string, string[]];
       expect(withRole).toEqual(roleless);
     });
   });
@@ -1449,7 +1630,7 @@ describe('AntigravityCliAdapter', () => {
         task: 'legacy',
         workingDirectory: '/proj',
       });
-      const [, argsArg] = mockSpawnCli.mock.calls[0] as [string, string[]];
+      const [, argsArg] = runSpawnCalls()[0] as [string, string[]];
 
       expect(argsArg).not.toContain('--input-format');
       expect(argsArg.slice(-2)).toEqual([

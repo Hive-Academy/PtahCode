@@ -47,9 +47,8 @@ import {
   getAllAnthropicProviders,
   getAnthropicProvider,
   getProviderAuthEnvVar,
-  seedStaticModelPricing,
   buildSafeEnv,
-  buildStaticTierCapabilityEnv,
+  buildTierCapabilityEnv,
   resolveSessionCapabilityPolicy,
   type AnthropicProvider,
   type HarnessPolicySync,
@@ -341,7 +340,8 @@ export class PtahCliRegistry {
             (isKimiCodeProvider(provider) &&
               (await this.isKimiCodeConnectionUsable()));
 
-          const modelCount = provider?.staticModels?.length ?? 0;
+          const modelCount =
+            this.providerModels.getCachedModelIds(agentConfig.providerId)?.length ?? 0;
 
           let status: PtahCliState['status'] = 'unconfigured';
           if (hasKey) {
@@ -455,7 +455,7 @@ export class PtahCliRegistry {
       `[PtahCliRegistry] Created agent "${name}" (${id}) for provider "${provider.name}"`,
     );
 
-    const modelCount = provider.staticModels?.length ?? 0;
+    const modelCount = this.providerModels.getCachedModelIds(providerId)?.length ?? 0;
 
     const hasKey = source === 'shared-connection'
       ? !!(await this.authSecrets.getCredential('apiKey'))?.trim()
@@ -613,10 +613,8 @@ export class PtahCliRegistry {
       return undefined;
     }
 
-    seedStaticModelPricing(agentConfig.providerId);
-
     const tier: ModelTier = 'sonnet';
-    const effectiveTiers = this.resolveEffectiveTiers(agentConfig, provider);
+    const effectiveTiers = this.resolveEffectiveTiers(agentConfig);
     const authEnv = await this.acquireProfileAuthEnv(
       id,
       agentConfig,
@@ -685,7 +683,6 @@ export class PtahCliRegistry {
         };
       }
 
-      seedStaticModelPricing(agentConfig.providerId);
       const { authEnv: testAuthEnv, stopProxy } = await this.buildProxyAuthEnv(
         agentConfig,
         testProvider,
@@ -887,9 +884,8 @@ export class PtahCliRegistry {
       credential,
     );
     try {
-      seedStaticModelPricing(agentConfig.providerId);
       const tier: ModelTier = options?.modelTier ?? 'sonnet';
-      const spawnTiers = this.resolveEffectiveTiers(agentConfig, provider);
+      const spawnTiers = this.resolveEffectiveTiers(agentConfig);
       const spawnFromTiers = spawnTiers?.[tier];
       const modelOverride = options?.model?.trim();
       const model =
@@ -1550,7 +1546,7 @@ export class PtahCliRegistry {
     agentConfig: PtahCliConfig,
     provider: AnthropicProvider,
   ): void {
-    const effectiveTiers = this.resolveEffectiveTiers(agentConfig, provider);
+    const effectiveTiers = this.resolveEffectiveTiers(agentConfig);
     if (effectiveTiers) {
       if (effectiveTiers.sonnet) {
         authEnv.ANTHROPIC_DEFAULT_SONNET_MODEL = effectiveTiers.sonnet;
@@ -1561,11 +1557,11 @@ export class PtahCliRegistry {
       if (effectiveTiers.haiku) {
         authEnv.ANTHROPIC_DEFAULT_HAIKU_MODEL = effectiveTiers.haiku;
       }
-      // Static-only providers (Kimi Code) must declare effort and thinking
-      // themselves: the runtime does not recognise their model ids.
+      // Providers whose live ids the runtime does not recognise (Kimi Code)
+      // declare effort and thinking for every live model.
       Object.assign(
         authEnv,
-        buildStaticTierCapabilityEnv(provider.id, effectiveTiers),
+        buildTierCapabilityEnv(provider.id, effectiveTiers),
       );
     }
   }
@@ -1702,36 +1698,29 @@ export class PtahCliRegistry {
   /**
    * Resolve effective tier mappings for a Ptah CLI agent.
    *
-   * Priority (highest wins):
-   * 1. Per-agent tierMappings stored in PtahCliConfig
-   * 2. Main agent settings from ProviderModelsService
-   * 3. Provider's first static model as sonnet fallback
+   * Per tier, the per-agent `tierMappings` win, then the `cliAgent` scope of
+   * the main settings. What is still empty resolves through
+   * `ProviderModelsService.resolveEffectiveTiers`: the registry preference
+   * when it is live (or no catalogue is on hand), else the closest live id,
+   * else the tier derived from the live catalogue.
    */
   private resolveEffectiveTiers(
     agentConfig: PtahCliConfig,
-    provider: AnthropicProvider,
   ): PtahCliConfig['tierMappings'] {
     const mainTiers = this.providerModels.getModelTiers(
       agentConfig.providerId,
       'cliAgent',
     );
     const agentTiers = agentConfig.tierMappings;
-    const providerDefaults = provider.defaultTiers;
-    const defaultSonnet = provider.staticModels?.[0]?.id ?? undefined;
-
-    const sonnet =
-      agentTiers?.sonnet ||
-      mainTiers.sonnet ||
-      providerDefaults?.sonnet ||
-      defaultSonnet ||
-      undefined;
-    const opus =
-      agentTiers?.opus || mainTiers.opus || providerDefaults?.opus || undefined;
-    const haiku =
-      agentTiers?.haiku ||
-      mainTiers.haiku ||
-      providerDefaults?.haiku ||
-      undefined;
+    const resolved = this.providerModels.resolveEffectiveTiers(
+      agentConfig.providerId,
+      {
+        sonnet: agentTiers?.sonnet || mainTiers.sonnet,
+        opus: agentTiers?.opus || mainTiers.opus,
+        haiku: agentTiers?.haiku || mainTiers.haiku,
+      },
+    );
+    const { sonnet, opus, haiku } = resolved;
 
     if (!sonnet && !opus && !haiku) {
       return undefined;
@@ -1757,11 +1746,10 @@ export class PtahCliRegistry {
    * Build default tier mappings for a new agent.
    *
    * Returns undefined so the runtime cascade in resolveEffectiveTiers can
-   * resolve tiers in the right order: agentTiers → mainTiers → provider.defaultTiers
-   * → staticModels[0]. Pre-filling a partial mapping here would shadow the
-   * user's globally-configured tier choices (e.g. Ollama defaults to
-   * staticModels[0]='llama3.1:8b' even when the user has selected
-   * 'qwen3:8b'/'devstral'/'qwen3:32b' via the model mapping modal).
+   * resolve tiers in the right order: agentTiers → cliAgent tiers → the
+   * provider's live-checked preference → the live-derived tier. Pre-filling a
+   * mapping here would freeze today's answer and shadow the user's
+   * globally-configured tier choices made later in the model mapping modal.
    */
   private buildDefaultTierMappings(
     _provider: AnthropicProvider,
