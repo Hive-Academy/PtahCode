@@ -413,7 +413,15 @@ describe('PtahSettingsLayoutComponent', () => {
     expect(buttons[0].getAttribute('data-in-section')).toBe('true');
     expect(buttons[0].getAttribute('aria-current')).toBeNull();
     expect(buttons[1].getAttribute('aria-current')).toBe('page');
-    expect(buttons[1].parentElement?.className).toContain('ml-[var(--ptah-settings-nav-child-indent)]');
+    expect(buttons[0].className).not.toContain('inset_2px');
+    expect(buttons[1].parentElement?.className).toContain('before:left-0');
+    expect(buttons[1].parentElement?.className).toContain('[&>button]:pl-[var(--ptah-settings-nav-child-indent)]');
+    for (const button of buttons) {
+      expect(button.querySelector('[data-testid="settings-layout-state-slot"]')?.classList).toContain('w-4');
+    }
+    host.navMode.set('tabs');
+    fixture.detectChanges();
+    expect(q('[data-testid="settings-layout-state-slot"]')).toBeNull();
   });
 
   it('renders the header icon before the title only when icon is set', () => {
@@ -432,13 +440,13 @@ describe('PtahSettingsLayoutComponent', () => {
     host.tabs.set([{ id: 'general', label: 'General', stateMark: { tone: 'warn', count: 2, label: '2 need attention' } }]);
     fixture.detectChanges();
     const mark = q('[data-testid="settings-layout-state-mark"]') as HTMLElement;
-    expect(mark.getAttribute('title')).toBe('2 need attention');
     expect(mark.textContent?.trim()).toBe('2');
     // The whole mark is hidden from assistive technology, so it adds nothing to the button name.
     expect(mark.getAttribute('aria-hidden')).toBe('true');
     expect(mark.hasAttribute('aria-label')).toBe(false);
     expect(mark.hasAttribute('role')).toBe(false);
     const button = mark.closest('button') as HTMLButtonElement;
+    expect(button.title).toBe('2 need attention');
     const name = Array.from(button.childNodes)
       // Name from content: text and elements only (no template comments), without the aria-hidden parts.
       .filter((node) => node.nodeType !== Node.COMMENT_NODE)

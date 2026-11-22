@@ -630,9 +630,18 @@ describe('MainAgentReassignPopoverComponent', () => {
       nothingWritten();
     });
 
-    it('(e) a provider change needs its confirm before Save; Save then activates it to the "Save to" scope', async () => {
+    it('(e) a provider change needs confirmation, then activates the provider and clears the stale model on Save', async () => {
+      state.model.set(ready({ model: 'custom/old-provider-model' }));
+      fixture.detectChanges();
       expect(query('main-agent-provider-confirm')).toBeNull();
       choose('main-agent-provider', 'second');
+      await flush();
+      expect(modelField().selectedId()).toBe('');
+      expect(modelField().includeDefault()).toBe(true);
+      expect(modelField().defaultLabel()).toBe('Provider default');
+      expect(modelField().options().map(({ id }) => id)).not.toContain(
+        'custom/old-provider-model',
+      );
       expect(query('main-agent-provider-copy')?.textContent?.trim()).toBe(
         'New main-agent requests use Second. Changing the provider ends running chat sessions in this workspace.',
       );
@@ -664,12 +673,16 @@ describe('MainAgentReassignPopoverComponent', () => {
         'workspace',
         CONTEXT,
       );
-      expect(state.saveSettings).not.toHaveBeenCalled();
+      expect(state.saveSettings).toHaveBeenCalledWith(
+        { model: { model: '', applyTo: 'workspace' } },
+        CONTEXT,
+      );
       // The outcome is the page toast now, never inline; a provider change offers no Undo.
       expect(query('main-agent-provider-outcome')).toBeNull();
       expect(feedback.toast()).toEqual({
         tone: 'status',
-        message: 'Main agent provider saved.',
+        message:
+          'Main agent provider saved. Saved main agent model to This workspace.',
         canUndo: false,
       });
       expect(fixture.componentInstance.closed).toBe(1);
@@ -772,7 +785,10 @@ describe('MainAgentReassignPopoverComponent', () => {
     });
 
     it('an uncheckable connection keeps its note; Cancel provider change drops it, writes nothing, and keeps focus inside', () => {
+      choose('main-agent-model', '__manual__');
+      expect(query('main-agent-model-manual')).toBeTruthy();
       choose('main-agent-provider', 'local');
+      expect(modelField().selectedId()).toBe('');
       expect(query('activation-unchecked-note')?.textContent).toContain(
         'Ptah cannot check this connection before use.',
       );
@@ -781,6 +797,7 @@ describe('MainAgentReassignPopoverComponent', () => {
       cancel?.click();
       fixture.detectChanges();
       expect(query('main-agent-provider-confirm')).toBeNull();
+      expect(modelField().selectedId()).toBe('model-a');
       nothingWritten();
       expect(document.activeElement).toBe(
         document.getElementById('main-agent-provider'),
@@ -882,6 +899,20 @@ describe('MainAgentReassignPopoverComponent', () => {
       expect(fixture.componentInstance.closed).toBe(0);
       key(input, 'Escape');
       expect(fixture.componentInstance.closed).toBe(1);
+    });
+
+    it('does not write a model when choosing Provider default on the current provider', async () => {
+      // config:model-get represents an empty stored model as "default".
+      state.model.set(ready({ model: 'default' }));
+      await flush();
+      choose('main-agent-model', 'model-b');
+      await flush();
+      expect(isDisabledControl(saveButton())).toBe(false);
+      choose('main-agent-model', '');
+      await flush();
+      expect(isDisabledControl(saveButton())).toBe(true);
+      await save();
+      nothingWritten();
     });
 
     it('a stored model the catalogue lacks stays listed and selected', async () => {
@@ -1628,10 +1659,17 @@ describe('MainAgentReassignPopoverComponent: Account (P6 MP)', () => {
       expect(state.activateConnection.mock.invocationCallOrder[0]).toBeLessThan(
         accounts.setSelection.mock.invocationCallOrder[0],
       );
-      // One toast for both writes.
-      expect(announced()).toEqual([
-        'status: Main agent provider saved. Chat uses Home',
-      ]);
+      expect(state.saveSettings).toHaveBeenCalledWith(
+        { model: { model: '', applyTo: 'workspace' } },
+        CONTEXT,
+      );
+      expect(announced()).toEqual([]);
+      expect(feedback.toast()).toEqual({
+        tone: 'status',
+        message:
+          'Main agent provider saved. Saved main agent model to This workspace. Chat uses Home.',
+        canUndo: false,
+      });
       expect(fixture.componentInstance.closed).toBe(1);
     });
 

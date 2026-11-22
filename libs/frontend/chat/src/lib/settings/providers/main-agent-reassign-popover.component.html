@@ -75,7 +75,7 @@
         <ptah-select
           triggerId="main-agent-provider"
           label="Provider connection"
-          class="block w-full"
+          class="w-full"
           data-focus="main-agent"
           [disabled]="busy()"
           [options]="providerSelectOptions()"
@@ -184,7 +184,7 @@
             #accountSelect
             triggerId="main-agent-account"
             label="Account"
-            class="block w-full"
+            class="w-full"
             [title]="accountText()"
             [invalid]="accountRemoved()"
             [attr.aria-describedby]="
@@ -319,7 +319,7 @@
         <ptah-select
           triggerId="main-agent-save-to"
           label="Save to"
-          class="block w-full"
+          class="w-full"
           [disabled]="busy() || !targetReady()"
           [options]="targetSelectOptions()"
           [value]="target()"

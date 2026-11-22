@@ -42,10 +42,8 @@ import {
   card,
   chooseMainAgentModel,
   expectHostAppScope,
-  closeCatalog,
+  connectProviderButton,
   closeConnectionDrawer,
-  expectCatalogOpen,
-  openCatalog,
   confirmWrite,
   credentialsOf,
   expectCall,
@@ -93,17 +91,26 @@ async function openThenClose(
 
 const wizardBody = (page: Page) => page.locator('[data-testid="wizard-body"]');
 
+async function openBlankWizard(page: Page): Promise<Locator> {
+  await providersTab(page);
+  await visibleEnabled(connectProviderButton(page));
+  await connectProviderButton(page).click();
+  const step = page.locator('[data-testid="wizard-step-provider"]');
+  await expect(step).toBeVisible();
+  return step;
+}
+
 /**
- * Clicks Cancel, then discards the "Discard this setup?" review
+ * Clicks Cancel, then discards via the "Discard this setup?" dialog
  * (`wizard-discard-review`) if it appears — `requestWizardClose()`
- * (`provider-setup-wizard.component.ts:2321-2334`) always shows it once a
+ * always shows it once a
  * provider is selected (`hasUserDraft()` is true the moment `_selection()`
  * is non-null, before any field is even touched), so every deep-linked or
  * card-triggered wizard session this table opens hits it on close.
  */
 async function closeWizard(page: Page): Promise<void> {
   // code-logic-review Blocking/Serious FM-4: this is called from a `finally`
-  // inside `throughCard`/`throughCatalog`, so it must NEVER throw an
+  // inside `throughCard`/`throughProviderPicker`, so it must NEVER throw an
   // unhandled error — a crashed or already-unmounted wizard here would
   // otherwise cascade every remaining reachability entry into failure. Each
   // recovery step is its own best-effort attempt; the final assertion is the
@@ -112,11 +119,11 @@ async function closeWizard(page: Page): Promise<void> {
     .locator('[data-testid="wizard-cancel"]')
     .click({ timeout: 5000 })
     .catch(() => undefined);
-  const discardConfirm = page.locator('[data-testid="wizard-discard-confirm"]');
+  const discardConfirm = page.getByRole('dialog', { name: 'Discard this setup?' })
+    .locator('[data-testid="wizard-discard-confirm"]');
   // A synchronous `.count()` right after the click races Angular's own
-  // re-render: when a draft is present the click flips `_closeReview` and
-  // wizard-body swaps to the discard-review CHILD content (still counted as
-  // 1 wizard-body), so an immediate .count() can read 0 discard buttons
+  // re-render: when a draft is present the dialog opens asynchronously,
+  // so an immediate .count() can read 0 discard buttons
   // before that render lands, silently skip the discard click, and leave the
   // whole wizard stuck open for every entry after this one. `waitFor` gives
   // that render its own timeout instead of trusting an instant snapshot.
@@ -238,43 +245,29 @@ async function advancePastProviderStep(page: Page): Promise<void> {
   }
 }
 
-/** Opens the setup wizard for `providerName` from the catalog modal's Connect (Batch 27) and closes it after `assertion`. */
-async function throughCatalog(
+/** Opens the setup wizard for `providerName` from the blank provider picker and closes it after `assertion`. */
+async function throughProviderPicker(
   page: Page,
   providerName: string,
   assertion: (page: Page) => Promise<void>,
   advance = true,
 ): Promise<void> {
-  const setupButton = (await openCatalog(page)).getByRole('button', {
-    name: 'Connect ' + providerName,
-    exact: true,
-  });
-  await visibleEnabled(setupButton);
-  await setupButton.click();
-  await expectCatalogOpen(page, false);
-  await visibleEnabled(wizardBody(page));
+  const step = await openBlankWizard(page);
   await withWizardClosed(page, async () => {
+    await step.getByText(providerName, { exact: true }).click();
     if (advance) await advancePastProviderStep(page);
     await assertion(page);
   });
 }
 
 /**
- * Opens the wizard with NO deep link (`openWizard('')`, the catalog modal's
- * "Custom endpoint gateway" Configure) so it lands on the provider step with
- * nothing preselected, selects the "Custom endpoint" radio, then closes.
+ * Opens a blank wizard, selects the "Custom endpoint" radio, then closes.
  */
 async function throughBlankWizardCustomOption(
   page: Page,
   assertion: (page: Page) => Promise<void>,
 ): Promise<void> {
-  const customEntry = (await openCatalog(page)).getByRole('button', {
-    name: 'Configure a custom endpoint',
-    exact: true,
-  });
-  await visibleEnabled(customEntry);
-  await customEntry.click();
-  await visibleEnabled(wizardBody(page));
+  await openBlankWizard(page);
   await withWizardClosed(page, async () => {
     const radio = page.locator('[data-testid="wizard-provider-custom-radio"]');
     await visibleEnabled(radio);
@@ -311,17 +304,12 @@ const providersAuth: readonly ReachabilityEntry[] = [
   {
     id: '#1',
     capability:
-      'All providers visible (configured cards + More providers catalog)',
+      'All providers visible in the wizard picker, with configured connection cards on the page',
     status: 'present',
-    // Since Batch 27 the catalog is a modal: the unconfigured providers are listed there, searchable.
     reach: async (page) => {
-      const dialog = await openCatalog(page);
-      await visibleEnabled(
-        dialog
-          .locator('[data-provider="openrouter"]')
-          .getByRole('button', { name: 'Connect OpenRouter', exact: true }),
-      );
-      await closeCatalog(page);
+      const step = await openBlankWizard(page);
+      await visibleEnabled(step.locator('[data-provider="openrouter"] input[type="radio"]'));
+      await closeWizard(page);
     },
   },
   {
@@ -372,7 +360,7 @@ const providersAuth: readonly ReachabilityEntry[] = [
     capability: 'Enter and save an API key (wizard credential step)',
     status: 'present',
     reach: (page) =>
-      throughCatalog(page, 'OpenRouter', async (p) =>
+      throughProviderPicker(page, 'OpenRouter', async (p) =>
         visibleEnabled(p.locator('[data-testid="wizard-api-key"]')),
       ),
   },
@@ -402,7 +390,7 @@ const providersAuth: readonly ReachabilityEntry[] = [
     capability: 'Key help (prefix hint)',
     status: 'present',
     reach: (page) =>
-      throughCatalog(page, 'OpenRouter', async (p) => {
+      throughProviderPicker(page, 'OpenRouter', async (p) => {
         // The hint only renders once a non-matching key is typed
         // (`provider-setup-wizard.component.ts:1617-1625`).
         await p
@@ -439,7 +427,7 @@ const providersAuth: readonly ReachabilityEntry[] = [
     capability: 'GitHub Copilot sign-in (OAuth)',
     status: 'present',
     reach: (page) =>
-      throughCatalog(page, 'GitHub Copilot', async (p) =>
+      throughProviderPicker(page, 'GitHub Copilot', async (p) =>
         visibleEnabled(
           p.locator(
             '[data-testid="wizard-sign-in"], [data-testid="wizard-sign-in-waiting"]',
@@ -475,7 +463,7 @@ const providersAuth: readonly ReachabilityEntry[] = [
     capability: 'Local provider (no key needed) with editable endpoint',
     status: 'present',
     reach: (page) =>
-      throughCatalog(page, 'Ollama', async (p) =>
+      throughProviderPicker(page, 'Ollama', async (p) =>
         visibleEnabled(p.locator('[data-testid="wizard-base-url"]')),
       ),
   },
@@ -576,7 +564,7 @@ const providersAuth: readonly ReachabilityEntry[] = [
     // Actually reaches and runs Verify — no comma-fallback to the credential
     // step's key input, which is a different step entirely.
     reach: (page) =>
-      throughCatalog(page, 'OpenRouter', async (p) => {
+      throughProviderPicker(page, 'OpenRouter', async (p) => {
         await p
           .locator('[data-testid="wizard-api-key"]')
           .fill('sk-or-e2e-test-key');
@@ -598,7 +586,7 @@ const providersAuth: readonly ReachabilityEntry[] = [
     // the failure copy that only renders on `outcome === 'failed'` — no
     // fallback to the credential step's key input.
     reach: (page) =>
-      throughCatalog(page, 'OpenRouter', async (p) => {
+      throughProviderPicker(page, 'OpenRouter', async (p) => {
         await p
           .locator('[data-testid="wizard-api-key"]')
           .fill(INVALID_PROBE_KEY);
@@ -830,7 +818,7 @@ const cliAgents: readonly ReachabilityEntry[] = [
     capability: 'Deep link opens setup for a preselected provider',
     status: 'present',
     reach: (page) =>
-      throughCatalog(page, 'OpenRouter', async (p) =>
+      throughProviderPicker(page, 'OpenRouter', async (p) =>
         visibleEnabled(p.locator('[data-testid="wizard-title"]')),
       ),
   },
@@ -1377,11 +1365,8 @@ const regressedUx: readonly ReachabilityEntry[] = [
   {
     id: 'RUX-3',
     capability:
-      'Unconfigured providers shown up front (hint strip + catalog modal), not in a collapsed disclosure',
+      'Unconfigured providers shown up front in the page hint and wizard picker',
     status: 'restored',
-    // Batch 27: the catalog caption names them; the modal opens with its search focused and Esc returns focus to the
-    // opener (`openCatalog` / `closeCatalog`). Batch 28 moved the Tab-trap and backdrop checks (Batch 14 finding 3)
-    // to `settings-providers.e2e.spec.ts`.
     reach: async (page) => {
       await providersTab(page);
       // The catalog names moved into the popover of the "N available in catalog" badge.
@@ -1390,19 +1375,15 @@ const regressedUx: readonly ReachabilityEntry[] = [
         page.locator('[data-testid="catalog-hint-text"]'),
       ).toContainText('OpenRouter');
       await page.keyboard.press('Escape');
-      const dialog = await openCatalog(page);
-      await expect(dialog.locator('[data-provider]')).not.toHaveCount(0);
-      await dialog
-        .locator('[data-testid="provider-catalog-search"]')
-        .fill('no-such-provider');
-      await expect(
-        dialog.locator('[data-testid="provider-catalog-empty"]'),
-      ).toContainText('No matching providers.');
-      await dialog
-        .getByRole('button', { name: 'Clear search', exact: true })
-        .click();
-      await expect(dialog.locator('[data-provider]')).not.toHaveCount(0);
-      await closeCatalog(page);
+      const step = await openBlankWizard(page);
+      await expect(step.locator('[data-provider]')).not.toHaveCount(0);
+      const search = step.locator('[data-testid="wizard-provider-search"]');
+      await search.fill('no-such-provider');
+      await expect(step.locator('[data-testid="wizard-provider-no-match"]')).toContainText('No providers match');
+      await step.getByRole('button', { name: 'Clear search', exact: true }).click();
+      await expect(search).toBeFocused();
+      await expect(step.locator('[data-provider]')).not.toHaveCount(0);
+      await closeWizard(page);
     },
   },
   {

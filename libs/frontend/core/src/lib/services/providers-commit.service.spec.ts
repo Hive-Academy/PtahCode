@@ -434,6 +434,23 @@ describe('ProvidersCommitService', () => {
       expect(refreshEffort).toHaveBeenCalledTimes(1);
     });
 
+    it('confirms a cleared main agent model when the backend reads it as default', async () => {
+      call.mockResolvedValueOnce(success({ model: '' }))
+        .mockResolvedValueOnce(success({ model: 'default' }));
+
+      await service.run(
+        service.operations({ model: { model: '', applyTo: 'workspace' } }),
+        context,
+        hooks,
+      );
+
+      expect(call.mock.calls).toEqual([
+        ['config:model-switch', { model: '', applyTo: 'workspace' }, undefined],
+        ['config:model-get', {}, undefined],
+      ]);
+      expect(service.commit()).toMatchObject({ status: 'saved', saved: ['Main agent model'] });
+    });
+
     it('does not make the save wait for the model or effort re-read', async () => {
       refreshModels.mockReturnValue(new Promise<void>(() => undefined));
       refreshEffort.mockReturnValue(new Promise<void>(() => undefined));
