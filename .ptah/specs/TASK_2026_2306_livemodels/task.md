@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_2306_livemodels
-status: in_progress
+status: in_review
 type: REFACTORING
 title: Live-only provider model lists, delete static fallbacks (closes #1455)
 depends_on: []
