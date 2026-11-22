@@ -34,7 +34,7 @@ async function harness() {
     getToolCallIdByAgentId: (agent: string) => agent, update: jest.fn(),
   });
   const dispatcher: SubagentBudgetDispatcherPort = {
-    stopSubagent: jest.fn(async () => undefined), pushParentMessage: jest.fn(async () => undefined),
+    pushParentMessage: jest.fn(async () => undefined),
     postMainThreadNotice: jest.fn(), withdrawMainThreadNotice: () => true,
     postSubagentNotice: jest.fn(), withdrawSubagentNotice: jest.fn(),
   };
@@ -49,8 +49,8 @@ async function completeNotes(h: Awaited<ReturnType<typeof harness>>, agent: stri
   await fs.mkdir(path.dirname(notes), { recursive: true });
   await fs.writeFile(notes, 'Completed investigation; continue from these notes.');
   await h.monitor.recordNotesToolResult(session, agent, 'Write', { file_path: notes });
-  const deadline = Date.now() + 5000;
-  while (h.monitor.hasNotesGate(agent) && Date.now() < deadline) await new Promise(resolve => setTimeout(resolve, 10));
+  await h.monitor.finishWarnedAgent(session, agent);
+  await h.monitor.recordTaskTerminal(session, agent, 'completed');
   expect(h.monitor.hasNotesGate(agent)).toBe(false);
 }
 it('writes ancestry through real warned completions and denies the linked next spawn after rekey', async () => {
@@ -67,7 +67,6 @@ it('writes ancestry through real warned completions and denies the linked next s
     await h.monitor.observe(session, spawn('second', `continue\nPtah predecessor handoff: ${firstPath}`), route);
     await h.monitor.observe(session, turn('second', 'small', 160_000), route);
     await completeNotes(h, 'second');
-    expect(h.dispatcher.stopSubagent).toHaveBeenCalledTimes(2);
     const second = (await fs.readdir(directory)).find(file => file.endsWith('.handoff.md') && file !== first);
     if (!second) throw new Error('Missing successor record');
     const secondPath = path.join(directory, second);

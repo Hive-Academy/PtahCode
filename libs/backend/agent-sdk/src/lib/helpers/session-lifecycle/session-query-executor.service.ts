@@ -194,7 +194,7 @@ export type CompactionCoordinatorSink = Pick<
 /** The subagent budget monitor surface the executor drives (TASK_2026_597 28b). */
 export type SubagentBudgetSink = Pick<
   SubagentBudgetMonitor,
-  'observe' | 'recordTaskStarted' | 'release' | 'currentSessionId' | 'getAgentBudgetState'
+  'observe' | 'recordTaskStarted' | 'recordTaskTerminal' | 'release' | 'currentSessionId' | 'getAgentBudgetState'
 >;
 
 /** True when a message's content carries at least one block of `blockType`. */
@@ -227,7 +227,6 @@ class CompactionSessionTap {
   private turn = 0;
   private capacityRoute?: ContextCapacityRoute;
   private readonly subagentIds = new Set<string>();
-  private readonly signalledStops = new Set<string>();
   private released = false;
   private readonly requestTracker = new MainRequestTracker(Date.now());
   constructor(
@@ -246,7 +245,6 @@ class CompactionSessionTap {
     private readonly subagentMonitor: SubagentBudgetSink | null = null,
     private readonly idle: IdleCompactionSignals | null = null,
     private readonly nativeAnthropic = false,
-    private readonly onBudgetStop?: (toolCallId: string) => void,
   ) {}
 
   attachQuery(query: Query): void {
@@ -264,6 +262,8 @@ class CompactionSessionTap {
   }
 
   private handle(message: SDKMessage): void | Promise<void> {
+    // Child assistant reports can be text-only. Forward them before filtering
+    // the parent stream for tool-use and tool-result blocks.
     if ('parent_tool_use_id' in message && message.parent_tool_use_id) {
       return this.feedSubagentMonitor(message);
     }
@@ -274,26 +274,6 @@ class CompactionSessionTap {
     if (id && id !== this.sessionId) this.bind(id);
     const sessionId = this.sessionId;
     if (sessionId === null) return;
-    if (this.signalledStops.size > 0 && message.type === 'user') {
-      const content = message.message.content;
-      if (Array.isArray(content)) {
-        for (const block of content) {
-          if (block.type !== 'tool_result' || !block.is_error) continue;
-          const output = typeof block.content === 'string'
-            ? block.content
-            : Array.isArray(block.content)
-              ? block.content.filter((part) => part.type === 'text').map((part) => part.text).join(' ')
-              : '';
-          this.logger.info('[SessionQueryExecutor] Tool result error after subagent budget stop', {
-            sessionId,
-            toolUseId: block.tool_use_id.slice(0, 128),
-            cause: /interrupt|stopped by user/i.test(output)
-              ? 'interrupted'
-              : /denied|permission|the user doesn.t want to take this action/i.test(output) ? 'denied' : 'other',
-          });
-        }
-      }
-    }
     if (
       this.requestTracker.observe(message, Date.now()) === 'request-started'
     ) {
@@ -336,7 +316,25 @@ class CompactionSessionTap {
           message.tool_use_id,
           message.task_id,
           message.subagent_type,
+          message.run_id,
+          message.is_backgrounded,
         );
+      } else if (message.subtype === 'task_notification') {
+        // The SDK runtime can send 'killed' even though its types list 'stopped'.
+        const status: string = message.status;
+        const outcome = status === 'killed' ? 'stopped' : status;
+        if (outcome === 'completed' || outcome === 'stopped' || outcome === 'failed') {
+          const monitor = this.subagentMonitor;
+          const id = monitor && this.monitorSessionId(message);
+          if (monitor && id) {
+            return monitor.recordTaskTerminal(
+              id, message.task_id, outcome, message.run_id, message.tool_use_id,
+              message.skip_transcript ? undefined : message.output_file,
+            ).catch((error: unknown) =>
+              this.warn('Subagent budget monitor failed to record a task outcome', 'subagent-task-terminal', error),
+            );
+          }
+        }
       }
     } else if (message.type === 'result') {
       this.feedSubagentMonitor(message);
@@ -362,13 +360,7 @@ class CompactionSessionTap {
     if (!id) return;
     return new Promise<void>((resolve) =>
       resolve(monitor.observe(id, message, this.capacityRoute)),
-    ).then(() => {
-      const toolCallId = 'parent_tool_use_id' in message ? message.parent_tool_use_id : undefined;
-      if (typeof toolCallId === 'string' && monitor.getAgentBudgetState(toolCallId, id)?.stopState === 'stopped' && !this.signalledStops.has(toolCallId)) {
-        this.signalledStops.add(toolCallId);
-        this.onBudgetStop?.(toolCallId);
-      }
-    }).catch((error: unknown) =>
+    ).catch((error: unknown) =>
       this.warn('Subagent budget monitor failed', 'subagent-budget', error),
     );
   }
@@ -384,13 +376,15 @@ class CompactionSessionTap {
     toolUseId: string,
     taskId: string,
     subagentType: string | undefined,
+    runId: string | undefined,
+    background: boolean | undefined,
   ): void {
     const monitor = this.subagentMonitor;
     if (!monitor) return;
     const id = this.monitorSessionId(message);
     if (!id) return;
     try {
-      monitor.recordTaskStarted(id, toolUseId, taskId, subagentType);
+      monitor.recordTaskStarted(id, toolUseId, taskId, subagentType, runId, background);
     } catch (error: unknown) {
       this.warn(
         'Subagent budget monitor failed to record a task start',
@@ -445,7 +439,6 @@ class CompactionSessionTap {
     }
     this.trackedIds.clear();
     this.subagentIds.clear();
-    this.signalledStops.clear();
     try {
       this.logger.debug('[SessionQueryExecutor] Releasing idle query ownership', {
         reason,
@@ -1650,16 +1643,6 @@ export class SessionQueryExecutor {
       this.subagentBudgetMonitor,
       this.idle,
       rec.capacityRoute?.kind === 'native',
-      (toolCallId) => {
-        this.permissionHandler.recordBudgetStop?.(sessionId as string);
-        const pendingPermissionRequests =
-          this.permissionHandler.getPendingPermissionCount?.(sessionId as string) ?? null;
-        this.logger.info('[SessionQueryExecutor] Subagent budget stop parent turn', {
-          sessionId, tabId: rec.tabId, toolCallId,
-          abortSignalAborted: abortController.signal.aborted,
-          pendingPermissionRequests,
-        });
-      },
     );
     abortController.signal.addEventListener(
       'abort',

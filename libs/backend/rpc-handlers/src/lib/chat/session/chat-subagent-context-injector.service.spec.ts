@@ -119,6 +119,29 @@ describe('ChatSubagentContextInjectorService', () => {
     expect(lookup).toHaveBeenCalledWith(by, 'sess-1');
   });
 
+  it.each(['stopped', 'failed'] as const)('reports an SDK %s outcome without budget attribution', async (sdkOutcome) => {
+    registerInterrupted('tc-1', 'agent-1');
+    withBudgetState({
+      contextTokens: 1001, handoffTokens: 1000, warningRatio: 0.85,
+      stopped: false, stopState: 'none', lifecycle: 'stopped', sdkOutcome,
+    }, 'agent-1');
+    const result = await injector.injectInterruptedAgentsContext('continue', SESSION, WORKSPACE);
+    expect(result.prompt).toContain(`The SDK reports that this agent ${sdkOutcome}`);
+    expect(result.prompt).not.toContain('budget monitor stopped this agent');
+    expect(result.prompt).toContain('advice: fresh');
+  });
+
+  it('reports a settled handoff with the record pointer in the resume brief', async () => {
+    registerInterrupted('tc-1', 'agent-1');
+    withBudgetState({
+      contextTokens: 1001, handoffTokens: 1000, warningRatio: 0.85,
+      stopped: true, stopState: 'none', lifecycle: 'settled', recordPath: 'D:/ws/handoff.md',
+    }, 'agent-1');
+    const result = await injector.injectInterruptedAgentsContext('continue', SESSION, WORKSPACE);
+    expect(result.prompt).toContain('already returned its handoff to Ptah');
+    expect(result.prompt).toContain('handoff record: D:/ws/handoff.md');
+  });
+
   it('labels unknown usage without claiming budget room', async () => {
     registerInterrupted('tc-1', 'agent-1');
     withBudgetState(undefined, 'agent-1');

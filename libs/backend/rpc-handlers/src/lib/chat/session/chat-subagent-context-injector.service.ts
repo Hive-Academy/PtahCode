@@ -38,6 +38,7 @@ import type {
 import {
   SDK_TOKENS,
   adviseSubagentResume,
+  buildBudgetResumeRefusal,
   type SessionMetadataStore,
   type CompactionConfigProvider,
   type SubagentBudgetMonitor,
@@ -387,6 +388,16 @@ ${instructions.map((line, i) => `${i + 1}. ${line}`).join('\n')}
       ? this.budgetMonitor?.getAgentBudgetState(agentId, sessionId as string)
         ?? this.budgetMonitor?.getAgentBudgetState(toolCallId, sessionId as string)
       : undefined;
+    if (state?.lifecycle === 'settled' || state?.lifecycle === 'finalizing') {
+      const reason = buildBudgetResumeRefusal(state);
+      if (reason) return { advice: 'fresh', reason };
+    }
+    if (state?.sdkOutcome) {
+      return {
+        advice: 'fresh',
+        reason: `The SDK reports that this agent ${state.sdkOutcome}. Start a new agent from the available context.`,
+      };
+    }
     if (state?.stopped) {
       return {
         advice: 'fresh',

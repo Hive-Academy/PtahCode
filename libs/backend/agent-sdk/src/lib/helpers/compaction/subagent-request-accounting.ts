@@ -1,26 +1,41 @@
 import { completedTurnTelemetry, findModelPricing, type AgentBudgetPolicy, type AgentBudgetSettings, type AgentBudgetSnapshot } from '@ptah-extension/shared';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type { SubagentRequestUsage } from './subagent-budget-monitor';
-import { independentSafetyCause, unavailableUsageCause, type SubagentStopCause } from './subagent-stop-cause';
 
 interface UsageState {
   initialContext?: number; warningRequestCount?: number;
-  stopFired: boolean; stopInFlight: boolean; warnedAgentId?: string;
-  policySnapshot: AgentBudgetSnapshot; startedAt: number; requestSequence: number;
+  policySnapshot: AgentBudgetSnapshot; startedAt: number;
+  requestOrder: Map<string, number>; lastResolvedRequest: number;
   lastMessageId?: string; lastWeighted: number; lastRaw: number; weightedUsed: number;
-  contextTokens: number; costUnavailableLogged: boolean; stopCause?: SubagentStopCause;
+  contextTokens: number; costUnavailableLogged: boolean;
 }
-/** Repeated content blocks replace their request share, rather than accumulating it. */
+export function trackSubagentRequest(state: Pick<UsageState, 'requestOrder'>, invocationId: string, messageId: unknown): string {
+  const turnId = typeof messageId === 'string'
+    ? `${invocationId}:message:${messageId}`
+    : `${invocationId}:sequence:${state.requestOrder.size + 1}`;
+  if (!state.requestOrder.has(turnId)) state.requestOrder.set(turnId, state.requestOrder.size + 1);
+  return turnId;
+}
+
+/**
+ * Repeated content blocks of one assistant request replace that request's share (the final
+ * sample wins), rather than accumulating it. Usage that cannot be read is not accounted here:
+ * the monitor registers missing-telemetry requests in the same first-seen order. Nothing here
+ * decides to stop a subagent; admission reads the snapshot.
+ */
 export function countSubagentUsage(state: UsageState, message: Record<string, unknown> | undefined,
   usage: SubagentRequestUsage, settings: AgentBudgetSettings, policy: AgentBudgetPolicy,
-  sessionId: string, taskId: string, logger: Pick<Logger, 'info' | 'warn'>): void {
+  invocationId: string, sessionId: string, taskId: string, logger: Pick<Logger, 'info' | 'warn'>): void {
     const messageId = message?.['id'];
-    const sameRequest = typeof messageId === 'string' && messageId === state.lastMessageId;
-    if (!sameRequest) state.requestSequence += 1;
+    const turnId = trackSubagentRequest(state, invocationId, messageId);
+    // Only the newest sample may be replaced. Replays of earlier requests leave
+    // the current context and totals untouched.
+    const sameRequest = state.policySnapshot.turnIds.at(-1) === turnId;
+    if (!sameRequest && state.policySnapshot.turnIds.includes(turnId)) return;
     const model = message?.['model'];
     const modelId = typeof model === 'string' ? model : undefined;
     const telemetry = completedTurnTelemetry({
-      turnId: `${sessionId}:${taskId}:${String(messageId ?? state.requestSequence)}`,
+      turnId,
       modelId, source: 'sdk', uncachedInput: true,
       usage: {
         inputTokens: usage.inputTokens, outputTokens: usage.outputTokens,
@@ -29,6 +44,10 @@ export function countSubagentUsage(state: UsageState, message: Record<string, un
         costUsd: usage.providerCostUsd,
       },
     });
+    if (telemetry.status === 'unavailable') return;
+    // Only the latest resolved position ends the trailing missing-usage streak.
+    const position = state.requestOrder.get(turnId);
+    if (position !== undefined) state.lastResolvedRequest = Math.max(state.lastResolvedRequest, position);
     const before = sameRequest ? {
       ...state.policySnapshot,
       weightedTokens: state.policySnapshot.weightedTokens - state.lastWeighted,
@@ -40,15 +59,12 @@ export function countSubagentUsage(state: UsageState, message: Record<string, un
       modelId ? findModelPricing(modelId) : null,
     );
     state.initialContext ??= usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens;
-    if (transition.snapshot.warned) state.warningRequestCount ??= state.requestSequence;
+    if (transition.snapshot.warned) state.warningRequestCount ??= state.requestOrder.size;
     state.lastWeighted = transition.snapshot.weightedTokens - before.weightedTokens;
     state.lastRaw = transition.snapshot.rawTokens - before.rawTokens;
-    const safetyCause = telemetry.status === 'unavailable' ? unavailableUsageCause()
-      : independentSafetyCause(transition.snapshot, Date.now() - state.startedAt, settings);
-    if ((!state.stopFired && !state.stopInFlight && !state.warnedAgentId) ||
-      (safetyCause && (!state.stopCause || ['warning-notes-complete', 'warning-turn-ended', 'notes-timeout'].includes(state.stopCause.kind)))) state.stopCause = safetyCause;
-    // A context-only ceiling enters the notes phase rather than immediately stopping it.
-    state.policySnapshot = { ...transition.snapshot, stopped: !!safetyCause };
+    // The shared `stopped` bit is never set: the monitor does not stop agents, and a latched bit
+    // would silence the policy's one-time warning.
+    state.policySnapshot = { ...transition.snapshot, stopped: false };
     state.weightedUsed = transition.snapshot.weightedTokens;
     state.lastMessageId = typeof messageId === 'string' ? messageId : undefined;
     state.contextTokens = (usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens);

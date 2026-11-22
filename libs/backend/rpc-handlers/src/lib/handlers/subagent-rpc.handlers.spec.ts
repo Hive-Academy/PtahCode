@@ -1206,16 +1206,30 @@ describe('SubagentRpcHandlers', () => {
       expect(h.dispatcher.sendToSubagent).not.toHaveBeenCalled();
     });
 
-    it('refuses a pending safety stop at low context', async () => {
+    it('refuses new work for a paused live agent and reports the pause reason', async () => {
       const h = makeHarness();
       jest.spyOn(h.budgetMonitor, 'getAgentBudgetState').mockReturnValue({
         contextTokens: 0, handoffTokens: 1000, warningRatio: 0.85,
-        stopped: true, stopState: 'pending',
+        stopped: false, stopState: 'none', lifecycle: 'paused',
+        pauseNotice: { actor: 'ptah-budget', action: 'paused', reason: 'duration', nextStep: 'review-live-agent' },
       });
       h.handlers.register();
       await expect(call(h, 'subagent:send-message', {
         sessionId: 'sess-abc', parentToolUseId: 'toolu_xyz', text: 'steer',
-      })).rejects.toThrow(/stopped this agent/);
+      })).rejects.toThrow(/Ptah budget monitor paused new work.*runtime reached its limit.*execution remains live/i);
+      expect(h.dispatcher.sendToSubagent).not.toHaveBeenCalled();
+    });
+
+    it('directs new work to the settled handoff record', async () => {
+      const h = makeHarness();
+      jest.spyOn(h.budgetMonitor, 'getAgentBudgetState').mockReturnValue({
+        contextTokens: 0, handoffTokens: 1000, warningRatio: 0.85,
+        stopped: true, stopState: 'none', lifecycle: 'settled', recordPath: 'D:/ws/handoff.md',
+      });
+      h.handlers.register();
+      await expect(call(h, 'subagent:send-message', {
+        sessionId: 'sess-abc', parentToolUseId: 'toolu_xyz', text: 'steer',
+      })).rejects.toThrow(/already returned its handoff to Ptah.*handoff record: D:\/ws\/handoff.md/);
       expect(h.dispatcher.sendToSubagent).not.toHaveBeenCalled();
     });
 

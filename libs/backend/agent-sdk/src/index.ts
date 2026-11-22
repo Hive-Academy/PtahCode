@@ -164,6 +164,12 @@ export {
   type UnattendedSessionPolicy,
 } from './lib/permission/unattended-session-policy.registry';
 export {
+  SessionToolDispositionRegistry,
+  type SessionToolDisposition,
+  type SessionToolDispositionIds,
+  type SessionToolDispositionPort,
+} from './lib/helpers/session-tool-disposition.port';
+export {
   PLAN_LANE_PTAH_TOOLS,
   isPlanLaneAllowedPtahTool,
 } from './lib/permission/plan-lane-tool-policy';
