@@ -1,4 +1,5 @@
 import { denySessionSpawnerHandoffAccess } from './__fixtures__/session-spawner-fs-access';
+import { SessionAdmissionRefusedError } from '@ptah-extension/agent-sdk';
 import { makeHarness, PARENT } from './session-spawner.service.spec';
 
 // The spawner looks for the handoff file with real file I/O, which fake timers
@@ -355,6 +356,93 @@ describe('SessionSpawnerService succession', () => {
     await flush();
     expect(h.registry.get(id)?.paused).toBe(true);
     expect(h.adapter.interruptSession).not.toHaveBeenCalled();
+  });
+
+  describe('a failed send keeps the pause', () => {
+    async function pausedChild() {
+      const h = makeHarness({
+        config: { 'agentSessions.maxRuntimeMinutes': 5, 'agentSessions.handoffGraceMinutes': 1 },
+      });
+      const child = await h.startChild();
+      const id = child.childSessionId;
+      h.markRan(id);
+      const sdkSessionId = h.registry.get(id)?.sdkSessionId;
+      jest.advanceTimersByTime(6 * 60_000);
+      await flush();
+      expect(h.registry.get(id)?.paused).toBe(true);
+      return { h, id, sdkSessionId };
+    }
+
+    function expectStillPaused(
+      h: ReturnType<typeof makeHarness>,
+      id: string,
+      sdkSessionId: string | undefined,
+    ) {
+      expect(h.registry.get(id)?.paused).toBe(true);
+      expect(h.registry.get(id)?.notice).toMatchObject({ reason: 'runtime-cap' });
+      expect(h.dispositions.lookup({ tabId: id })).toMatchObject({ phase: 'paused' });
+      expect(h.dispositions.lookup({ sdkSessionId })).toMatchObject({ phase: 'paused' });
+    }
+
+    it('after a refused if-idle send, with no second parent notice and no fresh cap', async () => {
+      const { h, id, sdkSessionId } = await pausedChild();
+      const notices = () => h.adapter.sendMessageToSession.mock.calls.filter(([t]) => t === PARENT).length;
+      const before = notices();
+      h.adapter.sendMessageToSession.mockRejectedValueOnce(
+        new SessionAdmissionRefusedError('busy', id),
+      );
+
+      await expect(h.spawner.send({
+        callerSessionId: PARENT, childSessionId: id, message: 'm', mode: 'if-idle',
+      })).resolves.toMatchObject({ delivered: false, reason: 'busy' });
+
+      expectStillPaused(h, id, sdkSessionId);
+      expect(notices()).toBe(before);
+      // No fresh runtime allowance: a later cap timer must not fire a second pause cycle.
+      jest.advanceTimersByTime(30 * 60_000);
+      await flush();
+      expectStillPaused(h, id, sdkSessionId);
+      expect(notices()).toBe(before);
+      expect(h.adapter.interruptSession).not.toHaveBeenCalled();
+    });
+
+    it('after a steer whose interrupt fails', async () => {
+      const { h, id, sdkSessionId } = await pausedChild();
+      h.phases.set(id, 'generating');
+      h.adapter.interruptCurrentTurn.mockResolvedValueOnce(false);
+      const sends = h.adapter.sendMessageToSession.mock.calls.length;
+
+      await expect(h.spawner.send({
+        callerSessionId: PARENT, childSessionId: id, message: 'stop', mode: 'steer',
+      })).resolves.toMatchObject({ delivered: false, reason: 'interrupt-failed' });
+
+      expect(h.adapter.sendMessageToSession.mock.calls.length).toBe(sends);
+      expectStillPaused(h, id, sdkSessionId);
+    });
+
+    it('resumes once when a concurrent send is accepted even if another one fails', async () => {
+      const { h, id, sdkSessionId } = await pausedChild();
+      let release: (() => void) | undefined;
+      h.adapter.sendMessageToSession.mockImplementationOnce(
+        () => new Promise<void>((resolve) => { release = resolve; }),
+      );
+      h.adapter.sendMessageToSession.mockRejectedValueOnce(
+        new SessionAdmissionRefusedError('busy', id),
+      );
+      const first = h.spawner.send({
+        callerSessionId: PARENT, childSessionId: id, message: 'a', mode: 'queue',
+      });
+      const second = h.spawner.send({
+        callerSessionId: PARENT, childSessionId: id, message: 'b', mode: 'if-idle',
+      });
+      await expect(second).resolves.toMatchObject({ delivered: false });
+      release?.();
+      await expect(first).resolves.toMatchObject({ delivered: true });
+
+      expect(h.registry.get(id)?.paused).toBeUndefined();
+      expect(h.dispositions.lookup({ tabId: id })).toBeUndefined();
+      expect(h.dispositions.lookup({ sdkSessionId })).toBeUndefined();
+    });
   });
 
   it.each(['end', 'dispose', 'sdk-resume'] as const)('clears both disposition aliases on %s', async (action) => {

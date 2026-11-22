@@ -198,6 +198,8 @@ interface ChildRuntime {
   observedTurnResult?: boolean;
   pausePublished?: boolean;
   escalationPublished?: boolean;
+  /** Pause state to restore when every send that resumed the child fails. */
+  resumeProbe?: ResumeProbe;
   endCause?: SessionEndCause;
   /** `turnsSettled` when the session ended; a later settle owns the turn. */
   turnsSettledAtEnd?: number;
@@ -209,6 +211,15 @@ interface ChildRuntime {
   /** Set while the spawner itself ends the child; events are then ignored. */
   stopping: boolean;
   pendingRequestId?: string;
+}
+
+interface ResumeProbe {
+  readonly notice?: AgentActionNotice;
+  readonly capReached: boolean;
+  readonly pausePublished?: boolean;
+  readonly escalationPublished?: boolean;
+  inflight: number;
+  accepted: boolean;
 }
 
 type StartRefusal = Extract<SessionChildStartResult, { ok: false }>;
@@ -1134,10 +1145,69 @@ export class SessionSpawnerService implements ISessionSpawner {
           '; the user can resume it from its tab',
       };
     }
+    const adapter = this.adapter;
+    let probe = runtime?.resumeProbe;
     if (runtime && !runtime.stopping && (child.paused || runtime.capReached)) {
+      probe = {
+        notice: child.notice,
+        capReached: runtime.capReached,
+        pausePublished: runtime.pausePublished,
+        escalationPublished: runtime.escalationPublished,
+        inflight: 0,
+        accepted: false,
+      };
+      runtime.resumeProbe = probe;
       this.resumeChild(child, runtime);
     }
-    const adapter = this.adapter;
+    if (probe) probe.inflight += 1;
+    const result = await this.deliverMessage(request, child, caller, target, adapter);
+    if (probe && runtime) this.settleResumeProbe(child.childSessionId, runtime, probe, result.delivered);
+    return result;
+  }
+
+  /** Keep the pause when no send that resumed the child was accepted. */
+  private settleResumeProbe(
+    childSessionId: string,
+    runtime: ChildRuntime,
+    probe: ResumeProbe,
+    delivered: boolean,
+  ): void {
+    probe.inflight -= 1;
+    if (delivered) probe.accepted = true;
+    if (probe.inflight > 0) return;
+    if (runtime.resumeProbe === probe) runtime.resumeProbe = undefined;
+    const child = this.registry.get(childSessionId);
+    if (probe.accepted || !child || child.terminalStatus || runtime.stopping) return;
+    if (runtime.runtimeTimer) clearTimeout(runtime.runtimeTimer);
+    if (runtime.warnTimer) clearTimeout(runtime.warnTimer);
+    runtime.runtimeTimer = undefined;
+    runtime.warnTimer = undefined;
+    runtime.capReached = probe.capReached;
+    runtime.pausePublished = probe.pausePublished;
+    runtime.escalationPublished = probe.escalationPublished;
+    if (probe.notice) {
+      if (this.registry.markPaused(childSessionId, probe.notice)) {
+        this.toolDisposition()?.set(
+          { tabId: childSessionId, sdkSessionId: child.sdkSessionId },
+          { phase: 'paused', notice: probe.notice },
+        );
+      }
+    } else if (probe.capReached && !runtime.handoffGraceTimer) {
+      runtime.handoffGraceTimer = this.armTimer(
+        runtime.settings.handoffGraceMinutes * 60_000,
+        () => this.onHandoffGraceExpired(childSessionId),
+      );
+    }
+    this.log(`${childSessionId} stays paused: the send was not accepted`);
+  }
+
+  private async deliverMessage(
+    request: SessionChildSendRequest,
+    child: SessionChildRecord,
+    caller: SessionId,
+    target: SessionId,
+    adapter: IAgentAdapter,
+  ): Promise<SessionChildSendResult> {
     const origin: AIMessageOrigin = {
       kind: 'peer',
       from: `ptah-session:${caller}`,
