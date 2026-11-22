@@ -214,7 +214,7 @@ test.describe('Config-change permission survival (TASK_2026_264, pins TASK_2026_
     // own — not a fabrication this spec constructs — and it resolves through
     // the exact same `systemAbort` branch a real auth-change's
     // `cleanupPendingPermissions()` call does. This is fix 2 (mapping): the
-    // model must receive "system abort, retryable", never the hard-deny
+    // model must receive a Ptah-labeled, retryable denial, never the hard-deny
     // wording that reads as a deliberate user refusal.
     const response = (await rpcBridge.sendRpc(
       'rpc',
@@ -242,8 +242,10 @@ test.describe('Config-change permission survival (TASK_2026_264, pins TASK_2026_
     expect(response.data?.success).toBe(true);
     expect(response.data?.behavior).toBe('deny');
     expect(response.data?.interrupt).toBe(false);
-    expect(response.data?.message).toContain('SYSTEM ABORT');
-    expect(response.data?.message).toContain('NOT a user decision');
+    // P1 relabel: Ptah names itself as the actor and never claims a user
+    // decision. The unroutable timeout resolves as a host expiry.
+    expect(response.data?.message).toContain('Ptah host denied');
+    expect(response.data?.message).toContain('permission request expired');
     // The canned string a real CLI substitutes for a hard deny
     // (interrupt: true) — this must be a system-abort deny, not that one.
     expect(response.data?.message).not.toContain(
