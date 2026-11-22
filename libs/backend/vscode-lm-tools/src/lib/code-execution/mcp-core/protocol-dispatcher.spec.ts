@@ -10734,4 +10734,91 @@ describe('protocol-handlers › navigation tools bind workspaceRoot to a known r
     expect(reply.isError).toBe(false);
     expect(reply.text).toContain('a.txt');
   });
+  /**
+   * A caller without a shell: a read-only capability that declares its root
+   * in the URL. It can call the read-only ptah tools and nothing else.
+   */
+  async function asReadOnlyCaller(
+    name: string,
+    args: Record<string, unknown>,
+    overrides: Partial<Record<keyof PtahAPI, unknown>> = {},
+  ): Promise<{ text: string; isError: boolean }> {
+    const res = await handleMCPRequest(
+      makeRequest({
+        id: `ro-${name}`,
+        method: 'tools/call',
+        _callerCapability: 'read-only',
+        _callerWorkspaceRoot: root,
+        params: { name, arguments: args },
+      }),
+      buildDeps({
+        ptahAPI: buildPtahAPIStub({
+          workspace: { getInfo: async () => ({ path: root }) },
+          ...overrides,
+        }),
+      }),
+    );
+    const result = res.result as {
+      content: Array<{ text: string }>;
+      isError?: boolean;
+    };
+    return { text: result.content[0].text, isError: result.isError === true };
+  }
+
+  // The rule of the existing file tools: `ptah_context_enrich_file` and
+  // `ptah_ast_analyze` take an absolute path verbatim (`resolveWorkspaceFilePath`
+  // and `resolveFilePath` in the namespace builders) and apply no root check.
+  // The navigation tools must never be wider than that, and they are narrower.
+  it('(D15) a read-only caller cannot read outside its root with ptah_read_symbol or ptah_grep', async () => {
+    const outsideFile = path.join(outside, 'b.txt');
+    fs.symlinkSync(outside, path.join(root, 'link'));
+
+    const replies = [
+      await asReadOnlyCaller('ptah_read_symbol', {
+        file: outsideFile,
+        startLine: 1,
+      }),
+      await asReadOnlyCaller('ptah_read_symbol', {
+        file: 'link/b.txt',
+        startLine: 1,
+      }),
+      await asReadOnlyCaller('ptah_read_symbol', {
+        file: outsideFile,
+        startLine: 1,
+        workspaceRoot: outside,
+      }),
+      await asReadOnlyCaller('ptah_grep', {
+        pattern: 'needle',
+        path: outside,
+      }),
+      await asReadOnlyCaller('ptah_grep', {
+        pattern: 'needle',
+        path: 'link',
+        includeIgnored: true,
+      }),
+      await asReadOnlyCaller('ptah_grep', {
+        pattern: 'needle',
+        path: outside,
+        includeIgnored: true,
+        workspaceRoot: outside,
+      }),
+    ];
+    for (const reply of replies) {
+      expect(reply.isError).toBe(true);
+      expect(reply.text).not.toContain('needle there');
+    }
+  });
+
+  it('(D15) the existing file tools take an outside absolute path as it is, so the navigation tools are not wider', async () => {
+    const enrichFile = jest.fn().mockResolvedValue({ summary: 'ok' });
+    const outsideFile = path.join(outside, 'b.txt');
+    const reply = await asReadOnlyCaller(
+      'ptah_context_enrich_file',
+      { file: outsideFile },
+      { context: { enrichFile } },
+    );
+    expect(reply.isError).toBe(false);
+    expect(enrichFile).toHaveBeenCalledWith(outsideFile, undefined);
+  });
+
 });
