@@ -116,6 +116,9 @@ A lane shares none of your context and cannot ask the user anything. Every `task
 Every lane receives `PTAH_LANE_POLICY`
 (`libs/backend/cli-agent-runtime/src/lib/cli-agents/cli-adapters/cli-adapter.utils.ts`) on that
 CLI's strongest channel (canary `Lane policy id: …`). Do not repeat its tool table in `task`.
+It tells the lane to search text with `ptah_grep` and to read a function or line range with
+`ptah_read_symbol`, not with shell `grep`, `rg`, `sed -n` or `cat`. Both tools are read-only and
+are on the Plan-lane allowlist.
 
 Say the output format ("markdown table", "numbered defects with `file:line`"). A lane that is not
 told where to write dumps its answer into the reply and skips the file.

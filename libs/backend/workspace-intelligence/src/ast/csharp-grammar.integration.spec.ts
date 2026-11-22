@@ -280,16 +280,14 @@ describe('C# grammar integration (real tree-sitter WASM)', () => {
       expect(findAsync).toHaveLength(2);
     });
 
-    it('extracts parameters as C# type tokens, and splits inside generics', () => {
-      // Documented limitation of the shared `extractParamsFromText`: it keeps
-      // the first token of each comma-separated part, so C# yields parameter
-      // TYPES rather than names, and a generic argument list is split on its
-      // own comma. Pinned here so the behaviour is a known cost, not a
-      // surprise — fixing it means making the shared extractor language-aware.
+    it('extracts parameter names, not types, and keeps generic arguments whole', () => {
+      // `extractParameterNames` reads C# type-first: the name is the last
+      // identifier outside generic arguments, so `Func<Invoice, T> selector`
+      // is one parameter, and the extension-method `this` modifier is dropped.
       const map = insights.functions.find((f) => f.name === 'Map');
-      expect(map?.parameters).toEqual(['Func<Invoice', 'T>']);
+      expect(map?.parameters).toEqual(['selector']);
       const net = insights.functions.find((f) => f.name === 'Net');
-      expect(net?.parameters).toEqual(['this', 'decimal']);
+      expect(net?.parameters).toEqual(['i', 'rate']);
     });
 
     it('leaves properties without parameters (they capture no param list)', () => {

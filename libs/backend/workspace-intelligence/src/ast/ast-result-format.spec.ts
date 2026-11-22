@@ -80,24 +80,138 @@ describe('formatAstAnalysisResult', () => {
     });
   });
 
-  it('leaves empty lists, non-record lists and nested records as JSON writes them', () => {
+  it('leaves empty lists and non-record lists as JSON writes them', () => {
     const input = {
       imports: [],
       supportedLanguages: ['typescript', 'python'],
-      classes: [
-        {
-          name: 'Box',
-          methods: [{ name: 'open', parameters: [] }],
-        },
-      ],
+      classes: [{ name: 'Box', members: [] }],
     };
     expect(parse(formatAstAnalysisResult(input))).toEqual({
       imports: [],
       supportedLanguages: ['typescript', 'python'],
       classes: [
-        ['name', 'methods'],
-        ['Box', [{ name: 'open', parameters: [] }]],
+        ['name', 'members'],
+        ['Box', []],
       ],
+    });
+  });
+
+  it('writes a nested list of records (class members) as a nested table', () => {
+    const input = {
+      classes: [
+        {
+          name: 'Box',
+          startLine: 0,
+          members: [
+            { name: 'open', parameters: [], modifiers: 'private static' },
+            { name: 'close', parameters: ['force'] },
+          ],
+        },
+        { name: 'Empty', startLine: 9 },
+      ],
+    };
+    expect(parse(formatAstAnalysisResult(input))).toEqual({
+      classes: [
+        ['name', 'startLine', 'members'],
+        [
+          'Box',
+          0,
+          [
+            ['name', 'parameters', 'modifiers'],
+            ['open', [], 'private static'],
+            ['close', ['force']],
+          ],
+        ],
+        ['Empty', 9],
+      ],
+    });
+  });
+
+  it('leaves a nested list with a real null as objects', () => {
+    const input = {
+      classes: [{ name: 'Box', members: [{ name: 'open', note: null }] }],
+    };
+    expect(parse(formatAstAnalysisResult(input))).toEqual({
+      classes: [
+        ['name', 'members'],
+        ['Box', [{ name: 'open', note: null }]],
+      ],
+    });
+  });
+
+  describe('with a fits limit', () => {
+    const result = {
+      parseStatus: 'ok',
+      file: 'a.ts',
+      classes: [{ name: 'Box' }],
+      imports: [{ source: 'x' }, { source: 'y' }],
+      functions: Array.from({ length: 50 }, (_, i) => ({
+        name: `fn${i}`,
+        parameters: [],
+      })),
+    };
+
+    it('returns the default text when it fits', () => {
+      expect(
+        formatAstAnalysisResult(result, { fits: () => true, hint: 'h' }),
+      ).toBe(formatAstAnalysisResult(result));
+    });
+
+    it('cuts the last list at a record boundary and notes it before the first list', () => {
+      const limit = formatAstAnalysisResult(result).length - 100;
+      const rejected: string[] = [];
+      const text = formatAstAnalysisResult(result, {
+        fits: (t) => t.length <= limit || (rejected.push(t), false),
+        hint: 'read one symbol instead',
+      });
+      const parsed = parse(text);
+
+      expect(text.length).toBeLessThanOrEqual(limit);
+      expect(Object.keys(parsed)).toEqual([
+        'parseStatus',
+        'file',
+        'truncated',
+        'hint',
+        'classes',
+        'imports',
+        'functions',
+      ]);
+      const shown = (parsed['functions'] as unknown[]).length - 1;
+      expect(parsed['truncated']).toEqual({
+        functions: {
+          shown,
+          total: 50,
+          // The cut records stay findable by name.
+          omittedNames: expect.stringContaining('fn49'),
+        },
+      });
+      expect(shown).toBeGreaterThan(0);
+      expect(parsed['hint']).toBe('read one symbol instead');
+      expect(parsed['imports']).toEqual([['source'], ['x'], ['y']]);
+      // The longest prefix that fits: one more record was tried and refused.
+      const rowCounts = rejected.map(
+        (t) => (parse(t)['functions'] as unknown[]).length - 1,
+      );
+      expect(rowCounts).toContain(shown + 1);
+    });
+
+    it('empties the last list and cuts the one before it when needed', () => {
+      const text = formatAstAnalysisResult(result, {
+        fits: (t) => !t.includes('"y"') && !t.includes('"fn0"'),
+      });
+      const parsed = parse(text);
+
+      expect(parsed['functions']).toEqual([]);
+      expect(parsed['imports']).toEqual([['source'], ['x']]);
+      expect(parsed['truncated']).toEqual({
+        imports: { shown: 1, total: 2 },
+        functions: {
+          shown: 0,
+          total: 50,
+          omittedNames: expect.stringContaining('fn0,fn1'),
+        },
+      });
+      expect(parsed).not.toHaveProperty('hint');
     });
   });
 });

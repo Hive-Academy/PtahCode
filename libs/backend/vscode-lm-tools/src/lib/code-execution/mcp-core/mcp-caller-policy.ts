@@ -35,6 +35,8 @@ export type McpToolClass =
 const READ_TOOLS: ReadonlySet<string> = new Set([
   'ptah_workspace_analyze',
   'ptah_search_files',
+  'ptah_read_symbol',
+  'ptah_grep',
   'ptah_get_diagnostics',
   'ptah_count_tokens',
   'ptah_ast_analyze',

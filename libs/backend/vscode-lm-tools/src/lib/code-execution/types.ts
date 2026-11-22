@@ -1433,6 +1433,12 @@ export interface AstFunctionInfo {
 
   /** Whether function is async */
   isAsync?: boolean;
+
+  /**
+   * Space-separated member modifiers of a TS/JS class method in source order
+   * (`private static`, `get`); only on `AstClassInfo.methods`, omitted when none.
+   */
+  modifiers?: string;
 }
 
 /**

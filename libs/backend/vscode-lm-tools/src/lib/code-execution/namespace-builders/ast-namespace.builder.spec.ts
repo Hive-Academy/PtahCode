@@ -782,3 +782,104 @@ describe('buildAstNamespace — 24c parse honesty (REAL parser, .tsx with JSX)',
     expect(out.parseStatus).toBe('recovered');
   });
 });
+
+/** The import and constructor shape of a real tsyringe service. */
+const TSYRINGE_SERVICE_SOURCE = [
+  "import { injectable, inject } from 'tsyringe';",
+  "import Default, { helper } from './helpers';",
+  "import * as path from 'path';",
+  "import './side-effect';",
+  '',
+  '@injectable()',
+  'export class Spawner {',
+  '  constructor(',
+  '    /** The logger. */',
+  '    @inject(TOKENS.LOGGER) private readonly logger: Logger,',
+  '    @inject(TOKENS.STORE) store: Map<string, number> = new Map(),',
+  '  ) {}',
+  '}',
+  '',
+].join('\n');
+
+describe('buildAstNamespace — import merge and parameter names (REAL parser, .ts)', () => {
+  const actual = jest.requireActual<
+    typeof import('@ptah-extension/workspace-intelligence')
+  >('@ptah-extension/workspace-intelligence');
+  let parser: InstanceType<typeof actual.TreeSitterParserService>;
+  let analysis: InstanceType<typeof actual.AstAnalysisService>;
+  let ns: AstNamespace;
+
+  beforeAll(async () => {
+    parser = new actual.TreeSitterParserService(silentLogger());
+    const init = await parser.initialize();
+    if (init.isErr()) {
+      throw init.error ?? new Error('tree-sitter initialisation failed');
+    }
+    analysis = new actual.AstAnalysisService(silentLogger(), parser);
+    ns = buildAstNamespace({
+      treeSitterParser: parser,
+      astAnalysis: analysis,
+      fileSystemProvider: {
+        stat: async () => ({ type: FileType.File }),
+        readFile: async () => TSYRINGE_SERVICE_SOURCE,
+      } as unknown as IFileSystemProvider,
+      workspaceProvider: {
+        getWorkspaceRoot: () => 'D:/ws',
+      } as unknown as IWorkspaceProvider,
+    });
+  }, 60_000);
+
+  afterAll(() => {
+    parser?.dispose();
+  });
+
+  const MERGED_IMPORTS = [
+    { source: 'tsyringe', importedSymbols: ['injectable', 'inject'] },
+    {
+      source: './helpers',
+      importedSymbols: ['Default', 'helper'],
+      isDefault: true,
+    },
+    { source: 'path', importedSymbols: ['* as path'], isNamespace: true },
+    { source: './side-effect' },
+  ];
+
+  it('the service itself keeps one row per captured name (the graph reads those)', async () => {
+    const raw = await analysis.analyzeSource(
+      TSYRINGE_SERVICE_SOURCE,
+      'typescript',
+      'D:/ws/src/spawner.ts',
+    );
+    const tsyringeRows = (raw.isOk() ? (raw.value?.imports ?? []) : []).filter(
+      (row) => row.source === 'tsyringe',
+    );
+    expect(tsyringeRows).toEqual([
+      { source: 'tsyringe', importedSymbols: ['injectable'] },
+      { source: 'tsyringe', importedSymbols: ['inject'] },
+      { source: 'tsyringe' },
+    ]);
+  });
+
+  it('analyze merges import rows per source and names decorated constructor parameters', async () => {
+    const out = await ns.analyze('src/spawner.ts');
+    expect(out.imports).toEqual(MERGED_IMPORTS);
+    expect(out.functions).toEqual([
+      expect.objectContaining({
+        name: 'constructor',
+        parameters: ['logger', 'store'],
+      }),
+    ]);
+  });
+
+  it('queryImports merges the same way', async () => {
+    const out = await ns.queryImports('src/spawner.ts');
+    expect(out.imports).toEqual(MERGED_IMPORTS);
+  });
+
+  it('queryFunctions names decorated constructor parameters', async () => {
+    const out = await ns.queryFunctions('src/spawner.ts');
+    expect(
+      out.functions.find((f) => f.name === 'constructor')?.parameters,
+    ).toEqual(['logger', 'store']);
+  });
+});

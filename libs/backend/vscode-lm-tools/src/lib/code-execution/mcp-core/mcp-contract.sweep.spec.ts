@@ -828,7 +828,13 @@ const TOOL_DRIVERS: Readonly<Record<string, ToolDriver>> = {
       api.ast = {
         analyze: async () => ({
           parseStatus: 'ok',
+          errorNodeCount: 0,
           coverage: CLEAN_COVERAGE,
+          file: '/fixture/a.ts',
+          language: 'typescript',
+          classes: [],
+          exports: [],
+          imports: [],
           functions: Array.from({ length: 800 }, (_, i) => ({
             name: i === 0 ? marker : `fn_${i}`,
             startLine: i,
@@ -1566,6 +1572,10 @@ const CONTROL_TOOL_EXCEPTIONS: Readonly<Record<string, string>> = {
     'control/UI: answers the host permission prompt with an allow/deny decision; it never returns model-facing content to budget',
   ptah_run_check:
     'process launcher: it runs the workspace-local Nx in a child process, which this in-process sweep cannot fake through the PtahAPI stub. Its reply is self-bounded at WAIT_SUMMARY_MAX_CHARS (4,000), asserted in run-check.tool.spec.ts; both surfaces are pinned in agent-spawn-surface-parity.spec.ts',
+  ptah_read_symbol:
+    'file reader: it reads real workspace files, which the PtahAPI stub of this sweep cannot fake. Its reply is self-bounded at 15,000 chars on a line boundary; asserted in nav/read-symbol.spec.ts, and its pinned budget is checked here',
+  ptah_grep:
+    'file search: it walks real workspace files (rg or a Node walk), which the PtahAPI stub of this sweep cannot fake. Its reply is self-bounded at 15,000 chars on a line boundary; asserted in nav/grep.spec.ts, and its pinned budget is checked here',
   ptah_run_check_wait:
     'process-job collector: it only observes or cancels the in-memory run_check job. Its reply is self-bounded at WAIT_SUMMARY_MAX_CHARS (4,000), asserted in run-check job specs.',
 };
@@ -1579,6 +1589,9 @@ const CONTROL_TOOL_EXCEPTIONS: Readonly<Record<string, string>> = {
  */
 const OWN_WINDOWING_TOOLS = new Set<string>([
   'ptah_get_symbol_index',
+  // Cut at a record boundary inside `renderAstAnalyzeResult`; asserted in
+  // ast-analyze-result.spec.ts.
+  'ptah_ast_analyze',
   'ptah_agent_read',
   'ptah_browser_evaluate',
   // Bounded at WAIT_SUMMARY_MAX_CHARS; its size bound is asserted in
@@ -1696,6 +1709,10 @@ const PINNED_BUDGET_OVERRIDES: Readonly<
   ptah_route_decide: { chars: 64_000, tokens: 25_600 },
   // The surface catalog's `maxStateReadBytes` (548 KiB); tokens at 4 chars/token.
   ptah_surface_get_state: { chars: 561_152, tokens: 140_288 },
+  // TASK_2026_2299: own cap of ~15,000 chars under a 16,000-char ceiling; code is
+  // token-dense (about 2.7 chars/token), so the token ceiling is 6,000, not 4,000.
+  ptah_read_symbol: { chars: 16_000, tokens: 6_000 },
+  ptah_grep: { chars: 16_000, tokens: 6_000 },
 };
 
 function pinnedBudget(budgetName: string): { chars: number; tokens: number } {
@@ -1709,6 +1726,8 @@ function pinnedBudget(budgetName: string): { chars: number; tokens: number } {
  */
 const PINNED_PREFORMATTED_TOOLS: ReadonlySet<string> = new Set([
   'ptah_get_diagnostics',
+  'ptah_read_symbol',
+  'ptah_grep',
   'ptah_get_symbol_index',
   'ptah_agent_spawn',
   'ptah_agent_status',
@@ -2099,7 +2118,7 @@ describe('independently pinned budgets (TASK_2026_559 Batch 21 r1, defect 3)', (
 // ---------------------------------------------------------------------------
 
 describe('coverage matrix — served tools across host, caller and transport (defect 1)', () => {
-  it('HTTP coding with IDE capabilities serves 59 identically-named tools across every caller kind', async () => {
+  it('HTTP coding with IDE capabilities serves 80 identically-named tools across every caller kind', async () => {
     const deps = buildDeps({}, { hasIDECapabilities: true });
     const callers: Array<Partial<MCPRequest>> = [
       {},
@@ -2129,11 +2148,12 @@ describe('coverage matrix — served tools across host, caller and transport (de
     // (TASK_2026_AGENT_MESSAGING P1-E). +1: ptah_agent_message_ack (P2-G).
     // +1: ptah_session_clear_finished (TASK_2026_932). +4: the ptah_cron_* read
     // tools (issue #1400 Part 1); the 5 write tools need `cronWriteApproval`.
-    expect(namesPerCaller[0]).toHaveLength(78);
+    // +2: ptah_read_symbol and ptah_grep (TASK_2026_2299).
+    expect(namesPerCaller[0]).toHaveLength(80);
     expect(namesPerCaller[0]).toContain('ptah_artifact_publish');
   });
 
-  it('HTTP coding without IDE capabilities serves 59 tools, identically across caller kinds, minus exactly the 3 IDE-gated tools', async () => {
+  it('HTTP coding without IDE capabilities serves 77 tools, identically across caller kinds, minus exactly the 3 IDE-gated tools', async () => {
     const deps = buildDeps({}, { hasIDECapabilities: false });
     const callers: Array<Partial<MCPRequest>> = [
       {},
@@ -2157,8 +2177,9 @@ describe('coverage matrix — served tools across host, caller and transport (de
     // 63 in total minus the 3 IDE-gated tools; see the note above
     // (TASK_2026_655: +1, ptah_session_handoff; P1-E: +1,
     // ptah_agent_message_control; P2-G: +1, ptah_agent_message_ack;
-    // TASK_2026_932: +1, ptah_session_clear_finished).
-    expect(namesPerCaller[0]).toHaveLength(75);
+    // TASK_2026_932: +1, ptah_session_clear_finished; TASK_2026_2299: +2,
+    // ptah_read_symbol and ptah_grep).
+    expect(namesPerCaller[0]).toHaveLength(77);
     expect(namesPerCaller[0]).toContain('ptah_artifact_publish');
     for (const ideOnly of [
       'ptah_lsp_references',
@@ -2202,7 +2223,7 @@ describe('coverage matrix — served tools across host, caller and transport (de
         // TASK_2026_932: +1, ptah_session_clear_finished.
         // Issue #1400 Part 1: +4, the ptah_cron_* read tools. The 5 write tools
         // are hidden from a caller without `cronWriteApproval`.
-        expect(apps).toHaveLength(hasIDECapabilities ? 81 : 78);
+        expect(apps).toHaveLength(hasIDECapabilities ? 83 : 80);
         expect(apps.filter((name) => !APPS_ONLY_TOOL_NAMES.has(name))).toEqual(
           coding,
         );
@@ -2616,7 +2637,8 @@ describe('MCP dispatcher contract sweep (TASK_2026_559 Batch 21, Task 21.1)', ()
       // the Batch 24d kinds, the code-index / export-index distinction),
       // asserted item by item in tool-description.builder.spec.ts.
       // +12 (Batch 33): the registry publicSymbols list gained ", python, go".
-      ptah_code_search_symbols: 714,
+      // 714 + 56 (TASK_2026_2299): text hits, header line, `includeCoverage`.
+      ptah_code_search_symbols: 770,
       // +12 (Batch 33): the registry graphEdges list gained ", python, go".
       ptah_get_dependencies: 701,
       ptah_dashboard_propose_spec: 671,
@@ -2642,7 +2664,10 @@ describe('MCP dispatcher contract sweep (TASK_2026_559 Batch 21, Task 21.1)', ()
       ptah_lsp_references: 529,
       ptah_web_search: 506,
       // +12 (Batch 33): the registry publicSymbols list gained ", python, go".
-      ptah_ast_analyze: 515,
+      ptah_ast_analyze: 626,
+      // TASK_2026_2299, measured: 476 and 394 chars; ceil(n * 1.1) + 10.
+      ptah_grep: 534,
+      ptah_read_symbol: 444,
       ptah_task_create: 498,
       ptah_agent_status: 445,
       ptah_memory_search: 438,

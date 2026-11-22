@@ -147,6 +147,30 @@ const CODE_SEARCH_MAX_TOP_K = 50;
  */
 const EXACT_NAME_RRF_WEIGHT = 3;
 
+/**
+ * RRF weight of the name-token candidate list (multi-word queries only, so
+ * it never competes with the exact list, which skips them). The same
+ * derivation as {@link EXACT_NAME_RRF_WEIGHT}: every row whose name holds at
+ * least two query words outranks every row matched by text or vector alone.
+ */
+const NAME_TOKEN_RRF_WEIGHT = EXACT_NAME_RRF_WEIGHT;
+/** Query words the name-token tier looks for at most. */
+const NAME_TOKEN_MAX_WORDS = 6;
+/** A query word shorter than this is too common to narrow the name scan. */
+const NAME_TOKEN_MIN_LENGTH = 3;
+/** Rows the name-token scan reads at most before ranking them. */
+const NAME_TOKEN_SCAN_CAP = 5000;
+
+/** Lower-case words of an identifier or query: camelCase, acronyms, snake/kebab case and `.` split. */
+function identifierWords(text: string): string[] {
+  return text
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .split(/[^A-Za-z0-9]+/)
+    .map((word) => word.toLowerCase())
+    .filter((word) => word.length > 0);
+}
+
 /** A query SQLite `NOCASE` can compare case-insensitively on its own. */
 const ASCII_ONLY = /^\p{ASCII}*$/u;
 
@@ -236,7 +260,10 @@ export class CodeSymbolStore implements ICodeSymbolReader {
     }
     this.staleRootPurgeInFlight = true;
     try {
-      const purged = await this.scanAndPurgeStaleRoots(statPath, throwIfAborted);
+      const purged = await this.scanAndPurgeStaleRoots(
+        statPath,
+        throwIfAborted,
+      );
       this.lastStaleRootPurgeAt = nowMs;
       return purged;
     } finally {
@@ -250,9 +277,9 @@ export class CodeSymbolStore implements ICodeSymbolReader {
     throwIfAborted: () => void,
   ): Promise<{ roots: number; rows: number }> {
     const db = this.connection.db;
-    const roots = db.prepare(
-      'SELECT DISTINCT workspace_root AS root FROM code_symbols',
-    ).all() as Array<{ root: string }>;
+    const roots = db
+      .prepare('SELECT DISTINCT workspace_root AS root FROM code_symbols')
+      .all() as Array<{ root: string }>;
     let purgedRoots = 0;
     let purgedRows = 0;
     for (const { root } of roots) {
@@ -262,7 +289,10 @@ export class CodeSymbolStore implements ICodeSymbolReader {
         continue;
       } catch (error: unknown) {
         if (!isMissingRoot(error)) {
-          this.logger.warn('[code-symbol-store] Cannot inspect indexed root; retaining it', { root, error });
+          this.logger.warn(
+            '[code-symbol-store] Cannot inspect indexed root; retaining it',
+            { root, error },
+          );
           continue;
         }
       }
@@ -270,15 +300,24 @@ export class CodeSymbolStore implements ICodeSymbolReader {
       try {
         const parentStat = await stat(parent);
         if (!parentStat.isDirectory()) {
-          this.logger.info('[code-symbol-store] Indexed root parent is not a directory; retaining it', { root, parent });
+          this.logger.info(
+            '[code-symbol-store] Indexed root parent is not a directory; retaining it',
+            { root, parent },
+          );
           continue;
         }
         await access(parent, constants.R_OK);
       } catch (error: unknown) {
         if (isMissingRoot(error)) {
-          this.logger.info('[code-symbol-store] Indexed root parent is missing; retaining it', { root, parent });
+          this.logger.info(
+            '[code-symbol-store] Indexed root parent is missing; retaining it',
+            { root, parent },
+          );
         } else {
-          this.logger.warn('[code-symbol-store] Cannot read indexed root parent; retaining it', { root, parent, error });
+          this.logger.warn(
+            '[code-symbol-store] Cannot read indexed root parent; retaining it',
+            { root, parent, error },
+          );
         }
         continue;
       }
@@ -286,7 +325,9 @@ export class CodeSymbolStore implements ICodeSymbolReader {
       const select = db.prepare(
         'SELECT rowid AS rowid FROM code_symbols WHERE workspace_root = ? LIMIT 128',
       );
-      const deleteSymbol = db.prepare('DELETE FROM code_symbols WHERE rowid = ?');
+      const deleteSymbol = db.prepare(
+        'DELETE FROM code_symbols WHERE rowid = ?',
+      );
       const deleteVec = vecAvailable
         ? db.prepare('DELETE FROM code_symbols_vec WHERE rowid = ?')
         : null;
@@ -297,23 +338,35 @@ export class CodeSymbolStore implements ICodeSymbolReader {
         if (ids.length === 0) break;
         try {
           await statPath(root);
-          this.logger.warn('[code-symbol-store] Indexed root reappeared; stopping purge', { root });
+          this.logger.warn(
+            '[code-symbol-store] Indexed root reappeared; stopping purge',
+            { root },
+          );
           break;
         } catch (error: unknown) {
           if (!isMissingRoot(error)) {
-            this.logger.warn('[code-symbol-store] Cannot confirm indexed root is absent; stopping purge', { root, error });
+            this.logger.warn(
+              '[code-symbol-store] Cannot confirm indexed root is absent; stopping purge',
+              { root, error },
+            );
             break;
           }
         }
         try {
           const parentStat = await stat(parent);
           if (!parentStat.isDirectory()) {
-            this.logger.warn('[code-symbol-store] Indexed root parent changed; stopping purge', { root, parent });
+            this.logger.warn(
+              '[code-symbol-store] Indexed root parent changed; stopping purge',
+              { root, parent },
+            );
             break;
           }
           await access(parent, constants.R_OK);
         } catch (error: unknown) {
-          this.logger.warn('[code-symbol-store] Cannot read indexed root parent; stopping purge', { root, parent, error });
+          this.logger.warn(
+            '[code-symbol-store] Cannot read indexed root parent; stopping purge',
+            { root, parent, error },
+          );
           break;
         }
         throwIfAborted();
@@ -342,8 +395,9 @@ export class CodeSymbolStore implements ICodeSymbolReader {
         .update(`path:${root}`, 'utf8')
         .digest('hex')
         .slice(0, 16);
-      db.prepare('DELETE FROM indexing_state WHERE workspace_fingerprint = ?')
-        .run(pathFp);
+      db.prepare(
+        'DELETE FROM indexing_state WHERE workspace_fingerprint = ?',
+      ).run(pathFp);
     }
     this.logger.info('[code-symbol-store] stale-root maintenance complete', {
       roots: purgedRoots,
@@ -972,6 +1026,7 @@ export class CodeSymbolStore implements ICodeSymbolReader {
     if (!trimmed) return { hits: [], bm25Only: !this.vecStatus.available };
 
     const exactRows = this.exactNameSymbols(trimmed, limit, workspaceRoot);
+    const nameTokenRows = this.nameTokenSymbols(trimmed, limit, workspaceRoot);
     const bm25Rows = this.bm25SearchSymbols(trimmed, limit * 4, workspaceRoot);
     let vecRows: CodeSymbolHitRow[] = [];
     let bm25Only = !this.reconcileOrphanVecRows();
@@ -994,11 +1049,17 @@ export class CodeSymbolStore implements ICodeSymbolReader {
 
     const tokenCount = trimmed.split(/\s+/).filter((t) => t.length > 0).length;
     const bm25Weight = tokenCount < 4 ? 0.6 : 0.3;
-    const fused = this.rrfFuseSymbols(exactRows, bm25Rows, vecRows, limit, {
-      exact: EXACT_NAME_RRF_WEIGHT,
-      bm25: bm25Weight,
-      vec: 1 - bm25Weight,
-    });
+    const fused = this.rrfFuseSymbols(
+      [...exactRows, ...nameTokenRows],
+      bm25Rows,
+      vecRows,
+      limit,
+      {
+        exact: EXACT_NAME_RRF_WEIGHT,
+        bm25: bm25Weight,
+        vec: 1 - bm25Weight,
+      },
+    );
 
     const hits: CodeSymbolHit[] = fused.map(({ row, score }) => ({
       id: row.id,
@@ -1035,6 +1096,86 @@ export class CodeSymbolStore implements ICodeSymbolReader {
     return ASCII_ONLY.test(query)
       ? this.nameEqualsSymbols('COLLATE NOCASE', query, limit, workspaceRoot)
       : this.foldedNameSymbols(query, limit, workspaceRoot);
+  }
+
+  /**
+   * Rows whose name holds at least two words of a multi-word query, after
+   * camelCase / snake_case splitting (`session budget deadline` finds
+   * `SessionBudgetDeadlineMonitor`, which full-text search cannot: the FTS
+   * tokenizer keeps an identifier whole). A name word matches a query word it
+   * starts with. More matched words rank first, then the shorter name, then
+   * file order. SQL keeps only rows that hold at least two words as
+   * `LIKE '%word%'` (ASCII case-insensitive; the words are alphanumeric, so
+   * they hold no wildcard), so one common word cannot fill the scan with rows
+   * that never qualify; the scan reads at most {@link NAME_TOKEN_SCAN_CAP} rows.
+   */
+  private nameTokenSymbols(
+    query: string,
+    limit: number,
+    workspaceRoot?: string,
+  ): CodeSymbolHitRow[] {
+    if (!/\s/.test(query)) return [];
+    const words = [
+      ...new Set(
+        identifierWords(query).filter(
+          (word) => word.length >= NAME_TOKEN_MIN_LENGTH,
+        ),
+      ),
+    ].slice(0, NAME_TOKEN_MAX_WORDS);
+    if (words.length < 2) return [];
+    const wsFilter = workspaceRoot ? 'AND cs.workspace_root = ?' : '';
+    const scanSql = `
+      SELECT cs.rowid AS rowid, cs.symbol_name AS symbol_name
+      FROM code_symbols cs
+      WHERE (${words.map(() => '(cs.symbol_name LIKE ?)').join(' + ')}) >= 2
+      ${wsFilter}
+      ORDER BY cs.file_path ASC, cs.rowid ASC
+      LIMIT ?
+    `;
+    const params: unknown[] = words.map((word) => `%${word}%`);
+    if (workspaceRoot) params.push(workspaceRoot);
+    params.push(NAME_TOKEN_SCAN_CAP);
+    const scanned = this.connection.db
+      .prepare(scanSql)
+      .all(...params) as Array<{
+      rowid: number;
+      symbol_name: string;
+    }>;
+    const ranked = scanned
+      .map((row, order) => {
+        const nameWords = identifierWords(row.symbol_name);
+        const matched = words.filter((word) =>
+          nameWords.some((nameWord) => nameWord.startsWith(word)),
+        ).length;
+        return {
+          rowid: row.rowid,
+          length: row.symbol_name.length,
+          matched,
+          order,
+        };
+      })
+      .filter((row) => row.matched >= 2)
+      .sort(
+        (a, b) =>
+          b.matched - a.matched || a.length - b.length || a.order - b.order,
+      )
+      .slice(0, limit);
+    if (ranked.length === 0) return [];
+    const byRowid = new Map(
+      (
+        this.connection.db
+          .prepare(
+            `SELECT ${EXACT_NAME_COLUMNS}
+             FROM code_symbols cs
+             WHERE cs.rowid IN (${ranked.map(() => '?').join(',')})`,
+          )
+          .all(...ranked.map((row) => row.rowid)) as CodeSymbolHitRow[]
+      ).map((row) => [row.rowid, row]),
+    );
+    return ranked.flatMap((row) => {
+      const full = byRowid.get(row.rowid);
+      return full ? [full] : [];
+    });
   }
 
   /**

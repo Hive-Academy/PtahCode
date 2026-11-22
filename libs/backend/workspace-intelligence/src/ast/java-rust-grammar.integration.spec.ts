@@ -297,9 +297,8 @@ describe('Java and Rust grammar integration (real tree-sitter WASM, Batch 30)', 
       expect(byName.get('App')?.startLine).toBe(9);
       expect(byName.get('App')?.endLine).toBe(11);
       expect(byName.get('run')?.startLine).toBe(13);
-      // The shared extractor keeps the first token of each parameter, which
-      // for a Java signature is the type (the C# precedent).
-      expect(byName.get('of')?.parameters).toEqual(['U', 'int']);
+      // Java is type-first: each parameter renders its name.
+      expect(byName.get('of')?.parameters).toEqual(['first', 'size']);
       expect(byName.get('Point')?.parameters).toEqual([]);
     });
 

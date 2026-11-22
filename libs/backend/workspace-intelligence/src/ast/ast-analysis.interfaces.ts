@@ -26,6 +26,12 @@ export interface FunctionInfo {
    * Whether this is an async function.
    */
   isAsync?: boolean;
+  /**
+   * Space-separated member modifiers of a class method, in source order
+   * (`private static`, `get`, `async`); set only on `ClassInfo.methods`
+   * entries of TypeScript/JavaScript, omitted when there are none.
+   */
+  modifiers?: string;
 }
 
 /**

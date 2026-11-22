@@ -21,6 +21,16 @@ import {
   moduleStringValue,
 } from './export-extraction';
 import { cDeclaratorName } from './c-declarator';
+import { extractParameterNames } from './parameter-names';
+import {
+  CLASS_MEMBER_LANGUAGES,
+  attachClassMembers,
+  classBodyStart,
+  classMemberIndex,
+  methodModifiers,
+  type ClassWithBody,
+  type MethodCapture,
+} from './class-members';
 import { LANGUAGE_MODULES } from './languages';
 import type { LanguageExtraction } from './languages/types';
 
@@ -222,11 +232,22 @@ export class AstAnalysisService {
           new Error('queryMulti returned null value unexpectedly'),
         );
       }
-      const { functions, unextractedDeclarations } =
-        this.extractFunctionsFromMatches(map.get('functions') ?? []);
-      const classes: ClassInfo[] = this.extractClassesFromMatches(
-        map.get('classes') ?? [],
+      const { functions, methods, unextractedDeclarations } =
+        this.extractFunctionsFromMatches(map.get('functions') ?? [], language);
+      const classMatches = map.get('classes') ?? [];
+      const capturedClasses = this.extractClassesFromMatches(
+        classMatches,
+        language,
       );
+      // TS/JS: each class lists its own methods (`class-members.ts`);
+      // `functions` still lists every method too.
+      const classes: ClassInfo[] = CLASS_MEMBER_LANGUAGES.has(language)
+        ? attachClassMembers(
+            capturedClasses,
+            methods,
+            classMemberIndex(classMatches),
+          )
+        : capturedClasses.map(({ info }) => info);
       const scopes = extraction?.declarations
         ? this.extractDeclarationsFromMatches(
             map.get('declarations') ?? [],
@@ -368,12 +389,21 @@ export class AstAnalysisService {
    * A C/C++ definition captures its whole declarator (`@function.declarator`)
    * and is named by walking it (`cDeclaratorName`); a declarator that names
    * nothing is listed in `unextractedDeclarations`, never dropped silently.
+   *
+   * `methods` holds the `@method.*` declarations of a TS/JS file with their
+   * nodes, for class membership (`class-members.ts`); empty otherwise.
    */
-  private extractFunctionsFromMatches(matches: QueryMatch[]): {
+  private extractFunctionsFromMatches(
+    matches: QueryMatch[],
+    language: SupportedLanguage,
+  ): {
     functions: FunctionInfo[];
+    methods: MethodCapture[];
     unextractedDeclarations: string[];
   } {
     const functions: FunctionInfo[] = [];
+    const methods: MethodCapture[] = [];
+    const collectMethods = CLASS_MEMBER_LANGUAGES.has(language);
     const unextractedDeclarations: string[] = [];
     const seen = new Set<string>();
 
@@ -413,7 +443,7 @@ export class AstAnalysisService {
       }
 
       if (paramsCapture) {
-        params = this.extractParamsFromText(paramsCapture.text);
+        params = extractParameterNames(paramsCapture.text, language);
       }
 
       const declaratorCapture = captures.get('function.declarator');
@@ -428,7 +458,7 @@ export class AstAnalysisService {
           params =
             declared.parameters === undefined
               ? []
-              : this.extractParamsFromText(declared.parameters.text);
+              : extractParameterNames(declared.parameters.text, language);
           namePosition = declaratorCapture.startPosition;
         }
       }
@@ -443,25 +473,35 @@ export class AstAnalysisService {
         const key = `${name}:${at?.row ?? startLine}:${at?.column ?? 0}`;
         if (!seen.has(key)) {
           seen.add(key);
-          functions.push({
+          const info: FunctionInfo = {
             name,
             parameters: params,
             startLine,
             endLine,
-          });
+          };
+          functions.push(info);
+          const methodCapture = captures.get('method.declaration');
+          if (collectMethods && methodCapture) {
+            methods.push({ info, declaration: methodCapture.node });
+          }
         }
       }
     }
 
-    return { functions, unextractedDeclarations };
+    return { functions, methods, unextractedDeclarations };
   }
 
   /**
    * Extracts ClassInfo from query matches. As for functions, one declaration
-   * is one name position (Batch 31 r1 R31-03).
+   * is one name position (Batch 31 r1 R31-03). For TS/JS each class also
+   * carries the start of its body, which `attachClassMembers` keys on.
    */
-  private extractClassesFromMatches(matches: QueryMatch[]): ClassInfo[] {
-    const classes: ClassInfo[] = [];
+  private extractClassesFromMatches(
+    matches: QueryMatch[],
+    language: SupportedLanguage,
+  ): ClassWithBody[] {
+    const classes: ClassWithBody[] = [];
+    const withBody = CLASS_MEMBER_LANGUAGES.has(language);
     const seen = new Set<string>();
 
     for (const match of matches) {
@@ -484,10 +524,13 @@ export class AstAnalysisService {
         const key = `${name}:${nameCapture.startPosition.row}:${nameCapture.startPosition.column}`;
         if (!seen.has(key)) {
           seen.add(key);
+          const bodyStart =
+            withBody && declCapture
+              ? classBodyStart(declCapture.node, nameCapture.startPosition)
+              : undefined;
           classes.push({
-            name,
-            startLine,
-            endLine,
+            info: { name, startLine, endLine },
+            ...(bodyStart ? { bodyStart } : {}),
           });
         }
       }
@@ -663,34 +706,6 @@ export class AstAnalysisService {
   }
 
   /**
-   * Extracts parameter names from a formal_parameters text.
-   * E.g., "(a, b, c)" -> ["a", "b", "c"]
-   */
-  private extractParamsFromText(paramsText: string): string[] {
-    // Delimiters are stripped only when present: Ruby may omit them
-    // (`def needle alpha, beta`; Batch 31 r1 R31-05).
-    const text = paramsText.trim();
-    const inner = (
-      text.startsWith('(') && text.endsWith(')') ? text.slice(1, -1) : text
-    ).trim();
-    if (!inner) return [];
-    return inner
-      .split(',')
-      .map((param) => {
-        const trimmed = param.trim();
-        if (trimmed.startsWith('...')) {
-          const name = trimmed
-            .slice(3)
-            .split(/[:\s=]/)[0]
-            .trim();
-          return `...${name}`;
-        }
-        return trimmed.split(/[:\s=?]/)[0].trim();
-      })
-      .filter(Boolean);
-  }
-
-  /**
    * Traverses the AST tree and calls the visitor function for each node.
    */
   private traverseAst(
@@ -844,7 +859,10 @@ export class AstAnalysisService {
         if (child.type === AST_NODE_TYPES.METHOD_DEFINITION) {
           const methodInfo = this.extractFunctionInfo(child, classBody);
           if (methodInfo) {
-            methods.push(methodInfo);
+            const modifiers = methodModifiers(child);
+            methods.push(
+              modifiers === '' ? methodInfo : { ...methodInfo, modifiers },
+            );
           }
         }
       }

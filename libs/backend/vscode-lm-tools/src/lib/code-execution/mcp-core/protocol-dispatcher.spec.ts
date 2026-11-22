@@ -1825,7 +1825,7 @@ describe('protocol-handlers › tools/call individual tool routing', () => {
   });
 
   // TASK_2026_559 Batch 20.2p: per-record JSON keys cost the promised saving.
-  it('writes ptah_ast_analyze records as tables behind parse status and coverage', async () => {
+  it('writes ptah_ast_analyze records as tables behind parse status, functions last', async () => {
     const analyze = jest.fn().mockResolvedValue({
       parseStatus: 'ok',
       errorNodeCount: 0,
@@ -1873,13 +1873,13 @@ describe('protocol-handlers › tools/call individual tool routing', () => {
     const content = (
       res.result as { content: Array<{ type: string; text: string }> }
     ).content;
+    // TASK_2026_2299: a zero error count and a plain clean coverage are
+    // dropped; classes, exports and imports come before functions.
     expect(content[0].text).toBe(
-      '{"parseStatus":"ok","errorNodeCount":0,"errorNodeCountCapped":false,' +
-        '"coverage":{"clean":true,"analyzed":1},"file":"src/a.ts",' +
-        '"language":"typescript",' +
-        '"functions":[["name","parameters","startLine","endLine"],["load",["id"],1,4],["save",[],6,9]],' +
-        '"classes":[],"imports":[["source","importedSymbols"],["node:path",["join"]]],' +
-        '"exports":[["name","kind"],["load","function"]]}',
+      '{"parseStatus":"ok","file":"src/a.ts","language":"typescript",' +
+        '"classes":[],"exports":[["name","kind"],["load","function"]],' +
+        '"imports":[["source","importedSymbols"],["node:path",["join"]]],' +
+        '"functions":[["name","parameters","startLine","endLine"],["load",["id"],1,4],["save",[],6,9]]}',
     );
   });
 
@@ -7177,48 +7177,64 @@ describe('protocol-handlers › ptah_code_reindex and index freshness (TASK_2026
     expect(resultOf(res).isError).toBe(true);
   });
 
-  it('ptah_code_search_symbols runs the freshness check and surfaces the index block', async () => {
-    let indexing = false;
-    const indexWorkspace = jest.fn(() => {
-      indexing = true;
-      return new Promise<never>(() => undefined);
-    });
-    const isIndexing = jest.fn(() => indexing);
-    const reader: ICodeSymbolReader = {
-      searchSymbols: jest.fn().mockResolvedValue({ hits: [], bm25Only: false }),
-      getIndexFreshness: jest
-        .fn()
-        .mockResolvedValue({ symbolCount: 0, newestUpdatedAt: null }),
-    };
-    const code = buildCodeNamespace({
-      getCodeSymbolSearch: () => reader,
-      getMemorySearch: () => undefined,
-      getSymbolIndexer: () =>
-        ({ indexWorkspace, isIndexing }) as unknown as CodeSymbolIndexer,
-      getWorkspaceRoot: () => '/ws',
-      getHostWorkspaceRoots: () => ['/ws'],
-      logger: { warn: jest.fn() },
-    });
+  it.each([
+    ['includeCoverage returns the index block as JSON', true],
+    ['the default text form names the index in one header line', false],
+  ])(
+    'ptah_code_search_symbols runs the freshness check; %s',
+    async (_label, includeCoverage) => {
+      let indexing = false;
+      const indexWorkspace = jest.fn(() => {
+        indexing = true;
+        return new Promise<never>(() => undefined);
+      });
+      const isIndexing = jest.fn(() => indexing);
+      const reader: ICodeSymbolReader = {
+        searchSymbols: jest
+          .fn()
+          .mockResolvedValue({ hits: [], bm25Only: false }),
+        getIndexFreshness: jest
+          .fn()
+          .mockResolvedValue({ symbolCount: 0, newestUpdatedAt: null }),
+      };
+      const code = buildCodeNamespace({
+        getCodeSymbolSearch: () => reader,
+        getMemorySearch: () => undefined,
+        getSymbolIndexer: () =>
+          ({ indexWorkspace, isIndexing }) as unknown as CodeSymbolIndexer,
+        getWorkspaceRoot: () => '/ws',
+        getHostWorkspaceRoots: () => ['/ws'],
+        logger: { warn: jest.fn() },
+      });
 
-    const res = await callTool(
-      'ptah_code_search_symbols',
-      { query: 'login' },
-      { ptahAPI: buildPtahAPIStub({ code }) },
-    );
-    await flush();
+      const res = await callTool(
+        'ptah_code_search_symbols',
+        { query: 'login', ...(includeCoverage ? { includeCoverage } : {}) },
+        { ptahAPI: buildPtahAPIStub({ code }) },
+      );
+      await flush();
 
-    expect(reader.getIndexFreshness).toHaveBeenCalledWith('/ws');
-    expect(indexWorkspace).toHaveBeenCalledWith('/ws', {
-      userInitiated: false,
-    });
-    const body = JSON.parse(resultOf(res).text) as { index: unknown };
-    expect(body.index).toEqual({
-      symbolCount: 0,
-      indexAgeMs: null,
-      reindexStarted: true,
-      reindexInFlight: true,
-    });
-  });
+      expect(reader.getIndexFreshness).toHaveBeenCalledWith('/ws');
+      expect(indexWorkspace).toHaveBeenCalledWith('/ws', {
+        userInitiated: false,
+      });
+      if (includeCoverage) {
+        const body = JSON.parse(resultOf(res).text) as { index: unknown };
+        expect(body.index).toEqual({
+          symbolCount: 0,
+          indexAgeMs: null,
+          reindexStarted: true,
+          reindexInFlight: true,
+        });
+      } else {
+        const text = resultOf(res).text;
+        expect(text).toContain('index 0 symbols');
+        expect(text).toContain('reindex started');
+        expect(text).toContain('No symbols found.');
+        expect(text).not.toContain('supportedLanguages');
+      }
+    },
+  );
 });
 
 describe('protocol-handlers › ptah_get_symbol_index paging (TASK_2026_559 Batch 9)', () => {
@@ -9414,9 +9430,10 @@ describe('MCP tool profile listing, eager loading and dispatch', () => {
       // ptah_session_handoff, always-on (TASK_2026_655). +1:
       // ptah_agent_message_control (P1-E). +1: ptah_agent_message_ack (P2-G).
       // +1: ptah_session_clear_finished (TASK_2026_932). +4: the ptah_cron_*
-      // read tools (issue #1400); the five write tools are hidden from a
+      // read tools (issue #1400); +2 in TASK_2026_2299 (ptah_read_symbol and
+      // ptah_grep); the five write tools are hidden from a
       // caller whose credential has no `cronWriteApproval`.
-      expect(coding).toHaveLength(hasIDECapabilities ? 78 : 75);
+      expect(coding).toHaveLength(hasIDECapabilities ? 80 : 77);
       expect(coding.map((tool) => tool.name)).toContain(
         'ptah_artifact_publish',
       );
@@ -9428,6 +9445,21 @@ describe('MCP tool profile listing, eager loading and dispatch', () => {
           'anthropic/alwaysLoad'
         ],
       ).toBeUndefined();
+      // TASK_2026_2299: the navigation tools load eagerly, so a shell command
+      // is never cheaper than a tool-search round trip.
+      for (const name of [
+        'ptah_read_symbol',
+        'ptah_grep',
+        'ptah_get_dependents',
+        'ptah_get_symbol_index',
+        'ptah_relevance_rank_files',
+      ]) {
+        expect(
+          coding.find((tool) => tool.name === name)?._meta?.[
+            'anthropic/alwaysLoad'
+          ],
+        ).toBe(true);
+      }
       expect(
         apps.filter((tool) => !APPS_ONLY_TOOL_NAMES.has(tool.name)),
       ).toEqual(coding);
@@ -10681,5 +10713,287 @@ describe('protocol-handlers › phase tool profile', () => {
     );
     expect(otherAppsTool).toBeDefined();
     expect(appsNames).toContain(otherAppsTool);
+  });
+});
+
+describe('protocol-handlers › navigation tools bind workspaceRoot to a known root (TASK_2026_2299)', () => {
+  let root: string;
+  let outside: string;
+
+  beforeEach(() => {
+    root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'ptah-nav-')));
+    outside = fs.realpathSync(
+      fs.mkdtempSync(path.join(os.tmpdir(), 'ptah-nav-out-')),
+    );
+    fs.mkdirSync(path.join(root, 'sub'));
+    fs.writeFileSync(path.join(root, 'sub', 'a.txt'), 'needle here\n');
+    fs.writeFileSync(path.join(outside, 'b.txt'), 'needle there\n');
+  });
+
+  afterEach(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+    fs.rmSync(outside, { recursive: true, force: true });
+  });
+
+  async function grep(workspaceRoot: string | undefined): Promise<{
+    text: string;
+    isError: boolean;
+  }> {
+    const res = await handleMCPRequest(
+      makeRequest({
+        id: 'nav-root',
+        method: 'tools/call',
+        params: {
+          name: 'ptah_grep',
+          arguments: {
+            pattern: 'needle',
+            ...(workspaceRoot ? { workspaceRoot } : {}),
+          },
+        },
+      }),
+      buildDeps({
+        ptahAPI: buildPtahAPIStub({
+          workspace: { getInfo: async () => ({ path: root }) },
+        }),
+      }),
+    );
+    const result = res.result as {
+      content: Array<{ text: string }>;
+      isError?: boolean;
+    };
+    return { text: result.content[0].text, isError: result.isError === true };
+  }
+
+  it('refuses a workspaceRoot outside the open workspace before any read', async () => {
+    const reply = await grep(outside);
+    expect(reply.isError).toBe(true);
+    expect(reply.text).toContain('"workspaceRoot" is not inside');
+    expect(reply.text).not.toContain('needle there');
+  });
+
+  it('accepts the open workspace and a folder inside it', async () => {
+    const same = await grep(root);
+    expect(same.isError).toBe(false);
+    expect(same.text).toContain('a.txt');
+    const inner = await grep(path.join(root, 'sub'));
+    expect(inner.isError).toBe(false);
+    expect(inner.text).toContain('a.txt');
+  });
+
+  it('uses the open workspace when no workspaceRoot is passed', async () => {
+    const reply = await grep(undefined);
+    expect(reply.isError).toBe(false);
+    expect(reply.text).toContain('a.txt');
+  });
+
+  /** One `ptah_grep` call against a host whose open workspace is `open`. */
+  async function grepWithHost(
+    workspaceRoot: string,
+    open: string | undefined,
+  ): Promise<{ text: string; isError: boolean }> {
+    const res = await handleMCPRequest(
+      makeRequest({
+        id: 'nav-root-host',
+        method: 'tools/call',
+        params: {
+          name: 'ptah_grep',
+          arguments: { pattern: 'needle', workspaceRoot },
+        },
+      }),
+      buildDeps({
+        ptahAPI: buildPtahAPIStub({
+          workspace: {
+            getInfo: async () => (open ? { path: open } : undefined),
+          },
+        }),
+      }),
+    );
+    const result = res.result as {
+      content: Array<{ text: string }>;
+      isError?: boolean;
+    };
+    return { text: result.content[0].text, isError: result.isError === true };
+  }
+
+  it('refuses a supplied workspaceRoot when no root is known (fail closed)', async () => {
+    const reply = await grepWithHost(outside, undefined);
+    expect(reply.isError).toBe(true);
+    expect(reply.text).toContain('"workspaceRoot" cannot be checked');
+    expect(reply.text).not.toContain('needle there');
+  });
+
+  /** One `ptah_grep` call from a caller whose URL declares `declared`. */
+  async function grepAsCaller(
+    declared: string,
+    workspaceRoot?: string,
+  ): Promise<{ text: string; isError: boolean }> {
+    const res = await handleMCPRequest(
+      makeRequest({
+        id: 'nav-root-caller',
+        method: 'tools/call',
+        params: {
+          name: 'ptah_grep',
+          arguments: {
+            pattern: 'needle',
+            ...(workspaceRoot ? { workspaceRoot } : {}),
+          },
+        },
+        _callerWorkspaceRoot: declared,
+      }),
+      buildDeps({
+        workspaceProvider: knownFolders(root),
+        ptahAPI: buildPtahAPIStub({
+          workspace: { getInfo: async () => ({ path: declared }) },
+        }),
+      }),
+    );
+    const result = res.result as {
+      content: Array<{ text: string }>;
+      isError?: boolean;
+    };
+    return { text: result.content[0].text, isError: result.isError === true };
+  }
+
+  // The declared root is a URL segment (caller input): it must not widen
+  // the containment boundary (PR #1465 review).
+  it('refuses a declared caller root outside every open folder', async () => {
+    for (const declared of ['/', outside]) {
+      const reply = await grepAsCaller(declared);
+      expect(reply.isError).toBe(true);
+      expect(reply.text).toContain('not an open folder of this host');
+      expect(reply.text).not.toContain('needle there');
+      const supplied = await grepAsCaller(declared, outside);
+      expect(supplied.isError).toBe(true);
+      expect(supplied.text).not.toContain('needle there');
+    }
+  });
+
+  it('holds a caller with a declared root inside an open folder to that root', async () => {
+    const sub = path.join(root, 'sub');
+    const own = await grepAsCaller(sub);
+    expect(own.isError).toBe(false);
+    expect(own.text).toContain('a.txt');
+    // The open folder itself is wider than the caller's own root.
+    const wider = await grepAsCaller(sub, root);
+    expect(wider.isError).toBe(true);
+    expect(wider.text).toContain('"workspaceRoot" is not inside');
+  });
+
+  // UNC keys compare lexically, but the handlers use the real path of the
+  // root; the guard must check the same real location. win32 only: a UNC
+  // path is not absolute on POSIX. `realpath` is stubbed for the share.
+  (process.platform === 'win32' ? it : it.skip)(
+    'checks a UNC workspaceRoot by real path, and keeps a plain UNC subdirectory (win32 only)',
+    async () => {
+      const share = '\\\\srv\\share\\repo';
+      const actual = fs.promises.realpath.bind(fs.promises);
+      const realpath = jest
+        .spyOn(fs.promises, 'realpath')
+        .mockImplementation(async (p) => {
+          const text = String(p).toLowerCase();
+          if (text === `${share}\\link`.toLowerCase()) {
+            return '\\\\srv\\share\\elsewhere';
+          }
+          if (text.startsWith(share.toLowerCase())) {
+            return String(p);
+          }
+          return actual(p);
+        });
+      try {
+        const link = await grepWithHost(`${share}\\link`, share);
+        expect(link.isError).toBe(true);
+        expect(link.text).toContain('"workspaceRoot" is not inside');
+        const sub = await grepWithHost(`${share}\\sub`, share);
+        expect(sub.text).not.toContain('"workspaceRoot" is not inside');
+      } finally {
+        realpath.mockRestore();
+      }
+    },
+  );
+  /**
+   * A caller without a shell: a read-only capability that declares its root
+   * in the URL. It can call the read-only ptah tools and nothing else.
+   */
+  async function asReadOnlyCaller(
+    name: string,
+    args: Record<string, unknown>,
+    overrides: Partial<Record<keyof PtahAPI, unknown>> = {},
+  ): Promise<{ text: string; isError: boolean }> {
+    const res = await handleMCPRequest(
+      makeRequest({
+        id: `ro-${name}`,
+        method: 'tools/call',
+        _callerCapability: 'read-only',
+        _callerWorkspaceRoot: root,
+        params: { name, arguments: args },
+      }),
+      buildDeps({
+        ptahAPI: buildPtahAPIStub({
+          workspace: { getInfo: async () => ({ path: root }) },
+          ...overrides,
+        }),
+      }),
+    );
+    const result = res.result as {
+      content: Array<{ text: string }>;
+      isError?: boolean;
+    };
+    return { text: result.content[0].text, isError: result.isError === true };
+  }
+
+  // The rule of the existing file tools: `ptah_context_enrich_file` and
+  // `ptah_ast_analyze` take an absolute path verbatim (`resolveWorkspaceFilePath`
+  // and `resolveFilePath` in the namespace builders) and apply no root check.
+  // The navigation tools must never be wider than that, and they are narrower.
+  it('(D15) a read-only caller cannot read outside its root with ptah_read_symbol or ptah_grep', async () => {
+    const outsideFile = path.join(outside, 'b.txt');
+    fs.symlinkSync(outside, path.join(root, 'link'));
+
+    const replies = [
+      await asReadOnlyCaller('ptah_read_symbol', {
+        file: outsideFile,
+        startLine: 1,
+      }),
+      await asReadOnlyCaller('ptah_read_symbol', {
+        file: 'link/b.txt',
+        startLine: 1,
+      }),
+      await asReadOnlyCaller('ptah_read_symbol', {
+        file: outsideFile,
+        startLine: 1,
+        workspaceRoot: outside,
+      }),
+      await asReadOnlyCaller('ptah_grep', {
+        pattern: 'needle',
+        path: outside,
+      }),
+      await asReadOnlyCaller('ptah_grep', {
+        pattern: 'needle',
+        path: 'link',
+        includeIgnored: true,
+      }),
+      await asReadOnlyCaller('ptah_grep', {
+        pattern: 'needle',
+        path: outside,
+        includeIgnored: true,
+        workspaceRoot: outside,
+      }),
+    ];
+    for (const reply of replies) {
+      expect(reply.isError).toBe(true);
+      expect(reply.text).not.toContain('needle there');
+    }
+  });
+
+  it('(D15) the existing file tools take an outside absolute path as it is, so the navigation tools are not wider', async () => {
+    const enrichFile = jest.fn().mockResolvedValue({ summary: 'ok' });
+    const outsideFile = path.join(outside, 'b.txt');
+    const reply = await asReadOnlyCaller(
+      'ptah_context_enrich_file',
+      { file: outsideFile },
+      { context: { enrichFile } },
+    );
+    expect(reply.isError).toBe(false);
+    expect(enrichFile).toHaveBeenCalledWith(outsideFile, undefined);
   });
 });

@@ -17,6 +17,8 @@ const CANARY_LINE = 'Lane policy id: ptah-lane-policy-v1';
 const SHARED_TOOL_NAMES = [
   'ptah_workspace_analyze',
   'ptah_search_files',
+  'ptah_grep',
+  'ptah_read_symbol',
   'ptah_code_search_symbols',
   'ptah_ast_analyze',
   'ptah_context_enrich_file',

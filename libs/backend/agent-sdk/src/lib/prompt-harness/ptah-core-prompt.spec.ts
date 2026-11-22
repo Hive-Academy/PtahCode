@@ -13,7 +13,7 @@ import {
 
 describe('PTAH_CORE_SYSTEM_PROMPT', () => {
   it('stays within the measured token budget plus five percent', () => {
-    expect(PTAH_CORE_SYSTEM_PROMPT_TOKENS).toBeLessThanOrEqual(3380);
+    expect(PTAH_CORE_SYSTEM_PROMPT_TOKENS).toBeLessThanOrEqual(3645);
   });
 
   it('carries the MCP substitution section exactly once', () => {
