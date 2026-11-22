@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_2298_049c
-status: backlog
+status: in_review
 type: BUGFIX
 title: Deliver child session reports to the parent after a session handoff
 depends_on: []
