@@ -6,7 +6,15 @@ import {
   formatBudgetCeilingDeny,
   formatBudgetPauseNotice,
   formatBudgetReadOnlyCeilingDeny,
+  formatActivityOverdue,
+  formatChildPauseNotice,
+  formatChildRuntimeAsk,
   formatExplicitUserStopContext,
+  formatProviderHang,
+  formatProviderInputClosed,
+  formatWatchdogFinalFailure,
+  formatWatchdogNoSafeRetry,
+  formatWatchdogRetry,
   formatHandoffNormalReturn,
   formatHandoffNotesDelay,
   formatHandoffRecordFailure,
@@ -180,5 +188,64 @@ describe('Ptah actor labels and tool gate notice', () => {
     expect(formatLaneToolGateUnavailable(gate, 'agent-1')).toBe(text);
     expect(formatAgentActionNotice(gate, { id: 'agent-1', audience: 'parent' })).toBe(text);
     expect(formatAgentActionNotice(gate)).toContain('paused new work for the agent because');
+  });
+});
+
+describe('P2 watchdog and child cap copy', () => {
+  it('formats the exact watchdog texts', () => {
+    expect(formatProviderHang(180)).toBe(
+      'Ptah watchdog ended the turn because the provider sent no response for 180 seconds while no work was accounted for. Review the current state before retrying the turn.',
+    );
+    expect(formatWatchdogRetry()).toBe(
+      'Ptah watchdog is retrying the first turn once because the provider sent no response and the previous attempt produced no output or tool activity. Continue the original task.',
+    );
+    expect(formatWatchdogFinalFailure('c1')).toBe(
+      'Ptah watchdog could not recover the first turn for c1. The provider did not respond. Review its worktree and start or resume the session when ready.',
+    );
+    expect(formatWatchdogNoSafeRetry('c1')).toBe(
+      'Ptah watchdog could not safely retry the first turn for c1. Review the session and its worktree before starting another attempt.',
+    );
+    expect(formatActivityOverdue('a Monitor watch')).toBe(
+      'Ptah watchdog is still waiting for a Monitor watch. Review the session if the wait is unexpected.',
+    );
+    expect(formatProviderInputClosed()).toBe(
+      'The provider input channel closed. Ptah ended the affected turn for recovery. Review the current state and send a new message to retry.',
+    );
+  });
+
+  it('never names the user for a watchdog end', () => {
+    const text = formatAgentActionNotice({
+      actor: 'ptah-watchdog',
+      action: 'ended',
+      reason: 'provider-no-response',
+      nextStep: 'retry-first-turn',
+      measured: 180_000,
+      unit: 'milliseconds',
+    });
+    expect(text).toContain('for 180 seconds');
+    expect(text.toLowerCase()).not.toContain('the user');
+  });
+
+  it('formats the child runtime ask and pause', () => {
+    const ask: AgentActionNotice = {
+      actor: 'ptah-budget',
+      action: 'asked-handoff',
+      reason: 'runtime-cap',
+      nextStep: 'write-notes-and-return',
+      limit: 120,
+    };
+    expect(formatChildRuntimeAsk({ ...ask, limit: 7_200_000, unit: 'milliseconds' }, 'notes/n.md')).toBe(
+      'Ptah budget monitor asked for a handoff because this child session is approaching its 120-minute runtime cap. Write the current state, remaining work, verification and active lane IDs to notes/n.md, call ptah_session_handoff, then return normally.',
+    );
+    const pause: AgentActionNotice = { ...ask, action: 'paused', nextStep: 'review-live-agent', measured: 135 };
+    expect(formatChildPauseNotice(pause, 'c1')).toBe(
+      'Ptah budget monitor paused new work for c1 because runtime reached 135 minutes. Review its notes and worktree. Continue after choosing a successor or explicitly resuming work.',
+    );
+    expect(formatAgentActionNotice(pause, { childSession: true, id: 'c1', audience: 'parent' })).toBe(
+      formatChildPauseNotice(pause, 'c1'),
+    );
+    expect(formatAgentActionNotice(pause, { childSession: true, audience: 'agent' })).toContain(
+      'paused new work tools',
+    );
   });
 });

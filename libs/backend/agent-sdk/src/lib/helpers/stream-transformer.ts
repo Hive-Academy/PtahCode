@@ -60,6 +60,7 @@ import {
 import type { IModelResolver } from '../auth-env.port';
 import type { IPricingProvider } from '../pricing.port';
 import type { NoActivityWatchdog } from './no-activity-watchdog';
+import { attributeProviderToolResults } from '../message-transform/user-message.transformer';
 import { LiveSessionStatsPublisher } from './live-session-stats-publisher';
 import type { SessionMcpStatusCallbackRegistry } from './session-mcp-status-callback-registry';
 import type { SessionPlanLimitCallbackRegistry } from './plan-limits/session-plan-limit-callback-registry';
@@ -651,9 +652,7 @@ export class StreamTransformer {
           },
         });
 
-        // Arm the no-activity watchdog before consuming the stream. It fires
-        // only if NO SDK message arrives for the full inactivity window; every
-        // message below kicks it, so a slow-but-alive turn never trips it.
+        // Arm the watchdog before consuming SDK messages for the active turn.
         activityWatchdog?.start();
 
         try {
@@ -662,27 +661,41 @@ export class StreamTransformer {
             turnIdentity?.subscribeRetirement,
             (error) => logger.warn('[StreamTransformer] SDK iterator return failed:', error),
           )) {
+            // Inspect raw work before yielding retirements or filtering SDK frames.
+            // Result ownership is resolved below before closing the turn.
+            if (sdkMessage !== RETIREMENT_TICK) {
+              activityWatchdog?.observe(sdkMessage, { deferResult: true });
+            }
             let displacedId = turnIdentity?.takeDisplacedRetirement?.() ?? null;
             while (displacedId !== null) {
               yieldedEventCount++;
+              activityWatchdog?.noteOutwardEvent();
               yield messageTransformer.retirePromptOnly(effectiveSessionId, displacedId);
               displacedId = turnIdentity?.takeDisplacedRetirement?.() ?? null;
             }
             let interruptClientMessageId = turnIdentity?.takeInterruptRetirement() ?? null;
             while (interruptClientMessageId !== null) {
               yieldedEventCount++;
+              activityWatchdog?.noteOutwardEvent();
               yield messageTransformer.settleInterruptedTurn(effectiveSessionId, interruptClientMessageId);
               interruptClientMessageId = turnIdentity?.takeInterruptRetirement() ?? null;
             }
             if (sdkMessage === RETIREMENT_TICK) continue;
+            // A result emitted during provider teardown cannot settle a turn.
+            if (isResultMessage(sdkMessage) && activityWatchdog?.failure) continue;
             let resultConsumedClientMessageId: string | null = null;
             let skippedLateResult = false;
             let turnEndPending = false;
             let resultNeedsSettle = false;
             try {
-            // Any stream activity — message, partial/streaming delta, tool_use,
-            // tool_result, thinking — resets the inactivity window.
-            activityWatchdog?.observe(sdkMessage);
+            const providerFailure = activityWatchdog?.failure;
+            if (sdkMessage.type === 'user' && providerFailure) {
+              attributeProviderToolResults(
+                sdkMessage,
+                activityWatchdog.interruptedRootTools(),
+                providerFailure.message,
+              );
+            }
             // An observer must never break the stream it observes.
             if (onMessage) {
               // Usually the handoff precedes the next parent message. A stuck
@@ -840,6 +853,7 @@ export class StreamTransformer {
               skippedLateResult = turnIdentity?.wasLastResultInterruptedLate?.() ?? false;
               resultConsumedClientMessageId = consumedClientMessageId;
               turnEndPending = !skippedLateResult;
+              if (turnEndPending) activityWatchdog?.endTurn();
               // Keep the next prompt held until this result's terminal event
               // has passed through the stream consumer.
               // Before any await: the turn's estimate is dropped now, so every
@@ -1191,6 +1205,7 @@ export class StreamTransformer {
                   sawBackgroundTasksSnapshot = true;
                 }
                 yieldedEventCount++;
+                activityWatchdog?.noteOutwardEvent();
                 if (event.eventType === 'turn_state') {
                   if (!emittedTerminal && resultConsumedClientMessageId !== null) {
                     emittedTerminal = true;
@@ -1205,6 +1220,7 @@ export class StreamTransformer {
               }
               if (resultConsumedClientMessageId !== null && !emittedTerminal) {
                 yieldedEventCount++;
+                activityWatchdog?.noteOutwardEvent();
                 yield messageTransformer.settleInterruptedTurn(effectiveSessionId, resultConsumedClientMessageId);
               }
             }
@@ -1224,36 +1240,34 @@ export class StreamTransformer {
           let finalDisplacedId = turnIdentity?.takeDisplacedRetirement?.() ?? null;
           while (finalDisplacedId !== null) {
             yieldedEventCount++;
+            activityWatchdog?.noteOutwardEvent();
             yield messageTransformer.retirePromptOnly(effectiveSessionId, finalDisplacedId);
             finalDisplacedId = turnIdentity?.takeDisplacedRetirement?.() ?? null;
           }
           let finalInterruptClientMessageId = turnIdentity?.takeInterruptRetirement() ?? null;
           while (finalInterruptClientMessageId !== null) {
             yieldedEventCount++;
+            activityWatchdog?.noteOutwardEvent();
             yield messageTransformer.settleInterruptedTurn(effectiveSessionId, finalInterruptClientMessageId);
             finalInterruptClientMessageId = turnIdentity?.takeInterruptRetirement() ?? null;
           }
+
+          // Some SDK transports finish the iterator cleanly after closing input.
+          if (activityWatchdog?.failure) throw activityWatchdog.failure;
 
           logger.debug(
             `[StreamTransformer] Stream ended for ${sessionId}: ${sdkMessageCount} SDK messages, ${yieldedEventCount} events yielded`,
           );
         } catch (error) {
-          // The SDK rethrows a watchdog abort as a generic "aborted" error,
-          // which callers classify as a user stop. Replace it with the true
-          // cause; the wording deliberately avoids "abort"/"cancel".
-          const watchdogCause = activityWatchdog?.firedCause ?? null;
-          if (watchdogCause !== null) {
-            const timeoutError = new Error(
-              watchdogCause === 'compaction-dwell'
-                ? 'Compaction did not finish in time. Stopped for recovery; retry the turn.'
-                : 'No stream activity from the provider in time. Stopped for recovery; retry the turn.',
-              { cause: error },
-            );
-            logger.error(
-              `[StreamTransformer] Session ${sessionId} ended by the no-activity watchdog (${watchdogCause})`,
-              timeoutError,
-            );
-            throw timeoutError;
+          const providerFailure = activityWatchdog?.failure;
+          if (providerFailure) {
+            if (error !== providerFailure) {
+              logger.error(
+                `[StreamTransformer] Provider stream failed for ${sessionId}`,
+                error instanceof Error ? error : new Error(String(error)),
+              );
+            }
+            throw providerFailure;
           }
           const errorObj =
             error instanceof Error ? error : new Error(String(error));
@@ -1266,7 +1280,7 @@ export class StreamTransformer {
 
           if (isUserAbort) {
             logger.debug(
-              `[StreamTransformer] Session ${sessionId} aborted by user`,
+              `[StreamTransformer] SDK stream interrupted for session ${sessionId}`,
             );
           } else {
             logger.error(

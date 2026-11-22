@@ -19,6 +19,7 @@
  */
 
 import 'reflect-metadata';
+import { ProviderTurnEndError } from '../no-activity-watchdog';
 
 import type { Logger } from '@ptah-extension/vscode-core';
 import type {
@@ -189,14 +190,16 @@ describe('SessionQueryExecutor — a dead input channel ends the session (TASK_2
     await settle();
 
     const reason = result.abortController.signal.reason as Error;
-    expect(reason).toBeInstanceOf(Error);
+    expect(reason).toBeInstanceOf(ProviderTurnEndError);
+    expect(reason).toMatchObject({ endCause: 'provider-input-closed' });
     // `StreamTransformer` classifies a reason containing "abort" or "cancel" as
     // a benign user abort and suppresses it at debug level. This one must reach
     // the user.
     const message = reason.message.toLowerCase();
     expect(message).not.toContain('abort');
     expect(message).not.toContain('cancel');
-    expect(message).toContain('lost its connection');
+    expect(message).toContain('provider input channel closed');
+    expect(message).toContain('ptah');
   });
 
   it('the provider error reaches the log but never the stop reason', async () => {

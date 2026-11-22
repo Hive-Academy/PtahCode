@@ -1,5 +1,5 @@
 import 'reflect-metadata';
-import { UserMessageTransformer } from './user-message.transformer';
+import { attributeProviderToolResults, UserMessageTransformer } from './user-message.transformer';
 import type { TransformerState } from './transformer-state';
 import type { TransformerHelpers } from './transformer-helpers';
 
@@ -93,6 +93,27 @@ describe('UserMessageTransformer', () => {
     transformer = new UserMessageTransformer();
     state = makeState();
     helpers = makeHelpers();
+  });
+
+  it('replaces exact stock cancellation copy on the correlated live root tool only', () => {
+    const stock = "The user doesn't want to take this action right now. STOP what you are doing and wait for the user to tell you how to proceed.";
+    const content = [
+      { type: 'tool_result', tool_use_id: 'owned', is_error: true, content: stock },
+      { type: 'tool_result', tool_use_id: 'unrelated', is_error: true, content: stock },
+      { type: 'tool_result', tool_use_id: 'owned', is_error: true, content: `Prefix: ${stock}` },
+    ];
+    const frame = { parent_tool_use_id: null, message: { content } };
+    expect(transformer.transform(frame as never, state, helpers)[0]).toMatchObject({ output: stock });
+
+    const explanation = 'The provider input channel closed. Ptah ended the affected turn for recovery.';
+    attributeProviderToolResults(frame as never, new Set(['owned']), explanation);
+    expect(transformer.transform(frame as never, state, helpers)).toEqual([
+      expect.objectContaining({ output: explanation }),
+      expect.objectContaining({ output: stock }),
+      expect.objectContaining({ output: `Prefix: ${stock}` }),
+    ]);
+    expect(content[0].content).toBe(stock);
+    expect(transformer.transform({ ...frame } as never, state, helpers)[0]).toMatchObject({ output: stock });
   });
 
   it('extracts tool_result blocks and returns them without text events', () => {

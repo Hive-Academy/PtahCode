@@ -11,6 +11,8 @@
  */
 import {
   SESSION_CHILD_OUTCOME_UNKNOWN_REASON,
+  formatProviderHang,
+  formatProviderInputClosed,
   type SessionChildOutcome,
   type SessionChildOutcomeKind,
   type SessionEndCause,
@@ -27,6 +29,7 @@ export type SessionChildEndCause =
 export interface SessionChildOutcomeInput {
   readonly parentSessionId?: string;
   readonly terminalStatus?: SessionChildTerminalStatus;
+  readonly paused?: true;
   readonly endReason?: string;
   readonly endedAt?: string;
   readonly succeededBy?: string;
@@ -46,15 +49,16 @@ const CAUSE_WORDS: Readonly<
   'stream-exit': 'the agent stream exited',
   'provider-error': 'provider error',
   'compaction-abort': 'context compaction did not finish',
-  'no-activity-timeout':
-    'no stream activity for 180 s (no-activity watchdog); the session can be resumed from its tab',
+  'no-activity-timeout': formatProviderHang(180),
+  'provider-no-response': formatProviderHang(180),
+  'provider-input-closed': formatProviderInputClosed(),
   'config-reinit': 'configuration reloaded',
   'runtime-cap': 'runtime cap reached',
   'first-turn-not-started': 'first turn did not start',
   unknown: 'the session ended for an unknown reason',
 };
 
-/** Outcome of a terminal record; `undefined` while the child is live. */
+/** Outcome of a terminal record. Live children, including paused children, have no terminal outcome. */
 export function childOutcomeOf(
   record: SessionChildOutcomeInput,
   latestSuccessorId?: string,

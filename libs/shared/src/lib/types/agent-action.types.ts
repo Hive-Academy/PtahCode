@@ -82,6 +82,10 @@ export interface AgentActionMessageContext {
   readonly audience?: 'agent' | 'parent';
   /** The paused agent can only use Read, Grep and Glob. */
   readonly readOnly?: boolean;
+  /** The subject is a child session (runtime-cap copy differs from a subagent budget copy). */
+  readonly childSession?: boolean;
+  /** Watchdog operation that is overdue, for example `compaction` or `a background task`. */
+  readonly operation?: string;
 }
 
 const MS_PER_MINUTE = 60_000;
@@ -250,6 +254,52 @@ export function formatExplicitUserStopContext(): string {
   return 'Ptah recorded an explicit user stop for the previous turn. Review the current state before repeating any interrupted work.';
 }
 
+/** The provider hang guard ended a turn that had no accounted work. */
+export function formatProviderHang(seconds: number | undefined): string {
+  const value = count(seconds);
+  return value === undefined
+    ? 'Ptah watchdog ended the turn because the provider sent no response while no work was accounted for. Review the current state before retrying the turn.'
+    : `Ptah watchdog ended the turn because the provider sent no response for ${value} seconds while no work was accounted for. Review the current state before retrying the turn.`;
+}
+
+/** The watchdog retries a first turn that produced no output or tool activity. */
+export function formatWatchdogRetry(): string {
+  return 'Ptah watchdog is retrying the first turn once because the provider sent no response and the previous attempt produced no output or tool activity. Continue the original task.';
+}
+
+/** The retry also failed; the parent or UI decides. */
+export function formatWatchdogFinalFailure(id: string): string {
+  return `Ptah watchdog could not recover the first turn for ${id}. The provider did not respond. Review its worktree and start or resume the session when ready.`;
+}
+
+/** The first turn showed signs of work, so no retry was safe. */
+export function formatWatchdogNoSafeRetry(id: string): string {
+  return `Ptah watchdog could not safely retry the first turn for ${id}. Review the session and its worktree before starting another attempt.`;
+}
+
+/** An accounted wait is still open after its overdue window. */
+export function formatActivityOverdue(operation: string): string {
+  return `Ptah watchdog is still waiting for ${operation}. Review the session if the wait is unexpected.`;
+}
+
+/** The provider input channel closed and the turn ended for recovery. */
+export function formatProviderInputClosed(): string {
+  return 'The provider input channel closed. Ptah ended the affected turn for recovery. Review the current state and send a new message to retry.';
+}
+
+/** Child session approaching its runtime cap. */
+export function formatChildRuntimeAsk(notice: AgentActionNotice, notesPath: string | undefined): string {
+  const capMinutes = minutes(notice.limit, notice.unit);
+  const cap = capMinutes === undefined ? 'configured' : `${capMinutes}-minute`;
+  const target = notesPath ?? 'your final report';
+  return `Ptah budget monitor asked for a handoff because this child session is approaching its ${cap} runtime cap. Write the current state, remaining work, verification and active lane IDs to ${target}, call ptah_session_handoff, then return normally.`;
+}
+
+/** Child session paused at the runtime cap plus grace, or its successor is blocked. */
+export function formatChildPauseNotice(notice: AgentActionNotice, id: string): string {
+  return `Ptah budget monitor paused new work for ${id} because ${formatAgentActionReason(notice)}. Review its notes and worktree. Continue after choosing a successor or explicitly resuming work.`;
+}
+
 /**
  * Render the message for a notice. The template is selected from the reason, the action and
  * the context. A missing context value falls back to a neutral phrase rather than an empty
@@ -277,8 +327,26 @@ export function formatAgentActionNotice(
       return formatExplicitUserStopContext();
     case 'tool-gate-unavailable':
       return formatLaneToolGateUnavailable(notice, context.id ?? FALLBACK_ID);
+    case 'provider-no-response':
+      return formatProviderHang(
+        notice.unit === 'milliseconds' && notice.measured !== undefined
+          ? notice.measured / 1000
+          : notice.measured,
+      );
+    case 'provider-input-closed':
+      return formatProviderInputClosed();
+    case 'compaction-overdue':
+      return formatActivityOverdue(context.operation ?? 'compaction');
     default:
       break;
+  }
+  if (notice.reason === 'runtime-cap' && context.childSession) {
+    if (notice.action === 'asked-handoff') return formatChildRuntimeAsk(notice, context.notesPath);
+    if (notice.action === 'paused') {
+      return context.audience === 'agent'
+        ? formatBudgetCeilingDeny(notice)
+        : formatChildPauseNotice(notice, context.id ?? FALLBACK_ID);
+    }
   }
   if (notice.action === 'asked-handoff') {
     return context.notesPath !== undefined && !context.readOnly

@@ -27,6 +27,7 @@ import type {
 } from '@ptah-extension/shared';
 
 import { SdkError } from '../../errors';
+import { NoActivityWatchdog, ProviderTurnEndError } from '../no-activity-watchdog';
 import type { IModelResolver } from '../../auth-env.port';
 import type {
   SessionRecord,
@@ -37,7 +38,7 @@ import {
   LEVEL_FROM_SDK_MODE,
 } from './permission-mode-map';
 import type { SessionEndCallbackRegistry } from '../session-end-callback-registry';
-import type { SessionEndCause } from '../session-end-callback-registry';
+import type { SessionEndCause, SessionEndPayload } from '../session-end-callback-registry';
 import type { SdkAdapterEvents } from '../sdk-adapter-events.service';
 import type { CompactionConfig } from '../compaction-config-provider';
 import {
@@ -70,7 +71,6 @@ function authWorkspaceOf(rec: SessionRecord): string | undefined {
 }
 
 export class SessionControl {
-  private readonly endingRecords = new WeakSet<SessionRecord>();
   constructor(
     private readonly logger: Logger,
     private readonly registry: SessionRegistry,
@@ -121,20 +121,30 @@ export class SessionControl {
       `[SessionLifecycle] Interrupting current turn for session: ${sessionId}`,
     );
     const wasTurnInFlight = rec.turnInFlight;
+    const watchdog = rec.activityHold instanceof NoActivityWatchdog
+      ? rec.activityHold
+      : undefined;
+    const wasProviderTurnOpen = watchdog?.isTurnOpen ?? false;
     const interruptedId = rec.currentTurnClientMessageId;
+    const ownedContext = cause === 'user-stop' && (wasTurnInFlight || wasProviderTurnOpen)
+      ? this.registry.recordExplicitUserStop(rec, false)
+      : undefined;
     const resultCountBefore = rec.resultCount ?? 0;
-    if (cause && wasTurnInFlight) {
+    if (cause && (wasTurnInFlight || wasProviderTurnOpen)) {
       this.adapterEvents?.recordStopCause(
         [rec.tabId, ...(rec.realSessionId ? [rec.realSessionId] : [])], cause,
       );
     }
 
+    const stopHold = cause === 'user-stop' ? watchdog : undefined;
+    stopHold?.hold();
+    let timeout: ReturnType<typeof setTimeout> | undefined;
     try {
       let timedOut = false;
       await Promise.race([
         rec.query.interrupt(),
         new Promise<void>((resolve) =>
-          setTimeout(() => {
+          timeout = setTimeout(() => {
             timedOut = true;
             resolve();
           }, 3000),
@@ -144,7 +154,10 @@ export class SessionControl {
       // the pump's turn claim. Release it here or the session's next follow-up
       // is held forever (TASK_2026_294).
       if (timedOut) {
-        if (this.registry.find(rec.tabId) === rec && !this.endingRecords.has(rec))
+        if (ownedContext && rec.pendingStopContext === ownedContext) {
+          rec.pendingStopContext = undefined;
+        }
+        if (this.registry.find(rec.tabId) === rec && !rec.ending)
           this.adapterEvents?.clearStopCause(rec.tabId);
         // No turn identifier exists on SDK hooks. Retire this query rather than
         // allowing late A hooks to acquire operation ownership during turn B.
@@ -173,6 +186,8 @@ export class SessionControl {
         } else {
           this.registry.markTurnEnded(sessionId as string);
         }
+      } else if (!wasTurnInFlight && wasProviderTurnOpen && !rec.turnInFlight) {
+        watchdog?.endTurn();
       }
       if (timedOut) {
         this.logger.warn(
@@ -188,7 +203,10 @@ export class SessionControl {
       // degradation-audit: optional-capability - false is this method's
       // reported "interrupt did not take", the same value the 3s timeout
       // returns, and the turn claim is released above so the session lives on.
-      if (this.registry.find(rec.tabId) === rec && !this.endingRecords.has(rec))
+      if (ownedContext && rec.pendingStopContext === ownedContext) {
+        rec.pendingStopContext = undefined;
+      }
+      if (this.registry.find(rec.tabId) === rec && !rec.ending)
         this.adapterEvents?.clearStopCause(rec.tabId);
       this.retireInterruptedRecord(rec);
       this.logger.warn(
@@ -196,6 +214,9 @@ export class SessionControl {
         err instanceof Error ? err : new Error(String(err)),
       );
       return false;
+    } finally {
+      clearTimeout(timeout);
+      stopHold?.release();
     }
   }
 
@@ -218,7 +239,7 @@ export class SessionControl {
     // to a replacement record or to an end that is already in progress. Clear
     // only this call's entry: a newer interrupt cause on the record stays.
     const clearCauseIfCurrent = (): void => {
-      if (owned && this.registry.find(rec.tabId) === rec && !this.endingRecords.has(rec))
+      if (owned && this.registry.find(rec.tabId) === rec && !rec.ending)
         this.adapterEvents?.clearStopCause(rec.tabId, owned);
     };
     let timeout: ReturnType<typeof setTimeout> | undefined;
@@ -302,7 +323,7 @@ export class SessionControl {
     cause: SessionEndCause = 'unknown',
   ): Promise<EndSessionOutcome> {
     const rec = this.registry.find(sessionId as string);
-    if (!rec) {
+    if (!rec || rec.ending) {
       this.logger.info(
         `[SessionLifecycle] Session already ended, nothing to interrupt`,
       );
@@ -333,7 +354,7 @@ export class SessionControl {
     cause: SessionEndCause = 'unknown',
   ): Promise<boolean> {
     const rec = this.registry.find(sessionId as string);
-    if (!rec || rec.token !== token) {
+    if (!rec || rec.token !== token || rec.ending) {
       return false;
     }
 
@@ -357,9 +378,23 @@ export class SessionControl {
     sessionId: SessionId,
     cause: SessionEndCause = 'unknown',
   ): Promise<void> {
-    // Sampled before any await, so a stop during the interrupt below is later.
-    const startedAt = Date.now();
-    this.endingRecords.add(rec);
+    // Attribute the owned turn before interrupting or releasing permissions.
+    const activityWatchdog = rec.activityHold instanceof NoActivityWatchdog
+      ? rec.activityHold
+      : undefined;
+    const providerFailure = rec.abortController.signal.reason;
+    if (providerFailure instanceof ProviderTurnEndError) {
+      cause = providerFailure.endCause;
+    } else if (cause === 'provider-no-response' || cause === 'provider-input-closed') {
+      this.registry.recordProviderTurnEnd(rec, new ProviderTurnEndError(cause));
+    } else if (cause === 'user-stop' && (rec.turnInFlight || activityWatchdog?.isTurnOpen)) {
+      this.registry.recordExplicitUserStop(rec, true);
+    }
+    const startedAt = providerFailure instanceof ProviderTurnEndError
+      ? providerFailure.startedAt
+      : activityWatchdog?.failure?.startedAt ?? Date.now();
+    rec.ending = true;
+    activityWatchdog?.stop();
     this.logger.info(`[SessionLifecycle] Ending session: ${sessionId}`);
     const registrySessionId = rec.realSessionId ?? rec.tabId;
     const workspaceRoot = rec.config.projectPath ?? '';
@@ -413,7 +448,7 @@ export class SessionControl {
         this.logger.info(
           `[SessionLifecycle] Marked running subagents as interrupted for session: ${sessionId}`,
         );
-        if (rec.query) {
+        if (rec.query && !rec.abortController.signal.aborted) {
           try {
             let timedOut = false;
             await Promise.race([
@@ -455,7 +490,15 @@ export class SessionControl {
         sessionId: registrySessionId,
         workspaceRoot,
         cause,
-        ...(cause === 'no-activity-timeout' ? { startedAt } : {}),
+        ...(cause === 'no-activity-timeout' || cause === 'provider-no-response'
+          ? { startedAt }
+          : {}),
+        ...(activityWatchdog
+          ? {
+              zeroOutwardEvents:
+                activityWatchdog.zeroOutwardEvents && (rec.resultCount ?? 0) === 0,
+            }
+          : {}),
       });
     } else {
       this.logger.debug(
@@ -470,7 +513,8 @@ export class SessionControl {
   async disposeAllSessions(cause: SessionEndCause = 'unknown'): Promise<void> {
     this.logger.info('[SessionLifecycle] Disposing all active sessions...');
 
-    const records = Array.from(this.registry.entries()).map(([, rec]) => rec);
+    const records = Array.from(this.registry.entries(), ([, rec]) => rec)
+      .filter((rec) => !rec.ending);
     for (const rec of records) {
       this.revokeMcpSubject?.(rec.tabId);
     }
@@ -490,26 +534,46 @@ export class SessionControl {
       }
     }
 
-    const endedSessions: Array<{ sessionId: string; workspaceRoot: string }> =
-      [];
+    const endedSessions: SessionEndPayload[] = [];
 
     const interruptPromises: Promise<void>[] = [];
     const teardownIds: string[] = [];
+    const claimedRecords: SessionRecord[] = [];
 
     try {
       for (const rec of records) {
         this.logger.debug(`[SessionLifecycle] Ending session: ${rec.tabId}`);
 
+        rec.ending = true;
+        claimedRecords.push(rec);
+        const watchdog = rec.activityHold instanceof NoActivityWatchdog
+          ? rec.activityHold
+          : undefined;
+        watchdog?.stop();
         const registryId = rec.realSessionId ?? rec.tabId;
         this.subagentRegistry.beginSessionTeardown(registryId);
         teardownIds.push(registryId);
         this.subagentRegistry.markAllInterrupted(registryId);
         const root = rec.config.projectPath ?? '';
         if (root) {
-          endedSessions.push({ sessionId: registryId, workspaceRoot: root });
+          const failure = rec.abortController.signal.reason;
+          endedSessions.push({
+            sessionId: registryId,
+            workspaceRoot: root,
+            cause: failure instanceof ProviderTurnEndError ? failure.endCause : cause,
+            ...(failure instanceof ProviderTurnEndError && failure.endCause === 'provider-no-response'
+              ? { startedAt: failure.startedAt }
+              : {}),
+            ...(watchdog
+              ? {
+                  zeroOutwardEvents:
+                    watchdog.zeroOutwardEvents && (rec.resultCount ?? 0) === 0,
+                }
+              : {}),
+          });
         }
 
-        if (rec.query) {
+        if (rec.query && !rec.abortController.signal.aborted) {
           interruptPromises.push(
             Promise.race([
               // SDK 0.3.278 gave `interrupt()` a return value. Teardown only
@@ -539,20 +603,20 @@ export class SessionControl {
         }
       }
     } finally {
+      // Retire only records claimed above. A replacement registered during
+      // the interrupt wait still owns its own registry entries.
+      for (const rec of claimedRecords) {
+        if (!rec.abortController.signal.aborted) rec.abortController.abort();
+        this.registry.remove(rec);
+      }
       for (const registryId of teardownIds) {
         this.subagentRegistry.endSessionTeardown(registryId);
       }
     }
 
-    // Remove only the records snapshotted above. A session that registered
-    // while the interrupts were awaited (a `chat:start` racing a config-change
-    // re-init) is not part of this dispose and must survive it.
-    for (const rec of records) {
-      this.registry.remove(rec);
-    }
     this.logger.info('[SessionLifecycle] All sessions disposed');
     for (const ended of endedSessions) {
-      this.sessionEndRegistry.notifyAll({ ...ended, cause });
+      this.sessionEndRegistry.notifyAll(ended);
     }
   }
 

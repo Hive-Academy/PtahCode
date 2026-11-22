@@ -25,13 +25,12 @@ describe('session child succession helpers', () => {
   });
 
   it('tells a child exactly how to hand off at the cap', () => {
-    const text = renderRuntimeCapWarning({ minutesLeft: 10, graceMinutes: 15, handoffPath: '/worktree/HANDOFF.md' });
-    for (const part of ['10 minutes', 'not interrupted now', 'do not start a new one',
-      'Commit verified work', 'leave other work uncommitted', '/worktree/HANDOFF.md',
-      'running lanes', 'agent ids', 'verification state', 'open decisions',
-      'ptah_session_handoff', 'same worktree and branch', '15 minutes after the cap']) {
-      expect(text).toContain(part);
-    }
+    const text = renderRuntimeCapWarning({ capMinutes: 10, handoffPath: '/worktree/HANDOFF.md' });
+    expect(text).toBe(
+      'Ptah budget monitor asked for a handoff because this child session is approaching its 10-minute runtime cap. ' +
+      'Write the current state, remaining work, verification and active lane IDs to /worktree/HANDOFF.md, ' +
+      'call ptah_session_handoff, then return normally.',
+    );
   });
 
   const base = {
@@ -95,10 +94,13 @@ describe('session child succession helpers', () => {
     'parent-stop',
     'workspace-close',
     'host-shutdown',
-  ])(
+    'provider-no-response',
+    'no-activity-timeout',
+    'provider-input-closed',
+  ] as const)(
     'keeps %s as a stop', (cause) => expect(routeSessionEndCause(cause)).toBe('stop'),
   );
-  it.each(['stream-exit', 'provider-error', 'config-reinit', 'compaction-abort', 'unknown'])(
+  it.each(['stream-exit', 'provider-error', 'config-reinit', 'compaction-abort', 'unknown'] as const)(
     'routes %s to succession', (cause) => expect(routeSessionEndCause(cause)).toBe('succeed'),
   );
   it('renders unexpected session end recovery', () => {

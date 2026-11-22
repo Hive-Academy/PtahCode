@@ -1,3 +1,7 @@
+import {
+  formatAgentActionNotice,
+  formatProviderInputClosed,
+} from '@ptah-extension/shared';
 import type {
   HookCallbackMatcher,
   HookEvent,
@@ -6,87 +10,199 @@ import type {
 } from '../types/sdk-types/claude-sdk.types';
 import { COMPACTION_MAX_DWELL_MS } from './compaction/compaction-state.types';
 
-/**
- * Query-local root activity accounting. Silence is not evidence of failure while
- * a known tool is running: report uncertainty, never impose a tool runtime
- * limit. A compaction is accounted the same way. Where the compaction
- * coordinator controls the session (`enforceCompactionDwell` returns true) it
- * is accounted for at most {@link COMPACTION_MAX_DWELL_MS} from when it opened;
- * past that bound the watchdog stops re-arming and times out with cause
- * `'compaction-dwell'` (TASK_2026_597 A8), the same bound at which the
- * coordinator gives up on the compaction. An observe-only session keeps the
- * TASK_2026_411 B8 behaviour: an open compaction is reported overdue, never cut.
- * Otherwise only unaccounted root silence invokes the recovery callback.
- * Idle/permission holds remain reference counted; operation ownership is keyed
- * and idempotent instead. Child registration never owns a parent hold.
- *
- * A backgrounded root-owned SDK task (`task_id`) releases its root tool but is
- * still accounted: its own progress, updates and child messages refresh it,
- * and root silence only times out once every such task has also been quiet
- * for {@link BACKGROUND_TASK_QUIET_TIMEOUT_MS}. Unknown, ambient and stale-run
- * task traffic never extends the deadline.
- */
+export const NO_ACTIVITY_TIMEOUT_MS = 180_000;
+export const BACKGROUND_TASK_QUIET_TIMEOUT_MS = 600_000;
+export const API_RETRY_MARGIN_MS = 30_000;
+export const API_RETRY_MAX_ACCOUNTED_MS = 900_000;
+
+export type WatchdogTimeoutCause = 'provider-no-response';
+
+export class ProviderTurnEndError extends Error {
+  readonly startedAt = Date.now();
+
+  constructor(
+    readonly endCause: WatchdogTimeoutCause | 'provider-input-closed',
+  ) {
+    super(
+      endCause === 'provider-input-closed'
+        ? formatProviderInputClosed()
+        : formatAgentActionNotice({
+            actor: 'ptah-watchdog',
+            action: 'ended',
+            reason: endCause,
+            nextStep: 'retry-first-turn',
+            measured: NO_ACTIVITY_TIMEOUT_MS,
+            unit: 'milliseconds',
+          }),
+    );
+    this.name = 'ProviderTurnEndError';
+  }
+}
+
+interface OverdueWindow {
+  nextAt: number;
+  interval: number;
+}
+
+interface OpenTask {
+  runId?: string;
+  toolUseId?: string;
+  background: boolean;
+  kind?: string;
+  overdue: OverdueWindow;
+}
+
+function isRootHook(message: object): boolean {
+  return !('parent_tool_use_id' in message && message.parent_tool_use_id) &&
+    !('agent_id' in message && message.agent_id);
+}
+
+function overdueWindow(interval: number): OverdueWindow {
+  return { nextAt: performance.now() + interval, interval };
+}
+
+function backOff(window: OverdueWindow, now: number): void {
+  window.interval = Math.min(window.interval * 2, 3_600_000);
+  window.nextAt = now + window.interval;
+}
+
+function nonNegativeMs(value: number | undefined): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0
+    ? value
+    : 0;
+}
+
+function isToolLifecycleHook(event: string): boolean {
+  return event === 'PreToolUse' ||
+    event === 'PostToolUse' ||
+    event === 'PostToolUseFailure';
+}
+
+function showsSdkWork(message: SDKMessage): boolean {
+  switch (message.type) {
+    case 'assistant':
+    case 'stream_event':
+    case 'tool_progress':
+    case 'tool_use_summary':
+    case 'result':
+      return true;
+    case 'user': {
+      const { content } = message.message;
+      return Array.isArray(content) &&
+        content.some((block) => block.type === 'tool_use' || block.type === 'tool_result');
+    }
+    case 'system':
+      switch (message.subtype) {
+        case 'local_command_output':
+        case 'files_persisted':
+        case 'permission_denied':
+          return true;
+        case 'hook_started':
+        case 'hook_progress':
+        case 'hook_response':
+          return isToolLifecycleHook(message.hook_event) || isRootHook(message);
+        case 'compact_boundary':
+          return true;
+        case 'status':
+          return message.status === 'compacting' || !!message.compact_result;
+        default:
+          return message.subtype.startsWith('task_') ||
+            message.subtype === 'background_tasks_changed' ||
+            message.subtype === 'thinking_tokens';
+      }
+    default:
+      return false;
+  }
+}
+
+/** Accounts for work within one SDK query, including tasks that span turns. */
 export class NoActivityWatchdog {
   private timer: ReturnType<typeof setTimeout> | null = null;
-  private fired = false;
-  /**
-   * Why the watchdog fired, or `null` while it has not. The SDK rethrows the
-   * abort as a generic "Operation aborted" error that loses the abort reason,
-   * so the stream reads this to report the true end cause (not `user-stop`).
-   */
-  private timeoutCause: WatchdogTimeoutCause | null = null;
   private stopped = false;
   private started = false;
   private holds = 0;
-  private turnOpen = true;
-  /**
-   * Monotonic end of an announced SDK API retry window; null while none is
-   * open. A hold release or an unrelated kick re-arms to it, never shorter.
-   */
-  private retryUntilMs: number | null = null;
-
-  get firedCause(): WatchdogTimeoutCause | null {
-    return this.timeoutCause;
-  }
-
-  beginTurn(): void {
-    if (this.stopped || this.fired) return;
-    // A real turn boundary: a tool from a late message of the previous turn
-    // must not hold this turn's deadline forever.
-    this.tools.clear();
-    this.tasks.clear();
-    this.retryUntilMs = null;
-    this.turnOpen = true;
-    this.kick();
-  }
+  private turnOpen = false;
+  private quietUntil = 0;
+  private retryUntil = 0;
+  private toolNoticeAt = 0;
+  private compaction: OverdueWindow | null = null;
   private readonly tools = new Map<string, string>();
-  /** Monotonic time the open compaction began; null while none is open. */
-  private compactingSinceMs: number | null = null;
-  /** Root-owned SDK tasks by `task_id`; cleared at every turn boundary. */
-  private readonly tasks = new Map<string, TaskRecord>();
+  private readonly hooks = new Map<string, { event: string; overdue: OverdueWindow }>();
+  private readonly tasks = new Map<string, OpenTask>();
+  // Run ids sort in launch order. Keep terminal ids to reject late frames
+  // after a task is removed, including stale entries in a replacement snapshot.
+  private readonly taskRuns = new Map<string, string>();
+  private readonly finishedTasks = new Set<string>();
+  private readonly finishedTools = new Set<string>();
+  private sawWork = false;
+  private sawOutwardEvent = false;
+  private terminalError?: ProviderTurnEndError;
+  private readonly interruptedTools = new Set<string>();
 
   constructor(
     private readonly timeoutMs: number,
     private readonly onTimeout: (cause: WatchdogTimeoutCause) => void,
     private readonly onOverdue: (operations: readonly string[]) => void = () =>
       undefined,
-    /** Read at each arm: whether the compaction dwell bound applies now. */
-    private readonly enforceCompactionDwell: () => boolean = () => false,
   ) {}
 
+  get firedCause(): WatchdogTimeoutCause | null {
+    return this.terminalError?.endCause === 'provider-no-response' ? 'provider-no-response' : null;
+  }
+
+  get failure(): ProviderTurnEndError | undefined {
+    return this.terminalError;
+  }
+
+  recordFailure(error: ProviderTurnEndError): void {
+    if (!this.terminalError) {
+      this.terminalError = error;
+      for (const id of this.tools.keys()) this.interruptedTools.add(id);
+    }
+    this.stop();
+  }
+
+  noteOutwardEvent(): void {
+    if (!this.terminalError) this.sawOutwardEvent = true;
+  }
+
+  get zeroOutwardEvents(): boolean {
+    return !this.sawOutwardEvent && !this.sawWork;
+  }
+
+  get isTurnOpen(): boolean {
+    return this.turnOpen;
+  }
+
+  beginTurn(): void {
+    if (this.stopped || this.turnOpen) return;
+    this.turnOpen = true;
+    this.kick();
+  }
+
+  endTurn(): void {
+    this.turnOpen = false;
+    this.tools.clear();
+    this.finishedTools.clear();
+    this.retryUntil = 0;
+    this.compaction = null;
+    this.clear();
+  }
+
   start(): void {
-    if (this.stopped || this.fired) return;
+    if (this.stopped || this.started) return;
     this.started = true;
-    this.arm();
+    this.kick();
   }
 
   kick(): void {
-    if (this.stopped || this.fired || !this.started) return;
+    this.quietUntil = performance.now() + this.timeoutMs;
+    this.toolNoticeAt = this.quietUntil;
     this.arm();
   }
 
   hold(): void {
-    if (this.stopped || this.fired) return;
+    if (this.stopped) return;
     this.holds += 1;
     this.clear();
   }
@@ -98,24 +214,21 @@ export class NoActivityWatchdog {
   }
 
   get isHeld(): boolean {
-    return this.holds > 0;
-  }
-
-  /** Root result/interrupt is authoritative even when a terminal hook is lost. */
-  endTurn(): void {
-    this.turnOpen = false;
-    this.tools.clear();
-    this.tasks.clear();
-    this.retryUntilMs = null;
-    this.setCompacting(false);
-    this.kick();
+    return !this.stopped && (this.holds > 0 || !this.turnOpen);
   }
 
   stop(): void {
     this.stopped = true;
     this.holds = 0;
     this.endTurn();
-    this.clear();
+    this.hooks.clear();
+    this.tasks.clear();
+    this.taskRuns.clear();
+    this.finishedTasks.clear();
+  }
+
+  interruptedRootTools(): ReadonlySet<string> {
+    return this.interruptedTools;
   }
 
   /** SDK hooks are scoped to this query, never a mutable session-id lookup. */
@@ -136,7 +249,14 @@ export class NoActivityWatchdog {
         {
           hooks: [
             async (input, _toolId, options) => {
-              if (!options.signal.aborted) this.observeHook(input);
+              if (!options.signal.aborted && !this.terminalError) {
+                if (isToolLifecycleHook(input.hook_event_name) ||
+                    input.hook_event_name === 'PreCompact' ||
+                    input.hook_event_name === 'PostCompact') {
+                  this.sawWork = true;
+                }
+                this.observeHook(input);
+              }
               return { continue: true };
             },
           ],
@@ -147,307 +267,297 @@ export class NoActivityWatchdog {
   }
 
   private observeHook(input: HookInput): void {
-    // SDK BaseHookInput: agent_id, not agent_type, identifies nested hooks.
-    if (this.stopped || this.fired || !this.turnOpen || input.agent_id) return;
+    if (this.stopped || input.agent_id) return;
     switch (input.hook_event_name) {
       case 'PreToolUse':
-        if (input.tool_use_id)
-          this.tools.set(input.tool_use_id, input.tool_name);
+        if (!input.tool_use_id) return;
+        this.beginTurn();
+        this.openTool(input.tool_use_id, input.tool_name);
         break;
       case 'PostToolUse':
       case 'PostToolUseFailure':
-        this.tools.delete(input.tool_use_id);
+        if (!this.turnOpen) return;
+        this.closeTool(input.tool_use_id);
         break;
       case 'PreCompact':
-        this.setCompacting(true);
+        this.compaction ??= overdueWindow(COMPACTION_MAX_DWELL_MS);
         break;
       case 'PostCompact':
-        this.setCompacting(false);
+        this.compaction = null;
         break;
       case 'Stop':
       case 'StopFailure':
-        // Do not release the pump or publish idle from a hook: final assistant
-        // messages may still be buffered. The result owns the turn boundary.
+        // The result, rather than a hook, releases the host's input pump.
         this.endTurn();
-        break;
+        return;
       case 'SessionEnd':
         this.stop();
-        break;
+        return;
     }
     this.kick();
   }
 
-  /**
-   * Only root activity extends the root deadline. Child chatter only refreshes
-   * a known background task that owns its parent tool.
-   */
-  observe(message: SDKMessage): void {
-    if (this.stopped || this.fired) return;
+  /** Stream callers defer turn closure until they have matched the result to its owner. */
+  observe(message: SDKMessage, { deferResult = false } = {}): void {
+    if (this.terminalError) return;
+    if (!this.sawWork && showsSdkWork(message)) this.sawWork = true;
+    if (this.stopped) return;
+    if (message.type === 'system') {
+      this.observeSystem(message);
+      return;
+    }
     if ('parent_tool_use_id' in message && message.parent_tool_use_id) {
-      const parentToolId = message.parent_tool_use_id;
-      for (const record of this.tasks.values()) {
-        if (record.toolUseId === parentToolId) this.touch(record);
+      let changed = false;
+      for (const task of this.tasks.values()) {
+        if (task.toolUseId === message.parent_tool_use_id) {
+          task.overdue = overdueWindow(BACKGROUND_TASK_QUIET_TIMEOUT_MS);
+          changed = true;
+        }
       }
+      if (changed) this.arm();
       return;
     }
-    if (
-      message.type === 'tool_progress' &&
-      !this.tools.has(message.tool_use_id)
-    )
-      return;
-    if (message.type === 'system' && this.observeSystem(message)) return;
-    // Root API output proves the retry sent its first byte.
-    if (message.type === 'assistant' || message.type === 'stream_event') {
-      this.retryUntilMs = null;
+    switch (message.type) {
+      case 'stream_event':
+        if (message.event.type === 'message_start') this.beginTurn();
+        if (!this.turnOpen) return;
+        this.retryUntil = 0;
+        break;
+      case 'assistant':
+        if (!this.turnOpen) return;
+        this.retryUntil = 0;
+        for (const block of message.message.content) {
+          if (block.type === 'tool_use') this.openTool(block.id, block.name);
+        }
+        break;
+      case 'user':
+        if (!this.turnOpen || !Array.isArray(message.message.content)) return;
+        for (const block of message.message.content) {
+          if (block.type === 'tool_result') this.closeTool(block.tool_use_id);
+        }
+        break;
+      case 'tool_progress':
+        if (!this.tools.has(message.tool_use_id)) return;
+        break;
+      case 'result':
+        if (deferResult) this.kick();
+        else this.endTurn();
+        return;
+      default:
+        return;
     }
-    this.observeToolUses(message);
-    this.observeToolResults(message);
-    if (message.type === 'result') this.endTurn();
     this.kick();
   }
 
-  /**
-   * Task chatter extends the deadline only when it releases a root tool or
-   * refreshes a known background task.
-   */
   private observeSystem(
     message: Extract<SDKMessage, { type: 'system' }>,
-  ): boolean {
-    if (message.subtype === 'task_started') {
-      this.observeTaskStarted(message);
-      return true;
-    }
-    if (message.subtype === 'task_updated') {
-      this.observeTaskUpdate(message);
-      return true;
-    }
-    if (message.subtype === 'task_notification') {
-      const record = this.tasks.get(message.task_id);
-      if (record && !sameRun(record, message.run_id)) return true;
-      const toolId = message.tool_use_id ?? record?.toolUseId;
-      const released = toolId !== undefined && this.tools.delete(toolId);
-      this.tasks.delete(message.task_id);
-      // A terminal notification restores a full normal window.
-      if (released || (record?.background && record.keepsAlive)) this.kick();
-      return true;
-    }
-    if (message.subtype === 'task_progress') {
-      const record = this.tasks.get(message.task_id);
-      if (record && sameRun(record, message.run_id)) this.touch(record);
-      return true;
-    }
-    if (message.subtype === 'api_retry') {
-      this.observeApiRetry(message);
-      return true;
-    }
-    this.observeCompaction(message);
-    return false;
-  }
-
-  /**
-   * The SDK announced its own retry of a failed API request. The silence until
-   * the retry sends its first byte is accounted: arm one window that covers the
-   * announced delay and the first-byte wait of the retry, so the watchdog does
-   * not stop the turn while the SDK still recovers (TASK_2026_2288 A).
-   */
-  private observeApiRetry(
-    message: Extract<SDKMessage, { type: 'system'; subtype: 'api_retry' }>,
   ): void {
-    const accountedMs =
-      nonNegativeMs(message.retry_delay_ms) +
-      nonNegativeMs(message.no_response?.retry_wait_ms) +
-      API_RETRY_MARGIN_MS;
-    const windowMs = Math.min(
-      API_RETRY_MAX_ACCOUNTED_MS,
-      Math.max(this.timeoutMs, accountedMs),
-    );
-    this.retryUntilMs = performance.now() + windowMs;
-    this.arm(windowMs);
-  }
-
-  private observeCompaction(
-    message: Extract<SDKMessage, { type: 'system' }>,
-  ): void {
-    if (message.subtype === 'status') {
-      if (message.status === 'compacting') this.setCompacting(true);
-      // null alone is not proof of completion; compact_result is explicit.
-      if (message.compact_result) this.setCompacting(false);
+    switch (message.subtype) {
+      case 'hook_started':
+      case 'hook_progress':
+      case 'hook_response': {
+        if (!isRootHook(message) || isToolLifecycleHook(message.hook_event)) return;
+        const hook = this.hooks.get(message.hook_id);
+        if (message.subtype === 'hook_started') {
+          this.hooks.set(message.hook_id, hook ?? {
+            event: message.hook_event,
+            overdue: overdueWindow(this.timeoutMs),
+          });
+        } else if (message.subtype === 'hook_progress') {
+          if (hook) hook.overdue = overdueWindow(this.timeoutMs);
+        } else if (!this.hooks.delete(message.hook_id)) {
+          return;
+        }
+        break;
+      }
+      case 'background_tasks_changed': {
+        let changed = false;
+        const retained = new Set(message.tasks.map((task) => task.task_id));
+        for (const id of this.tasks.keys()) {
+          if (!retained.has(id)) changed = this.tasks.delete(id) || changed;
+        }
+        for (const task of message.tasks) {
+          if (!task.run_id && this.finishedTasks.has(task.task_id)) continue;
+          changed = this.openTask(task.task_id, task.run_id, true, undefined, false, task.task_type) || changed;
+        }
+        if (!changed) return;
+        break;
+      }
+      case 'task_started':
+        if (!this.openTask(
+          message.task_id,
+          message.run_id,
+          message.is_backgrounded === true,
+          message.tool_use_id,
+          true,
+          message.task_type,
+        )) return;
+        this.finishedTasks.delete(message.task_id);
+        break;
+      case 'task_updated':
+        if (['completed', 'failed', 'killed'].includes(message.patch.status ?? '')) {
+          if (!this.finishTask(message.task_id, message.run_id)) return;
+        } else if (!this.openTask(
+          message.task_id,
+          message.run_id,
+          message.patch.is_backgrounded === true,
+          undefined,
+          true,
+        )) {
+          return;
+        }
+        break;
+      case 'task_notification':
+        if (!this.finishTask(message.task_id, message.run_id, message.tool_use_id)) return;
+        break;
+      case 'task_progress': {
+        const task = this.tasks.get(message.task_id);
+        if (!task || (message.run_id && task.runId && message.run_id !== task.runId)) return;
+        task.overdue = overdueWindow(BACKGROUND_TASK_QUIET_TIMEOUT_MS);
+        this.arm();
+        return;
+      }
+      case 'api_retry': {
+        if (!this.turnOpen) return;
+        const accountedMs =
+          nonNegativeMs(message.retry_delay_ms) +
+          nonNegativeMs(message.no_response?.retry_wait_ms) +
+          API_RETRY_MARGIN_MS;
+        this.retryUntil = performance.now() + Math.min(
+          API_RETRY_MAX_ACCOUNTED_MS,
+          Math.max(this.timeoutMs, accountedMs),
+        );
+        this.arm();
+        return;
+      }
+      case 'thinking_tokens':
+        if (!this.turnOpen) return;
+        break;
+      case 'status':
+        if (message.status === 'compacting') {
+          this.compaction ??= overdueWindow(COMPACTION_MAX_DWELL_MS);
+        } else if (message.compact_result) {
+          this.compaction = null;
+        } else {
+          return;
+        }
+        break;
+      case 'compact_boundary':
+        this.compaction = null;
+        break;
+      default:
+        return;
     }
-    if (message.subtype === 'compact_boundary') this.setCompacting(false);
-  }
-
-  /**
-   * A re-announced compaction keeps its original start, so the dwell bound
-   * covers the whole open time (PreCompact, `status:'compacting'`, retries).
-   */
-  private setCompacting(open: boolean): void {
-    if (!open) {
-      this.compactingSinceMs = null;
-    } else if (this.compactingSinceMs === null) {
-      this.compactingSinceMs = performance.now();
-    }
-  }
-
-  /**
-   * Milliseconds left before the open compaction exceeds its dwell bound; null
-   * while none is open or the bound does not apply to this session.
-   */
-  private compactionDwellRemainingMs(): number | null {
-    if (this.compactingSinceMs === null || !this.enforceCompactionDwell()) {
-      return null;
-    }
-    return this.compactingSinceMs + COMPACTION_MAX_DWELL_MS - performance.now();
-  }
-
-  /** Only a task started by an open root tool is recorded. */
-  private observeTaskStarted(
-    message: Extract<SDKMessage, { subtype: 'task_started' }>,
-  ): void {
-    const toolUseId = message.tool_use_id;
-    if (!toolUseId || !this.tools.has(toolUseId)) return;
-    this.tasks.set(message.task_id, {
-      toolUseId,
-      runId: message.run_id,
-      keepsAlive:
-        !message.parent_task_id && !message.ambient && !message.skip_transcript,
-      background: message.is_backgrounded === true,
-      lastActivityMs: performance.now(),
-    });
-  }
-
-  private observeTaskUpdate(
-    message: Extract<SDKMessage, { subtype: 'task_updated' }>,
-  ): void {
-    const record = this.tasks.get(message.task_id);
-    if (!record || !sameRun(record, message.run_id)) return;
-    const terminal = ['completed', 'failed', 'killed'].includes(
-      message.patch.status ?? '',
-    );
-    if (!terminal && !message.patch.is_backgrounded) {
-      this.touch(record);
-      return;
-    }
-    const wasWaiting = this.tools.delete(record.toolUseId);
-    if (terminal) {
-      this.tasks.delete(message.task_id);
-      if (wasWaiting || (record.background && record.keepsAlive)) this.kick();
-      return;
-    }
-    // Backgrounded: the root tool is released but the task stays accounted.
-    record.background = true;
-    if (wasWaiting) this.kick();
-    this.touch(record);
-  }
-
-  /** Refreshes a live background task's quiet window and the root deadline. */
-  private touch(record: TaskRecord): void {
-    if (!record.background || !record.keepsAlive) return;
-    record.lastActivityMs = performance.now();
     this.kick();
   }
 
-  /**
-   * Milliseconds left before every live background task has been quiet for
-   * {@link BACKGROUND_TASK_QUIET_TIMEOUT_MS}; null while none is live.
-   */
-  private backgroundQuietRemainingMs(): number | null {
-    let latestMs: number | null = null;
-    for (const record of this.tasks.values()) {
-      if (record.background && record.keepsAlive) {
-        latestMs = Math.max(latestMs ?? 0, record.lastActivityMs);
-      }
-    }
-    return latestMs === null
-      ? null
-      : latestMs + BACKGROUND_TASK_QUIET_TIMEOUT_MS - performance.now();
+  private openTask(
+    id: string,
+    runId: string | undefined,
+    background: boolean,
+    toolUseId?: string,
+    progress = false,
+    kind?: string,
+  ): boolean {
+    const current = this.tasks.get(id);
+    const latest = this.taskRuns.get(id);
+    if (runId && latest && (runId < latest || (runId === latest && !current))) return false;
+    const task = current && (!runId || !current.runId || runId === current.runId)
+      ? current
+      : { background: false, overdue: overdueWindow(BACKGROUND_TASK_QUIET_TIMEOUT_MS) };
+    task.runId = runId ?? task.runId;
+    if (task.runId) this.taskRuns.set(id, task.runId);
+    task.background ||= background;
+    task.kind = kind ?? task.kind;
+    task.toolUseId ??= toolUseId;
+    if (progress) task.overdue = overdueWindow(BACKGROUND_TASK_QUIET_TIMEOUT_MS);
+    this.tasks.set(id, task);
+    if (this.turnOpen && task.background && task.toolUseId) this.closeTool(task.toolUseId);
+    return true;
   }
 
-  /**
-   * A root `tool_use` in the stream opens a tool call until its result. The
-   * PreToolUse hook is only an early signal: when it is missed, a long tool
-   * call (for example a Bash `npm run verify` that waits in the verify lock)
-   * must still hold the watchdog instead of reading as provider silence.
-   *
-   * A root assistant message proves that a turn is open. It reopens the turn
-   * even when `beginTurn` was skipped (for example after a steer interrupt
-   * whose replacement message started while the turn still counted as in
-   * flight), so the tool hooks of that turn are observed again.
-   */
-  private observeToolUses(message: SDKMessage): void {
-    if (message.type !== 'assistant') return;
-    this.turnOpen = true;
-    const content: unknown = message.message?.content;
-    if (!Array.isArray(content)) return;
-    for (const block of content) {
-      if (block.type === 'tool_use' && typeof block.id === 'string') {
-        this.tools.set(
-          block.id,
-          typeof block.name === 'string' ? block.name : 'tool',
-        );
-      }
-    }
+  private finishTask(id: string, runId?: string, toolUseId?: string): boolean {
+    const latest = this.taskRuns.get(id);
+    if (runId && latest && runId < latest) return false;
+    const task = this.tasks.get(id);
+    const tool = toolUseId ?? task?.toolUseId;
+    if (runId) this.taskRuns.set(id, runId);
+    this.finishedTasks.add(id);
+    this.tasks.delete(id);
+    if (this.turnOpen && tool) this.closeTool(tool);
+    return task !== undefined || tool !== undefined;
   }
 
-  private observeToolResults(message: SDKMessage): void {
-    if (message.type === 'user' && Array.isArray(message.message.content)) {
-      for (const block of message.message.content) {
-        if (block.type === 'tool_result') this.tools.delete(block.tool_use_id);
-      }
-    }
+  private openTool(id: string, name: string): void {
+    // A background snapshot or terminal result can precede the full assistant
+    // tool-use block. A release for that call wins over the buffered block.
+    if (!this.finishedTools.has(id)) this.tools.set(id, name);
   }
 
-  private arm(requestedMs?: number): void {
+  private closeTool(id: string): void {
+    this.finishedTools.add(id);
+    this.tools.delete(id);
+  }
+
+  private arm(): void {
     this.clear();
-    if (this.holds > 0 || this.stopped || this.fired || !this.started) return;
-    const windowMs =
-      requestedMs ??
-      (this.retryUntilMs === null
-        ? this.timeoutMs
-        : Math.max(this.timeoutMs, this.retryUntilMs - performance.now()));
-    // While an enforced compaction is open the deadline never runs past its
-    // dwell bound.
-    const dwellRemainingMs = this.compactionDwellRemainingMs();
-    const delayMs =
-      dwellRemainingMs === null
-        ? windowMs
-        : Math.min(windowMs, Math.max(0, dwellRemainingMs));
-    this.timer = setTimeout(() => {
-      this.timer = null;
-      if (this.stopped || this.fired) return;
-      const operations = [...this.tools.values()];
-      if (this.compactingSinceMs !== null) operations.push('compaction');
-      const remainingMs = this.compactionDwellRemainingMs();
-      // A compaction open for COMPACTION_MAX_DWELL_MS is no longer accounted
-      // silence: stop re-arming and take the timeout path below.
-      const dwellExceeded = remainingMs !== null && remainingMs <= 0;
-      if (operations.length > 0 && !dwellExceeded) {
-        // One timer, no polling I/O and no invented failure verdict. A missing
-        // terminal hook is reconciled by result/interrupt/cancel/stream failure.
-        // Re-arm even if a diagnostic sink throws.
-        try {
-          this.onOverdue(operations);
-        } finally {
-          this.arm();
-        }
-        return;
-      }
-      // Root silence past the normal window while a background task is still
-      // inside its quiet window: report it and check again at the earlier of
-      // the next window and the quiet bound. Never earlier than today's rule.
-      const quietRemainingMs = this.backgroundQuietRemainingMs();
-      if (!dwellExceeded && quietRemainingMs !== null && quietRemainingMs > 0) {
-        try {
-          this.onOverdue(['background task']);
-        } finally {
-          this.arm(Math.min(this.timeoutMs, quietRemainingMs));
-        }
-        return;
-      }
-      this.fired = true;
-      this.timeoutCause = dwellExceeded ? 'compaction-dwell' : 'no-activity';
-      this.onTimeout(this.timeoutCause);
-    }, delayMs);
+    if (this.isHeld || this.stopped || !this.started) return;
+    let nextAt = this.hasOpenWork() ? Infinity : Math.max(this.quietUntil, this.retryUntil);
+    if (this.tools.size) nextAt = Math.min(nextAt, this.toolNoticeAt);
+    if (this.compaction) nextAt = Math.min(nextAt, this.compaction.nextAt);
+    for (const hook of this.hooks.values()) nextAt = Math.min(nextAt, hook.overdue.nextAt);
+    for (const task of this.tasks.values()) nextAt = Math.min(nextAt, task.overdue.nextAt);
+    this.timer = setTimeout(() => this.onTimer(), Math.ceil(nextAt - performance.now()));
     this.timer.unref?.();
+  }
+
+  private hasOpenWork(): boolean {
+    return this.tools.size > 0 || this.tasks.size > 0 ||
+      this.hooks.size > 0 || this.compaction !== null;
+  }
+
+  private onTimer(): void {
+    this.timer = null;
+    if (this.stopped || this.isHeld) return;
+    const now = performance.now();
+    const operations = new Set<string>();
+    if (this.tools.size && this.toolNoticeAt <= now) {
+      for (const tool of this.tools.values()) operations.add(tool);
+      this.toolNoticeAt = now + this.timeoutMs;
+    }
+    if (this.compaction && this.compaction.nextAt <= now) {
+      operations.add('compaction');
+      backOff(this.compaction, now);
+    }
+    for (const hook of this.hooks.values()) {
+      if (hook.overdue.nextAt <= now) {
+        operations.add(`${hook.event} hook`);
+        backOff(hook.overdue, now);
+      }
+    }
+    let taskOverdue = false;
+    for (const task of this.tasks.values()) {
+      if (task.overdue.nextAt <= now) {
+        taskOverdue = true;
+        backOff(task.overdue, now);
+      }
+    }
+    if (taskOverdue) {
+      const kinds = new Set([...this.tasks.values()].map((task) => task.kind ?? 'unknown'));
+      const count = this.tasks.size;
+      operations.add(`${count} open task${count === 1 ? '' : 's'} (${[...kinds].sort().join(', ')})`);
+    }
+    if (!this.hasOpenWork() && now >= Math.max(this.quietUntil, this.retryUntil)) {
+      // Only the session owner records the failure after accepting the verdict.
+      this.stop();
+      this.onTimeout('provider-no-response');
+      return;
+    }
+    try {
+      if (operations.size) this.onOverdue([...operations]);
+    } finally {
+      this.arm();
+    }
   }
 
   private clear(): void {
@@ -458,61 +568,9 @@ export class NoActivityWatchdog {
   }
 }
 
-/**
- * Why the watchdog fired: unaccounted root silence, or an enforced compaction
- * open for `COMPACTION_MAX_DWELL_MS`.
- */
-export type WatchdogTimeoutCause = 'no-activity' | 'compaction-dwell';
-
-/**
- * Unaccounted silence recovery window, NOT a tool runtime cap. Where the
- * coordinator controls the session, compaction is capped separately at
- * `COMPACTION_MAX_DWELL_MS` from when it opened.
- */
-export const NO_ACTIVITY_TIMEOUT_MS = 180_000;
-
-/**
- * Added to the wait an SDK `api_retry` announces, so the retry's first byte
- * can arrive before the watchdog window ends.
- */
-export const API_RETRY_MARGIN_MS = 30_000;
-
-/** Upper bound of the window one SDK `api_retry` can account for. */
-export const API_RETRY_MAX_ACCOUNTED_MS = 900_000;
-
-/** A finite, non-negative millisecond value from SDK data, else 0. */
-function nonNegativeMs(value: number | undefined): number {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0
-    ? value
-    : 0;
-}
-
-/**
- * Quiet bound for a backgrounded root-owned SDK task with no open root tool:
- * root silence times out once every such task has had no qualifying activity
- * for this long. Sustained real progress can run longer.
- */
-export const BACKGROUND_TASK_QUIET_TIMEOUT_MS = 600_000;
-
-/** A root-owned SDK task, kept after backgrounding releases its root tool. */
-interface TaskRecord {
-  readonly toolUseId: string;
-  readonly runId?: string;
-  /** Nested, ambient and skip_transcript tasks only release their root tool. */
-  readonly keepsAlive: boolean;
-  background: boolean;
-  lastActivityMs: number;
-}
-
-/** A late event of another run of the same task must not change this run. */
-function sameRun(record: TaskRecord, runId: string | undefined): boolean {
-  return !record.runId || !runId || record.runId === runId;
-}
-
 export interface ActivityHold {
   hold(): void;
   release(): void;
-  /** Implemented by the query watchdog; plain permission holds need neither. */
   lifecycleHooks?(): Partial<Record<HookEvent, HookCallbackMatcher[]>>;
   endTurn?(): void;
   beginTurn?(): void;

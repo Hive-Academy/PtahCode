@@ -33,6 +33,7 @@ import type {
   SessionMetadataStore,
 } from '@ptah-extension/agent-sdk';
 import {
+  ProviderTurnEndError,
   SessionTurnStateRegistry,
   toTurnStateEvent,
 } from '@ptah-extension/agent-sdk';
@@ -626,6 +627,30 @@ describe('ChatStreamBroadcaster zero-event failures', () => {
   ): AsyncGenerator<FlatStreamEventUnion> {
     throw new Error(message);
   }
+
+  it.each([
+    ['provider-no-response', SESSION_ID],
+    ['provider-input-closed', 'tab-resume'],
+  ] as const)('preserves %s through one token-owned zero-event teardown', async (cause, tabId) => {
+    const h = makeHarness();
+    h.sdkAdapter.getSessionToken.mockReturnValue('typed-token');
+    const failure = new ProviderTurnEndError(cause);
+    const stream: AsyncIterable<FlatStreamEventUnion> = {
+      [Symbol.asyncIterator]: () => ({ next: () => Promise.reject(failure) }),
+    };
+
+    await h.broadcaster.streamEventsToWebview(SESSION_ID, stream, tabId);
+
+    expect(h.sdkAdapter.endSession).not.toHaveBeenCalled();
+    expect(h.sdkAdapter.endSessionIfTokenMatches).toHaveBeenCalledTimes(1);
+    expect(h.sdkAdapter.endSessionIfTokenMatches).toHaveBeenCalledWith(
+      SESSION_ID, 'typed-token', cause,
+    );
+    expect(broadcastsFor(h, 'chat:error')).toEqual([
+      expect.objectContaining({ error: failure.message }),
+    ]);
+    expect(broadcastsFor(h, MESSAGE_TYPES.CHAT_SESSION_ENDED)).toHaveLength(1);
+  });
 
   it('reports a failed start with the original error', async () => {
     const h = makeHarness();
