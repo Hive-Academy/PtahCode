@@ -225,10 +225,14 @@ export class OllamaModelDiscoveryService {
    * and the context window from ollama.com/api/show; a failed or empty
    * /api/show leaves the window unknown (`contextLength: 0`).
    *
-   * @throws ModelListError with the ollama.com reason when ollama.com fails
-   *   and the local daemon yields no cloud model (unreachable or none pulled).
-   *   A successful empty ollama.com answer with no local cloud tags returns
-   *   `[]`.
+   * @throws ModelListError with the ollama.com reason whenever ollama.com
+   *   fails, even when the local daemon lists cloud tags. Those tags alone
+   *   are a partial catalog: returning them would make the caller cache and
+   *   persist them as the full live list, overwriting the saved complete one.
+   *   A cloud model also runs on ollama.com, so an unreachable ollama.com
+   *   cannot serve it either. The caller then shows the saved list (or, for a
+   *   credential reason, none). A successful empty ollama.com answer with no
+   *   local cloud tags returns `[]`.
    */
   async listCloudModels(): Promise<ProviderModelInfo[]> {
     const apiKey = await this.getOllamaCloudApiKey();
@@ -257,16 +261,11 @@ export class OllamaModelDiscoveryService {
           activeProvider: 'ollama-cloud',
         },
       );
-      if (localModels.length === 0) {
-        this.logger.warn(
-          `[OllamaModelDiscovery] listCloudModels: ollama.com/api/tags failed (${reason}) and the local daemon has no cloud models`,
-        );
-        throw new ModelListError(reason);
-      }
       this.logger.warn(
-        `[OllamaModelDiscovery] listCloudModels: ollama.com/api/tags failed (${reason}); listing ${localModels.length} local daemon cloud model(s) only`,
+        `[OllamaModelDiscovery] listCloudModels: ollama.com/api/tags failed (${reason}); ` +
+          `not listing the ${localModels.length} local daemon cloud model(s) alone`,
       );
-      return localModels;
+      throw new ModelListError(reason);
     }
 
     const chatTags = remote.value.filter(
@@ -602,7 +601,8 @@ export class OllamaModelDiscoveryService {
 
   /**
    * JSON request with a 5 s timeout and a {@link MAX_RESPONSE_BYTES} body cap.
-   * Rejects with `ModelListError`: non-2xx -> `http-error`, oversize or
+   * Rejects with `ModelListError`: 401/403 -> `auth-rejected`, any other
+   * non-2xx -> `http-error`, oversize or
    * non-JSON body -> `bad-response`, timeout -> `timeout`. A connection
    * failure rejects with the raw Node error (its code classifies as
    * `network`).
@@ -661,7 +661,13 @@ export class OllamaModelDiscoveryService {
               this.logger.debug(
                 `[OllamaModelDiscovery] ${url} returned ${res.statusCode}`,
               );
-              reject(new ModelListError('http-error'));
+              reject(
+                new ModelListError(
+                  res.statusCode === 401 || res.statusCode === 403
+                    ? 'auth-rejected'
+                    : 'http-error',
+                ),
+              );
             }
           });
         },

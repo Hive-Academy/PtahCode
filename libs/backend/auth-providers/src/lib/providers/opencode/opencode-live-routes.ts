@@ -102,7 +102,24 @@ export function protocolFromGatewayApi(
     : undefined;
 }
 
-/** `recommended_api` first; otherwise the single-`api`-key rule. */
+/**
+ * The protocol picked for a row that lists several routable `api` keys and
+ * no usable `recommended_api`: the native Messages API first (no
+ * translation), then Responses, then Chat Completions. Every candidate is one
+ * the row itself declares.
+ */
+const MULTI_API_PREFERENCE: readonly OpenCodeProtocol[] = [
+  'messages',
+  'responses',
+  'chat/completions',
+];
+
+/**
+ * `recommended_api` first; otherwise the single-`api`-key rule; otherwise,
+ * for a row with several `api` keys, the most preferred protocol among the
+ * keys that resolve ({@link MULTI_API_PREFERENCE}). Such a row used to be
+ * dropped from the list and from routing.
+ */
 function rowProtocol(
   row: z.infer<typeof modelSchema>,
 ): OpenCodeProtocol | undefined {
@@ -110,7 +127,16 @@ function rowProtocol(
     row.recommended_api !== undefined
       ? ownProtocol(API_PROTOCOL, row.recommended_api)
       : undefined;
-  return recommended ?? protocolFromGatewayApi(row.api);
+  if (recommended) return recommended;
+  const single = protocolFromGatewayApi(row.api);
+  if (single || !row.api) return single;
+  const declared = new Set(
+    Object.keys(row.api).flatMap((key) => {
+      const protocol = protocolFromGatewayApi({ [key]: row.api?.[key] });
+      return protocol ? [protocol] : [];
+    }),
+  );
+  return MULTI_API_PREFERENCE.find((protocol) => declared.has(protocol));
 }
 
 type Cache = {

@@ -290,10 +290,15 @@ function createMockCopilotAuthService(): MockCopilotAuthService {
   };
 }
 
-type MockCodexAuthService = jest.Mocked<Pick<CodexAuthService, 'listModels'>>;
+type MockCodexAuthService = jest.Mocked<
+  Pick<CodexAuthService, 'listModels' | 'isAuthenticated'>
+>;
 
 function createMockCodexAuthService(): MockCodexAuthService {
-  return { listModels: jest.fn().mockResolvedValue([]) };
+  return {
+    listModels: jest.fn().mockResolvedValue([]),
+    isAuthenticated: jest.fn().mockResolvedValue(true),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -1010,7 +1015,7 @@ describe('ProviderRpcHandlers', () => {
       expect(ids).not.toContain('opencode-cli');
     });
 
-    it('lists provider-session models from the lane adapter catalog, [] on failure', async () => {
+    it('lists provider-session models from the lane adapter catalog and classifies failures', async () => {
       const h = makeHarness({
         hostCapabilities: { nativeCodex: false, providerSessions: ['antigravity'] },
       });
@@ -1034,10 +1039,49 @@ describe('ProviderRpcHandlers', () => {
       ]);
       expect(h.cliDetection.getAdapter).toHaveBeenCalledWith('antigravity');
 
-      listModels.mockRejectedValueOnce(new Error('agy not signed in'));
+      // A failed probe is a classified failure, never an empty list.
+      listModels.mockRejectedValueOnce(
+        Object.assign(new Error('agy models timed out'), { code: 'ETIMEDOUT' }),
+      );
+      await expect(entry[1]()).rejects.toEqual(new ModelListError('timeout'));
+      // A clean empty answer from a CLI with no sign-in check stays [].
+      listModels.mockResolvedValueOnce([]);
       expect(await entry[1]()).toEqual([]);
       h.cliDetection.getAdapter.mockReturnValue(undefined);
-      expect(await entry[1]()).toEqual([]);
+      await expect(entry[1]()).rejects.toEqual(
+        new ModelListError('no-live-source'),
+      );
+    });
+
+    it('reports a signed-out provider-session CLI as not-signed-in, whether it failed or listed nothing', async () => {
+      const h = makeHarness({
+        hostCapabilities: { nativeCodex: false, providerSessions: ['antigravity'] },
+      });
+      h.handlers.register();
+      const entry = h.providerModels.registerDynamicFetcher.mock.calls.find(
+        ([id]) => id === 'antigravity-cli',
+      );
+      if (!entry) throw new Error('Missing Antigravity fetcher');
+      const listModels = jest.fn().mockResolvedValue([]);
+      const ensureTokensFresh = jest.fn().mockResolvedValue(false);
+      h.cliDetection.getAdapter.mockReturnValue({
+        listModels,
+        ensureTokensFresh,
+      } as never);
+
+      await expect(entry[1]()).rejects.toEqual(
+        new ModelListError('not-signed-in'),
+      );
+      listModels.mockRejectedValueOnce(new Error('agy models exited with code 1'));
+      await expect(entry[1]()).rejects.toEqual(
+        new ModelListError('not-signed-in'),
+      );
+      // An unreadable sign-in state keeps the fetch's own reason.
+      ensureTokensFresh.mockRejectedValueOnce(new Error('keyring locked'));
+      listModels.mockRejectedValueOnce(
+        Object.assign(new Error('down'), { code: 'ECONNREFUSED' }),
+      );
+      await expect(entry[1]()).rejects.toEqual(new ModelListError('network'));
     });
 
     it('uses the Kimi auth service and lists only the live catalog rows', async () => {
@@ -1372,14 +1416,54 @@ describe('ProviderRpcHandlers', () => {
       ]);
     });
 
-    it('returns an empty list when both dynamic sources fail, never a static fallback', async () => {
+    it('throws the classified reason when both dynamic sources fail, never a static fallback', async () => {
       const h = makeHarness();
       h.cliDetection.getAdapter.mockReturnValue(
         codexCatalogAdapter(
           jest.fn().mockRejectedValue(new Error('unavailable')),
         ),
       );
-      h.codexAuthService.listModels.mockRejectedValue(new Error('unavailable'));
+      h.codexAuthService.listModels.mockRejectedValue(
+        Object.assign(new Error('unavailable'), { code: 'ENOTFOUND' }),
+      );
+      h.handlers.register();
+      const entry = h.providerModels.registerDynamicFetcher.mock.calls.find(
+        ([id]) => id === 'openai-codex',
+      );
+      if (!entry) throw new Error('Missing Codex fetcher');
+
+      await expect(entry[1]()).rejects.toEqual(new ModelListError('network'));
+      expect(h.logger.debug).toHaveBeenCalledWith(
+        expect.stringContaining('Codex app-server model catalog unavailable'),
+      );
+      expect(h.logger.debug).toHaveBeenCalledWith(
+        expect.stringContaining('Codex auth service model listing unavailable'),
+      );
+    });
+
+    it('throws not-signed-in for a signed-out Codex account instead of an empty list', async () => {
+      const h = makeHarness();
+      h.cliDetection.getAdapter.mockReturnValue(
+        codexCatalogAdapter(jest.fn().mockResolvedValue([])),
+      );
+      h.codexAuthService.listModels.mockRejectedValue(new Error('401'));
+      h.codexAuthService.isAuthenticated.mockResolvedValue(false);
+      h.handlers.register();
+      const entry = h.providerModels.registerDynamicFetcher.mock.calls.find(
+        ([id]) => id === 'openai-codex',
+      );
+      if (!entry) throw new Error('Missing Codex fetcher');
+
+      await expect(entry[1]()).rejects.toEqual(
+        new ModelListError('not-signed-in'),
+      );
+    });
+
+    it('returns [] only when every Codex source answered with no models while signed in', async () => {
+      const h = makeHarness();
+      h.cliDetection.getAdapter.mockReturnValue(
+        codexCatalogAdapter(jest.fn().mockResolvedValue([])),
+      );
       h.handlers.register();
       const entry = h.providerModels.registerDynamicFetcher.mock.calls.find(
         ([id]) => id === 'openai-codex',
@@ -1387,12 +1471,40 @@ describe('ProviderRpcHandlers', () => {
       if (!entry) throw new Error('Missing Codex fetcher');
 
       await expect(entry[1]()).resolves.toEqual([]);
-      expect(h.logger.debug).toHaveBeenCalledWith(
-        expect.stringContaining('Codex app-server model catalog unavailable'),
+    });
+
+    it('keeps the last source reason when the Copilot sign-in check throws', async () => {
+      const h = makeHarness();
+      h.modelDiscovery.getCopilotModels.mockRejectedValue(
+        Object.assign(new Error('slow'), { code: 'ETIMEDOUT' }),
       );
-      expect(h.logger.debug).toHaveBeenCalledWith(
-        expect.stringContaining('Codex auth service model listing unavailable'),
+      h.copilotAuthService.isAuthenticated.mockRejectedValue(
+        new Error('token store unreadable'),
       );
+      h.handlers.register();
+      const entry = h.providerModels.registerDynamicFetcher.mock.calls.find(
+        ([id]) => id === 'github-copilot',
+      );
+      if (!entry) throw new Error('Missing Copilot fetcher');
+
+      await expect(entry[1]()).rejects.toEqual(new ModelListError('timeout'));
+    });
+
+    it('does not fall back to the SDK list when the Anthropic API key is rejected', async () => {
+      const h = makeHarness({ authEnv: { ANTHROPIC_API_KEY: 'fixture-key' } });
+      h.sdkAdapter.getApiModels.mockRejectedValue(
+        new ModelListError('auth-rejected'),
+      );
+      h.handlers.register();
+      const entry = h.providerModels.registerDynamicFetcher.mock.calls.find(
+        ([id]) => id === 'anthropic',
+      );
+      if (!entry) throw new Error('Missing Anthropic fetcher');
+
+      await expect(entry[1]()).rejects.toEqual(
+        new ModelListError('auth-rejected'),
+      );
+      expect(h.sdkAdapter.getSupportedModels).not.toHaveBeenCalled();
     });
 
     /**
@@ -1463,12 +1575,16 @@ describe('ProviderRpcHandlers', () => {
         expect(h.sdkAdapter.getSupportedModels).not.toHaveBeenCalled();
       });
 
-      it('returns [] (reported as empty) when the native login reports nothing', async () => {
+      it('throws unexpected when the native SDK bridge answers no models', async () => {
+        // The bridge answers [] for every failure, so [] is not an empty
+        // catalog; the reason was lost inside the bridge.
         const h = makeHarness();
         h.sdkAdapter.getNativeClaudeModels.mockResolvedValue([]);
         h.handlers.register();
 
-        await expect(claudeCliFetcher(h)()).resolves.toEqual([]);
+        await expect(claudeCliFetcher(h)()).rejects.toEqual(
+          new ModelListError('unexpected'),
+        );
       });
     });
   });

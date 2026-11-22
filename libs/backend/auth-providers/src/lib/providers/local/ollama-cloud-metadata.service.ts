@@ -49,6 +49,7 @@
  * @see https://openrouter.ai/api/v1/models
  */
 
+import { createHash } from 'crypto';
 import { injectable, inject } from 'tsyringe';
 import { Logger, TOKENS } from '@ptah-extension/vscode-core';
 import {
@@ -139,6 +140,16 @@ interface CacheEntry<T> {
 }
 
 /**
+ * The cache scope of an ollama.com request: a SHA-256 digest of the API key
+ * (never the key itself), or `''` without one. A tags answer is per account,
+ * so a cached one is served only to the same key.
+ */
+function keyFingerprint(apiKey: string | null | undefined): string {
+  const key = apiKey?.trim() ?? '';
+  return key ? createHash('sha256').update(key).digest('hex') : '';
+}
+
+/**
  * Strip `:cloud`/`-cloud` suffixes, lowercase, and remove dots so we can
  * match against OpenRouter's slug tails. Examples:
  *   `kimi-k2.5:cloud`       -> `kimi-k25`
@@ -187,7 +198,9 @@ function extractFamily(normalizedOllama: string): string {
 
 @injectable()
 export class OllamaCloudMetadataService {
-  private tagsCache: CacheEntry<OllamaCloudTag[]> | null = null;
+  private tagsCache:
+    | (CacheEntry<OllamaCloudTag[]> & { readonly keyFingerprint: string })
+    | null = null;
 
   constructor(
     @inject(TOKENS.LOGGER) private readonly logger: Logger,
@@ -203,11 +216,20 @@ export class OllamaCloudMetadataService {
    * use; without one it returns the public cloud catalog.
    *
    * @param apiKey - ollama.com API key (sent as `Authorization: Bearer <key>`)
-   * @throws ModelListError `http-error`, `bad-response`, `network` or
-   *   `timeout` when the list cannot be read. Nothing is cached then.
+   * The cache is scoped to a fingerprint of `apiKey`: a different (or no)
+   * key fetches again instead of reading another account's tags.
+   *
+   * @throws ModelListError `auth-rejected` (HTTP 401/403), `http-error`,
+   *   `bad-response`, `network` or `timeout` when the list cannot be read.
+   *   Nothing is cached then.
    */
   async fetchCloudTags(apiKey?: string | null): Promise<OllamaCloudTag[]> {
-    if (this.tagsCache && this.isFresh(this.tagsCache)) {
+    const fingerprint = keyFingerprint(apiKey);
+    if (
+      this.tagsCache &&
+      this.tagsCache.keyFingerprint === fingerprint &&
+      this.isFresh(this.tagsCache)
+    ) {
       this.logger.debug(
         `[OllamaCloudMetadata] Returning ${this.tagsCache.value.length} cached cloud tags (cache age: ${
           Date.now() - this.tagsCache.fetchedAt
@@ -258,7 +280,11 @@ export class OllamaCloudMetadataService {
       );
     }
 
-    this.tagsCache = { value: tags, fetchedAt: Date.now() };
+    this.tagsCache = {
+      value: tags,
+      fetchedAt: Date.now(),
+      keyFingerprint: fingerprint,
+    };
     this.logger.info(
       `[OllamaCloudMetadata] ollama.com/api/tags returned ${models.length} model entries. ` +
         `Full tag list: [${allNames.join(', ')}]`,
@@ -504,7 +530,9 @@ export class OllamaCloudMetadataService {
   /**
    * Lightweight JSON GET using Node 18+ global `fetch`. When `apiKey` is a
    * non-empty string we attach `Authorization: Bearer <key>`. Every failure
-   * throws `ModelListError`: non-2xx -> `http-error`, empty or non-JSON body
+   * throws `ModelListError`: 401/403 -> `auth-rejected` (the key is refused,
+   * so no saved list is shown), any other non-2xx -> `http-error`, empty or
+   * non-JSON body
    * -> `bad-response`, abort after {@link REQUEST_TIMEOUT_MS} -> `timeout`,
    * any other request failure -> `network`. The raw status and a short body
    * snippet go to the debug log only.
@@ -547,7 +575,11 @@ export class OllamaCloudMetadataService {
           `[OllamaCloudMetadata] HTTP ${res.status} ${res.statusText} from ${url}` +
             (snippet ? ` — body: ${snippet}` : ''),
         );
-        throw new ModelListError('http-error');
+        throw new ModelListError(
+          res.status === 401 || res.status === 403
+            ? 'auth-rejected'
+            : 'http-error',
+        );
       }
       if (!text) {
         this.logger.debug(

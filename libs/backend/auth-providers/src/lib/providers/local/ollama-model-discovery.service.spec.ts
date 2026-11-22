@@ -254,14 +254,17 @@ describe('Ollama Cloud discovery', () => {
     });
   });
 
-  it('lists the local cloud tags when only ollama.com fails', async () => {
+  it('throws the ollama.com reason instead of a partial list when only ollama.com fails', async () => {
+    // The local cloud tags alone would be cached and persisted as the full
+    // live catalog (S2); the failure lets the caller show the saved list.
     const { service, post } = harness({
       cloudTags: new ModelListError('network'),
       localTags: [{ name: 'gpt-oss:20b-cloud' }],
     });
     post.mockResolvedValue({ modelinfo: {} });
-    const models = await service.listCloudModels();
-    expect(models.map((m) => m.id)).toEqual(['gpt-oss:20b-cloud']);
+    await expect(service.listCloudModels()).rejects.toMatchObject({
+      reason: 'network',
+    });
   });
 
   it('returns [] when ollama.com answers empty and the daemon is down', async () => {
@@ -314,6 +317,16 @@ describe('Ollama HTTP transport', () => {
     };
     await expect(realService().listLocalModels()).rejects.toMatchObject({
       reason: 'http-error',
+    });
+  });
+
+  it.each([401, 403])('rejects HTTP %i as auth-rejected', async (status) => {
+    respond = (res) => {
+      res.writeHead(status);
+      res.end('denied');
+    };
+    await expect(realService().listLocalModels()).rejects.toMatchObject({
+      reason: 'auth-rejected',
     });
   });
 

@@ -16,6 +16,7 @@
  * - ANTHROPIC_DEFAULT_HAIKU_MODEL
  */
 
+import { createHash } from 'crypto';
 import { injectable, inject } from 'tsyringe';
 import axios from 'axios';
 import { Logger, ConfigManager, TOKENS } from '@ptah-extension/vscode-core';
@@ -59,6 +60,23 @@ import { parseModelsApiRows } from './models-api-parser';
 interface ProviderCache {
   models: ProviderModelInfo[];
   timestamp: number;
+  /** {@link credentialFingerprint} of the key the list was fetched with. */
+  credential?: string;
+}
+
+/**
+ * A short, one-way fingerprint of the credential a list was fetched with:
+ * the first 16 hex digits of a SHA-256 over a fixed prefix and the key, or
+ * `''` without a key. A cached or saved list is served only to the same
+ * fingerprint, so two keys (two Ptah CLI agents, or a rotated key) never share
+ * a list. The raw key is never stored.
+ */
+export function credentialFingerprint(apiKey: string | null): string {
+  if (!apiKey) return '';
+  return createHash('sha256')
+    .update(`ptah-model-list:${apiKey}`)
+    .digest('hex')
+    .slice(0, 16);
 }
 
 /** Callback type for dynamic model fetchers (e.g., Copilot SDK listModels) */
@@ -87,6 +105,11 @@ export interface ProviderModelList {
 export interface PersistedModelCatalog {
   models: ProviderModelInfo[];
   savedAt: number;
+  /**
+   * Fingerprint of the key the list was fetched with (`''` without a key or
+   * for a record saved without one).
+   */
+  credential: string;
 }
 
 /**
@@ -234,6 +257,7 @@ export class ProviderModelsService {
   private async persistCatalog(
     providerId: string,
     models: ProviderModelInfo[],
+    credential = '',
   ): Promise<void> {
     try {
       await this.config.set(this.getCatalogConfigKey(providerId), {
@@ -241,6 +265,7 @@ export class ProviderModelsService {
         origin: 'live',
         models,
         timestamp: Date.now(),
+        ...(credential ? { credential } : {}),
       });
     } catch (error: unknown) {
       // degradation-audit: reported - logged below; only the offline copy is lost and the next live success writes it again.
@@ -298,7 +323,12 @@ export class ProviderModelsService {
       .filter((m): m is ProviderModelInfo => m !== null);
     if (models.length === 0) return null;
     this.recordContextWindows(models, providerId);
-    return { models, savedAt };
+    const credential = record['credential'];
+    return {
+      models,
+      savedAt,
+      credential: typeof credential === 'string' ? credential : '',
+    };
   }
 
   /**
@@ -358,6 +388,12 @@ export class ProviderModelsService {
    * catalog -> `unavailable`. Never throws for a vendor failure; throws only
    * for an unknown provider.
    *
+   * For the `/v1/models` route, the memory cache and the persisted catalog
+   * are used only when their credential fingerprint matches `apiKey`'s: a
+   * deleted key no longer hits a list fetched with it (the live route then
+   * reports `no-key`), and agents with different keys never read each
+   * other's list.
+   *
    * Persisted and unavailable answers are not memory-cached, so a Retry runs
    * the live route again.
    *
@@ -390,10 +426,17 @@ export class ProviderModelsService {
       isStatic: false,
     });
 
+    // Only the `/v1/models` route sends `apiKey`. A fetcher reads its own
+    // credential and the OpenCode gateway catalog is credential-free, so
+    // their lists are scoped to no key (`''`).
+    const usesApiKey =
+      !fetcher && !isOpenCodeProviderId(providerId) && !!provider?.modelsEndpoint;
+    const credential = usesApiKey ? credentialFingerprint(apiKey) : '';
     const cached = this.modelCache.get(providerId);
     if (
       cached &&
       cached.models.length > 0 &&
+      (cached.credential ?? '') === credential &&
       Date.now() - cached.timestamp < this.CACHE_TTL_MS
     ) {
       return shape(cached.models, 'live');
@@ -406,12 +449,16 @@ export class ProviderModelsService {
         await this.fetchLive(providerId, provider, fetcher, apiKey),
       );
       if (models.length > 0) {
-        this.modelCache.set(providerId, { models, timestamp: Date.now() });
+        this.modelCache.set(providerId, {
+          models,
+          timestamp: Date.now(),
+          credential,
+        });
         this.recordContextWindows(models, providerId);
         // The OpenCode routes write their own refreshes through the attached
         // store (DI), so a second write here would only repeat it.
         if (!isOpenCodeProviderId(providerId)) {
-          void this.persistCatalog(providerId, models);
+          void this.persistCatalog(providerId, models, credential);
         }
         return shape(models, 'live');
       }
@@ -427,7 +474,15 @@ export class ProviderModelsService {
     }
 
     if (!CREDENTIAL_FAILURE_REASONS.has(failureReason)) {
-      const persisted = this.readPersistedCatalog(providerId);
+      const saved = this.readPersistedCatalog(providerId);
+      // A list saved under another key belongs to another account.
+      const persisted = saved?.credential === credential ? saved : null;
+      if (saved && !persisted) {
+        this.logger.debug(
+          '[ProviderModelsService] Ignoring a persisted catalog saved under another credential',
+          { providerId },
+        );
+      }
       if (persisted) {
         this.logger.info(
           '[ProviderModelsService] Live fetch unavailable — using the last catalog this provider returned',

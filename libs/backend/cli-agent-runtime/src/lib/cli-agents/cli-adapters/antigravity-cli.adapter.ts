@@ -175,6 +175,15 @@ const AGY_MODEL_IDS_FRESH_MS = 10 * 60_000;
 /** Budget of the `agy models` probe. */
 const AGY_MODELS_PROBE_TIMEOUT_MS = 8000;
 
+/** How long spawns skip the `agy models` probe after one listed nothing or failed. */
+const AGY_MODEL_IDS_RETRY_MS = 60_000;
+
+/** What one `agy models` run produced. */
+type AgyModelsProbe =
+  | { readonly kind: 'output'; readonly stdout: string; readonly exitCode: number | null }
+  | { readonly kind: 'timeout' }
+  | { readonly kind: 'error'; readonly code: string | undefined };
+
 type AgyModelLogger = Pick<Logger, 'debug' | 'warn'>;
 
 /** Token/cost accounting attached to `agent_response` / `checkpoint` / `result`. */
@@ -321,30 +330,52 @@ export function parseAgyModels(stdout: string): CliModelInfo[] {
 }
 
 /**
+ * Effort variants tried, in order, when a replacement base is not itself live
+ * and no chosen effort is: a middle effort first.
+ */
+const AGY_DEFAULT_EFFORT_ORDER: readonly AgyEffort[] = ['medium', 'high', 'low', 'xhigh', 'max'];
+
+/**
  * The value for `--model` (and the ACP `model` option). A model saved from the
  * earlier parse is the whole `id<TAB>name` line; only its id is passed
  * (Batch 52.2).
  *
  * `liveIds` are the ids of the last `agy models` read (`null` when none could
- * be read). A saved id agy no longer lists is replaced by the closest live
- * base (a live id with its effort suffix removed) and logged at `warn`. With
- * no live ids, or no close base, the id passes unchanged and agy reports it.
+ * be read). A saved id agy no longer lists is replaced by a live id of the
+ * closest live base (a live id with its effort suffix removed), logged at
+ * `warn`. The replacement is always a member of `liveIds`, tried in order:
+ * `<base>-<chosen effort>` (the saved id's own effort suffix, else `effort`),
+ * then the unsuffixed `<base>`, then `<base>-<effort>` over
+ * {@link AGY_DEFAULT_EFFORT_ORDER}. With no live ids, or no close base, the
+ * id passes unchanged and agy reports it.
  */
 export function agyModelId(
   value: string,
   liveIds: ReadonlySet<string> | null,
   logger?: AgyModelLogger,
+  effort?: AgyEffort,
 ): string {
   const modelId = value.split('\t')[0].trim();
   if (!liveIds || liveIds.size === 0 || liveIds.has(modelId)) return modelId;
+  const savedEffort = AGY_EFFORT_SUFFIX.exec(modelId)?.[0].slice(1);
+  const chosenEffort = isAgyEffort(savedEffort) ? savedEffort : effort;
   const bases = [...new Set([...liveIds].map((id) => id.replace(AGY_EFFORT_SUFFIX, '')))];
   const base = closestLiveModel(modelId.replace(AGY_EFFORT_SUFFIX, ''), bases);
   if (base === null) return modelId;
+  const candidates = [
+    ...(chosenEffort ? [`${base}-${chosenEffort}`] : []),
+    base,
+    ...AGY_DEFAULT_EFFORT_ORDER.map((variant) => `${base}-${variant}`),
+  ];
+  // `base` came from a live id, so one candidate is live unless that id's
+  // suffix is outside AGY_EFFORT_SUFFIX, which the base strip cannot produce.
+  const model = candidates.find((id) => liveIds.has(id));
+  if (model === undefined) return modelId;
   logger?.warn(
     '[AntigravityCliAdapter] agy no longer lists the saved model; using the closest live model',
-    { saved: modelId, model: base },
+    { saved: modelId, model },
   );
-  return base;
+  return model;
 }
 
 /**
@@ -400,7 +431,7 @@ function buildAntigravityArgs(
   const effort = isAgyEffort(options.reasoningEffort)
     ? options.reasoningEffort
     : undefined;
-  const model = options.model ? agyModelId(options.model, liveIds, logger) : '';
+  const model = options.model ? agyModelId(options.model, liveIds, logger, effort) : '';
   if (model) {
     args.push('--model', agyModelWithEffort(model, effort, liveIds, logger));
   } else if (effort) {
@@ -511,6 +542,8 @@ export class AntigravityCliAdapter implements CliAdapter {
   private lastModelIds: { ids: ReadonlySet<string>; at: number } | undefined;
   /** Spawns that need ids while none are current share one probe. */
   private modelIdsInFlight: Promise<ReadonlySet<string> | null> | undefined;
+  /** When a spawn's probe last listed nothing or failed (see AGY_MODEL_IDS_RETRY_MS). */
+  private modelIdsMissedAt: number | undefined;
 
   /**
    * @param acp - ACP seams for specs and live recordings; production passes none.
@@ -879,7 +912,12 @@ export class AntigravityCliAdapter implements CliAdapter {
       agentId: options.agentId,
     });
     const model = options.model
-      ? agyModelId(options.model, await this.currentModelIds(binary), this.logger)
+      ? agyModelId(
+          options.model,
+          await this.currentModelIds(binary),
+          this.logger,
+          isAgyEffort(options.reasoningEffort) ? options.reasoningEffort : undefined,
+        )
       : undefined;
     return createProviderSessionLaneHandle({
       profile: antigravityAcpProfile,
@@ -952,9 +990,11 @@ export class AntigravityCliAdapter implements CliAdapter {
 
   /**
    * List available models by parsing `agy models` stdout (`parseAgyModels`).
-   * An empty list when the probe fails — the caller treats a bare binary on
-   * PATH as "installed". A non-empty answer becomes the ids spawns read
-   * ({@link currentModelIds}).
+   * A probe that times out, cannot start or exits non-zero without a model
+   * throws (the timeout with code `ETIMEDOUT`, a start failure with the spawn
+   * error's code), so a caller can tell a failure from an empty answer. A
+   * clean exit that lists nothing is `[]`. A non-empty answer becomes the ids
+   * spawns read ({@link currentModelIds}).
    */
   async listModels(): Promise<CliModelInfo[]> {
     const binaryPath = (await resolveCliPath('agy')) ?? 'agy';
@@ -962,31 +1002,48 @@ export class AntigravityCliAdapter implements CliAdapter {
   }
 
   private async readModels(binary: string): Promise<CliModelInfo[]> {
-    const raw = await this.probeModels(binary, AGY_MODELS_PROBE_TIMEOUT_MS);
-    if (!raw) {
-      return [];
+    const probe = await this.probeModels(binary, AGY_MODELS_PROBE_TIMEOUT_MS);
+    if (probe.kind === 'timeout') {
+      throw Object.assign(new Error('agy models timed out'), { code: 'ETIMEDOUT' });
     }
-    const models = parseAgyModels(stripAnsiCodes(raw));
+    if (probe.kind === 'error') {
+      throw Object.assign(new Error('agy models could not start'), { code: probe.code });
+    }
+    const models = parseAgyModels(stripAnsiCodes(probe.stdout));
     if (models.length > 0) {
       this.lastModelIds = { ids: new Set(models.map((m) => m.id)), at: this.now() };
+      return models;
     }
-    return models;
+    if (probe.exitCode !== null && probe.exitCode !== 0) {
+      throw new Error(`agy models exited with code ${probe.exitCode}`);
+    }
+    return [];
   }
 
   /**
    * The live model ids a spawn derives its model value from: the last read
    * while it is under 10 minutes old, otherwise one `agy models` probe shared
-   * by every spawn waiting on it. `null` when the probe lists nothing.
+   * by every spawn waiting on it. `null` when the probe lists nothing or
+   * fails; that answer is kept for {@link AGY_MODEL_IDS_RETRY_MS}, so spawns
+   * in that window do not each wait out the probe budget again.
    */
   private currentModelIds(binary: string): Promise<ReadonlySet<string> | null> {
     const last = this.lastModelIds;
     if (last && this.now() - last.at < AGY_MODEL_IDS_FRESH_MS) {
       return Promise.resolve(last.ids);
     }
+    const missed = this.modelIdsMissedAt;
+    if (missed !== undefined && this.now() - missed < AGY_MODEL_IDS_RETRY_MS) {
+      return Promise.resolve(null);
+    }
     if (!this.modelIdsInFlight) {
       this.modelIdsInFlight = this.readModels(binary)
         .then((models) => {
-          if (models.length > 0) return new Set(models.map((m) => m.id));
+          if (models.length > 0) {
+            this.modelIdsMissedAt = undefined;
+            return new Set(models.map((m) => m.id));
+          }
+          this.modelIdsMissedAt = this.now();
           this.logger?.debug(
             '[AntigravityCliAdapter] agy models listed nothing; the model passes as chosen',
           );
@@ -994,6 +1051,7 @@ export class AntigravityCliAdapter implements CliAdapter {
         })
         .catch((error: unknown) => {
           // degradation-audit: reported - logged at warn; without live ids the model passes as chosen and agy validates it
+          this.modelIdsMissedAt = this.now();
           this.logger?.warn('[AntigravityCliAdapter] agy models probe failed; the model passes as chosen', {
             error: error instanceof Error ? error.message : String(error),
           });
@@ -1007,14 +1065,12 @@ export class AntigravityCliAdapter implements CliAdapter {
   }
 
   /**
-   * Run `agy models` and capture stdout. Never throws — resolves undefined on
-   * timeout/error/no output. Separate from probeCliVersion because we need the
-   * full multi-line stdout, not just the first line.
+   * Run `agy models` and capture stdout. Never rejects: a timeout, a start
+   * error and the exit are each reported as an {@link AgyModelsProbe}.
+   * Separate from probeCliVersion because we need the full multi-line
+   * stdout, not just the first line.
    */
-  private probeModels(
-    binary: string,
-    timeoutMs: number,
-  ): Promise<string | undefined> {
+  private probeModels(binary: string, timeoutMs: number): Promise<AgyModelsProbe> {
     return new Promise((resolve) => {
       let stdout = '';
       let childClosed = false;
@@ -1027,21 +1083,22 @@ export class AntigravityCliAdapter implements CliAdapter {
             });
           }
         });
-        resolve(undefined);
+        resolve({ kind: 'timeout' });
       }, timeoutMs);
 
       child.stdout?.setEncoding('utf8');
       child.stdout?.on('data', (data: string) => {
         stdout += data;
       });
-      child.on('close', () => {
+      child.on('close', (code: number | null) => {
         childClosed = true;
         clearTimeout(timer);
-        resolve(stdout.trim() || undefined);
+        resolve({ kind: 'output', stdout: stdout.trim(), exitCode: code ?? null });
       });
-      child.on('error', () => {
+      child.on('error', (error: Error) => {
         clearTimeout(timer);
-        resolve(undefined);
+        const code = (error as { code?: unknown }).code;
+        resolve({ kind: 'error', code: typeof code === 'string' ? code : undefined });
       });
     });
   }

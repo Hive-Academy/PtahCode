@@ -64,6 +64,8 @@ describe('OllamaCloudMetadataService.fetchCloudTags', () => {
 
   it.each<[string, () => Promise<Response>, string]>([
     ['a non-2xx status', async () => jsonResponse('nope', 503), 'http-error'],
+    ['HTTP 401', async () => jsonResponse('unauthorized', 401), 'auth-rejected'],
+    ['HTTP 403', async () => jsonResponse('forbidden', 403), 'auth-rejected'],
     [
       'a missing models array',
       async () => jsonResponse({ data: [] }),
@@ -116,6 +118,25 @@ describe('OllamaCloudMetadataService.fetchCloudTags', () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+
+  it('scopes the tags cache to the API key, never serving one account to another', async () => {
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ models: [{ name: 'glm-5.3' }] }))
+      .mockResolvedValueOnce(jsonResponse({ models: [{ name: 'kimi-k3' }] }));
+    const svc = service();
+    await expect(svc.fetchCloudTags('key-a')).resolves.toEqual([
+      { id: 'glm-5.3:cloud' },
+    ]);
+    await expect(svc.fetchCloudTags('key-b')).resolves.toEqual([
+      { id: 'kimi-k3:cloud' },
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    // The same key as the last fetch reads the cache.
+    await expect(svc.fetchCloudTags('key-b')).resolves.toEqual([
+      { id: 'kimi-k3:cloud' },
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it('sends the API key as a Bearer token when one is set', async () => {

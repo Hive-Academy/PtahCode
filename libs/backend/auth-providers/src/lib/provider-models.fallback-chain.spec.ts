@@ -15,7 +15,10 @@ import type { WorkspaceScopeResolver } from '@ptah-extension/settings-core';
 import type { ProviderModelInfo } from '@ptah-extension/shared';
 import { SdkError } from '@ptah-extension/agent-sdk';
 import { ActiveProviderResolver } from './auth/active-provider-resolver';
-import { ProviderModelsService } from './provider-models.service';
+import {
+  ProviderModelsService,
+  credentialFingerprint,
+} from './provider-models.service';
 import { ModelListError } from './model-list-error';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -33,11 +36,23 @@ const model = (
   ...extra,
 });
 
+/**
+ * A versioned record as `persistCatalog` writes it. `apiKey` is the key the
+ * list was fetched with (`'key'`, the endpoint rows' key, by default); `null`
+ * writes no credential, as for a fetcher provider.
+ */
 function record(
   models: readonly unknown[],
   timestamp: number = NOW - DAY_MS,
+  apiKey: string | null = 'key',
 ): Record<string, unknown> {
-  return { schema: 2, origin: 'live', models, timestamp };
+  return {
+    schema: 2,
+    origin: 'live',
+    models,
+    timestamp,
+    ...(apiKey ? { credential: credentialFingerprint(apiKey) } : {}),
+  };
 }
 
 function makeService(values: Record<string, unknown> = {}) {
@@ -115,7 +130,10 @@ describe('ProviderModelsService model-list chain', () => {
         expect.objectContaining({ id: 'no-tools' }),
       ]),
       timestamp: NOW,
+      // A fingerprint of the key, never the key itself.
+      credential: credentialFingerprint('key'),
     });
+    expect(JSON.stringify(config.set.mock.calls)).not.toContain('"key"');
     expect(
       (config.set.mock.calls[0][1] as { models: unknown[] }).models,
     ).toHaveLength(3);
@@ -294,7 +312,7 @@ describe('ProviderModelsService model-list chain', () => {
 
   it('signed out: not-signed-in, persisted list not used', async () => {
     const { service } = makeService({
-      [FETCHER_KEY]: record([model('saved')]),
+      [FETCHER_KEY]: record([model('saved')], NOW - DAY_MS, null),
     });
     service.registerDynamicFetcher(FETCHER, async () => {
       throw new ModelListError('not-signed-in');
@@ -357,7 +375,9 @@ describe('ProviderModelsService model-list chain', () => {
       failureReason: 'empty',
     });
 
-    const saved = makeService({ [FETCHER_KEY]: record([model('saved')]) });
+    const saved = makeService({
+      [FETCHER_KEY]: record([model('saved')], NOW - DAY_MS, null),
+    });
     saved.service.registerDynamicFetcher(FETCHER, async () => []);
     expect(await saved.service.fetchModels(FETCHER, null)).toMatchObject({
       source: 'persisted',
@@ -402,6 +422,45 @@ describe('ProviderModelsService model-list chain', () => {
     await expect(
       service.fetchModels('no-such-provider', 'key'),
     ).rejects.toBeInstanceOf(SdkError);
+  });
+
+  it('a deleted key never reads the list cached under it: no-key', async () => {
+    get.mockResolvedValue({ data: { data: [{ id: 'live-a' }] } });
+    const { service } = makeService();
+    expect((await service.fetchModels(ENDPOINT, 'key')).source).toBe('live');
+    expect(await service.fetchModels(ENDPOINT, null)).toMatchObject({
+      models: [],
+      source: 'unavailable',
+      failureReason: 'no-key',
+    });
+    expect(get).toHaveBeenCalledTimes(1);
+  });
+
+  it('two keys on one provider never share a cached list', async () => {
+    get
+      .mockResolvedValueOnce({ data: { data: [{ id: 'account-a' }] } })
+      .mockResolvedValueOnce({ data: { data: [{ id: 'account-b' }] } });
+    const { service } = makeService();
+    const a = await service.fetchModels(ENDPOINT, 'key-a');
+    const b = await service.fetchModels(ENDPOINT, 'key-b');
+    expect(a.models.map((m) => m.id)).toEqual(['account-a']);
+    expect(b.models.map((m) => m.id)).toEqual(['account-b']);
+    expect(get).toHaveBeenCalledTimes(2);
+  });
+
+  it('a list saved under another key is not shown: unavailable', async () => {
+    get.mockRejectedValue(withCode('ENOTFOUND'));
+    const { service } = makeService({
+      [ENDPOINT_KEY]: record([model('saved')], NOW - DAY_MS, 'key-a'),
+    });
+    expect(await service.fetchModels(ENDPOINT, 'key-b')).toMatchObject({
+      models: [],
+      source: 'unavailable',
+      failureReason: 'network',
+    });
+    expect((await service.fetchModels(ENDPOINT, 'key-a')).source).toBe(
+      'persisted',
+    );
   });
 
   it('Retry re-runs the chain: persisted answers are not memory-cached', async () => {

@@ -129,7 +129,7 @@ describe('OpenCode live routes', () => {
       {
         data: [
           model('google', 'generate-content'),
-          model('multi', 'x', { api: { messages: {}, responses: {} } }),
+          model('multi', 'x', { api: { 'generate-content': {}, x: {} } }),
         ],
       },
     ],
@@ -204,6 +204,31 @@ describe('OpenCode live routes', () => {
       recommended: 'responses',
       multi: 'chat/completions',
       fallback: 'messages',
+    });
+  });
+
+  it('routes a multi-api row without a usable recommendation to its most preferred declared protocol', async () => {
+    const routes = new OpenCodeLiveRoutes(async () => ({
+      data: [
+        { ...model('both', 'x'), api: { responses: {}, messages: {} } },
+        {
+          ...model('openai-only', 'x'),
+          api: { 'chat-completions': {}, responses: {} },
+          recommended_api: 'interactions',
+        },
+        {
+          ...model('one-routable', 'x'),
+          api: { 'generate-content': {}, 'chat-completions': {} },
+        },
+      ],
+    }));
+    const rows = await routes.list('opencode-go');
+    expect(
+      Object.fromEntries(rows.map((m) => [m.id, m.upstreamProtocol])),
+    ).toEqual({
+      both: 'messages',
+      'openai-only': 'responses',
+      'one-routable': 'chat/completions',
     });
   });
 

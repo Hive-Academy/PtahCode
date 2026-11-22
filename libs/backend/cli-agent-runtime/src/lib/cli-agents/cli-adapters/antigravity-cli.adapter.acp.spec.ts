@@ -513,7 +513,7 @@ describe('AntigravityCliAdapter — ACP lane', () => {
     lane.handle.abort.abort();
   });
 
-  it('sends a retired saved id as the closest live base, as the stream-json lane does', async () => {
+  it('sends a retired saved id as a live id of the closest base, as the stream-json lane does', async () => {
     const lane = await startLane(TOOL_USE, () => 'result', { model: 'claude-sonnet-4-6' });
     await lane.handle.done;
     const config = lane.agent().received.find(
@@ -521,9 +521,11 @@ describe('AntigravityCliAdapter — ACP lane', () => {
         message.method === 'session/set_config_option' &&
         (message.params as { configId?: unknown } | undefined)?.configId === 'model',
     );
-    // agy accepts a base for `model` (the effort travels as `thought_level`).
+    // Only an id `agy models` lists is derived: the pinned output has no bare
+    // `claude-sonnet-5-5`, so the middle effort variant is sent (the full id
+    // carries the effort, so no `thought_level` is needed).
     expect(config?.params).toEqual(
-      expect.objectContaining({ configId: 'model', value: 'claude-sonnet-5-5' }),
+      expect.objectContaining({ configId: 'model', value: 'claude-sonnet-5-5-medium' }),
     );
     lane.handle.abort.abort();
   });

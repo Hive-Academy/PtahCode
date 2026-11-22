@@ -185,7 +185,7 @@ jest.mock('fs/promises', () => ({
   mkdir: jest.fn().mockResolvedValue(undefined),
 }));
 
-import { AntigravityCliAdapter } from './antigravity-cli.adapter';
+import { AntigravityCliAdapter, agyModelId } from './antigravity-cli.adapter';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type { SdkHandle } from './cli-adapter.interface';
 import type {
@@ -313,17 +313,19 @@ describe('AntigravityCliAdapter', () => {
       expect(models).toContainEqual({ id: 'gemini-pro-orchestrator', name: 'Orchestrator (Carbon)' });
     });
 
-    it('tree-kills the model probe once on timeout', async () => {
+    it('tree-kills the model probe once on timeout and throws a timeout', async () => {
       // The worker has not forwarded exit; the fake child deliberately emits no exit event.
       jest.useFakeTimers();
       const realPlatform = process.platform;
       Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
       try {
         mockResolveCliPath.mockResolvedValue('/usr/local/bin/agy');
-        const models = adapter.listModels();
+        const models = adapter.listModels().catch((error: unknown) => error);
         await Promise.resolve();
         await jest.advanceTimersByTimeAsync(8000);
-        expect(await models).toEqual([]);
+        // A timeout is a failure, not an empty answer: the code lets the
+        // model-list classifier report `timeout`.
+        expect(await models).toMatchObject({ code: 'ETIMEDOUT' });
         expect(mockKillProcessTree).toHaveBeenCalledTimes(1);
         expect(mockKillProcessTree).toHaveBeenCalledWith(
           FAKE_PID,
@@ -386,13 +388,23 @@ describe('AntigravityCliAdapter', () => {
       ]);
     });
 
-    it('an error-only stdout yields no models', async () => {
+    it('an error-only stdout with a non-zero exit throws instead of listing nothing', async () => {
       mockResolveCliPath.mockResolvedValue('/usr/local/bin/agy');
       const models = adapter.listModels();
       await Promise.resolve();
       currentChild?.stdout.write('Error: not signed in. Run agy login.\n');
       currentChild?.emitClose(1);
-      expect(await models).toEqual([]);
+      await expect(models).rejects.toThrow('agy models exited with code 1');
+    });
+
+    it('throws with the spawn error code when agy cannot start', async () => {
+      mockResolveCliPath.mockResolvedValue('/usr/local/bin/agy');
+      const models = adapter.listModels();
+      await Promise.resolve();
+      currentChild?.emitError(
+        Object.assign(new Error('spawn agy ENOENT'), { code: 'ENOENT' }),
+      );
+      await expect(models).rejects.toMatchObject({ code: 'ENOENT' });
     });
 
     it('new format: when any line has a tab, only tab lines are models (final review M-4)', async () => {
@@ -522,7 +534,7 @@ describe('AntigravityCliAdapter', () => {
       );
     });
 
-    it('replaces a retired saved id with the closest live base, from `id<TAB>name`', async () => {
+    it('replaces a retired saved id with a live variant of the closest base, from `id<TAB>name`', async () => {
       const warn = jest.fn();
       const logged = new AntigravityCliAdapter(undefined, async () => true, {
         debug: jest.fn(),
@@ -539,11 +551,42 @@ describe('AntigravityCliAdapter', () => {
       await handle.done;
 
       const [, argsArg] = runSpawnCalls()[0] as [string, string[]];
-      expect(argsArg[argsArg.indexOf('--model') + 1]).toBe('claude-sonnet-5-5');
+      // The pinned output lists only `claude-sonnet-5-5-{low,medium,high}`:
+      // the bare base is not live, so the middle effort is chosen.
+      expect(argsArg[argsArg.indexOf('--model') + 1]).toBe(
+        'claude-sonnet-5-5-medium',
+      );
       expect(warn).toHaveBeenCalledWith(
         expect.stringContaining('closest live model'),
-        { saved: 'claude-sonnet-4-6', model: 'claude-sonnet-5-5' },
+        { saved: 'claude-sonnet-4-6', model: 'claude-sonnet-5-5-medium' },
       );
+    });
+
+    it('keeps the effort of a retired saved id when the closest base lists it', async () => {
+      const handle = await adapter.runSdk({
+        ...baseOptions,
+        model: 'claude-sonnet-4-6-high',
+      });
+      collect(handle);
+      currentChild?.emitClose(0);
+      await handle.done;
+
+      const [, argsArg] = runSpawnCalls()[0] as [string, string[]];
+      expect(argsArg[argsArg.indexOf('--model') + 1]).toBe('claude-sonnet-5-5-high');
+    });
+
+    it('does not re-probe agy models for every spawn after a failed probe', async () => {
+      servedModels = '';
+      for (let i = 0; i < 2; i++) {
+        const handle = await adapter.runSdk({ ...baseOptions, model: 'm-1' });
+        collect(handle);
+        currentChild?.emitClose(0);
+        await handle.done;
+      }
+      const probes = mockSpawnCli.mock.calls.filter(
+        ([, args]) => (args as string[])[0] === 'models',
+      );
+      expect(probes).toHaveLength(1);
     });
 
     it('applies the effort to a retired id through its closest live base', async () => {
@@ -1651,5 +1694,36 @@ describe('AntigravityCliAdapter', () => {
     it('strips ANSI escape codes', () => {
       expect(adapter.parseOutput('\x1b[32mok\x1b[0m')).toBe('ok');
     });
+  });
+});
+
+describe('agyModelId', () => {
+  const live = new Set([
+    'claude-sonnet-5-5',
+    'claude-sonnet-5-5-low',
+    'claude-sonnet-5-5-high',
+    'claude-opus-5-5-low',
+    'claude-opus-5-5-high',
+  ]);
+
+  it('prefers the chosen effort, then the unsuffixed base', () => {
+    expect(agyModelId('claude-sonnet-4-6-high', live)).toBe('claude-sonnet-5-5-high');
+    expect(agyModelId('claude-sonnet-4-6', live, undefined, 'low')).toBe('claude-sonnet-5-5-low');
+    expect(agyModelId('claude-sonnet-4-6', live)).toBe('claude-sonnet-5-5');
+    // `medium` is not live for this base: the bare base wins over the effort.
+    expect(agyModelId('claude-sonnet-4-6-medium', live)).toBe('claude-sonnet-5-5');
+  });
+
+  it('falls back to a listed effort variant when the bare base is not live', () => {
+    expect(agyModelId('claude-opus-4-8', live)).toBe('claude-opus-5-5-high');
+    expect(agyModelId('claude-opus-4-8-medium', live)).toBe('claude-opus-5-5-high');
+  });
+
+  it('never derives an id the live list does not hold', () => {
+    for (const saved of ['claude-sonnet-4-6', 'claude-opus-4-8-xhigh', 'claude-sonnet-1-0-max']) {
+      expect(live.has(agyModelId(saved, live))).toBe(true);
+    }
+    // No close base: the saved id passes unchanged (agy reports it).
+    expect(agyModelId('glm-5', live)).toBe('glm-5');
   });
 });

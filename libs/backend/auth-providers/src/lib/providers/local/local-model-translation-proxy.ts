@@ -24,6 +24,33 @@ import { Logger, ConfigManager, TOKENS } from '@ptah-extension/vscode-core';
 import { TranslationProxyBase } from '../../translation';
 import { SdkError } from '@ptah-extension/agent-sdk';
 import { getAnthropicProvider } from '@ptah-extension/shared';
+import { ModelListError, classifyModelListFailure } from '../../model-list-error';
+
+/**
+ * The model rows of a `/v1/models` body (`data`, or `models`), or `null` when
+ * the body is not JSON or holds no such array. Rows without a string `id`
+ * are dropped.
+ */
+function parseLocalModelRows(body: string): Array<{ id: string }> | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    // degradation-audit: reported - the caller throws bad-response for null.
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object') return null;
+  const record = parsed as { data?: unknown; models?: unknown };
+  const rows = record.data ?? record.models;
+  if (!Array.isArray(rows)) return null;
+  return rows.filter(
+    (row): row is { id: string } =>
+      !!row &&
+      typeof row === 'object' &&
+      typeof (row as { id?: unknown }).id === 'string' &&
+      (row as { id: string }).id.length > 0,
+  );
+}
 
 /**
  * Base translation proxy for local OpenAI-compatible model servers.
@@ -100,6 +127,12 @@ export class LocalModelTranslationProxy extends TranslationProxyBase {
    * Fetch available models from the local server's /v1/models endpoint.
    * Used as a DynamicModelFetcher registered with ProviderModelsService.
    * Also serves as a health check -- if this succeeds, the server is running.
+   *
+   * A failure throws a `ModelListError`, never `[]`, so a stopped server is
+   * not reported as "returned no models": a refused or unreachable server ->
+   * `network`, no answer in 5 s -> `timeout`, a non-2xx status -> `http-error`
+   * (401/403 -> `auth-rejected`), a body that is not a model list ->
+   * `bad-response`. Only a server that answers with no models gives `[]`.
    */
   async listModels(): Promise<
     Array<{
@@ -131,7 +164,14 @@ export class LocalModelTranslationProxy extends TranslationProxyBase {
               ) {
                 resolve(Buffer.concat(chunks).toString('utf8'));
               } else {
-                reject(new Error(`/v1/models returned ${res.statusCode}`));
+                const status = res.statusCode ?? 0;
+                reject(
+                  new ModelListError(
+                    status === 401 || status === 403
+                      ? 'auth-rejected'
+                      : 'http-error',
+                  ),
+                );
               }
             });
           },
@@ -139,15 +179,19 @@ export class LocalModelTranslationProxy extends TranslationProxyBase {
         req.on('error', reject);
         req.on('timeout', () => {
           req.destroy();
-          reject(new Error('/v1/models request timed out'));
+          reject(
+            Object.assign(new Error('/v1/models request timed out'), {
+              code: 'ETIMEDOUT',
+            }),
+          );
         });
         req.end();
       });
 
-      const parsed = JSON.parse(response);
-      const models = parsed.data ?? parsed.models ?? [];
+      const models = parseLocalModelRows(response);
+      if (models === null) throw new ModelListError('bad-response');
 
-      return models.map((m: { id: string; object?: string }) => ({
+      return models.map((m) => ({
         id: m.id,
         name: this.formatModelName(m.id),
         description: '',
@@ -155,14 +199,13 @@ export class LocalModelTranslationProxy extends TranslationProxyBase {
         supportsToolUse: false,
       }));
     } catch (error) {
-      // degradation-audit: reported - logged at warn here; the caller gets an
-      // empty model list for this local provider.
+      // degradation-audit: reported - logged at warn and rethrown as a classified ModelListError.
       this.logger.warn(
         `[${this.config.name}Proxy] Failed to list models: ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
-      return [];
+      throw new ModelListError(classifyModelListFailure(error));
     }
   }
 

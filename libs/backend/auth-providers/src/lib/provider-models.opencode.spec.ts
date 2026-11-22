@@ -135,6 +135,8 @@ describe('ProviderModelsService OpenCode catalog', () => {
     expect(reloaded.service.getPersistedCatalog('opencode-zen')).toEqual({
       models: [row('stored')],
       savedAt: (record as { timestamp: number }).timestamp,
+      // The gateway catalog is credential-free.
+      credential: '',
     });
   });
 });
