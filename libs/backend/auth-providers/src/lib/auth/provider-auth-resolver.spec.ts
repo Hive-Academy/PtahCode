@@ -1004,7 +1004,7 @@ describe('ProviderAuthResolver — live-catalogue tiers for a lane (TASK_2026_26
     const result = await resolver.resolve('lm-studio', 'lane');
 
     expect(result?.env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe('gemma-3-12b');
-    expect(getLiveDerivedTiers).toHaveBeenCalledWith('lm-studio');
+    expect(getLiveDerivedTiers).toHaveBeenCalledWith('lm-studio', undefined);
     expect(getLiveDerivedTiers).not.toHaveBeenCalledWith('openrouter');
   });
 });

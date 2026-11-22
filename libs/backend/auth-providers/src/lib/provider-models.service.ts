@@ -80,6 +80,16 @@ export function credentialFingerprint(apiKey: string | null): string {
     .slice(0, 16);
 }
 
+/**
+ * The credential a synchronous catalog read is for: the key one run
+ * authenticates with (`null` without one). The read then answers only from a
+ * list fetched under that credential's fingerprint, not from whichever
+ * credential listed this provider last.
+ */
+export interface CatalogCredentialScope {
+  apiKey: string | null;
+}
+
 /** Callback type for dynamic model fetchers (e.g., Copilot SDK listModels) */
 export type DynamicModelFetcher = () => Promise<ProviderModelInfo[]>;
 
@@ -235,6 +245,22 @@ export class ProviderModelsService {
   private readonly catalogCredential = new Map<string, string | null>();
 
   /**
+   * Providers whose saved catalog {@link clearCache} invalidated. A saved
+   * record is not read for them until a new live list is saved, so neither
+   * the deferred deletion nor its failure lets the previous credential's
+   * list answer again in this process.
+   */
+  private readonly invalidatedCatalogs = new Set<string>();
+
+  /**
+   * Bumped by {@link clearCache} (per provider, or globally for a full
+   * clear). A list request started before a bump writes nothing when it
+   * completes: its answer belongs to the previous credential.
+   */
+  private readonly cacheGeneration = new Map<string, number>();
+  private globalCacheGeneration = 0;
+
+  /**
    * Providers whose catalogue is being refreshed for tier derivation right now.
    *
    * Bounds the work to one in-flight refresh per provider and, because the
@@ -305,12 +331,15 @@ export class ProviderModelsService {
    * record, so a later fetch failure can show real data.
    *
    * Fire-and-forget: a failed write must never break the fetch that produced
-   * the data, so this swallows its own errors after logging.
+   * the data, so this swallows its own errors after logging. A successful
+   * write ends an invalidation ({@link invalidatedCatalogs}) unless another
+   * {@link clearCache} ran since `generation` was read.
    */
   private async persistCatalog(
     providerId: string,
     models: ProviderModelInfo[],
     credential = '',
+    generation = this.generationOf(providerId),
   ): Promise<void> {
     try {
       await this.config.set(this.getCatalogConfigKey(providerId), {
@@ -320,6 +349,9 @@ export class ProviderModelsService {
         timestamp: Date.now(),
         ...(credential ? { credential } : {}),
       });
+      if (this.generationOf(providerId) === generation) {
+        this.invalidatedCatalogs.delete(providerId);
+      }
     } catch (error: unknown) {
       // degradation-audit: reported - logged below; only the offline copy is lost and the next live success writes it again.
       this.logger.debug(
@@ -339,6 +371,9 @@ export class ProviderModelsService {
   private readPersistedCatalog(
     providerId: string,
   ): PersistedModelCatalog | null {
+    // Invalidated by clearCache: the record on disk (if its deletion has not
+    // run or failed) belongs to the previous credential.
+    if (this.invalidatedCatalogs.has(providerId)) return null;
     const stored = this.config.get<unknown>(
       this.getCatalogConfigKey(providerId),
     );
@@ -479,14 +514,12 @@ export class ProviderModelsService {
       ...extra,
     });
 
-    // Only the `/v1/models` route sends `apiKey`. A fetcher reads its own
-    // credential and the OpenCode gateway catalog is credential-free, so
-    // their lists are scoped to no key (`''`).
-    const usesApiKey =
-      !fetcher &&
-      !isOpenCodeProviderId(providerId) &&
-      !!provider?.modelsEndpoint;
-    const credential = usesApiKey ? credentialFingerprint(apiKey) : '';
+    const credential = this.catalogCredentialFor(providerId, apiKey);
+    // A clearCache() during any await below makes this request stale: it
+    // then writes nothing (memory, context windows, marker, saved catalog).
+    const generation = this.generationOf(providerId);
+    const isCurrent = (): boolean =>
+      this.generationOf(providerId) === generation;
 
     const signedIn = this.fetcherSignIn.get(providerId);
     if (
@@ -520,6 +553,13 @@ export class ProviderModelsService {
         await this.fetchLive(providerId, provider, fetcher, apiKey),
       );
       if (models.length > 0) {
+        if (!isCurrent()) {
+          this.logger.debug(
+            '[ProviderModelsService] Not caching a model list requested before its credential changed',
+            { providerId },
+          );
+          return shape(models, 'live');
+        }
         this.modelCache.set(providerId, {
           models,
           timestamp: Date.now(),
@@ -530,7 +570,7 @@ export class ProviderModelsService {
         // The OpenCode routes write their own refreshes through the attached
         // store (DI), so a second write here would only repeat it.
         if (!isOpenCodeProviderId(providerId)) {
-          void this.persistCatalog(providerId, models, credential);
+          void this.persistCatalog(providerId, models, credential, generation);
         }
         return shape(models, 'live');
       }
@@ -547,12 +587,16 @@ export class ProviderModelsService {
 
     // A credential failure hides every list of this provider from the
     // synchronous reads too; any other failure scopes them to this request's
-    // credential.
-    this.catalogCredential.set(
-      providerId,
-      CREDENTIAL_FAILURE_REASONS.has(failureReason) ? null : credential,
-    );
-    if (!CREDENTIAL_FAILURE_REASONS.has(failureReason)) {
+    // credential. A stale request (see `generation`) neither sets the marker
+    // nor answers from the saved catalog.
+    const current = isCurrent();
+    if (current) {
+      this.catalogCredential.set(
+        providerId,
+        CREDENTIAL_FAILURE_REASONS.has(failureReason) ? null : credential,
+      );
+    }
+    if (current && !CREDENTIAL_FAILURE_REASONS.has(failureReason)) {
       const saved = this.readPersistedCatalog(providerId);
       // A list saved under another key belongs to another account.
       const persisted = saved?.credential === credential ? saved : null;
@@ -585,6 +629,30 @@ export class ProviderModelsService {
       failureReason,
     });
     return shape([], 'unavailable', { failureReason });
+  }
+
+  /**
+   * The fingerprint a provider's lists are scoped to. Only the `/v1/models`
+   * route sends `apiKey`. A fetcher reads its own credential and the OpenCode
+   * gateway catalog is credential-free, so their lists are scoped to no key
+   * (`''`).
+   */
+  private catalogCredentialFor(
+    providerId: string,
+    apiKey: string | null,
+  ): string {
+    const usesApiKey =
+      !this.dynamicFetchers.has(providerId) &&
+      !isOpenCodeProviderId(providerId) &&
+      !!getPtahCliLaneProvider(providerId)?.modelsEndpoint;
+    return usesApiKey ? credentialFingerprint(apiKey) : '';
+  }
+
+  /** The invalidation generation a request captures (see {@link clearCache}). */
+  private generationOf(providerId: string): number {
+    return (
+      this.globalCacheGeneration + (this.cacheGeneration.get(providerId) ?? 0)
+    );
   }
 
   /**
@@ -883,20 +951,27 @@ export class ProviderModelsService {
    * `string`-returning and sits on per-message hot paths, so everything that
    * feeds it has to be readable without awaiting.
    */
-  private readLiveCatalog(providerId: string): ProviderModelInfo[] | null {
+  private readLiveCatalog(
+    providerId: string,
+    scope?: CatalogCredentialScope,
+  ): ProviderModelInfo[] | null {
     // Only a list fetched under the provider's current credential counts,
-    // and none after a credential failure ({@link catalogCredential}).
+    // and none after a credential failure ({@link catalogCredential}). A
+    // scoped read requires the scope's own credential instead.
     const active = this.catalogCredential.get(providerId);
     if (active === null) return null;
+    const wanted = scope
+      ? this.catalogCredentialFor(providerId, scope.apiKey)
+      : active;
     const cached = this.modelCache.get(providerId);
     if (
       cached &&
       cached.models.length > 0 &&
-      (active === undefined || (cached.credential ?? '') === active)
+      (wanted === undefined || (cached.credential ?? '') === wanted)
     )
       return cached.models;
     const saved = this.readPersistedCatalog(providerId);
-    if (!saved || (active !== undefined && saved.credential !== active))
+    if (!saved || (wanted !== undefined && saved.credential !== wanted))
       return null;
     this.recordContextWindows(saved.models, providerId);
     return saved.models;
@@ -933,15 +1008,22 @@ export class ProviderModelsService {
   /**
    * Model ids of the most recent catalogue this provider returned (in-memory,
    * then persisted), read synchronously. `null` when none is on hand — a
-   * caller must then not treat any model as unavailable.
+   * caller must then not treat any model as unavailable. With `scope`, only
+   * a list fetched under that credential counts.
    */
-  getCachedModelIds(providerId: string): string[] | null {
-    const catalog = this.readLiveCatalog(providerId);
+  getCachedModelIds(
+    providerId: string,
+    scope?: CatalogCredentialScope,
+  ): string[] | null {
+    const catalog = this.readLiveCatalog(providerId, scope);
     return catalog && catalog.length > 0 ? catalog.map((m) => m.id) : null;
   }
 
-  getLiveDerivedTiers(providerId: string): DerivedTierMap {
-    return deriveTiersFromCatalog(this.readLiveCatalog(providerId));
+  getLiveDerivedTiers(
+    providerId: string,
+    scope?: CatalogCredentialScope,
+  ): DerivedTierMap {
+    return deriveTiersFromCatalog(this.readLiveCatalog(providerId, scope));
   }
 
   /**
@@ -957,6 +1039,7 @@ export class ProviderModelsService {
   resolveEffectiveTiers(
     providerId: string,
     userTiers: Partial<Record<ProviderModelTier, string | null | undefined>>,
+    scope?: CatalogCredentialScope,
   ): Partial<Record<ProviderModelTier, string>> {
     const defaults = getPtahCliLaneProvider(providerId)?.defaultTiers;
     let knownIds: string[] | null = null;
@@ -965,14 +1048,14 @@ export class ProviderModelsService {
       if (!catalogRead) {
         knownIds = FILTERED_TIER_CATALOG_PROVIDERS.has(providerId)
           ? null
-          : this.getCachedModelIds(providerId);
+          : this.getCachedModelIds(providerId, scope);
         catalogRead = true;
       }
       return knownIds;
     };
     let derived: DerivedTierMap | undefined;
     const derivedFor = (tier: ProviderModelTier): string | undefined => {
-      derived ??= this.getLiveDerivedTiers(providerId);
+      derived ??= this.getLiveDerivedTiers(providerId, scope);
       return derived[tier];
     };
     const effective: Partial<Record<ProviderModelTier, string>> = {};
@@ -1334,10 +1417,18 @@ export class ProviderModelsService {
    *
    * For one provider (its key or connection changed) the saved catalog goes
    * too: a list fetched with the previous credential must not answer for the
-   * new one, in the chain or in the synchronous reads.
+   * new one, in the chain or in the synchronous reads. The saved record stays
+   * unread from here on ({@link invalidatedCatalogs}), whether or not its
+   * deferred deletion succeeds, until a new live list is saved. Every clear
+   * also makes the list requests in flight stale ({@link cacheGeneration}).
    */
   clearCache(providerId?: string): void {
     if (providerId) {
+      this.cacheGeneration.set(
+        providerId,
+        (this.cacheGeneration.get(providerId) ?? 0) + 1,
+      );
+      this.invalidatedCatalogs.add(providerId);
       this.modelCache.delete(providerId);
       this.catalogCredential.delete(providerId);
       const catalogKey = this.getCatalogConfigKey(providerId);
@@ -1351,6 +1442,7 @@ export class ProviderModelsService {
           );
         });
     } else {
+      this.globalCacheGeneration += 1;
       this.modelCache.clear();
     }
   }

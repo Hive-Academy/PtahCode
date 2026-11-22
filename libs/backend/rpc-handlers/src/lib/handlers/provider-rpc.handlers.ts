@@ -730,9 +730,25 @@ export class ProviderRpcHandlers {
     // The virtual 'anthropic' direct provider and the native 'claude-cli'
     // ptah-cli provider share the same auth path — both resolve models from the
     // host's Claude login via the SDK (no API key needed).
+    // While the native Claude login supplies the credential (the fetcher's
+    // `usesNativeLogin` case), a login signed out since the last fetch must
+    // not serve the cached list. An API key or OAuth token authenticates for
+    // itself and is not gated.
+    const anthropicSignedIn = async (): Promise<boolean | undefined> => {
+      const direct = isDirectAnthropic(this.authEnv);
+      if (
+        direct &&
+        (this.authEnv.ANTHROPIC_API_KEY || this.authEnv.ANTHROPIC_AUTH_TOKEN)
+      ) {
+        return undefined;
+      }
+      const status = await this.ambientLogin.read();
+      return status.state === 'signed-out' ? false : undefined;
+    };
     this.providerModels.registerDynamicFetcher(
       ANTHROPIC_DIRECT_PROVIDER_ID,
       fetcher,
+      { signedIn: anthropicSignedIn },
     );
 
     // 'claude-cli' is a `nativeAuth` provider: an agent running on it ALWAYS

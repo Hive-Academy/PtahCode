@@ -1002,9 +1002,10 @@ export class AntigravityCliAdapter implements CliAdapter {
    * A probe that times out, cannot start or exits non-zero throws (the
    * timeout with code `ETIMEDOUT`, a start failure with the spawn error's
    * code), so a caller can tell a failure from an empty answer: rows printed
-   * before a failing exit may be incomplete and are not used. A clean exit
-   * that lists nothing is `[]`. A non-empty answer becomes the ids spawns of
-   * that binary read ({@link currentModelIds}).
+   * before a failing exit or a signal may be incomplete and are not used. A
+   * clean exit that lists nothing is `[]` and drops that binary's earlier
+   * ids. A non-empty answer becomes the ids spawns of that binary read
+   * ({@link currentModelIds}).
    */
   async listModels(): Promise<CliModelInfo[]> {
     const binaryPath = (await resolveCliPath('agy')) ?? 'agy';
@@ -1019,12 +1020,23 @@ export class AntigravityCliAdapter implements CliAdapter {
     if (probe.kind === 'error') {
       throw Object.assign(new Error('agy models could not start'), { code: probe.code });
     }
-    if (probe.exitCode !== null && probe.exitCode !== 0) {
-      throw new Error(`agy models exited with code ${probe.exitCode}`);
+    // Only a clean exit is a complete answer. A signal-terminated probe closes
+    // with a `null` code and may have printed part of the list.
+    if (probe.exitCode !== 0) {
+      throw new Error(
+        probe.exitCode === null
+          ? 'agy models was terminated by a signal'
+          : `agy models exited with code ${probe.exitCode}`,
+      );
     }
     const models = parseAgyModels(stripAnsiCodes(probe.stdout));
     if (models.length > 0) {
       this.lastModelIds.set(binary, { ids: new Set(models.map((m) => m.id)), at: this.now() });
+    } else {
+      // A clean empty answer replaces an earlier list: spawns must not keep
+      // deriving their model from ids the binary no longer reports.
+      this.lastModelIds.delete(binary);
+      this.modelIdsMissedAt.set(binary, this.now());
     }
     return models;
   }

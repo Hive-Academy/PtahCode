@@ -614,7 +614,7 @@ export class PtahCliRegistry {
     }
 
     const tier: ModelTier = 'sonnet';
-    const effectiveTiers = this.resolveEffectiveTiers(agentConfig);
+    const effectiveTiers = this.resolveEffectiveTiers(agentConfig, credential);
     const authEnv = await this.acquireProfileAuthEnv(
       id,
       agentConfig,
@@ -878,7 +878,7 @@ export class PtahCliRegistry {
     // A supplied lane id is authoritative before the SDK query can request permission.
     // Generated ids attach through setAgentId; the SDK handler waits for that attachment.
     const agentIdHolder: { value?: string } = { value: options?.agentId };
-    const spawnTiers = this.resolveEffectiveTiers(agentConfig);
+    const spawnTiers = this.resolveEffectiveTiers(agentConfig, credential);
     const { authEnv, stopProxy } = await this.buildProxyAuthEnv(
       agentConfig,
       provider,
@@ -1403,6 +1403,7 @@ export class PtahCliRegistry {
     credential: AgentCredential,
     tiers: PtahCliConfig['tierMappings'] = this.resolveEffectiveTiers(
       agentConfig,
+      credential,
     ),
   ): Promise<{ authEnv: AuthEnv; stopProxy: () => Promise<void> }> {
     // A key-less Kimi Code agent runs on the host's Kimi Code connection
@@ -1585,6 +1586,7 @@ export class PtahCliRegistry {
     apiKey: string,
     tiers: PtahCliConfig['tierMappings'] = this.resolveEffectiveTiers(
       agentConfig,
+      { kind: 'instance-key', key: apiKey },
     ),
   ): AuthEnv {
     const authEnv = createEmptyAuthEnv();
@@ -1716,23 +1718,44 @@ export class PtahCliRegistry {
    * `ProviderModelsService.resolveEffectiveTiers`: the registry preference
    * when it is live (or no catalogue is on hand), else the closest live id,
    * else the tier derived from the live catalogue.
+   *
+   * With the run's `credential`, the catalogue must be one listed under that
+   * credential: two agents of one provider with different keys never take
+   * tiers from each other's list. No matching catalogue leaves those tiers
+   * unresolved.
    */
   private resolveEffectiveTiers(
     agentConfig: PtahCliConfig,
+    credential?: AgentCredential,
   ): PtahCliConfig['tierMappings'] {
     const mainTiers = this.providerModels.getModelTiers(
       agentConfig.providerId,
       'cliAgent',
     );
     const agentTiers = agentConfig.tierMappings;
-    const resolved = this.providerModels.resolveEffectiveTiers(
-      agentConfig.providerId,
-      {
-        sonnet: agentTiers?.sonnet || mainTiers.sonnet,
-        opus: agentTiers?.opus || mainTiers.opus,
-        haiku: agentTiers?.haiku || mainTiers.haiku,
-      },
-    );
+    const userTiers = {
+      sonnet: agentTiers?.sonnet || mainTiers.sonnet,
+      opus: agentTiers?.opus || mainTiers.opus,
+      haiku: agentTiers?.haiku || mainTiers.haiku,
+    };
+    const resolved = credential
+      ? this.providerModels.resolveEffectiveTiers(
+          agentConfig.providerId,
+          userTiers,
+          // The model listing sends no key for a key-less local agent, so the
+          // placeholder token maps to no key here too.
+          {
+            apiKey:
+              credential.kind === 'instance-key' &&
+              credential.key !== OLLAMA_AUTH_TOKEN_PLACEHOLDER
+                ? credential.key
+                : null,
+          },
+        )
+      : this.providerModels.resolveEffectiveTiers(
+          agentConfig.providerId,
+          userTiers,
+        );
     const { sonnet, opus, haiku } = resolved;
 
     if (!sonnet && !opus && !haiku) {

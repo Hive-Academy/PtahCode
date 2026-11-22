@@ -1349,6 +1349,48 @@ describe('ProviderRpcHandlers', () => {
       await expect(options.signedIn()).resolves.toBeUndefined();
     });
 
+    function anthropicSignInReader(
+      h: ReturnType<typeof makeHarness>,
+    ): () => Promise<boolean | undefined> {
+      const entry = h.providerModels.registerDynamicFetcher.mock.calls.find(
+        ([id]) => id === 'anthropic',
+      );
+      const options = entry?.[2] as
+        { signedIn?: () => Promise<boolean | undefined> } | undefined;
+      if (!options?.signedIn)
+        throw new Error('Missing Anthropic sign-in reader');
+      return options.signedIn;
+    }
+
+    it('gates the anthropic list on the native Claude login it reads', async () => {
+      const h = makeHarness();
+      h.handlers.register();
+      h.ambientLogin.read.mockResolvedValueOnce({
+        state: 'signed-out',
+        checkedAt: '2026-01-01T00:00:00.000Z',
+      } as never);
+
+      await expect(anthropicSignInReader(h)()).resolves.toBe(false);
+    });
+
+    it.each([
+      ['an API key', { ANTHROPIC_API_KEY: 'fixture-key' }],
+      ['an OAuth token', { ANTHROPIC_AUTH_TOKEN: 'fixture-token' }],
+    ])(
+      'does not gate the anthropic list on the Claude login for %s',
+      async (_label, authEnv) => {
+        const h = makeHarness({ authEnv });
+        h.handlers.register();
+        h.ambientLogin.read.mockResolvedValue({
+          state: 'signed-out',
+          checkedAt: '2026-01-01T00:00:00.000Z',
+        } as never);
+
+        await expect(anthropicSignInReader(h)()).resolves.toBeUndefined();
+        expect(h.ambientLogin.read).not.toHaveBeenCalled();
+      },
+    );
+
     it('declares platform API capacity for Copilot models from platform discovery', async () => {
       const h = makeHarness();
       h.modelDiscovery.getCopilotModels.mockResolvedValueOnce([

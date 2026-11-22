@@ -406,6 +406,16 @@ describe('AntigravityCliAdapter', () => {
       await expect(models).rejects.toThrow('agy models exited with code 1');
     });
 
+    it('rows printed before a signal termination are not a catalog', async () => {
+      mockResolveCliPath.mockResolvedValue('/usr/local/bin/agy');
+      const models = adapter.listModels();
+      await Promise.resolve();
+      currentChild?.stdout.write('gemini-3-pro-medium\tGemini 3 Pro (Medium)\n');
+      // A signal-terminated child closes with a null exit code.
+      currentChild?.emitClose(null, 'SIGKILL');
+      await expect(models).rejects.toThrow('agy models was terminated by a signal');
+    });
+
     it('throws with the spawn error code when agy cannot start', async () => {
       mockResolveCliPath.mockResolvedValue('/usr/local/bin/agy');
       const models = adapter.listModels();
@@ -622,6 +632,29 @@ describe('AntigravityCliAdapter', () => {
         '/usr/local/bin/agy',
         '/opt/other/agy',
       ]);
+    });
+
+    it('a clean empty refresh drops the earlier ids for the next spawn', async () => {
+      mockResolveCliPath.mockResolvedValue('/usr/local/bin/agy');
+      await adapter.listModels();
+      servedModels = '';
+      expect(await adapter.listModels()).toEqual([]);
+
+      const handle = await adapter.runSdk({
+        ...baseOptions,
+        model: 'claude-opus-4-8',
+        reasoningEffort: 'high',
+        binaryPath: '/usr/local/bin/agy',
+      });
+      collect(handle);
+      currentChild?.emitClose(0);
+      await handle.done;
+
+      // The earlier list would map the retired id to its live base; the empty
+      // answer leaves no ids, and its cooldown spares the spawn a third probe.
+      const [, argsArg] = runSpawnCalls()[0] as [string, string[]];
+      expect(argsArg[argsArg.indexOf('--model') + 1]).not.toBe('claude-opus-5-5-high');
+      expect(modelProbeCount()).toBe(2);
     });
 
     it('applies the effort to a retired id through its closest live base', async () => {

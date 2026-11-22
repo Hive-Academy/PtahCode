@@ -48,7 +48,10 @@ import {
 } from '@ptah-extension/shared';
 import type { Logger } from '@ptah-extension/vscode-core';
 
-import { ProviderModelsService } from './provider-models.service';
+import {
+  ProviderModelsService,
+  credentialFingerprint,
+} from './provider-models.service';
 import { ActiveProviderResolver } from './auth/active-provider-resolver';
 import type { WorkspaceScopeResolver } from '@ptah-extension/settings-core';
 
@@ -1063,6 +1066,115 @@ describe('ProviderModelsService.clearCache', () => {
     const { service } = makeService({});
     expect(() => service.clearCache()).not.toThrow();
   });
+
+  const SAVED_KEY = 'provider.claude-cli.modelCatalog';
+  const savedRow = {
+    id: 'previous-account-model',
+    name: 'Previous account model',
+    description: '',
+    contextLength: 200000,
+    supportsToolUse: true,
+  };
+
+  it('hides the saved catalog at once and after a failed deletion', async () => {
+    const { service, config } = makeService({
+      configValues: { [SAVED_KEY]: liveCatalog([savedRow]) },
+    });
+    service.registerDynamicFetcher('claude-cli', async () => {
+      throw Object.assign(new Error('offline'), { code: 'ECONNRESET' });
+    });
+    expect(service.getCachedModelIds('claude-cli')).toEqual([
+      'previous-account-model',
+    ]);
+    config.set.mockRejectedValueOnce(new Error('disk full'));
+
+    service.clearCache('claude-cli');
+    // Before the deferred deletion runs.
+    expect(service.getCachedModelIds('claude-cli')).toBeNull();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    // The deletion failed, so the record is still on disk; it stays unread.
+    expect(config.get(SAVED_KEY)).toBeTruthy();
+    expect(service.getCachedModelIds('claude-cli')).toBeNull();
+    const result = await service.fetchModels('claude-cli', null);
+    expect(result.source).toBe('unavailable');
+    expect(service.getCachedModelIds('claude-cli')).toBeNull();
+  });
+
+  it('reads saved catalogs again once a new live list is saved', async () => {
+    const { service } = makeService({
+      configValues: { [SAVED_KEY]: liveCatalog([savedRow]) },
+    });
+    let fail = false;
+    service.registerDynamicFetcher('claude-cli', async () => {
+      if (fail) throw new Error('offline');
+      return [{ ...savedRow, id: 'new-account-model' }];
+    });
+    service.clearCache('claude-cli');
+    await service.fetchModels('claude-cli', null);
+    await new Promise((resolve) => setImmediate(resolve));
+
+    fail = true;
+    service.clearCache();
+    const result = await service.fetchModels('claude-cli', null);
+    expect(result.source).toBe('persisted');
+    expect(result.models.map((m) => m.id)).toEqual(['new-account-model']);
+  });
+
+  it.each([
+    ['for the provider', 'claude-cli'],
+    ['for every provider', undefined],
+  ])(
+    'a list request in flight during a clear %s writes nothing',
+    async (_label, clearId) => {
+      const { service, config } = makeService({});
+      let release!: (rows: (typeof savedRow)[]) => void;
+      service.registerDynamicFetcher(
+        'claude-cli',
+        () =>
+          new Promise((resolve) => {
+            release = resolve;
+          }),
+      );
+      const pending = service.fetchModels('claude-cli', null);
+      await new Promise((resolve) => setImmediate(resolve));
+      service.clearCache(clearId);
+      release([savedRow]);
+      await pending;
+      await new Promise((resolve) => setImmediate(resolve));
+
+      expect(service.getCachedModelIds('claude-cli')).toBeNull();
+      expect(config.set).not.toHaveBeenCalledWith(
+        SAVED_KEY,
+        expect.objectContaining({ origin: 'live' }),
+      );
+    },
+  );
+});
+
+describe('ProviderModelsService credential-scoped catalog reads', () => {
+  const REQUESTY_KEY = 'provider.requesty.modelCatalog';
+
+  it('answers a scoped read only from the list of that credential', () => {
+    const { service } = makeService({
+      configValues: {
+        [REQUESTY_KEY]: {
+          ...liveCatalog([{ id: 'key-a-model', name: 'Key A model' }]),
+          credential: credentialFingerprint('key-a'),
+        },
+      },
+    });
+
+    expect(service.getCachedModelIds('requesty', { apiKey: 'key-a' })).toEqual([
+      'key-a-model',
+    ]);
+    expect(
+      service.getCachedModelIds('requesty', { apiKey: 'key-b' }),
+    ).toBeNull();
+    expect(
+      service.resolveEffectiveTiers('requesty', {}, { apiKey: 'key-b' }),
+    ).toEqual({ sonnet: undefined, opus: undefined, haiku: undefined });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1337,7 +1449,7 @@ describe('ProviderModelsService live-catalog tier derivation', () => {
       expect(service.resolveEffectiveTiers('opencode-go', {}).opus).toBe(
         'kimi-k3-1',
       );
-      expect(read).toHaveBeenCalledWith('opencode-go');
+      expect(read).toHaveBeenCalledWith('opencode-go', undefined);
     });
 
     it('prefers the closest same-family live id over the derived tier', () => {

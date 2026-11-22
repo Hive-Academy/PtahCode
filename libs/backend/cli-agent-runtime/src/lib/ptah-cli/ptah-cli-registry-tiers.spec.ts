@@ -22,7 +22,10 @@ import 'reflect-metadata';
 import { createMockLogger } from '@ptah-extension/shared/testing';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type { AnthropicProvider } from '@ptah-extension/agent-sdk';
-import type { ProviderModelsService } from '@ptah-extension/auth-providers';
+import {
+  OLLAMA_AUTH_TOKEN_PLACEHOLDER,
+  type ProviderModelsService,
+} from '@ptah-extension/auth-providers';
 import {
   KIMI_CODE_PROVIDER_ENTRY,
   getPtahCliLaneProvider,
@@ -221,6 +224,36 @@ describe('PtahCliRegistry.resolveEffectiveTiers', () => {
     expect(resolved?.sonnet).toBe('k3');
     expect(resolved?.haiku).toBe('kimi-for-coding');
   });
+
+  it.each([
+    ['its own key', { kind: 'instance-key', key: 'agent-key' }, 'agent-key'],
+    [
+      'no key (local placeholder)',
+      { kind: 'instance-key', key: OLLAMA_AUTH_TOKEN_PLACEHOLDER },
+      null,
+    ],
+    ['no key (Kimi Code connection)', { kind: 'kimi-connection' }, null],
+  ])(
+    'scopes the catalogue to the run credential: %s',
+    (_label, credential, apiKey) => {
+      const providerModels = createMockProviderModels();
+      const registry = makeRegistry(providerModels);
+      (
+        registry as unknown as {
+          resolveEffectiveTiers: (
+            config: PtahCliConfig,
+            credential: unknown,
+          ) => ResolvedTiers;
+        }
+      ).resolveEffectiveTiers(BASE_AGENT_CONFIG, credential);
+
+      expect(providerModels.resolveEffectiveTiers).toHaveBeenCalledWith(
+        'kimi-code',
+        { sonnet: null, opus: null, haiku: null },
+        { apiKey },
+      );
+    },
+  );
 });
 
 type AuthEnvInternals = {
