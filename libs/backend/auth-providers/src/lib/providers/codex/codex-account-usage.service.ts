@@ -176,12 +176,12 @@ export class CodexAccountUsageService implements ICodexAccountUsageService {
   /** `ownerKey` came from a rate-limits account id; it stays recorded until an account change. */
   private ownerFromAccountId = false;
   /**
-   * The last read named no account id while an id owner is recorded. The
-   * signed-in digest cannot prove the same account (two accounts can share
-   * type, email and plan), so that read reports no owner; the next read that
-   * carries the id reports the recorded key again.
+   * The last read named no account id while an id owner is recorded; the
+   * signed-in digest cannot prove the same account, so it reports no owner.
    */
   private ownerUnconfirmed = false;
+  /** Latest default-home reader; the legacy owner stands in only after a legacy answer. */
+  private defaultReader: 'legacy' | 'shared' | null = null;
   /**
    * Bumped by `clearCache`. A read that started before the bump finishes for
    * its own callers but is not cached, so an account change (auth file
@@ -270,6 +270,7 @@ export class CodexAccountUsageService implements ICodexAccountUsageService {
     this.ownerKey = null;
     this.ownerFromAccountId = false;
     this.ownerUnconfirmed = false;
+    this.defaultReader = null;
     this.generation += 1;
     // Later callers start a fresh read instead of joining one begun before the change.
     this.readInFlight = null;
@@ -281,13 +282,9 @@ export class CodexAccountUsageService implements ICodexAccountUsageService {
     if (kind === 'invalid') return null;
     if (this.coreClient) {
       const coreKey = coreOwnerKey(this.coreClient, home ?? this.codexHome.path);
-      return kind === 'default' ? coreKey ?? this.reportedOwnerKey() : coreKey;
-    }
-    if (home !== undefined && kind === 'explicit') return null;
-    return this.reportedOwnerKey();
-  }
-
-  private reportedOwnerKey(): string | null {
+      if (kind !== 'default' || this.defaultReader === 'shared') return coreKey;
+      if (coreKey) return coreKey;
+    } else if (home !== undefined && kind === 'explicit') return null;
     return this.ownerUnconfirmed ? null : this.ownerKey;
   }
 
@@ -296,20 +293,23 @@ export class CodexAccountUsageService implements ICodexAccountUsageService {
   ): Promise<CodexAccountUsageResult> {
     // One shared client owns every home when composition supplies it.
     const kind = this.homeKind(options.home);
-    if (kind === 'invalid') {
-      return { status: 'service-unavailable', providerId: 'openai-codex' };
-    }
+    if (kind === 'invalid') return { status: 'service-unavailable', providerId: 'openai-codex' };
     if (this.coreClient) {
       const result = await this.coreClient.read(options.home ?? this.codexHome.path, {
         refresh: options.refresh,
         signal: options.signal,
       });
-      if (result.status !== 'service-unavailable' || kind === 'explicit') return result;
+      if (kind === 'explicit') return result;
+      if (result.status !== 'service-unavailable') {
+        this.defaultReader = 'shared';
+        return result;
+      }
       // A shared client can outlive the last session profile for the default home.
     }
     if (options.home !== undefined && kind === 'explicit') {
       return { status: 'service-unavailable', providerId: 'openai-codex' };
     }
+    this.defaultReader = 'legacy'; // The legacy reader answers the default home.
     const eligibility = await this.auth.getAccountUsageEligibility();
     if (eligibility !== 'supported') {
       return { status: eligibility, providerId: 'openai-codex' };

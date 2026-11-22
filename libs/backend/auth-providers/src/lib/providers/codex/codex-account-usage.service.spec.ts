@@ -1340,6 +1340,43 @@ describe('CodexAccountUsageService', () => {
         expect(h.requests).toHaveLength(1);
       });
 
+      it('does not replace an unresolved shared-client owner with the retained legacy owner', async () => {
+        const h = harness({ accountId: 'acct-1' });
+        await h.service.getAccountUsage();
+        const legacyOwner = h.service.currentOwnerKey();
+        expect(legacyOwner).not.toBeNull();
+        const core = client();
+        const digest = jest
+          .spyOn(core, 'currentAccountDigest')
+          .mockReturnValue(null);
+        const reads: Array<string | null> = [
+          digestOf(h.syntheticHome, 'acct-1'),
+          null,
+        ];
+        let status: CodexAccountUsageResult['status'] = 'available';
+        jest.spyOn(core, 'read').mockImplementation(async () => {
+          digest.mockReturnValue(reads.shift() ?? null);
+          return status === 'available'
+            ? usageResult(400)
+            : { status, providerId: 'openai-codex' };
+        });
+        h.service.attachCoreClient(core);
+
+        // Shared read with account id A: confirmed, same key as the legacy owner.
+        await h.service.getAccountUsage();
+        expect(h.service.currentOwnerKey()).toBe(legacyOwner);
+        // Shared id-less read: unresolved stays unresolved.
+        await h.service.getAccountUsage({ refresh: true });
+        expect(h.service.currentOwnerKey()).toBeNull();
+        expect(h.requests).toHaveLength(1);
+
+        // Only when the legacy reader answers does its owner stand in.
+        status = 'service-unavailable';
+        await h.service.getAccountUsage({ refresh: true });
+        expect(h.requests).toHaveLength(2);
+        expect(h.service.currentOwnerKey()).toBe(legacyOwner);
+      });
+
       it('reports no owner for an id-less read after an id owner and restores it with the id', async () => {
         const h = harness({ accountId: 'acct-1' });
         await h.service.getAccountUsage();
