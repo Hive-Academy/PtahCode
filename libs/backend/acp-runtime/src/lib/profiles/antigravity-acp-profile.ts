@@ -14,8 +14,9 @@
  *   stream-json lane; agy's shell tool runs through a pty.
  * - Instructions: `session/new` `_meta.antigravity.systemPrompt.append`
  *   when `initialize` advertises that hook ({@link antigravityInstructionsMeta});
- *   not re-sent on restore (`instructionsOnRestore: 'none'`) until a live
- *   probe shows whether agy keeps them.
+ *   not re-sent on restore (`instructionsOnRestore: 'none'`): agy stores the
+ *   append with the conversation and keeps it across a process restart and
+ *   `session/resume` or `session/load` (TASK_2026_2301 S2 live probe, 1.5.14).
  * - Ptah MCP (D9): an ACP `http` entry with the lane bearer. agy advertises no
  *   `mcpCapabilities`, yet it connects to the entry, sends the header, lists
  *   the tools (`mcp_<server>_<tool>`) and calls them; it writes nothing to
@@ -299,9 +300,9 @@ export const antigravityAcpProfile: AcpVendorProfile = {
   },
 
   instructionsMeta: antigravityInstructionsMeta,
-  // Unverified whether agy keeps the `session/new` append across
-  // `session/resume` and `session/load` (live probe pending). 'none' until
-  // the probe answers; 'meta' re-sends the append on every restore.
+  // agy keeps the `session/new` append across a restart with
+  // `session/resume` or `session/load` (TASK_2026_2301 S2 live probe,
+  // 1.5.14); 'meta' would append the instructions a second time.
   instructionsOnRestore: 'none',
 
   modeFor(options: AcpSessionOptions): string | undefined {
