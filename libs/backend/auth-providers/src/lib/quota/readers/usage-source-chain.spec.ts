@@ -52,6 +52,17 @@ describe('readUsageSourceChain', () => {
   });
 });
 
+describe('readUsageSourceChain timer', () => {
+  it('reports a timeout when its timer fires before the wall clock reaches the deadline', async () => {
+    // Freeze the wall clock: only the chain's own timer can end the stage.
+    const frozen = Date.now();
+    const pending: UsageSource = { id: 'pending', label: 'provider-api',
+      read: () => new Promise(() => undefined) };
+    const result = await readUsageSourceChain([pending], request, () => frozen, 10);
+    expect(result).toMatchObject({ status: 'service-unavailable', statusReason: 'cli-timeout' });
+  });
+});
+
 describe('failure ranking', () => {
   const failed = (reason: import('./plan-usage-reader.types').UsageFailureReason): UsageSource => ({
     id: reason, label: 'provider-api', read: async () => ({ ok: false, source: 'provider-api', reason }),
