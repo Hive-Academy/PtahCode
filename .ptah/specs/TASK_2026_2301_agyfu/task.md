@@ -23,7 +23,15 @@ description: >-
   (4) User decisions to take: should a chat on Ptah Plan permission also
   reset agy to plan each turn (today only Manual does); keep or relax the
   fail-closed block when agy offers no plan mode.
-  (5) Live re-check on gemini-4-hydrogen-low: one extra set_mode per
+  (5) Found live 2026-11-22: agy plan mode is not a hard write barrier. In
+  plan mode agy writes implementation_plan.md, and when the user replies in
+  chat ("Approved. Proceed") agy carries out the plan and writes files with
+  no session/request_permission (agy acp-server log shows set_mode plan
+  before that prompt). So Manual means one approval per plan, given in the
+  user's own words, not per file. Decide with the user whether that is
+  acceptable, or find an agy setting (Tool Permission ask) that makes
+  default mode send request_permission per write.
+  (6) Live re-check on gemini-4-hydrogen-low: one extra set_mode per
   Manual prompt, /clear leaves no bubble, single Ptah tool set.
 executor: claude
 estimate: M

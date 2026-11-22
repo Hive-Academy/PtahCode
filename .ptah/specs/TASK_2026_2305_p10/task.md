@@ -1,5 +1,5 @@
 ---
-id: TASK_2026_2298_p10
+id: TASK_2026_2305_p10
 status: backlog
 type: FEATURE
 title: Grok as a main-chat provider over ACP (program P10)

@@ -56,6 +56,6 @@ Decisions this implies:
 | P8 + P9 Electron composition, Antigravity main chat | TASK_2026_2297_agy | #1462 | in_review |
 | Side: Antigravity follow-ups | TASK_2026_2301_agyfu | — | backlog |
 | Side: agy analytics and repricing (issue 1459) | TASK_2026_2302_usage | — | backlog |
-| P10 Grok main chat | TASK_2026_2298_p10 | — | backlog (live-unverified) |
+| P10 Grok main chat | TASK_2026_2305_p10 | — | backlog (live-unverified) |
 | P11a–c OpenCode | TASK_2026_2299_p11 | — | backlog, blocked on PF-6 (CLI not installed) |
 | P12 consolidation | TASK_2026_2300_p12 | — | backlog (removals need user approval) |
