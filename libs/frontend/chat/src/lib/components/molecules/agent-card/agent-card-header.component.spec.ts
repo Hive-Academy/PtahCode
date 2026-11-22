@@ -112,6 +112,16 @@ describe('AgentCardHeaderComponent — prompt cache (N6)', () => {
       expect(chip(el)?.getAttribute('title')).toContain('Ptah budget monitor');
     });
 
+    it('addresses the person, not the agent, when no host text arrived', () => {
+      const asked = chip(setup(lane({ actionNotice: ask })))?.getAttribute('title') ?? '';
+      expect(asked).toContain('asked agent-1 for a handoff');
+      expect(asked).toContain('The execution remains live');
+      expect(asked).not.toMatch(/Finish the current step|Return your/);
+      const paused = chip(setup(lane({ actionNotice: pause })))?.getAttribute('title') ?? '';
+      expect(paused).toContain('The execution remains live');
+      expect(paused).not.toMatch(/Use only the permitted/);
+    });
+
     it('says a paused lane is still running and keeps Stop for the user', () => {
       const el = setup(
         lane({ actionNotice: pause, actionNoticeText: 'Ptah budget monitor paused new work for agent-1.' }),

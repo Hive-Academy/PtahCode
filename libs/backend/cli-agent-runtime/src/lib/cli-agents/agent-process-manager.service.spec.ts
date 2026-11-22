@@ -3336,6 +3336,24 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       expect(sdkControls.abortController.signal.aborted).toBe(false);
     });
 
+    it('releases the notice on the monitor channel when output resumes', async () => {
+      const released = jest.fn();
+      manager.events.on('agent:action-notice-cleared', released);
+      await manager.spawn({
+        task: 'Slow task', cli: 'codex', workingDirectory: '/workspace/root', timeout: 5000,
+      });
+      jest.advanceTimersByTime(5000);
+      expect(released).not.toHaveBeenCalled();
+
+      sdkControls.emitOutput('back again');
+      expect(released).toHaveBeenCalledTimes(1);
+      expect(released).toHaveBeenCalledWith(
+        expect.objectContaining({ notice: null, text: '' }),
+      );
+      sdkControls.emitOutput('more output');
+      expect(released).toHaveBeenCalledTimes(1);
+    });
+
     it.each([1_200_000_000, 2_200_000_000])('honors both inactivity deadlines for W = %d ms', async (window) => {
       const onNotice = jest.fn();
       manager.events.on('agent:action-notice', onNotice);

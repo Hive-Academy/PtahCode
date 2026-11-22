@@ -262,7 +262,7 @@ describe('SessionBudgetActionsService', () => {
 
     it('fills in the formatted usage figure', () => {
       const prompt = buildWrapUpPrompt(BUDGET);
-      expect(prompt.startsWith('This session has used 41.2M tokens.')).toBe(
+      expect(prompt.startsWith('Ptah budget monitor requested a handoff because this session used 41.2M tokens.')).toBe(
         true,
       );
       expect(prompt).toContain('`HANDOFF.md`');
@@ -285,7 +285,7 @@ describe('SessionBudgetActionsService', () => {
         limit: 10,
       });
       expect(
-        prompt.startsWith('This session has used $8.96 worth of tokens.'),
+        prompt.startsWith('Ptah budget monitor requested a handoff because this session used $8.96 worth of tokens.'),
       ).toBe(true);
     });
 

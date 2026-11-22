@@ -62,8 +62,8 @@ const NOTICE_ACTIONS: readonly string[] = ['asked-handoff', 'paused', 'ended'];
 
 /**
  * Validate an `agent-monitor:action-notice` payload (TASK_2026_2297_920a): a non-empty
- * `agentId`, a `text` string and a notice with string `actor`, `reason`, `nextStep` and a known
- * `action`. Returns `null` for anything else. Hand-written to keep Zod out of the initial bundle.
+ * `agentId`, a `text` string and either `null` or a notice with string `actor`, `reason`,
+ * `nextStep` and a known `action`. Returns `null` for anything else. Hand-written to keep Zod out of the initial bundle.
  */
 export function parseAgentMonitorActionNotice(
   value: unknown,
@@ -71,15 +71,10 @@ export function parseAgentMonitorActionNotice(
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const p = value as Record<string, unknown>;
   const notice = p['notice'];
-  if (
-    !isNonEmptyString(p['agentId']) ||
-    typeof p['text'] !== 'string' ||
-    !notice ||
-    typeof notice !== 'object' ||
-    Array.isArray(notice)
-  ) {
-    return null;
-  }
+  if (!isNonEmptyString(p['agentId']) || typeof p['text'] !== 'string') return null;
+  // `null` releases the card's notice.
+  if (notice === null) return value as AgentMonitorActionNoticePayload;
+  if (!notice || typeof notice !== 'object' || Array.isArray(notice)) return null;
   const n = notice as Record<string, unknown>;
   if (
     typeof n['action'] !== 'string' ||

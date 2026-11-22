@@ -143,6 +143,16 @@ describe('AgentMonitorStore', () => {
       expect(card.actionNoticeText).toBe('Ptah paused lane.');
     });
 
+    it('drops the notice when the host releases it while the lane keeps running', () => {
+      store.onAgentSpawned(base('lane'));
+      store.onAgentActionNotice({ agentId: 'lane', notice: pause, text: 'Ptah paused lane.' });
+      store.onAgentActionNotice({ agentId: 'lane', notice: null, text: '' });
+      const card = store.agents()[0];
+      expect(card.status).toBe('running');
+      expect(card.actionNotice).toBeUndefined();
+      expect(card.actionNoticeText).toBeUndefined();
+    });
+
     it('ignores a notice for an unknown card', () => {
       store.onAgentActionNotice({ agentId: 'ghost', notice: pause, text: 't' });
       expect(store.agents()).toHaveLength(0);

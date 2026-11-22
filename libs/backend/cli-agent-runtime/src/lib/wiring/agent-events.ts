@@ -359,30 +359,33 @@ function wireAgentMonitorListeners(
     },
   );
 
-  // A Ptah monitor asked a live lane for a handoff or paused its new work. The lane stays
-  // alive, so the card needs this push: no spawn or exit event follows it (TASK_2026_2297_920a).
-  agentProcessManager.events.on(
-    'agent:action-notice',
-    (event: {
-      info: AgentProcessInfo;
-      notice: AgentActionNotice;
-      text: string;
-    }) => {
-      const payload: AgentMonitorActionNoticePayload = {
-        agentId: String(event.info.agentId),
-        notice: event.notice,
-        text: event.text,
-      };
-      webviewManager
-        .broadcastMessage(MESSAGE_TYPES.AGENT_MONITOR_ACTION_NOTICE, payload)
-        .catch((error: unknown) => {
-          logger.error(
-            `${tag} Failed to send agent-monitor:action-notice to webview`,
-            error instanceof Error ? error : new Error(String(error)),
-          );
-        });
-    },
-  );
+  // A Ptah monitor asked a live lane for a handoff or paused its new work, or later released
+  // that notice. The lane stays alive, so the card needs these pushes: no spawn or exit event
+  // follows them (TASK_2026_2297_920a). A release carries the remaining notice or `null`.
+  for (const eventName of ['agent:action-notice', 'agent:action-notice-cleared'] as const) {
+    agentProcessManager.events.on(
+      eventName,
+      (event: {
+        info: AgentProcessInfo;
+        notice: AgentActionNotice | null;
+        text: string;
+      }) => {
+        const payload: AgentMonitorActionNoticePayload = {
+          agentId: String(event.info.agentId),
+          notice: event.notice,
+          text: event.text,
+        };
+        webviewManager
+          .broadcastMessage(MESSAGE_TYPES.AGENT_MONITOR_ACTION_NOTICE, payload)
+          .catch((error: unknown) => {
+            logger.error(
+              `${tag} Failed to send agent-monitor:action-notice to webview`,
+              error instanceof Error ? error : new Error(String(error)),
+            );
+          });
+      },
+    );
+  }
 
   agentProcessManager.events.on('agent:output', (delta: AgentOutputDelta) => {
     webviewManager

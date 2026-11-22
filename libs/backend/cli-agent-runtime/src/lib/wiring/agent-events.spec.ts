@@ -361,6 +361,24 @@ describe('agent action notice broadcast', () => {
     );
   });
 
+  it('forwards a release of the notice as a null notice', () => {
+    const broadcastMessage = jest.fn().mockResolvedValue(undefined);
+    const events = new EventEmitter();
+    const container = buildContainer([
+      [TOKENS.AGENT_PROCESS_MANAGER, { events, findAgentInfo: () => undefined }],
+      [TOKENS.WEBVIEW_MANAGER, { broadcastMessage }],
+    ]);
+    wireAgentEventListeners(container, {
+      logger: Object.assign(Object.create(null) as Logger, createMockLogger()),
+      platform: 'electron',
+    });
+    events.emit('agent:action-notice-cleared', { info: { agentId: 'lane-1' }, notice: null, text: '' });
+    expect(broadcastMessage).toHaveBeenCalledWith(
+      MESSAGE_TYPES.AGENT_MONITOR_ACTION_NOTICE,
+      { agentId: 'lane-1', notice: null, text: '' },
+    );
+  });
+
   it('logs a failed broadcast and keeps running', async () => {
     const broadcastMessage = jest.fn().mockRejectedValue(new Error('renderer gone'));
     const events = new EventEmitter();

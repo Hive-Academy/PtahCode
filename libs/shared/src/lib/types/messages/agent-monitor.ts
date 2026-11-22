@@ -48,13 +48,15 @@ export interface AgentMonitorReparentedPayload {
 /**
  * Payload for `agent-monitor:action-notice` (TASK_2026_2297_920a, P5).
  *
- * A Ptah monitor asked a live lane for a handoff or paused its new work. The lane stays alive.
+ * A Ptah monitor asked a live lane for a handoff or paused its new work, or released it. The lane
+ * stays alive. `notice` is the notice that now holds, or `null` when none holds any more.
  * `text` is the host-rendered Ptah sentence for the parent and the card; it holds only trusted
- * values. Later `agent-monitor:spawned` and `agent-monitor:exited` payloads carry the current
- * notice in `AgentProcessInfo.actionNotice`, and a payload without it clears the card state.
+ * values and is empty with a `null` notice. Later `agent-monitor:spawned` and
+ * `agent-monitor:exited` payloads carry the current notice in `AgentProcessInfo.actionNotice`,
+ * and a payload without it clears the card state.
  */
 export interface AgentMonitorActionNoticePayload {
   readonly agentId: string;
-  readonly notice: AgentActionNotice;
+  readonly notice: AgentActionNotice | null;
   readonly text: string;
 }

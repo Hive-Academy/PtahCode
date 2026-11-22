@@ -1939,8 +1939,8 @@ export class AgentMonitorStore implements OnDestroy {
   }
 
   /**
-   * A Ptah monitor asked a live lane for a handoff or paused its new work. The card keeps the
-   * latest notice and the lane stays alive. An unknown id is a no-op: the notice follows the
+   * A Ptah monitor asked a live lane for a handoff, paused its new work, or released the notice
+   * (`null`). The card keeps the latest notice and the lane stays alive. An unknown id is a no-op: the notice follows the
    * spawn event, so a missing card was already evicted and a new one would show a ghost.
    */
   onAgentActionNotice(payload: AgentMonitorActionNoticePayload): void {
@@ -1948,11 +1948,13 @@ export class AgentMonitorStore implements OnDestroy {
       const index = list.findIndex((a) => a.agentId === payload.agentId);
       if (index === -1) return list;
       const next = [...list];
-      next[index] = {
-        ...next[index],
-        actionNotice: payload.notice,
-        actionNoticeText: payload.text,
-      };
+      next[index] = payload.notice
+        ? {
+            ...next[index],
+            actionNotice: payload.notice,
+            actionNoticeText: payload.text,
+          }
+        : { ...next[index], actionNotice: undefined, actionNoticeText: undefined };
       return next;
     });
   }

@@ -32,6 +32,12 @@ export interface TrackedAgent {
   laneAdmission?: Partial<Record<LaneAdmissionSource, AgentActionNotice>>;
   /** `source:action:reason` keys already announced, so each notice is sent once. */
   laneNoticesAnnounced?: Set<string>;
+  /**
+   * Called when a clear changes the lane's current notice: `current` is the notice that
+   * remains (a lower phase from another monitor) or undefined. Set once the lane is live, so the
+   * renderer card drops a pause or ask that no longer holds.
+   */
+  laneNoticeChanged?: (current: AgentActionNotice | undefined) => void;
   info: AgentProcessInfo;
   /** Admission has been returned to an MCP caller. */
   spawnReplied?: boolean;
@@ -155,10 +161,11 @@ export function isLanePaused(tracked: Pick<TrackedAgent, 'laneAdmission'>): bool
 
 /** Set or clear one monitor's notice and mirror the current notice onto `info.actionNotice`. */
 export function setLaneAdmission(
-  tracked: Pick<TrackedAgent, 'laneAdmission' | 'info'>,
+  tracked: Pick<TrackedAgent, 'laneAdmission' | 'info' | 'laneNoticeChanged'>,
   source: LaneAdmissionSource,
   notice: AgentActionNotice | undefined,
 ): void {
+  const before = currentLaneNotice(tracked);
   const next = { ...(tracked.laneAdmission ?? {}) };
   if (notice) next[source] = notice;
   else delete next[source];
@@ -168,6 +175,8 @@ export function setLaneAdmission(
   if (current) info.actionNotice = current;
   else delete info.actionNotice;
   tracked.info = info;
+  if (!notice && (before?.action !== current?.action || before?.reason !== current?.reason))
+    tracked.laneNoticeChanged?.(current);
 }
 
 /**
@@ -175,7 +184,7 @@ export function setLaneAdmission(
  * announced before. A latched pause is never downgraded to an ask from the same monitor.
  */
 export function announceLaneNotice(
-  tracked: Pick<TrackedAgent, 'laneAdmission' | 'laneNoticesAnnounced' | 'info'>,
+  tracked: Pick<TrackedAgent, 'laneAdmission' | 'laneNoticesAnnounced' | 'info' | 'laneNoticeChanged'>,
   source: LaneAdmissionSource,
   notice: AgentActionNotice,
 ): boolean {
@@ -191,7 +200,7 @@ export function announceLaneNotice(
 
 /** Clear one monitor's notice and its announce keys, so a later crossing is announced again. */
 export function clearLaneAdmission(
-  tracked: Pick<TrackedAgent, 'laneAdmission' | 'laneNoticesAnnounced' | 'info'>,
+  tracked: Pick<TrackedAgent, 'laneAdmission' | 'laneNoticesAnnounced' | 'info' | 'laneNoticeChanged'>,
   source: LaneAdmissionSource,
 ): void {
   for (const key of [...(tracked.laneNoticesAnnounced ?? [])]) {

@@ -27,7 +27,9 @@ import {
 import { SlicePipe } from '@angular/common';
 import type { MonitoredAgent } from '@ptah-extension/chat-streaming';
 import {
-  formatAgentActionNotice,
+  formatAgentActionReason,
+  formatAgentActorLabel,
+  formatBudgetPauseNotice,
   type AgentActionNotice,
   type LaneStopReason,
 } from '@ptah-extension/shared';
@@ -49,6 +51,15 @@ export interface LaneActionNoticeView {
 }
 
 /**
+ * Reader copy for a notice whose host text did not arrive (a card built from a spawn or exit
+ * payload). It speaks to the person, not to the agent, and keeps the lane live.
+ */
+function laneNoticeFallbackText(notice: AgentActionNotice, id: string): string {
+  if (notice.action === 'paused') return formatBudgetPauseNotice(notice, id);
+  return `${formatAgentActorLabel(notice)} asked ${id} for a handoff because ${formatAgentActionReason(notice)}. The execution remains live.`;
+}
+
+/**
  * Chip for the latest Ptah ask or pause notice of a lane that is still running. A pause only
  * holds new work: the lane stays alive, so the chip says so. A lane that has left `running` shows
  * nothing, because its completion result already carries the notice as past-tense context.
@@ -59,8 +70,7 @@ export function laneActionNoticeView(
   const notice: AgentActionNotice | undefined = agent.actionNotice;
   if (!notice || (agent.status !== 'running' && agent.status !== 'starting')) return null;
   if (notice.action === 'ended') return null;
-  const text =
-    agent.actionNoticeText || formatAgentActionNotice(notice, { id: String(agent.agentId) });
+  const text = agent.actionNoticeText || laneNoticeFallbackText(notice, String(agent.agentId));
   return notice.action === 'paused'
     ? { label: 'Paused · still running', text, paused: true }
     : { label: 'Handoff requested', text, paused: false };

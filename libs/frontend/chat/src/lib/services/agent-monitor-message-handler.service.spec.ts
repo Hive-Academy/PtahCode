@@ -128,6 +128,12 @@ describe('AgentMonitorMessageHandler', () => {
       expect(store.onAgentActionNotice).toHaveBeenCalledWith(payload);
     });
 
+    it('applies a release of the notice', () => {
+      const payload = { agentId: 'lane-1', notice: null, text: '' };
+      handler.handleMessage({ type: MESSAGE_TYPES.AGENT_MONITOR_ACTION_NOTICE, payload });
+      expect(store.onAgentActionNotice).toHaveBeenCalledWith(payload);
+    });
+
     it.each([
       ['undefined', undefined],
       ['an array', []],

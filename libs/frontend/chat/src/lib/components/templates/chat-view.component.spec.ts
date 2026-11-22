@@ -3829,7 +3829,7 @@ describe('ChatViewComponent — session budget banner wiring', () => {
 
     expect(h.sendOrQueueMessageMock).toHaveBeenCalledTimes(1);
     expect(h.sendOrQueueMessageMock).toHaveBeenCalledWith(
-      expect.stringContaining('This session has used 41.2M tokens.'),
+      expect.stringContaining('Ptah budget monitor requested a handoff because this session used 41.2M tokens.'),
       { tabId: 'tab-abc' },
     );
     expect(view.budgetWrapUpSent()).toBe(true);

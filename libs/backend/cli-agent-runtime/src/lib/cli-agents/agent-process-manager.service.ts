@@ -1907,6 +1907,14 @@ export class AgentProcessManager {
     );
     tracked.budget = budget;
     tracked.info = { ...tracked.info, agentBudget: budget.record() };
+    tracked.laneNoticeChanged = (current) => {
+      if (this.disposing || this.agents.get(agentId) !== tracked) return;
+      this.events.emit('agent:action-notice-cleared', {
+        info: tracked.info,
+        notice: current ?? null,
+        text: current ? this.laneNoticeParentText(agentId, tracked, current) : '',
+      });
+    };
     this.agents.set(agentId, tracked);
     // Ask at W of silence, pause at 2W; armed once the lane is registered.
     this.armInactivityWatchdog(agentId, tracked);
