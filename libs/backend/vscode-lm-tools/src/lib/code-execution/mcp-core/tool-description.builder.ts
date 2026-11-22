@@ -447,7 +447,7 @@ export function buildWorkspaceAnalyzeTool(): MCPToolDefinition {
   return {
     name: 'ptah_workspace_analyze',
     description:
-      'Analyze the entire workspace in one call. Returns project type, frameworks, directory structure, and architecture overview. Use it for a broad overview of a project you do not know yet. Do not call it as a first step before a focused search: to find a file or a symbol, use ptah_search_files, ptah_code_search_symbols or ptah_grep.',
+      'Analyze the workspace in one call: project type, frameworks, directory structure, architecture overview. Use it for a broad overview of an unknown project, not as a first step before a focused search.',
     inputSchema: {
       type: 'object',
       properties: {},
