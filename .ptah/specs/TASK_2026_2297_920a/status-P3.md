@@ -51,3 +51,17 @@ PtahCode review of 7ca90a4e1: two major findings, both fixed in the next commit.
 the store restore before it reads a saved receipt (refuses with `delivery-failed` if the restore
 fails). The drainer follows lineage from every recorded owner alias, which closes the drain side of
 defect 5. CI: only `mcp-bench` `host-launcher.spec.ts` (guard mode, 71 s) failed; it is outside P3.
+
+## CodeRabbit round (2026-11-22, head 5e2c18131)
+
+Fixed: saved receipt lookup now runs before the burst and duplicate bounds (a repeat returns its
+receipt); the claim (`sending`, same `attemptId`, same recipient) is checked synchronously before the
+adapter call; a failed claim write sets the retry floor; the `parent-session-not-active` sentence also
+covers an owner change.
+
+Not fixed in P3 (design limits, documented):
+- The child registry is in memory, so after a host restart a queued report stays `unknown` and waits
+  (up to 24 hours) until the child binding exists again. Persisting the registry is outside P3.
+- A claim whose release write fails and whose host then restarts becomes `outcome-unknown` on restore
+  (the safe side: no duplicate send). Distinguishing a pre-dispatch claim needs a store schema change.
+- `markDelivered` can still overwrite a `cancelled` row when a cancel lands during the adapter call.

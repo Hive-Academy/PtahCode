@@ -1400,12 +1400,15 @@ describe('AgentReportRouter.deliver — session child', () => {
       d.drainer.dispose();
 
       const e = await durableSession();
+      const firstSame = await e.router.deliver({
+        childSessionId: CHILD,
+        message: 'same',
+      });
+      expect(firstSame).toMatchObject({ queued: true });
+      // A repeat of a saved report returns its receipt, not a duplicate refusal.
       expect(
         await e.router.deliver({ childSessionId: CHILD, message: 'same' }),
-      ).toMatchObject({ queued: true });
-      expect(
-        await e.router.deliver({ childSessionId: CHILD, message: 'same' }),
-      ).toEqual({ delivered: false, reason: 'duplicate-report' });
+      ).toMatchObject({ queued: true, receiptId: firstSame.receiptId });
       expect(e.store.list(PARENT_SDK)).toHaveLength(1);
       e.drainer.dispose();
     });
@@ -1548,6 +1551,24 @@ describe('AgentReportRouter.deliver — session child', () => {
         expect(d.store.list(NEW_SDK)).toEqual([
           expect.objectContaining({ id: second.receiptId }),
         ]);
+        d.drainer.dispose();
+      });
+
+      it('returns the saved receipt for an immediate repeat instead of a duplicate refusal', async () => {
+        const d = await durableSession();
+        const first = await d.router.deliver({
+          childSessionId: CHILD,
+          message: 'repeat now',
+        });
+        const second = await d.router.deliver({
+          childSessionId: CHILD,
+          message: 'repeat now',
+        });
+        expect(second).toMatchObject({
+          queued: true,
+          receiptId: first.receiptId,
+        });
+        expect(d.store.list(PARENT_SDK)).toHaveLength(1);
         d.drainer.dispose();
       });
 

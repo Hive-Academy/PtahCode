@@ -2084,7 +2084,7 @@ const AGENT_REPORT_REFUSAL_SENTENCES: Record<string, string> = {
   'unattributed-caller':
     "Ptah could not route this report because the caller's child session identity could not be verified.",
   'parent-session-not-active':
-    'Ptah could not save the report for the inactive parent. Keep the report and retry when the parent is available.',
+    'Ptah could not route the report: the parent session is not active, or its owner changed. Keep the report and retry.',
   'storage-unavailable':
     'Ptah could not save the report. Keep the report and retry.',
   'delivery-in-progress':

@@ -820,6 +820,40 @@ export class AgentReportRouter {
       );
     }
 
+    // A saved receipt for this exact report outranks the report bounds and a
+    // live parent: a repeat gets its receipt, and a row
+    // that is sending or whose outcome is unknown may already have reached
+    // the parent, so a direct send here could deliver it twice.
+    // The lookup reads the in-memory index, so the restore must be done first.
+    if (this.parentDelivery) {
+      try {
+        await this.parentDelivery.restored();
+      } catch (error: unknown) {
+        this.sessionChildren?.markReportRefused(childSessionId, refusedSummary);
+        return this.refuseSessionChild('delivery-failed', childSessionId, {
+          parentSessionId,
+          detail: `saved reports could not be read: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        });
+      }
+      if (!this.ownerBindingHolds(childSessionId, binding)) {
+        this.sessionChildren?.markReportRefused(childSessionId, refusedSummary);
+        return this.refuseSessionChild(
+          'parent-session-not-active',
+          childSessionId,
+          { parentSessionIds: candidates, detail: 'the recorded owner changed' },
+        );
+      }
+    }
+    const stored = this.storedSessionReceipt(
+      childSessionId,
+      binding,
+      message,
+      refusedSummary,
+    );
+    if (stored) return stored;
+
     // Before the delivery branch, so the bounds also apply to queued reports.
     const rateKey = `session:${childSessionId}`;
     const now = Date.now();
@@ -858,39 +892,6 @@ export class AgentReportRouter {
       });
     }
     const originName = `session · ${child.label}`;
-
-    // A saved receipt for this exact report outranks a live parent: a row
-    // that is sending or whose outcome is unknown may already have reached
-    // the parent, so a direct send here could deliver it twice.
-    // The lookup reads the in-memory index, so the restore must be done first.
-    if (this.parentDelivery) {
-      try {
-        await this.parentDelivery.restored();
-      } catch (error: unknown) {
-        this.sessionChildren?.markReportRefused(childSessionId, refusedSummary);
-        return this.refuseSessionChild('delivery-failed', childSessionId, {
-          parentSessionId,
-          detail: `saved reports could not be read: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-        });
-      }
-      if (!this.ownerBindingHolds(childSessionId, binding)) {
-        this.sessionChildren?.markReportRefused(childSessionId, refusedSummary);
-        return this.refuseSessionChild(
-          'parent-session-not-active',
-          childSessionId,
-          { parentSessionIds: candidates, detail: 'the recorded owner changed' },
-        );
-      }
-    }
-    const stored = this.storedSessionReceipt(
-      childSessionId,
-      binding,
-      message,
-      refusedSummary,
-    );
-    if (stored) return stored;
 
     if (!adapter.isSessionActive(parentSessionId)) {
       // An offline owner is addressed by the id it comes back under: a

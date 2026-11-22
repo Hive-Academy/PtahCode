@@ -293,6 +293,7 @@ export class ParentDeliveryDrainerService {
         sending = await this.store.markSending(pending.id);
       } catch (error: unknown) {
         this.logger.error('[ParentDeliveryDrainer] Could not persist sending state', this.error(error));
+        this.holdAfterWriteFailure(pending.id);
         this.schedule(this.backoff(pending.attempts));
         break;
       }
@@ -310,6 +311,14 @@ export class ParentDeliveryDrainerService {
         const owner = await this.sessionOwner(sending);
         if (owner !== 'matches') {
           await this.holdSessionReport(pending, owner, true);
+          continue;
+        }
+        // The owner lookup awaited: a cancel or a recipient rewrite can have
+        // landed. Check the claim now; no await may follow before the send.
+        const current = this.store.findById(sending.id);
+        if (!current || current.state !== 'sending' || current.attemptId !== sending.attemptId) continue;
+        if (current.parentSessionId !== parentSessionId) {
+          await this.releaseClaim(sending.id, 'recipient-changed', BACKOFF_MS[0]);
           continue;
         }
       }

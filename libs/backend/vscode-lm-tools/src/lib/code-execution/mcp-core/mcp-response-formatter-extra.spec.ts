@@ -253,7 +253,7 @@ describe('mcp-response-formatter › formatAgentReport', () => {
     });
     expect(out).toMatch(/Reason:\*\* parent-session-not-active/);
     expect(out).toContain(
-      'Ptah could not save the report for the inactive parent. Keep the report and retry when the parent is available.',
+      'Ptah could not route the report: the parent session is not active, or its owner changed. Keep the report and retry.',
     );
   });
 

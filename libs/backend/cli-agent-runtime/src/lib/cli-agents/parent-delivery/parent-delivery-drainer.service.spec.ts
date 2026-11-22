@@ -526,6 +526,22 @@ describe('ParentDeliveryDrainerService child session reports', () => {
       });
     });
 
+  it('does not send a report that was cancelled during the final owner lookup', async () => {
+    const ackStore = acks([{ predecessorTabId: other, predecessorSdkId: null,
+      successorTabId: successor, successorSdkId: null, workspaceRoot: '/ws',
+      handoffPath: '/ws/h.md', state: 'recorded' }]);
+    const { h, drainer } = await sessionDrainer(registryWith({ parentSessionId: other }), ackStore);
+    await drainer.enqueue(sessionReport('cancelled-late', successor));
+    (ackStore.records as jest.Mock).mockImplementation(async () => {
+      await h.store.cancel('lane-delivery:cancelled-late', 'user');
+      return [{ predecessorTabId: other, predecessorSdkId: null, successorTabId: successor,
+        successorSdkId: null, workspaceRoot: '/ws', handoffPath: '/ws/h.md', state: 'recorded' }];
+    });
+    await drainer.drain(successor);
+    expect(h.send).not.toHaveBeenCalled();
+    expect(h.store.find('cancelled-late')?.state).toBe('cancelled');
+  });
+
   it('retries a stale-owner cancel whose write failed after its retry floor', async () => {
     const start = Date.now();
     let clock = start;
