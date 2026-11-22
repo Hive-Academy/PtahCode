@@ -63,6 +63,11 @@ import {
 import { SessionApprovalRouter } from '../codex-app-server/session-approval-router';
 import { ProviderSessionChatAdapter } from '../provider-session/provider-session-chat-adapter';
 import type { ProviderSessionChatPorts } from '../provider-session/provider-session-chat-ports';
+import {
+  SESSION_USAGE_SINK,
+  type SessionUsageSink,
+} from '../session-stats/session-usage-sink';
+import type { IPricingProvider } from '../pricing.port';
 import { SdkTranscriptReaderAdapter } from '../sdk-transcript-reader.adapter';
 import { SessionMetadataStore } from '../session-metadata-store';
 import {
@@ -1199,6 +1204,13 @@ export function registerCodexChatServices(
           approvals: c.resolve<SessionApprovalRouter>(
             SDK_TOKENS.SESSION_APPROVAL_ROUTER,
           ),
+          // Optional: a host without the session store keeps usage in memory.
+          usageSink: c.isRegistered(SESSION_USAGE_SINK, true)
+            ? c.resolve<SessionUsageSink | null>(SESSION_USAGE_SINK)
+            : null,
+          pricing: c.isRegistered(SDK_TOKENS.PRICING_PROVIDER, true)
+            ? c.resolve<IPricingProvider | null>(SDK_TOKENS.PRICING_PROVIDER)
+            : null,
         },
         c.resolve<SessionTurnStateRegistry>(
           SDK_TOKENS.SDK_SESSION_TURN_STATE_REGISTRY,

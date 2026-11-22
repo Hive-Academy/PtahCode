@@ -959,3 +959,71 @@ describe('SessionStatsRepository', () => {
   });
 });
 
+
+describe('provider-session usage', () => {
+  const turn = (n: number, overrides: Partial<LiveContribution> = {}): LiveContribution => ({
+    sessionId: 'agy-session', producer: 'provider-session', executorType: 'session',
+    runId: 'run-1', turnId: `turn-${n}`, eventKey: `run-1#${n}`,
+    parentSessionId: null, subagentId: null, providerId: 'antigravity-cli',
+    occurredAtMs: 1_000 + n * 100, revision: n,
+    models: [{ modelId: 'gemini-4-hydrogen-low', inputTokens: 100, outputTokens: 10,
+      cacheReadTokens: 50, cacheCreationTokens: 0, knownCostMicroUsd: 300,
+      costAuthority: 'model-priced' }],
+    totalCostMicroUsd: 300, totalCostAuthority: 'model-priced', pricingVersion: 'or-1',
+    workspaceKey: 'c:/repo', source: 'live',
+    coverageStartMs: 1_000 + n * 100 - 40, coverageEndMs: 1_000 + n * 100,
+    ...overrides,
+  });
+
+  it('persists provider-session turns and reads their totals back', async () => {
+    const store = openTestStore();
+    try {
+      const repository = new SessionStatsRepository(store);
+      const sink = new SqliteSessionUsageSink(repository, { error: jest.fn() });
+      await sink.recordUsage(turn(1));
+      await sink.recordUsage(turn(2));
+      // A replay of the same turn converges instead of double counting.
+      await sink.recordUsage(turn(2));
+      await sink.recordUsage(turn(3, {
+        models: [{ modelId: 'gemini-pro-orchestrator', inputTokens: 7, outputTokens: 3,
+          cacheReadTokens: 0, cacheCreationTokens: 0, knownCostMicroUsd: null,
+          costAuthority: 'unpriced' }],
+        totalCostMicroUsd: null, totalCostAuthority: 'unpriced', pricingVersion: null,
+      }));
+      const totals = await sink.readSessionUsage('agy-session', 'provider-session');
+      expect(totals).toEqual({
+        events: 3,
+        maxRevision: 3,
+        durationMs: 120,
+        models: [
+          { modelId: 'gemini-4-hydrogen-low', inputTokens: 200, outputTokens: 20,
+            cacheReadTokens: 100, cacheCreationTokens: 0, knownCostMicroUsd: 600,
+            events: 2, unpricedEvents: 0, costAuthorities: ['model-priced'] },
+          { modelId: 'gemini-pro-orchestrator', inputTokens: 7, outputTokens: 3,
+            cacheReadTokens: 0, cacheCreationTokens: 0, knownCostMicroUsd: null,
+            events: 1, unpricedEvents: 1, costAuthorities: ['unpriced'] },
+        ],
+      });
+      const stats = await repository.getSessionStats('agy-session', 'c:/repo');
+      expect(stats).toMatchObject({
+        provider_id: 'antigravity-cli', input_tokens: 207, known_cost_micro_usd: 600, has_unpriced: 1,
+      });
+      const groups = await repository.getWorkspaceUsageGroups('c:/repo', 0, 10_000);
+      expect(groups.map((row) => [row.provider_id, row.model_id])).toEqual([
+        ['antigravity-cli', 'gemini-4-hydrogen-low'],
+        ['antigravity-cli', 'gemini-pro-orchestrator'],
+      ]);
+    } finally { store.close(); }
+  });
+
+  it('reads nothing for a session the producer never wrote', async () => {
+    const store = openTestStore();
+    try {
+      const repository = new SessionStatsRepository(store);
+      const sink = new SqliteSessionUsageSink(repository, { error: jest.fn() });
+      await sink.recordUsage(turn(1, { producer: 'cli-lane' }));
+      expect(await sink.readSessionUsage('agy-session', 'provider-session')).toBeNull();
+      expect(await sink.readSessionUsage('other', 'provider-session')).toBeNull();
+    } finally { store.close(); }
+  });
+});

@@ -35,7 +35,12 @@ export interface SessionUsageContribution {
   phaseKind?: PhaseKind | null;
   executorType?: UsageExecutorType | null;
   sessionId: string;
-  producer: 'sdk-owner' | 'codex-checkpoint' | 'cli-lane' | 'transcript-replay';
+  producer:
+    | 'sdk-owner'
+    | 'codex-checkpoint'
+    | 'cli-lane'
+    | 'provider-session'
+    | 'transcript-replay';
   runId: string;
   /** Defaults to null for existing live producers. */
   nativeThreadId?: string | null;
@@ -68,9 +73,46 @@ export interface SessionUsageContribution {
   coverageEndMs?: number | null;
 }
 
+/** One model's persisted totals of one producer in one session. */
+export interface SessionUsageModelTotals {
+  /** `null` for usage that was recorded without a model. */
+  modelId: string | null;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  /** Sum of the priced events of this model, in micro-USD; null when none. */
+  knownCostMicroUsd: number | null;
+  /** Distinct accepted events of this model. */
+  events: number;
+  /** Events of this model without a known price. */
+  unpricedEvents: number;
+  /** Distinct cost authorities of this model's events. */
+  costAuthorities: Array<'provider-reported' | 'model-priced' | 'unpriced'>;
+}
+
+/** Everything one producer persisted for one session, for a resumed owner. */
+export interface SessionUsageTotals {
+  /** Distinct accepted events. */
+  events: number;
+  /** Highest producer revision persisted. */
+  maxRevision: number;
+  /** Sum of the persisted event spans (`coverageEndMs - coverageStartMs`). */
+  durationMs: number;
+  models: SessionUsageModelTotals[];
+}
+
 /** Host-neutral write boundary; callers handle rejection without interrupting a stream. */
 export interface SessionUsageSink {
   recordUsage(event: SessionUsageContribution): Promise<void> | void;
+  /**
+   * Read back what `producer` persisted for `sessionId`, after every write
+   * this sink already accepted. `null` when nothing was persisted.
+   */
+  readSessionUsage?(
+    sessionId: string,
+    producer: SessionUsageContribution['producer'],
+  ): Promise<SessionUsageTotals | null>;
   /** Queue a true session end after accepted usage writes. */
   requestFinalization?(sessionId: string): Promise<void> | void;
   /** Reopen a ledger row when a session is deliberately resumed. */

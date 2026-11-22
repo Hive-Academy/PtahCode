@@ -40,6 +40,7 @@ import {
 } from './provider-session-chat-session';
 import {
   brokenSessionNotice,
+  createProviderSessionUsageLedger,
   publishProviderSessionTurn,
   streamProviderSessionTurn,
   type ProviderSessionChatSession as Session,
@@ -48,6 +49,13 @@ import {
   type ProviderSessionTurnOptions,
 } from './provider-session-turn-stream';
 import type { ProviderSessionRealpath } from './provider-session-turn-files';
+import {
+  createPricingGate,
+  createProviderSessionUsagePersistence,
+  type ProviderSessionUsagePersistence,
+} from './provider-session-usage-capture';
+import type { SessionUsageSink } from '../session-stats/session-usage-sink';
+import type { IPricingProvider } from '../pricing.port';
 
 /** Host ports plus what agent-sdk composition adds (logger, approval router). */
 export interface ProviderSessionChatAdapterDependencies
@@ -56,6 +64,10 @@ export interface ProviderSessionChatAdapterDependencies
   readonly approvals: Pick<SessionApprovalRouter, 'register' | 'cancelPrompt'>;
   /** Canonicalises a turn's file references; `fs.promises.realpath` when absent. */
   readonly realpath?: ProviderSessionRealpath;
+  /** Durable usage ledger (`SESSION_USAGE_SINK`); absent: usage stays in memory. */
+  readonly usageSink?: SessionUsageSink | null;
+  /** Runtime price catalog; the first priced turn waits (bounded) for it. */
+  readonly pricing?: Pick<IPricingProvider, 'ensureHydrated'> | null;
 }
 
 const clientMessageIdSchema = z.string().min(1).optional();
@@ -80,6 +92,7 @@ export class ProviderSessionChatAdapter implements NativeChatAdapter {
   private readonly followUps: ProviderSessionFollowUpQueue;
   private readonly controls: ProviderSessionSessionControls;
   private readonly turnDeps: ProviderSessionTurnDependencies;
+  private readonly usage: ProviderSessionUsagePersistence;
   private disposed = false;
   private generation = 0;
   private resolved?: Parameters<
@@ -109,6 +122,10 @@ export class ProviderSessionChatAdapter implements NativeChatAdapter {
       rejectQueued: (session) => this.followUps.rejectAll(session),
     });
     const realpath = this.ports.realpath ?? ((path: string) => fsRealpath(path));
+    this.usage = createProviderSessionUsagePersistence(ports.usageSink, ports.logger);
+    // Started now so the catalog wait overlaps the first turn, not its end.
+    const pricingReady = createPricingGate(ports.pricing, ports.logger);
+    void pricingReady();
     this.followUps = new ProviderSessionFollowUpQueue({
       logger: this.ports.logger,
       realpath,
@@ -123,6 +140,8 @@ export class ProviderSessionChatAdapter implements NativeChatAdapter {
       realpath,
       live: (session) => this.live(session),
       stats: (payload) => this.stats?.(payload),
+      usage: this.usage,
+      pricingReady,
       failure: (error, operation) => this.failure(error, operation),
       broken: (session) => this.broken(session),
       onIdle: (session) => this.drain(session),
@@ -269,9 +288,13 @@ export class ProviderSessionChatAdapter implements NativeChatAdapter {
         router: this.ports.approvals,
         presentation: this.ports.presentation,
       });
+      // Read alongside the attach; never rejects.
+      const restoring = resumeId ? this.usage.restore(id) : undefined;
       await this.attach(session, opening.abort.signal, 'tab-closed', () =>
         this.checkOpening(opening, generation),
       );
+      if (restoring)
+        session.usage ??= createProviderSessionUsageLedger(session, await restoring);
       if (this.sessions.has(id)) {
         await this.releaseQuietly(id, 'tab-closed');
         throw new ProviderSessionChatAdapterError('busy', 'open');

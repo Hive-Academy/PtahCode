@@ -28,7 +28,10 @@ import { providerSessionRuntimeErrorCode } from './provider-session-error-mappin
 import {
   ProviderSessionUsageLedger,
   providerSessionBillingMode,
+  type ProviderSessionTurnUsage,
+  type ProviderSessionUsageSeed,
 } from './provider-session-usage-ledger';
+import type { ProviderSessionUsagePersistence } from './provider-session-usage-capture';
 import {
   confineTurnFiles,
   type ProviderSessionRealpath,
@@ -122,6 +125,13 @@ export interface ProviderSessionTurnDependencies {
   /** The live process, re-acquired (respawn + attach) when it broke. */
   live(session: ProviderSessionChatSession): Promise<ProviderSession>;
   stats(payload: ResultStatsPayload): void;
+  /** Durable usage; absent on a host without a usage sink. */
+  readonly usage?: Pick<ProviderSessionUsagePersistence, 'record'>;
+  /**
+   * Resolves once the runtime price table may be read (the OpenRouter
+   * catalog warmup settled, or a bounded wait elapsed). Never rejects.
+   */
+  pricingReady?(): Promise<void>;
   failure(error: unknown, operation: string): ProviderSessionChatAdapterError;
   /** The process is gone: release it, publish one notice, keep the session. */
   broken(session: ProviderSessionChatSession): void;
@@ -228,7 +238,24 @@ export async function* streamProviderSessionTurn(
         yield mapped;
       }
       if (event.type !== 'terminal') continue;
-      if (usage) deps.stats(resultStats(session, usage, Date.now() - started));
+      if (usage) {
+        // Timestamps first: the catalog wait is not part of the turn.
+        const ended = Date.now();
+        await deps.pricingReady?.();
+        const turn = recordTurnUsage(session, usage, ended - started);
+        deps.stats(turn.payload);
+        deps.usage?.record({
+          sessionId: session.id,
+          providerId: session.prepared.seed.providerId,
+          workspacePath: session.prepared.seed.workspacePath,
+          turnId,
+          model: turn.model,
+          usage,
+          recorded: turn.recorded,
+          startedAtMs: started,
+          endedAtMs: ended,
+        });
+      }
       yield {
         ...toTurnStateEvent(session.id, settle(session.id, event, deps)),
         ...consumed,
@@ -365,6 +392,36 @@ export function resultStats(
   usage: ProviderUsage,
   duration: number,
 ): ResultStatsPayload {
+  return recordTurnUsage(session, usage, duration).payload;
+}
+
+/**
+ * The session's usage ledger. A restored session is seeded with its
+ * persisted totals (`seed`); without one its snapshot stays partial.
+ */
+export function createProviderSessionUsageLedger(
+  session: ProviderSessionChatSession,
+  seed?: ProviderSessionUsageSeed | null,
+): ProviderSessionUsageLedger {
+  const { profile } = session.prepared.seed;
+  return new ProviderSessionUsageLedger(
+    session.id,
+    providerSessionBillingMode(profile),
+    session.prepared.resume !== undefined,
+    { profile, seed },
+  );
+}
+
+/** Count one turn in the session ledger: the payload plus what to persist. */
+function recordTurnUsage(
+  session: ProviderSessionChatSession,
+  usage: ProviderUsage,
+  duration: number,
+): {
+  payload: ResultStatsPayload;
+  recorded: ProviderSessionTurnUsage;
+  model: string | undefined;
+} {
   const model =
     usage.model ?? session.settings.model ?? session.prepared.seed.model;
   const tokens = {
@@ -386,17 +443,9 @@ export function resultStats(
           : { sdkContextWindow: usage.contextWindow }),
       })
     : undefined;
-  session.usage ??= new ProviderSessionUsageLedger(
-    session.id,
-    providerSessionBillingMode(session.prepared.seed.profile),
-    session.prepared.resume !== undefined,
-  );
-  const { turnPrice, snapshot } = session.usage.record(
-    model,
-    usage,
-    duration,
-    contextCapacity,
-  );
+  session.usage ??= createProviderSessionUsageLedger(session);
+  const recorded = session.usage.record(model, usage, duration, contextCapacity);
+  const { turnPrice, snapshot } = recorded;
   const pricing = {
     turnCost: turnPrice.totalCost,
     costBasis: turnPrice.costBasis,
@@ -407,13 +456,17 @@ export function resultStats(
   };
   if (!model || !contextCapacity)
     return {
-      sessionId: session.id,
-      ...pricing,
-      sessionStats: snapshot,
-      tokens,
-      duration,
+      model,
+      recorded,
+      payload: {
+        sessionId: session.id,
+        ...pricing,
+        sessionStats: snapshot,
+        tokens,
+        duration,
+      },
     };
-  return {
+  const payload: ResultStatsPayload = {
     sessionId: session.id,
     ...pricing,
     sessionStats: snapshot,
@@ -434,6 +487,7 @@ export function resultStats(
       },
     ],
   };
+  return { model, recorded, payload };
 }
 
 /** One projector per chat session (turn state lives in it). */

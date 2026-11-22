@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { PHASE_KINDS } from '@ptah-extension/shared';
 import { PLATFORM_TOKENS, type SessionUsageContribution, type UsageExecutorType } from '@ptah-extension/platform-core';
-export type { SessionUsageSink, SessionUsageContribution, SessionUsageModelDelta } from '@ptah-extension/platform-core';
+export type { SessionUsageSink, SessionUsageContribution, SessionUsageModelDelta, SessionUsageTotals } from '@ptah-extension/platform-core';
 
 /**
  * `SessionUsageSink` — the host-neutral port that persists ACCEPTED live
@@ -18,7 +18,10 @@ export type { SessionUsageSink, SessionUsageContribution, SessionUsageModelDelta
  *    non-regressing native Codex usage checkpoint; the contribution carries
  *    the per-thread accrued deltas against the previously stored checkpoint;
  *  - `'cli-lane'` — the CLI lane completion path with the turn total a lane
- *    reported at its terminal transition.
+ *    reported at its terminal transition;
+ *  - `'provider-session'` — the provider-session main chat (Antigravity,
+ *    Grok, OpenCode) after each completed turn with usage; one row per turn,
+ *    priced by `ProviderSessionUsageLedger`.
  *
  * The adapter is a host binding under `SESSION_USAGE_SINK` (optional;
  * `persistence-sqlite` binds it in `registerSessionStoreServices`). Every
@@ -53,6 +56,7 @@ export const SESSION_USAGE_PRODUCERS = [
   'sdk-owner',
   'codex-checkpoint',
   'cli-lane',
+  'provider-session',
   'transcript-replay',
 ] as const;
 export type SessionUsageProducer = (typeof SESSION_USAGE_PRODUCERS)[number];

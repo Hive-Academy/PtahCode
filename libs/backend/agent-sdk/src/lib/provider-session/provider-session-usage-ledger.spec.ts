@@ -1,5 +1,7 @@
 import 'reflect-metadata';
 import {
+  calculateExactMessageCost,
+  registerProviderPricing,
   resetPricingMapForTesting,
   resolveContextCapacity,
   SessionId,
@@ -12,8 +14,10 @@ import {
   type ProviderSessionChatSession,
 } from './provider-session-turn-stream';
 import {
+  priceTurn,
   ProviderSessionUsageLedger,
   providerSessionBillingMode,
+  providerSessionPricingFallback,
 } from './provider-session-usage-ledger';
 
 const PRICED = 'test-priced-model';
@@ -232,5 +236,132 @@ describe('resultStats for a provider-session turn (issue #1459)', () => {
       1,
     );
     expect(stats.sessionStats?.coverage).toBe('partial');
+  });
+});
+
+describe('Antigravity effort-suffixed model pricing', () => {
+  const rate = { inputCostPerToken: 1e-6, outputCostPerToken: 4e-6, cacheReadCostPerToken: 2e-7 };
+  const usage = { inputTokens: 1000, outputTokens: 100, cacheReadTokens: 500 };
+  afterEach(() => resetPricingMapForTesting());
+
+  it('names the base id only for the antigravity profile and the listed suffixes', () => {
+    expect(providerSessionPricingFallback('antigravity', 'gemini-4-hydrogen-low')).toBe('gemini-4-hydrogen');
+    expect(providerSessionPricingFallback('antigravity', 'gemini-4-hydrogen-xhigh')).toBe('gemini-4-hydrogen');
+    expect(providerSessionPricingFallback('antigravity', 'claude-opus-5-5-medium')).toBe('claude-opus-5-5');
+    expect(providerSessionPricingFallback('antigravity', 'gemini-pro-orchestrator')).toBeUndefined();
+    expect(providerSessionPricingFallback('antigravity', 'gemini-4-hydrogen-lowest')).toBeUndefined();
+    expect(providerSessionPricingFallback('grok', 'grok-5-high')).toBeUndefined();
+    expect(providerSessionPricingFallback(undefined, 'gemini-4-hydrogen-low')).toBeUndefined();
+  });
+
+  it('prices gemini-4-hydrogen-low at the gemini-4-hydrogen rate and names it', () => {
+    registerProviderPricing({ 'google/gemini-4-hydrogen': rate, 'gemini-4-hydrogen': rate });
+    const price = priceTurn('gemini-4-hydrogen-low', usage, 'subscription', 'antigravity');
+    expect(price.totalCost).toBeCloseTo(1000 * 1e-6 + 100 * 4e-6 + 500 * 2e-7, 9);
+    expect(price.costBasis).toBe('covered-by-subscription');
+    expect(price.priceProvenance?.modelIdUsed).toBe('gemini-4-hydrogen');
+  });
+
+  it('keeps an effort variant unpriced outside the antigravity profile', () => {
+    updatePricingMap({ 'gemini-4-hydrogen': rate });
+    expect(priceTurn('gemini-4-hydrogen-low', usage, 'subscription', 'grok').totalCost).toBeNull();
+    expect(priceTurn('gemini-4-hydrogen-low', usage, 'subscription').totalCost).toBeNull();
+  });
+
+  it('keeps a model with no published rate unpriced, never $0', () => {
+    updatePricingMap({ 'gemini-4-hydrogen': rate });
+    for (const model of ['gemini-pro-orchestrator', 'gemini-pro-orchestrator-high']) {
+      const price = priceTurn(model, usage, 'subscription', 'antigravity');
+      expect(price.totalCost).toBeNull();
+      expect(price.costUnavailableReason).toBe('rate-missing');
+    }
+  });
+
+  it('prices a claude effort variant at the bundled claude rate', () => {
+    const expected = calculateExactMessageCost(
+      'claude-sonnet-5-5',
+      { input: 1000, output: 100, cacheHit: 500, cacheCreation: 0 },
+      { billingMode: 'subscription', cacheSemantics: 'disjoint', usageObserved: true },
+    );
+    expect(expected.totalCost).not.toBeNull();
+    const price = priceTurn('claude-sonnet-5-5-medium', usage, 'subscription', 'antigravity');
+    expect(price.totalCost).toBe(expected.totalCost);
+    expect(price.priceProvenance?.modelIdUsed).toBe(expected.priceProvenance?.modelIdUsed);
+  });
+
+  it('prices through the ledger with the session profile', () => {
+    updatePricingMap({ 'gemini-4-hydrogen': rate });
+    const ledger = new ProviderSessionUsageLedger('s1', 'subscription', false, { profile: 'antigravity' });
+    const { snapshot } = ledger.record('gemini-4-hydrogen-high', usage, 1, undefined);
+    expect(snapshot.pricingCoverage).toBe('full');
+    expect(snapshot.totalCost).not.toBeNull();
+    expect(snapshot.priceProvenance?.[0]?.modelIdUsed).toBe('gemini-4-hydrogen');
+  });
+});
+
+describe('ProviderSessionUsageLedger persistence identity and seed', () => {
+  const seedRow = {
+    modelId: 'm',
+    inputTokens: 10,
+    outputTokens: 5,
+    cacheReadTokens: 0,
+    cacheCreationTokens: 0,
+    knownCostMicroUsd: 2500,
+    events: 2,
+    unpricedEvents: 0,
+    costAuthorities: ['model-priced' as const],
+  };
+  afterEach(() => resetPricingMapForTesting());
+
+  it('gives the turns of one run increasing revisions under one run id', () => {
+    const ledger = new ProviderSessionUsageLedger('s1', 'subscription', false);
+    const one = ledger.record('m', { inputTokens: 1, outputTokens: 1 }, 1, undefined);
+    const two = ledger.record('m', { inputTokens: 1, outputTokens: 1 }, 1, undefined);
+    expect(two.revision).toBeGreaterThan(one.revision);
+    expect([one.runTurn, two.runTurn]).toEqual([1, 2]);
+    expect(two.runId).toBe(one.runId);
+    expect(two.snapshot.coverage).toBe('complete');
+  });
+
+  it('shows the persisted totals of a contiguous seed as partial, since a lost trailing turn leaves no trace', () => {
+    updatePricingMap({ m: { inputCostPerToken: 1e-6, outputCostPerToken: 1e-6 } });
+    // 1..2 persisted, contiguous: a third turn may still have been lost.
+    const ledger = new ProviderSessionUsageLedger('s1', 'subscription', true, {
+      seed: { events: 2, maxRevision: 2, durationMs: 40, models: [seedRow] },
+    });
+    const turn = ledger.record('m', { inputTokens: 1, outputTokens: 1 }, 10, undefined);
+    expect(turn.runTurn).toBe(1);
+    expect(turn.revision).toBeGreaterThan(2);
+    expect(turn.snapshot).toMatchObject({
+      coverage: 'partial',
+      messageCount: 3,
+      durationMs: 50,
+      tokens: { input: 11, output: 6 },
+      pricingCoverage: 'full',
+      totalCost: null,
+    });
+    expect(turn.snapshot.turnCount).toBeUndefined();
+    expect(turn.snapshot.knownCost).toBeCloseTo(0.0025 + 2e-6, 9);
+  });
+
+  it('keeps applying a seed whose revisions are time-based (no poisoning after a timed-out resume)', () => {
+    // An earlier process resumed without a seed and wrote time-based
+    // revisions; the next resume still counts every persisted turn.
+    const ledger = new ProviderSessionUsageLedger('s1', 'subscription', true, {
+      seed: { events: 3, maxRevision: 1_700_000_000_000, durationMs: 0, models: [{ ...seedRow, events: 3 }] },
+    });
+    const turn = ledger.record('m', { inputTokens: 1, outputTokens: 1 }, 1, undefined);
+    expect(turn.snapshot.tokens.input).toBe(11);
+    expect(turn.snapshot.messageCount).toBe(4);
+    expect(turn.revision).toBeGreaterThan(1_700_000_000_000);
+  });
+
+  it('ignores a seed for a session that was not restored', () => {
+    const ledger = new ProviderSessionUsageLedger('s1', 'subscription', false, {
+      seed: { events: 2, maxRevision: 2, durationMs: 0, models: [seedRow] },
+    });
+    const turn = ledger.record('m', { inputTokens: 1, outputTokens: 1 }, 1, undefined);
+    expect(turn.snapshot.tokens.input).toBe(1);
+    expect(turn.snapshot.coverage).toBe('complete');
   });
 });
