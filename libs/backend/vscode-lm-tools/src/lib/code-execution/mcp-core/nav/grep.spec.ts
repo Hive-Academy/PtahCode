@@ -235,6 +235,18 @@ describe('handleGrep (node engine)', () => {
     expect(reply.text.split('\n')[0]).toBe('1 match in 1 file (engine: node)');
   });
 
+  it('stops a backtracking regular expression instead of freezing the host', async () => {
+    await writeFile(path.join(root, 'src', 'slow.txt'), `${'a'.repeat(40)}!\n`);
+    const started = Date.now();
+    const reply = await handleGrep(
+      { pattern: '(a+)+$', regex: true, path: 'src/slow.txt' },
+      deps,
+    );
+    expect(Date.now() - started).toBeLessThan(5_000);
+    expect(reply.isError).toBe(false);
+    expect(reply.text).toContain('too slow');
+  });
+
   it('rejects unknown arguments', async () => {
     const reply = await handleGrep({ pattern: 'x', surprise: true }, deps);
     expect(reply.isError).toBe(true);

@@ -8,6 +8,7 @@ import type { Readable } from 'node:stream';
 import { access, open, readdir, readFile, stat } from 'node:fs/promises';
 import { constants as fsConstants, type Dirent } from 'node:fs';
 import * as path from 'node:path';
+import * as vm from 'node:vm';
 import { toPosixRelative } from './nav-workspace-path';
 import {
   GREP_COLLECT_CAP,
@@ -86,6 +87,43 @@ export function buildMatcher(request: GrepRequest): RegExp {
     source,
     isCaseInsensitive(request.pattern, request.caseSensitive) ? 'i' : '',
   );
+}
+
+/** Time limit of one regular-expression test on one line, in ms. */
+const REGEX_TEST_TIMEOUT_MS = 100;
+
+/** Thrown when a user regular expression runs past its time limit. */
+export class RegexTimeoutError extends Error {
+  constructor() {
+    super('the regular expression is too slow (catastrophic backtracking)');
+    this.name = 'RegexTimeoutError';
+  }
+}
+
+/**
+ * A line test for `matcher`. A user regular expression runs under a `vm`
+ * timeout, so a backtracking pattern cannot freeze the event loop; a literal
+ * pattern is escaped first and cannot backtrack, so it runs directly.
+ */
+export function buildLineTester(
+  matcher: RegExp,
+  userRegex: boolean,
+): (line: string) => boolean {
+  if (!userRegex) {
+    return (line) => matcher.test(line);
+  }
+  const context = vm.createContext({ re: matcher, line: '' });
+  const script = new vm.Script('re.test(line)');
+  return (line) => {
+    context['line'] = line;
+    try {
+      return script.runInContext(context, {
+        timeout: REGEX_TEST_TIMEOUT_MS,
+      }) as boolean;
+    } catch {
+      throw new RegexTimeoutError();
+    }
+  };
 }
 
 /** Glob to RegExp: `**`, `*`, `?` and `{a,b}`; matched on the relative path. */
@@ -329,7 +367,7 @@ async function isBinary(filePath: string): Promise<boolean> {
 export async function runNodeSearch(
   request: GrepRequest,
 ): Promise<GrepEngineResult> {
-  const matcher = buildMatcher(request);
+  const matchLine = buildLineTester(buildMatcher(request), request.regex);
   const globMatcher = request.glob ? globToRegExp(request.glob) : undefined;
   const globNegated = request.glob ? isNegatedGlob(request.glob) : false;
   const deadline = Date.now() + GREP_TIMEOUT_MS;
@@ -359,7 +397,7 @@ export async function runNodeSearch(
         incomplete = true;
         return;
       }
-      if (matcher.test(lines[i])) {
+      if (matchLine(lines[i])) {
         total++;
         if (matches.length < GREP_COLLECT_CAP) {
           matches.push({
@@ -404,8 +442,11 @@ export async function runNodeSearch(
         }
         try {
           await searchFile(absolute);
-        } catch {
-          // unreadable file: skip it, like rg does
+        } catch (error: unknown) {
+          if (error instanceof RegexTimeoutError) {
+            throw error;
+          }
+          // An unreadable file is skipped, like rg does.
         }
       }
     }
