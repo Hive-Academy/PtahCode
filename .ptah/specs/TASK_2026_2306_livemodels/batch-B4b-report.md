@@ -12,7 +12,7 @@ Worktree: `D:\projects\PtahCode\.claude-worktrees\live-only-model-lists`.
 ## Assumption A7 (`agy models` output)
 
 **A7 verified.** I ran `agy models` once through the PowerShell tool on 2026-11-22, with agy
-`1.5.14` at `C:\Users\abdal\AppData\Local\agy\bin\agy.exe`. The command ran locally and took no
+`1.5.14` at `C:\Users\<user>\AppData\Local\agy\bin\agy.exe`. The command ran locally and took no
 model turn.
 
 - **stderr**: the status line `Fetching available models...`.
