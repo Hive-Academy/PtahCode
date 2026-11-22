@@ -31,6 +31,7 @@ export class KernelSessionDriverLock implements ISessionDriverLock {
   private nextNonce = 0;
   private control?: ControlEndpoint;
   private controlPending?: Promise<ControlEndpoint>;
+  private leaving?: Promise<void>;
   constructor(
     private liveRecordCheck: (
       sessionId: string,
@@ -122,7 +123,7 @@ export class KernelSessionDriverLock implements ISessionDriverLock {
       // endpoint to leave. Leave it here, or it stays bound with a dead source.
       const control = this.control;
       this.control = undefined;
-      await control?.unregister(this);
+      await this.leaveControl(control);
       return { ok: false, unavailable: 'Session driver lock disposed' };
     }
     const server = net.createServer((socket) => {
@@ -311,12 +312,31 @@ export class KernelSessionDriverLock implements ISessionDriverLock {
     );
   }
 
+  /** A disposed lock leaves its endpoint once; later callers await that. */
+  private leaveControl(control: ControlEndpoint | undefined): Promise<void> {
+    if (control) this.leaving ??= control.unregister(this);
+    return this.leaving ?? Promise.resolve();
+  }
+
   async dispose(): Promise<void> {
     this.disposed = true;
+    // An in-flight registration may still bind the endpoint; wait for it so
+    // the caller of dispose() can rely on the endpoint and key file being gone.
+    let control = this.control;
+    const pending = this.controlPending;
+    if (pending) {
+      try {
+        control ??= await pending;
+      } catch {
+        // degradation-audit: reported — the acquisition that started the
+        // registration returns this error as its `unavailable` result.
+      }
+    }
     await Promise.all(
       Array.from(this.entries.values(), (entry) => this.closeEntry(entry)),
     );
     process.removeListener('exit', this.onExit);
-    await this.control?.unregister(this);
+    this.control = undefined;
+    await this.leaveControl(control);
   }
 }

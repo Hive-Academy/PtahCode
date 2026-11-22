@@ -171,6 +171,47 @@ function send(value: unknown): Promise<unknown> {
       }
     });
 
+    it('does not finish dispose until an in-flight registration has settled and left', async () => {
+      const register = ControlEndpoint.register.bind(ControlEndpoint);
+      let registering: () => void = () => undefined;
+      const called = new Promise<void>((resolve) => (registering = resolve));
+      let proceed: () => void = () => undefined;
+      const held = new Promise<void>((resolve) => (proceed = resolve));
+      const spy = jest
+        .spyOn(ControlEndpoint, 'register')
+        .mockImplementation(async (kind, source) => {
+          registering();
+          await held;
+          return register(kind, source);
+        });
+      const unregister = jest.spyOn(ControlEndpoint.prototype, 'unregister');
+      const lock = new KernelSessionDriverLock();
+      try {
+        const acquiring = lock.acquire(
+          `dispose-wait-${process.pid}-${Date.now()}`,
+          owner,
+        );
+        await called;
+        let disposed = false;
+        const disposing = lock.dispose().then(() => {
+          disposed = true;
+        });
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        expect(disposed).toBe(false);
+        proceed();
+        await disposing;
+        // The endpoint bound after dispose began, and is already gone.
+        expect(readControlKey(process.pid)).toBeNull();
+        expect(unregister).toHaveBeenCalledTimes(1);
+        expect((await acquiring).ok).toBe(false);
+      } finally {
+        proceed();
+        spy.mockRestore();
+        unregister.mockRestore();
+        await lock.dispose();
+      }
+    });
+
     it('answers unavailable when the holder drops an operator release unanswered', async () => {
       const lock = new KernelSessionDriverLock();
       const id = `control-drop-${process.pid}-${Date.now()}`;
