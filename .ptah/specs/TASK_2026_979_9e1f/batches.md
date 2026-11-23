@@ -774,12 +774,12 @@ P2 gate:
   The header must say "for 5 projects".
 - Then Live review, P2 pass.
 
-## Batch 14: Stdio host and plugin MCP source (C10, D-U4 Option 1) - PENDING
+## Batch 14: Stdio host and plugin MCP source (C10, D-U4 Option 1) - COMPLETE
 
 - Id: P2-B1 | Phase: P2 | Shape: logic
 - Recommended executor: backend-developer (subagent; reason: lanes disabled)
 - Required Skills: none
-- Estimated weight: unavailable | Actual weight: pending
+- Estimated weight: unavailable | Actual weight: unavailable (`ptah_count_tokens` not listed)
 - Parallel-safe: no (first P2 batch) | Execution mode: sequential
 - Depends on: P1 complete
 - Write set:
@@ -811,11 +811,11 @@ P2 gate:
   - A sentinel `ANTHROPIC_API_KEY` is absent from the child env.
   - Restart cap, idle shutdown and dispose are covered.
   - Plugin-declared servers are listed.
-- Status: PENDING
+- Status: COMPLETE (batch-14-report.md)
 
-### Task 14.1: Stdio host - PENDING
+### Task 14.1: Stdio host - COMPLETE
 
-### Task 14.2: Stdio and plugin sources wired into the service - PENDING
+### Task 14.2: Stdio and plugin sources wired into the service - COMPLETE
 
 ## Batch 15: Parity inventory (C12 first step) - PENDING
 
@@ -844,7 +844,7 @@ P2 gate:
 
 ### Task 15.1: Write parity-inventory.md - PENDING
 
-## Batch 16: Harness targets stop writing MCP (C12a) - PENDING
+## Batch 16: Harness targets stop writing MCP (C12a) - COMPLETE
 
 - Id: P2-B3 | Phase: P2 | Shape: logic
 - Recommended executor: backend-developer (subagent; reason: lanes disabled)
@@ -873,11 +873,11 @@ P2 gate:
 - Acceptance:
   - No target performs an MCP facet write (spec with a fake fs).
   - The existing skills, commands and gitignore specs pass unchanged.
-- Status: PENDING
+- Status: COMPLETE (see batch-16-report.md)
 
-### Task 16.1: Remove MCP facet calls from targets - PENDING
+### Task 16.1: Remove MCP facet calls from targets - COMPLETE
 
-## Batch 17: Planner and reconciler MCP removal (C12b) - PENDING
+## Batch 17: Planner and reconciler MCP removal (C12b) - COMPLETE
 
 - Id: P2-B4 | Phase: P2 | Shape: logic
 - Recommended executor: backend-developer (subagent; reason: lanes disabled)
@@ -913,11 +913,11 @@ P2 gate:
   - Spec "no MCP plan rows".
   - `rg -n "planMcpFacet|applyMcpFacet" libs/backend` is empty.
   - Every reader in R5 still compiles.
-- Status: PENDING
+- Status: COMPLETE (see batch-17-report.md)
 
-### Task 17.1: Remove the planner and its reconciler, repair and health uses - PENDING
+### Task 17.1: Remove the planner and its reconciler, repair and health uses - COMPLETE
 
-## Batch 18: Install records intent only (C12c) - PENDING
+## Batch 18: Install records intent only (C12c) - COMPLETE
 
 - Id: P2-B5 | Phase: P2 | Shape: logic
 - Recommended executor: backend-developer (subagent; reason: lanes disabled)
@@ -939,11 +939,11 @@ P2 gate:
   - `npm run verify -- -t lint,typecheck -p @ptah-extension/cli-agent-runtime`
 - Acceptance: the install spec shows an intent recorded and no facet write; the list spec is
   unchanged.
-- Status: PENDING
+- Status: COMPLETE (see batch-18-report.md)
 
-### Task 18.1: Intent-only install - PENDING
+### Task 18.1: Intent-only install - COMPLETE
 
-## Batch 19: Remove the Ptah slot writer (C12d; C13 = D-U5 Option 1) - PENDING
+## Batch 19: Remove the Ptah slot writer (C12d; C13 = D-U5 Option 1) - COMPLETE
 
 - Id: P2-B6 | Phase: P2 | Shape: logic
 - Recommended executor: backend-developer (subagent; reason: lanes disabled)
@@ -968,9 +968,9 @@ P2 gate:
   - `npm run verify -- -t lint,typecheck -p @ptah-extension/vscode-lm-tools`
 - Acceptance: the http server spec shows no slot writes; the retired-sweep spec, including the B8
   case, passes.
-- Status: PENDING
+- Status: COMPLETE (batch-19-report.md)
 
-### Task 19.1: Remove the slot writer - PENDING
+### Task 19.1: Remove the slot writer - COMPLETE
 
 ## Batch 20: Strict MCP for Claude (C11) - PENDING
 
@@ -1005,7 +1005,7 @@ P2 gate:
 
 ### Task 20.1: Strict flag, flag-tier removal, A7 - PENDING
 
-## Batch 21: Lane config switches, copilot, cursor, opencode (C14a) - PENDING
+## Batch 21: Lane config switches, copilot, cursor, opencode (C14a) - COMPLETE
 
 - Id: P2-B8 | Phase: P2 | Shape: logic
 - Recommended executor: backend-developer (subagent; reason: lanes disabled)
@@ -1033,11 +1033,12 @@ P2 gate:
   - A5 findings are recorded per provider.
   - Each verified switch has a spec asserting the argv or env.
   - The `ptah` injection is unchanged.
-- Status: PENDING
+- Status: COMPLETE (cursor switch verified and set; copilot and opencode unverified and
+  unchanged; see `batch-21-report.md`)
 
-### Task 21.1: Copilot, cursor and opencode switches - PENDING
+### Task 21.1: Copilot, cursor and opencode switches - COMPLETE
 
-## Batch 22: grok switch, and the agy stream-json write removal (C14b + C12e, row 13) - PENDING
+## Batch 22: grok switch, and the agy stream-json write removal (C14b + C12e, row 13) - COMPLETE
 
 - Id: P2-B9 | Phase: P2 | Shape: logic
 - Recommended executor: backend-developer (subagent; reason: lanes disabled)
@@ -1070,11 +1071,13 @@ P2 gate:
   - The ACP spec still passes.
   - An agy ACP lane token is `privileged`; live: agy lists `livecheck__echo` (P2 live review).
   - A5 findings for grok and agy are recorded.
-- Status: PENDING
+- Status: COMPLETE (grok and agy A5 unverified, no switch; row 13 write removed; row 36
+  privileged; the live `livecheck__echo` check stays with the P2 live review; see
+  `batch-22-report.md`)
 
-### Task 22.1: grok switch - PENDING
+### Task 22.1: grok switch - COMPLETE
 
-### Task 22.2: agy spawn-write removal - PENDING
+### Task 22.2: agy spawn-write removal - COMPLETE
 
 ## Batch 23: P2 fix reserve - PENDING
 
@@ -1133,3 +1136,38 @@ Evidence:
 - Steps: start a child session with `ptah_session_start` (new branch + worktree). In it: (a) main session lists `mcp__ptah__*` host tools and `mcp__ptah__<server>__*` gateway tools; (b) a Claude `Task` subagent calls one `ptah` tool and one gateway tool; (c) one CLI lane (codex) spawned from the child calls one gateway tool.
 - Evidence: tool lists or log lines per agent; `git status --porcelain` in the worktree is empty; no `.mcp.json` / `.cursor/mcp.json` / `.codex/config.toml` / `.agents/mcp_config.json` written or changed.
 - Pass: all three see the tools with no worktree config written. Fail on (b) -> back to the user with evidence before any worktree write is added.
+
+## P2 amendments from the parity inventory (decision row 38)
+
+- B16 write set adds `libs/backend/harness-sync/src/lib/di/register.ts` and `libs/backend/harness-sync/src/index.ts` (G3).
+- B17: old `kind:'mcp'` manifest rows are dropped on load and never counted in preflight
+  (`harness-reconciler.service.ts:815` compare); the manifest schema still accepts `mcp` (D1).
+- B18 write set adds rpc-handlers `harness-mcp-install.service.ts`, `external-plugin-mcp.service.ts`,
+  `harness-workflow-prompt.service.ts` (+ their specs). Install results stop claiming written paths;
+  the workflow prompt stops telling agents servers land in `.mcp.json` / `.vscode/mcp.json` (G1).
+  Force uninstall of a user-owned key is removed (D2).
+- B19 keeps `ensureRegisteredForSubagents` and the `retainRoot`/`releaseRoot` port as non-writing
+  readiness answers; callers stay unchanged (G2).
+- B23 (from B14 report): `HttpMcpServer.disposeAsync()` calls `gateway?.dispose()` (not `stop()`,
+  which may restart), and the Electron `will-quit` chain (`apps/ptah-electron/src/main.ts`)
+  disposes `PLATFORM_TOKENS.MCP_GATEWAY`, so stdio children die on quit. Follow-up only: export
+  and reuse the `upstream-client.ts` connect/list helpers duplicated in `stdio-server-host.ts`.
+- B23 (from B19 report): fix stale docs that still say `.mcp.json` is written —
+  `platform-core` `mcp-subagent-root-registrar.interface.ts`, consumer call-site comments (e.g.
+  `chat-ptah-cli.service.ts:114`), and comments naming the deleted `ptah-mcp-slots.ts`
+  (`cli-agent-runtime` `ptah-mcp-url.ts:15`, `codex-runtime` `codex-ptah-mcp.ts:9,31`). Remove
+  `McpCallerTokenRegistry.preparePersistent` if it has no caller.
+- B23 (from B18 report, MUST): `listInstalled` / the marketplace Installed tab reads the intent
+  store (`McpIntentStore`) so recorded servers show; fix rpc-handlers `chat-session.service.ts:1235`
+  and `:2057` TS2367 (compares against readiness values B19 removed); `harness-namespace.builder.ts`
+  (vscode-lm-tools) stops pushing `configPath` into `installedPaths` and stops saying "written".
+- B23 (live finding + B18): invalidate the gateway sources and fire `onToolsChanged` at once on
+  install, uninstall and `capabilities:setEnabled`, instead of waiting for the 30 s poll.
+- Follow-up only: dead frontend `'direct'` removal paths, shared `force` uninstall param and old
+  reconcile/write result codes; drop the unused `_reconciler` ctor param from its five callers.
+- B23 (from B17 report): finish inventory row 20 — drop the resolver's `mcpIntents` ctor arg and
+  the `undefined` at its callers (`apps/ptah-electron/src/di/phase-2-libraries.ts:345-347`,
+  `libs/backend/cli-engine/src/lib/container.ts:837-839`, rpc-handlers
+  `wizard-generation.preview-fidelity.spec.ts`); stale MCP wording in shared
+  `harness-blocked-wording.ts:76,:260`, marketplace `harness-blocked-paths.component.ts:94` and the
+  reconciler's pinned warning (change together); stale comment `harness-sync.types.ts:483`.
