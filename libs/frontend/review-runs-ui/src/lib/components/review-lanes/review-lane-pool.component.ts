@@ -101,7 +101,7 @@ import {
             </span>
             <div class="col-span-2 col-start-2 mt-1.5 min-w-0">
               <ptah-select
-                class="block max-w-[260px]"
+                class="max-w-[260px]"
                 size="xs"
                 [label]="'Model for ' + row.label + ', position ' + ($index + 1)"
                 [options]="row.modelOptions"

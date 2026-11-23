@@ -50,7 +50,7 @@ import {
             }
           </span>
           <ptah-select
-            class="block min-w-0"
+            class="min-w-0"
             size="xs"
             [label]="row.name + ' lane'"
             [options]="row.laneOptions"
@@ -58,7 +58,7 @@ import {
             (valueChange)="setLane(row.role, $event)"
           />
           <ptah-select
-            class="block min-w-0"
+            class="min-w-0"
             size="xs"
             [label]="row.name + ' model'"
             [options]="row.modelOptions"
