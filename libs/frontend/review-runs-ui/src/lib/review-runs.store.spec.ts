@@ -163,7 +163,7 @@ describe('ReviewRunsStore', () => {
     await store.load();
     expect(store.nextCursor()).toBe('cursor-1');
     await store.loadMore();
-    expect(call).toHaveBeenCalledWith('review:listRuns', { limit: 100, cursor: 'cursor-1' }, { timeout: 5_000 });
+    expect(call).toHaveBeenCalledWith('review:listRuns', { limit: 100, cursor: 'cursor-1' }, { timeout: 15_000 });
     // The second page repeats rvw-428-01, which must not appear twice.
     expect(store.runs()).toHaveLength(2);
     expect(store.nextCursor()).toBeNull();
@@ -478,7 +478,7 @@ describe('ReviewRunsStore', () => {
     expect(call).toHaveBeenCalledWith(
       'review:listFindings',
       { attemptId: run.attemptId },
-      { timeout: 5_000 },
+      { timeout: 15_000 },
     );
     expect(store.findingsState()).toBe('ready');
     expect(store.findings()).toEqual([finding]);
@@ -744,7 +744,7 @@ describe('ReviewRunsStore', () => {
     expect(call).toHaveBeenLastCalledWith(
       'review:setPublicationPause',
       { paused: true },
-      { timeout: 5_000 },
+      { timeout: 15_000 },
     );
     expect(store.settings()?.globalPublicationPaused).toBe(true);
     expect(store.pauseError()).toBe(false);
@@ -802,7 +802,7 @@ describe('ReviewRunsStore', () => {
     await store.loadSettings();
     await store.setPublicationPause(true, true, repo);
     expect(call).toHaveBeenLastCalledWith('review:setPublicationPause',
-      { paused: true, repo: { owner: repo.owner, name: repo.name } }, { timeout: 5_000 });
+      { paused: true, repo: { owner: repo.owner, name: repo.name } }, { timeout: 15_000 });
     expect(store.settings()?.repositories[0].publicationPaused).toBe(true);
   });
   it('does not turn publication pause off without explicit confirmation', async () => {
@@ -840,7 +840,7 @@ describe('ReviewRunsStore', () => {
     expect(call).toHaveBeenCalledWith(
       'review:setPublicationPause',
       { paused: false },
-      { timeout: 5_000 },
+      { timeout: 15_000 },
     );
     expect(store.settings()?.globalPublicationPaused).toBe(false);
   });
@@ -860,7 +860,7 @@ describe('ReviewRunsStore', () => {
     expect(call).toHaveBeenLastCalledWith(
       'review:updateSettings',
       { settings: saved },
-      { timeout: 5_000 },
+      { timeout: 15_000 },
     );
     expect(store.settings()).toEqual(saved);
     expect(JSON.stringify(call.mock.calls)).not.toContain('token');
@@ -1030,7 +1030,7 @@ describe('ReviewRunsStore review lanes', () => {
     expect(updateCall()).toEqual([
       'review:updateSettings',
       { settings, lanes: next },
-      { timeout: 5_000 },
+      { timeout: 15_000 },
     ]);
     expect(store.settingsLanes()).toEqual(next);
     expect(store.draftLanes()).toEqual(next);

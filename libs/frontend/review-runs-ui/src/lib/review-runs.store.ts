@@ -28,8 +28,13 @@ export type ReviewListState =
 export type ReviewStateFilter = 'all' | z.infer<typeof ReviewStateSchema>;
 /** Allows several 15-second GitHub GET attempts plus per-pull base-config reads. */
 const REVIEW_REFRESH_TIMEOUT_MS = 120_000;
-/** Lane listing reads every lane's live model catalog (host bound 10 s), so it gets more than 5 s. */
+/** Lane listing reads every lane's live model catalog (host bound 10 s), so it gets more than the default. */
 const REVIEW_LIST_LANES_TIMEOUT_MS = 20_000;
+/**
+ * The other review calls answer from local state. Main and the renderer can each stall for several
+ * seconds while the app starts, so a 5-second cap timed out calls the host had already answered.
+ */
+const REVIEW_RPC_TIMEOUT_MS = 15_000;
 const LANES_DUPLICATE_MESSAGE =
   'Review lanes were not saved: the pool has a duplicate entry. Remove it and save again.';
 const LANE_ERROR_CODES: readonly string[] = Object.values(ReviewLaneErrorCode);
@@ -655,7 +660,7 @@ export class ReviewRunsStore {
     const response = await this.rpc.call(method, params, {
       timeout: method === 'review:refresh'
         ? REVIEW_REFRESH_TIMEOUT_MS
-        : method === 'review:listLanes' ? REVIEW_LIST_LANES_TIMEOUT_MS : 5_000,
+        : method === 'review:listLanes' ? REVIEW_LIST_LANES_TIMEOUT_MS : REVIEW_RPC_TIMEOUT_MS,
     });
     if (!response.isSuccess()) {
       if (method === 'review:refresh' && response.errorCode === 'REVIEW_DISABLED' &&

@@ -190,7 +190,7 @@ describe('ReviewRunsPageComponent', () => {
     fixture.detectChanges();
     fixture.nativeElement.querySelector('#review-page-resume-confirm')?.parentElement?.querySelectorAll('button')[1]?.click();
     await fixture.whenStable();
-    expect(call).toHaveBeenCalledWith('review:setPublicationPause', { paused: false }, { timeout: 5_000 });
+    expect(call).toHaveBeenCalledWith('review:setPublicationPause', { paused: false }, { timeout: 15_000 });
     store.settings.set({ repositories: [], maintainerLogins: ['maintainer'], pollMinutes: 10,
       globalPublicationPaused: false, laneCapPerPr: 6, confidenceFloor: 0.8, maxNewInline: 10, fallbackFamilies: [] });
     fixture.detectChanges();
@@ -198,7 +198,7 @@ describe('ReviewRunsPageComponent', () => {
     pauseButton().click();
     await fixture.whenStable();
     expect(fixture.nativeElement.textContent).not.toContain('Resume live publication?');
-    expect(call).toHaveBeenCalledWith('review:setPublicationPause', { paused: true }, { timeout: 5_000 });
+    expect(call).toHaveBeenCalledWith('review:setPublicationPause', { paused: true }, { timeout: 15_000 });
   });
 
   it('loads and renders findings for the run opened from the list', async () => {
@@ -222,7 +222,7 @@ describe('ReviewRunsPageComponent', () => {
     (runRows(fixture.nativeElement)[0] as HTMLButtonElement).click();
     await fixture.whenStable();
     fixture.detectChanges();
-    expect(call).toHaveBeenCalledWith('review:listFindings', { attemptId: run.attemptId }, { timeout: 5_000 });
+    expect(call).toHaveBeenCalledWith('review:listFindings', { attemptId: run.attemptId }, { timeout: 15_000 });
     expect(fixture.nativeElement.textContent).toContain('src/settings.ts:42');
     expect(fixture.nativeElement.textContent).toContain('Major');
   });
