@@ -5,6 +5,7 @@ import type {
   LaneCompletionVerdict,
   LaneStopReason,
 } from './agent-process.types';
+import type { InlineImageAttachment } from './rpc/rpc-chat.types';
 
 /** Identity of the caller that sent a message to a lane. */
 export type AgentMessageSender =
@@ -55,6 +56,22 @@ export type AgentMessagePreviewMode =
   | 'start-turn'
   | 'unsupported';
 
+/** Per-turn settings a caller may choose for the next lane turn. Omitted: keep the lane's current value. */
+export interface LaneTurnSettings {
+  readonly model?: string;
+  readonly reasoningEffort?: string;
+}
+
+/** Per-turn content sent beside the message text. */
+export interface LaneTurnContent {
+  readonly images?: readonly InlineImageAttachment[];
+  /** Workspace file paths attached to the turn. */
+  readonly files?: readonly string[];
+}
+
+/** Everything a caller may attach to one lane turn besides its text. */
+export type LaneTurnRequest = LaneTurnSettings & LaneTurnContent;
+
 export interface AgentMessageRequest {
   readonly agentId: AgentId;
   readonly message: string;
@@ -63,6 +80,8 @@ export interface AgentMessageRequest {
   readonly allowPartialTurnLoss?: boolean;
   /** Caller-chosen; unique per (sender, target). 1–128 chars, [A-Za-z0-9._:-]. */
   readonly idempotencyKey?: string;
+  /** Settings and attachments for this turn. Absent: a text-only turn with current settings. */
+  readonly turn?: LaneTurnRequest;
 }
 
 export interface AgentMessagePreviewRequest {
@@ -144,7 +163,15 @@ export type AgentMessageReasonCode =
   | 'different-parent'
   | 'workspace-missing'
   | 'different-workspace'
-  | 'rate-limited';
+  | 'rate-limited'
+  /** The lane refused the requested model or effort; nothing was sent. */
+  | 'turn-options-refused'
+  /** The lane cannot take an attached image, file or command on this turn. */
+  | 'turn-input-unsupported'
+  /** Held attachments were lost (for example after a host restart); the text body is kept. */
+  | 'attachments-unavailable'
+  /** The host attachment store is full. */
+  | 'attachments-capacity';
 
 /** Public receipt state projected from the durable message envelope. */
 export type AgentDeliveryReceiptState =

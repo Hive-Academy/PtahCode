@@ -182,6 +182,65 @@ export interface CliAdapterManifest {
   >;
   readonly limitReader: LaneLimitReaderCapability;
   readonly mcp: LaneCapabilitySupport;
+  /** Per-turn input the lane accepts from the composer. Absent: not declared. */
+  readonly turnInput?: LaneTurnInputCapabilities;
+  /** When the lane reports token usage. Absent: not declared. */
+  readonly usage?: LaneUsageCapability;
+  /** Which lane prompts reach the host as approval or question cards. Absent: not declared. */
+  readonly prompts?: LanePromptCapabilities;
+}
+
+/** Support for a per-turn setting (model or reasoning effort). */
+export interface LaneTurnSettingSupport extends LaneCapabilitySupport {
+  /** `next-spawn`: the value takes effect only when the lane process restarts. */
+  readonly appliesAt?: 'next-turn' | 'next-spawn';
+}
+
+/** Support for inline images on a turn. */
+export interface LaneImageInputSupport extends LaneCapabilitySupport {
+  /** True when images may also ride on a steer, not only on a full turn. */
+  readonly onSteer?: boolean;
+}
+
+/** Support for attached workspace files on a turn. */
+export interface LaneFileInputSupport extends LaneCapabilitySupport {
+  /** `reference`: native file reference; `path-text`: paths are written into the message. */
+  readonly delivery?: 'reference' | 'path-text';
+}
+
+/** Support for provider slash commands sent as a turn. */
+export interface LaneCommandInputSupport extends LaneCapabilitySupport {
+  /** Command names the host hides and refuses (permission-policy commands). */
+  readonly blocked?: readonly string[];
+}
+
+/** Per-turn input a lane accepts. */
+export interface LaneTurnInputCapabilities {
+  readonly model: LaneTurnSettingSupport;
+  readonly effort: LaneTurnSettingSupport;
+  readonly images: LaneImageInputSupport;
+  readonly files: LaneFileInputSupport;
+  readonly commands: LaneCommandInputSupport;
+  readonly skills: LaneCapabilitySupport;
+}
+
+/** When a lane reports token usage: during the turn or only once it ends. */
+export interface LaneUsageCapability {
+  readonly timing: 'live' | 'turn-end';
+  readonly reason?: string;
+}
+
+/** Lane prompts the host can show and answer. */
+export interface LanePromptCapabilities {
+  readonly approvals: LaneCapabilitySupport;
+  readonly questions: LaneCapabilitySupport;
+}
+
+/** The approval mode the lane actually runs with, as far as the host knows. */
+export interface LaneEffectiveApproval {
+  readonly mode: LanePermissionMode | 'unknown';
+  /** Why the mode is what it is, in words the UI can show. */
+  readonly reason: string;
 }
 
 export interface EffectiveLaneCapabilities {
@@ -190,6 +249,17 @@ export interface EffectiveLaneCapabilities {
   readonly source: 'live-handle' | 'restored-record';
   readonly messaging: CliAdapterManifest['messaging'];
   readonly mcp: LaneCapabilitySupport;
+  /**
+   * Resolved per-turn input. Optional in the type so producers compile before the
+   * resolver fills it; a consumer treats absence as "not reported yet".
+   */
+  readonly turnInput?: LaneTurnInputCapabilities;
+  /** Resolved usage timing; absence means not reported yet. */
+  readonly usage?: LaneUsageCapability;
+  /** Resolved prompt support; absence means not reported yet. */
+  readonly prompts?: LanePromptCapabilities;
+  /** Approval mode the lane runs with; absence means not reported yet. */
+  readonly effectiveApproval?: LaneEffectiveApproval;
 }
 
 export interface EffectiveLanePolicy {
@@ -253,6 +323,10 @@ export interface AgentProcessInfo {
   readonly displayName?: string;
   /** Model identifier used by the CLI agent (e.g., 'gpt-4o'). */
   readonly model?: string;
+  /** Reasoning effort requested for this lane's turns, when one was set. */
+  reasoningEffort?: string;
+  /** Model the provider reported it actually used on the latest turn. */
+  observedModel?: string;
   /** Display name of the Ptah CLI agent (only set when cli === 'ptah-cli') */
   readonly ptahCliName?: string;
   /** Ptah CLI agent registry ID (only set when cli === 'ptah-cli'). Needed for resume. */
@@ -613,6 +687,12 @@ export type CliOutputSegmentType =
   | 'file-change';
 
 /**
+ * What a usage figure covers: one provider message, the whole turn so far, or
+ * the whole session so far. Re-exported by `@ptah-extension/platform-core`.
+ */
+export type UsageScope = 'message' | 'turn' | 'cumulative';
+
+/**
  * A single structured output segment from a CLI agent.
  * Produced by SDK adapters alongside raw text deltas.
  */
@@ -620,6 +700,8 @@ export interface CliOutputSegment {
   readonly type: CliOutputSegmentType;
   readonly content: string;
   readonly turnTelemetry?: AgentTurnTelemetry;
+  /** Scope of `usage` on this segment; overrides the lane handle's default scope. */
+  readonly usageScope?: UsageScope;
   readonly usage?: {
     readonly model?: string;
     readonly models?: { modelId: string; inputTokens: number; outputTokens: number;
