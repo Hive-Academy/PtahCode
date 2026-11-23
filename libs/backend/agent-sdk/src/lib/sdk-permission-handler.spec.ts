@@ -36,6 +36,7 @@ interface AskUserQuestionPayload {
   toolName: 'AskUserQuestion';
   sessionId?: string;
   tabId?: string;
+  agentId?: string;
 }
 
 function makeHandler(hostAttention?: { resolve(key: string, generation: number): void }, agentProcessManager?: { findAgentInfo(agentId: string): { parentSessionId?: string; startedAt?: string; status?: string } | undefined } | null, budgetMonitor?: ConstructorParameters<typeof SdkPermissionHandler>[6], targetToolCallId?: string): {
@@ -882,6 +883,60 @@ describe('SdkPermissionHandler - live session id resolution', () => {
 
     ac.abort();
     await pending;
+  });
+
+  describe('AskUserQuestion lane id', () => {
+    const LANE_SESSION_ID = '11111111-2222-4333-8444-555555555555';
+    const QUESTION_INPUT = {
+      questions: [
+        {
+          question: 'Continue?',
+          header: 'Confirm',
+          options: [{ label: 'Yes' }, { label: 'No' }],
+        },
+      ],
+    };
+
+    async function askAndCapture(
+      cliAgentResolver?: () => string | undefined,
+    ): Promise<AskUserQuestionPayload> {
+      const { handler, sent } = makeHandler();
+      const callback = handler.createCallback(
+        asSessionId(LANE_SESSION_ID),
+        cliAgentResolver,
+      );
+      const ac = new AbortController();
+      const pending = callback('AskUserQuestion', QUESTION_INPUT, {
+        signal: ac.signal,
+        toolUseID: 'tool-lane-ask',
+        requestId: 'tool-lane-ask',
+      });
+      await flushMicrotasks();
+      const broadcast = sent.find(
+        (m) => m.type === MESSAGE_TYPES.ASK_USER_QUESTION_REQUEST,
+      );
+      expect(broadcast).toBeDefined();
+      ac.abort();
+      await pending;
+      return broadcast!.payload as unknown as AskUserQuestionPayload;
+    }
+
+    it('carries the resolved lane agentId on a lane question', async () => {
+      const payload = await askAndCapture(() => 'lane-agent-42');
+      expect(payload.agentId).toBe('lane-agent-42');
+      expect(payload.sessionId).toBe(LANE_SESSION_ID);
+    });
+
+    it('sends a main chat question without an agentId key', async () => {
+      const payload = await askAndCapture();
+      expect('agentId' in payload).toBe(false);
+      expect(payload.sessionId).toBe(LANE_SESSION_ID);
+    });
+
+    it('sends the question without an agentId when the lane id is unresolved', async () => {
+      const payload = await askAndCapture(() => undefined);
+      expect('agentId' in payload).toBe(false);
+    });
   });
 
   it('stamps the resolved SDK session id on an AskUserQuestion request', async () => {

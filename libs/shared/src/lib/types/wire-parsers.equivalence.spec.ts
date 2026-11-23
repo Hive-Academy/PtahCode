@@ -348,6 +348,7 @@ const ASK_USER_QUESTION = {
   sessionId: UUID_V4,
   tabId: UUID_V4,
   surfaceMode: true,
+  agentId: 'lane-agent-1',
 };
 
 // ---------------------------------------------------------------------------
@@ -505,8 +506,24 @@ describe('wire parser ≡ Zod schema equivalence', () => {
         { ...ASK_USER_QUESTION, toolUseId: undefined },
         { ...ASK_USER_QUESTION, id: UUID_V1 },
         { ...ASK_USER_QUESTION, sessionId: UUID_V1 },
+        // optional lane id: absent, undefined, empty and wrong type
+        { ...ASK_USER_QUESTION, agentId: undefined },
+        { ...ASK_USER_QUESTION, agentId: '' },
+        { ...ASK_USER_QUESTION, agentId: 7 },
       ],
     );
+  });
+
+  it('keeps a lane agentId and adds none to a main chat question', () => {
+    const lane = parseAskUserQuestionRequest(ASK_USER_QUESTION);
+    expect(lane?.agentId).toBe('lane-agent-1');
+
+    const mainChat: Record<string, unknown> = { ...ASK_USER_QUESTION };
+    delete mainChat['agentId'];
+    const main = parseAskUserQuestionRequest(mainChat);
+    expect(main).not.toBeNull();
+    expect(main && 'agentId' in main).toBe(false);
+    expect(AskUserQuestionRequestSchema.safeParse(mainChat).data).toEqual(main);
   });
 
   it('questions array is copied, not aliased, and is not frozen', () => {

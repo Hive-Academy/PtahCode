@@ -86,4 +86,6 @@ export const AskUserQuestionRequestSchema = z.object({
     .refine((v) => UUID_REGEX.test(v), { message: 'tabId must be a UUID v4' })
     .optional(),
   surfaceMode: z.boolean().optional(),
+  /** CLI lane that asked; absent for a main chat question. */
+  agentId: z.string().optional(),
 });
