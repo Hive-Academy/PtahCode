@@ -18,3 +18,11 @@ Source: benchmark report PR #1493 (TASK_2026_2320_15a6), findings (c)2 and (d).
 - review round 1 (code-logic-review.md): 1 serious + 3 moderate fixed:
   pruned folders named in skippedNote; list applies from an excluded target; probe fails closed
   (canGitGrepSearchRoot); Code Mode checks the root against the host roots; args read once.
+- live test (isolated HOME, ports 51821/51991, own PIDs only, no model run), build of the review-fix commit:
+  - ptah_grep in a workspace under an ignored dir of a parent repo: `git grep` gives silent 0 (reproduced);
+    the fixed app answers `1 match in 1 file (engine: node)` and names the pruned `build` folder.
+  - execute_code: ptah.help() lists CODE, SESSION, ROUTE, BROWSER, SKILL, WEBSEARCH; ptah.help('code') works;
+    ptah.code.grep, ptah.code.readSymbol, searchSymbols work; workspaceRoot refused; errors thrown.
+  - Setting mcp.externalCallerAccess=full was set only in the isolated settings (a direct call is read-only by default).
+- gate: `npm run verify -- -p vscode-lm-tools` (lint, typecheck, test) passed, head 521445f1c
+- next: push, PR, watch CI and reviews

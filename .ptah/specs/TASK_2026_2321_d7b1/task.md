@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_2321_d7b1
-status: backlog
+status: in_review
 type: BUGFIX
 title: Fix grep ignored-root zero result and Code Mode nav discoverability
 depends_on: []
