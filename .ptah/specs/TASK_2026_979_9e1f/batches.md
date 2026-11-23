@@ -417,7 +417,7 @@ P1 gate, run by the orchestrator after B13, before review:
 
 - Depends on: Task 5.1
 
-## Batch 6: Dispatcher routing and caller class (C3, part 1) - IN_PROGRESS
+## Batch 6: Dispatcher routing and caller class (C3, part 1) - COMPLETE
 
 - Id: P1-B6 | Phase: P1 | Shape: logic
 - Recommended executor: backend-developer (subagent; reason: lanes disabled)

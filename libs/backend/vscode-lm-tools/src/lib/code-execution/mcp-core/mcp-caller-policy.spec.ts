@@ -1,5 +1,7 @@
+import type { McpCallerBinding } from '@ptah-extension/platform-core';
 import {
   isCronWriteDenied,
+  isGatewayCallerPermitted,
   isToolPermitted,
   toolClass,
 } from './mcp-caller-policy';
@@ -116,5 +118,57 @@ describe('mcp caller policy', () => {
         expect(isCronWriteDenied(name, undefined)).toBe(false);
       }
     });
+  });
+
+  it('puts every gateway name in class gateway, privileged only', () => {
+    expect(toolClass('zernio__create_post', 'gateway')).toBe('gateway');
+    // A host-origin name keeps its own class even when the shape matches.
+    expect(toolClass('ptah_workspace_analyze', 'host')).toBe('read');
+    expect(
+      isToolPermitted('zernio__create_post', 'privileged', 'gateway'),
+    ).toBe(true);
+    for (const capability of ['read-only', 'lane-report'] as const) {
+      expect(
+        isToolPermitted('zernio__create_post', capability, 'gateway'),
+      ).toBe(false);
+      // A read-class name served by the gateway is still a gateway tool.
+      expect(
+        isToolPermitted('ptah_workspace_analyze', capability, 'gateway'),
+      ).toBe(false);
+    }
+  });
+
+  it('permits gateway callers by credential kind', () => {
+    const bind = (b: Partial<McpCallerBinding>): McpCallerBinding => ({
+      kind: 'agent',
+      capability: 'privileged',
+      ...b,
+    });
+    expect(isGatewayCallerPermitted(undefined)).toBe(false);
+    expect(isGatewayCallerPermitted(bind({}))).toBe(true);
+    expect(isGatewayCallerPermitted(bind({ capability: 'lane-report' }))).toBe(
+      false,
+    );
+    expect(isGatewayCallerPermitted(bind({ capability: 'read-only' }))).toBe(
+      false,
+    );
+    expect(isGatewayCallerPermitted(bind({ kind: 'session' }))).toBe(false);
+    expect(
+      isGatewayCallerPermitted(
+        bind({ kind: 'session', gatewayApproval: true }),
+      ),
+    ).toBe(true);
+    expect(isGatewayCallerPermitted(bind({ kind: 'internal-query' }))).toBe(
+      false,
+    );
+    expect(
+      isGatewayCallerPermitted(
+        bind({ kind: 'internal-query', includeConnectors: true }),
+      ),
+    ).toBe(true);
+    expect(isGatewayCallerPermitted(bind({ kind: 'workspace' }))).toBe(false);
+    expect(
+      isGatewayCallerPermitted(bind({ kind: 'home', capability: 'read-only' })),
+    ).toBe(false);
   });
 });
