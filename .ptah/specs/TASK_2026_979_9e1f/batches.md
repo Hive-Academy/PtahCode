@@ -263,7 +263,7 @@ P1 gate, run by the orchestrator after B13, before review:
 
 - Depends on: Task 2.1
 
-## Batch 3: Gateway pure modules (C2, part 1) - PENDING
+## Batch 3: Gateway pure modules (C2, part 1) - COMPLETE
 
 - Id: P1-B3 | Phase: P1 | Shape: logic
 - Recommended executor: backend-developer (subagent; reason: lanes disabled)
@@ -311,7 +311,7 @@ P1 gate, run by the orchestrator after B13, before review:
 
 ### Task 3.3: Caller policy matrix - PENDING
 
-## Batch 4: Gateway sources and upstream client (C2, part 2) - PENDING
+## Batch 4: Gateway sources and upstream client (C2, part 2) - IN_PROGRESS
 
 - Id: P1-B4 | Phase: P1 | Shape: logic
 - Recommended executor: backend-developer (subagent; reason: lanes disabled)
@@ -465,7 +465,7 @@ P1 gate, run by the orchestrator after B13, before review:
 
 ### Task 6.2: `gateway` caller class - PENDING
 
-## Batch 7: SSE list_changed and server wiring (C3, part 2) - PENDING
+## Batch 7: SSE list_changed and server wiring (C3, part 2) - IN_PROGRESS
 
 - Id: P1-B7 | Phase: P1 | Shape: logic
 - Recommended executor: backend-developer (subagent; reason: lanes disabled)
@@ -598,7 +598,7 @@ P1 gate, run by the orchestrator after B13, before review:
 
 ### Task 9.3: Capper detection - PENDING
 
-## Batch 10: Opt-in plumbing, suppression, gate wiring (C4 + C5 wiring) - PENDING
+## Batch 10: Opt-in plumbing, suppression, gate wiring (C4 + C5 wiring) - IN_PROGRESS
 
 - Id: P1-B10 | Phase: P1 | Shape: logic
 - Recommended executor: backend-developer (subagent; reason: lanes disabled)
