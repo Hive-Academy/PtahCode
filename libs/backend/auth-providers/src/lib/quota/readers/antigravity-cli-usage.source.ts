@@ -534,6 +534,8 @@ async function readOnce(
           // holds when the caller that started the run stopped waiting.
           killStreak = 0;
           killRetryAt = 0;
+          // A good answer ends an older failure backoff, even when its caller left.
+          if (parsed.kind === 'windows') backoff.delete(key);
           if (parsed.kind === 'windows' && disabledBy === 'killed') disabledBy = undefined;
         }
         return parsed;
