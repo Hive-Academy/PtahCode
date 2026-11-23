@@ -511,7 +511,7 @@ P1 gate, run by the orchestrator after B13, before review:
 
 ### Task 7.3: Server wiring and host-name registration - PENDING
 
-## Batch 8: Retired sweep skips linked worktrees (C3, part 3) - IN_PROGRESS
+## Batch 8: Retired sweep skips linked worktrees (C3, part 3) - COMPLETE
 
 - Id: P1-B8 | Phase: P1 | Shape: logic
 - Recommended executor: backend-developer (subagent; reason: lanes disabled)
@@ -661,7 +661,7 @@ P1 gate, run by the orchestrator after B13, before review:
 
 ### Task 10.3: Flag-tier suppression of served file servers - PENDING
 
-## Batch 11: Session status from the gateway (C6) - PENDING
+## Batch 11: Session status from the gateway (C6) - IN_PROGRESS
 
 - Id: P1-B11 | Phase: P1 | Shape: logic
 - Recommended executor: backend-developer (subagent; reason: lanes disabled)
@@ -693,7 +693,7 @@ P1 gate, run by the orchestrator after B13, before review:
 
 ### Task 11.1: Status append and back-off skip - PENDING
 
-## Batch 12: Cron opt-in and run-summary warning (C9) - PENDING
+## Batch 12: Cron opt-in and run-summary warning (C9) - IN_PROGRESS
 
 - Id: P1-B12 | Phase: P1 | Shape: logic
 - Recommended executor: backend-developer (subagent; reason: lanes disabled)
