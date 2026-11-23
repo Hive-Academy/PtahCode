@@ -36,6 +36,30 @@ as we do with main orchestrator and subagents?" Chat lanes do (per turn). Review
 5. Optional, ask at Gate 1: roll review spend into the existing usage and analytics surfaces
    (`analytics:spendSummary`, plan-limit tiles) so review cost counts against the same lane or account totals.
 
+## Also in scope: two known gaps from PR #1492 (user, 2026-11-23)
+
+Both were recorded in TASK_2026_2310_rvlns `decisions.md` (D19 M6, D20) and not fixed there. Neither changes
+lane selection or performance. Both make review diagnostics wrong or silent. They touch the same stage-record
+and lane-listing code as the usage work, so they ship with this task.
+
+- **M6: stale stage lane record after an aborted lens rerun.**
+  - `lens-stage.runner.ts:~56-66`: the runner saves the stage as `running`, runs the lane, then
+    `if (signal?.aborted) break;` comes *before* `saveStageLane(...)`.
+  - An aborted lens therefore keeps the `checkpoint:lane:lens:<x>` row and the `family` column from an earlier
+    run of the same attempt, or gets none. The lane it actually ran on is not recorded, and the stage can stay `running`.
+  - `saveStage` never resets `family` (`sqlite-review.repository.ts:~323-329`).
+  - Fix: record the lane the stage ran on, including on abort and failure, and close the stage row (`interrupted` or `cancelled`).
+  - Check the triage and verification runners for the same pattern.
+  - Usage for that stage (goal 2) belongs to the same record.
+- **D20: the drawer cannot mark a lane whose default model is blocked.**
+  - The gateway already computes `defaultModelBlocked` per lane (`review-lane-gateway.ts:~114-125`), and
+    selection uses it (`review-lane-selection.ts:~74`).
+  - The strict public listing `ReviewLaneListingEntrySchema` (`review-lanes.schema.ts:~96`) drops it, so
+    `review:listLanes` (`review-lane-listing.service.ts`) never sends it.
+  - Fix: forward an optional `defaultModelBlocked` in the listing. In the drawer, show the "Lane default" option
+    (`review-lane-options.ts`) for that lane as blocked, with the reason, in the pool and in the pins.
+    It must be visible before save, not only as a `model-blocked` fallback in run detail.
+
 ## Out of scope
 
 - Live, mid-turn usage for chat lanes and the lane composer: TASK_2026_2320_lnpar (`feat/lane-chat-parity`).
@@ -49,6 +73,7 @@ as we do with main orchestrator and subagents?" Chat lanes do (per turn). Review
 
 ## Related
 
-- TASK_2026_2310_rvlns / PR #1492 (merged aa7ef509a): stage lane, model and fallback records this extends.
-- TASK_2026_2309_bigdf / PR #1482: large-diff fallback.
+- TASK_2026_2310_rvlns / PR #1492 (merged aa7ef509a): stage lane, model and fallback records this extends;
+  source of M6 and D20.
+- TASK_2026_2309_bigdf / PR #1482 (merged 6225e966a): large-diff fallback.
 - TASK_2026_2320_lnpar: chat lane parity, including live usage.
