@@ -17,6 +17,7 @@ import { FileSystemService } from '../services/file-system.service';
 import { TokenCounterService } from '../services/token-counter.service';
 import { PatternMatcherService } from './pattern-matcher.service';
 import {
+  DEFAULT_IGNORE_FILE_NAMES,
   IgnorePatternResolverService,
   type ParsedIgnoreFile,
 } from './ignore-pattern-resolver.service';
@@ -25,6 +26,7 @@ import { WalkSlice } from './cooperative-yield';
 import {
   collectDirectories,
   groupByDepth,
+  holdsGitEntry,
   isUnderNestedRoot,
   relativeSegments,
   unprobedCandidates,
@@ -104,8 +106,7 @@ const UNREADABLE_ENTRY_CODES: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Whether `error` (or anything in its `cause` chain) is a per-entry
- * "cannot read this entry right now" failure.
+ * Whether `error` or a wrapped cause has one of the requested codes.
  *
  * Walks the chain because `FileSystemService.stat()` re-throws every driver
  * failure as a `FileSystemError` whose message is a fixed
@@ -114,17 +115,25 @@ const UNREADABLE_ENTRY_CODES: ReadonlySet<string> = new Set([
  * that message keeps the check working if the wrapper's wording ever changes,
  * and keeps it from matching a genuine error that merely mentions "ENOENT".
  */
-function isUnreadableEntryError(error: unknown): boolean {
+function hasErrorCode(error: unknown, codes: ReadonlySet<string>): boolean {
   let current: unknown = error;
   // Bounded so a self-referential `cause` cannot spin here.
   for (let depth = 0; depth < 5 && current instanceof Error; depth++) {
     const code = (current as { code?: unknown }).code;
-    if (typeof code === 'string' && UNREADABLE_ENTRY_CODES.has(code)) {
+    if (typeof code === 'string' && codes.has(code)) {
       return true;
     }
     current = (current as { cause?: unknown }).cause;
   }
   return false;
+}
+
+const MISSING_IGNORE_FILE_CODES = new Set(['ENOENT']);
+const IGNORE_CACHE_MAX_ROOTS = 16;
+
+interface IndexIgnoreMatcher {
+  signature: string;
+  matches: (relativePath: string) => boolean;
 }
 
 /**
@@ -201,6 +210,8 @@ export interface IndexingProgress {
 @injectable()
 export class WorkspaceIndexerService {
   private readonly defaultMaxFileSize = 1024 * 1024; // 1MB
+  private readonly indexIgnoreCache = new Map<string, IndexIgnoreMatcher>();
+  private readonly warnedIgnoreRoots = new Set<string>();
 
   constructor(
     @inject(TOKENS.FILE_SYSTEM_SERVICE)
@@ -218,6 +229,77 @@ export class WorkspaceIndexerService {
     @inject(TOKENS.LOGGER)
     private readonly logger: Logger,
   ) {}
+
+  /** Tests a file against the current set of workspace-root ignore files. */
+  async isIgnoredForIndex(root: string, file: string): Promise<boolean> {
+    try {
+      const before = await this.statIndexIgnoreFiles(root);
+      const signature = JSON.stringify(before);
+      const cached = this.indexIgnoreCache.get(root);
+      const relativePath = path.relative(root, file);
+      this.indexIgnoreCache.delete(root);
+      if (cached?.signature === signature) {
+        this.indexIgnoreCache.set(root, cached);
+        return cached.matches(relativePath);
+      }
+
+      const ignoreFiles: ParsedIgnoreFile[] = [];
+      for (const [name] of before) {
+        try {
+          ignoreFiles.push(
+            await this.ignoreResolver.parseIgnoreFile(path.join(root, name)),
+          );
+        } catch (error: unknown) {
+          if (!hasErrorCode(error, MISSING_IGNORE_FILE_CODES)) throw error;
+        }
+      }
+      const after = await this.statIndexIgnoreFiles(root);
+      const matches = this.ignoreResolver.compileMatcher(ignoreFiles, root);
+      if (
+        ignoreFiles.length === before.length &&
+        signature === JSON.stringify(after)
+      ) {
+        this.indexIgnoreCache.delete(root);
+        this.indexIgnoreCache.set(root, { signature, matches });
+        if (this.indexIgnoreCache.size > IGNORE_CACHE_MAX_ROOTS) {
+          const oldest = this.indexIgnoreCache.keys().next();
+          if (!oldest.done) this.indexIgnoreCache.delete(oldest.value);
+        }
+      }
+      return matches(relativePath);
+    } catch (error: unknown) {
+      this.indexIgnoreCache.delete(root);
+      if (!this.warnedIgnoreRoots.has(root)) {
+        this.warnedIgnoreRoots.add(root);
+        this.logger.warn('[WorkspaceIndexer] failed to load index ignore files', {
+          root,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      return false;
+    }
+  }
+
+  private async statIndexIgnoreFiles(
+    root: string,
+  ): Promise<
+    (readonly [name: string, mtimeMs: number, ctimeMs: number, size: number])[]
+  > {
+    const entries = await Promise.all(
+      DEFAULT_IGNORE_FILE_NAMES.map(async (name) => {
+        try {
+          const { mtime, ctime, size } = await this.fileSystemService.stat(
+            path.join(root, name),
+          );
+          return [name, mtime, ctime, size] as const;
+        } catch (error: unknown) {
+          if (!hasErrorCode(error, MISSING_IGNORE_FILE_CODES)) throw error;
+          return null;
+        }
+      }),
+    );
+    return entries.filter((entry) => entry !== null);
+  }
 
   /**
    * One walk's "skip this path?" predicate, compiled ONCE before the walk.
@@ -267,7 +349,7 @@ export class WorkspaceIndexerService {
     try {
       return await this.fileSystemService.stat(filePath);
     } catch (error: unknown) {
-      if (isUnreadableEntryError(error)) {
+      if (hasErrorCode(error, UNREADABLE_ENTRY_CODES)) {
         return null;
       }
       throw error;
@@ -731,20 +813,19 @@ export class WorkspaceIndexerService {
 
   /** True when `directory/.git` exists (a repository's directory or a worktree's file). */
   private async holdsGitEntry(directory: string): Promise<boolean> {
-    try {
-      return (
-        (await this.fsProvider.exists(path.join(directory, '.git'))) === true
-      );
-    } catch (error: unknown) {
-      // degradation-audit: optional-capability - a directory whose `.git`
-      // cannot be probed is indexed like any other; the cost is that a nested
-      // repository behind an unreadable probe stays in the `@` picker.
-      this.logger.debug('[WorkspaceIndexer] nested repository probe failed', {
-        directory,
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return false;
-    }
+    return holdsGitEntry(
+      directory,
+      (filePath) => this.fsProvider.exists(filePath),
+      (error) => {
+        // degradation-audit: optional-capability - a directory whose `.git`
+        // cannot be probed is indexed like any other; the cost is that a nested
+        // repository behind an unreadable probe stays in the `@` picker.
+        this.logger.debug('[WorkspaceIndexer] nested repository probe failed', {
+          directory,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      },
+    );
   }
 }
 

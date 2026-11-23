@@ -1,8 +1,11 @@
 # Implementation plan — TASK_2026_2312_c3ef (Part B)
 
-Status: PROPOSED, revision 3b (after codex reviews `implementation-plan-review.md`, `-r2.md`, `-r3.md`;
-the revise cap is reached; 3b changes are not re-reviewed, see "Review record").
-Not approved. No source change starts before the parent relays approval.
+Status: APPROVED by the user (2026-11-23), revision 3b. User answers: R1 any-depth agent-folder
+excludes (symbol index only; `DEFAULT_WORKSPACE_EXCLUDES` and the `@` picker unchanged); R2 rows
+per root + vector reuse by model-qualified text hash; R3 one more independent review of the 3b
+changes (`implementation-plan-review-r4.md`) before batch B2. `.mjs`/`.cjs`/`.cts` parse support
+is a follow-up, not Part B (decisions.md #15-#20). Revision 3c (after review r4) fixes the five
+r4 findings; D6 adds the JavaScript twin rule (decision #21).
 Input: `index-audit.md` (same folder). Follow-up design read first:
 `/home/amun/ptah-extension/.ptah/specs/TASK_2026_2299_d6f5/followup-index-skip-unchanged.md`.
 
@@ -92,9 +95,9 @@ Change from the follow-up note: the record lives in a per-file table, and the sk
 inside the existing per-file lock with a live lookup, not from a map loaded before the run.
 
 - Fingerprint: `` `${CODE_INDEX_FORMAT_VERSION}:${embedderModelId}:${mtimeMs}:${ctimeMs}:${size}` ``.
-  The store, not the indexer, appends the model id: the indexer passes
-  `${FORMAT}:${mtimeMs}:${ctimeMs}:${size}` and the store writes and compares
-  `${that}:${embedder.modelId}`. A model upgrade therefore turns every record into a miss,
+  The store, not the indexer, appends the model id AND does the compare (rev 3c, review r4
+  finding 1): the indexer passes the candidate `${FORMAT}:${mtimeMs}:${ctimeMs}:${size}` and
+  never sees a stored value; the store writes and compares `${candidate}:${embedder.modelId}`. A model upgrade therefore turns every record into a miss,
   and each file is re-embedded on its next run (revision 3b; replaces the generation table of
   revision 3, see D3). New exported
   `CODE_INDEX_FORMAT_VERSION = 1` in `code-symbol-indexer.service.ts`; bump it when extraction
@@ -125,19 +128,24 @@ inside the existing per-file lock with a live lookup, not from a map loaded befo
   Update every migration spec that asserts the latest version is 76: 24 files today
   (`grep -l "toBe(76)" libs/backend/persistence-sqlite/src/lib/migrations/*.spec.ts`), for
   example `0076_cron_job_creator.spec.ts:42`, `0040_skill_candidate_workspace_root.spec.ts:79`,
-  `0071_skill_inv_events_task_unreconciled.spec.ts:22`. Replace each "latest = 76" with "this
-  migration is registered, in order" so the next migration does not touch them again.
-  The 0077 spec covers: upgrade from 0076 with existing FTS rows, open with vec disabled, and
-  two connections on one file (Electron + CLI).
+  `0071_skill_inv_events_task_unreconciled.spec.ts:22`. Replace each "latest = 76" assertion
+  (both shapes: `Math.max(...MIGRATIONS.map(...))` and `MIGRATIONS[MIGRATIONS.length - 1]?.version`)
+  with exactly `expect(MIGRATIONS.findIndex((m) => m.version === N)).toBe(N - 1)` for that
+  spec's migration N (review r4 finding 4), so the next migration does not touch them again.
+  Keep each spec's own "registers after N-1" block.
+  The 0077 spec covers: upgrade from 0076 with existing FTS rows; after the upgrade every old
+  `code_symbols` row has `text_hash` NULL and is still found by search; a second open of the
+  migrated file applies nothing and the version stays 77; open with vec disabled; two
+  connections on one file (Electron + CLI) (review r4 finding 5).
   Before the commit, check `main` for another 0077 and renumber if needed.
 - Indexer flow, all inside `indexFileRecorded` → `withFileLock` → `_indexFile` for a run write
   (`run !== null`), when `!options.force`:
   1. Tombstone check first (as today, `:1610-1621`).
   2. `stat` the file now (in the lock, not the discovery stat). Build the fingerprint.
-  3. `sink.readFileFingerprint?.(root, path)`: one indexed point lookup (D2 store). It returns
-     `null` when the vec stale marker is set (same statement, one snapshot), so a pending vector
-     rebuild is never bypassed by a skip.
-  4. Equal → return `{ outcome: ANALYZED, skippedUnchanged: true, wrote: false }` with no read.
+  3. `sink.isFileUnchanged?.(root, path, candidate)`: boolean (D2 store). The store runs the
+     marker check and one indexed point lookup, and returns `false` when the vec stale marker
+     is set, so a pending vector rebuild is never bypassed by a skip. Absent method → `false`.
+  4. `true` → return `{ outcome: ANALYZED, skippedUnchanged: true, wrote: false }` with no read.
      `indexFileRecorded` records it with a new `seq` under the lock, exactly like a write, so
      a concurrent watcher `reindexFile` or delete is ordered by the lock as today. A skip does
      not add a kept path and does not clear a tombstone (`run !== null`).
@@ -181,17 +189,25 @@ inside the existing per-file lock with a live lookup, not from a map loaded befo
 
 #### D2 store changes (`memory-curator/src/lib/code-symbol.store.ts`)
 
-- `replaceFileSymbols(root, file, rows, fingerprint?: string | null)`. In the same synchronous
-  transaction: upsert the record when `fingerprint` is a string AND (vec is unavailable OR every
-  row got a valid vector); else delete the record. Omitted = delete.
-- `readFileFingerprint(root, file): string | null`:
-  `SELECT f.fingerprint FROM code_symbol_files f WHERE f.workspace_root = ? AND f.file_path = ?
-  AND NOT EXISTS (SELECT 1 FROM indexing_state WHERE workspace_fingerprint = ?)` with the vec
-  stale marker. When that statement finds the marker set, the store calls a new
-  `recoverVecIfStale()` that runs `dropAllVecRows` even when this connection already passed its
-  `vecOrphansReconciled` shortcut (`code-symbol.store.ts:430-463`). Until recovery commits,
-  `readFileFingerprint` returns `null` and D3 reuses no vector. So a warm connection recovers
-  from a marker that another connection wrote.
+- `replaceFileSymbols(root, file, rows, fingerprint?: string | null)`. `fingerprint` is the
+  indexer candidate without the model id; the store stores `${fingerprint}:${embedder.modelId}`.
+  In the same synchronous transaction: upsert the record when `fingerprint` is a string AND
+  (vec is unavailable OR every row got a valid vector); else delete the record. Omitted = delete.
+- `isFileUnchanged(root, file, candidate): boolean` (rev 3c, review r4 findings 1-3):
+  1. `reconcileOrphanVecRows()` first. That method (writable connection) now probes the
+     marker on EVERY call with one indexed read (`SELECT 1 FROM indexing_state WHERE
+     workspace_fingerprint = ?`, the `VEC_STALE_FINGERPRINT` shape at
+     `code-symbol.store.ts:447-451`); the `vecOrphansReconciled` shortcut only skips the
+     orphan scan, never the marker probe. When the marker is set, it runs a new
+     `recoverVecIfStale()`: one transaction that re-probes the marker and runs `dropAllVecRows`
+     only when the marker is still there, so a concurrent clear never causes a second wipe. The read-only branch
+     (`:435-441`) stays as is. Because `replaceFileSymbols` (`:546`) and the in-process search
+     (`:1032`) call the same method, a warm writer and a warm search also recover from a
+     marker that another connection wrote (r4 finding 3), not only the skip path.
+  2. When reconcile returns "vec not usable" or the marker is still set → `false`.
+  3. Else one point lookup: `SELECT 1 FROM code_symbol_files WHERE workspace_root = ? AND
+     file_path = ? AND fingerprint = ?` with `${candidate}:${embedder.modelId}` → hit = `true`.
+     A record of another model never matches, and the indexer never compares strings.
 - Every deleter also deletes records, inside its existing transaction, and enumerates the
   records table on its own (so a zero-symbol file or root is not missed):
   `deleteFileRows`, `purgeMissing` (paths from both tables), `purgeWorkspace`,
@@ -208,13 +224,14 @@ inside the existing per-file lock with a live lookup, not from a map loaded befo
   new embedding is missing or invalid (today it deletes only when the new vector is valid,
   `:775-814`).
 - Cross-connection outage: Electron and the CLI can open the same database. `markVecStale`
-  from one connection is seen by the other because `readFileFingerprint` reads the marker in
-  the same statement. The orphan-reconcile shortcut (`vecOrphansReconciled`) is not trusted for
-  this; the marker read is per call.
+  from one connection is seen by the other because `reconcileOrphanVecRows` probes the marker
+  on every call (see `isFileUnchanged`). The `vecOrphansReconciled` shortcut is not trusted for
+  this; the marker read is per call. The wipe (`recoverVecIfStale`) re-probes the marker inside
+  its own transaction and wipes at most once per marker (spec asserts one wipe, not one per miss).
 - Port and adapter (`memory-contracts/src/lib/symbol-sink.port.ts`,
   `memory-curator/src/lib/symbol-sink.adapter.ts`): optional 4th argument on
-  `replaceFileSymbols`, optional `readFileFingerprint?` and `markRootValidated?`. The null sink
-  needs no change.
+  `replaceFileSymbols`, optional `isFileUnchanged?(root, file, candidate): boolean` and
+  `markRootValidated?`. The null sink needs no change.
 
 ### D3. Reuse vectors by text hash (decision A3, option C)
 
@@ -277,6 +294,24 @@ direct `reindexFile` gap. Specs pin all three paths.
   (`code-namespace.builder.ts:276-281`). A busy result stays as it is (`:512`).
 - Boot lifecycle, watcher storms, task-end hook, lazy run and CLI never force.
 
+### D6. JavaScript emitted twins (user addition, decision #21)
+
+- Rule: a `.js`/`.jsx`/`.mjs`/`.cjs` file is not indexed when the same directory holds a
+  TypeScript source with the same stem (`.ts`, `.tsx`, `.mts`, `.cts`; not `.d.ts`, because a
+  `.js` next to a `.d.ts` holds the only implementation). A lone `.js` stays indexed. JavaScript
+  is not dropped globally.
+- Helper in `workspace-intelligence/src/file-indexing/` (batch B1b, owner of the predicate):
+  `typeScriptTwinCandidates(path)` (pure) and `hasTypeScriptSourceTwin(path, exists)`.
+- Full run (B3): decided against the discovered set (no extra I/O); the twin is not added to
+  `presentPaths`, so the next complete run purges its old rows. Watcher (B1b,
+  `workspace-index-lifecycle.ts`) and `reindexFile` (B3): `exists` probe; a probe error counts
+  as "no twin" (index the file).
+- Limit: when the TS source is deleted, the lone `.js` is picked up by the next full run, not
+  by the watcher event of the delete.
+- Measured before the change (tracked files of this worktree, `git ls-files`): 192 JavaScript
+  files, 0 with a TS source twin, 0 next to a `.d.ts`. The discovery-set count (includes
+  untracked, not-ignored files, and the main checkout) comes from the harness after B1.
+
 ## Specs
 
 | Spec file | Cases |
@@ -284,8 +319,8 @@ direct `reindexFile` gap. Specs pin all three paths.
 | `workspace-default-excludes.spec.ts` | `isCodeIndexExcluded` true: `.ptah/analysis/a.ts`, `.claude/skills/x/s.js`, `.codex/a.py`, `pkg/.agents/b.ts`, `a\\.claude\\x.ts`; false: `src/a.ts`, `libs/claude/x.ts`; every `DEFAULT_WORKSPACE_EXCLUDES` entry is in `CODE_INDEX_EXCLUDES` |
 | `code-symbol-indexer.service.spec.ts` | G3 hit: no read, no replace, coverage analyzed; G4 mtime / size / ctime change → parse; recovered, unsupported-syntax and unchecked outcomes → no record; zero-symbol clean file → record; G5 force → no lookup; lookup throws → parse + one warn; watcher reindex during a census, both lock orders; "write then delete" and "skip then delete" give the same coverage; gitignored file created after the cache warmed → ignored on the next `reindexFile`; runtime unavailable with all hits → completes, with one miss → throws, no purge; cap + hits; abort between batches; all attempted fail with hits → throws, no purge; `markRootValidated` only on complete runs |
 | new `code-symbol-indexer.scope.integration.spec.ts` (temp dir, real `WorkspaceIndexerService`) | G1 + G2: `src/a.ts` only is written from `src/a.ts`, `.ptah/analysis/x.ts`, `.claude/skills/s/run.js`, `.claude-worktrees/w/src/a.ts`, `vendor-wt/.git` (file) + `vendor-wt/b.ts`, a gitignored `generated-local/c.ts` (`.gitignore`: `generated-local/`); direct `reindexFile` of each excluded file writes nothing; `vendor-wt` opened as its own root indexes `b.ts`; old rows under `.claude/` are purged by a complete run |
-| `code-symbol.store.spec.ts` | record round trip; no record when a vector is missing or vec stale marker set (second connection writes the marker); every deleter removes records incl. file-only path and file-only root; `dropAllVecRows` clears records; `insertBatch` clears record and sets hash; G6 second root with same text → embedder gets misses only; bad BLOB length → miss; donor deleted during the await → still a valid write; four vectorless rows then a valid donor → reuse; second connection replaces the donor between two reads → no foreign vector (read transaction); other model id with unchanged files → no skip, no donor; marker written by a second connection after the first warmed → first recovers before any skip or reuse; subject conflict across files clears both records; `insertBatch` conflict with an invalid vector removes the old vec row; `getIndexFreshness` uses `validated_at` |
-| `0077_code_symbol_files.spec.ts` + the 24 latest-version specs | tables, column, index; upgrade from 0076 with existing FTS rows; open with vec disabled; two connections on one file; each old spec asserts "registered, in order" instead of "latest = 76" |
+| `code-symbol.store.spec.ts` | record round trip; no record when a vector is missing or vec stale marker set (second connection writes the marker); every deleter removes records incl. file-only path and file-only root; `dropAllVecRows` clears records; `insertBatch` clears record and sets hash; G6 second root with same text → embedder gets misses only; bad BLOB length → miss; donor deleted during the await → still a valid write; four vectorless rows then a valid donor → reuse; second connection replaces the donor between two reads → no foreign vector (read transaction); other model id with unchanged files → no skip, no donor; marker written by a second connection after the first warmed → first recovers before any skip or reuse, vectors wiped exactly once (not on each later miss), and a warm `replaceFileSymbols` / search also recovers; `isFileUnchanged` compares with the model id appended (indexer candidate has none); subject conflict across files clears both records; `insertBatch` conflict with an invalid vector removes the old vec row; `getIndexFreshness` uses `validated_at` |
+| `0077_code_symbol_files.spec.ts` + the 24 latest-version specs | tables, column, index; upgrade from 0076 with existing FTS rows; old rows have NULL `text_hash` and stay searchable; reopen applies nothing (version 77); open with vec disabled; two connections on one file; each old spec asserts `findIndex(version === N) === N - 1` instead of "latest = 76" |
 | `code-namespace.builder.spec.ts` | reindex passes `force: true`; lazy run `force: false`; busy result unchanged |
 | `indexing-control.service.spec.ts`, `indexing-rpc.handlers.spec.ts` | `force` reaches `runSymbols`; forced follow-up keeps force; resume never forces |
 | `workspace-index-lifecycle.spec.ts` | watch options use `CODE_INDEX_EXCLUDES`; `isIndexerSourcePath` rejects `.claude/x.ts` |
@@ -344,6 +379,8 @@ implementer, and one final review of `git diff main...HEAD` before the first pus
 5. **Follow-up, not Part B**: the CLI file walk and the Electron file walk treat hidden entries
    differently.
 6. **Part C**: the `ptah_grep` Node walk uses its own skip list.
+7. **Follow-up, not Part B** (user scope note): parse support for `.mjs`, `.cjs` and `.cts`
+   (the 115 `unsupported` JavaScript files of audit A5).
 
 ## Review record
 
@@ -353,6 +390,7 @@ implementer, and one final review of `git diff main...HEAD` before the first pus
 | Re-review 1 | same codex session | REVISE (6 Resolved, 7 Partly; new: 1 Blocking, 2 Serious) | `implementation-plan-review-r2.md`; addressed in revision 3 |
 | Re-review 2 (cap) | same codex session | REVISE (7 Resolved, 3 Partly; new: 1 Blocking) | `implementation-plan-review-r3.md` |
 | Post-cap correction | coordinator | not reviewed | Revision 3b: removed the generation table (the r3 Blocking item has no shared switch left to fence); warm-connection marker recovery (r3 finding 2); 24 migration specs in the table and B2 (r3 finding 13) |
+| R3 review of 3b (user-requested) | Ollama Code lane (`code-logic-reviewer`, ollama-cloud family; author is Claude) | REVISE (1 Blocking, 1 Serious, 1 Moderate, 2 Minor); topic 1 (no fence needed) confirmed sound | `implementation-plan-review-r4.md`; all 5 fixed in revision 3c by the coordinator: compare moved into the store (`isFileUnchanged`), marker probe on every reconcile + one-wipe `recoverVecIfStale`, named migration assertion, two more 0077 cases. 3c is not re-reviewed; the final code review checks it |
 
 Author: coordinator session (Claude, in-process). Reviewer family: codex (different family,
 opposite execution side). Open items for the user: the 3b correction needs either the user's

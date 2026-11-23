@@ -1,4 +1,5 @@
-import { basename, extname } from 'node:path';
+import { access, readdir, stat } from 'node:fs/promises';
+import { basename, dirname, extname, relative } from 'node:path';
 
 import { NESTED_WORKSPACE_PATH_RULES } from '@ptah-extension/shared';
 import type {
@@ -10,7 +11,10 @@ import type {
 } from '@ptah-extension/platform-core';
 import {
   classifyFileForCoverage,
-  DEFAULT_WORKSPACE_EXCLUDES,
+  CODE_INDEX_EXCLUDES,
+  hasTypeScriptSourceTwin,
+  isCodeIndexExcluded,
+  isJavaScriptPath,
 } from '@ptah-extension/workspace-intelligence';
 
 /**
@@ -103,8 +107,25 @@ const SQLITE_SIDECAR_SUFFIXES = ['-wal', '-shm', '-journal'] as const;
  * A path with no such extension — a directory, `.md`, a database file — is
  * not a per-file index target.
  */
-function isIndexerSourcePath(filePath: string): boolean {
-  return classifyFileForCoverage(filePath, 'codeIndex') === 'eligible';
+function isIndexerSourcePath(root: string, filePath: string): boolean {
+  return (
+    classifyFileForCoverage(filePath, 'codeIndex') === 'eligible' &&
+    !isCodeIndexExcluded(
+      relative(normalizeSymbolPath(root), normalizeSymbolPath(filePath)),
+    )
+  );
+}
+
+async function sourceTwinExists(filePath: string): Promise<boolean> {
+  await access(filePath);
+  if (!(await stat(filePath)).isFile()) return false;
+  if (process.platform === 'win32') return true;
+  // Access can also succeed for differently cased names on macOS volumes.
+  return (await readdir(dirname(filePath))).includes(basename(filePath));
+}
+
+function needsTwinProbe(change: WorkspaceChange): boolean {
+  return change.kind !== 'delete' && isJavaScriptPath(change.path);
 }
 
 function isDatabaseArtifact(
@@ -149,13 +170,12 @@ export function workspaceSymbolIndexFrom(
 }
 
 /**
- * Same exclude policy as the workspace file index watcher
- * (`folder-index-live-sync.ts`): globs plus nested-workspace segment rules.
+ * Symbol-index globs plus the shared nested-workspace segment rules.
  * Directory-name excludes stay empty because the globs already name them.
  */
 export function defaultSymbolWatchOptions(): WorkspaceWatchOptions {
   return {
-    excludeGlobs: DEFAULT_WORKSPACE_EXCLUDES,
+    excludeGlobs: CODE_INDEX_EXCLUDES,
     excludeDirNames: [],
     excludeSegmentRules: NESTED_WORKSPACE_PATH_RULES,
     nestedRepoDetection: true,
@@ -196,6 +216,7 @@ export class WorkspaceIndexLifecycleService {
   private readonly deleteRunCooldownMs: number;
 
   private subscription: IDisposable | undefined;
+  private pendingBatch: Promise<void> | undefined;
   private readonly pending = new Map<string, PendingFile>();
   private runAbort: AbortController | undefined;
   private fullRun: Promise<void> | undefined;
@@ -261,12 +282,31 @@ export class WorkspaceIndexLifecycleService {
   }
 
   private onBatch(batch: WorkspaceChangeBatch): void {
+    // A delete arriving during an earlier probe must be applied after that
+    // batch, so that an older update cannot replace it in the debounce queue.
+    const processing = this.pendingBatch
+      ? this.pendingBatch.then(() => this.processBatch(batch))
+      : this.processBatch(batch);
+    if (!processing) return;
+    const pending = processing
+      .catch((error: unknown) => this.report(WATCH_FAILURE, error))
+      .finally(() => {
+        if (this.pendingBatch === pending) this.pendingBatch = undefined;
+      });
+    this.pendingBatch = pending;
+  }
+
+  private processBatch(batch: WorkspaceChangeBatch): void | Promise<void> {
     if (this.disposed) return;
+    if (batch.overflow || batch.truncated) {
+      this.requestFullRun();
+      return;
+    }
     const kept: WorkspaceChange[] = [];
     let directoryDelete = false;
     for (const change of batch.changes) {
       if (isDatabaseArtifact(change.path, this.databasePath)) continue;
-      const source = isIndexerSourcePath(change.path);
+      const source = isIndexerSourcePath(this.workspaceRoot, change.path);
       if (change.kind === 'delete' && !source) {
         // The path is already gone, so it cannot be stat'ed. A non-empty
         // `path.extname` is a file the indexer never stored (`.md`, `.json`):
@@ -280,9 +320,30 @@ export class WorkspaceIndexLifecycleService {
       if (!source) continue;
       kept.push(change);
     }
+    if (kept.some(needsTwinProbe)) {
+      return Promise.all(
+        kept.map(async (change) =>
+          needsTwinProbe(change) &&
+          (await hasTypeScriptSourceTwin(change.path, sourceTwinExists))
+            ? null
+            : change,
+        ),
+      ).then((changes) =>
+        this.scheduleBatch(
+          changes.filter((change) => change !== null),
+          directoryDelete,
+        ),
+      );
+    }
+    this.scheduleBatch(kept, directoryDelete);
+  }
+
+  private scheduleBatch(
+    kept: readonly WorkspaceChange[],
+    directoryDelete: boolean,
+  ): void {
+    if (this.disposed) return;
     if (
-      batch.overflow ||
-      batch.truncated ||
       kept.length >= this.stormThreshold ||
       this.pending.size + kept.length >= this.stormThreshold
     ) {

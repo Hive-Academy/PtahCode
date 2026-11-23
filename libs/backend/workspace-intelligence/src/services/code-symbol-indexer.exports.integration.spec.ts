@@ -66,7 +66,9 @@ import type { WorkspaceIndexerService } from '../file-indexing/workspace-indexer
 import { generateMcpContractFixturePlan } from '../testing/mcp-contract/fixture-workspace';
 import { CodeSymbolIndexer } from './code-symbol-indexer.service';
 
-const ROOT = 'D:/census-ws';
+// A native absolute root: a direct reindexFile rejects a path the host does
+// not treat as absolute (TASK_2026_2312_c3ef D1.3).
+const ROOT = process.platform === 'win32' ? 'D:/census-ws' : '/census-ws';
 
 interface SymbolRow {
   readonly kind: string;
@@ -208,6 +210,8 @@ function discoveryOf(paths: readonly string[]): WorkspaceIndexerService {
           yield { path: p, relativePath: p, type: 'source', size: 100 };
         }
       })(),
+    // A direct reindexFile asks the ignore files; this fixture has none.
+    isIgnoredForIndex: async () => false,
   } as unknown as WorkspaceIndexerService;
 }
 

@@ -10,6 +10,7 @@ import {
 import {
   PLATFORM_TOKENS,
   COVERAGE_COUNT_MAX,
+  FileType,
   type CoverageCensus,
   type CoverageState,
   type FailureReason,
@@ -25,6 +26,12 @@ import {
 import { AstAnalysisService } from '../ast/ast-analysis.service';
 import { parserFailureReason } from '../ast/parser-refusal';
 import { WorkspaceIndexerService } from '../file-indexing/workspace-indexer.service';
+import { isCodeIndexExcluded } from '../file-indexing/workspace-default-excludes';
+import { findNestedRepoAncestor } from '../file-indexing/nested-repo-scan';
+import {
+  hasTypeScriptSourceTwin,
+  hasTypeScriptSourceTwinIn,
+} from '../file-indexing/typescript-twin';
 import type { SupportedLanguage } from '../ast/ast.types';
 import type { CodeInsights, ExportInfo } from '../ast/ast-analysis.interfaces';
 import { exportRowRange } from '../ast/export-extraction';
@@ -75,6 +82,15 @@ export interface CodeSymbolIndexerOptions {
    * generating turn would wait for that same turn to finish.
    */
   userInitiated?: boolean;
+  /**
+   * Bypass the unchanged-fingerprint shortcut: a selected file is parsed even
+   * when its stored fingerprint shows no change (TASK_2026_2312_c3ef D5).
+   * Tombstoned files and the runtime-unavailable gate still apply. Only an
+   * explicit full reindex sets it: `indexing:start` with `force: true` and the
+   * agent tool `ptah_code_reindex` without `filePath`. Boot, watcher, lazy
+   * and CLI runs never do.
+   */
+  force?: boolean;
 }
 
 export interface CodeSymbolIndexerProgress {
@@ -86,6 +102,7 @@ export interface CodeSymbolIndexerProgress {
 
 export interface IndexingStats {
   filesScanned: number;
+  filesSkippedUnchanged: number;
   symbolsIndexed: number;
   errors: number;
   durationMs: number;
@@ -108,11 +125,8 @@ const DISCOVERY_PATTERNS: readonly string[] = recognisedSourceExtensions().map(
 const DEFAULT_BATCH_SIZE = 20;
 /** `whenClear` lane name; it only labels the governor's ceiling log line. */
 const GOVERNOR_LANE = 'code-symbol-indexer';
-/**
- * Paths indexed last so source trees fill the run (and any optional cap)
- * before workspace-local skills and agent files.
- */
-const DEFERRED_DISCOVERY = /(?:^|\/)(?:\.ptah|\.github\/skills)(?:\/|$)/;
+/** Bump whenever the extracted symbols or embedded text format changes. */
+export const CODE_INDEX_FORMAT_VERSION = 1;
 /**
  * A run never reads a file larger than this (the discovery stream's old
  * silent size limit, now counted as `failed` with reason `too-large`).
@@ -176,14 +190,6 @@ function normalizeIndexPath(filePath: string): string {
   return filePath.replace(/\\/g, '/');
 }
 
-/** Source files first; `.ptah/` and `.github/skills` last; then path order. */
-function compareDiscoveryOrder(a: string, b: string): number {
-  const deferredA = DEFERRED_DISCOVERY.test(a) ? 1 : 0;
-  const deferredB = DEFERRED_DISCOVERY.test(b) ? 1 : 0;
-  if (deferredA !== deferredB) return deferredA - deferredB;
-  return a < b ? -1 : a > b ? 1 : 0;
-}
-
 /**
  * Maps a file extension to the tree-sitter SupportedLanguage.
  *
@@ -223,11 +229,13 @@ interface FileStats {
   symbolsIndexed: number;
   errors: number;
   durationMs: number;
-  outcome: FileOutcome;
+  outcome: FileOutcome | 'excluded';
   /** `replaceFileSymbols` finished. A failed read or parse does not set it. */
   wrote?: boolean;
   /** Census saw a deletion tombstone and did not replace. */
   skippedTombstone?: boolean;
+  skippedUnchanged?: boolean;
+  skippedRuntime?: boolean;
 }
 
 /** A completed write of one file; `seq` orders writes across runs and per-file calls. */
@@ -322,6 +330,7 @@ interface ActiveCensus {
 
 const EMPTY_INDEX_STATS: IndexingStats = {
   filesScanned: 0,
+  filesSkippedUnchanged: 0,
   symbolsIndexed: 0,
   errors: 0,
   durationMs: 0,
@@ -474,6 +483,7 @@ function saturate(count: number): number {
 export class CodeSymbolIndexer {
   /** Latch: a defective governor is warned about once, not per batch. */
   private governorFailureWarned = false;
+  private fingerprintLookupWarned = false;
   /**
    * Coverage state per workspace root, keyed by its path identity. One entry
    * per root indexed in this host session.
@@ -974,6 +984,7 @@ export class CodeSymbolIndexer {
     filePath: string,
     workspaceRoot: string,
     run: IndexRun | null,
+    force = false,
   ): Promise<FileStats> {
     const identity = graphPathIdentity(filePath);
     // Counted from before the lock wait (a queued write is already pending),
@@ -983,8 +994,14 @@ export class CodeSymbolIndexer {
     this.pendingWrites.set(rootKey, (this.pendingWrites.get(rootKey) ?? 0) + 1);
     try {
       return await this.withFileLock(identity, async () => {
-        const stats = await this._indexFile(filePath, workspaceRoot, run);
-        if (stats.skippedTombstone) return stats;
+        const stats = await this._indexFile(filePath, workspaceRoot, run, force);
+        if (
+          stats.skippedTombstone ||
+          stats.skippedRuntime ||
+          stats.outcome === 'excluded'
+        ) {
+          return stats;
+        }
         if (run === null && stats.wrote === true) {
           this.rememberKeptPath(workspaceRoot, identity, filePath);
         }
@@ -1016,6 +1033,7 @@ export class CodeSymbolIndexer {
     options: CodeSymbolIndexerOptions | undefined,
     active: ActiveCensus,
   ): Promise<{ stats: IndexingStats; complete: boolean }> {
+    const force = options?.force === true;
     if (this.sink.purgeStaleRoots) {
       this.throwIfAborted(options?.signal);
       try {
@@ -1032,32 +1050,21 @@ export class CodeSymbolIndexer {
     const startMs = Date.now();
     const batchSize = options?.batchSize ?? DEFAULT_BATCH_SIZE;
     const maxFilesPerRun = options?.maxFilesPerRun;
-    const eligible: Array<{
+    type DiscoveredFile = {
       readonly path: string;
       readonly size: number;
       /** Discovery could not stat it (locked, permission denied). */
       readonly unreadable: boolean;
-    }> = [];
-    const presentPaths: string[] = [];
-    const seenPresent = new Set<string>();
-    /** Classify one discovered file; every path is recorded as present on disk. */
+    };
+    const discovered = new Map<string, DiscoveredFile>();
     const consider = (
       filePath: string,
       size: number,
       unreadable: boolean,
     ): void => {
       const normalized = normalizeIndexPath(filePath);
-      if (!seenPresent.has(normalized)) {
-        seenPresent.add(normalized);
-        presentPaths.push(normalized);
-      }
-      const fileClass = classifyFileForCoverage(filePath, 'codeIndex');
-      if (fileClass === 'unsupported') {
-        this.countUnsupported(run, filePath);
-        return;
-      }
-      if (fileClass !== 'eligible' || shouldSkipFile(filePath)) return;
-      eligible.push({ path: normalized, size, unreadable });
+      if (isCodeIndexExcluded(path.relative(workspaceRoot, normalized))) return;
+      discovered.set(normalized, { path: normalized, size, unreadable });
     };
 
     try {
@@ -1088,6 +1095,7 @@ export class CodeSymbolIndexer {
       return {
         stats: {
           filesScanned: 0,
+          filesSkippedUnchanged: 0,
           symbolsIndexed: 0,
           errors: 1,
           durationMs: Date.now() - startMs,
@@ -1096,7 +1104,24 @@ export class CodeSymbolIndexer {
       };
     }
 
-    eligible.sort((a, b) => compareDiscoveryOrder(a.path, b.path));
+    const discoveredKeys = new Set<string>();
+    for (const filePath of discovered.keys()) {
+      discoveredKeys.add(
+        process.platform === 'win32' ? filePath.toLowerCase() : filePath,
+      );
+    }
+    const eligible: DiscoveredFile[] = [];
+    const presentPaths: string[] = [];
+    for (const file of discovered.values()) {
+      if (hasTypeScriptSourceTwinIn(file.path, discoveredKeys)) continue;
+      presentPaths.push(file.path);
+      const fileClass = classifyFileForCoverage(file.path, 'codeIndex');
+      if (fileClass === 'unsupported') this.countUnsupported(run, file.path);
+      if (fileClass === 'eligible' && !shouldSkipFile(file.path)) {
+        eligible.push(file);
+      }
+    }
+    eligible.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
     let files = eligible;
     let truncated = false;
     let omittedByCap = 0;
@@ -1115,6 +1140,7 @@ export class CodeSymbolIndexer {
     let totalErrors = 0;
     let attempted = 0;
     let runtimeSkipped = 0;
+    let filesSkippedUnchanged = 0;
 
     let filesProcessed = 0;
     // Before any write, after every batch (including the last), and again
@@ -1127,15 +1153,6 @@ export class CodeSymbolIndexer {
       const batch = files.slice(i, i + batchSize);
 
       for (const file of batch) {
-        if (
-          this.astAnalysis.isRuntimeUnavailable() &&
-          !file.unreadable &&
-          file.size <= MAX_INDEXED_FILE_BYTES
-        ) {
-          runtimeSkipped++;
-          filesProcessed++;
-          continue;
-        }
         if (file.unreadable || file.size > MAX_INDEXED_FILE_BYTES) {
           this.recordWrite(
             workspaceRoot,
@@ -1148,10 +1165,13 @@ export class CodeSymbolIndexer {
             file.path,
             workspaceRoot,
             run,
+            force,
           );
           totalSymbols += stats.symbolsIndexed;
           totalErrors += stats.errors;
-          attempted++;
+          if (stats.skippedUnchanged) filesSkippedUnchanged++;
+          else if (stats.skippedRuntime) runtimeSkipped++;
+          else if (!stats.skippedTombstone) attempted++;
         }
         filesProcessed++;
       }
@@ -1195,8 +1215,12 @@ export class CodeSymbolIndexer {
         `[CodeSymbolIndexer] tree-sitter runtime unavailable — skipped ${runtimeSkipped} files; next retry in ${this.astAnalysis.runtimeRetryInMs()}ms`,
       );
     }
+    // Unchanged-file hits prove the runtime and the sink work, so a warm run
+    // whose few re-parsed files all fail completes with `errors > 0`: it must
+    // still purge and validate the root (review S1, TASK_2026_2312_c3ef).
     if (
       attempted > 0 &&
+      filesSkippedUnchanged === 0 &&
       totalSymbols === 0 &&
       totalErrors === attempted
     ) {
@@ -1212,10 +1236,13 @@ export class CodeSymbolIndexer {
     this.throwIfAborted(options?.signal);
     if (run.census === 'complete') {
       this.purgeAbsentPaths(workspaceRoot, presentPaths, run);
+      this.throwIfAborted(options?.signal);
+      if (!run.invalidated) this.markRootValidated(workspaceRoot);
     }
 
     this.logger.info('[CodeSymbolIndexer] Workspace indexing complete', {
       filesScanned: files.length,
+      filesSkippedUnchanged,
       symbolsIndexed: totalSymbols,
       errors: totalErrors,
       durationMs,
@@ -1224,6 +1251,7 @@ export class CodeSymbolIndexer {
     return {
       stats: {
         filesScanned: files.length,
+        filesSkippedUnchanged,
         symbolsIndexed: totalSymbols,
         errors: totalErrors,
         durationMs,
@@ -1307,20 +1335,41 @@ export class CodeSymbolIndexer {
     absoluteFilePath: string,
     workspaceRoot: string,
   ): Promise<SingleFileReindex> {
-    if (shouldSkipFile(absoluteFilePath)) {
-      this.logger.debug?.(
-        `[CodeSymbolIndexer] reindexFile skipped (matches skip pattern): ${path.basename(absoluteFilePath)}`,
-      );
-      return {
-        coverage: singleFileCoverage(absoluteFilePath, 'excluded'),
-        symbolsIndexed: 0,
-        errors: 0,
-        durationMs: 0,
-      };
-    }
-    const normalizedFilePath = absoluteFilePath.replace(/\\/g, '/');
+    const normalizedFilePath = normalizeIndexPath(
+      path.normalize(normalizeIndexPath(absoluteFilePath)),
+    );
     const startMs = Date.now();
     try {
+      const relative = path.relative(workspaceRoot, normalizedFilePath);
+      if (
+        !path.isAbsolute(normalizedFilePath) ||
+        !relative ||
+        relative === '..' ||
+        relative.startsWith(`..${path.sep}`) ||
+        path.isAbsolute(relative) ||
+        isCodeIndexExcluded(relative) ||
+        shouldSkipFile(normalizedFilePath) ||
+        (await findNestedRepoAncestor(
+          workspaceRoot,
+          normalizedFilePath,
+          (entry) => this.fs.exists(entry),
+        )) !== null ||
+        (await hasTypeScriptSourceTwin(normalizedFilePath, async (candidate) => {
+          const stat = await this.fs.stat(candidate);
+          if ((stat.type & FileType.File) === 0) return false;
+          if (process.platform === 'win32') return true;
+          // Case-insensitive volumes can stat a differently spelled sibling.
+          const siblings = await this.fs.readDirectory(path.dirname(candidate));
+          return siblings.some((entry) => entry.name === path.basename(candidate));
+        }))
+      ) {
+        return {
+          coverage: singleFileCoverage(normalizedFilePath, 'excluded'),
+          symbolsIndexed: 0,
+          errors: 0,
+          durationMs: Date.now() - startMs,
+        };
+      }
       const { symbolsIndexed, errors, durationMs, outcome } =
         await this.indexFileRecorded(normalizedFilePath, workspaceRoot, null);
       return {
@@ -1353,15 +1402,29 @@ export class CodeSymbolIndexer {
   }
 
   /**
-   * Per-file write. {@link ISymbolSink.replaceFileSymbols} is one
-   * transaction in the store, so a failed insert keeps the previous rows.
+   * Records that a complete run validated the root. A failed write only costs
+   * freshness (the lazy run may start once more), so it never turns a finished
+   * index into a thrown run (review M3, TASK_2026_2312_c3ef).
    */
-  private async writeFileSymbols(
-    filePath: string,
-    workspaceRoot: string,
-    chunks: readonly SymbolChunkInsert[],
-  ): Promise<void> {
-    await this.sink.replaceFileSymbols(workspaceRoot, filePath, chunks);
+  private markRootValidated(workspaceRoot: string): void {
+    try {
+      this.sink.markRootValidated?.(workspaceRoot);
+    } catch (error: unknown) {
+      this.logger.warn('[CodeSymbolIndexer] Root validation write failed', {
+        workspaceRoot,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private async fileFingerprint(filePath: string): Promise<string | null> {
+    try {
+      const { mtime, ctime, size } = await this.fs.stat(filePath);
+      return `${CODE_INDEX_FORMAT_VERSION}:${mtime}:${ctime}:${size}`;
+    } catch {
+      // Stat failure disables caching. The read still determines the outcome.
+      return null;
+    }
   }
 
   /**
@@ -1426,15 +1489,55 @@ export class CodeSymbolIndexer {
    * calling this method (callers are responsible for normalization).
    */
   private async _indexFile(
-    absoluteFilePath: string,
+    normalizedFilePath: string,
     workspaceRoot: string,
     run: IndexRun | null,
+    force: boolean,
   ): Promise<FileStats> {
     const startMs = Date.now();
-    const normalizedFilePath = absoluteFilePath.replace(/\\/g, '/');
+    const empty = { symbolsIndexed: 0, errors: 0, durationMs: 0 };
+    if (run?.tombstones.has(graphPathIdentity(normalizedFilePath))) {
+      return { ...empty, outcome: UNCHECKED, skippedTombstone: true };
+    }
+
+    const before =
+      run === null ? null : await this.fileFingerprint(normalizedFilePath);
+    if (!force && before !== null) {
+      try {
+        if (this.sink.isFileUnchanged?.(workspaceRoot, normalizedFilePath, before)) {
+          return {
+            ...empty,
+            durationMs: Date.now() - startMs,
+            outcome: ANALYZED,
+            skippedUnchanged: true,
+            wrote: false,
+          };
+        }
+      } catch (error: unknown) {
+        if (!this.fingerprintLookupWarned) {
+          this.fingerprintLookupWarned = true;
+          this.logger.warn(
+            '[CodeSymbolIndexer] Fingerprint lookup failed; parsing file',
+            {
+              file: normalizedFilePath,
+              error: error instanceof Error ? error.message : String(error),
+            },
+          );
+        }
+      }
+    }
+    if (run !== null && this.astAnalysis.isRuntimeUnavailable()) {
+      return { ...empty, outcome: UNCHECKED, skippedRuntime: true };
+    }
 
     const ext = path.extname(normalizedFilePath);
     const language = extensionToLanguage(ext);
+    if (
+      run === null &&
+      await this.indexer.isIgnoredForIndex(workspaceRoot, normalizedFilePath)
+    ) {
+      return { ...empty, durationMs: Date.now() - startMs, outcome: 'excluded' };
+    }
     if (!language) {
       return {
         symbolsIndexed: 0,
@@ -1604,6 +1707,14 @@ export class CodeSymbolIndexer {
       });
     }
 
+    const outcome = outcomeOfParse(insights);
+    const fingerprint =
+      outcome === ANALYZED &&
+      before !== null &&
+      before === await this.fileFingerprint(normalizedFilePath)
+        ? before
+        : null;
+
     // Inside the file lock, after the read. A delete that ran once the
     // read had the content (or that won the lock earlier) wins: do not
     // put the census snapshot back.
@@ -1621,7 +1732,12 @@ export class CodeSymbolIndexer {
     }
 
     try {
-      await this.writeFileSymbols(normalizedFilePath, workspaceRoot, chunks);
+      await this.sink.replaceFileSymbols(
+        workspaceRoot,
+        normalizedFilePath,
+        chunks,
+        fingerprint,
+      );
     } catch (writeError: unknown) {
       const msg =
         writeError instanceof Error ? writeError.message : String(writeError);
@@ -1641,7 +1757,7 @@ export class CodeSymbolIndexer {
       // A recovered parse is a failure even though its symbols are written.
       errors: insights.parseStatus === 'recovered' ? 1 : 0,
       durationMs: Date.now() - startMs,
-      outcome: outcomeOfParse(insights),
+      outcome,
       wrote: true,
     };
   }

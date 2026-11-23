@@ -1,12 +1,14 @@
 ---
 id: TASK_2026_2312_c3ef
-status: backlog
+status: in_progress
 type: BUGFIX
 title: Make the workspace code index correct and cheap
 depends_on: []
-created: "2026-11-23T10:29:37.063Z"
-updated: "2026-11-23T10:29:37.063Z"
-description: "Audit and fix the code index pipeline: shared excludes, no nested-worktree duplicates, skip unchanged files on re-index."
+created: '2026-11-23T10:29:37.063Z'
+updated: '2026-11-23T11:38:27.785Z'
+description: >-
+  Audit and fix the code index pipeline: shared excludes, no nested-worktree
+  duplicates, skip unchanged files on re-index.
 estimate: L
 ---
 

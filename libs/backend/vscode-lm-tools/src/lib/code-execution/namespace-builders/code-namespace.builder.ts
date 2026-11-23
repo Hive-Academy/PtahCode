@@ -161,8 +161,10 @@ export interface CodeNamespace {
 
   /**
    * `filePath` reindexes one file and waits; no `filePath` starts a full run
-   * in the background. A file the index cannot hold is answered
-   * `unsupported-language`: nothing is deleted and nothing is counted.
+   * in the background. A full run is forced (TASK_2026_2312_c3ef D5): every
+   * file is parsed even when its stored fingerprint shows no change. A file
+   * the index cannot hold is answered `unsupported-language`: nothing is
+   * deleted and nothing is counted.
    */
   reindex(options?: {
     filePath?: string;
@@ -250,9 +252,14 @@ export function buildCodeNamespace(
     return Math.max(0, now() - freshness.newestUpdatedAt);
   }
 
-  /** Empty, or older than the threshold. An unknown age is never stale. */
+  /** Empty without a validated run, or older than the threshold. An unknown age is never stale. */
   function isStale(freshness: CodeIndexFreshness): boolean {
-    if (freshness.symbolCount === 0) return true;
+    if (freshness.symbolCount === 0) {
+      // A root a complete run validated — even one that wrote no symbols —
+      // is not stale (TASK_2026_2312_c3ef D2): without this, every tool call
+      // on a zero-symbol root would start another run.
+      return (freshness.validatedAt ?? null) === null;
+    }
     const age = ageOf(freshness);
     return age !== null && age > CODE_INDEX_STALE_MS;
   }
@@ -264,6 +271,11 @@ export function buildCodeNamespace(
    * A lazy run is `userInitiated: false` and so waits on the background-work
    * governor before each batch; it is never awaited from inside a tool call,
    * which would make the generating turn wait for itself (TASK_2026_437).
+   *
+   * A user-initiated full reindex also sets `force` (TASK_2026_2312_c3ef D5):
+   * an agent asked for it, so every file is parsed even when its stored
+   * fingerprint shows no change. The lazy run never forces, so its options
+   * stay exactly as before.
    *
    * `indexWorkspace` is called synchronously (inside the executor), because
    * it begins its run before its first `await`: coverage read right after
@@ -277,7 +289,12 @@ export function buildCodeNamespace(
   ): void {
     lastRunStartedAt.set(root, now());
     void new Promise<unknown>((resolve) =>
-      resolve(indexer.indexWorkspace(root, { userInitiated })),
+      resolve(
+        indexer.indexWorkspace(root, {
+          userInitiated,
+          ...(userInitiated ? { force: true } : {}),
+        }),
+      ),
     ).catch((error: unknown) => {
       // degradation-audit: reported — a background reindex failure is logged
       // at warn and never reaches the tool call that started it. Fixed text:

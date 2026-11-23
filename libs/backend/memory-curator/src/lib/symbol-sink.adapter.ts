@@ -46,12 +46,26 @@ export class MemoryStoreSymbolSink implements ISymbolSink {
     workspaceRoot: string,
     filePath: string,
     chunks: readonly SymbolChunkInsert[],
+    fingerprint?: string | null,
   ): Promise<void> {
     await this.codeSymbols.replaceFileSymbols(
       workspaceRoot,
       filePath,
       this.toEntries(chunks),
+      fingerprint,
     );
+  }
+
+  isFileUnchanged(
+    workspaceRoot: string,
+    filePath: string,
+    candidate: string,
+  ): boolean {
+    return this.codeSymbols.isFileUnchanged(workspaceRoot, filePath, candidate);
+  }
+
+  markRootValidated(workspaceRoot: string): void {
+    this.codeSymbols.markRootValidated(workspaceRoot);
   }
 
   purgeMissing(workspaceRoot: string, presentPaths: readonly string[]): number {

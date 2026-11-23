@@ -105,6 +105,7 @@ import { sql as sql0073TaskCloseOut } from './0073_task_close_out';
 import { sql as sql0074ReviewStatusSync } from './0074_review_status_sync';
 import { sql as sql0075PhaseGradeKeys } from './0075_phase_grade_keys';
 import { sql as sql0076CronJobCreator } from './0076_cron_job_creator';
+import { sql as sql0077CodeSymbolFiles } from './0077_code_symbol_files';
 import type { SqliteDatabase } from '../sqlite-connection.service';
 
 export interface Migration {
@@ -523,4 +524,5 @@ export const MIGRATIONS: readonly Migration[] = [
   },
   { version: 75, name: '0075_phase_grade_keys', sql: sql0075PhaseGradeKeys },
   { version: 76, name: '0076_cron_job_creator', sql: sql0076CronJobCreator },
+  { version: 77, name: '0077_code_symbol_files', sql: sql0077CodeSymbolFiles },
 ];

@@ -3,7 +3,7 @@
 
 import 'reflect-metadata';
 import type { Logger } from '@ptah-extension/vscode-core';
-import type { IFileSystemProvider } from '@ptah-extension/platform-core';
+import { FileType, type IFileSystemProvider } from '@ptah-extension/platform-core';
 import type {
   ISymbolSink,
   SymbolChunkInsert,
@@ -11,7 +11,7 @@ import type {
 import type { AstAnalysisService } from '../ast/ast-analysis.service';
 import type { BackgroundWorkAdmission } from '@ptah-extension/vscode-core';
 import { WorkspaceIndexerService } from '../file-indexing/workspace-indexer.service';
-import { CodeSymbolIndexer } from './code-symbol-indexer.service';
+import { CODE_INDEX_FORMAT_VERSION, CodeSymbolIndexer } from './code-symbol-indexer.service';
 import { Result } from '@ptah-extension/shared';
 import { AstAnalysisService as RealAstAnalysisService } from '../ast/ast-analysis.service';
 import { TreeSitterParserService } from '../ast/tree-sitter-parser.service';
@@ -40,6 +40,9 @@ function makeLogger(): jest.Mocked<Logger> {
   } as unknown as jest.Mocked<Logger>;
 }
 
+const FILE_STAT = { type: FileType.File, mtime: 100, ctime: 200, size: 30 };
+const FINGERPRINT = `${CODE_INDEX_FORMAT_VERSION}:100:200:30`;
+
 function makeFs(): jest.Mocked<IFileSystemProvider> {
   return {
     readFile: jest.fn(),
@@ -47,8 +50,8 @@ function makeFs(): jest.Mocked<IFileSystemProvider> {
     writeFile: jest.fn(),
     writeFileBytes: jest.fn(),
     readDirectory: jest.fn(),
-    stat: jest.fn(),
-    exists: jest.fn(),
+    stat: jest.fn().mockResolvedValue(FILE_STAT),
+    exists: jest.fn().mockResolvedValue(false),
     delete: jest.fn(),
     createDirectory: jest.fn(),
     copy: jest.fn(),
@@ -60,6 +63,8 @@ function makeFs(): jest.Mocked<IFileSystemProvider> {
 type TestSymbolSink = jest.Mocked<ISymbolSink> & {
   replaceFileSymbols: jest.Mock;
   purgeMissing: jest.Mock;
+  isFileUnchanged: jest.Mock;
+  markRootValidated: jest.Mock;
 };
 
 function makeSymbolSink(): TestSymbolSink {
@@ -68,6 +73,8 @@ function makeSymbolSink(): TestSymbolSink {
     insertSymbols: jest.fn().mockResolvedValue(undefined),
     replaceFileSymbols: jest.fn(),
     purgeMissing: jest.fn().mockReturnValue(0),
+    isFileUnchanged: jest.fn().mockReturnValue(false),
+    markRootValidated: jest.fn(),
   } as unknown as TestSymbolSink;
   sink.replaceFileSymbols.mockImplementation(
     async (
@@ -104,6 +111,7 @@ function makeIndexer(
   }
   return {
     indexWorkspaceStream: jest.fn().mockReturnValue(gen()),
+    isIgnoredForIndex: jest.fn().mockResolvedValue(false),
   } as unknown as jest.Mocked<WorkspaceIndexerService>;
 }
 
@@ -684,6 +692,7 @@ describe('CodeSymbolIndexer', () => {
       }
       return {
         indexWorkspaceStream: jest.fn(() => gen()),
+        isIgnoredForIndex: jest.fn().mockResolvedValue(false),
       } as unknown as jest.Mocked<WorkspaceIndexerService>;
     }
 
@@ -1624,7 +1633,7 @@ describe('CodeSymbolIndexer', () => {
       );
       fs.readFile.mockResolvedValue('function f() {}');
 
-      const manual = service.reindexFile('/workspace/build/manual.ts', ROOT);
+      const manual = service.reindexFile('/workspace/src/manual.ts', ROOT);
       await settle();
       await service.indexWorkspace(ROOT);
 
@@ -1655,7 +1664,7 @@ describe('CodeSymbolIndexer', () => {
       expect(sink.purgeMissing).toHaveBeenCalledWith(ROOT, files);
     });
 
-    it('selects files in deterministic order: source first, .ptah/ and .github/skills last', async () => {
+    it('excludes harness files and selects source files in deterministic path order', async () => {
       const { service, fs, sink } = setup([
         '/workspace/.ptah/agents/a.ts',
         '/workspace/.github/skills/b.ts',
@@ -1669,15 +1678,267 @@ describe('CodeSymbolIndexer', () => {
       expect(fs.readFile.mock.calls.map((call) => call[0])).toEqual([
         '/workspace/src/a.ts',
         '/workspace/src/z.ts',
-        '/workspace/.github/skills/b.ts',
-        '/workspace/.ptah/agents/a.ts',
-        '/workspace/.ptah/tools/c.ts',
       ]);
       const first = fs.readFile.mock.calls.map((call) => call[0]);
       fs.readFile.mockClear();
       await service.indexWorkspace(ROOT);
       expect(fs.readFile.mock.calls.map((call) => call[0])).toEqual(first);
       expect(sink.replaceFileSymbols).toHaveBeenCalled();
+    });
+
+    describe('file fingerprints', () => {
+      const file = '/workspace/src/a.ts';
+      const other = '/workspace/src/b.ts';
+
+      it('counts a hit as analyzed without reading, parsing, or replacing rows', async () => {
+        const { service, sink, fs, ast } = setup([file]);
+        sink.isFileUnchanged.mockReturnValue(true);
+
+        await expect(service.indexWorkspace(ROOT)).resolves.toMatchObject({
+          filesScanned: 1,
+          filesSkippedUnchanged: 1,
+          symbolsIndexed: 0,
+        });
+
+        expect(sink.isFileUnchanged).toHaveBeenCalledWith(ROOT, file, FINGERPRINT);
+        expect(fs.readFile).not.toHaveBeenCalled();
+        expect(ast.analyzeSource).not.toHaveBeenCalled();
+        expect(sink.replaceFileSymbols).not.toHaveBeenCalled();
+        expect(service.getCoverage(ROOT)).toMatchObject({ state: 'current', analyzed: 1 });
+        expect(sink.markRootValidated).toHaveBeenCalledWith(ROOT);
+      });
+
+      it.each(['mtime', 'ctime', 'size'] as const)('parses again when %s changes', async (field) => {
+        const { service, sink, fs } = setup([file]);
+        sink.isFileUnchanged.mockImplementation((_root, _file, candidate) => candidate === FINGERPRINT);
+        fs.stat.mockResolvedValue({ ...FILE_STAT, [field]: FILE_STAT[field] + 1 });
+
+        await expect(service.indexWorkspace(ROOT)).resolves.toMatchObject({ filesSkippedUnchanged: 0 });
+
+        expect(fs.readFile).toHaveBeenCalledWith(file);
+        expect(sink.replaceFileSymbols.mock.calls[0][3]).toEqual(expect.any(String));
+        expect(sink.replaceFileSymbols.mock.calls[0][3]).not.toBe(FINGERPRINT);
+      });
+
+      it('clears the record if the stat changes between reading and replacing', async () => {
+        const { service, sink, fs } = setup([file]);
+        fs.stat.mockResolvedValueOnce(FILE_STAT);
+        fs.stat.mockResolvedValueOnce({ ...FILE_STAT, mtime: FILE_STAT.mtime + 1 });
+
+        await service.indexWorkspace(ROOT);
+
+        expect(sink.replaceFileSymbols).toHaveBeenCalledWith(ROOT, file, expect.any(Array), null);
+      });
+
+      it.each([
+        ['clean', 'ok', false, FINGERPRINT],
+        ['recovered', 'recovered', false, null],
+        ['unsupported syntax', 'ok', true, null],
+        ['unchecked', 'unknown', false, null],
+      ])('writes the expected record for a %s parse', async (_label, parseStatus, unsupportedSyntax, fingerprint) => {
+        const { service, sink, ast } = setup([file]);
+        ast.analyzeSource.mockResolvedValueOnce({
+          isErr: () => false,
+          value: {
+            functions: parseStatus === 'recovered' ? [{ name: 'partial' }] : [],
+            classes: [],
+            parseStatus,
+            unextractedExports: unsupportedSyntax ? [{}] : [],
+          },
+        } as never);
+
+        await service.indexWorkspace(ROOT);
+
+        expect(sink.replaceFileSymbols).toHaveBeenCalledWith(
+          ROOT, file, parseStatus === 'recovered' ? expect.any(Array) : [], fingerprint,
+        );
+        expect(sink.markRootValidated).toHaveBeenCalledWith(ROOT);
+      });
+
+      it('forces a new fingerprint without doing a lookup', async () => {
+        const { service, sink, fs } = setup([file]);
+        sink.isFileUnchanged.mockReturnValue(true);
+
+        await expect(service.indexWorkspace(ROOT, { force: true })).resolves.toMatchObject({
+          filesSkippedUnchanged: 0,
+        });
+
+        expect(sink.isFileUnchanged).not.toHaveBeenCalled();
+        expect(fs.readFile).toHaveBeenCalledWith(file);
+        expect(sink.replaceFileSymbols).toHaveBeenCalledWith(ROOT, file, expect.any(Array), FINGERPRINT);
+      });
+
+      it('keeps the active run mode when a forced call joins it', async () => {
+        const { service, sink } = setup([file]);
+        sink.isFileUnchanged.mockReturnValue(true);
+        const run = service.indexWorkspace(ROOT);
+        const joined = service.indexWorkspace(ROOT, { force: true });
+
+        expect(joined.joinedActiveCensus).toBe(true);
+        await expect(joined).resolves.toMatchObject({ filesSkippedUnchanged: 1 });
+        await run;
+        expect(sink.replaceFileSymbols).not.toHaveBeenCalled();
+      });
+
+      it('parses when lookup throws, warning once across multiple files', async () => {
+        const { service, sink, fs, logger } = setup([file, other]);
+        sink.isFileUnchanged.mockImplementation(() => { throw new Error('lookup failed'); });
+
+        await service.indexWorkspace(ROOT);
+
+        expect(fs.readFile).toHaveBeenCalledTimes(2);
+        expect(sink.replaceFileSymbols).toHaveBeenCalledTimes(2);
+        expect(logger.warn).toHaveBeenCalledTimes(1);
+        expect(logger.warn).toHaveBeenCalledWith(
+          expect.stringContaining('Fingerprint lookup failed'),
+          expect.objectContaining({ error: 'lookup failed' }),
+        );
+      });
+
+      it.each([true, false])('honors the file lock when the census starts first: %s', async (censusFirst) => {
+        const { service, sink, fs } = setup([file]);
+        let record: string | null = FINGERPRINT;
+        sink.isFileUnchanged.mockImplementation((_root, _file, candidate) => record === candidate);
+        sink.replaceFileSymbols.mockImplementation(async (_root, _file, _chunks, fingerprint) => {
+          record = fingerprint ?? null;
+        });
+        let release!: () => void;
+        const held = new Promise<void>((resolve) => { release = resolve; });
+        if (censusFirst) {
+          fs.stat.mockImplementationOnce(async () => {
+            await held;
+            return FILE_STAT;
+          });
+        } else {
+          fs.readFile.mockImplementationOnce(async () => {
+            await held;
+            return 'function f() {}';
+          });
+        }
+
+        const first = censusFirst ? service.indexWorkspace(ROOT) : service.reindexFile(file, ROOT);
+        await settle();
+        const second = censusFirst ? service.reindexFile(file, ROOT) : service.indexWorkspace(ROOT);
+        await settle();
+        expect(sink.isFileUnchanged).not.toHaveBeenCalled();
+        expect(sink.replaceFileSymbols).not.toHaveBeenCalled();
+        release();
+        const [firstResult, secondResult] = await Promise.all([first, second]);
+
+        expect(censusFirst ? firstResult : secondResult).toMatchObject({
+          filesSkippedUnchanged: censusFirst ? 1 : 0,
+        });
+        expect(sink.replaceFileSymbols).toHaveBeenNthCalledWith(1, ROOT, file, expect.any(Array), null);
+        expect(record).toBe(censusFirst ? null : FINGERPRINT);
+        expect(service.getCoverage(ROOT)).toMatchObject({ analyzed: 1 });
+      });
+
+      it.each([false, true])('counts coverage after a delete with an earlier hit: %s', async (hit) => {
+        const { service, sink } = setup([file, other]);
+        const rows = trackingSink(sink);
+        rows.add(file);
+        sink.isFileUnchanged.mockImplementation((_root, path) => hit && path === file);
+        let deletion: Promise<number> | undefined;
+        await service.indexWorkspace(ROOT, {
+          batchSize: 1,
+          onProgress: ({ currentFile }) => {
+            if (currentFile === file) deletion = service.deleteFileSymbols(file, ROOT);
+          },
+        });
+        await deletion;
+
+        expect(service.getCoverage(ROOT)).toMatchObject({ state: 'current', analyzed: 2, unchecked: 0 });
+        expect(rows).toEqual(new Set([other]));
+        expect(sink.purgeMissing).toHaveBeenCalledWith(ROOT, [other]);
+      });
+
+      it('checks a tombstone before statting or looking up a discovered file', async () => {
+        const held = holdingGovernor();
+        const { service, sink, fs } = setup([file], held.governor);
+        sink.isFileUnchanged.mockReturnValue(true);
+        const run = service.indexWorkspace(ROOT);
+        await settle();
+        await service.deleteFileSymbols(file, ROOT);
+        held.releaseAll();
+
+        await expect(run).resolves.toMatchObject({ filesSkippedUnchanged: 0 });
+        expect(fs.stat).not.toHaveBeenCalled();
+        expect(sink.isFileUnchanged).not.toHaveBeenCalled();
+        expect(sink.purgeMissing).toHaveBeenCalledWith(ROOT, []);
+        expect(service.getCoverage(ROOT)).toMatchObject({ analyzed: 0, unchecked: 1 });
+      });
+
+      it.each([false, true])('needs the runtime only if there is a miss: %s', async (miss) => {
+        const { service, sink, ast, fs } = setup([file, other]);
+        ast.isRuntimeUnavailable.mockReturnValue(true);
+        sink.isFileUnchanged.mockImplementation((_root, path) => path === file || !miss);
+
+        const run = service.indexWorkspace(ROOT);
+        if (miss) {
+          await expect(run).rejects.toThrow('runtime unavailable — skipped 1 files');
+          expect(sink.purgeMissing).not.toHaveBeenCalled();
+          expect(sink.markRootValidated).not.toHaveBeenCalled();
+        } else {
+          await expect(run).resolves.toMatchObject({ filesSkippedUnchanged: 2 });
+          expect(sink.purgeMissing).toHaveBeenCalledWith(ROOT, [file, other]);
+          expect(sink.markRootValidated).toHaveBeenCalledWith(ROOT);
+        }
+        expect(fs.readFile).not.toHaveBeenCalled();
+      });
+
+      it('applies the cap before skip checks and leaves a truncated root unvalidated', async () => {
+        const { service, sink } = setup([other, file]);
+        sink.isFileUnchanged.mockReturnValue(true);
+
+        await expect(service.indexWorkspace(ROOT, { maxFilesPerRun: 1 })).resolves.toMatchObject({
+          filesScanned: 1,
+          filesSkippedUnchanged: 1,
+        });
+
+        expect(sink.isFileUnchanged).toHaveBeenCalledTimes(1);
+        expect(sink.isFileUnchanged).toHaveBeenCalledWith(ROOT, file, FINGERPRINT);
+        expect(service.getCoverage(ROOT)).toMatchObject({ census: 'truncated', analyzed: 1, omittedByCap: 1 });
+        expect(sink.purgeMissing).not.toHaveBeenCalled();
+        expect(sink.markRootValidated).not.toHaveBeenCalled();
+      });
+
+      // Review S1: hits prove the runtime and the sink work, so one failed
+      // re-parse must not block the purge and the root validation.
+      it('completes, purges and validates if all attempted files fail alongside hits', async () => {
+        const { service, sink, fs } = setup([file, other]);
+        sink.isFileUnchanged.mockImplementation((_root, path) => path === file);
+        fs.readFile.mockRejectedValue(new Error('read failed'));
+
+        await expect(service.indexWorkspace(ROOT)).resolves.toMatchObject({
+          filesSkippedUnchanged: 1,
+          errors: 1,
+        });
+        expect(sink.purgeMissing).toHaveBeenCalled();
+        expect(sink.markRootValidated).toHaveBeenCalledWith(ROOT);
+      });
+
+      it('still throws without purging if every file is attempted and fails', async () => {
+        const { service, sink, fs } = setup([file, other]);
+        fs.readFile.mockRejectedValue(new Error('read failed'));
+
+        await expect(service.indexWorkspace(ROOT)).rejects.toThrow('all 2 files errored');
+        expect(sink.purgeMissing).not.toHaveBeenCalled();
+        expect(sink.markRootValidated).not.toHaveBeenCalled();
+      });
+
+      // Review M3: a failed validation write never fails a finished run.
+      it('completes with one warning if markRootValidated throws', async () => {
+        const { service, sink } = setup([file]);
+        sink.isFileUnchanged.mockReturnValue(true);
+        sink.markRootValidated.mockImplementation(() => {
+          throw new Error('disk full');
+        });
+
+        await expect(service.indexWorkspace(ROOT)).resolves.toMatchObject({
+          filesSkippedUnchanged: 1,
+        });
+        expect(sink.purgeMissing).toHaveBeenCalled();
+      });
     });
 
     it('a cancelled run purges nothing', async () => {
@@ -1699,6 +1960,7 @@ describe('CodeSymbolIndexer', () => {
       ).rejects.toMatchObject({ name: 'AbortError' });
 
       expect(sink.purgeMissing).not.toHaveBeenCalled();
+      expect(sink.markRootValidated).not.toHaveBeenCalled();
     });
 
     it('a cancel during the only batch purges nothing', async () => {
