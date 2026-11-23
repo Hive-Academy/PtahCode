@@ -215,11 +215,15 @@ describe('SessionInspectorComponent presentation', () => {
       scope: 'session',
       revision: 1,
     };
-    const fixture = create({ ...emptyStats, snapshot });
+    const fixture = create({ ...emptyStats, sessionId: 'one', snapshot });
     const input = () => (fixture.nativeElement as HTMLElement).querySelector(
       '[data-testid="input"]',
     )?.textContent?.trim();
     expect(input()).toBe('100');
+    // A snapshot of the previous session must not supply the split after a session switch.
+    fixture.componentRef.setInput('stats', { ...emptyStats, sessionId: 'two', snapshot });
+    fixture.detectChanges();
+    expect(input()).toBe('—');
     fixture.componentRef.setInput('stats', emptyStats);
     fixture.detectChanges();
     expect(input()).toBe('—');

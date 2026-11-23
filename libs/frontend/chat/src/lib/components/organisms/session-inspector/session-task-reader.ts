@@ -488,7 +488,8 @@ export class SessionTaskReader {
         .filter(entry => entry?.kind === 'file' && typeof entry.name === 'string' &&
           isReadableTaskFolderMarkdownName(entry.name))
         .map(entry => entry.name);
-    } catch {
+    } catch (error: unknown) {
+      this.logger.error('SessionTaskReader', 'Could not list the task documents', error instanceof Error ? error : new Error(String(error)));
       return [];
     }
   }

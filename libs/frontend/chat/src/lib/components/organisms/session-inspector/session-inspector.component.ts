@@ -240,7 +240,8 @@ export class SessionInspectorComponent {
 
   /** Uncached input and output tokens of the session. */
   protected readonly sessionTokens = computed(() => {
-    const tokens = this.stats()?.snapshot?.tokens;
+    const snapshot = this.stats()?.snapshot;
+    const tokens = snapshot?.sessionId === this.sessionId() ? snapshot.tokens : undefined;
     return tokens
       ? {
           input: tokens.input,
