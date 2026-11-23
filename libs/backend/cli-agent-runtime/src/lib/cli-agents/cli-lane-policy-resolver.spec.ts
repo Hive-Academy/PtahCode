@@ -30,10 +30,37 @@ function refusalFrom(run: () => unknown): LaneSpawnPolicyError {
 }
 
 describe('CLI lane policy resolver', () => {
-  it('selects the most restrictive supported manifest pair', () => {
-    expect(builtInLanePolicy(manifest)).toMatchObject({ permission: 'plan', network: 'deny' });
+  it('selects the most capable supported manifest pair', () => {
+    expect(builtInLanePolicy(manifest)).toMatchObject({ permission: 'yolo', network: 'allow' });
     expect(resolveCliLanePolicy({ cli: 'codex', manifest, saved: {}, request: {} })).toMatchObject({
-      permission: 'plan', network: 'deny', permissionSource: 'built-in', networkSource: 'built-in',
+      permission: 'yolo', network: 'allow', permissionSource: 'built-in', networkSource: 'built-in',
+    });
+  });
+
+  it('falls back down the built-in order to a mode that supports an explicit network', () => {
+    expect(resolveCliLanePolicy({ cli: 'codex', manifest, saved: {}, request: { network: 'deny' } }))
+      .toMatchObject({ permission: 'auto-edit', network: 'deny',
+        permissionSource: 'built-in', networkSource: 'spawn' });
+  });
+
+  it('keeps a saved plan default over the built-in yolo default', () => {
+    expect(resolveCliLanePolicy({ cli: 'codex', manifest,
+      saved: { codex: { permission: 'plan', network: 'deny' } }, request: {} })).toMatchObject({
+      permission: 'plan', network: 'deny', permissionSource: 'saved', networkSource: 'saved',
+    });
+  });
+
+  it('keeps a stored legacy Codex sandbox mode over the built-in default', () => {
+    expect(resolveCliLanePolicy({ cli: 'codex', manifest, saved: {}, request: {},
+      legacyCodexMode: 'read-only' })).toMatchObject({
+      permission: 'plan', network: 'deny', permissionSource: 'saved', networkSource: 'saved',
+    });
+  });
+
+  it('caps a plan parent even when the built-in default would be yolo', () => {
+    expect(resolveCliLanePolicy({ cli: 'codex', manifest, saved: {}, request: {},
+      parentLevel: 'plan' })).toMatchObject({
+      permission: 'plan', network: 'deny', permissionSource: 'parent-plan', networkSource: 'parent-plan',
     });
   });
 
@@ -172,28 +199,33 @@ describe('CLI lane policy resolver', () => {
       expect(result).toMatchObject(snapshot);
     });
 
-    it('path 3: plain spawn with no permission defaults to plan (most restrictive)', () => {
+    it('path 3: plain spawn with no permission defaults to yolo with network allowed', () => {
       const result = resolveCliLanePolicy({ cli: 'codex', manifest,
         saved: {},
         request: {},
       });
       expect(result).toMatchObject({
-        permission: 'plan', network: 'deny', permissionSource: 'built-in', networkSource: 'built-in',
+        permission: 'yolo', network: 'allow', permissionSource: 'built-in', networkSource: 'built-in',
       });
     });
 
-    it('fails closed when adapter does not support plan', () => {
-      const noPlanManifest: CliAdapterManifest = { ...manifest,
-        permissionModes: {
-          'auto-edit': { ...supported, networkModes: ['allow', 'deny'] },
-          yolo: { ...supported, networkModes: ['allow'] },
-        },
+    it('defaults to plan when plan is the only supported mode', () => {
+      const planOnly: CliAdapterManifest = { ...manifest,
+        permissionModes: { plan: { ...supported, networkModes: ['deny'] } },
       };
-      const error = refusalFrom(() => resolveCliLanePolicy({ cli: 'codex', manifest: noPlanManifest,
+      expect(resolveCliLanePolicy({ cli: 'codex', manifest: planOnly, saved: {}, request: {} }))
+        .toMatchObject({ permission: 'plan', network: 'deny', permissionSource: 'built-in' });
+    });
+
+    it('fails closed when the adapter supports no permission mode', () => {
+      const noModeManifest: CliAdapterManifest = { ...manifest,
+        permissionModes: { yolo: { ...unsupported, networkModes: [] } },
+      };
+      const error = refusalFrom(() => resolveCliLanePolicy({ cli: 'pi', manifest: noModeManifest,
         saved: {},
         request: {} }));
-      expect(error.refusal).toMatchObject({ code: 'UNSUPPORTED_LANE_POLICY' });
-      expect(error.message).toContain('does not support plan');
+      expect(error.refusal).toMatchObject({ code: 'UNSUPPORTED_LANE_POLICY', field: 'permission' });
+      expect(error.message).toContain('supports no verified permission mode');
     });
   });
 });

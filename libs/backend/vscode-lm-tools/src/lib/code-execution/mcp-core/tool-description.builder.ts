@@ -911,13 +911,16 @@ export function buildAgentSpawnTool({
           type: 'string',
           enum: ['plan', 'ask', 'auto-edit', 'yolo'],
           description:
-            'Requested lane permission mode. Unsupported choices are refused before spawn.',
+            'Requested lane permission mode. Unsupported choices are refused before spawn. ' +
+            'Omitted: the saved per-CLI default, else the built-in default (yolo, or the ' +
+            'most capable mode the CLI supports). A plan-mode parent caps lanes to plan.',
         },
         network: {
           type: 'string',
           enum: ['allow', 'deny'],
           description:
-            'Requested network mode. Unsupported choices are refused before spawn.',
+            'Requested network mode. Unsupported choices are refused before spawn. ' +
+            'Omitted: the saved per-CLI default, else allow where the mode supports it.',
         },
         role: {
           type: 'string',
