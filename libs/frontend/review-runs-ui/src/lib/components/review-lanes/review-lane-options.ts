@@ -51,6 +51,7 @@ export const LANE_HINTS = {
 const REASONS = {
   laneMissing: 'Lane not listed. It may be uninstalled or disabled in global settings.',
   atLimit: 'At its usage limit.',
+  defaultModelBlocked: 'Lane default model blocked for review lanes.',
   modelBlocked: 'Model blocked for review lanes.',
   modelNotOffered: 'Model not offered by this lane.',
 } as const;
@@ -129,7 +130,8 @@ function isBlocked(listing: ReviewLaneListing | null, model: string | null): boo
 }
 
 /**
- * Model choices for one lane: "Lane default", the catalog without blocked models, and the saved
+ * Model choices for one lane: "Lane default" (marked blocked when the listing says the lane's own
+ * default model is blocked), the catalog without blocked models, and the saved
  * model when the catalog does not offer it. Only a verifiable catalog can call it "not offered".
  */
 export function modelOptions(
@@ -137,10 +139,12 @@ export function modelOptions(
   laneId: string | null,
   savedModel: string | null,
 ): PtahSelectOption<string>[] {
-  const options: PtahSelectOption<string>[] = [
-    { value: NO_CHOICE, label: 'Lane default', description: 'No model is sent' },
-  ];
   const lane = laneId === null ? null : findLane(listing, laneId);
+  const options: PtahSelectOption<string>[] = [
+    lane?.defaultModelBlocked === true
+      ? { value: NO_CHOICE, label: 'Lane default (blocked)', description: "This lane's default model is blocked for review lanes." }
+      : { value: NO_CHOICE, label: 'Lane default', description: 'No model is sent' },
+  ];
   if (lane && lane.catalog.status === 'read') {
     for (const model of lane.catalog.models) {
       if (!isBlocked(listing, model)) options.push({ value: model, label: model });
@@ -184,6 +188,7 @@ function unavailableReason(
 ): string | null {
   if (!lane) return REASONS.laneMissing;
   if (lane.limitState === 'at-limit') return REASONS.atLimit;
+  if (entry.model === null && lane.defaultModelBlocked === true) return REASONS.defaultModelBlocked;
   if (isBlocked(listing, entry.model)) return REASONS.modelBlocked;
   const catalog = lane.catalog;
   if (entry.model !== null && catalog.verifiable && !catalog.truncated && !catalog.models.includes(entry.model)) {
@@ -194,7 +199,7 @@ function unavailableReason(
 
 /**
  * Status of one saved entry against the listing, in the order selection checks it: lane not listed,
- * at limit, model blocked (also when the catalog is unreadable), model not offered (verifiable
+ * at limit, lane default model blocked, model blocked (also when the catalog is unreadable), model not offered (verifiable
  * catalogs only). Without a usable listing the state is unknown and nothing is marked unavailable.
  */
 export function entryState(
