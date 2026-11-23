@@ -50,7 +50,8 @@ export const ParentEnvelopeRecordSchema = z.object({
   deliveredAt: timestamp.optional(),
   cancelledAt: timestamp.optional(),
   waitingReason: z.literal('parent-offline').optional(),
-}).strict();
+  // Strip, never reject: a record that a newer build wrote with an extra field must still restore.
+}).strip();
 export type ParentEnvelopeRecord = z.infer<typeof ParentEnvelopeRecordSchema>;
 
 export const ParentEnvelopeIndexSchema = z.object({

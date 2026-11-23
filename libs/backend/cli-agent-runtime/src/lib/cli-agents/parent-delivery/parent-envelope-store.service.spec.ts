@@ -139,6 +139,17 @@ describe('ParentEnvelopeStoreService persistence', () => {
     expect(restarted.findById(entry.id)).toMatchObject({ state: 'outcome-unknown', lastError: 'host-restarted' });
   });
 
+  it('restores a record that carries an unknown extra field', async () => {
+    const storage = new FakeStateStorage();
+    const store = await open(storage);
+    const entry = saved(await store.enqueue(report(1)));
+    const index = storage.values.get(PARENT_ENVELOPE_INDEX_KEY) as { records: Record<string, unknown>[] };
+    for (const record of index.records) record['futureField'] = 'from-a-newer-build';
+    const restarted = await open(storage);
+    expect(restarted.findById(entry.id)).toMatchObject({ id: entry.id, state: 'pending' });
+    expect(restarted.findById(entry.id)).not.toHaveProperty('futureField');
+  });
+
   it('ignores a dispatch mark for a stale claim or a row that is not sending', async () => {
     const store = await open(new FakeStateStorage());
     const entry = saved(await store.enqueue(report(1)));
