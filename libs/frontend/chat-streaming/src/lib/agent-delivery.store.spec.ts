@@ -171,6 +171,49 @@ describe('AgentDeliveryStore', () => {
     expect(store.takeRecovered(resumed)).toBeNull();
   });
 
+  describe('turn snapshot', () => {
+    const turn = { model: 'gpt-5.5', reasoningEffort: 'high', files: ['src/app.ts'] };
+
+    it('recoverQueuedText still resolves the text alone', async () => {
+      rpc.call.mockResolvedValueOnce(rpcSuccess({ text: 'queued body', turn }));
+      await expect(store.recoverQueuedText(lane, 'message-1')).resolves.toBe('queued body');
+    });
+
+    it('recoverQueuedMessage resolves the text and its turn', async () => {
+      rpc.call.mockResolvedValueOnce(rpcSuccess({ text: 'queued body', turn }));
+      await expect(store.recoverQueuedMessage(lane, 'message-1')).resolves.toEqual({ text: 'queued body', turn });
+      expect(rpc.call).toHaveBeenCalledWith('agent:getQueuedMessageBody', { agentId: lane, messageId: 'message-1' });
+    });
+
+    it('recoverQueuedMessage omits turn for a text-only message and rejects a missing body', async () => {
+      rpc.call.mockResolvedValueOnce(rpcSuccess({ text: 'plain' }));
+      const plain = await store.recoverQueuedMessage(lane, 'message-1');
+      expect(plain).toEqual({ text: 'plain' });
+      expect('turn' in plain).toBe(false);
+      rpc.call.mockResolvedValueOnce(rpcError('gone'));
+      await expect(store.recoverQueuedMessage(lane, 'message-1')).rejects.toThrow('gone');
+    });
+
+    it('sends the turn with the message only when one is given', async () => {
+      rpc.call.mockResolvedValue(rpcSuccess({ mode: 'queue-next-turn', receipt: receipt() }));
+      await store.sendMessage(lane, 'hello', 'now', true, 'key-1', turn);
+      expect(rpc.call).toHaveBeenLastCalledWith('agent:sendMessage', {
+        agentId: lane, message: 'hello', delivery: 'now', allowPartialTurnLoss: true, idempotencyKey: 'key-1', turn,
+      });
+      await store.sendMessage(lane, 'hello', 'queue', undefined, 'key-2');
+      expect('turn' in (rpc.call.mock.calls[1][1] as object)).toBe(false);
+    });
+
+    it.each([
+      ['turn-options-refused', 'Not delivered: lane refused the model or effort · 5m'],
+      ['turn-input-unsupported', 'Not delivered: lane cannot take this attachment or command · 5m'],
+      ['attachments-unavailable', 'Not delivered: attachments no longer held · 5m'],
+      ['attachments-capacity', 'Not delivered: attachment storage full · 5m'],
+    ])('labels the %s reason', (reason, text) => {
+      expect(store.receiptStatus(receipt({ state: 'failed', reason })).text).toBe(text);
+    });
+  });
+
   describe('actions', () => {
     it('cancels and retries through the RPCs', async () => {
       rpc.call.mockResolvedValueOnce(rpcSuccess(receipt({ state: 'cancelled', reason: 'cancelled-by-user', updatedAt: NOW })));

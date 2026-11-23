@@ -72,6 +72,15 @@ export {
   type LaneMessageDirection,
   type ParentDeliveryItem,
 } from './lib/agent-delivery.store';
+export {
+  LaneTurnSettingsStore,
+  LANE_OPTIONS_CHECKING_TEXT,
+  LANE_OPTIONS_ERROR_TEXT,
+  LANE_OPTIONS_UNREPORTED_TEXT,
+  type LaneCatalogStatus,
+  type LaneComposerCatalog,
+  type LaneTurnInputState,
+} from './lib/lane-turn-settings.store';
 export { agentVisibleInSession, knownSessionId } from './lib/session-scope';
 /**
  * Retention markers. Exported so the agent card's stdout/segment renderers can

@@ -19,6 +19,7 @@ import type {
   AgentMessageOutcome,
   AgentMessagePreview,
   AgentMonitorParentDeliveryPayload,
+  LaneTurnRequest,
   ParentDeliveryState,
   ParentDeliveryView,
 } from '@ptah-extension/shared';
@@ -147,6 +148,10 @@ const REASON_TEXT: Readonly<Partial<Record<string, string>>> = {
   'body-too-large': 'message too large',
   'storage-unavailable': 'storage unavailable',
   'dispatch-interrupted': 'sending was interrupted',
+  'turn-options-refused': 'lane refused the model or effort',
+  'turn-input-unsupported': 'lane cannot take this attachment or command',
+  'attachments-unavailable': 'attachments no longer held',
+  'attachments-capacity': 'attachment storage full',
 };
 
 const CANCEL: DeliveryAction = { kind: 'cancel', label: 'Cancel', confirmDuplicateRisk: false };
@@ -513,9 +518,11 @@ export class AgentDeliveryStore {
     delivery: AgentMessageDelivery = 'queue',
     allowPartialTurnLoss?: boolean,
     idempotencyKey: string = this.newIdempotencyKey(),
+    turn?: LaneTurnRequest,
   ): Promise<AgentMessageOutcome> {
     const result = await this.rpc.call('agent:sendMessage', {
       agentId: AgentId.from(agentId), message: text, delivery, allowPartialTurnLoss, idempotencyKey,
+      ...(turn ? { turn } : {}),
     });
     if (!result.isSuccess()) throw new Error(result.error ?? 'Message send failed');
     if (result.data.receipt) this.onMessageReceipt(result.data.receipt);
@@ -540,9 +547,21 @@ export class AgentDeliveryStore {
 
   /** Read an undelivered message's text back from the backend body store. */
   async recoverQueuedText(agentId: string, messageId: string): Promise<string> {
+    return (await this.recoverQueuedMessage(agentId, messageId)).text;
+  }
+
+  /**
+   * Read an undelivered message back with its turn snapshot (model, effort and
+   * the attachments the host still holds). `turn` is absent for a text-only message.
+   */
+  async recoverQueuedMessage(
+    agentId: string,
+    messageId: string,
+  ): Promise<{ readonly text: string; readonly turn?: LaneTurnRequest }> {
     const result = await this.rpc.call('agent:getQueuedMessageBody', { agentId: AgentId.from(agentId), messageId });
     if (!result.isSuccess()) throw new Error(result.error ?? 'Message text is no longer available');
-    return result.data.text;
+    const { text, turn } = result.data;
+    return turn ? { text, turn } : { text };
   }
 
   /**
