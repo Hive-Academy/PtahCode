@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_2309_bigdf
-status: in_progress
+status: in_review
 type: BUGFIX
 title: Fall back to per-file patches when a PR diff exceeds 20k lines (closes #1457)
 depends_on: []
