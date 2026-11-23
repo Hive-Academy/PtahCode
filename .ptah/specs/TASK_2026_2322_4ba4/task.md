@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_2322_4ba4
-status: in_progress
+status: in_review
 type: REFACTORING
 title: Remove Antigravity stream-json transport, keep ACP only
 description: >-

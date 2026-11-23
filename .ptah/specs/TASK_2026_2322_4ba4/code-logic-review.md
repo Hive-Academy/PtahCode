@@ -115,3 +115,19 @@ Implicit requirements not addressed: a re-probe after an upgrade (S1), and the c
 - Confidence: MEDIUM (same-family review, no execution)
 - Top risk: a stale cached below-floor verdict blocks lanes after the user upgrades agy.
 - What a robust implementation would add: do not cache `false` (or add a TTL) and test it; one spec for a secret field next to a status code in the stderr redaction; downgrade the unreadable-version warn on `detect()` to debug after the first occurrence.
+
+## Re-review of 3b5304792
+
+Scope: the four fixes only. Same-family review; no builds or tests run.
+
+| Fix | Result | Evidence |
+| --- | --- | --- |
+| S1: cache only a pass | OK | `antigravity-cli.adapter.ts` `probeAcp`: `acpFloorPassed` Set, checked first; `.then` adds only on `meetsFloor === true`. `false` and `undefined` re-probe. The in-flight map is kept and cleared in `.finally`. `detect()` passes the fresh `knownVersion`, so a `false` verdict no longer hides the new version. The upgrade case is covered by the new specs. Residual: a cached `true` is never invalidated (a downgrade is out of scope). |
+| M1: classify the original line, emit only redacted text | OK | `lane-stderr-redaction.ts` `laneStderrLine` returns `{severity: classifyCliStderr(line), text: redactLaneStderr(...)}`. The lane handle `diagnostic` branch (`provider-session-lane-handle.ts:137-142`) emits only `text` to `output` and `segment` and returns before `projectToCliSegments` and the flat projector, so the raw line goes nowhere else. The only other `diagnostic` emitter is `acp-session-runtime.ts:662`, which feeds this handle. The classifier is word-based (`cli-stderr-severity.ts:4-5`), so the severity can only differ from before when redaction had masked an error word. That is the intended fix. Grok severity is unchanged otherwise. |
+| M2: warn once per binary | OK | `unreadableVersionWarned` Set; later reads log at `debug`. Behaviour is unchanged. |
+| M3: conpty filter only in agy `runAcp` | OK | `withAgyConptyNoiseFilter` is referenced only from `antigravity-cli.adapter.ts` `runAcp`. The state `suppressed` is per spawn, since the factory runs per generation. A missing `onStderrLine` passes through. Without a spawner or a seam factory the transport stays `undefined`, so the lane handle's "no spawner" error is preserved (`provider-session-lane-handle.ts:102`). Grok is untouched. |
+
+New findings: none Blocking or Serious.
+- Minor: the filter wraps the default `spawnAcpProcess` explicitly, a copy of the default in `acp-session-runtime.ts:649`. If that default changes, this copy must change with it. Acceptable.
+
+Verdict: APPROVED. S1, M1, M2 and M3 are resolved.
