@@ -97,7 +97,9 @@ const MAX_NAME_LOOKUP_WORK = 100_000_000;
 
 /**
  * Most characters the qualified names may take, estimated as the longest name
- * times the number of declarations (each qualified name holds its outer names).
+ * plus the most characters of class names that cover one line, times the
+ * number of declarations (an upper bound: each name holds only the classes
+ * around it).
  */
 const MAX_NAME_LOOKUP_CHARS = 20_000_000;
 
@@ -117,6 +119,35 @@ function readerOutline(result: AstCodeInsights): AstCodeInsights {
   };
 }
 
+/**
+ * Most characters in the names of the classes that cover one line, each name
+ * with its `.` separator. A class around a declaration covers the line where
+ * the declaration starts, so this bounds the outer part of every qualified
+ * name, whatever way the line ranges overlap. A sweep over the range starts
+ * and ends gives it in O(n log n).
+ */
+function mostCoveredNameChars(classes: AstCodeInsights['classes']): number {
+  const changes = new Map<number, number>();
+  for (const info of classes) {
+    if (
+      typeof info.startLine !== 'number' ||
+      typeof info.endLine !== 'number'
+    ) {
+      continue;
+    }
+    const chars = info.name.length + 1;
+    changes.set(info.startLine, (changes.get(info.startLine) ?? 0) + chars);
+    changes.set(info.endLine + 1, (changes.get(info.endLine + 1) ?? 0) - chars);
+  }
+  let covered = 0;
+  let most = 0;
+  for (const line of [...changes.keys()].sort((a, b) => a - b)) {
+    covered += changes.get(line) ?? 0;
+    most = Math.max(most, covered);
+  }
+  return most;
+}
+
 /** Whether the lookup would be too slow or too large for `result`. */
 function isLookupTooLarge(result: AstCodeInsights): boolean {
   const { classes, functions } = result;
@@ -133,9 +164,13 @@ function isLookupTooLarge(result: AstCodeInsights): boolean {
     longest = Math.max(longest, info.name.length);
   }
   const declarations = classes.length + functions.length + methods;
+  if (classes.length * declarations > MAX_NAME_LOOKUP_WORK) {
+    return true;
+  }
+  // A qualified name is its own name plus the names of the classes around it.
   return (
-    classes.length * declarations > MAX_NAME_LOOKUP_WORK ||
-    longest * declarations > MAX_NAME_LOOKUP_CHARS
+    (longest + mostCoveredNameChars(classes)) * declarations >
+    MAX_NAME_LOOKUP_CHARS
   );
 }
 

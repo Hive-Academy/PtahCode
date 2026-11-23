@@ -644,6 +644,74 @@ describe('ptah_ast_analyze result text (real parser)', () => {
       expect(note.omittedNames).toBe('run,helper');
     });
 
+    it('counts the names of the classes around a method, not only the longest name', () => {
+      const methods = Array.from({ length: 12_000 }, (_, i) => ({
+        name: `m${i}`,
+        parameters: [],
+        startLine: 100 + i,
+        endLine: 100 + i,
+      }));
+      const name = (i: number): string => `${'N'.repeat(400)}${i}`;
+      const nested = Array.from({ length: 20 }, (_, i) => ({
+        name: name(i),
+        startLine: i,
+        endLine: 50_000 - i,
+        ...(i === 19 ? { methods } : {}),
+      }));
+      // The same classes side by side: no class holds another one.
+      const flat = nested.map((info, i) => ({
+        ...info,
+        startLine: i * 20_000,
+        endLine: i * 20_000 + 19_999,
+        // The methods lie inside their own class, the last of the row.
+        methods:
+          i === 19
+            ? methods.map((method) => ({
+                ...method,
+                startLine: 380_100 + method.startLine,
+                endLine: 380_100 + method.endLine,
+              }))
+            : undefined,
+      }));
+      const lookup = (classes: unknown[]) =>
+        readerNameLookup({
+          classes,
+          functions: [],
+        } as unknown as Parameters<typeof readerNameLookup>[0]);
+
+      // 20 nested names of 400 characters in each of 12,000 qualified names
+      // is about 96 million characters: no name. Side by side, each name
+      // holds one class name and the lookup runs.
+      expect(lookup(nested)(nested[19])).toBeUndefined();
+      expect(lookup(nested)(methods[0])).toBeUndefined();
+      expect(lookup(flat)(flat[0])).toBe(name(0));
+      expect(lookup(flat)(flat[19].methods?.[5])).toBe(`${name(19)}.m5`);
+      expect(lookup(flat)(flat[19].methods?.[11_999])).toBe(
+        `${name(19)}.m11999`,
+      );
+      // Two classes that overlap on one line count together (`A`, `B`).
+      const overlap = [
+        { name: 'A'.repeat(50_000), startLine: 0, endLine: 1 },
+        {
+          name: 'B'.repeat(50_000),
+          startLine: 1,
+          endLine: 2,
+          methods: Array.from({ length: 150 }, (_, i) => ({
+            name: `f${i}`,
+            parameters: [],
+            startLine: 1,
+            endLine: 1,
+          })),
+        },
+      ];
+      // One class alone is about 15 million characters (allowed); both count
+      // at the shared line, about 23 million.
+      expect(lookup(overlap)(overlap[1].methods?.[0])).toBeUndefined();
+      expect(
+        lookup([overlap[0], { ...overlap[1], startLine: 2 }])(overlap[0]),
+      ).toBe(overlap[0].name);
+    });
+
     it('lists no names, and keeps the counts, when the lookup would be too slow', () => {
       const classes = Array.from({ length: 11_000 }, (_, i) => ({
         name: `C${i}`,

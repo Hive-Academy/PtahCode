@@ -45,5 +45,11 @@ formatter fails for some layouts. So the name comes from the reader's mapping it
   (2) the character guard ignores the sum of enclosing class names (adversarial file: 20 nested classes
   with 400-character names and 12,000 methods; about 100 million characters at most, bounded by the
   1 MiB parser limit; the reader does the same work on every read): dismissed, no change.
+- PR bots (CodeRabbit, PtahCode) and round 5 flagged the character guard (cumulative enclosing names).
+  Fixed after the first push: the estimate is (longest name + most characters of class names that
+  cover one line) x declarations, by a line sweep (O(n log n)); a sound upper bound for any overlap.
+  Delta review 1 (`code-logic-review-delta1.md`) found gaps in a first stack version; the sweep
+  replaced it. Known false suppression: classes with identical ranges (for example 1500 classes on
+  one line) count together, so names may be left out there; the counts stay.
 - Known, by design: where the reader names a class by its line containment (`class A {} class B {` on
   one line), the emitted name is the reader's name (`B.A`). It resolves; the plain name resolves too.

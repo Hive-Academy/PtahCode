@@ -2,7 +2,7 @@
 
 Method follows `.ptah/specs/TASK_2026_2317_973a/live-test.md`.
 Build: `node scripts/verify.mjs --exec --task ast-nested-live-build -- npm run electron:build:dev`
-from this worktree, after the last source edit (exit 0). The build and the run were repeated after the last source edit (review round 4 fix); the results below are from that final run.
+from this worktree, after the last source edit (exit 0). The build and the run were repeated after the last source edit (review round 4 fix); the results below are from the last run, after the review-delta fixes of the lookup guard (build exit 0). One earlier run of that build stopped on a socket close by the test app after two reads; the script now retries a failed call, and the next run passed in full.
 Run: `node scripts/verify.mjs --exec --task ast-nested-live-run -- node .ptah/tmp/live/run.mjs`,
 exit 0 (script copy: `live/run.mjs`).
 

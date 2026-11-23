@@ -88,12 +88,22 @@ for (let attempt = 0; attempt < 40 && !base_url; attempt++) {
 }
 if (!base_url) { console.log('NO TOKEN URL'); stop(); process.exit(3); }
 const call = async (name, args, id) => {
-  const res = await fetch(base_url, {
-    method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: args } }),
-  });
-  const body = await res.json();
-  return body.result?.content?.map((c) => c.text).join('\n') ?? JSON.stringify(body);
+  let last;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch(base_url, {
+        method: 'POST', headers: { 'content-type': 'application/json', connection: 'close' },
+        body: JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name, arguments: args } }),
+      });
+      const body = await res.json();
+      return body.result?.content?.map((c) => c.text).join('\n') ?? JSON.stringify(body);
+    } catch (error) {
+      last = error;
+      console.log(`call ${name} attempt ${attempt + 1} failed: ${error.cause?.message ?? error.message}`);
+      await sleep(1500);
+    }
+  }
+  throw last;
 };
 
 const file = `${ws}/src/nested.ts`;
