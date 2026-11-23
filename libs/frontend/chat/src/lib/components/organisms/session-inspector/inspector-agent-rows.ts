@@ -17,7 +17,7 @@ import {
   type UsageTotal,
 } from '@ptah-extension/chat-ui';
 import { ModelStateService, injectWallClock } from '@ptah-extension/core';
-import { resolveModelDisplayName } from '@ptah-extension/shared';
+import { resolveModelDisplayName, type SessionStatsEntry } from '@ptah-extension/shared';
 import { SessionAgentRosterService } from '../../../services/session-agents/session-agent-roster.service';
 import { SessionAgentTrayService } from '../../../services/session-agents/session-agent-tray.service';
 import { SessionInspectorStore } from '../../../services/session-inspector';
@@ -28,6 +28,7 @@ import { agentKindLine, agentListRow, orderAgentList, type AgentListRow } from '
 import { laneUsage } from './inspector-agent-usage';
 
 export interface InspectorAgentRows {
+  readonly snapshot: Signal<SessionStatsEntry | null>;
   readonly rows: Signal<readonly AgentListRow[] | null>;
   readonly contributions: Signal<readonly UsageContribution[]>;
   readonly totals: Signal<Readonly<Record<UsageMetric, UsageTotal>>>;
@@ -40,6 +41,7 @@ export interface InspectorAgentRows {
 }
 
 function addGap(amount: UsageAmount, cause: string): UsageAmount {
+  if (amount.lowerBound) return amount;
   return { ...amount, lowerBound: true, causes: [...amount.causes, cause] };
 }
 
@@ -105,14 +107,12 @@ export function injectInspectorAgentRows(
     source: () => ({
       sessionId: sessionId(),
       active: activeCli(),
-      all: sessionId() ? monitor.agents() : [],
     }),
-    computation: ({ sessionId, active, all }, previous): ReadonlyMap<string, UsageContribution> => {
+    computation: ({ sessionId, active }, previous): ReadonlyMap<string, UsageContribution> => {
       const next = new Map<string, UsageContribution>();
       if (previous && previous.source.sessionId === sessionId) {
-        const present = new Set(all.map((lane) => lane.agentId));
         for (const [id, usage] of previous.value) {
-          if (!present.has(id)) next.set(id, usage);
+          if (!active.has(id)) next.set(id, usage);
         }
       }
       for (const [id, { contribution }] of active) next.set(id, contribution);
@@ -223,13 +223,7 @@ export function injectInspectorAgentRows(
       });
     });
   });
-  const orchestratorUsage = computed(() => {
-    const usage = subtractSdkLanes(snapshot(), lanes() ?? []);
-    return {
-      tokens: { ...usage.tokens, estimated: true, lowerBound: false },
-      cost: { ...usage.cost, estimated: true, lowerBound: false },
-    };
-  });
+  const orchestratorUsage = computed(() => subtractSdkLanes(snapshot(), lanes() ?? []));
   const rows = computed(() => {
     const laneRows = lanes();
     if (laneRows === null) return null;
@@ -266,5 +260,5 @@ export function injectInspectorAgentRows(
       hasActions: false,
     }), laneRows);
   });
-  return { rows, contributions, totals, orchestratorUsage, captionCounts, cliCoverage };
+  return { snapshot, rows, contributions, totals, orchestratorUsage, captionCounts, cliCoverage };
 }

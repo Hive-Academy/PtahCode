@@ -113,6 +113,18 @@ describe('inspector agent rows', () => {
     expect(totals().cost).toMatchObject({ value: 0.1, state: 'exact' });
   });
 
+  it('keeps exact and partial SDK marks on the Orchestrator when there are no subagents', () => {
+    const { sdk, rows, orchestratorUsage } = setup();
+    expect(rows()?.[0]).toMatchObject({ tokens: '100', cost: '$0.10' });
+    sdk.set({ ...SDK, coverage: 'partial', tokenCount: 50_000 });
+    expect(rows()?.[0]).toMatchObject({ tokens: '≥50.0k', cost: '≥$0.10' });
+    expect(orchestratorUsage().tokens).toMatchObject({
+      estimated: false,
+      lowerBound: true,
+      causes: ['Some SDK usage could not be counted'],
+    });
+  });
+
   it('leaves a restored lane with an ordinary split and reported cost exact', () => {
     const { cli, totals, rows, cliCoverage } = setup();
     cli.set([{
@@ -132,14 +144,15 @@ describe('inspector agent rows', () => {
   });
 
   it.each([
-    ['tokens', { costUsd: 0.2 }, 'cost'],
-    ['cost', { inputTokens: 30, outputTokens: 20 }, 'tokens'],
-  ] as const)('clears the %s gap as soon as the restored lane reports usable data', (metric, usageTotals, other) => {
-    const { cli, totals, cliCoverage } = setup();
+    ['tokens', { costUsd: 0.2 }, 'cost', 'copilot reported no tokens'],
+    ['cost', { inputTokens: 30, outputTokens: 20 }, 'tokens', 'copilot reported incomplete cost'],
+  ] as const)('reports one restored lane %s gap cause and clears it when usage arrives', (metric, usageTotals, other, cause) => {
+    const { cli, totals, cliCoverage, contributions } = setup();
     cli.set([{ ...CLI, restored: true, usageTotals }]);
     expect(totals()[metric].state).toBe('lower-bound');
     expect(totals()[other].state).toBe('exact');
-    expect(cliCoverage()[metric].causes.join()).toContain('restored lane is missing');
+    expect(cliCoverage()[metric].causes).toEqual([cause]);
+    expect(contributions().find(({ source }) => source === 'cli')?.[metric].causes).toEqual([cause]);
     expect(cliCoverage()[other].complete).toBe(true);
 
     cli.set([{ ...CLI, restored: true }]);
@@ -208,13 +221,25 @@ describe('inspector agent rows', () => {
     expect(cliCoverage().cost.causes.join()).toContain('removed lane has no retained cost');
   });
 
-  it('drops a lane still present under a different parent', () => {
+  it('retains exact usage for a lane still present under a different parent', () => {
     const { cli, totals, contributions } = setup();
     cli.set([CLI]);
     expect(totals().tokens.value).toBe(150);
     cli.set([{ ...CLI, parentSessionId: 'other' }]);
-    expect(totals().tokens).toMatchObject({ value: 100, state: 'exact' });
-    expect(contributions()).toHaveLength(1);
+    expect(totals().tokens).toMatchObject({ value: 150, state: 'exact' });
+    expect(contributions()).toHaveLength(2);
+  });
+
+  it('marks missing retained metrics after a lane loses its session owner', () => {
+    const { cli, totals, cliCoverage } = setup();
+    const lane = { ...CLI, usageTotals: { inputTokens: 30, outputTokens: 20 } };
+    cli.set([lane]);
+    expect(totals().tokens.value).toBe(150);
+    cli.set([{ ...lane, parentSessionId: undefined }]);
+
+    expect(totals().tokens).toMatchObject({ value: 150, state: 'exact' });
+    expect(totals().cost).toMatchObject({ value: 0.1, state: 'lower-bound' });
+    expect(cliCoverage().cost.causes).toContain('copilot: removed lane has no retained cost');
   });
 
   it('resets retention across a session change and a same-session remount', () => {

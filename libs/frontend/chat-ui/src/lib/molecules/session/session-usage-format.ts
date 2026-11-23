@@ -22,6 +22,13 @@ function stateOf(figure: UsageFigure): UsageState {
   return 'state' in figure ? figure.state : usageState(figure);
 }
 
+function visibleMarker(figure: UsageFigure): string {
+  const state = stateOf(figure);
+  return state === 'both' && 'preferLowerBoundMarker' in figure && figure.preferLowerBoundMarker === true
+    ? MARKERS['lower-bound']
+    : MARKERS[state];
+}
+
 /** Truncate the reported decimal digits without a binary floating-point multiplication. */
 function floorDecimal(value: number, decimals: number, scale = 0): string {
   const [mantissa, exponent = '0'] = String(value).split('e');
@@ -38,7 +45,7 @@ export function formatUsageTokens(figure: UsageFigure): string {
   const { value } = figure;
   if (value === null) return '—';
 
-  const mark = MARKERS[stateOf(figure)];
+  const mark = visibleMarker(figure);
   if (value >= 1e9) return `${mark}${floorDecimal(value, 1, 9)}B`;
   if (value >= 1e6) return `${mark}${floorDecimal(value, 1, 6)}M`;
   if (value >= 1e3) return `${mark}${floorDecimal(value, 1, 3)}k`;
@@ -50,14 +57,17 @@ export function formatUsageCost(figure: UsageFigure): string {
   if (value === null) return '—';
 
   const decimals = value >= 10 ? 0 : value > 0 && value < 0.01 ? 3 : 2;
-  return `${MARKERS[stateOf(figure)]}$${floorDecimal(value, decimals)}`;
+  return `${visibleMarker(figure)}$${floorDecimal(value, decimals)}`;
 }
 
 /** Shared text for the usage tooltip and accessible name. */
 export function usageDetailsText(figure: UsageFigure, metric: UsageMetric, scope: string): string {
-  const value = figure.value?.toLocaleString('en-US', { maximumSignificantDigits: 21 });
-  const spoken = value === undefined
-    ? `${metric === 'cost' ? 'Cost' : 'Tokens'} unavailable`
-    : `${SPOKEN_MARKERS[stateOf(figure)]}${metric === 'cost' ? `$${value}` : `${value} tokens`}`;
+  let spoken = `${metric === 'cost' ? 'Cost' : 'Tokens'} unavailable`;
+  if (figure.value !== null) {
+    const value = figure.value.toLocaleString('en-US', { maximumSignificantDigits: 21 });
+    const [whole, fraction = ''] = value.split('.');
+    const reported = metric === 'cost' ? `$${whole}.${fraction.padEnd(2, '0')}` : `${value} tokens`;
+    spoken = `${SPOKEN_MARKERS[stateOf(figure)]}${reported}`;
+  }
   return [`${scope}: ${spoken}`, ...figure.causes].join('. ');
 }

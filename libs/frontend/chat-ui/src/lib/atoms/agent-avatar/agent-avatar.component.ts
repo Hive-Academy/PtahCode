@@ -51,7 +51,7 @@ const SIZE_CLASSES: Readonly<Record<AgentAvatarSize, SizeClasses>> = {
     tile: 'h-6 w-6',
     glyph: 'h-3.5 w-3.5',
     monogram: 'text-[11px]',
-    badge: 'h-[11px] w-[11px]',
+    badge: 'h-[0.6875rem] w-[0.6875rem]',
     badgeGlyph: 'h-[7px] w-[7px]',
   },
   28: {
@@ -66,7 +66,7 @@ const SIZE_CLASSES: Readonly<Record<AgentAvatarSize, SizeClasses>> = {
     glyph: 'h-[18px] w-[18px]',
     monogram: 'text-sm',
     badge: 'h-[15px] w-[15px]',
-    badgeGlyph: 'h-[11px] w-[11px]',
+    badgeGlyph: 'h-[0.6875rem] w-[0.6875rem]',
   },
 };
 

@@ -262,6 +262,7 @@ function statusTiles(
         label: 'Usage',
         ...caption,
         value: reason ?? 'No usage source',
+        unavailableReason: reason ?? 'No usage source',
         resetLine: 'plan usage is not reported',
         tone: 'neutral',
         sourceChips: [],
@@ -289,8 +290,6 @@ function statusTiles(
         `Plan usage could not be read: ${cause}.`,
       ]),
       ...caption,
-      ...((snapshot.status !== 'unsupported-auth' && snapshot.status !== 'unsupported-config'
-        && snapshot.status !== 'provider-unsupported') && { usageUnavailable: true }),
     },
   ];
 }
@@ -322,7 +321,7 @@ export function planUnavailableCause(snapshot: PlanLimitOwnerSnapshot): string {
 function unavailableTile(
   id: string,
   label: string,
-  resetLine: string,
+  reason: string,
   detailLines: readonly string[],
 ): PlanLimitTileModel {
   return {
@@ -332,10 +331,11 @@ function unavailableTile(
     captionLead: '',
     caption: '',
     value: 'Unavailable',
+    unavailableReason: reason,
     resetLine: '',
     tone: 'neutral',
     sourceChips: [],
-    detailLines: [resetLine, ...detailLines],
+    detailLines: [reason, ...detailLines],
   };
 }
 

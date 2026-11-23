@@ -205,7 +205,7 @@ describe('PtahRingComponent inputs', () => {
 });
 
 it.each([
-  ['dot', 'h-[11px]', 'w-[11px]'],
+  ['dot', 'h-[0.6875rem]', 'w-[0.6875rem]'],
   ['inline', 'h-5', 'w-5'],
 ])('renders the %s footprint with compact geometry and no visible center text', (size, height, width) => {
   const el = render({ value: 50, size, centerText: 'Half', subText: 'used' });

@@ -3,7 +3,7 @@ import { CHART_BG, CHART_TEXT, isValidRange, percentOf, resolveInk } from './cha
 import { PtahChartSize, PtahMeterRole, PtahMeterSegment, PtahMeterTone } from './chart.types';
 
 const TRACK_H: Readonly<Record<PtahChartSize, string>> = { xs: 'h-1', sm: 'h-1.5', md: 'h-2' };
-const TRACK_OVERRIDE = { '2px': 'h-[2px]', '3px': 'h-[3px]' } as const;
+const TRACK_OVERRIDE = { hairline: 'h-0.5', thin: 'h-[0.1875rem]' } as const;
 const FILL_TRANSITION = 'transition-[width] motion-reduce:transition-none';
 const TEXT: Readonly<Record<PtahChartSize, string>> = { xs: 'text-xs', sm: 'text-xs', md: 'text-sm' };
 
@@ -101,7 +101,7 @@ export class PtahMeterComponent {
   /** Known parts of the subtotal. Null keeps the single fill. */
   readonly segments = input<readonly PtahMeterSegment[] | null>(null);
   readonly unreported = input<'none' | 'partial' | 'missing'>('none');
-  readonly track = input<'2px' | '3px' | undefined>(undefined);
+  readonly track = input<'hairline' | 'thin' | undefined>(undefined);
 
   protected readonly unreportedImage = STRIPES;
   protected readonly missing = computed(() => this.unreported() === 'missing');

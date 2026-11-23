@@ -1,6 +1,6 @@
 import type { SessionStatsEntry } from '@ptah-extension/shared';
 import { orchestratorModel, orchestratorUsage } from './orchestrator-usage';
-import { formatUsageCost, formatUsageTokens } from './session-usage-format';
+import { formatUsageCost, formatUsageTokens, usageDetailsText } from './session-usage-format';
 
 const snapshot: SessionStatsEntry = {
   sessionId: 'session',
@@ -31,15 +31,24 @@ describe('Orchestrator usage', () => {
     const partial = orchestratorUsage({ ...snapshot, coverage: 'partial' }, []);
     expect(formatUsageTokens(partial.tokens)).toBe('≥1.0k');
     expect(formatUsageCost(partial.cost)).toBe('≥$1.00');
+
+    const partialEstimate = orchestratorUsage({ ...snapshot, coverage: 'partial', provisional: true }, []);
+    expect(formatUsageTokens(partialEstimate.tokens)).toBe('≥1.0k');
+    expect(usageDetailsText(partialEstimate.tokens, 'tokens', 'Orchestrator'))
+      .toContain('at least about 1,000 tokens');
   });
 
-  it('subtracts two SDK lanes and shows estimates even with mismatched snapshot metadata', () => {
+  it('preserves the SDK lower bound and its cause after subtracting two SDK lanes', () => {
     const usage = orchestratorUsage(
       { ...snapshot, agentSessionCount: 4, coverage: 'partial' },
       [sub, bg, { key: 'cli:one', usage: { tokens: 150, cost: 0.125 } }],
     );
-    expect(formatUsageTokens(usage.tokens)).toBe('~600');
-    expect(formatUsageCost(usage.cost)).toBe('~$0.50');
+    expect(formatUsageTokens(usage.tokens)).toBe('≥600');
+    expect(formatUsageCost(usage.cost)).toBe('≥$0.50');
+    expect(usageDetailsText(usage.tokens, 'tokens', 'Orchestrator'))
+      .toBe('Orchestrator: at least about 600 tokens. Some SDK usage could not be counted');
+    expect(usageDetailsText(usage.cost, 'cost', 'Orchestrator'))
+      .toBe('Orchestrator: at least about $0.50. Some SDK usage could not be counted');
   });
 
   it('deduplicates subagent and background aliases and uses reported usage from either', () => {

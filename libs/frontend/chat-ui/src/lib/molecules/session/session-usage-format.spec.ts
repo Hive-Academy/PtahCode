@@ -41,4 +41,14 @@ describe('session usage formatting', () => {
     expect(usageDetailsText(figure(0, 'lower-bound'), 'tokens', 'SDK'))
       .toBe('SDK: at least 0 tokens');
   });
+
+  it.each([
+    [0.1, '$0.10'],
+    [12.5, '$12.50'],
+    [0, '$0.00'],
+    [0.00000003, '$0.00000003'],
+    [1234.56789, '$1,234.56789'],
+  ])('speaks cost %s as %s with at least two decimals and all reported precision', (value, expected) => {
+    expect(usageDetailsText(figure(value), 'cost', 'Session')).toBe(`Session: ${expected}`);
+  });
 });

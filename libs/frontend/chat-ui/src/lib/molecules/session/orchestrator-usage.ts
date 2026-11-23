@@ -10,10 +10,12 @@ export interface OrchestratorUsageRow {
   };
 }
 
+type OrchestratorUsageAmount = UsageAmount & { readonly preferLowerBoundMarker?: true };
+
 export function orchestratorUsage(
   snapshot: SessionStatsEntry | null,
   rows: readonly OrchestratorUsageRow[],
-): { readonly tokens: UsageAmount; readonly cost: UsageAmount } {
+): { readonly tokens: OrchestratorUsageAmount; readonly cost: OrchestratorUsageAmount } {
   const sdk = sdkContribution(snapshot);
   const lanes = new Map<string, OrchestratorUsageRow[]>();
   for (const row of rows) {
@@ -34,8 +36,13 @@ function subtractSubagents(
   snapshot: UsageAmount,
   lanes: ReadonlyMap<string, readonly OrchestratorUsageRow[]>,
   metric: UsageMetric,
-): UsageAmount {
-  if (snapshot.value === null || lanes.size === 0) return snapshot;
+): OrchestratorUsageAmount {
+  if (snapshot.value === null) return snapshot;
+  if (lanes.size === 0) {
+    return snapshot.lowerBound && snapshot.estimated
+      ? { ...snapshot, preferLowerBoundMarker: true }
+      : snapshot;
+  }
 
   const values = [snapshot.value];
   for (const aliases of lanes.values()) {
@@ -43,15 +50,15 @@ function subtractSubagents(
       .map((row) => row.usage[metric])
       .find((value) => value !== null && Number.isFinite(value) && value >= 0);
     if (value === undefined || value === null) {
-      return { ...snapshot, value: null, causes: ['A subagent reported no usage'] };
+      return { ...snapshot, value: null, causes: [...snapshot.causes, 'A subagent reported no usage'] };
     }
     values.push(-value);
   }
 
   const value = sumUsageValues(values, metric);
   return value < 0
-    ? { ...snapshot, value: null, causes: ['Subagent usage exceeds the session snapshot'] }
-    : { ...snapshot, value, estimated: true, lowerBound: false };
+    ? { ...snapshot, value: null, causes: [...snapshot.causes, 'Subagent usage exceeds the session snapshot'] }
+    : { ...snapshot, value, estimated: true, preferLowerBoundMarker: true };
 }
 
 export function orchestratorModel(

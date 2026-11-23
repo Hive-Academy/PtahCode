@@ -90,7 +90,7 @@ let nextSessionId = 0;
                 [showValue]="false"
                 [animate]="false"
                 size="xs"
-                track="3px"
+                track="thin"
               />
             }
           </ptah-stat>
@@ -192,7 +192,7 @@ let nextSessionId = 0;
                 [showValue]="false"
                 [animate]="false"
                 size="xs"
-                track="3px"
+                track="thin"
               />
             }
             <span class="text-xs text-base-content-muted">{{ view.numerator }} / {{ view.limitText }}</span>
@@ -205,26 +205,34 @@ let nextSessionId = 0;
           </ptah-stat>
         }
       </div>
-      @if (hasCli()) {
-        @let tokens = metrics()[0];
-        <div class="flex flex-wrap gap-x-3 gap-y-1 text-xs text-base-content-muted" data-testid="session-source-legend">
-          <span><i class="source-swatch sdk-swatch" aria-hidden="true"></i> SDK {{ tokens.sdkLabel }}</span>
-          <span><i class="source-swatch cli-swatch" aria-hidden="true"></i> CLI {{ tokens.cliLabel }}</span>
-          @for (metric of metrics(); track metric.id) {
-            @if (metric.unreportedCount) {
-              <span>{{ metric.unreportedCount }} unreported ({{ metric.id }})</span>
+      @if (hasCli() || showEstimates() || showBounds()) {
+        <div class="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-[11px] text-base-content-muted"
+          [attr.data-testid]="hasCli() ? 'session-source-legend' : null">
+          @if (hasCli()) {
+            @let tokens = metrics()[0];
+            <span class="whitespace-nowrap"><i class="source-swatch sdk-swatch" aria-hidden="true"></i> SDK {{ tokens.sdkLabel }}</span>
+            <span class="whitespace-nowrap"><i class="source-swatch cli-swatch" aria-hidden="true"></i> CLI {{ tokens.cliLabel }}</span>
+            @if (sharedUnreportedCount(); as count) {
+              <span class="whitespace-nowrap" title="Unreported for both tokens and cost" data-testid="session-unreported">
+                {{ count }} unreported<span class="sr-only"> for both tokens and cost</span>
+              </span>
             }
-            @if (metric.incomparableCount) {
-              <span>{{ metric.incomparableCount }} on a different basis ({{ metric.id }})</span>
+            @for (metric of metrics(); track metric.id) {
+              @if (!sharedUnreportedCount() && metric.unreportedCount) {
+                <span class="whitespace-nowrap">{{ metric.unreportedCount }} unreported ({{ metric.id }})</span>
+              }
+              @if (metric.incomparableCount) {
+                <span>{{ metric.incomparableCount }} on a different basis ({{ metric.id }})</span>
+              }
             }
           }
+          @if (showEstimates() || showBounds()) {
+            <span class="inline-flex flex-wrap gap-x-2 gap-y-1" data-testid="session-accuracy-key">
+              @if (showEstimates()) { <span class="whitespace-nowrap">~ = estimate</span> }
+              @if (showBounds()) { <span class="whitespace-nowrap">≥ = lower bound</span> }
+            </span>
+          }
         </div>
-      }
-      @if (showEstimates() || showBounds()) {
-        <p class="flex flex-wrap gap-x-3 text-xs text-base-content-muted" data-testid="session-accuracy-key">
-          @if (showEstimates()) { <span>~ = estimate</span> }
-          @if (showBounds()) { <span>≥ = lower bound</span> }
-        </p>
       }
     </ptah-surface-section>
   `,
@@ -299,6 +307,10 @@ export class InspectorSessionStatsComponent {
   protected readonly metrics = computed(() => {
     const totals = this.displayedTotals();
     return [this.metric('tokens', totals.tokens), this.metric('cost', totals.cost)] as const;
+  });
+  protected readonly sharedUnreportedCount = computed(() => {
+    const [tokens, cost] = this.metrics();
+    return tokens.unreportedCount === cost.unreportedCount ? tokens.unreportedCount : 0;
   });
   protected readonly budget = computed(() => {
     const budget = this.stats().budget;

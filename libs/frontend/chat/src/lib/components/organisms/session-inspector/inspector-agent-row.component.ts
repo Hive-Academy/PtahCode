@@ -53,7 +53,12 @@ interface AgentRowCache {
   imports: [AgentAvatarComponent, PtahMeterComponent, PtahRingComponent, PtahTimerComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: { class: 'block' },
-  styles: [`@container (max-width: 340px) { .agent-row-wide { display: none; } }`],
+  styles: [`
+    @container (max-width: 340px) {
+      .agent-row { grid-template-columns: minmax(0, 1fr) 3rem 3rem; }
+      .agent-row-cost, .agent-row-wide { display: none; }
+    }
+  `],
   template: `
     @let r = row();
     @let detail = metrics();
@@ -61,7 +66,7 @@ interface AgentRowCache {
     @let currentCache = cache();
     <button
       type="button"
-      class="grid w-full {{ columns }} items-center px-3 py-1.5 text-left hover:bg-base-content/5 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-base-content"
+      class="agent-row grid w-full {{ columns }} items-center px-3 py-1.5 text-left hover:bg-base-content/5 focus-visible:outline focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-base-content"
       [attr.data-agent-key]="r.key"
       [attr.aria-label]="r.ariaLabel"
       [attr.aria-describedby]="detailId() + '-metrics'"
@@ -115,15 +120,16 @@ interface AgentRowCache {
           [class.text-base-content-muted]="detail.tokens === dash"
           [attr.title]="tokensTitle()">{{ detail.tokens }}</span>
         @if (share(); as tokenShare) {
-          <ptah-meter class="block [&_[data-meter-row]]:hidden" data-testid="agent-share"
+          <ptah-meter class="mt-0.5 block [&_[data-meter-row]]:hidden" data-testid="agent-share"
+            [title]="tokenShare.label"
             [label]="tokenShare.label" [value]="tokenShare.value" [max]="tokenShare.max"
-            [tone]="r.agent.kind === 'cli' ? 'accent' : 'gold'" track="2px"
+            [tone]="r.agent.kind === 'cli' ? 'accent' : 'gold'" track="hairline"
             [hideLabel]="true" [showValue]="false" [animate]="false" />
         } @else {
-          <span data-testid="agent-share-space" class="block h-[2px]"></span>
+          <span data-testid="agent-share-space" class="mt-0.5 block h-0.5"></span>
         }
       </span>
-      <span class="truncate text-right text-[10.5px] tabular-nums" aria-hidden="true"
+      <span class="agent-row-cost truncate text-right text-[10.5px] tabular-nums" aria-hidden="true"
         data-testid="agent-row-cost"
         [class.text-base-content-muted]="detail.cost === dash || r.usage.costNotPriced === true"
         [attr.title]="detail.cost === dash ? notReported : detail.cost">
@@ -198,29 +204,33 @@ export class InspectorAgentRowComponent {
     const amount = this.usageAmounts()?.tokens;
     const value = amount ? amount.value : row.usage.tokens;
     if (
-      !total || (total.state !== 'exact' && total.state !== 'estimate') ||
-      total.value === null || total.value <= 0 || value === null || value < 0 || !Number.isFinite(value)
+      !total || total.value === null || total.value <= 0 || amount?.comparable === false ||
+      value === null || value < 0 || !Number.isFinite(value) ||
+      (row.agent.kind === 'cli' ? total.cli : total.sdk) === null
     ) return null;
 
     const percent = Math.min(100, value / total.value * 100);
-    const approximate = total.state === 'estimate' || amount?.estimated;
+    const approximate = total.state === 'estimate' || total.state === 'both' || amount?.estimated;
+    const basis = total.coverage === 'partial' ? 'reported session tokens' : 'session tokens';
     const percentText = percent > 0 && percent < 1 ? 'under 1' : String(Math.round(percent));
-    return { value, max: total.value, label: `${approximate ? 'About ' : ''}${percentText}% of session tokens` };
+    return { value, max: total.value, label: `${approximate ? 'About ' : ''}${percentText}% of ${basis}` };
   });
 
   readonly metrics = computed(() => {
     const row = this.row();
     const amounts = this.usageAmounts();
     const duration = this.durationMs();
-    const time = row.time === UNKNOWN_AGENT_DURATION
-      ? this.unavailableDuration
-      : `Duration ${duration === null ? row.time : formatDuration(duration, 'clock')}`;
+    const durationText = row.time === UNKNOWN_AGENT_DURATION
+      ? NOT_REPORTED_VALUE
+      : duration === null ? row.time : formatDuration(duration, 'clock');
+    const time = durationText === NOT_REPORTED_VALUE ? this.unavailableDuration : `Duration ${durationText}`;
     const tokens = amounts ? formatUsageTokens(amounts.tokens) : row.tokens;
     const cost = amounts && amounts.cost.value !== null ? formatUsageCost(amounts.cost) : row.cost;
     return {
       tokens,
       cost,
       time,
+      durationText,
       tokenDetails: usageDetailsText(amounts?.tokens ?? {
         value: row.usage.tokens, estimated: false, lowerBound: row.usage.tokensPartial,
         comparable: true, causes: [],

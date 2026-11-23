@@ -53,10 +53,7 @@
         </button>
       }
     } @else {
-      <div class="mx-2 my-1 grid gap-2" aria-hidden="true">
-        <div class="skeleton h-7"></div>
-        <div class="skeleton h-7"></div>
-      </div>
+      <ptah-skeleton class="mx-2 my-1 block" [lines]="2" size="lg" />
     }
     @if (railLimitDescription(); as description) {
       <button type="button" data-rail-control="limits"
@@ -112,18 +109,27 @@
           {{ sessionTitle() }}
         </h2>
       }
-      @if (sessionStatus()) {
-        <p class="text-xs text-base-content-muted">{{ sessionStatus() }}</p>
-      }
-      @if (workflow()) {
-        <p class="text-xs text-base-content-muted [overflow-wrap:anywhere]">
-          {{ workflow() }}
-        </p>
-      }
-      @if (branch()) {
-        <p class="text-xs text-base-content-muted [overflow-wrap:anywhere]">
-          {{ branch() }}
-        </p>
+      @let status = headerStatus();
+      @let workflowName = workflow();
+      @let branchName = branch();
+      @if (status || workflowName || branchName) {
+        <div class="mt-1 flex flex-wrap items-center gap-1">
+          @if (status) {
+            <ptah-status size="xs" [status]="status.status" [label]="status.label" [title]="status.label" />
+          }
+          @if (workflowName) {
+            <span ptahBadge size="xs" class="min-w-0" [title]="'Workflow: ' + workflowName">
+              <lucide-angular class="size-3 shrink-0" [img]="workflowIcon" aria-hidden="true" />
+              <span class="ptah-badge-text">{{ workflowName }}</span>
+            </span>
+          }
+          @if (branchName) {
+            <span ptahBadge size="xs" class="min-w-0 max-w-[9rem]" [title]="'Branch: ' + branchName">
+              <lucide-angular class="size-3 shrink-0" [img]="branchIcon" aria-hidden="true" />
+              <span class="ptah-badge-text font-mono">{{ branchName }}</span>
+            </span>
+          }
+        </div>
       }
     </div>
     <div class="flex shrink-0 items-center gap-1">

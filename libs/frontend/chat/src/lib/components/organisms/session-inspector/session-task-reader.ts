@@ -24,6 +24,8 @@ import {
   type TasksGetArtifactResult,
   type TasksGetDigestParams,
   type TasksGetDigestResult,
+  type TasksListFolderEntriesParams,
+  type TasksListFolderEntriesResult,
   type TasksReadFolderMarkdownResult,
   type TaskStatus,
 } from '@ptah-extension/shared';
@@ -37,7 +39,7 @@ export interface TaskSectionData {
   readonly lead: { readonly taskId: string; readonly missing: boolean };
   readonly digest: TaskDigest | null;
   readonly task: TaskDigest['task'] | null;
-  /** @deprecated Read document metadata from digest.documents. */
+  /** File names from the digest or an independent folder listing when the digest fails. */
   readonly documents: readonly string[];
   /** @deprecated The digest does not provide a workflow stage. */
   readonly stage: null;
@@ -267,8 +269,8 @@ export class SessionTaskReader {
     const link = this.link();
     const sequence = ++this.previewSequence;
     if (this.destroyed) return;
-    const task = this.openableTask(file);
-    if (!link || !task) {
+    const taskId = this.openableTaskId(file);
+    if (!link || !taskId) {
       this._preview.set({ file, status: 'error', content: '', reason: 'not-openable' });
       return;
     }
@@ -282,7 +284,7 @@ export class SessionTaskReader {
     }
 
     this._preview.set({ file, status: 'loading', content: '' });
-    const params = { workspaceRoot: link.workspaceRoot ?? undefined, taskId: task.id, file };
+    const params = { workspaceRoot: link.workspaceRoot ?? undefined, taskId, file };
     try {
       const result = isDocFile(file)
         ? await rpcCall<TasksGetArtifactResult>(this.vscode, 'tasks:getArtifact', params)
@@ -290,9 +292,9 @@ export class SessionTaskReader {
       if (sequence !== this.previewSequence || !this.isCurrent(key)) return;
       const document = result.success && result.data?.file === file ? result.data : null;
       let reason: TaskDocumentFailure = 'unavailable';
-      if (this.openableTask(file)?.id !== task.id) {
+      if (this.openableTaskId(file) !== taskId) {
         reason = 'not-openable';
-      } else if (document && (!('state' in document) || document.taskId === task.id)) {
+      } else if (document && (!('state' in document) || document.taskId === taskId)) {
         if ('state' in document && document.state !== 'ready') {
           reason = document.state;
         } else if (document.content !== null) {
@@ -313,26 +315,25 @@ export class SessionTaskReader {
   async openDocument(file: string, origin?: Element | null): Promise<void> {
     if (this.destroyed) return;
     const link = this.link();
-    const task = this.openableTask(file);
+    const taskId = this.openableTaskId(file);
     const root = link?.workspaceRoot;
     if (!link || !root || !this.opener) {
       this._openError.set({ file, reason: 'unavailable' });
       return;
     }
-    if (!task) {
+    if (!taskId) {
       this._openError.set({ file, reason: 'not-openable' });
       return;
     }
 
     const key = linkKey(link);
-    const taskId = task.id;
     this._openError.set(null);
     try {
       const response = await rpcCall<TasksReadFolderMarkdownResult>(this.vscode, 'tasks:readFolderMarkdown', {
         workspaceRoot: root, taskId, file,
       });
       if (this.destroyed) return;
-      if (!this.isCurrent(key, link) || this.state()?.data?.digest?.task.id !== taskId) {
+      if (!this.isCurrent(key, link) || this.state()?.status === 'unknown') {
         this._openError.set({ file, reason: 'stale' });
         return;
       }
@@ -345,29 +346,30 @@ export class SessionTaskReader {
         this._openError.set({ file, reason: document.state });
         return;
       }
-      if (!this.openableTask(file)) {
+      if (this.openableTaskId(file) !== taskId) {
         this._openError.set({ file, reason: 'not-openable' });
         return;
       }
 
       // The editor reopens this path for reading. The file can change between
       // the contained backend check and the editor's own path open.
-      const path = `${root.replace(/[\\/]+$/, '')}/.ptah/specs/${task.folderName}/${file}`;
+      const path = `${root.replace(/[\\/]+$/, '')}/.ptah/specs/${taskId}/${file}`;
       await this.opener.open({ path, origin });
     } catch (error: unknown) {
       if (this.destroyed) return;
       this.logger.error('SessionTaskReader', 'Could not open a task document', error instanceof Error ? error : new Error(String(error)));
-      const current = this.isCurrent(key, link) && this.state()?.data?.digest?.task.id === taskId;
+      const current = this.isCurrent(key, link) && this.state()?.status !== 'unknown';
       this._openError.set({ file, reason: current ? 'unavailable' : 'stale' });
     }
   }
 
-  private openableTask(file: string): TaskDigest['task'] | null {
-    const digest = this.state()?.data?.digest;
-    return digest && isReadableTaskFolderMarkdownName(file) &&
-      digest.documents.some(document => document.name === file && document.openable)
-      ? digest.task
-      : null;
+  private openableTaskId(file: string): string | null {
+    const data = this.state()?.data;
+    if (!data || !isReadableTaskFolderMarkdownName(file)) return null;
+    const openable = data.digest
+      ? data.digest.documents.some(document => document.name === file && document.openable)
+      : data.documents.includes(file);
+    return openable ? data.lead.taskId : null;
   }
 
   private sectionData(link: TaskLink, digest: TaskDigest | null): TaskSectionData {
@@ -423,7 +425,7 @@ export class SessionTaskReader {
       const digest = response.data?.digest;
       if (!response.success || digest === undefined ||
         (digest && (digest.task.id !== taskId || digest.task.folderName !== taskId))) {
-        this.setError(key, data);
+        await this.handleDigestFailure(key, link, data);
         return;
       }
 
@@ -435,14 +437,14 @@ export class SessionTaskReader {
           : { status: 'unknown', data: { ...next, lead: { taskId, missing: true } } },
       });
       const previewFile = this._preview()?.file;
-      if (previewFile && !this.openableTask(previewFile)) {
+      if (previewFile && !this.openableTaskId(previewFile)) {
         this.previewSequence++;
         this._preview.set({ file: previewFile, status: 'error', content: '', reason: 'not-openable' });
       }
     } catch (error: unknown) {
       if (!this.isCurrent(key, link)) return;
       this.logger.error('SessionTaskReader', 'Could not load the task', error instanceof Error ? error : new Error(String(error)));
-      this.setError(key, data);
+      await this.handleDigestFailure(key, link, data);
     } finally {
       this.inFlight = false;
       if (this.dirty && !this.destroyed) {
@@ -458,11 +460,36 @@ export class SessionTaskReader {
       (requestLink === undefined || link === requestLink);
   }
 
-  /** Keep the last successful digest for this link while showing a retryable error. */
-  private setError(key: string, data: TaskSectionData): void {
+  private async handleDigestFailure(key: string, link: TaskLink, held: TaskSectionData): Promise<void> {
+    let data = held;
+    if (held.documents.length === 0) {
+      const documents = await this.listFallbackDocuments(link);
+      if (!this.isCurrent(key, link)) return;
+      data = { ...this.sectionData(link, null), documents };
+    }
     this.result.set({
       key,
       state: { status: 'error', data, error: 'Could not load task details' },
     });
+  }
+
+  private async listFallbackDocuments(link: TaskLink): Promise<readonly string[]> {
+    const params = {
+      workspaceRoot: link.workspaceRoot ?? undefined,
+      taskId: link.lead.taskId,
+      directory: '',
+    } satisfies TasksListFolderEntriesParams;
+    try {
+      const response = await rpcCall<TasksListFolderEntriesResult>(this.vscode, 'tasks:listFolderEntries', params);
+      const listing = response.data;
+      if (!response.success || listing?.state !== 'ready' || listing.taskId !== params.taskId ||
+        listing.directory !== params.directory || !Array.isArray(listing.entries)) return [];
+      return listing.entries
+        .filter(entry => entry?.kind === 'file' && typeof entry.name === 'string' &&
+          isReadableTaskFolderMarkdownName(entry.name))
+        .map(entry => entry.name);
+    } catch {
+      return [];
+    }
   }
 }

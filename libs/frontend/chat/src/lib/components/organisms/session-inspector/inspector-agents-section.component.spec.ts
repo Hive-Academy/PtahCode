@@ -18,6 +18,8 @@ import { SessionAgentRosterService } from '../../../services/session-agents/sess
 import type { SessionAgent } from '../../../services/session-agents/session-agent-roster';
 import { InspectorAgentsSectionComponent } from './inspector-agents-section.component';
 import type { InspectorLaneRunDetail } from '@ptah-extension/chat-ui';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 
 function agent(
   overrides: Partial<SessionAgent> = {},
@@ -295,6 +297,24 @@ describe('InspectorAgentsSectionComponent', () => {
     expect(root.textContent).not.toContain('Usage: 2284653');
   });
 
+  it('drops the Cost column at 340px while keeping the amount available in the row and detail', () => {
+    const columnsSource = readFileSync(join(__dirname, 'inspector-agents-section.component.ts'), 'utf8');
+    const rowSource = readFileSync(join(__dirname, 'inspector-agent-row.component.ts'), 'utf8');
+    expect(columnsSource).toMatch(/@container \(max-width: 340px\)\s*\{[^]*?\.agent-column-cost \{ display: none; \}/);
+    expect(rowSource).toMatch(/@container \(max-width: 340px\)\s*\{[^]*?\.agent-row-cost, \.agent-row-wide \{ display: none; \}/);
+    const fixture = mount([agent()]);
+    const root = fixture.nativeElement as HTMLElement;
+    const row = element<HTMLButtonElement>(root, '[data-agent-key="orchestrator"]');
+    const summaryCost = element(row, '.agent-row-cost').textContent?.trim();
+    const description = element(root, `[id="${row.getAttribute('aria-describedby')}"]`);
+    expect(description.textContent).toContain('Cost');
+    row.click();
+    fixture.detectChanges();
+    const region = element(root, `[id="${row.getAttribute('aria-controls')}"]`);
+    const cost = Array.from(region.querySelectorAll('dl > div')).find(pair => pair.querySelector('dt')?.textContent === 'Cost');
+    expect(cost?.querySelector('dd')?.textContent).toBe(summaryCost);
+  });
+
   it('keeps a starting lane active and labels it distinctly', () => {
     const el: HTMLElement = mount([
       agent({ key: 'cli:starting', status: 'starting', endedAt: null }),
@@ -337,7 +357,7 @@ describe('InspectorAgentsSectionComponent', () => {
       orchestrator
         .querySelector('[data-testid="agent-row-cost"]')
         ?.textContent?.trim(),
-    ).toBe('~$0.80');
+    ).toBe('$0.80');
   });
 
   it('renders an unknown figure as a quiet dash with a not-reported tooltip', () => {
@@ -759,18 +779,37 @@ describe('InspectorAgentsSectionComponent', () => {
     expect(orchestratorRow.querySelector('[role="meter"]')?.getAttribute('aria-label')).toBe('About 50% of session tokens');
   });
 
-  it.each([{ totalTokens: 1000 }, { inputTokens: 1000 }])(
-    'hides every share while reserving its height when the CLI token basis is incomplete (%p)',
-    (usageTotals) => {
+  it.each([
+    { usageTotals: { totalTokens: 1000 }, comparable: false },
+    { usageTotals: { inputTokens: 1000 }, comparable: true },
+  ])(
+    'uses the reported token subtotal and excludes incompatible CLI figures (%p)',
+    ({ usageTotals, comparable }) => {
       monitored.set([cliMonitor({ ...usageTotals, costUsd: 0.25 })]);
       const root: HTMLElement = mount([agent()]).nativeElement;
-      expect(shareWidths(root)).toEqual([]);
+      const widths = shareWidths(root);
+      expect(widths).toHaveLength(comparable ? 2 : 1);
+      expect(widths.reduce((sum, width) => sum + width, 0)).toBeCloseTo(100);
       const spaces = Array.from(root.querySelectorAll('[data-testid="agent-share-space"]'));
-      expect(spaces).toHaveLength(2);
-      expect(spaces.every(space => space.classList.contains('h-[2px]'))).toBe(true);
+      expect(spaces).toHaveLength(comparable ? 0 : 1);
+      expect(spaces.every(space => space.classList.contains('h-0.5'))).toBe(true);
       expect(root.querySelector('[data-agent-key="cli:lane-1"] [data-testid="agent-row-tokens"]')?.textContent).toMatch(/^≥/);
     },
   );
+
+  it('gives the Orchestrator a full reported-token bar when CLI usage is missing', () => {
+    monitored.set([cliMonitor({ costUsd: 0.25 })]);
+    const root: HTMLElement = mount([agent()]).nativeElement;
+    const orchestratorRow = element(root, '[data-agent-key="orchestrator"]');
+    const cliRow = element(root, '[data-agent-key="cli:lane-1"]');
+    expect(shareWidths(root)).toEqual([100]);
+    expect(element(orchestratorRow, 'ptah-meter').getAttribute('title'))
+      .toMatch(/100% of reported session tokens$/);
+    const description = element(root, `[id="${orchestratorRow.getAttribute('aria-describedby')}"]`);
+    expect(description.textContent).toContain('100% of reported session tokens');
+    expect(element(cliRow, '[data-testid="agent-row-tokens"]').textContent).toBe('—');
+    expect(cliRow.querySelector('ptah-meter')).toBeNull();
+  });
 
   it('keeps the share and displayed usage when a CLI lane leaves the monitor with retained usage', () => {
     snapshot.set({ ...defaultSnapshot, tokenCount: 3000 });
@@ -847,7 +886,7 @@ describe('InspectorAgentsSectionComponent', () => {
     expect(timer.textContent?.trim()).toBe('1h 26m');
     expect(timer.querySelector('time')?.getAttribute('title')).toBe('Duration 1:26:05');
     const description = root.querySelector(`[id="${row.getAttribute('aria-describedby')}"]`);
-    expect(description?.textContent).toContain('about 1,098,000 tokens');
+    expect(description?.textContent).toContain('1,098,000 tokens');
     expect(description?.textContent).toContain('Duration 1:26:05');
     expect(description?.textContent).toContain('Near context limit');
     const region = element<HTMLElement>(root, `[id="${row.getAttribute('aria-controls')}"]`);
@@ -865,6 +904,25 @@ describe('InspectorAgentsSectionComponent', () => {
     expect(focus).toHaveBeenCalledTimes(1);
     expect(row.getAttribute('aria-expanded')).toBe('false');
     expect(region.hidden).toBe(true);
+  });
+
+  it('groups detail labels with their values and marks unavailable metrics as muted dashes', () => {
+    const fixture = mount([]);
+    const root = fixture.nativeElement as HTMLElement;
+    const row = element<HTMLButtonElement>(root, '[data-agent-key="orchestrator"]');
+    row.click();
+    fixture.detectChanges();
+    const region = element(root, `[id="${row.getAttribute('aria-controls')}"]`);
+    const fields = Array.from(region.querySelectorAll('.agent-detail-grid > div'));
+    expect(fields.filter(field => !field.classList.contains('col-span-full'))
+      .map(field => field.querySelector('dt')?.textContent)).toEqual([
+      'Tokens', 'Cost', 'Time', 'Status', 'Context', 'Compactions',
+    ]);
+    expect(element(fields[3], 'dd').textContent).toBe('done');
+    const compactions = element(fields[5], 'dd');
+    expect(compactions.textContent).toBe('—');
+    expect(compactions.classList).toContain('text-base-content-muted');
+    expect(compactions.classList).toContain('font-mono');
   });
 
   it('keeps the composer for a running monitored CLI lane with no tray menu', () => {

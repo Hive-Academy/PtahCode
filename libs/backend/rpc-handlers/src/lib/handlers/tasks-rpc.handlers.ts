@@ -683,7 +683,8 @@ export class TasksRpcHandlers {
           const digest = await this.digest.getDigest(root, parsed.taskId);
           return { digest };
         } catch (error: unknown) {
-          throw this.sanitize(error, 'tasks:getDigest', 'Failed to read task digest.');
+          const invalidCarrier = error instanceof Error && 'code' in error && error.code === 'INVALID_TASK_CARRIER';
+          throw this.sanitize(error, 'tasks:getDigest', invalidCarrier ? 'Invalid task carrier.' : 'Failed to read task digest.');
         }
       },
     );

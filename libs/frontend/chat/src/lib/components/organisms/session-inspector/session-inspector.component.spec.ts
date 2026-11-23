@@ -1,4 +1,10 @@
-import { PTAH_CLOCK, PtahIconButtonDirective } from '@ptah-extension/ui';
+import {
+  PTAH_CLOCK,
+  PtahBadgeDirective,
+  PtahIconButtonDirective,
+  PtahSkeletonComponent,
+  PtahStatusComponent,
+} from '@ptah-extension/ui';
 import { NgTemplateOutlet } from '@angular/common';
 import { encapsulateStyle } from '@angular/compiler';
 import { Component, NO_ERRORS_SCHEMA, signal } from '@angular/core';
@@ -138,9 +144,11 @@ function projectionProviders(cli = signal<readonly MonitoredAgent[]>([])) {
 describe('SessionInspectorComponent presentation', () => {
   const model = signal(emptyModel);
   const cli = signal<readonly MonitoredAgent[]>([]);
+  const tabSnapshot = signal<SessionStatsEntry | null>(null);
   beforeEach(() => {
     model.set(emptyModel);
     cli.set([]);
+    tabSnapshot.set(null);
     TestBed.configureTestingModule({
       imports: [SessionInspectorComponent],
       providers: [
@@ -152,7 +160,10 @@ describe('SessionInspectorComponent presentation', () => {
         ...projectionProviders(cli),
         {
           provide: TabManagerService,
-          useValue: { backgroundTabsRevision: () => 0, findTabByIdAcrossWorkspaces: () => null },
+          useValue: {
+            backgroundTabsRevision: () => 0,
+            findTabByIdAcrossWorkspaces: () => ({ tab: { sessionStats: tabSnapshot() } }),
+          },
         },
         { provide: ClaudeRpcService, useValue: { call: jest.fn() } },
         { provide: SessionRowActionsService, useValue: { openSession: jest.fn() } },
@@ -162,6 +173,7 @@ describe('SessionInspectorComponent presentation', () => {
         imports: [
           NgTemplateOutlet, PtahIconButtonDirective, InspectorSessionStatsComponent,
           InspectorAgentsSectionComponent, InspectorRequestLinesComponent, InspectorLimitsLanesComponent,
+          PtahBadgeDirective, PtahSkeletonComponent, PtahStatusComponent,
         ],
         schemas: [NO_ERRORS_SCHEMA],
       },
@@ -170,6 +182,7 @@ describe('SessionInspectorComponent presentation', () => {
   afterEach(() => TestBed.resetTestingModule());
 
   function create(stats: SessionStatsInputs | null = emptyStats) {
+    tabSnapshot.set(stats?.snapshot ?? null);
     const fixture = TestBed.createComponent(SessionInspectorComponent);
     fixture.componentRef.setInput('tabId', 'one');
     fixture.componentRef.setInput('presentation', 'rail');
@@ -177,6 +190,12 @@ describe('SessionInspectorComponent presentation', () => {
     fixture.detectChanges();
     return fixture;
   }
+
+  it('uses the shared skeleton in the rail while session stats are unavailable', () => {
+    const root = create(null).nativeElement as HTMLElement;
+    const skeleton = root.querySelector('aside ptah-skeleton');
+    expect(skeleton?.querySelector('[aria-hidden="true"]')?.children).toHaveLength(2);
+  });
 
   it('passes uncached input tokens to the Orchestrator and preserves missing data', () => {
     TestBed.overrideComponent(SessionInspectorComponent, {
@@ -346,6 +365,7 @@ describe('SessionInspectorComponent presentation', () => {
       root.querySelector(`[data-rail-control="${key}"] span:last-child`)?.textContent?.trim();
     expect(railFigure('tokens')).toBe(first === 'sdk' ? '100' : '—');
     cli.set([lane]);
+    tabSnapshot.set(sdkSnapshot);
     fixture.componentRef.setInput('stats', stats);
     fixture.detectChanges();
     expect(railFigure('tokens')).toBe('150');
@@ -356,6 +376,33 @@ describe('SessionInspectorComponent presentation', () => {
     const dialog = root.querySelector('[role="dialog"][aria-modal="true"]');
     expect(dialog?.querySelector('[data-testid="session-tokens"]')?.getAttribute('aria-label')).toContain('150 tokens');
     expect(dialog?.querySelector('[data-testid="session-cost"]')?.getAttribute('aria-label')).toContain('$0.3');
+  });
+
+  it('waits for matching SDK usage after a session switch in the same tab', () => {
+    const stale = { ...sdkSnapshot, tokenCount: 120_000 };
+    const first = { ...emptyStats, sessionId: 'session-a', snapshot: stale };
+    const second = { ...first, sessionId: 'session-b' };
+    const fixture = create(first);
+    const root: HTMLElement = fixture.nativeElement;
+    const tokenControl = () => root.querySelector('[data-rail-control="tokens"]');
+    const tokens = () => tokenControl()?.querySelector('span:last-child')?.textContent?.trim();
+    expect(tokens()).toBe('120.0k');
+
+    cli.set([{
+      ...lane,
+      parentSessionId: 'session-b',
+      usageTotals: { inputTokens: 4_000, outputTokens: 1_000, costUsd: 0.2 },
+    }]);
+    fixture.componentRef.setInput('stats', second);
+    fixture.detectChanges();
+    expect(tokens()).toBe('—');
+    expect(tokenControl()?.getAttribute('aria-label')).toContain('SDK usage not loaded yet');
+
+    const current = { ...sdkSnapshot, sessionId: 'session-b', tokenCount: 7_000 };
+    tabSnapshot.set(current);
+    fixture.componentRef.setInput('stats', { ...second, snapshot: current });
+    fixture.detectChanges();
+    expect(tokens()).toBe('12.0k');
   });
 
   it('marks a detected CLI cost gap while leaving reported tokens exact', () => {
@@ -379,6 +426,7 @@ describe('SessionInspectorComponent presentation', () => {
       cli.set([lane]);
       fixture.componentRef.setInput('presentation', 'sheet');
       fixture.detectChanges();
+      tabSnapshot.set(second.snapshot);
       fixture.componentRef.setInput('stats', second);
       fixture.componentRef.setInput('focusSection', 'session');
       fixture.detectChanges();
@@ -390,6 +438,7 @@ describe('SessionInspectorComponent presentation', () => {
       root.querySelector<HTMLElement>('[data-inspector-close]')?.focus();
       await Promise.resolve();
       expect(document.activeElement).toBe(activeHeading);
+      tabSnapshot.set(first.snapshot);
       fixture.componentRef.setInput('stats', first);
       fixture.detectChanges();
       expect(leavingFigure()).toContain('200 tokens');
@@ -497,20 +546,30 @@ describe('SessionInspectorComponent presentation', () => {
     element.remove();
   });
 
-  it('renders wrapped identity and preserves every expanded section', () => {
+  it('renders supplied identity as shared chips and preserves every expanded section', () => {
     const fixture = create();
     fixture.componentRef.setInput('presentation', 'docked');
     fixture.componentRef.setInput('sessionTitle', 'Full session title');
-    fixture.componentRef.setInput('sessionStatus', 'idle');
-    fixture.componentRef.setInput('workflow', 'Review');
-    fixture.componentRef.setInput('branch', 'feature/test');
+    fixture.componentRef.setInput('sessionStatus', 'done');
+    fixture.componentRef.setInput('workflow', 'orchestrate');
+    fixture.componentRef.setInput('branch', 'feature/a-branch-long-enough-to-truncate');
     fixture.componentRef.setInput('stats', emptyStats);
     fixture.detectChanges();
     const element: HTMLElement = fixture.nativeElement;
     expect(element.querySelector('h2')?.textContent?.trim()).toBe(
       'Full session title',
     );
-    expect(element.textContent).toContain('feature/test');
+    const status = element.querySelector('header ptah-status');
+    expect(status?.textContent?.trim()).toBe('Done');
+    expect(status?.getAttribute('data-ink')).toBe('done');
+    expect(status?.querySelector('.ptah-status-glyph')?.getAttribute('aria-hidden')).toBe('true');
+    const chips = Array.from(element.querySelectorAll('header [data-ptah-badge]'));
+    expect(chips.map(chip => chip.querySelector('.ptah-badge-text')?.textContent)).toEqual([
+      'orchestrate', 'feature/a-branch-long-enough-to-truncate',
+    ]);
+    expect(chips.map(chip => chip.getAttribute('title'))).toEqual([
+      'Workflow: orchestrate', 'Branch: feature/a-branch-long-enough-to-truncate',
+    ]);
     for (const section of [
       'session-stats',
       'agents-section',
@@ -648,7 +707,8 @@ describe('SessionInspectorComponent presentation', () => {
     expect(identity.classList).toContain('min-w-0');
     expect(identity.classList).toContain('flex-1');
     expect(identity.querySelector('h2')?.textContent?.trim()).toBe('A very long session title');
-    expect(identity.querySelector('p')?.textContent?.trim()).toBe('running');
+    expect(identity.querySelector('ptah-status')?.textContent?.trim()).toBe('Running');
+    expect(identity.querySelector('[data-ptah-badge]')).toBeNull();
     expect(controls.classList).toContain('shrink-0');
     const labels = Array.from(controls.querySelectorAll('button')).map(
       (b) => b.getAttribute('aria-label') ?? b.textContent?.trim(),
@@ -664,6 +724,7 @@ describe('SessionInspectorComponent presentation', () => {
     fixture.detectChanges();
     const element: HTMLElement = fixture.nativeElement;
     expect(element.querySelector('h2')).toBeNull();
+    expect(element.querySelector('header :is(ptah-status, [data-ptah-badge])')).toBeNull();
     expect(
       element.querySelector('[data-inspector-close]')?.getAttribute('aria-label'),
     ).toBe('Close session details');

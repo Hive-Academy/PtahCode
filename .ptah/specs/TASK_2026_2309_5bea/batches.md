@@ -284,9 +284,9 @@ Assumptions:
 - Focused checks: jest chat on the reader spec. tsc chat. eslint.
 - Coordinator: `-p @ptah-extension/chat` (no other lane editing chat).
 
-### D3: TASK section component (addendum B3) — BLOCKED
+### D3: TASK section component (addendum B3) — DONE (approved, decisions row 29; report `lane-report-D3.md`)
 
-- BLOCKED until the user approves the TASK-section design update `TF/design-spec-v3-task.md`.
+- The user approved `TF/design-spec-v3-task.md` (decisions row 29). The coordinator added `counted` to `TaskDigest.directories[]`.
 - Wave: W4 | Depends on: D2 + user approval | Shape: logic (templates)
 - Executor: frontend-developer subagent.
 - Files: MODIFY `CHI/inspector-task-section.component.ts` + `CHI/inspector-task-section.component.spec.ts` (sole owner).

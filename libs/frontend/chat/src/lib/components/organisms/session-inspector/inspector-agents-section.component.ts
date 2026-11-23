@@ -41,6 +41,7 @@ import {
 import {
   agentKindLine,
   NOT_REPORTED_TITLE,
+  NOT_REPORTED_VALUE,
   normalizeAgentKey,
   type AgentListRow,
 } from './inspector-agent-list';
@@ -86,7 +87,22 @@ let nextSectionId = 0;
     InspectorRequestLinesComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  styles: [`:host { display: block; container-type: inline-size; }`],
+  styles: [`
+    :host { display: block; container-type: inline-size; }
+    @container (max-width: 340px) {
+      .agent-columns { grid-template-columns: minmax(0, 1fr) 3rem 3rem; }
+      .agent-column-cost { display: none; }
+    }
+    @container (min-width: 336px) {
+      .agent-detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .agent-detail-grid > :nth-child(odd):not(.col-span-full):not(:has(+ :not(.col-span-full))) {
+        grid-column: 1 / -1;
+      }
+    }
+    .agent-detail-grid > div { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 0.375rem; }
+    .agent-detail-grid > .col-span-full { grid-template-columns: minmax(0, 1fr); }
+    .agent-detail-grid dd { min-width: 0; overflow-wrap: anywhere; }
+  `],
   template: `
     @let count = caption();
     <section
@@ -128,7 +144,7 @@ let nextSectionId = 0;
       } @else {
         @if (list().length > 0) {
           <div
-            class="mt-2 grid {{
+            class="agent-columns mt-2 grid {{
               columns
             }} px-3 pb-1 text-[10.5px] text-base-content-muted"
             [class.mr-8]="hasMenus()"
@@ -136,7 +152,7 @@ let nextSectionId = 0;
           >
             <span>Agent</span>
             <span class="text-right">Tokens</span>
-            <span class="text-right">Cost</span>
+            <span class="agent-column-cost text-right">Cost</span>
             <span class="text-right">Time</span>
           </div>
           <ul [id]="listId" [attr.aria-labelledby]="headingId">
@@ -195,27 +211,55 @@ let nextSectionId = 0;
                 <div [id]="rowId" role="region" [attr.aria-label]="row.agent.name + ' details'" [hidden]="!expanded">
                   @if (expanded) {
                     @let metrics = presentation.metrics();
-                    <dl class="mb-2 ml-11 mr-3 flex flex-wrap gap-x-3 gap-y-1 text-[10.5px]">
-                      <div><dt class="sr-only">Tokens</dt><dd>{{ metrics.tokenDetails }}</dd></div>
-                      <div><dt class="sr-only">Cost</dt><dd>{{ metrics.costDetails }}</dd></div>
-                      <div><dt class="sr-only">Time</dt><dd>{{ metrics.time }}</dd></div>
-                      <div><dt class="text-base-content-muted">Status</dt><dd>{{ row.statusText }}</dd></div>
+                    <dl class="agent-detail-grid mb-2 ml-11 mr-3 grid grid-cols-1 gap-x-3 gap-y-1 text-[10.5px]">
+                      <div>
+                        <dt class="text-base-content-muted">Tokens</dt>
+                        <dd class="font-mono tabular-nums" [class.text-base-content-muted]="metrics.tokens === dash"
+                          [title]="metrics.tokenDetails">{{ metrics.tokens }}</dd>
+                      </div>
+                      <div>
+                        <dt class="text-base-content-muted">Cost</dt>
+                        <dd class="font-mono tabular-nums" [class.text-base-content-muted]="metrics.cost === dash"
+                          [title]="metrics.costDetails">{{ metrics.cost }}</dd>
+                      </div>
+                      <div>
+                        <dt class="text-base-content-muted">Time</dt>
+                        <dd class="font-mono tabular-nums" [class.text-base-content-muted]="metrics.durationText === dash"
+                          [title]="metrics.time">{{ metrics.durationText }}</dd>
+                      </div>
+                      <div>
+                        <dt class="text-base-content-muted">Status</dt>
+                        <dd class="font-mono tabular-nums" [class.text-base-content-muted]="row.statusText === dash">{{ row.statusText }}</dd>
+                      </div>
                       @if (role) {
                         <div><dt class="text-base-content-muted">Role</dt><dd>{{ role }}</dd></div>
                       }
                       @if (row.startedAtTitle) {
-                        <div><dt class="sr-only">Start time</dt><dd>{{ row.startedAtTitle }}</dd></div>
-                      }
-                      @if (row.tokensTitle !== notReported) {
-                        <div><dt class="sr-only">Token split</dt><dd>{{ row.tokensTitle }}</dd></div>
+                        <div>
+                          <dt class="text-base-content-muted">Started</dt><dd class="font-mono tabular-nums">{{ row.startedAtTitle }}</dd>
+                        </div>
                       }
                       @if (row.agent.kind === 'orchestrator') {
-                        <div><dt class="sr-only">Context</dt><dd>{{ context().description }}</dd></div>
-                        @if (compactionCount() !== null) {
-                          <div><dt class="text-base-content-muted">Compactions</dt><dd>{{ compactionCount() }}</dd></div>
-                        }
+                        @let mainContext = context();
+                        <div>
+                          <dt class="text-base-content-muted">Context</dt>
+                          <dd class="font-mono tabular-nums" [class.text-base-content-muted]="mainContext.percent === null"
+                            [title]="mainContext.description">{{ mainContext.text }}</dd>
+                        </div>
+                        <div>
+                          <dt class="text-base-content-muted">Compactions</dt>
+                          <dd class="font-mono tabular-nums" [class.text-base-content-muted]="compactionCount() === null"
+                            >{{ compactionCount() ?? dash }}</dd>
+                        </div>
+                      }
+                      @if (row.tokensTitle !== notReported) {
+                        <div class="col-span-full">
+                          <dt class="sr-only">Token split</dt><dd class="font-mono tabular-nums">{{ row.tokensTitle }}</dd>
+                        </div>
+                      }
+                      @if (row.agent.kind === 'orchestrator') {
                         @if (cache(); as shownCache) {
-                          <div class="basis-full">
+                          <div class="col-span-full">
                             <dt class="sr-only">Prompt cache</dt>
                             <dd><ptah-inspector-cache-tile [cache]="shownCache" variant="detail" /></dd>
                           </div>
@@ -306,6 +350,7 @@ export class InspectorAgentsSectionComponent implements OnInit {
   readonly announced = output<string>();
 
   protected readonly notReported = NOT_REPORTED_TITLE;
+  protected readonly dash = NOT_REPORTED_VALUE;
   protected readonly columns = AGENT_ROW_COLUMNS;
   protected readonly skeletonRows = [0, 1, 2];
   private readonly sectionId = ++nextSectionId;

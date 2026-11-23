@@ -86,10 +86,31 @@ describe(InspectorSessionStatsComponent.name, () => {
 
     models.click();
     fixture.detectChanges();
-    const detail = root.querySelector('ptah-session-model-breakdown')?.textContent ?? '';
-    expect(detail).toContain(sourceText);
-    expect(detail).toMatch(/Lanes with tokens\s*2\/2/);
-    expect(detail).toMatch(/Lanes with cost\s*1\/2/);
+    const detail = required(root.querySelector('ptah-session-model-breakdown'));
+    const details = detail.querySelector('[data-testid="model-source-details"]');
+    expect(details?.classList.contains('sr-only')).toBe(true);
+    expect(details?.textContent).toContain(sourceText);
+    expect(details?.textContent).toMatch(/Lanes with tokens: 2 of 2/);
+    expect(details?.textContent).toMatch(/Lanes with cost: 1 of 2/);
+    const coverageLine = detail.querySelector('[data-testid="model-cli-coverage"]')?.textContent?.replace(/\s+/g, ' ');
+    expect(coverageLine).toMatch(/CLI.*Tokens 2\/2.*Cost 1\/2/);
+    expect(detail.querySelector('[data-testid="model-usage-total"]')?.classList.contains('sr-only')).toBe(true);
+    expect(detail.querySelectorAll('dt')).toHaveLength(1);
+    expect(detail.querySelector('dt')?.textContent).toBe('Cost basis');
+  });
+
+  it('combines equal missing counts and keeps the accuracy key in the source legend', () => {
+    const { fixture, root } = render();
+    fixture.componentRef.setInput('cliContributions', ['codex', 'antigravity'].map(id =>
+      required(cliContribution({ kind: 'cli', id, label: id, usage: null })),
+    ));
+    fixture.detectChanges();
+    const legend = required(root.querySelector('[data-testid="session-source-legend"]'));
+    const missing = legend.querySelector('[data-testid="session-unreported"]');
+    expect(missing?.firstChild?.textContent?.trim()).toBe('2 unreported');
+    expect(missing?.querySelector('.sr-only')?.textContent).toContain('both tokens and cost');
+    expect(legend.textContent).not.toMatch(/unreported \(tokens\)|unreported \(cost\)/);
+    expect(legend.querySelector('[data-testid="session-accuracy-key"]')?.textContent).toContain('≥ = lower bound');
   });
 
   it('mutes unknown amounts and keeps the unavailable cause on the Cost tooltip', () => {
@@ -173,6 +194,9 @@ describe(InspectorSessionStatsComponent.name, () => {
     expect(rows).toHaveLength(2);
     expect(rows[0].textContent).toMatch(/Cache read\s*300.*Cache creation\s*40/);
     expect(rows[0].textContent).toContain('—');
+    const subtotals = root.querySelectorAll('[data-testid="model-usage-total"]');
+    expect(subtotals).toHaveLength(1);
+    expect(subtotals[0].textContent).toContain('SDK subtotal');
   });
 
   it.each([

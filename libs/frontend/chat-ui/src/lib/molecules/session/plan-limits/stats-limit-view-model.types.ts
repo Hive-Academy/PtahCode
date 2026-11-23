@@ -118,7 +118,7 @@ export interface PlanLimitTileModel {
   /** Stable id: `plan:<owner>:<window>`, `plan-evidence:<owner>[:<scope>]`, … */
   readonly id: string;
   readonly kind: PlanLimitTileKind;
-  readonly usageUnavailable?: true;
+  readonly unavailableReason?: string;
   readonly label: string;
   /** Caption text that may truncate on a closed tile. */
   readonly captionLead: string;

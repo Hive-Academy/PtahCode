@@ -46,7 +46,7 @@ type Reason = TaskDigest['truncatedReasons'][number];
 type DirectorySummary = NonNullable<TaskDigest['directories']>[number];
 type FileMetadata = Extract<ContainedTaskInspect, { state: 'file' }>;
 type Fragment =
-  | { state: 'ready'; task: TaskSpecSummary | null }
+  | { state: 'ready'; task: TaskSpecSummary }
   | { state: 'ready' | 'capped'; text: string };
 
 function compareNames(a: string, b: string): number {
@@ -72,7 +72,7 @@ function sameFile(before: FileMetadata | undefined, after: ContainedTaskInspect)
 
 async function summarizeDirectories(folder: ContainedTaskFolder, entries: DirectoryEntry[], reasons: Set<Reason>) {
   const directories: DirectorySummary[] = entries.filter(({ type }) => type === FileType.Directory)
-    .map(({ name }) => ({ name, files: 0, markdown: 0, images: 0, directories: 0, symlinks: 0, truncated: false }));
+    .map(({ name }) => ({ name, files: 0, markdown: 0, images: 0, directories: 0, symlinks: 0, truncated: false, counted: false }));
   const children: { parts: [string, string]; summary: DirectorySummary }[] = [];
   let listsUsed = 0;
   let countedEntries = 0;
@@ -99,6 +99,7 @@ async function summarizeDirectories(folder: ContainedTaskFolder, entries: Direct
       truncate(summary, 'nested');
       return [];
     }
+    if (parts.length === 1) summary.counted = true;
     const count = Math.min(listed.entries.length, NESTED_DIR_CAP, NESTED_TOTAL_CAP - countedEntries);
     if (count < listed.entries.length) truncate(summary, 'nested');
     countedEntries += count;
@@ -171,7 +172,10 @@ export class TaskDigestService {
     if (carrier) {
       if (read.state === 'capped') return { state: read.state };
       const parsed = parseTaskFile(taskId, read.content);
-      fragment = { state: 'ready', task: parsed.kind === 'task' ? parsed.task : null };
+      if (parsed.kind !== 'task') {
+        throw Object.assign(new Error('Invalid task carrier.'), { code: 'INVALID_TASK_CARRIER' });
+      }
+      fragment = { state: 'ready', task: parsed.task };
     } else {
       // Only complete lines from the capped prefix enter the extractors.
       const text = read.state === 'capped' ? read.content.slice(0, read.content.lastIndexOf('\n') + 1) : read.content;
@@ -210,7 +214,7 @@ export class TaskDigestService {
       if (entry.state === 'file') {
         metadata.set(name, entry);
         candidates.push({ name, ...describeTaskDocumentName(name), size: entry.size, mtime: entry.mtime, statFailed: false });
-      } else if (type === FileType.File) {
+      } else if (type === FileType.File || (type === undefined && entry.state === 'unreadable')) {
         stable = false;
         candidates.push({ name, ...describeTaskDocumentName(name), size: 0, mtime: 0, statFailed: true });
       } else if (entry.state === 'unreadable' || (type !== undefined && entry.state === 'missing')) {
@@ -233,7 +237,7 @@ export class TaskDigestService {
       if (carrier.state === 'missing') return null;
       throw new Error(`Task carrier read failed: ${carrier.state}`);
     }
-    if (!('task' in carrier.fragment) || !carrier.fragment.task) return null;
+    if (!('task' in carrier.fragment)) throw new Error('Task carrier fragment is unavailable.');
     stable = stable && carrier.stable;
 
     const latest = selectLatestTaskDocuments(candidates.filter(({ statFailed }) => !statFailed));
@@ -267,9 +271,16 @@ export class TaskDigestService {
     const readOrder = [progressName, DECISIONS_FILE, CONTEXT_FILE, TASK_DESCRIPTION_FILE]
       .flatMap((name) => byName.get(name) ?? []);
     const extracted = new Map<string, string>();
+    if (documents.some((doc) => doc.kind === 'reviews' && doc.extraction === 'failed')) {
+      reasons.add('reads');
+    }
     let reads = 0;
     for (const doc of [...readOrder, ...plans, ...reviews]) {
-      if (doc.readable === false || !isReadableTaskFolderMarkdownName(doc.name)) continue;
+      const requiredExtraction = doc.name === progressName || doc.name === DECISIONS_FILE || doc.kind === 'reviews';
+      if (doc.extraction === 'failed' || !isReadableTaskFolderMarkdownName(doc.name)) {
+        if (requiredExtraction) reasons.add('reads');
+        continue;
+      }
       if (reads === MAX_READS) {
         doc.extraction = 'skipped';
         reasons.add('reads');
@@ -280,6 +291,7 @@ export class TaskDigestService {
       if ('state' in result || !('text' in result.fragment)) {
         doc.readable = false;
         doc.extraction = 'failed';
+        if (requiredExtraction) reasons.add('reads');
         stable = false;
         continue;
       }

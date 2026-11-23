@@ -36,11 +36,11 @@ describe('ProviderLaneLimitTileComponent', () => {
     expect(bar?.getAttribute('aria-label')).toBe('Kimi Code Monthly code usage');
     expect(bar?.getAttribute('aria-valuenow')).toBe('80');
     expect(bar?.getAttribute('aria-valuetext')).toContain('80% used');
-    expect(bar?.className).toContain('h-[3px]');
+    expect(bar?.className).toContain('h-[0.1875rem]');
     expect(bar?.firstElementChild?.className).toContain('bg-state-need');
     const extra = rows[1].querySelector<HTMLElement>('[role="meter"]');
     expect(extra?.getAttribute('aria-valuenow')).toBe('41');
-    expect(extra?.className).toContain('h-[3px]');
+    expect(extra?.className).toContain('h-[0.1875rem]');
   });
   it('shows untracked provider state', () => {
     TestBed.configureTestingModule({ imports: [ProviderLaneLimitTileComponent] });

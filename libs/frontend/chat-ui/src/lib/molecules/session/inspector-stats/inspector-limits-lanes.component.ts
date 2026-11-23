@@ -34,7 +34,7 @@ export class InspectorLimitsLanesComponent {
     const vm = this.limits();
     const session: ProviderLaneLimitModel[] = vm.planTiles.length ? [{
       id: 'session-provider', label: vm.sessionProviderLabel ?? 'Session', ownerState: 'single',
-      windows: vm.planTiles, message: 'Limits not tracked', ownerDetails: [],
+      windows: vm.planTiles, message: '', ownerDetails: [],
       accountId: vm.sessionProviderAccountId, source: vm.sessionProviderSource, indicator: vm.indicator,
     }] : [];
     return [...session, ...vm.providerLimits.map(provider => ({

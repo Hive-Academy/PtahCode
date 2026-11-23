@@ -29,7 +29,14 @@ import {
   type SessionLimitSummary,
 } from '@ptah-extension/chat-ui';
 import { SessionId } from '@ptah-extension/shared';
-import { LucideAngularModule, PanelRightClose } from 'lucide-angular';
+import {
+  PtahBadgeDirective,
+  PtahIconButtonDirective,
+  PtahSkeletonComponent,
+  PtahStatusComponent,
+  type PtahStatus,
+} from '@ptah-extension/ui';
+import { GitBranch, LucideAngularModule, PanelRightClose, Workflow } from 'lucide-angular';
 import {
   HandoffChainClient,
   InspectorShellController,
@@ -43,11 +50,19 @@ import { InspectorSessionActionsComponent } from './inspector-session-actions.co
 import { InspectorRequestLinesComponent } from './inspector-request-panel.component';
 import { InspectorTaskSectionComponent } from './inspector-task-section.component';
 
-import { PtahIconButtonDirective } from '@ptah-extension/ui';
 /** Where the inspector body is shown; `sheet` is the modal overlay band. */
 export type SessionInspectorPresentation =
   'docked' | 'sheet' | 'embedded' | 'rail';
 type InspectorFocusSection = 'session' | 'agents' | 'orchestrator' | 'limits' | 'attention';
+
+const HEADER_STATUS = new Map<string, { status: PtahStatus; label: string }>([
+  ['running', { status: 'running', label: 'Running' }],
+  ['background', { status: 'running', label: 'Background' }],
+  ['needs', { status: 'needs-review', label: 'Needs you' }],
+  ['error', { status: 'failed', label: 'Failed' }],
+  ['done', { status: 'completed', label: 'Done' }],
+  ['idle', { status: 'pending', label: 'Idle' }],
+]);
 
 const FOCUS_TARGETS: Record<Exclude<InspectorFocusSection, 'attention'>, string> = {
   session: '[data-active-session-stats] [data-inspector-section="session"] h3',
@@ -83,6 +98,9 @@ function statsSwitchWindowMs(element: HTMLElement): number {
   imports: [
     NgTemplateOutlet,
     LucideAngularModule,
+    PtahBadgeDirective,
+    PtahSkeletonComponent,
+    PtahStatusComponent,
     InspectorRequestLinesComponent,
     InspectorSessionStatsComponent,
     InspectorLinkedSessionsComponent,
@@ -172,6 +190,13 @@ export class SessionInspectorComponent {
   readonly answerRequested = output<string>();
 
   protected readonly PanelRightCloseIcon = PanelRightClose;
+  protected readonly workflowIcon = Workflow;
+  protected readonly branchIcon = GitBranch;
+  protected readonly headerStatus = computed(() => {
+    const label = this.sessionStatus().trim();
+    if (!label) return null;
+    return HEADER_STATUS.get(label) ?? { status: 'pending' as const, label };
+  });
 
   /** Polite live region shared by request outcomes and session changes. */
   protected readonly announcement = signal('');
@@ -235,7 +260,7 @@ export class SessionInspectorComponent {
     this.projection.contributions().filter((entry) => entry.source === 'cli'),
   );
   private readonly totals = computed(() => {
-    const snapshot = this.stats()?.snapshot ?? null;
+    const snapshot = this.projection.snapshot();
     const sdk = sdkContribution(snapshot);
     // A pending SDK read is not evidence of missing usage. Wait to show a whole-session figure.
     const usage = snapshot ? [sdk, ...this.cliContributions()] : [sdk];

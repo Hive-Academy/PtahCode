@@ -404,6 +404,18 @@ describe('tasks:getDigest', () => {
     });
   });
 
+  it('reports an invalid carrier as a sanitized failure and an absent carrier as null', async () => {
+    const { rpc, digest } = buildSuite();
+    digest.getDigest.mockRejectedValueOnce(Object.assign(
+      new Error('YAML parse error in /private/workspace/.ptah/specs/task.md'),
+      { code: 'INVALID_TASK_CARRIER' },
+    ));
+    const handler = getHandler(rpc, 'tasks:getDigest');
+
+    await expect(handler({ taskId })).rejects.toThrow(/^Invalid task carrier\.$/);
+    await expect(handler({ taskId })).resolves.toEqual({ digest: null });
+  });
+
   it.each([
     [{ taskId: '../x' }, 'INVALID_PARAMS'],
     [{ taskId, workspaceRoot: '/outside' }, 'UNAUTHORIZED_WORKSPACE'],

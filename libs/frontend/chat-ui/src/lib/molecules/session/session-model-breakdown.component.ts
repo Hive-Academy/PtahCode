@@ -37,194 +37,197 @@ interface ModelUsageSource {
   selector: 'ptah-session-model-breakdown',
   standalone: true,
   template: `
-    <p class="text-xs text-base-content-muted">SDK scope — orchestrator and SDK subagents, no CLI lanes</p>
     @let tokenSource = sources()[0];
     @let costSource = sources()[1];
-    @if (usableSnapshot(); as stats) {
-      <div
-        class="mt-1.5 bg-base-200/50 rounded border border-purple-600/20 overflow-hidden"
-        [class.inspector-model-table]="tokenSource !== undefined"
-        role="table"
-        aria-label="Per-model usage"
-        data-testid="model-usage-table"
-      >
-        <div
-          class="model-usage-row px-2 py-1 border-b border-base-content/10"
-          [class.sr-only]="tokenSource !== undefined"
-          role="row"
-          data-testid="model-usage-header"
-        >
+    <p class="text-xs text-base-content-muted" [class.sr-only]="tokenSource !== undefined">SDK scope — orchestrator and SDK subagents, no CLI lanes</p>
+    @if (usableSnapshot() || tokenSource) {
+      <div class="mt-1.5 overflow-hidden rounded border bg-base-200/50"
+        [class.border-surface-border]="tokenSource" [class.border-purple-600/20]="!tokenSource">
+        @if (usableSnapshot(); as stats) {
           <div
-            class="text-[10px] leading-tight uppercase tracking-wider text-base-content-muted"
-            role="columnheader"
-          >
-            Model
-          </div>
-          <div
-            class="text-[10px] leading-tight uppercase tracking-wider text-base-content-muted text-right"
-            role="columnheader"
-            title="Uncached input tokens"
-          >
-            In
-          </div>
-          <div
-            class="text-[10px] leading-tight uppercase tracking-wider text-base-content-muted text-right"
-            role="columnheader"
-            title="Output tokens"
-          >
-            Out
-          </div>
-          <div
-            class="text-[10px] leading-tight uppercase tracking-wider text-base-content-muted text-right"
-            role="columnheader"
-            title="Cache read tokens"
-          >
-            Cache Read
-          </div>
-          <div
-            class="text-[10px] leading-tight uppercase tracking-wider text-base-content-muted text-right"
-            role="columnheader"
-            title="Cache creation tokens"
-          >
-            Cache Creation
-          </div>
-          <div
-            class="text-[10px] leading-tight uppercase tracking-wider text-base-content-muted text-right"
-            role="columnheader"
-          >
-            Cost
-          </div>
-        </div>
-        @for (usage of modelRows(); track usage.model) {
-          <div
-            class="model-usage-row px-2 py-1.5 border-b border-base-content/5 last:border-b-0"
-            role="row"
-            data-testid="model-usage-row"
+            [class.inspector-model-table]="tokenSource !== undefined"
+            role="table"
+            aria-label="Per-model usage"
+            data-testid="model-usage-table"
           >
             <div
-              class="text-xs font-semibold text-base-content truncate"
-              role="cell"
-              [title]="usage.model"
+              class="model-usage-row px-2 py-1 border-b border-base-content/10"
+              [class.sr-only]="tokenSource !== undefined"
+              role="row"
+              data-testid="model-usage-header"
             >
-              {{ formatModelName(usage.model) }}
+              <div
+                class="text-[10px] leading-tight uppercase tracking-wider text-base-content-muted"
+                role="columnheader"
+              >
+                Model
+              </div>
+              <div
+                class="text-[10px] leading-tight uppercase tracking-wider text-base-content-muted text-right"
+                role="columnheader"
+                title="Uncached input tokens"
+              >
+                In
+              </div>
+              <div
+                class="text-[10px] leading-tight uppercase tracking-wider text-base-content-muted text-right"
+                role="columnheader"
+                title="Output tokens"
+              >
+                Out
+              </div>
+              <div
+                class="text-[10px] leading-tight uppercase tracking-wider text-base-content-muted text-right"
+                role="columnheader"
+                title="Cache read tokens"
+              >
+                Cache Read
+              </div>
+              <div
+                class="text-[10px] leading-tight uppercase tracking-wider text-base-content-muted text-right"
+                role="columnheader"
+                title="Cache creation tokens"
+              >
+                Cache Creation
+              </div>
+              <div
+                class="text-[10px] leading-tight uppercase tracking-wider text-base-content-muted text-right"
+                role="columnheader"
+              >
+                Cost
+              </div>
             </div>
+            @for (usage of modelRows(); track usage.model) {
+              <div
+                class="model-usage-row px-2 py-1.5 border-b border-base-content/5 last:border-b-0"
+                role="row"
+                data-testid="model-usage-row"
+              >
+                <div
+                  class="text-xs font-semibold text-base-content truncate"
+                  role="cell"
+                  [title]="usage.model"
+                >
+                  {{ formatModelName(usage.model) }}
+                </div>
+                <div
+                  class="text-xs text-right tabular-nums text-base-content-muted"
+                  role="cell"
+                >
+                  @if (tokenSource) { <span>In</span> }
+                  {{ formatTokens(usage.inputTokens) }}
+                </div>
+                <div
+                  class="text-xs text-right tabular-nums text-base-content-muted"
+                  role="cell"
+                >
+                  @if (tokenSource) { <span>Out</span> }
+                  {{ formatTokens(usage.outputTokens) }}
+                </div>
+                <div
+                  class="text-xs text-right tabular-nums text-base-content-muted"
+                  role="cell"
+                >
+                  @if (tokenSource) { <span>Cache read</span> }
+                  {{ formatOptionalTokens(usage.cacheRead) }}
+                </div>
+                <div
+                  class="text-xs text-right tabular-nums text-base-content-muted"
+                  role="cell"
+                >
+                  @if (tokenSource) { <span>Cache creation</span> }
+                  {{ formatOptionalTokens(usage.cacheCreation) }}
+                </div>
+                <div
+                  class="text-xs text-right tabular-nums"
+                  [class.text-success]="isKnownCost(usage.costUSD)"
+                  [class.text-base-content-muted]="!isKnownCost(usage.costUSD)"
+                  [attr.title]="isKnownCost(usage.costUSD) ? null : notReported"
+                  role="cell"
+                >
+                  {{ formatModelCost(usage.costUSD, stats) }}
+                </div>
+              </div>
+            }
+            <!-- Totals row: the snapshot's own totals, never a sum of rows -->
             <div
-              class="text-xs text-right tabular-nums text-base-content-muted"
-              role="cell"
+              class="model-usage-row px-2 py-1.5 border-t border-base-content/10 bg-base-300/30"
+              role="row"
+              [class.sr-only]="!showSubtotal()"
+              data-testid="model-usage-total"
             >
-              @if (tokenSource) { <span>In</span> }
-              {{ formatTokens(usage.inputTokens) }}
-            </div>
-            <div
-              class="text-xs text-right tabular-nums text-base-content-muted"
-              role="cell"
-            >
-              @if (tokenSource) { <span>Out</span> }
-              {{ formatTokens(usage.outputTokens) }}
-            </div>
-            <div
-              class="text-xs text-right tabular-nums text-base-content-muted"
-              role="cell"
-            >
-              @if (tokenSource) { <span>Cache read</span> }
-              {{ formatOptionalTokens(usage.cacheRead) }}
-            </div>
-            <div
-              class="text-xs text-right tabular-nums text-base-content-muted"
-              role="cell"
-            >
-              @if (tokenSource) { <span>Cache creation</span> }
-              {{ formatOptionalTokens(usage.cacheCreation) }}
-            </div>
-            <div
-              class="text-xs text-right tabular-nums"
-              [class.text-success]="isKnownCost(usage.costUSD)"
-              [class.text-base-content-muted]="!isKnownCost(usage.costUSD)"
-              [attr.title]="isKnownCost(usage.costUSD) ? null : notReported"
-              role="cell"
-            >
-              {{ formatModelCost(usage.costUSD, stats) }}
+              <div class="text-xs font-semibold" role="cell">{{ tokenSource ? 'SDK subtotal' : 'Total' }}</div>
+              <div
+                class="text-xs text-right tabular-nums font-semibold"
+                role="cell"
+              >
+                @if (tokenSource) { <span>In</span> }
+                  {{ formatTokens(stats.tokens.input) }}
+              </div>
+              <div
+                class="text-xs text-right tabular-nums font-semibold"
+                role="cell"
+              >
+                @if (tokenSource) { <span>Out</span> }
+                  {{ formatTokens(stats.tokens.output) }}
+              </div>
+              <div
+                class="text-xs text-right tabular-nums font-semibold"
+                role="cell"
+              >
+                @if (tokenSource) { <span>Cache read</span> }
+                  {{ formatTokens(stats.tokens.cacheRead) }}
+              </div>
+              <div
+                class="text-xs text-right tabular-nums font-semibold"
+                role="cell"
+              >
+                @if (tokenSource) { <span>Cache creation</span> }
+                  {{ formatTokens(stats.tokens.cacheCreation) }}
+              </div>
+              <div
+                class="text-xs text-right tabular-nums font-semibold"
+                [class.text-success]="costSource ? costSource.sdkLabel !== '—' : isKnownCost(stats.totalCost)"
+                [class.text-base-content-muted]="costSource ? costSource.sdkLabel === '—' : !isKnownCost(stats.totalCost)"
+                role="cell"
+              >
+                @if (costSource) {
+                  {{ costSource.sdkLabel }}
+                } @else {
+                  {{ formatModelTotal(stats) }}
+                }
+              </div>
             </div>
           </div>
         }
-        <!-- Totals row: the snapshot's own totals, never a sum of rows -->
-        <div
-          class="model-usage-row px-2 py-1.5 border-t border-base-content/10 bg-base-300/30"
-          role="row"
-          data-testid="model-usage-total"
-        >
-          <div class="text-xs font-semibold" role="cell">{{ tokenSource ? 'SDK subtotal' : 'Total' }}</div>
-          <div
-            class="text-xs text-right tabular-nums font-semibold"
-            role="cell"
-          >
-            @if (tokenSource) { <span>In</span> }
-              {{ formatTokens(stats.tokens.input) }}
-          </div>
-          <div
-            class="text-xs text-right tabular-nums font-semibold"
-            role="cell"
-          >
-            @if (tokenSource) { <span>Out</span> }
-              {{ formatTokens(stats.tokens.output) }}
-          </div>
-          <div
-            class="text-xs text-right tabular-nums font-semibold"
-            role="cell"
-          >
-            @if (tokenSource) { <span>Cache read</span> }
-              {{ formatTokens(stats.tokens.cacheRead) }}
-          </div>
-          <div
-            class="text-xs text-right tabular-nums font-semibold"
-            role="cell"
-          >
-            @if (tokenSource) { <span>Cache creation</span> }
-              {{ formatTokens(stats.tokens.cacheCreation) }}
-          </div>
-          <div
-            class="text-xs text-right tabular-nums font-semibold"
-            [class.text-success]="costSource ? costSource.sdkLabel !== '—' : isKnownCost(stats.totalCost)"
-            [class.text-base-content-muted]="costSource ? costSource.sdkLabel === '—' : !isKnownCost(stats.totalCost)"
-            role="cell"
-          >
-            @if (costSource) {
-              {{ costSource.sdkLabel }}
-            } @else {
-              {{ formatModelTotal(stats) }}
+        @if (tokenSource && costSource) {
+          <div class="space-y-1 border-surface-border px-2 py-1.5 text-[11px] text-base-content-muted"
+            [class.border-t]="usableSnapshot()">
+            @if (tokenSource.laneCount) {
+              <p class="tabular-nums" data-testid="model-cli-coverage">
+                <span class="whitespace-nowrap">CLI {{ tokenSource.cliLabel }} tokens · {{ costSource.cliLabel }}</span>
+                · <span class="whitespace-nowrap">Tokens {{ tokenSource.reported }}/{{ tokenSource.laneCount }}</span>
+                · <span class="whitespace-nowrap">Cost {{ costSource.reported }}/{{ costSource.laneCount }}</span>
+              </p>
             }
+            <dl>
+              <div class="flex gap-1">
+                <dt>Cost basis</dt>
+                <dd class="text-base-content">{{ costBasis() }}</dd>
+              </div>
+            </dl>
           </div>
-        </div>
+        }
       </div>
     }
     @if (tokenSource && costSource) {
-      <dl class="flex flex-wrap gap-x-3 gap-y-1 pt-2 text-xs">
-        <div>
-          <dt class="text-base-content-muted">SDK subtotal</dt>
-          <dd class="tabular-nums">{{ tokenSource.sdkLabel }} tokens · {{ costSource.sdkLabel }}</dd>
-        </div>
-        @if (tokenSource.laneCount) {
-          <div>
-            <dt class="text-base-content-muted">CLI lanes</dt>
-            <dd class="tabular-nums">{{ tokenSource.cliLabel }} tokens · {{ costSource.cliLabel }}</dd>
-          </div>
-          <div>
-            <dt class="text-base-content-muted">Lanes with tokens</dt>
-            <dd>{{ tokenSource.reported }}/{{ tokenSource.laneCount }}</dd>
-          </div>
-          <div>
-            <dt class="text-base-content-muted">Lanes with cost</dt>
-            <dd>{{ costSource.reported }}/{{ costSource.laneCount }}</dd>
-          </div>
-        }
-        <div>
-          <dt class="text-base-content-muted">Cost basis</dt>
-          <dd>{{ costBasis() }}</dd>
-        </div>
-      </dl>
-      <div class="mt-1 space-y-1 text-xs text-base-content-muted">
+      <div class="sr-only" data-testid="model-source-details">
         <p>{{ tokenSource.sourceText }}</p>
         <p>{{ costSource.sourceText }}</p>
+        @if (tokenSource.laneCount) {
+          <p>Lanes with tokens: {{ tokenSource.reported }} of {{ tokenSource.laneCount }}.
+            Lanes with cost: {{ costSource.reported }} of {{ costSource.laneCount }}.</p>
+        }
       </div>
     }
   `,
@@ -272,6 +275,8 @@ export class SessionModelBreakdownComponent {
   readonly modelRows = computed<readonly ModelUsageRow[]>(
     () => this.usableSnapshot()?.modelUsageList ?? [],
   );
+
+  protected readonly showSubtotal = computed(() => !this.sources().length || this.modelRows().length > 1);
 
   protected readonly formatModelCost = formatModelCost;
   protected readonly formatModelTotal = formatModelTotal;

@@ -287,8 +287,10 @@ test.describe('Compaction recovery for duplicate visible session tiles (TASK_202
     await expect(stats).toContainText('Tokens');
     await expect(stats).toContainText('226.7k');
     await expect(stats).toContainText('Cost');
-    await expect(stats).toContainText('$35.67');
-    await expect(stats).toContainText('1 compaction');
+    // The cost is 35.668 and the stats floor it (never round a cost up).
+    await expect(stats).toContainText('$35.66');
+    // The compaction count moved to the Orchestrator detail of the AGENTS
+    // section; the compaction markers below prove the compaction itself.
 
     for (const tile of [firstTile, secondTile]) {
       await expect(

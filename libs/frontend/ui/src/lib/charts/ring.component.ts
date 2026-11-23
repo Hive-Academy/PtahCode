@@ -4,7 +4,7 @@ import { CHART_TEXT, isValidRange, percentOf, resolveInk } from './chart-geometr
 import { PtahMeterTone, PtahRingSize, PtahRingThresholds } from './chart.types';
 
 const BOX: Readonly<Record<PtahRingSize, string>> = {
-  dot: 'h-[11px] w-[11px]',
+  dot: 'h-[0.6875rem] w-[0.6875rem]',
   inline: 'h-5 w-5',
   xs: 'h-6 w-6',
   stat: 'h-8 w-8',

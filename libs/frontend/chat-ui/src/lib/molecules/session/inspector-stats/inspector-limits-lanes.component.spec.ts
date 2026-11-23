@@ -150,7 +150,8 @@ describe('Plan Limits provider states', () => {
     const root = render({ owner: grok, status: 'no-usage-source', statusReason: 'cli-not-signed-in',
       windowSetEstablished: false, ownerEvidence: [], windows: [] });
     for (const provider of root.querySelectorAll('ptah-provider-lane-limit-tile')) {
-      expect(provider.textContent).toContain('Sign in to the Grok CLI (run grok login)');
+      expect(provider.querySelector('[data-testid="provider-limit-message"]')?.textContent?.trim())
+        .toBe('Sign in to the Grok CLI (run grok login)');
       expect(provider.textContent).not.toMatch(/No usage source|[0-9]+%/i);
       expect(provider.querySelector('ptah-meter')).toBeNull();
     }
@@ -170,9 +171,10 @@ describe('Plan Limits provider states', () => {
     const root = render({ owner: grok, status: 'cli-unavailable', statusReason: 'cli-timeout', source: 'cli-command',
       windowSetEstablished: false, ownerEvidence: [], windows: [] });
     for (const provider of root.querySelectorAll('ptah-provider-lane-limit-tile')) {
-      const notice = provider.querySelector<HTMLElement>('.italic[tabindex="0"]');
-      expect(notice?.textContent).toBe('usage unavailable');
-      expect(notice?.getAttribute('aria-label')).toContain('Grok CLI did not respond in time');
+      const notice = provider.querySelector<HTMLElement>('[data-testid="provider-limit-message"]');
+      expect(notice?.textContent?.trim()).toBe('Grok CLI did not respond in time');
+      expect(notice?.tabIndex).toBe(0);
+      expect(provider.querySelector('[data-testid="plan-extra-tile"]')).toBeNull();
       notice?.focus();
       expect(document.body.querySelector('[role="tooltip"]')?.textContent).toContain('Grok CLI did not respond in time');
       notice?.blur();
@@ -180,30 +182,60 @@ describe('Plan Limits provider states', () => {
     }
   });
 
-  it('renders a reported window group only when every window has a valid group, keeping the full labels', () => {
+  it('keeps a reported group beside legacy windows and displays each full window label', () => {
+    const legacy: PlanLimitWindow = { ...hourly, key: 'other:legacy', kind: 'other', label: 'Gemini models · 5-hour' };
     const gemini: PlanLimitWindow & { readonly group: string } = {
-      ...hourly, key: 'other:gemini-5h', kind: 'other', label: 'Gemini models 5-hour', group: ' Gemini models ',
+      ...hourly, key: 'other:gemini-5h', kind: 'other', label: '5h', group: ' Gemini models ',
     };
-    const geminiWeekly = { ...gemini, key: 'other:gemini-weekly', label: 'Gemini models weekly' } as const;
-    const others = { ...gemini, key: 'other:claude-5h', label: 'Claude and GPT models 5-hour', group: 'Claude and GPT models' } as const;
-    const othersWeekly = { ...others, key: 'other:claude-weekly', label: 'Claude and GPT models weekly' } as const;
-    const { group: _group, ...ungrouped } = gemini;
-    const grouped = [gemini, geminiWeekly, others, othersWeekly];
+    const geminiWeekly = { ...gemini, key: 'other:gemini-weekly', label: 'Week' } as const;
+    const others = { ...gemini, key: 'other:claude-5h', group: 'Claude and GPT models' } as const;
+    const blank = { ...gemini, group: ' ' };
     const malformed = { ...gemini };
     Reflect.set(malformed, 'group', 42);
     const base = { owner: agy, status: 'available', windowSetEstablished: true, ownerEvidence: [], source: 'cli-command' } as const;
-    for (const [windows, captions] of [
-      [grouped, ['Gemini models', 'Claude and GPT models']],
-      [[ungrouped], []],
-      [[ungrouped, others], []],
-      [[{ ...gemini, group: ' ' }, others], []],
-      [[malformed, others], []],
+    for (const [windows, captions, stacked] of [
+      [[gemini, geminiWeekly, others], ['Gemini models', 'Claude and GPT models'], false],
+      [[legacy, hourly], [], true],
+      [[legacy, others], ['Claude and GPT models'], true],
+      [[blank, others], ['Claude and GPT models'], false],
+      [[malformed, others], ['Claude and GPT models'], false],
     ] as const) {
-      const root = render({ ...base, windows });
-      const session = root.querySelector('ptah-provider-lane-limit-tile');
+      const session = render({ ...base, windows }).querySelector('ptah-provider-lane-limit-tile');
       expect([...session?.querySelectorAll('[data-testid="plan-window-group"]') ?? []].map(node => node.textContent)).toEqual(captions);
-      for (const window of windows) expect(session?.textContent).toContain(window.label);
+      const rows = [...session?.querySelectorAll('[data-testid="plan-window-row"]') ?? []];
+      expect(rows).toHaveLength(windows.length);
+      expect(rows.every(row => row.classList.contains('stacked-label') === stacked)).toBe(true);
+      for (const window of windows) {
+        const row = rows.find(node => node.getAttribute('data-tile-id')?.endsWith(`:${window.key}`));
+        expect(row?.firstElementChild?.textContent).toBe(window.label);
+        expect(row?.firstElementChild?.getAttribute('title')).toBe(window.label);
+        expect(row?.getAttribute('aria-label')).toContain(window.label);
+      }
       TestBed.resetTestingModule();
+    }
+  });
+
+  it('gives the single unconfirmed-reading mark a hover and keyboard explanation', () => {
+    const root = render({ owner: agy, status: 'available', windowSetEstablished: true, ownerEvidence: [],
+      windows: [{ ...hourly, used: { kind: 'percent', percent: 3.4 } }] });
+    const row = root.querySelector<HTMLElement>('[data-testid="plan-window-row"]');
+    expect(row?.textContent?.match(/\?/g)).toHaveLength(1);
+    expect(row?.querySelector('[title^="Not confirmed"]')?.textContent).toBe('?');
+    expect(row?.getAttribute('aria-label')).toMatch(/Not confirmed.*freshness cannot be confirmed/);
+    row?.focus();
+    expect(document.body.querySelector('[role="tooltip"]')?.textContent).toContain('last reset unknown');
+    row?.blur();
+  });
+
+  it('shows only the specific reason when there is no open session', () => {
+    const root = render({ owner: kimi, status: 'service-unavailable', unavailableReason: 'no-open-session',
+      windowSetEstablished: false, ownerEvidence: [], windows: [] });
+    for (const provider of root.querySelectorAll('ptah-provider-lane-limit-tile')) {
+      const notices = provider.querySelectorAll('[data-testid="provider-limit-message"]');
+      expect(notices).toHaveLength(1);
+      expect(notices[0].textContent?.trim()).toBe('no open session');
+      expect(provider.textContent).not.toMatch(/Limits not tracked|Unavailable|Plan usage could not be read/);
+      expect(provider.querySelector('ptah-meter')).toBeNull();
     }
   });
 

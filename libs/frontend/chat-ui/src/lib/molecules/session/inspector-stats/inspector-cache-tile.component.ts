@@ -69,7 +69,7 @@ function countdown(ms: number, showHours = true): string {
         [hideLabel]="true"
         [showValue]="false"
         size="xs"
-        track="3px"
+        track="thin"
       />
       @if (variant() === 'detail') {
         <p class="text-xs text-base-content-muted">{{ estimateTitle }}</p>

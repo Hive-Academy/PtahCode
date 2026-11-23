@@ -18,6 +18,7 @@ import type {
   SessionTaskLinkSummary,
   TaskDigest,
   TaskDigestDocument,
+  TasksListFolderEntriesResult,
 } from '@ptah-extension/shared';
 import { ChatStore } from '../../../services/chat.store';
 import { SessionOrganizationCache } from '../../../services/session-organization/session-organization-cache.store';
@@ -354,6 +355,10 @@ describe('SessionTaskReader digest and documents', () => {
     await settle();
   }
 
+  function folderEntries(entries: TasksListFolderEntriesResult['entries']): Response {
+    return ok({ taskId: 'TASK_A', directory: '', state: 'ready', entries } satisfies TasksListFolderEntriesResult);
+  }
+
   function notify(change: Change): void {
     changes.set({ seq: 1, change });
     TestBed.tick();
@@ -464,6 +469,7 @@ describe('SessionTaskReader digest and documents', () => {
     expect(reader.state()?.status).toBe('loading');
     take('tasks:getDigest').resolve({ success: false, error: 'Cannot read C:/private/workspace' });
     await settle();
+    expect(pending).toHaveLength(0);
     expect(reader.state()).toMatchObject({
       status: 'error', error: 'Could not load task details',
       data: { digest: first, documents: ['task.md', 'context.md', 'implementation-plan.md'] },
@@ -480,13 +486,73 @@ describe('SessionTaskReader digest and documents', () => {
     expect(reader.progress()).toBe(refreshed.progress);
   });
 
-  it('reports a rejected first read as an unavailable digest and allows a retry', async () => {
-    take('tasks:getDigest').reject(new Error('C:/private/workspace'));
+  it('previews and opens eligible top-level Markdown after a coded first digest failure', async () => {
+    take('tasks:getDigest').resolve(new RpcResult(false, undefined, 'Invalid task.md at C:/private/workspace', 'INVALID_PARAMS'));
+    await settle();
+    const listing = take('tasks:listFolderEntries');
+    expect(listing.params).toEqual({ workspaceRoot: 'C:/ws', taskId: 'TASK_A', directory: '' });
+    listing.resolve(folderEntries([
+      { name: 'task.md', kind: 'file' },
+      { name: 'extra.md', kind: 'file' },
+      { name: 'archive.md', kind: 'directory' },
+      { name: 'link.md', kind: 'symlink' },
+      { name: 'notes.txt', kind: 'file' },
+      { name: 'nested/notes.md', kind: 'file' },
+    ]));
     await settle();
     expect(reader.state()).toMatchObject({
-      status: 'error', error: 'Could not load task details', data: { digest: null },
+      status: 'error',
+      error: 'Could not load task details',
+      data: { task: null, digest: null, documents: ['task.md', 'extra.md'] },
+    });
+    expect(reader.progress()).toBeNull();
+
+    const preview = reader.previewDocument('extra.md');
+    take('tasks:readFolderMarkdown').resolve(markdown('TASK_A', 'extra.md'));
+    await preview;
+    expect(reader.preview()).toMatchObject({ status: 'ready', content: 'Document' });
+
+    const opening = reader.openDocument('extra.md');
+    const check = take('tasks:readFolderMarkdown');
+    expect(check.params).toEqual({ workspaceRoot: 'C:/ws', taskId: 'TASK_A', file: 'extra.md' });
+    expect(open).not.toHaveBeenCalled();
+    check.resolve(markdown('TASK_A', 'extra.md'));
+    await opening;
+    expect(open).toHaveBeenCalledWith({ path: 'C:/ws/.ptah/specs/TASK_A/extra.md', origin: undefined });
+
+    reader.retry();
+    await finishDigest();
+    expect(reader.state()).toMatchObject({
+      status: 'ready',
+      data: { documents: ['task.md', 'context.md', 'implementation-plan.md'] },
+    });
+  });
+
+  it('keeps an empty file list and allows a retry when both the first digest and folder listing reject', async () => {
+    take('tasks:getDigest').reject(new Error('C:/private/workspace'));
+    await settle();
+    take('tasks:listFolderEntries').reject(new Error('C:/private/workspace/.ptah/specs'));
+    await settle();
+    expect(reader.state()).toMatchObject({
+      status: 'error', error: 'Could not load task details', data: { digest: null, documents: [] },
     });
     reader.retry();
+    await finishDigest();
+    expect(reader.state()?.status).toBe('ready');
+  });
+
+  it('drops a fallback listing after switching away and back to the same link', async () => {
+    take('tasks:getDigest').resolve({ success: false });
+    await settle();
+    const old = take('tasks:listFolderEntries');
+    tabId.set('tab-b');
+    TestBed.tick();
+    tabId.set('tab-a');
+    TestBed.tick();
+    expect(pending).toHaveLength(0);
+    old.resolve(folderEntries([{ name: 'old.md', kind: 'file' }]));
+    await settle();
+    expect(reader.state()).toMatchObject({ status: 'loading', data: { digest: null, documents: [] } });
     await finishDigest();
     expect(reader.state()?.status).toBe('ready');
   });

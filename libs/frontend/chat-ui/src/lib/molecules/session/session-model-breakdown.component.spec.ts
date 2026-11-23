@@ -172,6 +172,7 @@ describe('SESSION model scope', () => {
     expect(root.textContent).toContain('SDK subtotal');
     expect(root.textContent).toMatch(/Cost basis\s*/);
     expect(root.querySelector('dl > div:last-child dd')?.textContent?.trim()).toBe(label);
-    expect(root.querySelector('[data-testid="model-usage-total"]')?.textContent).toContain('Cache read');
+    expect(root.querySelector('[data-testid="model-usage-total"]')?.classList.contains('sr-only')).toBe(true);
+    expect(root.querySelector('.sr-only[role="row"]:last-child')?.textContent).toContain('Cache read');
   });
 });

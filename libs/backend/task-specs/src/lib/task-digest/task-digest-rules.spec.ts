@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { performance } from 'node:perf_hooks';
 import {
   BATCHES_FILE,
   LEGACY_BATCHES_FILE,
@@ -38,6 +39,9 @@ describe('task digest document metadata', () => {
     ['review-fix-report.md', 'reports'],
     ['test-report.md', 'reports'],
     ['test-fixes-round-2.md', 'reports'],
+    ['notes.v2-fixes.md', 'reports'],
+    ['notes.report.md', 'other'],
+    ['notes-report-.md', 'other'],
     ['design-spec-v3-review.md', 'reviews'],
     ['implementation-plan-review.md', 'reviews'],
     ['context.md', 'requirements'],
@@ -98,6 +102,12 @@ describe('task digest document metadata', () => {
 });
 
 describe('extractTaskReview', () => {
+  it('counts heading findings and exact table tags without counting summary rows or finding details', () => {
+    expect(extractTaskReview('standard-review.md', fixture('standard-review.md'))).toMatchObject({
+      verdict: 'REVISE', serious: 2, moderate: 1, minor: 1,
+    });
+  });
+
   it.each([
     ['design-spec-v3-review.md', 'design-spec', 3, 0],
     ['implementation-plan-review.md', 'implementation-plan', 0, 0],
@@ -127,13 +137,15 @@ describe('extractTaskReview', () => {
       '  - Nested',
       ' - [Moderate] — Overrides the heading',
       '| **Minor** |',
-      '#### mOdErAtE',
+      '#### mOdErAtE ####',
       '2. Second',
+      '#### Follow-up',
+      '- Third',
       '## Other',
       '- Outside',
       '* **serious** item',
     ].join('\n');
-    expect(extractTaskReview('review.md', text)).toMatchObject({ serious: 2, moderate: 2, minor: 1 });
+    expect(extractTaskReview('review.md', text)).toMatchObject({ serious: 3, moderate: 2, minor: 1 });
   });
 
   it('normalizes BOM and line endings and hides fenced examples in a capped prefix', () => {
@@ -196,11 +208,44 @@ describe('documentProgress', () => {
     expect(documentProgress('## Batch 1 — COMPLETE', BATCHES_FILE)).toBeNull();
   });
 
+  it('keeps progress markers and their values on the same line', () => {
+    expect(documentProgress('-\n[x] Not a checkbox\nstatus:\nDONE', BATCHES_FILE)).toBeNull();
+  });
+
   it('uses batches first and falls back to the legacy file when batches is absent', () => {
     expect(extractTaskProgress('- [ ] First', '- [x] Second')).toEqual({ done: 0, total: 1, source: BATCHES_FILE });
     expect(extractTaskProgress(null, '- [x] Second')).toEqual({ done: 1, total: 1, source: LEGACY_BATCHES_FILE });
     expect(extractTaskProgress('', '- [x] Second')).toBeNull();
     expect(extractTaskProgress(null, null)).toBeNull();
+  });
+});
+
+describe('digest extraction on whitespace-only documents', () => {
+  it.each([
+    ['progress', (input: string) => extractTaskProgress(input, null), null],
+    ['decisions', extractTaskDecisions, { rows: 0, pendingUser: 0 }],
+    ['open questions', countTaskOpenQuestions, 0],
+    ['review', (input: string) => extractTaskReview('review.md', input), {
+      verdict: null, serious: 0, moderate: 0, minor: 0,
+    }],
+  ] as const)('%s processes 65,536 newlines and spaces in under 200 ms each', (_name, extract, expected) => {
+    for (const char of ['\n', ' ']) {
+      const input = char.repeat(65_536);
+      const start = performance.now();
+      const result = extract(input);
+      expect(performance.now() - start).toBeLessThan(200);
+      expect(result).toEqual(typeof expected === 'object' && expected !== null
+        ? expect.objectContaining(expected)
+        : expected);
+    }
+  });
+
+  it('scans a long fence followed by an embedded Unicode line separator in under 200 ms', () => {
+    const input = '~'.repeat(65_500) + '\u2028notes\n# Verdict APPROVED';
+    const start = performance.now();
+    const result = extractTaskReview('review.md', input);
+    expect(performance.now() - start).toBeLessThan(200);
+    expect(result.verdict).toBeNull();
   });
 });
 

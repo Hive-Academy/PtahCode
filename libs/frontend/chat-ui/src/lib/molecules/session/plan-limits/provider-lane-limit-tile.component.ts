@@ -3,6 +3,8 @@ import { PtahBadgeDirective, PtahMeterComponent, PtahTooltipDirective } from '@p
 import { windowMeter } from './plan-limit-tiles';
 import type { PlanLimitTileModel, ProviderLaneLimitModel } from './stats-limit-view-model.types';
 
+const SHORT_LABEL_LENGTH = 6;
+
 const SOURCES = {
   'provider-api': ['API', 'Provider API'],
   'cli-command': ['CLI', 'CLI report'],
@@ -30,11 +32,6 @@ const SOURCES = {
             {{ indicator.state === 'at-limit' ? 'Limit reached' : 'Near limit' }}
           </span>
         }
-        @if (failure(); as tile) {
-          <span class="ml-auto text-right text-[11px] italic text-base-content-muted focus-visible:outline focus-visible:outline-base-content"
-            role="group" tabindex="0" [attr.aria-label]="'Usage unavailable: ' + tile.detailLines[0]"
-            [ptahTooltip]="tile.detailLines[0]">usage unavailable</span>
-        }
         <span class="ml-auto flex max-w-[50%] flex-wrap justify-end gap-1">
           @if (p.source; as source) {
             <span ptahBadge size="xs" [attr.title]="sources[source][1]">
@@ -48,7 +45,12 @@ const SOURCES = {
           }
         </span>
       </div>
-      @if (!failure() && (p.message || p.windows.length === 0)) {
+      @if (failure(); as failure) {
+        <p class="break-words text-[11px] text-base-content-muted focus-visible:outline focus-visible:outline-base-content"
+          data-testid="provider-limit-message" tabindex="0" [ptahTooltip]="failure.detail">
+          {{ failure.reason }}
+        </p>
+      } @else if (p.message || p.windows.length === 0) {
         <p class="text-[11px] text-base-content-muted" data-testid="provider-limit-message">
           {{ p.ownerState === 'untracked' ? 'Usage not tracked' : p.message || 'Limits not tracked' }}
         </p>
@@ -59,20 +61,23 @@ const SOURCES = {
         }
         @for (tile of group.tiles; track tile.id) {
           @let row = windowRowModel(tile);
-          <div class="grid min-w-0 grid-cols-[30px_minmax(0,1fr)_46px_60px] items-center gap-x-2 text-[11px] leading-[18px] focus-visible:outline focus-visible:outline-base-content"
+          <div class="grid min-w-0 plan-window-row items-center gap-x-2 text-[11px] leading-[18px] focus-visible:outline focus-visible:outline-base-content"
+            [class.stacked-label]="stackWindowLabels() || row.longLabel"
             [attr.data-tile-id]="tile.id" data-testid="plan-window-row" role="group" tabindex="0"
             [attr.aria-label]="row.description" [ptahTooltip]="row.description">
-            <span class="truncate text-base-content-muted">{{ tile.label }}</span>
+            <span class="plan-window-label min-w-0 break-words text-base-content-muted" [attr.title]="tile.label">{{ tile.label }}</span>
             <span>
               @if (row.range; as range) {
                 <ptah-meter [value]="range.value" [max]="range.max" [label]="p.label + ' ' + tile.label + ' usage'"
-                  [valueText]="row.valueText" [tone]="row.tone" track="3px" [showValue]="false" [hideLabel]="true" />
+                  [valueText]="row.valueText" [tone]="row.tone" track="thin" [showValue]="false" [hideLabel]="true" />
               }
             </span>
             <span class="text-right text-xs font-semibold tabular-nums"
-              [class.truncate]="!tile.window?.amount" [class.break-words]="tile.window?.amount"
+              [class.whitespace-nowrap]="!tile.window?.amount" [class.break-words]="tile.window?.amount"
               [class.text-base-content-muted]="row.displayValue === '—'">
-              @if (tile.chip; as chip) { <span aria-hidden="true">{{ chip.glyph }}</span> }
+              @if (tile.chip; as chip) {
+                <span aria-hidden="true" [attr.title]="row.markerTitle">{{ chip.glyph }}</span>
+              }
               {{ row.displayValue }}
             </span>
             <span class="truncate text-right text-base-content-muted" data-testid="plan-window-reset">{{ tile.window?.reset?.short ?? '—' }}</span>
@@ -96,30 +101,43 @@ const SOURCES = {
       }
     </div>
   `,
+  styles: `
+    .plan-window-row { grid-template-columns: 3rem minmax(0, 1fr) 3.25rem 3.75rem; }
+    .plan-window-row.stacked-label { grid-template-columns: minmax(0, 1fr) 3.25rem 3.75rem; }
+    .stacked-label .plan-window-label { grid-column: 1 / -1; }
+  `,
 })
 export class ProviderLaneLimitTileComponent {
   readonly provider = input.required<ProviderLaneLimitModel>();
   protected readonly sources = SOURCES;
-  protected readonly failure = computed(() => this.provider().windows.find(tile => tile.usageUnavailable));
+  protected readonly failure = computed(() => {
+    const tile = this.provider().windows.find(window => window.unavailableReason);
+    if (!tile?.unavailableReason) return null;
+    return {
+      reason: tile.unavailableReason,
+      detail: tile.detailLines.filter(line => line !== tile.unavailableReason).join(' ') || tile.unavailableReason,
+    };
+  });
   protected readonly sourceChips = computed(() => [...new Set(this.provider().windows.flatMap(tile => tile.sourceChips))]);
   protected readonly otherTiles = computed(() => this.provider().windows.filter(tile =>
-    tile.kind !== 'window' && !tile.usageUnavailable));
+    tile.kind !== 'window' && !tile.unavailableReason));
+  private readonly windows = computed(() => this.provider().windows.filter(tile => tile.kind === 'window'));
+  protected readonly stackWindowLabels = computed(() =>
+    this.windows().some(tile => !tile.window?.group && tile.label.length > SHORT_LABEL_LENGTH),
+  );
   protected readonly groups = computed(() => {
-    const windows = this.provider().windows.filter(tile => tile.kind === 'window');
-    if (windows.length === 0) return [];
-    if (!windows.every(tile => tile.window?.group)) {
-      const primary = windows.reduce((best, tile) => (tile.window?.percent ?? -1) > (best.window?.percent ?? -1) ? tile : best);
-      return [{ label: null, tiles: [primary, ...windows.filter(tile => tile !== primary)] }];
-    }
-    const groups = new Map<string, PlanLimitTileModel[]>();
-    for (const tile of windows) {
-      const label = tile.window?.group;
-      if (!label) continue;
+    const groups = new Map<string | null, PlanLimitTileModel[]>();
+    for (const tile of this.windows()) {
+      const label = tile.window?.group ?? null;
       const group = groups.get(label) ?? [];
       group.push(tile);
       groups.set(label, group);
     }
-    return [...groups].map(([label, tiles]) => ({ label, tiles }));
+    return [...groups].map(([label, tiles]) => {
+      if (label) return { label, tiles };
+      const primary = tiles.reduce((best, tile) => (tile.window?.percent ?? -1) > (best.window?.percent ?? -1) ? tile : best);
+      return { label, tiles: [primary, ...tiles.filter(tile => tile !== primary)] };
+    });
   });
 
   protected windowRowModel(tile: PlanLimitTileModel) {
@@ -132,9 +150,13 @@ export class ProviderLaneLimitTileComponent {
       : window?.amount ? displayValue : `${displayValue} used`;
     const valueText = [tile.label, usage, tile.chip?.text, tile.resetLine || 'Reset unknown', window?.reset?.full]
       .filter(Boolean).join(' · ');
-    const description = [valueText, window?.note, ...tile.sourceChips].filter(Boolean).join(' · ');
+    const description = [window?.group, valueText, window?.note, ...tile.sourceChips].filter(Boolean).join(' · ');
     return {
       range,
+      longLabel: tile.label.length > SHORT_LABEL_LENGTH,
+      markerTitle: window?.state === 'not-confirmed' && window.note
+        ? `Not confirmed: ${window.note}`
+        : tile.chip?.text,
       displayValue,
       description,
       valueText,

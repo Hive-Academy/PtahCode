@@ -20,7 +20,9 @@ const NUMBERED_HANDOFF = new RegExp(TASK_HANDOFF_FILE_PATTERN.source, 'i');
 const REVIEW_ROUND = /^(?:round-?|r|v)?(\d+)$/i;
 const BARE_REREVIEW = /^re-?review(?:-[a-z0-9-]+)?\.md$/i;
 const HEADING = /^(#{1,6})(?:[ \t]+|$)/;
-const FENCE = /^ {0,3}(\x60{3,}|~{3,})(.*)$/;
+const FENCE = /^ {0,3}(\x60{3,}|~{3,})/;
+const REPORT_SUFFIX = /(?:^|[^a-z0-9-])[a-z0-9-]*\.md$/;
+const REPORT_TAG = /(?:^|-)(?:report|fixes)(?=-[a-z0-9-]|\.md$)/;
 const MAX_OPENABLE_BYTES = 1024 * 1024;
 
 export interface TaskDigestDocumentName {
@@ -42,7 +44,8 @@ export function classifyTaskDocument(name: string): TaskDocumentKind {
   if (lower === CARRIER_FILE) return 'carrier';
   if (NUMBERED_HANDOFF.test(name) || lower === 'handoff.md') return 'handoff';
   if (/^research-report.*\.md$/i.test(name)) return 'design';
-  if (/(?:^|-)(?:report|fixes)(?:-[a-z0-9-]+)?\.md$/i.test(name)) return 'reports';
+  const reportSuffix = REPORT_SUFFIX.exec(lower)?.[0];
+  if (reportSuffix && REPORT_TAG.test(reportSuffix)) return 'reports';
   if (REVIEW_FILE_PATTERN.test(name)) return 'reviews';
   if (lower === CONTEXT_FILE || lower === TASK_DESCRIPTION_FILE) return 'requirements';
   if (lower === BATCHES_FILE || lower === LEGACY_BATCHES_FILE) return 'batches';
@@ -109,12 +112,14 @@ function visibleMarkdownLines(text: string): string[] {
   let fence: string | undefined;
   for (const line of text.replace(/^\uFEFF/, '').split(/\r\n?|\n/)) {
     const candidate = FENCE.exec(line);
+    const marker = candidate?.[1];
+    const suffix = candidate ? line.slice(candidate[0].length) : '';
     if (fence) {
-      if (candidate && candidate[1][0] === fence[0] && candidate[1].length >= fence.length && /^[ \t]*$/.test(candidate[2])) {
+      if (marker && marker[0] === fence[0] && marker.length >= fence.length && /^[ \t]*$/.test(suffix)) {
         fence = undefined;
       }
-    } else if (candidate && (candidate[1][0] === '~' || !candidate[2].includes('\x60'))) {
-      fence = candidate[1];
+    } else if (marker && (marker[0] === '~' || !suffix.includes('\x60'))) {
+      fence = marker;
     } else {
       visible.push(line);
     }
@@ -149,16 +154,45 @@ export function extractTaskReview(
   const { subject, revision, round } = describeTaskDocumentName(name);
   const lines = visibleMarkdownLines(text);
   const counts = { serious: 0, moderate: 0, minor: 0 };
-  let sectionSeverity: ReturnType<typeof severity>;
+  const sections: { level: number; tag: NonNullable<ReturnType<typeof severity>>; inFinding: boolean }[] = [];
+  let summaryLevel = 0;
   for (const line of lines) {
-    if (HEADING.test(line)) {
-      sectionSeverity = severity(/^#{2,4}[ \t]+(Serious|Moderate|Minor)\b/i.exec(line)?.[1]);
+    const heading = HEADING.exec(line);
+    if (heading) {
+      const level = heading[1].length;
+      while (sections.length && sections[sections.length - 1].level >= level) sections.pop();
+      const parent = sections.at(-1);
+      const label = line.slice(heading[0].length).trimEnd().replace(/[ \t]#+$/, '').trimEnd();
+      if (level <= summaryLevel) summaryLevel = 0;
+      if (!summaryLevel && /^(?:Review[ \t]+)?Summary:?$/i.test(label)) summaryLevel = level;
+      const severityHeading = parent
+        ? /^(Serious|Moderate|Minor)(?:[ \t]+(?:issues|findings))?[ \t]*$/i
+        : /^(Serious|Moderate|Minor)\b/i;
+      const tag = level >= 2 && level <= 4 ? severity(severityHeading.exec(label)?.[1]) : undefined;
+      if (tag) {
+        sections.push({ level, tag, inFinding: false });
+      } else if (parent && level === parent.level + 1) {
+        counts[parent.tag]++;
+        parent.inFinding = true;
+      }
+      continue;
     }
-    const itemSeverity = severity(/^\s*(?:\d+\.|[-*]|\|)\s*\**\[?(Serious|Moderate|Minor)\b/i.exec(line)?.[1]);
+
+    const table = /^[ \t]*\|([^|]*)\|/.exec(line);
+    if (table) {
+      if (summaryLevel) continue;
+      const tag = table[1].trim().replace(/^\*\*(.*)\*\*$/, '$1').replace(/^\[(.*)\]$/, '$1');
+      const tableSeverity = severity(tag);
+      if (tableSeverity) counts[tableSeverity]++;
+      continue;
+    }
+    const section = sections.at(-1);
+    if (section?.inFinding) continue;
+    const itemSeverity = severity(/^[ \t]*(?:\d+\.|[-*])[ \t]*\**\[?(Serious|Moderate|Minor)\b/i.exec(line)?.[1]);
     if (itemSeverity) {
       counts[itemSeverity]++;
-    } else if (sectionSeverity && /^ ?(?:\d+\.|[-*])\s+/.test(line)) {
-      counts[sectionSeverity]++;
+    } else if (section && /^ ?(?:\d+\.|[-*])[ \t]+/.test(line)) {
+      counts[section.tag]++;
     }
   }
   return { file: name, subject, revision, round, verdict: reviewVerdict(lines), ...counts, extraction };
@@ -173,7 +207,7 @@ export function extractTaskDecisions(text: string): NonNullable<TaskDigest['deci
   if (header < 0) return result;
   for (let index = header + 1; index < lines.length && lines[index].startsWith('|'); index++) {
     const row = lines[index];
-    if (/^\|\s*:?-{3,}/.test(row)) continue;
+    if (/^\|[ \t]*:?-{3,}/.test(row)) continue;
     result.rows++;
     if (row.split('|').some((cell) => /^(?:pending|awaiting)\b/i.test(cell.trim()))) {
       result.pendingUser++;
@@ -185,12 +219,12 @@ export function extractTaskDecisions(text: string): NonNullable<TaskDigest['deci
 export function documentProgress(content: string, file: string = LEGACY_BATCHES_FILE): TaskProgressCounts | null {
   const text = visibleMarkdownLines(content).join('\n');
   if (asciiLowerCase(file) === BATCHES_FILE) {
-    const tasks = [...text.matchAll(/^### Task [^\r\n]+? [—-] (PENDING|IN_PROGRESS|IMPLEMENTED|COMPLETE|FAILED)\s*$/gm)];
+    const tasks = [...text.matchAll(/^### Task .+? [—-] (PENDING|IN_PROGRESS|IMPLEMENTED|COMPLETE|FAILED)[ \t]*$/gm)];
     if (tasks.length) return { done: tasks.filter(match => match[1] === 'COMPLETE').length, total: tasks.length };
   }
-  const checkboxes = [...text.matchAll(/^\s*[-*]\s+\[([ xX])\]/gm)];
+  const checkboxes = [...text.matchAll(/^[ \t]*[-*][ \t]+\[([ xX])\]/gm)];
   if (checkboxes.length) return { done: checkboxes.filter(match => match[1].toLowerCase() === 'x').length, total: checkboxes.length };
-  const statuses = [...text.matchAll(/^\s*status:\s*(done|backlog|in_progress|in_review|blocked|cancelled)\s*$/gim)];
+  const statuses = [...text.matchAll(/^[ \t]*status:[ \t]*(done|backlog|in_progress|in_review|blocked|cancelled)[ \t]*$/gim)];
   return statuses.length ? { done: statuses.filter(match => match[1].toLowerCase() === 'done').length, total: statuses.length } : null;
 }
 
@@ -217,7 +251,7 @@ export function countTaskOpenQuestions(text: string): number {
     const section = /^(#{2,3})[ \t]+open questions\b/i.exec(line);
     if (section && !sectionLevel) sectionLevel = section[1].length;
     if (!sectionLevel) continue;
-    const item = /^(?:\d+\.|[-*])\s+(\S.*)/.exec(line)?.[1];
+    const item = /^(?:\d+\.|[-*])[ \t]+(\S.*)/.exec(line)?.[1];
     if (item && !/^\[x\]|Resolved:|\(resolved\)/i.test(item)) total++;
   }
   return total;

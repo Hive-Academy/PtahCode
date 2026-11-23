@@ -328,7 +328,7 @@ describe('segmented meter', () => {
   }
 
   it('allocates the proportional width, giving its remainder to the last valid segment', () => {
-    const el = render({ value: 3, max: 9, segments, track: '2px' });
+    const el = render({ value: 3, max: 9, segments, track: 'hairline' });
     const bar = el.querySelector('[role="meter"]');
     const [first, last] = widths(el);
     const fills = bar?.querySelectorAll('[aria-hidden="true"] > div');
@@ -337,7 +337,7 @@ describe('segmented meter', () => {
     expect(last).toBe((3 / 9) * 100 - first);
     expect(fills?.[0].classList.contains('bg-state-run')).toBe(true);
     expect(fills?.[1].classList.contains('bg-state-done')).toBe(true);
-    expect(bar?.classList.contains('h-[2px]')).toBe(true);
+    expect(bar?.classList.contains('h-0.5')).toBe(true);
   });
 
   it('has no fill at zero subtotal or with an invalid max', () => {
@@ -353,11 +353,11 @@ describe('segmented meter', () => {
   });
 
   it('keeps a fixed hatched stub beside the proportional track for partial coverage', () => {
-    const el = render({ value: 1, segments, unreported: 'partial', track: '3px' });
+    const el = render({ value: 1, segments, unreported: 'partial', track: 'thin' });
     const bar = el.querySelector('[role="meter"]');
     const stub = el.querySelector<HTMLElement>('.ptah-meter-unreported');
     expect(bar?.nextElementSibling).toBe(stub);
-    expect(stub?.classList.contains('h-[3px]')).toBe(true);
+    expect(stub?.classList.contains('h-[0.1875rem]')).toBe(true);
     expect(stub?.style.width).toBe('');
     expect(stub?.style.backgroundImage).toContain('repeating-linear-gradient');
     expect(widths(el).reduce((sum, width) => sum + width, 0)).toBe(1);

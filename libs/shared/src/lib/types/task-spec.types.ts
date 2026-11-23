@@ -1,3 +1,5 @@
+import type { BATCHES_FILE, LEGACY_BATCHES_FILE } from './task-spec.contract';
+
 /**
  * Task-spec plain types (TASK_2026_157).
  *
@@ -247,6 +249,8 @@ export interface TaskDigest {
     directories: number;
     symlinks: number;
     truncated: boolean;
+    /** False when the folder was not listed, so its counts are unknown and not zero. */
+    counted: boolean;
   }[];
   reviews?: {
     file: string;
@@ -260,7 +264,11 @@ export interface TaskDigest {
     extraction: TaskDigestExtraction;
   }[];
   decisions?: { rows: number; pendingUser: number };
-  progress?: { done: number; total: number; source: 'batches.md' | 'tasks.md' };
+  progress?: {
+    done: number;
+    total: number;
+    source: typeof BATCHES_FILE | typeof LEGACY_BATCHES_FILE;
+  };
   openQuestions?: number;
 }
 

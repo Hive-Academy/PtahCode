@@ -106,8 +106,8 @@ describe('TaskDigestService', () => {
     expect(digest?.truncatedReasons).toEqual(['depth']);
     expect(digest?.documents.map(({ name }) => name)).toEqual(['task.md']);
     expect(digest?.directories).toEqual([
-      { name: 'alpha', files: 1, markdown: 1, images: 0, directories: 1, symlinks: 0, truncated: false },
-      { name: 'notes.md', files: 1, markdown: 0, images: 1, directories: 3, symlinks: 0, truncated: true },
+      { name: 'alpha', files: 1, markdown: 1, images: 0, directories: 1, symlinks: 0, truncated: false, counted: true },
+      { name: 'notes.md', files: 1, markdown: 0, images: 1, directories: 3, symlinks: 0, truncated: true, counted: true },
     ]);
   });
 
@@ -131,6 +131,11 @@ describe('TaskDigestService', () => {
     expect(f.nestedCalls()).not.toContain('d064');
     expect(f.nestedCalls()).not.toContain(path.join('d003', 'child'));
     expect(digest?.directories?.filter(({ truncated }) => truncated)).toHaveLength(40);
+    const countedOf = (name: string) => digest?.directories?.find((d) => d.name === name)?.counted;
+    expect(countedOf('d003')).toBe(true);
+    expect(countedOf('d002')).toBe(false);
+    expect(countedOf('d064')).toBe(false);
+    expect(digest?.directories?.filter(({ counted, truncated }) => !counted && !truncated)).toHaveLength(0);
     expect(digest?.truncatedReasons).toEqual(['nested']);
   });
 
@@ -263,6 +268,77 @@ describe('TaskDigestService', () => {
     await expect(failed).rejects.toThrow('Task carrier read failed: binary');
     f.write('task.md', carrier());
     await expect(f.service.getDigest(ROOT, ID)).resolves.toHaveProperty('task.title', 'Test');
+  });
+
+  it('returns null for an absent task folder or carrier and retries an invalid carrier without memoizing it', async () => {
+    const f = setup();
+    await expect(f.service.getDigest(ROOT, ID)).resolves.toBeNull();
+    f.mkdir('empty');
+    await expect(f.service.getDigest(ROOT, ID)).resolves.toBeNull();
+
+    f.write('task.md', '---\nstatus: [\n---\n');
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await expect(f.service.getDigest(ROOT, ID)).rejects.toMatchObject({ code: 'INVALID_TASK_CARRIER' });
+    }
+    expect(f.fs.readFileBoundedNoFollow).toHaveBeenCalledTimes(2);
+
+    f.write('task.md', carrier());
+    await expect(f.service.getDigest(ROOT, ID)).resolves.toHaveProperty('task.title', 'Test');
+  });
+
+  it.each([
+    ['batches.md', 'progress'],
+    ['tasks.md', 'progress'],
+    ['decisions.md', 'decisions'],
+  ] as const)('marks an unreadable or capped %s even when %s cannot be extracted', async (name, field) => {
+    const f = setup();
+    f.write('task.md', carrier());
+    const absent = await f.service.getDigest(ROOT, ID);
+    expect(absent).toMatchObject({ truncated: false, truncatedReasons: [] });
+    expect(absent).not.toHaveProperty(field);
+
+    f.write(name, '- [x] First');
+    f.readFailure.add(path.join(taskFolder(), name));
+    const unreadable = await f.service.getDigest(ROOT, ID);
+    expect(unreadable).toMatchObject({ truncated: true, truncatedReasons: ['reads'] });
+    expect(unreadable).not.toHaveProperty(field);
+    expect(unreadable?.documents.find((doc) => doc.name === name)?.extraction).toBe('failed');
+
+    f.readFailure.clear();
+    f.write(name, ' '.repeat(64 * KB + 1));
+    const capped = await f.service.getDigest(ROOT, ID);
+    expect(capped).toMatchObject({ truncated: true, truncatedReasons: ['bytes'] });
+    if (field === 'progress') expect(capped).not.toHaveProperty('progress');
+    expect(capped?.documents.find((doc) => doc.name === name)?.extraction).toBe('capped');
+  });
+
+  it('marks listed progress and review documents that could not be inspected', async () => {
+    const f = setup();
+    f.write('task.md', carrier());
+    f.write('batches.md', '- [x] First');
+    f.write('plan-review.md', '## Verdict APPROVED');
+    const stat = f.fs.lstat.getMockImplementation();
+    if (!stat) throw new Error('fixture missing lstat');
+    f.fs.lstat.mockImplementation(async (target) => {
+      if (target === path.join(taskFolder(), 'batches.md') || target === path.join(taskFolder(), 'plan-review.md')) {
+        throw new Error('temporarily unreadable');
+      }
+      return stat(target);
+    });
+
+    const digest = await f.service.getDigest(ROOT, ID);
+    expect(digest).toMatchObject({ truncated: true, truncatedReasons: ['reads'] });
+    expect(digest?.documents.filter((doc) => doc.extraction === 'failed').map(({ name }) => name))
+      .toEqual(['batches.md', 'plan-review.md']);
+  });
+
+  it('marks reviews skipped by the read limit even when no source reaches the byte cap', async () => {
+    const f = setup();
+    f.write('task.md', carrier());
+    for (let i = 0; i < 26; i++) f.write(`subject-${String(i).padStart(2, '0')}-review.md`, '## Verdict APPROVED');
+    const digest = await f.service.getDigest(ROOT, ID);
+    expect(digest).toMatchObject({ truncated: true, truncatedReasons: ['reads'] });
+    expect(digest?.reviews?.filter(({ extraction }) => extraction === 'skipped')).toHaveLength(2);
   });
 
   it('limits extraction to 24 reads, 2.5 MiB returned and 25 extra probe bytes', async () => {

@@ -147,8 +147,8 @@ test.describe('plan limits > session inspector', () => {
           providerRows.locator(`[data-provider-id="provider:${cli}"]`);
         await expect(providerRows).toHaveCount(5);
         await expect(providerRow('codex')).toContainText('38%');
-        await expect(providerRow('opencode')).toContainText('Limits not tracked');
-        await expect(providerRow('copilot')).toContainText('Limits not tracked');
+        await expect(providerRow('opencode')).toContainText('No usage source');
+        await expect(providerRow('copilot')).toContainText('No usage source');
         await expect(providerRow('ptah-cli')).toContainText('Multiple accounts');
         await capture(stats, shotPath('session-inspector', 'near', theme, width));
 
