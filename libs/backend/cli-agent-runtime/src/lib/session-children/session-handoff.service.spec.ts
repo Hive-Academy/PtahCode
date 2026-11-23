@@ -828,6 +828,23 @@ describe('SessionHandoffService', () => {
           'A successor child needs no acknowledgement; the host retires its predecessor.',
       });
     });
+    it('lets the spawner retire the predecessor when a successor child acknowledges', async () => {
+      const h = makeHarness();
+      h.children.add(CALLER);
+      const spawner = {
+        succeed: jest.fn(),
+        retireAcknowledgedPredecessor: jest.fn(() => 'retired' as const),
+      };
+      await expect(
+        h.build({ spawner }).acknowledge({
+          callerSessionId: CALLER,
+          predecessorSessionId: CALLER_SDK,
+          handoffPath,
+        }),
+      ).resolves.toMatchObject({ status: 'already-closed' });
+      expect(spawner.retireAcknowledgedPredecessor).toHaveBeenCalledWith(CALLER);
+      expect(h.lifecycle.endSession).not.toHaveBeenCalled();
+    });
     it('lets a successor retry while its late-start record is being written', async () => {
       const h = makeHarness();
       await expect(

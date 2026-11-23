@@ -1008,3 +1008,133 @@ describe('SessionSpawnerService succession', () => {
     );
   });
 });
+
+describe('SessionSpawnerService cap-reached predecessor retirement (review P2-B m8)', () => {
+  /** A child at the cap (5 min) or paused (6 min) that hands off mid-turn. */
+  async function handOffAtCap(minutes: 5 | 6) {
+    const closer = { close: jest.fn().mockResolvedValue({ kind: 'closed' }) };
+    const h = makeHarness({
+      config: { 'agentSessions.maxRuntimeMinutes': 5, 'agentSessions.handoffGraceMinutes': 1 },
+      closer,
+    });
+    const child = await h.startChild();
+    const id = child.childSessionId;
+    h.markRan(id);
+    h.phases.set(id, 'generating');
+    jest.advanceTimersByTime(minutes * 60_000);
+    await flush();
+    expect(h.registry.get(id)?.paused).toEqual(minutes === 6 ? true : undefined);
+    const result = await requestHandoff(h, id);
+    if (!result.ok) throw new Error(result.detail);
+    await flush();
+    return { h, id, closer, worktreePath: child.worktreePath, successorId: result.successor.childSessionId };
+  }
+
+  it.each([5, 6] as const)('keeps the mid-turn predecessor (minute %s) without a retire timer', async (minutes) => {
+    const { h, id } = await handOffAtCap(minutes);
+    jest.advanceTimersByTime(30 * 60_000);
+    await flush();
+    expect(h.registry.get(id)?.terminalStatus).toBe('handed-off');
+    expect(h.adapter.interruptSession).not.toHaveBeenCalled();
+    expect(h.adapter.interruptCurrentTurn).not.toHaveBeenCalled();
+    expect(h.adapter.endSession).not.toHaveBeenCalled();
+    expect(h.lines.join('\n')).toContain(`${id} paused at the cap; retires at its turn end`);
+  });
+
+  it.each([5, 6] as const)('releases the predecessor (minute %s) when its session ends', async (minutes) => {
+    const { h, id, closer, worktreePath } = await handOffAtCap(minutes);
+    const sdkSessionId = h.registry.get(id)?.sdkSessionId;
+    h.active.delete(id);
+    h.sessionEnd.notifyAll({ sessionId: id, workspaceRoot: worktreePath, cause: 'stream-exit' });
+    await flush();
+    expect(closer.close).toHaveBeenCalledWith(id, sdkSessionId);
+    expect(h.registrar.releaseRoot).toHaveBeenCalledTimes(1);
+    expect(h.dispositions.lookup({ tabId: id })).toBeUndefined();
+    expect(h.spawner.clearFinished({ callerSessionId: PARENT, childSessionIds: [id] }))
+      .toMatchObject({ skipped: [] });
+    // The end is the predecessor's own: no successor, interrupt or second close.
+    jest.advanceTimersByTime(60_000);
+    await flush();
+    expect(h.host.startChildSession).toHaveBeenCalledTimes(2);
+    expect(h.adapter.interruptSession).not.toHaveBeenCalled();
+    expect(closer.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('retires the predecessor with parent-stop at its turn end', async () => {
+    const { h, id, closer, successorId } = await handOffAtCap(6);
+    h.phases.set(id, 'idle');
+    h.turnEnded(id);
+    await flush();
+    expect(h.adapter.interruptSession).toHaveBeenCalledWith(id, 'parent-stop');
+    expect(h.adapter.interruptSession).not.toHaveBeenCalledWith(successorId, expect.anything());
+    expect(closer.close).toHaveBeenCalledTimes(1);
+    expect(h.active.has(successorId)).toBe(true);
+  });
+
+  it('retires at once a predecessor whose turn already ended when the handoff returned', async () => {
+    const closer = { close: jest.fn().mockResolvedValue({ kind: 'closed' }) };
+    const h = makeHarness({
+      config: { 'agentSessions.maxRuntimeMinutes': 5, 'agentSessions.handoffGraceMinutes': 1 },
+      closer,
+    });
+    const child = await h.startChild();
+    const id = child.childSessionId;
+    h.markRan(id);
+    h.phases.set(id, 'idle');
+    jest.advanceTimersByTime(6 * 60_000);
+    await flush();
+    expect(await requestHandoff(h, id)).toMatchObject({ ok: true });
+    await flush();
+    expect(h.adapter.interruptSession).toHaveBeenCalledWith(id, 'parent-stop');
+    expect(closer.close).toHaveBeenCalledTimes(1);
+    expect(h.registrar.releaseRoot).toHaveBeenCalledTimes(1);
+  });
+
+  it('ends the predecessor with parent-stop on the successor acknowledgement once it is idle', async () => {
+    const { h, id, closer, successorId } = await handOffAtCap(6);
+    expect(h.spawner.retireAcknowledgedPredecessor(successorId)).toBe('awaiting-turn-end');
+    expect(h.adapter.interruptSession).not.toHaveBeenCalled();
+
+    // The turn-state phase reached idle, but no turn-end event retired it.
+    h.phases.set(id, 'idle');
+    expect(h.spawner.retireAcknowledgedPredecessor(successorId)).toBe('retired');
+    await flush();
+    expect(h.adapter.interruptSession).toHaveBeenCalledWith(id, 'parent-stop');
+    expect(h.adapter.interruptSession).not.toHaveBeenCalledWith(successorId, expect.anything());
+    expect(closer.close).toHaveBeenCalledWith(id, h.registry.get(id)?.sdkSessionId);
+    expect(h.registrar.releaseRoot).toHaveBeenCalledTimes(1);
+    expect(h.spawner.retireAcknowledgedPredecessor(successorId)).toBe('none');
+    expect(h.spawner.retireAcknowledgedPredecessor(id)).toBe('none');
+  });
+
+  it('waits for the turn of a queued follow-up before it retires an idle predecessor', async () => {
+    const { h, id, closer, successorId } = await handOffAtCap(6);
+    h.phases.set(id, 'idle');
+    const queued: string[] = ['follow-up'];
+    Object.assign(h.adapter, { listQueuedFollowUps: jest.fn(() => queued) });
+    expect(h.spawner.retireAcknowledgedPredecessor(successorId)).toBe('awaiting-turn-end');
+    expect(h.adapter.interruptSession).not.toHaveBeenCalled();
+
+    // The follow-up turn ran and ended: now the predecessor is idle.
+    queued.length = 0;
+    expect(h.spawner.retireAcknowledgedPredecessor(successorId)).toBe('retired');
+    await flush();
+    expect(h.adapter.interruptSession).toHaveBeenCalledWith(id, 'parent-stop');
+    expect(closer.close).toHaveBeenCalledTimes(1);
+  });
+});
+
+it('measures a runtime-cap pause from the cap start and reports the cap as its limit (review P2-B m9)', async () => {
+  const h = makeHarness({
+    config: { 'agentSessions.maxRuntimeMinutes': 5, 'agentSessions.handoffGraceMinutes': 2 },
+  });
+  const child = await h.startChild();
+  h.markRan(child.childSessionId);
+  jest.advanceTimersByTime(7 * 60_000);
+  await flush();
+  expect(h.registry.get(child.childSessionId)?.notice).toMatchObject({
+    reason: 'runtime-cap', measured: 7 * 60_000, limit: 5 * 60_000, unit: 'milliseconds',
+  });
+  expect(h.adapter.sendMessageToSession).toHaveBeenCalledWith(PARENT,
+    expect.stringContaining('runtime reached 7 minutes'), expect.anything());
+});

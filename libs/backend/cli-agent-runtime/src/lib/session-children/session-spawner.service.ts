@@ -187,6 +187,8 @@ interface ChildRuntime {
   /** The exact string given to `retainRoot`; `releaseRoot` must get the same one. */
   mcpRoot?: string;
   runtimeTimer?: ReturnType<typeof setTimeout>;
+  /** When the current runtime cap was armed; a pause measures from it. */
+  capArmedAt?: number;
   warnTimer?: ReturnType<typeof setTimeout>;
   handoffGraceTimer?: ReturnType<typeof setTimeout>;
   retireTimer?: ReturnType<typeof setTimeout>;
@@ -1851,7 +1853,12 @@ export class SessionSpawnerService implements ISessionSpawner {
       this.watchdogRecovery.cancel(key);
       runtime.watchdogFailure = undefined;
     }
-    const wasWorking = this.phaseOf(child) === 'generating';
+    // The watchdog ends only an open turn, and the turn-state phase can move to
+    // `failed` before this end arrives: a later turn still owes the parent a
+    // result. A first turn is owned by the watchdog recovery above.
+    const wasWorking =
+      this.phaseOf(child) === 'generating' ||
+      (child.turnsSettled > 0 && isProviderNoResponse(runtime.endCause));
     this.armGrace(runtime, child.childSessionId, wasWorking);
     this.log(
       `${child.childSessionId} session ended (${runtime.endCause}); ${SESSION_CHILD_GRACE_MS / 1000}s grace armed`,
@@ -2026,7 +2033,7 @@ export class SessionSpawnerService implements ISessionSpawner {
         childSessionId,
         'failed',
         (isProviderNoResponse(cause)
-          ? formatProviderHang(180)
+          ? formatProviderHang(undefined)
           : cause === 'provider-input-closed'
             ? formatProviderInputClosed()
             : `session ended while it worked (${cause})`) +
@@ -2419,6 +2426,18 @@ export class SessionSpawnerService implements ISessionSpawner {
     );
   }
 
+  /**
+   * The child's session is live and its turn runs, its phase is unknown, or a
+   * queued follow-up will start its next turn. A retirement waits for that turn.
+   */
+  private turnRuns(child: SessionChildRecord): boolean {
+    const target = this.activeIdOf(child);
+    if (!target) return false;
+    const phase = this.phaseOf(child);
+    return phase === undefined || phase === 'generating' ||
+      (this.adapter?.listQueuedFollowUps?.(target)?.length ?? 0) > 0;
+  }
+
   /** A Ptah CLI lane the child spawned is still running. */
   private hasRunningLane(child: SessionChildRecord): boolean {
     const ids = new Set(
@@ -2682,6 +2701,7 @@ export class SessionSpawnerService implements ISessionSpawner {
         void this.onRuntimeWarning(childSessionId);
       },
     );
+    runtime.capArmedAt = Date.now();
     runtime.runtimeTimer = this.armTimer(minutes * 60_000, () =>
       this.onRuntimeExceeded(childSessionId),
     );
@@ -2773,7 +2793,10 @@ export class SessionSpawnerService implements ISessionSpawner {
       reason,
       nextStep: 'review-live-agent',
       ...(reason === 'runtime-cap' ? {
-        measured: runtime.settings.maxRuntimeMinutes * 60_000,
+        measured: runtime.capArmedAt === undefined
+          ? runtime.settings.maxRuntimeMinutes * 60_000
+          : Date.now() - runtime.capArmedAt,
+        limit: runtime.settings.maxRuntimeMinutes * 60_000,
         unit: 'milliseconds',
       } : reason === 'succession-limit' ? {
         measured: child.successionCount ?? 0,
@@ -3077,6 +3100,13 @@ export class SessionSpawnerService implements ISessionSpawner {
           runtime.retireTimer = this.armTimer(60_000, () =>
             this.retirePredecessor(child.childSessionId),
           );
+        } else if (this.turnRuns(child)) {
+          // A predecessor paused at the cap is never interrupted mid-turn: it
+          // retires at its turn end, its session end or its successor's ack.
+          this.log(`${child.childSessionId} paused at the cap; retires at its turn end`);
+        } else {
+          // Its turn already ended (the handoff tool returned late): it is idle.
+          this.retirePredecessor(child.childSessionId);
         }
       } else if (cause === 'session-ended') {
         runtime.stopping = true;
@@ -3120,6 +3150,28 @@ export class SessionSpawnerService implements ISessionSpawner {
     }
   }
 
+  retireAcknowledgedPredecessor(
+    successorSessionId: string,
+  ): 'retired' | 'awaiting-turn-end' | 'none' {
+    const successor = this.registry.get(successorSessionId);
+    const predecessorId = successor?.succeeds;
+    const predecessor = this.registry.get(predecessorId);
+    if (!successor || !predecessorId || !predecessor || !this.retiring.has(predecessorId)) {
+      return 'none';
+    }
+    if (this.turnRuns(predecessor)) {
+      this.log(
+        `${predecessorId} acknowledged by successor ${successor.childSessionId}; retires at its turn end`,
+      );
+      return 'awaiting-turn-end';
+    }
+    this.log(
+      `${predecessorId} retired on the acknowledgement of successor ${successor.childSessionId}`,
+    );
+    this.retirePredecessor(predecessorId);
+    return 'retired';
+  }
+
   private retireForEvent(sessionId: string): boolean {
     const child = this.registry.get(sessionId);
     if (!child || !this.retiring.has(child.childSessionId)) return false;
@@ -3128,8 +3180,8 @@ export class SessionSpawnerService implements ISessionSpawner {
   }
 
   private retirePredecessor(childSessionId: string): void {
-    if (!this.runtimes.has(childSessionId)) return;
     this.retiring.delete(childSessionId);
+    if (!this.runtimes.has(childSessionId)) return;
     const runtime = this.runtimes.get(childSessionId);
     if (runtime) runtime.stopping = true;
     this.releaseResources(childSessionId);
