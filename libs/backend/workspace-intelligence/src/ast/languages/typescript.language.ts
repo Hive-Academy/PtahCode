@@ -108,7 +108,8 @@ const TS_EXPORT_QUERY_SUFFIX = `
 export const TYPESCRIPT_LANGUAGE: LanguageModule = {
   id: 'typescript',
   extensions: ['.ts'],
-  recognitionOnlyExtensions: ['.mts', '.cts'],
+  moduleFlavourExtensions: ['.mts', '.cts'],
+  recognitionOnlyExtensions: [],
   grammarFile: 'tree-sitter-typescript.wasm',
   queries: {
     functionQuery: JS_TS_FUNCTION_QUERY,
