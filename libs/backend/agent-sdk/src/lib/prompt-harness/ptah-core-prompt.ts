@@ -15,43 +15,19 @@
  * `ptah-core-prompt.spec.ts`. The substitution section appears once here and
  * is summarized by the MCP server handshake.
  */
+import { renderCoreSubstitutionBlock } from '@ptah-extension/shared';
 
 /**
- * Ptah's mandatory tool substitutions. The MCP handshake derives its summary
+ * Ptah's mandatory tool substitutions. The table, the fallback line and the
+ * callout are GENERATED from `TOOL_SUBSTITUTIONS` in `@ptah-extension/shared`;
+ * do not write a substitution row here. The MCP handshake derives its summary
  * from this constant, so the table and fallback line have one source.
  */
 export const PTAH_MCP_SUBSTITUTION_SECTION = `## Ptah MCP Tools — MANDATORY Substitutions
 
 Prefer ptah_* tools over built-in alternatives. They use VS Code's LSP, the workspace index and AI providers: faster, more accurate, and far cheaper in context. A tool below that is named only in the deferred-tools list is still available: load it with ToolSearch (\`select:<name>\`), then call it. Never use Grep because a ptah tool is deferred.
 
-### Required Substitutions — Use These Tools Directly
-
-| Instead of... | CALL THIS TOOL | Why |
-|------|------|------|
-| Manual exploration | ptah_workspace_analyze | Full project structure in one call |
-| Bash \`find\` / Glob tool | ptah_search_files | Respects .gitignore, workspace-indexed |
-| Build to find errors | ptah_get_diagnostics | Workspace type-check; call once after edits, not on every step |
-| \`grep\` / \`rg\` | ptah_grep { pattern, path?, glob? } | Text and constants, grouped by file with the enclosing function; \`includeIgnored\` + scoped \`path\` reaches node_modules |
-| \`sed -n\` / \`cat\` | ptah_read_symbol { file, name } | One declaration, or a line range (startLine/endLine); numbered, bounded |
-| Grep for symbol usages | ptah_lsp_references | LSP-accurate, rename-safe; take file/line/col from ptah_code_search_symbols first; use before any refactoring |
-| Navigating to find definitions | ptah_lsp_definitions | Go-to-definition via LSP |
-| \`git status\` via Bash | ptah_get_dirty_files | Shows unsaved VS Code buffers too |
-| Reading a file to check size | ptah_count_tokens | Token count, not byte count |
-| Web search / browsing | ptah_web_search | Grounded web search via LLM providers |
-| Grep/Glob to find a **function, class, or method** | ptah_code_search_symbols { query } | Symbol index — no false positives from string matches |
-| Reading a full file to inspect structure | ptah_ast_analyze { file } | Functions/classes/imports/exports with line ranges; 40-60% fewer tokens than Read |
-| Reading a full file for its API surface only | ptah_context_enrich_file { file } | .d.ts-style summary — signatures without bodies |
-| Checking what breaks before changing a file | ptah_get_dependents { file } | Reverse import edges = blast radius |
-| Recalling past decisions / preferences | ptah_memory_search { query } | Persistent cross-session memory (BM25+vector) |
-| Guessing which files matter for a task | ptah_relevance_rank_files { query } | Ranked 0-100 with reasons — triage before opening files |
-| Figuring out the monorepo layout | ptah_project_detect_monorepo | Detects nx/lerna/turbo/workspaces + package count |
-| Finding where a symbol is exported | ptah_get_symbol_index | Map of file → exported symbol names |
-
-Fall back to Bash, Grep or Glob only for **writes**, build/test/git, a ptah error, or one Grep after zero hits.
-Free text and line ranges: ptah_grep and ptah_read_symbol, not shell grep, rg, sed -n or cat.
-
-> [!IMPORTANT]
-> **Symbol and AST lookups are MANDATORY via ptah before Grep/Glob.** To find a function, class, method or type, call \`ptah_code_search_symbols\` or \`ptah_ast_analyze\` FIRST, then read the body with \`ptah_read_symbol\`. Fall back to Grep only after those return no results or an error.
+${renderCoreSubstitutionBlock()}
 
 ### IDE Access via execute_code
 

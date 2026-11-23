@@ -341,7 +341,16 @@ class FakeStatement implements SqliteStatement {
     );
   }
 
-  get(..._params: unknown[]): unknown {
+  get(...params: unknown[]): unknown {
+    const upper = this.sql.toUpperCase();
+    if (upper.startsWith('SELECT 1 FROM SCHEMA_MIGRATIONS WHERE VERSION = ?')) {
+      const [version] = params as [number];
+      return this.db
+        .selectMigrationRows()
+        .some((r) => r.version === Number(version))
+        ? { 1: 1 }
+        : undefined;
+    }
     return undefined;
   }
 

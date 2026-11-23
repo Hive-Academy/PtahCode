@@ -42,6 +42,19 @@ describe('PublicationStageRunner', () => {
     expect(readFile).not.toHaveBeenCalled();
     expect(writes.get(result.artifactPath)).not.toContain('unvalidated walkthrough');
   });
+  it('reports the family of the lane that ran triage, and unavailable when triage did not complete (Req 3.6)', async () => {
+    const writes = new Map<string, string>();
+    const fs: ReviewArtifactFileSystem = { realpath: async (path) => path,
+      readFile: async () => 'Observed behavior', writeFile: async (path, data) => { writes.set(path, data); } };
+    const runner = new PublicationStageRunner(new ReviewArtifactWriter(fs), new ReviewPolicyService(), {
+      resolve: async () => ({ repoRoot: '/repo', attemptsRoot: '/attempts' }), settings: async () => settings, baseConfig: async () => null,
+    });
+    const completed = await runner.run(claim, context, [], [], undefined, true, 'claude');
+    expect(writes.get(completed.artifactPath)).toContain('- triage — claude;');
+    expect(writes.get(completed.artifactPath)).not.toContain('coordinator');
+    const partial = await runner.run(claim, context, [], [], undefined, false, 'claude');
+    expect(writes.get(partial.artifactPath)).toContain('- triage — unavailable;');
+  });
   it('writes weaker evidence, unavailable checks, suppression and capped inline preview plus export', async () => {
     const writes = new Map<string, string>();
     const fs: ReviewArtifactFileSystem = { realpath: async (path) => path,

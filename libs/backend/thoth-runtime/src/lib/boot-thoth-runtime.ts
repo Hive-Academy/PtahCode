@@ -489,6 +489,10 @@ export async function bootThothRuntime(
           symbolIndexer.indexWorkspace(wsRoot, {
             ...(options?.signal ? { signal: options.signal } : {}),
             ...(options?.onProgress ? { onProgress: options.onProgress } : {}),
+            // Spread from the control service's run options: only an explicit
+            // user-forced `indexing:start` sets it (TASK_2026_2312_c3ef D5).
+            // Boot, watcher, lazy and resume runs never do.
+            ...(options?.force ? { force: true } : {}),
             // These deps are handed ONLY to `IndexingRpcHandlers`, whose
             // `indexing:start` / `indexing:resume` are user clicks. A click
             // is never held behind the background-work governor

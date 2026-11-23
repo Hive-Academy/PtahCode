@@ -14,8 +14,8 @@ import {
   ArrowLeft,
   Plug,
   Layers,
-  TableProperties,
   SlidersHorizontal,
+  TableProperties,
   AudioLines,
   ShieldCheck,
   Play,
@@ -27,7 +27,6 @@ import {
   PtahButtonDirective,
   PtahIconButtonDirective,
   PtahSettingsLayoutComponent,
-  PtahDescriptionListComponent,
   PtahStatusComponent,
   PtahStatePanelComponent,
   PtahFormSectionComponent,
@@ -135,7 +134,6 @@ const isAgentsRoutingSection = (
     PtahButtonDirective,
     PtahIconButtonDirective,
     PtahSettingsLayoutComponent,
-    PtahDescriptionListComponent,
     PtahStatusComponent,
     PtahStatePanelComponent,
     PtahFormSectionComponent,
@@ -245,9 +243,9 @@ export class SettingsComponent implements OnInit {
   );
   readonly contextRows = computed(() => [
     ...(this.workspaceName()
-      ? [{ key: 'workspace', term: 'Workspace', value: this.workspaceName() }]
+      ? [{ key: 'workspace', term: 'Workspace', value: this.workspaceName(), title: this.workspacePath() }]
       : []),
-    { key: 'app', term: 'App', value: this.appLabel },
+    { key: 'app', term: 'App', value: this.appLabel, title: this.appLabel },
   ]);
   readonly settingsTabIndex = computed(() =>
     this.settingsTabs().findIndex(

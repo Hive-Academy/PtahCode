@@ -106,6 +106,31 @@ describe('SqliteMigrationRunner', () => {
     expect(runner.readAppliedVersions()).toEqual(new Set([1, 2, 3]));
   });
 
+  // TASK_2026_2312_c3ef review: Electron and the CLI read the ledger before
+  // either takes the write lock. A version a peer applied meanwhile is
+  // skipped under the lock, not replayed (ADD COLUMN would fail the open).
+  it('skips a migration that a peer applied after the ledger read', async () => {
+    const db = new FakeSqliteDatabase();
+    const runner = new SqliteMigrationRunner(db, createMockLogger());
+    const originalExec = db.exec.bind(db);
+    let locks = 0;
+    jest.spyOn(db, 'exec').mockImplementation((sql) => {
+      originalExec(sql);
+      if (sql === 'BEGIN IMMEDIATE' && ++locks === 2) {
+        // The peer committed version 2 while this connection waited.
+        db.insertMigrationRow(2, 0);
+      }
+    });
+
+    const result = await runner.applyAll(FIXTURE_MIGRATIONS);
+
+    expect(result.appliedVersions).toEqual([1, 3]);
+    expect(result.skippedVersions).toEqual([2]);
+    expect(result.finalVersion).toBe(3);
+    expect(db.tables.has('t2')).toBe(false);
+    expect(db.tables.has('t3')).toBe(true);
+  });
+
   it('is a no-op on second run', async () => {
     const db = new FakeSqliteDatabase();
     const runner = new SqliteMigrationRunner(db, createMockLogger());

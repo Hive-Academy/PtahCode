@@ -49,8 +49,9 @@ const CAUSE_WORDS: Readonly<
   'stream-exit': 'the agent stream exited',
   'provider-error': 'provider error',
   'compaction-abort': 'context compaction did not finish',
-  'no-activity-timeout': formatProviderHang(180),
-  'provider-no-response': formatProviderHang(180),
+  // The window depends on the SDK first-byte wait, so the text names no number.
+  'no-activity-timeout': formatProviderHang(undefined),
+  'provider-no-response': formatProviderHang(undefined),
   'provider-input-closed': formatProviderInputClosed(),
   'config-reinit': 'configuration reloaded',
   'runtime-cap': 'runtime cap reached',

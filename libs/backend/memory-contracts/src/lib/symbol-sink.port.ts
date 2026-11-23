@@ -35,12 +35,32 @@ export interface ISymbolSink {
    * Replace one file's symbol rows. A persisting implementation does the
    * delete and the insert in one transaction, so a failed insert keeps the
    * previous rows. The indexer calls this, not delete-then-insert.
+   *
+   * `fingerprint` is the indexer's file fingerprint WITHOUT the embedder
+   * model id; the store appends the model id. A string records the file as
+   * indexed under that fingerprint when vec is unavailable or every row
+   * got its vector. `null` or omitted deletes the file's record.
    */
   replaceFileSymbols(
     workspaceRoot: string,
     filePath: string,
     chunks: readonly SymbolChunkInsert[],
+    fingerprint?: string | null,
   ): Promise<void>;
+
+  /**
+   * Whether the file's record matches `candidate`, the indexer's fingerprint
+   * WITHOUT the embedder model id (the store appends it). `false` when the
+   * record is missing, differs, or the vector index is not usable.
+   */
+  isFileUnchanged?(
+    workspaceRoot: string,
+    filePath: string,
+    candidate: string,
+  ): boolean;
+
+  /** Record that a complete indexing pass confirmed `workspaceRoot` now. */
+  markRootValidated?(workspaceRoot: string): void;
 
   /**
    * Delete symbol rows for `workspaceRoot` whose file path is not in

@@ -344,6 +344,7 @@ export {
   type PostToolUsePayload,
   PostToolUseHookHandler,
   SessionIdResolvedCallbackRegistry,
+  AgentNoticeCallbackRegistry,
   type SessionIdResolvedPayload,
   type SessionIdResolvedRegistryCallback,
   SessionMcpStatusCallbackRegistry,

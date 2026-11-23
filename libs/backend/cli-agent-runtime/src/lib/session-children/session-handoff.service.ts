@@ -308,7 +308,10 @@ export class SessionHandoffService
       status: 'retryable-failure',
       reason,
     });
-    if (this.registry.isChild(request.callerSessionId)) {
+    if (request.callerSessionId && this.registry.isChild(request.callerSessionId)) {
+      // The spawner owns child succession: an idle predecessor is retired now,
+      // one whose turn still runs retires at its turn end.
+      this.spawner?.retireAcknowledgedPredecessor?.(request.callerSessionId);
       return {
         status: 'already-closed',
         reason:

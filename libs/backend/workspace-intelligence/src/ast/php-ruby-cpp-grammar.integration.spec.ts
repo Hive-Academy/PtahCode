@@ -851,6 +851,7 @@ describe('PHP, Ruby and C++ grammar integration (real tree-sitter WASM, Batch 31
           analysis,
           {
             indexWorkspaceStream: () => (async function* () {})(),
+            isIgnoredForIndex: async () => false,
           } as unknown as WorkspaceIndexerService,
           { readFile: async () => source } as unknown as IFileSystemProvider,
           {
@@ -1024,6 +1025,7 @@ describe('PHP, Ruby and C++ grammar integration (real tree-sitter WASM, Batch 31
         } as unknown as AstAnalysisService,
         {
           indexWorkspaceStream: () => (async function* () {})(),
+          isIgnoredForIndex: async () => false,
         } as unknown as WorkspaceIndexerService,
         {
           readFile: async () => 'MACRO_DEF(x) {}\n',

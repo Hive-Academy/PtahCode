@@ -1,5 +1,11 @@
 import { z } from 'zod';
 import { ShaSchema, ReviewPathSchema } from './review-finding.schema';
+import {
+  REVIEW_LANE_POOL_MAX,
+  ReviewLaneFallbackSchema,
+  ReviewLaneIdSchema,
+  ReviewModelIdSchema,
+} from './review-lanes.schema';
 
 export const RepoIdentitySchema = z
   .object({
@@ -58,6 +64,10 @@ export const StageRecordSchema = z
     durationMs: z.number().int().min(0).max(86_400_000).nullable(),
     error: z.string().max(2000).nullable(),
     artifactPath: ReviewPathSchema.nullable(),
+    /** Lane, model and skipped pin/pool entries; absent on records written before lane pools. */
+    lane: ReviewLaneIdSchema.nullable().optional(),
+    model: ReviewModelIdSchema.nullable().optional(),
+    fallback: z.array(ReviewLaneFallbackSchema).max(REVIEW_LANE_POOL_MAX + 1).nullable().optional(),
   })
   .strict();
 export type StageRecord = z.infer<typeof StageRecordSchema>;

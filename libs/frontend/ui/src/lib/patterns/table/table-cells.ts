@@ -55,11 +55,14 @@ export function ptahCellLabel(column: string, row: string): string {
       <ng-content select="[ptahRowInfo]" />
     </span>
     @if (secondary()) {
-      <span
-        class="ptah-table-row-title-secondary"
-        [class.ptah-table-row-title-mono]="mono()"
-        >{{ secondary() }}</span
-      >
+      <span class="ptah-table-row-title-secondary-line">
+        <span
+          class="ptah-table-row-title-secondary"
+          [class.ptah-table-row-title-mono]="mono()"
+          >{{ secondary() }}</span
+        >
+        <ng-content select="[ptahRowSecondary]" />
+      </span>
     }
   `,
   styles: [
@@ -85,7 +88,14 @@ export function ptahCellLabel(column: string, row: string): string {
         border-radius: var(--ptah-radius-chip);
         font-size: var(--ptah-text-caption-size);
       }
+      .ptah-table-row-title-secondary-line {
+        display: inline-flex;
+        align-items: center;
+        gap: var(--ptah-gap-inline);
+        min-width: 0;
+      }
       .ptah-table-row-title-secondary {
+        min-width: 0;
         color: var(--ptah-section-description-color);
         font-size: var(--ptah-text-hint-size);
       }

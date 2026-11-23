@@ -17,7 +17,8 @@ import {
 } from '@ptah-extension/shared';
 import type { CompactionConfigProvider } from '../compaction-config-provider';
 import { MainThreadNoticeQueue } from '../main-thread-notice-queue';
-import { NOTES_GATE_TIMEOUT_MS } from './subagent-notes-gate';
+import { NOTES_GATE_TIMEOUT_MS, SubagentNotesGate } from './subagent-notes-gate';
+import { scopedAgentKey } from './subagent-scope-key';
 import { SubagentBudgetStopCallbackRegistry } from '../subagent-budget-stop-callback-registry';
 import { SubagentHandoffFiles } from './subagent-handoff-files';
 import { SubagentNoticeQueue } from '../subagent-notice-queue';
@@ -239,6 +240,7 @@ function makeHarness(
     withdrawSubagentNotice: jest.fn((agentId: string) =>
       subagentNotices.withdraw(agentId),
     ),
+    announceSubagentNotice: jest.fn(),
   };
   const registry = {
     get: jest.fn((_toolCallId: string) =>
@@ -285,7 +287,7 @@ function makeHarness(
     monitor.observe = async (sessionId, message, route) => {
       await observe(sessionId, message, route);
       const agentId = registry.get(TOOL_CALL)?.agentId;
-      if (agentId && monitor.notesGatePhase(agentId)) await monitor.finishWarnedAgent(sessionId, agentId, 'completed');
+      if (agentId && monitor.notesGatePhase(agentId, sessionId)) await monitor.finishWarnedAgent(sessionId, agentId, 'completed');
     };
   }
   return {
@@ -981,7 +983,10 @@ describe('SubagentBudgetMonitor handoff records', () => {
     expect(new Set(h.index.publish.mock.calls.map(([, name]) => name))).toEqual(
       new Set(files),
     );
-    expect(h.streamed).toHaveLength(1);
+    // Each parent session gets its own pause notice: the gate is scoped by session.
+    // Nothing else is delivered twice: the two pause notices are all that streamed.
+    expect(h.streamed).toHaveLength(2);
+    expect(h.streamed.every((text) => text.includes('paused new work'))).toBe(true);
   });
 
   describe('handoffPointer', () => {
@@ -1107,6 +1112,57 @@ describe('cooperative budget: ask, pause and normal return', () => {
       expect(h.monitor.getAgentBudgetState('a1', SESSION)?.admission).toBe('paused');
     });
 
+    it('scopes a paused gate to its parent session and survives a rekey', async () => {
+      const h = makeHarness();
+      await h.monitor.observe(SESSION, ctx(300_000, 'c0'));
+      expect(h.monitor.notesGatePhase('a1', SESSION)).toBe('paused');
+      // The same agent id under another parent session the monitor tracks never reads this gate.
+      await h.monitor.observe('session-2', ctx(10, 'other-1'));
+      expect(h.monitor.notesGatePhase('a1', 'session-2')).toBeUndefined();
+      expect(h.monitor.hasNotesGate('a1', 'session-2')).toBe(false);
+      await expect(h.monitor.checkNotesTool('session-2', 'a1', 'Bash', {})).resolves.toBeUndefined();
+      await expect(h.monitor.checkNotesTool(SESSION, 'a1', 'Bash', {})).resolves.toMatch(/Ptah budget monitor paused/);
+      // Without a session, or with an id the monitor does not know (a tab id), the unique gate answers.
+      expect(h.monitor.notesGatePhase('a1')).toBe('paused');
+      expect(h.monitor.notesGatePhase('a1', 'unknown-tab-id')).toBe('paused');
+      await expect(h.monitor.checkNotesTool('unknown-tab-id', 'a1', 'Bash', {})).resolves.toMatch(/Ptah budget monitor paused/);
+      h.monitor.rekey(SESSION, 'session-rekeyed');
+      expect(h.monitor.notesGatePhase('a1', 'session-rekeyed')).toBe('paused');
+      expect(h.monitor.notesGatePhase('a1', SESSION)).toBe('paused');
+      h.monitor.release('session-rekeyed');
+      expect(h.monitor.hasNotesGate('a1')).toBe(false);
+    });
+
+    it('announces the ask and the pause to the UI without stopping the agent', async () => {
+      const h = makeHarness();
+      await h.monitor.observe(SESSION, ctx(127_500, 'c1'));
+      expect(h.dispatcher.announceSubagentNotice).toHaveBeenCalledTimes(1);
+      expect(h.dispatcher.announceSubagentNotice).toHaveBeenLastCalledWith(
+        SESSION,
+        'a1',
+        expect.objectContaining({ action: 'asked-handoff', reason: 'context-budget' }),
+        expect.stringContaining('asked a1 for a handoff'),
+      );
+      await h.monitor.observe(SESSION, ctx(300_000, 'c3'));
+      expect(h.dispatcher.announceSubagentNotice).toHaveBeenCalledTimes(2);
+      expect(h.dispatcher.announceSubagentNotice).toHaveBeenLastCalledWith(
+        SESSION,
+        'a1',
+        expect.objectContaining({ action: 'paused' }),
+        expect.stringContaining('The execution remains live'),
+      );
+    });
+
+    it('keeps the agent running when the UI sink throws', async () => {
+      const h = makeHarness();
+      h.dispatcher.announceSubagentNotice.mockImplementation(() => {
+        throw new Error('sink down');
+      });
+      await expect(h.monitor.observe(SESSION, ctx(127_500, 'c1'))).resolves.toBeUndefined();
+      expect(h.monitor.notesGatePhase('a1')).toBe('asked');
+      expect(h.dispatcher.postSubagentNotice).toHaveBeenCalledTimes(1);
+    });
+
     it('asks and pauses on weighted usage (weighted = 5 x output)', async () => {
       const h = makeHarness();
       await h.monitor.observe(SESSION, assistant({ output: 500_000 }, { id: 'w0' }));
@@ -1211,6 +1267,18 @@ describe('cooperative budget: ask, pause and normal return', () => {
       await h.monitor.finishWarnedAgent(SESSION, 'a1', 'completed');
       expect(h.monitor.hasNotesGate('a1')).toBe(false);
       expect(h.recordStore.writeOnce).toHaveBeenCalledTimes(1);
+    });
+
+    it('records a notes write under the gate that a session id the monitor does not know resolves to', async () => {
+      const h = makeHarness({ agentType: 'general-purpose' }, { workspace });
+      await launched(h);
+      await h.monitor.observe(SESSION, ctx(300_000, 'tab'));
+      const gate = (h.monitor as unknown as { notesGate: SubagentNotesGate }).notesGate;
+      const key = scopedAgentKey(SESSION, 'a1');
+      expect(gate.notesReady(key)).toBe(false);
+      // A tab id before the SDK session id is known: the check and the record use the same lookup.
+      await h.monitor.recordNotesToolResult('unknown-tab-id', 'a1', 'Write', { file_path: notesPath() });
+      expect(gate.notesReady(key)).toBe(true);
     });
 
     it('reports a single target as asked, paused, finalizing, then settled', async () => {

@@ -494,6 +494,14 @@ export interface ISessionSpawner {
   succeed(
     request: SessionChildSuccessionRequest,
   ): Promise<SessionChildSuccessionResult>;
+  /**
+   * A successor child acknowledged its handoff. Its handed-off predecessor is
+   * retired now unless its turn still runs; such a predecessor retires at its
+   * turn end. `none` when the caller has no predecessor that is still retiring.
+   */
+  retireAcknowledgedPredecessor?(
+    successorSessionId: string,
+  ): 'retired' | 'awaiting-turn-end' | 'none';
   send(request: SessionChildSendRequest): Promise<SessionChildSendResult>;
   status(
     query: SessionChildQuery,

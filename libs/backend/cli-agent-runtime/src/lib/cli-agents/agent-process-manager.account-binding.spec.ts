@@ -1,6 +1,6 @@
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { join, resolve, sep } from 'path';
 import 'reflect-metadata';
 import {
   AgentId,
@@ -72,7 +72,12 @@ jest.mock('./cli-adapters/pi-cli.adapter', () => ({ PiCliAdapter: jest.fn(() => 
 jest.mock('./cli-adapters/grok-cli.adapter', () => ({ GrokCliAdapter: jest.fn(() => mockRosterAdapter('grok')) }));
 
 const CLAUDE: CliType = 'claude';
-const ROOT = 'D:/lane-account-fixture';
+// An absolute path at the filesystem root, so no `.git` marker sits above it.
+// A relative fixture such as 'D:/lane-account-fixture' resolves against the
+// jest cwd on POSIX, and a path under `tmpdir()` can sit inside a linked
+// worktree when TMPDIR points there. In either case `worktreeMainRoot` finds
+// the main checkout and the lane lookup reads the stored selection a second time.
+const ROOT = resolve(sep, 'lane-account-fixture');
 const ID = AgentId.from('aaaaaaaa-bbbb-4ccc-8ddd-000000000001');
 const binding: ProviderAccountBinding = {
   version: 1, provider: 'claude', profileId: 'account123', runId: 'run12345',

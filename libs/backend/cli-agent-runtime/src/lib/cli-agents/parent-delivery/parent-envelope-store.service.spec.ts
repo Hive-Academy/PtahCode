@@ -103,15 +103,62 @@ describe('ParentEnvelopeStoreService persistence', () => {
     expect(saved(await store.enqueue(completion())).id).toBe(`lane-delivery:${COMPLETION_KEY}`);
   });
 
-  it('turns sending into outcome-unknown at restart', async () => {
+  it('turns a dispatched claim into outcome-unknown at restart', async () => {
+    const storage = new FakeStateStorage();
+    const store = await open(storage);
+    const entry = saved(await store.enqueue(report(1)));
+    const claim = await store.markSending(entry.id);
+    await store.markDispatching(entry.id, claim?.attemptId);
+    const restarted = await open(storage);
+    expect(restarted.findById(entry.id)).toMatchObject({
+      state: 'outcome-unknown', lastError: 'host-restarted', everDispatched: true,
+    });
+  });
+
+  it('releases a claim that never reached the adapter at restart, so it is sent again', async () => {
     const storage = new FakeStateStorage();
     const store = await open(storage);
     const entry = saved(await store.enqueue(report(1)));
     await store.markSending(entry.id);
     const restarted = await open(storage);
     expect(restarted.findById(entry.id)).toMatchObject({
-      state: 'outcome-unknown', lastError: 'host-restarted', everDispatched: true,
+      state: 'blocked-retryable', lastError: 'host-restarted-before-send', nextRetryAt: now,
     });
+    expect(restarted.findById(entry.id)?.dispatchStarted).toBeUndefined();
+    expect(await restarted.markSending(entry.id)).toMatchObject({ state: 'sending', attempts: 2 });
+  });
+
+  it('keeps a claim saved before the dispatch mark existed as outcome-unknown', async () => {
+    const storage = new FakeStateStorage();
+    const store = await open(storage);
+    const entry = saved(await store.enqueue(report(1)));
+    await store.markSending(entry.id);
+    const index = storage.values.get(PARENT_ENVELOPE_INDEX_KEY) as { records: Record<string, unknown>[] };
+    for (const record of index.records) delete record['dispatchStarted'];
+    const restarted = await open(storage);
+    expect(restarted.findById(entry.id)).toMatchObject({ state: 'outcome-unknown', lastError: 'host-restarted' });
+  });
+
+  it('restores a record that carries an unknown extra field', async () => {
+    const storage = new FakeStateStorage();
+    const store = await open(storage);
+    const entry = saved(await store.enqueue(report(1)));
+    const index = storage.values.get(PARENT_ENVELOPE_INDEX_KEY) as { records: Record<string, unknown>[] };
+    for (const record of index.records) record['futureField'] = 'from-a-newer-build';
+    const restarted = await open(storage);
+    expect(restarted.findById(entry.id)).toMatchObject({ id: entry.id, state: 'pending' });
+    expect(restarted.findById(entry.id)).not.toHaveProperty('futureField');
+  });
+
+  it('ignores a dispatch mark for a stale claim or a row that is not sending', async () => {
+    const store = await open(new FakeStateStorage());
+    const entry = saved(await store.enqueue(report(1)));
+    expect(await store.markDispatching(entry.id, undefined)).toBeUndefined();
+    const claim = await store.markSending(entry.id);
+    expect(await store.markDispatching(entry.id, 'other-attempt')).toBeUndefined();
+    expect(await store.markDispatching(entry.id, claim?.attemptId)).toMatchObject({ dispatchStarted: true });
+    await store.cancel(entry.id);
+    expect(await store.markDispatching(entry.id, claim?.attemptId)).toBeUndefined();
   });
 
   it.each([
@@ -193,6 +240,32 @@ describe('ParentEnvelopeStoreService admission, body validation and deferral', (
     expect(await store.getBody(entry.id)).toBe('<agent-report>body 1</agent-report>');
     await store.cancel(entry.id);
     expect(await store.markDeferred(entry.id, 'waiting-for-binding', 5_000)).toBeUndefined();
+  });
+
+  it('keeps a cancelled row cancelled when the send lands late, and records the delivery', async () => {
+    const storage = new FakeStateStorage();
+    const store = await open(storage);
+    const entry = saved(await store.enqueue(report(1)));
+    await store.markSending(entry.id);
+    await store.cancel(entry.id, 'owner-changed');
+    const late = await store.markDelivered(entry.dedupeKey);
+    expect(late).toMatchObject({ state: 'cancelled', lastError: 'delivered-after-cancel', deliveredAt: now });
+    // A repeat is a no-op, and the state survives a restart.
+    expect(await store.markDelivered(entry.dedupeKey)).toMatchObject({ state: 'cancelled' });
+    expect((await open(storage)).find(entry.dedupeKey)).toMatchObject({ state: 'cancelled', deliveredAt: now });
+  });
+
+  it('readdresses an unsent row to another parent with its body, and leaves a sent row alone', async () => {
+    const storage = new FakeStateStorage();
+    const store = await open(storage);
+    const entry = saved(await store.enqueue(report(1)));
+    const moved = await store.rerouteReport(entry.id, 'parent-2');
+    expect(moved).toMatchObject({ parentSessionId: 'parent-2', state: 'pending', dedupeKey: entry.dedupeKey });
+    expect(await store.getBody(entry.id)).toBe('<agent-report>body 1</agent-report>');
+    expect((await open(storage)).find(entry.dedupeKey)?.parentSessionId).toBe('parent-2');
+    await store.markSending(entry.id);
+    expect(await store.rerouteReport(entry.id, 'parent-3')).toBeUndefined();
+    expect(store.find(entry.dedupeKey)?.parentSessionId).toBe('parent-2');
   });
 
   it('records a cancel reason as lastError', async () => {

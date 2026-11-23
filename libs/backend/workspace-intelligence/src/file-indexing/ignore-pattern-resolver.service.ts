@@ -25,6 +25,14 @@ import { TOKENS } from '@ptah-extension/vscode-core';
 import { FileSystemService } from '../services/file-system.service';
 import { PatternMatcherService } from './pattern-matcher.service';
 
+export const DEFAULT_IGNORE_FILE_NAMES: readonly string[] = [
+  '.gitignore',
+  '.vscodeignore',
+  '.prettierignore',
+  '.eslintignore',
+  '.npmignore',
+];
+
 /**
  * The picomatch options {@link IgnorePatternResolverService.compileMatcher}
  * compiles with.
@@ -188,13 +196,7 @@ export class IgnorePatternResolverService {
    */
   async parseWorkspaceIgnoreFiles(
     workspacePath: string,
-    ignoreFileNames: string[] = [
-      '.gitignore',
-      '.vscodeignore',
-      '.prettierignore',
-      '.eslintignore',
-      '.npmignore',
-    ],
+    ignoreFileNames: readonly string[] = DEFAULT_IGNORE_FILE_NAMES,
   ): Promise<ParsedIgnoreFile[]> {
     const ignoreFiles: ParsedIgnoreFile[] = [];
 

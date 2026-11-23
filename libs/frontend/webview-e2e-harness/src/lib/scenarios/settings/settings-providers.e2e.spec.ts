@@ -18,17 +18,14 @@ import {
 } from './settings.fixtures';
 import {
   card,
-  catalogDialog,
   chooseMainAgentModel,
   closeConnectionDrawer,
   confirmWrite,
   connectProviderButton,
   credentialsOf,
   expectCall,
-  expectCatalogOpen,
   mainAgentModelInput,
   openCardDrawer,
-  openCatalog,
   openMainAgentPopover,
   providersTab,
   visibleEnabled,
@@ -127,48 +124,50 @@ for (const host of HOSTS) {
       });
     });
 
-    test('catalog -> wizard: choosing a provider closes the modal and opens setup preselected on it', async ({
+    test('Connect provider opens an unselected wizard and selecting a provider creates a draft', async ({
       page,
     }) => {
-      const dialog = await openCatalog(page);
-      await dialog
-        .getByRole('button', { name: 'Connect OpenRouter', exact: true })
-        .click();
-      await expectCatalogOpen(page, false);
-      await expect(page.locator('[data-testid="wizard-body"]')).toBeVisible();
-      await expect(
-        page.locator(
-          '[data-testid="wizard-step-provider"] input[type="radio"]:checked',
-        ),
-      ).toHaveCount(1);
+      await connectProviderButton(page).click();
+      const step = page.locator('[data-testid="wizard-step-provider"]');
+      await expect(step).toBeVisible();
+      await expect(step.locator('input[type="radio"]:checked')).toHaveCount(0);
+      const openRouter = step.locator('[data-provider="openrouter"] input[type="radio"]');
+      await openRouter.check();
+      await expect(openRouter).toBeChecked();
       await page.locator('[data-testid="wizard-cancel"]').click();
-      // A preselected provider is a draft, so Cancel asks to discard it. Wait for that review to render
-      // (an instant visibility check races it, as `closeWizard` in the reachability table explains).
-      const discard = page.locator('[data-testid="wizard-discard-confirm"]');
-      await discard
-        .waitFor({ state: 'visible', timeout: 2000 })
-        .then(() => discard.click())
-        .catch(() => undefined);
-      await expect(page.locator('[data-testid="wizard-body"]')).toHaveCount(0);
+      await page.getByRole('dialog', { name: 'Discard this setup?' })
+        .getByRole('button', { name: 'Discard', exact: true }).click();
+      await expect(step).toHaveCount(0);
+      await expect(connectProviderButton(page)).toBeFocused();
     });
 
-    test('catalog modal (Batch 14 finding 3): Tab stays inside; the backdrop closes it and focus returns to the opener', async ({
+    test('the discard dialog traps focus and Escape returns to the open wizard', async ({
       page,
     }) => {
-      const dialog = await openCatalog(page);
-      for (let i = 0; i < 12; i += 1) {
-        await page.keyboard.press('Tab');
-        expect(
-          await dialog.evaluate((node) =>
-            node.contains(document.activeElement),
-          ),
-        ).toBe(true);
-      }
-      // The backdrop is the dialog's own ::backdrop area: a click outside the panel.
+      await connectProviderButton(page).click();
+      const step = page.locator('[data-testid="wizard-step-provider"]');
+      await step.locator('[data-provider="openrouter"] input[type="radio"]').check();
+      const cancel = page.locator('[data-testid="wizard-cancel"]');
+      const dialog = page.getByRole('dialog', { name: 'Discard this setup?' });
+      const keepEditing = dialog.getByRole('button', { name: 'Keep editing' });
+      const discard = dialog.getByRole('button', { name: 'Discard', exact: true });
+
+      await cancel.click();
+      await expect(keepEditing).toBeFocused();
+      await page.keyboard.press('Shift+Tab');
+      await expect(discard).toBeFocused();
+      await page.keyboard.press('Tab');
+      await expect(keepEditing).toBeFocused();
+      await page.keyboard.press('Escape');
+      await expect(dialog).toHaveCount(0);
+      await expect(cancel).toBeFocused();
+
+      await page.keyboard.press('Escape');
+      await expect(keepEditing).toBeFocused();
       await page.mouse.click(5, 5);
-      await expectCatalogOpen(page, false);
-      await expect(connectProviderButton(page)).toBeFocused();
-      await expect(catalogDialog(page)).not.toHaveAttribute('open');
+      await expect(dialog).toHaveCount(0);
+      await expect(step).toBeVisible();
+      await expect(cancel).toBeFocused();
     });
 
     test('popover model: nothing is written before Save; Save shows a toast, and Undo sends a second config:model-switch with the previous model', async ({

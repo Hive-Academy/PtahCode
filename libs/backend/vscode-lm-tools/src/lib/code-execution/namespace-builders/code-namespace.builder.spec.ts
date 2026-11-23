@@ -574,6 +574,105 @@ describe('buildCodeNamespace.ensureIndexFresh', () => {
   });
 });
 
+describe('buildCodeNamespace.ensureIndexFresh — lazy freshness (TASK_2026_2312_c3ef)', () => {
+  it('the lazy run is never forced: an aged index starts { userInitiated: false } with no force', async () => {
+    const double = makeIndexer();
+    const ns = buildCodeNamespace(
+      freshnessDeps(
+        makeReader({
+          symbolCount: 50,
+          newestUpdatedAt: NOW - CODE_INDEX_STALE_MS - 1,
+        }),
+        double,
+      ),
+    );
+
+    const status = await ns.ensureIndexFresh();
+    await flush();
+
+    expect(status.reindexStarted).toBe(true);
+    expect(double.indexWorkspace).toHaveBeenCalledWith('/ws', {
+      userInitiated: false,
+    });
+    expect(
+      (double.indexWorkspace.mock.calls[0] as unknown[])[1],
+    ).not.toHaveProperty('force');
+  });
+
+  it('does not start a run after an all-hit run: validatedAt keeps newestUpdatedAt fresh', async () => {
+    const double = makeIndexer();
+    const ns = buildCodeNamespace(
+      freshnessDeps(
+        makeReader({
+          symbolCount: 50,
+          // The store folds validatedAt into newestUpdatedAt, so a run where
+          // every file was a fingerprint hit still reads as fresh.
+          newestUpdatedAt: NOW - HOUR,
+          validatedAt: NOW - HOUR,
+        }),
+        double,
+      ),
+    );
+
+    const status = await ns.ensureIndexFresh();
+    await flush();
+
+    expect(status).toMatchObject({
+      reindexStarted: false,
+      reindexInFlight: false,
+    });
+    expect(double.indexWorkspace).not.toHaveBeenCalled();
+  });
+
+  it('does not start a run for a zero-symbol root a complete run validated', async () => {
+    const double = makeIndexer();
+    const ns = buildCodeNamespace(
+      freshnessDeps(
+        makeReader({
+          symbolCount: 0,
+          newestUpdatedAt: null,
+          validatedAt: NOW - HOUR,
+        }),
+        double,
+      ),
+    );
+
+    const status = await ns.ensureIndexFresh();
+    await flush();
+
+    expect(status).toEqual({
+      symbolCount: 0,
+      indexAgeMs: null,
+      reindexStarted: false,
+      reindexInFlight: false,
+    });
+    expect(double.indexWorkspace).not.toHaveBeenCalled();
+  });
+
+  it('still starts a run for a zero-symbol root whose validatedAt is null', async () => {
+    const double = makeIndexer();
+    const ns = buildCodeNamespace(
+      freshnessDeps(
+        makeReader({
+          symbolCount: 0,
+          newestUpdatedAt: null,
+          validatedAt: null,
+        }),
+        double,
+      ),
+    );
+
+    const status = await ns.ensureIndexFresh();
+    await flush();
+
+    expect(status.reindexStarted).toBe(true);
+    expect(double.indexWorkspace).toHaveBeenCalledTimes(1);
+    expect(double.indexWorkspace).toHaveBeenCalledWith('/ws', {
+      userInitiated: false,
+    });
+  });
+});
+
 describe('buildCodeNamespace.searchSymbols — index freshness', () => {
   it('reports a pending run as in flight when the freshness read rejects', async () => {
     const warn = jest.fn();
@@ -1008,7 +1107,7 @@ describe('buildCodeNamespace — live coverage (Batch 24b)', () => {
 });
 
 describe('buildCodeNamespace.reindex', () => {
-  it('starts a full run in the background (user-initiated) and returns at once', async () => {
+  it('starts a full run in the background (user-initiated, forced) and returns at once', async () => {
     const double = makeIndexer();
     const ns = buildCodeNamespace(
       freshnessDeps(
@@ -1020,8 +1119,10 @@ describe('buildCodeNamespace.reindex', () => {
     const result = (await ns.reindex()) as ReindexStarted;
     await flush();
 
+    // A user-forced full reindex parses every file (TASK_2026_2312_c3ef D5).
     expect(double.indexWorkspace).toHaveBeenCalledWith('/ws', {
       userInitiated: true,
+      force: true,
     });
     expect(double.runs).toHaveLength(1);
     expect(result).toEqual({

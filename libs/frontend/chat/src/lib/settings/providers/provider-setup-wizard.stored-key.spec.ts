@@ -75,6 +75,15 @@ describe('ProviderSetupWizardComponent — stored key with a saved endpoint', ()
   let fixture: ComponentFixture<ProviderSetupWizardComponent>;
   let verify: ReturnType<typeof verifyEcho>;
 
+  beforeAll(() => {
+    HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) {
+      this.setAttribute('open', '');
+    };
+    HTMLDialogElement.prototype.close ??= function (this: HTMLDialogElement) {
+      this.removeAttribute('open');
+    };
+  });
+
   beforeEach(async () => {
     await TestBed.configureTestingModule({
       imports: [ProviderSetupWizardComponent],

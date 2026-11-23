@@ -1,0 +1,303 @@
+<!doctype html>
+<html lang="en" data-theme="ptah-glass">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Review settings drawer prototype</title>
+<style>
+/* Tokens copied from apps/ptah-extension-webview/tailwind.config.js (anubis dark / anubis-light). */
+:root{--b1:#131317;--b2:#1a1a20;--b3:#242430;--bc:#e8e6e1;--bcm:#a39d99;--pri:#2563eb;--pri-c:#f8f7f4;--warn:#f97316;--err:#ef4444;--ok:#16a34a;--info:#3b82f6;
+--surface-1:color-mix(in oklch,var(--b2) 88%,var(--b1));--surface-border:color-mix(in oklch,var(--bc) 14%,transparent);--surface-border-strong:color-mix(in oklch,var(--bc) 22%,transparent);--focus:var(--info);--need:#f97316;--idle:#9ca3af;--err-ink:#ef4444}
+:root[data-theme=anubis-light]{--b1:oklch(97.788% .004 56.375);--b2:oklch(93.982% .007 61.449);--b3:oklch(91.586% .006 53.44);--bc:oklch(23.574% .066 313.189);--bcm:oklch(48.955% .0448 348.48);--pri:oklch(85% .138 181);--pri-c:oklch(36% .078 188);--warn:oklch(72% .18 55);--err:oklch(64% .246 16.4);--ok:oklch(69% .17 162.5);--info:oklch(68% .169 237);--focus:oklch(45% .15 250);--need:#8f5200;--idle:#6b6570;--err-ink:#b4232a}
+:root[data-theme=ptah-glass]{--b1:#17191d;--b2:#202329;--b3:#2a2e35;--bc:#f2f2f1;--bcm:oklch(90.05% .0071 268.54);--pri:#e4b94a;--pri-c:#1b1403;--need:#ffb066;--idle:#dcdee3;--err-ink:#ff9696;--ok:#5fe0a0;--info:#93bdff;--focus:#93bdff;--err:#ff9696;--warn:#ffb066}
+:root[data-theme=ptah-glass-light]{--b1:#f7f3fd;--b2:#eee8f8;--b3:#e2daf1;--bc:#1e1936;--bcm:oklch(46.559% .0614 293.53);--pri:#7c5700;--pri-c:#fff8e6;--need:#8f5200;--idle:#5f5878;--err-ink:#a31f26;--ok:#0f6434;--info:#2449b0;--focus:#2449b0;--err:#a31f26;--warn:#8f5200}
+*{box-sizing:border-box}
+body{margin:0;background:var(--b1);color:var(--bc);font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+.muted{color:var(--bcm)}.mono{font-family:ui-monospace,Consolas,monospace}.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+/* prototype chrome */
+.bar{position:sticky;top:0;z-index:5;background:var(--b3);border-bottom:1px solid var(--surface-border);padding:8px 16px;display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;font-size:12px}
+.bar label{display:flex;gap:6px;align-items:center}.bar select,.bar button{font:inherit;color:inherit;background:var(--b2);border:1px solid var(--surface-border-strong);border-radius:6px;padding:3px 8px}
+.stage{padding:16px;display:flex;flex-wrap:wrap;gap:24px;align-items:flex-start}
+.frame{border:1px dashed var(--surface-border-strong);border-radius:8px;padding:8px;max-width:100%}
+.frame>h2{font-size:11px;margin:0 0 6px;text-transform:uppercase;letter-spacing:.06em}
+/* drawer */
+.drawer{background:var(--b1);border-left:1px solid var(--b3);width:576px;max-width:100%;box-shadow:0 12px 30px #0008;display:flex;flex-direction:column;height:760px;max-height:90vh;position:relative}
+.dh{display:flex;gap:8px;align-items:flex-start;border-bottom:1px solid var(--b3);padding:12px 16px;flex:none}.dh h2{margin:0;font-size:14px;font-weight:600}.dh p{margin:0;font-size:12px}
+.db{flex:1;min-height:0;overflow-y:auto;padding:12px 16px}.df{flex:none;border-top:1px solid var(--b3);padding:12px 16px;display:flex;gap:12px;justify-content:space-between;align-items:center;background:var(--b1)}
+.db>section+section,.db>fieldset+section,.db>section+fieldset{border-top:1px solid var(--b3);margin-top:20px;padding-top:20px}.sh{display:flex;gap:8px;align-items:center}.sh svg{width:16px;height:16px;flex:none;color:var(--bcm)}.sd{font-size:12px;color:var(--bcm);margin:2px 0 8px}
+.ico{width:14px;height:14px;flex:none}.fld{display:block;margin-top:8px}.fld span{display:block;font-size:12px;color:var(--bcm);margin-bottom:2px}.fld input,.inp{width:100%;font:inherit;color:var(--bc);background:var(--b1);border:1px solid var(--surface-border-strong);border-radius:8px;padding:6px 10px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:8px 12px}.narrow .grid2{grid-template-columns:1fr}.rc{background:var(--b2);border:1px solid var(--b3);border-radius:10px;padding:10px;margin-top:8px}.rc label{display:flex;gap:8px;font-size:13px;margin-top:6px}.btn.outline{border-color:var(--surface-border-strong)}
+.bk{background:#0006;padding:0}.bk .drawer{margin-left:auto}
+.drawer.narrow{width:400px}
+h3{font-size:14px;margin:0;font-weight:600}h4{font-size:12px;margin:14px 0 6px;font-weight:600}
+.btn{font:inherit;display:inline-flex;align-items:center;gap:6px;border:1px solid transparent;border-radius:8px;padding:6px 12px;cursor:pointer;background:transparent;color:var(--bc)}
+.btn.primary{background:var(--pri);color:var(--pri-c)}
+.sec.sec2{border-top:1px solid var(--b3);margin-top:20px;padding-top:20px}.sec:first-child{border-top:0;margin-top:0;padding-top:0}
+.btn.ghost:hover{background:var(--surface-border)}
+.btn.xs{padding:2px 6px;min-height:28px;min-width:28px;justify-content:center}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.sel{position:relative;display:inline-block;min-width:0;width:100%}
+.sel>button{width:100%;display:flex;justify-content:space-between;gap:8px;align-items:center;text-align:left;font:inherit;font-size:12px;color:var(--bc);background:var(--b1);border:1px solid var(--surface-border-strong);border-radius:8px;padding:4px 8px;min-height:30px;cursor:pointer}
+.sel>button span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.sel>button[disabled]{opacity:.5;cursor:not-allowed}
+.sel ul{position:absolute;z-index:20;left:0;right:0;top:calc(100% + 4px);margin:0;padding:4px;list-style:none;background:var(--b2);border:1px solid var(--surface-border-strong);border-radius:8px;box-shadow:0 12px 30px #0006;max-height:220px;overflow:auto;min-width:200px}
+.sel li{padding:5px 8px;border-radius:6px;font-size:12px;cursor:pointer}
+.sel li[aria-selected=true]{font-weight:600}.sel li.act{background:var(--surface-border)}
+.sel li[aria-disabled=true]{opacity:.55;cursor:default}
+.sel li small{display:block;color:var(--bcm)}
+.card{background:var(--b2);border:1px solid var(--surface-border);border-radius:10px}
+.row{display:grid;grid-template-columns:24px minmax(0,1fr) auto;gap:6px 8px;align-items:center;padding:8px}
+.row+.row{border-top:1px solid var(--surface-border)}
+.row .pos{font-size:12px;color:var(--bcm);text-align:center}
+.row .name{display:flex;flex-wrap:wrap;gap:4px 6px;align-items:center;min-width:0}
+.row .model{grid-column:2/3}.row .ctl{display:flex;gap:2px;grid-row:1;grid-column:3}
+
+.badge{display:inline-flex;align-items:center;gap:4px;font-size:11px;border:1px solid var(--surface-border-strong);border-radius:999px;padding:0 7px;line-height:18px;white-space:nowrap}
+.badge i{width:7px;height:7px;border-radius:50%;background:currentColor;display:inline-block}
+.st{display:inline-flex;align-items:center;gap:5px;font-size:11px;white-space:nowrap}.st i{width:7px;height:7px;display:inline-block;background:var(--need);transform:rotate(45deg)}.st.offline i{background:var(--err-ink);transform:none}.st.ok i{background:var(--ok);border-radius:50%;transform:none}.st.idle i{background:none;border:1.5px solid var(--idle);border-radius:50%;transform:none}
+.tint-need{background:color-mix(in oklch,var(--need) 9%,transparent)}
+.pin{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.2fr) minmax(0,1.2fr);gap:6px;align-items:center;padding:6px 8px}
+.pin+.pin{border-top:1px solid var(--surface-border)}
+.drawer.narrow .pin{grid-template-columns:1fr 1fr}.drawer.narrow .pin>:first-child{grid-column:1/-1}
+.hint{font-size:12px;color:var(--bcm);margin:4px 0 0}
+.err-t{font-size:12px;margin:4px 0 0;display:flex;gap:6px}.err-t:before{content:"";width:8px;height:8px;background:var(--err-ink);margin-top:5px;flex:none}
+.note{border-radius:8px;border:1px solid var(--surface-border-strong);padding:8px 10px;font-size:12px;display:flex;gap:8px;justify-content:space-between;align-items:center}
+.skel{/* prototype stand-in for ptah-skeleton */height:34px;border-radius:8px;background:var(--surface-border);animation:p 1.4s infinite}@keyframes p{50%{opacity:.5}}
+@media(prefers-reduced-motion:reduce){.skel{/* prototype stand-in for ptah-skeleton */animation:none}}
+.info{border:1px solid var(--surface-border-strong);border-radius:50%;width:20px;height:20px;font-size:11px;background:transparent;color:var(--bc);cursor:pointer}
+.pop{font-size:12px;padding:8px 10px;margin-top:6px}
+/* run detail */
+.detail{width:576px;max-width:100%;padding:12px}
+.detail.narrow{width:400px}
+.detail ol,.detail ul{list-style:none;margin:6px 0 0;padding:0;display:grid;gap:8px;grid-template-columns:1fr 1fr}
+.detail.narrow ol,.detail.narrow ul{grid-template-columns:1fr}
+.detail li{background:var(--b2);border-radius:10px;padding:8px 12px}
+.detail li p{margin:0;font-size:12px}.detail li p.t{font-size:14px}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:currentColor;margin-right:6px}
+.fb{margin-top:4px!important;padding-left:8px;border-left:2px solid var(--need)}
+</style>
+</head>
+<body>
+<div class="bar" role="toolbar" aria-label="Prototype controls">
+  <strong>Review settings drawer</strong>
+  <label>State <select id="state">
+    <option value="empty">Empty (no pool, no pins)</option>
+    <option value="pool" selected>Pool with entries</option>
+    <option value="pins">Pins set</option>
+    <option value="unavailable">Unavailable entries</option>
+    <option value="models">Model catalog unreadable for one lane</option>
+    <option value="modelsall">Model catalog unreadable for all lanes</option>
+    <option value="lanes">Lane list unreadable</option>
+    <option value="loading">Loading</option>
+    <option value="error">Saving / validation error</option>
+  </select></label>
+  <label>Theme <select id="theme"><option value="ptah-glass" selected>ptah-glass</option><option value="ptah-glass-light">ptah-glass-light</option><option value="anubis">anubis</option><option value="anubis-light">anubis-light</option></select></label>
+  <label><input type="checkbox" id="old"> Run detail: pre-change run</label>
+</div>
+<div class="stage">
+  <div class="frame bk"><h2>Drawer 576 px, on dimmed page (1440 px viewport)</h2><div class="drawer" id="d1"></div></div>
+  <div class="frame bk"><h2>Drawer 400 px (narrow window)</h2><div class="drawer narrow" id="d2"></div></div>
+  <div class="frame"><h2>Run detail additions</h2><div class="detail" id="r1"></div></div>
+  <div class="frame"><h2>Run detail 400px</h2><div class="detail narrow" id="r2"></div></div>
+</div>
+<div id="live" class="sr" role="status" aria-live="polite"></div>
+<script>
+const LANES=[
+ {id:'codex',label:'Codex',family:'openai',limit:'ok',models:['gpt-5.4','gpt-5.4-mini']},
+ {id:'claude-code',label:'Claude Code',family:'anthropic',limit:'ok',models:['opus','sonnet','haiku']},
+ {id:'gemini',label:'Gemini',family:'google',limit:'at-limit',models:['gemini-pro','gemini-flash']},
+ {id:'ptah-cli:a1',label:'Ptah CLI: reviewer-a',family:'ptah-cli',limit:'unknown',models:[]}
+];
+const ROLES=[['triage','Triage'],['correctness-lifecycle','correctness-lifecycle'],['contracts-callers','contracts-callers'],['security-privacy','security-privacy'],['host-di-config','host-di-config'],['verifier','Verifier']];
+const S={
+ empty:{pool:[],pins:{},bot:'none'},
+ pool:{pool:[{lane:'codex',model:null},{lane:'claude-code',model:'sonnet'},{lane:'gemini',model:null}],pins:{},bot:'ok'},
+ pins:{pool:[{lane:'codex',model:null},{lane:'claude-code',model:'sonnet'}],pins:{triage:{lane:'claude-code',model:'haiku'},'security-privacy':{lane:'codex',model:'gpt-5.4'},verifier:{lane:'claude-code',model:null}}},
+ unavailable:{pool:[{lane:'codex',model:'gpt-4-old'},{lane:'ptah-cli:gone',model:null},{lane:'claude-code',model:null}],pins:{verifier:{lane:'ptah-cli:gone',model:null}}},
+ models:{pool:[{lane:'codex',model:'gpt-5.4'},{lane:'claude-code',model:null}],pins:{},failLanes:['codex']},
+ modelsall:{pool:[{lane:'codex',model:'gpt-5.4'},{lane:'claude-code',model:null}],pins:{},failLanes:['*']},
+ lanes:{pool:[{lane:'codex',model:null},{lane:'claude-code',model:'sonnet'}],pins:{},lanesDown:true},
+ loading:{pool:[],pins:{},loading:true},
+ error:{pool:[{lane:'codex',model:null},{lane:'codex',model:null}],pins:{},err:true}
+};
+let st,uid=0;
+const laneOf=id=>LANES.find(l=>l.id===id);
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+function reason(e){ // why an entry is unavailable
+  if(st.lanesDown) return null;
+  const l=laneOf(e.lane);
+  if(!l) return 'Lane not listed. It may be uninstalled or disabled in global settings.';
+  if(l.limit==='at-limit') return 'At its usage limit.';
+  if(e.model && !mfail(e.lane) && l.models.length && !l.models.includes(e.model)) return 'Model not offered by this lane.';
+  return null;
+}
+const mfail=id=>!!st.failLanes&&(st.failLanes.includes('*')||st.failLanes.includes(id));
+const allFail=()=>!!st.failLanes&&st.failLanes.includes('*');
+const limTxt=l=>l.limit==='at-limit'?'at limit':l.limit==='unknown'?'limit unknown':'room available';
+function laneName(id){const l=laneOf(id);return l?l.label:id}
+function sel(o){ // o:{id,label,labelledBy,value,options:[{v,t,d,dis}],disabled,onPick}
+  const id='s'+(++uid);window['pick'+id]=o.onPick;
+  const cur=o.options.find(x=>x.v===o.value);
+  return `<div class="sel" data-sel="${id}"><button type="button" role="combobox" aria-haspopup="listbox" aria-expanded="false" aria-controls="${id}-l" aria-label="${esc(o.label)}" ${o.disabled?'disabled':''} data-id="${id}"><span>${esc(cur?cur.t:(o.value||o.ph||''))}</span><span aria-hidden="true">▾</span></button><ul role="listbox" id="${id}-l" aria-label="${esc(o.label)}" hidden>${o.options.map((x,i)=>`<li role="option" id="${id}-o${i}" data-v="${esc(x.v??'')}" aria-selected="${x.v===o.value}" ${x.dis?'aria-disabled="true"':''}>${esc(x.t)}${x.d?`<small>${esc(x.d)}</small>`:''}</li>`).join('')}</ul></div>`;
+}
+function modelOpts(e){
+  const l=laneOf(e.lane);const o=[{v:'',t:'Lane default',d:'No model is sent'}];
+  if(l&&!mfail(e.lane)) l.models.forEach(m=>o.push({v:m,t:m}));
+  if(e.model && !o.some(x=>x.v===e.model)) o.push({v:e.model,t:e.model+(mfail(e.lane)?'':' (not offered)'),d:mfail(e.lane)?'Saved. Not checked.':'Kept until you change it.'});
+  return o;
+}
+function modelSel(e,label,set){
+  return sel({label,value:e.model||'',options:modelOpts(e),disabled:!e.lane,onPick:v=>{set(v||null)}});
+}
+function status(t,k){return `<span class="st ${k||''}"><i aria-hidden="true"></i><span>${esc(t)}</span></span>`}
+function badge(t,k){return `<span class="badge ${k||''}"><i aria-hidden="true"></i>${esc(t)}</span>`}
+function poolRows(){
+  if(!st.pool.length) return '';
+  return `<ol class="card" style="list-style:none;margin:6px 0 0;padding:0" aria-label="Review lane pool, in order of use">`+st.pool.map((e,i)=>{
+    const l=laneOf(e.lane),why=reason(e),n=laneName(e.lane),pos=`${i+1} of ${st.pool.length}`;
+    const dupe=st.err&&st.pool.findIndex(x=>x.lane===e.lane&&x.model===e.model)!==i;
+    return `<li class="row ${why?'tint-need':''}"><span class="pos" aria-hidden="true">${i+1}</span>
+      <span class="name"><strong>${esc(n)}</strong>${l?badge(l.family):''}${l&&l.limit==='at-limit'?status('At limit'):''}${l&&l.limit==='unknown'?status('Limit unknown','idle'):''}${!l&&!st.lanesDown?status('Unavailable'):''}${l&&why&&l.limit!=='at-limit'?status('Unavailable'):''}${st.lanesDown?status('Status unknown','idle'):''}</span>
+      <span class="ctl"><button class="btn ghost xs" type="button" aria-label="Move ${esc(n)} up, position ${pos}" title="Move up" ${i===0?'disabled':''} onclick="mv(${i},-1,'up')">${ic('up')}</button><button class="btn ghost xs" type="button" aria-label="Move ${esc(n)} down, position ${pos}" title="Move down" ${i===st.pool.length-1?'disabled':''} onclick="mv(${i},1,'down')">${ic('down')}</button><button class="btn ghost xs" type="button" aria-label="Remove ${esc(n)}, position ${pos}" title="Remove" onclick="rm(${i})">${ic('x')}</button></span>
+      <span class="model">${modelSel(e,`Model for ${n}, position ${i+1}`,v=>{e.model=v;render()})}
+      ${l&&mfail(e.lane)&&!allFail()?`<p class="hint">Models for this lane could not be read. The saved model is kept.</p>`:''}
+      ${why?`<p class="hint" id="why${i}">${esc(why)} Reviews skip it and say so.</p>`:''}
+      ${dupe?`<p class="err-t" role="alert">Already in the pool with this model.</p>`:''}</span></li>`}).join('')+`</ol>`;
+}
+function addCtl(){
+  const full=st.pool.length>=12;
+  return `<div style="margin-top:8px;max-width:260px">${sel({label:'Add lane to pool',value:'',ph:full?'Pool is full':'Add a lane…',disabled:full||st.lanesDown,options:LANES.map(l=>({v:l.id,t:l.label,d:l.family+' · '+limTxt(l)})),onPick:v=>{if(v){st.pool.push({lane:v,model:null});announce(laneName(v)+' added at position '+st.pool.length);render(null,'addctl')}}})}</div>${full?'<p class="hint">The pool holds up to 12 entries.</p>':''}`;
+}
+function pinRows(){
+  return ROLES.map(([k,t])=>{
+    const p=st.pins[k]||{lane:'',model:null};const why=p.lane?reason(p):null;
+    const lopts=[{v:'',t:'Follow the pool',d:'No pin'}].concat(LANES.map(l=>({v:l.id,t:l.label,d:l.family+' · '+limTxt(l)})));
+    if(p.lane&&!laneOf(p.lane)&&!st.lanesDown) lopts.push({v:p.lane,t:p.lane+' (unavailable)'});
+    return `<div class="pin ${why?'tint-need':''}" role="group" aria-label="${esc(t)} pin"><span>${k==='triage'||k==='verifier'?esc(t):`<span class="mono">${esc(t)}</span>`}${why?' '+status('Unavailable'):''}</span>
+      ${sel({label:`${t} lane`,value:p.lane,options:lopts,disabled:st.lanesDown&&false,onPick:v=>{if(v)st.pins[k]={lane:v,model:null};else delete st.pins[k];announce(v?t+' pinned to '+laneName(v):t+' pin cleared');render()}})}
+      ${sel({label:`${t} model`,value:p.model||'',options:modelOpts(p),disabled:!p.lane,onPick:v=>{st.pins[k].model=v||null;render()}})}
+      ${why?`<span class="hint" style="grid-column:1/-1;margin:0">${esc(why)} Reviews use the pool order and say so.</span>`:''}</div>`}).join('');
+}
+function section(){
+  if(st.loading) return `<section class="sec2"><div class="sh">${ic('route')}<h3>Review lanes</h3></div><div class="skel" style="margin-top:8px" role="status" aria-label="Loading review lanes"></div></section>`;
+  const empty=!st.pool.length&&!Object.keys(st.pins).length;
+  return `<fieldset class="sec2" style="border:0;border-top:1px solid var(--b3);padding:20px 0 0;margin:20px 0 0;min-width:0"><section aria-labelledby="rl-h"><div class="sh">${ic('route')}<h3 id="rl-h">Review lanes</h3><button class="btn ghost xs" type="button" aria-label="About review lanes" title="About review lanes" aria-expanded="false" onclick="tip(this)">${ic('info')}</button></div>
+  <div class="card pop" hidden role="dialog" aria-label="About review lanes">Choose which lanes review a pull request. Lenses spread across lane families when the pool has more than one. The verifier avoids the families that wrote its candidates. A lane turned off in global settings stays off.</div>
+  ${st.lanesDown?`<div class="note" style="margin-top:8px" role="alert"><span>Lanes could not be read. Saved entries are shown as they are.</span><button class="btn ghost" type="button">Retry</button></div>`:''}
+  ${allFail()?`<p class="hint" role="status">Model list unreadable. Saved models are kept and sent as they are. You can still choose Lane default.</p>`:''}
+  ${empty?`<p class="note" style="margin-top:8px" id="empty-note">No lanes chosen. Reviews follow the global agent order.</p>`:''}
+  <h4 id="pool-h">Lane pool</h4><p class="hint" style="margin-top:0">Used in order. Add lanes to limit reviews to them.</p>
+  ${poolRows()}${addCtl()}
+  <h4 id="pin-h">Pins</h4><p class="hint" style="margin-top:0">Force one lane for a role. Roles without a pin follow the pool, or the global agent order when the pool is empty.</p>
+  <div class="card" style="margin-top:6px">${pinRows()}</div>
+  ${st.err?`<p class="err-t" role="alert">Review lanes were not saved: the pool has a duplicate entry. Remove it and save again.</p>`:''}
+  </section></fieldset>`;
+}
+const IC={
+ x:'<path d="M18 6 6 18M6 6l12 12"/>',plus:'<path d="M5 12h14M12 5v14"/>',trash:'<path d="M3 6h18M8 6V4h8v2m-9 0 1 14h8l1-14"/>',
+ pr:'<circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="18" r="2"/><path d="M6 8v8M18 16V9a3 3 0 0 0-3-3h-3m2-2-2 2 2 2"/>',
+ branch:'<circle cx="6" cy="5" r="2"/><circle cx="6" cy="19" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 7v10M18 10c0 5-12 2-12 7"/>',
+ users:'<circle cx="9" cy="8" r="3"/><path d="M3 20c0-3 3-5 6-5s6 2 6 5M16 5a3 3 0 0 1 0 6M21 20c0-2-1-4-3-5"/>',
+ sliders:'<path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/>',
+ route:'<circle cx="6" cy="19" r="2"/><circle cx="18" cy="5" r="2"/><path d="M8 19h8a3 3 0 0 0 0-6H8a3 3 0 0 1 0-6h8"/>',
+ bot:'<rect x="4" y="8" width="16" height="12" rx="2"/><path d="M12 8V4M9 14h.01M15 14h.01"/>',
+ send:'<path d="m22 2-7 20-4-9-9-4zM22 2 11 13"/>',save:'<path d="M5 3h12l4 4v14H3V3zM7 3v6h8V3M7 21v-7h10v7"/>',
+ key:'<circle cx="8" cy="15" r="4"/><path d="m11 12 9-9M16 7l3 3"/>',shield:'<path d="M12 3 4 6v6c0 5 3 8 8 9 5-1 8-4 8-9V6zM9 12l2 2 4-4"/>',unplug:'<path d="m19 5 3-3M2 22l3-3M7 14l-2 2a3 3 0 0 0 4 4l2-2M17 10l2-2a3 3 0 0 0-4-4l-2 2M8 12l4 4"/>',
+ pause:'<path d="M8 5v14M16 5v14"/>',up:'<path d="M12 19V5M5 12l7-7 7 7"/>',down:'<path d="M12 5v14M19 12l-7 7-7-7"/>',info:'<circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/>'
+};
+const ic=(k,c)=>`<svg class="${c||'ico'}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${IC[k]}</svg>`;
+function secHead(i,id,t,d){return `<div class="sh">${ic(i)}<h3 id="${id}">${t}</h3></div>${d?`<p class="sd">${d}</p>`:''}`}
+function botBlock(){
+  if(st.bot==='ok') return `<p style="margin:0">${status('Connected','ok')}</p><p style="margin:4px 0 0;font-size:13px">Connected as review-bot</p><p class="hint" style="margin-top:2px">Reported scopes: repo | Connected 2026-11-20 | Verified 2026-11-23</p>`;
+  if(st.bot==='unverified') return `<p style="margin:0">${status('Unverified')}</p><p class="muted" style="margin:4px 0 0;font-size:13px">Bot identity unavailable. Verify connection.</p>`;
+  return `<p style="margin:0">${status('Not connected','offline')}</p><p class="muted" style="margin:4px 0 0;font-size:13px">No bot connected. Live publication is unavailable.</p>`;
+}
+function otherSections(){
+  return {
+  repos:`<section class="sec" aria-labelledby="h-repo">${secHead('branch','h-repo','Repositories','Fork PRs are always excluded. CodeRabbit remains enabled alongside Ptah review.')}
+    <div class="rc"><div style="display:flex;justify-content:space-between;align-items:center"><strong style="font-weight:500">Hive-Academy/ptah-extension</strong><button class="btn ghost xs" type="button" aria-label="Remove Hive-Academy/ptah-extension" title="Remove Hive-Academy/ptah-extension">${ic('trash')}</button></div>
+    <label><input type="checkbox" checked> Enable review polling</label><label><input type="checkbox" checked> Keep this repository in dry-run</label><label><input type="checkbox"> Pause publication for this repository</label>
+    <p class="hint">Connect a bot token to enable live publication.</p></div>
+    ${st.err?`<p class="err-t" role="alert">Repository was already added.</p>`:''}
+    <div style="display:flex;gap:8px;align-items:flex-end"><label class="fld" style="flex:1"><span>Add repository (owner/name)</span><input id="review-add-repository" autocomplete="off"></label><button class="btn outline" type="button">${ic('plus')}Add repository</button></div></section>`,
+  maint:`<section class="sec" aria-labelledby="h-m">${secHead('users','h-m','Maintainers','Who may attest live publication.')}
+    <label class="fld"><span>Your maintainer GitHub login for live permission attestation</span><input id="review-attestor"></label>
+    <label class="fld"><span>GitHub logins, comma separated</span><input id="review-maintainers" autocomplete="off"></label></section>`,
+  thr:`<section class="sec" aria-labelledby="h-t">${secHead('sliders','h-t','Review thresholds')}
+    <div style="margin-top:8px"><p style="margin:0;font-size:14px;font-weight:500">Minimum severity</p><p class="hint" style="margin-top:2px">Set in the repository review config.</p></div>
+    <div class="grid2"><label class="fld"><span>Poll interval (minutes)</span><input type="number" value="10" min="1" max="1440"></label>
+    <label class="fld"><span>Max inline comments</span><input type="number" value="10" min="0" max="100"></label>
+    <label class="fld"><span>Confidence floor</span><input type="number" value="0.8" step="0.01"></label>
+    <label class="fld"><span>Lane cap per PR</span><input type="number" value="6" min="1" max="6"></label></div></section>`,
+  bot:`<section class="sec2" aria-labelledby="h-b">${secHead('bot','h-b','GitHub bot identity','The bot that posts review comments.')}
+    ${botBlock()}
+    <label class="fld"><span>${st.bot==='none'?'Connect bot token':'Replace bot token'}</span><input id="review-bot-token" type="password" autocomplete="off"></label>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px"><button class="btn outline" type="button" ${st.saving?'disabled':''}>${ic('key')}Save token</button><button class="btn outline" type="button">${ic('shield')}Verify connection</button>${st.bot!=='none'?`<button class="btn ghost" type="button">${ic('unplug')}Remove connection</button>`:''}</div></section>`,
+  pub:`<section class="sec" aria-labelledby="h-p">${secHead('send','h-p','Publication')}
+    <label style="display:flex;gap:8px;align-items:center;font-size:13px;margin-top:8px"><input type="checkbox" role="switch"> ${ic('pause')} Pause all publication</label><p class="hint">Turning pause off asks for confirmation.</p></section>`};
+}
+function drawer(){
+  const o=otherSections();
+  return `<div class="dh">${ic('pr','ico muted')}<div style="flex:1;min-width:0"><h2 id="review-settings-title" tabindex="-1">Review settings</h2><p class="muted">Settings apply to the next run.</p></div><button class="btn ghost xs" type="button" aria-label="Close review settings" title="Close review settings">${ic('x')}</button></div>
+  <div class="db" role="region" aria-label="Review settings sections">${o.repos}${o.maint}${o.thr}${section()}${o.bot}${o.pub}</div>
+  <div class="df"><div style="font-size:12px;min-width:0">${st.err?`<span class="err-t" role="alert" style="margin:0">Review settings could not be saved.</span>`:''}</div><button class="btn primary" type="button" ${st.loading?'disabled':''}>${ic('save')}${st.saving?'Saving…':'Save review settings'}</button></div>`;
+}
+function stageCards(old,narrow){
+  /* One rule per stage record: lane set -> lane line; lane null + family -> "Family: x"; both null -> nothing. */
+  const lane=(l,m,f)=>old?(f?`<p class="muted">Family: ${f}</p>`:''):(l?`<p class="muted"><span class="mono">${l}</span> · ${m?`<span class="mono">${m}</span>`:'lane default'}${f?` · family ${f}`:''}</p>`:'');
+  const fb=(t)=>old?'':`<p class="fb">${t}</p>`;
+  const dot='<span class="dot" style="color:var(--ok)"></span>';
+  return `<h3>Stages</h3><ol>
+   <li><p class="t">${dot}Discovery</p><p class="muted">Succeeded · 3s</p></li>
+   <li><p class="t">${dot}Triage</p><p class="muted">Succeeded · 41s</p>${lane('claude-code','haiku','anthropic')}${fb('Fallback: pinned <span class="mono">ptah-cli:gone</span> was unavailable (lane not listed). Ran on <span class="mono">claude-code</span>.')}</li>
+   <li><p class="t">${dot}Verification</p><p class="muted">Succeeded · 72s</p>${lane('claude-code',null,'anthropic')}</li></ol>
+  <h3 style="margin-top:14px">Lenses</h3><ul>
+   <li><p class="t" style="font-weight:600">${dot}correctness-lifecycle</p><p class="muted">Succeeded · 118s</p>${old?'':lane('codex','gpt-5.4')}<p class="muted">Family: openai · Verifier family: anthropic</p></li>
+   <li><p class="t" style="font-weight:600">${dot}security-privacy</p><p class="muted">Succeeded · 96s</p>${old?'':lane('claude-code','sonnet')}<p class="muted">Family: anthropic · Verifier family: anthropic</p>${fb('Fallback: pool entry <span class="mono">gemini</span> skipped (at limit). Ran on <span class="mono">claude-code</span>.')}</li></ul>`;
+}
+/* behaviour */
+function announce(t){document.getElementById('live').textContent='';setTimeout(()=>document.getElementById('live').textContent=t,30)}
+function mv(i,d,dir){const [e]=st.pool.splice(i,1);st.pool.splice(i+d,0,e);announce(`${laneName(e.lane)} moved ${dir} to position ${i+d+1} of ${st.pool.length}`);
+  // focus stays on the button that moved; if it hit an edge the other move button takes focus
+  const j=i+d,edge=(dir==='up'&&j===0)||(dir==='down'&&j===st.pool.length-1);render({row:j,btn:edge?(dir==='up'?1:0):(dir==='up'?0:1)})}
+function rm(i){const [e]=st.pool.splice(i,1);announce(`${laneName(e.lane)} removed. ${st.pool.length} in pool`);
+  render(st.pool.length?{row:Math.min(i,st.pool.length-1),btn:2}:null,st.pool.length?null:'addctl')}
+/* real UI: ptah-native-popover, same trigger and panel as ptah-field info */
+function tip(b){const p=b.closest('section').querySelector('.pop');p.hidden=!p.hidden;b.setAttribute('aria-expanded',!p.hidden)}
+function render(focus,ctl){
+  uid=0;
+  const f=document.activeElement;
+  ['d1','d2'].forEach((id,k)=>{document.getElementById(id).innerHTML=drawer()});
+  document.getElementById('r1').innerHTML=stageCards(document.getElementById('old').checked);
+  document.getElementById('r2').innerHTML=stageCards(document.getElementById('old').checked);
+  const d=document.getElementById('d1');
+  if(focus){const b=d.querySelectorAll('ol[aria-label] > li')[focus.row]?.querySelectorAll('.ctl button')[focus.btn];b&&b.focus()}
+  if(ctl==='addctl')d.querySelector('[aria-label="Add lane to pool"]')?.focus();
+}
+document.addEventListener('click',e=>{
+  const b=e.target.closest('.sel>button');
+  document.querySelectorAll('.sel ul').forEach(u=>{if(!b||u!==b.nextElementSibling){u.hidden=true;u.previousElementSibling.setAttribute('aria-expanded','false')}});
+  if(b&&!b.disabled){const u=b.nextElementSibling;u.hidden=!u.hidden;b.setAttribute('aria-expanded',!u.hidden);return}
+  const li=e.target.closest('.sel li');
+  if(li&&li.getAttribute('aria-disabled')!=='true'){const id=li.closest('.sel').dataset.sel;window['pick'+id](li.dataset.v||null)}
+});
+document.addEventListener('keydown',e=>{
+  const w=e.target.closest&&e.target.closest('.sel');if(!w)return;
+  const btn=w.querySelector('button'),ul=w.querySelector('ul');
+  const items=[...ul.querySelectorAll('li:not([aria-disabled=true])')];
+  if(['ArrowDown','ArrowUp','Enter',' '].includes(e.key)&&ul.hidden&&e.target===btn){e.preventDefault();ul.hidden=false;btn.setAttribute('aria-expanded','true');items.forEach(i=>i.classList.remove('act'));(items.find(i=>i.getAttribute('aria-selected')==='true')||items[0]).classList.add('act');btn.setAttribute('aria-activedescendant',(items.find(i=>i.classList.contains('act'))).id);return}
+  if(ul.hidden)return;
+  let k=items.findIndex(i=>i.classList.contains('act'));
+  if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();items[k]?.classList.remove('act');k=Math.max(0,Math.min(items.length-1,k+(e.key==='ArrowDown'?1:-1)));items[k].classList.add('act');btn.setAttribute('aria-activedescendant',items[k].id)}
+  else if(e.key==='Enter'||e.key===' '){e.preventDefault();const li=items[k];if(li){const id=w.dataset.sel;window['pick'+id](li.dataset.v||null)}}
+  else if(e.key==='Escape'){e.preventDefault();e.stopPropagation();ul.hidden=true;btn.setAttribute('aria-expanded','false');btn.focus()}
+});
+function load(){st=JSON.parse(JSON.stringify(S[document.getElementById('state').value]));if(!st.bot)st.bot=document.getElementById('state').value==='pins'?'unverified':'ok';render()}
+document.getElementById('state').onchange=load;
+document.getElementById('old').onchange=()=>render();
+document.getElementById('theme').onchange=e=>{document.documentElement.dataset.theme=e.target.value};
+load();
+</script>
+</body>
+</html>

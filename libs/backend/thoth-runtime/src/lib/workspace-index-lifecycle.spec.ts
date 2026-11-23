@@ -1,13 +1,26 @@
+import type { Stats } from 'node:fs';
+import { access, readdir, stat } from 'node:fs/promises';
 import type {
   WorkspaceChangeBatch,
   WorkspaceChangeListener,
 } from '@ptah-extension/platform-core';
+import { CODE_INDEX_EXCLUDES } from '@ptah-extension/workspace-intelligence';
 
 import {
   WorkspaceIndexLifecycleService,
   workspaceSymbolIndexFrom,
   type WorkspaceSymbolIndex,
 } from './workspace-index-lifecycle';
+
+jest.mock('node:fs/promises', () => ({
+  ...jest.requireActual('node:fs/promises'),
+  access: jest.fn(jest.requireActual('node:fs/promises').access),
+  readdir: jest.fn(jest.requireActual('node:fs/promises').readdir),
+  stat: jest.fn(jest.requireActual('node:fs/promises').stat),
+}));
+
+const readDirectoryNames: (path: string) => Promise<string[]> = readdir;
+const statTwin: (path: string) => Promise<Stats> = stat;
 
 interface Release {
   resolve: () => void;
@@ -83,6 +96,15 @@ describe('WorkspaceIndexLifecycleService', () => {
 
   afterEach(() => {
     jest.useRealTimers();
+    jest.mocked(access).mockReset().mockImplementation(
+      jest.requireActual('node:fs/promises').access,
+    );
+    jest.mocked(readDirectoryNames).mockReset().mockImplementation(
+      jest.requireActual('node:fs/promises').readdir,
+    );
+    jest.mocked(statTwin).mockReset().mockImplementation(
+      jest.requireActual('node:fs/promises').stat,
+    );
   });
 
   function start(opts?: {
@@ -286,6 +308,110 @@ describe('WorkspaceIndexLifecycleService', () => {
     jest.advanceTimersByTime(500);
     expect(indexer.indexWorkspace).toHaveBeenCalledTimes(1);
     expect(indexer.reindexFile).toHaveBeenCalledTimes(2);
+  });
+
+  it('subscribes with the symbol index exclude globs', () => {
+    const { watcher } = start();
+    expect(watcher.watch).toHaveBeenCalledWith(
+      '/ws',
+      expect.objectContaining({ excludeGlobs: CODE_INDEX_EXCLUDES }),
+      expect.any(Function),
+    );
+  });
+
+  it('filters harness source events before counting changes toward a full run', async () => {
+    const { indexer, watcher } = start({ stormThreshold: 2 });
+    indexer.releases[0]?.resolve();
+    await flush();
+
+    watcher.emit({ changes: batchPaths(['/ws/.claude/x.ts', '/ws/src/a.ts']) });
+    jest.advanceTimersByTime(500);
+    await flush();
+
+    expect(indexer.indexWorkspace).toHaveBeenCalledTimes(1);
+    expect(indexer.reindexFile).toHaveBeenCalledTimes(1);
+    expect(indexer.reindexFile).toHaveBeenCalledWith('/ws/src/a.ts', '/ws');
+  });
+
+  it('keeps lone JavaScript updates and forwards deletes of JavaScript with twins', async () => {
+    const probe = jest.mocked(access);
+    probe.mockImplementation(async (path) => {
+      if (path !== '/ws/src/x.ts') throw new Error('absent');
+    });
+    jest.mocked(readDirectoryNames).mockResolvedValue(['x.ts']);
+    jest.mocked(statTwin).mockResolvedValue({ isFile: () => true } as Stats);
+    const { indexer, watcher } = start({ stormThreshold: 2 });
+    indexer.releases[0]?.resolve();
+    await flush();
+
+    watcher.emit({
+      changes: batchPaths(['/ws/src/x.js', '/ws/src/y.js']),
+    });
+    await jest.advanceTimersByTimeAsync(500);
+
+    expect(indexer.indexWorkspace).toHaveBeenCalledTimes(1);
+    expect(indexer.reindexFile).toHaveBeenCalledTimes(1);
+    expect(indexer.reindexFile).toHaveBeenCalledWith('/ws/src/y.js', '/ws');
+    expect(probe).toHaveBeenCalledWith('/ws/src/x.ts');
+    probe.mockClear();
+
+    watcher.emit({ changes: batchPaths(['/ws/src/x.js'], 'delete') });
+    await jest.advanceTimersByTimeAsync(500);
+
+    expect(indexer.deleteFileSymbols).toHaveBeenCalledWith(
+      '/ws/src/x.js',
+      '/ws',
+    );
+    expect(probe).not.toHaveBeenCalled();
+  });
+
+  it('uses the platform stem case rule even if access accepts a different case', async () => {
+    jest.mocked(access).mockRejectedValue(new Error('absent'))
+      .mockResolvedValueOnce(undefined);
+    jest.mocked(readDirectoryNames).mockResolvedValue(['X.ts']);
+    jest.mocked(statTwin).mockResolvedValue({ isFile: () => true } as Stats);
+    const { indexer, watcher } = start();
+
+    watcher.emit({ changes: batchPaths(['/ws/src/x.js'], 'create') });
+    await jest.advanceTimersByTimeAsync(500);
+
+    expect(indexer.reindexFile).toHaveBeenCalledTimes(
+      process.platform === 'win32' ? 0 : 1,
+    );
+  });
+
+  it('keeps JavaScript when the sibling name denotes a directory', async () => {
+    jest.mocked(access).mockRejectedValue(new Error('absent'))
+      .mockResolvedValueOnce(undefined);
+    jest.mocked(readDirectoryNames).mockResolvedValue(['x.ts']);
+    jest.mocked(statTwin).mockResolvedValue({ isFile: () => false } as Stats);
+    const { indexer, watcher } = start();
+
+    watcher.emit({ changes: batchPaths(['/ws/src/x.js']) });
+    await jest.advanceTimersByTimeAsync(500);
+
+    expect(indexer.reindexFile).toHaveBeenCalledWith('/ws/src/x.js', '/ws');
+  });
+
+  it('preserves event order when a delete arrives during an earlier JS probe', async () => {
+    const probe = jest.mocked(access);
+    let finishProbe!: () => void;
+    probe.mockRejectedValue(new Error('absent')).mockImplementationOnce(
+      () => new Promise<void>((_resolve, reject) => {
+        finishProbe = () => reject(new Error('absent'));
+      }),
+    );
+    const { indexer, watcher } = start();
+    watcher.emit({ changes: batchPaths(['/ws/src/x.js']) });
+    watcher.emit({ changes: batchPaths(['/ws/src/x.js'], 'delete') });
+    finishProbe();
+    await jest.advanceTimersByTimeAsync(500);
+
+    expect(indexer.reindexFile).not.toHaveBeenCalled();
+    expect(indexer.deleteFileSymbols).toHaveBeenCalledWith(
+      '/ws/src/x.js',
+      '/ws',
+    );
   });
 
   it('deletes a supported file during a held full run through the indexer lock', async () => {

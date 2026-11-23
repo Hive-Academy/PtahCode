@@ -68,26 +68,40 @@ parent is told, and a person decides the rest.
 
 Items found during P1-P3 that no phase of this program covers yet.
 
-- (a) Notes gate keyed by agent ID only (pre-existing on main). Scope the gate by parent session and
-  invocation, so a reused agent ID cannot inherit an earlier gate state.
-- (b) Tool-less resumed start frame that the executor drops (found in P1). A resumed subagent can start
-  with a frame that has no tool list, and the executor drops it.
-- (c) P3 limits:
+- (a) **Done in #1485.** Notes gate keyed by agent ID only (pre-existing on main). Scope the
+  gate by parent session and invocation, so a reused agent ID cannot inherit an earlier gate state.
+- (b) **Done in #1485.** Tool-less resumed start frame that the executor drops (found in P1). A
+  resumed subagent can start with a frame that has no tool list, and the executor drops it.
+- (c) **Done in #1485**, except the persisted child registry (see the follow-up below). P3 limits:
   - The child registry is in memory only, so it is empty after a restart.
   - Pre-dispatch claim versus outcome-unknown on restore.
   - `markDelivered` can overwrite a cancelled row.
   - Handoff reparent gap.
   - SDK alias routing and de-duplication.
-- (d) Ambient and Monitor open tasks hide a real provider hang. The watchdog counts them as open work, so
-  a hang shows only as overdue log warnings. P5 does not cover this: it renders lane notices only.
+- (d) **Done in #1483.** Ambient and Monitor open tasks hide a real provider hang. The watchdog
+  counts them as open work, so a hang shows only as overdue log warnings. P5 does not cover this: it renders lane notices only.
   The overdue callback in `session-query-executor.service.ts` still only logs. A UI notice needs a
   new path from the SDK session to the host (adapter callback, like `setCompactionStartCallback`),
   a message type and a banner in the chat view. Open for a later phase.
-- (g) SDK subagent ask and pause notices (P1) still reach only the parent text and the agent. No
-  event carries them to the renderer, so a paused subagent shows no chip. Lane notices show a chip (P5).
+- (g) **Done in #1483.** SDK subagent ask and pause notices (P1) still reach only the parent
+  text and the agent. No event carries them to the renderer, so a paused subagent shows no chip. Lane notices show a chip (P5).
 - (h) `agent-process-manager.account-binding.spec.ts` ("stays ambient when the stored lane selection
   is the default route") fails inside any linked worktree: `worktreeMainRoot` makes a second read.
   CI is not affected. Make the spec independent of the checkout location.
-- (e) A child predecessor that reached the runtime cap has no retirement timer after a cooperative
-  handoff (review finding m8 in `review-P2-B.md`).
-- (f) Other minor review findings of P2 are in `review-P2-A.md` and `review-P2-B.md`.
+- (e) **Done in TASK_2026_2319_5f47.** A child predecessor that reached the runtime cap had no
+  retirement timer after a cooperative handoff (review finding m8 in `review-P2-B.md`). An idle
+  predecessor now retires at once with `parent-stop`. A working one is never interrupted: it retires
+  at its turn end, its session end or the successor's ack. The top-level ack still ends the
+  predecessor with `endSession(..., 'parent-stop')`.
+- (f) **Done in TASK_2026_2319_5f47.** Minor findings of `review-P2-A.md` and `review-P2-B.md`. All
+  P2-A minors and most P2-B minors were already fixed on main. m4 (replay phase), m8 and m9 (runtime
+  cap) are fixed. The task `context.md` lists each finding with its evidence or skip reason.
+- (j) **Done in TASK_2026_2319_5f47.** The no-activity watchdog ended child session f7ea7de9
+  (2026-11-23) while it waited for a provider response. The guard window (180 s) was shorter than the
+  SDK first-byte wait (181 s), so it fired 1.6 s before the SDK's own retry. The installed app was
+  also older than P2. The guard window is now longer than the SDK first-byte wait plus 30 s. A
+  watchdog end after the first turn now reports a failed completion to the parent instead of nothing.
+- (i) Persist the child registry across a restart (follow-up (c), first item). Decided: not built in
+  #1485 (option B), because it changes a storage format. The registry stays in memory, so it is empty
+  after a restart. Note: a downgrade to a build before #1485 drops parent-envelope records that carry
+  `dispatchStarted`.

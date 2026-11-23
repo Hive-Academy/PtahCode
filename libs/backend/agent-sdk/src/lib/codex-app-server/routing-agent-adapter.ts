@@ -296,6 +296,11 @@ export class RoutingAgentAdapter implements IAgentAdapter {
   ): void {
     this.legacy.setCompactionStartCallback(...args);
   }
+  setAgentNoticeCallback(
+    ...args: Parameters<NonNullable<IAgentAdapter['setAgentNoticeCallback']>>
+  ): void {
+    this.legacy.setAgentNoticeCallback?.(...args);
+  }
   // Legacy-only event shapes have no native source. Native file/image/usage
   // observations are delivered by CodexChatAdapterPorts.callbacks instead.
   setLiveStatsCallback(

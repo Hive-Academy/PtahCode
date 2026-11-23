@@ -1,0 +1,1 @@
+{"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"2 matches in 1 file (engine: git) (pattern read as regex; pass regex:false for a literal search)\nsrc/search.ts (2 matches)\n  1| export const alpha = 1;\n  [betaCall] function 2-2\n  2| export function betaCall() { return 2; }"}]}}

@@ -52,8 +52,23 @@ export {
 } from './project-analysis/toolchain-probe';
 export type { ToolchainProbeOptions } from './project-analysis/toolchain-probe';
 export { PatternMatcherService } from './file-indexing/pattern-matcher.service';
-export { IgnorePatternResolverService } from './file-indexing/ignore-pattern-resolver.service';
-export { DEFAULT_WORKSPACE_EXCLUDES } from './file-indexing/workspace-default-excludes';
+export {
+  DEFAULT_IGNORE_FILE_NAMES,
+  IgnorePatternResolverService,
+} from './file-indexing/ignore-pattern-resolver.service';
+export {
+  CODE_INDEX_EXCLUDES,
+  CODE_INDEX_EXTRA_EXCLUDES,
+  DEFAULT_WORKSPACE_EXCLUDES,
+  isCodeIndexExcluded,
+} from './file-indexing/workspace-default-excludes';
+export { findNestedRepoAncestor } from './file-indexing/nested-repo-scan';
+export {
+  hasTypeScriptSourceTwin,
+  hasTypeScriptSourceTwinIn,
+  isJavaScriptPath,
+  typeScriptTwinCandidates,
+} from './file-indexing/typescript-twin';
 export {
   WorkspaceIndexerService,
   type WorkspaceIndexOptions,
@@ -136,6 +151,7 @@ export {
 export { cDeclaratorName, type DeclaredName } from './ast/c-declarator';
 export { extractParameterNames } from './ast/parameter-names';
 export {
+  CODE_INDEX_FORMAT_VERSION,
   CodeSymbolIndexer,
   type CodeSymbolIndexerOptions,
   type IndexingStats,

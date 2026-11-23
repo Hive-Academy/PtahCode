@@ -148,6 +148,11 @@
         />
       }
 
+      <!-- Session overdue notice: the host saw no activity. Display only. -->
+      @if (overdueNotice(); as overdue) {
+        <ptah-session-overdue-banner [notice]="overdue" />
+      }
+
       <!-- Auth Required Banner (e.g. expired Codex token). Deferred: it only
            shows after a refused send, so it stays out of the initial bundle. -->
       @if (authRequiredBanner(); as authBanner) {

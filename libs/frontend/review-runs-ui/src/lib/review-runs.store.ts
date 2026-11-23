@@ -1,23 +1,54 @@
 import { Injectable, computed, inject, signal } from '@angular/core';
 import { ClaudeRpcService, LoggingService } from '@ptah-extension/core';
 import {
+  EMPTY_REVIEW_LANE_SETTINGS,
   OperatorSettingsSchema,
+  REVIEW_LANE_ERROR_MESSAGES,
+  ReviewLaneErrorCode,
+  ReviewLaneRoleSchema,
+  ReviewLaneSettingsSchema,
   ReviewRpcSchemas,
   ReviewStateSchema,
+  duplicatePoolEntryIndex,
   type OperatorSettings,
+  type ReviewLaneEntry,
+  type ReviewLaneListing,
+  type ReviewLaneListState,
+  type ReviewLaneSettings,
   type RepositorySettings,
   type RepoIdentity,
   type ReviewFinding,
   type ReviewRun,
 } from '@ptah-extension/review-contracts';
 import { z } from 'zod';
-import type { RpcMethodParams } from '@ptah-extension/shared';
+import type { RpcMethodParams, RpcUserErrorCode } from '@ptah-extension/shared';
 
 export type ReviewListState =
   'loading' | 'ready' | 'offline' | 'error' | 'no-lanes';
 export type ReviewStateFilter = 'all' | z.infer<typeof ReviewStateSchema>;
 /** Allows several 15-second GitHub GET attempts plus per-pull base-config reads. */
 const REVIEW_REFRESH_TIMEOUT_MS = 120_000;
+/** Lane listing reads every lane's live model catalog (host bound 10 s), so it gets more than the default. */
+const REVIEW_LIST_LANES_TIMEOUT_MS = 20_000;
+/**
+ * The other review calls answer from local state. Main and the renderer can each stall for several
+ * seconds while the app starts, so a 5-second cap timed out calls the host had already answered.
+ */
+const REVIEW_RPC_TIMEOUT_MS = 15_000;
+const LANES_DUPLICATE_MESSAGE =
+  'Review lanes were not saved: the pool has a duplicate entry. Remove it and save again.';
+const LANE_ERROR_CODES: readonly string[] = Object.values(ReviewLaneErrorCode);
+
+/** A lane-save failure the host reported by its `errorCode`; the message comes from the contract table. */
+class ReviewLaneSaveError extends Error {
+  constructor(readonly code: ReviewLaneErrorCode) {
+    super(REVIEW_LANE_ERROR_MESSAGES[code]);
+  }
+}
+
+function laneErrorCode(code: RpcUserErrorCode | undefined): ReviewLaneErrorCode | null {
+  return code !== undefined && LANE_ERROR_CODES.includes(code) ? (code as ReviewLaneErrorCode) : null;
+}
 const botIdentitySchema = z
   .object({
     login: z.string(),
@@ -45,6 +76,8 @@ export class ReviewRunsStore {
   private readonly logger = inject(LoggingService);
   /** Monotonic findings-request generation; replies from superseded loads are ignored. */
   private findingsGeneration = 0;
+  /** Monotonic lane-listing generation; replies from superseded loads are ignored. */
+  private laneListGeneration = 0;
   readonly runs = signal<ReviewRun[]>([]);
   /** Cursor of the next run page; null when the backend has no more runs. */
   readonly nextCursor = signal<string | null>(null);
@@ -83,6 +116,17 @@ export class ReviewRunsStore {
   readonly settingsSaving = signal(false);
   readonly settingsSaveError = signal<string | null>(null);
   readonly settingsState = signal<'loading' | 'ready' | 'error'>('loading');
+  /** Lanes the host last returned or stored. */
+  readonly settingsLanes = signal<ReviewLaneSettings>(EMPTY_REVIEW_LANE_SETTINGS);
+  readonly draftLanes = signal<ReviewLaneSettings>(EMPTY_REVIEW_LANE_SETTINGS);
+  /** The host could not read its stored lane document; the next save replaces it (M1). */
+  readonly lanesCorrupt = signal(false);
+  /** Last lane listing read. Kept while a reload runs or fails; the section ignores it on error. */
+  readonly laneListing = signal<ReviewLaneListing | null>(null);
+  /** Lane listing load state, separate from `settingsState`. */
+  readonly laneListState = signal<ReviewLaneListState>('idle');
+  /** Lane-specific save error for the lanes section; `settingsSaveError` carries it too. */
+  readonly lanesSaveError = signal<string | null>(null);
   readonly pauseSaving = signal(false);
   readonly pauseError = signal(false);
   readonly refreshError = signal(false);
@@ -333,15 +377,65 @@ export class ReviewRunsStore {
         ReviewRpcSchemas['review:getSettings'].params.parse({}),
         ReviewRpcSchemas['review:getSettings'].result,
       );
-      this.settings.set(response.settings);
-      this.draftSettings.set(response.settings ?? defaultSettings);
-      this.hasToken.set(response.hasToken);
-      this.tokenStorage.set(response.tokenStorage);
+      this.applyHostSettings(response);
+      const lanes = response.lanes ?? EMPTY_REVIEW_LANE_SETTINGS;
+      this.draftLanes.set(lanes);
+      this.lanesSaveError.set(null);
       this.settingsState.set('ready');
       await this.loadBotIdentity();
     } catch {
       this.settingsState.set('error');
     }
+  }
+  /**
+   * After a lanes-only save failure the host has stored the operator settings: re-read them so
+   * `settings`, `draftSettings` and `repositories` match the host. The lane draft and its error stay.
+   */
+  private async refreshSavedSettings(): Promise<void> {
+    try {
+      const response = await this.request(
+        'review:getSettings',
+        ReviewRpcSchemas['review:getSettings'].params.parse({}),
+        ReviewRpcSchemas['review:getSettings'].result,
+      );
+      this.applyHostSettings(response);
+      if (response.settings) this.repositories.set(response.settings.repositories);
+    } catch (error: unknown) {
+      // degradation-audit: reported — lanesSaveError already tells the operator to save again.
+      this.logger.warn('ReviewRunsStore', 'Settings refresh after a lane save failure failed', error);
+    }
+  }
+  private applyHostSettings(
+    response: z.output<(typeof ReviewRpcSchemas)['review:getSettings']['result']>,
+  ): void {
+    this.settings.set(response.settings);
+    this.draftSettings.set(response.settings ?? defaultSettings);
+    this.settingsLanes.set(response.lanes ?? EMPTY_REVIEW_LANE_SETTINGS);
+    this.lanesCorrupt.set(response.lanesCorrupt === true);
+    this.hasToken.set(response.hasToken);
+    this.tokenStorage.set(response.tokenStorage);
+  }
+  /** Reads the lane listing for the lanes section; Retry calls it again. */
+  async loadLanes(): Promise<void> {
+    const generation = ++this.laneListGeneration;
+    this.laneListState.set('loading');
+    try {
+      const listing = await this.request(
+        'review:listLanes',
+        ReviewRpcSchemas['review:listLanes'].params.parse({}),
+        ReviewRpcSchemas['review:listLanes'].result,
+      );
+      if (generation !== this.laneListGeneration) return;
+      this.laneListing.set(listing);
+      this.laneListState.set('ready');
+    } catch {
+      // degradation-audit: reported — laneListState 'error' shows the failure and offers Retry.
+      if (generation === this.laneListGeneration) this.laneListState.set('error');
+    }
+  }
+  updateDraftLanes(next: ReviewLaneSettings): void {
+    this.draftLanes.set(next);
+    this.lanesSaveError.set(null);
   }
   async loadBotIdentity(): Promise<void> {
     this.botIdentityError.set(null);
@@ -443,13 +537,32 @@ export class ReviewRunsStore {
       );
       return;
     }
+    if (duplicatePoolEntryIndex(this.draftLanes().pool) !== null) {
+      this.lanesSaveError.set(LANES_DUPLICATE_MESSAGE);
+      this.settingsSaveError.set(LANES_DUPLICATE_MESSAGE);
+      return;
+    }
+    // Parse on the client too, so the lanes kept as saved equal what the host stores (trimmed ids).
+    const lanes = ReviewLaneSettingsSchema.safeParse(this.draftLanes());
+    if (!lanes.success) {
+      const message = REVIEW_LANE_ERROR_MESSAGES[ReviewLaneErrorCode.Invalid];
+      this.lanesSaveError.set(message);
+      this.settingsSaveError.set(message);
+      return;
+    }
+    // Unchanged lanes are left out, so the host keeps what it stored (Req 1.5). An unreadable stored
+    // document is always replaced, so its lanes are sent even when they equal the empty fallback (M1).
+    const sentLanes = !this.lanesCorrupt() && sameLaneSettings(lanes.data, this.settingsLanes())
+      ? undefined : lanes.data;
     this.settingsSaving.set(true);
     this.settingsSaveError.set(null);
+    this.lanesSaveError.set(null);
     try {
       const saved = await this.request(
         'review:updateSettings',
         ReviewRpcSchemas['review:updateSettings'].params.parse({
           settings: parsed.data,
+          lanes: sentLanes,
           attestation:
             this.liveAttested() && this.botIdentity()
               ? {
@@ -470,13 +583,25 @@ export class ReviewRunsStore {
       this.settings.set(saved);
       this.draftSettings.set(saved);
       this.repositories.set(saved.repositories);
+      if (sentLanes) {
+        // The update result carries no lanes (A14): the host stored exactly the parsed draft.
+        this.settingsLanes.set(sentLanes);
+        this.draftLanes.set(sentLanes);
+        this.lanesCorrupt.set(false);
+      }
       this.liveAttested.set(false);
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : '';
-      this.settingsSaveError.set(message.startsWith('Only one repository can publish live') ||
-        message.startsWith('Permission attestation required') ||
-        message.startsWith('Bot identity') || message.startsWith('Connect a bot token')
-        ? message : 'Review settings could not be saved.');
+      if (error instanceof ReviewLaneSaveError) {
+        this.settingsSaveError.set(error.message);
+        this.lanesSaveError.set(error.message);
+        if (error.code === ReviewLaneErrorCode.NotSaved) await this.refreshSavedSettings();
+      } else {
+        const message = error instanceof Error ? error.message : '';
+        this.settingsSaveError.set(message.startsWith('Only one repository can publish live') ||
+          message.startsWith('Permission attestation required') ||
+          message.startsWith('Bot identity') || message.startsWith('Connect a bot token')
+          ? message : 'Review settings could not be saved.');
+      }
     } finally {
       this.settingsSaving.set(false);
     }
@@ -522,6 +647,7 @@ export class ReviewRunsStore {
       | 'review:getRun'
       | 'review:listFindings'
       | 'review:getSettings'
+      | 'review:listLanes'
       | 'review:updateSettings'
       | 'review:setPublicationPause'
       | 'review:refresh'
@@ -532,7 +658,9 @@ export class ReviewRunsStore {
     T = unknown,
   >(method: M, params: RpcMethodParams<M>, schema: z.ZodType<T>): Promise<T> {
     const response = await this.rpc.call(method, params, {
-      timeout: method === 'review:refresh' ? REVIEW_REFRESH_TIMEOUT_MS : 5_000,
+      timeout: method === 'review:refresh'
+        ? REVIEW_REFRESH_TIMEOUT_MS
+        : method === 'review:listLanes' ? REVIEW_LIST_LANES_TIMEOUT_MS : REVIEW_RPC_TIMEOUT_MS,
     });
     if (!response.isSuccess()) {
       if (method === 'review:refresh' && response.errorCode === 'REVIEW_DISABLED' &&
@@ -555,8 +683,21 @@ export class ReviewRunsStore {
           typeof response.error === 'string' &&
           /^(Only one repository can publish live at a time|Permission attestation required for this repository|Bot identity verification failed|Connect a bot token before enabling live publication)$/.test(response.error))
         throw new Error(response.error);
+      const laneCode = method === 'review:updateSettings' ? laneErrorCode(response.errorCode) : null;
+      if (laneCode !== null) throw new ReviewLaneSaveError(laneCode);
       throw new Error('Review data is unavailable');
     }
     return schema.parse(response.data);
   }
+}
+
+function sameLaneEntry(a: ReviewLaneEntry | undefined, b: ReviewLaneEntry | undefined): boolean {
+  return a?.lane === b?.lane && a?.model === b?.model;
+}
+
+/** Pool order counts; pins compare per role. */
+function sameLaneSettings(a: ReviewLaneSettings, b: ReviewLaneSettings): boolean {
+  return a.pool.length === b.pool.length &&
+    a.pool.every((entry, index) => sameLaneEntry(entry, b.pool[index])) &&
+    ReviewLaneRoleSchema.options.every((role) => sameLaneEntry(a.pins[role], b.pins[role]));
 }

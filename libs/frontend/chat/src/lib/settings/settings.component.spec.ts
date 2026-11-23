@@ -1,3 +1,4 @@
+import { TableProperties } from 'lucide-angular';
 import {
   Component,
   Input,
@@ -294,6 +295,9 @@ describe('SettingsComponent deep-link', () => {
       const page = await landWith({ tab: 'orchestration', section });
       expect(page.activeSettingsTab()).toBe('matrix');
       expect(page.selectedSettingsTab()).toBe('matrix');
+      expect(page.settingsTabs().find((tab) => tab.id === 'matrix')).toMatchObject({
+        label: 'Decision matrix', parent: 'orchestration', icon: TableProperties,
+      });
       expect(page.providersTarget()).toBeNull();
     },
   );
@@ -757,7 +761,7 @@ describe('SettingsComponent header', () => {
         node.textContent?.trim(),
       ),
     ).toEqual(['Workspace', 'ptah-extension', 'App', 'Desktop']);
-    expect(context?.getAttribute('title')).toBe('C:\\work\\ptah-extension');
+    expect(context?.querySelector('dd')?.getAttribute('title')).toBe('C:\\work\\ptah-extension');
   });
 
   it('shows only the VS Code app label when no folder is open', () => {
@@ -840,9 +844,9 @@ describe('SettingsComponent header', () => {
     const element = render(false, null, 'expired');
     const marks = element.querySelectorAll('[data-testid="settings-layout-state-mark"]');
     expect(marks.length).toBe(1);
-    expect(marks[0].getAttribute('title')).toBe('Membership needs attention');
     // The button name stays "Advanced" (live-app scripts use it); the warning is its description.
     const button = marks[0].closest('button') as HTMLButtonElement;
+    expect(button.title).toBe('Membership needs attention');
     const name = Array.from(button.childNodes)
       // Name from content: text and elements only (no template comments), without the aria-hidden parts.
       .filter((node) => node.nodeType !== Node.COMMENT_NODE)
@@ -1033,17 +1037,16 @@ describe('SettingsComponent security copy', () => {
     jest.clearAllMocks();
   });
 
-  it('keeps the built-in claim verbatim for a shipped provider', () => {
+  it('shows the short local note for a shipped provider', () => {
     const fixture = render();
     const builtIn = fixture.nativeElement.querySelector(
       '[data-testid="builtin-provider-security-copy"]',
     );
     expect(builtIn).toBeTruthy();
     expect(builtIn.textContent.replace(/\s+/g, ' ')).toContain(
-      'Your credentials go directly from this machine to the AI provider — no proxies, no Ptah servers involved.',
+      'Credentials go straight from this machine to your provider. No proxies, no Ptah servers.',
     );
-    // D10 (Batch 28) kept text-xs (12 px floor). In the narrow nav footer the claim wraps:
-    // one truncated line hid most of it.
+    expect(builtIn.querySelector('strong')?.textContent).toBe('Runs 100% locally');
     expect(builtIn.className).toContain('text-xs');
     expect(builtIn.querySelector('p')?.className).not.toContain('truncate');
     // The text is visible in full, so no title repeats it (a title is not reachable by keyboard or touch).

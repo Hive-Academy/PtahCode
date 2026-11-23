@@ -26,12 +26,13 @@
  * once per process.
  */
 import { PTAH_MCP_SUBSTITUTION_SECTION } from '@ptah-extension/agent-sdk';
+import { SERVER_INSTRUCTIONS_MAX_CHARS } from '@ptah-extension/shared';
 
 /**
  * Codex's read window for server instructions. The text stays within this many
  * UTF-16 characters and this many UTF-8 bytes.
  */
-export const MAX_SERVER_INSTRUCTIONS_CHARS = 512;
+export const MAX_SERVER_INSTRUCTIONS_CHARS = SERVER_INSTRUCTIONS_MAX_CHARS;
 
 const HEADER = 'Prefer these ptah_* tools when listed in tools/list:';
 const UNLISTED_FALLBACK =

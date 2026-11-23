@@ -37,20 +37,28 @@
         </div>
       </div>
     }
-    <!-- Footer spacing follows the navigation prototype. -->
-    <div nav-footer class="flex flex-col gap-[var(--ptah-settings-nav-icon-gap)] p-[var(--ptah-settings-nav-px)] border-t border-[var(--ptah-border-color)]">
-      <div data-testid="settings-context" class="[--ptah-dl-compact-term-w:5.5rem] [&_dd]:text-base-content-muted [&_dd]:truncate" [attr.title]="workspacePath()">
-        <ptah-description-list density="compact" [items]="contextRows()" />
-      </div>
+    <div nav-footer class="flex flex-col gap-[var(--ptah-space-3)] border-t border-[var(--ptah-border-color)] px-[var(--ptah-settings-nav-px)] py-[var(--ptah-space-3)]">
+      <dl data-testid="settings-context" class="grid grid-cols-[auto_minmax(0,1fr)] gap-x-ptah-inline text-[length:var(--ptah-text-caption-size)] leading-[var(--ptah-text-caption-leading)]">
+        @for (row of contextRows(); track row.key) {
+          <dt class="text-base-content-muted">{{ row.term }}</dt>
+          <dd class="truncate text-end text-base-content" [attr.title]="row.title">{{ row.value }}</dd>
+        }
+      </dl>
       @if (authState.isCustomProviderSelected()) {
         <div data-testid="custom-provider-security-copy" class="flex min-w-0 items-start gap-ptah-inline text-xs text-base-content-muted">
           <ptah-status status="warning" appearance="dot" label="Custom endpoint" />
-          <p class="min-w-0 break-words">Your own endpoint. Credentials and prompts go from this machine to <code class="font-semibold">{{ authState.selectedCustomHost() }}</code> — a host you added. Ptah does not operate, vet, or monitor it, and no Ptah server is involved either way.</p>
+          <div class="min-w-0 break-words">
+            <strong class="text-base-content">Custom endpoint</strong>
+            <p>Your own endpoint. Credentials and prompts go from this machine to <code class="font-semibold">{{ authState.selectedCustomHost() }}</code> — a host you added. Ptah does not operate, vet, or monitor it, and no Ptah server is involved either way.</p>
+          </div>
         </div>
       } @else {
         <div data-testid="builtin-provider-security-copy" class="flex min-w-0 items-start gap-ptah-inline text-xs text-base-content-muted">
           <span class="shrink-0" role="img" aria-label="Local"><lucide-angular [img]="SecurityIcon" class="size-[var(--ptah-icon-sm)]" aria-hidden="true" /></span>
-          <p class="min-w-0 break-words">Runs 100% locally. Your credentials go directly from this machine to the AI provider — no proxies, no Ptah servers involved.</p>
+          <div class="min-w-0 break-words">
+            <strong class="text-base-content">Runs 100% locally</strong>
+            <p>Credentials go straight from this machine to your provider. No proxies, no Ptah servers.</p>
+          </div>
         </div>
       }
     </div>

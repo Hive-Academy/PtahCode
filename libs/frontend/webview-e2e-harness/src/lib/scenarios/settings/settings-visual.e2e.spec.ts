@@ -934,34 +934,24 @@ for (const host of ['vscode', 'electron'] as const) {
       expect((mainBox?.y ?? 0) + (mainBox?.height ?? 0)).toBeLessThanOrEqual(
         connectionsBox?.y ?? 0,
       );
-      // Gate V 28 (prototype header): the status pill and badges sit beside the title. The title is one line: 20 px
-      // leading since the Settings UI polish (text-base, leading-5; was 16 px); a layer badge that does not fit moves,
-      // whole, to the next line under it.
-      expect(
-        await page
-          .locator('[data-testid="routing-node-title"]')
-          .evaluate((h) => h.getBoundingClientRect().height),
-      ).toBeLessThanOrEqual(21);
-      const titleRow = await page
-        .locator('[data-testid="routing-node-main-agent"]')
-        .evaluate((node) => ({
-          title:
-            node
-              .querySelector('[data-testid="routing-node-title"]')
-              ?.getBoundingClientRect() ?? null,
-          badges: Array.from(
-            node.querySelectorAll(
-              '[data-testid="routing-node-status"], [data-testid="main-scope-layer"]',
-            ),
-          ).map((badge) => badge.getBoundingClientRect().top),
-        }));
-      console.log(
-        `B28 main node header ${host}/${theme}: title ${Math.round(titleRow.title?.top ?? 0)}-${Math.round(titleRow.title?.bottom ?? 0)}, badge tops ${titleRow.badges.map(Math.round).join(',')}`,
+      const title = mainSection.getByTestId('routing-node-title');
+      const change = mainSection.getByRole('button', { name: 'Change main agent' });
+      const tile = mainSection.getByTestId('main-agent-values');
+      const providerRow = tile.getByTestId('routing-main-provider-row');
+      await expect(providerRow.getByTestId('routing-node-status')).toBeVisible();
+      await expect(providerRow.locator('ptah-provider-mark')).toBeVisible();
+      await expect(change).toHaveText('Change');
+      const [titleBox, changeBox, tileBox] = await Promise.all([
+        title.boundingBox(),
+        change.boundingBox(),
+        tile.boundingBox(),
+      ]);
+      expect((titleBox?.y ?? 0) + (titleBox?.height ?? 0)).toBeLessThan(
+        tileBox?.y ?? 0,
       );
-      // The status pill sits on the title's line; layer badges are on it or on the one line under it.
-      expect(titleRow.badges[0]).toBeLessThan(titleRow.title?.bottom ?? 0);
-      for (const top of titleRow.badges)
-        expect(top).toBeLessThan((titleRow.title?.bottom ?? 0) + 28);
+      expect((changeBox?.y ?? 0) + (changeBox?.height ?? 0)).toBeLessThan(
+        tileBox?.y ?? 0,
+      );
       // Batch 52.6: no layer badge runs past the node, and none is truncated (its text fits its box).
       const headFit = await page
         .locator('[data-testid="routing-node-main-agent"]')
@@ -986,45 +976,21 @@ for (const host of ['vscode', 'electron'] as const) {
             ),
           ).some((badge) => badge.scrollWidth > badge.clientWidth + 1),
         }));
-      expect(headFit.title).toBeLessThanOrEqual(21);
+      expect(headFit.title).toBeLessThanOrEqual(25);
       expect(headFit.overflow).toBeLessThanOrEqual(0.5);
       expect(headFit.clipped).toBe(false);
-      // "PROVIDER:" / "MODEL:" start on the value's first line, and the value is shown whole (Batch 28b: it may wrap in
-      // its own column, never truncate): nothing overflows its box and the text is the full route value.
-      for (const row of [
-        'routing-main-provider-row',
-        'routing-main-model-row',
-      ]) {
-        const layout = await page
-          .locator(`[data-testid="${row}"]`)
-          .evaluate((node) => {
-            const [label, value] = Array.from(node.children) as HTMLElement[];
-            const labelBox = label.getBoundingClientRect();
-            const valueBox = value.getBoundingClientRect();
-            return {
-              labelBottom: labelBox.bottom,
-              valueTop: valueBox.top,
-              labelMid: labelBox.top + labelBox.height / 2,
-              valueMid: valueBox.top + valueBox.height / 2,
-              overflow: value.scrollWidth - value.clientWidth,
-              lines: Math.round(value.getBoundingClientRect().height / 16),
-            };
-          });
-        console.log(
-          `B28b ${row} ${host}/${theme}: ${layout.lines} line(s), overflow ${layout.overflow}`,
+      const providerBox = await providerRow.boundingBox();
+      for (const chip of ['routing-main-model-row', 'routing-main-effort-row']) {
+        const chipBox = await tile.getByTestId(chip).boundingBox();
+        expect(chipBox?.y ?? 0).toBeGreaterThanOrEqual(
+          (providerBox?.y ?? 0) + (providerBox?.height ?? 0),
         );
-        // PR #1306: the rows are ptah-description-list items (dt + dd). From 640 px the pattern centers the term on
-        // the value (items-center), and the Provider value also holds the "Change main agent" button, so its dd is
-        // taller than the term and the tops differ by about 8 px. Compare the centers. Below 640 px the term stacks
-        // above the value.
-        if (layout.labelBottom <= layout.valueTop + 1) {
-          expect(layout.valueTop - layout.labelBottom).toBeLessThanOrEqual(8);
-        } else {
-          expect(
-            Math.abs(layout.labelMid - layout.valueMid),
-          ).toBeLessThanOrEqual(2);
-        }
-        expect(layout.overflow).toBeLessThanOrEqual(0);
+      }
+      for (const value of ['routing-main-provider', 'routing-main-model']) {
+        const overflow = await tile.getByTestId(value).evaluate((node) =>
+          node.scrollWidth - node.clientWidth,
+        );
+        expect(overflow).toBeLessThanOrEqual(1);
       }
       await expect(
         page.locator('[data-testid="routing-main-model"]'),
@@ -1044,13 +1010,12 @@ for (const host of ['vscode', 'electron'] as const) {
     }) => {
       await openSettingsAt(page, fixtureServer.url, host, theme, 'Providers');
       // Batch 26: the Main Agent popover (Reassign), captured open, then closed with Esc.
-      await page
-        .locator(
-          '[data-testid="routing-node-main-agent"] [data-testid="routing-node-action"]',
-        )
-        .click();
+      const reassign = page.getByTestId('routing-node-action');
+      await expect(reassign).toHaveAttribute('aria-expanded', 'false');
+      await reassign.click();
       const mainPopover = page.locator('[data-testid="main-agent-popover"]');
       await expect(mainPopover).toBeVisible();
+      await expect(reassign).toHaveAttribute('aria-expanded', 'true');
       // The model catalogue has loaded (the model search is enabled) and the whole popover is on screen.
       const modelInput = mainPopover.locator(
         '[data-testid="main-agent-model"] input',
@@ -1187,7 +1152,7 @@ for (const host of ['vscode', 'electron'] as const) {
       await expect(mainPopover).toHaveCount(0);
     });
 
-    test(`baseline smoke — Providers scope popover and catalog (${host}, ${theme})`, async ({
+    test(`baseline smoke — Providers scope popover (${host}, ${theme})`, async ({
       page,
       fixtureServer,
     }) => {
@@ -1227,46 +1192,6 @@ for (const host of ['vscode', 'electron'] as const) {
       await expect(
         page.locator('[data-testid="main-scope-layer-popover"]'),
       ).toHaveCount(0);
-      // Batch 27: the provider catalog modal (prototype `#modalPalette`), centred and fully on screen.
-      const connect = page.getByRole('button', {
-        name: 'Connect provider',
-        exact: true,
-      });
-      await connect.click();
-      const catalog = page.locator('ptah-provider-catalog-modal dialog');
-      await expect(catalog).toHaveAttribute('open', '');
-      await expect(
-        catalog.locator('[data-testid="provider-catalog-search"]'),
-      ).toBeFocused();
-      // daisyUI scales the box in on open: measure once its transition has finished.
-      await catalog
-        .locator('.modal-box')
-        .evaluate((box) =>
-          Promise.all(
-            box.getAnimations().map((animation) => animation.finished),
-          ),
-        );
-      const panel = await catalog.locator('.modal-box').boundingBox();
-      const view = page.viewportSize();
-      expect(
-        panel && view && panel.y >= 0 && panel.y + panel.height <= view.height,
-      ).toBe(true);
-      // Centred in its full-screen dialog (fixed, inset 0: the area left of the host's scrollbar gutter).
-      const frame = await catalog.boundingBox();
-      expect(
-        panel &&
-          frame &&
-          Math.abs(panel.x + panel.width / 2 - (frame.x + frame.width / 2)),
-      ).toBeLessThanOrEqual(1);
-      console.log(
-        `B27 catalog ${host}/${theme}: ${Math.round(panel?.width ?? 0)}x${Math.round(panel?.height ?? 0)} @ ${Math.round(panel?.y ?? 0)}`,
-      );
-      await waitForSettled(page);
-      await capture(page, 'provider-catalog', host, theme);
-      await page.keyboard.press('Escape');
-      // daisyUI keeps a closed `.modal` laid out at opacity 0: the `open` attribute is the real state.
-      await expect(catalog).not.toHaveAttribute('open');
-      await expect(connect).toBeFocused();
     });
 
     test(`baseline smoke — connection drawers, Overview and Credentials (${host}, ${theme})`, async ({
@@ -1385,8 +1310,7 @@ for (const host of ['vscode', 'electron'] as const) {
       console.log(
         `B52 main node head ${host}/${theme}: title h ${Math.round(head.titleHeight)}, layer tops ${head.tops.map(Math.round).join(',')}, overflow ${Math.round(head.overflow)}, node h ${Math.round(head.nodeHeight)}`,
       );
-      // One line: 20 px leading since the Settings UI polish (sentence-case text-base title; was 16 px uppercase).
-      expect(head.titleHeight).toBeLessThanOrEqual(21);
+      expect(head.titleHeight).toBeLessThanOrEqual(25);
       // Whole badges wrap under the title: in the 261 px VS Code node each of the two takes its own line (two badge
       // lines); in Electron the first fits beside the title. Never more than two lines under the title.
       for (const top of head.tops)

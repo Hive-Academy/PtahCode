@@ -1,0 +1,50 @@
+# Status (batch 2, not pushed yet)
+
+Commits: 7adb12d43, a5ea78fce, 078280208, c7795d248.
+
+Gate 1 (shared, agent-sdk, cli-agent-runtime, vscode-lm-tools, agent-generation):
+lint + typecheck 10/10 passed. Tests passed for shared, agent-sdk, agent-generation.
+
+Findings:
+1. vscode-lm-tools: the per-tool description budget spec and the schema-hash snapshot failed
+   because of the description edits (ptah_grep cue, ptah_workspace_analyze reword, new `regex`
+   parameter text). Fixed in c7795d248: ptah_workspace_analyze is 200 chars (budget 231),
+   ptah_grep budget 534 -> 608, snapshot updated (ptah_grep hash only). The nav work will hit the
+   same budget line and snapshot hash for ptah_grep: expect a small merge conflict, re-measure
+   (budget = ceil(len * 1.1) + 10). `mcp-contract.sweep.spec.ts` times out (30 s) under load when
+   run with other suites; it passes alone (77/77).
+2. cli-agent-runtime: `agent-process-manager.account-binding.spec.ts` "stays ambient when the
+   stored lane selection is the default route" fails (readStoredSelection called 2 times, expected
+   1). It also fails with this task's two cli-agent-runtime files reverted to 569011f8e, so it is
+   pre-existing on the feat/ptah-nav-tools base. Not touched here.
+
+Next: vscode-lm-tools tests again, Electron + renderer scoped gate, push in background, stacked PR
+(body: degradation-audit:lint at nav/grep-engine.ts:352 is fixed on feat/ptah-nav-tools, item 7
+open, the account-binding failure is pre-existing).
+
+# Status (batch 3)
+
+Pushed refactor/tool-guidance-single-source and opened PR #1475
+(https://github.com/Hive-Academy/PtahCode/pull/1475), base feat/ptah-nav-tools, head c7795d248.
+The body records: degradation-audit:lint item (fixed on the nav branch), item 7 open, the
+pre-existing account-binding failure, and the expected ptah_grep budget/snapshot merge conflict.
+CI watch is running (`gh pr checks 1475 --watch`, log .ptah/tmp/ci-watch.log).
+
+# Status (batch 4)
+
+PR #1475 at 8cf45a905 (fenced-heading fix, review thread resolved). The bot review on 0be87307a had
+two Major findings:
+1. Pattern text "literal unless regex is true" was stale (my file). Fixed in the next commit
+   (pattern text now matches the regex inference rule; snapshot updated).
+2. NOT FIXED here, belongs to the nav work: implicit regex inference turns a literal unspaced
+   `a|b` (regex omitted) into alternation (nav/grep-engine.ts:110, :142; nav/grep.ts:491). The nav
+   session was unreachable when I tried to forward it (SendMessage: no such agent). Needs a
+   decision by the nav owner: keep literal semantics for existing callers, or accept it and
+   document it.
+The nav branch moved to 4c0689842 (docs only); not merged here.
+
+## Batch 5 report (to parent)
+- vscode-lm-tools gate passed for 2086f0675. Pushed 2086f0675 and 3c83c5724 to PR #1475.
+- Posted a PR comment on the ptah_grep pattern finding. Updated the PR body.
+- Open: the nav-owned regex inference finding (nav/grep-engine.ts:110,142, nav/grep.ts:491) needs the nav owner.
+- CI does not run until the PR retargets main.

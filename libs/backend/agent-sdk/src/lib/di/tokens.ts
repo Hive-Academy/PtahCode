@@ -256,6 +256,13 @@ export const SDK_TOKENS = {
     'SdkSessionIdResolvedCallbackRegistry',
   ),
   /**
+   * Fan-out for Ptah notices about a live SDK session that need the host UI: a subagent
+   * ask or pause, and an overdue watchdog (TASK_2026_2310). Never stops a session.
+   */
+  SDK_AGENT_NOTICE_CALLBACK_REGISTRY: Symbol.for(
+    'SdkAgentNoticeCallbackRegistry',
+  ),
+  /**
    * Per-session turn state — the single source of truth for "is the agent
    * busy" (TASK_2026_360). Read by `session:status` and every turn_state
    * producer on the chunk stream.

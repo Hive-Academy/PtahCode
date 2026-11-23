@@ -28,8 +28,8 @@ import {
             kind="CLI agent"
             secondary="1.2"
             [mono]="true"
-            ><span ptahRowMark>Q</span
-            ><span ptahRowInfo>Info</span></ptah-table-row-title
+            ><span ptahRowMark>Q</span><span ptahRowInfo>Info</span
+            ><span ptahRowSecondary>Tag</span></ptah-table-row-title
           >
         </th>
         <td ptahControlCell>
@@ -71,6 +71,19 @@ describe('table cells', () => {
     ).toBe(true);
     expect(root.querySelector('[ptahRowMark]')?.textContent).toBe('Q');
     expect(root.querySelector('[ptahRowInfo]')?.textContent).toBe('Info');
+    const primary = root.querySelector('.ptah-table-row-title-primary');
+    const secondaryLine = root.querySelector(
+      '.ptah-table-row-title-secondary-line',
+    );
+    const tag = root.querySelector('[ptahRowSecondary]');
+    expect(primary?.contains(root.querySelector('[ptahRowInfo]'))).toBe(true);
+    expect(primary?.contains(tag)).toBe(false);
+    expect(tag?.parentElement).toBe(secondaryLine);
+    expect(
+      root
+        .querySelector('.ptah-table-row-title-secondary')
+        ?.compareDocumentPosition(tag as Node),
+    ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
     expect(
       root
         .querySelector('td[ptahControlCell]')

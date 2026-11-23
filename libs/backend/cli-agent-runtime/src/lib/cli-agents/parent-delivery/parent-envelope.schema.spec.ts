@@ -55,6 +55,19 @@ describe('parent envelope originKind', () => {
   });
 });
 
+describe('parent envelope record unknown keys', () => {
+  const record = {
+    id: 'lane-delivery:key', parentSessionId: 'session', agentId: 'agent', kind: 'report' as const,
+    dedupeKey: 'key', createdAt: 1, updatedAt: 1, state: 'pending', attempts: 0, bodyBytes: 1,
+  };
+
+  it('strips an unknown key instead of rejecting the record', () => {
+    const parsed = ParentEnvelopeRecordSchema.safeParse({ ...record, futureField: 'x' });
+    expect(parsed.success).toBe(true);
+    if (parsed.success) expect(parsed.data).not.toHaveProperty('futureField');
+  });
+});
+
 describe('parent envelope body limit', () => {
   const body = {
     text: '', envelopeId: 'lane-delivery:key', parentSessionId: 'session', agentId: 'agent',

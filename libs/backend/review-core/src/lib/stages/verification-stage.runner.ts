@@ -4,6 +4,10 @@ import { ReviewFindingSchema, type CandidateFinding, type VerifierVerdict } from
 import { TOKENS, type Logger } from '@ptah-extension/vscode-core';
 import { PERSISTENCE_TOKENS, type SqliteDatabase } from '@ptah-extension/persistence-sqlite';
 import { ReviewLaneRunner, type ReviewLaneResult } from '../lanes/review-lane.runner';
+import type { ReviewLaneAttempt } from '../lanes/review-lane-attempt';
+import { REVIEW_CORE_TOKENS } from '../../di/tokens';
+import type { IReviewRepository } from '../persistence/review-repository.interface';
+import { VERIFICATION_STAGE } from './review-stage-keys';
 import type { ReviewQueueClaim } from '../review-queue.service';
 import type { ContextStageResult } from './context-stage.runner';
 import type { LensStageResult } from './lens-stage.runner';
@@ -64,12 +68,21 @@ function uniqueLensCandidates(candidates: readonly LensCandidate[]): LensCandida
   return unique;
 }
 
+/** Merged candidates per author family; the verifier prefers the family that wrote the fewest (requirement 3.4). */
+function authorFamilyCounts(candidates: readonly LensCandidate[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const { authorFamily } of candidates) counts[authorFamily] = (counts[authorFamily] ?? 0) + 1;
+  return counts;
+}
+
 @injectable()
 export class VerificationStageRunner {
   constructor(@inject(ReviewLaneRunner) private readonly lanes: ReviewLaneRunner,
     @inject(PERSISTENCE_TOKENS.SQLITE_CONNECTION) private readonly sqlite: { readonly db: SqliteDatabase } | null = null,
-    @inject(TOKENS.LOGGER) private readonly logger: Pick<Logger, 'debug'> | null = null) {}
-  async run(claim: ReviewQueueClaim, context: ContextStageResult, lenses: LensStageResult, deadline: number, signal?: AbortSignal): Promise<VerificationResult[]> {
+    @inject(TOKENS.LOGGER) private readonly logger: Pick<Logger, 'debug'> | null = null,
+    @inject(REVIEW_CORE_TOKENS.REVIEW_REPOSITORY) private readonly stages: IReviewRepository | null = null) {}
+  async run(claim: ReviewQueueClaim, context: ContextStageResult, lenses: LensStageResult, deadline: number,
+    attempt: ReviewLaneAttempt, signal?: AbortSignal): Promise<VerificationResult[]> {
     const allCandidates = lenses.flatMap((entry) => {
       const result = entry.result;
       return result.status === 'completed' && 'findings' in result.output
@@ -98,8 +111,10 @@ ${text}`);
     recordPromptTruncation(prompt, context.coverage);
     const batch = await this.lanes.run({ repo: claim.repo, prKey: `${claim.repo.owner}/${claim.repo.name}#${claim.prNumber}`,
       attemptId: claim.attemptId, attemptRoot: context.attemptRoot, headSha: claim.headSha, kind: 'verifier',
-      verifierBatch: true, runDeadlineMs: deadline, signal,
+      verifierBatch: true, runDeadlineMs: deadline, signal, attempt, authorFamilyCounts: authorFamilyCounts(candidates),
       prompt });
+    if (batch.lane && this.stages && !signal?.aborted)
+      await this.stages.saveStageLane(claim.attemptId, VERIFICATION_STAGE.name, VERIFICATION_STAGE.ordinal, batch.lane);
     if (batch.status === 'partial') return candidates.map(({ lens, finding }) => ({ lens, finding,
       verification: 'unavailable', result: batch }));
     if (!Array.isArray(batch.output)) throw new Error('Verifier batch output missing');
