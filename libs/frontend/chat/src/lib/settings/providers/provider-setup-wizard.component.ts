@@ -40,10 +40,23 @@ import {
   viewChild,
   type WritableSignal,
 } from '@angular/core';
-import { LucideAngularModule, Check, Server } from 'lucide-angular';
+import { LucideAngularModule, Check, Eye, EyeOff, Server } from 'lucide-angular';
 import { LoggingService, injectWallClock } from '@ptah-extension/core';
 import type { LucideIconData } from 'lucide-angular';
-import { NativeDrawerComponent, MotionStageDirective, ProviderMarkComponent, ProviderModelPickerComponent, PtahButtonDirective, PtahFieldComponent, PtahInputDirective } from '@ptah-extension/ui';
+import {
+  MotionStageDirective,
+  NativeDrawerComponent,
+  NativeModalComponent,
+  ProviderMarkComponent,
+  ProviderModelPickerComponent,
+  PtahAlertComponent,
+  PtahBadgeDirective,
+  PtahButtonDirective,
+  PtahFieldComponent,
+  PtahIconButtonDirective,
+  PtahInputDirective,
+  PtahSkeletonComponent,
+} from '@ptah-extension/ui';
 import type { ProviderModelSelection, ProviderMarkLucideIcon } from '@ptah-extension/ui';
 import { getAllAnthropicProviders, getAnthropicProvider, validateProviderBaseUrl } from '@ptah-extension/shared';
 import type {
@@ -162,6 +175,9 @@ interface WizardProviderOption {
   readonly id: string;
   readonly name: string;
   readonly summary: string;
+  readonly description?: string;
+  readonly connected: boolean;
+  readonly signIn: boolean;
   readonly fallback: ProviderMarkLucideIcon;
 }
 
@@ -286,7 +302,12 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
   imports: [
     LucideAngularModule, NativeDrawerComponent, MotionStageDirective, ProviderMarkComponent, ProviderModelPickerComponent,
     KimiCodeLoginProgressComponent,
+    NativeModalComponent,
+    PtahAlertComponent,
+    PtahBadgeDirective,
     PtahButtonDirective,
+    PtahIconButtonDirective,
+    PtahSkeletonComponent,
     PtahFieldComponent,
     PtahInputDirective,
   ],
@@ -381,44 +402,45 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
         </details>
       </div>
 
-      <div class="space-y-4 p-3" data-testid="wizard-body" #wizardHost>
-        @if (closeReview()) {
-          <div
-            class="rounded-md border border-base-300 bg-base-100 p-3"
-            data-testid="wizard-discard-review"
+      <ptah-native-modal
+        [isOpen]="closeReview()"
+        size="sm"
+        ariaLabelledby="wizard-discard-heading"
+        (closed)="onKeepEditing()"
+        data-testid="wizard-discard-review"
+      >
+        <h3
+          modal-header
+          id="wizard-discard-heading"
+          class="text-[length:var(--ptah-text-section-title-size)] leading-[var(--ptah-text-section-title-leading)] font-[number:var(--ptah-text-section-title-weight)] text-base-content"
+          data-testid="wizard-discard-heading"
+        >
+          Discard this setup?
+        </h3>
+        <p class="mt-[var(--ptah-gap-heading)] text-sm text-base-content-muted" data-testid="wizard-discard-copy">
+          Your credential, verification, and model choices are not saved. Nothing was written to disk.
+        </p>
+        <div modal-footer class="mt-[var(--ptah-gap-group)] flex flex-wrap justify-end gap-[var(--ptah-space-2)]">
+          <button
+            type="button"
+            ptahButton variant="ghost"
+            (click)="onKeepEditing()"
+            data-testid="wizard-discard-keep"
           >
-            <p
-              #closeReviewHeading
-              tabindex="-1"
-              class="text-sm font-semibold text-base-content focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
-              data-testid="wizard-discard-heading"
-            >
-              Discard this setup?
-            </p>
-            <p class="text-xs text-base-content-muted" data-testid="wizard-discard-copy">
-              Your credential, verification, and model choices are not saved. Nothing was written to disk.
-            </p>
-            <div class="mt-2 flex gap-2">
-              <button
-                type="button"
-                ptahButton
-                (click)="onKeepEditing()"
-                data-testid="wizard-discard-keep"
-              >
-                Keep editing
-              </button>
-              <button
-                type="button"
-                ptahButton variant="ghost"
-                (click)="onDiscard()"
-                data-testid="wizard-discard-confirm"
-              >
-                Discard
-              </button>
-            </div>
-          </div>
-        }
+            Keep editing
+          </button>
+          <button
+            type="button"
+            ptahButton variant="danger"
+            (click)="onDiscard()"
+            data-testid="wizard-discard-confirm"
+          >
+            Discard
+          </button>
+        </div>
+      </ptah-native-modal>
 
+      <div class="space-y-4 p-3" data-testid="wizard-body" #wizardHost>
         @if (externalMessage()) { <p role="status">{{ externalMessage() }}</p> }
       <div ptahMotionStage [motionIndex]="stepIndex()">
       @switch (step()) {
@@ -435,7 +457,7 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
               <div class="mt-3 flex flex-col gap-1">
                 <span id="wizard-search-label" class="sr-only">Search providers</span>
                 <ptah-field label="Search providers" size="sm">
-                  <input ptahInput size="sm"
+                  <input #providerSearch ptahInput size="sm"
                       type="text"
                       class="w-full text-base-content"
                       aria-labelledby="wizard-search-label"
@@ -445,35 +467,9 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
                     />
                 </ptah-field>
               </div>
-              <fieldset class="mt-3 space-y-2" data-testid="wizard-provider-options">
-                <legend class="text-sm font-semibold text-base-content">Choose a provider</legend>
-                @for (option of providerOptions(); track option.id) {
-                  <label
-                    class="flex items-start gap-2 rounded-md border border-base-300 bg-base-100 p-2"
-                    data-testid="wizard-provider-option"
-                  >
-                    <input
-                      type="radio"
-                      class="radio radio-sm mt-0.5"
-                      name="wizard-provider"
-                      [value]="option.id"
-                      [checked]="selectionId() === option.id"
-                      (change)="onSelectProvider($event, option.id)"
-                      data-testid="wizard-provider-radio"
-                    />
-                    <ptah-provider-mark [providerId]="option.id" [fallback]="option.fallback" />
-                    <span class="min-w-0">
-                      <span class="block text-sm text-base-content">{{ option.name }}</span>
-                      <span class="block break-all text-xs text-base-content-muted">{{
-                        option.summary
-                      }}</span>
-                    </span>
-                  </label>
-                } @empty {
-                  <p
-                    class="text-xs text-base-content-muted"
-                    data-testid="wizard-provider-no-match"
-                  >
+              @if (connectionsStatus() !== 'loading' && !providerOptions().length) {
+                <div class="mt-2">
+                  <p class="text-xs text-base-content-muted" data-testid="wizard-provider-no-match">
                     No providers match “{{ search() }}”.
                   </p>
                   <button
@@ -484,6 +480,81 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
                   >
                     Clear search
                   </button>
+                </div>
+              }
+              @if (connectionsStatus() === 'error') {
+                <ptah-alert tone="warning" [compact]="true" live="polite" class="mt-[var(--ptah-gap-heading)]" data-testid="wizard-connections-error">
+                  <p>Connected providers could not be refreshed. The list may be out of date.</p>
+                  <button alertAction type="button" ptahButton variant="ghost" (click)="onRetryConnections($event)">
+                    Retry
+                  </button>
+                </ptah-alert>
+              }
+              <p role="status" class="sr-only">
+                {{ connectionsStatus() === 'loading' ? 'Checking connected providers…' : '' }}
+              </p>
+              <fieldset class="mt-3 space-y-2" data-testid="wizard-provider-options">
+                <legend class="text-sm font-semibold text-base-content">Choose a provider</legend>
+                @if (connectionsStatus() === 'loading') {
+                  <div class="space-y-[var(--ptah-gap-controls)]" aria-hidden="true" data-testid="wizard-provider-loading">
+                    @for (row of [1, 2, 3, 4]; track row) {
+                      <div class="flex items-start rounded-md border border-base-300 p-[var(--ptah-gap-controls)]">
+                        <ptah-skeleton class="flex-1" [lines]="2" size="sm" />
+                      </div>
+                    }
+                  </div>
+                } @else {
+                  @for (option of providerOptions(); track option.id) {
+                    <div
+                      class="flex items-start gap-[var(--ptah-gap-controls)] rounded-md border border-base-300 bg-base-100"
+                      data-testid="wizard-provider-option"
+                      [attr.data-provider]="option.id"
+                    >
+                      <label class="flex min-w-0 flex-1 items-start gap-[var(--ptah-gap-controls)] p-[var(--ptah-gap-controls)]">
+                        <input
+                          type="radio"
+                          class="radio radio-sm mt-0.5"
+                          name="wizard-provider"
+                          [value]="option.id"
+                          [checked]="selectionId() === option.id"
+                          (change)="onSelectProvider($event, option.id)"
+                          data-testid="wizard-provider-radio"
+                        />
+                        <ptah-provider-mark [providerId]="option.id" [fallback]="option.fallback" />
+                        <span class="min-w-0">
+                          <span class="flex flex-wrap items-center gap-[var(--ptah-gap-controls)] text-sm text-base-content">
+                            <span class="break-all">{{ option.name }}</span>
+                            @if (option.connected) {
+                              <span ptahBadge tone="ok" size="xs" data-testid="wizard-provider-connected">
+                                <lucide-angular [img]="CheckIcon" class="h-3 w-3" aria-hidden="true" />
+                                Connected
+                              </span>
+                            }
+                          </span>
+                          <span class="block text-xs text-base-content-muted">{{ option.summary }}</span>
+                          @if (option.description) {
+                            <span class="block break-words text-xs text-base-content-muted">{{ option.description }}</span>
+                          }
+                          @if (providersWithDefaults().has(option.id)) {
+                            <span class="block text-xs text-base-content-muted">Default models available</span>
+                          }
+                        </span>
+                      </label>
+                      @if (option.signIn && !option.connected) {
+                        <button
+                          type="button"
+                          ptahButton variant="ghost" size="xs"
+                          class="m-[var(--ptah-gap-controls)] shrink-0"
+                          [attr.aria-label]="'Sign in to ' + option.name"
+                          [disabled]="saving()"
+                          (click)="requestWizardClose(option.id)"
+                          data-testid="wizard-provider-sign-in"
+                        >
+                          Sign in
+                        </button>
+                      }
+                    </div>
+                  }
                 }
                 <label
                   class="flex items-start gap-2 rounded-md border border-base-300 bg-base-100 p-2"
@@ -494,16 +565,18 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
                     class="radio radio-sm mt-0.5"
                     name="wizard-provider"
                     [value]="CUSTOM_RADIO_VALUE"
+                    aria-labelledby="wizard-custom-provider-name"
+                    aria-describedby="wizard-custom-provider-description"
                     [checked]="isCustomSelected()"
                     (change)="onSelectCustom($event)"
                     data-testid="wizard-provider-custom-radio"
                   />
                   <lucide-angular [img]="ServerIcon" class="h-6 w-6 text-base-content" aria-hidden="true" />
                   <span class="min-w-0">
-                    <span class="block text-sm text-base-content">Custom endpoint</span>
-                    <span class="block text-xs text-base-content-muted"
-                      >Enter a provider that is not in the list</span
-                    >
+                    <span id="wizard-custom-provider-name" class="block text-sm text-base-content">Custom endpoint</span>
+                    <span id="wizard-custom-provider-description" class="block text-xs text-base-content-muted">
+                      OpenAI- or Anthropic-compatible self-hosted endpoint
+                    </span>
                   </span>
                 </label>
               </fieldset>
@@ -668,22 +741,25 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
                             [type]="showApiKey() ? 'text' : 'password'"
                             class="w-full text-base-content"
                             autocomplete="off"
+                            spellcheck="false"
                             aria-labelledby="wizard-api-key-label"
                             [value]="apiKeyDraft()"
                             (input)="onApiKeyInput($event)"
                             data-testid="wizard-api-key"
                           />
+                        <button
+                          ptahFieldTrailing
+                          type="button"
+                          ptahIconButton size="xs"
+                          label="Show API key"
+                          [selected]="showApiKey()"
+                          (click)="toggleKeyVisibility()"
+                          data-testid="wizard-key-visibility"
+                        >
+                          <lucide-angular [img]="showApiKey() ? EyeOffIcon : EyeIcon" aria-hidden="true" />
+                        </button>
                       </ptah-field>
                     </div>
-                    <button
-                      type="button"
-                      ptahButton variant="ghost" class="mt-1"
-                      [attr.aria-pressed]="showApiKey()"
-                      (click)="toggleKeyVisibility()"
-                      data-testid="wizard-key-visibility"
-                    >
-                      {{ showApiKey() ? 'Hide API key' : 'Show API key' }}
-                    </button>
                     @if (apiKeyError(); as keyError) {
                       <p
                         class="text-xs text-base-content"
@@ -848,22 +924,25 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
                             [type]="showApiKey() ? 'text' : 'password'"
                             class="w-full text-base-content"
                             autocomplete="off"
+                            spellcheck="false"
                             aria-labelledby="wizard-optional-key-label"
                             [value]="apiKeyDraft()"
                             (input)="onApiKeyInput($event)"
                             data-testid="wizard-optional-key"
                           />
+                        <button
+                          ptahFieldTrailing
+                          type="button"
+                          ptahIconButton size="xs"
+                          label="Show API key"
+                          [selected]="showApiKey()"
+                          (click)="toggleKeyVisibility()"
+                          data-testid="wizard-optional-key-visibility"
+                        >
+                          <lucide-angular [img]="showApiKey() ? EyeOffIcon : EyeIcon" aria-hidden="true" />
+                        </button>
                       </ptah-field>
                     </div>
-                    <button
-                      type="button"
-                      ptahButton variant="ghost" class="mt-1"
-                      [attr.aria-pressed]="showApiKey()"
-                      (click)="toggleKeyVisibility()"
-                      data-testid="wizard-optional-key-visibility"
-                    >
-                      {{ showApiKey() ? 'Hide API key' : 'Show API key' }}
-                    </button>
                     @if (usesStoredKey()) {
                       <p class="text-xs text-base-content-muted" data-testid="wizard-local-stored-key">
                         Key stored. Leave the key empty to verify the stored key.
@@ -907,22 +986,25 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
                             [type]="showApiKey() ? 'text' : 'password'"
                             class="w-full text-base-content"
                             autocomplete="off"
+                            spellcheck="false"
                             aria-labelledby="wizard-optional-key-label"
                             [value]="apiKeyDraft()"
                             (input)="onApiKeyInput($event)"
                             data-testid="wizard-optional-key"
                           />
+                        <button
+                          ptahFieldTrailing
+                          type="button"
+                          ptahIconButton size="xs"
+                          label="Show API key"
+                          [selected]="showApiKey()"
+                          (click)="toggleKeyVisibility()"
+                          data-testid="wizard-optional-key-visibility"
+                        >
+                          <lucide-angular [img]="showApiKey() ? EyeOffIcon : EyeIcon" aria-hidden="true" />
+                        </button>
                       </ptah-field>
                     </div>
-                    <button
-                      type="button"
-                      ptahButton variant="ghost" class="mt-1"
-                      [attr.aria-pressed]="showApiKey()"
-                      (click)="toggleKeyVisibility()"
-                      data-testid="wizard-optional-key-visibility"
-                    >
-                      {{ showApiKey() ? 'Hide API key' : 'Show API key' }}
-                    </button>
                     @if (usesStoredKey()) {
                       <p class="text-xs text-base-content-muted" data-testid="wizard-local-stored-key">
                         Key stored. Leave the key empty to verify the stored key.
@@ -965,22 +1047,25 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
                           [type]="showApiKey() ? 'text' : 'password'"
                           class="w-full text-base-content"
                           autocomplete="off"
+                          spellcheck="false"
                           aria-labelledby="wizard-api-key-label"
                           [value]="apiKeyDraft()"
                           (input)="onApiKeyInput($event)"
                           data-testid="wizard-api-key"
                         />
+                      <button
+                        ptahFieldTrailing
+                        type="button"
+                        ptahIconButton size="xs"
+                        label="Show API key"
+                        [selected]="showApiKey()"
+                        (click)="toggleKeyVisibility()"
+                        data-testid="wizard-key-visibility"
+                      >
+                        <lucide-angular [img]="showApiKey() ? EyeOffIcon : EyeIcon" aria-hidden="true" />
+                      </button>
                     </ptah-field>
                   </div>
-                  <button
-                    type="button"
-                    ptahButton variant="ghost" class="mt-1"
-                    [attr.aria-pressed]="showApiKey()"
-                    (click)="toggleKeyVisibility()"
-                    data-testid="wizard-key-visibility"
-                  >
-                    {{ showApiKey() ? 'Hide API key' : 'Show API key' }}
-                  </button>
                   @if (usesStoredKey()) {
                     <p class="text-xs text-base-content-muted" data-testid="wizard-custom-stored-key">
                       Key stored. Leave the key empty to verify the stored key.
@@ -1365,6 +1450,7 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
             type="button"
             ptahButton variant="ghost"
             [disabled]="commitBusy()"
+            #cancelButton
             (click)="requestWizardClose()"
             data-testid="wizard-cancel"
           >
@@ -1398,6 +1484,8 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
 })
 export class ProviderSetupWizardComponent implements OnDestroy {
   protected readonly CheckIcon: LucideIconData = Check;
+  protected readonly EyeIcon: LucideIconData = Eye;
+  protected readonly EyeOffIcon: LucideIconData = EyeOff;
   protected readonly ServerIcon: LucideIconData = Server;
   protected readonly STEP_DEFS = STEP_DEFS;
   protected readonly TIER_DEFS = TIER_DEFS;
@@ -1465,6 +1553,12 @@ export class ProviderSetupWizardComponent implements OnDestroy {
 
   /** Sign-in and CLI work the host must perform. */
   readonly externalActionRequested = output<{ providerId: string; action: WizardExternalAction }>();
+  readonly signInShortcut = output<string>();
+  readonly retryConnectionsRequested = output<void>();
+  readonly connectedProviderIds = input<ReadonlySet<string>>(new Set<string>());
+  readonly providersWithDefaults = input<ReadonlySet<string>>(new Set<string>());
+  readonly connectionsStatus = input<'loading' | 'ready' | 'error'>('ready');
+  readonly saving = input(false);
   readonly providerChanged = output<string>();
   readonly reviewContextRequested = output<void>();
   readonly contextChanged = input(false);
@@ -1511,6 +1605,7 @@ export class ProviderSetupWizardComponent implements OnDestroy {
   private readonly _providerChangeReview = signal(false);
   private readonly _pendingSelection = signal<WizardSelection | null>(null);
   private readonly _closeReview = signal(false);
+  private pendingSignInProvider: string | null = null;
   private readonly _scopeTouched = signal(false);
 
   private readonly logger = inject(LoggingService);
@@ -1523,7 +1618,8 @@ export class ProviderSetupWizardComponent implements OnDestroy {
 
   protected readonly stepHeading = viewChild<ElementRef<HTMLElement>>('stepHeading');
   private readonly failureHeading = viewChild<ElementRef<HTMLElement>>('failureHeading');
-  private readonly closeReviewHeading = viewChild<ElementRef<HTMLElement>>('closeReviewHeading');
+  private readonly providerSearch = viewChild<ElementRef<HTMLInputElement>>('providerSearch');
+  private readonly cancelButton = viewChild<ElementRef<HTMLButtonElement>>('cancelButton');
   private readonly providerChangeHeading = viewChild<ElementRef<HTMLElement>>(
     'providerChangeHeading',
   );
@@ -1627,23 +1723,30 @@ export class ProviderSetupWizardComponent implements OnDestroy {
 
   protected readonly providerOptions = computed<readonly WizardProviderOption[]>(() => {
     const query = this._search().trim().toLowerCase();
+    const connectedIds = this.connectedProviderIds();
     const offered = this.offeredProviderSessionIds();
-    const all = getAllAnthropicProviders().filter(
-      (entry) => !entry.providerSession || offered.includes(entry.id),
-    );
-    const matched = query
-      ? all.filter(
-          (entry) => entry.name.toLowerCase().includes(query) || entry.id.includes(query),
-        )
-      : all;
-    const options: WizardProviderOption[] = matched.map((entry) => ({
+    const options: WizardProviderOption[] = getAllAnthropicProviders()
+      .filter((entry) => !entry.providerSession || offered.includes(entry.id))
+      .map((entry) => ({
       id: entry.id,
       name: entry.name,
       summary: authSummaryFor(entry),
+      description: entry.description,
+      connected: connectedIds.has(entry.id),
+      signIn: !!entry.nativeAuth || entry.authType === 'oauth',
       fallback: markFallbackFor(entry),
     }));
-    if (!query || 'claude api anthropic'.includes(query)) options.unshift({ id: 'anthropic', name: 'Claude API', summary: 'Connect an API key; optionally use it for the main agent', fallback: 'Bot' });
-    return options;
+    options.unshift({
+      id: 'anthropic',
+      name: 'Claude API',
+      summary: 'Connect an API key; optionally use it for the main agent',
+      connected: connectedIds.has('anthropic'),
+      signIn: false,
+      fallback: 'Bot',
+    });
+    return options
+      .filter((option) => option.name.toLowerCase().includes(query) || option.id.toLowerCase().includes(query))
+      .sort((left, right) => Number(left.connected) - Number(right.connected));
   });
 
   protected readonly customNameError = computed<string | null>(() => {
@@ -1989,25 +2092,22 @@ export class ProviderSetupWizardComponent implements OnDestroy {
       });
     });
 
-    // Focus management on step navigation and on the discard review.
+    // Focus management on step navigation and credential/provider changes.
     effect(() => {
       if (!this.open()) return;
       void this._step();
       void this.authMode();
       void this._credentialModeSwitch();
-      void this._closeReview();
       void this._providerChangeReview();
       queueMicrotask(() => {
         const target =
-          this._closeReview()
-            ? this.closeReviewHeading()?.nativeElement
-            : this._providerChangeReview()
-              ? this.providerChangeHeading()?.nativeElement
-              : this._step() === 'credential' && this._credentialModeSwitch()
-                ? (this.authMode() === 'apiKey'
-                    ? this.signInModeToggle()?.nativeElement
-                    : this.apiKeyModeToggle()?.nativeElement) ?? this.stepHeading()?.nativeElement
-                : this.stepHeading()?.nativeElement;
+          this._providerChangeReview()
+            ? this.providerChangeHeading()?.nativeElement
+            : this._step() === 'credential' && this._credentialModeSwitch()
+              ? (this.authMode() === 'apiKey'
+                  ? this.signInModeToggle()?.nativeElement
+                  : this.apiKeyModeToggle()?.nativeElement) ?? this.stepHeading()?.nativeElement
+              : this.stepHeading()?.nativeElement;
         if (target && document.activeElement !== target) target.focus();
       });
     });
@@ -2062,11 +2162,27 @@ export class ProviderSetupWizardComponent implements OnDestroy {
   // ----------------------------------------------------------- provider step
 
   protected onSearchInput(event: Event): void {
+    const search = this.providerSearch()?.nativeElement;
+    const focusedProvider = search?.ownerDocument.activeElement
+      ?.closest<HTMLElement>('[data-provider]')
+      ?.dataset['provider'];
     this._search.set((event.target as HTMLInputElement).value);
+    if (focusedProvider && !this.providerOptions().some((option) => option.id === focusedProvider)) {
+      search?.focus();
+    }
   }
 
   protected onClearSearch(): void {
     this._search.set('');
+    this.providerSearch()?.nativeElement.focus();
+  }
+
+  protected onRetryConnections(event: MouseEvent): void {
+    const search = this.providerSearch()?.nativeElement;
+    if (search && event.currentTarget === search.ownerDocument.activeElement) {
+      search.focus();
+    }
+    this.retryConnectionsRequested.emit();
   }
 
   protected onSelectProvider(event: Event, id: string): void {
@@ -2412,7 +2528,7 @@ export class ProviderSetupWizardComponent implements OnDestroy {
   // ------------------------------------------------------- drawer and discard
 
   /** Drawer close, backdrop, Escape, and the Cancel button all land here. */
-  protected requestWizardClose(): void {
+  protected requestWizardClose(signInProvider: string | null = null): void {
     if (this.commitBusy()) return;
     if (this.probeChecking()) {
       // A close during the check cancels the probe first; the user stays on
@@ -2420,22 +2536,34 @@ export class ProviderSetupWizardComponent implements OnDestroy {
       this.onCancelProbe();
       return;
     }
-    if (this.hasUserDraft()) {
+    if (this.hasUserDraft() || (signInProvider !== null && this._search().length > 0)) {
+      const cancel = this.cancelButton()?.nativeElement;
+      const panel = cancel?.closest('[role="dialog"]');
+      if (cancel && !panel?.contains(cancel.ownerDocument.activeElement)) cancel.focus();
+      this.pendingSignInProvider = signInProvider;
       this._closeReview.set(true);
       return;
     }
-    this.closed.emit();
+    this.finishWizardClose(signInProvider);
   }
 
   protected onKeepEditing(): void {
+    this.pendingSignInProvider = null;
     this._closeReview.set(false);
   }
 
   protected onDiscard(): void {
+    const signInProvider = this.pendingSignInProvider;
+    this.onKeepEditing();
     this._apiKeyDraft.set('');
     this._showApiKey.set(false);
     this._replacingKey.set(false);
-    this.closed.emit();
+    this.finishWizardClose(signInProvider);
+  }
+
+  private finishWizardClose(signInProvider: string | null): void {
+    if (signInProvider !== null) this.signInShortcut.emit(signInProvider);
+    else this.closed.emit();
   }
 
   // ------------------------------------------------------------------ helpers
@@ -2467,6 +2595,6 @@ export class ProviderSetupWizardComponent implements OnDestroy {
     this._scopeTouched.set(false);
     this._providerChangeReview.set(false);
     this._pendingSelection.set(null);
-    this._closeReview.set(false);
+    this.onKeepEditing();
   }
 }

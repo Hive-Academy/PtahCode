@@ -98,7 +98,12 @@ describe('LaneRowIdentityComponent', () => {
     });
 
     it('never puts a multi-line probe output in the tooltip', () => {
-      mount(system({ version: 'codex-cli 0.155.1\nUsage: codex', versionLabel: 'v0.155.1' }));
+      mount(
+        system({
+          version: 'codex-cli 0.155.1\nUsage: codex',
+          versionLabel: 'v0.155.1',
+        }),
+      );
       expect(q('ptah-table-row-title')?.getAttribute('title')).toBe(
         'Codex - v0.155.1',
       );
@@ -147,15 +152,27 @@ describe('LaneRowIdentityComponent', () => {
       expect(badge()?.classList).not.toContain('kind-cli');
     });
 
-    it('is in the first line, after the name', () => {
+    it('is in the second line, after the version', () => {
       mount(system());
-      const primary = q('.ptah-table-row-title-primary');
-      expect(badge()?.parentElement).toBe(primary);
-      expect(
-        q('.ptah-table-row-title-name')?.compareDocumentPosition(
-          badge() as Node,
-        ),
-      ).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+      const line = q('.ptah-table-row-title-secondary-line');
+      expect(badge()?.parentElement).toBe(line);
+      expect(q('.ptah-table-row-title-primary')?.contains(badge())).toBe(false);
+      expect(secondLine()?.compareDocumentPosition(badge() as Node)).toBe(
+        Node.DOCUMENT_POSITION_FOLLOWING,
+      );
+    });
+
+    it('follows the "--" placeholder when there is no version', () => {
+      mount(system({ versionLabel: null }));
+      expect(secondLine()?.textContent).toBe('--');
+      expect(badge()?.parentElement).toBe(
+        q('.ptah-table-row-title-secondary-line'),
+      );
+    });
+
+    it('no longer uses the narrow-width absolute-position hack', () => {
+      mount(system());
+      expect(styles()).not.toMatch(/@container\s*\(max-width:\s*13rem\)/);
     });
 
     it('gives the two kinds different coloured text, each with a tinted border, never base-content', () => {

@@ -110,7 +110,8 @@ export class ProvidersCommitService {
           return true;
         },
         readBack: async () =>
-          (await this.require('config:model-get', {})).model === params.model,
+          (await this.require('config:model-get', {})).model ===
+          (params.model || 'default'),
       });
     }
     if (patch.effort) {

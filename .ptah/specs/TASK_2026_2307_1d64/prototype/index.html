@@ -1,0 +1,415 @@
+<!doctype html>
+<html lang="en" data-theme="ptah-glass" data-theme-mode="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TASK_2026_2307_1d64 - Providers settings polish prototype</title>
+<style>
+/* Token values copied from apps/ptah-extension-webview/tailwind.config.js (ptah-glass / ptah-glass-light)
+   and libs/frontend/ui/src/lib/tokens/ptah-tokens.css. Names kept so the implementer can map 1:1. */
+:root,[data-theme-mode=dark]{
+  --b1:#17191d;--b2:#202329;--b3:#2a2e35;--bc:#f2f2f1;--bcm:#dcdee3; /* --bcm oklch(90.05% .0071 268.54) ~ #dcdee3 */
+  --p:#e4b94a;--pc:#1b1403;
+  --state-need:#ffb066;--state-done:#5fe0a0;--state-err:#ff9696;--state-run:#93bdff;--state-idle:#dcdee3;
+  --surface-border:color-mix(in srgb,var(--bc) 14%,transparent);
+  --surface-border-strong:color-mix(in srgb,var(--bc) 22%,transparent);
+  --nav-active-bg:color-mix(in srgb,var(--p) 15%,transparent);
+  --scrim:rgba(0,0,0,.55);
+}
+[data-theme-mode=light]{
+  --b1:#f7f3fd;--b2:#eee8f8;--b3:#e2daf1;--bc:#1e1936;--bcm:#5b5478; /* oklch(46.559% .0614 293.53) ~ #5b5478 */
+  --p:#7c5700;--pc:#fff8e6;
+  --state-need:#8f5200;--state-done:#0f6434;--state-err:#a31f26;--state-run:#2449b0;--state-idle:#5f5878;
+  --scrim:rgba(30,25,54,.4);
+}
+:root{
+  --ptah-space-1:.25rem;--ptah-space-2:.5rem;--ptah-space-3:.75rem;--ptah-space-4:1rem;--ptah-space-6:1.5rem;
+  --ptah-control-h-xs:1.5rem;--ptah-control-h-sm:2rem;--ptah-control-h-md:2.5rem;--ptah-control-h-field:3.25rem;
+  --ptah-icon-xs:.75rem;--ptah-icon-sm:.875rem;--ptah-icon-md:1rem;--ptah-icon-lg:1.25rem;
+  --t-section:600 1rem/1.5rem system-ui,sans-serif;--t-group:600 .875rem/1.25rem system-ui,sans-serif;
+  --t-body:400 .875rem/1.25rem system-ui,sans-serif;--t-label:500 .75rem/1rem system-ui,sans-serif;
+  --t-hint:400 .75rem/1rem system-ui,sans-serif;--t-caption:500 .6875rem/1rem system-ui,sans-serif;
+  --ptah-font-mono:'JetBrains Mono','Fira Code',Menlo,monospace;
+  --radius-control:9999px;--radius-surface:1.5rem;--radius-chip:9999px;
+  --ptah-focus-ring-width:2px;--ptah-focus-ring-offset:2px;--ptah-focus-ring-color:var(--p);
+  --ptah-status-glyph:.5rem;
+  --nav-w:14.5rem;--nav-px:.75rem;--nav-py:1rem;--nav-list-gap:2px;--nav-item-h:2.5rem;--nav-item-pl:.875rem;--nav-item-pr:.625rem;
+  --nav-icon-gap:.5rem;--nav-child-indent:1.25rem;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--b1);color:var(--bc);font:var(--t-body)}
+button{font:inherit;color:inherit;cursor:pointer}
+:focus-visible{outline:var(--ptah-focus-ring-width) solid var(--ptah-focus-ring-color);outline-offset:var(--ptah-focus-ring-offset)}
+.muted{color:var(--bcm)}
+.mono{font-family:var(--ptah-font-mono)}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* ---------- prototype chrome (NOT part of the design) ---------- */
+.proto-bar{position:sticky;top:0;z-index:50;background:var(--b2);border-bottom:1px solid var(--surface-border);padding:.5rem 1rem;display:flex;flex-wrap:wrap;gap:.75rem 1.25rem;align-items:center;font:var(--t-label)}
+.proto-bar .grp{display:flex;gap:.25rem;align-items:center}
+.proto-bar .grp>b{font-weight:600;margin-right:.25rem;color:var(--bcm)}
+.seg{border:1px solid var(--surface-border-strong);background:transparent;padding:.2rem .65rem;border-radius:9999px;font:var(--t-label)}
+.seg[aria-pressed=true]{background:var(--nav-active-bg);border-color:var(--p);color:var(--bc)}
+main.proto{padding:1rem;display:flex;flex-direction:column;align-items:flex-start;gap:.75rem}
+.proto-note{font:var(--t-hint);color:var(--bcm);max-width:60rem;margin:0}
+.stage{container-type:inline-size;width:var(--stage-w,900px);max-width:100%;border:1px dashed var(--surface-border-strong);border-radius:var(--ptah-space-3);background:var(--b1);position:relative;overflow:hidden}
+section.surface[hidden]{display:none}
+
+/* ---------- shared controls (mirror ptahButton / ptahBadge / ptah-field) ---------- */
+.btn{display:inline-flex;align-items:center;gap:.375rem;height:var(--ptah-control-h-sm);padding:0 var(--ptah-space-3);border-radius:var(--radius-control);border:1px solid transparent;background:transparent;font:var(--t-label);font-size:.8125rem;white-space:nowrap}
+.btn.primary{background:var(--p);color:var(--pc);border-color:var(--p);font-weight:600}
+.btn.ghost{border-color:var(--surface-border-strong);color:var(--bc)}
+.btn.ghost:hover{background:color-mix(in srgb,var(--bc) 8%,transparent)}
+.btn.danger{background:color-mix(in srgb,var(--state-err) 14%,transparent);border-color:var(--state-err);color:var(--state-err);font-weight:600}
+.btn.sm{height:var(--ptah-control-h-xs);padding:0 var(--ptah-space-2)}
+.btn[aria-disabled=true]{opacity:.55;cursor:not-allowed}
+.ibtn{display:inline-grid;place-items:center;width:var(--ptah-control-h-xs);height:var(--ptah-control-h-xs);border-radius:9999px;border:0;background:transparent;color:var(--bcm)}
+.ibtn:hover{background:color-mix(in srgb,var(--bc) 10%,transparent);color:var(--bc)}
+.ibtn svg,.btn svg{width:var(--ptah-icon-md);height:var(--ptah-icon-md)}
+.badge{display:inline-flex;align-items:center;gap:.3rem;height:1.25rem;padding:0 .5rem;border-radius:var(--radius-chip);font:var(--t-caption);background:color-mix(in srgb,var(--bc) 8%,transparent);color:var(--bc);white-space:nowrap}
+.badge.ok{background:color-mix(in srgb,var(--state-done) 8%,var(--b2));color:var(--state-done)}
+.badge.warn{background:color-mix(in srgb,var(--state-need) 8%,var(--b2));color:var(--state-need)}
+.badge.err{background:color-mix(in srgb,var(--state-err) 8%,var(--b2));color:var(--state-err)}
+.badge.idle{color:var(--bcm)}
+.badge .dot{width:var(--ptah-status-glyph);height:var(--ptah-status-glyph);border-radius:9999px;background:currentColor}
+.badge svg{width:var(--ptah-icon-xs);height:var(--ptah-icon-xs)}
+.chip{display:inline-flex;align-items:baseline;gap:.35rem;padding:.125rem .6rem;border-radius:var(--radius-chip);background:color-mix(in srgb,var(--bc) 8%,transparent);font:var(--t-hint);color:var(--bc);max-width:100%}
+.chip .k{color:var(--bcm)}
+.chip .v{min-width:0;overflow-wrap:anywhere}
+.card{background:var(--b2);border:1px solid var(--surface-border);border-radius:var(--radius-surface);padding:var(--ptah-space-4)}
+.mark{width:2rem;height:2rem;border-radius:9999px;display:inline-grid;place-items:center;font:600 .75rem system-ui;background:color-mix(in srgb,var(--p) 18%,var(--b3));color:var(--bc);flex:none;border:1px solid var(--surface-border)}
+.field{position:relative;display:flex;align-items:center;gap:.25rem;height:var(--ptah-control-h-field);padding:0 .75rem 0 1rem;border:1px solid var(--surface-border-strong);border-radius:var(--radius-control);background:var(--b2)}
+.field:focus-within{border-color:var(--p);box-shadow:0 0 0 1px var(--p)}
+.field label{position:absolute;left:1rem;top:.35rem;font:var(--t-caption);color:var(--bcm)}
+.field input{flex:1;min-width:0;border:0;background:transparent;color:var(--bc);font:var(--t-body);padding-top:.9rem;outline:none}
+.skel{height:.75rem;border-radius:9999px;background:linear-gradient(90deg,color-mix(in srgb,var(--bc) 8%,transparent),color-mix(in srgb,var(--bc) 16%,transparent),color-mix(in srgb,var(--bc) 8%,transparent));background-size:200% 100%;animation:sh 1.6s linear infinite}
+@keyframes sh{to{background-position:-200% 0}}
+@media (prefers-reduced-motion:reduce){.skel{animation:none}}
+
+/* ---------- A. Main agent ---------- */
+.ma{display:flex;flex-direction:column;gap:var(--ptah-space-3)}
+.ma-head{display:flex;flex-wrap:wrap;align-items:center;gap:var(--ptah-space-2) var(--ptah-space-2)}
+.ma-head h2{margin:0;font:var(--t-section)}
+.ma-head .grow{flex:1 1 .5rem}
+.ma-tile{border:1px solid var(--surface-border);border-radius:var(--ptah-space-4);background:color-mix(in srgb,var(--bc) 4%,var(--b2));padding:var(--ptah-space-3) var(--ptah-space-4);display:flex;flex-direction:column;gap:var(--ptah-space-2)}
+.ma-tile.attn{border-color:color-mix(in srgb,var(--state-need) 45%,transparent)}
+.ma-l1{display:flex;align-items:center;gap:var(--ptah-space-3);min-width:0;flex-wrap:wrap}
+.ma-l1 .name{font:var(--t-group);font-weight:600;min-width:0;overflow-wrap:anywhere}
+.ma-l2{display:flex;flex-wrap:wrap;gap:var(--ptah-space-2);padding-left:calc(2rem + var(--ptah-space-3))}
+@container (max-width:479px){.ma-l2{padding-left:0}}
+.ma-empty{border:1px dashed var(--surface-border-strong);border-radius:var(--ptah-space-4);padding:var(--ptah-space-4);display:flex;gap:var(--ptah-space-3);align-items:center}
+.ma-alert{display:flex;gap:var(--ptah-space-3);align-items:center;flex-wrap:wrap;padding:var(--ptah-space-2) var(--ptah-space-3);border-radius:var(--ptah-space-3);background:color-mix(in srgb,var(--state-need) 8%,var(--b2));border:1px solid color-mix(in srgb,var(--state-need) 45%,transparent)}
+.pop{position:absolute;z-index:5;margin-top:.25rem;width:min(22rem,100%);background:var(--b3);border:1px solid var(--surface-border-strong);border-radius:var(--ptah-space-4);padding:var(--ptah-space-4);box-shadow:0 12px 32px rgba(0,0,0,.35)}
+.pop[hidden]{display:none}
+
+/* ---------- B/C. Wizard drawer ---------- */
+.drawer-stage{min-height:46rem;display:flex}
+.page-stub{flex:1;padding:var(--ptah-space-4);min-width:0}
+.page-head{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+.drawer{position:absolute;top:0;right:0;bottom:0;width:min(26rem,100%);background:var(--b2);border-left:1px solid var(--surface-border-strong);display:flex;flex-direction:column;box-shadow:-12px 0 32px rgba(0,0,0,.3)}
+.drawer>header{display:flex;align-items:center;gap:.5rem;padding:var(--ptah-space-3) var(--ptah-space-4);border-bottom:1px solid var(--surface-border)}
+.drawer>header h3{margin:0;font:var(--t-section);flex:1}
+.drawer .body{flex:1;overflow:auto;padding:var(--ptah-space-4);display:flex;flex-direction:column;gap:var(--ptah-space-3)}
+.drawer>footer{display:flex;justify-content:flex-end;gap:.5rem;padding:var(--ptah-space-3) var(--ptah-space-4);border-top:1px solid var(--surface-border)}
+.steps{font:var(--t-hint);color:var(--bcm)}
+.opts{display:flex;flex-direction:column;gap:var(--ptah-space-2);border:0;padding:0;margin:0}
+.opts legend{font:var(--t-group);font-weight:600;padding:0;margin-bottom:var(--ptah-space-2)}
+.opt{display:flex;align-items:center;gap:var(--ptah-space-2);border:1px solid var(--surface-border);border-radius:var(--ptah-space-3);background:var(--b1);padding:var(--ptah-space-2) var(--ptah-space-3)}
+.opt:has(input:checked){border-color:var(--p);background:var(--nav-active-bg)}
+.opt:has(input:focus-visible){outline:var(--ptah-focus-ring-width) solid var(--ptah-focus-ring-color);outline-offset:var(--ptah-focus-ring-offset)}
+.opt label{display:flex;align-items:center;gap:var(--ptah-space-2);flex:1;min-width:0;cursor:pointer}
+.opt input[type=radio]{accent-color:var(--p);width:1rem;height:1rem;margin:0;flex:none}
+.opt .t{display:flex;flex-direction:column;min-width:0}
+.opt .t b{font:var(--t-body);font-weight:500}
+.opt .t span{font:var(--t-hint);color:var(--bcm)}
+.group-toggle{display:flex;align-items:center;gap:.4rem;background:transparent;border:0;padding:.25rem 0;font:var(--t-label);color:var(--bcm);text-align:left}
+.group-toggle svg{width:var(--ptah-icon-sm);height:var(--ptah-icon-sm);transition:transform .15s}
+.group-toggle[aria-expanded=true] svg{transform:rotate(90deg)}
+.opt.connected{background:transparent}
+.scrim{position:absolute;inset:0;background:var(--scrim);display:grid;place-items:center;z-index:20}
+.scrim[hidden]{display:none}
+.modal{width:min(24rem,calc(100% - 2rem));background:var(--b3);border:1px solid var(--surface-border-strong);border-radius:var(--ptah-space-4);padding:var(--ptah-space-4);box-shadow:0 20px 48px rgba(0,0,0,.45);display:flex;flex-direction:column;gap:var(--ptah-space-3)}
+.modal h4{margin:0;font:var(--t-section)}
+.modal p{margin:0;font:var(--t-body);color:var(--bcm)}
+.modal .acts{display:flex;justify-content:flex-end;gap:.5rem}
+.log{font:var(--t-hint);color:var(--bcm);margin:.5rem 0 0}
+
+/* ---------- E. Settings nav ---------- */
+.set{display:flex;min-height:34rem}
+.nav{width:var(--nav-w);flex:none;background:var(--b2);border-right:1px solid var(--surface-border);display:flex;flex-direction:column;padding:var(--nav-py) 0 0}
+.nav-list{display:flex;flex-direction:column;gap:var(--nav-list-gap);padding:0 var(--nav-px)}
+.nav-item{position:relative}
+.nav-btn{display:flex;align-items:center;gap:var(--nav-icon-gap);width:100%;height:var(--nav-item-h);padding:0 var(--nav-item-pr) 0 var(--nav-item-pl);border:0;border-radius:var(--radius-control);background:transparent;color:var(--bcm);font:var(--t-body);font-weight:500;text-align:left}
+.nav-btn:hover{background:color-mix(in srgb,var(--bc) 8%,transparent);color:var(--bc)}
+.nav-btn[aria-current=page]{color:var(--bc);background:var(--nav-active-bg);box-shadow:inset 3px 0 0 var(--p)}
+.nav-btn svg.ic{width:var(--ptah-icon-md);height:var(--ptah-icon-md);flex:none}
+.nav-btn .lbl{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+/* NEW: parent of the active child: text ink only; no second rail */
+.nav-btn[data-in-section]{color:var(--bc)}
+/* NEW: child */
+.nav-item.child{margin-left:var(--nav-child-indent)}
+.nav-item.child .nav-btn{height:var(--ptah-control-h-sm);padding-left:var(--nav-child-indent);font-weight:400}
+.nav-item.child::before{content:"";position:absolute;left:0;top:calc(-1 * var(--nav-list-gap) - 0.5rem);height:calc(50% + var(--nav-list-gap) + .5rem);width:.625rem;border-left:1px solid var(--surface-border-strong);border-bottom:1px solid var(--surface-border-strong);border-bottom-left-radius:5px;pointer-events:none}
+/* NEW: status mark = fixed 1rem slot, 0.5rem glyph, so every row ends on the same x */
+.mark-slot{flex:none;width:var(--ptah-icon-md);display:grid;place-items:center}
+.mark-slot i{width:var(--ptah-status-glyph);height:var(--ptah-status-glyph);border-radius:9999px;background:var(--state-need);box-shadow:0 0 0 2px color-mix(in srgb,var(--state-need) 28%,transparent)}
+.nav-foot{margin-top:auto;border-top:1px solid var(--surface-border);padding:var(--ptah-space-3) var(--nav-px);display:flex;flex-direction:column;gap:var(--ptah-space-3)}
+.ctx{display:grid;grid-template-columns:auto 1fr;gap:.125rem .75rem;margin:0;font:var(--t-caption)}
+.ctx dt{color:var(--bcm);font-weight:500}
+.ctx dd{margin:0;color:var(--bc);font-weight:400;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:right}
+.local{display:grid;grid-template-columns:auto 1fr;gap:.125rem .5rem;align-items:start}
+.local svg{width:var(--ptah-icon-sm);height:var(--ptah-icon-sm);margin-top:.125rem;color:var(--bcm)}
+.local b{font:var(--t-label);color:var(--bc)}
+.local p{grid-column:2;margin:0;font:var(--t-hint);color:var(--bcm)}
+.set-main{flex:1;min-width:0;padding:var(--ptah-space-4);display:flex;flex-direction:column;gap:var(--ptah-space-3)}
+@container (max-width:639px){
+  .set{flex-direction:column}
+  .nav{width:100%;border-right:0;border-bottom:1px solid var(--surface-border);padding-top:var(--ptah-space-2)}
+  .nav-list{flex-direction:row;overflow-x:auto}
+  .nav-item{flex:none}
+  .nav-item.child{margin-left:0}.nav-item.child::before{display:none}
+  .nav-item.child .nav-btn{padding-left:var(--nav-item-pl)}
+  .nav-foot{display:none}
+}
+.kv{display:grid;grid-template-columns:7rem 1fr;gap:.35rem 1rem;margin:0}
+</style>
+</head>
+<body>
+<div class="proto-bar" role="toolbar" aria-label="Prototype controls">
+  <div class="grp"><b>Theme</b>
+    <button class="seg" data-theme-btn="dark" aria-pressed="true">Dark</button>
+    <button class="seg" data-theme-btn="light" aria-pressed="false">Light</button></div>
+  <div class="grp"><b>Width</b>
+    <button class="seg" data-w="400" aria-pressed="false">Narrow 400</button>
+    <button class="seg" data-w="720" aria-pressed="false">Medium 720</button>
+    <button class="seg" data-w="1100" aria-pressed="true">Wide 1100</button></div>
+  <div class="grp"><b>Surface</b>
+    <button class="seg" data-s="A" aria-pressed="true">A Main agent</button>
+    <button class="seg" data-s="B" aria-pressed="false">B Connect flow</button>
+    <button class="seg" data-s="C" aria-pressed="false">C Discard</button>
+    <button class="seg" data-s="D" aria-pressed="false">D API key</button>
+    <button class="seg" data-s="E" aria-pressed="false">E Settings nav</button></div>
+</div>
+
+<main class="proto" id="proto">
+<p class="proto-note">Design prototype for TASK_2026_2307_1d64. Dashed frame = the Electron window content width. Chrome above the frame is prototype-only. Token names in the CSS match ptah-tokens.css and the ptah-glass / ptah-glass-light themes.</p>
+<div class="grp" id="state-bar" role="group" aria-label="States" style="display:flex;gap:.25rem;flex-wrap:wrap;font:var(--t-label)"></div>
+
+<div class="stage" id="stage">
+
+<!-- ======================= A ======================= -->
+<section class="surface" data-surface="A" aria-label="Main agent section" style="padding:var(--ptah-space-4);min-height:22rem;position:relative">
+  <div class="card">
+    <div class="ma" id="ma"></div>
+  </div>
+</section>
+
+<!-- ======================= B ======================= -->
+<section class="surface" data-surface="B" hidden aria-label="Connect provider flow">
+  <div class="drawer-stage">
+    <div class="page-stub">
+      <div class="page-head">
+        <h2 style="margin:0;font:var(--t-section)">Providers</h2><span style="flex:1"></span>
+        <button class="btn primary" id="b-connect" aria-describedby="b-connect-why">Connect provider</button>
+      </div>
+      <p class="muted" id="b-connect-why" hidden style="font:var(--t-hint);margin:.5rem 0 0;text-align:right">Provider setup is not available right now.</p>
+      <p class="muted" style="font:var(--t-hint)">The catalog modal is gone. The button, and the <code>more-providers</code> deep link, open the sidebar at step 1.</p>
+    </div>
+    <aside class="drawer" role="dialog" aria-label="Connect provider" id="b-drawer" hidden>
+      <header><h3>Connect provider</h3><button class="ibtn" aria-label="Close" id="b-close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></header>
+      <div class="body" id="b-body"></div>
+      <footer><button class="btn ghost" id="b-cancel">Cancel</button><button class="btn primary" aria-disabled="true">Next</button></footer>
+    </aside>
+  </div>
+</section>
+
+<!-- ======================= C ======================= -->
+<section class="surface" data-surface="C" hidden aria-label="Discard confirmation">
+  <div class="drawer-stage" id="c-stage">
+    <div class="page-stub"><p class="muted" style="font:var(--t-hint)">Dirty wizard (a key was typed). Close it with the X, Cancel, the backdrop, or Escape on the drawer.</p>
+      <p class="log" id="c-log" aria-live="polite">Log: drawer open.</p></div>
+    <aside class="drawer" role="dialog" aria-label="Connect provider" id="c-drawer">
+      <header><h3>Connect provider</h3><button class="ibtn" aria-label="Close" id="c-close"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 6 6 18M6 6l12 12"/></svg></button></header>
+      <div class="body"><div class="steps">Step 2 of 4 - Credentials</div>
+        <div class="field"><label>API key</label><input type="password" value="sk-ant-demo-123" aria-label="API key"></div></div>
+      <footer><button class="btn ghost" id="c-cancel">Cancel</button><button class="btn primary">Next</button></footer>
+    </aside>
+    <div class="scrim" id="c-scrim" hidden>
+      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="c-title" id="c-modal">
+        <h4 id="c-title">Discard this setup?</h4>
+        <p>Your credential, verification, and model choices are not saved. Nothing was written to disk.</p>
+        <div class="acts"><button class="btn ghost" id="c-keep">Keep editing</button><button class="btn danger" id="c-discard">Discard</button></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ======================= D ======================= -->
+<section class="surface" data-surface="D" hidden aria-label="API key field" style="padding:var(--ptah-space-4)">
+  <div style="display:grid;gap:1.25rem;max-width:26rem">
+    <div class="card" style="background:var(--b2)">
+      <div class="field" id="d-field">
+        <label for="d-input">API key</label>
+        <input id="d-input" type="password" value="sk-ant-api03-EXAMPLE" autocomplete="off" spellcheck="false">
+        <button class="ibtn" id="d-eye" type="button" aria-pressed="false" aria-label="Show API key" data-testid="wizard-key-visibility"></button>
+      </div>
+      <p class="log" id="d-log" aria-live="polite">Hidden. The button is in the field's trailing slot (ptahFieldTrailing), xs icon button, 24px target.</p>
+    </div>
+    <p class="muted" style="font:var(--t-hint);margin:0">Same markup in all four copies of the wizard (steps: API key, token, gateway key, custom endpoint key). Press the icon, or Tab to it and press Space/Enter.</p>
+  </div>
+</section>
+
+<!-- ======================= E ======================= -->
+<section class="surface" data-surface="E" hidden aria-label="Settings sidebar">
+  <div class="set">
+    <nav class="nav" aria-label="Settings sections">
+      <div class="nav-list" id="e-list"></div>
+      <div class="sr-only" id="e-adv-why">Membership needs attention</div>
+      <div class="nav-foot" id="e-foot"></div>
+    </nav>
+    <div class="set-main"><h2 style="margin:0;font:var(--t-section)" id="e-title">Providers</h2><p class="muted" style="font:var(--t-hint);margin:0">Content area is a stub. Resize with the Width buttons: below 640px container width the nav becomes the existing horizontal strip and the footer is hidden by the layout (existing behaviour).</p></div>
+  </div>
+</section>
+
+</div>
+</main>
+
+<script>
+const $=(s,r=document)=>r.querySelector(s),$$=(s,r=document)=>[...r.querySelectorAll(s)];
+const I={
+ chev:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>',
+ right:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>',
+ eye:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/></svg>',
+ eyeoff:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 3l18 18M10.6 5.1A10 10 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.2 4M6.5 6.6A16 16 0 0 0 2 12s3.5 7 10 7a9.7 9.7 0 0 0 4.2-.9M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>',
+ shield:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 3 4 6v6c0 5 3.4 8 8 9 4.6-1 8-4 8-9V6l-8-3Z"/><path d="m9 12 2 2 4-4"/></svg>',
+ alert:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 9v4m0 4h.01M10.3 3.9 2 18a2 2 0 0 0 1.7 3h16.6A2 2 0 0 0 22 18L13.7 3.9a2 2 0 0 0-3.4 0Z"/></svg>',
+ check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path d="m5 12 5 5 9-10"/></svg>',
+ layers:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="m12 3 9 5-9 5-9-5 9-5Zm-9 9 9 5 9-5"/></svg>',
+ plug:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M9 2v6m6-6v6M6 8h12v4a6 6 0 0 1-12 0V8Zm6 10v4"/></svg>',
+ grid:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 3h7v7H3zM14 3h7v7h-7zM3 14h7v7H3zM14 14h7v7h-7z"/></svg>',
+ gear:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M12 2v3m0 14v3M2 12h3m14 0h3M5 5l2 2m10 10 2 2M19 5l-2 2M7 17l-2 2"/></svg>',
+ mic:'<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>',
+ server:'<svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/></svg>'
+};
+const state={theme:'dark',w:1100,s:'A',A:'operational',B:'default',C:'-',D:'-',E:'providers',Efoot:'local'};
+const STATES={A:['operational','attention','checking','loading','error','empty'],
+ B:['default','search','loading','load-error','no-match','connect-disabled'],
+ C:['-'],D:['-'],E:['providers','matrix','advanced','foot-custom']};
+function render(){
+  document.documentElement.dataset.themeMode=state.theme;document.documentElement.dataset.theme=state.theme==='dark'?'ptah-glass':'ptah-glass-light';
+  $('#stage').style.setProperty('--stage-w',state.w+'px');
+  $$('[data-theme-btn]').forEach(b=>b.setAttribute('aria-pressed',b.dataset.themeBtn===state.theme));
+  $$('[data-w]').forEach(b=>b.setAttribute('aria-pressed',+b.dataset.w===state.w));
+  $$('[data-s]').forEach(b=>b.setAttribute('aria-pressed',b.dataset.s===state.s));
+  $$('.surface').forEach(s=>s.hidden=s.dataset.surface!==state.s);
+  const sb=$('#state-bar');sb.innerHTML='';
+  if(STATES[state.s].length>1){sb.insertAdjacentHTML('beforeend','<b class="muted" style="margin-right:.25rem">State</b>');
+   STATES[state.s].forEach(n=>{const b=document.createElement('button');b.className='seg';b.textContent=n;b.setAttribute('aria-pressed',state[state.s]===n);b.onclick=()=>{state[state.s]=n;render()};sb.appendChild(b)})}
+  ({A:renderA,B:renderB,C:()=>{},D:renderD,E:renderE})[state.s]();
+}
+$$('[data-theme-btn]').forEach(b=>b.onclick=()=>{state.theme=b.dataset.themeBtn;render()});
+$$('[data-w]').forEach(b=>b.onclick=()=>{state.w=+b.dataset.w;render()});
+$$('[data-s]').forEach(b=>b.onclick=()=>{state.s=b.dataset.s;render()});
+
+/* ---- A ---- */
+function renderA(){
+  const s=state.A;
+  const change=(label='Change')=>`<button class="btn ghost" id="ma-change" aria-haspopup="dialog" aria-expanded="false" aria-label="${label==='Change'?'Change main agent: provider, model and effort':'Choose main agent provider'}" data-testid="routing-node-action">${label}${I.chev}</button>`;
+  const dot=s==='attention'||s==='error'?'var(--state-need)':(s==='operational'?'var(--state-done)':'var(--bcm)');
+  const head=`<div class="ma-head"><span aria-hidden="true" style="width:.5rem;height:.5rem;border-radius:9999px;background:${dot}"></span><h2 id="ma-h">Main agent</h2>
+   <span class="badge" data-testid="scope-badge">Applies to all workspaces</span><span class="grow"></span>${change(s==='empty'?'Choose provider':'Change')}</div>`;
+  let body='';
+  if(s==='loading')body=`<div class="ma-tile" aria-busy="true"><div class="ma-l1"><span class="mark skel" style="border:0"></span><span class="skel" style="width:9rem;height:1rem"></span><span class="skel" style="width:5rem;height:1.25rem"></span></div><div class="ma-l2"><span class="skel" style="width:8rem;height:1.25rem"></span><span class="skel" style="width:5rem;height:1.25rem"></span></div></div>`;
+  else if(s==='error')body=`<div class="ma-alert" role="alert">${I.alert.replace('<svg','<svg width="16" height="16" style="color:var(--state-need)"')}<span style="flex:1;min-width:10rem">Main-agent route unavailable.</span><button class="btn ghost sm" data-testid="routing-node-retry">Retry</button></div>`;
+  else if(s==='empty')body=`<div class="ma-empty"><span class="mark" aria-hidden="true">?</span><div><div style="font:var(--t-group);font-weight:600">No main agent yet</div><div class="muted" style="font:var(--t-hint)">Choose a provider to start the main agent.</div></div></div>`;
+  else{
+    const badge={operational:'<span class="badge ok" role="status" data-testid="main-agent-route-status">'+I.check+'Operational</span>',
+      attention:'<span class="badge warn" role="status" data-testid="main-agent-route-status">'+I.alert+'Needs attention</span>',
+      checking:'<span class="badge idle" role="status" data-testid="main-agent-route-status"><span class="dot"></span>Checking...</span>'}[s];
+    body=`<div class="ma-tile ${s==='attention'?'attn':''}" data-testid="main-agent-values" aria-label="Main agent settings" role="group">
+     <div class="ma-l1"><span class="mark" aria-hidden="true">An</span><span class="name" data-testid="routing-main-provider">Anthropic (Claude subscription)</span>${badge}</div>
+     <div class="ma-l2"><span class="chip" data-testid="routing-main-model-row"><span class="k">Model</span><span class="v mono" data-testid="routing-main-model">claude-sonnet-4-5</span></span><span class="chip" data-testid="routing-main-effort-row"><span class="k">Effort</span><span class="v" data-testid="routing-node-footer">High</span></span></div>
+     ${s==='attention'?'<div class="muted" style="font:var(--t-hint);padding-left:calc(2rem + var(--ptah-space-3))">The provider needs a new sign-in or key. Use Change to pick another provider.</div>':''}</div>`;
+  }
+  $('#ma').innerHTML=head+body+`<div class="pop" id="ma-pop" role="dialog" aria-label="Change main agent" hidden><b style="font:var(--t-group)">Change main agent</b><p class="muted" style="font:var(--t-hint);margin:.35rem 0 0">Existing reassign popover (Provider connection, Model, Effort, Save to). Unchanged by this task apart from the select chevron fix (item 1).</p></div>`;
+  const btn=$('#ma-change'),pop=$('#ma-pop');
+  btn.onclick=()=>{pop.hidden=!pop.hidden;btn.setAttribute('aria-expanded',!pop.hidden)};
+}
+
+/* ---- B ---- */
+const NOT_CONNECTED=[['Anthropic (Claude subscription)','An','Sign in with Claude','signin','Use your Claude subscription',1],['OpenRouter','Or','API key','', 'One key for many hosted models',1],['Z.AI','Zi','API key','','GLM models through the Z.AI gateway',1],['Moonshot (Kimi)','Mo','API key','','Kimi models from Moonshot',0],['GitHub Copilot','Gh','Sign in with GitHub','signin','Models included with your Copilot plan',1]];
+const CONNECTED=[['Claude API','Ca','API key','','Anthropic models with your own API key',1],['Gemini','Ge','API key','','Google Gemini models',1]];
+/* one native radio group: unconfigured first, then connected rows with a Connected badge */
+function opt(n,m,sum,signin,desc,models,connected,checked){
+  return `<div class="opt ${connected?'connected':''}" data-testid="wizard-provider-option"><label><input type="radio" name="wz" ${checked?'checked':''}><span class="mark" aria-hidden="true">${m}</span><span class="t"><b>${n}</b><span>${sum}</span><span>${desc}${models?' &middot; Default models available':''}</span></span></label>
+   ${connected?'<span class="badge ok">'+I.check+'Connected</span>':''}${signin&&!connected?`<button class="btn ghost sm" type="button" aria-label="Sign in to ${n}" data-testid="wizard-provider-signin" data-signin>Sign in</button>`:''}</div>`;
+}
+function renderB(){
+  const s=state.B,d=$('#b-drawer'),connectBtn=$('#b-connect');
+  const disabled=s==='connect-disabled';
+  connectBtn.setAttribute('aria-disabled',disabled);$('#b-connect-why').hidden=!disabled;
+  connectBtn.onclick=()=>{if(connectBtn.getAttribute('aria-disabled')==='true')return;d.hidden=false;$('#b-body input').focus()};
+  $('#b-close').onclick=$('#b-cancel').onclick=()=>{d.hidden=true;connectBtn.focus()};
+  d.hidden=disabled;
+  const q=s==='search'?'open':s==='no-match'?'zzz':'';
+  let list='';
+  const match=x=>!q||x[0].toLowerCase().includes(q);
+  const nc=NOT_CONNECTED.filter(match),co=CONNECTED.filter(match);
+    let notice='';
+  if(s==='load-error')notice=`<div class="ma-alert" role="alert">${I.alert.replace('<svg','<svg width="16" height="16" style="color:var(--state-need)"')}<span style="flex:1;min-width:9rem">Connected providers could not be loaded. All providers are listed.</span><button class="btn ghost sm" data-testid="wizard-connections-retry">Retry</button></div>`;
+  
+  const all=(s==='load-error');
+  const O=(r,conn,chk)=>opt(r[0],r[1],r[2],r[3],r[4],r[5],conn,chk);
+  const skel=[0,1,2,3].map(()=>'<div class="opt" aria-hidden="true"><span class="mark skel" style="border-radius:9999px"></span><span class="t" style="flex:1;gap:.35rem"><span class="skel" style="width:40%"></span><span class="skel" style="width:70%"></span></span></div>').join('');
+  const rows=s==='loading'?skel:all?[...NOT_CONNECTED,...CONNECTED].map(r=>O(r,false,false)).join(''):nc.map((r,i)=>O(r,false,i===0&&s==='default')).join('')+co.map(r=>O(r,true,false)).join('');
+  const empty=(!all&&s!=='loading'&&!nc.length&&!co.length)?`<p class="muted" style="font:var(--t-hint)" data-testid="wizard-provider-no-match">No providers match "${q}".</p><button class="btn ghost sm" data-testid="wizard-clear-search">Clear search</button>`:'';
+  $('#b-body').innerHTML=`<div class="steps">Step 1 of 4</div><h3 style="margin:0;font:var(--t-group);font-weight:600">Provider</h3>
+   <div class="field" style="height:var(--ptah-control-h-field)"><label for="b-s">Search providers</label><input id="b-s" value="${q}" data-testid="wizard-provider-search"></div>${notice}
+   <fieldset class="opts" data-testid="wizard-provider-options"><legend>Choose a provider</legend>${rows}${empty}</fieldset>
+   <div class="opt" data-testid="wizard-provider-custom-option"><label><input type="radio" name="wz"><span class="mark" aria-hidden="true" style="background:transparent">${I.server}</span><span class="t"><b>Custom endpoint</b><span>OpenAI- or Anthropic-compatible self-hosted endpoint</span></span></label></div>
+   <p class="muted" style="font:var(--t-hint);margin:0" id="b-status" role="status">${s==='loading'?'Checking connected providers...':''}</p><p class="muted" style="font:var(--t-hint);margin:0">Rows with a Sign in button skip the key step: sign-in runs the provider's own flow and then the wizard closes.</p>`;
+  $('#b-body').querySelectorAll('[data-signin]').forEach(x=>x.onclick=()=>{d.hidden=true;connectBtn.focus()}); /* sign-in: closes the wizard, hands off to sign-in UI (stub: focus returns to Connect) */
+}
+
+/* ---- C ---- */
+(function(){
+  const drawer=$('#c-drawer'),scrim=$('#c-scrim'),log=$('#c-log');let asker=null;
+  const ask=el=>{asker=el;scrim.hidden=false;$('#c-keep').focus();log.textContent='Log: modal open, focus on Keep editing.'};
+  const keep=why=>{scrim.hidden=true;asker&&asker.focus();log.textContent='Log: '+why+' -> kept editing; drawer still open; focus returned to '+(asker?asker.id||asker.tagName:'?')+'.'};
+  $('#c-close').onclick=e=>ask(e.currentTarget);$('#c-cancel').onclick=e=>ask(e.currentTarget);
+  $('#c-keep').onclick=()=>keep('Keep editing');
+  $('#c-discard').onclick=()=>{scrim.hidden=true;drawer.hidden=true;log.textContent='Log: Discard -> draft cleared, drawer closed.';setTimeout(()=>{drawer.hidden=false;log.textContent+=' (prototype re-opens the drawer)'},1200)};
+  scrim.addEventListener('click',e=>{if(e.target===scrim)keep('backdrop click')});
+  document.addEventListener('keydown',e=>{
+    if(e.key!=='Escape'||state.s!=='C')return;
+    if(!scrim.hidden){e.stopPropagation();e.preventDefault();keep('Escape on the modal')}
+    else if(!drawer.hidden&&drawer.contains(document.activeElement)){ask(document.activeElement)}
+  },true);
+  // focus trap inside modal
+  $('#c-modal').addEventListener('keydown',e=>{if(e.key!=='Tab')return;const f=$$('button',$('#c-modal'));const i=f.indexOf(document.activeElement);
+    if(e.shiftKey&&i===0){e.preventDefault();f[f.length-1].focus()}else if(!e.shiftKey&&i===f.length-1){e.preventDefault();f[0].focus()}});
+})();
+
+/* ---- D ---- */
+function renderD(){
+  const eye=$('#d-eye'),inp=$('#d-input');
+  const set=on=>{inp.type=on?'text':'password';eye.setAttribute('aria-pressed',on);eye.innerHTML=on?I.eyeoff:I.eye;$('#d-log').textContent=(on?'Visible':'Hidden')+'. Fixed accessible name "Show API key", aria-pressed="'+on+'".'};
+  eye.onclick=()=>set(inp.type==='password');set(false);
+}
+
+/* ---- E ---- */
+function renderE(){
+  const s=state.E==='foot-custom'?'providers':state.E;
+  const item=(id,label,icon,o={})=>`<div class="nav-item ${o.child?'child':''}"><button class="nav-btn" ${s===id?'aria-current="page"':''} ${o.inSection?'data-in-section="true"':''} ${o.mark?'aria-describedby="e-adv-why" title="'+o.mark+'"':''}>${o.child?'':icon}<span class="lbl">${label}</span>${o.mark?'<span class="mark-slot" aria-hidden="true"><i></i></span>':''}</button></div>`;
+  $('#e-list').innerHTML=item('providers','Providers',I.plug)+item('context','Context Management',I.layers,{inSection:s==='matrix'})+item('matrix','Decision matrix','',{child:true})+item('advanced','Advanced',I.gear,{mark:'Membership needs attention'})+item('search','Search &amp; Voice',I.mic);
+  $('#e-title').textContent={providers:'Providers',matrix:'Decision matrix',advanced:'Advanced'}[s]||'Settings';
+  const custom=state.E==='foot-custom';
+  $('#e-foot').innerHTML=`<dl class="ctx" data-testid="settings-context" title="/home/dev/ptah-extension"><dt>Workspace</dt><dd>ptah-extension</dd><dt>App</dt><dd>v1.4.2</dd></dl>`+
+   (custom?`<div class="local" data-testid="custom-provider-security-copy"><span class="badge warn" style="padding:0" aria-label="Custom endpoint"><span class="dot" style="margin-top:.2rem"></span></span><b style="color:var(--state-need)">Custom endpoint</b><p>Your own endpoint. Credentials and prompts go from this machine to <b>gateway.example.com</b>, a host you added. Ptah does not operate, vet, or monitor it, and no Ptah server is involved either way.</p></div>`
+   :`<div class="local" data-testid="builtin-provider-security-copy"><span role="img" aria-label="Local">${I.shield}</span><b>Runs 100% locally</b><p>Credentials go straight from this machine to your provider. No proxies, no Ptah servers.</p></div>`);
+  $$('#e-list .nav-btn').forEach(b=>b.onclick=()=>{const t=b.querySelector('.lbl').textContent;state.E={Providers:'providers','Decision matrix':'matrix',Advanced:'advanced'}[t]||state.E;if(state.E==='foot-custom')state.E='providers';render()});
+}
+render();
+</script>
+</body>
+</html>

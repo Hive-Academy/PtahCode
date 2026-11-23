@@ -69,7 +69,7 @@ describe('MainAgentSectionComponent', () => {
     expect(element.querySelector('ptah-surface-section, [data-glass-surface="chrome"]')).toBeNull();
     expect(query('routing-node-title')?.tagName.toLowerCase()).toBe('h2');
     expect(query('routing-node-title')?.textContent?.trim()).toBe('Main agent');
-    expect(query('main-agent-route-status')?.getAttribute('role')).toBe('status');
+    expect(query('routing-node-status')?.getAttribute('role')).toBe('status');
     expect(query('main-agent-route-status')?.textContent?.trim()).toBe('Operational');
     state.route.set(ready({ ...ROUTE, ready: false }));
     fixture.detectChanges();
@@ -81,15 +81,20 @@ describe('MainAgentSectionComponent', () => {
     expect(query('routing-main-model')?.textContent?.trim()).toBe('Default (chosen by Claude)');
     expect(query('routing-main-model')?.classList.contains('font-mono')).toBe(false);
     expect(query('routing-node-footer')?.textContent?.trim()).toBe('medium');
-    // One description list: the rows Provider, Model and Effort, in that order.
-    const list = element.querySelector('[data-ptah-pattern="description-list"] dl');
-    expect(Array.from(list?.querySelectorAll('dt') ?? []).map((term) => term.textContent?.trim())).toEqual(['Provider', 'Model', 'Effort']);
-    expect(list?.contains(query('routing-node-footer'))).toBe(true);
-    expect(query('routing-node-status')?.textContent?.trim()).toBe('Active');
+    const tile = query('main-agent-values');
+    const providerRow = query('routing-main-provider-row');
+    expect(providerRow?.querySelector('ptah-provider-mark')).not.toBeNull();
+    expect(providerRow?.contains(query('routing-node-status'))).toBe(true);
+    for (const [row, label] of [['routing-main-model-row', 'Model'], ['routing-main-effort-row', 'Effort']]) {
+      const chip = query(row);
+      expect(tile?.contains(chip)).toBe(true);
+      expect(chip?.getAttribute('data-tone')).toBe('neutral');
+      expect(chip?.firstElementChild?.textContent).toBe(label);
+    }
+    expect(query('routing-node-status')?.getAttribute('data-assignment')).toBe('active');
     const badges = query('routing-node-badges');
-    expect(badges?.contains(query('routing-node-status'))).toBe(true);
     expect(badges?.contains(query('badge'))).toBe(true);
-    // Batch 52.6: the title is one line and never shrinks; the pill and the badges are items of the same wrapping
+    // Batch 52.6: the title is one line and never shrinks; the scope badges are items of the same wrapping
     // row (the badge wrapper is display: contents), so a badge that does not fit moves under the title, whole.
     expect(badges?.className).toContain('contents');
     expect(badges?.parentElement?.className).toContain('flex-wrap');
@@ -127,53 +132,56 @@ describe('MainAgentSectionComponent', () => {
     state.route.set(ready({ ...ROUTE, ready: false }));
     fixture.detectChanges();
     expect(query('routing-node-status')?.textContent?.trim()).toBe('Needs attention');
+    expect(query('main-agent-route-status')?.getAttribute('data-tone')).toBe('warn');
     state.route.set(ready({ ...ROUTE, driverProviderId: null }));
     fixture.detectChanges();
     expect(query('routing-node-status')?.textContent?.trim()).toBe('Not set');
+    expect(query('main-agent-route-status')?.getAttribute('data-tone')).toBe('neutral');
     expect(query('routing-node-main-agent')?.textContent).toContain('Choose a provider to start the main agent.');
   });
 
-  const changeButton = () => Array.from(element.querySelectorAll<HTMLButtonElement>('button'))
-    .filter((button) => button.textContent?.trim() === 'Change main agent');
-
-  it('"Change main agent" is one normal ptahButton (no stretched link), named for provider, model and effort', () => {
-    const buttons = changeButton();
-    expect(buttons).toHaveLength(1);
-    const [change] = buttons;
-    expect(change.getAttribute('aria-label')).toBe('Change main agent: provider, model and effort');
-    expect(change.getAttribute('data-testid')).toBe('routing-node-action');
-    expect(change.hasAttribute('data-ptah-button')).toBe(true);
-    expect(change.className).not.toMatch(/after:/);
-    change.click();
+  it('places the ghost Change button in the header and emits the existing reassign output', () => {
+    const change = query('routing-node-action');
+    expect(element.querySelectorAll('[data-testid="routing-node-action"]')).toHaveLength(1);
+    expect(change?.textContent?.trim()).toBe('Change');
+    expect(change?.getAttribute('aria-label')).toBe('Change main agent: provider, model and effort');
+    expect(change?.getAttribute('aria-haspopup')).toBe('dialog');
+    expect(change?.getAttribute('aria-expanded')).toBe('false');
+    expect(change?.hasAttribute('data-ptah-button')).toBe(true);
+    expect(change?.parentElement).toBe(query('routing-node-badges')?.parentElement);
+    expect(query('main-agent-values')?.contains(change)).toBe(false);
+    change?.click();
     expect(fixture.componentInstance.reassigned).toBe(1);
   });
 
-  it('puts the change button in the same container as the provider value, directly after it (not in a far-right wrapper)', () => {
-    const [change] = changeButton();
-    const provider = query('routing-main-provider');
-    expect(change.parentElement).toBe(provider?.parentElement);
-    expect(provider?.nextElementSibling).toBe(change);
-    expect(change.closest('[data-ptah-description-actions]')).toBeNull();
-    expect(change.closest('[data-testid="routing-main-provider-row"]')).not.toBeNull();
-    expect(element.querySelector('.ml-auto')).toBeNull();
-  });
-
-  it('keeps the change button when there is no provider, so the user can choose one', () => {
-    state.route.set(ready({ ...ROUTE, driverProviderId: null }));
+  it('offers Choose provider for an unresolved route', () => {
+    state.route.set(ready({ ...ROUTE, route: 'unresolved' }));
     fixture.detectChanges();
-    expect(changeButton()).toHaveLength(1);
-    expect(changeButton()[0].parentElement?.textContent).toContain('Choose a provider to start the main agent.');
+    const choose = query('routing-node-action');
+    expect(choose?.textContent?.trim()).toBe('Choose provider');
+    expect(choose?.getAttribute('aria-label')).toBe('Choose provider');
+    expect(query('routing-node-status')?.textContent?.trim()).toBe('Not set');
+    expect(query('routing-main-model-row')).toBeNull();
+    choose?.click();
+    expect(fixture.componentInstance.reassigned).toBe(1);
   });
 
-  it('a loading route shows the skeleton; a failed one offers Retry of the route read', () => {
+  it('keeps one live status through loading and error, and offers Retry on error', () => {
+    const status = query('routing-node-status');
     state.route.set(loading());
     fixture.detectChanges();
-    expect(query('routing-node-skeleton')).not.toBeNull();
-    expect(query('routing-node-main-agent')?.getAttribute('aria-busy')).toBe('true');
+    const skeleton = query('routing-node-skeleton');
+    expect(skeleton?.closest('[aria-busy="true"]')).not.toBeNull();
+    expect(status?.closest('[aria-busy="true"]')).toBeNull();
+    expect(query('routing-node-status')).toBe(status);
+    expect(status?.textContent?.trim()).toBe('Checking…');
     state.route.set(failed());
     fixture.detectChanges();
-    expect(query('routing-node-error')?.getAttribute('role')).toBe('alert');
-    expect(changeButton()).toHaveLength(1);
+    expect(query('routing-node-status')).toBe(status);
+    expect(status?.textContent?.trim()).toBe('');
+    expect(query('routing-node-error')?.querySelector('[role="alert"]')?.textContent).toContain('Main-agent route unavailable.');
+    expect(element.querySelectorAll('[role="alert"]')).toHaveLength(1);
+    expect(query('routing-node-action')?.getAttribute('aria-label')).toBe('Change main agent: provider, model and effort');
     query('routing-node-retry')?.click();
     expect(state.refreshRoute).toHaveBeenCalledTimes(1);
   });
