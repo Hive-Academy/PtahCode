@@ -6,6 +6,7 @@ import { PERSISTENCE_TOKENS, SqliteConnectionService } from '@ptah-extension/per
 import { TOKENS, type Logger } from '@ptah-extension/vscode-core';
 import type { ReviewQueueAttempt, ReviewQueueClaim, ReviewQueueHead } from '../review-queue.service';
 import type { IReviewRepository, ReviewAttemptRecord, ReviewStageRecord, ReviewStatusSyncRecord } from './review-repository.interface';
+import { NON_RETRYABLE_REVIEW_FAILURE_CODES } from '../review-failure-retry';
 import type { ReviewLaneUse } from '../lanes/review-lane.runner';
 
 /** Version of the `checkpoint:lane:<stage>` JSON document; `ReviewQueryRepository` reads it. */
@@ -250,6 +251,14 @@ export class SqliteReviewRepository implements IReviewRepository {
           WHERE (repo_id, pr_number, head_sha) IN
             (SELECT repo_id, pr_number, head_sha FROM review_attempts WHERE attempt_id = ? AND trigger = 'automatic')`)
           .run(ms(now) + 600_000, ms(now) + 1_800_000, ms(now) + 7_200_000, attemptId);
+        // The orchestrator saves the failure before release. A failure that every attempt repeats stops automatic retries.
+        const failure = z.object({ failure_code: z.string().nullable() }).safeParse(
+          db.prepare(`SELECT failure_code FROM review_attempts WHERE attempt_id = ?`).get(attemptId));
+        if (failure.success && NON_RETRYABLE_REVIEW_FAILURE_CODES.some((code) => code === failure.data.failure_code)) {
+          db.prepare(`UPDATE review_heads SET failure_count = MAX(failure_count, 3), next_eligible_at = NULL
+            WHERE (repo_id, pr_number, head_sha) IN
+              (SELECT repo_id, pr_number, head_sha FROM review_attempts WHERE attempt_id = ? AND trigger = 'automatic')`).run(attemptId);
+        }
       }
       return updated;
     })();

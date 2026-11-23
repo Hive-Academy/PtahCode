@@ -20,6 +20,10 @@ export class ReviewGitTimeoutError extends Error {
 export class ReviewGitHeadMissingError extends Error {
   constructor() { super('PR head commit is unavailable after fetch'); }
 }
+/** The baseline commit of an incremental diff is gone from the repository, for example after a force-push. */
+export class ReviewGitBaselineMissingError extends Error {
+  constructor() { super('Incremental diff baseline commit is unavailable'); }
+}
 export class ReviewGitWorktreeError extends Error {
   constructor(stderr: string) { super(`Detached worktree creation failed: ${sanitizeReviewFailureMessage(stderr).slice(0, 180)}`); }
 }

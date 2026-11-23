@@ -1,4 +1,4 @@
-import { ReviewWorktreeService } from './review-worktree.service';
+import { ReviewGitBaselineMissingError, ReviewWorktreeService } from './review-worktree.service';
 import { ReviewContextService } from './review-context.service';
 import { ReviewChecksService } from './review-checks.service';
 import { ReviewDependenciesService } from './review-dependencies.service';
@@ -18,6 +18,23 @@ describe('review exact SHA context', () => {
     expect(result.changedPaths).toEqual(['src/new.ts']);
     expect(runner.run).toHaveBeenCalledWith(repo, 'git',
       ['diff', '--no-ext-diff', '--no-renames', 'b'.repeat(40), 'a'.repeat(40), '--'], '/repo', 60_000, undefined);
+  });
+  it('reports a missing baseline only when the prior head commit is absent', async () => {
+    const failed: ReviewCommandResult = { exitCode: 128, stdout: '', stderr: 'bad object', timedOut: false };
+    const probe = (result: ReviewCommandResult): IReviewCommandRunner =>
+      ({ run: jest.fn(async (_repo, _cmd, args) => args[0] === 'rev-parse' ? result : failed) });
+    const diff = (runner: IReviewCommandRunner) =>
+      new ReviewContextService(runner).diffSince(repo, '/repo', 'b'.repeat(40), 'a'.repeat(40)).catch((e: unknown) => e);
+    const gone = probe({ exitCode: 1, stdout: '', stderr: '', timedOut: false });
+    expect(await diff(gone)).toBeInstanceOf(ReviewGitBaselineMissingError);
+    expect(gone.run).toHaveBeenCalledWith(repo, 'git', ['rev-parse', '--verify', '--quiet', `${'b'.repeat(40)}^{commit}`], '/repo', 60_000, undefined);
+    // The baseline exists, the repository fails to answer, or the probe is killed: all stay retryable.
+    for (const result of [ok('b'.repeat(40)), { exitCode: 128, stdout: '', stderr: 'fatal: bad object store', timedOut: false },
+      { exitCode: 1, stdout: '', stderr: 'error: unable to read', timedOut: false }, { exitCode: null, stdout: '', stderr: '', timedOut: false }]) {
+      const error = await diff(probe(result));
+      expect(error).not.toBeInstanceOf(ReviewGitBaselineMissingError);
+      expect(error).toMatchObject({ message: 'Incremental diff unavailable' });
+    }
   });
   const files: IReviewContextFiles = {
     mkdir: jest.fn(async () => undefined),

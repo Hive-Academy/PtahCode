@@ -191,6 +191,20 @@ describe('SqliteReviewRepository', () => {
     } finally { db.close(); }
   });
 
+  it('stops automatic retries of a head whose failure every attempt repeats', async () => {
+    const { db, repository } = setup();
+    try {
+      const first = await repository.enqueueDiscovered(head(1, 'a'), at(0));
+      await repository.claimNext('owner', at(1), at(100));
+      await repository.saveFailure(first.attemptId, { stage: 'context', code: 'diff-too-large', message: "Diff exceeds GitHub's 20,000-line limit" });
+      expect(await repository.release(first.attemptId, 'owner', 'failed', at(2))).toBe(true);
+      expect(db.prepare('SELECT failure_count, next_eligible_at FROM review_heads').get()).toEqual({ failure_count: 3, next_eligible_at: null });
+      expect(await repository.enqueueDiscovered(head(1, 'a'), at(10_000_000))).toMatchObject({ skipped: true });
+      const manual = await repository.enqueueManual(head(1, 'a'), 'manual-retry', at(10_000_001));
+      expect((await repository.claimNext('owner', at(10_000_002), at(20_000_000)))?.attemptId).toBe(manual.attemptId);
+    } finally { db.close(); }
+  });
+
   it('records a draft head without an attempt and enqueues it when it becomes eligible', async () => {
     const { db, repository } = setup();
     try {

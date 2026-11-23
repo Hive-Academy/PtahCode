@@ -240,6 +240,14 @@ describe('ReviewOrchestratorService', () => {
     expect(f.publicationRun).not.toHaveBeenCalled();
     expect(f.release).toHaveBeenCalledWith(claim.attemptId, 'worker', 'partial');
   });
+  it.each([['diff-truncated', 'partial'], ['diff-complete', 'succeeded']] as const)('releases a run with %s coverage as %s', async (coverage, status) => {
+    const f = fixture();
+    f.contextRun.mockResolvedValue({ ...contextValue, coverage: [coverage] });
+    f.triageRun.mockResolvedValue({ status: 'completed', family: 'codex', output: { schemaVersion: 1, headSha: sha, findings: [], coverage: [] } });
+    await f.coordinator.drain('worker', Date.now() + 1000);
+    expect(f.publicationRun).toHaveBeenCalled();
+    expect(f.release).toHaveBeenCalledWith(claim.attemptId, 'worker', status);
+  });
   it('polls on startup only when discovery is at least 48 hours old', async () => {
     const f = fixture();
     expect(await f.coordinator.startupPoll(Date.now() - 47 * 60 * 60 * 1000)).toBe(0);

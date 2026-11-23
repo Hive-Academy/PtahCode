@@ -3,7 +3,7 @@ import { inject, injectable } from 'tsyringe';
 import { z } from 'zod';
 import type { RepoIdentity } from '@ptah-extension/review-contracts';
 import { type IReviewCommandRunner, REVIEW_CONTEXT_TOKENS, ReviewRelativePathSchema, ReviewShaSchema } from './review-context.ports';
-import { insideRoot, ReviewGitTimeoutError } from './review-worktree.service';
+import { insideRoot, ReviewGitBaselineMissingError, ReviewGitTimeoutError } from './review-worktree.service';
 
 const SymbolSchema = z.string().regex(/^[A-Za-z_$][\w$]{0,127}$/);
 const ChangedFileSchema = z.array(ReviewRelativePathSchema).max(5000);
@@ -23,7 +23,17 @@ export class ReviewContextService {
     if (signal?.aborted) throw new Error('Review context aborted');
     const result = await this.commands.run(repo, 'git', ['diff', '--no-ext-diff', '--no-renames', previousHead, head, '--'], src, timeoutMs, signal);
     if (result.timedOut) throw new ReviewGitTimeoutError();
-    if (result.unavailable || result.exitCode !== 0) throw new Error('Incremental diff unavailable');
+    if (result.unavailable) throw new Error('Incremental diff unavailable');
+    if (result.exitCode !== 0) {
+      // Only a confirmed missing baseline is permanent; any other git failure stays a plain, retryable error.
+      // `rev-parse --verify --quiet` exits 1 with no output only when the object is absent; repository and
+      // object-store errors exit 128 or print, and a signal-terminated probe has no exit code.
+      const present = await this.commands.run(repo, 'git', ['rev-parse', '--verify', '--quiet', `${previousHead}^{commit}`], src, timeoutMs, signal);
+      if (present.timedOut) throw new ReviewGitTimeoutError();
+      if (!present.unavailable && present.exitCode === 1 && !present.stdout.trim() && !present.stderr.trim())
+        throw new ReviewGitBaselineMissingError();
+      throw new Error('Incremental diff unavailable');
+    }
     const changedPaths = ChangedFileSchema.parse([...result.stdout.matchAll(/^diff --git a\/.+? b\/(.+)$/gm)].map((match) => match[1]));
     for (const path of changedPaths) if (!insideRoot(src, resolve(src, path))) throw new Error('Changed path escapes source');
     return { patch: result.stdout, changedPaths };
