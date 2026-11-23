@@ -450,6 +450,7 @@ describe('buildStatsLimitViewModel', () => {
         'lanesCount',
         'planTiles',
         'providerLimits',
+        'sessionProviderAccountId',
         'sessionProviderLabel',
         'subtotal',
       ]);
@@ -1215,5 +1216,47 @@ describe('inspector provider grouping', () => {
       laneRuns: [run({ modelScope: 'opus' }), run({ modelScope: 'sonnet' })],
     }));
     expect(vm.providerLimits[0]).toMatchObject({ windows: [], message: 'Multiple scopes · Usage unknown' });
+  });
+});
+
+describe('inspector provider states', () => {
+  it('projects a trimmed group or null for the same window on older and newer snapshots', () => {
+    const ungrouped = planWindow({ label: 'Gemini models 5-hour' });
+    const grouped = { ...ungrouped, group: ' Gemini models ' };
+    for (const [window, group] of [[ungrouped, null], [grouped, 'Gemini models']] as const) {
+      const vm = buildStatsLimitViewModel(input({
+        owners: [snapshot(CLAUDE_A, { windows: [window] })], laneRuns: [run()],
+      }));
+      expect(vm.planTiles[0].window).toMatchObject({ group, label: ungrouped.label });
+      expect(vm.providerLimits[0].windows[0].window).toMatchObject({ group, label: ungrouped.label });
+    }
+  });
+
+  it('uses the typed signed-out reason in the plan tile, provider and lane note', () => {
+    const grok = owner('grok', 'account', 'aaaaaaaaaaaaaaaa', 'Grok account');
+    const signedOut = snapshot(grok, { status: 'no-usage-source', statusReason: 'cli-not-signed-in', windows: [] });
+    const reason = 'Sign in to the Grok CLI (run grok login)';
+    const lane = run({ quotaOwner: grok, cli: 'grok', cliLabel: 'Grok' });
+    const session = buildStatsLimitViewModel(input({ sessionOwnerKey: grok.key, owners: [signedOut], laneRuns: [lane] }));
+    expect(session.planTiles[0].value).toBe(reason);
+    expect(session.providerLimits[0]).toMatchObject({ message: reason, windows: [] });
+    const other = buildStatsLimitViewModel(input({ owners: [snapshot(CLAUDE_A), signedOut], laneRuns: [lane] }));
+    expect(other.inspectorRuns[0].notes).toContain(reason);
+  });
+
+  it.each(['stale', 'reset-invalidated'] as const)('suppresses the rail and dock limit cue for %s 100%%', state => {
+    const window = planWindow({
+      used: { kind: 'percent', percent: 100 },
+      ...(state === 'reset-invalidated' && { observedAt: NOW - 2 * MIN, resetsAt: NOW - MIN }),
+    });
+    const vm = buildStatsLimitViewModel(input({
+      owners: [snapshot(CLAUDE_A, { status: state === 'stale' ? 'stale' : 'available', windows: [window] })],
+      laneRuns: [run()],
+    }));
+    expect(vm.indicator).toBeUndefined();
+    expect(vm.providerLimits[0].indicator).toBeUndefined();
+    expect(vm.planTiles.find(tile => tile.kind === 'window')).toMatchObject({
+      tone: 'neutral', window: { state: state === 'stale' ? 'aged' : 'reset-usage-unknown' },
+    });
   });
 });

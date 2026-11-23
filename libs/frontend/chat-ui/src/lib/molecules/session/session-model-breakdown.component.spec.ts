@@ -146,3 +146,32 @@ describe('SessionModelBreakdownComponent', () => {
     expect(cells[0].textContent?.trim()).toBe('$38.00');
   });
 });
+
+describe('SESSION model scope', () => {
+  it.each([
+    [{}, 'Reported'],
+    [{ costBasis: 'estimated' }, 'Estimated'],
+    [{ costBasis: 'covered-by-subscription' }, 'Covered by subscription'],
+    [{ pricingCoverage: 'partial' }, 'Partial pricing'],
+    [{ totalCost: null, costUnavailableReason: 'rate-missing' }, 'Not priced'],
+  ] satisfies Array<[Partial<SessionStatsEntry>, string]>)('names the SDK cost basis for %j', (patch, label) => {
+    TestBed.configureTestingModule({
+      imports: [SessionModelBreakdownComponent],
+      providers: [{ provide: ModelStateService, useValue: { availableModels: signal([]) } }],
+    });
+    const fixture = TestBed.createComponent(SessionModelBreakdownComponent);
+    fixture.componentRef.setInput('snapshot', { ...SNAPSHOT, ...patch, modelUsageList: [] });
+    const tokens = {
+      id: 'tokens', sdkLabel: '14.9M', cliLabel: '—', sourceText: 'SDK subtotal: 14,900,000 tokens',
+      reported: 0, laneCount: 0,
+    };
+    fixture.componentRef.setInput('sources', [tokens, { ...tokens, id: 'cost', sdkLabel: '$38.18' }]);
+    fixture.detectChanges();
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.textContent).toContain('SDK scope — orchestrator and SDK subagents, no CLI lanes');
+    expect(root.textContent).toContain('SDK subtotal');
+    expect(root.textContent).toMatch(/Cost basis\s*/);
+    expect(root.querySelector('dl > div:last-child dd')?.textContent?.trim()).toBe(label);
+    expect(root.querySelector('[data-testid="model-usage-total"]')?.textContent).toContain('Cache read');
+  });
+});

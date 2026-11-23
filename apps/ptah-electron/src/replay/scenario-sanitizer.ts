@@ -288,6 +288,7 @@ export const DEFAULT_ALLOWED_RPC_METHODS: ReadonlySet<string> = new Set<string>(
     'diagnostics:go-vet-consent-get',
     'tasks:list',
     'tasks:get',
+    'tasks:getDigest',
     'tasks:getArtifact',
     'tasks:readFolderMarkdown',
     'tasks:listFolderEntries',

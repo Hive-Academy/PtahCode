@@ -1,3 +1,4 @@
+import { formatDuration as clockDuration, type PtahStatAccuracy } from '@ptah-extension/ui';
 import { trustedContextWindow, type SessionBudgetState, type SessionStatsEntry } from '@ptah-extension/shared';
 import type { LiveModelStats } from './session-stats-summary.component';
 import type { StatsLimitViewModel } from './plan-limits/stats-limit-view-model.types';
@@ -5,6 +6,19 @@ import type { SessionLimitSummary } from './plan-limits/session-limit-summary';
 import { budgetTooltip, costTooltip, tokensTooltip } from './session-budget-format';
 import { formatCost, formatDuration, formatTokens } from './session-stats-format';
 import { costBasisLabel } from '../../atoms/cost-badge.component';
+
+import { formatUsageCost, formatUsageTokens, usageDetailsText } from './session-usage-format';
+import { sdkContribution, sessionTotal, type UsageMetric, type UsageState, type UsageTotal } from './session-usage-totals';
+
+export type SessionUsageTotals = Readonly<Record<UsageMetric, UsageTotal>>;
+
+export const USAGE_ACCURACY: Record<UsageState, PtahStatAccuracy> = {
+  exact: 'exact',
+  unknown: 'exact',
+  estimate: 'approximate',
+  'lower-bound': 'lower-bound',
+  both: 'lower-bound-approximate',
+};
 
 export interface SessionStatsInputs {
   readonly sessionId: string | null;
@@ -179,7 +193,7 @@ export function agentCountOf(s: SessionStatsEntry | null): number | null {
 
 export function durationMsOf(s: SessionStatsEntry | null): number | null {
   const duration = s?.durationMs;
-  return typeof duration === 'number' && duration > 0 ? duration : null;
+  return typeof duration === 'number' && Number.isFinite(duration) && duration > 0 ? duration : null;
 }
 
 export function lanesAriaLabelFor(count: number): string {
@@ -195,48 +209,54 @@ export interface CompactSessionMetric {
   readonly unavailable: boolean;
 }
 
-export function compactSessionMetrics(stats: SessionStatsInputs): readonly CompactSessionMetric[] {
-  const snapshot = stats.snapshot;
-  const tokens = snapshot?.tokenCount;
-  const subtotal = knownSubtotalOf(snapshot);
-  const cost = snapshot?.totalCost ?? subtotal?.value ?? null;
-  const basis = costBasisLabel(snapshot?.totalCost, snapshot?.costBasis);
-  const estimate = snapshot?.provisional ? '~' : '';
-  const estimatedLabel = snapshot?.provisional ? 'estimated ' : '';
-  const partialTokens = snapshot?.coverage === 'partial';
-  const metrics: CompactSessionMetric[] = [
+/** SDK-only callers still project the S1 model while the host supplies whole-session totals. */
+export function sdkSessionTotals(snapshot: SessionStatsEntry | null): SessionUsageTotals {
+  const contributions = [sdkContribution(snapshot)];
+  const coverage = { complete: true, causes: [] };
+  return {
+    tokens: sessionTotal(contributions, coverage, 'tokens'),
+    cost: sessionTotal(contributions, coverage, 'cost'),
+  };
+}
+
+export const DURATION_NOT_RECORDED = 'Duration not recorded';
+
+export function sessionDurationText(duration: number | null, unknownReason = DURATION_NOT_RECORDED): string {
+  if (duration === null) return unknownReason;
+  return formatDuration(duration).replace(/([\d.]+)(ms|m|s)\b/g, (_match: string, amount: string, unit: string) => {
+    const name = unit === 'ms' ? 'millisecond' : unit === 'm' ? 'minute' : 'second';
+    return `${amount} ${name}${Number(amount) === 1 ? '' : 's'}`;
+  });
+}
+
+export function compactSessionMetrics(
+  stats: SessionStatsInputs,
+  totals = sdkSessionTotals(stats.snapshot),
+  durationUnknownReason?: string,
+): readonly CompactSessionMetric[] {
+  const duration = durationMsOf(stats.snapshot);
+  return [
     {
       id: 'context', label: 'Ctx', value: stats.context.label,
       ariaLabel: stats.context.known
-        ? `Context ${stats.context.label}, ${stats.context.usedTokens?.toLocaleString()} tokens used`
+        ? `Main request context ${stats.context.label}, ${stats.context.usedTokens?.toLocaleString()} tokens used`
         : STATS_EMPTY.context,
       unavailable: !stats.context.known,
     },
     {
-      id: 'tokens', label: 'Tokens',
-      value: typeof tokens === 'number' ? `${estimate}${partialTokens ? '≥' : ''}${formatTokens(tokens)}` : STATS_EMPTY.value,
-      ariaLabel: typeof tokens === 'number' ? `Tokens ${estimatedLabel}${partialTokens ? 'at least ' : ''}${tokens.toLocaleString()}` : STATS_EMPTY.tokens,
-      unavailable: typeof tokens !== 'number',
+      id: 'tokens', label: 'Tokens', value: formatUsageTokens(totals.tokens),
+      ariaLabel: usageDetailsText(totals.tokens, 'tokens', 'Whole-session tokens'),
+      unavailable: totals.tokens.value === null,
     },
     {
-      id: 'cost', label: 'Cost',
-      value: cost === null
-        ? nullCostValue(snapshot)
-        : `${estimate}${subtotal ? '≥' : ''}${formatCost(cost)}${basis ? ` ${basis}` : ''}`,
-      ariaLabel: cost === null
-        ? nullCostLabel(snapshot)
-        : `Cost ${basis === 'estimated' ? '' : estimatedLabel}${subtotal ? 'known subtotal ' : ''}${formatCost(cost).slice(1)} US dollars${basis ? `, ${basis}` : ''}`,
-      unavailable: cost === null,
+      id: 'cost', label: 'Cost', value: formatUsageCost(totals.cost),
+      ariaLabel: usageDetailsText(totals.cost, 'cost', 'Whole-session cost'),
+      unavailable: totals.cost.value === null,
+    },
+    {
+      id: 'time', label: 'Time', value: duration === null ? '--:--' : clockDuration(duration, 'clock'),
+      ariaLabel: `Time. ${sessionDurationText(duration, durationUnknownReason)}`,
+      unavailable: duration === null,
     },
   ];
-  const duration = durationMsOf(snapshot);
-  if (duration !== null) {
-    const value = formatDuration(duration);
-    const spokenDuration = value.replace(/([\d.]+)(ms|m|s)\b/g, (_match: string, amount: string, unit: string) => {
-      const name = unit === 'ms' ? 'millisecond' : unit === 'm' ? 'minute' : 'second';
-      return `${amount} ${name}${Number(amount) === 1 ? '' : 's'}`;
-    });
-    metrics.push({ id: 'time', label: 'Time', value, ariaLabel: `Time ${spokenDuration}`, unavailable: false });
-  }
-  return metrics;
 }

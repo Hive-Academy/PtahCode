@@ -23,8 +23,8 @@
  *   2. Resolves + normalizes the workspace root (param ?? active workspace) and
  *      gates a caller-SUPPLIED root through `isAuthorizedWorkspace` →
  *      RpcUserError('UNAUTHORIZED_WORKSPACE'). See `resolveRoot`.
- *   3. Warms the index lazily (`index.ensureStarted`).
- *   4. Delegates to the index / writer / registry generator.
+ *   3. Warms the index lazily when the method relies on the derived index.
+ *   4. Delegates to the owning task service.
  *   5. Sanitizes failures — never forwards raw fs error messages (which carry
  *      absolute paths) to the client (R4.4).
  *
@@ -44,6 +44,7 @@ import {
   TASK_SPECS_TOKENS,
   normalizeWorkspaceRoot,
   type TaskIndexService,
+  type TaskDigestService,
   type TaskIndexChangeEvent,
   type TaskWriterService,
   type TaskDoctorService,
@@ -71,6 +72,8 @@ import {
   type TasksListResult,
   type TasksGetParams,
   type TasksGetResult,
+  type TasksGetDigestParams,
+  type TasksGetDigestResult,
   type TasksGetArtifactParams,
   type TasksGetArtifactResult,
   type TasksReadFolderMarkdownParams,
@@ -110,6 +113,7 @@ import {
 import {
   TasksListParamsSchema,
   TasksGetParamsSchema,
+  TasksGetDigestParamsSchema,
   TasksGetArtifactParamsSchema,
   TasksReadFolderMarkdownParamsSchema,
   TasksListFolderEntriesParamsSchema,
@@ -267,6 +271,7 @@ export class TasksRpcHandlers {
   static readonly METHODS = [
     'tasks:list',
     'tasks:get',
+    'tasks:getDigest',
     'tasks:getArtifact',
     'tasks:readFolderMarkdown',
     'tasks:listFolderEntries',
@@ -304,6 +309,8 @@ export class TasksRpcHandlers {
     private readonly sweep: TaskSweepService,
     @inject(SETTINGS_TOKENS.TASKS_SETTINGS)
     private readonly tasksSettings: TasksSettings,
+    @inject(TASK_SPECS_TOKENS.TASK_DIGEST)
+    private readonly digest: TaskDigestService,
   ) {
     // Push every derived-index change to all webviews.
     this.index.onDidChangeIndex((event) => {
@@ -314,6 +321,7 @@ export class TasksRpcHandlers {
   register(): void {
     this.registerList();
     this.registerGet();
+    this.registerGetDigest();
     this.registerGetArtifact();
     this.registerReadFolderMarkdown();
     this.registerListFolderEntries();
@@ -660,6 +668,22 @@ export class TasksRpcHandlers {
           return { task };
         } catch (error: unknown) {
           throw this.sanitize(error, 'tasks:get', 'Failed to read task.');
+        }
+      },
+    );
+  }
+
+  private registerGetDigest(): void {
+    this.rpcHandler.registerMethod<TasksGetDigestParams, TasksGetDigestResult>(
+      'tasks:getDigest',
+      async (params) => {
+        const parsed = this.parse(TasksGetDigestParamsSchema, params);
+        const root = this.resolveRoot(parsed.workspaceRoot);
+        try {
+          const digest = await this.digest.getDigest(root, parsed.taskId);
+          return { digest };
+        } catch (error: unknown) {
+          throw this.sanitize(error, 'tasks:getDigest', 'Failed to read task digest.');
         }
       },
     );

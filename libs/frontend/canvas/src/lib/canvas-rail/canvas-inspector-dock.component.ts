@@ -303,6 +303,7 @@ export class CanvasInspectorDockComponent {
   private readonly tabs = inject(TabManagerService);
   private readonly openState = inject(InspectorOpenStateService);
   private readonly injector = inject(Injector);
+  private railInvokerKey: string | null = null;
   private detailsFocusObserver: MutationObserver | null = null;
   readonly inspectorSection =
     signal<ReturnType<SessionInspectorComponent['focusSection']>>(null);
@@ -368,14 +369,23 @@ export class CanvasInspectorDockComponent {
   }
 
   /**
-   * Focus the rail's expand control. The rail sits in a @defer block that the sheet
+   * Restore focus to the rail control that opened the inspector. The rail sits in a @defer block that the sheet
    * or a cold load can leave unmounted, so wait for it while focus has not moved.
    */
   private focusRailExpand(): void {
     this.stopDetailsFocusObserver();
     const root = this.root();
-    const find = () =>
-      root.querySelector<HTMLElement>('[data-inspector-rail] [data-inspector-expand]');
+    const key = this.railInvokerKey;
+    this.railInvokerKey = null;
+    const find = () => {
+      const rail = root.querySelector('[data-inspector-rail]');
+      if (key && rail) {
+        const control = Array.from(rail.querySelectorAll<HTMLElement>('[data-rail-control]'))
+          .find((candidate) => candidate.dataset['railControl'] === key);
+        if (control) return control;
+      }
+      return rail?.querySelector<HTMLElement>('[data-inspector-expand]');
+    };
     const expand = find();
     if (expand) {
       expand.focus();
@@ -436,6 +446,11 @@ export class CanvasInspectorDockComponent {
       ReturnType<SessionInspectorComponent['focusSection']>
     >,
   ): void {
+    const root = this.root();
+    const invoker = root.ownerDocument.activeElement?.closest<HTMLElement>('[data-rail-control]');
+    this.railInvokerKey = invoker && root.contains(invoker) && invoker.closest('[data-inspector-rail]')
+      ? invoker.dataset['railControl'] ?? null
+      : null;
     this.inspectorSection.set(section ?? null);
     if (this.compactSheet()) {
       this.detailsOpen.set(true);
@@ -450,6 +465,7 @@ export class CanvasInspectorDockComponent {
 
   /** The Stats tab opens or closes the single-focus dock. */
   toggleDetails(): void {
+    this.railInvokerKey = null;
     this.stopDetailsFocusObserver();
     if (this.compactSheet()) {
       this.detailsOpen.set(!this.detailsOpen());

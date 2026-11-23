@@ -313,3 +313,62 @@ describe('label row', () => {
     expect(row(el).classList.contains('sr-only')).toBe(false);
   });
 });
+
+describe('segmented meter', () => {
+  const segments = [
+    { value: 1, tone: 'info', label: 'First' },
+    { value: -4, tone: 'err', label: 'Negative' },
+    { value: Number.NaN, tone: 'err', label: 'Invalid' },
+    { value: 2, tone: 'ok', label: 'Second' },
+  ];
+
+  function widths(el: HTMLElement): number[] {
+    return Array.from(el.querySelectorAll<HTMLElement>('[role="meter"] [aria-hidden="true"] > div'))
+      .map((fill) => parseFloat(fill.style.width));
+  }
+
+  it('allocates the proportional width, giving its remainder to the last valid segment', () => {
+    const el = render({ value: 3, max: 9, segments, track: '2px' });
+    const bar = el.querySelector('[role="meter"]');
+    const [first, last] = widths(el);
+    const fills = bar?.querySelectorAll('[aria-hidden="true"] > div');
+    expect(fills).toHaveLength(2);
+    expect(first).toBeCloseTo(100 / 9);
+    expect(last).toBe((3 / 9) * 100 - first);
+    expect(fills?.[0].classList.contains('bg-state-run')).toBe(true);
+    expect(fills?.[1].classList.contains('bg-state-done')).toBe(true);
+    expect(bar?.classList.contains('h-[2px]')).toBe(true);
+  });
+
+  it('has no fill at zero subtotal or with an invalid max', () => {
+    expect(widths(render({ value: 0, segments }))).toEqual([]);
+    expect(widths(render({ value: 3, max: 0, segments }))).toEqual([]);
+  });
+
+  it('keeps the single fill at zero width and preserves tiny positive widths', () => {
+    const fill = (value: number) => render({ value }).querySelector<HTMLElement>('[role="meter"] > div');
+    expect(fill(0)?.style.width).toBe('0%');
+    expect(fill(0.01)?.style.width).toBe('0.01%');
+    expect(fill(0)?.style.minWidth).toBe('');
+  });
+
+  it('keeps a fixed hatched stub beside the proportional track for partial coverage', () => {
+    const el = render({ value: 1, segments, unreported: 'partial', track: '3px' });
+    const bar = el.querySelector('[role="meter"]');
+    const stub = el.querySelector<HTMLElement>('.ptah-meter-unreported');
+    expect(bar?.nextElementSibling).toBe(stub);
+    expect(stub?.classList.contains('h-[3px]')).toBe(true);
+    expect(stub?.style.width).toBe('');
+    expect(stub?.style.backgroundImage).toContain('repeating-linear-gradient');
+    expect(widths(el).reduce((sum, width) => sum + width, 0)).toBe(1);
+  });
+
+  it('shows the stub and status without a track when all usage is missing', () => {
+    const el = render({ value: 0, segments: [], unreported: 'missing', hideLabel: true, showValue: false });
+    expect(el.querySelector('[role="meter"]')).toBeNull();
+    expect(el.querySelector('.ptah-meter-unreported')).not.toBeNull();
+    expect(el.querySelector('[data-meter-row]')?.classList.contains('sr-only')).toBe(false);
+    expect(el.querySelector('.tabular-nums')?.classList.contains('sr-only')).toBe(false);
+    expect(el.textContent).toContain('No usage reported');
+  });
+});

@@ -13,6 +13,7 @@ import {
   ownerDisplayLabel,
   ownerRelation,
   PLAN_LIMIT_SOURCE_LABELS,
+  planLimitReasonLabel,
   windowModelScope,
   type AgentStatus,
   type LaneLimitState,
@@ -490,7 +491,8 @@ function ownerStatusNote(
     case 'no-usage-source':
       return {
         tone: 'neutral',
-        text: `No usage source · ${ownerDisplayLabel(snapshot.owner)} does not report plan usage`,
+        text: planLimitReasonLabel(snapshot.statusReason, snapshot.owner.providerId)
+          ?? `No usage source · ${ownerDisplayLabel(snapshot.owner)} does not report plan usage`,
       };
     case 'stale':
       return {

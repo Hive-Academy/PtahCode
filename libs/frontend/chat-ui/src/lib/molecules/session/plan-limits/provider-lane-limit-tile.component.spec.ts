@@ -6,7 +6,7 @@ function windowTile(label: string, used: number): PlanLimitTileModel {
   return { id: label, kind: 'window', label, captionLead: 'Kimi account', caption: 'Kimi account · 2b78',
     value: `${used}% used`, resetLine: 'resets in 2d', tone: used >= 90 ? 'error' : 'neutral',
     sourceChips: ['Provider API'], detailLines: [], window: {
-      windowKey: 'monthly', label, state: 'ok', usedText: `${used}% used`, percent: used,
+      windowKey: 'monthly', label, state: used === 80 ? 'near-limit' : 'ok', usedText: `${used}% used`, percent: used,
       resetFacts: [], sourceChips: ['Provider API'],
     } };
 }
@@ -23,22 +23,24 @@ describe('ProviderLaneLimitTileComponent', () => {
     } satisfies ProviderLaneLimitModel);
     fixture.detectChanges();
     const root = fixture.nativeElement as HTMLElement;
-    expect(root.querySelectorAll('[data-testid="plan-extra-window"]')).toHaveLength(2);
+    const rows = [...root.querySelectorAll('[data-testid="plan-window-row"]')];
+    expect(rows).toHaveLength(3);
+    expect(rows.map(row => row.getAttribute('data-tile-id'))).toEqual(['Monthly code', '5-hour', 'Monthly total']);
+    expect(rows.map(row => row.getAttribute('tabindex'))).toEqual(['0', '0', '0']);
+    expect(rows[0].getAttribute('aria-label')).toContain('Monthly code');
     expect(root.querySelectorAll('ptah-meter')).toHaveLength(3);
     expect(root.querySelector('select, button')).toBeNull();
     expect(root.textContent).not.toMatch(/Less detail|More detail/);
     expect(root.querySelectorAll('[data-ptah-badge][data-size="xs"]')).toHaveLength(1);
-    const primary = root.querySelector<HTMLElement>('[data-testid="provider-limit-progress"]');
-    const bar = primary?.querySelector<HTMLElement>('[role="progressbar"]');
-    expect(primary?.tagName).toBe('PTAH-METER');
+    const bar = rows[0].querySelector<HTMLElement>('[role="meter"]');
     expect(bar?.getAttribute('aria-label')).toBe('Kimi Code Monthly code usage');
     expect(bar?.getAttribute('aria-valuenow')).toBe('80');
-    expect(bar?.getAttribute('aria-valuetext')).toBe('80% used');
-    expect(bar?.className).toContain('h-2');
+    expect(bar?.getAttribute('aria-valuetext')).toContain('80% used');
+    expect(bar?.className).toContain('h-[3px]');
     expect(bar?.firstElementChild?.className).toContain('bg-state-need');
-    const extra = root.querySelector<HTMLElement>('[data-testid="provider-limit-extra-progress"] [role="progressbar"]');
+    const extra = rows[1].querySelector<HTMLElement>('[role="meter"]');
     expect(extra?.getAttribute('aria-valuenow')).toBe('41');
-    expect(extra?.className).toContain('h-1');
+    expect(extra?.className).toContain('h-[3px]');
   });
   it('shows untracked provider state', () => {
     TestBed.configureTestingModule({ imports: [ProviderLaneLimitTileComponent] });
@@ -49,8 +51,8 @@ describe('ProviderLaneLimitTileComponent', () => {
     } satisfies ProviderLaneLimitModel);
     fixture.detectChanges();
     const root = fixture.nativeElement as HTMLElement;
-    expect(root.textContent).toContain('Usage · Unavailable');
-    expect(root.textContent).toContain('Limits not tracked');
+    expect(root.textContent).toContain('Usage not tracked');
+    expect(root.textContent).not.toContain('No usage source');
     expect(root.querySelector('ptah-meter')).toBeNull();
   });
   it('keeps local usage, evidence, cooldown and status beside a window', () => {

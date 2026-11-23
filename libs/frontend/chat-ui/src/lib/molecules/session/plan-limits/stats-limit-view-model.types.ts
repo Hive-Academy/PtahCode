@@ -13,6 +13,7 @@ import type {
   PlanWindowKey,
   PlanWindowState,
   QuotaOwnerRef,
+  UsageSourceLabel,
 } from '@ptah-extension/shared';
 
 // ------------------------------------------------------------------ input
@@ -96,8 +97,12 @@ export interface PlanWindowDetailModel {
   readonly chip?: StatsChip;
   /** "94% used", "$3.20 of $50.00", or "unknown". */
   readonly usedText: string;
-  /** Percent for the meter; absent when the value is unknown. */
+  /** Percent for window comparison; absent when the value cannot be compared. */
   readonly percent?: number;
+  readonly amount?: { readonly value: number; readonly max: number };
+  /** Structured group on the inspector projection. */
+  readonly group?: string | null;
+  readonly reset?: { readonly short: string; readonly full: string };
   /** Reset facts, each absolute + relative; passed and next kept apart. */
   readonly resetFacts: readonly string[];
   /** Aged or not-confirmed explanation. */
@@ -113,6 +118,7 @@ export interface PlanLimitTileModel {
   /** Stable id: `plan:<owner>:<window>`, `plan-evidence:<owner>[:<scope>]`, … */
   readonly id: string;
   readonly kind: PlanLimitTileKind;
+  readonly usageUnavailable?: true;
   readonly label: string;
   /** Caption text that may truncate on a closed tile. */
   readonly captionLead: string;
@@ -280,6 +286,8 @@ export interface StatsLimitViewModel {
    * Absent when the session has no listed owner; never a fixed provider.
    */
   readonly sessionProviderLabel?: string;
+  readonly sessionProviderAccountId?: string;
+  readonly sessionProviderSource?: UsageSourceLabel;
   readonly laneTiles: readonly LaneUsageTileModel[];
   readonly inspectorRuns: readonly InspectorLaneRunDetail[];
   readonly providerLimits: readonly ProviderLaneLimitModel[];
@@ -305,6 +313,9 @@ export interface ProviderLaneLimitModel {
   readonly id: string;
   readonly label: string;
   readonly ownerState: 'single' | 'multiple' | 'untracked';
+  readonly accountId?: string;
+  readonly source?: UsageSourceLabel;
+  readonly indicator?: StatsLimitIndicator;
   readonly windows: readonly PlanLimitTileModel[];
   readonly message: string;
   readonly ownerDetails: readonly string[];

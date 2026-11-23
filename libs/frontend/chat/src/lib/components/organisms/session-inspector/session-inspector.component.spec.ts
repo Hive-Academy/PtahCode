@@ -1,23 +1,33 @@
-import { PtahIconButtonDirective } from '@ptah-extension/ui';
+import { PTAH_CLOCK, PtahIconButtonDirective } from '@ptah-extension/ui';
 import { NgTemplateOutlet } from '@angular/common';
 import { encapsulateStyle } from '@angular/compiler';
 import { Component, NO_ERRORS_SCHEMA, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { AgentMonitorStore, type MonitoredAgent } from '@ptah-extension/chat-streaming';
 import { TabManagerService } from '@ptah-extension/chat-state';
 import {
   InspectorLinkedSessionsComponent,
+  InspectorSessionStatsComponent,
+  InspectorLimitsLanesComponent,
   type SessionStatsInputs,
 } from '@ptah-extension/chat-ui';
-import { ClaudeRpcService, RpcResult } from '@ptah-extension/core';
-import type { SessionHandoffChainResult } from '@ptah-extension/shared';
+import { ClaudeRpcService, ModelStateService, RpcResult, WallClockService } from '@ptah-extension/core';
+import type { SessionHandoffChainResult, SessionStatsEntry } from '@ptah-extension/shared';
 import {
   HandoffChainClient,
   SessionInspectorStore,
+  type InspectorRequest,
   type SessionInspectorModel,
 } from '../../../services/session-inspector';
 import { SessionRowActionsService } from '../../../services/session-list/session-row-actions.service';
+import { By } from '@angular/platform-browser';
+import { buildSessionAgentRoster } from '../../../services/session-agents/session-agent-roster';
+import { SessionAgentRosterService } from '../../../services/session-agents/session-agent-roster.service';
+import { SessionAgentTrayService } from '../../../services/session-agents/session-agent-tray.service';
+import { InspectorAgentsSectionComponent } from './inspector-agents-section.component';
+import { InspectorRequestLinesComponent } from './inspector-request-panel.component';
 import { SessionInspectorComponent } from './session-inspector.component';
 
 const emptyStats: SessionStatsInputs = {
@@ -96,23 +106,65 @@ describe('SessionInspectorComponent motion styles', () => {
   });
 });
 
+const emptyRoster = buildSessionAgentRoster({
+  sessionId: 'one',
+  tabStatus: 'idle',
+  cliAgents: [],
+  subagents: [],
+  backgroundAgents: [],
+  permissions: [],
+  questions: [],
+});
+const readyAgents: SessionInspectorModel['agents'] = {
+  status: 'ready',
+  data: { rows: [], active: 0, finished: 0 },
+};
+
+function projectionProviders(cli = signal<readonly MonitoredAgent[]>([])) {
+  return [
+    { provide: AgentMonitorStore, useValue: {
+      agents: cli,
+      agentsOwnedBySession: (id: string) => cli().filter((lane) => lane.parentSessionId === id),
+      subagents: () => new Map(),
+    } },
+    { provide: SessionAgentRosterService, useValue: { roster: () => emptyRoster } },
+    { provide: SessionAgentTrayService, useValue: { extrasFor: () => new Map() } },
+    { provide: ModelStateService, useValue: { availableModels: () => [] } },
+    { provide: WallClockService, useValue: { now: () => signal(0), acquire: () => () => undefined } },
+    { provide: PTAH_CLOCK, useValue: { now: signal(0), acquire: () => () => undefined } },
+  ];
+}
+
 describe('SessionInspectorComponent presentation', () => {
   const model = signal(emptyModel);
+  const cli = signal<readonly MonitoredAgent[]>([]);
   beforeEach(() => {
     model.set(emptyModel);
+    cli.set([]);
     TestBed.configureTestingModule({
       imports: [SessionInspectorComponent],
       providers: [
-        { provide: SessionInspectorStore, useValue: { modelFor: () => model } },
+        { provide: SessionInspectorStore, useValue: {
+          modelFor: () => model,
+          answerMissed: () => false,
+          clearAnswerMiss: jest.fn(),
+        } },
+        ...projectionProviders(cli),
         {
           provide: TabManagerService,
-          useValue: { findTabByIdAcrossWorkspaces: () => null },
+          useValue: { backgroundTabsRevision: () => 0, findTabByIdAcrossWorkspaces: () => null },
         },
         { provide: ClaudeRpcService, useValue: { call: jest.fn() } },
         { provide: SessionRowActionsService, useValue: { openSession: jest.fn() } },
       ],
     }).overrideComponent(SessionInspectorComponent, {
-      set: { imports: [NgTemplateOutlet, PtahIconButtonDirective], schemas: [NO_ERRORS_SCHEMA] },
+      set: {
+        imports: [
+          NgTemplateOutlet, PtahIconButtonDirective, InspectorSessionStatsComponent,
+          InspectorAgentsSectionComponent, InspectorRequestLinesComponent, InspectorLimitsLanesComponent,
+        ],
+        schemas: [NO_ERRORS_SCHEMA],
+      },
     });
   });
   afterEach(() => TestBed.resetTestingModule());
@@ -221,44 +273,211 @@ describe('SessionInspectorComponent presentation', () => {
     expect(element.querySelectorAll('.text-state-err')).toHaveLength(2);
   });
 
-  it('renders unknown fields as labeled dashes, omitting absent time and todos', () => {
+  it('renders unknown usage and context as labelled muted dashes and unknown Time as --:--', () => {
     const fixture = create();
-    const element: HTMLElement = fixture.nativeElement;
-    expect(element.querySelector('aside')?.classList.contains('w-14')).toBe(
-      true,
-    );
-    for (const field of ['Context', 'Tokens', 'Cost']) {
-      const tile = element.querySelector(`[aria-label="${field} unavailable"]`);
-      expect(tile?.textContent).toContain('—');
-      expect(tile?.getAttribute('title')).toBe(`${field} unavailable`);
+    const root: HTMLElement = fixture.nativeElement;
+    expect(root.querySelector('aside')?.classList.contains('w-14')).toBe(true);
+    const context = root.querySelector('[data-rail-control="context"]');
+    expect(context?.getAttribute('aria-label')).toBe('Context unavailable');
+    expect(context?.querySelector('.text-base-content-muted:last-child')?.textContent?.trim()).toBe('—');
+
+    fixture.componentRef.setInput('presentation', 'docked');
+    fixture.detectChanges();
+    for (const field of ['Tokens', 'Cost']) {
+      const tile = root.querySelector(`[data-testid="session-${field.toLowerCase()}"]`);
+      expect(tile?.getAttribute('aria-label')).toContain(`${field} unavailable`);
+      expect(tile?.querySelector('.tabular-nums.text-base-content-muted')?.textContent).toContain('—');
     }
-    expect(element.textContent).not.toContain('Time');
-    expect(element.textContent).not.toContain('Todo');
-    expect(element.querySelectorAll('button')).toHaveLength(4);
+    const time = root.querySelector('[data-testid="session-time"]');
+    expect(time?.getAttribute('aria-label')).toContain('Duration not recorded');
+    expect(time?.querySelector('time.text-base-content-muted')?.textContent).toContain('--:--');
+    expect(root.textContent).not.toContain('Todo');
   });
 
-  it('emits expansion targets and exposes the attention count', () => {
-    model.set({
-      ...emptyModel,
-      needsYouCount: 2,
-      agents: { status: 'ready', data: { rows: [], active: 3, finished: 0 } },
-    });
+  it('emits expansion targets and exposes the ready attention count', () => {
+    model.set({ ...emptyModel, needsYouCount: 2, agents: readyAgents });
     const fixture = create();
     const requests: (string | undefined)[] = [];
-    fixture.componentInstance.expandRequested.subscribe((value) =>
-      requests.push(value),
-    );
-    const buttons = (
-      fixture.nativeElement as HTMLElement
-    ).querySelectorAll<HTMLButtonElement>('button');
-    buttons[0].click();
-    buttons[1].click();
-    expect(requests).toEqual([undefined, 'session']);
-    const aggregate = fixture.nativeElement.querySelector('[aria-label="Running agents: 3; 2 need you"]');
-    expect(aggregate?.textContent).toContain('2!');
-    // A bare span ignores aria-label; the role makes assistive tech announce it.
-    expect(aggregate?.getAttribute('role')).toBe('img');
-    expect(fixture.nativeElement.textContent).not.toContain('Run');
+    fixture.componentInstance.expandRequested.subscribe((value) => requests.push(value));
+    const root: HTMLElement = fixture.nativeElement;
+    root.querySelector<HTMLButtonElement>('[data-inspector-expand]')?.click();
+    for (const key of ['tokens', 'cost', 'time', 'context', 'attention']) {
+      root.querySelector<HTMLButtonElement>(`[data-rail-control="${key}"]`)?.click();
+    }
+    expect(requests).toEqual([undefined, 'session', 'session', 'session', 'orchestrator', 'attention']);
+    const attention = root.querySelector('[data-rail-control="attention"]');
+    expect(attention?.getAttribute('aria-label')).toBe('Running agents: 0; 2 need you');
+    expect(attention?.textContent).toContain('2!');
+  });
+
+  const sdkSnapshot: SessionStatsEntry = {
+    sessionId: 'session-a',
+    model: null,
+    status: 'ok',
+    totalCost: 0.1,
+    tokens: { input: 80, output: 20, cacheRead: 0, cacheCreation: 0 },
+    tokenCount: 100,
+    messageCount: 1,
+  };
+  const lane: MonitoredAgent = {
+    agentId: 'lane',
+    parentSessionId: 'session-a',
+    cli: 'copilot',
+    task: 'Inspect files',
+    status: 'completed',
+    startedAt: 100,
+    completedAt: 200,
+    stdout: '',
+    stderr: '',
+    expanded: false,
+    segments: [],
+    streamEvents: [],
+    streamRevision: 0,
+    permissionQueue: [],
+    usageTotals: { inputTokens: 30, outputTokens: 20, costUsd: 0.2 },
+  };
+
+  it.each(['sdk', 'cli'] as const)('shares measured whole-session totals across rail and SESSION when %s arrives first', (first) => {
+    const stats = { ...emptyStats, sessionId: 'session-a', snapshot: sdkSnapshot };
+    if (first === 'cli') cli.set([lane]);
+    const fixture = create(first === 'cli' ? { ...stats, snapshot: null } : stats);
+    const root: HTMLElement = fixture.nativeElement;
+    const railFigure = (key: string) =>
+      root.querySelector(`[data-rail-control="${key}"] span:last-child`)?.textContent?.trim();
+    expect(railFigure('tokens')).toBe(first === 'sdk' ? '100' : '—');
+    cli.set([lane]);
+    fixture.componentRef.setInput('stats', stats);
+    fixture.detectChanges();
+    expect(railFigure('tokens')).toBe('150');
+    expect(railFigure('cost')).toBe('$0.30');
+
+    fixture.componentRef.setInput('presentation', 'sheet');
+    fixture.detectChanges();
+    const dialog = root.querySelector('[role="dialog"][aria-modal="true"]');
+    expect(dialog?.querySelector('[data-testid="session-tokens"]')?.getAttribute('aria-label')).toContain('150 tokens');
+    expect(dialog?.querySelector('[data-testid="session-cost"]')?.getAttribute('aria-label')).toContain('$0.3');
+  });
+
+  it('marks a detected CLI cost gap while leaving reported tokens exact', () => {
+    cli.set([{ ...lane, restored: true, usageTotals: { inputTokens: 30, outputTokens: 20 } }]);
+    const fixture = create({ ...emptyStats, sessionId: 'session-a', snapshot: sdkSnapshot });
+    const root: HTMLElement = fixture.nativeElement;
+    expect(root.querySelector('[data-rail-control="tokens"] span:last-child')?.textContent?.trim()).toBe('150');
+    expect(root.querySelector('[data-rail-control="cost"] span:last-child')?.textContent?.trim()).toBe('≥$0.10');
+  });
+
+  it('focuses only the active SESSION heading during a switch and freezes totals in both directions', async () => {
+    const first = { ...emptyStats, sessionId: 'session-a', snapshot: sdkSnapshot };
+    const second = {
+      ...emptyStats, sessionId: 'session-b',
+      snapshot: { ...sdkSnapshot, sessionId: 'session-b', tokenCount: 200 },
+    };
+    const fixture = create(first);
+    const root: HTMLElement = fixture.nativeElement;
+    document.body.appendChild(root);
+    try {
+      cli.set([lane]);
+      fixture.componentRef.setInput('presentation', 'sheet');
+      fixture.detectChanges();
+      fixture.componentRef.setInput('stats', second);
+      fixture.componentRef.setInput('focusSection', 'session');
+      fixture.detectChanges();
+      const leavingFigure = () => root.querySelector('.inspector-stats-leave [data-testid="session-tokens"]')?.getAttribute('aria-label');
+      expect(leavingFigure()).toContain('150 tokens');
+      expect(root.querySelector('.inspector-stats-leave')?.hasAttribute('inert')).toBe(true);
+      const activeHeading = root.querySelector('[data-active-session-stats] h3');
+      expect(document.activeElement).toBe(activeHeading);
+      root.querySelector<HTMLElement>('[data-inspector-close]')?.focus();
+      await Promise.resolve();
+      expect(document.activeElement).toBe(activeHeading);
+      fixture.componentRef.setInput('stats', first);
+      fixture.detectChanges();
+      expect(leavingFigure()).toContain('200 tokens');
+      expect(root.querySelector('p[aria-live="polite"]')?.textContent?.trim()).toBe('Session changed.');
+    } finally {
+      root.remove();
+    }
+  });
+
+  it('routes the plan-limit cue to the PLAN LIMITS heading and keeps section order', () => {
+    const fixture = create({
+      ...emptyStats,
+      limits: {
+        planTiles: [], laneTiles: [], inspectorRuns: [], providerLimits: [],
+        lanesCount: 0, refreshNotice: 'Showing last observed limits',
+      },
+      limitSummary: { state: 'near', source: 'session', text: 'Near limit', extra: 0, fullText: 'Near plan limit' },
+    });
+    const root: HTMLElement = fixture.nativeElement;
+    document.body.appendChild(root);
+    try {
+      const expand = jest.fn();
+      fixture.componentInstance.expandRequested.subscribe(expand);
+      root.querySelector<HTMLButtonElement>('[data-rail-control="limits"]')?.click();
+      expect(expand).toHaveBeenCalledWith('limits');
+      fixture.componentRef.setInput('focusSection', 'limits');
+      fixture.componentRef.setInput('presentation', 'sheet');
+      fixture.detectChanges();
+      const sections = Array.from(root.querySelectorAll('h3')).map((heading) => heading.textContent?.trim());
+      expect(sections).toEqual(['Session', 'AGENTS', 'PLAN LIMITS']);
+      expect(document.activeElement).toBe(root.querySelector('[data-inspector-section="limits"] h3'));
+    } finally {
+      root.remove();
+    }
+  });
+
+  it('preserves the Answer emit and selects and focuses the asking row request', async () => {
+    const question: InspectorRequest = {
+      requestId: 'question-1',
+      kind: 'question',
+      source: 'session',
+      ownerKey: 'orchestrator',
+      ownerName: 'Orchestrator',
+      agentId: null,
+      toolName: null,
+      command: 'Which branch?',
+      questionPreview: 'Which branch?',
+      timestamp: 1,
+    };
+    model.set({
+      ...emptyModel,
+      sessionId: 'one',
+      agents: readyAgents,
+      requests: [question],
+      needsYouCount: 1,
+      orchestrator: { ...emptyModel.orchestrator, requests: [question] },
+    });
+    const fixture = create();
+    const root: HTMLElement = fixture.nativeElement;
+    document.body.appendChild(root);
+    try {
+      fixture.componentRef.setInput('presentation', 'docked');
+      fixture.componentRef.setInput('selectedAgentKey', null);
+      fixture.componentRef.setInput('focusSection', 'attention');
+      const answered = jest.fn();
+      const selected = jest.fn();
+      fixture.componentInstance.answerRequested.subscribe(answered);
+      fixture.componentInstance.agentSelected.subscribe(selected);
+      fixture.detectChanges();
+      expect(document.activeElement).toBe(root.querySelector('[data-agent-key="orchestrator"]'));
+      const headerLines = fixture.debugElement.query(By.directive(InspectorRequestLinesComponent));
+      const headerAnswer = (headerLines.nativeElement as HTMLElement).querySelector<HTMLButtonElement>('[data-request-button]');
+      expect(headerAnswer?.textContent?.trim()).toBe('Answer');
+      headerAnswer?.click();
+      fixture.detectChanges();
+      await fixture.whenStable();
+
+      const row = root.querySelector('[data-agent-key="orchestrator"]')?.closest('li');
+      expect(row?.getAttribute('aria-current')).toBe('true');
+      expect(document.activeElement).toBe(row?.querySelector('[data-request-button]'));
+      expect(answered).toHaveBeenCalledTimes(1);
+      expect(answered).toHaveBeenCalledWith('question-1');
+      expect(selected).toHaveBeenCalledWith('orchestrator');
+      headerLines.injector.get(InspectorRequestLinesComponent).focusReleased.emit();
+      expect(document.activeElement).toBe(root.querySelector('[data-inspector-close]'));
+    } finally {
+      root.remove();
+    }
   });
 
   it('focuses the requested section on expansion and the expand control on collapse', () => {
@@ -269,9 +488,7 @@ describe('SessionInspectorComponent presentation', () => {
     fixture.componentRef.setInput('focusSection', 'agents');
     fixture.componentRef.setInput('presentation', 'docked');
     fixture.detectChanges();
-    expect(document.activeElement?.getAttribute('data-inspector-section')).toBe(
-      'agents',
-    );
+    expect(document.activeElement).toBe(element.querySelector('[data-inspector-section="agents"] h3'));
     fixture.componentRef.setInput('presentation', 'rail');
     fixture.detectChanges();
     expect(document.activeElement).toBe(
@@ -483,9 +700,10 @@ describe('SessionInspectorComponent linked sessions (TASK_2026_876)', () => {
       imports: [SessionInspectorComponent],
       providers: [
         { provide: SessionInspectorStore, useValue: { modelFor: () => model } },
+        ...projectionProviders(),
         {
           provide: TabManagerService,
-          useValue: { findTabByIdAcrossWorkspaces: () => null },
+          useValue: { backgroundTabsRevision: () => 0, findTabByIdAcrossWorkspaces: () => null },
         },
         { provide: ClaudeRpcService, useValue: { call: rpcCall } },
         { provide: SessionRowActionsService, useValue: { openSession } },
@@ -527,7 +745,7 @@ describe('SessionInspectorComponent linked sessions (TASK_2026_876)', () => {
       expect(host).not.toBeNull();
       const order = Array.from(
         root.querySelectorAll(
-          'ptah-inspector-session-stats[data-inspector-section], ptah-inspector-agents-section, ptah-inspector-git-section, ptah-inspector-linked-sessions',
+          'ptah-inspector-session-stats[data-active-session-stats], ptah-inspector-agents-section, ptah-inspector-git-section, ptah-inspector-linked-sessions',
         ),
         (el) => el.tagName.toLowerCase(),
       );

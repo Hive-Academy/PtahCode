@@ -10,8 +10,8 @@ import type { ProviderLaneLimitModel, StatsLimitViewModel } from '../plan-limits
   template: `
     @let vm = limits();
     @if (providers().length || vm.refreshNotice) {
-      <section class="border-t border-surface-border p-4" aria-labelledby="inspector-plan-limits-heading">
-        <div class="mb-2 flex items-center justify-between gap-2">
+      <section class="border-t border-surface-border px-3 py-3" data-inspector-section="limits" aria-labelledby="inspector-plan-limits-heading">
+        <div class="mb-1.5 flex items-center justify-between gap-2">
           <h3 id="inspector-plan-limits-heading" tabindex="-1" class="sec-label text-[10.5px] font-semibold uppercase">PLAN LIMITS</h3>
           <span data-testid="providers-count" class="text-[10.5px] text-base-content-muted">{{ providers().length }} {{ providers().length === 1 ? 'provider' : 'providers' }}</span>
         </div>
@@ -35,6 +35,7 @@ export class InspectorLimitsLanesComponent {
     const session: ProviderLaneLimitModel[] = vm.planTiles.length ? [{
       id: 'session-provider', label: vm.sessionProviderLabel ?? 'Session', ownerState: 'single',
       windows: vm.planTiles, message: 'Limits not tracked', ownerDetails: [],
+      accountId: vm.sessionProviderAccountId, source: vm.sessionProviderSource, indicator: vm.indicator,
     }] : [];
     return [...session, ...vm.providerLimits.map(provider => ({
       ...provider,

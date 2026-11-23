@@ -18,6 +18,9 @@ import { CanvasInspectorDockComponent } from './canvas-inspector-dock.component'
       >
         Expand
       </button>
+      <button data-rail-control="cost" (click)="expandRequested.emit('session')">
+        Cost
+      </button>
     } @else {
       <div [attr.role]="presentation() === 'sheet' ? 'dialog' : null">
         <button
@@ -191,6 +194,36 @@ describe('CanvasInspectorDockComponent', () => {
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
     expect(document.activeElement).toBe(host.querySelector('[data-inspector-expand]'));
     host.remove();
+  });
+
+  it('restores focus to Cost after dismissing the compact sheet opened from Cost', async () => {
+    const { fixture } = mount();
+    const host: HTMLElement = fixture.nativeElement;
+    document.body.appendChild(host);
+    try {
+      fixture.componentRef.setInput('dockOpen', false);
+      fixture.componentRef.setInput('compactSheet', true);
+      fixture.detectChanges();
+      await completeDeferBlocks(fixture);
+      const cost = host.querySelector<HTMLButtonElement>('[data-rail-control="cost"]');
+      expect(cost).not.toBeNull();
+      cost?.focus();
+      cost?.click();
+      fixture.detectChanges();
+      expect(host.querySelector('[data-inspector-rail]')).toBeNull();
+      await completeDeferBlocks(fixture);
+      expect(host.querySelector('[aria-modal="true"]')).not.toBeNull();
+      host.querySelector<HTMLButtonElement>('[data-inspector-close]')?.click();
+      fixture.detectChanges();
+      await fixture.whenStable();
+      await completeDeferBlocks(fixture);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      const restored = host.querySelector('[data-rail-control="cost"]');
+      expect(restored).not.toBe(cost);
+      expect(document.activeElement).toBe(restored);
+    } finally {
+      host.remove();
+    }
   });
 
   it.each(['dock', 'sheet'])('shows a skeleton without a lane strip while the deferred %s loads, and an agent pick selects its lane', async (presentation) => {

@@ -1,385 +1,214 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { ModelStateService, WallClockService } from '@ptah-extension/core';
-import type { SessionBudgetState } from '@ptah-extension/shared';
+import { ModelStateService } from '@ptah-extension/core';
+import type { SessionBudgetState, SessionStatsEntry } from '@ptah-extension/shared';
+import { PTAH_CLOCK, type PtahClock } from '@ptah-extension/ui';
 import type { SessionStatsInputs } from '../session-stats-view';
+import { cliContribution, sdkContribution, sessionTotal } from '../session-usage-totals';
 import { InspectorSessionStatsComponent } from './inspector-session-stats.component';
 
-describe(InspectorSessionStatsComponent.name, () => {
-  afterEach(() => {
-    jest.useRealTimers();
-    jest.restoreAllMocks();
-  });
+const snapshot: SessionStatsEntry = {
+  sessionId: 'first', model: 'opus', totalCost: 17.54, knownCost: 17.54,
+  tokenCount: 23_500_000, messageCount: 24, agentSessionCount: 2, turnCount: 24,
+  tokens: { input: 23_000_000, output: 300_000, cacheRead: 100_000, cacheCreation: 100_000 },
+  status: 'ok', pricingCoverage: 'full', scope: 'session', revision: 1,
+};
 
-  it('mounts only a present cache, releases it on removal, and updates on session switch', () => {
-    jest.useFakeTimers();
-    jest.setSystemTime(new Date(0));
+const stats: SessionStatsInputs = {
+  sessionId: 'first', snapshot, liveModelStats: null,
+  compactionCount: 0, limits: null, budget: null,
+  context: { hasLive: false, known: false, percent: null, label: '—', usedTokens: null },
+  limitSummary: { state: 'none', text: null, extra: 0, source: null, fullText: null },
+};
+
+const budget: SessionBudgetState = {
+  sessionId: 'first', stage: 'normal', unit: 'cost', measure: 'cost',
+  used: 17.54, limit: 30, percent: 58.46, lowerBound: false, revision: null,
+  compactions: 0, autoHandoff: false,
+};
+
+function required<T>(value: T | null): T {
+  if (value === null) throw new Error('Expected element or usage contribution');
+  return value;
+}
+
+describe(InspectorSessionStatsComponent.name, () => {
+  function render(overrides: Partial<SessionStatsInputs> = {}) {
     TestBed.configureTestingModule({
       imports: [InspectorSessionStatsComponent],
       providers: [
-        { provide: ModelStateService, useValue: { availableModels: signal([]) } },
+        { provide: ModelStateService, useValue: { availableModels: signal([{ id: 'opus', name: 'Opus 4.7' }]) } },
+        { provide: PTAH_CLOCK, useValue: { now: signal(0), acquire: () => jest.fn() } satisfies PtahClock },
       ],
     });
-    const clock = TestBed.inject(WallClockService);
-    const acquireClock = clock.acquire.bind(clock);
-    const release = jest.fn();
-    const acquire = jest.spyOn(clock, 'acquire').mockImplementation((cadence) => {
-      const releaseClock = acquireClock(cadence);
-      return () => {
-        releaseClock();
-        release();
-      };
-    });
     const fixture = TestBed.createComponent(InspectorSessionStatsComponent);
-    const stats: SessionStatsInputs = {
-      sessionId: 'one', snapshot: null, cache: null, liveModelStats: null,
-      compactionCount: 0, limits: null, budget: null,
-      context: { hasLive: false, known: false, percent: null, label: '—', usedTokens: null },
-      limitSummary: { state: 'none', text: null, extra: 0, source: null, fullText: null },
-    };
-    fixture.componentRef.setInput('stats', stats);
+    fixture.componentRef.setInput('stats', { ...stats, ...overrides });
     fixture.detectChanges();
     const root = fixture.nativeElement as HTMLElement;
-    expect(root.querySelector('[data-testid="inspector-cache-tile"]')).toBeNull();
-    expect(acquire).not.toHaveBeenCalled();
-    const grid = root.querySelector('[data-testid="inspector-stats-grid"]');
-    expect(grid?.classList.contains('grid-cols-3')).toBe(true);
-    expect(grid?.querySelectorAll('[data-glass-surface="tile"]').length).toBe(0);
-    for (const field of ['Context', 'Tokens', 'Cost']) {
-      const missing = root.querySelector(`[aria-label="${field} unavailable"]`);
-      expect(missing?.textContent?.trim()).toBe('—');
-      expect(missing?.classList.contains('text-base-content-muted')).toBe(true);
-      expect(missing?.getAttribute('title')).toBe('not reported');
+    const tile = (key: string) => required(root.querySelector<HTMLElement>(`[data-testid="session-${key}"]`));
+    const models = required(root.querySelector<HTMLButtonElement>('ptah-disclosure button'));
+    return { fixture, root, tile, models };
+  }
+
+  it('reads whole-session tiles from supplied S1 totals and never adds the model breakdown again', () => {
+    const { fixture, tile, models, root } = render({
+      snapshot: { ...snapshot, tokenCount: 1, totalCost: 100 },
+    });
+    const lane = required(cliContribution({
+      kind: 'cli', id: 'codex', label: 'Codex',
+      usage: { inputTokens: 2_000_000, outputTokens: 400_000 },
+      cost: 0.008, costEstimated: true,
+    }));
+    const unpriced = required(cliContribution({
+      kind: 'cli', id: 'antigravity', label: 'Antigravity',
+      usage: { inputTokens: 1, outputTokens: 0 },
+    }));
+    const contributions = [sdkContribution(snapshot), lane, unpriced];
+    const coverage = { complete: true, causes: [] };
+    fixture.componentRef.setInput('cliContributions', [lane, unpriced]);
+    fixture.componentRef.setInput('totals', {
+      tokens: sessionTotal(contributions, coverage, 'tokens'),
+      cost: sessionTotal(contributions, coverage, 'cost'),
+    });
+    fixture.detectChanges();
+
+    expect(tile('tokens').textContent).toContain('25.9M');
+    expect(tile('tokens').getAttribute('aria-label')).toContain('25,900,001 tokens');
+    expect(tile('tokens').getAttribute('aria-label')).not.toContain('at least');
+    expect(tile('cost').textContent).toContain('≥~$17.54');
+    expect(tile('cost').getAttribute('aria-label')).toContain('at least about $17.548');
+    const sourceText = tile('cost').querySelector('[role="meter"]')?.getAttribute('aria-valuetext');
+    expect(sourceText).toContain('1 of 2 lanes report no cost');
+    expect(root.querySelector('[data-testid="session-source-legend"]')?.textContent).toContain('1 unreported (cost)');
+    expect(tile('cost').querySelector('.ptah-meter-unreported')).toBeTruthy();
+    expect(tile('tokens').querySelector('.ptah-meter-unreported')).toBeNull();
+    expect(root.querySelector('[data-testid="session-accuracy-key"]')?.textContent).toMatch(/~ = estimate.*≥ = lower bound/);
+
+    models.click();
+    fixture.detectChanges();
+    const detail = root.querySelector('ptah-session-model-breakdown')?.textContent ?? '';
+    expect(detail).toContain(sourceText);
+    expect(detail).toMatch(/Lanes with tokens\s*2\/2/);
+    expect(detail).toMatch(/Lanes with cost\s*1\/2/);
+  });
+
+  it('mutes unknown amounts and keeps the unavailable cause on the Cost tooltip', () => {
+    const { fixture, tile } = render({
+      snapshot: { ...snapshot, tokenCount: undefined, totalCost: null, pricingCoverage: 'none',
+        costUnavailableReason: 'rate-missing' },
+    });
+    for (const key of ['tokens', 'cost']) {
+      expect(tile(key).querySelector('.tabular-nums.text-base-content-muted')?.textContent).toBe('—');
+      expect(tile(key).tabIndex).toBe(0);
     }
-    expect(grid?.textContent).toContain('all agents');
-    expect(grid?.textContent).toContain('this session');
-    expect(root.textContent).not.toMatch(/No data yet|Window unknown|Agents/);
-
-    const cache ={ ttl: '1h' as const, lastRequestAt: 0, expiresAt: 3_600_000 };
-    fixture.componentRef.setInput('stats', { ...stats, cache });
+    tile('cost').dispatchEvent(new FocusEvent('focus'));
     fixture.detectChanges();
-    const tile = root.querySelector('[data-testid="inspector-cache-tile"]');
-    expect(root.querySelector('ptah-inspector-cache-tile')?.classList.contains('col-span-2')).toBe(false);
-    expect(tile?.textContent).toContain('1:00:00');
-    expect(acquire).toHaveBeenCalledTimes(1);
-    expect(acquire).toHaveBeenCalledWith('second');
-    fixture.componentRef.setInput('stats', { ...stats, sessionId: 'two', cache: { ttl: '5m', lastRequestAt: 0, expiresAt: 300_000 } });
-    fixture.detectChanges();
-    expect(root.textContent).toContain('05:00');
-    fixture.componentRef.setInput('stats', stats);
-    fixture.detectChanges();
-    expect(root.querySelector('[data-testid="inspector-cache-tile"]')).toBeNull();
-    expect(release).toHaveBeenCalledTimes(1);
-    fixture.destroy();
+    const tooltip = tile('cost').querySelector<HTMLElement>('[role="tooltip"]');
+    expect(tooltip?.hidden).toBe(false);
+    expect(tooltip?.textContent).toContain('Not priced');
   });
 
-  it('preserves the Model label and display name below the metric grid', () => {
-    TestBed.configureTestingModule({
-      imports: [InspectorSessionStatsComponent],
-      providers: [{
-        provide: ModelStateService,
-        useValue: { availableModels: signal([{ id: 'claude-opus-4-7', name: 'Opus 4.7' }]) },
-      }],
-    });
-    const fixture = TestBed.createComponent(InspectorSessionStatsComponent);
-    const stats: SessionStatsInputs = {
-      sessionId: 'session-1',
-      snapshot: null,
-      liveModelStats: {
-        model: 'claude-opus-4-7',
-        contextUsed: 0,
-        contextPercent: 0,
-        contextWindow: 0,
-      },
-      compactionCount: 0,
-      limits: null,
-      budget: null,
-      context: { hasLive: false, known: false, percent: null, label: '—', usedTokens: null },
-      limitSummary: { state: 'none', text: null, extra: 0, source: null, fullText: null },
-    };
-    fixture.componentRef.setInput('stats', stats);
-    fixture.detectChanges();
-
-    const root = fixture.nativeElement.querySelector('[data-testid="inspector-session-stats"]') as HTMLElement;
-    expect(root.getAttribute('aria-label')).toBe('Session statistics');
-    expect(root.querySelector('h3')).toBeNull();
-    const label = [...root.querySelectorAll('div')].find(element => element.textContent?.trim() === 'Model');
-    expect(label).toBeTruthy();
-    expect(label?.classList.contains('text-base-content-muted')).toBe(true);
-    const value = label?.nextElementSibling as HTMLElement;
-    expect(value.textContent?.trim()).toBe('Opus 4.7');
-    expect(value.classList.contains('font-semibold')).toBe(true);
+  it.each([undefined, null, 0, Infinity])('shows muted --:-- with known turns for duration %p', (durationMs) => {
+    const { tile } = render({ snapshot: { ...snapshot, durationMs } });
+    const time = tile('time');
+    const output = time.querySelector('time');
+    expect(output?.textContent).toBe('--:--');
+    expect(output?.classList.contains('text-base-content-muted')).toBe(true);
+    expect(time.getAttribute('aria-label')).toContain('Duration not recorded');
+    expect(time.textContent).toContain('24 turns');
+    expect(time.tabIndex).toBe(0);
   });
 
-  it('left aligns the Models button when two models are present', () => {
-    TestBed.configureTestingModule({
-      imports: [InspectorSessionStatsComponent],
-      providers: [{ provide: ModelStateService, useValue: { availableModels: signal([]) } }],
-    });
-    const fixture = TestBed.createComponent(InspectorSessionStatsComponent);
-    const stats: SessionStatsInputs = {
-      sessionId: 'session-1', cache: null, liveModelStats: null,
-      compactionCount: 0, limits: null, budget: null,
-      context: { hasLive: false, known: false, percent: null, label: '—', usedTokens: null },
-      limitSummary: { state: 'none', text: null, extra: 0, source: null, fullText: null },
-      snapshot: {
-        sessionId: 'session-1', model: 'model-a', totalCost: 0, knownCost: 0,
-        tokens: { input: 0, output: 0, cacheRead: 0, cacheCreation: 0 },
-        tokenCount: 0, messageCount: 0, agentSessionCount: 0,
-        modelUsageList: [
-          { model: 'model-a', inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheCreation: 0, costUSD: 0 },
-          { model: 'model-b', inputTokens: 0, outputTokens: 0, cacheRead: 0, cacheCreation: 0, costUSD: 0 },
-        ],
-        status: 'ok', pricingCoverage: 'full', scope: 'session', revision: 1,
-      },
-    };
-    fixture.componentRef.setInput('stats', stats);
+  it('shows a known duration without a start, and a known start in focus detail', () => {
+    const { fixture, tile } = render({ snapshot: { ...snapshot, durationMs: 65_000, turnCount: 0 } });
+    const time = tile('time');
+    expect(time.querySelector('time')?.textContent).toBe('1:05');
+    expect(time.textContent).toContain('0 turns');
+    expect(time.getAttribute('aria-label')).toContain('1 minute 5 seconds');
+    fixture.componentRef.setInput('startedAt', new Date(0));
+    time.dispatchEvent(new FocusEvent('focus'));
     fixture.detectChanges();
-    const button = [...(fixture.nativeElement as HTMLElement).querySelectorAll('button')]
-      .find((element) => element.textContent?.trim() === 'Models');
-    expect(button).toBeTruthy();
-    for (const className of ['block', 'w-fit', 'self-start', 'text-left', 'leading-4']) {
-      expect(button?.classList.contains(className)).toBe(true);
-    }
+    const tooltip = time.querySelector<HTMLElement>('[role="tooltip"]');
+    expect(tooltip?.hidden).toBe(false);
+    expect(tooltip?.textContent).toContain('Started');
   });
 
-  it('keeps the context bar on the cell bottom edge when the session has compactions', () => {
-    TestBed.configureTestingModule({
-      imports: [InspectorSessionStatsComponent],
-      providers: [{ provide: ModelStateService, useValue: { availableModels: signal([]) } }],
-    });
-    const fixture = TestBed.createComponent(InspectorSessionStatsComponent);
-    const stats: SessionStatsInputs = {
-      sessionId: 'session-1', snapshot: null, cache: null, liveModelStats: null,
-      compactionCount: 2, limits: null, budget: null,
-      context: { hasLive: true, known: true, percent: 40, label: '40%', usedTokens: 80_000 },
-      limitSummary: { state: 'none', text: null, extra: 0, source: null, fullText: null },
-    };
+  it('preserves the single-model name and SDK scope, and restores each session disclosure independently', () => {
+    const { fixture, models, root } = render();
+    expect(root.querySelector('h3')?.textContent).toBe('Session');
+    expect(models.textContent).toMatch(/Models\s*1\s*Opus 4.7/);
+    expect(models.tabIndex).toBe(0);
+    const panel = () => root.querySelector<HTMLElement>(`#${models.getAttribute('aria-controls')}`);
+    expect(panel()?.hidden).toBe(true);
+    models.click();
+    fixture.detectChanges();
+    expect(models.getAttribute('aria-expanded')).toBe('true');
+    expect(panel()?.hidden).toBe(false);
+    expect(panel()?.textContent).toContain('SDK scope — orchestrator and SDK subagents, no CLI lanes');
+    expect(panel()?.textContent).not.toMatch(/Lanes with tokens/);
+    fixture.componentRef.setInput('stats', { ...stats, sessionId: 'second' });
+    fixture.detectChanges();
+    expect(panel()?.hidden).toBe(true);
     fixture.componentRef.setInput('stats', stats);
     fixture.detectChanges();
+    expect(panel()?.hidden).toBe(false);
+    models.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    fixture.detectChanges();
+    expect(models.getAttribute('aria-expanded')).toBe('false');
+    expect(panel()?.hidden).toBe(true);
+    expect(document.activeElement).toBe(models);
+  });
 
-    const root = fixture.nativeElement as HTMLElement;
-    const meter = root.querySelector('[data-testid="inspector-stats-grid"] ptah-meter');
-    expect(meter?.previousElementSibling?.textContent).toContain('2 compactions');
-    expect(meter?.nextElementSibling).toBeNull();
-    const bar = meter?.querySelector('[role="progressbar"]');
-    expect(bar?.getAttribute('aria-valuenow')).toBe('40');
-    expect(bar?.getAttribute('aria-valuetext')).toBe('40% of the context window, 80.0k tokens used');
-    expect(bar?.getAttribute('aria-labelledby')).toBeTruthy();
-    expect(bar?.hasAttribute('aria-label')).toBe(false);
-    expect(bar?.firstElementChild?.classList.contains('bg-[var(--ptah-gold)]')).toBe(true);
+  it('keeps the model count and real model category rows when multiple models are present', () => {
+    const { fixture, models, root } = render({ snapshot: {
+      ...snapshot, modelUsageList: [
+        { model: 'opus', inputTokens: 1, outputTokens: 2, cacheRead: 300, cacheCreation: 40, costUSD: null },
+        { model: 'sonnet', inputTokens: 3, outputTokens: 4, cacheRead: 50, cacheCreation: 600, costUSD: 0 },
+      ],
+    } });
+    expect(models.textContent).toMatch(/Models\s*2\s*Opus 4.7 \+1/);
+    models.click();
+    fixture.detectChanges();
+    const rows = root.querySelectorAll('[data-testid="model-usage-row"]');
+    expect(rows).toHaveLength(2);
+    expect(rows[0].textContent).toMatch(/Cache read\s*300.*Cache creation\s*40/);
+    expect(rows[0].textContent).toContain('—');
   });
 
   it.each([
-    ['tokens', 'tighten', 'bg-state-need', '42% of the 10.0k token budget'],
-    ['cost', 'limit', 'bg-state-err', '42% of the $10 cost budget'],
-    ['tokens', 'normal', 'bg-[var(--ptah-gold)]', '42% of the 10.0k token budget'],
-    ['weighted-tokens', 'normal', 'bg-[var(--ptah-gold)]', '42% of the 10.0k token budget'],
-  ] as const)('keeps the %s budget bar values and %s tone', (measure, stage, fillClass, valueText) => {
-    TestBed.configureTestingModule({
-      imports: [InspectorSessionStatsComponent],
-      providers: [{ provide: ModelStateService, useValue: { availableModels: signal([]) } }],
+    [null, 'weighted-fallback', 'normal', 6_298_000, 9_000_000, '6.3M / 9.0M', 'Weighted tokens in place of cost', 'bg-[var(--ptah-gold)]'],
+    [17.54, 'weighted-fallback', 'handoff', 6_298_000, 9_000_000, '6.3M / 9.0M', 'Weighted tokens in place of cost', 'bg-state-need'],
+    [17.54, 'cost', 'limit', 12.349, 25, '≥$12.34 / $25', 'Cost budget', 'bg-state-err'],
+    [17.54, 'weighted-tokens', 'tighten', 1_299, 2_000, '≥1.2k / 2.0k', 'Weighted session tokens', 'bg-state-need'],
+  ] as const)('shows the SDK budget (%p, %s, %s) in its own units', (totalCost, measure, stage, used, limit, figures, label, ink) => {
+    const lowerBound = measure !== 'weighted-fallback';
+    const { tile } = render({
+      snapshot: { ...snapshot, totalCost },
+      budget: { ...budget, measure, stage, used, limit, lowerBound, percent: 55.9 },
     });
-    const fixture = TestBed.createComponent(InspectorSessionStatsComponent);
-    const budget: SessionBudgetState = {
-      sessionId: 's', stage, unit: measure === 'cost' ? 'cost' : 'tokens', measure, used: measure === 'cost' ? 4.2 : 4200,
-      limit: measure === 'cost' ? 10 : 10_000,
-      percent: 42, lowerBound: false, revision: null, compactions: 0, autoHandoff: false,
-    };
-    fixture.componentRef.setInput('stats', {
-      sessionId: 's', snapshot: null, cache: null, liveModelStats: null,
-      compactionCount: 0, limits: null, budget,
-      context: { hasLive: false, known: false, percent: null, label: '—', usedTokens: null },
-      limitSummary: { state: 'none', text: null, extra: 0, source: null, fullText: null },
-    } satisfies SessionStatsInputs);
-    fixture.detectChanges();
-    const meter = (fixture.nativeElement as HTMLElement).querySelector('ptah-meter');
-    const bar = meter?.querySelector('[role="progressbar"]');
-    expect(meter?.classList.contains('mt-auto')).toBe(true);
-    expect(bar?.getAttribute('aria-label')).toBe(measure === 'cost' ? 'Session cost budget' : measure === 'weighted-tokens' ? 'Weighted session tokens' : 'Raw session tokens');
-    expect(bar?.getAttribute('aria-valuenow')).toBe('42');
-    expect(bar?.getAttribute('aria-valuetext')).toBe(valueText);
-    expect(bar?.firstElementChild?.classList.contains(fillClass)).toBe(true);
+    const cell = tile('budget');
+    expect(cell.textContent).toContain(figures);
+    expect(cell.getAttribute('aria-label')).toContain(label);
+    expect(cell.getAttribute('aria-label')).toContain('SDK usage only, CLI lanes are not counted');
+    expect(cell.textContent).toContain(lowerBound ? '≥55%' : '55%');
+    expect(cell.querySelector('[role="meter"]')?.firstElementChild?.classList.contains(ink)).toBe(true);
+    if (stage !== 'normal') expect(cell.textContent).toContain(stage);
   });
 
-  it('opens the Context details from its dotted label, under the totals row', () => {
-    TestBed.configureTestingModule({
-      imports: [InspectorSessionStatsComponent],
-      providers: [{ provide: ModelStateService, useValue: { availableModels: signal([]) } }],
-    });
-    const fixture = TestBed.createComponent(InspectorSessionStatsComponent);
-    const stats: SessionStatsInputs = {
-      sessionId: 'session-ctx', snapshot: null, cache: null,
-      liveModelStats: { model: 'm', contextUsed: 1000, contextPercent: 10, contextWindow: 10_000 },
-      compactionCount: 0, limits: null, budget: null,
-      context: { hasLive: true, known: true, percent: 10, label: '10%', usedTokens: 1000 },
-      limitSummary: { state: 'none', text: null, extra: 0, source: null, fullText: null },
-    };
-    fixture.componentRef.setInput('stats', stats);
+  it('shows the agents count only when the whole roster supplies it', () => {
+    const { fixture, root } = render();
+    expect(root.querySelector('[aria-label="Agents unavailable"]')?.textContent).toContain('—');
+    fixture.componentRef.setInput('agentCount', 4);
+    fixture.componentRef.setInput('liveAgentCount', 1);
     fixture.detectChanges();
-    const root = fixture.nativeElement as HTMLElement;
-    const toggle = root.querySelector<HTMLButtonElement>('button[aria-label="Context details"]');
-    expect(toggle?.textContent?.trim()).toBe('Context');
-    expect(toggle?.classList.contains('decoration-dotted')).toBe(true);
-      expect(toggle?.classList.contains('self-start')).toBe(true);
-      expect(toggle?.classList.contains('text-left')).toBe(true);
-    const tooltip = toggle?.getAttribute('title') ?? '';
-    expect(tooltip.length).toBeGreaterThan(0);
-    expect(root.querySelector('[role="progressbar"]')?.getAttribute('aria-valuenow')).toBe('10');
-    expect(root.querySelector('[role="region"]')).toBeNull();
-    toggle!.click();
-    fixture.detectChanges();
-    expect(toggle!.getAttribute('aria-expanded')).toBe('true');
-    const region = root.querySelector('[role="region"][aria-label="Context details"]');
-    expect(region?.textContent).toBe(tooltip);
-    expect(root.querySelector('[data-testid="inspector-stats-grid"]')?.contains(region)).toBe(false);
-    toggle!.click();
-    fixture.detectChanges();
-    expect(root.querySelector('[role="region"]')).toBeNull();
+    expect(root.querySelector('[aria-label="Agents: 4, 1 live"]')?.textContent).toContain('1 live');
   });
 
-  it('formats known totals, keeps cells one height and leaves the limit notice out', () => {
-    TestBed.configureTestingModule({
-      imports: [InspectorSessionStatsComponent],
-      providers: [{ provide: ModelStateService, useValue: { availableModels: signal([]) } }],
-    });
-    const fixture = TestBed.createComponent(InspectorSessionStatsComponent);
-    const snapshot = {
-      tokenCount: 2_284_653, totalCost: 1.2,
-      tokens: { input: 2_000_000, output: 19_323, cacheRead: 265_330, cacheCreation: 0 },
-    } as unknown as NonNullable<SessionStatsInputs['snapshot']>;
-    fixture.componentRef.setInput('stats', {
-      sessionId: 's', snapshot, cache: null, liveModelStats: null,
-      compactionCount: 0, limits: null, budget: null,
-      context: { hasLive: false, known: false, percent: null, label: '—', usedTokens: null },
-      limitSummary: { state: 'near', text: '5-hour 94%', extra: 0, source: 'session', fullText: '5-hour 94%' },
-    } satisfies SessionStatsInputs);
-    fixture.detectChanges();
-    const root = fixture.nativeElement as HTMLElement;
-    const grid = root.querySelector('[data-testid="inspector-stats-grid"]') as HTMLElement;
-    expect(grid.textContent).toContain('2.3M');
-    expect(grid.textContent).toContain('$1.20');
-    expect(grid.textContent).not.toContain('2284653');
-    expect(grid.textContent).not.toContain('5-hour');
-    const cells = [
-      ...root.querySelectorAll<HTMLElement>(
-        '[data-testid="inspector-stats-grid"] > div, [data-testid="inspector-stats-grid-2"] > div',
-      ),
-    ];
-    expect(cells).toHaveLength(6);
-    for (const [index, cell] of cells.entries()) {
-      expect(cell.classList.contains(index < 3 ? 'min-h-[4rem]' : 'min-h-[3.75rem]')).toBe(true);
-      expect(cell.classList.contains('flex-col')).toBe(true);
-    }
-    // The Plan limits section shows the limit notice; the stats do not repeat it.
-    expect(root.textContent).not.toContain('5-hour 94%');
-    expect(root.querySelector('button')?.textContent ?? '').not.toContain('Plan limits');
-  });
-
-  it('shows "Not priced" for an unpriced model, never "—" or $0 (issue #1459)', () => {
-    TestBed.configureTestingModule({
-      imports: [InspectorSessionStatsComponent],
-      providers: [{ provide: ModelStateService, useValue: { availableModels: signal([]) } }],
-    });
-    const fixture = TestBed.createComponent(InspectorSessionStatsComponent);
-    const snapshot = {
-      sessionId: 's', model: 'gemini-4-hydrogen-low', tokenCount: 31_660, totalCost: null,
-      pricingCoverage: 'none', costUnavailableReason: 'rate-missing',
-      tokens: { input: 31_539, output: 121, cacheRead: 0, cacheCreation: 0 },
-      messageCount: 1, status: 'ok',
-    } as unknown as NonNullable<SessionStatsInputs['snapshot']>;
-    fixture.componentRef.setInput('stats', {
-      sessionId: 's', snapshot, cache: null, liveModelStats: null,
-      compactionCount: 0, limits: null, budget: null,
-      context: { hasLive: false, known: false, percent: null, label: '—', usedTokens: null },
-      limitSummary: { state: 'none', text: null, extra: 0, source: null, fullText: null },
-    } satisfies SessionStatsInputs);
-    fixture.detectChanges();
-    const root = fixture.nativeElement as HTMLElement;
-    const cost = root.querySelector('[aria-label="Not priced"]');
-    expect(cost?.textContent?.trim()).toBe('Not priced');
-    expect(root.querySelector('[aria-label="Cost unavailable"]')).toBeNull();
-    expect(root.querySelector('[data-testid="inspector-stats-grid"]')?.textContent).toContain('31.7k');
-  });
-
-  describe('Codex main-agent snapshot (TASK_2026_2303)', () => {
-    const base = {
-      cache: null, liveModelStats: null, compactionCount: 0, limits: null, budget: null,
-      context: { hasLive: false, known: false, percent: null, label: '—', usedTokens: null },
-      limitSummary: { state: 'none', text: null, extra: 0, source: null, fullText: null },
-    } as const;
-    const codexSnapshot = (extra: Record<string, unknown>) => ({
-      sessionId: 'codex-1', model: 'gpt-5.5', totalCost: 0.42, knownCost: 0.42,
-      tokens: { input: 1_000, output: 200, cacheRead: 0, cacheCreation: 0 },
-      tokenCount: 1_200, messageCount: 2, status: 'ok', pricingCoverage: 'full',
-      scope: 'session', coverage: 'complete',
-      ...extra,
-    }) as unknown as NonNullable<SessionStatsInputs['snapshot']>;
-    const render = (snapshot: NonNullable<SessionStatsInputs['snapshot']>) => {
-      TestBed.configureTestingModule({
-        imports: [InspectorSessionStatsComponent],
-        providers: [{ provide: ModelStateService, useValue: { availableModels: signal([]) } }],
-      });
-      const fixture = TestBed.createComponent(InspectorSessionStatsComponent);
-      fixture.componentRef.setInput('stats', { sessionId: 'codex-1', snapshot, ...base } satisfies SessionStatsInputs);
-      fixture.detectChanges();
-      return fixture;
-    };
-
-    it('shows the session time when the snapshot carries durationMs', () => {
-      const root = render(codexSnapshot({ durationMs: 12_500 })).nativeElement as HTMLElement;
-      const time = root.querySelector('[data-testid="inspector-session-time"]');
-      expect(time?.textContent).toContain('12.5s');
-      expect(time?.textContent).not.toContain('—');
-    });
-
-    it.each([undefined, null, 0])('shows "—" only when the duration is unknown (%p)', (durationMs) => {
-      const root = render(codexSnapshot({ durationMs })).nativeElement as HTMLElement;
-      const time = root.querySelector('[data-testid="inspector-session-time"] > div:nth-child(2)');
-      expect(time?.textContent?.trim()).toBe('—');
-      expect(time?.getAttribute('title')).toBe('not reported');
-    });
-
-    const openModels = (fixture: ReturnType<typeof render>) => {
-      const root = fixture.nativeElement as HTMLElement;
-      [...root.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Models')?.click();
-      fixture.detectChanges();
-      return {
-        root,
-        rows: [...root.querySelectorAll('[aria-label="Per-model usage"] [role="listitem"]')],
-        total: root.querySelector('[aria-label="Per-model usage"] > div:last-child'),
-      };
-    };
-
-    it('keeps "—" for a partly priced row and labels the known subtotal', () => {
-      const { root, rows, total } = openModels(render(codexSnapshot({
-        totalCost: null, knownCost: 0.42, pricingCoverage: 'partial',
-        modelUsageList: [
-          { model: 'gpt-5.5', inputTokens: 900, outputTokens: 150, cacheRead: 0, cacheCreation: 0, costUSD: 0.42 },
-          { model: 'other-model', inputTokens: 100, outputTokens: 50, cacheRead: 0, cacheCreation: 0, costUSD: null },
-        ],
-      })));
-      expect(rows).toHaveLength(2);
-      expect(rows[0].textContent).toContain('$0.42');
-      expect(rows[1].textContent).toContain('—');
-      expect(rows[1].textContent).not.toMatch(/Not priced|\$0\.00/);
-      expect(total?.textContent).toContain('known subtotal $0.42');
-      // The header keeps its known-subtotal label as before.
-      expect(root.textContent).toContain('known subtotal $0.42');
-    });
-
-    it('labels rows "Not priced" when the session names a missing rate', () => {
-      const { rows, total } = openModels(render(codexSnapshot({
-        totalCost: null, knownCost: null, pricingCoverage: 'none',
-        costUnavailableReason: 'rate-missing',
-        modelUsageList: [
-          { model: 'model-a', inputTokens: 900, outputTokens: 150, cacheRead: 0, cacheCreation: 0, costUSD: null },
-          { model: 'model-b', inputTokens: 100, outputTokens: 50, cacheRead: 0, cacheCreation: 0, costUSD: null },
-        ],
-      })));
-      expect(rows).toHaveLength(2);
-      for (const row of rows) expect(row.textContent).toContain('Not priced');
-      expect(total?.textContent).toContain('Not priced');
-    });
+  it('omits the budget tile and leaves cache and context to Orchestrator detail', () => {
+    const { root } = render({ compactionCount: 3, cache: { ttl: '5m', lastRequestAt: 0, expiresAt: 300_000 } });
+    expect(root.querySelector('[data-testid="session-budget"]')).toBeNull();
+    expect(root.querySelector('ptah-disclosure')?.classList.contains('models-wide')).toBe(true);
+    expect(root.querySelector('ptah-inspector-cache-tile')).toBeNull();
+    expect(root.textContent).not.toContain('compactions');
   });
 });

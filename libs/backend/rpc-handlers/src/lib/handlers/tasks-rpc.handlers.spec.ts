@@ -46,6 +46,7 @@ import {
   InMemoryTaskIndexStore,
   SqliteTaskIndexStore,
   TaskIndexService,
+  type TaskDigestService,
   TaskScannerService,
   normalizeWorkspaceRoot,
   TaskDoctorService,
@@ -230,6 +231,7 @@ interface Suite {
   webviewManager: MockWebviewManager;
   logger: MockLogger;
   tasksSettings: MockTasksSettings;
+  digest: { getDigest: jest.Mock };
 }
 
 function buildSuite(
@@ -300,6 +302,7 @@ function buildSuite(
     }),
   };
 
+  const digest = { getDigest: jest.fn().mockResolvedValue(null) };
   const handlers = new TasksRpcHandlers(
     logger as unknown as Logger,
     rpc as unknown as RpcHandler,
@@ -311,6 +314,7 @@ function buildSuite(
     doctor as unknown as TaskDoctorService,
     sweep as unknown as TaskSweepService,
     tasksSettings as unknown as TasksSettings,
+    digest as unknown as TaskDigestService,
   );
   handlers.register();
 
@@ -326,6 +330,7 @@ function buildSuite(
     webviewManager,
     logger,
     tasksSettings,
+    digest,
   };
 }
 
@@ -342,10 +347,11 @@ function getHandler(
 }
 
 describe('TasksRpcHandlers.METHODS', () => {
-  it('owns exactly the 18 tasks:* methods', () => {
+  it('owns exactly the 19 tasks:* methods', () => {
     expect([...TasksRpcHandlers.METHODS]).toEqual([
       'tasks:list',
       'tasks:get',
+      'tasks:getDigest',
       'tasks:getArtifact',
       'tasks:readFolderMarkdown',
       'tasks:listFolderEntries',
@@ -372,6 +378,40 @@ describe('TasksRpcHandlers.register', () => {
     for (const method of TasksRpcHandlers.METHODS) {
       expect(() => getHandler(rpc, method)).not.toThrow();
     }
+  });
+});
+
+describe('tasks:getDigest', () => {
+  const taskId = 'TASK_2026_401';
+
+  it('returns the digest from the authorized workspace and a null for a missing carrier', async () => {
+    const { rpc, digest, index } = buildSuite();
+    const result = { task: { id: taskId }, documents: [], entryCount: 1 };
+    digest.getDigest.mockResolvedValueOnce(result);
+    const handler = getHandler(rpc, 'tasks:getDigest');
+
+    await expect(handler({ taskId })).resolves.toEqual({ digest: result });
+    expect(digest.getDigest).toHaveBeenCalledWith(expect.any(String), taskId);
+    await expect(handler({ taskId })).resolves.toEqual({ digest: null });
+    expect(index.ensureStarted).not.toHaveBeenCalled();
+  });
+
+  it('sanitizes digest failures before they leave the handler', async () => {
+    const { rpc, digest } = buildSuite();
+    digest.getDigest.mockRejectedValueOnce(new Error('EACCES /private/workspace/.ptah/specs'));
+    await expect(getHandler(rpc, 'tasks:getDigest')({ taskId })).rejects.toMatchObject({
+      message: 'Failed to read task digest.',
+    });
+  });
+
+  it.each([
+    [{ taskId: '../x' }, 'INVALID_PARAMS'],
+    [{ taskId, workspaceRoot: '/outside' }, 'UNAUTHORIZED_WORKSPACE'],
+  ])('rejects invalid or unauthorized params before index or digest work (%j)', async (params, code) => {
+    const { rpc, digest, index } = buildSuite();
+    await expect(getHandler(rpc, 'tasks:getDigest')(params)).rejects.toMatchObject({ errorCode: code });
+    expect(index.ensureStarted).not.toHaveBeenCalled();
+    expect(digest.getDigest).not.toHaveBeenCalled();
   });
 });
 
@@ -625,6 +665,7 @@ function buildRealSuite(store: ITaskIndexStore): {
     } as unknown as TaskDoctorService,
     createInertSweep() as unknown as TaskSweepService,
     createMockTasksSettings() as unknown as TasksSettings,
+    { getDigest: jest.fn() } as unknown as TaskDigestService,
   );
   handlers.register();
 
@@ -813,6 +854,7 @@ describe('tasks:create', () => {
       { plan: jest.fn() } as unknown as TaskDoctorService,
       createInertSweep() as unknown as TaskSweepService,
       createMockTasksSettings() as unknown as TasksSettings,
+      { getDigest: jest.fn() } as unknown as TaskDigestService,
     );
     handlers.register();
 
@@ -1356,6 +1398,7 @@ describe('tasks:doctorPlan', () => {
       realDoctor,
       createInertSweep() as unknown as TaskSweepService,
       createMockTasksSettings() as unknown as TasksSettings,
+      { getDigest: jest.fn() } as unknown as TaskDigestService,
     );
     handlers.register();
 
@@ -1620,6 +1663,7 @@ function buildParitySuite(store: ITaskIndexStore): {
     } as unknown as TaskDoctorService,
     createInertSweep() as unknown as TaskSweepService,
     createMockTasksSettings() as unknown as TasksSettings,
+    { getDigest: jest.fn() } as unknown as TaskDigestService,
   );
   handlers.register();
 
@@ -2491,6 +2535,7 @@ async function buildBulkSuite(
     { plan: jest.fn() } as unknown as TaskDoctorService,
     createInertSweep() as unknown as TaskSweepService,
     createMockTasksSettings() as unknown as TasksSettings,
+    { getDigest: jest.fn() } as unknown as TaskDigestService,
   );
   handlers.register();
 
@@ -3051,6 +3096,7 @@ async function buildLabelSuite(
     { plan: jest.fn() } as unknown as TaskDoctorService,
     createInertSweep() as unknown as TaskSweepService,
     createMockTasksSettings() as unknown as TasksSettings,
+    { getDigest: jest.fn() } as unknown as TaskDigestService,
   );
   handlers.register();
 
@@ -3851,6 +3897,7 @@ describe('tasks:* workspace authorization', () => {
   const VALID_PARAMS: Record<string, Record<string, unknown>> = {
     'tasks:list': {},
     'tasks:get': { taskId: 'TASK_2026_401' },
+    'tasks:getDigest': { taskId: 'TASK_2026_401' },
     'tasks:getArtifact': {
       taskId: 'TASK_2026_401',
       file: 'implementation-plan.md',

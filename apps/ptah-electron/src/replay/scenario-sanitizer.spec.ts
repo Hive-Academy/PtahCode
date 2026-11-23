@@ -1164,6 +1164,15 @@ describe('scenario-sanitizer (B5)', () => {
 });
 
 describe('task folder replay methods', () => {
+  it('keeps the task digest response and sanitizes workspace paths in its text', () => {
+    const { scenario } = sanitizeScenario({
+      rpc: { 'tasks:getDigest': { digest: { task: { title: 'See /Users/alice/work/project' } } } },
+      timeline: [],
+    }, { id: 'task-digest' });
+    expect(scenario.rpc['tasks:getDigest']).toHaveProperty('digest.task.title');
+    expect(JSON.stringify(scenario.rpc['tasks:getDigest'])).not.toContain('/Users/alice');
+  });
+
   it('permits bounded read-only task methods', () => {
     expect(DEFAULT_ALLOWED_RPC_METHODS.has('tasks:readFolderMarkdown')).toBe(true);
     expect(DEFAULT_ALLOWED_RPC_METHODS.has('tasks:listFolderEntries')).toBe(true);

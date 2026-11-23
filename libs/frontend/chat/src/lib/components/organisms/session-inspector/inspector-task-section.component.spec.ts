@@ -11,7 +11,6 @@ import {
 } from './inspector-task-section.component';
 import {
   documentExcerpt,
-  documentProgress,
   SessionTaskReader,
 } from './session-task-reader';
 
@@ -219,18 +218,16 @@ describe('InspectorTaskSectionComponent', () => {
     });
   });
 
-  it('strips front matter before excerpt and parses checkbox progress', () => {
+  it('strips front matter before excerpt and cuts it at 12 lines', () => {
     expect(
       documentExcerpt('---\ntitle: Example\n---\nFirst line\nSecond line'),
     ).toBe('First line\nSecond line');
     expect(documentExcerpt('---\ntitle: Example\n---\n')).toBe('No content');
-    expect(documentExcerpt('one\ntwo\nthree\nfour\nfive\nsix\nseven')).toBe(
-      'one\ntwo\nthree\nfour\nfive\nsix…',
+    const thirteen = Array.from({ length: 13 }, (_, i) => `line ${i + 1}`);
+    expect(documentExcerpt(thirteen.join('\n'))).toBe(
+      `${thirteen.slice(0, 12).join('\n')}…`,
     );
-    expect(documentProgress('- [x] One\n- [ ] Two')).toEqual({
-      done: 1,
-      total: 2,
-    });
+    expect(documentExcerpt('one\ntwo')).toBe('one\ntwo');
   });
 
   it('shows the task ID in a small ghost mono badge', () => {

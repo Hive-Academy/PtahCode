@@ -91,6 +91,17 @@ export const DESIGN_HANDOFF_FILE = 'design-handoff.md';
 /** Permanent fallback name for {@link BATCHES_FILE}. */
 export const LEGACY_BATCHES_FILE = 'tasks.md';
 
+export const DECISIONS_FILE = 'decisions.md';
+
+/** Numbered session handoffs, capturing the handoff number. */
+export const TASK_HANDOFF_FILE_PATTERN = /^handoff-(\d+)\.md$/;
+
+/** Captures the optional review subject and qualifier. */
+export const REVIEW_FILE_PATTERN = /^(?:(.+?)-)?(?:re-?)?review(?:-([a-z0-9-]+?))?\.md$/i;
+
+/** Captures the stem and revision of a document name without its extension. */
+export const VERSIONED_DOC_PATTERN = /^(.+?)-(?:v|rev)(\d+)$/i;
+
 /**
  * The CLOSED set of per-task documents Ptah recognises inside a task folder.
  *

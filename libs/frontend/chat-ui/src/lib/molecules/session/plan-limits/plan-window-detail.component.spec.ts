@@ -70,6 +70,19 @@ describe('PlanWindowDetailComponent', () => {
     expect(text).not.toMatch(/\b0%/);
   });
 
+  it('uses an amount scale and preserves the used text in full details', () => {
+    const root = render({
+      ...NEAR_WINDOW, state: 'ok', usedText: '12 of 40 requests',
+      amount: { value: 12, max: 40 },
+    });
+    const meter = root.querySelector('[role="meter"]');
+    expect(meter?.getAttribute('aria-valuemin')).toBe('0');
+    expect(meter?.getAttribute('aria-valuenow')).toBe('12');
+    expect(meter?.getAttribute('aria-valuemax')).toBe('40');
+    expect(meter?.getAttribute('aria-valuetext')).toBe('12 of 40 requests');
+    expect(meter?.firstElementChild?.className).not.toMatch(/bg-state-(need|err)/);
+  });
+
   it('with showSummary false, shows only the reset facts and the note', () => {
     const root = render(NEAR_WINDOW, false);
     const text = detail(root)?.textContent ?? '';

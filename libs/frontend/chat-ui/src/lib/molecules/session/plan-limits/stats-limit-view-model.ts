@@ -26,11 +26,17 @@
  *   as a live read failure. An Anthropic API-key owner arrives as
  *   `unsupported-auth` with no windows and is shown as unsupported.
  */
-import type { QuotaOwnerRef } from '@ptah-extension/shared';
+import type { PlanLimitWindow, QuotaOwnerRef } from '@ptah-extension/shared';
 import {
+  activeWindowExhaustion,
   formatLocalAbsolute,
+  formatRelative,
+  formatToolUtc,
   FRESHNESS_MS,
   NEAR_LIMIT_PERCENT,
+  ownerKeySuffix,
+  planLimitReasonLabel,
+  resetPassage,
   windowObservedAt,
 } from '@ptah-extension/shared';
 import {
@@ -41,12 +47,13 @@ import {
   runRow,
   subtotalTile,
 } from './lane-tiles';
-import { sessionPlan } from './plan-limit-tiles';
+import { sessionPlan, type SessionPlan } from './plan-limit-tiles';
 import type {
   StatsLimitContext,
   StatsLimitViewModel,
   StatsLimitViewModelInput,
   ProviderLaneLimitModel,
+  PlanLimitTileModel,
   InspectorLaneRunDetail,
 } from './stats-limit-view-model.types';
 
@@ -123,21 +130,30 @@ export function buildStatsLimitViewModel(
       ownerDetails,
     };
     const ownerPlan = sessionPlan({ ...input, sessionOwnerKey: ownerKey, sessionModelScope: scopes.length === 1 ? scopes[0] : null }, ctx);
-    const windows = ownerPlan.tiles.filter(tile => tile.kind === 'window' || tile.kind === 'cooldown' || tile.kind === 'evidence');
+    const windows = inspectorPlanTiles(ownerPlan, input.now).filter(tile =>
+      tile.kind === 'window' || tile.kind === 'cooldown' || tile.kind === 'evidence'
+      || tile.id === `plan-status:${ownerKey}` && ownerSnapshot?.status !== 'no-usage-source');
+    const noSource = ownerSnapshot?.status === 'no-usage-source'
+      ? planLimitReasonLabel(ownerSnapshot.statusReason, ownerSnapshot.owner.providerId) ?? 'No usage source'
+      : undefined;
+    const accountId = ownerAccountId(ownerPlan.owner);
     return {
       id: `provider:${providerKey}`, label: laneGroupLabel(runs),
       ownerState: 'single' as const, windows,
-      message: windows.some(tile => tile.kind === 'window') ? ''
-        : ownerSnapshot?.status === 'no-usage-source' || ownerSnapshot?.status === 'provider-unsupported'
-          || ownerSnapshot?.status === 'unsupported-auth' || ownerSnapshot?.status === 'unsupported-config'
-          ? 'Limits not tracked' : 'Usage unknown',
+      ...(accountId && { accountId }),
+      ...(ownerPlan.source && { source: ownerPlan.source }),
+      ...(ownerPlan.indicator && { indicator: ownerPlan.indicator }),
+      message: noSource ?? (windows.length > 0 ? '' : 'Usage unknown'),
       ownerDetails,
     };
   });
+  const sessionProviderAccountId = ownerAccountId(session.owner);
   return {
     ...(session.indicator && { indicator: session.indicator }),
     ...(refreshNotice !== undefined && { refreshNotice }),
-    planTiles: session.tiles,
+    planTiles: inspectorPlanTiles(session, input.now),
+    ...(sessionProviderAccountId && { sessionProviderAccountId }),
+    ...(session.source && { sessionProviderSource: session.source }),
     ...(session.owner && {
       sessionProviderLabel: sessionProviderLabel(session.owner),
     }),
@@ -149,6 +165,43 @@ export function buildStatsLimitViewModel(
     }),
     lanesCount: input.laneRuns.length,
   };
+}
+
+/** The sibling producer may supply a group on newer snapshots. */
+function windowGroupOf(window: PlanLimitWindow): string | undefined {
+  if ('group' in window && typeof window.group === 'string') {
+    return window.group.trim() || undefined;
+  }
+  return undefined;
+}
+
+function inspectorPlanTiles(plan: SessionPlan, now: number): PlanLimitTileModel[] {
+  return plan.tiles.map(tile => {
+    if (!tile.window) return tile;
+    const window = plan.renderedWindows.get(tile.window.windowKey)?.window;
+    if (!window) return tile;
+    const reset = tile.window.state === 'limit-reached'
+      ? activeWindowExhaustion(window, now)?.resetsAt ?? window.resetsAt
+      : tile.window.state === 'reset-usage-unknown'
+        ? resetPassage(window, now)?.nextResetAt
+        : window.resetsAt;
+    const resetTime = reset === undefined ? undefined : {
+      short: formatRelative(reset, now).replace(/^in /, ''),
+      full: formatToolUtc(reset),
+    };
+    return {
+      ...tile,
+      window: {
+        ...tile.window,
+        group: windowGroupOf(window) ?? null,
+        ...(resetTime && resetTime.full !== 'unknown' && { reset: resetTime }),
+      },
+    };
+  });
+}
+
+function ownerAccountId(owner: QuotaOwnerRef | undefined): string | null {
+  return owner && owner.identityKind !== 'unknown' ? ownerKeySuffix(owner.key) : null;
 }
 
 /** Provider names of plan-limit owners, as the host labels them. */

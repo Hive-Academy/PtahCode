@@ -4,6 +4,8 @@ import { CHART_TEXT, isValidRange, percentOf, resolveInk } from './chart-geometr
 import { PtahMeterTone, PtahRingSize, PtahRingThresholds } from './chart.types';
 
 const BOX: Readonly<Record<PtahRingSize, string>> = {
+  dot: 'h-[11px] w-[11px]',
+  inline: 'h-5 w-5',
   xs: 'h-6 w-6',
   stat: 'h-8 w-8',
   row: 'h-14 w-14',
@@ -14,6 +16,8 @@ const BOX: Readonly<Record<PtahRingSize, string>> = {
   xl: 'h-[var(--ptah-ring-size-xl,7rem)] w-[var(--ptah-ring-size-xl,7rem)]',
 };
 const CENTER: Readonly<Record<PtahRingSize, string>> = {
+  dot: 'hidden',
+  inline: 'hidden',
   xs: 'hidden',
   stat: 'text-[0.625rem]',
   row: 'text-sm',
@@ -23,8 +27,10 @@ const CENTER: Readonly<Record<PtahRingSize, string>> = {
   lg: 'text-[length:var(--ptah-ring-center-lg,1.125rem)]',
   xl: 'text-[length:var(--ptah-ring-center-xl,1.375rem)]',
 };
-/** Sub text is too small for xs, stat and sm. */
+/** Sub text is hidden at compact sizes. */
 const SUB: Readonly<Record<PtahRingSize, string>> = {
+  dot: 'hidden',
+  inline: 'hidden',
   xs: 'hidden',
   stat: 'hidden',
   row: 'text-xs',
@@ -36,6 +42,8 @@ const SUB: Readonly<Record<PtahRingSize, string>> = {
 };
 /** Circle geometry in the 36 unit viewBox. `tile` is the thicker ring of the stat tile. */
 const GEOMETRY: Readonly<Record<PtahRingSize, { readonly stroke: number; readonly radius: number }>> = {
+  dot: { stroke: 4, radius: 15 },
+  inline: { stroke: 4, radius: 15 },
   xs: { stroke: 4, radius: 15 },
   stat: { stroke: 4, radius: 15 },
   row: { stroke: 4, radius: 15 },
@@ -65,7 +73,7 @@ type RingTextWeight = keyof typeof TEXT_WEIGHT;
  * `aria-valuetext`. `indeterminate` is a pulsing `progressbar` without
  * `aria-valuenow`.
  *
- * Sizes are a named scale. `xs`, `stat`, `sm`, `row` and `md` are 24, 32, 40, 56 and 64 px. `tile` follows
+ * `dot` and `inline` are 11 and 20 px. `xs`, `stat`, `sm`, `row` and `md` are 24, 32, 40, 56 and 64 px. `tile` follows
  * `--ptah-stat-value-h` (the stat tile value row) with a thicker ring and a soft track. `lg` and
  * `xl` read `--ptah-ring-size-*` (96 and 112 px). The SVG geometry is a fixed
  * viewBox and scales with the box. At `stat`, percent labels wider than two
