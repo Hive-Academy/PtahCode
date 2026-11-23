@@ -220,13 +220,14 @@ export class LaneDeliveryController {
       });
     });
     effect(() => {
-      // Text recovered from an undelivered message ("Recover text") lands in this draft.
+      // A message recovered from an undelivered receipt ("Recover text")
+      // lands in this draft with its files, images, model and effort.
       if (!this.sources()) return;
       const agentId = this.agentId();
       if (!this.store.recovered().has(agentId)) return;
       untracked(() => {
-        const text = this.store.takeRecovered(agentId);
-        if (text) this.restore(text, EMPTY_SNAPSHOT);
+        const message = this.store.takeRecoveredMessage(agentId);
+        if (message?.text) this.restore(message.text, this.snapshotFromTurn(message.turn));
       });
     });
   }
@@ -320,34 +321,96 @@ export class LaneDeliveryController {
     this._sending.set(true);
     this.cancelling.add(messageId);
     try {
+      const message = await this.takeQueued(agentId, messageId);
+      if (message) this.restore(message.text, message.snapshot);
+    } finally {
+      this.cancelling.delete(messageId);
+      if (this.agentId() === agentId) this._sending.set(false);
+    }
+  }
+
+  /**
+   * Send a queued message now (the queued card's Send now): withdraw it, then
+   * send its text and turn snapshot with delivery `now`, apart from the draft.
+   * Needs `allowPartialTurnLoss` when {@link nowNeedsConfirmation} is true. A
+   * refused or failed send puts the message back into the composer.
+   */
+  async sendQueuedNow(messageId: string, allowPartialTurnLoss = false): Promise<void> {
+    const sources = this.sources();
+    const agentId = this.agentId();
+    if (!sources || !agentId || sources.stopped() || this._sending()) return;
+    if (!this.state().now || this.state().nowDisabledReason) return;
+    this._sending.set(true);
+    this._error.set(null);
+    this.cancelling.add(messageId);
+    let message: AcceptedMessage | null = null;
+    try {
+      message = await this.takeQueued(agentId, messageId);
+      if (!message || this.agentId() !== agentId) return;
+      const turn = toTurnRequest(message.snapshot);
+      const outcome = await this.store.sendMessage(
+        agentId, message.text, 'now', allowPartialTurnLoss,
+        this.submissionKey(agentId, message.text, 'now', turn), turn,
+      );
+      this.submission = null;
+      const receipt = outcome.receipt;
+      if (outcome.mode === 'unsupported' || !receipt || (receipt.state !== 'accepted' && receipt.state !== 'started')) {
+        // The message left the queue; put it back so nothing is lost.
+        this.restore(message.text, message.snapshot);
+        this._error.set(outcome.detail ?? 'Could not send your message. Try again.');
+        this.refreshPreviews();
+        return;
+      }
+      if (receipt.state === 'accepted') {
+        this.remember(receipt.id, message);
+        const latest = this.store.receipt(agentId, receipt.id);
+        if (latest) this.processReceipt(latest);
+      }
+      sources.accepted();
+    } catch {
+      if (message && this.agentId() === agentId) {
+        this.restore(message.text, message.snapshot);
+        this._error.set('Could not send your message. Try again.');
+        this.refreshPreviews();
+      }
+    } finally {
+      this.cancelling.delete(messageId);
+      if (this.agentId() === agentId) this._sending.set(false);
+    }
+  }
+
+  /**
+   * Read a queued message (locally, or from the backend after a reload) and
+   * cancel it. Null, with the error set, when it could not be taken back.
+   */
+  private async takeQueued(agentId: string, messageId: string): Promise<AcceptedMessage | null> {
+    try {
       // After a reload the message lives only in the backend: read it before the cancel drops it.
       const local = acceptedMessages.get(messageId);
-      let text: string;
-      let snapshot: LaneTurnSnapshot;
-      if (local?.agentId === agentId) ({ text, snapshot } = local);
+      let message: AcceptedMessage;
+      if (local?.agentId === agentId) message = local;
       else {
         try {
           const recovered = await this.store.recoverQueuedMessage(agentId, messageId);
-          text = recovered.text;
-          snapshot = this.snapshotFromTurn(recovered.turn);
+          message = { agentId, text: recovered.text, snapshot: this.snapshotFromTurn(recovered.turn) };
         } catch {
           // degradation-audit: reported - the cancel would drop the only copy of
           // the message, so Edit stops, shows the error, and the queued message
           // stays for a retry.
           this._error.set('Could not load the queued message to edit. Try again.');
-          return;
+          return null;
         }
       }
       const receipt = await this.store.cancelMessage(agentId, messageId);
-      if (receipt.reason === 'cancelled-by-user') {
-        this.restore(text, snapshot);
-        acceptedMessages.delete(messageId);
-      } else this._error.set('Message already started and could not be cancelled.');
+      if (receipt.reason !== 'cancelled-by-user') {
+        this._error.set('Message already started and could not be cancelled.');
+        return null;
+      }
+      acceptedMessages.delete(messageId);
+      return message;
     } catch {
       this._error.set('Could not cancel the queued message. Try again.');
-    } finally {
-      this.cancelling.delete(messageId);
-      if (this.agentId() === agentId) this._sending.set(false);
+      return null;
     }
   }
 

@@ -1,4 +1,4 @@
-import { computed, signal } from '@angular/core';
+import { Component, computed, input, signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { AgentDeliveryStore, AgentMonitorStore, PermissionHandlerService, type MonitoredAgent } from '@ptah-extension/chat-streaming';
 import { TabManagerService } from '@ptah-extension/chat-state';
@@ -17,6 +17,7 @@ import { SessionAgentTrayService } from '../../../services/session-agents/sessio
 import { SessionAgentRosterService } from '../../../services/session-agents/session-agent-roster.service';
 import type { SessionAgent } from '../../../services/session-agents/session-agent-roster';
 import { InspectorAgentsSectionComponent } from './inspector-agents-section.component';
+import { LaneComposerComponent } from '../../molecules/lane-composer/lane-composer.component';
 import type { InspectorLaneRunDetail } from '@ptah-extension/chat-ui';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -63,6 +64,15 @@ const CARD: OrchestratorCardModel = {
   requests: [],
 };
 
+/** Stands in for the lane composer; its behaviour is pinned by lane-composer.component.spec.ts. */
+@Component({ selector: 'ptah-lane-composer', standalone: true, template: '' })
+class LaneComposerStubComponent {
+  readonly agentId = input.required<string>();
+  readonly laneLabel = input('lane');
+  readonly cli = input('CLI');
+  readonly stopped = input(false);
+}
+
 describe('InspectorAgentsSectionComponent', () => {
   const detail: InspectorLaneRunDetail = {
     runId: 'lane-1', cliLabel: 'Codex', role: 'backend-developer',
@@ -92,7 +102,7 @@ describe('InspectorAgentsSectionComponent', () => {
     TestBed.configureTestingModule({
       imports: [InspectorAgentsSectionComponent],
       providers: [
-        { provide: AgentDeliveryStore, useValue: { receipts: signal(new Map()), recovered: signal(new Map()), takeRecovered: () => null,
+        { provide: AgentDeliveryStore, useValue: { receipts: signal(new Map()), recovered: signal(new Map()), takeRecoveredMessage: () => null,
           composerState: () => ({ queue: { mode: 'queue-next-turn' }, now: { mode: 'steer' } }), previewMessage: jest.fn().mockResolvedValue(undefined),
           receiptLabel: () => 'Queued', receiptStatus: () => ({ label: 'Queued' }), newIdempotencyKey: () => 'key' } },
         {
@@ -144,6 +154,10 @@ describe('InspectorAgentsSectionComponent', () => {
           useValue: { now: () => fixedNow, acquire: () => () => undefined },
         },
       ],
+    });
+    TestBed.overrideComponent(InspectorAgentsSectionComponent, {
+      remove: { imports: [LaneComposerComponent] },
+      add: { imports: [LaneComposerStubComponent] },
     });
   });
 
@@ -932,10 +946,12 @@ describe('InspectorAgentsSectionComponent', () => {
     expect(root.querySelector('[aria-label="Actions for Codex"]')).toBeNull();
     element<HTMLButtonElement>(root, '[data-agent-key="cli:lane-1"]').click();
     fixture.detectChanges();
-    const composer = element(root, 'ptah-lane-composer');
-    const label = element(composer, 'label');
-    expect(label.textContent?.trim()).toBe('Message Codex');
-    expect(composer.querySelector('textarea')?.id).toBe(label.htmlFor);
+    element(root, 'ptah-lane-composer');
+    const composer = fixture.debugElement.query((node) => node.componentInstance instanceof LaneComposerStubComponent)
+      .componentInstance as LaneComposerStubComponent;
+    expect(composer.agentId()).toBe('lane-1');
+    expect(composer.laneLabel()).toBe('Codex');
+    expect(composer.stopped()).toBe(false);
     expect(root.querySelector('ptah-agent-steer-input')).toBeNull();
   });
 

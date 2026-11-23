@@ -5,6 +5,7 @@ import {
   AgentDeliveryStore,
   AgentMonitorStore,
   LaneTurnSettingsStore,
+  type RecoveredLaneMessage,
 } from '@ptah-extension/chat-streaming';
 import type { AgentDeliveryReceipt } from '@ptah-extension/shared';
 import { ComposerAttachmentsService, type ComposerImage } from '../../../services/composer-attachments.service';
@@ -31,7 +32,7 @@ function receipt(overrides: Partial<AgentDeliveryReceipt> = {}): AgentDeliveryRe
 
 describe('LaneDeliveryController', () => {
   const receipts = signal<ReadonlyMap<string, readonly AgentDeliveryReceipt[]>>(new Map());
-  const recovered = signal<ReadonlyMap<string, string>>(new Map());
+  const recovered = signal<ReadonlyMap<string, RecoveredLaneMessage>>(new Map());
   const agentsById = signal<ReadonlyMap<string, object>>(new Map());
   let keys = 0;
   const store = {
@@ -51,10 +52,10 @@ describe('LaneDeliveryController', () => {
     }),
     receipt: () => undefined,
     newIdempotencyKey: () => `key-${++keys}`,
-    takeRecovered: (id: string) => {
-      const text = recovered().get(id) ?? null;
+    takeRecoveredMessage: (id: string) => {
+      const message = recovered().get(id) ?? null;
       recovered.set(new Map());
-      return text;
+      return message;
     },
   };
 
@@ -280,9 +281,93 @@ describe('LaneDeliveryController', () => {
 
   it('puts recovered text from a Recover text action into the draft', () => {
     draft.set('Draft');
-    recovered.set(new Map([[AGENT, 'Recovered']]));
+    recovered.set(new Map([[AGENT, { text: 'Recovered' }]]));
     TestBed.tick();
     expect(draft()).toBe('Draft\nRecovered');
+  });
+
+  it('restores the recovered turn (files, images, model, effort) with the text', () => {
+    recovered.set(new Map([[AGENT, {
+      text: 'Recovered',
+      turn: { model: 'opus', reasoningEffort: 'high', files: [FILE.path], images: [{ data: IMAGE.data, mediaType: 'image/png' }] },
+    }]]));
+    TestBed.tick();
+    expect(draft()).toBe('Recovered');
+    expect(attachments.files().map((file) => file.path)).toEqual([FILE.path]);
+    expect(attachments.images().map((image) => image.data)).toEqual([IMAGE.data]);
+    expect(settings.pending(AGENT)).toEqual({ model: 'opus', reasoningEffort: 'high' });
+  });
+
+  describe('sendQueuedNow', () => {
+    async function queueOne(): Promise<AgentDeliveryReceipt> {
+      const queued = receipt();
+      store.sendMessage.mockResolvedValueOnce({ mode: 'queue-next-turn', receipt: queued });
+      fillComposer('Queued body');
+      await controller.send('queue');
+      push(queued);
+      return queued;
+    }
+
+    it('withdraws the queued message and sends it now with its snapshot, apart from the draft', async () => {
+      const queued = await queueOne();
+      store.cancelMessage.mockResolvedValue({ ...queued, state: 'cancelled', reason: 'cancelled-by-user' });
+      store.sendMessage.mockResolvedValueOnce({ mode: 'steer', receipt: receipt({ state: 'started', delivery: 'now' }) });
+      draft.set('Unrelated draft');
+
+      await controller.sendQueuedNow(queued.id);
+
+      expect(store.cancelMessage).toHaveBeenCalledWith(AGENT, queued.id);
+      expect(store.sendMessage).toHaveBeenLastCalledWith(AGENT, 'Queued body', 'now', false, expect.any(String), {
+        model: 'opus', reasoningEffort: 'high',
+        images: [{ data: IMAGE.data, mediaType: 'image/png' }], files: [FILE.path],
+      });
+      expect(store.cancelMessage.mock.invocationCallOrder[0]).toBeLessThan(store.sendMessage.mock.invocationCallOrder[1]);
+      expect(draft()).toBe('Unrelated draft');
+      expect(controller.error()).toBeNull();
+    });
+
+    it('passes turn-loss consent through', async () => {
+      const queued = await queueOne();
+      store.cancelMessage.mockResolvedValue({ ...queued, state: 'cancelled', reason: 'cancelled-by-user' });
+      store.sendMessage.mockResolvedValueOnce({ mode: 'interrupt-resume', receipt: receipt({ state: 'started', delivery: 'now' }) });
+      await controller.sendQueuedNow(queued.id, true);
+      expect(store.sendMessage).toHaveBeenLastCalledWith(AGENT, 'Queued body', 'now', true, expect.any(String), expect.anything());
+    });
+
+    it('puts the message back into the composer when the lane refuses the send', async () => {
+      const queued = await queueOne();
+      store.cancelMessage.mockResolvedValue({ ...queued, state: 'cancelled', reason: 'cancelled-by-user' });
+      store.sendMessage.mockResolvedValueOnce({ mode: 'unsupported', detail: 'Codex refused the model change.' });
+      await controller.sendQueuedNow(queued.id);
+      expect(draft()).toBe('Queued body');
+      expect(attachments.files()).toEqual([FILE]);
+      expect(controller.error()).toBe('Codex refused the model change.');
+    });
+
+    it('sends nothing when the queued message already started', async () => {
+      const queued = await queueOne();
+      store.cancelMessage.mockResolvedValue({ ...queued, state: 'started' });
+      const calls = store.sendMessage.mock.calls.length;
+      await controller.sendQueuedNow(queued.id);
+      expect(store.sendMessage).toHaveBeenCalledTimes(calls);
+      expect(controller.error()).toBe('Message already started and could not be cancelled.');
+    });
+
+    it('does nothing while Send now is unavailable', async () => {
+      const queued = await queueOne();
+      store.composerState.mockReturnValue({
+        queue: { supported: true, mode: 'queue-next-turn' },
+        now: { supported: false, mode: 'unsupported', reason: 'No steer' },
+        nowDisabledReason: 'No steer',
+      });
+      // `state` is computed from the agent id; a lane switch and back re-reads it.
+      agentId.set(OTHER_AGENT);
+      TestBed.tick();
+      agentId.set(AGENT);
+      TestBed.tick();
+      await controller.sendQueuedNow(queued.id);
+      expect(store.cancelMessage).not.toHaveBeenCalled();
+    });
   });
 
   it('starts a switched lane from an empty draft and tray and loads its previews', () => {

@@ -656,15 +656,6 @@ export class AgentDeliveryStore {
     return message;
   }
 
-  /**
-   * Text-only take for the lane composer callers that do not restore a turn
-   * yet (`LaneDeliveryController` in chat, `LaneComposerComponent` in chat-ui).
-   * It drops the turn. Remove it once those callers use `takeRecoveredMessage`.
-   */
-  takeRecovered(agentId: string): string | null {
-    return this.takeRecoveredMessage(agentId)?.text ?? null;
-  }
-
   async retryParentDelivery(deliveryId: ParentDeliveryView['deliveryId'], confirmDuplicateRisk = false): Promise<ParentDeliveryView> {
     const result = await this.rpc.call('agent:retryParentDelivery', {
       deliveryId, ...(confirmDuplicateRisk ? { confirmDuplicateRisk: true } : {}),

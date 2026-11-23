@@ -173,6 +173,16 @@ function optionKey(item: SuggestionItem): string {
           }
         </div>
       }
+
+      <!-- How a chosen entry is sent (a lane composer's @ list). -->
+      @if (footer(); as text) {
+        <div
+          class="px-2 py-1.5 border-t border-base-300 text-[11px] text-base-content-muted"
+          data-testid="suggestions-footer"
+        >
+          {{ text }}
+        </div>
+      }
     </div>
   `,
   changeDetection: ChangeDetectionStrategy.OnPush,
@@ -188,6 +198,8 @@ export class UnifiedSuggestionsDropdownComponent implements OnDestroy {
   readonly groups = input<readonly SuggestionGroup[] | null>(null);
   /** One non-selectable row instead of any suggestion (e.g. unsupported). */
   readonly notice = input<string | null>(null);
+  /** One line at the foot of the panel, e.g. how chosen files are sent. */
+  readonly footer = input<string | null>(null);
   readonly suggestionSelected = output<SuggestionItem>();
   readonly closed = output<void>();
   private readonly floatingPanel =

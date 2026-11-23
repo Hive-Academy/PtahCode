@@ -70,6 +70,7 @@ function promptSuggestion(
       [suggestions]="suggestions()"
       [groups]="groups()"
       [notice]="notice()"
+      [footer]="footer()"
       (suggestionSelected)="onSelected($event)"
     />
   `,
@@ -89,6 +90,7 @@ class HostComponent {
   ]);
   readonly groups = signal<readonly SuggestionGroup[] | null>(null);
   readonly notice = signal<string | null>(null);
+  readonly footer = signal<string | null>(null);
   readonly selectedItems: SuggestionItem[] = [];
 
   onSelected(item: SuggestionItem): void {
@@ -117,6 +119,16 @@ describe('UnifiedSuggestionsDropdownComponent', () => {
     });
 
     fixture.detectChanges();
+  });
+
+  it('shows a footer line only when one is given', () => {
+    const panel = fixture.nativeElement as HTMLElement;
+    expect(panel.querySelector('[data-testid="suggestions-footer"]')).toBeNull();
+    host.footer.set('Chosen files are sent as file references.');
+    fixture.detectChanges();
+    expect(panel.querySelector('[data-testid="suggestions-footer"]')?.textContent?.trim()).toBe(
+      'Chosen files are sent as file references.',
+    );
   });
 
   it('gives file, command and prompt suggestions a dense overlay surface', () => {

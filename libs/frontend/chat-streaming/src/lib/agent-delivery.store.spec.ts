@@ -167,8 +167,8 @@ describe('AgentDeliveryStore', () => {
     rpc.call.mockResolvedValueOnce(rpcSuccess({ text: 'queued body' }));
     await store.recoverIntoComposer(resumed, lane, 'message-1');
     expect(rpc.call).toHaveBeenCalledWith('agent:getQueuedMessageBody', { agentId: lane, messageId: 'message-1' });
-    expect(store.takeRecovered(resumed)).toBe('queued body');
-    expect(store.takeRecovered(resumed)).toBeNull();
+    expect(store.takeRecoveredMessage(resumed)).toEqual({ text: 'queued body' });
+    expect(store.takeRecoveredMessage(resumed)).toBeNull();
   });
 
   describe('turn snapshot', () => {
@@ -233,14 +233,6 @@ describe('AgentDeliveryStore', () => {
       await store.recoverIntoComposer(resumed, lane, 'message-2');
       await store.recoverIntoComposer(resumed, lane, 'message-3');
       expect(store.takeRecoveredMessage(resumed)).toEqual({ text: 'one\ntwo\nthree', turn });
-    });
-
-    it('takeRecovered still returns the text alone and consumes the entry', async () => {
-      rpc.call.mockResolvedValueOnce(rpcSuccess({ text: 'queued body', turn }));
-      await store.recoverIntoComposer(resumed, lane, 'message-1');
-      expect(store.recovered().has(resumed)).toBe(true);
-      expect(store.takeRecovered(resumed)).toBe('queued body');
-      expect(store.takeRecoveredMessage(resumed)).toBeNull();
     });
 
     it('sends the turn with the message only when one is given', async () => {

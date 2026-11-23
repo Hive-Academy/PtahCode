@@ -18,6 +18,7 @@ export { isTabBusyGenerating } from './lib/services/chat-store/tab-busy';
 export * from './lib/directives';
 export { ComposerAttachmentsService, type ComposerImage } from './lib/services/composer-attachments.service';
 export { AttachmentTrayComponent } from './lib/components/molecules/attachment-tray/attachment-tray.component';
+export { LaneComposerComponent } from './lib/components/molecules/lane-composer/lane-composer.component';
 
 export { UpdateDialogService } from './lib/update-dialog/update-dialog.service';
 export { UpdateDialogComponent } from './lib/update-dialog/update-dialog.component';
