@@ -249,6 +249,11 @@ export function isTaskDigestQuestionSource(name: string, latest: boolean): boole
     || (latest && describeTaskDocumentName(name).group === 'plan:' + IMPLEMENTATION_PLAN_FILE.replace(MARKDOWN_EXTENSION, ''));
 }
 
+// `Resolved:` counts only as a status marker: at the start of the item (after an optional
+// checkbox) or after a dash separator. The same text in the question itself is not a status.
+const RESOLVED_QUESTION =
+  /^\[x\]|(?:^(?:\[ \][ \t]*)?|[ \t][—–-][ \t]+)[*_]{0,2}Resolved:|\(resolved\)/i;
+
 export function countTaskOpenQuestions(text: string): number {
   let total = 0;
   let sectionLevel = 0;
@@ -259,7 +264,7 @@ export function countTaskOpenQuestions(text: string): number {
     if (section && !sectionLevel) sectionLevel = section[1].length;
     if (!sectionLevel) continue;
     const item = /^(?:\d+\.|[-*])[ \t]+(\S.*)/.exec(line)?.[1];
-    if (item && !/^\[x\]|\bResolved:|\(resolved\)/i.test(item)) total++;
+    if (item && !RESOLVED_QUESTION.test(item)) total++;
   }
   return total;
 }

@@ -111,3 +111,13 @@ Classes: CONFIRMED (corrected in the next commit unless marked DEFER), DISPUTED,
   -yJA (`costPartial` is true for each lane with segment usage; decisions row 22 keeps a restored lane unmarked).
 - DEFERRED: PRRT_kwDOPngTds666A1q follow-up (a late stale error of task A can show below the same file name
   of task B; the designed `stale` message is pinned by a spec; needs an owner decision).
+
+## Round 2 follow-up (head 98e0743b0)
+
+No third CodeRabbit round. All 12 round-2 replies are on the threads. CodeRabbit withdrew the
+findings on `PRRT_kwDOPngTds66-yI3` and `PRRT_kwDOPngTds66-yJA`. Four of our replies got the
+CodeRabbit chat rate limit (not processed by the bot; the replies are posted).
+
+| Thread | Finding | Class | Proof / action |
+| --- | --- | --- | --- |
+| `PRRT_kwDOPngTds66-yIX` | `\bResolved:` matches inside the question text | CORRECTED | Proven: `- What should the label "Resolved:" display?` was not counted. `RESOLVED_QUESTION` now accepts `Resolved:` only at the item start (optional checkbox, optional emphasis) or after a dash separator. One test added. |

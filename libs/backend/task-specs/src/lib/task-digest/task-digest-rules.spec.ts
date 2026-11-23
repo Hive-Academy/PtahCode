@@ -306,4 +306,16 @@ describe('open questions', () => {
     const text = '## Open questions\n- Unresolved: Which option?\n- Resolved: Option A\n- Option B — Resolved: no';
     expect(countTaskOpenQuestions(text)).toBe(1);
   });
+
+  it('counts a question that only mentions the text Resolved: and excludes status markers', () => {
+    const text = [
+      '## Open questions',
+      '- What should the label "Resolved:" display?',
+      '- Is the field named isResolved: boolean?',
+      '- [ ] Resolved: Option A',
+      '- **Resolved:** Option B',
+      '- Option C - resolved: yes',
+    ].join('\n');
+    expect(countTaskOpenQuestions(text)).toBe(2);
+  });
 });
