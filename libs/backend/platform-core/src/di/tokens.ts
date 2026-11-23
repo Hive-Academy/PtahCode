@@ -134,6 +134,9 @@ export const PLATFORM_TOKENS = {
   /** IMcpSubagentRootRegistrar — keeps the Ptah `.mcp.json` entry in a non-workspace folder (a child session's worktree) while a session runs there. Registered only by hosts that run the MCP server. */
   MCP_SUBAGENT_ROOT_REGISTRAR: Symbol.for('PlatformMcpSubagentRootRegistrar'),
 
+  /** IMcpGateway — serves the user's own MCP servers through the `ptah` server. Bound by cli-agent-runtime only when auth secrets are registered; inject as optional. */
+  MCP_GATEWAY: Symbol.for('PlatformMcpGateway'),
+
   /** ITracer — performance tracing port (spans + breadcrumbs). Adapters: SentryTracerAdapter / NoopTracer (vscode-core). */
   TRACER: Symbol.for('Ptah.ITracer'),
 

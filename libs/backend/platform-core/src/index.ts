@@ -177,6 +177,14 @@ export type {
   McpCallerToolProfile,
 } from './interfaces/mcp-caller-credentials.interface';
 export type {
+  IMcpGateway,
+  McpGatewayCallResult,
+  McpGatewayScope,
+  McpGatewayServerState,
+  McpGatewayServerStatus,
+  McpGatewayTool,
+} from './interfaces/mcp-gateway.interface';
+export type {
   IMcpSubagentRootRegistrar,
   McpSubagentRootRetention,
 } from './interfaces/mcp-subagent-root-registrar.interface';

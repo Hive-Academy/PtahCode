@@ -57,6 +57,20 @@ export interface McpCallerBinding {
    * server rejects those five tools for every other caller.
    */
   readonly cronWriteApproval?: boolean;
+  /**
+   * `true` only on a session credential whose host asks the user before each
+   * gateway tool call (the user's own MCP servers served through `ptah`), via
+   * the PreToolUse gateway approval gate. `IMcpGateway` hides and rejects
+   * gateway tools for `session` callers without it.
+   */
+  readonly gatewayApproval?: boolean;
+  /**
+   * `true` only on an `internal-query` credential whose run opted in to the
+   * user's connectors (a cron job). Calls run unattended; the one-shot
+   * PreToolUse hook denies gateway tools without the opt-in. `IMcpGateway`
+   * hides and rejects gateway tools for `internal-query` callers without it.
+   */
+  readonly includeConnectors?: boolean;
 }
 
 export interface IMcpCallerCredentials {
