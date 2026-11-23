@@ -24,8 +24,11 @@ import {
   type HostKind,
   type IWorkspaceProvider,
   type IMcpCallerCredentials,
+  type IMcpGateway,
 } from '@ptah-extension/platform-core';
 import { createCronApprovalGate } from '../permission/cron-approval-gate';
+import { isCronMutatingTool } from '../permission/cron-tool-policy';
+import { createGatewayApprovalGate } from '../permission/gateway-approval-gate';
 import { MemoryPromptInjector } from './memory-prompt-injector';
 import { CodeSymbolPromptInjector } from './code-symbol-prompt-injector';
 import { redactMcpUrl, redactMcpOverrideMap } from './redact-mcp-url';
@@ -577,6 +580,33 @@ export function capabilityFlagsFor(
     ).filter((name) => !deniedSet.has(name)),
     deniedSkillNames: uniqueNames(policy.deniedSkillNames),
   };
+}
+
+/**
+ * File-declared MCP server names the gateway serves through `ptah` under
+ * `root` (TASK_2026_979, C4). The caller adds them to the flag-tier denied
+ * list, so the CLI does not also load its own copy of a server that `ptah`
+ * already serves. Fail-open to the old behaviour: on an error the list is
+ * empty and a warning is logged, so the CLI loads its copies as before.
+ */
+export async function readServedFileServerNames(
+  gateway: Pick<IMcpGateway, 'servedFileServerNames'>,
+  root: string,
+  logger: Pick<Logger, 'warn'>,
+  serviceTag: string,
+): Promise<string[]> {
+  try {
+    const names = await gateway.servedFileServerNames(root);
+    return names.filter((name) => name !== PTAH_MCP_SERVER_NAME);
+  } catch (error: unknown) {
+    // degradation-audit: reported - logged below; without the list the CLI
+    // loads its own copies of those servers, as it did before the gateway.
+    logger.warn(
+      `${serviceTag} Could not read the MCP servers the gateway serves; the CLI keeps its own copies`,
+      { root, error: error instanceof Error ? error.message : String(error) },
+    );
+    return [];
+  }
 }
 
 /**
@@ -1243,6 +1273,13 @@ export class SdkQueryOptionsBuilder {
     private readonly hostKind?: HostKind,
     @inject(PLATFORM_TOKENS.MCP_CALLER_CREDENTIALS, { isOptional: true })
     private readonly mcpCallerCredentials?: IMcpCallerCredentials,
+    /**
+     * Serves the user's own MCP servers through `ptah` (TASK_2026_979).
+     * Last and optional for the reason given on `mcpStatus`; a host with no
+     * gateway serves no gateway tool, so it needs no gateway gate either.
+     */
+    @inject(PLATFORM_TOKENS.MCP_GATEWAY, { isOptional: true })
+    private readonly mcpGateway?: IMcpGateway,
   ) {}
 
   /**
@@ -1408,7 +1445,18 @@ export class SdkQueryOptionsBuilder {
           },
         ),
     });
-    const canUseToolCallback: CanUseTool = cronApprovalGate.canUseTool;
+    // Gateway tools (the user's own MCP servers served as
+    // `mcp__ptah__<alias>__<tool>`) are asked ahead of allow rules too
+    // (permission/gateway-approval-gate.ts). The gateway gate wraps the cron
+    // gate, and a cron write tool is never a gateway tool here, so a cron
+    // call is asked once, by the cron gate, even before the gateway has
+    // registered the host tool names.
+    const gatewayGate = this.createGatewayGate(
+      heldPermissionCallback,
+      cronApprovalGate.canUseTool,
+    );
+    const canUseToolCallback: CanUseTool =
+      gatewayGate?.canUseTool ?? cronApprovalGate.canUseTool;
     const hooks = this.createHooks(
       cwd,
       sessionId,
@@ -1513,6 +1561,7 @@ export class SdkQueryOptionsBuilder {
     hooks.PreToolUse = [
       { matcher: 'SendMessage', hooks: [budgetMessageGate] },
       { hooks: [pausedToolGate] },
+      ...(gatewayGate ? [gatewayGate.hookMatcher] : []),
       cronApprovalGate.hookMatcher,
       ...(hooks.PreToolUse ?? []),
     ];
@@ -1664,8 +1713,19 @@ export class SdkQueryOptionsBuilder {
             this.logger,
           )
         : builtinPolicy;
+    // File servers the gateway serves through `ptah` are switched off on the
+    // flag tier, so the CLI does not run a second copy of each one.
+    const servedFileServers =
+      this.mcpGateway && mcpServerRunning && cwd && policy.ptahEnabled
+        ? await readServedFileServerNames(
+            this.mcpGateway,
+            cwd,
+            this.logger,
+            '[SdkQueryOptionsBuilder]',
+          )
+        : [];
     const capabilityFlags = withClaudeBuiltinSkillDenials(
-      capabilityFlagsFor(policy, backingOffServers),
+      capabilityFlagsFor(policy, [...backingOffServers, ...servedFileServers]),
       policy,
       sessionBuiltinPolicy,
     );
@@ -2435,6 +2495,11 @@ export class SdkQueryOptionsBuilder {
         // of `SdkPermissionHandler` runs in `canUseTool` and, ahead of SDK
         // allow rules, in `PreToolUse` (permission/cron-approval-gate.ts).
         cronWriteApproval: true,
+        // With a gateway bound, this host also asks the user before every
+        // gateway tool call, in `PreToolUse` ahead of allow rules
+        // (permission/gateway-approval-gate.ts). Without one, no such gate
+        // is installed, so the credential must not claim it.
+        ...(this.mcpGateway ? { gatewayApproval: true } : {}),
       },
       subject,
       INTERACTIVE_MCP_CREDENTIAL_MAX_AGE_MS,
@@ -2496,6 +2561,32 @@ export class SdkQueryOptionsBuilder {
       return Math.floor(sessionConfig.maxTokens / 1000);
     }
     return 200;
+  }
+
+  /**
+   * The gateway approval gate around `next` (the cron gate's `canUseTool`),
+   * or `undefined` on a host with no gateway, which serves no gateway tool.
+   * Cron write tools stay with the cron gate whatever the gateway answers.
+   */
+  private createGatewayGate(
+    permissionCallback: CanUseTool,
+    next: CanUseTool,
+  ): ReturnType<typeof createGatewayApprovalGate> | undefined {
+    const gateway = this.mcpGateway;
+    if (!gateway) return undefined;
+    return createGatewayApprovalGate(permissionCallback, {
+      next,
+      isGatewayTool: (toolName) =>
+        !isCronMutatingTool(toolName) && gateway.isGatewayTool(toolName),
+      onError: (error, toolName) =>
+        this.logger.warn(
+          '[SdkQueryOptionsBuilder] Gateway approval prompt failed; denying the call',
+          {
+            toolName,
+            error: error instanceof Error ? error.message : String(error),
+          },
+        ),
+    });
   }
 
   private ptahUiHintEnabled(sessionConfig?: AISessionConfig): boolean {

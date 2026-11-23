@@ -45,7 +45,16 @@ import {
   CLAUDE_BUILTIN_TERMINAL_SKILL_IDS,
   CLAUDE_BUILTIN_TOOL_IDS,
 } from './claude-builtin-catalog';
-import type { IWorkspaceProvider } from '@ptah-extension/platform-core';
+import type {
+  IMcpGateway,
+  IWorkspaceProvider,
+  McpCallerBinding,
+} from '@ptah-extension/platform-core';
+import type {
+  CanUseTool,
+  HookInput,
+  HookJSONOutput,
+} from '../types/sdk-types/claude-sdk.types';
 
 /**
  * Every Claude built-in opted in (TASK_2026_853), so these specs see only the
@@ -97,10 +106,17 @@ interface BuildInput {
   backingOff?: string[];
   authEnv?: AuthEnv;
   mcpServersOverride?: Record<string, McpHttpServerOverride>;
+  /** `IMcpGateway` stand-in (TASK_2026_979); absent means no gateway bound. */
+  gateway?: Pick<IMcpGateway, 'isGatewayTool' | 'servedFileServerNames'>;
+  /** The permission callback `createCallback` returns. */
+  ask?: jest.Mock;
 }
 
 interface Built {
   options: Options;
+  /** Every binding the session minted a credential for. */
+  issue: jest.Mock;
+  logger: { warn: jest.Mock };
   /** `options.settings`, parsed — it is serialized on the interactive path. */
   settings: Record<string, unknown>;
   events: SessionMcpStatusEvent[];
@@ -123,10 +139,19 @@ async function build(input: BuildInput = {}): Promise<Built> {
   const ctor = SdkQueryOptionsBuilder as unknown as new (
     ...args: unknown[]
   ) => SdkQueryOptionsBuilder;
+  const logger = {
+    info: jest.fn(),
+    warn: jest.fn(),
+    error: jest.fn(),
+    debug: jest.fn(),
+  };
+  const issue = jest.fn().mockReturnValue('test-token');
   const builder = new ctor(
-    { info: jest.fn(), warn: jest.fn(), error: jest.fn(), debug: jest.fn() },
+    logger,
     {
-      createCallback: jest.fn().mockReturnValue(() => ({ behavior: 'allow' })),
+      createCallback: jest
+        .fn()
+        .mockReturnValue(input.ask ?? (() => ({ behavior: 'allow' }))),
     },
     noopHooks,
     {
@@ -163,9 +188,10 @@ async function build(input: BuildInput = {}): Promise<Built> {
     ALL_BUILTINS_ENABLED,
     undefined,
     {
-      issue: jest.fn().mockReturnValue('test-token'),
+      issue,
       revokeSubject: jest.fn(),
     },
+    input.gateway,
   );
 
   const cfg = await builder.build({
@@ -185,6 +211,8 @@ async function build(input: BuildInput = {}): Promise<Built> {
 
   return {
     options: cfg.options,
+    issue,
+    logger,
     settings: JSON.parse(cfg.options.settings as string) as Record<
       string,
       unknown
@@ -499,6 +527,171 @@ describe('SdkQueryOptionsBuilder — capability policy (TASK_2026_560, C5)', () 
 
       expect(built.settings['disabledMcpjsonServers']).toEqual(['flaky']);
     });
+  });
+});
+
+describe('SdkQueryOptionsBuilder: MCP gateway (TASK_2026_979)', () => {
+  const CRON_TOOL = 'mcp__ptah__ptah_cron_create';
+  const GATEWAY_TOOL = 'mcp__ptah__github__create_issue';
+
+  function gateway(
+    served: string[] | Error = [],
+  ): jest.Mocked<Pick<IMcpGateway, 'isGatewayTool' | 'servedFileServerNames'>> {
+    return {
+      // Fail-closed worst case: no host tool name registered yet, so every
+      // `ptah` tool, cron writes included, reads as a gateway tool.
+      isGatewayTool: jest.fn().mockReturnValue(true),
+      servedFileServerNames: jest.fn((_root: string) =>
+        served instanceof Error
+          ? Promise.reject(served)
+          : Promise.resolve(served),
+      ),
+    };
+  }
+
+  /** The CLI order: every matching `PreToolUse` hook, then `canUseTool`. */
+  async function callTool(options: Options, toolName: string): Promise<void> {
+    const toolUseId = `tu-${toolName}`;
+    const hookInput = {
+      hook_event_name: 'PreToolUse',
+      tool_name: toolName,
+      tool_input: {},
+      tool_use_id: toolUseId,
+      session_id: 's',
+      transcript_path: '',
+      cwd: PROJECT,
+    } as unknown as HookInput;
+    const outputs: HookJSONOutput[] = [];
+    for (const matcher of options.hooks?.PreToolUse ?? []) {
+      // Only the `ptah` approval gates; the other hooks have their own specs.
+      if (!matcher.matcher?.startsWith('mcp__ptah__')) continue;
+      if (!new RegExp(`^${matcher.matcher}$`).test(toolName)) continue;
+      for (const hook of matcher.hooks) {
+        outputs.push(
+          await hook(hookInput, toolUseId, {
+            signal: new AbortController().signal,
+          }),
+        );
+      }
+    }
+    expect(
+      outputs.some(
+        (output) =>
+          (output as { hookSpecificOutput?: { permissionDecision?: string } })
+            .hookSpecificOutput?.permissionDecision === 'deny',
+      ),
+    ).toBe(false);
+    const canUseTool = options.canUseTool as CanUseTool;
+    await canUseTool(toolName, {}, {
+      signal: new AbortController().signal,
+      toolUseID: toolUseId,
+      requestId: 'r',
+    } as Parameters<CanUseTool>[2]);
+  }
+
+  it('keeps ptah with no overrides and marks the session binding gatewayApproval', async () => {
+    const built = await build({
+      capabilityPolicy: policy(),
+      gateway: gateway(),
+    });
+
+    expect(Object.keys(built.options.mcpServers ?? {})).toEqual(['ptah']);
+    const binding = built.issue.mock.calls[0][0] as McpCallerBinding;
+    expect(binding).toMatchObject({
+      kind: 'session',
+      capability: 'privileged',
+      cronWriteApproval: true,
+      gatewayApproval: true,
+    });
+  });
+
+  it('asks once for a cron tool that runs through both gates (N2c)', async () => {
+    const ask = jest.fn().mockResolvedValue({ behavior: 'allow' });
+    const built = await build({
+      capabilityPolicy: policy(),
+      gateway: gateway(),
+      ask,
+    });
+
+    await callTool(built.options, CRON_TOOL);
+
+    expect(ask).toHaveBeenCalledTimes(1);
+    expect(ask.mock.calls[0][0]).toBe(CRON_TOOL);
+  });
+
+  it('asks once for a gateway tool through the hook and canUseTool', async () => {
+    const ask = jest.fn().mockResolvedValue({ behavior: 'allow' });
+    const built = await build({
+      capabilityPolicy: policy(),
+      gateway: gateway(),
+      ask,
+    });
+
+    await callTool(built.options, GATEWAY_TOOL);
+
+    expect(ask).toHaveBeenCalledTimes(1);
+    expect(ask.mock.calls[0][0]).toBe(GATEWAY_TOOL);
+  });
+
+  it('puts the gateway matcher next to the cron matcher', async () => {
+    const built = await build({
+      capabilityPolicy: policy(),
+      gateway: gateway(),
+    });
+
+    const matchers = (built.options.hooks?.PreToolUse ?? []).map(
+      (m) => m.matcher,
+    );
+    const at = matchers.indexOf('mcp__ptah__.*');
+    expect(at).toBeGreaterThanOrEqual(0);
+    expect(matchers[at + 1]).toBe('mcp__ptah__ptah_cron_.*');
+  });
+
+  it('adds no gateway matcher and claims no gatewayApproval on a host with no gateway', async () => {
+    const built = await build({ capabilityPolicy: policy() });
+
+    expect(built.issue.mock.calls[0][0]).not.toHaveProperty('gatewayApproval');
+
+    const matchers = (built.options.hooks?.PreToolUse ?? []).map(
+      (m) => m.matcher,
+    );
+    expect(matchers).not.toContain('mcp__ptah__.*');
+    expect(matchers).toContain('mcp__ptah__ptah_cron_.*');
+  });
+
+  it('suppresses the file servers the gateway serves on the flag tier', async () => {
+    const gw = gateway(['github', 'ptah', 'linear']);
+    const built = await build({ capabilityPolicy: policy(), gateway: gw });
+
+    expect(gw.servedFileServerNames).toHaveBeenCalledWith(PROJECT);
+    expect(built.settings['disabledMcpjsonServers']).toEqual([
+      'github',
+      'linear',
+    ]);
+    expect(Object.keys(built.options.mcpServers ?? {})).toEqual(['ptah']);
+  });
+
+  it('does not ask the gateway when the policy turned ptah OFF', async () => {
+    const gw = gateway(['github']);
+    await build({
+      capabilityPolicy: policy({ ptahEnabled: false }),
+      gateway: gw,
+    });
+
+    expect(gw.servedFileServerNames).not.toHaveBeenCalled();
+  });
+
+  it('gives an empty list and a warning when the gateway throws', async () => {
+    const built = await build({
+      capabilityPolicy: policy(),
+      gateway: gateway(new Error('disk gone')),
+    });
+
+    expect(built.settings).not.toHaveProperty('disabledMcpjsonServers');
+    expect(built.logger.warn).toHaveBeenCalledWith(
+      expect.stringContaining('gateway serves'),
+      expect.objectContaining({ error: 'disk gone' }),
+    );
   });
 });
 

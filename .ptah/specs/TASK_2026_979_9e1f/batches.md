@@ -511,7 +511,7 @@ P1 gate, run by the orchestrator after B13, before review:
 
 ### Task 7.3: Server wiring and host-name registration - PENDING
 
-## Batch 8: Retired sweep skips linked worktrees (C3, part 3) - PENDING
+## Batch 8: Retired sweep skips linked worktrees (C3, part 3) - IN_PROGRESS
 
 - Id: P1-B8 | Phase: P1 | Shape: logic
 - Recommended executor: backend-developer (subagent; reason: lanes disabled)
@@ -598,7 +598,7 @@ P1 gate, run by the orchestrator after B13, before review:
 
 ### Task 9.3: Capper detection - PENDING
 
-## Batch 10: Opt-in plumbing, suppression, gate wiring (C4 + C5 wiring) - IN_PROGRESS
+## Batch 10: Opt-in plumbing, suppression, gate wiring (C4 + C5 wiring) - COMPLETE
 
 - Id: P1-B10 | Phase: P1 | Shape: logic
 - Recommended executor: backend-developer (subagent; reason: lanes disabled)
