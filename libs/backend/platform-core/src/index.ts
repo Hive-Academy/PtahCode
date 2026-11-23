@@ -184,6 +184,19 @@ export type {
   McpGatewayServerStatus,
   McpGatewayTool,
 } from './interfaces/mcp-gateway.interface';
+export type { McpGatewayCaller } from './interfaces/mcp-gateway-caller-policy';
+export {
+  gatewayScopeFromBinding,
+  internalQueryGatewayScope,
+  isGatewayCallerPermitted,
+  sessionGatewayScope,
+} from './interfaces/mcp-gateway-caller-policy';
+export {
+  PTAH_MCP_TOOL_PREFIX,
+  hasPtahMcpToolPrefix,
+  stripPtahMcpToolPrefix,
+  withPtahMcpToolPrefix,
+} from './interfaces/ptah-mcp-tool-name';
 export type {
   IMcpSubagentRootRegistrar,
   McpSubagentRootRetention,
