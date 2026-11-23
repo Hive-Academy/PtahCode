@@ -5,6 +5,7 @@ import { ReviewConfirmDialogComponent } from './review-confirm-dialog.component'
 import { ReviewFindingsPanelComponent } from '../findings/review-findings-panel.component';
 import { RUN_STATUS_INK, reviewStatusLabel } from './review-runs-list.component';
 import { PtahBadgeDirective, PtahButtonDirective, PtahMeterComponent } from '@ptah-extension/ui';
+import { fallbackNotes, laneLine, type StageLaneLine } from './review-stage-lane';
 
 /** The run contract and the query return 16 stage records at most. */
 const STAGE_LIMIT = 16;
@@ -51,6 +52,10 @@ const STAGE_LIMIT = 16;
               @for (stage of pipelineStages(); track stage.name + ':' + (stage.scope ?? '')) { <li class="surface-2 rounded-box px-3 py-2">
                 <p class="flex items-center gap-1.5 truncate text-sm" [class]="ink(stage.status)"><span class="h-2 w-2 shrink-0 rounded-full bg-current" aria-hidden="true"></span>{{ stageLabel(stage) }}</p>
                 <p class="text-xs text-base-content-muted">{{ label(stage.status) }}{{ stage.durationMs === null ? '' : ' · ' + seconds(stage.durationMs) }}</p>
+                @if (stageLane(stage, stage.name === 'triage' || stage.name === 'verification'); as line) {
+                  <p class="truncate text-xs text-base-content-muted" data-testid="review-stage-lane"><span class="font-mono">{{ line.lane }}</span> · @if (line.model) {<span class="font-mono">{{ line.model }}</span>} @else {lane default}@if (line.family) { · family {{ line.family }}}</p>
+                } @else if (stage.family) { <p class="text-xs text-base-content-muted" data-testid="review-stage-family">Family: {{ stage.family }}</p> }
+                @for (note of stageFallbacks(stage); track $index) { <p class="mt-1 border-l-2 border-state-need pl-2 text-xs text-base-content" data-testid="review-stage-fallback">{{ note }}</p> }
                 @if (stage.error) { <p class="text-xs" role="status">{{ stage.error }}</p> }
               </li> }
             </ol> }
@@ -59,7 +64,11 @@ const STAGE_LIMIT = 16;
             @if (lensStages().length) { <ul class="mt-2 grid grid-cols-1 gap-2 min-[1100px]:grid-cols-2" data-testid="review-detail-lenses">@for (lens of lensStages(); track lens.scope) { <li class="surface-2 rounded-box px-3 py-2">
               <p class="flex items-center gap-1.5 truncate text-sm font-semibold" [class]="ink(lens.status)"><span class="h-2 w-2 shrink-0 rounded-full bg-current" aria-hidden="true"></span>{{ lens.scope }}</p>
               <p class="text-xs text-base-content-muted">{{ label(lens.status) }}{{ lens.durationMs === null ? '' : ' · ' + seconds(lens.durationMs) }}</p>
+              @if (stageLane(lens, false); as line) {
+                <p class="truncate text-xs text-base-content-muted" data-testid="review-stage-lane"><span class="font-mono">{{ line.lane }}</span> · @if (line.model) {<span class="font-mono">{{ line.model }}</span>} @else {lane default}</p>
+              }
               <p class="text-xs text-base-content-muted">Family: {{ lens.family ?? 'Unavailable' }} · Verifier family: {{ family('verification') ?? 'Unavailable' }}</p>
+              @for (note of stageFallbacks(lens); track $index) { <p class="mt-1 border-l-2 border-state-need pl-2 text-xs text-base-content" data-testid="review-stage-fallback">{{ note }}</p> }
               @if (lens.error) { <p class="text-xs" role="status">{{ lens.error }}</p> }
             </li> }</ul> }
             @else { <p class="text-sm text-base-content-muted">Lens records unavailable.</p> }
@@ -116,10 +125,11 @@ export class ReviewRunDetailComponent implements AfterViewInit, OnDestroy {
     if (lenses.length === 0 || this.run().stages.length >= STAGE_LIMIT) return null;
     return { completed: lenses.filter(lens => lens.status === 'succeeded').length, total: lenses.length };
   }
-  sameFamilyVerification(): boolean {
-    const verifier = this.family('verification');
-    return verifier !== null && this.run().stages.some(stage => stage.name === 'lenses' && stage.family === verifier);
-  }
+  /** Weaker evidence only when the verifier marked a loaded finding so (decisions.md D14), not from the stage families. */
+  sameFamilyVerification(): boolean { return this.findings().some(finding => finding.verification === 'same-family-weaker'); }
+  /** Lane and model for records written after lane pools; null on older and lane-less records. */
+  stageLane(stage: StageRecord, withFamily: boolean): StageLaneLine | null { return laneLine(stage, withFamily); }
+  stageFallbacks(stage: StageRecord): string[] { return fallbackNotes(stage); }
   startLiveRerun(): void { this.confirmLive.set(false); void this.store.rerun(this.run().attemptId, false); }
   stageLabel(stage: StageRecord): string { return stage.name === 'lenses' && stage.scope ? stage.scope : ({ discovery: 'Discovery', context: 'Context', checks: 'Checks', triage: 'Triage', lenses: 'Lenses', verification: 'Verification', identity: 'Identity', publication: 'Publication' })[stage.name]; }
   family(name: StageRecord['name']): string | null { return this.run().stages.find(stage => stage.name === name)?.family ?? null; }

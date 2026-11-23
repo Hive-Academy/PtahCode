@@ -214,4 +214,23 @@ describe('SqliteReviewRepository', () => {
       expect(await repository.getCheckpoint(manual.attemptId, 'checks', 0)).toEqual({ done: ['lint'], version: 1 });
     } finally { db.close(); }
   });
+
+  it('writes the stage family and a lane record that a later stage save keeps (Req 4.7)', async () => {
+    const { db, repository } = setup();
+    try {
+      const attempt = await repository.enqueueDiscovered(head(1, 'a'), at(0));
+      const row = { attemptId: attempt.attemptId, stage: 'lens:security-privacy', ordinal: 0, state: 'running' as const,
+        startedAt: at(1), endedAt: null, outcome: null, errorSummary: null, artifactHash: null, artifactPath: null };
+      await repository.saveStage(row);
+      const use = { lane: 'ptah-cli:pc-1', model: 'model-a', family: 'anthropic',
+        fallback: [{ source: 'pin' as const, lane: 'codex', model: null, reason: 'at-limit' as const }] };
+      await repository.saveStageLane(attempt.attemptId, row.stage, 0, use);
+      await repository.saveStage({ ...row, state: 'completed', endedAt: at(2), outcome: 'completed' });
+      expect(db.prepare(`SELECT family FROM review_stages WHERE attempt_id = ? AND stage = ? AND ordinal = 0`)
+        .get(attempt.attemptId, row.stage)).toEqual({ family: 'anthropic' });
+      expect(await repository.getCheckpoint(attempt.attemptId, `lane:${row.stage}`, 0)).toEqual({ version: 1, ...use });
+      // A lane record never shadows the stage's own checkpoint.
+      expect(await repository.getCheckpoint(attempt.attemptId, row.stage, 0)).toBeNull();
+    } finally { db.close(); }
+  });
 });

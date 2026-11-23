@@ -1,21 +1,63 @@
 import { z } from 'zod';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { AgentProcessManager, AgentSpawnEnvironment, CliDetectionService, LaneLimitLookupService, PTAH_CLI_ROLE_DELIVERY } from '@ptah-extension/cli-agent-runtime';
+import {
+  AgentProcessManager, AgentSpawnEnvironment, CliDetectionService, LaneLimitLookupService, PTAH_CLI_ROLE_DELIVERY, findBlockedLaneModel,
+} from '@ptah-extension/cli-agent-runtime';
 import { laneFamilyOf, type CliDetectionResult } from '@ptah-extension/shared';
 import type { IWorkspaceProvider } from '@ptah-extension/platform-core';
-import { type IReviewLaneGateway, type ReviewLaneCapability } from '@ptah-extension/review-core';
+import type { LaneModelEntry, LaneModelListing } from '@ptah-extension/lane-routing';
+import { REVIEW_LANE_CATALOG_MAX, ReviewModelIdSchema, type ReviewLaneCatalog } from '@ptah-extension/review-contracts';
+import { type IReviewLaneGateway, type ReviewLaneCandidate } from '@ptah-extension/review-core';
 
 const spawnInputSchema = z.object({
   laneId: z.string().min(1).max(128), cwd: z.string().min(1),
   prompt: z.string().min(1).max(200_000),
+  model: z.string().trim().min(1).max(200).optional(),
 }).strict();
+
+const FAILED_CATALOG: ReviewLaneCatalog = { status: 'failed', models: [], truncated: false, verifiable: false };
+const EMPTY_CATALOG: ReviewLaneCatalog = { status: 'empty', models: [], truncated: false, verifiable: false };
+
+/**
+ * Settles with `work`, or rejects as soon as `signal` aborts. `LaneModelListing` does not honour the
+ * signal for every lane kind, so a read that loses the race is abandoned and its late result dropped.
+ */
+function untilAborted<T>(work: () => Promise<T>, signal: AbortSignal): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => reject(new Error('Review lane model listing aborted'));
+    if (signal.aborted) { onAbort(); return; }
+    signal.addEventListener('abort', onAbort, { once: true });
+    void Promise.resolve().then(work).then(resolve, reject)
+      .finally(() => signal.removeEventListener('abort', onAbort));
+  });
+}
+
+/** Valid, unblocked ids in listing order, cut to the catalog bound (plan A5: truncation, never rejection). */
+function catalogOf(entries: readonly LaneModelEntry[]): ReviewLaneCatalog {
+  if (entries.length === 0) return EMPTY_CATALOG;
+  const kept = new Map<string, LaneModelEntry['provenance']>();
+  for (const entry of entries) {
+    const id = ReviewModelIdSchema.safeParse(entry.id);
+    if (!id.success || findBlockedLaneModel(id.data) !== undefined || kept.has(id.data)) continue;
+    kept.set(id.data, entry.provenance);
+  }
+  const truncated = kept.size > REVIEW_LANE_CATALOG_MAX;
+  const models = [...kept.keys()].slice(0, REVIEW_LANE_CATALOG_MAX);
+  return { status: 'read', models, truncated,
+    verifiable: !truncated && [...kept.values()].some((provenance) => provenance === 'reported') };
+}
 
 /** Prompts above this size go through a file, because argv lanes cannot carry them. */
 const PROMPT_FILE_THRESHOLD_BYTES = 100_000;
 
 function idOf(row: CliDetectionResult): string {
   return row.ptahCliId ? `ptah-cli:${row.ptahCliId}` : row.cli;
+}
+
+/** Ptah CLI rows carry their display name; system rows show the CLI id (plan A4). */
+function labelOf(row: CliDetectionResult): string {
+  return (row.ptahCliName?.trim() || idOf(row)).slice(0, 128);
 }
 
 type PtahCliEntry = { id: string; name: string; providerName: string; providerId?: string; enabled: boolean; hasApiKey: boolean };
@@ -36,6 +78,7 @@ export class ReviewLaneGateway implements IReviewLaneGateway {
     private readonly getRegistry?: () => ReviewPtahCliRegistry | undefined,
     private readonly getWorkspaceProvider?: () => IWorkspaceProvider | undefined,
     private readonly logger?: ReviewLaneLogger,
+    private readonly getModelListing?: () => LaneModelListing | undefined,
   ) {}
 
   private async buildLanes(): Promise<CliDetectionResult[]> {
@@ -64,20 +107,50 @@ export class ReviewLaneGateway implements IReviewLaneGateway {
     return rows.sort((a, b) => rank(a) - rank(b));
   }
 
-  async list(): Promise<{ lanes: ReviewLaneCapability[]; maxConcurrentAgents: number }> {
+  /**
+   * A lane whose model without a request model (its own setting, else the CLI default) is on the
+   * block list: spawn would refuse it, so selection skips it when no model is chosen (M3).
+   */
+  private defaultModelBlocked(row: CliDetectionResult): boolean {
+    return findBlockedLaneModel(this.spawnEnvironment.resolveModel(row.cli, undefined).model) !== undefined;
+  }
+
+  async list(): Promise<{ lanes: ReviewLaneCandidate[]; maxConcurrentAgents: number }> {
     const checked = await this.limits.lookup(await this.buildLanes());
     return {
       lanes: checked.map(({ row, state }) => ({
-        id: idOf(row), family: row.family ?? row.cli,
+        id: idOf(row), label: labelOf(row), family: row.family ?? row.cli,
         limitState: state.state === 'confirmed-room' ? 'confirmed-room' as const :
           state.state === 'at-limit' ? 'at-limit' as const : 'unknown' as const,
+        ...(this.defaultModelBlocked(row) ? { defaultModelBlocked: true } : {}),
       })),
       maxConcurrentAgents: this.spawnEnvironment.maxConcurrentAgents(),
     };
   }
 
-  async spawn(input: { laneId: string; cwd: string; prompt: string; signal: AbortSignal }): Promise<void> {
-    const parsed = spawnInputSchema.parse({ laneId: input.laneId, cwd: input.cwd, prompt: input.prompt });
+  /** Live catalogs of the requested listed lanes. One lane's failure or abort maps to `failed`; never rejects for one lane. */
+  async listModels(laneIds: readonly string[], signal: AbortSignal): Promise<Record<string, ReviewLaneCatalog>> {
+    const listing = this.getModelListing?.();
+    if (!listing || laneIds.length === 0) return {};
+    const wanted = new Set(laneIds);
+    const rows = (await this.buildLanes()).filter((row) => wanted.has(idOf(row)));
+    const settled = await Promise.allSettled(rows.map((row) => untilAborted(() => listing.list(row, signal), signal)));
+    const catalogs: Record<string, ReviewLaneCatalog> = {};
+    rows.forEach((row, index) => {
+      const outcome = settled[index];
+      catalogs[idOf(row)] = outcome.status === 'fulfilled' ? catalogOf(outcome.value) : FAILED_CATALOG;
+    });
+    return catalogs;
+  }
+
+  /** The lane block list refuses this model at spawn, so selection must skip it (plan A6). */
+  modelBlocked(model: string): boolean {
+    return findBlockedLaneModel(model) !== undefined;
+  }
+
+  async spawn(input: { laneId: string; model?: string; cwd: string; prompt: string; signal: AbortSignal }): Promise<void> {
+    const parsed = spawnInputSchema.parse({ laneId: input.laneId, cwd: input.cwd, prompt: input.prompt,
+      ...(input.model !== undefined ? { model: input.model } : {}) });
     if (input.signal.aborted) throw new Error('Review lane cancelled');
     const lane = (await this.buildLanes()).find((entry) => idOf(entry) === parsed.laneId);
     if (!lane) throw new Error('Review lane unavailable');
@@ -95,7 +168,7 @@ export class ReviewLaneGateway implements IReviewLaneGateway {
         task = `Read ${taskFile} with your file tool and follow its instructions exactly, `
           + 'including every output file it names.';
       }
-      await this.runLane(lane, task, parsed.cwd, input.signal);
+      await this.runLane(lane, task, parsed.cwd, parsed.model, input.signal);
     } finally {
       if (taskDir) {
         try {
@@ -107,9 +180,10 @@ export class ReviewLaneGateway implements IReviewLaneGateway {
     }
   }
 
-  private async runLane(lane: CliDetectionResult, task: string, cwd: string, signal: AbortSignal): Promise<void> {
+  private async runLane(lane: CliDetectionResult, task: string, cwd: string, model: string | undefined, signal: AbortSignal): Promise<void> {
+    // The model is a typed request field; this code never puts it into command text.
     const result = await this.manager.spawn({ task, cli: lane.cli,
-      ...(lane.ptahCliId ? { ptahCliId: lane.ptahCliId } : {}), workingDirectory: cwd,
+      ...(lane.ptahCliId ? { ptahCliId: lane.ptahCliId } : {}), ...(model ? { model } : {}), workingDirectory: cwd,
       taskKind: 'review', attachMcp: false, deliverables: ['out/lane-output.json'] });
     const agentId = String(result.agentId);
     if (signal.aborted) {

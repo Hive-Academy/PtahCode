@@ -98,6 +98,7 @@ const EXPECTED_ABSENT_METHOD_NAMES: readonly string[] = [
   'review:getRun',
   'review:getSettings',
   'review:listFindings',
+  'review:listLanes',
   'review:listRepositories',
   'review:listRuns',
   'review:refresh',

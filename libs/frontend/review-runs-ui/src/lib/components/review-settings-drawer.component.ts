@@ -1,9 +1,7 @@
 import {
-  AfterViewInit,
   ChangeDetectionStrategy,
   Component,
   ElementRef,
-  OnDestroy,
   inject,
   input,
   output,
@@ -12,48 +10,92 @@ import {
 import type {
   OperatorSettings,
   RepositorySettings,
-  Severity,
+  ReviewLaneListing,
+  ReviewLaneListState,
+  ReviewLaneSettings,
 } from '@ptah-extension/review-contracts';
-import { PtahButtonDirective, PtahFieldComponent, PtahInputDirective, PtahStatePanelComponent, PtahToggleDirective } from '@ptah-extension/ui';
+import {
+  NativeDrawerComponent,
+  PtahAlertComponent,
+  PtahButtonDirective,
+  PtahFieldComponent,
+  PtahIconButtonDirective,
+  PtahInputDirective,
+  PtahStatePanelComponent,
+  PtahToggleDirective,
+} from '@ptah-extension/ui';
+import {
+  GitPullRequest,
+  LucideAngularModule,
+  Pause,
+  Save,
+  Send,
+  SlidersHorizontal,
+  Users,
+  X,
+} from 'lucide-angular';
 import { ReviewRunsStore } from '../review-runs.store';
 import { ReviewConfirmDialogComponent } from './review-confirm-dialog.component';
 import { ReviewRepositoriesEditorComponent } from './review-repositories-editor.component';
 import { ReviewBotIdentityComponent } from './review-bot-identity.component';
+import { ReviewLanesSectionComponent } from './review-lanes/review-lanes-section.component';
 
+/**
+ * Review settings drawer (design-spec section 1). The shell is `ptah-native-drawer`: a top-layer
+ * popover with an opaque panel, pinned header and footer. The native drawer owns the focus trap,
+ * Escape and focus restore; this component only moves focus to the title once the drawer opened.
+ * Confirm dialogs render as top-layer siblings of the drawer, so they paint above it and sit
+ * outside its focus trap and keydown handler.
+ */
 @Component({
   selector: 'ptah-review-settings-drawer',
   standalone: true,
   imports: [
-    ReviewConfirmDialogComponent,
-    ReviewRepositoriesEditorComponent,
-    ReviewBotIdentityComponent,
-    PtahStatePanelComponent,
-    PtahToggleDirective,
+    LucideAngularModule,
+    NativeDrawerComponent,
+    PtahAlertComponent,
     PtahButtonDirective,
     PtahFieldComponent,
+    PtahIconButtonDirective,
     PtahInputDirective,
+    PtahStatePanelComponent,
+    PtahToggleDirective,
+    ReviewBotIdentityComponent,
+    ReviewConfirmDialogComponent,
+    ReviewLanesSectionComponent,
+    ReviewRepositoriesEditorComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './review-settings-drawer.component.html',
 })
-export class ReviewSettingsDrawerComponent implements AfterViewInit, OnDestroy {
+export class ReviewSettingsDrawerComponent {
+  protected readonly GitPullRequestIcon = GitPullRequest;
+  protected readonly XIcon = X;
+  protected readonly UsersIcon = Users;
+  protected readonly SlidersIcon = SlidersHorizontal;
+  protected readonly SendIcon = Send;
+  protected readonly PauseIcon = Pause;
+  protected readonly SaveIcon = Save;
   private readonly element = inject<ElementRef<HTMLElement>>(ElementRef);
-  private returnFocus: HTMLElement | null = null;
   readonly store = inject(ReviewRunsStore);
   readonly confirmation = signal<
     'pause-off' | 'live-enable' | 'remove-token' | 'replace-token' | null
   >(null);
-  readonly repository = input<RepositorySettings | null>(null);
-  readonly settings = input<OperatorSettings | null>(null);
   readonly draft = input.required<OperatorSettings>();
+  readonly lanes = input.required<ReviewLaneSettings>();
+  readonly laneListing = input<ReviewLaneListing | null>(null);
+  readonly laneListState = input<ReviewLaneListState>('idle');
+  readonly lanesSaveError = input<string | null>(null);
+  readonly lanesCorrupt = input(false);
   readonly hasToken = input(false);
   readonly saving = input(false);
   readonly saveError = input<string | null>(null);
-  readonly minimumSeverity = input<Severity>('Minor');
   readonly loadState = input<'loading' | 'ready' | 'error'>('ready');
   readonly closed = output<void>();
   readonly retry = output<void>();
   readonly changed = output<Partial<OperatorSettings>>();
+  readonly lanesChanged = output<ReviewLaneSettings>();
+  readonly retryLanes = output<void>();
   readonly save = output<void>();
   readonly newRepository = signal('');
   readonly repositoryError = signal<string | null>(null);
@@ -215,44 +257,10 @@ export class ReviewSettingsDrawerComponent implements AfterViewInit, OnDestroy {
     if (event.target instanceof HTMLInputElement)
       this.changed.emit({ [field]: Number(event.target.value) });
   }
-  ngAfterViewInit(): void {
-    const doc = this.element.nativeElement.ownerDocument;
-    this.returnFocus =
-      doc.activeElement instanceof HTMLElement ? doc.activeElement : null;
+  /** Runs on the native drawer's `opened`, after it moved focus into the panel (parity: title focus). */
+  focusTitle(): void {
     this.element.nativeElement
       .querySelector<HTMLElement>('#review-settings-title')
       ?.focus();
-  }
-  ngOnDestroy(): void {
-    this.returnFocus?.focus();
-  }
-  onKeydown(event: Event): void {
-    if (!(event instanceof KeyboardEvent)) return;
-    if (event.key === 'Escape') {
-      event.preventDefault();
-      this.closed.emit();
-      return;
-    }
-    if (event.key !== 'Tab') return;
-    const items = Array.from(
-      this.element.nativeElement.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), [tabindex="-1"]',
-      ),
-    );
-    const first = items[0],
-      last = items[items.length - 1];
-    if (
-      event.shiftKey &&
-      this.element.nativeElement.ownerDocument.activeElement === first
-    ) {
-      event.preventDefault();
-      last?.focus();
-    } else if (
-      !event.shiftKey &&
-      this.element.nativeElement.ownerDocument.activeElement === last
-    ) {
-      event.preventDefault();
-      first?.focus();
-    }
   }
 }

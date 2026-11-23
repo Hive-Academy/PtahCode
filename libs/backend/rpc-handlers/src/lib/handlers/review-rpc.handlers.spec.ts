@@ -2,13 +2,15 @@ import 'reflect-metadata';
 import type { RpcHandler, Logger } from '@ptah-extension/vscode-core';
 import type {
   IReviewArtifactReader,
+  IReviewLaneSettingsStore,
   IReviewQueryRepository,
+  ReviewLaneListingService,
   IReviewSecretPresence,
   IReviewSettingsStore,
   ReviewQueueService,
   ReviewOrchestratorService,
 } from '@ptah-extension/review-core';
-import type { IGitHubReviewPort } from '@ptah-extension/review-contracts';
+import type { IGitHubReviewPort, ReviewLaneListing } from '@ptah-extension/review-contracts';
 import { publishedFindingTitle, ReviewPollDisabledError, ReviewRepositoryUnavailableError } from '@ptah-extension/review-core';
 import { GitHubReviewError, type IGitHubFindingReplyPort, type IGitHubFindingThreadPort } from '@ptah-extension/review-github';
 import { realpathSync } from 'node:fs';
@@ -87,6 +89,15 @@ function suite() {
     baseConfig: jest.fn().mockResolvedValue(null),
     resolve: jest.fn().mockRejectedValue(new ReviewRepositoryUnavailableError()),
   } as Pick<ReviewStageEnvironment, 'baseConfig' | 'resolve' | 'redactionSecrets' | 'checkoutRoot'>;
+  const laneSettings = {
+    get: jest.fn().mockResolvedValue({ pool: [], pins: {} }),
+    read: jest.fn(),
+    update: jest.fn().mockImplementation(async (next: unknown) => next),
+  } as jest.Mocked<IReviewLaneSettingsStore>;
+  laneSettings.read.mockImplementation(async () => ({ settings: await laneSettings.get(), corrupt: false }));
+  const laneListing = {
+    list: jest.fn<Promise<ReviewLaneListing>, []>().mockResolvedValue({ lanes: [], blockedModels: [] }),
+  } satisfies Pick<ReviewLaneListingService, 'list'>;
   new ReviewRpcHandlers(
     logger,
     rpc,
@@ -104,6 +115,8 @@ function suite() {
     replies,
     workspace,
     threads,
+    laneSettings,
+    laneListing,
   ).register();
   const calls = (rpc.registerMethod as jest.Mock).mock.calls as Array<
     [string, (params: unknown) => Promise<unknown>]
@@ -130,6 +143,8 @@ function suite() {
     orchestrator,
     tokenStorage,
     fetcher,
+    laneSettings,
+    laneListing,
   };
 }
 
@@ -546,6 +561,8 @@ describe('ReviewRpcHandlers', () => {
       settings,
       hasToken: true,
       tokenStorage: 'encrypted',
+      lanes: { pool: [], pins: {} },
+      lanesCorrupt: false,
     });
     expect(JSON.stringify(result)).not.toContain('ghp_secret');
     await expect(
@@ -564,6 +581,8 @@ describe('ReviewRpcHandlers', () => {
       settings: null,
       hasToken: true,
       tokenStorage: 'encrypted',
+      lanes: { pool: [], pins: {} },
+      lanesCorrupt: false,
     });
   });
 
@@ -682,5 +701,105 @@ describe('review repository settings RPC', () => {
       invoke('review:updateSettings', { settings: live }),
     ).rejects.toThrow('Connect a bot token');
     expect(store.updateSettings).not.toHaveBeenCalled();
+  });
+});
+
+describe('review lane settings RPC', () => {
+  const saved = {
+    pool: [
+      { lane: 'codex', model: 'gpt-5.3-codex' },
+      { lane: 'claude', model: null },
+    ],
+    pins: { verifier: { lane: 'gemini', model: 'gemini-3-pro' } },
+  };
+
+  it('returns empty lanes when none are saved (Req 1.1)', async () => {
+    const { invoke } = suite();
+    expect(await invoke('review:getSettings', {})).toEqual(
+      expect.objectContaining({ lanes: { pool: [], pins: {} }, lanesCorrupt: false }),
+    );
+  });
+
+  it('reports a corrupt lane document and repairs it on the next lane save (M1)', async () => {
+    const { invoke, laneSettings } = suite();
+    laneSettings.read.mockResolvedValueOnce({ settings: { pool: [], pins: {} }, corrupt: true });
+    expect(await invoke('review:getSettings', {})).toEqual(
+      expect.objectContaining({ lanes: { pool: [], pins: {} }, lanesCorrupt: true }),
+    );
+    await invoke('review:updateSettings', { settings, lanes: { pool: [], pins: {} } });
+    expect(laneSettings.update).toHaveBeenCalledWith({ pool: [], pins: {} });
+  });
+
+  it('saves lanes after the operator settings and returns the saved settings (Req 1.4)', async () => {
+    const { invoke, store, laneSettings } = suite();
+    expect(await invoke('review:updateSettings', { settings, lanes: saved })).toEqual(settings);
+    expect(laneSettings.update).toHaveBeenCalledWith(saved);
+    expect((store.updateSettings as jest.Mock).mock.invocationCallOrder[0]).toBeLessThan(
+      laneSettings.update.mock.invocationCallOrder[0],
+    );
+    laneSettings.get.mockResolvedValue(saved);
+    expect(await invoke('review:getSettings', {})).toEqual(expect.objectContaining({ lanes: saved }));
+  });
+
+  it('keeps the stored lanes when an update has no lanes (Req 1.5)', async () => {
+    const { invoke, store, laneSettings } = suite();
+    await invoke('review:updateSettings', { settings });
+    expect(store.updateSettings).toHaveBeenCalledWith(settings);
+    expect(laneSettings.update).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['a duplicate pool entry', { pool: [saved.pool[0], saved.pool[0]], pins: {} }],
+    ['an unknown role', { pool: [], pins: { coordinator: { lane: 'codex', model: null } } }],
+    ['an invalid lane id', { pool: [{ lane: '../codex', model: null }], pins: {} }],
+    ['too many pool entries', { pool: Array.from({ length: 13 }, (_, i) => ({ lane: `lane-${i}`, model: null })), pins: {} }],
+  ])('rejects %s and writes nothing (Req 1.2, 1.3)', async (_name, lanes) => {
+    const { invoke, store, laneSettings } = suite();
+    await expect(invoke('review:updateSettings', { settings, lanes })).rejects.toMatchObject({
+      message: 'Review lanes were not saved: the lane settings are invalid',
+      errorCode: 'REVIEW_LANES_INVALID',
+    });
+    expect(store.updateSettings).not.toHaveBeenCalled();
+    expect(laneSettings.update).not.toHaveBeenCalled();
+  });
+
+  it('reports a lane write failure after the settings commit', async () => {
+    const { invoke, store, laneSettings, logger } = suite();
+    laneSettings.update.mockRejectedValue(new Error('disk full at C:/secret'));
+    await expect(invoke('review:updateSettings', { settings, lanes: saved })).rejects.toMatchObject({
+      message: 'Review lanes were not saved',
+      errorCode: 'REVIEW_LANES_NOT_SAVED',
+    });
+    expect(store.updateSettings).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify((logger.info as jest.Mock).mock.calls)).not.toContain('secret');
+  });
+
+  it('does not save lanes when the live-gate checks reject the call', async () => {
+    const { invoke, secrets, laneSettings } = suite();
+    (secrets.hasToken as jest.Mock).mockResolvedValue(false);
+    const live = { ...settings, repositories: [{ ...settings.repositories[0], dryRun: false }] };
+    await expect(invoke('review:updateSettings', { settings: live, lanes: saved })).rejects.toThrow('Connect a bot token');
+    expect(laneSettings.update).not.toHaveBeenCalled();
+  });
+
+  it('returns the lane listing service result', async () => {
+    const { invoke, laneListing } = suite();
+    const listing: ReviewLaneListing = {
+      lanes: [{ id: 'codex', label: 'Codex', family: 'codex', limitState: 'unknown',
+        catalog: { status: 'failed', models: [], truncated: false, verifiable: false } }],
+      blockedModels: ['gemini-3-pro'],
+    };
+    laneListing.list.mockResolvedValue(listing);
+    expect(await invoke('review:listLanes', {})).toEqual(listing);
+  });
+
+  it('maps a lane list failure to a generic error and rejects extra params', async () => {
+    const { invoke, laneListing } = suite();
+    laneListing.list.mockRejectedValue(new Error('token ghp_secret'));
+    await expect(invoke('review:listLanes', {})).rejects.toMatchObject({
+      message: 'Review service is unavailable',
+      errorCode: 'PERSISTENCE_UNAVAILABLE',
+    });
+    await expect(invoke('review:listLanes', { extra: true })).rejects.toThrow('Invalid review request');
   });
 });

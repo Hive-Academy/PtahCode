@@ -1,6 +1,12 @@
 import { TestBed } from '@angular/core/testing';
 import { ClaudeRpcService, LoggingService } from '@ptah-extension/core';
-import type { ReviewFinding, ReviewRun } from '@ptah-extension/review-contracts';
+import type {
+  OperatorSettings,
+  ReviewFinding,
+  ReviewLaneListing,
+  ReviewLaneSettings,
+  ReviewRun,
+} from '@ptah-extension/review-contracts';
 import { ReviewRunsStore } from './review-runs.store';
 
 const run: ReviewRun = {
@@ -157,7 +163,7 @@ describe('ReviewRunsStore', () => {
     await store.load();
     expect(store.nextCursor()).toBe('cursor-1');
     await store.loadMore();
-    expect(call).toHaveBeenCalledWith('review:listRuns', { limit: 100, cursor: 'cursor-1' }, { timeout: 5_000 });
+    expect(call).toHaveBeenCalledWith('review:listRuns', { limit: 100, cursor: 'cursor-1' }, { timeout: 15_000 });
     // The second page repeats rvw-428-01, which must not appear twice.
     expect(store.runs()).toHaveLength(2);
     expect(store.nextCursor()).toBeNull();
@@ -472,7 +478,7 @@ describe('ReviewRunsStore', () => {
     expect(call).toHaveBeenCalledWith(
       'review:listFindings',
       { attemptId: run.attemptId },
-      { timeout: 5_000 },
+      { timeout: 15_000 },
     );
     expect(store.findingsState()).toBe('ready');
     expect(store.findings()).toEqual([finding]);
@@ -738,7 +744,7 @@ describe('ReviewRunsStore', () => {
     expect(call).toHaveBeenLastCalledWith(
       'review:setPublicationPause',
       { paused: true },
-      { timeout: 5_000 },
+      { timeout: 15_000 },
     );
     expect(store.settings()?.globalPublicationPaused).toBe(true);
     expect(store.pauseError()).toBe(false);
@@ -796,7 +802,7 @@ describe('ReviewRunsStore', () => {
     await store.loadSettings();
     await store.setPublicationPause(true, true, repo);
     expect(call).toHaveBeenLastCalledWith('review:setPublicationPause',
-      { paused: true, repo: { owner: repo.owner, name: repo.name } }, { timeout: 5_000 });
+      { paused: true, repo: { owner: repo.owner, name: repo.name } }, { timeout: 15_000 });
     expect(store.settings()?.repositories[0].publicationPaused).toBe(true);
   });
   it('does not turn publication pause off without explicit confirmation', async () => {
@@ -834,7 +840,7 @@ describe('ReviewRunsStore', () => {
     expect(call).toHaveBeenCalledWith(
       'review:setPublicationPause',
       { paused: false },
-      { timeout: 5_000 },
+      { timeout: 15_000 },
     );
     expect(store.settings()?.globalPublicationPaused).toBe(false);
   });
@@ -854,7 +860,7 @@ describe('ReviewRunsStore', () => {
     expect(call).toHaveBeenLastCalledWith(
       'review:updateSettings',
       { settings: saved },
-      { timeout: 5_000 },
+      { timeout: 15_000 },
     );
     expect(store.settings()).toEqual(saved);
     expect(JSON.stringify(call.mock.calls)).not.toContain('token');
@@ -925,5 +931,258 @@ describe('review settings defaults', () => {
     await store.saveSettings();
     expect(call).not.toHaveBeenCalled();
     expect(store.settingsSaveError()).toContain('bot token');
+  });
+});
+
+describe('ReviewRunsStore review lanes', () => {
+  const call = jest.fn();
+  let store: ReviewRunsStore;
+  const settings: OperatorSettings = {
+    repositories: [],
+    maintainerLogins: ['maintainer'],
+    pollMinutes: 10,
+    globalPublicationPaused: false,
+    laneCapPerPr: 6,
+    confidenceFloor: 0.8,
+    maxNewInline: 10,
+    fallbackFamilies: [],
+  };
+  const savedLanes: ReviewLaneSettings = {
+    pool: [
+      { lane: 'codex', model: 'gpt-5.3-codex' },
+      { lane: 'gemini', model: null },
+    ],
+    pins: { verifier: { lane: 'codex', model: null } },
+  };
+  const listing: ReviewLaneListing = {
+    lanes: [
+      {
+        id: 'codex',
+        label: 'Codex',
+        family: 'openai',
+        limitState: 'confirmed-room',
+        catalog: { status: 'read', models: ['gpt-5.3-codex'], truncated: false, verifiable: true },
+      },
+    ],
+    blockedModels: [],
+  };
+  const ok = (data: unknown) => ({ isSuccess: () => true, data });
+  const failure = (error: string, errorCode: string) => ({
+    isSuccess: () => false,
+    error,
+    errorCode,
+  });
+  const loadSettingsWith = async (lanes?: ReviewLaneSettings): Promise<void> => {
+    call.mockResolvedValueOnce(
+      ok({ settings, hasToken: false, tokenStorage: 'encrypted', ...(lanes ? { lanes } : {}) }),
+    );
+    // loadSettings also reads the bot identity; that read may fail without affecting lanes.
+    call.mockResolvedValueOnce(ok(null));
+    await store.loadSettings();
+  };
+  const updateCall = (): unknown[] | undefined =>
+    call.mock.calls.find((entry) => entry[0] === 'review:updateSettings');
+
+  beforeEach(() => {
+    call.mockReset();
+    TestBed.configureTestingModule({
+      providers: [
+        ReviewRunsStore,
+        { provide: ClaudeRpcService, useValue: { call } },
+        { provide: LoggingService, useValue: { error: jest.fn(), warn: jest.fn() } },
+      ],
+    });
+    store = TestBed.inject(ReviewRunsStore);
+  });
+
+  it('loads saved lanes into the saved value and the draft', async () => {
+    await loadSettingsWith(savedLanes);
+    expect(store.settingsLanes()).toEqual(savedLanes);
+    expect(store.draftLanes()).toEqual(savedLanes);
+  });
+
+  it('gives empty lanes when the settings reply has no lanes', async () => {
+    await loadSettingsWith();
+    expect(store.settingsLanes()).toEqual({ pool: [], pins: {} });
+    expect(store.draftLanes()).toEqual({ pool: [], pins: {} });
+  });
+
+  it('leaves lanes out of an unrelated settings save so the host keeps them', async () => {
+    await loadSettingsWith(savedLanes);
+    store.updateDraft({ pollMinutes: 30 });
+    call.mockResolvedValueOnce(ok({ ...settings, pollMinutes: 30 }));
+    await store.saveSettings();
+    const params = updateCall()?.[1] as Record<string, unknown>;
+    expect(params['lanes']).toBeUndefined();
+    expect(store.settingsLanes()).toEqual(savedLanes);
+    expect(store.draftLanes()).toEqual(savedLanes);
+  });
+
+  it('sends exactly the edited draft and keeps it as the saved lanes', async () => {
+    await loadSettingsWith(savedLanes);
+    const next: ReviewLaneSettings = {
+      pool: [{ lane: 'gemini', model: null }, { lane: 'codex', model: 'gpt-5.3-codex' }],
+      pins: { triage: { lane: 'gemini', model: null } },
+    };
+    store.updateDraftLanes(next);
+    call.mockResolvedValueOnce(ok(settings));
+    await store.saveSettings();
+    expect(updateCall()).toEqual([
+      'review:updateSettings',
+      { settings, lanes: next },
+      { timeout: 15_000 },
+    ]);
+    expect(store.settingsLanes()).toEqual(next);
+    expect(store.draftLanes()).toEqual(next);
+    expect(store.lanesSaveError()).toBeNull();
+  });
+
+  it('stores the parsed draft, so the saved lanes equal what the host stores', async () => {
+    await loadSettingsWith();
+    store.updateDraftLanes({ pool: [{ lane: ' codex ', model: ' gpt-5.3-codex ' }], pins: {} });
+    call.mockResolvedValueOnce(ok(settings));
+    await store.saveSettings();
+    const trimmed = { pool: [{ lane: 'codex', model: 'gpt-5.3-codex' }], pins: {} };
+    expect((updateCall()?.[1] as Record<string, unknown>)['lanes']).toEqual(trimmed);
+    expect(store.settingsLanes()).toEqual(trimmed);
+    expect(store.draftLanes()).toEqual(trimmed);
+  });
+
+  it('blocks a save with a duplicate pool entry without calling the host', async () => {
+    await loadSettingsWith(savedLanes);
+    const duplicate: ReviewLaneSettings = {
+      pool: [...savedLanes.pool, { lane: 'codex', model: 'gpt-5.3-codex' }],
+      pins: {},
+    };
+    store.updateDraftLanes(duplicate);
+    await store.saveSettings();
+    const message =
+      'Review lanes were not saved: the pool has a duplicate entry. Remove it and save again.';
+    expect(updateCall()).toBeUndefined();
+    expect(store.lanesSaveError()).toBe(message);
+    expect(store.settingsSaveError()).toBe(message);
+    expect(store.draftLanes()).toEqual(duplicate);
+    expect(store.settingsLanes()).toEqual(savedLanes);
+  });
+
+  it('blocks a save with lanes the contract rejects without calling the host', async () => {
+    await loadSettingsWith();
+    store.updateDraftLanes({ pool: [{ lane: 'not a lane id', model: null }], pins: {} });
+    await store.saveSettings();
+    expect(updateCall()).toBeUndefined();
+    expect(store.lanesSaveError()).toBe('Review lanes were not saved: the lane settings are invalid');
+  });
+
+  it('matches a lanes-not-saved failure by code, refreshes the saved settings and keeps the lane draft', async () => {
+    await loadSettingsWith();
+    store.updateDraft({ pollMinutes: 30 });
+    store.updateDraftLanes(savedLanes);
+    const hostSettings = { ...settings, pollMinutes: 30 };
+    call.mockResolvedValueOnce(failure('any host text', 'REVIEW_LANES_NOT_SAVED'));
+    call.mockResolvedValueOnce(ok({ settings: hostSettings, hasToken: false, tokenStorage: 'encrypted' }));
+    await store.saveSettings();
+    expect(call.mock.calls.filter((entry) => entry[0] === 'review:getSettings')).toHaveLength(2);
+    expect(store.settingsSaveError()).toBe('Review lanes were not saved');
+    expect(store.lanesSaveError()).toBe('Review lanes were not saved');
+    expect(store.settings()).toEqual(hostSettings);
+    expect(store.draftSettings()).toEqual(hostSettings);
+    expect(store.repositories()).toEqual(hostSettings.repositories);
+    expect(store.settingsLanes()).toEqual({ pool: [], pins: {} });
+    expect(store.draftLanes()).toEqual(savedLanes);
+    expect(store.settingsState()).toBe('ready');
+    expect(store.settingsSaving()).toBe(false);
+    store.updateDraftLanes({ pool: [], pins: {} });
+    expect(store.lanesSaveError()).toBeNull();
+  });
+
+  it('keeps the lane error and draft when the refresh after a lanes-not-saved failure fails', async () => {
+    await loadSettingsWith();
+    store.updateDraftLanes(savedLanes);
+    call.mockResolvedValueOnce(failure('x', 'REVIEW_LANES_NOT_SAVED'));
+    call.mockResolvedValueOnce(failure('x', 'INTERNAL_ERROR'));
+    await store.saveSettings();
+    expect(store.lanesSaveError()).toBe('Review lanes were not saved');
+    expect(store.draftLanes()).toEqual(savedLanes);
+    expect(store.settings()).toEqual(settings);
+  });
+
+  it('matches a lanes-invalid failure by code and shows the contract message without a refresh', async () => {
+    await loadSettingsWith();
+    store.updateDraftLanes(savedLanes);
+    call.mockResolvedValueOnce(failure('reworded host text', 'REVIEW_LANES_INVALID'));
+    await store.saveSettings();
+    expect(store.lanesSaveError()).toBe('Review lanes were not saved: the lane settings are invalid');
+    expect(store.settingsSaveError()).toBe('Review lanes were not saved: the lane settings are invalid');
+    expect(call.mock.calls.filter((entry) => entry[0] === 'review:getSettings')).toHaveLength(1);
+  });
+
+  it('keeps a lane-worded message with another code generic and off the lanes section', async () => {
+    await loadSettingsWith();
+    store.updateDraftLanes(savedLanes);
+    call.mockResolvedValueOnce(failure('Review lanes were not saved', 'PERSISTENCE_UNAVAILABLE'));
+    await store.saveSettings();
+    expect(store.settingsSaveError()).toBe('Review settings could not be saved.');
+    expect(store.lanesSaveError()).toBeNull();
+  });
+
+  it('sends unchanged lanes when the stored lane document is unreadable, then clears the flag', async () => {
+    call.mockResolvedValueOnce(
+      ok({ settings, hasToken: false, tokenStorage: 'encrypted', lanes: { pool: [], pins: {} }, lanesCorrupt: true }),
+    );
+    call.mockResolvedValueOnce(ok(null));
+    await store.loadSettings();
+    expect(store.lanesCorrupt()).toBe(true);
+    call.mockResolvedValueOnce(ok(settings));
+    await store.saveSettings();
+    expect((updateCall()?.[1] as Record<string, unknown>)['lanes']).toEqual({ pool: [], pins: {} });
+    expect(store.lanesCorrupt()).toBe(false);
+  });
+
+  it('treats an absent lanesCorrupt as readable lanes', async () => {
+    await loadSettingsWith(savedLanes);
+    expect(store.lanesCorrupt()).toBe(false);
+  });
+
+  it('loads the lane listing with its own state and a longer timeout', async () => {
+    expect(store.laneListState()).toBe('idle');
+    call.mockResolvedValueOnce(ok(listing));
+    const pending = store.loadLanes();
+    expect(store.laneListState()).toBe('loading');
+    await pending;
+    expect(call).toHaveBeenLastCalledWith('review:listLanes', {}, { timeout: 20_000 });
+    expect(store.laneListing()).toEqual(listing);
+    expect(store.laneListState()).toBe('ready');
+    expect(store.settingsState()).toBe('loading');
+  });
+
+  it('reports a listing failure and recovers on retry', async () => {
+    call.mockResolvedValueOnce(failure('Review service is unavailable', 'INTERNAL_ERROR'));
+    await store.loadLanes();
+    expect(store.laneListState()).toBe('error');
+    expect(store.laneListing()).toBeNull();
+    call.mockResolvedValueOnce(ok(listing));
+    await store.loadLanes();
+    expect(store.laneListState()).toBe('ready');
+    expect(store.laneListing()).toEqual(listing);
+  });
+
+  it('rejects a listing that does not fit the contract', async () => {
+    call.mockResolvedValueOnce(ok({ lanes: [{ id: 'codex' }], blockedModels: [] }));
+    await store.loadLanes();
+    expect(store.laneListState()).toBe('error');
+    expect(store.laneListing()).toBeNull();
+  });
+
+  it('ignores a listing reply from a superseded load', async () => {
+    let resolveFirst: (value: unknown) => void = () => undefined;
+    call
+      .mockReturnValueOnce(new Promise((resolve) => { resolveFirst = resolve; }))
+      .mockResolvedValueOnce(ok(listing));
+    const first = store.loadLanes();
+    await store.loadLanes();
+    resolveFirst(failure('Review service is unavailable', 'INTERNAL_ERROR'));
+    await first;
+    expect(store.laneListState()).toBe('ready');
+    expect(store.laneListing()).toEqual(listing);
   });
 });

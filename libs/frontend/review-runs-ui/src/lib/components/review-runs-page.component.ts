@@ -248,14 +248,19 @@ import { ReviewConfirmDialogComponent } from './review-confirm-dialog.component'
       </ptah-inbox-layout>
       @if (settingsOpen()) {
         <ptah-review-settings-drawer
-          [repository]="store.repositories()[0] ?? null"
-          [settings]="store.settings()"
           [draft]="store.draftSettings()"
+          [lanes]="store.draftLanes()"
+          [laneListing]="store.laneListing()"
+          [laneListState]="store.laneListState()"
+          [lanesSaveError]="store.lanesSaveError()"
+          [lanesCorrupt]="store.lanesCorrupt()"
           [hasToken]="store.hasToken()"
           [saving]="store.settingsSaving()"
           [saveError]="store.settingsSaveError()"
           [loadState]="store.settingsState()"
           (changed)="store.updateDraft($event)"
+          (lanesChanged)="store.updateDraftLanes($event)"
+          (retryLanes)="store.loadLanes()"
           (save)="store.saveSettings()"
           (retry)="store.loadSettings()"
           (closed)="settingsOpen.set(false)"
@@ -282,6 +287,7 @@ export class ReviewRunsPageComponent implements OnInit {
   openSettings(): void {
     this.settingsOpen.set(true);
     void this.store.loadSettings();
+    void this.store.loadLanes();
   }
   ngOnInit(): void {
     void this.store.load();

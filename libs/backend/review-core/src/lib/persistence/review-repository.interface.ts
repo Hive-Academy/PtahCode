@@ -1,6 +1,7 @@
 import type { IReviewQueueRepository } from '../review-queue.service';
 import type { RepoIdentity } from '@ptah-extension/review-contracts';
 import type { ReviewFailure } from '../review-failure';
+import type { ReviewLaneUse } from '../lanes/review-lane.runner';
 
 export interface ReviewStageRecord {
   attemptId: string;
@@ -54,6 +55,11 @@ export interface IReviewRepository extends IReviewQueueRepository {
   saveStage(stage: ReviewStageRecord): Promise<void>;
   saveCheckpoint(attemptId: string, stage: string, ordinal: number, data: unknown): Promise<void>;
   getCheckpoint(attemptId: string, stage: string, ordinal: number): Promise<unknown | null>;
+  /**
+   * Records the lane a role used on its stage row: the family into `review_stages.family`, and lane,
+   * model, family and skipped entries into the `checkpoint:lane:<stage>` row (no migration, plan A2).
+   */
+  saveStageLane(attemptId: string, stage: string, ordinal: number, use: ReviewLaneUse): Promise<void>;
   getStatusSync(attemptId: string): Promise<ReviewStatusSyncRecord | null>;
   saveStatusSync(record: ReviewStatusSyncRecord): Promise<void>;
   getPendingStatusSync(now: string): Promise<ReviewStatusSyncRecord[]>;

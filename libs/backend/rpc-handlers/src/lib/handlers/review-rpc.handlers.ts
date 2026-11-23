@@ -4,6 +4,8 @@ import { inject, injectable } from 'tsyringe';
 import { ulid } from 'ulid';
 import { z, ZodError } from 'zod';
 import {
+  REVIEW_LANE_ERROR_MESSAGES,
+  ReviewLaneErrorCode,
   ReviewRpcSchemas,
   type IGitHubReviewPort,
   type RepoIdentity,
@@ -11,6 +13,8 @@ import {
 import {
   REVIEW_CORE_TOKENS,
   ReviewPollDisabledError,
+  type IReviewLaneSettingsStore,
+  type ReviewLaneListingService,
   type IReviewArtifactReader,
   type IReviewQueryRepository,
   type IReviewSecretPresence,
@@ -72,6 +76,7 @@ export class ReviewRpcHandlers {
     'review:listFindings',
     'review:listRepositories',
     'review:getSettings',
+    'review:listLanes',
     'review:updateSettings',
     'review:setPublicationPause',
     'review:retryHead',
@@ -112,6 +117,10 @@ export class ReviewRpcHandlers {
     @inject(PLATFORM_TOKENS.WORKSPACE_PROVIDER)
     private readonly workspace: Pick<IWorkspaceProvider, 'getWorkspaceFolders'>,
     @inject(REVIEW_GITHUB_TOKENS.REVIEW_PORT) threads: IGitHubFindingThreadPort,
+    @inject(REVIEW_CORE_TOKENS.LANE_SETTINGS_STORE)
+    private readonly laneSettings: IReviewLaneSettingsStore,
+    @inject(REVIEW_CORE_TOKENS.LANE_LISTING)
+    private readonly laneListing: Pick<ReviewLaneListingService, 'list'>,
   ) {
     this.responder = new ReviewFindingResponder({ query, threads, replies, environment, logger });
   }
@@ -359,17 +368,34 @@ export class ReviewRpcHandlers {
       this.safe(async () => {
         ReviewRpcSchemas['review:getSettings'].params.parse(raw);
         const settings = await this.settings.getSettings();
+        const lanes = await this.laneSettings.read();
         return ReviewRpcSchemas['review:getSettings'].result.parse({
           settings,
           hasToken: await this.secrets.hasToken(),
           tokenStorage: this.tokenStorage.storageMode?.() ?? 'encrypted',
+          lanes: lanes.settings,
+          lanesCorrupt: lanes.corrupt,
         });
+      }),
+    );
+    this.rpc.registerMethod('review:listLanes', (raw) =>
+      this.safe(async () => {
+        ReviewRpcSchemas['review:listLanes'].params.parse(raw);
+        return ReviewRpcSchemas['review:listLanes'].result.parse(
+          await this.laneListing.list(),
+        );
       }),
     );
     this.rpc.registerMethod('review:updateSettings', (raw) =>
       this.safe(async () => {
-        const { settings, attestation } =
-          ReviewRpcSchemas['review:updateSettings'].params.parse(raw);
+        const parsed = ReviewRpcSchemas['review:updateSettings'].params.safeParse(raw);
+        if (!parsed.success) {
+          // Nothing is written when any part of the request is invalid (Req 1.2).
+          if (parsed.error.issues.some((issue) => issue.path[0] === 'lanes'))
+            throw new RpcUserError(REVIEW_LANE_ERROR_MESSAGES[ReviewLaneErrorCode.Invalid], ReviewLaneErrorCode.Invalid);
+          throw parsed.error;
+        }
+        const { settings, attestation, lanes } = parsed.data;
         if (
           settings.repositories.some((repo) => !repo.dryRun) &&
           !(await this.secrets.hasToken())
@@ -422,6 +448,17 @@ export class ReviewRpcHandlers {
           });
         } else if (previousGate) {
           await this.settings.setLiveGate(null);
+        }
+        // Lanes go last: the live-gate checks above can reject the call and must not leave lane
+        // changes behind. Save is idempotent, so a second Save completes a failed lane write. Sent
+        // lanes are always written, which also replaces a corrupt stored document (lanesCorrupt).
+        if (lanes) {
+          try {
+            await this.laneSettings.update(lanes);
+          } catch {
+            // degradation-audit: reported — the operator sees this error; the adapter error is not logged.
+            throw new RpcUserError(REVIEW_LANE_ERROR_MESSAGES[ReviewLaneErrorCode.NotSaved], ReviewLaneErrorCode.NotSaved);
+          }
         }
         return ReviewRpcSchemas['review:updateSettings'].result.parse(saved);
       }),

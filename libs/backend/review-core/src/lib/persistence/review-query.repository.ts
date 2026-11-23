@@ -3,7 +3,11 @@ import { basename } from 'node:path';
 import { z } from 'zod';
 import { PERSISTENCE_TOKENS, SqliteConnectionService } from '@ptah-extension/persistence-sqlite';
 import { publishedFindingTitle, redactSecrets } from '../publication/publication-text';
-import { RepoIdentitySchema, ReviewFindingSchema, ReviewRunSchema, ReviewRpcSchemas, type ReviewFinding, type ReviewRun } from '@ptah-extension/review-contracts';
+import {
+  REVIEW_LANE_POOL_MAX, RepoIdentitySchema, ReviewFindingSchema, ReviewLaneFallbackSchema, ReviewLaneIdSchema, ReviewModelIdSchema,
+  ReviewRunSchema, ReviewRpcSchemas, type ReviewFinding, type ReviewLaneFallback, type ReviewRun,
+} from '@ptah-extension/review-contracts';
+import { REVIEW_STAGE_LANE_RECORD_VERSION } from './sqlite-review.repository';
 
 export interface IReviewQueryRepository {
   listRuns(input: z.input<typeof ReviewRpcSchemas['review:listRuns']['params']>): Promise<z.output<typeof ReviewRpcSchemas['review:listRuns']['result']>>;
@@ -23,10 +27,22 @@ const rowSchema = z.object({ attempt_id: z.string(), owner: z.string(), name: z.
   config_snapshot_hash: z.string().nullable(), result_status: z.enum(['succeeded', 'partial', 'failed', 'superseded']).nullable(),
   failure_stage: z.string().nullable().optional(), failure_code: z.string().nullable().optional(), failure_message: z.string().nullable().optional(),
   failure_count: z.number().nullable().optional(), next_eligible_at: z.number().nullable().optional() });
-const stageSchema = z.object({ stage: z.string(), state: z.string(), outcome: z.string().nullable(), family: z.string().nullable(), scope: z.string().nullable(),
+const stageSchema = z.object({ stage: z.string(), ordinal: z.number(), state: z.string(), outcome: z.string().nullable(), family: z.string().nullable(), scope: z.string().nullable(),
   started_at: z.number().nullable(), ended_at: z.number().nullable(), error_summary: z.string().nullable(), artifact_path: z.string().nullable() });
 const coverageSchema = z.object({ coverage: z.array(z.string().min(1).max(256)).max(100) });
 const checkpointSchema = z.object({ outcome: z.string().nullable() });
+const LANE_RECORD_PREFIX = 'checkpoint:lane:';
+const laneRowSchema = z.object({ stage: z.string(), ordinal: z.number(), outcome: z.string().nullable() });
+/** Lenient: unknown keys pass, an invalid document is ignored for display (plan component 7). */
+const laneRecordSchema = z.string().transform((text, ctx): unknown => {
+  try { return JSON.parse(text) as unknown; }
+  catch {
+    ctx.addIssue({ code: 'custom', message: 'Lane record is not JSON' });
+    return z.NEVER;
+  }
+}).pipe(z.object({ version: z.literal(REVIEW_STAGE_LANE_RECORD_VERSION), lane: ReviewLaneIdSchema.nullable(),
+  model: ReviewModelIdSchema.nullable(), fallback: z.array(ReviewLaneFallbackSchema).max(REVIEW_LANE_POOL_MAX + 1) }));
+type StageLane = { lane: string | null; model: string | null; fallback: ReviewLaneFallback[] };
 const pollRowSchema = z.object({ poll_status: z.enum(['succeeded', 'failed']).nullable(), poll_error: z.string().nullable(),
   last_success_at: z.number().nullable(), last_error_at: z.number().nullable() });
 const iso = (value: number): string => new Date(value).toISOString();
@@ -48,13 +64,16 @@ export class ReviewQueryRepository implements IReviewQueryRepository {
       .get(row.attempt_id);
     const outcome = checkpoint ? checkpointSchema.parse(checkpoint).outcome : null;
     const coverage = outcome === null ? null : coverageSchema.parse(JSON.parse(outcome)).coverage;
-    const stages = this.sqlite.db.prepare(`SELECT stage, state, outcome, family, scope, started_at, ended_at, error_summary, artifact_path
+    const lanes = this.stageLanes(row.attempt_id);
+    const stages = this.sqlite.db.prepare(`SELECT stage, ordinal, state, outcome, family, scope, started_at, ended_at, error_summary, artifact_path
       FROM review_stages WHERE attempt_id = ? AND stage NOT LIKE 'checkpoint:%' ORDER BY started_at, ordinal LIMIT 16`).all(row.attempt_id)
       .map((value) => {
         const stage = stageSchema.parse(value);
         const status = stage.outcome === 'partial' ? 'partial' : stage.state === 'completed' ? 'succeeded' : stage.state === 'cancelled' ? 'superseded' : stage.state;
         const lens = stage.stage.startsWith('lens:') ? stage.stage.slice(5) : null;
+        const lane = lanes.get(`${stage.stage}#${stage.ordinal}`);
         return { name: lens === null ? stage.stage : 'lenses', status, family: stage.family,
+          lane: lane?.lane ?? null, model: lane?.model ?? null, fallback: lane?.fallback ?? null,
           scope: lens ?? stage.scope,
           durationMs: stage.started_at !== null && stage.ended_at !== null ? Math.max(0, stage.ended_at - stage.started_at) : null,
           error: stage.error_summary === null ? null : lens === null ? 'Review stage failed' : stage.error_summary,
@@ -73,6 +92,21 @@ export class ReviewQueryRepository implements IReviewQueryRepository {
       completedAt: row.ended_at === null ? null : iso(row.ended_at),
       deadlineAt: row.deadline_at === null ? null : iso(row.deadline_at),
       coverage: coverage ?? [], stages });
+  }
+
+  /** Lane records of one attempt by `<stage>#<ordinal>`. Runs from before lane pools have none. */
+  private stageLanes(attemptId: string): Map<string, StageLane> {
+    const records = new Map<string, StageLane>();
+    for (const value of this.sqlite.db.prepare(`SELECT stage, ordinal, outcome FROM review_stages
+      WHERE attempt_id = ? AND stage LIKE 'checkpoint:lane:%'`).all(attemptId)) {
+      const row = laneRowSchema.parse(value);
+      if (row.outcome === null || !row.stage.startsWith(LANE_RECORD_PREFIX)) continue;
+      const record = laneRecordSchema.safeParse(row.outcome);
+      if (!record.success) continue;
+      records.set(`${row.stage.slice(LANE_RECORD_PREFIX.length)}#${row.ordinal}`,
+        { lane: record.data.lane, model: record.data.model, fallback: record.data.fallback });
+    }
+    return records;
   }
 
   async listRuns(raw: z.input<typeof ReviewRpcSchemas['review:listRuns']['params']>): Promise<z.output<typeof ReviewRpcSchemas['review:listRuns']['result']>> {
