@@ -528,6 +528,32 @@ describe('SessionTaskReader digest and documents', () => {
     });
   });
 
+  it('lists the fallback documents again on each failed retry and keeps the held list when the listing fails', async () => {
+    const documents = () => reader.state()?.data.documents;
+    take('tasks:getDigest').resolve({ success: false });
+    await settle();
+    take('tasks:listFolderEntries').resolve(folderEntries([{ name: 'notes.md', kind: 'file' }]));
+    await settle();
+    expect(documents()).toEqual(['notes.md']);
+
+    reader.retry();
+    await settle();
+    take('tasks:getDigest').resolve({ success: false });
+    await settle();
+    take('tasks:listFolderEntries').resolve(folderEntries([{ name: 'updated-notes.md', kind: 'file' }]));
+    await settle();
+    expect(documents()).toEqual(['updated-notes.md']);
+
+    reader.retry();
+    await settle();
+    take('tasks:getDigest').resolve({ success: false });
+    await settle();
+    take('tasks:listFolderEntries').reject(new Error('listing failed'));
+    await settle();
+    expect(reader.state()?.status).toBe('error');
+    expect(documents()).toEqual(['updated-notes.md']);
+  });
+
   it('keeps an empty file list and allows a retry when both the first digest and folder listing reject', async () => {
     take('tasks:getDigest').reject(new Error('C:/private/workspace'));
     await settle();

@@ -462,10 +462,12 @@ export class SessionTaskReader {
 
   private async handleDigestFailure(key: string, link: TaskLink, held: TaskSectionData): Promise<void> {
     let data = held;
-    if (held.documents.length === 0) {
+    // Without a digest the file list comes from a listing; list again so a
+    // retry or refresh drops renamed files. A failed listing keeps the held list.
+    if (held.digest === null) {
       const documents = await this.listFallbackDocuments(link);
       if (!this.isCurrent(key, link)) return;
-      data = { ...this.sectionData(link, null), documents };
+      if (documents !== null) data = { ...this.sectionData(link, null), documents };
     }
     this.result.set({
       key,
@@ -473,7 +475,8 @@ export class SessionTaskReader {
     });
   }
 
-  private async listFallbackDocuments(link: TaskLink): Promise<readonly string[]> {
+  /** Top-level readable Markdown names, or null when the listing failed. */
+  private async listFallbackDocuments(link: TaskLink): Promise<readonly string[] | null> {
     const params = {
       workspaceRoot: link.workspaceRoot ?? undefined,
       taskId: link.lead.taskId,
@@ -483,14 +486,14 @@ export class SessionTaskReader {
       const response = await rpcCall<TasksListFolderEntriesResult>(this.vscode, 'tasks:listFolderEntries', params);
       const listing = response.data;
       if (!response.success || listing?.state !== 'ready' || listing.taskId !== params.taskId ||
-        listing.directory !== params.directory || !Array.isArray(listing.entries)) return [];
+        listing.directory !== params.directory || !Array.isArray(listing.entries)) return null;
       return listing.entries
         .filter(entry => entry?.kind === 'file' && typeof entry.name === 'string' &&
           isReadableTaskFolderMarkdownName(entry.name))
         .map(entry => entry.name);
     } catch (error: unknown) {
       this.logger.error('SessionTaskReader', 'Could not list the task documents', error instanceof Error ? error : new Error(String(error)));
-      return [];
+      return null;
     }
   }
 }

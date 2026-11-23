@@ -124,6 +124,8 @@ function visibleMarkdownLines(text: string): string[] {
       }
     } else if (marker && (marker[0] === '~' || !suffix.includes('\x60'))) {
       fence = marker;
+      // A hidden block still separates the blocks around it, so a table cannot run across it.
+      visible.push('');
     } else {
       visible.push(line);
     }
@@ -190,6 +192,7 @@ export function extractTaskReview(
       if (tableSeverity) counts[tableSeverity]++;
       continue;
     }
+    if (summaryLevel) continue;
     const section = sections.at(-1);
     if (section?.inFinding) continue;
     const itemSeverity = severity(/^[ \t]*(?:\d+\.|[-*])[ \t]*\**\[?(Serious|Moderate|Minor)\b/i.exec(line)?.[1]);
@@ -256,7 +259,7 @@ export function countTaskOpenQuestions(text: string): number {
     if (section && !sectionLevel) sectionLevel = section[1].length;
     if (!sectionLevel) continue;
     const item = /^(?:\d+\.|[-*])[ \t]+(\S.*)/.exec(line)?.[1];
-    if (item && !/^\[x\]|Resolved:|\(resolved\)/i.test(item)) total++;
+    if (item && !/^\[x\]|\bResolved:|\(resolved\)/i.test(item)) total++;
   }
   return total;
 }

@@ -262,6 +262,37 @@ let nextTaskSectionId = 0;
               <span class="shrink-0">{{ stage }}</span>
             }
             @if (digest?.progress; as progress) {
+              @if (progressCapped()) {
+                <ptah-meter
+                  class="min-w-0 flex-1"
+                  role="img"
+                  [attr.aria-label]="
+                    'Task progress incomplete: at least ' +
+                    progress.done +
+                    ' of at least ' +
+                    progress.total +
+                    ' tasks complete, ' +
+                    progress.source +
+                    ' was read in part'
+                  "
+                  label=""
+                  [value]="0"
+                  [max]="0"
+                  size="xs"
+                  [hideLabel]="true"
+                  [showValue]="false"
+                />
+                <span
+                  class="shrink-0"
+                  aria-hidden="true"
+                  [title]="progress.source + ' was read in part'"
+                >
+                  <b class="tabular-nums"
+                    >≥{{ progress.done }}/≥{{ progress.total }}</b
+                  >
+                  tasks
+                </span>
+              } @else {
               <ptah-meter
                 class="min-w-0 flex-1"
                 [value]="progress.done"
@@ -289,6 +320,7 @@ let nextTaskSectionId = 0;
                 >
                 tasks
               </span>
+              }
             } @else {
               <ptah-meter
                 class="min-w-0 flex-1"
@@ -555,6 +587,7 @@ let nextTaskSectionId = 0;
                           aria-label="More task documents"
                           [hidden]="!menuOpen()"
                           (keydown)="navigateMenu($event)"
+                          (focusout)="closeOnFocusLeave($event)"
                           class="document-menu"
                         >
                           @if (menuOpen()) {
@@ -566,6 +599,7 @@ let nextTaskSectionId = 0;
                                   variant="ghost"
                                   size="xs"
                                   role="menuitem"
+                                  tabindex="-1"
                                   class="w-full min-w-0 justify-start font-mono"
                                   [title]="doc.label"
                                   [attr.aria-label]="doc.label"
@@ -727,7 +761,7 @@ let nextTaskSectionId = 0;
                   <span
                     aria-hidden="true"
                     class="text-lg font-semibold tabular-nums"
-                    >{{ folders.length }}</span
+                    >{{ folderCount() }}</span
                   >
                   <span aria-hidden="true" class="tile-sub">
                     <b class="tabular-nums">{{ folderFileTotal() }}</b> files
@@ -1052,6 +1086,18 @@ export class InspectorTaskSectionComponent {
     return state?.status === 'ready' ? (state.data?.digest ?? null) : null;
   });
 
+  /** Progress counted from a capped `batches.md` read covers only a prefix. */
+  protected readonly progressCapped = computed(() => {
+    const digest = this.readyDigest();
+    const source = digest?.progress?.source;
+    return (
+      source !== undefined &&
+      digest?.documents.some(
+        (doc) => doc.name === source && doc.extraction === 'capped',
+      ) === true
+    );
+  });
+
   protected readonly stats = computed<TaskStat[]>(() => {
     const digest = this.readyDigest();
     const pending = digest?.decisions?.pendingUser ?? null;
@@ -1185,10 +1231,16 @@ export class InspectorTaskSectionComponent {
     return `${count} ${count === 1 ? 'document' : 'documents'}, ${reviewLabel}${verdict}. ${this.documentsOpen() ? 'Hide' : 'Show'} documents`;
   });
 
+  /** The top-level entry cap can leave folders out of `directories`. */
+  private readonly foldersOmitted = computed(
+    () => this.readyDigest()?.truncatedReasons.includes('entries') ?? false,
+  );
+
   private readonly folderFiles = computed(() => {
     const folders = this.readyDigest()?.directories ?? [];
     const counted = folders.filter((folder) => this.hasFolderCount(folder));
-    const lowerBound = folders.some((folder) => folder.truncated);
+    const lowerBound =
+      this.foldersOmitted() || folders.some((folder) => folder.truncated);
     if (!counted.length || (counted.length < folders.length && !lowerBound))
       return null;
     return {
@@ -1208,13 +1260,19 @@ export class InspectorTaskSectionComponent {
     return files ? `${files.lowerBound ? '≥' : ''}${files.total}` : '—';
   });
 
+  protected readonly folderCount = computed(() => {
+    const count = this.readyDigest()?.directories?.length ?? 0;
+    return `${this.foldersOmitted() ? '≥' : ''}${count}`;
+  });
+
   protected readonly folderDisclosureLabel = computed(() => {
     const count = this.readyDigest()?.directories?.length ?? 0;
     const files = this.folderFiles();
     const total = files
       ? `${files.lowerBound ? 'at least ' : ''}${files.total} ${files.total === 1 ? 'file' : 'files'}`
       : 'file count not available';
-    return `${count} ${count === 1 ? 'folder' : 'folders'}, ${total}. ${this.foldersOpen() ? 'Hide' : 'Show'} folders`;
+    const folders = `${this.foldersOmitted() ? 'at least ' : ''}${count} ${count === 1 ? 'folder' : 'folders'}`;
+    return `${folders}, ${total}. ${this.foldersOpen() ? 'Hide' : 'Show'} folders`;
   });
 
   protected readonly relatedCount = computed(
@@ -1286,6 +1344,15 @@ export class InspectorTaskSectionComponent {
   protected closeOnEscape(): void {
     if (this.menuOpen()) this.dismissMenu();
     else this.reader.closePreview();
+  }
+
+  /** Tab out of the menu closes it and leaves focus where Tab moved it. */
+  protected closeOnFocusLeave(event: FocusEvent): void {
+    const next = event.relatedTarget;
+    const root = this.dropdownRoot()?.nativeElement;
+    if (this.menuOpen() && !(next instanceof Node && root?.contains(next))) {
+      this.dismissMenu(false);
+    }
   }
 
   protected closeOnOutsideClick(event: MouseEvent): void {

@@ -131,6 +131,19 @@ describe(InspectorSessionStatsComponent.name, () => {
     expect(legend.querySelector('[data-testid="session-accuracy-key"]')?.textContent).toContain('≥ = lower bound');
   });
 
+  it('keeps metric-specific counts when different lanes miss tokens and cost', () => {
+    const { fixture, root } = render();
+    fixture.componentRef.setInput('cliContributions', [
+      required(cliContribution({ kind: 'cli', id: 'codex', label: 'Codex', usage: { inputTokens: 10, outputTokens: 5 } })),
+      required(cliContribution({ kind: 'cli', id: 'grok', label: 'Grok', usage: null, cost: 0.5 })),
+    ]);
+    fixture.detectChanges();
+    const legend = required(root.querySelector('[data-testid="session-source-legend"]'));
+    expect(legend.querySelector('[data-testid="session-unreported"]')).toBeNull();
+    expect(legend.textContent).toContain('1 unreported (tokens)');
+    expect(legend.textContent).toContain('1 unreported (cost)');
+  });
+
   it('mutes unknown amounts and keeps the unavailable cause on the Cost tooltip', () => {
     const { fixture, tile } = render({
       snapshot: { ...snapshot, tokenCount: undefined, totalCost: null, pricingCoverage: 'none',

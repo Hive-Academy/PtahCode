@@ -100,3 +100,14 @@ Classes: CONFIRMED (corrected in the next commit unless marked DEFER), DISPUTED,
 - DEFER: 6 (no producer is known to omit `tokenCount`), 9 (needs the backend usage ledger, decisions row 22),
   14 (focus only, one render tick).
 - DISPUTED: 2, 5, 8, 10, 15, 16.
+
+## Round 2 (CodeRabbit on head 6357407c3, 11 new threads + 1 follow-up)
+
+- CORRECTED: PRRT_kwDOPngTds66-yIL (table after a fenced block), -yIR (summary bullets counted as findings),
+  -yIX (`Unresolved:` dropped), -yIl (question source not read gives no partial mark), -yIs (legend merged
+  counts of different lanes), -yJU (capped progress shown as exact), -yJY (menu items in the Tab sequence),
+  -yJi (folder totals with the entry cap), -yJs (fallback documents not listed again on Retry).
+- DISPUTED: -yI3 (SDK subtotal hidden for fewer than two models: deliberate visual correction, lane-report-V1 V2),
+  -yJA (`costPartial` is true for each lane with segment usage; decisions row 22 keeps a restored lane unmarked).
+- DEFERRED: PRRT_kwDOPngTds666A1q follow-up (a late stale error of task A can show below the same file name
+  of task B; the designed `stale` message is pinned by a spec; needs an owner decision).

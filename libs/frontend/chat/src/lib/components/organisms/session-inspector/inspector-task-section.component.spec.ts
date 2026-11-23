@@ -239,6 +239,27 @@ describe('InspectorTaskSectionComponent', () => {
     expect(root.textContent).toContain('3/7 tasks');
   });
 
+  it('marks progress from a capped batches read as incomplete', () => {
+    const { root } = mount(
+      readyState({
+        documents: DOCUMENTS.map((doc) =>
+          doc.name === BATCHES_FILE
+            ? { ...doc, readable: true, extraction: 'capped' }
+            : doc,
+        ),
+        progress: { done: 1, total: 1, source: BATCHES_FILE },
+      }),
+    );
+    expect(root.querySelector('[role="progressbar"]')).toBeNull();
+    expect(root.querySelector('ptah-meter[role="img"]')?.getAttribute('aria-label')).toBe(
+      'Task progress incomplete: at least 1 of at least 1 tasks complete, ' +
+        BATCHES_FILE +
+        ' was read in part',
+    );
+    expect(root.textContent).toContain('≥1/≥1 tasks');
+    expect(root.textContent).not.toContain(' 1/1 ');
+  });
+
   it('renders an empty named meter when progress is unavailable', () => {
     const { root } = mount();
     const meter = root.querySelector('ptah-meter[role="img"]');
@@ -400,6 +421,34 @@ describe('InspectorTaskSectionComponent', () => {
       root.querySelector('[aria-label="Task folders, file counts only"]')
         ?.textContent,
     ).toContain('≥20 files');
+  });
+
+  it('marks folder totals as lower bounds when the entry cap omits folders', () => {
+    const { disclosure } = mount(
+      readyState({
+        entryCount: 600,
+        truncated: true,
+        truncatedReasons: ['entries'],
+        directories: [
+          {
+            name: 'prototype',
+            counted: true,
+            files: 20,
+            markdown: 2,
+            images: 17,
+            directories: 1,
+            symlinks: 0,
+            truncated: false,
+          },
+        ],
+      }),
+    );
+    const folders = disclosure('folders');
+    expect(folders?.textContent).toContain(
+      'at least 1 folder, at least 20 files',
+    );
+    expect(folders?.textContent).toContain('≥1');
+    expect(folders?.textContent).toContain('≥20 files');
   });
 
   it.each([
@@ -609,6 +658,24 @@ describe('InspectorTaskSectionComponent', () => {
     click(button('button[role="menuitem"]'));
     expect(document.activeElement).toBe(trigger);
     expect(reader.previewDocument).toHaveBeenCalledWith('test-report.md');
+  });
+
+  it('keeps menu items out of the Tab sequence and closes when focus leaves', () => {
+    const { root, button, click, disclosure, fixture } = mount();
+    click(disclosure('documents'));
+    const trigger = button('button[aria-label="1 more task documents"]');
+    click(trigger);
+    const item = button('button[role="menuitem"]');
+    expect(item?.getAttribute('tabindex')).toBe('-1');
+    item?.focus();
+    const outside = button('button[aria-label="Open ' + CARRIER_FILE + '"]');
+    item?.dispatchEvent(
+      new FocusEvent('focusout', { bubbles: true, relatedTarget: outside }),
+    );
+    fixture.detectChanges();
+    expect(trigger?.getAttribute('aria-expanded')).toBe('false');
+    expect(root.querySelector('[role="menuitem"]')).toBeNull();
+    expect(document.activeElement).not.toBe(trigger);
   });
 
   it('preserves preview toggle, Escape, and forwarding the Open action and error', () => {

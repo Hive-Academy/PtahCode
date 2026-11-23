@@ -276,7 +276,8 @@ export class TaskDigestService {
     }
     let reads = 0;
     for (const doc of [...readOrder, ...plans, ...reviews]) {
-      const requiredExtraction = doc.name === progressName || doc.name === DECISIONS_FILE || doc.kind === 'reviews';
+      const requiredExtraction = doc.name === progressName || doc.name === DECISIONS_FILE || doc.kind === 'reviews'
+        || isTaskDigestQuestionSource(doc.name, doc.latest);
       if (doc.extraction === 'failed' || !isReadableTaskFolderMarkdownName(doc.name)) {
         if (requiredExtraction) reasons.add('reads');
         continue;

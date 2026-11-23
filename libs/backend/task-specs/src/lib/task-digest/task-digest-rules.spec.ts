@@ -152,6 +152,11 @@ describe('extractTaskReview', () => {
     expect(extractTaskReview('review.md', text)).toMatchObject({ serious: 3, moderate: 2, minor: 1 });
   });
 
+  it('does not count summary list entries as findings', () => {
+    const text = '## Summary\n- Serious: 1\n- Minor: 0\n## Serious issues\n### Finding\n## Notes\n- Minor nit';
+    expect(extractTaskReview('review.md', text)).toMatchObject({ serious: 1, moderate: 0, minor: 1 });
+  });
+
   it('normalizes BOM and line endings and hides fenced examples in a capped prefix', () => {
     const text = [
       '\uFEFF~~~md',
@@ -188,6 +193,11 @@ describe('extractTaskDecisions', () => {
       '| 5 | Pending but ignored |',
     ].join('\r');
     expect(extractTaskDecisions(text)).toEqual({ rows: 4, pendingUser: 3 });
+  });
+
+  it('ends the decision table at a fenced block that has no blank line around it', () => {
+    const text = '| # | Decision |\n| --- | --- |\n| 1 | Pending |\n~~~\nexample\n~~~\n| Other | Table |\n| Pending | row |';
+    expect(extractTaskDecisions(text)).toEqual({ rows: 1, pendingUser: 1 });
   });
 
   it('returns zero counts when the only table is a fenced example', () => {
@@ -290,5 +300,10 @@ describe('open questions', () => {
       '- Outside again',
     ].join('\n');
     expect(countTaskOpenQuestions(text)).toBe(3);
+  });
+
+  it('counts an item marked Unresolved while excluding one marked Resolved', () => {
+    const text = '## Open questions\n- Unresolved: Which option?\n- Resolved: Option A\n- Option B — Resolved: no';
+    expect(countTaskOpenQuestions(text)).toBe(1);
   });
 });

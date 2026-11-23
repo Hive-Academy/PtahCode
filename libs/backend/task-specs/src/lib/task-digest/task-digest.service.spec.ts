@@ -312,6 +312,16 @@ describe('TaskDigestService', () => {
     expect(capped?.documents.find((doc) => doc.name === name)?.extraction).toBe('capped');
   });
 
+  it('marks open questions partial when one selected question source cannot be read', async () => {
+    const f = setup();
+    f.write('task.md', carrier());
+    f.write('context.md', '# Context');
+    f.write('task-description.md', '## Open questions\n- Unknown');
+    f.readFailure.add(path.join(taskFolder(), 'task-description.md'));
+    const digest = await f.service.getDigest(ROOT, ID);
+    expect(digest).toMatchObject({ openQuestions: 0, truncated: true, truncatedReasons: ['reads'] });
+  });
+
   it('marks listed progress and review documents that could not be inspected', async () => {
     const f = setup();
     f.write('task.md', carrier());

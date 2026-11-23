@@ -309,8 +309,9 @@ export class InspectorSessionStatsComponent {
     return [this.metric('tokens', totals.tokens), this.metric('cost', totals.cost)] as const;
   });
   protected readonly sharedUnreportedCount = computed(() => {
-    const [tokens, cost] = this.metrics();
-    return tokens.unreportedCount === cost.unreportedCount ? tokens.unreportedCount : 0;
+    // Combine only when the same lanes miss both metrics, not merely the same number of lanes.
+    const sameLanes = this.lanes().every(({ tokens, cost }) => (tokens.value === null) === (cost.value === null));
+    return sameLanes ? this.metrics()[0].unreportedCount : 0;
   });
   protected readonly budget = computed(() => {
     const budget = this.stats().budget;
