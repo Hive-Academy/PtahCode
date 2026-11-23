@@ -88,9 +88,19 @@ Items found during P1-P3 that no phase of this program covers yet.
 - (h) `agent-process-manager.account-binding.spec.ts` ("stays ambient when the stored lane selection
   is the default route") fails inside any linked worktree: `worktreeMainRoot` makes a second read.
   CI is not affected. Make the spec independent of the checkout location.
-- (e) A child predecessor that reached the runtime cap has no retirement timer after a cooperative
-  handoff (review finding m8 in `review-P2-B.md`).
-- (f) Other minor review findings of P2 are in `review-P2-A.md` and `review-P2-B.md`.
+- (e) **Done in TASK_2026_2319_5f47.** A child predecessor that reached the runtime cap had no
+  retirement timer after a cooperative handoff (review finding m8 in `review-P2-B.md`). An idle
+  predecessor now retires at once with `parent-stop`. A working one is never interrupted: it retires
+  at its turn end, its session end or the successor's ack. The top-level ack still ends the
+  predecessor with `endSession(..., 'parent-stop')`.
+- (f) **Done in TASK_2026_2319_5f47.** Minor findings of `review-P2-A.md` and `review-P2-B.md`. All
+  P2-A minors and most P2-B minors were already fixed on main. m4 (replay phase), m8 and m9 (runtime
+  cap) are fixed. The task `context.md` lists each finding with its evidence or skip reason.
+- (j) **Done in TASK_2026_2319_5f47.** The no-activity watchdog ended child session f7ea7de9
+  (2026-11-23) while it waited for a provider response. The guard window (180 s) was shorter than the
+  SDK first-byte wait (181 s), so it fired 1.6 s before the SDK's own retry. The installed app was
+  also older than P2. The guard window is now longer than the SDK first-byte wait plus 30 s. A
+  watchdog end after the first turn now reports a failed completion to the parent instead of nothing.
 - (i) Persist the child registry across a restart (follow-up (c), first item). Decided: not built in
   #1485 (option B), because it changes a storage format. The registry stays in memory, so it is empty
   after a restart. Note: a downgrade to a build before #1485 drops parent-envelope records that carry
