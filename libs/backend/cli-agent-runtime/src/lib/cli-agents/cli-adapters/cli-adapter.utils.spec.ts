@@ -52,7 +52,7 @@ import type {
 } from '@ptah-extension/platform-core';
 
 import type { AgentRoleDefinition } from '@ptah-extension/shared';
-import { SYSTEM_CLI_TYPES } from '@ptah-extension/shared';
+import { LANE_POLICY_MAX_BYTES, SYSTEM_CLI_TYPES } from '@ptah-extension/shared';
 import { transformAgentBody } from '@ptah-extension/harness-sync';
 
 import {
@@ -142,7 +142,7 @@ describe('buildTaskPrompt', () => {
   it('stays within the argv budget it shares with the task text', () => {
     // argv on the task-prompt adapters; the Windows `.cmd` fallback limit is
     // 8,191 bytes for the WHOLE command line.
-    expect(Buffer.byteLength(toolPolicy, 'utf8')).toBeLessThanOrEqual(3500);
+    expect(Buffer.byteLength(toolPolicy, 'utf8')).toBeLessThanOrEqual(LANE_POLICY_MAX_BYTES);
   });
 
   it('includes the shared native-agent policy without enhanced guidance', () => {
