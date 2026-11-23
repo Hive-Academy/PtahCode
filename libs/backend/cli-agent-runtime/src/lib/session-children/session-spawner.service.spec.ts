@@ -58,10 +58,11 @@ import {
   type PermissionPromptLifecycleListener,
   type SdkAdapterTurnEndedEvent,
 } from '@ptah-extension/agent-sdk';
-import type {
-  AgentProcessInfo,
-  PermissionLevel,
-  SessionTurnPhase,
+import {
+  formatProviderHang,
+  type AgentProcessInfo,
+  type PermissionLevel,
+  type SessionTurnPhase,
 } from '@ptah-extension/shared';
 import { resolveWorktreePath, type Logger } from '@ptah-extension/vscode-core';
 import { createMockLogger } from '@ptah-extension/shared/testing';
@@ -2377,6 +2378,81 @@ describe('SessionSpawnerService — child session end grace', () => {
       expect(h.notifier.signalSessionChild).toHaveBeenCalledTimes(1);
     },
   );
+
+  // Incident f7ea7de9: turn 1 settled, the watchdog ended turn 2. First-turn
+  // recovery does not apply, and the phase may already read `failed`.
+  describe.each(['generating', 'failed'] as const)('a watchdog end in turn 2 (phase %s)', (phase) => {
+    async function endTurnTwo(cause: 'provider-no-response' | 'no-activity-timeout') {
+      const h = makeHarness({ config: { 'agentSessions.maxSuccessions': 0 } });
+      const child = await h.startChild();
+      h.markRan(child.childSessionId);
+      h.turnEnded(child.childSessionId, { timestamp: 1 });
+      await flush();
+      expect(h.registry.get(child.childSessionId)?.turnsSettled).toBe(1);
+      h.notifier.signalSessionChild.mockClear();
+      h.phases.set(child.childSessionId, phase);
+      h.active.delete(child.childSessionId);
+      h.sessionEnd.notifyAll({
+        sessionId: child.childSessionId,
+        workspaceRoot: WORKTREE,
+        cause,
+        startedAt: Date.now(),
+        zeroOutwardEvents: false,
+      });
+      jest.advanceTimersByTime(SESSION_CHILD_GRACE_MS);
+      await flush();
+      return { h, child };
+    }
+
+    it.each(['provider-no-response', 'no-activity-timeout'] as const)(
+      'tells the parent the Ptah provider-hang reason and the kept worktree (%s)',
+      async (cause) => {
+        const { h, child } = await endTurnTwo(cause);
+        expect(h.host.recoverAfterWatchdogStop).not.toHaveBeenCalled();
+        expect(h.host.startChildSession).toHaveBeenCalledTimes(1);
+        expect(h.notifier.signalSessionChild).toHaveBeenCalledTimes(1);
+        const [subject, settle] = h.notifier.signalSessionChild.mock.calls[0];
+        expect(settle).toMatchObject({ status: 'failed', turn: 2 });
+        expect(subject).toMatchObject({
+          childSessionId: child.childSessionId,
+          worktreePath: WORKTREE,
+          lastRecap: formatProviderHang(undefined),
+        });
+        expect(h.registry.get(child.childSessionId)).toMatchObject({
+          terminalStatus: 'ended',
+          endReason: expect.stringContaining(`uncommitted work is kept in ${WORKTREE}`),
+        });
+      },
+    );
+
+    it('holds the failed completion when the parent is not active', async () => {
+      const h = makeHarness({ config: { 'agentSessions.maxSuccessions': 0 } });
+      h.notifier.signalSessionChild.mockImplementation(async (_subject, { turn }) => ({
+        delivered: false,
+        reason: 'parent-session-not-active',
+        envelope: envelope(turn),
+      }));
+      const child = await h.startChild();
+      h.markRan(child.childSessionId);
+      h.turnEnded(child.childSessionId, { timestamp: 1 });
+      await flush();
+      h.phases.set(child.childSessionId, phase);
+      h.active.delete(child.childSessionId);
+      h.active.delete(PARENT);
+      h.sessionEnd.notifyAll({
+        sessionId: child.childSessionId,
+        workspaceRoot: WORKTREE,
+        cause: 'provider-no-response',
+        startedAt: Date.now(),
+      });
+      jest.advanceTimersByTime(SESSION_CHILD_GRACE_MS);
+      await flush();
+      expect(h.registry.get(child.childSessionId)?.heldCompletion?.envelope.turn).toBe(2);
+      expect(h.lines.join('\n')).toContain(
+        `${child.childSessionId} turn 2 settled (unverified); held for the parent (parent-session-not-active)`,
+      );
+    });
+  });
 
   it('does not signal a second completion when the turn settled during the grace', async () => {
     const h = makeHarness({ config: { 'agentSessions.maxSuccessions': 0 } });

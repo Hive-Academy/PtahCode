@@ -17,11 +17,27 @@ export const API_RETRY_MAX_ACCOUNTED_MS = 900_000;
 
 export type WatchdogTimeoutCause = 'provider-no-response';
 
+/**
+ * The quiet window of the provider-hang guard for an SDK whose first-byte wait
+ * is `firstByteTimeoutMs`. The SDK announces its own retry (`api_retry`) only
+ * when that wait ends, so the guard must wait longer than the SDK, plus the
+ * retry margin. A shorter guard ended child f7ea7de9 1.6 s before the SDK
+ * retry (incident 2026-11-23: guard 180 s, SDK wait 181 s).
+ */
+export function noActivityWindowMs(firstByteTimeoutMs: number): number {
+  // No upper clamp: a guard shorter than the SDK wait recreates the race.
+  return Math.max(
+    NO_ACTIVITY_TIMEOUT_MS,
+    nonNegativeMs(firstByteTimeoutMs) + API_RETRY_MARGIN_MS,
+  );
+}
+
 export class ProviderTurnEndError extends Error {
   readonly startedAt = Date.now();
 
   constructor(
     readonly endCause: WatchdogTimeoutCause | 'provider-input-closed',
+    windowMs: number = NO_ACTIVITY_TIMEOUT_MS,
   ) {
     super(
       endCause === 'provider-input-closed'
@@ -31,7 +47,7 @@ export class ProviderTurnEndError extends Error {
             action: 'ended',
             reason: endCause,
             nextStep: 'retry-first-turn',
-            measured: NO_ACTIVITY_TIMEOUT_MS,
+            measured: windowMs,
             unit: 'milliseconds',
           }),
     );

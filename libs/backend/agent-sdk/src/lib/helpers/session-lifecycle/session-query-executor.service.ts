@@ -108,8 +108,12 @@ import type { SdkQueryRunner } from '../sdk-query-runner.service';
 import {
   NoActivityWatchdog,
   ProviderTurnEndError,
-  NO_ACTIVITY_TIMEOUT_MS,
+  noActivityWindowMs,
 } from '../no-activity-watchdog';
+import {
+  SDK_DEFAULT_FIRST_BYTE_TIMEOUT_MS,
+  sdkFirstByteTimeoutMs,
+} from '../build-safe-env';
 import type { HarnessPolicySync } from '../../harness/harness-policy-sync';
 
 /**
@@ -1660,11 +1664,19 @@ export class SessionQueryExecutor {
       () => compactionTap.release('abort'),
       { once: true },
     );
+    // The guard waits longer than the SDK's own first-byte wait, so the SDK
+    // announces its retry before the guard can end the turn. A named run's
+    // certified env drops the key, so the SDK default applies there.
+    const watchdogWindowMs = noActivityWindowMs(
+      named
+        ? SDK_DEFAULT_FIRST_BYTE_TIMEOUT_MS
+        : sdkFirstByteTimeoutMs({ ...process.env, ...effectiveAuthEnv }),
+    );
     const activityWatchdog = new NoActivityWatchdog(
-      NO_ACTIVITY_TIMEOUT_MS,
+      watchdogWindowMs,
       (cause) => {
         if (abortController.signal.aborted) return;
-        const error = new ProviderTurnEndError(cause);
+        const error = new ProviderTurnEndError(cause, watchdogWindowMs);
         if (!this.registry.recordProviderTurnEnd(rec, error)) return;
         this.logger.error(
           `[SessionLifecycle] ${error.message}`,
