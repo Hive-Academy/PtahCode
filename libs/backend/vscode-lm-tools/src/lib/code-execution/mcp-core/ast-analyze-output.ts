@@ -17,12 +17,19 @@
  * table; those methods are left out of `functions`, which keeps the module
  * functions and the methods no class claims (object-literal methods, and
  * the methods of languages that do not attach them).
+ *
+ * When the text is cut, `omittedNames` lists each cut class and each of its
+ * methods by the name `ptah_read_symbol` qualifies it with (`Outer.Inner.run`
+ * for a method of a nested class), taken from `toNavSymbols`, the mapping that
+ * tool uses, so the two always agree. A file with so many classes and methods
+ * that the lookup would be slow lists no names; the counts stay.
  */
 import * as path from 'node:path';
 import { compactCoverage } from '@ptah-extension/platform-core';
 import { fitsBudget } from '@ptah-extension/tool-output-reducers';
 import { formatAstAnalysisResult } from '@ptah-extension/workspace-intelligence';
 import type { AstClassInfo, AstCodeInsights, AstFunctionInfo } from '../types';
+import { toNavSymbols } from './nav/nav-symbols';
 import { getToolResultBudget } from './tool-result-budget';
 
 const TOOL_NAME = 'ptah_ast_analyze';
@@ -36,11 +43,11 @@ const BUDGET_SHARE = 0.9;
 export const AST_ANALYZE_TRUNCATION_HINT =
   'Lists cut at a record boundary to fit the result budget. ' +
   'omittedNames lists the cut records by name when names exist and fit; ' +
-  'the named methods of cut classes follow as Class.method, and ' +
-  'omittedMembers counts them. A name list that ends with … is cut again. ' +
-  'Read a declaration or a class with ptah_read_symbol (name, or ' +
-  'Class.method; for a method of a nested class use its plain name; a ' +
-  'long read says where to continue).';
+  'the named methods of cut classes follow, and omittedMembers counts them. ' +
+  'A name list that ends with … is cut again. ' +
+  'Read a cut class or method with ptah_read_symbol: pass its name from ' +
+  'omittedNames as it is (the name carries the outer classes, as in ' +
+  'Outer.Inner.method); a long read says where to continue.';
 
 /**
  * `file` relative to the first root that contains it, `/`-separated; the
@@ -79,6 +86,104 @@ function shapeClass({
   ...rest
 }: AstClassInfo): Record<string, unknown> {
   return methods && methods.length > 0 ? { ...rest, members: methods } : rest;
+}
+
+/**
+ * Most comparisons the name lookup may make. It compares each class with every
+ * other class, function and method, as `toNavSymbols` does, so it is
+ * quadratic: a file past this bound (generated code) lists no names.
+ */
+const MAX_NAME_LOOKUP_WORK = 100_000_000;
+
+/**
+ * Most characters the qualified names may take, estimated as the longest name
+ * times the number of declarations (each qualified name holds its outer names).
+ */
+const MAX_NAME_LOOKUP_CHARS = 20_000_000;
+
+/** The outline `ptah_read_symbol` reads, with a missing `parameters` filled. */
+function readerOutline(result: AstCodeInsights): AstCodeInsights {
+  const withParameters = (info: AstFunctionInfo): AstFunctionInfo => ({
+    ...info,
+    parameters: info.parameters ?? [],
+  });
+  return {
+    ...result,
+    functions: result.functions.map(withParameters),
+    classes: result.classes.map((info) => ({
+      ...info,
+      methods: info.methods?.map(withParameters),
+    })),
+  };
+}
+
+/** Whether the lookup would be too slow or too large for `result`. */
+function isLookupTooLarge(result: AstCodeInsights): boolean {
+  const { classes, functions } = result;
+  let methods = 0;
+  let longest = 0;
+  for (const info of classes) {
+    methods += info.methods?.length ?? 0;
+    longest = Math.max(longest, info.name.length);
+    for (const method of info.methods ?? []) {
+      longest = Math.max(longest, method.name.length);
+    }
+  }
+  for (const info of functions) {
+    longest = Math.max(longest, info.name.length);
+  }
+  const declarations = classes.length + functions.length + methods;
+  return (
+    classes.length * declarations > MAX_NAME_LOOKUP_WORK ||
+    longest * declarations > MAX_NAME_LOOKUP_CHARS
+  );
+}
+
+/**
+ * The name `ptah_read_symbol` qualifies a class or a class method with, for
+ * `formatAstAnalysisResult`. It is the qualified name of `toNavSymbols` run on
+ * the outline the reader sees, found by `name:startLine:endLine`: the
+ * qualified name depends on those three only. The reader keeps one symbol for
+ * each kind, qualified name and start line, so a ranged record it dropped has
+ * no entry and lists no name. A record without a range keeps its own name. The table is built when the
+ * first name is asked for, so an uncut result costs nothing. It serves the
+ * `classes` list only (a class and its methods); the other lists keep the
+ * names their records carry.
+ */
+export function readerNameLookup(
+  result: AstCodeInsights,
+): (record: unknown) => string | undefined {
+  if (isLookupTooLarge(result)) {
+    return () => undefined;
+  }
+  let qualified: Map<string, string> | undefined;
+  const table = (): Map<string, string> => {
+    if (qualified === undefined) {
+      qualified = new Map();
+      for (const symbol of toNavSymbols(readerOutline(result))) {
+        qualified.set(
+          `${symbol.name}:${symbol.startLine - 1}:${symbol.endLine - 1}`,
+          symbol.qualifiedName,
+        );
+      }
+    }
+    return qualified;
+  };
+  return (record) => {
+    if (typeof record !== 'object' || record === null) {
+      return undefined;
+    }
+    const { name, startLine, endLine } = record as Partial<AstFunctionInfo>;
+    if (typeof name !== 'string' || name === '') {
+      return undefined;
+    }
+    // A record without a range is no reader symbol (an export, an import):
+    // it keeps its own name, as before.
+    if (typeof startLine !== 'number' || typeof endLine !== 'number') {
+      return name;
+    }
+    return table().get(`${name}:${startLine}:${endLine}`);
+  };
 }
 
 /** The analysis result in the documented key order, quiet fields dropped. */
@@ -133,5 +238,6 @@ export function renderAstAnalyzeResult(
   return formatAstAnalysisResult(shapeAstAnalyzeResult(result, roots), {
     fits: (text) => fitsBudget(text, limit),
     hint: AST_ANALYZE_TRUNCATION_HINT,
+    listedName: { classes: readerNameLookup(result) },
   });
 }
