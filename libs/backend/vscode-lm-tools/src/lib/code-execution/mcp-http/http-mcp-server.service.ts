@@ -12,15 +12,24 @@
  * - tool-description.builder: Tool definitions and descriptions
  *
  * Pattern: Injectable service with HTTP server lifecycle
+ *
+ * ## No MCP config file is written (TASK_2026_979_9e1f, decision 10)
+ *
+ * This service used to declare its own server as a `ptah` entry in
+ * `{ws}/.mcp.json`, `{ws}/.cursor/mcp.json` and a Codex `config.toml` for every
+ * open folder. It writes none of them now. Every session and lane Ptah starts
+ * gets `ptah` in its own spawn config: a Claude SDK session through
+ * `Options.mcpServers` (`SdkQueryOptionsBuilder.buildMcpServers`), every other
+ * CLI through its adapter's per-spawn config. A CLI the user starts outside
+ * Ptah no longer gets Ptah's server. Entries an earlier Ptah wrote stay on disk
+ * (D-U5 Option 1), and their persisted token hashes keep authorizing them.
  */
 
 import * as http from 'http';
-import * as fs from 'fs';
 import * as path from 'path';
 import { injectable, inject } from 'tsyringe';
 import { TOKENS, Logger, hangBreadcrumbs } from '@ptah-extension/vscode-core';
 import type { WebviewManager } from '@ptah-extension/vscode-core';
-import type { McpServerConfig } from '@ptah-extension/shared';
 import { PLATFORM_TOKENS } from '@ptah-extension/platform-core';
 import type {
   IArtifactStore,
@@ -52,11 +61,7 @@ import {
 import type { CodeOutliner } from '@ptah-extension/tool-output-reducers';
 import { CLI_AGENT_RUNTIME_TOKENS, type ExternalCompletionOutbox } from '@ptah-extension/cli-agent-runtime';
 import {
-  isFileLockTimeoutError,
-  isLinkedWorktreeRoot,
-  withMcpConfigLock,
   HARNESS_SYNC_TOKENS,
-  PTAH_SPAWN_MCP_KEY,
   type IHarnessCliDetector,
 } from '@ptah-extension/harness-sync';
 import {
@@ -64,21 +69,10 @@ import {
   stopHttpServer,
   getConfiguredPort,
 } from './http-server.handler';
-import {
-  planPtahMcpSlots,
-  ptahMcpEntry,
-  ptahMcpUrl,
-  CLAUDE_TARGET,
-  type PtahMcpSlot,
-} from './ptah-mcp-slots';
 import { sweepRetiredPtahMcpEntries } from './retired-ptah-mcp-slots';
 import { McpNotificationHub } from './mcp-notification-hub';
 import { buildToolDefinitions } from '../mcp-core/effective-tool-list';
-import { extractAuthToken } from './mcp-http-gate';
-import {
-  McpCallerTokenRegistry,
-  type PreparedPersistentCredential,
-} from './mcp-caller-token-registry';
+import { McpCallerTokenRegistry } from './mcp-caller-token-registry';
 import {
   parseExternalCallerAccess,
   type McpExternalAccess,
@@ -87,53 +81,32 @@ import {
 /** Host callback for metadata-only artifact pushes. Registered by Electron. */
 export const ARTIFACT_NOTIFICATION_TOKEN = Symbol('ArtifactNotification');
 
-/** Why the `ptah` entry is not on disk. */
+/** Why a session cannot be told that Ptah's server is reachable. */
 export type McpRegistrationFailure =
   /** The HTTP server is not running, or is being torn down. */
-  | 'not-started'
-  /** No workspace folder is open, so there is no `.mcp.json` to write. */
-  | 'no-workspace'
-  /**
-   * Another process held the config-file lock past its deadline, so the write
-   * was REFUSED rather than performed unlocked (TASK_2026_332). Distinct from
-   * `write-failed` because it is transient by construction and a retry a moment
-   * later is expected to succeed.
-   */
-  | 'lock-timeout'
-  /** Registration is still queued or in progress after the chat deadline. */
-  | 'timeout'
-  /** The read-modify-write itself failed (permissions, unparseable JSON, …). */
-  | 'write-failed'
-  /**
-   * The root is a linked git worktree, where Ptah writes no workspace config
-   * file by design (#1469). Sessions started there still get `ptah` from
-   * their own spawn config; only Claude `Task` subagents, which read
-   * `<cwd>/.mcp.json`, go without it.
-   */
-  | 'linked-worktree';
+  'not-started';
 
 /**
  * The outcome of {@link CodeExecutionMCP.ensureRegisteredForSubagents}.
  *
- * **`registered: false` is a normal, expected answer and callers must read it.**
- * Every caller already threads an `mcpServerRunning` boolean into the session it
- * is about to start; that boolean is only honest if it is ANDed with this one.
- * Reporting "the server is up" while the entry a subagent reads is absent means
- * the subagent spawns believing it has Ptah tools and silently has none.
+ * A readiness answer, not a write result: it is true exactly when the HTTP
+ * server is up. Callers AND it into the `mcpServerRunning` they pass to the
+ * session they start, which then carries `ptah` in its own spawn config.
  */
 export interface McpSubagentRegistration {
-  /**
-   * True only when a `ptah` entry is on disk for the CURRENT workspace, or
-   * when the current workspace is a linked git worktree. There Ptah writes no
-   * config file by design (#1469), and `false` would make the chat start
-   * drop the session's own `ptah` server, which never reads `.mcp.json`.
-   */
+  /** True when the HTTP server is running and not being torn down. */
   registered: boolean;
   /** Present exactly when `registered` is false. */
   reason?: McpRegistrationFailure;
 }
 
 const REGISTERED: McpSubagentRegistration = { registered: true };
+
+/**
+ * How long a chat start waits for a queued retired-entry sweep before it goes
+ * on. The sweep keeps running in the background past it; readiness does not
+ * depend on it.
+ */
 export const MCP_CHAT_REGISTRATION_DEADLINE_MS = 3000;
 
 /**
@@ -152,69 +125,6 @@ function notRegistered(
   reason: McpRegistrationFailure,
 ): McpSubagentRegistration {
   return { registered: false, reason };
-}
-
-/** The shape of the `ptah` key this service owns inside `.mcp.json`. */
-interface McpHttpServerEntry {
-  type: 'http';
-  url: string;
-}
-
-/**
- * True when the `ptah` key already on disk is exactly the entry we would write.
- *
- * Structural rather than `JSON.stringify` equality: a hand-edited file may
- * carry the same two fields in the other order, and rewriting it for that would
- * be the same spurious diff this check exists to avoid. An entry carrying EXTRA
- * keys is deliberately treated as different — we own this key, and leaving
- * someone else's additions in place would mean advertising a server config we
- * did not author.
- */
-function isSameMcpHttpEntry(
-  existing: unknown,
-  desired: McpHttpServerEntry,
-): boolean {
-  if (typeof existing !== 'object' || existing === null) return false;
-  const entry = existing as Record<string, unknown>;
-  const keys = Object.keys(entry);
-  return (
-    keys.length === 2 &&
-    entry['type'] === desired.type &&
-    entry['url'] === desired.url
-  );
-}
-
-/**
- * True when the `ptah` entry a FACET-written config file already declares is
- * exactly the one we would write.
- *
- * Compared through the facet's PARSED form rather than raw bytes, so one
- * predicate serves dialects that spell the same entry differently — `url`
- * versus `serverUrl`, a fenced TOML table in Codex. The read-compare exists to
- * keep an idempotent restart from rewriting a config file it does not need to
- * touch.
- *
- * A stdio entry can never be ours — Ptah's server is always an HTTP endpoint —
- * so it compares unequal and is overwritten.
- */
-function isSameFacetEntry(
-  existing: McpServerConfig | undefined,
-  desired: McpServerConfig,
-): boolean {
-  if (existing === undefined) return false;
-  if (existing.type === 'stdio' || desired.type === 'stdio') return false;
-  return (
-    existing.type === desired.type &&
-    existing.url === desired.url &&
-    JSON.stringify(existing.headers ?? {}) ===
-      JSON.stringify(desired.headers ?? {})
-  );
-}
-
-/** A `ptah` entry we wrote, and everything needed to take it back. */
-interface OwnedRegistration {
-  readonly port: number;
-  readonly slot: PtahMcpSlot;
 }
 
 export interface IMcpExternalCallerAccessUpdater {
@@ -236,103 +146,25 @@ export class CodeExecutionMCP
   private toolResultCallback: ToolResultCallback | undefined;
 
   /**
-   * Every MCP config file we currently own a `ptah` entry in, keyed by absolute
-   * path. Empty when we own no entry anywhere.
-   *
-   * **One entry per OPEN workspace folder, not one for the active root**
-   * (TASK_2026_354). This used to be a single `registeredMcpJsonPath` slot, so
-   * the set of files we owned was always "the active workspace" — and on
-   * Electron `setActiveFolder()` fires `onDidChangeWorkspaceFolders`, which
-   * `workspace:switch` calls on every tab switch. The result was a
-   * unregister-from-A + register-into-B pair on every switch between two
-   * ALREADY-OPEN folders, i.e. a write into a file inside the user's
-   * version-controlled repository for a change that altered nothing they could
-   * observe (six such moves in `tmp/logs/log.log`).
-   *
-   * **And one entry per rival CLI, not just `.mcp.json`.** Ptah's own server
-   * used to be persisted for Claude alone; every other CLI received it
-   * in-process at spawn time, so a `codex` the USER launched saw none of it.
-   * See `ptah-mcp-slots.ts` for which files that is and why the scope differs
-   * per target.
-   *
-   * Keyed by path, and per-path, for two more reasons:
-   *  - A folder that is open needs the entry, whether or not it is the one on
-   *    screen: a subagent spawned for that folder reads ITS `.mcp.json`.
-   *  - A failed removal keeps its own record, so a write into a different
-   *    folder can no longer destroy the evidence of a stale entry. That was the
-   *    single-slot hazard TASK_2026_332 had to work around by coupling the two
-   *    mutations together; with per-path records the coupling is unnecessary
-   *    and would only produce false negatives.
-   *
-   * The slot is stored beside the port because removal must go through the same
-   * facet the write used. Re-deriving it at removal time would ask the CURRENT
-   * workspace which files we own, which is the second half of the A3 defect
-   * `unregisterFromSlot` documents.
-   */
-  private readonly registrations = new Map<string, OwnedRegistration>();
-
-  /**
-   * Folders that are NOT necessarily open in the workspace but must carry the
-   * `ptah` entry anyway, because an agent session is running there (a child
-   * session's git worktree). Planned beside the open folders in
-   * {@link desiredSlots}, so a workspace-folder reconcile keeps them.
-   *
-   * A count per root, not a set: two live sessions can share one worktree (a
-   * successor keeps its predecessor's), so each successful retain adds one and
-   * each release subtracts one. The entry goes away only at zero. Mutated only
-   * inside `enqueueMcpOp`. Survives `stop()` on purpose: the sessions still run
-   * in those folders, so a restarted server keeps their entries in its next
-   * reconcile.
-   */
-  private readonly retainedRoots = new Map<string, number>();
-
-  /**
-   * The tail of the re-pointing queue. Every `.mcp.json` OWNERSHIP mutation
-   * this service performs joins it, so no two of them can interleave.
-   *
-   * `withMcpConfigLock` cannot do this job and adding a second lock would not
-   * either: it is keyed per FILE, and the racing mutations here target
-   * DIFFERENT files. Two concrete failures it cannot see (TASK_2026_332):
-   *
-   *  a. The user switches workspace A -> B -> C quickly. Both reconciles read
-   *     the registration record as {A} — the first has not finished updating it
-   *     when the second starts — and then write B and C independently. B is
-   *     left with a live `ptah` entry for a folder that is no longer open, and
-   *     nothing ever removes it.
-   *  b. `stop()` arrives right after a switch. Without cancellation, the
-   *     outstanding event writes B while the socket is closing.
-   *
-   * So the queue is over the OPERATION, not the file, and it has two rules:
-   *
-   *  - **Serialized.** A job reads {@link registrations} only after every
-   *    previously queued job has finished updating it. That alone kills the
-   *    stale-read half of (a).
-   *  - **Latest wins.** Each re-point captures {@link repointGeneration} and is
-   *    dropped before it touches disk if a newer request has superseded it, so
-   *    the intermediate workspace in (a) is never written at all. `stop()`
-   *    bumps the generation as well, which is what cancels (b).
+   * The tail of the operation queue. The retired-entry sweep and the
+   * external-access update join it, so neither interleaves with the other,
+   * and `stop()` joins it so no sweep runs past the socket close.
    */
   private mcpOpQueue: Promise<void> = Promise.resolve();
-  /** A re-point that is queued or running; the chat fast path waits for it. */
-  private pendingRepoint: Promise<void> | null = null;
+
+  /** A retired-entry sweep that is queued and has NOT started. */
+  private queuedSweep: Promise<void> | null = null;
+
   /**
-   * A re-point that is queued and has NOT started. Only this one is joined by
-   * later requests: a running pass captured its desired slots already, so a
-   * change that arrives during it needs a new pass.
+   * True when the next chat start should sweep retired entries: after
+   * `start()` and after a workspace-folder change. A folder event only sets
+   * the flag, so opening a folder never touches disk on its own (Bug #9).
    */
-  private queuedRepoint: Promise<void> | null = null;
-  /** A chat registration reconcile that is queued and has NOT started. */
-  private queuedEnsure: Promise<McpSubagentRegistration> | null = null;
-  private registrationNeedsReconcile = false;
-
-  /** Monotonic request counter; only the newest re-point is allowed to run. */
-  private repointGeneration = 0;
+  private sweepDue = true;
 
   /**
-   * True between `stop()` and the next `start()`. Re-points enqueued in that
-   * window are dropped rather than superseded: the generation guard covers work
-   * queued BEFORE the stop, and this covers a folder event that fires while the
-   * stop is still draining.
+   * True between `stop()` and the next `start()`. A sweep queued before the
+   * stop and run after it is dropped.
    */
   private stopped = false;
 
@@ -369,14 +201,13 @@ export class CodeExecutionMCP
     ideCapabilities: IIDECapabilities | undefined,
 
     /**
-     * Which rival CLIs are installed, used to gate the two HOME-scoped slots.
+     * Which rival CLIs are installed, used to gate the retired-entry sweep
+     * (it runs only where `agy` is detected).
      *
-     * Optional so a bare container still starts a server; absent means no
-     * home-global file is written, which is the conservative answer. All three
-     * hosts register `HARNESS_SYNC_TOKENS.CLI_DETECTOR` during DI setup, and
-     * this class is a lazily-constructed singleton resolved when the server
-     * starts, so the token exists by then even where `registerHarnessSyncServices`
-     * runs AFTER `registerVsCodeLmToolsServices` (the VS Code host does).
+     * Optional so a bare container still starts a server; absent means the
+     * sweep touches no file. All three hosts register
+     * `HARNESS_SYNC_TOKENS.CLI_DETECTOR` during DI setup, and this class is a
+     * lazily-constructed singleton resolved when the server starts.
      */
     @inject(HARNESS_SYNC_TOKENS.CLI_DETECTOR, { isOptional: true })
     private readonly cliDetector: IHarnessCliDetector | undefined,
@@ -434,13 +265,11 @@ export class CodeExecutionMCP
       ...(legacyNotice === undefined ? {} : { notice: legacyNotice }),
       onExclusiveOwnerRevoked: (owner) => { this.completionOutbox?.discardOwner(owner); },
     });
-    // The event has nowhere to return a promise to, so this call site stays
-    // fire-and-forget — but it is no longer UNORDERED. `queueRepoint` puts it
-    // behind every other `.mcp.json` mutation and lets a later change, or a
-    // `stop()`, supersede it before it writes. See `mcpOpQueue`.
+    // A changed folder set can bring a retired entry into view; the next chat
+    // start sweeps it. Nothing is written from the event itself.
     this.workspaceFoldersSubscription =
       this.workspaceProvider.onDidChangeWorkspaceFolders(() => {
-        void this.queueRepoint();
+        this.sweepDue = true;
       });
     const hub =
       this.gateway === undefined
@@ -454,12 +283,10 @@ export class CodeExecutionMCP
   }
 
   /**
-   * Run `job` after every `.mcp.json` mutation already queued on this instance.
+   * Run `job` after every operation already queued on this instance.
    *
    * Mirrors `harness-sync`'s `serializeByKey`: the chain is kept alive past a
-   * rejection so one failed mutation cannot poison the next one. The jobs here
-   * already catch and log their own failures; the chain must not depend on that
-   * staying true.
+   * rejection so one failed operation cannot poison the next one.
    */
   private enqueueMcpOp<T>(job: () => Promise<T>): Promise<T> {
     const run = this.mcpOpQueue.then(job, job);
@@ -467,43 +294,6 @@ export class CodeExecutionMCP
       () => undefined,
       () => undefined,
     );
-    return run;
-  }
-
-  /**
-   * Enqueue a re-point for the workspace as it stands when the job actually
-   * RUNS, and drop the job if a newer request has landed in the meantime.
-   */
-  private queueRepoint(): Promise<void> {
-    if (this.queuedRepoint) return this.queuedRepoint;
-    const generation = ++this.repointGeneration;
-    const run: Promise<void> = this.enqueueMcpOp(async () => {
-      // The job starts now: a later request must queue a new pass, because
-      // this one may have read the workspace before that change.
-      if (this.queuedRepoint === run) this.queuedRepoint = null;
-      // Superseded while queued — a later workspace change, or a `stop()`, has
-      // already asked for a different final state. Writing the intermediate one
-      // here is exactly the entry that gets stranded.
-      if (this.stopped || generation !== this.repointGeneration) return;
-      try {
-        await this.syncMcpJsonRegistration();
-      } catch (error: unknown) {
-        this.logger.warn(
-          `[CodeExecutionMCP] Failed to re-point .mcp.json after a workspace change: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-          'CodeExecutionMCP',
-        );
-      }
-    });
-    this.pendingRepoint = run;
-    this.queuedRepoint = run;
-    void run.finally(() => {
-      if (this.pendingRepoint === run) this.pendingRepoint = null;
-      if (this.queuedRepoint === run) this.queuedRepoint = null;
-    }).catch((error: unknown) => {
-      this.logger.warn(`[CodeExecutionMCP] Repoint cleanup failed: ${String(error)}`, 'CodeExecutionMCP');
-    });
     return run;
   }
 
@@ -517,8 +307,9 @@ export class CodeExecutionMCP
       return this.port as number;
     }
 
-    // A restart re-arms re-pointing that `stop()` disabled.
+    // A restart re-arms the sweep that `stop()` disabled.
     this.stopped = false;
+    this.sweepDue = true;
 
     const configuredPort = getConfiguredPort(this.workspaceProvider);
 
@@ -574,336 +365,91 @@ export class CodeExecutionMCP
   }
 
   /**
-   * Register the Ptah MCP server in the `.mcp.json` of every OPEN workspace
-   * folder, for subagent discovery. Callers gate this on the MCP server
-   * actually being up (`mcpServerRunning`) — Ptah's local features, including
-   * MCP tool access, are available to everyone.
+   * Tell a session starter whether Ptah's server is reachable. Callers AND the
+   * answer into the `mcpServerRunning` they pass to the session, which then
+   * carries `ptah` in its own spawn config (a Claude SDK session through
+   * `Options.mcpServers`). No config file is written.
    *
-   * Idempotent per (path, port), twice over: a folder already recorded at this
-   * port is skipped without taking the lock, and a folder whose file already
-   * holds the exact desired entry is left byte-for-byte alone. A folder that
-   * has LEFT the workspace has its entry removed in the same pass; a switch
-   * between two open folders changes the folder set not at all and therefore
-   * writes nothing (TASK_2026_354).
+   * Never rejects. `registered: false` with `not-started` means the server is
+   * down or stopping, and the session must start without Ptah tools.
    *
-   * The outcome describes the ACTIVE workspace root, because that is the root
-   * the caller is about to start a session in. The other open folders are
-   * reconciled in the same pass and report through the log.
-   *
-   * **Await it before spawning anything that reads `.mcp.json`.** It became
-   * async in TASK_2026_318 because the write now takes the config-file lock,
-   * and the callers that start a session immediately afterwards
-   * (`ChatSessionService`, `ChatPtahCliService`, `GatewayChatBridge`) depend on
-   * the entry being on disk before the subagent looks for it. Fire-and-forget
-   * here is a race, not an optimisation.
-   *
-   * It joins the same queue as the workspace-change re-points (see
-   * `mcpOpQueue`), so an explicit registration and a folder event cannot both
-   * capture the same "from" root and then write two different files. The
-   * returned promise still resolves only once THIS call's write has landed.
-   *
-   * **It resolves with an outcome instead of rejecting, and the outcome is not
-   * optional to read** (TASK_2026_332). It used to resolve with `undefined`
-   * whatever happened, because both mutation helpers swallowed every failure
-   * into a warn — so a lock timeout, which means the entry was deliberately NOT
-   * written, was indistinguishable from success at every call site. A rejection
-   * was rejected as the shape because three of the five callers have no local
-   * catch and would abort a whole chat session over a two-second contention on
-   * a config file; `mcpServerRunning: false` is the honest degraded mode the SDK
-   * path already supports. AND this result into the `mcpServerRunning` you pass
-   * to the session.
+   * The first call after `start()` or after a workspace-folder change also
+   * runs the retired-entry sweep (see {@link removeRetiredEntries}), waiting
+   * for it at most {@link MCP_CHAT_REGISTRATION_DEADLINE_MS}. The answer does
+   * not depend on the sweep.
    */
   async ensureRegisteredForSubagents(): Promise<McpSubagentRegistration> {
     if (this.stopped || !this.port) return notRegistered('not-started');
-    const activeTarget = this.getMcpJsonPath();
-    if (!activeTarget) return notRegistered('no-workspace');
-    const owned = this.registrations.get(activeTarget);
-    if (!this.registrationNeedsReconcile && !this.pendingRepoint && owned?.port === this.port &&
-        this.hasCurrentClaudeEntry(activeTarget, this.port, owned.slot.workspaceRoot)) {
-      return REGISTERED;
+    if (this.sweepDue) await this.waitForSweep(this.queueRetiredSweep());
+    return REGISTERED;
+  }
+
+  /**
+   * Whether a session in `root` gets Ptah's server (IMcpSubagentRootRegistrar).
+   * A readiness answer: true when the server is up, because the session gets
+   * `ptah` in its own spawn config. Nothing is written or retained, so
+   * {@link releaseRoot} has nothing to give back.
+   */
+  async retainRoot(root: string): Promise<McpSubagentRootRetention> {
+    if (root.trim() === '' || !path.isAbsolute(root)) {
+      return { registered: false, reason: 'invalid-root' };
     }
+    if (this.stopped || !this.port) {
+      return { registered: false, reason: 'not-started' };
+    }
+    return REGISTERED;
+  }
+
+  /** Nothing is retained by {@link retainRoot}, so a release changes nothing. */
+  releaseRoot(_root: string): Promise<void> {
+    return Promise.resolve();
+  }
+
+  /** One queued sweep serves every chat start that arrives before it runs. */
+  private queueRetiredSweep(): Promise<void> {
+    if (this.queuedSweep) return this.queuedSweep;
+    this.sweepDue = false;
+    const run: Promise<void> = this.enqueueMcpOp(async () => {
+      if (this.queuedSweep === run) this.queuedSweep = null;
+      // `stop()` arrived while this sweep was queued.
+      if (this.stopped) return;
+      await this.removeRetiredEntries();
+    });
+    this.queuedSweep = run;
+    return run;
+  }
+
+  /** Wait for `sweep`, but no longer than the chat deadline. */
+  private async waitForSweep(sweep: Promise<void>): Promise<void> {
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const deadline = new Promise<McpSubagentRegistration>((resolve) => {
+    const deadline = new Promise<void>((resolve) => {
       timer = setTimeout(() => {
-        this.logger.warn('[CodeExecutionMCP] Chat MCP registration exceeded deadline', 'CodeExecutionMCP');
-        resolve(notRegistered('timeout'));
+        this.logger.warn(
+          '[CodeExecutionMCP] Retired MCP entry sweep exceeded the chat deadline; it continues in the background',
+          'CodeExecutionMCP',
+        );
+        resolve();
       }, MCP_CHAT_REGISTRATION_DEADLINE_MS);
     });
     try {
-      return await Promise.race([this.queueEnsureRegistered(), deadline]);
+      await Promise.race([sweep, deadline]);
     } finally {
       if (timer) clearTimeout(timer);
     }
   }
 
   /**
-   * One queued full reconcile serves every chat caller that arrives before it
-   * starts. Without this, each caller that gave up at the deadline left one more
-   * full reconcile in the FIFO, and the backlog grew with each chat start.
-   */
-  private queueEnsureRegistered(): Promise<McpSubagentRegistration> {
-    if (this.queuedEnsure) return this.queuedEnsure;
-    const run: Promise<McpSubagentRegistration> = this.enqueueMcpOp(() => {
-      if (this.queuedEnsure === run) this.queuedEnsure = null;
-      return this.ensureRegisteredNow();
-    });
-    this.queuedEnsure = run;
-    void run.finally(() => {
-      if (this.queuedEnsure === run) this.queuedEnsure = null;
-    }).catch((error: unknown) => {
-      this.logger.warn(`[CodeExecutionMCP] Registration cleanup failed: ${String(error)}`, 'CodeExecutionMCP');
-    });
-    return run;
-  }
-
-  private hasCurrentClaudeEntry(configPath: string, port: number, workspaceRoot: string): boolean {
-    try {
-      const config: unknown = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-      if (typeof config !== 'object' || config === null || !('mcpServers' in config)) return false;
-      const servers = config.mcpServers;
-      if (typeof servers !== 'object' || servers === null || !('ptah' in servers)) return false;
-      const entry = servers.ptah;
-      if (typeof entry !== 'object' || entry === null || !('type' in entry) || !('url' in entry)) return false;
-      const url = entry.url;
-      if (entry.type !== 'http' || typeof url !== 'string' ||
-          !url.startsWith(`http://localhost:${port}/auth/`)) return false;
-      const token = /\/auth\/([A-Za-z0-9_-]{43})\//.exec(url)?.[1];
-      if (!token) return false;
-      // The whole URL must be the one this service writes (same grammar as
-      // `writeMcpJsonEntry`), so a changed path suffix goes to the repair.
-      const expected = `http://localhost:${port}/auth/${token}${ptahMcpUrl(port, workspaceRoot).slice(`http://localhost:${port}`.length)}`;
-      if (url !== expected) return false;
-      const auth = this.callerCredentials.authorize({ token, workspaceRoot: path.dirname(configPath) });
-      return auth.ok && auth.binding.capability === this.externalCallerAccess();
-    } catch (error: unknown) {
-      // degradation-audit: optional-capability - an unreadable config falls through to the queued repair.
-      this.logger.warn(`[CodeExecutionMCP] Could not inspect ${configPath}: ${String(error)}`, 'CodeExecutionMCP');
-      return false;
-    }
-  }
-
-  /** The body of {@link ensureRegisteredForSubagents}, already serialized. */
-  private async ensureRegisteredNow(): Promise<McpSubagentRegistration> {
-    // `stop()` nulls `this.port` in its own continuation, OUTSIDE the queue, so
-    // the port can still be non-null here for a registration queued behind it.
-    // The stopped guard prevents that job from writing after shutdown.
-    if (this.stopped || !this.port) return notRegistered('not-started');
-
-    const activeTarget = this.getMcpJsonPath();
-    if (!activeTarget) {
-      // No folder open: nothing to register in, and anything we still own
-      // belongs to a folder that has gone away.
-      await this.reconcileRegistrations(this.port);
-      return notRegistered('no-workspace');
-    }
-
-    const outcomes = await this.reconcileRegistrations(this.port);
-    // The reported outcome is the ACTIVE root's `.mcp.json` and nothing else,
-    // because that is what the callers do with it: they AND it into the
-    // `mcpServerRunning` they pass to a Claude session, whose subagents read
-    // exactly that file. A contended `~/.codex/config.toml` must not make a
-    // Claude session report itself tool-less; those slots report through the
-    // log instead.
-    const active = outcomes.get(activeTarget);
-    if (active !== undefined) return active;
-    // A linked worktree gets no workspace slot (`planPtahMcpSlots`, #1469).
-    const activeRoot = this.workspaceProvider.getWorkspaceRoot();
-    if (activeRoot && (await isLinkedWorktreeRoot(activeRoot))) {
-      return REGISTERED;
-    }
-    // `planPtahMcpSlots` always yields a claude slot for the active root, so
-    // the lookup hits. Reaching here means it did not, and returning REGISTERED
-    // on that would be the false assurance TASK_2026_332 removed.
-    return notRegistered('no-workspace');
-  }
-
-  /**
-   * Bring the set of MCP config files we own into line with the set of slots
-   * that should currently exist, at `port`.
-   *
-   * Removals first, then registrations — not for correctness (the paths are
-   * disjoint by construction, since a path is only removed when it is NOT in
-   * the desired set) but so a shrinking workspace gives its entries back before
-   * anything else touches disk.
-   *
-   * Unlike the single-slot version this replaces, a failed removal does NOT
-   * block the registrations. Each path carries its own record, so the stale
-   * entry stays known and is retried by the next reconcile;
-   * refusing to register the folder the user is actually working in, because an
-   * unrelated closed folder's file was contended, would report
-   * `mcpServerRunning: false` for a session that has a perfectly good entry.
-   * The same independence now covers a whole TARGET: a contended
-   * `~/.codex/config.toml` costs Codex its entry and costs Claude nothing.
-   *
-   * **Call it only from inside `enqueueMcpOp`.** It reads {@link registrations}
-   * and then awaits, so two concurrent runs are the stale-read race the queue
-   * exists to close.
-   */
-  private async reconcileRegistrations(
-    port: number,
-  ): Promise<Map<string, McpSubagentRegistration>> {
-    const desired = await this.desiredSlots();
-    const outcomes = new Map<string, McpSubagentRegistration>();
-    let needsRetry = false;
-
-    for (const owned of [...this.registrations.keys()]) {
-      if (desired.has(owned)) continue;
-      if (await this.unregisterFromSlot(owned)) needsRetry = true;
-    }
-    await this.removeRetiredEntries();
-
-    for (const [configPath, slot] of desired) {
-      const outcome = await this.registerInSlot(slot, port);
-      outcomes.set(configPath, outcome);
-      if (!outcome.registered) needsRetry = true;
-    }
-
-    this.registrationNeedsReconcile = needsRetry;
-    return outcomes;
-  }
-
-  private async registerRootSlots(root: string, port: number): Promise<Map<string, McpSubagentRegistration>> {
-    const slots = await planPtahMcpSlots({
-      workspaceRoots: [root],
-      isInstalled: (target) => this.cliDetector?.isInstalled(target) ?? Promise.resolve(false),
-    });
-    const outcomes = new Map<string, McpSubagentRegistration>();
-    for (const slot of slots) {
-      if (slot.workspaceRoot === root) outcomes.set(slot.configPath, await this.registerInSlot(slot, port));
-    }
-    return outcomes;
-  }
-
-  /**
-   * Keep the `ptah` entry in `<root>/.mcp.json` while a session runs in `root`
-   * (IMcpSubagentRootRegistrar). Serialized with every other ownership
-   * mutation, and resolves only once the write has landed.
-   *
-   * Nothing is retained when the answer is `registered: false`, so a refused
-   * retain leaves no state for the next reconcile to act on.
-   */
-  async retainRoot(root: string): Promise<McpSubagentRootRetention> {
-    if (root.trim() === '' || !path.isAbsolute(root)) {
-      return { registered: false, reason: 'invalid-root' };
-    }
-    return this.enqueueMcpOp(() => this.retainRootNow(root));
-  }
-
-  /** The body of {@link retainRoot}, already serialized. */
-  private async retainRootNow(root: string): Promise<McpSubagentRootRetention> {
-    // Same guard as `ensureRegisteredNow`: `stop()` nulls the port outside the
-    // queue, so a non-null port is not proof the server is staying up.
-    if (this.stopped || !this.port) {
-      return { registered: false, reason: 'not-started' };
-    }
-
-    // Counted before the write, so a reconcile during it keeps the root.
-    this.retainedRoots.set(root, (this.retainedRoots.get(root) ?? 0) + 1);
-    let outcome: McpSubagentRegistration;
-    try {
-      const outcomes = await this.registerRootSlots(root, this.port);
-      outcome =
-        outcomes.get(path.join(root, '.mcp.json')) ??
-        notRegistered(
-          // A linked worktree gets no workspace slot (`planPtahMcpSlots`).
-          (await isLinkedWorktreeRoot(root)) ? 'linked-worktree' : 'write-failed',
-        );
-    } catch (error: unknown) {
-      this.logger.warn(
-        `[CodeExecutionMCP] Failed to retain ${root} for subagents: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-        'CodeExecutionMCP',
-      );
-      outcome = notRegistered('write-failed');
-    }
-
-    // A refused retain is never released by its caller, so it takes back its
-    // own count here. Other holders of the root keep theirs.
-    if (!outcome.registered) this.dropRetention(root);
-    return outcome;
-  }
-
-  /** Subtract one holder of `root`. True when this was the last holder. */
-  private dropRetention(root: string): boolean {
-    const count = this.retainedRoots.get(root);
-    if (count === undefined) return false;
-    if (count > 1) {
-      this.retainedRoots.set(root, count - 1);
-      return false;
-    }
-    this.retainedRoots.delete(root);
-    return true;
-  }
-
-  /**
-   * Give back one hold on a root kept by {@link retainRoot}. Call once per
-   * successful retain; a release of an unretained root does nothing. Never rejects.
-   *
-   * The entry goes away in the reconcile that follows, unless the folder is
-   * also an open workspace folder, which keeps its own entry.
-   */
-  async releaseRoot(root: string): Promise<void> {
-    await this.enqueueMcpOp(async () => {
-      // Another live session still holds this root: its entry stays.
-      if (!this.dropRetention(root)) return;
-      // A stopping or stopped server has already given every entry back (or
-      // kept the record of a failed removal for its next pass). Reconciling
-      // here would write the open folders' entries for a port about to close.
-      if (this.stopped || this.port === null) return;
-      try {
-        for (const [configPath, owned] of this.registrations) {
-          if (owned.slot.workspaceRoot !== root) continue;
-          if (this.workspaceProvider.getWorkspaceFolders().includes(root) ||
-              this.workspaceProvider.getWorkspaceRoot() === root) continue;
-          // A failed removal leaves a live entry: the next chat registration
-          // must take the full reconcile, which retries it.
-          if (await this.unregisterFromSlot(configPath)) this.registrationNeedsReconcile = true;
-        }
-      } catch (error: unknown) {
-        this.logger.warn(
-          `[CodeExecutionMCP] Failed to release ${root}: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
-          'CodeExecutionMCP',
-        );
-      }
-    });
-  }
-
-  /**
-   * Every slot Ptah should own right now, keyed by config path.
-   *
-   * A detector failure is not fatal here: `planPtahMcpSlots` gates only the
-   * home-scoped targets on it, so the workspace files are planned either way.
-   */
-  private async desiredSlots(): Promise<Map<string, PtahMcpSlot>> {
-    const slots = await planPtahMcpSlots({
-      workspaceRoots: [
-        ...this.workspaceProvider.getWorkspaceFolders(),
-        this.workspaceProvider.getWorkspaceRoot() ?? '',
-        ...this.retainedRoots.keys(),
-      ],
-      isInstalled: (target) =>
-        this.cliDetector?.isInstalled(target) ?? Promise.resolve(false),
-    });
-    return new Map(slots.map((slot) => [slot.configPath, slot]));
-  }
-
-  /**
-   * Take back the persistent `ptah` entries an earlier Ptah wrote into config
-   * files it no longer plans (Antigravity, TASK_2026_2297), and drop their
-   * credentials. Every full reconcile runs it, because a stream-json lane that
-   * was running during an earlier pass may restore the old entry when it ends.
-   * Failures are logged and retried by the next full reconcile; they do not
-   * mark the registration for retry. See `retired-ptah-mcp-slots.ts`.
+   * Take back the persistent `ptah` entries an earlier Ptah wrote into
+   * Antigravity config files (TASK_2026_2297), and drop their credentials.
+   * Kept as is under D-U5 Option 1, including its linked-worktree skip.
+   * It never rejects: failures are logged and retried by the next sweep.
+   * See `retired-ptah-mcp-slots.ts`.
    */
   private removeRetiredEntries(): Promise<void> {
     return sweepRetiredPtahMcpEntries({
       workspaceRoots: [
         ...this.workspaceProvider.getWorkspaceFolders(),
         this.workspaceProvider.getWorkspaceRoot() ?? '',
-        ...this.retainedRoots.keys(),
       ],
       isInstalled: (target) =>
         this.cliDetector?.isInstalled(target) ?? Promise.resolve(false),
@@ -914,50 +460,18 @@ export class CodeExecutionMCP
   }
 
   /**
-   * Reconcile after the workspace folders changed.
-   *
-   * Only runs when we already own an entry: a host that never called
-   * `ensureRegisteredForSubagents` must not start touching the user's disk just
-   * because they opened a folder (the Bug #9 rule that
-   * `unregisterFromMcpJson` also enforces).
-   *
-   * Going to ZERO folders is a real case — the desired set is empty, every
-   * owned entry is removed and none is written back, which is what stops a
-   * dead-port entry outliving the workspace it was written into.
-   *
-   * A switch between folders that are BOTH open reaches here (the Electron
-   * provider fires the folder event from `setActiveFolder`) and finds the
-   * desired set unchanged, so it writes nothing.
-   *
-   * **Call it only from inside `enqueueMcpOp`** (`queueRepoint` is the one
-   * caller).
-   */
-  private async syncMcpJsonRegistration(): Promise<void> {
-    if (this.registrations.size === 0) return;
-    if (this.port === null) return;
-
-    await this.reconcileRegistrations(this.port);
-  }
-
-  /**
    * Stop MCP server and clean up resources.
    *
-   * The cancellation flags prevent a queued re-point from writing after stop.
-   * Persistent entries remain on disk so a restart can reuse their tokens (M1).
-   * Ephemeral lane and session credentials are revoked immediately.
+   * The stopped flag drops a sweep that is still queued. Ephemeral lane and
+   * session credentials are revoked immediately.
    */
   async stop(): Promise<void> {
-    // Lane tokens die with the server. Persistent hashes stay so the next
-    // start can recognise the token already in a config file (M1).
+    // Lane tokens die with the server. Persistent hashes stay, so an entry an
+    // earlier Ptah wrote keeps its token across a restart (M1, D-U5 Option 1).
     this.callerCredentials.revokeEphemeral();
-    // Drop re-points queued after this point...
     this.stopped = true;
-    // ...and supersede the ones already queued before it.
-    this.repointGeneration++;
 
-    // Join the queue so an active mutation finishes before the socket closes.
-    // Persistent entries stay on disk: removing them would force token rotation
-    // on the next start and violate M1's byte-identical restart contract.
+    // Join the queue so a running sweep finishes before the socket closes.
     await this.enqueueMcpOp(() => Promise.resolve());
 
     // Open SSE streams would keep `server.close` waiting forever.
@@ -994,31 +508,6 @@ export class CodeExecutionMCP
     );
   }
 
-  /**
-   * Prepare a persistent credential. Its candidate hash is committed only
-   * after the config writer succeeds, so a failed write keeps the old token.
-   */
-  private async persistentCredential(
-    slot: PtahMcpSlot,
-  ): Promise<PreparedPersistentCredential> {
-    const fileToken = this.readFileAuthToken(slot.configPath);
-    try {
-      return await this.callerCredentials.preparePersistent({
-        configPath: slot.configPath,
-        kind: slot.workspaceRoot === '' ? 'home' : 'workspace',
-        ...(slot.workspaceRoot === ''
-          ? {}
-          : { workspaceRoot: slot.workspaceRoot }),
-        setting: this.externalCallerAccess(),
-        ...(fileToken === undefined ? {} : { fileToken }),
-      });
-    } catch (error: unknown) {
-      this.logger.warn(
-        `[CodeExecutionMCP] Credential reconcile failed for ${slot.configPath}`,
-      );
-      throw new Error('MCP credential reconcile failed');
-    }
-  }
 
   private externalCallerAccess(): 'read-only' | 'full' {
     return parseExternalCallerAccess(
@@ -1030,27 +519,6 @@ export class CodeExecutionMCP
     );
   }
 
-  /** One `/auth/{43}` token in the file, or undefined when it cannot be read. */
-  private readFileAuthToken(configPath: string): string | undefined {
-    try {
-      if (!fs.existsSync(configPath)) return undefined;
-      const content = fs.readFileSync(configPath, 'utf-8');
-      if (typeof content !== 'string') return undefined;
-      return (
-        extractAuthToken(content) ??
-        /Authorization["']?\s*[:=]\s*["']Bearer ([A-Za-z0-9_-]{43})["']/.exec(
-          content,
-        )?.[1]
-      );
-    } catch (error: unknown) {
-      // degradation-audit: optional-capability - the warning reports the read
-      // failure, and undefined makes reconciliation issue a replacement token.
-      this.logger.warn(
-        '[CodeExecutionMCP] Could not read MCP config for credential reconcile',
-      );
-      return undefined;
-    }
-  }
 
   /**
    * Set callback for tool result notifications.
@@ -1102,310 +570,5 @@ export class CodeExecutionMCP
       });
     }
     await this.stop();
-  }
-
-  /**
-   * Declare the Ptah MCP server in one target's config file.
-   *
-   * For Claude this is what lets SUBAGENTS reach Ptah at all: only the parent
-   * SDK session gets the server through the programmatic `Options.mcpServers`,
-   * and a spawned subagent reads `.mcp.json`. For every other target it is what
-   * lets a CLI the USER launched reach Ptah, which nothing did before — the
-   * spawn adapters hand the server over in-process, so it existed only inside
-   * threads Ptah itself started.
-   *
-   * **The write goes through `harness-sync`'s facet, never a hand-rolled
-   * read-modify-write.** The facet owns the path, the dialect (`url` versus
-   * `serverUrl`, a `type` discriminant for VS Code only, a fenced TOML table
-   * for Codex), the atomic write and — critically — the per-config-file lock.
-   * That lock is what makes this safe beside the reconciler, which writes the
-   * same files for the user's OWN installed servers: two unserialized
-   * read-modify-writes lose an entry silently, with no torn file to notice.
-   *
-   * Ownership is unchanged by the widening. `ptah` (`PTAH_SPAWN_MCP_KEY`) is
-   * this service's key for as long as the HTTP server is up; the reconciler
-   * never writes or reaps it, because its desired state is the user's durable
-   * `~/.ptah/mcp-installed.json` and this key is in neither that nor any
-   * manifest.
-   */
-  private async registerInSlot(
-    slot: PtahMcpSlot,
-    port: number,
-  ): Promise<McpSubagentRegistration> {
-    const started = Date.now();
-    try {
-      const credential = await this.persistentCredential(slot);
-      const prepared = Date.now();
-      const wrote =
-        slot.target === CLAUDE_TARGET
-          ? await this.writeMcpJsonEntry(
-              slot.configPath,
-              port,
-              slot.workspaceRoot,
-              credential.token,
-            )
-          : await this.writeFacetEntry(slot, port, credential.token);
-      const written = Date.now();
-      await credential.commit();
-      const committed = Date.now();
-      if (committed - started > 1000) {
-        this.logger.warn(
-          `[CodeExecutionMCP] Slow registration for ${slot.target} in ${slot.configPath}: prepare=${prepared - started}ms write=${written - prepared}ms commit=${committed - written}ms total=${committed - started}ms`,
-          'CodeExecutionMCP',
-        );
-      }
-
-      this.registrations.set(slot.configPath, { port, slot });
-      if (wrote) {
-        this.logger.info(
-          `[CodeExecutionMCP] Registered ptah for ${slot.target} in ${slot.configPath} (port ${port})`,
-          'CodeExecutionMCP',
-        );
-      }
-      return REGISTERED;
-    } catch (error: unknown) {
-      // A lock timeout is NOT an ordinary I/O failure and must not be folded
-      // into the same branch. `harness-sync` refuses the write when another
-      // process holds the config file past the deadline (TASK_2026_332), which
-      // means the entry is definitely absent and definitely retryable — as
-      // opposed to an EACCES, which is likely to fail the same way next time.
-      if (isFileLockTimeoutError(error)) {
-        this.logger.warn(
-          `[CodeExecutionMCP] Did not register for ${slot.target} — another process ` +
-            `held the config lock: ${error.message}`,
-          'CodeExecutionMCP',
-        );
-        return notRegistered('lock-timeout');
-      }
-      this.logger.warn(
-        `[CodeExecutionMCP] Failed to register for ${slot.target} in ${slot.configPath}`,
-        'CodeExecutionMCP',
-      );
-      return notRegistered('write-failed');
-    }
-  }
-
-  /**
-   * Write the `ptah` key into `{ws}/.mcp.json`.
-   *
-   * **Deliberately NOT routed through `createMcpFacet('claude')`, unlike every
-   * other target.** The facet is the right writer for a server the RECONCILER
-   * installs, and it is a different writer from this one in a way that shows on
-   * disk: `includeType: false` means it emits `{ url }`, while this key has been
-   * `{ type, url }` in every `.mcp.json` Ptah has ever written. Switching would
-   * rewrite that entry in every existing user's repository to say the same
-   * thing differently, for no capability — Ptah's own server reached Claude
-   * perfectly well before this task. The gap being closed is the CLIs that had
-   * NO persistent registration at all, and none of them is this file.
-   *
-   * It is still one writer per file: `.mcp.json` is written here and by the
-   * reconciler, both under `withMcpConfigLock`, and they own disjoint keys.
-   *
-   * Returns whether anything was written.
-   */
-  private async writeMcpJsonEntry(
-    mcpJsonPath: string,
-    port: number,
-    workspaceRoot: string,
-    token: string,
-  ): Promise<boolean> {
-    // The `/workspace/...` segment is what lets the server attribute an
-    // external caller — Claude Code subagents, Copilot, `ptah-cli` — to THIS
-    // folder instead of whichever folder was most recently activated
-    // (TASK_2026_364). `ptahMcpUrl` owns the grammar.
-    const desiredEntry: McpHttpServerEntry = {
-      type: 'http',
-      url: `http://localhost:${port}/auth/${token}${ptahMcpUrl(port, workspaceRoot).slice(`http://localhost:${port}`.length)}`,
-    };
-    let wrote = false;
-
-    // `harness-sync` also writes this file (it is the `claude` target's MCP
-    // facet), so the read-modify-write below runs inside that lib's
-    // config-file lock (TASK_2026_318). Atomicity is NOT the same problem:
-    // a temp+rename guarantees no reader sees half a file and guarantees
-    // nothing about two writers that each READ, each edit their own key and
-    // each write their own copy back — the second write wins whole and the
-    // first key is gone, silently.
-    await withMcpConfigLock(mcpJsonPath, async () => {
-      // Read-merge-write, deliberately. `.mcp.json` is a USER-OWNED file that
-      // may hold hand-authored servers; only the `ptah` key is ours to touch
-      // and a blocking writeFileSync over it has no undo.
-      let config: Record<string, unknown> = {};
-      if (fs.existsSync(mcpJsonPath)) {
-        const content = fs.readFileSync(mcpJsonPath, 'utf-8');
-        config = JSON.parse(content);
-      }
-
-      const servers = (config['mcpServers'] as Record<string, unknown>) || {};
-
-      // Read-COMPARE-write. The entry on disk is frequently already the one
-      // we want — a restart that reused the port, a second host, a reconcile
-      // that changed nothing — and rewriting a file inside the user's
-      // repository to the bytes it already holds is a spurious VCS diff and a
-      // spurious log line (TASK_2026_354).
-      if (isSameMcpHttpEntry(servers['ptah'], desiredEntry)) return;
-
-      servers['ptah'] = desiredEntry;
-      config['mcpServers'] = servers;
-
-      fs.writeFileSync(mcpJsonPath, JSON.stringify(config, null, 2) + '\n');
-      wrote = true;
-    });
-
-    return wrote;
-  }
-
-  /**
-   * Write the `ptah` key into a rival CLI's config file, through its facet.
-   *
-   * The facet owns the path, the dialect (`url` versus `serverUrl`, a fenced
-   * TOML table for Codex), the atomic write and — critically — the
-   * per-config-file lock. Hand-rolling any of that here would make this a
-   * second writer with a second idea of the format, which is the failure
-   * `AntigravityCliAdapter` already documents.
-   *
-   * The read-compare is OUTSIDE the facet's lock. That is sound for THIS key
-   * and would not be for a user's server: a stale read can only cost one
-   * redundant write, never a lost update, because the write itself is the
-   * facet's own read-modify-write under the lock and it touches one key.
-   *
-   * Returns whether anything was written.
-   */
-  private async writeFacetEntry(
-    slot: PtahMcpSlot,
-    port: number,
-    token: string,
-  ): Promise<boolean> {
-    // A workspace-scoped slot declares its folder in the URL; a home-scoped
-    // slot (`workspaceRoot === ''`) keeps the bare URL, because one home file
-    // serves every open folder at once.
-    const base = ptahMcpEntry(port, slot.workspaceRoot);
-    const desired: McpServerConfig =
-      slot.target === 'cursor'
-        ? { ...base, headers: { Authorization: `Bearer ${token}` } }
-        : {
-            ...base,
-            url: `http://localhost:${port}/auth/${token}${base.url.slice(`http://localhost:${port}`.length)}`,
-          };
-    const existing = slot.facet
-      .readAll(slot.workspaceRoot)
-      .get(PTAH_SPAWN_MCP_KEY);
-    if (isSameFacetEntry(existing, desired)) return false;
-
-    await slot.facet.write(slot.workspaceRoot, PTAH_SPAWN_MCP_KEY, desired);
-    return true;
-  }
-
-  /**
-   * Remove the Ptah MCP server entry from one config file we actually wrote.
-   * Prevents stale entries pointing to a dead server.
-   *
-   * Takes the slot from {@link registrations}, NOT by re-deriving it. Resolving
-   * the current workspace root here was the second half of the A3 defect: after
-   * a workspace switch (or after the last folder was removed) it either edited
-   * the wrong repository or gave up entirely, leaving the written entry behind.
-   *
-   * Returns `null` on success — including the "we did not own this path" case —
-   * and the failure reason otherwise. On failure the record is deliberately
-   * KEPT, so the next reconcile retries the removal.
-   */
-  private async unregisterFromSlot(
-    configPath: string,
-  ): Promise<McpRegistrationFailure | null> {
-    const owned = this.registrations.get(configPath);
-    if (owned === undefined) return null;
-
-    try {
-      const removed =
-        owned.slot.target === CLAUDE_TARGET
-          ? await this.removeMcpJsonEntry(configPath)
-          : await this.removeFacetEntry(owned.slot);
-
-      this.registrations.delete(configPath);
-      if (removed) {
-        this.logger.info(
-          `[CodeExecutionMCP] Unregistered ptah for ${owned.slot.target} from ${configPath}`,
-          'CodeExecutionMCP',
-        );
-      }
-      return null;
-    } catch (error: unknown) {
-      // degradation-audit: optional-capability - not a swallow: every branch
-      // below returns a machine-readable failure reason ('lock-timeout' |
-      // 'write-failed') that callers AND into mcpServerRunning, so the caller
-      // always learns the removal did not happen.
-      // Distinguished for the same reason registration distinguishes it, and
-      // with a sharper consequence: a lock timeout means the entry is STILL ON
-      // DISK, pointing at a port that may be about to die. The record is
-      // deliberately left in `registrations` on every failure path, so it
-      // survives and the next reconcile retries the removal.
-      if (isFileLockTimeoutError(error)) {
-        this.logger.warn(
-          `[CodeExecutionMCP] Did not unregister from ${configPath} — another ` +
-            `process held the config lock; the ptah entry is still on disk: ${error.message}`,
-          'CodeExecutionMCP',
-        );
-        return 'lock-timeout';
-      }
-      this.logger.warn(
-        `[CodeExecutionMCP] Failed to unregister from ${configPath}: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-        'CodeExecutionMCP',
-      );
-      return 'write-failed';
-    }
-  }
-
-  /**
-   * Take the `ptah` key back out of `{ws}/.mcp.json`.
-   *
-   * Under the same lock as the write, and for the same reason — see
-   * {@link writeMcpJsonEntry}. The whole read/check/delete/write is one
-   * critical section: deciding `ptah` is present and then removing it are two
-   * halves of one decision, and a reconcile landing between them would be
-   * written over by the copy read before it.
-   */
-  private removeMcpJsonEntry(mcpJsonPath: string): Promise<boolean> {
-    return withMcpConfigLock(mcpJsonPath, async () => {
-      if (!fs.existsSync(mcpJsonPath)) return false;
-
-      const content = fs.readFileSync(mcpJsonPath, 'utf-8');
-      const config = JSON.parse(content) as Record<string, unknown>;
-      const servers = (config['mcpServers'] as Record<string, unknown>) || {};
-
-      if (!('ptah' in servers)) return false;
-
-      // Same read-merge-write contract as registration: every other key in
-      // the user's file — their own servers included — is written back
-      // untouched.
-      delete servers['ptah'];
-      config['mcpServers'] = servers;
-
-      fs.writeFileSync(mcpJsonPath, JSON.stringify(config, null, 2) + '\n');
-      return true;
-    });
-  }
-
-  /** Take the `ptah` key back out of a rival CLI's config, through its facet. */
-  private async removeFacetEntry(slot: PtahMcpSlot): Promise<boolean> {
-    const present = slot.facet
-      .readAll(slot.workspaceRoot)
-      .has(PTAH_SPAWN_MCP_KEY);
-    if (!present) return false;
-    await slot.facet.remove(slot.workspaceRoot, PTAH_SPAWN_MCP_KEY);
-    return true;
-  }
-
-  /**
-   * Get the path to .mcp.json in the ACTIVE workspace folder.
-   *
-   * Used only to decide which slot {@link ensureRegisteredForSubagents} reports
-   * on. The full set actually written is {@link desiredSlots}.
-   */
-  private getMcpJsonPath(): string | null {
-    const workspaceRoot = this.workspaceProvider.getWorkspaceRoot();
-    if (!workspaceRoot) return null;
-    return path.join(workspaceRoot, '.mcp.json');
   }
 }
