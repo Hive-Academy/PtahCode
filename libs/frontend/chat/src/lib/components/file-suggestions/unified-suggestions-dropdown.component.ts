@@ -213,7 +213,13 @@ export class UnifiedSuggestionsDropdownComponent implements OnDestroy {
         }
         rows.push({ kind: 'header', key: `header-${g}`, label: group.label });
         for (const item of group.items) {
-          rows.push({ kind: 'option', key: optionKey(item), item, index: index++ });
+          rows.push({
+            kind: 'option',
+            // The same command can sit in two groups (Commands and Skills).
+            key: `${g}-${optionKey(item)}`,
+            item,
+            index: index++,
+          });
         }
       });
       return rows;

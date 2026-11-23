@@ -17,8 +17,10 @@ import {
   ChangeDetectionStrategy,
   Component,
   computed,
+  effect,
   inject,
   input,
+  linkedSignal,
   output,
   signal,
 } from '@angular/core';
@@ -137,8 +139,8 @@ const MODEL_PILL_CLASS =
           type="button"
           class="${MODEL_PILL_CLASS}"
           [ptahComposerGated]="disabledReason()"
-          (reasonRevealed)="reasonRevealed.emit($event)"
-          (reasonCleared)="reasonCleared.emit()"
+          (reasonRevealed)="revealReason($event)"
+          (reasonCleared)="clearReason()"
           aria-label="Select model"
           data-testid="composer-model-pill"
         >
@@ -343,12 +345,35 @@ export class ComposerModelPickerComponent {
   protected readonly BoxIcon = Box;
   protected readonly InfoIcon = Info;
 
-  private readonly _isOpen = signal(false);
-  readonly isOpen = this._isOpen.asReadonly();
-
   readonly gated = computed(
     () => (this.disabledReason() ?? '').trim().length > 0,
   );
+
+  /**
+   * Open state. Every gate change closes it, so a menu that was open when a
+   * reason arrived stays closed after the reason clears.
+   */
+  private readonly _isOpen = linkedSignal({
+    source: this.gated,
+    computation: () => false,
+  });
+  readonly isOpen = this._isOpen.asReadonly();
+
+  /**
+   * The status line shows this picker's reason. The gated pill is destroyed
+   * when the reason clears, so its blur / leave never fire; the picker then
+   * sends `reasonCleared` itself.
+   */
+  private reasonShown = false;
+
+  constructor() {
+    effect(() => {
+      if (!this.gated() && this.reasonShown) {
+        this.reasonShown = false;
+        this.reasonCleared.emit();
+      }
+    });
+  }
 
   /** A gated picker never shows its menu, even if it was open when gated. */
   protected readonly menuOpen = computed(() => this._isOpen() && !this.gated());
@@ -417,6 +442,16 @@ export class ComposerModelPickerComponent {
 
   close(): void {
     this._isOpen.set(false);
+  }
+
+  protected revealReason(reason: string): void {
+    this.reasonShown = true;
+    this.reasonRevealed.emit(reason);
+  }
+
+  protected clearReason(): void {
+    this.reasonShown = false;
+    this.reasonCleared.emit();
   }
 
   choose(modelId: string): void {

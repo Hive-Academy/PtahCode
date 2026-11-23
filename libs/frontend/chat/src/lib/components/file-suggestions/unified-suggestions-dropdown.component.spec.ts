@@ -217,6 +217,22 @@ describe('UnifiedSuggestionsDropdownComponent', () => {
       expect(host.selectedItems).toEqual([commandSuggestion('review')]);
     });
 
+    it('keys a command listed in two groups once per group', () => {
+      host.groups.set([
+        { label: 'Commands', items: [commandSuggestion('review')] },
+        { label: 'Skills', items: [commandSuggestion('review')] },
+      ]);
+      fixture.detectChanges();
+
+      const keys = host.dropdown.rows().map((row) => row.key);
+      expect(new Set(keys).size).toBe(keys.length);
+      expect(
+        (fixture.nativeElement as HTMLElement).querySelectorAll(
+          'ptah-suggestion-option',
+        ).length,
+      ).toBe(2);
+    });
+
     it('leaves out a group with no items and no notice', () => {
       host.groups.set([
         { label: 'Commands', items: [] },

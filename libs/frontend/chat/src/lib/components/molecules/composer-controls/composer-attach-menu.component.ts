@@ -20,6 +20,9 @@ import { COMPOSER_ICON_BUTTON_CLASS } from '@ptah-extension/chat-ui';
   standalone: true,
   imports: [LucideAngularModule, NativePopoverComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
+  // No box of its own (like the voice button): the popover is the toolbar's
+  // flex item, so no inline line box sits under the 28 px button.
+  host: { class: 'contents' },
   template: `
     <ptah-native-popover
       [isOpen]="isOpen()"

@@ -121,4 +121,29 @@ describe('ComposerGatedControlDirective', () => {
     button.dispatchEvent(new FocusEvent('focus'));
     expect(host.revealed).toEqual([]);
   });
+
+  it('clears a shown reason when the control is ungated while focused', () => {
+    const { host, button, fixture } = setup();
+    host.reason.set('Set at spawn.');
+    fixture.detectChanges();
+    button.dispatchEvent(new FocusEvent('focus'));
+    expect(host.revealed).toEqual(['Set at spawn.']);
+
+    host.reason.set(null);
+    fixture.detectChanges();
+    expect(host.cleared).toBe(1);
+
+    // Nothing shown any more: a later blur adds no second clear.
+    button.dispatchEvent(new FocusEvent('blur'));
+    expect(host.cleared).toBe(1);
+  });
+
+  it('sends no clear on ungate when the reason was never shown', () => {
+    const { host, fixture } = setup();
+    host.reason.set('Set at spawn.');
+    fixture.detectChanges();
+    host.reason.set(null);
+    fixture.detectChanges();
+    expect(host.cleared).toBe(0);
+  });
 });

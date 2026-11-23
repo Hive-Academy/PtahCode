@@ -64,7 +64,12 @@ describe('ComposerInputController', () => {
   let submitNow: jest.Mock | undefined;
 
   function setup(
-    opts: { cache?: boolean; prompts?: boolean; withSubmitNow?: boolean } = {},
+    opts: {
+      cache?: boolean;
+      prompts?: boolean;
+      withSubmitNow?: boolean;
+      withoutTextarea?: boolean;
+    } = {},
   ): void {
     jest.clearAllMocks();
     TestBed.resetTestingModule();
@@ -87,7 +92,9 @@ describe('ComposerInputController', () => {
     submitNow = opts.withSubmitNow ? jest.fn() : undefined;
     controller.connect({
       text,
-      textarea: signal(new ElementRef(textarea)),
+      textarea: signal(
+        opts.withoutTextarea ? undefined : new ElementRef(textarea),
+      ),
       dropdown,
       commands,
       fileMode,
@@ -175,6 +182,16 @@ describe('ComposerInputController', () => {
       expect(discovery.fetchCommands).not.toHaveBeenCalled();
     });
 
+    it('drops an older list while the source is loading', async () => {
+      controller.handleSlashActivated({ query: '', cursorPosition: 1 });
+      await Promise.resolve();
+      expect(controller.filteredSuggestions().length).toBeGreaterThan(0);
+
+      commands.set({ state: 'loading' });
+      expect(controller.isLoadingSuggestions()).toBe(true);
+      expect(controller.filteredSuggestions()).toEqual([]);
+    });
+
     it('filters ready groups by the typed query', () => {
       setup({ prompts: false });
       commands.set({
@@ -241,6 +258,23 @@ describe('ComposerInputController', () => {
 
       text.set('');
       TestBed.tick();
+      expect(controller.statusNote()).toBeNull();
+    });
+
+    it('sets no path-text note when there is no textarea to insert into', () => {
+      setup({ withoutTextarea: true });
+      fileMode.set('path-text');
+      text.set('see @app');
+      controller.handleAtActivated({
+        query: 'app',
+        cursorPosition: 8,
+        triggerPosition: 4,
+      });
+      const [file] = controller.filteredSuggestions();
+      controller.handleSuggestionSelected(file!);
+      TestBed.tick();
+
+      expect(text()).toBe('see @app');
       expect(controller.statusNote()).toBeNull();
     });
 

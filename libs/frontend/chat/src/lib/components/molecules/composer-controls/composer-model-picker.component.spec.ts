@@ -303,4 +303,53 @@ describe('ComposerModelPickerComponent gated', () => {
     expect(rows(fixture)).toHaveLength(0);
     expect(pill(fixture).getAttribute('aria-disabled')).toBe('true');
   });
+
+  it('stays closed after a gated period ends', async () => {
+    const fixture = await render({ options: [option('a')], selectedId: 'a' });
+    await open(fixture);
+    expect(rows(fixture)).toHaveLength(1);
+
+    fixture.componentRef.setInput('disabledReason', reason);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.componentRef.setInput('disabledReason', null);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+
+    expect(fixture.componentInstance.isOpen()).toBe(false);
+    expect(rows(fixture)).toHaveLength(0);
+    expect(pill(fixture).getAttribute('aria-expanded')).toBe('false');
+  });
+
+  it('clears a shown reason when the gate lifts under focus', async () => {
+    const fixture = await render({ ...{ options: [option('a')], selectedId: 'a' }, disabledReason: reason });
+    const revealed: string[] = [];
+    let cleared = 0;
+    fixture.componentInstance.reasonRevealed.subscribe((r) => revealed.push(r));
+    fixture.componentInstance.reasonCleared.subscribe(() => cleared++);
+
+    pill(fixture).dispatchEvent(new FocusEvent('focus'));
+    expect(revealed).toEqual([reason]);
+
+    // The gated pill is swapped out: its blur never fires.
+    fixture.componentRef.setInput('disabledReason', null);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(cleared).toBe(1);
+    expect(pill(fixture).getAttribute('aria-disabled')).toBeNull();
+  });
+
+  it('sends no clear when the gate lifts with no reason shown', async () => {
+    const fixture = await render({ ...{ options: [option('a')], selectedId: 'a' }, disabledReason: reason });
+    let cleared = 0;
+    fixture.componentInstance.reasonCleared.subscribe(() => cleared++);
+
+    fixture.componentRef.setInput('disabledReason', null);
+    fixture.detectChanges();
+    await fixture.whenStable();
+
+    expect(cleared).toBe(0);
+  });
 });

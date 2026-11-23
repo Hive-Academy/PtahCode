@@ -80,4 +80,21 @@ describe('ComposerAttachMenuComponent', () => {
       'Attach images',
     );
   });
+
+  it('has no box of its own, like the voice button', () => {
+    const { fixture } = setup();
+    expect(
+      (fixture.nativeElement as HTMLElement).classList.contains('contents'),
+    ).toBe(true);
+  });
+
+  it('marks the open menu panel as a glass overlay of the composer', () => {
+    const { fixture, trigger } = setup();
+    trigger.click();
+    fixture.detectChanges();
+    const panel = item('composer-attach-files')?.closest('[role="menu"]');
+    expect(panel).not.toBeNull();
+    expect(panel?.getAttribute('data-glass-surface')).toBe('overlay');
+    expect(panel?.hasAttribute('data-composer-overlay')).toBe(true);
+  });
 });

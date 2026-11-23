@@ -29,7 +29,12 @@ let nextGatedReasonId = 0;
  * - swallows clicks before the control's own handlers run, so a menu never
  *   opens; the click, a focus or a hover emits `reasonRevealed` instead, and
  *   blur or pointer leave emits `reasonCleared` (the status line shows the
- *   reason of the hovered or focused control).
+ *   reason of the hovered or focused control). A reason that clears while it
+ *   is shown also emits `reasonCleared`.
+ *
+ * A host that swaps the gated control out when the reason clears destroys
+ * the directive with it; Angular drops output listeners before destroy
+ * hooks, so that host sends its own `reasonCleared` (the pickers do).
  *
  * The host template shows the info glyph in place of its chevron by reading
  * `gated()` through `exportAs: 'ptahComposerGated'`.
@@ -70,6 +75,9 @@ export class ComposerGatedControlDirective {
   private readonly element =
     inject<ElementRef<HTMLElement>>(ElementRef).nativeElement;
 
+  /** The status line shows this control's reason. */
+  private revealed = false;
+
   constructor() {
     const renderer = inject(Renderer2);
     const reasonNode: HTMLElement = renderer.createElement('span');
@@ -80,6 +88,13 @@ export class ComposerGatedControlDirective {
     effect(() => {
       renderer.setProperty(reasonNode, 'textContent', this.reason());
     });
+    // Ungated while focused or hovered: blur / leave will no longer clear it.
+    effect(() => {
+      if (!this.gated() && this.revealed) {
+        this.revealed = false;
+        this.reasonCleared.emit();
+      }
+    });
 
     // Capture phase on the control itself runs before its own (bubble-phase)
     // template handlers, so a gated pill never opens its menu.
@@ -87,6 +102,7 @@ export class ComposerGatedControlDirective {
       if (!this.gated()) return;
       event.preventDefault();
       event.stopImmediatePropagation();
+      this.revealed = true;
       this.reasonRevealed.emit(this.reason());
     };
     this.element.addEventListener('click', onClick, true);
@@ -96,10 +112,14 @@ export class ComposerGatedControlDirective {
   }
 
   protected reveal(): void {
-    if (this.gated()) this.reasonRevealed.emit(this.reason());
+    if (!this.gated()) return;
+    this.revealed = true;
+    this.reasonRevealed.emit(this.reason());
   }
 
   protected clear(): void {
-    if (this.gated()) this.reasonCleared.emit();
+    if (!this.gated()) return;
+    this.revealed = false;
+    this.reasonCleared.emit();
   }
 }

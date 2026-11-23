@@ -230,6 +230,8 @@ export class ComposerInputController {
       const groups = this.suggestionGroups();
       if (groups) return groups.flatMap((group) => [...group.items]);
       if (this.suggestionNotice() !== null) return [];
+      // A loading source shows only the spinner row, never an older list.
+      if (this.commandSource().state === 'loading') return [];
       return this._localSuggestions();
     }
 
@@ -413,10 +415,11 @@ export class ComposerInputController {
   handleSuggestionSelected(suggestion: SuggestionItem): void {
     if (suggestion.type === 'file') {
       if (this.sources()?.fileMode() === 'path-text') {
-        this.replaceTrigger(`${suggestion.path} `);
-        this._statusNote.set(
-          `Inserted ${suggestion.name} as path text in your message.`,
-        );
+        if (this.replaceTrigger(`${suggestion.path} `)) {
+          this._statusNote.set(
+            `Inserted ${suggestion.name} as path text in your message.`,
+          );
+        }
       } else {
         this.addFileTag(suggestion);
         this.removeTriggerText();
@@ -676,11 +679,14 @@ export class ComposerInputController {
     this.attachments.addFile(chatFile);
   }
 
-  /** Replace the trigger text with the chosen suggestion. */
-  private replaceTrigger(replacement: string): void {
+  /**
+   * Replace the trigger text with the chosen suggestion. False when there is
+   * no draft or textarea to write into (nothing was inserted).
+   */
+  private replaceTrigger(replacement: string): boolean {
     const text = this.text;
     const textarea = this.textareaElement();
-    if (!text || !textarea) return;
+    if (!text || !textarea) return false;
 
     const currentValue = text();
     const triggerStart = this._triggerPosition();
@@ -694,6 +700,7 @@ export class ComposerInputController {
     textarea.value = newValue;
     const newCursorPos = triggerStart + replacement.length;
     textarea.setSelectionRange(newCursorPos, newCursorPos);
+    return true;
   }
 
   /** Remove the trigger text (a file becomes a tag instead). */
