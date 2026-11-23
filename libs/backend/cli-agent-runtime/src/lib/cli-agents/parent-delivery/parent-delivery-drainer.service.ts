@@ -294,6 +294,8 @@ export class ParentDeliveryDrainerService {
           continue;
         }
       }
+      // Taken before the claim write and the body read, so a reparent during either is seen.
+      const ownersBefore = pending.originKind === 'session' ? this.ownersSignature(pending.agentId) : undefined;
       let sending: ParentDeliveryEnvelope | undefined;
       try {
         sending = await this.store.markSending(pending.id);
@@ -313,7 +315,6 @@ export class ParentDeliveryDrainerService {
         break;
       }
       // The owner can change while the claim and the body read wait on storage.
-      const ownersBefore = sending.originKind === 'session' ? this.ownersSignature(sending.agentId) : undefined;
       if (sending.originKind === 'session') {
         const owner = await this.sessionOwner(sending);
         if (owner !== 'matches') {
@@ -525,8 +526,13 @@ export class ParentDeliveryDrainerService {
     if (claimed && !(await this.releaseClaim(envelope.id, 'owner-rerouted', 0))) return;
     try {
       const next = await this.store.rerouteReport(envelope.id, target);
+      if (!next) {
+        // The target is frozen or the row left the unsent states. Hold it so a released claim
+        // with a past retry time does not re-arm a zero-delay loop.
+        this.holdAfterWriteFailure(envelope.id);
+        return;
+      }
       this.retryNotBefore.delete(envelope.id);
-      if (!next) return;
       this.emitSafely(next);
       void this.drain(target).catch((error: unknown) => this.logCallbackError(error));
     } catch (error: unknown) {

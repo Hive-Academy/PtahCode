@@ -730,6 +730,25 @@ describe('ParentDeliveryDrainerService child session reports', () => {
     expect(h.store.find('fence')?.dispatchStarted).toBeUndefined();
   });
 
+  it('holds a report whose reroute does not apply instead of looping at zero delay', async () => {
+    const timer = jest.spyOn(global, 'setTimeout');
+    try {
+      const { h, drainer } = await sessionDrainer(
+        registryWith({ parentSessionId: other }),
+        acks([{ predecessorTabId: parent, predecessorSdkId: null, successorTabId: other,
+          successorSdkId: null, workspaceRoot: '/ws', handoffPath: '/ws/h.md', state: 'recorded' }]));
+      jest.spyOn(h.store, 'rerouteReport').mockResolvedValue(undefined);
+      await drainer.enqueue(sessionReport('frozen-target', parent));
+      await drainer.drain(parent);
+      expect(h.send).not.toHaveBeenCalled();
+      expect(h.store.find('frozen-target')?.parentSessionId).toBe(parent);
+      expect(timer).toHaveBeenCalledWith(expect.any(Function), 5_000);
+      expect(timer).not.toHaveBeenCalledWith(expect.any(Function), 0);
+    } finally {
+      timer.mockRestore();
+    }
+  });
+
   it('reroutes a queued report to the owner when a committed edge hands the recipient off to it', async () => {
     const { h, drainer } = await sessionDrainer(
       registryWith({ parentSessionId: other }),

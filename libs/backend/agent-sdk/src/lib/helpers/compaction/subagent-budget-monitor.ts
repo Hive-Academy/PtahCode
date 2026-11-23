@@ -836,8 +836,13 @@ export class SubagentBudgetMonitor {
   private findGateKey(sessionId: string | undefined, agentId: string | undefined): string | undefined {
     if (!agentId) return undefined;
     if (sessionId) {
-      const key = scopedAgentKey(this.currentSessionId(sessionId), agentId);
-      return this.notesGate.has(key) ? key : undefined;
+      const current = this.currentSessionId(sessionId);
+      const key = scopedAgentKey(current, agentId);
+      if (this.notesGate.has(key)) return key;
+      // A session the monitor tracks is authoritative: another session's gate never applies.
+      // An id the monitor does not know (a tab id before the SDK id is known) falls back to the
+      // unique gate of the agent, so the pause is not lost to an id mismatch.
+      if (this.sessions.has(current)) return undefined;
     }
     const keys = scopedKeysOfAgent(this.notesGate.keys(), agentId);
     return keys.length === 1 ? keys[0] : undefined;
@@ -943,7 +948,8 @@ export class SubagentBudgetMonitor {
     this.notesGate.finish(key);
     this.deliverables.finish(key);
     this.notesWarnings.finish(key);
-    this.dispatcher.withdrawSubagentNotice(agentId);
+    // The notice queue is keyed by agent id only: withdraw it only for a gate this call ended.
+    if (owner !== undefined) this.dispatcher.withdrawSubagentNotice(agentId);
   }
 
   /** Build, publish and deliver the handoff of an agent that returned after the request. */
@@ -1122,7 +1128,7 @@ export class SubagentBudgetMonitor {
     }
     const toolUseId = spawnToolUseId || this.toolUseOfTask(sessionId, taskId);
     if (!toolUseId) {
-      this.logger.debug('[SubagentBudgetMonitor] Task start without a tool use id matches no single spawn', { sessionId, taskId, runId });
+      this.logger.warn('[SubagentBudgetMonitor] Task start without a tool use id matches no single spawn', { sessionId, taskId, runId });
       return;
     }
     const session = this.sessionState(sessionId);

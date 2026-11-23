@@ -440,10 +440,21 @@ export class ParentEnvelopeStoreService implements ParentEnvelopeStore {
       const bodyKey = `${PARENT_ENVELOPE_BODY_PREFIX}${existing.id}`;
       const body = ParentEnvelopeBodySchema.safeParse(this.storage.get<unknown>(bodyKey));
       if (body.success) await this.storage.update(bodyKey, { ...body.data, parentSessionId });
-      return this.replaceLocked(existing, {
-        parentSessionId, state: 'pending', nextRetryAt: undefined, lastError: undefined,
-        waitingReason: undefined,
-      });
+      try {
+        return await this.replaceLocked(existing, {
+          parentSessionId, state: 'pending', nextRetryAt: undefined, lastError: undefined,
+          waitingReason: undefined,
+        });
+      } catch (error: unknown) {
+        // The index write failed: put the body back so it still names the recorded parent.
+        if (body.success) {
+          try { await this.storage.update(bodyKey, body.data); }
+          catch (restoreError: unknown) {
+            this.logger.error('[ParentEnvelopeStore] Reroute body restore failed', this.error(restoreError));
+          }
+        }
+        throw error;
+      }
     });
   }
 

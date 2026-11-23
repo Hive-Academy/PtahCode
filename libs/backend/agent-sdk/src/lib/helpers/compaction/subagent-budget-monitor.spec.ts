@@ -1114,13 +1114,16 @@ describe('cooperative budget: ask, pause and normal return', () => {
       const h = makeHarness();
       await h.monitor.observe(SESSION, ctx(300_000, 'c0'));
       expect(h.monitor.notesGatePhase('a1', SESSION)).toBe('paused');
-      // The same agent id under another parent session never reads this gate.
+      // The same agent id under another parent session the monitor tracks never reads this gate.
+      await h.monitor.observe('session-2', ctx(10, 'other-1'));
       expect(h.monitor.notesGatePhase('a1', 'session-2')).toBeUndefined();
       expect(h.monitor.hasNotesGate('a1', 'session-2')).toBe(false);
       await expect(h.monitor.checkNotesTool('session-2', 'a1', 'Bash', {})).resolves.toBeUndefined();
       await expect(h.monitor.checkNotesTool(SESSION, 'a1', 'Bash', {})).resolves.toMatch(/Ptah budget monitor paused/);
-      // Without a session the unique gate still answers.
+      // Without a session, or with an id the monitor does not know (a tab id), the unique gate answers.
       expect(h.monitor.notesGatePhase('a1')).toBe('paused');
+      expect(h.monitor.notesGatePhase('a1', 'unknown-tab-id')).toBe('paused');
+      await expect(h.monitor.checkNotesTool('unknown-tab-id', 'a1', 'Bash', {})).resolves.toMatch(/Ptah budget monitor paused/);
       h.monitor.rekey(SESSION, 'session-rekeyed');
       expect(h.monitor.notesGatePhase('a1', 'session-rekeyed')).toBe('paused');
       expect(h.monitor.notesGatePhase('a1', SESSION)).toBe('paused');
