@@ -26,9 +26,12 @@ export class ReviewContextService {
     if (result.unavailable) throw new Error('Incremental diff unavailable');
     if (result.exitCode !== 0) {
       // Only a confirmed missing baseline is permanent; any other git failure stays a plain, retryable error.
-      const present = await this.commands.run(repo, 'git', ['cat-file', '-e', `${previousHead}^{commit}`], src, timeoutMs, signal);
+      // `rev-parse --verify --quiet` exits 1 with no output only when the object is absent; repository and
+      // object-store errors exit 128 or print, and a signal-terminated probe has no exit code.
+      const present = await this.commands.run(repo, 'git', ['rev-parse', '--verify', '--quiet', `${previousHead}^{commit}`], src, timeoutMs, signal);
       if (present.timedOut) throw new ReviewGitTimeoutError();
-      if (!present.unavailable && present.exitCode !== 0) throw new ReviewGitBaselineMissingError();
+      if (!present.unavailable && present.exitCode === 1 && !present.stdout.trim() && !present.stderr.trim())
+        throw new ReviewGitBaselineMissingError();
       throw new Error('Incremental diff unavailable');
     }
     const changedPaths = ChangedFileSchema.parse([...result.stdout.matchAll(/^diff --git a\/.+? b\/(.+)$/gm)].map((match) => match[1]));
