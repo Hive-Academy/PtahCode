@@ -694,7 +694,6 @@ export class McpDirectoryRpcHandlers {
         this.logger.info('RPC: mcpDirectory:uninstall', {
           serverKey: input.serverKey,
           targets: input.targets,
-          force: input.force,
         });
 
         const workspaceRoot = this.getWorkspaceRoot();
@@ -703,7 +702,6 @@ export class McpDirectoryRpcHandlers {
           input.serverKey,
           input.targets,
           workspaceRoot,
-          { force: input.force },
         );
 
         return { results };

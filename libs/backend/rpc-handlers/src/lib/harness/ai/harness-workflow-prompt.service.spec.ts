@@ -62,6 +62,21 @@ describe('HarnessWorkflowPromptService', () => {
     },
   );
 
+  it('says MCP servers are served by Ptah, never written to .mcp.json or .vscode/mcp.json (TASK_2026_979 B18)', async () => {
+    const { service } = buildService();
+
+    const { prompt } = await service.composePrompt({
+      mode: 'configure-harness',
+      contextOnly: true,
+    });
+
+    expect(prompt).not.toContain('.mcp.json');
+    expect(prompt).not.toContain('.vscode/mcp.json');
+    expect(prompt).toContain(
+      'Ptah serves it to every session and CLI lane through its own `ptah` MCP server',
+    );
+  });
+
   it('composes a prompt containing workspace context, the proposeConfig instruction, and the user intent', async () => {
     const { service, workspaceContext } = buildService();
 

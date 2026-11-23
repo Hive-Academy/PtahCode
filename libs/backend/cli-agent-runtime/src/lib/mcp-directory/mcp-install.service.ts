@@ -1,67 +1,56 @@
 /**
- * MCP Install Service — the public install surface, now a thin wrapper over the
- * harness reconciler.
+ * MCP Install Service — the public install surface. It records intent only.
  *
- * The RPC contract is unchanged: `install`, `uninstall`, `listInstalled` and
- * `getConfigPath` still behave as the marketplace, `ptah mcp` and the harness
- * apply path expect. What changed is what happens underneath.
+ * The RPC surface is unchanged: `install`, `makeGlobal`, `uninstall`,
+ * `listInstalled` and `getConfigPath` keep their signatures for the
+ * marketplace, `ptah mcp`, the harness apply path and the
+ * `ptah_harness_install_mcp_server` tool.
  *
- * It used to own four installers that each wrote a config file directly, plus a
- * manifest recording what had been written so an uninstall knew where to look.
- * That made MCP a fifth, parallel fan-out alongside skills, commands, agents
- * and junctions — with its own idea of ownership, no reconciliation, and no
- * Codex writer at all, so every server "installed for codex" landed in a config
- * Codex does not read (defect 12).
+ * ## Install records intent, and the gateway serves it
  *
- * Now the write path is: RECORD INTENT, then RECONCILE. The intent store
- * (`~/.ptah/mcp-installed.json`, the same file the old tracker wrote) becomes
- * the desired state, and the reconciler's per-target MCP facets do the writing
- * under the same manifest that owns every other artifact. Two consequences
- * worth stating:
+ * An install, a make-global and an uninstall change the intent store
+ * (`~/.ptah/mcp-installed.json`) and nothing else. Ptah no longer writes,
+ * updates or deletes a native provider MCP config file (decision row 10,
+ * TASK_2026_979): the MCP gateway reads the same store through
+ * `GatewayServerSources` (`McpIntentStore.listFor(root)`, source 2 in
+ * `gateway/server-sources.ts`) and serves every recorded server to every
+ * session and CLI lane through Ptah's own `ptah` MCP server. A server
+ * recorded here is therefore served on the gateway's next resolve of the
+ * workspace, and a forgotten one stops being served.
  *
- * - An install is now IDEMPOTENT and SELF-HEALING. A config file the user
- *   deletes is restored by the next reconcile, which happens at every host
- *   activation, rather than staying missing until they reinstall the server.
- * - The user's own entries in those files are safe by construction. They are
- *   not in the manifest, so nothing here can rewrite or delete them.
+ * Consequences worth stating:
  *
- * Without a reconciler the service degrades to intent-recording only, reporting
- * a clear error per target instead of writing anything. That is the state in a
- * bare container, and it is preferable to falling back to a second write path.
+ * - A successful result names no config file: `configPath` is empty, because
+ *   no file was written. The targets are still recorded on the intent.
+ * - A global install with no folder open is a success, not a deferral: the
+ *   gateway serves a global intent in every workspace. A workspace install
+ *   with no root still throws `McpIntentScopeError` before anything is saved.
+ * - A linked git worktree needs no special case: nothing is written there
+ *   either way, and the gateway reads a worktree's intents with its main
+ *   checkout's (#1469).
+ * - A key Ptah never recorded is the user's own entry in a file Ptah does not
+ *   edit. Uninstalling it reports that, and the Installed tab gives the
+ *   removal instruction instead of a delete button (decision D2).
  *
  * ## `listInstalled` reads FOUR sources, not one
  *
- * It used to read the six harness MCP facets alone, so the Installed tab
- * reported eight servers on a machine running about eleven. A Smithery install,
- * an in-app OAuth connection and anything the user added with `claude mcp add`
- * were each real, connected, and invisible. Every row now carries its
- * {@link McpServerOrigin}, a display label, and the {@link McpRemovalKind} that
- * says how — or whether — it can be removed. Rows are deduplicated by
- * (`serverKey`, `origin`, `configPath`, `scope`) and NOT by key alone: the same key
- * legitimately lives in several config files, and each of those is its own row.
+ * The harness MCP config files (read-only, through the facets' `inspect`),
+ * `~/.claude.json`, the Smithery manifest and the OAuth manifest. Every row
+ * carries its {@link McpServerOrigin}, a display label, and the
+ * {@link McpRemovalKind} that says how — or whether — it can be removed. Rows
+ * are deduplicated by (`serverKey`, `origin`, `configPath`, `scope`) and NOT
+ * by key alone: the same key legitimately lives in several config files, and
+ * each of those is its own row.
  *
  * claude.ai ACCOUNT connectors (Gmail, Calendar, Drive, Canva) are deliberately
  * absent. They exist nowhere on disk; the frontend derives those rows from live
  * session status, and this service stops at disk and manifest stores.
- *
- * ## The uninstall that reported success and removed nothing
- *
- * The reconciler deletes only manifest-owned keys — a key the user wrote by
- * hand is `foreign` and is never touched, which is CORRECT and did not change.
- * What was wrong is that `reconcileTargets` reported `success: true` for it,
- * because it only fails a target when a write for that exact key failed, and no
- * write was attempted. Two halves fix it: an ordinary uninstall now re-reads the
- * config and reports `success: false` when the key survived, and `force: true`
- * removes an unowned key through the facet — the same lock and the same format
- * the reconciler uses, never a hand-rolled read-modify-write.
  */
 
 import {
   createAllMcpFacets,
-  isLinkedWorktreeRoot,
   McpIntentPersistError,
   McpIntentStore,
-  resolveHarnessWorkspaceRoot,
   type HarnessReconcilerService,
   type IHarnessMcpFacet,
   type McpSourceStatus,
@@ -70,7 +59,6 @@ import {
   classifyMcpScope,
   MCP_INSTALL_RESULT_COPY,
   type CapabilityScope,
-  type HarnessTargetHealth,
   type InstalledMcpServer,
   type McpInstallResult,
   type McpInstallResultCode,
@@ -98,15 +86,6 @@ const ALL_TARGETS: McpInstallTarget[] = [
   'codex',
   'antigravity',
 ];
-
-/**
- * The fixed copy of a target skipped because the workspace is a linked git
- * worktree (#1469). Any intent change is still saved, but no config file is
- * written, updated or deleted: a worktree's config files belong to the
- * repository it shares with the main checkout.
- */
-export const MCP_LINKED_WORKTREE_SKIP_COPY =
-  'Ptah does not change MCP config files in a linked git worktree.';
 
 /** Display label per origin. One place, so the four readers cannot disagree. */
 const ORIGIN_LABELS: Record<McpServerOrigin, string> = {
@@ -178,14 +157,6 @@ export interface McpDeclarationInventory {
 /** Options for {@link McpInstallService.uninstall}. */
 export interface McpUninstallOptions {
   /**
-   * Remove a key Ptah does not own, directly through the target's facet.
-   *
-   * Only ever true behind an explicit user confirm: the entry belongs to the
-   * user, not to Ptah, and deleting it is not something a routine uninstall
-   * gets to decide.
-   */
-  force?: boolean;
-  /**
    * Which record to drop targets from. Omitted = every record this workspace
    * sees: the global one and this workspace's own.
    */
@@ -198,12 +169,14 @@ export class McpInstallService {
 
   constructor(
     /**
-     * `null` in containers that never registered `harness-sync`. Install and
-     * uninstall then record intent and report the failure per target; they do
-     * not write, because a second write path is exactly what this change
-     * removes.
+     * Unused since TASK_2026_979 B18: an install no longer reconciles, so the
+     * reconciler is not called. The parameter keeps its position only so the
+     * callers outside this batch (`mcp-directory-rpc.handlers.ts`,
+     * `plugin-rpc.handlers.ts`, `harness-mcp-install.service.ts`,
+     * `ptah-api-builder.service.ts`, `cli-agent-runtime` `di/register.ts`)
+     * compile unchanged; the P2 fix reserve (B23) drops it with them.
      */
-    private readonly reconciler: HarnessReconcilerService | null = null,
+    _reconciler: HarnessReconcilerService | null = null,
     private readonly intents: McpIntentStore = new McpIntentStore(),
     options: McpInstallServiceOptions = {},
   ) {
@@ -214,20 +187,23 @@ export class McpInstallService {
   }
 
   /**
-   * Install an MCP server to one or more targets, recorded in one scope.
+   * Record an MCP server for one or more targets, in one scope.
    *
    * `workspace` (the default) records the install against this workspace only,
-   * so no other workspace's reconcile writes it; it needs a workspace root and
-   * throws `McpIntentScopeError` before writing anything without one. `global`
-   * is the explicit opt-in that applies in every workspace. Which targets a
-   * scope may name is the caller's policy (the RPC rejects home targets for a
-   * workspace install); the store records what it is given.
+   * so the gateway serves it in this workspace alone; it needs a workspace
+   * root and throws `McpIntentScopeError` before saving anything without one.
+   * `global` is the explicit opt-in that applies in every workspace. Which
+   * targets a scope may name is the caller's policy (the RPC rejects home
+   * targets for a workspace install); the store records what it is given.
+   *
+   * No config file is written. Every target succeeds once the intent is saved,
+   * and every target fails with `intent-not-saved` when it is not.
    *
    * @param serverName - Registry name for tracking (e.g. `io.github.user/server`)
    * @param serverKey - Config key (e.g. `github`, `filesystem`)
    * @param config - Transport configuration
-   * @param targets - Which targets to install to
-   * @param workspaceRoot - The workspace the install belongs to and reconciles
+   * @param targets - Which targets to record
+   * @param workspaceRoot - The workspace the install belongs to
    * @param scope - Where the intent is recorded
    */
   async install(
@@ -238,10 +214,6 @@ export class McpInstallService {
     workspaceRoot?: string,
     scope: CapabilityScope = 'workspace',
   ): Promise<McpInstallResult[]> {
-    // Intent first: the reconciler's desired state IS this file, so recording
-    // after reconciling would make the pass a no-op. An intent that could not
-    // be saved fails every target BEFORE any write: reconciling without it
-    // would write nothing and report the targets as fine.
     try {
       this.intents.record({
         serverKey,
@@ -253,23 +225,17 @@ export class McpInstallService {
       });
     } catch (error: unknown) {
       if (!(error instanceof McpIntentPersistError)) throw error;
-      return this.intentNotSaved(targets, workspaceRoot, serverKey, error);
+      return this.intentNotSaved(targets, serverKey, error);
     }
-    return this.reconcileTargets(
-      targets,
-      workspaceRoot,
-      serverKey,
-      'mcp:install',
-    );
+    return targets.map((target) => recorded(target));
   }
 
   /**
    * Promote this workspace's install of `serverKey` to global, adding the
-   * opt-in home targets, then reconcile the current workspace for every
-   * global target. Throws `McpIntentScopeError` before writing when there is
-   * no workspace root or this workspace never recorded the server, and
-   * `McpIntentPersistError` when the change could not be saved; nothing is
-   * reconciled in either case.
+   * opt-in home targets. Throws `McpIntentScopeError` when there is no
+   * workspace root or this workspace never recorded the server, and
+   * `McpIntentPersistError` when the change could not be saved. No config
+   * file is written in any case.
    */
   async makeGlobal(
     serverKey: string,
@@ -281,12 +247,7 @@ export class McpInstallService {
       workspaceRoot,
       homeTargets,
     );
-    return this.reconcileTargets(
-      targets,
-      workspaceRoot,
-      serverKey,
-      'mcp:make-global',
-    );
+    return targets.map((target) => recorded(target));
   }
 
   /**
@@ -301,23 +262,18 @@ export class McpInstallService {
   }
 
   /**
-   * Uninstall an MCP server from one or more targets. With no targets given,
-   * every target the server was recorded against in that scope is visited.
+   * Forget an MCP server for one or more targets. With no targets given, every
+   * target the server was recorded against in that scope is visited.
    *
    * The scope is `options.scope` when given. Otherwise every record this
    * workspace sees is dropped — the global one and this workspace's own — so a
-   * bare uninstall leaves nothing that would re-add the server here. An
-   * explicit workspace scope with no root throws `McpIntentScopeError` before
-   * anything is written.
+   * bare uninstall leaves nothing that would make the gateway serve the server
+   * here. An explicit workspace scope with no root throws
+   * `McpIntentScopeError` before anything is saved.
    *
-   * Two paths, chosen by ownership rather than by the caller:
-   *
-   * - The key is manifest-owned, or `force` is false: drop the intent and
-   *   reconcile, exactly as before. The result is then VERIFIED against the
-   *   config file, so a key the reconciler correctly refused to touch is
-   *   reported as a refusal instead of a success.
-   * - `force` is true and the key is not Ptah's: delete it through the target's
-   *   facet, which owns the file's format and holds its lock.
+   * No config file is edited. A target this workspace never recorded the key
+   * for fails with copy that says so: the entry, if any, is the user's own,
+   * in a file Ptah does not edit (decision D2).
    */
   async uninstall(
     serverKey: string,
@@ -326,21 +282,16 @@ export class McpInstallService {
     options: McpUninstallOptions = {},
   ): Promise<McpInstallResult[]> {
     const scopes = this.uninstallScopes(serverKey, workspaceRoot, options);
-    const recorded = [
-      ...new Set(
-        scopes.flatMap((scope) =>
-          this.intents.targetsIn(serverKey, scope, workspaceRoot),
-        ),
+    const recordedTargets = new Set(
+      scopes.flatMap((scope) =>
+        this.intents.targetsIn(serverKey, scope, workspaceRoot),
       ),
-    ];
+    );
     const requested =
-      targets !== undefined && targets.length > 0 ? targets : recorded;
+      targets !== undefined && targets.length > 0
+        ? targets
+        : [...recordedTargets];
     const visited = requested.length > 0 ? requested : ALL_TARGETS;
-    const managed = this.intents.has(serverKey);
-
-    if (options.force === true && !managed) {
-      return this.removeUnowned(visited, workspaceRoot, serverKey);
-    }
 
     try {
       for (const scope of scopes) {
@@ -348,16 +299,12 @@ export class McpInstallService {
       }
     } catch (error: unknown) {
       if (!(error instanceof McpIntentPersistError)) throw error;
-      return this.intentNotSaved(visited, workspaceRoot, serverKey, error);
+      return this.intentNotSaved(visited, serverKey, error);
     }
-    const results = await this.reconcileTargets(
-      visited,
-      workspaceRoot,
-      serverKey,
-      'mcp:uninstall',
-    );
-    return results.map((result) =>
-      this.verifyRemoved(result, serverKey, workspaceRoot),
+    return visited.map((target) =>
+      recordedTargets.has(target)
+        ? recorded(target)
+        : notRecorded(target, serverKey),
     );
   }
 
@@ -460,8 +407,8 @@ export class McpInstallService {
   }
 
   /**
-   * The reconciler-owned config files, read in parallel through `inspect`,
-   * with each file's read status.
+   * The harness MCP config files, read (never written) in parallel through
+   * `inspect`, with each file's read status.
    */
   private async harnessConfigRows(workspaceRoot?: string): Promise<{
     rows: InstalledMcpServer[];
@@ -499,9 +446,18 @@ export class McpInstallService {
           managedByPtah,
           origin: 'harness-config',
           originLabel: ORIGIN_LABELS['harness-config'],
-          // An unowned key IS removable — but only deliberately, because
-          // deleting it is deleting something the user wrote.
-          removal: managedByPtah ? 'ptah-managed' : 'direct',
+          // A key Ptah recorded is removed by forgetting its intent. Any
+          // other key is the user's own entry in a file Ptah does not edit
+          // (decision D2), so the row says how to remove it by hand.
+          ...(managedByPtah
+            ? { removal: 'ptah-managed' as const }
+            : {
+                removal: 'none' as const,
+                removalBlockedReason: unownedConfigRemovalReason(
+                  serverKey,
+                  configPath,
+                ),
+              }),
         });
       }
     }
@@ -597,145 +553,9 @@ export class McpInstallService {
     }));
   }
 
-  /**
-   * Delete an unowned key from each requested target, through the facet.
-   *
-   * Never a hand-rolled read-modify-write: the facet owns the dialect (`agy`
-   * spells a remote endpoint `serverUrl`) and holds the per-config-file lock
-   * that stops two writers losing each other's entry.
-   */
-  private async removeUnowned(
-    targets: McpInstallTarget[],
-    workspaceRoot: string | undefined,
-    serverKey: string,
-  ): Promise<McpInstallResult[]> {
-    if (await this.inLinkedWorktree(workspaceRoot)) {
-      return this.skippedForWorktree(
-        targets,
-        workspaceRoot,
-        serverKey,
-        'mcp:force-remove',
-      );
-    }
-
-    const results: McpInstallResult[] = [];
-    for (const target of targets) {
-      const facet = this.facets.get(target);
-      const configPath = this.getConfigPath(target, workspaceRoot) ?? '';
-      if (facet === undefined || configPath === '') {
-        results.push(this.failed(target, configPath, 'config-unresolved'));
-        continue;
-      }
-
-      try {
-        await facet.remove(workspaceRoot ?? '', serverKey);
-        results.push({ target, configPath, success: true });
-      } catch (error: unknown) {
-        // degradation-audit: reported - the target fails with fixed copy and
-        // the cause goes to the host log.
-        this.options.warn?.('[mcp-install] Removing an unowned entry failed', {
-          serverKey,
-          target,
-          ...causeDetail(error),
-        });
-        results.push(this.failed(target, configPath, 'remove-failed'));
-      }
-    }
-    return results;
-  }
-
-  /**
-   * Turn a reconcile that removed nothing into an observable refusal.
-   *
-   * The reconciler reports a target healthy when no write for this key failed,
-   * and a key it declined to touch produced no write at all — so a hand-written
-   * entry survived an uninstall that returned `success: true`. Re-reading the
-   * config is the only thing that can tell "removed" from "refused".
-   */
-  private verifyRemoved(
-    result: McpInstallResult,
-    serverKey: string,
-    workspaceRoot: string | undefined,
-  ): McpInstallResult {
-    if (!result.success) return result;
-
-    const facet = this.facets.get(result.target);
-    if (facet === undefined) return result;
-
-    let stillPresent = false;
-    try {
-      stillPresent = facet.readAll(workspaceRoot ?? '').has(serverKey);
-    } catch {
-      // `readAll` promises never to throw; if it somehow does, the honest
-      // answer is the reconciler's, not a fabricated failure.
-      return result;
-    }
-    if (!stillPresent) return result;
-
-    return {
-      ...result,
-      success: false,
-      error:
-        `"${serverKey}" is still declared in ${result.configPath}: that entry ` +
-        'is user-owned, not managed by Ptah, so the reconciler left it alone. ' +
-        'Removing it needs an explicit confirmation.',
-    };
-  }
-
-  /**
-   * Whether the workspace root (as the reconciler resolves it) is a linked git
-   * worktree. In one, no MCP config file is written, updated or deleted from
-   * here (#1469): its config files belong to the shared repository.
-   */
-  private async inLinkedWorktree(
-    workspaceRoot: string | undefined,
-  ): Promise<boolean> {
-    if (workspaceRoot === undefined || workspaceRoot === '') return false;
-    return isLinkedWorktreeRoot(resolveHarnessWorkspaceRoot(workspaceRoot));
-  }
-
-  /**
-   * Every target deferred, nothing written, and the skip recorded in the host
-   * log — a skipped write must never read as a silent success.
-   */
-  private skippedForWorktree(
-    targets: readonly McpInstallTarget[],
-    workspaceRoot: string | undefined,
-    serverKey: string,
-    reason: string,
-  ): McpInstallResult[] {
-    this.options.warn?.(
-      '[mcp-install] Skipped MCP config change in a linked git worktree',
-      { serverKey, reason, targets: [...targets] },
-    );
-    return targets.map((target) => ({
-      target,
-      configPath: this.getConfigPath(target, workspaceRoot) ?? '',
-      success: false,
-      deferred: true,
-      error: MCP_LINKED_WORKTREE_SKIP_COPY,
-    }));
-  }
-
-  /** A failed target with the fixed copy for `code`. */
-  private failed(
-    target: McpInstallTarget,
-    configPath: string,
-    code: McpInstallResultCode,
-  ): McpInstallResult {
-    return {
-      target,
-      configPath,
-      success: false,
-      code,
-      error: MCP_INSTALL_RESULT_COPY[code],
-    };
-  }
-
-  /** Every target fails: the intent change was not saved, nothing was written. */
+  /** Every target fails: the intent change was not saved. */
   private intentNotSaved(
     targets: readonly McpInstallTarget[],
-    workspaceRoot: string | undefined,
     serverKey: string,
     error: McpIntentPersistError,
   ): McpInstallResult[] {
@@ -744,105 +564,70 @@ export class McpInstallService {
       ...causeDetail(error),
       cause: causeDetail(error.cause).error,
     });
-    return targets.map((target) =>
-      this.failed(
-        target,
-        this.getConfigPath(target, workspaceRoot) ?? '',
-        'intent-not-saved',
-      ),
-    );
+    return targets.map((target) => failed(target, 'intent-not-saved'));
   }
+}
 
-  /**
-   * Run one reconcile pass restricted to the affected targets and translate the
-   * health report back into the per-target results the RPC contract returns.
-   *
-   * With no folder open nothing can be reconciled, home targets included: the
-   * ownership manifest lives in the workspace (`{ws}/.ptah/harness`), and a
-   * home config entry written without one would read as the user's own at the
-   * next pass and be blocked for good. The saved intent is applied by the
-   * reconcile of the next opened folder, so every target is DEFERRED, not
-   * failed. A workspace-scoped call never gets here without a root: the store
-   * refuses it first.
-   *
-   * The no-folder branch runs before the reconciler check, so a host without
-   * a reconciler still defers every target (decision #79).
-   *
-   * Every failure carries fixed copy; the raw cause goes to `options.warn`.
-   */
-  private async reconcileTargets(
-    targets: McpInstallTarget[],
-    workspaceRoot: string | undefined,
-    serverKey: string,
-    reason: string,
-  ): Promise<McpInstallResult[]> {
-    if (workspaceRoot === undefined || workspaceRoot === '') {
-      return targets.map((target) => ({
-        target,
-        configPath: this.getConfigPath(target, workspaceRoot) ?? '',
-        success: false,
-        deferred: true,
-        code: 'deferred-no-workspace',
-        error: MCP_INSTALL_RESULT_COPY['deferred-no-workspace'],
-      }));
-    }
+/**
+ * A target whose intent change was saved. `configPath` is empty: no config
+ * file was written, the gateway serves the intent.
+ */
+function recorded(target: McpInstallTarget): McpInstallResult {
+  return { target, configPath: '', success: true };
+}
 
-    if (await this.inLinkedWorktree(workspaceRoot)) {
-      return this.skippedForWorktree(targets, workspaceRoot, serverKey, reason);
-    }
+/** A failed target with the fixed copy for `code`. */
+function failed(
+  target: McpInstallTarget,
+  code: McpInstallResultCode,
+): McpInstallResult {
+  return {
+    target,
+    configPath: '',
+    success: false,
+    code,
+    error: MCP_INSTALL_RESULT_COPY[code],
+  };
+}
 
-    if (this.reconciler === null) {
-      return targets.map((target) =>
-        this.failed(
-          target,
-          this.getConfigPath(target, workspaceRoot) ?? '',
-          'reconciler-unavailable',
-        ),
-      );
-    }
+/**
+ * A target this workspace never recorded `serverKey` for. Whatever entry
+ * carries the key is the user's own, and Ptah does not edit config files.
+ */
+function notRecorded(
+  target: McpInstallTarget,
+  serverKey: string,
+): McpInstallResult {
+  return {
+    target,
+    configPath: '',
+    success: false,
+    error: notRecordedCopy(serverKey),
+  };
+}
 
-    let health: HarnessTargetHealth[];
-    try {
-      const report = await this.reconciler.reconcile(workspaceRoot, {
-        mode: 'full',
-        targets,
-        reason,
-      });
-      health = report.targets;
-    } catch (error: unknown) {
-      // degradation-audit: reported - every target fails with fixed copy and
-      // the cause goes to the host log.
-      this.options.warn?.('[mcp-install] Reconcile failed', {
-        serverKey,
-        reason,
-        ...causeDetail(error),
-      });
-      return targets.map((target) =>
-        this.failed(
-          target,
-          this.getConfigPath(target, workspaceRoot) ?? '',
-          'reconcile-failed',
-        ),
-      );
-    }
+/** Why an unrecorded key cannot be uninstalled here, and what removes it. */
+function notRecordedCopy(serverKey: string): string {
+  return (
+    `"${serverKey}" was not installed by Ptah for this workspace, so there ` +
+    'is nothing to uninstall. Ptah does not edit MCP config files: remove ' +
+    'an entry you added yourself from the file that declares it.'
+  );
+}
 
-    return targets.map((target) => {
-      const configPath = this.getConfigPath(target, workspaceRoot) ?? '';
-      const reported = health.find((entry) => entry.target === target);
-      // A failure is attributed to THIS server only when its own key failed to
-      // write; another server's problem must not make this call look broken.
-      const failure = reported?.writeFailed.find((entry) =>
-        entry.relPath.endsWith(`#${serverKey}`),
-      );
-      if (failure === undefined) return { target, configPath, success: true };
-      this.options.warn?.('[mcp-install] Config write failed', {
-        serverKey,
-        target,
-        error: failure.reason,
-      });
-      return this.failed(target, configPath, 'write-failed');
-    });
-  }
+/**
+ * Why a harness config row Ptah never recorded has no removal path here
+ * (decision D2): the file is the user's, and Ptah no longer edits it.
+ */
+function unownedConfigRemovalReason(
+  serverKey: string,
+  configPath: string,
+): string {
+  return (
+    `"${serverKey}" is declared in ${configPath}, which Ptah did not write. ` +
+    'Ptah does not edit MCP config files: remove the entry from that file ' +
+    'by hand.'
+  );
 }
 
 /**

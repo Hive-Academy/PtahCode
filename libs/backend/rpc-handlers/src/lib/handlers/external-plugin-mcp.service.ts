@@ -6,10 +6,7 @@
  * since the marketplace shipped, the installer renders them in the consent
  * dialog and persists them in the consent record — and nothing ever installed
  * them. The user was told "this plugin will install these MCP servers", said
- * yes, and not one byte reached `.mcp.json`, `~/.codex/config.toml`,
- * `~/.copilot/mcp-config.json`, `.cursor/mcp.json` or
- * `~/.gemini/config/mcp_config.json`. No intent was recorded, so the reconciler
- * never saw them.
+ * yes, and no intent was ever recorded for them.
  *
  * ## Why this lives in `rpc-handlers` and not in `plugin-marketplace`
  *
@@ -17,29 +14,23 @@
  * depends on neither it nor `harness-sync` — its whole dependency set is
  * `shared` + `vscode-core`. Adding that edge to buy one call would put the
  * consent flow downstream of the CLI runtime. `PluginRpcHandlers` already sits
- * downstream of both and already reconciles the harness after an install, so
- * the seam was already here.
+ * downstream of both, so the seam was already here.
  *
- * ## The write path is the existing one, unchanged
+ * ## Install records intent, and the gateway serves it
  *
- * RECORD INTENT, then RECONCILE — the same two steps `mcp:install` takes.
- * Intent first is not a style choice: the reconciler's desired state IS
- * `~/.ptah/mcp-installed.json`, so reconciling before recording makes the pass
- * a no-op (`mcp-install.service.ts`). Everything downstream — ownership, the
- * per-target facets, the atomic writes, the locks — is the reconciler's, and
- * nothing here writes a config file.
+ * The same step `mcp:install` takes: record an intent in
+ * `~/.ptah/mcp-installed.json` through `McpInstallService`. Nothing here, and
+ * nothing behind it, writes a config file (TASK_2026_979 B18): Ptah's MCP
+ * gateway serves every recorded server to each session and CLI lane through
+ * its own `ptah` MCP server.
  *
- * ## Collisions are REPORTED here and REFUSED there
+ * ## Collisions are REPORTED
  *
- * A `serverKey` an unowned server already occupies must not be overwritten.
- * That rule already exists and already holds: the target classifies the key as
- * `foreign`/`blocked` and leaves the user's entry exactly as it is. What was
- * missing is that nobody TOLD the user. So this service probes the config files
- * before recording anything and turns each occupied key into a warning on the
- * install result.
- *
- * The probe answers "should I warn", never "should I write". Re-deciding
- * ownership here would be a second copy of a rule that must have exactly one.
+ * A `serverKey` an unowned entry already occupies in a config file stays the
+ * user's: Ptah does not edit that file. So this service probes the config
+ * files before recording anything and turns each occupied key into a warning
+ * on the install result. The probe answers "should I warn", never "should I
+ * record".
  */
 
 import { z } from 'zod';
@@ -109,11 +100,8 @@ export interface ExternalMcpOutcome {
  * Targets every install reaches regardless of what is installed on the machine,
  * in either scope.
  *
- * Not a policy choice — it mirrors the two targets the reconciler itself never
- * gates: `ClaudeTarget.detect()` is unconditionally `true` (Claude Code reads
- * `{ws}/.claude` in any workspace, and the SDK adapter, `ptah tui` and the
- * gateway all rely on `.mcp.json`), and the VS Code target hardcodes
- * `isInstalled: () => true` because VS Code is the host, not a binary to probe.
+ * Claude Code is always present (the SDK adapter is Ptah's own), and VS Code
+ * is a host, not a binary to probe.
  */
 const ALWAYS_INSTALLED_TARGETS: readonly McpInstallTarget[] = [
   'claude',
@@ -136,7 +124,7 @@ const DETECTED_TARGETS: readonly McpInstallTarget[] = [
  * The detected targets a WORKSPACE install may reach: the ones whose config
  * lives in the workspace folder (`.cursor/mcp.json`, `opencode.json`). Codex,
  * Copilot and Antigravity read only home-folder files that every workspace
- * shares, so writing them is a global install by another name — the same rule
+ * shares, so naming them is a global install by another name — the same rule
  * the MCP directory applies to its workspace preselection.
  */
 const WORKSPACE_DETECTED_TARGETS: readonly McpInstallTarget[] = [
@@ -171,16 +159,16 @@ export class ExternalPluginMcpService {
   ) {}
 
   /**
-   * Record an intent for every server the plugin declared, then let the
-   * reconciler write them.
+   * Record an intent for every server the plugin declared. No config file is
+   * written; the gateway serves the recorded servers.
    *
    * @param pluginId Carried into the intent store as the entry's registry name,
    *   so `~/.ptah/mcp-installed.json` says WHERE a server came from. Everything
    *   else in that file is a directory install named after a registry.
    * @param scope `workspace` records the servers for the open workspace only
    *   and needs one; with no folder open it records nothing and warns. `global`
-   *   is the user's explicit "All workspaces" choice and records without one —
-   *   the next reconcile in any workspace writes the files.
+   *   is the user's explicit "All workspaces" choice and records without one;
+   *   the gateway serves it in every workspace.
    */
   async install(
     pluginId: string,
@@ -208,7 +196,7 @@ export class ExternalPluginMcpService {
       const conflicts = occupied.get(server.name);
       if (conflicts !== undefined && conflicts.length > 0) {
         outcome.warnings.push(
-          `MCP server "${server.name}" is already defined by you in ${conflicts.join(', ')}. Ptah never overwrites an entry it does not own, so your version stays. Rename or remove it if you want the plugin’s server instead.`,
+          `MCP server "${server.name}" is already defined by you in ${conflicts.join(', ')}. Ptah does not own that entry and does not edit the file, so your version stays. Rename or remove it if you want the plugin’s server instead.`,
         );
       }
 
@@ -245,7 +233,7 @@ export class ExternalPluginMcpService {
    *
    * Called with the servers read from the consent record BEFORE the record is
    * deleted — after that there is nothing left to say which keys were the
-   * plugin's, and its entries would sit in every config file forever.
+   * plugin's, and the gateway would serve its servers forever.
    *
    * Each key is forgotten in the scope it was recorded in, as this workspace
    * sees it (`intentScopeOf`): the global record, this workspace's own, or
@@ -254,8 +242,7 @@ export class ExternalPluginMcpService {
    * touched and is reported, because forgetting it needs that folder's root.
    *
    * Runs even with no workspace open: a global record is user-wide, so
-   * forgetting it always lands; only the config-file rewrite needs a
-   * workspace, and the next reconcile in any workspace performs it.
+   * forgetting it always lands, and no config file is involved.
    */
   async uninstall(
     pluginId: string,
@@ -270,9 +257,9 @@ export class ExternalPluginMcpService {
     for (const server of declared) {
       try {
         const forgotten: CapabilityScope[] = [];
-        // The last pass's result per target wins: while the workspace record
-        // still declares the key, the global pass sees the entry kept and
-        // reports it as a refusal that the workspace pass then clears.
+        // The last pass's result per target wins: a target recorded only in
+        // the workspace record fails the global pass as "not recorded" and
+        // succeeds in the workspace pass that follows.
         const latest = new Map<McpInstallTarget, McpInstallResult>();
         // At most two passes (global, then this workspace's own); the guard on
         // `forgotten` stops a store that keeps reporting the same scope.
@@ -318,20 +305,12 @@ export class ExternalPluginMcpService {
   /**
    * `claude` + `vscode` + whichever rival CLIs are actually installed — all of
    * them for a global install, only the workspace-file ones
-   * ({@link WORKSPACE_DETECTED_TARGETS}) for a workspace install.
+   * ({@link WORKSPACE_DETECTED_TARGETS}) for a workspace install. The targets
+   * are recorded on the intent; no config file is written for any of them.
    *
-   * Deliberately NOT `HARNESS_DEFAULT_MCP_TARGETS` (`['claude','vscode']`).
-   * That default exists for the harness BUILDER, where an AI-designed preset
-   * names servers with no knowledge of the machine it will land on and two
-   * universally-writable surfaces are the honest floor. Here the install is a
-   * real user action on a real machine, and the same detector the reconciler
-   * uses is already injected — so a user whose day job is Codex or Cursor gets
-   * the plugin's servers in the tool they actually use, instead of only in the
-   * two files Ptah can always write.
-   *
-   * It is also not "all six": an undetected target is skipped by the reconciler
-   * anyway, so asking for one would make `McpInstallService` report a cheerful
-   * success for a file it never touched.
+   * Deliberately NOT `HARNESS_DEFAULT_MCP_TARGETS` (`['claude','vscode']`) and
+   * not "all six": the recorded targets name the tools on this machine, as
+   * the CLI detector sees them.
    */
   private async resolveTargets(
     scope: CapabilityScope,
@@ -358,8 +337,8 @@ export class ExternalPluginMcpService {
    * not manage — keyed by server key, valued by config path.
    *
    * `managedByPtah` is "an intent exists for this key", which is exactly the
-   * question: with no intent, whatever is in the file is the user's, and the
-   * target will refuse to touch it.
+   * question: with no intent, whatever is in the file is the user's, and Ptah
+   * does not edit it.
    */
   private async findOccupiedKeys(
     declared: readonly DeclaredMcpServer[],
@@ -373,7 +352,7 @@ export class ExternalPluginMcpService {
       installed = await this.installer.listInstalled(workspaceRoot);
     } catch (error: unknown) {
       // A probe that fails costs a warning nobody sees; it must never cost the
-      // install itself, which the reconciler will handle correctly regardless.
+      // install itself, which only records an intent.
       this.logger.debug('Could not probe MCP configs for key collisions', {
         error: error instanceof Error ? error.message : String(error),
       });
@@ -416,11 +395,12 @@ export class ExternalPluginMcpService {
     warnings: string[],
   ): void {
     for (const result of results) {
-      // A deferred result (no folder open) saved the request; the next
-      // reconcile of an opened folder writes it, so it is not a failure.
+      // A deferred result saved the request, so it is not a failure. The port
+      // keeps the shared `deferred` contract (decision row 31), though
+      // `McpInstallService` no longer defers: it records intent only.
       if (result.success || result.deferred === true) continue;
       warnings.push(
-        `MCP server "${serverKey}" could not be written to ${result.target}: ${result.error ?? 'unknown error'}`,
+        `MCP server "${serverKey}" could not be recorded for ${result.target}: ${result.error ?? 'unknown error'}`,
       );
     }
   }
