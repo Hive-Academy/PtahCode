@@ -68,26 +68,30 @@ parent is told, and a person decides the rest.
 
 Items found during P1-P3 that no phase of this program covers yet.
 
-- (a) Notes gate keyed by agent ID only (pre-existing on main). Scope the gate by parent session and
-  invocation, so a reused agent ID cannot inherit an earlier gate state.
-- (b) Tool-less resumed start frame that the executor drops (found in P1). A resumed subagent can start
-  with a frame that has no tool list, and the executor drops it.
-- (c) P3 limits:
+- (a) **Done in #1485.** Notes gate keyed by agent ID only (pre-existing on main). Scope the
+  gate by parent session and invocation, so a reused agent ID cannot inherit an earlier gate state.
+- (b) **Done in #1485.** Tool-less resumed start frame that the executor drops (found in P1). A
+  resumed subagent can start with a frame that has no tool list, and the executor drops it.
+- (c) **Done in #1485**, except the persisted child registry (see the follow-up below). P3 limits:
   - The child registry is in memory only, so it is empty after a restart.
   - Pre-dispatch claim versus outcome-unknown on restore.
   - `markDelivered` can overwrite a cancelled row.
   - Handoff reparent gap.
   - SDK alias routing and de-duplication.
-- (d) Ambient and Monitor open tasks hide a real provider hang. The watchdog counts them as open work, so
-  a hang shows only as overdue log warnings. P5 does not cover this: it renders lane notices only.
+- (d) **Done in #1483.** Ambient and Monitor open tasks hide a real provider hang. The watchdog
+  counts them as open work, so a hang shows only as overdue log warnings. P5 does not cover this: it renders lane notices only.
   The overdue callback in `session-query-executor.service.ts` still only logs. A UI notice needs a
   new path from the SDK session to the host (adapter callback, like `setCompactionStartCallback`),
   a message type and a banner in the chat view. Open for a later phase.
-- (g) SDK subagent ask and pause notices (P1) still reach only the parent text and the agent. No
-  event carries them to the renderer, so a paused subagent shows no chip. Lane notices show a chip (P5).
+- (g) **Done in #1483.** SDK subagent ask and pause notices (P1) still reach only the parent
+  text and the agent. No event carries them to the renderer, so a paused subagent shows no chip. Lane notices show a chip (P5).
 - (h) `agent-process-manager.account-binding.spec.ts` ("stays ambient when the stored lane selection
   is the default route") fails inside any linked worktree: `worktreeMainRoot` makes a second read.
   CI is not affected. Make the spec independent of the checkout location.
 - (e) A child predecessor that reached the runtime cap has no retirement timer after a cooperative
   handoff (review finding m8 in `review-P2-B.md`).
 - (f) Other minor review findings of P2 are in `review-P2-A.md` and `review-P2-B.md`.
+- (i) Persist the child registry across a restart (follow-up (c), first item). Decided: not built in
+  #1485 (option B), because it changes a storage format. The registry stays in memory, so it is empty
+  after a restart. Note: a downgrade to a build before #1485 drops parent-envelope records that carry
+  `dispatchStarted`.
