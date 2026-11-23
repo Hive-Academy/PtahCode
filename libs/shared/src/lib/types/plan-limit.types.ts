@@ -83,6 +83,12 @@ export interface PlanLimitWindow {
   readonly key: PlanWindowKey;
   readonly kind: PlanWindowKind;
   readonly label: string;
+  /**
+   * Display name of the model group the window belongs to (for example
+   * "Gemini Models"), when the provider reports its quota per group. Only a
+   * display name: never a key or an identity. `label` stays the full label.
+   */
+  readonly group?: string;
   /** Opaque key of a provider's limit bucket, when one has several. */
   readonly bucketId?: string;
   /** Safe provider cause, separate from the window's used percentage. */

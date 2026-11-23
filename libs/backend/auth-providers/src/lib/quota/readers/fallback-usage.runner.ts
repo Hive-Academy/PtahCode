@@ -42,6 +42,11 @@ export interface FallbackRequest<T> {
   readonly timeoutMs?: number;
   /** How long a successful reading is reused; defaults to `FALLBACK_CACHE_MS`. */
   readonly cacheMs?: number;
+  /**
+   * Set to `false` when the caller keeps its own failure backoff. Failures
+   * are then not cached here, so a caller-approved retry is never blocked.
+   */
+  readonly cacheFailures?: boolean;
   readonly executor: FallbackExecutor;
   readonly parse: (output: string, readAt: number) => T | undefined;
   readonly signal?: AbortSignal;
@@ -106,7 +111,7 @@ export async function runFallbackUsage<T>(request: FallbackRequest<T>): Promise<
         ['cli-timeout', 'cli-exit-error', 'cli-not-signed-in', 'cli-unavailable'].includes(result.reason)
           ? now() + FALLBACK_SHORT_BACKOFF_MS : 0;
       const settled = result.ok ? result : { ...result, retryAfter: until || now() };
-      if (until) cache.set(key, { until, result: settled });
+      if (until && (result.ok || request.cacheFailures !== false)) cache.set(key, { until, result: settled });
       return settled;
     }).finally(() => {
       flights.delete(key);

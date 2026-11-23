@@ -70,3 +70,13 @@ session list keeps its exact match.
   to account/read; the auth-file watcher remains the guard.
 - `libs/shared` dashboard-budgets.spec.ts fails 2 stack-depth tests on this
   Windows machine on main too (unrelated).
+
+## Amendment (2026-11-23, TASK_2026_2313_2af3): a kill is not billing proof
+
+A slow run at app start (file indexing, other readers) was killed after 7 s, and the
+circuit breaker disabled the source for the whole app session. New rule: only billing
+evidence (`num_turns > 0` or a non-zero counter, also in the partial stdout of a killed
+run) disables the source for the process. A kill without evidence backs off 30 s, then
+120 s; the 3rd kill in a row disables the source until a manual refresh succeeds. The
+kill window is agy's `--print-timeout` (10 s) + 3 s, and the chain budget is 22 s. See
+`.ptah/specs/TASK_2026_2313_2af3/decisions.md`.
