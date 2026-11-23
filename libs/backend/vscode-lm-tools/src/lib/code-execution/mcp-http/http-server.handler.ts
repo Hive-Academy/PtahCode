@@ -49,6 +49,27 @@ const jsonRpcEnvelopeSchema = z
   .passthrough();
 
 /**
+ * A JSON-RPC response the client sends back to a server request: an id plus
+ * exactly one of `result` or `error`, and no `method`.
+ */
+const jsonRpcClientResponseSchema = z.union([
+  z
+    .object({
+      jsonrpc: z.literal('2.0'),
+      id: z.union([z.string(), z.number(), z.null()]),
+      result: z.unknown().refine((value) => value !== undefined),
+    })
+    .strict(),
+  z
+    .object({
+      jsonrpc: z.literal('2.0'),
+      id: z.union([z.string(), z.number(), z.null()]),
+      error: z.object({ code: z.number(), message: z.string() }).passthrough(),
+    })
+    .strict(),
+]);
+
+/**
  * Configuration for the HTTP server
  */
 export interface HttpServerConfig {
@@ -508,15 +529,24 @@ async function handleHttpRequest(
 
     try {
       const json: unknown = JSON.parse(body);
+      // Streamable HTTP: a POST that carries only notifications or responses
+      // gets 202 Accepted with no body. The Claude CLI opens its standalone
+      // GET SSE stream (the `tools/list_changed` channel) only after a 202 to
+      // `notifications/initialized`; a 204 skips that step.
+      if (isAcceptOnlyBody(json)) {
+        res.writeHead(202);
+        res.end();
+        return;
+      }
       const parsed = jsonRpcEnvelopeSchema.safeParse(json);
       if (!parsed.success) {
         endInvalidRequest(res);
         return;
       }
       const id = parsed.data.id;
+      // A notification-shaped body never reaches here: isAcceptOnlyBody took it.
       if (id === undefined) {
-        res.writeHead(204);
-        res.end();
+        endInvalidRequest(res);
         return;
       }
 
@@ -753,6 +783,25 @@ function advertiseListChanged(response: MCPResponse): MCPResponse {
 
 function isPlainRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isNotificationOrResponse(message: unknown): boolean {
+  if (jsonRpcClientResponseSchema.safeParse(message).success) return true;
+  const envelope = jsonRpcEnvelopeSchema.safeParse(message);
+  return envelope.success && envelope.data.id === undefined;
+}
+
+/**
+ * True for a body that holds only JSON-RPC notifications or responses: one
+ * message, or a non-empty batch of them. A batch with any request is not
+ * accept-only; this server does not answer batched requests, so it stays a
+ * 400 Invalid Request as before.
+ */
+function isAcceptOnlyBody(json: unknown): boolean {
+  if (Array.isArray(json)) {
+    return json.length > 0 && json.every(isNotificationOrResponse);
+  }
+  return isNotificationOrResponse(json);
 }
 
 function discardBody(req: http.IncomingMessage): void {

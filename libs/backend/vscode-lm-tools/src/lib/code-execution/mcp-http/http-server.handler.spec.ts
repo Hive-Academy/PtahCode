@@ -477,7 +477,7 @@ describe('HTTP request handling', () => {
     expect(parsed.result).toEqual({ echoed: 'tools/list' });
   });
 
-  it('returns 204 for JSON-RPC notifications (no id field)', async () => {
+  it('returns 202 with no body for a JSON-RPC notification (no id field)', async () => {
     const { status, body } = await fetchPath(
       port,
       'POST',
@@ -487,9 +487,74 @@ describe('HTTP request handling', () => {
         method: 'notifications/initialized',
       }),
     );
-    expect(status).toBe(204);
+    expect(status).toBe(202);
     expect(body).toBe('');
     expect(onMCPRequest).not.toHaveBeenCalled();
+  });
+
+  it('returns 202 with no body for a batch of only notifications and responses', async () => {
+    const { status, body } = await fetchPath(
+      port,
+      'POST',
+      '/',
+      JSON.stringify([
+        { jsonrpc: '2.0', method: 'notifications/initialized' },
+        { jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 3 } },
+        { jsonrpc: '2.0', id: 'srv-1', result: {} },
+        { jsonrpc: '2.0', id: 'srv-2', error: { code: -32601, message: 'nope' } },
+      ]),
+    );
+    expect(status).toBe(202);
+    expect(body).toBe('');
+    expect(onMCPRequest).not.toHaveBeenCalled();
+  });
+
+  it('returns 202 with no body for a single JSON-RPC response', async () => {
+    const { status, body } = await fetchPath(
+      port,
+      'POST',
+      '/',
+      JSON.stringify({ jsonrpc: '2.0', id: 'srv-1', result: { ok: true } }),
+    );
+    expect(status).toBe(202);
+    expect(body).toBe('');
+    expect(onMCPRequest).not.toHaveBeenCalled();
+  });
+
+  it('keeps 400 Invalid Request for a mixed batch and an empty batch', async () => {
+    for (const batch of [
+      [
+        { jsonrpc: '2.0', method: 'notifications/initialized' },
+        { jsonrpc: '2.0', id: 7, method: 'tools/list' },
+      ],
+      [],
+    ]) {
+      const { status, body } = await fetchPath(
+        port,
+        'POST',
+        '/',
+        JSON.stringify(batch),
+      );
+      expect(status).toBe(400);
+      expect(JSON.parse(body)).toEqual({
+        jsonrpc: '2.0',
+        id: null,
+        error: { code: -32600, message: 'Invalid Request' },
+      });
+    }
+    expect(onMCPRequest).not.toHaveBeenCalled();
+  });
+
+  it('dispatches a body with an id and a method as a request, not a response', async () => {
+    const { status } = await fetchPath(
+      port,
+      'POST',
+      '/',
+      JSON.stringify({ jsonrpc: '2.0', id: 'srv-1', method: 'x', result: {} }),
+    );
+    // Has an id and a method: a request. Its stray `result` passes through
+    // the envelope, so it is dispatched like any request.
+    expect(status).toBe(200);
   });
 
   it('stamps _callerSessionId from /session/{id} URL onto request', async () => {
@@ -1479,6 +1544,46 @@ describe('GET SSE notification stream', () => {
     req.destroy();
     await waitFor(() => hub?.streamCount === 0);
     expect(hub?.keepAliveActive).toBe(false);
+  });
+
+  it('after initialize, 202s initialized and delivers list_changed on the GET stream', async () => {
+    const token = await listen(true);
+    const authorization = `Bearer ${token}`;
+    const initialize = await fetchPath(port, 'POST', '/agent/lane-a', initializeBody, {
+      authorization,
+    });
+    expect(initialize.status).toBe(200);
+    expect(JSON.parse(initialize.body).result.capabilities.tools).toEqual({
+      listChanged: true,
+    });
+
+    const initialized = await fetchPath(
+      port,
+      'POST',
+      '/agent/lane-a',
+      JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }),
+      { authorization },
+    );
+    expect(initialized.status).toBe(202);
+    expect(initialized.body).toBe('');
+
+    const { req, res, nextData } = await openStream('/agent/lane-a', {
+      accept: 'text/event-stream',
+      authorization,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.headers['content-type']).toBe('text/event-stream');
+    await waitFor(() => hub?.streamCount === 1);
+
+    // HttpMcpServerService subscribes `gateway.onToolsChanged` to exactly
+    // this call (http-mcp-server.service.ts; pinned in its spec).
+    hub?.notifyToolsChanged();
+    expect(await nextData()).toBe(
+      'data: {"jsonrpc":"2.0","method":"notifications/tools/list_changed"}\n\n',
+    );
+
+    req.destroy();
+    await waitFor(() => hub?.streamCount === 0);
   });
 
   it('answers an unauthenticated GET with 401 and opens no stream', async () => {
