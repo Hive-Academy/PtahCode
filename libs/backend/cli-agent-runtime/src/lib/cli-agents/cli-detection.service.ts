@@ -186,7 +186,7 @@ export class CliDetectionService {
     );
     this.adapters.set(
       'antigravity',
-      new AntigravityCliAdapter(this.spawner, undefined, this.logger),
+      new AntigravityCliAdapter(this.spawner, this.logger),
     );
     this.adapters.set('opencode', new OpencodeCliAdapter(this.spawner, this.logger, windowsJob));
     this.adapters.set('pi', new PiCliAdapter(this.spawner, windowsJob));
