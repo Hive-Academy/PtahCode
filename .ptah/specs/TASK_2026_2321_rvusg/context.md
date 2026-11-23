@@ -77,3 +77,15 @@ and lane-listing code as the usage work, so they ship with this task.
   source of M6 and D20.
 - TASK_2026_2309_bigdf / PR #1482 (merged 6225e966a): large-diff fallback.
 - TASK_2026_2320_lnpar: chat lane parity, including live usage.
+
+## Gate 1 answers (user, 2026-11-23)
+
+1. Spend totals: **also roll review spend into account totals** (`analytics:spendSummary`, plan-limit tiles), not only the Reviews UI and PR comment.
+2. PR comment: **tokens only**. USD appears only in local run detail.
+3. Partial usage: **yes, record it, marked partial**; run total shown with ≥.
+
+## Gate 0.1 — execution
+
+- Preference source: none found (no `ptah_memory_search` / `ptah_agent_list` tools in this host session).
+- Lanes: `disabled` (no ptah lane tools available); executors are built-in subagents.
+- Approval mode: `user`. Document reviews are same-side (reason: opposite side unavailable).
