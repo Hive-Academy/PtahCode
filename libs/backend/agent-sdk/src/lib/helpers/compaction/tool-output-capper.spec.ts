@@ -44,6 +44,7 @@ function makeCapper(
   options: {
     outliner?: CodeOutliner;
     getConfig?: () => unknown;
+    isGatewayTool?: (toolName: string) => boolean;
   } = {},
 ): { capper: ToolOutputCapper; warn: jest.Mock; getConfig: jest.Mock } {
   const warn = jest.fn();
@@ -58,7 +59,12 @@ function makeCapper(
   );
   const config = { getConfig } as unknown as CompactionConfigProvider;
   return {
-    capper: new ToolOutputCapper(logger, config, options.outliner),
+    capper: new ToolOutputCapper(
+      logger,
+      config,
+      options.outliner,
+      options.isGatewayTool,
+    ),
     warn,
     getConfig,
   };
@@ -328,6 +334,58 @@ describe('ToolOutputCapper', () => {
       capper.cap('mcp__ptah__ptah_search_files', {}, response, cwd),
     ).resolves.toBe(response);
     expect(getConfig).not.toHaveBeenCalled();
+  });
+
+  describe('gateway tools served through the ptah server', () => {
+    const HOST_TOOLS = new Set(['ptah_search_files']);
+    const isGatewayTool = (name: string): boolean =>
+      !HOST_TOOLS.has(name.replace(/^mcp__ptah__/, ''));
+
+    it('caps a gateway result when the predicate is bound', async () => {
+      const { capper } = makeCapper({ isGatewayTool });
+      const response = { content: [{ type: 'text', text: bigLog() }] };
+      const result = (await capper.cap(
+        'mcp__ptah__zernio__create_post',
+        {},
+        response,
+        cwd,
+      )) as typeof response;
+
+      expect(result).not.toBe(response);
+      expect(result.content[0].text).toContain('full output:');
+      expect(withinBudget(result.content[0].text)).toBe(true);
+    });
+
+    it('still exempts host tools when the predicate is bound', async () => {
+      const { capper, getConfig } = makeCapper({ isGatewayTool });
+      const response = { content: [{ type: 'text', text: bigLog() }] };
+
+      await expect(
+        capper.cap('mcp__ptah__ptah_search_files', {}, response, cwd),
+      ).resolves.toBe(response);
+      expect(getConfig).not.toHaveBeenCalled();
+    });
+
+    it('caps when the predicate throws (fail-closed)', () => {
+      expect(
+        ToolOutputCapper.appliesTo('mcp__ptah__ptah_search_files', () => {
+          throw new Error('registry broken');
+        }),
+      ).toBe(true);
+    });
+
+    it('keeps every ptah tool exempt when no predicate is bound', () => {
+      expect(ToolOutputCapper.appliesTo('mcp__ptah__zernio__create_post')).toBe(
+        false,
+      );
+    });
+
+    it('never asks the predicate about non-ptah tools', () => {
+      const predicate = jest.fn(() => false);
+      expect(ToolOutputCapper.appliesTo('mcp__github__x', predicate)).toBe(true);
+      expect(ToolOutputCapper.appliesTo('Write', predicate)).toBe(false);
+      expect(predicate).not.toHaveBeenCalled();
+    });
   });
 
   it('leaves tools outside its scope untouched', async () => {

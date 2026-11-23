@@ -540,7 +540,7 @@ P1 gate, run by the orchestrator after B13, before review:
 
 ### Task 8.1: Linked-worktree skip in the sweep - PENDING
 
-## Batch 9: Gateway approval gate, unattended exclusion, capper (C5, part 1) - IN_PROGRESS
+## Batch 9: Gateway approval gate, unattended exclusion, capper (C5, part 1) - COMPLETE
 
 - Id: P1-B9 | Phase: P1 | Shape: logic
 - Recommended executor: backend-developer (subagent; reason: lanes disabled)
