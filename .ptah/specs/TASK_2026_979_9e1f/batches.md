@@ -693,7 +693,7 @@ P1 gate, run by the orchestrator after B13, before review:
 
 ### Task 11.1: Status append and back-off skip - PENDING
 
-## Batch 12: Cron opt-in and run-summary warning (C9) - IN_PROGRESS
+## Batch 12: Cron opt-in and run-summary warning (C9) - COMPLETE
 
 - Id: P1-B12 | Phase: P1 | Shape: logic
 - Recommended executor: backend-developer (subagent; reason: lanes disabled)

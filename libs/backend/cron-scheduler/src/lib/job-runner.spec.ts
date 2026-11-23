@@ -29,6 +29,10 @@
 import 'reflect-metadata';
 import type { Logger } from '@ptah-extension/vscode-core';
 import { JobId, RunId } from '@ptah-extension/shared';
+import type {
+  IMcpGateway,
+  McpGatewayServerStatus,
+} from '@ptah-extension/platform-core';
 import { JobRunner } from './job-runner';
 import type { IJobStore } from './job.store';
 import type { IRunStore } from './run.store';
@@ -84,7 +88,10 @@ interface Harness {
  * @param handler - what the registry resolves for `skills:drain:frequent`.
  *   Pass `null` to leave the registry empty.
  */
-function makeHarness(handler: JobHandler | null): Harness {
+function makeHarness(
+  handler: JobHandler | null,
+  mcpGateway: IMcpGateway | null = null,
+): Harness {
   const runs = {
     tryClaim: jest.fn(() => ({
       id: RUN_ID,
@@ -138,6 +145,7 @@ function makeHarness(handler: JobHandler | null): Harness {
     logger,
     workspaceLlm,
     null,
+    mcpGateway,
   );
   return { runner, runs, jobs, internalQuery, workspaceLlm, logWithContext };
 }
@@ -444,6 +452,192 @@ describe('JobRunner prompt jobs — run session id', () => {
     expect(h.runs.markSucceeded).toHaveBeenCalledWith(
       RUN_ID,
       'claimed 1, done 1',
+    );
+  });
+});
+
+describe('JobRunner prompt jobs — connectors opt-in and MCP warning', () => {
+  function handleOf(messages: readonly unknown[]) {
+    return {
+      stream: (async function* () {
+        for (const message of messages) yield message;
+      })(),
+      close: jest.fn(),
+      abort: jest.fn(),
+    };
+  }
+
+  function promptJob(): ScheduledJob {
+    return {
+      ...drainJob(),
+      prompt: 'Summarise the repo',
+      workspaceRoot: '/ws/a',
+    };
+  }
+
+  function gatewayOf(
+    statuses: McpGatewayServerStatus[] | (() => never),
+  ): IMcpGateway & { status: jest.Mock } {
+    return {
+      registerHostToolNames: jest.fn(),
+      isGatewayTool: jest.fn(() => false),
+      listTools: jest.fn(async () => []),
+      callTool: jest.fn(),
+      status: jest.fn(
+        typeof statuses === 'function' ? statuses : () => statuses,
+      ),
+      servedFileServerNames: jest.fn(async () => []),
+      onToolsChanged: jest.fn(() => ({ dispose: jest.fn() })),
+      dispose: jest.fn(),
+    };
+  }
+
+  const init = (servers: unknown[]) => ({
+    type: 'system',
+    subtype: 'init',
+    session_id: 'sess-1',
+    mcp_servers: servers,
+  });
+
+  it('opts the one-shot run in to connectors', async () => {
+    const h = makeHarness(null);
+    h.internalQuery.execute.mockResolvedValue(
+      handleOf([{ type: 'result', subtype: 'success', result: 'done' }]),
+    );
+
+    await h.runner.run(promptJob(), 1_700_000_000_000);
+
+    expect(h.internalQuery.execute.mock.calls[0][0].includeConnectors).toBe(
+      true,
+    );
+    expect(h.runs.markSucceeded).toHaveBeenCalledWith(RUN_ID, 'done');
+  });
+
+  it('names a needs-auth init server and a cold-start pending gateway server', async () => {
+    const gateway = gatewayOf([
+      {
+        key: 'https://ok.example/mcp',
+        display: 'ok-server',
+        status: 'connected',
+      },
+      {
+        key: 'https://slow.example/mcp',
+        display: 'slow-server',
+        status: 'pending',
+        detail: 'tools/list timed out after 12s',
+      },
+    ]);
+    const h = makeHarness(null, gateway);
+    h.internalQuery.execute.mockResolvedValue(
+      handleOf([
+        init([
+          { name: 'ptah', status: 'connected' },
+          { name: 'off-server', status: 'disabled' },
+          { name: 'linear', status: 'needs-auth' },
+        ]),
+        { type: 'result', subtype: 'success', result: 'done' },
+      ]),
+    );
+
+    await h.runner.run(promptJob(), 1_700_000_000_000);
+
+    expect(gateway.status).toHaveBeenCalledWith({
+      kind: 'internal-query',
+      capability: 'privileged',
+      includeConnectors: true,
+      workspaceRoot: '/ws/a',
+    });
+    expect(h.runs.markSucceeded).toHaveBeenCalledWith(
+      RUN_ID,
+      'done\n[warning] MCP unavailable: linear(needs-auth), ' +
+        'slow-server(pending: tools/list timed out after 12s)',
+    );
+    expect(h.runs.markFailed).not.toHaveBeenCalled();
+    expect(h.runs.markSkipped).not.toHaveBeenCalled();
+  });
+
+  it('carries the failed init server error as detail and dedups by name', async () => {
+    const gateway = gatewayOf([
+      { key: 'k', display: 'broken', status: 'failed', detail: 'gateway copy' },
+    ]);
+    const h = makeHarness(null, gateway);
+    h.internalQuery.execute.mockResolvedValue(
+      handleOf([
+        init([{ name: 'broken', status: 'failed', error: 'spawn ENOENT' }]),
+        { type: 'result', subtype: 'success', result: 'done' },
+      ]),
+    );
+
+    await h.runner.run(promptJob(), 1_700_000_000_000);
+
+    expect(h.runs.markSucceeded).toHaveBeenCalledWith(
+      RUN_ID,
+      'done\n[warning] MCP unavailable: broken(failed: spawn ENOENT)',
+    );
+  });
+
+  it('caps the base at 500 and the warning at 300 characters', async () => {
+    const gateway = gatewayOf(
+      Array.from({ length: 40 }, (_, i) => ({
+        key: `k${i}`,
+        display: `server-${i}`,
+        status: 'failed' as const,
+        detail: 'connection refused',
+      })),
+    );
+    const h = makeHarness(null, gateway);
+    h.internalQuery.execute.mockResolvedValue(
+      handleOf([
+        { type: 'result', subtype: 'success', result: 'x'.repeat(900) },
+      ]),
+    );
+
+    await h.runner.run(promptJob(), 1_700_000_000_000);
+
+    const summary = h.runs.markSucceeded.mock.calls[0][1] as string;
+    expect(summary.slice(0, 500)).toBe('x'.repeat(500));
+    const warning = summary.slice(500);
+    expect(warning.startsWith('\n[warning] MCP unavailable: server-0(')).toBe(
+      true,
+    );
+    expect(warning).toHaveLength(300);
+    expect(summary).toHaveLength(800);
+  });
+
+  it('leaves the summary unchanged when every server is connected', async () => {
+    const gateway = gatewayOf([
+      { key: 'k', display: 'ok-server', status: 'connected' },
+    ]);
+    const h = makeHarness(null, gateway);
+    h.internalQuery.execute.mockResolvedValue(
+      handleOf([
+        init([{ name: 'ptah', status: 'connected' }]),
+        { type: 'result', subtype: 'success', result: 'done' },
+      ]),
+    );
+
+    await h.runner.run(promptJob(), 1_700_000_000_000);
+
+    expect(h.runs.markSucceeded).toHaveBeenCalledWith(RUN_ID, 'done');
+  });
+
+  it('a throwing gateway status is logged and keeps the run succeeded', async () => {
+    const statusError = new Error('cache unavailable');
+    const gateway = gatewayOf(() => {
+      throw statusError;
+    });
+    const h = makeHarness(null, gateway);
+    h.internalQuery.execute.mockResolvedValue(
+      handleOf([{ type: 'result', subtype: 'success', result: 'done' }]),
+    );
+
+    await h.runner.run(promptJob(), 1_700_000_000_000);
+
+    expect(h.runs.markSucceeded).toHaveBeenCalledWith(RUN_ID, 'done');
+    expect(h.logWithContext).toHaveBeenCalledWith(
+      'warn',
+      '[cron-scheduler] could not read MCP gateway status',
+      { error: statusError, metadata: { jobId: JOB_ID, runId: RUN_ID } },
     );
   });
 });
