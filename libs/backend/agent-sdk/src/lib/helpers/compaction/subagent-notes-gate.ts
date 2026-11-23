@@ -6,6 +6,7 @@ import {
 } from '@ptah-extension/shared';
 import { insideNotesWorkspace } from './subagent-notes-path';
 import { summarizeSubagentPaths } from './subagent-path-summary';
+import { rekeyScopedMap, scopedKeyBelongsToSession } from './subagent-scope-key';
 
 /** One generous bound, measured from entry, never from tool calls or denials. */
 export const NOTES_GATE_TIMEOUT_MS = 10 * 60_000;
@@ -27,9 +28,12 @@ export interface SubagentGateOptions {
   readonly notesPath?: string;
   readonly deliverablePaths?: readonly string[];
   readonly now?: number;
+  /** The Agent tool call that owns the gate. A different owner replaces an existing entry. */
+  readonly invocation?: string;
 }
 
 interface GateEntry {
+  readonly invocation?: string;
   readonly readOnly: boolean;
   readonly notesPath?: string;
   readonly workspace?: string;
@@ -52,10 +56,15 @@ export interface GateDecision { readonly reason?: string; }
 export class SubagentNotesGate {
   private readonly entries = new Map<string, GateEntry>();
 
-  /** Idempotent. Without `notesPath` and `workspace` the agent reports inline and gets no write rights. */
+  /**
+   * Idempotent for the same owner. An entry of another invocation is stale (a reused agent id)
+   * and is replaced, so the new invocation never inherits its phase.
+   * Without `notesPath` and `workspace` the agent reports inline and gets no write rights.
+   */
   enter(agentId: string, opts: SubagentGateOptions): void {
-    if (this.entries.has(agentId)) return;
-    const base = { readOnly: opts.readOnly, startedAt: opts.now ?? Date.now(), written: new Set<string>(), phase: 'asked' as const, overdueNotified: false };
+    const existing = this.entries.get(agentId);
+    if (existing && (opts.invocation === undefined || existing.invocation === undefined || existing.invocation === opts.invocation)) return;
+    const base = { invocation: opts.invocation, readOnly: opts.readOnly, startedAt: opts.now ?? Date.now(), written: new Set<string>(), phase: 'asked' as const, overdueNotified: false };
     if (!opts.notesPath || !opts.workspace) {
       this.entries.set(agentId, { ...base, permittedPaths: [] });
       return;
@@ -79,7 +88,18 @@ export class SubagentNotesGate {
 
   phase(agentId: string | undefined): SubagentGatePhase | undefined { return agentId ? this.entries.get(agentId)?.phase : undefined; }
   has(agentId: string | undefined): boolean { return !!agentId && this.entries.has(agentId); }
-  finish(agentId: string): void { this.entries.delete(agentId); }
+  /** Without `invocation` the entry always ends; with it only the owning invocation ends it. */
+  finish(agentId: string, invocation?: string): void {
+    const entry = this.entries.get(agentId);
+    if (!entry || (invocation !== undefined && entry.invocation !== undefined && entry.invocation !== invocation)) return;
+    this.entries.delete(agentId);
+  }
+  owner(agentId: string): string | undefined { return this.entries.get(agentId)?.invocation; }
+  keys(): string[] { return [...this.entries.keys()]; }
+  rekey(from: string, to: string): void { rekeyScopedMap(this.entries, from, to); }
+  release(sessionId: string): void {
+    for (const key of [...this.entries.keys()]) if (scopedKeyBelongsToSession(key, sessionId)) this.entries.delete(key);
+  }
   paths(agentId: string): readonly string[] { return this.entries.get(agentId)?.permittedPaths ?? []; }
 
   /** True once the handoff has been outstanding for the overdue window. Informational only. */

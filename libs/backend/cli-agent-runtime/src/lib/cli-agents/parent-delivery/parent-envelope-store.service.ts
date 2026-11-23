@@ -61,6 +61,8 @@ export interface ParentDeliveryEnvelope {
   readonly nextRetryAt?: number;
   readonly attemptId?: string;
   readonly everDispatched?: boolean;
+  /** See the record schema: `false` while a claim has not reached the adapter call. */
+  readonly dispatchStarted?: boolean;
   readonly bodyBytes: number;
   readonly deliveredAt?: number;
   readonly cancelledAt?: number;
@@ -255,9 +257,24 @@ export class ParentEnvelopeStoreService implements ParentEnvelopeStore {
         attempts: existing.attempts + 1,
         attemptId: randomUUID(),
         everDispatched: true,
+        dispatchStarted: false,
         nextRetryAt: undefined,
         waitingReason: undefined,
       });
+    });
+  }
+
+  /**
+   * Durable mark, written before the adapter call: from here a restart cannot tell whether the
+   * parent got the message. Applies only to the live claim `attemptId`; `undefined` otherwise.
+   */
+  async markDispatching(id: string, attemptId: string | undefined): Promise<ParentDeliveryEnvelope | undefined> {
+    await this.restore();
+    return this.serialize(async () => {
+      const existing = this.findById(id);
+      if (!existing || existing.state !== 'sending' || existing.attemptId !== attemptId) return undefined;
+      if (existing.dispatchStarted === true) return existing;
+      return this.replaceLocked(existing, { dispatchStarted: true });
     });
   }
 
@@ -266,6 +283,12 @@ export class ParentEnvelopeStoreService implements ParentEnvelopeStore {
     return this.serialize(async () => {
       const existing = this.entries.get(dedupeKey);
       if (!existing) return undefined;
+      // A cancel that landed while the send was in flight stays the final state: the person's
+      // decision is not overwritten. The send did happen, so the row records that fact.
+      if (existing.state === 'cancelled') {
+        if (existing.deliveredAt !== undefined) return existing;
+        return this.replaceLocked(existing, { deliveredAt: Date.now(), lastError: 'delivered-after-cancel' });
+      }
       const delivered = await this.replaceLocked(existing, {
         state: 'delivered', deliveredAt: Date.now(), lastError: undefined,
         nextRetryAt: undefined, waitingReason: undefined,
@@ -293,7 +316,7 @@ export class ParentEnvelopeStoreService implements ParentEnvelopeStore {
       // A send result applies only to an in-flight attempt; a concurrent cancel stays cancelled.
       if (!existing || existing.state !== 'sending') return undefined;
       return this.replaceLocked(existing, {
-        state: 'blocked-retryable', lastError: reason,
+        state: 'blocked-retryable', lastError: reason, dispatchStarted: undefined,
         nextRetryAt: Date.now() + delayMs, waitingReason: undefined,
       });
     });
@@ -378,7 +401,7 @@ export class ParentEnvelopeStoreService implements ParentEnvelopeStore {
       if (existing.state === 'delivered' || existing.state === 'cancelled') return existing;
       return this.replaceLocked(existing, {
         state: 'pending', nextRetryAt: undefined, lastError: undefined,
-        waitingReason: undefined,
+        waitingReason: undefined, dispatchStarted: undefined,
       });
     });
   }
@@ -398,6 +421,40 @@ export class ParentEnvelopeStoreService implements ParentEnvelopeStore {
       }
       await this.moveParentShardLocked(PARENT_COMPLETION_OUTBOX_PREFIX, tabId, sessionId);
       await this.moveParentShardLocked(PARENT_COMPLETION_KEYS_PREFIX, tabId, sessionId);
+    });
+  }
+
+  /**
+   * Readdresses an unsent row to `parentSessionId` (a handoff reparented the child, so the
+   * recipient's successor now owns it). Keeps the dedupe key, id and body; the row becomes
+   * `pending` again. Returns `undefined` when the row is gone, was already sent or cancelled,
+   * or either parent is frozen.
+   */
+  async rerouteReport(id: string, parentSessionId: string): Promise<ParentDeliveryEnvelope | undefined> {
+    await this.restore();
+    return this.serialize(async () => {
+      const existing = this.findById(id);
+      if (!existing || (existing.state !== 'pending' && existing.state !== 'blocked-retryable')) return undefined;
+      if (existing.parentSessionId === parentSessionId) return existing;
+      if (this.isParentFrozen(existing.parentSessionId) || this.isParentFrozen(parentSessionId)) return undefined;
+      const bodyKey = `${PARENT_ENVELOPE_BODY_PREFIX}${existing.id}`;
+      const body = ParentEnvelopeBodySchema.safeParse(this.storage.get<unknown>(bodyKey));
+      if (body.success) await this.storage.update(bodyKey, { ...body.data, parentSessionId });
+      try {
+        return await this.replaceLocked(existing, {
+          parentSessionId, state: 'pending', nextRetryAt: undefined, lastError: undefined,
+          waitingReason: undefined,
+        });
+      } catch (error: unknown) {
+        // The index write failed: put the body back so it still names the recorded parent.
+        if (body.success) {
+          try { await this.storage.update(bodyKey, body.data); }
+          catch (restoreError: unknown) {
+            this.logger.error('[ParentEnvelopeStore] Reroute body restore failed', this.error(restoreError));
+          }
+        }
+        throw error;
+      }
     });
   }
 
@@ -637,12 +694,21 @@ export class ParentEnvelopeStoreService implements ParentEnvelopeStore {
         malformed++;
         continue;
       }
-      const restored = parsed.data.state === 'sending' ? {
-        ...parsed.data,
-        state: 'outcome-unknown' as const,
-        lastError: 'host-restarted',
-        updatedAt: Date.now(),
-      } : parsed.data;
+      const restored = parsed.data.state !== 'sending' ? parsed.data
+        : parsed.data.dispatchStarted === false ? {
+          // Claimed but never handed to the adapter: nothing was sent, so it is safe to send again.
+          ...parsed.data,
+          state: 'blocked-retryable' as const,
+          lastError: 'host-restarted-before-send',
+          nextRetryAt: Date.now(),
+          dispatchStarted: undefined,
+          updatedAt: Date.now(),
+        } : {
+          ...parsed.data,
+          state: 'outcome-unknown' as const,
+          lastError: 'host-restarted',
+          updatedAt: Date.now(),
+        };
       this.entries.set(restored.dedupeKey, restored);
     }
     await this.reindexOrphansLocked();

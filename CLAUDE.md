@@ -70,11 +70,15 @@ main agent, every subagent and every CLI lane. Repeat them in any task prompt yo
 ## Git: start every task in its own worktree
 
 - Start a new task in this order, before you write any file for it:
-  1. Create the worktree on a new branch from `main`. Prefer `ptah_git_worktree_add`, which
+  1. Update local `main` first: in the main checkout run `git fetch origin` and
+     `git merge --ff-only origin/main`. A worktree or child session made from a stale `main`
+     misses merged work. `ptah_session_start` and `ptah_git_worktree_add` branch from local
+     `main`; to be safe, also pass `baseRef: origin/main` to `ptah_session_start`.
+  2. Create the worktree on a new branch from `main`. Prefer `ptah_git_worktree_add`, which
      links the worktree to the chat session. Otherwise run
      `git worktree add -b <type>/<short-name> .claude-worktrees/<short-name> main`.
      `.claude-worktrees/` is git-ignored. Keep `<type>` to the commit type (`fix`, `feat`, ...).
-  2. Create the task folder inside that worktree: `ptah_task_create { worktreePath }`, or
+  3. Create the task folder inside that worktree: `ptah_task_create { worktreePath }`, or
      `.ptah/specs/<TASK_ID>/` under the worktree by hand.
 - Never create task files (`.ptah/specs/**`) or task changes in the main checkout.
 - Make every edit, check and commit of the task inside that worktree. The main checkout stays
