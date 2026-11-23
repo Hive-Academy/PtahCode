@@ -18,12 +18,17 @@ export { ReviewQueryRepository } from './lib/persistence/review-query.repository
 export type { IReviewQueryRepository } from './lib/persistence/review-query.repository';
 export { ReviewSettingsStore } from './lib/persistence/review-settings.store';
 export type { IReviewSettingsStore } from './lib/persistence/review-settings.store';
+export { ReviewLaneSettingsStore, REVIEW_LANE_SETTINGS_KEY, REVIEW_LANE_SETTINGS_VERSION } from './lib/persistence/review-lane-settings.store';
+export type { IReviewLaneSettingsStore } from './lib/persistence/review-lane-settings.store';
 export { ReviewArtifactReader } from './lib/persistence/review-artifact.reader';
 export type { IReviewArtifactReader } from './lib/persistence/review-artifact.reader';
 export type { IReviewSecretPresence } from './lib/persistence/review-secret-presence.port';
 export * from './lib/lanes/review-lane-selector';
 export * from './lib/lanes/review-lane-admission.service';
 export * from './lib/lanes/review-lane.runner';
+export * from './lib/lanes/review-lane-selection';
+export * from './lib/lanes/review-lane-attempt';
+export * from './lib/lanes/review-lane-selection.service';
 export * from './lib/lanes/review-output.parser';
 export * from './lib/context/review-context.ports';
 export * from './lib/context/review-worktree.service';

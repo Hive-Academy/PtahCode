@@ -3,6 +3,8 @@ export const REVIEW_CORE_TOKENS = {
   REVIEW_REPOSITORY: Symbol.for('ReviewRepository'),
   QUERY_REPOSITORY: Symbol.for('ReviewQueryRepository'),
   SETTINGS_STORE: Symbol.for('ReviewSettingsStore'),
+  LANE_SETTINGS_STORE: Symbol.for('ReviewLaneSettingsStore'),
+  LANE_SELECTION: Symbol.for('ReviewLaneSelectionService'),
   ARTIFACT_READER: Symbol.for('ReviewArtifactReader'),
   SECRET_PRESENCE: Symbol.for('ReviewSecretPresence'),
   CLOCK: Symbol.for('ReviewClock'),

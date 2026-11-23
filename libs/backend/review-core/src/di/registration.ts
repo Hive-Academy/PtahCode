@@ -5,9 +5,11 @@ import { ReviewQueueService } from '../lib/review-queue.service';
 import { SqliteReviewRepository } from '../lib/persistence/sqlite-review.repository';
 import { ReviewQueryRepository } from '../lib/persistence/review-query.repository';
 import { ReviewSettingsStore } from '../lib/persistence/review-settings.store';
+import { ReviewLaneSettingsStore } from '../lib/persistence/review-lane-settings.store';
 import { ReviewArtifactReader } from '../lib/persistence/review-artifact.reader';
 import { ReviewLaneAdmissionService, REVIEW_LANE_TOKENS } from '../lib/lanes/review-lane-admission.service';
 import { ReviewLaneRunner } from '../lib/lanes/review-lane.runner';
+import { ReviewLaneSelectionService } from '../lib/lanes/review-lane-selection.service';
 import { ReviewWorktreeService } from '../lib/context/review-worktree.service';
 import { ReviewContextService } from '../lib/context/review-context.service';
 import { IncrementalScopeService } from '../lib/context/incremental-scope.service';
@@ -31,7 +33,8 @@ import { ReviewStatusCoordinatorService } from '../lib/status/review-status-coor
 /**
  * The host registers REVIEW_LANE_TOKENS.GATEWAY, REVIEW_LANE_TOKENS.FILES,
  * REVIEW_CONTEXT_TOKENS.COMMAND_RUNNER and REVIEW_CONTEXT_TOKENS.FILES (P1-16)
- * before it resolves the lane runner or the context services.
+ * before it resolves the lane runner or the context services. The lane settings store reads
+ * PLATFORM_TOKENS.STATE_STORAGE (global state).
  */
 export function registerReviewCore(container: DependencyContainer): void {
   container.registerSingleton(SqliteReviewRepository);
@@ -39,6 +42,8 @@ export function registerReviewCore(container: DependencyContainer): void {
   container.register(REVIEW_CORE_TOKENS.QUERY_REPOSITORY, { useToken: ReviewQueryRepository });
   container.registerSingleton(ReviewSettingsStore);
   container.register(REVIEW_CORE_TOKENS.SETTINGS_STORE, { useToken: ReviewSettingsStore });
+  container.registerSingleton(ReviewLaneSettingsStore);
+  container.register(REVIEW_CORE_TOKENS.LANE_SETTINGS_STORE, { useToken: ReviewLaneSettingsStore });
   container.registerSingleton(ReviewArtifactReader);
   container.register(REVIEW_CORE_TOKENS.ARTIFACT_READER, { useToken: ReviewArtifactReader });
   container.register(REVIEW_CORE_TOKENS.REVIEW_REPOSITORY, { useToken: SqliteReviewRepository });
@@ -58,6 +63,8 @@ export function registerReviewCore(container: DependencyContainer): void {
   });
   container.registerSingleton(ReviewLaneAdmissionService);
   container.register(REVIEW_LANE_TOKENS.ADMISSION, { useToken: ReviewLaneAdmissionService });
+  container.registerSingleton(ReviewLaneSelectionService);
+  container.register(REVIEW_CORE_TOKENS.LANE_SELECTION, { useToken: ReviewLaneSelectionService });
   container.registerSingleton(ReviewLaneRunner);
   container.registerSingleton(ReviewWorktreeService);
   container.registerSingleton(ReviewContextService);
