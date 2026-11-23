@@ -4165,6 +4165,7 @@ const RPC_METHOD_ENTRIES: Record<RpcMethodName, true> = {
   'review:listFindings': true,
   'review:listRepositories': true,
   'review:getSettings': true,
+  'review:listLanes': true,
   'review:updateSettings': true,
   'review:setPublicationPause': true,
   'review:retryHead': true,

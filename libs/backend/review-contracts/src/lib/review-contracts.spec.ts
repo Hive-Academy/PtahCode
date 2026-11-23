@@ -255,3 +255,51 @@ describe('review failure contract', () => {
     expect(ReviewFailureSchema.safeParse({ ...failure, message: 'x'.repeat(301) }).success).toBe(false);
   });
 });
+
+describe('review lane RPC contracts', () => {
+  const settings = {
+    repositories: [],
+    maintainerLogins: [],
+    pollMinutes: 30,
+    globalPublicationPaused: true,
+    laneCapPerPr: 6,
+    confidenceFloor: 0.8,
+    maxNewInline: 10,
+    fallbackFamilies: [],
+  };
+  const lanes = { pool: [{ lane: 'codex', model: 'gpt-5.3-codex' }], pins: { verifier: { lane: 'claude', model: null } } };
+  const read = { settings: null, hasToken: false, tokenStorage: 'encrypted' } as const;
+
+  it('keeps lanes optional on getSettings and updateSettings (A14)', () => {
+    expect(ReviewRpcSchemas['review:getSettings'].result.safeParse(read).success).toBe(true);
+    expect(ReviewRpcSchemas['review:getSettings'].result.safeParse({ ...read, lanes }).success).toBe(true);
+    expect(ReviewRpcSchemas['review:updateSettings'].params.safeParse({ settings }).success).toBe(true);
+    expect(ReviewRpcSchemas['review:updateSettings'].params.safeParse({ settings, lanes }).success).toBe(true);
+    expect(ReviewRpcSchemas['review:updateSettings'].result.safeParse(settings).success).toBe(true);
+  });
+
+  it('rejects invalid lanes in an update', () => {
+    const params = ReviewRpcSchemas['review:updateSettings'].params;
+    expect(params.safeParse({ settings, lanes: { pool: [lanes.pool[0], lanes.pool[0]], pins: {} } }).success).toBe(false);
+    expect(params.safeParse({ settings, lanes: { pool: [], pins: { coordinator: lanes.pins.verifier } } }).success).toBe(false);
+  });
+
+  it('describes the lane listing', () => {
+    const schema = ReviewRpcSchemas['review:listLanes'];
+    expect(schema.params.safeParse({}).success).toBe(true);
+    expect(schema.params.safeParse({ refresh: true }).success).toBe(false);
+    const listing = {
+      lanes: [{
+        id: 'ptah-cli:pc-1',
+        label: 'My CLI',
+        family: 'claude',
+        limitState: 'unknown',
+        catalog: { status: 'failed', models: [], truncated: false, verifiable: false },
+      }],
+      blockedModels: ['gpt-5.3-codex'],
+    };
+    expect(schema.result.safeParse(listing).success).toBe(true);
+    expect(schema.result.safeParse({ ...listing, extra: 1 }).success).toBe(false);
+    expect(schema.result.safeParse({ ...listing, lanes: [{ ...listing.lanes[0], limitState: 'busy' }] }).success).toBe(false);
+  });
+});

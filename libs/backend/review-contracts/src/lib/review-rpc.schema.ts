@@ -9,6 +9,10 @@ import {
   ReviewRunSchema,
   ReviewStateSchema,
 } from './review-run.schema';
+import {
+  ReviewLaneListingSchema,
+  ReviewLaneSettingsSchema,
+} from './review-lanes.schema';
 
 const noParams = z.object({}).strict();
 export const REVIEW_TRIAGE_ACCEPTED_MARKER = '<!-- ptah-review-triage:accepted -->';
@@ -25,6 +29,8 @@ export const ReviewSettingsReadSchema = z
     settings: OperatorSettingsSchema.nullable(),
     hasToken: z.boolean(),
     tokenStorage: z.enum(['encrypted', 'plaintext']),
+    /** Lane pool and pins. Optional on the wire; the handler always sends it (plan A14). */
+    lanes: ReviewLaneSettingsSchema.optional(),
   })
   .strict();
 export const ReviewSettingsUpdateSchema = z
@@ -41,6 +47,8 @@ export const ReviewSettingsUpdateSchema = z
       })
       .strict()
       .optional(),
+    /** Absent keeps the stored lane pool and pins. */
+    lanes: ReviewLaneSettingsSchema.optional(),
   })
   .strict();
 export const ReviewRpcSchemas = {
@@ -84,6 +92,7 @@ export const ReviewRpcSchemas = {
     result: z.array(RepositorySettingsSchema).max(100),
   },
   'review:getSettings': { params: noParams, result: ReviewSettingsReadSchema },
+  'review:listLanes': { params: noParams, result: ReviewLaneListingSchema },
   'review:updateSettings': {
     params: ReviewSettingsUpdateSchema,
     result: OperatorSettingsSchema,
