@@ -38,6 +38,7 @@ import { existsSync, readFileSync } from 'fs';
 import { join, posix } from 'path';
 import type { Logger } from '@ptah-extension/vscode-core';
 import { atomicWriteWithRetry } from '../fs/atomic-write';
+import { isLinkedWorktreeRootSync } from '../workspace/linked-worktree';
 import { HarnessStateStore } from './harness-state-store';
 
 export const GITIGNORE_BEGIN = '# ptah:harness:begin';
@@ -56,11 +57,16 @@ export type GitignoreOutcome =
   | 'nothing-to-ignore'
   | 'disabled'
   | 'removed-by-user'
+  | 'linked-worktree'
   | 'failed';
 
 export interface GitignoreResult {
   outcome: GitignoreOutcome;
-  /** Patterns in the block after this pass. Empty unless `written`/`unchanged`. */
+  /**
+   * Patterns in the block after this pass. Empty unless `written`/`unchanged`.
+   * `linked-worktree` means the root is a linked git worktree and the file
+   * was not read or written.
+   */
   patterns: string[];
   /** Narrowed message; only set for `failed`. */
   reason?: string;
@@ -124,6 +130,20 @@ export class HarnessGitignoreWriter {
     dirs: readonly string[],
     skillPaths: readonly string[] = [],
   ): GitignoreResult {
+    // A linked worktree's `.gitignore` is a TRACKED file of the shared
+    // repository (#1469). Rebuilding the block there turns a change in which
+    // CLIs this pass detected into an uncommitted diff on the task branch, so
+    // the main checkout is the one place the block is maintained. Checked
+    // before the state store too: nothing about this workspace is recorded,
+    // so a toggle or a deletion is still read correctly in the main checkout.
+    if (isLinkedWorktreeRootSync(workspaceRoot)) {
+      this.logger.debug(
+        '[harness-sync] linked git worktree; leaving .gitignore alone',
+        { workspaceRoot },
+      );
+      return { outcome: 'linked-worktree', patterns: [] };
+    }
+
     const enabled = this.readSetting();
     const state = this.stateStore.load(workspaceRoot);
 

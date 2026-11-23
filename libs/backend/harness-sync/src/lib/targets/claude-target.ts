@@ -75,6 +75,8 @@ import {
   retiredSourceItemId,
   type GitTrackingProbe,
 } from './retirement-proof';
+import { isLinkedWorktreeRoot } from '../workspace/linked-worktree';
+import { keepsTrackedCopy } from './linked-worktree-guard';
 
 const SKILLS_REL = '.claude/skills';
 const COMMANDS_REL = '.claude/commands';
@@ -378,6 +380,7 @@ export class ClaudeTarget implements IHarnessTarget {
       writeFailed: [],
       keptLocalEdit: [],
     };
+    const linkedWorktree = await isLinkedWorktreeRoot(workspaceRoot);
 
     // Junctions first: a desired slug whose copy is about to be written must
     // not still be a link, or the copy would land inside the SOURCE directory.
@@ -399,6 +402,17 @@ export class ClaudeTarget implements IHarnessTarget {
 
     for (const removal of plan.removals) {
       if (removal.kind === 'mcp') continue;
+      if (
+        await keepsTrackedCopy(
+          linkedWorktree,
+          workspaceRoot,
+          removal.relPath,
+          this.probeGitTracking,
+        )
+      ) {
+        (result.releasedTracked ??= []).push(removal.relPath);
+        continue;
+      }
       if (removal.retiredItemId !== undefined) {
         await removeRetiredCopy({
           workspaceRoot,
@@ -437,7 +451,13 @@ export class ClaudeTarget implements IHarnessTarget {
 
     for (const write of plan.writes) {
       if (write.kind === 'mcp') continue;
-      await this.applyWrite(write, workspaceRoot, plan.baseEntries, result);
+      await this.applyWrite(
+        write,
+        workspaceRoot,
+        plan.baseEntries,
+        result,
+        linkedWorktree,
+      );
     }
 
     await applyMcpFacet(
@@ -489,8 +509,21 @@ export class ClaudeTarget implements IHarnessTarget {
     workspaceRoot: string,
     baseEntries: ManagedEntries,
     result: HarnessApplyResult,
+    linkedWorktree: boolean,
   ): Promise<void> {
     const owned = baseEntries[write.relPath];
+    if (
+      write.reason === 'update' &&
+      (await keepsTrackedCopy(
+        linkedWorktree,
+        workspaceRoot,
+        write.relPath,
+        this.probeGitTracking,
+      ))
+    ) {
+      (result.releasedTracked ??= []).push(write.relPath);
+      return;
+    }
     if (write.reason === 'update' && owned !== undefined) {
       const gate = await prepareOwnedOverwrite({
         workspaceRoot,

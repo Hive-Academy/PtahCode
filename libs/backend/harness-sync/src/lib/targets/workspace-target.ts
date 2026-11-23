@@ -99,6 +99,8 @@ import {
   retiredSourceItemId,
   type GitTrackingProbe,
 } from './retirement-proof';
+import { isLinkedWorktreeRoot } from '../workspace/linked-worktree';
+import { keepsTrackedCopy } from './linked-worktree-guard';
 import type { IHarnessAgentTransformer } from './transformers/agent-transformer.port';
 
 /**
@@ -315,11 +317,23 @@ export class WorkspaceHarnessTarget implements IHarnessTarget {
       keptLocalEdit: [],
       removedLocalEdit,
     };
+    const linkedWorktree = await isLinkedWorktreeRoot(workspaceRoot);
 
     await this.applyMigrations(plan.migrations, result);
 
     for (const removal of plan.removals) {
       if (removal.kind === 'mcp') continue;
+      if (
+        await keepsTrackedCopy(
+          linkedWorktree,
+          workspaceRoot,
+          removal.relPath,
+          this.probeGitTracking,
+        )
+      ) {
+        (result.releasedTracked ??= []).push(removal.relPath);
+        continue;
+      }
       if (removal.retiredItemId !== undefined) {
         await removeRetiredCopy({
           workspaceRoot,
@@ -355,7 +369,13 @@ export class WorkspaceHarnessTarget implements IHarnessTarget {
 
     for (const write of plan.writes) {
       if (write.kind === 'mcp') continue;
-      await this.applyWrite(write, workspaceRoot, plan.baseEntries, result);
+      await this.applyWrite(
+        write,
+        workspaceRoot,
+        plan.baseEntries,
+        result,
+        linkedWorktree,
+      );
     }
 
     const facet = this.options.mcpFacet;
@@ -945,7 +965,22 @@ export class WorkspaceHarnessTarget implements IHarnessTarget {
     workspaceRoot: string,
     baseEntries: ManagedEntries,
     result: HarnessApplyResult,
+    linkedWorktree: boolean,
   ): Promise<void> {
+    // An update of a copy git tracks, adopted ones included, is a diff on the
+    // worktree's branch (#1469): release the claim instead of writing.
+    if (
+      write.reason === 'update' &&
+      (await keepsTrackedCopy(
+        linkedWorktree,
+        workspaceRoot,
+        write.relPath,
+        this.probeGitTracking,
+      ))
+    ) {
+      (result.releasedTracked ??= []).push(write.relPath);
+      return;
+    }
     const owned = baseEntries[write.relPath];
     const adopted = write.reason === 'update' && owned === undefined;
     const absolute = toAbsolute(workspaceRoot, write.relPath);
