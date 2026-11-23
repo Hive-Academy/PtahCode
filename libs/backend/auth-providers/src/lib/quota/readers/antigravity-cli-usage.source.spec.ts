@@ -217,6 +217,26 @@ describe('readAntigravityCliUsage', () => {
     } finally { jest.useRealTimers(); }
   });
 
+  it('keeps the failure backoff when the caller stopped waiting before the error reply', async () => {
+    let release: (() => void) | undefined;
+    const late: Behaviour = (child) => {
+      release = () => {
+        child.stdout.emit('data', Buffer.from(JSON.stringify({ num_turns: 0, usage: {}, error: 'quota service down' })));
+        close(child, 1);
+      };
+    };
+    const { options, spawnProcess } = harness([late, answer(antigravityUsageJsonFixture())]);
+    const caller = new AbortController();
+    const pending = readAntigravityCliUsage(caller.signal, options());
+    for (let i = 0; i < 20 && !release; i++) await new Promise((resolve) => setImmediate(resolve));
+    caller.abort();
+    await pending;
+    release?.();
+    for (let i = 0; i < 20; i++) await new Promise((resolve) => setImmediate(resolve));
+    expect(await readAntigravityCliUsage(undefined, options())).toMatchObject({ statusReason: 'cli-exit-error' });
+    expect(spawnProcess).toHaveBeenCalledTimes(1);
+  });
+
   it('does not trip on a clean non-billing error reply, and backs it off', async () => {
     const { options, calls } = harness([answer({ num_turns: 0, usage: {}, error: 'quota service down' }, 1),
       answer(antigravityUsageJsonFixture())]);

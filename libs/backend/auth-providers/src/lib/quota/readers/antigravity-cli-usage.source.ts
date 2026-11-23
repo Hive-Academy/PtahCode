@@ -466,8 +466,11 @@ export async function readAntigravityCliUsage(
   // deferral: the short budget belonged to that request, and the next one
   // with a full window must run.
   // A read that ended in a kill is held by `killRetryAt`, not by this map.
+  // A caller that stopped waiting leaves the map alone: the shared run records
+  // its own failure (see `parse`), and the abort reading is not a failure of agy.
+  if (signal?.aborted) return reading;
   if (reading.status === 'available' || cause === 'cli-disabled' || cause === 'cli-busy'
-    || cause === 'cli-deferred' || signal?.aborted || killsSeen !== killsBefore)
+    || cause === 'cli-deferred' || killsSeen !== killsBefore)
     backoff.delete(key);
   else backoff.set(key, { until: now() + backoffFor(reading), reading });
   return reading;
@@ -480,6 +483,7 @@ async function readOnce(
   mayRetry: boolean,
 ): Promise<AntigravityUsageReading> {
   const { logger } = options;
+  const key = JSON.stringify([options.ownerKey, options.accountFingerprint]);
   const blocked = (): boolean => disabledBy === 'billed' || (disabledBy === 'killed' && !mayRetry);
   const spare = options.budgetMs - ANTIGRAVITY_CLI_TIMEOUT_MS;
   // Never squeeze a run: a short kill could cut off an honest slow answer
@@ -519,6 +523,12 @@ async function readOnce(
         const parsed = parseAgyUsageOutput(run, observedAt);
         if (parsed.kind === 'billed') trip('billed', logger);
         else {
+          // A failed reply holds back the next run even when the caller that
+          // started it stopped waiting.
+          if (parsed.kind === 'failed') {
+            const failed = cliFailure(parsed.reason, parsed.reason);
+            backoff.set(key, { until: now() + backoffFor(failed), reading: failed });
+          }
           // A run that completed ends a series of kills; a good answer proves
           // the source works again. Done here, in the shared flight, so it
           // holds when the caller that started the run stopped waiting.
