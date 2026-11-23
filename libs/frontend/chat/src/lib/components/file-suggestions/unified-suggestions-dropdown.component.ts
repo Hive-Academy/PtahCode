@@ -1,6 +1,7 @@
 import {
   ChangeDetectionStrategy,
   Component,
+  computed,
   effect,
   ElementRef,
   inject,
@@ -10,6 +11,7 @@ import {
   viewChild,
   viewChildren,
 } from '@angular/core';
+import { Info, LucideAngularModule } from 'lucide-angular';
 import {
   FloatingUIService,
   KeyboardNavigationService,
@@ -21,6 +23,35 @@ import {
 export type { SuggestionItem } from './suggestion-option.component';
 
 /**
+ * A titled group of suggestions (lane `/`: Commands, Skills). A group with
+ * no items and a `notice` renders one non-selectable row with that reason;
+ * a group with neither is left out.
+ */
+export interface SuggestionGroup {
+  readonly label: string;
+  readonly items: readonly SuggestionItem[];
+  readonly notice?: string;
+}
+
+/** One rendered row: a group header, a notice, or a selectable option. */
+type SuggestionRow =
+  | { readonly kind: 'header'; readonly key: string; readonly label: string }
+  | { readonly kind: 'notice'; readonly key: string; readonly text: string }
+  | {
+      readonly kind: 'option';
+      readonly key: string;
+      readonly item: SuggestionItem;
+      /** Position among the selectable rows (keyboard index, option id). */
+      readonly index: number;
+    };
+
+function optionKey(item: SuggestionItem): string {
+  if (item.type === 'file') return `file-${item.path}`;
+  if (item.type === 'prompt') return `prompt-${item.text}`;
+  return `${item.type}-${item.name}`;
+}
+
+/**
  * UnifiedSuggestionsDropdownComponent - Autocomplete UI with Native Floating UI
  *
  * ARCHITECTURE:
@@ -29,6 +60,8 @@ export type { SuggestionItem } from './suggestion-option.component';
  * - Options receive isActive as INPUT (not via Highlightable interface)
  * - Filter input INSIDE dropdown - focus stays on filter input
  * - Supports file and command types via discriminated union
+ * - Optional titled groups and a non-selectable notice row
+ *   (`role=option aria-disabled`); the main chat composer passes neither
  * - Agents are not offered here: the model picks its own sub-agents
  *
  * KEYBOARD NAVIGATION:
@@ -51,7 +84,7 @@ export type { SuggestionItem } from './suggestion-option.component';
 @Component({
   selector: 'ptah-unified-suggestions-dropdown',
   standalone: true,
-  imports: [SuggestionOptionComponent],
+  imports: [SuggestionOptionComponent, LucideAngularModule],
   providers: [FloatingUIService, KeyboardNavigationService],
   template: `
     <!-- Panel positioned by Floating UI relative to overlayOrigin -->
@@ -90,7 +123,7 @@ export type { SuggestionItem } from './suggestion-option.component';
       }
 
       <!-- Empty State -->
-      @else if (suggestions().length === 0) {
+      @else if (rows().length === 0) {
         <div class="flex items-center justify-center p-3">
           <span class="text-xs text-base-content-muted">No matches found</span>
         </div>
@@ -101,29 +134,42 @@ export type { SuggestionItem } from './suggestion-option.component';
         <div
           class="flex flex-col overflow-y-auto overflow-x-hidden max-h-64 p-1"
         >
-          @for (
-            suggestion of suggestions();
-            track trackBy($index, suggestion);
-            let i = $index
-          ) {
-            @if (isGroupStart(i)) {
-              <!-- Divider between the command and prompt groups. Decorative:
-                   each prompt row carries its own "Prompt · <Category>" badge,
-                   so screen readers get the grouping from the options. -->
+          @for (row of rows(); track row.key) {
+            @if (row.kind === 'header') {
+              <!-- Group header. Decorative: each option carries its own name
+                   or badge, so screen readers get the grouping from the
+                   options. -->
               <div
                 class="px-2 pt-1.5 pb-0.5 text-[11px] font-semibold text-base-content-muted uppercase tracking-wide"
                 role="presentation"
               >
-                {{ groupHeaderTitle(suggestion) }}
+                {{ row.label }}
               </div>
+            } @else if (row.kind === 'notice') {
+              <!-- Why nothing can be chosen here; never selectable. -->
+              <div
+                class="flex items-start gap-2 px-2 py-1.5 rounded-md text-xs text-base-content-muted cursor-default"
+                role="option"
+                aria-disabled="true"
+                aria-selected="false"
+                data-testid="suggestion-notice"
+              >
+                <lucide-angular
+                  [img]="InfoIcon"
+                  class="w-4 h-4 shrink-0 opacity-80"
+                  aria-hidden="true"
+                />
+                <span class="min-w-0">{{ row.text }}</span>
+              </div>
+            } @else {
+              <ptah-suggestion-option
+                [suggestion]="row.item"
+                [optionId]="'suggestion-' + row.index"
+                [isActive]="row.index === activeIndex()"
+                (selected)="handleSelection($event)"
+                (hovered)="handleHover(row.index)"
+              />
             }
-            <ptah-suggestion-option
-              [suggestion]="suggestion"
-              [optionId]="'suggestion-' + i"
-              [isActive]="i === activeIndex()"
-              (selected)="handleSelection($event)"
-              (hovered)="handleHover(i)"
-            />
           }
         </div>
       }
@@ -138,19 +184,64 @@ export class UnifiedSuggestionsDropdownComponent implements OnDestroy {
   readonly suggestions = input.required<SuggestionItem[]>();
   readonly isLoading = input(false);
   readonly errorMessage = input<string | null>(null);
+  /** Titled groups; when set they replace `suggestions` for rendering. */
+  readonly groups = input<readonly SuggestionGroup[] | null>(null);
+  /** One non-selectable row instead of any suggestion (e.g. unsupported). */
+  readonly notice = input<string | null>(null);
   readonly suggestionSelected = output<SuggestionItem>();
   readonly closed = output<void>();
   private readonly floatingPanel =
     viewChild<ElementRef<HTMLElement>>('floatingPanel');
   private readonly optionComponents = viewChildren(SuggestionOptionComponent);
   readonly activeIndex = this.keyboardNav.activeIndex;
+  protected readonly InfoIcon = Info;
+
+  /** Rendered rows: a notice, titled groups, or the flat list with dividers. */
+  readonly rows = computed<readonly SuggestionRow[]>(() => {
+    const notice = this.notice();
+    if (notice) return [{ kind: 'notice', key: 'notice', text: notice }];
+    const rows: SuggestionRow[] = [];
+    let index = 0;
+    const groups = this.groups();
+    if (groups) {
+      groups.forEach((group, g) => {
+        if (group.items.length === 0) {
+          if (!group.notice) return;
+          rows.push({ kind: 'header', key: `header-${g}`, label: group.label });
+          rows.push({ kind: 'notice', key: `notice-${g}`, text: group.notice });
+          return;
+        }
+        rows.push({ kind: 'header', key: `header-${g}`, label: group.label });
+        for (const item of group.items) {
+          rows.push({ kind: 'option', key: optionKey(item), item, index: index++ });
+        }
+      });
+      return rows;
+    }
+    this.suggestions().forEach((item, i) => {
+      if (this.isGroupStart(i)) {
+        rows.push({
+          kind: 'header',
+          key: `header-${i}`,
+          label: this.groupHeaderTitle(item),
+        });
+      }
+      rows.push({ kind: 'option', key: optionKey(item), item, index: index++ });
+    });
+    return rows;
+  });
+
+  /** The rows that can be chosen, in keyboard order. */
+  private readonly selectable = computed(() =>
+    this.rows().flatMap((row) => (row.kind === 'option' ? [row.item] : [])),
+  );
   readonly listboxId = `suggestions-listbox-${Math.random()
     .toString(36)
     .substring(2, 9)}`;
 
   constructor() {
     effect(() => {
-      const count = this.suggestions().length;
+      const count = this.selectable().length;
       this.keyboardNav.configure({ itemCount: count, wrap: true });
     });
     effect(() => {
@@ -206,6 +297,11 @@ export class UnifiedSuggestionsDropdownComponent implements OnDestroy {
    * Get header title based on suggestion types
    */
   getHeaderTitle(): string {
+    if (this.notice()) return 'Slash Commands';
+    const groups = this.groups();
+    if (groups) {
+      return groups.map((group) => group.label).join(' & ') || 'Suggestions';
+    }
     const suggestions = this.suggestions();
     if (suggestions.length === 0) return 'Suggestions';
 
@@ -295,7 +391,7 @@ export class UnifiedSuggestionsDropdownComponent implements OnDestroy {
    */
   selectFocused(): void {
     const index = this.activeIndex();
-    const suggestions = this.suggestions();
+    const suggestions = this.selectable();
     if (index >= 0 && index < suggestions.length) {
       this.suggestionSelected.emit(suggestions[index]);
     }
@@ -320,11 +416,5 @@ export class UnifiedSuggestionsDropdownComponent implements OnDestroy {
    */
   handleSelection(suggestion: SuggestionItem): void {
     this.suggestionSelected.emit(suggestion);
-  }
-
-  trackBy(index: number, item: SuggestionItem): string {
-    if (item.type === 'file') return `file-${item.path}`;
-    if (item.type === 'prompt') return `prompt-${item.text}`;
-    return `${item.type}-${item.name}`;
   }
 }

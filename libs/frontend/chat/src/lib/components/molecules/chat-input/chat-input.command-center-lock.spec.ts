@@ -38,6 +38,7 @@ import { ComposerTypeToExpandDirective } from './composer-type-to-expand.directi
 import { COMPOSER_TRIGGER_CACHE_ENABLED } from '../../../services/composer-trigger-scheduler';
 import { FilePickerService } from '../../../services/file-picker.service';
 import { VoiceInputService } from '../../../services/voice-input.service';
+import { ComposerInputController } from '../../../services/composer-input.controller';
 
 describe('ChatInputComponent Command Center lock', () => {
   let fixture: ComponentFixture<ChatInputComponent>;
@@ -196,7 +197,7 @@ describe('ChatInputComponent Command Center lock', () => {
         set: {
           // The root's type-to-expand directive binds an input on a plain div.
           imports: [ComposerTypeToExpandDirective],
-          providers: [ComposerAttachmentsService],
+          providers: [ComposerAttachmentsService, ComposerInputController],
           schemas: [CUSTOM_ELEMENTS_SCHEMA],
         },
       })

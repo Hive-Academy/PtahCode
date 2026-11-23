@@ -37,6 +37,7 @@ import { ComposerAttachmentsService } from '../../../services/composer-attachmen
 import { COMPOSER_TRIGGER_CACHE_ENABLED } from '../../../services/composer-trigger-scheduler';
 import { FilePickerService } from '../../../services/file-picker.service';
 import { VoiceInputService } from '../../../services/voice-input.service';
+import { ComposerInputController } from '../../../services/composer-input.controller';
 import { ComposerActivityDirective } from '../../../directives/composer-activity.directive';
 import { ComposerCompactBarComponent } from '@ptah-extension/chat-ui';
 import { ComposerTypeToExpandDirective } from './composer-type-to-expand.directive';
@@ -205,7 +206,7 @@ describe('ChatInputComponent streaming fold', () => {
             ComposerTypeToExpandDirective,
             UnifiedSuggestionsDropdownComponent,
           ],
-          providers: [ComposerAttachmentsService],
+          providers: [ComposerAttachmentsService, ComposerInputController],
           schemas: [CUSTOM_ELEMENTS_SCHEMA],
         },
       })
@@ -441,7 +442,7 @@ describe('ChatInputComponent streaming fold', () => {
     }
     // The toolbar holds the attach menu's glass overlay: it must not fade.
     const toolbar = root().querySelector('.ptah-composer-toolbar')!;
-    expect(toolbar.querySelector('[data-glass-surface]')).not.toBeNull();
+    expect(toolbar.querySelector('ptah-composer-attach-menu')).not.toBeNull();
     expect(toolbar.closest('.ptah-fold-fade')).toBeNull();
     expect(toolbar.querySelector('.ptah-fold-fade')).toBeNull();
   });
@@ -464,9 +465,9 @@ describe('ChatInputComponent streaming fold', () => {
     jest.useFakeTimers();
     try {
       button('composer-compact-expand').click();
-      fixture.componentInstance.handleSlashActivated({
+      fixture.componentInstance.composerInput.handleSlashActivated({
         query: '',
-      } as Parameters<ChatInputComponent['handleSlashActivated']>[0]);
+      } as Parameters<ChatInputComponent['composerInput']['handleSlashActivated']>[0]);
       fixture.detectChanges();
       TestBed.tick();
       const dropdown = () =>
@@ -487,9 +488,9 @@ describe('ChatInputComponent streaming fold', () => {
 
   it('opens slash suggestions at once when the composer is not folding', async () => {
     await settle();
-    fixture.componentInstance.handleSlashActivated({
+    fixture.componentInstance.composerInput.handleSlashActivated({
       query: '',
-    } as Parameters<ChatInputComponent['handleSlashActivated']>[0]);
+    } as Parameters<ChatInputComponent['composerInput']['handleSlashActivated']>[0]);
     fixture.detectChanges();
     expect(
       root().querySelector('ptah-unified-suggestions-dropdown'),
