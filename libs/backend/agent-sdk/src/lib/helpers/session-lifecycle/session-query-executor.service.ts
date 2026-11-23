@@ -308,7 +308,8 @@ class CompactionSessionTap {
             Number.isFinite(pre_tokens) ? pre_tokens : null,
           ),
         );
-      } else if (message.subtype === 'task_started' && message.tool_use_id) {
+      } else if (message.subtype === 'task_started') {
+        // A resumed run can start without a tool_use_id; the monitor resolves it from the task id.
         this.recordTaskStarted(
           message,
           message.tool_use_id,
@@ -371,7 +372,7 @@ class CompactionSessionTap {
    */
   private recordTaskStarted(
     message: SDKMessage,
-    toolUseId: string,
+    toolUseId: string | undefined,
     taskId: string,
     subagentType: string | undefined,
     runId: string | undefined,

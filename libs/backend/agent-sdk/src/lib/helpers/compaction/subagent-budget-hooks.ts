@@ -20,7 +20,7 @@ const PAUSED_GATE_FAILURE_REASON = 'Ptah budget monitor paused new work tools. U
 /** The gate state the hooks need to decide whether a failure fails open or closed. */
 interface NotesGatePhaseSource {
   /** Gate phase per SDK agent id; `asked` never denies, `paused` denies new work tools. */
-  readonly notesGatePhase?: (agentId: string | undefined) => 'asked' | 'paused' | undefined;
+  readonly notesGatePhase?: (agentId: string | undefined, sessionId?: string) => 'asked' | 'paused' | undefined;
 }
 
 type HookMonitor = Pick<SubagentBudgetMonitor, 'checkNotesTool' | 'hasNotesGate' | 'finishWarnedAgent' | 'takeNormalHandoff'>
@@ -45,7 +45,7 @@ export function createSubagentBudgetHooks(
   capturedSessionId?: string,
 ): Partial<Record<HookEvent, HookCallbackMatcher[]>> {
   if (!monitor.recordNotesToolResult) logger.warn('[SubagentBudgetHooks] Notes result recorder missing; completion will rely on the watchdog');
-  const paused = (agentId: string | undefined): boolean => monitor.hasNotesGate(agentId) && monitor.notesGatePhase?.(agentId) === 'paused';
+  const paused = (agentId: string | undefined, sessionId?: string): boolean => monitor.hasNotesGate(agentId, sessionId) && monitor.notesGatePhase?.(agentId, sessionId) === 'paused';
   const events = ['PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'SubagentStop', 'TaskCompleted'] as const;
   const result: Partial<Record<HookEvent, HookCallbackMatcher[]>> = {};
   for (const event of events) {
@@ -104,7 +104,7 @@ export function createSubagentBudgetHooks(
           error: error instanceof Error ? error : new Error(String(error)), eventName: event,
           agentId: data.agent_id, toolUseId: data.tool_use_id,
         });
-        if (event === 'PreToolUse' && paused(data.agent_id)) return preToolDeny(PAUSED_GATE_FAILURE_REASON);
+        if (event === 'PreToolUse' && paused(data.agent_id, sessionId)) return preToolDeny(PAUSED_GATE_FAILURE_REASON);
       }
       return { continue: true };
     }] }];

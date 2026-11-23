@@ -149,3 +149,47 @@ describe('notes path containment', () => {
     } finally { fs.rmSync(base, { recursive: true, force: true }); }
   });
 });
+
+describe('SubagentNotesGate invocation ownership', () => {
+  const root = path.resolve('C:/fake-workspace');
+  const notes = path.join(root, '.ptah', 'notes.md');
+  const notice: AgentActionNotice = { actor: 'ptah-budget', action: 'paused', reason: 'context-budget', nextStep: 'write-notes-and-return', measured: 300_000, limit: 150_000, unit: 'tokens' };
+
+  it('replaces the stale entry of a reused agent id instead of inheriting its paused phase', () => {
+    const gate = new SubagentNotesGate();
+    gate.enter('s\0agent', { readOnly: false, notesPath: notes, workspace: root, invocation: 'first' });
+    gate.pause('s\0agent', notice);
+    gate.enter('s\0agent', { readOnly: true, invocation: 'second' });
+    expect(gate.owner('s\0agent')).toBe('second');
+    expect(gate.phase('s\0agent')).toBe('asked');
+    expect(gate.paths('s\0agent')).toEqual([]);
+    expect(gate.check('s\0agent', 'Bash', {})).toEqual({});
+  });
+
+  it('keeps the entry on a repeated enter of the same invocation', () => {
+    const gate = new SubagentNotesGate();
+    gate.enter('s\0agent', { readOnly: true, invocation: 'first' });
+    gate.pause('s\0agent', notice);
+    gate.enter('s\0agent', { readOnly: true, invocation: 'first' });
+    expect(gate.phase('s\0agent')).toBe('paused');
+  });
+
+  it('lets only the owning invocation finish the entry', () => {
+    const gate = new SubagentNotesGate();
+    gate.enter('s\0agent', { readOnly: true, invocation: 'second' });
+    gate.finish('s\0agent', 'first');
+    expect(gate.has('s\0agent')).toBe(true);
+    gate.finish('s\0agent', 'second');
+    expect(gate.has('s\0agent')).toBe(false);
+  });
+
+  it('moves entries on a session rekey and drops them on release', () => {
+    const gate = new SubagentNotesGate();
+    gate.enter('old\0agent', { readOnly: true, invocation: 'first' });
+    gate.enter('other\0agent', { readOnly: true, invocation: 'first' });
+    gate.rekey('old', 'new');
+    expect(gate.keys().sort()).toEqual(['new\0agent', 'other\0agent']);
+    gate.release('new');
+    expect(gate.keys()).toEqual(['other\0agent']);
+  });
+});

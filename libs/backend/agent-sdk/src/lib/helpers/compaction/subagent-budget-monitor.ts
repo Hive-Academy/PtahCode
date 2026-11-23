@@ -87,6 +87,7 @@ import type { SubagentStopCause } from './subagent-stop-cause';
 import { parseSubagentDeliverables, SubagentDeliverables } from './subagent-deliverables';
 import { SubagentNotesWarnings } from './subagent-notes-warnings';
 import { SubagentNotesGate } from './subagent-notes-gate';
+import { scopedAgentKey, scopedKeysOfAgent } from './subagent-scope-key';
 
 /** The handoff file operations the monitor uses. */
 export type SubagentHandoffFilesPort = Pick<
@@ -717,7 +718,7 @@ export class SubagentBudgetMonitor {
     const paused = state.admissionReasons.paused;
     if (state.admission === 'paused' && paused) {
       const notice = admissionNotice('paused', paused, nextStep);
-      if (this.notesGate.pause(agentId, notice)) {
+      if (this.notesGate.pause(scopedAgentKey(session.sessionId, agentId), notice)) {
         this.dispatcher.postMainThreadNotice(session.sessionId, redactBudgetSecrets(formatBudgetPauseNotice(notice, agentId)));
         this.logger.info('[SubagentBudgetMonitor] Subagent paused; new tool calls are denied until it returns', {
           sessionId: session.sessionId, toolCallId, reason: paused.reason,
@@ -737,24 +738,27 @@ export class SubagentBudgetMonitor {
     const readOnly = this.isReadOnlyRole(session, toolCallId);
     const paths = readOnly ? undefined : this.handoffFiles.paths(session.sessionId, invocationKey(toolCallId, state));
     const workspace = this.records.workspaceOf(session.sessionId);
-    if (!state.warnedAgentId || !this.notesGate.has(agentId)) {
+    const gateKey = scopedAgentKey(session.sessionId, agentId);
+    const invocation = invocationKey(toolCallId, state);
+    // A gate of another invocation (a reused agent id) is stale: this invocation enters its own.
+    if (!state.warnedAgentId || !this.notesGate.has(gateKey) || this.notesGate.owner(gateKey) !== invocation) {
       state.warnedAgentId = agentId;
       state.warnedTaskId = session.startedTasks.get(toolCallId)?.taskId ?? this.resolveRegistryRecord(session, toolCallId).record?.taskId;
       const writable = !readOnly && !!paths && !!workspace;
-      const entered = this.notesWarnings.run(session.sessionId, agentId, this.logger, () => {
-        this.notesGate.enter(agentId, writable
+      const entered = this.notesWarnings.run(session.sessionId, gateKey, this.logger, () => {
+        this.notesGate.enter(gateKey, writable
           ? {
-            readOnly: false, workspace, notesPath: paths.notes,
-            deliverablePaths: this.deliverables.permitted(agentId, session.tasks.get(toolCallId)?.deliverables ?? [], workspace),
+            invocation, readOnly: false, workspace, notesPath: paths.notes,
+            deliverablePaths: this.deliverables.permitted(gateKey, session.tasks.get(toolCallId)?.deliverables ?? [], workspace),
           }
-          : { readOnly: true });
+          : { invocation, readOnly: true });
       });
       // A gate that cannot hold the notes paths falls back to the read-only rights.
-      if (!entered) this.notesGate.enter(agentId, { readOnly: true });
+      if (!entered) this.notesGate.enter(gateKey, { invocation, readOnly: true });
       if (entered && writable) state.handoffPaths = paths;
       this.scheduleGateTimeout();
     }
-    return state.handoffPaths && this.notesGate.paths(agentId).length > 0 ? 'write-notes-and-return' : 'return-report';
+    return state.handoffPaths && this.notesGate.paths(gateKey).length > 0 ? 'write-notes-and-return' : 'return-report';
   }
 
   private postAsk(
@@ -790,7 +794,7 @@ export class SubagentBudgetMonitor {
       if (denied) return denied;
     }
     if (!agentId) return undefined;
-    if (sessionId && !this.notesGate.has(agentId)) {
+    if (sessionId && !this.notesGate.has(scopedAgentKey(this.currentSessionId(sessionId), agentId))) {
       const session = this.sessions.get(this.currentSessionId(sessionId));
       if (session) {
         for (const [toolCallId, state] of session.subagents) {
@@ -802,8 +806,9 @@ export class SubagentBudgetMonitor {
         }
       }
     }
-    if (!this.notesGate.has(agentId)) return undefined;
-    const decision = this.notesGate.check(agentId, toolName, toolInput);
+    const gateKey = this.findGateKey(sessionId, agentId);
+    if (!gateKey) return undefined;
+    const decision = this.notesGate.check(gateKey, toolName, toolInput);
     return decision.reason ? redactBudgetSecrets(decision.reason) : undefined;
   }
 
@@ -818,8 +823,24 @@ export class SubagentBudgetMonitor {
   }
 
   /** The admitted agent's gate phase, `undefined` when it has no gate. */
-  notesGatePhase(agentId: string | undefined): 'asked' | 'paused' | undefined {
-    return this.notesGate.phase(agentId);
+  notesGatePhase(agentId: string | undefined, sessionId?: string): 'asked' | 'paused' | undefined {
+    const key = agentId ? this.findGateKey(sessionId, agentId) : undefined;
+    return key ? this.notesGate.phase(key) : undefined;
+  }
+
+  /**
+   * The gate key of `agentId`: scoped by the parent session when it is known. Without a session
+   * (a hook that carries none) the agent id must name exactly one gate; two gates are ambiguous
+   * and match none, so a reused agent id never reads another session's gate.
+   */
+  private findGateKey(sessionId: string | undefined, agentId: string | undefined): string | undefined {
+    if (!agentId) return undefined;
+    if (sessionId) {
+      const key = scopedAgentKey(this.currentSessionId(sessionId), agentId);
+      return this.notesGate.has(key) ? key : undefined;
+    }
+    const keys = scopedKeysOfAgent(this.notesGate.keys(), agentId);
+    return keys.length === 1 ? keys[0] : undefined;
   }
 
   /**
@@ -828,13 +849,14 @@ export class SubagentBudgetMonitor {
    */
   recordNotesToolResult(sessionId: string, agentId: string, toolName: string, input: unknown): Promise<void> {
     const current = this.currentSessionId(sessionId);
-    this.deliverables.record(current, agentId, toolName, input, this.records.workspaceOf(current), this.logger);
-    this.notesGate.recordWrite(agentId, toolName, input);
+    const key = scopedAgentKey(current, agentId);
+    this.deliverables.record(current, key, toolName, input, this.records.workspaceOf(current), this.logger);
+    this.notesGate.recordWrite(key, toolName, input);
     return Promise.resolve();
   }
 
-  hasNotesGate(agentId: string | undefined): boolean {
-    return this.notesGate.has(agentId);
+  hasNotesGate(agentId: string | undefined, sessionId?: string): boolean {
+    return !!this.findGateKey(sessionId, agentId);
   }
 
   /**
@@ -847,11 +869,12 @@ export class SubagentBudgetMonitor {
       this.gateTimer = undefined;
       let pending = false;
       for (const session of this.sessions.values()) {
-        for (const state of session.subagents.values()) {
+        for (const [toolCallId, state] of session.subagents) {
           const agentId = state.warnedAgentId;
-          if (!agentId || isFinalized(state) || !this.notesGate.has(agentId)) continue;
-          if (!this.notesGate.expired(agentId)) { pending = true; continue; }
-          if (this.notesGate.markOverdueNotified(agentId)) {
+          const gateKey = agentId ? scopedAgentKey(session.sessionId, agentId) : undefined;
+          if (!agentId || !gateKey || isFinalized(state) || this.notesGate.owner(gateKey) !== invocationKey(toolCallId, state)) continue;
+          if (!this.notesGate.expired(gateKey)) { pending = true; continue; }
+          if (this.notesGate.markOverdueNotified(gateKey)) {
             this.dispatcher.postMainThreadNotice(session.sessionId, redactBudgetSecrets(formatHandoffNotesDelay(agentId)));
             this.logger.warn('[SubagentBudgetMonitor] Handoff still outstanding after 10 minutes; parent notified', {
               sessionId: session.sessionId, agentId,
@@ -867,7 +890,8 @@ export class SubagentBudgetMonitor {
   private clearIdleGateTimer(): void {
     if (!this.gateTimer) return;
     const active = [...this.sessions.values()].some((session) =>
-      [...session.subagents.values()].some((state) => !isFinalized(state) && this.notesGate.has(state.warnedAgentId)));
+      [...session.subagents.values()].some((state) => !isFinalized(state) && !!state.warnedAgentId &&
+        this.notesGate.has(scopedAgentKey(session.sessionId, state.warnedAgentId))));
     if (!active) {
       clearTimeout(this.gateTimer);
       this.gateTimer = undefined;
@@ -892,7 +916,7 @@ export class SubagentBudgetMonitor {
   }
 
   private async finishWarnedInvocation(session: SessionState, toolCallId: string, state: SubagentState, agentId: string): Promise<void> {
-    if (isFinalized(state) || !this.notesGate.has(agentId)) return;
+    if (isFinalized(state) || this.notesGate.owner(scopedAgentKey(session.sessionId, agentId)) !== invocationKey(toolCallId, state)) return;
     const generation = state.generation;
     state.stopInFlight = true;
     if (state.deadlineTimer) clearTimeout(state.deadlineTimer);
@@ -905,16 +929,20 @@ export class SubagentBudgetMonitor {
           state.warnedAgentId === agentId) {
         state.stopInFlight = false;
         // Terminal notifications already release the old invocation's gate.
-        if (state.stopState === 'none' && !state.sdkOutcome) this.releaseAdmission(agentId);
+        if (state.stopState === 'none' && !state.sdkOutcome) this.releaseAdmission(session.sessionId, agentId, invocationKey(toolCallId, state));
         this.clearIdleGateTimer();
       }
     }
   }
 
-  private releaseAdmission(agentId: string): void {
-    this.notesGate.finish(agentId);
-    this.deliverables.finish(agentId);
-    this.notesWarnings.finish(agentId);
+  /** Ends the gate of `invocation` only; a newer invocation of a reused agent id keeps its own gate. */
+  private releaseAdmission(sessionId: string, agentId: string, invocation: string): void {
+    const key = scopedAgentKey(sessionId, agentId);
+    const owner = this.notesGate.owner(key);
+    if (owner !== undefined && owner !== invocation) return;
+    this.notesGate.finish(key);
+    this.deliverables.finish(key);
+    this.notesWarnings.finish(key);
     this.dispatcher.withdrawSubagentNotice(agentId);
   }
 
@@ -1078,17 +1106,23 @@ export class SubagentBudgetMonitor {
    * subagent spawned by `toolUseId`, so a stop does not wait for the registry.
    * Tasks that spawn no subagent (bash, workflow) are recorded too; their
    * tool_use id never parents a subagent message, so they never stop anything.
-   * A blank id is ignored.
+   * A blank id is ignored. A resumed run can start without a tool_use_id: it then belongs to
+   * the one spawn that already carries the same task id, and is ignored when none or several do.
    */
   recordTaskStarted(
     sessionId: string,
-    toolUseId: string,
+    spawnToolUseId: string | undefined,
     taskId: string,
     subagentType?: string,
     runId?: string,
     background?: boolean,
   ): void {
-    if (!sessionId || !toolUseId || !taskId) {
+    if (!sessionId || !taskId) {
+      return;
+    }
+    const toolUseId = spawnToolUseId || this.toolUseOfTask(sessionId, taskId);
+    if (!toolUseId) {
+      this.logger.debug('[SubagentBudgetMonitor] Task start without a tool use id matches no single spawn', { sessionId, taskId, runId });
       return;
     }
     const session = this.sessionState(sessionId);
@@ -1101,10 +1135,11 @@ export class SubagentBudgetMonitor {
     const newRun = !!runId && !!previousRunId && runId > previousRunId;
     let generation = state?.generation ?? 0;
     if (state && ((previousTaskId && previousTaskId !== taskId) || newRun)) {
+      const previousInvocation = invocationKey(toolUseId, state);
       generation = ++state.generation;
       if (state.deadlineTimer) clearTimeout(state.deadlineTimer);
       if (state.warnedAgentId) {
-        this.releaseAdmission(state.warnedAgentId);
+        this.releaseAdmission(session.sessionId, state.warnedAgentId, previousInvocation);
         this.transcriptLookup.delete(stoppedIdentityKey(session.sessionId, state.warnedAgentId));
       }
       session.subagents.delete(toolUseId);
@@ -1129,6 +1164,16 @@ export class SubagentBudgetMonitor {
       // The registry agent id may have arrived with this task: enact a phase that waited for it.
       this.enactAdmission(session, toolUseId, known);
     }
+  }
+
+  /** The tool_use id of the only spawn of `sessionId` that already carries `taskId`. */
+  private toolUseOfTask(sessionId: string, taskId: string): string | undefined {
+    const session = this.sessions.get(this.currentSessionId(sessionId));
+    if (!session) return undefined;
+    const matches = new Set<string>();
+    for (const [toolUseId, started] of session.startedTasks) if (started.taskId === taskId) matches.add(toolUseId);
+    for (const [toolUseId, state] of session.subagents) if (state.warnedTaskId === taskId) matches.add(toolUseId);
+    return matches.size === 1 ? [...matches][0] : undefined;
   }
 
   /** Apply the SDK outcome to the execution identified by its task id. */
@@ -1161,7 +1206,7 @@ export class SubagentBudgetMonitor {
         state.pendingNotice = undefined;
         if (state.deadlineTimer) clearTimeout(state.deadlineTimer);
         state.deadlineTimer = undefined;
-        if (agentId && this.notesGate.has(agentId)) this.releaseAdmission(agentId);
+        if (agentId && this.notesGate.has(scopedAgentKey(session.sessionId, agentId))) this.releaseAdmission(session.sessionId, agentId, invocationKey(toolCallId, state));
         this.clearIdleGateTimer();
       }
       return;
@@ -1263,7 +1308,7 @@ export class SubagentBudgetMonitor {
     }
     // Messages still queued under the old id resolve to the new one. The new
     // id is current again, so an alias it had is dropped (no alias cycle).
-    moveLineageWarning(this.logger, fromSessionId, toSessionId); this.contextLimits.rekey(fromSessionId, toSessionId); this.deliverables.rekey(fromSessionId, toSessionId); this.notesWarnings.rekey(fromSessionId, toSessionId);
+    moveLineageWarning(this.logger, fromSessionId, toSessionId); this.contextLimits.rekey(fromSessionId, toSessionId); this.deliverables.rekey(fromSessionId, toSessionId); this.notesWarnings.rekey(fromSessionId, toSessionId); this.notesGate.rekey(fromSessionId, toSessionId);
     this.aliases.delete(toSessionId);
     this.aliases.set(fromSessionId, toSessionId);
     const session = this.sessions.get(fromSessionId);
@@ -1338,11 +1383,11 @@ export class SubagentBudgetMonitor {
       this.aliases.delete(from);
     }
     // A near-budget warning no tool result drained ends with the session.
-    for (const state of this.sessions.get(sessionId)?.subagents.values() ??
-      []) {
+    for (const [toolCallId, state] of this.sessions.get(sessionId)?.subagents ?? []) {
       if (state.deadlineTimer) clearTimeout(state.deadlineTimer);
-      if (state.warnedAgentId) this.releaseAdmission(state.warnedAgentId);
+      if (state.warnedAgentId) this.releaseAdmission(sessionId, state.warnedAgentId, invocationKey(toolCallId, state));
     }
+    this.notesGate.release(sessionId);
     this.sessions.delete(sessionId);
     this.clearIdleGateTimer();
     this.records.forget(new Set([...stale, sessionId]));
@@ -1752,7 +1797,7 @@ export class SubagentBudgetMonitor {
     const progress: HandoffProgress = {
       lastAssistantText: state.lastAssistantText,
       filePaths: [...state.filePaths],
-      permittedPaths: who.agentId ? this.notesGate.paths(who.agentId) : [],
+      permittedPaths: who.agentId ? this.notesGate.paths(scopedAgentKey(durableSession.sessionId, who.agentId)) : [],
       toolCalls: state.toolCalls.map(({ name, targetPath, outcome }) => ({ name, targetPath, outcome })),
       transcriptPath: state.transcriptPath,
     };
@@ -1780,7 +1825,7 @@ export class SubagentBudgetMonitor {
     if (!ownsInvocation()) return undefined;
     const lineage = successorLineage(previous, { predecessor: task?.prompt?.match(/^Ptah predecessor handoff: (.+)$/m)?.[1], notes: files.paths?.notes,
       warningReached: state.warningRequestCount !== undefined, requestCount: state.warningRequestCount ?? state.requestOrder.size, initialContext: state.initialContext ?? state.contextTokens,
-      effectiveH: limits.handoffTokens, completedDeliverable: !!who.agentId && this.deliverables.completed(who.agentId, task?.deliverables ?? [], this.records.workspaceOf(durableSession.sessionId) ?? '.', files.paths?.notes) });
+      effectiveH: limits.handoffTokens, completedDeliverable: !!who.agentId && this.deliverables.completed(scopedAgentKey(durableSession.sessionId, who.agentId), task?.deliverables ?? [], this.records.workspaceOf(durableSession.sessionId) ?? '.', files.paths?.notes) });
     const cooperative = state.stopCause?.forced === false;
     const recordText = redactBudgetSecrets(handoffMessage(subject, usage, task?.text, files, undefined, progress) + '\n' + renderLineage(lineage));
     const write = await this.records.writeOnce(

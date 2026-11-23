@@ -285,7 +285,7 @@ function makeHarness(
     monitor.observe = async (sessionId, message, route) => {
       await observe(sessionId, message, route);
       const agentId = registry.get(TOOL_CALL)?.agentId;
-      if (agentId && monitor.notesGatePhase(agentId)) await monitor.finishWarnedAgent(sessionId, agentId, 'completed');
+      if (agentId && monitor.notesGatePhase(agentId, sessionId)) await monitor.finishWarnedAgent(sessionId, agentId, 'completed');
     };
   }
   return {
@@ -981,7 +981,10 @@ describe('SubagentBudgetMonitor handoff records', () => {
     expect(new Set(h.index.publish.mock.calls.map(([, name]) => name))).toEqual(
       new Set(files),
     );
-    expect(h.streamed).toHaveLength(1);
+    // Each parent session gets its own pause notice: the gate is scoped by session.
+    // Nothing else is delivered twice: the two pause notices are all that streamed.
+    expect(h.streamed).toHaveLength(2);
+    expect(h.streamed.every((text) => text.includes('paused new work'))).toBe(true);
   });
 
   describe('handoffPointer', () => {
@@ -1105,6 +1108,24 @@ describe('cooperative budget: ask, pause and normal return', () => {
       expect(h.dispatcher.postMainThreadNotice).toHaveBeenCalledTimes(1);
       expect(h.dispatcher.postMainThreadNotice.mock.calls[0][1]).toContain('a1');
       expect(h.monitor.getAgentBudgetState('a1', SESSION)?.admission).toBe('paused');
+    });
+
+    it('scopes a paused gate to its parent session and survives a rekey', async () => {
+      const h = makeHarness();
+      await h.monitor.observe(SESSION, ctx(300_000, 'c0'));
+      expect(h.monitor.notesGatePhase('a1', SESSION)).toBe('paused');
+      // The same agent id under another parent session never reads this gate.
+      expect(h.monitor.notesGatePhase('a1', 'session-2')).toBeUndefined();
+      expect(h.monitor.hasNotesGate('a1', 'session-2')).toBe(false);
+      await expect(h.monitor.checkNotesTool('session-2', 'a1', 'Bash', {})).resolves.toBeUndefined();
+      await expect(h.monitor.checkNotesTool(SESSION, 'a1', 'Bash', {})).resolves.toMatch(/Ptah budget monitor paused/);
+      // Without a session the unique gate still answers.
+      expect(h.monitor.notesGatePhase('a1')).toBe('paused');
+      h.monitor.rekey(SESSION, 'session-rekeyed');
+      expect(h.monitor.notesGatePhase('a1', 'session-rekeyed')).toBe('paused');
+      expect(h.monitor.notesGatePhase('a1', SESSION)).toBe('paused');
+      h.monitor.release('session-rekeyed');
+      expect(h.monitor.hasNotesGate('a1')).toBe(false);
     });
 
     it('asks and pauses on weighted usage (weighted = 5 x output)', async () => {
