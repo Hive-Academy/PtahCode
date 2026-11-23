@@ -25,11 +25,28 @@ function findRow(tool: string): ToolSubstitution {
   return row;
 }
 
+function disabledSet(
+  options: ToolGuidanceRenderOptions | undefined,
+): ReadonlySet<ToolGuidanceNamespace> {
+  return new Set(options?.disabledNamespaces ?? []);
+}
+
 function enabledRows(
   options: ToolGuidanceRenderOptions | undefined,
 ): ToolSubstitution[] {
-  const disabled = new Set(options?.disabledNamespaces ?? []);
+  const disabled = disabledSet(options);
   return TOOL_SUBSTITUTIONS.filter((row) => !disabled.has(row.namespace));
+}
+
+/** The "Why" cell, without its reference to a tool of a disabled namespace. */
+function coreWhy(
+  row: ToolSubstitution,
+  disabled: ReadonlySet<ToolGuidanceNamespace>,
+): string {
+  const core = row.core;
+  if (!core) return '';
+  const fallback = core.whyIfDisabled;
+  return fallback && disabled.has(fallback.namespace) ? fallback.why : core.why;
 }
 
 /** "a, b or c" */
@@ -62,9 +79,21 @@ function freeTextLine(): string {
 export function renderCoreSubstitutionBlock(
   options?: ToolGuidanceRenderOptions,
 ): string {
+  const disabled = disabledSet(options);
   const rows = enabledRows(options).flatMap((row) =>
-    row.core ? [`| ${row.core.insteadOf} | ${row.core.call} | ${row.core.why} |`] : [],
+    row.core
+      ? [`| ${row.core.insteadOf} | ${row.core.call} | ${coreWhy(row, disabled)} |`]
+      : [],
   );
+  // The callout sends symbol lookups to the code tools; without them it
+  // would mandate a tool the host does not list.
+  const callout = disabled.has('code')
+    ? []
+    : [
+        '',
+        '> [!IMPORTANT]',
+        '> **Symbol and AST lookups are MANDATORY via ptah before Grep/Glob.** To find a function, class, method or type, call `ptah_code_search_symbols` or `ptah_ast_analyze` FIRST, then read the body with `ptah_read_symbol`. Fall back to Grep only after those return no results or an error.',
+      ];
   return [
     '### Required Substitutions — Use These Tools Directly',
     '',
@@ -74,9 +103,7 @@ export function renderCoreSubstitutionBlock(
     '',
     FALLBACK_LINE,
     freeTextLine(),
-    '',
-    '> [!IMPORTANT]',
-    '> **Symbol and AST lookups are MANDATORY via ptah before Grep/Glob.** To find a function, class, method or type, call `ptah_code_search_symbols` or `ptah_ast_analyze` FIRST, then read the body with `ptah_read_symbol`. Fall back to Grep only after those return no results or an error.',
+    ...callout,
   ].join('\n');
 }
 
@@ -163,17 +190,31 @@ export function applyAgentToolingRules(
   return `${blockText.slice(0, heading.start)}${renderAgentToolingRules(options)}${rest}`;
 }
 
-/** The `## ` heading lines of a Markdown text, skipping fenced code blocks. */
+/**
+ * The level-one and level-two heading lines of a Markdown text, skipping
+ * fenced code blocks. A level-one heading also ends the section before it;
+ * `### ` subheadings stay inside their section.
+ */
 function sectionHeadings(text: string): Array<{ start: number; text: string }> {
   const headings: Array<{ start: number; text: string }> = [];
-  let fence: string | undefined;
+  // CommonMark: a fence closes only with the same character, at least as many
+  // of them as it opened with, and nothing but whitespace after them.
+  let fence: { char: string; length: number } | undefined;
   let offset = 0;
   for (const line of text.split('\n')) {
-    const marker = /^\s*(```|~~~)/.exec(line)?.[1];
-    if (marker) {
-      if (!fence) fence = marker;
-      else if (fence === marker) fence = undefined;
-    } else if (!fence && line.startsWith('## ')) {
+    const match = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+    if (match) {
+      const run = match[1];
+      if (!fence) {
+        fence = { char: run[0], length: run.length };
+      } else if (
+        run[0] === fence.char &&
+        run.length >= fence.length &&
+        match[2].trim() === ''
+      ) {
+        fence = undefined;
+      }
+    } else if (!fence && /^#{1,2} /.test(line)) {
       headings.push({ start: offset, text: line });
     }
     offset += line.length + 1;

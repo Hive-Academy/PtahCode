@@ -118,6 +118,21 @@ describe('renderCoreSubstitutionBlock', () => {
     expect(without).toContain('| ptah_grep');
     expect(without).toContain('| ptah_lsp_references');
   });
+
+  it('names no tool of a disabled namespace in the callout or a row', () => {
+    const without = renderCoreSubstitutionBlock({
+      disabledNamespaces: ['code'],
+    });
+    expect(without).not.toContain('ptah_code_search_symbols');
+    expect(without).not.toContain('ptah_ast_analyze');
+    expect(without).not.toContain('MANDATORY via ptah');
+    expect(without).toContain(
+      '| Grep for symbol usages | ptah_lsp_references | LSP-accurate, rename-safe; use before any refactoring |',
+    );
+    const all = renderCoreSubstitutionBlock();
+    expect(all).toContain('MANDATORY via ptah');
+    expect(all).toContain('take file/line/col from ptah_code_search_symbols first');
+  });
 });
 
 describe('renderLaneToolTable', () => {
@@ -265,6 +280,37 @@ describe('applyAgentToolingRules', () => {
     expect(out).not.toContain('- old');
     expect(out).not.toContain('## Not a section');
     expect(out.endsWith('## Skill use\n\n- keep\n')).toBe(true);
+  });
+
+  it('does not end a long fence at a shorter inner fence', () => {
+    const text = [
+      '````md',
+      '```',
+      '## Working rules',
+      '```',
+      '````',
+      '',
+      '## Working rules',
+      '',
+      '- old',
+      '',
+      '## Skill use',
+      '',
+      '- keep',
+      '',
+    ].join('\n');
+    const out = applyAgentToolingRules(text);
+    expect(out.startsWith('````md\n```\n## Working rules\n```\n````\n\n')).toBe(true);
+    expect(out).not.toContain('- old');
+    expect(out.endsWith('## Skill use\n\n- keep\n')).toBe(true);
+  });
+
+  it('keeps a level-one section after the working rules, and replaces its subsections', () => {
+    const out = applyAgentToolingRules(
+      '## Working rules\n\nold\n\n### Detail\n\nold detail\n# Appendix\nkeep\n',
+    );
+    expect(out).not.toContain('old');
+    expect(out.endsWith('# Appendix\nkeep\n')).toBe(true);
   });
 
   it('returns a text without the heading unchanged', () => {

@@ -561,7 +561,7 @@ export function buildReadSymbolTool(): MCPToolDefinition {
 export function buildGrepTool(): MCPToolDefinition {
   return {
     name: GREP_TOOL_NAME,
-    description: withToolCue(GREP_TOOL_NAME, `Search file contents for a text or regex (strings, constants, comments, any usage). Matches are grouped by file and show the line number, the enclosing function/class in [brackets] and the trimmed line. Literal by default; smart case. Default ${GREP_DEFAULT_MAX_MATCHES} matches (max ${GREP_HARD_MAX_MATCHES}), ${GREP_MAX_FILES} files; a cut result says what was left out. Skips ignored paths, binary files and files over 1 MB; set \`includeIgnored\` with a scoped \`path\` (e.g. "node_modules/zod") to search them. A small result (≤3 matches in ≤2 declarations) inlines each enclosing body, so no follow-up read is needed. Use ptah_code_search_symbols to find a declaration by name.`),
+    description: withToolCue(GREP_TOOL_NAME, `Search file contents for a text or regex (strings, constants, comments, any usage). Matches are grouped by file and show the line number, the enclosing function/class in [brackets] and the trimmed line. Literal unless the pattern has clear regex syntax (see \`regex\`); smart case. Default ${GREP_DEFAULT_MAX_MATCHES} matches (max ${GREP_HARD_MAX_MATCHES}), ${GREP_MAX_FILES} files; a cut result says what was left out. Skips ignored paths, binary files and files over 1 MB; set \`includeIgnored\` with a scoped \`path\` (e.g. "node_modules/zod") to search them. A small result (≤3 matches in ≤2 declarations) inlines each enclosing body, so no follow-up read is needed. Use ptah_code_search_symbols to find a declaration by name.`),
     inputSchema: {
       type: 'object',
       properties: {

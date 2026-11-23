@@ -33,6 +33,14 @@ export interface CoreSubstitutionWording {
   readonly call: string;
   /** "Why" cell. */
   readonly why: string;
+  /**
+   * The "Why" cell to use when `namespace` is disabled, because `why` names a
+   * tool of that namespace.
+   */
+  readonly whyIfDisabled?: {
+    readonly namespace: ToolGuidanceNamespace;
+    readonly why: string;
+  };
 }
 
 /** The two cells of the lane policy table. */
@@ -158,6 +166,10 @@ export const TOOL_SUBSTITUTIONS: readonly ToolSubstitution[] = [
       insteadOf: 'Grep for symbol usages',
       call: 'ptah_lsp_references',
       why: 'LSP-accurate, rename-safe; take file/line/col from ptah_code_search_symbols first; use before any refactoring',
+      whyIfDisabled: {
+        namespace: 'code',
+        why: 'LSP-accurate, rename-safe; use before any refactoring',
+      },
     },
     lane: {
       need: 'Find symbol usages',
