@@ -21,13 +21,28 @@ import { classifyCliStderr, type CliStderrSeverity } from '../cli-stderr-severit
 
 const REDACTED = '[REDACTED]';
 
-/** A quoted key that names a secret, followed by a quoted value. */
+/**
+ * A quoted key that names a secret, followed by a quoted value. The value runs
+ * to the same closing quote (group 2, matched by backreference), so the other
+ * quote type and backslash escapes stay inside it; an unterminated value runs
+ * to the end of the line. The two body alternatives never match the same
+ * character, so the value costs linear time. The key text on each side of the
+ * secret word is capped at 128 characters: unbounded, a quote followed by a
+ * long run of secret words made the key part quadratic (about 1.2 s on a
+ * 100 KB line).
+ */
 const QUOTED_SECRET =
-  /(["'](?:[^"']*(?:token|key|secret|authorization|password|credential|cookie|session)[^"']*)["']\s*:\s*["'])[^"']+/gi;
+  /(["'](?:[^"'\r\n]{0,128}(?:token|key|secret|authorization|password|credential|cookie|session)[^"'\r\n]{0,128})["']\s*:\s*)(["'])(?:\\.|(?!\2)[^\\\r\n])*/gi;
 
-/** An inline `Bearer <credential>` or `<secret field>[:=] <value>`. */
+/**
+ * An inline `Bearer <credential>` or `<secret field>[:=] <value>`. A quote does
+ * not end either value: a field value may hold or start with a quoted string
+ * (escapes allowed; an unterminated one runs to the end of the line), and a
+ * comma outside quotes ends it. Each alternative starts on a different
+ * character, so the match stays linear on long lines.
+ */
 const INLINE_SECRET =
-  /\b(bearer\s+)[^\s,;"']+|\b((?:api[_-]?key|token|secret|authorization|password|credential|set-cookie|cookie|session)\s*[:=]\s*)[^\r\n,"']+/gi;
+  /\b(bearer\s+)[^\s,;]+|\b((?:api[_-]?key|token|secret|authorization|password|credential|set-cookie|cookie|session)\s*[:=]\s*)(?:"(?:\\.|[^"\\\r\n])*"?|'(?:\\.|[^'\\\r\n])*'?|[^\r\n,"'])+/gi;
 
 /**
  * Return `line` with its secrets replaced by `[REDACTED]`. Pure: no I/O, never
@@ -35,7 +50,7 @@ const INLINE_SECRET =
  */
 export function redactLaneStderr(line: string, mcpToken?: string): string {
   const redacted = line
-    .replace(QUOTED_SECRET, `$1${REDACTED}`)
+    .replace(QUOTED_SECRET, `$1$2${REDACTED}`)
     .replace(
       INLINE_SECRET,
       (_match, bearer: string | undefined, field: string | undefined) =>
