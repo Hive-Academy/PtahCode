@@ -20,6 +20,7 @@ import {
   inferRegexMode,
   isCaseInsensitive,
   isGitWorkTree,
+  canGitGrepSearchRoot,
   type GrepRequest,
 } from './grep-engine';
 import { GREP_MAX_CHARS, GREP_MAX_FILE_BYTES } from './grep.limits';
@@ -33,8 +34,15 @@ jest.mock('../route-tool-handlers', () => ({
       .join('; '),
 }));
 
+// The real package cannot load under Jest (tree-sitter loader). This stand-in
+// has the excluded folders the specs use; the predicate itself is pinned by
+// workspace-default-excludes.spec.ts.
 jest.mock('@ptah-extension/workspace-intelligence', () => ({
   EXTENSION_LANGUAGE_MAP: { '.ts': 'typescript' },
+  isCodeIndexExcluded: (relativePath: string) =>
+    /(^|\/)(node_modules|dist|build|out|target|tmp|coverage)(\/|$)/.test(
+      relativePath,
+    ),
 }));
 
 const SOURCE = [
@@ -205,6 +213,55 @@ describe('handleGrep (node engine)', () => {
     expect(lines).toContain('  4| [check] return n > LIMIT;');
     expect(lines).toContain('  5- }');
     expect(lines).toContain('    --');
+  });
+
+  it('prunes the folders of the shared code-index exclude list', async () => {
+    for (const dir of ['build', 'out', 'target', 'src/tmp']) {
+      await mkdir(path.join(root, dir), { recursive: true });
+      await writeFile(path.join(root, dir, 'x.ts'), 'LIMIT pruned\n');
+    }
+    const reply = await handleGrep({ pattern: 'LIMIT pruned' }, deps);
+    expect(reply.text).toMatch(/^0 matches/);
+    // The prune is never silent: the answer names the folders.
+    expect(reply.text).toContain('code-index exclude list');
+    expect(reply.text).toMatch(/build|out|target|tmp/);
+    expect(reply.text).toContain('includeIgnored');
+  });
+
+  it('does not name node_modules in the note: it was always skipped', async () => {
+    const reply = await handleGrep({ pattern: 'LIMIT' }, deps);
+    expect(reply.text).not.toContain('code-index exclude list');
+  });
+
+  it('prunes below an excluded target by the path from that target', async () => {
+    await mkdir(path.join(root, 'dist', 'pkg', 'node_modules', 'dep'), {
+      recursive: true,
+    });
+    await writeFile(
+      path.join(root, 'dist', 'pkg', 'node_modules', 'dep', 'x.js'),
+      'LIMIT nested\n',
+    );
+    await writeFile(path.join(root, 'dist', 'pkg', 'y.js'), 'LIMIT nested\n');
+    const reply = await handleGrep(
+      { pattern: 'LIMIT nested', path: 'dist/pkg' },
+      deps,
+    );
+    expect(reply.text.split('\n')[0]).toBe('1 match in 1 file (engine: node)');
+    expect(reply.text).toContain('dist/pkg/y.js');
+  });
+
+  it('still searches a folder the caller scoped into, even when it is excluded', async () => {
+    await mkdir(path.join(root, 'dist', 'pkg', 'lib'), { recursive: true });
+    await writeFile(
+      path.join(root, 'dist', 'pkg', 'lib', 'x.js'),
+      'LIMIT scoped\n',
+    );
+    const reply = await handleGrep(
+      { pattern: 'LIMIT scoped', path: 'dist/pkg' },
+      deps,
+    );
+    expect(reply.text.split('\n')[0]).toBe('1 match in 1 file (engine: node)');
+    expect(reply.text).toContain('dist/pkg/lib/x.js');
   });
 
   it('keeps node_modules out unless includeIgnored has a scoped path', async () => {
@@ -628,6 +685,72 @@ describe('handleGrep (git engine)', () => {
       expect(await isGitWorkTree('git', real)).toBe(true);
     } finally {
       await rm(plain, { recursive: true, force: true });
+    }
+  });
+
+  // The root sits under a directory that the parent repository ignores: git
+  // calls it "inside the work tree" but lists no file of it.
+  itGit(
+    'falls back to the Node walk when a parent repository ignores the root',
+    async () => {
+      const parent = await mkdtemp(path.join(os.tmpdir(), 'grep-parent-'));
+      try {
+        const parentReal = await realpath(parent);
+        execFileSync('git', ['init', '-q'], { cwd: parentReal });
+        await writeFile(path.join(parentReal, '.gitignore'), 'ignored/\n');
+        const ws = path.join(parentReal, 'ignored', 'ws');
+        await mkdir(path.join(ws, 'src'), { recursive: true });
+        await writeFile(path.join(ws, 'src', 'a.ts'), 'LIMIT in ignored\n');
+        const reply = await handleGrep(
+          { pattern: 'LIMIT' },
+          { ...deps, defaultWorkspaceRoot: async () => ws },
+        );
+        expect(reply.text.split('\n')[0]).toBe(
+          '1 match in 1 file (engine: node)',
+        );
+        expect(reply.text).toContain('src/a.ts');
+      } finally {
+        await rm(parent, { recursive: true, force: true });
+      }
+    },
+  );
+
+  itGit(
+    'keeps git grep for a root that a parent repository does not ignore',
+    async () => {
+      const ws = path.join(root, 'nested');
+      await mkdir(ws);
+      await writeFile(path.join(ws, 'a.ts'), 'LIMIT nested\n');
+      const reply = await handleGrep(
+        { pattern: 'LIMIT nested' },
+        { ...deps, defaultWorkspaceRoot: async () => ws },
+      );
+      expect(reply.text.split('\n')[0]).toBe('1 match in 1 file (engine: git)');
+    },
+  );
+
+  itGit('reports whether git grep can search the root', async () => {
+    const parent = await mkdtemp(path.join(os.tmpdir(), 'grep-ignore-'));
+    try {
+      const real = await realpath(parent);
+      execFileSync('git', ['init', '-q'], { cwd: real });
+      await writeFile(path.join(real, '.gitignore'), 'ignored/\n');
+      await mkdir(path.join(real, 'ignored'));
+      await mkdir(path.join(real, 'kept'));
+      expect(
+        await canGitGrepSearchRoot('git', path.join(real, 'ignored')),
+      ).toBe(false);
+      expect(await canGitGrepSearchRoot('git', path.join(real, 'kept'))).toBe(
+        true,
+      );
+      expect(await canGitGrepSearchRoot('git', real)).toBe(true);
+      // A failed probe is not "searchable": the Node walk runs.
+      expect(
+        await canGitGrepSearchRoot('git', path.join(real, 'missing')),
+      ).toBe(false);
+      expect(await canGitGrepSearchRoot('/no/such/git', real)).toBe(false);
+    } finally {
+      await rm(parent, { recursive: true, force: true });
     }
   });
 

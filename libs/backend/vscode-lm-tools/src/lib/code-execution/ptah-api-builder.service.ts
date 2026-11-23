@@ -706,6 +706,9 @@ export class PtahAPIBuilder {
       },
     };
 
+    const ast = this.buildNamespaceSafe('ast', () =>
+      buildAstNamespace(astDeps),
+    );
     const code = this.buildNamespaceSafe('code', () =>
       buildCodeNamespace({
         getCodeSymbolSearch: () => this.codeSymbolReader,
@@ -713,6 +716,8 @@ export class PtahAPIBuilder {
         getSymbolIndexer: () => this.symbolIndexer,
         getWorkspaceRoot: () => this.getWorkspaceRoot(),
         getHostWorkspaceRoots: () => this.getHostWorkspaceRoots(),
+        getNavWorkspaceRoot: () => this.resolveSessionWorkspaceRoot(),
+        analyze: (absolutePath) => ast.analyze(absolutePath),
         logger: this.logger,
       }),
     );
@@ -745,7 +750,7 @@ export class PtahAPIBuilder {
       dependencies: this.buildNamespaceSafe('dependencies', () =>
         buildDependencyNamespace(analysisDeps),
       ),
-      ast: this.buildNamespaceSafe('ast', () => buildAstNamespace(astDeps)),
+      ast,
       ide: this.buildNamespaceSafe('ide', () =>
         // The desktop host answers definitions from the symbol index, so a
         // definition lookup (direct tool or execute_code) starts the lazy

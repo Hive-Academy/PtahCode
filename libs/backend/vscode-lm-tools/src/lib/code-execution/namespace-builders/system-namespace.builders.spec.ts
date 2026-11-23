@@ -326,6 +326,26 @@ describe('buildFilesNamespace — list', () => {
 // buildHelpMethod / HELP_DOCS
 // ---------------------------------------------------------------------------
 
+describe('help of the code namespace', () => {
+  it('lists code in the overview of both profiles and serves a code topic', async () => {
+    for (const profile of ['apps', 'coding'] as const) {
+      const help = buildHelpMethod({ getCallerToolProfile: () => profile });
+      await expect(help()).resolves.toMatch(/CODE: ptah\.code\.\*/);
+      const topic = await help('code');
+      expect(topic).toBe(HELP_DOCS['code']);
+      for (const method of [
+        'searchSymbols(',
+        'grep(',
+        'readSymbol(',
+        'reindex(',
+        'ensureIndexFresh(',
+      ]) {
+        expect(topic).toContain(method);
+      }
+    }
+  });
+});
+
 describe('buildHelpMethod', () => {
   it('returns the "overview" doc when called with no topic', async () => {
     const help = buildHelpMethod({ getCallerToolProfile: () => 'apps' });

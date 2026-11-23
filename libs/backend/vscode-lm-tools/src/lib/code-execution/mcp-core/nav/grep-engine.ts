@@ -18,6 +18,7 @@ import {
 import { constants as fsConstants, type Dirent } from 'node:fs';
 import * as path from 'node:path';
 import * as vm from 'node:vm';
+import { isCodeIndexExcluded } from '@ptah-extension/workspace-intelligence';
 import { canonicalPathInsideRoot } from '../../namespace-builders/browser-file-url';
 import { toPosixRelative } from './nav-workspace-path';
 import {
@@ -67,13 +68,6 @@ export interface GrepEngineResult {
   /** Set when the search failed; `matches` may then be partial. */
   readonly error?: string;
 }
-
-const NODE_SKIPPED_DIRS: ReadonlySet<string> = new Set([
-  'node_modules',
-  '.git',
-  'dist',
-  'coverage',
-]);
 
 /** Smart case: insensitive unless the pattern has an upper-case letter. */
 export function isCaseInsensitive(
@@ -443,6 +437,35 @@ export function isGitWorkTree(
   return probe;
 }
 
+/**
+ * True only when `git grep` can list files of `rootReal`: the work tree
+ * around it does not ignore the root. One `git check-ignore -q -- .`: exit 1
+ * = not ignored. A root under an ignored directory of a parent repository is
+ * "inside the work tree", yet `git grep` lists no file of it and reports no
+ * error. Exit 0 (ignored) and every failure (timeout, spawn error, exit 128)
+ * give `false`, so the Node walk runs and never a silent zero. Not cached: an
+ * ignore rule can change.
+ */
+export function canGitGrepSearchRoot(
+  gitBinary: string,
+  rootReal: string,
+): Promise<boolean> {
+  return new Promise<boolean>((resolve) => {
+    execFile(
+      gitBinary,
+      ['-C', rootReal, 'check-ignore', '-q', '--', '.'],
+      { timeout: GIT_PROBE_TIMEOUT_MS, windowsHide: true },
+      (error) => {
+        const exitCode =
+          error && typeof (error as { code?: unknown }).code === 'number'
+            ? (error as { code: number }).code
+            : undefined;
+        resolve(exitCode === 1);
+      },
+    );
+  });
+}
+
 /** argv for `rg`; the pattern and the path follow `--`. */
 export function buildRipgrepArgs(
   request: GrepRequest,
@@ -775,7 +798,7 @@ function hasHiddenSegment(relative: string): boolean {
  * `.gitignore`, `.git/info/exclude` and the global excludes file. Hidden
  * files and directories are excluded by pathspec, as rg and the Node walk
  * skip them, unless the target itself is hidden. Unlike the Node walk there
- * is no NODE_SKIPPED_DIRS list, because git's ignore rules already cover
+ * is no code-index exclude list, because git's ignore rules already cover
  * what a repository wants skipped. `.git` itself is never searched. A PCRE-less git fails a `-P` search with
  * no matches, so the handler falls through to the Node walk.
  */
@@ -859,6 +882,13 @@ function isBinaryContent(content: Buffer): boolean {
   return content.subarray(0, 4096).includes(0);
 }
 
+/** Pruned folders that need no note: they were always skipped by the walk. */
+const QUIET_PRUNED_DIRS: ReadonlySet<string> = new Set([
+  'node_modules',
+  'dist',
+  'coverage',
+]);
+
 /** Bounded Node search used when `rg` is not on PATH. */
 export async function runNodeSearch(
   request: GrepRequest,
@@ -881,6 +911,21 @@ export async function runNodeSearch(
   const isIgnored = request.includeIgnored
     ? () => false
     : await loadRootIgnore(request.rootReal);
+  // A target the caller scoped into an excluded folder (`dist/pkg`) is
+  // searched, as before: the shared exclude list prunes only below a
+  // target that is not itself excluded.
+  const targetExcluded = isCodeIndexExcluded(
+    toPosixRelative(request.rootReal, request.targetAbsolute),
+  );
+  // Below an excluded target the list applies to the path from the target,
+  // so `dist/pkg/node_modules` is still pruned.
+  const excludeBase = targetExcluded
+    ? request.targetAbsolute
+    : request.rootReal;
+  // Names of directories the shared list pruned, other than the long-standing
+  // `node_modules`, `dist` and `coverage`: a source folder called `build` or
+  // `out` must not vanish without a word.
+  const prunedNames = new Set<string>();
 
   const searchFile = async (absolute: string): Promise<void> => {
     const relative = toPosixRelative(request.rootReal, absolute);
@@ -951,10 +996,16 @@ export async function runNodeSearch(
       const absolute = path.join(dir, entry.name);
       const relative = toPosixRelative(request.rootReal, absolute);
       if (entry.isDirectory()) {
+        const excluded =
+          !request.includeIgnored &&
+          isCodeIndexExcluded(toPosixRelative(excludeBase, absolute));
+        if (excluded && !QUIET_PRUNED_DIRS.has(entry.name)) {
+          prunedNames.add(entry.name);
+        }
         const skipped = request.includeIgnored
           ? entry.name === '.git'
-          : NODE_SKIPPED_DIRS.has(entry.name) ||
-            entry.name.startsWith('.') ||
+          : entry.name.startsWith('.') ||
+            excluded ||
             isIgnored(relative, entry.name, true);
         if (!skipped) {
           await walk(absolute);
@@ -1002,6 +1053,9 @@ export async function runNodeSearch(
       ? `${skippedLongLines} line(s) over ${GREP_MAX_SEARCHED_LINE_CHARS} chars (regex only)`
       : '',
     unreadable > 0 ? `${unreadable} unreadable file(s) or folder(s)` : '',
+    prunedNames.size > 0
+      ? `folder(s) on the code-index exclude list (${[...prunedNames].slice(0, 5).join(', ')}); search one with includeIgnored and a scoped path`
+      : '',
   ].filter((note) => note !== '');
   return {
     engine: 'node',

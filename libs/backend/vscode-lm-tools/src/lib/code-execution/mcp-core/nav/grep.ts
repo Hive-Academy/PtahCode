@@ -15,6 +15,7 @@ import {
   findRipgrep,
   inferRegexMode,
   isGitWorkTree,
+  canGitGrepSearchRoot,
   runGitGrep,
   runNodeSearch,
   runRipgrep,
@@ -530,7 +531,13 @@ export async function handleGrep(
     // rg is absent or failed: `git grep` is a child process too, so a large
     // repository does not stall this process's event loop like the walk.
     const git = await (deps.findGit ?? findGit)();
-    if (git && (await isGitWorkTree(git, request.rootReal))) {
+    if (
+      git &&
+      (await isGitWorkTree(git, request.rootReal)) &&
+      // A root that a parent repository ignores is "inside" the work tree,
+      // but `git grep` lists no file of it and says nothing: use the walk.
+      (await canGitGrepSearchRoot(git, request.rootReal))
+    ) {
       result = await runGitGrep(git, request);
       if (
         result.error &&

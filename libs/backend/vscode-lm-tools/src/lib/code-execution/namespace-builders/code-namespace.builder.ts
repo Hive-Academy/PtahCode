@@ -17,6 +17,7 @@
  * reindex that pretends to have scanned it.
  */
 
+import { realpath } from 'fs/promises';
 import * as path from 'path';
 import type {
   CodeIndexFreshness,
@@ -35,6 +36,16 @@ import {
   supportedLanguagesFor,
   type CodeSymbolIndexer,
 } from '@ptah-extension/workspace-intelligence';
+import type { AstCodeInsights } from '../types';
+import {
+  handleGrep,
+  type GrepArgs,
+  type GrepReply,
+} from '../mcp-core/nav/grep';
+import {
+  handleReadSymbol,
+  type ReadSymbolArgs,
+} from '../mcp-core/nav/read-symbol';
 import {
   shapeSymbolHits,
   symbolCandidateCount,
@@ -66,6 +77,14 @@ export interface CodeNamespaceDependencies {
    * only when the searched root is exactly one of these.
    */
   getHostWorkspaceRoots: () => readonly string[];
+  /**
+   * Root of `grep` and `readSymbol`: the session root, or `undefined` when no
+   * workspace is open. Unlike `getWorkspaceRoot` there is no home-directory
+   * fallback, so a free-text search never walks the home directory.
+   */
+  getNavWorkspaceRoot?: () => string | undefined;
+  /** Tree-sitter outline of an absolute file path, for `grep` and `readSymbol`. */
+  analyze?: (absolutePath: string) => Promise<AstCodeInsights>;
   logger: {
     warn(message: string, metadata?: Record<string, unknown>): void;
   };
@@ -177,7 +196,24 @@ export interface CodeNamespace {
    * background reindex without waiting for it. Never rejects.
    */
   ensureIndexFresh(): Promise<IndexFreshnessStatus>;
+
+  /**
+   * Free-text search of the workspace, the same engine and plain-text answer
+   * as the `ptah_grep` tool. The root is the session workspace;
+   * `workspaceRoot` is refused. Throws the tool's error text on a failed call.
+   */
+  grep(args: NavCallArgs<GrepArgs>): Promise<string>;
+
+  /**
+   * Reads one declaration by name, or a line range, the same as the
+   * `ptah_read_symbol` tool. The root is the session workspace;
+   * `workspaceRoot` is refused. Throws the tool's error text on a failed call.
+   */
+  readSymbol(args: NavCallArgs<ReadSymbolArgs>): Promise<string>;
 }
+
+/** Arguments of a Code Mode nav call: those of the tool, minus `workspaceRoot`. */
+export type NavCallArgs<T> = Omit<T, 'workspaceRoot'>;
 
 export function buildCodeNamespace(
   deps: CodeNamespaceDependencies,
@@ -188,9 +224,84 @@ export function buildCodeNamespace(
     getSymbolIndexer,
     getWorkspaceRoot,
     getHostWorkspaceRoots,
+    getNavWorkspaceRoot,
+    analyze,
     logger,
   } = deps;
   const now = deps.now ?? Date.now;
+
+  /** True when `root` is a host-recorded root or a directory inside one. */
+  async function isInsideHostRoot(root: string): Promise<boolean> {
+    const canonical = async (value: string): Promise<string> => {
+      try {
+        return await realpath(value);
+      } catch {
+        return path.resolve(value);
+      }
+    };
+    const target = await canonical(root);
+    for (const host of getHostWorkspaceRoots()) {
+      const relative = path.relative(await canonical(host), target);
+      if (
+        relative === '' ||
+        (!relative.startsWith('..') && !path.isAbsolute(relative))
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * One nav call: the tool's own handler, so the tool and Code Mode cannot
+   * drift. `workspaceRoot` is refused because the MCP tool checks it against
+   * the open folders and a Code Mode call has no such check.
+   */
+  async function runNav(
+    toolName: string,
+    handler: (
+      args: unknown,
+      navDeps: {
+        analyze: (absolutePath: string) => Promise<AstCodeInsights>;
+        defaultWorkspaceRoot: () => Promise<string | undefined>;
+      },
+    ) => Promise<GrepReply>,
+    args: unknown,
+  ): Promise<string> {
+    if (!analyze || !getNavWorkspaceRoot) {
+      throw new Error(`ptah.code: ${toolName} is not available in this host`);
+    }
+    // One read of the caller's object: a getter or Proxy cannot show a
+    // different `workspaceRoot` to this check and to the handler's schema.
+    const snapshot: unknown =
+      typeof args === 'object' && args !== null ? { ...args } : args;
+    if (
+      typeof snapshot === 'object' &&
+      snapshot !== null &&
+      (snapshot as { workspaceRoot?: unknown }).workspaceRoot !== undefined
+    ) {
+      throw new Error(
+        `ptah.code: "workspaceRoot" is not supported; ${toolName} runs in the current workspace`,
+      );
+    }
+    // The session root can come from a caller-declared tier (an MCP URL
+    // segment). The MCP tools refuse a declared root outside the open
+    // folders; so does this call, rather than search the wrong tree.
+    const root = getNavWorkspaceRoot();
+    if (root !== undefined && !(await isInsideHostRoot(root))) {
+      throw new Error(
+        `ptah.code: the workspace '${root}' is not an open folder of this host or a directory inside one, so ${toolName} did not run`,
+      );
+    }
+    const reply = await handler(snapshot, {
+      analyze,
+      defaultWorkspaceRoot: async () => root,
+    });
+    if (reply.isError) {
+      throw new Error(reply.text);
+    }
+    return reply.text;
+  }
 
   /** When the last background run for a root started (epoch ms). */
   const lastRunStartedAt = new Map<string, number>();
@@ -547,6 +658,10 @@ export function buildCodeNamespace(
     },
 
     ensureIndexFresh,
+
+    grep: (args) => runNav('grep', handleGrep, args),
+
+    readSymbol: (args) => runNav('readSymbol', handleReadSymbol, args),
   };
 }
 
