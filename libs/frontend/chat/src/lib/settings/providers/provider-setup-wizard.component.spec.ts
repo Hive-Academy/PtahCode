@@ -221,6 +221,16 @@ async function reachScope(fixture: ComponentFixture<ProviderSetupWizardComponent
 }
 
 describe('ProviderSetupWizardComponent', () => {
+  beforeAll(() => {
+    // jsdom needs a dialog stub. Native focus behaviour is covered by the Electron scenario.
+    HTMLDialogElement.prototype.showModal ??= function (this: HTMLDialogElement) {
+      this.setAttribute('open', '');
+    };
+    HTMLDialogElement.prototype.close ??= function (this: HTMLDialogElement) {
+      this.removeAttribute('open');
+    };
+  });
+
   beforeEach(async () => {
     await TestBed.configureTestingModule({
       imports: [ProviderSetupWizardComponent],
@@ -398,6 +408,116 @@ describe('ProviderSetupWizardComponent', () => {
       expect(button(fixture, 'wizard-continue')?.disabled).toBe(false);
     });
 
+    it('lists unconnected providers first, marks connected providers, and keeps Custom in the same radio group', () => {
+      const fixture = createComponent({
+        connectedProviderIds: new Set(['anthropic', 'requesty']),
+        providersWithDefaults: new Set(['requesty']),
+      });
+      const fieldset = query(fixture, 'wizard-provider-options');
+      const radios = Array.from(fieldset?.querySelectorAll<HTMLInputElement>('input[type="radio"]') ?? []);
+      expect(radios.slice(-3, -1).map((radio) => radio.value)).toEqual(['anthropic', 'requesty']);
+      expect(radios.every((radio) => radio.name === 'wizard-provider')).toBe(true);
+      expect(radios.at(-1)).toBe(query(fixture, 'wizard-provider-custom-radio'));
+      const requesty = fieldset?.querySelector('[data-provider="requesty"]');
+      expect(requesty?.querySelector('[data-testid="wizard-provider-connected"]')?.textContent).toContain('Connected');
+      expect(requesty?.textContent).toContain('Routed multi-model access via Anthropic-compatible API');
+      expect(requesty?.textContent).toContain('Default models available');
+      expect(fieldset?.querySelectorAll('[data-testid="wizard-provider-connected"]')).toHaveLength(2);
+      expect(query(fixture, 'wizard-provider-custom-option')?.textContent).toContain(
+        'OpenAI- or Anthropic-compatible self-hosted endpoint',
+      );
+    });
+
+    it('emits the row sign-in shortcut immediately with no draft', () => {
+      const fixture = createComponent();
+      const shortcut = jest.fn();
+      const stepAction = jest.fn();
+      fixture.componentInstance.signInShortcut.subscribe(shortcut);
+      fixture.componentInstance.externalActionRequested.subscribe(stepAction);
+      const signIn = fixture.nativeElement.querySelector('[data-provider="github-copilot"] button') as HTMLButtonElement;
+      expect(signIn.closest('label')).toBeNull();
+      signIn.click();
+      expect(shortcut).toHaveBeenCalledWith('github-copilot');
+      expect(stepAction).not.toHaveBeenCalled();
+      expect(fixture.nativeElement.querySelector('input[type="radio"]:checked')).toBeNull();
+      fixture.detectChanges();
+      expect(query(fixture, 'wizard-discard-review')?.querySelector('dialog')?.open).toBe(false);
+
+      fixture.componentRef.setInput('saving', true);
+      fixture.detectChanges();
+      expect(signIn.disabled).toBe(true);
+    });
+
+    it.each(['selection', 'search'] as const)(
+      'keeps the %s draft until Discard confirms the row sign-in shortcut',
+      (draft) => {
+        const fixture = draft === 'selection'
+          ? createComponent({ deepLinkProviderId: 'requesty' })
+          : createComponent();
+        const shortcut = jest.fn();
+        const closed = jest.fn();
+        fixture.componentInstance.signInShortcut.subscribe(shortcut);
+        fixture.componentInstance.closed.subscribe(closed);
+        if (draft === 'search') typeInto(fixture, 'wizard-provider-search', 'copilot');
+        const signIn = fixture.nativeElement.querySelector(
+          '[data-provider="github-copilot"] button',
+        ) as HTMLButtonElement;
+        const dialog = query(fixture, 'wizard-discard-review')?.querySelector('dialog');
+
+        signIn.focus();
+        signIn.click();
+        fixture.detectChanges();
+        expect(dialog?.open).toBe(true);
+        expect(shortcut).not.toHaveBeenCalled();
+        expect(closed).not.toHaveBeenCalled();
+
+        click(fixture, 'wizard-discard-keep');
+        expect(dialog?.open).toBe(false);
+        expect(shortcut).not.toHaveBeenCalled();
+        if (draft === 'selection') {
+          expect(fixture.nativeElement.querySelector('input[type="radio"]:checked')?.value)
+            .toBe('requesty');
+        } else {
+          expect((query(fixture, 'wizard-provider-search') as HTMLInputElement).value)
+            .toBe('copilot');
+        }
+
+        signIn.click();
+        fixture.detectChanges();
+        click(fixture, 'wizard-discard-confirm');
+        expect(shortcut).toHaveBeenCalledTimes(1);
+        expect(shortcut).toHaveBeenCalledWith('github-copilot');
+        expect(closed).not.toHaveBeenCalled();
+      },
+    );
+
+    it('offers Retry on a refresh failure, then displays skeleton rows until ready', () => {
+      const fixture = createComponent({ connectionsStatus: 'error' });
+      const retry = jest.fn();
+      fixture.componentInstance.retryConnectionsRequested.subscribe(retry);
+      const alert = query(fixture, 'wizard-connections-error');
+      expect(alert?.querySelector('[role="status"]')).not.toBeNull();
+      expect(query(fixture, 'wizard-provider-radio')).not.toBeNull();
+      const retryButton = alert?.querySelector('button');
+      retryButton?.focus();
+      retryButton?.click();
+      expect(retry).toHaveBeenCalledTimes(1);
+      expect(document.activeElement).toBe(query(fixture, 'wizard-provider-search'));
+
+      fixture.componentRef.setInput('connectionsStatus', 'loading');
+      fixture.detectChanges();
+      expect(query(fixture, 'wizard-provider-loading')?.querySelectorAll('ptah-skeleton')).toHaveLength(4);
+      expect(query(fixture, 'wizard-provider-radio')).toBeNull();
+      expect(query(fixture, 'wizard-step-provider')?.querySelector('[role="status"]')?.textContent).toContain(
+        'Checking connected providers…',
+      );
+
+      fixture.componentRef.setInput('connectionsStatus', 'ready');
+      fixture.detectChanges();
+      expect(query(fixture, 'wizard-provider-loading')).toBeNull();
+      expect(query(fixture, 'wizard-provider-radio')).not.toBeNull();
+    });
+
     it('offers a provider-session provider only when the host reports it', () => {
       const antigravity = '[name="wizard-provider"][value="antigravity-cli"]';
       expect(createComponent().nativeElement.querySelector(antigravity)).toBeNull();
@@ -484,10 +604,13 @@ describe('ProviderSetupWizardComponent', () => {
       expect(keyInput.type).toBe('password');
       const toggle = button(fixture, 'wizard-key-visibility');
       expect(toggle?.getAttribute('aria-pressed')).toBe('false');
+      expect(toggle?.getAttribute('aria-label')).toBe('Show API key');
+      expect(toggle?.closest('ptah-field')).toBe(keyInput.closest('ptah-field'));
       toggle?.click();
       fixture.detectChanges();
       expect((query(fixture, 'wizard-api-key') as HTMLInputElement).type).toBe('text');
-      expect(button(fixture, 'wizard-key-visibility')?.getAttribute('aria-pressed')).toBe('true');
+      expect(toggle?.getAttribute('aria-pressed')).toBe('true');
+      expect(toggle?.getAttribute('aria-label')).toBe('Show API key');
       expect(button(fixture, 'wizard-continue')?.disabled).toBe(true);
       typeInto(fixture, 'wizard-api-key', 'sk-test-123');
       expect(button(fixture, 'wizard-continue')?.disabled).toBe(false);
@@ -1042,7 +1165,7 @@ describe('ProviderSetupWizardComponent', () => {
       expect(verify).toHaveBeenCalledTimes(1);
       // The user backs out instead of committing.
       click(fixture, 'wizard-cancel');
-      expect(query(fixture, 'wizard-discard-review')).not.toBeNull();
+      expect(query(fixture, 'wizard-discard-review')?.querySelector('dialog')?.open).toBe(true);
       click(fixture, 'wizard-discard-confirm');
       fixture.detectChanges();
       expect(closings).toHaveLength(1);
@@ -1388,7 +1511,7 @@ describe('ProviderSetupWizardComponent', () => {
       });
       click(fixture, 'wizard-cancel');
       expect(closings).toHaveLength(1);
-      expect(query(fixture, 'wizard-discard-review')).toBeNull();
+      expect(query(fixture, 'wizard-discard-review')?.querySelector('dialog')?.open).toBe(false);
     });
 
     it('asks before discarding, and Keep editing keeps the setup', () => {
@@ -1399,13 +1522,37 @@ describe('ProviderSetupWizardComponent', () => {
       });
       selectProvider(fixture, 'requesty');
       click(fixture, 'wizard-cancel');
+      const dialog = query(fixture, 'wizard-discard-review')?.querySelector('dialog');
+      expect(dialog?.open).toBe(true);
+      expect(dialog?.getAttribute('aria-labelledby')).toBe('wizard-discard-heading');
+      expect(dialog?.querySelector('.modal-box button')).toBe(button(fixture, 'wizard-discard-keep'));
+      expect(button(fixture, 'wizard-discard-confirm')?.classList.contains('btn-error')).toBe(true);
       expect(query(fixture, 'wizard-discard-heading')?.textContent?.trim()).toBe(
         'Discard this setup?',
       );
       expect(closings).toHaveLength(0);
       click(fixture, 'wizard-discard-keep');
-      expect(query(fixture, 'wizard-discard-review')).toBeNull();
+      expect(query(fixture, 'wizard-discard-review')?.querySelector('dialog')?.open).toBe(false);
       expect(closings).toHaveLength(0);
+    });
+
+    it('handles Escape in the discard modal without closing the drawer', () => {
+      const fixture = createComponent({ deepLinkProviderId: 'requesty' });
+      const closed = jest.fn();
+      fixture.componentInstance.closed.subscribe(closed);
+      const panel = query(fixture, 'native-drawer-panel');
+      const escape = () => new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+      panel?.dispatchEvent(escape());
+      fixture.detectChanges();
+
+      const keydown = escape();
+      button(fixture, 'wizard-discard-keep')?.dispatchEvent(keydown);
+      expect(keydown.defaultPrevented).toBe(false);
+      query(fixture, 'wizard-discard-review')?.querySelector('dialog')?.dispatchEvent(new Event('cancel'));
+      fixture.detectChanges();
+      expect(query(fixture, 'wizard-discard-review')?.querySelector('dialog')?.open).toBe(false);
+      expect(query(fixture, 'native-drawer-panel')).toBe(panel);
+      expect(closed).not.toHaveBeenCalled();
     });
 
     it('clears the secret and closes on Discard', () => {
@@ -1487,10 +1634,10 @@ describe('ProviderSetupWizardComponent', () => {
       const buttons = Array.from(
         fixture.nativeElement.querySelectorAll('button'),
       ) as HTMLButtonElement[];
-      // The shared drawer's own close button is outside this batch; every
-      // button this component renders must comply.
+      // The drawer close and modal backdrop are owned by the shared overlay primitives.
       const wizardButtons = buttons.filter(
-        (element) => element.getAttribute('data-testid') !== 'native-drawer-close',
+        (element) => element.getAttribute('data-testid') !== 'native-drawer-close' &&
+          !element.closest('.modal-backdrop'),
       );
       expect(wizardButtons.length).toBeGreaterThan(3);
       for (const element of wizardButtons) {

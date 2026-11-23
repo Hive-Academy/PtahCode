@@ -29,7 +29,8 @@ class StubModelEffortPopoverComponent {
 @Component({
   selector: 'ptah-lanes-redetect-button',
   standalone: true,
-  template: '<button type="button" [attr.data-testid]="testId()">Re-detect CLIs</button>',
+  template:
+    '<button type="button" [attr.data-testid]="testId()">Re-detect CLIs</button>',
 })
 class StubRedetectButtonComponent {
   readonly testId = input('policy-redetect');
@@ -154,7 +155,9 @@ describe('LanesTableComponent visual presentation', () => {
     expect(remove?.getAttribute('data-tone')).toBe('danger');
     // The table actions sit in the detail footer, beside Test.
     expect(edit?.closest('[data-testid="lane-detail-footer"]')).not.toBeNull();
-    expect(remove?.closest('[data-testid="lane-detail-footer"]')).not.toBeNull();
+    expect(
+      remove?.closest('[data-testid="lane-detail-footer"]'),
+    ).not.toBeNull();
   });
 
   it('hides unset effort in rows and keeps its editor in expanded details at both tiers', async () => {
@@ -244,7 +247,9 @@ describe('LanesTableComponent visual presentation', () => {
     const cell = q(host, '[data-testid="lanes-empty"]');
     expect(cell?.classList.contains('ptah-table-message-cell')).toBe(true);
     expect(cell?.textContent?.trim()).toBe('No lanes available');
-    expect(cell?.querySelector('lucide-angular[aria-hidden="true"]')).not.toBeNull();
+    expect(
+      cell?.querySelector('lucide-angular[aria-hidden="true"]'),
+    ).not.toBeNull();
     expect(cell?.getAttribute('colspan')).toBe('8');
   });
 
@@ -252,7 +257,9 @@ describe('LanesTableComponent visual presentation', () => {
     const { fixture, host } = await mount([]);
     fixture.componentRef.setInput('loading', true);
     fixture.detectChanges();
-    expect(host.querySelectorAll('[data-testid="lanes-skeleton-row"]')).toHaveLength(3);
+    expect(
+      host.querySelectorAll('[data-testid="lanes-skeleton-row"]'),
+    ).toHaveLength(3);
     expect(q(host, 'tbody[aria-busy="true"]')).not.toBeNull();
     expect(q(host, '[data-testid="lanes-group-cli"]')).toBeNull();
     fixture.componentRef.setInput('loading', false);
@@ -261,7 +268,9 @@ describe('LanesTableComponent visual presentation', () => {
     const alert = q(host, 'td[role="alert"]');
     expect(alert?.textContent).toContain('Could not load lanes');
     expect(alert?.querySelector('button')?.textContent?.trim()).toBe('Retry');
-    expect(host.querySelectorAll('[data-testid="lanes-skeleton-row"]')).toHaveLength(0);
+    expect(
+      host.querySelectorAll('[data-testid="lanes-skeleton-row"]'),
+    ).toHaveLength(0);
   });
 
   it('distinguishes loading and error from an empty result and retries', async () => {
@@ -574,7 +583,9 @@ describe('LanesTableComponent visual presentation', () => {
         ).not.toBeNull();
         const primary = title?.querySelector('.ptah-table-row-title-primary');
         expect(
-          primary?.querySelector('.ptah-table-row-title-kind'),
+          title?.querySelector(
+            '.ptah-table-row-title-secondary-line .ptah-table-row-title-kind',
+          ),
         ).not.toBeNull();
         expect(
           identity.nextElementSibling?.classList.contains('lane-model-value'),
@@ -625,7 +636,9 @@ describe('LanesTableComponent visual presentation', () => {
     expect(
       lane?.querySelector('ptah-lanes-table-status')?.textContent,
     ).not.toContain('Sign in');
-    const signIn = lane?.querySelector<HTMLButtonElement>('[data-testid="lanes-sign-in"]');
+    const signIn = lane?.querySelector<HTMLButtonElement>(
+      '[data-testid="lanes-sign-in"]',
+    );
     expect(signIn?.textContent?.trim()).toBe('Sign in');
     expect(signIn?.closest('[data-lane-status]')).not.toBeNull();
     expect(

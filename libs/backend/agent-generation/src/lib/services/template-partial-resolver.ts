@@ -46,6 +46,7 @@ import { join } from 'path';
 import { Logger, TOKENS } from '@ptah-extension/vscode-core';
 import {
   Result,
+  applyAgentToolingRules,
   renderTaskSpecAgentBlock,
   type TaskSpecAgentAudience,
 } from '@ptah-extension/shared';
@@ -93,6 +94,16 @@ const DERIVED_BLOCKS: Readonly<Record<string, (templateId: string) => string>> =
   {
     TASK_SPEC_CONTRACT: (templateId) =>
       renderTaskSpecAgentBlock(taskSpecAudienceFor(templateId)),
+  };
+
+/**
+ * Block ids whose `_shared/` file is read, then rewritten by a renderer. The
+ * file supplies the sections the host does not generate; the generated part
+ * cannot go stale on disk.
+ */
+const POST_PROCESSED_BLOCKS: Readonly<Record<string, (raw: string) => string>> =
+  {
+    TOOLING_PRECEDENCE: (raw) => applyAgentToolingRules(raw),
   };
 
 /** `<id>` → `_shared/<id-in-kebab-case>.md`. */
@@ -312,7 +323,8 @@ export class TemplatePartialResolver {
     const filePath = join(partialsDir, fileName);
     const registered = (SHARED_BLOCK_IDS as readonly string[]).includes(id);
     try {
-      const text = await readFile(filePath, 'utf-8');
+      const raw = await readFile(filePath, 'utf-8');
+      const text = POST_PROCESSED_BLOCKS[id]?.(raw) ?? raw;
       this.partialCache.set(fileName, text);
       return Result.ok(text);
     } catch (error: unknown) {

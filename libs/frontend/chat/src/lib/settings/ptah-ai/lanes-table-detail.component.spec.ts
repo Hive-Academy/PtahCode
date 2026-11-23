@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { Component, signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 import { By } from '@angular/platform-browser';
@@ -264,6 +266,25 @@ describe('LanesTableDetailComponent', () => {
     expect(
       host.querySelector('[data-testid="cli-provider-popover-content"]'),
     ).toBeNull();
+  });
+
+  it('lays each capability group out as one full-width column, overriding the shared dl style', () => {
+    const { fixture, host } = mount();
+    host
+      .querySelector<HTMLButtonElement>(
+        'ptah-disclosure[data-lane-capabilities] button',
+      )!
+      .click();
+    fixture.detectChanges();
+    expect(host.querySelector('ptah-cli-capability-detail dl')).not.toBeNull();
+    // Jest removes component styles, so the rule is read from the source file.
+    const css = readFileSync(
+      join(__dirname, 'cli-capability-detail.component.ts'),
+      'utf8',
+    );
+    expect(css).toMatch(
+      /:host\s+dl\s*\{\s*grid-template-columns:\s*minmax\(0,\s*1fr\)/,
+    );
   });
 
   it('places destructive Delete last after the instance actions', () => {

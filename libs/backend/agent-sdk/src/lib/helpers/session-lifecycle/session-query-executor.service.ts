@@ -70,6 +70,7 @@ import {
   OPENROUTER_PROXY_TOKEN_PLACEHOLDER,
   NAMED_ACCOUNT_ADMISSION_BUDGET_MS,
   formatActivityOverdue,
+  formatSessionOverdue,
   type ContextCapacityRoute,
 } from '@ptah-extension/shared';
 import type { UsageCostSource } from '../../session-stats/session-stats-owner.service';
@@ -88,6 +89,7 @@ import type {
 import type { SubagentBudgetMonitor } from '../compaction/subagent-budget-monitor';
 import { MainRequestTracker } from '../compaction/idle/idle-request-tracker';
 import type { IdleCompactionSignals } from '../compaction/idle/idle-compaction.types';
+import type { AgentNoticeCallbackRegistry } from '../agent-notice-callback-registry';
 import type { SdkModuleLoader } from '../sdk-module-loader';
 import {
   resolveSessionCapabilityPolicy,
@@ -1418,8 +1420,38 @@ export class SessionQueryExecutor {
     private readonly contextUsagePort: IContextUsagePort | null = null,
     private readonly subagentBudgetMonitor: SubagentBudgetSink | null = null,
     private readonly idle: IdleCompactionSignals | null = null,
+    /** Carries the overdue notice to the host UI (TASK_2026_2310). Informs only. */
+    private readonly agentNotices: Pick<AgentNoticeCallbackRegistry, 'notifyAll'> | null = null,
   ) {
     this.namedSettlements = new NamedAdmissionSettlements(logger);
+  }
+
+  /**
+   * Tell the host UI that a live session still waits on open work after its overdue window, or
+   * (empty `operations`) that it shows activity again. A failing subscriber never affects the run.
+   */
+  private announceOverdue(
+    rec: { readonly tabId: string; readonly realSessionId: string | null },
+    sessionId: string,
+    operations: readonly string[],
+  ): void {
+    if (!this.agentNotices) return;
+    const overdue = operations.length > 0;
+    try {
+      this.agentNotices.notifyAll({
+        kind: 'session-overdue',
+        sessionId: rec.realSessionId ?? sessionId,
+        tabId: rec.tabId,
+        overdue,
+        operations,
+        text: overdue ? formatSessionOverdue(operations) : '',
+      });
+    } catch (error) {
+      this.logger.warn('[SessionLifecycle] Overdue notice failed; the session continues', {
+        sessionId,
+        error: error instanceof Error ? error.name : typeof error,
+      });
+    }
   }
 
   /** Named-account flows whose run lease may still be unsettled. */
@@ -1649,7 +1681,11 @@ export class SessionQueryExecutor {
         for (const operation of operations) {
           this.logger.warn(formatActivityOverdue(operation), { sessionId });
         }
+        // Ambient and Monitor tasks count as open work, so a provider hang behind them only
+        // reaches the log. Show it to the person; the session is never stopped for this.
+        this.announceOverdue(rec, sessionId as string, operations);
       },
+      () => this.announceOverdue(rec, sessionId as string, []),
     );
     abortController.signal.addEventListener('abort', () => activityWatchdog.stop(), {
       once: true,

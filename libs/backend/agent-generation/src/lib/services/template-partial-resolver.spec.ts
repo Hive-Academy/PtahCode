@@ -17,7 +17,10 @@ jest.mock('@ptah-extension/vscode-core', () => ({
   TOKENS: { LOGGER: Symbol.for('Logger'), SENTRY_SERVICE: Symbol.for('S') },
 }));
 
-import { renderTaskSpecAgentBlock } from '@ptah-extension/shared';
+import {
+  renderAgentToolingRules,
+  renderTaskSpecAgentBlock,
+} from '@ptah-extension/shared';
 import {
   TASK_SPEC_COORDINATOR_TEMPLATES,
   TemplatePartialResolver,
@@ -346,6 +349,24 @@ describe('TemplatePartialResolver', () => {
       expect(result.value!.content).toContain('{{NOT_A_SLOT}}');
       expect(result.value!.content).toContain('STOP before writing code.');
     });
+  });
+
+  it('regenerates the TOOLING_PRECEDENCE working rules and keeps the rest of the file', async () => {
+    writeFileSync(
+      join(dir, partialFileName('TOOLING_PRECEDENCE')),
+      '## Working rules\n\n- stale: native search for free text\n\n## Skill use\n\n- keep this\n',
+      'utf8',
+    );
+    const result = await resolve(
+      '<!-- STATIC:TOOLING_PRECEDENCE -->\n<!-- /STATIC:TOOLING_PRECEDENCE -->\n',
+    );
+
+    expect(result.isOk()).toBe(true);
+    const content = result.value!.content;
+    expect(content).toContain(renderAgentToolingRules());
+    expect(content).toContain('ptah_grep');
+    expect(content).not.toContain('stale: native search');
+    expect(content).toContain('## Skill use\n\n- keep this');
   });
 
   it('reads each partial once and forgets it on clearCache', async () => {

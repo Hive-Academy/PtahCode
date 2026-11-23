@@ -2,7 +2,7 @@
 
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
 import { SAVE_REFUSED_MESSAGE, SettingsSaveFeedbackService } from '../feedback/settings-save-feedback.service';
-import { computed, signal } from '@angular/core';
+import { signal } from '@angular/core';
 import { PROVIDER_MODELS_LOADER } from '@ptah-extension/ui';
 import { rpcSuccess } from '@ptah-extension/core/testing';
 import {
@@ -66,8 +66,6 @@ class MockProvidersSettingsStateService {
     },
     error: null,
   });
-
-  readonly activeProviderId = computed(() => 'anthropic');
 
   readonly memoryStore = signal<
     ProvidersSettingsSection<{
@@ -155,6 +153,26 @@ class MockProvidersSettingsStateService {
     return { scopeKey: 'test-scope', activePath: '/workspace' };
   }
 
+  readonly applySettings = async (patch: ProvidersSettingsPatch) => {
+    const enhancement = this.enhancement().data;
+    if (patch.enhancement && enhancement) {
+      this.enhancementStore.set({
+        status: 'ready',
+        data: { ...enhancement, ...patch.enhancement },
+        error: null,
+      });
+    }
+    this.commitState.set({
+      status: 'saved',
+      saved: ['test'],
+      unsaved: [],
+      unconfirmed: [],
+      refreshFailed: false,
+      message: null,
+    });
+    return true;
+  };
+
   readonly refreshMemory = jest
     .fn<Promise<void>, []>()
     .mockResolvedValue(undefined);
@@ -162,17 +180,7 @@ class MockProvidersSettingsStateService {
 
   readonly saveSettings = jest
     .fn<Promise<boolean>, [ProvidersSettingsPatch, ProvidersEditContext]>()
-    .mockImplementation(async () => {
-      this.commitState.set({
-        status: 'saved',
-        saved: ['test'],
-        unsaved: [],
-        unconfirmed: [],
-        refreshFailed: false,
-        message: null,
-      });
-      return true;
-    });
+    .mockImplementation(this.applySettings);
 }
 
 function query(
@@ -355,6 +363,99 @@ describe('ProviderConsumerAssignmentsComponent', () => {
       { enhancement: { provider: 'anthropic', model: 'claude-3-5-sonnet' } },
       expect.any(Object),
     );
+  });
+
+  it('reverts the picker and alerts when the edit context is still unavailable at save time', async () => {
+    const reviewContext = jest
+      .spyOn(mockState, 'reviewContext')
+      .mockReturnValue(null);
+    await openRow('enhancement');
+    await choose(providerSelect('enhancement'), 'anthropic');
+
+    expect(reviewContext).toHaveBeenCalledTimes(2);
+    expect(mockState.saveSettings).not.toHaveBeenCalled();
+    expect(providerSelect('enhancement').value).toBe('');
+    expect(feedback.toast()).toMatchObject({
+      tone: 'alert',
+      message: expect.stringContaining('Could not save'),
+      canUndo: false,
+    });
+  });
+
+  it('uses the edit context that becomes available after opening the picker', async () => {
+    jest.spyOn(mockState, 'reviewContext').mockReturnValueOnce(null);
+    await openRow('enhancement');
+    await choose(providerSelect('enhancement'), 'anthropic');
+
+    expect(mockState.saveSettings).toHaveBeenCalledWith(
+      { enhancement: { provider: 'anthropic', model: 'inherit' } },
+      { scopeKey: 'test-scope', activePath: '/workspace' },
+    );
+  });
+
+  it('saves only the latest model picked while the provider save is in flight', async () => {
+    let finishProviderSave: () => void = () => undefined;
+    const providerSave = new Promise<void>((resolve) => {
+      finishProviderSave = () => resolve();
+    });
+    mockState.saveSettings.mockImplementationOnce(async (patch) => {
+      mockState.commitState.update((commit) => ({ ...commit, status: 'saving' }));
+      await providerSave;
+      return mockState.applySettings(patch);
+    });
+    await openRow('enhancement');
+    await choose(providerSelect('enhancement'), 'anthropic');
+    expect(feedback.saving()).toBe(true);
+    expect(isDisabledControl(modelSelect('enhancement'))).toBe(false);
+
+    await choose(modelSelect('enhancement'), 'claude-3-5-haiku');
+    await choose(modelSelect('enhancement'), 'claude-3-5-sonnet');
+    expect(modelSelect('enhancement').value).toBe('claude-3-5-sonnet');
+    expect(mockState.saveSettings).toHaveBeenCalledTimes(1);
+
+    finishProviderSave();
+    await flushSave();
+
+    expect(mockState.saveSettings).toHaveBeenCalledTimes(2);
+    expect(mockState.saveSettings).toHaveBeenLastCalledWith(
+      { enhancement: { provider: 'anthropic', model: 'claude-3-5-sonnet' } },
+      expect.any(Object),
+    );
+    expect(mockState.enhancement().data).toMatchObject({
+      provider: 'anthropic',
+      model: 'claude-3-5-sonnet',
+    });
+    expect(providerSelect('enhancement').value).toBe('anthropic');
+    expect(modelSelect('enhancement').value).toBe('claude-3-5-sonnet');
+    const label = query(fixture, 'consumer-summary-enhancement')?.textContent;
+    expect(label).toContain('anthropic');
+    expect(label).toContain('claude-3-5-sonnet');
+  });
+
+  it('reverts a blocked pick made during a successful save to the refreshed assignment', async () => {
+    let finishProviderSave: () => void = () => undefined;
+    const providerSave = new Promise<void>((resolve) => {
+      finishProviderSave = () => resolve();
+    });
+    mockState.saveSettings.mockImplementationOnce(async (patch) => {
+      mockState.commitState.update((commit) => ({ ...commit, status: 'saving' }));
+      await providerSave;
+      return mockState.applySettings(patch);
+    });
+
+    await openRow('enhancement');
+    await choose(providerSelect('enhancement'), 'anthropic');
+    await choose(providerSelect('enhancement'), 'ollama');
+    expect(providerSelect('enhancement').value).toBe('ollama');
+    expect(query(fixture, 'readiness-alert-enhancement')).toBeTruthy();
+
+    finishProviderSave();
+    await flushSave();
+
+    expect(mockState.saveSettings).toHaveBeenCalledTimes(1);
+    expect(mockState.enhancement().data?.provider).toBe('anthropic');
+    expect(providerSelect('enhancement').value).toBe('anthropic');
+    expect(query(fixture, 'readiness-alert-enhancement')).toBeNull();
   });
 
   it('retries an unloaded enhancement section', async () => {

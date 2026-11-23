@@ -65,6 +65,7 @@ import {
   SessionIdResolvedCallbackRegistry,
   type SessionIdResolvedPayload,
 } from './helpers/session-id-resolved-callback-registry';
+import { AgentNoticeCallbackRegistry } from './helpers/agent-notice-callback-registry';
 import { SdkError } from './errors';
 import type { SessionMetadataStore } from './session-metadata-store';
 import type { SessionHistoryReaderService } from './session-history-reader.service';
@@ -389,6 +390,7 @@ interface AdapterHarness {
   events: SdkAdapterEvents;
   activityRegistry: SessionActivityRegistry;
   sessionIdResolvedRegistry: SessionIdResolvedCallbackRegistry;
+  agentNoticeRegistry: AgentNoticeCallbackRegistry;
   sessionBudget: ReturnType<typeof createMockSessionBudget>;
 }
 
@@ -440,6 +442,7 @@ function makeAdapter(
   const sessionIdResolvedRegistry = new SessionIdResolvedCallbackRegistry(
     asLogger(logger),
   );
+  const agentNoticeRegistry = new AgentNoticeCallbackRegistry(asLogger(logger));
   const statsOwner = new SessionStatsOwnerService();
   const historyReader = createMockHistoryReader();
   const sessionBudget = createMockSessionBudget();
@@ -466,6 +469,7 @@ function makeAdapter(
     historyReader as unknown as SessionHistoryReaderService,
     sessionBudget,
     { getConfig: () => ({ enabled: true, contextTokenThreshold: options.budgetWindow ?? null, envWindow: options.budgetEnvWindow ?? null }) },
+    agentNoticeRegistry,
   );
 
   return {
@@ -488,6 +492,7 @@ function makeAdapter(
     events,
     activityRegistry,
     sessionIdResolvedRegistry,
+    agentNoticeRegistry,
     sessionBudget,
   };
 }
@@ -2926,6 +2931,26 @@ describe('SdkAgentAdapter', () => {
   });
 
   describe('callback wiring', () => {
+    it('delivers agent notices to the latest callback only (TASK_2026_2310)', () => {
+      const h = makeAdapter();
+      const first = jest.fn();
+      const second = jest.fn();
+      h.adapter.setAgentNoticeCallback(first);
+      h.adapter.setAgentNoticeCallback(second);
+
+      const event = {
+        kind: 'session-overdue',
+        sessionId: 's1',
+        overdue: true,
+        operations: ['compaction'],
+        text: 'Waiting.',
+      } as const;
+      h.agentNoticeRegistry.notifyAll(event);
+
+      expect(first).not.toHaveBeenCalled();
+      expect(second).toHaveBeenCalledWith(event);
+    });
+
     it('passes registered callbacks through into executeQuery() options', async () => {
       const h = makeAdapter();
       await h.adapter.initialize();

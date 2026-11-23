@@ -575,6 +575,57 @@ describe('NoActivityWatchdog', () => {
     expect(timeout).toHaveBeenCalledWith('provider-no-response');
   });
 
+  it('reports recovery once after an overdue report when activity resumes', async () => {
+    const timeout = jest.fn();
+    const overdue = jest.fn();
+    const recovered = jest.fn();
+    const wd = new NoActivityWatchdog(WINDOW, timeout, overdue, recovered);
+    wd.beginTurn();
+    wd.start();
+    await fireHook(wd, { hook_event_name: 'PreCompact' });
+    jest.advanceTimersByTime(COMPACTION_MAX_DWELL_MS);
+    expect(overdue).toHaveBeenCalledTimes(1);
+    expect(recovered).not.toHaveBeenCalled();
+
+    await fireHook(wd, { hook_event_name: 'PostCompact' });
+    expect(recovered).toHaveBeenCalledTimes(1);
+    await fireHook(wd, { hook_event_name: 'PreCompact' });
+    expect(recovered).toHaveBeenCalledTimes(1);
+    expect(timeout).not.toHaveBeenCalled();
+  });
+
+  it('reports recovery when the session stops after an overdue report', async () => {
+    const recovered = jest.fn();
+    const wd = new NoActivityWatchdog(WINDOW, jest.fn(), jest.fn(), recovered);
+    wd.beginTurn();
+    wd.start();
+    await fireHook(wd, { hook_event_name: 'PreCompact' });
+    jest.advanceTimersByTime(COMPACTION_MAX_DWELL_MS);
+    wd.stop();
+    expect(recovered).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports recovery when a hold starts: waiting for a person is not a hang', async () => {
+    const recovered = jest.fn();
+    const wd = new NoActivityWatchdog(WINDOW, jest.fn(), jest.fn(), recovered);
+    wd.beginTurn();
+    wd.start();
+    await fireHook(wd, { hook_event_name: 'PreCompact' });
+    jest.advanceTimersByTime(COMPACTION_MAX_DWELL_MS);
+    wd.hold();
+    expect(recovered).toHaveBeenCalledTimes(1);
+  });
+
+  it('never reports recovery without an overdue report', () => {
+    const recovered = jest.fn();
+    const wd = new NoActivityWatchdog(WINDOW, jest.fn(), jest.fn(), recovered);
+    wd.beginTurn();
+    wd.start();
+    wd.kick();
+    wd.stop();
+    expect(recovered).not.toHaveBeenCalled();
+  });
+
   it('keeps a root UserPromptSubmit hook open for two watchdog windows', () => {
     const timeout = jest.fn();
     const overdue = jest.fn();

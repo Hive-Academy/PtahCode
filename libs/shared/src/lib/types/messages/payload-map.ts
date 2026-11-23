@@ -117,6 +117,7 @@ import type { PlanLimitsSnapshot } from '../plan-limit.types';
 import type { AgentSessionOpenedPayload } from './agent-session';
 import type {
   AgentMonitorActionNoticePayload,
+  SessionActivityOverduePayload,
   AgentMonitorMessageReceiptPayload,
   AgentMonitorParentDeliveryPayload,
   AgentMonitorReparentedPayload,
@@ -460,6 +461,7 @@ export interface MessagePayloadMap {
   'session:compactionComplete': SdkCompactionCompletePayload;
   'session:turnEnded': SdkTurnEndedPayload;
   'session:turnFailed': SdkTurnFailedPayload;
+  'session:activity-overdue': SessionActivityOverduePayload;
   'session:subagentEnded': SdkSubagentEndedPayload;
   'session:mcpStatus': SessionMcpStatusPayload;
   'planLimits:changed': PlanLimitsSnapshot;

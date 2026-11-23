@@ -47,7 +47,7 @@ function singleClassToggles(classes: string, on: boolean): Record<string, boolea
 
 /** The connector of a child item in navigation mode. */
 const NAVIGATION_CHILD_CLASS =
-  'relative ml-[var(--ptah-settings-nav-child-indent)] before:pointer-events-none before:absolute before:left-[var(--ptah-settings-nav-connector-left)] before:top-0 before:bottom-1/2 before:w-[var(--ptah-settings-nav-connector-w)] before:rounded-bl-[var(--ptah-settings-nav-connector-radius)] before:border-b before:border-l before:border-[var(--ptah-border-color-strong)] [&>button]:pl-[var(--ptah-settings-nav-child-indent)]';
+  'relative [@container(min-width:640px)]:ml-[calc(var(--ptah-settings-nav-item-pl)+var(--ptah-icon-md)/2)] before:pointer-events-none before:absolute before:left-0 before:top-0 before:bottom-1/2 before:w-[var(--ptah-settings-nav-item-pr)] before:rounded-bl-[var(--ptah-settings-nav-connector-radius)] before:border-b before:border-l before:border-[var(--ptah-border-color-strong)] [@container(max-width:639px)]:before:hidden [@container(min-width:640px)]:[&>button]:pl-[var(--ptah-settings-nav-child-indent)] [&>button]:h-[var(--ptah-control-h-sm)] [&>button]:font-normal';
 
 /** One tab item of `ptah-settings-layout`. */
 export interface PtahSettingsTab<TId extends string = string> {
@@ -167,7 +167,6 @@ const NAV_CLASS = [
                 [class]="navMode() === 'tabs' ? tabClass : navClass"
                 [class.tab-active]="navMode() === 'navigation' && tab.id === selected()"
                 [class.text-base-content]="navMode() === 'navigation' && inSection(tab.id)"
-                [class.shadow-[inset_2px_0_0_var(--ptah-border-color-strong)]]="navMode() === 'navigation' && inSection(tab.id)"
                 [attr.data-active]="navMode() === 'navigation' && tab.id === selected() ? 'true' : null"
                 [attr.data-in-section]="navMode() === 'navigation' && inSection(tab.id) ? 'true' : null"
                 [attr.aria-current]="navMode() === 'navigation' && tab.id === selected() ? 'page' : null"
@@ -175,7 +174,7 @@ const NAV_CLASS = [
                 [attr.aria-controls]="navMode() === 'tabs' ? panelId : null"
                 [attr.aria-disabled]="tab.disabled ? 'true' : null"
                 [attr.aria-describedby]="describedBy(tab)"
-                [attr.title]="tab.disabled && tab.disabledReason ? tab.disabledReason : null"
+                [attr.title]="tab.disabled && tab.disabledReason ? tab.disabledReason : navMode() === 'navigation' ? tab.stateMark?.label : null"
                 [tabIndex]="navMode() === 'tabs' ? (i === focusIndex() ? 0 : -1) : 0"
                 (click)="activate(tab)"
                 (keydown)="onKeydown($event)"
@@ -192,11 +191,19 @@ const NAV_CLASS = [
                 @if (hasBadge(tab.badge)) {
                   <span ptahBadge size="xs" data-testid="settings-layout-badge">{{ tab.badge }}</span>
                 }
-                <!-- The mark is not part of the button name: its label is the button description (the sr-only span below). -->
-                @if (navMode() === 'navigation' && tab.stateMark; as mark) {
-                  <span aria-hidden="true" class="inline-flex shrink-0 items-center gap-[var(--ptah-gap-label)] text-[length:var(--ptah-text-caption-size)]" [class]="markToneClass(mark.tone)" [attr.title]="mark.label" data-testid="settings-layout-state-mark">
-                    <span class="size-[var(--ptah-icon-xs)] rounded-full bg-current"></span>
-                    @if (mark.count !== undefined) { <span>{{ mark.count }}</span> }
+                @if (navMode() === 'navigation') {
+                  <!-- The button description supplies the mark's accessible text. -->
+                  <span aria-hidden="true" class="inline-flex shrink-0 items-center text-[length:var(--ptah-text-caption-size)]"
+                    [class]="tab.stateMark ? markToneClass(tab.stateMark.tone) : ''"
+                    [attr.data-testid]="tab.stateMark ? 'settings-layout-state-mark' : null">
+                    @if (tab.stateMark?.count !== undefined) {
+                      <span>{{ tab.stateMark?.count }}</span>
+                    }
+                    <span class="inline-flex w-4 shrink-0 items-center justify-center" data-testid="settings-layout-state-slot">
+                      @if (tab.stateMark) {
+                        <span class="size-2 rounded-full bg-current ring-2 ring-[color-mix(in_oklch,currentColor_28%,transparent)]"></span>
+                      }
+                    </span>
                   </span>
                 }
               </button>

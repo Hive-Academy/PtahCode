@@ -109,6 +109,7 @@ export function wireSdkCallbacks(
       options.getSdkSessionId,
     );
     wireCompactionStartCallback(sdkAdapter, webviewManager, logger, tag);
+    wireAgentNoticeCallback(sdkAdapter, webviewManager, logger, tag);
 
     if (options.worktree === true) {
       wireWorktreeCallbacks(
@@ -408,6 +409,42 @@ function wireCompactionStartCallback(
           error instanceof Error ? error : new Error(String(error)),
         );
       });
+  });
+}
+
+/**
+ * Carry SDK notices that have no other path to the renderer (TASK_2026_2310): a subagent ask or
+ * pause reuses `agent-monitor:action-notice`, and an overdue session uses
+ * `session:activity-overdue`. A notice only informs; nothing here stops a session or a subagent.
+ */
+function wireAgentNoticeCallback(
+  sdkAdapter: IAgentAdapter,
+  webviewManager: WebviewManagerLike,
+  logger: Logger,
+  tag: string,
+): void {
+  sdkAdapter.setAgentNoticeCallback?.((event) => {
+    const send =
+      event.kind === 'subagent-notice'
+        ? webviewManager.broadcastMessage(MESSAGE_TYPES.AGENT_MONITOR_ACTION_NOTICE, {
+            sessionId: event.sessionId,
+            agentId: event.agentId,
+            notice: event.notice,
+            text: event.text,
+          })
+        : webviewManager.broadcastMessage(MESSAGE_TYPES.SESSION_ACTIVITY_OVERDUE, {
+            sessionId: event.sessionId,
+            ...(event.tabId ? { tabId: event.tabId } : {}),
+            overdue: event.overdue,
+            operations: event.operations,
+            text: event.text,
+          });
+    send.catch((error: unknown) => {
+      logger.error(
+        `${tag} Failed to send ${event.kind} notice to webview`,
+        error instanceof Error ? error : new Error(String(error)),
+      );
+    });
   });
 }
 

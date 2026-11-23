@@ -109,6 +109,7 @@ import {
   CompactionCallbackRegistry,
   CompactionBoundaryGenerationRegistry,
   SessionIdResolvedCallbackRegistry,
+  AgentNoticeCallbackRegistry,
   SessionMcpStatusCallbackRegistry,
   McpServerBackoffService,
   SessionTurnStateRegistry,
@@ -715,6 +716,9 @@ export function registerSdkServices(
         );
       const notices = c.resolve(MainThreadNoticeQueue);
       const subagentNotices = c.resolve(SubagentNoticeQueue);
+      const agentNotices = c.resolve<AgentNoticeCallbackRegistry>(
+        SDK_TOKENS.SDK_AGENT_NOTICE_CALLBACK_REGISTRY,
+      );
       const logger = c.resolve<Logger>(TOKENS.LOGGER);
       // Resolved on first use, like the dispatcher: the lifecycle manager
       // injects this monitor.
@@ -741,6 +745,14 @@ export function registerSdkServices(
             subagentNotices.post(agentId, text),
           withdrawSubagentNotice: (agentId) =>
             subagentNotices.withdraw(agentId),
+          announceSubagentNotice: (sessionId, agentId, notice, text) =>
+            agentNotices.notifyAll({
+              kind: 'subagent-notice',
+              sessionId,
+              agentId,
+              notice,
+              text,
+            }),
         },
         c.resolve<SubagentRegistryService>(TOKENS.SUBAGENT_REGISTRY_SERVICE),
         handoffFiles,
@@ -782,6 +794,12 @@ export function registerSdkServices(
   container.register(
     SDK_TOKENS.SDK_SESSION_ID_RESOLVED_CALLBACK_REGISTRY,
     { useClass: SessionIdResolvedCallbackRegistry },
+    { lifecycle: Lifecycle.Singleton },
+  );
+
+  container.register(
+    SDK_TOKENS.SDK_AGENT_NOTICE_CALLBACK_REGISTRY,
+    { useClass: AgentNoticeCallbackRegistry },
     { lifecycle: Lifecycle.Singleton },
   );
 

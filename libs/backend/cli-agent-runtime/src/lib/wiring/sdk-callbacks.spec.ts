@@ -28,6 +28,7 @@ import type {
   SessionBudgetState,
   SessionStatsEntry,
   SessionStatsLivePayload,
+  AgentNoticeEvent,
 } from '@ptah-extension/shared';
 import { MESSAGE_TYPES } from '@ptah-extension/shared';
 import type { DependencyContainer } from 'tsyringe';
@@ -901,5 +902,113 @@ describe('wireSdkCallbacks — worktree created broadcast (TASK_2026_580)', () =
         sessionId: REAL_SESSION_ID,
       }),
     );
+  });
+});
+
+describe('wireSdkCallbacks — agent notices (TASK_2026_2310)', () => {
+  function wireNotices(broadcastMessage: jest.Mock, withSetter = true) {
+    let onNotice: ((event: AgentNoticeEvent) => void) | undefined;
+    const logger = createMockLogger();
+    const sdkAdapter = {
+      setResultStatsCallback: jest.fn(),
+      setLiveStatsCallback: jest.fn(),
+      setSessionIdResolvedCallback: jest.fn(),
+      setCompactionStartCallback: jest.fn(),
+      ...(withSetter
+        ? {
+            setAgentNoticeCallback: jest.fn((cb: (event: AgentNoticeEvent) => void) => {
+              onNotice = cb;
+            }),
+          }
+        : {}),
+    };
+    const registry = new Map<symbol, unknown>([
+      [TOKENS.AGENT_ADAPTER, sdkAdapter],
+      [TOKENS.WEBVIEW_MANAGER, { broadcastMessage }],
+    ]);
+    wireSdkCallbacks(
+      {
+        isRegistered: (token: symbol) => registry.has(token),
+        resolve: (token: symbol) => registry.get(token),
+      } as unknown as DependencyContainer,
+      { logger: logger as unknown as Logger, platform: 'electron' },
+    );
+    return { onNotice, logger };
+  }
+
+  const flush = () => new Promise<void>((resolve) => setImmediate(resolve));
+
+  it('sends a subagent notice as agent-monitor:action-notice', async () => {
+    const broadcastMessage = jest.fn().mockResolvedValue(undefined);
+    const { onNotice } = wireNotices(broadcastMessage);
+    const notice = {
+      actor: 'ptah-budget',
+      action: 'paused',
+      reason: 'context-budget',
+      nextStep: 'review-live-agent',
+    } as const;
+
+    onNotice?.({ kind: 'subagent-notice', sessionId: 's1', agentId: 'abc123', notice, text: 'Paused.' });
+    onNotice?.({ kind: 'subagent-notice', sessionId: 's1', agentId: 'abc123', notice: null, text: '' });
+    await flush();
+
+    expect(broadcastMessage).toHaveBeenNthCalledWith(1, 'agent-monitor:action-notice', {
+      sessionId: 's1',
+      agentId: 'abc123',
+      notice,
+      text: 'Paused.',
+    });
+    expect(broadcastMessage).toHaveBeenNthCalledWith(2, 'agent-monitor:action-notice', {
+      sessionId: 's1',
+      agentId: 'abc123',
+      notice: null,
+      text: '',
+    });
+  });
+
+  it('sends an overdue session notice as session:activity-overdue', async () => {
+    const broadcastMessage = jest.fn().mockResolvedValue(undefined);
+    const { onNotice } = wireNotices(broadcastMessage);
+
+    onNotice?.({
+      kind: 'session-overdue',
+      sessionId: 's1',
+      tabId: 't1',
+      overdue: true,
+      operations: ['2 open tasks (monitor)'],
+      text: 'Waiting.',
+    });
+    await flush();
+
+    expect(broadcastMessage).toHaveBeenCalledWith('session:activity-overdue', {
+      sessionId: 's1',
+      tabId: 't1',
+      overdue: true,
+      operations: ['2 open tasks (monitor)'],
+      text: 'Waiting.',
+    });
+  });
+
+  it('logs and does not throw when the broadcast rejects', async () => {
+    const broadcastMessage = jest.fn().mockRejectedValue(new Error('disposed'));
+    const { onNotice, logger } = wireNotices(broadcastMessage);
+
+    expect(() =>
+      onNotice?.({
+        kind: 'session-overdue',
+        sessionId: 's1',
+        overdue: false,
+        operations: [],
+        text: '',
+      }),
+    ).not.toThrow();
+    await flush();
+
+    expect(logger.error).toHaveBeenCalled();
+  });
+
+  it('wires nothing for an adapter without the setter', () => {
+    const { onNotice } = wireNotices(jest.fn(), false);
+    expect(onNotice).toBeUndefined();
   });
 });

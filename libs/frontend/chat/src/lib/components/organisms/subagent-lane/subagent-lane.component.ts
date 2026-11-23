@@ -39,6 +39,10 @@ import { findScrollingAncestor } from '../../../utils/scroll-parent.utils';
 import { isNativeCodexAgent, NATIVE_CODEX_CONTROL_REASON } from '../native-codex-control-reason';
 
 import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
+import {
+  AgentActionNoticeChipComponent,
+  subagentActionNoticeView,
+} from '../../molecules/agent-card/agent-action-notice-chip.component';
 /**
  * Each refresh re-reads the whole sidechain transcript over paged RPC, so the
  * interval trades freshness against reparsing a long transcript.
@@ -56,6 +60,7 @@ const LIVE_HISTORY_REFRESH_MS = 5000;
     SubagentLaneComposerComponent,
     PtahButtonDirective,
     PtahIconButtonDirective,
+    AgentActionNoticeChipComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   // Card mode keeps a bounded transcript; flat mode flows through its host scroller.
@@ -114,6 +119,15 @@ const LIVE_HISTORY_REFRESH_MS = 5000;
         </div>
       }
     </ptah-execution-header>
+    }
+    @if (noticeView(); as notice) {
+      <!-- Static copy of LANE_COLUMN_CLASS: the ui-class-audit ratchet blocks new dynamic classes. -->
+      <div class="mx-auto flex w-[calc(100cqw-1.5rem)] max-w-[min(var(--chat-content-max-width,758px),100%)] shrink-0 py-1">
+        <ptah-agent-action-notice-chip
+          [view]="notice"
+          testId="subagent-action-notice"
+        />
+      </div>
     }
     @if (isNativeCodex()) {
       <!-- Static copy of LANE_COLUMN_CLASS: the ui-class-audit ratchet blocks new dynamic classes. -->
@@ -248,6 +262,9 @@ export class SubagentLaneComponent {
 
   protected readonly columnClass = LANE_COLUMN_CLASS;
   protected readonly nativeControlReason = NATIVE_CODEX_CONTROL_REASON;
+  protected readonly noticeView = computed(() =>
+    subagentActionNoticeView(this.record()),
+  );
   protected readonly isNativeCodex = computed(() => isNativeCodexAgent(this.record()));
   protected readonly tray = inject(SessionAgentTrayService);
   private readonly monitor = inject(AgentMonitorStore);

@@ -11,7 +11,9 @@ import { cliCapabilityView } from './cli-capability-view';
   // The expanded row spans every matrix column, so it is wider than the
   // visible scroll area. Keep it inside the visible part of the matrix
   // (`cqw` = the matrix host container) and pinned to its left edge.
-  styles: `:host { display: block; position: sticky; left: 1rem; max-width: calc(100cqw - 4.75rem); }`,
+  styles: `:host { display: block; position: sticky; left: 1rem; max-width: calc(100cqw - 4.75rem); }
+    /* The shared table detail-cell style lays every dl out as two columns; a capability must take the full group width. */
+    :host dl { grid-template-columns: minmax(0, 1fr); }`,
   template: `<div class="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(14rem,100%),1fr))] gap-4 text-xs text-base-content" data-testid="cli-capability-detail">
     @for (group of view().groups; track group.heading) {
       <section class="min-w-0" [attr.aria-label]="group.heading">
