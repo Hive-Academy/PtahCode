@@ -502,6 +502,8 @@ async function readOnce(
   let failure: FallbackReason | undefined;
   for (const executable of executables) {
     if (blocked()) return disabledReading();
+    // Another run may have been killed while this read waited for the sign-in check.
+    if (killRetryAt > now() && !mayRetry) return cliFailure('cli-timeout', 'cli-timeout');
     const result = await runFallbackUsage({
       sourceId: 'antigravity', ownerKey: options.ownerKey, executable, version: 'usage-json-v3',
       accountFingerprint: options.accountFingerprint, args: ANTIGRAVITY_CLI_ARGS, executor,
@@ -509,6 +511,8 @@ async function readOnce(
       deadline: now() + ANTIGRAVITY_CLI_TIMEOUT_MS, cacheMs: ANTIGRAVITY_CLI_CACHE_MS,
       // This source owns its failure backoff (kill backoff, refresh bypass).
       cacheFailures: false,
+      // A parsed failure (agy error reply) is not a reading: the source backoff holds it, so a refresh can run again.
+      cacheable: (output) => output.kind === 'windows',
       // Trip inside the shared flight: a caller that stopped waiting never
       // sees the billed result, but the flight still parses and caches it.
       parse: (run: string, observedAt: number) => {

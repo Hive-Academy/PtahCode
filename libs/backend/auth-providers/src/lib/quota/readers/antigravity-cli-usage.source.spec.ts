@@ -188,6 +188,35 @@ describe('readAntigravityCliUsage', () => {
     expect(JSON.stringify(logger.warn.mock.calls)).not.toMatch(/Gemini Models|groups|input_tokens/);
   });
 
+  it('does not reuse a parsed error reply as a reading: a refresh runs agy again', async () => {
+    jest.useFakeTimers();
+    try {
+      const { options, spawnProcess } = harness([answer({ num_turns: 0, usage: {}, error: 'quota service down' }, 1),
+        answer(antigravityUsageJsonFixture())]);
+      expect(await readAntigravityCliUsage(undefined, options())).toMatchObject({ statusReason: 'cli-exit-error' });
+      await jest.advanceTimersByTimeAsync(ANTIGRAVITY_CLI_REFRESH_MIN_GAP_MS + 1);
+      expect((await readAntigravityCliUsage(undefined, options({ refresh: true }))).status).toBe('available');
+      expect(spawnProcess).toHaveBeenCalledTimes(2);
+    } finally { jest.useRealTimers(); }
+  });
+
+  it('does not start a run when another run was killed while this read waited for the sign-in check', async () => {
+    jest.useFakeTimers();
+    try {
+      const { options, spawnProcess } = harness([hang, answer(antigravityUsageJsonFixture())]);
+      // The first read starts a run. The second read (another owner) reaches its
+      // sign-in wait 0.5 s before the kill; the wait ends after the kill.
+      const first = readAntigravityCliUsage(undefined, options({ ownerKey: 'antigravity#cli-store:one' }));
+      await jest.advanceTimersByTimeAsync(ANTIGRAVITY_CLI_TIMEOUT_MS - 500);
+      const second = readAntigravityCliUsage(undefined, options({ ownerKey: 'antigravity#cli-store:two',
+        readSignIn: () => new Promise(() => undefined) }));
+      await jest.advanceTimersByTimeAsync(2_000);
+      await first;
+      expect(await second).toMatchObject({ statusReason: 'cli-timeout' });
+      expect(spawnProcess).toHaveBeenCalledTimes(1);
+    } finally { jest.useRealTimers(); }
+  });
+
   it('does not trip on a clean non-billing error reply, and backs it off', async () => {
     const { options, calls } = harness([answer({ num_turns: 0, usage: {}, error: 'quota service down' }, 1),
       answer(antigravityUsageJsonFixture())]);

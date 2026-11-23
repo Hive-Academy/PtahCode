@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_2313_2af3
-status: backlog
+status: in_review
 type: BUGFIX
 title: "Fix agy plan usage startup kill; check grok and Kimi readers"
 depends_on: []

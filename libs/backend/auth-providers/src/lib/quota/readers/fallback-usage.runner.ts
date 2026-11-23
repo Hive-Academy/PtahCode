@@ -47,6 +47,8 @@ export interface FallbackRequest<T> {
    * are then not cached here, so a caller-approved retry is never blocked.
    */
   readonly cacheFailures?: boolean;
+  /** Decides per value whether a successful run is reused for `cacheMs`; default: always. */
+  readonly cacheable?: (value: T) => boolean;
   readonly executor: FallbackExecutor;
   readonly parse: (output: string, readAt: number) => T | undefined;
   readonly signal?: AbortSignal;
@@ -105,7 +107,7 @@ export async function runFallbackUsage<T>(request: FallbackRequest<T>): Promise<
     total++;
     running.set(request.sourceId, 1);
     flight = execute(request).catch(() => failure('cli-unavailable')).then((result) => {
-      const until = result.ok ? now() + (request.cacheMs ?? FALLBACK_CACHE_MS) :
+      const until = result.ok ? (request.cacheable?.(result.value) === false ? 0 : now() + (request.cacheMs ?? FALLBACK_CACHE_MS)) :
         result.cwdUnavailable ? 0 :
         result.reason === 'cli-parse-failed' ? now() + FALLBACK_PARSE_BACKOFF_MS :
         ['cli-timeout', 'cli-exit-error', 'cli-not-signed-in', 'cli-unavailable'].includes(result.reason)
