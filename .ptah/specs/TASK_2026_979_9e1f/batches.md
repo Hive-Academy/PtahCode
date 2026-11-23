@@ -1048,6 +1048,8 @@ P2 gate:
 - Write set (under `L\cli-agent-runtime\src\lib\cli-agents\cli-adapters\`):
   - `grok-cli.adapter.ts`, `grok-cli.adapter.spec.ts`
   - `antigravity-cli.adapter.ts`, `antigravity-cli.adapter.mcp.spec.ts`
+  - Row 36 (under `L\cli-agent-runtime\src\lib\cli-agents\`): `lane-mcp-token-rule.ts`,
+    `lane-mcp-token-rule.spec.ts`
 - Read set: `antigravity-cli.adapter.ts:1-30`, `:1160-1280`; `antigravity-acp-lane.ts`
   (`session/new.mcpServers`); `grok-cli.adapter.ts`; `parity-inventory.md`.
 - Contract excerpts:
@@ -1056,6 +1058,9 @@ P2 gate:
   - The ACP path keeps `ptah` via `session/new.mcpServers`.
   - Consequence (user-approved, row 13): the stream-json fallback has no `ptah` server.
   - The A5 switch applies to grok and agy only if verified.
+  - Row 36: after the write removal, `laneMcpTokenCapability('antigravity')` returns
+    `privileged` (`lane-mcp-token-rule.ts`, `lane-mcp-token-rule.spec.ts`); the token is still
+    revoked at teardown (`agent-process-manager.service.ts` `onMcpConfigRestored`).
 - Verify:
   - `npm run verify -- --related -p @ptah-extension/cli-agent-runtime`
   - `npm run verify -- -t lint,typecheck -p @ptah-extension/cli-agent-runtime`
@@ -1063,6 +1068,7 @@ P2 gate:
   - `antigravity-cli.adapter.mcp.spec.ts`: a stream-json spawn records zero writes to the home
     `mcp_config.json` (fake fs).
   - The ACP spec still passes.
+  - An agy ACP lane token is `privileged`; live: agy lists `livecheck__echo` (P2 live review).
   - A5 findings for grok and agy are recorded.
 - Status: PENDING
 
