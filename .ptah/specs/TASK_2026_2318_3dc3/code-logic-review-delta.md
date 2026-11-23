@@ -26,3 +26,11 @@ With 302 declarations, counting even one of the two 50,000-character classes pro
 ## Verification
 
 The two source diffs against `1d6009d3` match `delta.diff` byte for byte. The full worktree diff also includes the reviewed `context.md` update. `git diff --check 1d6009d3` passed, and all 27 tests in the focused `ast-analyze-result.spec.ts` Jest suite passed. Applied the Codex `review-agent` skill and used Ptah AST inspection with native line-numbered source reads. This report is the only file written.
+
+## Disposition (coordinator)
+
+Both P3 findings and the suggestion in "Guard analysis" were fixed before commit `640e28f72` (the review ran on the working tree before that commit), in `ast-analyze-result.spec.ts`, test 'counts the names of the classes around a method, not only the longest name':
+1. Flat control: each flat class spans 20,000 lines (`i * 20_000` to `i * 20_000 + 19_999`); the methods of the last class start at line 380,100, inside it. The test also asserts the last method (`m11999`) as the boundary case.
+2. Overlap: 150 methods. One class alone is about 15 million characters (allowed); both classes count together at the shared line, about 23 million, so only counting both crosses the threshold. A control with `B` moved to start at line 2 shows the lookup runs when the two no longer share a line.
+3. The nested case also queries a nested method (`methods[0]`), not only a class.
+The focused spec passes (27 tests) and `npm run verify -- -p workspace-intelligence,vscode-lm-tools` exits 0 on this code.
