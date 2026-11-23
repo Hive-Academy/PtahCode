@@ -1,5 +1,5 @@
 import { classifyCliStderr } from '../cli-stderr-severity';
-import { redactLaneStderr } from './lane-stderr-redaction';
+import { laneStderrLine, redactLaneStderr } from './lane-stderr-redaction';
 
 describe('redactLaneStderr', () => {
   it('redacts the value of a quoted secret key', () => {
@@ -49,5 +49,28 @@ describe('redactLaneStderr', () => {
     const redacted = redactLaneStderr(raw);
     expect(redacted).toBe(raw);
     expect(classifyCliStderr(redacted)).toBe(classifyCliStderr(raw));
+  });
+
+  describe('a secret field and a status on one line', () => {
+    const raw = 'request authorization: Bearer abc.def 401 Unauthorized';
+
+    it('masks the rest of the line, status words included', () => {
+      // The field rule runs to the end of the line, so the redacted text alone
+      // reads as `info`; the lane must not classify on it.
+      const redacted = redactLaneStderr(raw);
+      expect(redacted).toBe('request authorization: [REDACTED]');
+      expect(classifyCliStderr(redacted)).toBe('info');
+    });
+
+    it('keeps the error severity of the original line and emits only redacted text', () => {
+      expect(laneStderrLine(raw, 'lane-tok')).toEqual({
+        severity: 'error',
+        text: 'request authorization: [REDACTED]',
+      });
+    });
+
+    it('classifies a line with no status word as info', () => {
+      expect(laneStderrLine('token=abc123').severity).toBe('info');
+    });
   });
 });

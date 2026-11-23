@@ -36,7 +36,7 @@
  * Session events reach the lane twice: as segments (`projectToCliSegments`,
  * the text log and lane outcome) and as flat stream events
  * (`createFlatStreamProjector`, `onStreamEvent`), from which the renderer
- * builds the lane's execution cards. stderr lines are classified here (`classifyCliStderr`). `done` and every continuation
+ * builds the lane's execution cards. stderr lines are redacted and classified here (`laneStderrLine`). `done` and every continuation
  * `done` resolve with 0 or 1 and never reject; failures become one `error`
  * segment.
  */
@@ -63,14 +63,13 @@ import type {
   SdkHandle,
 } from '../cli-adapter.interface';
 import { buildTaskPrompt, createBufferedEmitter } from '../cli-adapter.utils';
-import { classifyCliStderr } from '../cli-stderr-severity';
 import {
   LANE_ACP_PROMPT_TIMEOUT_MS,
   laneAcpBaseEnv,
   laneAcpCommandPreparer,
 } from './lane-acp-spawn';
 import { buildLaneMcpAttachments } from './lane-mcp-attachments';
-import { redactLaneStderr } from './lane-stderr-redaction';
+import { laneStderrLine } from './lane-stderr-redaction';
 
 export interface ProviderSessionLaneHandleConfig {
   readonly profile: AcpVendorProfile;
@@ -136,9 +135,9 @@ export function createProviderSessionLaneHandle(
   const project = (event: ProviderSessionEvent): void => {
     const turnKey = event.turnId ?? `${event.contextId}:setup`;
     if (event.type === 'diagnostic') {
-      const safe = redactLaneStderr(event.line, options.mcpToken);
-      output.emit(`[stderr] ${safe}\n`);
-      segment.emit({ type: classifyCliStderr(safe), content: safe });
+      const { severity, text } = laneStderrLine(event.line, options.mcpToken);
+      output.emit(`[stderr] ${text}\n`);
+      segment.emit({ type: severity, content: text });
       return;
     }
     if (event.type === 'textDelta') output.emit(event.delta);

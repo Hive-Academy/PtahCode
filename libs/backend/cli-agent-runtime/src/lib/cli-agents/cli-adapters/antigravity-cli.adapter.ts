@@ -62,6 +62,7 @@ import {
   AGY_ACP_MIN_VERSION,
   antigravityAcpManifest,
   meetsAgyAcpFloor,
+  withAgyConptyNoiseFilter,
   type AntigravityAcpSeam,
 } from './antigravity-acp-lane';
 import { createProviderSessionLaneHandle } from './provider-session/provider-session-lane-handle';
@@ -197,8 +198,14 @@ export class AntigravityCliAdapter implements CliAdapter {
    */
   readonly supportsMcp = true;
 
-  /** Definite version-floor answers per binary; a probe that could not tell is retried. */
-  private readonly acpFloorByBinary = new Map<string, boolean>();
+  /**
+   * Binaries whose version met the ACP floor. Only a pass is cached: a
+   * below-floor or unreadable answer is probed again, so an in-place agy
+   * upgrade is seen without a restart.
+   */
+  private readonly acpFloorPassed = new Set<string>();
+  /** Binaries whose unreadable version was already logged at warn (later reads log at debug). */
+  private readonly unreadableVersionWarned = new Set<string>();
   /** Lanes spawned before a binary's first probe settles share it. */
   private readonly acpProbesInFlight = new Map<string, Promise<boolean | undefined>>();
   /** The version string the floor check last read, per binary, for the upgrade message. */
@@ -305,19 +312,20 @@ export class AntigravityCliAdapter implements CliAdapter {
 
   /**
    * Whether `binary` meets the ACP version floor: `true` or `false` once
-   * known, `undefined` while the version cannot be read. Only a definite
-   * answer is cached per binary; lanes that ask while the first probe runs
-   * share it. Reads `agy --version` only (detection passes the version it
-   * already read) and never spawns `agy acp` itself.
+   * known, `undefined` while the version cannot be read. Only `true` is
+   * cached per binary; `false` and `undefined` re-read the version on the
+   * next check, so an agy upgraded in place passes without a restart. Lanes
+   * that ask while a probe runs share it. Reads `agy --version` only
+   * (detection passes the version it already read) and never spawns
+   * `agy acp` itself.
    */
   private probeAcp(binary: string, knownVersion?: string): Promise<boolean | undefined> {
-    const cached = this.acpFloorByBinary.get(binary);
-    if (cached !== undefined) return Promise.resolve(cached);
+    if (this.acpFloorPassed.has(binary)) return Promise.resolve(true);
     const inFlight = this.acpProbesInFlight.get(binary);
     if (inFlight) return inFlight;
     const probe = this.runAcpProbe(binary, knownVersion)
       .then((meetsFloor) => {
-        if (meetsFloor !== undefined) this.acpFloorByBinary.set(binary, meetsFloor);
+        if (meetsFloor === true) this.acpFloorPassed.add(binary);
         return meetsFloor;
       })
       .finally(() => this.acpProbesInFlight.delete(binary));
@@ -335,10 +343,16 @@ export class AntigravityCliAdapter implements CliAdapter {
       knownVersion ??
       (await probeCliVersion(binary, undefined, undefined, this.spawner));
     if (version === undefined || !/\d+\.\d+\.\d+/.test(version)) {
-      this.logger?.warn(
-        '[AntigravityCliAdapter] could not read the agy version; the lane tries ACP and the next lane probes again',
-        { version: version ?? null },
-      );
+      // Detection polls, so only the first unreadable read per binary warns.
+      const message =
+        '[AntigravityCliAdapter] could not read the agy version; the lane tries ACP and the next lane probes again';
+      const context = { version: version ?? null };
+      if (this.unreadableVersionWarned.has(binary)) {
+        this.logger?.debug(message, context);
+      } else {
+        this.unreadableVersionWarned.add(binary);
+        this.logger?.warn(message, context);
+      }
       return undefined;
     }
     this.versionByBinary.set(binary, version);
@@ -391,7 +405,12 @@ export class AntigravityCliAdapter implements CliAdapter {
       },
       command: binary,
       spawner: this.spawner,
-      transportFactory: this.acp.transportFactory,
+      // Without a spawner or a seam factory the lane handle reports the
+      // missing spawner; a wrapped factory would hide that.
+      transportFactory:
+        this.spawner || this.acp.transportFactory
+          ? withAgyConptyNoiseFilter(this.acp.transportFactory)
+          : undefined,
       logger: this.logger,
     });
   }

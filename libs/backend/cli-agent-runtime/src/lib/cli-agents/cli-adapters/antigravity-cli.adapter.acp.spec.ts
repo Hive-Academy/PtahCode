@@ -174,9 +174,24 @@ describe('AntigravityCliAdapter — detection', () => {
     ).rejects.toThrow(
       'Antigravity lanes need agy 1.5.1 or later (installed: 1.4.2). Update agy and try again.',
     );
-    // The definite answer from detection is cached: no second version read.
-    expect(mockProbeCliVersion).toHaveBeenCalledTimes(1);
+    // A below-floor answer is not cached: the lane reads the version again.
+    expect(mockProbeCliVersion).toHaveBeenCalledTimes(2);
     expect(transportFactory).not.toHaveBeenCalled();
+  });
+
+  it('reports the freshly read version after agy is upgraded in place', async () => {
+    mockProbeCliVersion.mockResolvedValueOnce('1.5.0').mockResolvedValueOnce('1.5.2');
+    const transportFactory = jest.fn();
+    const adapter = new AntigravityCliAdapter(fakeSpawner, undefined, { transportFactory });
+    await expect(adapter.detect()).resolves.toMatchObject({
+      installed: true,
+      version: '1.5.0',
+    });
+    await expect(adapter.detect()).resolves.toMatchObject({
+      installed: true,
+      version: '1.5.2',
+    });
+    expect(mockProbeCliVersion).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -317,6 +332,32 @@ describe('AntigravityCliAdapter — ACP lane', () => {
       error: { code: -32603, message: 'agent runtime unpack failed' },
     }));
 
+  it('drops the Windows ConPTY noise from agy stderr and keeps every other line', async () => {
+    const lane = await startLane(TOOL_USE, () => 'hold', { mcpPort: undefined });
+    await settle();
+    const lines = [
+      'Error: conpty_console_list_agent.js:12',
+      'at a',
+      'at b',
+      'at c',
+      'at d',
+      'at e',
+      'kept one',
+      'AttachConsole failed',
+      'x',
+      'y',
+      'z',
+      'kept two',
+    ];
+    for (const line of lines) lane.spawn().onStderrLine?.(line);
+    await settle();
+    const shown = lane.segments
+      .map((segment) => segment.content)
+      .filter((content) => content !== undefined && lines.includes(content));
+    expect(shown).toEqual(['kept one', 'kept two']);
+    lane.handle.abort.abort();
+  });
+
   describe('version floor', () => {
     const production = { probe: undefined };
 
@@ -383,6 +424,30 @@ describe('AntigravityCliAdapter — ACP lane', () => {
       await finishLane(rig, { mcpPort: undefined });
       expect(mockProbeCliVersion).toHaveBeenCalledTimes(2);
       expect(rig.spawns).toHaveLength(2);
+      // Detection polls: only the first unreadable read per binary warns.
+      const unreadable = (calls: unknown[][]): number =>
+        calls.filter(([message]) => String(message).includes('could not read the agy version'))
+          .length;
+      expect(unreadable(logger.warn.mock.calls)).toBe(1);
+      expect(unreadable(logger.debug.mock.calls)).toBe(1);
+    });
+
+    it('lets the next lane run once agy is upgraded in place after a below-floor answer', async () => {
+      mockProbeCliVersion.mockResolvedValueOnce('1.5.0').mockResolvedValue('1.5.2');
+      const rig = laneRig(TOOL_USE, () => 'result', { seam: production });
+      await expect(runLane(rig, { mcpPort: undefined })).rejects.toThrow(
+        'Antigravity lanes need agy 1.5.1 or later (installed: 1.5.0). Update agy and try again.',
+      );
+      expect(rig.spawns).toHaveLength(0);
+
+      await finishLane(rig, { mcpPort: undefined });
+      expect(rig.spawns).toHaveLength(1);
+      expect(mockProbeCliVersion).toHaveBeenCalledTimes(2);
+
+      // The passing answer is cached.
+      await finishLane(rig, { mcpPort: undefined });
+      expect(rig.spawns).toHaveLength(2);
+      expect(mockProbeCliVersion).toHaveBeenCalledTimes(2);
     });
 
     it('re-runs an injected probe that answered undefined, and shares one in flight', async () => {

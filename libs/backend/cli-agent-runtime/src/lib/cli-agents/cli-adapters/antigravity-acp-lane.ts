@@ -4,7 +4,7 @@
  * and the manifest the lane declares. The lane itself is
  * `createProviderSessionLaneHandle` with `antigravityAcpProfile`.
  */
-import type { AcpTransportFactory } from '@ptah-extension/acp-runtime';
+import { spawnAcpProcess, type AcpTransportFactory } from '@ptah-extension/acp-runtime';
 import type { AgentRoleChannel } from '@ptah-extension/shared';
 import type { CliAdapterManifest } from './cli-adapter.interface';
 
@@ -91,5 +91,40 @@ export function antigravityAcpManifest(
     },
     limitReader: { state: 'available', source: 'antigravity' },
     mcp: { state: 'supported' },
+  };
+}
+
+/**
+ * Wrap `factory` so each lane child drops the Windows ConPTY noise agy's
+ * node-pty helper can print: a `conpty_console_list_agent` line and the next
+ * five lines of its stack, or an `AttachConsole failed` line and the next
+ * three. Same rule the stream-json adapter applied; only the agy lane uses it,
+ * so Grok stderr is untouched. Every other line reaches the lane unchanged.
+ */
+export function withAgyConptyNoiseFilter(
+  factory: AcpTransportFactory = spawnAcpProcess,
+): AcpTransportFactory {
+  return (spawnOptions) => {
+    const forward = spawnOptions.onStderrLine;
+    if (!forward) return factory(spawnOptions);
+    let suppressed = 0;
+    return factory({
+      ...spawnOptions,
+      onStderrLine: (line) => {
+        if (line.includes('conpty_console_list_agent')) {
+          suppressed = 5;
+          return;
+        }
+        if (line.includes('AttachConsole failed')) {
+          suppressed = 3;
+          return;
+        }
+        if (suppressed > 0) {
+          suppressed--;
+          return;
+        }
+        forward(line);
+      },
+    });
   };
 }
