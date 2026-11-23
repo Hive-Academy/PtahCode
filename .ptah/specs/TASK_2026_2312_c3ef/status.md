@@ -65,3 +65,5 @@ Reports that `ptah_agent_report` did not deliver (reason: unattributed-caller) a
   a clean `/tmp`. All other rpc-handlers tests: 273/274 suites, 6977 passed.
 - Review: moderate findings 1-6 and codex finding 2 dispositioned in `code-logic-review.md`
   (4 mitigated, others deferred with reasons). Final verdict APPROVE, no open finding.
+
+- PR #1491 opened (head 7e8b98332). task.md set to in_review.

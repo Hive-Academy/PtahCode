@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_2312_c3ef
-status: in_progress
+status: in_review
 type: BUGFIX
 title: Make the workspace code index correct and cheap
 depends_on: []
