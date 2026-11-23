@@ -65,7 +65,6 @@ const EMPTY_DESIRED: HarnessDesiredState = {
   skills: [],
   commands: [],
   agents: [],
-  mcp: [],
   collisions: [],
   sources: 'ok',
   sourceRoots: [],
@@ -114,7 +113,7 @@ describe('WorkspaceHarnessTarget — retired copy removal proofs (D-2)', () => {
     ws = join(tempRoot, 'ws');
     mkdirSync(ws, { recursive: true });
     retiredRoot = join(tempRoot, 'plugins', ROOT_ID);
-    retired = { skillSourceRoots: [retiredRoot], mcpServerKeys: [] };
+    retired = { skillSourceRoots: [retiredRoot] };
   });
 
   afterEach(() => {
@@ -188,7 +187,7 @@ describe('WorkspaceHarnessTarget — retired copy removal proofs (D-2)', () => {
       }),
       undefined,
       // A trailing separator must not change the root id.
-      { skillSourceRoots: [`${retiredRoot}/`], mcpServerKeys: [] },
+      { skillSourceRoots: [`${retiredRoot}/`] },
     );
     expect(plan.removals).toEqual(
       expect.arrayContaining([
@@ -558,5 +557,69 @@ describe('containedTargetPath', () => {
     expect(containedTargetPath(root, '.cursor/skills/x')).toBe(
       join(root, '.cursor', 'skills', 'x'),
     );
+  });
+});
+
+describe('WorkspaceHarnessTarget — no MCP config writes (TASK_2026_979, decision row 10)', () => {
+  let tempRoot: string;
+  let ws: string;
+
+  beforeEach(() => {
+    tempRoot = mkdtempSync(join(tmpdir(), 'ptah-b16-ws-'));
+    ws = join(tempRoot, 'ws');
+    mkdirSync(ws, { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(tempRoot, { recursive: true, force: true });
+  });
+
+  function makeTarget() {
+    return new WorkspaceHarnessTarget({
+      id: 'cursor',
+      facets: FACETS,
+      manifestStore: new ManagedManifestStore(),
+      detector: { isInstalled: () => Promise.resolve(true) },
+      skillsDirRel: '.cursor/skills',
+      commandsDirRel: '.cursor/commands',
+    });
+  }
+
+  it('drops an old manifest mcp row on load, plans no MCP row and applies none', async () => {
+    const config = join(ws, '.cursor', 'mcp.json');
+    mkdirSync(join(ws, '.cursor'), { recursive: true });
+    const content = '{"mcpServers":{"github":{"command":"npx"}}}\n';
+    writeFileSync(config, content);
+    // A pre-P2 manifest on disk, as the old facet planner left it (D1).
+    const store = new ManagedManifestStore();
+    const manifestPath = store.manifestPath(ws, 'cursor');
+    mkdirSync(join(manifestPath, '..'), { recursive: true });
+    writeFileSync(
+      manifestPath,
+      JSON.stringify({
+        ...emptyManifest('cursor'),
+        entries: {
+          '.cursor/mcp.json#github': managedEntry(
+            'hash-github',
+            'io.github.example/github',
+            'mcp',
+          ),
+        },
+      }),
+    );
+    const manifest = store.load(ws, 'cursor');
+    expect(manifest.entries).toEqual({});
+
+    const target = makeTarget();
+    const plan = await target.plan(EMPTY_DESIRED, ws, manifest, undefined, {
+      skillSourceRoots: [],
+    });
+    expect(plan.writes).toEqual([]);
+    expect(plan.removals).toEqual([]);
+    expect(plan.foreign).toEqual([]);
+    expect(plan.expected).toBe(0);
+    const result = await target.apply(plan, ws);
+    expect(result.removed).toEqual([]);
+    expect(readFileSync(config, 'utf-8')).toBe(content);
   });
 });

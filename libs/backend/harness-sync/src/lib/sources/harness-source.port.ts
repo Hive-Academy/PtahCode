@@ -63,6 +63,12 @@ export interface HarnessSourceState {
    * Ptah-managed MCP servers" — never "remove the user's own", which are not
    * in the manifest and so are never touched.
    *
+   * No harness target writes MCP config any more (TASK_2026_979), so the
+   * manifest builder no longer reads this field. The resolver still fills it,
+   * which keeps an unreadable intent store failing `resolve` as before; the
+   * field and that read go once the hosts stop passing the store positionally
+   * (`createPluginConfigSourceResolver`, B17 hand-off).
+   *
    * Optional, and absent means empty, so a resolver that predates the MCP facet
    * (or a spec that only cares about skills) is a valid source state rather
    * than a compile error.
@@ -70,8 +76,7 @@ export interface HarnessSourceState {
   mcpIntents?: HarnessMcpIntent[];
   /**
    * Sources retired for good (D-2): skills.sh roots listed in
-   * `~/.ptah/plugins/.ptah-skillssh-retired.json`, and the MCP keys the intent
-   * store carried over from its v1 file. The reconciler removes a copy of one
+   * `~/.ptah/plugins/.ptah-skillssh-retired.json`. The reconciler removes a copy of one
    * only on proof, never as an ordinary stale entry.
    *
    * Retirement is permanent and independent of the plugin policy, so

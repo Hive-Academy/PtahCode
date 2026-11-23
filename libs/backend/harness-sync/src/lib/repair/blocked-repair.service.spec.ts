@@ -87,7 +87,6 @@ import {
   blockedTargetPaths,
   HARNESS_REPAIR_REASONS,
   type HarnessHealth,
-  type HarnessTargetId,
 } from '@ptah-extension/shared';
 import type { Logger } from '@ptah-extension/vscode-core';
 import { probeDestination } from '../health/harness-destination-scanner';
@@ -98,12 +97,8 @@ import { QUARANTINE_DIR_NAME } from '../quarantine/quarantine';
 import { HarnessReconcilerService } from '../reconciler/harness-reconciler.service';
 import { createStaticSourceResolver } from '../sources/plugin-config-source-resolver';
 import { NO_USER_LAYER_REFRESH } from '../sources/user-layer-refresher.port';
-import type {
-  HarnessSourceState,
-  IHarnessCliDetector,
-} from '../sources/harness-source.port';
+import type { HarnessSourceState } from '../sources/harness-source.port';
 import { ClaudeTarget } from '../targets/claude-target';
-import { createVscodeMcpTarget } from '../targets/rival-targets';
 import { HarnessBlockedRepairService } from './blocked-repair.service';
 import { HarnessStateStore } from '../gitignore/harness-state-store';
 
@@ -127,7 +122,17 @@ const STAMP = '20260823T141530123';
 
 const ALPHA = '.claude/skills/alpha';
 const RUN_IT = '.claude/commands/run-it.md';
-const MCP_KEY = '.vscode/mcp.json#wanted';
+/**
+ * A server key a stale, pre-P2 report could still name. No target plans an
+ * MCP entry any more (TASK_2026_979), so it is never in the blocked set, but
+ * the repair still refuses it as `not-a-path` (parity row 28).
+ */
+const MCP_KEY = '.mcp.json#wanted';
+const USER_MCP_JSON = `${JSON.stringify(
+  { mcpServers: { wanted: { command: 'the-users-other-server' } } },
+  null,
+  2,
+)}\n`;
 
 const USER_SKILL = 'hand-written by the user\n';
 const USER_COMMAND = 'the user wrote this command\n';
@@ -157,15 +162,9 @@ function makeFakeLogger(): FakeLogger {
   };
 }
 
-function detectorFor(installed: HarnessTargetId[]): IHarnessCliDetector {
-  const set = new Set(installed);
-  return { isInstalled: (target) => Promise.resolve(set.has(target)) };
-}
-
 describe('HarnessBlockedRepairService', () => {
   let ws: string;
   let sourcesRoot: string;
-  let home: string;
   let logger: FakeLogger;
   let reconciler: HarnessReconcilerService;
   let propagation: HarnessPropagationService;
@@ -197,18 +196,10 @@ describe('HarnessBlockedRepairService', () => {
       overlayPluginPaths: [],
       disabledSkillIds: [],
       disabledPluginIds: [],
-      mcpIntents: [
-        {
-          serverKey: 'wanted',
-          registryName: 'io.github.example/wanted',
-          config: { type: 'stdio', command: 'wanted-server' },
-          targets: ['vscode'],
-        },
-      ],
     };
   }
 
-  /** Occupants on two desired paths, one foreign-but-undesired, one MCP key. */
+  /** Occupants on two desired paths, one foreign-but-undesired, and the user's `.mcp.json`. */
   function writeOccupants(): void {
     mkdirSync(join(ws, '.claude', 'skills', 'alpha'), { recursive: true });
     writeFileSync(
@@ -232,20 +223,7 @@ describe('HarnessBlockedRepairService', () => {
       'utf-8',
     );
 
-    mkdirSync(join(ws, '.vscode'), { recursive: true });
-    writeFileSync(
-      join(ws, '.vscode', 'mcp.json'),
-      JSON.stringify(
-        {
-          servers: {
-            wanted: { type: 'stdio', command: 'the-users-other-server' },
-          },
-        },
-        null,
-        2,
-      ),
-      'utf-8',
-    );
+    writeFileSync(join(ws, '.mcp.json'), USER_MCP_JSON, 'utf-8');
   }
 
   function buildReconciler(state: HarnessSourceState): void {
@@ -258,14 +236,7 @@ describe('HarnessBlockedRepairService', () => {
       new HarnessManifestBuilder(),
       store,
       createStaticSourceResolver(state),
-      [
-        new ClaudeTarget(store),
-        createVscodeMcpTarget({
-          manifestStore: store,
-          detector: detectorFor(['vscode']),
-          homeDir: home,
-        }),
-      ],
+      [new ClaudeTarget(store)],
     );
     propagation = new HarnessPropagationService(
       logger as unknown as Logger,
@@ -323,7 +294,6 @@ describe('HarnessBlockedRepairService', () => {
     ws = mkdtempSync(join(tmpdir(), 'harness-repair-ws-'));
     grantSkillSync(ws);
     sourcesRoot = mkdtempSync(join(tmpdir(), 'harness-repair-src-'));
-    home = mkdtempSync(join(tmpdir(), 'harness-repair-home-'));
     logger = makeFakeLogger();
     renameLiesFor = null;
     readFailsFor = null;
@@ -338,16 +308,16 @@ describe('HarnessBlockedRepairService', () => {
     renameLiesFor = null;
     readFailsFor = null;
     readdirFailsFor = null;
-    for (const dir of [ws, sourcesRoot, home]) {
+    for (const dir of [ws, sourcesRoot]) {
       rmSync(dir, { recursive: true, force: true });
     }
   });
 
   // ------------------------------------------------------------ the premise
 
-  it('starts from the captured shape: three blocked paths, and writeFailed is 0', async () => {
+  it('starts from the captured shape: two blocked paths, no MCP key, and writeFailed is 0', async () => {
     const health = await reconciler.verify(ws);
-    expect(blockedIn(health)).toEqual([ALPHA, RUN_IT, MCP_KEY].sort());
+    expect(blockedIn(health)).toEqual([ALPHA, RUN_IT].sort());
     for (const target of health.targets) {
       expect(target.writeFailed).toEqual([]);
     }
@@ -412,19 +382,16 @@ describe('HarnessBlockedRepairService', () => {
     expect(report.health).toBeNull();
   });
 
-  it('refuses a blocked MCP server key — there is no directory to move aside', async () => {
+  it('refuses an MCP server key a stale report names — there is no directory to move aside', async () => {
     const report = await makeService().repair(ws, [
-      { target: 'vscode', relPath: MCP_KEY },
+      { target: 'claude', relPath: MCP_KEY },
     ]);
 
     expect(report.paths[0].outcome).toBe('not-a-path');
     expect(report.paths[0].reason).toContain('nothing to move aside');
     // The sixth wording surface — see the `not-blocked` case above.
     expect(report.paths[0].reason).toBe(HARNESS_REPAIR_REASONS.notAPath);
-    const config = JSON.parse(
-      readFileSync(join(ws, '.vscode', 'mcp.json'), 'utf-8'),
-    ) as { servers: Record<string, { command?: string }> };
-    expect(config.servers['wanted'].command).toBe('the-users-other-server');
+    expect(readFileSync(join(ws, '.mcp.json'), 'utf-8')).toBe(USER_MCP_JSON);
   });
 
   // -------------------------------------------------- move, then and only then
@@ -492,7 +459,7 @@ describe('HarnessBlockedRepairService', () => {
     for (const target of after.targets) {
       expect(target.writeFailed).toEqual([]);
     }
-    expect(blockedIn(after)).toEqual([RUN_IT, MCP_KEY].sort());
+    expect(blockedIn(after)).toEqual([RUN_IT]);
   });
 
   it('repairs a partial selection and leaves every unselected blocked path exactly as it was', async () => {
@@ -509,9 +476,7 @@ describe('HarnessBlockedRepairService', () => {
     expect(readFileSync(join(abs(ALPHA), 'SKILL.md'), 'utf-8')).toBe(
       USER_SKILL,
     );
-    expect(blockedIn(await reconciler.verify(ws))).toEqual(
-      [ALPHA, MCP_KEY].sort(),
-    );
+    expect(blockedIn(await reconciler.verify(ws))).toEqual([ALPHA]);
   });
 
   it('is idempotent: a second call on a repaired path is refused, not a second quarantine entry', async () => {

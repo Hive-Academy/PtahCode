@@ -282,8 +282,7 @@ export async function acquireFileLock(
  *
  * Failing is affordable because every caller of this function already treats a
  * mutation failure as transient and retries on its own schedule:
- * `applyMcpFacet` records a `writeFailed` row that the next `mode: 'full'` pass
- * (every host activation) re-attempts; `AntigravityCliAdapter` documents its
+ * `AntigravityCliAdapter` documents its
  * spawn-time write as non-fatal and the next spawn rewrites it;
  * `CodeExecutionMCP` logs and deliberately keeps its registration record so a
  * later call retries. What is traded away is liveness for ONE mutation under

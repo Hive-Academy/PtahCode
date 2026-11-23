@@ -1,9 +1,11 @@
 /**
  * One engine for every rival-CLI harness target.
  *
- * Codex, Copilot, Cursor, Antigravity and VS Code differ in four values —
- * which directory holds skills, which holds commands, how an agent is
- * transformed, and which MCP config file they read — and in nothing else. The
+ * Codex, Copilot, Cursor, Antigravity and OpenCode differ in three values —
+ * which directory holds skills, which holds commands, and how an agent is
+ * transformed — and in nothing else. No target writes an MCP config file
+ * (TASK_2026_979, decision row 10): servers reach every CLI through the Ptah
+ * gateway or the spawn adapter, never through harness sync. The
  * three services this replaces (`CliPluginSyncService`,
  * `MultiCliAgentWriterService`, the `mcp-directory` installers) each
  * rediscovered ownership, drift and reaping for their own artifact family, with
@@ -48,10 +50,7 @@ import {
   type ContentHashOptions,
 } from '../hash/content-hash';
 import { plannedTargetHealth } from '../health/harness-health';
-import type {
-  HarnessDesiredMcpServer,
-  HarnessDesiredState,
-} from '../manifest/desired-state.types';
+import type { HarnessDesiredState } from '../manifest/desired-state.types';
 import {
   desiredAgentModel,
   desiredAgentSourceHash,
@@ -86,13 +85,6 @@ import type {
   HarnessRetiredSources,
   IHarnessTarget,
 } from './harness-target.port';
-import type { IHarnessMcpFacet } from './mcp/mcp-facet.port';
-import {
-  applyMcpFacet,
-  emptyMcpFacetPlan,
-  planMcpFacet,
-  type McpFacetPlan,
-} from './mcp/mcp-facet-planner';
 import {
   createGitTrackingProbe,
   removeRetiredCopy,
@@ -131,7 +123,6 @@ export interface WorkspaceHarnessTargetOptions {
   /** Workspace-relative POSIX directory holding `<slug>.md` command files. */
   commandsDirRel?: string;
   agentTransformer?: IHarnessAgentTransformer;
-  mcpFacet?: IHarnessMcpFacet;
   /**
    * Targets that write into the same directories as this one. Their manifests
    * count as proof of Ptah ownership here.
@@ -184,9 +175,8 @@ export class WorkspaceHarnessTarget implements IHarnessTarget {
 
   /**
    * @param retired the pass's retired sources (D-2). A removal whose manifest
-   *   source lies under a retired skill root, or whose MCP key is retired, is
-   *   marked with `retiredItemId` so apply runs the proof policy on it. Absent
-   *   means nothing is retired.
+   *   source lies under a retired skill root is marked with `retiredItemId` so
+   *   apply runs the proof policy on it. Absent means nothing is retired.
    */
   async plan(
     desired: HarnessDesiredState,
@@ -272,17 +262,10 @@ export class WorkspaceHarnessTarget implements IHarnessTarget {
       });
     }
 
-    const mcpPlan = this.planMcp(
-      desired,
-      workspaceRoot,
-      baseEntries,
-      retired?.mcpServerKeys ?? [],
-    );
     const removals = await this.planRemovals(
       workspaceRoot,
       baseEntries,
       desiredEntries,
-      mcpPlan,
       retired?.skillSourceRoots ?? [],
       keptLocalEdit,
     );
@@ -290,18 +273,18 @@ export class WorkspaceHarnessTarget implements IHarnessTarget {
 
     return {
       target: this.id,
-      writes: [...writes, ...mcpPlan.writes],
-      removals: [...removals, ...mcpPlan.removals],
-      foreign: [...foreign, ...mcpPlan.foreign],
-      blocked: [...blocked, ...mcpPlan.blocked],
+      writes,
+      removals,
+      foreign,
+      blocked,
       collisions: desired.collisions,
       migrations,
       adopted,
-      keptLocalEdit: [...keptLocalEdit, ...mcpPlan.keptLocalEdit],
+      keptLocalEdit,
       baseEntries,
-      unchanged: unchanged + mcpPlan.unchanged,
+      unchanged,
       unchangedAgents,
-      expected: desiredEntries.size + mcpPlan.expected,
+      expected: desiredEntries.size,
     };
   }
 
@@ -322,7 +305,6 @@ export class WorkspaceHarnessTarget implements IHarnessTarget {
     await this.applyMigrations(plan.migrations, result);
 
     for (const removal of plan.removals) {
-      if (removal.kind === 'mcp') continue;
       if (
         await keepsTrackedCopy(
           linkedWorktree,
@@ -368,28 +350,12 @@ export class WorkspaceHarnessTarget implements IHarnessTarget {
     }
 
     for (const write of plan.writes) {
-      if (write.kind === 'mcp') continue;
       await this.applyWrite(
         write,
         workspaceRoot,
         plan.baseEntries,
         result,
         linkedWorktree,
-      );
-    }
-
-    const facet = this.options.mcpFacet;
-    if (facet !== undefined) {
-      await applyMcpFacet(
-        facet,
-        plan.writes.filter((write) => write.kind === 'mcp'),
-        plan.removals.filter((removal) => removal.kind === 'mcp'),
-        workspaceRoot,
-        result,
-        {
-          baseEntries: plan.baseEntries,
-          probeGitTracking: this.probeGitTracking,
-        },
       );
     }
 
@@ -400,8 +366,7 @@ export class WorkspaceHarnessTarget implements IHarnessTarget {
    * The directories this target fills, for the `.gitignore` block (E23).
    *
    * Derived from the same three option fields the plan is built from, so a
-   * target that gains a facet cannot forget to declare it. The MCP facet is
-   * absent by design — it writes into a config FILE the user commits.
+   * target that gains a facet cannot forget to declare it.
    */
   managedDirs(): readonly string[] {
     const dirs: string[] = [];
@@ -551,25 +516,6 @@ export class WorkspaceHarnessTarget implements IHarnessTarget {
     }
   }
 
-  private planMcp(
-    desired: HarnessDesiredState,
-    workspaceRoot: string,
-    baseEntries: ManagedEntries,
-    retiredServerKeys: readonly string[],
-  ): McpFacetPlan {
-    const facet = this.options.mcpFacet;
-    if (facet === undefined) return emptyMcpFacetPlan();
-    return planMcpFacet(
-      facet,
-      desired.mcp.filter((server: HarnessDesiredMcpServer) =>
-        server.targets.includes(this.id),
-      ),
-      workspaceRoot,
-      baseEntries,
-      retiredServerKeys,
-    );
-  }
-
   // -------------------------------------------------------------------- plan
 
   /**
@@ -700,7 +646,8 @@ export class WorkspaceHarnessTarget implements IHarnessTarget {
   }
 
   /**
-   * Manifest-owned paths that are no longer desired. MCP is handled separately.
+   * Manifest-owned paths that are no longer desired. A pre-P2 `kind: 'mcp'`
+   * row never reaches here: the manifest store drops it on load (D1).
    * A copy whose manifest source lies under a retired skills.sh root carries
    * that root's item id (D-2).
    */
@@ -708,7 +655,6 @@ export class WorkspaceHarnessTarget implements IHarnessTarget {
     workspaceRoot: string,
     baseEntries: ManagedEntries,
     desiredEntries: Map<string, DesiredEntry>,
-    mcpPlan: McpFacetPlan,
     retiredSkillRoots: readonly string[],
     keptLocalEdit: string[],
   ): Promise<HarnessPlanRemove[]> {
@@ -716,7 +662,6 @@ export class WorkspaceHarnessTarget implements IHarnessTarget {
     for (const relPath of Object.keys(baseEntries)) {
       if (desiredEntries.has(relPath)) continue;
       const entry = baseEntries[relPath];
-      if (entry.kind === 'mcp') continue; // owned by the facet planner
       if (entry.kind === 'agent') {
         // Routine passes retain managed agent copies pending explicit removal.
         // A copy already absent on disk only needs its stale claim removed.
@@ -732,7 +677,6 @@ export class WorkspaceHarnessTarget implements IHarnessTarget {
           }
         }
       }
-      if (mcpPlan.ownedKeys.has(relPath)) continue;
       const retiredItemId = retiredSourceItemId(
         entry.source,
         retiredSkillRoots,

@@ -10,8 +10,6 @@ import type {
   AgentModelProvider,
   HarnessCollision,
   HarnessSourcesStatus,
-  HarnessTargetId,
-  McpServerConfig,
 } from '@ptah-extension/shared';
 
 /** A skill directory that should reach every detected target. */
@@ -55,31 +53,10 @@ export interface HarnessDesiredAgent {
   models?: Partial<Record<AgentModelProvider, string>>;
 }
 
-/**
- * An MCP server that should appear in a target's config file.
- *
- * Unlike a skill or a command, this artifact has no source FILE — its source is
- * the user's recorded intent (`~/.ptah/mcp-installed.json`). The hash is
- * therefore computed from the transport config itself, which is what lets an
- * unchanged intent produce a byte-identical config file on every reconcile.
- */
-export interface HarnessDesiredMcpServer {
-  /** Config key, e.g. `github`. */
-  serverKey: string;
-  /** Registry name for display, e.g. `io.github.user/server`. */
-  registryName: string;
-  config: McpServerConfig;
-  /** Targets the user asked for. A target not listed here must not write it. */
-  targets: HarnessTargetId[];
-  /** {@link hashMcpConfig} over `config`. */
-  contentHash: string;
-}
-
 export interface HarnessDesiredState {
   skills: HarnessDesiredSkill[];
   commands: HarnessDesiredCommand[];
   agents: HarnessDesiredAgent[];
-  mcp: HarnessDesiredMcpServer[];
   /** Sources that lost a name/case/reserved-name contest. Reported, not renamed. */
   collisions: HarnessCollision[];
   sources: HarnessSourcesStatus;

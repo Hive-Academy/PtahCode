@@ -149,7 +149,8 @@ describe('HarnessReconcilerService × .gitignore (E23)', () => {
     await build(true).reconcile(ws, { mode: 'full', reason: 'spec' });
 
     const text = gitignore();
-    expect(existsSync(join(ws, '.mcp.json'))).toBe(true);
+    // No target writes MCP config any more (TASK_2026_979, decision row 10).
+    expect(existsSync(join(ws, '.mcp.json'))).toBe(false);
     expect(text).not.toContain('.mcp.json');
     expect(text).not.toContain('mcp.json');
     expect(text).not.toContain('config.toml');

@@ -25,7 +25,6 @@ import {
   rmSync,
   writeFileSync,
 } from 'fs';
-import { execFileSync } from 'child_process';
 import { homedir, tmpdir } from 'os';
 import { dirname, join } from 'path';
 import {
@@ -344,10 +343,10 @@ describe('PluginConfigSourceResolver — workspace scope and retirement', () => 
 
     expect(stateA.mcpIntents?.map((i) => i.serverKey)).toEqual(['only-a']);
     expect(stateB.mcpIntents).toEqual([]);
-    expect((await builder.build(stateA)).mcp.map((s) => s.serverKey)).toEqual([
-      'only-a',
-    ]);
-    expect((await builder.build(stateB)).mcp).toEqual([]);
+    // The desired state carries no MCP list: no target writes MCP config
+    // (TASK_2026_979, parity row 19).
+    expect(await builder.build(stateA)).not.toHaveProperty('mcp');
+    expect(await builder.build(stateB)).not.toHaveProperty('mcp');
   });
 
   it('merges global targets with the workspace’s own, and never widens an unscoped pass', async () => {
@@ -397,8 +396,17 @@ describe('PluginConfigSourceResolver — workspace scope and retirement', () => 
   });
 
   describe('an unreadable intent store fails the pass safe (Phase D review)', () => {
-    const readMcpJson = (root: string): Record<string, unknown> =>
-      JSON.parse(readFileSync(join(root, '.mcp.json'), 'utf-8')).mcpServers;
+    /**
+     * The user's `.mcp.json`, holding the key a pre-P2 pass wrote. No pass
+     * writes or removes it any more (TASK_2026_979), whatever the store holds.
+     */
+    const USER_MCP_JSON = `${JSON.stringify(
+      { mcpServers: { github: { command: 'npx', args: ['github'] } } },
+      null,
+      2,
+    )}\n`;
+    const mcpJson = (root: string): string =>
+      readFileSync(join(root, '.mcp.json'), 'utf-8');
 
     const reconcilerFor = (
       warn: jest.Mock = jest.fn(),
@@ -428,8 +436,10 @@ describe('PluginConfigSourceResolver — workspace scope and retirement', () => 
         scope: 'workspace',
         workspaceRoot: wsA,
       });
+      writeFileSync(join(wsA, '.mcp.json'), USER_MCP_JSON, 'utf-8');
       await reconcilerFor().reconcile(wsA, { mode: 'full', reason: 'seed' });
-      expect(Object.keys(readMcpJson(wsA))).toEqual(['github']);
+      // A recorded intent writes nothing into the config file.
+      expect(mcpJson(wsA)).toBe(USER_MCP_JSON);
     });
 
     it('resolve throws the typed read failure instead of an empty intent list', () => {
@@ -441,7 +451,6 @@ describe('PluginConfigSourceResolver — workspace scope and retirement', () => 
 
     it('a reconcile over the unreadable store removes and writes nothing', async () => {
       const manifestBefore = new ManagedManifestStore().load(wsA, 'claude');
-      const mcpBefore = readFileSync(join(wsA, '.mcp.json'), 'utf-8');
       breakStore();
 
       await expect(
@@ -452,26 +461,20 @@ describe('PluginConfigSourceResolver — workspace scope and retirement', () => 
         message: 'The MCP intent store could not be read.',
       });
 
-      expect(readFileSync(join(wsA, '.mcp.json'), 'utf-8')).toBe(mcpBefore);
+      expect(mcpJson(wsA)).toBe(USER_MCP_JSON);
       expect(new ManagedManifestStore().load(wsA, 'claude')).toEqual(
         manifestBefore,
       );
     });
 
-    it('control: a store that truly records nothing does remove the entry', async () => {
+    it('control: a store that truly records nothing removes nothing either', async () => {
       rmSync(storePath, { force: true });
-      // A real checkout, so the removal proof (#1469) can show git does not
-      // track `.mcp.json`; the bare `.git` marker alone leaves git unable to
-      // answer, and an unproven owned key is kept.
-      const env: NodeJS.ProcessEnv = { ...process.env };
-      delete env['GIT_DIR'];
-      delete env['GIT_WORK_TREE'];
-      delete env['GIT_INDEX_FILE'];
-      execFileSync('git', ['init', '-q'], { cwd: wsA, env, stdio: 'ignore' });
 
       await reconcilerFor().reconcile(wsA, { mode: 'full', reason: 'empty' });
 
-      expect(readMcpJson(wsA)).toEqual({});
+      // Before TASK_2026_979 an empty store removed the owned `github` key.
+      // No target owns or edits MCP config now, so the file stays as it was.
+      expect(mcpJson(wsA)).toBe(USER_MCP_JSON);
     });
   });
 
@@ -567,7 +570,6 @@ describe('PluginConfigSourceResolver — workspace scope and retirement', () => 
           join(pluginsRoot, 'ptah-skillssh-acme-skills'),
           join(pluginsRoot, 'ptah-skillssh-zeta-skills'),
         ],
-        mcpServerKeys: ['legacy'],
       });
       // A retired v1 server is never desired anywhere.
       expect(state.mcpIntents).toEqual([]);
@@ -584,24 +586,22 @@ describe('PluginConfigSourceResolver — workspace scope and retirement', () => 
 
       const state = await resolverFor(syncReader).resolve(wsA);
 
-      expect(state.retired).toEqual({
-        skillSourceRoots: [],
-        mcpServerKeys: ['legacy'],
-      });
+      expect(state.retired).toEqual({ skillSourceRoots: [] });
     });
 
-    it('re-reads both registries on every pass', async () => {
+    it('re-reads the skills.sh registry on every pass, and carries no retired MCP keys', async () => {
       const resolver = resolverFor(syncReader);
-      expect((await resolver.resolve(wsA)).retired?.mcpServerKeys).toEqual([
-        'legacy',
-      ]);
+      expect((await resolver.resolve(wsA)).retired).not.toHaveProperty(
+        'mcpServerKeys',
+      );
+      expect(
+        (await resolver.resolve(wsA)).retired?.skillSourceRoots,
+      ).toHaveLength(2);
 
-      rmSync(storePath);
       rmSync(join(pluginsRoot, SKILLS_SH_RETIRED_FILE));
 
       expect((await resolver.resolve(wsA)).retired).toEqual({
         skillSourceRoots: [],
-        mcpServerKeys: [],
       });
     });
   });

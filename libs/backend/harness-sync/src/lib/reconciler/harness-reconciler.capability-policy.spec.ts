@@ -366,16 +366,9 @@ describe('HarnessReconcilerService — the frozen plan', () => {
         write('skill', '.claude/skills/a'),
         write('command', '.claude/commands/b.md'),
         write('agent', '.claude/agents/c.md'),
-        write('mcp', '.mcp.json#github'),
       ],
       removals: [
         { relPath: '.claude/skills/old', kind: 'skill', isDirectory: true },
-        {
-          relPath: '.mcp.json#stale',
-          kind: 'mcp',
-          isDirectory: false,
-          mcpServerKey: 'stale',
-        },
       ],
       foreign: [],
       blocked: [],
@@ -391,7 +384,7 @@ describe('HarnessReconcilerService — the frozen plan', () => {
         },
       },
       unchanged: 0,
-      expected: 4,
+      expected: 3,
     };
     return {
       id: 'claude',
@@ -437,7 +430,7 @@ describe('HarnessReconcilerService — the frozen plan', () => {
     );
   }
 
-  it('[C3] keeps only MCP writes and removals, and no migration or adoption', async () => {
+  it('[C3] a frozen pass applies nothing: no write, removal, migration or adoption (TASK_2026_979 row 22)', async () => {
     const applied: HarnessPlan[] = [];
 
     const health = await reconcilerOver(true, applied).reconcile(ws, {
@@ -446,16 +439,10 @@ describe('HarnessReconcilerService — the frozen plan', () => {
     });
 
     expect(health.sources).toBe('policy-unknown');
-    expect(applied).toHaveLength(1);
-    expect(applied[0].writes.map((w) => w.relPath)).toEqual([
-      '.mcp.json#github',
-    ]);
-    expect(applied[0].removals.map((r) => r.relPath)).toEqual([
-      '.mcp.json#stale',
-    ]);
-    expect(applied[0].migrations).toEqual([]);
-    expect(applied[0].adopted).toEqual([]);
-    expect(applied[0].baseEntries).toEqual({});
+    // The frozen plan keeps the manifest exactly as loaded, so it is a no-op
+    // and the target's apply is never called.
+    expect(applied).toEqual([]);
+    expect(existsSync(join(ws, '.mcp.json'))).toBe(false);
   });
 
   it('[C3] a known policy hands the plan through untouched', async () => {
@@ -466,8 +453,8 @@ describe('HarnessReconcilerService — the frozen plan', () => {
       reason: 'known-plan-spec',
     });
 
-    expect(applied[0].writes).toHaveLength(4);
-    expect(applied[0].removals).toHaveLength(2);
+    expect(applied[0].writes).toHaveLength(3);
+    expect(applied[0].removals).toHaveLength(1);
     expect(applied[0].migrations).toHaveLength(1);
   });
 });

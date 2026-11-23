@@ -105,7 +105,8 @@ export type AgentModelsFactory = () => {
 export function defaultHarnessSourceLayout(
   homeDir?: string,
 ): HarnessSourceLayout {
-  const ptahRoot = homeDir === undefined ? defaultPtahRoot() : join(homeDir, '.ptah');
+  const ptahRoot =
+    homeDir === undefined ? defaultPtahRoot() : join(homeDir, '.ptah');
   const userRoot = join(ptahRoot, 'user');
   return {
     skillsRoot: join(userRoot, 'skills'),
@@ -120,7 +121,8 @@ export function defaultHarnessSourceLayout(
  * retired-root registry (`SKILLS_SH_RETIRED_FILE`) sits beside them.
  */
 export function defaultSkillsShPluginsRoot(homeDir?: string): string {
-  const ptahRoot = homeDir === undefined ? defaultPtahRoot() : join(homeDir, '.ptah');
+  const ptahRoot =
+    homeDir === undefined ? defaultPtahRoot() : join(homeDir, '.ptah');
   return join(ptahRoot, 'plugins');
 }
 
@@ -332,9 +334,9 @@ export class PluginConfigSourceResolver implements IHarnessSourceResolver {
    * workspace's, which is the leak v2 exists to close.
    *
    * NOT caught. An unreadable store (`McpIntentPersistError` 'read-failed')
-   * used to come back as `[]`, which is an AUTHORITATIVE "no Ptah-managed MCP
-   * servers here": the MCP facet then plans a removal for every owned entry.
-   * Thrown, it fails `resolve`, and the reconciler reads its source before it
+   * once came back as `[]`, an AUTHORITATIVE "no Ptah-managed MCP servers
+   * here" that made the (now removed) MCP facet plan a removal for every owned
+   * entry. Thrown, it fails `resolve`, and the reconciler reads its source before it
    * takes the lock or plans a target, so the pass writes and removes nothing.
    * Every reconcile caller already catches that rejection and logs a warning
    * (`HarnessPropagationService.propagate`, the preflight, host activation,
@@ -345,30 +347,9 @@ export class PluginConfigSourceResolver implements IHarnessSourceResolver {
     return this.mcpIntents.listFor(workspaceRoot ?? '');
   }
 
-  /** Both registries, re-read on every pass and sorted so a pass is stable. */
+  /** The skills.sh registry, re-read and sorted on every pass. */
   private readRetiredSources(): HarnessRetiredSources {
-    return {
-      skillSourceRoots: this.readRetiredSkillSourceRoots(),
-      mcpServerKeys: this.readRetiredMcpServerKeys(),
-    };
-  }
-
-  /**
-   * Every key the intent store carried over from v1. A key that is ALSO
-   * recorded again stays listed: the reconciler consults the list only for a
-   * removal, and a copy that is no longer desired somewhere is exactly a v1
-   * leftover that must be removed on proof.
-   */
-  private readRetiredMcpServerKeys(): string[] {
-    try {
-      return this.mcpIntents.listRetired().map((intent) => intent.serverKey);
-    } catch {
-      // degradation-audit: optional-capability - an unreadable store (corrupt
-      // included, #84) already fails the pass loudly where the desired MCP
-      // state is read; here it leaves nothing retired, so removals fall back
-      // to the ordinary manifest-hash rule and never widen.
-      return [];
-    }
+    return { skillSourceRoots: this.readRetiredSkillSourceRoots() };
   }
 
   /**

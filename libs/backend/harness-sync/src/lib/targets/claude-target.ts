@@ -15,6 +15,11 @@
  * would close a source→target→source loop in which every reconcile re-mirrors
  * its own output. Rival CLIs get agents in Batch 2, from the user layer, into
  * their own directories.
+ *
+ * **`{ws}/.mcp.json` is never written** (TASK_2026_979, decision row 10). MCP
+ * servers reach Claude through the Ptah gateway at session start, so this
+ * target plans no MCP row. An old `kind: 'mcp'` manifest row is dropped when
+ * the manifest loads (D1); the config entry it named stays on disk.
  */
 
 import { existsSync, lstatSync, readdirSync, readFileSync } from 'fs';
@@ -62,13 +67,6 @@ import {
   publishFailureReason,
 } from './artifact-retirement';
 import { isMigratableLink } from './link-ownership';
-import { createMcpFacet } from './mcp/mcp-facet.registry';
-import type { IHarnessMcpFacet } from './mcp/mcp-facet.port';
-import {
-  applyMcpFacet,
-  planMcpFacet,
-  type McpFacetPlan,
-} from './mcp/mcp-facet-planner';
 import {
   createGitTrackingProbe,
   removeRetiredCopy,
@@ -104,11 +102,6 @@ function hasGitMarker(workspaceRoot: string): boolean {
   }
 }
 
-/** `{ws}/.mcp.json` — read by Claude Code, the `claude` binary and ptah-cli. */
-function defaultClaudeMcpFacet(): IHarnessMcpFacet {
-  return createMcpFacet('claude');
-}
-
 export class ClaudeTarget implements IHarnessTarget {
   readonly id: HarnessTargetId = 'claude';
 
@@ -123,20 +116,14 @@ export class ClaudeTarget implements IHarnessTarget {
     skills: 'supported',
     commands: 'supported',
     agents: 'source-managed',
-    mcp: 'supported',
+    mcp: 'unsupported',
   };
 
-  private readonly mcpFacet: IHarnessMcpFacet;
-  /** Answers rule 3 of the retired-copy proof (D-D7) for skills, commands and `.mcp.json`. */
+  /** Answers rule 3 of the retired-copy proof (D-D7) for skills and commands. */
   private readonly probeGitTracking: GitTrackingProbe =
     createGitTrackingProbe();
 
-  constructor(
-    private readonly manifestStore: ManagedManifestStore,
-    mcpFacet: IHarnessMcpFacet = defaultClaudeMcpFacet(),
-  ) {
-    this.mcpFacet = mcpFacet;
-  }
+  constructor(private readonly manifestStore: ManagedManifestStore) {}
 
   /**
    * Always true. Claude Code reads `{ws}/.claude/` in any workspace, and the
@@ -156,18 +143,7 @@ export class ClaudeTarget implements IHarnessTarget {
     for (const command of desired.commands) {
       keys.set(`${COMMANDS_REL}/${command.slug}.md`, command.contentHash);
     }
-    for (const server of this.desiredMcp(desired)) {
-      keys.set(
-        `${this.mcpFacet.configRelPath()}#${server.serverKey}`,
-        server.contentHash,
-      );
-    }
     return keys;
-  }
-
-  /** MCP servers the user asked for on THIS target. */
-  private desiredMcp(desired: HarnessDesiredState) {
-    return desired.mcp.filter((server) => server.targets.includes(this.id));
   }
 
   async plan(
@@ -297,20 +273,10 @@ export class ClaudeTarget implements IHarnessTarget {
       });
     }
 
-    const mcpPlan = this.planMcp(
-      desired,
-      workspaceRoot,
-      baseEntries,
-      retired?.mcpServerKeys ?? [],
-    );
-
     const retiredSkillRoots = retired?.skillSourceRoots ?? [];
     for (const relPath of Object.keys(baseEntries)) {
       if (desiredRel.has(relPath)) continue;
       const entry = baseEntries[relPath];
-      // MCP entries live inside a shared config file and are swept by the facet
-      // planner, which knows which config file each key belongs to.
-      if (entry.kind === 'mcp' || mcpPlan.ownedKeys.has(relPath)) continue;
       // A copy of a retired skills.sh root is no longer desired because its
       // source is gone, not because the user deselected it: apply removes it
       // only on proof (D-2) instead of snapshot-deleting it.
@@ -341,33 +307,18 @@ export class ClaudeTarget implements IHarnessTarget {
 
     return {
       target: this.id,
-      writes: [...writes, ...mcpPlan.writes],
-      removals: [...removals, ...mcpPlan.removals],
-      foreign: [...foreign, ...mcpPlan.foreign],
-      blocked: [...blocked, ...mcpPlan.blocked],
+      writes,
+      removals,
+      foreign,
+      blocked,
       collisions: desired.collisions,
       migrations,
       adopted,
-      keptLocalEdit: [...keptLocalEdit, ...mcpPlan.keptLocalEdit],
+      keptLocalEdit,
       baseEntries,
-      unchanged: unchanged + mcpPlan.unchanged,
-      expected: desiredRel.size + mcpPlan.expected,
+      unchanged,
+      expected: desiredRel.size,
     };
-  }
-
-  private planMcp(
-    desired: HarnessDesiredState,
-    workspaceRoot: string,
-    baseEntries: ManagedEntries,
-    retiredServerKeys: readonly string[],
-  ): McpFacetPlan {
-    return planMcpFacet(
-      this.mcpFacet,
-      this.desiredMcp(desired),
-      workspaceRoot,
-      baseEntries,
-      retiredServerKeys,
-    );
   }
 
   async apply(
@@ -401,7 +352,6 @@ export class ClaudeTarget implements IHarnessTarget {
     }
 
     for (const removal of plan.removals) {
-      if (removal.kind === 'mcp') continue;
       if (
         await keepsTrackedCopy(
           linkedWorktree,
@@ -450,7 +400,6 @@ export class ClaudeTarget implements IHarnessTarget {
     }
 
     for (const write of plan.writes) {
-      if (write.kind === 'mcp') continue;
       await this.applyWrite(
         write,
         workspaceRoot,
@@ -459,20 +408,6 @@ export class ClaudeTarget implements IHarnessTarget {
         linkedWorktree,
       );
     }
-
-    await applyMcpFacet(
-      this.mcpFacet,
-      plan.writes.filter((write) => write.kind === 'mcp'),
-      plan.removals.filter((removal) => removal.kind === 'mcp'),
-      workspaceRoot,
-      result,
-      // Wired together with the plan side above: a retired removal applied
-      // without its owned hash and git probe fails owned on every pass.
-      {
-        baseEntries: plan.baseEntries,
-        probeGitTracking: this.probeGitTracking,
-      },
-    );
 
     // Last: the legacy manifest is the only proof of ownership for adopted
     // command copies until the new manifest lands, and the reconciler persists
@@ -577,7 +512,7 @@ export class ClaudeTarget implements IHarnessTarget {
    * `.claude/agents` is absent, and that absence is the same decision made
    * everywhere else in this file: it is a SOURCE the user-layer mirror reads
    * FROM, so it holds files the user authored and must stay tracked.
-   * `{ws}/.mcp.json` is absent because it is a config file teams commit.
+   * `{ws}/.mcp.json` is absent because this target never writes it.
    */
   managedDirs(): readonly string[] {
     return [SKILLS_REL, COMMANDS_REL];

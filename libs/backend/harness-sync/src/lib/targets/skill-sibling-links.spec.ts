@@ -108,9 +108,9 @@ function crossSkillLinks(): CrossSkillLink[] {
     markdownFiles(skill.dir).flatMap((file) =>
       relativeLinks(readFileSync(file, 'utf8'))
         .filter((link) =>
-          toPosix(
-            relative(skill.dir, resolve(dirname(file), link)),
-          ).startsWith('..'),
+          toPosix(relative(skill.dir, resolve(dirname(file), link))).startsWith(
+            '..',
+          ),
         )
         .map((link) => {
           const flatRel = toPosix(
@@ -171,9 +171,7 @@ describe('skills that link a sibling skill declare it', () => {
   it('every ## Requires entry names a sibling skill shipped by a guarded plugin', () => {
     const offenders = skillDirs().flatMap((skill) =>
       declaredRequires(readFileSync(join(skill.dir, 'SKILL.md'), 'utf8'))
-        .filter(
-          (slug) => shippedSkillDir(skill.plugin, slug) === null,
-        )
+        .filter((slug) => shippedSkillDir(skill.plugin, slug) === null)
         .map((slug) => `${skill.plugin}/${skill.slug} requires ${slug}`),
     );
     expect(offenders).toEqual([]);
@@ -218,7 +216,6 @@ describe('every harness target installs skills as flat siblings', () => {
     ],
     commands: [],
     agents: [],
-    mcp: [],
     collisions: [],
     sources: 'ok',
     sourceRoots: [],

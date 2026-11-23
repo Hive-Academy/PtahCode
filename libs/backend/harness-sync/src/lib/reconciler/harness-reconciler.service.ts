@@ -47,7 +47,6 @@ import {
   type ManagedEntries,
   type ManagedManifest,
 } from '../manifest-store/managed-manifest';
-import { isMcpFragmentKey } from '../targets/mcp/mcp-facet.port';
 import { resolveHarnessWorkspaceRoot } from '../workspace/workspace-root';
 import {
   acquireWorkspaceLock,
@@ -102,8 +101,14 @@ export interface HarnessReconcileOptions {
 /** What a pass hands the targets when the resolver reported no retirement. */
 const NO_RETIRED_SOURCES: HarnessRetiredSources = {
   skillSourceRoots: [],
-  mcpServerKeys: [],
 };
+
+/**
+ * Why a blocked path could not be written, in words a user can act on. Every
+ * blocked path is a file or directory: no target plans an MCP config entry
+ * (TASK_2026_979, decision row 10).
+ */
+const BLOCKED_REASON = 'occupied by a file or directory Ptah does not own';
 
 /** Emitted after every completed pass, including no-op preflights. */
 export interface HarnessReconcilerEvents {
@@ -299,9 +304,6 @@ export class HarnessReconcilerService {
             relPath,
             kind: entry.kind,
             isDirectory: entry.kind === 'skill',
-            ...(entry.kind === 'mcp'
-              ? { mcpServerKey: relPath.slice(relPath.indexOf('#') + 1) }
-              : {}),
           }),
         );
 
@@ -428,7 +430,7 @@ export class HarnessReconcilerService {
     const retired = source.retired ?? NO_RETIRED_SOURCES;
     if (frozen) {
       this.logger.warn(
-        '[harness-sync] Capability policy unknown; skills, commands and agents are frozen this pass (MCP still applies)',
+        '[harness-sync] Capability policy unknown; skills, commands and agents are frozen this pass',
         { workspaceRoot, reason: options.reason },
       );
     }
@@ -667,7 +669,7 @@ export class HarnessReconcilerService {
         pass.signal,
         retired,
       );
-      const plan = frozen ? freezeToMcp(planned, manifest) : planned;
+      const plan = frozen ? freezePlan(planned, manifest) : planned;
       if (this.isNoOp(plan, manifest)) {
         return appliedTargetHealth(
           plan,
@@ -822,9 +824,6 @@ export class HarnessReconcilerService {
       if (owned === undefined || entrySourceHash(owned) !== sourceHash) {
         return true;
       }
-      // An MCP key addresses an entry inside a shared config file; there is no
-      // path to stat. Its hash comparison above is the whole check.
-      if (isMcpFragmentKey(relPath)) continue;
       if (!existsSync(join(workspaceRoot, ...relPath.split('/')))) return true;
     }
     return false;
@@ -989,7 +988,7 @@ export class HarnessReconcilerService {
       blockedTargetPaths(target).map((relPath) => ({
         target: target.target,
         relPath,
-        reason: blockedReason(relPath),
+        reason: BLOCKED_REASON,
       })),
     );
 
@@ -1050,21 +1049,12 @@ export class HarnessReconcilerService {
 }
 
 /**
- * Why one blocked path could not be written, in words a user can act on.
- *
- * Two shapes, because a blocked MCP entry is not a file at all: it is a server
- * key inside a config file the user also writes, so telling them to move or
- * delete a path would name something that does not exist.
- */
-/**
  * A canonical, order-independent identity for one blocked set.
  *
  * Sorted because target iteration order is the registration order and a host
  * that registers its targets differently must not read as a changed set. The
- * `reason` is part of the key on purpose: the same path can move from
- * "occupied by a file or directory Ptah does not own" to the MCP-key wording
- * when a target's facet changes, and that is a different fact about the same
- * path rather than the same one repeated.
+ * `reason` stays part of the key so a later change of wording reads as a
+ * different fact about the same path rather than the same one repeated.
  */
 function blockedSetKey(
   paths: readonly { target: string; relPath: string; reason: string }[],
@@ -1073,12 +1063,6 @@ function blockedSetKey(
     .map((entry) => `${entry.target}|${entry.relPath}|${entry.reason}`)
     .sort()
     .join('\n');
-}
-
-function blockedReason(relPath: string): string {
-  return isMcpFragmentKey(relPath)
-    ? 'the config file already defines this server key, and Ptah did not write it'
-    : 'occupied by a file or directory Ptah does not own';
 }
 
 /**
@@ -1100,38 +1084,24 @@ function policyHealth(
 }
 
 /**
- * A plan with every skill, command and agent change taken out, for a pass
- * whose capability policy could not be read (TASK_2026_560, fail-closed).
+ * A plan with every change taken out, for a pass whose capability policy
+ * could not be read (TASK_2026_560, fail-closed).
  *
  * The desired state of such a pass cannot say which skills and plugins are
  * off, so any write could re-add one the user disabled and any removal could
- * reap one they kept. Only MCP entries — governed by the intent store, not by
- * that policy — still move. Migrations wait too: each is a one-time repair a
- * later, readable pass still finds.
- *
- * Ownership follows the same line. Non-MCP entries keep exactly what the
- * manifest recorded (an adoption this pass planned is not taken), and MCP
- * entries take the plan's view, so the manifest saved afterwards differs from
- * the loaded one only where MCP changed.
+ * reap one they kept. Migrations wait too: each is a one-time repair a later,
+ * readable pass still finds. Ownership stays exactly what the manifest
+ * recorded (an adoption this pass planned is not taken), so a frozen pass
+ * applies nothing (TASK_2026_979: no MCP entry moves either).
  */
-function freezeToMcp(
-  plan: HarnessPlan,
-  manifest: ManagedManifest,
-): HarnessPlan {
-  const baseEntries: ManagedEntries = {};
-  for (const [relPath, entry] of Object.entries(manifest.entries)) {
-    if (entry.kind !== 'mcp') baseEntries[relPath] = entry;
-  }
-  for (const [relPath, entry] of Object.entries(plan.baseEntries)) {
-    if (entry.kind === 'mcp') baseEntries[relPath] = entry;
-  }
+function freezePlan(plan: HarnessPlan, manifest: ManagedManifest): HarnessPlan {
   return {
     ...plan,
-    writes: plan.writes.filter((write) => write.kind === 'mcp'),
-    removals: plan.removals.filter((removal) => removal.kind === 'mcp'),
+    writes: [],
+    removals: [],
     migrations: [],
-    adopted: plan.adopted.filter((relPath) => isMcpFragmentKey(relPath)),
-    baseEntries,
+    adopted: [],
+    baseEntries: { ...manifest.entries },
   };
 }
 
