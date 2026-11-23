@@ -483,7 +483,7 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
                 </div>
               }
               @if (connectionsStatus() === 'error') {
-                <ptah-alert tone="warning" [compact]="true" live="polite" class="mt-3" data-testid="wizard-connections-error">
+                <ptah-alert tone="warning" [compact]="true" live="polite" class="mt-[var(--ptah-gap-heading)]" data-testid="wizard-connections-error">
                   <p>Connected providers could not be refreshed. The list may be out of date.</p>
                   <button alertAction type="button" ptahButton variant="ghost" (click)="onRetryConnections($event)">
                     Retry
@@ -496,10 +496,9 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
               <fieldset class="mt-3 space-y-2" data-testid="wizard-provider-options">
                 <legend class="text-sm font-semibold text-base-content">Choose a provider</legend>
                 @if (connectionsStatus() === 'loading') {
-                  <div class="space-y-2" aria-hidden="true" data-testid="wizard-provider-loading">
+                  <div class="space-y-[var(--ptah-gap-controls)]" aria-hidden="true" data-testid="wizard-provider-loading">
                     @for (row of [1, 2, 3, 4]; track row) {
-                      <div class="flex items-start gap-2 rounded-md border border-base-300 p-2">
-                        <span class="skeleton h-6 w-6 shrink-0 rounded-full"></span>
+                      <div class="flex items-start rounded-md border border-base-300 p-[var(--ptah-gap-controls)]">
                         <ptah-skeleton class="flex-1" [lines]="2" size="sm" />
                       </div>
                     }
@@ -507,11 +506,11 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
                 } @else {
                   @for (option of providerOptions(); track option.id) {
                     <div
-                      class="flex items-start gap-2 rounded-md border border-base-300 bg-base-100"
+                      class="flex items-start gap-[var(--ptah-gap-controls)] rounded-md border border-base-300 bg-base-100"
                       data-testid="wizard-provider-option"
                       [attr.data-provider]="option.id"
                     >
-                      <label class="flex min-w-0 flex-1 items-start gap-2 p-2">
+                      <label class="flex min-w-0 flex-1 items-start gap-[var(--ptah-gap-controls)] p-[var(--ptah-gap-controls)]">
                         <input
                           type="radio"
                           class="radio radio-sm mt-0.5"
@@ -523,7 +522,7 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
                         />
                         <ptah-provider-mark [providerId]="option.id" [fallback]="option.fallback" />
                         <span class="min-w-0">
-                          <span class="flex flex-wrap items-center gap-2 text-sm text-base-content">
+                          <span class="flex flex-wrap items-center gap-[var(--ptah-gap-controls)] text-sm text-base-content">
                             <span class="break-all">{{ option.name }}</span>
                             @if (option.connected) {
                               <span ptahBadge tone="ok" size="xs" data-testid="wizard-provider-connected">
@@ -545,7 +544,7 @@ function hostnameOf(baseUrl: string | null, fallback: string): string {
                         <button
                           type="button"
                           ptahButton variant="ghost" size="xs"
-                          class="m-2 shrink-0"
+                          class="m-[var(--ptah-gap-controls)] shrink-0"
                           [attr.aria-label]="'Sign in to ' + option.name"
                           [disabled]="saving()"
                           (click)="requestWizardClose(option.id)"
