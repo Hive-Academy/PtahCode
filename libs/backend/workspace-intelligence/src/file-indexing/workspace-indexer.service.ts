@@ -268,6 +268,8 @@ export class WorkspaceIndexerService {
       }
       return matches(relativePath);
     } catch (error: unknown) {
+      // degradation-audit: reported - warned once per root below; an
+      // unreadable ignore file keeps the path indexed, which is the old behaviour.
       this.indexIgnoreCache.delete(root);
       if (!this.warnedIgnoreRoots.has(root)) {
         this.warnedIgnoreRoots.add(root);
@@ -817,9 +819,9 @@ export class WorkspaceIndexerService {
       directory,
       (filePath) => this.fsProvider.exists(filePath),
       (error) => {
-        // degradation-audit: optional-capability - a directory whose `.git`
-        // cannot be probed is indexed like any other; the cost is that a nested
-        // repository behind an unreadable probe stays in the `@` picker.
+        // A directory whose `.git` cannot be probed is indexed like any other;
+        // the cost is that a nested repository behind an unreadable probe stays
+        // in the `@` picker.
         this.logger.debug('[WorkspaceIndexer] nested repository probe failed', {
           directory,
           error: error instanceof Error ? error.message : String(error),

@@ -1422,7 +1422,8 @@ export class CodeSymbolIndexer {
       const { mtime, ctime, size } = await this.fs.stat(filePath);
       return `${CODE_INDEX_FORMAT_VERSION}:${mtime}:${ctime}:${size}`;
     } catch {
-      // Stat failure disables caching. The read still determines the outcome.
+      // degradation-audit: optional-capability - a stat failure disables the
+      // unchanged-file skip for this file; the read still determines the outcome.
       return null;
     }
   }

@@ -16,6 +16,8 @@ export async function holdsGitEntry(
   try {
     return (await exists(path.join(directory, '.git'))) === true;
   } catch (error: unknown) {
+    // degradation-audit: optional-capability - a `.git` probe that cannot run
+    // treats the directory as a plain folder; `onError` lets the caller log it.
     onError?.(error);
     return false;
   }
