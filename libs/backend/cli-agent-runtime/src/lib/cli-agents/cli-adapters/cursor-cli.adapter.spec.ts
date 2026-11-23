@@ -374,7 +374,8 @@ describe('CursorCliAdapter', () => {
       currentRun?.end();
       await handle.done;
       expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({
-        mode: 'agent', local: { cwd: '/proj', sandboxOptions: { enabled: false } },
+        mode: 'agent',
+        local: { cwd: '/proj', settingSources: [], sandboxOptions: { enabled: false } },
       }));
     });
 
@@ -547,7 +548,10 @@ describe('CursorCliAdapter', () => {
 
       expect(mockResume).toHaveBeenCalledWith(
         'agent-resumed',
-        expect.objectContaining({ mode: 'agent', local: { cwd: '/proj', sandboxOptions: { enabled: false } } }),
+        expect.objectContaining({
+          mode: 'agent',
+          local: { cwd: '/proj', settingSources: [], sandboxOptions: { enabled: false } },
+        }),
       );
       expect(mockCreate).not.toHaveBeenCalled();
     });
@@ -606,6 +610,31 @@ describe('CursorCliAdapter', () => {
       expect(createArg.mcpServers?.['ptah']?.headers).toEqual({
         Authorization: 'Bearer lane-token',
       });
+    });
+
+    // A5 (TASK_2026_979): `@cursor/sdk` loads project and user
+    // `.cursor/mcp.json` and plugin MCP only for the matching
+    // `local.settingSources` entries, so an empty list leaves `ptah` alone.
+    it('loads no ambient Cursor settings, so `ptah` is the only MCP server', async () => {
+      const handle = await adapter.runSdk({
+        ...defaultOptions,
+        mcpPort: 4321,
+        mcpToken: 'lane-token',
+      });
+      handle.onOutput(() => {
+        /* drain */
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+      currentRun?.end();
+      await handle.done;
+
+      const createArg = mockCreate.mock.calls[0][0] as {
+        local?: { settingSources?: unknown };
+        mcpServers?: Record<string, unknown>;
+      };
+      expect(createArg.local?.settingSources).toEqual([]);
+      expect(Object.keys(createArg.mcpServers ?? {})).toEqual(['ptah']);
     });
 
     it.each([undefined, 'agent-resumed'])(
@@ -838,7 +867,8 @@ describe('CursorCliAdapter', () => {
       expect(code).toBe(0);
       expect(mockCreate).toHaveBeenCalledTimes(1);
       expect(mockCreate).toHaveBeenCalledWith(expect.objectContaining({
-        mode: 'agent', local: { cwd: '/proj', sandboxOptions: { enabled: false } },
+        mode: 'agent',
+        local: { cwd: '/proj', settingSources: [], sandboxOptions: { enabled: false } },
       }));
       expect(mockSend).toHaveBeenCalledTimes(2);
       expect(mockSend.mock.calls[1][0]).toContain('Follow-up');

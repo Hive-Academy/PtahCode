@@ -15,7 +15,9 @@
  *   version floor, when `acp` is not listed, or without a spawner.
  *   After such a fallback the binary's lanes stay on stream-json for
  *   `AGY_ACP_FAILURE_COOLDOWN_MS`. A fallback never resumes an id it cannot
- *   prove stream-json knows: it starts a fresh conversation.
+ *   prove stream-json knows: it starts a fresh conversation. This transport
+ *   has no Ptah MCP server: it no longer writes `ptah` into the home
+ *   `~/.gemini/config/mcp_config.json` (TASK_2026_979 decision row 13).
  * - `PTAH_AGY_TRANSPORT=acp|stream-json` forces one transport (no probe, no
  *   fallback, no cooldown); unset or `auto` chooses as above.
  *
@@ -77,15 +79,9 @@ import {
   type AgySignInState,
 } from '@ptah-extension/auth-providers';
 
-import {
-  createMcpFacet,
-  PTAH_SPAWN_MCP_KEY,
-  type IHarnessMcpFacet,
-} from '@ptah-extension/harness-sync';
 import type {
   CliDetectionResult,
   CliOutputSegment,
-  McpServerConfig,
 } from '@ptah-extension/shared';
 import type {
   CliAdapterManifest,
@@ -128,10 +124,7 @@ import {
   type AgyTransportOverride,
   type AntigravityAcpSeam,
 } from './antigravity-acp-lane';
-import { MCP_ATTACHMENT_TIMEOUT_MS } from '../mcp-attachment-probe.port';
 import { createProviderSessionLaneHandle } from './provider-session/provider-session-lane-handle';
-import { laneMcpAuthUrl } from './lane-mcp-credentials';
-import { ptahMcpServerUrl } from './ptah-mcp-url';
 import { classifyCliStderr } from './cli-stderr-severity';
 import { z } from 'zod';
 import {
@@ -474,36 +467,14 @@ function withLeadingInfo(handle: SdkHandle, info: string): SdkHandle {
 }
 
 export class AntigravityCliAdapter implements CliAdapter {
-  /**
-   * How long a failed startup waits for its child to stop before it releases
-   * the MCP startup lock. Mutable only so specs can shorten it.
-   */
-  static startupChildStopDeadlineMs = 5_000;
-
-  private static readonly mcpStartupLocks = new Map<string, Promise<void>>();
-
-  private static async lockMcpStartup(): Promise<() => void> {
-    const key = process.env['HOME'] || process.env['USERPROFILE'] || homedir();
-    const previous = this.mcpStartupLocks.get(key) ?? Promise.resolve();
-    let release!: () => void;
-    const current = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    this.mcpStartupLocks.set(key, current);
-    await previous;
-    let released = false;
-    return () => {
-      if (released) return;
-      released = true;
-      if (this.mcpStartupLocks.get(key) === current)
-        this.mcpStartupLocks.delete(key);
-      release();
-    };
-  }
   readonly name = 'antigravity' as const;
   readonly displayName = 'Antigravity';
   readonly roleChannel = 'task-prompt' as const;
-  /** MCP is configured via ~/.gemini/config/mcp_config.json before each spawn */
+  /**
+   * The ACP lane attaches Ptah MCP through `session/new.mcpServers`. The
+   * stream-json fallback writes no MCP config and runs without `ptah`
+   * (TASK_2026_979 decision row 13).
+   */
   readonly supportsMcp = true;
 
   /**
@@ -1167,114 +1138,6 @@ export class AntigravityCliAdapter implements CliAdapter {
   }
 
   /**
-   * The ONE writer of `~/.gemini/config/mcp_config.json`.
-   *
-   * This adapter used to hand-roll its own read-modify-write of that file. Then
-   * `agy` became a user-installable MCP target (TASK_2026_285) and the harness
-   * reconciler started writing the SAME file, which made the hand-rolled copy a
-   * second writer with a second idea of the format and no serialization at all
-   * — one lost update and the user's installed server disappears after an agent
-   * run, silently.
-   *
-   * So both sides go through the facet from `harness-sync`, which owns the
-   * schema (`mcpServers`, `serverUrl` for remote), the atomic write and the
-   * config-file lock. The dependency direction is the allowed one:
-   * `cli-agent-runtime` → `harness-sync`, never the reverse.
-   *
-   * `homeDir` is resolved env-first for the same reason `geminiRoot()` is —
-   * tests and sandboxes reassign `HOME` after module load, and the facet's
-   * default would otherwise resolve `os.homedir()` and write to the real one.
-   */
-  private static mcpFacet(): IHarnessMcpFacet {
-    return createMcpFacet('antigravity', {
-      homeDir: process.env['HOME'] || process.env['USERPROFILE'] || homedir(),
-    });
-  }
-
-  /**
-   * Publish Ptah's own MCP server for this run.
-   *
-   * The key is `PTAH_SPAWN_MCP_KEY`, shared with the reconciler so the two
-   * writers cannot disagree about which name is ephemeral. The facet's write is
-   * read-modify-write of ONE key, so a user's servers — installed through the
-   * marketplace or by hand — are carried through untouched.
-   *
-   * Non-fatal: a failure here costs MCP tools for this run, and the CLI still
-   * functions, so it must not abort the spawn.
-   */
-  private async configureMcpServer(
-    port: number,
-    workingDirectory: string,
-    agentId: string,
-    token: string,
-  ): Promise<{
-    prior?: McpServerConfig;
-    configured: boolean;
-    restoreNeeded: boolean;
-  }> {
-    const facet = AntigravityCliAdapter.mcpFacet();
-    const existing = facet.readAll('').get(PTAH_SPAWN_MCP_KEY);
-    // Older launches could leave a lane URL behind. Never restore that route
-    // (or its credential) as the next lane's persistent prior entry.
-    const prior =
-      existing &&
-      'url' in existing &&
-      typeof existing.url === 'string' &&
-      /^http:\/\/localhost:\d+\/(?:auth|agent)\//.test(existing.url)
-        ? { ...existing, url: new URL(existing.url).origin }
-        : existing;
-    const url = laneMcpAuthUrl(
-      ptahMcpServerUrl(port, workingDirectory, agentId),
-      token,
-    );
-    try {
-      await facet.write('', PTAH_SPAWN_MCP_KEY, { type: 'http', url });
-      return { prior, configured: true, restoreNeeded: true };
-    } catch {
-      this.logger?.warn('[AntigravityCliAdapter] MCP config write failed');
-      // A failed atomic write may have reached disk. Restore the previous key.
-      return { prior, configured: false, restoreNeeded: true };
-    }
-  }
-
-  /**
-   * Put the `ptah` key back the way this run found it, so no stale localhost
-   * port is left pointing at a closed server.
-   *
-   * **RESTORE, not delete.** The key may hold an entry this run did not write:
-   * a user's own `ptah` server, or a persistent entry an older Ptah left
-   * (`CodeExecutionMCP` no longer writes one, TASK_2026_2297, and its
-   * reconcile removes the leftover). An unconditional delete would drop the
-   * user's server every time a Ptah-spawned agent finished.
-   *
-   * Restoring needs no knowledge of who the other writer is: `prior` is
-   * whatever was in the file before this run. Absent means nobody owned the
-   * key, and removing it is exactly the old behaviour.
-   *
-   * Removes or rewrites exactly `PTAH_SPAWN_MCP_KEY` and nothing else. An older
-   * version also deleted the whole `mcpServers` map once it looked empty, which
-   * was safe only while Ptah was its sole writer; now that a user's install can
-   * live in that map, "empty" is a claim this code is not entitled to make.
-   *
-   * Non-fatal: the next spawn, and the next registration pass, both rewrite it.
-   */
-  private async cleanupMcpEntry(prior?: McpServerConfig): Promise<void> {
-    try {
-      const facet = AntigravityCliAdapter.mcpFacet();
-      if (prior === undefined) {
-        await facet.remove('', PTAH_SPAWN_MCP_KEY);
-      } else {
-        await facet.write('', PTAH_SPAWN_MCP_KEY, prior);
-      }
-    } catch {
-      // degradation-audit: optional-capability - a failed restore is retried by
-      // the next startup and must not change the lane's result.
-      // Stale ptah entry will be overwritten on next configureMcpServer().
-      this.logger?.error('[AntigravityCliAdapter] MCP config restore failed');
-    }
-  }
-
-  /**
    * Run the task on `agy acp` when this binary supports it (or the transport
    * is forced to it), else on the stream-json lane.
    */
@@ -1347,38 +1210,28 @@ export class AntigravityCliAdapter implements CliAdapter {
       ...args,
     ]);
 
-    // The `ptah` entry as this run found it. Held in a LOCAL, not a field:
-    // two `agy` agents can be in flight at once and a shared slot would let
-    // one run's cleanup restore the other run's snapshot.
-    const releaseMcpStartup = options.mcpPort
-      ? await AntigravityCliAdapter.lockMcpStartup()
-      : undefined;
-    let priorMcpEntry: McpServerConfig | undefined;
-    let mcpConfigured = false;
-    let mcpRestoreNeeded = false;
-    let mcpRestored = false;
-    const restoreMcpConfig = async (): Promise<void> => {
-      if (!mcpRestoreNeeded || mcpRestored) return;
-      mcpRestored = true;
-      await this.cleanupMcpEntry(priorMcpEntry);
+    // This lane writes no MCP config (TASK_2026_979 decision row 13): `agy`
+    // print mode has no per-spawn MCP flag, and the old spawn-time write of
+    // the home `mcp_config.json` put a lane credential in a shared file. The
+    // credential the manager minted for the lane is unused here; it is still
+    // revoked through `onMcpConfigRestored` once the lane ends (or fails to
+    // start), the same teardown the ACP lane uses.
+    let credentialReleased = false;
+    const releaseMcpCredential = (): void => {
+      if (credentialReleased) return;
+      credentialReleased = true;
       options.onMcpConfigRestored?.();
     };
     let spawnedChild: ReturnType<typeof spawnCli> | undefined;
     try {
-      if (options.mcpPort && options.mcpToken && options.agentId) {
-        const setup = await this.configureMcpServer(
-          options.mcpPort,
-          options.workingDirectory,
-          options.agentId,
-          options.mcpToken,
-        );
-        priorMcpEntry = setup.prior;
-        mcpConfigured = setup.configured;
-        mcpRestoreNeeded = setup.restoreNeeded;
-      }
-
       const output = createBufferedEmitter<string>();
       const segment = createBufferedEmitter<CliOutputSegment>();
+      if (options.mcpPort) {
+        const notice =
+          'Antigravity runs this lane on stream-json, which has no Ptah MCP server: Ptah tools and ptah_agent_report are unavailable; report in your final message.';
+        output.emit(`\n[Antigravity] ${notice}\n`);
+        segment.emit({ type: 'info', content: notice });
+      }
 
       const child = spawnCli(
         spawnDescriptor.command,
@@ -1774,80 +1627,9 @@ export class AntigravityCliAdapter implements CliAdapter {
         });
       });
 
-      // Keep the credential valid for the whole lane. Startup restore would
-      // revoke it before the lane could send its final report.
-      void done.then(() => restoreMcpConfig());
-
-      let mcpTimedOut = false;
-      let onMcpTimeout: (() => void) | undefined;
-      if (releaseMcpStartup) {
-        if (!mcpConfigured) {
-          output.emit(
-            '\n[Antigravity MCP warning: config-write-failed] Ptah MCP was not configured; report in your final message.\n',
-          );
-        }
-        let startupGrace: ReturnType<typeof setTimeout> | undefined;
-        const startup =
-          mcpConfigured &&
-          options.attachmentProbe &&
-          options.agentId &&
-          options.mcpPort
-            ? Promise.race([
-                options.attachmentProbe
-                  .waitFor(
-                    options.agentId,
-                    options.mcpPort,
-                    MCP_ATTACHMENT_TIMEOUT_MS,
-                  )
-                  .then((entry) => ({ exited: false as const, entry })),
-                done.then(() => ({ exited: true as const, entry: undefined })),
-              ])
-            : mcpRestoreNeeded
-              ? // No probe can confirm that agy read the lane URL, so keep the
-                // startup lock for the same window (or until the lane ends).
-                // Releasing at once would race agy's config read.
-                Promise.race([
-                  done.then(() => ({
-                    exited: true as const,
-                    entry: undefined,
-                  })),
-                  new Promise<{ exited: true; entry: undefined }>((resolve) => {
-                    startupGrace = setTimeout(
-                      () => resolve({ exited: true, entry: undefined }),
-                      MCP_ATTACHMENT_TIMEOUT_MS,
-                    );
-                  }),
-                ])
-              : Promise.resolve({ exited: true as const, entry: undefined });
-        void startup
-          .then(async (result) => {
-            if (
-              !processClosed &&
-              mcpConfigured &&
-              !result.exited &&
-              !result.entry &&
-              options.attachmentProbe &&
-              options.agentId &&
-              options.mcpPort
-            ) {
-              mcpTimedOut = true;
-              onMcpTimeout?.();
-              output.emit(
-                '\n[Antigravity MCP warning: handshake-timeout] Ptah MCP did not connect within 15s; report in your final message.\n',
-              );
-            }
-          })
-          .catch((error: unknown) => {
-            this.logger?.error(
-              '[AntigravityCliAdapter] MCP startup wait failed',
-              error instanceof Error ? error : new Error(String(error)),
-            );
-          })
-          .finally(async () => {
-            clearTimeout(startupGrace);
-            releaseMcpStartup();
-          });
-      }
+      // Keep the credential until the lane ends, the same lifetime the ACP
+      // lane gives it.
+      void done.then(releaseMcpCredential);
 
       return {
         outcomeUsageIsTurnTotal: true,
@@ -1856,11 +1638,6 @@ export class AntigravityCliAdapter implements CliAdapter {
         done: useStreamInput ? firstTurn.done : done,
         onOutput: output.subscribe,
         onSegment: segment.subscribe,
-        onMcpAttachmentTimeout: (callback) => {
-          onMcpTimeout = callback;
-          if (mcpTimedOut && !processClosed) callback();
-        },
-        mcpConfigWriteFailed: !!options.mcpPort && !mcpConfigured,
         getSessionId: () => capturedSessionId,
         getPid: () => child.pid,
         ...(useStreamInput
@@ -1897,43 +1674,21 @@ export class AntigravityCliAdapter implements CliAdapter {
           : {}),
       };
     } catch (error: unknown) {
-      try {
-        // The pid report and the Windows tree kill have no deadline of their
-        // own. Bound the wait so restore and release always run; a pid that
-        // arrives later is still killed, just without holding the lock.
-        const stopChild = (async (): Promise<void> => {
-          const pid = await spawnedChild?.whenSpawned;
-          if (pid) await killProcessTree(pid);
-        })().catch((killError: unknown) => {
-          // degradation-audit: optional-capability - cleanup still restores the shared key.
-          this.logger?.error(
-            '[AntigravityCliAdapter] Failed to stop child after startup error',
-            killError instanceof Error
-              ? killError
-              : new Error(String(killError)),
-          );
-        });
-        let deadline: ReturnType<typeof setTimeout> | undefined;
-        const stopped = await Promise.race([
-          stopChild.then(() => true),
-          new Promise<false>((resolve) => {
-            deadline = setTimeout(
-              () => resolve(false),
-              AntigravityCliAdapter.startupChildStopDeadlineMs,
-            );
-          }),
-        ]);
-        clearTimeout(deadline);
-        if (!stopped) {
-          this.logger?.warn(
-            '[AntigravityCliAdapter] Child stop after startup error is still pending; restoring MCP config and releasing the startup lock',
-            { deadlineMs: AntigravityCliAdapter.startupChildStopDeadlineMs },
-          );
-        }
-        await restoreMcpConfig();
-      } finally {
-        releaseMcpStartup?.();
-      }
+      // The pid report and the Windows tree kill have no deadline of their
+      // own, and nothing here waits on them: the startup error is rethrown at
+      // once and a pid that arrives later is still killed.
+      void (async (): Promise<void> => {
+        const pid = await spawnedChild?.whenSpawned;
+        if (pid) await killProcessTree(pid);
+      })().catch((killError: unknown) => {
+        // degradation-audit: reported - logged at error; the startup error is
+        // the one the caller needs and is rethrown below.
+        this.logger?.error(
+          '[AntigravityCliAdapter] Failed to stop child after startup error',
+          killError instanceof Error ? killError : new Error(String(killError)),
+        );
+      });
+      releaseMcpCredential();
       throw error;
     }
   }

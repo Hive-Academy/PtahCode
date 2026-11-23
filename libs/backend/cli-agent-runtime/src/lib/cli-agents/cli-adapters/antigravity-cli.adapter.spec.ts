@@ -897,20 +897,6 @@ describe('AntigravityCliAdapter', () => {
       reasoningEffort: 'high',
     };
 
-    function spyOnMcpWrite(): jest.SpyInstance {
-      return jest
-        .spyOn(
-          adapter as unknown as {
-            configureMcpServer: () => Promise<{
-              configured: boolean;
-              restoreNeeded: boolean;
-            }>;
-          },
-          'configureMcpServer',
-        )
-        .mockResolvedValue({ configured: true, restoreNeeded: false });
-    }
-
     it('declares the task-prompt channel', () => {
       expect(adapter.roleChannel).toBe('task-prompt');
     });
@@ -931,16 +917,8 @@ describe('AntigravityCliAdapter', () => {
       expect(prompt).toContain(renderRoleBlock(role, 'antigravity'));
     });
 
-    it('rejects an oversized role-carrying prompt before writing the MCP entry or spawning', async () => {
+    it('rejects an oversized role-carrying prompt before spawning', async () => {
       const legacy = new AntigravityCliAdapter(undefined, async () => false);
-      const mcpWrite = jest
-        .spyOn(
-          legacy as unknown as {
-            configureMcpServer: () => Promise<undefined>;
-          },
-          'configureMcpServer',
-        )
-        .mockResolvedValue(undefined);
       // The role block is capped (TASK_2026_597), so the oversized part of
       // this role-carrying prompt is the task text.
       const hugeTask = 'x'.repeat(1_100_000);
@@ -953,32 +931,8 @@ describe('AntigravityCliAdapter', () => {
           role,
         }),
       ).rejects.toBeInstanceOf(CliCommandLineTooLongError);
-      expect(mcpWrite).not.toHaveBeenCalled();
       // Only the `agy models` probe ran; the lane itself never spawned.
       expect(runSpawnCalls()).toHaveLength(0);
-    });
-
-    it('still writes the MCP entry before spawning a role-carrying run', async () => {
-      const mcpWrite = spyOnMcpWrite();
-
-      const handle = await adapter.runSdk({
-        ...baseOptions,
-        mcpPort: 51820,
-        mcpToken: 'lane-token',
-        agentId: 'lane-7',
-        role,
-      });
-      collect(handle);
-      currentChild?.emitClose(0);
-      await handle.done;
-
-      expect(mcpWrite).toHaveBeenCalledTimes(1);
-      const laneSpawn = mockSpawnCli.mock.calls.findIndex(
-        ([, args]) => (args as string[])[0] !== 'models',
-      );
-      expect(mcpWrite.mock.invocationCallOrder[0]).toBeLessThan(
-        mockSpawnCli.mock.invocationCallOrder[laneSpawn],
-      );
     });
 
     it('keeps every argument except the prompt identical when a role is set', async () => {

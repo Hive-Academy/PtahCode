@@ -42,6 +42,8 @@ export interface GatewayBridgeContext {
   readonly capability: McpCallerCapability;
   /** Logs one warning. Must never throw. */
   readonly warn: (message: string, meta: Record<string, unknown>) => void;
+  /** Logs one debug line. Must never throw. */
+  readonly debug: (message: string, meta: Record<string, unknown>) => void;
 }
 
 /** {@link GatewayBridgeContext} plus the result budget for `tools/call`. */
@@ -84,21 +86,34 @@ export function hostToolNames(): ReadonlySet<string> {
 /**
  * The gateway scope of this request, copied from its binding, or `undefined`
  * when the caller gets no gateway tools (class `gateway` is privileged only;
- * see `isGatewayCallerPermitted`).
+ * see `isGatewayCallerPermitted`). A denial is logged at debug with the
+ * caller's kind, lane id and capability only, never its credential, so a lane
+ * that lists no gateway tools can be traced (TASK_2026_979 decision row 36).
  */
 function gatewayScopeOf(
   request: MCPRequest,
-  capability: McpCallerCapability,
+  context: GatewayBridgeContext,
 ): McpGatewayScope | undefined {
   const binding = request._callerBinding;
-  if (
-    binding === undefined ||
-    !isGatewayCallerPermitted(binding) ||
-    capability !== 'privileged'
-  ) {
+  const reason =
+    binding === undefined
+      ? 'no-caller-binding'
+      : !isGatewayCallerPermitted(binding)
+        ? 'caller-not-permitted'
+        : context.capability !== 'privileged'
+          ? 'request-not-privileged'
+          : undefined;
+  if (reason !== undefined) {
+    context.debug('[MCP] gateway tools withheld from caller', {
+      reason,
+      callerKind: binding?.kind,
+      agentId: binding?.agentId,
+      bindingCapability: binding?.capability,
+      capability: context.capability,
+    });
     return undefined;
   }
-  return gatewayScopeFromBinding(binding);
+  return binding === undefined ? undefined : gatewayScopeFromBinding(binding);
 }
 
 function gatewayScopeKey(scope: McpGatewayScope): string {
@@ -180,8 +195,9 @@ export async function listGatewayToolsForList(
   context: GatewayBridgeContext,
 ): Promise<McpGatewayTool[]> {
   const gateway = context.gateway;
-  const scope = gatewayScopeOf(request, context.capability);
-  if (gateway === undefined || scope === undefined) return [];
+  if (gateway === undefined) return [];
+  const scope = gatewayScopeOf(request, context);
+  if (scope === undefined) return [];
   try {
     return await listGatewayTools(gateway, scope, request);
   } catch (error) {
@@ -260,11 +276,10 @@ export async function routeGatewayCall(
   relist: boolean,
 ): Promise<MCPResponse | null> {
   const gateway = context.gateway;
-  const scope = gatewayScopeOf(request, context.capability);
+  if (gateway === undefined || hostToolNames().has(name)) return null;
+  const scope = gatewayScopeOf(request, context);
   if (
-    gateway === undefined ||
     scope === undefined ||
-    hostToolNames().has(name) ||
     !isToolPermitted(name, context.capability, 'gateway')
   ) {
     return null;

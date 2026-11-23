@@ -1,29 +1,25 @@
 /**
- * `AntigravityCliAdapter` and the two-writer rule on
- * `~/.gemini/config/mcp_config.json` (TASK_2026_285).
+ * `AntigravityCliAdapter` stream-json lane and the home
+ * `~/.gemini/config/mcp_config.json` (TASK_2026_979 decision rows 13 and 36).
  *
- * The main adapter spec mocks `fs/promises` wholesale and never passes
- * `mcpPort`, so it says nothing about the MCP config file. This one is the
- * opposite shape: `HOME` is a real temp directory, the filesystem is real, and
- * only the spawn is faked — because the property under test is what lands on
- * disk, not what the parser does with a JSONL stream.
+ * `HOME` is a throwaway temp directory standing in for the user's home, and
+ * only the spawn is faked, so the property under test is what lands on disk.
  *
  * What it pins:
  *
- * - The spawn writes the entry `agy` actually reads: `mcpServers.ptah` with a
- *   `serverUrl`, produced by the harness-sync facet rather than by a second
- *   hand-rolled read-modify-write in this adapter.
- * - Cleanup after `done` removes ONLY that key. A server the user installed —
- *   through the marketplace, into the same file — must still be there, which is
- *   the regression that made this task more than a type-union edit.
- * - A key the user hand-wrote is never touched in either direction.
+ * - A stream-json spawn with an MCP port writes nothing to the home
+ *   `mcp_config.json`: an absent file stays absent, a user's file stays
+ *   byte-identical, and no lane credential reaches the disk or the argv.
+ * - The lane says once that it has no Ptah MCP server.
+ * - The lane credential is still revoked (`onMcpConfigRestored`) once, when
+ *   the lane ends or fails to start, and not before.
  */
 
-// The adapter reaches the MCP facet through the `harness-sync` barrel, which
-// pulls in `vscode-core`'s tsyringe decorators. Same reason the other DI-touching
-// specs in this lib import it first.
+// Some of the adapter's imports pull in `vscode-core`'s tsyringe decorators.
+// Same reason the other DI-touching specs in this lib import it first.
 import 'reflect-metadata';
 import {
+  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
@@ -62,10 +58,7 @@ jest.mock('@ptah-extension/platform-core', () => {
 
 import { AntigravityCliAdapter } from './antigravity-cli.adapter';
 import { killProcessTree } from '@ptah-extension/platform-core';
-import type {
-  IMcpAttachmentProbe,
-  McpAttachment,
-} from '../mcp-attachment-probe.port';
+import type { CliOutputSegment } from '@ptah-extension/shared';
 
 interface FakeChild extends EventEmitter {
   stdout: PassThrough;
@@ -91,7 +84,8 @@ function createFakeChild(): FakeChild {
   return child;
 }
 
-describe('AntigravityCliAdapter — MCP config (TASK_2026_285)', () => {
+describe('AntigravityCliAdapter — stream-json writes no MCP config (TASK_2026_979)', () => {
+  const TOKEN = 'b'.repeat(43);
   let tempHome: string;
   let ws: string;
   let previousHome: string | undefined;
@@ -113,15 +107,8 @@ describe('AntigravityCliAdapter — MCP config (TASK_2026_285)', () => {
 
     child = createFakeChild();
     mockSpawnCli.mockImplementation(() => child);
+    // No spawner: the ACP probe fails and the lane runs on stream-json.
     adapter = new AntigravityCliAdapter(undefined, async () => true);
-    const runSdk = adapter.runSdk.bind(adapter);
-    jest.spyOn(adapter, 'runSdk').mockImplementation((options) =>
-      runSdk({
-        ...options,
-        agentId: options.agentId ?? 'test-lane',
-        mcpToken: options.mcpPort ? 'b'.repeat(43) : undefined,
-      }),
-    );
   });
 
   afterEach(() => {
@@ -133,101 +120,126 @@ describe('AntigravityCliAdapter — MCP config (TASK_2026_285)', () => {
     rmSync(ws, { recursive: true, force: true });
   });
 
-  /** The URL this run's write must carry: scoped to the spawn's cwd. */
-  function scopedUrl(port: number): string {
-    return `http://localhost:${port}/auth/${'b'.repeat(43)}/agent/test-lane/workspace/${encodeURIComponent(ws)}`;
-  }
-
-  function servers(): Record<string, unknown> {
-    const parsed = JSON.parse(readFileSync(configPath, 'utf-8')) as Record<
-      string,
-      Record<string, unknown>
-    >;
-    return parsed['mcpServers'] ?? {};
-  }
-
-  function seedUserConfig(entries: Record<string, unknown>): void {
+  function seedUserConfig(entries: Record<string, unknown>): string {
     mkdirSync(join(tempHome, '.gemini', 'config'), { recursive: true });
-    writeFileSync(
-      configPath,
-      JSON.stringify({ mcpServers: entries }, null, 2),
-      'utf-8',
-    );
+    const text = JSON.stringify({ mcpServers: entries }, null, 2);
+    writeFileSync(configPath, text, 'utf-8');
+    return text;
   }
 
-  /** Spawn with an MCP port, then let the process exit and settle cleanup. */
-  async function runAndFinish(port: number): Promise<void> {
-    const handle = await adapter.runSdk({
-      task: 'do a thing',
-      workingDirectory: ws,
-      mcpPort: port,
-    });
-    child.emit('close', 0, null);
-    await handle.done;
-    // `cleanupMcpEntry` is chained off `done`; let that microtask + its writes
-    // settle before asserting on the file.
+  function spawnArgv(): string[] {
+    return (mockSpawnCli.mock.calls[0]?.[1] as string[] | undefined) ?? [];
+  }
+
+  async function settle(): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
 
-  it("writes Ptah's own server as `mcpServers.ptah` with a `serverUrl` before the spawn", async () => {
+  it('records zero writes to an absent home mcp_config.json', async () => {
     const handle = await adapter.runSdk({
       task: 'do a thing',
       workingDirectory: ws,
       mcpPort: 51234,
+      mcpToken: TOKEN,
+      agentId: 'lane-1',
     });
-
-    // The URL carries the spawn's working directory (TASK_2026_364), and the
-    // encoding keeps it free of a literal `/sse`, so a read-back still infers
-    // transport `http` and the persistent writer's read-compare stays honest.
-    expect(servers()['ptah']).toEqual({
-      serverUrl: scopedUrl(51234),
-    });
-
+    expect(existsSync(configPath)).toBe(false);
     child.emit('close', 0, null);
     await handle.done;
+    await settle();
+    expect(existsSync(configPath)).toBe(false);
   });
 
-  it('leads the written URL with /agent/{id} when one was reserved', async () => {
+  it("leaves the user's file byte-identical, their own `ptah` entry included", async () => {
+    const before = seedUserConfig({
+      ptah: { serverUrl: 'http://localhost:51820' },
+      github: { command: 'github-mcp', args: ['--stdio'] },
+    });
     const handle = await adapter.runSdk({
       task: 'do a thing',
       workingDirectory: ws,
       mcpPort: 51234,
-      agentId: 'agent-7',
+      mcpToken: TOKEN,
+      agentId: 'lane-1',
     });
+    expect(readFileSync(configPath, 'utf-8')).toBe(before);
+    child.emit('close', 0, null);
+    await handle.done;
+    await settle();
+    expect(readFileSync(configPath, 'utf-8')).toBe(before);
+  });
 
-    // The agent segment is how the server learns WHICH spawn is calling
-    // (TASK_2026_402) — the child never names itself.
-    expect(servers()['ptah']).toEqual({
-      serverUrl: `http://localhost:51234/auth/${'b'.repeat(43)}/agent/agent-7/workspace/${encodeURIComponent(ws)}`,
+  it('puts no lane credential or Ptah URL in the argv', async () => {
+    const handle = await adapter.runSdk({
+      task: 'do a thing',
+      workingDirectory: ws,
+      mcpPort: 51234,
+      mcpToken: TOKEN,
+      agentId: 'lane-1',
     });
-
+    const argv = spawnArgv().join(' ');
+    expect(argv).not.toContain(TOKEN);
+    expect(argv).not.toContain('localhost:51234');
     child.emit('close', 0, null);
     await handle.done;
   });
 
-  it('revokes on restore and removes the credential from disk', async () => {
-    seedUserConfig({ ptah: { serverUrl: 'http://localhost:51820' } });
+  it('says once that the lane has no Ptah MCP server, and reports no MCP gate', async () => {
+    const handle = await adapter.runSdk({
+      task: 'do a thing',
+      workingDirectory: ws,
+      mcpPort: 51234,
+      mcpToken: TOKEN,
+      agentId: 'lane-1',
+    });
+    const segments: CliOutputSegment[] = [];
+    handle.onSegment?.((segment) => segments.push(segment));
+    const notices = segments.filter(
+      (segment) =>
+        segment.type === 'info' &&
+        segment.content.includes('no Ptah MCP server'),
+    );
+    expect(notices).toHaveLength(1);
+    expect(handle.mcpConfigWriteFailed).toBeUndefined();
+    expect(handle.onMcpAttachmentTimeout).toBeUndefined();
+    child.emit('close', 0, null);
+    await handle.done;
+  });
+
+  it('prints no MCP notice when the spawn carries no MCP port', async () => {
+    const handle = await adapter.runSdk({
+      task: 'do a thing',
+      workingDirectory: ws,
+    });
+    const segments: CliOutputSegment[] = [];
+    handle.onSegment?.((segment) => segments.push(segment));
+    expect(
+      segments.some((segment) => segment.content.includes('Ptah MCP')),
+    ).toBe(false);
+    child.emit('close', 0, null);
+    await handle.done;
+    expect(existsSync(configPath)).toBe(false);
+  });
+
+  it('revokes the lane credential once when the lane ends, not before', async () => {
     const revoke = jest.fn();
     const handle = await adapter.runSdk({
       task: 'report',
       workingDirectory: ws,
       mcpPort: 51234,
+      mcpToken: TOKEN,
       agentId: 'lane-7',
       onMcpConfigRestored: revoke,
     });
-    expect(JSON.stringify(servers())).toContain(
-      `/auth/${'b'.repeat(43)}/agent/lane-7`,
-    );
+    await settle();
     expect(revoke).not.toHaveBeenCalled();
     child.emit('close', 0, null);
     await handle.done;
-    await new Promise((resolve) => setTimeout(resolve, 20));
+    await settle();
     expect(revoke).toHaveBeenCalledTimes(1);
-    expect(servers()['ptah']).toEqual({ serverUrl: 'http://localhost:51820' });
-    expect(readFileSync(configPath, 'utf-8')).not.toContain('b'.repeat(43));
   });
 
-  it('revokes and removes the credential after a failed launch', async () => {
+  it('revokes the credential and stops the child after a failed launch', async () => {
     const revoke = jest.fn();
     child.stdin.write.mockImplementationOnce(() => {
       throw new Error('stdin failed');
@@ -237,363 +249,63 @@ describe('AntigravityCliAdapter — MCP config (TASK_2026_285)', () => {
         task: 'report',
         workingDirectory: ws,
         mcpPort: 51234,
+        mcpToken: TOKEN,
         agentId: 'lane-7',
         onMcpConfigRestored: revoke,
       }),
     ).rejects.toThrow('stdin failed');
     expect(revoke).toHaveBeenCalledTimes(1);
-    expect(readFileSync(configPath, 'utf-8')).not.toContain('b'.repeat(43));
-  });
-
-  it('removes only `ptah` after `done`, leaving a marketplace-installed server in place', async () => {
-    seedUserConfig({
-      github: { command: 'github-mcp', args: ['--stdio'] },
-    });
-
-    await runAndFinish(51234);
-
-    const remaining = servers();
-    expect(remaining['ptah']).toBeUndefined();
-    expect(remaining['github']).toEqual({
-      command: 'github-mcp',
-      args: ['--stdio'],
-    });
-  });
-
-  it('never touches a server the user hand-wrote, in either direction', async () => {
-    seedUserConfig({
-      mine: { serverUrl: 'https://mine.example.com/sse' },
-    });
-
-    await runAndFinish(51234);
-
-    expect(servers()['mine']).toEqual({
-      serverUrl: 'https://mine.example.com/sse',
-    });
-  });
-
-  // `CodeExecutionMCP` keeps a PERSISTENT `ptah` entry in this file for as long
-  // as its HTTP server is up, so that `agy` sessions the USER starts have Ptah
-  // tools. Cleanup therefore RESTORES what the run found rather than deleting.
-  describe('a persistent `ptah` entry written by CodeExecutionMCP', () => {
-    it('survives a spawn that finished', async () => {
-      seedUserConfig({
-        ptah: { serverUrl: 'http://localhost:51820' },
-      });
-
-      await runAndFinish(51234);
-
-      expect(servers()['ptah']).toEqual({
-        serverUrl: 'http://localhost:51820',
-      });
-    });
-
-    it("is replaced by this run's port WHILE the agent runs", async () => {
-      seedUserConfig({
-        ptah: { serverUrl: 'http://localhost:51820' },
-      });
-
-      const handle = await adapter.runSdk({
-        task: 'do a thing',
-        workingDirectory: ws,
-        mcpPort: 51234,
-      });
-
-      expect(servers()['ptah']).toEqual({
-        serverUrl: scopedUrl(51234),
-      });
-
-      child.emit('close', 0, null);
-      await handle.done;
-    });
-
-    it('keeps the lane URL during startup when no attachment probe can confirm the read', async () => {
-      seedUserConfig({
-        ptah: { serverUrl: 'http://localhost:51820' },
-      });
-
-      const handle = await adapter.runSdk({
-        task: 'do a thing',
-        workingDirectory: ws,
-        mcpPort: 51234,
-      });
-      // Give an early restore every chance to land before the check.
-      await new Promise((resolve) => setTimeout(resolve, 50));
-
-      expect(servers()['ptah']).toEqual({
-        serverUrl: scopedUrl(51234),
-      });
-
-      child.emit('close', 0, null);
-      await handle.done;
-      await new Promise((resolve) => setTimeout(resolve, 0));
-      expect(servers()['ptah']).toEqual({
-        serverUrl: 'http://localhost:51820',
-      });
-    });
-
-    it("is restored without disturbing the user's other servers", async () => {
-      seedUserConfig({
-        ptah: { serverUrl: 'http://localhost:51820' },
-        mine: { serverUrl: 'https://mine.example.com/sse' },
-      });
-
-      await runAndFinish(51234);
-
-      expect(servers()).toEqual({
-        ptah: { serverUrl: 'http://localhost:51820' },
-        mine: { serverUrl: 'https://mine.example.com/sse' },
-      });
-    });
-  });
-
-  it('writes nothing at all when the spawn carries no MCP port', async () => {
-    const handle = await adapter.runSdk({
-      task: 'do a thing',
-      workingDirectory: ws,
-    });
-    child.emit('close', 0, null);
-    await handle.done;
-
-    expect(() => readFileSync(configPath, 'utf-8')).toThrow();
-  });
-
-  it('serializes two startups and keeps the second credential until completion', async () => {
-    seedUserConfig({ ptah: { serverUrl: 'http://localhost:51820' } });
-    const children = [createFakeChild(), createFakeChild()];
-    mockSpawnCli
-      .mockImplementationOnce(() => children[0])
-      .mockImplementationOnce(() => children[1]);
-    const resolveWaits = new Map<string, (entry: McpAttachment) => void>();
-    const probe: IMcpAttachmentProbe = {
-      get: () => undefined,
-      getAttempt: () => undefined,
-      waitFor: (id) =>
-        new Promise((resolve) => {
-          resolveWaits.set(id, resolve);
-        }),
-    };
-    const first = await adapter.runSdk({
-      task: 'one',
-      workingDirectory: ws,
-      mcpPort: 51234,
-      agentId: 'lane-1',
-      attachmentProbe: probe,
-    });
-    expect(servers()['ptah']).toEqual({
-      serverUrl: `http://localhost:51234/auth/${'b'.repeat(43)}/agent/lane-1/workspace/${encodeURIComponent(ws)}`,
-    });
-    const secondPromise = adapter.runSdk({
-      task: 'two',
-      workingDirectory: ws,
-      mcpPort: 51234,
-      agentId: 'lane-2',
-      attachmentProbe: probe,
-    });
-    await Promise.resolve();
-    expect(mockSpawnCli).toHaveBeenCalledTimes(1);
-    expect(servers()['ptah']).toEqual({
-      serverUrl: `http://localhost:51234/auth/${'b'.repeat(43)}/agent/lane-1/workspace/${encodeURIComponent(ws)}`,
-    });
-    resolveWaits.get('lane-1')?.({
-      agentId: 'lane-1',
-      method: 'initialize',
-      port: 51234,
-      time: Date.now(),
-    });
-    const second = await secondPromise;
-    expect(servers()['ptah']).toEqual({
-      serverUrl: `http://localhost:51234/auth/${'b'.repeat(43)}/agent/lane-2/workspace/${encodeURIComponent(ws)}`,
-    });
-    resolveWaits.get('lane-2')?.({
-      agentId: 'lane-2',
-      method: 'initialize',
-      port: 51234,
-      time: Date.now(),
-    });
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(servers()['ptah']).toEqual({
-      serverUrl: `http://localhost:51234/auth/${'b'.repeat(43)}/agent/lane-2/workspace/${encodeURIComponent(ws)}`,
-    });
-    children[0].emit('close', 0, null);
-    children[1].emit('close', 0, null);
-    await Promise.all([first.done, second.done]);
-  });
-
-  const makeDeferredProbe = () => {
-    let finishWait: ((entry: McpAttachment | undefined) => void) | undefined;
-    const probe: IMcpAttachmentProbe = {
-      get: () => undefined,
-      getAttempt: () => undefined,
-      waitFor: () =>
-        new Promise((resolve) => {
-          finishWait = resolve;
-        }),
-    };
-    return { probe, finish: (e?: McpAttachment) => finishWait?.(e) };
-  };
-
-  it('calls the registered MCP timeout callback while the lane is active', async () => {
-    const { probe, finish } = makeDeferredProbe();
-    const handle = await adapter.runSdk({
-      task: 'do a thing',
-      workingDirectory: ws,
-      mcpPort: 51234,
-      attachmentProbe: probe,
-    });
-    const onTimeout = jest.fn();
-    handle.onMcpAttachmentTimeout?.(onTimeout);
-    finish(undefined);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(onTimeout).toHaveBeenCalledTimes(1);
-    child.emit('close', 0, null);
-    await handle.done;
-  });
-
-  it('does not call the MCP timeout callback when the process closed first', async () => {
-    const { probe, finish } = makeDeferredProbe();
-    const handle = await adapter.runSdk({
-      task: 'do a thing',
-      workingDirectory: ws,
-      mcpPort: 51234,
-      attachmentProbe: probe,
-    });
-    const onTimeout = jest.fn();
-    handle.onMcpAttachmentTimeout?.(onTimeout);
-    child.emit('close', 0, null);
-    finish(undefined);
-    await handle.done;
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(onTimeout).not.toHaveBeenCalled();
-  });
-
-  it('does not replay a timeout to a callback registered after process close', async () => {
-    const { probe, finish } = makeDeferredProbe();
-    const handle = await adapter.runSdk({
-      task: 'do a thing',
-      workingDirectory: ws,
-      mcpPort: 51234,
-      attachmentProbe: probe,
-    });
-    finish(undefined);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    child.emit('close', 0, null);
-    await handle.done;
-    const onTimeout = jest.fn();
-    handle.onMcpAttachmentTimeout?.(onTimeout);
-    expect(onTimeout).not.toHaveBeenCalled();
-  });
-
-  it('releases the startup lock and restores the entry after a stdin write failure', async () => {
-    seedUserConfig({ ptah: { serverUrl: 'http://localhost:51820' } });
-    child.stdin.write.mockImplementationOnce(() => {
-      throw new Error('stdin failed');
-    });
-
-    await expect(
-      adapter.runSdk({
-        task: 'first',
-        workingDirectory: ws,
-        mcpPort: 51234,
-        agentId: 'lane-1',
-      }),
-    ).rejects.toThrow('stdin failed');
+    await settle();
     expect(killProcessTree).toHaveBeenCalledWith(4242);
     expect(child.kill).not.toHaveBeenCalled();
-    expect(servers()['ptah']).toEqual({ serverUrl: 'http://localhost:51820' });
-
-    const nextChild = createFakeChild();
-    mockSpawnCli.mockImplementationOnce(() => nextChild);
-    const second = await adapter.runSdk({
-      task: 'second',
-      workingDirectory: ws,
-      mcpPort: 51234,
-      agentId: 'lane-2',
-    });
-    expect(servers()['ptah']).toEqual({
-      serverUrl: `http://localhost:51234/auth/${'b'.repeat(43)}/agent/lane-2/workspace/${encodeURIComponent(ws)}`,
-    });
-    nextChild.emit('close', 0, null);
-    await second.done;
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(servers()['ptah']).toEqual({ serverUrl: 'http://localhost:51820' });
+    expect(existsSync(configPath)).toBe(false);
   });
 
-  it('releases the startup lock and restores the entry when the failed child never reports a pid', async () => {
-    seedUserConfig({ ptah: { serverUrl: 'http://localhost:51820' } });
+  it('rethrows a failed launch at once when the child never reports a pid', async () => {
+    const revoke = jest.fn();
     child.whenSpawned = new Promise<number | null>(() => undefined);
     child.stdin.write.mockImplementationOnce(() => {
       throw new Error('stdin failed');
     });
-    const defaultDeadline = AntigravityCliAdapter.startupChildStopDeadlineMs;
-    AntigravityCliAdapter.startupChildStopDeadlineMs = 20;
-    try {
-      await expect(
-        adapter.runSdk({
-          task: 'first',
-          workingDirectory: ws,
-          mcpPort: 51234,
-          agentId: 'lane-1',
-        }),
-      ).rejects.toThrow('stdin failed');
-    } finally {
-      AntigravityCliAdapter.startupChildStopDeadlineMs = defaultDeadline;
-    }
+    await expect(
+      adapter.runSdk({
+        task: 'report',
+        workingDirectory: ws,
+        mcpPort: 51234,
+        mcpToken: TOKEN,
+        agentId: 'lane-7',
+        onMcpConfigRestored: revoke,
+      }),
+    ).rejects.toThrow('stdin failed');
+    expect(revoke).toHaveBeenCalledTimes(1);
     expect(killProcessTree).not.toHaveBeenCalled();
-    expect(servers()['ptah']).toEqual({ serverUrl: 'http://localhost:51820' });
-
-    const nextChild = createFakeChild();
-    mockSpawnCli.mockImplementationOnce(() => nextChild);
-    const second = await adapter.runSdk({
-      task: 'second',
-      workingDirectory: ws,
-      mcpPort: 51234,
-      agentId: 'lane-2',
-    });
-    expect(servers()['ptah']).toEqual({
-      serverUrl: `http://localhost:51234/auth/${'b'.repeat(43)}/agent/lane-2/workspace/${encodeURIComponent(ws)}`,
-    });
-    nextChild.emit('close', 0, null);
-    await second.done;
   });
 
-  it('reports a failed config write without firing the attachment timeout callback', async () => {
-    mkdirSync(configPath, { recursive: true });
-    const handle = await adapter.runSdk({
-      task: 'continue without MCP',
-      workingDirectory: ws,
-      mcpPort: 51234,
-      agentId: 'lane-config-failure',
-      attachmentProbe: {
-        get: () => undefined,
-        getAttempt: () => undefined,
-        waitFor: jest.fn().mockResolvedValue(undefined),
-      },
-    });
-    const onTimeout = jest.fn();
-    handle.onMcpAttachmentTimeout?.(onTimeout);
-    expect(handle.mcpConfigWriteFailed).toBe(true);
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(onTimeout).not.toHaveBeenCalled();
-    child.emit('close', 0, null);
-    await handle.done;
-  });
-
-  it('does not preserve a stale lane URL as the next lane prior', async () => {
-    seedUserConfig({
-      ptah: {
-        serverUrl: 'http://localhost:51820/agent/old-lane/workspace/root',
-      },
-    });
-    const handle = await adapter.runSdk({
-      task: 'next',
-      workingDirectory: ws,
-      mcpPort: 51234,
-      agentId: 'lane-2',
-    });
-    child.emit('close', 0, null);
-    await handle.done;
-    await new Promise((resolve) => setTimeout(resolve, 0));
-    expect(servers()['ptah']).toEqual({ serverUrl: 'http://localhost:51820' });
+  it('starts two lanes at once without serializing their startups', async () => {
+    const children = [createFakeChild(), createFakeChild()];
+    mockSpawnCli
+      .mockImplementationOnce(() => children[0])
+      .mockImplementationOnce(() => children[1]);
+    const [first, second] = await Promise.all([
+      adapter.runSdk({
+        task: 'one',
+        workingDirectory: ws,
+        mcpPort: 51234,
+        mcpToken: TOKEN,
+        agentId: 'lane-1',
+      }),
+      adapter.runSdk({
+        task: 'two',
+        workingDirectory: ws,
+        mcpPort: 51234,
+        mcpToken: TOKEN,
+        agentId: 'lane-2',
+      }),
+    ]);
+    expect(mockSpawnCli).toHaveBeenCalledTimes(2);
+    children[0].emit('close', 0, null);
+    children[1].emit('close', 0, null);
+    await Promise.all([first.done, second.done]);
+    expect(existsSync(configPath)).toBe(false);
   });
 });

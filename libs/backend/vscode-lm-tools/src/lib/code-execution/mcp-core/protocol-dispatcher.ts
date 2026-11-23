@@ -622,6 +622,8 @@ function gatewayBridgeContext(
     gateway: deps.gateway,
     capability: requestCapability(request),
     warn: (message, meta) => runObserver(() => deps.logger.warn(message, meta)),
+    debug: (message, meta) =>
+      runObserver(() => deps.logger.debug(message, 'CodeExecutionMCP', meta)),
   };
 }
 
