@@ -11,7 +11,11 @@ import type {
 } from '../cli-lane-defaults.types';
 import type { CodexSandboxMode } from '../advanced-settings.types';
 import type { PtahCliSummary } from '../ptah-cli.types';
-import type { AgentPermissionDecision } from '../agent-permission.types';
+import type {
+  AgentPermissionDecision,
+  LanePermissionResponse,
+} from '../agent-permission.types';
+import type { LaneTurnRequest } from '../agent-messaging.types';
 import type { EffortLevel } from '../ai-provider.types';
 import type {
   AgentDeliveryReceipt,
@@ -51,6 +55,36 @@ export interface AgentGetQueuedMessageBodyParams {
 
 export interface AgentGetQueuedMessageBodyResult {
   readonly text: string;
+  /**
+   * Per-turn settings and content of the held message. Images are present
+   * only while the host still holds them. Absent for a text-only message.
+   */
+  readonly turn?: LaneTurnRequest;
+}
+
+export interface AgentGetLaneComposerOptionsParams {
+  readonly agentId: AgentId;
+}
+
+/** One slash entry a lane accepts in its composer. */
+export interface LaneComposerCommandOption {
+  readonly name: string;
+  readonly description?: string;
+  readonly group: 'command' | 'skill';
+}
+
+/**
+ * Turn options a lane offers its composer: models, reasoning efforts and
+ * slash commands. A failed lookup returns empty lists with `error` set; the
+ * method does not throw.
+ */
+export interface AgentGetLaneComposerOptionsResult {
+  readonly models: readonly CliModelOption[];
+  readonly efforts: readonly string[];
+  readonly currentModel?: string;
+  readonly currentEffort?: string;
+  readonly commands: readonly LaneComposerCommandOption[];
+  readonly error?: string;
 }
 
 export interface AgentRetryMessageParams {
@@ -742,6 +776,11 @@ export type AgentContinueErrorCode =
    * continued on another account.
    */
   | 'account_refused'
+  /**
+   * The lane refused the per-turn settings (model or effort) sent with the
+   * continuation. The message is not delivered with other settings.
+   */
+  | 'turn-options-refused'
   | 'unknown';
 
 /** Parameters for ptahCli:list RPC method */
@@ -851,4 +890,4 @@ export interface PtahCliListModelsResult {
   notice?: string;
   error?: string;
 }
-export type { AgentPermissionDecision };
+export type { AgentPermissionDecision, LanePermissionResponse };
