@@ -111,6 +111,10 @@ export class McpServerBackoffService {
         if (event.kind === 'servers') {
           const attemptKey = this.resolveInitAttemptKey(event.sessionId);
           for (const server of event.servers) {
+            // A gateway server runs inside Ptah's `ptah` MCP server, not as a
+            // CLI-spawned process, and is not a `.mcp.json` key the flag tier
+            // could disable, so back-off neither suppresses nor clears it.
+            if (server.source === 'ptah-gateway') continue;
             if (server.status === 'failed') {
               const failedAt = Date.now();
               if (attemptKey !== undefined) {

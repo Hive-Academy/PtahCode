@@ -20,6 +20,7 @@ import { LANE_ROUTING_TOKENS } from '@ptah-extension/lane-routing';
 import { TOKENS } from '@ptah-extension/vscode-core';
 import {
   PLATFORM_TOKENS,
+  type IMcpGateway,
   type IWorkspaceProvider,
   type IWindowsJobAssigner,
 } from '@ptah-extension/platform-core';
@@ -638,20 +639,25 @@ export function registerSdkServices(
   // A factory rather than `useClass`: `SDK_CODE_OUTLINER` is optional and is
   // bound by the hosts, not here. It is looked up when the capper is first
   // resolved; when no host bound it, the capper gets none and Read reduction
-  // takes the log reducer plus the file path pointer.
+  // takes the log reducer plus the file path pointer. `MCP_GATEWAY` is
+  // optional the same way: with a gateway bound, the third-party tools it
+  // serves through `ptah` are capped like any other MCP tool.
   container.register(SDK_TOKENS.SDK_TOOL_OUTPUT_CAPPER, {
-    useFactory: instanceCachingFactory(
-      (c) =>
-        new ToolOutputCapper(
-          c.resolve<Logger>(TOKENS.LOGGER),
-          c.resolve<CompactionConfigProvider>(
-            SDK_TOKENS.SDK_COMPACTION_CONFIG_PROVIDER,
-          ),
-          c.isRegistered(SDK_TOKENS.SDK_CODE_OUTLINER, true)
-            ? c.resolve<CodeOutliner>(SDK_TOKENS.SDK_CODE_OUTLINER)
-            : undefined,
+    useFactory: instanceCachingFactory((c) => {
+      const gateway = c.isRegistered(PLATFORM_TOKENS.MCP_GATEWAY, true)
+        ? c.resolve<IMcpGateway>(PLATFORM_TOKENS.MCP_GATEWAY)
+        : undefined;
+      return new ToolOutputCapper(
+        c.resolve<Logger>(TOKENS.LOGGER),
+        c.resolve<CompactionConfigProvider>(
+          SDK_TOKENS.SDK_COMPACTION_CONFIG_PROVIDER,
         ),
-    ),
+        c.isRegistered(SDK_TOKENS.SDK_CODE_OUTLINER, true)
+          ? c.resolve<CodeOutliner>(SDK_TOKENS.SDK_CODE_OUTLINER)
+          : undefined,
+        gateway ? (toolName) => gateway.isGatewayTool(toolName) : undefined,
+      );
+    }),
   });
 
   // A factory rather than `useClass`: the coordinator is a plain class (no
