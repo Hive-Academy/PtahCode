@@ -100,6 +100,8 @@ export const ReviewLaneListingEntrySchema = z
     family: z.string().trim().min(1).max(64),
     limitState: ReviewLaneLimitStateSchema,
     catalog: ReviewLaneCatalogSchema,
+    /** The model the lane runs on when none is sent is blocked; absent on older listings. */
+    defaultModelBlocked: z.boolean().optional(),
   })
   .strict();
 export type ReviewLaneListingEntry = z.infer<typeof ReviewLaneListingEntrySchema>;

@@ -414,6 +414,11 @@ export interface SpawnAgentRequest {
   readonly cli?: CliType;
   /** Working directory (defaults to workspace root) */
   readonly workingDirectory?: string;
+  /**
+   * Host-internal. Ledger usage rows of this lane are keyed here instead of `workingDirectory`.
+   * Not in any MCP or RPC parameter schema; the `execute_code` spawn and `resumeRequest` drop it.
+   */
+  readonly usageWorkspaceRoot?: string;
   /** Omit the host MCP attachment for isolated, ephemeral work such as review attempts. */
   readonly attachMcp?: boolean;
   /**

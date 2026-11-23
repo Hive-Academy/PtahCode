@@ -6,6 +6,7 @@ import {
   ReviewLaneIdSchema,
   ReviewModelIdSchema,
 } from './review-lanes.schema';
+import { ReviewUsageTotalSchema } from './review-usage.schema';
 
 export const RepoIdentitySchema = z
   .object({
@@ -68,6 +69,8 @@ export const StageRecordSchema = z
     lane: ReviewLaneIdSchema.nullable().optional(),
     model: ReviewModelIdSchema.nullable().optional(),
     fallback: z.array(ReviewLaneFallbackSchema).max(REVIEW_LANE_POOL_MAX + 1).nullable().optional(),
+    /** Lane token and cost total of this stage; absent or null when no lane ran or the record is older. */
+    usage: ReviewUsageTotalSchema.nullable().optional(),
   })
   .strict();
 export type StageRecord = z.infer<typeof StageRecordSchema>;
@@ -96,6 +99,8 @@ export const ReviewRunSchema = z
     lastPoll: ReviewPollResultSchema.nullable().optional(),
     health: z.enum(['online', 'offline', 'degraded']).optional(),
     stages: z.array(StageRecordSchema).max(16),
+    /** Lane token and cost total of the attempt; absent or null on older runs. */
+    usage: ReviewUsageTotalSchema.nullable().optional(),
   })
   .strict();
 export type ReviewRun = z.infer<typeof ReviewRunSchema>;
