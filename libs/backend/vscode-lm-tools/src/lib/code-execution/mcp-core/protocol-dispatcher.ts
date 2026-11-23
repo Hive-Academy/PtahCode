@@ -739,8 +739,8 @@ async function listGatewayToolsForList(
   try {
     return await listGatewayTools(gateway, scope, request);
   } catch (error) {
-    // Degrades to Ptah's own tools by design (batch contract): one failing
-    // hub must not take the host tool list down with it.
+    // degradation-audit: reported - logged at warn; one failing hub must not
+    // take the host tool list down, so the caller gets Ptah's tools only.
     runObserver(() =>
       deps.logger.warn(
         '[MCP] gateway tools/list failed; listing Ptah tools only',
@@ -783,7 +783,8 @@ async function routeGatewayCall(
       const tools = await listGatewayTools(gateway, scope, request);
       known = tools.some((tool) => tool.name === name);
     } catch (error) {
-      // The re-list is best effort: a failure answers "unknown tool" below.
+      // degradation-audit: reported - logged at warn; the re-list is best
+      // effort and the caller gets an explicit "unknown tool" answer.
       runObserver(() =>
         deps.logger.warn('[MCP] gateway re-list on tools/call failed', {
           error: error instanceof Error ? error.message : String(error),

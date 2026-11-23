@@ -465,7 +465,7 @@ P1 gate, run by the orchestrator after B13, before review:
 
 ### Task 6.2: `gateway` caller class - PENDING
 
-## Batch 7: SSE list_changed and server wiring (C3, part 2) - IN_PROGRESS
+## Batch 7: SSE list_changed and server wiring (C3, part 2) - COMPLETE
 
 - Id: P1-B7 | Phase: P1 | Shape: logic
 - Recommended executor: backend-developer (subagent; reason: lanes disabled)

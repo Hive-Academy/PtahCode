@@ -11,12 +11,14 @@ import { z } from 'zod';
 import { mcpAttachmentObserver } from './mcp-attachment-observer';
 import { writeHttpMcpResponse } from './http-response-writer';
 import { HttpConnectionOwners } from './http-connection-owners';
+import type { McpNotificationHub } from './mcp-notification-hub';
 import type { ExternalCompletionOutbox } from '@ptah-extension/cli-agent-runtime';
 import type { ExternalOwnerKey } from '@ptah-extension/shared';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type {
   IStateStorage,
   IWorkspaceProvider,
+  McpCallerBinding,
 } from '@ptah-extension/platform-core';
 import type { MCPRequest, MCPResponse } from '../types';
 import {
@@ -62,6 +64,13 @@ export interface HttpServerConfig {
   authenticate?: (input: McpHttpAuthInput) => McpRequestAuth;
   isExclusiveOwnerActive?: (owner: ExternalOwnerKey) => boolean;
   completionOutbox?: ExternalCompletionOutbox;
+  /**
+   * Open GET SSE streams. Present only when an MCP gateway is bound: then
+   * `initialize` advertises `tools.listChanged` and an authenticated GET with
+   * `Accept: text/event-stream` opens a stream. Absent: GET stays a health
+   * probe or 405, and `initialize` is unchanged.
+   */
+  notificationHub?: McpNotificationHub;
 }
 
 /**
@@ -215,7 +224,7 @@ export async function startHttpServer(
   const connectionOwners = new HttpConnectionOwners(Date.now, owner => config.completionOutbox?.discardOwner(owner));
 
   const server = http.createServer((req, res) => {
-    handleHttpRequest(req, res, onMCPRequest, logger, config.authenticate, config.completionOutbox, connectionOwners);
+    handleHttpRequest(req, res, onMCPRequest, logger, config.authenticate, config.completionOutbox, connectionOwners, config.notificationHub);
   });
   config.completionOutbox?.setHttpOwnerIsActive(owner =>
     server.listening && (connectionOwners.isActive(owner) || (config.isExclusiveOwnerActive?.(owner) ?? false)),
@@ -390,16 +399,12 @@ async function handleHttpRequest(
   authenticate?: (input: McpHttpAuthInput) => McpRequestAuth,
   completionOutbox?: ExternalCompletionOutbox,
   connectionOwners?: HttpConnectionOwners,
+  notificationHub?: McpNotificationHub,
 ): Promise<void> {
   const port = req.socket.localPort ?? 0;
   const recordRejected = (
     url: string | undefined,
-    reason:
-      | 'auth-required'
-      | 'invalid-credential'
-      | 'forbidden'
-      | 'auth-error'
-      | 'invalid-url',
+    reason: RejectionReason,
   ): void => {
     try {
       const agentId = extractCallerAgentId(url);
@@ -435,6 +440,26 @@ async function handleHttpRequest(
     res.end();
     return;
   }
+  if (
+    req.method === 'GET' &&
+    notificationHub !== undefined &&
+    req.url !== '/health' &&
+    acceptsEventStream(req.headers.accept)
+  ) {
+    const authenticated = authenticateHttpRequest(req, res, authenticate, recordRejected);
+    if (authenticated === undefined) return;
+    // The legacy grace path accepts an untokened POST as read-only so old
+    // config files keep working. No old client opens a stream, so a stream
+    // needs a real credential: an untokened GET gets the same 401 as a POST
+    // after the grace window.
+    if (authenticated.accepted.legacy) {
+      recordRejected(authenticated.identityUrl, 'auth-required');
+      endAuthFailure(res, 401, MCP_AUTH_REQUIRED_CODE, MCP_AUTH_REQUIRED_MESSAGE);
+      return;
+    }
+    openNotificationStream(res, authenticated.accepted.binding, notificationHub);
+    return;
+  }
   if (req.method === 'GET' && (req.url === '/health' || req.url === '/')) {
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ status: 'ok' }));
@@ -451,73 +476,9 @@ async function handleHttpRequest(
     endAuthFailure(res, 415, MCP_AUTH_REQUIRED_CODE, MCP_CONTENT_TYPE_MESSAGE);
     return;
   }
-  const presented = splitCredential(req.headers.authorization, req.url);
-  if (!presented.ok) {
-    recordRejected(req.url, 'auth-required');
-    discardBody(req);
-    endAuthFailure(res, 401, MCP_AUTH_REQUIRED_CODE, MCP_AUTH_REQUIRED_MESSAGE);
-    return;
-  }
-  const identityUrl = presented.identityUrl;
-  let authInput: McpHttpAuthInput;
-  try {
-    authInput = {
-      ...(presented.token === undefined ? {} : { token: presented.token }),
-      agentId: extractCallerAgentId(identityUrl),
-      sessionId: extractCallerSessionId(identityUrl),
-      workspaceRoot: extractCallerWorkspaceRoot(identityUrl),
-      toolProfile: extractCallerToolProfile(identityUrl),
-    };
-  } catch (error) {
-    // degradation-audit: reported - the handler returns a JSON-RPC parse error
-    // for a malformed caller identity URL.
-    recordRejected(identityUrl, 'invalid-url');
-    discardBody(req);
-    const errorMessage =
-      error instanceof Error ? error.message : 'Unknown error';
-    res.writeHead(400, { 'Content-Type': 'application/json' });
-    res.end(
-      JSON.stringify({
-        jsonrpc: '2.0',
-        id: 0,
-        error: { code: -32700, message: 'Parse error', data: errorMessage },
-      }),
-    );
-    return;
-  }
-  let decision: McpRequestAuth;
-  try {
-    decision =
-      authenticate === undefined
-        ? authenticateWithoutRegistry(authInput)
-        : authenticate(authInput);
-  } catch {
-    // degradation-audit: reported - the fixed 401 response avoids disclosure
-    // of credential details when authentication throws.
-    recordRejected(identityUrl, 'auth-error');
-    discardBody(req);
-    endAuthFailure(res, 401, MCP_AUTH_REQUIRED_CODE, MCP_AUTH_REQUIRED_MESSAGE);
-    return;
-  }
-  if (!decision.ok) {
-    recordRejected(
-      identityUrl,
-      decision.failure.httpStatus === 403
-        ? 'forbidden'
-        : decision.failure.message === MCP_CREDENTIAL_INVALID_MESSAGE
-          ? 'invalid-credential'
-          : 'auth-required',
-    );
-    discardBody(req);
-    endAuthFailure(
-      res,
-      decision.failure.httpStatus,
-      decision.failure.jsonRpcCode,
-      decision.failure.message,
-    );
-    return;
-  }
-  const accepted = decision;
+  const authenticated = authenticateHttpRequest(req, res, authenticate, recordRejected);
+  if (authenticated === undefined) return;
+  const { accepted, identityUrl } = authenticated;
   const externalOwner = connectionOwners?.resolve(accepted.externalOwner, req.headers['mcp-session-id']) ?? accepted.externalOwner;
 
   let body = '';
@@ -622,7 +583,12 @@ async function handleHttpRequest(
       if (res.destroyed) return;
 
       writeHttpMcpResponse({
-        res, response: mcpResponse, method: mcpRequest.method,
+        res,
+        response:
+          notificationHub !== undefined && mcpRequest.method === 'initialize'
+            ? advertiseListChanged(mcpResponse)
+            : mcpResponse,
+        method: mcpRequest.method,
         status: isToolDenial(mcpResponse) ? 403 : 200,
         owner: externalOwner, initialOwner: accepted.externalOwner,
         outbox: completionOutbox, connections: connectionOwners, logger,
@@ -644,6 +610,149 @@ async function handleHttpRequest(
       res.end(JSON.stringify(errorResponse));
     }
   });
+}
+
+type RejectionReason =
+  | 'auth-required'
+  | 'invalid-credential'
+  | 'forbidden'
+  | 'auth-error'
+  | 'invalid-url';
+
+/** An accepted credential and the credential-stripped identity URL. */
+interface AuthenticatedRequest {
+  readonly accepted: Extract<McpRequestAuth, { ok: true }>;
+  readonly identityUrl: string | undefined;
+}
+
+/**
+ * The credential steps every authenticated method shares: split the bearer
+ * from the URL, decode the identity, and ask the registry. On failure it
+ * records the rejection, discards the body, writes the error response, and
+ * returns `undefined`.
+ */
+function authenticateHttpRequest(
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  authenticate: ((input: McpHttpAuthInput) => McpRequestAuth) | undefined,
+  recordRejected: (url: string | undefined, reason: RejectionReason) => void,
+): AuthenticatedRequest | undefined {
+  const presented = splitCredential(req.headers.authorization, req.url);
+  if (!presented.ok) {
+    recordRejected(req.url, 'auth-required');
+    discardBody(req);
+    endAuthFailure(res, 401, MCP_AUTH_REQUIRED_CODE, MCP_AUTH_REQUIRED_MESSAGE);
+    return undefined;
+  }
+  const identityUrl = presented.identityUrl;
+  let authInput: McpHttpAuthInput;
+  try {
+    authInput = {
+      ...(presented.token === undefined ? {} : { token: presented.token }),
+      agentId: extractCallerAgentId(identityUrl),
+      sessionId: extractCallerSessionId(identityUrl),
+      workspaceRoot: extractCallerWorkspaceRoot(identityUrl),
+      toolProfile: extractCallerToolProfile(identityUrl),
+    };
+  } catch (error) {
+    // degradation-audit: reported - the handler returns a JSON-RPC parse error
+    // for a malformed caller identity URL.
+    recordRejected(identityUrl, 'invalid-url');
+    discardBody(req);
+    const errorMessage =
+      error instanceof Error ? error.message : 'Unknown error';
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(
+      JSON.stringify({
+        jsonrpc: '2.0',
+        id: 0,
+        error: { code: -32700, message: 'Parse error', data: errorMessage },
+      }),
+    );
+    return undefined;
+  }
+  let decision: McpRequestAuth;
+  try {
+    decision =
+      authenticate === undefined
+        ? authenticateWithoutRegistry(authInput)
+        : authenticate(authInput);
+  } catch {
+    // degradation-audit: reported - the fixed 401 response avoids disclosure
+    // of credential details when authentication throws.
+    recordRejected(identityUrl, 'auth-error');
+    discardBody(req);
+    endAuthFailure(res, 401, MCP_AUTH_REQUIRED_CODE, MCP_AUTH_REQUIRED_MESSAGE);
+    return undefined;
+  }
+  if (!decision.ok) {
+    recordRejected(
+      identityUrl,
+      decision.failure.httpStatus === 403
+        ? 'forbidden'
+        : decision.failure.message === MCP_CREDENTIAL_INVALID_MESSAGE
+          ? 'invalid-credential'
+          : 'auth-required',
+    );
+    discardBody(req);
+    endAuthFailure(
+      res,
+      decision.failure.httpStatus,
+      decision.failure.jsonRpcCode,
+      decision.failure.message,
+    );
+    return undefined;
+  }
+  return { accepted: decision, identityUrl };
+}
+
+/** True when the `Accept` header names `text/event-stream`. */
+function acceptsEventStream(accept: string | undefined): boolean {
+  if (accept === undefined) return false;
+  return accept
+    .split(',')
+    .some((part) => part.split(';')[0]?.trim().toLowerCase() === 'text/event-stream');
+}
+
+/**
+ * Answer an authenticated GET with an SSE stream registered under its own
+ * binding. The stream carries only `notifications/tools/list_changed` and
+ * keep-alive comments, and leaves the hub when the response closes.
+ */
+function openNotificationStream(
+  res: http.ServerResponse,
+  binding: McpCallerBinding,
+  hub: McpNotificationHub,
+): void {
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+  });
+  res.flushHeaders();
+  hub.register(binding, res);
+}
+
+/** `initialize` result with `capabilities.tools.listChanged: true` added. */
+function advertiseListChanged(response: MCPResponse): MCPResponse {
+  const result = response.result;
+  if (response.error !== undefined || typeof result !== 'object' || result === null) {
+    return response;
+  }
+  const record = result as Record<string, unknown>;
+  const capabilities = isPlainRecord(record['capabilities']) ? record['capabilities'] : {};
+  const tools = isPlainRecord(capabilities['tools']) ? capabilities['tools'] : {};
+  return {
+    ...response,
+    result: {
+      ...record,
+      capabilities: { ...capabilities, tools: { ...tools, listChanged: true } },
+    },
+  };
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function discardBody(req: http.IncomingMessage): void {

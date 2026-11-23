@@ -127,6 +127,7 @@ jest.mock('@ptah-extension/harness-sync', () => {
 });
 
 import * as http from 'http';
+import { EventEmitter } from 'node:events';
 import * as crypto from 'node:crypto';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -135,6 +136,7 @@ import { TOKENS } from '@ptah-extension/vscode-core';
 import type { Logger, WebviewManager } from '@ptah-extension/vscode-core';
 import type {
   IArtifactStore,
+  IMcpGateway,
   IStateStorage,
   IWorkspaceProvider,
 } from '@ptah-extension/platform-core';
@@ -247,6 +249,7 @@ interface BuildOptions {
   configOverrides?: Record<string, unknown>;
   folders?: string[];
   globalState?: IStateStorage;
+  gateway?: IMcpGateway;
 }
 
 function build(opts: BuildOptions = {}): Fixture {
@@ -290,6 +293,9 @@ function build(opts: BuildOptions = {}): Fixture {
     opts.notifyArtifactPublished,
     undefined,
     opts.globalState,
+    undefined,
+    undefined,
+    opts.gateway,
   );
 
   return {
@@ -2125,5 +2131,107 @@ describe('CodeExecutionMCP — persistent credential files stay byte-identical',
       String(call[1]),
     );
     expect(written.join('\n')).toMatch(/\/auth\/[A-Za-z0-9_-]{43}/);
+  });
+});
+
+describe('CodeExecutionMCP — MCP gateway wiring', () => {
+  function buildGateway(): {
+    gateway: jest.Mocked<IMcpGateway>;
+    fireToolsChanged: () => void;
+    unsubscribe: jest.Mock;
+  } {
+    let listener: (() => void) | undefined;
+    const unsubscribe = jest.fn();
+    const gateway = {
+      registerHostToolNames: jest.fn(),
+      isGatewayTool: jest.fn(() => false),
+      listTools: jest.fn(async () => []),
+      callTool: jest.fn(),
+      status: jest.fn(() => []),
+      servedFileServerNames: jest.fn(async () => []),
+      onToolsChanged: jest.fn((l: () => void) => {
+        listener = l;
+        return { dispose: unsubscribe };
+      }),
+      dispose: jest.fn(),
+    } as unknown as jest.Mocked<IMcpGateway>;
+    return {
+      gateway,
+      fireToolsChanged: () => listener?.(),
+      unsubscribe,
+    };
+  }
+
+  it('registers exactly the buildToolDefinitions names at start', async () => {
+    const { buildToolDefinitions } = jest.requireActual<
+      typeof import('../mcp-core/effective-tool-list')
+    >('../mcp-core/effective-tool-list');
+    const { gateway } = buildGateway();
+    const { service } = build({ gateway });
+
+    await service.start();
+
+    expect(gateway.registerHostToolNames).toHaveBeenCalledTimes(1);
+    expect(gateway.registerHostToolNames).toHaveBeenCalledWith(
+      buildToolDefinitions({ hasIDECapabilities: true }).map((t) => t.name),
+    );
+  });
+
+  it('passes the gateway into the dispatcher and a hub into the server', async () => {
+    const { gateway } = buildGateway();
+    const { service } = build({ gateway });
+    await service.start();
+
+    const config = startHttpServer.mock.calls[0][0];
+    expect(config.notificationHub).toBeDefined();
+    await config.onMCPRequest({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
+    expect(handleMCPRequest).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ gateway }),
+    );
+  });
+
+  it('notifies the hub on a gateway change and closes its streams on stop', async () => {
+    jest.useFakeTimers();
+    try {
+      const { gateway, fireToolsChanged, unsubscribe } = buildGateway();
+      const { service } = build({ gateway });
+      await service.start();
+      const hub = startHttpServer.mock.calls[0][0].notificationHub;
+      if (hub === undefined) throw new Error('expected a hub');
+      const stream = Object.assign(new EventEmitter(), {
+        destroyed: false,
+        write: jest.fn(),
+        end: jest.fn(),
+      });
+      hub.register(
+        { kind: 'agent', agentId: 'a1', capability: 'privileged' },
+        stream,
+      );
+
+      fireToolsChanged();
+      jest.advanceTimersByTime(500);
+      expect(stream.write).toHaveBeenCalledWith(
+        expect.stringContaining('notifications/tools/list_changed'),
+      );
+
+      await service.disposeAsync();
+      expect(stream.end).toHaveBeenCalled();
+      expect(hub.streamCount).toBe(0);
+      expect(unsubscribe).toHaveBeenCalled();
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('leaves the current behaviour when no gateway is bound', async () => {
+    const { service } = build();
+    await service.start();
+
+    const config = startHttpServer.mock.calls[0][0];
+    expect(config.notificationHub).toBeUndefined();
+    await config.onMCPRequest({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
+    const deps = handleMCPRequest.mock.calls[0][1];
+    expect(deps.gateway).toBeUndefined();
   });
 });

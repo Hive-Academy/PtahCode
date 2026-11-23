@@ -29,6 +29,7 @@ import type {
   IDisposable,
   IMcpServerStatus,
   IMcpCallerCredentials,
+  IMcpGateway,
   IMcpSubagentRootRegistrar,
   IUserInteraction,
   McpCallerBinding,
@@ -70,6 +71,8 @@ import {
   type PtahMcpSlot,
 } from './ptah-mcp-slots';
 import { sweepRetiredPtahMcpEntries } from './retired-ptah-mcp-slots';
+import { McpNotificationHub } from './mcp-notification-hub';
+import { buildToolDefinitions } from '../mcp-core/effective-tool-list';
 import { extractAuthToken } from './mcp-http-gate';
 import {
   McpCallerTokenRegistry,
@@ -326,6 +329,9 @@ export class CodeExecutionMCP
   private readonly hasSqliteLayer: boolean;
   private readonly codeOutliner: CodeOutliner | undefined;
   private readonly callerCredentials: McpCallerTokenRegistry;
+  /** Open GET SSE streams; present only when a gateway is bound. */
+  private readonly notificationHub: McpNotificationHub | undefined;
+  private readonly gatewayToolsSubscription: IDisposable | undefined;
 
   constructor(
     @inject(TOKENS.PTAH_API_BUILDER)
@@ -393,6 +399,13 @@ export class CodeExecutionMCP
     legacyNotice?: IUserInteraction,
     @inject(CLI_AGENT_RUNTIME_TOKENS.EXTERNAL_COMPLETION_OUTBOX, { isOptional: true })
     private readonly completionOutbox?: ExternalCompletionOutbox,
+    /**
+     * The user's own MCP servers served through `ptah`. Optional: a host
+     * without auth secrets binds none, and the server then lists, calls and
+     * advertises exactly Ptah's own tools.
+     */
+    @inject(PLATFORM_TOKENS.MCP_GATEWAY, { isOptional: true })
+    private readonly gateway?: IMcpGateway,
   ) {
     this.codeOutliner =
       treeSitterParser === undefined
@@ -416,6 +429,15 @@ export class CodeExecutionMCP
       this.workspaceProvider.onDidChangeWorkspaceFolders(() => {
         void this.queueRepoint();
       });
+    const hub =
+      this.gateway === undefined
+        ? undefined
+        : new McpNotificationHub({ logger: this.logger });
+    this.notificationHub = hub;
+    this.gatewayToolsSubscription =
+      hub === undefined
+        ? undefined
+        : this.gateway?.onToolsChanged(() => hub.notifyToolsChanged());
   }
 
   /**
@@ -487,6 +509,12 @@ export class CodeExecutionMCP
 
     const configuredPort = getConfiguredPort(this.workspaceProvider);
 
+    // Every name Ptah serves itself, so `isGatewayTool` treats only the rest
+    // as third-party. The same superset the dispatcher's collision filter uses.
+    this.gateway?.registerHostToolNames(
+      buildToolDefinitions({ hasIDECapabilities: true }).map((tool) => tool.name),
+    );
+
     const result = await startHttpServer({
       port: configuredPort,
       logger: this.logger,
@@ -494,6 +522,7 @@ export class CodeExecutionMCP
       authenticate: (input) => this.callerCredentials.authorize(input),
       isExclusiveOwnerActive: (owner) => this.callerCredentials.isExclusiveOwnerActive(owner),
       completionOutbox: this.completionOutbox,
+      notificationHub: this.notificationHub,
       onMCPRequest: (request) =>
         handleMCPRequest(request, {
           ptahAPI: this.ptahAPI,
@@ -521,6 +550,7 @@ export class CodeExecutionMCP
               ? this.apiBuilder.outcomeReportDependencies()
               : undefined,
           hangBreadcrumbs,
+          gateway: this.gateway,
         }),
     });
 
@@ -909,6 +939,8 @@ export class CodeExecutionMCP
     // on the next start and violate M1's byte-identical restart contract.
     await this.enqueueMcpOp(() => Promise.resolve());
 
+    // Open SSE streams would keep `server.close` waiting forever.
+    this.notificationHub?.closeAll();
     await stopHttpServer(this.server, this.workspaceState, this.logger);
     this.server = null;
     this.port = null;
@@ -1037,6 +1069,7 @@ export class CodeExecutionMCP
    */
   async disposeAsync(): Promise<void> {
     this.workspaceFoldersSubscription.dispose();
+    this.gatewayToolsSubscription?.dispose();
     // A `run_check` in flight owns an Nx process tree that would outlive the
     // host. Fail-open: a kill failure must not stop the server teardown.
     try {
