@@ -24,6 +24,16 @@ describe('parseAntigravityUsageGroups', () => {
       window.observedAt === OBSERVED)).toBe(true);
   });
 
+  it('sets the display group on every window and keeps key and label unchanged', () => {
+    const windows = parseAntigravityUsageGroups(probeData(), OBSERVED) ?? [];
+    expect(windows.map(({ key, label, group }) => [key, label, group])).toEqual([
+      ['other:cli-gemini-models-five_hour', 'Gemini Models · 5 Hour', 'Gemini Models'],
+      ['other:cli-gemini-models-weekly', 'Gemini Models · Weekly', 'Gemini Models'],
+      ['other:cli-claude-and-gpt-models-five_hour', 'Claude and GPT models · 5 Hour', 'Claude and GPT models'],
+      ['other:cli-claude-and-gpt-models-weekly', 'Claude and GPT models · Weekly', 'Claude and GPT models'],
+    ]);
+  });
+
   it('treats the 1970 reset of an unused pool as no known reset', () => {
     const windows = parseAntigravityUsageGroups(probeData(), OBSERVED) ?? [];
     const unused = windows.find((window) => window.key === 'other:cli-claude-and-gpt-models-five_hour');
@@ -79,6 +89,11 @@ describe('parseAntigravityUsageTsv', () => {
       ['other:cli-claude-and-gpt-models-weekly', { kind: 'percent', percent: 40 }],
       ['other:cli-claude-and-gpt-models-five_hour', { kind: 'percent', percent: 50 }],
     ]);
+  });
+
+  it('sets the display group from the first column of the text rows', () => {
+    const windows = parseAntigravityUsageTsv(ANTIGRAVITY_USAGE_FIXTURE, OBSERVED) ?? [];
+    expect([...new Set(windows.map((window) => window.group))]).toEqual(['Gemini Models', 'Claude and GPT models']);
   });
 
   it('keeps an epoch reset as unknown and rejects any malformed or duplicate line', () => {

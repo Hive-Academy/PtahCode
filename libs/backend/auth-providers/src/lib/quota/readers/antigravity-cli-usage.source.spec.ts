@@ -5,6 +5,10 @@ import type { Logger } from '@ptah-extension/vscode-core';
 import {
   ANTIGRAVITY_CLI_ARGS,
   ANTIGRAVITY_CLI_CACHE_MS,
+  ANTIGRAVITY_CLI_KILL_BACKOFF_MS,
+  ANTIGRAVITY_CLI_MAX_CONSECUTIVE_KILLS,
+  ANTIGRAVITY_CLI_MAX_STDOUT_BYTES,
+  ANTIGRAVITY_CLI_REFRESH_MIN_GAP_MS,
   ANTIGRAVITY_CLI_TIMEOUT_MS,
   antigravityCliCandidates,
   antigravityCliEnv,
@@ -16,6 +20,7 @@ import {
   type AntigravityCliUsageOptions,
 } from './antigravity-cli-usage.source';
 import { FALLBACK_SHORT_BACKOFF_MS } from './fallback-usage.constants';
+import { ANTIGRAVITY_CHAIN_TIMEOUT_MS } from './antigravity-plan-usage.reader';
 import { antigravityUsageJsonFixture } from './antigravity-usage.fixture';
 
 type FakeChild = EventEmitter & {
@@ -45,7 +50,9 @@ function close(child: FakeChild, code: number | null): void {
 }
 
 interface Behaviour { (child: FakeChild): void; readonly noPid?: true }
-const answer = (body: unknown, code = 0): Behaviour => (child) => queueMicrotask(() => {
+// A promise tick, not `queueMicrotask`: fake timers replace `queueMicrotask`.
+const soon = (run: () => void): void => void Promise.resolve().then(run);
+const answer = (body: unknown, code = 0): Behaviour => (child) => soon(() => {
   child.stdout.emit('data', Buffer.from(typeof body === 'string' ? body : JSON.stringify(body)));
   close(child, code);
 });
@@ -181,6 +188,81 @@ describe('readAntigravityCliUsage', () => {
     expect(JSON.stringify(logger.warn.mock.calls)).not.toMatch(/Gemini Models|groups|input_tokens/);
   });
 
+  it('does not reuse a parsed error reply as a reading: a refresh runs agy again', async () => {
+    jest.useFakeTimers();
+    try {
+      const { options, spawnProcess } = harness([answer({ num_turns: 0, usage: {}, error: 'quota service down' }, 1),
+        answer(antigravityUsageJsonFixture())]);
+      expect(await readAntigravityCliUsage(undefined, options())).toMatchObject({ statusReason: 'cli-exit-error' });
+      await jest.advanceTimersByTimeAsync(ANTIGRAVITY_CLI_REFRESH_MIN_GAP_MS + 1);
+      expect((await readAntigravityCliUsage(undefined, options({ refresh: true }))).status).toBe('available');
+      expect(spawnProcess).toHaveBeenCalledTimes(2);
+    } finally { jest.useRealTimers(); }
+  });
+
+  it('does not start a run when another run was killed while this read waited for the sign-in check', async () => {
+    jest.useFakeTimers();
+    try {
+      const { options, spawnProcess } = harness([hang, answer(antigravityUsageJsonFixture())]);
+      // The first read starts a run. The second read (another owner) reaches its
+      // sign-in wait 0.5 s before the kill; the wait ends after the kill.
+      const first = readAntigravityCliUsage(undefined, options({ ownerKey: 'antigravity#cli-store:one' }));
+      await jest.advanceTimersByTimeAsync(ANTIGRAVITY_CLI_TIMEOUT_MS - 500);
+      const second = readAntigravityCliUsage(undefined, options({ ownerKey: 'antigravity#cli-store:two',
+        readSignIn: () => new Promise(() => undefined) }));
+      await jest.advanceTimersByTimeAsync(2_000);
+      await first;
+      expect(await second).toMatchObject({ statusReason: 'cli-timeout' });
+      expect(spawnProcess).toHaveBeenCalledTimes(1);
+    } finally { jest.useRealTimers(); }
+  });
+
+  it('keeps the failure backoff when the caller stopped waiting before the error reply', async () => {
+    let release: (() => void) | undefined;
+    const late: Behaviour = (child) => {
+      release = () => {
+        child.stdout.emit('data', Buffer.from(JSON.stringify({ num_turns: 0, usage: {}, error: 'quota service down' })));
+        close(child, 1);
+      };
+    };
+    const { options, spawnProcess } = harness([late, answer(antigravityUsageJsonFixture())]);
+    const caller = new AbortController();
+    const pending = readAntigravityCliUsage(caller.signal, options());
+    for (let i = 0; i < 20 && !release; i++) await new Promise((resolve) => setImmediate(resolve));
+    caller.abort();
+    await pending;
+    release?.();
+    for (let i = 0; i < 20; i++) await new Promise((resolve) => setImmediate(resolve));
+    expect(await readAntigravityCliUsage(undefined, options())).toMatchObject({ statusReason: 'cli-exit-error' });
+    expect(spawnProcess).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears an older failure backoff when a refresh run answers after its caller stopped waiting', async () => {
+    jest.useFakeTimers();
+    try {
+      let release: (() => void) | undefined;
+      const late: Behaviour = (child) => {
+        release = () => {
+          child.stdout.emit('data', Buffer.from(JSON.stringify(antigravityUsageJsonFixture())));
+          close(child, 0);
+        };
+      };
+      const { options, spawnProcess } = harness([
+        answer({ num_turns: 0, usage: {}, error: 'quota service down' }, 1), late]);
+      expect(await readAntigravityCliUsage(undefined, options())).toMatchObject({ statusReason: 'cli-exit-error' });
+      await jest.advanceTimersByTimeAsync(ANTIGRAVITY_CLI_REFRESH_MIN_GAP_MS + 1);
+      const caller = new AbortController();
+      const pending = readAntigravityCliUsage(caller.signal, options({ refresh: true }));
+      for (let i = 0; i < 20 && !release; i++) await Promise.resolve();
+      caller.abort();
+      await pending;
+      release?.();
+      await jest.advanceTimersByTimeAsync(10);
+      expect((await readAntigravityCliUsage(undefined, options())).status).toBe('available');
+      expect(spawnProcess).toHaveBeenCalledTimes(2);
+    } finally { jest.useRealTimers(); }
+  });
+
   it('does not trip on a clean non-billing error reply, and backs it off', async () => {
     const { options, calls } = harness([answer({ num_turns: 0, usage: {}, error: 'quota service down' }, 1),
       answer(antigravityUsageJsonFixture())]);
@@ -191,18 +273,179 @@ describe('readAntigravityCliUsage', () => {
     expect((await readAntigravityCliUsage(undefined, options({ now: () => clock++ }))).status).toBe('available');
   });
 
-  it('kills a run that outlasts its window and disables the source', async () => {
-    jest.useFakeTimers();
-    try {
-      const { options, calls, killTree } = harness([hang]);
-      const pending = readAntigravityCliUsage(undefined, options());
+  describe('a run that outlasts its window', () => {
+    const killedRead = async (read: () => Promise<unknown>) => {
+      const pending = read();
       await jest.advanceTimersByTimeAsync(ANTIGRAVITY_CLI_TIMEOUT_MS + 1_000);
-      expect(await pending).toMatchObject({ statusReason: 'cli-timeout' });
+      return pending;
+    };
+    beforeEach(() => jest.useFakeTimers());
+    afterEach(() => jest.useRealTimers());
+
+    it('kills the run after agy own timeout and keeps the source alive', async () => {
+      const { options, killTree, spawnProcess } = harness([hang]);
+      expect(ANTIGRAVITY_CLI_TIMEOUT_MS).toBeGreaterThan(10_000);
+      expect(ANTIGRAVITY_CLI_ARGS).toContain('10s');
+      expect(await killedRead(() => readAntigravityCliUsage(undefined, options())))
+        .toMatchObject({ statusReason: 'cli-timeout' });
       expect(killTree).toHaveBeenCalledWith(4242);
-      expect(await readAntigravityCliUsage(undefined, options({ ownerKey: 'antigravity#cli-store:next' })))
+      // The failed read is held for the kill backoff: no new process.
+      expect(await readAntigravityCliUsage(undefined, options()))
+        .toMatchObject({ statusReason: 'cli-timeout' });
+      expect(spawnProcess).toHaveBeenCalledTimes(1);
+    });
+
+    it('retries after the kill backoff and reads the windows', async () => {
+      const { options, spawnProcess, logger } = harness([hang, answer(antigravityUsageJsonFixture())]);
+      await killedRead(() => readAntigravityCliUsage(undefined, options()));
+      await jest.advanceTimersByTimeAsync(ANTIGRAVITY_CLI_KILL_BACKOFF_MS[0]! + 1);
+      const reading = await readAntigravityCliUsage(undefined, options());
+      expect(reading.status).toBe('available');
+      expect(reading.windows.length).toBeGreaterThan(0);
+      expect(spawnProcess).toHaveBeenCalledTimes(2);
+      expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('killed without billing evidence'),
+        expect.anything());
+    });
+
+    it('grows the backoff, then disables after the maximum kills in a row', async () => {
+      const { options, spawnProcess } = harness([hang]);
+      for (let kill = 1; kill <= ANTIGRAVITY_CLI_MAX_CONSECUTIVE_KILLS; kill++) {
+        await killedRead(() => readAntigravityCliUsage(undefined, options()));
+        expect(spawnProcess).toHaveBeenCalledTimes(kill);
+        await jest.advanceTimersByTimeAsync(ANTIGRAVITY_CLI_KILL_BACKOFF_MS[1]! + 1);
+      }
+      expect(await readAntigravityCliUsage(undefined, options()))
         .toMatchObject({ sourceFailures: [{ cause: 'cli-disabled' }] });
-      expect(calls).toHaveLength(1);
-    } finally { jest.useRealTimers(); }
+      expect(spawnProcess).toHaveBeenCalledTimes(ANTIGRAVITY_CLI_MAX_CONSECUTIVE_KILLS);
+    });
+
+    it('uses the longer backoff after the second kill', async () => {
+      const { options, spawnProcess } = harness([hang]);
+      await killedRead(() => readAntigravityCliUsage(undefined, options()));
+      await jest.advanceTimersByTimeAsync(ANTIGRAVITY_CLI_KILL_BACKOFF_MS[0]! + 1);
+      await killedRead(() => readAntigravityCliUsage(undefined, options()));
+      await jest.advanceTimersByTimeAsync(ANTIGRAVITY_CLI_KILL_BACKOFF_MS[0]! + 1);
+      await readAntigravityCliUsage(undefined, options());
+      expect(spawnProcess).toHaveBeenCalledTimes(2);
+    });
+
+    it('lets a manual refresh retry after the kill-disable, and a good answer re-enables it', async () => {
+      const { options, spawnProcess } = harness([hang, hang, hang, answer(antigravityUsageJsonFixture())]);
+      for (let kill = 0; kill < ANTIGRAVITY_CLI_MAX_CONSECUTIVE_KILLS; kill++) {
+        await killedRead(() => readAntigravityCliUsage(undefined, options({ refresh: true })));
+        await jest.advanceTimersByTimeAsync(ANTIGRAVITY_CLI_REFRESH_MIN_GAP_MS + 1);
+      }
+      expect(await readAntigravityCliUsage(undefined, options()))
+        .toMatchObject({ sourceFailures: [{ cause: 'cli-disabled' }] });
+      expect(spawnProcess).toHaveBeenCalledTimes(ANTIGRAVITY_CLI_MAX_CONSECUTIVE_KILLS);
+      const refreshed = await readAntigravityCliUsage(undefined, options({ refresh: true }));
+      expect(refreshed.status).toBe('available');
+      expect(spawnProcess).toHaveBeenCalledTimes(ANTIGRAVITY_CLI_MAX_CONSECUTIVE_KILLS + 1);
+      // The source works again without a refresh.
+      await jest.advanceTimersByTimeAsync(ANTIGRAVITY_CLI_CACHE_MS + 1);
+      expect((await readAntigravityCliUsage(undefined, options())).status).toBe('available');
+    });
+
+    it('does not start a refresh run faster than the refresh gap', async () => {
+      const { options, spawnProcess } = harness([hang, answer(antigravityUsageJsonFixture())]);
+      await killedRead(() => readAntigravityCliUsage(undefined, options()));
+      // The gap runs from the end of the killed run: it has not passed yet.
+      await jest.advanceTimersByTimeAsync(ANTIGRAVITY_CLI_REFRESH_MIN_GAP_MS / 2);
+      expect(await readAntigravityCliUsage(undefined, options({ refresh: true })))
+        .toMatchObject({ statusReason: 'cli-timeout' });
+      expect(spawnProcess).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps the kill backoff for a normal read, but a manual refresh passes it', async () => {
+      const { options, spawnProcess } = harness([hang, answer(antigravityUsageJsonFixture())]);
+      await killedRead(() => readAntigravityCliUsage(undefined, options()));
+      await jest.advanceTimersByTimeAsync(ANTIGRAVITY_CLI_REFRESH_MIN_GAP_MS);
+      await readAntigravityCliUsage(undefined, options());
+      expect(spawnProcess).toHaveBeenCalledTimes(1);
+      expect((await readAntigravityCliUsage(undefined, options({ refresh: true }))).status).toBe('available');
+      expect(spawnProcess).toHaveBeenCalledTimes(2);
+    });
+
+    it('keeps the kill backoff when the caller stopped waiting before the kill', async () => {
+      const { options, spawnProcess } = harness([hang, answer(antigravityUsageJsonFixture())]);
+      const caller = new AbortController();
+      const pending = readAntigravityCliUsage(caller.signal, options());
+      await jest.advanceTimersByTimeAsync(ANTIGRAVITY_CLI_TIMEOUT_MS - 1_000);
+      caller.abort();
+      await pending;
+      await jest.advanceTimersByTimeAsync(2_000);
+      // The run was killed after its caller left; the next read must not spawn at once.
+      expect(await readAntigravityCliUsage(undefined, options()))
+        .toMatchObject({ statusReason: 'cli-timeout' });
+      expect(spawnProcess).toHaveBeenCalledTimes(1);
+      await jest.advanceTimersByTimeAsync(ANTIGRAVITY_CLI_KILL_BACKOFF_MS[0]! + 1);
+      expect((await readAntigravityCliUsage(undefined, options())).status).toBe('available');
+    });
+
+    it('does not count a run stopped for too much output as a kill', async () => {
+      const flood: Behaviour = (child) => soon(() =>
+        child.stdout.emit('data', Buffer.alloc(ANTIGRAVITY_CLI_MAX_STDOUT_BYTES + 1, 'x')));
+      const { options, spawnProcess } = harness([flood, flood, flood, flood]);
+      for (let run = 0; run < ANTIGRAVITY_CLI_MAX_CONSECUTIVE_KILLS + 1; run++) {
+        expect(await readAntigravityCliUsage(undefined, options({ refresh: true })))
+          .toMatchObject({ statusReason: 'cli-parse-failed' });
+        await jest.advanceTimersByTimeAsync(ANTIGRAVITY_CLI_REFRESH_MIN_GAP_MS + 1);
+      }
+      expect(spawnProcess).toHaveBeenCalledTimes(ANTIGRAVITY_CLI_MAX_CONSECUTIVE_KILLS + 1);
+    });
+
+    it('re-enables the source when a refresh run answers after its caller stopped waiting', async () => {
+      const slowGood: Behaviour = (child) => { setTimeout(() => {
+        child.stdout.emit('data', Buffer.from(JSON.stringify(antigravityUsageJsonFixture())));
+        close(child, 0);
+      }, 2_000); };
+      const { options, spawnProcess } = harness([hang, hang, hang, slowGood]);
+      for (let kill = 0; kill < ANTIGRAVITY_CLI_MAX_CONSECUTIVE_KILLS; kill++) {
+        await killedRead(() => readAntigravityCliUsage(undefined, options({ refresh: true })));
+        await jest.advanceTimersByTimeAsync(ANTIGRAVITY_CLI_REFRESH_MIN_GAP_MS + 1);
+      }
+      const caller = new AbortController();
+      const pending = readAntigravityCliUsage(caller.signal, options({ refresh: true }));
+      await jest.advanceTimersByTimeAsync(500);
+      caller.abort();
+      await pending;
+      await jest.advanceTimersByTimeAsync(2_000);
+      // The run settled with a good answer after its caller left: no refresh needed now.
+      expect((await readAntigravityCliUsage(undefined, options())).status).toBe('available');
+      expect(spawnProcess).toHaveBeenCalledTimes(ANTIGRAVITY_CLI_MAX_CONSECUTIVE_KILLS + 1);
+    });
+
+    it('disables for good when the killed run had already shown a model turn', async () => {
+      const turnThenHang: Behaviour = (child) => soon(() =>
+        child.stdout.emit('data', Buffer.from(JSON.stringify(antigravityUsageJsonFixture({ num_turns: 1 })))));
+      const { options, spawnProcess } = harness([turnThenHang, answer(antigravityUsageJsonFixture())]);
+      await killedRead(() => readAntigravityCliUsage(undefined, options()));
+      await jest.advanceTimersByTimeAsync(ANTIGRAVITY_CLI_REFRESH_MIN_GAP_MS + 1);
+      for (const refresh of [false, true])
+        expect(await readAntigravityCliUsage(undefined, options({ refresh })))
+          .toMatchObject({ sourceFailures: [{ cause: 'cli-disabled' }] });
+      expect(spawnProcess).toHaveBeenCalledTimes(1);
+    });
+
+    it('a slow first run at app start still answers inside its window, with no kill', async () => {
+      const slow: Behaviour = (child) => { setTimeout(() => {
+        child.stdout.emit('data', Buffer.from(JSON.stringify(antigravityUsageJsonFixture())));
+        close(child, 0);
+      }, 9_000); };
+      const { options, killTree } = harness([slow]);
+      const pending = readAntigravityCliUsage(undefined, options());
+      await jest.advanceTimersByTimeAsync(9_500);
+      expect((await pending).status).toBe('available');
+      expect(killTree).not.toHaveBeenCalled();
+    });
+  });
+
+  it('keeps the billing trip for a refresh, too', async () => {
+    const { options, spawnProcess } = harness([answer(antigravityUsageJsonFixture({ num_turns: 1 }))]);
+    await readAntigravityCliUsage(undefined, options());
+    expect(await readAntigravityCliUsage(undefined, options({ refresh: true })))
+      .toMatchObject({ sourceFailures: [{ cause: 'cli-disabled' }] });
+    expect(spawnProcess).toHaveBeenCalledTimes(1);
   });
 
   it('trips the breaker inside the shared run when its caller stopped waiting', async () => {
@@ -226,6 +469,11 @@ describe('readAntigravityCliUsage', () => {
     expect(await readAntigravityCliUsage(undefined, options({ ownerKey: 'antigravity#cli-store:after' })))
       .toMatchObject({ sourceFailures: [{ cause: 'cli-disabled' }] });
     expect(spawnProcess).toHaveBeenCalledTimes(1);
+  });
+
+  it('the chain budget leaves the full CLI window after both slower stages time out', () => {
+    // Token file and IDE server stages: 3 s each at most; sign-in check 1 s; 250 ms CLI margin.
+    expect(ANTIGRAVITY_CHAIN_TIMEOUT_MS - 3_000 - 3_000 - 1_000 - 250).toBeGreaterThanOrEqual(ANTIGRAVITY_CLI_TIMEOUT_MS);
   });
 
   it('defers without spawning when the chain has less than the full window left', async () => {
