@@ -1,5 +1,6 @@
 import type { Logger } from '@ptah-extension/vscode-core';
 import { getAllAnthropicProviders } from '@ptah-extension/agent-sdk';
+import { isProviderSessionProviderId } from '@ptah-extension/shared';
 import type { ClaudeCliDetector } from '@ptah-extension/agent-sdk';
 import type { ActiveProviderResolver } from '@ptah-extension/auth-providers';
 import type { WorkspaceScopeResolver } from '@ptah-extension/settings-core';
@@ -203,7 +204,11 @@ export class AuthStatusCache {
       claudeCliInstalled,
       providerSessionStatus,
     ] = await Promise.all([
-      probes.probeSecrets(checkProviderId, allProviders),
+      // A provider session (Antigravity) never holds a stored key.
+      probes.probeSecrets(
+        checkProviderId,
+        allProviders.filter((p) => !isProviderSessionProviderId(p.id)),
+      ),
       probes.probeCopilot(),
       probes.probeCodex(),
       probes.probeKimiCode(),

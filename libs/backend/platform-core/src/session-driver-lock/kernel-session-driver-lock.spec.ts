@@ -128,7 +128,7 @@ describe('session endpoint naming', () => {
     }
   });
 
-  it('releases even when a holder query peer never closes or resets', async () => {
+  it('releases even when a holder query peer stays half-open or drops before reading', async () => {
     const lock = new KernelSessionDriverLock();
     const id = `idle-peer-${process.pid}-${Date.now()}`;
     const first = await lock.acquire(id, {
@@ -146,10 +146,13 @@ describe('session endpoint naming', () => {
     const idle = net.createConnection({ path: endpoint, allowHalfOpen: true });
     idle.on('error', () => undefined);
     await new Promise<void>((resolve) => idle.once('data', () => resolve()));
-    // Resetting peer: aborts while the holder line is being written.
-    const reset = net.createConnection(endpoint);
-    reset.on('error', () => undefined);
-    reset.once('connect', () => reset.resetAndDestroy());
+    // Dropping peer: closes as soon as it connects, before it reads the
+    // holder line the server is writing. This is a close, not an abort: the
+    // endpoint is a Unix socket or a named pipe, which have no RST, and
+    // Node's resetAndDestroy() throws ERR_INVALID_HANDLE_TYPE for them.
+    const dropped = net.createConnection(endpoint);
+    dropped.on('error', () => undefined);
+    dropped.once('connect', () => dropped.destroy());
     try {
       expect(await lock.release(id, first.nonce)).toBe('released');
     } finally {

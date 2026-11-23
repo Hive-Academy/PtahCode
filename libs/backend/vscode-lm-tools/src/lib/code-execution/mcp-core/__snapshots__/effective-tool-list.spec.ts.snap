@@ -17,6 +17,8 @@ exports[`effective tool list characterization cron write tools (issue #1400) lis
 exports[`effective tool list characterization denied ptah tool hides execute_code keeps the ordered names and schema hashes 1`] = `
 [
   "ptah_workspace_analyze efddc7bd8bbcef73",
+  "ptah_read_symbol 62c487c843621be2",
+  "ptah_grep 1f6619d24842c8df",
   "ptah_get_diagnostics 2bf1cfc0ccdfd152",
   "ptah_count_tokens 0e01f64bed29df92",
   "ptah_web_search 9d7f7bcb440d33d9",
@@ -84,7 +86,7 @@ exports[`effective tool list characterization denied ptah tool hides execute_cod
   "ptah_get_dependents 0e01f64bed29df92",
   "ptah_get_dependencies 26c235882d60417e",
   "ptah_get_symbol_index df6add13400d44af",
-  "ptah_code_search_symbols 1584433694c8685a",
+  "ptah_code_search_symbols e1546e546c8f7aa9",
   "ptah_code_reindex 2cd7475dd831e63b",
   "ptah_memory_search fbeee61c05fffa7d",
   "ptah_relevance_rank_files 22065710b62931b0",
@@ -96,6 +98,8 @@ exports[`effective tool list characterization no phase keeps the ordered names a
 [
   "ptah_workspace_analyze efddc7bd8bbcef73",
   "ptah_search_files 21b875a2b9a00a8e",
+  "ptah_read_symbol 62c487c843621be2",
+  "ptah_grep 1f6619d24842c8df",
   "ptah_get_diagnostics 2bf1cfc0ccdfd152",
   "ptah_count_tokens 0e01f64bed29df92",
   "ptah_web_search 9d7f7bcb440d33d9",
@@ -164,7 +168,7 @@ exports[`effective tool list characterization no phase keeps the ordered names a
   "ptah_get_dependents 0e01f64bed29df92",
   "ptah_get_dependencies 26c235882d60417e",
   "ptah_get_symbol_index df6add13400d44af",
-  "ptah_code_search_symbols 1584433694c8685a",
+  "ptah_code_search_symbols e1546e546c8f7aa9",
   "ptah_code_reindex 2cd7475dd831e63b",
   "ptah_memory_search fbeee61c05fffa7d",
   "ptah_relevance_rank_files 22065710b62931b0",
@@ -176,6 +180,8 @@ exports[`effective tool list characterization phase with denials keeps the order
 [
   "ptah_workspace_analyze efddc7bd8bbcef73",
   "ptah_search_files 21b875a2b9a00a8e",
+  "ptah_read_symbol 62c487c843621be2",
+  "ptah_grep 1f6619d24842c8df",
   "ptah_get_diagnostics 2bf1cfc0ccdfd152",
   "ptah_count_tokens 0e01f64bed29df92",
   "ptah_web_search 9d7f7bcb440d33d9",
@@ -242,7 +248,7 @@ exports[`effective tool list characterization phase with denials keeps the order
   "ptah_get_dependents 0e01f64bed29df92",
   "ptah_get_dependencies 26c235882d60417e",
   "ptah_get_symbol_index df6add13400d44af",
-  "ptah_code_search_symbols 1584433694c8685a",
+  "ptah_code_search_symbols e1546e546c8f7aa9",
   "ptah_code_reindex 2cd7475dd831e63b",
   "ptah_memory_search fbeee61c05fffa7d",
   "ptah_relevance_rank_files 22065710b62931b0",

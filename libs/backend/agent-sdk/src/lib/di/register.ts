@@ -63,6 +63,11 @@ import {
 import { SessionApprovalRouter } from '../codex-app-server/session-approval-router';
 import { ProviderSessionChatAdapter } from '../provider-session/provider-session-chat-adapter';
 import type { ProviderSessionChatPorts } from '../provider-session/provider-session-chat-ports';
+import {
+  SESSION_USAGE_SINK,
+  type SessionUsageSink,
+} from '../session-stats/session-usage-sink';
+import type { IPricingProvider } from '../pricing.port';
 import { SdkTranscriptReaderAdapter } from '../sdk-transcript-reader.adapter';
 import { SessionMetadataStore } from '../session-metadata-store';
 import {
@@ -75,6 +80,7 @@ import { SessionStatsReaderService } from '../session-stats';
 import { SessionStatsOwnerService } from '../session-stats/session-stats-owner.service';
 import { SdkPermissionHandler } from '../sdk-permission-handler';
 import { UnattendedSessionPolicyRegistry } from '../permission/unattended-session-policy.registry';
+import { SessionToolDispositionRegistry } from '../helpers/session-tool-disposition.port';
 import { HostAttentionCoordinator } from '../permission/host-attention-coordinator';
 import { SdkMessageTransformer } from '../sdk-message-transformer';
 import { ClaudeCliDetector } from '../detector/claude-cli-detector';
@@ -370,6 +376,13 @@ export function registerSdkServices(
   container.register(
     SDK_TOKENS.SDK_UNATTENDED_SESSION_POLICY_REGISTRY,
     { useClass: UnattendedSessionPolicyRegistry },
+    { lifecycle: Lifecycle.Singleton },
+  );
+
+  // Resolved optionally by the permission handler, so it must be registered first.
+  container.register(
+    SDK_TOKENS.SDK_SESSION_TOOL_DISPOSITION,
+    { useClass: SessionToolDispositionRegistry },
     { lifecycle: Lifecycle.Singleton },
   );
 
@@ -718,8 +731,6 @@ export function registerSdkServices(
           SDK_TOKENS.SDK_COMPACTION_CONFIG_PROVIDER,
         ),
         {
-          stopSubagent: (sessionId, taskId) =>
-            dispatcher().stopSubagent(sessionId, taskId),
           pushParentMessage: (sessionId, content) =>
             dispatcher().pushParentMessage(sessionId, content),
           postMainThreadNotice: (sessionId, text, onDropped) =>
@@ -1199,6 +1210,13 @@ export function registerCodexChatServices(
           approvals: c.resolve<SessionApprovalRouter>(
             SDK_TOKENS.SESSION_APPROVAL_ROUTER,
           ),
+          // Optional: a host without the session store keeps usage in memory.
+          usageSink: c.isRegistered(SESSION_USAGE_SINK, true)
+            ? c.resolve<SessionUsageSink | null>(SESSION_USAGE_SINK)
+            : null,
+          pricing: c.isRegistered(SDK_TOKENS.PRICING_PROVIDER, true)
+            ? c.resolve<IPricingProvider | null>(SDK_TOKENS.PRICING_PROVIDER)
+            : null,
         },
         c.resolve<SessionTurnStateRegistry>(
           SDK_TOKENS.SDK_SESSION_TURN_STATE_REGISTRY,
@@ -1236,6 +1254,7 @@ export function registerCodexChatServices(
             ...createCodexChatMetadataPort(identities),
             readUsage: ports.metadata.readUsage,
             persistUsage: ports.metadata.persistUsage,
+            persistDuration: ports.metadata.persistDuration,
           },
         },
         c.resolve<SessionTurnStateRegistry>(

@@ -90,6 +90,30 @@ describe('inspector agent list', () => {
     expect(total.tokens).toBe('—');
     expect(total.cost).toBe('—');
   });
+
+  it('shows "Not priced" for a model without a published rate, row and total', () => {
+    const unpriced = row('orchestrator', 'done', 'orchestrator', {
+      ...NO_USAGE,
+      tokens: 100,
+      costEstimated: false,
+      costNotPriced: true,
+    });
+    expect(unpriced.cost).toBe('Not priced');
+    expect(unpriced.usageLabel).toContain('Cost not priced');
+    expect(agentListTotal([unpriced]).cost).toBe('Not priced');
+    // A lane with no cost data beside it keeps the total unreported.
+    expect(agentListTotal([unpriced, row('cli:one', 'done')]).cost).toBe('—');
+  });
+
+  it('keeps a priced cost over the not-priced flag', () => {
+    const priced = row('orchestrator', 'done', 'orchestrator', {
+      ...NO_USAGE,
+      cost: 0.25,
+      costEstimated: false,
+      costNotPriced: true,
+    });
+    expect(priced.cost).toBe('$0.25');
+  });
   it('uses the role in the visible name and accessible label', () => {
     const result = agentListRow({
       agent: row('a', 'running').agent,

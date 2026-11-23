@@ -8,7 +8,7 @@ describe('subagent budget hooks', () => {
     hasNotesGate: jest.fn().mockReturnValue(false),
     finishWarnedAgent: jest.fn().mockResolvedValue(undefined),
     takeNormalHandoff: jest.fn(),
-    takeInterruptedHandoff: jest.fn(),
+    notesGatePhase: jest.fn(),
   };
   const logger = { info: jest.fn(), debug: jest.fn(), warn: jest.fn(), error: jest.fn() };
   const hooks = createSubagentBudgetHooks(logger, monitor, 'parent-session');
@@ -36,15 +36,14 @@ describe('subagent budget hooks', () => {
     expect(logger.info).toHaveBeenCalledWith('[SubagentBudgetProbe]', expect.objectContaining({ eventName: 'PostToolUse' }));
   });
 
-  it('repairs only an interrupted budget-stopped Agent call', async () => {
-    monitor.takeInterruptedHandoff.mockReturnValueOnce('continue from record');
-    expect(await invoke('PostToolUseFailure', 'tool-1')).toEqual({ continue: true });
-    expect(await invoke('PostToolUseFailure', 'tool-1', true)).toEqual({
-      hookSpecificOutput: {
-        hookEventName: 'PostToolUseFailure',
-        additionalContext: "Ptah's token budget ended this subagent; not the user. The SDK's STOP and wait text does not apply. The handoff follows as a separate message.",
-      },
-    });
+  it('adds no stop attribution to an interrupted Agent call; nothing is ever stopped by Ptah', async () => {
+    const withInterrupted = { ...monitor, takeInterruptedHandoff: jest.fn().mockReturnValue('legacy handoff') };
+    const legacyHooks = createSubagentBudgetHooks(logger, withInterrupted, 'parent-session');
+    const callback = legacyHooks.PostToolUseFailure?.[0]?.hooks[0];
+    if (!callback) throw new Error('budget hook missing');
+    expect(await callback({ hook_event_name: 'PostToolUseFailure', session_id: 'parent-session',
+      tool_name: 'Agent', tool_use_id: 'tool-1', is_interrupt: true } as HookInput, 'tool-1', { signal: new AbortController().signal })).toEqual({ continue: true });
+    expect(withInterrupted.takeInterruptedHandoff).not.toHaveBeenCalled();
   });
 
   it('routes live SDK agent hooks by their parent session id rather than the captured tab id', async () => {
@@ -65,19 +64,19 @@ describe('subagent budget hooks', () => {
     expect(monitor.finishWarnedAgent).toHaveBeenCalledWith(parentSession, agent);
   });
 
-  it('uses the rekeyed parent session and Agent tool id for an interrupted handoff', async () => {
+  it('uses the rekeyed parent session and Agent tool id for a normal handoff', async () => {
     const liveHooks = createSubagentBudgetHooks(logger, monitor, 'parent-before-rekey');
-    monitor.takeInterruptedHandoff.mockReturnValueOnce('Ptah handoff for task-9');
-    const callback = liveHooks.PostToolUseFailure?.[0]?.hooks[0];
+    monitor.takeNormalHandoff.mockReturnValueOnce('Ptah handoff for task-9');
+    const callback = liveHooks.PostToolUse?.[0]?.hooks[0];
     if (!callback) throw new Error('budget hook missing');
-    await callback({ hook_event_name: 'PostToolUseFailure', session_id: 'parent-after-rekey',
-      tool_name: 'Agent', tool_use_id: 'toolu_task_9', is_interrupt: true,
-    } as HookInput, 'toolu_task_9', { signal: new AbortController().signal });
-    expect(monitor.takeInterruptedHandoff).toHaveBeenCalledWith('parent-after-rekey', 'toolu_task_9');
+    await callback({ hook_event_name: 'PostToolUse', session_id: 'parent-after-rekey',
+      tool_name: 'Agent', tool_use_id: 'toolu_task_9' } as HookInput, 'toolu_task_9', { signal: new AbortController().signal });
+    expect(monitor.takeNormalHandoff).toHaveBeenCalledWith('parent-after-rekey', 'toolu_task_9');
   });
 
-  it('logs a rejected notes check and denies a gated agent without rejecting the hook', async () => {
-    monitor.hasNotesGate.mockReturnValueOnce(true);
+  it('logs a rejected notes check and denies a paused agent with fixed Ptah copy without rejecting the hook', async () => {
+    monitor.hasNotesGate.mockReturnValue(true);
+    monitor.notesGatePhase.mockReturnValue('paused');
     monitor.checkNotesTool.mockRejectedValueOnce(new Error('gate failed'));
     const callback = hooks.PreToolUse?.[0]?.hooks[0];
     if (!callback) throw new Error('missing PreToolUse hook');
@@ -85,11 +84,25 @@ describe('subagent budget hooks', () => {
       hook_event_name: 'PreToolUse', session_id: 'parent-session', agent_id: 'agent-7',
       tool_name: 'Bash', tool_input: { command: 'pwd' },
     } as HookInput, 'tool-1', { signal: new AbortController().signal });
-    expect(result).toEqual({ hookSpecificOutput: expect.objectContaining({ permissionDecision: 'deny' }) });
+    expect(result).toEqual({ hookSpecificOutput: expect.objectContaining({ permissionDecision: 'deny',
+      permissionDecisionReason: 'Ptah budget monitor paused new work tools. Use only the permitted handoff tools, then return normally.' }) });
+    monitor.hasNotesGate.mockReturnValue(false);
     expect(logger.error).toHaveBeenCalledWith('[SubagentBudgetHooks] Hook failed',
       expect.objectContaining({ error: expect.any(Error), eventName: 'PreToolUse' }));
     expect(monitor.checkNotesTool).toHaveBeenCalledWith('parent-session', 'agent-7', 'Bash', { command: 'pwd' });
     expect(logger.debug).toHaveBeenCalledWith('[SubagentBudgetProbe]', expect.objectContaining({ eventName: 'PreToolUse' }));
+  });
+
+  it('fails open for an agent that was only asked for a handoff', async () => {
+    monitor.hasNotesGate.mockReturnValue(true);
+    monitor.notesGatePhase.mockReturnValue('asked');
+    monitor.checkNotesTool.mockRejectedValueOnce(new Error('gate failed'));
+    const callback = hooks.PreToolUse?.[0]?.hooks[0];
+    if (!callback) throw new Error('missing PreToolUse hook');
+    expect(await callback({ hook_event_name: 'PreToolUse', session_id: 'parent-session', agent_id: 'agent-7',
+      tool_name: 'Bash', tool_input: { command: 'pwd' } } as HookInput, 'tool-1', { signal: new AbortController().signal })).toEqual({ continue: true });
+    expect(logger.error).toHaveBeenCalledWith('[SubagentBudgetHooks] Hook failed', expect.objectContaining({ error: expect.any(Error) }));
+    monitor.hasNotesGate.mockReturnValue(false);
   });
 
   it('logs a callback failure and continues an unrelated agent', async () => {
@@ -156,7 +169,7 @@ describe('successful notes tool result hook', () => {
   const logger = { info: jest.fn(), debug: jest.fn(), warn: jest.fn(), error: jest.fn() };
   it('reports only successful PostToolUse and rejects embedded errors', async () => {
     const monitor = { checkNotesTool: jest.fn(), hasNotesGate: jest.fn(), finishWarnedAgent: jest.fn(),
-      takeNormalHandoff: jest.fn(), takeInterruptedHandoff: jest.fn(), recordNotesToolResult: jest.fn() };
+      takeNormalHandoff: jest.fn(), recordNotesToolResult: jest.fn() };
     const hooks = createSubagentBudgetHooks(logger, monitor, 'parent');
     for (const [event, response] of [['PostToolUseFailure', {}], ['PreToolUse', {}], ['PostToolUse', { is_error: true }], ['PostToolUse', {}]] as const) {
       const callback = hooks[event]?.[0]?.hooks[0];
@@ -174,7 +187,7 @@ it('warns once per hook installation when the notes result recorder is missing',
   const logger = { info: jest.fn(), debug: jest.fn(), warn: jest.fn(), error: jest.fn() };
   createSubagentBudgetHooks(logger, {
     checkNotesTool: jest.fn(), hasNotesGate: jest.fn(), finishWarnedAgent: jest.fn(),
-    takeNormalHandoff: jest.fn(), takeInterruptedHandoff: jest.fn(),
+    takeNormalHandoff: jest.fn(),
   });
   expect(logger.warn).toHaveBeenCalledTimes(1);
   expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('Notes result recorder missing'));

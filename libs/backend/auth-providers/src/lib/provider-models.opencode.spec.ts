@@ -3,102 +3,138 @@ import { createMockConfigManager } from '@ptah-extension/vscode-core/testing';
 import { createMockLogger } from '@ptah-extension/shared/testing';
 import type { ConfigManager, Logger } from '@ptah-extension/vscode-core';
 import type { WorkspaceScopeResolver } from '@ptah-extension/settings-core';
-import {
-  OPENCODE_MODEL_ROUTES,
-  getAnthropicProvider,
-} from '@ptah-extension/shared';
 import { ActiveProviderResolver } from './auth/active-provider-resolver';
 import { ProviderModelsService } from './provider-models.service';
-import { openCodeLiveRoutes, type OpenCodeLiveModel } from './providers/opencode/opencode-live-routes';
+import { ModelListError } from './model-list-error';
+import {
+  openCodeLiveRoutes,
+  type OpenCodeLiveModel,
+} from './providers/opencode/opencode-live-routes';
+
+function makeService(values: Record<string, unknown> = {}) {
+  const config = createMockConfigManager({ values });
+  const service = new ProviderModelsService(
+    createMockLogger() as unknown as Logger,
+    config as unknown as ConfigManager,
+    {},
+    new ActiveProviderResolver({
+      read: () => undefined,
+      isStored: () => false,
+    } as unknown as WorkspaceScopeResolver),
+  );
+  return { service, config };
+}
+
+const row = (
+  id: string,
+  extra: Partial<OpenCodeLiveModel> = {},
+): OpenCodeLiveModel => ({
+  id,
+  name: id,
+  description: `${id} via OpenCode`,
+  contextLength: 0,
+  supportsToolUse: true,
+  upstreamProtocol: 'messages',
+  ...extra,
+});
 
 describe('ProviderModelsService OpenCode catalog', () => {
   afterEach(() => jest.restoreAllMocks());
 
   it.each(['opencode-zen', 'opencode-go'] as const)(
-    '%s returns the whole reviewed route table when the public list cannot be read',
+    '%s lists exactly the live gateway rows, forcing past the failure backoff',
     async (id) => {
-      const unknown = {
-        id: 'unreviewed-model',
-        name: 'Unreviewed',
-        description: 'Unreviewed fixture',
-        contextLength: 100,
-        supportsToolUse: true,
-      };
-      const config = createMockConfigManager({
-        values: {
-          [`provider.${id}.modelCatalog`]: {
-            models: [unknown],
-            timestamp: Date.now(),
-          },
-        },
-      });
-      const service = new ProviderModelsService(
-        createMockLogger() as unknown as Logger,
-        config as unknown as ConfigManager,
-        {},
-        new ActiveProviderResolver({
-          read: () => undefined,
-          isStored: () => false,
-        } as unknown as WorkspaceScopeResolver),
-      );
-      const dynamic = jest.fn(async () => [unknown]);
+      const live = [
+        row('live-a', { upstreamProtocol: 'responses' }),
+        row('live-b', { supportsToolUse: false, toolUseUnknown: true }),
+        row('live-c', { supportsToolUse: false }),
+      ];
+      jest.spyOn(openCodeLiveRoutes, 'list').mockResolvedValue(live);
+      const { service, config } = makeService();
+      const dynamic = jest.fn(async () => [row('fetcher-row')]);
       service.registerDynamicFetcher(id, dynamic);
-      jest.spyOn(openCodeLiveRoutes, 'list').mockResolvedValue(null);
-      for (const key of [null, 'configured-key']) {
-        const result = await service.fetchModels(id, key);
-        expect(result.isStatic).toBe(true);
-        expect(result.models.map((m) => m.id)).toEqual(
-          Object.keys(OPENCODE_MODEL_ROUTES[id]),
-        );
-        expect(result.totalCount).toBe(id === 'opencode-zen' ? 78 : 35);
-        for (const model of result.models)
-          expect(model).toMatchObject({
-            contextLength: 0,
-            supportsToolUse: true,
-          });
-        // Every OpenCode model is tool-capable (measured: 103/103 on
-        // GET /api/model), so a toolUseOnly request must return the WHOLE
-        // catalog. Asserting [] here would pin the opposite bug.
-        expect(await service.fetchModels(id, key, true)).toEqual(result);
-      }
+
+      const result = await service.fetchModels(id, 'configured-key');
+      expect(result).toMatchObject({
+        source: 'live',
+        totalCount: 3,
+      });
+      expect(result.failureReason).toBeUndefined();
+      expect(result.models).toEqual(live);
+      expect(openCodeLiveRoutes.list).toHaveBeenCalledWith(id, {
+        force: true,
+      });
       expect(dynamic).not.toHaveBeenCalled();
-      expect(openCodeLiveRoutes.list).toHaveBeenCalledWith(id);
-      expect(config.get).not.toHaveBeenCalledWith(
-        `provider.${id}.modelCatalog`,
-      );
+      // The routes write their refreshes through the attached store.
       expect(config.set).not.toHaveBeenCalled();
-      expect(getAnthropicProvider('opencode-go')?.pricingModel).toBe(
-        'subscription',
-      );
+
+      // toolUseOnly keeps unknown tool support, drops only a known "no".
+      const tools = await service.fetchModels(id, null, true);
+      expect(tools.models.map((m) => m.id)).toEqual(['live-a', 'live-b']);
+      expect(tools.totalCount).toBe(3);
     },
   );
 
-  it.each(['opencode-zen', 'opencode-go'] as const)(
-    '%s drops routed IDs the public list no longer serves and ignores unrouted ones',
-    async (id) => {
-      const routed = Object.keys(OPENCODE_MODEL_ROUTES[id]);
-      const stillLive = routed.slice(0, 3);
-      const live = new Map<string, OpenCodeLiveModel>(
-        [...stillLive, 'no-route-model'].map((modelId) => [modelId, {
-          id: modelId,
-          name: modelId,
-          contextLength: 0,
-          protocol: modelId === 'no-route-model' ? undefined : 'messages',
-        }]),
-      );
-      jest.spyOn(openCodeLiveRoutes, 'list').mockResolvedValue(live);
-      const service = new ProviderModelsService(
-        createMockLogger() as unknown as Logger,
-        createMockConfigManager({ values: {} }) as unknown as ConfigManager,
-        {},
-        new ActiveProviderResolver({
-          read: () => undefined,
-          isStored: () => false,
-        } as unknown as WorkspaceScopeResolver),
-      );
-      const result = await service.fetchModels(id, null);
-      expect(result.models.map((m) => m.id)).toEqual(stillLive);
-      expect(result.isStatic).toBe(false);
-    },
-  );
+  it('gateway down with a saved live catalog: persisted list with the reason', async () => {
+    const savedAt = Date.now() - 60_000;
+    jest
+      .spyOn(openCodeLiveRoutes, 'list')
+      .mockRejectedValue(new ModelListError('network'));
+    const { service } = makeService({
+      'provider.opencode-go.modelCatalog': {
+        schema: 2,
+        origin: 'live',
+        models: [row('saved', { upstreamProtocol: 'chat/completions' })],
+        timestamp: savedAt,
+      },
+    });
+    const result = await service.fetchModels('opencode-go', null);
+    expect(result).toMatchObject({
+      source: 'persisted',
+      failureReason: 'network',
+      savedAt,
+      totalCount: 1,
+    });
+    expect(result.models[0]).toMatchObject({
+      id: 'saved',
+      upstreamProtocol: 'chat/completions',
+    });
+  });
+
+  it('gateway down with no saved catalog: unavailable', async () => {
+    jest
+      .spyOn(openCodeLiveRoutes, 'list')
+      .mockRejectedValue(new ModelListError('bad-response'));
+    const { service } = makeService();
+    expect(await service.fetchModels('opencode-zen', null)).toEqual({
+      models: [],
+      totalCount: 0,
+      source: 'unavailable',
+      failureReason: 'bad-response',
+    });
+  });
+
+  it('exposes the versioned persisted catalog to the routes store', () => {
+    const { service, config } = makeService();
+    service.savePersistedCatalog('opencode-zen', [row('stored')]);
+    expect(config.set).toHaveBeenCalledWith(
+      'provider.opencode-zen.modelCatalog',
+      expect.objectContaining({
+        schema: 2,
+        origin: 'live',
+        models: [row('stored')],
+        timestamp: expect.any(Number),
+      }),
+    );
+    const record = config.set.mock.calls[0][1];
+    const reloaded = makeService({
+      'provider.opencode-zen.modelCatalog': record,
+    });
+    expect(reloaded.service.getPersistedCatalog('opencode-zen')).toEqual({
+      models: [row('stored')],
+      savedAt: (record as { timestamp: number }).timestamp,
+      // The gateway catalog is credential-free.
+      credential: '',
+    });
+  });
 });

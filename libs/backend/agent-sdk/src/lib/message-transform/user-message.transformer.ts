@@ -22,6 +22,42 @@ import type {
 } from './transformer-state';
 import type { TransformerHelpers } from './transformer-helpers';
 
+const SDK_STOCK_CANCELLATION =
+  "The user doesn't want to take this action right now. STOP what you are doing and wait for the user to tell you how to proceed.";
+
+interface ProviderToolStop {
+  toolUseIds: ReadonlySet<string>;
+  text: string;
+}
+
+// Associate the exact live SDK frame with tool IDs captured before Ptah
+// closed the owned query. Replayed transcript entries carry no attribution.
+const providerToolStops = new WeakMap<SDKUserMessage, ProviderToolStop>();
+
+export function attributeProviderToolResults(
+  message: SDKUserMessage,
+  toolUseIds: ReadonlySet<string>,
+  text: string,
+): void {
+  if (message.parent_tool_use_id === null && toolUseIds.size) {
+    providerToolStops.set(message, { toolUseIds, text });
+  }
+}
+
+function renderToolResult(
+  result: ToolResultBlock,
+  stop: ProviderToolStop | undefined,
+): ToolResultBlock['content'] {
+  if (!result.is_error || !stop?.toolUseIds.has(result.tool_use_id)) return result.content;
+  if (result.content === SDK_STOCK_CANCELLATION) return stop.text;
+  if (!Array.isArray(result.content)) return result.content;
+  return result.content.map((block) =>
+    block.type === 'text' && block.text === SDK_STOCK_CANCELLATION
+      ? { ...block, text: stop.text }
+      : block,
+  );
+}
+
 export class UserMessageTransformer {
   /**
    * @param inboundPeer - Set only when the turn arrived from another session.
@@ -79,7 +115,7 @@ export class UserMessageTransformer {
             source: 'complete' as EventSource,
             messageId,
             toolCallId: toolResultBlock.tool_use_id,
-            output: toolResultBlock.content,
+            output: renderToolResult(toolResultBlock, providerToolStops.get(sdkMessage)),
             isError: toolResultBlock.is_error ?? false,
             parentToolUseId: parent_tool_use_id ?? undefined,
           };

@@ -9,7 +9,13 @@ import {
 import { TabManagerService } from '@ptah-extension/chat-state';
 import { AgentMonitorStore } from '@ptah-extension/chat-streaming';
 import type { SessionStatus, TabState } from '@ptah-extension/chat-types';
-import { isRunningAgentWord, sessionContextCue } from '@ptah-extension/chat-ui';
+import {
+  isRunningAgentWord,
+  NOT_PRICED,
+  durationMsOf,
+  nullCostLabel,
+  sessionContextCue,
+} from '@ptah-extension/chat-ui';
 import {
   contextFillPercent,
   sessionTokenTotal,
@@ -147,6 +153,8 @@ function orchestratorCard(
     contextWindow,
     tokens: sessionTokenTotal(stats),
     cost: finiteOrNull(stats?.totalCost),
+    costNotPriced: nullCostLabel(stats) === NOT_PRICED,
+    durationMs: durationMsOf(stats),
     turns,
     requests,
   };

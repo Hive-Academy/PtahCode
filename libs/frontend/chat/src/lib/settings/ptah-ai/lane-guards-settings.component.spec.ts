@@ -77,7 +77,7 @@ describe('LaneGuardsSettingsComponent', () => {
   it('preserves threshold row DOM', async () => {
     await create();
     const row = input('lane-guards-repeat').closest('ptah-field');
-    expect(row?.querySelector('button[aria-label="More about Repeat-call stop at"]')).not.toBeNull();
+    expect(row?.querySelector('button[aria-label="More about Repeat-call handoff at"]')).not.toBeNull();
     expect(byTestId('lane-guards-intro')?.classList.contains('sr-only')).toBe(true);
     expect(input('lane-guards-repeat').getAttribute('aria-describedby')?.split(' ')).toContain('lane-guards-intro');
 
@@ -194,7 +194,7 @@ describe('LaneGuardsSettingsComponent', () => {
     expect(byTestId('lane-guards-status')).toBeNull();
     expect(feedback.toast()).toEqual({
       tone: 'status',
-      message: 'Saved Repeat-call stop at.',
+      message: 'Saved Repeat-call handoff at.',
       canUndo: true,
     });
     await feedback.undo();

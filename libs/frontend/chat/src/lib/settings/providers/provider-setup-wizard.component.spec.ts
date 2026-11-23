@@ -518,6 +518,14 @@ describe('ProviderSetupWizardComponent', () => {
       expect(query(fixture, 'wizard-provider-radio')).not.toBeNull();
     });
 
+    it('offers a provider-session provider only when the host reports it', () => {
+      const antigravity = '[name="wizard-provider"][value="antigravity-cli"]';
+      expect(createComponent().nativeElement.querySelector(antigravity)).toBeNull();
+      expect(
+        createComponent({ offeredProviderSessionIds: ['antigravity-cli'] }).nativeElement.querySelector(antigravity),
+      ).not.toBeNull();
+    });
+
     it('filters provider options and offers Clear search when nothing matches', () => {
       const fixture = createComponent();
       typeInto(fixture, 'wizard-provider-search', 'requesty');

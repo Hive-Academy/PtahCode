@@ -42,11 +42,27 @@ export interface ProviderSessionPolicy {
  * One MCP server the session attaches, built by the caller. Secret-bearing:
  * a header carries the lane's bearer token, so it is never logged unredacted.
  */
-export interface ProviderMcpAttachment {
-  readonly name: 'ptah';
+export interface ProviderHttpMcpAttachment {
+  /** Absent means http (the Ptah server and remote user servers). */
+  readonly type?: 'http' | 'sse';
+  /** `'ptah'` for Ptah's own server; a user server keeps its configured name. */
+  readonly name: string;
   readonly url: string;
   readonly headers: readonly { readonly name: string; readonly value: string }[];
 }
+
+/** A user-configured local MCP server, as ACP `McpServer::Stdio`. */
+export interface ProviderStdioMcpAttachment {
+  readonly type: 'stdio';
+  readonly name: string;
+  readonly command: string;
+  readonly args: readonly string[];
+  readonly env: readonly { readonly name: string; readonly value: string }[];
+}
+
+export type ProviderMcpAttachment =
+  | ProviderHttpMcpAttachment
+  | ProviderStdioMcpAttachment;
 
 export interface ProviderSessionAttach {
   readonly nativeSessionId: string;
@@ -63,6 +79,15 @@ export interface ProviderSessionOpenRequest {
   readonly model?: string;
   readonly effort?: string;
   readonly mcp: readonly ProviderMcpAttachment[];
+  /**
+   * Ptah's instructions for the session (identity, user system prompt,
+   * enhanced prompt, output style, memory blocks). The runtime delivers it
+   * per profile: a vendor system-prompt hook when the agent advertises one,
+   * else in front of the first prompt of a new session. Whether a restored
+   * (`attach`) session gets them again is the runtime's per-profile choice,
+   * so the caller passes them on every open.
+   */
+  readonly instructions?: string;
   readonly attach?: ProviderSessionAttach;
   readonly approvals: ProviderApprovalSink;
   readonly baseEnv: Readonly<Record<string, string | undefined>>;
@@ -71,6 +96,21 @@ export interface ProviderSessionOpenRequest {
   readonly runId: string;
   /** Lanes bound a prompt; the chat has none (liveness from process exit). */
   readonly promptTimeoutMs?: number;
+  /**
+   * Called once when the agent process exists, normally before the
+   * handshake ends, so the caller can track a process whose open is still
+   * running (crash sweep). It may come after a failed or aborted `open`
+   * settled; never for a process that did not start. A runtime without a
+   * process of its own may never call it.
+   */
+  readonly onSpawn?: (process: ProviderSessionSpawnedProcess) => void;
+}
+
+/** The agent process of one open, as {@link ProviderSessionOpenRequest.onSpawn} reports it. */
+export interface ProviderSessionSpawnedProcess {
+  readonly pid: number;
+  /** Resolves once the process has exited. Never rejects. */
+  readonly exited: Promise<void>;
 }
 
 export interface ProviderSessionCapabilities {

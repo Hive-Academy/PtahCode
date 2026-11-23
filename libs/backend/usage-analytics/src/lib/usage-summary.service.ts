@@ -1,7 +1,6 @@
 import { inject, injectable } from 'tsyringe';
 import { Logger, TOKENS } from '@ptah-extension/vscode-core';
 import { UsageSummaryParamsSchema, UsageSummarySchema, UsageTopSessionSchema } from '@ptah-extension/shared';
-import { normalizeWorkspaceRoot } from '@ptah-extension/shared';
 import { SessionStatsRepository } from '@ptah-extension/persistence-sqlite';
 import type { UsageFact, UsageRepositoryTotals, UsageSummary, UsageSummaryParams, UsageSourceStatus, UsageTopSession } from '@ptah-extension/shared';
 import { ClaudeLedgerSource } from './sources/claude-ledger.source';
@@ -60,7 +59,8 @@ export class UsageAnalyticsService {
     let repositories: UsageRepositoryTotals[] | undefined;
     if (this.statsRepository) {
       try {
-        workspaceKey = normalizeWorkspaceRoot(workspacePath);
+        // The repository derives the ledger key; folding here would lose POSIX case.
+        workspaceKey = workspacePath;
         if (signal?.aborted) throw new Error('time-budget');
         const coverage = await this.statsRepository.getWorkspaceCoverage(workspaceKey);
         let factLimitReached = false;

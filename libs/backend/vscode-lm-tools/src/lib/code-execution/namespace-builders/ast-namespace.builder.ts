@@ -13,6 +13,7 @@ import {
   LANGUAGE_QUERIES_MAP,
   classifyFileForCoverage,
   extractExportsFromMatches,
+  extractParameterNames,
   hasCapability,
   isCParsedAsCpp,
   languageForExtension,
@@ -47,6 +48,7 @@ import {
   AstImportsResult,
   AstExportInfo,
 } from '../types';
+import { mergeImportRows } from './merge-import-rows';
 
 /**
  * Dependencies required for AST namespace
@@ -114,7 +116,7 @@ export function buildAstNamespace(
         language,
         functions: insights.functions as AstFunctionInfo[],
         classes: insights.classes as AstClassInfo[],
-        imports: insights.imports as AstImportInfo[],
+        imports: mergeImportRows(insights.imports as AstImportInfo[]),
         exports: (insights.exports || []) as AstExportInfo[],
       };
     },
@@ -175,7 +177,7 @@ export function buildAstNamespace(
         ...parseHonesty(absolutePath, quality),
         file: filePath,
         language,
-        functions: extractFunctionsFromMatches(matches),
+        functions: extractFunctionsFromMatches(matches, language),
       };
     },
 
@@ -221,7 +223,7 @@ export function buildAstNamespace(
         ...parseHonesty(absolutePath, quality),
         file: filePath,
         language,
-        imports: extractImportsFromMatches(matches),
+        imports: mergeImportRows(extractImportsFromMatches(matches)),
       };
     },
 
@@ -484,7 +486,10 @@ function simplifyAstNode(
 /**
  * Extract function info from tree-sitter query matches
  */
-function extractFunctionsFromMatches(matches: QueryMatch[]): AstFunctionInfo[] {
+function extractFunctionsFromMatches(
+  matches: QueryMatch[],
+  language: SupportedLanguage,
+): AstFunctionInfo[] {
   const functions: AstFunctionInfo[] = [];
   const seen = new Set<string>();
 
@@ -525,7 +530,7 @@ function extractFunctionsFromMatches(matches: QueryMatch[]): AstFunctionInfo[] {
         functions.push({
           name,
           parameters: paramsCapture
-            ? extractParamsFromText(paramsCapture.text)
+            ? extractParameterNames(paramsCapture.text, language)
             : [],
           startLine,
           endLine: declCapture?.endPosition?.row,
@@ -633,27 +638,4 @@ function extractImportsFromMatches(matches: QueryMatch[]): AstImportInfo[] {
   }
 
   return imports;
-}
-
-/**
- * Extract parameter names from formal_parameters text
- */
-function extractParamsFromText(paramsText: string): string[] {
-  const inner = paramsText.slice(1, -1).trim();
-  if (!inner) return [];
-
-  return inner
-    .split(',')
-    .map((param) => {
-      const trimmed = param.trim();
-      if (trimmed.startsWith('...')) {
-        const name = trimmed
-          .slice(3)
-          .split(/[:\s=]/)[0]
-          .trim();
-        return `...${name}`;
-      }
-      return trimmed.split(/[:\s=?]/)[0].trim();
-    })
-    .filter(Boolean);
 }

@@ -37,13 +37,13 @@ The session budget section sets the cost limits of a session. See [Session Budge
 
 ## Lane guards
 
-**Lane guards** stop background lanes that are stuck in a loop. Lanes have no limit on tool calls. PtahCode stops a lane only when it repeats the same tool call many times.
+**Lane guards** ask background lanes that are stuck in a loop to hand off. Lanes have no limit on tool calls. PtahCode asks a lane to hand off when it repeats the same tool call many times. If the lane keeps repeating it, PtahCode pauses the new tool calls of the lane. A paused lane stays alive, and you decide how it continues.
 
 | Field | Default | What it does |
 | ----- | ------- | ------------ |
-| **Repeat-call stop at** | `20` calls | Stops a lane that repeats the same tool call this many times. The minimum is `2` |
+| **Repeat-call handoff at** | `20` calls | Asks a lane that repeats the same tool call this many times to hand off. PtahCode pauses new tool calls at twice this count. The minimum is `2` |
 
-PtahCode still judges a stopped lane by the files that it delivered.
+PtahCode judges a lane that returned by the files that it delivered.
 
 ## Routing suggestions
 

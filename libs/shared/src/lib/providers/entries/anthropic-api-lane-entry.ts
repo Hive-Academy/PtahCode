@@ -14,6 +14,7 @@ export const ANTHROPIC_API_LANE_ENTRY: AnthropicProvider = {
   description: 'Direct Claude API key for a Ptah CLI lane',
   keyPlaceholder: 'Anthropic API key',
   maskedKeyDisplay: '••••••••••••',
+  modelsEndpoint: 'https://api.anthropic.com/v1/models?limit=1000',
+  modelsAuthScheme: 'anthropic',
   defaultTiers: CLAUDE_CLI_PROVIDER_ENTRY.defaultTiers,
-  staticModels: CLAUDE_CLI_PROVIDER_ENTRY.staticModels,
 };

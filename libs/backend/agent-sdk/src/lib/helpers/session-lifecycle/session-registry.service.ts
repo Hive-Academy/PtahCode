@@ -31,10 +31,14 @@ import type {
   PermissionLevel,
   QueuedFollowUpSnapshot,
 } from '@ptah-extension/shared';
-import { blankToUndefined } from '@ptah-extension/shared';
+import { blankToUndefined, formatExplicitUserStopContext } from '@ptah-extension/shared';
 
 import type { Query, SDKUserMessage } from '../session-lifecycle-manager';
-import type { ActivityHold } from '../no-activity-watchdog';
+import {
+  NoActivityWatchdog,
+  type ActivityHold,
+  type ProviderTurnEndError,
+} from '../no-activity-watchdog';
 import type { UsageCostSource } from '../../session-stats/session-stats-owner.service';
 
 /**
@@ -137,14 +141,13 @@ export interface SessionRecord {
    */
   permissionLevel: PermissionLevel;
   /**
-   * The session's `NoActivityWatchdog`, seen through its hold/release half.
-   * The turn state owns exactly one hold on it: count 1 while no turn is in
-   * flight, 0 while one is. Idle between turns is silence Ptah chose, not a
-   * hung provider — without the hold the watchdog fired exactly 180 s after
-   * every `result` and marked every running subagent interrupted
-   * (TASK_2026_363). Null until `SessionQueryExecutor` builds the watchdog.
+   * The query watchdog is inactive between turns. Other hold implementations
+   * use one registry-owned reference-counted hold while idle.
    */
   activityHold: ActivityHold | null;
+  ending?: boolean;
+  /** Ownership of an explicit interrupt or Ptah provider recovery. */
+  pendingStopContext?: { readonly text: string };
   lastActivityAt: number;
   /**
    * Who is authoritative for this query's dollars, classified ONCE from the
@@ -229,6 +232,7 @@ function tokenFingerprint(token: string): string {
 
 export const DEFAULT_SWEEP_INTERVAL_MS = 5 * 60 * 1000;
 export const DEFAULT_SWEEP_TTL_MS = 30 * 60 * 1000;
+const MAX_ENDED_STOP_CONTEXTS = 256;
 
 /**
  * Told about each record the idle sweep evicted, with every key the session
@@ -255,6 +259,7 @@ export class SessionRegistry {
    * This is the authoritative source for session iteration.
    */
   private byTabId = new Map<string, SessionRecord>();
+  private readonly endedStopContexts = new Map<string, string>();
 
   /**
    * Secondary index: realSessionId → SessionRecord. Populated when
@@ -673,14 +678,57 @@ export class SessionRegistry {
     }
   }
 
+  recordProviderTurnEnd(rec: SessionRecord, error: ProviderTurnEndError): boolean {
+    if (rec.ending || this.find(rec.tabId) !== rec) return false;
+    if (rec.activityHold instanceof NoActivityWatchdog) {
+      rec.activityHold.recordFailure(error);
+    }
+    this.rememberEndedStopContext(rec, error.message);
+    return true;
+  }
+
+  recordExplicitUserStop(rec: SessionRecord, ending: boolean) {
+    const text = formatExplicitUserStopContext();
+    if (ending) {
+      this.rememberEndedStopContext(rec, text);
+      return undefined;
+    }
+    const context = { text };
+    rec.pendingStopContext = context;
+    return context;
+  }
+
+  private rememberEndedStopContext(rec: SessionRecord, text: string): void {
+    // A tab can be reused for a different conversation. Only a resolved SDK
+    // identity can carry trusted context across query registrations.
+    if (rec.realSessionId && this.find(rec.tabId) === rec) {
+      this.endedStopContexts.delete(rec.realSessionId);
+      this.endedStopContexts.set(rec.realSessionId, text);
+      if (this.endedStopContexts.size > MAX_ENDED_STOP_CONTEXTS) {
+        const oldest = this.endedStopContexts.keys().next().value;
+        if (oldest !== undefined) this.endedStopContexts.delete(oldest);
+      }
+    }
+    rec.pendingStopContext = undefined;
+  }
+
+  takeStopContext(rec: SessionRecord): string | undefined {
+    const prior = rec.realSessionId
+      ? this.endedStopContexts.get(rec.realSessionId)
+      : undefined;
+    if (rec.realSessionId) this.endedStopContexts.delete(rec.realSessionId);
+    const context = rec.pendingStopContext?.text ?? prior;
+    rec.pendingStopContext = undefined;
+    return context;
+  }
+
   /**
    * Mark a turn as started. Called by the streaming pump immediately before it
    * yields a user message, so the pump's own drain loop stops after exactly one
    * message and holds the rest (TASK_2026_294).
    *
-   * Releases the idle hold on the watchdog on the false→true transition only,
-   * so the hold count owned by the turn state is 1 while no turn is in flight
-   * and 0 while one is (TASK_2026_363).
+   * Confirms a provider turn on the false→true transition. Permission holds
+   * belong to the outstanding permission requests.
    */
   markTurnStarted(rec: SessionRecord): void {
     this.onTurnStarted?.(rec.tabId);
@@ -691,7 +739,9 @@ export class SessionRegistry {
     }
     if (!rec.turnInFlight) {
       rec.activityHold?.beginTurn?.();
-      rec.activityHold?.release();
+      if (!(rec.activityHold instanceof NoActivityWatchdog)) {
+        rec.activityHold?.release();
+      }
     }
     rec.turnInFlight = true;
     rec.lastActivityAt = this._now();
@@ -706,11 +756,9 @@ export class SessionRegistry {
    * no separate clear. A turn that emits neither is bounded by
    * `NoActivityWatchdog`, which aborts the controller and ends the pump loop.
    *
-   * Re-takes the idle hold on the watchdog on the true→false transition only.
-   * The guard is load-bearing: this is called from the `result` branch, the
-   * interrupt path and the adapter, and a double call must not stack holds.
-   * Invariant: the hold count owned by the turn state is 1 while no turn is in
-   * flight, 0 while one is (TASK_2026_363).
+   * An idle watchdog can reopen on provider evidence or the next input. A
+   * repeated result or interrupt must leave any independent permission holds
+   * untouched.
    *
    * @returns true when a live record was found and cleared.
    */
@@ -718,7 +766,7 @@ export class SessionRegistry {
     const rec = this.find(idOrTabId);
     if (!rec) return false;
     rec.activityHold?.endTurn?.();
-    if (rec.turnInFlight) {
+    if (rec.turnInFlight && !(rec.activityHold instanceof NoActivityWatchdog)) {
       rec.activityHold?.hold();
     }
     rec.turnInFlight = false;

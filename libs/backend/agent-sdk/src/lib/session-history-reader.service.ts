@@ -396,23 +396,27 @@ export class SessionHistoryReaderService {
         const metadata = await this.metadataStore?.get(sessionId);
         if (
           metadata?.codexExecution?.runtime === 'codex-app-server' &&
-          metadata.codexUsageCheckpoint !== undefined
+          (metadata.codexUsageCheckpoint !== undefined ||
+            metadata.codexTurnDuration !== undefined)
         ) {
           const raw = metadata.codexUsageCheckpoint;
-          const owner = CodexSessionUsageOwner.restore(
-            sessionId,
-            raw.rootThreadId,
-            raw,
-          );
+          // A session whose only turns ended before any usage has turn time
+          // but no checkpoint: its usage stays partial, its Time is kept.
+          const owner = raw
+            ? CodexSessionUsageOwner.restore(sessionId, raw.rootThreadId, raw)
+            : new CodexSessionUsageOwner(sessionId, sessionId);
+          if (!raw) owner.markMissingCheckpoint();
+          owner.restoreDuration(metadata.codexTurnDuration);
           if (owner.getDiagnostics().length) {
             // Use the same legacy totals as the sidebar.
-            this.logger.warn(
-              '[SessionHistoryReader] Native usage checkpoint rejected',
-              {
-                sessionId,
-                diagnostics: owner.getDiagnostics(),
-              },
-            );
+            if (raw)
+              this.logger.warn(
+                '[SessionHistoryReader] Native usage checkpoint rejected',
+                {
+                  sessionId,
+                  diagnostics: owner.getDiagnostics(),
+                },
+              );
             const input = metadata.totalTokens.input;
             const output = metadata.totalTokens.output;
             nativeSnapshot = {

@@ -161,7 +161,7 @@ describe('WorkspaceProviderProfileResolver provider-session branch', () => {
       await expect(attempt).rejects.toBeInstanceOf(AuthRequiredError);
       await expect(attempt).rejects.toMatchObject({
         providerId: 'antigravity-cli',
-        message: 'This session requires a host with antigravity-cli support.',
+        message: 'This session requires a host with Antigravity support.',
       });
     },
   );
@@ -221,7 +221,7 @@ describe('WorkspaceProviderProfileResolver provider-session branch', () => {
     });
     await expect(attempt).rejects.toThrow(
       new AuthRequiredError(
-        'Cannot resume antigravity-cli session: profile changed.',
+        'Cannot resume Antigravity session: profile changed.',
       ),
     );
     // Not a sign-in problem: no providerId for the UI to route to a banner.
@@ -240,7 +240,7 @@ describe('WorkspaceProviderProfileResolver provider-session branch', () => {
       hostCapabilities: ADMITTED,
     });
     await expect(attempt).rejects.toThrow(
-      'Cannot resume antigravity-cli session: workspaceId changed.',
+      'Cannot resume Antigravity session: workspaceId changed.',
     );
   });
 
@@ -272,7 +272,7 @@ describe('WorkspaceProviderProfileResolver provider-session branch', () => {
         hostCapabilities: ADMITTED,
       });
       await expect(attempt).rejects.toThrow(
-        'Cannot use antigravity-cli session: workspaceId is invalid.',
+        'Cannot use Antigravity session: workspaceId is invalid.',
       );
       await expect(attempt).rejects.toMatchObject({
         name: 'AuthRequiredError',
@@ -301,7 +301,14 @@ describe('WorkspaceProviderProfileResolver provider-session branch', () => {
     ['explicit, no catalog yet', 'gemini-3-pro', false, null, 'gemini-3-pro'],
     ['stored, catalog offers it', 'gemini-3-pro', true, ['gemini-3-pro'], 'gemini-3-pro'],
     ['stored, catalog lacks it', 'gpt-6-luna', true, ['gemini-3-pro'], undefined],
-    ['stored, no catalog yet', 'gpt-6-luna', true, null, undefined],
+    // M8 (documented regression): with no catalogue on hand no provider
+    // claims the id, so it is kept and the vendor answers it.
+    ['stored, no catalog yet', 'gpt-6-luna', true, null, 'gpt-6-luna'],
+    // Live test: a resume right after a restart has no warmed catalog; the
+    // model saved in the provider's own slot must still apply.
+    ['stored own-slot model, no catalog yet', 'gemini-4-hydrogen-low', true, null, 'gemini-4-hydrogen-low'],
+    ['stored Claude id, no catalog yet', 'claude-opus-5-5', true, null, undefined],
+    ['explicit Claude id the catalog offers', 'claude-opus-5-5', false, ['claude-opus-5-5'], 'claude-opus-5-5'],
   ] as const)(
     'model: %s',
     async (_label, requestedModel, requestedModelIsStored, catalog, expected) => {
@@ -317,6 +324,36 @@ describe('WorkspaceProviderProfileResolver provider-session branch', () => {
       expect(resolved.seed.model).toBe(expected);
     },
   );
+
+  it('refuses a stored model from another provider slot when a session resumes there', async () => {
+    // The stored setting is read from the ACTIVE provider's slot; once the
+    // workspace moved to Codex it is a Codex choice, not this session's.
+    const { resolver } = harness('openai-codex');
+    const resolved = await resolver.resolveExecutionProfile({
+      workspacePath: WORKSPACE,
+      requestedModel: 'gemini-4-hydrogen-low',
+      requestedModelIsStored: true,
+      existingIdentity: storedIdentity(),
+      consumer: 'chat',
+      hostCapabilities: ADMITTED,
+    });
+    if (resolved.runtime !== 'provider-session') throw new Error('runtime');
+    expect(resolved.seed.model).toBeUndefined();
+  });
+
+  it('resumes a stored session on its saved model before the catalog is warm', async () => {
+    const { resolver } = harness('antigravity-cli', null);
+    const resolved = await resolver.resolveExecutionProfile({
+      workspacePath: WORKSPACE,
+      requestedModel: 'gemini-4-hydrogen-low',
+      requestedModelIsStored: true,
+      existingIdentity: storedIdentity(),
+      consumer: 'chat',
+      hostCapabilities: ADMITTED,
+    });
+    if (resolved.runtime !== 'provider-session') throw new Error('runtime');
+    expect(resolved.seed.model).toBe('gemini-4-hydrogen-low');
+  });
 
   it('keeps a stored Claude session on its own runtime, then refuses the SDK profile', async () => {
     const { resolver, acquire } = harness('antigravity-cli');
@@ -337,7 +374,7 @@ describe('WorkspaceProviderProfileResolver provider-session branch', () => {
       name: 'AuthRequiredError',
       providerId: 'antigravity-cli',
       message:
-        "antigravity-cli runs only as a chat or agent runtime; it cannot serve Ptah's internal model calls.",
+        "Antigravity runs only as a chat or agent runtime; it cannot serve Ptah's internal model calls.",
     });
     expect(acquire).not.toHaveBeenCalled();
   });

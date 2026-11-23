@@ -18,6 +18,7 @@ import {
   NativePopoverComponent,
   PtahBadgeDirective,
   PROVIDER_MODELS_LOADER,
+  ProviderModelsNoticeComponent,
   PtahButtonDirective,
   PtahRichSelectComponent,
   PtahIconButtonDirective,
@@ -111,6 +112,7 @@ type WriteResult = { ok: true } | { ok: false; message: string };
     DecisionModelKeyFieldComponent,
     DecisionModelBaseUrlFieldComponent,
     DecisionModelTimeoutFieldComponent,
+    ProviderModelsNoticeComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   // Angular owns (and removes) this listener with the component.
@@ -466,6 +468,11 @@ export class DecisionModelRowComponent implements OnInit {
     }
     await this.reload();
     return { ok: true };
+  }
+
+  /** The saved-list notice's Retry: loads the provider's list again. */
+  protected retrySuggestions(): void {
+    void this.refreshSuggestions();
   }
 
   /** Loads the suggestions for the draft's kind; a newer request wins. Never writes `draft.model` (no preselection). */

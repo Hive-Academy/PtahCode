@@ -752,3 +752,59 @@ describe('McpCallerTokenRegistry', () => {
     });
   });
 });
+
+describe('McpCallerTokenRegistry.revokePersistent (TASK_2026_2297)', () => {
+  it('drops the credential of a retired config file, in memory and in state', async () => {
+    const state = new MemoryState();
+    const registry = new McpCallerTokenRegistry({ state, logger: logger() });
+    const retired = await registry.issuePersistent({
+      configPath: '/home/.gemini/config/mcp_config.json',
+      kind: 'home',
+      setting: 'read-only',
+    });
+    const kept = await registry.issuePersistent({
+      configPath: '/ws/.mcp.json',
+      kind: 'workspace',
+      workspaceRoot: '/ws',
+      setting: 'read-only',
+    });
+
+    await expect(
+      registry.revokePersistent('/home/.gemini/config/mcp_config.json'),
+    ).resolves.toBe(true);
+
+    expect(registry.authorize({ token: retired }).ok).toBe(false);
+    expect(registry.authorize({ token: kept, workspaceRoot: '/ws' }).ok).toBe(true);
+    const stored = JSON.stringify(state.read(STORE_KEY));
+    expect(stored).not.toContain(hashOf(retired));
+    expect(stored).toContain(hashOf(kept));
+    const reloaded = new McpCallerTokenRegistry({ state, logger: logger() });
+    expect(reloaded.authorize({ token: retired }).ok).toBe(false);
+  });
+
+  it('reports false and writes nothing for a path with no record', async () => {
+    const state = new MemoryState();
+    const registry = new McpCallerTokenRegistry({ state, logger: logger() });
+
+    await expect(registry.revokePersistent('/ws/.agents/mcp_config.json')).resolves.toBe(false);
+
+    expect(state.read(STORE_KEY)).toBeUndefined();
+  });
+
+  it('stops authorizing at once even when the state write fails', async () => {
+    const state = new FailingWriteState();
+    const registry = new McpCallerTokenRegistry({ state, logger: logger() });
+    const token = await registry.issuePersistent({
+      configPath: '/home/.gemini/config/mcp_config.json',
+      kind: 'home',
+      setting: 'read-only',
+    });
+    state.failNextUpdate = true;
+
+    await expect(
+      registry.revokePersistent('/home/.gemini/config/mcp_config.json'),
+    ).rejects.toThrow('state write failed');
+
+    expect(registry.authorize({ token }).ok).toBe(false);
+  });
+});

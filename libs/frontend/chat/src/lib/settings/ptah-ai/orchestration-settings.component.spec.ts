@@ -208,7 +208,7 @@ describe('OrchestrationSettingsComponent', () => {
       expect.objectContaining({
         id: 'lane-guards',
         label: 'Lane guards',
-        value: 'Stop at 8',
+        value: 'Handoff at 8',
       }),
       expect.objectContaining({
         id: 'routing',
@@ -261,7 +261,7 @@ describe('OrchestrationSettingsComponent', () => {
       By.directive(PtahInstrumentBandComponent),
     ).componentInstance as PtahInstrumentBandComponent;
     expect(band.segments()[1].value).toBe('Off');
-    expect(band.segments()[2].value).toBe('Stop at 20');
+    expect(band.segments()[2].value).toBe('Handoff at 20');
   });
 
   it('uses warning segments when RPC reads fail', async () => {

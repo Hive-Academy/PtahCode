@@ -268,7 +268,7 @@ describe('MemoryDiagnosticsRpcService', () => {
         },
       ],
       totalCount: 1,
-      isStatic: true,
+      source: 'live',
     };
     rpcCall.mockResolvedValue(okResult(payload));
 
@@ -284,7 +284,7 @@ describe('MemoryDiagnosticsRpcService', () => {
 
   it('listModels() omits providerId when not supplied', async () => {
     rpcCall.mockResolvedValue(
-      okResult({ models: [], totalCount: 0, isStatic: false }),
+      okResult({ models: [], totalCount: 0, source: 'live' }),
     );
 
     await service.listModels();

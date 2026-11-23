@@ -1,3 +1,4 @@
+import { formatAgentActionReason } from '@ptah-extension/shared';
 import type { IOutputChannel } from '@ptah-extension/platform-core';
 import {
   HANDOFF_FINAL_TEXT_MAX_CHARS,
@@ -359,13 +360,38 @@ describe('LaneResumeGate', () => {
 
 describe('LaneResumeGate budget refusal', () => {
   const budgetSettings = { warnRatio: 0.8, stopWeightedTokens: 1_000, handoffContextTokens: 1_000, maxDurationMin: 10 };
+  const accountBindings = {
+    lookupBySdkSession: jest.fn().mockResolvedValue({ status: 'absent' }),
+    validateResume: jest.fn(),
+    persistReference: jest.fn(),
+  };
   it('starts fresh after an internal budget stop', async () => {
-    const result = await gateWith().gate.evaluate({ cli: 'claude', cliSessionId: 's', stopReason: 'budget', budgetSettings });
+    const result = await gateWith().gate.evaluate({ cli: 'claude', cliSessionId: 's', accountBindings, stopReason: 'budget', budgetSettings });
     expect(result.decision).toBe('fresh');
     expect(result.reason).toContain('cannot resume');
+    expect(result.reason).toMatch(/^Ptah budget monitor stopped this CLI session \(budget\)/);
+    expect(result.reason).not.toContain('the user');
+  });
+  it.each(['duration', 'telemetry-unavailable'] as const)('still refuses a persisted %s stop', async (stopReason) => {
+    const result = await gateWith().gate.evaluate({ cli: 'codex', cliSessionId: 's', stopReason });
+    expect(result).toMatchObject({ decision: 'fresh', contextTokens: null, source: 'estimate', idleMs: null });
+    expect(result.reason).toContain(`(${stopReason}), so it cannot resume`);
+  });
+  it('refuses a resume after a budget pause with a Ptah-labeled reason', async () => {
+    const reader = jest.fn();
+    const pausedBudgetNotice = { actor: 'ptah-budget', action: 'paused', reason: 'context-budget',
+      nextStep: 'review-live-agent', measured: 120_000, limit: 100_000, unit: 'tokens' } as const;
+    const result = await gateWith(reader).gate.evaluate({ cli: 'codex', cliSessionId: 's', pausedBudgetNotice,
+      lastActivityAt: NOW - 1_000, lastRequestContext: { tokens: 10, source: 'estimate' } });
+    expect(result).toEqual({
+      decision: 'fresh', contextTokens: null, source: 'estimate', idleMs: null,
+      reason: `Ptah budget monitor paused new work because ${formatAgentActionReason(pausedBudgetNotice)}. This CLI session cannot resume. Start a fresh lane with the remaining work.`,
+    });
+    expect(result.reason).not.toContain('the user');
+    expect(reader).not.toHaveBeenCalled();
   });
   it('starts fresh at the warning threshold', async () => {
-    const result = await gateWith().gate.evaluate({ cli: 'claude', cliSessionId: 's', budgetSettings,
+    const result = await gateWith().gate.evaluate({ cli: 'claude', cliSessionId: 's', accountBindings, budgetSettings,
       budget: { weightedTokens: 800, rawTokens: 800, turnIds: [], startedAtMs: NOW - 1_000 } });
     expect(result.decision).toBe('fresh');
   });
@@ -376,9 +402,9 @@ describe('LaneResumeGate budget refusal', () => {
     expect(result.decision).toBe('resume');
   });
   it('refuses a token-empty lane after its lifetime expires', async () => {
-    const result = await gateWith().gate.evaluate({ cli: 'claude', cliSessionId: 's', budgetSettings,
+    const result = await gateWith().gate.evaluate({ cli: 'claude', cliSessionId: 's', accountBindings, budgetSettings,
       budget: { weightedTokens: 0, rawTokens: 0, turnIds: [], startedAtMs: NOW - 11 * 60_000 } });
-    expect(result).toMatchObject({ decision: 'fresh', reason: 'lane lifetime budget expired' });
+    expect(result).toMatchObject({ decision: 'fresh', reason: expect.stringContaining('Ptah budget monitor found that the lane lifetime budget expired') });
   });
 });
 

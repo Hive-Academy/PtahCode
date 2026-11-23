@@ -55,6 +55,7 @@ import {
   DEFAULT_PROVIDER_ID,
   getModelPricingDescription,
   getPricingMap,
+  getProviderSessionProfile,
   normalizeAuthMethod,
   isDirectAnthropic,
   type AuthEnv,
@@ -71,6 +72,7 @@ import {
 import { configRuntimeControls } from './config-runtime-controls';
 import { isTierAlias, savedModelOption } from './config-saved-model-option';
 import { modelPickerGroups } from './model-picker-groups';
+import { providerSessionModelOptions } from './config-provider-session-models';
 
 /**
  * Copy of an auth env taken for one `config:models-list` request.
@@ -179,7 +181,7 @@ export class ConfigRpcHandlers {
    *
    * `pricing.utils` stores its map in a module-level `let`, and the webview
    * bundle holds its OWN instance of that module. Every hydration path —
-   * OpenRouter's catalog, `seedStaticModelPricing`, Ollama Cloud's metadata —
+   * OpenRouter's catalog, live model lists, Ollama Cloud's metadata —
    * runs in the extension host, so the renderer's copy never held anything but
    * the handful of bundled entries. There is no way to share the map short of
    * sending it, which is what this does.
@@ -526,6 +528,22 @@ export class ConfigRpcHandlers {
           this.logger.debug('RPC: config:models-list called', {
             workspacePath: scope.workspacePath,
           });
+          // A provider-session provider never serves the Claude SDK: list its
+          // own CLI catalog, not the SDK tier slots (live test: the composer
+          // showed Opus / Sonnet / Haiku for an Antigravity session).
+          if (getProviderSessionProfile(scope.providerId)) {
+            const models = await providerSessionModelOptions(
+              scope.providerId,
+              scope.savedModel,
+              (providerId) => this.providerModels.fetchModels(providerId, null),
+              (error) =>
+                this.logger.warn(
+                  'RPC: config:models-list - provider catalog unavailable',
+                  { providerId: scope.providerId, error: error.message },
+                ),
+            );
+            return { models, workspacePath: scope.workspacePath };
+          }
           const sdkModels = await this.sdkAdapter.getSupportedModels();
           const apiModels = await this.sdkAdapter.getApiModels();
 
@@ -623,7 +641,6 @@ export class ConfigRpcHandlers {
               models,
               savedModel,
               pricingOptions,
-              scope.providerId,
               scope.cachedModelIds,
             );
           }
@@ -762,21 +779,21 @@ export class ConfigRpcHandlers {
 
   /**
    * Offer a saved model the list did not carry (D1): a concrete id the active
-   * provider declares but that is not one of its tier mappings. Without this
-   * the picker selected nothing and "Default" ran the turn on the opus tier.
+   * provider's cached catalog lists but that is not one of its tier mappings.
+   * Without this the picker selected nothing and "Default" ran the turn on the
+   * opus tier.
    *
-   * `providerId` and `cachedModelIds` are the snapshot from the start of the
-   * request. Re-reading them here would follow a workspace switch that happened
-   * while the catalog fetch was in flight.
+   * `cachedModelIds` is the snapshot from the start of the request.
+   * Re-reading it here would follow a workspace switch that happened while
+   * the catalog fetch was in flight.
    */
   private appendSavedModel(
     models: SdkModelInfo[],
     savedModel: string,
     pricingOptions: { subscriptionCovered: boolean },
-    providerId: string,
     cachedModelIds: readonly string[] | null,
   ): void {
-    const option = savedModelOption(providerId, savedModel, cachedModelIds);
+    const option = savedModelOption(savedModel, cachedModelIds);
     if (!option) return;
     models.push({
       id: option.id,

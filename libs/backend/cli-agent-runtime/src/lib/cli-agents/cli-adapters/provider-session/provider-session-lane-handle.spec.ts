@@ -208,13 +208,13 @@ describe('createProviderSessionLaneHandle — first turn', () => {
       first.segments.find((item) => item.turnTelemetry)?.turnTelemetry,
     ).toMatchObject({
       status: 'reported',
-      usage: { turnId: 'sess-1:run-a:1' },
+      usage: { turnId: expect.stringMatching(/^sess-1:run-a:[0-9a-f]{8}:1$/) },
     });
     expect(
       resumed.segments.find((item) => item.turnTelemetry)?.turnTelemetry,
     ).toMatchObject({
       status: 'reported',
-      usage: { turnId: 'sess-1:run-b:1' },
+      usage: { turnId: expect.stringMatching(/^sess-1:run-b:[0-9a-f]{8}:1$/) },
     });
   });
 

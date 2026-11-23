@@ -27,7 +27,9 @@ import type {
   SessionId,
 } from '@ptah-extension/shared';
 
+import { formatExplicitUserStopContext } from '@ptah-extension/shared';
 import { SessionControl } from './session-control.service';
+import { NoActivityWatchdog, ProviderTurnEndError } from '../no-activity-watchdog';
 import { SdkAdapterEvents } from '../sdk-adapter-events.service';
 import { SessionRegistry } from './session-registry.service';
 import { SdkQueryOptionsBuilder } from '../sdk-query-options-builder';
@@ -151,6 +153,83 @@ function makeCredentialBuilder() {
   };
   return { live, builder, issueFor };
 }
+
+describe('SessionControl provider end ownership', () => {
+  it.each(['user-stop', 'unknown'] as const)('only attributes a trusted explicit stop (%s)', async (cause) => {
+    const { control, registry, notifyAll } = makeHarness();
+    const sdkId = 'sdk-explicit';
+    const record = registry.register(KEY, makeConfig(), new AbortController(), sdkId);
+    registry.markTurnStarted(record);
+
+    await control.endSession(KEY_ID, cause);
+    expect(notifyAll).toHaveBeenCalledWith(expect.objectContaining({ cause }));
+
+    const resumed = registry.register('new-tab', makeConfig(), new AbortController(), sdkId);
+    expect(registry.takeStopContext(resumed)).toBe(
+      cause === 'user-stop' ? formatExplicitUserStopContext() : undefined,
+    );
+    expect(registry.takeStopContext(resumed)).toBeUndefined();
+  });
+
+  it('quiets the watchdog as soon as a bulk teardown begins', async () => {
+    jest.useFakeTimers();
+    try {
+      const { control, registry, notifyAll } = makeHarness();
+      const record = registry.register(KEY, makeConfig(), new AbortController());
+      const onTimeout = jest.fn();
+      const watchdog = new NoActivityWatchdog(180_000, onTimeout);
+      record.activityHold = watchdog;
+      registry.markTurnStarted(record);
+      watchdog.start();
+      jest.advanceTimersByTime(179_999);
+      const disposing = control.disposeAllSessions('host-shutdown');
+      jest.advanceTimersByTime(1);
+      await disposing;
+      expect(onTimeout).not.toHaveBeenCalled();
+      expect(notifyAll).toHaveBeenCalledTimes(1);
+      expect(notifyAll).toHaveBeenCalledWith(expect.objectContaining({ cause: 'host-shutdown' }));
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it.each([true, false])('publishes a single typed end and records whether retry was zero-event (%s)', async (zeroEvents) => {
+    const { control, registry, notifyAll } = makeHarness();
+    const controller = new AbortController();
+    const sdkId = 'sdk-original';
+    const rec = registry.register(KEY, makeConfig(), controller, sdkId);
+    const watchdog = new NoActivityWatchdog(180_000, jest.fn());
+    rec.activityHold = watchdog;
+    if (!zeroEvents) {
+      watchdog.observe({
+        type: 'system',
+        subtype: 'background_tasks_changed',
+        session_id: sdkId,
+        uuid: '00000000-0000-0000-0000-000000000001',
+        tasks: [{ task_id: 'monitor', task_type: 'monitor', description: 'Monitor', ambient: true }],
+      });
+    }
+    const failure = new ProviderTurnEndError('provider-no-response');
+    expect(registry.recordProviderTurnEnd(rec, failure)).toBe(true);
+    controller.abort(failure);
+
+    expect(await control.endSessionIfTokenMatches(KEY_ID, rec.token, 'provider-error')).toBe(true);
+    expect(await control.endSessionIfTokenMatches(KEY_ID, rec.token, 'provider-error')).toBe(false);
+    expect(notifyAll).toHaveBeenCalledTimes(1);
+    expect(notifyAll).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: sdkId,
+      cause: 'provider-no-response',
+      startedAt: failure.startedAt,
+      zeroOutwardEvents: zeroEvents,
+    }));
+
+    const unrelated = registry.register(KEY, makeConfig(), new AbortController(), 'sdk-different');
+    expect(registry.takeStopContext(unrelated)).toBeUndefined();
+    const resumed = registry.register('new-tab', makeConfig(), new AbortController(), sdkId);
+    expect(registry.takeStopContext(resumed)).toBe(failure.message);
+    expect(registry.takeStopContext(resumed)).toBeUndefined();
+  });
+});
 
 describe('SessionControl end causes', () => {
   it('keeps user-stop for both consumers after session end and clears an earlier cause', async () => {
@@ -379,6 +458,37 @@ describe('SessionControl unavailable settings', () => {
 });
 
 describe('SessionControl.interruptCurrentTurn', () => {
+  it('holds the watchdog while waiting for an explicit user interrupt', async () => {
+    jest.useFakeTimers();
+    try {
+      const { control, registry } = makeHarness();
+      const rec = registry.register(KEY, makeConfig(), new AbortController());
+      const onTimeout = jest.fn();
+      const watchdog = new NoActivityWatchdog(180_000, onTimeout);
+      rec.activityHold = watchdog;
+      let finishInterrupt: (() => void) | undefined;
+      rec.query = {
+        interrupt: () => new Promise<void>((resolve) => { finishInterrupt = resolve; }),
+      } as typeof rec.query;
+      registry.markTurnStarted(rec);
+      watchdog.start();
+      jest.advanceTimersByTime(179_999);
+
+      const interrupt = control.interruptCurrentTurn(KEY_ID, 'user-stop');
+      jest.advanceTimersByTime(2);
+      expect(onTimeout).not.toHaveBeenCalled();
+      finishInterrupt?.();
+      await expect(interrupt).resolves.toBe(true);
+      expect(registry.takeStopContext(rec)).toBe(formatExplicitUserStopContext());
+
+      registry.markTurnStarted(rec);
+      jest.advanceTimersByTime(180_000);
+      expect(onTimeout).toHaveBeenCalledWith('provider-no-response');
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
   it('case 19: captures P before waking Q and keeps queued metadata', async () => {
     let observed:
       | {

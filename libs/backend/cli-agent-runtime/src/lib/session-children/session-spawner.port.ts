@@ -13,6 +13,7 @@
  */
 import type { ProviderAccountPortRefusal } from '@ptah-extension/auth-providers-tokens';
 import type {
+  AgentActionNotice,
   AgentSessionOpenedPayload,
   ChildSettingSource,
   EffortLevel,
@@ -37,6 +38,7 @@ export type SessionChildStatus =
   | 'awaiting-permission'
   | 'waiting'
   | 'idle'
+  | 'paused'
   | 'failed'
   | 'stopped'
   | 'timed-out'
@@ -102,6 +104,7 @@ export interface SessionChildSnapshot {
   /** Absolute deliverable paths, resolved at start. */
   readonly deliverables: readonly string[];
   readonly status: SessionChildStatus;
+  readonly notice?: AgentActionNotice;
   /** True while memory admission is waiting; no worktree or tab exists yet. */
   readonly waitingForMemory?: boolean;
   readonly pendingPermission?: SessionChildPendingPermission;
@@ -295,6 +298,7 @@ export type SessionChildSendResult =
         | 'unknown-child'
         | 'unattributed-caller'
         | 'session-ended'
+        | 'session-paused'
         | 'busy'
         | 'interrupt-failed'
         | 'delivery-failed';
@@ -452,7 +456,8 @@ export interface SessionChildCompletionEnvelope {
   readonly verdict: LaneCompletionVerdict;
   readonly text: string;
   /** Present when this host built the envelope. Older held rows omit it. */
-  readonly completion?: ExecutorCompletionResultV1;
+  readonly completion?: ExecutorCompletionResultV1 & { readonly notice?: AgentActionNotice };
+  readonly notice?: AgentActionNotice;
 }
 
 /** Why a child completion was not delivered (the lane refusal reasons, unchanged). */

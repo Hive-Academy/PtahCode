@@ -133,6 +133,8 @@ describe('budget tables', () => {
   it('overrides only the tools whose description documents a bound', () => {
     expect(Object.keys(TOOL_RESULT_BUDGET_OVERRIDES).sort()).toEqual([
       'ptah_browser_content',
+      'ptah_grep',
+      'ptah_read_symbol',
       'ptah_route_decide',
       'ptah_session_read',
       'ptah_surface_get_state',
@@ -183,6 +185,8 @@ describe('budget tables', () => {
     expect(TOOL_CONTENT_HINTS).toEqual({
       ptah_get_diagnostics: 'preformatted',
       ptah_get_symbol_index: 'preformatted',
+      ptah_read_symbol: 'preformatted',
+      ptah_grep: 'preformatted',
       ptah_agent_spawn: 'preformatted',
       ptah_agent_status: 'preformatted',
       ptah_agent_read: 'preformatted',

@@ -841,6 +841,10 @@ describe('FollowUpQueueService', () => {
       patchTab('tab-1', { providerId: undefined });
       activeProviderId.set('openai-codex');
       expect(service.isClaudeSession('tab-1')).toBe(false);
+      // A provider session (Antigravity) is a native runtime: it steers too.
+      patchTab('tab-1', { providerId: 'antigravity-cli' });
+      expect(service.canSendNow('tab-1')).toBe(true);
+      expect(service.isClaudeSession('tab-1')).toBe(false);
     });
 
     it('waits for the Claude delivered event after interrupt and reports failure', async () => {

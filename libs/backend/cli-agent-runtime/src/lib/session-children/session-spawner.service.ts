@@ -22,10 +22,11 @@ import { inject, injectable, type DependencyContainer } from 'tsyringe';
 import { SessionMemoryAdmission, SessionMemoryTicket } from './session-memory-admission';
 import { waitForChildStart } from './session-start-stop-wait';
 import type { ProviderAccountPortRefusal } from '@ptah-extension/auth-providers-tokens';
-import { isAbsolute, join, resolve } from 'node:path';
+import { isAbsolute, join, relative, resolve } from 'node:path';
 import { access, readFile, realpath, stat } from 'node:fs/promises';
 import {
   SDK_TOKENS,
+  ProviderTurnEndError,
   SessionAdmissionRefusedError,
   parseSessionEndCause,
   type PermissionPromptLifecycleEvent,
@@ -36,6 +37,7 @@ import {
   type SessionBudgetService,
   type SessionEndCallbackRegistry,
   type SessionEndPayload,
+  type SessionToolDispositionRegistry,
   type SessionIdResolvedCallbackRegistry,
   type SessionIdResolvedPayload,
   type SessionLifecycleManager,
@@ -59,6 +61,12 @@ import {
 } from '@ptah-extension/platform-core';
 import {
   CARRIER_FILE,
+  formatChildPauseNotice,
+  formatProviderHang,
+  formatProviderInputClosed,
+  formatWatchdogFinalFailure,
+  formatWatchdogNoSafeRetry,
+  type AgentActionNotice,
   SessionId,
   isLiveAgentStatus,
   normalizeWorkspaceRoot,
@@ -81,7 +89,9 @@ import { LaneCompletionNotifier } from '../cli-agents/lane-completion-notifier.s
 import { resolveChildSettings } from './child-setting-resolution';
 import { childSettingSources } from './session-spawner.port';
 import type {
+  ChildChatSessionStartInput,
   ChildChatSessionStartOutcome,
+  WatchdogRecoveryOutcome,
   IChildChatSessionHost,
 } from './child-chat-session-host.port';
 import type { IChildSettingRouter } from './child-setting-router.port';
@@ -111,6 +121,14 @@ import {
   sessionChildHandoffPath,
   successionEndReason,
 } from './session-child-succession';
+import {
+  HandoffWatchdogRecovery,
+  isProviderNoResponse,
+  watchdogReplayPrompt,
+  WATCHDOG_RECOVERY_SENDER,
+} from './handoff-watchdog-recovery';
+import { deliveryTarget } from './session-handoff-lineage';
+import type { SessionHandoffAckStore } from './session-handoff-ack.store';
 import { childOutcomeOf } from './session-child-outcome';
 import { transferHeldPeerMessages } from './session-held-message-transfer';
 import type { HandoffPredecessorCloser } from './session-handoff.port';
@@ -118,7 +136,6 @@ import {
   SESSION_CHILD_FIRST_TURN_TIMEOUT_MS,
   firstTurnFailureText,
   firstTurnNotStarted,
-  firstTurnVerdict,
   type FirstTurnProbe,
 } from './session-child-first-turn.watchdog';
 import type {
@@ -152,6 +169,7 @@ const LOG_PREFIX = '[SessionSpawner]';
 
 /** How long an ended child session may take to re-register before it is ended. */
 export const SESSION_CHILD_GRACE_MS = 30_000;
+const HANDOFF_GRACE_RECHECK_MS = 60_000;
 export const SESSION_READ_DEFAULT_TAIL_KIB = 32;
 export const SESSION_READ_MAX_TAIL_KIB = 256;
 /** JSONL bytes read per KiB of transcript returned: the JSONL is far more verbose. */
@@ -172,9 +190,16 @@ interface ChildRuntime {
   warnTimer?: ReturnType<typeof setTimeout>;
   handoffGraceTimer?: ReturnType<typeof setTimeout>;
   retireTimer?: ReturnType<typeof setTimeout>;
-  /** First-turn watchdog (TASK_2026_932 E); re-armed at most once. */
+  /** Advisory first-turn probe. */
   firstTurnTimer?: ReturnType<typeof setTimeout>;
-  firstTurnRearmed?: boolean;
+  readonly lineageId: string;
+  firstInput?: ChildChatSessionStartInput;
+  watchdogFailure?: string;
+  observedTurnResult?: boolean;
+  pausePublished?: boolean;
+  escalationPublished?: boolean;
+  /** Pause state to restore when every send that resumed the child fails. */
+  resumeProbe?: ResumeProbe;
   endCause?: SessionEndCause;
   /** `turnsSettled` when the session ended; a later settle owns the turn. */
   turnsSettledAtEnd?: number;
@@ -186,6 +211,15 @@ interface ChildRuntime {
   /** Set while the spawner itself ends the child; events are then ignored. */
   stopping: boolean;
   pendingRequestId?: string;
+}
+
+interface ResumeProbe {
+  readonly notice?: AgentActionNotice;
+  readonly capReached: boolean;
+  readonly pausePublished?: boolean;
+  readonly escalationPublished?: boolean;
+  inflight: number;
+  accepted: boolean;
 }
 
 type StartRefusal = Extract<SessionChildStartResult, { ok: false }>;
@@ -245,6 +279,9 @@ export class SessionSpawnerService implements ISessionSpawner {
   }
   private readonly memoryAdmission: SessionMemoryAdmission;
   private disposed = false;
+  private readonly watchdogRecovery = new HandoffWatchdogRecovery({
+    log: (message) => this.log(message),
+  });
 
   constructor(
     @inject(SessionChildRegistry)
@@ -335,8 +372,11 @@ export class SessionSpawnerService implements ISessionSpawner {
       adapterEvents.onTurnFailed((event) => this.onTurnFailed(event)),
       idResolved.register((payload) => this.onSessionIdResolved(payload)),
       sessionEnd.register((payload) => this.onSessionEnd(payload)),
+      this.registry.onReparent((child) => {
+        const runtime = this.runtimes.get(child.childSessionId);
+        if (runtime) this.watchdogRecovery.cancelScheduled(this.firstInputKey(child, runtime));
+      }),
       permissions.onPromptLifecycle((event) => this.onPromptLifecycle(event)),
-      turnState.onGeneratingChange(() => this.onGeneratingChange()),
     );
   }
 
@@ -872,6 +912,7 @@ export class SessionSpawnerService implements ISessionSpawner {
     };
 
     const runtime: ChildRuntime = {
+      lineageId: childTabId,
       worktree,
       policy: this.policyFor(guard.settings, label, worktree.worktreePath),
       settings: guard.settings,
@@ -991,6 +1032,8 @@ export class SessionSpawnerService implements ISessionSpawner {
     }
   > {
     try {
+      const runtime = this.runtimes.get(input.tabId);
+      if (runtime) runtime.firstInput ??= input;
       return await host.startChildSession(input);
     } catch (error: unknown) {
       // degradation-audit: reported - a throwing host is the same outcome as
@@ -1091,20 +1134,6 @@ export class SessionSpawnerService implements ISessionSpawner {
     }
     const { child, caller } = owned;
     const runtime = this.runtimes.get(child.childSessionId);
-    if (runtime?.capReached && this.isIdleWithoutPendingWork(child)) {
-      const result = await this.hostSucceed(
-        child,
-        'runtime-cap',
-        request.message,
-      );
-      if (!result.ok)
-        return {
-          delivered: false,
-          reason: 'session-ended',
-          detail: result.detail,
-        };
-      return this.sent(child, request.mode, 'started-turn');
-    }
     const target = this.activeIdOf(child);
     if (child.terminalStatus || !target || !this.adapter) {
       return {
@@ -1117,6 +1146,68 @@ export class SessionSpawnerService implements ISessionSpawner {
       };
     }
     const adapter = this.adapter;
+    let probe = runtime?.resumeProbe;
+    if (runtime && !runtime.stopping && (child.paused || runtime.capReached)) {
+      probe = {
+        notice: child.notice,
+        capReached: runtime.capReached,
+        pausePublished: runtime.pausePublished,
+        escalationPublished: runtime.escalationPublished,
+        inflight: 0,
+        accepted: false,
+      };
+      runtime.resumeProbe = probe;
+      this.resumeChild(child, runtime);
+    }
+    if (probe) probe.inflight += 1;
+    const result = await this.deliverMessage(request, child, caller, target, adapter);
+    if (probe && runtime) this.settleResumeProbe(child.childSessionId, runtime, probe, result.delivered);
+    return result;
+  }
+
+  /** Keep the pause when no send that resumed the child was accepted. */
+  private settleResumeProbe(
+    childSessionId: string,
+    runtime: ChildRuntime,
+    probe: ResumeProbe,
+    delivered: boolean,
+  ): void {
+    probe.inflight -= 1;
+    if (delivered) probe.accepted = true;
+    if (probe.inflight > 0) return;
+    if (runtime.resumeProbe === probe) runtime.resumeProbe = undefined;
+    const child = this.registry.get(childSessionId);
+    if (probe.accepted || !child || child.terminalStatus || runtime.stopping) return;
+    if (runtime.runtimeTimer) clearTimeout(runtime.runtimeTimer);
+    if (runtime.warnTimer) clearTimeout(runtime.warnTimer);
+    runtime.runtimeTimer = undefined;
+    runtime.warnTimer = undefined;
+    runtime.capReached = probe.capReached;
+    runtime.pausePublished = probe.pausePublished;
+    runtime.escalationPublished = probe.escalationPublished;
+    if (probe.notice) {
+      if (this.registry.markPaused(childSessionId, probe.notice)) {
+        this.toolDisposition()?.set(
+          { tabId: childSessionId, sdkSessionId: child.sdkSessionId },
+          { phase: 'paused', notice: probe.notice },
+        );
+      }
+    } else if (probe.capReached && !runtime.handoffGraceTimer) {
+      runtime.handoffGraceTimer = this.armTimer(
+        runtime.settings.handoffGraceMinutes * 60_000,
+        () => this.onHandoffGraceExpired(childSessionId),
+      );
+    }
+    this.log(`${childSessionId} stays paused: the send was not accepted`);
+  }
+
+  private async deliverMessage(
+    request: SessionChildSendRequest,
+    child: SessionChildRecord,
+    caller: SessionId,
+    target: SessionId,
+    adapter: IAgentAdapter,
+  ): Promise<SessionChildSendResult> {
     const origin: AIMessageOrigin = {
       kind: 'peer',
       from: `ptah-session:${caller}`,
@@ -1361,12 +1452,15 @@ export class SessionSpawnerService implements ISessionSpawner {
       };
     }
     const runtime = this.runtimes.get(id);
-    if (runtime) runtime.stopping = true;
+    if (runtime) {
+      runtime.stopping = true;
+      this.watchdogRecovery.cancel(this.firstInputKey(target, runtime));
+    }
 
     let reason = 'stopped-by-parent';
     let stop: Awaited<ReturnType<typeof this.verifyAndHardStop>>;
     try {
-       stop = await this.verifyAndHardStop(id, target.sdkSessionId, 'host-stop');
+       stop = await this.verifyAndHardStop(id, target.sdkSessionId);
     } catch (error) {
       if (runtime) runtime.stopping = false;
       throw error;
@@ -1411,9 +1505,8 @@ export class SessionSpawnerService implements ISessionSpawner {
   private async verifyAndHardStop(
     childSessionId: string,
     sdkSessionId?: string,
-    stopCause: 'host-stop' | 'runtime-cap' = 'host-stop',
   ): Promise<{ stopped: boolean; interruptError?: string }> {
-    this.log(`${childSessionId} hard stop requested (${stopCause})`);
+    this.log(`${childSessionId} hard stop requested (host-stop)`);
     const adapter = this.adapter;
     const tabId = SessionId.safeParse(childSessionId);
     if (!adapter || !tabId) return { stopped: true };
@@ -1425,10 +1518,8 @@ export class SessionSpawnerService implements ISessionSpawner {
     let interruptError: string | undefined;
     for (const candidate of ids) {
       try {
-        // The adapter's SessionEndCause contract uses parent-stop for both
-        // host stop paths; stopCause preserves the origin at this boundary.
         const turnInterrupt = adapter.isSessionActive(candidate)
-          ? adapter.interruptCurrentTurn(candidate, stopCause)
+          ? adapter.interruptCurrentTurn(candidate, 'host-stop')
           : Promise.resolve(false);
         await Promise.all([
           turnInterrupt,
@@ -1596,8 +1687,7 @@ export class SessionSpawnerService implements ISessionSpawner {
       this.releaseResources(child.childSessionId);
       this.interruptInBackground(child.childSessionId);
     }
-    for (const runtime of this.runtimes.values()) this.clearTimers(runtime);
-    this.runtimes.clear();
+    for (const childSessionId of this.runtimes.keys()) this.releaseResources(childSessionId);
     this.retiring.clear();
     this.log('disposed');
   }
@@ -1612,14 +1702,11 @@ export class SessionSpawnerService implements ISessionSpawner {
     if (!child) return;
     const runtime = this.runtimes.get(child.childSessionId);
     if (!runtime || runtime.lastSettleTimestamp === event.timestamp) return;
+    runtime.observedTurnResult = true;
     if (event.backgroundTasks.length > 0) {
       this.log(
         `${child.childSessionId} turn ended with ${event.backgroundTasks.length} background task(s); waiting, no push`,
       );
-      return;
-    }
-    if (runtime.capReached) {
-      void this.hostSucceed(child, 'runtime-cap');
       return;
     }
     if (this.hasRunningLane(child)) {
@@ -1643,10 +1730,15 @@ export class SessionSpawnerService implements ISessionSpawner {
     if (!child) return;
     const runtime = this.runtimes.get(child.childSessionId);
     if (!runtime || runtime.lastSettleTimestamp === event.timestamp) return;
-    if (runtime.capReached) {
-      void this.hostSucceed(child, 'runtime-cap');
+    const providerEnd: unknown = this.lifecycle.find(event.sessionId)?.abortController?.signal.reason;
+    if (
+      (providerEnd instanceof ProviderTurnEndError && isProviderNoResponse(providerEnd.endCause)) ||
+      this.watchdogRecovery.owns(this.firstInputKey(child, runtime))
+    ) {
+      if (event.lastAssistantMessage) runtime.observedTurnResult = true;
       return;
     }
+    runtime.observedTurnResult = true;
     runtime.lastSettleTimestamp = event.timestamp;
     void this.settle(
       child.childSessionId,
@@ -1662,10 +1754,24 @@ export class SessionSpawnerService implements ISessionSpawner {
     const child = this.registry.get(tabId);
     if (child?.childSessionId !== tabId) return;
     this.registry.bindSdkSessionId(tabId, payload.realSessionId);
+    const runtime = this.runtimes.get(tabId);
+    if (runtime && child.sdkSessionId && !child.terminalStatus && !runtime.stopping &&
+        (child.paused || runtime.capReached) && !payload.isNewSession) {
+      if (child.sdkSessionId !== payload.realSessionId) {
+        this.toolDisposition()?.clear({ sdkSessionId: child.sdkSessionId });
+      }
+      this.resumeChild({ ...child, sdkSessionId: payload.realSessionId }, runtime);
+    } else if (child.paused && child.notice) {
+      const disposition = this.toolDisposition();
+      disposition?.clear({ sdkSessionId: child.sdkSessionId });
+      disposition?.set(
+        { tabId, sdkSessionId: payload.realSessionId },
+        { phase: 'paused', notice: child.notice },
+      );
+    }
     this.log(`${tabId} bound to SDK session ${payload.realSessionId}`);
     this.recordOrganization(child, payload.realSessionId);
-    const runtime = this.runtimes.get(tabId);
-    if (runtime?.graceTimer) {
+    if (runtime?.graceTimer && !this.watchdogRecovery.owns(this.firstInputKey(child, runtime))) {
       clearTimeout(runtime.graceTimer);
       runtime.graceTimer = undefined;
       this.log(`${tabId} re-registered; grace cancelled`);
@@ -1724,20 +1830,108 @@ export class SessionSpawnerService implements ISessionSpawner {
     if (!child) return;
     const runtime = this.runtimes.get(child.childSessionId);
     if (!runtime || runtime.stopping) return;
+    this.clearChildPause(child);
     if (child.terminalStatus) {
       // A succession in flight marks the record handed-off before its start
       // settles. Keep the cause: a failed start routes this end afterwards.
-      if (runtime.succeeding)
+      if (runtime.succeeding) {
         runtime.endCause = parseSessionEndCause(payload.cause);
+      } else if (this.retiring.delete(child.childSessionId)) {
+        this.releaseResources(child.childSessionId);
+        void this.closeRetiredPredecessor(child.childSessionId, child);
+      }
       return;
     }
     runtime.endCause = parseSessionEndCause(payload.cause);
     runtime.turnsSettledAtEnd = child.turnsSettled;
+    const key = this.firstInputKey(child, runtime);
+    if (isProviderNoResponse(runtime.endCause) && child.turnsSettled === 0) {
+      this.reserveChildRetry(child, runtime, key, payload);
+    } else {
+      this.watchdogRecovery.cancel(key);
+      runtime.watchdogFailure = undefined;
+    }
     const wasWorking = this.phaseOf(child) === 'generating';
     this.armGrace(runtime, child.childSessionId, wasWorking);
     this.log(
       `${child.childSessionId} session ended (${runtime.endCause}); ${SESSION_CHILD_GRACE_MS / 1000}s grace armed`,
     );
+  }
+
+  private firstInputKey(child: SessionChildRecord, runtime: ChildRuntime): string {
+    // A new startup generation always gets a new tab/input ID. The retry reuses it.
+    return JSON.stringify([runtime.lineageId, child.successionCount ?? 0, child.childSessionId]);
+  }
+
+  private reserveChildRetry(
+    child: SessionChildRecord,
+    runtime: ChildRuntime,
+    key: string,
+    payload: SessionEndPayload,
+  ): void {
+    const id = child.childSessionId;
+    const firstInput = runtime.firstInput;
+    const host = this.lookupHost();
+    const ownsChild = (): boolean => {
+      const current = this.registry.get(id);
+      return this.runtimes.get(id) === runtime && !!current && !current.terminalStatus &&
+        !runtime.stopping && !runtime.succeeding && !runtime.observedTurnResult &&
+        current.turnsSettled === 0 && !current.pendingPermission &&
+        current.parentSessionId === child.parentSessionId &&
+        current.parentSdkSessionId === child.parentSdkSessionId &&
+        current.sdkSessionId === child.sdkSessionId;
+    };
+    this.watchdogRecovery.reserve({
+      key,
+      ended: payload,
+      eligible: !!firstInput && !!host && !runtime.observedTurnResult && !child.pendingPermission &&
+        (!child.sdkSessionId || !!host.recoverAfterWatchdogStop),
+      isCurrent: () => ownsChild() && !this.activeIdOf(child) &&
+        !this.lifecycle.find(id) && !this.lifecycle.find(payload.sessionId),
+      recover: async (endedAt) => {
+        if (!host || !firstInput) return { recovered: false, reason: 'resume-failed' };
+        const outcome = await this.replayChildInput(host, child, firstInput, endedAt);
+        if (outcome.recovered && this.watchdogRecovery.owns(key) && !runtime.watchdogFailure && runtime.endCause &&
+            isProviderNoResponse(runtime.endCause)) {
+          if (runtime.graceTimer) clearTimeout(runtime.graceTimer);
+          runtime.graceTimer = undefined;
+          runtime.endCause = undefined;
+          this.armFirstTurnWatchdog(runtime, id);
+        }
+        return outcome;
+      },
+      fail: (retried) => {
+        if (this.runtimes.get(id) !== runtime || runtime.stopping) return;
+        runtime.watchdogFailure = retried
+          ? formatWatchdogFinalFailure(id) : formatWatchdogNoSafeRetry(id);
+        if (!runtime.graceTimer) this.armGrace(runtime, id, false);
+      },
+    });
+  }
+
+  private async replayChildInput(
+    host: IChildChatSessionHost,
+    child: SessionChildRecord,
+    input: ChildChatSessionStartInput,
+    endedAt: number,
+  ): Promise<WatchdogRecoveryOutcome> {
+    const prompt = watchdogReplayPrompt(input.prompt);
+    if (child.sdkSessionId) {
+      return host.recoverAfterWatchdogStop?.({
+        sessionId: child.sdkSessionId,
+        tabId: child.childSessionId,
+        prompt,
+        senderName: WATCHDOG_RECOVERY_SENDER,
+        endedAt,
+      }) ?? { recovered: false, reason: 'resume-failed' };
+    }
+    // The host can record a stop after SDK teardown has removed the record.
+    if (host.wasStoppedSince?.(child.childSessionId, endedAt)) {
+      return { recovered: false, reason: 'stopped' };
+    }
+    const outcome = await this.startOnHost(host, { ...input, prompt });
+    if (outcome.started) return { recovered: true };
+    return { recovered: false, reason: 'resume-failed' };
   }
 
   private async onGraceExpired(
@@ -1747,8 +1941,16 @@ export class SessionSpawnerService implements ISessionSpawner {
     const runtime = this.runtimes.get(childSessionId);
     if (runtime) runtime.graceTimer = undefined;
     const child = this.registry.get(childSessionId);
-    if (!child || child.terminalStatus) return;
+    if (!child || child.terminalStatus || runtime?.stopping) return;
+    if (runtime && this.watchdogRecovery.owns(this.firstInputKey(child, runtime))) {
+      this.armGrace(runtime, childSessionId, wasWorking);
+      return;
+    }
     if (this.activeIdOf(child)) {
+      if (runtime?.watchdogFailure) {
+        void this.sendParentNotice(child, runtime.watchdogFailure);
+        runtime.watchdogFailure = undefined;
+      }
       // The end was harmless: its cause must not route a later, different end.
       if (runtime) runtime.endCause = undefined;
       this.log(
@@ -1759,6 +1961,10 @@ export class SessionSpawnerService implements ISessionSpawner {
     const cause = runtime?.endCause ?? 'unknown';
     if (cause === 'unknown')
       this.log(`${childSessionId} session ended with unknown cause`);
+    if (runtime?.watchdogFailure && child.turnsSettled === 0) {
+      this.failFirstTurn(child, runtime.watchdogFailure, cause);
+      return;
+    }
     const probe = this.firstTurnProbe(child);
     if (
       routeSessionEndCause(cause) === 'succeed' &&
@@ -1819,12 +2025,11 @@ export class SessionSpawnerService implements ISessionSpawner {
       void this.settle(
         childSessionId,
         'failed',
-        (cause === 'no-activity-timeout'
-          ? 'session ended while it worked: no stream activity for 180 s ' +
-            '(no-activity watchdog, cause no-activity-timeout); not stopped by a user. ' +
-            'The session can be resumed: the user sends a message in its tab ' +
-            '(ptah_session_send refuses an ended child), or start a successor'
-          : `session ended while it worked (${cause})`) +
+        (isProviderNoResponse(cause)
+          ? formatProviderHang(180)
+          : cause === 'provider-input-closed'
+            ? formatProviderInputClosed()
+            : `session ended while it worked (${cause})`) +
           (failure ? `; ${failure}` : ''),
         Date.now(),
       );
@@ -1887,33 +2092,25 @@ export class SessionSpawnerService implements ISessionSpawner {
     runtime.firstTurnTimer = undefined;
     const child = this.registry.get(childSessionId);
     if (!child || child.terminalStatus) return;
+    if (runtime.graceTimer || this.watchdogRecovery.owns(this.firstInputKey(child, runtime))) return;
     const probe = this.firstTurnProbe(child);
-    const verdict = firstTurnVerdict(probe, runtime.firstTurnRearmed === true);
-    if (verdict === 'rearm') {
-      runtime.firstTurnRearmed = true;
-      this.log(
-        `${childSessionId} first turn still generating without an SDK id; watchdog re-armed once`,
-      );
-      this.armFirstTurnWatchdog(runtime, childSessionId);
-      return;
-    }
-    if (verdict === 'give-up') {
-      this.log(
-        `${childSessionId} still generating after the watchdog re-arm; left running`,
-      );
-      return;
-    }
-    if (verdict === 'fail') {
+    if (firstTurnNotStarted(probe) && !probe.awaitingPermission) {
       const seconds = SESSION_CHILD_FIRST_TURN_TIMEOUT_MS / 1000;
-      this.failFirstTurn(
-        child,
-        firstTurnFailureText(probe, `no first turn after ${seconds}s`),
-      );
+      const evidence = firstTurnFailureText(probe, `no first turn after ${seconds}s`);
+      if (probe.phase !== 'generating' && !probe.lifecycleRecordPresent) {
+        this.failFirstTurn(child, evidence);
+      } else {
+        this.log(`${childSessionId} ${evidence}; awaiting a confirmed provider end`);
+      }
     }
   }
 
-  /** End a child whose first turn never ran: `failed`, parent told, never a succession. */
-  private failFirstTurn(child: SessionChildRecord, evidence: string): void {
+  /** Settle a failed first turn without interrupting the provider. */
+  private failFirstTurn(
+    child: SessionChildRecord,
+    evidence: string,
+    cause: SessionEndCause | 'first-turn-not-started' = 'first-turn-not-started',
+  ): void {
     const childSessionId = child.childSessionId;
     const runtime = this.runtimes.get(childSessionId);
     if (!runtime || child.terminalStatus) return;
@@ -1928,64 +2125,22 @@ export class SessionSpawnerService implements ISessionSpawner {
       'failed',
       reason,
       undefined,
-      'first-turn-not-started',
+      cause,
     );
     this.releaseResources(childSessionId);
-    this.interruptInBackground(childSessionId);
+    this.releaseBudget(childSessionId);
   }
 
-  private onRuntimeExceeded(childSessionId: string, minutes: number): void {
+  private onRuntimeExceeded(childSessionId: string): void {
     const child = this.registry.get(childSessionId);
     const runtime = this.runtimes.get(childSessionId);
     if (!child || child.terminalStatus || !runtime || runtime.stopping) return;
     runtime.runtimeTimer = undefined;
-    if (runtime.succeeding) {
-      runtime.capReached = true;
-      this.armHandoffGrace(runtime, childSessionId);
-      return;
-    }
-    // An idle child is not ended or replaced for idle wall time. New work
-    // (a parent message or a turn start) applies the cap and the succession limit.
-    if (this.isIdleWithoutPendingWork(child)) {
-      runtime.capReached = true;
-      this.log(
-        `${childSessionId} runtime cap reached while idle; deferring handoff until next message`,
-      );
-      return;
-    }
-    if ((child.successionCount ?? 0) >= runtime.settings.maxSuccessions) {
-      this.runtimeSafetyNet(child, 'max successions reached');
-      return;
-    }
     runtime.capReached = true;
-    this.armHandoffGrace(runtime, childSessionId);
-  }
-
-  private armHandoffGrace(runtime: ChildRuntime, childSessionId: string): void {
     runtime.handoffGraceTimer = this.armTimer(
       runtime.settings.handoffGraceMinutes * 60_000,
-      () => {
-        void this.onHandoffGraceExpired(childSessionId);
-      },
+      () => this.onHandoffGraceExpired(childSessionId),
     );
-  }
-
-  /**
-   * A turn that starts in the child tab after a deferred cap gets the normal
-   * handoff grace, so that it cannot run without a bound.
-   */
-  private onGeneratingChange(): void {
-    for (const [childSessionId, runtime] of this.runtimes) {
-      if (!runtime.capReached || runtime.handoffGraceTimer) continue;
-      if (runtime.succeeding || runtime.stopping) continue;
-      const child = this.registry.get(childSessionId);
-      if (!child || child.terminalStatus) continue;
-      if (this.phaseOf(child) !== 'generating') continue;
-      this.log(
-        `${childSessionId} turn started after the deferred runtime cap; handoff grace armed`,
-      );
-      this.armHandoffGrace(runtime, childSessionId);
-    }
   }
 
   private onPromptLifecycle(event: PermissionPromptLifecycleEvent): void {
@@ -2082,6 +2237,19 @@ export class SessionSpawnerService implements ISessionSpawner {
         `completion of ${childSessionId} turn ${turn} failed: ${errorMessage(error)}`,
       );
       return;
+    }
+    if (child.paused && child.notice && 'envelope' in delivery) {
+      const { envelope } = delivery;
+      delivery = {
+        ...delivery,
+        envelope: {
+          ...envelope,
+          notice: child.notice,
+          ...(envelope.completion
+            ? { completion: { ...envelope.completion, notice: child.notice } }
+            : {}),
+        },
+      };
     }
     this.recordDelivery(childSessionId, turn, delivery);
   }
@@ -2198,7 +2366,9 @@ export class SessionSpawnerService implements ISessionSpawner {
       child = byCwd;
       if (!byCwd.sdkSessionId && sessionId) {
         child =
-          this.registry.bindSdkSessionId(byCwd.childSessionId, sessionId) ??
+          this.registry.bindSdkSessionId(byCwd.childSessionId, sessionId, {
+            inferred: true,
+          }) ??
           byCwd;
         this.log(
           `${byCwd.childSessionId} bound to SDK session ${sessionId} by cwd`,
@@ -2214,6 +2384,7 @@ export class SessionSpawnerService implements ISessionSpawner {
   private statusOf(child: SessionChildRecord): SessionChildStatus {
     if (child.terminalStatus) return child.terminalStatus;
     if (this.queuedAdmissions.get(child.childSessionId)?.ticket.isPending()) return 'queued';
+    if (child.paused) return 'paused';
     if (child.pendingPermission) return 'awaiting-permission';
     const phase = this.phaseOf(child);
     switch (phase) {
@@ -2325,8 +2496,10 @@ export class SessionSpawnerService implements ISessionSpawner {
     const snapshot: Record<string, unknown> = { ...record };
     delete snapshot['task'];
     delete snapshot['terminalStatus'];
+    delete snapshot['paused'];
     delete snapshot['endCause'];
     delete snapshot['heldCompletion'];
+    delete snapshot['sdkSessionIdInferred'];
     delete snapshot['phaseKind'];
     delete snapshot['phaseDisallowedTools'];
     delete snapshot['toolProfileApplied'];
@@ -2385,6 +2558,11 @@ export class SessionSpawnerService implements ISessionSpawner {
   private releaseResources(childSessionId: string): void {
     const runtime = this.runtimes.get(childSessionId);
     if (!runtime) return;
+    const child = this.registry.get(childSessionId);
+    if (child) {
+      this.clearChildPause(child);
+      this.watchdogRecovery.forget(this.firstInputKey(child, runtime));
+    }
     this.runtimes.delete(childSessionId);
     this.clearTimers(runtime);
     runtime.releasePolicy?.();
@@ -2416,13 +2594,13 @@ export class SessionSpawnerService implements ISessionSpawner {
    * once the interrupt settles, so a result the run emits meanwhile cannot
    * bring the entry back.
    */
-  private interruptInBackground(childSessionId: string, stopCause: 'host-stop' | 'runtime-cap' = 'host-stop'): Promise<boolean> {
+  private interruptInBackground(childSessionId: string): Promise<boolean> {
     const id = SessionId.safeParse(childSessionId);
     if (!this.adapter || !id) {
       this.releaseBudget(childSessionId);
       return Promise.resolve(false);
     }
-    return this.verifyAndHardStop(childSessionId, this.registry.get(childSessionId)?.sdkSessionId, stopCause)
+    return this.verifyAndHardStop(childSessionId, this.registry.get(childSessionId)?.sdkSessionId)
       .then((result) => {
         if (!result.stopped) {
           this.log(
@@ -2505,7 +2683,7 @@ export class SessionSpawnerService implements ISessionSpawner {
       },
     );
     runtime.runtimeTimer = this.armTimer(minutes * 60_000, () =>
-      this.onRuntimeExceeded(childSessionId, minutes),
+      this.onRuntimeExceeded(childSessionId),
     );
   }
 
@@ -2529,9 +2707,8 @@ export class SessionSpawnerService implements ISessionSpawner {
       await this.adapter.sendMessageToSession(
         target,
         renderRuntimeCapWarning({
-          minutesLeft: runtime.settings.runtimeWarnLeadMinutes,
-          graceMinutes: runtime.settings.handoffGraceMinutes,
-          handoffPath: sessionChildHandoffPath(child),
+          capMinutes: runtime.settings.maxRuntimeMinutes,
+          handoffPath: relative(child.worktreePath, sessionChildHandoffPath(child)),
         }),
         { origin: { kind: 'peer', from: 'ptah-host', name: 'Ptah host' } },
       );
@@ -2543,32 +2720,113 @@ export class SessionSpawnerService implements ISessionSpawner {
     }
   }
 
-  private async onHandoffGraceExpired(childSessionId: string): Promise<void> {
+  private onHandoffGraceExpired(childSessionId: string): void {
     const child = this.registry.get(childSessionId);
     const runtime = this.runtimes.get(childSessionId);
-    if (!child || child.terminalStatus || !runtime || runtime.stopping) return;
+    if (!child || !runtime || runtime.stopping) return;
+    runtime.handoffGraceTimer = undefined;
     if (runtime.succeeding) {
-      runtime.handoffGraceTimer = this.armTimer(60_000, () => {
-        void this.onHandoffGraceExpired(childSessionId);
-      });
+      runtime.handoffGraceTimer = this.armTimer(HANDOFF_GRACE_RECHECK_MS, () =>
+        this.onHandoffGraceExpired(childSessionId),
+      );
       return;
     }
+    if (child.terminalStatus) return;
+    const exhausted = (child.successionCount ?? 0) >= runtime.settings.maxSuccessions;
+    this.pauseChild(child, runtime, exhausted ? 'succession-limit' : 'runtime-cap');
+  }
+
+  private toolDisposition(): SessionToolDispositionRegistry | undefined {
+    const token = SDK_TOKENS.SDK_SESSION_TOOL_DISPOSITION;
+    return this.container?.isRegistered(token, true)
+      ? this.container.resolve<SessionToolDispositionRegistry>(token)
+      : undefined;
+  }
+
+  private clearChildPause(child: SessionChildRecord): void {
+    this.toolDisposition()?.clear({
+      tabId: child.childSessionId,
+      sdkSessionId: child.sdkSessionId,
+    });
+    this.registry.clearPause(child.childSessionId);
+  }
+
+  private resumeChild(child: SessionChildRecord, runtime: ChildRuntime): void {
+    this.clearChildPause(child);
+    runtime.capReached = false;
+    runtime.pausePublished = false;
+    runtime.escalationPublished = false;
+    if (runtime.handoffGraceTimer) clearTimeout(runtime.handoffGraceTimer);
     runtime.handoffGraceTimer = undefined;
-    const target = this.activeIdOf(child);
-    if (target) {
-      const stop = await this.verifyAndHardStop(
-        childSessionId,
-        child.sdkSessionId,
-        'runtime-cap',
-      );
-      if (!stop.stopped || stop.interruptError) {
-        // Incomplete stop is logged; succession proceeds anyway (degradation path).
-        this.log(
-          `${childSessionId} grace stop incomplete (stopped=${stop.stopped}): ${stop.interruptError ?? 'still active'}`,
-        );
-      }
+    this.armRuntimeCap(runtime, child.childSessionId, runtime.settings.maxRuntimeMinutes);
+  }
+
+  private pauseChild(
+    child: SessionChildRecord,
+    runtime: ChildRuntime,
+    reason: 'runtime-cap' | 'succession-limit' | 'successor-start-failed',
+  ): void {
+    const disposition = this.toolDisposition();
+    const notice: AgentActionNotice = {
+      actor: 'ptah-budget',
+      action: 'paused',
+      reason,
+      nextStep: 'review-live-agent',
+      ...(reason === 'runtime-cap' ? {
+        measured: runtime.settings.maxRuntimeMinutes * 60_000,
+        unit: 'milliseconds',
+      } : reason === 'succession-limit' ? {
+        measured: child.successionCount ?? 0,
+        limit: runtime.settings.maxSuccessions,
+      } : {}),
+    };
+    if (!this.registry.markPaused(child.childSessionId, notice)) return;
+    disposition?.set(
+      { tabId: child.childSessionId, sdkSessionId: child.sdkSessionId },
+      { phase: 'paused', notice },
+    );
+    if (reason === 'runtime-cap') {
+      if (runtime.pausePublished || runtime.escalationPublished) return;
+      runtime.pausePublished = true;
+    } else {
+      if (runtime.escalationPublished) return;
+      runtime.escalationPublished = true;
     }
-    await this.hostSucceed(child, 'runtime-cap-interrupted');
+    const text = `${formatChildPauseNotice(notice, child.childSessionId)} Send a message with ptah_session_send to resume work in the live child.`;
+    void this.sendParentNotice(child, disposition
+      ? text
+      : `${text} This host has no verified tool gate and the child may still be running tools.`);
+  }
+
+  private async sendParentNotice(child: SessionChildRecord, message: string): Promise<void> {
+    try {
+      const token = CLI_AGENT_RUNTIME_TOKENS.SESSION_HANDOFF_ACK_STORE;
+      const handoffs = this.container?.isRegistered(token, true)
+        ? this.container.resolve<SessionHandoffAckStore>(token) : null;
+      const owner = this.registry.get(child.childSessionId);
+      if (!owner) {
+        this.log(`${child.childSessionId} parent notice dropped: child is no longer registered`);
+        return;
+      }
+      const forwarded = await deliveryTarget(handoffs, owner.parentSessionId, (error) =>
+        this.log(`parent notice lineage lookup failed: ${errorMessage(error)}`),
+      );
+      const target = SessionId.safeParse(forwarded);
+      const current = this.registry.get(child.childSessionId);
+      if (!current || current.parentSessionId !== owner.parentSessionId) {
+        this.log(`${child.childSessionId} parent notice dropped: child ownership changed during lookup`);
+        return;
+      }
+      if (!target || !this.adapter?.isSessionActive(target)) {
+        this.log(`${child.childSessionId} parent notice dropped: verified parent is inactive`);
+        return;
+      }
+      await this.adapter.sendMessageToSession(target, message, {
+        origin: { kind: 'peer', from: 'ptah-host', name: 'Ptah host' },
+      });
+    } catch (error: unknown) {
+      this.log(`${child.childSessionId} parent notice delivery failed: ${errorMessage(error)}`);
+    }
   }
 
   private adoptToParent(child: SessionChildRecord): string[] {
@@ -2580,41 +2838,6 @@ export class SessionSpawnerService implements ISessionSpawner {
     );
     this.agents.settleLaneAdoption(adopted, 'kept');
     return adopted;
-  }
-
-  private runtimeSafetyNet(child: SessionChildRecord, detail: string): void {
-    const runtime = this.runtimes.get(child.childSessionId);
-    if (!runtime || child.terminalStatus) return;
-    if (this.phaseOf(child) === 'generating') {
-      void this.settle(child.childSessionId, 'timeout', undefined, Date.now());
-    }
-    runtime.stopping = true;
-    const lanes = this.adoptToParent(child);
-    this.registry.markEnded(
-      child.childSessionId,
-      'timed-out',
-      `exceeded the ${runtime.settings.maxRuntimeMinutes}-minute runtime cap (agentSessions.maxRuntimeMinutes); automatic handoff failed: ${detail}; uncommitted work is kept in ${child.worktreePath}; ${lanes.length} running lane(s) moved to the parent session`,
-      undefined,
-      'runtime-cap',
-    );
-    this.releaseResources(child.childSessionId);
-    this.interruptInBackground(child.childSessionId, 'runtime-cap');
-  }
-
-  private async hostSucceed(
-    child: SessionChildRecord,
-    cause: SessionChildSuccessionCause,
-    prompt?: string,
-  ): Promise<SessionChildSuccessionResult> {
-    const result = await this.succeedChild(child, cause, prompt);
-    if (
-      !result.ok &&
-      result.refusal !== 'succession-in-progress' &&
-      !child.terminalStatus
-    ) {
-      this.runtimeSafetyNet(child, result.detail);
-    }
-    return result;
   }
 
   /** Called by the child itself from its handoff tool. */
@@ -2637,8 +2860,17 @@ export class SessionSpawnerService implements ISessionSpawner {
       undefined,
       request.handoffPath,
     );
-    if (!result.ok && result.refusal === 'session-start-failed')
-      this.recoverDeadCaller(child.childSessionId);
+    if (!result.ok &&
+      (result.refusal === 'session-start-failed' || result.refusal === 'max-successions-reached')) {
+      const current = this.registry.get(child.childSessionId);
+      const runtime = this.runtimes.get(child.childSessionId);
+      if (current && runtime && !runtime.endCause) {
+        this.pauseChild(current, runtime, result.refusal === 'max-successions-reached'
+          ? 'succession-limit' : 'successor-start-failed');
+      } else if (result.refusal === 'session-start-failed') {
+        this.recoverDeadCaller(child.childSessionId);
+      }
+    }
     return result;
   }
 
@@ -2726,6 +2958,7 @@ export class SessionSpawnerService implements ISessionSpawner {
       ...(child.toolProfileApplied ? { toolProfileApplied: true } : {}),
     };
     const nextRuntime: ChildRuntime = {
+      lineageId: runtime.lineageId,
       worktree: runtime.worktree,
       settings,
       permissionLevel: runtime.permissionLevel,
@@ -2829,6 +3062,8 @@ export class SessionSpawnerService implements ISessionSpawner {
       }
       this.agents.settleLaneAdoption(adopted, 'kept');
       this.armRuntimeCap(nextRuntime, successorId, settings.maxRuntimeMinutes);
+      this.armFirstTurnWatchdog(nextRuntime, successorId);
+      const cooperativePause = runtime.capReached || child.paused;
       this.releaseBudget(child.childSessionId);
       void this.settle(
         child.childSessionId,
@@ -2838,9 +3073,11 @@ export class SessionSpawnerService implements ISessionSpawner {
       );
       if (cause === 'child-handoff') {
         this.retiring.add(child.childSessionId);
-        runtime.retireTimer = this.armTimer(60_000, () =>
-          this.retirePredecessor(child.childSessionId),
-        );
+        if (!cooperativePause) {
+          runtime.retireTimer = this.armTimer(60_000, () =>
+            this.retirePredecessor(child.childSessionId),
+          );
+        }
       } else if (cause === 'session-ended') {
         runtime.stopping = true;
         this.releaseResources(child.childSessionId);

@@ -467,6 +467,61 @@ describe('SessionHistoryReaderService', () => {
         '[SessionHistoryReader] Native usage metadata read failed', expect.any(Object),
       );
     });
+    it('keeps a stored turn time when the session has no usage checkpoint', async () => {
+      const stubs = makeStubs();
+      const metadata = new SessionMetadataStore(createMockStateStorage(), asLogger(createMockLogger()));
+      const sessionId = SessionId.from('12345678-1234-4234-8234-123456789abc');
+      const workspaceId = process.platform === 'win32' ? 'C:\\Work\\Project' : '/work/project';
+      await metadata.updateCodexExecution(sessionId, () => ({
+        version: 1, sessionId, runtime: 'codex-app-server',
+        providerId: 'openai-codex', workspaceId,
+        codex: { normalizedHome: '/home/codex' },
+      }));
+      await metadata.updateCodexTurnDuration(sessionId, { completedMs: 0, turnId: 'turn-1', turnMs: 9_000 });
+      const result = await makeService(stubs, metadata).readSessionHistory(sessionId, workspaceId);
+      expect(result.stats?.durationMs).toBe(9_000);
+      expect(result.stats?.coverage).toBe('partial');
+      expect(result.stats?.totalCost).toBeNull();
+      expect(stubs.logger.warn).not.toHaveBeenCalledWith(
+        '[SessionHistoryReader] Native usage checkpoint rejected', expect.any(Object),
+      );
+    });
+
+    it('keeps a stored turn time when the checkpoint is rejected', async () => {
+      const stubs = makeStubs();
+      const metadata = new SessionMetadataStore(createMockStateStorage(), asLogger(createMockLogger()));
+      const sessionId = SessionId.from('12345678-1234-4234-8234-123456789abc');
+      const workspaceId = process.platform === 'win32' ? 'C:\\Work\\Project' : '/work/project';
+      await metadata.updateCodexExecution(sessionId, () => ({
+        version: 1, sessionId, runtime: 'codex-app-server',
+        providerId: 'openai-codex', workspaceId,
+        codex: { normalizedHome: '/home/codex' },
+      }));
+      const row = await metadata.get(sessionId);
+      if (!row) throw new Error('Missing Codex row');
+      jest.spyOn(metadata, 'get').mockResolvedValue({
+        ...row, codexUsageCheckpoint: { version: 99 } as never,
+        codexTurnDuration: { completedMs: 2_000, turnMs: 500 },
+      });
+      const result = await makeService(stubs, metadata).readSessionHistory(sessionId, workspaceId);
+      expect(result.stats?.durationMs).toBe(2_500);
+      expect(result.stats?.coverage).toBe('partial');
+    });
+
+    it('returns no native stats for a Codex session with neither checkpoint nor turn time', async () => {
+      const stubs = makeStubs();
+      const metadata = new SessionMetadataStore(createMockStateStorage(), asLogger(createMockLogger()));
+      const sessionId = SessionId.from('12345678-1234-4234-8234-123456789abc');
+      const workspaceId = process.platform === 'win32' ? 'C:\\Work\\Project' : '/work/project';
+      await metadata.updateCodexExecution(sessionId, () => ({
+        version: 1, sessionId, runtime: 'codex-app-server',
+        providerId: 'openai-codex', workspaceId,
+        codex: { normalizedHome: '/home/codex' },
+      }));
+      const result = await makeService(stubs, metadata).readSessionHistory(sessionId, workspaceId);
+      expect(result.stats).toBeNull();
+    });
+
     it('uses sidebar totals when a persisted checkpoint is rejected', async () => {
       const stubs = makeStubs();
       const metadata = new SessionMetadataStore(createMockStateStorage(), asLogger(createMockLogger()));

@@ -9,7 +9,7 @@
  *   - getApiEndpoint()  → the normalized root from construction
  *   - getHeaders()      → Bearer key read from SecretStorage under the entry id
  *   - onAuthFailure()   → false, message names the endpoint (+ helpUrl if any)
- *   - getStaticModels() → the entry's models, else empty
+ *   - getListedModels() → the entry's user-declared models, else empty
  */
 
 import 'reflect-metadata';
@@ -39,11 +39,13 @@ class TestableCustomProxy extends CustomOpenAiTranslationProxy {
   public normalizeModelIdPublic(modelId: string): string {
     return this.normalizeModelId(modelId);
   }
-  public resolveUpstreamProtocolPublic(modelId: string): 'messages' | 'chat/completions' | 'responses' | undefined {
+  public resolveUpstreamProtocolPublic(
+    modelId: string,
+  ): 'messages' | 'chat/completions' | 'responses' | undefined {
     return this.resolveUpstreamProtocol(modelId);
   }
-  public getStaticModelsPublic(): Array<{ id: string }> {
-    return this.getStaticModels();
+  public getListedModelsPublic(): Array<{ id: string }> {
+    return this.getListedModels();
   }
 }
 
@@ -198,16 +200,16 @@ describe('CustomOpenAiTranslationProxy', () => {
     );
   });
 
-  it('advertises no static models by default', () => {
-    expect(makeProxy().proxy.getStaticModelsPublic()).toEqual([]);
+  it('lists no models by default', () => {
+    expect(makeProxy().proxy.getListedModelsPublic()).toEqual([]);
   });
 
-  it('advertises the entry static models when it declares them', () => {
+  it('lists the models the user declared on the entry', () => {
     const { proxy } = makeProxy({
       staticModels: [{ id: 'llama-3.1-70b' }, { id: 'qwen-2.5-coder' }],
     });
 
-    expect(proxy.getStaticModelsPublic().map((m) => m.id)).toEqual([
+    expect(proxy.getListedModelsPublic().map((m) => m.id)).toEqual([
       'llama-3.1-70b',
       'qwen-2.5-coder',
     ]);
@@ -223,6 +225,8 @@ describe('CustomOpenAiTranslationProxy', () => {
 
   it('always routes through Chat Completions, never the Responses API', () => {
     const { proxy } = makeProxy();
-    expect(proxy.resolveUpstreamProtocolPublic('gpt-4o')).toBe('chat/completions');
+    expect(proxy.resolveUpstreamProtocolPublic('gpt-4o')).toBe(
+      'chat/completions',
+    );
   });
 });

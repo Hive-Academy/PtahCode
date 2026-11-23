@@ -2,14 +2,17 @@ import { z } from 'zod';
 import type { AgentTurnTelemetry, AgentTurnUsage } from '../types/agent-turn-usage.types';
 import { findModelPricing, type ModelPricing } from './pricing.utils';
 import { findAdvancedSetting } from '../types/advanced-settings.types';
+import type { AgentActionNotice, AgentActionReason } from '../types/agent-action.types';
 
 /** Fixed $3 per million input tokens, independent of catalog updates. */
 export const REFERENCE_INPUT_USD_PER_TOKEN = 0.000003;
 /** Verified cache reads contribute 10% to the lifetime token floor. */
 export const VERIFIED_CACHE_READ_WEIGHT = 0.1;
-/** Stop after this many consecutive completed turns without usage telemetry. */
+/** Existing stop threshold, and the pause threshold of cooperative admission: consecutive completed turns without usage telemetry. */
 export const MAX_CONSECUTIVE_UNAVAILABLE_TURNS = 3;
 export interface AgentBudgetPolicyOptions { readonly laneAccounting?: boolean; }
+/** A pause lands at this multiple of each configured limit. The ask lands at `warnRatio` x the limit. */
+export const AGENT_BUDGET_PAUSE_MULTIPLIER = 2;
 
 export const agentBudgetSettingsSchema = z.object({
   warnRatio: z.number().finite().gt(0).lt(1),
@@ -52,6 +55,7 @@ export interface AgentBudgetSnapshot {
   readonly stopped: boolean;
   readonly turnIds: readonly string[];
   readonly largestTurnTokens?: number;
+  /** Consecutive requests with unavailable telemetry at the tail of request order. */
   readonly unavailableTurns?: number;
 }
 export interface AgentBudgetTransition {
@@ -62,6 +66,43 @@ export interface AgentBudgetTransition {
   readonly coverage: AgentBudgetCoverage;
   readonly cost: AgentBudgetCost;
 }
+export type AgentAdmissionPhase = 'running' | 'asked-handoff' | 'paused';
+/** Dimensions that drive admission; the values are the notice reasons they report. */
+export type AgentAdmissionDimension = Extract<AgentActionReason,
+  'weighted-budget' | 'raw-budget' | 'context-budget' | 'duration' | 'telemetry-unavailable'>;
+export interface AgentAdmissionAssessment {
+  readonly phase: AgentAdmissionPhase;
+  readonly reason?: AgentAdmissionDimension;
+  readonly measured?: number;
+  readonly limit?: number;
+  readonly unit?: Extract<NonNullable<AgentActionNotice['unit']>, 'tokens' | 'milliseconds' | 'turns'>;
+}
+/** Ask and pause points of one dimension. `limit` is the configured value shown to the agent. */
+export interface AgentAdmissionLimits {
+  readonly limit: number;
+  readonly askAt: number;
+  readonly pauseAt: number;
+  readonly unit: 'tokens' | 'milliseconds';
+}
+export type AgentAdmissionLimitMap = Readonly<Record<Exclude<AgentAdmissionDimension, 'telemetry-unavailable'>, AgentAdmissionLimits>>;
+
+/** Remove binary-float noise (0.85 x 3,000,000) so the inclusive boundary lands on the intended integer. */
+function threshold(limit: number, factor: number): number {
+  return Math.round(limit * factor * 1e6) / 1e6;
+}
+function dimensionLimits(limit: number, warnRatio: number, unit: AgentAdmissionLimits['unit']): AgentAdmissionLimits {
+  return { limit, askAt: threshold(limit, warnRatio), pauseAt: threshold(limit, AGENT_BUDGET_PAUSE_MULTIPLIER), unit };
+}
+/** Ask and pause points per dimension. Duration is in milliseconds so a timer can use it directly. */
+export function agentBudgetAdmissionLimits(settings: AgentBudgetSettings): AgentAdmissionLimitMap {
+  return {
+    'weighted-budget': dimensionLimits(settings.stopWeightedTokens, settings.warnRatio, 'tokens'),
+    'raw-budget': dimensionLimits(settings.stopWeightedTokens, settings.warnRatio, 'tokens'),
+    'context-budget': dimensionLimits(settings.handoffContextTokens, settings.warnRatio, 'tokens'),
+    duration: dimensionLimits(settings.maxDurationMin * 60_000, settings.warnRatio, 'milliseconds'),
+  };
+}
+
 export const initialAgentBudgetSnapshot: AgentBudgetSnapshot = {
   weightedTokens: 0, rawTokens: 0, elapsedMs: 0, warned: false, stopped: false, turnIds: [],
 };
@@ -110,6 +151,40 @@ export class AgentBudgetPolicy {
       : total >= this.settings.stopWeightedTokens || (contextTokens !== undefined && contextTokens >= this.settings.handoffContextTokens * 2) ? 'budget' as const
       : undefined;
     return { warning, stopReason, handoff: contextTokens !== undefined && contextTokens >= this.settings.handoffContextTokens };
+  }
+
+  /** Ask and pause points per dimension for this policy's settings. */
+  admissionLimits(): AgentAdmissionLimitMap { return agentBudgetAdmissionLimits(this.settings); }
+
+  /**
+   * Cooperative admission phase. Never stops anything: `asked-handoff` advises a handoff and
+   * `paused` denies new work tools. Boundaries are inclusive and the highest phase wins; among
+   * equal phases the first of weighted, raw, context, duration and telemetry is reported.
+   * The caller latches the phase; `snapshot.stopped` is deliberately ignored here. Lane
+   * accounting tracks weighted tokens only, so its raw dimension is skipped.
+   */
+  assessAdmission(snapshot: AgentBudgetSnapshot, elapsedMs: number, contextTokens?: number): AgentAdmissionAssessment {
+    const limits = this.admissionLimits();
+    const candidates: Array<[Exclude<AgentAdmissionDimension, 'telemetry-unavailable'>, number | undefined]> = [
+      ['weighted-budget', snapshot.weightedTokens],
+      ['raw-budget', this.options.laneAccounting ? undefined : snapshot.rawTokens],
+      ['context-budget', contextTokens],
+      ['duration', elapsedMs],
+    ];
+    let best: AgentAdmissionAssessment = { phase: 'running' };
+    const consider = (candidate: AgentAdmissionAssessment): void => {
+      if (candidate.phase === 'paused' ? best.phase !== 'paused' : candidate.phase === 'asked-handoff' && best.phase === 'running') best = candidate;
+    };
+    for (const [reason, measured] of candidates) {
+      if (measured === undefined) continue;
+      const { limit, askAt, pauseAt, unit } = limits[reason];
+      const phase: AgentAdmissionPhase = measured >= pauseAt ? 'paused' : measured >= askAt ? 'asked-handoff' : 'running';
+      consider({ phase, reason, measured, limit, unit });
+    }
+    const unavailable = snapshot.unavailableTurns ?? 0;
+    const telemetryPhase: AgentAdmissionPhase = unavailable >= MAX_CONSECUTIVE_UNAVAILABLE_TURNS ? 'paused' : unavailable >= 1 ? 'asked-handoff' : 'running';
+    consider({ phase: telemetryPhase, reason: 'telemetry-unavailable', measured: unavailable, limit: MAX_CONSECUTIVE_UNAVAILABLE_TURNS, unit: 'turns' });
+    return best;
   }
 
   private decideTurn(snapshot: AgentBudgetSnapshot, previousWeightedTokens: number, elapsedMs: number, duplicate: boolean,

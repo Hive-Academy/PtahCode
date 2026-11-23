@@ -29,7 +29,6 @@ import type {
   McpInstallTarget,
   McpServerConfig,
 } from '@ptah-extension/shared';
-import { formatAstAnalysisResult } from '@ptah-extension/workspace-intelligence';
 import {
   countTokensPiecewise,
   fitsBudget,
@@ -107,6 +106,10 @@ import type {
   SymbolIndexPage,
 } from '../types';
 import { parseSymbolIndexQuery } from '../namespace-builders/symbol-index-query';
+import {
+  renderSymbolSearchText,
+  toSymbolSearchWireAnswer,
+} from './symbol-search-answer';
 import { FileNotInGraphError } from '../namespace-builders/analysis-namespace.builders';
 import { readOnlyCronNamespace } from '../namespace-builders/cron-namespace.builder';
 import { AgentMessageControlIdentityError } from '../namespace-builders/agent-message-control-actor';
@@ -221,6 +224,10 @@ import { handleSessionToolCall } from './session-tool-handlers';
 import { lifecycleTools } from './lifecycle-tools';
 import { ROUTE_DECIDE_TOOL_NAME, buildRouteDecideTool } from './route-tools';
 import { describeZodIssues, handleRouteToolCall } from './route-tool-handlers';
+import { handleGrep } from './nav/grep';
+import { GREP_TOOL_NAME } from './nav/grep.limits';
+import { handleReadSymbol } from './nav/read-symbol';
+import { READ_SYMBOL_TOOL_NAME } from './nav/read-symbol.limits';
 import {
   OUTCOME_REPORT_TOOL_NAME,
   buildOutcomeReportTool,
@@ -239,6 +246,7 @@ import {
   isMcpRequestInFlight,
   runWithMcpRequestContext,
 } from './mcp-request-context';
+import { renderAstAnalyzeResult } from './ast-analyze-output';
 import {
   resolveMcpCaller,
   type McpCaller,
@@ -619,13 +627,22 @@ const APPROVAL_PROMPT_TOOL_NAME = 'approval_prompt';
  *
  * Lane discovery and spawning are eager so delegation is visible without
  * tool search. Other agent tools, route_decide and outcome_report stay deferred.
+ * The navigation tools (read, grep, outline, dependents, symbol index) are
+ * eager for the same reason: a deferred tool loses to a shell command.
  */
 const ALWAYS_EAGER_TOOLS: ReadonlySet<string> = new Set([
   'ptah_search_files',
+  READ_SYMBOL_TOOL_NAME,
+  GREP_TOOL_NAME,
   'ptah_ast_analyze',
   'ptah_context_enrich_file',
   'ptah_get_diagnostics',
   'ptah_workspace_analyze',
+  // Navigation set (TASK_2026_2299): measured, one deferred tool cost an
+  // agent a tool-search round trip, so it ran `rg` instead.
+  'ptah_get_dependents',
+  'ptah_get_symbol_index',
+  'ptah_relevance_rank_files',
   'ptah_agent_list',
   'ptah_agent_spawn',
 ]);
@@ -1119,6 +1136,59 @@ async function handleIndividualTool(
           formatSearchFiles(files.slice(0, limit), files.length > limit),
           deps,
         );
+      }
+
+      case READ_SYMBOL_TOOL_NAME:
+      case GREP_TOOL_NAME: {
+        // Validation, path containment and bounds live in the handlers.
+        // The caller-declared root is a URL segment (caller input), so it
+        // is used only once it resolves inside an open folder of the host.
+        const callerRoot = await resolveNavCallerRoot(deps);
+        if ('error' in callerRoot) {
+          return toolErrorResponse(request, callerRoot.error);
+        }
+        const navDeps = {
+          analyze: (absolutePath: string) => ptahAPI.ast.analyze(absolutePath),
+          // The caller's own root first: a lane in a git worktree must read
+          // its worktree, not the main checkout.
+          defaultWorkspaceRoot: async () =>
+            callerRoot.root ?? (await ptahAPI.workspace.getInfo())?.path,
+        };
+        // A supplied `workspaceRoot` is the containment boundary of the
+        // handlers, so it must lie inside a root the host or the caller
+        // already has. A caller with a declared root is held to that root.
+        // With no known root it is refused (fail closed).
+        const suppliedRoot = (args as { workspaceRoot?: unknown })
+          .workspaceRoot;
+        if (typeof suppliedRoot === 'string' && suppliedRoot.trim() !== '') {
+          const allowedRoots = (
+            callerRoot.root !== undefined
+              ? [callerRoot.root]
+              : [
+                  (await ptahAPI.workspace.getInfo())?.path,
+                  ...knownWorkspaceFolders(deps),
+                ]
+          ).filter((root): root is string => !!root && root.trim() !== '');
+          if (allowedRoots.length === 0) {
+            return toolErrorResponse(
+              request,
+              'Error: "workspaceRoot" cannot be checked: no workspace is open and the caller declared none, so a supplied root is refused. Open a workspace folder first.',
+            );
+          }
+          if (!(await isInsideKnownRoot(suppliedRoot.trim(), allowedRoots))) {
+            return toolErrorResponse(
+              request,
+              'Error: "workspaceRoot" is not inside the open workspace or the caller workspace. Omit it to use the current workspace.',
+            );
+          }
+        }
+        const reply =
+          name === GREP_TOOL_NAME
+            ? await handleGrep(args, navDeps)
+            : await handleReadSymbol(args, navDeps);
+        return reply.isError
+          ? toolErrorResponse(request, reply.text)
+          : await createToolSuccessResponse(request, reply.text, deps);
       }
 
       case 'ptah_get_diagnostics': {
@@ -2812,14 +2882,17 @@ async function handleIndividualTool(
         if (!file || typeof file !== 'string' || !file.trim()) {
           return missingStringArgResponse(request, 'file');
         }
-        const result = await ptahAPI.ast.analyze(
-          file.trim(),
-          typeof workspaceRoot === 'string' ? workspaceRoot.trim() : undefined,
-        );
-        // Records as tables: the lossless form that meets the promised token saving.
+        const root =
+          typeof workspaceRoot === 'string' ? workspaceRoot.trim() : undefined;
+        const result = await ptahAPI.ast.analyze(file.trim(), root);
+        // Records as tables, cut at a record boundary to fit the budget.
         return await createToolSuccessResponse(
           request,
-          formatAstAnalysisResult(withCompactCoverage(result)),
+          renderAstAnalyzeResult(result, [
+            root,
+            getCallerWorkspaceRoot(),
+            ...knownWorkspaceFolders(deps),
+          ]),
           deps,
         );
       }
@@ -2935,10 +3008,11 @@ async function handleIndividualTool(
             deps,
           );
         }
-        const { query, maxResults, filePath } = args as {
+        const { query, maxResults, filePath, includeCoverage } = args as {
           query: string;
           maxResults?: number;
           filePath?: string;
+          includeCoverage?: boolean;
         };
         if (!query || typeof query !== 'string' || !query.trim()) {
           return missingStringArgResponse(request, 'query');
@@ -2951,13 +3025,15 @@ async function handleIndividualTool(
           maxResults,
           filePath,
         });
-        return await createToolSuccessResponse(
-          request,
-          JSON.stringify(
-            'coverage' in result ? withCompactCoverage(result) : result,
-          ),
-          deps,
-        );
+        // Text by default; `includeCoverage` returns the JSON form with the
+        // index block and the compact coverage block.
+        const text =
+          'coverage' in result
+            ? includeCoverage === true
+              ? JSON.stringify(toSymbolSearchWireAnswer(result, true))
+              : renderSymbolSearchText(result)
+            : JSON.stringify(result);
+        return await createToolSuccessResponse(request, text, deps);
       }
 
       case 'ptah_code_reindex': {
@@ -4259,6 +4335,36 @@ function clampRunCheckWaitSummary(text: string): string {
     : `${text.slice(0, WAIT_SUMMARY_MAX_CHARS - 1)}…`;
 }
 
+/**
+ * The navigation tools' caller root. A caller that declares no root gets
+ * `{ root: undefined }` (the host's open workspace applies). A declared root
+ * (a URL segment, so caller input) is used only when it is an open folder of
+ * the host or an existing directory inside one, and then by its validated
+ * path; otherwise the call is refused, so a declared `/` cannot widen the
+ * containment boundary of `ptah_grep` or `ptah_read_symbol`.
+ */
+async function resolveNavCallerRoot(
+  deps: ProtocolHandlerDependencies,
+): Promise<{ readonly root: string | undefined } | { readonly error: string }> {
+  const declared = getCallerWorkspaceRoot()?.trim();
+  if (declared === undefined || declared === '') {
+    return { root: undefined };
+  }
+  const known = knownWorkspaceFolders(deps);
+  const match =
+    (await findKnownWorkspaceFolder(declared, known)) ??
+    (await findDirectoryInsideKnownFolder(declared, known));
+  if (match !== undefined) {
+    return { root: match };
+  }
+  return {
+    error:
+      `Error: the caller declared workspace '${declared}', which is not an open folder of this ` +
+      `host or a directory inside one, so nothing was read. Re-read the 'ptah' entry in ` +
+      `.mcp.json of the tree you mean to search.`,
+  };
+}
+
 async function resolveRunCheckRoot(
   deps: ProtocolHandlerDependencies,
 ): Promise<{ readonly root: string } | { readonly error: string }> {
@@ -4389,6 +4495,82 @@ async function findKnownWorkspaceFolder(
 }
 
 /**
+ * True when `candidate` is one of `roots` or lies inside one, compared
+ * canonically ({@link canonicalFolderKey}). False when `roots` is empty:
+ * with nothing to compare with, a caller-named root is refused (fail closed).
+ * A UNC candidate keys lexically there, but the navigation handlers use the
+ * real path of the root, so a UNC candidate is also checked by real path; it
+ * is resolved only after it matched a known root lexically, so only a share
+ * the host already knows is touched. One that cannot be resolved is refused.
+ */
+async function isInsideKnownRoot(
+  candidate: string,
+  roots: readonly string[],
+): Promise<boolean> {
+  if (roots.length === 0) {
+    return false;
+  }
+  const plain = stripExtendedLengthPrefix(candidate);
+  if (!path.isAbsolute(plain)) {
+    return false;
+  }
+  if (!(await keyInsideAnyRoot(await canonicalFolderKey(plain), roots))) {
+    return false;
+  }
+  const resolved = path.resolve(plain);
+  if (!isUncPath(resolved)) {
+    // Not UNC: `canonicalFolderKey` already used the real path.
+    return true;
+  }
+  try {
+    const realKey = folderKeyOf(
+      stripExtendedLengthPrefix(await fs.promises.realpath(resolved)),
+    );
+    return await keyInsideAnyRoot(realKey, roots, true);
+  } catch {
+    // degradation-audit: reported - a UNC root that cannot be resolved is
+    // refused; the caller gets an error reply that says so.
+    return false;
+  }
+}
+
+/**
+ * Whether `key` equals or lies inside one of `roots`, each keyed by
+ * {@link canonicalFolderKey}, or by its real path when `real` is set (a root
+ * whose real path cannot be read then matches nothing).
+ */
+async function keyInsideAnyRoot(
+  key: string,
+  roots: readonly string[],
+  real = false,
+): Promise<boolean> {
+  for (const root of roots) {
+    let rootKey: string;
+    if (real) {
+      try {
+        rootKey = folderKeyOf(
+          stripExtendedLengthPrefix(
+            await fs.promises.realpath(
+              path.resolve(stripExtendedLengthPrefix(root)),
+            ),
+          ),
+        );
+      } catch {
+        // degradation-audit: reported - an unreadable root matches nothing;
+        // when no root matches, the caller refuses with an error reply.
+        continue;
+      }
+    } else {
+      rootKey = await canonicalFolderKey(root);
+    }
+    if (key === rootKey || key.startsWith(rootKey + path.sep)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
  * A comparison key for a folder path: the win32 extended-length prefix
  * removed ({@link stripExtendedLengthPrefix}), `path.resolve` (collapses
  * `..`), then `realpath` where the folder exists (follows links and
@@ -4408,6 +4590,11 @@ async function canonicalFolderKey(folder: string): Promise<string> {
       // Does not exist (yet): the lexical form is the key.
     }
   }
+  return folderKeyOf(resolved);
+}
+
+/** `resolved` without trailing separators, case folded on win32. */
+function folderKeyOf(resolved: string): string {
   const trimmed = resolved.replace(/[\\/]+$/, '');
   return process.platform === 'win32' ? trimmed.toLowerCase() : trimmed;
 }

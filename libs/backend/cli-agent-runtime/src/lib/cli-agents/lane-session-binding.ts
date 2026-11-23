@@ -1,13 +1,16 @@
-import type { AgentBudgetStopReason } from '@ptah-extension/shared';
+import type { AgentAdmissionAssessment } from '@ptah-extension/shared';
 import type { TrackedAgent } from './tracked-agent';
 import { previousResumeRecord } from './lane-restore';
 
-/** Bind a transport's native ID and merge any resumed budget ledger. */
+/**
+ * Bind a transport's native ID and merge any resumed budget ledger. Returns the admission
+ * assessment of the merged ledger, or undefined when no ledger was merged.
+ */
 export function bindLaneSessionId(
   tracked: TrackedAgent,
   sessionId: string | undefined,
   agents: Iterable<TrackedAgent>,
-): { warning: boolean; stopReason?: AgentBudgetStopReason } | undefined {
+): AgentAdmissionAssessment | undefined {
   if (!sessionId || sessionId === tracked.info.cliSessionId) return undefined;
   const prior = previousResumeRecord(agents, tracked.info.cli, sessionId)?.agentBudget;
   const decision = prior && tracked.budget ? tracked.budget.rebindRecord(prior) : undefined;

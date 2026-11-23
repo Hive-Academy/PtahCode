@@ -122,7 +122,10 @@ function createMockSdkAdapter(): MockSdkAdapter {
 type MockProviderModels = jest.Mocked<
   Pick<
     ProviderModelsService,
-    'getModelTiers' | 'resolveActiveProviderId' | 'getCachedModelIds'
+    | 'getModelTiers'
+    | 'resolveActiveProviderId'
+    | 'getCachedModelIds'
+    | 'fetchModels'
   >
 >;
 
@@ -133,6 +136,11 @@ function createMockProviderModels(): MockProviderModels {
       .mockReturnValue({ default: null, fast: null, reasoning: null }),
     resolveActiveProviderId: jest.fn().mockReturnValue('anthropic'),
     getCachedModelIds: jest.fn().mockReturnValue(null),
+    fetchModels: jest.fn().mockResolvedValue({
+      models: [],
+      totalCount: 0,
+      source: 'live',
+    }),
   };
 }
 
@@ -1105,6 +1113,94 @@ describe('ConfigRpcHandlers', () => {
       expect(h.providerModels.getModelTiers).not.toHaveBeenCalled();
     });
 
+    describe('provider-session provider (Antigravity)', () => {
+      const agyCatalog = [
+        { id: 'gemini-4-neon', name: 'Gemini 4 Neon', description: '', contextLength: 0, supportsToolUse: true },
+        { id: 'gemini-4-hydrogen-low', name: 'Gemini 4 Hydrogen (Low)', description: '', contextLength: 0, supportsToolUse: true },
+      ];
+
+      function agyHarness(saved: string): Harness {
+        const h = makeHarness({ modelSelected: saved });
+        h.providerModels.resolveActiveProviderId.mockReturnValue('antigravity-cli');
+        h.providerModels.fetchModels.mockResolvedValue({
+          models: agyCatalog,
+          totalCount: agyCatalog.length,
+          source: 'live',
+        });
+        return h;
+      }
+
+      it('lists the provider CLI catalog, not the Claude SDK tier slots, with the saved model selected', async () => {
+        // Live test: the composer offered "Default (recommended) / Opus / Sonnet /
+        // Haiku" for an Antigravity session and the saved model was unselected.
+        const h = agyHarness('gemini-4-hydrogen-low');
+        h.handlers.register();
+
+        const result = await call<{
+          models: Array<{ id: string; name: string; isSelected: boolean }>;
+        }>(h, 'config:models-list');
+
+        expect(result.models.map((m) => m.id)).toEqual([
+          'default',
+          'gemini-4-neon',
+          'gemini-4-hydrogen-low',
+        ]);
+        expect(result.models[0].name).toBe('Default (chosen by Antigravity)');
+        expect(result.models.filter((m) => m.isSelected).map((m) => m.id)).toEqual([
+          'gemini-4-hydrogen-low',
+        ]);
+        expect(h.providerModels.fetchModels).toHaveBeenCalledWith('antigravity-cli', null);
+        expect(h.sdkAdapter.getSupportedModels).not.toHaveBeenCalled();
+      });
+
+      it('selects the provider default when nothing is saved', async () => {
+        const h = agyHarness('');
+        h.handlers.register();
+        const result = await call<{
+          models: Array<{ id: string; isSelected: boolean }>;
+        }>(h, 'config:models-list');
+        expect(result.models.filter((m) => m.isSelected).map((m) => m.id)).toEqual(['default']);
+      });
+
+      it('keeps the saved model selectable and warns when the list is unavailable', async () => {
+        const h = agyHarness('gemini-4-hydrogen-low');
+        h.providerModels.fetchModels.mockResolvedValue({
+          models: [],
+          totalCount: 0,
+          source: 'unavailable',
+          failureReason: 'not-signed-in',
+        });
+        h.handlers.register();
+        const result = await call<{
+          models: Array<{ id: string; isSelected: boolean }>;
+        }>(h, 'config:models-list');
+        expect(result.models.map((m) => [m.id, m.isSelected])).toEqual([
+          ['default', false],
+          ['gemini-4-hydrogen-low', true],
+        ]);
+        expect(h.logger.warn).toHaveBeenCalledWith(
+          'RPC: config:models-list - provider catalog unavailable',
+          {
+            providerId: 'antigravity-cli',
+            error: 'Model list unavailable: not-signed-in',
+          },
+        );
+      });
+
+      it('keeps the saved model selectable when the catalog read fails', async () => {
+        const h = agyHarness('gemini-4-hydrogen-low');
+        h.providerModels.fetchModels.mockRejectedValue(new Error('agy models timed out'));
+        h.handlers.register();
+        const result = await call<{
+          models: Array<{ id: string; isSelected: boolean }>;
+        }>(h, 'config:models-list');
+        expect(result.models.map((m) => [m.id, m.isSelected])).toEqual([
+          ['default', false],
+          ['gemini-4-hydrogen-low', true],
+        ]);
+      });
+    });
+
     describe('saved model that is not a tier mapping (Codex)', () => {
       const codexTierList = [
         { value: 'default', displayName: 'Default', description: '' },
@@ -1356,13 +1452,17 @@ describe('ConfigRpcHandlers', () => {
         expect(h.modelSettings.selectedModel.get).not.toHaveBeenCalled();
       });
 
-      it('appends a saved Claude id the catalog omits when the null-scope env is native Claude CLI', async () => {
+      it('appends a saved Claude id the tier list omits but the cached catalog lists, when the null-scope env is native Claude CLI', async () => {
         const authEnv: AuthEnv = {};
         const h = makeHarness({
           modelSelected: 'claude-haiku-4-5',
           authEnv,
         });
         h.providerModels.resolveActiveProviderId.mockReturnValue('claude-cli');
+        h.providerModels.getCachedModelIds.mockReturnValue([
+          'claude-haiku-4-5',
+          'claude-haiku-5-5',
+        ]);
         h.sdkAdapter.getSupportedModels.mockResolvedValue([
           {
             value: 'claude-haiku-5-5',
@@ -1386,9 +1486,10 @@ describe('ConfigRpcHandlers', () => {
 
         expect(result.workspacePath).toBeNull();
         expect(result.models.filter((model) => model.isSelected)).toEqual([
+          // No repository display name: a cached-only id is shown as itself.
           expect.objectContaining({
             id: 'claude-haiku-4-5',
-            name: 'Claude Haiku 4.5',
+            name: 'claude-haiku-4-5',
           }),
         ]);
         expect(h.modelResolver.resolve.mock.calls.length).toBeGreaterThan(0);
@@ -1399,7 +1500,7 @@ describe('ConfigRpcHandlers', () => {
         }
       });
 
-      it('appends a saved Claude id for an explicit claude-cli workspace with empty native auth env', async () => {
+      it('appends a cached-catalog Claude id for an explicit claude-cli workspace with empty native auth env', async () => {
         const claudeWorkspace = 'D:/projects/claude-cli-workspace';
         const resolver = await scopedResolver(claudeWorkspace, {
           authMethod: 'thirdParty',
@@ -1412,6 +1513,7 @@ describe('ConfigRpcHandlers', () => {
           scopeResolver: resolver,
           authEnv,
         });
+        h.providerModels.getCachedModelIds.mockReturnValue(['claude-haiku-4-5']);
         h.sdkAdapter.getSupportedModels.mockResolvedValue([
           {
             value: 'claude-haiku-5-5',
@@ -1428,9 +1530,10 @@ describe('ConfigRpcHandlers', () => {
         }>(h, 'config:models-list', { workspacePath: claudeWorkspace });
 
         expect(result.models.filter((model) => model.isSelected)).toEqual([
+          // No repository display name: a cached-only id is shown as itself.
           expect.objectContaining({
             id: 'claude-haiku-4-5',
-            name: 'Claude Haiku 4.5',
+            name: 'claude-haiku-4-5',
           }),
         ]);
         expect(h.providerModels.getCachedModelIds).toHaveBeenCalledWith('claude-cli');

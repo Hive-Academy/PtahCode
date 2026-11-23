@@ -38,7 +38,7 @@ import type { CliWindowsJobDependencies } from './cli-windows-job';
  * - session.error             -> error
  * - result                    -> info (final stats); resolves done promise
  */
-import { completedTurnTelemetry, COPILOT_PROVIDER_ENTRY, turnIdentity } from '@ptah-extension/shared';
+import { completedTurnTelemetry, turnIdentity } from '@ptah-extension/shared';
 import type {
   CliAdapterManifest,
   CliDetectionResult,
@@ -116,10 +116,6 @@ interface CopilotCliEvent {
     };
   };
 }
-
-/** CLI picker fields projected from the drift-checked provider fallback. */
-export const COPILOT_MODELS: CliModelInfo[] =
-  (COPILOT_PROVIDER_ENTRY.staticModels ?? []).map(({ id, name }) => ({ id, name }));
 
 /**
  * Actionable error message used when the `copilot` binary cannot be found.
@@ -239,13 +235,12 @@ export class CopilotSdkAdapter implements CliAdapter {
   }
 
   /**
-   * Return available models for Copilot CLI.
-   * Uses the static COPILOT_MODELS list (the CLI itself has no machine-
-   * readable model listing endpoint; the list is curated in sync with
-   * `copilot --help`).
+   * The Copilot CLI has no machine-readable model listing, so the adapter
+   * reports none. Copilot model lists come from live sources instead: the
+   * host LM API and the signed-in account's `/models` endpoint.
    */
   async listModels(): Promise<CliModelInfo[]> {
-    return COPILOT_MODELS;
+    return [];
   }
 
   /**

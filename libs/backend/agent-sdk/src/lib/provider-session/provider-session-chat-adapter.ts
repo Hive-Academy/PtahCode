@@ -1,8 +1,10 @@
 import { randomUUID } from 'node:crypto';
+import { realpath as fsRealpath } from 'node:fs/promises';
 import { z } from 'zod';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type { ProviderSession } from '@ptah-extension/provider-session-contracts';
 import {
+  MAX_IMAGE_SIZE_BYTES,
   SessionId,
   type AgentModelInfo,
   type AgentSessionResumeConfig,
@@ -38,6 +40,7 @@ import {
 } from './provider-session-chat-session';
 import {
   brokenSessionNotice,
+  createProviderSessionUsageLedger,
   publishProviderSessionTurn,
   streamProviderSessionTurn,
   type ProviderSessionChatSession as Session,
@@ -45,12 +48,26 @@ import {
   type ProviderSessionTurnInput,
   type ProviderSessionTurnOptions,
 } from './provider-session-turn-stream';
+import type { ProviderSessionRealpath } from './provider-session-turn-files';
+import {
+  createPricingGate,
+  createProviderSessionUsagePersistence,
+  type ProviderSessionUsagePersistence,
+} from './provider-session-usage-capture';
+import type { SessionUsageSink } from '../session-stats/session-usage-sink';
+import type { IPricingProvider } from '../pricing.port';
 
 /** Host ports plus what agent-sdk composition adds (logger, approval router). */
 export interface ProviderSessionChatAdapterDependencies
   extends ProviderSessionChatPorts {
   readonly logger: Logger;
   readonly approvals: Pick<SessionApprovalRouter, 'register' | 'cancelPrompt'>;
+  /** Canonicalises a turn's file references; `fs.promises.realpath` when absent. */
+  readonly realpath?: ProviderSessionRealpath;
+  /** Durable usage ledger (`SESSION_USAGE_SINK`); absent: usage stays in memory. */
+  readonly usageSink?: SessionUsageSink | null;
+  /** Runtime price catalog; the first priced turn waits (bounded) for it. */
+  readonly pricing?: Pick<IPricingProvider, 'ensureHydrated'> | null;
 }
 
 const clientMessageIdSchema = z.string().min(1).optional();
@@ -75,6 +92,7 @@ export class ProviderSessionChatAdapter implements NativeChatAdapter {
   private readonly followUps: ProviderSessionFollowUpQueue;
   private readonly controls: ProviderSessionSessionControls;
   private readonly turnDeps: ProviderSessionTurnDependencies;
+  private readonly usage: ProviderSessionUsagePersistence;
   private disposed = false;
   private generation = 0;
   private resolved?: Parameters<
@@ -103,8 +121,14 @@ export class ProviderSessionChatAdapter implements NativeChatAdapter {
       failure: (error, operation) => this.failure(error, operation),
       rejectQueued: (session) => this.followUps.rejectAll(session),
     });
+    const realpath = this.ports.realpath ?? ((path: string) => fsRealpath(path));
+    this.usage = createProviderSessionUsagePersistence(ports.usageSink, ports.logger);
+    // Started now so the catalog wait overlaps the first turn, not its end.
+    const pricingReady = createPricingGate(ports.pricing, ports.logger);
+    void pricingReady();
     this.followUps = new ProviderSessionFollowUpQueue({
       logger: this.ports.logger,
+      realpath,
       publish: (session, input, options) =>
         this.publishTurn(session, input, options),
       failure: (error, operation) => this.failure(error, operation),
@@ -113,8 +137,11 @@ export class ProviderSessionChatAdapter implements NativeChatAdapter {
     this.turnDeps = {
       turnState,
       logger: this.ports.logger,
+      realpath,
       live: (session) => this.live(session),
       stats: (payload) => this.stats?.(payload),
+      usage: this.usage,
+      pricingReady,
       failure: (error, operation) => this.failure(error, operation),
       broken: (session) => this.broken(session),
       onIdle: (session) => this.drain(session),
@@ -261,9 +288,13 @@ export class ProviderSessionChatAdapter implements NativeChatAdapter {
         router: this.ports.approvals,
         presentation: this.ports.presentation,
       });
+      // Read alongside the attach; never rejects.
+      const restoring = resumeId ? this.usage.restore(id) : undefined;
       await this.attach(session, opening.abort.signal, 'tab-closed', () =>
         this.checkOpening(opening, generation),
       );
+      if (restoring)
+        session.usage ??= createProviderSessionUsageLedger(session, await restoring);
       if (this.sessions.has(id)) {
         await this.releaseQuietly(id, 'tab-closed');
         throw new ProviderSessionChatAdapterError('busy', 'open');
@@ -316,6 +347,7 @@ export class ProviderSessionChatAdapter implements NativeChatAdapter {
           ? { resume: { nativeSessionId, onFailure: 'error' as const } }
           : {}),
         approvals: session.approvals,
+        ...(session.prepared.open ? { open: session.prepared.open } : {}),
       },
       signal,
     );
@@ -344,7 +376,12 @@ export class ProviderSessionChatAdapter implements NativeChatAdapter {
       if (nativeSessionId && model && live.capabilities().setModel)
         await live.setModel(model);
     } catch (error) {
-      await this.releaseQuietly(session.id, failReason);
+      // A session closed while its process opened is released for good, so
+      // the host forgets its routing instead of keeping it for a re-acquire.
+      await this.releaseQuietly(
+        session.id,
+        session.closing ? 'tab-closed' : failReason,
+      );
       throw error;
     }
     // Prompts of the process the pool replaced cannot be answered any more.
@@ -729,13 +766,40 @@ export class ProviderSessionChatAdapter implements NativeChatAdapter {
   }
 }
 
-/** The chat image shape (`{ data, mediaType }`, base64 without a data: prefix). */
-const turnImagesSchema = z.array(
-  z.object({
-    data: z.string().min(1),
-    mediaType: z.string().regex(/^image\/[\w.+-]+$/),
-  }),
-);
+/** At most this many images per turn, as the chat image picker allows. */
+export const PROVIDER_SESSION_MAX_TURN_IMAGES = 10;
+
+/** Canonical base64: the alphabet, at most two padding characters, whole quads. */
+const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
+
+/** Decoded bytes of a canonical base64 string. */
+function decodedBytes(data: string): number {
+  const padding = data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0;
+  return (data.length / 4) * 3 - padding;
+}
+
+/**
+ * The chat image shape (`{ data, mediaType }`, base64 without a data: prefix).
+ * Each image is canonical base64 within the chat attachment cap
+ * (`MAX_IMAGE_SIZE_BYTES`, decoded), so an oversized or malformed payload is
+ * refused before it is held in the queue or sent.
+ */
+const turnImagesSchema = z
+  .array(
+    z.object({
+      data: z
+        .string()
+        .min(1)
+        .refine((data) => data.length % 4 === 0 && BASE64.test(data), {
+          message: 'image data is not base64',
+        })
+        .refine((data) => decodedBytes(data) <= MAX_IMAGE_SIZE_BYTES, {
+          message: 'image is too large',
+        }),
+      mediaType: z.string().regex(/^image\/[\w.+-]+$/),
+    }),
+  )
+  .max(PROVIDER_SESSION_MAX_TURN_IMAGES);
 const turnFilesSchema = z.array(z.string().trim().min(1));
 
 /** Nothing to send: an open without a first prompt. */

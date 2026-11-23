@@ -442,6 +442,21 @@ describe('CredentialsTabComponent', () => {
     expect(action).toHaveBeenCalledWith('cli-check');
   });
 
+  it('Antigravity shows its own CLI sign-in session, not the Claude CLI copy', () => {
+    const action = jest.fn();
+    fixture.componentInstance.externalActionRequested.subscribe(action);
+    render({
+      connection: connection({ id: 'antigravity-cli', name: 'Antigravity', authMode: 'cli', hasKey: false, configured: false }),
+      kind: 'claude-cli',
+    });
+    expect(query('credentials-cli')).toBeNull();
+    const block = query('credentials-provider-session');
+    expect(block?.textContent).toContain('Antigravity is not ready');
+    expect(block?.textContent).not.toContain('Claude');
+    query('credentials-provider-session-check')?.click();
+    expect(action).toHaveBeenCalledWith('cli-check');
+  });
+
   it('Ollama Cloud explains its optional key and links to the provider (#15, #9)', () => {
     render({ connection: connection({ id: 'ollama-cloud', name: 'Ollama Cloud' }) });
     expect(query('credentials-optional-key')?.textContent).toContain('optional');

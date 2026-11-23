@@ -84,7 +84,47 @@ export interface ProviderModelInfo {
   cacheReadCostPerToken?: number;
   /** Cost per cache creation/write token in USD (from provider API) */
   cacheCreationCostPerToken?: number;
+  /**
+   * Present only when the vendor's row did not report tool support.
+   * `supportsToolUse` is then `false`, and a `toolUseOnly` filter keeps the
+   * row: unknown is not "no".
+   */
+  toolUseUnknown?: true;
+  /**
+   * OpenCode only: the upstream API the live row reported. Persisted with the
+   * list so requests can be routed while the gateway catalog is cold.
+   */
+  upstreamProtocol?: 'messages' | 'chat/completions' | 'responses';
 }
+
+/**
+ * Where a returned model list came from.
+ *
+ * - `'live'`: fetched from the vendor just now.
+ * - `'persisted'`: the live fetch failed; this is the list saved from the last
+ *   successful live fetch.
+ * - `'unavailable'`: no usable list; `models` is empty.
+ */
+export type ProviderModelListSource = 'live' | 'persisted' | 'unavailable';
+
+/**
+ * Why a live model list could not be used. Closed set: the text shown for a
+ * reason is fixed copy, never relayed vendor or error text.
+ *
+ * `'no-key'`, `'not-signed-in'` and `'auth-rejected'` are credential reasons:
+ * a persisted list is never shown for them.
+ */
+export type ModelListFailureReason =
+  | 'no-key'
+  | 'not-signed-in'
+  | 'auth-rejected'
+  | 'timeout'
+  | 'network'
+  | 'http-error'
+  | 'bad-response'
+  | 'empty'
+  | 'no-live-source'
+  | 'unexpected';
 
 /** Parameters for provider:listModels RPC method */
 export interface ProviderListModelsParams {
@@ -100,9 +140,18 @@ export interface ProviderListModelsResult {
   models: ProviderModelInfo[];
   /** Total count before filtering */
   totalCount: number;
-  /** Whether the model list is static (no Refresh needed) */
-  isStatic?: boolean;
-  /** Error message when models couldn't be loaded (e.g., auth failure) */
+  /** Where `models` came from. */
+  source: ProviderModelListSource;
+  /** Set when `source` is `'persisted'` or `'unavailable'`. */
+  failureReason?: ModelListFailureReason;
+  /** `source: 'persisted'` only: epoch ms at which the saved list was fetched. */
+  savedAt?: number;
+  /** `source: 'persisted'` only: fixed-copy sentence explaining the saved list. */
+  notice?: string;
+  /**
+   * `source: 'unavailable'` only (then `models` is empty): fixed-copy sentence
+   * saying why no usable list exists.
+   */
   error?: string;
 }
 

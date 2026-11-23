@@ -1,4 +1,5 @@
 ﻿import 'reflect-metadata';
+import { planLimitReasonLabel } from '@ptah-extension/shared';
 import type { CodexAccountUsageResult } from '../../providers/codex/codex-provider.types';
 import {
   accountOwnerKey,
@@ -44,6 +45,34 @@ function result(
 }
 
 describe('Codex plan-usage reader', () => {
+  it('reports a typed reason, not an empty provider reading, when an available read has no window', async () => {
+    const debug = jest.fn();
+    const reader = createCodexPlanUsageReader(
+      { getAccountUsage: async () => result({ quota: {}, buckets: undefined }) },
+      () => NOW,
+      () => '/no-rollout-home',
+      undefined,
+      { debug },
+    );
+    const reading = await reader({ target: TARGET, refresh: false });
+    expect(reading).toMatchObject({
+      status: 'service-unavailable',
+      statusReason: 'no-usage-windows',
+      windows: [],
+      account: { planType: 'plus' },
+    });
+    expect(reading).not.toHaveProperty('source');
+    // A valid answer without windows is named as such, not as a parse failure.
+    expect(planLimitReasonLabel('no-usage-windows', 'openai-codex')).toBe(
+      'No usage windows reported',
+    );
+    expect(debug).toHaveBeenCalledTimes(1);
+    expect(debug).toHaveBeenCalledWith('[PlanUsage] Codex App Server usage read', {
+      buckets: 1,
+      windows: 0,
+    });
+  });
+
   it('keeps App Server account and allowances when no windows exist', async () => {
     const reader = createCodexPlanUsageReader({ getAccountUsage: async () => result({
       quota: undefined,
@@ -175,8 +204,10 @@ describe('Codex plan-usage reader', () => {
       },
       () => NOW,
     );
-    expect(await reader({ target: TARGET, refresh: false })).toMatchObject({
-      status: 'available', source: 'provider-api', windowSetEstablished: true, windows: [],
+    const reading = await reader({ target: TARGET, refresh: false });
+    // No window to show is a typed failure, never an empty provider reading.
+    expect(reading).toEqual({
+      status: 'service-unavailable', statusReason: 'no-usage-windows', windowSetEstablished: false, windows: [],
     });
   });
 

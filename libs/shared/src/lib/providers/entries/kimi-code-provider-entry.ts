@@ -4,9 +4,8 @@
  * Static provider definition for the Kimi Code subscription, registered into
  * the Anthropic-compatible provider registry.
  *
- * - Flat subscription (`pricingModel: 'subscription'`). The static models carry
- *   no per-token cost, so cost renders as unavailable instead of a fake amount,
- *   and `seedStaticModelPricing` keeps them out of the shared pricing map.
+ * - Flat subscription (`pricingModel: 'subscription'`). No model carries a
+ *   per-token cost, so cost renders as unavailable instead of a fake amount.
  * - Base URL: https://api.kimi.ai/coding/ (Anthropic Messages endpoint).
  * - Auth: `authType: 'oauth'` + `requiresProxy: true`. The SDK talks to a local
  *   Kimi Code proxy that relays Messages requests unchanged and attaches a
@@ -16,22 +15,20 @@
  * - `authEnvVar: 'ANTHROPIC_API_KEY'` (sent as `x-api-key`) is used by the
  *   direct key paths: draft verification, connection check and Ptah CLI
  *   agents.
- * - The RPC model fetcher reads `/coding/v1/models` with the credential from
- *   Kimi auth. Known live ids retain static metadata; failures use this list.
+ * - No built-in model list: the RPC model fetcher reads `/coding/v1/models` with
+ *   the credential from Kimi auth, and a failed read reports the saved or
+ *   unavailable list. `liveModelCapabilities` declares the SDK capability
+ *   allowlist the live rows do not report.
  * - `keyPrefix` is empty: Kimi Code keys have no documented stable prefix.
  *
- * Model availability depends on the subscription plan; each model description
- * names its plan gate. Lowest-plan users must remap opus and sonnet to
- * `kimi-for-coding`.
+ * Model availability depends on the subscription plan. Lowest-plan users must
+ * remap opus and sonnet to `kimi-for-coding`.
  *
  * @see https://www.kimi.com/code
  */
 
 import type { ModelCapability } from '../../types/auth-env.types';
-import type {
-  AnthropicProvider,
-  ProviderStaticModel,
-} from '../provider-registry';
+import type { AnthropicProvider } from '../provider-registry';
 
 /**
  * Capabilities every Kimi Code model declares to the runtime through
@@ -61,65 +58,6 @@ export const KIMI_CODE_DEFAULT_TIERS = {
   haiku: 'kimi-for-coding',
 } as const;
 
-const KIMI_CODE_STATIC_MODELS: ProviderStaticModel[] = [
-  {
-    id: 'k3.1-pro',
-    name: 'K3.1 Pro',
-    description: 'Thinking-only flagship (256K). Plus/Moderato plan or higher',
-    contextLength: 262144,
-    supportsToolUse: true,
-    capabilities: KIMI_CODE_MODEL_CAPABILITIES,
-  },
-  {
-    id: 'k3.1-pro[1m]',
-    name: 'K3.1 Pro (1M)',
-    description: '1M-context K3.1 Pro. Pro/Allegretto plan or higher',
-    contextLength: 1048576,
-    supportsToolUse: true,
-    capabilities: KIMI_CODE_MODEL_CAPABILITIES,
-  },
-  {
-    id: 'k3.1-pro-highspeed',
-    name: 'K3.1 Pro Highspeed',
-    description: 'Low-latency K3.1 Pro. Pro/Allegretto plan or higher',
-    contextLength: 1048576,
-    supportsToolUse: true,
-    capabilities: KIMI_CODE_MODEL_CAPABILITIES,
-  },
-  {
-    id: 'k3',
-    name: 'K3',
-    description: 'K3 (up to 1M on higher plans). Plus plan or higher',
-    contextLength: 262144,
-    supportsToolUse: true,
-    capabilities: KIMI_CODE_MODEL_CAPABILITIES,
-  },
-  {
-    id: 'k3-256k',
-    name: 'K3 256K',
-    description: 'K3 pinned to 256K. Plus plan or higher',
-    contextLength: 262144,
-    supportsToolUse: true,
-    capabilities: KIMI_CODE_MODEL_CAPABILITIES,
-  },
-  {
-    id: 'kimi-for-coding',
-    name: 'Kimi for Coding',
-    description: 'Available on every plan (Andante+)',
-    contextLength: 1048576,
-    supportsToolUse: true,
-    capabilities: KIMI_CODE_MODEL_CAPABILITIES,
-  },
-  {
-    id: 'kimi-for-coding-highspeed',
-    name: 'Kimi for Coding Highspeed',
-    description: 'Low-latency. Pro/Allegretto plan or higher',
-    contextLength: 262144,
-    supportsToolUse: true,
-    capabilities: KIMI_CODE_MODEL_CAPABILITIES,
-  },
-];
-
 /** Kimi Code provider entry. */
 export const KIMI_CODE_PROVIDER_ENTRY: AnthropicProvider = {
   id: 'kimi-code',
@@ -138,5 +76,5 @@ export const KIMI_CODE_PROVIDER_ENTRY: AnthropicProvider = {
   maskedKeyDisplay: '••••••••••••',
   pricingModel: 'subscription',
   defaultTiers: KIMI_CODE_DEFAULT_TIERS,
-  staticModels: KIMI_CODE_STATIC_MODELS,
+  liveModelCapabilities: KIMI_CODE_MODEL_CAPABILITIES,
 };

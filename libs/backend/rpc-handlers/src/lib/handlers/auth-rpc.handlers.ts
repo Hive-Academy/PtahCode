@@ -185,6 +185,7 @@ export class AuthRpcHandlers {
       kimiCodeAuth,
       cliDetector,
       readProviderKey: (id) => authSecretsService.getProviderKey(id),
+      ...(providerSessionAuth ? { providerSessionAuth } : {}),
       logger,
     });
 

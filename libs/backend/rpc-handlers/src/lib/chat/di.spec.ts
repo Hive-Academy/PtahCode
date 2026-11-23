@@ -295,6 +295,10 @@ describe('registerChatServices — ChildChatSessionHostAdapter', () => {
     });
     c.register(TOKENS.WEBVIEW_MANAGER, { useValue: {} });
     c.register(CHAT_TOKENS.SESSION, { useValue: {} });
+    // The adapter reads the follow-up queue, which needs the agent adapter.
+    c.register(TOKENS.AGENT_ADAPTER, {
+      useValue: { onQueuedFollowUpState: jest.fn(() => () => undefined) },
+    });
 
     expect(
       c.isRegistered(CLI_AGENT_RUNTIME_TOKENS.CHILD_CHAT_SESSION_HOST),

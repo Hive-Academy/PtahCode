@@ -17,6 +17,7 @@ import {
   type PtahCliConfig,
   type AuthEnv,
   type OpenCodeProviderId,
+  getPtahCliLaneProvider,
 } from '@ptah-extension/shared';
 
 const created: Array<{
@@ -68,6 +69,20 @@ interface SpawnHarness {
   registry: PtahCliRegistry;
   getCapturedEnv: () => AuthEnv | undefined;
 }
+/**
+ * Stand-in for `ProviderModelsService.resolveEffectiveTiers` with no live
+ * catalogue on hand: the caller's tier, else the registry preference.
+ */
+function specTierPreferences(
+  providerId: string,
+  user: Partial<Record<'sonnet' | 'opus' | 'haiku', string | null | undefined>>,
+): Partial<Record<'sonnet' | 'opus' | 'haiku', string>> {
+  const preferred = getPtahCliLaneProvider(providerId)?.defaultTiers;
+  const pick = (tier: 'sonnet' | 'opus' | 'haiku'): string | undefined =>
+    user[tier] || preferred?.[tier];
+  return { sonnet: pick('sonnet'), opus: pick('opus'), haiku: pick('haiku') };
+}
+
 function buildHarness(
   config: PtahCliConfig,
   mode: 'complete' | 'error' | 'cancel' | 'setup-error' = 'complete',
@@ -120,6 +135,8 @@ function buildHarness(
   } as unknown as IAuthSecretsService;
 
   const providerModels = {
+    resolveEffectiveTiers: jest.fn(specTierPreferences),
+    getCachedModelIds: jest.fn(() => null),
     getModelTiers: jest.fn().mockReturnValue({
       sonnet: null,
       opus: null,

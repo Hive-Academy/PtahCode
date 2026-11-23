@@ -29,7 +29,11 @@ import type {
   LlmGetProviderStatusResponse,
   LlmProviderAuthMode,
 } from '@ptah-extension/shared';
-import { validateProviderBaseUrl } from '@ptah-extension/shared';
+import {
+  isProviderSessionProviderId,
+  providerSessionNativeRuntimeRequiredMessage,
+  validateProviderBaseUrl,
+} from '@ptah-extension/shared';
 import type { IModelDiscovery } from '@ptah-extension/platform-core';
 import type { RpcMethodName } from '@ptah-extension/shared';
 import {
@@ -162,6 +166,9 @@ function buildStatusProviderList(): Array<{
   ];
   const registry: readonly AnthropicProvider[] = getAllAnthropicProviders();
   for (const p of registry) {
+    // A provider session (Antigravity) has no key, base URL or proxy and
+    // never serves Ptah's internal model calls.
+    if (isProviderSessionProviderId(p.id)) continue;
     entries.push({
       id: p.id,
       displayName: p.name,
@@ -174,6 +181,18 @@ function buildStatusProviderList(): Array<{
     });
   }
   return entries;
+}
+
+/**
+ * The refusal for a provider-session id on a method that stores a key, a base
+ * URL or the internal default provider; `null` for every other id.
+ */
+function providerSessionRefusal(
+  provider: string | undefined,
+): { success: false; error: string } | null {
+  return provider && isProviderSessionProviderId(provider)
+    ? { success: false, error: providerSessionNativeRuntimeRequiredMessage(provider) }
+    : null;
 }
 
 /**
@@ -384,6 +403,8 @@ export class LlmRpcHandlers {
             error: 'provider and apiKey are required',
           };
         }
+        const refusal = providerSessionRefusal(params.provider);
+        if (refusal) return refusal;
 
         const key = params.apiKey.trim();
         const formatCheck = validateApiKeyFormat(params.provider, key);
@@ -540,6 +561,8 @@ export class LlmRpcHandlers {
     >(
       'llm:setDefaultProvider',
       async (params: { provider: string } | undefined) => {
+        const refusal = providerSessionRefusal(params?.provider);
+        if (refusal) return refusal;
         try {
           this.logger.debug('RPC: llm:setDefaultProvider called', {
             provider: params?.provider,
@@ -711,6 +734,8 @@ export class LlmRpcHandlers {
             error: 'provider and baseUrl are required',
           };
         }
+        const refusal = providerSessionRefusal(params.provider);
+        if (refusal) return refusal;
 
         // The scheme check moved to `validateProviderBaseUrl` in
         // `@ptah-extension/shared` so the user-defined-provider path

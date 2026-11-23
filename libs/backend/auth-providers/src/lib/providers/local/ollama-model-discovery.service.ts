@@ -10,6 +10,11 @@
  * - Infers tool use and thinking capabilities from model metadata
  * - Separates local vs cloud models (`:cloud` suffix detection)
  * - Caches /api/show results with TTL to avoid repeated calls
+ *
+ * Ollama Cloud models come only from live sources: ollama.com/api/tags and
+ * the local daemon's cloud tags. There is no bundled model list. Listing
+ * failures throw `ModelListError` so the caller can report why the list is
+ * unavailable.
  */
 
 import * as http from 'http';
@@ -23,9 +28,26 @@ import {
 } from '@ptah-extension/vscode-core';
 import type { SentryService } from '@ptah-extension/vscode-core';
 import type { ProviderModelInfo } from '@ptah-extension/shared';
-import { getAnthropicProvider, isCloudTag } from '@ptah-extension/shared';
+import {
+  getAnthropicProvider,
+  isCloudTag,
+  toCloudId,
+} from '@ptah-extension/shared';
 import { AUTH_PROVIDERS_TOKENS } from '../../di/tokens';
-import { OllamaCloudMetadataService } from './ollama-cloud-metadata.service';
+import {
+  ModelListError,
+  classifyModelListFailure,
+} from '../../model-list-error';
+import {
+  OllamaCloudMetadataService,
+  type OllamaCloudTag,
+} from './ollama-cloud-metadata.service';
+
+/** Host that answers the hosted /api/tags and /api/show for Ollama Cloud. */
+const OLLAMA_COM_BASE_URL = 'https://ollama.com';
+
+/** Largest response body read from an Ollama server (1 MiB). */
+const MAX_RESPONSE_BYTES = 1024 * 1024;
 
 /** Ollama /api/version response shape */
 interface OllamaVersionResponse {
@@ -56,8 +78,13 @@ interface OllamaModelTag {
   };
 }
 
-/** Ollama /api/show response shape (subset of fields we need) */
+/**
+ * Ollama /api/show response shape (subset of fields we need). The local daemon
+ * has reported `modelinfo`; ollama.com and current daemons report
+ * `model_info`. Both are read.
+ */
 interface OllamaShowResponse {
+  model_info?: Record<string, unknown>;
   modelinfo?: Record<string, unknown>;
   template?: string;
   details?: {
@@ -95,150 +122,6 @@ const TOOL_USE_FAMILIES = new Set([
   'phi3',
   'phi4',
 ]);
-
-/** Cloud model capability metadata */
-interface CloudModelMeta {
-  contextLength: number;
-  supportsToolUse: boolean;
-  supportsThinking: boolean;
-  supportsVision: boolean;
-  /** Human-readable description for the model selector */
-  description?: string;
-  /** Full tag when it is not `<key>:cloud` (e.g. `gpt-oss:20b-cloud`) */
-  tag?: string;
-}
-
-/**
- * Catalog of Ollama Cloud models: the IDs live on `ollama.com/api/tags` on
- * 2026-10-07, with context and capabilities from models.dev `ollama-cloud`.
- * The model-list drift check (model-lists.live.spec.ts) fails when an ID here
- * stops being served.
- *
- * The live `ollama.com/api/tags` list (OllamaCloudMetadataService) is the
- * source of which models exist; this catalog only adds metadata (context,
- * capabilities, description) to live entries, and is the list itself only
- * when the live fetch is empty or fails. It is never merged in as extra
- * entries: on 2026-10-07 15 of its 20 IDs were no longer served (some return
- * 410 "retired"), and the merge kept showing them.
- *
- * Key is the base model name (without the `:cloud` / `-cloud` suffix).
- */
-export const KNOWN_CLOUD_MODELS: Record<string, CloudModelMeta> = {
-  'deepseek-v4-pro:0813': {
-    tag: 'deepseek-v4-pro:0813-cloud',
-    contextLength: 1048576,
-    supportsToolUse: true,
-    supportsThinking: true,
-    supportsVision: false,
-  },
-  'deepseek-v4.1-flash': {
-    contextLength: 1048576,
-    supportsToolUse: true,
-    supportsThinking: true,
-    supportsVision: true,
-  },
-  'gemma4:31b': {
-    tag: 'gemma4:31b-cloud',
-    contextLength: 262144,
-    supportsToolUse: true,
-    supportsThinking: true,
-    supportsVision: true,
-  },
-  'glm-5.2': {
-    contextLength: 976000,
-    supportsToolUse: true,
-    supportsThinking: true,
-    supportsVision: false,
-  },
-  'glm-5.3': {
-    contextLength: 1048576,
-    supportsToolUse: true,
-    supportsThinking: true,
-    supportsVision: false,
-  },
-  'glm-5.3-flash': {
-    contextLength: 1000000,
-    supportsToolUse: true,
-    supportsThinking: true,
-    supportsVision: true,
-  },
-  'gpt-oss:120b': {
-    tag: 'gpt-oss:120b-cloud',
-    contextLength: 131072,
-    supportsToolUse: true,
-    supportsThinking: true,
-    supportsVision: false,
-  },
-  'gpt-oss:20b': {
-    tag: 'gpt-oss:20b-cloud',
-    contextLength: 131072,
-    supportsToolUse: true,
-    supportsThinking: true,
-    supportsVision: false,
-  },
-  'kimi-k2.6': {
-    contextLength: 262144,
-    supportsToolUse: true,
-    supportsThinking: true,
-    supportsVision: true,
-  },
-  'kimi-k2.7-code': {
-    contextLength: 262144,
-    supportsToolUse: true,
-    supportsThinking: true,
-    supportsVision: true,
-  },
-  'kimi-k3': {
-    contextLength: 1048576,
-    supportsToolUse: true,
-    supportsThinking: true,
-    supportsVision: true,
-  },
-  'minimax-m2.7': {
-    contextLength: 196608,
-    supportsToolUse: true,
-    supportsThinking: true,
-    supportsVision: false,
-  },
-  'minimax-m3': {
-    contextLength: 512000,
-    supportsToolUse: true,
-    supportsThinking: true,
-    supportsVision: true,
-  },
-  'mistral-large-3:675b': {
-    tag: 'mistral-large-3:675b-cloud',
-    contextLength: 262144,
-    supportsToolUse: true,
-    supportsThinking: false,
-    supportsVision: true,
-  },
-  'mistral-large-4': {
-    contextLength: 1048576,
-    supportsToolUse: true,
-    supportsThinking: true,
-    supportsVision: true,
-  },
-  'nemotron-3-nano:30b': {
-    tag: 'nemotron-3-nano:30b-cloud',
-    contextLength: 1048576,
-    supportsToolUse: true,
-    supportsThinking: true,
-    supportsVision: false,
-  },
-  'nemotron-3-super': {
-    contextLength: 262144,
-    supportsToolUse: true,
-    supportsThinking: true,
-    supportsVision: false,
-  },
-  'nemotron-3-ultra': {
-    contextLength: 262144,
-    supportsToolUse: true,
-    supportsThinking: true,
-    supportsVision: false,
-  },
-};
 
 @injectable()
 export class OllamaModelDiscoveryService {
@@ -333,63 +216,46 @@ export class OllamaModelDiscoveryService {
   /**
    * Fetch models for the 'ollama-cloud' provider.
    *
-   * The live ollama.com/api/tags list is the source: when it is non-empty,
-   * only its IDs are returned, and the static KNOWN_CLOUD_MODELS catalog only
-   * supplies names, descriptions and context lengths for them. When the live
-   * list is empty or the fetch fails, the static catalog is the fallback, plus
-   * any extra :cloud models from the local /api/tags (models the user has
-   * pulled that the catalog does not know).
+   * The list is the union, keyed by `toCloudId`, of:
+   *   (a) ollama.com/api/tags entries whose declared `capabilities` include
+   *       `completion` (an entry that declares no capabilities is kept), and
+   *   (b) cloud tags the local daemon reports (`ollama pull <model>:cloud`).
+   * A model in both keeps the ollama.com fields. ollama.com rows take the
+   * tool flag from `capabilities` (`toolUseUnknown` when none are declared)
+   * and the context window from ollama.com/api/show; a failed or empty
+   * /api/show leaves the window unknown (`contextLength: 0`).
+   *
+   * @throws ModelListError with the ollama.com reason whenever ollama.com
+   *   fails, even when the local daemon lists cloud tags. Those tags alone
+   *   are a partial catalog: returning them would make the caller cache and
+   *   persist them as the full live list, overwriting the saved complete one.
+   *   A cloud model also runs on ollama.com, so an unreachable ollama.com
+   *   cannot serve it either. The caller then shows the saved list (or, for a
+   *   credential reason, none). A successful empty ollama.com answer with no
+   *   local cloud tags returns `[]`.
    */
   async listCloudModels(): Promise<ProviderModelInfo[]> {
-    const staticModels: ProviderModelInfo[] = Object.entries(
-      KNOWN_CLOUD_MODELS,
-    ).map(([baseName, meta]) => ({
-      id: meta.tag ?? `${baseName}:cloud`,
-      name: this.formatModelName(meta.tag ?? `${baseName}:cloud`),
-      description: meta.description ?? this.buildCloudDescription(meta),
-      contextLength: meta.contextLength,
-      supportsToolUse: meta.supportsToolUse,
-    }));
     const apiKey = await this.getOllamaCloudApiKey();
+    // Both start now; the daemon's /api/show enrichment is awaited only once
+    // ollama.com has answered, so an ollama.com failure is reported at once.
+    const localPending = this.listModels('ollama-cloud', (name) =>
+      isCloudTag(name),
+    ).then(
+      (models) => models,
+      (error: unknown) => {
+        // Expected in direct mode (no daemon): listModels already captured
+        // and logged the reason, and ollama.com alone answers.
+        this.logger.debug(
+          `[OllamaModelDiscovery] listCloudModels: local daemon cloud tags unavailable (${classifyModelListFailure(error)})`,
+        );
+        return [] as ProviderModelInfo[];
+      },
+    );
+    let remoteTags: OllamaCloudTag[];
     try {
-      const liveTags = await this.cloudMetadata.fetchCloudTags(apiKey);
-      if (liveTags.length > 0) {
-        const staticById = new Map(staticModels.map((m) => [m.id, m]));
-        const merged = new Map<string, ProviderModelInfo>();
-        for (const tag of liveTags) {
-          const existing = staticById.get(tag.id);
-          const baseName = tag.id.replace(/:cloud$/, '').replace(/-cloud$/, '');
-          const knownMeta = KNOWN_CLOUD_MODELS[baseName];
-          merged.set(tag.id, {
-            id: tag.id,
-            name: existing?.name ?? this.formatModelName(tag.id),
-            description:
-              existing?.description ??
-              (knownMeta
-                ? (knownMeta.description ??
-                  this.buildCloudDescription(knownMeta))
-                : 'Cloud model'),
-            contextLength: existing?.contextLength ?? 128000,
-            supportsToolUse: existing?.supportsToolUse ?? true,
-          });
-        }
-        const retiredIds = staticModels
-          .map((m) => m.id)
-          .filter((id) => !merged.has(id));
-        this.logger.info(
-          `[OllamaModelDiscovery] listCloudModels: ${merged.size} live (ollama.com/api/tags). ` +
-            `Static entries not served live: [${retiredIds.slice(0, 8).join(', ')}${retiredIds.length > 8 ? ', …' : ''}]`,
-        );
-        return Array.from(merged.values());
-      } else {
-        this.logger.warn(
-          `[OllamaModelDiscovery] listCloudModels: live ollama.com/api/tags returned 0 cloud tags — ` +
-            `falling back to bundled static catalog (${staticModels.length} models). ` +
-            `This is expected if the user has not yet pulled any cloud models via 'ollama pull <model>:cloud'. ` +
-            `Check the output channel above for the full HTTP response shape.`,
-        );
-      }
-    } catch (error) {
+      remoteTags = await this.cloudMetadata.fetchCloudTags(apiKey);
+    } catch (error: unknown) {
+      const reason = classifyModelListFailure(error);
       this.sentryService.captureException(
         error instanceof Error ? error : new Error(String(error)),
         {
@@ -398,40 +264,79 @@ export class OllamaModelDiscoveryService {
         },
       );
       this.logger.warn(
-        `[OllamaModelDiscovery] Live cloud tag fetch failed unexpectedly: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
+        `[OllamaModelDiscovery] listCloudModels: ollama.com/api/tags failed (${reason}); ` +
+          `not listing local daemon cloud models alone`,
       );
+      throw new ModelListError(reason);
     }
-    try {
-      const dynamicModels = await this.listModels('ollama-cloud', (name) =>
-        isCloudTag(name),
-      );
-      const staticIds = new Set(staticModels.map((m) => m.id));
-      const extras = dynamicModels.filter((m) => !staticIds.has(m.id));
 
-      if (extras.length > 0) {
-        this.logger.info(
-          `[OllamaModelDiscovery] listCloudModels: found ${extras.length} additional cloud models from local /api/tags: [${extras
-            .map((m) => m.id)
-            .join(', ')}]`,
-        );
-      }
-
-      return [...staticModels, ...extras];
-    } catch (tagsError) {
-      this.sentryService.captureException(
-        tagsError instanceof Error ? tagsError : new Error(String(tagsError)),
-        {
-          errorSource: 'OllamaModelDiscoveryService.listCloudModels',
-          activeProvider: 'ollama-cloud',
-        },
-      );
-      this.logger.debug(
-        `[OllamaModelDiscovery] listCloudModels: local /api/tags unavailable — returning ${staticModels.length} bundled cloud models only`,
-      );
-      return staticModels;
+    const chatTags = remoteTags.filter(
+      (tag) => !tag.capabilities || tag.capabilities.includes('completion'),
+    );
+    // A tag ollama.com describes as non-chat stays out even when the daemon
+    // lists it too.
+    const nonChatIds = new Set(
+      remoteTags
+        .filter((tag) => !chatTags.includes(tag))
+        .map((tag) => toCloudId(tag.id)),
+    );
+    const remoteModels = await this.inBatches(chatTags, (tag) =>
+      this.toCloudModel(tag),
+    );
+    const localModels = await localPending;
+    const byId = new Map<string, ProviderModelInfo>();
+    for (const model of remoteModels) byId.set(toCloudId(model.id), model);
+    const localOnly: string[] = [];
+    for (const model of localModels) {
+      const key = toCloudId(model.id);
+      if (byId.has(key) || nonChatIds.has(key)) continue;
+      byId.set(key, model);
+      localOnly.push(model.id);
     }
+
+    this.logger.info(
+      `[OllamaModelDiscovery] listCloudModels: ${byId.size} model(s): ` +
+        `${remoteModels.length} from ollama.com (${remoteTags.length - chatTags.length} non-chat skipped), ` +
+        `${localOnly.length} only on the local daemon${localOnly.length > 0 ? ` [${localOnly.join(', ')}]` : ''}`,
+    );
+    return Array.from(byId.values());
+  }
+
+  /**
+   * Build one ollama.com row: tool flag from the declared capabilities, the
+   * context window from ollama.com/api/show (0 when it is not reported).
+   */
+  private async toCloudModel(tag: OllamaCloudTag): Promise<ProviderModelInfo> {
+    const metadata = await this.getModelMetadata(OLLAMA_COM_BASE_URL, tag.id);
+    const knownWindow = metadata.contextLengthSource === 'provider';
+    const contextLength = knownWindow ? metadata.contextLength : 0;
+    const caps = tag.capabilities;
+    return {
+      id: tag.id,
+      name: this.formatModelName(tag.id),
+      description: this.buildDescription(undefined, contextLength, {
+        tools: caps?.includes('tools') ?? false,
+        vision: caps?.includes('vision') ?? false,
+        thinking: caps?.includes('thinking') ?? false,
+      }),
+      contextLength,
+      ...(knownWindow && { contextLengthSource: 'provider' as const }),
+      supportsToolUse: caps?.includes('tools') ?? false,
+      ...(caps === undefined && { toolUseUnknown: true as const }),
+    };
+  }
+
+  /** Map items with at most MAX_CONCURRENT_ENRICHMENTS calls in flight. */
+  private async inBatches<T, R>(
+    items: readonly T[],
+    map: (item: T) => Promise<R>,
+  ): Promise<R[]> {
+    const results: R[] = [];
+    for (let i = 0; i < items.length; i += this.MAX_CONCURRENT_ENRICHMENTS) {
+      const batch = items.slice(i, i + this.MAX_CONCURRENT_ENRICHMENTS);
+      results.push(...(await Promise.all(batch.map(map))));
+    }
+    return results;
   }
 
   /**
@@ -447,24 +352,11 @@ export class OllamaModelDiscoveryService {
   }
 
   /**
-   * Build description string from CloudModelMeta (fallback when no explicit description).
-   */
-  private buildCloudDescription(meta: CloudModelMeta): string {
-    const parts: string[] = [];
-    if (meta.contextLength >= 1000) {
-      parts.push(`${Math.round(meta.contextLength / 1000)}K context`);
-    }
-    const caps: string[] = [];
-    if (meta.supportsToolUse) caps.push('tools');
-    if (meta.supportsVision) caps.push('vision');
-    if (meta.supportsThinking) caps.push('thinking');
-    if (caps.length > 0) parts.push(caps.join(', '));
-    return parts.join(' \u2022 ');
-  }
-
-  /**
    * Core model listing logic.
    * Fetches from /api/tags and enriches with /api/show metadata.
+   *
+   * @throws ModelListError when the daemon cannot be read (`network` when it
+   *   is unreachable). A reachable daemon with no matching models returns `[]`.
    */
   private async listModels(
     providerId: string,
@@ -472,40 +364,12 @@ export class OllamaModelDiscoveryService {
   ): Promise<ProviderModelInfo[]> {
     const baseUrl = this.getBaseUrl(providerId);
 
+    let tagsResponse: OllamaTagsResponse;
     try {
-      const tagsResponse = await this.httpGet<OllamaTagsResponse>(
+      tagsResponse = await this.httpGet<OllamaTagsResponse>(
         `${baseUrl}/api/tags`,
       );
-
-      if (!tagsResponse?.models?.length) {
-        this.logger.debug(
-          `[OllamaModelDiscovery] No models returned from /api/tags`,
-        );
-        return [];
-      }
-      const filtered = tagsResponse.models.filter((m) => filter(m.name));
-      const enriched: ProviderModelInfo[] = [];
-      for (
-        let i = 0;
-        i < filtered.length;
-        i += this.MAX_CONCURRENT_ENRICHMENTS
-      ) {
-        const batch = filtered.slice(i, i + this.MAX_CONCURRENT_ENRICHMENTS);
-        const results = await Promise.all(
-          batch.map(async (model) => this.enrichModel(baseUrl, model)),
-        );
-        enriched.push(...results);
-      }
-
-      this.logger.debug(
-        `[OllamaModelDiscovery] Discovered ${enriched.length} models for ${providerId}`,
-        { total: tagsResponse.models.length, filtered: enriched.length },
-      );
-
-      return enriched;
     } catch (error) {
-      // degradation-audit: reported - sent to Sentry and logged at warn here;
-      // the caller gets an empty model list.
       this.sentryService.captureException(
         error instanceof Error ? error : new Error(String(error)),
         {
@@ -513,13 +377,57 @@ export class OllamaModelDiscoveryService {
           activeProvider: providerId,
         },
       );
+      const reason = classifyModelListFailure(error);
       this.logger.warn(
-        `[OllamaModelDiscovery] Failed to list models: ${
+        `[OllamaModelDiscovery] Failed to list models for ${providerId} (${reason}): ${
           error instanceof Error ? error.message : String(error)
         }`,
       );
+      throw error instanceof ModelListError
+        ? error
+        : new ModelListError(reason);
+    }
+
+    const rawTags: unknown =
+      tagsResponse && typeof tagsResponse === 'object'
+        ? (tagsResponse as { models?: unknown }).models
+        : undefined;
+    if (!Array.isArray(rawTags)) {
+      this.logger.debug(
+        `[OllamaModelDiscovery] /api/tags for ${providerId} has no models array`,
+      );
+      throw new ModelListError('bad-response');
+    }
+    const tags = rawTags.filter(
+      (m): m is OllamaModelTag =>
+        !!m &&
+        typeof m === 'object' &&
+        typeof (m as { name?: unknown }).name === 'string' &&
+        (m as { name: string }).name.length > 0,
+    );
+    if (tags.length === 0) {
+      if (rawTags.length > 0) {
+        this.logger.debug(
+          `[OllamaModelDiscovery] /api/tags for ${providerId} has no valid model row`,
+        );
+        throw new ModelListError('bad-response');
+      }
+      this.logger.debug(
+        `[OllamaModelDiscovery] No models returned from /api/tags`,
+      );
       return [];
     }
+    const filtered = tags.filter((m) => filter(m.name));
+    const enriched = await this.inBatches(filtered, (model) =>
+      this.enrichModel(baseUrl, model),
+    );
+
+    this.logger.debug(
+      `[OllamaModelDiscovery] Discovered ${enriched.length} models for ${providerId}`,
+      { total: tags.length, filtered: enriched.length },
+    );
+
+    return enriched;
   }
 
   /**
@@ -535,7 +443,15 @@ export class OllamaModelDiscoveryService {
     return {
       id: model.name,
       name: this.formatModelName(model.name),
-      description: this.buildDescription(model, metadata),
+      description: this.buildDescription(
+        model.details?.parameter_size,
+        metadata.contextLength,
+        {
+          tools: metadata.supportsToolUse,
+          vision: metadata.supportsVision,
+          thinking: metadata.supportsThinking,
+        },
+      ),
       contextLength: metadata.contextLength,
       ...(metadata.contextLengthSource === 'provider' && {
         contextLengthSource: 'provider' as const,
@@ -561,21 +477,6 @@ export class OllamaModelDiscoveryService {
         : this.METADATA_CACHE_TTL_MS;
       if (Date.now() - cached.timestamp < ttl) {
         return cached;
-      }
-    }
-    if (isCloudTag(modelName)) {
-      const baseName = modelName.replace(/:cloud$/, '').replace(/-cloud$/, '');
-      const known = KNOWN_CLOUD_MODELS[baseName];
-      if (known) {
-        const metadata: ModelMetadataCache = {
-          contextLength: known.contextLength,
-          supportsToolUse: known.supportsToolUse,
-          supportsThinking: known.supportsThinking,
-          supportsVision: known.supportsVision,
-          timestamp: Date.now(),
-        };
-        this.metadataCache.set(cacheKey, metadata);
-        return metadata;
       }
     }
     try {
@@ -612,16 +513,15 @@ export class OllamaModelDiscoveryService {
     response: OllamaShowResponse,
     modelName: string,
   ): ModelMetadataCache {
-    const modelinfo = response.modelinfo ?? {};
     // Validate each candidate before choosing: an invalid `general` value
-    // (e.g. 0) must not hide a valid architecture-specific one.
-    const reportedContextLength = [
-      modelinfo['general.context_length'],
-      modelinfo['llama.context_length'],
-    ].find(
-      (value): value is number =>
-        typeof value === 'number' && Number.isSafeInteger(value) && value > 0,
-    );
+    // (e.g. 0) must not hide a valid architecture-specific one
+    // (`llama.context_length`, `gptoss.context_length`, ...).
+    const reportedContextLength = [response.model_info, response.modelinfo]
+      .flatMap((info) => this.contextLengthCandidates(info))
+      .find(
+        (value): value is number =>
+          typeof value === 'number' && Number.isSafeInteger(value) && value > 0,
+      );
     const hasProviderCapacity = reportedContextLength !== undefined;
     const contextLength = reportedContextLength ?? 8192;
     const template = response.template ?? '';
@@ -646,6 +546,24 @@ export class OllamaModelDiscoveryService {
       supportsVision,
       timestamp: Date.now(),
     };
+  }
+
+  /**
+   * Values of every own `*.context_length` key, `general.context_length`
+   * first so a valid general value wins over an architecture-specific one.
+   */
+  private contextLengthCandidates(info: unknown): unknown[] {
+    if (!info || typeof info !== 'object' || Array.isArray(info)) return [];
+    const record = info as Record<string, unknown>;
+    const keys = Object.keys(record).filter((key) =>
+      key.endsWith('.context_length'),
+    );
+    keys.sort(
+      (a, b) =>
+        Number(b === 'general.context_length') -
+        Number(a === 'general.context_length'),
+    );
+    return keys.map((key) => record[key]);
   }
 
   /**
@@ -676,23 +594,24 @@ export class OllamaModelDiscoveryService {
   }
 
   /**
-   * Build a short description from model metadata.
+   * Build a short description: parameter size, context window, capabilities.
    */
   private buildDescription(
-    model: OllamaModelTag,
-    metadata: ModelMetadataCache,
+    parameterSize: string | undefined,
+    contextLength: number,
+    capabilities: { tools: boolean; vision: boolean; thinking: boolean },
   ): string {
     const parts: string[] = [];
-    if (model.details?.parameter_size) {
-      parts.push(model.details.parameter_size);
+    if (parameterSize) {
+      parts.push(parameterSize);
     }
-    if (metadata.contextLength >= 1000) {
-      parts.push(`${Math.round(metadata.contextLength / 1000)}K context`);
+    if (contextLength >= 1000) {
+      parts.push(`${Math.round(contextLength / 1000)}K context`);
     }
     const caps: string[] = [];
-    if (metadata.supportsToolUse) caps.push('tools');
-    if (metadata.supportsVision) caps.push('vision');
-    if (metadata.supportsThinking) caps.push('thinking');
+    if (capabilities.tools) caps.push('tools');
+    if (capabilities.vision) caps.push('vision');
+    if (capabilities.thinking) caps.push('thinking');
     if (caps.length > 0) parts.push(caps.join(', '));
 
     return parts.join(' \u2022 ');
@@ -713,6 +632,14 @@ export class OllamaModelDiscoveryService {
     return this.httpRequest<T>(url, 'POST', JSON.stringify(body));
   }
 
+  /**
+   * JSON request with a 5 s timeout and a {@link MAX_RESPONSE_BYTES} body cap.
+   * Rejects with `ModelListError`: 401/403 -> `auth-rejected`, any other
+   * non-2xx -> `http-error`, oversize or
+   * non-JSON body -> `bad-response`, timeout -> `timeout`. A connection
+   * failure rejects with the raw Node error (its code classifies as
+   * `network`).
+   */
   private httpRequest<T>(
     url: string,
     method: string,
@@ -734,21 +661,46 @@ export class OllamaModelDiscoveryService {
         parsedUrl,
         { method, headers, timeout: 5000 },
         (res) => {
+          const status = res.statusCode;
+          if (!status || status < 200 || status >= 300) {
+            // The status decides; the body of a refusal is not read.
+            this.logger.debug(
+              `[OllamaModelDiscovery] ${url} returned ${status}`,
+            );
+            reject(
+              new ModelListError(
+                status === 401 || status === 403
+                  ? 'auth-rejected'
+                  : 'http-error',
+              ),
+            );
+            res.resume();
+            req.destroy();
+            return;
+          }
           const chunks: Buffer[] = [];
-          res.on('data', (c: Buffer) => chunks.push(c));
+          let received = 0;
+          res.on('data', (c: Buffer) => {
+            received += c.length;
+            if (received > MAX_RESPONSE_BYTES) {
+              this.logger.debug(
+                `[OllamaModelDiscovery] ${url} response exceeded ${MAX_RESPONSE_BYTES} bytes`,
+              );
+              reject(new ModelListError('bad-response'));
+              req.destroy();
+              return;
+            }
+            chunks.push(c);
+          });
           res.on('end', () => {
-            if (
-              res.statusCode &&
-              res.statusCode >= 200 &&
-              res.statusCode < 300
-            ) {
-              try {
-                resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));
-              } catch {
-                reject(new Error(`Invalid JSON response from ${url}`));
-              }
-            } else {
-              reject(new Error(`${url} returned ${res.statusCode}`));
+            if (received > MAX_RESPONSE_BYTES) return;
+            try {
+              resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+            } catch {
+              this.logger.debug(
+                `[OllamaModelDiscovery] Invalid JSON response from ${url}`,
+              );
+              reject(new ModelListError('bad-response'));
             }
           });
         },
@@ -756,7 +708,7 @@ export class OllamaModelDiscoveryService {
       req.on('error', reject);
       req.on('timeout', () => {
         req.destroy();
-        reject(new Error(`${url} request timed out`));
+        reject(new ModelListError('timeout'));
       });
       if (body) req.write(body);
       req.end();

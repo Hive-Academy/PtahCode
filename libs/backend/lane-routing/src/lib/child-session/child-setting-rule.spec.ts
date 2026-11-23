@@ -1,3 +1,4 @@
+import { replaceProviderContextWindows } from '@ptah-extension/shared';
 import { rankChildSettings } from './child-setting-rule';
 
 const models = ['default', 'claude-fable-5-2', 'claude-opus-5-5', 'claude-haiku-4-5', 'claude-sonnet-5', 'claude-sonnet-5-5'];
@@ -26,8 +27,14 @@ describe('rankChildSettings', () => {
     expect(rankChildSettings({ brief: 'design', models, workKind: 'code' }).reason.rule).toBe('code-work-kind');
   });
   it('orders the real mixed-generation catalog newest first, then the strong fallback, then the 200k reserve', () => {
-    const catalog = [...models, 'claude-sonnet-4-6', 'claude-sonnet-4-5-20250929', 'claude-3-7-sonnet-20250219'];
-    expect(rankChildSettings({ brief: '', models: catalog }).candidates).toEqual(['claude-sonnet-5-5', 'claude-sonnet-5', 'claude-sonnet-4-6', 'claude-sonnet-4-5-20250929', 'claude-opus-5-5', 'claude-3-7-sonnet-20250219']);
+    // The 1M window comes from the live claude-cli catalogue.
+    replaceProviderContextWindows('claude-cli', [{ id: 'claude-sonnet-5-5', contextLength: 1_000_000 }]);
+    try {
+      const catalog = [...models, 'claude-sonnet-4-6', 'claude-sonnet-4-5-20250929', 'claude-3-7-sonnet-20250219'];
+      expect(rankChildSettings({ brief: '', models: catalog }).candidates).toEqual(['claude-sonnet-5-5', 'claude-sonnet-5', 'claude-sonnet-4-6', 'claude-sonnet-4-5-20250929', 'claude-opus-5-5', 'claude-3-7-sonnet-20250219']);
+    } finally {
+      replaceProviderContextWindows('claude-cli', []);
+    }
   });
   it('uses the old generation when it is the only admitted balanced candidate', () => {
     expect(rankChildSettings({ brief: '', models: ['claude-sonnet-5', 'claude-haiku-4-5'] }).model).toBe('claude-sonnet-5');

@@ -4,6 +4,9 @@
  * state machine; these helpers only resolve paths and render text.
  */
 import { isAbsolute, resolve } from 'node:path';
+import { formatChildRuntimeAsk } from '@ptah-extension/shared';
+import { isProviderNoResponse } from './handoff-watchdog-recovery';
+import type { SessionEndCause } from '@ptah-extension/shared';
 import type { SessionChildRecord } from './session-child.registry';
 import type { SessionChildSettings } from './session-child-settings';
 import type { SessionChildSuccessionCause } from './session-spawner.port';
@@ -37,20 +40,17 @@ export function runtimeWarnDelayMs(
 
 /** Peer message sent ahead of the runtime cap. */
 export function renderRuntimeCapWarning(input: {
-  readonly minutesLeft: number;
-  readonly graceMinutes: number;
+  readonly capMinutes: number;
   readonly handoffPath: string;
 }): string {
-  return (
-    `This session reaches its runtime cap in ${input.minutesLeft} minutes. It is not interrupted now. ` +
-    'Finish the current step; do not start a new one. Commit verified work if a commit is due; ' +
-    'leave other work uncommitted in the worktree. ' +
-    `Write ${input.handoffPath} with the current state, work done, remaining steps, running lanes ` +
-    'and their agent ids, verification state, and open decisions. ' +
-    'Call ptah_session_handoff with that path and a continuation prompt. ' +
-    'A successor session continues in the same worktree and branch and receives the running lanes. ' +
-    `Without a handoff, the host starts a successor by itself at the latest ${input.graceMinutes} minutes after the cap.`
-  );
+  return formatChildRuntimeAsk({
+    actor: 'ptah-budget',
+    action: 'asked-handoff',
+    reason: 'runtime-cap',
+    nextStep: 'write-notes-and-return',
+    limit: input.capMinutes * 60_000,
+    unit: 'milliseconds',
+  }, input.handoffPath);
 }
 
 function causeWords(cause: SessionChildSuccessionCause): string {
@@ -124,14 +124,15 @@ export function renderSuccessorTask(input: {
  * `chat:abort` from code (`internal-abort`, TASK_2026_1165) is a deliberate
  * end, not a crash, so it also stays stopped.
  */
-export function routeSessionEndCause(cause: string): 'stop' | 'succeed' {
+export function routeSessionEndCause(cause: SessionEndCause): 'stop' | 'succeed' {
   return cause === 'user-stop' ||
     cause === 'tab-close' ||
     cause === 'internal-abort' ||
     cause === 'parent-stop' ||
     cause === 'workspace-close' ||
     cause === 'host-shutdown' ||
-    cause === 'no-activity-timeout'
+    cause === 'provider-input-closed' ||
+    isProviderNoResponse(cause)
     ? 'stop'
     : 'succeed';
 }

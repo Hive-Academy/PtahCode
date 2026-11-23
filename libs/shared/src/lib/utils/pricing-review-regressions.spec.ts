@@ -1,5 +1,4 @@
 import { calculateExactMessageCost, findModelPricing, hasUnknownCacheCreationTtl, registerProviderPricing, resetPricingMapForTesting } from './pricing.utils';
-import { seedStaticModelPricing } from '../providers/provider-registry';
 
 beforeEach(() => resetPricingMapForTesting());
 afterEach(() => resetPricingMapForTesting());
@@ -35,10 +34,9 @@ it('keeps unknown Anthropic TTL splits partial after catalog hydration', () => {
   expect(calculateExactMessageCost('claude-sonnet-5-5', { input: 1, output: 1, cacheCreation: 10 }, options).pricingCoverage).toBe('partial');
   expect(calculateExactMessageCost('claude-sonnet-5-5', { input: 1, output: 1, cacheCreation: 10, cacheCreation1h: 0 }, options).pricingCoverage).toBe('full');
 });
-it('retains one-hour pricing when seeding native Claude static models', () => {
-  const bundled = findModelPricing('claude-sonnet-5-5')?.cacheCreation1hCostPerToken;
-  seedStaticModelPricing('claude-cli');
-  expect(findModelPricing('claude-sonnet-5-5')?.cacheCreation1hCostPerToken).toBe(bundled);
+it.each(['glm-5.3', 'glm-5.3-flash', 'glm-4.5-air'])('leaves Z.AI %s cost unknown: no built-in rate exists', (model) => {
+  expect(findModelPricing(model)).toBeNull();
+  expect(calculateExactMessageCost(model, { input: 1000, output: 100 }, { billingMode: 'api-key' })).toMatchObject({ totalCost: null, costUnavailableReason: 'rate-missing' });
 });
 
 it.each(['anthropic/claude-sonnet-4-6', 'claude-sonnet-4-6-20251101', 'claude-sonnet-4.6'])(

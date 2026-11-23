@@ -1,5 +1,6 @@
 import type { ChildProcess } from 'child_process';
 import type {
+  AgentActionNotice,
   AgentProcessInfo,
   ExternalOwnerKey,
   CliOutputSegment,
@@ -9,6 +10,9 @@ import type { SdkHandle } from './cli-adapters/cli-adapter.interface';
 import type { PendingAgentMessage } from './agent-message-router.service';
 import type { AgentBudgetCoordinator } from './agent-budget-coordinator';
 import type { LaneModelLogState } from './lane-model-log';
+
+/** Ptah monitors that can ask a lane for a handoff and then pause it. */
+export type LaneAdmissionSource = 'budget' | 'repeat' | 'inactivity';
 
 export interface TrackedAgent {
   /** Authenticated external transport owner; never exposed through AgentProcessInfo. */
@@ -20,6 +24,20 @@ export interface TrackedAgent {
   budgetCostWarned?: boolean;
   /** Warning withheld at a turn boundary; attached to the next parent message once. */
   heldBudgetWarning?: string;
+  /**
+   * Latest Ptah ask or pause per monitor (TASK_2026_2297, P4). Budget and repeat notices stay
+   * latched until the lane settles; an inactivity notice is cleared by real output. Kept in
+   * sync with `info.actionNotice` through {@link setLaneAdmission}.
+   */
+  laneAdmission?: Partial<Record<LaneAdmissionSource, AgentActionNotice>>;
+  /** `source:action:reason` keys already announced, so each notice is sent once. */
+  laneNoticesAnnounced?: Set<string>;
+  /**
+   * Called when a clear changes the lane's current notice: `current` is the notice that
+   * remains (a lower phase from another monitor) or undefined. Set once the lane is live, so the
+   * renderer card drops a pause or ask that no longer holds.
+   */
+  laneNoticeChanged?: (current: AgentActionNotice | undefined) => void;
   info: AgentProcessInfo;
   /** Admission has been returned to an MCP caller. */
   spawnReplied?: boolean;
@@ -35,6 +53,8 @@ export interface TrackedAgent {
   stderrBuffer: string;
   /** Absent for a restored record, and for an agent whose watchdog is disabled. */
   timeoutHandle?: NodeJS.Timeout;
+  /** Start of the current silence window, updated when adapter output arrives. */
+  inactivitySinceMs?: number;
   /** Silence window this agent's watchdog uses, or undefined when disabled. */
   inactivityTimeoutMs?: number;
   stdoutLineCount: number;
@@ -117,4 +137,74 @@ export interface TrackedAgent {
    * Its output is readable; nothing about it is live.
    */
   restored?: true;
+}
+
+const PHASE_RANK: Readonly<Record<AgentActionNotice['action'], number>> = {
+  'asked-handoff': 1,
+  paused: 2,
+  ended: 0,
+};
+
+/** The highest-phase notice across the lane's monitors: a pause wins over an ask. */
+export function currentLaneNotice(tracked: Pick<TrackedAgent, 'laneAdmission'>): AgentActionNotice | undefined {
+  let best: AgentActionNotice | undefined;
+  for (const notice of Object.values(tracked.laneAdmission ?? {})) {
+    if (notice && (!best || PHASE_RANK[notice.action] > PHASE_RANK[best.action])) best = notice;
+  }
+  return best;
+}
+
+/** True while any Ptah monitor holds the lane paused. */
+export function isLanePaused(tracked: Pick<TrackedAgent, 'laneAdmission'>): boolean {
+  return currentLaneNotice(tracked)?.action === 'paused';
+}
+
+/** Set or clear one monitor's notice and mirror the current notice onto `info.actionNotice`. */
+export function setLaneAdmission(
+  tracked: Pick<TrackedAgent, 'laneAdmission' | 'info' | 'laneNoticeChanged'>,
+  source: LaneAdmissionSource,
+  notice: AgentActionNotice | undefined,
+): void {
+  const before = currentLaneNotice(tracked);
+  const next = { ...(tracked.laneAdmission ?? {}) };
+  if (notice) next[source] = notice;
+  else delete next[source];
+  tracked.laneAdmission = next;
+  const current = currentLaneNotice(tracked);
+  const info = { ...tracked.info };
+  if (current) info.actionNotice = current;
+  else delete info.actionNotice;
+  tracked.info = info;
+  if (!notice && (before?.action !== current?.action || before?.reason !== current?.reason))
+    tracked.laneNoticeChanged?.(current);
+}
+
+/**
+ * Record a monitor's notice once. Returns true when this `source:action:reason` was not
+ * announced before. A latched pause is never downgraded to an ask from the same monitor.
+ */
+export function announceLaneNotice(
+  tracked: Pick<TrackedAgent, 'laneAdmission' | 'laneNoticesAnnounced' | 'info' | 'laneNoticeChanged'>,
+  source: LaneAdmissionSource,
+  notice: AgentActionNotice,
+): boolean {
+  const latched = tracked.laneAdmission?.[source];
+  if (latched && PHASE_RANK[latched.action] > PHASE_RANK[notice.action]) return false;
+  setLaneAdmission(tracked, source, notice);
+  const key = `${source}:${notice.action}:${notice.reason}`;
+  const announced = (tracked.laneNoticesAnnounced ??= new Set<string>());
+  if (announced.has(key)) return false;
+  announced.add(key);
+  return true;
+}
+
+/** Clear one monitor's notice and its announce keys, so a later crossing is announced again. */
+export function clearLaneAdmission(
+  tracked: Pick<TrackedAgent, 'laneAdmission' | 'laneNoticesAnnounced' | 'info' | 'laneNoticeChanged'>,
+  source: LaneAdmissionSource,
+): void {
+  for (const key of [...(tracked.laneNoticesAnnounced ?? [])]) {
+    if (key.startsWith(`${source}:`)) tracked.laneNoticesAnnounced?.delete(key);
+  }
+  if (tracked.laneAdmission?.[source]) setLaneAdmission(tracked, source, undefined);
 }

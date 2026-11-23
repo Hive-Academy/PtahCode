@@ -7,6 +7,7 @@ import {
   getPtahCliLaneProvider,
   isBuiltInProviderId,
 } from './index';
+import { CLAUDE_CLI_PROVIDER_ENTRY } from './entries/claude-cli-provider-entry';
 
 describe('direct Claude API CLI lane', () => {
   it('has a direct key and valid Claude tier defaults', () => {
@@ -20,19 +21,31 @@ describe('direct Claude API CLI lane', () => {
       requiresProxy: false,
     });
     expect(lane.nativeAuth).not.toBe(true);
-    const modelIds = new Set(lane.staticModels?.map((model) => model.id));
+    // The models come from the live `/v1/models` route; the tiers are the
+    // native login's defaults.
+    expect(lane.modelsEndpoint).toBe(
+      'https://api.anthropic.com/v1/models?limit=1000',
+    );
+    expect(lane.defaultTiers).toEqual(CLAUDE_CLI_PROVIDER_ENTRY.defaultTiers);
     for (const tier of ['opus', 'sonnet', 'haiku'] as const) {
       expect(lane.defaultTiers?.[tier]).toBeDefined();
-      expect(modelIds.has(lane.defaultTiers?.[tier] ?? '')).toBe(true);
     }
   });
 
   it('remains lane-only and reserves both Anthropic IDs', () => {
-    expect(getPtahCliLaneProvider('anthropic-api')).toBe(ANTHROPIC_API_LANE_ENTRY);
+    expect(getPtahCliLaneProvider('anthropic-api')).toBe(
+      ANTHROPIC_API_LANE_ENTRY,
+    );
     expect(getAnthropicProvider('anthropic-api')).toBeUndefined();
     expect(getAnthropicProvider(ANTHROPIC_DIRECT_PROVIDER_ID)).toBeUndefined();
-    expect(ANTHROPIC_PROVIDERS.some((provider) => provider.id === 'anthropic-api')).toBe(false);
-    expect(getAllAnthropicProviders().some((provider) => provider.id === 'anthropic-api')).toBe(false);
+    expect(
+      ANTHROPIC_PROVIDERS.some((provider) => provider.id === 'anthropic-api'),
+    ).toBe(false);
+    expect(
+      getAllAnthropicProviders().some(
+        (provider) => provider.id === 'anthropic-api',
+      ),
+    ).toBe(false);
     expect(isBuiltInProviderId('anthropic-api')).toBe(true);
     expect(isBuiltInProviderId(ANTHROPIC_DIRECT_PROVIDER_ID)).toBe(true);
   });

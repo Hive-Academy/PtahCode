@@ -21,6 +21,16 @@
 import type { IOutputChannel } from '@ptah-extension/platform-core';
 import { SURFACE_LIMITS } from '@ptah-extension/shared/mcp-apps-contracts/surface';
 import {
+  GREP_RESULT_BUDGET_CHARS,
+  GREP_RESULT_BUDGET_TOKENS,
+  GREP_TOOL_NAME,
+} from './nav/grep.limits';
+import {
+  READ_SYMBOL_RESULT_BUDGET_CHARS,
+  READ_SYMBOL_RESULT_BUDGET_TOKENS,
+  READ_SYMBOL_TOOL_NAME,
+} from './nav/read-symbol.limits';
+import {
   applyOutputBudget,
   reduceOutput,
   type CodeOutliner,
@@ -103,6 +113,17 @@ export const TOOL_RESULT_BUDGET_OVERRIDES: Readonly<
   ptah_session_read: charBudget(SESSION_READ_CHARS),
   ptah_surface_get_state: charBudget(SURFACE_LIMITS.maxStateReadBytes),
   ptah_route_decide: ROUTE_DECIDE_RESULT_BUDGET,
+  // The descriptions state a ~15,000-char own cap; the handlers cut on a line
+  // boundary below this budget. Code text is token-dense (about 2.7 chars per
+  // token), so the token ceiling is not the 4 chars/token default.
+  [READ_SYMBOL_TOOL_NAME]: Object.freeze({
+    tokens: READ_SYMBOL_RESULT_BUDGET_TOKENS,
+    chars: READ_SYMBOL_RESULT_BUDGET_CHARS,
+  }),
+  [GREP_TOOL_NAME]: Object.freeze({
+    tokens: GREP_RESULT_BUDGET_TOKENS,
+    chars: GREP_RESULT_BUDGET_CHARS,
+  }),
 });
 
 /**
@@ -121,6 +142,8 @@ export const TOOL_CONTENT_HINTS: Readonly<Record<string, ContentKind>> =
   Object.freeze({
     ptah_get_diagnostics: 'preformatted',
     ptah_get_symbol_index: 'preformatted',
+    [READ_SYMBOL_TOOL_NAME]: 'preformatted',
+    [GREP_TOOL_NAME]: 'preformatted',
     ptah_agent_spawn: 'preformatted',
     ptah_agent_status: 'preformatted',
     ptah_agent_read: 'preformatted',

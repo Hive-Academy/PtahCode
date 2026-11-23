@@ -12,8 +12,10 @@ export function phaseKindFromAgentInfo(info: AgentProcessInfo): PhaseKind | null
   return info.phaseKind ?? null;
 }
 
+type CompletionProgress = Pick<LaneCompletionSignal, 'notice' | 'receipt'>;
+
 export interface LaneCompletionResultInput {
-  readonly signal: Pick<LaneCompletionSignal, 'deliverables' | 'verdict'>;
+  readonly signal: Pick<LaneCompletionSignal, 'deliverables' | 'verdict'> & CompletionProgress;
   readonly executorId: string;
   readonly phaseKind: PhaseKind | null;
   readonly parentSignal: string;
@@ -23,7 +25,7 @@ export interface LaneCompletionResultInput {
 /** The lane's existing verdict and deliverable checks, plus phase attribution. */
 export function buildLaneCompletionResult(
   input: LaneCompletionResultInput,
-): ExecutorCompletionResultV1 {
+): ExecutorCompletionResultV1 & CompletionProgress {
   return {
     phaseKind: input.phaseKind,
     executorId: input.executorId,
@@ -31,10 +33,12 @@ export function buildLaneCompletionResult(
     verdict: input.signal.verdict,
     parentSignal: input.parentSignal,
     toolProfileAdapter: input.toolProfileAdapter ?? null,
+    ...(input.signal.notice ? { notice: input.signal.notice } : {}),
+    ...(input.signal.receipt ? { receipt: input.signal.receipt } : {}),
   };
 }
 
-export interface SessionCompletionResultInput {
+export interface SessionCompletionResultInput extends CompletionProgress {
   readonly executorId: string;
   readonly phaseKind: PhaseKind | null;
   readonly deliverableCheck: readonly LaneDeliverableCheck[];
@@ -51,7 +55,7 @@ export interface SessionCompletionResultInput {
  */
 export function buildSessionCompletionResult(
   input: SessionCompletionResultInput,
-): ExecutorCompletionResultV1 {
+): ExecutorCompletionResultV1 & CompletionProgress {
   return {
     phaseKind: input.phaseKind,
     executorId: input.executorId,
@@ -63,6 +67,8 @@ export function buildSessionCompletionResult(
       input.disallowedTools,
       input.toolProfileApplied === true,
     ),
+    ...(input.notice ? { notice: input.notice } : {}),
+    ...(input.receipt ? { receipt: input.receipt } : {}),
   };
 }
 

@@ -17,6 +17,8 @@ import {
   buildApprovalPromptTool,
   buildWorkspaceAnalyzeTool,
   buildSearchFilesTool,
+  buildReadSymbolTool,
+  buildGrepTool,
   buildGetDiagnosticsTool,
   buildLspReferencesTool,
   buildLspDefinitionsTool,
@@ -142,6 +144,8 @@ export function buildToolDefinitions(
   return [
     buildWorkspaceAnalyzeTool(),
     buildSearchFilesTool(),
+    buildReadSymbolTool(),
+    buildGrepTool(),
     buildGetDiagnosticsTool(),
     buildCountTokensTool(),
     buildWebSearchTool(),

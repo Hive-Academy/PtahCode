@@ -1,5 +1,5 @@
 import type { SessionStatsEntry } from '@ptah-extension/shared';
-import { compactSessionMetrics, contextDetailsText, costDetailsText, sessionContextCue, tokenDetailsText, type SessionStatsInputs } from './session-stats-view';
+import { compactSessionMetrics, contextDetailsText, costDetailsText, durationMsOf, formatModelCost, formatModelTotal, isKnownCost, nullCostValue, sessionContextCue, tokenDetailsText, type SessionStatsInputs } from './session-stats-view';
 import type { LiveModelStats } from './session-stats-summary.component';
 
 const liveContext: LiveModelStats = {
@@ -108,7 +108,9 @@ describe('compactSessionMetrics', () => {
       costUnavailableReason: 'rate-missing' as const,
     };
     const cost = compactSessionMetrics({ ...empty, snapshot: unpriced })[2];
-    expect(cost).toMatchObject({ unavailable: true, ariaLabel: 'Not priced' });
+    // Visible "Not priced", never "—" or $0 (issue #1459).
+    expect(cost).toMatchObject({ unavailable: true, ariaLabel: 'Not priced', value: 'Not priced' });
+    expect(nullCostValue(unpriced)).toBe('Not priced');
     expect(costDetailsText(unpriced, null)).toContain('Not priced');
     expect(costDetailsText(unpriced, null)).not.toContain('Cost unavailable');
   });
@@ -120,7 +122,8 @@ describe('compactSessionMetrics', () => {
       costUnavailableReason: 'usage-incomplete' as const,
     };
     const cost = compactSessionMetrics({ ...empty, snapshot: incomplete })[2];
-    expect(cost).toMatchObject({ unavailable: true, ariaLabel: 'Cost unavailable' });
+    expect(cost).toMatchObject({ unavailable: true, ariaLabel: 'Cost unavailable', value: '—' });
+    expect(nullCostValue(incomplete)).toBe('—');
     expect(costDetailsText(incomplete, null)).toContain('Cost unavailable');
     expect(costDetailsText(incomplete, null)).not.toContain('Not priced');
   });
@@ -162,3 +165,65 @@ describe('compactSessionMetrics', () => {
   });
 });
 
+
+describe('formatModelCost and formatModelTotal', () => {
+  const base = {
+    sessionId: 's', model: 'm', totalCost: null,
+    tokens: { input: 1, output: 1, cacheRead: 0, cacheCreation: 0 },
+    messageCount: 1, status: 'ok', scope: 'session',
+  } as SessionStatsEntry;
+  const rateMissing = { ...base, pricingCoverage: 'none', costUnavailableReason: 'rate-missing' } as SessionStatsEntry;
+  const partial = { ...base, pricingCoverage: 'partial', knownCost: 0.4 } as SessionStatsEntry;
+
+  it('reads "Not priced" only when the session names a missing rate', () => {
+    expect(formatModelCost(null, rateMissing)).toBe('Not priced');
+    expect(formatModelCost(undefined, rateMissing)).toBe('Not priced');
+  });
+
+  it('keeps "—" for a null row that is unobserved or only partly priced', () => {
+    expect(formatModelCost(null, base)).toBe('—');
+    expect(formatModelCost(null, partial)).toBe('—');
+    expect(formatModelCost(Number.NaN, partial)).toBe('—');
+    expect(formatModelCost(null, { ...base, costUnavailableReason: 'billing-unknown' })).toBe('—');
+    expect(formatModelCost(null, null)).toBe('—');
+  });
+
+  it('keeps a priced row unchanged, including a measured zero', () => {
+    expect(formatModelCost(1.234, partial)).toBe('$1.23');
+    expect(formatModelCost(0.0042, rateMissing)).toBe('$0.0042');
+    expect(formatModelCost(0, base)).toBe('$0.0000');
+  });
+
+  it('labels a partial Total with its known subtotal', () => {
+    expect(formatModelTotal(partial)).toBe('known subtotal $0.40');
+    expect(formatModelTotal(rateMissing)).toBe('Not priced');
+    expect(formatModelTotal(base)).toBe('—');
+    expect(formatModelTotal({ ...base, totalCost: 2.5 })).toBe('$2.50');
+  });
+
+  it('treats only a finite number as a known cost', () => {
+    expect(isKnownCost(0)).toBe(true);
+    expect(isKnownCost(null)).toBe(false);
+    expect(isKnownCost(undefined)).toBe(false);
+    expect(isKnownCost(Number.POSITIVE_INFINITY)).toBe(false);
+  });
+});
+
+describe('durationMsOf', () => {
+  const codex = {
+    sessionId: 'codex-1', model: 'gpt-5.5', totalCost: null,
+    tokens: { input: 1, output: 1, cacheRead: 0, cacheCreation: 0 },
+    messageCount: 1, status: 'ok', scope: 'session',
+  } as SessionStatsEntry;
+
+  it('reads a Codex snapshot duration', () => {
+    expect(durationMsOf({ ...codex, durationMs: 4_200 })).toBe(4_200);
+  });
+
+  it('is null only when the duration is truly unknown', () => {
+    expect(durationMsOf(null)).toBeNull();
+    expect(durationMsOf(codex)).toBeNull();
+    expect(durationMsOf({ ...codex, durationMs: null })).toBeNull();
+    expect(durationMsOf({ ...codex, durationMs: 0 })).toBeNull();
+  });
+});

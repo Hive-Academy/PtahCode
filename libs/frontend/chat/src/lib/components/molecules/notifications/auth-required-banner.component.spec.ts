@@ -238,4 +238,32 @@ describe('AuthRequiredBannerComponent', () => {
     expect(carryOverButton(host)).toBeUndefined();
     expect(host.querySelector('.sr-only')).toBeNull();
   });
+
+  it('offers "Check again" with the sign-in hint for a provider session', () => {
+    const host = render({
+      providerId: 'antigravity-cli',
+      message: 'Run `agy` once to sign in.',
+    });
+    const reauth = jest.fn();
+    fixture.componentInstance.reauth.subscribe(reauth);
+
+    const check = buttons(host).find(
+      (b) => b.textContent?.trim() === 'Check again',
+    );
+    expect(check?.getAttribute('aria-label')).toBe('Check again');
+    expect(host.textContent).toContain('Run `agy` once to sign in.');
+    expect(host.textContent).not.toContain('Re-authenticate in terminal');
+    check?.click();
+    expect(reauth).toHaveBeenCalledTimes(1);
+  });
+
+  it('disables "Check again" while the check runs', () => {
+    const host = render({ providerId: 'antigravity-cli' });
+    fixture.componentRef.setInput('reauthBusy', true);
+    fixture.detectChanges();
+    const check = buttons(host).find(
+      (b) => b.textContent?.trim() === 'Check again',
+    );
+    expect(check?.disabled).toBe(true);
+  });
 });

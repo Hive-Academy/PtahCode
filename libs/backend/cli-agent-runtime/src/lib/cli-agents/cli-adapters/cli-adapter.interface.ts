@@ -6,6 +6,7 @@
  * 2. Register in CliDetectionService
  */
 import type {
+  AgentActionNotice,
   AgentMessagingCapability,
   AgentRoleChannel,
   AgentRoleDefinition,
@@ -64,7 +65,10 @@ export interface LaneAccountBindingPort {
 export interface CliModelInfo {
   readonly id: string;
   readonly name: string;
-  /** A curated row the CLI did not report. */
+  /**
+   * Set by classification when no account source confirmed the CLI's id.
+   * Adapters never set it; no adapter carries a hardcoded list.
+   */
   readonly isFallback?: boolean;
 }
 
@@ -108,7 +112,21 @@ export type LanePolicyDelivery =
   | 'system-prompt'
   | 'instruction-file';
 
+/**
+ * Cooperative-pause probe for a lane (TASK_2026_2297_920a, phase P4). The manager owns the
+ * state. An adapter that can gate its own tool calls consults it before each NEW tool call
+ * and denies the call, without interrupting the run, while it returns a notice. It never
+ * stops or aborts the lane.
+ */
+export type LaneToolGate = () => AgentActionNotice | undefined;
+
 export interface CliCommandOptions extends LaneAccountBindingFields {
+  /**
+   * Pause probe from the manager. Adapters that honor it MUST report
+   * `honorsLaneToolGate: true` on their {@link SdkHandle} and deny new tool calls on every
+   * owned tool path. Others ignore it, and the manager falls back to a host dispatch hold.
+   */
+  readonly laneToolGate?: LaneToolGate;
   /** Phase identity for effort policy; retained when a lane resumes. */
   readonly phaseKind?: import('@ptah-extension/shared').PhaseKind;
   /** Adapters MUST await this checkpoint before releasing a named prompt. */
@@ -242,6 +260,11 @@ export interface SdkHandle extends LaneAccountBindingFields {
    *  in preference to the legacy `tracked.process.stdin` path.
    *  No-op if the run no longer has a writable channel. */
   readonly steer?: (message: string) => void | Promise<void>;
+  /**
+   * True only when this handle denies every new tool call while the `laneToolGate` it was
+   * launched with returns a notice (certified for all owned tool paths).
+   */
+  readonly honorsLaneToolGate?: boolean;
   /** Hold an internal warning for the next turn without starting a turn. */
   readonly queueForNextTurn?: (message: string) => void;
   /** Abort the CURRENT run/turn without ending the session/agent, and resolve

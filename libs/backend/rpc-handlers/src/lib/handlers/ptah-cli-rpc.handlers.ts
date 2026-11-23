@@ -18,12 +18,24 @@ import {
   RpcUserError,
   TOKENS,
 } from '@ptah-extension/vscode-core';
-import type { SentryService } from '@ptah-extension/vscode-core';
-import { getPtahCliLaneProvider } from '@ptah-extension/shared';
+import type {
+  IAuthSecretsService,
+  SentryService,
+} from '@ptah-extension/vscode-core';
+import {
+  getPtahCliLaneProvider,
+  modelListErrorText,
+  modelListNoticeText,
+} from '@ptah-extension/shared';
 import {
   CLI_AGENT_RUNTIME_TOKENS,
+  PTAH_CLI_KEY_PREFIX,
   PtahCliRegistry,
 } from '@ptah-extension/cli-agent-runtime';
+import {
+  AUTH_PROVIDERS_TOKENS,
+  type ProviderModelsService,
+} from '@ptah-extension/auth-providers';
 import { PtahCliReasoningEffortInputSchema } from '@ptah-extension/shared';
 import type {
   PtahCliListParams,
@@ -38,6 +50,7 @@ import type {
   PtahCliTestConnectionResult,
   PtahCliListModelsParams,
   PtahCliListModelsResult,
+  PtahCliSummary,
 } from '@ptah-extension/shared';
 import type { RpcMethodName } from '@ptah-extension/shared';
 
@@ -75,6 +88,13 @@ export class PtahCliRpcHandlers {
     private readonly ptahCliRegistry: PtahCliRegistry,
     @inject(TOKENS.SENTRY_SERVICE)
     private readonly sentryService: SentryService,
+    @inject(AUTH_PROVIDERS_TOKENS.SDK_PROVIDER_MODELS)
+    private readonly providerModels: Pick<ProviderModelsService, 'fetchModels'>,
+    @inject(TOKENS.AUTH_SECRETS_SERVICE)
+    private readonly authSecrets: Pick<
+      IAuthSecretsService,
+      'getCredential' | 'getProviderKey'
+    >,
   ) {}
 
   /**
@@ -292,11 +312,12 @@ export class PtahCliRpcHandlers {
   }
 
   /**
-   * ptahCli:listModels - List available models for a Ptah CLI agent's provider
+   * ptahCli:listModels - The model list of a Ptah CLI agent's provider.
    *
-   * Returns static model list from the provider registry. For providers with
-   * dynamic model APIs (e.g., OpenRouter), uses the static models as the list
-   * since dynamic model fetching is handled by ProviderModelsService separately.
+   * Goes through `ProviderModelsService.fetchModels` (live route, then the
+   * persisted catalog) with the agent's own credential, and maps the typed
+   * list to `{ models, source, failureReason?, error? }`. An unknown agent or
+   * provider keeps its text with `source: 'unavailable'`.
    */
   private registerListModels(): void {
     this.rpcHandler.registerMethod<
@@ -314,7 +335,7 @@ export class PtahCliRpcHandlers {
           this.logger.warn('RPC: ptahCli:listModels - agent not found', {
             id: params.id,
           });
-          return { models: [], isStatic: true, error: 'Agent not found' };
+          return { models: [], source: 'unavailable', error: 'Agent not found' };
         }
         const provider = getPtahCliLaneProvider(agent.providerId);
 
@@ -322,39 +343,85 @@ export class PtahCliRpcHandlers {
           this.logger.warn('RPC: ptahCli:listModels - provider not found', {
             providerId: agent.providerId,
           });
-          return { models: [], isStatic: true, error: 'Provider not found' };
+          return {
+            models: [],
+            source: 'unavailable',
+            error: 'Provider not found',
+          };
         }
-        const models = (provider.staticModels ?? []).map((m) => ({
+        const apiKey = await this.resolveAgentKey(agent);
+        const result = await this.providerModels.fetchModels(
+          agent.providerId,
+          apiKey,
+          false,
+        );
+        const models = result.models.map((m) => ({
           id: m.id,
           name: m.name,
           description: m.description,
           contextLength: m.contextLength,
         }));
 
-        const hasDynamicEndpoint = !!(
-          'modelsEndpoint' in provider && provider.modelsEndpoint
-        );
-
         this.logger.debug('RPC: ptahCli:listModels success', {
           id: params.id,
           providerId: agent.providerId,
           modelCount: models.length,
-          isStatic: !hasDynamicEndpoint,
+          source: result.source,
+          failureReason: result.failureReason,
         });
 
+        if (result.source === 'live' || !result.failureReason) {
+          return { models, source: result.source };
+        }
+        if (result.source === 'persisted') {
+          const { savedAt } = result;
+          return {
+            models,
+            source: result.source,
+            failureReason: result.failureReason,
+            ...(savedAt !== undefined && {
+              savedAt,
+              notice: modelListNoticeText(
+                result.failureReason,
+                provider.name,
+                savedAt,
+              ),
+            }),
+          };
+        }
         return {
-          models,
-          isStatic: !hasDynamicEndpoint,
+          models: [],
+          source: result.source,
+          failureReason: result.failureReason,
+          error: modelListErrorText(result.failureReason, provider.name),
         };
       } catch (error: unknown) {
         this.reportFailure('ptahCli:listModels', 'registerListModels', error);
         return {
           models: [],
-          isStatic: true,
+          source: 'unavailable',
           error: PTAH_CLI_RPC_ERRORS.listModels,
         };
       }
     });
+  }
+
+  /**
+   * The agent's key, by the registry's credential-source rule
+   * (`PtahCliRegistry.listAgents`): a shared-connection Claude API lane reads
+   * the host's API key credential, every other agent its own
+   * `ptahCli.<agentId>` slot. `null` when none is stored; the key is passed
+   * on only and never logged.
+   */
+  private async resolveAgentKey(agent: PtahCliSummary): Promise<string | null> {
+    const key =
+      agent.providerId === 'anthropic-api' &&
+      agent.credentialSource === 'shared-connection'
+        ? await this.authSecrets.getCredential('apiKey')
+        : await this.authSecrets.getProviderKey(
+            `${PTAH_CLI_KEY_PREFIX}.${agent.id}`,
+          );
+    return key?.trim() ? key : null;
   }
 
   /**

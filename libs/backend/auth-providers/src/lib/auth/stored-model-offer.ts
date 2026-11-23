@@ -10,7 +10,6 @@
 import {
   ANTHROPIC_DIRECT_PROVIDER_ID,
   getAllAnthropicProviders,
-  getAnthropicProvider,
 } from '@ptah-extension/shared';
 
 /** Claude aliases; `ModelResolver` maps the tiers for every provider. */
@@ -28,7 +27,10 @@ export function isClaudeModel(model: string): boolean {
   return CLAUDE_ALIASES.has(base) || base.startsWith('claude-');
 }
 
-/** Cached catalogue model ids of a provider, or `null` when none is on hand. */
+/**
+ * Catalogue model ids of a provider (the live memory cache or the saved
+ * catalog), or `null` when none is on hand on this machine.
+ */
 export type CachedModelIdsReader = (
   providerId: string,
 ) => readonly string[] | null;
@@ -38,22 +40,20 @@ function isOfferedBy(
   model: string,
   cachedModelIds: CachedModelIdsReader,
 ): boolean {
-  return (
-    (cachedModelIds(providerId)?.includes(model) ?? false) ||
-    (getAnthropicProvider(providerId)?.staticModels?.some(
-      (m) => m.id === model,
-    ) ??
-      false)
-  );
+  return cachedModelIds(providerId)?.includes(model) ?? false;
 }
 
 /**
  * `false` only when `model` is known to belong to ANOTHER provider: some
- * other provider offers it (cached catalogue or registry `staticModels`) and
- * the serving provider does not (direct Anthropic: not a Claude id or alias;
- * otherwise neither its cached catalogue nor its `staticModels`). Claude ids
- * and aliases are kept on every provider. Unknown ids (custom, pinned, local,
- * missing from a partial catalogue) are kept, as before this check.
+ * other provider's catalogue lists it and the serving provider does not
+ * (direct Anthropic: not a Claude id or alias; otherwise its catalogue does
+ * not list it). Claude ids and aliases are kept on every provider. Unknown ids
+ * (custom, pinned, local, missing from a partial catalogue) are kept, as
+ * before this check.
+ *
+ * Only catalogues on hand count; there is no repository model list. A
+ * provider never listed on this machine claims no model, so a saved id that
+ * belongs to it is kept and the vendor answers it (documented regression M8).
  */
 export function isStoredModelOffered(
   model: string,

@@ -81,14 +81,14 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
         data-testid="ready-connection-intro"
       >
         Ptah uses your main connection for chat and agents. Pick
-        {{ optionNames }}, and make sure it is installed and signed in. The
+        {{ optionNames() }}, and make sure it is installed and signed in. The
         others are optional, and you can change this later in Providers. If you
         skip this step, you can fix it later.
       </p>
       <ptah-connection-choice class="mt-5" />
       <div
         class="mt-5 items-stretch gap-[var(--ptah-gap-field)] grid grid-cols-1 lg:grid-cols-[repeat(var(--connection-cols),minmax(0,1fr))]"
-        [style.--connection-cols]="columns"
+        [style.--connection-cols]="columns()"
         data-testid="ready-provider-panels"
       >
         @for (panel of panels(); track panel.option.id) {
@@ -176,10 +176,12 @@ export class ReadyConnectionStepPage {
   );
   private readonly options = inject(CONNECTION_OPTION_LIST);
   /** One grid column per option, up to three. */
-  protected readonly columns = connectionColumns(this.options.length);
+  protected readonly columns = computed(() =>
+    connectionColumns(this.options().length),
+  );
   /** "Claude Code or Codex", from the option list. */
-  protected readonly optionNames = joinOr(
-    this.options.map((option) => option.name),
+  protected readonly optionNames = computed(() =>
+    joinOr(this.options().map((option) => option.name)),
   );
   /** Each provider's readiness, keyed by option id. */
   private readonly readinessOf: Record<
@@ -188,11 +190,12 @@ export class ReadyConnectionStepPage {
   > = {
     'claude-cli': () => this.store.claude(),
     'openai-codex': () => this.store.codex(),
+    'antigravity-cli': () => this.store.antigravity(),
   };
   /** One detail card per option, in list order. */
   protected readonly panels = computed(() => {
     const main = this.store.chosen().provider;
-    return this.options.map((option) => ({
+    return this.options().map((option) => ({
       option,
       view: this.readinessOf[option.id](),
       role: connectionRole(main, option.id),

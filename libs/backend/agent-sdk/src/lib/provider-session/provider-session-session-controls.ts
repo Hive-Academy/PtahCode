@@ -71,10 +71,15 @@ export class ProviderSessionSessionControls {
   }
 
   endSession(id: SessionId): void {
+    // An open in flight releases what it got itself once cancelled.
+    const opening = this.deps.opening.has(id);
     this.cancelOpening(id);
     const session = this.deps.sessions.get(id);
-    if (!session) return;
-    void this.close(session, 'tab-closed').catch((error: unknown) => {
+    if (!session && opening) return;
+    const closing = session
+      ? this.close(session, 'tab-closed')
+      : this.releaseUnowned(id);
+    void closing.catch((error: unknown) => {
       this.deps.failure(error, 'cleanup');
     });
   }
@@ -87,6 +92,18 @@ export class ProviderSessionSessionControls {
   /** Each turn is its own stream; the session outlives it. */
   async endSessionIfTokenMatches(): Promise<boolean> {
     return false;
+  }
+
+  /**
+   * A session this adapter holds no record for, but the host may still hold a
+   * process for: one only a history read opened (`load`). Its tab closing
+   * gives that process back now instead of after the pool's idle close; the
+   * host release is a no-op when nothing is live.
+   */
+  private releaseUnowned(id: SessionId): Promise<void> {
+    return this.deps.ports.release(id, 'tab-closed').catch((error: unknown) => {
+      throw this.deps.failure(error, 'release');
+    });
   }
 
   /** Remove the record and give the session back to the pool, once. */
@@ -133,7 +150,10 @@ export class ProviderSessionSessionControls {
       return;
     }
     const session = this.deps.sessions.get(id);
-    if (!session) return;
+    if (!session) {
+      if (cause === 'tab-close') await this.releaseUnowned(id);
+      return;
+    }
     const hardStop = cause === 'parent-stop';
     if (session.busy && !session.stopRequested) {
       session.stopRequested = true;

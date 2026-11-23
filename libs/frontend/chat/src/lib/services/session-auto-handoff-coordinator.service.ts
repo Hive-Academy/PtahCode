@@ -217,7 +217,7 @@ export class SessionAutoHandoffCoordinatorService {
         this.logSkip(sessionId, 'pending resume', tab.id);
         continue;
       }
-      // A queued message would deny the prompt; this tracked read re-runs the
+      // The hand-off waits until the prompt is answered; this tracked read re-runs the
       // effect once the prompt is answered.
       if (this.messageDispatch.hasPendingPermissionForTab(tab.id)) {
         this.logSkip(sessionId, 'pending permission', tab.id);

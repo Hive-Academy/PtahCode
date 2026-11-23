@@ -24,7 +24,6 @@ import {
 } from '@ptah-extension/workspace-intelligence';
 import {
   FileType,
-  compactCoverage,
   isCleanAnswer,
   type IFileSystemProvider,
   type IWorkspaceProvider,
@@ -32,6 +31,12 @@ import {
 import { countTokens } from '@ptah-extension/tool-output-reducers';
 import { buildAstNamespace } from '../namespace-builders/ast-namespace.builder';
 import type { AstNamespace } from '../types';
+import {
+  AST_ANALYZE_TRUNCATION_HINT,
+  renderAstAnalyzeResult,
+  shapeAstAnalyzeResult,
+} from './ast-analyze-output';
+import { getToolResultBudget } from './tool-result-budget';
 
 jest.mock('wasm-bundle-dir', () => {
   const nodePath = require('path');
@@ -79,7 +84,7 @@ function silentLogger(): Logger {
  * methods, then short exported helpers — the shape where per-record JSON
  * keys cost the most.
  */
-function generateSource(lineCount: number): string {
+function generateSource(lineCount: number, exportHelpers = true): string {
   const lines = [
     "import { readFile } from 'node:fs/promises';",
     "import * as path from 'node:path';",
@@ -102,7 +107,7 @@ function generateSource(lineCount: number): string {
   let n = 0;
   while (lines.length + 7 <= lineCount) {
     lines.push(
-      `export function transformRecord${n}(input: string, factor: number, label?: string): string {`,
+      `${exportHelpers ? 'export ' : ''}function transformRecord${n}(input: string, factor: number, label?: string): string {`,
       `  const scaled = input.length * factor + ${n};`,
       `  const text = label ? label + ':' + scaled : String(scaled);`,
       `  return text.padStart(${(n % 7) + 2}, '0');`,
@@ -139,21 +144,35 @@ const BROKEN_SOURCE = [
 function decode(text: string): Record<string, unknown> {
   const out = JSON.parse(text) as Record<string, unknown>;
   for (const [key, value] of Object.entries(out)) {
-    if (!isTable(value)) {
-      continue;
+    if (isTable(value)) {
+      out[key] = decodeTable(value);
     }
-    const [header, ...rows] = value;
-    out[key] = rows.map((row) => {
-      const record: Record<string, unknown> = {};
-      header.forEach((column, i) => {
-        if (i < row.length && row[i] !== null) {
-          record[column] = row[i];
-        }
-      });
-      return record;
-    });
   }
   return out;
+}
+
+/** Records of one table; a cell that is a table (class members) nests. */
+function decodeTable([header, ...rows]: [string[], ...unknown[][]]): Record<
+  string,
+  unknown
+>[] {
+  return rows.map((row) => {
+    const record: Record<string, unknown> = {};
+    header.forEach((column, i) => {
+      if (i < row.length && row[i] !== null) {
+        const cell = row[i];
+        record[column] = isTable(cell) ? decodeTable(cell) : cell;
+      }
+    });
+    return record;
+  });
+}
+
+/** The lists of the served shape, as plain JSON. */
+function shapedLists(
+  result: Parameters<typeof shapeAstAnalyzeResult>[0],
+): Record<string, unknown> {
+  return JSON.parse(JSON.stringify(shapeAstAnalyzeResult(result, [ROOT])));
 }
 
 function isTable(value: unknown): value is [string[], ...unknown[][]] {
@@ -228,26 +247,102 @@ describe('ptah_ast_analyze result text (real parser)', () => {
   });
 
   // Lane H merge (Batches 22c + 24r): the namespace result carries the full
-  // coverage with its verdict first; the dispatcher writes it in the compact
-  // form (`withCompactCoverage`), so a clean parse is `{clean, analyzed}`.
-  it('keeps parse status and coverage ahead of the tables', async () => {
+  // coverage with its verdict first. TASK_2026_2299: the served text drops a
+  // zero error count and a plain clean coverage, and lists classes, exports
+  // and imports ahead of functions. `D:/ws` is not absolute on POSIX, so the
+  // file stays as given there and becomes `src/...` on Windows.
+  it('serves parse status first, quiet fields dropped, functions last', async () => {
     const result = await ast.analyze(`${ROOT}/src/record-store.ts`);
     expect(Object.keys(result.coverage).slice(0, 2)).toEqual([
       'clean',
       'reasons',
     ]);
-    const text = formatAstAnalysisResult({
-      ...result,
-      coverage: compactCoverage(result.coverage),
-    });
+    const text = renderAstAnalyzeResult(result, [ROOT]);
 
     expect(text).toMatch(
-      /^\{"parseStatus":"ok","errorNodeCount":0,"errorNodeCountCapped":false,"coverage":\{"clean":true,"analyzed":1\},"file":"D:\/ws\/src\/record-store\.ts","language":"typescript","functions":\[\["name","parameters","startLine","endLine"\],/,
+      /^\{"parseStatus":"ok","file":"(D:\/ws\/)?src\/record-store\.ts","language":"typescript","classes":\[\[/,
     );
+    expect(Object.keys(JSON.parse(text) as object)).toEqual([
+      'parseStatus',
+      'file',
+      'language',
+      'classes',
+      'exports',
+      'imports',
+      'functions',
+    ]);
+    expect(decode(text)['functions']).toEqual(shapedLists(result)['functions']);
   });
 
-  // Batch 31 r1 R31-01: a clean C answer, in the compact form the
-  // dispatcher serves (`withCompactCoverage`), still names its approximation;
+  it('lists class methods under their class as members, out of functions', async () => {
+    const result = await ast.analyze(`${ROOT}/src/record-store.ts`);
+    const text = renderAstAnalyzeResult(result, [ROOT]);
+    const parsed = JSON.parse(text) as { classes: unknown[][] };
+
+    expect(parsed.classes[0]).toEqual([
+      'name',
+      'startLine',
+      'endLine',
+      'members',
+    ]);
+    const [name, startLine, endLine, members] = parsed.classes[1] as [
+      string,
+      number,
+      number,
+      unknown[][],
+    ];
+    expect([name, startLine, endLine]).toEqual(['RecordStore', 4, 37]);
+    expect(members[0]).toEqual([
+      'name',
+      'parameters',
+      'startLine',
+      'endLine',
+      'modifiers',
+    ]);
+    expect(members[1]).toEqual(['constructor', ['logger'], 6, 6]);
+    expect(members[2]).toEqual(['load0', ['key', 'fallback'], 7, 11, 'async']);
+    expect(members).toHaveLength(8);
+
+    const functions = decode(text)['functions'] as { name: string }[];
+    const names = functions.map((fn) => fn.name);
+    expect(names).not.toContain('constructor');
+    expect(names.some((fn) => fn.startsWith('load'))).toBe(false);
+    expect(names).toContain('transformRecord0');
+    expect(functions).toHaveLength(result.functions.length - 7);
+  });
+
+  it('cuts functions at a record boundary to fit the budget, and says so', async () => {
+    // Helpers stay private, so the long list is `functions`, not `exports`.
+    files.set(`${ROOT}/src/huge-store.ts`, generateSource(3000, false));
+    const result = await ast.analyze(`${ROOT}/src/huge-store.ts`);
+    const text = renderAstAnalyzeResult(result, [ROOT]);
+    const parsed = JSON.parse(text) as {
+      truncated: Record<string, { shown: number; total: number }>;
+      hint: string;
+    };
+    const budget = getToolResultBudget('ptah_ast_analyze');
+
+    expect(countTokens(text)).toBeLessThanOrEqual(budget.tokens);
+    expect(Object.keys(parsed).indexOf('truncated')).toBeLessThan(
+      Object.keys(parsed).indexOf('classes'),
+    );
+    expect(parsed.hint).toBe(AST_ANALYZE_TRUNCATION_HINT);
+    const cut = parsed.truncated['functions'];
+    expect(cut.shown).toBeGreaterThan(0);
+    expect(cut.shown).toBeLessThan(cut.total);
+    const decoded = decode(text);
+    const shaped = shapedLists(result);
+    expect(cut.total).toBe((shaped['functions'] as unknown[]).length);
+    expect(decoded['functions']).toEqual(
+      (shaped['functions'] as unknown[]).slice(0, cut.shown),
+    );
+    for (const list of ['classes', 'exports', 'imports'] as const) {
+      expect(decoded[list]).toEqual(shaped[list]);
+    }
+  });
+
+  // Batch 31 r1 R31-01: a clean C answer, in the form the dispatcher
+  // serves (`renderAstAnalyzeResult`), still names its approximation;
   // a C++ one does not.
   it.each([
     ['widget.c', ['c:parsed-as-cpp']],
@@ -258,19 +353,18 @@ describe('ptah_ast_analyze result text (real parser)', () => {
     async (name, approximations) => {
       files.set(`${ROOT}/native/${name}`, 'int needle(int x) { return x; }\n');
       const result = await ast.analyze(`${ROOT}/native/${name}`);
-      const served = JSON.parse(
-        formatAstAnalysisResult({
-          ...result,
-          coverage: compactCoverage(result.coverage),
-        }),
-      ) as { parseStatus: string; coverage: Record<string, unknown> };
+      const served = JSON.parse(renderAstAnalyzeResult(result, [ROOT])) as {
+        parseStatus: string;
+        coverage?: Record<string, unknown>;
+      };
 
       expect(served.parseStatus).toBe('ok');
-      expect(served.coverage).toEqual({
-        clean: true,
-        analyzed: 1,
-        ...(approximations === undefined ? {} : { approximations }),
-      });
+      // A plain clean verdict is dropped; one with an approximation is kept.
+      expect(served.coverage).toEqual(
+        approximations === undefined
+          ? undefined
+          : { clean: true, analyzed: 1, approximations },
+      );
     },
   );
 

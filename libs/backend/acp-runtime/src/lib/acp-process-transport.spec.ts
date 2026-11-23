@@ -198,6 +198,8 @@ describe('spawnAcpProcess', () => {
 
     // Both writes flushed, so the child is attached and alive.
     expect(transport.getPid()).toBeDefined();
+    // The spawn report carries the same pid (a caller tracks it before setup).
+    await expect(transport.spawned).resolves.toBe(transport.getPid());
 
     // Ends stdin -> the child echoes nothing more and exits 0.
     await writer.close();
@@ -431,6 +433,8 @@ describe('spawnAcpProcess', () => {
     const exit = await transport.exited;
     expect(exit).toEqual({ code: null, signal: 'error' });
     expect(transport.getPid()).toBeUndefined();
+    // A process that never started is never reported as spawned.
+    await expect(transport.spawned).resolves.toBeUndefined();
 
     const first = await transport.stream.readable.getReader().read();
     expect(first.done).toBe(true);
@@ -480,6 +484,7 @@ describe('spawnAcpProcess', () => {
       command: 'grok', args: [], cwd: '.', env: {}, needsConsole: false, logger,
     });
     await expect(missing.exited).resolves.toEqual({ code: null, signal: 'error' });
+    await expect(missing.spawned).resolves.toBeUndefined();
     expect(logger.error).toHaveBeenCalledWith(
       '[AcpProcessTransport] agent process was not spawned',
       { command: 'grok', error: 'no process spawner was supplied for the agent process' },

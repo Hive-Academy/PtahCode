@@ -47,6 +47,8 @@ import { randomUUID } from 'node:crypto';
 import { join, resolve } from 'path';
 import { container as rootContainer, type DependencyContainer } from 'tsyringe';
 import {
+  SDK_TOKENS,
+  SessionToolDispositionRegistry,
   SdkAdapterEvents,
   SessionAdmissionRefusedError,
   SessionEndCallbackRegistry,
@@ -77,6 +79,8 @@ import type {
 import type {
   ChildChatSessionStartInput,
   IChildChatSessionHost,
+  WatchdogRecoveryInput,
+  WatchdogRecoveryOutcome,
 } from './child-chat-session-host.port';
 import { CLI_AGENT_RUNTIME_TOKENS } from '../di/tokens';
 import { SessionHandoffService } from './session-handoff.service';
@@ -118,11 +122,13 @@ export function makeHarness(
     /** `null` builds the spawner with no recorder bound (VS Code). */
     recorder?: { recordAgentStartedSession: jest.Mock } | null;
     memoryProbe?: () => number;
+    wasStoppedSince?: IChildChatSessionHost['wasStoppedSince'];
   } = {},
 ) {
   const logger = createMockLogger() as unknown as Logger;
   const registry = new SessionChildRegistry();
   const policies = new UnattendedSessionPolicyRegistry();
+  const dispositions = new SessionToolDispositionRegistry();
   const adapterEvents = new SdkAdapterEvents(logger);
   const idResolved = new SessionIdResolvedCallbackRegistry(logger);
   const sessionEnd = new SessionEndCallbackRegistry(logger);
@@ -152,6 +158,13 @@ export function makeHarness(
     }),
   };
   const host = {
+    wasStoppedSince: options.wasStoppedSince,
+    recoverAfterWatchdogStop: jest.fn(async (
+      input: WatchdogRecoveryInput,
+    ): Promise<WatchdogRecoveryOutcome> => {
+      active.add(input.tabId);
+      return { recovered: true };
+    }),
     listChildModels: jest.fn(async () => ['claude-haiku-4', 'claude-opus-4']),
     resolveChildModel: jest.fn(
       async ({
@@ -271,6 +284,7 @@ export function makeHarness(
   /** A real child container holding `hostValue` (none when `null`). */
   const containerWith = (hostValue: unknown): DependencyContainer => {
     const scope = rootContainer.createChildContainer();
+    scope.registerInstance(SDK_TOKENS.SDK_SESSION_TOOL_DISPOSITION, dispositions);
     if (options.closer) {
       scope.register(CLI_AGENT_RUNTIME_TOKENS.HANDOFF_PREDECESSOR_CLOSER, {
         useValue: options.closer,
@@ -371,6 +385,7 @@ export function makeHarness(
     containerWith,
     registry,
     policies,
+    dispositions,
     adapterEvents,
     idResolved,
     sessionEnd,
@@ -384,6 +399,7 @@ export function makeHarness(
     environment,
     lanes,
     agents,
+    lifecycle,
     lifecycleIds,
     parentLevel,
     phases,
@@ -2508,26 +2524,27 @@ describe('SessionSpawnerService — runtime cap', () => {
     expect(h.adapter.interruptSession).not.toHaveBeenCalled();
   });
 
-  it('releases the budget only after safety-net interruption settles', async () => {
+  it('retains the budget through pause and clears the tool disposition on explicit stop', async () => {
     const h = makeHarness({
       config: {
         'agentSessions.maxRuntimeMinutes': 5,
+        'agentSessions.handoffGraceMinutes': 1,
         'agentSessions.maxSuccessions': 0,
       },
     });
     const child = await h.startChild();
-    let settle: () => void = () => undefined;
-    h.adapter.interruptSession.mockImplementationOnce(
-      () => new Promise<void>((resolve) => (settle = resolve)),
-    );
-
-    jest.advanceTimersByTime(5 * 60_000);
+    h.markRan(child.childSessionId);
+    const sdkSessionId = h.registry.get(child.childSessionId)?.sdkSessionId;
+    jest.advanceTimersByTime(6 * 60_000);
     await flush();
     expect(h.sessionBudget.release).not.toHaveBeenCalled();
+    expect(h.dispositions.lookup({ tabId: child.childSessionId })?.phase).toBe('paused');
+    expect(h.dispositions.lookup({ sdkSessionId })?.phase).toBe('paused');
 
-    settle();
-    await flush();
+    await h.spawner.stop({ callerSessionId: PARENT, childSessionId: child.childSessionId });
     expect(h.sessionBudget.release).toHaveBeenCalledWith(child.childSessionId);
+    expect(h.dispositions.lookup({ tabId: child.childSessionId })).toBeUndefined();
+    expect(h.dispositions.lookup({ sdkSessionId })).toBeUndefined();
   });
 });
 

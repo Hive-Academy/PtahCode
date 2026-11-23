@@ -159,7 +159,7 @@ export class ModelStateService {
    *
    * `pricing.utils` owns a module-level map, and the webview loads its own
    * instance of that module. Every hydration path — OpenRouter's catalog,
-   * `seedStaticModelPricing`, Ollama Cloud's metadata — runs host-side, so the
+   * the Anthropic rate card, Ollama Cloud's metadata — runs host-side, so the
    * renderer's map held nothing but the handful of bundled OpenAI/local entries
    * and knew no Claude model at all. Anything here that reads the map
    * (`getModelContextWindow`, and any future cost rendering) was answering from

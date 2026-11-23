@@ -22,6 +22,7 @@ import {
   buildClaudeLaneBootstrapOptions,
   buildClaudeSdkLaneOptions,
 } from '../../claude/claude-sdk-lane-options';
+import { gateLaneCanUseTool } from '../../claude/lane-admission-gate';
 import {
   ClaudeNamedLaneAdmission,
   claudeLaneRefusal,
@@ -237,6 +238,7 @@ export class ClaudeCliAdapter implements ClaudeCliAdapterContract {
         logger: this.logger,
         processSpawner: this.deps.processSpawner,
         executable,
+        laneToolGate: input.laneToolGate,
       });
       if (lanePolicy.cli === 'claude' && lanePolicy.permissionMode) {
         options.permissionMode = lanePolicy.permissionMode;
@@ -251,13 +253,18 @@ export class ClaudeCliAdapter implements ClaudeCliAdapterContract {
         ) {
           const permissionRoutingId = input.resumeSessionId ?? input.parentSessionId ?? routingId;
           const laneLevel = lanePolicy.requested.permission;
-          options.canUseTool = this.deps.permissionHandler.createCallback(
+          const routed = this.deps.permissionHandler.createCallback(
             SessionId.safeParse(permissionRoutingId) ?? undefined,
             () => agentIdHolder.value,
             undefined,
             () => laneLevel,
             permissionRoutingId,
           );
+          // Installed after the shared builder gated the options, so it is
+          // gated here; the yolo branch above relies on the PreToolUse hook.
+          options.canUseTool = input.laneToolGate
+            ? gateLaneCanUseTool(routed, input.laneToolGate)
+            : routed;
         }
       }
       // An unresolved native model is the SDK default, never a tier alias.
@@ -341,6 +348,9 @@ export class ClaudeCliAdapter implements ClaudeCliAdapterContract {
         }).handle;
         return {
           ...handle,
+          // The shared builder gated every tool path of this lane: the
+          // PreToolUse hook (all permission modes) and `canUseTool`.
+          ...(input.laneToolGate && { honorsLaneToolGate: true }),
           toolProfileApplied: Boolean(
             input.phase?.toolProfile.disallowedTools.length &&
               assembly.mcpServers['ptah'] &&

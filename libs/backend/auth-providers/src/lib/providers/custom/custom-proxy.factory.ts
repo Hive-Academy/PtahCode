@@ -44,6 +44,5 @@ export function createCustomOpenAiProxy(params: {
     name: provider.name,
     baseUrl,
     helpUrl: provider.helpUrl,
-    staticModels: provider.staticModels,
   });
 }

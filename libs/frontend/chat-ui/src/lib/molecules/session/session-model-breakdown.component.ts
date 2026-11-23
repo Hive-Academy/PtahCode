@@ -11,10 +11,14 @@ import {
 } from '@ptah-extension/shared';
 import { ModelStateService } from '@ptah-extension/core';
 import {
-  formatCost,
   formatOptionalTokens,
   formatTokens,
 } from './session-stats-format';
+import {
+  formatModelCost,
+  formatModelTotal,
+  isKnownCost,
+} from './session-stats-view';
 
 /** One per-model row of the backend snapshot. */
 type ModelUsageRow = NonNullable<SessionStatsEntry['modelUsageList']>[number];
@@ -115,10 +119,13 @@ type ModelUsageRow = NonNullable<SessionStatsEntry['modelUsageList']>[number];
               {{ formatOptionalTokens(usage.cacheCreation) }}
             </div>
             <div
-              class="text-xs text-right tabular-nums text-success"
+              class="text-xs text-right tabular-nums"
+              [class.text-success]="isKnownCost(usage.costUSD)"
+              [class.text-base-content-muted]="!isKnownCost(usage.costUSD)"
+              [attr.title]="isKnownCost(usage.costUSD) ? null : notReported"
               role="cell"
             >
-              {{ formatCost(usage.costUSD) }}
+              {{ formatModelCost(usage.costUSD, stats) }}
             </div>
           </div>
         }
@@ -154,10 +161,12 @@ type ModelUsageRow = NonNullable<SessionStatsEntry['modelUsageList']>[number];
             {{ formatTokens(stats.tokens.cacheCreation) }}
           </div>
           <div
-            class="text-xs text-right tabular-nums font-semibold text-success"
+            class="text-xs text-right tabular-nums font-semibold"
+            [class.text-success]="isKnownCost(stats.totalCost)"
+            [class.text-base-content-muted]="!isKnownCost(stats.totalCost)"
             role="cell"
           >
-            {{ formatCost(stats.totalCost) }}
+            {{ formatModelTotal(stats) }}
           </div>
         </div>
       </div>
@@ -181,7 +190,10 @@ export class SessionModelBreakdownComponent {
     () => this.snapshot()?.modelUsageList ?? [],
   );
 
-  protected readonly formatCost = formatCost;
+  protected readonly formatModelCost = formatModelCost;
+  protected readonly formatModelTotal = formatModelTotal;
+  protected readonly isKnownCost = isKnownCost;
+  protected readonly notReported = 'not reported';
   protected readonly formatTokens = formatTokens;
   protected readonly formatOptionalTokens = formatOptionalTokens;
 

@@ -20,6 +20,7 @@ import {
   NativePopoverComponent,
   PROVIDER_MODELS_LOADER,
   ProviderModelSearchFieldComponent,
+  SAVED_LIST_NOTICE,
 } from '@ptah-extension/ui';
 import type {
   ProviderAccountSelection,
@@ -102,6 +103,7 @@ const CATALOGUE: ProviderListModelsResult = {
     },
   ],
   totalCount: 2,
+  source: 'live',
 };
 
 class StateStub {
@@ -1016,6 +1018,31 @@ describe('MainAgentReassignPopoverComponent', () => {
       buttonNamed('Retry')?.click();
       await flush();
       expect(query('main-agent-model-error')).toBeNull();
+    });
+
+    it('a saved (persisted) list shows a status notice whose Retry reloads; a live list shows none (S2)', async () => {
+      expect(query('main-agent-model-notice')).toBeNull();
+      loader.listModels.mockResolvedValueOnce({
+        ...CATALOGUE,
+        source: 'persisted',
+        failureReason: 'network',
+      });
+      fixture.componentInstance.open.set(false);
+      fixture.detectChanges();
+      fixture.componentInstance.open.set(true);
+      fixture.detectChanges();
+      await flush();
+      const notice = query('main-agent-model-notice');
+      expect(notice?.getAttribute('role')).toBe('status');
+      expect(notice?.textContent).toContain(SAVED_LIST_NOTICE);
+      expect(query('main-agent-model-error')).toBeNull();
+      const calls = loader.listModels.mock.calls.length;
+      (
+        query('main-agent-model-notice-retry') as HTMLButtonElement | null
+      )?.click();
+      await flush();
+      expect(loader.listModels.mock.calls.length).toBe(calls + 1);
+      expect(query('main-agent-model-notice')).toBeNull();
     });
 
     it('a failed write is never reported as saved and offers no Undo (D15)', async () => {

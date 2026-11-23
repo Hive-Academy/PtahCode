@@ -24,6 +24,7 @@ import {
   OLLAMA_CLOUD_DIRECT_BASE_URL,
   PTAH_CLI_PERMISSION_CAPABILITIES,
   getPtahCliLaneProvider,
+  isProviderSessionProviderId,
 } from '@ptah-extension/shared';
 import {
   Logger,
@@ -32,6 +33,7 @@ import {
   type IAuthSecretsService,
 } from '@ptah-extension/vscode-core';
 import type { SdkHandle } from '../cli-agents/cli-adapters';
+import type { LaneToolGate } from '../cli-agents/cli-adapters/cli-adapter.interface';
 import {
   SDK_TOKENS,
   AuthRequiredError,
@@ -46,9 +48,8 @@ import {
   getAllAnthropicProviders,
   getAnthropicProvider,
   getProviderAuthEnvVar,
-  seedStaticModelPricing,
   buildSafeEnv,
-  buildStaticTierCapabilityEnv,
+  buildTierCapabilityEnv,
   resolveSessionCapabilityPolicy,
   type AnthropicProvider,
   type HarnessPolicySync,
@@ -95,9 +96,12 @@ import {
 
 /**
  * Resolves the provider definition for a Ptah CLI lane. The direct Anthropic
- * lane is lane-only and lives outside the main-agent provider registry.
+ * lane is lane-only and lives outside the main-agent provider registry. A
+ * provider-session entry (Antigravity) has no base URL, key or proxy for the
+ * Claude SDK, so it never backs a Ptah CLI agent.
  */
 function resolveLaneProvider(id: string): AnthropicProvider | undefined {
+  if (isProviderSessionProviderId(id)) return undefined;
   return id === 'anthropic-api'
     ? getPtahCliLaneProvider(id)
     : getAnthropicProvider(id);
@@ -337,7 +341,8 @@ export class PtahCliRegistry {
             (isKimiCodeProvider(provider) &&
               (await this.isKimiCodeConnectionUsable()));
 
-          const modelCount = provider?.staticModels?.length ?? 0;
+          const modelCount =
+            this.providerModels.getCachedModelIds(agentConfig.providerId)?.length ?? 0;
 
           let status: PtahCliState['status'] = 'unconfigured';
           if (hasKey) {
@@ -451,7 +456,7 @@ export class PtahCliRegistry {
       `[PtahCliRegistry] Created agent "${name}" (${id}) for provider "${provider.name}"`,
     );
 
-    const modelCount = provider.staticModels?.length ?? 0;
+    const modelCount = this.providerModels.getCachedModelIds(providerId)?.length ?? 0;
 
     const hasKey = source === 'shared-connection'
       ? !!(await this.authSecrets.getCredential('apiKey'))?.trim()
@@ -609,10 +614,8 @@ export class PtahCliRegistry {
       return undefined;
     }
 
-    seedStaticModelPricing(agentConfig.providerId);
-
     const tier: ModelTier = 'sonnet';
-    const effectiveTiers = this.resolveEffectiveTiers(agentConfig, provider);
+    const effectiveTiers = this.resolveEffectiveTiers(agentConfig, credential);
     const authEnv = await this.acquireProfileAuthEnv(
       id,
       agentConfig,
@@ -681,7 +684,6 @@ export class PtahCliRegistry {
         };
       }
 
-      seedStaticModelPricing(agentConfig.providerId);
       const { authEnv: testAuthEnv, stopProxy } = await this.buildProxyAuthEnv(
         agentConfig,
         testProvider,
@@ -766,7 +768,9 @@ export class PtahCliRegistry {
    * back a spawned Ptah CLI agent.
    */
   getAvailableProviders(): AnthropicProvider[] {
-    return getAllAnthropicProviders();
+    return getAllAnthropicProviders().filter(
+      (provider) => !isProviderSessionProviderId(provider.id),
+    );
   }
 
   /**
@@ -779,6 +783,8 @@ export class PtahCliRegistry {
     options?: {
       workingDirectory?: string;
       resumeSessionId?: string;
+      /** Rejects a newly paused resume owner before starting the SDK. */
+      checkResumeOwner?: () => void;
       /** Parent session ID for permission routing. Permissions from this agent
        *  will be scoped to this session for cleanup purposes. */
       parentSessionId?: string;
@@ -802,6 +808,12 @@ export class PtahCliRegistry {
       parentLevel?: import('@ptah-extension/shared').LanePermissionMode;
       resumePolicy?: EffectiveLanePolicy;
       phase?: import('@ptah-extension/shared').PhaseDispatchV1;
+      /**
+       * Manager pause probe. Every provider route here launches through the
+       * Claude Code SDK, so the shared lane options gate its tool calls and
+       * the handle reports `honorsLaneToolGate`. Absent: no gate, flag unset.
+       */
+      laneToolGate?: LaneToolGate;
     },
   ): Promise<
     | {
@@ -875,15 +887,15 @@ export class PtahCliRegistry {
     // A supplied lane id is authoritative before the SDK query can request permission.
     // Generated ids attach through setAgentId; the SDK handler waits for that attachment.
     const agentIdHolder: { value?: string } = { value: options?.agentId };
+    const spawnTiers = this.resolveEffectiveTiers(agentConfig, credential);
     const { authEnv, stopProxy } = await this.buildProxyAuthEnv(
       agentConfig,
       provider,
       credential,
+      spawnTiers,
     );
     try {
-      seedStaticModelPricing(agentConfig.providerId);
       const tier: ModelTier = options?.modelTier ?? 'sonnet';
-      const spawnTiers = this.resolveEffectiveTiers(agentConfig, provider);
       const spawnFromTiers = spawnTiers?.[tier];
       const modelOverride = options?.model?.trim();
       const model =
@@ -986,7 +998,9 @@ export class PtahCliRegistry {
         logger: this.logger,
         processSpawner: this.processSpawner,
         executable: (await this.moduleLoader.getCliJsPath()) ?? undefined,
+        laneToolGate: options?.laneToolGate,
       });
+      options?.checkResumeOwner?.();
       const { handle, setAgentId: attachAgentId } = new ClaudeSdkLaneRunner(
         this.logger,
         this.messageTransformer,
@@ -1024,7 +1038,9 @@ export class PtahCliRegistry {
       );
 
       return {
-        handle,
+        handle: options?.laneToolGate
+          ? { ...handle, honorsLaneToolGate: true }
+          : handle,
         agentName: agentConfig.name,
         potentialCapabilities: this.capabilities(agentConfig.providerId),
         effectivePolicy: lanePolicy.requested,
@@ -1276,6 +1292,7 @@ export class PtahCliRegistry {
         agentConfig,
         provider,
         credential,
+        effectiveTiers,
       );
       // The tab moved to an un-pooled profile (e.g. a key was added to a
       // key-less Kimi Code agent): give back the lease it held, AFTER the
@@ -1336,10 +1353,13 @@ export class PtahCliRegistry {
       }
     }
 
+    // The tiers written to the env are the ones in the fingerprint: a catalog
+    // that warms while the proxy starts must not make the two disagree.
     const { authEnv, stopProxy } = await this.buildProxyAuthEnv(
       agentConfig,
       provider,
       credential,
+      effectiveTiers,
     );
     const lease: ProfileProxyLease = {
       fingerprint,
@@ -1394,6 +1414,10 @@ export class PtahCliRegistry {
     agentConfig: PtahCliConfig,
     provider: AnthropicProvider,
     credential: AgentCredential,
+    tiers: PtahCliConfig['tierMappings'] = this.resolveEffectiveTiers(
+      agentConfig,
+      credential,
+    ),
   ): Promise<{ authEnv: AuthEnv; stopProxy: () => Promise<void> }> {
     // A key-less Kimi Code agent runs on the host's Kimi Code connection
     // through its own proxy. Never a direct fallback: there is no key to send.
@@ -1402,6 +1426,7 @@ export class PtahCliRegistry {
         agentConfig,
         provider,
         this.createKimiConnectionProxy(),
+        tiers,
       );
     }
 
@@ -1420,7 +1445,7 @@ export class PtahCliRegistry {
       usesDirectAgentKey(provider, credential)
     ) {
       return {
-        authEnv: this.buildAuthEnv(agentConfig, provider, apiKey),
+        authEnv: this.buildAuthEnv(agentConfig, provider, apiKey, tiers),
         stopProxy: noopStop,
       };
     }
@@ -1431,12 +1456,12 @@ export class PtahCliRegistry {
         `[PtahCliRegistry] No proxy factory for proxy-requiring provider '${provider.id}'; falling back to direct base URL`,
       );
       return {
-        authEnv: this.buildAuthEnv(agentConfig, provider, apiKey),
+        authEnv: this.buildAuthEnv(agentConfig, provider, apiKey, tiers),
         stopProxy: noopStop,
       };
     }
 
-    return this.startProxyAuthEnv(agentConfig, provider, created);
+    return this.startProxyAuthEnv(agentConfig, provider, created, tiers);
   }
 
   /**
@@ -1447,6 +1472,7 @@ export class PtahCliRegistry {
     agentConfig: PtahCliConfig,
     provider: AnthropicProvider,
     created: { proxy: ITranslationProxy; placeholder: string },
+    tiers: PtahCliConfig['tierMappings'],
   ): Promise<{ authEnv: AuthEnv; stopProxy: () => Promise<void> }> {
     const { proxy, placeholder } = created;
     const { url: proxyUrl } = await proxy.start();
@@ -1457,7 +1483,7 @@ export class PtahCliRegistry {
     const authEnv = createEmptyAuthEnv();
     authEnv.ANTHROPIC_BASE_URL = proxyUrl;
     authEnv.ANTHROPIC_AUTH_TOKEN = placeholder;
-    this.applyTierEnv(authEnv, agentConfig, provider);
+    this.applyTierEnv(authEnv, provider, tiers);
 
     const stopProxy = async (): Promise<void> => {
       if (!proxy.isRunning()) {
@@ -1537,14 +1563,14 @@ export class PtahCliRegistry {
 
   /**
    * Apply per-agent tier env vars to an AuthEnv (shared by the direct and proxy
-   * auth-env paths).
+   * auth-env paths). `effectiveTiers` is the caller's one resolution, so the
+   * env and whatever else the caller derives from it agree.
    */
   private applyTierEnv(
     authEnv: AuthEnv,
-    agentConfig: PtahCliConfig,
     provider: AnthropicProvider,
+    effectiveTiers: PtahCliConfig['tierMappings'],
   ): void {
-    const effectiveTiers = this.resolveEffectiveTiers(agentConfig, provider);
     if (effectiveTiers) {
       if (effectiveTiers.sonnet) {
         authEnv.ANTHROPIC_DEFAULT_SONNET_MODEL = effectiveTiers.sonnet;
@@ -1555,11 +1581,11 @@ export class PtahCliRegistry {
       if (effectiveTiers.haiku) {
         authEnv.ANTHROPIC_DEFAULT_HAIKU_MODEL = effectiveTiers.haiku;
       }
-      // Static-only providers (Kimi Code) must declare effort and thinking
-      // themselves: the runtime does not recognise their model ids.
+      // Providers whose live ids the runtime does not recognise (Kimi Code)
+      // declare effort and thinking for every live model.
       Object.assign(
         authEnv,
-        buildStaticTierCapabilityEnv(provider.id, effectiveTiers),
+        buildTierCapabilityEnv(provider.id, effectiveTiers),
       );
     }
   }
@@ -1571,6 +1597,10 @@ export class PtahCliRegistry {
     agentConfig: PtahCliConfig,
     provider: AnthropicProvider,
     apiKey: string,
+    tiers: PtahCliConfig['tierMappings'] = this.resolveEffectiveTiers(
+      agentConfig,
+      { kind: 'instance-key', key: apiKey },
+    ),
   ): AuthEnv {
     const authEnv = createEmptyAuthEnv();
 
@@ -1596,7 +1626,7 @@ export class PtahCliRegistry {
       : getProviderAuthEnvVar(agentConfig.providerId);
     authEnv[authEnvVar] = apiKey;
 
-    this.applyTierEnv(authEnv, agentConfig, provider);
+    this.applyTierEnv(authEnv, provider, tiers);
 
     return authEnv;
   }
@@ -1696,36 +1726,50 @@ export class PtahCliRegistry {
   /**
    * Resolve effective tier mappings for a Ptah CLI agent.
    *
-   * Priority (highest wins):
-   * 1. Per-agent tierMappings stored in PtahCliConfig
-   * 2. Main agent settings from ProviderModelsService
-   * 3. Provider's first static model as sonnet fallback
+   * Per tier, the per-agent `tierMappings` win, then the `cliAgent` scope of
+   * the main settings. What is still empty resolves through
+   * `ProviderModelsService.resolveEffectiveTiers`: the registry preference
+   * when it is live (or no catalogue is on hand), else the closest live id,
+   * else the tier derived from the live catalogue.
+   *
+   * With the run's `credential`, the catalogue must be one listed under that
+   * credential: two agents of one provider with different keys never take
+   * tiers from each other's list. No matching catalogue leaves those tiers
+   * unresolved.
    */
   private resolveEffectiveTiers(
     agentConfig: PtahCliConfig,
-    provider: AnthropicProvider,
+    credential?: AgentCredential,
   ): PtahCliConfig['tierMappings'] {
     const mainTiers = this.providerModels.getModelTiers(
       agentConfig.providerId,
       'cliAgent',
     );
     const agentTiers = agentConfig.tierMappings;
-    const providerDefaults = provider.defaultTiers;
-    const defaultSonnet = provider.staticModels?.[0]?.id ?? undefined;
-
-    const sonnet =
-      agentTiers?.sonnet ||
-      mainTiers.sonnet ||
-      providerDefaults?.sonnet ||
-      defaultSonnet ||
-      undefined;
-    const opus =
-      agentTiers?.opus || mainTiers.opus || providerDefaults?.opus || undefined;
-    const haiku =
-      agentTiers?.haiku ||
-      mainTiers.haiku ||
-      providerDefaults?.haiku ||
-      undefined;
+    const userTiers = {
+      sonnet: agentTiers?.sonnet || mainTiers.sonnet,
+      opus: agentTiers?.opus || mainTiers.opus,
+      haiku: agentTiers?.haiku || mainTiers.haiku,
+    };
+    const resolved = credential
+      ? this.providerModels.resolveEffectiveTiers(
+          agentConfig.providerId,
+          userTiers,
+          // The model listing sends no key for a key-less local agent, so the
+          // placeholder token maps to no key here too.
+          {
+            apiKey:
+              credential.kind === 'instance-key' &&
+              credential.key !== OLLAMA_AUTH_TOKEN_PLACEHOLDER
+                ? credential.key
+                : null,
+          },
+        )
+      : this.providerModels.resolveEffectiveTiers(
+          agentConfig.providerId,
+          userTiers,
+        );
+    const { sonnet, opus, haiku } = resolved;
 
     if (!sonnet && !opus && !haiku) {
       return undefined;
@@ -1751,11 +1795,10 @@ export class PtahCliRegistry {
    * Build default tier mappings for a new agent.
    *
    * Returns undefined so the runtime cascade in resolveEffectiveTiers can
-   * resolve tiers in the right order: agentTiers → mainTiers → provider.defaultTiers
-   * → staticModels[0]. Pre-filling a partial mapping here would shadow the
-   * user's globally-configured tier choices (e.g. Ollama defaults to
-   * staticModels[0]='llama3.1:8b' even when the user has selected
-   * 'qwen3:8b'/'devstral'/'qwen3:32b' via the model mapping modal).
+   * resolve tiers in the right order: agentTiers → cliAgent tiers → the
+   * provider's live-checked preference → the live-derived tier. Pre-filling a
+   * mapping here would freeze today's answer and shadow the user's
+   * globally-configured tier choices made later in the model mapping modal.
    */
   private buildDefaultTierMappings(
     _provider: AnthropicProvider,

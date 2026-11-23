@@ -74,6 +74,7 @@ function makeChecker(
     codex?: { authenticated: boolean; stale: boolean };
     cli?: boolean;
     kimi?: Partial<KimiCodeAuthStatus>;
+    providerSessionAuth?: { probe: jest.Mock };
   } = {},
 ) {
   const recorder = new ConnectionCheckRecorder();
@@ -104,6 +105,9 @@ function makeChecker(
     cliDetector: cliDetector as never,
     kimiCodeAuth,
     readProviderKey,
+    ...(overrides.providerSessionAuth
+      ? { providerSessionAuth: overrides.providerSessionAuth }
+      : {}),
     logger: logger as unknown as Logger,
   });
   return {
@@ -130,6 +134,7 @@ describe('connectionCheckKind', () => {
     ['github-copilot', 'copilot'],
     ['openai-codex', 'codex'],
     ['claude-cli', 'claude-cli'],
+    ['antigravity-cli', 'provider-session'],
     ['ollama', null],
     ['lm-studio', null],
     ['ollama-cloud', null],
@@ -669,5 +674,41 @@ describe('customProbeCheckRecord', () => {
         latencyMs: 40,
       }),
     ).toMatchObject({ status: 'failed', reason, latencyMs: null });
+  });
+});
+
+describe('ConnectionChecker — provider-session connections', () => {
+  const row = (installed: boolean, authenticated: boolean) => ({
+    probe: jest.fn(async () => ({
+      antigravity: { installed, authenticated, signInHint: 'run `agy`' },
+    })),
+  });
+
+  it('verifies a signed-in Antigravity from the auth row, with no request', async () => {
+    const auth = row(true, true);
+    const { checker, verify } = makeChecker({ providerSessionAuth: auth });
+    await expect(
+      checker.check('antigravity-cli', 'provider-session'),
+    ).resolves.toMatchObject({ status: 'verified', reason: null, latencyMs: null });
+    expect(auth.probe).toHaveBeenCalledTimes(1);
+    expect(verify).not.toHaveBeenCalled();
+  });
+
+  it('reports signed-out for an installed CLI without a sign-in', async () => {
+    const { checker } = makeChecker({ providerSessionAuth: row(true, false) });
+    await expect(
+      checker.check('antigravity-cli', 'provider-session'),
+    ).resolves.toMatchObject({ status: 'failed', reason: 'signed-out' });
+  });
+
+  it('reports not-installed when the CLI is missing or the host binds no probe', async () => {
+    const missing = makeChecker({ providerSessionAuth: row(false, false) });
+    await expect(
+      missing.checker.check('antigravity-cli', 'provider-session'),
+    ).resolves.toMatchObject({ status: 'failed', reason: 'not-installed' });
+    const unbound = makeChecker();
+    await expect(
+      unbound.checker.check('antigravity-cli', 'provider-session'),
+    ).resolves.toMatchObject({ status: 'failed', reason: 'not-installed' });
   });
 });

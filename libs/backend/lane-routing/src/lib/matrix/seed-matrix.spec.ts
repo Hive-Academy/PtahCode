@@ -22,14 +22,8 @@ import {
 const NOW = Date.parse('2026-10-15T00:00:00Z');
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-function shippedProviderModelIds(providerId: string): string[] | undefined {
-  for (const provider of ANTHROPIC_PROVIDERS) {
-    if (provider.id !== providerId) continue;
-    const staticModels =
-      'staticModels' in provider ? provider.staticModels : undefined;
-    return (staticModels ?? []).map((model) => model.id);
-  }
-  return undefined;
+function isProviderFamily(providerId: string): boolean {
+  return ANTHROPIC_PROVIDERS.some((provider) => provider.id === providerId);
 }
 
 const unknownCells = {
@@ -96,22 +90,20 @@ describe('seed matrix', () => {
     });
   });
 
-  it('keys every profile by a lane family and model id the lane lists', () => {
+  // Model lists are live-only, so a row's model id is not checked against a
+  // shipped list; only its lane family must exist.
+  it('keys every profile by a lane family and a model id', () => {
     const systemClis: readonly string[] = SYSTEM_CLI_TYPES;
     for (const row of SEED_MATRIX_ROWS) {
       expect(row.model).not.toBe(FAMILY_PROFILE_MODEL);
-      const providerModels = shippedProviderModelIds(row.family);
       const knownFamily =
-        providerModels !== undefined ||
+        isProviderFamily(row.family) ||
         systemClis.includes(row.family) ||
         row.family === SUBAGENT_FAMILY;
       expect({ family: row.family, knownFamily }).toEqual({
         family: row.family,
         knownFamily: true,
       });
-      if (providerModels !== undefined) {
-        expect(providerModels).toContain(row.model);
-      }
     }
   });
 

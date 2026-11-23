@@ -65,6 +65,12 @@ export {
 } from './lib/codex-resume-profile-error';
 export { CodexAccountUsageClient } from './lib/codex-account-usage-client';
 export {
+  codexAccountIdentityDigest,
+  codexSignedInDigest,
+  type CodexAccountIdentity,
+  type CodexSignedInAccount,
+} from './lib/codex-account-identity';
+export {
   registerCodexRuntime,
   type CodexRuntimeRegistrationPorts,
 } from './lib/di/registration';

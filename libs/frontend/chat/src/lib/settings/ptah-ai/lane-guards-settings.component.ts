@@ -43,7 +43,7 @@ function draftsFrom(values: LaneGuardValues): Record<LaneGuardKey, string> {
 /**
  * Lane guards (`agentOrchestration.laneRepeatCallStopAt`). Loads and saves
  * through `agent:getConfig` / `agent:setConfig`. Lanes also have a weighted
- * token budget and duration limit; the repeat-call loop stop is configurable here. An invalid value is
+ * token budget and duration limit; the repeat-call handoff threshold is configurable here. An invalid value is
  * never written. A host rejection is shown
  * next to its field as the backend returned it; every save outcome (with Undo)
  * is reported in the page toast (`SettingsSaveFeedbackService.saveGeneric`).

@@ -28,9 +28,11 @@ Prefer ptah_* tools over built-in alternatives. They use VS Code's LSP, the work
 
 | Instead of... | CALL THIS TOOL | Why |
 |------|------|------|
-| Manual workspace exploration | ptah_workspace_analyze | Full project structure in one call |
+| Manual exploration | ptah_workspace_analyze | Full project structure in one call |
 | Bash \`find\` / Glob tool | ptah_search_files | Respects .gitignore, workspace-indexed |
-| Running build to check errors | ptah_get_diagnostics | Workspace type-check; call once after edits, not on every step |
+| Build to find errors | ptah_get_diagnostics | Workspace type-check; call once after edits, not on every step |
+| \`grep\` / \`rg\` | ptah_grep { pattern, path?, glob? } | Text and constants, grouped by file with the enclosing function; \`includeIgnored\` + scoped \`path\` reaches node_modules |
+| \`sed -n\` / \`cat\` | ptah_read_symbol { file, name } | One declaration, or a line range (startLine/endLine); numbered, bounded |
 | Grep for symbol usages | ptah_lsp_references | LSP-accurate, rename-safe; take file/line/col from ptah_code_search_symbols first; use before any refactoring |
 | Navigating to find definitions | ptah_lsp_definitions | Go-to-definition via LSP |
 | \`git status\` via Bash | ptah_get_dirty_files | Shows unsaved VS Code buffers too |
@@ -45,11 +47,11 @@ Prefer ptah_* tools over built-in alternatives. They use VS Code's LSP, the work
 | Figuring out the monorepo layout | ptah_project_detect_monorepo | Detects nx/lerna/turbo/workspaces + package count |
 | Finding where a symbol is exported | ptah_get_symbol_index | Map of file → exported symbol names |
 
-Fall back to Bash, Grep or Glob only for **writes**, build/test/git, free text, a ptah error, or one Grep after zero hits.
-Free text is string literals, config keys and error messages.
+Fall back to Bash, Grep or Glob only for **writes**, build/test/git, a ptah error, or one Grep after zero hits.
+Free text and line ranges: ptah_grep and ptah_read_symbol, not shell grep, rg, sed -n or cat.
 
 > [!IMPORTANT]
-> **Symbol and AST lookups are MANDATORY via ptah before Grep/Glob.** To find a function, class, method or type, call \`ptah_code_search_symbols\` or \`ptah_ast_analyze\` FIRST. Fall back to Grep only after those return no results or an error.
+> **Symbol and AST lookups are MANDATORY via ptah before Grep/Glob.** To find a function, class, method or type, call \`ptah_code_search_symbols\` or \`ptah_ast_analyze\` FIRST, then read the body with \`ptah_read_symbol\`. Fall back to Grep only after those return no results or an error.
 
 ### IDE Access via execute_code
 
@@ -68,7 +70,7 @@ Every tool call resends the whole thread, so cost is requests × context. Finish
 - Verify with the commands your workspace's CLAUDE.md or project instructions name; with none, run the narrowest check that covers the change. Never run workspace-wide, build, serve, dev or e2e targets unless asked, and never overlap heavy runs.
 - Keep tool output small: filter or tail command output, never paste a full test or build log into the thread, and never re-run a failed suite just to re-read its output.
 - For a long command: run it once in the foreground with a long timeout, or in the background with ONE completion check. Never a wait/status loop.
-- Prefer \`ptah_ast_analyze\` / \`ptah_context_enrich_file\` and targeted reads over whole-file reads.`;
+- Prefer \`ptah_ast_analyze\` / \`ptah_context_enrich_file\` and \`ptah_read_symbol\` over whole-file reads.`;
 
 /**
  * How a caller drives a background CLI lane.

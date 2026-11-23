@@ -3021,6 +3021,83 @@ describe('Codex metadata identity', () => {
     };
   }
 
+  it('stores a duration-only write beside the checkpoint without touching usage', async () => {
+    const contributions: unknown[] = [];
+    const { storage } = fixture();
+    const store = new SessionMetadataStore(
+      storage, asLogger(createMockLogger()), undefined, undefined, undefined,
+      { recordUsage: (value) => { contributions.push(value); } },
+    );
+    await store.updateCodexExecution(threadId, () => execution);
+    const owner = new CodexSessionUsageOwner(threadId, 'native-root');
+    await store.updateCodexUsageCheckpoint(threadId, owner.serialize());
+    const before = await store.get(threadId);
+    const sunk = contributions.length;
+    await store.updateCodexTurnDuration(threadId, { completedMs: 0, turnId: 'turn-1', turnMs: 7_000 });
+    // A shorter replay keeps the stored time.
+    await store.updateCodexTurnDuration(threadId, { completedMs: 0, turnId: 'turn-1', turnMs: 2_000 });
+    const row = await store.get(threadId);
+    expect(row?.codexTurnDuration).toEqual({ completedMs: 0, turnId: 'turn-1', turnMs: 7_000 });
+    expect(row?.codexUsageCheckpoint).toEqual(before?.codexUsageCheckpoint);
+    expect(row?.totalCost).toEqual(before?.totalCost);
+    expect(row?.totalTokens).toEqual(before?.totalTokens);
+    expect(contributions).toHaveLength(sunk);
+    // Reopen: a new store over the same storage restores the time.
+    const reloaded = new SessionMetadataStore(storage, asLogger(createMockLogger()));
+    const saved = await reloaded.get(threadId);
+    expect(saved?.codexTurnDuration?.turnMs).toBe(7_000);
+    const restored = CodexSessionUsageOwner.restore(
+      threadId, 'native-root', saved?.codexUsageCheckpoint,
+    );
+    restored.restoreDuration(saved?.codexTurnDuration);
+    expect(restored.snapshot().durationMs).toBe(7_000);
+  });
+
+  it('accepts a duration-only write for a native session with no checkpoint yet', async () => {
+    const { storage, store } = fixture();
+    await store.updateCodexExecution(threadId, () => execution);
+    expect((await store.get(threadId))?.codexUsageCheckpoint).toBeUndefined();
+    await store.updateCodexTurnDuration(threadId, { completedMs: 0, turnId: 'turn-1', turnMs: 3_000 });
+    const reloaded = new SessionMetadataStore(storage, asLogger(createMockLogger()));
+    const row = await reloaded.get(threadId);
+    expect(row?.codexUsageCheckpoint).toBeUndefined();
+    expect(row?.codexTurnDuration).toEqual({ completedMs: 0, turnId: 'turn-1', turnMs: 3_000 });
+  });
+
+  it('refuses a duration-only write for a session that is not native Codex', async () => {
+    const { store } = fixture();
+    await expect(store.updateCodexTurnDuration(
+      SessionId.from('77777777-7777-4777-8777-777777777777'),
+      { completedMs: 0, turnMs: 1 },
+    )).rejects.toThrow('non-native');
+  });
+
+  it('stores Codex turn time beside the checkpoint and never lowers it', async () => {
+    const { storage, store } = fixture();
+    await store.updateCodexExecution(threadId, () => execution);
+    const owner = new CodexSessionUsageOwner(threadId, 'native-root');
+    owner.recordTurnDuration('turn-1', 4_000);
+    await store.updateCodexUsageCheckpoint(threadId, owner.serialize(), owner.serializeDuration());
+    const row = await store.get(threadId);
+    expect(row?.codexTurnDuration).toEqual({ completedMs: 0, turnId: 'turn-1', turnMs: 4_000 });
+    expect(row?.codexUsageCheckpoint).not.toHaveProperty('duration');
+    // A stale or replayed write with a shorter time keeps the stored one.
+    await store.updateCodexUsageCheckpoint(threadId, owner.serialize(),
+      { completedMs: 0, turnId: 'turn-1', turnMs: 1_000 });
+    expect((await store.get(threadId))?.codexTurnDuration?.turnMs).toBe(4_000);
+    // A write without a duration (an older caller) keeps it as well.
+    await store.updateCodexUsageCheckpoint(threadId, owner.serialize());
+    expect((await store.get(threadId))?.codexTurnDuration?.turnMs).toBe(4_000);
+    owner.recordTurnDuration('turn-2', 500);
+    await store.updateCodexUsageCheckpoint(threadId, owner.serialize(), owner.serializeDuration());
+    const reloaded = new SessionMetadataStore(storage, asLogger(createMockLogger()));
+    const saved = await reloaded.get(threadId);
+    expect(saved?.codexTurnDuration).toEqual({ completedMs: 4_000, turnId: 'turn-2', turnMs: 500 });
+    // A later unrelated metadata write keeps the turn time.
+    await reloaded.updateCodexExecution(threadId, () => execution);
+    expect((await reloaded.get(threadId))?.codexTurnDuration?.completedMs).toBe(4_000);
+  });
+
   it('persists a native usage checkpoint and restores sidebar totals after reload', async () => {
     const { storage, store } = fixture();
     await store.updateCodexExecution(threadId, () => execution);

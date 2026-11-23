@@ -332,6 +332,131 @@ describe('agent delivery push sinks', () => {
   });
 });
 
+describe('agent action notice broadcast', () => {
+  it('forwards a lane ask or pause on the monitor channel with the host text', () => {
+    const broadcastMessage = jest.fn().mockResolvedValue(undefined);
+    const events = new EventEmitter();
+    const container = buildContainer([
+      [TOKENS.AGENT_PROCESS_MANAGER, { events, findAgentInfo: () => undefined }],
+      [TOKENS.WEBVIEW_MANAGER, { broadcastMessage }],
+    ]);
+    wireAgentEventListeners(container, {
+      logger: Object.assign(Object.create(null) as Logger, createMockLogger()),
+      platform: 'electron',
+    });
+    const notice = {
+      actor: 'ptah-budget',
+      action: 'paused',
+      reason: 'weighted-budget',
+      nextStep: 'review-live-agent',
+    } as const;
+    events.emit('agent:action-notice', {
+      info: { agentId: 'lane-1' },
+      notice,
+      text: 'Ptah budget monitor paused new work for lane-1.',
+    });
+    expect(broadcastMessage).toHaveBeenCalledWith(
+      MESSAGE_TYPES.AGENT_MONITOR_ACTION_NOTICE,
+      { agentId: 'lane-1', notice, text: 'Ptah budget monitor paused new work for lane-1.' },
+    );
+  });
+
+  it('sends the current notice when another monitor already holds a higher phase', () => {
+    const broadcastMessage = jest.fn().mockResolvedValue(undefined);
+    const events = new EventEmitter();
+    const container = buildContainer([
+      [TOKENS.AGENT_PROCESS_MANAGER, { events, findAgentInfo: () => undefined }],
+      [TOKENS.WEBVIEW_MANAGER, { broadcastMessage }],
+    ]);
+    wireAgentEventListeners(container, {
+      logger: Object.assign(Object.create(null) as Logger, createMockLogger()),
+      platform: 'electron',
+    });
+    const paused = {
+      actor: 'ptah-budget', action: 'paused', reason: 'weighted-budget', nextStep: 'review-live-agent',
+    } as const;
+    const ask = {
+      actor: 'ptah-watchdog', action: 'asked-handoff', reason: 'lane-inactive', nextStep: 'return-report',
+    } as const;
+    events.emit('agent:action-notice', {
+      info: { agentId: 'lane-1', actionNotice: paused },
+      notice: ask,
+      text: 'Ptah watchdog asked lane-1 for a handoff.',
+    });
+    expect(broadcastMessage).toHaveBeenCalledWith(
+      MESSAGE_TYPES.AGENT_MONITOR_ACTION_NOTICE,
+      { agentId: 'lane-1', notice: paused, text: '' },
+    );
+  });
+
+  it('forwards a release of the notice as a null notice', () => {
+    const broadcastMessage = jest.fn().mockResolvedValue(undefined);
+    const events = new EventEmitter();
+    const container = buildContainer([
+      [TOKENS.AGENT_PROCESS_MANAGER, { events, findAgentInfo: () => undefined }],
+      [TOKENS.WEBVIEW_MANAGER, { broadcastMessage }],
+    ]);
+    wireAgentEventListeners(container, {
+      logger: Object.assign(Object.create(null) as Logger, createMockLogger()),
+      platform: 'electron',
+    });
+    events.emit('agent:action-notice-cleared', { info: { agentId: 'lane-1' }, notice: null, text: '' });
+    expect(broadcastMessage).toHaveBeenCalledWith(
+      MESSAGE_TYPES.AGENT_MONITOR_ACTION_NOTICE,
+      { agentId: 'lane-1', notice: null, text: '' },
+    );
+  });
+
+  it('keeps a remaining pause visible when another notice clears', () => {
+    const broadcastMessage = jest.fn().mockResolvedValue(undefined);
+    const events = new EventEmitter();
+    const container = buildContainer([
+      [TOKENS.AGENT_PROCESS_MANAGER, { events, findAgentInfo: () => undefined }],
+      [TOKENS.WEBVIEW_MANAGER, { broadcastMessage }],
+    ]);
+    wireAgentEventListeners(container, {
+      logger: Object.assign(Object.create(null) as Logger, createMockLogger()),
+      platform: 'electron',
+    });
+    const paused = {
+      actor: 'ptah-budget', action: 'paused', reason: 'weighted-budget', nextStep: 'review-live-agent',
+    } as const;
+    events.emit('agent:action-notice-cleared', {
+      info: { agentId: 'lane-1', actionNotice: paused },
+      notice: null,
+      text: '',
+    });
+    expect(broadcastMessage).toHaveBeenCalledWith(
+      MESSAGE_TYPES.AGENT_MONITOR_ACTION_NOTICE,
+      { agentId: 'lane-1', notice: paused, text: '' },
+    );
+  });
+
+  it('logs a failed broadcast and keeps running', async () => {
+    const broadcastMessage = jest.fn().mockRejectedValue(new Error('renderer gone'));
+    const events = new EventEmitter();
+    const logger = Object.assign(Object.create(null) as Logger, createMockLogger());
+    const container = buildContainer([
+      [TOKENS.AGENT_PROCESS_MANAGER, { events, findAgentInfo: () => undefined }],
+      [TOKENS.WEBVIEW_MANAGER, { broadcastMessage }],
+    ]);
+    wireAgentEventListeners(container, { logger, platform: 'electron' });
+    expect(() =>
+      events.emit('agent:action-notice', {
+        info: { agentId: 'lane-1' },
+        notice: { actor: 'ptah-budget', action: 'asked-handoff', reason: 'duration', nextStep: 'return-report' },
+        text: 'x',
+      }),
+    ).not.toThrow();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('agent-monitor:action-notice'),
+      expect.any(Error),
+    );
+  });
+});
+
 describe('persistCliSessionReference — missing parent session', () => {
   it('warns and names the agent instead of dropping it silently', () => {
     const logger = createMockLogger();
@@ -500,6 +625,15 @@ describe('persistCliSessionReference — completion time', () => {
         cliSessionId: 'bundled-thread',
         replacesCliSessionIds: ['installed-thread'],
       }));
+  });
+
+  it('persists an optional action notice with the lane reference', () => {
+    const addCliSession = jest.fn().mockResolvedValue(undefined);
+    const notice = {
+      actor: 'ptah-budget', action: 'paused', reason: 'runtime-cap', nextStep: 'review-live-agent',
+    } as const;
+    persist(buildInfo({ parentSessionId: PARENT_SESSION, notice }), addCliSession);
+    expect(addCliSession).toHaveBeenCalledWith(PARENT_SESSION, expect.objectContaining({ notice }));
   });
 
   it('writes the exit completion time on the reference', () => {

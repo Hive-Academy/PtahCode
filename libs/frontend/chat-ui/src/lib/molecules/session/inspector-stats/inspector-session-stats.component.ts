@@ -29,7 +29,12 @@ import {
   STATS_EMPTY,
   contextDetailsText,
   costDetailsText,
+  nullCostLabel,
+  nullCostValue,
   durationMsOf,
+  formatModelCost,
+  formatModelTotal,
+  isKnownCost,
   knownSubtotalOf,
   tokenDetailsText,
   type SessionStatsInputs,
@@ -182,9 +187,9 @@ let nextSessionId = 0;
             } @else if ((s.snapshot?.totalCost ?? null) === null) {
               <span
                 class="text-base-content-muted"
-                [attr.aria-label]="empty.cost"
+                [attr.aria-label]="nullCostLabel(s.snapshot)"
                 [attr.title]="notReported"
-                >{{ empty.value }}</span
+                >{{ nullCostValue(s.snapshot) }}</span
               >
             } @else {
               {{ formatCost(s.snapshot!.totalCost) }}
@@ -325,9 +330,12 @@ let nextSessionId = 0;
                   <span class="min-w-0 truncate" [title]="row.model">{{
                     formatModelName(row.model)
                   }}</span>
-                  <span class="tabular-nums">{{
-                    formatCost(row.costUSD)
-                  }}</span>
+                  <span
+                    class="tabular-nums"
+                    [class.text-base-content-muted]="!isKnownCost(row.costUSD)"
+                    [attr.title]="isKnownCost(row.costUSD) ? null : notReported"
+                    >{{ formatModelCost(row.costUSD, s.snapshot) }}</span
+                  >
                 </div>
                 <div class="grid grid-cols-2 gap-1 text-[11px] sm:grid-cols-4">
                   <span title="Uncached input tokens"
@@ -350,7 +358,7 @@ let nextSessionId = 0;
               class="flex justify-between border-t border-surface-border pt-2 text-xs font-semibold"
             >
               <span>Total</span
-              ><span>{{ formatCost(s.snapshot?.totalCost ?? null) }}</span>
+              ><span>{{ formatModelTotal(s.snapshot) }}</span>
             </div>
           }
         </div>
@@ -403,6 +411,11 @@ export class InspectorSessionStatsComponent {
   protected readonly empty = STATS_EMPTY;
   protected readonly notReported = 'not reported';
   protected readonly formatCost = formatCost;
+  protected readonly formatModelCost = formatModelCost;
+  protected readonly formatModelTotal = formatModelTotal;
+  protected readonly isKnownCost = isKnownCost;
+  protected readonly nullCostLabel = nullCostLabel;
+  protected readonly nullCostValue = nullCostValue;
   protected readonly formatDuration = formatDuration;
   protected readonly formatOptionalTokens = formatOptionalTokens;
   protected readonly formatTokens = formatTokens;

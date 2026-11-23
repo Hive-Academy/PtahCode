@@ -6,6 +6,7 @@ import { z } from 'zod';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type { PlanLimitWindow, PlanWindowKind } from '@ptah-extension/shared';
 import type { PlanUsageReading, UsageFailureReason, UsageSourceLabel } from './plan-usage-reader.types';
+import type { FallbackReason } from './fallback-usage.runner';
 
 const TokenSchema = z.object({
   client_id: z.string().min(1),
@@ -53,9 +54,12 @@ export interface AntigravitySourceFailure {
   readonly reason: UsageFailureReason;
   readonly cause: 'missing-token-file' | 'invalid-grant' | 'http-rejection' |
     'schema-mismatch' | 'timeout' | 'missing-local-server' | 'account-mismatch' |
-    'request-failed' | 'source-unavailable';
+    'request-failed' | AntigravityCliCause;
   readonly httpStatus?: number;
 }
+/** Causes of the `agy -p /usage` stage (`antigravity-cli-usage.source.ts`). */
+export type AntigravityCliCause = FallbackReason | 'signed-out' | 'cli-guard-rejected' | 'cli-disabled' |
+  'cli-deferred';
 export type AntigravityUsageReading = PlanUsageReading & {
   readonly sourceFailures?: readonly AntigravitySourceFailure[];
 };

@@ -14,6 +14,7 @@
  * option.
  */
 import type {
+  InitializeResponse,
   McpServer,
   RequestPermissionRequest,
 } from '@agentclientprotocol/sdk';
@@ -65,6 +66,13 @@ export interface AcpSessionOptions {
    * `prompt-timeout`, the agent is cancelled and then stopped. Omit for none.
    */
   readonly promptTimeoutMs?: number;
+  /**
+   * Who drives the session. A `chat` asks every permission request through
+   * its approval sink and can change the permission live, so a profile never
+   * bakes an approve-everything flag into a chat's spawn (a later switch to a
+   * narrower permission could not take it back). Absent means a lane.
+   */
+  readonly consumer?: 'chat' | 'lane';
   /** The lane's agent id: names the run in logs and turn ids. */
   readonly agentId?: string;
   /**
@@ -72,6 +80,12 @@ export interface AcpSessionOptions {
    * profile turns them into ACP `McpServer` entries in `buildMcpServers`.
    */
   readonly mcp: readonly ProviderMcpAttachment[];
+  /**
+   * Ptah's instructions for the session (the chat's system prompt). Sent to
+   * a new session once, per {@link AcpVendorProfile.instructionsMeta}; to a
+   * restored one only per {@link AcpVendorProfile.instructionsOnRestore}.
+   */
+  readonly instructions?: string;
 }
 
 /**
@@ -192,6 +206,25 @@ export interface AcpVendorProfile {
   initializeMeta?(options: AcpSessionOptions): Record<string, unknown> | undefined;
   /** Optional `_meta` for `session/new`. */
   sessionMeta?(options: AcpSessionOptions): Record<string, unknown> | undefined;
+  /**
+   * How a new session's instructions travel. Return the `session/new`
+   * `_meta` that carries them when the agent advertised a system-prompt hook
+   * on `initialize`; `undefined` (or no hook) sends them as a delimited
+   * block in front of the first prompt instead. Merged one level deep with
+   * {@link sessionMeta}.
+   */
+  instructionsMeta?(
+    instructions: string,
+    init: InitializeResponse,
+  ): Record<string, unknown> | undefined;
+  /**
+   * Whether a restored session (`session/resume`, `session/load`) is sent its
+   * instructions again: `'meta'` passes the {@link instructionsMeta} `_meta`
+   * on the attach request too (for an agent that rebuilds its system prompt
+   * on restore); `'none'` (the default) sends nothing, for an agent that
+   * keeps the instructions it was created with.
+   */
+  readonly instructionsOnRestore?: 'meta' | 'none';
   /** Optional `_meta` for `session/cancel`. */
   cancelMeta?(options: AcpSessionOptions): Record<string, unknown> | undefined;
   /**
@@ -201,6 +234,26 @@ export interface AcpVendorProfile {
    * `info`.
    */
   modeFor?(options: AcpSessionOptions): string | undefined;
+  /**
+   * The mode every prompt of a session with these options must start in, or
+   * `undefined` for none. Before each `session/prompt` the runtime sets it
+   * (`session/set_mode`, else a `mode` config option), whatever mode it last
+   * saw, since an agent can switch modes without reporting it. When that
+   * fails the prompt is not sent and the turn fails. Use it when an
+   * approval the agent asks for (e.g. leaving a read-only mode) must cover
+   * only the turn it was given in.
+   */
+  turnStartMode?(options: AcpSessionOptions): string | undefined;
+  /**
+   * A user-facing title for a `session/request_permission` shown to the
+   * approval sink, replacing the agent's tool title, e.g. to say plainly
+   * what approving a mode switch allows. Return `undefined` to keep the
+   * agent's title. The request is untrusted: read it defensively, never throw.
+   */
+  approvalTitle?(
+    request: RequestPermissionRequest,
+    options: AcpSessionOptions,
+  ): string | undefined;
   /**
    * Config to apply after session setup and before the first prompt. Entries
    * whose `configId` the session did not advertise are skipped with an `info`.

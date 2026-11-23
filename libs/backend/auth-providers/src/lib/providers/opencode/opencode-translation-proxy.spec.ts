@@ -3,8 +3,8 @@ import * as http from 'http';
 import type { Logger } from '@ptah-extension/vscode-core';
 import { createMockLogger } from '@ptah-extension/shared/testing';
 import {
-  OPENCODE_MODEL_ROUTES,
   getAnthropicProvider,
+  type OpenCodeProtocol,
   type OpenCodeProviderId,
 } from '@ptah-extension/shared';
 import { providerQuotaStore } from '../../auth/provider-quota.store';
@@ -17,6 +17,36 @@ import type {
 } from '../../translation/openai-translation.types';
 import { OpenCodeTranslationProxy } from './opencode-translation-proxy';
 import type { IOpenCodeAuthService } from './opencode-provider.types';
+import { openCodeLiveRoutes } from './opencode-live-routes';
+
+/**
+ * Spec fixture standing in for the live gateway catalog. The proxy itself
+ * holds no model list; it routes only what the gateway reports.
+ */
+const LIVE_ROUTES: Record<
+  OpenCodeProviderId,
+  Record<string, OpenCodeProtocol>
+> = {
+  'opencode-zen': {
+    'claude-sonnet-5': 'messages',
+    'claude-opus-5': 'messages',
+    'claude-haiku-4-5': 'messages',
+    'minimax-m3': 'chat/completions',
+    'minimax-m2.7': 'chat/completions',
+    'minimax-m2.5': 'chat/completions',
+    'gpt-5.6-luna': 'responses',
+  },
+  'opencode-go': {
+    'glm-5.3': 'chat/completions',
+    'glm-5.3-flash': 'chat/completions',
+    'kimi-k3': 'messages',
+    'minimax-m3': 'messages',
+    'minimax-m2.7': 'messages',
+    'minimax-m2.5': 'messages',
+    'gpt-5.6-luna': 'responses',
+  },
+};
+let liveRoutes: typeof LIVE_ROUTES | null;
 
 class TestProxy extends OpenCodeTranslationProxy {
   origin?: string;
@@ -26,11 +56,8 @@ class TestProxy extends OpenCodeTranslationProxy {
   protected override async onAuthFailure() {
     return this.authRecovers || super.onAuthFailure();
   }
-  public override normalizeModelId(id: string) {
-    return super.normalizeModelId(id);
-  }
-  public override resolveUpstreamProtocol(id: string) {
-    return super.resolveUpstreamProtocol(id);
+  public resolveRequestModelIdPublic(id: string) {
+    return this.resolveRequestModelId(id);
   }
   public override async getApiEndpoint() {
     const actual = await super.getApiEndpoint();
@@ -173,6 +200,26 @@ describe('OpenCodeTranslationProxy', () => {
   beforeEach(async () => {
     providerQuotaStore.clear();
     jest.clearAllMocks();
+    liveRoutes = LIVE_ROUTES;
+    jest
+      .spyOn(openCodeLiveRoutes, 'modelIds')
+      .mockImplementation(async (id) =>
+        liveRoutes ? Object.keys(liveRoutes[id]) : null,
+      );
+    jest
+      .spyOn(openCodeLiveRoutes, 'resolve')
+      .mockImplementation(async (id, model) => {
+        if (!liveRoutes) return { outcome: 'catalog-unavailable' };
+        const protocol = Object.prototype.hasOwnProperty.call(
+          liveRoutes[id],
+          model,
+        )
+          ? liveRoutes[id][model]
+          : undefined;
+        return protocol
+          ? { outcome: 'routed', protocol }
+          : { outcome: 'not-listed' };
+      });
     requests = [];
     respond = (req, res, body) => {
       const native = req.url?.endsWith('/messages');
@@ -279,24 +326,88 @@ describe('OpenCodeTranslationProxy', () => {
       upstream.close((error) => (error ? reject(error) : resolve())),
     );
     providerQuotaStore.clear();
+    jest.restoreAllMocks();
   });
 
-  it.each(['opencode-zen', 'opencode-go'] as const)(
-    '%s resolves every reviewed route and only explicit tier aliases',
-    async (id) => {
-      const { p } = await proxy(id);
-      for (const [model, lane] of Object.entries(OPENCODE_MODEL_ROUTES[id])) {
-        expect(p.resolveUpstreamProtocol(model)).toBe(lane);
-        expect(p.normalizeModelId(model)).toBe(model);
-      }
-      const tiers = getAnthropicProvider(id)?.defaultTiers;
-      for (const tier of ['sonnet', 'opus', 'haiku'] as const)
-        expect(p.normalizeModelId(tier)).toBe(tiers?.[tier]);
-      expect(p.normalizeModelId('default')).toBe(tiers?.sonnet);
-      expect(p.resolveUpstreamProtocol('toString')).toBeUndefined();
-      expect(p.resolveUpstreamProtocol('unknown')).toBeUndefined();
-    },
-  );
+  describe('tier alias resolution', () => {
+    it.each(['opencode-zen', 'opencode-go'] as const)(
+      '%s resolves aliases to the listed preference and passes other ids through',
+      async (id) => {
+        const { p } = await proxy(id);
+        const tiers = getAnthropicProvider(id)?.defaultTiers;
+        for (const tier of ['sonnet', 'opus', 'haiku'] as const)
+          expect(await p.resolveRequestModelIdPublic(tier)).toBe(tiers?.[tier]);
+        expect(await p.resolveRequestModelIdPublic('default')).toBe(
+          tiers?.sonnet,
+        );
+        for (const model of [
+          'minimax-m3',
+          'unknown',
+          'toString',
+          'constructor',
+        ])
+          expect(await p.resolveRequestModelIdPublic(model)).toBe(model);
+        expect(logger.warn).not.toHaveBeenCalled();
+      },
+    );
+
+    it('replaces a retired preference with the closest same-family live id, warning once', async () => {
+      liveRoutes = {
+        ...LIVE_ROUTES,
+        'opencode-zen': {
+          'claude-sonnet-5-1': 'messages',
+          'claude-sonnet-6': 'messages',
+          'minimax-m3': 'chat/completions',
+        },
+      };
+      const { p } = await proxy('opencode-zen');
+      expect(await p.resolveRequestModelIdPublic('sonnet')).toBe(
+        'claude-sonnet-5-1',
+      );
+      expect(await p.resolveRequestModelIdPublic('default')).toBe(
+        'claude-sonnet-5-1',
+      );
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      expect(logger.warn).toHaveBeenCalledWith(
+        '[provider-auth] tier preference not in live catalog',
+        {
+          providerId: 'opencode-zen',
+          tier: 'sonnet',
+          preferred: 'claude-sonnet-5',
+          resolved: 'claude-sonnet-5-1',
+          rule: 'family',
+        },
+      );
+    });
+
+    it('keeps the preference instead of switching family when no family member is live', async () => {
+      liveRoutes = {
+        ...LIVE_ROUTES,
+        'opencode-go': { 'deepseek-v4': 'chat/completions' },
+      };
+      const { p } = await proxy('opencode-go');
+      expect(await p.resolveRequestModelIdPublic('opus')).toBe('kimi-k3');
+      expect(logger.warn).toHaveBeenCalledWith(
+        '[provider-auth] tier preference not in live catalog',
+        {
+          providerId: 'opencode-go',
+          tier: 'opus',
+          preferred: 'kimi-k3',
+          resolved: 'kimi-k3',
+          rule: 'none',
+        },
+      );
+    });
+
+    it('uses the preference unverified when no catalog is on hand', async () => {
+      liveRoutes = null;
+      const { p } = await proxy('opencode-go');
+      expect(await p.resolveRequestModelIdPublic('haiku')).toBe(
+        getAnthropicProvider('opencode-go')?.defaultTiers?.haiku,
+      );
+      expect(logger.warn).not.toHaveBeenCalled();
+    });
+  });
 
   it.each([
     ['opencode-zen', 'claude-sonnet-5', '/zen/v1/messages'],
@@ -421,9 +532,33 @@ describe('OpenCodeTranslationProxy', () => {
         expect(result.status).toBe(400);
         expect(JSON.parse(result.body).error).toEqual({
           type: 'invalid_request_error',
-          message: `Model '${model}' is not supported by ${getAnthropicProvider(id)?.name} in this Ptah version. Choose a listed model or update Ptah.`,
+          message: `Model '${model}' is not offered by ${getAnthropicProvider(id)?.name} as a chat model. Choose a model from the list.`,
         });
       }
+      expect(getHeaders).not.toHaveBeenCalled();
+      expect(requests).toHaveLength(0);
+    },
+  );
+
+  it.each(['opencode-zen', 'opencode-go'] as const)(
+    '%s explains a request it cannot route without a catalog',
+    async (id) => {
+      liveRoutes = null;
+      const getHeaders = jest.fn(async () => ({}));
+      const { url } = await proxy(id, {
+        getHeaders,
+        isAuthenticated: async () => true,
+        getApiKey: async () => 'key',
+      });
+      const result = await post(
+        url,
+        JSON.stringify({ model: 'minimax-m3', max_tokens: 1, messages: [] }),
+      );
+      expect(result.status).toBe(400);
+      expect(JSON.parse(result.body).error).toEqual({
+        type: 'invalid_request_error',
+        message: `Couldn't load ${getAnthropicProvider(id)?.name}'s model list to route 'minimax-m3'. Check your connection and retry.`,
+      });
       expect(getHeaders).not.toHaveBeenCalled();
       expect(requests).toHaveLength(0);
     },
@@ -472,8 +607,7 @@ describe('OpenCodeTranslationProxy', () => {
     it.each(['opencode-zen', 'opencode-go'] as const)(
       '%s GPT route sends an image tool_result as a placeholder string',
       async (id) => {
-        const { p, url } = await proxy(id);
-        expect(p.resolveUpstreamProtocol('gpt-5.6-luna')).toBe('responses');
+        const { url } = await proxy(id);
         const result = await post(url, JSON.stringify(imageRequest));
         expect(result.status).toBe(200);
         expect(requests).toHaveLength(1);

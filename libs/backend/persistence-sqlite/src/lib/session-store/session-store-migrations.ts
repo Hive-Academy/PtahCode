@@ -1,10 +1,13 @@
 import type { Migration } from '../migrations';
+import { rewriteLedgerWorkspaceKeys } from './ledger-workspace-key-rewrite';
 
 // Migrations for sessions.sqlite only. Its ledger is separate from
 // ptah.sqlite's, so versions start at 1 again.
 //
 // sessions: one row per session for every project and host. workspace_key is
-// normalizeWorkspaceRoot(workspace_path), NULL for a projectless session.
+// normalizeWorkspaceRoot(workspace_path), NULL for a projectless session; the
+// session list matches on it exactly. ledger_workspace_key (S0009) is
+// ledgerWorkspaceKey(workspace_path), the key the usage tables store and join on.
 // summary_json is the lean listing entry, detail_json the full record without
 // bulk agent output (that lives in per-session files).
 //
@@ -190,6 +193,13 @@ CREATE INDEX idx_session_usage_codex_run ON session_usage_turns (run_id, occurre
   WHERE producer = 'codex-checkpoint';
 `;
 
+// The usage ledger's join key for a session, beside the session list's exact
+// workspace_key. S0010 fills it for existing rows.
+const S0009_SESSIONS_LEDGER_WORKSPACE_KEY = `
+ALTER TABLE sessions ADD COLUMN ledger_workspace_key TEXT;
+CREATE INDEX idx_sessions_ledger_workspace_key ON sessions (ledger_workspace_key, session_id);
+`;
+
 export const SESSION_STORE_MIGRATIONS: readonly Migration[] = [
   { version: 1, name: 'S0001_sessions', sql: S0001_SESSIONS },
   { version: 2, name: 'S0002_session_stats', sql: S0002_SESSION_STATS },
@@ -199,4 +209,6 @@ export const SESSION_STORE_MIGRATIONS: readonly Migration[] = [
   { version: 6, name: 'S0006_usage_coverage', sql: S0006_USAGE_COVERAGE },
   { version: 7, name: 'S0007_usage_source_cursor', sql: S0007_USAGE_SOURCE_CURSOR },
   { version: 8, name: 'S0008_usage_backfill_lookup', sql: S0008_USAGE_BACKFILL_LOOKUP },
+  { version: 9, name: 'S0009_sessions_ledger_workspace_key', sql: S0009_SESSIONS_LEDGER_WORKSPACE_KEY },
+  { version: 10, name: 'S0010_ledger_workspace_key_rewrite', run: (db) => rewriteLedgerWorkspaceKeys(db) },
 ];

@@ -65,7 +65,6 @@ jest.mock('@ptah-extension/agent-sdk', () => {
       },
     })),
     getProviderAuthEnvVar: jest.fn(() => 'ANTHROPIC_API_KEY'),
-    seedStaticModelPricing: jest.fn(),
     buildSafeEnv: jest.fn((env: unknown) => env),
   };
 });
@@ -194,6 +193,8 @@ function buildHarness(accountInfo: jest.Mock): Harness {
     null as never, // compactionHookHandler
     null as never, // compactionConfigProvider
     {
+      resolveEffectiveTiers: jest.fn(specTierPreferences),
+      getCachedModelIds: jest.fn(() => null),
       getModelTiers: jest
         .fn()
         .mockReturnValue({ sonnet: null, opus: null, haiku: null }),
@@ -236,6 +237,24 @@ async function spawnLane(harness: Harness) {
 
 async function flush(): Promise<void> {
   for (let i = 0; i < 20; i++) await Promise.resolve();
+}
+
+/**
+ * Stand-in for `ProviderModelsService.resolveEffectiveTiers` with no live
+ * catalogue on hand: the caller's tier, else the provider's preference (read
+ * from the provider lookup this spec mocks).
+ */
+function specTierPreferences(
+  providerId: string,
+  user: Partial<Record<'sonnet' | 'opus' | 'haiku', string | null | undefined>>,
+): Partial<Record<'sonnet' | 'opus' | 'haiku', string>> {
+  const { getAnthropicProvider } = jest.requireMock<
+    typeof import('@ptah-extension/agent-sdk')
+  >('@ptah-extension/agent-sdk');
+  const preferred = getAnthropicProvider(providerId)?.defaultTiers;
+  const pick = (tier: 'sonnet' | 'opus' | 'haiku'): string | undefined =>
+    user[tier] || preferred?.[tier];
+  return { sonnet: pick('sonnet'), opus: pick('opus'), haiku: pick('haiku') };
 }
 
 describe('PtahCliRegistry.spawnAgent — lane owner and plan limits', () => {

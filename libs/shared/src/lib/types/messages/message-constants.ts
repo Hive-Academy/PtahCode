@@ -262,6 +262,11 @@ export const MESSAGE_TYPES = {
    * path rewrites it to the SDK id.
    */
   AGENT_MONITOR_REPARENTED: 'agent-monitor:reparented',
+  /**
+   * Backend → Frontend: a Ptah monitor asked a live lane for a handoff or paused its new work
+   * (TASK_2026_2297_920a, P5). The lane stays alive.
+   */
+  AGENT_MONITOR_ACTION_NOTICE: 'agent-monitor:action-notice',
   AGENT_MONITOR_MESSAGE_RECEIPT: 'agent-monitor:message-receipt',
   AGENT_MONITOR_PARENT_DELIVERY: 'agent-monitor:parent-delivery',
   AGENT_MONITOR_OUTPUT: 'agent-monitor:output',

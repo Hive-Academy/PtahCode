@@ -1,4 +1,4 @@
-name: Model Lists Drift Probe
+name: Live Model Parser Probe
 
 on:
   schedule:
@@ -50,23 +50,23 @@ jobs:
         # needs no native rebuilds.
         run: npm ci --ignore-scripts --no-audit --no-fund
 
-      - name: Run live model-list drift check
+      - name: Run live model parser probe
         id: probe
         run: |
           set -o pipefail
-          ./node_modules/.bin/nx test @ptah-extension/auth-providers --testPathPatterns model-lists.live --passWithNoTests=false 2>&1 | tee "${RUNNER_TEMP}/model-lists-probe-output.txt"
+          ./node_modules/.bin/nx test @ptah-extension/auth-providers --testPathPatterns vendor-model-parsers.live --passWithNoTests=false 2>&1 | tee "${RUNNER_TEMP}/model-lists-probe-output.txt"
 
       - name: Open or update the probe failure issue
         if: failure() && steps.probe.outcome == 'failure'
         env:
           GH_TOKEN: ${{ github.token }}
-          ISSUE_TITLE: '[model-lists-probe] Provider model lists have drifted'
+          ISSUE_TITLE: '[model-lists-probe] A live model parser or tier preference failed'
         run: |
           output_file="${RUNNER_TEMP}/model-lists-probe-output.txt"
           body_file="${RUNNER_TEMP}/model-lists-probe-issue-body.md"
 
           {
-            echo 'The scheduled model-list drift check failed: a fallback list or the OpenCode route table no longer matches what the vendor serves. See libs/backend/auth-providers/src/lib/model-lists.live.spec.ts.'
+            echo 'The scheduled live model parser probe failed: a production parser no longer reads a vendor catalog, or a tier preference was retired by its vendor and must be updated. See libs/backend/auth-providers/src/lib/vendor-model-parsers.live.spec.ts.'
             echo
             printf -- '- Run: %s/%s/actions/runs/%s\n' \
               "${GITHUB_SERVER_URL}" "${GITHUB_REPOSITORY}" "${GITHUB_RUN_ID}"

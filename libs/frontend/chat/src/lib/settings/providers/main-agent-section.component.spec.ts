@@ -117,6 +117,17 @@ describe('MainAgentSectionComponent', () => {
     expect(query('routing-main-model')?.classList.contains('font-mono')).toBe(resolvedModel.kind === 'model');
   });
 
+  it('names the provider, not Claude, as the default-model chooser of a provider-session main agent', () => {
+    // Live test: Antigravity's Model row read "Default (chosen by Claude)".
+    state.connections.set(ready([{ id: 'antigravity-cli', name: 'Antigravity' }]));
+    state.route.set(ready({
+      ...ROUTE, driverProviderId: 'antigravity-cli',
+      providers: [{ id: 'antigravity-cli', type: 'cli', status: 'connected' }],
+    }));
+    fixture.detectChanges();
+    expect(query('routing-main-model')?.textContent?.trim()).toBe('Default (chosen by Antigravity)');
+  });
+
   it('a driver that is not ready "Needs attention"; no driver says to choose one', () => {
     state.route.set(ready({ ...ROUTE, ready: false }));
     fixture.detectChanges();

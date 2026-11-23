@@ -591,4 +591,33 @@ describe('SessionChildRegistry', () => {
       expect(registry.pendingOf([PARENT])).toEqual([]);
     });
   });
+
+  it('marks a cwd-inferred SDK binding until the child confirms it (TASK_2026_2298)', () => {
+    const registry = new SessionChildRegistry();
+    addChild(registry, 'a');
+    expect(registry.bindSdkSessionId('a', 'sdk-a', { inferred: true })?.sdkSessionIdInferred).toBe(true);
+    expect(registry.bindSdkSessionId('a', 'sdk-a', { inferred: true })?.sdkSessionIdInferred).toBe(true);
+    expect(registry.bindSdkSessionId('a', 'sdk-a')?.sdkSessionIdInferred).toBeUndefined();
+    expect(registry.get('sdk-a')?.childSessionId).toBe('a');
+    expect(registry.bindSdkSessionId('a', 'sdk-b')?.sdkSessionIdInferred).toBeUndefined();
+  });
+});
+
+it('retains the slot and notice through a live pause and clears pause on end', () => {
+  const registry = new SessionChildRegistry();
+  const notice = {
+    actor: 'ptah-budget', action: 'paused', reason: 'runtime-cap', nextStep: 'review-live-agent',
+  } as const;
+  addChild(registry, 'paused-child');
+  expect(registry.markPaused('paused-child', notice)).toBe(true);
+  expect(registry.markPaused('paused-child', notice)).toBe(false);
+  expect(registry.live()).toMatchObject([{ paused: true, notice }]);
+  expect(registry.reserveSlot(1)).toBeNull();
+  registry.clearPause('paused-child');
+  expect(registry.get('paused-child')?.notice).toBeUndefined();
+  expect(registry.get('paused-child')?.paused).toBeUndefined();
+  expect(registry.markPaused('paused-child', notice)).toBe(true);
+  expect(registry.markEnded('paused-child', 'stopped', 'explicit stop'))
+    .toMatchObject({ terminalStatus: 'stopped', notice });
+  expect(registry.get('paused-child')?.paused).toBeUndefined();
 });

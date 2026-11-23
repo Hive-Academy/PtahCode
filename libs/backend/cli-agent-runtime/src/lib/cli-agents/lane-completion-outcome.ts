@@ -192,7 +192,8 @@ export function recordLaneUsageOutcome(
       totalCostMicroUsd: knownCostMicroUsd,
       totalCostAuthority: costAuthority,
       pricingVersion: null,
-      workspaceKey: normalizeWorkspaceRoot(info.workingDirectory),
+      // The raw path: the ledger keeps POSIX case on case-sensitive hosts.
+      workspaceKey: info.workingDirectory,
       host: 'cli',
       source: 'live',
       missingReason,

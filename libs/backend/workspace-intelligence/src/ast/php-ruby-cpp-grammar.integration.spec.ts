@@ -482,8 +482,11 @@ describe('PHP, Ruby and C++ grammar integration (real tree-sitter WASM, Batch 31
       // A function whose body is HTML between `?>` and `<?php`.
       expect(byName.get('late_partial')?.startLine).toBe(49);
       expect(byName.get('late_partial')?.endLine).toBe(51);
-      // The shared extractor keeps each parameter's first token.
-      expect(byName.get('__construct')?.parameters).toEqual(['string', 'int']);
+      // PHP parameters render as their `$name` variables.
+      expect(byName.get('__construct')?.parameters).toEqual([
+        '$label',
+        '$size',
+      ]);
     });
 
     it('captures interfaces, traits, enums and classes', () => {
@@ -582,7 +585,7 @@ describe('PHP, Ruby and C++ grammar integration (real tree-sitter WASM, Batch 31
       ]);
       expect(
         cpp.functions.find((f) => f.name === 'helper')?.parameters,
-      ).toEqual(['int']);
+      ).toEqual(['value']);
     });
 
     it('captures class templates, structs and scoped enums', () => {
@@ -744,7 +747,7 @@ describe('PHP, Ruby and C++ grammar integration (real tree-sitter WASM, Batch 31
     // Batch 31 r1 R31-02: valid definitions whose declarator a fixed query
     // shape could not read are indexed, not a clean empty answer.
     it.each([
-      ['a parenthesised name', 'int (needle)(int x) { return x; }\n', ['int']],
+      ['a parenthesised name', 'int (needle)(int x) { return x; }\n', ['x']],
       ['three pointers', 'int ***needle() { return nullptr; }\n', []],
       [
         'a returned function pointer',
@@ -754,12 +757,12 @@ describe('PHP, Ruby and C++ grammar integration (real tree-sitter WASM, Batch 31
       [
         'a name qualified five scopes deep',
         'int a::b::c::d::e::needle(long v) { return 0; }\n',
-        ['long'],
+        ['v'],
       ],
       [
         'a reference to a pointer',
         'int *&needle(int *p) { return p; }\n',
-        ['int'],
+        ['p'],
       ],
     ])(
       'C++ definition with %s is indexed',

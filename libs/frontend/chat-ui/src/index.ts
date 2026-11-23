@@ -266,6 +266,8 @@ export {
   agentCountOf,
   durationMsOf,
   knownSubtotalOf,
+  NOT_PRICED,
+  nullCostLabel,
 } from './lib/molecules/session/session-stats-view';
 export { InspectorSessionStatsComponent } from './lib/molecules/session/inspector-stats/inspector-session-stats.component';
 export {

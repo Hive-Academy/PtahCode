@@ -23,6 +23,7 @@ import {
   COPILOT_PROXY_TOKEN_PLACEHOLDER,
   OPENROUTER_PROXY_TOKEN_PLACEHOLDER,
   getAnthropicProvider,
+  isProviderSessionProviderId,
   updatePricingMap,
   type AuthEnv,
 } from '@ptah-extension/shared';
@@ -103,10 +104,9 @@ describe('ModelResolver', () => {
 
   describe('resolveForCost', () => {
     it('prices a subscription turn at published rates, not zero', () => {
-      // Subscription models are absent from the
-      // pricing map by design (seedStaticModelPricing skips subscription
-      // providers, so their $0 statics cannot pin a shared slug), and their
-      // rates come from the catalog like everyone else's.
+      // Subscription models are absent from the pricing map by design (no
+      // strategy seeds prices from a repository model list), and their rates
+      // come from the catalog like everyone else's.
       const resolver = makeResolver(
         copilotEnv({ ANTHROPIC_DEFAULT_SONNET_MODEL: 'gpt-5.3-codex' }),
       );
@@ -229,9 +229,13 @@ describe('ModelResolver', () => {
       // The "3 of 11" figure in skill-synthesis/CLAUDE.md and in
       // `resolveJudgeModel`'s docblock. Derived from the registry rather than
       // restated, so adding `defaultTiers` to one of these fails HERE and
-      // sends whoever did it to the prose.
+      // sends whoever did it to the prose. Provider-session entries
+      // (`antigravity-cli`) never reach the Claude SDK, so tier resolution
+      // does not apply to them and they are not part of the count.
       const withoutTiers = ANTHROPIC_PROVIDERS.filter(
-        (p) => !('defaultTiers' in p) || !p.defaultTiers,
+        (p) =>
+          !isProviderSessionProviderId(p.id) &&
+          (!('defaultTiers' in p) || !p.defaultTiers),
       ).map((p) => p.id);
 
       expect([...withoutTiers].sort()).toEqual([
@@ -365,6 +369,8 @@ describe('ModelResolver', () => {
       ];
       const configValues = {
         'provider.openrouter.modelCatalog': {
+          schema: 2,
+          origin: 'live',
           models: CATALOG,
           timestamp: Date.now(),
         },

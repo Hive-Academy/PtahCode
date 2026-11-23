@@ -1,22 +1,8 @@
 /**
- * No built-in entry carries `providerSession` yet (one is added per admitting
- * phase), so this spec gives two existing entries a profile to prove the
- * lookups: one renamed to a reserved provider-session id, one keeping an id
- * outside the reserved list. `provider-session-registry.entries.spec.ts`
- * pins that the real registry has none.
+ * Antigravity is the first built-in provider-session entry. To prove that a
+ * profile on an id outside the reserved list is ignored, this spec gives the
+ * Sakana entry a profile.
  */
-jest.mock('./entries/requesty-provider-entry', () => {
-  const actual = jest.requireActual('./entries/requesty-provider-entry');
-  return {
-    ...actual,
-    REQUESTY_PROVIDER_ENTRY: {
-      ...actual.REQUESTY_PROVIDER_ENTRY,
-      id: 'antigravity-cli',
-      name: 'Antigravity',
-      providerSession: 'antigravity',
-    },
-  };
-});
 jest.mock('./entries/sakana-provider-entry', () => {
   const actual = jest.requireActual('./entries/sakana-provider-entry');
   return {
@@ -31,6 +17,7 @@ jest.mock('./entries/sakana-provider-entry', () => {
 import {
   getProviderSessionProfile,
   isProviderSessionProviderId,
+  planOwnerProviderId,
   providerRuntimeFor,
   providerSessionNativeRuntimeRequiredMessage,
 } from './provider-registry';
@@ -51,6 +38,14 @@ describe('provider-session registry lookups', () => {
   it('answers "not a provider session" for a reserved id with no entry', () => {
     expect(getProviderSessionProfile('grok-cli')).toBeUndefined();
     expect(isProviderSessionProviderId('grok-cli')).toBe(false);
+  });
+
+  it('names the plan-limit owner provider of a main provider (issue #1459)', () => {
+    // Antigravity bills its CLI account, whose owners carry the profile id.
+    expect(planOwnerProviderId('antigravity-cli')).toBe('antigravity');
+    expect(planOwnerProviderId('openai-codex')).toBe('openai-codex');
+    expect(planOwnerProviderId('anthropic')).toBe('anthropic');
+    expect(planOwnerProviderId('grok-cli')).toBe('grok-cli');
   });
 
   it('maps Codex to its app-server runtime', () => {

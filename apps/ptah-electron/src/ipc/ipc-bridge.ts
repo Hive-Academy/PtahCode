@@ -21,7 +21,10 @@
 import { ipcMain, type IpcMainEvent } from 'electron';
 import { z } from 'zod';
 import type { DependencyContainer } from 'tsyringe';
-import type { CodexChatHostPorts } from '@ptah-extension/rpc-handlers';
+import type {
+  CodexChatHostPorts,
+  ProviderSessionChatHostPorts,
+} from '@ptah-extension/rpc-handlers';
 import { SDK_TOKENS } from '@ptah-extension/agent-sdk';
 import type { PermissionPromptService } from '@ptah-extension/vscode-lm-tools';
 import type { RpcHandler } from '@ptah-extension/vscode-core';
@@ -703,6 +706,20 @@ export class IpcBridge {
             : null;
           if (
             codexPorts?.handlePermissionResponse(response) === true
+          ) {
+            return;
+          }
+          // Then provider-session host ports (null when none are bound).
+          const providerSessionPorts = this.container.isRegistered(
+            SDK_TOKENS.PROVIDER_SESSION_CHAT_PORTS,
+            true,
+          )
+            ? this.container.resolve<
+                Pick<ProviderSessionChatHostPorts, 'handlePermissionResponse'> | null
+              >(SDK_TOKENS.PROVIDER_SESSION_CHAT_PORTS)
+            : null;
+          if (
+            providerSessionPorts?.handlePermissionResponse(response) === true
           ) {
             return;
           }

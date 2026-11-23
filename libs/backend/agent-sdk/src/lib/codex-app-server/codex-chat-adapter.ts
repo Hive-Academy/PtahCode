@@ -61,6 +61,7 @@ import { CodexChatPeerQueue } from './codex-chat-peer-queue';
 import { SessionAdmissionRefusedError } from '../errors/session-admission-refused.error';
 import {
   CodexSessionUsageOwner,
+  type CodexTurnDuration,
   type CodexUsageCheckpoint,
 } from './codex-session-usage-owner';
 
@@ -74,11 +75,19 @@ export interface CodexChatMetadataPort {
   completedTurn?(sessionId: SessionId): Promise<void>;
   readUsage?(sessionId: SessionId): Promise<{
     checkpoint?: unknown;
+    /** Turn time stored beside the checkpoint; absent on older rows. */
+    duration?: unknown;
     messageCount: number;
   }>;
   persistUsage?(
     sessionId: SessionId,
     checkpoint: CodexUsageCheckpoint,
+    duration?: CodexTurnDuration,
+  ): Promise<void>;
+  /** Store only the turn-time record (max wins). Optional for older hosts. */
+  persistDuration?(
+    sessionId: SessionId,
+    duration: CodexTurnDuration,
   ): Promise<void>;
 }
 
@@ -445,6 +454,9 @@ export class CodexChatAdapter implements NativeChatAdapter {
               context.identity.threadId,
               savedUsage.checkpoint,
             );
+      // Turn time is kept on its own: a session whose only turns ended
+      // before any usage has a duration record and no checkpoint.
+      usageOwner.restoreDuration(savedUsage?.duration);
       if (
         readUsageFailed ||
         (resumeId && savedUsage?.checkpoint === undefined)
@@ -929,12 +941,12 @@ export class CodexChatAdapter implements NativeChatAdapter {
           this.ports.metadata.completedTurn?.(id) ?? Promise.resolve(),
         callbacks: (id, turn) => this.ports.callbacks(id, turn),
         stats: (result) => this.stats?.(result),
-        persistUsage: (id, checkpoint) => {
+        persistUsage: (id, checkpoint, duration) => {
           // An unreadable checkpoint may contain threads absent from this owner.
           if (this.usagePersistenceDisabled.has(session.usageOwner))
             return Promise.resolve();
           if (this.ports.metadata.persistUsage) {
-            return this.ports.metadata.persistUsage(id, checkpoint);
+            return this.ports.metadata.persistUsage(id, checkpoint, duration);
           }
           // Optional capability: this host has no durable usage store.
           if (!this.missingUsageStoreReported) {
@@ -945,6 +957,13 @@ export class CodexChatAdapter implements NativeChatAdapter {
             );
           }
           return Promise.resolve();
+        },
+        persistDuration: (id, duration) => {
+          // Same rule as usage: an unreadable stored row is never written.
+          if (this.usagePersistenceDisabled.has(session.usageOwner))
+            return Promise.resolve();
+          return this.ports.metadata.persistDuration?.(id, duration) ??
+            Promise.resolve();
         },
         interrupt: (id) => this.interruptCurrentTurn(id),
         close: (active) => this.close(active),

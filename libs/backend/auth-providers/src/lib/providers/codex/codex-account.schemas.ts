@@ -91,6 +91,8 @@ const rateLimitSnapshot = z.object({
 
 export const codexRateLimitsResponseSchema = z.object({
   rateLimits: rateLimitSnapshot,
+  /** Owner identity material only; never returned or logged. */
+  accountId: z.string().nullable().optional(),
   rateLimitsByLimitId: z
     .record(z.string(), rateLimitSnapshot)
     .nullable()

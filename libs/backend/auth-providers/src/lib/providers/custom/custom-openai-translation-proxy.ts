@@ -181,11 +181,14 @@ export class CustomOpenAiTranslationProxy extends TranslationProxyBase {
   }
 
   /**
-   * Custom entries normally advertise no static catalog — models come from the
-   * entry's `defaultTiers` or whatever slug the user types. Returns whatever
-   * the entry declared, else an empty list.
+   * The `staticModels` the constructing caller passed on this entry (caller
+   * configuration, not a repo literal), else an empty list. Served on
+   * `GET /v1/models`. Settings-created entries never carry the field: the
+   * settings schema, the registry and `createCustomOpenAiProxy` do not pass
+   * it, so those proxies list nothing here and models come from the entry's
+   * tiers or the slug the user types.
    */
-  protected getStaticModels(): Array<{ id: string }> {
+  protected override getListedModels(): Array<{ id: string }> {
     return [...(this.customConfig.staticModels ?? [])];
   }
 }

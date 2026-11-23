@@ -12,9 +12,15 @@ import type {
   FlatStreamEventUnion,
   IAgentAdapter,
   SessionId,
+  SessionStatsEntry,
 } from '@ptah-extension/shared';
 import { calculateExactMessageCost, resolveContextCapacity } from '@ptah-extension/shared';
-import type { CodexSessionUsageOwner, CodexUsageCheckpoint } from './codex-session-usage-owner';
+import {
+  codexTurnDurationTotal,
+  type CodexSessionUsageOwner,
+  type CodexTurnDuration,
+  type CodexUsageCheckpoint,
+} from './codex-session-usage-owner';
 import type {
   CodexChatAdapterPorts,
   CodexChatScope,
@@ -62,6 +68,8 @@ export interface CodexChatSession {
   stopRequested?: boolean;
   closing?: Promise<void>;
   compacting?: Promise<void>;
+  /** The last session snapshot a stats publish sent; a time-only update reuses it. */
+  lastSessionStats?: SessionStatsEntry;
 }
 
 function failureNotice(
@@ -104,7 +112,17 @@ interface CodexChatTurnDependencies {
   completedTurn(id: SessionId): Promise<void>;
   callbacks: CodexChatAdapterPorts['callbacks'];
   stats: Parameters<IAgentAdapter['setResultStatsCallback']>[0];
-  persistUsage(id: SessionId, checkpoint: CodexUsageCheckpoint): Promise<void>;
+  persistUsage(
+    id: SessionId,
+    checkpoint: CodexUsageCheckpoint,
+    duration?: CodexTurnDuration,
+  ): Promise<void>;
+  /**
+   * Store only the turn-time record beside the checkpoint (max wins). Used
+   * when a turn exits without a stats publish; never touches the checkpoint,
+   * its revision or the usage sink.
+   */
+  persistDuration(id: SessionId, duration: CodexTurnDuration): Promise<void>;
   interrupt(id: SessionId): Promise<boolean>;
   close(session: CodexChatSession): Promise<void>;
   notifyCompaction(session: CodexChatSession, trigger: 'auto'): void;
@@ -175,6 +193,41 @@ export async function* streamCodexChatTurn(
   let terminalStateEmitted = false;
   let compactionActive = false;
   let admitted = false;
+  /** Turn-time total the last successful usage persist stored. */
+  let persistedDurationTotal: number | undefined;
+  let admittedTurnId: string | undefined;
+  /** Whether this turn sent its own `session:stats` result already. */
+  let statsPublished = false;
+  /**
+   * Record this turn's wall time and, when no usage persist stored that
+   * total yet, write it on its own (bounded, never throws). Safe to call on
+   * every exit path: one value per turn (max wins) and the stored-total
+   * check skip a repeat write.
+   *
+   * With `final`, a turn that sent no `session:stats` result sends one
+   * time-only result, once. A detached exit passes `final: false`: its
+   * drain still owns the turn and may publish the terminal's real stats.
+   */
+  const storeTurnTime = async (final: boolean): Promise<void> => {
+    if (!admittedTurnId) return;
+    session.usageOwner.recordTurnDuration(admittedTurnId, Date.now() - started);
+    const duration = session.usageOwner.serializeDuration();
+    const total = codexTurnDurationTotal(duration);
+    if (total === 0) return;
+    // After a stats publish stored this turn, only a real gain (a drain or a
+    // slow exit) is worth a second write; a few ms of cleanup is not.
+    if (persistedDurationTotal === undefined ||
+      total - persistedDurationTotal >= TURN_TIME_MIN_GAIN_MS) {
+      // Marked stored only on success, so a failed or timed-out write is
+      // retried once by the turn's final store.
+      if (await persistTurnDuration(session.id, duration, deps))
+        persistedDurationTotal = total;
+    }
+    if (final && !statsPublished) {
+      statsPublished = true;
+      publishTurnTime(session, startTokens, Date.now() - started, deps);
+    }
+  };
   let finishCompaction: (() => void) | undefined;
   let drainUsage: {
     readonly publishStats: (result: CodexChatResult) => Promise<void>;
@@ -192,6 +245,7 @@ export async function* streamCodexChatTurn(
       ...input, signal: subscription.signal,
     });
     session.turnId = receipt.turnId;
+    admittedTurnId = receipt.turnId;
     admitted = true;
     deps.admission?.accepted();
     const turn = { ...session.context.identity, turnId: receipt.turnId };
@@ -206,6 +260,9 @@ export async function* streamCodexChatTurn(
       const usage = result.usage;
       if (turnTerminalObserved && !turnUsageObserved)
         session.usageOwner.markMissingEvidence();
+      // Codex Time is wall time per turn (approval waits included).
+      const elapsed = Date.now() - started;
+      session.usageOwner.recordTurnDuration(receipt.turnId, elapsed);
       const lifetime = session.usageOwner.snapshot(session.messageCount);
       const checkpoint = session.usageOwner.serialize();
       const turnTokens = {
@@ -241,7 +298,13 @@ export async function* streamCodexChatTurn(
       }
       const lifetimePrice = session.usageOwner.lifetimePrice();
       try {
-        await deps.persistUsage(session.id, session.usageOwner.serialize());
+        const duration = session.usageOwner.serializeDuration();
+        await deps.persistUsage(
+          session.id,
+          session.usageOwner.serialize(),
+          duration,
+        );
+        persistedDurationTotal = codexTurnDurationTotal(duration);
       } catch (error) {
         deps.logger.error(
           '[CodexChatAdapter] Native usage checkpoint persistence failed.',
@@ -261,6 +324,28 @@ export async function* streamCodexChatTurn(
             sdkContextWindow: usage?.modelContextWindow,
           })
         : undefined;
+      const sessionStats: SessionStatsEntry = {
+        ...lifetime,
+        totalCost: lifetimePrice.totalCost,
+        costBasis: lifetimePrice.costBasis,
+        pricingCoverage: lifetimePrice.pricingCoverage,
+        ...(lifetimePrice.priceProvenance
+          ? { priceProvenance: lifetimePrice.priceProvenance } : {}),
+        // The session reason is published only when nothing in the session
+        // was priced AND this turn's own unpriced cause is a missing rate,
+        // so "not priced" never mislabels an unknown billing mode or
+        // unusable usage. Lifetime usage coverage must also be complete: an
+        // earlier turn without usage evidence keeps "cost unavailable". Any
+        // other null-cost cause omits the field and the UI keeps that label.
+        ...(lifetimePrice.totalCost === null &&
+            lifetimePrice.pricingCoverage === 'none' &&
+            lifetime.coverage === 'complete' &&
+            turnPrice.totalCost === null &&
+            turnPrice.costUnavailableReason === 'rate-missing'
+          ? { costUnavailableReason: 'rate-missing' as const } : {}),
+      };
+      session.lastSessionStats = sessionStats;
+      statsPublished = true;
       deps.stats({
         sessionId: session.id,
         turnCost: turnUsageObserved ? turnPrice.totalCost : null,
@@ -268,28 +353,9 @@ export async function* streamCodexChatTurn(
         pricingCoverage: turnPrice.pricingCoverage,
         ...(turnPrice.priceProvenance
           ? { priceProvenance: [turnPrice.priceProvenance] } : {}),
-        sessionStats: {
-          ...lifetime,
-          totalCost: lifetimePrice.totalCost,
-          costBasis: lifetimePrice.costBasis,
-          pricingCoverage: lifetimePrice.pricingCoverage,
-          ...(lifetimePrice.priceProvenance
-            ? { priceProvenance: lifetimePrice.priceProvenance } : {}),
-          // The session reason is published only when nothing in the session
-          // was priced AND this turn's own unpriced cause is a missing rate,
-          // so "not priced" never mislabels an unknown billing mode or
-          // unusable usage. Lifetime usage coverage must also be complete: an
-          // earlier turn without usage evidence keeps "cost unavailable". Any
-          // other null-cost cause omits the field and the UI keeps that label.
-          ...(lifetimePrice.totalCost === null &&
-              lifetimePrice.pricingCoverage === 'none' &&
-              lifetime.coverage === 'complete' &&
-              turnPrice.totalCost === null &&
-              turnPrice.costUnavailableReason === 'rate-missing'
-            ? { costUnavailableReason: 'rate-missing' as const } : {}),
-        },
+        sessionStats,
         tokens,
-        duration: Date.now() - started,
+        duration: elapsed,
         ...(model && contextCapacity
           ? {
               // The same per-model row the Claude path sends, from native
@@ -529,6 +595,9 @@ export async function* streamCodexChatTurn(
       failureNoticeEmitted = true;
       yield* failureNotice(session, session.turnId, notice);
     }
+    // Store the turn time before the terminal turn_state: a consumer that
+    // stops pulling after the settle must not lose it.
+    await storeTurnTime(true);
     if (!terminalStateEmitted) {
       terminalStatus = interrupted ? 'interrupted' : 'failed';
       const settled = settleTurn();
@@ -570,6 +639,21 @@ export async function* streamCodexChatTurn(
   } finally {
     clearTimeout(backgroundTimer);
     finishCompaction?.();
+    // A detached consumer leaves the turn to a drain that may still publish
+    // the terminal's stats; that drain then sends the final time.
+    const drains = Boolean(
+      !terminal &&
+      !exhausted &&
+      session.turnId &&
+      events &&
+      projection &&
+      drainUsage &&
+      !session.closing &&
+      !session.abort.signal.aborted
+    );
+    // Every other admitted exit stores its wall time here, before the turn
+    // settles (a no-op when the catch path or a stats publish stored it).
+    await storeTurnTime(!drains);
     // A consumer can detach between message_complete and its settlement event.
     if (terminal) settleTurn();
     if (session.turnId) session.sink.endTurn(session.id, session.turnId);
@@ -583,10 +667,9 @@ export async function* streamCodexChatTurn(
       session.stopRequested = false;
       deps.onIdle(session);
     };
+    // Re-checked: the session can start closing during the time write.
     if (
-      !terminal &&
-      !exhausted &&
-      session.turnId &&
+      drains &&
       events &&
       projection &&
       drainUsage &&
@@ -602,8 +685,16 @@ export async function* streamCodexChatTurn(
         settleTurn,
         drainUsage.publishStats,
         drainUsage.observeUsage,
-      ).finally(release);
+      ).finally(async () => {
+        // The drain ran after the time above: record it for the same turn,
+        // whether a terminal arrived or not, before the session is released.
+        // A terminal the drain published counts as this turn's one result.
+        await storeTurnTime(true);
+        release();
+      });
     } else {
+      // No drain after all: this exit is the turn's last, so it sends the time.
+      if (drains) await storeTurnTime(true);
       release();
       try {
         await events?.return?.();
@@ -616,6 +707,89 @@ export async function* streamCodexChatTurn(
     }
   }
 }
+/**
+ * The one `session:stats` result of a turn that ended without one (a failure
+ * or cancel before its terminal), so the renderer's Time is current.
+ * Nothing is counted twice: `sessionStats` is the last published snapshot
+ * (installed as-is, never summed) with only `durationMs` updated, `turnCost`
+ * is unknown and `tokens` are the turn's own observed delta. No price is
+ * recorded and the checkpoint revision does not move.
+ */
+function publishTurnTime(
+  session: CodexChatSession,
+  startTokens: SessionStatsEntry['tokens'],
+  elapsed: number,
+  deps: Pick<CodexChatTurnDependencies, 'stats' | 'logger'>,
+): void {
+  const owner = session.usageOwner.snapshot(session.messageCount);
+  try {
+    deps.stats({
+      sessionId: session.id,
+      turnCost: null,
+      tokens: {
+        input: owner.tokens.input - startTokens.input,
+        output: owner.tokens.output - startTokens.output,
+        cacheRead: owner.tokens.cacheRead - startTokens.cacheRead,
+        cacheCreation: owner.tokens.cacheCreation - startTokens.cacheCreation,
+      },
+      duration: elapsed,
+      sessionStats: {
+        ...(session.lastSessionStats ?? owner),
+        durationMs: owner.durationMs,
+      },
+    });
+  } catch (error) {
+    deps.logger.warn('[CodexChatAdapter] Native turn time publish failed.', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
+/** Smallest turn-time gain that earns a write after one was already stored. */
+export const TURN_TIME_MIN_GAIN_MS = 1_000;
+
+/** Upper bound on how long a turn's settle waits for its turn-time write. */
+export const TURN_DURATION_PERSIST_WAIT_MS = 2_000;
+
+/**
+ * Write the turn-time record and wait for it, at most
+ * {@link TURN_DURATION_PERSIST_WAIT_MS}. Never rejects: a failure is logged;
+ * a write still running at the bound finishes (and is logged) on its own.
+ * Resolves `true` only when the write completed inside the bound.
+ */
+export async function persistTurnDuration(
+  id: SessionId,
+  duration: CodexTurnDuration,
+  deps: Pick<CodexChatTurnDependencies, 'persistDuration' | 'logger'>,
+): Promise<boolean> {
+  const write = Promise.resolve()
+    .then(() => deps.persistDuration(id, duration))
+    .then(() => true, (error: unknown) => {
+      deps.logger.warn(
+        '[CodexChatAdapter] Native turn time persistence failed.',
+        { error: error instanceof Error ? error.message : String(error) },
+      );
+      return false;
+    });
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const bound = new Promise<'timeout'>((resolve) => {
+    timer = setTimeout(() => resolve('timeout'), TURN_DURATION_PERSIST_WAIT_MS);
+  });
+  try {
+    const outcome = await Promise.race([write, bound]);
+    if (outcome === 'timeout') {
+      deps.logger.warn(
+        '[CodexChatAdapter] Native turn time persistence is slow; the turn settles without waiting.',
+        { sessionId: id },
+      );
+      return false;
+    }
+    return outcome;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 const REFUSED_INTERRUPT_DRAIN_MS = 5_000;
 
 /** The next event, or undefined when none arrives within `ms` (or `ms` <= 0). */

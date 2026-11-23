@@ -884,20 +884,30 @@ describe('ProviderAuthResolver — live-catalogue tiers for a lane (TASK_2026_26
     });
     const first = await resolver.resolve('kimi-code', 'lane');
     expect(first?.env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('catalogue-new');
+    // Kimi declares its capabilities for every live model, so the live
+    // replacement id carries them too.
     expect(
       first?.env.ANTHROPIC_DEFAULT_SONNET_MODEL_SUPPORTED_CAPABILITIES,
-    ).toBeUndefined();
-    expect(logger.info).toHaveBeenCalledWith(
-      '[provider-auth] replaced static tier default',
-      {
-        providerId: 'kimi-code',
-        tier: 'sonnet',
-        staticId: fallback,
-        liveId: 'catalogue-new',
-      },
-    );
+    ).toBe(getAnthropicProvider('kimi-code')?.liveModelCapabilities?.join(','));
+    const replacementWarnings = () =>
+      (logger.warn as jest.Mock).mock.calls.filter(
+        ([message]) =>
+          message === '[provider-auth] tier preference not in live catalog',
+      );
+    expect(replacementWarnings()).toEqual([
+      [
+        '[provider-auth] tier preference not in live catalog',
+        {
+          providerId: 'kimi-code',
+          tier: 'sonnet',
+          preferred: fallback,
+          resolved: 'catalogue-new',
+          rule: 'derived',
+        },
+      ],
+    ]);
     await resolver.resolve('kimi-code', 'lane');
-    expect(logger.info).toHaveBeenCalledTimes(1);
+    expect(replacementWarnings()).toHaveLength(1);
   });
 
   it('keeps a static default when no live tier can replace it', async () => {
@@ -994,7 +1004,7 @@ describe('ProviderAuthResolver — live-catalogue tiers for a lane (TASK_2026_26
     const result = await resolver.resolve('lm-studio', 'lane');
 
     expect(result?.env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe('gemma-3-12b');
-    expect(getLiveDerivedTiers).toHaveBeenCalledWith('lm-studio');
+    expect(getLiveDerivedTiers).toHaveBeenCalledWith('lm-studio', undefined);
     expect(getLiveDerivedTiers).not.toHaveBeenCalledWith('openrouter');
   });
 });

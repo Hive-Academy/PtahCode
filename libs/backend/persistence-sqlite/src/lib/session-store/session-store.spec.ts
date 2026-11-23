@@ -151,7 +151,7 @@ describeDb('SessionStoreDatabase', () => {
   it('upgrades a populated version 7 session store without losing rows', async () => {
     const file = path.join(dir, 'upgrade.sqlite');
     const oldDb = openDb(file);
-    await new SqliteMigrationRunner(oldDb, logger).applyAll(SESSION_STORE_MIGRATIONS.slice(0, -1), { vecExtensionLoaded: false });
+    await new SqliteMigrationRunner(oldDb, logger).applyAll(SESSION_STORE_MIGRATIONS.filter((migration) => migration.version <= 7), { vecExtensionLoaded: false });
     oldDb.exec(`INSERT INTO session_usage_turns
       (session_id,producer,run_id,turn_id,model_id,event_key,occurred_at_ms,provider_id,cost_authority,source,revision)
       VALUES ('saved','codex-checkpoint','run','turn','model','event',1,'codex','unpriced','live',1)`);

@@ -223,6 +223,8 @@ export function onboardingReadyFixtures(
       anthropicProviderId: chosen,
       codexAuthenticated: codex === 'ready',
       codexTokenStale: false,
+      // The Get ready captures show the two fixed connections; a provider-session card has unit specs.
+      providerSessionStatus: undefined,
     },
     'auth:getCodexReadiness': CODEX_READINESS_FIXTURES[codex],
     'auth:codexLogin': { success: true, state: { attemptId: 'visual-21', mode: 'browser', status: 'starting' } },

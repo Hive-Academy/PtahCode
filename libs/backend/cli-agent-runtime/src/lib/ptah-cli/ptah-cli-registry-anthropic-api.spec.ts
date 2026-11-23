@@ -1,10 +1,24 @@
 import 'reflect-metadata';
 import { PtahCliRegistry } from './ptah-cli-registry';
-import type { PtahCliConfig } from '@ptah-extension/shared';
+import { getPtahCliLaneProvider, type PtahCliConfig } from '@ptah-extension/shared';
 import { createFakeSdkProcessSpawner } from './testing/fake-sdk-process-spawner';
 
 async function* emptyStream(): AsyncGenerator<never, void, unknown> {
   // The query options are captured before stream consumption.
+}
+
+/**
+ * Stand-in for `ProviderModelsService.resolveEffectiveTiers` with no live
+ * catalogue on hand: the caller's tier, else the registry preference.
+ */
+function specTierPreferences(
+  providerId: string,
+  user: Partial<Record<'sonnet' | 'opus' | 'haiku', string | null | undefined>>,
+): Partial<Record<'sonnet' | 'opus' | 'haiku', string>> {
+  const preferred = getPtahCliLaneProvider(providerId)?.defaultTiers;
+  const pick = (tier: 'sonnet' | 'opus' | 'haiku'): string | undefined =>
+    user[tier] || preferred?.[tier];
+  return { sonnet: pick('sonnet'), opus: pick('opus'), haiku: pick('haiku') };
 }
 
 function harness() {
@@ -30,7 +44,11 @@ function harness() {
     { createIsolated: jest.fn(() => ({ transform: jest.fn(() => []) })) } as never,
     { getPermissionLevel: jest.fn(() => 'yolo'), createCallback: jest.fn() } as never,
     null as never, null as never, null as never,
-    { getModelTiers: jest.fn(() => ({ sonnet: null, opus: null, haiku: null })) } as never,
+    {
+      getModelTiers: jest.fn(() => ({ sonnet: null, opus: null, haiku: null })),
+      resolveEffectiveTiers: jest.fn(specTierPreferences),
+      getCachedModelIds: jest.fn(() => null),
+    } as never,
     persistence as never,
     { assembleSpawnOptions: jest.fn(async () => ({
       builtinPolicy: { disallowedTools: [], deniedSkillNames: [] },
@@ -141,5 +159,16 @@ describe('Ptah CLI direct Claude API credentials', () => {
     expect(h.logger.error).toHaveBeenCalledWith(expect.any(String), expect.any(Error));
     expect(JSON.stringify(h.logger.error.mock.calls)).not.toContain('secret value must not appear');
     expect(JSON.stringify(h.logger.error.mock.calls)).not.toContain('instance-key');
+  });
+});
+
+describe('Ptah CLI and provider-session entries', () => {
+  it('never offers or creates an agent on a provider-session entry', async () => {
+    const h = harness();
+    expect(h.registry.getAvailableProviders().map((p) => p.id)).not.toContain('antigravity-cli');
+    await expect(h.registry.createAgent('Agy', 'antigravity-cli')).rejects.toThrow(
+      'Unknown provider: antigravity-cli',
+    );
+    expect(h.configs).toEqual([]);
   });
 });

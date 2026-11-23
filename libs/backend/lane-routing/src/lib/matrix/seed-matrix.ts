@@ -19,17 +19,20 @@ import {
  * and no value is carried from implement to another kind.
  *
  * A labelled row is seeded only when the row names a Ptah lane family and its
- * model id appears exactly in that lane's shipped list. Rows left out:
+ * model id appeared exactly in that lane's list when the seed was written.
+ * Rows left out:
  * - Claude Opus 4.5 high, Claude Opus 4.6 (in-process): the subagent lane
  *   lists the tiers `opus` / `sonnet`, not these ids.
  * - GPT-5.2 high, GPT-5.2-Codex, GPT-5.1-Codex medium (Codex CLI): the Codex
  *   lane has no shipped model list; its catalog is the app-server `model/list`.
- * - Claude Sonnet 4.5 high: its row cites Copilot CLI, whose shipped list
- *   (`copilot-sdk.adapter.ts`) has no Sonnet 4.5 id.
+ * - Claude Sonnet 4.5 high: its row cites Copilot CLI, whose list had no
+ *   Sonnet 4.5 id.
  * - Claude Haiku 4.5 high, GPT-5.1 medium, GPT-5 medium, GPT-5 mini medium,
  *   Gemini 3 Flash high, Gemini 3 Pro: the row names no lane.
- * Seeded: GLM-5 high (Z.ai) as provider `z-ai`, model `glm-5`, which is in
- * that provider's `staticModels` (`ANTHROPIC_PROVIDERS`, shared).
+ * Seeded: GLM-5 high (Z.ai) as provider `z-ai`, model `glm-5`, the id the
+ * benchmark row names. Provider model lists are live-only, so the id is not
+ * checked against a shipped list; a row whose model the live catalogue
+ * lacks simply never matches a lane.
  *
  * The seed holds no family-level profile: the benchmark scores models, and a
  * family value would be inferred.

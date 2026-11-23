@@ -31,12 +31,15 @@ import {
   NativePopoverComponent,
   PROVIDER_MODELS_LOADER,
   ProviderModelSearchFieldComponent,
+  ProviderModelsNoticeComponent,
   PtahButtonDirective,
   PtahIconButtonDirective,
   PtahInputDirective,
   PtahRichSelectComponent,
+  savedModelListNotice,
   type ProviderModelSearchOption,
 } from '@ptah-extension/ui';
+import { isProviderSessionProviderId } from '@ptah-extension/shared';
 import type { EffortLevel, SettingScope } from '@ptah-extension/shared';
 import {
   SAVE_REFUSED_MESSAGE,
@@ -44,6 +47,7 @@ import {
   type SettingsSaveResult,
 } from '../feedback/settings-save-feedback.service';
 import { commitToast } from '../feedback/settings-commit-toast';
+import { mainAgentDefaultModelLabel } from './main-agent-default-model-label';
 import {
   DRAWER_WRITE_NO_CONTEXT,
   runDrawerWrite,
@@ -89,6 +93,7 @@ const LABEL = 'block text-xs font-semibold text-base-content-muted';
     LucideAngularModule,
     NativePopoverComponent,
     ProviderModelSearchFieldComponent,
+    ProviderModelsNoticeComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   // Angular owns (and removes) this listener with the component.
@@ -154,6 +159,7 @@ export class MainAgentReassignPopoverComponent {
   protected readonly catalogue = signal<ModelCatalogue>({
     status: 'loading',
     models: [],
+    notice: null,
   });
   private readonly outcome = signal<DrawerWriteOutcome | null>(null);
   protected readonly saving = signal(false);
@@ -252,12 +258,19 @@ export class MainAgentReassignPopoverComponent {
   protected readonly selectedModel = computed(
     () => this.modelDraft() ?? this.currentModel(),
   );
-  protected readonly defaultModelLabel = computed(() =>
-    this.providerId() === this.driverId() &&
-    this.state.route().data?.resolvedModel.kind === 'unresolved'
-      ? 'Default (chosen by Claude)'
-      : 'Provider default',
-  );
+  protected readonly defaultModelLabel = computed(() => {
+    const providerId = this.providerId();
+    if (isProviderSessionProviderId(providerId)) {
+      const name = this.state
+        .connections()
+        .data?.find((entry) => entry.id === providerId)?.name;
+      return mainAgentDefaultModelLabel(providerId, name);
+    }
+    return providerId === this.driverId() &&
+      this.state.route().data?.resolvedModel.kind === 'unresolved'
+      ? mainAgentDefaultModelLabel(providerId, null)
+      : 'Provider default';
+  });
   protected readonly modelOptions = computed(() =>
     mainAgentModelOptions(this.catalogue().models, this.selectedModel()),
   );
@@ -295,7 +308,11 @@ export class MainAgentReassignPopoverComponent {
     const entry = (this.state.connections().data ?? []).find(
       (connection) => connection.id === this.providerId(),
     );
-    return !!entry && connectionKind(entry) === 'claude-cli';
+    return (
+      !!entry &&
+      connectionKind(entry) === 'claude-cli' &&
+      !isProviderSessionProviderId(entry.id)
+    );
   });
   private readonly accountModel = computed(() =>
     this.accounts && this.ambient
@@ -434,17 +451,18 @@ export class MainAgentReassignPopoverComponent {
   async loadModels(): Promise<void> {
     const request = ++this.catalogueRequest,
       provider = this.providerId();
-    this.catalogue.set({ status: 'loading', models: [] });
+    this.catalogue.set({ status: 'loading', models: [], notice: null });
     try {
       const result = await this.loader.listModels(provider);
       if (request !== this.catalogueRequest) return;
       this.catalogue.set({
         status: result.error ? 'error' : 'ready',
         models: result.models ?? [],
+        notice: savedModelListNotice(result),
       });
     } catch {
       if (request === this.catalogueRequest)
-        this.catalogue.set({ status: 'error', models: [] });
+        this.catalogue.set({ status: 'error', models: [], notice: null });
     }
   }
   protected onProvider(id: string): void {

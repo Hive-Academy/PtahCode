@@ -17,9 +17,10 @@ import type { Logger } from '@ptah-extension/vscode-core';
 export interface ProviderSessionAuthLane {
   detect(): Promise<Pick<CliDetectionResult, 'installed' | 'version'>>;
   /**
-   * Whether the CLI's own stored sign-in is usable. A lane without a
-   * credential reader (Antigravity) omits it: an installed CLI then counts as
-   * signed in, and a missing sign-in surfaces as `auth-required` on open.
+   * Whether the CLI's own stored sign-in is usable (Antigravity reads its
+   * keyring entry or an environment credential). A lane without a credential
+   * reader omits it: an installed CLI then counts as signed in, and a missing
+   * sign-in surfaces as `auth-required` on open.
    */
   ensureTokensFresh?(): Promise<boolean>;
 }

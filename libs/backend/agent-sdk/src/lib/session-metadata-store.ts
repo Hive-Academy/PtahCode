@@ -65,7 +65,14 @@ import {
   repositoryLeaseStore,
   stateStorageLeaseStore,
 } from './host-run-lease-stores';
-import { CodexSessionUsageOwner, codexUsageCheckpointSchema, type CodexUsageCheckpoint } from './codex-app-server/codex-session-usage-owner';
+import {
+  CodexSessionUsageOwner,
+  codexTurnDurationSchema,
+  codexTurnDurationTotal,
+  codexUsageCheckpointSchema,
+  type CodexTurnDuration,
+  type CodexUsageCheckpoint,
+} from './codex-app-server/codex-session-usage-owner';
 import { parseQuotaOwnerRef } from './helpers/plan-limits/quota-owner-ref.schema';
 import {
   parseSessionUsageContribution,
@@ -274,6 +281,24 @@ function checkpointRegresses(next: CodexUsageCheckpoint, current: CodexUsageChec
     return !updated || updated.epoch < thread.epoch ||
       classes.some((key) => updated.accrued[key] < thread.accrued[key]);
   });
+}
+
+/**
+ * The turn-time record to store: never lower than the stored one, so a stale
+ * or replayed write cannot shorten the session Time. An invalid record on
+ * either side counts as absent.
+ */
+function nextTurnDuration(
+  next: CodexTurnDuration | undefined,
+  stored: unknown,
+): CodexTurnDuration | undefined {
+  const current = codexTurnDurationSchema.safeParse(stored);
+  const incoming = next === undefined ? undefined : codexTurnDurationSchema.safeParse(next);
+  const kept = current.success ? current.data : undefined;
+  const offered = incoming?.success ? incoming.data : undefined;
+  if (!offered) return kept;
+  if (!kept) return offered;
+  return codexTurnDurationTotal(offered) >= codexTurnDurationTotal(kept) ? offered : kept;
 }
 
 function validCheckpoint(sessionId: string, raw: unknown): CodexUsageCheckpoint | undefined {
@@ -530,6 +555,12 @@ export interface SessionMetadata {
 
   /** Two visible messages per completed native turn: user prompt and assistant reply. */
   readonly codexMessageCount?: number;
+
+  /**
+   * Codex wall-clock turn time, beside `codexUsageCheckpoint` (not inside its
+   * strict shape, so older builds keep reading the checkpoint). Never lowered.
+   */
+  readonly codexTurnDuration?: CodexTurnDuration;
 
   /** Provider-session binding; history remains owned by the provider. */
   readonly providerSessionExecution?: ProviderSessionExecution;
@@ -1811,6 +1842,7 @@ export class SessionMetadataStore {
   async updateCodexUsageCheckpoint(
     sessionId: SessionId,
     checkpoint: CodexUsageCheckpoint,
+    duration?: CodexTurnDuration,
   ): Promise<void> {
     const validated = codexUsageCheckpointSchema.parse(checkpoint);
     if (validated.sessionId !== sessionId) {
@@ -1839,9 +1871,11 @@ export class SessionMetadataStore {
         );
       }
       workspaceId = current.workspaceId;
+      const turnDuration = nextTurnDuration(duration, current.codexTurnDuration);
       await this.persistMetadata({
         ...current,
         codexUsageCheckpoint: validated,
+        ...(turnDuration ? { codexTurnDuration: turnDuration } : {}),
         totalCost: nativeCheckpointCost(validated),
         totalTokens: {
           input: validated.total.uncachedInputTokens + validated.total.cacheReadTokens + validated.total.cacheCreationTokens,
@@ -1856,6 +1890,32 @@ export class SessionMetadataStore {
       this.captureCheckpointUsage(sessionId, current, validated, stored);
     });
     if (workspaceId) this.emitChange('updated', sessionId, workspaceId);
+  }
+
+  /**
+   * Store only the Codex turn-time record, for a turn that ended without a
+   * usage persist. Max wins against the stored record; the checkpoint, the
+   * sidebar totals and the usage sink are untouched.
+   */
+  async updateCodexTurnDuration(
+    sessionId: SessionId,
+    duration: CodexTurnDuration,
+  ): Promise<void> {
+    const offered = codexTurnDurationSchema.parse(duration);
+    await this.enqueueWrite(async () => {
+      const current = await this.get(sessionId);
+      if (current?.codexExecution?.runtime !== 'codex-app-server') {
+        throw new CodexSessionMetadataError(
+          'invalid-identity',
+          'Cannot store native turn time for a non-native session',
+        );
+      }
+      const next = nextTurnDuration(offered, current.codexTurnDuration);
+      // Nothing new: the stored record already wins (or equals the offer).
+      if (!next || JSON.stringify(next) === JSON.stringify(current.codexTurnDuration)) return;
+      await this.persistMetadata({ ...current, codexTurnDuration: next });
+      await this.flush();
+    });
   }
 
   /**
@@ -2032,6 +2092,9 @@ export class SessionMetadataStore {
         : {}),
       ...(existing?.codexUsageCheckpoint
         ? { codexUsageCheckpoint: existing.codexUsageCheckpoint }
+        : {}),
+      ...(existing?.codexTurnDuration
+        ? { codexTurnDuration: existing.codexTurnDuration }
         : {}),
       ...(checkpoint ? { totalTokens: {
         input: checkpoint.total.uncachedInputTokens + checkpoint.total.cacheReadTokens +

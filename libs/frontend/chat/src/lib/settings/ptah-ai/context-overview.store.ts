@@ -185,7 +185,7 @@ export class ContextOverviewStore {
       return {
         id: 'lane-guards',
         label: 'Lane guards',
-        value: `Stop at ${stopAt}`,
+        value: `Handoff at ${stopAt}`,
         meta: 'Repeated calls',
         tone: 'ok',
       };

@@ -32,7 +32,7 @@ export interface PtahCliResumeParams {
 
 export type PtahCliLaneResumerManager = Pick<
   AgentProcessManager,
-  'prepareSdkHandleSpawn' | 'reserveAgentId' | 'spawnFromSdkHandle'
+  'prepareSdkHandleSpawn' | 'reserveAgentId' | 'laneToolGateFor' | 'spawnFromSdkHandle'
 >;
 
 /** Owns the registry-backed Ptah CLI resume sequence for RPC and cold sends. */
@@ -95,10 +95,12 @@ export class PtahCliLaneResumer implements LaneResumer {
         {
           workingDirectory: workspaceRoot,
           resumeSessionId: prepared.resumeSessionId,
+          ...(prepared.checkResumeOwner ? { checkResumeOwner: prepared.checkResumeOwner } : {}),
           parentSessionId,
           ...(this.parentLevel && parentSessionId
             ? { parentLevel: this.parentLevel(parentSessionId) } : {}),
           agentId,
+          laneToolGate: this.manager.laneToolGateFor(agentId),
           ...(params.permission ? { permission: params.permission } : {}),
           ...(params.network ? { network: params.network } : {}),
           ...(params.effectivePolicy ? { resumePolicy: params.effectivePolicy } : {}),

@@ -448,6 +448,8 @@ Need                                      | Prefer
 Understand workspace                      | ptah_workspace_analyze
 Find files by path                        | ptah_search_files
 Find function/class/method                 | ptah_code_search_symbols
+Find text/constant/usage (not grep/rg)     | ptah_grep
+Read function or line range (not sed/cat)  | ptah_read_symbol
 Inspect source structure before full read | ptah_ast_analyze
 Inspect signatures/API                    | ptah_context_enrich_file
 Find symbol usages                        | ptah_lsp_references after locating file/line/col

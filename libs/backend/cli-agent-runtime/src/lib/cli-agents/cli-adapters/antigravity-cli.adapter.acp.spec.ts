@@ -64,6 +64,21 @@ const AGY_HELP = [
   '  models          List available models',
 ].join('\n');
 
+/**
+ * Lines of the `agy models` stdout agy 1.5.14 printed on 2026-11-22 (the full
+ * output is pinned in `antigravity-cli.adapter.spec.ts`). The ACP lane derives
+ * its `model` option from these ids.
+ */
+const AGY_MODELS_STDOUT = [
+  'gemini-3.8-flash-high\tGemini 3.8 Flash (High)',
+  'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)',
+  'gemini-3.8-flash-low\tGemini 3.8 Flash (Low)',
+  'claude-sonnet-5-5-low\tClaude Sonnet 5.5 (Low)',
+  'claude-sonnet-5-5-medium\tClaude Sonnet 5.5 (Medium)',
+  'claude-sonnet-5-5-high\tClaude Sonnet 5.5 (High)',
+  '',
+].join('\r\n');
+
 /** A `spawnCli` child that prints `stdout` and closes. */
 function helpChild(stdout: string): EventEmitter & {
   stdout: PassThrough;
@@ -352,8 +367,16 @@ describe('AntigravityCliAdapter — ACP lane', () => {
   let home: string;
   const live: FakeAcpAgent[] = [];
 
+  /** What the lane's `agy models` probe prints. */
+  let servedModels: string;
+
   beforeEach(() => {
     jest.clearAllMocks();
+    servedModels = AGY_MODELS_STDOUT;
+    mockSpawnCli.mockImplementation((_binary: string, args: string[]) => {
+      if (args[0] !== 'models') throw new Error(`unexpected spawn: ${args.join(' ')}`);
+      return helpChild(servedModels);
+    });
     home = mkdtempSync(join(tmpdir(), 'ptah-agy-acp-'));
     process.env['HOME'] = home;
     process.env['USERPROFILE'] = home;
@@ -490,14 +513,34 @@ describe('AntigravityCliAdapter — ACP lane', () => {
     lane.handle.abort.abort();
   });
 
-  it('sends a saved legacy model id normalised, as the stream-json lane does', async () => {
+  it('sends a retired saved id as a live id of the closest base, as the stream-json lane does', async () => {
     const lane = await startLane(TOOL_USE, () => 'result', { model: 'claude-sonnet-4-6' });
     await lane.handle.done;
     const config = lane.agent().received.find(
-      (message) => message.method === 'session/set_config_option',
+      (message) =>
+        message.method === 'session/set_config_option' &&
+        (message.params as { configId?: unknown } | undefined)?.configId === 'model',
     );
+    // Only an id `agy models` lists is derived: the pinned output has no bare
+    // `claude-sonnet-5-5`, so the middle effort variant is sent (the full id
+    // carries the effort, so no `thought_level` is needed).
     expect(config?.params).toEqual(
       expect.objectContaining({ configId: 'model', value: 'claude-sonnet-5-5-medium' }),
+    );
+    lane.handle.abort.abort();
+  });
+
+  it('sends the saved id unchanged when agy lists no models', async () => {
+    servedModels = '';
+    const lane = await startLane(TOOL_USE, () => 'result', { model: 'claude-sonnet-4-6' });
+    await lane.handle.done;
+    const config = lane.agent().received.find(
+      (message) =>
+        message.method === 'session/set_config_option' &&
+        (message.params as { configId?: unknown } | undefined)?.configId === 'model',
+    );
+    expect(config?.params).toEqual(
+      expect.objectContaining({ configId: 'model', value: 'claude-sonnet-4-6' }),
     );
     lane.handle.abort.abort();
   });

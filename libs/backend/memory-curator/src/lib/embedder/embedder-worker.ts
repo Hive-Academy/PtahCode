@@ -35,6 +35,7 @@ import type {
   EmbedderWorkerInbound,
   PipelineProgressInfo,
 } from './embedder-worker-protocol';
+import { embedInBatches, type FeatureExtractor } from './embed-batches';
 
 /**
  * Electron utilityProcess `process.parentPort` (a `MessagePortMain`): its
@@ -104,12 +105,8 @@ function configureTransformersEnv(env: TransformersEnv | undefined): void {
   envConfigured = true;
 }
 
-interface PipelineFn {
-  (
-    texts: string | string[],
-    options: { pooling: string; normalize: boolean },
-  ): Promise<{ data: Float32Array }>;
-}
+/** The feature-extraction pipeline, called with a batch of texts. */
+type PipelineFn = FeatureExtractor;
 
 let pipelineSingleton: PipelineFn | null = null;
 let pipelineLoading: Promise<PipelineFn> | null = null;
@@ -174,14 +171,11 @@ async function loadPipeline(): Promise<PipelineFn> {
   return pipelineLoading;
 }
 
+/** One pipeline call per batch of texts; one vector per input, in order. */
 async function embed(texts: readonly string[]): Promise<number[][]> {
+  if (texts.length === 0) return [];
   const fn = await loadPipeline();
-  const out: number[][] = [];
-  for (const text of texts) {
-    const result = await fn(text, { pooling: 'mean', normalize: true });
-    out.push(Array.from(result.data));
-  }
-  return out;
+  return embedInBatches(fn, texts);
 }
 
 /**

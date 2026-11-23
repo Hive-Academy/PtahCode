@@ -2,11 +2,9 @@ import {
   ChangeDetectionStrategy,
   Component,
   computed,
-  effect,
   inject,
   input,
   signal,
-  untracked,
 } from '@angular/core';
 import { LucideAngularModule, Clock } from 'lucide-angular';
 import {
@@ -19,11 +17,17 @@ import { PtahButtonDirective } from '@ptah-extension/ui';
 const PREVIEW_LENGTH = 100;
 
 /**
- * The follow-ups waiting for this composer's tab and session (TASK_2026_884):
- * a short text preview each, Withdraw (the text goes back to the composer to
- * edit), and — for a Codex session only — "Send now", which moves the item
- * into the running turn. Reconciles with the backend list when the session
- * view opens. Text is rendered through interpolation only.
+ * The follow-ups waiting for this tab and session (TASK_2026_884), rendered
+ * at the end of the transcript as queued user cards. Every message sent while
+ * a turn may still run lands here first — one predictable flow. Each card
+ * shows the full text (interpolation only), its state, Withdraw (the text
+ * goes back to the composer to edit), and the immediate action:
+ * "Interrupt & send" for Claude (stops the turn, then sends this as the next
+ * one) or "Send now" for Codex (steers it into the running turn). The action
+ * stays disabled, with the reason, until the backend holds the item.
+ * The transcript mounts it only while the store holds an item for the view;
+ * `ChatViewComponent` reconciles the backend list when a session view opens.
+ * On delivery the card is replaced by the normal user bubble.
  */
 @Component({
   selector: 'ptah-queued-follow-ups',
@@ -31,54 +35,79 @@ const PREVIEW_LENGTH = 100;
   imports: [LucideAngularModule, PtahButtonDirective],
   template: `
     @if (items().length > 0) {
-      <section
-        class="px-4 pb-2 border-t border-primary/20 bg-primary/5"
-        data-glass-surface="plate"
-        aria-label="Queued messages"
-      >
-        <ul class="flex flex-col gap-1 py-2">
+      <section class="pb-3" aria-label="Queued messages">
+        <ul class="flex flex-col gap-2">
           @for (item of items(); track item.clientMessageId) {
-            <li class="flex items-start gap-2 text-xs" data-testid="queued-follow-up-item">
-              <lucide-angular
-                [img]="ClockIcon"
-                class="w-3.5 h-3.5 mt-0.5 text-primary flex-shrink-0"
-                aria-hidden="true"
-              />
-              <div class="min-w-0 flex-1">
-                <p class="truncate text-base-content" [title]="item.content">
-                  {{ preview(item.content) }}
-                </p>
-                <p class="text-base-content-muted">{{ statusLabel(item) }}</p>
-                @if (item.note) {
-                  <p class="text-warning" role="status">{{ item.note }}</p>
-                }
-              </div>
-              @if (sendNowAvailable() && item.phase === 'queued') {
-                <button
-                  type="button"
-                  ptahButton variant="ghost" size="xs"
-                  data-testid="queued-follow-up-send-now"
-                  [disabled]="pending().has(item.clientMessageId)"
-                  [attr.aria-label]="(isClaude() ? 'Interrupt and send: ' : 'Send now: ') + preview(item.content)"
-                  (click)="sendNow(item)"
-                >
-                  {{ isClaude() ? 'Interrupt & send' : 'Send now' }}
-                </button>
-              }
-              <button
-                type="button"
-                ptahButton variant="ghost" size="xs"
-                data-testid="queued-withdraw"
-                title="Withdraw and put the text back in the composer"
-                [disabled]="
-                  item.phase === 'submitting' ||
-                  pending().has(item.clientMessageId)
-                "
-                [attr.aria-label]="'Withdraw: ' + preview(item.content)"
-                (click)="withdraw(item)"
+            <li class="flex justify-end" data-testid="queued-follow-up-item">
+              <article
+                class="max-w-[85%] min-w-0 rounded-2xl border border-dashed border-primary/50 bg-primary/5 px-3 py-2 text-sm"
               >
-                Withdraw
-              </button>
+                <header
+                  class="flex items-center gap-1.5 text-[11px] text-base-content-muted"
+                >
+                  <lucide-angular
+                    [img]="ClockIcon"
+                    class="w-3.5 h-3.5 text-primary flex-shrink-0"
+                    aria-hidden="true"
+                  />
+                  <span class="font-medium text-primary">Queued</span>
+                  <span aria-hidden="true">·</span>
+                  <span data-testid="queued-follow-up-status">{{
+                    statusLabel(item)
+                  }}</span>
+                </header>
+                <p
+                  class="mt-1 whitespace-pre-wrap break-words text-base-content"
+                >{{ item.content }}</p>
+                @if (item.note) {
+                  <p class="mt-1 text-xs text-warning" role="status">
+                    {{ item.note }}
+                  </p>
+                }
+                <div class="mt-2 flex items-center justify-end gap-1">
+                  <button
+                    type="button"
+                    ptahButton
+                    variant="ghost"
+                    size="xs"
+                    data-testid="queued-withdraw"
+                    title="Withdraw and put the text back in the composer"
+                    [disabled]="
+                      item.phase === 'submitting' ||
+                      pending().has(item.clientMessageId)
+                    "
+                    [attr.aria-label]="'Withdraw: ' + preview(item.content)"
+                    (click)="withdraw(item)"
+                  >
+                    Withdraw
+                  </button>
+                  @if (sendNowAvailable()) {
+                    <button
+                      type="button"
+                      ptahButton
+                      variant="primary"
+                      size="xs"
+                      data-testid="queued-follow-up-send-now"
+                      [disabled]="
+                        item.phase !== 'queued' ||
+                        pending().has(item.clientMessageId)
+                      "
+                      [title]="
+                        item.phase === 'queued'
+                          ? sendNowHint()
+                          : statusLabel(item)
+                      "
+                      [attr.aria-label]="
+                        (isClaude() ? 'Interrupt and send: ' : 'Send now: ') +
+                        preview(item.content)
+                      "
+                      (click)="sendNow(item)"
+                    >
+                      {{ isClaude() ? 'Interrupt & send' : 'Send now' }}
+                    </button>
+                  }
+                </div>
+              </article>
             </li>
           }
         </ul>
@@ -114,15 +143,11 @@ export class QueuedFollowUpsComponent {
     const tabId = this.tabId();
     return tabId !== null && this.followUps.isClaudeSession(tabId);
   });
-
-  constructor() {
-    effect(() => {
-      const tabId = this.tabId();
-      const sessionId = this.sessionId();
-      if (!tabId || !sessionId) return;
-      untracked(() => void this.followUps.reconcile(tabId, sessionId));
-    });
-  }
+  protected readonly sendNowHint = computed(() =>
+    this.isClaude()
+      ? 'Stop the current turn and send this message now'
+      : 'Send this message into the running turn now',
+  );
 
   protected preview(content: string): string {
     const flat = content.replace(/\s+/g, ' ').trim();

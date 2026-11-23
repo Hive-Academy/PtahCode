@@ -12,7 +12,11 @@ import {
   PlanLimitsStore,
 } from '@ptah-extension/core';
 import type { PlanRingData } from '@ptah-extension/chat-ui';
-import type { PlanLimitsSnapshot, UsageSummary } from '@ptah-extension/shared';
+import {
+  planOwnerProviderId,
+  type PlanLimitsSnapshot,
+  type UsageSummary,
+} from '@ptah-extension/shared';
 import { UsageVitalsCache, type UsageVitalsRange } from './usage-vitals.cache';
 import {
   ACTIVITY_DAY_COUNT,
@@ -187,12 +191,17 @@ export type MainProviderId = string | null | undefined;
 
 /**
  * The main agent's provider (`AuthStateService.activeProviderId`), the only
- * provider whose plan an empty screen draws. Call in an injection context.
+ * provider whose plan an empty screen draws, as plan-limit owners name it: a
+ * provider-session entry (`antigravity-cli`) bills its CLI's account, whose
+ * owners carry the profile id (`antigravity`). Call in an injection context.
  */
 export function injectMainProviderId(): Signal<MainProviderId> {
   const auth = inject(AuthStateService);
   return computed(() => {
-    if (auth.isLoaded()) return auth.activeProviderId();
+    if (auth.isLoaded()) {
+      const providerId = auth.activeProviderId();
+      return providerId ? planOwnerProviderId(providerId) : providerId;
+    }
     return auth.isLoading() ? undefined : null;
   });
 }

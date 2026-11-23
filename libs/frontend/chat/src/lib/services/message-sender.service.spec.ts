@@ -42,6 +42,7 @@ import {
   CARRY_OVER_CHECK_TIMEOUT_MS,
   ProviderCarryOverService,
 } from './provider-carry-over.service';
+import { ProviderSessionResumeNoticeService } from './provider-session-resume-notice.service';
 import { SessionAgentRosterService } from './session-agents/session-agent-roster.service';
 import { UltracodeStateService } from './ultracode-state.service';
 import {
@@ -107,6 +108,7 @@ describe('MessageSenderService', () => {
     setLastTerminalReason: jest.Mock;
     markStreaming: jest.Mock;
     markResuming: jest.Mock;
+    setStatus: jest.Mock;
     detachSessionAndMarkLoaded: jest.Mock;
     setMessages: jest.Mock;
     consumeFirstMessagePreamble: jest.Mock;
@@ -212,6 +214,9 @@ describe('MessageSenderService', () => {
       ),
       markResuming: jest.fn((tabId: string) =>
         applyPatch(tabId, { status: 'resuming' }),
+      ),
+      setStatus: jest.fn((tabId: string, status: TabState['status']) =>
+        applyPatch(tabId, { status }),
       ),
       detachSessionAndMarkLoaded: jest.fn((tabId: string) =>
         applyPatch(tabId, { claudeSessionId: null, status: 'loaded' }),
@@ -464,6 +469,74 @@ describe('MessageSenderService', () => {
       expect(removeBoundary).not.toHaveBeenCalled();
     });
 
+    it('asks for idle-only admission only when the caller opts in', async () => {
+      tabsSignal.set([makeTab({ id: 'tab-1', claudeSessionId: 'sess-X' })]);
+      rpcCall.mockImplementation((method: string): Promise<unknown> =>
+        Promise.resolve(
+          method === 'session:validate'
+            ? { success: true, data: { exists: true } }
+            : { success: true, data: { success: true } },
+        ),
+      );
+      await service.send('hello', { tabId: 'tab-1', idleOnly: true });
+      const payload = rpcCall.mock.calls.find((c) => c[0] === 'chat:continue')?.[1];
+      expect(payload.admission).toBe('require-idle');
+
+      rpcCall.mockClear();
+      await service.send('direct', { tabId: 'tab-1' });
+      const direct = rpcCall.mock.calls.find((c) => c[0] === 'chat:continue')?.[1];
+      expect(direct).not.toHaveProperty('admission');
+      expect(payload.queueIntent).toBeUndefined();
+    });
+
+    it('withdraws the bubble and keeps the tab status when the backend says TURN_IN_FLIGHT', async () => {
+      tabsSignal.set([
+        makeTab({ id: 'tab-1', claudeSessionId: 'sess-X', status: 'awaiting-background' }),
+      ]);
+      rpcCall.mockImplementation((method: string): Promise<unknown> =>
+        Promise.resolve(
+          method === 'session:validate'
+            ? { success: true, data: { exists: true } }
+            : {
+                success: true,
+                data: { success: false, errorCode: 'TURN_IN_FLIGHT', error: 'busy' },
+              },
+        ),
+      );
+
+      const outcome = await service.send('late', { tabId: 'tab-1', idleOnly: true });
+
+      expect(outcome).toEqual({ success: false, turnInFlight: true });
+      expect(tabsSignal()[0].messages).toEqual([]);
+      expect(tabsSignal()[0].status).toBe('awaiting-background');
+      expect(removeBoundary).toHaveBeenCalled();
+      expect(tabManager.markLoaded).not.toHaveBeenCalled();
+      expect(tabManager.markTabIdle).not.toHaveBeenCalled();
+      expect(sessionManager.setStatus).toHaveBeenLastCalledWith('awaiting-background');
+    });
+
+    it('keeps a newer turn status that arrived while the refused send was in flight', async () => {
+      tabsSignal.set([
+        makeTab({ id: 'tab-1', claudeSessionId: 'sess-X', status: 'loaded' }),
+      ]);
+      rpcCall.mockImplementation((method: string): Promise<unknown> => {
+        if (method === 'session:validate') {
+          return Promise.resolve({ success: true, data: { exists: true } });
+        }
+        // A turn_state for the running turn lands before the refusal.
+        tabManager.markStreaming('tab-1');
+        return Promise.resolve({
+          success: true,
+          data: { success: false, errorCode: 'TURN_IN_FLIGHT' },
+        });
+      });
+
+      await service.send('late', { tabId: 'tab-1', idleOnly: true });
+
+      expect(tabsSignal()[0].status).toBe('streaming');
+      expect(tabsSignal()[0].messages).toEqual([]);
+    });
+
     describe('a continue whose prompt never reaches the backend', () => {
       /** `chat:continue` resolves to `continueResult`, or rejects with it. */
       const failContinue = (continueResult: unknown, reject = false): void => {
@@ -501,6 +574,32 @@ describe('MessageSenderService', () => {
         expect(tabsSignal()[0].messages.map((m) => m.id)).toEqual([
           recordedBubbleId(),
         ]);
+      });
+
+      it('raises the resume-failed notice for the tab when a provider session cannot be reopened', async () => {
+        const notices = TestBed.inject(ProviderSessionResumeNoticeService);
+        const flag = jest.spyOn(notices, 'flagIfResumeFailed');
+        failContinue({
+          success: true,
+          data: {
+            success: false,
+            errorCode: 'PROVIDER_SESSION_RESUME_FAILED',
+            error: 'The provider could not reopen this conversation.',
+          },
+        });
+
+        const outcome = await service.send('follow up', { tabId: 'tab-1' });
+
+        expect(outcome).toEqual({
+          success: false,
+          error:
+            'The provider could not reopen this conversation. Start a new session to continue.',
+        });
+        expect(flag).toHaveBeenCalledWith(
+          'PROVIDER_SESSION_RESUME_FAILED',
+          'tab-1',
+          'sess-X',
+        );
       });
 
       it('removes the boundary but keeps the bubble when chat:continue throws', async () => {
@@ -935,6 +1034,25 @@ describe('MessageSenderService', () => {
         await expect(service.send('hello')).resolves.toEqual({ success: false, error: expected });
         expect(streamingTabIds.has('tab-1')).toBe(false);
         expect(TestBed.inject(SessionAgentRosterService).roster('tab-1')[0].status).toBe('failed');
+      });
+    });
+
+    describe.each(['outer', 'data'])('provider-session failure code on %s', (location) => {
+      it.each([
+        ['PROVIDER_SESSION_BUSY', 'The provider is busy, try again when the current operation finishes'],
+        ['PROVIDER_SESSION_LIMIT', 'Too many provider sessions are open. Close one and try again.'],
+        ['PROVIDER_SESSION_UNAVAILABLE', 'The provider is not connected. Reconnect and try again.'],
+        ['PROVIDER_SESSION_RUNTIME_FAILED', 'The provider chat could not complete the request.'],
+        ['PROVIDER_SESSION_UNSUPPORTED_OPTION', 'This chat provider does not support the "maxTurns" option.'],
+      ])('maps %s and marks the turn failed', async (errorCode, expected) => {
+        const error = 'This chat provider does not support the "maxTurns" option.';
+        rpcCall.mockResolvedValue(location === 'outer'
+          ? { success: false, errorCode, error }
+          : { success: true, data: { success: false, errorCode, error } });
+
+        await expect(service.send('hello')).resolves.toEqual({ success: false, error: expected });
+        expect(streamingTabIds.has('tab-1')).toBe(false);
+        expect(tabsSignal()[0].lastTerminalReason).toBe('api_error');
       });
     });
 
@@ -1396,6 +1514,61 @@ describe('MessageSenderService', () => {
       const aborts = rpcCall.mock.calls.filter((c) => c[0] === 'chat:abort');
       expect(aborts).toHaveLength(1);
       expect(aborts[0][1]).toEqual({ sessionId: 'sess-X', source: 'tab-reset' });
+    });
+  });
+
+  // `/clear`: the backend closes the session, broadcasts CHAT_COMPLETE
+  // `command: 'clear'` (the tab resets to fresh, aborting this continue with
+  // `tab-reset`) and only then answers the RPC. The aborted RPC is the clear
+  // completing, not a delivery failure.
+  describe('a continue aborted by a tab reset (/clear)', () => {
+    /** `chat:continue` aborts its signal with `reason`, then resolves aborted. */
+    function abortContinueWith(reason: string): AbortController {
+      const controller = new AbortController();
+      tabManager.createAbortController.mockReturnValueOnce(controller.signal);
+      rpcCall.mockImplementation((method: string): Promise<unknown> => {
+        if (method === 'session:validate') {
+          return Promise.resolve({ success: true, data: { exists: true } });
+        }
+        if (method === 'chat:continue') {
+          controller.abort(reason);
+          return Promise.resolve({
+            success: false,
+            error: 'RPC aborted: chat:continue',
+          });
+        }
+        return Promise.resolve({ success: true });
+      });
+      return controller;
+    }
+
+    beforeEach(() => {
+      tabsSignal.set([makeTab({ id: 'tab-1', claudeSessionId: 'sess-X' })]);
+    });
+
+    it('settles successfully and leaves the fresh tab untouched', async () => {
+      abortContinueWith(ABORT_REASON_TAB_RESET);
+
+      const outcome = await service.send('/clear', { tabId: 'tab-1' });
+
+      expect(outcome).toEqual({ success: true, settled: true });
+      expect(tabManager.markStreaming).not.toHaveBeenCalled();
+      expect(tabManager.markLoaded).not.toHaveBeenCalled();
+      expect(removeBoundary).not.toHaveBeenCalled();
+      expect(sessionManager.setStatus).toHaveBeenLastCalledWith('loaded');
+    });
+
+    it('still fails a continue aborted by a tab close', async () => {
+      abortContinueWith('tab-close');
+
+      const outcome = await service.send('/clear', { tabId: 'tab-1' });
+
+      expect(outcome).toEqual(
+        expect.objectContaining({
+          success: false,
+          error: expect.stringContaining('RPC aborted: chat:continue'),
+        }),
+      );
     });
   });
 

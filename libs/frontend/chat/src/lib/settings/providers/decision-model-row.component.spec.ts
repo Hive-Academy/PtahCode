@@ -338,6 +338,45 @@ describe('DecisionModelRowComponent', () => {
       });
     });
 
+    it('Structured: a saved (persisted) catalogue shows a status notice whose Retry reloads; a live one shows none (S2)', async () => {
+      await create();
+      await open();
+      await pickKind('structured');
+      const live = {
+        models: [{ id: 'live-1', name: 'Live', supportsToolUse: true }],
+        totalCount: 1,
+        source: 'live' as const,
+      };
+      listModels
+        .mockResolvedValueOnce({
+          ...live,
+          models: [{ id: 'saved-1', name: 'Saved', supportsToolUse: true }],
+          source: 'persisted',
+          failureReason: 'network',
+          notice: 'Showing the list saved on 1 Nov.',
+        })
+        .mockResolvedValueOnce(live);
+      selectControl('decision-provider')?.value.set('anthropic');
+      await flush();
+      const notice = byTestId('decision-model-notice');
+      expect(notice?.getAttribute('role')).toBe('status');
+      expect(notice?.textContent).toContain('Showing the list saved on 1 Nov.');
+      expect(
+        Array.from(
+          host().querySelectorAll('#decision-model-suggestions option'),
+        ).map((o) => o.getAttribute('value')),
+      ).toEqual(['saved-1']);
+      byTestId<HTMLButtonElement>('decision-model-notice-retry')?.click();
+      await flush();
+      expect(listModels).toHaveBeenLastCalledWith('anthropic');
+      expect(byTestId('decision-model-notice')).toBeNull();
+      expect(
+        Array.from(
+          host().querySelectorAll('#decision-model-suggestions option'),
+        ).map((o) => o.getAttribute('value')),
+      ).toEqual(['live-1']);
+    });
+
     it('Structured: a configured provider, then any model of its catalogue, with help text that matches the list (P4 M-4)', async () => {
       await create();
       await open();

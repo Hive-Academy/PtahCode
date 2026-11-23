@@ -426,6 +426,9 @@ export class ChatSessionService {
     }
   >();
 
+  /** Set once the native child catalog pass-through has been logged. */
+  private nativeChildPassThroughWarned = false;
+
   constructor(
     @inject(TOKENS.LOGGER) private readonly logger: Logger,
     @inject(TOKENS.WEBVIEW_MANAGER)
@@ -1461,6 +1464,8 @@ export class ChatSessionService {
     // Set once a workspace provider profile is in use: from then on, logs and
     // child-facing errors must not carry provider-supplied text.
     let profileProbe = false;
+    // Set once the profile is known to be the native Claude login.
+    let native = false;
     try {
       const account = await this.gateAccount({
         workspacePath: input.workspaceRoot,
@@ -1493,10 +1498,13 @@ export class ChatSessionService {
           input.workspaceRoot,
           input.model,
         );
-      const native = isNativeChildModelProfile(profile);
+      native = isNativeChildModelProfile(profile);
       profileProbe = Boolean(profile) && !native;
       const acceptedModels = await childModelIds(this.childModelCatalog, profile);
       if (acceptedModels.length === 0) {
+        // Revision 2 S-C: the native login validates its own models, so an
+        // empty catalog must not refuse every native child spawn.
+        if (native) return this.passNativeChildModelThrough(input.model);
         this.logger.warn(
           '[ChatSessionService] Provider returned an empty model catalog',
         );
@@ -1507,7 +1515,7 @@ export class ChatSessionService {
         };
       }
       const resolvedModel = native
-        ? resolveNativeTierAlias(input.model)
+        ? resolveNativeTierAlias(input.model, acceptedModels, this.logger)
         : this.childModelCatalog.resolveModelId(
             input.model,
             profile?.authEnv,
@@ -1523,6 +1531,11 @@ export class ChatSessionService {
       }
       return { accepted: true, resolvedModel };
     } catch (error: unknown) {
+      if (native) {
+        // The native catalog read failed: the model passes through with a
+        // warn and the Claude runtime validates it.
+        return this.passNativeChildModelThrough(input.model);
+      }
       if (profileProbe) {
         this.logger.error(
           '[ChatSessionService] Child model catalog unavailable',
@@ -1544,6 +1557,31 @@ export class ChatSessionService {
         message: error instanceof Error ? error.message : String(error),
       };
     }
+  }
+
+  /**
+   * Admit a native child model unchecked when the native Claude catalog is
+   * empty or unreadable (Revision 2 S-C): the requested model passes through
+   * unchanged and the Claude runtime validates it at launch. Warns once per
+   * service lifetime; later pass-throughs log at debug.
+   */
+  private passNativeChildModelThrough(model: string): {
+    readonly accepted: true;
+    readonly resolvedModel: string;
+  } {
+    if (!this.nativeChildPassThroughWarned) {
+      this.nativeChildPassThroughWarned = true;
+      this.logger.warn(
+        '[ChatSessionService] Native Claude model catalog is empty or unavailable; passing the requested child model through for the Claude runtime to validate',
+        { model },
+      );
+    } else {
+      this.logger.debug(
+        '[ChatSessionService] Native child model passed through without a catalog',
+        { model },
+      );
+    }
+    return { accepted: true, resolvedModel: model };
   }
 
   /**
@@ -2097,6 +2135,10 @@ export class ChatSessionService {
         followUp.queue.assertTabOwnsSession(sessionId, tabId);
       }
       let followUpIdentity = followUp?.queue.liveIdentity(sessionId);
+      // Idle-only normal send: a running turn refuses it with TURN_IN_FLIGHT
+      // and the renderer queues it instead, so it neither waits unseen behind
+      // the turn nor interrupts it.
+      const requireIdle = !followUp && params.admission === 'require-idle';
       driveAttempt = await this.driverLock.beginDrive(sessionId, tabId);
       await this.gateAccount({
         sessionId,
@@ -2285,7 +2327,13 @@ export class ChatSessionService {
       try {
         // A queued follow-up never interrupts the running turn, even when its
         // text reads like a stop request: Stop is the explicit control.
-        if (!justResumed && !followUp && hasStopIntent(prompt)) {
+        // An idle-only send has no turn to stop: a busy session refuses it.
+        if (
+          !justResumed &&
+          !followUp &&
+          !requireIdle &&
+          hasStopIntent(prompt)
+        ) {
           const autopilotEnabled = this.configManager.getWithDefault<boolean>(
             'autopilot.enabled',
             false,
@@ -2375,6 +2423,7 @@ export class ChatSessionService {
             images,
             clientMessageId: params.clientMessageId,
             ...(followUp ? { queueIntent: 'next-turn' as const } : {}),
+            ...(requireIdle ? { admission: 'require-idle' as const } : {}),
           },
         );
         if (followUp) followUp.queue.trackSubmission(sessionId, submission);
@@ -2433,6 +2482,34 @@ export class ChatSessionService {
     } catch (error) {
       await this.driverLock.abandonDrive(params.sessionId, driveAttempt);
       if (error instanceof RpcUserError) followUpRefusalCode = error.errorCode;
+      if (
+        error instanceof SessionAdmissionRefusedError &&
+        error.reason === 'session-ended' &&
+        params.admission === 'require-idle'
+      ) {
+        return {
+          success: false,
+          sessionId: params.sessionId,
+          errorCode: 'SESSION_ENDED',
+          error: 'The session ended before the message was sent.',
+        };
+      }
+      if (
+        error instanceof SessionAdmissionRefusedError &&
+        error.reason === 'busy' &&
+        params.admission === 'require-idle'
+      ) {
+        this.logger.info('RPC: chat:continue - turn in flight, not admitted', {
+          sessionId: params.sessionId,
+          tabId: params.tabId,
+        });
+        return {
+          success: false,
+          sessionId: params.sessionId,
+          errorCode: 'TURN_IN_FLIGHT',
+          error: 'A turn is running. The message was not sent.',
+        };
+      }
       if (
         error instanceof Error &&
         error.message.includes('FOLLOW_UP_ID_CONFLICT')

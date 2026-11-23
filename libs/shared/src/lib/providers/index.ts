@@ -14,6 +14,13 @@ export * from './provider-base-url';
 export * from './proxy-token-placeholders';
 export { isCloudTag, toCloudId } from './ollama-cloud-model-id';
 export {
+  CREDENTIAL_FAILURE_REASONS,
+  describeModelListFailure,
+  modelListErrorText,
+  modelListNoticeText,
+} from './model-list-failure';
+export { closestLiveModel } from './closest-live-model';
+export {
   COPILOT_PROVIDER_ENTRY,
   COPILOT_DEFAULT_TIERS,
 } from './entries/copilot-provider-entry';
@@ -37,21 +44,14 @@ export {
   KIMI_CODE_DEFAULT_TIERS,
   KIMI_CODE_MODEL_CAPABILITIES,
 } from './entries/kimi-code-provider-entry';
-export {
-  isKimiCodeModelsPayload,
-  mergeKimiCodeModels,
-} from './entries/kimi-code-model-merge';
+export { parseKimiCodeModels } from './entries/kimi-code-models';
 export {
   OPENCODE_ZEN_PROVIDER_ENTRY,
   OPENCODE_GO_PROVIDER_ENTRY,
   OPENCODE_ZEN_DEFAULT_TIERS,
   OPENCODE_GO_DEFAULT_TIERS,
-} from './entries/opencode-provider-entry';
-export {
-  OPENCODE_MODEL_ROUTES,
   isOpenCodeProviderId,
-  getOpenCodeModelProtocol,
   type OpenCodeProviderId,
   type OpenCodeProtocol,
-  type OpenCodeModelRoutes,
-} from './entries/opencode-model-routes';
+} from './entries/opencode-provider-entry';
+export { ANTIGRAVITY_CLI_PROVIDER_ENTRY } from './entries/provider-session-provider-entries';

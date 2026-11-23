@@ -517,6 +517,19 @@ describe('CliDetectionService role stamp', () => {
     await service.listModelsForAll();
     expect(mockAdapterFor('codex').listModels).toHaveBeenCalledTimes(2);
   });
+
+  it('does not cache a model map in which a CLI failed, so the next call retries it', async () => {
+    const { service } = createService();
+    mockAdapterFor('codex').listModels.mockRejectedValueOnce(
+      new Error('codex catalog unavailable'),
+    );
+    expect(await service.listModelsForAll()).not.toHaveProperty('codex');
+    expect(await service.listModelsForAll()).toHaveProperty('codex');
+    expect(mockAdapterFor('codex').listModels).toHaveBeenCalledTimes(2);
+    // A read with no failure is cached as before.
+    await service.listModelsForAll();
+    expect(mockAdapterFor('codex').listModels).toHaveBeenCalledTimes(2);
+  });
 });
 
 describe('CliDetectionService named detection', () => {

@@ -81,6 +81,7 @@ interface ProcessManagerMock {
   spawnFromSdkHandle: jest.Mock;
   prepareSdkHandleSpawn: jest.Mock;
   reserveAgentId: jest.Mock;
+  laneToolGateFor: jest.Mock;
   getStatus: jest.Mock;
   readOutput: jest.Mock;
   sendToAgent: jest.Mock;
@@ -96,6 +97,9 @@ interface RegistryMock {
   listAgents: jest.Mock;
   spawnAgent: jest.Mock;
 }
+
+/** The gate the manager hands out for a reserved Ptah CLI agent id. */
+const LANE_TOOL_GATE = jest.fn(() => undefined);
 
 function createProcessManager(): ProcessManagerMock {
   return {
@@ -114,6 +118,7 @@ function createProcessManager(): ProcessManagerMock {
     // One id per spawn, minted BEFORE the handle exists (TASK_2026_402), so
     // the handle's MCP URL can carry it.
     reserveAgentId: jest.fn().mockReturnValue('reserved-1'),
+    laneToolGateFor: jest.fn(() => LANE_TOOL_GATE),
     getStatus: jest.fn(),
     readOutput: jest.fn(),
     sendToAgent: jest.fn().mockResolvedValue({ mode: 'queue-next-turn' }),
@@ -635,7 +640,13 @@ describe('buildAgentNamespace — spawn (ptahCliId)', () => {
       expect.objectContaining({
         workingDirectory: 'D:/ws',
         agentId: 'reserved-1',
+        // The manager's tool gate for the reserved id, so a paused lane's
+        // registry handle refuses new tools.
+        laneToolGate: LANE_TOOL_GATE,
       }),
+    );
+    expect(mocks.processManager.laneToolGateFor).toHaveBeenCalledWith(
+      'reserved-1',
     );
     // The RECORD keeps the caller's task, not the prompt with the contract on
     // it: the tile, the persisted reference and the completion signal's

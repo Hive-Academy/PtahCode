@@ -1,5 +1,6 @@
 import { DecisionCaller } from '../decision-model/decision-caller';
 import { runFixedRequest } from '../pipeline/model-refine';
+import { replaceProviderContextWindows } from '@ptah-extension/shared';
 import { rankChildSettings } from './child-setting-rule';
 import { clampChildSettingDecision, ChildSettingRouterService } from './child-setting-router.service';
 
@@ -181,10 +182,16 @@ describe('ChildSettingRouterService', () => {
     ]);
   });
   it('does not offer a reserve 200k model to the decision model, but keeps it last for admission', async () => {
-    run.mockResolvedValue(outcome('o1', 'o1') as never);
-    const result = await router().route({ ...input, workKind: 'code', models: ['claude-3-7-sonnet-20250219', 'claude-sonnet-5-5'] });
-    expect(run.mock.calls[0][0].questions.map((question) => Object.values(question.criteria))[0]).toEqual(['claude-sonnet-5-5']);
-    expect(result.candidates).toEqual(['claude-sonnet-5-5', 'claude-3-7-sonnet-20250219']);
+    // The 1M window comes from the live claude-cli catalogue.
+    replaceProviderContextWindows('claude-cli', [{ id: 'claude-sonnet-5-5', contextLength: 1_000_000 }]);
+    try {
+      run.mockResolvedValue(outcome('o1', 'o1') as never);
+      const result = await router().route({ ...input, workKind: 'code', models: ['claude-3-7-sonnet-20250219', 'claude-sonnet-5-5'] });
+      expect(run.mock.calls[0][0].questions.map((question) => Object.values(question.criteria))[0]).toEqual(['claude-sonnet-5-5']);
+      expect(result.candidates).toEqual(['claude-sonnet-5-5', 'claude-3-7-sonnet-20250219']);
+    } finally {
+      replaceProviderContextWindows('claude-cli', []);
+    }
   });
 
   it('uses the full brief for ranking and cuts only the decision request', async () => {
