@@ -103,6 +103,7 @@ import {
   codexProjectTrusted,
   createMcpFacet,
   CodexTomlMcpFacet,
+  isLinkedWorktreeRoot,
   type IHarnessMcpFacet,
 } from '@ptah-extension/harness-sync';
 
@@ -242,6 +243,15 @@ export function ptahMcpEntry(
  *
  * A target whose facet cannot resolve a path — a workspace-scoped facet with no
  * folder open — contributes nothing rather than a slot that fails on write.
+ *
+ * A root that is a linked git worktree gets no workspace-scoped slot (#1469,
+ * decision 14): its `.mcp.json`, `.cursor/mcp.json` and `.codex/config.toml`
+ * are usually tracked files of the shared repository, so writing the `ptah`
+ * entry and its bearer token there put config churn on the task branch. No
+ * slot means no write, no update, no removal and no `.bak` for those files.
+ * Every session and lane started there already gets `ptah` in its own spawn
+ * config. Home-scoped slots are planned over all roots as before, and the
+ * main checkout keeps its workspace slots.
  */
 export async function planPtahMcpSlots(
   deps: PtahMcpSlotDeps,
@@ -249,6 +259,7 @@ export async function planPtahMcpSlots(
   const facetOptions =
     deps.homeDir === undefined ? {} : { homeDir: deps.homeDir };
   const roots = [...new Set(deps.workspaceRoots.filter((root) => root !== ''))];
+  const linked = await linkedWorktreeRoots(roots);
   const slots: PtahMcpSlot[] = [];
 
   for (const spec of SLOT_SPECS) {
@@ -276,6 +287,7 @@ export async function planPtahMcpSlots(
     }
 
     for (const workspaceRoot of roots) {
+      if (linked.has(workspaceRoot)) continue;
       if (applies && !applies(workspaceRoot, deps.homeDir)) continue;
       const configPath = facet.configPath(workspaceRoot);
       if (configPath === null) continue;
@@ -284,4 +296,20 @@ export async function planPtahMcpSlots(
   }
 
   return slots;
+}
+
+/**
+ * The roots that are linked git worktrees. `isLinkedWorktreeRoot` never
+ * rejects; an error reads as "not linked", which keeps the main-checkout
+ * behaviour.
+ */
+async function linkedWorktreeRoots(
+  roots: readonly string[],
+): Promise<ReadonlySet<string>> {
+  const linked = await Promise.all(
+    roots.map(async (root) =>
+      (await isLinkedWorktreeRoot(root)) ? root : null,
+    ),
+  );
+  return new Set(linked.filter((root): root is string => root !== null));
 }

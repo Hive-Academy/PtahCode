@@ -1,7 +1,5 @@
-import type { McpCallerBinding } from '@ptah-extension/platform-core';
 import {
   isCronWriteDenied,
-  isGatewayCallerPermitted,
   isToolPermitted,
   toolClass,
 } from './mcp-caller-policy';
@@ -136,39 +134,5 @@ describe('mcp caller policy', () => {
         isToolPermitted('ptah_workspace_analyze', capability, 'gateway'),
       ).toBe(false);
     }
-  });
-
-  it('permits gateway callers by credential kind', () => {
-    const bind = (b: Partial<McpCallerBinding>): McpCallerBinding => ({
-      kind: 'agent',
-      capability: 'privileged',
-      ...b,
-    });
-    expect(isGatewayCallerPermitted(undefined)).toBe(false);
-    expect(isGatewayCallerPermitted(bind({}))).toBe(true);
-    expect(isGatewayCallerPermitted(bind({ capability: 'lane-report' }))).toBe(
-      false,
-    );
-    expect(isGatewayCallerPermitted(bind({ capability: 'read-only' }))).toBe(
-      false,
-    );
-    expect(isGatewayCallerPermitted(bind({ kind: 'session' }))).toBe(false);
-    expect(
-      isGatewayCallerPermitted(
-        bind({ kind: 'session', gatewayApproval: true }),
-      ),
-    ).toBe(true);
-    expect(isGatewayCallerPermitted(bind({ kind: 'internal-query' }))).toBe(
-      false,
-    );
-    expect(
-      isGatewayCallerPermitted(
-        bind({ kind: 'internal-query', includeConnectors: true }),
-      ),
-    ).toBe(true);
-    expect(isGatewayCallerPermitted(bind({ kind: 'workspace' }))).toBe(false);
-    expect(
-      isGatewayCallerPermitted(bind({ kind: 'home', capability: 'read-only' })),
-    ).toBe(false);
   });
 });

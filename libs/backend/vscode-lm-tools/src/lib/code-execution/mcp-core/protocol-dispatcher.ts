@@ -254,14 +254,10 @@ import {
 } from './mcp-caller';
 import {
   isCronWriteDenied,
-  isGatewayCallerPermitted,
   isToolPermitted,
   MCP_CRON_WRITE_DENIED_MESSAGE,
 } from './mcp-caller-policy';
-import {
-  composeEffectiveToolList,
-  buildToolDefinitions,
-} from './effective-tool-list';
+import { composeEffectiveToolList } from './effective-tool-list';
 import { childPhasePolicyRefusal } from './child-phase-policy';
 import {
   MCP_CALLER_FORBIDDEN_CODE,
@@ -269,15 +265,16 @@ import {
 } from './mcp-caller-auth.types';
 import type {
   IMcpGateway,
-  McpCallerBinding,
   McpCallerCapability,
-  McpGatewayScope,
-  McpGatewayTool,
 } from '@ptah-extension/platform-core';
+import { isPhaseToolDenied } from './mcp-caller-phase-filter';
 import {
-  isPhaseToolDenied,
-  phaseDisallowedTools,
-} from './mcp-caller-phase-filter';
+  hostToolNames,
+  listGatewayToolsForList,
+  routeGatewayCall,
+  type GatewayBridgeContext,
+  type GatewayCallContext,
+} from './gateway-tool-bridge';
 import {
   applyToolResultBudget,
   getToolResultBudget,
@@ -604,7 +601,10 @@ async function handleToolsList(
   declareResultBudgets(tools);
   // Appended after the eager and budget passes: gateway tools stay deferred
   // and pass through unchanged, after Ptah's byte-stable list.
-  const gatewayTools = await listGatewayToolsForList(request, deps);
+  const gatewayTools = await listGatewayToolsForList(
+    request,
+    gatewayBridgeContext(request, deps),
+  );
 
   return {
     jsonrpc: '2.0',
@@ -613,232 +613,39 @@ async function handleToolsList(
   };
 }
 
-/** Most scopes remembered per gateway; the oldest is dropped first. */
-const MAX_GATEWAY_SCOPES = 64;
-
-/**
- * Gateway tool names each scope saw in its last list: the reverse map a
- * `tools/call` consults before it asks the gateway. Keyed weakly by the
- * gateway so a disposed hub takes its names with it.
- */
-const gatewayNamesByScope = new WeakMap<
-  IMcpGateway,
-  Map<string, ReadonlySet<string>>
->();
-
-/**
- * The gateway scope of this request, copied from its binding, or `undefined`
- * when the caller gets no gateway tools (class `gateway` is privileged only;
- * see {@link isGatewayCallerPermitted}).
- */
-function gatewayScopeOf(request: MCPRequest): McpGatewayScope | undefined {
-  const binding = request._callerBinding;
-  if (
-    binding === undefined ||
-    !isGatewayCallerPermitted(binding) ||
-    requestCapability(request) !== 'privileged'
-  ) {
-    return undefined;
-  }
+/** What `gateway-tool-bridge` needs from this request and these deps. */
+function gatewayBridgeContext(
+  request: MCPRequest,
+  deps: ProtocolHandlerDependencies,
+): GatewayBridgeContext {
   return {
-    kind: binding.kind,
-    capability: binding.capability,
-    ...(binding.workspaceRoot !== undefined && {
-      workspaceRoot: binding.workspaceRoot,
-    }),
-    ...(binding.gatewayApproval !== undefined && {
-      gatewayApproval: binding.gatewayApproval,
-    }),
-    ...(binding.includeConnectors !== undefined && {
-      includeConnectors: binding.includeConnectors,
-    }),
+    gateway: deps.gateway,
+    capability: requestCapability(request),
+    warn: (message, meta) => runObserver(() => deps.logger.warn(message, meta)),
   };
 }
 
-function gatewayScopeKey(scope: McpGatewayScope): string {
-  return JSON.stringify([
-    scope.kind,
-    scope.capability,
-    scope.workspaceRoot ?? null,
-    scope.gatewayApproval === true,
-    scope.includeConnectors === true,
-  ]);
-}
-
 /**
- * Phase denial for a gateway name. `disallowedTools` applies by exact name.
- * A present phase with a malformed list hides every gateway tool, the same
- * fail-closed reading the host tools get.
+ * {@link gatewayBridgeContext} plus the tool-result budget, applied under the
+ * gateway tool's name (the default budget), the same as host tool results.
  */
-function isGatewayPhaseDenied(
-  name: string,
-  binding: McpCallerBinding | undefined,
-): boolean {
-  if (
-    binding?.phaseKind !== undefined &&
-    phaseDisallowedTools(binding) === undefined
-  ) {
-    return true;
-  }
-  return isPhaseToolDenied(name, binding);
-}
-
-/**
- * Ask the gateway for this scope's tools, drop host-name collisions and
- * phase-denied names, sort by name, and remember the names for `tools/call`.
- * Throws whatever `listTools` throws.
- */
-async function listGatewayTools(
-  gateway: IMcpGateway,
-  scope: McpGatewayScope,
-  request: MCPRequest,
-): Promise<McpGatewayTool[]> {
-  const listed = await gateway.listTools(scope, request._abortSignal);
-  const host = hostToolNames();
-  const tools = listed
-    .filter(
-      (tool) =>
-        !host.has(tool.name) &&
-        !isGatewayPhaseDenied(tool.name, request._callerBinding),
-    )
-    .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
-  rememberGatewayNames(gateway, scope, tools);
-  return tools;
-}
-
-function rememberGatewayNames(
-  gateway: IMcpGateway,
-  scope: McpGatewayScope,
-  tools: readonly McpGatewayTool[],
-): void {
-  let byScope = gatewayNamesByScope.get(gateway);
-  if (byScope === undefined) {
-    byScope = new Map();
-    gatewayNamesByScope.set(gateway, byScope);
-  }
-  const key = gatewayScopeKey(scope);
-  byScope.delete(key);
-  byScope.set(key, new Set(tools.map((tool) => tool.name)));
-  if (byScope.size > MAX_GATEWAY_SCOPES) {
-    const oldest = byScope.keys().next().value;
-    if (oldest !== undefined) byScope.delete(oldest);
-  }
-}
-
-/**
- * Gateway tools for `tools/list`. A gateway failure never fails the list:
- * it is logged as a warning and the caller gets Ptah's tools only.
- */
-async function listGatewayToolsForList(
+function gatewayCallContext(
   request: MCPRequest,
   deps: ProtocolHandlerDependencies,
-): Promise<McpGatewayTool[]> {
-  const gateway = deps.gateway;
-  const scope = gatewayScopeOf(request);
-  if (gateway === undefined || scope === undefined) return [];
-  try {
-    return await listGatewayTools(gateway, scope, request);
-  } catch (error) {
-    // degradation-audit: reported - logged at warn; one failing hub must not
-    // take the host tool list down, so the caller gets Ptah's tools only.
-    runObserver(() =>
-      deps.logger.warn(
-        '[MCP] gateway tools/list failed; listing Ptah tools only',
-        { error: error instanceof Error ? error.message : String(error) },
-      ),
-    );
-    return [];
-  }
+): GatewayCallContext {
+  return {
+    ...gatewayBridgeContext(request, deps),
+    budgetText: async (text) =>
+      (await budgetToolText(request, text, deps)).text,
+  };
 }
-
-/**
- * Forward a `tools/call` to the gateway when its reverse map has the name.
- *
- * `relist`: on a miss, list once more and look again (a server that came up
- * after the caller's last list). `null` means "not a gateway tool for this
- * caller"; the dispatcher then goes on, and at the end answers `-32602`.
- */
-async function routeGatewayCall(
-  request: MCPRequest,
-  deps: ProtocolHandlerDependencies,
-  name: string,
-  args: unknown,
-  relist: boolean,
-): Promise<MCPResponse | null> {
-  const gateway = deps.gateway;
-  const scope = gatewayScopeOf(request);
-  if (
-    gateway === undefined ||
-    scope === undefined ||
-    hostToolNames().has(name) ||
-    !isToolPermitted(name, requestCapability(request), 'gateway')
-  ) {
-    return null;
-  }
-  let known =
-    gatewayNamesByScope.get(gateway)?.get(gatewayScopeKey(scope))?.has(name) ===
-    true;
-  if (!known && relist) {
-    try {
-      const tools = await listGatewayTools(gateway, scope, request);
-      known = tools.some((tool) => tool.name === name);
-    } catch (error) {
-      // degradation-audit: reported - logged at warn; the re-list is best
-      // effort and the caller gets an explicit "unknown tool" answer.
-      runObserver(() =>
-        deps.logger.warn('[MCP] gateway re-list on tools/call failed', {
-          error: error instanceof Error ? error.message : String(error),
-        }),
-      );
-      return null;
-    }
-  }
-  if (!known) return null;
-  if (
-    args !== undefined &&
-    (args === null || typeof args !== 'object' || Array.isArray(args))
-  ) {
-    return createErrorResponse(
-      request.id,
-      -32602,
-      'Invalid params: tools/call "arguments" must be an object',
-    );
-  }
-  try {
-    const result = await gateway.callTool(
-      scope,
-      name,
-      (args ?? {}) as Readonly<Record<string, unknown>>,
-      request._abortSignal,
-    );
-    return { jsonrpc: '2.0', id: request.id, result };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    // A tool error, never `-32603`: the agent sees the failure and goes on.
-    runObserver(() =>
-      deps.logger.warn('[MCP] gateway tools/call failed', {
-        tool: name,
-        error: message,
-      }),
-    );
-    return toolErrorResponse(
-      request,
-      `Gateway tool ${name} failed: ${message}`,
-    );
-  }
-}
-
-/**
- * Every tool name the dispatcher serves (all namespaces and capabilities on).
- * Built on first use; the telemetry line logs only these names.
- */
-let registeredToolNames: ReadonlySet<string> | undefined;
 
 /** Label the telemetry uses for a requested name that is not a registered tool. */
 const UNKNOWN_TOOL_LABEL = '<unknown>';
 
 /**
- * The tool identity the telemetry may log: a registered tool name, else
+ * The tool identity the telemetry may log: a registered tool name (every
+ * name the dispatcher serves, see `hostToolNames`), else
  * {@link UNKNOWN_TOOL_LABEL}. A requested name is caller input — it can carry
  * a path or a secret — so an unregistered one is never logged verbatim.
  */
@@ -846,17 +653,6 @@ function telemetryToolName(requestedName: string): string {
   return hostToolNames().has(requestedName)
     ? requestedName
     : UNKNOWN_TOOL_LABEL;
-}
-
-/**
- * Every host tool name. A gateway name is never one of these, so a call is
- * routed to the gateway only for a name outside this set.
- */
-function hostToolNames(): ReadonlySet<string> {
-  registeredToolNames ??= new Set(
-    buildToolDefinitions({ hasIDECapabilities: true }).map((tool) => tool.name),
-  );
-  return registeredToolNames;
 }
 
 /** The permission-prompt tool (`buildApprovalPromptTool`). */
@@ -1261,7 +1057,7 @@ async function dispatchToolsCall(
   // Gateway first: a name its reverse map holds is never a host tool name.
   const gatewayResult = await routeGatewayCall(
     request,
-    deps,
+    gatewayCallContext(request, deps),
     name,
     args,
     false,
@@ -1321,7 +1117,13 @@ async function dispatchToolsCall(
     );
   }
 
-  const relisted = await routeGatewayCall(request, deps, name, args, true);
+  const relisted = await routeGatewayCall(
+    request,
+    gatewayCallContext(request, deps),
+    name,
+    args,
+    true,
+  );
   if (relisted) return relisted;
   return createErrorResponse(request.id, -32602, `Unknown tool: ${name}`);
 }

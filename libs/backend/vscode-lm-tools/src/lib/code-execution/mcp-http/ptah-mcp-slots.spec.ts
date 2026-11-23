@@ -281,6 +281,72 @@ describe('planPtahMcpSlots', () => {
 
     expect(new Set(paths).size).toBe(paths.length);
   });
+
+  describe('linked git worktrees (#1469)', () => {
+    let repo: string;
+    let mainCheckout: string;
+    let worktree: string;
+
+    beforeEach(() => {
+      repo = mkdtempSync(join(tmpdir(), 'ptah-mcp-slots-wt-'));
+      mainCheckout = join(repo, 'main');
+      worktree = join(repo, 'wt');
+      mkdirSync(join(mainCheckout, '.git', 'worktrees', 'wt'), {
+        recursive: true,
+      });
+      mkdirSync(worktree, { recursive: true });
+      // git's own layout: a linked worktree's `.git` is a FILE pointing at
+      // `<common git dir>/worktrees/<name>`.
+      writeFileSync(
+        join(worktree, '.git'),
+        `gitdir: ${join(mainCheckout, '.git', 'worktrees', 'wt')}\n`,
+        'utf-8',
+      );
+    });
+
+    afterEach(() => {
+      rmSync(repo, { recursive: true, force: true });
+    });
+
+    it('plans no workspace slot for a linked worktree, whatever is installed', async () => {
+      trustCodexProjects([worktree]);
+      const slots = await plan({
+        roots: [worktree],
+        installed: ['cursor', 'codex'],
+      });
+
+      expect(slots.filter((slot) => slot.workspaceRoot === worktree)).toEqual(
+        [],
+      );
+      expect(slots.map((slot) => slot.configPath)).not.toContain(
+        join(worktree, '.mcp.json'),
+      );
+    });
+
+    it('keeps the main checkout slots beside a linked worktree', async () => {
+      trustCodexProjects([mainCheckout, worktree]);
+      const slots = await plan({
+        roots: [mainCheckout, worktree],
+        installed: ['cursor', 'codex'],
+      });
+
+      expect(
+        slots.map((slot) => [slot.target, slot.configPath]),
+      ).toEqual([
+        [CLAUDE_TARGET, join(mainCheckout, '.mcp.json')],
+        ['cursor', join(mainCheckout, '.cursor', 'mcp.json')],
+        ['codex', join(mainCheckout, '.codex', 'config.toml')],
+      ]);
+    });
+
+    it('still plans the home codex slot for an untrusted linked worktree', async () => {
+      const slots = await plan({ roots: [worktree], installed: ['codex'] });
+
+      expect(slots).toHaveLength(1);
+      expect(slots[0].workspaceRoot).toBe('');
+      expect(slots[0].configPath).toBe(join(tempHome, '.codex', 'config.toml'));
+    });
+  });
 });
 
 describe('ptahMcpUrl', () => {

@@ -11295,6 +11295,129 @@ describe('protocol-handlers › MCP gateway', () => {
     expect(names.some((n) => n.includes('__'))).toBe(false);
   });
 
+  it('re-checks the caller phase on every call, whatever another caller listed (M2)', async () => {
+    const gateway = fakeGateway();
+    // Caller A: same scope key (agent, privileged, no root), no phase.
+    const laneA: McpCallerBinding = {
+      kind: 'agent',
+      agentId: 'lane-a',
+      capability: 'privileged',
+    };
+    expect((await list(gateway, bound(laneA))).map((t) => t.name)).toContain(
+      'zernio__create_post',
+    );
+    // Caller B: same scope key, malformed phase list. The name is cached.
+    const laneB = {
+      kind: 'agent',
+      agentId: 'lane-b',
+      capability: 'privileged',
+      phaseKind: 'review',
+      disallowedTools: 'not-a-list',
+    } as unknown as McpCallerBinding;
+    const response = await call(
+      gateway,
+      bound(laneB),
+      'zernio__create_post',
+      {},
+    );
+    expect(response.error).toEqual({
+      code: MCP_CALLER_FORBIDDEN_CODE,
+      message: MCP_TOOL_DENIED_MESSAGE,
+    });
+    expect(gateway.callTool).not.toHaveBeenCalled();
+    // Caller A still reaches it.
+    const allowed = await call(
+      gateway,
+      bound(laneA),
+      'zernio__create_post',
+      {},
+    );
+    expect(allowed.error).toBeUndefined();
+    expect(gateway.callTool).toHaveBeenCalledTimes(1);
+  });
+
+  describe('result budget (M3)', () => {
+    let spoolRoot: string;
+
+    beforeEach(() => {
+      spoolRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ptah-gw-budget-'));
+    });
+
+    afterEach(() => {
+      fs.rmSync(spoolRoot, { recursive: true, force: true });
+    });
+
+    async function callBudgeted(
+      gateway: FakeGateway,
+    ): Promise<Record<string, unknown>> {
+      const response = await handleMCPRequest(
+        makeRequest({
+          id: 'gw-budget',
+          method: 'tools/call',
+          params: { name: 'zernio__create_post', arguments: {} },
+          ...bound(SESSION_BINDING),
+          _callerWorkspaceRoot: spoolRoot,
+        }),
+        buildDeps({ gateway, workspaceProvider: knownFolders(spoolRoot) }),
+      );
+      expect(response.error).toBeUndefined();
+      return response.result as Record<string, unknown>;
+    }
+
+    it('cuts an over-budget gateway result to the default budget and spools it', async () => {
+      const gateway = fakeGateway();
+      const huge = Array.from(
+        { length: 4_000 },
+        (_, i) => `line ${i} of a very long upstream answer`,
+      ).join('\n');
+      const image = { type: 'image', data: 'AAAA', mimeType: 'image/png' };
+      gateway.callTool.mockResolvedValue({
+        content: [{ type: 'text', text: huge }, image],
+        structuredContent: { rows: huge },
+        _meta: { upstream: true },
+      });
+
+      const result = await callBudgeted(gateway);
+      const content = result['content'] as Array<{
+        type: string;
+        text?: string;
+      }>;
+
+      expect(content).toHaveLength(2);
+      expect(content[0].type).toBe('text');
+      expect(content[0].text?.length).toBeLessThanOrEqual(
+        DEFAULT_TOOL_RESULT_BUDGET_CHARS,
+      );
+      expect(content[0].text).not.toBe(huge);
+      expect(content[1]).toEqual(image);
+      expect(result['structuredContent']).toBeUndefined();
+      expect(result['_meta']).toEqual({ upstream: true });
+      expect(
+        fs.readdirSync(path.join(spoolRoot, '.ptah', 'tmp', 'mcp-out')).length,
+      ).toBeGreaterThan(0);
+    });
+
+    it('budgets structuredContent when the result has no text item', async () => {
+      const gateway = fakeGateway();
+      gateway.callTool.mockResolvedValue({
+        content: [],
+        structuredContent: { blob: 'x'.repeat(50_000) },
+      });
+
+      const result = await callBudgeted(gateway);
+      const content = result['content'] as Array<{
+        type: string;
+        text?: string;
+      }>;
+
+      expect(content).toHaveLength(1);
+      expect(content[0].text?.length).toBeLessThanOrEqual(
+        DEFAULT_TOOL_RESULT_BUDGET_CHARS,
+      );
+      expect(result['structuredContent']).toBeUndefined();
+    });
+  });
+
   it('drops a gateway tool whose name collides with a host tool', async () => {
     const gateway = fakeGateway([
       { ...ZERNIO, name: 'ptah_workspace_analyze', description: 'shadow' },

@@ -123,6 +123,9 @@ jest.mock('@ptah-extension/harness-sync', () => {
     ),
     FileLockTimeoutError: actual.FileLockTimeoutError,
     isFileLockTimeoutError: actual.isFileLockTimeoutError,
+    // No real `.git` lookup (its async I/O would outlast the settle turns):
+    // no virtual root is a linked worktree unless a case below names one.
+    isLinkedWorktreeRoot: jest.fn(async () => false),
   };
 });
 
@@ -161,6 +164,7 @@ import { killRunningChecks } from '../mcp-core/run-check.tool';
 import {
   FileLockTimeoutError,
   createMcpFacet,
+  isLinkedWorktreeRoot as isLinkedWorktreeRootMock,
   withMcpConfigLock as withMcpConfigLockMock,
 } from '@ptah-extension/harness-sync';
 import { McpCallerTokenRegistry } from './mcp-caller-token-registry';
@@ -1633,6 +1637,83 @@ describe('CodeExecutionMCP — re-pointing queue', () => {
  * planned beside the open folders, so it is written, it survives every
  * workspace reconcile, and only `releaseRoot` takes it back.
  */
+describe('CodeExecutionMCP — linked git worktrees (#1469)', () => {
+  const WORKTREE = '/wt-linked';
+  const linkedMock = isLinkedWorktreeRootMock as unknown as jest.Mock;
+
+  beforeEach(() => {
+    linkedMock.mockImplementation(async (root: string) => root === WORKTREE);
+  });
+
+  afterEach(() => {
+    linkedMock.mockImplementation(async () => false);
+  });
+
+  function writesUnder(root: string): string[] {
+    return fsWriteFileSyncMock.mock.calls
+      .map(([file]) => String(file))
+      .filter((file) => file.startsWith(root));
+  }
+
+  it('retainRoot writes no config file (and no .bak) in a linked worktree', async () => {
+    const disk = useVirtualDisk();
+    const { service } = build({ folders: ['/wsA'] });
+    await service.start();
+
+    expect(await service.retainRoot(WORKTREE)).toEqual({
+      registered: false,
+      reason: 'linked-worktree',
+    });
+
+    expect(writesUnder(WORKTREE)).toEqual([]);
+    expect([...disk.keys()].filter((f) => f.startsWith(WORKTREE))).toEqual([]);
+    // A refused retain keeps nothing: the next reconcile writes nothing there.
+    await service.ensureRegisteredForSubagents();
+    expect(writesUnder(WORKTREE)).toEqual([]);
+    expect(serversIn(disk, ROOT_A)).toEqual(ptahEntryFor('/wsA'));
+  });
+
+  it('leaves an existing worktree .mcp.json untouched, and release deletes nothing', async () => {
+    const existing = JSON.stringify({
+      mcpServers: { ptah: { type: 'http', url: 'http://localhost:1/old' } },
+    });
+    const disk = useVirtualDisk({ [path.join(WORKTREE, '.mcp.json')]: existing });
+    const { service } = build({ folders: ['/wsA'] });
+    await service.start();
+    await service.retainRoot(WORKTREE);
+    await service.releaseRoot(WORKTREE);
+    await service.stop();
+
+    expect(writesUnder(WORKTREE)).toEqual([]);
+    expect(disk.get(path.join(WORKTREE, '.mcp.json'))).toBe(existing);
+  });
+
+  it('keeps the session MCP when the active workspace is a linked worktree', async () => {
+    useVirtualDisk();
+    const { service } = build({ folders: [WORKTREE] });
+    await service.start();
+
+    // `false` here would make chat:start drop the session's own `ptah`
+    // server, which never reads `.mcp.json`.
+    expect(await service.ensureRegisteredForSubagents()).toEqual({
+      registered: true,
+    });
+    expect(writesUnder(WORKTREE)).toEqual([]);
+  });
+
+  it('still writes the main checkout beside an open linked worktree', async () => {
+    const disk = useVirtualDisk();
+    const { service } = build({ folders: ['/wsA', WORKTREE] });
+    await service.start();
+
+    expect(await service.ensureRegisteredForSubagents()).toEqual({
+      registered: true,
+    });
+    expect(serversIn(disk, ROOT_A)).toEqual(ptahEntryFor('/wsA'));
+    expect(writesUnder(WORKTREE)).toEqual([]);
+  });
+});
+
 describe('CodeExecutionMCP — retained subagent roots', () => {
   const WORKTREE = '/wt1';
   const ROOT_WT = path.join(WORKTREE, '.mcp.json');

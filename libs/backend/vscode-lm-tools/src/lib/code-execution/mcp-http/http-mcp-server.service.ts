@@ -53,6 +53,7 @@ import type { CodeOutliner } from '@ptah-extension/tool-output-reducers';
 import { CLI_AGENT_RUNTIME_TOKENS, type ExternalCompletionOutbox } from '@ptah-extension/cli-agent-runtime';
 import {
   isFileLockTimeoutError,
+  isLinkedWorktreeRoot,
   withMcpConfigLock,
   HARNESS_SYNC_TOKENS,
   PTAH_SPAWN_MCP_KEY,
@@ -102,7 +103,14 @@ export type McpRegistrationFailure =
   /** Registration is still queued or in progress after the chat deadline. */
   | 'timeout'
   /** The read-modify-write itself failed (permissions, unparseable JSON, …). */
-  | 'write-failed';
+  | 'write-failed'
+  /**
+   * The root is a linked git worktree, where Ptah writes no workspace config
+   * file by design (#1469). Sessions started there still get `ptah` from
+   * their own spawn config; only Claude `Task` subagents, which read
+   * `<cwd>/.mcp.json`, go without it.
+   */
+  | 'linked-worktree';
 
 /**
  * The outcome of {@link CodeExecutionMCP.ensureRegisteredForSubagents}.
@@ -114,7 +122,12 @@ export type McpRegistrationFailure =
  * the subagent spawns believing it has Ptah tools and silently has none.
  */
 export interface McpSubagentRegistration {
-  /** True only when a `ptah` entry is on disk for the CURRENT workspace. */
+  /**
+   * True only when a `ptah` entry is on disk for the CURRENT workspace, or
+   * when the current workspace is a linked git worktree. There Ptah writes no
+   * config file by design (#1469), and `false` would make the chat start
+   * drop the session's own `ptah` server, which never reads `.mcp.json`.
+   */
   registered: boolean;
   /** Present exactly when `registered` is false. */
   reason?: McpRegistrationFailure;
@@ -693,6 +706,11 @@ export class CodeExecutionMCP
     // log instead.
     const active = outcomes.get(activeTarget);
     if (active !== undefined) return active;
+    // A linked worktree gets no workspace slot (`planPtahMcpSlots`, #1469).
+    const activeRoot = this.workspaceProvider.getWorkspaceRoot();
+    if (activeRoot && (await isLinkedWorktreeRoot(activeRoot))) {
+      return REGISTERED;
+    }
     // `planPtahMcpSlots` always yields a claude slot for the active root, so
     // the lookup hits. Reaching here means it did not, and returning REGISTERED
     // on that would be the false assurance TASK_2026_332 removed.
@@ -786,7 +804,10 @@ export class CodeExecutionMCP
       const outcomes = await this.registerRootSlots(root, this.port);
       outcome =
         outcomes.get(path.join(root, '.mcp.json')) ??
-        notRegistered('write-failed');
+        notRegistered(
+          // A linked worktree gets no workspace slot (`planPtahMcpSlots`).
+          (await isLinkedWorktreeRoot(root)) ? 'linked-worktree' : 'write-failed',
+        );
     } catch (error: unknown) {
       this.logger.warn(
         `[CodeExecutionMCP] Failed to retain ${root} for subagents: ${
