@@ -25,6 +25,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'fs';
+import { execFileSync } from 'child_process';
 import { homedir, tmpdir } from 'os';
 import { dirname, join } from 'path';
 import {
@@ -459,6 +460,14 @@ describe('PluginConfigSourceResolver — workspace scope and retirement', () => 
 
     it('control: a store that truly records nothing does remove the entry', async () => {
       rmSync(storePath, { force: true });
+      // A real checkout, so the removal proof (#1469) can show git does not
+      // track `.mcp.json`; the bare `.git` marker alone leaves git unable to
+      // answer, and an unproven owned key is kept.
+      const env: NodeJS.ProcessEnv = { ...process.env };
+      delete env['GIT_DIR'];
+      delete env['GIT_WORK_TREE'];
+      delete env['GIT_INDEX_FILE'];
+      execFileSync('git', ['init', '-q'], { cwd: wsA, env, stdio: 'ignore' });
 
       await reconcilerFor().reconcile(wsA, { mode: 'full', reason: 'empty' });
 

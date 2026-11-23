@@ -100,6 +100,10 @@ export {
   WORKSPACE_ROOT_MARKERS,
 } from './lib/workspace/workspace-root';
 
+// Linked git worktree detection (#1469): harness sync leaves every MCP config
+// file alone in a linked worktree, and so does any other writer of them.
+export { isLinkedWorktreeRoot } from './lib/workspace/linked-worktree';
+
 // Manifest store.
 export {
   ManagedManifestStore,

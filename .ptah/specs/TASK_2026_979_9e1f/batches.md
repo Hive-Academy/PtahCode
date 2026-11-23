@@ -198,7 +198,7 @@ P1 gate, run by the orchestrator after B13, before review:
   at `cron-scheduler/src/lib/job-runner.ts:118-119`).
 - Validation notes: no runtime code. Each doc comment names the enforcing site (Hub 6, Hub 10).
 
-## Batch 2: #1469 linked-worktree guard (C7) - IN_PROGRESS
+## Batch 2: #1469 linked-worktree guard (C7) - COMPLETE
 
 - Id: P1-B2 | Phase: P1 | Shape: logic
 - Recommended executor: backend-developer (subagent; reason: lanes disabled)
@@ -417,7 +417,7 @@ P1 gate, run by the orchestrator after B13, before review:
 
 - Depends on: Task 5.1
 
-## Batch 6: Dispatcher routing and caller class (C3, part 1) - PENDING
+## Batch 6: Dispatcher routing and caller class (C3, part 1) - IN_PROGRESS
 
 - Id: P1-B6 | Phase: P1 | Shape: logic
 - Recommended executor: backend-developer (subagent; reason: lanes disabled)
@@ -540,7 +540,7 @@ P1 gate, run by the orchestrator after B13, before review:
 
 ### Task 8.1: Linked-worktree skip in the sweep - PENDING
 
-## Batch 9: Gateway approval gate, unattended exclusion, capper (C5, part 1) - PENDING
+## Batch 9: Gateway approval gate, unattended exclusion, capper (C5, part 1) - IN_PROGRESS
 
 - Id: P1-B9 | Phase: P1 | Shape: logic
 - Recommended executor: backend-developer (subagent; reason: lanes disabled)

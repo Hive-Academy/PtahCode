@@ -25,6 +25,8 @@ import {
   type HarnessRetiredItemId,
   type McpServerConfig,
 } from '@ptah-extension/shared';
+import { existsSync } from 'fs';
+import { dirname, join } from 'path';
 import type { HarnessDesiredMcpServer } from '../../manifest/desired-state.types';
 import {
   entrySourceHash,
@@ -42,6 +44,10 @@ import {
   recordRetiredRemoved,
   type GitTrackingProbe,
 } from '../retirement-proof';
+import {
+  isLinkedWorktreeRoot,
+  isLinkedWorktreeRootSync,
+} from '../../workspace/linked-worktree';
 import { hashMcpConfig } from './mcp-json-format';
 import { mcpEntryKey, type IHarnessMcpFacet } from './mcp-facet.port';
 
@@ -87,6 +93,10 @@ export function emptyMcpFacetPlan(): McpFacetPlan {
  * `desired` must already be filtered to the servers whose `targets` include
  * this target — a server the user installed for Cursor only must not appear in
  * Codex's config just because both targets were reconciled in one pass.
+ *
+ * In a linked git worktree the plan is always empty (#1469): no write, no
+ * removal, nothing owned — so the manifest's MCP rows pass through unchanged
+ * and the main checkout stays the one place MCP config is reconciled.
  */
 export function planMcpFacet(
   facet: IHarnessMcpFacet,
@@ -97,6 +107,10 @@ export function planMcpFacet(
 ): McpFacetPlan {
   const plan = emptyMcpFacetPlan();
   const configRel = facet.configRelPath();
+
+  // Before any read: a worktree's config files belong to the shared repository
+  // and are not this pass's to rewrite, workspace or home.
+  if (isLinkedWorktreeRootSync(workspaceRoot)) return plan;
 
   if (facet.configPath(workspaceRoot) === null) {
     // Workspace-scoped config with no workspace open. Nothing is desired and
@@ -185,8 +199,14 @@ export interface McpRetirementContext {
  * Execute the MCP half of a plan, merging into the target's apply result.
  *
  * A removal carrying `retiredItemId` goes through
- * {@link applyRetiredMcpRemoval} instead of a plain delete; `retirement` is
- * required for it, and without one such a removal fails and stays owned.
+ * {@link applyRetiredMcpRemoval}; every other removal goes through
+ * {@link applyOwnedMcpRemoval}. Both need `retirement` for the owned hash and
+ * the git probe, and without one a removal fails and stays owned.
+ *
+ * In a linked git worktree nothing here touches the facet (#1469): no write,
+ * no removal, no `.bak`. This is the backstop for a caller that built its plan
+ * somewhere other than {@link planMcpFacet} — the uninstall sweep does — and
+ * it records nothing, so every manifest row stays owned as it was.
  */
 export async function applyMcpFacet(
   facet: IHarnessMcpFacet,
@@ -196,6 +216,9 @@ export async function applyMcpFacet(
   result: HarnessApplyResult,
   retirement?: McpRetirementContext,
 ): Promise<void> {
+  if (writes.length === 0 && removals.length === 0) return;
+  if (await isLinkedWorktreeRoot(workspaceRoot)) return;
+
   for (const removal of removals) {
     if (removal.mcpServerKey === undefined) continue;
     if (removal.retiredItemId !== undefined) {
@@ -209,15 +232,13 @@ export async function applyMcpFacet(
       );
       continue;
     }
-    try {
-      await facet.remove(workspaceRoot, removal.mcpServerKey);
-      result.removed.push(removal.relPath);
-    } catch (error: unknown) {
-      result.writeFailed.push({
-        relPath: removal.relPath,
-        reason: `failed to remove MCP entry: ${describe(error)}`,
-      });
-    }
+    await applyOwnedMcpRemoval(
+      facet,
+      { ...removal, mcpServerKey: removal.mcpServerKey },
+      workspaceRoot,
+      result,
+      retirement,
+    );
   }
 
   for (const write of writes) {
@@ -261,6 +282,8 @@ async function applyRetiredMcpRemoval(
   result: HarnessApplyResult,
   retirement: McpRetirementContext | undefined,
 ): Promise<void> {
+  // Backstop for a direct caller; applyMcpFacet already returned here.
+  if (await isLinkedWorktreeRoot(workspaceRoot)) return;
   const { relPath, mcpServerKey } = removal;
   const owned = retirement?.baseEntries[relPath];
   if (retirement === undefined || owned === undefined) {
@@ -323,6 +346,99 @@ async function applyRetiredMcpRemoval(
       itemId,
       `failed to remove MCP entry: ${describe(error)}`,
     );
+  }
+}
+
+/**
+ * Remove one owned, NOT retired server key only on proof (#1469):
+ *
+ * 1. the key's current entry hashes to the manifest hash — else the entry is
+ *    the user's now: kept on disk and released from the manifest
+ *    (`releasedTracked`), so no later pass touches it. A key already gone is
+ *    removed;
+ * 2. a workspace config file is not git-tracked — else kept and released. Git
+ *    answering `unverifiable` keeps it too when the root is inside a git
+ *    checkout; outside any repository there is nothing git could lose, which is
+ *    the same rule the targets apply to a command copy. A `~/` home config sits
+ *    outside any repository and skips this check;
+ * 3. only then the key is deleted.
+ *
+ * No context, a missing manifest hash, or an I/O failure lands in
+ * `writeFailed`: the key stays owned for the next pass.
+ */
+async function applyOwnedMcpRemoval(
+  facet: IHarnessMcpFacet,
+  removal: HarnessPlanRemove & { mcpServerKey: string },
+  workspaceRoot: string,
+  result: HarnessApplyResult,
+  retirement: McpRetirementContext | undefined,
+): Promise<void> {
+  const { relPath, mcpServerKey } = removal;
+  const owned = retirement?.baseEntries[relPath];
+  if (retirement === undefined || owned === undefined) {
+    result.writeFailed.push({
+      relPath,
+      reason:
+        'cannot prove an MCP entry unchanged: no owned manifest hash was supplied',
+    });
+    return;
+  }
+
+  let current: McpServerConfig | undefined;
+  try {
+    current = facet.readAll(workspaceRoot).get(mcpServerKey);
+  } catch (error: unknown) {
+    // degradation-audit: reported - recorded as writeFailed; the entry stays
+    // owned and the next pass retries it.
+    result.writeFailed.push({
+      relPath,
+      reason: `failed to read MCP config: ${describe(error)}`,
+    });
+    return;
+  }
+  if (current === undefined) {
+    result.removed.push(relPath);
+    return;
+  }
+  if (hashMcpConfig(current) !== owned.hash) {
+    (result.releasedTracked ??= []).push(relPath);
+    return;
+  }
+
+  const configRel = facet.configRelPath();
+  if (!configRel.startsWith('~/')) {
+    const tracking = await retirement.probeGitTracking(
+      workspaceRoot,
+      configRel,
+    );
+    if (
+      tracking === 'tracked' ||
+      (tracking === 'unverifiable' && insideGitCheckout(workspaceRoot))
+    ) {
+      (result.releasedTracked ??= []).push(relPath);
+      return;
+    }
+  }
+
+  try {
+    await facet.remove(workspaceRoot, mcpServerKey);
+    result.removed.push(relPath);
+  } catch (error: unknown) {
+    result.writeFailed.push({
+      relPath,
+      reason: `failed to remove MCP entry: ${describe(error)}`,
+    });
+  }
+}
+
+/** Whether `root` or any ancestor holds a `.git` (directory or file). */
+function insideGitCheckout(root: string): boolean {
+  let current = root;
+  while (true) {
+    if (existsSync(join(current, '.git'))) return true;
+    const parent = dirname(current);
+    if (parent === current) return false;
+    current = parent;
   }
 }
 

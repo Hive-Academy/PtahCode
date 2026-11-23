@@ -12,7 +12,10 @@ import {
   type McpOAuthConnectedRecord,
   type SmitheryInstalledRecord,
 } from '@ptah-extension/shared';
-import { McpInstallService } from './mcp-install.service';
+import {
+  MCP_LINKED_WORKTREE_SKIP_COPY,
+  McpInstallService,
+} from './mcp-install.service';
 
 /**
  * Every case runs against a temp directory used as BOTH the home dir and the
@@ -745,6 +748,103 @@ describe('McpInstallService', () => {
       });
       expect(JSON.stringify(results)).not.toContain(SECRET);
       expect(JSON.stringify(warnings)).toContain(SECRET);
+    });
+  });
+  describe('linked git worktree (#1469)', () => {
+    /** git's linked-worktree layout: `.git` is a FILE with a gitdir pointer. */
+    const makeLinkedWorktree = (): void => {
+      fs.writeFileSync(
+        path.join(tmp, '.git'),
+        'gitdir: /repo/.git/worktrees/wt\n',
+        'utf-8',
+      );
+    };
+
+    const warningsFor = (): {
+      svc: McpInstallService;
+      warnings: Array<[string, unknown]>;
+    } => {
+      const warnings: Array<[string, unknown]> = [];
+      const svc = new McpInstallService(cleanReconciler(), intents, {
+        homeDir: tmp,
+        warn: (message, detail) => warnings.push([message, detail]),
+      });
+      return { svc, warnings };
+    };
+
+    it('install saves the intent, skips the reconcile, and records the skip', async () => {
+      makeLinkedWorktree();
+      const { svc, warnings } = warningsFor();
+
+      const results = await svc.install(
+        'io.github.x/zernio',
+        'zernio',
+        { type: 'stdio', command: 'node' },
+        ['claude'],
+        tmp,
+      );
+
+      expect(reconcileCalls).toBe(0);
+      expect(intents.has('zernio')).toBe(true);
+      expect(results).toEqual([
+        expect.objectContaining({
+          target: 'claude',
+          success: false,
+          deferred: true,
+          error: MCP_LINKED_WORKTREE_SKIP_COPY,
+        }),
+      ]);
+      expect(fs.existsSync(path.join(tmp, '.mcp.json'))).toBe(false);
+      expect(warnings).toEqual([
+        [
+          expect.stringContaining('linked git worktree'),
+          expect.objectContaining({
+            serverKey: 'zernio',
+            reason: 'mcp:install',
+          }),
+        ],
+      ]);
+    });
+
+    it('force uninstall leaves the config file alone: no facet remove, no .bak', async () => {
+      writeMcpJson({ handwritten: { command: 'node' } });
+      const before = fs.readFileSync(path.join(tmp, '.mcp.json'), 'utf-8');
+      makeLinkedWorktree();
+      const { svc, warnings } = warningsFor();
+
+      const results = await svc.uninstall('handwritten', ['claude'], tmp, {
+        force: true,
+      });
+
+      expect(results[0]).toMatchObject({
+        target: 'claude',
+        success: false,
+        deferred: true,
+        error: MCP_LINKED_WORKTREE_SKIP_COPY,
+      });
+      expect(fs.readFileSync(path.join(tmp, '.mcp.json'), 'utf-8')).toBe(
+        before,
+      );
+      expect(fs.existsSync(path.join(tmp, '.mcp.json.bak'))).toBe(false);
+      expect(warnings).toHaveLength(1);
+      expect(warnings[0][1]).toMatchObject({ reason: 'mcp:force-remove' });
+    });
+
+    it('a main checkout (.git directory) still force-removes through the facet', async () => {
+      writeMcpJson({ handwritten: { command: 'node' } });
+      fs.mkdirSync(path.join(tmp, '.git'));
+
+      const results = await service().uninstall(
+        'handwritten',
+        ['claude'],
+        tmp,
+        {
+          force: true,
+        },
+      );
+
+      expect(results[0]).toMatchObject({ target: 'claude', success: true });
+      expect(readMcpJson()).not.toHaveProperty('handwritten');
     });
   });
 });

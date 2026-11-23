@@ -58,8 +58,10 @@
 
 import {
   createAllMcpFacets,
+  isLinkedWorktreeRoot,
   McpIntentPersistError,
   McpIntentStore,
+  resolveHarnessWorkspaceRoot,
   type HarnessReconcilerService,
   type IHarnessMcpFacet,
   type McpSourceStatus,
@@ -96,6 +98,15 @@ const ALL_TARGETS: McpInstallTarget[] = [
   'codex',
   'antigravity',
 ];
+
+/**
+ * The fixed copy of a target skipped because the workspace is a linked git
+ * worktree (#1469). Any intent change is still saved, but no config file is
+ * written, updated or deleted: a worktree's config files belong to the
+ * repository it shares with the main checkout.
+ */
+export const MCP_LINKED_WORKTREE_SKIP_COPY =
+  'Ptah does not change MCP config files in a linked git worktree.';
 
 /** Display label per origin. One place, so the four readers cannot disagree. */
 const ORIGIN_LABELS: Record<McpServerOrigin, string> = {
@@ -598,6 +609,15 @@ export class McpInstallService {
     workspaceRoot: string | undefined,
     serverKey: string,
   ): Promise<McpInstallResult[]> {
+    if (await this.inLinkedWorktree(workspaceRoot)) {
+      return this.skippedForWorktree(
+        targets,
+        workspaceRoot,
+        serverKey,
+        'mcp:force-remove',
+      );
+    }
+
     const results: McpInstallResult[] = [];
     for (const target of targets) {
       const facet = this.facets.get(target);
@@ -660,6 +680,41 @@ export class McpInstallService {
         'is user-owned, not managed by Ptah, so the reconciler left it alone. ' +
         'Removing it needs an explicit confirmation.',
     };
+  }
+
+  /**
+   * Whether the workspace root (as the reconciler resolves it) is a linked git
+   * worktree. In one, no MCP config file is written, updated or deleted from
+   * here (#1469): its config files belong to the shared repository.
+   */
+  private async inLinkedWorktree(
+    workspaceRoot: string | undefined,
+  ): Promise<boolean> {
+    if (workspaceRoot === undefined || workspaceRoot === '') return false;
+    return isLinkedWorktreeRoot(resolveHarnessWorkspaceRoot(workspaceRoot));
+  }
+
+  /**
+   * Every target deferred, nothing written, and the skip recorded in the host
+   * log — a skipped write must never read as a silent success.
+   */
+  private skippedForWorktree(
+    targets: readonly McpInstallTarget[],
+    workspaceRoot: string | undefined,
+    serverKey: string,
+    reason: string,
+  ): McpInstallResult[] {
+    this.options.warn?.(
+      '[mcp-install] Skipped MCP config change in a linked git worktree',
+      { serverKey, reason, targets: [...targets] },
+    );
+    return targets.map((target) => ({
+      target,
+      configPath: this.getConfigPath(target, workspaceRoot) ?? '',
+      success: false,
+      deferred: true,
+      error: MCP_LINKED_WORKTREE_SKIP_COPY,
+    }));
   }
 
   /** A failed target with the fixed copy for `code`. */
@@ -730,6 +785,10 @@ export class McpInstallService {
         code: 'deferred-no-workspace',
         error: MCP_INSTALL_RESULT_COPY['deferred-no-workspace'],
       }));
+    }
+
+    if (await this.inLinkedWorktree(workspaceRoot)) {
+      return this.skippedForWorktree(targets, workspaceRoot, serverKey, reason);
     }
 
     if (this.reconciler === null) {
