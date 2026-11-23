@@ -43,6 +43,12 @@ const BINDING_WAIT_MS = 24 * 60 * 60 * 1000;
  * partial (an unreadable shard drops its edges), so it does not prove a new owner.
  */
 type SessionOwnerState = 'matches' | 'changed' | 'unknown' | 'lookup-failed' | 'unverified';
+/**
+ * `reroute`: a committed handoff edge leads from the recipient into the owner's lineage, so the
+ * owner is the recipient's successor and now holds the report's conversation. The report goes
+ * to `reroute` instead of being lost.
+ */
+type SessionOwnerCheck = SessionOwnerState | { readonly reroute: string };
 
 const HOLD_REASONS = {
   unknown: 'waiting-for-binding',
@@ -307,18 +313,35 @@ export class ParentDeliveryDrainerService {
         break;
       }
       // The owner can change while the claim and the body read wait on storage.
+      const ownersBefore = sending.originKind === 'session' ? this.ownersSignature(sending.agentId) : undefined;
       if (sending.originKind === 'session') {
         const owner = await this.sessionOwner(sending);
         if (owner !== 'matches') {
           await this.holdSessionReport(pending, owner, true);
           continue;
         }
-        // The owner lookup awaited: a cancel or a recipient rewrite can have
-        // landed. Check the claim now; no await may follow before the send.
+      }
+      // The durable dispatch mark comes first: after it a restart cannot tell whether the parent
+      // got the message, and before it a restart releases the claim safely.
+      try {
+        if (!(await this.store.markDispatching(sending.id, sending.attemptId))) continue;
+      } catch (error: unknown) {
+        // Degradation: nothing was sent; the claim is released and retried.
+        this.logger.error('[ParentDeliveryDrainer] Could not persist dispatch state', this.error(error));
+        await this.releaseClaim(sending.id, 'dispatch-mark-failed', BACKOFF_MS[0]);
+        continue;
+      }
+      if (sending.originKind === 'session') {
+        // The lookup and the mark awaited: a cancel, a recipient rewrite or a reparent can have
+        // landed. Check the claim and the owner binding now; no await may follow before the send.
         const current = this.store.findById(sending.id);
         if (!current || current.state !== 'sending' || current.attemptId !== sending.attemptId) continue;
         if (current.parentSessionId !== parentSessionId) {
           await this.releaseClaim(sending.id, 'recipient-changed', BACKOFF_MS[0]);
+          continue;
+        }
+        if (this.ownersSignature(sending.agentId) !== ownersBefore) {
+          await this.releaseClaim(sending.id, 'owner-changed-during-claim', BACKOFF_MS[0]);
           continue;
         }
       }
@@ -350,7 +373,7 @@ export class ParentDeliveryDrainerService {
   private async sessionOwner(
     envelope: ParentDeliveryEnvelope,
     retried = false,
-  ): Promise<SessionOwnerState> {
+  ): Promise<SessionOwnerCheck> {
     const recorded = this.recordedOwners(envelope.agentId);
     if (!recorded) return 'unknown';
     if (recorded.includes(envelope.parentSessionId)) return 'matches';
@@ -376,8 +399,13 @@ export class ParentDeliveryDrainerService {
     // A committed edge out of the recipient into the owner's lineage is positive proof.
     return recipientForwarded !== envelope.parentSessionId &&
       forwardedTargets.includes(recipientForwarded)
-      ? 'changed'
+      ? { reroute: recipientForwarded }
       : 'unverified';
+  }
+
+  /** The recorded owner ids of the child as one value; it changes when a reparent lands. */
+  private ownersSignature(childSessionId: string): string | undefined {
+    return this.recordedOwners(childSessionId)?.join('\0');
   }
 
   private recordedOwners(childSessionId: string): readonly string[] | undefined {
@@ -389,7 +417,8 @@ export class ParentDeliveryDrainerService {
   }
 
   /**
-   * A report whose owner is not confirmed is never sent. `changed` cancels it;
+   * A report whose owner is not confirmed is never sent. `reroute` readdresses it to the owner;
+   * `changed` cancels it;
    * `unknown`, `unverified` and `lookup-failed` keep the body and wait with
    * bounded backoff; `unknown` and `unverified` are cancelled after 24 hours.
    * Limitation: a restored binding does not wake the drainer; the next backoff
@@ -398,9 +427,13 @@ export class ParentDeliveryDrainerService {
    */
   private async holdSessionReport(
     snapshot: ParentDeliveryEnvelope,
-    owner: Exclude<SessionOwnerState, 'matches'>,
+    owner: Exclude<SessionOwnerCheck, 'matches'>,
     claimed: boolean,
   ): Promise<void> {
+    if (typeof owner === 'object') {
+      await this.rerouteSessionReport(snapshot, owner.reroute, claimed);
+      return;
+    }
     if (owner === 'changed') {
       await this.cancelStaleSessionReport(snapshot, 'owner-changed', claimed);
       return;
@@ -475,6 +508,32 @@ export class ParentDeliveryDrainerService {
       ? entry.nextRetryAt - entry.updatedAt
       : 0;
     return BACKOFF_MS.find((delay) => delay > previous + 1_000) ?? BACKOFF_MS[BACKOFF_MS.length - 1];
+  }
+
+  /**
+   * Readdresses an unsent report to the successor that owns the child now and drains it there.
+   * A claimed row is released first. A failed write keeps the row and its retry floor.
+   */
+  private async rerouteSessionReport(
+    envelope: ParentDeliveryEnvelope,
+    target: string,
+    claimed: boolean,
+  ): Promise<void> {
+    this.logger.info('[ParentDeliveryDrainer] Child session report rerouted to the handed-off owner', {
+      parentSessionId: envelope.parentSessionId, targetSessionId: target, childSessionId: envelope.agentId,
+    });
+    if (claimed && !(await this.releaseClaim(envelope.id, 'owner-rerouted', 0))) return;
+    try {
+      const next = await this.store.rerouteReport(envelope.id, target);
+      this.retryNotBefore.delete(envelope.id);
+      if (!next) return;
+      this.emitSafely(next);
+      void this.drain(target).catch((error: unknown) => this.logCallbackError(error));
+    } catch (error: unknown) {
+      // Degradation: the row keeps its body and old recipient; the retry floor checks the owner again.
+      this.logger.error('[ParentDeliveryDrainer] Could not reroute child report', this.error(error));
+      this.holdAfterWriteFailure(envelope.id);
+    }
   }
 
   /** The cancelled entry stays in delivery status, so the undelivered outcome is not lost. */

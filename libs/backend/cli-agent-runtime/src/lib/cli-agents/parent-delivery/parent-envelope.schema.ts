@@ -40,6 +40,12 @@ export const ParentEnvelopeRecordSchema = z.object({
   nextRetryAt: timestamp.optional(),
   attemptId: z.string().uuid().optional(),
   everDispatched: z.boolean().optional(),
+  /**
+   * Only on a claim (`sending`). `false`: claimed, nothing handed to the adapter yet, so a restart
+   * may release it safely. `true`: the adapter call began, so the outcome after a restart is
+   * unknown. Absent on a record written before this field existed: treated as `true`.
+   */
+  dispatchStarted: z.boolean().optional(),
   bodyBytes: z.number().int().nonnegative(),
   deliveredAt: timestamp.optional(),
   cancelledAt: timestamp.optional(),

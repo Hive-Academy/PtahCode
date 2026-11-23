@@ -1120,12 +1120,16 @@ export class AgentReportRouter {
     refusedSummary: string,
   ): AgentReportDelivery | null {
     if (!this.parentDelivery) return null;
-    const previous = this.parentDelivery.find(
-      AgentReportRouter.sessionReportKey(childSessionId, binding, message),
-    );
-    if (!previous || !AgentReportRouter.ownsSessionRow(previous, childSessionId))
-      return null;
-    return this.sessionReceipt(previous, childSessionId, refusedSummary);
+    for (const key of AgentReportRouter.sessionReportKeys(
+      childSessionId,
+      binding,
+      message,
+    )) {
+      const previous = this.parentDelivery.find(key);
+      if (previous && AgentReportRouter.ownsSessionRow(previous, childSessionId))
+        return this.sessionReceipt(previous, childSessionId, refusedSummary);
+    }
+    return null;
   }
 
   private static ownsSessionRow(
@@ -1187,7 +1191,10 @@ export class AgentReportRouter {
 
   /**
    * Deterministic and within the store's `^\S{1,470}$` dedupe key pattern.
-   * Scoped to the owner binding; the summary is not part of the identity.
+   * Scoped to the recorded owner tab; the summary is not part of the identity.
+   * The SDK alias of the same owner is not part of it either: an owner that
+   * gains its alias after a report was queued is still the same owner, so a
+   * repeat gets the saved receipt instead of a second queued copy.
    * A JSON tuple keeps field boundaries unambiguous for any text.
    */
   private static sessionReportKey(
@@ -1195,14 +1202,43 @@ export class AgentReportRouter {
     binding: SessionOwnerBinding,
     message: string,
   ): string {
-    const idPart =
-      /^\S+$/.test(childSessionId) && childSessionId.length <= MAX_KEY_ID_LENGTH
-        ? childSessionId
-        : createHash('sha256').update(childSessionId).digest('hex');
+    const digest = createHash('sha256')
+      .update(JSON.stringify(['v3', binding.tab, message]))
+      .digest('hex');
+    return `session-report:v3:${AgentReportRouter.keyIdPart(childSessionId)}:${digest}`;
+  }
+
+  /**
+   * The key of a row saved before the alias left the identity (`v2` carried
+   * the SDK alias), so a repeat of that report still finds its receipt.
+   */
+  private static legacySessionReportKey(
+    childSessionId: string,
+    binding: SessionOwnerBinding,
+    message: string,
+  ): string {
     const digest = createHash('sha256')
       .update(JSON.stringify(['v2', binding.tab, binding.sdk ?? '', message]))
       .digest('hex');
-    return `session-report:v2:${idPart}:${digest}`;
+    return `session-report:v2:${AgentReportRouter.keyIdPart(childSessionId)}:${digest}`;
+  }
+
+  /** Current key first, then the legacy key. */
+  private static sessionReportKeys(
+    childSessionId: string,
+    binding: SessionOwnerBinding,
+    message: string,
+  ): readonly string[] {
+    return [
+      AgentReportRouter.sessionReportKey(childSessionId, binding, message),
+      AgentReportRouter.legacySessionReportKey(childSessionId, binding, message),
+    ];
+  }
+
+  private static keyIdPart(childSessionId: string): string {
+    return /^\S+$/.test(childSessionId) && childSessionId.length <= MAX_KEY_ID_LENGTH
+      ? childSessionId
+      : createHash('sha256').update(childSessionId).digest('hex');
   }
 
   private refuseSessionChild(
