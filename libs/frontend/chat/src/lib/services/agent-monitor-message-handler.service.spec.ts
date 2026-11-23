@@ -13,7 +13,9 @@ import {
   AgentMonitorMessageHandler,
   parseAgentMonitorActionNotice,
   parseAgentMonitorReparented,
+  parseSessionActivityOverdue,
 } from './agent-monitor-message-handler.service';
+import { SessionOverdueStore } from './session-overdue.store';
 import { AgentDeliveryStore, AgentMonitorStore } from '@ptah-extension/chat-streaming';
 
 type StoreSlice = Pick<
@@ -33,6 +35,7 @@ describe('AgentMonitorMessageHandler', () => {
   let handler: AgentMonitorMessageHandler;
   let store: jest.Mocked<StoreSlice>;
   let delivery: jest.Mocked<DeliverySlice>;
+  let overdue: { apply: jest.Mock };
   const activeSession = signal<string | null>(null);
 
   beforeEach(() => {
@@ -42,6 +45,7 @@ describe('AgentMonitorMessageHandler', () => {
       onParentDelivery: jest.fn(),
       hydrate: jest.fn().mockResolvedValue(undefined),
     };
+    overdue = { apply: jest.fn() };
     store = {
       onAgentSpawned: jest.fn(),
       onAgentOutput: jest.fn(),
@@ -58,6 +62,7 @@ describe('AgentMonitorMessageHandler', () => {
         AgentMonitorMessageHandler,
         { provide: AgentMonitorStore, useValue: store },
         { provide: AgentDeliveryStore, useValue: delivery },
+        { provide: SessionOverdueStore, useValue: overdue },
         { provide: TabManagerService, useValue: { activeTabSessionId: activeSession } },
       ],
     });
@@ -69,7 +74,7 @@ describe('AgentMonitorMessageHandler', () => {
     TestBed.resetTestingModule();
   });
 
-  it('declares the nine AGENT_MONITOR_* message types', () => {
+  it('declares the nine AGENT_MONITOR_* message types and the overdue notice', () => {
     expect(handler.handledMessageTypes).toEqual([
       MESSAGE_TYPES.AGENT_MONITOR_SPAWNED,
       MESSAGE_TYPES.AGENT_MONITOR_OUTPUT,
@@ -80,7 +85,57 @@ describe('AgentMonitorMessageHandler', () => {
       MESSAGE_TYPES.AGENT_MONITOR_ACTION_NOTICE,
       MESSAGE_TYPES.AGENT_MONITOR_MESSAGE_RECEIPT,
       MESSAGE_TYPES.AGENT_MONITOR_PARENT_DELIVERY,
+      MESSAGE_TYPES.SESSION_ACTIVITY_OVERDUE,
     ]);
+  });
+
+  describe('session:activity-overdue (TASK_2026_2310)', () => {
+    const valid = {
+      sessionId: 'session-1',
+      tabId: 'tab-1',
+      overdue: true,
+      operations: ['Bash'],
+      text: 'Ptah: no activity for 10 minutes.',
+    };
+
+    it('routes a valid payload to SessionOverdueStore', () => {
+      handler.handleMessage({ type: MESSAGE_TYPES.SESSION_ACTIVITY_OVERDUE, payload: valid });
+      expect(overdue.apply).toHaveBeenCalledWith(valid);
+    });
+
+    it('routes a clear without a tab id', () => {
+      const clear = { sessionId: 'session-1', overdue: false, operations: [], text: '' };
+      handler.handleMessage({ type: MESSAGE_TYPES.SESSION_ACTIVITY_OVERDUE, payload: clear });
+      expect(overdue.apply).toHaveBeenCalledWith(clear);
+    });
+
+    it('drops a malformed payload with a warning', () => {
+      const warn = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+      handler.handleMessage({
+        type: MESSAGE_TYPES.SESSION_ACTIVITY_OVERDUE,
+        payload: { ...valid, overdue: 'yes' },
+      });
+      expect(overdue.apply).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalled();
+      warn.mockRestore();
+    });
+
+    it.each([
+      ['null', null],
+      ['an array', [valid]],
+      ['an empty sessionId', { ...valid, sessionId: '' }],
+      ['a non-string tabId', { ...valid, tabId: 7 }],
+      ['a non-boolean overdue', { ...valid, overdue: 1 }],
+      ['non-array operations', { ...valid, operations: 'Bash' }],
+      ['a non-string operation', { ...valid, operations: ['Bash', 3] }],
+      ['a missing text', { ...valid, text: undefined }],
+    ])('parseSessionActivityOverdue rejects %s', (_label, payload) => {
+      expect(parseSessionActivityOverdue(payload)).toBeNull();
+    });
+
+    it('parseSessionActivityOverdue copies only the contract fields', () => {
+      expect(parseSessionActivityOverdue({ ...valid, extra: 'x' })).toEqual(valid);
+    });
   });
 
   it('routes valid parent delivery and rejects malformed payloads', () => {

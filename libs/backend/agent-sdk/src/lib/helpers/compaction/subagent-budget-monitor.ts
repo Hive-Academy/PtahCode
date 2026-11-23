@@ -44,6 +44,7 @@ import {
   formatBudgetAskReadOnly,
   formatBudgetAskWritable,
   formatBudgetPauseNotice,
+  formatBudgetAskNotice,
   formatHandoffNormalReturn,
   formatHandoffNotesDelay,
   formatHandoffRecordFailure,
@@ -518,6 +519,11 @@ export interface SubagentBudgetDispatcherPort
   postSubagentNotice(agentId: string, text: string): void;
   /** Drop the subagent's pending notice. */
   withdrawSubagentNotice(agentId: string): void;
+  /**
+   * Show the subagent's current ask or pause to the person (TASK_2026_2310); `null` clears it.
+   * Informational only: it never stops the subagent. Optional so a host without a UI omits it.
+   */
+  announceSubagentNotice?(agentId: string, notice: AgentActionNotice | null, text: string): void;
 }
 
 /**
@@ -719,6 +725,7 @@ export class SubagentBudgetMonitor {
       const notice = admissionNotice('paused', paused, nextStep);
       if (this.notesGate.pause(agentId, notice)) {
         this.dispatcher.postMainThreadNotice(session.sessionId, redactBudgetSecrets(formatBudgetPauseNotice(notice, agentId)));
+        this.announce(agentId, notice, redactBudgetSecrets(formatBudgetPauseNotice(notice, agentId)));
         this.logger.info('[SubagentBudgetMonitor] Subagent paused; new tool calls are denied until it returns', {
           sessionId: session.sessionId, toolCallId, reason: paused.reason,
         });
@@ -770,6 +777,7 @@ export class SubagentBudgetMonitor {
       ? formatBudgetAskWritable(notice, state.handoffPaths.notes)
       : formatBudgetAskReadOnly(notice);
     this.dispatcher.postSubagentNotice(agentId, redactBudgetSecrets(text));
+    this.announce(agentId, notice, redactBudgetSecrets(formatBudgetAskNotice(notice, agentId)));
     this.logger.info('[SubagentBudgetMonitor] Handoff ask queued', {
       sessionId: session.sessionId, toolCallId, reason: asked.reason, contextTokens: state.contextTokens,
     });
@@ -916,6 +924,18 @@ export class SubagentBudgetMonitor {
     this.deliverables.finish(agentId);
     this.notesWarnings.finish(agentId);
     this.dispatcher.withdrawSubagentNotice(agentId);
+    this.announce(agentId, null, '');
+  }
+
+  /** Show the agent's notice in the host UI. A failing sink never changes the agent's run. */
+  private announce(agentId: string, notice: AgentActionNotice | null, text: string): void {
+    try {
+      this.dispatcher.announceSubagentNotice?.(agentId, notice, text);
+    } catch (error) {
+      this.logger.warn('[SubagentBudgetMonitor] Subagent notice could not reach the UI', {
+        errorType: error instanceof Error ? error.name : typeof error,
+      });
+    }
   }
 
   /** Build, publish and deliver the handoff of an agent that returned after the request. */

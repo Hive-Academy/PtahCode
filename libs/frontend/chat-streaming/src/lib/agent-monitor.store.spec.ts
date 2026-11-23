@@ -1752,6 +1752,74 @@ describe('AgentMonitorStore', () => {
       } as AgentCompletedEvent;
     }
 
+    describe('Ptah notice on an SDK subagent (TASK_2026_2310)', () => {
+      const ask = {
+        actor: 'ptah-budget',
+        action: 'asked-handoff',
+        reason: 'weighted-budget',
+        nextStep: 'return-report',
+      } as const;
+      const record = () => store.subagents().get(PARENT);
+
+      it('applies a notice keyed by the SDK agent id when no lane matches', () => {
+        store.onAgentStart(startEvent());
+        store.onAgentActionNotice({ agentId: 'short-1', notice: ask, text: 'Ptah asked.' });
+        expect(record()?.actionNotice).toEqual(ask);
+        expect(record()?.actionNoticeText).toBe('Ptah asked.');
+        expect(record()?.status).toBe('running');
+        expect(store.agents()).toHaveLength(0);
+      });
+
+      it('clears on a null notice', () => {
+        store.onAgentStart(startEvent());
+        store.onAgentActionNotice({ agentId: 'short-1', notice: ask, text: 'Ptah asked.' });
+        store.onAgentActionNotice({ agentId: 'short-1', notice: null, text: '' });
+        expect(record()?.actionNotice).toBeUndefined();
+        expect(record()?.actionNoticeText).toBeUndefined();
+      });
+
+      it('buffers a notice that arrives before agent_start sets the id', () => {
+        store.onAgentActionNotice({ agentId: 'short-1', notice: ask, text: 'Early.' });
+        store.onAgentProgress(progressEvent());
+        expect(record()?.actionNotice).toBeUndefined();
+        store.onAgentStart(startEvent());
+        expect(record()?.actionNotice).toEqual(ask);
+        expect(record()?.actionNoticeText).toBe('Early.');
+        // The buffer entry is consumed: a release still clears the record.
+        store.onAgentActionNotice({ agentId: 'short-1', notice: null, text: '' });
+        expect(record()?.actionNotice).toBeUndefined();
+      });
+
+      it('drops a buffered notice that a null notice released', () => {
+        store.onAgentActionNotice({ agentId: 'short-1', notice: ask, text: 'Early.' });
+        store.onAgentActionNotice({ agentId: 'short-1', notice: null, text: '' });
+        store.onAgentStart(startEvent());
+        expect(record()?.actionNotice).toBeUndefined();
+      });
+
+      it('clears the notice when the record turns terminal and ignores later notices', () => {
+        store.onAgentStart(startEvent());
+        store.onAgentActionNotice({ agentId: 'short-1', notice: ask, text: 'Ptah asked.' });
+        store.onAgentCompleted(completedEvent());
+        expect(record()?.status).toBe('completed');
+        expect(record()?.actionNotice).toBeUndefined();
+        store.onAgentActionNotice({ agentId: 'short-1', notice: ask, text: 'Late.' });
+        expect(record()?.actionNotice).toBeUndefined();
+      });
+
+      it('keeps at most 50 buffered notices, oldest dropped first', () => {
+        for (let i = 0; i <= 50; i++) {
+          store.onAgentActionNotice({ agentId: `early-${i}`, notice: ask, text: `n${i}` });
+        }
+        store.onAgentStart(startEvent({ agentId: 'early-0' }));
+        expect(record()?.actionNotice).toBeUndefined();
+        store.onAgentStart(
+          startEvent({ id: 'other', toolCallId: 'toolu_other', agentId: 'early-50', taskId: 'task_other' }),
+        );
+        expect(store.subagents().get('toolu_other')?.actionNoticeText).toBe('n50');
+      });
+    });
+
     it('agent_start populates a record with running status and taskId', () => {
       store.onAgentStart(startEvent());
       const rec = store.subagents().get(PARENT);

@@ -659,8 +659,8 @@ export interface MonitoredAgent {
   readonly cacheReported?: boolean;
 }
 
-/** Record statuses a SubagentStop may still finish. */
-const LIVE_SUBAGENT_STATUSES: ReadonlySet<SubagentRecord['status']> = new Set([
+/** Record statuses a SubagentStop may still finish; also the statuses that show a Ptah notice. */
+export const LIVE_SUBAGENT_STATUSES: ReadonlySet<SubagentRecord['status']> = new Set([
   'pending',
   'running',
   'background',
@@ -786,7 +786,24 @@ export interface SubagentRecord {
    * answer's `cacheInfo`. Absent until that query ran for this subagent.
    */
   cacheTtl?: SubagentPromptCacheTtl;
+  /**
+   * Latest Ptah ask or pause notice for this live SDK subagent (TASK_2026_2310), from the
+   * `agent-monitor:action-notice` push keyed by {@link agentId}. Cleared by a `null` notice and
+   * when the record reaches a terminal status. The subagent stays alive either way.
+   */
+  actionNotice?: AgentActionNotice;
+  /** Host-rendered Ptah sentence for {@link actionNotice}. */
+  actionNoticeText?: string;
 }
+
+/** A Ptah notice for an SDK agent id that has no record yet. */
+interface PendingSubagentNotice {
+  readonly notice: AgentActionNotice;
+  readonly text: string;
+}
+
+/** Cap on buffered notices whose `agent_start` has not arrived yet, oldest dropped first. */
+const MAX_PENDING_SUBAGENT_NOTICES = 50;
 
 const ACTIVE_SESSION_SUBAGENT_STATUSES: ReadonlySet<SubagentRecord['status']> =
   new Set(['running', 'pending', 'paused', 'background']);
@@ -989,8 +1006,58 @@ export class AgentMonitorStore implements OnDestroy {
     BackgroundIdentity
   >();
 
+  /**
+   * Ptah notices keyed by SDK agent id that arrived before any record carried that id. A record
+   * that gains the id takes and removes its entry; a terminal record drops it. Bounded by
+   * MAX_PENDING_SUBAGENT_NOTICES. Cleared on destroy.
+   */
+  private readonly _pendingSubagentNotices = new Map<
+    string,
+    PendingSubagentNotice
+  >();
+
   /** Public readonly view of the subagent record map. */
   readonly subagents = this._subagents.asReadonly();
+
+  /**
+   * The one writer of the subagent map. After `fn`, each changed record takes a buffered notice
+   * for its agent id, or drops its notice once terminal.
+   */
+  private updateSubagents(
+    fn: (
+      map: ReadonlyMap<string, SubagentRecord>,
+    ) => ReadonlyMap<string, SubagentRecord>,
+  ): void {
+    this._subagents.update((prev) => {
+      const next = fn(prev);
+      if (next === prev) return next;
+      let fixed: Map<string, SubagentRecord> | null = null;
+      for (const [key, record] of next) {
+        if (prev.get(key) === record) continue;
+        const withNotice = this.reconcileSubagentNotice(record);
+        if (withNotice !== record) (fixed ??= new Map(next)).set(key, withNotice);
+      }
+      return fixed ?? next;
+    });
+  }
+
+  private reconcileSubagentNotice(record: SubagentRecord): SubagentRecord {
+    const id = record.agentId;
+    if (this.isTerminal(record.status)) {
+      if (id) this._pendingSubagentNotices.delete(id);
+      return record.actionNotice || record.actionNoticeText !== undefined
+        ? { ...record, actionNotice: undefined, actionNoticeText: undefined }
+        : record;
+    }
+    const pending = id ? this._pendingSubagentNotices.get(id) : undefined;
+    if (!id || !pending) return record;
+    this._pendingSubagentNotices.delete(id);
+    return {
+      ...record,
+      actionNotice: pending.notice,
+      actionNoticeText: pending.text,
+    };
+  }
 
   private readonly historyCandidates = new Map<
     string,
@@ -1052,7 +1119,7 @@ export class AgentMonitorStore implements OnDestroy {
     if (!candidate || candidate.generation !== generation) return;
     this.clearHistoryCandidates(sessionId);
     if (evidence === 'live') return;
-    this._subagents.update((map) => {
+    this.updateSubagents((map) => {
       const next = new Map(map);
       for (const key of candidate.keys) {
         const record = map.get(key);
@@ -1134,7 +1201,7 @@ export class AgentMonitorStore implements OnDestroy {
     status: SubagentRecord['status'],
   ): void {
     this.claimHistoryCandidate(event.toolCallId);
-    this._subagents.update((map) => {
+    this.updateSubagents((map) => {
       const existing = map.get(event.toolCallId);
       if (
         !existing ||
@@ -1452,6 +1519,7 @@ export class AgentMonitorStore implements OnDestroy {
     this._pendingPermissionBuffer.clear();
     this._subagentRequestUsage.clear();
     this._pendingBackgroundIdentity.clear();
+    this._pendingSubagentNotices.clear();
   }
 
   togglePanel(): void {
@@ -1940,13 +2008,16 @@ export class AgentMonitorStore implements OnDestroy {
 
   /**
    * A Ptah monitor asked a live lane for a handoff, paused its new work, or released the notice
-   * (`null`). The card keeps the latest notice and the lane stays alive. An unknown id is a no-op: the notice follows the
-   * spawn event, so a missing card was already evicted and a new one would show a ghost.
+   * (`null`). The card keeps the latest notice and the lane stays alive. An id that matches no lane
+   * goes to the SDK subagent fallback; no lane card is ever created here, since the notice follows
+   * the spawn event and a missing card was already evicted.
    */
   onAgentActionNotice(payload: AgentMonitorActionNoticePayload): void {
+    let laneMatched = false;
     this.updateAgents((list) => {
       const index = list.findIndex((a) => a.agentId === payload.agentId);
       if (index === -1) return list;
+      laneMatched = true;
       const next = [...list];
       next[index] = payload.notice
         ? {
@@ -1957,6 +2028,42 @@ export class AgentMonitorStore implements OnDestroy {
         : { ...next[index], actionNotice: undefined, actionNoticeText: undefined };
       return next;
     });
+    if (!laneMatched) this.applySubagentActionNotice(payload);
+  }
+
+  /**
+   * SDK subagent fallback (TASK_2026_2310): `agentId` is the short SDK agent id. A live record
+   * with that id takes the notice; a terminal one ignores it. With no record yet, a notice waits
+   * in a bounded buffer for the `agent_start` that sets the id. A `null` notice clears both.
+   */
+  private applySubagentActionNotice(
+    payload: AgentMonitorActionNoticePayload,
+  ): void {
+    const { agentId, notice, text } = payload;
+    // A newer push replaces any buffered one; drop it first so the writer cannot re-apply it.
+    this._pendingSubagentNotices.delete(agentId);
+    let recordMatched = false;
+    this.updateSubagents((map) => {
+      let next: Map<string, SubagentRecord> | null = null;
+      for (const [key, record] of map) {
+        if (record.agentId !== agentId) continue;
+        recordMatched = true;
+        if (this.isTerminal(record.status)) continue;
+        (next ??= new Map(map)).set(
+          key,
+          notice
+            ? { ...record, actionNotice: notice, actionNoticeText: text }
+            : { ...record, actionNotice: undefined, actionNoticeText: undefined },
+        );
+      }
+      return next ?? map;
+    });
+    if (recordMatched || !notice) return;
+    this._pendingSubagentNotices.set(agentId, { notice, text });
+    for (const oldest of this._pendingSubagentNotices.keys()) {
+      if (this._pendingSubagentNotices.size <= MAX_PENDING_SUBAGENT_NOTICES) break;
+      this._pendingSubagentNotices.delete(oldest);
+    }
   }
 
   /**
@@ -2370,7 +2477,7 @@ export class AgentMonitorStore implements OnDestroy {
       const next = list.filter((a) => a.parentSessionId !== sessionId);
       return next.length === list.length ? list : next;
     });
-    this._subagents.update((map) => {
+    this.updateSubagents((map) => {
       let next: Map<string, SubagentRecord> | null = null;
       for (const [key, rec] of map) {
         if (rec.parentSessionId !== sessionId) continue;
@@ -2469,7 +2576,7 @@ export class AgentMonitorStore implements OnDestroy {
     // same placeholder until `init` resolves it. They were never rekeyed, so a
     // subagent spawned in the first turn stayed owned by the tab id and the
     // tile's panel — scoped by `claudeSessionId` — never showed it.
-    this._subagents.update((map) => {
+    this.updateSubagents((map) => {
       let changed = false;
       const next = new Map(map);
       for (const [key, rec] of map) {
@@ -2517,7 +2624,7 @@ export class AgentMonitorStore implements OnDestroy {
       });
       return changed ? next : list;
     });
-    this._subagents.update((map) => {
+    this.updateSubagents((map) => {
       let changed = false;
       const next = new Map(map);
       for (const [key, rec] of map) {
@@ -2580,7 +2687,7 @@ export class AgentMonitorStore implements OnDestroy {
     const key = event.toolCallId;
     if (!key) return;
     const wf = readWorkflowFields(event);
-    this._subagents.update((map) => {
+    this.updateSubagents((map) => {
       this.claimHistoryCandidate(key);
       const existing = map.get(key);
       if (
@@ -2683,7 +2790,7 @@ export class AgentMonitorStore implements OnDestroy {
       }
       return;
     }
-    this._subagents.update((map) => {
+    this.updateSubagents((map) => {
       this.claimHistoryCandidate(key);
       const existing = map.get(key);
       if (!existing) return map;
@@ -2722,7 +2829,7 @@ export class AgentMonitorStore implements OnDestroy {
     if (!key) return;
     if (this.isShellParentWithoutRecord(key, parentToolName)) return;
     const wf = readWorkflowFields(event);
-    this._subagents.update((map) => {
+    this.updateSubagents((map) => {
       this.claimHistoryCandidate(key);
       const existing = map.get(key);
       const restart = this.isNewExecution(existing, event.taskId);
@@ -2787,7 +2894,7 @@ export class AgentMonitorStore implements OnDestroy {
     }
     const taskId = event.native === undefined ? event.taskId : undefined;
     const wf = readWorkflowFields(event);
-    this._subagents.update((map) => {
+    this.updateSubagents((map) => {
       this.claimHistoryCandidate(key);
       const existing = map.get(key);
       const restart = this.isNewExecution(existing, taskId);
@@ -2833,7 +2940,7 @@ export class AgentMonitorStore implements OnDestroy {
 
   private onNativeCodexAgentStatus(event: NativeCodexAgentStatusEvent): void {
     const key = event.parentToolUseId;
-    this._subagents.update((map) => {
+    this.updateSubagents((map) => {
       const existing = map.get(key);
       const merged = reduceNativeCodexStatus(existing, event, knownSessionId(event.sessionId));
       if (!merged) return map;
@@ -2869,7 +2976,7 @@ export class AgentMonitorStore implements OnDestroy {
     if (!key) return;
     if (this.isShellParentWithoutRecord(key, parentToolName)) return;
     const wf = readWorkflowFields(event);
-    this._subagents.update((map) => {
+    this.updateSubagents((map) => {
       this.claimHistoryCandidate(key);
       const existing = map.get(key);
       const restart = this.isNewExecution(existing, event.taskId);
@@ -2950,7 +3057,7 @@ export class AgentMonitorStore implements OnDestroy {
       }
       entry.requests.set(event.messageId, request);
     }
-    this._subagents.update((map) => {
+    this.updateSubagents((map) => {
       this.claimHistoryCandidate(key);
       const existing = map.get(key);
       if (!existing) return map;
@@ -3013,7 +3120,7 @@ export class AgentMonitorStore implements OnDestroy {
     );
     if (!remote) return;
     const cacheTtl = asCacheTtl(remote.cacheInfo?.effectiveTtl);
-    this._subagents.update((map) => {
+    this.updateSubagents((map) => {
       const existing = map.get(parentToolUseId);
       if (!existing) return map;
       const nextTtl = cacheTtl ?? existing.cacheTtl;
@@ -3121,7 +3228,7 @@ export class AgentMonitorStore implements OnDestroy {
     isError: boolean,
     timestamp?: number,
   ): void {
-    this._subagents.update((map) => {
+    this.updateSubagents((map) => {
       this.claimHistoryCandidate(toolCallId);
       const existing = map.get(toolCallId);
       if (!existing) return map;
@@ -3187,7 +3294,7 @@ export class AgentMonitorStore implements OnDestroy {
     summary?: string,
     timestamp?: number,
   ): void {
-    this._subagents.update((map) => {
+    this.updateSubagents((map) => {
       const existing = map.get(toolCallId);
       if (!existing) return map;
       if (!LIVE_SUBAGENT_STATUSES.has(existing.status)) return map;

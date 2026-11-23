@@ -26,13 +26,7 @@ import {
 } from 'lucide-angular';
 import { SlicePipe } from '@angular/common';
 import type { MonitoredAgent } from '@ptah-extension/chat-streaming';
-import {
-  formatAgentActionReason,
-  formatAgentActorLabel,
-  formatBudgetPauseNotice,
-  type AgentActionNotice,
-  type LaneStopReason,
-} from '@ptah-extension/shared';
+import type { LaneStopReason } from '@ptah-extension/shared';
 import { ProviderAccountsStateService } from '@ptah-extension/core';
 
 import {
@@ -41,40 +35,10 @@ import {
   PtahBadgeDirective,
   PtahTimerComponent,
 } from '@ptah-extension/ui';
-/** A live lane's Ptah notice as the card shows it. */
-export interface LaneActionNoticeView {
-  /** Short chip text. */
-  readonly label: string;
-  /** Full Ptah sentence: who acted, why and what happens next. */
-  readonly text: string;
-  readonly paused: boolean;
-}
-
-/**
- * Reader copy for a notice whose host text did not arrive (a card built from a spawn or exit
- * payload). It speaks to the person, not to the agent, and keeps the lane live.
- */
-function laneNoticeFallbackText(notice: AgentActionNotice, id: string): string {
-  if (notice.action === 'paused') return formatBudgetPauseNotice(notice, id);
-  return `${formatAgentActorLabel(notice)} asked ${id} for a handoff because ${formatAgentActionReason(notice)}. The execution remains live.`;
-}
-
-/**
- * Chip for the latest Ptah ask or pause notice of a lane that is still running. A pause only
- * holds new work: the lane stays alive, so the chip says so. A lane that has left `running` shows
- * nothing, because its completion result already carries the notice as past-tense context.
- */
-export function laneActionNoticeView(
-  agent: Pick<MonitoredAgent, 'agentId' | 'status' | 'actionNotice' | 'actionNoticeText'>,
-): LaneActionNoticeView | null {
-  const notice: AgentActionNotice | undefined = agent.actionNotice;
-  if (!notice || (agent.status !== 'running' && agent.status !== 'starting')) return null;
-  if (notice.action === 'ended') return null;
-  const text = agent.actionNoticeText || laneNoticeFallbackText(notice, String(agent.agentId));
-  return notice.action === 'paused'
-    ? { label: 'Paused · still running', text, paused: true }
-    : { label: 'Handoff requested', text, paused: false };
-}
+import {
+  AgentActionNoticeChipComponent,
+  laneActionNoticeView,
+} from './agent-action-notice-chip.component';
 
 /**
  * Readable host stop or interruption reason for a lane. Ptah no longer ends a lane for a budget
@@ -114,7 +78,7 @@ export function laneAccountText(
 @Component({
   selector: 'ptah-agent-card-header',
   standalone: true,
-  imports: [PtahBadgeDirective, LucideAngularModule, SlicePipe, PtahButtonDirective, PtahIconButtonDirective, PtahTimerComponent],
+  imports: [PtahBadgeDirective, LucideAngularModule, SlicePipe, PtahButtonDirective, PtahIconButtonDirective, PtahTimerComponent, AgentActionNoticeChipComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
@@ -164,16 +128,7 @@ export function laneAccountText(
       </span>
 
       @if (noticeView(); as notice) {
-        <span
-          class="min-w-0 truncate text-[10px] flex-shrink"
-          [class.text-warning]="notice.paused"
-          [class.text-info]="!notice.paused"
-          data-testid="lane-action-notice"
-          [title]="notice.text"
-        >
-          {{ notice.label }}
-          <span class="sr-only">. {{ notice.text }}</span>
-        </span>
+        <ptah-agent-action-notice-chip [view]="notice" />
       }
 
       @if (stopText(); as reason) {

@@ -60,3 +60,19 @@ export interface AgentMonitorActionNoticePayload {
   readonly notice: AgentActionNotice | null;
   readonly text: string;
 }
+
+/**
+ * Payload for `session:activity-overdue` (TASK_2026_2310).
+ *
+ * The watchdog of a live SDK session still counts open work (an ambient task, a monitor, a tool,
+ * a hook or a compaction) after its overdue window, so a provider hang can hide behind that work.
+ * The session stays alive: Ptah never stops it for this. `overdue: false` clears the notice when
+ * the session shows activity again or ends. `text` is host-rendered from trusted values.
+ */
+export interface SessionActivityOverduePayload {
+  readonly sessionId: string;
+  readonly tabId?: string;
+  readonly overdue: boolean;
+  readonly operations: readonly string[];
+  readonly text: string;
+}

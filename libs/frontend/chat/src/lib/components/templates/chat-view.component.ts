@@ -42,6 +42,8 @@ import { ResumeNotificationBannerComponent } from '../molecules/notifications/re
 import { AuthRequiredBannerComponent } from '../molecules/notifications/auth-required-banner.component';
 import { CodexSignInBlockComponent } from '../../settings/providers/connection-drawer/codex-sign-in-block.component';
 import { SessionBudgetBannerComponent } from '../molecules/notifications/session-budget-banner.component';
+import { SessionOverdueBannerComponent } from '../molecules/notifications/session-overdue-banner.component';
+import { SessionOverdueStore } from '../../services/session-overdue.store';
 import {
   InstallScopeMigrationNoticeComponent,
   type InstallScopeMigrationNoticeAction,
@@ -210,6 +212,7 @@ const VIEW_PANEL_KEY = '';
     AuthRequiredBannerComponent,
     CodexSignInBlockComponent,
     SessionBudgetBannerComponent,
+    SessionOverdueBannerComponent,
     InstallScopeMigrationNoticeComponent,
     CompactionNotificationComponent,
     CompactionMarkerComponent,
@@ -1359,6 +1362,25 @@ export class ChatViewComponent implements OnDestroy {
       tabId !== null &&
       tabId === this._tabManager.activeTabId()
     );
+  });
+
+  private readonly _overdue = inject(SessionOverdueStore);
+
+  /**
+   * The host's "no activity" notice (TASK_2026_2310), shown only on the active
+   * tab of the main panel. Matched by this view's session id or tab id.
+   * Display only: nothing here stops the session.
+   */
+  protected readonly overdueNotice = computed(() => {
+    const tabId = this.resolvedTabId();
+    if (
+      !this.mainPanelShowing() ||
+      tabId === null ||
+      tabId !== this._tabManager.activeTabId()
+    ) {
+      return null;
+    }
+    return this._overdue.noticeFor(this.resolvedSessionId(), tabId);
   });
 
   /**
