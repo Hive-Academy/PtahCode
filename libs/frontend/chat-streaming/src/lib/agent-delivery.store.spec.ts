@@ -194,6 +194,55 @@ describe('AgentDeliveryStore', () => {
       await expect(store.recoverQueuedMessage(lane, 'message-1')).rejects.toThrow('gone');
     });
 
+    it('Recover text hands the composer the message with its turn', async () => {
+      const image = { data: 'aGVsbG8=', mediaType: 'image/png' };
+      rpc.call.mockResolvedValueOnce(rpcSuccess({ text: 'queued body', turn: { ...turn, images: [image] } }));
+      await store.recoverIntoComposer(resumed, lane, 'message-1');
+      expect(rpc.call).toHaveBeenCalledWith('agent:getQueuedMessageBody', { agentId: lane, messageId: 'message-1' });
+      expect(store.takeRecoveredMessage(resumed)).toEqual({ text: 'queued body', turn: { ...turn, images: [image] } });
+      expect(store.takeRecoveredMessage(resumed)).toBeNull();
+    });
+
+    it('Recover text keeps a text-only message without a turn', async () => {
+      rpc.call.mockResolvedValueOnce(rpcSuccess({ text: 'plain' }));
+      await store.recoverIntoComposer(resumed, lane, 'message-1');
+      const message = store.takeRecoveredMessage(resumed);
+      expect(message).toEqual({ text: 'plain' });
+      expect(message && 'turn' in message).toBe(false);
+    });
+
+    it('merges two recoveries: texts joined, attachments deduplicated, later model and effort win', async () => {
+      const image = { data: 'aGVsbG8=', mediaType: 'image/png' };
+      rpc.call
+        .mockResolvedValueOnce(rpcSuccess({ text: 'first', turn: { model: 'a', reasoningEffort: 'low', files: ['x.ts'], images: [image] } }))
+        .mockResolvedValueOnce(rpcSuccess({ text: 'second', turn: { model: 'b', files: ['x.ts', 'y.ts'], images: [image] } }));
+      await store.recoverIntoComposer(resumed, lane, 'message-1');
+      await store.recoverIntoComposer(resumed, lane, 'message-2');
+      expect(store.takeRecoveredMessage(resumed)).toEqual({
+        text: 'first\nsecond',
+        turn: { model: 'b', reasoningEffort: 'low', files: ['x.ts', 'y.ts'], images: [image] },
+      });
+    });
+
+    it('merges a turn after a text-only recovery and keeps it after a later text-only one', async () => {
+      rpc.call
+        .mockResolvedValueOnce(rpcSuccess({ text: 'one' }))
+        .mockResolvedValueOnce(rpcSuccess({ text: 'two', turn }))
+        .mockResolvedValueOnce(rpcSuccess({ text: 'three' }));
+      await store.recoverIntoComposer(resumed, lane, 'message-1');
+      await store.recoverIntoComposer(resumed, lane, 'message-2');
+      await store.recoverIntoComposer(resumed, lane, 'message-3');
+      expect(store.takeRecoveredMessage(resumed)).toEqual({ text: 'one\ntwo\nthree', turn });
+    });
+
+    it('takeRecovered still returns the text alone and consumes the entry', async () => {
+      rpc.call.mockResolvedValueOnce(rpcSuccess({ text: 'queued body', turn }));
+      await store.recoverIntoComposer(resumed, lane, 'message-1');
+      expect(store.recovered().has(resumed)).toBe(true);
+      expect(store.takeRecovered(resumed)).toBe('queued body');
+      expect(store.takeRecoveredMessage(resumed)).toBeNull();
+    });
+
     it('sends the turn with the message only when one is given', async () => {
       rpc.call.mockResolvedValue(rpcSuccess({ mode: 'queue-next-turn', receipt: receipt() }));
       await store.sendMessage(lane, 'hello', 'now', true, 'key-1', turn);

@@ -236,6 +236,40 @@ function capped<T>(map: Map<string, T>, cap: number, isFinal: (item: T) => boole
 
 type PreviewMap = ReadonlyMap<string, Readonly<Partial<Record<AgentMessageDelivery, AgentMessagePreview>>>>;
 
+/** An undelivered message read back for a lane composer: its text and, when it had one, its turn. */
+export interface RecoveredLaneMessage {
+  readonly text: string;
+  readonly turn?: LaneTurnRequest;
+}
+
+/**
+ * Fold a later recovery into one already waiting: texts join on a new line,
+ * files and images are kept from both without duplicates, and the later
+ * message's model and effort win. `turn` stays absent when neither had one.
+ */
+function mergeRecovered(prior: RecoveredLaneMessage, next: RecoveredLaneMessage): RecoveredLaneMessage {
+  const text = `${prior.text}\n${next.text}`;
+  if (!prior.turn) return next.turn ? { text, turn: next.turn } : { text };
+  if (!next.turn) return { text, turn: prior.turn };
+  const files = [...new Set([...(prior.turn.files ?? []), ...(next.turn.files ?? [])])];
+  const seenImages = new Set<string>();
+  const images = [...(prior.turn.images ?? []), ...(next.turn.images ?? [])].filter((image) => {
+    const key = `${image.mediaType}:${image.data}`;
+    if (seenImages.has(key)) return false;
+    seenImages.add(key);
+    return true;
+  });
+  const model = next.turn.model ?? prior.turn.model;
+  const reasoningEffort = next.turn.reasoningEffort ?? prior.turn.reasoningEffort;
+  const turn: LaneTurnRequest = {
+    ...(model !== undefined ? { model } : {}),
+    ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
+    ...(files.length > 0 ? { files } : {}),
+    ...(images.length > 0 ? { images } : {}),
+  };
+  return { text, turn };
+}
+
 @Injectable({ providedIn: 'root' })
 export class AgentDeliveryStore {
   private readonly rpc = inject(ClaudeRpcService);
@@ -247,8 +281,8 @@ export class AgentDeliveryStore {
   /** Parent deliveries by delivery id; insertion order is update order. */
   private readonly _parentDeliveries = signal<ReadonlyMap<string, ParentDeliveryItem>>(new Map());
   private readonly _previews = signal<PreviewMap>(new Map());
-  /** Text recovered from the backend body store, waiting for the lane composer. */
-  private readonly _recovered = signal<ReadonlyMap<string, string>>(new Map());
+  /** Messages recovered from the backend body store, waiting for the lane composer. */
+  private readonly _recovered = signal<ReadonlyMap<string, RecoveredLaneMessage>>(new Map());
 
   /** Receipts grouped by lane: the resolved lane after a cold resume, and the lane addressed. */
   readonly receipts = computed<ReadonlyMap<string, readonly AgentDeliveryReceipt[]>>(() => {
@@ -557,7 +591,7 @@ export class AgentDeliveryStore {
   async recoverQueuedMessage(
     agentId: string,
     messageId: string,
-  ): Promise<{ readonly text: string; readonly turn?: LaneTurnRequest }> {
+  ): Promise<RecoveredLaneMessage> {
     const result = await this.rpc.call('agent:getQueuedMessageBody', { agentId: AgentId.from(agentId), messageId });
     if (!result.isSuccess()) throw new Error(result.error ?? 'Message text is no longer available');
     const { text, turn } = result.data;
@@ -596,27 +630,39 @@ export class AgentDeliveryStore {
     else if (kind === 'cancel') await this.cancelParentDelivery(deliveryId);
   }
 
-  /** Recover the text and hand it to a lane's composer (see `takeRecovered`). */
+  /**
+   * Recover the message with its turn (files, images, model, effort) and hand
+   * it to a lane's composer (see `takeRecoveredMessage`).
+   */
   async recoverIntoComposer(composerAgentId: string, agentId: string, messageId: string): Promise<void> {
-    const text = await this.recoverQueuedText(agentId, messageId);
+    const message = await this.recoverQueuedMessage(agentId, messageId);
     this._recovered.update((current) => {
       const next = new Map(current);
       const prior = next.get(composerAgentId);
-      next.set(composerAgentId, prior ? `${prior}\n${text}` : text);
+      next.set(composerAgentId, prior ? mergeRecovered(prior, message) : message);
       return next;
     });
   }
 
-  /** Take recovered text for a lane's composer; returns null when none waits. */
-  takeRecovered(agentId: string): string | null {
-    const text = this._recovered().get(agentId);
-    if (text === undefined) return null;
+  /** Take the recovered message for a lane's composer; returns null when none waits. */
+  takeRecoveredMessage(agentId: string): RecoveredLaneMessage | null {
+    const message = this._recovered().get(agentId);
+    if (message === undefined) return null;
     this._recovered.update((current) => {
       const next = new Map(current);
       next.delete(agentId);
       return next;
     });
-    return text;
+    return message;
+  }
+
+  /**
+   * Text-only take for the lane composer callers that do not restore a turn
+   * yet (`LaneDeliveryController` in chat, `LaneComposerComponent` in chat-ui).
+   * It drops the turn. Remove it once those callers use `takeRecoveredMessage`.
+   */
+  takeRecovered(agentId: string): string | null {
+    return this.takeRecoveredMessage(agentId)?.text ?? null;
   }
 
   async retryParentDelivery(deliveryId: ParentDeliveryView['deliveryId'], confirmDuplicateRisk = false): Promise<ParentDeliveryView> {

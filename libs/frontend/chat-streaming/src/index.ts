@@ -71,6 +71,7 @@ export {
   type DeliveryStatus,
   type LaneMessageDirection,
   type ParentDeliveryItem,
+  type RecoveredLaneMessage,
 } from './lib/agent-delivery.store';
 export {
   LaneTurnSettingsStore,

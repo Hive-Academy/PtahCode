@@ -1,16 +1,18 @@
 import { signal } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
-import { ClaudeRpcService } from '@ptah-extension/core';
+import { ClaudeRpcService, VSCodeService } from '@ptah-extension/core';
 import { createMockRpcService, rpcError, rpcSuccess } from '@ptah-extension/core/testing';
 import { TabManagerService } from '@ptah-extension/chat-state';
 import {
   AgentId,
+  type AgentProcessInfo,
   type AgentGetLaneComposerOptionsResult,
   type AgentMessagePreview,
   type LaneTurnInputCapabilities,
 } from '@ptah-extension/shared';
 import { AgentDeliveryStore } from './agent-delivery.store';
 import { AgentMonitorStore } from './agent-monitor.store';
+import { BackgroundAgentStore } from './background-agent.store';
 import {
   LANE_OPTIONS_UNREPORTED_TEXT,
   LaneTurnSettingsStore,
@@ -187,6 +189,68 @@ describe('LaneTurnSettingsStore', () => {
       previews.set({ now: preview({ turnInput: fromPreview }) });
       expect(store.turnInput(lane)).toEqual({ kind: 'reported', turnInput: fromPreview });
       expect(store.isChecking(lane)).toBe(false);
+    });
+  });
+
+  describe('confirmation from the real agent monitor record', () => {
+    let monitor: AgentMonitorStore;
+    let settings: LaneTurnSettingsStore;
+    const record = (overrides: Partial<AgentProcessInfo> = {}): AgentProcessInfo => ({
+      agentId: lane,
+      cli: 'codex',
+      task: 'Work',
+      workingDirectory: '/workspace/root',
+      startedAt: '2026-10-01T10:00:00.000Z',
+      status: 'running',
+      model: 'gpt-5.4',
+      ...overrides,
+    });
+
+    beforeEach(() => {
+      TestBed.resetTestingModule();
+      TestBed.configureTestingModule({
+        providers: [
+          AgentMonitorStore,
+          BackgroundAgentStore,
+          { provide: ClaudeRpcService, useValue: createMockRpcService() },
+          { provide: VSCodeService, useValue: { config: signal({ panelId: '' }), postMessage: jest.fn() } },
+          { provide: AgentDeliveryStore, useValue: { composerState: () => ({}) } },
+          {
+            provide: TabManagerService,
+            useValue: { ...tabManager, activeTab: signal(null), activeTabSessionId: signal(null) },
+          },
+        ],
+      });
+      monitor = TestBed.inject(AgentMonitorStore);
+      settings = TestBed.inject(LaneTurnSettingsStore);
+      monitor.onAgentSpawned(record({ turnSeq: 1 }));
+      TestBed.tick();
+    });
+
+    it('clears a pending model once the lane reports it as the observed model', () => {
+      settings.pickModel(lane, 'gpt-5.5');
+      TestBed.tick();
+      expect(settings.pending(lane)).toEqual({ model: 'gpt-5.5' });
+      monitor.onAgentSpawned(record({ turnSeq: 2, observedModel: 'gpt-5.5' }));
+      TestBed.tick();
+      expect(settings.pendingByAgent().has(lane)).toBe(false);
+    });
+
+    it('clears a pending effort once the lane reports it, keeping an unconfirmed model', () => {
+      settings.pickModel(lane, 'gpt-5.5');
+      settings.pickEffort(lane, 'high');
+      TestBed.tick();
+      monitor.onAgentSpawned(record({ turnSeq: 2, reasoningEffort: 'high' }));
+      TestBed.tick();
+      expect(settings.pending(lane)).toEqual({ model: 'gpt-5.5' });
+    });
+
+    it('clears a pending effort confirmed by an exit payload', () => {
+      settings.pickEffort(lane, 'low');
+      TestBed.tick();
+      monitor.onAgentExited(record({ turnSeq: 1, status: 'completed', reasoningEffort: 'low' }));
+      TestBed.tick();
+      expect(settings.pendingByAgent().has(lane)).toBe(false);
     });
   });
 });

@@ -569,6 +569,10 @@ export interface MonitoredAgent {
   readonly displayName?: string;
   /** Model identifier used by the CLI agent (e.g., 'gpt-5-codex', 'gpt-4o'). */
   readonly model?: string;
+  /** Reasoning effort the lane runs its turns with, when the record reports one. */
+  reasoningEffort?: string;
+  /** Model the provider reported it used on the latest turn; can differ from `model`. */
+  observedModel?: string;
   readonly supportsContinuation?: boolean;
   /**
    * The backend dropped this agent's process record after its completed-agent
@@ -1660,6 +1664,10 @@ export class AgentMonitorStore implements OnDestroy {
           displayName:
             info.displayName || info.ptahCliName || existing.displayName,
           providerId: info.providerId ?? existing.providerId,
+          // A new turn may change the effort or the served model; an absent
+          // value keeps what the card already knows.
+          reasoningEffort: info.reasoningEffort ?? existing.reasoningEffort,
+          observedModel: info.observedModel ?? existing.observedModel,
           // Prefer-known, never downgrade: a respawn that arrives before the
           // session UUID resolves must not erase an owner we already captured.
           parentSessionId: parentSessionId ?? existing.parentSessionId,
@@ -1728,6 +1736,8 @@ export class AgentMonitorStore implements OnDestroy {
           permissionQueue: [],
           displayName: info.displayName || info.ptahCliName,
           model: info.model,
+          reasoningEffort: info.reasoningEffort,
+          observedModel: info.observedModel,
           supportsContinuation: info.supportsContinuation,
           potentialCapabilities: info.potentialCapabilities,
           effectiveCapabilities: info.effectiveCapabilities,
@@ -1770,6 +1780,8 @@ export class AgentMonitorStore implements OnDestroy {
         permissionQueue: [],
         displayName: info.displayName || info.ptahCliName,
         model: info.model,
+        reasoningEffort: info.reasoningEffort,
+        observedModel: info.observedModel,
         supportsContinuation: info.supportsContinuation,
         workflowRunId: wf.workflowRunId,
         workflowName: wf.workflowName,
@@ -2015,6 +2027,8 @@ export class AgentMonitorStore implements OnDestroy {
         permissionQueue: [],
         supportsContinuation:
           info.supportsContinuation ?? agent.supportsContinuation,
+        reasoningEffort: info.reasoningEffort ?? agent.reasoningEffort,
+        observedModel: info.observedModel ?? agent.observedModel,
         role: info.role ?? agent.role,
         failureKind: info.failureKind,
         stopReason: info.stopReason,
