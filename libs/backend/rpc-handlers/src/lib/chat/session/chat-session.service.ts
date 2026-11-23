@@ -455,6 +455,12 @@ export class ChatSessionService {
     private readonly slashCommandRouter: ChatSlashCommandRouterService,
     @inject(SETTINGS_TOKENS.MODEL_SETTINGS)
     private readonly modelSettings: ModelSettings,
+    /**
+     * @deprecated Unused. Connectors are now served by the MCP gateway, so
+     * this service no longer reads connector secrets. The parameter stays
+     * only because 16 specs construct the service positionally; remove with
+     * its 16 positional specs (TASK_2026_979_9e1f follow-up).
+     */
     @inject(TOKENS.AUTH_SECRETS_SERVICE)
     private readonly authSecretsService: IAuthSecretsService,
     @inject(AUTH_PROVIDERS_TOKENS.SDK_WORKSPACE_PROVIDER_PROFILE_RESOLVER)
