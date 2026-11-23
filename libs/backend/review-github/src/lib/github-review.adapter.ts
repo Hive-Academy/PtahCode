@@ -120,6 +120,20 @@ function fileSection(file: z.infer<typeof filesSchema>[number]): string {
   return `${header.join('\n')}\n${file.patch === undefined ? '' : file.patch.replace(/\n?$/, '\n')}`;
 }
 
+function aborted(): GitHubReviewError {
+  return new GitHubReviewError('timeout', 'GitHub request aborted');
+}
+
+/** A retry backoff that an aborted `signal` ends early with the abort error. */
+function delay(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) { reject(aborted()); return; }
+    const onAbort = (): void => { clearTimeout(timer); reject(aborted()); };
+    const timer = setTimeout(() => { signal?.removeEventListener('abort', onAbort); resolve(); }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
 function mapPull(raw: z.infer<typeof pullSchema>): GitHubPull {
   return {
     number: raw.number, headSha: raw.head.sha, baseSha: raw.base.sha,
@@ -147,16 +161,18 @@ export class GithubReviewAdapter implements IGitHubReviewPort, IGitHubFindingThr
     return parse(z.number().int().positive(), number);
   }
 
-  private async request(path: string, accept = 'application/vnd.github+json', etag?: string): Promise<Response> {
+  private async request(path: string, accept = 'application/vnd.github+json', etag?: string, signal?: AbortSignal): Promise<Response> {
     const token = await this.secrets.get(REVIEW_GITHUB_TOKEN_KEY);
     if (!token) throw new GitHubReviewError('missing-token', 'GitHub bot token is unavailable');
     for (let attempt = 0; attempt < 3; attempt++) {
+      if (signal?.aborted) throw aborted();
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 15_000);
+      const requestSignal = signal ? AbortSignal.any([controller.signal, signal]) : controller.signal;
       let response: Response;
       try {
         const received = await this.fetcher(`${API}${path}`, {
-          method: 'GET', signal: controller.signal,
+          method: 'GET', signal: requestSignal,
           headers: {
             Authorization: `Bearer ${token}`, Accept: accept,
             'X-GitHub-Api-Version': '2022-11-28', 'User-Agent': 'PtahReview/1.0',
@@ -168,6 +184,7 @@ export class GithubReviewAdapter implements IGitHubReviewPort, IGitHubFindingThr
         if (body !== null && body.length > MAX_BYTES) throw new GitHubReviewError('malformed-response', 'GitHub response is too large');
         response = new Response(body, { status: received.status, headers: received.headers });
       } catch (error: unknown) {
+        if (signal?.aborted) throw aborted();
         if (controller.signal.aborted) throw new GitHubReviewError('timeout', 'GitHub request timed out');
         if (error instanceof GitHubReviewError) throw error;
         throw new GitHubReviewError('http', 'GitHub request failed');
@@ -187,7 +204,7 @@ export class GithubReviewAdapter implements IGitHubReviewPort, IGitHubFindingThr
       if (response.status === 403) throw new GitHubReviewError('permission', 'GitHub bot lacks permission');
       if (response.status >= 500 && attempt < 2) {
         this.logger.warn('[review-github] retrying GitHub GET');
-        await new Promise(resolve => setTimeout(resolve, 100 * (2 ** attempt) + Math.random() * 100));
+        await delay(100 * (2 ** attempt) + Math.random() * 100, signal);
         continue;
       }
       if (response.status !== 304 && !response.ok) {
@@ -230,31 +247,34 @@ export class GithubReviewAdapter implements IGitHubReviewPort, IGitHubFindingThr
   }
   private readonly snapshots = new Map<string, GitHubPage<GitHubPull>>();
 
-  async getPull(repo: RepoIdentity, number: number): Promise<GitHubPull> {
-    const response = await this.request(this.path(repo, `/pulls/${this.number(number)}`));
+  async getPull(repo: RepoIdentity, number: number, signal?: AbortSignal): Promise<GitHubPull> {
+    const response = await this.request(this.path(repo, `/pulls/${this.number(number)}`), undefined, undefined, signal);
     return mapPull(await this.json(response, pullSchema));
   }
 
-  async getDiff(repo: RepoIdentity, number: number, sha: string): Promise<GitHubDiff> {
-    const pr = await this.getPull(repo, number);
+  async getDiff(repo: RepoIdentity, number: number, sha: string, signal?: AbortSignal): Promise<GitHubDiff> {
+    const pr = await this.getPull(repo, number, signal);
     if (pr.headSha !== ShaSchema.parse(sha)) throw new GitHubReviewError('malformed-response', 'Pull request head changed');
     const base = this.path(repo, `/pulls/${this.number(number)}`);
     let response: Response;
-    try { response = await this.request(base, 'application/vnd.github.v3.diff'); }
+    try { response = await this.request(base, 'application/vnd.github.v3.diff', undefined, signal); }
     catch (error: unknown) {
       // GitHub renders no diff above 20,000 lines; the files endpoint still lists each file's patch.
       if (!(error instanceof GitHubReviewError && error.status === 406 && error.reasons.includes('too_large'))) throw error;
-      return { headSha: pr.headSha, baseSha: pr.baseSha, ...await this.diffFromFiles(base) };
+      return { headSha: pr.headSha, baseSha: pr.baseSha, ...await this.diffFromFiles(base, signal) };
     }
     const patch = parse(z.string().min(1).max(MAX_BYTES), await response.text());
-    const filesResponse = await this.request(`${base}/files?per_page=100&page=1`);
+    const filesResponse = await this.request(`${base}/files?per_page=100&page=1`, undefined, undefined, signal);
     const files = await this.json(filesResponse, filesSchema);
     return { headSha: pr.headSha, baseSha: pr.baseSha, patch,
       truncated: nextPage(filesResponse.headers.get('link')) !== null || files.some(omitsPatch) };
   }
 
-  /** Assembles the diff from the paginated files endpoint. Stops at the page cap or MAX_BYTES and reports truncation. */
-  private async diffFromFiles(base: string): Promise<{ patch: string; truncated: boolean }> {
+  /**
+   * Assembles the diff from the paginated files endpoint. Stops at the page cap; a section over the remaining
+   * MAX_BYTES budget is skipped, so smaller later files still fit. Both report truncation.
+   */
+  private async diffFromFiles(base: string, signal?: AbortSignal): Promise<{ patch: string; truncated: boolean }> {
     const sections: string[] = [];
     let size = 0;
     let truncated = false;
@@ -265,7 +285,7 @@ export class GithubReviewAdapter implements IGitHubReviewPort, IGitHubFindingThr
       if (count === FILE_PAGES) { truncated = true; break; }
       if (seen.has(page)) throw new GitHubReviewError('malformed-response', 'GitHub pagination cycle');
       seen.add(page);
-      const response = await this.request(`${base}/files?per_page=100&page=${page}`);
+      const response = await this.request(`${base}/files?per_page=100&page=${page}`, undefined, undefined, signal);
       const files = await this.json(response, filesSchema);
       page = nextPage(response.headers.get('link'));
       // GitHub stops listing at 3000 files without a next link, so a full last page may hide more files.
@@ -274,7 +294,7 @@ export class GithubReviewAdapter implements IGitHubReviewPort, IGitHubFindingThr
         if (omitsPatch(file)) truncated = true;
         const section = fileSection(file);
         const bytes = Buffer.byteLength(section, 'utf8');
-        if (size + bytes > MAX_BYTES) { truncated = true; page = null; break; }
+        if (size + bytes > MAX_BYTES) { truncated = true; continue; }
         sections.push(section);
         size += bytes;
         if (file.patch !== undefined) usable = true;

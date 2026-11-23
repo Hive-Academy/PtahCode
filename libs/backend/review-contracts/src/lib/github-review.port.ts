@@ -60,8 +60,9 @@ export interface IGitHubReviewPort {
     etag?: string,
     page?: number,
   ): Promise<GitHubPage<GitHubPull>>;
-  getPull(repo: RepoIdentity, number: number): Promise<GitHubPull>;
-  getDiff(repo: RepoIdentity, number: number, sha: string): Promise<GitHubDiff>;
+  getPull(repo: RepoIdentity, number: number, signal?: AbortSignal): Promise<GitHubPull>;
+  /** An aborted `signal` stops the requests and rejects promptly. */
+  getDiff(repo: RepoIdentity, number: number, sha: string, signal?: AbortSignal): Promise<GitHubDiff>;
   listOwnIssueComments(
     repo: RepoIdentity,
     number: number,

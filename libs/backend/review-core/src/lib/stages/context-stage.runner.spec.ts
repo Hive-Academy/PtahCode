@@ -1,6 +1,6 @@
 import { ReviewRepositoryUnavailableError } from './context-stage.runner';
 import { ContextStageRunner } from './context-stage.runner';
-import { ReviewWorktreeService } from '../context/review-worktree.service';
+import { ReviewGitTimeoutError, ReviewWorktreeService } from '../context/review-worktree.service';
 import { ReviewContextService } from '../context/review-context.service';
 import { ReviewDependenciesService } from '../context/review-dependencies.service';
 import { ReviewChecksService } from '../context/review-checks.service';
@@ -81,6 +81,60 @@ describe('ContextStageRunner repository resolution', () => {
     expect(runChecks.mock.calls[1]?.[2]).toEqual([
       expect.objectContaining({ name: 'degradation-audit' }),
     ]);
+  });
+  describe('full diff unavailable', () => {
+    const tooLarge = Object.assign(new Error("Diff exceeds GitHub's 20,000-line limit"), { code: 'diff-too-large' });
+    function setup(previousHead: string | null) {
+      const github = Object.create(null) as IGitHubReviewPort;
+      github.getDiff = jest.fn().mockRejectedValue(tooLarge);
+      github.getPull = jest.fn().mockResolvedValue({ number: 1, headSha: claim.headSha, baseSha: 'b'.repeat(40) });
+      const worktree = Object.create(ReviewWorktreeService.prototype) as ReviewWorktreeService;
+      jest.spyOn(worktree, 'create').mockResolvedValue({ root: '/attempt', src: '/attempt/src', out: '/attempt/out', meta: '/attempt/meta' });
+      jest.spyOn(worktree, 'snapshot').mockResolvedValue({ headSha: claim.headSha, checksum: 'checksum', files: [] });
+      const context = Object.create(ReviewContextService.prototype) as ReviewContextService;
+      jest.spyOn(context, 'diffSince').mockResolvedValue({ patch: 'incremental patch', changedPaths: ['src/new.ts'] });
+      jest.spyOn(context, 'build').mockResolvedValue({ changedPaths: ['src/new.ts'], changedLockfiles: [], dependentPaths: [], callers: [] });
+      const dependencies = Object.create(ReviewDependenciesService.prototype) as ReviewDependenciesService;
+      jest.spyOn(dependencies, 'prepare').mockResolvedValue({ status: 'available', reason: null, source: 'test',
+        lockfileSha256: null, scriptsDisabled: true, invocation: null });
+      const checks = Object.create(ReviewChecksService.prototype) as ReviewChecksService;
+      jest.spyOn(checks, 'run').mockResolvedValue([]);
+      const repository = Object.create(null) as IReviewRepository;
+      repository.getLastReviewedHead = jest.fn().mockResolvedValue(previousHead);
+      repository.getOpenFailures = jest.fn().mockResolvedValue([]);
+      const baseConfig = jest.fn().mockResolvedValue({ version: 1 });
+      const runner = new ContextStageRunner(github, { resolve: async () => ({ repoRoot: '/repo', attemptsRoot: '/attempts' }),
+        settings: async () => null, baseConfig }, worktree, context, dependencies, checks, repository, new IncrementalScopeService());
+      return { runner, github, baseConfig, context };
+    }
+
+    it('reviews the incremental diff with the pull request base when a prior head exists', async () => {
+      const { runner, github, baseConfig } = setup('c'.repeat(40));
+      const result = await runner.run(claim);
+      expect(github.getDiff).toHaveBeenCalledWith(claim.repo, claim.prNumber, claim.headSha, expect.any(AbortSignal));
+      expect(github.getPull).toHaveBeenCalledWith(claim.repo, claim.prNumber, expect.any(AbortSignal));
+      expect(baseConfig).toHaveBeenCalledWith(claim.repo, 'b'.repeat(40));
+      expect(result).toMatchObject({ baseSha: 'b'.repeat(40), promptInput: { diff: 'incremental patch' } });
+      expect(result.coverage.slice(0, 2)).toEqual(['diff-complete', 'diff-full-unavailable']);
+    });
+
+    it('keeps the diff-too-large failure without a prior head', async () => {
+      const { runner, github } = setup(null);
+      await expect(runner.run(claim)).rejects.toMatchObject({ code: 'diff-too-large' });
+      expect(github.getPull).not.toHaveBeenCalled();
+    });
+
+    it('keeps the diff-too-large failure when the prior head is gone', async () => {
+      const { runner, context } = setup('c'.repeat(40));
+      jest.spyOn(context, 'diffSince').mockRejectedValue(new Error('Incremental diff unavailable'));
+      await expect(runner.run(claim)).rejects.toBe(tooLarge);
+    });
+
+    it('keeps a git timeout retryable when the full diff is unavailable', async () => {
+      const { runner, context } = setup('c'.repeat(40));
+      jest.spyOn(context, 'diffSince').mockRejectedValue(new ReviewGitTimeoutError());
+      await expect(runner.run(claim)).rejects.toBeInstanceOf(ReviewGitTimeoutError);
+    });
   });
   it('rejects an expired attempt before repository work starts', async () => {
     const resolve = jest.fn();

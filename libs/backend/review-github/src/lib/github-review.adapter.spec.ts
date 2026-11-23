@@ -209,6 +209,30 @@ describe('GithubReviewAdapter', () => {
       expect(diff.patch).not.toContain('src/b.ts');
     });
 
+    it('skips a section over the byte budget and keeps later small patches', async () => {
+      // About 6M characters, 12 MB in UTF-8: the response fits, its section does not.
+      const huge = file('src/huge.ts', { patch: `@@ -1 +1 @@\n+${'é'.repeat(6_000_000)}` });
+      const fetcher = jest.fn().mockResolvedValueOnce(response(pull)).mockResolvedValueOnce(tooLarge())
+        .mockResolvedValueOnce(response([huge], 200, next(2)))
+        .mockResolvedValueOnce(response([file('src/small.ts')]));
+      const { adapter } = setup(fetcher);
+      const diff = await adapter.getDiff(repo, 4, sha);
+      expect(diff.truncated).toBe(true);
+      expect(diff.patch).toBe(['diff --git a/src/small.ts b/src/small.ts', '--- a/src/small.ts', '+++ b/src/small.ts',
+        '@@ -1 +1 @@', '-old', '+new', ''].join('\n'));
+    });
+
+    it('stops paginating when the signal aborts and fails as an abort, not diff-too-large', async () => {
+      const controller = new AbortController();
+      const fetcher = jest.fn().mockResolvedValueOnce(response(pull)).mockResolvedValueOnce(tooLarge())
+        .mockImplementationOnce(async () => { controller.abort(); return response([file('src/a.ts')], 200, next(2)); });
+      const { adapter } = setup(fetcher);
+      await expect(adapter.getDiff(repo, 4, sha, controller.signal)).rejects.toMatchObject({
+        code: 'timeout', message: 'GitHub request aborted' });
+      expect(fetcher).toHaveBeenCalledTimes(3);
+      expect(fetcher.mock.calls[2][1].signal.aborted).toBe(true);
+    });
+
     it('stops at the files page cap and marks the patch truncated', async () => {
       let pulls = 0;
       const fetcher = jest.fn(async (url: string) => {
@@ -254,6 +278,17 @@ describe('GithubReviewAdapter', () => {
     const { adapter } = setup(fetcher);
     expect((await adapter.getPull(repo, 4)).number).toBe(4);
     expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it('ends the retry backoff when the signal aborts', async () => {
+    const controller = new AbortController();
+    const fetcher = jest.fn().mockImplementationOnce(async () => {
+      setTimeout(() => controller.abort(), 0);
+      return response({}, 503);
+    });
+    const { adapter } = setup(fetcher);
+    await expect(adapter.getPull(repo, 4, controller.signal)).rejects.toMatchObject({ code: 'timeout', message: 'GitHub request aborted' });
+    expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
   it('times out and keeps the token out of errors and logs', async () => {

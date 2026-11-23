@@ -1,7 +1,7 @@
 import { inject, injectable } from 'tsyringe';
-import { RepoIdentitySchema, RepoReviewConfigV1Schema, type IGitHubReviewPort, type RepoIdentity } from '@ptah-extension/review-contracts';
+import { RepoIdentitySchema, RepoReviewConfigV1Schema, type GitHubDiff, type IGitHubReviewPort, type RepoIdentity } from '@ptah-extension/review-contracts';
 import { REVIEW_CORE_TOKENS } from '../../di/tokens';
-import { ReviewWorktreeService } from '../context/review-worktree.service';
+import { ReviewGitTimeoutError, ReviewWorktreeService } from '../context/review-worktree.service';
 import { ReviewContextService } from '../context/review-context.service';
 import { IncrementalScopeService } from '../context/incremental-scope.service';
 import type { IncrementalScope } from '../context/incremental-scope.service';
@@ -93,21 +93,28 @@ export class ContextStageRunner {
     check();
     const paths = await this.worktree.create(claim.repo, roots.repoRoot, roots.attemptsRoot, claim.attemptId, claim.headSha, claim.prNumber, workSignal);
     check();
-    const diff = await this.github.getDiff(claim.repo as RepoIdentity, claim.prNumber, claim.headSha);
+    const previousHead = await this.repository.getLastReviewedHead(claim.repo, claim.prNumber);
     check();
-    const config = RepoReviewConfigV1Schema.parse(await this.environment.baseConfig(claim.repo, diff.baseSha) ?? { version: 1 });
+    const { diff, tooLarge } = await this.fullDiff(claim, previousHead, workSignal);
+    check();
+    const baseSha = diff ? diff.baseSha : await this.pullBase(claim, workSignal);
+    check();
+    const config = RepoReviewConfigV1Schema.parse(await this.environment.baseConfig(claim.repo, baseSha) ?? { version: 1 });
     check();
     const source = await this.worktree.snapshot(claim.repo, paths.src, claim.headSha, workSignal);
-    check();
-    const previousHead = await this.repository.getLastReviewedHead(claim.repo, claim.prNumber);
     check();
     const openFailures = await this.repository.getOpenFailures(claim.repo, claim.prNumber);
     check();
     const incrementalDiff = previousHead ? previousHead === claim.headSha ? { patch: '', changedPaths: [] }
-      : await this.context.diffSince(claim.repo, paths.src, previousHead, claim.headSha, workSignal) : null;
+      : await this.context.diffSince(claim.repo, paths.src, previousHead, claim.headSha, workSignal).catch((error: unknown) => {
+        // Without the full diff, a lost baseline (for example after a force-push) leaves nothing to review:
+        // keep the non-retryable diff-too-large failure instead of a retryable one. A git timeout stays retryable.
+        throw tooLarge !== undefined && !workSignal.aborted && !(error instanceof ReviewGitTimeoutError) ? tooLarge : error;
+      }) : null;
     check();
-    const reviewPatch = incrementalDiff?.patch ?? diff.patch;
-    const changedPaths = incrementalDiff?.changedPaths ?? [...diff.patch.matchAll(/^diff --git a\/.+? b\/(.+)$/gm)].map((match) => match[1]);
+    const fullPatch = diff?.patch ?? '';
+    const reviewPatch = incrementalDiff?.patch ?? fullPatch;
+    const changedPaths = incrementalDiff?.changedPaths ?? [...fullPatch.matchAll(/^diff --git a\/.+? b\/(.+)$/gm)].map((match) => match[1]);
     const context = await this.context.build(claim.repo, paths.src, changedPaths, changedExports(reviewPatch), workSignal);
     check();
     const scope = this.incremental.plan({ headSha: claim.headSha, previousReviewedHeadSha: previousHead,
@@ -120,11 +127,34 @@ export class ContextStageRunner {
     check();
     const text = await this.environment.pullText?.(claim.prNumber);
     check();
-    return { attemptRoot: paths.root, baseSha: diff.baseSha, incrementalScope: scope,
-      coverage: [!incrementalDiff && diff.truncated ? 'diff-truncated' : 'diff-complete',
+    return { attemptRoot: paths.root, baseSha, incrementalScope: scope,
+      coverage: [!incrementalDiff && diff?.truncated ? 'diff-truncated' : 'diff-complete', ...(diff ? [] : ['diff-full-unavailable']),
       `dependencies:${dependency.status}`, ...checks.map((check) => `${check.name}:${check.status}`)],
       promptInput: { headSha: claim.headSha, title: text?.title ?? '', body: text?.body ?? '', diff: reviewPatch, comments: '', fileContent: JSON.stringify(context.callers),
         deterministicEvidence: JSON.stringify({ context, checks, incrementalScope: scope, sourceChecksum: source.checksum }),
         repositoryRules: JSON.stringify({ include: config.include, exclude: config.exclude, pathInstructions: config.pathInstructions }) } };
+  }
+
+  /**
+   * The full pull request diff, or null when GitHub cannot provide it (`diff-too-large`) and an incremental
+   * baseline exists: the review then runs on the local diff since that head, and `tooLarge` keeps the GitHub
+   * error for when that local diff fails too. Without a baseline the error stands.
+   */
+  private async fullDiff(claim: ReviewQueueClaim, previousHead: string | null, signal: AbortSignal): Promise<{ diff: GitHubDiff | null; tooLarge?: unknown }> {
+    try {
+      return { diff: await this.github.getDiff(claim.repo as RepoIdentity, claim.prNumber, claim.headSha, signal) };
+    } catch (error: unknown) {
+      if (signal.aborted) throw new Error('Review context aborted', { cause: error });
+      const tooLarge = error !== null && typeof error === 'object' && 'code' in error && error.code === 'diff-too-large';
+      if (!tooLarge || !previousHead) throw error;
+      return { diff: null, tooLarge: error };
+    }
+  }
+
+  /** The base of the pull request when the full diff, which carries it, is unavailable. */
+  private async pullBase(claim: ReviewQueueClaim, signal: AbortSignal): Promise<string> {
+    const pull = await this.github.getPull(claim.repo as RepoIdentity, claim.prNumber, signal);
+    if (pull.headSha !== claim.headSha) throw new Error('Pull request head changed');
+    return pull.baseSha;
   }
 }
