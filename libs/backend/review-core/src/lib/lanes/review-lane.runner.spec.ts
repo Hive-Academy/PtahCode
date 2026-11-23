@@ -1,9 +1,13 @@
+import type { ReviewLaneSettings } from '@ptah-extension/review-contracts';
 import { ReviewLaneRunner, type IReviewLaneFiles, type IReviewLaneGateway, type ReviewLaneRequest } from './review-lane.runner';
 import { ReviewLaneAdmissionService, type IReviewLaneClock } from './review-lane-admission.service';
+import { ReviewLaneAttempt } from './review-lane-attempt';
 
 const sha = 'a'.repeat(40);
 const repo = { owner: 'Hive-Academy', name: 'PtahCode' } as const;
-const request: ReviewLaneRequest = { repo, prKey: 'repo#1', attemptId: 'attempt-1', attemptRoot: '/attempt', headSha: sha, kind: 'triage', prompt: 'review', runDeadlineMs: 1000 };
+const baseRequest = { repo, prKey: 'repo#1', attemptId: 'attempt-1', attemptRoot: '/attempt', headSha: sha, kind: 'triage', prompt: 'review', runDeadlineMs: 1000 } as const;
+const verdict = JSON.stringify({ schemaVersion: 1, candidateId: 'candidate', headSha: sha, verdict: 'inconclusive',
+  checkedEvidence: [{ path: 'a.ts', line: 1, observation: 'checked' }], reason: 'no disproof', confidence: 0.5, verifierFamily: 'family-a' });
 
 describe('ReviewLaneRunner', () => {
   let now: number;
@@ -11,15 +15,23 @@ describe('ReviewLaneRunner', () => {
   let gateway: IReviewLaneGateway;
   let files: IReviewLaneFiles;
   let runner: ReviewLaneRunner;
+  let laneSettings: ReviewLaneSettings | Error;
+  let request: ReviewLaneRequest;
   const logger = { error: jest.fn() };
+  const attemptFor = (): ReviewLaneAttempt => new ReviewLaneAttempt({ source: gateway, clock, logger: { warn: jest.fn() },
+    settings: { get: async () => { if (laneSettings instanceof Error) throw laneSettings; return laneSettings; }, update: jest.fn() } });
 
   beforeEach(() => {
     now = 0;
     clock = { now: () => now, setTimeout, clearTimeout };
+    laneSettings = { pool: [], pins: {} };
     gateway = {
-      list: async () => ({ lanes: [{ id: 'lane', family: 'family-a', limitState: 'confirmed-room' }], maxConcurrentAgents: 4 }),
+      list: async () => ({ lanes: [{ id: 'lane', label: 'lane', family: 'family-a', limitState: 'confirmed-room' }], maxConcurrentAgents: 4 }),
+      listModels: async () => ({}),
+      modelBlocked: () => false,
       spawn: async () => undefined,
     };
+    request = { ...baseRequest, attempt: attemptFor() };
     files = { prepare: jest.fn().mockResolvedValue('same'), sourceChecksum: jest.fn().mockResolvedValue('same'),
       clearOutput: jest.fn().mockResolvedValue(undefined),
       readOutput: jest.fn().mockImplementation(async (_root: string, name: string) => name === 'walkthrough.md'
@@ -150,7 +162,7 @@ describe('ReviewLaneRunner', () => {
   });
 
   it('runs when capacity is unknown and records the missing check', async () => {
-    gateway.list = async () => ({ lanes: [{ id: 'lane', family: 'family-a', limitState: 'unknown' }], maxConcurrentAgents: 4 });
+    gateway.list = async () => ({ lanes: [{ id: 'lane', label: 'lane', family: 'family-a', limitState: 'unknown' }], maxConcurrentAgents: 4 });
     const spawn = jest.spyOn(gateway, 'spawn');
     expect(await runner.run(request)).toMatchObject({ status: 'completed', limitCheck: 'unavailable' });
     expect(spawn).toHaveBeenCalled();
@@ -168,7 +180,7 @@ describe('ReviewLaneRunner', () => {
     files.prepare = jest.fn().mockResolvedValue('before');
     const checksum = jest.fn().mockResolvedValue('after');
     files.sourceChecksum = checksum;
-    expect(await runner.run(request)).toEqual({ status: 'partial', reason: 'source-mutated' });
+    expect(await runner.run(request)).toEqual({ status: 'partial', reason: 'source-mutated', lane: { lane: 'lane', model: null, family: 'family-a', fallback: [] } });
     expect(checksum).toHaveBeenCalledTimes(1);
   });
 
@@ -183,28 +195,26 @@ describe('ReviewLaneRunner', () => {
     gateway.spawn = async () => {
       now = 1000;
     };
-    expect(await runner.run(request)).toEqual({ status: 'partial', reason: 'deadline' });
+    expect(await runner.run(request)).toEqual({ status: 'partial', reason: 'deadline', lane: { lane: 'lane', model: null, family: 'family-a', fallback: [] } });
     expect(files.sourceChecksum).toHaveBeenCalledTimes(1);
   });
 
   it('reports deadline when the after-spawn snapshot aborts', async () => {
     gateway.spawn = async () => { now = 1000; };
     files.sourceChecksum = jest.fn().mockRejectedValue(new Error('Review snapshot aborted'));
-    expect(await runner.run(request)).toEqual({ status: 'partial', reason: 'deadline' });
+    expect(await runner.run(request)).toEqual({ status: 'partial', reason: 'deadline', lane: { lane: 'lane', model: null, family: 'family-a', fallback: [] } });
   });
 
   it('reports caller abort when the after-spawn snapshot aborts', async () => {
     const caller = new AbortController();
     gateway.spawn = async () => { caller.abort(); };
     files.sourceChecksum = jest.fn().mockRejectedValue(new Error('Review snapshot aborted'));
-    expect(await runner.run({ ...request, signal: caller.signal })).toEqual({ status: 'partial', reason: 'aborted' });
+    expect(await runner.run({ ...request, signal: caller.signal })).toEqual({ status: 'partial', reason: 'aborted', lane: { lane: 'lane', model: null, family: 'family-a', fallback: [] } });
   });
 
   it('allows the verifier the same 480 second lane window as lenses', async () => {
     const setTimer = jest.spyOn(clock, 'setTimeout');
-    files.readOutput = jest.fn().mockResolvedValue(JSON.stringify({ schemaVersion: 1, candidateId: 'candidate', headSha: sha,
-      verdict: 'inconclusive', checkedEvidence: [{ path: 'a.ts', line: 1, observation: 'checked' }], reason: 'no disproof',
-      confidence: 0.5, verifierFamily: 'family-a' }));
+    files.readOutput = jest.fn().mockResolvedValue(verdict);
     expect(await runner.run({ ...request, kind: 'verifier', runDeadlineMs: 600_000 })).toMatchObject({ status: 'completed' });
     expect(setTimer).toHaveBeenCalledWith(expect.any(Function), 480_000);
   });
@@ -215,9 +225,73 @@ describe('ReviewLaneRunner', () => {
     expect(setTimer).toHaveBeenCalledWith(expect.any(Function), 480_000);
   });
 
-  it('labels same-family verification weaker', async () => {
-    files.readOutput = jest.fn().mockResolvedValue(JSON.stringify({ schemaVersion: 1, candidateId: 'candidate', headSha: sha, verdict: 'inconclusive', checkedEvidence: [{ path: 'a.ts', line: 1, observation: 'checked' }], reason: 'no disproof', confidence: 0.5, verifierFamily: 'family-a' }));
-    expect(await runner.run({ ...request, kind: 'verifier', lensAuthorFamily: 'family-a' }))
-      .toMatchObject({ status: 'completed', evidenceStrength: 'weaker' });
+  it('sends the chosen pool model on spawn and records the lane use on a completed result (Req 2.5)', async () => {
+    laneSettings = { pool: [{ lane: 'lane', model: 'model-x' }], pins: {} };
+    request = { ...baseRequest, attempt: attemptFor() };
+    const spawn = jest.spyOn(gateway, 'spawn');
+    const result = await runner.run(request);
+    expect(spawn).toHaveBeenCalledWith(expect.objectContaining({ laneId: 'lane', model: 'model-x' }));
+    expect(result).toMatchObject({ status: 'completed', family: 'family-a',
+      lane: { lane: 'lane', model: 'model-x', family: 'family-a', fallback: [] } });
+  });
+
+  it('sends no model key when the lane default applies (Req 2.1)', async () => {
+    const spawn = jest.spyOn(gateway, 'spawn');
+    expect(await runner.run(request)).toMatchObject({ lane: { lane: 'lane', model: null, family: 'family-a', fallback: [] } });
+    expect(spawn.mock.calls[0][0]).not.toHaveProperty('model');
+  });
+
+  it('records the lane use on a partial result after a started lane fails', async () => {
+    gateway.spawn = async () => { throw new Error('status-failed: quota'); };
+    expect(await runner.run(request)).toMatchObject({ status: 'partial', reason: 'status-failed: quota',
+      lane: { lane: 'lane', family: 'family-a' } });
+  });
+
+  it('ends no-confirmed-room with the skipped pool entries when no pool entry is available (Req 4.4, 4.5)', async () => {
+    laneSettings = { pool: [{ lane: 'missing', model: null }], pins: {} };
+    request = { ...baseRequest, attempt: attemptFor() };
+    const spawn = jest.spyOn(gateway, 'spawn');
+    expect(await runner.run(request)).toEqual({ status: 'partial', reason: 'no-confirmed-room',
+      lane: { lane: null, model: null, family: null,
+        fallback: [{ source: 'pool', lane: 'missing', model: null, reason: 'lane-not-listed' }] } });
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('ends partial without guessing when the lane settings cannot be read, and logs it once per attempt', async () => {
+    laneSettings = new Error('storage unavailable');
+    request = { ...baseRequest, attempt: attemptFor() };
+    const spawn = jest.spyOn(gateway, 'spawn');
+    const list = jest.spyOn(gateway, 'list');
+    expect(await runner.run(request)).toEqual({ status: 'partial', reason: 'lane-settings-unavailable' });
+    expect(await runner.run({ ...request, kind: 'correctness-lifecycle' })).toEqual({ status: 'partial', reason: 'lane-settings-unavailable' });
+    expect(spawn).not.toHaveBeenCalled();
+    expect(list).not.toHaveBeenCalled();
+    expect(logger.error).toHaveBeenCalledTimes(1);
+    expect(logger.error).toHaveBeenCalledWith(expect.objectContaining({ message: expect.stringContaining('lane settings could not be read') }));
+  });
+
+  it('throws a lane list failure as before', async () => {
+    gateway.list = async () => { throw new Error('detection failed'); };
+    await expect(runner.run(request)).rejects.toThrow('detection failed');
+  });
+
+  it('passes verifier author counts to selection and reports no runner-level evidence strength (A10)', async () => {
+    gateway.list = async () => ({ lanes: [
+      { id: 'a', label: 'a', family: 'family-a', limitState: 'confirmed-room' },
+      { id: 'b', label: 'b', family: 'family-b', limitState: 'confirmed-room' },
+    ], maxConcurrentAgents: 4 });
+    files.readOutput = jest.fn().mockResolvedValue(verdict);
+    const result = await runner.run({ ...request, kind: 'verifier', authorFamilyCounts: { 'family-a': 2 } });
+    expect(result).toMatchObject({ status: 'completed', family: 'family-b', lane: { lane: 'b' } });
+    expect(result).not.toHaveProperty('evidenceStrength');
+  });
+
+  it('prefers a family outside the used lens families (Req 2.2)', async () => {
+    gateway.list = async () => ({ lanes: [
+      { id: 'a', label: 'a', family: 'family-a', limitState: 'confirmed-room' },
+      { id: 'b', label: 'b', family: 'family-b', limitState: 'confirmed-room' },
+    ], maxConcurrentAgents: 4 });
+    expect(await runner.run({ ...request, kind: 'contracts-callers', usedFamilies: ['family-a'] }))
+      .toMatchObject({ status: 'completed', family: 'family-b' });
   });
 });

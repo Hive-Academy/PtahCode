@@ -14,6 +14,8 @@ import { TriageStageRunner } from './stages/triage-stage.runner';
 import { LensStageRunner } from './stages/lens-stage.runner';
 import { VerificationStageRunner } from './stages/verification-stage.runner';
 import { PublicationStageRunner } from './stages/publication-stage.runner';
+import { TRIAGE_STAGE, VERIFICATION_STAGE } from './stages/review-stage-keys';
+import type { ReviewLaneSelectionService } from './lanes/review-lane-selection.service';
 import { classifyReviewFailure, sanitizeReviewFailureMessage, type ReviewFailureStage } from './review-failure';
 import { ReviewStatusCoordinatorService } from './status/review-status-coordinator.service';
 import type { ReviewSeverity } from './status/review-status-conclusion';
@@ -30,6 +32,12 @@ const VerificationSchema = z.array(z.object({ lens: z.string(), finding: Candida
   result: z.discriminatedUnion('status', [z.object({ status: z.literal('partial'), reason: z.string() }),
     z.object({ status: z.literal('completed'), family: z.string(), evidenceStrength: z.enum(['strong', 'weaker']).optional(), output: VerifierVerdictSchema })]),
 }));
+const CompletedTriageSchema = z.object({ status: z.literal('completed'), family: z.string().min(1).max(64) });
+/** The family of the lane that completed triage, from a fresh or a reused checkpoint; `null` otherwise. */
+function completedTriageFamily(value: unknown): string | null {
+  const parsed = CompletedTriageSchema.safeParse(value);
+  return parsed.success ? parsed.data.family : null;
+}
 /** Attempt states that never run again; a retry makes a new attempt ID. */
 const ENDED_ATTEMPT_STATES: ReadonlySet<ReviewAttemptRecord['state']> = new Set(['completed', 'failed', 'cancelled']);
 /** An attempt gets its own review window; drain's deadline only limits new claims. */
@@ -57,6 +65,7 @@ export class ReviewOrchestratorService {
     @inject(TOKENS.LOGGER) private readonly logger: Logger,
     @inject(REVIEW_CORE_TOKENS.SETTINGS_STORE) private readonly settingsStore: IReviewSettingsStore,
     @inject(ReviewWorktreeService) private readonly worktree: ReviewWorktreeService,
+    @inject(REVIEW_CORE_TOKENS.LANE_SELECTION) private readonly laneSelection: ReviewLaneSelectionService,
     @inject(ReviewStatusCoordinatorService) private readonly statuses?: ReviewStatusCoordinatorService,
   ) {}
 
@@ -234,14 +243,17 @@ export class ReviewOrchestratorService {
       if (signal?.aborted) { status = 'partial'; return; }
       if (!await this.guard(claim, signal)) { status = signal?.aborted ? 'partial' : 'superseded'; return; }
       failureStage = 'lanes';
-      const triage = await this.stage(claim, 'triage', 1, z.unknown(), () => this.triage.run(claim, context, attemptDeadline, signal), signal);
+      // One lane-choice state per attempt: lane settings and catalogs are read once, the lane list per role.
+      const lanes = this.laneSelection.beginAttempt(signal);
+      const triage = await this.stage(claim, TRIAGE_STAGE.name, TRIAGE_STAGE.ordinal, z.unknown(),
+        () => this.triage.run(claim, context, attemptDeadline, lanes, signal), signal);
       if (!triage) { status = 'partial'; return; }
       if (typeof triage === 'object' && 'status' in triage && triage.status === 'partial' &&
           'reason' in triage && triage.reason === 'deadline') { status = 'partial'; return; }
       if (!triage || (typeof triage === 'object' && triage !== null && 'status' in triage && triage.status === 'partial')) status = 'partial';
       if (signal?.aborted) { status = 'partial'; return; }
       if (!await this.guard(claim, signal)) { status = signal?.aborted ? 'partial' : 'superseded'; return; }
-      const lensResults = await this.lenses.run(claim, context, attemptDeadline, signal,
+      const lensResults = await this.lenses.run(claim, context, attemptDeadline, lanes, signal,
         (completed, total) => this.statuses?.lensCompleted(claim, completed, total) ?? Promise.resolve());
       if (context.coverage.some((entry) => entry.startsWith('prompt:truncated:'))) status = 'partial';
       if (lensResults.some((entry) => entry.result.status === 'partial')) status = 'partial';
@@ -249,7 +261,8 @@ export class ReviewOrchestratorService {
       if (signal?.aborted) { status = 'partial'; return; }
       if (!await this.guard(claim, signal)) { status = signal?.aborted ? 'partial' : 'superseded'; return; }
       failureStage = 'verification';
-      const verdicts = await this.stage(claim, 'verification', 3, VerificationSchema, () => this.verification.run(claim, context, lensResults, attemptDeadline, signal), signal);
+      const verdicts = await this.stage(claim, VERIFICATION_STAGE.name, VERIFICATION_STAGE.ordinal, VerificationSchema,
+        () => this.verification.run(claim, context, lensResults, attemptDeadline, lanes, signal), signal);
       if (!verdicts) { status = 'partial'; return; }
       if (verdicts.some((entry) => entry.verification === 'unavailable')) status = 'partial';
       acceptedSeverities = verdicts.filter((entry) => entry.result.status === 'completed' &&
@@ -261,7 +274,8 @@ export class ReviewOrchestratorService {
         await this.environment.baseConfig(claim.repo, context.baseSha), claim.repo).allowed;
       const publication = await this.stage(claim, 'publication', 4, z.object({ artifactPath: z.string(), exportPath: z.string(),
         acceptedCount: z.number(), suppressedCount: z.number() }), () => this.publication.run(claim, context, lensResults, verdicts, signal,
-          typeof triage === 'object' && triage !== null && 'status' in triage && triage.status === 'completed'), signal);
+          typeof triage === 'object' && triage !== null && 'status' in triage && triage.status === 'completed',
+          completedTriageFamily(triage)), signal);
       if (!publication) status = 'partial';
     } catch (error: unknown) {
       if (signal?.aborted) {

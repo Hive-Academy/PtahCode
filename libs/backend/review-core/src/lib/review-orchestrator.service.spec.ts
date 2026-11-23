@@ -13,6 +13,8 @@ import { VerificationStageRunner } from './stages/verification-stage.runner';
 import { PublicationStageRunner } from './stages/publication-stage.runner';
 import { ReviewWorktreeService } from './context/review-worktree.service';
 import { ReviewStatusCoordinatorService } from './status/review-status-coordinator.service';
+import { ReviewLaneSelectionService } from './lanes/review-lane-selection.service';
+import { ReviewLaneAttempt } from './lanes/review-lane-attempt';
 
 const sha = 'a'.repeat(40);
 const claim: ReviewQueueClaim = { repo: { owner: 'Hive-Academy', name: 'PtahCode' }, prNumber: 1,
@@ -38,6 +40,7 @@ function fixture(withStatuses = false) {
     saveStage: async (row) => { stages.set(key(row.stage, row.ordinal), row); },
     saveCheckpoint: async (_id, name, ordinal, data) => { checkpoints.set(key(name, ordinal), data); },
     getCheckpoint: async (_id, name, ordinal) => checkpoints.get(key(name, ordinal)) ?? null,
+    saveStageLane: jest.fn().mockResolvedValue(undefined),
     getStatusSync: jest.fn().mockResolvedValue(null), saveStatusSync: jest.fn(),
     getPendingStatusSync: jest.fn().mockResolvedValue([]), getMachineStatusSync: jest.fn().mockResolvedValue([]),
     syncFindingResolution: jest.fn().mockResolvedValue(false),
@@ -76,11 +79,15 @@ function fixture(withStatuses = false) {
   jest.spyOn(statuses, 'claimed').mockResolvedValue(undefined);
   jest.spyOn(statuses, 'lensCompleted').mockResolvedValue(undefined);
   const finished = jest.spyOn(statuses, 'finished').mockResolvedValue(undefined);
+  const laneSelection = Object.create(ReviewLaneSelectionService.prototype) as ReviewLaneSelectionService;
+  const laneAttempt = new ReviewLaneAttempt({ source: { list: jest.fn(), listModels: jest.fn(), modelBlocked: jest.fn() },
+    settings: { get: jest.fn(), update: jest.fn() }, clock: { now: () => 0, setTimeout, clearTimeout }, logger: { warn: jest.fn() } });
+  const beginAttempt = jest.spyOn(laneSelection, 'beginAttempt').mockReturnValue(laneAttempt);
   const coordinator = new ReviewOrchestratorService(discovery, context, triage, lenses, verification, publication, queue,
     new ReviewPolicyService(), repository, github,
     { resolve: async () => ({ repoRoot: '/repo', attemptsRoot: '/attempts' }), settings: async () => settings, baseConfig: async () => null }, logger,
-    settingsStore, worktree, withStatuses ? statuses : undefined);
-  return { releaseSource, listAttemptSources, prune, settingsStore, coordinator, finished, stages, checkpoints, repository, logger, claimMock, release, discover, contextRun, triageRun, lensRun,
+    settingsStore, worktree, laneSelection, withStatuses ? statuses : undefined);
+  return { beginAttempt, laneAttempt, releaseSource, listAttemptSources, prune, settingsStore, coordinator, finished, stages, checkpoints, repository, logger, claimMock, release, discover, contextRun, triageRun, lensRun,
     verificationRun, publicationRun, github };
 }
 
@@ -202,6 +209,28 @@ describe('ReviewOrchestratorService', () => {
     const contextDeadline = f.contextRun.mock.calls[0][1];
     expect(contextDeadline).toBeGreaterThan(drainDeadline + 20 * 60_000);
     expect(f.triageRun.mock.calls[0][2]).toBe(contextDeadline);
+  });
+
+  it('gives triage, lenses and the verifier one lane attempt and reports the triage family to publication', async () => {
+    const f = fixture();
+    const controller = new AbortController();
+    f.triageRun.mockResolvedValue({ status: 'completed', family: 'claude',
+      output: { schemaVersion: 1, headSha: sha, findings: [], coverage: [] } });
+    await f.coordinator.drain('worker', Date.now() + 10_000, controller.signal);
+    expect(f.beginAttempt).toHaveBeenCalledTimes(1);
+    expect(f.beginAttempt).toHaveBeenCalledWith(controller.signal);
+    expect(f.triageRun.mock.calls[0][3]).toBe(f.laneAttempt);
+    expect(f.lensRun.mock.calls[0][3]).toBe(f.laneAttempt);
+    expect(f.verificationRun.mock.calls[0][4]).toBe(f.laneAttempt);
+    expect(f.publicationRun.mock.calls[0][5]).toBe(true);
+    expect(f.publicationRun.mock.calls[0][6]).toBe('claude');
+  });
+
+  it('reports no triage family to publication when triage was partial', async () => {
+    const f = fixture();
+    await f.coordinator.drain('worker', Date.now() + 10_000);
+    expect(f.publicationRun.mock.calls[0][5]).toBe(false);
+    expect(f.publicationRun.mock.calls[0][6]).toBeNull();
   });
 
   it('does not publish when all lens lanes skipped for deadline', async () => {

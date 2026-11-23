@@ -119,4 +119,57 @@ describe('ReviewQueryRepository', () => {
       expect(second.nextCursor).toBeNull();
     } finally { db.close(); }
   });
+
+  it('projects lane records onto their stages, ignores invalid ones, and renders older runs with nulls (Req 4.7, 4.8)', async () => {
+    const Database = require('better-sqlite3') as new (path: string) => SqliteDatabase;
+    const db = new Database(':memory:');
+    try {
+      db.pragma('foreign_keys = ON');
+      for (const version of [65, 67, 68]) {
+        const migration = MIGRATIONS.find((entry) => entry.version === version);
+        if (!migration?.sql) throw new Error('Review migration missing: ' + version);
+        db.exec(migration.sql);
+      }
+      const now = Date.UTC(2026, 0, 1);
+      const sha = 'a'.repeat(40);
+      db.prepare(`INSERT INTO review_repositories (repo_id, owner, name, created_at, updated_at)
+        VALUES ('hive-academy/ptahcode', 'Hive-Academy', 'PtahCode', ?, ?)`).run(now, now);
+      db.prepare(`INSERT INTO review_heads (repo_id, pr_number, head_sha, state, discovered_at)
+        VALUES ('hive-academy/ptahcode', 1, ?, 'active', ?)`).run(sha, now);
+      const attempt = db.prepare(`INSERT INTO review_attempts
+        (attempt_id, repo_id, pr_number, head_sha, attempt_number, trigger, state, result_status, queued_at, ended_at)
+        VALUES (?, 'hive-academy/ptahcode', 1, ?, ?, 'manual', 'completed', 'succeeded', ?, ?)`);
+      attempt.run('lanes', sha, 1, now + 1, now + 2);
+      attempt.run('older', sha, 2, now + 3, now + 4);
+      const stage = db.prepare(`INSERT INTO review_stages (attempt_id, stage, ordinal, state, outcome, family, started_at, ended_at)
+        VALUES (?, ?, ?, 'completed', ?, ?, ?, ?)`);
+      stage.run('lanes', 'triage', 1, 'completed', 'claude', now + 10, now + 11);
+      stage.run('lanes', 'lens:security-privacy', 0, 'completed', 'codex', now + 12, now + 13);
+      stage.run('lanes', 'verification', 3, 'completed', 'gemini', now + 14, now + 15);
+      stage.run('lanes', 'checkpoint:lane:triage', 1, JSON.stringify({ version: 1, lane: 'claude', model: null, family: 'claude',
+        fallback: [{ source: 'pin', lane: 'ptah-cli:pc-gone', model: 'model-x', reason: 'lane-not-listed' }] }), null, null, null);
+      stage.run('lanes', 'checkpoint:lane:lens:security-privacy', 0, JSON.stringify({ version: 1, lane: 'codex', model: 'gpt-model',
+        family: 'codex', fallback: [] }), null, null, null);
+      // Wrong ordinal: belongs to no displayed stage.
+      stage.run('lanes', 'checkpoint:lane:verification', 0, JSON.stringify({ version: 1, lane: 'gemini', model: null,
+        family: 'gemini', fallback: [] }), null, null, null);
+      stage.run('lanes', 'checkpoint:lane:verification', 3, '{not json', null, null, null);
+      stage.run('older', 'triage', 1, 'completed', null, now + 20, now + 21);
+      const logger = Object.create(Logger.prototype) as Logger;
+      const connection = new SqliteConnectionService(':memory:', logger);
+      Object.defineProperty(connection, 'db', { value: db });
+      const query = new ReviewQueryRepository(connection);
+      const run = await query.getRun('lanes');
+      expect(run?.stages).toEqual([
+        expect.objectContaining({ name: 'triage', family: 'claude', lane: 'claude', model: null,
+          fallback: [{ source: 'pin', lane: 'ptah-cli:pc-gone', model: 'model-x', reason: 'lane-not-listed' }] }),
+        expect.objectContaining({ name: 'lenses', scope: 'security-privacy', family: 'codex', lane: 'codex', model: 'gpt-model', fallback: [] }),
+        expect.objectContaining({ name: 'verification', family: 'gemini', lane: null, model: null, fallback: null }),
+      ]);
+      expect((await query.getRun('older'))?.stages).toEqual([
+        expect.objectContaining({ name: 'triage', family: null, lane: null, model: null, fallback: null }),
+      ]);
+      expect((await query.listRuns({ limit: 10 })).runs.find((entry) => entry.attemptId === 'lanes')?.stages).toHaveLength(3);
+    } finally { db.close(); }
+  });
 });
