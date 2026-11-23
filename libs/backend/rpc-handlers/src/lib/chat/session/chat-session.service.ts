@@ -37,21 +37,11 @@ import {
   type IAuthSecretsService,
 } from '@ptah-extension/vscode-core';
 import {
-  SmitheryRegistrySource,
-  SmitheryConnectionResolver,
-  SmitheryInstalledManifestStore,
-  SmitheryOverrideResolver,
-  createSmitheryConfigSecretStore,
-  McpOAuthService,
-  McpOAuthInstalledManifestStore,
-  McpOAuthOverrideResolver,
-  createMcpOAuthTokenStore,
   safeErrorKind,
   withRestoredOutputLoss,
   type AgentProcessManager,
   SessionChildRegistry,
 } from '@ptah-extension/cli-agent-runtime';
-import { SMITHERY_API_KEY_SECRET_ID } from '../../handlers/mcp-directory-rpc.schema';
 import { SETTINGS_TOKENS } from '@ptah-extension/settings-core';
 import type { ModelSettings } from '@ptah-extension/settings-core';
 import {
@@ -314,7 +304,7 @@ class CarryOverProviderChangedError extends Error {
  * One host deadline for a whole renderer-awaited RPC that may run a named
  * account admission (`chat:start`, `chat:continue` auto-resume, `chat:resume`
  * activate), taken at handler entry so the preparation before admission (MCP
- * and OAuth overrides, profile, prompts) counts against it (D73). The
+ * overrides, profile, prompts) counts against it (D73). The
  * renderer's `CHAT_ADMISSION_RPC_TIMEOUT_MS` is this budget plus its margin.
  */
 function namedAdmissionDeadline(): number {
@@ -875,83 +865,7 @@ export class ChatSessionService {
   }
 
   /**
-   * Lazily-built resolver that rebuilds session-time Smithery MCP overrides
-   * from the encrypted install manifest. Built once and reused; reads the
-   * manifest on each `buildOverrides()` so installs/uninstalls take effect on
-   * the next session start without restarting.
-   */
-  private smitheryOverrideResolver?: SmitheryOverrideResolver;
-
-  private getSmitheryOverrideResolver(): SmitheryOverrideResolver {
-    if (!this.smitheryOverrideResolver) {
-      const getApiKey = async (): Promise<string | null> =>
-        (await this.authSecretsService.getProviderKey(
-          SMITHERY_API_KEY_SECRET_ID,
-        )) ?? null;
-
-      const registry = new SmitheryRegistrySource({
-        getApiKey,
-        logger: this.logger,
-      });
-      const connectionResolver = new SmitheryConnectionResolver(
-        getApiKey,
-        registry,
-      );
-      const manifest = new SmitheryInstalledManifestStore(
-        createSmitheryConfigSecretStore({
-          getProviderKey: (id) => this.authSecretsService.getProviderKey(id),
-          setProviderKey: (id, value) =>
-            this.authSecretsService.setProviderKey(id, value),
-          deleteProviderKey: (id) =>
-            this.authSecretsService.deleteProviderKey(id),
-        }),
-      );
-      this.smitheryOverrideResolver = new SmitheryOverrideResolver({
-        manifest,
-        resolver: connectionResolver,
-        logger: this.logger,
-      });
-    }
-    return this.smitheryOverrideResolver;
-  }
-
-  /**
-   * Lazily-built resolver that rebuilds session-time OAuth MCP overrides from
-   * the connected manifest, refreshing near-expiry tokens. Built once and
-   * reused; reads the manifest + token store on each `buildOverrides()` so new
-   * connections take effect on the next session start without restarting.
-   *
-   * Constructed WITHOUT the interactive `connect()` deps (loopback server /
-   * browser opener) — only the token paths are exercised here.
-   */
-  private oauthOverrideResolver?: McpOAuthOverrideResolver;
-
-  private getOAuthOverrideResolver(): McpOAuthOverrideResolver {
-    if (!this.oauthOverrideResolver) {
-      const tokenStore = createMcpOAuthTokenStore({
-        getProviderKey: (id) => this.authSecretsService.getProviderKey(id),
-        setProviderKey: (id, value) =>
-          this.authSecretsService.setProviderKey(id, value),
-        deleteProviderKey: (id) =>
-          this.authSecretsService.deleteProviderKey(id),
-      });
-      const manifest = new McpOAuthInstalledManifestStore();
-      const service = new McpOAuthService({
-        tokenStore,
-        manifest,
-        logger: this.logger,
-      });
-      this.oauthOverrideResolver = new McpOAuthOverrideResolver({
-        manifest,
-        service,
-        logger: this.logger,
-      });
-    }
-    return this.oauthOverrideResolver;
-  }
-
-  /**
-   * Bound a NAMED launch's pre-admission preparation (MCP/OAuth overrides,
+   * Bound a NAMED launch's pre-admission preparation (MCP overrides,
    * prompts, provider profile, output style) by the handler-entry deadline
    * (D76 item 3). Once the deadline passes the caller gets the admission's own
    * refusal instead of an answer after the renderer gave up. The abandoned
@@ -994,40 +908,15 @@ export class ChatSessionService {
   }
 
   /**
-   * Merge manifest-resolved Smithery overrides UNDER any caller-supplied
-   * overrides (caller wins on key collision, matching the builder's
-   * `mergeMcpOverride` contract). Never throws — Smithery contributes nothing on
-   * empty manifest / missing key / resolution failure.
+   * The `mcpServersOverride` a session starts with: only what the caller
+   * supplied. Installed connectors (Smithery, OAuth) no longer become
+   * per-server overrides here; every session reaches them through the MCP
+   * gateway behind the single `ptah` entry (D-U1).
    */
-  private async buildMcpServersOverride(
+  private buildMcpServersOverride(
     callerOverride: Record<string, McpHttpServerOverride> | undefined,
   ): Promise<Record<string, McpHttpServerOverride> | undefined> {
-    let smithery: Record<string, McpHttpServerOverride> = {};
-    try {
-      smithery = await this.getSmitheryOverrideResolver().buildOverrides();
-    } catch (error: unknown) {
-      this.logger.warn('[RPC] chat:start - Smithery override build failed', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-
-    let oauth: Record<string, McpHttpServerOverride> = {};
-    try {
-      oauth = await this.getOAuthOverrideResolver().buildOverrides();
-    } catch (error: unknown) {
-      this.logger.warn('[RPC] chat:start - OAuth override build failed', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-
-    const hasSmithery = Object.keys(smithery).length > 0;
-    const hasOAuth = Object.keys(oauth).length > 0;
-    const hasCaller =
-      !!callerOverride && Object.keys(callerOverride).length > 0;
-    if (!hasSmithery && !hasOAuth && !hasCaller) {
-      return callerOverride;
-    }
-    return { ...smithery, ...oauth, ...(callerOverride ?? {}) };
+    return Promise.resolve(callerOverride);
   }
 
   /**

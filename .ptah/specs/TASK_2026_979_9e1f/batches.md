@@ -726,7 +726,7 @@ P1 gate, run by the orchestrator after B13, before review:
 
 ### Task 12.1: Opt-in and warning - PENDING
 
-## Batch 13: Remove chat:start connector overrides (C8, D-U1 Option 1) - PENDING
+## Batch 13: Remove chat:start connector overrides (C8, D-U1 Option 1) - COMPLETE
 
 - Id: P1-B13 | Phase: P1 | Shape: logic
 - Recommended executor: backend-developer (subagent; reason: lanes disabled)
