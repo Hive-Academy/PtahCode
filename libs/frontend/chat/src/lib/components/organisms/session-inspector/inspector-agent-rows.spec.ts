@@ -67,13 +67,14 @@ function setup() {
     questions: [],
   }));
   const ready = signal(true);
+  const costNotPriced = signal(false);
   const model = computed(() => ({
     agents: {
       data: ready()
         ? { rows: roster().slice(1).map((agent) => ({ agent, requests: [] })) }
         : null,
     },
-    orchestrator: { model: null, durationMs: null },
+    orchestrator: { model: null, durationMs: null, costNotPriced: costNotPriced() },
     needsYouCount: 0,
   }));
   TestBed.configureTestingModule({
@@ -99,7 +100,7 @@ function setup() {
   });
   const fixture = TestBed.createComponent(RowsHost);
   const host = fixture.componentInstance;
-  return { host, fixture, sdk, tabStatus, cli, subagents, background, ready, ...host.projection };
+  return { host, fixture, sdk, tabStatus, cli, subagents, background, ready, costNotPriced, ...host.projection };
 }
 
 describe('inspector agent rows', () => {
@@ -123,6 +124,22 @@ describe('inspector agent rows', () => {
       lowerBound: true,
       causes: ['Some SDK usage could not be counted'],
     });
+  });
+
+  it('counts all four token classes for a ptah CLI lane and leaves Codex input as reported', () => {
+    const { cli, totals } = setup();
+    const cache = { inputTokens: 30, outputTokens: 20, cacheReadTokens: 400, cacheWriteTokens: 50, costUsd: 0.2 };
+    cli.set([{ ...CLI, cli: 'ptah-cli', providerId: 'openrouter', usageTotals: cache }]);
+    expect(totals().tokens).toMatchObject({ value: 600, state: 'exact' });
+    cli.set([{ ...CLI, cli: 'codex', usageTotals: cache }]);
+    expect(totals().tokens).toMatchObject({ value: 150, state: 'exact' });
+  });
+
+  it('keeps "Not priced" on the Orchestrator row when the SDK snapshot has no rate', () => {
+    const { sdk, costNotPriced, rows } = setup();
+    sdk.set({ ...SDK, totalCost: null, costUnavailableReason: 'rate-missing', pricingCoverage: 'none' });
+    costNotPriced.set(true);
+    expect(rows()?.[0]).toMatchObject({ cost: 'Not priced' });
   });
 
   it('leaves a restored lane with an ordinary split and reported cost exact', () => {

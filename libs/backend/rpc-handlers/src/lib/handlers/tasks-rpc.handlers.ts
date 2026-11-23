@@ -680,6 +680,7 @@ export class TasksRpcHandlers {
         const parsed = this.parse(TasksGetDigestParamsSchema, params);
         const root = this.resolveRoot(parsed.workspaceRoot);
         try {
+          await this.index.ensureStarted(root);
           const digest = await this.digest.getDigest(root, parsed.taskId);
           return { digest };
         } catch (error: unknown) {

@@ -424,7 +424,9 @@ export class InspectorAgentsSectionComponent implements OnInit {
     const cache = this.cache();
     if (cache === null) return null;
     const ms = cache.expiresAt - this.cacheNow();
-    const warning = ms <= 0 ? 'Cache expired' : ms <= 60_000 ? 'Cache expires soon' : null;
+    // Same rule as the cache tile: warn once 20% of the TTL is left.
+    const ttlMs = cache.ttl === '1h' ? 3_600_000 : 300_000;
+    const warning = ms <= 0 ? 'Cache expired' : ms <= ttlMs * 0.2 ? 'Cache expires soon' : null;
     const time = ms <= 0 ? 'Expired' : formatDuration(Math.ceil(ms / 1000) * 1000, 'clock');
     return { time, warning, description: [`Estimated ${cache.ttl} cache · ${time}`, warning].filter(Boolean).join(' · ') };
   });
@@ -536,7 +538,8 @@ export class InspectorAgentsSectionComponent implements OnInit {
       if (sent) this.steerOpenKey.set(null);
       else this.steerErrorKey.set(key);
     } finally {
-      this.pendingSteerId.set(null);
+      // A later send for another row owns the pending state now; leave it.
+      if (this.pendingSteerId() === key) this.pendingSteerId.set(null);
     }
   }
 

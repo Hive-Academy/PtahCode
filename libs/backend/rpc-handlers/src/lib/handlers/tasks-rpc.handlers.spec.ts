@@ -385,7 +385,7 @@ describe('tasks:getDigest', () => {
   const taskId = 'TASK_2026_401';
 
   it('returns the digest from the authorized workspace and a null for a missing carrier', async () => {
-    const { rpc, digest, index } = buildSuite();
+    const { rpc, digest } = buildSuite();
     const result = { task: { id: taskId }, documents: [], entryCount: 1 };
     digest.getDigest.mockResolvedValueOnce(result);
     const handler = getHandler(rpc, 'tasks:getDigest');
@@ -393,7 +393,18 @@ describe('tasks:getDigest', () => {
     await expect(handler({ taskId })).resolves.toEqual({ digest: result });
     expect(digest.getDigest).toHaveBeenCalledWith(expect.any(String), taskId);
     await expect(handler({ taskId })).resolves.toEqual({ digest: null });
-    expect(index.ensureStarted).not.toHaveBeenCalled();
+  });
+
+  it('warms the index for the resolved root before reading the digest', async () => {
+    const { rpc, digest, index } = buildSuite();
+    const order: string[] = [];
+    index.ensureStarted.mockImplementationOnce(async () => { order.push('ensureStarted'); });
+    digest.getDigest.mockImplementationOnce(async () => { order.push('getDigest'); return null; });
+
+    await expect(getHandler(rpc, 'tasks:getDigest')({ taskId })).resolves.toEqual({ digest: null });
+    expect(index.ensureStarted).toHaveBeenCalledWith(normalizeWorkspaceRoot('D:\\workspace'));
+    expect(digest.getDigest).toHaveBeenCalledWith(normalizeWorkspaceRoot('D:\\workspace'), taskId);
+    expect(order).toEqual(['ensureStarted', 'getDigest']);
   });
 
   it('sanitizes digest failures before they leave the handler', async () => {

@@ -164,7 +164,7 @@ test.describe('plan limits > session inspector', () => {
         await expect(planTiles.first()).toBeVisible();
         await expect(providerRow('ptah-cli')).toContainText('Multiple accounts');
         const agents = inspector.locator('ptah-inspector-agents-section');
-        await expect(agents.locator('[data-testid="agents-count"]')).toContainText('CLI runs');
+        await expect(agents.locator('[data-testid="agents-count"]')).toContainText(/\d+ CLI/);
         await fitViewportHeight(page, limits, width);
         await capture(limits, shotPath('session-limits', 'all-tiles', theme, width));
 
@@ -173,7 +173,7 @@ test.describe('plan limits > session inspector', () => {
         await expect(opusTile).toBeVisible();
         await expect(opusTile).toContainText('100%');
 
-        const reviewRow = agents.locator('[data-agent-key]').filter({ hasText: 'Codex · review' });
+        const reviewRow = agents.locator('[data-agent-key]').filter({ hasText: 'Codex' }).filter({ hasText: 'review' });
         await expect(reviewRow.locator('[data-testid="agent-row-tokens"]')).toContainText('10.1k');
 
         await fitViewportHeight(page, limits, width);

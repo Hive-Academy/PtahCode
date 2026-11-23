@@ -99,6 +99,24 @@ describe(InspectorSessionStatsComponent.name, () => {
     expect(detail.querySelector('dt')?.textContent).toBe('Cost basis');
   });
 
+  it('hatches the meter whenever the total is a lower bound, even with every lane reported', () => {
+    const { fixture, tile } = render();
+    const partial = { ...snapshot, coverage: 'partial' as const };
+    const lane = required(cliContribution({
+      kind: 'cli', id: 'codex', label: 'Codex', usage: { inputTokens: 10, outputTokens: 5, costUsd: 0.01 },
+    }));
+    const contributions = [sdkContribution(partial), lane];
+    const coverage = { complete: true, causes: [] };
+    fixture.componentRef.setInput('cliContributions', [lane]);
+    fixture.componentRef.setInput('totals', {
+      tokens: sessionTotal(contributions, coverage, 'tokens'),
+      cost: sessionTotal(contributions, coverage, 'cost'),
+    });
+    fixture.detectChanges();
+    expect(tile('tokens').textContent).toContain('≥');
+    expect(tile('tokens').querySelector('.ptah-meter-unreported')).toBeTruthy();
+  });
+
   it('combines equal missing counts and keeps the accuracy key in the source legend', () => {
     const { fixture, root } = render();
     fixture.componentRef.setInput('cliContributions', ['codex', 'antigravity'].map(id =>

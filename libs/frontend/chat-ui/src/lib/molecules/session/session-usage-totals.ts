@@ -44,6 +44,7 @@ export interface CliUsageRun {
   readonly kind: string;
   readonly id: string;
   readonly label: string;
+  /** CLI that produced the usage (`MonitoredAgent.cli`); decides how token classes overlap. */
   readonly provider?: string;
   readonly usage: CliUsageTotals | null;
   /** Resolved lane cost, when the caller has one apart from the raw usage. */
@@ -53,8 +54,11 @@ export interface CliUsageRun {
   readonly costUnavailableReason?: SessionCostUnavailableReason;
 }
 
-// Only providers with four disjoint token classes belong here.
-const FOUR_CLASS_CLI_PROVIDERS: ReadonlySet<string> = new Set();
+// Only CLIs with four disjoint token classes belong here. A ptah CLI lane runs
+// the Claude Agent SDK, whose `inputTokens` exclude cache reads and writes
+// (cli-agent-runtime ptah-cli-stream-loop.service.ts `turnUsage`). Codex input
+// already includes its cached input, so it stays out.
+const FOUR_CLASS_CLI_PROVIDERS: ReadonlySet<string> = new Set(['ptah-cli']);
 
 const SDK_USAGE_GAP = 'Some SDK usage could not be counted';
 const SDK_LOAD_PENDING = 'SDK usage not loaded yet';

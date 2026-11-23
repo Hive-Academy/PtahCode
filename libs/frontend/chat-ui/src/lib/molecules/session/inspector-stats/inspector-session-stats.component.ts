@@ -400,8 +400,8 @@ export class InspectorSessionStatsComponent {
       { value: total.sdk ?? 0, tone: 'gold', label: 'SDK' },
       { value: total.cli ?? 0, tone: 'info', label: 'CLI lanes' },
     ];
-    const unreported = total.value === null ? 'missing'
-      : reported.length < laneAmounts.length || total.sdk === null ? 'partial' : 'none';
+    // The hatch follows the total's own bound, so a "≥" value always shows it.
+    const unreported = total.value === null ? 'missing' : total.coverage === 'full' ? 'none' : 'partial';
     return {
       id, label, total, detail, sourceText, segments, unreported,
       value: format(total).replace(/^[≥~ ]+/, ''),

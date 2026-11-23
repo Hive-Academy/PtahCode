@@ -69,6 +69,18 @@ function sdkTotal(snapshot: SessionStatsEntry | null, metric: UsageMetric) {
   return sessionTotal([sdkContribution(snapshot)], complete, metric);
 }
 
+describe('CLI token classes', () => {
+  const usage = { inputTokens: 100, outputTokens: 20, cacheReadTokens: 300, cacheWriteTokens: 40 };
+
+  it('adds cache reads and writes for a ptah CLI lane, whose input excludes them', () => {
+    expect(lane({ provider: 'ptah-cli', usage }).tokens).toMatchObject({ value: 460, lowerBound: false });
+  });
+
+  it('keeps Codex at input plus output because its input already includes cache', () => {
+    expect(lane({ provider: 'codex', usage }).tokens).toMatchObject({ value: 120, lowerBound: false });
+  });
+});
+
 describe('SDK usage contribution', () => {
   it.each(['tokens', 'cost'] as const)('keeps absent SDK %s unknown', (metric) => {
     expect(sdkTotal(null, metric)).toMatchObject({

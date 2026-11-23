@@ -229,6 +229,26 @@ describe('SessionInspectorComponent presentation', () => {
     expect(input()).toBe('—');
   });
 
+  it('hides Orchestrator cache, context and compactions of another session after a switch', () => {
+    TestBed.overrideComponent(SessionInspectorComponent, {
+      set: { template: '<span data-testid="orch">{{ rosterStats()?.compactionCount ?? "—" }}'
+        + '|{{ rosterStats()?.cache?.ttl ?? "—" }}|{{ rosterStats()?.context?.usedTokens ?? "—" }}</span>' },
+    });
+    model.set({ ...emptyModel, sessionId: 'one' });
+    const stats: SessionStatsInputs = {
+      ...emptyStats, sessionId: 'one', compactionCount: 2,
+      cache: { ttl: '5m', lastRequestAt: 0, expiresAt: 300_000 },
+      context: { usedTokens: 1_000 } as SessionStatsInputs['context'],
+    };
+    const fixture = create(stats);
+    const text = () => (fixture.nativeElement as HTMLElement)
+      .querySelector('[data-testid="orch"]')?.textContent?.trim();
+    expect(text()).toBe('2|5m|1000');
+    fixture.componentRef.setInput('stats', { ...stats, sessionId: 'two' });
+    fixture.detectChanges();
+    expect(text()).toBe('—|—|—');
+  });
+
   it('renders only expand when no session stats are available', () => {
     model.set({ ...emptyModel, needsYouCount: 2 });
     const fixture = create(null);

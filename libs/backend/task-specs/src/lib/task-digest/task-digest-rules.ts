@@ -43,10 +43,14 @@ export function classifyTaskDocument(name: string): TaskDocumentKind {
   const lower = asciiLowerCase(name);
   if (lower === CARRIER_FILE) return 'carrier';
   if (NUMBERED_HANDOFF.test(name) || lower === 'handoff.md') return 'handoff';
+  // A review of a report (`research-report-review.md`) is a review; a report
+  // about a review (`review-fix-report.md`) keeps its report tag in the qualifier.
+  const review = REVIEW_FILE_PATTERN.exec(name);
+  if (review && !REPORT_TAG.test(asciiLowerCase(review[2] ?? '') + '.md')) return 'reviews';
   if (/^research-report.*\.md$/i.test(name)) return 'design';
   const reportSuffix = REPORT_SUFFIX.exec(lower)?.[0];
   if (reportSuffix && REPORT_TAG.test(reportSuffix)) return 'reports';
-  if (REVIEW_FILE_PATTERN.test(name)) return 'reviews';
+  if (review) return 'reviews';
   if (lower === CONTEXT_FILE || lower === TASK_DESCRIPTION_FILE) return 'requirements';
   if (lower === BATCHES_FILE || lower === LEGACY_BATCHES_FILE) return 'batches';
   if (lower === DECISIONS_FILE) return 'decisions';

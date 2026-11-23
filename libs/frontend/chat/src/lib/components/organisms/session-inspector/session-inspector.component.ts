@@ -286,11 +286,21 @@ export class SessionInspectorComponent {
     source: () => ({ sessionId: this.sessionId(), key: this.selectedAgentKey() }),
     computation: ({ key }) => key,
   });
+  /**
+   * Stats that belong to the roster's session, or null while the two
+   * disagree (a session switch), so old data never shows as current.
+   */
+  protected readonly rosterStats = computed(() => {
+    const stats = this.stats();
+    if (!stats) return null;
+    const modelSessionId = this.model().sessionId;
+    return !stats.sessionId || !modelSessionId || stats.sessionId === modelSessionId ? stats : null;
+  });
   protected readonly sessionModel = computed(() => {
     const stats = this.stats();
     if (!stats) return null;
     const model = this.model();
-    const rosterMatches = !stats.sessionId || !model.sessionId || stats.sessionId === model.sessionId;
+    const rosterMatches = this.rosterStats() !== null;
     const rows = rosterMatches ? this.inspectorAgentRows.rows() : null;
     return {
       stats,

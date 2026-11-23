@@ -52,7 +52,8 @@ function projectCliLane(lane: MonitoredAgent) {
     kind: 'cli',
     id: lane.agentId,
     label: lane.displayName || lane.cli,
-    provider: lane.providerId,
+    // The CLI, not the ptah CLI agent's upstream provider, fixes the token classes.
+    provider: lane.cli,
     usage,
     cost: stats.cost ?? null,
     costEstimated: stats.cost != null && usage?.costUsd == null,
@@ -250,6 +251,7 @@ export function injectInspectorAgentRows(
         cost: usage.cost.value,
         costEstimated: usage.cost.estimated,
         costPartial: usage.cost.lowerBound,
+        costNotPriced: card.costNotPriced === true && usage.cost.value === null,
         input: split?.input ?? null,
         output: split?.output ?? null,
       },

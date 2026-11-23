@@ -962,6 +962,54 @@ describe('InspectorAgentsSectionComponent', () => {
     expect(focus).toHaveBeenCalledTimes(1);
   });
 
+  it('warns of cache expiry at 20% of the TTL left, like the cache tile', () => {
+    const fixture = mount([]);
+    const line = () => (fixture.componentInstance as unknown as {
+      cacheLine: () => { warning: string | null } | null;
+    }).cacheLine()?.warning ?? null;
+    // fixedNow is 10_000; 10 min of a 1h TTL left is under 20%.
+    fixture.componentRef.setInput('cache', { ttl: '1h', lastRequestAt: 0, expiresAt: 610_000 });
+    expect(line()).toBe('Cache expires soon');
+    fixture.componentRef.setInput('cache', { ttl: '1h', lastRequestAt: 0, expiresAt: 1_010_000 });
+    expect(line()).toBeNull();
+    fixture.componentRef.setInput('cache', { ttl: '5m', lastRequestAt: 0, expiresAt: 80_000 });
+    expect(line()).toBeNull();
+    fixture.componentRef.setInput('cache', { ttl: '5m', lastRequestAt: 0, expiresAt: 60_000 });
+    expect(line()).toBe('Cache expires soon');
+    fixture.componentRef.setInput('cache', { ttl: '5m', lastRequestAt: 0, expiresAt: 10_000 });
+    expect(line()).toBe('Cache expired');
+  });
+
+  it('keeps a later steer pending when an earlier steer for another row settles', async () => {
+    const entry = (id: string, name: string) => ({ agentId: `sdk-${id}`, model: null, sessionId: 'owner', entry: {
+      id, name, origin: 'foreground', status: 'running', steerable: true, stoppable: true, canBackground: true,
+    } });
+    const contexts = new Map([
+      ['sub:tool-1', { tray: entry('tool-1', 'Explore'), model: null, tokens: null }],
+      ['sub:tool-2', { tray: entry('tool-2', 'Plan'), model: null, tokens: null }],
+    ]);
+    const settle: ((sent: boolean) => void)[] = [];
+    const steer = jest.fn(() => new Promise<boolean>(resolve => settle.push(resolve)));
+    TestBed.overrideProvider(SessionAgentTrayService, { useValue: { extrasFor: () => contexts, steer } });
+    const fixture = mount([
+      agent({ key: 'sub:tool-1', name: 'Explore', kind: 'subagent', status: 'running', endedAt: null }),
+      agent({ key: 'sub:tool-2', name: 'Plan', kind: 'subagent', status: 'running', endedAt: null }),
+    ]);
+    const section = fixture.componentInstance as unknown as {
+      onSteer: (key: string, text: string) => Promise<void>;
+      pendingSteerId: () => string | null;
+    };
+    const first = section.onSteer('sub:tool-1', 'A');
+    const second = section.onSteer('sub:tool-2', 'B');
+    expect(section.pendingSteerId()).toBe('sub:tool-2');
+    settle[0](true);
+    await first;
+    expect(section.pendingSteerId()).toBe('sub:tool-2');
+    settle[1](true);
+    await second;
+    expect(section.pendingSteerId()).toBeNull();
+  });
+
   it('keeps the steer draft available for retry after a failed send', async () => {
     const key = 'sub:tool-1';
     const context = { agentId: 'sdk-1', model: null, sessionId: 'owner', entry: {
