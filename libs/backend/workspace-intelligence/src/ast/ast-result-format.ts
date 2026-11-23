@@ -39,6 +39,17 @@ export interface AstResultFormatOptions {
   readonly fits?: (text: string) => boolean;
   /** One line written as `hint` after `truncated` when a list was cut. */
   readonly hint?: string;
+  /**
+   * Per list key, the name that `omittedNames` lists for a cut record of that
+   * list, or for a `members` record of one; `undefined` lists none. A list
+   * with no entry here is listed by each record's own `name`, and a member as
+   * `Record.member`. A caller whose readers qualify names another way (a
+   * nested class, `ptah_read_symbol`) gives the names they accept.
+   * `omittedMembers` counts the named members either way.
+   */
+  readonly listedName?: Readonly<
+    Record<string, (record: unknown) => string | undefined>
+  >;
 }
 
 /** Rows shown of a cut list, and how many it had. */
@@ -81,23 +92,33 @@ function membersOf(record: unknown): readonly unknown[] {
 function cutNames(
   list: readonly unknown[],
   shown: number,
-): { owners: string[]; members: string[] } {
+  listedName?: (record: unknown) => string | undefined,
+): { owners: string[]; members: string[]; memberCount: number } {
   const owners: string[] = [];
   const members: string[] = [];
+  let memberCount = 0;
   for (const record of list.slice(shown)) {
     const owner = nameOf(record);
     if (owner === undefined) {
       continue;
     }
-    owners.push(owner);
+    const listedOwner = listedName ? listedName(record) : owner;
+    if (listedOwner !== undefined) {
+      owners.push(listedOwner);
+    }
     for (const member of membersOf(record)) {
       const memberName = nameOf(member);
-      if (memberName !== undefined) {
-        members.push(`${owner}.${memberName}`);
+      if (memberName === undefined) {
+        continue;
+      }
+      memberCount += 1;
+      const listed = listedName ? listedName(member) : `${owner}.${memberName}`;
+      if (listed !== undefined) {
+        members.push(listed);
       }
     }
   }
-  return { owners, members };
+  return { owners, members, memberCount };
 }
 
 /**
@@ -163,7 +184,7 @@ export function formatAstAnalysisResult(
     }
   }
   const render = (withNames = true): string =>
-    serialise(entries, shown, options.hint, withNames);
+    serialise(entries, shown, options.hint, withNames, options.listedName);
   for (let i = listKeys.length - 1; i >= 0; i--) {
     const entry = shown.get(listKeys[i]);
     if (!entry || entry.total === 0) {
@@ -199,18 +220,19 @@ function serialise(
   shown: ReadonlyMap<string, ShownOfTotal>,
   hint: string | undefined,
   withNames = true,
+  listedName?: AstResultFormatOptions['listedName'],
 ): string {
   const truncated: Record<string, ShownOfTotal> = {};
   for (const [key, entry] of shown) {
     if (entry.shown < entry.total) {
       const list = entries.find(([entryKey]) => entryKey === key)?.[1];
-      const cut: { owners: string[]; members: string[] } = Array.isArray(list)
-        ? cutNames(list, entry.shown)
-        : { owners: [], members: [] };
+      const cut = Array.isArray(list)
+        ? cutNames(list, entry.shown, listedName?.[key])
+        : { owners: [], members: [], memberCount: 0 };
       const omittedNames = withNames
         ? joinNames(cut.owners, cut.members)
         : undefined;
-      const omittedMembers = cut.members.length;
+      const omittedMembers = cut.memberCount;
       truncated[key] = {
         shown: entry.shown,
         total: entry.total,

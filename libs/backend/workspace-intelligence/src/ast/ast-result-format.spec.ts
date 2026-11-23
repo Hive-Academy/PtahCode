@@ -253,6 +253,52 @@ describe('formatAstAnalysisResult', () => {
       expect(parsed['classes']).toEqual([['name'], ['Box']]);
     });
 
+    it('lists the names the caller gives, for a class and for its members', () => {
+      const listed: Record<string, string> = {
+        Inner: 'A.Inner',
+        run: 'A.Inner.run',
+      };
+      const parsed = parse(
+        formatAstAnalysisResult(
+          {
+            parseStatus: 'ok',
+            classes: [
+              { name: 'Box' },
+              { name: 'Inner', members: [{ name: 'run' }] },
+            ],
+          },
+          {
+            fits: fitsRows(1),
+            listedName: {
+              classes: (record) => listed[(record as { name: string }).name],
+            },
+          },
+        ),
+      );
+
+      expect(parsed['truncated']).toEqual({
+        classes: {
+          shown: 1,
+          total: 2,
+          omittedNames: 'A.Inner,A.Inner.run',
+          omittedMembers: 1,
+        },
+      });
+    });
+
+    it('lists no name the caller leaves out, and still counts the members', () => {
+      const parsed = parse(
+        formatAstAnalysisResult(
+          { parseStatus: 'ok', classes: [{ name: 'Box' }, store] },
+          { fits: fitsRows(1), listedName: { classes: () => undefined } },
+        ),
+      );
+
+      expect(parsed['truncated']).toEqual({
+        classes: { shown: 1, total: 2, omittedMembers: 2 },
+      });
+    });
+
     it('does not list members of a class that is still shown', () => {
       const parsed = parse(
         formatAstAnalysisResult(
