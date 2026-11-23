@@ -63,6 +63,17 @@ import type {
           aria-hidden="true"
         />
         <span class="font-semibold text-info">Input needed</span>
+        @if (laneLabelText(); as lane) {
+        <span
+          ptahBadge size="xs" tone="accent" appearance="outline"
+          class="px-1.5 max-w-[12rem] flex-shrink-0"
+          data-testid="lane-label"
+          [attr.title]="'Lane: ' + lane"
+        >
+          <span class="sr-only">Lane: </span>
+          <span class="ptah-badge-text">{{ lane }}</span>
+        </span>
+        }
         <span
           ptahBadge size="xs"
           [tone]="timeRemaining() >= 0 && timeRemaining() <= 10 ? 'err' : 'warn'"
@@ -292,6 +303,13 @@ export class QuestionCardComponent {
 
   /** The question request containing questions to display */
   readonly request = input.required<AskUserQuestionRequest>();
+
+  /**
+   * Display name of the lane that raised this prompt. Lane surfaces set it;
+   * main chat leaves it unset and the card renders exactly as before.
+   */
+  readonly laneLabel = input<string | null | undefined>(undefined);
+  protected readonly laneLabelText = computed(() => this.laneLabel()?.trim() || null);
 
   /** Emits when user submits their answers */
   readonly answered = output<AskUserQuestionResponse>();
