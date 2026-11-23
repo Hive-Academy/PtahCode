@@ -32,10 +32,7 @@ import {
 } from '@ptah-extension/acp-runtime/testing';
 import type { McpAttachment } from '../../mcp-attachment-probe.port';
 import type { CliCommandOptions, SdkHandle } from '../cli-adapter.interface';
-import {
-  createProviderSessionLaneHandle,
-  type ProviderSessionLaneFallback,
-} from './provider-session-lane-handle';
+import { createProviderSessionLaneHandle } from './provider-session-lane-handle';
 
 const NAME = 'Test Agent';
 const SESSION_ID = 'sess-1';
@@ -110,7 +107,6 @@ function start(
     options?: Partial<CliCommandOptions>;
     agent?: FakeAcpAgentOptions;
     script?: (agent: FakeAcpAgent) => void;
-    fallback?: ProviderSessionLaneFallback;
   } = {},
 ): Harness {
   const agent = createFakeAcpAgent({ sessionId: SESSION_ID, ...setup.agent });
@@ -133,7 +129,6 @@ function start(
       return transport;
     },
     logger: logger as unknown as Logger,
-    ...(setup.fallback ? { fallback: setup.fallback } : {}),
   });
   const segments: CliOutputSegment[] = [];
   const chunks: string[] = [];
@@ -1711,188 +1706,8 @@ describe('createProviderSessionLaneHandle — stream events (P1 review m-4)', ()
   });
 });
 
-describe('createProviderSessionLaneHandle — fallback when the ACP session never opens (S3)', () => {
-  /** A stand-in for the stream-json lane handle. */
-  function fallbackHandle(): SdkHandle & { readonly continued: string[] } {
-    const continued: string[] = [];
-    return {
-      continued,
-      abort: new AbortController(),
-      done: Promise.resolve(0),
-      onOutput: (callback) => callback('stream-json output\n'),
-      onSegment: (callback) => callback({ type: 'text', content: 'from stream-json' }),
-      getSessionId: () => 'conversation-1',
-      getPid: () => 999,
-      supportsContinuation: () => true,
-      continue: async (message: string) => {
-        continued.push(message);
-        return { done: Promise.resolve(0) };
-      },
-    };
-  }
-
-  it('runs the lane on the fallback when initialize fails, without the ACP error', async () => {
-    const next = fallbackHandle();
-    const run = jest.fn(async () => next);
-    const h = start({
-      fallback: { label: 'stream-json', run },
-      script: (agent) =>
-        agent.handle('initialize', () => ({
-          error: { code: -32603, message: 'agent runtime unpack failed' },
-        })),
-    });
-
-    await expect(h.handle.done).resolves.toBe(0);
-    expect(run).toHaveBeenCalledTimes(1);
-    expect(h.errors()).toEqual([]);
-    expect(h.infos()).toEqual([
-      expect.stringMatching(
-        /^Test Agent could not open an ACP session \(.*agent runtime unpack failed.*\); this lane runs on stream-json instead\.$/,
-      ),
-    ]);
-    expect(h.segments).toContainEqual({ type: 'text', content: 'from stream-json' });
-    expect(h.output()).toContain('stream-json output');
-    expect(sent(h.agent, 'session/new')).toHaveLength(0);
-    expect(h.handle.getPid?.()).toBe(999);
-    expect(h.handle.getSessionId?.()).toBe('conversation-1');
-    expect(h.handle.supportsContinuation?.()).toBe(true);
-    await h.handle.continue?.('next');
-    expect(next.continued).toEqual(['next']);
-    h.handle.abort.abort();
-    expect(next.abort.signal.aborted).toBe(true);
-  });
-
-  it('falls back when session/new fails with a non-auth error', async () => {
-    const run = jest.fn(async () => fallbackHandle());
-    const h = start({
-      fallback: { label: 'stream-json', run },
-      script: (agent) =>
-        agent.handle('session/new', () => ({
-          error: { code: -32603, message: 'Internal error' },
-        })),
-    });
-    await expect(h.handle.done).resolves.toBe(0);
-    expect(run).toHaveBeenCalledTimes(1);
-    expect(h.errors()).toEqual([]);
-  });
-
-  it('does not fall back from a missing sign-in: the ACP error and hint stay', async () => {
-    const run = jest.fn(async () => fallbackHandle());
-    const h = start({
-      profile: { describeError: undefined },
-      fallback: { label: 'stream-json', run },
-      script: (agent) =>
-        agent.handle('session/new', () => ({
-          error: { code: -32000, message: 'Authentication required' },
-        })),
-    });
-    await expect(h.handle.done).resolves.toBe(1);
-    expect(run).not.toHaveBeenCalled();
-    expect(h.errors()).toEqual([`${NAME} is not signed in: run \`test login\``]);
-  });
-
-  it('does not fall back once a session exists (a refused model fails the lane)', async () => {
-    const run = jest.fn(async () => fallbackHandle());
-    const h = start({
-      options: { model: 'model-z' },
-      agent: { configOptions: [MODEL_OPTION] },
-      profile: {
-        sessionConfig: (options) => [
-          { configId: 'model', value: options.model ?? '', binding: true },
-        ],
-      },
-      fallback: { label: 'stream-json', run },
-      script: (agent) =>
-        agent.handle('session/set_config_option', () => ({
-          error: { code: -32602, message: 'Invalid params' },
-        })),
-    });
-    await expect(h.handle.done).resolves.toBe(1);
-    expect(run).not.toHaveBeenCalled();
-    expect(h.errors()).toHaveLength(1);
-    expect(h.errors()[0]).toMatch(/rejected model 'model-z'/);
-  });
-
-  it('does not fall back after an abort during the setup', async () => {
-    const run = jest.fn(async () => fallbackHandle());
-    const h = start({
-      fallback: { label: 'stream-json', run },
-      script: (agent) => agent.handle('initialize', () => ({ hold: true })),
-    });
-    h.handle.abort.abort();
-    await expect(h.handle.done).resolves.toBe(1);
-    expect(run).not.toHaveBeenCalled();
-  });
-
-  it('fails with one error naming both transports when the fallback cannot start', async () => {
-    const h = start({
-      fallback: {
-        label: 'stream-json',
-        run: async () => {
-          throw new Error('agy not found');
-        },
-      },
-      script: (agent) =>
-        agent.handle('initialize', () => ({
-          error: { code: -32603, message: 'boom' },
-        })),
-    });
-    await expect(h.handle.done).resolves.toBe(1);
-    expect(h.errors()).toEqual([
-      expect.stringMatching(/ACP failed \(.*boom.*\), then stream-json failed \(agy not found\)$/),
-    ]);
-  });
-
-  it('reports a fallback that could not write its MCP config (round-2 M1)', async () => {
-    const h = start({
-      fallback: {
-        label: 'stream-json',
-        run: async () => ({ ...fallbackHandle(), mcpConfigWriteFailed: true }),
-      },
-      script: (agent) =>
-        agent.handle('initialize', () => ({ error: { code: -32603, message: 'boom' } })),
-    });
-    await expect(h.handle.done).resolves.toBe(0);
-    expect(h.infos()).toContain(
-      'Ptah MCP was not configured for the stream-json lane (config-write-failed); report in your final message.',
-    );
-    expect(h.errors()).toEqual([]);
-  });
-
-  it('adds no MCP warning when the fallback configured MCP', async () => {
-    const h = start({
-      fallback: {
-        label: 'stream-json',
-        run: async () => ({ ...fallbackHandle(), mcpConfigWriteFailed: false }),
-      },
-      script: (agent) =>
-        agent.handle('initialize', () => ({ error: { code: -32603, message: 'boom' } })),
-    });
-    await h.handle.done;
-    expect(h.infos().some((info) => /config-write-failed/.test(info))).toBe(false);
-  });
-
-  it('kills the failed ACP child before the fallback spawns', async () => {
-    let killsWhenFallbackRan: number | undefined;
-    const ref: { harness?: Harness } = {};
-    const h = start({
-      fallback: {
-        label: 'stream-json',
-        run: async () => {
-          killsWhenFallbackRan = ref.harness?.transport.killCount;
-          return fallbackHandle();
-        },
-      },
-      script: (agent) =>
-        agent.handle('initialize', () => ({ error: { code: -32603, message: 'boom' } })),
-    });
-    ref.harness = h;
-    await expect(h.handle.done).resolves.toBe(0);
-    expect(killsWhenFallbackRan).toBe(1);
-    expect(h.agent.closed).toBe(true);
-  });
-
-  it('keeps the original single error without a fallback', async () => {
+describe('createProviderSessionLaneHandle — setup failure', () => {
+  it('a failed setup ends the lane with one error', async () => {
     const h = start({
       script: (agent) =>
         agent.handle('initialize', () => ({
@@ -1902,6 +1717,49 @@ describe('createProviderSessionLaneHandle — fallback when the ACP session neve
     await expect(h.handle.done).resolves.toBe(1);
     expect(h.errors()).toHaveLength(1);
     expect(h.errors()[0]).toMatch(/boom/);
+    expect(sent(h.agent, 'session/new')).toHaveLength(0);
+    expect(h.handle.supportsContinuation?.()).toBe(false);
+  });
+
+  it('a missing sign-in fails the lane with the sign-in hint', async () => {
+    const h = start({
+      profile: { describeError: undefined },
+      script: (agent) =>
+        agent.handle('session/new', () => ({
+          error: { code: -32000, message: 'Authentication required' },
+        })),
+    });
+    await expect(h.handle.done).resolves.toBe(1);
+    expect(h.errors()).toEqual([`${NAME} is not signed in: run \`test login\``]);
+  });
+
+  it('a failed setup closes the ACP child', async () => {
+    const h = start({
+      script: (agent) =>
+        agent.handle('initialize', () => ({ error: { code: -32603, message: 'boom' } })),
+    });
+    await expect(h.handle.done).resolves.toBe(1);
+    expect(h.transport.killCount).toBe(1);
+    expect(h.agent.closed).toBe(true);
+  });
+
+  it('a refused model after the session opened fails the lane', async () => {
+    const h = start({
+      options: { model: 'model-z' },
+      agent: { configOptions: [MODEL_OPTION] },
+      profile: {
+        sessionConfig: (options) => [
+          { configId: 'model', value: options.model ?? '', binding: true },
+        ],
+      },
+      script: (agent) =>
+        agent.handle('session/set_config_option', () => ({
+          error: { code: -32602, message: 'Invalid params' },
+        })),
+    });
+    await expect(h.handle.done).resolves.toBe(1);
+    expect(h.errors()).toHaveLength(1);
+    expect(h.errors()[0]).toMatch(/rejected model 'model-z'/);
   });
 });
 
@@ -1966,27 +1824,6 @@ describe('createProviderSessionLaneHandle — MCP credential revoke (round 4)', 
     await expect(h.handle.done).resolves.toBe(1);
     await settle();
     expect(onMcpConfigRestored).toHaveBeenCalledTimes(1);
-  });
-
-  it('leaves the revoke to the fallback transport, which still needs the credential', async () => {
-    const onMcpConfigRestored = jest.fn();
-    const h = start({
-      options: { onMcpConfigRestored },
-      fallback: {
-        label: 'stream-json',
-        run: async () => ({
-          abort: new AbortController(),
-          done: Promise.resolve(0),
-          onOutput: () => undefined,
-        }),
-      },
-      script: (agent) =>
-        agent.handle('initialize', () => ({ error: { code: -32603, message: 'boom' } })),
-    });
-    await expect(h.handle.done).resolves.toBe(0);
-    await h.transport.exited;
-    await settle();
-    expect(onMcpConfigRestored).not.toHaveBeenCalled();
   });
 
   it('revokes at once when the lane has no spawner', async () => {

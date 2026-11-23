@@ -18,25 +18,20 @@
  *   and command preparer (`lane-acp-spawn.ts`). Without a spawner the lane
  *   fails at once with one error.
  * - Each prompt is bounded by {@link LANE_ACP_PROMPT_TIMEOUT_MS}; a failed
- *   resume falls back to a new session (lanes keep that fallback).
- *
- * - Fallback (optional, {@link ProviderSessionLaneFallback}): when the ACP
- *   session cannot be opened at all (spawn, `initialize` or `session/new`
- *   failed, so no session id) and nothing was prompted, the lane runs on the
- *   fallback transport instead, with one `info` naming the ACP failure. The
- *   setup's own output is held until the outcome is known. Never mid-run: once
- *   a session exists the lane stays on ACP.
+ *   resume opens a new session instead.
+ * - One transport: a lane whose ACP session cannot be opened (spawn,
+ *   `initialize` or `session/new` failed) fails with the session's one error
+ *   and `done` 1. Setup output reaches the lane as it happens.
  *
  * - MCP credential (round 4): `options.onMcpConfigRestored` is the
- *   manager's revoke of the lane's Ptah MCP credential (Antigravity wires it;
- *   stream-json calls it after restoring `mcp_config.json`). An ACP lane
- *   writes no config, so it calls the hook once the agent process exits on
- *   its own: a failed setup or a lost process. An abort is the manager's stop
- *   or idle release, which revoke the subject themselves
+ *   manager's revoke of the lane's Ptah MCP credential. An ACP lane writes no
+ *   config, so it calls the hook once the agent process exits on its own: a
+ *   failed setup or a lost process. An abort is the manager's stop or idle
+ *   release, which revoke the subject themselves
  *   (`AgentProcessManager.stop`, `releaseSubprocess`); calling the hook from
  *   that late exit could revoke a credential the manager has meanwhile minted
  *   for a resumed lane of the same id. A warm process keeps the credential
- *   for its continuations. After a fallback the fallback transport owns it.
+ *   for its continuations.
  *
  * Session events reach the lane twice: as segments (`projectToCliSegments`,
  * the text log and lane outcome) and as flat stream events
@@ -55,10 +50,7 @@ import {
   createFlatStreamProjector,
   projectToCliSegments,
 } from '@ptah-extension/provider-session-contracts';
-import type {
-  ProviderSessionError,
-  ProviderSessionEvent,
-} from '@ptah-extension/provider-session-contracts';
+import type { ProviderSessionEvent } from '@ptah-extension/provider-session-contracts';
 import type {
   CliOutputSegment,
   FlatStreamEventUnion,
@@ -80,20 +72,6 @@ import {
 import { buildLaneMcpAttachments } from './lane-mcp-attachments';
 import { redactLaneStderr } from './lane-stderr-redaction';
 
-/**
- * Setup output held while a fallback is still possible. Beyond it the output
- * is released, so a noisy setup is never silenced for long.
- */
-const MAX_HELD_SETUP_ITEMS = 200;
-
-/** Another transport for the same lane, used only when the ACP session never opened. */
-export interface ProviderSessionLaneFallback {
-  /** Names the transport in the lane's `info`, e.g. `stream-json`. */
-  readonly label: string;
-  /** Start the lane on that transport. A rejection fails the lane with one error. */
-  readonly run: () => Promise<SdkHandle>;
-}
-
 export interface ProviderSessionLaneHandleConfig {
   readonly profile: AcpVendorProfile;
   readonly options: CliCommandOptions;
@@ -105,8 +83,6 @@ export interface ProviderSessionLaneHandleConfig {
   readonly transportFactory?: AcpTransportFactory;
   /** Receives the raw failure detail that user-facing segments summarise. */
   readonly logger?: Logger;
-  /** Runs the lane elsewhere when the ACP session could not be opened. */
-  readonly fallback?: ProviderSessionLaneFallback;
 }
 
 /**
@@ -144,29 +120,6 @@ export function createProviderSessionLaneHandle(
   const sessionResolved = createBufferedEmitter<string>();
   const stream = createBufferedEmitter<FlatStreamEventUnion>();
   let streamProjector = createFlatStreamProjector();
-
-  /**
-   * While the setup runs and a fallback is configured, output is held: a
-   * setup that fails over must not leave its errors on the lane.
-   */
-  let holdingSetup = !!config.fallback;
-  const held: Array<() => void> = [];
-  const setupErrors: ProviderSessionError[] = [];
-  const releaseHeld = (): void => {
-    holdingSetup = false;
-    for (const send of held.splice(0)) send();
-  };
-  const deliver = (send: () => void): void => {
-    if (!holdingSetup) {
-      send();
-      return;
-    }
-    held.push(send);
-    if (held.length > MAX_HELD_SETUP_ITEMS) releaseHeld();
-  };
-  /** The lane runs on the fallback transport; ACP events are ignored from then on. */
-  let delegate: SdkHandle | undefined;
-  let delegating = false;
   let mcpTimedOut = false;
   let onMcpTimeout: (() => void) | undefined;
 
@@ -220,10 +173,8 @@ export function createProviderSessionLaneHandle(
   };
 
   const onEvent = (event: ProviderSessionEvent): void => {
-    if (delegating) return;
     if (event.type === 'terminal') lastTerminalStatus = event.status;
-    if (event.type === 'error' && holdingSetup) setupErrors.push(event.error);
-    deliver(() => project(event));
+    project(event);
   };
 
   const session = createAcpSession({
@@ -369,82 +320,6 @@ export function createProviderSessionLaneHandle(
     }
   };
 
-  /**
-   * Whether a failed setup may fail over: nothing was aborted, no ACP session
-   * was opened, the held output was not released, and the failure is not a
-   * missing sign-in (both transports share agy's profile, so the fallback
-   * would fail the same way, and the ACP error carries the sign-in hint).
-   */
-  const mayFallBack = (): boolean =>
-    holdingSetup &&
-    !abort.signal.aborted &&
-    !session.getSessionId() &&
-    !setupErrors.some((error) => error.code === 'auth-required');
-
-  /** Run the lane on the fallback transport and forward everything it emits. */
-  const runFallback = async (
-    fallback: ProviderSessionLaneFallback,
-  ): Promise<number> => {
-    delegating = true;
-    held.length = 0;
-    holdingSetup = false;
-    const reason =
-      setupErrors.map((error) => error.message).join('; ') ||
-      'the ACP session did not open';
-    logger?.warn('[AcpSessionHandle] ACP setup failed; the lane falls back', {
-      ...logContext,
-      transport: fallback.label,
-      reason,
-    });
-    let next: SdkHandle;
-    try {
-      next = await fallback.run();
-    } catch (error: unknown) {
-      logger?.error(
-        '[AcpSessionHandle] fallback transport failed to start',
-        error instanceof Error ? error : new Error(String(error)),
-      );
-      const detail = error instanceof Error ? error.message : String(error);
-      const message = `${name} could not start: ACP failed (${reason}), then ${fallback.label} failed (${detail})`;
-      output.emit(`\n[${name}] ${message}\n`);
-      segment.emit({ type: 'error', content: message });
-      return 1;
-    }
-    delegate = next;
-    if (abort.signal.aborted) next.abort.abort();
-    else {
-      abort.signal.addEventListener('abort', () => next.abort.abort(), {
-        once: true,
-      });
-    }
-    const notice = `${name} could not open an ACP session (${reason}); this lane runs on ${fallback.label} instead.`;
-    output.emit(`\n[${name}] ${notice}\n`);
-    segment.emit({ type: 'info', content: notice });
-    // The manager reads `mcpConfigWriteFailed` once, at spawn, while this
-    // handle still ran ACP; a fallback that could not write its MCP config
-    // is reported here (round-2 M1). The fallback prints its own output line.
-    if (next.mcpConfigWriteFailed) {
-      logger?.warn('[AcpSessionHandle] fallback could not configure Ptah MCP', {
-        ...logContext,
-        transport: fallback.label,
-        cause: 'config-write-failed',
-      });
-      segment.emit({
-        type: 'info',
-        content: `Ptah MCP was not configured for the ${fallback.label} lane (config-write-failed); report in your final message.`,
-      });
-    }
-    next.onOutput(output.emit);
-    next.onSegment?.(segment.emit);
-    next.onStreamEvent?.(stream.emit);
-    next.onSessionResolved?.(sessionResolved.emit);
-    next.onMcpAttachmentTimeout?.(() => {
-      mcpTimedOut = true;
-      onMcpTimeout?.();
-    });
-    return next.done;
-  };
-
   /** Revoke the lane's MCP credential once, when the ACP process is gone. */
   let credentialReleased = false;
   const releaseCredential = (): void => {
@@ -464,13 +339,7 @@ export function createProviderSessionLaneHandle(
 
   const runFirstTurn = async (): Promise<number> => {
     const setup = await session.start();
-    if (!setup.ok && config.fallback && mayFallBack()) {
-      return runFallback(config.fallback);
-    }
-    // Decided after the fallback check: a fallback lane still needs the
-    // credential, and its own transport revokes it.
     releaseCredentialOnExit();
-    releaseHeld();
     if (!setup.ok || abort.signal.aborted) return 1;
     const sessionId = session.getSessionId();
     if (!sessionId || !(await persistAccountBinding(sessionId))) return 1;
@@ -494,9 +363,7 @@ export function createProviderSessionLaneHandle(
   };
 
   const supportsContinuation = (): boolean => {
-    if (delegate) return delegate.supportsContinuation?.() ?? false;
     return (
-      !delegating &&
       session.isSetupComplete() &&
       !!session.getSessionId() &&
       !session.isClosed() &&
@@ -514,13 +381,6 @@ export function createProviderSessionLaneHandle(
   };
 
   const continueTurn = (message: string): Promise<ContinuationOutcome> => {
-    if (delegate) {
-      return delegate.continue
-        ? delegate.continue(message)
-        : Promise.reject(
-            new Error(`${name} on ${config.fallback?.label} takes no further messages`),
-          );
-    }
     if (session.isClosed() || abort.signal.aborted) {
       return Promise.reject(
         new Error(`${name} is no longer running; resume the session by id`),
@@ -544,10 +404,6 @@ export function createProviderSessionLaneHandle(
 
   /** Cancel the running turn; the process and session stay for `continue`. */
   const interrupt = async (): Promise<void> => {
-    if (delegate) {
-      await delegate.interrupt?.();
-      return;
-    }
     interruptRequested = true;
     const kept = await session.interrupt();
     logger?.info('[AcpSessionHandle] turn interrupted', {
@@ -580,30 +436,18 @@ export function createProviderSessionLaneHandle(
       onMcpTimeout = callback;
       if (mcpTimedOut) callback();
     },
-    // After a fallback, the fallback transport's answer (it writes the file).
-    get mcpConfigWriteFailed() {
-      return delegate?.mcpConfigWriteFailed;
-    },
-    getSessionId: () =>
-      delegate
-        ? delegate.getSessionId?.()
-        : (session.getSessionId() ?? options.resumeSessionId),
+    getSessionId: () => session.getSessionId() ?? options.resumeSessionId,
     onSessionResolved: sessionResolved.subscribe,
     supportsContinuation,
     continue: continueTurn,
     // Before the task prompt there is no turn to cancel.
     supportsInterrupt: () =>
-      delegate
-        ? (delegate.supportsInterrupt?.() ?? false)
-        : taskPromptSent && session.supportsInterrupt() && !abort.signal.aborted,
+      taskPromptSent && session.supportsInterrupt() && !abort.signal.aborted,
     interrupt,
-    getPid: () => (delegate ? delegate.getPid?.() : session.getPid()),
-    // Both transports report per-turn totals.
+    getPid: () => session.getPid(),
+    // ACP reports per-turn totals.
     outcomeUsageIsTurnTotal: true,
     usageScope: 'turn',
-    getObservedNativeThreadId: () =>
-      delegate
-        ? (delegate.getObservedNativeThreadId?.() ?? delegate.getSessionId?.())
-        : session.getSessionId(),
+    getObservedNativeThreadId: () => session.getSessionId(),
   };
 }
