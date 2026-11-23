@@ -1,6 +1,6 @@
 import { ReviewRepositoryUnavailableError } from './context-stage.runner';
 import { ContextStageRunner } from './context-stage.runner';
-import { ReviewGitTimeoutError, ReviewWorktreeService } from '../context/review-worktree.service';
+import { ReviewGitBaselineMissingError, ReviewGitTimeoutError, ReviewWorktreeService } from '../context/review-worktree.service';
 import { ReviewContextService } from '../context/review-context.service';
 import { ReviewDependenciesService } from '../context/review-dependencies.service';
 import { ReviewChecksService } from '../context/review-checks.service';
@@ -126,8 +126,15 @@ describe('ContextStageRunner repository resolution', () => {
 
     it('keeps the diff-too-large failure when the prior head is gone', async () => {
       const { runner, context } = setup('c'.repeat(40));
-      jest.spyOn(context, 'diffSince').mockRejectedValue(new Error('Incremental diff unavailable'));
+      jest.spyOn(context, 'diffSince').mockRejectedValue(new ReviewGitBaselineMissingError());
       await expect(runner.run(claim)).rejects.toBe(tooLarge);
+    });
+
+    it('keeps a transient git failure retryable when the full diff is unavailable', async () => {
+      const { runner, context } = setup('c'.repeat(40));
+      const transient = new Error('Incremental diff unavailable');
+      jest.spyOn(context, 'diffSince').mockRejectedValue(transient);
+      await expect(runner.run(claim)).rejects.toBe(transient);
     });
 
     it('keeps a git timeout retryable when the full diff is unavailable', async () => {

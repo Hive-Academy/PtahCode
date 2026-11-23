@@ -1,7 +1,7 @@
 import { inject, injectable } from 'tsyringe';
 import { RepoIdentitySchema, RepoReviewConfigV1Schema, type GitHubDiff, type IGitHubReviewPort, type RepoIdentity } from '@ptah-extension/review-contracts';
 import { REVIEW_CORE_TOKENS } from '../../di/tokens';
-import { ReviewGitTimeoutError, ReviewWorktreeService } from '../context/review-worktree.service';
+import { ReviewGitBaselineMissingError, ReviewWorktreeService } from '../context/review-worktree.service';
 import { ReviewContextService } from '../context/review-context.service';
 import { IncrementalScopeService } from '../context/incremental-scope.service';
 import type { IncrementalScope } from '../context/incremental-scope.service';
@@ -108,8 +108,8 @@ export class ContextStageRunner {
     const incrementalDiff = previousHead ? previousHead === claim.headSha ? { patch: '', changedPaths: [] }
       : await this.context.diffSince(claim.repo, paths.src, previousHead, claim.headSha, workSignal).catch((error: unknown) => {
         // Without the full diff, a lost baseline (for example after a force-push) leaves nothing to review:
-        // keep the non-retryable diff-too-large failure instead of a retryable one. A git timeout stays retryable.
-        throw tooLarge !== undefined && !workSignal.aborted && !(error instanceof ReviewGitTimeoutError) ? tooLarge : error;
+        // keep the non-retryable diff-too-large failure. Any other git failure stays retryable.
+        throw tooLarge !== undefined && !workSignal.aborted && error instanceof ReviewGitBaselineMissingError ? tooLarge : error;
       }) : null;
     check();
     const fullPatch = diff?.patch ?? '';

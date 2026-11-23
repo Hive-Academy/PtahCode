@@ -1,4 +1,4 @@
-import { ReviewWorktreeService } from './review-worktree.service';
+import { ReviewGitBaselineMissingError, ReviewWorktreeService } from './review-worktree.service';
 import { ReviewContextService } from './review-context.service';
 import { ReviewChecksService } from './review-checks.service';
 import { ReviewDependenciesService } from './review-dependencies.service';
@@ -18,6 +18,17 @@ describe('review exact SHA context', () => {
     expect(result.changedPaths).toEqual(['src/new.ts']);
     expect(runner.run).toHaveBeenCalledWith(repo, 'git',
       ['diff', '--no-ext-diff', '--no-renames', 'b'.repeat(40), 'a'.repeat(40), '--'], '/repo', 60_000, undefined);
+  });
+  it('reports a missing baseline only when the prior head commit is absent', async () => {
+    const failed: ReviewCommandResult = { exitCode: 128, stdout: '', stderr: 'bad object', timedOut: false };
+    const gone: IReviewCommandRunner = { run: jest.fn(async () => failed) };
+    await expect(new ReviewContextService(gone).diffSince(repo, '/repo', 'b'.repeat(40), 'a'.repeat(40)))
+      .rejects.toBeInstanceOf(ReviewGitBaselineMissingError);
+    expect(gone.run).toHaveBeenCalledWith(repo, 'git', ['cat-file', '-e', `${'b'.repeat(40)}^{commit}`], '/repo', 60_000, undefined);
+    const transient: IReviewCommandRunner = { run: jest.fn(async (_repo, _cmd, args) => args[0] === 'cat-file' ? ok() : failed) };
+    const error = await new ReviewContextService(transient).diffSince(repo, '/repo', 'b'.repeat(40), 'a'.repeat(40)).catch((e: unknown) => e);
+    expect(error).not.toBeInstanceOf(ReviewGitBaselineMissingError);
+    expect(error).toMatchObject({ message: 'Incremental diff unavailable' });
   });
   const files: IReviewContextFiles = {
     mkdir: jest.fn(async () => undefined),
