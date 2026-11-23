@@ -365,7 +365,7 @@ P1 gate, run by the orchestrator after B13, before review:
 
 ### Task 4.2: Upstream client with redirect-safe fetch - PENDING
 
-## Batch 5: Gateway service and DI binding (C2, part 3) - IN_PROGRESS
+## Batch 5: Gateway service and DI binding (C2, part 3) - COMPLETE
 
 - Id: P1-B5 | Phase: P1 | Shape: logic
 - Recommended executor: backend-developer (subagent; reason: lanes disabled)

@@ -142,6 +142,9 @@ export const EXPECTED_RESOLVABLE_TOKENS = [
   ['USAGE_RECONCILIATION_TRIGGER', PLATFORM_TOKENS.USAGE_RECONCILIATION_TRIGGER],
   ['USAGE_RECONCILIATION_SERVICE', UsageReconciliationService],
   ['REPOSITORY_IDENTITY_BACKFILL', RepositoryIdentityBackfillService],
+  // MCP gateway (TASK_2026_979), bound by registerCliAgentRuntimeServices in
+  // phase 2 because Electron registers the auth secrets service in phase 1.
+  ['MCP_GATEWAY', PLATFORM_TOKENS.MCP_GATEWAY],
 ] as const;
 
 /**
