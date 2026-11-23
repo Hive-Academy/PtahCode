@@ -9,9 +9,9 @@ component sections C1-C14; each executor reads only its batch's components.
 | B2 | Lane store + selection blocks (C3, C5-B2) | backend-developer | B1 | COMPLETE | 0e492bbe8 |
 | B3 | Runner, stages, persistence, Electron gateway (C4, C5-B3, C6, C7, C8) | backend-developer | B2 | COMPLETE | 4a33ede04 |
 | B4 | RPC surface + rpc-surface specs (C1-B4, C2, C9) | backend-developer | B2, B3 | COMPLETE | 72c37376d |
-| B5 | Renderer store (C10) | frontend-developer | B4 | COMPLETE | (B5 commit) |
+| B5 | Renderer store (C10) | frontend-developer | B4 | COMPLETE | 27c89c2f4 |
 | B6 | Review lanes section components (C11, C12) | frontend-developer | B1 | COMPLETE | f0b779714 |
 | B7 | Run detail + D14 badge (C14) | frontend-developer | B1 | COMPLETE | 213cfc8cf |
-| B8 | Drawer shell on ptah-native-drawer (C13) | frontend-developer | B5, B6 | IN PROGRESS | |
+| B8 | Drawer shell on ptah-native-drawer (C13) | frontend-developer | B5, B6 | COMPLETE | (B8 commit) |
 
 Verify commands and acceptance criteria per batch: plan table, `implementation-plan.md:719-726`.

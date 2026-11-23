@@ -746,10 +746,6 @@
   "libs/frontend/onboarding/src/lib/shared/run-status-chip.component.ts": {
     "<dynamic>": 1
   },
-  "libs/frontend/review-runs-ui/src/lib/components/review-bot-identity.component.ts": {
-    "alert": 1,
-    "alert-warning": 1
-  },
   "libs/frontend/review-runs-ui/src/lib/components/review-run-detail.component.ts": {
     "<dynamic>": 3,
     "alert": 2,

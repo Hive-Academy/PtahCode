@@ -1,211 +1,255 @@
-    <div class="fixed inset-0 z-50 bg-black/60">
-      <aside
-        class="surface-1 absolute inset-y-0 right-0 w-full max-w-xl overflow-y-auto border-l border-base-300 p-5 shadow-xl"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="review-settings-title"
-        (keydown)="onKeydown($event)"
-      >
-        <header class="flex items-start justify-between gap-3">
-          <div>
-            <h2
-              id="review-settings-title"
-              class="text-xl font-semibold"
-              tabindex="-1"
-            >
-              Review settings
-            </h2>
-            <p class="text-sm text-base-content-muted">
-              Settings apply to the next run.
-            </p>
-          </div>
-          <button
-            type="button"
-            ptahButton
-            variant="ghost"
-            aria-label="Close review settings"
-            (click)="closed.emit()"
-          >
-            Close
-          </button>
-        </header>
-        @if (loadState() === 'loading') {
-          <ptah-state-panel class="mt-6 block" state="loading" title="Loading review settings" />
-        } @else if (loadState() === 'error') {
-          <ptah-state-panel
-            class="mt-6 block"
-            state="error"
-            title="Review settings are unavailable."
-            actionLabel="Retry"
-            (action)="retry.emit()"
-          />
-        } @else {
-          <div class="mt-6 space-y-6">
-            <ptah-review-repositories-editor
-              [draft]="draft()" [hasToken]="hasToken()"
-              [botConnected]="!!store.botIdentity()"
-              [newRepository]="newRepository()"
-              [repositoryError]="repositoryError()"
-              (removed)="removeRepository($event)"
-              (enabledChanged)="setRepositoryEnabled($event.repo, $event.event)"
-              (dryRunChanged)="setRepositoryDryRun($event.repo, $event.event)"
-              (pauseChanged)="setRepositoryPause($event.repo, $event.event)"
-              (newRepositoryChanged)="setNewRepository($event)"
-              (added)="addRepository()" />
-            <section>
-              <h3 class="font-semibold">Maintainer allowlist</h3>
-              <ptah-field
-                label="Your maintainer GitHub login for live permission attestation"
-                appearance="stacked"
-              >
-                <input
-                  id="review-attestor"
-                  ptahInput
-                  class="w-full"
-                  [value]="store.attestorLogin()"
-                  (input)="setAttestor($event)"
-                />
-              </ptah-field>
-              <ptah-field
-                label="GitHub logins, comma separated"
-                appearance="stacked"
-              >
-                <input
-                  id="review-maintainers"
-                  ptahInput
-                  class="w-full"
-                  [value]="draft().maintainerLogins.join(', ')"
-                  (input)="setLogins($event)"
-                  autocomplete="off"
-                />
-              </ptah-field>
-            </section>
-            <section class="grid gap-3 sm:grid-cols-2">
-              <div>
-                <h3 class="font-semibold">Minimum severity</h3>
-                <p class="text-sm">{{ minimumSeverity() }}</p>
-              </div>
-              <ptah-field label="Poll interval (minutes)">
-                <input
-                  type="number"
-                  min="1"
-                  max="1440"
-                  ptahInput
-                  class="w-full"
-                  [value]="draft().pollMinutes"
-                  (input)="setNumber('pollMinutes', $event)"
-                />
-              </ptah-field>
-              <ptah-field label="Max inline comments">
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
-                  ptahInput
-                  class="w-full"
-                  [value]="draft().maxNewInline"
-                  (input)="setNumber('maxNewInline', $event)"
-                />
-              </ptah-field>
-              <ptah-field label="Confidence floor">
-                <input
-                  type="number"
-                  min="0"
-                  max="1"
-                  step="0.01"
-                  ptahInput
-                  class="w-full"
-                  [value]="draft().confidenceFloor"
-                  (input)="setNumber('confidenceFloor', $event)"
-                />
-              </ptah-field>
-              <ptah-field label="Lane cap per PR">
-                <input
-                  type="number"
-                  min="1"
-                  max="6"
-                  ptahInput
-                  class="w-full"
-                  [value]="draft().laneCapPerPr"
-                  (input)="setNumber('laneCapPerPr', $event)"
-                />
-              </ptah-field>
-            </section>
-            <ptah-review-bot-identity [hasToken]="hasToken()"
-              (submitted)="submitToken($event)"
-              (removeRequested)="confirmation.set('remove-token')" />
-            <section>
-              <label class="flex items-center gap-2 text-sm"
-                ><input
-                  type="checkbox"
-                  ptahToggle
-                  [checked]="draft().globalPublicationPaused"
-                  (change)="setGlobalPause($event)"
-                />Pause all publication</label
-              >
-            </section>
-            <section>
-              <h3 class="font-semibold">Effective repository configuration</h3>
-              <p class="text-sm text-base-content-muted">
-                Configuration details and validation state unavailable.
-              </p>
-            </section>
-            @if (saveError()) {
-              <p class="text-sm text-error" role="alert">{{ saveError() }}</p>
-            }
-            <button
-              type="button"
-              ptahButton
-              variant="primary"
-              size="md"
-              [disabled]="saving()"
-              (click)="save.emit()"
-            >
-              {{ saving() ? 'Saving…' : 'Save review settings' }}
-            </button>
-          </div>
-        }
-      </aside>
-      @if (confirmation() === 'pause-off') {
-        <ptah-review-confirm-dialog
-          dialogId="review-resume-confirm"
-          title="Resume live publication?"
-          description="Turning pause off can allow this repository to publish comments on eligible pull requests. CodeRabbit remains enabled."
-          confirmLabel="Resume publication"
-          [requirePermissions]="true"
-          (cancelled)="confirmation.set(null)"
-          (confirmed)="confirmPauseOff()"
-        />
-      }
-      @if (confirmation() === 'live-enable') {
-        <ptah-review-confirm-dialog
-          dialogId="review-live-enable-confirm"
-          title="Enable live publication?"
-          description="Confirm the bot token permissions for this repository before saving."
-          confirmLabel="Enable live publication"
-          [requirePermissions]="true"
-          (cancelled)="confirmation.set(null)"
-          (confirmed)="confirmLiveEnable()"
-        />
-      }
-      @if (confirmation() === 'remove-token') {
-        <ptah-review-confirm-dialog
-          dialogId="review-remove-token-confirm"
-          title="Remove bot connection?"
-          description="Future live publication will stop until another bot token is connected."
-          confirmLabel="Remove connection"
-          (cancelled)="confirmation.set(null)"
-          (confirmed)="confirmRemoveToken()"
-        />
-      }
-      @if (confirmation() === 'replace-token') {
-        <ptah-review-confirm-dialog
-          dialogId="review-replace-token-confirm"
-          title="Replace bot connection?"
-          description="Future live publication will use the new bot token."
-          confirmLabel="Replace connection"
-          (cancelled)="confirmation.set(null)"
-          (confirmed)="confirmReplaceToken()"
-        />
-      }
+<ptah-native-drawer
+  [isOpen]="true"
+  widthClass="w-full max-w-xl"
+  ariaLabel="Review settings"
+  [showCloseButton]="false"
+  [closeOnBackdrop]="false"
+  (opened)="focusTitle()"
+  (closed)="closed.emit()"
+>
+  <div drawer-header class="flex items-start gap-2">
+    <lucide-angular
+      [img]="GitPullRequestIcon"
+      class="mt-0.5 size-4 shrink-0 text-base-content-muted"
+      aria-hidden="true"
+    />
+    <div class="min-w-0 flex-1">
+      <h2 id="review-settings-title" class="text-sm font-semibold" tabindex="-1">
+        Review settings
+      </h2>
+      <p class="text-xs text-base-content-muted">Settings apply to the next run.</p>
     </div>
+    <button
+      type="button"
+      ptahIconButton
+      variant="ghost"
+      size="sm"
+      label="Close review settings"
+      (click)="closed.emit()"
+    >
+      <lucide-angular [img]="XIcon" class="size-4" aria-hidden="true" />
+    </button>
+  </div>
+
+  @if (loadState() === 'loading') {
+    <ptah-state-panel class="block" state="loading" title="Loading review settings" />
+  } @else if (loadState() === 'error') {
+    <ptah-state-panel
+      class="block"
+      state="error"
+      title="Review settings are unavailable."
+      actionLabel="Retry"
+      (action)="retry.emit()"
+    />
+  } @else {
+    <ptah-review-repositories-editor
+      class="block"
+      [draft]="draft()"
+      [hasToken]="hasToken()"
+      [botConnected]="!!store.botIdentity()"
+      [newRepository]="newRepository()"
+      [repositoryError]="repositoryError()"
+      (removed)="removeRepository($event)"
+      (enabledChanged)="setRepositoryEnabled($event.repo, $event.event)"
+      (dryRunChanged)="setRepositoryDryRun($event.repo, $event.event)"
+      (pauseChanged)="setRepositoryPause($event.repo, $event.event)"
+      (newRepositoryChanged)="setNewRepository($event)"
+      (added)="addRepository()"
+    />
+
+    <section class="mt-5 border-t border-base-300 pt-5" aria-labelledby="review-maintainers-h">
+      <div class="flex items-center gap-2">
+        <lucide-angular [img]="UsersIcon" class="size-4 text-base-content-muted" aria-hidden="true" />
+        <h3 id="review-maintainers-h" class="text-sm font-semibold">Maintainers</h3>
+      </div>
+      <p class="mt-1 text-xs text-base-content-muted">Who may attest live publication.</p>
+      <div class="mt-3 space-y-3">
+        <ptah-field
+          label="Your maintainer GitHub login for live permission attestation"
+          appearance="stacked"
+        >
+          <input
+            id="review-attestor"
+            ptahInput
+            class="w-full"
+            autocomplete="off"
+            [value]="store.attestorLogin()"
+            (input)="setAttestor($event)"
+          />
+        </ptah-field>
+        <ptah-field label="GitHub logins, comma separated" appearance="stacked">
+          <input
+            id="review-maintainers"
+            ptahInput
+            class="w-full"
+            autocomplete="off"
+            [value]="draft().maintainerLogins.join(', ')"
+            (input)="setLogins($event)"
+          />
+        </ptah-field>
+      </div>
+    </section>
+
+    <section class="mt-5 border-t border-base-300 pt-5" aria-labelledby="review-thresholds-h">
+      <div class="flex items-center gap-2">
+        <lucide-angular [img]="SlidersIcon" class="size-4 text-base-content-muted" aria-hidden="true" />
+        <h3 id="review-thresholds-h" class="text-sm font-semibold">Review thresholds</h3>
+      </div>
+      <div class="mt-3">
+        <p class="text-sm font-medium">Minimum severity</p>
+        <p class="text-xs text-base-content-muted">Set in the repository review config.</p>
+      </div>
+      <div class="mt-3 grid grid-cols-1 gap-3 min-[520px]:grid-cols-2">
+        <ptah-field label="Poll interval (minutes)" appearance="stacked">
+          <input
+            type="number"
+            min="1"
+            max="1440"
+            ptahInput
+            class="w-full"
+            [value]="draft().pollMinutes"
+            (input)="setNumber('pollMinutes', $event)"
+          />
+        </ptah-field>
+        <ptah-field label="Max inline comments" appearance="stacked">
+          <input
+            type="number"
+            min="0"
+            max="100"
+            ptahInput
+            class="w-full"
+            [value]="draft().maxNewInline"
+            (input)="setNumber('maxNewInline', $event)"
+          />
+        </ptah-field>
+        <ptah-field label="Confidence floor" appearance="stacked">
+          <input
+            type="number"
+            min="0"
+            max="1"
+            step="0.01"
+            ptahInput
+            class="w-full"
+            [value]="draft().confidenceFloor"
+            (input)="setNumber('confidenceFloor', $event)"
+          />
+        </ptah-field>
+        <ptah-field label="Lane cap per PR" appearance="stacked">
+          <input
+            type="number"
+            min="1"
+            max="6"
+            ptahInput
+            class="w-full"
+            [value]="draft().laneCapPerPr"
+            (input)="setNumber('laneCapPerPr', $event)"
+          />
+        </ptah-field>
+      </div>
+    </section>
+
+    <ptah-review-lanes-section
+      class="block"
+      [lanes]="lanes()"
+      [listing]="laneListing()"
+      [listState]="laneListState()"
+      [saving]="saving()"
+      [saveError]="lanesSaveError()"
+      (lanesChanged)="lanesChanged.emit($event)"
+      (retry)="retryLanes.emit()"
+    />
+
+    <ptah-review-bot-identity
+      class="block"
+      [hasToken]="hasToken()"
+      (submitted)="submitToken($event)"
+      (removeRequested)="confirmation.set('remove-token')"
+    />
+
+    <section class="mt-5 border-t border-base-300 pt-5" aria-labelledby="review-publication-h">
+      <div class="flex items-center gap-2">
+        <lucide-angular [img]="SendIcon" class="size-4 text-base-content-muted" aria-hidden="true" />
+        <h3 id="review-publication-h" class="text-sm font-semibold">Publication</h3>
+      </div>
+      <label class="mt-3 flex items-center gap-2 text-sm">
+        <input
+          type="checkbox"
+          ptahToggle
+          [checked]="draft().globalPublicationPaused"
+          (change)="setGlobalPause($event)"
+        />
+        <lucide-angular [img]="PauseIcon" class="size-4 text-base-content-muted" aria-hidden="true" />
+        Pause all publication
+      </label>
+      <p class="mt-1 text-xs text-base-content-muted">Turning pause off asks for confirmation.</p>
+    </section>
+  }
+
+  @if (loadState() !== 'error') {
+    <div
+      drawer-footer
+      class="flex items-center justify-between gap-3 border-t border-base-300 bg-base-100 px-4 py-3"
+    >
+      @if (saveError()) {
+        <ptah-alert class="min-w-0" tone="error" [compact]="true" live="assertive">
+          {{ saveError() }}
+        </ptah-alert>
+      }
+      <button
+        type="button"
+        ptahButton
+        variant="primary"
+        size="md"
+        class="ml-auto shrink-0"
+        [disabled]="saving() || loadState() === 'loading'"
+        (click)="save.emit()"
+      >
+        <lucide-angular [img]="SaveIcon" class="size-4" aria-hidden="true" />
+        {{ saving() ? 'Saving…' : 'Save review settings' }}
+      </button>
+    </div>
+  }
+</ptah-native-drawer>
+
+@if (confirmation() === 'pause-off') {
+  <ptah-review-confirm-dialog
+    dialogId="review-resume-confirm"
+    title="Resume live publication?"
+    description="Turning pause off can allow this repository to publish comments on eligible pull requests. CodeRabbit remains enabled."
+    confirmLabel="Resume publication"
+    [requirePermissions]="true"
+    (cancelled)="confirmation.set(null)"
+    (confirmed)="confirmPauseOff()"
+  />
+}
+@if (confirmation() === 'live-enable') {
+  <ptah-review-confirm-dialog
+    dialogId="review-live-enable-confirm"
+    title="Enable live publication?"
+    description="Confirm the bot token permissions for this repository before saving."
+    confirmLabel="Enable live publication"
+    [requirePermissions]="true"
+    (cancelled)="confirmation.set(null)"
+    (confirmed)="confirmLiveEnable()"
+  />
+}
+@if (confirmation() === 'remove-token') {
+  <ptah-review-confirm-dialog
+    dialogId="review-remove-token-confirm"
+    title="Remove bot connection?"
+    description="Future live publication will stop until another bot token is connected."
+    confirmLabel="Remove connection"
+    (cancelled)="confirmation.set(null)"
+    (confirmed)="confirmRemoveToken()"
+  />
+}
+@if (confirmation() === 'replace-token') {
+  <ptah-review-confirm-dialog
+    dialogId="review-replace-token-confirm"
+    title="Replace bot connection?"
+    description="Future live publication will use the new bot token."
+    confirmLabel="Replace connection"
+    (cancelled)="confirmation.set(null)"
+    (confirmed)="confirmReplaceToken()"
+  />
+}
