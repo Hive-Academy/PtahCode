@@ -11,9 +11,10 @@
  */
 
 import { createHash } from 'node:crypto';
+import { PTAH_MCP_TOOL_PREFIX } from '@ptah-extension/platform-core';
 
-/** Longest gateway tool name: 64 minus `mcp__ptah__`. */
-export const GATEWAY_TOOL_NAME_MAX = 53;
+/** Longest gateway tool name: 64 minus {@link PTAH_MCP_TOOL_PREFIX} (53). */
+export const GATEWAY_TOOL_NAME_MAX = 64 - PTAH_MCP_TOOL_PREFIX.length;
 
 /** Longest base alias, before any collision suffix. */
 export const GATEWAY_ALIAS_MAX = 20;

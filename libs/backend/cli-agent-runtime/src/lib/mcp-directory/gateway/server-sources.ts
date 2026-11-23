@@ -29,16 +29,24 @@
  * ## Project approval
  *
  * A `.mcp.json` / `.vscode/mcp.json` entry is a repository file, so it is
- * served only when `approvedProjectMcpServers` names it, unless its name or
- * key matches a connector or an intent (the user created that server). An
- * unapproved entry is dropped before dedup, so it can never win a key and no
- * upstream connect is ever made for it.
+ * served only when `approvedProjectMcpServers` names it. A repository picks
+ * its own entry names, so a name equal to a connector's or an intent's grants
+ * nothing. An unapproved entry whose key matches a connector or an intent is
+ * kept only as a merge-only member of that server's dedup group: it never
+ * wins the key, so the user's own copy (and its URL and headers) is the one
+ * served, and the entry's name is still reported for CLI suppression. Every
+ * other unapproved entry is dropped before dedup, so no upstream connect is
+ * ever made for it.
  *
  * ## Env expansion
  *
- * `${VAR}` and `${VAR:-default}` in the URL and header values of intents and
- * file entries expand from the process env, as the Claude CLI does. An entry
- * that names an unset variable with no default is skipped.
+ * `${VAR}` and `${VAR:-default}` in the URL and header values of intents,
+ * `~/.claude.json` entries and APPROVED project entries expand from the
+ * process env, as the Claude CLI does: approval is the user's consent. An
+ * unapproved project entry is never expanded. One that references a variable
+ * is dropped as unapproved, so a repository cannot pull a secret such as
+ * `${GITHUB_TOKEN}` out of the Ptah process even to compute a dedup key. An
+ * entry that names an unset variable with no default is skipped.
  *
  * ## Cache
  *
@@ -148,6 +156,11 @@ interface Candidate {
   readonly authenticated: boolean;
   readonly resolveHeaders: () => Promise<Readonly<Record<string, string>>>;
   readonly refreshAuth?: () => Promise<boolean>;
+  /**
+   * An unapproved project entry kept only because its key matches a
+   * user-created server: it joins that dedup group but never wins it.
+   */
+  readonly mergeOnly?: true;
 }
 
 const FILE_ORIGINS: ReadonlySet<GatewayServerOrigin> = new Set([
@@ -215,12 +228,9 @@ export class GatewayServerSources {
     const intents = roots.flatMap((root) => this.intentCandidates(root));
     const claudeUser = roots.flatMap((root) => this.claudeUserCandidates(root));
 
-    const userKeys = new Set<string>();
-    const userNames = new Set<string>();
-    for (const candidate of [...connectors, ...intents]) {
-      userKeys.add(candidate.key);
-      userNames.add(candidate.serverName);
-    }
+    const userKeys = new Set<string>(
+      [...connectors, ...intents].map((candidate) => candidate.key),
+    );
 
     const approvedByRoot = new Map<string, ReadonlySet<string>>();
     for (const root of roots) {
@@ -232,21 +242,17 @@ export class GatewayServerSources {
     for (const file of PROJECT_FILES) {
       for (const root of roots) {
         const approved = approvedByRoot.get(root) ?? new Set<string>();
-        for (const candidate of this.projectFileCandidates(root, file)) {
-          if (
-            approved.has(candidate.serverName) ||
-            userNames.has(candidate.serverName) ||
-            userKeys.has(candidate.key)
-          ) {
+        for (const candidate of this.projectFileCandidates(
+          root,
+          file,
+          approved,
+        )) {
+          if (approved.has(candidate.serverName)) {
             projectFiles.push(candidate);
+          } else if (userKeys.has(candidate.key)) {
+            projectFiles.push({ ...candidate, mergeOnly: true });
           } else {
-            this.deps.logger?.debug(
-              'MCP gateway skipped an unapproved project server',
-              {
-                serverName: candidate.serverName,
-                origin: candidate.origin,
-              },
-            );
+            this.skippedUnapproved(candidate.serverName, candidate.origin);
           }
         }
       }
@@ -350,9 +356,15 @@ export class GatewayServerSources {
     );
   }
 
+  /**
+   * Candidates of one project file. Approved entries expand from the env. An
+   * unapproved entry is never expanded: one that references a variable is
+   * dropped here as unapproved, and the rest are built with no env.
+   */
   private projectFileCandidates(
     root: string,
     file: (typeof PROJECT_FILES)[number],
+    approved: ReadonlySet<string>,
   ): Candidate[] {
     if (root.trim() === '') return [];
     const text = (this.deps.readFile ?? readTextFile)(
@@ -369,18 +381,28 @@ export class GatewayServerSources {
       );
       return [];
     }
-    return Object.entries(map).flatMap(([name, raw]) =>
-      this.configCandidate(name, jsonToConfig(raw), file.origin),
-    );
+    return Object.entries(map).flatMap(([name, raw]) => {
+      const config = jsonToConfig(raw);
+      if (approved.has(name) || config.type === 'stdio') {
+        return this.configCandidate(name, config, file.origin);
+      }
+      if (referencesEnv(config)) {
+        this.skippedUnapproved(name, file.origin);
+        return [];
+      }
+      // No variable to expand: the empty env changes nothing.
+      return this.configCandidate(name, config, file.origin, {});
+    });
   }
 
   private configCandidate(
     serverName: string,
     config: McpServerConfig,
     origin: GatewayServerOrigin,
+    env: Readonly<Record<string, string | undefined>> = this.deps.env ??
+      process.env,
   ): Candidate[] {
     if (config.type === 'stdio') return [];
-    const env = this.deps.env ?? process.env;
     const url = expandEnv(config.url, env);
     const headers: Record<string, string> = {};
     const missing = new Set(url.missing);
@@ -417,6 +439,19 @@ export class GatewayServerSources {
     ];
   }
 
+  private skippedUnapproved(
+    serverName: string,
+    origin: GatewayServerOrigin,
+  ): void {
+    this.deps.logger?.debug(
+      'MCP gateway skipped an unapproved project server',
+      {
+        serverName,
+        origin,
+      },
+    );
+  }
+
   private skipped(
     serverName: string,
     origin: GatewayServerOrigin,
@@ -436,7 +471,11 @@ export class GatewayServerSources {
   }
 }
 
-/** One endpoint per key: the first authenticated candidate, else the first. */
+/**
+ * One endpoint per key: the first authenticated candidate, else the first.
+ * A merge-only candidate never wins; a group of merge-only candidates alone
+ * serves nothing.
+ */
 function dedupe(candidates: readonly Candidate[]): GatewayServerSet {
   const byKey = new Map<string, Candidate[]>();
   for (const candidate of candidates) {
@@ -447,7 +486,9 @@ function dedupe(candidates: readonly Candidate[]): GatewayServerSet {
   const endpoints: GatewayEndpoint[] = [];
   const fileNames = new Set<string>();
   for (const group of byKey.values()) {
-    const winner = group.find((c) => c.authenticated) ?? group[0];
+    const eligible = group.filter((c) => c.mergeOnly !== true);
+    const winner = eligible.find((c) => c.authenticated) ?? eligible[0];
+    if (winner === undefined) continue;
     endpoints.push(toEndpoint(winner));
     for (const candidate of group) {
       if (FILE_ORIGINS.has(candidate.origin))
@@ -477,6 +518,14 @@ function toEndpoint(candidate: Candidate): GatewayEndpoint {
 }
 
 const ENV_REFERENCE = /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/g;
+
+/** Whether a remote entry's URL or any header value names a variable. */
+function referencesEnv(config: McpServerConfig): boolean {
+  if (config.type === 'stdio') return false;
+  return [config.url, ...Object.values(config.headers ?? {})].some((text) =>
+    new RegExp(ENV_REFERENCE.source).test(text),
+  );
+}
 
 /**
  * Expand `${VAR}` and `${VAR:-default}` from `env`. An unset (or empty, for

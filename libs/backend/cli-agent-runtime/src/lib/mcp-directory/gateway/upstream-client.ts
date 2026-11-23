@@ -79,7 +79,12 @@ export interface UpstreamTool {
 export type UpstreamCallResult = Readonly<Record<string, unknown>>;
 
 export interface UpstreamClient {
-  /** Connect if not connected. Concurrent calls share one attempt. */
+  /**
+   * Connect if not connected. Concurrent calls share one attempt, which no
+   * caller's `signal` can cancel: a caller's abort only ends that caller's
+   * wait (rejecting with the signal's reason), and the attempt carries on
+   * for the others. `close()` cancels it.
+   */
   connect(signal?: AbortSignal): Promise<void>;
   /** Every tool the server lists, following pagination. Connects first. */
   listTools(signal?: AbortSignal): Promise<UpstreamTool[]>;
@@ -207,6 +212,8 @@ export const createUpstreamClient: UpstreamClientFactory = (options) =>
 class SdkUpstreamClient implements UpstreamClient {
   private client: Client | null = null;
   private connecting: Promise<Client> | null = null;
+  /** Cancels the shared connect attempt; only `close()` uses it. */
+  private connectAbort: AbortController | null = null;
 
   constructor(private readonly options: UpstreamClientOptions) {}
 
@@ -253,21 +260,35 @@ class SdkUpstreamClient implements UpstreamClient {
     const client = this.client;
     this.client = null;
     this.connecting = null;
+    this.connectAbort?.abort();
+    this.connectAbort = null;
     if (client !== null) await client.close();
   }
 
+  /**
+   * The live client, or the shared connect attempt. The attempt runs on an
+   * internal signal, so one caller's abort never fails it for the callers
+   * that joined it (M1).
+   */
   private connected(signal?: AbortSignal): Promise<Client> {
     if (this.client !== null) return Promise.resolve(this.client);
     if (this.connecting === null) {
-      const attempt = this.open(signal).finally(() => {
-        if (this.connecting === attempt) this.connecting = null;
+      const controller = new AbortController();
+      const attempt = this.open(controller.signal).finally(() => {
+        if (this.connecting === attempt) {
+          this.connecting = null;
+          this.connectAbort = null;
+        }
       });
       this.connecting = attempt;
+      this.connectAbort = controller;
     }
-    return this.connecting;
+    return signal === undefined
+      ? this.connecting
+      : abandonOnAbort(this.connecting, signal);
   }
 
-  private async open(signal?: AbortSignal): Promise<Client> {
+  private async open(signal: AbortSignal): Promise<Client> {
     const { endpoint, onToolsChanged, onUnauthorized, onDisconnected } =
       this.options;
     const fetch = createRedirectSafeFetch({
@@ -305,9 +326,47 @@ class SdkUpstreamClient implements UpstreamClient {
       await transport.close();
       throw error;
     }
+    if (signal.aborted) {
+      // `close()` ran while the handshake was finishing: do not resurrect a
+      // session the owner already closed.
+      await client.close();
+      throw new Error('MCP upstream connect was cancelled by close()');
+    }
     this.client = client;
     return client;
   }
+}
+
+/**
+ * `shared`, or a rejection with `signal`'s reason once it aborts. Leaves
+ * `shared` running, and handles its rejection, so an abandoned attempt never
+ * surfaces as an unhandled rejection.
+ */
+function abandonOnAbort<T>(
+  shared: Promise<T>,
+  signal: AbortSignal,
+): Promise<T> {
+  if (signal.aborted) {
+    shared.catch(() => {
+      // degradation-audit: optional-capability - this caller already left;
+      // the attempt's failure reaches every caller still waiting on it.
+    });
+    return Promise.reject(signal.reason);
+  }
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => reject(signal.reason);
+    signal.addEventListener('abort', onAbort, { once: true });
+    shared.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(error);
+      },
+    );
+  });
 }
 
 function createTransport(

@@ -13,8 +13,8 @@
  *
  * ## Caller policy (Hub 6)
  *
- * `listTools`, `callTool` and `status` apply {@link isGatewayScopePermitted}
- * first. A scope without a `workspaceRoot` gets nothing: the deny list and the
+ * `listTools`, `callTool` and `status` apply `isGatewayCallerPermitted`
+ * (platform-core, shared with the dispatcher's early skip) first. A scope without a `workspaceRoot` gets nothing: the deny list and the
  * project approvals cannot be read without one, so it fails closed.
  *
  * ## Cold start (Hub 3, S6)
@@ -23,9 +23,17 @@
  * awaits every such server together, bounded by one
  * {@link GATEWAY_COLD_START_BUDGET_MS} budget. A server still loading at the
  * deadline is omitted with detail `tools/list timed out after 12s` and keeps
- * loading; when it lands, `onToolsChanged` fires. Only the first list per
- * server waits; later lists serve the last good list and refresh in the
- * background.
+ * loading; when it lands, `onToolsChanged` fires. Only the first completed
+ * wait per server counts (one the caller aborted does not); later lists serve
+ * the last good list and refresh in the background.
+ *
+ * ## Pre-warm (M5)
+ *
+ * When the first `onToolsChanged` listener subscribes (the HTTP MCP server's
+ * start), the gateway resolves the `prewarmRoots` roots and starts loading
+ * their servers on the next macrotask, so the first session or cron run finds
+ * the lists loaded or in flight instead of paying the cold wait. It never
+ * blocks the subscriber, runs once per gateway, and only logs a failure.
  *
  * ## Failures
  *
@@ -49,21 +57,22 @@
  * duration and the status only; error text is redacted of the URL and key.
  */
 
-import type {
-  IDisposable,
-  IMcpGateway,
-  McpGatewayCallResult,
-  McpGatewayScope,
-  McpGatewayServerState,
-  McpGatewayServerStatus,
-  McpGatewayTool,
+import {
+  isGatewayCallerPermitted,
+  stripPtahMcpToolPrefix,
+  type IDisposable,
+  type IMcpGateway,
+  type McpGatewayCallResult,
+  type McpGatewayScope,
+  type McpGatewayServerState,
+  type McpGatewayServerStatus,
+  type McpGatewayTool,
 } from '@ptah-extension/platform-core';
 import {
   isMcpServerEnabled,
   PTAH_MCP_SERVER_NAME,
   type ICapabilityResolver,
 } from '@ptah-extension/shared';
-import { isGatewayScopePermitted } from './gateway-caller-policy';
 import {
   assignGatewayAliases,
   buildGatewayToolName,
@@ -99,7 +108,6 @@ export const GATEWAY_POLL_MS = GATEWAY_SOURCES_CACHE_MS;
 /** Most workspace roots remembered; the oldest is dropped first. */
 export const GATEWAY_MAX_ROOTS = 32;
 
-const HOST_PREFIX = 'mcp__ptah__';
 const NEEDS_AUTH_DETAIL = 'reconnect in Settings > Connectors';
 const MAX_ERROR_TEXT = 500;
 
@@ -110,6 +118,11 @@ export interface McpGatewayDeps {
   /** Defaults to the SDK client. */
   readonly clientFactory?: UpstreamClientFactory;
   readonly logger?: GatewaySourcesLogger;
+  /**
+   * Workspace roots to pre-warm when the first listener subscribes (M5).
+   * Read at pre-warm time, not at construction. Absent: no pre-warm.
+   */
+  readonly prewarmRoots?: () => readonly string[];
   /** Injectable clock for specs. */
   readonly now?: () => number;
 }
@@ -161,6 +174,7 @@ export class McpGateway implements IMcpGateway {
   private readonly clientFactory: UpstreamClientFactory;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private polling = false;
+  private prewarmed = false;
   private disposed = false;
 
   constructor(private readonly deps: McpGatewayDeps) {
@@ -170,11 +184,13 @@ export class McpGateway implements IMcpGateway {
   // ---- host-name registry ----------------------------------------------------
 
   registerHostToolNames(names: readonly string[]): void {
-    this.hostToolNames = new Set(names.map(stripHostPrefix));
+    this.hostToolNames = new Set(
+      names.map((name) => stripPtahMcpToolPrefix(name)),
+    );
   }
 
   isGatewayTool(name: string): boolean {
-    return !this.hostToolNames.has(stripHostPrefix(name));
+    return !this.hostToolNames.has(stripPtahMcpToolPrefix(name));
   }
 
   // ---- list ------------------------------------------------------------------
@@ -208,7 +224,7 @@ export class McpGateway implements IMcpGateway {
     if (root === null) {
       return errorResult('Gateway tools are not available to this caller.');
     }
-    const bare = stripHostPrefix(name);
+    const bare = stripPtahMcpToolPrefix(name);
     let route = this.roots.get(root)?.routes.get(bare);
     if (route === undefined) {
       // The caller may hold a list from before a restart or a refresh.
@@ -326,6 +342,7 @@ export class McpGateway implements IMcpGateway {
     if (this.disposed) return { dispose: () => undefined };
     this.listeners.add(listener);
     this.startPoll();
+    this.schedulePrewarm();
     return {
       dispose: () => {
         this.listeners.delete(listener);
@@ -347,7 +364,7 @@ export class McpGateway implements IMcpGateway {
   // ---- roots -----------------------------------------------------------------
 
   private permittedRoot(scope: McpGatewayScope): string | null {
-    if (this.disposed || !isGatewayScopePermitted(scope)) return null;
+    if (this.disposed || !isGatewayCallerPermitted(scope)) return null;
     const root = scope.workspaceRoot;
     return root === undefined || root.trim() === '' ? null : root;
   }
@@ -514,8 +531,13 @@ export class McpGateway implements IMcpGateway {
         !state.coldWaited && state.tools === null && !this.inBackoff(state),
     );
     if (waiting.length === 0) return;
-    for (const state of waiting) state.coldWaited = true;
-    const loads = Promise.all(waiting.map((state) => this.load(state)));
+    // `load` never rejects, so neither does `loads`.
+    let loadsDone = false;
+    const loads = Promise.all(waiting.map((state) => this.load(state))).then(
+      () => {
+        loadsDone = true;
+      },
+    );
 
     let timer: ReturnType<typeof setTimeout> | undefined;
     let onAbort: (() => void) | undefined;
@@ -537,6 +559,12 @@ export class McpGateway implements IMcpGateway {
       clearTimeout(timer);
       if (onAbort !== undefined) signal?.removeEventListener('abort', onAbort);
     }
+
+    // Only a completed wait (every load landed, or the budget ran out) uses up
+    // a server's cold wait. A wait the caller aborted leaves the next list to
+    // wait again (M6).
+    if (!loadsDone && !timedOut) return;
+    for (const state of waiting) state.coldWaited = true;
 
     for (const state of waiting) {
       if (state.loading === null) continue;
@@ -702,6 +730,38 @@ export class McpGateway implements IMcpGateway {
     return tools;
   }
 
+  // ---- pre-warm ----------------------------------------------------------------
+
+  /** Pre-warm once, on the next macrotask, so the subscriber never waits. */
+  private schedulePrewarm(): void {
+    if (this.prewarmed || this.deps.prewarmRoots === undefined) return;
+    this.prewarmed = true;
+    const timer = setTimeout(() => void this.prewarm(), 0);
+    timer.unref?.();
+  }
+
+  /** Resolve each root and start its servers' first loads. Never rejects. */
+  private async prewarm(): Promise<void> {
+    try {
+      const roots = this.deps.prewarmRoots?.() ?? [];
+      for (const root of roots) {
+        if (this.disposed) return;
+        if (root.trim() === '') continue;
+        const view = await this.refreshRoot(root);
+        if (view === null || this.disposed) continue;
+        for (const state of this.statesOf(view)) {
+          if (this.dueForBackgroundLoad(state)) void this.load(state);
+        }
+      }
+    } catch (error: unknown) {
+      // degradation-audit: reported - logged; pre-warm is an optimisation and
+      // the first list still loads every server under the cold-start budget.
+      this.deps.logger?.warn('MCP gateway pre-warm failed', {
+        error: errorName(error),
+      });
+    }
+  }
+
   // ---- polling and events ------------------------------------------------------
 
   private startPoll(): void {
@@ -753,10 +813,6 @@ export class McpGateway implements IMcpGateway {
   private now(): number {
     return (this.deps.now ?? Date.now)();
   }
-}
-
-function stripHostPrefix(name: string): string {
-  return name.startsWith(HOST_PREFIX) ? name.slice(HOST_PREFIX.length) : name;
 }
 
 function toolsFingerprint(tools: readonly UpstreamTool[]): string {

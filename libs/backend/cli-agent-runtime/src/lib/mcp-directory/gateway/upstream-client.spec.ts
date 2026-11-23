@@ -305,6 +305,53 @@ describe('createUpstreamClient (SDK over the redirect-safe fetch)', () => {
     await client.close();
   });
 
+  it("one caller's abort ends only its own wait, not the shared connect", async () => {
+    const server = fakeMcpServer();
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const fetch = jest.fn<Promise<Response>, [string | URL, RequestInit?]>(
+      async (url, init) => {
+        if (
+          typeof init?.body === 'string' &&
+          init.body.includes('"method":"initialize"')
+        ) {
+          await gate;
+        }
+        return server.fetch(url, init);
+      },
+    );
+    const client = createUpstreamClient({ endpoint: endpointWith(), fetch });
+    const caller = new AbortController();
+
+    const cancelled = client.callTool('first', {}, caller.signal);
+    const joiner = client.listTools();
+    caller.abort(new Error('caller went away'));
+
+    await expect(cancelled).rejects.toThrow('caller went away');
+    release();
+    await expect(joiner).resolves.toHaveLength(2);
+    const initializes = server.calls.filter(
+      (c) =>
+        typeof c.init.body === 'string' &&
+        c.init.body.includes('"method":"initialize"'),
+    );
+    expect(initializes).toHaveLength(1);
+    await client.close();
+  });
+
+  it('rejects at once for an already aborted caller and still connects for the next', async () => {
+    const { fetch } = fakeMcpServer();
+    const client = createUpstreamClient({ endpoint: endpointWith(), fetch });
+    const caller = new AbortController();
+    caller.abort(new Error('already gone'));
+
+    await expect(client.connect(caller.signal)).rejects.toThrow('already gone');
+    await expect(client.listTools()).resolves.toHaveLength(2);
+    await client.close();
+  });
+
   it('fails the connect when the server redirects to another origin', async () => {
     const { fetch, calls } = recordingFetch(() =>
       redirect(307, 'https://evil.example.net/mcp'),

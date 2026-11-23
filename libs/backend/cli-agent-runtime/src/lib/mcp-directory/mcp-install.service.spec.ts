@@ -806,6 +806,33 @@ describe('McpInstallService', () => {
       ]);
     });
 
+    it('uninstall of a managed server forgets the intent and reports it deferred, not refused', async () => {
+      makeLinkedWorktree();
+      const { svc } = warningsFor();
+      await svc.install(
+        'io.github.x/zernio',
+        'zernio',
+        { type: 'stdio', command: 'node' },
+        ['claude'],
+        tmp,
+      );
+      // A file Ptah may not touch here still names the key: no removal check.
+      writeMcpJson({ zernio: { command: 'node' } });
+
+      const results = await svc.uninstall('zernio', ['claude'], tmp);
+
+      expect(reconcileCalls).toBe(0);
+      expect(intents.has('zernio')).toBe(false);
+      expect(results).toEqual([
+        expect.objectContaining({
+          target: 'claude',
+          success: false,
+          deferred: true,
+          error: MCP_LINKED_WORKTREE_SKIP_COPY,
+        }),
+      ]);
+    });
+
     it('force uninstall leaves the config file alone: no facet remove, no .bak', async () => {
       writeMcpJson({ handwritten: { command: 'node' } });
       const before = fs.readFileSync(path.join(tmp, '.mcp.json'), 'utf-8');

@@ -20,6 +20,7 @@ import {
   PLATFORM_TOKENS,
   type IMcpGateway,
   type IOutputChannel,
+  type IWorkspaceProvider,
 } from '@ptah-extension/platform-core';
 import {
   CLAUDE_LANE_ACCOUNT_PERSISTENCE,
@@ -570,6 +571,10 @@ function createDeclarationInventory(c: DependencyContainer): McpInstallService {
  * HTTP MCP server (all resolved later) find it. A cached factory: nothing is
  * built until the first consumer resolves it, and the capability resolver is
  * looked up on each use, so building the gateway never builds the resolver.
+ *
+ * Pre-warm (M5): the gateway warms the host's active workspace root when its
+ * first listener subscribes (the HTTP MCP server's start). The workspace
+ * provider is read then, not here, and a host without one pre-warms nothing.
  */
 function registerMcpGateway(container: DependencyContainer): void {
   if (!container.isRegistered(TOKENS.AUTH_SECRETS_SERVICE, true)) return;
@@ -623,7 +628,16 @@ function registerMcpGateway(container: DependencyContainer): void {
         capabilities,
         logger,
       });
-      return new McpGateway({ sources, capabilities, logger });
+      const prewarmRoots = (): readonly string[] => {
+        if (!c.isRegistered(PLATFORM_TOKENS.WORKSPACE_PROVIDER, true)) {
+          return [];
+        }
+        const root = c
+          .resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER)
+          .getWorkspaceRoot();
+        return root === undefined || root === '' ? [] : [root];
+      };
+      return new McpGateway({ sources, capabilities, logger, prewarmRoots });
     }),
   });
 }

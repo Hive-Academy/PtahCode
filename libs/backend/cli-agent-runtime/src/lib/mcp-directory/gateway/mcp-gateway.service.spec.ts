@@ -71,6 +71,7 @@ interface Harness {
 function harness(
   endpoints: GatewayEndpoint[],
   behaviour: Record<string, FakeBehaviour> = {},
+  extraDeps: Partial<McpGatewayDeps> = {},
 ): Harness {
   let set: GatewayServerSet = { endpoints, servedFileServerNames: [] };
   let policy: Partial<EffectiveCapabilitySet> = {
@@ -117,6 +118,7 @@ function harness(
     capabilities,
     clientFactory: factory,
     logger,
+    ...extraDeps,
   };
   return {
     gateway: new McpGateway(deps),
@@ -365,6 +367,85 @@ describe('McpGateway', () => {
       await jest.advanceTimersByTimeAsync(1_000);
       controller.abort();
       await expect(pending).resolves.toEqual([]);
+      h.gateway.dispose();
+    });
+
+    it('an aborted first list does not use up the cold wait (M6)', async () => {
+      jest.useFakeTimers();
+      const h = harness([endpoint('slow')], {
+        slow: { listTools: delayed(5_000, [tool('b')]) },
+      });
+      const controller = new AbortController();
+      controller.abort();
+      await expect(
+        h.gateway.listTools(SESSION, controller.signal),
+      ).resolves.toEqual([]);
+
+      let listed: string[] | undefined;
+      void h.gateway.listTools(SESSION).then((tools) => {
+        listed = tools.map((t) => t.name);
+      });
+      await jest.advanceTimersByTimeAsync(5_000);
+      // The second list waited for the in-flight load instead of omitting it.
+      expect(listed).toEqual(['slow__b']);
+      expect(h.clients.get('slow')?.listTools).toHaveBeenCalledTimes(1);
+      h.gateway.dispose();
+    });
+  });
+
+  describe('pre-warm (M5)', () => {
+    it('loads the pre-warm roots after the first listener subscribes, without blocking it', async () => {
+      jest.useFakeTimers();
+      const prewarmRoots = jest.fn(() => [ROOT]);
+      const h = harness(
+        [endpoint('slow')],
+        { slow: { listTools: delayed(10_000, [tool('b')]) } },
+        { prewarmRoots },
+      );
+
+      const subscription = h.gateway.onToolsChanged(jest.fn());
+      // Subscribing returned before anything was read or connected.
+      expect(prewarmRoots).not.toHaveBeenCalled();
+      expect(h.sources.list).not.toHaveBeenCalled();
+
+      await jest.advanceTimersByTimeAsync(0);
+      expect(prewarmRoots).toHaveBeenCalledTimes(1);
+      expect(h.sources.list).toHaveBeenCalledWith(ROOT);
+      expect(h.clients.get('slow')?.listTools).toHaveBeenCalledTimes(1);
+
+      // A second subscriber does not pre-warm again.
+      h.gateway.onToolsChanged(jest.fn());
+      await jest.advanceTimersByTimeAsync(10_000);
+      expect(prewarmRoots).toHaveBeenCalledTimes(1);
+
+      // The first list finds the tools loaded and does not list again.
+      const tools = await h.gateway.listTools(SESSION);
+      expect(tools.map((t) => t.name)).toEqual(['slow__b']);
+      expect(h.clients.get('slow')?.listTools).toHaveBeenCalledTimes(1);
+      subscription.dispose();
+      h.gateway.dispose();
+    });
+
+    it('logs and carries on when the pre-warm roots cannot be read', async () => {
+      jest.useFakeTimers();
+      const h = harness(
+        [endpoint('zernio')],
+        {},
+        {
+          prewarmRoots: () => {
+            throw new Error('no workspace provider');
+          },
+        },
+      );
+      h.gateway.onToolsChanged(jest.fn());
+      await jest.advanceTimersByTimeAsync(0);
+
+      expect(h.logs).toContainEqual([
+        'MCP gateway pre-warm failed',
+        { error: 'Error' },
+      ]);
+      const tools = await h.gateway.listTools(SESSION);
+      expect(tools.map((t) => t.name)).toEqual(['zernio__search']);
       h.gateway.dispose();
     });
   });
