@@ -4,11 +4,22 @@ import {
   GATEWAY_BACKOFF_INITIAL_MS,
   GATEWAY_COLD_START_BUDGET_MS,
   GATEWAY_COLD_START_TIMEOUT_DETAIL,
+  GATEWAY_LIST_REFRESH_MS,
   GATEWAY_POLL_MS,
   McpGateway,
   type McpGatewayDeps,
 } from './mcp-gateway.service';
-import type { GatewayEndpoint, GatewayServerSet } from './server-sources';
+import type {
+  GatewayEndpoint,
+  GatewayRemoteEndpoint,
+  GatewayServerSet,
+  GatewayStdioEndpoint,
+} from './server-sources';
+import {
+  STDIO_RESTART_LIMIT_DETAIL,
+  type StdioClientOptions,
+  type StdioUpstreamClient,
+} from './stdio-server-host';
 import type {
   UpstreamClient,
   UpstreamClientOptions,
@@ -27,8 +38,8 @@ const BEARER = 'bearer-secret-token';
 
 function endpoint(
   serverName: string,
-  overrides: Partial<GatewayEndpoint> = {},
-): GatewayEndpoint {
+  overrides: Partial<GatewayRemoteEndpoint> = {},
+): GatewayRemoteEndpoint {
   const url = overrides.url ?? `https://${serverName}.example.com/mcp`;
   return {
     key: overrides.key ?? url,
@@ -41,6 +52,62 @@ function endpoint(
     resolveHeaders: async () => ({ Authorization: `Bearer ${BEARER}` }),
     ...overrides,
   };
+}
+
+function stdioEndpoint(serverName: string): GatewayStdioEndpoint {
+  return {
+    key: `stdio:${serverName}`,
+    serverName,
+    origin: 'intent',
+    baseAlias: serverName,
+    authenticated: false,
+    transport: 'stdio',
+    command: 'node',
+    args: ['server.js'],
+    env: { API_TOKEN: 'stdio-secret' },
+    cwd: ROOT,
+  };
+}
+
+interface FakeStdioHost {
+  createClient: jest.Mock<StdioUpstreamClient, [StdioClientOptions]>;
+  dispose: jest.Mock<Promise<void>, []>;
+  clients: Map<string, jest.Mocked<StdioUpstreamClient>>;
+  options: Map<string, StdioClientOptions>;
+}
+
+function fakeStdioHost(
+  behaviour: Record<string, FakeBehaviour> = {},
+): FakeStdioHost {
+  const clients = new Map<string, jest.Mocked<StdioUpstreamClient>>();
+  const options = new Map<string, StdioClientOptions>();
+  const createClient = jest.fn((opts: StdioClientOptions) => {
+    const fake = behaviour[opts.serverName] ?? {};
+    const client = {
+      connect: jest.fn(async () => undefined),
+      listTools: jest.fn(fake.listTools ?? (async () => [tool('search')])),
+      callTool: jest.fn(
+        fake.callTool ??
+          (async () => ({ content: [{ type: 'text', text: 'ok' }] })),
+      ),
+      close: jest.fn(async () => undefined),
+      stderrTail: jest.fn(() => []),
+      running: true,
+    } as unknown as jest.Mocked<StdioUpstreamClient>;
+    clients.set(opts.serverName, client);
+    options.set(opts.serverName, opts);
+    return client;
+  });
+  return {
+    createClient,
+    dispose: jest.fn(async () => undefined),
+    clients,
+    options,
+  };
+}
+
+function settle(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
 }
 
 function tool(name: string, description = `${name} tool`): UpstreamTool {
@@ -681,6 +748,102 @@ describe('McpGateway', () => {
     expect(logged).not.toContain(BEARER);
     expect(logged).not.toContain(SECRET_URL_KEY);
     expect(logged).not.toContain('example.com');
+  });
+
+  describe('stdio servers (C10)', () => {
+    it('serves a stdio endpoint through the stdio host, never the HTTP factory', async () => {
+      const host = fakeStdioHost();
+      const h = harness([stdioEndpoint('local')], {}, { stdioHost: host });
+      const names = (await h.gateway.listTools(SESSION)).map((t) => t.name);
+
+      expect(names).toEqual(['local__search']);
+      expect(h.factory).not.toHaveBeenCalled();
+      expect(host.createClient).toHaveBeenCalledTimes(1);
+      const [opts] = host.createClient.mock.calls[0];
+      expect(opts.serverName).toBe('local');
+      expect(opts.spec).toMatchObject({
+        command: 'node',
+        args: ['server.js'],
+        cwd: ROOT,
+      });
+
+      const result = await h.gateway.callTool(SESSION, 'local__search', {});
+      expect(result.isError).toBeUndefined();
+      expect(host.clients.get('local')?.callTool).toHaveBeenCalledWith(
+        'search',
+        {},
+        undefined,
+      );
+    });
+
+    it('never refreshes a connected stdio list by age, unlike a remote one', async () => {
+      let now = 1_000;
+      const host = fakeStdioHost();
+      const h = harness(
+        [stdioEndpoint('local'), endpoint('zernio')],
+        {},
+        { stdioHost: host, now: () => now },
+      );
+      await h.gateway.listTools(SESSION);
+      now += GATEWAY_LIST_REFRESH_MS + 1;
+      await h.gateway.listTools(SESSION);
+      await settle();
+
+      expect(host.clients.get('local')?.listTools).toHaveBeenCalledTimes(1);
+      expect(h.clients.get('zernio')?.listTools).toHaveBeenCalledTimes(2);
+    });
+
+    it('re-lists a stdio server when it reports a change', async () => {
+      const host = fakeStdioHost();
+      const h = harness([stdioEndpoint('local')], {}, { stdioHost: host });
+      await h.gateway.listTools(SESSION);
+      host.options.get('local')?.onToolsChanged?.();
+      await settle();
+      expect(host.clients.get('local')?.listTools).toHaveBeenCalledTimes(2);
+    });
+
+    it('reports a stdio server that used up its restarts as failed', async () => {
+      const host = fakeStdioHost({
+        local: { listTools: failing(STDIO_RESTART_LIMIT_DETAIL) },
+      });
+      const h = harness(
+        [stdioEndpoint('local'), endpoint('zernio')],
+        {},
+        { stdioHost: host },
+      );
+      const names = (await h.gateway.listTools(SESSION)).map((t) => t.name);
+
+      expect(names).toEqual(['zernio__search']);
+      expect(h.gateway.status(SESSION)).toEqual(
+        expect.arrayContaining([
+          {
+            key: 'local',
+            display: 'local',
+            status: 'failed',
+            detail: STDIO_RESTART_LIMIT_DETAIL,
+          },
+        ]),
+      );
+      expect(JSON.stringify(h.logs)).not.toContain('stdio-secret');
+    });
+
+    it('closes a stdio client its source no longer serves', async () => {
+      const host = fakeStdioHost();
+      const h = harness([stdioEndpoint('local')], {}, { stdioHost: host });
+      await h.gateway.listTools(SESSION);
+      h.setEndpoints([]);
+      await h.gateway.listTools(SESSION);
+      expect(host.clients.get('local')?.close).toHaveBeenCalled();
+    });
+
+    it('stops the stdio host on dispose', async () => {
+      const host = fakeStdioHost();
+      const h = harness([stdioEndpoint('local')], {}, { stdioHost: host });
+      await h.gateway.listTools(SESSION);
+      h.gateway.dispose();
+      expect(host.clients.get('local')?.close).toHaveBeenCalled();
+      expect(host.dispose).toHaveBeenCalledTimes(1);
+    });
   });
 
   it('closes every upstream and serves nothing after dispose', async () => {

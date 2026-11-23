@@ -7,10 +7,27 @@
  *    `ChatSessionService` used to merge itself).
  * 2. Ptah's install intents, `McpIntentStore.listFor(root)`.
  * 3. `~/.claude.json` (user and project scope).
- * 4. `{root}/.mcp.json`.
- * 5. `{root}/.vscode/mcp.json`.
+ * 4. Enabled Claude Code plugins' MCP declarations (D-U4), named
+ *    `plugin:<plugin>:<server>` as the Claude CLI names them.
+ * 5. `{root}/.mcp.json`.
+ * 6. `{root}/.vscode/mcp.json`.
  *
- * P1 serves `http` and `sse` entries only; `stdio` entries are skipped.
+ * `http`, `sse` and (P2) `stdio` entries are served. A stdio entry becomes a
+ * Ptah-run process per workspace root (`stdio-server-host.ts`), keyed by the
+ * root, the resolved command, the args and a hash of the expanded env.
+ *
+ * ## Plugins
+ *
+ * A plugin is enabled by `enabledPlugins` in `<claudeConfigDir>/settings.json`
+ * or `{root}/.claude/settings.local.json` (local wins). The repository's own
+ * `{root}/.claude/settings.json` can only turn a plugin OFF: a repository file
+ * grants nothing, as for project MCP entries. Its install root comes from
+ * `<claudeConfigDir>/plugins/installed_plugins.json` (an install scoped to
+ * another project is skipped). Its servers come from the root's `.mcp.json`
+ * and the `mcpServers` of `.claude-plugin/plugin.json` (a map, or paths
+ * inside the plugin root). `${CLAUDE_PLUGIN_ROOT}` expands to the install
+ * root. The user installed and enabled the plugin, so its entries are
+ * approved like `~/.claude.json` entries.
  *
  * ## Linked worktrees (A6)
  *
@@ -22,7 +39,8 @@
  *
  * ## Dedup
  *
- * Entries with the same {@link normalizeMcpUrl} key are one server. The
+ * Remote entries with the same {@link normalizeMcpUrl} key are one server, and
+ * stdio entries with the same root, command, args and env are one server. The
  * authenticated entry wins (a connector, or an entry with an `Authorization`
  * header), then source order.
  *
@@ -36,12 +54,13 @@
  * wins the key, so the user's own copy (and its URL and headers) is the one
  * served, and the entry's name is still reported for CLI suppression. Every
  * other unapproved entry is dropped before dedup, so no upstream connect is
- * ever made for it.
+ * ever made for it, and an unapproved stdio entry is never spawned.
  *
  * ## Env expansion
  *
- * `${VAR}` and `${VAR:-default}` in the URL and header values of intents,
- * `~/.claude.json` entries and APPROVED project entries expand from the
+ * `${VAR}` and `${VAR:-default}` in the URL and header values (stdio: the
+ * command, args and env values) of intents, `~/.claude.json` entries, plugin
+ * entries and APPROVED project entries expand from the
  * process env, as the Claude CLI does: approval is the user's consent. An
  * unapproved project entry is never expanded. One that references a variable
  * is dropped as unapproved, so a repository cannot pull a secret such as
@@ -65,14 +84,17 @@ import type {
 } from '@ptah-extension/shared';
 import { jsonToConfig } from '@ptah-extension/harness-sync';
 import type { HarnessMcpIntent } from '@ptah-extension/harness-sync';
+import { createHash } from 'crypto';
 import { existsSync, readFileSync } from 'fs';
-import { join } from 'path';
+import { homedir } from 'os';
+import { isAbsolute, join, relative, resolve as resolvePath } from 'path';
 import { worktreeMainRoot } from '../../cli-agents/git-main-checkout-root';
 import { readClaudeUserMcpServers } from '../claude-user-mcp.reader';
 import type { McpOAuthInstalledManifestStore } from '../oauth/mcp-oauth-installed-manifest';
 import type { McpOAuthService } from '../oauth/mcp-oauth.service';
 import { configAliasBase, connectorAliasBase } from './gateway-tool-naming';
 import { normalizeMcpUrl } from './mcp-url-normalize';
+import type { StdioServerSpec } from './stdio-server-host';
 import type { UpstreamEndpoint } from './upstream-client';
 
 /** How long a resolved server set is reused. */
@@ -84,14 +106,16 @@ export type GatewayServerOrigin =
   | 'smithery'
   | 'intent'
   | 'claude-user'
+  | 'claude-plugin'
   | 'project-mcp-json'
   | 'project-vscode-mcp-json';
 
-/** One upstream server the gateway serves. */
-export interface GatewayEndpoint extends UpstreamEndpoint {
+/** What every served server carries, whatever its transport. */
+export interface GatewayEndpointIdentity {
   /**
-   * Dedup key ({@link normalizeMcpUrl}). Internal only: it keeps the URL's
-   * query, which can carry a secret. Show {@link serverName} instead.
+   * Dedup key: {@link normalizeMcpUrl} for a remote server, `stdio:` and a
+   * hash for a stdio one. Internal only: a URL key keeps the query, which can
+   * carry a secret. Show {@link serverName} instead.
    */
   readonly key: string;
   /** The declaring source's own key for the server. */
@@ -101,6 +125,19 @@ export interface GatewayEndpoint extends UpstreamEndpoint {
   readonly baseAlias: string;
   readonly authenticated: boolean;
 }
+
+/** A remote (`http`/`sse`) server. */
+export interface GatewayRemoteEndpoint
+  extends GatewayEndpointIdentity, UpstreamEndpoint {}
+
+/** A Ptah-run stdio server; `cwd` is the workspace root it serves. */
+export interface GatewayStdioEndpoint
+  extends GatewayEndpointIdentity, StdioServerSpec {
+  readonly transport: 'stdio';
+}
+
+/** One upstream server the gateway serves. */
+export type GatewayEndpoint = GatewayRemoteEndpoint | GatewayStdioEndpoint;
 
 /** The resolved set for one workspace root. */
 export interface GatewayServerSet {
@@ -142,29 +179,23 @@ export interface GatewayServerSourcesDeps {
   readonly env?: Readonly<Record<string, string | undefined>>;
   readonly readFile?: (path: string) => string | null;
   readonly mainCheckoutRoot?: (root: string) => string | null;
+  /** The Claude account config dir; `~/.claude` by default. */
+  readonly claudeConfigDir?: string;
   readonly now?: () => number;
 }
 
-/** One declaration before dedup. */
-interface Candidate {
-  readonly key: string;
-  readonly serverName: string;
-  readonly origin: GatewayServerOrigin;
-  readonly transport: 'http' | 'sse';
-  readonly url: string;
-  readonly baseAlias: string;
-  readonly authenticated: boolean;
-  readonly resolveHeaders: () => Promise<Readonly<Record<string, string>>>;
-  readonly refreshAuth?: () => Promise<boolean>;
-  /**
-   * An unapproved project entry kept only because its key matches a
-   * user-created server: it joins that dedup group but never wins it.
-   */
-  readonly mergeOnly?: true;
-}
+/**
+ * One declaration before dedup. `mergeOnly` marks an unapproved project entry
+ * kept only because its key matches a user-created server: it joins that
+ * dedup group but never wins it.
+ */
+type Candidate = GatewayEndpoint & { mergeOnly?: true };
+
+type Env = Readonly<Record<string, string | undefined>>;
 
 const FILE_ORIGINS: ReadonlySet<GatewayServerOrigin> = new Set([
   'claude-user',
+  'claude-plugin',
   'project-mcp-json',
   'project-vscode-mcp-json',
 ]);
@@ -225,8 +256,13 @@ export class GatewayServerSources {
       mainRoot === null ? [workspaceRoot] : [workspaceRoot, mainRoot];
 
     const connectors = await this.connectorCandidates();
-    const intents = roots.flatMap((root) => this.intentCandidates(root));
-    const claudeUser = roots.flatMap((root) => this.claudeUserCandidates(root));
+    const intents = roots.flatMap((root) =>
+      this.intentCandidates(root, workspaceRoot),
+    );
+    const claudeUser = roots.flatMap((root) =>
+      this.claudeUserCandidates(root, workspaceRoot),
+    );
+    const plugins = this.pluginCandidates(workspaceRoot);
 
     const userKeys = new Set<string>(
       [...connectors, ...intents].map((candidate) => candidate.key),
@@ -246,6 +282,7 @@ export class GatewayServerSources {
           root,
           file,
           approved,
+          workspaceRoot,
         )) {
           if (approved.has(candidate.serverName)) {
             projectFiles.push(candidate);
@@ -258,7 +295,13 @@ export class GatewayServerSources {
       }
     }
 
-    return dedupe([...connectors, ...intents, ...claudeUser, ...projectFiles]);
+    return dedupe([
+      ...connectors,
+      ...intents,
+      ...claudeUser,
+      ...plugins,
+      ...projectFiles,
+    ]);
   }
 
   private mainRootOf(workspaceRoot: string): string | null {
@@ -329,7 +372,7 @@ export class GatewayServerSources {
 
   // ---- config-declared -------------------------------------------------------
 
-  private intentCandidates(root: string): Candidate[] {
+  private intentCandidates(root: string, cwd: string): Candidate[] {
     const { intents } = this.deps;
     if (intents === undefined) return [];
     let list: HarnessMcpIntent[];
@@ -344,16 +387,82 @@ export class GatewayServerSources {
       return [];
     }
     return list.flatMap((intent) =>
-      this.configCandidate(intent.serverKey, intent.config, 'intent'),
+      this.configCandidate(intent.serverKey, intent.config, 'intent', cwd),
     );
   }
 
-  private claudeUserCandidates(root: string): Candidate[] {
+  private claudeUserCandidates(root: string, cwd: string): Candidate[] {
     const options =
       this.deps.homeDir === undefined ? {} : { homeDir: this.deps.homeDir };
     return readClaudeUserMcpServers(root, options).flatMap((entry) =>
-      this.configCandidate(entry.serverKey, entry.config, 'claude-user'),
+      this.configCandidate(entry.serverKey, entry.config, 'claude-user', cwd),
     );
+  }
+
+  // ---- Claude Code plugins (D-U4) --------------------------------------------
+
+  private pluginCandidates(workspaceRoot: string): Candidate[] {
+    if (workspaceRoot.trim() === '') return [];
+    const read = this.deps.readFile ?? readTextFile;
+    const configDir =
+      this.deps.claudeConfigDir ??
+      join(this.deps.homeDir ?? homedir(), '.claude');
+    const enabled = this.enabledPlugins(read, configDir, workspaceRoot);
+    if (enabled.size === 0) return [];
+    const registry = read(join(configDir, 'plugins', 'installed_plugins.json'));
+    if (registry === null) return [];
+    const installs = installedPluginRoots(registry, enabled, workspaceRoot);
+    if (installs === null) {
+      this.malformed('claude-plugin');
+      return [];
+    }
+    const env = this.deps.env ?? process.env;
+    return installs.flatMap(({ pluginId, root }) => {
+      const pluginName = pluginId.split('@')[0] || pluginId;
+      const pluginEnv: Env = { ...env, CLAUDE_PLUGIN_ROOT: root };
+      return Object.entries(pluginServerMaps(read, root)).flatMap(
+        ([name, raw]) =>
+          this.configCandidate(
+            `plugin:${pluginName}:${name}`,
+            jsonToConfig(raw),
+            'claude-plugin',
+            workspaceRoot,
+            pluginEnv,
+            configAliasBase(name),
+          ),
+      );
+    });
+  }
+
+  /**
+   * Plugin ids enabled for `root`: user settings, then the repository's
+   * settings (which can only turn a plugin off), then local settings.
+   */
+  private enabledPlugins(
+    read: (path: string) => string | null,
+    configDir: string,
+    root: string,
+  ): ReadonlySet<string> {
+    const enabled = new Map<string, boolean>();
+    const tiers: ReadonlyArray<{ path: string; canEnable: boolean }> = [
+      { path: join(configDir, 'settings.json'), canEnable: true },
+      { path: join(root, '.claude', 'settings.json'), canEnable: false },
+      { path: join(root, '.claude', 'settings.local.json'), canEnable: true },
+    ];
+    for (const tier of tiers) {
+      const text = read(tier.path);
+      if (text === null) continue;
+      const map = parseEnabledPlugins(text);
+      if (map === null) {
+        this.malformed('claude-plugin');
+        continue;
+      }
+      for (const [id, value] of Object.entries(map)) {
+        if (value && !tier.canEnable) continue;
+        enabled.set(id, value);
+      }
+    }
+    return new Set([...enabled].filter(([, value]) => value).map(([id]) => id));
   }
 
   /**
@@ -365,6 +474,7 @@ export class GatewayServerSources {
     root: string,
     file: (typeof PROJECT_FILES)[number],
     approved: ReadonlySet<string>,
+    cwd: string,
   ): Candidate[] {
     if (root.trim() === '') return [];
     const text = (this.deps.readFile ?? readTextFile)(
@@ -373,25 +483,21 @@ export class GatewayServerSources {
     if (text === null) return [];
     const map = parseServerMap(text, file.rootKey);
     if (map === null) {
-      this.deps.logger?.warn(
-        'MCP gateway ignored a malformed MCP config file',
-        {
-          origin: file.origin,
-        },
-      );
+      this.malformed(file.origin);
       return [];
     }
     return Object.entries(map).flatMap(([name, raw]) => {
       const config = jsonToConfig(raw);
-      if (approved.has(name) || config.type === 'stdio') {
-        return this.configCandidate(name, config, file.origin);
+      if (approved.has(name)) {
+        return this.configCandidate(name, config, file.origin, cwd);
       }
       if (referencesEnv(config)) {
         this.skippedUnapproved(name, file.origin);
         return [];
       }
-      // No variable to expand: the empty env changes nothing.
-      return this.configCandidate(name, config, file.origin, {});
+      // No variable to expand: the empty env changes nothing. The caller
+      // drops it or keeps it merge-only; either way it is never spawned.
+      return this.configCandidate(name, config, file.origin, cwd, {});
     });
   }
 
@@ -399,10 +505,20 @@ export class GatewayServerSources {
     serverName: string,
     config: McpServerConfig,
     origin: GatewayServerOrigin,
-    env: Readonly<Record<string, string | undefined>> = this.deps.env ??
-      process.env,
+    cwd: string,
+    env: Env = this.deps.env ?? process.env,
+    baseAlias: string = configAliasBase(serverName),
   ): Candidate[] {
-    if (config.type === 'stdio') return [];
+    if (config.type === 'stdio') {
+      return this.stdioCandidate(
+        serverName,
+        config,
+        origin,
+        cwd,
+        env,
+        baseAlias,
+      );
+    }
     const url = expandEnv(config.url, env);
     const headers: Record<string, string> = {};
     const missing = new Set(url.missing);
@@ -429,7 +545,7 @@ export class GatewayServerSources {
         origin,
         transport: config.type,
         url: url.value,
-        baseAlias: configAliasBase(serverName),
+        baseAlias,
         authenticated: Object.entries(headers).some(
           ([name, value]) =>
             name.toLowerCase() === 'authorization' && value.trim() !== '',
@@ -437,6 +553,60 @@ export class GatewayServerSources {
         resolveHeaders: () => Promise.resolve(headers),
       },
     ];
+  }
+
+  private stdioCandidate(
+    serverName: string,
+    config: Extract<McpServerConfig, { type: 'stdio' }>,
+    origin: GatewayServerOrigin,
+    cwd: string,
+    env: Env,
+    baseAlias: string,
+  ): Candidate[] {
+    if (cwd.trim() === '') return [];
+    const missing = new Set<string>();
+    const expand = (text: string): string => {
+      const expanded = expandEnv(text, env);
+      expanded.missing.forEach((variable) => missing.add(variable));
+      return expanded.value;
+    };
+    const command = expand(config.command).trim();
+    const args = (config.args ?? []).map(expand);
+    const childEnv: Record<string, string> = {};
+    for (const [name, value] of Object.entries(config.env ?? {})) {
+      childEnv[name] = expand(value);
+    }
+    if (missing.size > 0) {
+      this.skipped(serverName, origin, 'unset environment variable', [
+        ...missing,
+      ]);
+      return [];
+    }
+    if (command === '') {
+      this.skipped(serverName, origin, 'no command');
+      return [];
+    }
+    const resolved = resolveCommand(command, cwd);
+    return [
+      {
+        key: stdioKey(cwd, resolved, args, childEnv),
+        serverName,
+        origin,
+        transport: 'stdio',
+        command: resolved,
+        args,
+        env: childEnv,
+        cwd,
+        baseAlias,
+        authenticated: false,
+      },
+    ];
+  }
+
+  private malformed(origin: GatewayServerOrigin): void {
+    this.deps.logger?.warn('MCP gateway ignored a malformed MCP config file', {
+      origin,
+    });
   }
 
   private skippedUnapproved(
@@ -502,29 +672,48 @@ function dedupe(candidates: readonly Candidate[]): GatewayServerSet {
 }
 
 function toEndpoint(candidate: Candidate): GatewayEndpoint {
-  return {
-    key: candidate.key,
-    serverName: candidate.serverName,
-    origin: candidate.origin,
-    baseAlias: candidate.baseAlias,
-    authenticated: candidate.authenticated,
-    transport: candidate.transport,
-    url: candidate.url,
-    resolveHeaders: candidate.resolveHeaders,
-    ...(candidate.refreshAuth === undefined
-      ? {}
-      : { refreshAuth: candidate.refreshAuth }),
-  };
+  const endpoint: Candidate = { ...candidate };
+  delete endpoint.mergeOnly;
+  return endpoint;
+}
+
+/** `stdio:` and a hash of the root, the command, the args and the env. */
+function stdioKey(
+  cwd: string,
+  command: string,
+  args: readonly string[],
+  env: Readonly<Record<string, string>>,
+): string {
+  const envEntries = Object.entries(env).sort(([a], [b]) =>
+    a < b ? -1 : a > b ? 1 : 0,
+  );
+  const envHash = sha256Hex(JSON.stringify(envEntries));
+  return `stdio:${sha256Hex(JSON.stringify([cwd, command, args, envHash]))}`;
+}
+
+/** A relative path (`./bin/server`) resolves against the root; a bare name stays. */
+function resolveCommand(command: string, cwd: string): string {
+  if (isAbsolute(command) || !/[\\/]/.test(command)) return command;
+  return resolvePath(cwd, command);
+}
+
+function sha256Hex(text: string): string {
+  return createHash('sha256').update(text).digest('hex');
 }
 
 const ENV_REFERENCE = /\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}/g;
 
-/** Whether a remote entry's URL or any header value names a variable. */
+/** Whether an entry's URL, headers, command, args or env name a variable. */
 function referencesEnv(config: McpServerConfig): boolean {
-  if (config.type === 'stdio') return false;
-  return [config.url, ...Object.values(config.headers ?? {})].some((text) =>
-    new RegExp(ENV_REFERENCE.source).test(text),
-  );
+  const texts =
+    config.type === 'stdio'
+      ? [
+          config.command,
+          ...(config.args ?? []),
+          ...Object.values(config.env ?? {}),
+        ]
+      : [config.url, ...Object.values(config.headers ?? {})];
+  return texts.some((text) => new RegExp(ENV_REFERENCE.source).test(text));
 }
 
 /**
@@ -575,6 +764,121 @@ function parseServerMap(
     if (name !== '' && isPlainObject(value)) servers[name] = value;
   }
   return servers;
+}
+
+/** `enabledPlugins` of one settings file; `{}` when absent, null if malformed. */
+function parseEnabledPlugins(text: string): Record<string, boolean> | null {
+  const parsed = parseJsonObject(text);
+  if (parsed === null) return null;
+  const map = parsed['enabledPlugins'];
+  if (map === undefined) return {};
+  if (!isPlainObject(map)) return null;
+  const out: Record<string, boolean> = {};
+  for (const [id, value] of Object.entries(map)) {
+    if (typeof value === 'boolean') out[id] = value;
+  }
+  return out;
+}
+
+/**
+ * Install roots of the enabled plugins in an `installed_plugins.json` (v2:
+ * `plugins: { id: [{ installPath }] }`, v1: `plugins: { id: { installPath } }`).
+ * An install scoped to another project (`projectPath`) is skipped. Null when
+ * the file is malformed.
+ */
+function installedPluginRoots(
+  text: string,
+  enabled: ReadonlySet<string>,
+  workspaceRoot: string,
+): Array<{ pluginId: string; root: string }> | null {
+  const parsed = parseJsonObject(text);
+  const plugins = parsed?.['plugins'];
+  if (!isPlainObject(plugins)) return null;
+  const installs: Array<{ pluginId: string; root: string }> = [];
+  for (const [pluginId, entry] of Object.entries(plugins)) {
+    if (!enabled.has(pluginId)) continue;
+    const seen = new Set<string>();
+    for (const install of Array.isArray(entry) ? entry : [entry]) {
+      if (!isPlainObject(install)) continue;
+      const root = install['installPath'];
+      if (typeof root !== 'string' || root === '' || seen.has(root)) continue;
+      const projectPath = install['projectPath'];
+      if (
+        typeof projectPath === 'string' &&
+        !samePath(projectPath, workspaceRoot)
+      ) {
+        continue;
+      }
+      seen.add(root);
+      installs.push({ pluginId, root });
+    }
+  }
+  return installs;
+}
+
+/**
+ * A plugin's MCP declarations: `{root}/.mcp.json` (an `mcpServers` map or a
+ * bare map), then `mcpServers` of `.claude-plugin/plugin.json` (a map, or one
+ * or more JSON files inside the plugin root). The first name wins.
+ */
+function pluginServerMaps(
+  read: (path: string) => string | null,
+  root: string,
+): Record<string, Record<string, unknown>> {
+  const servers: Record<string, Record<string, unknown>> = {};
+  const addMap = (map: Record<string, unknown>): void => {
+    for (const [name, value] of Object.entries(map)) {
+      if (name === '' || name in servers || !isPlainObject(value)) continue;
+      if (!('command' in value) && !('url' in value)) continue;
+      servers[name] = value;
+    }
+  };
+  const addFile = (path: string): void => {
+    const text = read(path);
+    const parsed = text === null ? null : parseJsonObject(text);
+    if (parsed === null) return;
+    const nested = parsed['mcpServers'];
+    addMap(isPlainObject(nested) ? nested : parsed);
+  };
+  addFile(join(root, '.mcp.json'));
+  const manifestText = read(join(root, '.claude-plugin', 'plugin.json'));
+  const manifest = manifestText === null ? null : parseJsonObject(manifestText);
+  const declared = manifest?.['mcpServers'];
+  if (isPlainObject(declared)) addMap(declared);
+  const paths =
+    typeof declared === 'string'
+      ? [declared]
+      : Array.isArray(declared)
+        ? declared.filter((p): p is string => typeof p === 'string')
+        : [];
+  for (const rel of paths) {
+    const path = resolvePath(root, rel);
+    const inside = relative(root, path);
+    if (inside === '' || inside.startsWith('..') || isAbsolute(inside)) {
+      continue;
+    }
+    addFile(path);
+  }
+  return servers;
+}
+
+function parseJsonObject(text: string): Record<string, unknown> | null {
+  try {
+    const parsed: unknown = JSON.parse(text);
+    return isPlainObject(parsed) ? parsed : null;
+  } catch {
+    // degradation-audit: optional-capability - a malformed plugin or settings
+    // file drops that one source; the caller logs it and every other serves.
+    return null;
+  }
+}
+
+function samePath(a: string, b: string): boolean {
+  const left = resolvePath(a);
+  const right = resolvePath(b);
+  return process.platform === 'win32' || process.platform === 'darwin'
+    ? left.toLowerCase() === right.toLowerCase()
+    : left === right;
 }
 
 function readTextFile(path: string): string | null {

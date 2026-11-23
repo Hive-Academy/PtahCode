@@ -35,6 +35,15 @@
  * the lists loaded or in flight instead of paying the cold wait. It never
  * blocks the subscriber, runs once per gateway, and only logs a failure.
  *
+ * ## Stdio servers (C10)
+ *
+ * A `stdio` endpoint gets its client from {@link StdioServerHost} instead of
+ * the HTTP client factory, so it shares every state, back-off and naming rule
+ * below. The host adds its own restart cap and idle shutdown; a connected
+ * stdio server's list is refreshed on `list_changed` or a restart only, never
+ * by age, so a list does not restart a process that was stopped for idling.
+ * {@link dispose} stops every process tree.
+ *
  * ## Failures
  *
  * A failed server is `failed` (or `needs-auth` after an unrecoverable 401; the
@@ -83,6 +92,7 @@ import {
   type GatewayServerSources,
   type GatewaySourcesLogger,
 } from './server-sources';
+import { StdioServerHost } from './stdio-server-host';
 import {
   createUpstreamClient,
   type UpstreamCallResult,
@@ -117,6 +127,8 @@ export interface McpGatewayDeps {
   readonly capabilities: Pick<ICapabilityResolver, 'resolve'>;
   /** Defaults to the SDK client. */
   readonly clientFactory?: UpstreamClientFactory;
+  /** Runs stdio servers. Defaults to a host owned (and disposed) by the gateway. */
+  readonly stdioHost?: Pick<StdioServerHost, 'createClient' | 'dispose'>;
   readonly logger?: GatewaySourcesLogger;
   /**
    * Workspace roots to pre-warm when the first listener subscribes (M5).
@@ -129,7 +141,8 @@ export interface McpGatewayDeps {
 
 interface ServerState {
   readonly key: string;
-  readonly transport: UpstreamEndpoint['transport'];
+  readonly transport: GatewayEndpoint['transport'];
+  /** Empty for a stdio server. */
   readonly url: string;
   /** Latest endpoint for this key; the client reads its headers per request. */
   endpoint: GatewayEndpoint;
@@ -172,6 +185,7 @@ export class McpGateway implements IMcpGateway {
   private readonly listeners = new Set<() => void>();
   private hostToolNames: ReadonlySet<string> = new Set();
   private readonly clientFactory: UpstreamClientFactory;
+  private readonly stdioHost: Pick<StdioServerHost, 'createClient' | 'dispose'>;
   private pollTimer: ReturnType<typeof setInterval> | null = null;
   private polling = false;
   private prewarmed = false;
@@ -179,6 +193,8 @@ export class McpGateway implements IMcpGateway {
 
   constructor(private readonly deps: McpGatewayDeps) {
     this.clientFactory = deps.clientFactory ?? createUpstreamClient;
+    this.stdioHost =
+      deps.stdioHost ?? new StdioServerHost({ logger: deps.logger });
   }
 
   // ---- host-name registry ----------------------------------------------------
@@ -359,6 +375,13 @@ export class McpGateway implements IMcpGateway {
     for (const state of this.servers.values()) this.closeState(state);
     this.servers.clear();
     this.roots.clear();
+    this.stdioHost.dispose().catch((error: unknown) => {
+      // degradation-audit: reported - logged; every client was already told
+      // to stop its process tree above.
+      this.deps.logger?.warn('MCP gateway could not stop its stdio servers', {
+        error: errorName(error),
+      });
+    });
   }
 
   // ---- roots -----------------------------------------------------------------
@@ -427,7 +450,7 @@ export class McpGateway implements IMcpGateway {
     if (
       existing !== undefined &&
       existing.transport === endpoint.transport &&
-      existing.url === endpoint.url
+      existing.url === urlOf(endpoint)
     ) {
       existing.endpoint = endpoint;
       return;
@@ -437,36 +460,37 @@ export class McpGateway implements IMcpGateway {
   }
 
   private createState(endpoint: GatewayEndpoint): ServerState {
-    const proxy: UpstreamEndpoint = {
-      transport: endpoint.transport,
-      url: endpoint.url,
-      resolveHeaders: () => state.endpoint.resolveHeaders(),
-      refreshAuth: () =>
-        state.endpoint.refreshAuth === undefined
-          ? Promise.resolve(false)
-          : state.endpoint.refreshAuth(),
-    };
-    const client = this.clientFactory({
-      endpoint: proxy,
+    const callbacks = {
       onToolsChanged: () => this.onUpstreamListChanged(state),
-      onUnauthorized: () => {
-        state.unauthorized = true;
-        this.deps.sources.invalidate();
-      },
       onDisconnected: () => {
         state.stale = true;
       },
-      onTransportError: (error) => {
+      onTransportError: (error: Error) => {
         this.deps.logger?.debug('MCP gateway upstream transport error', {
           server: state.endpoint.serverName,
           error: errorName(error),
         });
       },
-    });
+    };
+    const client =
+      endpoint.transport === 'stdio'
+        ? this.stdioHost.createClient({
+            spec: endpoint,
+            serverName: endpoint.serverName,
+            ...callbacks,
+          })
+        : this.clientFactory({
+            endpoint: this.remoteProxy(endpoint, () => state.endpoint),
+            onUnauthorized: () => {
+              state.unauthorized = true;
+              this.deps.sources.invalidate();
+            },
+            ...callbacks,
+          });
     const state: ServerState = {
       key: endpoint.key,
       transport: endpoint.transport,
-      url: endpoint.url,
+      url: urlOf(endpoint),
       endpoint,
       client,
       status: 'pending',
@@ -483,6 +507,26 @@ export class McpGateway implements IMcpGateway {
       closed: false,
     };
     return state;
+  }
+
+  /**
+   * An endpoint whose headers come from the latest endpoint for its key, so a
+   * refreshed token is used without a reconnect.
+   */
+  private remoteProxy(
+    endpoint: UpstreamEndpoint,
+    latest: () => GatewayEndpoint,
+  ): UpstreamEndpoint {
+    const remote = (): UpstreamEndpoint | null => {
+      const current = latest();
+      return current.transport === 'stdio' ? null : current;
+    };
+    return {
+      transport: endpoint.transport,
+      url: endpoint.url,
+      resolveHeaders: () => remote()?.resolveHeaders() ?? Promise.resolve({}),
+      refreshAuth: () => remote()?.refreshAuth?.() ?? Promise.resolve(false),
+    };
   }
 
   private statesOf(view: RootView): ServerState[] {
@@ -590,10 +634,10 @@ export class McpGateway implements IMcpGateway {
       return false;
     }
     if (state.stale || state.tools === null) return true;
-    return (
-      state.status !== 'connected' ||
-      this.now() - state.listedAt >= GATEWAY_LIST_REFRESH_MS
-    );
+    if (state.status !== 'connected') return true;
+    // A stdio list changes only through `list_changed` or a restart.
+    if (state.transport === 'stdio') return false;
+    return this.now() - state.listedAt >= GATEWAY_LIST_REFRESH_MS;
   }
 
   /** List one server's tools. Never rejects; concurrent calls share a load. */
@@ -813,6 +857,10 @@ export class McpGateway implements IMcpGateway {
   private now(): number {
     return (this.deps.now ?? Date.now)();
   }
+}
+
+function urlOf(endpoint: GatewayEndpoint): string {
+  return endpoint.transport === 'stdio' ? '' : endpoint.url;
 }
 
 function toolsFingerprint(tools: readonly UpstreamTool[]): string {

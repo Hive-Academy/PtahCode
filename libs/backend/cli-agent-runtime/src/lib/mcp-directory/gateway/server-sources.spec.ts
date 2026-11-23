@@ -11,12 +11,30 @@ import {
   expandEnv,
   GATEWAY_SOURCES_CACHE_MS,
   GatewayServerSources,
+  type GatewayEndpoint,
+  type GatewayRemoteEndpoint,
+  type GatewayServerSet,
   type GatewayServerSourcesDeps,
+  type GatewayStdioEndpoint,
 } from './server-sources';
 import type { UpstreamClientFactory } from './upstream-client';
 
 const ROOT = join(tmpdir(), 'gw-root');
 const MAIN = join(tmpdir(), 'gw-main');
+const CLAUDE_DIR = join(tmpdir(), 'gw-claude');
+const PLUGIN = join(tmpdir(), 'gw-plugin-tools');
+
+function remotes(set: GatewayServerSet): GatewayRemoteEndpoint[] {
+  return set.endpoints.filter(
+    (e: GatewayEndpoint): e is GatewayRemoteEndpoint => e.transport !== 'stdio',
+  );
+}
+
+function stdios(set: GatewayServerSet): GatewayStdioEndpoint[] {
+  return set.endpoints.filter(
+    (e: GatewayEndpoint): e is GatewayStdioEndpoint => e.transport === 'stdio',
+  );
+}
 
 function intent(serverKey: string, config: McpServerConfig): HarnessMcpIntent {
   return { serverKey, config, targets: ['claude'] } as HarnessMcpIntent;
@@ -194,7 +212,7 @@ describe('GatewayServerSources', () => {
         ['smithery', 'http'],
         ['intent', 'sse'],
       ]);
-      expect(await set.endpoints[0].resolveHeaders()).toEqual({
+      expect(await remotes(set)[0].resolveHeaders()).toEqual({
         Authorization: 'Bearer smithery-key',
       });
       expect(set.endpoints[0].baseAlias).toBe('smithery');
@@ -223,7 +241,7 @@ describe('GatewayServerSources', () => {
           service: { getFreshAccessToken, refresh },
         },
       }).list(ROOT);
-      const [endpoint] = set.endpoints;
+      const [endpoint] = remotes(set);
 
       expect(await endpoint.resolveHeaders()).toEqual({
         Authorization: 'Bearer t1',
@@ -254,7 +272,7 @@ describe('GatewayServerSources', () => {
       }).list(ROOT);
 
       // The gateway builds one client per served endpoint.
-      for (const endpoint of set.endpoints) factory({ endpoint });
+      for (const endpoint of remotes(set)) factory({ endpoint });
 
       expect(set.endpoints.map((e) => e.serverName)).toEqual(['trusted']);
       expect(set.servedFileServerNames).toEqual(['trusted']);
@@ -281,7 +299,7 @@ describe('GatewayServerSources', () => {
         }),
       }).list(ROOT);
 
-      expect(set.endpoints.map((e) => [e.origin, e.url])).toEqual([
+      expect(remotes(set).map((e) => [e.origin, e.url])).toEqual([
         ['intent', 'https://one.example.com/mcp'],
       ]);
       expect(set.servedFileServerNames).toEqual([]);
@@ -330,7 +348,7 @@ describe('GatewayServerSources', () => {
       }).list(ROOT);
 
       expect(set.endpoints.map((e) => e.origin)).toEqual(['oauth']);
-      expect(set.endpoints.some((e) => e.url.includes('evil'))).toBe(false);
+      expect(remotes(set).some((e) => e.url.includes('evil'))).toBe(false);
       expect(read).not.toContain('GITHUB_TOKEN');
     });
 
@@ -361,18 +379,65 @@ describe('GatewayServerSources', () => {
       expect(set.endpoints.map((e) => [e.serverName, e.origin])).toEqual([
         ['docs', 'intent'],
       ]);
-      expect(await set.endpoints[0].resolveHeaders()).toEqual({});
+      expect(await remotes(set)[0].resolveHeaders()).toEqual({});
       // Its name is still suppressed in the CLI, which would serve it twice.
       expect(set.servedFileServerNames).toEqual(['repo-docs']);
     });
 
-    it('skips stdio entries in P1', async () => {
+    it('never serves an unapproved project stdio entry', async () => {
       const set = await sources({
-        intents: {
-          listFor: () => [intent('local', { type: 'stdio', command: 'node' })],
-        },
+        readFile: files({
+          [join(ROOT, '.mcp.json')]: {
+            mcpServers: { rogue: { command: 'node', args: ['evil.js'] } },
+          },
+        }),
       }).list(ROOT);
       expect(set.endpoints).toEqual([]);
+      expect(set.servedFileServerNames).toEqual([]);
+    });
+
+    it('drops an unapproved stdio entry that names a variable without reading it', async () => {
+      const read: string[] = [];
+      const env = new Proxy(
+        { GITHUB_TOKEN: 'ghp_secret' } as Record<string, string | undefined>,
+        {
+          get: (target, name) => {
+            if (typeof name === 'string') read.push(name);
+            return target[name as string];
+          },
+        },
+      );
+      const set = await sources({
+        env,
+        readFile: files({
+          [join(ROOT, '.mcp.json')]: {
+            mcpServers: {
+              rogue: {
+                command: 'node',
+                args: ['srv.js'],
+                env: { TOKEN: '${GITHUB_TOKEN}' },
+              },
+            },
+          },
+        }),
+      }).list(ROOT);
+      expect(set.endpoints).toEqual([]);
+      expect(read).not.toContain('GITHUB_TOKEN');
+    });
+
+    it('serves an approved project stdio entry and reports it for suppression', async () => {
+      const set = await sources({
+        capabilities: capabilities({ [ROOT]: ['local'] }),
+        readFile: files({
+          [join(ROOT, '.mcp.json')]: {
+            mcpServers: { local: { command: 'node', args: ['srv.js'] } },
+          },
+        }),
+      }).list(ROOT);
+      expect(stdios(set).map((e) => [e.serverName, e.origin, e.cwd])).toEqual([
+        ['local', 'project-mcp-json', ROOT],
+      ]);
+      expect(set.servedFileServerNames).toEqual(['local']);
     });
 
     it('ignores a malformed project file and keeps other sources', async () => {
@@ -404,7 +469,7 @@ describe('GatewayServerSources', () => {
         },
       }).list(ROOT);
 
-      const [endpoint] = set.endpoints;
+      const [endpoint] = remotes(set);
       expect(endpoint.url).toBe('https://env.example.com/mcp');
       expect(await endpoint.resolveHeaders()).toEqual({
         Authorization: 'Bearer abc',
@@ -455,7 +520,7 @@ describe('GatewayServerSources', () => {
         }),
       }).list(ROOT);
 
-      const [endpoint] = set.endpoints;
+      const [endpoint] = remotes(set);
       expect(set.endpoints).toHaveLength(1);
       expect(endpoint.url).toBe('https://env.example.com/mcp');
       expect(await endpoint.resolveHeaders()).toEqual({
@@ -550,6 +615,267 @@ describe('GatewayServerSources', () => {
         ROOT,
         MAIN,
       ]);
+    });
+  });
+
+  describe('stdio entries (C10)', () => {
+    it('serves a stdio entry with its expanded command, args and own env only', async () => {
+      const set = await sources({
+        env: { TOKEN: 'abc', ANTHROPIC_API_KEY: 'sk-ant-sentinel' },
+        intents: {
+          listFor: () => [
+            intent('local', {
+              type: 'stdio',
+              command: 'node',
+              args: ['srv.js', '--token=${TOKEN}'],
+              env: { API_TOKEN: '${TOKEN}', MODE: '${MODE:-prod}' },
+            }),
+          ],
+        },
+      }).list(ROOT);
+
+      const [endpoint] = stdios(set);
+      expect(endpoint).toMatchObject({
+        serverName: 'local',
+        origin: 'intent',
+        transport: 'stdio',
+        command: 'node',
+        args: ['srv.js', '--token=abc'],
+        env: { API_TOKEN: 'abc', MODE: 'prod' },
+        cwd: ROOT,
+        baseAlias: 'local',
+      });
+      expect(endpoint.key.startsWith('stdio:')).toBe(true);
+      // The key is a hash: it carries no argument or env value.
+      expect(endpoint.key).not.toContain('abc');
+      expect(Object.keys(endpoint.env)).not.toContain('ANTHROPIC_API_KEY');
+    });
+
+    it('dedupes identical stdio entries and keeps differently configured ones apart', async () => {
+      const node = (env?: Record<string, string>): McpServerConfig => ({
+        type: 'stdio',
+        command: 'node',
+        args: ['srv.js'],
+        ...(env === undefined ? {} : { env }),
+      });
+      const set = await sources({
+        intents: {
+          listFor: () => [
+            intent('a', node()),
+            intent('b', node()),
+            intent('c', node({ KEY: 'other' })),
+          ],
+        },
+      }).list(ROOT);
+      expect(set.endpoints.map((e) => e.serverName)).toEqual(['a', 'c']);
+    });
+
+    it('keys the same entry per workspace root', async () => {
+      const gateway = sources({
+        intents: {
+          listFor: () => [intent('a', { type: 'stdio', command: 'node' })],
+        },
+      });
+      const [one] = (await gateway.list(ROOT)).endpoints;
+      const [two] = (await gateway.list(MAIN)).endpoints;
+      expect(one.key).not.toBe(two.key);
+    });
+
+    it('resolves a relative command against the root and keeps a bare name', async () => {
+      const set = await sources({
+        intents: {
+          listFor: () => [
+            intent('rel', { type: 'stdio', command: './bin/server' }),
+            intent('bare', { type: 'stdio', command: 'uvx' }),
+          ],
+        },
+      }).list(ROOT);
+      expect(stdios(set).map((e) => e.command)).toEqual([
+        join(ROOT, 'bin', 'server'),
+        'uvx',
+      ]);
+    });
+
+    it('skips a stdio entry that names an unset variable', async () => {
+      const set = await sources({
+        intents: {
+          listFor: () => [
+            intent('a', {
+              type: 'stdio',
+              command: 'node',
+              env: { KEY: '${MISSING}' },
+            }),
+          ],
+        },
+      }).list(ROOT);
+      expect(set.endpoints).toEqual([]);
+    });
+  });
+
+  describe('Claude Code plugins (D-U4)', () => {
+    const registry = (
+      installs: Record<string, unknown>,
+    ): Record<string, unknown> => ({
+      [join(CLAUDE_DIR, 'plugins', 'installed_plugins.json')]: {
+        version: 2,
+        plugins: installs,
+      },
+    });
+    const pluginFiles = (): Record<string, unknown> => ({
+      [join(PLUGIN, '.mcp.json')]: {
+        mcpServers: {
+          db: {
+            command: '${CLAUDE_PLUGIN_ROOT}/bin/db',
+            args: ['--fast'],
+          },
+        },
+      },
+      [join(PLUGIN, '.claude-plugin', 'plugin.json')]: {
+        name: 'tools',
+        mcpServers: {
+          web: { type: 'http', url: 'https://web.example.com/mcp' },
+        },
+      },
+    });
+    const userEnabled = (value: boolean): Record<string, unknown> => ({
+      [join(CLAUDE_DIR, 'settings.json')]: {
+        enabledPlugins: { 'tools@market': value },
+      },
+    });
+
+    it('lists the servers of an enabled plugin', async () => {
+      const set = await sources({
+        claudeConfigDir: CLAUDE_DIR,
+        readFile: files({
+          ...userEnabled(true),
+          ...registry({ 'tools@market': [{ installPath: PLUGIN }] }),
+          ...pluginFiles(),
+        }),
+      }).list(ROOT);
+
+      expect(
+        set.endpoints.map((e) => [e.serverName, e.origin, e.transport]),
+      ).toEqual([
+        ['plugin:tools:db', 'claude-plugin', 'stdio'],
+        ['plugin:tools:web', 'claude-plugin', 'http'],
+      ]);
+      const [db] = stdios(set);
+      expect(db.command).toBe(`${PLUGIN}/bin/db`);
+      expect(db.cwd).toBe(ROOT);
+      expect(db.baseAlias).toBe('db');
+      expect(set.servedFileServerNames).toEqual([
+        'plugin:tools:db',
+        'plugin:tools:web',
+      ]);
+    });
+
+    it('lists nothing for a disabled or never-enabled plugin', async () => {
+      for (const settings of [userEnabled(false), {}]) {
+        const set = await sources({
+          claudeConfigDir: CLAUDE_DIR,
+          readFile: files({
+            ...settings,
+            ...registry({ 'tools@market': [{ installPath: PLUGIN }] }),
+            ...pluginFiles(),
+          }),
+        }).list(ROOT);
+        expect(set.endpoints).toEqual([]);
+      }
+    });
+
+    it('lets the repository settings turn a plugin off but never on', async () => {
+      const projectSettings = (value: boolean): Record<string, unknown> => ({
+        [join(ROOT, '.claude', 'settings.json')]: {
+          enabledPlugins: { 'tools@market': value },
+        },
+      });
+      const base = {
+        ...registry({ 'tools@market': [{ installPath: PLUGIN }] }),
+        ...pluginFiles(),
+      };
+      const onlyProject = await sources({
+        claudeConfigDir: CLAUDE_DIR,
+        readFile: files({ ...base, ...projectSettings(true) }),
+      }).list(ROOT);
+      expect(onlyProject.endpoints).toEqual([]);
+
+      const projectOff = await sources({
+        claudeConfigDir: CLAUDE_DIR,
+        readFile: files({
+          ...base,
+          ...userEnabled(true),
+          ...projectSettings(false),
+        }),
+      }).list(ROOT);
+      expect(projectOff.endpoints).toEqual([]);
+
+      const localOn = await sources({
+        claudeConfigDir: CLAUDE_DIR,
+        readFile: files({
+          ...base,
+          [join(ROOT, '.claude', 'settings.local.json')]: {
+            enabledPlugins: { 'tools@market': true },
+          },
+        }),
+      }).list(ROOT);
+      expect(localOn.endpoints).toHaveLength(2);
+    });
+
+    it('skips an install scoped to another project', async () => {
+      const set = await sources({
+        claudeConfigDir: CLAUDE_DIR,
+        readFile: files({
+          ...userEnabled(true),
+          ...registry({
+            'tools@market': [
+              { installPath: PLUGIN, scope: 'project', projectPath: MAIN },
+            ],
+          }),
+          ...pluginFiles(),
+        }),
+      }).list(ROOT);
+      expect(set.endpoints).toEqual([]);
+    });
+
+    it('reads manifest server files inside the plugin root only', async () => {
+      const set = await sources({
+        claudeConfigDir: CLAUDE_DIR,
+        readFile: files({
+          ...userEnabled(true),
+          ...registry({ 'tools@market': { installPath: PLUGIN } }),
+          [join(PLUGIN, '.claude-plugin', 'plugin.json')]: {
+            mcpServers: ['./mcp/servers.json', '../outside.json'],
+          },
+          [join(PLUGIN, 'mcp', 'servers.json')]: {
+            inside: { command: 'node' },
+          },
+          [join(PLUGIN, '..', 'outside.json')]: {
+            outside: { command: 'node' },
+          },
+        }),
+      }).list(ROOT);
+      expect(set.endpoints.map((e) => e.serverName)).toEqual([
+        'plugin:tools:inside',
+      ]);
+    });
+
+    it('ignores a malformed plugin registry and keeps other sources', async () => {
+      const warn = jest.fn();
+      const set = await sources({
+        claudeConfigDir: CLAUDE_DIR,
+        logger: { debug: jest.fn(), warn },
+        readFile: (path) =>
+          path === join(CLAUDE_DIR, 'plugins', 'installed_plugins.json')
+            ? '{"plugins": 3}'
+            : files(userEnabled(true))(path),
+        intents: {
+          listFor: () => [
+            intent('ok', { type: 'http', url: 'https://ok.example.com/mcp' }),
+          ],
+        },
+      }).list(ROOT);
+      expect(set.endpoints.map((e) => e.serverName)).toEqual(['ok']);
+      expect(warn).toHaveBeenCalled();
     });
   });
 
