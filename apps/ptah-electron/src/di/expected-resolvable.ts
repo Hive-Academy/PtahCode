@@ -41,6 +41,7 @@ import {
   REVIEW_LANE_TOKENS,
 } from '@ptah-extension/review-core';
 import { REVIEW_GITHUB_TOKENS } from '@ptah-extension/review-github';
+import { TASK_SPECS_TOKENS } from '@ptah-extension/task-specs';
 import { TASK_END_TOKENS } from '@ptah-extension/task-end-hook';
 import { PERSISTENCE_TOKENS } from '@ptah-extension/persistence-sqlite';
 import { CODEX_SIGN_IN_QUIT_HANDLE } from './codex-login-composition';
@@ -68,6 +69,7 @@ export const EXPECTED_RESOLVABLE = [
 
 /** Lib-owned tokens composed by Electron in addition to handler classes. */
 export const EXPECTED_RESOLVABLE_TOKENS = [
+  ['TASK_DIGEST', TASK_SPECS_TOKENS.TASK_DIGEST],
   ['USER_LAYER_MIRROR_SERVICE', USER_LAYER_COMPOSITION_TOKENS.USER_LAYER_MIRROR_SERVICE],
   ['SKILL_RECOMMENDATION_SERVICE', SKILL_RECOMMENDATION_SERVICE],
   ['SKILL_RANKING_SERVICE', SKILL_RANKING_SERVICE],

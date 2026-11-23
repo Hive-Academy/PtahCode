@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
+import { ChangeDetectionStrategy, Component, computed, input, output, signal } from '@angular/core';
 import { PtahButtonDirective } from '../button/button.directive';
 import { CHART_TEXT } from './chart-geometry';
 import { PtahChartSize, PtahChartTone, PtahStatTrend } from './chart.types';
@@ -10,6 +10,16 @@ export type PtahStatValueWrap = 'none' | 'break-words';
 export type PtahStatRadius = 'none' | 'xl' | '2xl';
 export type PtahStatHintStyle = 'default' | 'stat-desc';
 export type PtahStatLayout = 'default' | 'tile';
+export type PtahStatAccuracy = 'exact' | 'lower-bound' | 'approximate' | 'lower-bound-approximate';
+
+const ACCURACY_GLYPH: Readonly<Record<PtahStatAccuracy, string>> = {
+  exact: '',
+  'lower-bound': '≥',
+  approximate: '~',
+  'lower-bound-approximate': '≥~',
+};
+
+let nextDetailId = 0;
 /** Colour for the value text. `PtahChartTone` uses state tokens. The rest use the theme colours. */
 export type PtahStatValueTone =
   | PtahChartTone
@@ -58,12 +68,19 @@ const VALUE_TEXT: Readonly<Record<PtahChartSize, string>> = { xs: 'text-sm', sm:
     '[class.rounded-xl]': "(appearance() === 'surface' || layout() === 'tile') && radius() === 'xl'",
     '[attr.data-icon-placement]': "iconPlacement() === 'center-end' ? 'center-end' : null",
     '[attr.data-layout]': "layout() === 'tile' ? 'tile' : null",
-    '[attr.title]': 'title()',
+    '[attr.title]': 'detail() ? null : title()',
+    '[attr.tabindex]': 'detail() ? 0 : null',
+    '[attr.aria-describedby]': 'detail() ? detailId : null',
+    '(mouseenter)': 'openDetail()',
+    '(mouseleave)': 'leaveDetail()',
+    '(focus)': 'focusDetail()',
+    '(blur)': 'blurDetail()',
+    '(keydown.escape)': 'dismissDetail($event)',
     '[class.surface-2]': "appearance() === 'surface' || layout() === 'tile'",
     '[class.rounded-2xl]': "(appearance() === 'surface' || layout() === 'tile') && radius() === '2xl'",
     '[class.p-4]': "appearance() === 'surface' || layout() === 'tile'",
     '[class.min-w-0]': "appearance() === 'surface' || layout() === 'tile'",
-    '[class.overflow-hidden]': "appearance() === 'surface' || layout() === 'tile'",
+    '[class.overflow-hidden]': "!detail() && (appearance() === 'surface' || layout() === 'tile')",
   },
   styles: `
     :host { display: block; }
@@ -113,8 +130,9 @@ const VALUE_TEXT: Readonly<Record<PtahChartSize, string>> = { xs: 'text-sm', sm:
     } @else {
     <span class="flex items-baseline gap-2" [class.stat-value]="layout() === 'tile'">
       <ng-content select="[ptahStatMedia]" />
-      <span class="tabular-nums" [class]="valueClass()">{{ display() }}</span>
-      @if (unit() && hasValue()) { <span class="-ml-1 text-xs text-base-content-muted" data-testid="stat-unit">{{ unit() }}</span> }
+      <span class="tabular-nums" [class]="valueClass()" [attr.aria-hidden]="accessibleValue() !== undefined ? 'true' : null">@if (hasValue() && accuracyGlyph()) {<span class="text-[84%]">{{ accuracyGlyph() }}</span>}{{ display() }}</span>
+      @if (unit() && hasValue()) { <span class="-ml-1 text-xs text-base-content-muted" [attr.aria-hidden]="accessibleValue() !== undefined ? 'true' : null" data-testid="stat-unit">{{ unit() }}</span> }
+      @if (accessibleValue() !== undefined) { <span class="sr-only">{{ accessibleValue() }}</span> }
       @if (polarity(); as p) {
         @if (delta() || trend()) {
           <span class="inline-flex items-baseline gap-1 rounded-full border border-current px-2 text-xs tabular-nums"
@@ -134,7 +152,13 @@ const VALUE_TEXT: Readonly<Record<PtahChartSize, string>> = { xs: 'text-sm', sm:
     @if (hint()) { <span class="text-xs text-base-content-muted" [class.stat-desc]="hintStyle() === 'stat-desc' || layout() === 'tile'">{{ hint() }}</span> }
     <ng-content />
     }
-  </div>`,
+  </div>
+  @if (detail(); as detailText) {
+    <span role="tooltip" [id]="detailId" [hidden]="!detailOpen()"
+      class="surface-2 absolute start-0 top-full z-10 w-max max-w-full break-words rounded px-2 py-1 text-xs text-base-content shadow-md">
+      {{ detailText }}
+    </span>
+  }`,
 })
 export class PtahStatComponent {
   readonly label = input.required<string>();
@@ -151,6 +175,12 @@ export class PtahStatComponent {
   readonly hintStyle = input<PtahStatHintStyle>('default');
   readonly layout = input<PtahStatLayout>('default');
   readonly title = input<string | undefined>(undefined);
+  /** A keyboard-accessible tooltip for secondary detail. */
+  readonly detail = input<string | undefined>(undefined);
+  /** Prefix for an unmarked value. */
+  readonly accuracy = input<PtahStatAccuracy>('exact');
+  /** Full spoken value including accuracy, unit and any coverage detail. */
+  readonly accessibleValue = input<string | undefined>(undefined);
   /**
    * `card` (default) draws a small card around the stat. `plain` draws none.
    * `surface` uses the `surface-2` class with `rounded-xl` and `p-4`, as the
@@ -192,6 +222,11 @@ export class PtahStatComponent {
   /** The user pressed Retry in the error state. */
   readonly retry = output<void>();
 
+  protected readonly detailId = `ptah-stat-detail-${++nextDetailId}`;
+  protected readonly detailOpen = signal(false);
+  private detailFocused = false;
+  protected readonly accuracyGlyph = computed(() => ACCURACY_GLYPH[this.accuracy()]);
+
   readonly hasValue = computed(() => {
     const v = this.value();
     return typeof v === 'number' ? Number.isFinite(v) : v.trim() !== '';
@@ -220,6 +255,30 @@ export class PtahStatComponent {
     return [weight, size, color, wrap].filter(Boolean).join(' ');
   });
   readonly toneClass = computed(() => CHART_TEXT[this.tone()]);
+
+  protected openDetail(): void {
+    if (this.detail()) this.detailOpen.set(true);
+  }
+
+  protected leaveDetail(): void {
+    if (!this.detailFocused) this.detailOpen.set(false);
+  }
+
+  protected focusDetail(): void {
+    this.detailFocused = true;
+    this.openDetail();
+  }
+
+  protected blurDetail(): void {
+    this.detailFocused = false;
+    this.detailOpen.set(false);
+  }
+
+  protected dismissDetail(event: Event): void {
+    if (!this.detail() || !this.detailOpen()) return;
+    this.detailOpen.set(false);
+    event.stopPropagation();
+  }
 
   glyph(trend: PtahStatTrend): string {
     return GLYPH[trend];

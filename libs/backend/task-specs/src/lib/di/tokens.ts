@@ -26,6 +26,7 @@ export const TASK_SPECS_TOKENS = {
   TASK_SWEEP: Symbol.for('TaskSpecsSweep'),
   /** TaskIndexService — lazy start + watcher + debounce (Batch B). */
   TASK_INDEX_SERVICE: Symbol.for('TaskSpecsIndexService'),
+  TASK_DIGEST: Symbol.for('TaskSpecsDigest'),
 } as const;
 
 export type TaskSpecsDIToken = keyof typeof TASK_SPECS_TOKENS;

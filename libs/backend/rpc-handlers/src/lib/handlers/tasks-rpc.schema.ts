@@ -72,6 +72,11 @@ export const TasksGetParamsSchema = z.object({
   taskId: taskIdRef,
 });
 
+export const TasksGetDigestParamsSchema = z.object({
+  workspaceRoot,
+  taskId: taskIdRef,
+});
+
 /**
  * `file` is a CLOSED ENUM over the contract's document set, never a string.
  *

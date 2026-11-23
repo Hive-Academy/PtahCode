@@ -269,6 +269,30 @@ export {
   NOT_PRICED,
   nullCostLabel,
 } from './lib/molecules/session/session-stats-view';
+export {
+  cliContribution,
+  sdkContribution,
+  sessionTotal,
+  type CliCoverage,
+  type CliUsageRun,
+  type UsageAmount,
+  type UsageContribution,
+  type UsageMetric,
+  type UsageState,
+  type UsageTotal,
+} from './lib/molecules/session/session-usage-totals';
+export {
+  formatUsageCost,
+  formatUsageTokens,
+  usageDetailsText,
+} from './lib/molecules/session/session-usage-format';
+export {
+  orchestratorModel,
+  orchestratorUsage,
+  type OrchestratorUsageRow,
+} from './lib/molecules/session/orchestrator-usage';
+export { InspectorCacheTileComponent } from './lib/molecules/session/inspector-stats/inspector-cache-tile.component';
+export type { SessionUsageTotals } from './lib/molecules/session/session-stats-view';
 export { InspectorSessionStatsComponent } from './lib/molecules/session/inspector-stats/inspector-session-stats.component';
 export {
   InspectorLinkedSessionsComponent,

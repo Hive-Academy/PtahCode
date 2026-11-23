@@ -15,19 +15,20 @@ describe(InspectorCacheTileComponent.name, () => {
     acquire,
   } satisfies Pick<WallClockService, 'now' | 'acquire'>;
 
-  function render(cache: Cache) {
+  function render(cache: Cache, variant: 'tile' | 'detail' = 'tile') {
     TestBed.configureTestingModule({
       imports: [InspectorCacheTileComponent],
       providers: [{ provide: WallClockService, useValue: clock }],
     });
     const fixture = TestBed.createComponent(InspectorCacheTileComponent);
     fixture.componentRef.setInput('cache', cache);
+    fixture.componentRef.setInput('variant', variant);
     fixture.detectChanges();
     return fixture;
   }
 
   const bar = (root: HTMLElement) =>
-    root.querySelector<HTMLElement>('[data-testid="cache-bar"]');
+    root.querySelector<HTMLElement>('[data-testid="cache-bar"] [role="meter"] > div');
 
   beforeEach(() => {
     now.set(0);
@@ -50,12 +51,10 @@ describe(InspectorCacheTileComponent.name, () => {
       expect(root.textContent).toContain(start);
       expect(acquire).toHaveBeenCalledWith('second');
       expect(root.textContent).toContain('estimated');
-      expect(bar(root)?.parentElement?.getAttribute('aria-hidden')).toBe(
+      expect(bar(root)?.closest('ptah-meter')?.getAttribute('aria-hidden')).toBe(
         'true',
       );
-      expect(bar(root)?.style.backgroundColor).toBe(
-        'var(--ptah-gold, var(--ptah-accent-ink))',
-      );
+      expect(bar(root)?.classList.contains('bg-[var(--ptah-gold)]')).toBe(true);
       expect(bar(root)?.style.width).toBe('100%');
       expect(tile?.getAttribute('role')).toBe('group');
       expect(tile?.getAttribute('title')).toContain(
@@ -68,7 +67,8 @@ describe(InspectorCacheTileComponent.name, () => {
 
       now.set(expiresAt * 0.8);
       fixture.detectChanges();
-      expect(bar(root)?.style.backgroundColor).toBe('var(--state-ink-need)');
+      expect(bar(root)?.classList.contains('bg-state-need')).toBe(true);
+      expect(tile?.textContent).toContain('Expires soon');
       expect(parseFloat(bar(root)?.style.width ?? '')).toBeCloseTo(20);
 
       now.set(expiresAt - 1);
@@ -80,7 +80,7 @@ describe(InspectorCacheTileComponent.name, () => {
       now.set(expiresAt);
       fixture.detectChanges();
       expect(root.textContent).toContain('Expired');
-      expect(bar(root)?.style.backgroundColor).toBe('var(--state-ink-err)');
+      expect(bar(root)?.classList.contains('bg-state-err')).toBe(true);
       expect(bar(root)?.style.width).toBe('0%');
       expect(tile?.getAttribute('aria-label')).toBe(
         `Prompt cache ${ttl}. Cache expired. Estimated from the last request. The server can evict cached content early.`,
@@ -90,6 +90,17 @@ describe(InspectorCacheTileComponent.name, () => {
       expect(release).toHaveBeenCalledTimes(1);
     },
   );
+
+  it('exposes the detail variant with the same timer and a visible estimate explanation', () => {
+    const fixture = render({ ttl: '5m', lastRequestAt: 0, expiresAt: 300_000, idleCompactAt: 180_000 }, 'detail');
+    const root = fixture.nativeElement as HTMLElement;
+    expect(root.textContent).toContain('05:00');
+    expect(root.textContent).toContain('idle in 03:00');
+    expect(root.textContent).toContain('The server can evict cached content early');
+    expect(acquire).toHaveBeenCalledTimes(1);
+    fixture.destroy();
+    expect(release).toHaveBeenCalledTimes(1);
+  });
 
   it('updates seconds and keeps aria time at whole minutes', () => {
     const fixture = render({

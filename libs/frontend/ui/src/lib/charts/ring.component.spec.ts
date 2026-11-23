@@ -203,3 +203,18 @@ describe('PtahRingComponent inputs', () => {
     expect(render({ value: 9, size: 'stat', centerOnly: true }).textContent?.trim()).toBe('9%');
   });
 });
+
+it.each([
+  ['dot', 'h-[0.6875rem]', 'w-[0.6875rem]'],
+  ['inline', 'h-5', 'w-5'],
+])('renders the %s footprint with compact geometry and no visible center text', (size, height, width) => {
+  const el = render({ value: 50, size, centerText: 'Half', subText: 'used' });
+  const box = el.querySelector('span.relative');
+  expect(box?.classList.contains(height)).toBe(true);
+  expect(box?.classList.contains(width)).toBe(true);
+  expect(arc(el)?.getAttribute('stroke-width')).toBe('4');
+  expect(arc(el)?.getAttribute('r')).toBe('15');
+  expect(box?.querySelector('.absolute')?.classList.contains('hidden')).toBe(true);
+  expect(box?.querySelector('.absolute span:last-child')?.classList.contains('hidden')).toBe(true);
+  expect(el.querySelector('[role="meter"]')?.getAttribute('aria-valuetext')).toBe('Half used');
+});

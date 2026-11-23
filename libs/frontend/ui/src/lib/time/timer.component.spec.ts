@@ -108,3 +108,55 @@ describe('PtahTimerComponent', () => {
     expect(live()).toBe('Stopped');
   });
 });
+
+it('continues to derive a running duration from a Date start', () => {
+  const clock = new FakePtahClock(START + 5_000);
+  const fixture = setup(clock);
+  fixture.componentRef.setInput('startedAt', new Date(START));
+  fixture.detectChanges();
+  expect(timeText(fixture)).toBe('0:05');
+  expect(clock.holders).toBe(1);
+});
+
+it.each([null, 0, -1, Infinity, NaN])('shows unknown for a null start with duration %p', (durationMs) => {
+  const clock = new FakePtahClock(START);
+  const fixture = setup(clock);
+  fixture.componentRef.setInput('startedAt', null);
+  fixture.componentRef.setInput('durationMs', durationMs);
+  fixture.detectChanges();
+
+  const time = host(fixture).querySelector('time');
+  expect(timeText(fixture)).toBe('--:--');
+  expect(time?.classList.contains('text-base-content-muted')).toBe(true);
+  expect(time?.hasAttribute('datetime')).toBe(false);
+  expect(host(fixture).getAttribute('data-state')).toBe('unknown');
+  expect(clock.holders).toBe(0);
+});
+
+it('renders a valid static duration with or without a start and uses the description as its title', () => {
+  const clock = new FakePtahClock(START);
+  const fixture = setup(clock);
+  fixture.componentRef.setInput('durationMs', 65_000);
+  fixture.componentRef.setInput('description', 'Reported run time');
+  fixture.detectChanges();
+  expect(timeText(fixture)).toBe('1:05');
+  expect(clock.holders).toBe(0);
+  expect(host(fixture).querySelector('.ptah-time-live')?.textContent).toBe('');
+
+  fixture.componentRef.setInput('startedAt', null);
+  clock.time.set(START + 1_000);
+  fixture.detectChanges();
+  expect(timeText(fixture)).toBe('1:05');
+  expect(host(fixture).querySelector('time')?.getAttribute('title')).toBe('Reported run time');
+  expect(host(fixture).querySelector('time')?.getAttribute('datetime')).toBe('PT65S');
+  expect(clock.holders).toBe(0);
+});
+
+it('falls back to the running calculation when the explicit duration is invalid', () => {
+  const clock = new FakePtahClock(START + 5_000);
+  const fixture = setup(clock);
+  fixture.componentRef.setInput('durationMs', -1);
+  fixture.detectChanges();
+  expect(timeText(fixture)).toBe('0:05');
+  expect(clock.holders).toBe(1);
+});

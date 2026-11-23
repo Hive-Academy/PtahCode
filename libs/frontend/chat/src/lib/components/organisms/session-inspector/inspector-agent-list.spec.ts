@@ -1,7 +1,6 @@
 import type { SessionAgent } from '../../../services/session-agents/session-agent-roster';
 import {
   agentListRow,
-  agentListTotal,
   inOutText,
   normalizeAgentKey,
   orderAgentList,
@@ -48,50 +47,7 @@ function row(
 }
 
 describe('inspector agent list', () => {
-  it('sums known numeric usage from every row', () => {
-    const total = agentListTotal([
-      row('orchestrator', 'done', 'orchestrator', {
-        ...NO_USAGE,
-        tokens: 100,
-        cost: 0.1,
-        costEstimated: false,
-      }),
-      row('cli:one', 'done', 'cli', {
-        ...NO_USAGE,
-        tokens: 200,
-        cost: 0.2,
-        costEstimated: false,
-      }),
-    ]);
-    expect(total.tokens).toBe('300');
-    expect(total.cost).toBe('$0.30');
-    expect(total.title).toBe(
-      'Total of 2 agents · 0 without token data · 0 without cost data',
-    );
-  });
-
-  it('marks missing or partial values as lower bounds and estimated cost', () => {
-    const total = agentListTotal([
-      row('a', 'done', 'cli', {
-        ...NO_USAGE,
-        tokens: 100,
-        tokensPartial: true,
-        cost: 0.1,
-      }),
-      row('b', 'done'),
-    ]);
-    expect(total.tokens).toBe('≥ 100');
-    expect(total.cost).toBe('≥ ~$0.10');
-    expect(total.title).toContain('1 without token data · 1 without cost data');
-  });
-
-  it('uses a dash when no agent reports a value', () => {
-    const total = agentListTotal([row('a', 'done')]);
-    expect(total.tokens).toBe('—');
-    expect(total.cost).toBe('—');
-  });
-
-  it('shows "Not priced" for a model without a published rate, row and total', () => {
+  it('shows "Not priced" for a model without a published rate', () => {
     const unpriced = row('orchestrator', 'done', 'orchestrator', {
       ...NO_USAGE,
       tokens: 100,
@@ -100,9 +56,6 @@ describe('inspector agent list', () => {
     });
     expect(unpriced.cost).toBe('Not priced');
     expect(unpriced.usageLabel).toContain('Cost not priced');
-    expect(agentListTotal([unpriced]).cost).toBe('Not priced');
-    // A lane with no cost data beside it keeps the total unreported.
-    expect(agentListTotal([unpriced, row('cli:one', 'done')]).cost).toBe('—');
   });
 
   it('keeps a priced cost over the not-priced flag', () => {
@@ -131,7 +84,7 @@ describe('inspector agent list', () => {
     expect(result.usageLabel).toContain('Codex · reviewer');
   });
   it('shows elapsed time without converting an unknown duration to zero', () => {
-    expect(row('a', 'running').time).toBe('—');
+    expect(row('a', 'running').time).toBe('--:--');
     const timed = agentListRow({
       agent: row('b', 'done').agent,
       secondary: '',
@@ -150,7 +103,7 @@ describe('inspector agent list', () => {
     expect(inOutText(null, null)).toBeNull();
   });
 
-  it('orders live agents, then the Orchestrator, then finished ones', () => {
+  it('orders the Orchestrator, needs you, live, then remaining lanes in store order', () => {
     const ordered = orderAgentList(
       row('orchestrator', 'done', 'orchestrator'),
       [
@@ -158,12 +111,32 @@ describe('inspector agent list', () => {
         row('b', 'running'),
         row('c', 'queued'),
         row('d', 'failed'),
+        row('e', 'waiting'),
+        {
+          ...row('f', 'done'),
+          requests: [{
+            agentId: 'f',
+            requestId: 'permission',
+            kind: 'permission',
+            source: 'lane',
+            ownerKey: 'f',
+            ownerName: 'f',
+            toolName: null,
+            command: 'Run',
+            questionPreview: null,
+            timestamp: 0,
+          }],
+        },
+        row('g', 'starting'),
       ],
     );
     expect(ordered.map((r) => r.key)).toEqual([
+      'orchestrator',
+      'e',
+      'f',
       'b',
       'c',
-      'orchestrator',
+      'g',
       'a',
       'd',
     ]);

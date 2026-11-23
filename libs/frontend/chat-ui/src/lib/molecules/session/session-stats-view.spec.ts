@@ -1,5 +1,5 @@
 import type { SessionStatsEntry } from '@ptah-extension/shared';
-import { compactSessionMetrics, contextDetailsText, costDetailsText, durationMsOf, formatModelCost, formatModelTotal, isKnownCost, nullCostValue, sessionContextCue, tokenDetailsText, type SessionStatsInputs } from './session-stats-view';
+import { compactSessionMetrics, contextDetailsText, costDetailsText, durationMsOf, formatModelCost, formatModelTotal, isKnownCost, sessionContextCue, tokenDetailsText, type SessionStatsInputs } from './session-stats-view';
 import type { LiveModelStats } from './session-stats-summary.component';
 
 const liveContext: LiveModelStats = {
@@ -64,99 +64,74 @@ const snapshot: SessionStatsEntry = {
 };
 
 describe('compactSessionMetrics', () => {
-  it('gives missing values field-specific labels and omits unknown time', () => {
-    expect(compactSessionMetrics(empty)).toEqual([
-      { id: 'context', label: 'Ctx', value: '—', ariaLabel: 'Context unavailable', unavailable: true },
-      { id: 'tokens', label: 'Tokens', value: '—', ariaLabel: 'Tokens unavailable', unavailable: true },
-      { id: 'cost', label: 'Cost', value: '—', ariaLabel: 'Cost unavailable', unavailable: true },
+  it('shows muted placeholders including unknown time and names their causes', () => {
+    const metrics = compactSessionMetrics(empty);
+    expect(metrics.map(({ value, unavailable }) => [value, unavailable])).toEqual([
+      ['—', true], ['—', true], ['—', true], ['--:--', true],
     ]);
+    expect(metrics[0].ariaLabel).toBe('Context unavailable');
+    expect(metrics[1].ariaLabel).toContain('Tokens unavailable');
+    expect(metrics[2].ariaLabel).toContain('Cost unavailable');
+    expect(metrics[3].ariaLabel).toBe('Time. Duration not recorded');
+    expect(compactSessionMetrics(empty, undefined, 'Earlier duration missing')[3].ariaLabel)
+      .toBe('Time. Earlier duration missing');
   });
+
   it('preserves measured zero', () => {
     const metrics = compactSessionMetrics({ ...empty, snapshot });
     expect(metrics[1]).toMatchObject({ value: '0', unavailable: false });
-    expect(metrics[2]).toMatchObject({ value: '$0.0000', unavailable: false });
+    expect(metrics[2]).toMatchObject({ value: '$0.00', unavailable: false });
   });
+
+  it('uses S1 totals and speaks their full value and cause even when the snapshot differs', () => {
+    const details = {
+      sdk: 100, cli: 100, coverage: 'partial', reportedCount: 2, missingCount: 1,
+      causes: ['A restored lane reported no usage'],
+    } as const;
+    const metrics = compactSessionMetrics({ ...empty, snapshot }, {
+      tokens: { ...details, state: 'lower-bound', value: 123_456 },
+      cost: { ...details, state: 'both', value: 19.987 },
+    });
+    expect(metrics[1].value).toBe('≥123.4k');
+    expect(metrics[1].ariaLabel).toContain('at least 123,456 tokens');
+    expect(metrics[2].value).toBe('≥ ~$19');
+    expect(metrics[2].ariaLabel).toContain('at least about $19.987');
+    expect(metrics[2].ariaLabel).toContain('A restored lane reported no usage');
+  });
+
   it.each([
-    ['estimated', 'estimated', 'Estimated cost, not a charge.'],
-    ['covered-by-subscription', 'covered by subscription',
+    ['estimated', '~$0.50', 'about $0.5', 'Estimated cost, not a charge.'],
+    ['covered-by-subscription', '$0.50', 'covered by the subscription',
       'Published-rate value covered by the subscription, not a charge.'],
-  ] as const)('uses the shared %s label in compact and inspector text', (basis, label, details) => {
+  ] as const)('preserves the %s cost basis in full-value text', (basis, value, spoken, details) => {
     const priced = { ...snapshot, totalCost: 0.5, costBasis: basis };
     const cost = compactSessionMetrics({ ...empty, snapshot: priced })[2];
-    expect(cost.value).toContain(label);
-    expect(cost.ariaLabel).toContain(label);
+    expect(cost.value).toBe(value);
+    expect(cost.ariaLabel).toContain(spoken);
     expect(costDetailsText(priced, null)).toContain(details);
   });
-  it('speaks a provisional estimated cost without repeating estimated', () => {
-    const priced = { ...snapshot, provisional: true, totalCost: 0.5, costBasis: 'estimated' as const };
-    const cost = compactSessionMetrics({ ...empty, snapshot: priced })[2];
-    expect(cost.value).toBe('~$0.50 estimated');
-    expect(cost.ariaLabel).toBe('Cost 0.50 US dollars, estimated');
-  });
-  it('keeps null cost unavailable regardless of basis', () => {
-    const unavailable = { ...snapshot, totalCost: null, costBasis: 'estimated' as const };
+
+  it.each([
+    ['rate-missing', 'Not priced'],
+    ['usage-incomplete', 'Some SDK usage could not be priced'],
+  ] as const)('keeps null cost muted and speaks the %s cause', (costUnavailableReason, cause) => {
+    const unavailable = { ...snapshot, totalCost: null, costUnavailableReason, pricingCoverage: 'none' as const };
     const cost = compactSessionMetrics({ ...empty, snapshot: unavailable })[2];
-    expect(cost).toMatchObject({ unavailable: true, ariaLabel: 'Cost unavailable' });
-    expect(costDetailsText(unavailable, null)).toContain('Cost unavailable');
-    expect(costDetailsText(unavailable, null)).not.toContain('estimated');
+    expect(cost).toMatchObject({ unavailable: true, value: '—' });
+    expect(cost.ariaLabel).toContain(cause);
   });
-  it('says "Not priced" only when the snapshot names a missing rate', () => {
-    const unpriced = {
-      ...snapshot,
-      totalCost: null,
-      pricingCoverage: 'none' as const,
-      costUnavailableReason: 'rate-missing' as const,
-    };
-    const cost = compactSessionMetrics({ ...empty, snapshot: unpriced })[2];
-    // Visible "Not priced", never "—" or $0 (issue #1459).
-    expect(cost).toMatchObject({ unavailable: true, ariaLabel: 'Not priced', value: 'Not priced' });
-    expect(nullCostValue(unpriced)).toBe('Not priced');
-    expect(costDetailsText(unpriced, null)).toContain('Not priced');
-    expect(costDetailsText(unpriced, null)).not.toContain('Cost unavailable');
-  });
-  it('keeps "Cost unavailable" when the null cause is not a missing rate', () => {
-    const incomplete = {
-      ...snapshot,
-      totalCost: null,
-      pricingCoverage: 'none' as const,
-      costUnavailableReason: 'usage-incomplete' as const,
-    };
-    const cost = compactSessionMetrics({ ...empty, snapshot: incomplete })[2];
-    expect(cost).toMatchObject({ unavailable: true, ariaLabel: 'Cost unavailable', value: '—' });
-    expect(nullCostValue(incomplete)).toBe('—');
-    expect(costDetailsText(incomplete, null)).toContain('Cost unavailable');
-    expect(costDetailsText(incomplete, null)).not.toContain('Not priced');
-  });
-  it('formats existing totals with partial/estimate markers and full accessible values', () => {
-    const metrics = compactSessionMetrics({ ...empty, snapshot: {
-      ...snapshot, tokenCount: 12345, coverage: 'partial', provisional: true,
-      totalCost: null, knownCost: 0.12, pricingCoverage: 'partial', durationMs: 65000,
-    }});
-    expect(metrics[1].value).toBe('~≥12.3k');
-    expect(metrics[1].ariaLabel).toBe(`Tokens estimated at least ${(12345).toLocaleString()}`);
-    expect(metrics[2].value).toBe('~≥$0.12');
-    expect(metrics[2].ariaLabel).toContain('known subtotal 0.12 US dollars');
-    expect(metrics[3]).toMatchObject({ id: 'time', value: '1m 5s', ariaLabel: 'Time 1 minute 5 seconds' });
-  });
+
   it.each([
-    [0.2400000001, '0.24'],
-    [0.00012345, '0.0001'],
-    [0, '0.0000'],
-  ])('formats the accessible cost for %s without floating-point noise', (cost, expected) => {
-    const metrics = compactSessionMetrics({ ...empty, snapshot: { ...snapshot, totalCost: cost } });
-    expect(metrics[2].ariaLabel).toBe(`Cost ${expected} US dollars`);
-  });
-  it.each([
-    [252000, '4m 12s', '4 minutes 12 seconds'],
-    [61000, '1m 1s', '1 minute 1 second'],
-    [60000, '1m 0s', '1 minute 0 seconds'],
-    [12500, '12.5s', '12.5 seconds'],
-    [1000, '1.0s', '1.0 second'],
-    [850, '850ms', '850 milliseconds'],
-    [1, '1ms', '1 millisecond'],
-  ])('speaks duration %s using the displayed precision', (durationMs, value, spoken) => {
+    [252000, '4:12', '4 minutes 12 seconds'],
+    [61000, '1:01', '1 minute 1 second'],
+    [60000, '1:00', '1 minute 0 seconds'],
+    [12500, '0:12', '12.5 seconds'],
+    [1000, '0:01', '1.0 second'],
+    [850, '0:00', '850 milliseconds'],
+    [1, '0:00', '1 millisecond'],
+  ])('speaks duration %s with its full precision', (durationMs, value, spoken) => {
     const metrics = compactSessionMetrics({ ...empty, snapshot: { ...snapshot, durationMs } });
-    expect(metrics[3]).toMatchObject({ value, ariaLabel: `Time ${spoken}` });
+    expect(metrics[3]).toMatchObject({ value, ariaLabel: `Time. ${spoken}` });
   });
   it('uses the approved missing detail copy', () => {
     expect(contextDetailsText(null, 0)).toBe('Context unavailable');

@@ -32,7 +32,8 @@
           class="m-1 flex min-h-10 flex-col items-center justify-center rounded-md p-1 text-xs tabular-nums hover:bg-base-content/5 focus-visible:outline focus-visible:outline-2"
           [attr.aria-label]="metric.ariaLabel"
           [title]="metric.ariaLabel"
-          (click)="expandRequested.emit('session')"
+          [attr.data-rail-control]="metric.id"
+          (click)="expandRequested.emit(metric.target)"
         >
           <span class="text-[10px] text-base-content-muted">{{
             metric.id === 'tokens' ? 'Tok' : metric.label
@@ -51,9 +52,24 @@
           }
         </button>
       }
-      @if (model().needsYouCount > 0) {
-        <span role="img" class="text-center text-xs text-state-need" [attr.aria-label]="runLabel()">{{ model().needsYouCount }}!</span>
-      }
+    } @else {
+      <ptah-skeleton class="mx-2 my-1 block" [lines]="2" size="lg" />
+    }
+    @if (railLimitDescription(); as description) {
+      <button type="button" data-rail-control="limits"
+        class="m-1 min-h-10 rounded-md text-xs text-state-need hover:bg-base-content/5 focus-visible:outline"
+        [attr.aria-label]="description" [title]="description"
+        (click)="expandRequested.emit('limits')">
+        Limits
+      </button>
+    }
+    @if (showAttention()) {
+      <button type="button" data-rail-control="attention"
+        class="m-1 min-h-10 rounded-md text-xs text-state-need hover:bg-base-content/5 focus-visible:outline"
+        [attr.aria-label]="runLabel()" [title]="runLabel()"
+        (click)="expandRequested.emit('attention')">
+        {{ model().needsYouCount }}!
+      </button>
     }
   </aside>
 } @else if (presentation() === 'sheet') {
@@ -93,18 +109,27 @@
           {{ sessionTitle() }}
         </h2>
       }
-      @if (sessionStatus()) {
-        <p class="text-xs text-base-content-muted">{{ sessionStatus() }}</p>
-      }
-      @if (workflow()) {
-        <p class="text-xs text-base-content-muted [overflow-wrap:anywhere]">
-          {{ workflow() }}
-        </p>
-      }
-      @if (branch()) {
-        <p class="text-xs text-base-content-muted [overflow-wrap:anywhere]">
-          {{ branch() }}
-        </p>
+      @let status = headerStatus();
+      @let workflowName = workflow();
+      @let branchName = branch();
+      @if (status || workflowName || branchName) {
+        <div class="mt-1 flex flex-wrap items-center gap-1">
+          @if (status) {
+            <ptah-status size="xs" [status]="status.status" [label]="status.label" [title]="status.label" />
+          }
+          @if (workflowName) {
+            <span ptahBadge size="xs" class="min-w-0" [title]="'Workflow: ' + workflowName">
+              <lucide-angular class="size-3 shrink-0" [img]="workflowIcon" aria-hidden="true" />
+              <span class="ptah-badge-text">{{ workflowName }}</span>
+            </span>
+          }
+          @if (branchName) {
+            <span ptahBadge size="xs" class="min-w-0 max-w-[9rem]" [title]="'Branch: ' + branchName">
+              <lucide-angular class="size-3 shrink-0" [img]="branchIcon" aria-hidden="true" />
+              <span class="ptah-badge-text font-mono">{{ branchName }}</span>
+            </span>
+          }
+        </div>
       }
     </div>
     <div class="flex shrink-0 items-center gap-1">
@@ -136,7 +161,7 @@
         ownerName="Orchestrator"
         [tabId]="tabId()"
         [hasLaneSurface]="false"
-        (answerRequested)="answerRequested.emit($event)"
+        (answerRequested)="answerFromHeader($event)"
         (announced)="announce($event)"
         (focusReleased)="closeButton.focus()"
       />
@@ -144,43 +169,52 @@
 
     <ng-content select="[inspectorSection]" />
 
-    @if (s) {
+    @if (sessionModel(); as session) {
       <div class="inspector-stats-switch">
-        @if (leavingStats(); as oldStats) {
+        @if (leavingModel(); as leaving) {
           <ptah-inspector-session-stats
             class="inspector-stats-leave block border-t border-surface-border"
             aria-hidden="true"
             inert
-            [stats]="oldStats"
-            [turns]="null"
+            [stats]="leaving.stats"
+            [totals]="leaving.totals"
+            [cliContributions]="leaving.cliContributions"
+            [turns]="leaving.turns"
+            [agentCount]="leaving.agentCount"
+            [liveAgentCount]="leaving.liveAgentCount"
           />
         }
         <ptah-inspector-session-stats
-          data-inspector-section="session"
-          tabindex="-1"
+          data-active-session-stats
           class="block border-t border-surface-border"
           [class.inspector-stats-enter]="statsSwitching()"
-          [stats]="s"
-          [turns]="m.orchestrator.turns"
+          [stats]="session.stats"
+          [totals]="session.totals"
+          [cliContributions]="session.cliContributions"
+          [turns]="session.turns"
+          [agentCount]="session.agentCount"
+          [liveAgentCount]="session.liveAgentCount"
         />
       </div>
     }
 
     <ptah-inspector-agents-section
-      data-inspector-section="agents"
-      tabindex="-1"
       class="block border-t border-surface-border"
       [tabId]="tabId()"
       [sessionId]="m.sessionId"
       [agents]="m.agents"
-      [laneRuns]="s?.limits?.inspectorRuns ?? []"
+      [laneRuns]="laneRuns()"
+      [projection]="inspectorAgentRows"
       [orchestrator]="m.orchestrator"
+      [cache]="rosterStats()?.cache ?? null"
+      [contextUsed]="rosterStats()?.context?.usedTokens ?? null"
+      [compactionCount]="rosterStats()?.compactionCount ?? null"
       [sessionTokens]="sessionTokens()"
-      [selectedAgentKey]="selectedAgentKey()"
+      [selectedAgentKey]="agentsSelection()"
       [hasLaneSurface]="hasLaneSurface()"
       [staggerStart]="agentsStaggerStart()"
       (laneRequested)="laneRequested.emit($event)"
-      (agentSelected)="agentSelected.emit($event)"
+      (agentSelected)="selectAgent($event)"
       (answerRequested)="answerRequested.emit($event)"
       (announced)="announce($event)"
     />

@@ -10,6 +10,13 @@ import {
 import { TabManagerService } from '@ptah-extension/chat-state';
 import { VSCodeService, UnavailableGitRootsStore } from '@ptah-extension/core';
 import {
+  PtahBadgeDirective,
+  PtahButtonDirective,
+  PtahDescriptionItemComponent,
+  PtahDescriptionListComponent,
+  SurfaceSectionComponent,
+} from '@ptah-extension/ui';
+import {
   GitBranch,
   LoaderCircle,
   LucideAngularModule,
@@ -36,17 +43,29 @@ let nextGitId = 0;
 @Component({
   selector: 'ptah-inspector-git-section',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [
+    LucideAngularModule,
+    PtahBadgeDirective,
+    PtahButtonDirective,
+    PtahDescriptionItemComponent,
+    PtahDescriptionListComponent,
+    SurfaceSectionComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @let git = state();
-    <section class="border-t border-surface-border p-4" [attr.aria-labelledby]="headingId">
-      <div class="mb-2 flex items-center justify-between gap-2">
+    <ptah-surface-section
+      padding="md"
+      role="region"
+      class="block border-t border-surface-border [&>section]:gap-1 [&>section]:rounded-none [&>section]:border-0 [&>section]:bg-transparent [&>section]:px-3 [&>section]:py-2"
+      [attr.aria-labelledby]="headingId"
+    >
+      <div section-header class="flex min-h-6 items-center justify-between gap-2">
         <h3 [id]="headingId" class="sec-label text-[10.5px] font-semibold uppercase">GIT</h3>
         @if (git.kind === 'known') {
           <button
             type="button"
-            class="inline-flex h-6 items-center text-xs font-medium text-[var(--ptah-link)] underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+            ptahButton variant="link" size="xs" density="compact" noPadding
             (click)="reviewChanges()"
           >
             Review changes
@@ -55,17 +74,41 @@ let nextGitId = 0;
       </div>
       @switch (git.kind) {
         @case ('known') {
-          <div class="flex items-center gap-2 text-xs">
-            <lucide-angular [img]="GitBranchIcon" class="size-3.5 shrink-0 text-base-content-muted" aria-hidden="true" />
-            <span class="min-w-0 truncate font-mono text-xs font-medium" [attr.title]="branch()">{{ branch() ?? 'Detached HEAD' }}</span>
-            <span
-              class="ml-auto flex shrink-0 items-center gap-1.5 font-mono text-xs font-medium"
-              [attr.title]="git.partial ? 'Some files could not be counted' : 'Uncommitted changes'"
+          @let branchName = branch();
+          <ptah-description-list density="compact" [divided]="false">
+            <div
+              ptahDescriptionItem
+              term="Branch"
+              class="min-h-0 py-0 [grid-template-columns:minmax(0,1fr)_auto] [&>dt]:sr-only [&_[data-ptah-description-slot]]:flex [&_[data-ptah-description-slot]]:flex-nowrap"
             >
-              <span class="diff-add-text">+{{ git.additions }}{{ git.partial ? '+' : '' }}</span>
-              <span class="diff-del-text">&#8722;{{ git.deletions }}{{ git.partial ? '+' : '' }}</span>
-            </span>
-          </div>
+              <lucide-angular [img]="GitBranchIcon" class="size-3.5 shrink-0 text-base-content-muted" aria-hidden="true" />
+              <span
+                class="min-w-0 truncate font-mono text-xs"
+                [class.text-base-content-muted]="!branchName"
+                [attr.title]="branchName"
+                [attr.aria-hidden]="branchName ? null : 'true'"
+              >{{ branchName ?? '—' }}</span>
+              @if (!branchName) {
+                <span class="sr-only">Unknown branch</span>
+              }
+              @if (git.branch === 'HEAD') {
+                <span class="flex shrink-0 items-center gap-1">
+                  @if (branchName !== 'HEAD') {
+                    <span class="font-mono">HEAD</span>
+                  }
+                  <span ptahBadge size="xs">detached</span>
+                </span>
+              }
+              <span
+                actions
+                class="flex shrink-0 items-center gap-1.5 font-mono text-xs tabular-nums"
+                [attr.title]="git.partial ? 'Some files could not be counted' : 'Uncommitted changes'"
+              >
+                <span class="diff-add-text">+{{ git.additions }}{{ git.partial ? '+' : '' }}</span>
+                <span class="diff-del-text">&#8722;{{ git.deletions }}{{ git.partial ? '+' : '' }}</span>
+              </span>
+            </div>
+          </ptah-description-list>
         }
         @case ('unknown') {
           @if (git.reason === 'failed') {
@@ -74,9 +117,9 @@ let nextGitId = 0;
               <span class="min-w-0 flex-1">Could not read git status</span>
               <button
                 type="button"
-                class="inline-flex h-6 min-w-6 items-center gap-1 px-1.5 text-xs font-medium text-base-content focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+                ptahButton variant="ghost" size="xs" density="compact"
                 aria-label="Retry reading git status"
-                [attr.aria-busy]="retrying() ? 'true' : null"
+                [busy]="retrying()"
                 (click)="retry()"
               >
                 @if (retrying()) {
@@ -86,7 +129,7 @@ let nextGitId = 0;
               </button>
             </div>
           } @else {
-            <p class="text-xs text-base-content-muted">Git changes unavailable</p>
+            <p class="text-xs text-base-content-muted"><span aria-hidden="true">—</span> Git changes unavailable</p>
           }
         }
         @default {
@@ -96,7 +139,7 @@ let nextGitId = 0;
           </p>
         }
       }
-    </section>
+    </ptah-surface-section>
   `,
 })
 export class InspectorGitSectionComponent {

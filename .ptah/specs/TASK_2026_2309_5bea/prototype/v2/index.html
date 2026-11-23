@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Session inspector v2 prototype</title>
+<style>
+/* Token values copied from tailwind.config.js (themes anubis / anubis-light),
+   apps/ptah-extension-webview/src/styles.css (--surface-*, --ptah-gold) and
+   libs/frontend/ui/src/lib/tokens/ptah-tokens.css (--ptah-series-*, spacing, type). */
+:root,[data-theme="anubis"]{
+  --b1:#131317;--b2:#1a1a20;--b3:#242430;--bc:#e8e6e1;--bcm:oklch(66.509856% 0.007403 31.090978);
+  --st-run:#3b82f6;--st-need:#f97316;--st-err:#ef4444;--st-done:#16a34a;--st-idle:#9ca3af;
+  --gold:#d4af37;--series-1:oklch(78% 0.14 85);--series-2:oklch(76% 0.12 180);
+  --r-box:.75rem;--r-btn:.375rem;--r-chip:.25rem;--hl:13%;
+  --shadow-raised:0 12px 30px oklch(0% 0 0 / .42);
+}
+[data-theme="anubis-light"]{
+  --b1:oklch(97.788% 0.004 56.375);--b2:oklch(93.982% 0.007 61.449);--b3:oklch(91.586% 0.006 53.44);
+  --bc:oklch(23.574% 0.066 313.189);--bcm:oklch(48.955188% 0.044796 348.478612);
+  --st-run:#2a56c6;--st-need:#8f5200;--st-err:#b4232a;--st-done:#13713a;--st-idle:#6b6570;
+  --gold:oklch(58% 0.132 75);--series-1:oklch(52% 0.12 75);--series-2:oklch(50% 0.1 180);
+  --r-box:1rem;--r-btn:2rem;--r-chip:1rem;--hl:10%;
+  --shadow-raised:0 8px 24px color-mix(in oklch,var(--bc) 18%,transparent);
+}
+:root,[data-theme]{
+  --surface-1:color-mix(in oklch,var(--b2) 88%,var(--b1));--surface-2:var(--b2);
+  --surface-3:color-mix(in oklch,var(--b3) 86%,var(--b2));
+  --line:color-mix(in oklch,var(--bc) 14%,transparent);
+  --line-strong:color-mix(in oklch,var(--bc) 22%,transparent);
+  --highlight:color-mix(in oklch,var(--bc) var(--hl),transparent);
+  --hover:color-mix(in oklch,var(--bc) 5%,transparent);
+  --meter-fill:color-mix(in oklch,var(--bc) 62%,transparent);
+  --sp1:.25rem;--sp2:.5rem;--sp3:.75rem;--sp4:1rem;
+  --t-val:1.125rem;--t-row:.8125rem;--t-num:.75rem;--t-cap:.6875rem;
+  --mono:'JetBrains Mono','Fira Code',Menlo,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{background:var(--b2);color:var(--bc);font:400 .75rem/1rem Inter,system-ui,-apple-system,sans-serif;-webkit-font-smoothing:antialiased}
+button,input{font:inherit;color:inherit}
+button{background:none;border:0;padding:0;cursor:pointer;text-align:inherit}
+:focus-visible{outline:2px solid var(--st-run);outline-offset:2px;border-radius:var(--r-btn)}
+svg.ic{width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round;flex:none}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+
+/* Prototype chrome */
+.controls{display:flex;gap:var(--sp3);align-items:center;padding:var(--sp2) var(--sp3);border-bottom:1px solid var(--line);background:var(--b1)}
+.controls label{display:flex;gap:var(--sp1);align-items:center;color:var(--bcm)}
+.controls select{background:var(--surface-2);color:var(--bc);border:1px solid var(--line-strong);border-radius:var(--r-btn);padding:2px 6px;font:inherit}
+.stage{display:flex;justify-content:flex-end;min-height:calc(100% - 37px)}
+body.bare .controls{display:none}
+html:has(body.bare){scrollbar-width:none}
+body.bare .stage{justify-content:flex-start;min-height:100%}
+
+/* Inspector frame */
+.insp{container-type:inline-size;position:relative;background:var(--b1);border-left:1px solid var(--line);display:flex;flex-direction:column;min-height:100%}
+.sec{padding:var(--sp3);border-top:1px solid var(--line);position:relative}
+.sec-h{display:flex;align-items:center;justify-content:space-between;gap:var(--sp2);height:1rem;margin-bottom:var(--sp2)}
+.sec-h h3{margin:0;font-weight:600;font-size:var(--t-cap);line-height:1rem;letter-spacing:.06em;text-transform:uppercase;color:var(--bc)}
+.meta{font-size:var(--t-cap);color:var(--bcm);white-space:nowrap;font-variant-numeric:tabular-nums}
+.muted{color:var(--bcm)}
+.num{font-variant-numeric:tabular-nums;white-space:nowrap}
+.num .mk{font-style:normal;color:var(--bcm);font-weight:500;margin-right:1px}
+.num.unk{color:var(--bcm);font-weight:400}
+.link{color:var(--bcm);font-size:var(--t-cap);border-radius:var(--r-btn);padding:1px 4px;margin:-1px -4px}
+.link:hover{color:var(--bc);background:var(--hover)}
+
+/* Chip: one style everywhere */
+.chip{display:inline-flex;align-items:center;gap:4px;height:18px;padding:0 6px;border:1px solid var(--line);border-radius:var(--r-chip);background:var(--surface-1);font-size:var(--t-cap);line-height:1;color:var(--bcm);white-space:nowrap;min-width:0;max-width:100%}
+.chip>span{overflow:hidden;text-overflow:ellipsis;line-height:16px}
+.chip svg.ic{width:11px;height:11px}
+.chip.mono{font-family:var(--mono);font-size:.625rem}
+.chip.st{color:var(--bc)}
+.chip.st svg{color:var(--tone)}
+button.chip:hover{border-color:var(--line-strong);color:var(--bc)}
+button.chip[aria-pressed="true"]{background:var(--highlight);color:var(--bc);border-color:var(--line-strong)}
+.t-done{--tone:var(--st-done)}.t-run{--tone:var(--st-run)}.t-err{--tone:var(--st-err)}.t-need{--tone:var(--st-need)}.t-idle{--tone:var(--st-idle)}
+
+/* Bars and rings: one language (3 px bar, pill ends, 2 px gap between segments) */
+.bar{display:flex;gap:2px;height:3px;border-radius:999px;background:var(--line-strong);overflow:hidden}
+.bar>i{display:block;height:100%;border-radius:999px;background:var(--meter-fill);min-width:2px}
+.bar.src{background:none}
+.bar .s1{background:var(--series-1)}.bar .s2{background:var(--series-2)}
+.bar.warn>i{background:var(--st-need)}.bar.err>i{background:var(--st-err)}
+.sw{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px;vertical-align:-0.5px}
+.sw.s1{background:var(--series-1)}.sw.s2{background:var(--series-2)}
+.ring{width:16px;height:16px;flex:none;transform:rotate(-90deg)}
+.ring circle{fill:none;stroke-width:2.5}
+.ring .trk{stroke:var(--line-strong)}.ring .arc{stroke:var(--meter-fill);stroke-linecap:round}
+.ring.warn .arc{stroke:var(--st-need)}.ring.err .arc{stroke:var(--st-err)}
+.cue{color:var(--st-need);display:inline-flex}.cue.err{color:var(--st-err)}
+.cue svg.ic{width:11px;height:11px}
+
+/* Header */
+.hd{display:flex;gap:var(--sp2);align-items:flex-start;padding:var(--sp3) var(--sp2) var(--sp3) var(--sp3)}
+.hd h2{margin:0 0 6px;font-weight:600;font-size:.875rem;line-height:1.25rem;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;padding-bottom:1px}
+.hd .chips{display:flex;gap:var(--sp1);min-width:0}
+@container (max-width:340px){.hd .chips{flex-wrap:wrap}}
+.hd .chips .chip{flex:none}.hd .chips .chip.mono{flex:0 1 auto}
+.acts{display:flex;gap:2px;flex:none}
+.ib{width:24px;height:24px;display:grid;place-items:center;border-radius:var(--r-btn);color:var(--bcm)}
+.ib:hover{background:var(--hover);color:var(--bc)}
+.ib.danger{color:var(--st-err)}
+
+/* Request line */
+.req{display:flex;align-items:center;gap:var(--sp2);padding:6px var(--sp3);border-top:1px solid var(--line);background:color-mix(in oklch,var(--st-need) 9%,transparent)}
+.req svg{color:var(--st-need)}
+.req span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.btn-xs{height:20px;padding:0 8px;border-radius:var(--r-btn);border:1px solid var(--line-strong);font-size:var(--t-cap);font-weight:500;flex:none}
+.btn-xs:hover{background:var(--hover)}
+
+/* SESSION tiles */
+.tiles{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}
+.tile{padding:var(--sp2) 10px;border-left:1px solid var(--line);min-width:0;display:flex;flex-direction:column;gap:2px;text-align:left}
+.tile:nth-child(3n+1){border-left:0;padding-left:0}
+.tile:nth-child(3n){padding-right:0}
+.tile:nth-child(n+4){border-top:1px solid var(--line)}
+.tile:nth-child(-n+3){padding-top:0}
+.tile .cap{font-size:var(--t-cap);color:var(--bcm);display:flex;align-items:center;gap:3px}
+.tile .val{font-weight:600;font-size:var(--t-val);line-height:1.5rem;letter-spacing:-.01em}
+.tile .val .mk{font-size:.75rem}
+.tile .sub{height:1rem;display:flex;align-items:center;font-size:var(--t-cap);color:var(--bcm);white-space:nowrap;gap:5px}
+.tile .sub .bar{flex:1}
+button.tile{border-radius:0}
+button.tile:hover .cap,button.tile[aria-expanded="true"] .cap{color:var(--bc)}
+button.tile .cap svg{width:10px;height:10px;transition:transform .15s}
+button.tile[aria-expanded="true"] .cap svg{transform:rotate(180deg)}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--st-run);flex:none}
+.legend{display:flex;gap:var(--sp4);margin-top:var(--sp2);font-size:var(--t-cap);color:var(--bcm)}
+.legend b{font-weight:500;color:var(--bc);font-variant-numeric:tabular-nums;margin-left:4px}
+@container (max-width:340px){.tile{padding-left:6px;padding-right:6px}.tile .val{font-size:1rem}.tile .sub{font-size:.625rem;gap:3px}}
+.tiles.enter{animation:enter .22s ease-out}
+@keyframes enter{from{opacity:0;transform:translateY(4px)}}
+
+/* Popover (Models) */
+.pop{position:absolute;left:var(--sp3);right:var(--sp3);z-index:5;margin-top:6px;background:var(--surface-3);border:1px solid var(--line-strong);border-radius:var(--r-box);box-shadow:var(--shadow-raised);padding:10px var(--sp3)}
+.pop table{width:100%;border-collapse:collapse}
+.pop td{padding:3px 0;font-size:var(--t-num)}
+.pop td.r{text-align:right;width:64px}
+.pop .cats{display:grid;grid-template-columns:repeat(4,auto);justify-content:space-between;gap:var(--sp2);border-top:1px solid var(--line);margin-top:6px;padding-top:var(--sp2)}
+.pop .cats dt{font-size:var(--t-cap);color:var(--bcm)}.pop .cats dd{margin:0;font-variant-numeric:tabular-nums;font-weight:500}
+
+/* AGENTS table */
+table.ag{width:calc(100% + 1.5rem);margin:0 -.75rem;border-collapse:collapse;table-layout:fixed}
+.ag col.c-tok{width:54px}.ag col.c-cost{width:62px}.ag col.c-time{width:58px}
+.ag th{font-size:var(--t-cap);font-weight:400;color:var(--bcm);text-align:right;padding:0 0 4px 8px}
+.ag th:first-child{text-align:left;padding-left:var(--sp3)}
+.ag th:last-child,.ag td:last-child{padding-right:var(--sp3)}
+.ag td{padding:6px 0 6px 8px;text-align:right;vertical-align:middle;font-size:var(--t-num)}
+.ag td:first-child{padding-left:var(--sp3);text-align:left}
+.ag tr.row{cursor:pointer}
+.ag tr.row:hover td{background:var(--hover)}
+.ag tr.sel td,.ag tr.sel+tr.exp td{background:var(--highlight)}
+.ag tr.sel td:first-child,.ag tr.sel+tr.exp td:first-child{box-shadow:inset 2px 0 0 var(--gold)}
+.agent{display:flex;align-items:center;gap:var(--sp2);width:100%;min-width:0}
+.av{position:relative;width:26px;height:26px;border-radius:50%;background:var(--surface-3);border:1px solid var(--line);display:grid;place-items:center;flex:none;color:var(--bc)}
+.av svg.ic{width:13px;height:13px}
+.bd{position:absolute;right:-4px;bottom:-4px;width:13px;height:13px;border-radius:50%;background:var(--tone);color:var(--b1);display:grid;place-items:center;box-shadow:0 0 0 2px var(--b1)}
+.bd svg.ic{width:8px;height:8px;stroke-width:3.5}
+.bd.t-run svg{animation:pulse 1.4s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.35}}
+.nm{min-width:0;display:flex;flex-direction:column}
+.nm b{font-weight:600;font-size:var(--t-row);line-height:1.0625rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.nm small{font-size:var(--t-cap);line-height:.875rem;color:var(--bcm);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tokc{display:flex;flex-direction:column;align-items:flex-end;gap:3px}.tokc .bar{width:100%}
+.tokc .bar{height:2px;background:var(--line)}
+.orch{display:inline-flex;align-items:center;gap:6px;justify-content:flex-end}
+.orch .grp{display:inline-flex;align-items:center;gap:5px}
+.orch .grp+.grp{margin-left:8px}
+.orch svg.ic{width:12px;height:12px;color:var(--bcm)}.orch .cue svg.ic{color:inherit}
+.ag tr.exp td{padding:0 var(--sp3) var(--sp2) calc(var(--sp3) + 34px);text-align:left}
+.strip{display:flex;gap:var(--sp3);flex-wrap:wrap;font-size:var(--t-cap);color:var(--bcm);margin:0}
+.strip div{display:flex;gap:4px}.strip dt{margin:0}.strip dd{margin:0;color:var(--bc);font-variant-numeric:tabular-nums}
+.steer{display:flex;gap:4px;margin-top:6px;position:relative}
+.steer input{flex:1;min-width:0;height:26px;padding:0 8px;background:var(--b1);border:1px solid var(--line-strong);border-radius:var(--r-btn);font-size:var(--t-num)}
+.steer input::placeholder{color:var(--bcm)}
+.steer .ib{width:26px;height:26px;border:1px solid var(--line)}
+.alert{display:flex;align-items:center;gap:6px;margin-top:6px;font-size:var(--t-cap);color:var(--bc)}
+.alert svg{color:var(--st-err)}
+.menu{position:absolute;right:0;top:30px;z-index:6;min-width:132px;background:var(--surface-3);border:1px solid var(--line-strong);border-radius:var(--r-box);box-shadow:var(--shadow-raised);padding:4px;display:flex;flex-direction:column}
+.menu button{padding:5px 8px;border-radius:calc(var(--r-box) - 4px);font-size:var(--t-num)}
+.menu button:hover,.menu button:focus-visible{background:var(--hover)}
+.menu button.danger{color:var(--st-err)}
+.more{display:flex;align-items:center;gap:4px;margin-top:4px;padding:3px 6px 3px 0;color:var(--bcm);font-size:var(--t-cap);border-radius:var(--r-btn)}
+.more:hover{color:var(--bc)}
+.more svg{width:11px;height:11px}
+
+/* Generic rows shared by LIMITS / TASK / GIT / LINKED */
+.rows>*+*{margin-top:10px}
+.line{display:flex;align-items:center;gap:var(--sp2);min-width:0}
+
+.grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.ttl{font-weight:600;font-size:var(--t-row);line-height:1.125rem}
+.lim .bar{margin:5px 0 4px}
+.lim .pct{font-weight:600;font-size:var(--t-row)}
+.notice{display:flex;align-items:center;gap:6px;font-size:var(--t-cap);color:var(--bcm);margin-bottom:var(--sp2)}
+.notice svg{color:var(--st-need);width:12px;height:12px}
+.docs{display:flex;flex-wrap:wrap;gap:4px;margin-top:var(--sp2)}
+.prog{display:flex;align-items:center;gap:var(--sp2);margin-top:6px}.prog .bar{flex:1}
+.add{color:var(--st-done)}.del{color:var(--st-err)}
+.mono{font-family:var(--mono);font-size:.6875rem}
+.lk{display:flex;align-items:center;gap:var(--sp2);width:calc(100% + 1.5rem);margin:0 -.75rem;padding:5px var(--sp3)}
+.lk:hover{background:var(--hover)}
+.lk[aria-current="true"]{background:var(--highlight);box-shadow:inset 2px 0 0 var(--gold)}
+.lk[aria-current="true"] .grow{font-weight:600}
+.sk{display:block;height:10px;border-radius:4px;background:var(--line-strong);animation:pulse 1.4s ease-in-out infinite}
+
+/* Tooltip */
+#tip{position:fixed;z-index:20;max-width:260px;padding:5px 8px;background:var(--bc);color:var(--b1);border-radius:6px;font-size:var(--t-cap);line-height:.9375rem;pointer-events:none;opacity:0;transition:opacity .1s;font-variant-numeric:tabular-nums}
+#tip.on{opacity:1}
+
+/* Rail (56 px) */
+.rail{width:56px;background:var(--b1);border-left:1px solid var(--line);display:flex;flex-direction:column;align-items:center;gap:var(--sp1);padding:var(--sp1) 0;min-height:100%}
+.rail .rb{width:48px;min-height:40px;border-radius:var(--r-btn);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;padding:4px 0}
+.rail .rb:hover{background:var(--hover)}
+.rail .rb .cap{font-size:.625rem;color:var(--bcm)}
+.rail .rb .num{font-size:.6875rem;font-weight:600}
+.rail .rb .num .mk{font-size:.5625rem}
+.rail hr{width:32px;border:0;border-top:1px solid var(--line);margin:2px 0}
+.rail .av{margin:3px 0}
+.rail .ring{width:20px;height:20px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<div class="controls" aria-label="Prototype controls">
+  <label>Width <select id="c-w"><option>300</option><option>336</option><option>360</option><option>400</option><option>448</option><option value="rail">rail 56</option></select></label>
+  <label>Theme <select id="c-theme"><option>dark</option><option>light</option></select></label>
+  <label>Fixture <select id="c-fx"><option>lanes</option><option>exact</option><option>partial</option><option>missing</option><option>live</option><option>resumed</option><option>loading</option><option>empty</option></select></label>
+  <span class="muted">Click a row to select it. Escape closes popovers.</span>
+</div>
+<div class="stage"><div id="root"></div></div>
+<div id="tip" role="tooltip"></div>
+<script>
+const I={pencil:'<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/>',
+folder:'<path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/>',
+square:'<rect width="14" height="14" x="5" y="5" rx="2"/>',panel:'<rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/><path d="m8 9 3 3-3 3"/>',
+dots:'<circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/>',
+branch:'<line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/>',
+file:'<path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><path d="M14 2v4a2 2 0 0 0 2 2h4"/><path d="M16 13H8"/><path d="M16 17H8"/>',
+alert:'<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+down:'<path d="m6 9 6 6 6-6"/>',left:'<path d="m15 18-6-6 6-6"/>',check:'<path d="M20 6 9 17l-5-5"/>',x:'<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+bang:'<path d="M12 5v9"/><path d="M12 19h.01"/>',run:'<circle cx="12" cy="12" r="5" fill="currentColor"/>',stop:'<rect x="6" y="6" width="12" height="12" rx="1" fill="currentColor"/>',
+bot:'<path d="M12 8V4H8"/><rect width="16" height="12" x="4" y="8" rx="2"/><path d="M2 14h2"/><path d="M20 14h2"/><path d="M15 13v2"/><path d="M9 13v2"/>',
+term:'<polyline points="4 17 10 11 4 5"/><line x1="12" x2="20" y1="19" y2="19"/>',
+net:'<rect x="16" y="16" width="6" height="6" rx="1"/><rect x="2" y="16" width="6" height="6" rx="1"/><rect x="9" y="2" width="6" height="6" rx="1"/><path d="M5 16v-3a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v3"/><path d="M12 12V8"/>',
+glass:'<path d="M5 22h14"/><path d="M5 2h14"/><path d="M17 22v-4.172a2 2 0 0 0-.586-1.414L12 12l-4.414 4.414A2 2 0 0 0 7 17.828V22"/><path d="M7 2v4.172a2 2 0 0 0 .586 1.414L12 12l4.414-4.414A2 2 0 0 0 17 6.172V2"/>',
+send:'<polyline points="9 10 4 15 9 20"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/>',flow:'<rect width="8" height="8" x="3" y="3" rx="2"/><path d="M7 11v4a2 2 0 0 0 2 2h4"/><rect width="8" height="8" x="13" y="13" rx="2"/>'};
+const ic=n=>`<svg class="ic" viewBox="0 0 24 24" aria-hidden="true">${I[n]}</svg>`;
+const ST={done:['t-done','check','Done'],running:['t-run','run','Running'],failed:['t-err','x','Failed'],stopped:['t-idle','stop','Stopped'],needs:['t-need','bang','Needs you'],idle:['t-idle','stop','Idle']};
+const MK={est:'~',low:'≥',both:'≥~'};
+const tok=n=>n==null?null:n>=1e6?(n/1e6).toFixed(1)+'M':n>=1e4?Math.round(n/1e3)+'K':n>=1e3?(n/1e3).toFixed(1)+'K':String(n);
+const usd=n=>n==null?null:'$'+n.toFixed(2);
+const clock=s=>{if(s==null)return null;const h=Math.floor(s/3600),m=Math.floor(s%3600/60),x=String(s%60).padStart(2,'0');return h?`${h}:${String(m).padStart(2,'0')}:${x}`:`${m}:${x}`};
+const esc=s=>String(s).replace(/[&<"]/g,c=>({'&':'&amp;','<':'&lt;','"':'&quot;'}[c]));
+const num=(txt,mk,tip,dc)=>txt==null?`<span class="num unk" data-component="${dc||'ptah-stat'}" data-tip="${esc(tip||'Not reported')}" aria-label="${esc(tip||'Not reported')}">—</span>`
+  :`<span class="num" data-component="${dc||'ptah-stat'}"${tip?` data-tip="${esc(tip)}"`:''}>${mk?`<i class="mk">${MK[mk]}</i>`:''}${txt}</span>`;
+const time=(s,live,tip)=>s==null?`<span class="num unk" data-component="ptah-timer" data-tip="${esc(tip||'Duration not recorded')}" aria-label="Duration unknown">--:--</span>`
+  :`<span class="num" data-component="ptah-timer"${live?` data-live="1" data-s="${s}"`:''}>${clock(s)}</span>`;
+const ring=(pct,cls)=>{const c=2*Math.PI*6,t=pct>=95?'err':pct>=80?'warn':'';return `<svg class="ring ${t} ${cls||''}" viewBox="0 0 16 16" data-component="ptah-ring" aria-hidden="true"><circle class="trk" cx="8" cy="8" r="6"/>${pct==null?'':`<circle class="arc" cx="8" cy="8" r="6" stroke-dasharray="${Math.max(pct,3)/100*c} ${c}"/>`}</svg>`};
+const cue=p=>p>=80?`<span class="cue ${p>=95?'err':''}" aria-hidden="true">${ic('alert')}</span>`:'';
+
+/* ---------- fixtures ---------- */
+const base={
+ header:{title:'Stats sidebar redesign',status:'done',workflow:'orchestrate',branch:'feat/stats-sidebar-redesign',running:false},
+ requests:[],
+ s:{tok:{v:25.9e6,sdk:23.5e6,cli:2.4e6},cost:{v:17.54,mk:'both',sdk:14.92,cli:2.62,tip:'At least about $17.54. CLI lane cost is estimated; 1 lane reports no cost.'},
+    time:2537,turns:24,live:1,budget:{pct:62,tip:'25.9M of 42.0M token budget'},
+    models:[{n:'Fable 5.2',t:18.9e6,c:12.10},{n:'Sonnet 5.5',t:3.9e6,c:2.41},{n:'Haiku 5',t:0.7e6,c:0.41}],cats:{in:1.9e6,out:0.6e6,cr:19.8e6,cw:1.2e6}},
+ ctx:{pct:6.7,used:'13.4K',cap:'200K',comp:1},cache:{s:3518,ttl:'1h',idle:'52:38'},
+ agents:[
+  {id:'o',k:'orch',n:'Orchestrator',m:'Fable 5.2',st:'done'},
+  {id:'a1',k:'sub',n:'Explore',m:'Haiku 5',st:'done',t:412e3,c:.31,d:252,io:['380K','32K','1.1M']},
+  {id:'a2',k:'sub',n:'code-logic-reviewer',m:'Sonnet 5.5',st:'done',t:1.2e6,c:.94,d:663,io:['1.1M','96K','2.4M']},
+  {id:'a3',k:'sub',n:'software-architect',m:'Fable 5.2',st:'failed',t:88e3,c:.07,d:130,io:['81K','7K','0']},
+  {id:'a4',k:'sub',n:'frontend-developer',m:'Fable 5.2',st:'done',t:9.6e6,c:5.92,d:1604,io:['9.1M','512K','14.2M']},
+  {id:'a5',k:'sub',n:'senior-tester',m:'Sonnet 5.5',st:'running',t:3.1e6,c:1.71,d:347,live:1,io:['2.9M','204K','4.0M']},
+  {id:'a6',k:'sub',n:'code-style-reviewer',m:'Sonnet 5.5',st:'stopped',t:1.4e6,c:.52,d:0,io:['1.3M','88K','1.9M']},
+  {id:'a7',k:'sub',n:'researcher-expert',m:'Haiku 5',st:'done',t:800e3,c:.35,d:418,io:['742K','58K','610K']},
+  {id:'l1',k:'cli',n:'Codex CLI',m:'gpt-6.2-sol',st:'done',t:2.2e6,c:2.62,cmk:'est',ctip:'About $2.62, estimated from weighted tokens',d:1584},
+  {id:'l2',k:'cli',n:'Gemini CLI',m:'gemini-3-pro',st:'done',t:200e3,tmk:'est',ttip:'About 200K tokens, estimated',c:null,ctip:'This lane reports no cost',d:637}],
+ limits:{notice:null,providers:[{n:'Claude',acct:'227d',pct:41,win:'Weekly',reset:'Sat 28 Nov 04:59',src:'API'},{n:'Codex',acct:'6ba5',pct:6,win:'Weekly',reset:'Sun 29 Nov 01:49',src:'API'},{n:'Gemini',acct:'c41e',pct:83,win:'Daily',reset:'today 23:00',src:'CLI'}]},
+ task:{id:'TASK_2026_2309_5bea',title:'Redesign the session stats sidebar',st:'running',label:'In progress',stage:'design',done:3,total:7,docs:['task-description.md','design-spec-v2.md'],more:4,related:2},
+ git:{branch:'feat/stats-sidebar-redesign',add:128,del:42},
+ linked:[{t:'Stats sidebar redesign',rel:'this session',cur:true},{t:'Usage limits fix',rel:'parent'},{t:'Visual review of inspector',rel:'child'}]};
+const clone=o=>JSON.parse(JSON.stringify(o));
+const FX={lanes:()=>clone(base),
+ exact(){const f=clone(base);f.agents=f.agents.filter(a=>a.k!=='cli').map(a=>({...a,st:a.st==='running'?'done':a.st}));f.s.tok={v:23.5e6,sdk:23.5e6,cli:0,io:['1.9M','0.6M']};f.s.cost={v:14.92,sdk:14.92,cli:0};f.s.live=0;f.s.budget={pct:56,tip:'23.5M of 42.0M token budget'};f.limits.providers.length=1;return f},
+ partial(){const f=FX.exact();f.s.cost={v:12.51,mk:'low',sdk:12.51,cli:0,tip:'At least $12.51. Sonnet 5.5 has no price.'};f.s.models[1].c=null;f.agents.forEach(a=>{if(a.m==='Sonnet 5.5'){a.c=null;a.ctip='No price for Sonnet 5.5'}});return f},
+ missing(){const f=clone(base);f.s.tok={v:null};f.s.cost={v:null};f.s.budget=null;f.s.models=[];f.s.cats=null;f.ctx={pct:null};f.cache=null;f.agents.forEach(a=>{a.t=null;a.c=null;a.tmk=a.cmk=null;a.ttip=a.ctip='Usage not reported';a.io=null;if(a.st==='running')a.st='done'});f.s.live=0;return f},
+ live(){const f=clone(base);f.header.status='running';f.header.running=true;f.s.live=4;f.s.liveTime=1;f.ctx={pct:86,used:'172K',cap:'200K',comp:2};f.cache={s:221,ttl:'5m',idle:'3:41',live:1};
+   f.agents[0].st='running';f.agents[2].st='running';f.agents[2].live=1;f.agents[4].st='needs';f.agents[4].req='Allow npm run verify?';f.requests=[{t:'Orchestrator asks: push branch and open PR?'}];f.s.budget={pct:91,stage:'warn',tip:'Tighten stage: 38.2M of 42.0M token budget'};f.limits.notice='Limits last refreshed 14 min ago';return f},
+ resumed(){const f=clone(base);f.s.time=null;f.agents.forEach(a=>{if(a.k!=='orch'&&a.st!=='running')a.d=null});f.agents[5].st='done';f.agents[5].live=0;f.s.live=0;return f},
+ loading(){const f=clone(base);f.loading=true;return f},
+ empty(){const f=clone(base);f.header={title:'New session',status:'idle',workflow:null,branch:null,running:false};f.s=null;f.ctx={pct:null};f.cache=null;f.agents=[f.agents[0]];f.agents[0].st='idle';f.limits=null;f.task=null;f.git=null;f.linked=[];return f}};
+
+/* ---------- state ---------- */
+const P=new URLSearchParams(location.search);
+const S={w:P.get('w')||'400',theme:P.get('theme')||'dark',fx:P.get('fx')||'lanes',sel:P.get('sel'),more:P.get('more')==='1',pop:P.get('pop')==='1',menu:false,err:P.get('err')==='1',docs:null};
+if(P.get('chrome')==='0')document.body.classList.add('bare');
+let F=FX[S.fx]?FX[S.fx]():FX.lanes();
+const VISIBLE=6;
+
+/* ---------- sections ---------- */
+function header(){const h=F.header,[tc,ti,tl]=ST[h.status];
+ return `<header class="hd"><div style="flex:1;min-width:0"><h2 data-tip="${esc(h.title)}">${esc(h.title)}</h2>
+ <div class="chips"><span class="chip st ${tc}" data-component="ptah-badge">${ic(ti)}<span>${tl}</span></span>
+ ${h.workflow?`<span class="chip" data-component="ptah-badge" data-tip="Workflow: ${esc(h.workflow)}">${ic('flow')}<span>${esc(h.workflow)}</span></span>`:''}
+ ${h.branch?`<span class="chip mono" data-component="ptah-badge" data-tip="Branch: ${esc(h.branch)}">${ic('branch')}<span>${esc(h.branch)}</span></span>`:''}</div></div>
+ <div class="acts" data-component="ptah-inspector-session-actions"><button class="ib" aria-label="Rename session" data-tip="Rename">${ic('pencil')}</button><button class="ib" aria-label="Organize session" data-tip="Organize">${ic('folder')}</button>
+ ${h.running?`<button class="ib danger" aria-label="Stop session" data-tip="Stop session">${ic('square')}</button>`:''}<button class="ib" aria-label="Compact session details" data-tip="Collapse to rail" data-act="rail">${ic('panel')}</button></div></header>
+ ${F.requests.map(r=>`<div class="req" data-component="ptah-inspector-request-lines">${ic('alert')}<span data-tip="${esc(r.t)}">${esc(r.t)}</span><button class="btn-xs">Answer</button></div>`).join('')}`}
+
+function srcbar(a,b,fa,fb){return `<span class="bar src" data-component="ptah-meter (gap: two-segment)" role="img" aria-label="SDK ${fa}, CLI lanes ${fb}"><i class="s1" style="flex:${a}" data-tip="SDK ${fa}"></i><i class="s2" style="flex:${b}" data-tip="CLI lanes ${fb}"></i></span>`}
+function session(){const s=F.s;if(F.loading)return `<section class="sec" aria-busy="true"><div class="sec-h"><h3>Session</h3></div><div class="tiles">${'<div class="tile"><span class="sk" style="width:40%"></span><span class="sk" style="width:70%;height:18px;margin:4px 0"></span><span class="sk" style="height:3px"></span></div>'.repeat(6)}</div></section>`;
+ if(!s)return '';
+ const lanes=s.tok.cli>0,t=s.tok,c=s.cost,subs=F.agents.filter(a=>a.k==='sub').length,clis=F.agents.filter(a=>a.k==='cli').length;
+ const b=s.budget,bt=b?(b.pct>=100?'err':b.stage==='warn'?'warn':''):'';
+ return `<section class="sec" data-inspector-section="session" data-component="ptah-surface-section" aria-labelledby="h-s">
+ <div class="sec-h"><h3 id="h-s">Session</h3><span class="meta">${lanes?'all agents':subs?'all agents':''}</span></div>
+ <div class="tiles ${S.enter?'enter':''}" data-component="ptah-instrument-band">
+  <div class="tile" data-component="ptah-stat"><span class="cap">Tokens</span><span class="val">${num(tok(t.v),t.mk,t.v==null?'No usage reported':`${t.v.toLocaleString()} tokens`)}</span>
+   <span class="sub">${t.v==null?'':lanes?srcbar(t.sdk,t.cli,tok(t.sdk),tok(t.cli)):`in ${t.io[0]} · out ${t.io[1]}`}</span></div>
+  <div class="tile" data-component="ptah-stat"><span class="cap">Cost</span><span class="val">${num(usd(c.v),c.mk,c.tip||(c.v==null?'No usage reported':'Exact, from provider pricing'))}</span>
+   <span class="sub">${c.v==null?'':lanes?srcbar(c.sdk,c.cli,usd(c.sdk),MK.est+usd(c.cli)):'this session'}</span></div>
+  <div class="tile" data-component="ptah-stat"><span class="cap">Time</span><span class="val">${time(s.time,s.liveTime,'Duration was not recorded before this session was resumed')}</span><span class="sub num">${s.turns} turns</span></div>
+  <div class="tile" data-component="ptah-stat"><span class="cap">Agents</span><span class="val num">${F.agents.length}</span><span class="sub">${s.live?`<span class="dot"></span>${s.live} live`:'0 live'}</span></div>
+  <button class="tile" id="t-models" data-component="ptah-stat + ptah-disclosure" aria-haspopup="dialog" aria-expanded="${S.pop}" aria-controls="pop-models" ${s.models.length?'':'disabled'}><span class="cap">Models ${s.models.length?ic('down'):''}</span><span class="val">${s.models.length?`<span class="num">${s.models.length}</span>`:num(null,null,'No model usage reported')}</span>
+   <span class="sub">${s.models.length?`${s.models[0].n.split(' ')[0]}${s.models.length>1?` +${s.models.length-1}`:''}`:''}</span></button>
+  <div class="tile" data-component="ptah-stat"><span class="cap">Budget ${b&&bt?cue(bt==='err'?99:85):''}</span><span class="val">${b?num(b.pct+'%',null,b.tip):num(null,null,'No budget set')}</span>
+   <span class="sub">${b?`<span class="bar ${bt}" data-component="ptah-meter" role="meter" aria-label="Budget used" aria-valuenow="${b.pct}" aria-valuemin="0" aria-valuemax="100"><i style="width:${b.pct}%"></i></span>`:''}</span></div>
+ </div>
+ ${S.pop&&s.models.length?models():''}
+ ${lanes?`<div class="legend" data-component="ptah-legend (gap)"><span><i class="sw s1"></i>SDK<b>${tok(t.sdk)}</b></span><span><i class="sw s2"></i>CLI lanes<b>${tok(t.cli)}</b></span></div>`:''}
+ </section>`}
+function models(){const s=F.s,k=s.cats;return `<div class="pop" id="pop-models" role="dialog" aria-label="Models and token breakdown, SDK scope" data-component="ptah-disclosure > ptah-table + ptah-description-list">
+ <div class="sec-h"><h3>Models</h3><span class="meta"><i class="sw s1"></i>SDK</span></div>
+ <table>${s.models.map(m=>`<tr><td>${m.n}</td><td class="r">${num(tok(m.t),null,m.t.toLocaleString()+' tokens')}</td><td class="r">${num(usd(m.c),null,m.c==null?'No price for this model':'')}</td></tr>`).join('')}</table>
+ <dl class="cats"><div><dt>Input</dt><dd>${tok(k.in)}</dd></div><div><dt>Output</dt><dd>${tok(k.out)}</dd></div><div><dt>Cache read</dt><dd>${tok(k.cr)}</dd></div><div><dt>Cache write</dt><dd>${tok(k.cw)}</dd></div></dl></div>`}
+
+function agentRow(a,max){const [tc,ti,tl]=ST[a.st],sel=S.sel===a.id,av=a.k==='orch'?'net':a.k==='cli'?'term':'bot';
+ const kind=a.k==='orch'?'':a.k==='cli'?'CLI lane, ':'Subagent, ';
+ const name=`<td><button class="agent" aria-current="${sel}" aria-label="${kind}${esc(a.n)}, ${tl}" data-row="${a.id}"><span class="av" data-tip="${tl}">${ic(av)}<span class="bd ${tc}">${ic(ti)}</span></span><span class="nm"><b>${esc(a.n)}</b><small>${esc(a.m)}</small></span></button></td>`;
+ let cells;
+ if(a.k==='orch'){const x=F.ctx,ch=F.cache;
+  cells=`<td colspan="3"><span class="orch" data-component="ptah-ring + ptah-countdown">
+   <span class="grp" data-tip="${x.pct==null?'Context not reported':`Main request context: ${x.used} of ${x.cap}, ${x.comp} compaction${x.comp===1?'':'s'}`}" aria-label="Context ${x.pct==null?'unknown':x.pct+' percent'}">${ring(x.pct)}${x.pct==null?'<span class="num unk">—</span>':`<span class="num">${x.pct}%</span>`}${x.pct!=null?cue(x.pct):''}</span>
+   ${ch?`<span class="grp" data-tip="Prompt cache (${ch.ttl}) expires in ${clock(ch.s)}, idle in ${ch.idle}" aria-label="Cache expires in ${clock(ch.s)}">${ic('glass')}<span class="num" ${ch.live?`data-live="-1" data-s="${ch.s}"`:''}>${clock(ch.s)}</span></span>`:''}</span></td>`}
+ else cells=`<td ptahNumeric><span class="tokc">${num(tok(a.t),a.tmk,a.ttip||(a.t!=null?a.t.toLocaleString()+' tokens':''),'td[ptahBarCell]')}${a.t!=null?`<span class="bar"><i class="${a.k==='cli'?'s2':'s1'}" style="flex:none;width:${Math.max(6,a.t/max*100)}%"></i></span>`:''}</span></td>
+  <td>${num(usd(a.c),a.cmk,a.ctip,'td[ptahNumeric]')}</td><td>${a.st==='stopped'&&a.d===0?time(0):time(a.d,a.live,'Duration not recorded')}</td>`;
+ let exp='';
+ if(sel){const strip=a.k==='orch'?(F.ctx.pct==null?'':`<dl class="strip" data-component="ptah-description-list"><div><dt>Context</dt><dd>${F.ctx.used} / ${F.ctx.cap}</dd></div><div><dt>Compactions</dt><dd>${F.ctx.comp}</dd></div>${F.cache?`<div><dt>Cache</dt><dd>${F.cache.ttl}, idle in ${F.cache.idle}</dd></div>`:''}</dl>`)
+   :a.io?`<dl class="strip" data-component="ptah-description-list"><div><dt>In</dt><dd>${a.io[0]}</dd></div><div><dt>Out</dt><dd>${a.io[1]}</dd></div><div><dt>Cache</dt><dd>${a.io[2]}</dd></div></dl>`:'';
+  const act=a.st==='running'||a.st==='needs';
+  exp=`<tr class="exp"><td colspan="4">${a.req?`<div class="line" style="margin-bottom:6px" data-component="ptah-inspector-request-lines"><span class="cue">${ic('alert')}</span><span class="grow">${esc(a.req)}</span><button class="btn-xs">Answer</button></div>`:''}${strip}
+   ${act?`<form class="steer" onsubmit="return false"><input aria-label="Steer ${esc(a.n)}" placeholder="Steer ${esc(a.n)}" id="steer-in"><button class="ib" aria-label="Send" data-act="send">${ic('send')}</button><button class="ib" type="button" id="menu-btn" aria-label="Agent actions" aria-haspopup="menu" aria-expanded="${S.menu}">${ic('dots')}</button>
+    ${S.menu?`<div class="menu" role="menu" aria-label="Agent actions" data-component="ptah-inspector-agent-actions-menu"><button role="menuitem" data-m="steer">Steer</button><button role="menuitem" data-m="bg">Background</button><button role="menuitem" class="danger" data-m="stop">Stop</button></div>`:''}</form>
+    ${S.err?`<div class="alert" role="alert">${ic('alert')}<span>Steer not delivered</span><button class="link" data-act="retry">Retry</button></div>`:''}`:''}</td></tr>`;
+  if(!strip&&!act&&!a.req)exp='';}
+ return `<tr class="row ${sel?'sel':''}" data-row="${a.id}">${name}${cells}</tr>${exp}`}
+function agents(){const A=F.agents,max=Math.max(1,...A.map(a=>a.t||0));
+ if(F.loading)return `<section class="sec" aria-busy="true"><div class="sec-h"><h3>Agents</h3></div>${'<div class="line" style="margin:10px 0"><span class="sk" style="width:26px;height:26px;border-radius:50%"></span><span class="sk grow"></span><span class="sk" style="width:120px"></span></div>'.repeat(4)}</section>`;
+ const run=A.filter(a=>a.st==='running'||a.st==='needs').length,sub=A.filter(a=>a.k==='sub').length,cli=A.filter(a=>a.k==='cli').length;
+ const vis=S.more?A:A.filter((a,i)=>i<VISIBLE||a.id===S.sel),hid=A.length-VISIBLE;
+ return `<section class="sec" data-inspector-section="agents" data-component="ptah-surface-section" aria-labelledby="h-a">
+ <div class="sec-h"><h3 id="h-a">Agents</h3><span class="meta">${[run?`${run} running`:'',sub?`${sub} sub`:'',cli?`${cli} CLI`:''].filter(Boolean).join(' · ')}</span></div>
+ <table class="ag" data-component="ptah-table"><colgroup><col><col class="c-tok"><col class="c-cost"><col class="c-time"></colgroup>
+ <thead><tr><th scope="col">Agent</th><th scope="col">Tokens</th><th scope="col">Cost</th><th scope="col">Time</th></tr></thead>
+ <tbody>${vis.map(a=>agentRow(a,max)).join('')}</tbody></table>
+ ${hid>0?`<button class="more" id="more" aria-expanded="${S.more}">${ic('down')}${S.more?'Show fewer':`Show ${hid} more`}</button>`:''}</section>`}
+
+function limits(){const l=F.limits;if(!l||F.loading)return '';
+ return `<section class="sec" data-component="ptah-surface-section" aria-labelledby="h-l"><div class="sec-h"><h3 id="h-l">Plan limits</h3><span class="meta">${l.providers.length} provider${l.providers.length===1?'':'s'}</span></div>
+ ${l.notice?`<p class="notice" role="status" style="margin-top:0">${ic('alert')}${esc(l.notice)}</p>`:''}
+ <div class="rows">${l.providers.map(p=>{const t=p.pct>=100?'err':p.pct>=80?'warn':'';return `<div class="lim" data-component="ptah-provider-lane-limit-tile">
+  <div class="line"><span class="ttl">${p.n}</span><span class="muted mono grow" data-tip="${p.n} account ${p.acct}">${p.acct}</span>${t?cue(t==='err'?99:85):''}<span class="pct num" data-tip="${p.pct}% of the ${p.win.toLowerCase()} limit used">${p.pct}%</span></div>
+  <div class="bar ${t}" data-component="ptah-meter" role="meter" aria-label="${p.n} ${p.win} limit used" aria-valuenow="${p.pct}" aria-valuemin="0" aria-valuemax="100"><i style="width:${p.pct}%"></i></div>
+  <div class="line meta"><span class="grow">${p.win} · resets ${p.reset}</span><span class="chip" data-component="ptah-badge" data-tip="Source: ${p.src==='API'?'provider API':'CLI report'}"><span>${p.src}</span></span></div></div>`}).join('')}</div></section>`}
+
+function task(){const t=F.task;if(F.loading)return '';
+ if(!t)return '';
+ const [tc,ti]=ST[t.st];
+ return `<section class="sec" data-component="ptah-surface-section" aria-labelledby="h-t"><div class="sec-h"><h3 id="h-t">Task</h3><span class="chip mono" data-component="ptah-badge" data-tip="${t.id}"><span>${t.id}</span></span></div>
+ <div class="line"><span class="ttl grow" data-tip="${esc(t.title)}">${esc(t.title)}</span></div>
+ <div class="prog"><span class="chip st ${tc}" data-component="ptah-badge">${ic(ti)}<span>${t.label}</span></span><span class="meta">${t.stage}</span>
+  <span class="bar" data-component="ptah-meter" role="progressbar" aria-label="${t.done} of ${t.total} tasks complete" aria-valuenow="${t.done}" aria-valuemax="${t.total}"><i style="width:${t.done/t.total*100}%"></i></span><span class="meta">${t.done}/${t.total}</span></div>
+ <div class="docs" aria-label="Task documents">${t.docs.map(d=>`<button class="chip" aria-pressed="${S.docs===d}" data-doc="${d}" data-tip="${d}">${ic('file')}<span>${d}</span></button>`).join('')}<button class="chip" aria-expanded="false"><span>+${t.more} files</span></button>${t.related?`<button class="chip" aria-expanded="false" aria-label="${t.related} related tasks"><span>+${t.related} related</span></button>`:''}</div></section>`}
+function git(){if(F.loading)return '';const g=F.git;
+ return `<section class="sec" data-component="ptah-surface-section" aria-labelledby="h-g"><div class="sec-h"><h3 id="h-g">Git</h3>${g?'<button class="link">Review changes</button>':''}</div>
+ ${g?`<div class="line"><span class="muted" style="display:flex">${ic('branch')}</span><span class="mono grow" data-tip="${g.branch}">${g.branch}</span><span class="num" data-tip="Uncommitted changes"><span class="add">+${g.add}</span> <span class="del">−${g.del}</span></span></div>`
+   :`<div class="line muted">${ic('branch')}<span>Not a git repository</span></div>`}</section>`}
+function linked(){if(F.loading||!F.linked.length)return '';
+ return `<section class="sec" data-component="ptah-surface-section" aria-labelledby="h-k"><div class="sec-h"><h3 id="h-k">Linked sessions</h3><span class="meta">${F.linked.length}</span></div>
+ <div role="list">${F.linked.map(l=>`<div role="listitem"><button class="lk" aria-current="${!!l.cur}"><span class="grow">${esc(l.t)}</span><span class="meta">${l.rel}</span></button></div>`).join('')}</div></section>`}
+
+function rail(){const s=F.s,x=F.ctx;
+ return `<aside class="rail" aria-label="Session details"><button class="rb" aria-label="Expand session details" data-act="expand" data-tip="Expand">${ic('left')}</button>
+ ${F.agents.slice(0,3).map(a=>{const [tc,ti,tl]=ST[a.st];return `<span class="av" data-tip="${esc(a.n)}: ${tl}">${ic(a.k==='orch'?'net':a.k==='cli'?'term':'bot')}<span class="bd ${tc}">${ic(ti)}</span></span>`}).join('')}
+ ${F.agents.length>3?`<span class="meta">+${F.agents.length-3}</span>`:''}<hr>
+ ${s?`<button class="rb" aria-label="Session tokens ${tok(s.tok.v)||'unknown'}" data-act="expand"><span class="cap">Tok</span>${num(tok(s.tok.v),s.tok.mk,'Session tokens')}</button>
+ <button class="rb" aria-label="Session cost ${s.cost.tip||usd(s.cost.v)||'unknown'}" data-act="expand"><span class="cap">Cost</span>${num(usd(s.cost.v),s.cost.mk,s.cost.tip)}</button>`:''}
+ <button class="rb" aria-label="Main request context ${x.pct==null?'unknown':x.pct+' percent'}" data-act="expand" data-tip="Main request context">${ring(x.pct)}<span class="num ${x.pct==null?'unk':''}">${x.pct==null?'—':Math.round(x.pct)+'%'}</span>${x.pct!=null?cue(x.pct):''}</button></aside>`}
+
+function render(){document.documentElement.dataset.theme=S.theme==='light'?'anubis-light':'anubis';
+ const root=document.getElementById('root');
+ if(S.w==='rail'){root.innerHTML=rail();root.style.width='56px';return}
+ root.style.width=S.w+'px';
+ root.innerHTML=`<aside class="insp" aria-label="This session" data-inspector-pane>${header()}${session()}${agents()}${limits()}${task()}${git()}${linked()}<p role="status" aria-live="polite" class="sr" id="live"></p></aside>`;
+ S.enter=false}
+function say(t){const l=document.getElementById('live');if(l)l.textContent=t}
+function sync(){const q=new URLSearchParams({w:S.w,theme:S.theme,fx:S.fx});if(document.body.classList.contains('bare'))q.set('chrome','0');history.replaceState(null,'','?'+q)}
+
+/* ---------- interactions ---------- */
+document.addEventListener('click',e=>{const t=e.target;
+ const act=t.closest('[data-act]');
+ if(act){const a=act.dataset.act;if(a==='rail'){S.w='rail'}else if(a==='expand'){S.w='400'}else if(a==='send'){S.err=!document.getElementById('steer-in').value.trim();if(!S.err)say('Steer sent')}else if(a==='retry'){S.err=false}
+  document.getElementById('c-w').value=S.w;sync();render();return}
+ if(t.closest('.menu [data-m]')){const m=t.closest('[data-m]').dataset.m;S.menu=false;render();if(m==='steer')document.getElementById('steer-in')?.focus();else{say(m==='stop'?'Stop requested':'Moved to background');document.getElementById('menu-btn')?.focus()}return}
+ if(t.closest('#menu-btn')){S.menu=!S.menu;render();(S.menu?document.querySelector('.menu button'):document.getElementById('menu-btn'))?.focus();return}
+ if(t.closest('#t-models')){S.pop=!S.pop;render();document.getElementById('t-models').focus();return}
+ if(t.closest('#more')){S.more=!S.more;render();document.getElementById('more').focus();return}
+ if(t.closest('[data-doc]')){const d=t.closest('[data-doc]').dataset.doc;S.docs=S.docs===d?null:d;render();return}
+ if(t.closest('.exp')||t.closest('.pop'))return;
+ const row=t.closest('tr.row');
+ if(row){S.sel=S.sel===row.dataset.row?null:row.dataset.row;S.menu=false;S.err=false;render();document.querySelector(`button[data-row="${row.dataset.row}"]`)?.focus();return}
+ if(S.pop||S.menu){S.pop=S.menu=false;render()}});
+document.addEventListener('keydown',e=>{if(e.key!=='Escape')return;
+ if(S.menu){S.menu=false;render();document.getElementById('menu-btn')?.focus()}
+ else if(S.pop){S.pop=false;render();document.getElementById('t-models')?.focus()}});
+const tip=document.getElementById('tip');
+function showTip(el){tip.textContent=el.dataset.tip;tip.classList.add('on');const r=el.getBoundingClientRect(),w=tip.offsetWidth,h=tip.offsetHeight;
+ tip.style.left=Math.max(4,Math.min(innerWidth-w-4,r.left+r.width/2-w/2))+'px';tip.style.top=(r.top-h-6<4?r.bottom+6:r.top-h-6)+'px'}
+document.addEventListener('mouseover',e=>{const el=e.target.closest('[data-tip]');el?showTip(el):tip.classList.remove('on')});
+document.addEventListener('focusin',e=>{const el=e.target.closest('[data-tip]')||e.target.querySelector?.('[data-tip]');el?showTip(el):tip.classList.remove('on')});
+setInterval(()=>document.querySelectorAll('[data-live]').forEach(el=>{const s=Math.max(0,+el.dataset.s+ +el.dataset.live);el.dataset.s=s;el.textContent=clock(s);
+ const id=el.closest('tr')?.dataset.row,a=F.agents.find(a=>a.id===id);if(el.closest('.orch')&&F.cache)F.cache.s=s;else if(a)a.d=s;else if(F.s)F.s.time=s}),1000);
+for(const k of ['w','theme','fx']){const el=document.getElementById('c-'+k);el.value=S[k];el.addEventListener('change',()=>{S[k]=el.value;if(k==='fx'){F=FX[S.fx]();S.sel=null;S.more=S.pop=S.menu=S.err=false;S.enter=true}sync();render()})}
+render();
+</script>
+</body>
+</html>

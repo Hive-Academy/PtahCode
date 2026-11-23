@@ -73,7 +73,7 @@ let nextMenuId = 0;
     <button
       #trigger
       type="button"
-      class="inline-flex size-7 items-center justify-center rounded-md text-base-content-muted hover:bg-base-content/5 hover:text-base-content focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
+      class="inline-flex size-6 items-center justify-center rounded-md text-base-content-muted hover:bg-base-content/5 hover:text-base-content focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
       aria-haspopup="menu"
       [attr.aria-expanded]="open()"
       [attr.aria-controls]="open() ? menuId : null"
@@ -81,7 +81,7 @@ let nextMenuId = 0;
       (click)="openChange.emit(!open())"
       (keydown.arrowdown)="openFromKeyboard($event)"
     >
-      <lucide-angular [img]="EllipsisIcon" class="size-4" aria-hidden="true" />
+      <lucide-angular [img]="EllipsisIcon" class="size-3.5" aria-hidden="true" />
     </button>
     @if (open()) {
       <ul

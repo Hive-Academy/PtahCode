@@ -168,3 +168,50 @@ describe('ptah-ring new inputs accessibility', () => {
     expect(meter?.getAttribute('aria-label')).toBe('Used');
   });
 });
+
+it('exposes the supplied stat text once and hides the visible value and unit', () => {
+  const spoken = 'At least approximately 1,200 tokens';
+  const el = render(PtahStatComponent, {
+    label: 'Usage', value: '1.2k', unit: 'tokens', accuracy: 'lower-bound-approximate', accessibleValue: spoken,
+  });
+  expect(el.querySelector('.tabular-nums[aria-hidden="true"]')?.textContent).toBe('≥~1.2k');
+  expect(el.querySelector('[data-testid="stat-unit"]')?.getAttribute('aria-hidden')).toBe('true');
+  expect(Array.from(el.querySelectorAll('.sr-only'), (node) => node.textContent)).toEqual([spoken]);
+});
+
+it('opens the stat tooltip on hover and focus and dismisses it with Escape or blur', () => {
+  const fixture = TestBed.createComponent(PtahStatComponent);
+  fixture.componentRef.setInput('label', 'Usage');
+  fixture.componentRef.setInput('value', 42);
+  fixture.componentRef.setInput('layout', 'tile');
+  fixture.componentRef.setInput('detail', 'Known subtotal');
+  fixture.detectChanges();
+  const el = fixture.nativeElement as HTMLElement;
+  const tooltip = el.querySelector<HTMLElement>('[role="tooltip"]');
+  expect(el.getAttribute('tabindex')).toBe('0');
+  expect(tooltip?.id).toBe(el.getAttribute('aria-describedby'));
+  expect(tooltip?.hidden).toBe(true);
+
+  el.dispatchEvent(new MouseEvent('mouseenter'));
+  fixture.detectChanges();
+  expect(tooltip?.hidden).toBe(false);
+  el.dispatchEvent(new MouseEvent('mouseleave'));
+  fixture.detectChanges();
+  expect(tooltip?.hidden).toBe(true);
+
+  el.focus();
+  fixture.detectChanges();
+  expect(tooltip?.hidden).toBe(false);
+  el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  fixture.detectChanges();
+  expect(el.ownerDocument.activeElement).toBe(el);
+  expect(tooltip?.hidden).toBe(true);
+
+  el.blur();
+  el.focus();
+  fixture.detectChanges();
+  expect(tooltip?.hidden).toBe(false);
+  el.blur();
+  fixture.detectChanges();
+  expect(tooltip?.hidden).toBe(true);
+});

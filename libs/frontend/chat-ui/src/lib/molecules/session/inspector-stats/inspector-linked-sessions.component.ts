@@ -5,6 +5,7 @@ import {
   input,
   output,
 } from '@angular/core';
+import { PtahButtonDirective, SurfaceSectionComponent } from '@ptah-extension/ui';
 
 /** Where an entry sits in the handoff chain relative to the open session. */
 export type InspectorLinkedSessionRelation = 'current' | 'from' | 'in';
@@ -71,6 +72,7 @@ let nextSectionId = 0;
 @Component({
   selector: 'ptah-inspector-linked-sessions',
   standalone: true,
+  imports: [PtahButtonDirective, SurfaceSectionComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: `
     .linked-session-button {
@@ -78,16 +80,23 @@ let nextSectionId = 0;
     }
   `,
   template: `
-    <section
-      class="border-t border-surface-border p-4"
+    <ptah-surface-section
+      padding="md"
+      role="region"
+      class="block border-t border-surface-border [&>section]:gap-1 [&>section]:rounded-none [&>section]:border-0 [&>section]:bg-transparent [&>section]:px-0 [&>section]:py-2"
       data-testid="inspector-linked-sessions"
       [attr.aria-labelledby]="headingId"
     >
-      <h3 [id]="headingId" class="sec-label mb-2 text-[10.5px] font-semibold uppercase">
-        LINKED SESSIONS
-      </h3>
+      <div section-header class="flex min-h-6 items-center justify-between gap-2 px-3">
+        <h3 [id]="headingId" class="sec-label text-[10.5px] font-semibold uppercase">
+          LINKED SESSIONS
+        </h3>
+        <span class="text-[10.5px] tabular-nums text-base-content-muted" data-testid="inspector-linked-session-count">
+          {{ rows().length }}
+        </span>
+      </div>
       <ul
-        class="max-h-[10.5rem] overflow-y-auto"
+        class="max-h-[8.75rem] overflow-y-auto"
         role="list"
         data-testid="inspector-linked-sessions-list"
       >
@@ -95,13 +104,11 @@ let nextSectionId = 0;
           <li>
             <button
               type="button"
-              class="linked-session-button relative grid min-h-8 w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-2 py-1 text-left transition-colors duration-[120ms] hover:bg-base-content/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-base-content"
+              ptahButton variant="ghost" size="sm" density="compact" align="row" selectedAs="current"
+              class="linked-session-button w-full text-left"
+              [selected]="row.current ? true : undefined"
               data-testid="inspector-linked-session"
               [attr.data-session-id]="row.sessionId"
-              [class.bg-surface-2]="row.current"
-              [class.font-semibold]="row.current"
-              [class.font-medium]="!row.current"
-              [attr.aria-current]="row.current ? 'true' : null"
               [attr.aria-label]="row.ariaLabel"
               (click)="activate(row)"
             >
@@ -112,14 +119,15 @@ let nextSectionId = 0;
                 ></span>
               }
               <span
-                class="min-w-0 truncate text-[11.5px] leading-[18px]"
+                class="min-w-0 flex-1 truncate px-1 text-[11.5px] leading-[18px]"
+                [class.font-semibold]="row.current"
                 data-testid="inspector-linked-session-title"
                 [class.text-base-content-muted]="row.fallback"
                 [attr.title]="row.title"
                 >{{ row.title }}</span
               >
               <span
-                class="shrink-0 whitespace-nowrap text-[10.5px] font-normal leading-4 text-base-content-muted"
+                class="shrink-0 whitespace-nowrap pr-1 text-[10.5px] font-normal leading-4 text-base-content-muted"
                 data-testid="inspector-linked-session-relation"
                 >{{ row.relationText }}</span
               >
@@ -127,7 +135,7 @@ let nextSectionId = 0;
           </li>
         }
       </ul>
-    </section>
+    </ptah-surface-section>
   `,
 })
 export class InspectorLinkedSessionsComponent {

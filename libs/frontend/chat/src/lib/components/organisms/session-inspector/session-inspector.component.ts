@@ -4,11 +4,14 @@ import {
   Component,
   DestroyRef,
   ElementRef,
+  afterNextRender,
   afterRenderEffect,
   computed,
   effect,
   inject,
+  Injector,
   input,
+  linkedSignal,
   output,
   signal,
   untracked,
@@ -17,6 +20,8 @@ import {
 import {
   compactSessionMetrics,
   limitAwareDot,
+  sdkContribution,
+  sessionTotal,
   InspectorLimitsLanesComponent,
   InspectorLinkedSessionsComponent,
   InspectorSessionStatsComponent,
@@ -24,24 +29,47 @@ import {
   type SessionLimitSummary,
 } from '@ptah-extension/chat-ui';
 import { SessionId } from '@ptah-extension/shared';
-import { LucideAngularModule, PanelRightClose } from 'lucide-angular';
+import {
+  PtahBadgeDirective,
+  PtahIconButtonDirective,
+  PtahSkeletonComponent,
+  PtahStatusComponent,
+  type PtahStatus,
+} from '@ptah-extension/ui';
+import { GitBranch, LucideAngularModule, PanelRightClose, Workflow } from 'lucide-angular';
 import {
   HandoffChainClient,
   InspectorShellController,
   SessionInspectorStore,
 } from '../../../services/session-inspector';
 import { SessionRowActionsService } from '../../../services/session-list/session-row-actions.service';
+import { injectInspectorAgentRows, type InspectorAgentRows } from './inspector-agent-rows';
 import { InspectorAgentsSectionComponent } from './inspector-agents-section.component';
 import { InspectorGitSectionComponent } from './inspector-git-section.component';
 import { InspectorSessionActionsComponent } from './inspector-session-actions.component';
 import { InspectorRequestLinesComponent } from './inspector-request-panel.component';
 import { InspectorTaskSectionComponent } from './inspector-task-section.component';
 
-import { PtahIconButtonDirective } from '@ptah-extension/ui';
 /** Where the inspector body is shown; `sheet` is the modal overlay band. */
 export type SessionInspectorPresentation =
   'docked' | 'sheet' | 'embedded' | 'rail';
-type InspectorFocusSection = 'session' | 'agents';
+type InspectorFocusSection = 'session' | 'agents' | 'orchestrator' | 'limits' | 'attention';
+
+const HEADER_STATUS = new Map<string, { status: PtahStatus; label: string }>([
+  ['running', { status: 'running', label: 'Running' }],
+  ['background', { status: 'running', label: 'Background' }],
+  ['needs', { status: 'needs-review', label: 'Needs you' }],
+  ['error', { status: 'failed', label: 'Failed' }],
+  ['done', { status: 'completed', label: 'Done' }],
+  ['idle', { status: 'pending', label: 'Idle' }],
+]);
+
+const FOCUS_TARGETS: Record<Exclude<InspectorFocusSection, 'attention'>, string> = {
+  session: '[data-active-session-stats] [data-inspector-section="session"] h3',
+  agents: '[data-inspector-section="agents"] h3',
+  orchestrator: '[data-agent-key="orchestrator"]',
+  limits: '[data-inspector-section="limits"] h3',
+};
 
 function statsSwitchWindowMs(element: HTMLElement): number {
   const value = typeof getComputedStyle === 'function'
@@ -70,6 +98,9 @@ function statsSwitchWindowMs(element: HTMLElement): number {
   imports: [
     NgTemplateOutlet,
     LucideAngularModule,
+    PtahBadgeDirective,
+    PtahSkeletonComponent,
+    PtahStatusComponent,
     InspectorRequestLinesComponent,
     InspectorSessionStatsComponent,
     InspectorLinkedSessionsComponent,
@@ -128,8 +159,9 @@ export class SessionInspectorComponent {
   /** Provided by the chat-view host only; the Rail board has no sheet. */
   private readonly shell = inject(InspectorShellController, { optional: true });
   private readonly destroyRef = inject(DestroyRef);
+  private readonly injector = inject(Injector);
   private statsSwitchTimer: ReturnType<typeof setTimeout> | null = null;
-  protected readonly leavingStats = signal<SessionStatsInputs | null>(null);
+  protected readonly leavingModel = signal<ReturnType<typeof this.sessionModel> | null>(null);
   protected readonly statsSwitching = signal(false);
 
   readonly tabId = input.required<string>();
@@ -158,8 +190,15 @@ export class SessionInspectorComponent {
   readonly answerRequested = output<string>();
 
   protected readonly PanelRightCloseIcon = PanelRightClose;
+  protected readonly workflowIcon = Workflow;
+  protected readonly branchIcon = GitBranch;
+  protected readonly headerStatus = computed(() => {
+    const label = this.sessionStatus().trim();
+    if (!label) return null;
+    return HEADER_STATUS.get(label) ?? { status: 'pending' as const, label };
+  });
 
-  /** Polite live region text: request outcomes only (design 4.5). */
+  /** Polite live region shared by request outcomes and session changes. */
   protected readonly announcement = signal('');
 
   private readonly closeButton =
@@ -185,21 +224,24 @@ export class SessionInspectorComponent {
     const stats = this.stats();
     if (!stats) return [];
     const warning = this.railLimitDescription();
-    return compactSessionMetrics(stats).map((metric) =>
-      metric.id === 'context' && warning
-        ? { ...metric, ariaLabel: `${metric.ariaLabel}; ${warning}` }
-        : metric,
-    );
+    return compactSessionMetrics(stats, this.totals()).map((metric) => ({
+      ...metric,
+      target: metric.id === 'context' ? 'orchestrator' as const : 'session' as const,
+      ariaLabel: metric.id === 'context' && warning
+        ? `${metric.ariaLabel}; ${warning}`
+        : metric.ariaLabel,
+    }));
   });
   protected readonly runLabel = computed(() => {
     const model = this.model();
-    const count = model.agents.data?.active;
+    const count = this.inspectorAgentRows.captionCounts().running;
     return `${count == null ? 'Running agents unavailable' : `Running agents: ${count}`}; ${model.needsYouCount} need you`;
   });
 
   /** Uncached input and output tokens of the session. */
   protected readonly sessionTokens = computed(() => {
-    const tokens = this.stats()?.snapshot?.tokens;
+    const snapshot = this.stats()?.snapshot;
+    const tokens = snapshot?.sessionId === this.sessionId() ? snapshot.tokens : undefined;
     return tokens
       ? {
           input: tokens.input,
@@ -211,6 +253,70 @@ export class SessionInspectorComponent {
   protected readonly model = computed(() =>
     this.store.modelFor(this.tabId())(),
   );
+
+  private readonly sessionId = computed(() => this.stats()?.sessionId ?? this.model().sessionId);
+  protected readonly laneRuns = computed(() => this.stats()?.limits?.inspectorRuns ?? []);
+  private readonly projection = injectInspectorAgentRows(this.tabId, this.sessionId, this.laneRuns);
+  private readonly cliContributions = computed(() =>
+    this.projection.contributions().filter((entry) => entry.source === 'cli'),
+  );
+  private readonly totals = computed(() => {
+    const snapshot = this.projection.snapshot();
+    const sdk = sdkContribution(snapshot);
+    // A pending SDK read is not evidence of missing usage. Wait to show a whole-session figure.
+    const usage = snapshot ? [sdk, ...this.cliContributions()] : [sdk];
+    const coverage = this.projection.cliCoverage();
+    return {
+      tokens: sessionTotal(usage, coverage.tokens, 'tokens'),
+      cost: sessionTotal(usage, coverage.cost, 'cost'),
+    };
+  });
+  protected readonly inspectorAgentRows: InspectorAgentRows = {
+    ...this.projection,
+    totals: this.totals,
+    rows: computed(() => {
+      const rows = this.projection.rows();
+      const requests = this.model().orchestrator.requests;
+      return requests.length
+        ? rows?.map((row) => row.key === 'orchestrator' ? { ...row, requests } : row) ?? null
+        : rows;
+    }),
+  };
+  protected readonly agentsSelection = linkedSignal({
+    source: () => ({ sessionId: this.sessionId(), key: this.selectedAgentKey() }),
+    computation: ({ key }) => key,
+  });
+  /**
+   * Stats that belong to the roster's session, or null while the two
+   * disagree (a session switch), so old data never shows as current.
+   */
+  protected readonly rosterStats = computed(() => {
+    const stats = this.stats();
+    if (!stats) return null;
+    const modelSessionId = this.model().sessionId;
+    return !stats.sessionId || !modelSessionId || stats.sessionId === modelSessionId ? stats : null;
+  });
+  protected readonly sessionModel = computed(() => {
+    const stats = this.stats();
+    if (!stats) return null;
+    const model = this.model();
+    const rosterMatches = this.rosterStats() !== null;
+    const rows = rosterMatches ? this.inspectorAgentRows.rows() : null;
+    return {
+      stats,
+      totals: this.totals(),
+      cliContributions: this.cliContributions(),
+      turns: rosterMatches ? model.orchestrator.turns : null,
+      agentCount: rows?.length ?? null,
+      liveAgentCount: rows === null ? null : this.inspectorAgentRows.captionCounts().running,
+    };
+  });
+  protected readonly showAttention = computed(() =>
+    this.inspectorAgentRows.rows() !== null && this.model().needsYouCount > 0,
+  );
+  private readonly attentionKey = computed(() => this.inspectorAgentRows.rows()?.find((row) =>
+    row.requests.length > 0 || row.agent.openRequestIds.length > 0 || row.agent.status === 'waiting',
+  )?.key);
 
   /**
    * SDK id whose handoff chain the expanded body lists (TASK_2026_876).
@@ -240,33 +346,36 @@ export class SessionInspectorComponent {
 
   constructor() {
     let previousSessionId: string | null = null;
-    let previousStats: SessionStatsInputs | null = null;
+    let previousModel: ReturnType<typeof this.sessionModel> = null;
     effect(() => {
-      const stats = this.stats();
-      if (stats === null) {
+      const current = this.sessionModel();
+      if (current === null) {
         if (this.statsSwitchTimer !== null) clearTimeout(this.statsSwitchTimer);
         this.statsSwitchTimer = null;
-        this.leavingStats.set(null);
+        this.leavingModel.set(null);
         this.statsSwitching.set(false);
         // Keep the last session snapshot across one empty interval. A new
         // session can then leave from it; the same session does not replay.
         return;
       }
-      const sessionId = stats?.sessionId ?? null;
+      const sessionId = current.stats.sessionId;
       const changed = previousSessionId !== null &&
         sessionId !== null && sessionId !== previousSessionId;
-      if (changed && stats && previousStats) {
+      if (changed && previousModel) {
         if (this.statsSwitchTimer !== null) clearTimeout(this.statsSwitchTimer);
-        this.leavingStats.set(previousStats);
+        this.leavingModel.set(previousModel);
+        this.announce('Session changed.');
         this.statsSwitching.set(true);
         this.statsSwitchTimer = setTimeout(() => {
           this.statsSwitchTimer = null;
-          this.leavingStats.set(null);
+          this.leavingModel.set(null);
           this.statsSwitching.set(false);
         }, statsSwitchWindowMs(this.element.nativeElement));
       }
-      if (sessionId !== null) previousSessionId = sessionId;
-      if (stats) previousStats = stats;
+      if (sessionId !== null) {
+        previousSessionId = sessionId;
+        previousModel = current;
+      }
     });
     this.destroyRef.onDestroy(() => {
       if (this.statsSwitchTimer !== null) clearTimeout(this.statsSwitchTimer);
@@ -286,10 +395,21 @@ export class SessionInspectorComponent {
       if (presentation === 'rail' && previous && previous !== 'rail') {
         this.focusExpandControl();
       } else if (presentation !== 'rail' && section) {
-        const target = this.element.nativeElement.querySelector<HTMLElement>(
-          `[data-inspector-section="${section}"]`,
-        );
-        (target ?? this.closeButton()?.nativeElement)?.focus();
+        const host = this.element.nativeElement;
+        const target = section === 'attention'
+          ? this.attentionTarget(host) ?? host.querySelector<HTMLElement>(FOCUS_TARGETS.agents)
+          : host.querySelector<HTMLElement>(FOCUS_TARGETS[section]);
+        const close = this.closeButton()?.nativeElement;
+        (target ?? close)?.focus();
+        if (presentation === 'sheet' && target && close) {
+          // The canvas may focus close as its deferred sheet mounts.
+          queueMicrotask(() => {
+            if (target.isConnected && this.focusSection() === section &&
+              host.ownerDocument.activeElement === close) {
+              target.focus();
+            }
+          });
+        }
       }
       previous = presentation;
     });
@@ -304,9 +424,47 @@ export class SessionInspectorComponent {
     });
   }
 
+  private attentionTarget(host: HTMLElement): HTMLElement | undefined {
+    const key = this.attentionKey();
+    if (!key) return undefined;
+    return Array.from(host.querySelectorAll<HTMLElement>('[data-agent-key]'))
+      .find((button) => button.dataset['agentKey'] === key);
+  }
+
   /** For hosts that replace the expanded instance with a newly mounted rail. */
   focusExpandControl(): void {
     this.expandButton()?.nativeElement.focus();
+  }
+
+  protected selectAgent(key: string): void {
+    this.agentsSelection.set(key);
+    this.agentSelected.emit(key);
+  }
+
+  protected answerFromHeader(requestId: string): void {
+    this.answerRequested.emit(requestId);
+    const row = this.inspectorAgentRows.rows()?.find(({ key, requests }) =>
+      key === 'orchestrator' && requests.some((request) => request.requestId === requestId),
+    );
+    if (!row) return;
+
+    this.selectAgent(row.key);
+    const index = row.requests.findIndex((request) => request.requestId === requestId);
+    afterNextRender(() => {
+      const rowElement = this.element.nativeElement
+        .querySelector(FOCUS_TARGETS.orchestrator)?.closest('li');
+      const lines = rowElement?.querySelector('ptah-inspector-request-lines');
+      if (!lines) return;
+      const requestButton = () =>
+        lines.querySelectorAll<HTMLButtonElement>('[data-request-button]')[index];
+      const button = requestButton();
+      if (button) {
+        button.focus();
+      } else {
+        lines.querySelector<HTMLButtonElement>(':scope > button[aria-expanded="false"]')?.click();
+        afterNextRender(() => requestButton()?.focus(), { injector: this.injector });
+      }
+    }, { injector: this.injector });
   }
 
   protected announce(text: string): void {

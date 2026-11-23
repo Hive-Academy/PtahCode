@@ -39,13 +39,14 @@ const chainOnB: readonly InspectorLinkedSessionEntry[] = [
 ];
 
 describe(InspectorLinkedSessionsComponent.name, () => {
-  it('labels the section with the inspector heading style', () => {
+  it('labels its shared section and displays the chain count', () => {
     const { root } = render(chainOnB, B);
-    const section = root.querySelector('section');
+    const section = root.querySelector('ptah-surface-section[role="region"]');
     const heading = root.querySelector('h3');
     expect(text(heading)).toBe('LINKED SESSIONS');
     expect(heading?.classList).toContain('uppercase');
     expect(section?.getAttribute('aria-labelledby')).toBe(heading?.id);
+    expect(text(root.querySelector('[data-testid="inspector-linked-session-count"]'))).toBe('3');
   });
 
   it('lists a chain of three on B root first: A from, B current, C in', () => {
@@ -59,12 +60,13 @@ describe(InspectorLinkedSessionsComponent.name, () => {
     ).toEqual(['Continued from', 'This session', 'Continued in']);
     expect(rows.map((b) => b.getAttribute('aria-current'))).toEqual([
       null,
-      'true',
+      'page',
       null,
     ]);
-    expect(rows[1].classList).toContain('bg-surface-2');
-    expect(rows[1].classList).toContain('font-semibold');
-    expect(rows[0].classList).toContain('font-medium');
+    expect(rows[1].hasAttribute('data-selected')).toBe(true);
+    expect(rows[0].hasAttribute('data-selected')).toBe(false);
+    expect(rows[1].querySelector('.font-semibold')?.textContent?.trim()).toBe('Implement batch 2');
+    expect(rows.every((b) => b.getAttribute('data-density') === 'compact' && b.tabIndex === 0)).toBe(true);
     expect(rows[1].querySelector('.bg-secondary')).not.toBeNull();
     expect(rows[0].querySelector('.bg-secondary')).toBeNull();
     expect(rows.map((b) => b.getAttribute('aria-label'))).toEqual([
@@ -135,7 +137,7 @@ describe(InspectorLinkedSessionsComponent.name, () => {
     expect(opened).toEqual([A]);
   });
 
-  it('keeps every row of a long chain inside the 10.5rem scroll viewport', () => {
+  it('keeps every row of a long chain inside the 8.75rem scroll viewport', () => {
     const ids = Array.from(
       { length: 7 },
       (_, i) => `${String(i).repeat(8)}-0000-4000-8000-000000000000`,
@@ -151,7 +153,7 @@ describe(InspectorLinkedSessionsComponent.name, () => {
     const list = root.querySelector(
       '[data-testid="inspector-linked-sessions-list"]',
     );
-    expect(list?.classList).toContain('max-h-[10.5rem]');
+    expect(list?.classList).toContain('max-h-[8.75rem]');
     expect(list?.classList).toContain('overflow-y-auto');
     expect(buttons(root)).toHaveLength(7);
     expect(root.textContent).not.toContain('Show more');

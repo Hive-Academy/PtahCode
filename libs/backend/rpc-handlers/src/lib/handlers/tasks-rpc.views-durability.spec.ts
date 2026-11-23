@@ -55,6 +55,7 @@ import type {
   RegistryGeneratorService,
   TaskDoctorService,
   TaskIndexService,
+  TaskDigestService,
   TaskSweepService,
   TaskWriterService,
 } from '@ptah-extension/task-specs';
@@ -218,6 +219,7 @@ function buildHandlers(
     { plan: jest.fn() } as unknown as TaskDoctorService,
     createInertSweep() as unknown as TaskSweepService,
     settings,
+    { getDigest: jest.fn() } as unknown as TaskDigestService,
   );
   handlers.register();
   return rpc;

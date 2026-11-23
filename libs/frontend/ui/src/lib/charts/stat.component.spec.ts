@@ -98,3 +98,29 @@ describe('PtahStatComponent', () => {
     expect(render({ value: 3, size: 'md' }).querySelector('.text-2xl')).not.toBeNull();
   });
 });
+
+it.each([
+  ['exact', ''],
+  ['lower-bound', '≥'],
+  ['approximate', '~'],
+  ['lower-bound-approximate', '≥~'],
+])('prefixes the compact figure for %s accuracy', (accuracy, glyph) => {
+  const value = render({ value: '1.2k', accuracy }).querySelector('.tabular-nums');
+  expect(value?.textContent).toBe(glyph + '1.2k');
+  expect(value?.firstElementChild?.textContent ?? '').toBe(glyph);
+  expect(value?.firstElementChild?.classList.contains('text-[84%]') ?? false).toBe(glyph !== '');
+});
+
+it('renders the custom placeholder without an accuracy glyph or unit', () => {
+  const el = render({ value: '', placeholder: '—', accuracy: 'lower-bound', unit: 'tokens' });
+  expect(el.querySelector('.tabular-nums')?.textContent).toBe('—');
+  expect(el.querySelector('[data-testid="stat-unit"]')).toBeNull();
+});
+
+it('retains the native title and has no tab stop when there is no detail', () => {
+  const el = render({ value: 1, title: 'Summary' });
+  expect(el.getAttribute('title')).toBe('Summary');
+  expect(el.hasAttribute('tabindex')).toBe(false);
+  expect(el.hasAttribute('aria-describedby')).toBe(false);
+  expect(el.querySelector('[role="tooltip"]')).toBeNull();
+});
