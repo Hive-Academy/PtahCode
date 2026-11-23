@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_2320_lnpar
-status: pending
+status: in_progress
 type: FEATURE
 title: CLI lane chat parity - one composer, live steering, per-turn model/effort, live usage
 depends_on: []

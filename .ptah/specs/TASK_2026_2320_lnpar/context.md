@@ -95,3 +95,37 @@ separate follow-up.
 - Should the lane composer be the main `chat-input` with a lane mode, or a shared core both use?
 - Does a model or effort change mid-session apply to the next turn only, or should it restart the lane?
 - When a lane cannot steer, should a mid-turn message queue (as main chat does) or interrupt and re-send?
+
+## Task Type
+FEATURE
+
+## Complexity
+Complex (XL)
+
+## Strategy
+FEATURE, Full depth: plan (task-description.md + parity-inventory.md for the lane composer
+redesign) -> document-review -> Gate 1 -> [research] -> design -> document-review -> Gate 1.7
+-> architecture -> document-review -> Gate 2 -> batch -> implement -> review -> tests ->
+completion -> research (modernization scan).
+
+## CLI Lanes
+- Preference source: none found (ptah_memory_search not listed in this session).
+- `ptah_agent_list` / `ptah_agent_spawn` / `ptah_route_decide` not listed in this host session,
+  so no lane is spawnable. Mode: disabled.
+- Approval: user
+
+## Gate decisions
+- 2026-11-23 Gate 1: user APPROVED task-description.md + parity-inventory.md revision 1
+  (same-side review APPROVED after 1 revise round; recorded weaker evidence).
+- 2026-11-23 Open question answered by user: SDK sub-agent composer (`subagent-lane-composer`)
+  should follow the same unified look ("the subagent should follow same yes"). Recorded as a
+  follow-up task, as the question was framed; not in this task's scope.
+- 2026-11-23 Gate 1.7: user APPROVED design-spec.md + prototype revision 1 (same-side review APPROVED
+  after 1 revise round; prototype rendered in Chrome, not Electron).
+- 2026-11-23 Antigravity: user decided to remove agy stream-json completely and rely only on ACP.
+  The removal runs as a parallel task, TASK_2026_2322_4ba4 (worktree `.claude-worktrees/agy-acp-only`,
+  branch `refactor/agy-acp-only`). This task targets the agy ACP lane only and does not edit
+  stream-json files.
+- 2026-11-23 User: "full auto mode" for both tasks until review, live test, review comments addressed
+  and merge. Approval mode for the remaining document gate (Gate 2) switches to orchestrator
+  approval after an APPROVED review; escalate only user-reserved decisions.
