@@ -35,7 +35,12 @@ const BUDGET_SHARE = 0.9;
 
 export const AST_ANALYZE_TRUNCATION_HINT =
   'Lists cut at a record boundary to fit the result budget. ' +
-  'omittedNames lists the cut records by name; read one with ptah_read_symbol.';
+  'omittedNames lists the cut records by name when names exist and fit; ' +
+  'the named methods of cut classes follow as Class.method, and ' +
+  'omittedMembers counts them. A name list that ends with … is cut again. ' +
+  'Read a declaration or a class with ptah_read_symbol (name, or ' +
+  'Class.method; for a method of a nested class use its plain name; a ' +
+  'long read says where to continue).';
 
 /**
  * `file` relative to the first root that contains it, `/`-separated; the

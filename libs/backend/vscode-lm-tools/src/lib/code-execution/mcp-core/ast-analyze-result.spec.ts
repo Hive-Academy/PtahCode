@@ -341,6 +341,42 @@ describe('ptah_ast_analyze result text (real parser)', () => {
     }
   });
 
+  it('counts the methods of cut classes and points to ptah_read_symbol', async () => {
+    const source = Array.from(
+      { length: 1500 },
+      (_, i) =>
+        `class Unit${i} {\n  alpha${i}(input: string): string {\n    return input + '${i}';\n  }\n  beta${i}(): number {\n    return ${i};\n  }\n}\n`,
+    ).join('\n');
+    files.set(`${ROOT}/src/many-classes.ts`, source);
+    const result = await ast.analyze(`${ROOT}/src/many-classes.ts`);
+    const text = renderAstAnalyzeResult(result, [ROOT]);
+    const parsed = JSON.parse(text) as {
+      truncated: Record<
+        string,
+        {
+          shown: number;
+          total: number;
+          omittedNames?: string;
+          omittedMembers?: number;
+        }
+      >;
+      hint: string;
+    };
+
+    const cut = parsed.truncated['classes'];
+    expect(cut.shown).toBeLessThan(cut.total);
+    expect(parsed.hint).toBe(AST_ANALYZE_TRUNCATION_HINT);
+    expect(parsed.hint).toContain('Class.method');
+    const names = (cut.omittedNames ?? '').split(',');
+    // Cut class names come first; the cap on names may drop the members, so
+    // `omittedMembers` gives their count and the hint names the way to read.
+    expect(names.slice(0, 2)).toEqual([
+      `Unit${cut.shown}`,
+      `Unit${cut.shown + 1}`,
+    ]);
+    expect(cut.omittedMembers).toBe((cut.total - cut.shown) * 2);
+  });
+
   // Batch 31 r1 R31-01: a clean C answer, in the form the dispatcher
   // serves (`renderAstAnalyzeResult`), still names its approximation;
   // a C++ one does not.

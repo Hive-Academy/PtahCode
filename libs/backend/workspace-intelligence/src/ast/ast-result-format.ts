@@ -45,38 +45,89 @@ export interface AstResultFormatOptions {
 interface ShownOfTotal {
   shown: number;
   total: number;
-  /** Names of the cut records, comma-separated, so a cut list still names them. */
+  /**
+   * Names of the cut records, comma-separated, so a cut list still names
+   * them; a cut record with named `members` (a class) adds `Record.member`
+   * for each one. Left out when the note would not fit the budget.
+   */
   omittedNames?: string;
+  /** How many named members (a class's methods) the cut records held, when any. */
+  omittedMembers?: number;
 }
 
 /** Most cut-record names listed, and most characters they may take. */
 const OMITTED_NAMES_MAX = 150;
 const OMITTED_NAMES_MAX_CHARS = 1800;
 
-/** `a,b,c` of the `name` fields of `list` past `shown`; `undefined` when none. */
-function omittedNamesOf(
+/** The `name` of a record, or `undefined` when it has none. */
+function nameOf(record: unknown): string | undefined {
+  const name =
+    typeof record === 'object' && record !== null && 'name' in record
+      ? record.name
+      : undefined;
+  return typeof name === 'string' && name !== '' ? name : undefined;
+}
+
+/** The `members` records of a cut record (a class's methods), if any. */
+function membersOf(record: unknown): readonly unknown[] {
+  const members =
+    typeof record === 'object' && record !== null && 'members' in record
+      ? record.members
+      : undefined;
+  return Array.isArray(members) ? members : [];
+}
+
+/** Names of the records of `list` past `shown`, and of their named members. */
+function cutNames(
   list: readonly unknown[],
   shown: number,
-): string | undefined {
-  const names: string[] = [];
-  let chars = 0;
+): { owners: string[]; members: string[] } {
+  const owners: string[] = [];
+  const members: string[] = [];
   for (const record of list.slice(shown)) {
-    const name =
-      typeof record === 'object' && record !== null && 'name' in record
-        ? record.name
-        : undefined;
-    if (typeof name !== 'string' || name === '') {
+    const owner = nameOf(record);
+    if (owner === undefined) {
       continue;
     }
+    owners.push(owner);
+    for (const member of membersOf(record)) {
+      const memberName = nameOf(member);
+      if (memberName !== undefined) {
+        members.push(`${owner}.${memberName}`);
+      }
+    }
+  }
+  return { owners, members };
+}
+
+/**
+ * `a,b,c` of the names in `owners` then `members`; `undefined` when none.
+ * Every cut record is named first. The named members of a cut record (a
+ * class's methods) follow as `Record.member`, so many methods never hide a
+ * later cut class. The text never exceeds `OMITTED_NAMES_MAX_CHARS`
+ * characters, and a `…` that closes the list marks what the cap dropped.
+ */
+function joinNames(
+  owners: readonly string[],
+  members: readonly string[],
+): string | undefined {
+  const all = [...owners, ...members];
+  const names: string[] = [];
+  let chars = 0;
+  for (const [index, name] of all.entries()) {
+    const separator = names.length > 0 ? 1 : 0;
+    // Room is kept for the closing `,…` (two characters) unless this is the
+    // last name.
+    const reserve = index < all.length - 1 ? 2 : 0;
     if (
       names.length >= OMITTED_NAMES_MAX ||
-      chars + name.length + 1 > OMITTED_NAMES_MAX_CHARS
+      chars + separator + name.length + reserve > OMITTED_NAMES_MAX_CHARS
     ) {
       names.push('…');
       break;
     }
     names.push(name);
-    chars += name.length + 1;
+    chars += separator + name.length;
   }
   return names.length > 0 ? names.join(',') : undefined;
 }
@@ -111,7 +162,8 @@ export function formatAstAnalysisResult(
       shown.set(key, { shown: value.length, total: value.length });
     }
   }
-  const render = (): string => serialise(entries, shown, options.hint);
+  const render = (withNames = true): string =>
+    serialise(entries, shown, options.hint, withNames);
   for (let i = listKeys.length - 1; i >= 0; i--) {
     const entry = shown.get(listKeys[i]);
     if (!entry || entry.total === 0) {
@@ -136,7 +188,9 @@ export function formatAstAnalysisResult(
     entry.shown = low;
     return render();
   }
-  return render();
+  // Even every list emptied does not fit with the names: drop the names,
+  // which are optional, and keep the counts.
+  return render(false);
 }
 
 /** The JSON text with `shown` cuts applied and the truncation note placed. */
@@ -144,18 +198,24 @@ function serialise(
   entries: readonly [string, unknown][],
   shown: ReadonlyMap<string, ShownOfTotal>,
   hint: string | undefined,
+  withNames = true,
 ): string {
   const truncated: Record<string, ShownOfTotal> = {};
   for (const [key, entry] of shown) {
     if (entry.shown < entry.total) {
       const list = entries.find(([entryKey]) => entryKey === key)?.[1];
-      const omittedNames = Array.isArray(list)
-        ? omittedNamesOf(list, entry.shown)
+      const cut: { owners: string[]; members: string[] } = Array.isArray(list)
+        ? cutNames(list, entry.shown)
+        : { owners: [], members: [] };
+      const omittedNames = withNames
+        ? joinNames(cut.owners, cut.members)
         : undefined;
+      const omittedMembers = cut.members.length;
       truncated[key] = {
         shown: entry.shown,
         total: entry.total,
         ...(omittedNames ? { omittedNames } : {}),
+        ...(omittedMembers > 0 ? { omittedMembers } : {}),
       };
     }
   }
