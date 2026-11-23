@@ -230,8 +230,14 @@ export function buildCodeNamespace(
   } = deps;
   const now = deps.now ?? Date.now;
 
-  /** True when `root` is a host-recorded root or a directory inside one. */
-  async function isInsideHostRoot(root: string): Promise<boolean> {
+  /**
+   * The canonical path of `root` when it is a host-recorded root or a
+   * directory inside one, else `undefined`. The caller uses the returned
+   * path, so the checked location is the one that is searched.
+   */
+  async function resolveInsideHostRoot(
+    root: string,
+  ): Promise<string | undefined> {
     const canonical = async (value: string): Promise<string> => {
       try {
         return await realpath(value);
@@ -242,14 +248,17 @@ export function buildCodeNamespace(
     const target = await canonical(root);
     for (const host of getHostWorkspaceRoots()) {
       const relative = path.relative(await canonical(host), target);
-      if (
-        relative === '' ||
-        (!relative.startsWith('..') && !path.isAbsolute(relative))
-      ) {
-        return true;
+      // A parent segment is `..` or `..` plus a separator: a folder whose
+      // name only starts with two dots (`..project`) is a valid descendant.
+      const leavesRoot =
+        relative === '..' ||
+        relative.startsWith(`..${path.sep}`) ||
+        path.isAbsolute(relative);
+      if (!leavesRoot) {
+        return target;
       }
     }
-    return false;
+    return undefined;
   }
 
   /**
@@ -287,10 +296,14 @@ export function buildCodeNamespace(
     // The session root can come from a caller-declared tier (an MCP URL
     // segment). The MCP tools refuse a declared root outside the open
     // folders; so does this call, rather than search the wrong tree.
-    const root = getNavWorkspaceRoot();
-    if (root !== undefined && !(await isInsideHostRoot(root))) {
+    const declaredRoot = getNavWorkspaceRoot();
+    const root =
+      declaredRoot === undefined
+        ? undefined
+        : await resolveInsideHostRoot(declaredRoot);
+    if (declaredRoot !== undefined && root === undefined) {
       throw new Error(
-        `ptah.code: the workspace '${root}' is not an open folder of this host or a directory inside one, so ${toolName} did not run`,
+        `ptah.code: the workspace '${declaredRoot}' is not an open folder of this host or a directory inside one, so ${toolName} did not run`,
       );
     }
     const reply = await handler(snapshot, {

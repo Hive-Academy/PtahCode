@@ -1,6 +1,13 @@
 // The workspace-intelligence barrel (the language registry) loads tsyringe.
 import 'reflect-metadata';
-import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises';
+import {
+  mkdtemp,
+  mkdir,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from 'node:fs/promises';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import type { AstCodeInsights } from '../types';
@@ -106,6 +113,48 @@ describe('ptah.code.grep and ptah.code.readSymbol (Code Mode nav wrappers)', () 
     await expect(elsewhere.grep({ pattern: 'clampTail' })).rejects.toThrow(
       /not an open folder/,
     );
+  });
+
+  it('accepts a root folder whose name only starts with two dots', async () => {
+    const dotted = path.join(root, '..project');
+    await mkdir(dotted);
+    await writeFile(path.join(dotted, 'd.ts'), 'const clampTail = 7;\n');
+    const ns = makeNamespace({
+      getNavWorkspaceRoot: () => dotted,
+      getHostWorkspaceRoots: () => [root],
+    });
+
+    await expect(ns.grep({ pattern: 'clampTail = 7' })).resolves.toContain(
+      'd.ts',
+    );
+  });
+
+  it('searches the canonical path it checked, not the symlink', async () => {
+    const link = path.join(os.tmpdir(), `code-nav-link-${process.pid}`);
+    await symlink(root, link);
+    try {
+      const ns = makeNamespace({
+        getNavWorkspaceRoot: () => link,
+        getHostWorkspaceRoots: () => [root],
+      });
+      const analyze = jest.fn().mockResolvedValue(EMPTY_OUTLINE);
+      const checked = makeNamespace({
+        getNavWorkspaceRoot: () => link,
+        getHostWorkspaceRoots: () => [root],
+        analyze,
+      });
+
+      await expect(ns.grep({ pattern: 'clampTail' })).resolves.toContain(
+        'src/a.ts',
+      );
+      await checked.grep({ pattern: 'clampTail', inlineBody: false });
+      // Outline paths are under the canonical root, never under the link.
+      for (const [file] of analyze.mock.calls) {
+        expect(String(file).startsWith(link)).toBe(false);
+      }
+    } finally {
+      await rm(link, { force: true });
+    }
   });
 
   it('reads workspaceRoot once: a getter cannot show a different value later', async () => {
