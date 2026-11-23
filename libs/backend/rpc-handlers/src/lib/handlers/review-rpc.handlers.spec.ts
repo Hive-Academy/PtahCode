@@ -4,13 +4,13 @@ import type {
   IReviewArtifactReader,
   IReviewLaneSettingsStore,
   IReviewQueryRepository,
-  ReviewLaneSource,
+  ReviewLaneListingService,
   IReviewSecretPresence,
   IReviewSettingsStore,
   ReviewQueueService,
   ReviewOrchestratorService,
 } from '@ptah-extension/review-core';
-import type { IGitHubReviewPort, ReviewLaneCatalog } from '@ptah-extension/review-contracts';
+import type { IGitHubReviewPort, ReviewLaneListing } from '@ptah-extension/review-contracts';
 import { publishedFindingTitle, ReviewPollDisabledError, ReviewRepositoryUnavailableError } from '@ptah-extension/review-core';
 import { GitHubReviewError, type IGitHubFindingReplyPort, type IGitHubFindingThreadPort } from '@ptah-extension/review-github';
 import { realpathSync } from 'node:fs';
@@ -91,13 +91,13 @@ function suite() {
   } as Pick<ReviewStageEnvironment, 'baseConfig' | 'resolve' | 'redactionSecrets' | 'checkoutRoot'>;
   const laneSettings = {
     get: jest.fn().mockResolvedValue({ pool: [], pins: {} }),
+    read: jest.fn(),
     update: jest.fn().mockImplementation(async (next: unknown) => next),
   } as jest.Mocked<IReviewLaneSettingsStore>;
-  const lanes = {
-    list: jest.fn().mockResolvedValue({ lanes: [], maxConcurrentAgents: 4 }),
-    listModels: jest.fn().mockResolvedValue({}),
-    modelBlocked: jest.fn().mockReturnValue(false),
-  } as jest.Mocked<ReviewLaneSource>;
+  laneSettings.read.mockImplementation(async () => ({ settings: await laneSettings.get(), corrupt: false }));
+  const laneListing = {
+    list: jest.fn<Promise<ReviewLaneListing>, []>().mockResolvedValue({ lanes: [], blockedModels: [] }),
+  } satisfies Pick<ReviewLaneListingService, 'list'>;
   new ReviewRpcHandlers(
     logger,
     rpc,
@@ -116,7 +116,7 @@ function suite() {
     workspace,
     threads,
     laneSettings,
-    lanes,
+    laneListing,
   ).register();
   const calls = (rpc.registerMethod as jest.Mock).mock.calls as Array<
     [string, (params: unknown) => Promise<unknown>]
@@ -144,7 +144,7 @@ function suite() {
     tokenStorage,
     fetcher,
     laneSettings,
-    lanes,
+    laneListing,
   };
 }
 
@@ -562,6 +562,7 @@ describe('ReviewRpcHandlers', () => {
       hasToken: true,
       tokenStorage: 'encrypted',
       lanes: { pool: [], pins: {} },
+      lanesCorrupt: false,
     });
     expect(JSON.stringify(result)).not.toContain('ghp_secret');
     await expect(
@@ -581,6 +582,7 @@ describe('ReviewRpcHandlers', () => {
       hasToken: true,
       tokenStorage: 'encrypted',
       lanes: { pool: [], pins: {} },
+      lanesCorrupt: false,
     });
   });
 
@@ -714,8 +716,18 @@ describe('review lane settings RPC', () => {
   it('returns empty lanes when none are saved (Req 1.1)', async () => {
     const { invoke } = suite();
     expect(await invoke('review:getSettings', {})).toEqual(
-      expect.objectContaining({ lanes: { pool: [], pins: {} } }),
+      expect.objectContaining({ lanes: { pool: [], pins: {} }, lanesCorrupt: false }),
     );
+  });
+
+  it('reports a corrupt lane document and repairs it on the next lane save (M1)', async () => {
+    const { invoke, laneSettings } = suite();
+    laneSettings.read.mockResolvedValueOnce({ settings: { pool: [], pins: {} }, corrupt: true });
+    expect(await invoke('review:getSettings', {})).toEqual(
+      expect.objectContaining({ lanes: { pool: [], pins: {} }, lanesCorrupt: true }),
+    );
+    await invoke('review:updateSettings', { settings, lanes: { pool: [], pins: {} } });
+    expect(laneSettings.update).toHaveBeenCalledWith({ pool: [], pins: {} });
   });
 
   it('saves lanes after the operator settings and returns the saved settings (Req 1.4)', async () => {
@@ -745,7 +757,7 @@ describe('review lane settings RPC', () => {
     const { invoke, store, laneSettings } = suite();
     await expect(invoke('review:updateSettings', { settings, lanes })).rejects.toMatchObject({
       message: 'Review lanes were not saved: the lane settings are invalid',
-      errorCode: 'INVALID_PARAMS',
+      errorCode: 'REVIEW_LANES_INVALID',
     });
     expect(store.updateSettings).not.toHaveBeenCalled();
     expect(laneSettings.update).not.toHaveBeenCalled();
@@ -756,7 +768,7 @@ describe('review lane settings RPC', () => {
     laneSettings.update.mockRejectedValue(new Error('disk full at C:/secret'));
     await expect(invoke('review:updateSettings', { settings, lanes: saved })).rejects.toMatchObject({
       message: 'Review lanes were not saved',
-      errorCode: 'PERSISTENCE_UNAVAILABLE',
+      errorCode: 'REVIEW_LANES_NOT_SAVED',
     });
     expect(store.updateSettings).toHaveBeenCalledTimes(1);
     expect(JSON.stringify((logger.info as jest.Mock).mock.calls)).not.toContain('secret');
@@ -770,53 +782,20 @@ describe('review lane settings RPC', () => {
     expect(laneSettings.update).not.toHaveBeenCalled();
   });
 
-  it('lists lanes with their catalogs, a failed catalog for unread lanes, and blocked saved models', async () => {
-    const { invoke, lanes, laneSettings } = suite();
-    lanes.list.mockResolvedValue({
-      lanes: [
-        { id: 'codex', label: 'Codex', family: 'codex', limitState: 'confirmed-room' },
-        { id: 'ptah-cli:pc-1', label: 'My CLI', family: 'claude', limitState: 'at-limit' },
-      ],
-      maxConcurrentAgents: 4,
-    });
-    const read: ReviewLaneCatalog = { status: 'read', models: ['gpt-5.3-codex'], truncated: false, verifiable: true };
-    lanes.listModels.mockResolvedValue({ codex: read });
-    laneSettings.get.mockResolvedValue({ ...saved, pins: { ...saved.pins, triage: { lane: 'codex', model: 'gpt-5.3-codex' } } });
-    lanes.modelBlocked.mockImplementation((model) => model === 'gemini-3-pro');
-    expect(await invoke('review:listLanes', {})).toEqual({
-      lanes: [
-        { id: 'codex', label: 'Codex', family: 'codex', limitState: 'confirmed-room', catalog: read },
-        {
-          id: 'ptah-cli:pc-1', label: 'My CLI', family: 'claude', limitState: 'at-limit',
-          catalog: { status: 'failed', models: [], truncated: false, verifiable: false },
-        },
-      ],
+  it('returns the lane listing service result', async () => {
+    const { invoke, laneListing } = suite();
+    const listing: ReviewLaneListing = {
+      lanes: [{ id: 'codex', label: 'Codex', family: 'codex', limitState: 'unknown',
+        catalog: { status: 'failed', models: [], truncated: false, verifiable: false } }],
       blockedModels: ['gemini-3-pro'],
-    });
-    expect(lanes.listModels).toHaveBeenCalledWith(['codex', 'ptah-cli:pc-1'], expect.any(AbortSignal));
-    // Each distinct saved model is checked once.
-    expect(lanes.modelBlocked.mock.calls.map(([model]) => model)).toEqual(['gpt-5.3-codex', 'gemini-3-pro']);
-  });
-
-  it('marks every catalog failed when the catalog read rejects', async () => {
-    const { invoke, lanes } = suite();
-    lanes.list.mockResolvedValue({
-      lanes: [{ id: 'codex', label: 'Codex', family: 'codex', limitState: 'unknown' }],
-      maxConcurrentAgents: 4,
-    });
-    lanes.listModels.mockRejectedValue(new Error('boom'));
-    expect(await invoke('review:listLanes', {})).toEqual({
-      lanes: [{
-        id: 'codex', label: 'Codex', family: 'codex', limitState: 'unknown',
-        catalog: { status: 'failed', models: [], truncated: false, verifiable: false },
-      }],
-      blockedModels: [],
-    });
+    };
+    laneListing.list.mockResolvedValue(listing);
+    expect(await invoke('review:listLanes', {})).toEqual(listing);
   });
 
   it('maps a lane list failure to a generic error and rejects extra params', async () => {
-    const { invoke, lanes } = suite();
-    lanes.list.mockRejectedValue(new Error('token ghp_secret'));
+    const { invoke, laneListing } = suite();
+    laneListing.list.mockRejectedValue(new Error('token ghp_secret'));
     await expect(invoke('review:listLanes', {})).rejects.toMatchObject({
       message: 'Review service is unavailable',
       errorCode: 'PERSISTENCE_UNAVAILABLE',

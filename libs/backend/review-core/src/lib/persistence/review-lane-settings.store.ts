@@ -12,8 +12,17 @@ import { TOKENS, type Logger } from '@ptah-extension/vscode-core';
  * before this change still parses its strict operator settings (decisions.md D5, plan A1).
  */
 export interface IReviewLaneSettingsStore {
+  /** The settings reviews use; a corrupt document gives empty settings. */
   get(): Promise<ReviewLaneSettings>;
+  /** The same read, plus whether the stored document was corrupt, so the drawer can report it. */
+  read(): Promise<ReviewLaneSettingsRead>;
   update(next: ReviewLaneSettings): Promise<ReviewLaneSettings>;
+}
+
+export interface ReviewLaneSettingsRead {
+  settings: ReviewLaneSettings;
+  /** The stored document failed validation; `settings` is empty and a save replaces the document. */
+  corrupt: boolean;
 }
 
 export const REVIEW_LANE_SETTINGS_KEY = 'review.lanes.v1';
@@ -39,16 +48,20 @@ export class ReviewLaneSettingsStore implements IReviewLaneSettingsStore {
    * gives empty settings, so a corrupt document never blocks reviews. A throwing read propagates.
    */
   async get(): Promise<ReviewLaneSettings> {
+    return (await this.read()).settings;
+  }
+
+  async read(): Promise<ReviewLaneSettingsRead> {
     const raw = this.storage.get<unknown>(REVIEW_LANE_SETTINGS_KEY);
-    if (raw === undefined || raw === null) return { pool: [], pins: {} };
+    if (raw === undefined || raw === null) return { settings: { pool: [], pins: {} }, corrupt: false };
     const parsed = ReviewLaneSettingsDocumentSchema.safeParse(raw);
     if (!parsed.success) {
       this.logger.warn('Review lane settings are invalid; reviews use empty lane settings', {
         paths: parsed.error.issues.slice(0, 5).map((issue) => issue.path.join('.') || '<root>'),
       });
-      return { pool: [], pins: {} };
+      return { settings: { pool: [], pins: {} }, corrupt: true };
     }
-    return { pool: parsed.data.pool, pins: parsed.data.pins };
+    return { settings: { pool: parsed.data.pool, pins: parsed.data.pins }, corrupt: false };
   }
 
   /** Validates before writing; a rejected value leaves the stored document unchanged. */

@@ -253,6 +253,7 @@ import { ReviewConfirmDialogComponent } from './review-confirm-dialog.component'
           [laneListing]="store.laneListing()"
           [laneListState]="store.laneListState()"
           [lanesSaveError]="store.lanesSaveError()"
+          [lanesCorrupt]="store.lanesCorrupt()"
           [hasToken]="store.hasToken()"
           [saving]="store.settingsSaving()"
           [saveError]="store.settingsSaveError()"

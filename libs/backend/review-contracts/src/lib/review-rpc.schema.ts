@@ -31,6 +31,11 @@ export const ReviewSettingsReadSchema = z
     tokenStorage: z.enum(['encrypted', 'plaintext']),
     /** Lane pool and pins. Optional on the wire; the handler always sends it (plan A14). */
     lanes: ReviewLaneSettingsSchema.optional(),
+    /**
+     * True when the stored lane document is unreadable: `lanes` is then empty, reviews run without
+     * pins or pool, and saving lanes (even empty ones) replaces the document. Absent means false.
+     */
+    lanesCorrupt: z.boolean().optional(),
   })
   .strict();
 export const ReviewSettingsUpdateSchema = z

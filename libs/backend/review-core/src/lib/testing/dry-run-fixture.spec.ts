@@ -95,7 +95,7 @@ describe('dry-run fixture without UI or GitHub mutation', () => {
       jest.spyOn(verification, 'run').mockResolvedValue(verdicts);
       const laneSelection = Object.create(ReviewLaneSelectionService.prototype) as ReviewLaneSelectionService;
       jest.spyOn(laneSelection, 'beginAttempt').mockReturnValue(new ReviewLaneAttempt({
-        source: { list: jest.fn(), listModels: jest.fn(), modelBlocked: jest.fn() }, settings: { get: jest.fn(), update: jest.fn() },
+        source: { list: jest.fn(), listModels: jest.fn(), modelBlocked: jest.fn() }, settings: { get: jest.fn() },
         clock: { now: () => 0, setTimeout, clearTimeout }, logger: { warn: jest.fn() } }));
       const writer = new ReviewArtifactWriter({ realpath: async (path) => realpathSync(path),
         readFile: async (path) => readFileSync(path, 'utf8'),

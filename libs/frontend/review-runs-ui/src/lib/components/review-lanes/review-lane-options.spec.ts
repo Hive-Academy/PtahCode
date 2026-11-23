@@ -1,4 +1,5 @@
 import {
+  LensSchema,
   REVIEW_LANE_POOL_MAX,
   type ReviewLaneListing,
   type ReviewLaneListingEntry,
@@ -8,6 +9,7 @@ import {
   announce,
   duplicateEntryIndexes,
   entryState,
+  isLensRole,
   laneLabel,
   laneOptions,
   modelOptions,
@@ -200,5 +202,11 @@ describe('review lane options', () => {
     expect(toModel(NO_CHOICE)).toBeNull();
     expect(toModel('m-1')).toBe('m-1');
     expect(laneLabel(null, 'raw-id')).toBe('raw-id');
+  });
+
+  it('derives lens roles from the lens contract', () => {
+    expect(REVIEW_LANE_ROLES.filter(isLensRole)).toEqual(LensSchema.options);
+    expect(isLensRole('triage')).toBe(false);
+    expect(isLensRole('verifier')).toBe(false);
   });
 });

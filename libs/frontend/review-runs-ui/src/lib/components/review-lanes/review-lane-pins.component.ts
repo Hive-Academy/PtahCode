@@ -8,6 +8,7 @@ import { PtahRichSelectComponent, PtahStatusComponent } from '@ptah-extension/ui
 import {
   announce,
   entryState,
+  isLensRole,
   laneLabel,
   modelOptions,
   NO_CHOICE,
@@ -93,7 +94,7 @@ export class ReviewLanePinsComponent {
       return {
         role,
         name: roleLabel(role),
-        isLens: role !== 'triage' && role !== 'verifier',
+        isLens: isLensRole(role),
         laneOptions: pinLaneOptions(listing, pin?.lane ?? null),
         laneValue: pin?.lane ?? NO_CHOICE,
         modelOptions: modelOptions(listing, pin?.lane ?? null, pin?.model ?? null),

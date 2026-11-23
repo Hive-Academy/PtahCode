@@ -252,6 +252,12 @@ describe('ReviewSettingsDrawerComponent', () => {
       expect(section.textContent).toContain('Review lanes were not saved: the pool has a duplicate entry.');
     });
 
+    it('passes lanesCorrupt to the Review lanes section warning', () => {
+      const { root } = setup({ inputs: { lanesCorrupt: true } });
+      const section = root.querySelector('ptah-review-lanes-section') as HTMLElement;
+      expect(section.querySelector('[data-testid="review-lanes-corrupt"]')).not.toBeNull();
+    });
+
     it('shows the footer save error only when there is one, as an assertive alert', () => {
       const { fixture, root } = setup();
       const footer = () => root.querySelector('[drawer-footer]') as HTMLElement;

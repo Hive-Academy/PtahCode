@@ -11,7 +11,7 @@ import type { IReviewLaneSettingsStore } from '../persistence/review-lane-settin
 export class ReviewLaneSelectionService {
   constructor(
     @inject(REVIEW_LANE_TOKENS.GATEWAY) private readonly source: ReviewLaneSource,
-    @inject(REVIEW_CORE_TOKENS.LANE_SETTINGS_STORE) private readonly settings: IReviewLaneSettingsStore,
+    @inject(REVIEW_CORE_TOKENS.LANE_SETTINGS_STORE) private readonly settings: Pick<IReviewLaneSettingsStore, 'get'>,
     @inject(REVIEW_LANE_TOKENS.CLOCK) private readonly clock: IReviewLaneClock,
     @inject(TOKENS.LOGGER) private readonly logger: Pick<Logger, 'warn'>,
   ) {}

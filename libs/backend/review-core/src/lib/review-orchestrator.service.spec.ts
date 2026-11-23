@@ -1,5 +1,5 @@
 import { Logger } from '@ptah-extension/vscode-core';
-import type { IGitHubReviewPort } from '@ptah-extension/review-contracts';
+import { CandidateFindingSchema, type IGitHubReviewPort } from '@ptah-extension/review-contracts';
 import { ReviewOrchestratorService, ReviewPollDisabledError } from './review-orchestrator.service';
 import { ReviewQueueService, type ReviewQueueClaim } from './review-queue.service';
 import { ReviewPolicyService } from './review-policy.service';
@@ -81,7 +81,7 @@ function fixture(withStatuses = false) {
   const finished = jest.spyOn(statuses, 'finished').mockResolvedValue(undefined);
   const laneSelection = Object.create(ReviewLaneSelectionService.prototype) as ReviewLaneSelectionService;
   const laneAttempt = new ReviewLaneAttempt({ source: { list: jest.fn(), listModels: jest.fn(), modelBlocked: jest.fn() },
-    settings: { get: jest.fn(), update: jest.fn() }, clock: { now: () => 0, setTimeout, clearTimeout }, logger: { warn: jest.fn() } });
+    settings: { get: jest.fn() }, clock: { now: () => 0, setTimeout, clearTimeout }, logger: { warn: jest.fn() } });
   const beginAttempt = jest.spyOn(laneSelection, 'beginAttempt').mockReturnValue(laneAttempt);
   const coordinator = new ReviewOrchestratorService(discovery, context, triage, lenses, verification, publication, queue,
     new ReviewPolicyService(), repository, github,
@@ -271,6 +271,44 @@ describe('ReviewOrchestratorService', () => {
     await f.coordinator.drain('worker', Date.now() + 10_000);
     expect(f.contextRun).toHaveBeenCalledTimes(1);
     expect(f.stages.get('context:0')?.state).toBe('completed');
+  });
+
+  it('keeps triage retryable when the lane settings were unreadable, and runs it again on resume (M2)', async () => {
+    const f = fixture();
+    f.triageRun.mockResolvedValue({ status: 'partial', reason: 'lane-settings-unavailable' });
+    await f.coordinator.drain('worker', Date.now() + 10_000);
+    expect(f.stages.get('triage:1')).toEqual(expect.objectContaining({ state: 'interrupted', outcome: 'partial',
+      errorSummary: 'lane-settings-unavailable' }));
+    expect(f.checkpoints.has('triage:1')).toBe(false);
+    expect(f.release).toHaveBeenCalledWith(claim.attemptId, 'worker', 'partial');
+    f.triageRun.mockResolvedValue({ status: 'completed', family: 'claude',
+      output: { schemaVersion: 1, headSha: sha, findings: [], coverage: [] } });
+    (f.repository.claimNext as jest.Mock).mockResolvedValueOnce(claim);
+    await f.coordinator.drain('worker', Date.now() + 10_000);
+    expect(f.triageRun).toHaveBeenCalledTimes(2);
+    expect(f.stages.get('triage:1')?.state).toBe('completed');
+  });
+
+  it('checkpoints a no-room triage as a completed stage', async () => {
+    const f = fixture();
+    await f.coordinator.drain('worker', Date.now() + 10_000);
+    expect(f.stages.get('triage:1')?.state).toBe('completed');
+    expect(f.checkpoints.get('triage:1')).toEqual({ status: 'partial', reason: 'no-confirmed-room' });
+  });
+
+  it('keeps verification retryable when the lane settings were unreadable (M2)', async () => {
+    const f = fixture();
+    const finding = CandidateFindingSchema.parse({ schemaVersion: 1, lens: 'security-privacy', title: 'Unsafe output',
+      failureMode: 'Leaks a token', affectedBehavior: 'Preview contains token', scenario: 'Open preview',
+      path: 'src/a.ts', line: 1, evidence: [{ path: 'src/a.ts', line: 1, excerpt: 'token' }], affectedCaller: null,
+      severity: 'Major', category: 'security', confidence: 0.9, suggestedDiff: null, fixPrompt: 'Remove token' });
+    f.verificationRun.mockResolvedValue([{ lens: 'security-privacy', finding, verification: 'unavailable',
+      result: { status: 'partial', reason: 'lane-settings-unavailable' } }]);
+    await f.coordinator.drain('worker', Date.now() + 10_000);
+    expect(f.stages.get('verification:3')).toEqual(expect.objectContaining({ state: 'interrupted', outcome: 'partial',
+      errorSummary: 'lane-settings-unavailable' }));
+    expect(f.checkpoints.has('verification:3')).toBe(false);
+    expect(f.release).toHaveBeenCalledWith(claim.attemptId, 'worker', 'partial');
   });
 
   it.each([['no room', 'no-confirmed-room'], ['deadline', 'deadline']])('marks %s partial', async (_case, reason) => {

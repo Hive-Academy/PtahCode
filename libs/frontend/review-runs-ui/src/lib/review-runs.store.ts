@@ -3,6 +3,8 @@ import { ClaudeRpcService, LoggingService } from '@ptah-extension/core';
 import {
   EMPTY_REVIEW_LANE_SETTINGS,
   OperatorSettingsSchema,
+  REVIEW_LANE_ERROR_MESSAGES,
+  ReviewLaneErrorCode,
   ReviewLaneRoleSchema,
   ReviewLaneSettingsSchema,
   ReviewRpcSchemas,
@@ -11,6 +13,7 @@ import {
   type OperatorSettings,
   type ReviewLaneEntry,
   type ReviewLaneListing,
+  type ReviewLaneListState,
   type ReviewLaneSettings,
   type RepositorySettings,
   type RepoIdentity,
@@ -18,8 +21,7 @@ import {
   type ReviewRun,
 } from '@ptah-extension/review-contracts';
 import { z } from 'zod';
-import type { RpcMethodParams } from '@ptah-extension/shared';
-import type { ReviewLaneListState } from './components/review-lanes/review-lane-options';
+import type { RpcMethodParams, RpcUserErrorCode } from '@ptah-extension/shared';
 
 export type ReviewListState =
   'loading' | 'ready' | 'offline' | 'error' | 'no-lanes';
@@ -28,10 +30,20 @@ export type ReviewStateFilter = 'all' | z.infer<typeof ReviewStateSchema>;
 const REVIEW_REFRESH_TIMEOUT_MS = 120_000;
 /** Lane listing reads every lane's live model catalog (host bound 10 s), so it gets more than 5 s. */
 const REVIEW_LIST_LANES_TIMEOUT_MS = 20_000;
-const LANES_NOT_SAVED = 'Review lanes were not saved';
 const LANES_DUPLICATE_MESSAGE =
   'Review lanes were not saved: the pool has a duplicate entry. Remove it and save again.';
-const LANES_INVALID_MESSAGE = 'Review lanes were not saved: the lane settings are invalid';
+const LANE_ERROR_CODES: readonly string[] = Object.values(ReviewLaneErrorCode);
+
+/** A lane-save failure the host reported by its `errorCode`; the message comes from the contract table. */
+class ReviewLaneSaveError extends Error {
+  constructor(readonly code: ReviewLaneErrorCode) {
+    super(REVIEW_LANE_ERROR_MESSAGES[code]);
+  }
+}
+
+function laneErrorCode(code: RpcUserErrorCode | undefined): ReviewLaneErrorCode | null {
+  return code !== undefined && LANE_ERROR_CODES.includes(code) ? (code as ReviewLaneErrorCode) : null;
+}
 const botIdentitySchema = z
   .object({
     login: z.string(),
@@ -102,6 +114,8 @@ export class ReviewRunsStore {
   /** Lanes the host last returned or stored. */
   readonly settingsLanes = signal<ReviewLaneSettings>(EMPTY_REVIEW_LANE_SETTINGS);
   readonly draftLanes = signal<ReviewLaneSettings>(EMPTY_REVIEW_LANE_SETTINGS);
+  /** The host could not read its stored lane document; the next save replaces it (M1). */
+  readonly lanesCorrupt = signal(false);
   /** Last lane listing read. Kept while a reload runs or fails; the section ignores it on error. */
   readonly laneListing = signal<ReviewLaneListing | null>(null);
   /** Lane listing load state, separate from `settingsState`. */
@@ -358,19 +372,43 @@ export class ReviewRunsStore {
         ReviewRpcSchemas['review:getSettings'].params.parse({}),
         ReviewRpcSchemas['review:getSettings'].result,
       );
-      this.settings.set(response.settings);
-      this.draftSettings.set(response.settings ?? defaultSettings);
+      this.applyHostSettings(response);
       const lanes = response.lanes ?? EMPTY_REVIEW_LANE_SETTINGS;
-      this.settingsLanes.set(lanes);
       this.draftLanes.set(lanes);
       this.lanesSaveError.set(null);
-      this.hasToken.set(response.hasToken);
-      this.tokenStorage.set(response.tokenStorage);
       this.settingsState.set('ready');
       await this.loadBotIdentity();
     } catch {
       this.settingsState.set('error');
     }
+  }
+  /**
+   * After a lanes-only save failure the host has stored the operator settings: re-read them so
+   * `settings`, `draftSettings` and `repositories` match the host. The lane draft and its error stay.
+   */
+  private async refreshSavedSettings(): Promise<void> {
+    try {
+      const response = await this.request(
+        'review:getSettings',
+        ReviewRpcSchemas['review:getSettings'].params.parse({}),
+        ReviewRpcSchemas['review:getSettings'].result,
+      );
+      this.applyHostSettings(response);
+      if (response.settings) this.repositories.set(response.settings.repositories);
+    } catch (error: unknown) {
+      // degradation-audit: reported — lanesSaveError already tells the operator to save again.
+      this.logger.warn('ReviewRunsStore', 'Settings refresh after a lane save failure failed', error);
+    }
+  }
+  private applyHostSettings(
+    response: z.output<(typeof ReviewRpcSchemas)['review:getSettings']['result']>,
+  ): void {
+    this.settings.set(response.settings);
+    this.draftSettings.set(response.settings ?? defaultSettings);
+    this.settingsLanes.set(response.lanes ?? EMPTY_REVIEW_LANE_SETTINGS);
+    this.lanesCorrupt.set(response.lanesCorrupt === true);
+    this.hasToken.set(response.hasToken);
+    this.tokenStorage.set(response.tokenStorage);
   }
   /** Reads the lane listing for the lanes section; Retry calls it again. */
   async loadLanes(): Promise<void> {
@@ -502,12 +540,15 @@ export class ReviewRunsStore {
     // Parse on the client too, so the lanes kept as saved equal what the host stores (trimmed ids).
     const lanes = ReviewLaneSettingsSchema.safeParse(this.draftLanes());
     if (!lanes.success) {
-      this.lanesSaveError.set(LANES_INVALID_MESSAGE);
-      this.settingsSaveError.set(LANES_INVALID_MESSAGE);
+      const message = REVIEW_LANE_ERROR_MESSAGES[ReviewLaneErrorCode.Invalid];
+      this.lanesSaveError.set(message);
+      this.settingsSaveError.set(message);
       return;
     }
-    // Unchanged lanes are left out, so the host keeps what it stored (Req 1.5).
-    const sentLanes = sameLaneSettings(lanes.data, this.settingsLanes()) ? undefined : lanes.data;
+    // Unchanged lanes are left out, so the host keeps what it stored (Req 1.5). An unreadable stored
+    // document is always replaced, so its lanes are sent even when they equal the empty fallback (M1).
+    const sentLanes = !this.lanesCorrupt() && sameLaneSettings(lanes.data, this.settingsLanes())
+      ? undefined : lanes.data;
     this.settingsSaving.set(true);
     this.settingsSaveError.set(null);
     this.lanesSaveError.set(null);
@@ -541,17 +582,21 @@ export class ReviewRunsStore {
         // The update result carries no lanes (A14): the host stored exactly the parsed draft.
         this.settingsLanes.set(sentLanes);
         this.draftLanes.set(sentLanes);
+        this.lanesCorrupt.set(false);
       }
       this.liveAttested.set(false);
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : '';
-      const lanesFailed = message.startsWith(LANES_NOT_SAVED);
-      this.settingsSaveError.set(message.startsWith('Only one repository can publish live') ||
-        message.startsWith('Permission attestation required') ||
-        message.startsWith('Bot identity') || message.startsWith('Connect a bot token') ||
-        lanesFailed
-        ? message : 'Review settings could not be saved.');
-      if (lanesFailed) this.lanesSaveError.set(message);
+      if (error instanceof ReviewLaneSaveError) {
+        this.settingsSaveError.set(error.message);
+        this.lanesSaveError.set(error.message);
+        if (error.code === ReviewLaneErrorCode.NotSaved) await this.refreshSavedSettings();
+      } else {
+        const message = error instanceof Error ? error.message : '';
+        this.settingsSaveError.set(message.startsWith('Only one repository can publish live') ||
+          message.startsWith('Permission attestation required') ||
+          message.startsWith('Bot identity') || message.startsWith('Connect a bot token')
+          ? message : 'Review settings could not be saved.');
+      }
     } finally {
       this.settingsSaving.set(false);
     }
@@ -633,10 +678,8 @@ export class ReviewRunsStore {
           typeof response.error === 'string' &&
           /^(Only one repository can publish live at a time|Permission attestation required for this repository|Bot identity verification failed|Connect a bot token before enabling live publication)$/.test(response.error))
         throw new Error(response.error);
-      if (method === 'review:updateSettings' &&
-          ((response.errorCode === 'PERSISTENCE_UNAVAILABLE' && response.error === LANES_NOT_SAVED) ||
-            (response.errorCode === 'INVALID_PARAMS' && response.error === LANES_INVALID_MESSAGE)))
-        throw new Error(response.error);
+      const laneCode = method === 'review:updateSettings' ? laneErrorCode(response.errorCode) : null;
+      if (laneCode !== null) throw new ReviewLaneSaveError(laneCode);
       throw new Error('Review data is unavailable');
     }
     return schema.parse(response.data);

@@ -12,6 +12,6 @@ component sections C1-C14; each executor reads only its batch's components.
 | B5 | Renderer store (C10) | frontend-developer | B4 | COMPLETE | 27c89c2f4 |
 | B6 | Review lanes section components (C11, C12) | frontend-developer | B1 | COMPLETE | f0b779714 |
 | B7 | Run detail + D14 badge (C14) | frontend-developer | B1 | COMPLETE | 213cfc8cf |
-| B8 | Drawer shell on ptah-native-drawer (C13) | frontend-developer | B5, B6 | COMPLETE | (B8 commit) |
+| B8 | Drawer shell on ptah-native-drawer (C13) | frontend-developer | B5, B6 | COMPLETE | 5bbe772fb |
 
 Verify commands and acceptance criteria per batch: plan table, `implementation-plan.md:719-726`.

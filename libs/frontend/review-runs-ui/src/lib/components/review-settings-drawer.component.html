@@ -154,6 +154,7 @@
       [listing]="laneListing()"
       [listState]="laneListState()"
       [saving]="saving()"
+      [storedCorrupt]="lanesCorrupt()"
       [saveError]="lanesSaveError()"
       (lanesChanged)="lanesChanged.emit($event)"
       (retry)="retryLanes.emit()"

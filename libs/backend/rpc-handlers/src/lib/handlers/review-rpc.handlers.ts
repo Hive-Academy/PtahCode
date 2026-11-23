@@ -4,21 +4,17 @@ import { inject, injectable } from 'tsyringe';
 import { ulid } from 'ulid';
 import { z, ZodError } from 'zod';
 import {
-  ReviewLaneCatalogSchema,
-  ReviewLaneListingEntrySchema,
+  REVIEW_LANE_ERROR_MESSAGES,
+  ReviewLaneErrorCode,
   ReviewRpcSchemas,
   type IGitHubReviewPort,
   type RepoIdentity,
-  type ReviewLaneCatalog,
-  type ReviewLaneListingEntry,
-  type ReviewLaneSettings,
 } from '@ptah-extension/review-contracts';
 import {
   REVIEW_CORE_TOKENS,
-  REVIEW_LANE_TOKENS,
   ReviewPollDisabledError,
   type IReviewLaneSettingsStore,
-  type ReviewLaneSource,
+  type ReviewLaneListingService,
   type IReviewArtifactReader,
   type IReviewQueryRepository,
   type IReviewSecretPresence,
@@ -49,10 +45,6 @@ import type { RpcMethodName } from '@ptah-extension/shared';
 import { ReviewFindingResponder } from './review-finding-response';
 
 const empty = z.object({}).strict();
-/** Bound for the per-lane model catalog reads of `review:listLanes`. */
-const LANE_CATALOG_TIMEOUT_MS = 10_000;
-const LISTED_LANES_MAX = 100;
-const unreadCatalog: ReviewLaneCatalog = { status: 'failed', models: [], truncated: false, verifiable: false };
 const ok = z.object({ ok: z.literal(true) }).strict();
 const tokenParams = z.object({ token: z.string().min(1).max(4096) }).strict();
 const rerunParams = z
@@ -127,7 +119,8 @@ export class ReviewRpcHandlers {
     @inject(REVIEW_GITHUB_TOKENS.REVIEW_PORT) threads: IGitHubFindingThreadPort,
     @inject(REVIEW_CORE_TOKENS.LANE_SETTINGS_STORE)
     private readonly laneSettings: IReviewLaneSettingsStore,
-    @inject(REVIEW_LANE_TOKENS.GATEWAY) private readonly lanes: ReviewLaneSource,
+    @inject(REVIEW_CORE_TOKENS.LANE_LISTING)
+    private readonly laneListing: Pick<ReviewLaneListingService, 'list'>,
   ) {
     this.responder = new ReviewFindingResponder({ query, threads, replies, environment, logger });
   }
@@ -169,43 +162,6 @@ export class ReviewRpcHandlers {
         'PERSISTENCE_UNAVAILABLE',
       );
     }
-  }
-
-  /** The lane list with a catalog per lane, and the saved models that the block list refuses. */
-  private async laneListing(): Promise<{ lanes: ReviewLaneListingEntry[]; blockedModels: string[] }> {
-    // A list failure propagates: safe() maps it to a generic error, and the drawer offers Retry.
-    const { lanes } = await this.lanes.list();
-    const listed = lanes.slice(0, LISTED_LANES_MAX);
-    const [catalogs, saved] = await Promise.all([
-      this.lanes
-        .listModels(listed.map((lane) => lane.id), AbortSignal.timeout(LANE_CATALOG_TIMEOUT_MS))
-        .catch((_error: unknown): Record<string, ReviewLaneCatalog> => {
-          // degradation-audit: reported — every lane then shows a failed catalog, which the drawer reports.
-          this.logger.info('[review] Lane model catalogs unavailable');
-          return {};
-        }),
-      this.laneSettings.get(),
-    ]);
-    const entries = listed.flatMap((lane) => {
-      const catalog = ReviewLaneCatalogSchema.safeParse(catalogs[lane.id]);
-      const entry = ReviewLaneListingEntrySchema.safeParse({
-        id: lane.id,
-        label: lane.label,
-        family: lane.family,
-        limitState: lane.limitState,
-        catalog: catalog.success ? catalog.data : unreadCatalog,
-      });
-      // A lane the listing contract cannot carry is left out; the other lanes still render.
-      return entry.success ? [entry.data] : [];
-    });
-    return { lanes: entries, blockedModels: this.blockedModels(saved) };
-  }
-
-  private blockedModels(saved: ReviewLaneSettings): string[] {
-    const models = [...saved.pool, ...Object.values(saved.pins)]
-      .map((entry) => entry?.model ?? null)
-      .filter((model): model is string => model !== null);
-    return [...new Set(models)].filter((model) => this.lanes.modelBlocked(model));
   }
 
   private async botVerified(expectedLogin: string): Promise<boolean> {
@@ -412,11 +368,13 @@ export class ReviewRpcHandlers {
       this.safe(async () => {
         ReviewRpcSchemas['review:getSettings'].params.parse(raw);
         const settings = await this.settings.getSettings();
+        const lanes = await this.laneSettings.read();
         return ReviewRpcSchemas['review:getSettings'].result.parse({
           settings,
           hasToken: await this.secrets.hasToken(),
           tokenStorage: this.tokenStorage.storageMode?.() ?? 'encrypted',
-          lanes: await this.laneSettings.get(),
+          lanes: lanes.settings,
+          lanesCorrupt: lanes.corrupt,
         });
       }),
     );
@@ -424,7 +382,7 @@ export class ReviewRpcHandlers {
       this.safe(async () => {
         ReviewRpcSchemas['review:listLanes'].params.parse(raw);
         return ReviewRpcSchemas['review:listLanes'].result.parse(
-          await this.laneListing(),
+          await this.laneListing.list(),
         );
       }),
     );
@@ -434,7 +392,7 @@ export class ReviewRpcHandlers {
         if (!parsed.success) {
           // Nothing is written when any part of the request is invalid (Req 1.2).
           if (parsed.error.issues.some((issue) => issue.path[0] === 'lanes'))
-            throw new RpcUserError('Review lanes were not saved: the lane settings are invalid', 'INVALID_PARAMS');
+            throw new RpcUserError(REVIEW_LANE_ERROR_MESSAGES[ReviewLaneErrorCode.Invalid], ReviewLaneErrorCode.Invalid);
           throw parsed.error;
         }
         const { settings, attestation, lanes } = parsed.data;
@@ -492,13 +450,14 @@ export class ReviewRpcHandlers {
           await this.settings.setLiveGate(null);
         }
         // Lanes go last: the live-gate checks above can reject the call and must not leave lane
-        // changes behind. Save is idempotent, so a second Save completes a failed lane write.
+        // changes behind. Save is idempotent, so a second Save completes a failed lane write. Sent
+        // lanes are always written, which also replaces a corrupt stored document (lanesCorrupt).
         if (lanes) {
           try {
             await this.laneSettings.update(lanes);
           } catch {
             // degradation-audit: reported — the operator sees this error; the adapter error is not logged.
-            throw new RpcUserError('Review lanes were not saved', 'PERSISTENCE_UNAVAILABLE');
+            throw new RpcUserError(REVIEW_LANE_ERROR_MESSAGES[ReviewLaneErrorCode.NotSaved], ReviewLaneErrorCode.NotSaved);
           }
         }
         return ReviewRpcSchemas['review:updateSettings'].result.parse(saved);

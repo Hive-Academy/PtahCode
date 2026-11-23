@@ -62,7 +62,7 @@ import {
   type PostToolUseCallbackRegistry,
 } from '@ptah-extension/agent-sdk';
 import { PERSISTENCE_TOKENS, SessionStatsRepository } from '@ptah-extension/persistence-sqlite';
-import { REVIEW_CORE_TOKENS, REVIEW_LANE_TOKENS, ReviewPolicyService } from '@ptah-extension/review-core';
+import { REVIEW_CORE_TOKENS, ReviewPolicyService } from '@ptah-extension/review-core';
 import { REVIEW_GITHUB_TOKENS } from '@ptah-extension/review-github';
 import {
   LANE_OUTCOME_TOKENS,
@@ -239,7 +239,7 @@ function buildMinimalContainer(): DependencyContainer {
     REVIEW_CORE_TOKENS.QUERY_REPOSITORY, REVIEW_CORE_TOKENS.SETTINGS_STORE,
     REVIEW_CORE_TOKENS.ARTIFACT_READER, REVIEW_CORE_TOKENS.SECRET_PRESENCE,
     REVIEW_CORE_TOKENS.QUEUE_SERVICE, REVIEW_CORE_TOKENS.ORCHESTRATOR,
-    REVIEW_CORE_TOKENS.GITHUB, REVIEW_CORE_TOKENS.LANE_SETTINGS_STORE, REVIEW_LANE_TOKENS.GATEWAY,
+    REVIEW_CORE_TOKENS.GITHUB, REVIEW_CORE_TOKENS.LANE_SETTINGS_STORE, REVIEW_CORE_TOKENS.LANE_LISTING,
     REVIEW_CORE_TOKENS.ENVIRONMENT, REVIEW_GITHUB_TOKENS.FETCH,
     REVIEW_GITHUB_TOKENS.PUBLICATION_PORT, REVIEW_GITHUB_TOKENS.REVIEW_PORT,
   ]) c.register(token, { useValue: {} });

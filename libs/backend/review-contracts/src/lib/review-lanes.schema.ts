@@ -36,17 +36,11 @@ export type ReviewLaneEntry = z.infer<typeof ReviewLaneEntrySchema>;
 export const ReviewLaneRoleSchema = z.enum(['triage', ...LensSchema.options, 'verifier']);
 export type ReviewLaneRole = z.infer<typeof ReviewLaneRoleSchema>;
 
-/** Per-role pins. Every role is optional; an unknown role key is rejected. */
-export const ReviewLanePinsSchema = z
-  .object({
-    triage: ReviewLaneEntrySchema.optional(),
-    'correctness-lifecycle': ReviewLaneEntrySchema.optional(),
-    'contracts-callers': ReviewLaneEntrySchema.optional(),
-    'security-privacy': ReviewLaneEntrySchema.optional(),
-    'host-di-config': ReviewLaneEntrySchema.optional(),
-    verifier: ReviewLaneEntrySchema.optional(),
-  })
-  .strict();
+/**
+ * Per-role pins, keyed by `ReviewLaneRoleSchema` so a new lens gets a pin key with no edit here.
+ * Every role is optional; an unknown role key is rejected.
+ */
+export const ReviewLanePinsSchema = z.partialRecord(ReviewLaneRoleSchema, ReviewLaneEntrySchema.optional());
 export type ReviewLanePins = z.infer<typeof ReviewLanePinsSchema>;
 
 /**
@@ -97,6 +91,7 @@ export const ReviewLaneCatalogSchema = z
 export type ReviewLaneCatalog = z.infer<typeof ReviewLaneCatalogSchema>;
 
 export const ReviewLaneLimitStateSchema = z.enum(['confirmed-room', 'unknown', 'at-limit']);
+export type ReviewLaneLimitState = z.infer<typeof ReviewLaneLimitStateSchema>;
 
 export const ReviewLaneListingEntrySchema = z
   .object({
@@ -109,11 +104,14 @@ export const ReviewLaneListingEntrySchema = z
   .strict();
 export type ReviewLaneListingEntry = z.infer<typeof ReviewLaneListingEntrySchema>;
 
+/** Distinct saved models: at most every pool entry plus one pin per role. */
+export const REVIEW_LANE_BLOCKED_MODELS_MAX = REVIEW_LANE_POOL_MAX + ReviewLaneRoleSchema.options.length;
+
 export const ReviewLaneListingSchema = z
   .object({
     lanes: z.array(ReviewLaneListingEntrySchema).max(100),
     /** Saved pool and pin models that the lane block list refuses. */
-    blockedModels: z.array(ReviewModelIdSchema).max(2 * REVIEW_LANE_POOL_MAX + 12),
+    blockedModels: z.array(ReviewModelIdSchema).max(REVIEW_LANE_BLOCKED_MODELS_MAX),
   })
   .strict();
 export type ReviewLaneListing = z.infer<typeof ReviewLaneListingSchema>;
@@ -136,3 +134,24 @@ export const ReviewLaneFallbackSchema = z
   })
   .strict();
 export type ReviewLaneFallback = z.infer<typeof ReviewLaneFallbackSchema>;
+
+/** Load state of the lane listing in the settings drawer. */
+export type ReviewLaneListState = 'idle' | 'loading' | 'ready' | 'error';
+
+/**
+ * Machine codes of lane-save failures, sent as the RPC `errorCode` so the renderer matches the code,
+ * never the message text. Each value is also a member of `RPC_USER_ERROR_CODES` in `@ptah-extension/shared`.
+ */
+export const ReviewLaneErrorCode = {
+  /** The request's lane settings failed validation; nothing was saved. */
+  Invalid: 'REVIEW_LANES_INVALID',
+  /** The operator settings were saved, the lane write failed; saving again completes it. */
+  NotSaved: 'REVIEW_LANES_NOT_SAVED',
+} as const;
+export type ReviewLaneErrorCode = (typeof ReviewLaneErrorCode)[keyof typeof ReviewLaneErrorCode];
+
+/** Operator-facing messages of the lane-save failures, by code. */
+export const REVIEW_LANE_ERROR_MESSAGES: Readonly<Record<ReviewLaneErrorCode, string>> = {
+  [ReviewLaneErrorCode.Invalid]: 'Review lanes were not saved: the lane settings are invalid',
+  [ReviewLaneErrorCode.NotSaved]: 'Review lanes were not saved',
+};

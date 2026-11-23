@@ -8,7 +8,7 @@ import { laneFamilyOf, type CliDetectionResult } from '@ptah-extension/shared';
 import type { IWorkspaceProvider } from '@ptah-extension/platform-core';
 import type { LaneModelEntry, LaneModelListing } from '@ptah-extension/lane-routing';
 import { REVIEW_LANE_CATALOG_MAX, ReviewModelIdSchema, type ReviewLaneCatalog } from '@ptah-extension/review-contracts';
-import { type IReviewLaneGateway, type ReviewLaneCapability } from '@ptah-extension/review-core';
+import { type IReviewLaneGateway, type ReviewLaneCandidate } from '@ptah-extension/review-core';
 
 const spawnInputSchema = z.object({
   laneId: z.string().min(1).max(128), cwd: z.string().min(1),
@@ -107,13 +107,22 @@ export class ReviewLaneGateway implements IReviewLaneGateway {
     return rows.sort((a, b) => rank(a) - rank(b));
   }
 
-  async list(): Promise<{ lanes: ReviewLaneCapability[]; maxConcurrentAgents: number }> {
+  /**
+   * A lane whose model without a request model (its own setting, else the CLI default) is on the
+   * block list: spawn would refuse it, so selection skips it when no model is chosen (M3).
+   */
+  private defaultModelBlocked(row: CliDetectionResult): boolean {
+    return findBlockedLaneModel(this.spawnEnvironment.resolveModel(row.cli, undefined).model) !== undefined;
+  }
+
+  async list(): Promise<{ lanes: ReviewLaneCandidate[]; maxConcurrentAgents: number }> {
     const checked = await this.limits.lookup(await this.buildLanes());
     return {
       lanes: checked.map(({ row, state }) => ({
         id: idOf(row), label: labelOf(row), family: row.family ?? row.cli,
         limitState: state.state === 'confirmed-room' ? 'confirmed-room' as const :
           state.state === 'at-limit' ? 'at-limit' as const : 'unknown' as const,
+        ...(this.defaultModelBlocked(row) ? { defaultModelBlocked: true } : {}),
       })),
       maxConcurrentAgents: this.spawnEnvironment.maxConcurrentAgents(),
     };

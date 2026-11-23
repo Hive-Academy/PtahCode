@@ -10,6 +10,7 @@ import { ReviewArtifactReader } from '../lib/persistence/review-artifact.reader'
 import { ReviewLaneAdmissionService, REVIEW_LANE_TOKENS } from '../lib/lanes/review-lane-admission.service';
 import { ReviewLaneRunner } from '../lib/lanes/review-lane.runner';
 import { ReviewLaneSelectionService } from '../lib/lanes/review-lane-selection.service';
+import { ReviewLaneListingService } from '../lib/lanes/review-lane-listing.service';
 import { ReviewWorktreeService } from '../lib/context/review-worktree.service';
 import { ReviewContextService } from '../lib/context/review-context.service';
 import { IncrementalScopeService } from '../lib/context/incremental-scope.service';
@@ -65,6 +66,8 @@ export function registerReviewCore(container: DependencyContainer): void {
   container.register(REVIEW_LANE_TOKENS.ADMISSION, { useToken: ReviewLaneAdmissionService });
   container.registerSingleton(ReviewLaneSelectionService);
   container.register(REVIEW_CORE_TOKENS.LANE_SELECTION, { useToken: ReviewLaneSelectionService });
+  container.registerSingleton(ReviewLaneListingService);
+  container.register(REVIEW_CORE_TOKENS.LANE_LISTING, { useToken: ReviewLaneListingService });
   container.registerSingleton(ReviewLaneRunner);
   container.registerSingleton(ReviewWorktreeService);
   container.registerSingleton(ReviewContextService);

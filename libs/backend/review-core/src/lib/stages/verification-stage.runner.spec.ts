@@ -3,7 +3,7 @@ import { MIGRATIONS, type SqliteDatabase } from '@ptah-extension/persistence-sql
 import { ReviewLaneRunner, type IReviewLaneFiles, type IReviewLaneGateway } from '../lanes/review-lane.runner';
 import { ReviewLaneAdmissionService, type IReviewLaneClock } from '../lanes/review-lane-admission.service';
 import { ReviewLaneAttempt } from '../lanes/review-lane-attempt';
-import type { ReviewLaneCandidate } from '../lanes/review-lane-selection';
+import type { ReviewLaneCandidate } from '../lanes/review-lane-list';
 import type { IReviewRepository } from '../persistence/review-repository.interface';
 import type { ReviewQueueClaim } from '../review-queue.service';
 import type { ContextStageResult } from './context-stage.runner';
@@ -31,7 +31,7 @@ const clock: IReviewLaneClock = { now: () => 0, setTimeout, clearTimeout };
 /** For specs that stub `ReviewLaneRunner.run`: the attempt is passed through but never asked to choose. */
 function idleAttempt(): ReviewLaneAttempt {
   return new ReviewLaneAttempt({ source: { list: jest.fn(), listModels: jest.fn(), modelBlocked: jest.fn() },
-    settings: { get: jest.fn(), update: jest.fn() }, clock, logger: { warn: jest.fn() } });
+    settings: { get: jest.fn() }, clock, logger: { warn: jest.fn() } });
 }
 
 function acceptedVerdict(candidateId: string) {
@@ -174,7 +174,7 @@ async function verifyWith(options: { lanes: ReviewLaneCandidate[]; authors: stri
   const runner = new ReviewLaneRunner(gateway, files, clock, new ReviewLaneAdmissionService(clock), { error: jest.fn() },
     { resolve: async () => ({ repoRoot: '/repo', attemptsRoot: '/attempts' }), settings: async () => operatorSettings, baseConfig: async () => null });
   const attempt = new ReviewLaneAttempt({ source: gateway, clock, logger: { warn: jest.fn() },
-    settings: { get: async () => options.settings ?? { pool: [], pins: {} }, update: jest.fn() } });
+    settings: { get: async () => options.settings ?? { pool: [], pins: {} } } });
   const saveStageLane = jest.fn<ReturnType<IReviewRepository['saveStageLane']>, Parameters<IReviewRepository['saveStageLane']>>()
     .mockResolvedValue(undefined);
   const repository = Object.assign(Object.create(null) as IReviewRepository, { saveStageLane });

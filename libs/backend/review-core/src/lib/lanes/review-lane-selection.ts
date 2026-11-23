@@ -3,17 +3,10 @@ import type {
   ReviewLaneEntry,
   ReviewLaneFallback,
   ReviewLaneFallbackReason,
+  ReviewLaneRole,
   ReviewLaneSettings,
 } from '@ptah-extension/review-contracts';
-import type { LaneLimitState, ReviewLaneKind } from './review-lane-selector';
-
-/** One lane of the review lane list, in gateway (global preference) order. */
-export interface ReviewLaneCandidate {
-  id: string;
-  label: string;
-  family: string;
-  limitState: LaneLimitState;
-}
+import type { ReviewLaneCandidate } from './review-lane-list';
 
 /** What an attempt needs from the host to choose lanes. The gateway implements it. */
 export interface ReviewLaneSource {
@@ -26,7 +19,7 @@ export interface ReviewLaneSource {
 export type ReviewLaneCatalogs = Readonly<Record<string, ReviewLaneCatalog>>;
 
 export interface ReviewLaneSelectionInput {
-  kind: ReviewLaneKind;
+  kind: ReviewLaneRole;
   lanes: readonly ReviewLaneCandidate[];
   settings: ReviewLaneSettings;
   catalog: ReviewLaneCatalogs;
@@ -65,7 +58,10 @@ export function catalogFor(catalogs: ReviewLaneCatalogs, laneId: string): Review
   return Object.prototype.hasOwnProperty.call(catalogs, laneId) ? catalogs[laneId] : undefined;
 }
 
-/** Requirement 4.1, checked in this order: not listed, at limit, model blocked, model not offered. */
+/**
+ * Requirement 4.1, checked in this order: not listed, at limit, model blocked, model not offered.
+ * An entry without a model is blocked when the lane's own default model is (M3).
+ */
 export function reviewLaneEntryAvailability(
   entry: ReviewLaneEntry,
   lanes: readonly ReviewLaneCandidate[],
@@ -75,7 +71,8 @@ export function reviewLaneEntryAvailability(
   const lane = lanes.find((candidate) => candidate.id === entry.lane);
   if (!lane) return { available: false, reason: 'lane-not-listed', lane: null };
   if (lane.limitState === 'at-limit') return { available: false, reason: 'at-limit', lane };
-  if (entry.model !== null && blocked(entry.model)) return { available: false, reason: 'model-blocked', lane };
+  if (entry.model === null ? lane.defaultModelBlocked === true : blocked(entry.model))
+    return { available: false, reason: 'model-blocked', lane };
   const catalog = catalogFor(catalogs, entry.lane);
   if (entry.model !== null && isVerifiableCatalog(catalog) && !catalog?.models.includes(entry.model))
     return { available: false, reason: 'model-not-offered', lane };
@@ -91,7 +88,7 @@ interface Preference {
   index: number;
 }
 
-function rank(kind: ReviewLaneKind, preference: Preference, input: ReviewLaneSelectionInput): number {
+function rank(kind: ReviewLaneRole, preference: Preference, input: ReviewLaneSelectionInput): number {
   if (kind === 'triage' || preference.family === null) return 0;
   if (kind === 'verifier') return input.authorFamilyCounts?.get(preference.family) ?? 0;
   return input.avoidFamilies.has(preference.family) ? 1 : 0;
@@ -104,7 +101,8 @@ function rank(kind: ReviewLaneKind, preference: Preference, input: ReviewLaneSel
  *   without a model. A set pool never falls back to lanes outside it (plan A11).
  * - Lenses prefer families outside `avoidFamilies`; the verifier prefers the family that authored the
  *   fewest merged candidates. Ties keep preference order.
- * - Unavailable pool entries met before the choice are recorded. No available entry gives no choice.
+ * - Unavailable pool entries met before the choice are recorded; global-order lanes are skipped
+ *   unrecorded (at limit, or default model blocked), as before. No available entry gives no choice.
  */
 export function selectReviewLane(input: ReviewLaneSelectionInput): ReviewLaneSelection {
   const fallback: ReviewLaneFallback[] = [];

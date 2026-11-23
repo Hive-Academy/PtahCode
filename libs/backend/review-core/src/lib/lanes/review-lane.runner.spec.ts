@@ -19,7 +19,7 @@ describe('ReviewLaneRunner', () => {
   let request: ReviewLaneRequest;
   const logger = { error: jest.fn() };
   const attemptFor = (): ReviewLaneAttempt => new ReviewLaneAttempt({ source: gateway, clock, logger: { warn: jest.fn() },
-    settings: { get: async () => { if (laneSettings instanceof Error) throw laneSettings; return laneSettings; }, update: jest.fn() } });
+    settings: { get: async () => { if (laneSettings instanceof Error) throw laneSettings; return laneSettings; } } });
 
   beforeEach(() => {
     now = 0;

@@ -10,6 +10,7 @@ import {
 import type {
   ReviewLaneEntry,
   ReviewLaneListing,
+  ReviewLaneListState,
   ReviewLanePins,
   ReviewLaneSettings,
 } from '@ptah-extension/review-contracts';
@@ -27,7 +28,6 @@ import {
   LANE_HINTS,
   allCatalogsFailed,
   usableListing,
-  type ReviewLaneListState,
 } from './review-lane-options';
 
 /**
@@ -82,6 +82,11 @@ import {
           </ptah-native-popover>
         </div>
 
+        @if (storedCorrupt()) {
+          <div class="mt-2" data-testid="review-lanes-corrupt">
+            <ptah-alert tone="warning" [compact]="true" live="polite">{{ storedCorruptText }}</ptah-alert>
+          </div>
+        }
         @if (listState() === 'loading') {
           <div class="mt-2" role="status" aria-label="Loading review lanes">
             <ptah-skeleton [lines]="1" size="sm" />
@@ -133,6 +138,8 @@ export class ReviewLanesSectionComponent {
   readonly listing = input<ReviewLaneListing | null>(null);
   readonly listState = input<ReviewLaneListState>('idle');
   readonly saving = input(false, { transform: booleanAttribute });
+  /** The host could not read the stored lane document; saving replaces it. */
+  readonly storedCorrupt = input(false, { transform: booleanAttribute });
   /** The lanes save error ("Review lanes were not saved: …"), or `null`. */
   readonly saveError = input<string | null>(null);
   readonly lanesChanged = output<ReviewLaneSettings>();
@@ -146,6 +153,7 @@ export class ReviewLanesSectionComponent {
     'than one. The verifier avoids the families that wrote its candidates. A lane turned off in global ' +
     'settings stays off.';
   protected readonly listErrorText = LANE_HINTS.listError;
+  protected readonly storedCorruptText = LANE_HINTS.storedCorrupt;
   protected readonly catalogsFailedText = LANE_HINTS.allCatalogsFailed;
   protected readonly emptyText = LANE_HINTS.empty;
 

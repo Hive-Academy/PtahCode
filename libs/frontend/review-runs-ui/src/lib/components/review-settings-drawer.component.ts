@@ -11,6 +11,7 @@ import type {
   OperatorSettings,
   RepositorySettings,
   ReviewLaneListing,
+  ReviewLaneListState,
   ReviewLaneSettings,
 } from '@ptah-extension/review-contracts';
 import {
@@ -38,7 +39,6 @@ import { ReviewConfirmDialogComponent } from './review-confirm-dialog.component'
 import { ReviewRepositoriesEditorComponent } from './review-repositories-editor.component';
 import { ReviewBotIdentityComponent } from './review-bot-identity.component';
 import { ReviewLanesSectionComponent } from './review-lanes/review-lanes-section.component';
-import type { ReviewLaneListState } from './review-lanes/review-lane-options';
 
 /**
  * Review settings drawer (design-spec section 1). The shell is `ptah-native-drawer`: a top-layer
@@ -86,6 +86,7 @@ export class ReviewSettingsDrawerComponent {
   readonly laneListing = input<ReviewLaneListing | null>(null);
   readonly laneListState = input<ReviewLaneListState>('idle');
   readonly lanesSaveError = input<string | null>(null);
+  readonly lanesCorrupt = input(false);
   readonly hasToken = input(false);
   readonly saving = input(false);
   readonly saveError = input<string | null>(null);

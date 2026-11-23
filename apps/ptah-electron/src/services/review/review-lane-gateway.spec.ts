@@ -28,6 +28,7 @@ describe('ReviewLaneGateway', () => {
       row, lookup: 'ok' as const, state: { state: 'confirmed-room' as const, reasons: [], windows: [] },
     })));
     const environment = Object.create(AgentSpawnEnvironment.prototype) as AgentSpawnEnvironment;
+    jest.spyOn(environment, 'resolveModel').mockReturnValue({ model: undefined, source: 'cli-default' });
     jest.spyOn(environment, 'maxConcurrentAgents').mockReturnValue(5);
     let disabled = ['copilot'];
     const workspace = { getConfiguration: (_section: string, key: string) => key === 'preferredAgentOrder'
@@ -70,6 +71,7 @@ describe('ReviewLaneGateway', () => {
       row, lookup: 'ok' as const, state: { state: 'confirmed-room' as const, reasons: [], windows: [] },
     })));
     const environment = Object.create(AgentSpawnEnvironment.prototype) as AgentSpawnEnvironment;
+    jest.spyOn(environment, 'resolveModel').mockReturnValue({ model: undefined, source: 'cli-default' });
     const gateway = new ReviewLaneGateway(manager, detection, limits, environment);
     const cwd = await mkdtemp(join(tmpdir(), 'review-gateway-'));
     // An earlier lane can plant a symlink in the attempt folder; the write must not follow it.
@@ -110,6 +112,7 @@ describe('ReviewLaneGateway', () => {
       row, lookup: 'ok' as const, state: { state: 'confirmed-room' as const, reasons: [], windows: [] },
     })));
     const environment = Object.create(AgentSpawnEnvironment.prototype) as AgentSpawnEnvironment;
+    jest.spyOn(environment, 'resolveModel').mockReturnValue({ model: undefined, source: 'cli-default' });
     await expect(new ReviewLaneGateway(manager, detection, limits, environment)
       .spawn({ laneId: 'codex', cwd: '/attempt', prompt: 'Review', signal: controller.signal }))
       .rejects.toThrow('cancelled');
@@ -130,6 +133,7 @@ describe('ReviewLaneGateway', () => {
       row, lookup: 'ok' as const, state: { state: 'confirmed-room' as const, reasons: [], windows: [] },
     })));
     const environment = Object.create(AgentSpawnEnvironment.prototype) as AgentSpawnEnvironment;
+    jest.spyOn(environment, 'resolveModel').mockReturnValue({ model: undefined, source: 'cli-default' });
     const gateway = new ReviewLaneGateway(manager, detection, limits, environment);
     await expect(gateway.spawn({ laneId: 'codex', cwd: '/attempt', prompt: 'Review', signal: new AbortController().signal }))
       .resolves.toBeUndefined();
@@ -149,6 +153,7 @@ describe('ReviewLaneGateway', () => {
       row, lookup: 'ok' as const, state: { state: 'at-limit' as const, reasons: [], windows: [] },
     })));
     const environment = Object.create(AgentSpawnEnvironment.prototype) as AgentSpawnEnvironment;
+    jest.spyOn(environment, 'resolveModel').mockReturnValue({ model: undefined, source: 'cli-default' });
     jest.spyOn(environment, 'maxConcurrentAgents').mockReturnValue(5);
     const gateway = new ReviewLaneGateway(manager, detection, limits, environment);
 
@@ -172,12 +177,33 @@ describe('ReviewLaneGateway', () => {
       row, lookup: 'timeout' as const, state: { state: 'unknown' as const, reasons: [], windows: [] },
     })));
     const environment = Object.create(AgentSpawnEnvironment.prototype) as AgentSpawnEnvironment;
+    jest.spyOn(environment, 'resolveModel').mockReturnValue({ model: undefined, source: 'cli-default' });
     jest.spyOn(environment, 'maxConcurrentAgents').mockReturnValue(5);
     const waitForAgents = jest.spyOn(manager, 'waitForAgents');
     const gateway = new ReviewLaneGateway(manager, detection, limits, environment);
     await expect(gateway.spawn({ laneId: 'codex', cwd: '/attempt/src', prompt: 'Review', signal: new AbortController().signal }))
       .rejects.toThrow('status-failed: quota');
     expect(waitForAgents).not.toHaveBeenCalled();
+  });
+
+  it('flags a lane whose default model is on the block list (M3)', async () => {
+    const manager = Object.create(AgentProcessManager.prototype) as AgentProcessManager;
+    const detection = Object.create(CliDetectionService.prototype) as CliDetectionService;
+    jest.spyOn(detection, 'getInstalledClis').mockResolvedValue([
+      { cli: 'codex', installed: true, messagingMode: 'none' },
+      { cli: 'copilot', installed: true, messagingMode: 'none' },
+    ]);
+    const limits = Object.create(LaneLimitLookupService.prototype) as LaneLimitLookupService;
+    jest.spyOn(limits, 'lookup').mockImplementation(async (rows) => rows.map((row) => ({
+      row, lookup: 'ok' as const, state: { state: 'confirmed-room' as const, reasons: [], windows: [] },
+    })));
+    const environment = Object.create(AgentSpawnEnvironment.prototype) as AgentSpawnEnvironment;
+    jest.spyOn(environment, 'maxConcurrentAgents').mockReturnValue(5);
+    const resolveModel = jest.spyOn(environment, 'resolveModel').mockImplementation((cli) =>
+      cli === 'codex' ? { model: 'blocked-model', source: 'setting' } : { model: undefined, source: 'cli-default' });
+    const { lanes } = await new ReviewLaneGateway(manager, detection, limits, environment).list();
+    expect(lanes.map((lane) => [lane.id, lane.defaultModelBlocked ?? false])).toEqual([['codex', true], ['copilot', false]]);
+    expect(resolveModel).toHaveBeenCalledWith('codex', undefined);
   });
 
   it('spawns when a limit lookup timed out', async () => {
@@ -190,6 +216,7 @@ describe('ReviewLaneGateway', () => {
       row, lookup: 'timeout' as const, state: { state: 'unknown' as const, reasons: [], windows: [] },
     })));
     const environment = Object.create(AgentSpawnEnvironment.prototype) as AgentSpawnEnvironment;
+    jest.spyOn(environment, 'resolveModel').mockReturnValue({ model: undefined, source: 'cli-default' });
     jest.spyOn(environment, 'maxConcurrentAgents').mockReturnValue(5);
     const gateway = new ReviewLaneGateway(manager, detection, limits, environment);
     expect((await gateway.list()).lanes[0].limitState).toBe('unknown');
@@ -211,6 +238,7 @@ describe('ReviewLaneGateway models', () => {
       row, lookup: 'ok' as const, state: { state: 'confirmed-room' as const, reasons: [], windows: [] },
     })));
     const environment = Object.create(AgentSpawnEnvironment.prototype) as AgentSpawnEnvironment;
+    jest.spyOn(environment, 'resolveModel').mockReturnValue({ model: undefined, source: 'cli-default' });
     return new ReviewLaneGateway(manager, detection, limits, environment, undefined, undefined, undefined,
       listing ? () => listing : undefined);
   }

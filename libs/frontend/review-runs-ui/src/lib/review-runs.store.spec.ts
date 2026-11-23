@@ -989,7 +989,7 @@ describe('ReviewRunsStore review lanes', () => {
       providers: [
         ReviewRunsStore,
         { provide: ClaudeRpcService, useValue: { call } },
-        { provide: LoggingService, useValue: { error: jest.fn() } },
+        { provide: LoggingService, useValue: { error: jest.fn(), warn: jest.fn() } },
       ],
     });
     store = TestBed.inject(ReviewRunsStore);
@@ -1073,36 +1073,74 @@ describe('ReviewRunsStore review lanes', () => {
     expect(store.lanesSaveError()).toBe('Review lanes were not saved: the lane settings are invalid');
   });
 
-  it('shows the host message when the lanes were not saved, and clears it on the next edit', async () => {
+  it('matches a lanes-not-saved failure by code, refreshes the saved settings and keeps the lane draft', async () => {
     await loadSettingsWith();
+    store.updateDraft({ pollMinutes: 30 });
     store.updateDraftLanes(savedLanes);
-    call.mockResolvedValueOnce(failure('Review lanes were not saved', 'PERSISTENCE_UNAVAILABLE'));
+    const hostSettings = { ...settings, pollMinutes: 30 };
+    call.mockResolvedValueOnce(failure('any host text', 'REVIEW_LANES_NOT_SAVED'));
+    call.mockResolvedValueOnce(ok({ settings: hostSettings, hasToken: false, tokenStorage: 'encrypted' }));
     await store.saveSettings();
+    expect(call.mock.calls.filter((entry) => entry[0] === 'review:getSettings')).toHaveLength(2);
     expect(store.settingsSaveError()).toBe('Review lanes were not saved');
     expect(store.lanesSaveError()).toBe('Review lanes were not saved');
+    expect(store.settings()).toEqual(hostSettings);
+    expect(store.draftSettings()).toEqual(hostSettings);
+    expect(store.repositories()).toEqual(hostSettings.repositories);
     expect(store.settingsLanes()).toEqual({ pool: [], pins: {} });
     expect(store.draftLanes()).toEqual(savedLanes);
+    expect(store.settingsState()).toBe('ready');
+    expect(store.settingsSaving()).toBe(false);
     store.updateDraftLanes({ pool: [], pins: {} });
     expect(store.lanesSaveError()).toBeNull();
   });
 
-  it('passes the host lane validation message through', async () => {
+  it('keeps the lane error and draft when the refresh after a lanes-not-saved failure fails', async () => {
     await loadSettingsWith();
     store.updateDraftLanes(savedLanes);
-    call.mockResolvedValueOnce(
-      failure('Review lanes were not saved: the lane settings are invalid', 'INVALID_PARAMS'),
-    );
+    call.mockResolvedValueOnce(failure('x', 'REVIEW_LANES_NOT_SAVED'));
+    call.mockResolvedValueOnce(failure('x', 'INTERNAL_ERROR'));
     await store.saveSettings();
-    expect(store.lanesSaveError()).toBe('Review lanes were not saved: the lane settings are invalid');
+    expect(store.lanesSaveError()).toBe('Review lanes were not saved');
+    expect(store.draftLanes()).toEqual(savedLanes);
+    expect(store.settings()).toEqual(settings);
   });
 
-  it('keeps an unlisted host message generic and off the lanes section', async () => {
+  it('matches a lanes-invalid failure by code and shows the contract message without a refresh', async () => {
     await loadSettingsWith();
     store.updateDraftLanes(savedLanes);
-    call.mockResolvedValueOnce(failure('Review lanes were not saved', 'INTERNAL_ERROR'));
+    call.mockResolvedValueOnce(failure('reworded host text', 'REVIEW_LANES_INVALID'));
+    await store.saveSettings();
+    expect(store.lanesSaveError()).toBe('Review lanes were not saved: the lane settings are invalid');
+    expect(store.settingsSaveError()).toBe('Review lanes were not saved: the lane settings are invalid');
+    expect(call.mock.calls.filter((entry) => entry[0] === 'review:getSettings')).toHaveLength(1);
+  });
+
+  it('keeps a lane-worded message with another code generic and off the lanes section', async () => {
+    await loadSettingsWith();
+    store.updateDraftLanes(savedLanes);
+    call.mockResolvedValueOnce(failure('Review lanes were not saved', 'PERSISTENCE_UNAVAILABLE'));
     await store.saveSettings();
     expect(store.settingsSaveError()).toBe('Review settings could not be saved.');
     expect(store.lanesSaveError()).toBeNull();
+  });
+
+  it('sends unchanged lanes when the stored lane document is unreadable, then clears the flag', async () => {
+    call.mockResolvedValueOnce(
+      ok({ settings, hasToken: false, tokenStorage: 'encrypted', lanes: { pool: [], pins: {} }, lanesCorrupt: true }),
+    );
+    call.mockResolvedValueOnce(ok(null));
+    await store.loadSettings();
+    expect(store.lanesCorrupt()).toBe(true);
+    call.mockResolvedValueOnce(ok(settings));
+    await store.saveSettings();
+    expect((updateCall()?.[1] as Record<string, unknown>)['lanes']).toEqual({ pool: [], pins: {} });
+    expect(store.lanesCorrupt()).toBe(false);
+  });
+
+  it('treats an absent lanesCorrupt as readable lanes', async () => {
+    await loadSettingsWith(savedLanes);
+    expect(store.lanesCorrupt()).toBe(false);
   });
 
   it('loads the lane listing with its own state and a longer timeout', async () => {

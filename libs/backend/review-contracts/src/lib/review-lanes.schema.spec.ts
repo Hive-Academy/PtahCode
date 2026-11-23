@@ -1,9 +1,12 @@
 import {
   EMPTY_REVIEW_LANE_SETTINGS,
   LensSchema,
+  REVIEW_LANE_BLOCKED_MODELS_MAX,
   REVIEW_LANE_CATALOG_MAX,
+  REVIEW_LANE_ERROR_MESSAGES,
   REVIEW_LANE_POOL_MAX,
   ReviewLaneCatalogSchema,
+  ReviewLaneErrorCode,
   ReviewLaneFallbackSchema,
   ReviewLaneIdSchema,
   ReviewLaneListingSchema,
@@ -74,9 +77,12 @@ describe('review lane settings', () => {
 
   it('covers every role with an optional pin', () => {
     expect(ReviewLaneRoleSchema.options).toEqual(['triage', ...LensSchema.options, 'verifier']);
-    expect(Object.keys(ReviewLanePinsSchema.shape).sort()).toEqual([...ReviewLaneRoleSchema.options].sort());
     const allPins = Object.fromEntries(ReviewLaneRoleSchema.options.map((role) => [role, { lane: 'codex', model: null }]));
-    expect(ReviewLanePinsSchema.safeParse(allPins).success).toBe(true);
+    expect(Object.keys(ReviewLanePinsSchema.parse(allPins)).sort()).toEqual([...ReviewLaneRoleSchema.options].sort());
+    // Every lens is a pin key, so a lens added to LensSchema can be pinned with no change here.
+    for (const lens of LensSchema.options)
+      expect(ReviewLanePinsSchema.safeParse({ [lens]: { lane: 'codex', model: null } }).success).toBe(true);
+    expect(ReviewLanePinsSchema.safeParse({ triage: undefined }).success).toBe(true);
   });
 
   it('rejects an unknown role key and unknown keys', () => {
@@ -165,7 +171,7 @@ describe('review lane listing', () => {
     expect(ReviewLaneListingSchema.safeParse({ lanes: [{ ...lane, limitState: 'busy' }], blockedModels: [] }).success).toBe(false);
     expect(ReviewLaneListingSchema.safeParse({ lanes: [{ ...lane, extra: 1 }], blockedModels: [] }).success).toBe(false);
     expect(ReviewLaneListingSchema.safeParse({ lanes: [{ ...lane, label: '' }], blockedModels: [] }).success).toBe(false);
-    expect(ReviewLaneListingSchema.safeParse({ lanes: [], blockedModels: models(2 * REVIEW_LANE_POOL_MAX + 13) }).success).toBe(false);
+    expect(ReviewLaneListingSchema.safeParse({ lanes: [], blockedModels: models(REVIEW_LANE_BLOCKED_MODELS_MAX + 1) }).success).toBe(false);
   });
 });
 
@@ -194,5 +200,19 @@ describe('stage record lane fields', () => {
     expect(ReviewLaneFallbackSchema.safeParse({ ...skip, source: 'global' }).success).toBe(false);
     expect(StageRecordSchema.safeParse({ ...stage, fallback: Array(REVIEW_LANE_POOL_MAX + 1).fill(skip) }).success).toBe(true);
     expect(StageRecordSchema.safeParse({ ...stage, fallback: Array(REVIEW_LANE_POOL_MAX + 2).fill(skip) }).success).toBe(false);
+  });
+});
+
+describe('review lane error codes', () => {
+  it('keeps one message per code, unchanged from the English messages', () => {
+    expect(ReviewLaneErrorCode).toEqual({ Invalid: 'REVIEW_LANES_INVALID', NotSaved: 'REVIEW_LANES_NOT_SAVED' });
+    expect(REVIEW_LANE_ERROR_MESSAGES).toEqual({
+      REVIEW_LANES_INVALID: 'Review lanes were not saved: the lane settings are invalid',
+      REVIEW_LANES_NOT_SAVED: 'Review lanes were not saved',
+    });
+  });
+
+  it('bounds blocked models by the pool plus one pin per role', () => {
+    expect(REVIEW_LANE_BLOCKED_MODELS_MAX).toBe(REVIEW_LANE_POOL_MAX + ReviewLaneRoleSchema.options.length);
   });
 });

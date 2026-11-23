@@ -3,7 +3,7 @@ import type { IReviewRepository, ReviewStageRecord } from '../persistence/review
 import { ReviewLaneRunner, type IReviewLaneFiles, type IReviewLaneGateway, type ReviewLaneUse } from '../lanes/review-lane.runner';
 import { ReviewLaneAdmissionService, type IReviewLaneClock } from '../lanes/review-lane-admission.service';
 import { ReviewLaneAttempt } from '../lanes/review-lane-attempt';
-import type { ReviewLaneCandidate } from '../lanes/review-lane-selection';
+import type { ReviewLaneCandidate } from '../lanes/review-lane-list';
 import { LensStageRunner } from './lens-stage.runner';
 import type { ContextStageResult } from './context-stage.runner';
 import type { ReviewQueueClaim } from '../review-queue.service';

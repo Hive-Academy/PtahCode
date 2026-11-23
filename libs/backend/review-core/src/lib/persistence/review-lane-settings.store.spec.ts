@@ -45,9 +45,24 @@ describe('ReviewLaneSettingsStore', () => {
   ])('logs and returns empty settings for %s without logging values', async (_label, document) => {
     const { store, logger } = setup({ [REVIEW_LANE_SETTINGS_KEY]: document });
     await expect(store.get()).resolves.toEqual({ pool: [], pins: {} });
-    expect(logger.warn).toHaveBeenCalledTimes(1);
+    await expect(store.read()).resolves.toEqual({ settings: { pool: [], pins: {} }, corrupt: true });
+    expect(logger.warn).toHaveBeenCalledTimes(2);
     expect(JSON.stringify(logger.warn.mock.calls)).not.toContain('secret-looking-text');
     expect(JSON.stringify(logger.warn.mock.calls)).not.toContain('codex');
+  });
+
+  it('reports a missing or valid document as not corrupt', async () => {
+    const { store } = setup();
+    await expect(store.read()).resolves.toEqual({ settings: { pool: [], pins: {} }, corrupt: false });
+    await store.update(settings);
+    await expect(store.read()).resolves.toEqual({ settings, corrupt: false });
+  });
+
+  it('repairs a corrupt document on the next save (M1)', async () => {
+    const { store } = setup({ [REVIEW_LANE_SETTINGS_KEY]: { version: 2 } });
+    expect((await store.read()).corrupt).toBe(true);
+    await store.update({ pool: [], pins: {} });
+    await expect(store.read()).resolves.toEqual({ settings: { pool: [], pins: {} }, corrupt: false });
   });
 
   it('propagates a throwing state read', async () => {

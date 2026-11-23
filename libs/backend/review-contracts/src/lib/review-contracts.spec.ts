@@ -273,6 +273,8 @@ describe('review lane RPC contracts', () => {
   it('keeps lanes optional on getSettings and updateSettings (A14)', () => {
     expect(ReviewRpcSchemas['review:getSettings'].result.safeParse(read).success).toBe(true);
     expect(ReviewRpcSchemas['review:getSettings'].result.safeParse({ ...read, lanes }).success).toBe(true);
+    expect(ReviewRpcSchemas['review:getSettings'].result.safeParse({ ...read, lanes, lanesCorrupt: true }).success).toBe(true);
+    expect(ReviewRpcSchemas['review:getSettings'].result.safeParse({ ...read, lanesCorrupt: 'yes' }).success).toBe(false);
     expect(ReviewRpcSchemas['review:updateSettings'].params.safeParse({ settings }).success).toBe(true);
     expect(ReviewRpcSchemas['review:updateSettings'].params.safeParse({ settings, lanes }).success).toBe(true);
     expect(ReviewRpcSchemas['review:updateSettings'].result.safeParse(settings).success).toBe(true);

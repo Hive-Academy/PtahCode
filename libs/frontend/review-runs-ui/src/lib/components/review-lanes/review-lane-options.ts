@@ -1,16 +1,15 @@
 import {
+  LensSchema,
   REVIEW_LANE_CATALOG_MAX,
   REVIEW_LANE_POOL_MAX,
   ReviewLaneRoleSchema,
   type ReviewLaneEntry,
   type ReviewLaneListing,
   type ReviewLaneListingEntry,
+  type ReviewLaneListState,
   type ReviewLaneRole,
 } from '@ptah-extension/review-contracts';
 import type { PtahSelectOption } from '@ptah-extension/ui';
-
-/** Load state of the lane listing, kept apart from the drawer's own settings load state. */
-export type ReviewLaneListState = 'idle' | 'loading' | 'ready' | 'error';
 
 /** Select value for "Lane default" and "Follow the pool". Lane and model ids never are empty. */
 export const NO_CHOICE = '';
@@ -43,6 +42,7 @@ export const LANE_HINTS = {
   allCatalogsFailed:
     'Model list unreadable. Saved models are kept and sent as they are. You can still choose Lane default.',
   listError: 'Lanes could not be read. Saved entries are shown as they are.',
+  storedCorrupt: 'Saved lane settings could not be read. Reviews run without pins or pool. Saving replaces them.',
   empty: 'No lanes chosen. Reviews follow the global agent order.',
   poolFull: `The pool holds up to ${REVIEW_LANE_POOL_MAX} entries.`,
   duplicate: 'Already in the pool with this model.',
@@ -80,6 +80,11 @@ export function findLane(listing: ReviewLaneListing | null, id: string): ReviewL
 /** The lane's label, or its raw id when the listing does not hold it. */
 export function laneLabel(listing: ReviewLaneListing | null, id: string): string {
   return findLane(listing, id)?.label ?? id;
+}
+
+/** True for the lens roles; triage and verifier are the other roles. */
+export function isLensRole(role: ReviewLaneRole): boolean {
+  return LensSchema.safeParse(role).success;
 }
 
 export function roleLabel(role: ReviewLaneRole): string {

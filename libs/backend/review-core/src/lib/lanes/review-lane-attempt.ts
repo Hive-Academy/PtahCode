@@ -1,15 +1,14 @@
 import { z } from 'zod';
 import {
   ReviewLaneCatalogSchema,
-  ReviewLaneIdSchema,
-  ReviewLaneLimitStateSchema,
   type Lens,
   type ReviewLaneCatalog,
+  type ReviewLaneRole,
   type ReviewLaneSettings,
 } from '@ptah-extension/review-contracts';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type { IReviewLaneClock } from './review-lane-admission.service';
-import type { ReviewLaneKind } from './review-lane-selector';
+import { parseReviewLaneList } from './review-lane-list';
 import {
   reviewLaneEntryAvailability,
   selectReviewLane,
@@ -22,16 +21,19 @@ import type { IReviewLaneSettingsStore } from '../persistence/review-lane-settin
 /** Upper bound of the one catalog read an attempt makes. */
 export const REVIEW_CATALOG_TIMEOUT_MS = 8_000;
 
+/** Partial reason of a role that could not read the lane settings; the stage stays retryable (M2). */
+export const LANE_SETTINGS_UNAVAILABLE = 'lane-settings-unavailable';
+
 /** The lane settings could not be read; the role must not run on guessed settings. */
 export class ReviewLaneSettingsUnavailableError extends Error {
   override readonly name = 'ReviewLaneSettingsUnavailableError';
   constructor(options?: { cause?: unknown }) {
-    super('lane-settings-unavailable', options);
+    super(LANE_SETTINGS_UNAVAILABLE, options);
   }
 }
 
 export interface ReviewLaneChooseInput {
-  kind: ReviewLaneKind;
+  kind: ReviewLaneRole;
   /** Families of lenses that already ran or were reused in this attempt. */
   usedFamilies?: readonly string[];
   /** Lenses that start after this one; their available pins count towards diversity now. */
@@ -47,29 +49,11 @@ export interface ReviewLaneAttemptChoice extends ReviewLaneSelection {
 
 export interface ReviewLaneAttemptDeps {
   source: ReviewLaneSource;
-  settings: IReviewLaneSettingsStore;
+  settings: Pick<IReviewLaneSettingsStore, 'get'>;
   clock: IReviewLaneClock;
   logger: Pick<Logger, 'warn'>;
   signal?: AbortSignal;
 }
-
-const LaneListSchema = z
-  .object({
-    lanes: z
-      .array(
-        z
-          .object({
-            id: ReviewLaneIdSchema,
-            label: z.string().min(1).max(128),
-            family: z.string().min(1).max(64),
-            limitState: ReviewLaneLimitStateSchema,
-          })
-          .strict(),
-      )
-      .max(100),
-    maxConcurrentAgents: z.number().int().nonnegative(),
-  })
-  .strict();
 
 /** Lanes whose saved model needs a catalog check: pool entries and pins that name a model. */
 export function catalogLaneIds(settings: ReviewLaneSettings): string[] {
@@ -92,12 +76,13 @@ export class ReviewLaneAttempt {
 
   /**
    * Chooses the lane for one role. Throws `ReviewLaneSettingsUnavailableError` when the settings
-   * cannot be read; a lane list failure is thrown as the gateway raised it.
+   * cannot be read; a lane list failure is thrown as the gateway raised it. An invalid lane row is
+   * dropped with a warn log, so the role chooses among the other lanes (M5).
    */
   async choose(input: ReviewLaneChooseInput): Promise<ReviewLaneAttemptChoice> {
     const settings = await this.loadSettings();
     const catalog = await this.loadCatalog(settings);
-    const listing = LaneListSchema.parse(await this.deps.source.list());
+    const listing = parseReviewLaneList(await this.deps.source.list(), this.deps.logger);
     const blocked = (model: string): boolean => this.deps.source.modelBlocked(model);
     const avoidFamilies = new Set(input.usedFamilies ?? []);
     for (const lens of input.laterLenses ?? []) {

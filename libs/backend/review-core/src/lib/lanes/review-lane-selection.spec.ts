@@ -1,11 +1,10 @@
-import type { ReviewLaneCatalog, ReviewLaneSettings } from '@ptah-extension/review-contracts';
+import type { ReviewLaneCatalog, ReviewLaneRole, ReviewLaneSettings } from '@ptah-extension/review-contracts';
 import {
   isVerifiableCatalog,
   selectReviewLane,
-  type ReviewLaneCandidate,
   type ReviewLaneSelectionInput,
 } from './review-lane-selection';
-import type { ReviewLaneKind } from './review-lane-selector';
+import type { ReviewLaneCandidate } from './review-lane-list';
 
 const lane = (id: string, family: string, limitState: ReviewLaneCandidate['limitState'] = 'confirmed-room'): ReviewLaneCandidate =>
   ({ id, label: id, family, limitState });
@@ -13,7 +12,7 @@ const catalog = (models: string[], extra: Partial<ReviewLaneCatalog> = {}): Revi
   ({ status: 'read', models, truncated: false, verifiable: true, ...extra });
 const empty: ReviewLaneSettings = { pool: [], pins: {} };
 
-function select(partial: Partial<ReviewLaneSelectionInput> & { kind: ReviewLaneKind; lanes: ReviewLaneCandidate[] }) {
+function select(partial: Partial<ReviewLaneSelectionInput> & { kind: ReviewLaneRole; lanes: ReviewLaneCandidate[] }) {
   return selectReviewLane({
     settings: empty, catalog: {}, blocked: () => false, avoidFamilies: new Set(), ...partial,
   });
@@ -126,6 +125,20 @@ describe('selectReviewLane', () => {
       expect(select({ kind: 'triage', lanes, settings: pool, blocked: () => true })).toEqual({
         choice: null, fallback: [{ source: 'pool', lane: 'x', model: 'blocked-model', reason: 'model-blocked' }],
       });
+    });
+  });
+
+  describe('blocked lane default model (M3)', () => {
+    const blockedDefault = { ...lane('a', 'fa'), defaultModelBlocked: true };
+    it('skips a lane default entry, records a pin or pool skip, and keeps a named model on that lane', () => {
+      const lanes = [blockedDefault, lane('b', 'fb')];
+      expect(select({ kind: 'triage', lanes }).choice?.lane.id).toBe('b');
+      expect(select({ kind: 'verifier', lanes, settings: { pool: [], pins: { verifier: { lane: 'a', model: null } } } })).toEqual({
+        choice: { lane: lane('b', 'fb'), model: null },
+        fallback: [{ source: 'pin', lane: 'a', model: null, reason: 'model-blocked' }],
+      });
+      expect(select({ kind: 'triage', lanes, settings: { pool: [{ lane: 'a', model: 'ok-model' }], pins: {} } }).choice)
+        .toEqual({ lane: blockedDefault, model: 'ok-model' });
     });
   });
 

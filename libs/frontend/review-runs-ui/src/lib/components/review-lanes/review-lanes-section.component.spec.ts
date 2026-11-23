@@ -31,12 +31,14 @@ describe('ReviewLanesSectionComponent', () => {
     listState: 'idle' | 'loading' | 'ready' | 'error';
     saving: boolean;
     saveError: string | null;
+    storedCorrupt: boolean;
   }>): void {
     fixture.componentRef.setInput('lanes', inputs.lanes ?? { pool: [], pins: {} });
     fixture.componentRef.setInput('listing', inputs.listing === undefined ? LISTING : inputs.listing);
     fixture.componentRef.setInput('listState', inputs.listState ?? 'ready');
     fixture.componentRef.setInput('saving', inputs.saving ?? false);
     fixture.componentRef.setInput('saveError', inputs.saveError ?? null);
+    fixture.componentRef.setInput('storedCorrupt', inputs.storedCorrupt ?? false);
     fixture.detectChanges();
   }
 
@@ -108,6 +110,15 @@ describe('ReviewLanesSectionComponent', () => {
     expect(el().textContent).toContain('Model list unreadable. Saved models are kept and sent as they are.');
     render({ listing: LISTING });
     expect(el().textContent).not.toContain('Model list unreadable.');
+  });
+
+  it('warns that unreadable saved lanes are replaced on save, only when flagged', () => {
+    render({});
+    expect(el().querySelector('[data-testid="review-lanes-corrupt"]')).toBeNull();
+    render({ storedCorrupt: true });
+    expect(el().querySelector('[data-testid="review-lanes-corrupt"]')?.textContent).toContain(
+      'Saved lane settings could not be read',
+    );
   });
 
   it('shows a loading status while the lanes load', () => {

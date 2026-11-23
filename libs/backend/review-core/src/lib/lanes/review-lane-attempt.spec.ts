@@ -6,7 +6,8 @@ import {
   catalogLaneIds,
 } from './review-lane-attempt';
 import type { IReviewLaneClock } from './review-lane-admission.service';
-import type { ReviewLaneCandidate, ReviewLaneSource } from './review-lane-selection';
+import type { ReviewLaneSource } from './review-lane-selection';
+import type { ReviewLaneCandidate } from './review-lane-list';
 
 const lane = (id: string, family: string, limitState: ReviewLaneCandidate['limitState'] = 'confirmed-room'): ReviewLaneCandidate =>
   ({ id, label: id, family, limitState });
@@ -168,12 +169,41 @@ describe('ReviewLaneAttempt', () => {
     expect(source.list).not.toHaveBeenCalled();
   });
 
-  it('propagates a lane list failure and rejects an invalid list', async () => {
+  it('propagates a lane list failure', async () => {
     const failing = setup();
     failing.source.list.mockRejectedValue(new Error('list down'));
     await expect(failing.attempt.choose({ kind: 'triage' })).rejects.toThrow('list down');
+  });
+
+  it('drops an invalid lane row with a warn log and chooses among the others (M5)', async () => {
+    const { attempt, source, logger } = setup();
+    source.list.mockResolvedValue({ lanes: [
+      { id: 'a', family: 'fa', limitState: 'unknown' } as ReviewLaneCandidate,
+      { ...lane('../bad', 'fx') },
+      lane('b', 'fb'),
+    ], maxConcurrentAgents: 1 });
+    await expect(attempt.choose({ kind: 'triage' })).resolves.toEqual({
+      choice: { lane: lane('b', 'fb'), model: null }, fallback: [], maxConcurrentAgents: 1,
+    });
+    expect(logger.warn).toHaveBeenCalledWith(expect.stringContaining('left out'), { dropped: 2 });
+    expect(JSON.stringify(logger.warn.mock.calls)).not.toContain('../bad');
+  });
+
+  it('skips a lane whose default model is blocked, and records it for a pool entry (M3)', async () => {
+    const blockedDefault = { ...lane('a', 'fa'), defaultModelBlocked: true };
+    const unpinned = setup({ lanes: [[blockedDefault, lane('b', 'fb')]] });
+    expect((await unpinned.attempt.choose({ kind: 'triage' })).choice?.lane.id).toBe('b');
+    const pooled = setup({ lanes: [[blockedDefault, lane('b', 'fb')]],
+      settings: { pool: [{ lane: 'a', model: null }, { lane: 'b', model: null }], pins: {} } });
+    await expect(pooled.attempt.choose({ kind: 'triage' })).resolves.toEqual(expect.objectContaining({
+      choice: { lane: lane('b', 'fb'), model: null },
+      fallback: [{ source: 'pool', lane: 'a', model: null, reason: 'model-blocked' }],
+    }));
+  });
+
+  it('rejects a list that is not the gateway shape', async () => {
     const invalid = setup();
-    invalid.source.list.mockResolvedValue({ lanes: [{ id: 'a', family: 'fa', limitState: 'unknown' } as ReviewLaneCandidate], maxConcurrentAgents: 1 });
+    invalid.source.list.mockResolvedValue({ lanes: 'none', maxConcurrentAgents: 1 } as unknown as Awaited<ReturnType<ReviewLaneSource['list']>>);
     await expect(invalid.attempt.choose({ kind: 'triage' })).rejects.toThrow();
   });
 

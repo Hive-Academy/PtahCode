@@ -1,14 +1,13 @@
 import { inject, injectable } from 'tsyringe';
 import {
   OperatorSettingsSchema, REVIEW_LANE_POOL_MAX, RepoIdentitySchema, ReviewLaneFallbackSchema, ReviewLaneIdSchema, ReviewModelIdSchema,
-  ShaSchema, type Lens, type RepoIdentity,
+  ShaSchema, type Lens, type RepoIdentity, type ReviewLaneRole,
 } from '@ptah-extension/review-contracts';
 import { TOKENS, type Logger } from '@ptah-extension/vscode-core';
 import { z } from 'zod';
 import { ReviewLaneAdmissionService, REVIEW_LANE_TOKENS, type IReviewLaneClock } from './review-lane-admission.service';
-import type { ReviewLaneKind } from './review-lane-selector';
 import type { ReviewLaneSource } from './review-lane-selection';
-import { ReviewLaneSettingsUnavailableError, type ReviewLaneAttempt, type ReviewLaneAttemptChoice } from './review-lane-attempt';
+import { LANE_SETTINGS_UNAVAILABLE, ReviewLaneSettingsUnavailableError, type ReviewLaneAttempt, type ReviewLaneAttemptChoice } from './review-lane-attempt';
 import { ReviewOutputParser } from './review-output.parser';
 import { REVIEW_CORE_TOKENS } from '../../di/tokens';
 import type { ReviewStageEnvironment } from '../stages/context-stage.runner';
@@ -45,7 +44,7 @@ export interface ReviewLaneRequest {
   attemptId: string;
   attemptRoot: string;
   headSha: string;
-  kind: ReviewLaneKind;
+  kind: ReviewLaneRole;
   prompt: string;
   runDeadlineMs: number;
   signal?: AbortSignal;
@@ -137,7 +136,7 @@ export class ReviewLaneRunner {
     const deadline = Math.min(request.runDeadlineMs, this.clock.now() + limit);
     if (this.clock.now() >= deadline) return { status: 'partial', reason: 'deadline' };
     const chosen = await this.choose(request);
-    if (!chosen) return { status: 'partial', reason: 'lane-settings-unavailable' };
+    if (!chosen) return { status: 'partial', reason: LANE_SETTINGS_UNAVAILABLE };
     const choice = chosen.choice;
     const lane: ReviewLaneUse = { lane: choice?.lane.id ?? null, model: choice?.model ?? null,
       family: choice?.lane.family ?? null, fallback: chosen.fallback };
