@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_2317_973a
-status: in_progress
+status: in_review
 type: BUGFIX
 title: Close nav-tools follow-ups from PR 1465 and 1475
 depends_on: []
