@@ -30,12 +30,16 @@ import { BackgroundAgentStore } from '@ptah-extension/chat-streaming';
 import { TabManagerService } from '@ptah-extension/chat-state';
 import { SessionHistoryReplayer } from '../../../services/chat-store/session-history-replayer.service';
 import { subagentToolCount } from '../../../utils/subagent-tool-count';
+import {
+  AgentActionNoticeChipComponent,
+  subagentActionNoticeView,
+} from '../../molecules/agent-card/agent-action-notice-chip.component';
 
 /** One transcript row for an agent. The full execution tree lives in the selected lane. */
 @Component({
   selector: 'ptah-subagent-tile',
   standalone: true,
-  imports: [LucideAngularModule],
+  imports: [LucideAngularModule, AgentActionNoticeChipComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
@@ -114,6 +118,15 @@ import { subagentToolCount } from '../../../utils/subagent-tool-count';
           aria-hidden="true"
         />
       </button>
+      @if (noticeView(); as notice) {
+        <!-- After the open button: its aria-label would hide the chip's sr-only text. -->
+        <div class="mt-1 flex min-w-0 max-w-full">
+          <ptah-agent-action-notice-chip
+            [view]="notice"
+            testId="subagent-action-notice"
+          />
+        </div>
+      }
       @if (pendingPermission(); as permission) {
         <button
           type="button"
@@ -168,6 +181,10 @@ export class SubagentTileComponent {
       this.node().agentDescription ||
       'Subagent',
   );
+  protected readonly noticeView = computed(() => {
+    const record = this.record();
+    return record ? subagentActionNoticeView(record) : null;
+  });
   protected readonly tree = computed(() => {
     const key = this.node().toolCallId;
     if (key) this.executions.revisionFor(key);

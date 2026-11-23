@@ -161,6 +161,11 @@ export const MESSAGE_TYPES = {
   SESSION_COMPACTION_COMPLETE: 'session:compactionComplete',
   /** Backend → Frontend: SDK Stop hook fired — turn ended, status pivot. */
   SESSION_TURN_ENDED: 'session:turnEnded',
+  /**
+   * Backend → Frontend: a live SDK session still waits on open work after its overdue window
+   * (TASK_2026_2310). The session stays alive; `overdue: false` clears the notice.
+   */
+  SESSION_ACTIVITY_OVERDUE: 'session:activity-overdue',
   /** Backend → Frontend: SDK StopFailure hook fired — turn failed with error. */
   SESSION_TURN_FAILED: 'session:turnFailed',
   /** Backend → Frontend: SDK SubagentStop hook fired — a backgrounded subagent finished. */

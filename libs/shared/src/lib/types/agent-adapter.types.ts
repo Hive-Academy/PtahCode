@@ -1,4 +1,5 @@
 import type { ContextCapacity } from '../utils/pricing.utils';
+import type { AgentActionNotice } from './agent-action.types';
 /**
  * IAgentAdapter - Unified contract for the agent runtime.
  *
@@ -156,6 +157,38 @@ export type CompactionStartCallback = (data: {
    */
   preTokens: number;
 }) => void;
+
+/**
+ * A Ptah notice about a live SDK session that has no other path to the host UI
+ * (TASK_2026_2310). Nothing here stops or aborts the session: the notice only informs.
+ *
+ * - `subagent-notice`: an SDK subagent was asked for a handoff or paused. `notice` is `null`
+ *   when the gate is released. `text` is the host-rendered sentence built from trusted values.
+ * - `session-overdue`: the watchdog still counts open work (an ambient task, a monitor, a tool,
+ *   a hook or a compaction) after its overdue window. `overdue: false` clears the notice.
+ */
+export type AgentNoticeEvent =
+  | {
+      readonly kind: 'subagent-notice';
+      /** Parent session id: SDK agent ids repeat across parent sessions. */
+      readonly sessionId: string;
+      /** SDK agent id of the subagent (`SubagentRecord.agentId`). */
+      readonly agentId: string;
+      readonly notice: AgentActionNotice | null;
+      readonly text: string;
+    }
+  | {
+      readonly kind: 'session-overdue';
+      readonly sessionId: string;
+      readonly tabId?: string;
+      readonly overdue: boolean;
+      /** Short names of the waits that are overdue. Empty when `overdue` is false. */
+      readonly operations: readonly string[];
+      /** Host-rendered sentence for the person. Empty when `overdue` is false. */
+      readonly text: string;
+    };
+
+export type AgentNoticeCallback = (event: AgentNoticeEvent) => void;
 
 export type WorktreeCreatedCallback = (data: {
   sessionId: string;
@@ -416,6 +449,11 @@ export interface IAgentAdapter extends IAIProvider, FollowUpQueueOperations {
    */
   setLiveStatsCallback(cb: LiveStatsCallback): void;
   setCompactionStartCallback(cb: CompactionStartCallback): void;
+  /**
+   * Notices about a live SDK session that reach the host UI (TASK_2026_2310). Optional: an
+   * adapter with no ambient tasks or SDK subagents never emits one.
+   */
+  setAgentNoticeCallback?(cb: AgentNoticeCallback): void;
   setWorktreeCreatedCallback(cb: WorktreeCreatedCallback): void;
   setWorktreeRemovedCallback(cb: WorktreeRemovedCallback): void;
 }

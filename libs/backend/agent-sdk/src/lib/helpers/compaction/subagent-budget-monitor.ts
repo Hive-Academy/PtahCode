@@ -44,6 +44,7 @@ import {
   formatBudgetAskReadOnly,
   formatBudgetAskWritable,
   formatBudgetPauseNotice,
+  formatBudgetAskNotice,
   formatHandoffNormalReturn,
   formatHandoffNotesDelay,
   formatHandoffRecordFailure,
@@ -518,6 +519,11 @@ export interface SubagentBudgetDispatcherPort
   postSubagentNotice(agentId: string, text: string): void;
   /** Drop the subagent's pending notice. */
   withdrawSubagentNotice(agentId: string): void;
+  /**
+   * Show the subagent's current ask or pause to the person (TASK_2026_2310); `null` clears it.
+   * Informational only: it never stops the subagent. Optional so a host without a UI omits it.
+   */
+  announceSubagentNotice?(sessionId: string, agentId: string, notice: AgentActionNotice | null, text: string): void;
 }
 
 /**
@@ -719,6 +725,7 @@ export class SubagentBudgetMonitor {
       const notice = admissionNotice('paused', paused, nextStep);
       if (this.notesGate.pause(agentId, notice)) {
         this.dispatcher.postMainThreadNotice(session.sessionId, redactBudgetSecrets(formatBudgetPauseNotice(notice, agentId)));
+        this.announce(session.sessionId, agentId, notice, redactBudgetSecrets(formatBudgetPauseNotice(notice, agentId)));
         this.logger.info('[SubagentBudgetMonitor] Subagent paused; new tool calls are denied until it returns', {
           sessionId: session.sessionId, toolCallId, reason: paused.reason,
         });
@@ -770,6 +777,7 @@ export class SubagentBudgetMonitor {
       ? formatBudgetAskWritable(notice, state.handoffPaths.notes)
       : formatBudgetAskReadOnly(notice);
     this.dispatcher.postSubagentNotice(agentId, redactBudgetSecrets(text));
+    this.announce(session.sessionId, agentId, notice, redactBudgetSecrets(formatBudgetAskNotice(notice, agentId)));
     this.logger.info('[SubagentBudgetMonitor] Handoff ask queued', {
       sessionId: session.sessionId, toolCallId, reason: asked.reason, contextTokens: state.contextTokens,
     });
@@ -905,17 +913,29 @@ export class SubagentBudgetMonitor {
           state.warnedAgentId === agentId) {
         state.stopInFlight = false;
         // Terminal notifications already release the old invocation's gate.
-        if (state.stopState === 'none' && !state.sdkOutcome) this.releaseAdmission(agentId);
+        if (state.stopState === 'none' && !state.sdkOutcome) this.releaseAdmission(session.sessionId, agentId);
         this.clearIdleGateTimer();
       }
     }
   }
 
-  private releaseAdmission(agentId: string): void {
+  private releaseAdmission(sessionId: string, agentId: string): void {
     this.notesGate.finish(agentId);
     this.deliverables.finish(agentId);
     this.notesWarnings.finish(agentId);
     this.dispatcher.withdrawSubagentNotice(agentId);
+    this.announce(sessionId, agentId, null, '');
+  }
+
+  /** Show the agent's notice in the host UI. A failing sink never changes the agent's run. */
+  private announce(sessionId: string, agentId: string, notice: AgentActionNotice | null, text: string): void {
+    try {
+      this.dispatcher.announceSubagentNotice?.(sessionId, agentId, notice, text);
+    } catch (error) {
+      this.logger.warn('[SubagentBudgetMonitor] Subagent notice could not reach the UI', {
+        errorType: error instanceof Error ? error.name : typeof error,
+      });
+    }
   }
 
   /** Build, publish and deliver the handoff of an agent that returned after the request. */
@@ -1104,7 +1124,7 @@ export class SubagentBudgetMonitor {
       generation = ++state.generation;
       if (state.deadlineTimer) clearTimeout(state.deadlineTimer);
       if (state.warnedAgentId) {
-        this.releaseAdmission(state.warnedAgentId);
+        this.releaseAdmission(session.sessionId, state.warnedAgentId);
         this.transcriptLookup.delete(stoppedIdentityKey(session.sessionId, state.warnedAgentId));
       }
       session.subagents.delete(toolUseId);
@@ -1161,7 +1181,7 @@ export class SubagentBudgetMonitor {
         state.pendingNotice = undefined;
         if (state.deadlineTimer) clearTimeout(state.deadlineTimer);
         state.deadlineTimer = undefined;
-        if (agentId && this.notesGate.has(agentId)) this.releaseAdmission(agentId);
+        if (agentId && this.notesGate.has(agentId)) this.releaseAdmission(session.sessionId, agentId);
         this.clearIdleGateTimer();
       }
       return;
@@ -1341,7 +1361,7 @@ export class SubagentBudgetMonitor {
     for (const state of this.sessions.get(sessionId)?.subagents.values() ??
       []) {
       if (state.deadlineTimer) clearTimeout(state.deadlineTimer);
-      if (state.warnedAgentId) this.releaseAdmission(state.warnedAgentId);
+      if (state.warnedAgentId) this.releaseAdmission(sessionId, state.warnedAgentId);
     }
     this.sessions.delete(sessionId);
     this.clearIdleGateTimer();

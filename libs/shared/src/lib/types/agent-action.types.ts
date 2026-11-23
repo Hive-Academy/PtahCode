@@ -209,6 +209,11 @@ export function formatBudgetReadOnlyCeilingDeny(notice: AgentActionNotice): stri
   return `${formatAgentActorLabel(notice)} paused new work tools because ${formatAgentActionReason(notice)}. You may use your permitted Read, Grep, and Glob tools and return your findings in your final report.`;
 }
 
+/** Parent and UI copy for an execution that was asked for a handoff. */
+export function formatBudgetAskNotice(notice: AgentActionNotice, id: string): string {
+  return `${formatAgentActorLabel(notice)} asked ${id} for a handoff because ${formatAgentActionReason(notice)}. The execution remains live.`;
+}
+
 /** Parent and UI copy for a paused execution. */
 export function formatBudgetPauseNotice(notice: AgentActionNotice, id: string): string {
   return `${formatAgentActorLabel(notice)} paused new work for ${id} because ${formatAgentActionReason(notice)}. The execution remains live. Review its progress and decide how it should continue.`;
@@ -280,6 +285,19 @@ export function formatWatchdogNoSafeRetry(id: string): string {
 /** An accounted wait is still open after its overdue window. */
 export function formatActivityOverdue(operation: string): string {
   return `Ptah watchdog is still waiting for ${operation}. Review the session if the wait is unexpected.`;
+}
+
+/**
+ * A live session still waits on open work after its overdue window. For the person who reads the
+ * session, not for the agent. Ptah never stops the session for this.
+ */
+export function formatSessionOverdue(operations: readonly string[]): string {
+  // A tool name can repeat (many parallel calls). Show each once and cap the list.
+  const unique = [...new Set(operations)];
+  const shown = unique.slice(0, 5).join(', ');
+  const more = unique.length > 5 ? ` and ${unique.length - 5} more` : '';
+  const waits = unique.length > 0 ? `${shown}${more}` : 'open work';
+  return `Ptah watchdog is still waiting for ${waits}. The provider may be stuck.`;
 }
 
 /** The provider input channel closed and the turn ended for recovery. */

@@ -647,6 +647,26 @@ describe('SubagentLaneComponent', () => {
     ).toBe('Reviewing tests');
   });
 
+  it('shows a Ptah pause notice under the header while live and hides it once terminal (TASK_2026_2310)', () => {
+    const notice = {
+      actor: 'ptah-budget',
+      action: 'paused',
+      reason: 'weighted-budget',
+      nextStep: 'review-live-agent',
+    } as const;
+    const fixture = setup({ ...base, agentId: 'agent-7', actionNotice: notice });
+    const root = fixture.nativeElement as HTMLElement;
+    const chip = root.querySelector('[data-testid="subagent-action-notice"]');
+    expect(chip?.textContent).toContain('Paused · still running');
+    expect(chip?.textContent).toContain('Notice:');
+    expect(chip?.getAttribute('title')).toContain('Explore');
+    expect(root.querySelector('ptah-execution-header')?.contains(chip)).toBe(false);
+
+    fixture.componentRef.setInput('record', { ...base, status: 'completed', actionNotice: notice });
+    fixture.detectChanges();
+    expect(root.querySelector('[data-testid="subagent-action-notice"]')).toBeNull();
+  });
+
   it('keeps the draft after a failed steer and clears it after success', async () => {
     contexts.set(new Map([['tool-1', context({ steerable: true })]]));
     steer.mockResolvedValueOnce(false).mockResolvedValueOnce(true);

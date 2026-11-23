@@ -144,7 +144,25 @@ export class NoActivityWatchdog {
     private readonly onTimeout: (cause: WatchdogTimeoutCause) => void,
     private readonly onOverdue: (operations: readonly string[]) => void = () =>
       undefined,
+    /**
+     * Called once after an overdue report when the session shows activity again, closes its
+     * turn or stops. Lets the host withdraw the overdue notice. Never stops the session.
+     */
+    private readonly onRecovered: () => void = () => undefined,
   ) {}
+
+  /** An overdue report is outstanding and the host has not yet been told it cleared. */
+  private overdueReported = false;
+
+  private recovered(): void {
+    if (!this.overdueReported) return;
+    this.overdueReported = false;
+    try {
+      this.onRecovered();
+    } catch {
+      // The notice is informational; a failing subscriber never changes the watchdog.
+    }
+  }
 
   get firedCause(): WatchdogTimeoutCause | null {
     return this.terminalError?.endCause === 'provider-no-response' ? 'provider-no-response' : null;
@@ -181,6 +199,7 @@ export class NoActivityWatchdog {
   }
 
   endTurn(): void {
+    this.recovered();
     this.turnOpen = false;
     this.tools.clear();
     this.finishedTools.clear();
@@ -196,6 +215,7 @@ export class NoActivityWatchdog {
   }
 
   kick(): void {
+    this.recovered();
     this.quietUntil = performance.now() + this.timeoutMs;
     this.toolNoticeAt = this.quietUntil;
     this.arm();
@@ -204,6 +224,8 @@ export class NoActivityWatchdog {
   hold(): void {
     if (this.stopped) return;
     this.holds += 1;
+    // A hold is a wait for the person (a permission or an approval), not a hang.
+    this.recovered();
     this.clear();
   }
 
@@ -314,7 +336,10 @@ export class NoActivityWatchdog {
           changed = true;
         }
       }
-      if (changed) this.arm();
+      if (changed) {
+        this.recovered();
+        this.arm();
+      }
       return;
     }
     switch (message.type) {
@@ -414,6 +439,7 @@ export class NoActivityWatchdog {
         const task = this.tasks.get(message.task_id);
         if (!task || (message.run_id && task.runId && message.run_id !== task.runId)) return;
         task.overdue = overdueWindow(BACKGROUND_TASK_QUIET_TIMEOUT_MS);
+        this.recovered();
         this.arm();
         return;
       }
@@ -554,7 +580,10 @@ export class NoActivityWatchdog {
       return;
     }
     try {
-      if (operations.size) this.onOverdue([...operations]);
+      if (operations.size) {
+        this.overdueReported = true;
+        this.onOverdue([...operations]);
+      }
     } finally {
       this.arm();
     }

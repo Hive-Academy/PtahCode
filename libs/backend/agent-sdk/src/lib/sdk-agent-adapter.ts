@@ -37,6 +37,7 @@ import {
   type SessionBudgetState,
   type SessionStatsEntry,
   type LiveStatsCallback,
+  type AgentNoticeCallback,
   type SessionStatsLivePayload,
   blankToUndefined,
 } from '@ptah-extension/shared';
@@ -82,6 +83,7 @@ import {
   SessionForkService,
   SdkAdapterCallbackRegistry,
   SessionIdResolvedCallbackRegistry,
+  AgentNoticeCallbackRegistry,
   type SessionIdResolvedCallback,
   type ResultStatsCallback,
   type CompactionStartCallback,
@@ -312,6 +314,9 @@ export class SdkAgentAdapter implements IAgentAdapter {
     private readonly compactionConfigProvider: {
       getConfig(): Pick<ReturnType<CompactionConfigProvider['getConfig']>, 'enabled' | 'contextTokenThreshold' | 'envWindow'>;
     } | null = null,
+    /** Carries subagent and overdue notices to the host UI (TASK_2026_2310). */
+    @inject(SDK_TOKENS.SDK_AGENT_NOTICE_CALLBACK_REGISTRY, { isOptional: true })
+    private readonly agentNoticeRegistry: AgentNoticeCallbackRegistry | null = null,
   ) {
     this.callbacks = new SdkAdapterCallbackRegistry();
     this.statsOwner.setLiveSessionIdsProvider(() =>
@@ -1957,6 +1962,15 @@ export class SdkAgentAdapter implements IAgentAdapter {
   setCompactionStartCallback(callback: CompactionStartCallback): void {
     this.callbacks.setCompactionStart(callback);
   }
+
+  /** Single slot: a later call replaces the earlier subscription. */
+  setAgentNoticeCallback(callback: AgentNoticeCallback): void {
+    this.stopAgentNoticeSubscription?.();
+    this.stopAgentNoticeSubscription =
+      this.agentNoticeRegistry?.register(callback) ?? null;
+  }
+
+  private stopAgentNoticeSubscription: (() => void) | null = null;
 
   setWorktreeCreatedCallback(callback: WorktreeCreatedCallback): void {
     this.callbacks.setWorktreeCreated(callback);

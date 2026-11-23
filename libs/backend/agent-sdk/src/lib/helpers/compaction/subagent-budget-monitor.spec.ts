@@ -239,6 +239,7 @@ function makeHarness(
     withdrawSubagentNotice: jest.fn((agentId: string) =>
       subagentNotices.withdraw(agentId),
     ),
+    announceSubagentNotice: jest.fn(),
   };
   const registry = {
     get: jest.fn((_toolCallId: string) =>
@@ -1105,6 +1106,36 @@ describe('cooperative budget: ask, pause and normal return', () => {
       expect(h.dispatcher.postMainThreadNotice).toHaveBeenCalledTimes(1);
       expect(h.dispatcher.postMainThreadNotice.mock.calls[0][1]).toContain('a1');
       expect(h.monitor.getAgentBudgetState('a1', SESSION)?.admission).toBe('paused');
+    });
+
+    it('announces the ask and the pause to the UI without stopping the agent', async () => {
+      const h = makeHarness();
+      await h.monitor.observe(SESSION, ctx(127_500, 'c1'));
+      expect(h.dispatcher.announceSubagentNotice).toHaveBeenCalledTimes(1);
+      expect(h.dispatcher.announceSubagentNotice).toHaveBeenLastCalledWith(
+        SESSION,
+        'a1',
+        expect.objectContaining({ action: 'asked-handoff', reason: 'context-budget' }),
+        expect.stringContaining('asked a1 for a handoff'),
+      );
+      await h.monitor.observe(SESSION, ctx(300_000, 'c3'));
+      expect(h.dispatcher.announceSubagentNotice).toHaveBeenCalledTimes(2);
+      expect(h.dispatcher.announceSubagentNotice).toHaveBeenLastCalledWith(
+        SESSION,
+        'a1',
+        expect.objectContaining({ action: 'paused' }),
+        expect.stringContaining('The execution remains live'),
+      );
+    });
+
+    it('keeps the agent running when the UI sink throws', async () => {
+      const h = makeHarness();
+      h.dispatcher.announceSubagentNotice.mockImplementation(() => {
+        throw new Error('sink down');
+      });
+      await expect(h.monitor.observe(SESSION, ctx(127_500, 'c1'))).resolves.toBeUndefined();
+      expect(h.monitor.notesGatePhase('a1')).toBe('asked');
+      expect(h.dispatcher.postSubagentNotice).toHaveBeenCalledTimes(1);
     });
 
     it('asks and pauses on weighted usage (weighted = 5 x output)', async () => {

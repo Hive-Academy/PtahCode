@@ -2,7 +2,8 @@
  * Agent Monitor Message Handler
  *
  * Routes AGENT_MONITOR_* messages from the extension backend to AgentMonitorStore,
- * and receipt / parent-delivery pushes to AgentDeliveryStore.
+ * receipt / parent-delivery pushes to AgentDeliveryStore, and
+ * `session:activity-overdue` to SessionOverdueStore.
  * Implements the MessageHandler interface (same pattern as ChatMessageHandler).
  *
  * It also hydrates the delivery store on renderer start and on every session
@@ -18,12 +19,14 @@ import {
   type AgentPermissionRequest,
   type AgentMonitorReparentedPayload,
   type AgentMonitorActionNoticePayload,
+  type SessionActivityOverduePayload,
   AgentMonitorMessageReceiptPayloadSchema,
   AgentMonitorParentDeliveryPayloadSchema,
   AgentId,
 } from '@ptah-extension/shared';
 import { AgentDeliveryStore, AgentMonitorStore } from '@ptah-extension/chat-streaming';
 import { TabManagerService } from '@ptah-extension/chat-state';
+import { SessionOverdueStore } from './session-overdue.store';
 
 /**
  * rAF does not fire while the window is hidden or occluded, so a timer also
@@ -88,6 +91,41 @@ export function parseAgentMonitorActionNotice(
   return value as AgentMonitorActionNoticePayload;
 }
 
+/**
+ * Validate a `session:activity-overdue` payload (TASK_2026_2310): a non-empty
+ * `sessionId`, an optional string `tabId`, a boolean `overdue`, a string array
+ * `operations` and a `text` string. Returns `null` for anything else.
+ * Hand-written to keep Zod out of the initial bundle.
+ */
+export function parseSessionActivityOverdue(
+  value: unknown,
+): SessionActivityOverduePayload | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const p = value as Record<string, unknown>;
+  const sessionId = p['sessionId'];
+  const tabId = p['tabId'];
+  const overdue = p['overdue'];
+  const operations = p['operations'];
+  const text = p['text'];
+  if (
+    !isNonEmptyString(sessionId) ||
+    (tabId !== undefined && typeof tabId !== 'string') ||
+    typeof overdue !== 'boolean' ||
+    !Array.isArray(operations) ||
+    !operations.every((op) => typeof op === 'string') ||
+    typeof text !== 'string'
+  ) {
+    return null;
+  }
+  return {
+    sessionId,
+    ...(tabId ? { tabId } : {}),
+    overdue,
+    operations: [...(operations as string[])],
+    text,
+  };
+}
+
 /** Type and top-level keys of a refused payload; never its values. */
 function describePayload(payload: unknown): string {
   if (payload === null) return 'null';
@@ -102,6 +140,7 @@ export class AgentMonitorMessageHandler implements MessageHandler {
   private readonly store = inject(AgentMonitorStore);
   private readonly delivery = inject(AgentDeliveryStore);
   private readonly tabManager = inject(TabManagerService);
+  private readonly overdue = inject(SessionOverdueStore);
 
   /**
    * Output deltas waiting for the next frame. A CLI agent streams many small
@@ -122,6 +161,7 @@ export class AgentMonitorMessageHandler implements MessageHandler {
     MESSAGE_TYPES.AGENT_MONITOR_ACTION_NOTICE,
     MESSAGE_TYPES.AGENT_MONITOR_MESSAGE_RECEIPT,
     MESSAGE_TYPES.AGENT_MONITOR_PARENT_DELIVERY,
+    MESSAGE_TYPES.SESSION_ACTIVITY_OVERDUE,
   ] as const;
 
   constructor() {
@@ -179,6 +219,18 @@ export class AgentMonitorMessageHandler implements MessageHandler {
           break;
         }
         this.store.onAgentActionNotice(parsed);
+        break;
+      }
+      case MESSAGE_TYPES.SESSION_ACTIVITY_OVERDUE: {
+        const parsed = parseSessionActivityOverdue(message.payload);
+        if (!parsed) {
+          console.warn(
+            '[AgentMonitorMessageHandler] session:activity-overdue payload rejected — dropped',
+            describePayload(message.payload),
+          );
+          break;
+        }
+        this.overdue.apply(parsed);
         break;
       }
       case MESSAGE_TYPES.AGENT_MONITOR_MESSAGE_RECEIPT: {
