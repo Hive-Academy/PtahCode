@@ -1807,6 +1807,24 @@ describe('AgentMonitorStore', () => {
         expect(record()?.actionNotice).toBeUndefined();
       });
 
+      it('ignores a notice of another parent session that reuses the agent id', () => {
+        store.onAgentStart(startEvent({ sessionId: 'sess-a' }));
+        store.onAgentActionNotice({ sessionId: 'sess-b', agentId: 'short-1', notice: ask, text: 'Other.' });
+        expect(record()?.actionNotice).toBeUndefined();
+        store.onAgentActionNotice({ sessionId: 'sess-a', agentId: 'short-1', notice: ask, text: 'Mine.' });
+        expect(record()?.actionNoticeText).toBe('Mine.');
+        store.onAgentActionNotice({ sessionId: 'sess-b', agentId: 'short-1', notice: null, text: '' });
+        expect(record()?.actionNotice).toEqual(ask);
+        store.onAgentActionNotice({ sessionId: 'sess-a', agentId: 'short-1', notice: null, text: '' });
+        expect(record()?.actionNotice).toBeUndefined();
+      });
+
+      it('buffers an early notice per parent session', () => {
+        store.onAgentActionNotice({ sessionId: 'sess-b', agentId: 'short-1', notice: ask, text: 'For b.' });
+        store.onAgentStart(startEvent({ sessionId: 'sess-a' }));
+        expect(record()?.actionNotice).toBeUndefined();
+      });
+
       it('keeps at most 50 buffered notices, oldest dropped first', () => {
         for (let i = 0; i <= 50; i++) {
           store.onAgentActionNotice({ agentId: `early-${i}`, notice: ask, text: `n${i}` });

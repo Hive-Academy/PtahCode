@@ -427,6 +427,7 @@ function wireAgentNoticeCallback(
     const send =
       event.kind === 'subagent-notice'
         ? webviewManager.broadcastMessage(MESSAGE_TYPES.AGENT_MONITOR_ACTION_NOTICE, {
+            sessionId: event.sessionId,
             agentId: event.agentId,
             notice: event.notice,
             text: event.text,

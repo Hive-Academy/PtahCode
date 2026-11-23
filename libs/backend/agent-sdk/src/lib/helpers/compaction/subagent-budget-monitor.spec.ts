@@ -1113,6 +1113,7 @@ describe('cooperative budget: ask, pause and normal return', () => {
       await h.monitor.observe(SESSION, ctx(127_500, 'c1'));
       expect(h.dispatcher.announceSubagentNotice).toHaveBeenCalledTimes(1);
       expect(h.dispatcher.announceSubagentNotice).toHaveBeenLastCalledWith(
+        SESSION,
         'a1',
         expect.objectContaining({ action: 'asked-handoff', reason: 'context-budget' }),
         expect.stringContaining('asked a1 for a handoff'),
@@ -1120,6 +1121,7 @@ describe('cooperative budget: ask, pause and normal return', () => {
       await h.monitor.observe(SESSION, ctx(300_000, 'c3'));
       expect(h.dispatcher.announceSubagentNotice).toHaveBeenCalledTimes(2);
       expect(h.dispatcher.announceSubagentNotice).toHaveBeenLastCalledWith(
+        SESSION,
         'a1',
         expect.objectContaining({ action: 'paused' }),
         expect.stringContaining('The execution remains live'),

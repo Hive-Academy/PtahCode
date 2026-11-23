@@ -170,6 +170,8 @@ export type CompactionStartCallback = (data: {
 export type AgentNoticeEvent =
   | {
       readonly kind: 'subagent-notice';
+      /** Parent session id: SDK agent ids repeat across parent sessions. */
+      readonly sessionId: string;
       /** SDK agent id of the subagent (`SubagentRecord.agentId`). */
       readonly agentId: string;
       readonly notice: AgentActionNotice | null;

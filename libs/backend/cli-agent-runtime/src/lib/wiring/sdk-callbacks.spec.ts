@@ -948,16 +948,18 @@ describe('wireSdkCallbacks — agent notices (TASK_2026_2310)', () => {
       nextStep: 'review-live-agent',
     } as const;
 
-    onNotice?.({ kind: 'subagent-notice', agentId: 'abc123', notice, text: 'Paused.' });
-    onNotice?.({ kind: 'subagent-notice', agentId: 'abc123', notice: null, text: '' });
+    onNotice?.({ kind: 'subagent-notice', sessionId: 's1', agentId: 'abc123', notice, text: 'Paused.' });
+    onNotice?.({ kind: 'subagent-notice', sessionId: 's1', agentId: 'abc123', notice: null, text: '' });
     await flush();
 
     expect(broadcastMessage).toHaveBeenNthCalledWith(1, 'agent-monitor:action-notice', {
+      sessionId: 's1',
       agentId: 'abc123',
       notice,
       text: 'Paused.',
     });
     expect(broadcastMessage).toHaveBeenNthCalledWith(2, 'agent-monitor:action-notice', {
+      sessionId: 's1',
       agentId: 'abc123',
       notice: null,
       text: '',

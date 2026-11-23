@@ -56,6 +56,11 @@ export interface AgentMonitorReparentedPayload {
  * and a payload without it clears the card state.
  */
 export interface AgentMonitorActionNoticePayload {
+  /**
+   * Parent session of an SDK subagent. SDK agent ids repeat across parent sessions, so the card
+   * matches on it. CLI lanes do not send it.
+   */
+  readonly sessionId?: string;
   readonly agentId: string;
   readonly notice: AgentActionNotice | null;
   readonly text: string;

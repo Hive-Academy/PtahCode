@@ -745,9 +745,10 @@ export function registerSdkServices(
             subagentNotices.post(agentId, text),
           withdrawSubagentNotice: (agentId) =>
             subagentNotices.withdraw(agentId),
-          announceSubagentNotice: (agentId, notice, text) =>
+          announceSubagentNotice: (sessionId, agentId, notice, text) =>
             agentNotices.notifyAll({
               kind: 'subagent-notice',
+              sessionId,
               agentId,
               notice,
               text,

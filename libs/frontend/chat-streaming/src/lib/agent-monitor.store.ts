@@ -804,6 +804,8 @@ interface PendingSubagentNotice {
 
 /** Cap on buffered notices whose `agent_start` has not arrived yet, oldest dropped first. */
 const MAX_PENDING_SUBAGENT_NOTICES = 50;
+/** Separates the parent session from the agent id in a buffered notice key. */
+const PENDING_NOTICE_SEPARATOR = '\u0000';
 
 const ACTIVE_SESSION_SUBAGENT_STATUSES: ReadonlySet<SubagentRecord['status']> =
   new Set(['running', 'pending', 'paused', 'background']);
@@ -1041,17 +1043,43 @@ export class AgentMonitorStore implements OnDestroy {
     });
   }
 
+  /**
+   * The buffered notice key that fits a record. A notice with a session fits only a record of
+   * that session, or a record whose session is not known yet. A notice with no session fits any
+   * record of the agent id.
+   */
+  private pendingNoticeKeyFor(
+    agentId: string,
+    parentSessionId: string | undefined,
+  ): string | undefined {
+    const session = knownSessionId(parentSessionId);
+    for (const key of this._pendingSubagentNotices.keys()) {
+      const split = key.indexOf(PENDING_NOTICE_SEPARATOR);
+      if (key.slice(split + 1) !== agentId) continue;
+      const noticeSession = key.slice(0, split);
+      if (!noticeSession || !session || noticeSession === session) return key;
+    }
+    return undefined;
+  }
+
   private reconcileSubagentNotice(record: SubagentRecord): SubagentRecord {
     const id = record.agentId;
     if (this.isTerminal(record.status)) {
-      if (id) this._pendingSubagentNotices.delete(id);
+      if (id) {
+        const pendingKey = this.pendingNoticeKeyFor(id, record.parentSessionId);
+        if (pendingKey) this._pendingSubagentNotices.delete(pendingKey);
+      }
       return record.actionNotice || record.actionNoticeText !== undefined
         ? { ...record, actionNotice: undefined, actionNoticeText: undefined }
         : record;
     }
-    const pending = id ? this._pendingSubagentNotices.get(id) : undefined;
-    if (!id || !pending) return record;
-    this._pendingSubagentNotices.delete(id);
+    if (!id) return record;
+    const pendingKey = this.pendingNoticeKeyFor(id, record.parentSessionId);
+    const pending = pendingKey
+      ? this._pendingSubagentNotices.get(pendingKey)
+      : undefined;
+    if (!pendingKey || !pending) return record;
+    this._pendingSubagentNotices.delete(pendingKey);
     return {
       ...record,
       actionNotice: pending.notice,
@@ -2040,13 +2068,23 @@ export class AgentMonitorStore implements OnDestroy {
     payload: AgentMonitorActionNoticePayload,
   ): void {
     const { agentId, notice, text } = payload;
+    const sessionId = payload.sessionId ?? '';
+    const pendingKey = `${sessionId}${PENDING_NOTICE_SEPARATOR}${agentId}`;
     // A newer push replaces any buffered one; drop it first so the writer cannot re-apply it.
-    this._pendingSubagentNotices.delete(agentId);
+    this._pendingSubagentNotices.delete(pendingKey);
     let recordMatched = false;
     this.updateSubagents((map) => {
       let next: Map<string, SubagentRecord> | null = null;
       for (const [key, record] of map) {
         if (record.agentId !== agentId) continue;
+        // Another parent session reuses this agent id: leave its card alone.
+        if (
+          sessionId &&
+          record.parentSessionId &&
+          record.parentSessionId !== sessionId
+        ) {
+          continue;
+        }
         recordMatched = true;
         if (this.isTerminal(record.status)) continue;
         (next ??= new Map(map)).set(
@@ -2059,7 +2097,7 @@ export class AgentMonitorStore implements OnDestroy {
       return next ?? map;
     });
     if (recordMatched || !notice) return;
-    this._pendingSubagentNotices.set(agentId, { notice, text });
+    this._pendingSubagentNotices.set(pendingKey, { notice, text });
     for (const oldest of this._pendingSubagentNotices.keys()) {
       if (this._pendingSubagentNotices.size <= MAX_PENDING_SUBAGENT_NOTICES) break;
       this._pendingSubagentNotices.delete(oldest);
