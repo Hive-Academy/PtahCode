@@ -137,7 +137,13 @@ export class SqliteMigrationRunner {
         continue;
       }
       const migrationStart = this.now();
-      this.applyOne(migration, vecLoaded);
+      if (!this.applyOne(migration, vecLoaded)) {
+        skippedNow.push(migration.version);
+        this.logger.info('[persistence-sqlite] migration applied by a peer connection', {
+          version: migration.version,
+        });
+        continue;
+      }
       appliedNow.push(migration.version);
       this.logger.info('[persistence-sqlite] migration applied', {
         version: migration.version,
@@ -249,8 +255,11 @@ export class SqliteMigrationRunner {
    *
    * `PRAGMA user_version = N` is written inside the bookkeeping transaction
    * so it rolls back atomically with the INSERT if something goes wrong.
+   *
+   * Returns `false` when the `sql` path finds, under the write lock, that a
+   * peer connection already applied the version (TASK_2026_2312_c3ef review).
    */
-  private applyOne(migration: Migration, vecLoaded: boolean): void {
+  private applyOne(migration: Migration, vecLoaded: boolean): boolean {
     const hasSql = migration.sql !== undefined;
     const hasRun = migration.run !== undefined;
     const hasVecSql = migration.vecSql !== undefined;
@@ -300,13 +309,24 @@ export class SqliteMigrationRunner {
             stringifyError(err),
         );
       }
-      return;
+      return true;
     }
     const sql = migration.sql ?? '';
     const applyVecNow = hasVecSql && vecLoaded;
     const deferVec = hasVecSql && !vecLoaded;
     this.db.exec('BEGIN IMMEDIATE');
     try {
+      // Electron and the CLI can open one database file at the same time. Both
+      // read the ledger before either takes the write lock, so a peer may have
+      // applied this migration meanwhile. Under the lock the ledger is current:
+      // replaying a non-idempotent statement (ADD COLUMN) would fail the open.
+      const appliedByPeer = this.db
+        .prepare('SELECT 1 FROM schema_migrations WHERE version = ?')
+        .get(migration.version);
+      if (appliedByPeer !== undefined) {
+        this.db.exec('COMMIT');
+        return false;
+      }
       if (sql.length > 0) this.db.exec(sql);
       if (applyVecNow && migration.vecSql !== undefined) {
         this.db.exec(migration.vecSql);
@@ -337,6 +357,7 @@ export class SqliteMigrationRunner {
         `[persistence-sqlite] migration ${migration.version} (${migration.name}) applied base schema only — sqlite-vec not loaded; vec index deferred`,
       );
     }
+    return true;
   }
 
   /**

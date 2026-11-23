@@ -11,7 +11,11 @@ import {
   toWorkspaceExcludeGlobs,
 } from '@ptah-extension/shared';
 
-import { DEFAULT_WORKSPACE_EXCLUDES } from './workspace-default-excludes';
+import {
+  CODE_INDEX_EXCLUDES,
+  DEFAULT_WORKSPACE_EXCLUDES,
+  isCodeIndexExcluded,
+} from './workspace-default-excludes';
 
 describe('DEFAULT_WORKSPACE_EXCLUDES', () => {
   it('is a superset of the globs derived from NESTED_WORKSPACE_PATH_RULES', () => {
@@ -68,4 +72,37 @@ describe('DEFAULT_WORKSPACE_EXCLUDES', () => {
       ).toBe(excluded);
     },
   );
+});
+
+describe('isCodeIndexExcluded', () => {
+  it.each([
+    '.ptah/analysis/a.ts',
+    '.claude/skills/x/s.js',
+    '.codex/a.py',
+    'pkg/.agents/b.ts',
+    'a\\.claude\\x.ts',
+    '.github/skills/k/x.ts',
+    './.claude/x.ts',
+    '/.claude/x.ts',
+    'dist/a.js',
+  ])('excludes %s', (relativePath) => {
+    expect(isCodeIndexExcluded(relativePath)).toBe(true);
+  });
+
+  it.each(['src/a.ts', 'libs/claude/x.ts', '.github/workflows/ci.yml', ''])(
+    'keeps %s',
+    (relativePath) => expect(isCodeIndexExcluded(relativePath)).toBe(false),
+  );
+
+  it('includes workspace defaults and keeps picker visibility for harness files', () => {
+    expect(CODE_INDEX_EXCLUDES).toEqual(
+      expect.arrayContaining([...DEFAULT_WORKSPACE_EXCLUDES]),
+    );
+    expect(DEFAULT_WORKSPACE_EXCLUDES).not.toContain('**/.claude/**');
+    const matchesPickerExclude = picomatch([...DEFAULT_WORKSPACE_EXCLUDES], {
+      dot: true,
+    });
+    expect(matchesPickerExclude('.ptah/analysis/a.ts')).toBe(false);
+    expect(matchesPickerExclude('.claude/skills/x/s.js')).toBe(false);
+  });
 });

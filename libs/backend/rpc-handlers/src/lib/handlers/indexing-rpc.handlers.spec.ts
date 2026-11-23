@@ -265,6 +265,40 @@ describe('IndexingRpcHandlers', () => {
       );
     });
 
+    it('forwards the run force option to runSymbols unchanged, separately from userInitiated', async () => {
+      const { rpcHandler, indexingControl, handlers } = buildHandlers();
+      indexingControl.getStatus.mockResolvedValueOnce(
+        makeStatus({ state: 'indexing' }),
+      );
+      const runSymbols = jest.fn().mockResolvedValue(undefined);
+      handlers.setRunDeps({ runSymbols });
+      // What the real control service does for a forced start
+      // (TASK_2026_2312_c3ef D5): force reaches runSymbols in the options.
+      indexingControl.start.mockImplementationOnce(
+        async (_pipeline: unknown, root: string, deps: IndexingRunDeps) => {
+          await deps.runSymbols(root, { force: true });
+        },
+      );
+
+      await rpcHandler.call('indexing:start', {
+        workspaceRoot: '/workspace',
+        force: true,
+      });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      expect(indexingControl.start).toHaveBeenCalledWith(
+        undefined,
+        '/workspace',
+        expect.anything(),
+        { force: true },
+      );
+      // The wrapped deps pass the force option through unchanged, and
+      // userInitiated stays a boot-adapter concern, never an option here.
+      expect(runSymbols).toHaveBeenCalledWith('/workspace', { force: true });
+      const options = runSymbols.mock.calls[0][1] as Record<string, unknown>;
+      expect(options).not.toHaveProperty('userInitiated');
+    });
+
     it('passes pipeline filter when provided', async () => {
       const { rpcHandler, indexingControl, handlers } = buildHandlers();
       indexingControl.getStatus.mockResolvedValueOnce(

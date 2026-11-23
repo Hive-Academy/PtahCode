@@ -177,6 +177,9 @@ const ASCII_ONLY = /^\p{ASCII}*$/u;
 /** Files deleted per transaction in {@link CodeSymbolStore.purgeMissing}. */
 const PURGE_MISSING_BATCH = 200;
 
+/** Symbol rows deleted per transaction by the stale-root purge. */
+const STALE_ROOT_BATCH = 128;
+
 /**
  * Marker row in `indexing_state`, the database's existing per-key meta
  * table (migration 0012). Real workspace fingerprints are 16 hex characters
@@ -188,6 +191,21 @@ const PURGE_MISSING_BATCH = 200;
  * absent until the next index run. Lexical search does not read them.
  */
 const VEC_STALE_FINGERPRINT = 'code-symbols-vec-stale';
+
+/**
+ * `code_symbol_files` (migration 0077) records that one file was indexed
+ * under a fingerprint, with every row carrying its vector. Every writer that
+ * changes or removes a file's rows deletes its record in the same
+ * transaction, so a record never outlives the rows it describes.
+ */
+const DELETE_FILE_RECORD_SQL = `DELETE FROM code_symbol_files WHERE workspace_root = ? AND file_path = ?`;
+const UPSERT_FILE_RECORD_SQL = `INSERT INTO code_symbol_files (workspace_root, file_path, fingerprint, updated_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(workspace_root, file_path) DO UPDATE SET
+         fingerprint = excluded.fingerprint,
+         updated_at = excluded.updated_at`;
+/** Current file path of the row a `(workspace_root, subject)` upsert would update. */
+const SELECT_SUBJECT_FILE_SQL = `SELECT rowid AS rowid, file_path AS file_path FROM code_symbols WHERE workspace_root = ? AND subject = ?`;
 
 function normalizeStoredPath(filePath: string): string {
   return filePath.replaceAll('\\', '/');
@@ -209,6 +227,7 @@ export class CodeSymbolStore implements ICodeSymbolReader {
   private readonly searchFlight = new SearchFlight<CodeSymbolHitPage>();
   private revision = 0;
   private embedderWarnedOnce = false;
+  private fileRecordWarnedOnce = false;
   /**
    * Set after orphan `code_symbols_vec` rows have been removed for the
    * current stretch of vec availability. Cleared when vec is unavailable
@@ -277,8 +296,14 @@ export class CodeSymbolStore implements ICodeSymbolReader {
     throwIfAborted: () => void,
   ): Promise<{ roots: number; rows: number }> {
     const db = this.connection.db;
+    // A root can hold only file records (zero-symbol files) or only a
+    // validation row; it is stale the same way when its directory is gone.
     const roots = db
-      .prepare('SELECT DISTINCT workspace_root AS root FROM code_symbols')
+      .prepare(
+        `SELECT workspace_root AS root FROM code_symbols
+         UNION SELECT workspace_root AS root FROM code_symbol_files
+         UNION SELECT workspace_root AS root FROM code_index_roots`,
+      )
       .all() as Array<{ root: string }>;
     let purgedRoots = 0;
     let purgedRows = 0;
@@ -323,7 +348,7 @@ export class CodeSymbolStore implements ICodeSymbolReader {
       }
       const vecAvailable = this.vecStatus.available;
       const select = db.prepare(
-        'SELECT rowid AS rowid FROM code_symbols WHERE workspace_root = ? LIMIT 128',
+        `SELECT rowid AS rowid FROM code_symbols WHERE workspace_root = ? LIMIT ${STALE_ROOT_BATCH}`,
       );
       const deleteSymbol = db.prepare(
         'DELETE FROM code_symbols WHERE rowid = ?',
@@ -331,11 +356,16 @@ export class CodeSymbolStore implements ICodeSymbolReader {
       const deleteVec = vecAvailable
         ? db.prepare('DELETE FROM code_symbols_vec WHERE rowid = ?')
         : null;
+      const deleteRecords = db.prepare(
+        'DELETE FROM code_symbol_files WHERE workspace_root = ?',
+      );
+      const deleteRootRow = db.prepare(
+        'DELETE FROM code_index_roots WHERE workspace_root = ?',
+      );
       let removedForRoot = 0;
+      let removedMeta = 0;
       for (;;) {
         throwIfAborted();
-        const ids = select.all(root) as Array<{ rowid: number }>;
-        if (ids.length === 0) break;
         try {
           await statPath(root);
           this.logger.warn(
@@ -370,22 +400,31 @@ export class CodeSymbolStore implements ICodeSymbolReader {
           break;
         }
         throwIfAborted();
+        // The batch is selected inside the delete transaction, after the
+        // async checks above, so it never holds rowids across an await.
+        let batch: { readonly rows: number; readonly meta: number };
         try {
-          db.transaction((): void => {
+          batch = db.transaction((): { rows: number; meta: number } => {
+            const ids = select.all(root) as Array<{ rowid: number }>;
             for (const { rowid } of ids) {
               deleteVec?.run(rowid);
               deleteSymbol.run(rowid);
             }
-            if (!vecAvailable) this.markVecStale();
+            const meta =
+              deleteRecords.run(root).changes + deleteRootRow.run(root).changes;
+            if (!vecAvailable && ids.length > 0) this.markVecStale();
+            return { rows: ids.length, meta };
           })();
         } catch (error: unknown) {
           this.connection.handleFatalWriteError(error);
           throw error;
         }
-        removedForRoot += ids.length;
+        removedForRoot += batch.rows;
+        removedMeta += batch.meta;
+        if (batch.rows < STALE_ROOT_BATCH) break;
         await new Promise<void>((resolve) => setImmediate(resolve));
       }
-      if (removedForRoot === 0) continue;
+      if (removedForRoot === 0 && removedMeta === 0) continue;
       purgedRoots++;
       purgedRows += removedForRoot;
       this.revision++;
@@ -424,15 +463,17 @@ export class CodeSymbolStore implements ICodeSymbolReader {
    * first (`vec0` is not written with `INSERT OR REPLACE`).
    *
    * The marker lives in SQLite, so an outage that lasts the whole process
-   * is still repaired in the next process. Returns whether vec reads and
-   * writes may run.
+   * is still repaired in the next process. Electron and the CLI can open the
+   * same database file, so another connection can write the marker after
+   * this one warmed: the writable branch reads the marker on every call (one
+   * primary-key lookup). `vecOrphansReconciled` only skips the orphan scan.
+   * Returns whether vec reads and writes may run.
    */
   private reconcileOrphanVecRows(): boolean {
-    if (!this.vecStatus.available) {
-      this.vecOrphansReconciled = false;
-      return false;
-    }
+    const vecAvailable = this.vecStatus.available;
+    if (!vecAvailable) this.vecOrphansReconciled = false;
     if (this.readOnlySearch) {
+      if (!vecAvailable) return false;
       const stale = this.connection.db
         .prepare(
           `SELECT 1 AS present FROM indexing_state WHERE workspace_fingerprint = ?`,
@@ -440,18 +481,14 @@ export class CodeSymbolStore implements ICodeSymbolReader {
         .get(VEC_STALE_FINGERPRINT);
       return !stale;
     }
-    if (this.vecOrphansReconciled) return true;
 
     const db = this.connection.db;
     try {
-      const stale = db
-        .prepare(
-          `SELECT 1 AS present FROM indexing_state WHERE workspace_fingerprint = ?`,
-        )
-        .get(VEC_STALE_FINGERPRINT) as { present: number } | undefined;
+      const stale = this.isVecStale(db);
+      if (!vecAvailable) return false;
       if (stale) {
-        this.dropAllVecRows(db);
-      } else {
+        this.recoverVecIfStale(db);
+      } else if (!this.vecOrphansReconciled) {
         this.dropOrphanVecRows(db);
       }
     } catch (err: unknown) {
@@ -460,6 +497,15 @@ export class CodeSymbolStore implements ICodeSymbolReader {
     }
     this.vecOrphansReconciled = true;
     return true;
+  }
+
+  private isVecStale(db: SqliteDatabase): boolean {
+    const stale = db
+      .prepare(
+        `SELECT 1 AS present FROM indexing_state WHERE workspace_fingerprint = ?`,
+      )
+      .get(VEC_STALE_FINGERPRINT) as { present: number } | undefined;
+    return stale !== undefined;
   }
 
   /** Record that symbol rows changed while vec rows could not. */
@@ -472,9 +518,29 @@ export class CodeSymbolStore implements ICodeSymbolReader {
   }
 
   /**
-   * Delete every vec row, then the stale marker. The marker is cleared
-   * only after the deletes, inside the same transaction: a failure leaves
-   * the marker so the next call tries again. vec0 is deleted by rowid.
+   * Wipe the vector index once per marker. Explicit `BEGIN IMMEDIATE`
+   * (the `observation-queue.store.ts` idiom) takes the write lock before the
+   * marker is read again, so of two connections that both saw the marker
+   * only the first wipes; the second finds it cleared and commits nothing.
+   */
+  private recoverVecIfStale(db: SqliteDatabase): void {
+    db.exec('BEGIN IMMEDIATE');
+    try {
+      if (this.isVecStale(db)) this.dropAllVecRows(db);
+      db.exec('COMMIT');
+    } catch (err: unknown) {
+      if (db.inTransaction) db.exec('ROLLBACK');
+      throw err;
+    }
+  }
+
+  /**
+   * Delete every vec row, every file record and root validation, then the
+   * stale marker. The records claim "indexed with vectors", which no longer
+   * holds once the vectors are gone. Runs inside the caller's write
+   * transaction, rowid selection included: a failure rolls everything back
+   * and leaves the marker so the next call tries again. vec0 is deleted by
+   * rowid.
    */
   private dropAllVecRows(db: SqliteDatabase): void {
     const rowids = db
@@ -483,15 +549,12 @@ export class CodeSymbolStore implements ICodeSymbolReader {
     const deleteVec = db.prepare(
       `DELETE FROM code_symbols_vec WHERE rowid = ?`,
     );
-    const clearMarker = db.prepare(
+    for (const row of rowids) deleteVec.run(row.rowid);
+    db.prepare(`DELETE FROM code_symbol_files`).run();
+    db.prepare(`DELETE FROM code_index_roots`).run();
+    db.prepare(
       `DELETE FROM indexing_state WHERE workspace_fingerprint = ?`,
-    );
-    const txnFn = ((): void => {
-      for (const row of rowids) deleteVec.run(row.rowid);
-      clearMarker.run(VEC_STALE_FINGERPRINT);
-    }) as unknown as (...args: unknown[]) => unknown;
-    const txn = db.transaction(txnFn) as unknown as () => void;
-    txn();
+    ).run(VEC_STALE_FINGERPRINT);
     this.logger.debug?.(
       '[code-symbol-store] dropped code_symbols_vec after a vec outage',
       { removed: rowids.length },
@@ -504,27 +567,26 @@ export class CodeSymbolStore implements ICodeSymbolReader {
    * rowid shadow and each orphan is deleted by rowid.
    */
   private dropOrphanVecRows(db: SqliteDatabase): void {
-    const orphans = db
-      .prepare(
-        `SELECT rowid AS rowid FROM code_symbols_vec_rowids
-         WHERE rowid NOT IN (SELECT rowid FROM code_symbols)`,
-      )
-      .all() as Array<{ rowid: number }>;
-    if (orphans.length === 0) return;
-    const deleteVec = db.prepare(
-      `DELETE FROM code_symbols_vec WHERE rowid = ?`,
-    );
-    const txnFn = ((rows: ReadonlyArray<{ rowid: number }>): void => {
-      for (const row of rows) deleteVec.run(row.rowid);
-    }) as unknown as (...args: unknown[]) => unknown;
-    const txn = db.transaction(txnFn) as unknown as (
-      rows: ReadonlyArray<{ rowid: number }>,
-    ) => void;
-    txn(orphans);
-    this.logger.debug?.(
-      '[code-symbol-store] removed orphan code_symbols_vec rows',
-      { removed: orphans.length },
-    );
+    const removed = db.transaction(() => {
+      const orphans = db
+        .prepare(
+          `SELECT rowid AS rowid FROM code_symbols_vec_rowids
+           WHERE rowid NOT IN (SELECT rowid FROM code_symbols)`,
+        )
+        .all() as Array<{ rowid: number }>;
+      if (orphans.length === 0) return 0;
+      const deleteVec = db.prepare(
+        `DELETE FROM code_symbols_vec WHERE rowid = ?`,
+      );
+      for (const { rowid } of orphans) deleteVec.run(rowid);
+      return orphans.length;
+    })();
+    if (removed > 0) {
+      this.logger.debug?.(
+        '[code-symbol-store] removed orphan code_symbols_vec rows',
+        { removed },
+      );
+    }
   }
 
   deleteByFile(workspaceRoot: string, filePath: string): number {
@@ -536,18 +598,35 @@ export class CodeSymbolStore implements ICodeSymbolReader {
    * transaction. A failed insert leaves the previous rows (and their FTS
    * and vector rows) in place. FTS follows the `code_symbols` triggers;
    * vector rows are deleted by rowid before the symbol rows.
+   *
+   * `fingerprint` is the indexer's value without the embedder model id. The
+   * same transaction records the file as `${fingerprint}:${modelId}` when it
+   * is a string and every row got a valid vector (or vec is unavailable,
+   * which sets the stale marker and makes the record unusable until the
+   * recovery wipe removes it). Otherwise the file's record is deleted.
    */
   async replaceFileSymbols(
     workspaceRoot: string,
     filePath: string,
     rows: readonly CodeSymbolInsert[],
+    fingerprint?: string | null,
   ): Promise<void> {
     const now = Date.now();
     const vecAvailable = this.reconcileOrphanVecRows();
-    const embeddings: Float32Array[] =
-      vecAvailable && rows.length > 0
-        ? await this.embedderEmbed(rows.map((entry) => entry.text))
-        : [];
+    const hashes = rows.map(({ text }) => this.textHash(text));
+    const embeddings = new Map<string, Float32Array>();
+    if (vecAvailable && rows.length > 0) {
+      const textsByHash = new Map(hashes.map((hash, i) => [hash, rows[i].text]));
+      this.readDonorVectors(textsByHash.keys(), embeddings);
+      const misses = [...textsByHash].filter(([hash]) => !embeddings.has(hash));
+      if (misses.length > 0) {
+        const embedded = await this.embedderEmbed(misses.map(([, text]) => text));
+        misses.forEach(([hash], i) => {
+          const vector = embedded[i];
+          if (vector?.length === this.embedder.dim) embeddings.set(hash, vector);
+        });
+      }
+    }
 
     const db = this.connection.db;
     const selectRowidsStmt = vecAvailable
@@ -562,13 +641,14 @@ export class CodeSymbolStore implements ICodeSymbolReader {
       `DELETE FROM code_symbols WHERE workspace_root = ? AND file_path = ?`,
     );
     const upsertStmt = db.prepare(
-      `INSERT INTO code_symbols (id, workspace_root, file_path, kind, symbol_name, subject, text, token_count, created_at, updated_at)
-       VALUES (@id, @workspace_root, @file_path, @kind, @symbol_name, @subject, @text, @token_count, @created_at, @updated_at)
+      `INSERT INTO code_symbols (id, workspace_root, file_path, kind, symbol_name, subject, text, text_hash, token_count, created_at, updated_at)
+       VALUES (@id, @workspace_root, @file_path, @kind, @symbol_name, @subject, @text, @text_hash, @token_count, @created_at, @updated_at)
        ON CONFLICT(workspace_root, subject) DO UPDATE SET
          file_path = excluded.file_path,
          kind = excluded.kind,
          symbol_name = excluded.symbol_name,
          text = excluded.text,
+         text_hash = excluded.text_hash,
          token_count = excluded.token_count,
          updated_at = excluded.updated_at`,
     );
@@ -580,6 +660,10 @@ export class CodeSymbolStore implements ICodeSymbolReader {
           `INSERT INTO code_symbols_vec(rowid, embedding) VALUES (CAST(? AS INTEGER), ?)`,
         )
       : null;
+
+    const selectSubjectStmt = db.prepare(SELECT_SUBJECT_FILE_SQL);
+    const deleteRecordStmt = db.prepare(DELETE_FILE_RECORD_SQL);
+    const upsertRecordStmt = db.prepare(UPSERT_FILE_RECORD_SQL);
 
     type Payload = { readonly entries: readonly CodeSymbolInsert[] };
     const txnFn = ((payload: Payload): void => {
@@ -598,8 +682,18 @@ export class CodeSymbolStore implements ICodeSymbolReader {
       ) {
         this.markVecStale();
       }
+      let everyRowHasVector = true;
       for (let i = 0; i < payload.entries.length; i++) {
         const e = payload.entries[i];
+        // The file's own rows are gone, so a row still holding this subject
+        // belongs to another file: the upsert moves it here, and that
+        // file's record no longer describes its rows.
+        const moved = selectSubjectStmt.get(e.workspaceRoot, e.subject) as
+          | { rowid: number; file_path: string }
+          | undefined;
+        if (moved) {
+          deleteRecordStmt.run(e.workspaceRoot, moved.file_path);
+        }
         upsertStmt.run({
           id: ulid(),
           workspace_root: e.workspaceRoot,
@@ -608,26 +702,42 @@ export class CodeSymbolStore implements ICodeSymbolReader {
           symbol_name: e.symbolName,
           subject: e.subject,
           text: e.text,
+          text_hash: hashes[i],
           token_count: e.tokenCount,
           created_at: now,
           updated_at: now,
         });
+        let wroteVector = false;
         if (insertVecStmt && deleteVecStmt) {
-          const vec = embeddings[i];
-          if (vec && vec.length === this.embedder.dim) {
-            const row = fetchRowidStmt.get(e.workspaceRoot, e.subject) as
-              { rowid: number } | undefined;
-            if (row) {
-              // Drop a stale embedding if this rowid was reused while vec
-              // was down (implicit rowid, no AUTOINCREMENT).
-              deleteVecStmt.run(row.rowid);
+          const row = moved ?? (fetchRowidStmt.get(e.workspaceRoot, e.subject) as
+            { rowid: number } | undefined);
+          const vec = embeddings.get(hashes[i]);
+          if (row) {
+            // A moved or reused rowid may still have an old embedding.
+            deleteVecStmt.run(row.rowid);
+            if (vec) {
               insertVecStmt.run(
                 row.rowid,
                 Buffer.from(vec.buffer, vec.byteOffset, vec.byteLength),
               );
+              wroteVector = true;
             }
           }
         }
+        if (!wroteVector) everyRowHasVector = false;
+      }
+      if (
+        typeof fingerprint === 'string' &&
+        (!vecAvailable || everyRowHasVector)
+      ) {
+        upsertRecordStmt.run(
+          workspaceRoot,
+          filePath,
+          `${fingerprint}:${this.embedder.modelId}`,
+          now,
+        );
+      } else {
+        deleteRecordStmt.run(workspaceRoot, filePath);
       }
     }) as unknown as (...args: unknown[]) => unknown;
     const txn = db.transaction(txnFn) as unknown as (p: Payload) => void;
@@ -638,6 +748,39 @@ export class CodeSymbolStore implements ICodeSymbolReader {
       this.connection.handleFatalWriteError(err);
       throw err;
     }
+  }
+
+  private textHash(text: string): string {
+    return createHash('sha256')
+      .update(`${this.embedder.modelId}\0${text}`)
+      .digest('hex');
+  }
+
+  private readDonorVectors(
+    hashes: Iterable<string>,
+    embeddings: Map<string, Float32Array>,
+  ): void {
+    const db = this.connection.db;
+    db.transaction(() => {
+      // The marker and all donor reads share one SQLite snapshot, including
+      // when a second connection writes while we read.
+      if (this.isVecStale(db)) return;
+      const donor = db.prepare(
+        `SELECT v.embedding FROM code_symbols s
+         CROSS JOIN code_symbols_vec v ON v.rowid = s.rowid
+         WHERE s.text_hash = ? AND length(v.embedding) = ? LIMIT 1`,
+      );
+      const byteLength = this.embedder.dim * Float32Array.BYTES_PER_ELEMENT;
+      for (const hash of hashes) {
+        const row = donor.get(hash, byteLength) as { embedding: Buffer } | undefined;
+        if (row) {
+          const blob = row.embedding;
+          const owned = new Float32Array(this.embedder.dim);
+          new Uint8Array(owned.buffer).set(blob);
+          embeddings.set(hash, owned);
+        }
+      }
+    })();
   }
 
   /**
@@ -656,11 +799,15 @@ export class CodeSymbolStore implements ICodeSymbolReader {
       presentPaths.map((filePath) => normalizeStoredPath(filePath)),
     );
     const db = this.connection.db;
+    // A file with zero symbols has a record and no symbol rows; it is
+    // missing too when it is gone from disk.
     const listed = db
       .prepare(
-        `SELECT DISTINCT file_path AS file_path FROM code_symbols WHERE workspace_root = ?`,
+        `SELECT file_path AS file_path FROM code_symbols WHERE workspace_root = ?
+         UNION
+         SELECT file_path AS file_path FROM code_symbol_files WHERE workspace_root = ?`,
       )
-      .all(workspaceRoot) as Array<{ file_path: string }>;
+      .all(workspaceRoot, workspaceRoot) as Array<{ file_path: string }>;
     const missing: string[] = [];
     for (const row of listed) {
       if (!present.has(normalizeStoredPath(row.file_path))) {
@@ -681,11 +828,14 @@ export class CodeSymbolStore implements ICodeSymbolReader {
       `DELETE FROM code_symbols WHERE workspace_root = ? AND file_path = ?`,
     );
 
+    const deleteRecordStmt = db.prepare(DELETE_FILE_RECORD_SQL);
+
     type Payload = { readonly paths: readonly string[] };
     const txnFn = ((payload: Payload): number => {
       if (!vecAvailable && payload.paths.length > 0) this.markVecStale();
       let changes = 0;
       for (const filePath of payload.paths) {
+        deleteRecordStmt.run(workspaceRoot, filePath);
         if (selectRowidsStmt && deleteVecStmt) {
           const ids = selectRowidsStmt.all(workspaceRoot, filePath) as Array<{
             rowid: number;
@@ -730,11 +880,13 @@ export class CodeSymbolStore implements ICodeSymbolReader {
     const deleteSymbolsStmt = db.prepare(
       `DELETE FROM code_symbols WHERE workspace_root = ? AND file_path = ?`,
     );
+    const deleteRecordStmt = db.prepare(DELETE_FILE_RECORD_SQL);
     type Payload = {
       readonly workspaceRoot: string;
       readonly filePath: string;
     };
     const txnFn = ((payload: Payload): number => {
+      deleteRecordStmt.run(payload.workspaceRoot, payload.filePath);
       if (selectRowidsStmt && deleteVecStmt) {
         const ids = selectRowidsStmt.all(
           payload.workspaceRoot,
@@ -772,13 +924,14 @@ export class CodeSymbolStore implements ICodeSymbolReader {
 
     const db = this.connection.db;
     const upsertStmt = db.prepare(
-      `INSERT INTO code_symbols (id, workspace_root, file_path, kind, symbol_name, subject, text, token_count, created_at, updated_at)
-       VALUES (@id, @workspace_root, @file_path, @kind, @symbol_name, @subject, @text, @token_count, @created_at, @updated_at)
+      `INSERT INTO code_symbols (id, workspace_root, file_path, kind, symbol_name, subject, text, text_hash, token_count, created_at, updated_at)
+       VALUES (@id, @workspace_root, @file_path, @kind, @symbol_name, @subject, @text, @text_hash, @token_count, @created_at, @updated_at)
        ON CONFLICT(workspace_root, subject) DO UPDATE SET
          file_path = excluded.file_path,
          kind = excluded.kind,
          symbol_name = excluded.symbol_name,
          text = excluded.text,
+         text_hash = excluded.text_hash,
          token_count = excluded.token_count,
          updated_at = excluded.updated_at`,
     );
@@ -794,11 +947,25 @@ export class CodeSymbolStore implements ICodeSymbolReader {
         )
       : null;
 
+    const selectSubjectStmt = db.prepare(SELECT_SUBJECT_FILE_SQL);
+    const deleteRecordStmt = db.prepare(DELETE_FILE_RECORD_SQL);
+
     type Payload = { readonly entries: readonly CodeSymbolInsert[] };
     const txnFn = ((payload: Payload): void => {
       if (!vecAvailable) this.markVecStale();
       for (let i = 0; i < payload.entries.length; i++) {
         const e = payload.entries[i];
+        // This write changes the rows of `e.filePath` and, on a subject
+        // conflict, of the file the row came from: neither record holds.
+        deleteRecordStmt.run(e.workspaceRoot, e.filePath);
+        const prior = selectSubjectStmt.get(e.workspaceRoot, e.subject) as
+          | { rowid: number; file_path: string }
+          | undefined;
+        if (prior) {
+          if (prior.file_path !== e.filePath) {
+            deleteRecordStmt.run(e.workspaceRoot, prior.file_path);
+          }
+        }
         upsertStmt.run({
           id: ulid(),
           workspace_root: e.workspaceRoot,
@@ -807,17 +974,19 @@ export class CodeSymbolStore implements ICodeSymbolReader {
           symbol_name: e.symbolName,
           subject: e.subject,
           text: e.text,
+          text_hash: this.textHash(e.text),
           token_count: e.tokenCount,
           created_at: now,
           updated_at: now,
         });
         if (insertVecStmt && deleteVecStmt) {
+          const row = prior ?? (fetchRowidStmt.get(e.workspaceRoot, e.subject) as
+            { rowid: number } | undefined);
           const vec = embeddings[i];
-          if (vec && vec.length === this.embedder.dim) {
-            const row = fetchRowidStmt.get(e.workspaceRoot, e.subject) as
-              { rowid: number } | undefined;
-            if (row) {
-              deleteVecStmt.run(row.rowid);
+          if (row) {
+            // Discard the old vector even if the new one cannot be stored.
+            deleteVecStmt.run(row.rowid);
+            if (vec?.length === this.embedder.dim) {
               insertVecStmt.run(
                 row.rowid,
                 Buffer.from(vec.buffer, vec.byteOffset, vec.byteLength),
@@ -848,25 +1017,97 @@ export class CodeSymbolStore implements ICodeSymbolReader {
   }
 
   /**
-   * Symbol count and newest `updated_at` for one workspace root, in a single
-   * aggregate query. An empty index yields `{ symbolCount: 0, newestUpdatedAt: null }`.
+   * Whether `filePath` was last written by {@link replaceFileSymbols} with
+   * this `candidate` (the indexer's fingerprint without the model id) under
+   * the current embedder model, every row carrying its vector. Reconcile
+   * runs first, so a stale marker another connection wrote is recovered
+   * (records wiped) before any record is read. The lookup also checks the
+   * marker in the same statement, for a marker written after reconcile.
+   * `false` when vec is unusable or on any error: a false answer re-indexes
+   * the file, which is always correct.
+   */
+  isFileUnchanged(
+    workspaceRoot: string,
+    filePath: string,
+    candidate: string,
+  ): boolean {
+    try {
+      if (!this.reconcileOrphanVecRows()) return false;
+      const row = this.connection.db
+        .prepare(
+          `SELECT 1 AS present FROM code_symbol_files
+           WHERE workspace_root = ? AND file_path = ? AND fingerprint = ?
+             AND NOT EXISTS (SELECT 1 FROM indexing_state WHERE workspace_fingerprint = ?)`,
+        )
+        .get(
+          workspaceRoot,
+          filePath,
+          `${candidate}:${this.embedder.modelId}`,
+          VEC_STALE_FINGERPRINT,
+        );
+      return row !== undefined;
+    } catch (error: unknown) {
+      // degradation-audit: reported - logged at warn once per store
+      // (fileRecordWarnedOnce); the file is re-indexed instead of skipped.
+      if (!this.fileRecordWarnedOnce) {
+        this.fileRecordWarnedOnce = true;
+        this.logger.warn(
+          '[code-symbol-store] file record lookup failed; re-indexing files instead of skipping them',
+          { error: error instanceof Error ? error.message : String(error) },
+        );
+      }
+      return false;
+    }
+  }
+
+  /** Record that a complete indexing pass confirmed `workspaceRoot` now. */
+  markRootValidated(workspaceRoot: string): void {
+    try {
+      this.connection.db
+        .prepare(
+          `INSERT INTO code_index_roots (workspace_root, validated_at) VALUES (?, ?)
+           ON CONFLICT(workspace_root) DO UPDATE SET validated_at = excluded.validated_at`,
+        )
+        .run(workspaceRoot, Date.now());
+    } catch (err: unknown) {
+      this.connection.handleFatalWriteError(err);
+      throw err;
+    }
+  }
+
+  /**
+   * Symbol count, newest `updated_at` and last validation for one workspace
+   * root, in a single statement. `newestUpdatedAt` is the newer of the
+   * symbols' `updated_at` and `validatedAt`. An empty, never validated root
+   * yields `{ symbolCount: 0, newestUpdatedAt: null, validatedAt: null }`.
    */
   async getIndexFreshness(workspaceRoot: string): Promise<CodeIndexFreshness> {
     const row = this.connection.db
       .prepare(
-        `SELECT COUNT(*) AS n, MAX(updated_at) AS newest FROM code_symbols WHERE workspace_root = ?`,
+        `SELECT COUNT(*) AS n, MAX(updated_at) AS newest,
+                (SELECT validated_at FROM code_index_roots WHERE workspace_root = ?) AS validated
+         FROM code_symbols WHERE workspace_root = ?`,
       )
-      .get(workspaceRoot) as { n: number; newest: number | null } | undefined;
+      .get(workspaceRoot, workspaceRoot) as
+      | { n: number; newest: number | null; validated: number | null }
+      | undefined;
     const symbolCount = row?.n ?? 0;
-    const newest = row?.newest;
+    const newest =
+      symbolCount > 0 && typeof row?.newest === 'number' ? row.newest : null;
+    const validatedAt =
+      typeof row?.validated === 'number' ? row.validated : null;
     return {
       symbolCount,
       newestUpdatedAt:
-        symbolCount > 0 && typeof newest === 'number' ? newest : null,
+        newest === null
+          ? validatedAt
+          : validatedAt === null
+            ? newest
+            : Math.max(newest, validatedAt),
+      validatedAt,
     };
   }
 
-  /** Paginated search over code_symbols with optional workspace, name/path, and kind filters. */
   search(params: CodeSymbolSearchParams): CodeSymbolSearchResult {
     const clauses: string[] = [];
     const values: unknown[] = [];
@@ -1434,6 +1675,9 @@ export class CodeSymbolStore implements ICodeSymbolReader {
     const deleteSymbolsStmt = db.prepare(
       `DELETE FROM code_symbols WHERE ${where}`,
     );
+    const deleteRecordsStmt = db.prepare(
+      `DELETE FROM code_symbol_files WHERE ${where}`,
+    );
     const patterns = junkSegments.map((segment) => {
       const escaped = segment
         .replace(/\\/g, '\\\\')
@@ -1454,6 +1698,7 @@ export class CodeSymbolStore implements ICodeSymbolReader {
           }
         }
         const removed = deleteSymbolsStmt.run(pattern, ...clause.values);
+        deleteRecordsStmt.run(pattern, ...clause.values);
         totalDeleted += removed.changes;
       }
       if (!vecAvailable && totalDeleted > 0) this.markVecStale();
@@ -1484,8 +1729,16 @@ export class CodeSymbolStore implements ICodeSymbolReader {
     const deleteSymbolsStmt = db.prepare(
       `DELETE FROM code_symbols WHERE workspace_root = ?`,
     );
+    const deleteRecordsStmt = db.prepare(
+      `DELETE FROM code_symbol_files WHERE workspace_root = ?`,
+    );
+    const deleteRootStmt = db.prepare(
+      `DELETE FROM code_index_roots WHERE workspace_root = ?`,
+    );
     type Payload = { readonly workspaceRoot: string };
     const txnFn = ((payload: Payload): number => {
+      deleteRecordsStmt.run(payload.workspaceRoot);
+      deleteRootStmt.run(payload.workspaceRoot);
       if (selectRowidsStmt && deleteVecStmt) {
         const ids = selectRowidsStmt.all(payload.workspaceRoot) as Array<{
           rowid: number;

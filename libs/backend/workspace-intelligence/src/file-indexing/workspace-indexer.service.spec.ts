@@ -3,6 +3,7 @@
  */
 
 import 'reflect-metadata';
+import * as path from 'node:path';
 import { WorkspaceIndexerService } from './workspace-indexer.service';
 import { FileSystemService } from '../services/file-system.service';
 import { TokenCounterService } from '../services/token-counter.service';
@@ -164,6 +165,128 @@ describe('WorkspaceIndexerService', () => {
 
   afterEach(() => {
     jest.clearAllMocks();
+  });
+
+  describe('isIgnoredForIndex', () => {
+    const file = path.join(WORKSPACE_ROOT, 'src', 'generated.ts');
+    const gitignore = 'src/generated.ts\n';
+    let gitignoreStat: Awaited<ReturnType<FileSystemService['stat']>> | undefined;
+
+    beforeEach(() => {
+      gitignoreStat = undefined;
+      fileSystemService.stat.mockImplementation(async (filePath) => {
+        if (path.basename(filePath) === '.gitignore' && gitignoreStat) {
+          return gitignoreStat;
+        }
+        throw statError(filePath, 'ENOENT');
+      });
+      fileSystemService.readFile.mockResolvedValue(gitignore);
+    });
+
+    function writeGitignore(content: string): void {
+      gitignoreStat = { type: 1, mtime: 100, ctime: 100, size: content.length };
+      fileSystemService.readFile.mockResolvedValue(content);
+    }
+
+    function withRealResolver(): WorkspaceIndexerService {
+      return new WorkspaceIndexerService(
+        fileSystemService,
+        patternMatcher,
+        new IgnorePatternResolverService(fileSystemService, patternMatcher),
+        fileClassifier,
+        tokenCounter,
+        mockFsProvider,
+        logger,
+      );
+    }
+
+    it('applies .gitignore and reuses the matcher after re-statting unchanged files', async () => {
+      writeGitignore(gitignore);
+      const indexer = withRealResolver();
+
+      await expect(
+        indexer.isIgnoredForIndex(WORKSPACE_ROOT, file),
+      ).resolves.toBe(true);
+      const statCalls = fileSystemService.stat.mock.calls.length;
+      await expect(
+        indexer.isIgnoredForIndex(WORKSPACE_ROOT, file),
+      ).resolves.toBe(true);
+      expect(fileSystemService.readFile).toHaveBeenCalledTimes(1);
+      expect(fileSystemService.stat).toHaveBeenCalledTimes(statCalls + 5);
+    });
+
+    it('detects an ignore file created after warming the cache', async () => {
+      const indexer = withRealResolver();
+      await expect(
+        indexer.isIgnoredForIndex(WORKSPACE_ROOT, file),
+      ).resolves.toBe(false);
+
+      writeGitignore(gitignore);
+      await expect(
+        indexer.isIgnoredForIndex(WORKSPACE_ROOT, file),
+      ).resolves.toBe(true);
+    });
+
+    it('does not cache a matcher when the ignore file changes during parsing', async () => {
+      writeGitignore(gitignore);
+      const replacement = gitignore.replace('generated', 'different');
+      fileSystemService.readFile.mockImplementationOnce(async () => {
+        writeGitignore(replacement);
+        if (gitignoreStat) gitignoreStat = { ...gitignoreStat, ctime: 101 };
+        return gitignore;
+      });
+      const indexer = withRealResolver();
+
+      await expect(
+        indexer.isIgnoredForIndex(WORKSPACE_ROOT, file),
+      ).resolves.toBe(true);
+      await expect(
+        indexer.isIgnoredForIndex(WORKSPACE_ROOT, file),
+      ).resolves.toBe(false);
+      expect(fileSystemService.readFile).toHaveBeenCalledTimes(2);
+    });
+
+    it('fails open on a stat error, invalidates the cached matcher and warns once per root', async () => {
+      await service.isIgnoredForIndex(WORKSPACE_ROOT, file);
+      for (let i = 0; i < 2; i++) {
+        fileSystemService.stat.mockRejectedValueOnce(statError(file, 'EIO'));
+        await expect(
+          service.isIgnoredForIndex(WORKSPACE_ROOT, file),
+        ).resolves.toBe(false);
+      }
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      await service.isIgnoredForIndex(WORKSPACE_ROOT, file);
+      expect(ignoreResolver.compileMatcher).toHaveBeenCalledTimes(2);
+    });
+
+    it('fails open on a parse error and retries with the same stat tuple', async () => {
+      writeGitignore(gitignore);
+      fileSystemService.readFile.mockRejectedValueOnce(statError(file, 'EIO'));
+      const indexer = withRealResolver();
+
+      await expect(
+        indexer.isIgnoredForIndex(WORKSPACE_ROOT, file),
+      ).resolves.toBe(false);
+      expect(logger.warn).toHaveBeenCalledTimes(1);
+      await expect(
+        indexer.isIgnoredForIndex(WORKSPACE_ROOT, file),
+      ).resolves.toBe(true);
+    });
+
+    it('keeps at most 16 roots and evicts the least recently used matcher', async () => {
+      const checkRoot = (index: number) => {
+        const root = path.join(WORKSPACE_ROOT, `root-${index}`);
+        return service.isIgnoredForIndex(root, path.join(root, 'file.ts'));
+      };
+      for (let index = 0; index < 16; index++) await checkRoot(index);
+      await checkRoot(0);
+      await checkRoot(16);
+      await checkRoot(0);
+      expect(ignoreResolver.compileMatcher).toHaveBeenCalledTimes(17);
+
+      await checkRoot(1);
+      expect(ignoreResolver.compileMatcher).toHaveBeenCalledTimes(18);
+    });
   });
 
   /**

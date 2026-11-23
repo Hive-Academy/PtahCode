@@ -1498,6 +1498,90 @@ describe('IndexingControlService census join (F5)', () => {
   });
 });
 
+describe('IndexingControlService force plumbing (TASK_2026_2312_c3ef D5)', () => {
+  it('start({ force: true }) forwards force to runSymbols', async () => {
+    const fakeDb = makeFakeDb();
+    const { service } = buildService(fakeDb, {
+      headContent: `${VALID_SHA_A}\n`,
+    });
+    const deps = makeRunDeps();
+
+    await service.start('symbols', ROOT, deps, { force: true });
+
+    expect(deps.runSymbols as jest.Mock).toHaveBeenCalledTimes(1);
+    const options = (deps.runSymbols as jest.Mock).mock.calls[0][1] as {
+      force?: boolean;
+      signal?: AbortSignal;
+      onProgress?: (progress: IndexingRunProgress) => void;
+    };
+    expect(options.force).toBe(true);
+    expect(options.signal).toBeInstanceOf(AbortSignal);
+    expect(options.onProgress).toBeInstanceOf(Function);
+  });
+
+  it('start() without force forwards force: false to runSymbols', async () => {
+    const fakeDb = makeFakeDb();
+    const { service } = buildService(fakeDb, {
+      headContent: `${VALID_SHA_A}\n`,
+    });
+    const deps = makeRunDeps();
+
+    await service.start('symbols', ROOT, deps);
+
+    const options = (deps.runSymbols as jest.Mock).mock.calls[0][1] as {
+      force?: boolean;
+    };
+    expect(options.force).toBe(false);
+  });
+
+  it('a forced start that joins an open background census still forwards force (the forced follow-up keeps it)', async () => {
+    const { service, indexer } = buildCensusService();
+    const bg = startBackground(service, indexer);
+    await waitFor(() => indexer.calls() === 1);
+
+    const seen: Array<{ force?: boolean; onProgress?: unknown }> = [];
+    const deps: IndexingRunDeps = {
+      runSymbols: (root, options) => {
+        seen.push({
+          force: options?.force,
+          onProgress: options?.onProgress,
+        });
+        return indexer.index(root, options);
+      },
+    };
+    const manual = service.start('symbols', ROOT, deps, { force: true });
+    await waitFor(() => indexer.calls() === 2);
+
+    // The joined record was opened by the background run, but the caller's
+    // force still reaches runSymbols: the `indexing:start` handler re-sends
+    // these options for its forced follow-up after the join settles.
+    expect(seen).toHaveLength(1);
+    expect(seen[0]).toMatchObject({ force: true });
+    expect(seen[0].onProgress).toBeInstanceOf(Function);
+
+    indexer.succeed(STATS);
+    await manual;
+    await bg;
+  });
+
+  it('resume never forces', async () => {
+    const fakeDb = makeFakeDb();
+    const { service } = buildService(fakeDb, {
+      headContent: `${VALID_SHA_A}\n`,
+    });
+    const deps = makeRunDeps();
+
+    // No stored cursor → resume() runs a fresh, non-forced start.
+    await service.resume(ROOT, deps);
+
+    expect(deps.runSymbols as jest.Mock).toHaveBeenCalledTimes(1);
+    const options = (deps.runSymbols as jest.Mock).mock.calls[0][1] as {
+      force?: boolean;
+    };
+    expect(options.force).toBe(false);
+  });
+});
+
 describe('IndexingControlService census removal on final release (A-F6)', () => {
   let now = 1_000;
 

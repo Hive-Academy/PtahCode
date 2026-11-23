@@ -27,7 +27,7 @@ describe('migration 0070_indexing_last_run', () => {
         name: '0070_indexing_last_run',
         sql,
       });
-      expect(MIGRATIONS[MIGRATIONS.length - 1]?.version).toBe(76);
+      expect(MIGRATIONS.findIndex((m) => m.version === 70)).toBe(69);
       db.exec(indexingStateSql);
       db.prepare(
         `INSERT INTO indexing_state

@@ -1,6 +1,8 @@
+import * as path from 'node:path';
 import { WalkSlice } from './cooperative-yield';
 import {
   collectDirectories,
+  findNestedRepoAncestor,
   groupByDepth,
   unprobedCandidates,
 } from './nested-repo-scan';
@@ -61,5 +63,54 @@ describe('nested-repo-scan', () => {
     await groupByDepth(new Set(FLAT_DIRS.slice(0, 10)), walk);
 
     expect(yields).not.toHaveBeenCalled();
+  });
+});
+
+describe('findNestedRepoAncestor', () => {
+  const root = path.resolve('/ws');
+  const repo = path.join(root, 'repo');
+  const worktree = path.join(repo, 'worktree');
+  const file = path.join(worktree, 'src', 'index.ts');
+  const gitEntries = new Map([
+    [path.join(root, '.git'), 'directory'],
+    [path.join(repo, '.git'), 'directory'],
+    [path.join(worktree, '.git'), 'file'],
+  ]);
+
+  it('finds a .git pointer file and prefers the closest ancestor', async () => {
+    const exists = jest.fn(async (entry: string) => gitEntries.has(entry));
+    await expect(findNestedRepoAncestor(root, file, exists)).resolves.toBe(worktree);
+    expect(exists).not.toHaveBeenCalledWith(path.join(repo, '.git'));
+  });
+
+  it('finds an ancestor with a .git directory', async () => {
+    const exists = async (entry: string) => gitEntries.has(entry);
+    await expect(
+      findNestedRepoAncestor(root, path.join(repo, 'src', 'index.ts'), exists),
+    ).resolves.toBe(repo);
+  });
+
+  it('ignores the workspace root’s own .git entry', async () => {
+    const exists = jest.fn(async (entry: string) => gitEntries.has(entry));
+    await expect(
+      findNestedRepoAncestor(root, path.join(root, 'src', 'index.ts'), exists),
+    ).resolves.toBeNull();
+    expect(exists).not.toHaveBeenCalledWith(path.join(root, '.git'));
+  });
+
+  it('does not probe paths outside the root', async () => {
+    const exists = jest.fn(async () => true);
+    await expect(
+      findNestedRepoAncestor(root, `${root}-other/src/index.ts`, exists),
+    ).resolves.toBeNull();
+    expect(exists).not.toHaveBeenCalled();
+  });
+
+  it('continues past a rejected probe', async () => {
+    const exists = async (entry: string) => {
+      if (entry === path.join(worktree, '.git')) throw new Error('probe failed');
+      return gitEntries.has(entry);
+    };
+    await expect(findNestedRepoAncestor(root, file, exists)).resolves.toBe(repo);
   });
 });

@@ -19,8 +19,16 @@ export interface CodeSymbolHitPage {
 export interface CodeIndexFreshness {
   /** Number of indexed symbols under the workspace root; 0 when nothing is indexed. */
   readonly symbolCount: number;
-  /** Newest `updated_at` (epoch ms) under the workspace root; `null` when `symbolCount` is 0. */
+  /**
+   * Newest of the symbols' `updated_at` and the root's last validation
+   * (epoch ms) under the workspace root; `null` when neither exists.
+   */
   readonly newestUpdatedAt: number | null;
+  /**
+   * When a complete indexing pass last confirmed the root (epoch ms); `null`
+   * when no pass has confirmed it. Omitted by a reader that does not track it.
+   */
+  readonly validatedAt?: number | null;
 }
 
 export interface ICodeSymbolReader {

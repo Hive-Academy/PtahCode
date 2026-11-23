@@ -103,6 +103,12 @@ export interface IndexingRunDeps {
     options?: {
       signal?: AbortSignal;
       onProgress?: (progress: IndexingRunProgress) => void;
+      /**
+       * Parse every file, also one whose stored fingerprint shows no change
+       * (TASK_2026_2312_c3ef D5). Only an explicit user-forced start sets it;
+       * boot, watcher, lazy, resume and CLI runs never do.
+       */
+      force?: boolean;
     },
   ) => Promise<IndexingRunStats | void> & {
     /** Set synchronously when this call joins an active symbols census. */
@@ -589,6 +595,7 @@ export class IndexingControlService {
           participant.record,
           fp,
           signal,
+          force,
         );
         if (symbols.kind === 'aborted') {
           outcome = symbols;
@@ -1333,10 +1340,14 @@ export class IndexingControlService {
   /**
    * Internal symbol-indexing loop with progress events and cooperative abort.
    *
-   * Passes the abort signal and the census record's progress handler to
-   * deps.runSymbols. A settlement that is not an abort closes the record. On
-   * abort, persists the cursor (except for a cancel, which clears it) and
-   * reports the abort cause.
+   * Passes the abort signal, the census record's progress handler and this
+   * run's `force` flag to deps.runSymbols (TASK_2026_2312_c3ef D5). The
+   * caller's force is forwarded, not the joined record's: a forced start
+   * that joins an open boot census still reports `force`, so the forced
+   * follow-up the `indexing:start` handler starts after the join keeps it.
+   * A settlement that is not an abort closes the record. On abort, persists
+   * the cursor (except for a cancel, which clears it) and reports the abort
+   * cause.
    */
   private async runSymbolsIndexWithProgress(
     workspaceRoot: string,
@@ -1344,6 +1355,7 @@ export class IndexingControlService {
     record: CensusRecord,
     fp: string,
     signal: AbortSignal,
+    force: boolean,
   ): Promise<
     | { readonly kind: 'succeeded'; readonly stats: IndexingRunStats | null }
     | { readonly kind: 'aborted'; readonly cause: AbortCause }
@@ -1353,6 +1365,7 @@ export class IndexingControlService {
       result = await deps.runSymbols(workspaceRoot, {
         signal,
         onProgress: record.onProgress,
+        force,
       });
     } catch (error: unknown) {
       if (isAbortError(error) || signal.aborted) {
