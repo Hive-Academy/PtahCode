@@ -201,7 +201,8 @@ export class AntigravityCliAdapter implements CliAdapter {
   /**
    * Binaries whose version met the ACP floor. Only a pass is cached: a
    * below-floor or unreadable answer is probed again, so an in-place agy
-   * upgrade is seen without a restart.
+   * upgrade is seen without a restart. A below-floor read in detection
+   * drops the pass, so an in-place downgrade is seen too.
    */
   private readonly acpFloorPassed = new Set<string>();
   /** Binaries whose unreadable version was already logged at warn (later reads log at debug). */
@@ -260,7 +261,8 @@ export class AntigravityCliAdapter implements CliAdapter {
         undefined,
         this.spawner,
       );
-      await this.probeAcp(binaryPath, version);
+      // Detection read the version already, even when it came back unreadable.
+      await this.probeAcp(binaryPath, { version });
 
       return {
         cli: 'antigravity',
@@ -315,17 +317,25 @@ export class AntigravityCliAdapter implements CliAdapter {
    * known, `undefined` while the version cannot be read. Only `true` is
    * cached per binary; `false` and `undefined` re-read the version on the
    * next check, so an agy upgraded in place passes without a restart. Lanes
-   * that ask while a probe runs share it. Reads `agy --version` only
-   * (detection passes the version it already read) and never spawns
-   * `agy acp` itself.
+   * that ask while a probe runs share it. Never spawns `agy acp` itself.
+   *
+   * `fresh` is a `--version` read the caller already made (detection),
+   * unreadable or not: the floor is judged from it, with no second read and
+   * no cache short-cut, and a below-floor answer drops a cached pass so an
+   * agy downgraded in place is rejected by the next lane. Without `fresh` the
+   * probe reads `agy --version` itself unless a pass is cached.
    */
-  private probeAcp(binary: string, knownVersion?: string): Promise<boolean | undefined> {
-    if (this.acpFloorPassed.has(binary)) return Promise.resolve(true);
+  private probeAcp(
+    binary: string,
+    fresh?: { readonly version: string | undefined },
+  ): Promise<boolean | undefined> {
+    if (!fresh && this.acpFloorPassed.has(binary)) return Promise.resolve(true);
     const inFlight = this.acpProbesInFlight.get(binary);
     if (inFlight) return inFlight;
-    const probe = this.runAcpProbe(binary, knownVersion)
+    const probe = this.runAcpProbe(binary, fresh)
       .then((meetsFloor) => {
         if (meetsFloor === true) this.acpFloorPassed.add(binary);
+        if (meetsFloor === false) this.acpFloorPassed.delete(binary);
         return meetsFloor;
       })
       .finally(() => this.acpProbesInFlight.delete(binary));
@@ -336,12 +346,12 @@ export class AntigravityCliAdapter implements CliAdapter {
   /** One version-floor probe; `undefined` when it could not tell. */
   private async runAcpProbe(
     binary: string,
-    knownVersion: string | undefined,
+    fresh: { readonly version: string | undefined } | undefined,
   ): Promise<boolean | undefined> {
     if (this.acp.probe) return this.acp.probe(binary);
-    const version =
-      knownVersion ??
-      (await probeCliVersion(binary, undefined, undefined, this.spawner));
+    const version = fresh
+      ? fresh.version
+      : await probeCliVersion(binary, undefined, undefined, this.spawner);
     if (version === undefined || !/\d+\.\d+\.\d+/.test(version)) {
       // Detection polls, so only the first unreadable read per binary warns.
       const message =

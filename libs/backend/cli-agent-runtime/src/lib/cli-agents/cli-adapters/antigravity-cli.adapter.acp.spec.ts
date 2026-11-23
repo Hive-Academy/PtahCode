@@ -193,6 +193,38 @@ describe('AntigravityCliAdapter — detection', () => {
     });
     expect(mockProbeCliVersion).toHaveBeenCalledTimes(2);
   });
+
+  it('does not read --version a second time when the detection read is unreadable', async () => {
+    mockProbeCliVersion.mockResolvedValue(undefined);
+    const transportFactory = jest.fn();
+    const adapter = new AntigravityCliAdapter(fakeSpawner, undefined, { transportFactory });
+    await expect(adapter.detect()).resolves.toMatchObject({ installed: true });
+    // One read: a timed-out read is not run again inside the same detection.
+    expect(mockProbeCliVersion).toHaveBeenCalledTimes(1);
+
+    // The next lane request still retries the read.
+    mockProbeCliVersion.mockResolvedValue('1.4.2');
+    await expect(
+      adapter.runSdk({ task: 'x', workingDirectory: '/proj', binaryPath: '/usr/local/bin/agy' }),
+    ).rejects.toThrow('(installed: 1.4.2)');
+    expect(mockProbeCliVersion).toHaveBeenCalledTimes(2);
+    expect(transportFactory).not.toHaveBeenCalled();
+  });
+
+  it('drops a cached floor pass when detection reads a downgraded agy', async () => {
+    mockProbeCliVersion.mockResolvedValueOnce('1.5.13').mockResolvedValue('1.4.2');
+    const transportFactory = jest.fn();
+    const adapter = new AntigravityCliAdapter(fakeSpawner, undefined, { transportFactory });
+    await adapter.detect();
+    await adapter.detect();
+    expect(mockProbeCliVersion).toHaveBeenCalledTimes(2);
+    await expect(
+      adapter.runSdk({ task: 'x', workingDirectory: '/proj', binaryPath: '/usr/local/bin/agy' }),
+    ).rejects.toThrow(
+      'Antigravity lanes need agy 1.5.1 or later (installed: 1.4.2). Update agy and try again.',
+    );
+    expect(transportFactory).not.toHaveBeenCalled();
+  });
 });
 
 describe('AntigravityCliAdapter — ACP lane', () => {

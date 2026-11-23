@@ -64,6 +64,9 @@ describe('redactLaneStderr', () => {
     ['an inline value of escaped quotes', `token= ${'a\\"'.repeat(33_000)}`, true],
     // No key/value shape: nothing to redact, but the key part must not go quadratic.
     ['a quote then many secret words', `"${'token '.repeat(17_000)}`, false],
+    ['a quote then many escaped quotes', `"${'\\"'.repeat(50_000)}`, false],
+    ['many non-secret quoted pairs', '"model":"m" '.repeat(9_000), false],
+    ['a long key that names a secret', `{"${'a'.repeat(50_000)}token${'a'.repeat(50_000)}": "x"}`, true],
   ])('handles a ~100 KB line with %s quickly', (_name, line, redacts) => {
     const started = Date.now();
     const result = redactLaneStderr(line);
@@ -73,6 +76,46 @@ describe('redactLaneStderr', () => {
     } else {
       expect(result).toBe(line);
     }
+  });
+
+  describe('a quoted key of any length', () => {
+    it('redacts a key with 1,000 characters around the secret word', () => {
+      const key = `${'a'.repeat(1_000)}token${'b'.repeat(1_000)}`;
+      expect(redactLaneStderr(`{"${key}": "s3cr3t", "model":"m"}`)).toBe(
+        `{"${key}": "[REDACTED]", "model":"m"}`,
+      );
+    });
+
+    it('still finds a secret pair inside the value of a non-secret pair', () => {
+      expect(redactLaneStderr(`{"msg": "{'token': 'abc'}"}`)).toBe(
+        `{"msg": "{'token': '[REDACTED]'}"}`,
+      );
+    });
+
+    it('leaves a non-secret pair unchanged', () => {
+      const line = '{"model": "gemini", "mode": "fast"}';
+      expect(redactLaneStderr(line)).toBe(line);
+    });
+  });
+
+  describe('a secret word as the last segment of a field name', () => {
+    it.each([
+      ['access_token=abc123', 'access_token=[REDACTED]'],
+      ['refresh_token: abc123', 'refresh_token: [REDACTED]'],
+      ['id_token=abc.def', 'id_token=[REDACTED]'],
+      ['client_secret=s3cr3t', 'client_secret=[REDACTED]'],
+      ['x-api-key: k-123', 'x-api-key: [REDACTED]'],
+      ['private_key=abc', 'private_key=[REDACTED]'],
+    ])('redacts %p', (raw, expected) => {
+      expect(redactLaneStderr(`cfg ${raw}`)).toBe(`cfg ${expected}`);
+    });
+
+    it.each(['tokenizer=bpe', 'monkey=banana', 'key=enter', 'mytoken=abc', 'tokens: 42'])(
+      'leaves the ordinary field %p unchanged',
+      (raw) => {
+        expect(redactLaneStderr(`cfg ${raw}`)).toBe(`cfg ${raw}`);
+      },
+    );
   });
 
   it('redacts a Bearer credential', () => {

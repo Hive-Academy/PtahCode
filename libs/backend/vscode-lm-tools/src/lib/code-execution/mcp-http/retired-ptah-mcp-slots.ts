@@ -75,9 +75,13 @@ export const RETIRED_PTAH_MCP_TARGET: HarnessTargetId = 'antigravity';
 /** `{ws}/.agents/mcp_config.json`, the Antigravity editor's workspace file. */
 const WORKSPACE_SEGMENTS = ['.agents', 'mcp_config.json'] as const;
 
-/** The URL shapes the persistent writer produced; see the file header. */
+/**
+ * The URL shapes the persistent writer produced; see the file header. A path
+ * segment holds no `?` or `#`: the writers percent-encoded every segment, so a
+ * query or fragment marks a URL a user wrote.
+ */
 const PTAH_PERSISTENT_URL =
-  /^http:\/\/localhost:\d+(?:\/auth\/[A-Za-z0-9_-]{43})?(?:\/workspace\/[^/]+)?\/?$/;
+  /^http:\/\/localhost:\d+(?:\/auth\/[A-Za-z0-9_-]{43})?(?:\/workspace\/[^/?#]+)?\/?$/;
 
 /**
  * The URL shapes the retired stream-json lane wrote; see the file header.
@@ -86,10 +90,11 @@ const PTAH_PERSISTENT_URL =
  * and `laneMcpAuthUrl` (`cli-adapters/lane-mcp-credentials.ts`) in
  * `@ptah-extension/cli-agent-runtime`. Neither is on that library's barrel,
  * and this matcher must keep recognising the retired shape even if those
- * builders change, so the grammar is pinned here rather than imported.
+ * builders change, so the grammar is pinned here rather than imported. As in
+ * {@link PTAH_PERSISTENT_URL}, no segment holds a `?` or `#`.
  */
 const PTAH_LANE_URL =
-  /^http:\/\/localhost:\d+(?:\/auth\/[A-Za-z0-9_-]{43})?\/agent\/[^/]+(?:\/workspace\/[^/]+)?\/?$/;
+  /^http:\/\/localhost:\d+(?:\/auth\/[A-Za-z0-9_-]{43})?\/agent\/[^/?#]+(?:\/workspace\/[^/?#]+)?\/?$/;
 
 /** Which family of Ptah-written shapes a removed entry had. */
 export type RetiredPtahEntryShape = 'lane' | 'persistent';

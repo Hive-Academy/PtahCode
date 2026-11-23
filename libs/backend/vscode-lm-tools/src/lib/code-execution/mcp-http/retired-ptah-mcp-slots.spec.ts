@@ -117,6 +117,14 @@ describe('isPtahPersistentEntry', () => {
     ],
     ['a stdio server', { command: 'npx', args: ['ptah'] }],
     ['a non-object', 'http://localhost:51820'],
+    [
+      'a workspace URL with a query',
+      { serverUrl: 'http://localhost:8080/workspace/ws?tenant=dev' },
+    ],
+    [
+      'a workspace URL with a fragment',
+      { serverUrl: 'http://localhost:8080/workspace/ws#top' },
+    ],
   ])('leaves %s alone', (_label, entry) => {
     expect(isPtahPersistentEntry(entry)).toBe(false);
   });
@@ -166,8 +174,31 @@ describe('isPtahLaneEntry', () => {
       { serverUrl: 'http://localhost:51820/agent/a1', command: 'npx' },
     ],
     ['a non-object', 'http://localhost:51820/agent/a1'],
+    [
+      "a user's agent URL with a query",
+      { serverUrl: 'http://localhost:8080/agent/local?tenant=dev' },
+    ],
+    [
+      "a user's agent URL with a fragment",
+      { serverUrl: 'http://localhost:8080/agent/local#dev' },
+    ],
+    [
+      'a lane workspace URL with a query',
+      { serverUrl: 'http://localhost:51820/agent/a1/workspace/ws?tenant=dev' },
+    ],
   ])('leaves %s alone', (_label, entry) => {
     expect(isPtahLaneEntry(entry)).toBe(false);
+  });
+
+  it('still recognises percent-encoded `?` and `#` in a segment', () => {
+    expect(
+      isPtahLaneEntry({
+        serverUrl: 'http://localhost:51820/agent/a%3F1/workspace/D%3A%5Cws%3Fx%23y',
+      }),
+    ).toBe(true);
+    expect(
+      isPtahPersistentEntry({ serverUrl: 'http://localhost:51820/workspace/ws%3Fx%23y' }),
+    ).toBe(true);
   });
 });
 
