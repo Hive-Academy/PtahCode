@@ -311,7 +311,7 @@ P1 gate, run by the orchestrator after B13, before review:
 
 ### Task 3.3: Caller policy matrix - PENDING
 
-## Batch 4: Gateway sources and upstream client (C2, part 2) - IN_PROGRESS
+## Batch 4: Gateway sources and upstream client (C2, part 2) - COMPLETE
 
 - Id: P1-B4 | Phase: P1 | Shape: logic
 - Recommended executor: backend-developer (subagent; reason: lanes disabled)
@@ -365,7 +365,7 @@ P1 gate, run by the orchestrator after B13, before review:
 
 ### Task 4.2: Upstream client with redirect-safe fetch - PENDING
 
-## Batch 5: Gateway service and DI binding (C2, part 3) - PENDING
+## Batch 5: Gateway service and DI binding (C2, part 3) - IN_PROGRESS
 
 - Id: P1-B5 | Phase: P1 | Shape: logic
 - Recommended executor: backend-developer (subagent; reason: lanes disabled)
