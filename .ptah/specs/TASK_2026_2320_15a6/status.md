@@ -23,3 +23,9 @@
   wrong: invented name). Arm total 7/8. Code-mode retry of files-session-handoff: correct.
 - 20:00Z — Instance stopped by POST /stop. Recorded PIDs 1512078 and 1512091 gone, ports free.
   User files unchanged (`hashes-r7-final`), user app alive. `benchmark-report.md` written.
+- 20:05Z — Commit 5e361761f pushed; PR #1493 open against main
+  (https://github.com/Hive-Academy/PtahCode/pull/1493). task.md set to `in_review`. CI and review
+  watch started. Not merged.
+- 20:40Z — CI on 5e361761f: all checks pass. `git-real-git (macos-latest)` first ended
+  `cancelled` with no step run (runner problem); one job rerun passed. CodeRabbit skipped
+  (`.ptah/specs/**` path filter). Waiting for human review; not merged.
