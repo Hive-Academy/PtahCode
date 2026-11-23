@@ -575,6 +575,40 @@ describe('createProviderSessionLaneHandle — first turn', () => {
       content: 'fatal: cannot read config',
     });
   });
+
+  it('redacts secrets and the lane token from agent stderr', async () => {
+    const mcpToken = 'lane-mcp-token-7f3a';
+    const agent = createFakeAcpAgent({ sessionId: SESSION_ID });
+    live.push(agent);
+    const transport = createFakeAcpTransport(agent);
+    let onStderrLine: ((line: string) => void) | undefined;
+    const handle = createProviderSessionLaneHandle({
+      profile: createProfile(),
+      options: { task: 't', workingDirectory: process.cwd(), mcpToken },
+      command: 'test-agent',
+      transportFactory: (spawn) => {
+        onStderrLine = spawn.onStderrLine;
+        return transport;
+      },
+    });
+    const segments: CliOutputSegment[] = [];
+    const chunks: string[] = [];
+    handle.onSegment?.((s) => segments.push(s));
+    handle.onOutput((d) => chunks.push(d));
+
+    onStderrLine?.(
+      `HTTP debug Authorization: Bearer super-secret-token api_key=abc123 ${mcpToken}`,
+    );
+    await handle.done;
+
+    const output = chunks.join('');
+    const rendered = output + segments.map((s) => s.content).join('\n');
+    expect(output).toContain('[stderr]');
+    expect(rendered).toContain('[REDACTED]');
+    expect(rendered).not.toContain('super-secret-token');
+    expect(rendered).not.toContain('abc123');
+    expect(rendered).not.toContain(mcpToken);
+  });
 });
 
 describe('createProviderSessionLaneHandle — continuation', () => {

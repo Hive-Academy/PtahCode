@@ -78,6 +78,7 @@ import {
   laneAcpCommandPreparer,
 } from './lane-acp-spawn';
 import { buildLaneMcpAttachments } from './lane-mcp-attachments';
+import { redactLaneStderr } from './lane-stderr-redaction';
 
 /**
  * Setup output held while a fallback is still possible. Beyond it the output
@@ -182,8 +183,9 @@ export function createProviderSessionLaneHandle(
   const project = (event: ProviderSessionEvent): void => {
     const turnKey = event.turnId ?? `${event.contextId}:setup`;
     if (event.type === 'diagnostic') {
-      output.emit(`[stderr] ${event.line}\n`);
-      segment.emit({ type: classifyCliStderr(event.line), content: event.line });
+      const safe = redactLaneStderr(event.line, options.mcpToken);
+      output.emit(`[stderr] ${safe}\n`);
+      segment.emit({ type: classifyCliStderr(safe), content: safe });
       return;
     }
     if (event.type === 'textDelta') output.emit(event.delta);
