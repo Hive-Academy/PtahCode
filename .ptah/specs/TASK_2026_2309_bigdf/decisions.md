@@ -1,0 +1,12 @@
+# Decisions — TASK_2026_2309_bigdf
+
+| # | Decision | Evidence | Reversible |
+|---|----------|----------|------------|
+| D1 | Type BUGFIX, depth Partial. No `ptah_route_decide` (tool not listed); classified by the skill table. | Issue names root cause, file and fix. | yes |
+| D2 | Ship #1457 apart from the lane work. | User answer (2026-11-23): "Two PRs". | yes |
+| D3 | Lanes disabled, approval mode `user`; implementer and reviewer are Claude subagents. Review family: same family (Claude), weaker evidence. Reason: no CLI lane tools in this session. | No `ptah_*` tools listed. | yes |
+| D4 | Orchestrator writes the single batch B1; no team-leader decomposition. | One project (`review-github`) plus a classifier line in `review-core`. | yes |
+| D5 | A `diff-truncated` coverage entry makes the run status `partial` (orchestrator, beside `prompt:truncated:`). This also applies when a normal diff omits a file's patch, which is correct: that review did not see every file. | Issue AC "completed run with partial coverage"; `review-orchestrator.service.ts:246`; publication already reads `diff-truncated` (`publication-stage.runner.ts:81`). | yes |
+| D6 | Record, do not fix: publication/status GitHub adapters still drop the error body (not on the context-stage path of #1457); the fallback reads pages sequentially within the context deadline (bounded by 30 pages). | batch-1-report.md open items 2-3. | yes |
+| D7 | Fix round 1: fix review Serious (a missing patch counts as truncation only when `changes > 0`, both diff paths, specs for binary and pure rename) and the local byte-cap check (`Buffer.byteLength`). | code-logic-review.md; Serious would mark ordinary PRs with images/renames `partial` and drop the incremental baseline (`sqlite-review.repository.ts:95-97`). | yes |
+| D8 | Record, do not fix (Moderate, no lane-config or data loss): fallback page time vs context deadline (`unknown`, retried); `prompt-too-large`/`head-missing` not marked non-retryable; `getDiff` still runs on incremental reviews. Named later task: "review: bound large-diff fallback time and widen non-retryable codes". | code-logic-review.md Moderate 1, 3, 4; rule 4 of the orchestration skill. | yes |

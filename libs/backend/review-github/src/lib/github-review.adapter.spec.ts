@@ -138,6 +138,117 @@ describe('GithubReviewAdapter', () => {
     expect(await adapter.getDiff(repo, 4, sha)).toMatchObject({ headSha: sha, baseSha: base, truncated: true });
   });
 
+  it('does not mark binary files or pure renames without a patch truncated', async () => {
+    const fetcher = jest.fn().mockResolvedValueOnce(response(pull))
+      .mockResolvedValueOnce(new Response('diff --git a/x b/x', { status: 200 }))
+      .mockResolvedValueOnce(response([
+        { filename: 'logo.png', status: 'modified', additions: 0, deletions: 0, changes: 0 },
+        { filename: 'src/moved.ts', previous_filename: 'src/old.ts', status: 'renamed', additions: 0, deletions: 0, changes: 0 }]));
+    const { adapter } = setup(fetcher);
+    expect(await adapter.getDiff(repo, 4, sha)).toMatchObject({ truncated: false });
+  });
+
+  describe('diff above the GitHub line limit', () => {
+    const tooLarge = () => response({ message: 'Sorry, the diff exceeded the maximum number of lines (20000)',
+      errors: [{ resource: 'PullRequest', field: 'diff', code: 'too_large' }], status: '406' }, 406);
+    const file = (filename: string, extra: object = {}) => ({ filename, status: 'modified', additions: 1, deletions: 1, changes: 2,
+      patch: '@@ -1 +1 @@\n-old\n+new', ...extra });
+    const next = (page: number) => ({ link: `<https://api.github.com/repos/Hive-Academy/PtahCode/pulls/4/files?per_page=100&page=${page}>; rel="next"` });
+
+    it('assembles the patch from every files page with git headers', async () => {
+      const fetcher = jest.fn().mockResolvedValueOnce(response(pull)).mockResolvedValueOnce(tooLarge())
+        .mockResolvedValueOnce(response([file('src/a.ts'), file('src/new.ts', { status: 'added', patch: '@@ -0,0 +1 @@\n+x\n' })], 200, next(2)))
+        .mockResolvedValueOnce(response([file('src/gone.ts', { status: 'removed', patch: '@@ -1 +0,0 @@\n-x' }),
+          file('src/moved.ts', { status: 'renamed', previous_filename: 'src/old.ts' })]));
+      const { adapter } = setup(fetcher);
+      const diff = await adapter.getDiff(repo, 4, sha);
+      expect(diff).toMatchObject({ headSha: sha, baseSha: base, truncated: false });
+      expect(diff.patch).toBe([
+        'diff --git a/src/a.ts b/src/a.ts', '--- a/src/a.ts', '+++ b/src/a.ts', '@@ -1 +1 @@', '-old', '+new',
+        'diff --git a/src/new.ts b/src/new.ts', '--- /dev/null', '+++ b/src/new.ts', '@@ -0,0 +1 @@', '+x',
+        'diff --git a/src/gone.ts b/src/gone.ts', '--- a/src/gone.ts', '+++ /dev/null', '@@ -1 +0,0 @@', '-x',
+        'diff --git a/src/old.ts b/src/moved.ts', 'rename from src/old.ts', 'rename to src/moved.ts', '--- a/src/old.ts', '+++ b/src/moved.ts',
+        '@@ -1 +1 @@', '-old', '+new', ''].join('\n'));
+      const urls = fetcher.mock.calls.map(call => String(call[0]));
+      expect(urls.slice(2)).toEqual(['https://api.github.com/repos/Hive-Academy/PtahCode/pulls/4/files?per_page=100&page=1',
+        'https://api.github.com/repos/Hive-Academy/PtahCode/pulls/4/files?per_page=100&page=2']);
+    });
+
+    it('marks the assembled patch truncated when a changed file has no patch', async () => {
+      const fetcher = jest.fn().mockResolvedValueOnce(response(pull)).mockResolvedValueOnce(tooLarge())
+        .mockResolvedValueOnce(response([file('src/a.ts'), file('big.sql', { patch: undefined, changes: 40000 })]));
+      const { adapter } = setup(fetcher);
+      const diff = await adapter.getDiff(repo, 4, sha);
+      expect(diff.truncated).toBe(true);
+      expect(diff.patch).toContain('diff --git a/big.sql b/big.sql');
+    });
+
+    it('keeps binary files and pure renames without a patch complete, with their headers', async () => {
+      const fetcher = jest.fn().mockResolvedValueOnce(response(pull)).mockResolvedValueOnce(tooLarge())
+        .mockResolvedValueOnce(response([file('src/a.ts'),
+          file('logo.png', { patch: undefined, changes: 0, additions: 0, deletions: 0 }),
+          file('src/moved.ts', { status: 'renamed', previous_filename: 'src/old.ts', patch: undefined, changes: 0, additions: 0, deletions: 0 })]));
+      const { adapter } = setup(fetcher);
+      const diff = await adapter.getDiff(repo, 4, sha);
+      expect(diff.truncated).toBe(false);
+      expect(diff.patch).toContain('diff --git a/logo.png b/logo.png\n--- a/logo.png\n+++ b/logo.png\n');
+      expect(diff.patch).toContain(['diff --git a/src/old.ts b/src/moved.ts', 'rename from src/old.ts', 'rename to src/moved.ts',
+        '--- a/src/old.ts', '+++ b/src/moved.ts', ''].join('\n'));
+    });
+
+    it('applies the size cap to UTF-8 bytes, not string length', async () => {
+      // Each section is about 3M characters but 6 MB in UTF-8: two fit by length, only one by bytes.
+      const wide = (name: string) => file(name, { patch: `@@ -1 +1 @@\n+${'é'.repeat(3_000_000)}` });
+      const fetcher = jest.fn().mockResolvedValueOnce(response(pull)).mockResolvedValueOnce(tooLarge())
+        .mockResolvedValueOnce(response([wide('src/a.ts')], 200, next(2)))
+        .mockResolvedValueOnce(response([wide('src/b.ts')]));
+      const { adapter } = setup(fetcher);
+      const diff = await adapter.getDiff(repo, 4, sha);
+      expect(diff.truncated).toBe(true);
+      expect(diff.patch).toContain('diff --git a/src/a.ts b/src/a.ts');
+      expect(diff.patch).not.toContain('src/b.ts');
+    });
+
+    it('stops at the files page cap and marks the patch truncated', async () => {
+      let pulls = 0;
+      const fetcher = jest.fn(async (url: string) => {
+        const target = String(url);
+        if (target.endsWith('/pulls/4')) return ++pulls === 1 ? response(pull) : tooLarge();
+        const page = Number(new URL(target).searchParams.get('page'));
+        return response([file(`src/${page}.ts`)], 200, next(page + 1));
+      });
+      const { adapter } = setup(fetcher as typeof fetch);
+      const diff = await adapter.getDiff(repo, 4, sha);
+      expect(diff.truncated).toBe(true);
+      expect(fetcher.mock.calls.filter(call => String(call[0]).includes('/files?'))).toHaveLength(30);
+      expect(diff.patch).toContain('diff --git a/src/30.ts b/src/30.ts');
+      expect(diff.patch).not.toContain('src/31.ts');
+    });
+
+    it('fails as diff-too-large when no file has a usable patch', async () => {
+      const fetcher = jest.fn().mockResolvedValueOnce(response(pull)).mockResolvedValueOnce(tooLarge())
+        .mockResolvedValueOnce(response([file('big.sql', { patch: undefined })]));
+      const { adapter } = setup(fetcher);
+      await expect(adapter.getDiff(repo, 4, sha)).rejects.toMatchObject({
+        code: 'diff-too-large', message: "Diff exceeds GitHub's 20,000-line limit" });
+    });
+
+    it('keeps the GitHub reason of another 406 and does not fall back', async () => {
+      const fetcher = jest.fn().mockResolvedValueOnce(response(pull)).mockResolvedValueOnce(response({
+        message: 'Unsupported media type, see https://docs.github.com/rest?token=abc', errors: [{ code: 'invalid' }] }, 406));
+      const { adapter } = setup(fetcher);
+      const error = await adapter.getDiff(repo, 4, sha).catch((caught: unknown) => caught);
+      expect(error).toMatchObject({ code: 'http', status: 406, reasons: ['invalid'],
+        message: 'GitHub returned HTTP 406: Unsupported media type, see [url]' });
+      expect(fetcher).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it('carries the GitHub message of a 4xx response and its status', async () => {
+    const { adapter } = setup(jest.fn().mockResolvedValue(response({ message: 'Not Found' }, 404)));
+    await expect(adapter.getPull(repo, 4)).rejects.toMatchObject({ code: 'http', status: 404, message: 'GitHub returned HTTP 404: Not Found' });
+  });
+
   it('retries transient 5xx GET responses', async () => {
     const fetcher = jest.fn().mockResolvedValueOnce(response({}, 503)).mockResolvedValueOnce(response(pull));
     const { adapter } = setup(fetcher);

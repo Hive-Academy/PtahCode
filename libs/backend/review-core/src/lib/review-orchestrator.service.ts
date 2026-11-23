@@ -243,7 +243,7 @@ export class ReviewOrchestratorService {
       if (!await this.guard(claim, signal)) { status = signal?.aborted ? 'partial' : 'superseded'; return; }
       const lensResults = await this.lenses.run(claim, context, attemptDeadline, signal,
         (completed, total) => this.statuses?.lensCompleted(claim, completed, total) ?? Promise.resolve());
-      if (context.coverage.some((entry) => entry.startsWith('prompt:truncated:'))) status = 'partial';
+      if (context.coverage.some((entry) => entry === 'diff-truncated' || entry.startsWith('prompt:truncated:'))) status = 'partial';
       if (lensResults.some((entry) => entry.result.status === 'partial')) status = 'partial';
       if (lensResults.length > 0 && lensResults.every((entry) => entry.result.status === 'partial' && entry.result.reason === 'deadline')) return;
       if (signal?.aborted) { status = 'partial'; return; }
