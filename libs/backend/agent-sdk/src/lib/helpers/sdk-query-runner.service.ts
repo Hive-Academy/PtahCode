@@ -54,8 +54,11 @@ import {
   type IPlatformInfo,
   type IMcpCallerCredentials,
   type IMcpGateway,
+  internalQueryGatewayScope,
 } from '@ptah-extension/platform-core';
 import { SDK_TOKENS } from '../di/tokens';
+import { oneShotGatewayDenyHookFor } from '../permission/one-shot-gateway-deny-hook';
+import { readOneShotServedFileServerNames } from './gateway-session-wiring';
 import {
   AUTH_PROVIDERS_TOKENS,
   type ProviderAccountAdmissionPort,
@@ -78,14 +81,12 @@ import {
   capabilityIsolationOptions,
   filterMcpServersByPolicy,
   getActiveProviderId,
-  readServedFileServerNames,
   resolveSessionCapabilityPolicy,
 } from './sdk-query-options-builder';
 import { PTAH_CORE_SYSTEM_PROMPT } from '../prompt-harness';
 import {
   CanUseTool,
   Options as SdkQueryOptions,
-  HookCallback,
   HookEvent,
   HookCallbackMatcher,
   McpHttpServerConfig,
@@ -204,52 +205,8 @@ export interface OneShotRunInput {
    * filled in this runner, from `resolveModelId`, not from `input.model`.
    */
   dispatch?: ModelDispatchRoute;
-  /**
-   * `true` lets this run call the user's own MCP servers that `ptah` serves
-   * (a cron job that opted in). The run is unattended, so nobody is asked
-   * before such a call. Absent or `false`: gateway tools are hidden and
-   * rejected by the gateway and denied by the one-shot `PreToolUse` hook.
-   */
+  /** Opt in to the user's own MCP servers served by `ptah` (unattended, never asked). */
   includeConnectors?: boolean;
-}
-
-/** Every tool of the `ptah` server; the hook itself picks the gateway ones. */
-export const ONE_SHOT_GATEWAY_HOOK_MATCHER = 'mcp__ptah__.*';
-export const ONE_SHOT_CONNECTORS_DISABLED_MESSAGE =
-  'connectors are not enabled for this run';
-
-/**
- * The one-shot `PreToolUse` hook that denies every gateway tool of a run that
- * did not opt in to connectors. A deny from `PreToolUse` wins over
- * `bypassPermissions`. The gateway rejects the same calls on its own, so this
- * is the client-side half. A predicate that throws counts as a gateway tool.
- */
-export function oneShotGatewayDenyHook(
-  isGatewayTool: (toolName: string) => boolean,
-  onError?: (error: unknown, toolName: string) => void,
-): HookCallbackMatcher {
-  const hook: HookCallback = async (hookInput) => {
-    if (hookInput.hook_event_name !== 'PreToolUse') return {};
-    const toolName = hookInput.tool_name;
-    if (!toolName.startsWith('mcp__ptah__')) return {};
-    let gatewayTool = true;
-    try {
-      gatewayTool = isGatewayTool(toolName);
-    } catch (error: unknown) {
-      // degradation-audit: reported - the owner logs through `onError`, and
-      // the name is denied: the safe answer for a run with no opt-in.
-      onError?.(error, toolName);
-    }
-    if (!gatewayTool) return {};
-    return {
-      hookSpecificOutput: {
-        hookEventName: 'PreToolUse',
-        permissionDecision: 'deny',
-        permissionDecisionReason: ONE_SHOT_CONNECTORS_DISABLED_MESSAGE,
-      },
-    };
-  };
-  return { matcher: ONE_SHOT_GATEWAY_HOOK_MATCHER, hooks: [hook] };
 }
 
 /** The `canUseTool` of a `'none'` one-shot: every request is refused. */
@@ -387,7 +344,6 @@ export class SdkQueryRunner {
     readonly accountPersistence: NamedAccountPersistencePort | null = null,
     @inject(PLATFORM_TOKENS.MCP_CALLER_CREDENTIALS, { isOptional: true })
     private readonly mcpCallerCredentials?: IMcpCallerCredentials,
-    /** Optional: a host with no gateway serves no gateway tool. */
     @inject(PLATFORM_TOKENS.MCP_GATEWAY, { isOptional: true })
     private readonly mcpGateway?: IMcpGateway,
   ) {}
@@ -498,21 +454,14 @@ export class SdkQueryRunner {
       this.logger,
     );
     const credentialSubject = `claude-internal-query:${randomUUID()}`;
-    // A run that opted in to connectors gets the user's file servers through
-    // `ptah`, so the CLI's own copies are switched off on the flag tier.
-    const servedFileServers =
-      this.mcpGateway &&
-      input.includeConnectors === true &&
-      input.mcpServerRunning &&
-      (input.toolAccess ?? 'claude-code') !== 'none' &&
-      policy.ptahEnabled
-        ? await readServedFileServerNames(
-            this.mcpGateway,
-            input.cwd,
-            this.logger,
-            SERVICE_TAG,
-          )
-        : [];
+    // An opted-in run gets the file servers through `ptah`; the CLI's copies go.
+    const servedFileServers = await readOneShotServedFileServerNames(
+      this.mcpGateway,
+      input,
+      policy.ptahEnabled,
+      this.logger,
+      SERVICE_TAG,
+    );
     try {
       const options = this.buildOneShotOptions(
         input,
@@ -928,13 +877,7 @@ export class SdkQueryRunner {
       );
     }
     const token = this.mcpCallerCredentials.issue(
-      {
-        kind: 'internal-query',
-        workspaceRoot: cwd,
-        capability: 'privileged',
-        // Only a run that opted in; the gateway shows no connector otherwise.
-        ...(includeConnectors ? { includeConnectors: true } : {}),
-      },
+      internalQueryGatewayScope(cwd, includeConnectors),
       credentialSubject,
       15 * 60 * 1000,
     );
@@ -987,26 +930,15 @@ export class SdkQueryRunner {
       mergedHooks[event as HookEvent] = matchers;
     }
 
-    // A run without the connector opt-in must not call a gateway tool, even
-    // under `bypassPermissions`. With the opt-in the run is unattended by
-    // design and nothing is asked.
-    const gateway = this.mcpGateway;
-    if (gateway && !includeConnectors) {
-      mergedHooks.PreToolUse = [
-        oneShotGatewayDenyHook(
-          (toolName) => gateway.isGatewayTool(toolName),
-          (error, toolName) =>
-            this.logger.warn(
-              `${SERVICE_TAG} Gateway tool check failed; denying the call`,
-              {
-                toolName,
-                error: error instanceof Error ? error.message : String(error),
-              },
-            ),
-        ),
-        ...(mergedHooks.PreToolUse ?? []),
-      ];
-    }
+    // No connector opt-in: deny gateway tools, even under `bypassPermissions`.
+    const gatewayDeny = oneShotGatewayDenyHookFor(
+      this.mcpGateway,
+      includeConnectors,
+      this.logger,
+      SERVICE_TAG,
+    );
+    if (gatewayDeny)
+      mergedHooks.PreToolUse = [gatewayDeny, ...(mergedHooks.PreToolUse ?? [])];
 
     return mergedHooks;
   }

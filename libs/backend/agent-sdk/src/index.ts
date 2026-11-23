@@ -504,7 +504,11 @@ export {
   resolveClaudeConfigDir,
   type SyncedClaudeSkill,
 } from './lib/helpers/synced-claude-skills.reader';
-export { redactMcpUrl, redactMcpOverrideMap } from './lib/helpers';
+export {
+  redactMcpUrl,
+  redactMcpOverrideMap,
+  redactMcpErrorText,
+} from './lib/helpers';
 export {
   TIER_ENV_VAR_MAP,
   TIER_METADATA_ENV_VAR_MAP,

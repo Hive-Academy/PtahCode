@@ -90,7 +90,7 @@ interface Harness {
  */
 function makeHarness(
   handler: JobHandler | null,
-  mcpGateway: IMcpGateway | null = null,
+  mcpGateway?: IMcpGateway,
 ): Harness {
   const runs = {
     tryClaim: jest.fn(() => ({
@@ -639,5 +639,118 @@ describe('JobRunner prompt jobs — connectors opt-in and MCP warning', () => {
       '[cron-scheduler] could not read MCP gateway status',
       { error: statusError, metadata: { jobId: JOB_ID, runId: RUN_ID } },
     );
+  });
+
+  it('M8: appends the MCP warning to a failed run and keeps it failed', async () => {
+    const gateway = gatewayOf([
+      {
+        key: 'https://slow.example/mcp',
+        display: 'slow-server',
+        status: 'pending',
+        detail: 'tools/list timed out after 12s',
+      },
+    ]);
+    const h = makeHarness(null, gateway);
+    h.internalQuery.execute.mockResolvedValue(
+      handleOf([
+        init([{ name: 'linear', status: 'needs-auth' }]),
+        { type: 'result', subtype: 'error_max_turns' },
+      ]),
+    );
+
+    await h.runner.run(promptJob(), 1_700_000_000_000);
+
+    expect(h.runs.markFailed).toHaveBeenCalledWith(
+      RUN_ID,
+      'SDK reported max-turns exceeded\n[warning] MCP unavailable: ' +
+        'linear(needs-auth), slow-server(pending: tools/list timed out after 12s)',
+    );
+    expect(h.runs.markSucceeded).not.toHaveBeenCalled();
+    expect(h.runs.markSkipped).not.toHaveBeenCalled();
+    const logged = h.logWithContext.mock.calls.find(
+      ([, message]) => message === '[cron-scheduler] run failed',
+    );
+    expect((logged?.[2] as { error: Error }).error.cause).toEqual(
+      new Error('SDK reported max-turns exceeded'),
+    );
+  });
+
+  it('M8: a failed run with every server connected keeps its own message', async () => {
+    const h = makeHarness(
+      null,
+      gatewayOf([{ key: 'k', display: 'ok-server', status: 'connected' }]),
+    );
+    h.internalQuery.execute.mockResolvedValue(
+      handleOf([{ type: 'result', subtype: 'error_during_execution' }]),
+    );
+
+    await h.runner.run(promptJob(), 1_700_000_000_000);
+
+    expect(h.runs.markFailed).toHaveBeenCalledWith(
+      RUN_ID,
+      'SDK reported execution error',
+    );
+  });
+
+  it('M8: an aborted run that throws stays skipped', async () => {
+    const h = makeHarness(
+      null,
+      gatewayOf([{ key: 'k', display: 'down', status: 'failed' }]),
+    );
+    const caller = new AbortController();
+    h.internalQuery.execute.mockResolvedValue({
+      stream: {
+        [Symbol.asyncIterator]: () => ({
+          next: async () => {
+            caller.abort();
+            throw new Error('stream torn down');
+          },
+        }),
+      },
+      close: jest.fn(),
+      abort: jest.fn(),
+    });
+
+    await h.runner.run(promptJob(), 1_700_000_000_000, {
+      signal: caller.signal,
+    });
+
+    expect(h.runs.markSkipped).toHaveBeenCalledWith(RUN_ID, 'aborted');
+    expect(h.runs.markFailed).not.toHaveBeenCalled();
+  });
+
+  it('M8: redacts URL queries, tokens and header values in the warning', async () => {
+    const gateway = gatewayOf([
+      {
+        key: 'k',
+        display: 'hosted',
+        status: 'failed',
+        detail: 'HTTP 401 from https://mcp.example/v1?api_key=GW-SECRET-1',
+      },
+    ]);
+    const h = makeHarness(null, gateway);
+    h.internalQuery.execute.mockResolvedValue(
+      handleOf([
+        init([
+          {
+            name: 'broken',
+            status: 'failed',
+            error:
+              'connect https://user:pw-SECRET-2@srv.example/mcp?token=SECRET-3 ' +
+              'failed; Authorization: Token SECRET-4',
+          },
+        ]),
+        { type: 'result', subtype: 'success', result: 'done' },
+      ]),
+    );
+
+    await h.runner.run(promptJob(), 1_700_000_000_000);
+
+    const summary = h.runs.markSucceeded.mock.calls[0][1] as string;
+    for (const secret of ['GW-SECRET-1', 'SECRET-2', 'SECRET-3', 'SECRET-4']) {
+      expect(summary).not.toContain(secret);
+    }
+    expect(summary).toContain('https://srv.example/mcp?***redacted***');
+    expect(summary).toContain('https://mcp.example/v1?***redacted***');
   });
 });

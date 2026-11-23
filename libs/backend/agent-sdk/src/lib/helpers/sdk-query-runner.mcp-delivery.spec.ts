@@ -8,13 +8,11 @@ import type {
 import type { AuthEnv } from '@ptah-extension/shared';
 import { createMockLogger } from '@ptah-extension/shared/testing';
 import {
-  ONE_SHOT_CONNECTORS_DISABLED_MESSAGE,
-  ONE_SHOT_GATEWAY_HOOK_MATCHER,
   SdkQueryRunner,
   keepMcpServersOnArgv,
-  oneShotGatewayDenyHook,
   type OneShotRunInput,
 } from './sdk-query-runner.service';
+import { oneShotGatewayDenyHook } from '../permission/one-shot-gateway-deny-hook';
 import type { SdkQueryOptions } from './sdk-query-options-builder';
 import type { SdkRuntimeStateService } from './sdk-runtime-state.service';
 import type { SdkModuleLoader } from './sdk-module-loader';
@@ -268,9 +266,11 @@ describe('SdkQueryRunner: connector opt-in (TASK_2026_979)', () => {
         throw new Error('registry not ready');
       }, onError);
 
-      expect(matcher.matcher).toBe(ONE_SHOT_GATEWAY_HOOK_MATCHER);
+      expect(matcher.matcher).toBe('mcp__ptah__.*');
       const outputs = await runPreToolUse([matcher], GATEWAY_TOOL);
-      expect(deniedReason(outputs)).toBe(ONE_SHOT_CONNECTORS_DISABLED_MESSAGE);
+      expect(deniedReason(outputs)).toBe(
+        'connectors are not enabled for this run',
+      );
       expect(onError).toHaveBeenCalledWith(expect.any(Error), GATEWAY_TOOL);
     });
 

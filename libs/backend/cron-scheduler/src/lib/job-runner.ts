@@ -38,9 +38,10 @@ import type { IRunStore } from './run.store';
 import { SlotAlreadyClaimedError } from './run.store';
 import type { RunId } from '@ptah-extension/shared';
 import type { IHandlerRegistry, JobHandlerResult, ScheduledJob } from './types';
-import { SDK_TOKENS } from '@ptah-extension/agent-sdk';
+import { SDK_TOKENS, redactMcpErrorText } from '@ptah-extension/agent-sdk';
 import {
   PLATFORM_TOKENS,
+  internalQueryGatewayScope,
   resolveMcpSessionWiring,
   type IMcpGateway,
   type IMcpServerStatus,
@@ -74,7 +75,7 @@ interface UnavailableMcpServer {
 /**
  * The `system`/`init` message lists every MCP server the CLI loaded. Returns
  * the entries that are neither `connected` nor deliberately `disabled`, with
- * the CLI's error text as detail when it gives one.
+ * the CLI's error text, redacted, as detail when it gives one.
  */
 function readUnavailableInitServers(msg: unknown): UnavailableMcpServer[] {
   if (!msg || typeof msg !== 'object') return [];
@@ -91,7 +92,7 @@ function readUnavailableInitServers(msg: unknown): UnavailableMcpServer[] {
       name: e.name,
       status: e.status,
       ...(typeof e.error === 'string' && e.error.length > 0
-        ? { detail: e.error }
+        ? { detail: redactMcpErrorText(e.error) }
         : {}),
     });
   }
@@ -99,16 +100,13 @@ function readUnavailableInitServers(msg: unknown): UnavailableMcpServer[] {
 }
 
 /**
- * `base` capped at 500 characters, then one warning line naming every MCP
- * server the run could not use, capped at 300. The warning never changes the
- * run status (decision 6): the job reached its own verdict either way.
+ * One warning line naming every MCP server the run could not use, capped at
+ * 300 characters, or `''` when there is none. Details are already redacted.
+ * The warning never changes the run status (decision 6): the job reached its
+ * own verdict either way.
  */
-function withMcpWarning(
-  base: string,
-  unavailable: readonly UnavailableMcpServer[],
-): string {
-  const capped = base.slice(0, SUMMARY_CAP);
-  if (unavailable.length === 0) return capped;
+function mcpWarningLine(unavailable: readonly UnavailableMcpServer[]): string {
+  if (unavailable.length === 0) return '';
   const names = unavailable
     .map((s) =>
       s.detail
@@ -116,8 +114,15 @@ function withMcpWarning(
         : `${s.name}(${s.status})`,
     )
     .join(', ');
-  const warning = `\n[warning] MCP unavailable: ${names}`;
-  return capped + warning.slice(0, MCP_WARNING_CAP);
+  return `\n[warning] MCP unavailable: ${names}`.slice(0, MCP_WARNING_CAP);
+}
+
+/** `base` capped at 500 characters, then the MCP warning line. */
+function withMcpWarning(
+  base: string,
+  unavailable: readonly UnavailableMcpServer[],
+): string {
+  return base.slice(0, SUMMARY_CAP) + mcpWarningLine(unavailable);
 }
 
 /**
@@ -181,7 +186,7 @@ export class JobRunner {
      * the run-summary warning about connectors that were not available.
      */
     @inject(PLATFORM_TOKENS.MCP_GATEWAY, { isOptional: true })
-    private readonly mcpGateway: IMcpGateway | null = null,
+    private readonly mcpGateway?: IMcpGateway,
   ) {}
 
   /**
@@ -391,15 +396,47 @@ export class JobRunner {
             throw new Error('SDK reported execution error');
         }
       }
+    } catch (err) {
+      // degradation-audit: reported - rethrown, not swallowed: the run still
+      // fails with the same error, now naming the MCP servers it could not use.
+      throw this.withFailureMcpWarning(err, job, runId, cwd, unavailable);
     } finally {
       handle.close();
     }
+    this.addGatewayUnavailable(job, runId, cwd, unavailable);
+    return { summary: withMcpWarning(summary ?? 'ok', unavailable) };
+  }
+
+  /**
+   * `err` with the MCP warning appended to its message, the original as its
+   * `cause`. With nothing to warn about, `err` itself, unchanged.
+   */
+  private withFailureMcpWarning(
+    err: unknown,
+    job: ScheduledJob,
+    runId: RunId,
+    cwd: string,
+    unavailable: UnavailableMcpServer[],
+  ): unknown {
+    this.addGatewayUnavailable(job, runId, cwd, unavailable);
+    const warning = mcpWarningLine(unavailable);
+    if (!warning) return err;
+    const message = err instanceof Error ? err.message : String(err);
+    return new Error(message + warning, { cause: err });
+  }
+
+  /** Adds the gateway's unavailable servers not already named by the CLI. */
+  private addGatewayUnavailable(
+    job: ScheduledJob,
+    runId: RunId,
+    cwd: string,
+    unavailable: UnavailableMcpServer[],
+  ): void {
     for (const server of this.readGatewayUnavailable(job, runId, cwd)) {
       if (!unavailable.some((u) => u.name === server.name)) {
         unavailable.push(server);
       }
     }
-    return { summary: withMcpWarning(summary ?? 'ok', unavailable) };
   }
 
   /**
@@ -415,17 +452,12 @@ export class JobRunner {
     if (!this.mcpGateway) return [];
     try {
       return this.mcpGateway
-        .status({
-          kind: 'internal-query',
-          capability: 'privileged',
-          includeConnectors: true,
-          workspaceRoot,
-        })
+        .status(internalQueryGatewayScope(workspaceRoot, true))
         .filter((s) => s.status !== 'connected')
         .map((s) => ({
           name: s.display,
           status: s.status,
-          ...(s.detail ? { detail: s.detail } : {}),
+          ...(s.detail ? { detail: redactMcpErrorText(s.detail) } : {}),
         }));
     } catch (err) {
       // degradation-audit: reported - the gateway status only feeds the

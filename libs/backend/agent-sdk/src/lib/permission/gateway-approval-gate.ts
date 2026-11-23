@@ -24,6 +24,10 @@ import type {
   HookJSONOutput,
   PermissionResult,
 } from '../types/sdk-types/claude-sdk.types';
+import {
+  hasPtahMcpToolPrefix,
+  PTAH_MCP_TOOL_PREFIX,
+} from '@ptah-extension/platform-core';
 
 /**
  * Seconds the CLI waits on the held `PreToolUse` call. A hook that times out
@@ -39,10 +43,8 @@ const HOOK_DEADLINE_MARGIN_MS = 30_000;
  */
 export const GATEWAY_APPROVAL_REMEMBERED_MAX = 32;
 
-const PTAH_MCP_TOOL_PREFIX = 'mcp__ptah__';
-
 /** Every tool of the `ptah` server; the hook itself picks the gateway ones. */
-export const GATEWAY_APPROVAL_HOOK_MATCHER = 'mcp__ptah__.*';
+export const GATEWAY_APPROVAL_HOOK_MATCHER = `${PTAH_MCP_TOOL_PREFIX}.*`;
 
 export const GATEWAY_APPROVAL_TIMEOUT_MESSAGE =
   'Nobody answered the approval prompt for this MCP tool call in time, so the call was not run.';
@@ -96,7 +98,7 @@ export function createGatewayApprovalGate(
 
   /** A `ptah` server tool that is not one of Ptah's own; fail-closed. */
   const isGatewayTool = (toolName: string): boolean => {
-    if (!toolName.startsWith(PTAH_MCP_TOOL_PREFIX)) return false;
+    if (!hasPtahMcpToolPrefix(toolName)) return false;
     try {
       return options.isGatewayTool(toolName);
     } catch (error: unknown) {

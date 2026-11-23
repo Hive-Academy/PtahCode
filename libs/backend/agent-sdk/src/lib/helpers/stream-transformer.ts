@@ -28,13 +28,9 @@ import {
   type LiveStatsCallback,
   type ResultStatsPayload,
   type SessionStatsEntry,
-  type SessionMcpServerEntry,
 } from '@ptah-extension/shared';
-import {
-  PLATFORM_TOKENS,
-  type IMcpGateway,
-  type McpGatewayScope,
-} from '@ptah-extension/platform-core';
+import { PLATFORM_TOKENS, type IMcpGateway } from '@ptah-extension/platform-core';
+import { withGatewayServers } from './gateway-server-status';
 import { Logger, TOKENS } from '@ptah-extension/vscode-core';
 import type {
   RunModelUsage,
@@ -406,52 +402,6 @@ function runGuardedCallback(
   }
 }
 
-/** Name of Ptah's own MCP server in a session's `mcpServersOverride`. */
-const PTAH_MCP_SERVER_NAME = 'ptah';
-
-/**
- * Gateway servers to append to a session's init MCP status, each with
- * `name = serverKey` and `source: 'ptah-gateway'`.
- *
- * Empty when no gateway is bound, when the session has no `ptah` server
- * (gateway tools only reach a session through it) or when the init message
- * names no workspace. The scope mirrors the interactive credential the
- * options builder mints when a gateway is bound: a privileged `session`
- * caller with `gatewayApproval`. `status` reads the gateway's cache only.
- */
-function readGatewayServers(
-  gateway: Pick<IMcpGateway, 'status'> | undefined,
-  cliServers: readonly SessionMcpServerEntry[],
-  cwd: unknown,
-  logger: Logger,
-  sessionId: string,
-): SessionMcpServerEntry[] {
-  if (!gateway || typeof cwd !== 'string' || cwd.length === 0) return [];
-  if (!cliServers.some((server) => server.name === PTAH_MCP_SERVER_NAME)) {
-    return [];
-  }
-  const scope: McpGatewayScope = {
-    kind: 'session',
-    capability: 'privileged',
-    workspaceRoot: cwd,
-    gatewayApproval: true,
-  };
-  try {
-    return gateway.status(scope).map((server) => ({
-      name: server.key,
-      status: server.status,
-      source: 'ptah-gateway' as const,
-    }));
-  } catch (error: unknown) {
-    // degradation-audit: reported - gateway status is advisory; the CLI's own entries still publish and the failure is logged.
-    logger.warn('[StreamTransformer] Gateway server status unavailable', {
-      sessionId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return [];
-  }
-}
-
 /** Longer than the 10 s parent streamInput acceptance window. */
 export const STREAM_MONITOR_WAIT_MS = 15_000;
 
@@ -599,10 +549,6 @@ export class StreamTransformer {
      */
     @inject(SDK_TOKENS.SDK_SESSION_PLAN_LIMIT_REGISTRY)
     private readonly planLimits: SessionPlanLimitCallbackRegistry,
-    /**
-     * Ptah's MCP gateway, when the host binds one. Its servers are appended
-     * to the init MCP status so a session that loses one shows it.
-     */
     @inject(PLATFORM_TOKENS.MCP_GATEWAY, { isOptional: true })
     private readonly mcpGateway?: Pick<IMcpGateway, 'status'>,
   ) {}
@@ -853,24 +799,19 @@ export class StreamTransformer {
               // here in a way it is not for `turn_state`. See the registry's
               // file header.
               if (Array.isArray(sdkMessage.mcp_servers)) {
-                const cliServers: SessionMcpServerEntry[] =
-                  sdkMessage.mcp_servers.map((server) => ({
-                    name: server.name,
-                    status: server.status,
-                  }));
                 mcpStatus.notifyAll({
                   kind: 'servers',
                   sessionId: realSessionId,
-                  servers: [
-                    ...cliServers,
-                    ...readGatewayServers(
-                      mcpGateway,
-                      cliServers,
-                      sdkMessage.cwd,
-                      logger,
-                      realSessionId,
-                    ),
-                  ],
+                  servers: withGatewayServers(
+                    mcpGateway,
+                    sdkMessage.mcp_servers.map((server) => ({
+                      name: server.name,
+                      status: server.status,
+                    })),
+                    sdkMessage.cwd,
+                    logger,
+                    realSessionId,
+                  ),
                 });
               }
             }
