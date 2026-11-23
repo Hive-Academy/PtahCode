@@ -862,7 +862,8 @@ export class SubagentBudgetMonitor {
    */
   recordNotesToolResult(sessionId: string, agentId: string, toolName: string, input: unknown): Promise<void> {
     const current = this.currentSessionId(sessionId);
-    const key = scopedAgentKey(current, agentId);
+    // The same lookup as the check: a session id the monitor does not know falls back to the unique gate.
+    const key = this.findGateKey(sessionId, agentId) ?? scopedAgentKey(current, agentId);
     this.deliverables.record(current, key, toolName, input, this.records.workspaceOf(current), this.logger);
     this.notesGate.recordWrite(key, toolName, input);
     return Promise.resolve();

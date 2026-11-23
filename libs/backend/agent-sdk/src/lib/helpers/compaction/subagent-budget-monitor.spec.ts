@@ -17,7 +17,8 @@ import {
 } from '@ptah-extension/shared';
 import type { CompactionConfigProvider } from '../compaction-config-provider';
 import { MainThreadNoticeQueue } from '../main-thread-notice-queue';
-import { NOTES_GATE_TIMEOUT_MS } from './subagent-notes-gate';
+import { NOTES_GATE_TIMEOUT_MS, SubagentNotesGate } from './subagent-notes-gate';
+import { scopedAgentKey } from './subagent-scope-key';
 import { SubagentBudgetStopCallbackRegistry } from '../subagent-budget-stop-callback-registry';
 import { SubagentHandoffFiles } from './subagent-handoff-files';
 import { SubagentNoticeQueue } from '../subagent-notice-queue';
@@ -1266,6 +1267,18 @@ describe('cooperative budget: ask, pause and normal return', () => {
       await h.monitor.finishWarnedAgent(SESSION, 'a1', 'completed');
       expect(h.monitor.hasNotesGate('a1')).toBe(false);
       expect(h.recordStore.writeOnce).toHaveBeenCalledTimes(1);
+    });
+
+    it('records a notes write under the gate that a session id the monitor does not know resolves to', async () => {
+      const h = makeHarness({ agentType: 'general-purpose' }, { workspace });
+      await launched(h);
+      await h.monitor.observe(SESSION, ctx(300_000, 'tab'));
+      const gate = (h.monitor as unknown as { notesGate: SubagentNotesGate }).notesGate;
+      const key = scopedAgentKey(SESSION, 'a1');
+      expect(gate.notesReady(key)).toBe(false);
+      // A tab id before the SDK session id is known: the check and the record use the same lookup.
+      await h.monitor.recordNotesToolResult('unknown-tab-id', 'a1', 'Write', { file_path: notesPath() });
+      expect(gate.notesReady(key)).toBe(true);
     });
 
     it('reports a single target as asked, paused, finalizing, then settled', async () => {
