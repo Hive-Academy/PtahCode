@@ -680,7 +680,7 @@ Edge cases:
 
 - Artifacts exist; scoped commands pass.
 
-## Batch 13: F6c canvas lane view uses main chat cards - PENDING
+## Batch 13: F6c canvas lane view uses main chat cards - COMPLETE
 
 - Shape: logic
 - Estimated weight (tokens): ~9k
@@ -700,13 +700,13 @@ Edge cases:
 - Tasks: 1 | Depends on: Batch 12
 - Phase: P4 Lane prompts and header | Phase review: see Batch 14
 
-### Task 13.1: Card list and lane question filter in canvas lane view - PENDING
+### Task 13.1: Card list and lane question filter in canvas lane view - COMPLETE
 
 ### Batch 13 verification
 
 - Artifacts exist; scoped commands pass.
 
-## Batch 14: F7 lane header confirmed model and usage timing - PENDING
+## Batch 14: F7 lane header confirmed model and usage timing - COMPLETE
 
 - Shape: logic
 - Estimated weight (tokens): ~9k
@@ -732,8 +732,8 @@ Edge cases:
 - Phase: P4 Lane prompts and header (last batch with 13: phase review due after both commit) |
   Phase review: code-logic + visual (Electron, lane view prompts and header)
 
-### Task 14.1: Header model chip and usage timing - PENDING
-### Task 14.2: Verify A5 (no double count of lane usage) - PENDING
+### Task 14.1: Header model chip and usage timing - COMPLETE
+### Task 14.2: Verify A5 (no double count of lane usage) - COMPLETE
 
 ### Batch 14 verification
 
