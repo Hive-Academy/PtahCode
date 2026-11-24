@@ -13,7 +13,7 @@ import type { StructuredDecisionCompleter } from './decision-model/structured-de
 import type { SystemOneFetch } from './decision-model/system-one.client';
 import type { LaneRoutingLogger } from './lane-routing-logger';
 import type { RouteCandidateSource } from './route-candidate-source.port';
-import { DECISION_REQUEST_TIMEOUT_MS } from './routing-constants';
+import { DECISION_REQUEST_TIMEOUT_MS, ROUTE_RETURN_RESERVE_MS } from './routing-constants';
 import {
   RouteDecideService,
   type RouteDecideSeams,
@@ -25,7 +25,6 @@ import {
 import type { DecisionPayload } from './decision-model/decision-payload';
 import type { SystemOneCallResult } from './decision-model/system-one.client';
 import {
-  SystemOneClient,
   type SystemOneClientOptions,
 } from './decision-model/system-one.client';
 import { PreflightResultSchema } from './contracts/route-decide-result.schema';
@@ -123,6 +122,9 @@ function harness(options: {
       ? { structured: options.structured }
       : {}),
     seams: {
+      residencyFetch: async () => ({
+        ok: true, status: 200, text: async () => '{"models":[{"name":"nimble:latest"}]}',
+      }),
       systemOne: (clientOptions) => {
         seen.push(clientOptions);
         return options.seams?.systemOne?.(clientOptions) ?? caller;
@@ -348,48 +350,39 @@ describe('route decide preflight', () => {
     });
   });
 
-  // Real timers: AbortSignal.timeout ignores Jest's fake timers, so this
-  // waits ~3.3 s. The reply is slower than the 3000 ms default and faster
-  // than the configured 5000 ms, so it succeeds only if the setting reaches
-  // the client's abort signal.
-  it('waits for a slow decision model up to the configured timeout', async () => {
-    const reply = JSON.stringify({
-      model: 'nimble',
-      answers: {
-        task_type: { type: 'choice', choice: 'o1', confidence: 0.8 },
-        depth: { type: 'choice', choice: 'o1', confidence: 0.7 },
-      },
-    });
-    const slowFetch: SystemOneFetch = (_url, init) =>
-      new Promise((resolve, reject) => {
-        const timer = setTimeout(
-          () =>
-            resolve({ ok: true, status: 200, text: async () => reply }),
-          DECISION_REQUEST_TIMEOUT_MS + 300,
-        );
-        init?.signal?.addEventListener('abort', () => {
-          clearTimeout(timer);
-          reject(new Error('aborted'));
-        });
-      });
-    const seen: SystemOneClientOptions[] = [];
-    const { service } = harness({
+  it('caps the configured timeout at the remaining pre-flight budget', async () => {
+    const { service, seen } = harness({
       selection: OLLAMA,
-      config: { [`ptah.${DECISION_MODEL_TIMEOUT_SETTING_KEY}`]: 5_000 },
-      seams: {
-        systemOne: (clientOptions) => {
-          seen.push(clientOptions);
-          return new SystemOneClient(clientOptions, { fetch: slowFetch });
-        },
-      },
+      config: { [`ptah.${DECISION_MODEL_TIMEOUT_SETTING_KEY}`]: 15_000 },
+      seams: { monotonicNow: () => 100 },
     });
     const result = await service.decide(preflight, source());
-    expect(seen[0]?.timeoutMs).toBe(5_000);
-    expect(result).toMatchObject({
-      taskType: { value: 'FEATURE', source: 'model', fallbackCause: null },
-      usage: { requests: 1 },
-    });
-  }, 10_000);
+    expect(seen[0]?.timeoutMs).toBe(4000 - ROUTE_RETURN_RESERVE_MS);
+    expect(seen[0]?.coldTimeoutMs).toBeUndefined();
+    expect(result).toMatchObject({ taskType: { source: 'model' }, usage: { requests: 1 } });
+  });
+
+  it('returns null skill-table answers when a dispatched pre-flight request hangs', async () => {
+    jest.useFakeTimers();
+    try {
+      const { service } = harness({
+        selection: OLLAMA,
+        seams: { systemOne: () => ({ decide: () => new Promise<never>(() => undefined) }) },
+      });
+      const pending = service.decide(preflight, source(), {
+        deadlineAtMs: performance.now() + ROUTE_RETURN_RESERVE_MS + 1200,
+      });
+      await jest.advanceTimersByTimeAsync(1200);
+      const result = await pending;
+      const fallback = { value: null, source: 'skill-table', fallbackCause: 'deadline' };
+      expect(result).toMatchObject({
+        taskType: fallback, depth: fallback,
+        usage: { requests: 1, inputTokens: null, outputTokens: null },
+      });
+    } finally {
+      jest.useRealTimers();
+    }
+  });
 
   it('rejects invalid args before any port or model call', async () => {
     const rows = source();

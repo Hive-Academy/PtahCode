@@ -10034,10 +10034,10 @@ describe('protocol-handlers › route and outcome registration', () => {
       }),
       deps,
     );
-    expect(decide).toHaveBeenCalledWith({
-      stage: 'pre-flight',
-      request: 'ship the parser',
-    });
+    expect(decide).toHaveBeenCalledWith(
+      { stage: 'pre-flight', request: 'ship the parser' },
+      { deadlineAtMs: expect.any(Number) },
+    );
     expect(agentToolResult(route).isError).toBeFalsy();
 
     const outcome = await handleMCPRequest(

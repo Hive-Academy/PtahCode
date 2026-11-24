@@ -272,6 +272,31 @@ describe('buildRouteNamespace', () => {
     expect(rows.limits).toHaveBeenCalledWith([codex, glm, bare]);
   });
 
+  it('projects only state, lookup status, snapshot status and readAt into limit evidence', async () => {
+    const codex = cliRow('codex');
+    const glm = cliRow('ptah-cli', 'glm');
+    const owner = { key: 'private-owner-key', providerId: 'codex', identityKind: 'account', label: 'Private owner' } as const;
+    const lookup = jest.fn().mockResolvedValue([
+      {
+        ...limitEntry(codex, 'near-limit'),
+        owner,
+        snapshot: {
+          owner, status: 'available', fetchedAt: 4321, readAt: 1234,
+          windowSetEstablished: true, windows: [], ownerEvidence: [],
+        },
+      },
+      { ...limitEntry(glm, 'unknown'), lookup: 'failed', error: new Error('private error') },
+    ]);
+    const source = buildRouteCandidateSource(agent({ limits: lookup }));
+
+    await expect(source.limitEvidence?.([codex, glm])).resolves.toEqual(new Map([
+      ['codex', { state: 'near-limit', lookup: 'ok', status: 'available', readAt: 1234 }],
+      ['glm', { state: 'unknown', lookup: 'failed', status: null, readAt: null }],
+    ]));
+    expect(lookup).toHaveBeenCalledTimes(1);
+    expect(lookup).toHaveBeenCalledWith([codex, glm]);
+  });
+
   it('reports limits unavailable when the agent has no limits method', async () => {
     const rows = {
       list: jest.fn().mockResolvedValue([cliRow('codex')]),
@@ -285,6 +310,7 @@ describe('buildRouteNamespace', () => {
     await namespace.decide(ARGS);
     const source = sourceOf(decide);
     await expect(source.limits([cliRow('codex')])).resolves.toBeNull();
+    await expect(source.limitEvidence?.([cliRow('codex')])).resolves.toBeNull();
   });
 
   it('reports limits unavailable when the lookup returns undefined', async () => {

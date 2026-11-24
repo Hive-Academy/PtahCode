@@ -13,6 +13,7 @@ import type {
 } from '@ptah-extension/shared';
 import {
   LANE_ROUTING_TOKENS,
+  type LimitEvidence,
   type RouteCandidateSource,
   type RouteDecideArgs,
   type RouteDecideResult,
@@ -47,7 +48,7 @@ export interface RouteServiceLocator {
 export interface RouteNamespace {
   decide(
     args: RouteDecideArgs,
-    context?: { readonly sessionKey?: string },
+    context?: { readonly sessionKey?: string; readonly deadlineAtMs?: number },
   ): Promise<RouteDecideResult>;
 }
 
@@ -92,6 +93,20 @@ export function buildRouteCandidateSource(
   childSession?: { canStart(): SessionChildEligibility },
 ): RouteCandidateSource {
   const rowsById = new Map<string, CandidateRow>();
+  const limitEvidence: NonNullable<RouteCandidateSource['limitEvidence']> = async (rows) => {
+    const listed = await agent.limits?.(rows);
+    if (listed === undefined) return null;
+    const map = new Map<string, LimitEvidence>();
+    for (const entry of listed) {
+      map.set(limitKey(entry.row), {
+        state: entry.state.state,
+        lookup: entry.lookup,
+        status: entry.snapshot?.status ?? null,
+        readAt: entry.snapshot?.readAt ?? null,
+      });
+    }
+    return map;
+  };
   return {
     childSessionEligible: () => childSession?.canStart().ok === true,
     rows: async () => {
@@ -102,16 +117,13 @@ export function buildRouteCandidateSource(
     },
 
     limits: async (rows) => {
-      const lookup = agent.limits;
-      if (!lookup) return null;
-      const listed = await lookup(rows);
-      if (listed === undefined) return null;
-      const map = new Map<string, LaneLimitState>();
-      for (const entry of listed) {
-        map.set(limitKey(entry.row), entry.state.state);
-      }
-      return map;
+      const evidence = await limitEvidence(rows);
+      if (evidence === null) return null;
+      const states = new Map<string, LaneLimitState>();
+      for (const [id, entry] of evidence) states.set(id, entry.state);
+      return states;
     },
+    limitEvidence,
 
     // A rejection stays a rejection. Gather records "roles unavailable"
     // and still offers built-in roles. Swallowing it as [] would hide that.

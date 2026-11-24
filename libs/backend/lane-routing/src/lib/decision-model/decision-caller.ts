@@ -69,28 +69,47 @@ export class DecisionCaller {
     }
   }
 
-  dispatchFor(caller: OpenedCaller): ModelDispatch {
+  dispatchFor(
+    caller: OpenedCaller,
+    budget?: { readonly signal: AbortSignal; readonly timeoutCapMs: number },
+  ): ModelDispatch {
     if (caller.kind === 'structured') {
       const structured = this.deps.structured;
       if (structured === undefined) {
         throw new Error('structured decision port is not registered');
       }
+      const timeout = AbortSignal.timeout(
+        Math.min(DECISION_REQUEST_TIMEOUT_MS, budget?.timeoutCapMs ?? Infinity),
+      );
       return {
         kind: 'structured',
         completer: structured,
         providerId: caller.providerId,
         model: caller.model,
-        signal: AbortSignal.timeout(DECISION_REQUEST_TIMEOUT_MS),
+        signal: budget === undefined ? timeout : AbortSignal.any([timeout, budget.signal]),
       };
     }
     if (caller.kind !== 'system-one') {
       throw new Error('decision model dispatch requires a caller');
     }
-    const options = systemOneClientOptions(caller.target);
+    const defaults = systemOneClientOptions(caller.target);
+    const options = budget === undefined ? defaults : {
+      ...defaults,
+      timeoutMs: Math.min(caller.target.timeoutMs, budget.timeoutCapMs),
+      coldTimeoutMs: undefined,
+    };
     const factory =
       this.deps.seams?.systemOne ??
       ((next: SystemOneClientOptions) =>
-        new SystemOneClient(next, { logger: this.deps.logger }));
+        new SystemOneClient(next, {
+          logger: this.deps.logger,
+          ...(budget === undefined ? {} : {
+            fetch: (url, init) => fetch(url, {
+              ...init,
+              signal: init?.signal === undefined ? budget.signal : AbortSignal.any([init.signal, budget.signal]),
+            }),
+          }),
+        }));
     return {
       kind: 'system-one',
       caller: factory(options),

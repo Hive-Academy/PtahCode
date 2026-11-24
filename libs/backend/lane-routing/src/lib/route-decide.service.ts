@@ -18,19 +18,24 @@ import {
   type RouteDecideArgs,
 } from './contracts/route-decide-args.schema';
 import {
+  DECISION_MODEL_TIMEOUT_MIN_MS,
   loggableErrorName,
   type LoggableErrorName,
 } from '@ptah-extension/shared';
 import type { DecisionModelConfig } from './decision-model/decision-model.config';
 import { DecisionCaller } from './decision-model/decision-caller';
 import type { StructuredDecisionCompleter } from './decision-model/structured-decision.port';
-import type { SystemOneClientOptions } from './decision-model/system-one.client';
+import type { SystemOneClientOptions, SystemOneFetch } from './decision-model/system-one.client';
+import {
+  ollamaPsUrl,
+  residentFromPsBody,
+  SYSTEM_ONE_RESIDENCY_PROBE_TIMEOUT_MS,
+} from './decision-model/system-one.residency';
 import type { LaneModelListing } from './lane-model-listing.port';
 import type { LaneRoutingLogger } from './lane-routing-logger';
 import type { OutcomeFigureLookup } from './matrix/outcome-figures';
 import type { RouteCandidateSource } from './route-candidate-source.port';
 import type { PhaseDefinitionReader } from './phase-definition-reader.port';
-import { effectiveMachineCapabilities, PhaseDefinitionError, resolvePhaseDefinition } from './contracts/phase-definition-resolver';
 import type { RotationPick } from './ranking/rotation.store';
 import { assembleGateResult } from './pipeline/assemble-gate';
 import {
@@ -49,6 +54,7 @@ import {
 import {
   runFixedRequest,
   runLaneRequest,
+  type ModelDispatch,
   type ModelRequestOutcome,
   type SystemOneCaller,
 } from './pipeline/model-refine';
@@ -67,7 +73,13 @@ import {
   type PhaseResolution,
 } from './pipeline/phase-plan';
 import { isSendable } from './pipeline/phase-resolve';
-import { readCandidateTools } from './pipeline/candidate-tools';
+import { emptyOutcome } from './pipeline/model-call';
+import {
+  capRouteDeadline,
+  createRouteDeadline,
+  withinBudget,
+  type RouteDeadline,
+} from './pipeline/route-deadline';
 import type { RoutingCandidate } from './ranking/candidate.types';
 import {
   emptyRotationState,
@@ -78,15 +90,20 @@ import { overallConfidence } from './reasons/confidence';
 import { compilePreflightReasons } from './reasons/compile-reasons';
 import { gateSummary, preflightSummary, type DecisionSummaryFacts } from './reasons/decision-summary';
 import type { PreflightReuseCache } from './scope/preflight-reuse-cache';
+import type { RoutingRulesSetting } from './scope/routing-rules-setting';
 import {
   MODEL_LISTING_BUDGET_MS,
   MIN_OPTIONS_PER_PHASE,
   QUESTIONS_PER_REQUEST,
   REQUEST_SIZE_LIMIT_BYTES,
+  ROUTE_DEADLINE_MS,
+  ROUTE_RETURN_RESERVE_MS,
 } from './routing-constants';
 
 export interface RouteDecideSeams {
   readonly now?: () => number;
+  readonly monotonicNow?: () => number;
+  readonly residencyFetch?: SystemOneFetch;
   readonly maxRequestBytes?: number;
   readonly listingBudgetMs?: number;
   /** Receives the options the default client would use, including the timeout. */
@@ -94,6 +111,7 @@ export interface RouteDecideSeams {
 }
 
 export interface RouteDecideDependencies {
+  readonly routingRulesSetting?: Pick<RoutingRulesSetting, 'read'>;
   readonly rotationSetting?: { isEnabled(): boolean };
   readonly config: DecisionModelConfig;
   readonly matrix: RouteMatrix;
@@ -118,7 +136,7 @@ export interface RotationStateReader {
 }
 
 export class RouteDecideService implements RotationStateReader {
-  private readerUnavailableLogged = false;
+  private rotationWrites = Promise.resolve();
   private readonly decisionCaller: DecisionCaller;
 
   constructor(private readonly deps: RouteDecideDependencies) {
@@ -133,9 +151,11 @@ export class RouteDecideService implements RotationStateReader {
   async decide(
     args: unknown,
     source: RouteCandidateSource,
-    context?: { readonly sessionKey?: string },
+    context?: { readonly sessionKey?: string; readonly deadlineAtMs?: number },
   ): Promise<RouteDecideResult> {
     const started = this.nowMs;
+    const monotonicNow = this.deps.seams?.monotonicNow ?? (() => performance.now());
+    const enteredAt = monotonicNow();
     let stage: 'pre-flight' | 'gate-0.1' | 'unknown' = 'unknown';
     try {
       const parsed = RouteDecideArgsSchema.safeParse(args);
@@ -143,8 +163,16 @@ export class RouteDecideService implements RotationStateReader {
         throw schemaError('invalid route decide args', parsed.error);
       }
       stage = parsed.data.stage;
+      const deadline = createRouteDeadline(
+        context?.deadlineAtMs ?? enteredAt + ROUTE_DEADLINE_MS[stage],
+        monotonicNow,
+      );
+      const ioDeadline = createRouteDeadline(
+        deadline.deadlineAtMs - ROUTE_RETURN_RESERVE_MS,
+        monotonicNow,
+      );
       if (parsed.data.stage === 'pre-flight') {
-        if (context?.sessionKey !== undefined && this.deps.reuse !== undefined) {
+        if (ioDeadline.remainingMs() > 0 && context?.sessionKey !== undefined && this.deps.reuse !== undefined) {
           const fingerprint = JSON.stringify(this.deps.config.getSelection());
           const cached = this.deps.reuse.get(context.sessionKey, fingerprint);
           if (cached !== null) {
@@ -171,9 +199,9 @@ export class RouteDecideService implements RotationStateReader {
             return reused.data;
           }
         }
-        return await this.decidePreflight(parsed.data, started);
+        return await this.decidePreflight(parsed.data, started, ioDeadline);
       }
-      return await this.decideGate(parsed.data, source, started);
+      return await this.decideGate(parsed.data, source, started, deadline, ioDeadline);
     } catch (error: unknown) {
       this.logSummary(() => ({
         stage, outcome: 'error', name: errorFacts(error).name,
@@ -183,19 +211,22 @@ export class RouteDecideService implements RotationStateReader {
     }
   }
 
-  private async decidePreflight(args: PreflightArgs, started: number): Promise<PreflightResult> {
-    const caller = await this.decisionCaller.openCaller();
+  private async decidePreflight(
+    args: PreflightArgs,
+    started: number,
+    deadline: RouteDeadline,
+  ): Promise<PreflightResult> {
+    const caller = await this.openCaller(deadline);
     const tally = emptyTally();
     let outcome: ModelRequestOutcome | null = null;
     if (caller.kind === 'system-one' || caller.kind === 'structured') {
-      outcome = await runFixedRequest({
+      outcome = await this.requestWithinDeadline(caller, deadline, (dispatch) => runFixedRequest({
         request: args.request,
         questions: preflightQuestions(),
         maxRequestBytes: this.maxBytes,
-        dispatch: this.decisionCaller.dispatchFor(caller),
+        dispatch,
         logger: this.deps.logger,
-      });
-      await this.decisionCaller.noteLive(caller, outcome);
+      }));
       noteUsage(tally, outcome);
     }
     const read = readPreflight(caller, outcome);
@@ -232,22 +263,30 @@ export class RouteDecideService implements RotationStateReader {
     args: GateArgs,
     source: RouteCandidateSource,
     started: number,
+    deadline: RouteDeadline,
+    ioDeadline: RouteDeadline,
   ): Promise<GateResult> {
-    const caller = await this.decisionCaller.openCaller();
     const rotate = this.deps.rotationSetting?.isEnabled() ?? true;
+    const routingRules = this.deps.routingRulesSetting?.read();
+    const [caller, gathered] = await Promise.all([
+      this.openCaller(ioDeadline),
+      gatherRouteCall({
+        source,
+        listing: this.deps.listing,
+        matrix: this.deps.matrix,
+        rotation: this.deps.rotation,
+        logger: this.deps.logger,
+        nowMs: this.nowMs,
+        listingBudgetMs: this.listingBudget,
+        deadline: ioDeadline,
+        phases: args.phases,
+        phaseDefinitionReader: this.deps.phaseDefinitionReader,
+      }),
+    ]);
     const mode = dispatchMode(caller);
-    const gathered = await gatherRouteCall({
-      source,
-      listing: this.deps.listing,
-      matrix: this.deps.matrix,
-      rotation: this.deps.rotation,
-      logger: this.deps.logger,
-      nowMs: this.nowMs,
-      listingBudgetMs: this.listingBudget,
-    });
-    const phases = await this.resolveMachineRequirements(args.phases);
+    const phases = gathered.resolvedPhases ?? args.phases;
     const effectiveArgs: GateArgs = { ...args, phases };
-    const toolNamesByPhase = await readCandidateTools(phases, gathered, source, this.deps.logger);
+    const toolNamesByPhase = gathered.toolNamesByPhase;
     const inputRowIds: string[] = [];
     const remember = (candidates: readonly RoutingCandidate[]): void => {
       for (const candidate of candidates) {
@@ -267,10 +306,11 @@ export class RouteDecideService implements RotationStateReader {
       remember,
       rotate,
       toolNamesByPhase,
+      routingRules,
     );
     cursor = pass1.cursor;
     const pass1Run = await this.runPass(
-      pass1.plans, args, caller, mode, gathered.matrix.outcomeFigures,
+      pass1.plans, args, caller, mode, gathered.matrix.outcomeFigures, ioDeadline,
     );
     const resolutions = new Map<string, PhaseResolution>();
     const plans = new Map<string, PhasePlan>();
@@ -287,9 +327,10 @@ export class RouteDecideService implements RotationStateReader {
       remember,
       rotate,
       toolNamesByPhase,
+      routingRules,
     );
     const pass2Run = await this.runPass(
-      pass2.plans, args, caller, mode, gathered.matrix.outcomeFigures,
+      pass2.plans, args, caller, mode, gathered.matrix.outcomeFigures, ioDeadline,
     );
     storePass(pass2.plans, pass2Run.context, plans, resolutions);
 
@@ -305,11 +346,18 @@ export class RouteDecideService implements RotationStateReader {
       tally,
       [pass1Run.outcome, pass2Run.outcome],
     );
-    const validated = GateResultSchema.safeParse(result);
+    const validated = GateResultSchema.safeParse(ioDeadline.remainingMs() === 0 ? {
+      ...result,
+      roster: result.roster.map((row) => row.status === 'unavailable'
+        ? { ...row, reason: `${row.reason}; route deadline reached` }
+        : row),
+    } : result);
     if (!validated.success) {
       throw schemaError('route decide result failed schema', validated.error);
     }
-    await this.persistRotation(gathered, validated.data);
+    this.rotationWrites = this.rotationWrites.then(async () => {
+      if (deadline.remainingMs() > 0) await this.persistRotation(gathered, validated.data);
+    }).catch((error: unknown) => this.logBackgroundFailure('rotation state could not be saved', error));
     this.logSummary(() => gateSummary(validated.data, this.summaryFacts(
       caller, started,
       (pass1Run.outcome?.outcomeFigures ?? 0) + (pass2Run.outcome?.outcomeFigures ?? 0),
@@ -317,46 +365,76 @@ export class RouteDecideService implements RotationStateReader {
     return validated.data;
   }
 
-  private async resolveMachineRequirements(
-    phases: GateArgs['phases'],
-  ): Promise<GateArgs['phases']> {
-    const resolved = new Map<GateArgs['phases'][number]['kind'], GateArgs['phases'][number]['requiredCapabilities']>();
-    return Promise.all(phases.map(async (phase) => {
-      if (phase.requiredCapabilities !== undefined) return phase;
-      let requiredCapabilities = resolved.get(phase.kind);
-      if (requiredCapabilities === undefined) {
-        const reader = this.deps.phaseDefinitionReader;
-        if (reader !== undefined) {
-          try {
-            const text = await reader.read(phase.kind);
-            const definition = resolvePhaseDefinition(phase.kind, () => text).definition;
-            if (definition.version === 1) {
-              this.deps.logger.warn('[lane-routing] version 1 phase definition; using legacy machine capabilities', {
-                kind: phase.kind,
-              });
-            }
-            requiredCapabilities = [...effectiveMachineCapabilities(definition)];
-          } catch (error: unknown) {
-            // degradation-audit: optional-capability - retain the legacy browser gate when a phase definition cannot be read.
-            this.deps.logger.warn('[lane-routing] phase definition unavailable; using legacy machine capabilities', {
-              kind: phase.kind,
-              errorName: error instanceof Error ? error.name : 'unknown',
-              code: error instanceof PhaseDefinitionError ? error.code : undefined,
-            });
-          }
-        } else {
-          if (!this.readerUnavailableLogged) {
-            this.readerUnavailableLogged = true;
-            this.deps.logger.warn('[lane-routing] phase definition reader unavailable; using legacy machine capabilities', {
-              kind: phase.kind,
-            });
-          }
-        }
-        requiredCapabilities ??= phase.kind === 'visual-review' || phase.kind === 'design' ? ['browser'] : [];
-        resolved.set(phase.kind, requiredCapabilities);
+  private async openCaller(deadline: RouteDeadline): Promise<OpenedCaller> {
+    const opened = await withinBudget(deadline, () => this.decisionCaller.openCaller());
+    if (opened.kind === 'ok') return opened.value;
+    if (opened.kind === 'error') throw opened.error;
+    return { kind: 'blocked', cause: 'deadline' };
+  }
+
+  private async requestWithinDeadline(
+    caller: Extract<OpenedCaller, { kind: 'system-one' | 'structured' }>,
+    deadline: RouteDeadline,
+    run: (dispatch: ModelDispatch) => Promise<ModelRequestOutcome>,
+  ): Promise<ModelRequestOutcome> {
+    if (deadline.remainingMs() < DECISION_MODEL_TIMEOUT_MIN_MS) return emptyOutcome('deadline');
+    if (caller.kind === 'system-one' && caller.target.locality === 'local' && caller.target.probe === 'daemon') {
+      const url = ollamaPsUrl(caller.target.baseUrl);
+      const residency = await withinBudget(
+        capRouteDeadline(deadline, SYSTEM_ONE_RESIDENCY_PROBE_TIMEOUT_MS),
+        async (signal) => {
+          if (url === null) return null;
+          const response = await (this.deps.seams?.residencyFetch ?? fetch)(url, { method: 'GET', signal });
+          return response.ok ? residentFromPsBody(await response.text(), caller.target.model) : null;
+        },
+      );
+      if (deadline.remainingMs() < DECISION_MODEL_TIMEOUT_MIN_MS) return emptyOutcome('deadline');
+      if (residency.kind !== 'ok' || residency.value !== true) return emptyOutcome('model-cold');
+    }
+
+    let sent = false;
+    const result = await withinBudget(deadline, async (signal) => {
+      // Arm the outer timer before synchronous payload fitting begins.
+      await Promise.resolve();
+      const timeoutCapMs = Math.floor(deadline.remainingMs());
+      if (timeoutCapMs < DECISION_MODEL_TIMEOUT_MIN_MS) return emptyOutcome('deadline');
+      const dispatch = this.decisionCaller.dispatchFor(caller, { signal, timeoutCapMs });
+      if (dispatch.kind === 'system-one') {
+        return run({
+          ...dispatch,
+          caller: {
+            decide: (payload) => {
+              sent = true;
+              return dispatch.caller.decide(payload);
+            },
+          },
+        });
       }
-      return { ...phase, requiredCapabilities };
-    }));
+      return run({
+        ...dispatch,
+        completer: {
+          isReady: (id) => dispatch.completer.isReady(id),
+          complete: (input) => {
+            sent = true;
+            return dispatch.completer.complete(input);
+          },
+        },
+      });
+    });
+    if (result.kind === 'error') throw result.error;
+    if (result.kind === 'deadline') return { ...emptyOutcome('deadline'), sent };
+    void this.decisionCaller.noteLive(caller, result.value).catch(
+      (error: unknown) => this.logBackgroundFailure('decision model live recheck failed', error),
+    );
+    return result.value;
+  }
+
+  private logBackgroundFailure(message: string, error: unknown): void {
+    try {
+      this.deps.logger.warn(`[lane-routing] ${message}`, errorFacts(error));
+    } catch {
+      // degradation-audit: optional-capability - a broken logger cannot reject background work.
+    }
   }
 
   private summaryFacts(caller: OpenedCaller, started: number, outcomeFigures: number): DecisionSummaryFacts {
@@ -389,6 +467,7 @@ export class RouteDecideService implements RotationStateReader {
     caller: OpenedCaller,
     mode: DispatchMode,
     outcomes: OutcomeFigureLookup,
+    deadline: RouteDeadline,
   ): Promise<{
     readonly outcome: ModelRequestOutcome | null;
     readonly context: PassContext;
@@ -408,17 +487,16 @@ export class RouteDecideService implements RotationStateReader {
       send.length > 0 &&
       (caller.kind === 'system-one' || caller.kind === 'structured')
     ) {
-      outcome = await runLaneRequest({
+      outcome = await this.requestWithinDeadline(caller, deadline, (dispatch) => runLaneRequest({
         provider:
           caller.kind === 'structured' ? 'structuredOutput' : caller.provider,
         request: args.request,
         phases: send.map(laneQuestion),
         outcomes,
         maxRequestBytes: this.maxBytes,
-        dispatch: this.decisionCaller.dispatchFor(caller),
+        dispatch,
         logger: this.deps.logger,
-      });
-      await this.decisionCaller.noteLive(caller, outcome);
+      }));
     }
     return {
       outcome,
@@ -446,14 +524,7 @@ export class RouteDecideService implements RotationStateReader {
         entry.executor.id,
       );
     }
-    try {
-      await this.deps.rotation.save(picks);
-    } catch (error: unknown) {
-      this.deps.logger.warn(
-        '[lane-routing] rotation state could not be saved',
-        errorFacts(error),
-      );
-    }
+    await this.deps.rotation.save(picks);
   }
 
   private get nowMs(): number {
