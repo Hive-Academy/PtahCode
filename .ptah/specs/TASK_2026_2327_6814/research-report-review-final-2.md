@@ -1,0 +1,6 @@
+Verdict: REVISE
+
+1. Resolved — The conclusion and open item give HTTP 500 and 59.98 s as observations and leave the client and cause unknown (`research-report.md:174–176,182`).
+2. Partially resolved — Section 7 records the launch order, treats serialization as an inference, and leaves the retry contribution unmeasured. Section 5 still says “Overlapping calls queue” categorically. Say the pre-F4 timings are consistent with queueing, and describe 51.9 s as the difference in elapsed times from near-simultaneous starts (`research-report.md:90–93,107–109,156,166–170`).
+3. Partially resolved — The separate baseline, unchanged runner context, untested derived model, and D10 are addressed. The F4 table still says “needs approval” and promises retry removal. Mark F4 as applied there and its expected effect as unverified, and remove the untested no-throughput-gain claim about `OLLAMA_NUM_PARALLEL` from section 7 and D9 (`research-report.md:120,131–149,155`, `decisions.md:12–13`).
+4. Resolved — The report labels the pre-F4 baseline, points to the later unload trial, and scopes the 13.8 s difference to that comparison. D11 excludes the overlapping restart trial from the estimate, and D4 records that the initial decision was superseded (`research-report.md:46,77,159,163–165`, `decisions.md:8,14`).
