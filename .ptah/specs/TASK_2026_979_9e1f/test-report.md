@@ -50,3 +50,12 @@ Setup: dev build of HEAD 53550a7c3 (B14-B23) plus B24 work in progress, same `te
 | Claude lane, strict on: no duplicate (P1 finding) | PASS - lane lists only `mcp__ptah__livecheck__echo`; upstream log `call echo("hello-p2-claude")` | live7/04-table.png, echo-mcp log |
 | agy lane sees gateway tools (B22 fix of the P1 FAIL) | PASS - `mcp_ptah_lane_livecheck__echo`, reply `echo: hello-p2-antigravity`, upstream log `call echo("hello-p2-antigravity")` | live7/04-table.png, echo-mcp log |
 | Lanes spawn with the yolo + network default (row 37) | PASS - both lanes spawned with no mode argument and ran the gateway call | same |
+
+### Final live checks on the merged build (main merged; fixes through fd1f80ed8)
+
+| Item | Result | Evidence |
+|---|---|---|
+| Stdio server installed through `ptah_harness_install_mcp_server` (workspace scope) is served | FAIL on 9e55b18da - recorded but never served: the workspace intent got the repository-only default (off), so policy denied it and the gateway dropped it silently. Fixed in fd1f80ed8 (Ptah intents on by default; explicit OFF wins) with an end-to-end spec. PASS on the fixed build: fresh session called `secho`, stdio server log `started` then `call secho("hello-stdio-final")`. | live8/01-stdio.png, live9/01-stdio.png, stdio.log |
+| Stdio server process stops on quit (B23/B25) | PASS - pid 23820 running before quit, gone after; server log ends with `exit`. Repeated after the agy check (pid 5768). | stdio.log, tasklist |
+| agy lane after main's ACP-only adapter | PASS - `mcp_ptah_lane_livecheck__echo` -> `echo: hello-agy-final`; `mcp_ptah_lane_stdiocheck__secho` -> `secho: hello-agy-stdio`; both upstream logs show the calls | live10/01-agy.png, echo-mcp log, stdio.log |
+| CI fixes | `@modelcontextprotocol/sdk` added to the Electron package deps (validate-deps); win32 tree-kill tick restored (skills-sh-cli spec); orphaned degradation-audit marker removed | 776c19c38, 54e6860ea, a43b9bfaa |
