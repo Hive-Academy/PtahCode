@@ -240,6 +240,11 @@ describe('ClaudeCliAdapter native SDK execution', () => {
       undefined,
     );
     const context = f.run.mock.calls[0][0];
+    // The manifest's steer reaches the runner; it stays unsupported (dormant).
+    expect(context.manifestSteer).toEqual({
+      state: 'unsupported',
+      reason: 'The SDK prompt mailbox starts turns; it has no mid-turn steer.',
+    });
     expect(f.query).toHaveBeenCalledWith({
       prompt: context.mailbox.prompt,
       options: context.options,

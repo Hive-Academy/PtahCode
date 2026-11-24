@@ -1589,7 +1589,7 @@ describe('Claude lane interrupt, turn settings, content and catalog (B5)', () =>
   });
 });
 
-describe('Claude lane steer fold-in (B6, dormant until Batch 30)', () => {
+describe('Claude lane steer fold-in (B6, dormant until the manifest flip)', () => {
   function manifest(steer: CliAdapterManifest['messaging']['steer']): CliAdapterManifest {
     return {
       messaging: {
@@ -1672,6 +1672,129 @@ describe('Claude lane steer fold-in (B6, dormant until Batch 30)', () => {
     f.config.onTurnResult?.({ subtype: 'success' });
     f.config.onTurnComplete?.(0);
     await expect(next?.done).resolves.toBe(0);
+    f.finish(0);
+  });
+
+  /** Lets promise chains (the owner-settled gate) run. */
+  const flush = async (): Promise<void> => {
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+  };
+
+  it('assumes a steer folded when the result has no user_message_uuids (older CLI, M6 a)', async () => {
+    const f = runnerFixture(Promise.resolve(), undefined, {}, { manifestSteer: { state: 'supported' } });
+    await f.context.mailbox.prompt.next();
+    f.config.onToolInFlightChange?.(true);
+    await f.handle.steer?.('also check the tests');
+    f.config.onTurnResult?.({ subtype: 'success' });
+    f.config.onTurnComplete?.(0);
+    await expect(f.handle.done).resolves.toBe(0);
+    expect(f.context.emitSegment).not.toHaveBeenCalledWith({ type: 'info', content: CLAUDE_STEER_MISSED_TEXT });
+    // The next real turn settles on its own frame: no placeholder is queued.
+    const next = await f.handle.continue?.('real follow-up');
+    f.config.onTurnResult?.({ subtype: 'success' });
+    f.config.onTurnComplete?.(0);
+    await expect(next?.done).resolves.toBe(0);
+    f.finish(0);
+  });
+
+  it('forgets a steer whose push fails, so the next result reports no missed steer (M6 b)', async () => {
+    const f = runnerFixture(Promise.resolve(), undefined, {}, { manifestSteer: { state: 'supported' } });
+    const first = (await f.context.mailbox.prompt.next()).value;
+    f.config.onToolInFlightChange?.(true);
+    jest.spyOn(f.context.mailbox, 'push').mockImplementationOnce(() => {
+      throw new Error('mailbox closed');
+    });
+    await expect(f.handle.steer?.('lost note')).rejects.toThrow('mailbox closed');
+    f.config.onTurnResult?.({ subtype: 'success', userMessageUuids: [first.uuid] });
+    expect(f.context.emitSegment).not.toHaveBeenCalledWith({ type: 'info', content: CLAUDE_STEER_MISSED_TEXT });
+    f.config.onTurnComplete?.(0);
+    await expect(f.handle.done).resolves.toBe(0);
+    f.finish(0);
+  });
+
+  it('forgets a steer whose named enqueue rejects (M6 b)', async () => {
+    const named = {
+      query: {} as ReturnType<ClaudeSdkLaneRunContext['queryFn']>,
+      reference: {
+        accountBindingId: 'run',
+        accountBinding: {
+          version: 1 as const,
+          provider: 'claude' as const,
+          profileId: 'profile',
+          runId: 'run',
+          routeFingerprint: 'a'.repeat(64),
+          routeRevision: 0,
+          authEpoch: 0,
+          identity: { kind: 'unknown' as const },
+        },
+      },
+      enqueue: jest.fn(async () => undefined).mockRejectedValueOnce(new Error('gate refused')),
+      dispose: jest.fn(async () => undefined),
+    };
+    const f = runnerFixture(
+      Promise.resolve(),
+      named as unknown as NonNullable<ClaudeSdkLaneRunContext['named']>,
+      undefined,
+      { manifestSteer: { state: 'supported' } },
+    );
+    f.config.onToolInFlightChange?.(true);
+    await expect(f.handle.steer?.('lost note')).rejects.toThrow('gate refused');
+    f.config.onTurnResult?.({ subtype: 'success', userMessageUuids: [] });
+    expect(f.context.emitSegment).not.toHaveBeenCalledWith({ type: 'info', content: CLAUDE_STEER_MISSED_TEXT });
+    f.finish(0);
+  });
+
+  it('places a missed steer after a continue queued before it (M6 c)', async () => {
+    const f = runnerFixture(Promise.resolve(), undefined, {}, { manifestSteer: { state: 'supported' } });
+    const first = (await f.context.mailbox.prompt.next()).value;
+    const queued = await f.handle.continue?.('queued follow-up');
+    const queuedSettled = jest.fn();
+    void queued?.done.then(queuedSettled);
+    f.config.onToolInFlightChange?.(true);
+    await f.handle.steer?.('late note');
+    f.config.onTurnResult?.({ subtype: 'success', userMessageUuids: [first.uuid] });
+    expect(f.context.emitSegment).toHaveBeenCalledWith({ type: 'info', content: CLAUDE_STEER_MISSED_TEXT });
+    f.config.onTurnComplete?.(0);
+    await expect(f.handle.done).resolves.toBe(0);
+    await flush();
+    expect(queuedSettled).not.toHaveBeenCalled();
+    // The CLI runs the queued continue next, on its own frame.
+    f.config.onTurnResult?.({ subtype: 'success' });
+    f.config.onTurnComplete?.(0);
+    await expect(queued?.done).resolves.toBe(0);
+    // Then the missed steer's own turn, which settles no real turn.
+    const later = await f.handle.continue?.('after the steer');
+    const laterSettled = jest.fn();
+    void later?.done.then(laterSettled);
+    f.config.onTurnResult?.({ subtype: 'success' });
+    f.config.onTurnComplete?.(0);
+    await flush();
+    expect(laterSettled).not.toHaveBeenCalled();
+    f.config.onTurnResult?.({ subtype: 'success' });
+    f.config.onTurnComplete?.(0);
+    await expect(later?.done).resolves.toBe(0);
+    f.finish(0);
+  });
+
+  it('places a missed steer before a turn queued after it (M6 c)', async () => {
+    const f = runnerFixture(Promise.resolve(), undefined, {}, { manifestSteer: { state: 'supported' } });
+    const first = (await f.context.mailbox.prompt.next()).value;
+    f.config.onToolInFlightChange?.(true);
+    await f.handle.steer?.('late note');
+    const later = await f.handle.continue?.('queued after the steer');
+    const laterSettled = jest.fn();
+    void later?.done.then(laterSettled);
+    f.config.onTurnResult?.({ subtype: 'success', userMessageUuids: [first.uuid] });
+    f.config.onTurnComplete?.(0);
+    await expect(f.handle.done).resolves.toBe(0);
+    // The missed steer runs first, as its own turn.
+    f.config.onTurnResult?.({ subtype: 'success' });
+    f.config.onTurnComplete?.(0);
+    await flush();
+    expect(laterSettled).not.toHaveBeenCalled();
+    f.config.onTurnResult?.({ subtype: 'success' });
+    f.config.onTurnComplete?.(0);
+    await expect(later?.done).resolves.toBe(0);
     f.finish(0);
   });
 

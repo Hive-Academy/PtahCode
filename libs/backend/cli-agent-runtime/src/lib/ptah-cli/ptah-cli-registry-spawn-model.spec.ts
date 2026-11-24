@@ -40,6 +40,7 @@ import type {
 import { CODEX_PROXY_TOKEN_PLACEHOLDER } from '@ptah-extension/shared';
 import type { DependencyContainer } from 'tsyringe';
 import { PtahCliRegistry } from './ptah-cli-registry';
+import { ClaudeSdkLaneRunner } from '../claude/claude-sdk-lane-runner';
 import { createFakeSdkProcessSpawner } from './testing/fake-sdk-process-spawner';
 
 jest.mock('@ptah-extension/agent-sdk', () => {
@@ -439,5 +440,22 @@ describe('PtahCliRegistry.spawnAgent — resume prompt passes the caller task (T
     const first = await prompt!.next();
     expect(first.done).toBe(false);
     expect(first.value.message.content).toBe(task);
+  });
+});
+
+describe('PtahCliRegistry.spawnAgent — steer manifest wiring (M6 d)', () => {
+  it("hands the runner the manifest's steer, which stays unsupported until the flip", async () => {
+    const run = jest.spyOn(ClaudeSdkLaneRunner.prototype, 'run');
+    try {
+      const harness = buildHarness(BASE_CONFIG);
+      await harness.registry.spawnAgent(BASE_CONFIG.id, 'do work', { permission: 'yolo' });
+      expect(run).toHaveBeenCalledTimes(1);
+      expect(run.mock.calls[0][0].manifestSteer).toEqual({
+        state: 'unsupported',
+        reason: 'The SDK prompt mailbox starts a new turn.',
+      });
+    } finally {
+      run.mockRestore();
+    }
   });
 });

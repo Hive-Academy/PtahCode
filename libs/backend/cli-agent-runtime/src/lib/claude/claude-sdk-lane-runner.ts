@@ -321,9 +321,11 @@ export class ClaudeSdkLaneRunner {
     let settling: InFlightTurn[] | undefined;
     let interruptPending: { turn: InFlightTurn; timedOut: boolean } | undefined;
     // Steer fold-in (B6): main-thread tool calls without their result, and
-    // the uuids of steers pushed since the last result frame.
+    // the steers pushed since the last result frame, by uuid. Each keeps its
+    // anchor: the last turn in flight when it was pushed, which the CLI runs
+    // before the steer when it does not fold it in (M6 c).
     let toolInFlight = false;
-    const pendingSteers = new Set<string>();
+    const pendingSteers = new Map<string, InFlightTurn | undefined>();
     let currentModel: string | undefined = options.model;
     let currentEffort: string | undefined =
       typeof options.effort === 'string' ? options.effort : undefined;
@@ -414,18 +416,27 @@ export class ClaudeSdkLaneRunner {
     const supportsSteer = (): boolean => toolInFlight && turnRunning();
     /**
      * A steer the result frame does not list was not folded in: the CLI runs
-     * it as its own turn next. That turn gets a resolver of its own, so the
-     * next real turn's `done` is not settled by it (queued sends may
-     * coalesce, so one turn is assumed for all missed steers).
+     * it as its own turn, in push order, so right after the turn that was
+     * last when it was pushed. That turn gets a resolver of its own, placed
+     * there, so no real turn's `done` is settled by it (queued sends may
+     * coalesce, so one turn is assumed for all missed steers, after the
+     * earliest one's anchor). A frame without `user_message_uuids` (an older
+     * CLI) proves nothing either way: the steers are assumed folded (M6 a).
+     * This runs before the head is shifted off, so an anchor that is the
+     * head puts the placeholder next; an anchor already gone puts it right
+     * after the head.
      */
     const reconcileSteers = (consumed?: readonly string[]): void => {
       if (pendingSteers.size === 0) return;
-      const listed = new Set(consumed ?? []);
-      const missed = [...pendingSteers].some((uuid) => !listed.has(uuid));
+      const steers = [...pendingSteers];
       pendingSteers.clear();
+      if (consumed === undefined) return;
+      const listed = new Set(consumed);
+      const missed = steers.find(([uuid]) => !listed.has(uuid));
       if (!missed) return;
       emitSegment({ type: 'info', content: CLAUDE_STEER_MISSED_TEXT });
-      inFlight.splice(1, 0, { resolve: () => undefined });
+      const anchor = missed[1] ? inFlight.indexOf(missed[1]) : -1;
+      inFlight.splice(anchor >= 0 ? anchor + 1 : 1, 0, { resolve: () => undefined });
     };
     /** Refuses a turn carrying images when the lane's provider cannot take them (S1). */
     const assertImagesAccepted = (content?: LaneTurnContent): void => {
@@ -441,15 +452,23 @@ export class ClaudeSdkLaneRunner {
         content: claudeLaneTurnContent(message, content),
         uuid: randomUUID(),
       };
-      pendingSteers.add(turn.uuid as string);
+      const uuid = turn.uuid as string;
+      pendingSteers.set(uuid, inFlight[inFlight.length - 1]);
       this.logger.info(`[ClaudeLane] steer pushed into the running turn for "${agentName}"`, {
         messageLength: message.length,
         imageCount: content?.images?.length ?? 0,
         fileCount: content?.files?.length ?? 0,
       });
-      if (context.named)
-        await context.named.enqueue(turn, resolvedSessionId ?? undefined);
-      else mailbox.push(turn, resolvedSessionId ?? undefined);
+      try {
+        if (context.named)
+          await context.named.enqueue(turn, resolvedSessionId ?? undefined);
+        else mailbox.push(turn, resolvedSessionId ?? undefined);
+      } catch (error: unknown) {
+        // A steer that never reached the CLI cannot be missed (M6 b); the
+        // caller gets the failure.
+        pendingSteers.delete(uuid);
+        throw error;
+      }
     };
     const applyTurnSettings = async (
       settings: LaneTurnSettings,

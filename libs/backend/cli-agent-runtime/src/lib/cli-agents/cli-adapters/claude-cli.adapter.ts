@@ -356,6 +356,8 @@ export class ClaudeCliAdapter implements ClaudeCliAdapterContract {
           },
           disposeCallbacks,
           stopProxy: async () => undefined,
+          // The runner exposes steer only when the manifest supports it.
+          manifestSteer: this.capabilities().messaging.steer,
         }).handle;
         return {
           ...handle,
