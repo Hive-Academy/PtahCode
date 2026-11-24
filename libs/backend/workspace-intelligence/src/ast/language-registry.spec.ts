@@ -20,9 +20,12 @@
  *   `apps/ptah-electron/src/services/electron-ide-capabilities.spec.ts`).
  * - The grammar the parser registers for each language equals
  *   `GRAMMAR_FILE_MAP` until Batch 29a2 makes the parser read the map.
- * - `.mjs/.cjs/.mts/.cts/.pyi/.pyw` are recognition-only (counted as
- *   `unsupported`) until a batch adds them to `EXTENSION_LANGUAGE_MAP` with
- *   their consumers.
+ * - `.pyi/.pyw` are recognition-only (counted as `unsupported`) until a
+ *   batch adds them to `EXTENSION_LANGUAGE_MAP` with their consumers.
+ * - `.mjs/.cjs/.mts/.cts` are module-flavour extensions since TASK_2026_2322:
+ *   parsed with the JavaScript / TypeScript grammar and holding only
+ *   `MODULE_FLAVOUR_CAPABILITIES` (no graph edges, no Electron definition
+ *   fallback).
  *
  * Revision r1 (`reviews/batch-22-code-logic-review-r1.md`): S1 — common
  * source extensions no longer vanish (recognition-only suffixes and the
@@ -81,6 +84,7 @@ import {
   NON_SOURCE_EXTENSIONS,
   NON_SOURCE_FILE_NAMES,
   classifyFileForCoverage,
+  MODULE_FLAVOUR_CAPABILITIES,
   extensionHasCapability,
   hasCapability,
   languageForExtension,
@@ -455,7 +459,10 @@ describe('language registry', () => {
     for (const [extension, language] of Object.entries(
       EXTENSION_LANGUAGE_MAP,
     )) {
-      expect(LANGUAGE_REGISTRY[language].extensions).toContain(extension);
+      expect([
+        ...LANGUAGE_REGISTRY[language].extensions,
+        ...LANGUAGE_REGISTRY[language].moduleFlavourExtensions,
+      ]).toContain(extension);
       expect(languageForExtension(extension)).toBe(language);
     }
     for (const [language, grammarFile] of Object.entries(GRAMMAR_FILE_MAP)) {
@@ -504,6 +511,7 @@ describe('language registry', () => {
       const entry = LANGUAGE_REGISTRY[id];
       for (const extension of [
         ...entry.extensions,
+        ...entry.moduleFlavourExtensions,
         ...entry.recognitionOnlyExtensions,
       ]) {
         expect(extension).toBe(extension.toLowerCase());
@@ -586,7 +594,7 @@ describe('recognition never loses a source file (r1 S1)', () => {
         }
       }
     }
-    expect(extensionHasCapability('.mjs', 'codeIndex')).toBe(false);
+    expect(extensionHasCapability('.pyi', 'codeIndex')).toBe(false);
     expect(extensionHasCapability('.js', 'codeIndex')).toBe(true);
     expect(extensionHasCapability('.JS', 'codeIndex')).toBe(true);
     expect(extensionHasCapability('.swift', 'parse')).toBe(false);
@@ -594,11 +602,8 @@ describe('recognition never loses a source file (r1 S1)', () => {
   });
 
   it.each([
-    [['src/a.mjs']],
-    [['src/a.cjs']],
-    [['src/a.mts']],
-    [['src/a.cts']],
     [['stubs/a.pyi']],
+    [['src/a.pyw']],
     [['src/a.xyz']],
     [['src/a.ts', 'src/b.mjs', 'typings/c.pyi', 'src/d.xyz']],
   ])('a census over %p is never clean', (files) => {
@@ -616,6 +621,90 @@ describe('recognition never loses a source file (r1 S1)', () => {
     expect(
       isCleanAnswer(censusOf(['src/a.ts', 'src/b.py', 'c.go'], 'codeIndex')),
     ).toBe(true);
+  });
+});
+
+describe('module-flavour extensions (TASK_2026_2322)', () => {
+  // Fails before TASK_2026_2322: these suffixes were recognition-only, so the
+  // code index skipped every `.mjs/.cjs/.mts/.cts` file as `unsupported`.
+  it.each([
+    ['.mjs', 'javascript'],
+    ['.cjs', 'javascript'],
+    ['.mts', 'typescript'],
+    ['.cts', 'typescript'],
+    ['.MJS', 'javascript'],
+    ['.CTS', 'typescript'],
+  ] as const)('parses %s with the %s grammar', (extension, language) => {
+    expect(EXTENSION_LANGUAGE_MAP[extension.toLowerCase()]).toBe(language);
+    expect(languageForExtension(extension)).toBe(language);
+    expect(LANGUAGE_REGISTRY[language].moduleFlavourExtensions).toContain(
+      extension.toLowerCase(),
+    );
+    // Capability claims go through the language's `extensions`, never these.
+    expect(LANGUAGE_REGISTRY[language].extensions).not.toContain(
+      extension.toLowerCase(),
+    );
+  });
+
+  it('pins the flavour lists and the capabilities they hold', () => {
+    expect(LANGUAGE_REGISTRY.javascript.moduleFlavourExtensions).toEqual([
+      '.mjs',
+      '.cjs',
+    ]);
+    expect(LANGUAGE_REGISTRY.typescript.moduleFlavourExtensions).toEqual([
+      '.mts',
+      '.cts',
+    ]);
+    expect(LANGUAGE_REGISTRY.javascript.recognitionOnlyExtensions).toEqual([]);
+    expect(LANGUAGE_REGISTRY.typescript.recognitionOnlyExtensions).toEqual([]);
+    for (const id of LANGUAGE_IDS) {
+      if (id !== 'javascript' && id !== 'typescript') {
+        expect(LANGUAGE_REGISTRY[id].moduleFlavourExtensions).toEqual([]);
+      }
+    }
+    expect([...MODULE_FLAVOUR_CAPABILITIES].sort()).toEqual([
+      'codeIndex',
+      'enrichSummary',
+      'outline',
+      'parse',
+      'publicSymbols',
+    ]);
+  });
+
+  it.each(['.mjs', '.cjs', '.mts', '.cts'])(
+    'grants %s exactly the flavour capabilities its language holds',
+    (extension) => {
+      const language = EXTENSION_LANGUAGE_MAP[extension];
+      for (const capability of Object.keys(
+        LANGUAGE_REGISTRY[language].capabilities,
+      ) as LanguageCapability[]) {
+        expect(extensionHasCapability(extension, capability)).toBe(
+          MODULE_FLAVOUR_CAPABILITIES.has(capability) &&
+            hasCapability(language, capability),
+        );
+      }
+      expect(extensionHasCapability(extension, 'codeIndex')).toBe(true);
+      expect(extensionHasCapability(extension, 'graphEdges')).toBe(false);
+      expect(extensionHasCapability(extension, 'definitionFallback')).toBe(
+        false,
+      );
+    },
+  );
+
+  it('counts flavour files as analysed by the code index, unsupported by the graph', () => {
+    const files = [
+      'src/a.mjs',
+      'src/b.cjs',
+      'src/c.mts',
+      'src/d.cts',
+      'types/e.d.cts',
+    ];
+    const codeIndex = censusOf(files, 'codeIndex');
+    expect(codeIndex.analyzed).toBe(files.length);
+    expect(isCleanAnswer(codeIndex)).toBe(true);
+    const graph = censusOf(files, 'graphEdges');
+    expect(graph.unsupported).toBe(files.length);
+    expect(isCleanAnswer(graph)).toBe(false);
   });
 });
 
@@ -653,7 +742,10 @@ describe('non-source classification (orchestrator ruling)', () => {
     ['yarn.lock', 'nonSource'],
     ['src/app.ts', 'eligible'],
     ['src/APP.TS', 'eligible'],
-    ['src/esm.mjs', 'unsupported'],
+    ['src/esm.mjs', 'eligible'],
+    ['src/legacy.CJS', 'eligible'],
+    ['src/types.d.cts', 'eligible'],
+    ['stubs/a.pyi', 'unsupported'],
     ['lib/mix.ex', 'unsupported'],
     ['src/Widget.swift', 'unsupported'],
     ['src/main.zig', 'unrecognised'],

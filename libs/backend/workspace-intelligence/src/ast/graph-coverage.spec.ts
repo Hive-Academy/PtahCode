@@ -153,7 +153,7 @@ describe('selectGraphFiles — census buckets', () => {
     expect(selection.unsupported).toBe(3);
     expect(selection.unsupportedByLanguage).toEqual({
       java: 1,
-      javascript: 1, // .mjs: recognised, not yet graphed
+      javascript: 1, // .mjs: parsed and code-indexed, but holds no graph edges
       swift: 1,
     });
     expect(selection.unrecognised).toBe(2);

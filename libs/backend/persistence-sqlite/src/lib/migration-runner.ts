@@ -31,14 +31,20 @@ export interface MigrationRunResult {
   readonly appliedVersions: number[];
   /** Versions that were already present and therefore skipped. */
   readonly skippedVersions: number[];
-  /** Highest version present after the run. */
+  /**
+   * Highest version present after the run, including versions a peer
+   * connection applied while this run was in progress.
+   */
   readonly finalVersion: number;
 }
 
 export class SqliteMigrationRunner {
   private _lastAppliedVersion = 0;
 
-  /** Returns the last migration version applied during this session, or 0 if none. */
+  /**
+   * The `finalVersion` of the last `applyAll` run (including versions a peer
+   * connection applied meanwhile), or 0 if none.
+   */
   get lastAppliedVersion(): number {
     return this._lastAppliedVersion;
   }
@@ -103,6 +109,8 @@ export class SqliteMigrationRunner {
 
     const appliedNow: number[] = [];
     const skippedNow: number[] = [];
+    // Versions a peer connection recorded after this connection's ledger read.
+    const peerAppliedNow: number[] = [];
     const vecPendingSet = vecLoaded
       ? new Set(this.readPendingVecVersions())
       : new Set<number>();
@@ -139,6 +147,7 @@ export class SqliteMigrationRunner {
       const migrationStart = this.now();
       if (!this.applyOne(migration, vecLoaded)) {
         skippedNow.push(migration.version);
+        peerAppliedNow.push(migration.version);
         this.logger.info('[persistence-sqlite] migration applied by a peer connection', {
           version: migration.version,
         });
@@ -162,7 +171,14 @@ export class SqliteMigrationRunner {
       this.runVecCatchUp(sorted, appliedNow);
     }
 
-    const finalVersion = Math.max(dbMaxVersion, ...appliedNow, 0);
+    // A peer-applied version is present in the ledger after the run, so it
+    // counts toward the final version just like one this connection applied.
+    const finalVersion = Math.max(
+      dbMaxVersion,
+      ...appliedNow,
+      ...peerAppliedNow,
+      0,
+    );
     this._lastAppliedVersion = finalVersion;
     if (appliedNow.length > 0) {
       this.logger.info('[persistence-sqlite] migrations applied', {

@@ -424,7 +424,7 @@ function unknownGraphCoverage(): LanguageCoverage {
 /**
  * The `unsupported-language` answer for a file the dependency graph cannot
  * hold, or `undefined` when its extension is graph-capable. Every other file
- * (another language, a recognition-only extension such as `.mjs`, non-source
+ * (another language, a recognition-only extension such as `.pyi`, non-source
  * or unrecognised) is never a graph node, so an empty list for it would read
  * as "nothing imports it".
  */

@@ -529,7 +529,8 @@ export class SqliteConnectionService {
 
   /**
    * The highest migration version successfully applied, or 0 if no migrations
-   * have run yet. Delegates to the migration runner's `lastAppliedVersion`.
+   * have run yet. Delegates to the migration runner's `lastAppliedVersion`,
+   * which also counts versions a peer connection applied during the run.
    * Note: reflects the highest *applied* version; `user_version` may skip
    * numbers when vec-required migrations were skipped.
    */

@@ -1091,10 +1091,76 @@ describe('IndexingControlService.trackBackgroundRun alone', () => {
         filesScanned: 4,
       }),
     ]);
-    // Background runs never write the per-call columns.
+    // A succeeded background run records its completion time, never an error.
+    const row = [...rows.values()][0];
+    expect(row['last_indexed_at']).toEqual(expect.any(Number));
+    expect(row['last_error']).toBeNull();
+    const after = await service.getStatus(ROOT);
+    expect(after.state).not.toBe('never-indexed');
+    expect(after.lastIndexedAt).toBe(row['last_indexed_at']);
+  });
+
+  it('success: clears an older failure and records the HEAD it indexed', async () => {
+    const { service, indexer, rows } = buildCensusService();
+    const { workspaceFingerprint } = await service.getStatus(ROOT);
+    const row: Record<string, unknown> = {
+      workspace_fingerprint: workspaceFingerprint,
+      git_head_sha: null,
+      last_indexed_at: null,
+      symbols_enabled: 1,
+      memory_enabled: 1,
+      symbols_cursor: null,
+      disclosure_acknowledged_at: null,
+      last_dismissed_stale_sha: null,
+      last_error: null,
+    };
+    rows.set(workspaceFingerprint, row);
+    const bg = startBackground(service, indexer);
+    await waitFor(() => indexer.calls() === 1);
+    row['last_error'] = 'earlier manual failure';
+    indexer.succeed(STATS);
+    await bg;
+    expect(row['last_error']).toBeNull();
+    expect(row['git_head_sha']).toBe(VALID_SHA_A);
+    expect((await service.getStatus(ROOT)).state).toBe('indexed');
+  });
+
+  it('success: a null HEAD does not overwrite the stored sha', async () => {
+    const { service, indexer, rows } = buildCensusService();
+    const { workspaceFingerprint } = await service.getStatus(ROOT);
+    const row: Record<string, unknown> = {
+      workspace_fingerprint: workspaceFingerprint,
+      git_head_sha: null,
+      last_indexed_at: null,
+      symbols_enabled: 1,
+      memory_enabled: 1,
+      symbols_cursor: null,
+      disclosure_acknowledged_at: null,
+      last_dismissed_stale_sha: null,
+      last_error: null,
+    };
+    rows.set(workspaceFingerprint, row);
+    jest
+      .spyOn(fingerprintModule, 'deriveGitHeadSha')
+      .mockResolvedValueOnce(null);
+    const bg = startBackground(service, indexer);
+    await waitFor(() => indexer.calls() === 1);
+    row['git_head_sha'] = VALID_SHA_A;
+    indexer.succeed(STATS);
+    await bg;
+    expect(row['git_head_sha']).toBe(VALID_SHA_A);
+    expect(row['last_indexed_at']).toEqual(expect.any(Number));
+  });
+
+  it('failure: records no completion time', async () => {
+    const { service, indexer, rows } = buildCensusService();
+    const bg = startBackground(service, indexer);
+    await waitFor(() => indexer.calls() === 1);
+    indexer.fail(new Error('census broke'));
+    await expect(bg).rejects.toThrow('census broke');
     const row = [...rows.values()][0];
     expect(row['last_indexed_at']).toBeNull();
-    expect(row['last_error']).toBeNull();
+    expect((await service.getStatus(ROOT)).lastIndexedAt).toBeNull();
   });
 
   it('failure: one INDEXING_FAILED, and the rejection passes through unchanged', async () => {
