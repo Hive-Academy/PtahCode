@@ -1,6 +1,6 @@
 # Batches - TASK_2026_2320_lnpar
 
-Total tasks: 49 | Batches: 30 | Complete: 27/30
+Total tasks: 49 | Batches: 30 | Complete: 28/30
 
 Source: `implementation-plan.md` revision 3 plus "Binding notes from Gate 2" (R3-1, R3-2 bind
 Batch 20), `task-description.md`, `design-spec.md`, `prototype/README.md`, `parity-inventory.md`,
@@ -1221,7 +1221,7 @@ Edge cases:
 
 - Artifacts exist; scoped commands pass.
 
-## Batch 28: B9a Copilot and OpenCode - PENDING (AFTER REBASE)
+## Batch 28: B9a Copilot and OpenCode - COMPLETE
 
 - Shape: logic
 - Estimated weight (tokens): ~38k
@@ -1245,8 +1245,8 @@ Edge cases:
 - Tasks: 2 | Depends on: Batches 15, 21
 - Phase: P6 Adapters
 
-### Task 28.1: Copilot next-spawn settings and per-request usage - PENDING
-### Task 28.2: OpenCode next-spawn settings, `--file`, step usage - PENDING
+### Task 28.1: Copilot next-spawn settings and per-request usage - COMPLETE
+### Task 28.2: OpenCode next-spawn settings, `--file`, step usage - COMPLETE
 
 ### Batch 28 verification
 

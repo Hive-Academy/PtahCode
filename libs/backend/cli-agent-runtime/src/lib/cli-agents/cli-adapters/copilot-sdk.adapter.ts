@@ -43,15 +43,22 @@ import type {
   CliAdapterManifest,
   CliDetectionResult,
   CliOutputSegment,
+  LaneTurnSettings,
 } from '@ptah-extension/shared';
-import type {
-  CliAdapter,
-  CliCommandOptions,
-  CliModelInfo,
-  ContinuationOutcome,
-  SdkHandle,
+import {
+  LaneTurnSettingRefusal,
+  type CliAdapter,
+  type CliCommandOptions,
+  type CliModelInfo,
+  type ContinuationOutcome,
+  type LaneTurnOptionsCatalog,
+  type LaneTurnSettingsResult,
+  type SdkHandle,
 } from './cli-adapter.interface';
 import { bestMessagingCapability } from './cli-adapter.interface';
+
+/** `copilot --effort` values; the lane spawn policy maps chat efforts onto the same scale. */
+const COPILOT_LANE_EFFORTS: readonly string[] = ['low', 'medium', 'high', 'xhigh'];
 import {
   applyLaneArgvPolicy,
   translateLaneSpawnPolicy,
@@ -227,6 +234,20 @@ export class CopilotSdkAdapter implements CliAdapter {
       },
       limitReader: { state: 'no-reliable-source', reason: 'No reliable noninteractive plan-limit source exists.' },
       mcp: { state: 'supported' },
+      turnInput: {
+        // Spawn flags: a fresh `copilot -p` process takes them on the next turn.
+        model: { state: 'supported', appliesAt: 'next-spawn' },
+        effort: { state: 'supported', appliesAt: 'next-spawn' },
+        images: { state: 'unsupported', reason: 'Copilot image input is not confirmed for -p mode.' },
+        files: { state: 'unsupported', reason: 'Copilot file attachments are not confirmed for -p mode.' },
+        commands: { state: 'unsupported', reason: 'Copilot lanes take no slash commands in -p mode.' },
+        skills: { state: 'unsupported', reason: 'Copilot lanes do not expose skills to the composer.' },
+      },
+      usage: { timing: 'live' },
+      prompts: {
+        approvals: { state: 'unsupported', reason: 'Noninteractive Copilot approvals have no Ptah session route.' },
+        questions: { state: 'unsupported', reason: 'Noninteractive Copilot questions have no Ptah session route.' },
+      },
     };
   }
 
@@ -321,6 +342,8 @@ export class CopilotSdkAdapter implements CliAdapter {
     };
     abortController.signal.addEventListener('abort', onAbort);
 
+    /** Model and effort the next spawned turn uses (`applyTurnSettings`, next-spawn). */
+    const nextTurn: { model?: string; reasoningEffort?: string } = {};
     const runTurn = (
       prompt: string,
       resumeSessionId?: string,
@@ -339,12 +362,14 @@ export class CopilotSdkAdapter implements CliAdapter {
         args.push(`--resume=${resumeSessionId}`);
       }
 
-      if (options.model) {
-        args.push('--model', options.model);
+      const model = nextTurn.model ?? options.model;
+      if (model) {
+        args.push('--model', model);
       }
 
-      if (options.reasoningEffort) {
-        args.push('--effort', options.reasoningEffort);
+      const effort = nextTurn.reasoningEffort ?? options.reasoningEffort;
+      if (effort) {
+        args.push('--effort', effort);
       }
       if (options.mcpPort && options.mcpToken) {
         const mcpConfig = JSON.stringify({
@@ -396,8 +421,9 @@ export class CopilotSdkAdapter implements CliAdapter {
       let nativeTurnId: string | undefined;
       const emitTurnSegment = (item: CliOutputSegment): void => {
         if (item.usage) turnUsages.push(item.usage);
-        // Intermediate message usage feeds the aggregate but is not a turn total.
-        segment.emit(item.usage ? { ...item, usage: undefined } : item);
+        // Per-request usage goes out live as `message` increments; the turn
+        // telemetry below is the `turn` total that corrects them (B4).
+        segment.emit(item.usage ? { ...item, usageScope: 'message' } : item);
       };
       let lineBuf = '';
       let stderrBuf = '';
@@ -503,7 +529,7 @@ export class CopilotSdkAdapter implements CliAdapter {
             } : undefined;
             segment.emit({
               type: 'info', content: 'Copilot turn telemetry',
-              ...(usage ? { usage } : {}),
+              ...(usage ? { usage, usageScope: 'turn' as const } : {}),
               turnTelemetry: completedTurnTelemetry({
                 ...turnIdentity({ provider: 'copilot', turnId: nativeTurnId,
                   sessionId: capturedSessionId ?? resumeSessionId ?? `copilot:${child.pid ?? options.agentId ?? 'unknown'}`,
@@ -545,6 +571,35 @@ export class CopilotSdkAdapter implements CliAdapter {
       supportsContinuation: () => capturedSessionId != null,
       continue: (message: string): Promise<ContinuationOutcome> =>
         Promise.resolve({ done: runTurn(message, capturedSessionId) }),
+      applyTurnSettings: async (settings: LaneTurnSettings): Promise<LaneTurnSettingsResult> => {
+        const { model, reasoningEffort } = settings;
+        if (reasoningEffort !== undefined && !COPILOT_LANE_EFFORTS.includes(reasoningEffort))
+          throw new LaneTurnSettingRefusal('reasoningEffort', `Copilot has no effort level "${reasoningEffort}".`);
+        if (model !== undefined) {
+          // Checked only when the CLI can list its models; Copilot lists none today.
+          const known = await this.listModels();
+          if (known.length > 0 && !known.some((entry) => entry.id === model))
+            throw new LaneTurnSettingRefusal('model', `Copilot has no model "${model}".`);
+          nextTurn.model = model;
+        }
+        if (reasoningEffort !== undefined) nextTurn.reasoningEffort = reasoningEffort;
+        return {
+          ...(model !== undefined ? { model } : {}),
+          ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
+          appliesAt: 'next-spawn',
+        };
+      },
+      listTurnOptions: async (): Promise<LaneTurnOptionsCatalog> => {
+        const currentModel = nextTurn.model ?? options.model;
+        const currentEffort = nextTurn.reasoningEffort ?? options.reasoningEffort;
+        return {
+          models: await this.listModels(),
+          efforts: [...COPILOT_LANE_EFFORTS],
+          ...(currentModel ? { currentModel } : {}),
+          ...(currentEffort ? { currentEffort } : {}),
+          commands: [],
+        };
+      },
     };
   }
 
