@@ -460,6 +460,13 @@ export interface CliAdapter {
   listModels?(): Promise<CliModelInfo[]>;
 
   /**
+   * Optional: the reasoning effort levels this CLI's lanes accept, when the
+   * list is fixed and known without a running lane. Served to the composer of
+   * a stopped or restored lane that has no cached catalog.
+   */
+  laneEfforts?(): readonly string[];
+
+  /**
    * Optional: Ensure OAuth tokens are fresh (for adapters that use OAuth).
    * Called during extension startup to proactively refresh stale tokens.
    * Returns true if tokens are fresh (or were refreshed), false otherwise.

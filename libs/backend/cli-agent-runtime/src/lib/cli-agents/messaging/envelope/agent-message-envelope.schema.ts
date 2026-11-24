@@ -2,6 +2,8 @@ import { z } from 'zod';
 import {
   AGENT_MESSAGE_MAX_CHARS,
   AgentId,
+  LANE_TURN_MAX_FILES,
+  LANE_TURN_MAX_IMAGES,
 } from '@ptah-extension/shared';
 
 export const AGENT_MESSAGE_ENVELOPE_INDEX_KEY = 'ptah:agent-message-envelopes:v2';
@@ -36,8 +38,8 @@ const turnSettingSchema = z.string().min(1).max(200);
 export const AgentMessageEnvelopeTurnSchema = z.object({
   model: turnSettingSchema.optional(),
   reasoningEffort: turnSettingSchema.optional(),
-  files: z.array(z.string().min(1).max(4096)).max(32).optional(),
-  imageCount: z.number().int().positive().max(8).optional(),
+  files: z.array(z.string().min(1).max(4096)).max(LANE_TURN_MAX_FILES).optional(),
+  imageCount: z.number().int().positive().max(LANE_TURN_MAX_IMAGES).optional(),
 }).strict();
 
 export const AgentMessageEnvelopeSchema = z.object({

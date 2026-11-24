@@ -3,6 +3,8 @@ import { z } from 'zod';
 import {
   AGENT_MESSAGE_MAX_CHARS,
   AgentId,
+  LANE_TURN_MAX_FILES,
+  LANE_TURN_MAX_IMAGES,
   MAX_IMAGE_SIZE_BYTES,
   type AgentDeliveryReceipt,
   type AgentGetLaneComposerOptionsResult,
@@ -48,8 +50,8 @@ const imageSchema = z.object({
 const turnSchema = z.object({
   model: turnSetting.optional(),
   reasoningEffort: turnSetting.optional(),
-  files: z.array(z.string().min(1).max(4096)).max(32).optional(),
-  images: z.array(imageSchema).max(8).optional(),
+  files: z.array(z.string().min(1).max(4096)).max(LANE_TURN_MAX_FILES).optional(),
+  images: z.array(imageSchema).max(LANE_TURN_MAX_IMAGES).optional(),
 }).strict();
 const sendSchema = z.object({
   agentId,
@@ -158,8 +160,8 @@ export class AgentMessageRpcHandlers {
 
   /**
    * The lane's models, efforts and commands. A failed lookup is a result
-   * with `error` and empty lists, never a throw (the composer shows it and
-   * offers Retry).
+   * with `error` beside the lists the host still has, never a throw (the
+   * composer shows both and offers Retry).
    */
   private async composerOptions(agentId: AgentId): Promise<AgentGetLaneComposerOptionsResult> {
     try {
@@ -176,6 +178,7 @@ export class AgentMessageRpcHandlers {
           ...(command.description ? { description: command.description } : {}),
         })),
         ...(view.error ? { error: view.error } : {}),
+        ...(view.unavailableReason ? { unavailableReason: view.unavailableReason } : {}),
       };
     } catch {
       // degradation-audit: reported - the coordinator logs lookup failures; the composer shows `error`.

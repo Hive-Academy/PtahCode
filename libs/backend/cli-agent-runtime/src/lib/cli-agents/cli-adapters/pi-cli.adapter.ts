@@ -319,6 +319,11 @@ export class PiCliAdapter implements CliAdapter {
    * List available models from `pi --list-models` (see parsePiModelList).
    * Falls back to an empty list when the probe fails.
    */
+  /** The fixed effort list its lanes accept, also for a stopped lane. */
+  laneEfforts(): readonly string[] {
+    return PI_LANE_EFFORTS;
+  }
+
   async listModels(): Promise<CliModelInfo[]> {
     const binaryPath = (await resolveCliPath('pi')) ?? 'pi';
     const raw = await this.probeModels(binaryPath);

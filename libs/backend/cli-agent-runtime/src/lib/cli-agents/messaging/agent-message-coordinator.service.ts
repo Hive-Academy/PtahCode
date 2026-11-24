@@ -96,9 +96,13 @@ export interface AgentMessageCoordinatorDeps {
   readonly clock?: () => number;
 }
 
-/** What `turnOptions` serves: the lane's catalog, with `error` when the lookup failed. */
+/**
+ * What `turnOptions` serves: the lane's catalog, with `error` when the lookup
+ * failed, and `unavailableReason` when a stopped lane has no list to serve yet.
+ */
 export interface LaneTurnOptionsView extends LaneTurnOptionsCatalog {
   readonly error?: string;
+  readonly unavailableReason?: string;
 }
 
 /** D17: catalog lookups (`listTurnOptions`, `listModels`) are bounded at 5 s. */
@@ -106,6 +110,9 @@ export const LANE_TURN_OPTIONS_TIMEOUT_MS = 5_000;
 /** Lineages whose last served catalog is kept for a stopped lane. */
 const MAX_CACHED_CATALOGS = 64;
 const TURN_OPTIONS_ERROR = 'Lane options could not be read.';
+/** S1: shown in the composer when held images would exceed the host attachment cap. */
+export const ATTACHMENTS_CAPACITY_TEXT =
+  'Held attachments are using all attachment storage. Remove an image or wait for earlier messages to finish.';
 
 type ReasonCode = NonNullable<AgentMessageOutcome['reasonCode']>;
 type RouterDelivery = 'queue' | 'now' | 'steer';
@@ -476,10 +483,9 @@ export class AgentMessageCoordinator implements AgentMessageDeliveryTarget {
   ): Promise<{ text: string; turn?: LaneTurnRequest }> {
     const text = await this.getBody(agentId, messageId, actor);
     const envelope = await this.deps.store.get(messageId);
+    // Reading never releases images: a failed message keeps them for Retry
+    // until its TTL, a cancel or another terminal state (P5 S2).
     const turn = envelope ? this.heldTurn(envelope) : undefined;
-    // A failed message's images were kept only for this: they now live in
-    // the composer, so the host lets them go. A pending message keeps them.
-    if (envelope?.state === 'failed') this.deps.attachments?.release(messageId);
     return turn ? { text, turn } : { text };
   }
 
@@ -487,8 +493,10 @@ export class AgentMessageCoordinator implements AgentMessageDeliveryTarget {
    * Models, efforts and commands a lane offers its composer. A live handle
    * answers through `listTurnOptions()`; a stopped lane through the adapter's
    * `listModels()` plus the last list served for its lineage. Both lookups
-   * are bounded (D17). A failure returns the cached lists with `error` set;
-   * it never throws. Hidden permission-policy commands are always dropped.
+   * are bounded (D17). A stopped lane with no cached list takes the
+   * adapter's static effort levels and says what appears once it runs
+   * (`unavailableReason`). A failure returns the cached lists with `error`
+   * set; it never throws. Hidden permission-policy commands are always dropped.
    */
   async turnOptions(agentId: AgentId): Promise<LaneTurnOptionsView> {
     const { agentId: laneId } = await this.deps.aliases.resolve(agentId);
@@ -515,14 +523,21 @@ export class AgentMessageCoordinator implements AgentMessageDeliveryTarget {
       const models = adapter?.listModels
         ? await bounded(adapter.listModels(), LANE_TURN_OPTIONS_TIMEOUT_MS)
         : cached?.models ?? [];
-      return { ...current, models, efforts: cached?.efforts ?? [], commands: cached?.commands ?? [] };
+      if (cached) return { ...current, models, efforts: cached.efforts, commands: cached.commands };
+      const efforts = adapter?.laneEfforts?.() ?? [];
+      return {
+        ...current, models, efforts: [...efforts], commands: [],
+        unavailableReason: efforts.length > 0
+          ? 'Commands and skills appear when the lane is running.'
+          : 'Effort levels, commands and skills appear when the lane is running.',
+      };
     } catch (error: unknown) {
       // degradation-audit: reported - logged here, and the result carries `error` for the composer.
       this.deps.logger.warn('[AgentMessageCoordinator] Lane turn options unavailable', {
         agentId: laneId, error: error instanceof Error ? error.name : 'unknown',
       });
       return {
-        ...current, models: cached?.models ?? [], efforts: cached?.efforts ?? [],
+        ...current, models: cached?.models ?? [], efforts: cached?.efforts ?? [...(adapter?.laneEfforts?.() ?? [])],
         commands: cached?.commands ?? [], error: TURN_OPTIONS_ERROR,
       };
     }
@@ -582,7 +597,10 @@ export class AgentMessageCoordinator implements AgentMessageDeliveryTarget {
       return undefined;
     } catch (error: unknown) {
       if (!(error instanceof AgentMessageAttachmentCapacityError)) throw error;
-      return { mode: 'unsupported', reasonCode: 'attachments-capacity', detail: 'attachments-capacity', requestedAgentId: request.agentId };
+      return {
+        mode: 'unsupported', reasonCode: 'attachments-capacity', detail: ATTACHMENTS_CAPACITY_TEXT,
+        requestedAgentId: request.agentId,
+      };
     }
   }
 

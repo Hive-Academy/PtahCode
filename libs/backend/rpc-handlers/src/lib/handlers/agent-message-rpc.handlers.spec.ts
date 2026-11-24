@@ -298,6 +298,19 @@ describe('AgentMessageRpcHandlers', () => {
       });
     });
 
+    it('passes the cached lists beside an error, and the stopped-lane reason (M5, S2)', async () => {
+      const { coordinator, call } = setup();
+      (coordinator.turnOptions as jest.Mock).mockResolvedValueOnce({
+        models: [{ id: 'grok-4', name: 'Grok 4' }], efforts: [], commands: [], error: 'Lane options could not be read.',
+        unavailableReason: 'Commands and skills appear when the lane is running.',
+      });
+      const result = await call('agent:getLaneComposerOptions', { agentId: AGENT_ID });
+      expect(result.data).toEqual({
+        models: [{ id: 'grok-4', name: 'Grok 4' }], efforts: [], commands: [], error: 'Lane options could not be read.',
+        unavailableReason: 'Commands and skills appear when the lane is running.',
+      });
+    });
+
     it('answers a failed lookup with error, never a throw', async () => {
       const { coordinator, call } = setup();
       (coordinator.turnOptions as jest.Mock).mockRejectedValueOnce(new Error('boom'));

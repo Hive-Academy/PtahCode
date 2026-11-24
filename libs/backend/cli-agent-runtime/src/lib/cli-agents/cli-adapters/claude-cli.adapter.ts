@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Logger } from '@ptah-extension/vscode-core';
-import { SessionId } from '@ptah-extension/shared';
+import { EFFORT_LEVELS, SessionId } from '@ptah-extension/shared';
 import type {
   CliAdapterManifest,
   EffectiveCapabilitySet,
@@ -143,6 +143,11 @@ export class ClaudeCliAdapter implements ClaudeCliAdapterContract {
 
   parseOutput(raw: string): string {
     return stripAnsiCodes(raw);
+  }
+
+  /** Claude lanes accept every shared effort level (`claude-sdk-lane-runner`). */
+  laneEfforts(): readonly string[] {
+    return EFFORT_LEVELS;
   }
 
   async listModels() {

@@ -261,6 +261,11 @@ export class CopilotSdkAdapter implements CliAdapter {
    * reports none. Copilot model lists come from live sources instead: the
    * host LM API and the signed-in account's `/models` endpoint.
    */
+  /** The fixed effort list its lanes accept, also for a stopped lane. */
+  laneEfforts(): readonly string[] {
+    return COPILOT_LANE_EFFORTS;
+  }
+
   async listModels(): Promise<CliModelInfo[]> {
     return [];
   }

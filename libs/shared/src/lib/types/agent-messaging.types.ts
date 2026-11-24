@@ -120,6 +120,10 @@ export type AgentMessageEnvelopeState =
 export const AGENT_MESSAGE_MAX_CHARS = 102_400;
 /** Lower limit for lane-to-lane senders, in UTF-16 code units. */
 export const AGENT_LANE_MESSAGE_MAX_CHARS = 32_768;
+/** Most inline images one lane turn may carry (host schema and composer). */
+export const LANE_TURN_MAX_IMAGES = 8;
+/** Most attached files one lane turn may carry (host schema and composer). */
+export const LANE_TURN_MAX_FILES = 32;
 
 export type AgentMessageAckState =
   | 'pending'

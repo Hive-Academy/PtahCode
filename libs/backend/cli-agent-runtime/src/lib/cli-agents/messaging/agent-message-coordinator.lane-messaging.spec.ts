@@ -5,10 +5,10 @@
  */
 import { AgentId, type AgentMessageSender } from '@ptah-extension/shared';
 import { AgentMessageError } from '../agent-message-router.service';
-import { AgentMessageCoordinator } from './agent-message-coordinator.service';
+import { ATTACHMENTS_CAPACITY_TEXT, AgentMessageCoordinator } from './agent-message-coordinator.service';
 import { LaneMessagePolicy, type VerifiedLaneSender } from './lane-message.policy';
 import { harness, idOf, manifest } from './__fixtures__/agent-message-harness';
-import { AgentMessageAttachmentStore } from './agent-message-attachment.store';
+import { AgentMessageAttachmentCapacityError, AgentMessageAttachmentStore } from './agent-message-attachment.store';
 import type { CliAdapterManifest } from '@ptah-extension/shared';
 import type { SdkHandle } from '../cli-adapters/cli-adapter.interface';
 
@@ -223,7 +223,7 @@ describe('AgentMessageCoordinator — turn input refusals and options', () => {
     await expect(coordinator.getBody(h.agentId, id, user)).resolves.toBe('look');
   });
 
-  it('returns a failed message with its images once, then lets them go (S2)', async () => {
+  it('returns a failed message with its images and keeps them for Retry (P5 S2)', async () => {
     const withImages: CliAdapterManifest = {
       ...grok, turnInput: { ...grokTurnInput, images: { state: 'supported' } },
     };
@@ -235,7 +235,24 @@ describe('AgentMessageCoordinator — turn input refusals and options', () => {
     await expect(coordinator.getMessage(h.agentId, id, user)).resolves.toEqual({
       text: 'look', turn: { images: [image] },
     });
-    expect(attachments?.take(id)).toBeUndefined();
+    // A second read (or a Retry) still finds them; the TTL or a cancel releases them.
+    expect(attachments?.take(id)).toEqual([image]);
+  });
+
+  it('refuses a send past the attachment cap with user text, not the reason code (S1)', async () => {
+    const withImages: CliAdapterManifest = {
+      ...grok, turnInput: { ...grokTurnInput, images: { state: 'supported' } },
+    };
+    const full = new AgentMessageAttachmentStore();
+    jest.spyOn(full, 'hold').mockImplementation(() => { throw new AgentMessageAttachmentCapacityError(); });
+    const { h, coordinator, persisted } = setupTurn(full);
+    h.setInfo({ potentialCapabilities: withImages });
+    h.tracked.sdkHandle = { ...handleOf(h), turnInputSupport: () => ({ images: { state: 'supported' } }) };
+    const outcome = await coordinator.send({ agentId: h.agentId, message: 'look', turn: { images: [image] } }, user);
+    expect(outcome).toMatchObject({
+      mode: 'unsupported', reasonCode: 'attachments-capacity', detail: ATTACHMENTS_CAPACITY_TEXT,
+    });
+    expect(persisted()).toBe(0);
   });
 
   it('releases held images when the limit gate throws before the envelope exists (M2)', async () => {
@@ -280,6 +297,25 @@ describe('AgentMessageCoordinator — turn input refusals and options', () => {
     h.setInfo({ status: 'stopped' });
     const stopped = await coordinator.turnOptions(h.agentId);
     expect(stopped.commands.map((command) => command.name)).toEqual(['compact', 'code-review']);
+  });
+
+  it('serves a stopped lane with no cached catalog the adapter efforts and a reason (S2)', async () => {
+    const { h, coordinator } = setupTurn();
+    h.tracked.sdkHandle = undefined;
+    h.setInfo({ status: 'stopped' });
+    (h.detection.getAdapter as jest.Mock).mockReturnValue({
+      listModels: async () => [{ id: 'grok-4', name: 'Grok 4' }],
+      laneEfforts: () => ['low', 'high'],
+    });
+    await expect(coordinator.turnOptions(h.agentId)).resolves.toEqual({
+      models: [{ id: 'grok-4', name: 'Grok 4' }], efforts: ['low', 'high'], commands: [],
+      unavailableReason: 'Commands and skills appear when the lane is running.',
+    });
+    (h.detection.getAdapter as jest.Mock).mockReturnValue({ listModels: async () => [] });
+    await expect(coordinator.turnOptions(h.agentId)).resolves.toMatchObject({
+      efforts: [], commands: [],
+      unavailableReason: 'Effort levels, commands and skills appear when the lane is running.',
+    });
   });
 
   it('reads the cached command list for a / send instead of asking the lane again (M9)', async () => {

@@ -687,8 +687,11 @@ export type CliOutputSegmentType =
   | 'file-change';
 
 /**
- * What a usage figure covers: one provider message, the whole turn so far, or
- * the whole session so far. Re-exported by `@ptah-extension/platform-core`.
+ * What a usage figure covers: `message` is one provider message; `turn` is
+ * the turn total so far; `cumulative` is a running snapshot that restarts
+ * each turn (the host takes the delta to the previous snapshot of the same
+ * turn and resets at turn end), never a whole-session total. Re-exported by
+ * `@ptah-extension/platform-core`.
  */
 export type UsageScope = 'message' | 'turn' | 'cumulative';
 

@@ -75,8 +75,8 @@ export interface LaneComposerCommandOption {
 
 /**
  * Turn options a lane offers its composer: models, reasoning efforts and
- * slash commands. A failed lookup returns empty lists with `error` set; the
- * method does not throw.
+ * slash commands. A failed lookup returns the lists the host still has
+ * (possibly empty) with `error` set; the method does not throw.
  */
 export interface AgentGetLaneComposerOptionsResult {
   readonly models: readonly CliModelOption[];
@@ -85,6 +85,11 @@ export interface AgentGetLaneComposerOptionsResult {
   readonly currentEffort?: string;
   readonly commands: readonly LaneComposerCommandOption[];
   readonly error?: string;
+  /**
+   * Set for a stopped or restored lane with no cached catalog: which lists
+   * load only once the lane runs, in words the composer shows.
+   */
+  readonly unavailableReason?: string;
 }
 
 export interface AgentRetryMessageParams {
