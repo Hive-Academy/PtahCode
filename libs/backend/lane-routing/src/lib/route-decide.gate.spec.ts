@@ -927,9 +927,13 @@ describe('route decide gate', () => {
     expect(text).toContain('fast-model');
     expect(text).toContain('lane-default');
     if (result.stage !== 'gate-0.1') throw new Error('expected a gate result');
+    // The slow lane is named with its cause; the old global line is gone.
     expect(
-      result.reasons.filter((reason) => reason === 'models unknown'),
+      result.reasons.filter((reason) =>
+        /^models unknown for \S.* \(timeout\)$/.test(reason),
+      ),
     ).toHaveLength(1);
+    expect(result.reasons).not.toContain('models unknown');
   });
 
   it('takes the minimum model confidence and ignores unavailable entries', async () => {

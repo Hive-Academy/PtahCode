@@ -15,6 +15,8 @@ import {
   runLaneRequest,
   type LaneQuestion,
 } from './model-refine';
+import { computeLaneOfferDispositions, type PhasePlan } from './phase-plan';
+import { policyForPhase } from './tier-effort-policy';
 
 const logger: LaneRoutingLogger = {
   debug: () => undefined,
@@ -221,6 +223,149 @@ describe('runLaneRequest outcome figures', () => {
     });
     expect(result.outcomeFigures).toBe(0);
     expect(captured.payloads[0].state.pastOutcomes).toEqual({});
+  });
+
+  it('tracks optionCapOffered and distinguishes option-cap, payload-fit, and below-band without pruning lanes on alternate drops', async () => {
+    const five = ['codex', 'grok', 'opencode', 'fourth', 'fifth'].map((laneId) => ({
+      laneId,
+      family: laneId,
+      model: 'test-model',
+      limitState: 'confirmed-room' as const,
+      score: 80,
+    }));
+    const fivePhase: LaneQuestion = {
+      phaseId: 'build',
+      taskKind: 'implement',
+      instructions: 'Choose',
+      primaryCount: five.length,
+      options: five,
+    };
+
+    // Full width fits 4 (OPTIONS_PER_PHASE_CAP): fifth is pruned by option-cap.
+    const wideCap = capture();
+    const wideResult = await runLaneRequest({
+      provider: 'ollama',
+      request: 'ship',
+      phases: [fivePhase],
+      outcomes: () => null,
+      maxRequestBytes: 100_000,
+      dispatch: wideCap.dispatch,
+      logger,
+    });
+    expect(wideResult.optionCapOffered?.get('build')?.map((o) => o.laneId)).toEqual([
+      'codex',
+      'grok',
+      'opencode',
+      'fourth',
+    ]);
+    expect(wideResult.prunedLanes?.get('build')?.get('fifth')).toBe('option-cap');
+    expect(wideResult.prunedLanes?.get('build')?.has('fourth')).toBe(false);
+
+    // Tight byte cap shrinks from 4 to 3: fourth is payload-fit, fifth stays option-cap.
+    const fullBytes = requestBytes('nimble', wideCap.payloads[0]);
+    const narrowCap = capture();
+    const narrowResult = await runLaneRequest({
+      provider: 'ollama',
+      request: 'ship',
+      phases: [fivePhase],
+      outcomes: () => null,
+      maxRequestBytes: fullBytes - 1,
+      dispatch: narrowCap.dispatch,
+      logger,
+    });
+    expect(narrowResult.offered.get('build')?.map((o) => o.laneId)).toEqual([
+      'codex',
+      'grok',
+      'opencode',
+    ]);
+    expect(narrowResult.prunedLanes?.get('build')?.get('fourth')).toBe('payload-fit');
+    expect(narrowResult.prunedLanes?.get('build')?.get('fifth')).toBe('option-cap');
+
+    // Join with a 6th below-band candidate via computeLaneOfferDispositions.
+    const allIds = [...five.map((o) => o.laneId), 'sixth'];
+    const planForDispositions: PhasePlan = {
+      phaseId: 'build',
+      kind: 'implement',
+      taskKind: 'implement',
+      policy: policyForPhase('implement'),
+      constraint: {
+        phaseId: 'build',
+        status: 'eligible',
+        eligible: [],
+        excluded: [],
+        pinAccepted: false,
+      },
+      spread: null,
+      ranked: allIds.map((id) => {
+        const candidate = {
+          kind: 'lane' as const,
+          id,
+          cli: 'codex' as const,
+          family: id,
+          installed: true,
+          disabled: false,
+          limitState: 'confirmed-room' as const,
+        };
+        const total = id === 'sixth' ? 60 : 80;
+        return {
+          candidate,
+          scored: {
+            candidate,
+            model: 'test-model',
+            provenance: 'reported' as const,
+            score: total,
+            total,
+            cell: { kind: 'unknown' as const },
+            profileModel: '*',
+            noProfile: true,
+          },
+        };
+      }),
+    };
+    const dispositions = computeLaneOfferDispositions(
+      planForDispositions,
+      narrowResult,
+    );
+    expect(dispositions.get('codex')?.offered).toBe(true);
+    expect(dispositions.get('codex')?.prunedCause).toBeUndefined();
+    expect(dispositions.get('fourth')?.prunedCause).toBe('payload-fit');
+    expect(dispositions.get('fifth')?.prunedCause).toBe('option-cap');
+    expect(dispositions.get('sixth')?.prunedCause).toBe('below-band');
+
+    // Dropping only an alternate model never prunes its lane.
+    const primaryOnly = [
+      { ...phases[0], phaseId: 'p', primaryCount: 2, options: [lanes[0], lanes[1]] },
+    ];
+    const baseCap = capture();
+    await runLaneRequest({
+      provider: 'ollama',
+      request: 'ship',
+      phases: primaryOnly,
+      outcomes: () => null,
+      maxRequestBytes: 100_000,
+      dispatch: baseCap.dispatch,
+      logger,
+    });
+    const exactPrimaryBytes = requestBytes('nimble', baseCap.payloads[0]);
+    const altDropped = await runLaneRequest({
+      provider: 'ollama',
+      request: 'ship',
+      phases: [
+        {
+          ...primaryOnly[0],
+          options: [lanes[0], lanes[1], { ...lanes[0], model: 'alt-model' }],
+        },
+      ],
+      outcomes: () => null,
+      maxRequestBytes: exactPrimaryBytes,
+      dispatch: capture().dispatch,
+      logger,
+    });
+    expect(altDropped.offered.get('p')?.map((o) => o.laneId)).toEqual([
+      'codex',
+      'grok',
+    ]);
+    expect(altDropped.prunedLanes?.get('p')?.size).toBe(0);
   });
 });
 

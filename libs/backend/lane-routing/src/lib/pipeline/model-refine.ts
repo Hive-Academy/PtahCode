@@ -7,6 +7,7 @@
  * the caller to re-check; this module never persists a mark.
  */
 import { SUBAGENT_LANE_ID, type OutcomeTaskKind } from '@ptah-extension/shared';
+import type { PrunedCause } from '../contracts/route-decide-result.schema';
 import type { LaneRoutingLogger } from '../lane-routing-logger';
 import {
   MIN_OPTIONS_PER_PHASE,
@@ -77,6 +78,10 @@ export interface ModelRequestOutcome {
   readonly answers: ReadonlyMap<string, ChoiceValidation>;
   /** Options actually offered, in label order. Empty when the request was not sent. */
   readonly offered: ReadonlyMap<string, readonly DecisionOption[]>;
+  /** Options that fit at full option-cap width before payload shrinking, keyed by phase id. */
+  readonly optionCapOffered?: ReadonlyMap<string, readonly DecisionOption[]>;
+  /** Per-phase, per-executor prune cause for primary lanes dropped by option-cap or payload-fit. */
+  readonly prunedLanes?: ReadonlyMap<string, ReadonlyMap<string, PrunedCause>>;
   readonly inputTokens: number | null;
   readonly outputTokens: number | null;
   readonly outcomeFigures: number;
@@ -172,7 +177,12 @@ export async function runLaneRequest(input: {
       fitted.offered,
       asked,
     );
-    return { ...outcome, outcomeFigures: fitted.figureCount };
+    return {
+      ...outcome,
+      optionCapOffered: fitted.optionCapOffered,
+      prunedLanes: fitted.prunedLanes,
+      outcomeFigures: fitted.figureCount,
+    };
   }
   const outcome = await callStructured(
     input.dispatch,
@@ -182,7 +192,12 @@ export async function runLaneRequest(input: {
     asked,
     input.logger,
   );
-  return { ...outcome, outcomeFigures: fitted.figureCount };
+  return {
+    ...outcome,
+    optionCapOffered: fitted.optionCapOffered,
+    prunedLanes: fitted.prunedLanes,
+    outcomeFigures: fitted.figureCount,
+  };
 }
 
 export async function runFixedRequest(input: {
@@ -251,6 +266,8 @@ interface FittedLane {
   readonly prompt: string;
   readonly schema: Record<string, unknown>;
   readonly offered: ReadonlyMap<string, readonly DecisionOption[]>;
+  readonly optionCapOffered: ReadonlyMap<string, readonly DecisionOption[]>;
+  readonly prunedLanes: ReadonlyMap<string, ReadonlyMap<string, PrunedCause>>;
   readonly figureCount: number;
 }
 
@@ -266,35 +283,83 @@ function fitLane(input: {
     OPTIONS_PER_PHASE_CAP,
     PROVIDER_OPTION_LIMIT[input.provider],
   );
+  const optionCapOffered = sliceOptions(input.phases, cap, false);
   for (let width = cap; width >= MIN_OPTIONS_PER_PHASE; width -= 1) {
     for (const primariesOnly of fitPasses(input.phases, width)) {
-    const offered = sliceOptions(input.phases, width, primariesOnly);
-    const sent = input.phases.filter((phase) => offered.has(phase.phaseId));
-    if (sent.length === 0) continue;
-    const figures = offeredFigures(sent, offered, input.outcomes);
-    const payload = buildDecisionPayload({
-      request: input.request,
-      questions: sent.map((phase) => ({
-        kind: 'lane-choice' as const,
-        phaseId: phase.phaseId,
-        instructions: phase.instructions,
-        options: offered.get(phase.phaseId) ?? [],
-      })),
-      outcomeFigures: figures,
-    });
-    const questions = laneQuestions(sent, offered);
-    const prompt = renderLanePrompt(input.request, questions, figures);
-    const schema = choiceSchema(questions);
-    const bytes =
-      input.dispatch.kind === 'system-one'
-        ? bodyBytes(input.dispatch.model, payload, input.dispatch.keepAlive)
-        : textBytes(JSON.stringify({ prompt, jsonSchema: schema }));
-    if (bytes <= input.maxRequestBytes) {
-      return { payload, prompt, schema, offered, figureCount: figures.length };
-    }
+      const offered = sliceOptions(input.phases, width, primariesOnly);
+      const sent = input.phases.filter((phase) => offered.has(phase.phaseId));
+      if (sent.length === 0) continue;
+      const figures = offeredFigures(sent, offered, input.outcomes);
+      const payload = buildDecisionPayload({
+        request: input.request,
+        questions: sent.map((phase) => ({
+          kind: 'lane-choice' as const,
+          phaseId: phase.phaseId,
+          instructions: phase.instructions,
+          options: offered.get(phase.phaseId) ?? [],
+        })),
+        outcomeFigures: figures,
+      });
+      const questions = laneQuestions(sent, offered);
+      const prompt = renderLanePrompt(input.request, questions, figures);
+      const schema = choiceSchema(questions);
+      const bytes =
+        input.dispatch.kind === 'system-one'
+          ? bodyBytes(input.dispatch.model, payload, input.dispatch.keepAlive)
+          : textBytes(JSON.stringify({ prompt, jsonSchema: schema }));
+      if (bytes <= input.maxRequestBytes) {
+        return {
+          payload,
+          prompt,
+          schema,
+          offered,
+          optionCapOffered,
+          prunedLanes: computePrunedLanes(
+            input.phases,
+            optionCapOffered,
+            offered,
+          ),
+          figureCount: figures.length,
+        };
+      }
     }
   }
   return null;
+}
+
+/**
+ * Classify primary lanes dropped by the model-request fit.
+ * Dropping only an alternate model never prunes its lane because the primary
+ * option remains in `finalOffered`.
+ */
+function computePrunedLanes(
+  phases: readonly LaneQuestion[],
+  optionCapOffered: ReadonlyMap<string, readonly DecisionOption[]>,
+  finalOffered: ReadonlyMap<string, readonly DecisionOption[]>,
+): ReadonlyMap<string, ReadonlyMap<string, PrunedCause>> {
+  const byPhase = new Map<string, ReadonlyMap<string, PrunedCause>>();
+  for (const phase of phases) {
+    const kept = finalOffered.get(phase.phaseId);
+    if (kept === undefined) continue;
+    const keptLaneIds = new Set(kept.map((option) => option.laneId));
+    const capLaneIds = new Set(
+      (optionCapOffered.get(phase.phaseId) ?? []).map(
+        (option) => option.laneId,
+      ),
+    );
+    const pruned = new Map<string, PrunedCause>();
+    for (const option of phase.options.slice(0, phase.primaryCount)) {
+      if (keptLaneIds.has(option.laneId) || pruned.has(option.laneId)) {
+        continue;
+      }
+      pruned.set(
+        option.laneId,
+        capLaneIds.has(option.laneId) ? 'payload-fit' : 'option-cap',
+      );
+    }
+    byPhase.set(phase.phaseId, pruned);
+  }
+  return byPhase;
 }
 
 /**
@@ -341,8 +406,12 @@ function sliceOptions(
 ): Map<string, readonly DecisionOption[]> {
   const offered = new Map<string, readonly DecisionOption[]>();
   for (const phase of phases) {
-    const options = phase.options.slice(0, primariesOnly ? Math.min(width, phase.primaryCount) : width);
-    if (options.length >= MIN_OPTIONS_PER_PHASE) offered.set(phase.phaseId, options);
+    const options = phase.options.slice(
+      0,
+      primariesOnly ? Math.min(width, phase.primaryCount) : width,
+    );
+    if (options.length >= MIN_OPTIONS_PER_PHASE)
+      offered.set(phase.phaseId, options);
   }
   return offered;
 }

@@ -12,11 +12,14 @@ import {
   MISSING_INPUT_REASON,
   MISSING_INPUTS,
   NO_CONFIDENCE_REPORTED,
+  compileChosenExplanation,
   compileChosenReason,
   compileGateReasons,
   compilePreflightReasons,
   compileResultReasons,
+  compileUnavailableExplanation,
   compileUnavailableReason,
+  formatLimitAge,
   type ChosenExecutor,
   type ChosenReasonInput,
   type UnavailableReasonInput,
@@ -1033,5 +1036,124 @@ describe('requirement 13.4', () => {
     ).toThrow(
       'disclosed fallback is set only for exclusion reason reviewer-family',
     );
+  });
+});
+
+describe('B08 one-sentence explanations and per-lane reason deduplication', () => {
+  it('formats limit age cleanly and renders age unknown when timestamp is absent', () => {
+    expect(formatLimitAge(null, 10_000)).toBe('age unknown');
+    expect(formatLimitAge(undefined, 10_000)).toBe('age unknown');
+    expect(formatLimitAge(9_500, 10_000)).toBe('age 500ms');
+    expect(formatLimitAge(10_000 - 45_000, 10_000)).toBe('age 45s');
+    expect(formatLimitAge(10_000 - 180_000, 10_000)).toBe('age 3m');
+    expect(formatLimitAge(10_000 - 7_200_000, 10_000)).toBe('age 2h');
+  });
+
+  it('renders a chosen one-sentence explanation with parts, signed gap, deciding factor, preference diagnostics, policy rule note, and limit age', () => {
+    const explanation = compileChosenExplanation({
+      candidateId: 'kimi-cli',
+      displayName: 'Kimi Code',
+      model: 'kimi-k2',
+      total: 87,
+      parts: {
+        prior: 70,
+        priorSource: 'seed',
+        learned: 5,
+        exploration: 5,
+        sampleCount: 0,
+        preference: 12,
+        limit: 0,
+      },
+      strongestAlternative: {
+        id: 'codex',
+        displayName: 'codex',
+        total: 85,
+        parts: {
+          prior: 80,
+          priorSource: 'seed',
+          learned: 5,
+          exploration: 5,
+          sampleCount: 0,
+          preference: 0,
+          limit: 0,
+        },
+      },
+      decidingFactor: 'rule ui-review',
+      preferenceSource: 'rule',
+      overriddenPreferenceSources: ['call', 'configured'],
+      preferenceMatches: [
+        {
+          entry: 'Kimi Code',
+          rank: 1,
+          ids: ['kimi-cli'],
+          via: 'displayName',
+          status: 'matched',
+        },
+      ],
+      policyCondition: 'R3 shape=logic weight>=8000',
+      tier: 'sonnet',
+      effort: 'xhigh',
+      matchedRuleId: 'ui-review',
+      policyRuleNote: 'rule ui-review capped tier opus->sonnet',
+      limitState: 'confirmed-room',
+      limitEvidence: {
+        state: 'confirmed-room',
+        lookup: 'ok',
+        status: 'available',
+        readAt: 1_000_000 - 30_000,
+      },
+      nowMs: 1_000_000,
+    });
+
+    expect(explanation).not.toContain('\n');
+    expect(explanation.endsWith('.')).toBe(true);
+    expect(explanation).toContain(
+      'Selected Kimi Code (kimi-cli) (model kimi-k2) with total 87 [prior 70 (seed), learned +5 (exploration +5, n=0), preference +12, limit +0]',
+    );
+    expect(explanation).toContain('over runner-up codex at total 85');
+    expect(explanation).toContain('(gap +2)');
+    expect(explanation).toContain('decided by rule ui-review');
+    expect(explanation).toContain('preferences from rule (overridden: call, configured, Kimi Code->kimi-cli via displayName (#1))');
+    expect(explanation).toContain(
+      'policy R3 shape=logic weight>=8000, sonnet/xhigh after rule ui-review capped tier opus->sonnet',
+    );
+    expect(explanation).toContain('limit confirmed-room (age 30s)');
+  });
+
+  it('renders an unavailable one-sentence explanation naming the blocking constraint', () => {
+    const explanation = compileUnavailableExplanation({
+      phaseId: 'review',
+      exclusionReason: 'reviewer-family',
+      pinRule: null,
+      needsDisclosedFallback: true,
+      excludedBy: [{ candidate: 'codex', rule: 'reviewer-family' }],
+      policyCondition: 'R2 kind=review weight omitted',
+      tier: 'opus',
+      effort: 'high',
+    });
+    expect(explanation).toBe(
+      'Phase review is unavailable due to blocking constraint reviewer-family (disclosed fallback required, excluded: codex by reviewer-family), policy R2 kind=review weight omitted, opus/high.',
+    );
+  });
+
+  it('removes generic models unknown when per-lane model status is supplied and deduplicates extraReasons', () => {
+    const gate = compileGateReasons({
+      chosen: [chosen()],
+      unavailable: [],
+      excluded: [],
+      missingInputs: ['limits', 'model-lists'],
+      inputRowIds: ['grok', 'codex'],
+      extraReasons: [
+        'models unknown for codex (timeout)',
+        'models unknown for codex (timeout)',
+        'routing rule bad: ignored',
+        'routing rule bad: ignored',
+      ],
+    });
+    expect(gate.reasons).toEqual([
+      'limits unavailable',
+      'models unknown for codex (timeout)',
+      'routing rule bad: ignored',
+    ]);
   });
 });
