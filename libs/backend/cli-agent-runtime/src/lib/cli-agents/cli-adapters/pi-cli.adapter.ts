@@ -69,17 +69,30 @@ import { join } from 'path';
 import type {
   CliDetectionResult,
   CliOutputSegment,
+  LaneTurnSettings,
 } from '@ptah-extension/shared';
-import { completedTurnTelemetry, turnIdentity } from '@ptah-extension/shared';
+import {
+  PI_REASONING_EFFORT_VALUES,
+  completedTurnTelemetry,
+  turnIdentity,
+} from '@ptah-extension/shared';
 import { z } from 'zod';
-import type {
-  CliAdapterManifest,
-  CliAdapter,
-  CliCommandOptions,
-  CliModelInfo,
-  ContinuationOutcome,
-  SdkHandle,
+import {
+  LaneTurnSettingRefusal,
+  type CliAdapterManifest,
+  type CliAdapter,
+  type CliCommandOptions,
+  type CliModelInfo,
+  type ContinuationOutcome,
+  type LaneTurnOptionsCatalog,
+  type LaneTurnSettingsResult,
+  type SdkHandle,
 } from './cli-adapter.interface';
+
+/** `pi --thinking` levels a lane may pick; `''` and `inherit` are spawn-time settings only. */
+const PI_LANE_EFFORTS: readonly string[] = PI_REASONING_EFFORT_VALUES.filter(
+  (value) => value !== '' && value !== 'inherit',
+);
 import { bestMessagingCapability } from './cli-adapter.interface';
 import { validateLaneSpawnPolicy } from '../lane-spawn-policy';
 import {
@@ -279,6 +292,21 @@ export class PiCliAdapter implements CliAdapter {
       },
       limitReader: { state: 'no-reliable-source', reason: 'No reliable noninteractive limit source exists.' },
       mcp: { state: 'unsupported', reason: 'Pi RPC adapter does not configure Ptah MCP.' },
+      turnInput: {
+        // `--model` / `--thinking` are spawn flags; each turn spawns a new `pi --mode rpc`.
+        model: { state: 'supported', appliesAt: 'next-spawn' },
+        effort: { state: 'supported', appliesAt: 'next-spawn' },
+        // A7: `images` on the RPC `prompt`/`steer` is known from Pi's docs only (Pi not installed).
+        images: { state: 'unsupported', reason: 'Pi image input over RPC is not confirmed.' },
+        files: { state: 'unsupported', reason: 'Pi lanes take no attached files per turn.' },
+        commands: { state: 'unsupported', reason: 'Pi lanes take no slash commands over RPC.' },
+        skills: { state: 'unsupported', reason: 'Pi lanes do not expose skills to the composer.' },
+      },
+      usage: { timing: 'live' },
+      prompts: {
+        approvals: { state: 'unsupported', reason: 'Pi has no core permission events.' },
+        questions: { state: 'unsupported', reason: 'Pi has no core question events.' },
+      },
     };
   }
 
@@ -437,6 +465,8 @@ export class PiCliAdapter implements CliAdapter {
     // so child.pid is the process taskkill /T should walk from. No-op off-Windows.
     const spawnDescriptor = await resolveDirectSpawn(binary);
 
+    /** Model and thinking level of the next spawned turn (`applyTurnSettings`, next-spawn). */
+    const nextTurn: { model?: string; reasoningEffort?: string } = {};
     const runTurn = (
       message: string,
       resumeSessionId?: string,
@@ -444,12 +474,14 @@ export class PiCliAdapter implements CliAdapter {
     ): Promise<number> => {
       const args: string[] = ['--mode', 'rpc', '-a'];
       if (turnInstructionPath) args.push('--append-system-prompt', turnInstructionPath);
-      if (options.model) {
-        args.push('--model', options.model);
+      const spawnModel = nextTurn.model ?? options.model;
+      if (spawnModel) {
+        args.push('--model', spawnModel);
       }
-      if (options.reasoningEffort) {
+      const spawnEffort = nextTurn.reasoningEffort ?? options.reasoningEffort;
+      if (spawnEffort) {
         // Pi's thinking scale: off | minimal | low | medium | high | xhigh | max.
-        args.push('--thinking', options.reasoningEffort);
+        args.push('--thinking', spawnEffort);
       }
       if (resumeSessionId) {
         // See UNVERIFIED note in the header: assumes --mode rpc honours --session.
@@ -483,7 +515,7 @@ export class PiCliAdapter implements CliAdapter {
 
       let lineBuf = '';
       let stderrBuf = '';
-      let turnModel = options.model;
+      let turnModel = spawnModel;
       const messageUsage: PiMessageUsage[] = [];
       const endUsage: PiMessageUsage[] = [];
       let incompleteUsage = false;
@@ -521,8 +553,24 @@ export class PiCliAdapter implements CliAdapter {
             if (completion) {
               if (!completion.usage) incompleteUsage = true;
               else {
-                if (completion.type === 'message_end') messageUsage.push(completion.usage);
-                else endUsage.push(completion.usage);
+                if (completion.type === 'message_end') {
+                  messageUsage.push(completion.usage);
+                  // Live (B9): each message's usage is a `message` increment;
+                  // the turn total below corrects the running sum.
+                  const { usage: counts } = completion.usage;
+                  segment.emit({
+                    type: 'info',
+                    content: 'Pi message usage.',
+                    usageScope: 'message',
+                    usage: {
+                      ...(completion.usage.model ? { model: completion.usage.model } : {}),
+                      inputTokens: counts.input,
+                      outputTokens: counts.output,
+                      ...(counts.cacheRead !== undefined ? { cacheReadTokens: counts.cacheRead } : {}),
+                      ...(counts.cacheWrite !== undefined ? { cacheWriteTokens: counts.cacheWrite } : {}),
+                    },
+                  });
+                } else endUsage.push(completion.usage);
                 turnModel = completion.usage.model || turnModel;
               }
             }
@@ -549,7 +597,7 @@ export class PiCliAdapter implements CliAdapter {
               segment.emit({
                 type: 'info',
                 content: usage ? 'Pi turn usage.' : 'Pi turn telemetry unavailable.',
-                ...(usage ? { usage: { model: turnModel, ...usage } } : {}),
+                ...(usage ? { usage: { model: turnModel, ...usage }, usageScope: 'turn' as const } : {}),
                 turnTelemetry: completedTurnTelemetry({ ...turnIdentity({ provider: 'pi',
                   sessionId: resumeSessionId ?? capturedSessionId, runId: options.agentId, sequence: turnSequence,
                   modelId: turnModel, source: 'sdk' }), usage }),
@@ -654,6 +702,34 @@ export class PiCliAdapter implements CliAdapter {
           ? buildTaskPrompt({ ...options, task: message, files: undefined }, this.name)
           : message;
         return { done: runTurn(turnMessage, capturedSessionId, turnPath) };
+      },
+      applyTurnSettings: async (settings: LaneTurnSettings): Promise<LaneTurnSettingsResult> => {
+        const { model, reasoningEffort } = settings;
+        if (reasoningEffort !== undefined && !PI_LANE_EFFORTS.includes(reasoningEffort))
+          throw new LaneTurnSettingRefusal('reasoningEffort', `Pi has no thinking level "${reasoningEffort}".`);
+        if (model !== undefined) {
+          const known = await this.listModels();
+          if (known.length > 0 && !known.some((entry) => entry.id === model))
+            throw new LaneTurnSettingRefusal('model', `Pi has no model "${model}".`);
+          nextTurn.model = model;
+        }
+        if (reasoningEffort !== undefined) nextTurn.reasoningEffort = reasoningEffort;
+        return {
+          ...(model !== undefined ? { model } : {}),
+          ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
+          appliesAt: 'next-spawn',
+        };
+      },
+      listTurnOptions: async (): Promise<LaneTurnOptionsCatalog> => {
+        const currentModel = nextTurn.model ?? options.model;
+        const currentEffort = nextTurn.reasoningEffort ?? options.reasoningEffort;
+        return {
+          models: await this.listModels(),
+          efforts: [...PI_LANE_EFFORTS],
+          ...(currentModel ? { currentModel } : {}),
+          ...(currentEffort ? { currentEffort } : {}),
+          commands: [],
+        };
       },
       outcomeUsageIsTurnTotal: true,
       usageScope: 'turn',

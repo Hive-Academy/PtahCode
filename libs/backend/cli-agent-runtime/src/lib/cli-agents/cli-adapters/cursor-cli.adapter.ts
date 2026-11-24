@@ -17,16 +17,21 @@
 import type {
   CliDetectionResult,
   CliOutputSegment,
+  LaneTurnContent,
+  LaneTurnSettings,
 } from '@ptah-extension/shared';
 import { completedTurnTelemetry, turnIdentity } from '@ptah-extension/shared';
 import type { Logger } from '@ptah-extension/vscode-core';
-import type {
-  CliAdapterManifest,
-  CliAdapter,
-  CliCommandOptions,
-  CliModelInfo,
-  ContinuationOutcome,
-  SdkHandle,
+import {
+  LaneTurnSettingRefusal,
+  type CliAdapterManifest,
+  type CliAdapter,
+  type CliCommandOptions,
+  type CliModelInfo,
+  type ContinuationOutcome,
+  type LaneTurnOptionsCatalog,
+  type LaneTurnSettingsResult,
+  type SdkHandle,
 } from './cli-adapter.interface';
 import { bestMessagingCapability } from './cli-adapter.interface';
 import { validateLaneSpawnPolicy } from '../lane-spawn-policy';
@@ -119,9 +124,19 @@ interface CursorRun {
   cancel(): Promise<void>;
 }
 
+/** `@cursor/sdk` `SDKUserMessage`: text plus inline images (`options.d.ts`). */
+interface CursorUserMessage {
+  readonly text: string;
+  readonly images?: readonly { readonly data: string; readonly mimeType: string }[];
+}
+
 interface CursorSdkAgent {
   readonly agentId: string;
-  send(message: string, options?: unknown): Promise<CursorRun>;
+  /** A8: `send({ model })` overrides the agent's model for this send (`agent.d.ts` SendOptions). */
+  send(
+    message: string | CursorUserMessage,
+    options?: { readonly model?: CursorModelSelection },
+  ): Promise<CursorRun>;
   close(): void;
 }
 
@@ -299,6 +314,20 @@ export class CursorCliAdapter implements CliAdapter {
       },
       limitReader: { state: 'no-reliable-source', reason: 'No reliable noninteractive limit source exists.' },
       mcp: { state: 'supported' },
+      turnInput: {
+        // Per send (A8): the agent and its session stay; the next send carries the model.
+        model: { state: 'supported', appliesAt: 'next-turn' },
+        effort: { state: 'unsupported', reason: 'Cursor model effort parameters are not known to Ptah.' },
+        images: { state: 'supported', onSteer: false },
+        files: { state: 'unsupported', reason: 'Cursor lanes take no attached files per turn.' },
+        commands: { state: 'unsupported', reason: 'Cursor lanes take no slash commands.' },
+        skills: { state: 'unsupported', reason: 'Cursor lanes do not expose skills to the composer.' },
+      },
+      usage: { timing: 'turn-end', reason: 'Cursor reports usage once, when the turn ends.' },
+      prompts: {
+        approvals: { state: 'unsupported', reason: 'Cursor SDK exposes no verified ask policy binding.' },
+        questions: { state: 'unsupported', reason: 'Cursor SDK lane questions do not reach Ptah.' },
+      },
     };
   }
 
@@ -395,7 +424,12 @@ export class CursorCliAdapter implements CliAdapter {
     };
     abortController.signal.addEventListener('abort', onAbort);
 
-    const runTurn = async (prompt: string): Promise<number> => {
+    /** Model the next send carries (`applyTurnSettings`, per send). */
+    let sendModel: string | undefined;
+    const runTurn = async (
+      prompt: string,
+      images: LaneTurnContent['images'] = [],
+    ): Promise<number> => {
       const apiKey = await this.resolveCursorApiKey();
       if (abortController.signal.aborted) {
         return 1;
@@ -447,7 +481,12 @@ export class CursorCliAdapter implements CliAdapter {
           return 1;
         }
 
-        const run = await agent.send(prompt);
+        const run = await agent.send(
+          images.length > 0
+            ? { text: prompt, images: images.map((image) => ({ data: image.data, mimeType: image.mediaType })) }
+            : prompt,
+          ...(sendModel ? [{ model: { id: sendModel } }] : []),
+        );
         activeRun = run;
 
         const textTracker = { last: '' };
@@ -487,7 +526,7 @@ export class CursorCliAdapter implements CliAdapter {
           reportedModel = settled?.model?.id ?? reportedModel;
           emitStreamSegment({
             type: 'info', content: usage ? 'Cursor turn usage.' : 'Cursor turn telemetry unavailable.',
-            ...(usage ? { usage: { model: reportedModel, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, cacheReadTokens: usage.cacheReadTokens, cacheWriteTokens: usage.cacheWriteTokens, totalTokens: usage.totalTokens } } : {}),
+            ...(usage ? { usageScope: 'turn' as const, usage: { model: reportedModel, inputTokens: usage.inputTokens, outputTokens: usage.outputTokens, cacheReadTokens: usage.cacheReadTokens, cacheWriteTokens: usage.cacheWriteTokens, totalTokens: usage.totalTokens } } : {}),
             turnTelemetry: completedTurnTelemetry({ ...turnIdentity({ provider: 'cursor',
               turnId: latestUsage?.run_id ?? run.id, modelId: reportedModel, source: 'sdk' }), usage }),
           });
@@ -518,8 +557,8 @@ export class CursorCliAdapter implements CliAdapter {
      * Start a turn and keep a handle on it, so `interrupt` can wait for the
      * stream consumer to unwind before the caller resumes on the same agent.
      */
-    const startTurn = (prompt: string): Promise<number> => {
-      const turn = runTurn(prompt);
+    const startTurn = (prompt: string, images?: LaneTurnContent['images']): Promise<number> => {
+      const turn = runTurn(prompt, images);
       activeTurn = turn;
       void turn.finally(() => {
         // Only the newest turn clears the slots — an older turn settling after
@@ -580,7 +619,7 @@ export class CursorCliAdapter implements CliAdapter {
       getSessionId: () => capturedAgentId,
       setAgentId: () => {},
       supportsContinuation: () => true,
-      continue: (message: string): Promise<ContinuationOutcome> =>
+      continue: (message: string, content?: LaneTurnContent): Promise<ContinuationOutcome> =>
         Promise.resolve({
           done: startTurn(
             buildTaskPrompt(
@@ -595,8 +634,38 @@ export class CursorCliAdapter implements CliAdapter {
               },
               this.name,
             ),
+            content?.images,
           ),
         }),
+      applyTurnSettings: async (settings: LaneTurnSettings): Promise<LaneTurnSettingsResult> => {
+        if (settings.reasoningEffort !== undefined)
+          throw new LaneTurnSettingRefusal('reasoningEffort', 'Cursor model effort parameters are not known to Ptah.');
+        const { model } = settings;
+        if (model !== undefined) {
+          let known: CliModelInfo[];
+          try {
+            known = await this.listModels();
+          } catch {
+            // degradation-audit: reported - the refusal tells the user the model was not changed; listModels logs the redacted cause.
+            throw new LaneTurnSettingRefusal('model', 'Cursor models could not be read; the model was not changed.');
+          }
+          if (known.length > 0 && !known.some((entry) => entry.id === model))
+            throw new LaneTurnSettingRefusal('model', `Cursor has no model "${model}".`);
+          sendModel = model;
+        }
+        return { ...(model !== undefined ? { model } : {}), appliesAt: 'next-turn' };
+      },
+      // Images ride on every send (`SDKUserMessage.images`).
+      turnInputSupport: () => ({ images: { state: 'supported', onSteer: false } }),
+      listTurnOptions: async (): Promise<LaneTurnOptionsCatalog> => {
+        const currentModel = sendModel ?? options.model;
+        return {
+          models: await this.listModels(),
+          efforts: [],
+          ...(currentModel ? { currentModel } : {}),
+          commands: [],
+        };
+      },
       supportsInterrupt: () => true,
       interrupt,
       outcomeUsageIsTurnTotal: true,

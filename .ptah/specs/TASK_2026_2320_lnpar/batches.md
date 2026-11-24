@@ -1,6 +1,6 @@
 # Batches - TASK_2026_2320_lnpar
 
-Total tasks: 49 | Batches: 30 | Complete: 28/30
+Total tasks: 49 | Batches: 30 | Complete: 29/30
 
 Source: `implementation-plan.md` revision 3 plus "Binding notes from Gate 2" (R3-1, R3-2 bind
 Batch 20), `task-description.md`, `design-spec.md`, `prototype/README.md`, `parity-inventory.md`,
@@ -1252,7 +1252,7 @@ Edge cases:
 
 - Artifacts exist; scoped commands pass.
 
-## Batch 29: B9b Pi and Cursor - PENDING (AFTER REBASE)
+## Batch 29: B9b Pi and Cursor - COMPLETE
 
 - Shape: logic
 - Estimated weight (tokens): ~32k
@@ -1274,8 +1274,8 @@ Edge cases:
 - Tasks: 2 | Depends on: Batch 28
 - Phase: P6 Adapters (last batch: phase review due) | Phase review: code-logic
 
-### Task 29.1: Pi settings, usage, images per A7 - PENDING
-### Task 29.2: Cursor per-send model and images, turn-end usage - PENDING
+### Task 29.1: Pi settings, usage, images per A7 - COMPLETE
+### Task 29.2: Cursor per-send model and images, turn-end usage - COMPLETE
 
 ### Batch 29 verification
 
