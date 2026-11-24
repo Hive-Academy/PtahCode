@@ -420,8 +420,10 @@ export interface CliAdapter {
    * Which messaging mechanisms this CLI supports for a message aimed at a live
    * agent. Required — an adapter that does not answer it is a compile error, so
    * a new adapter cannot silently inherit "no messaging at all".
+   * `permission` is the lane's effective spawn mode when known; an adapter
+   * whose prompt routes depend on it (Claude: no approvals in `yolo`) uses it.
    */
-  capabilities(): CliAdapterManifest;
+  capabilities(permission?: LanePermissionMode): CliAdapterManifest;
 
   /**
    * Where this CLI receives a resolved workspace role. Required — an adapter

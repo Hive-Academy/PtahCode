@@ -22,6 +22,7 @@ import {
   type EffortLevel,
   type LaneCapabilitySupport,
   type LaneComposerCommandOption,
+  type LaneImageInputSupport,
   type LanePermissionMode,
   type LanePromptCapabilities,
   type LaneTurnContent,
@@ -105,6 +106,27 @@ export const CLAUDE_SDK_LANE_TURN_INPUT: LaneTurnInputCapabilities = {
   commands: { state: 'supported', blocked: CLAUDE_HIDDEN_LANE_COMMANDS },
   skills: { state: 'supported' },
 };
+
+/** Reason a Ptah CLI lane on a provider without known image support gives (S1). */
+export const CLAUDE_SDK_LANE_IMAGES_UNKNOWN_TEXT =
+  'This provider does not report which of its models accept images.';
+
+/**
+ * The Claude SDK turn input with images narrowed to `images`. A Ptah CLI lane
+ * passes its provider's image support; the native Claude lane keeps the
+ * default.
+ */
+export function claudeSdkLaneTurnInput(
+  images: LaneImageInputSupport,
+): LaneTurnInputCapabilities {
+  return { ...CLAUDE_SDK_LANE_TURN_INPUT, images };
+}
+
+/** Fixed refusal texts of `applyTurnSettings` (M7): no provider text reaches a caller. */
+const CLAUDE_MODEL_REFUSED_TEXT = 'Claude did not accept the model.';
+const CLAUDE_EFFORT_REFUSED_TEXT = 'Claude did not accept the effort level.';
+const CLAUDE_EFFORT_REFUSED_MODEL_KEPT_TEXT =
+  'Claude did not accept the effort level; the model change could not be undone.';
 
 /**
  * Approval prompts reach the host through `canUseTool`. In `yolo` (native
@@ -206,6 +228,18 @@ export interface ClaudeSdkLaneRunContext {
    * is `supported`; absent keeps the fold-in dormant.
    */
   manifestSteer?: LaneCapabilitySupport;
+  /**
+   * The manifest's `turnInput.images` (S1). Absent means supported (the
+   * native Claude lane); an unsupported value refuses image turns.
+   */
+  imageInput?: LaneImageInputSupport;
+}
+
+/** One turn sent to the CLI whose result frame has not arrived yet. */
+interface InFlightTurn {
+  /** The prompt's uuid; absent for the spawn's first turn and steer placeholders. */
+  readonly uuid?: string;
+  readonly resolve: (exitCode: number) => void;
 }
 
 /** One native query and stream loop per spawn; no provider/config fabrication. */
@@ -266,17 +300,26 @@ export class ClaudeSdkLaneRunner {
     }
     let resolvedSessionId: string | null = null;
     const sessionResolvedCallbacks: Array<(sessionId: string) => void> = [];
-    const pendingTurns: Array<(exitCode: number) => void> = [];
-    const enqueueTurn = (): Promise<number> =>
-      new Promise<number>((resolve) => {
-        pendingTurns.push(resolve);
+    // Turn bookkeeping (B5, M4): a turn is in flight from its enqueue to its
+    // result frame. A result frame with no turn in flight (a CLI-initiated
+    // result, such as a background task notification) settles nothing.
+    const inFlight: InFlightTurn[] = [];
+    const enqueueTurn = (uuid?: string): { entry: InFlightTurn; done: Promise<number> } => {
+      let entry!: InFlightTurn;
+      const done = new Promise<number>((resolve) => {
+        entry = uuid ? { uuid, resolve } : { resolve };
       });
-    const turn1Done = enqueueTurn();
-    // Turn bookkeeping for interrupt (B5): a turn runs from its enqueue to
-    // its result frame.
-    let queuedTurns = 1;
-    let completedTurns = 0;
-    let interruptPending: { turnIndex: number; timedOut: boolean } | undefined;
+      inFlight.push(entry);
+      return { entry, done };
+    };
+    const dropTurn = (entry: InFlightTurn): void => {
+      const index = inFlight.indexOf(entry);
+      if (index >= 0) inFlight.splice(index, 1);
+    };
+    const turn1Done = enqueueTurn().done;
+    /** The turns the current result frame settles, handed to `onTurnComplete`. */
+    let settling: InFlightTurn[] | undefined;
+    let interruptPending: { turn: InFlightTurn; timedOut: boolean } | undefined;
     // Steer fold-in (B6): main-thread tool calls without their result, and
     // the uuids of steers pushed since the last result frame.
     let toolInFlight = false;
@@ -289,11 +332,16 @@ export class ClaudeSdkLaneRunner {
       fixed: string,
       error: unknown,
     ): LaneTurnSettingRefusal => {
-      // Named lanes show no provider text: it can carry account paths.
-      const detail = !context.named && error instanceof Error && error.message
-        ? `: ${error.message.slice(0, 200)}`
-        : '.';
-      return new LaneTurnSettingRefusal(field, `${fixed}${detail}`);
+      // The caller gets fixed text only (M7). Named lanes log no provider
+      // text either: it can carry account paths.
+      if (context.named)
+        this.logger.warn('[ClaudeLane] Claude refused a turn setting.', { field });
+      else
+        this.logger.warn('[ClaudeLane] Claude refused a turn setting.', {
+          field,
+          detail: error instanceof Error ? error.message.slice(0, 200) : String(error),
+        });
+      return new LaneTurnSettingRefusal(field, fixed);
     };
     const attachAgentId = (agentId: string): void => {
       agentIdHolder.value = agentId;
@@ -319,23 +367,38 @@ export class ClaudeSdkLaneRunner {
       // has settled (bounded at 3 s), so the exit it triggers is classified
       // and persisted with the owner (Batch 11 carry-forward).
       onTurnComplete: (exitCode: number) => {
-        const resolve = pendingTurns.shift();
-        if (resolve) {
-          void lanePlanLimits.settled.then(() => resolve(exitCode));
-        }
+        // Without a preceding `onTurnResult` the frame settles the oldest turn.
+        const head = settling === undefined ? inFlight.shift() : undefined;
+        const settled = settling ?? (head ? [head] : []);
+        settling = undefined;
+        if (settled.length > 0)
+          void lanePlanLimits.settled.then(() => {
+            for (const turn of settled) turn.resolve(exitCode);
+          });
       },
-      onToolInFlightChange: (inFlight) => {
-        toolInFlight = inFlight;
+      onToolInFlightChange: (toolRunning) => {
+        toolInFlight = toolRunning;
       },
       onTurnResult: ({ subtype, userMessageUuids }) => {
         reconcileSteers(userMessageUuids);
-        const turnIndex = completedTurns++;
+        const head = inFlight.shift();
+        if (!head) {
+          // Unsolicited (M4): no queued turn ends here.
+          settling = [];
+          return { interrupted: false };
+        }
+        // Queued prompts the CLI folded into this turn are proved by their
+        // uuids; they settle with it instead of waiting for a later frame.
+        const listed = new Set(userMessageUuids ?? []);
+        const folded = inFlight.filter((turn) => turn.uuid !== undefined && listed.has(turn.uuid));
+        for (const turn of folded) dropTurn(turn);
+        settling = [head, ...folded];
         // The flag clears on this turn's result frame, whatever its outcome.
         const flag = interruptPending;
         interruptPending = undefined;
         const interrupted =
           flag !== undefined &&
-          flag.turnIndex === turnIndex &&
+          flag.turn === head &&
           subtype === 'error_during_execution' &&
           !closed;
         if (interrupted && flag.timedOut)
@@ -347,7 +410,7 @@ export class ClaudeSdkLaneRunner {
     });
     let finished = false;
     const turnRunning = (): boolean =>
-      !closed && !finished && queuedTurns > completedTurns;
+      !closed && !finished && inFlight.length > 0;
     const supportsSteer = (): boolean => toolInFlight && turnRunning();
     /**
      * A steer the result frame does not list was not folded in: the CLI runs
@@ -362,12 +425,17 @@ export class ClaudeSdkLaneRunner {
       pendingSteers.clear();
       if (!missed) return;
       emitSegment({ type: 'info', content: CLAUDE_STEER_MISSED_TEXT });
-      queuedTurns++;
-      pendingTurns.splice(1, 0, () => undefined);
+      inFlight.splice(1, 0, { resolve: () => undefined });
+    };
+    /** Refuses a turn carrying images when the lane's provider cannot take them (S1). */
+    const assertImagesAccepted = (content?: LaneTurnContent): void => {
+      if ((content?.images?.length ?? 0) > 0 && context.imageInput?.state === 'unsupported')
+        throw new Error(context.imageInput.reason ?? CLAUDE_SDK_LANE_IMAGES_UNKNOWN_TEXT);
     };
     const steer = async (message: string, content?: LaneTurnContent): Promise<void> => {
       if (!supportsSteer()) throw new Error(CLAUDE_STEER_REFUSED_TEXT);
       if (context.named && abortController.signal.aborted) throw claudeLaneRefusal();
+      assertImagesAccepted(content);
       // Tagged so the result frame's `user_message_uuids` proves the fold-in.
       const turn: PromptTurn = {
         content: claudeLaneTurnContent(message, content),
@@ -392,37 +460,62 @@ export class ClaudeSdkLaneRunner {
           model !== undefined ? 'model' : 'reasoningEffort',
           'The Claude lane has ended.',
         );
+      // Both fields are checked before anything is sent (M2).
       if (reasoningEffort !== undefined && !isEffortLevel(reasoningEffort))
         throw new LaneTurnSettingRefusal(
           'reasoningEffort',
           `Claude has no effort level "${reasoningEffort}".`,
         );
+      // The flag layer has no `max` tier (E20), as in main chat: the result
+      // names the level actually applied (m4).
+      const effortLevel = reasoningEffort === 'max' ? 'xhigh' : reasoningEffort;
+      const result: LaneTurnSettingsResult = {
+        ...(model !== undefined ? { model } : {}),
+        ...(effortLevel !== undefined ? { reasoningEffort: effortLevel } : {}),
+        appliesAt: 'next-turn',
+      };
+      // Sent at once: the manager applies settings on an idle lane, or right
+      // before it interrupts the running turn, so a refusal never costs it.
+      await sendSettings(model, effortLevel);
+      return result;
+    };
+    /**
+     * Sends model then effort. An effort refusal rolls the model back, so a
+     * refusal leaves the lane's settings as they were (M2).
+     */
+    const sendSettings = async (model?: string, effortLevel?: string): Promise<void> => {
+      const previousModel = currentModel;
       if (model !== undefined) {
         try {
           await boundedCall(sdkQuery.setModel(model), CLAUDE_SETTINGS_TIMEOUT_MS,
             'Claude did not confirm the model in 10 s.');
         } catch (error: unknown) {
-          throw settingRefusal('model', `Claude did not accept the model "${model}"`, error);
+          throw settingRefusal('model', CLAUDE_MODEL_REFUSED_TEXT, error);
         }
-        currentModel = model;
       }
-      if (reasoningEffort !== undefined && isEffortLevel(reasoningEffort)) {
-        // The flag layer has no `max` tier (E20), as in main chat.
-        const effortLevel = reasoningEffort === 'max' ? 'xhigh' : reasoningEffort;
+      if (effortLevel !== undefined && isEffortLevel(effortLevel)) {
         try {
-          await boundedCall(sdkQuery.applyFlagSettings({ effortLevel }), CLAUDE_SETTINGS_TIMEOUT_MS,
-            'Claude did not confirm the effort level in 10 s.');
+          await boundedCall(
+            sdkQuery.applyFlagSettings({ effortLevel: effortLevel === 'max' ? 'xhigh' : effortLevel }),
+            CLAUDE_SETTINGS_TIMEOUT_MS,
+            'Claude did not confirm the effort level in 10 s.',
+          );
         } catch (error: unknown) {
-          throw settingRefusal('reasoningEffort',
-            `Claude did not accept the effort level "${reasoningEffort}"`, error);
+          if (model === undefined)
+            throw settingRefusal('reasoningEffort', CLAUDE_EFFORT_REFUSED_TEXT, error);
+          try {
+            await boundedCall(sdkQuery.setModel(previousModel), CLAUDE_SETTINGS_TIMEOUT_MS,
+              'Claude did not confirm the model rollback in 10 s.');
+          } catch {
+            // The refusal below tells the user the model stayed changed.
+            currentModel = model;
+            throw settingRefusal('reasoningEffort', CLAUDE_EFFORT_REFUSED_MODEL_KEPT_TEXT, error);
+          }
+          throw settingRefusal('reasoningEffort', CLAUDE_EFFORT_REFUSED_TEXT, error);
         }
-        currentEffort = reasoningEffort;
+        currentEffort = effortLevel;
       }
-      return {
-        ...(model !== undefined ? { model } : {}),
-        ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
-        appliesAt: 'next-turn',
-      };
+      if (model !== undefined) currentModel = model;
     };
     const listTurnOptions = async (): Promise<LaneTurnOptionsCatalog> => {
       const [models, commands] = await Promise.allSettled([
@@ -464,8 +557,10 @@ export class ClaudeSdkLaneRunner {
       );
       sessionResolvedCallbacks.length = 0;
       lanePlanLimits.end();
+      const remaining = [...(settling ?? []), ...inFlight.splice(0)];
+      settling = undefined;
       void lanePlanLimits.settled.then(() => {
-        while (pendingTurns.length) pendingTurns.shift()?.(exitCode);
+        for (const turn of remaining) turn.resolve(exitCode);
       });
     };
     abortSettler.settle = () => finish(1);
@@ -519,15 +614,25 @@ export class ClaudeSdkLaneRunner {
       continue: async (message: string, content?: LaneTurnContent) => {
         if (context.named && (closed || abortController.signal.aborted))
           throw claudeLaneRefusal();
-        // Built before the turn is queued: an unresolvable image rejects
-        // the call and nothing is sent.
-        const turn: PromptTurn = { content: claudeLaneTurnContent(message, content) };
-        const done = enqueueTurn();
-        queuedTurns++;
-        if (context.named)
-          await context.named.enqueue(turn, resolvedSessionId ?? undefined);
-        if (context.named && (closed || abortController.signal.aborted))
-          throw claudeLaneRefusal();
+        // Built before the turn is queued: an unresolvable or refused image
+        // rejects the call and nothing is sent.
+        assertImagesAccepted(content);
+        const turn: PromptTurn = {
+          content: claudeLaneTurnContent(message, content),
+          uuid: randomUUID(),
+        };
+        // Queued before the named gate so its result frame always finds it;
+        // a refusal by the gate drops it again (M5).
+        const { entry, done } = enqueueTurn(turn.uuid);
+        try {
+          if (context.named)
+            await context.named.enqueue(turn, resolvedSessionId ?? undefined);
+          if (context.named && (closed || abortController.signal.aborted))
+            throw claudeLaneRefusal();
+        } catch (error: unknown) {
+          dropTurn(entry);
+          throw error;
+        }
         // Counts only: no image data or file path reaches the log.
         this.logger.info(
           `[PtahCliRegistry] continue() pushing follow-up turn for "${agentName}"`,
@@ -544,8 +649,9 @@ export class ClaudeSdkLaneRunner {
       },
       supportsInterrupt: turnRunning,
       interrupt: async () => {
-        if (!turnRunning()) return;
-        const pending = { turnIndex: completedTurns, timedOut: false };
+        const running = inFlight[0];
+        if (!turnRunning() || !running) return;
+        const pending = { turn: running, timedOut: false };
         interruptPending = pending;
         try {
           await boundedCall(
@@ -567,8 +673,13 @@ export class ClaudeSdkLaneRunner {
       // Dormant until the manifest declares steer (Batch 30, after live L4).
       ...(context.manifestSteer?.state === 'supported' ? { steer, supportsSteer } : {}),
       applyTurnSettings,
-      // Images need no live gate: the SDK accepts image blocks on every turn.
-      turnInputSupport: () => ({ images: { state: 'supported' } }),
+      // The SDK accepts image blocks on every turn; whether the model can
+      // read them is the provider's (S1), so the manifest's value is echoed.
+      turnInputSupport: () => ({
+        images: context.imageInput?.state === 'unsupported'
+          ? context.imageInput
+          : { state: 'supported' },
+      }),
       listTurnOptions,
     };
     return { handle, setAgentId: attachAgentId };

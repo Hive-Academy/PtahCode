@@ -534,13 +534,27 @@ describe('named runner handoff', () => {
     expect(f.handle.accountBinding).toBe(f.named.reference.accountBinding);
     expect(f.handle.accountBindingId).toBe('run');
     const queued = await f.handle.continue?.('next');
-    expect(f.named.enqueue).toHaveBeenCalledWith({ content: 'next' }, undefined);
+    expect(f.named.enqueue).toHaveBeenCalledWith({ content: 'next', uuid: expect.any(String) }, undefined);
     expect(f.handle.steer).toBeUndefined();
     expect(typeof f.handle.interrupt).toBe('function');
     f.finish(0);
     await f.handle.done;
     await queued?.done;
     expect(f.named.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops a turn the named gate refuses, so the next result settles the right turn (M5)', async () => {
+    const f = namedRunnerFixture();
+    f.named.enqueue.mockRejectedValueOnce(new Error('refused'));
+    await expect(f.handle.continue?.('refused')).rejects.toThrow('refused');
+    const first = jest.fn();
+    void f.handle.done.then(first);
+    f.config.onTurnResult?.({ subtype: 'success' });
+    f.config.onTurnComplete?.(0);
+    await f.handle.done;
+    expect(first).toHaveBeenCalledWith(0);
+    expect(f.handle.supportsInterrupt?.()).toBe(false);
+    f.finish(0);
   });
 
   it('settles turns and cleans listeners once on named abort even when the stream stays pending', async () => {
@@ -1432,14 +1446,14 @@ describe('Claude lane interrupt, turn settings, content and catalog (B5)', () =>
     f.finish(0);
   });
 
-  it('applies model and effort for the next turn, mapping max to xhigh', async () => {
+  it('applies model and effort for the next turn, mapping max to xhigh and reporting xhigh (m4)', async () => {
     const f = fixture();
     await expect(f.handle.applyTurnSettings?.({ model: 'claude-opus-x', reasoningEffort: 'max' }))
-      .resolves.toEqual({ model: 'claude-opus-x', reasoningEffort: 'max', appliesAt: 'next-turn' });
+      .resolves.toEqual({ model: 'claude-opus-x', reasoningEffort: 'xhigh', appliesAt: 'next-turn' });
     expect(f.query.setModel).toHaveBeenCalledWith('claude-opus-x');
     expect(f.query.applyFlagSettings).toHaveBeenCalledWith({ effortLevel: 'xhigh' });
     const catalog = await f.handle.listTurnOptions?.();
-    expect(catalog).toMatchObject({ currentModel: 'claude-opus-x', currentEffort: 'max' });
+    expect(catalog).toMatchObject({ currentModel: 'claude-opus-x', currentEffort: 'xhigh' });
     f.finish(0);
   });
 
@@ -1449,7 +1463,8 @@ describe('Claude lane interrupt, turn settings, content and catalog (B5)', () =>
     const f = fixture(query);
     const refusal = await f.handle.applyTurnSettings?.({ model: 'nope' }).catch((error: unknown) => error);
     expect(refusal).toBeInstanceOf(LaneTurnSettingRefusal);
-    expect(refusal).toMatchObject({ field: 'model', reason: 'Claude did not accept the model "nope": unknown model' });
+    // Fixed text only (M7); the provider's detail goes to the log.
+    expect(refusal).toMatchObject({ field: 'model', reason: 'Claude did not accept the model.' });
     await expect(f.handle.applyTurnSettings?.({ reasoningEffort: 'turbo' }))
       .rejects.toMatchObject({ field: 'reasoningEffort' });
     expect(query.applyFlagSettings).not.toHaveBeenCalled();
@@ -1476,6 +1491,77 @@ describe('Claude lane interrupt, turn settings, content and catalog (B5)', () =>
       .toThrow('An attached image is not a PNG, JPEG, GIF or WebP image.');
     const f = fixture();
     await expect(f.handle.continue?.('x', { images: [{ data: 'AAAA', mediaType: 'text/plain' }] })).rejects.toThrow();
+    f.config.onTurnResult?.({ subtype: 'success' });
+    expect(f.handle.supportsInterrupt?.()).toBe(false);
+    f.finish(0);
+  });
+
+  it('rolls the model back when the effort is refused, and logs no provider text in the refusal (M2, M7)', async () => {
+    const query = fakeQuery();
+    query.applyFlagSettings.mockRejectedValue(new Error('C:\\Users\\me\\secret effort failure'));
+    const f = fixture(query);
+    const refusal = await f.handle
+      .applyTurnSettings?.({ model: 'claude-opus-x', reasoningEffort: 'high' })
+      .catch((error: unknown) => error);
+    expect(refusal).toMatchObject({ field: 'reasoningEffort', reason: 'Claude did not accept the effort level.' });
+    expect(JSON.stringify(refusal)).not.toContain('secret');
+    // Rolled back to the spawn's model.
+    expect(query.setModel.mock.calls).toEqual([['claude-opus-x'], ['sonnet']]);
+    expect(await f.handle.listTurnOptions?.()).toHaveProperty('currentModel', 'sonnet');
+    f.finish(0);
+  });
+
+  it('says the model stayed changed when the rollback also fails (M2)', async () => {
+    const query = fakeQuery();
+    query.applyFlagSettings.mockRejectedValue(new Error('no'));
+    query.setModel.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('no'));
+    const f = fixture(query);
+    await expect(f.handle.applyTurnSettings?.({ model: 'claude-opus-x', reasoningEffort: 'high' }))
+      .rejects.toMatchObject({
+        reason: 'Claude did not accept the effort level; the model change could not be undone.',
+      });
+    expect(await f.handle.listTurnOptions?.()).toHaveProperty('currentModel', 'claude-opus-x');
+    f.finish(0);
+  });
+
+  it('ignores a result frame with no turn in flight, so a later turn stays interruptible (M4)', async () => {
+    const f = fixture();
+    f.config.onTurnResult?.({ subtype: 'success' });
+    f.config.onTurnComplete?.(0);
+    await expect(f.handle.done).resolves.toBe(0);
+    // Unsolicited: a CLI-initiated result while nothing is queued.
+    expect(f.config.onTurnResult?.({ subtype: 'success' })).toEqual({ interrupted: false });
+    f.config.onTurnComplete?.(0);
+    const next = await f.handle.continue?.('next');
+    expect(f.handle.supportsInterrupt?.()).toBe(true);
+    await f.handle.interrupt?.();
+    expect(f.query.interrupt).toHaveBeenCalledTimes(1);
+    expect(f.config.onTurnResult?.({ subtype: 'error_during_execution' })).toEqual({ interrupted: true });
+    f.config.onTurnComplete?.(0);
+    await expect(next?.done).resolves.toBe(0);
+    f.finish(0);
+  });
+
+  it('settles a queued turn the result frame lists as folded in', async () => {
+    const f = fixture();
+    const next = await f.handle.continue?.('next');
+    await f.context.mailbox.prompt.next();
+    const pushed = (await f.context.mailbox.prompt.next()).value as { uuid: string };
+    f.config.onTurnResult?.({ subtype: 'success', userMessageUuids: [pushed.uuid] });
+    f.config.onTurnComplete?.(0);
+    await expect(next?.done).resolves.toBe(0);
+    expect(f.handle.supportsInterrupt?.()).toBe(false);
+    f.finish(0);
+  });
+
+  it('refuses image turns when the provider cannot take images (S1)', async () => {
+    const reason = 'This provider does not report which of its models accept images.';
+    const f = runnerFixture(Promise.resolve(), undefined, fakeQuery(), {
+      imageInput: { state: 'unsupported', reason },
+    });
+    expect(f.handle.turnInputSupport?.()).toEqual({ images: { state: 'unsupported', reason } });
+    await expect(f.handle.continue?.('look', { images: [{ data: PNG, mediaType: 'image/png' }] }))
+      .rejects.toThrow(reason);
     f.config.onTurnResult?.({ subtype: 'success' });
     expect(f.handle.supportsInterrupt?.()).toBe(false);
     f.finish(0);

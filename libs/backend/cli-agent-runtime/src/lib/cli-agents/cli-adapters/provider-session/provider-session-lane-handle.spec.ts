@@ -1923,6 +1923,32 @@ describe('createProviderSessionLaneHandle — lane turn input (B8)', () => {
     ]);
   });
 
+  it('refuses an effort the profile maps to nothing before the model changes (M2)', async () => {
+    const h = start({ agent: { configOptions: [MODEL_OPTION, EFFORT_OPTION] } });
+    await expect(h.handle.done).resolves.toBe(0);
+    const before = sent(h.agent, 'session/set_config_option').length;
+    await expect(h.handle.applyTurnSettings?.({ model: 'model-b', reasoningEffort: 'high' }))
+      .rejects.toMatchObject({ field: 'reasoningEffort' });
+    expect(sent(h.agent, 'session/set_config_option').slice(before)).toHaveLength(0);
+  });
+
+  it('rolls the model back when the agent refuses the effort (M2)', async () => {
+    const h = start({ agent: { configOptions: [MODEL_OPTION, EFFORT_OPTION] }, profile: effortProfile });
+    await expect(h.handle.done).resolves.toBe(0);
+    h.agent.handle('session/set_config_option', (params) =>
+      params['configId'] === 'reasoning_effort'
+        ? { error: { code: -32602, message: 'Invalid params' } }
+        : { result: { configOptions: [MODEL_OPTION, EFFORT_OPTION] } });
+    const before = sent(h.agent, 'session/set_config_option').length;
+    await expect(h.handle.applyTurnSettings?.({ model: 'model-b', reasoningEffort: 'high' }))
+      .rejects.toMatchObject({ field: 'reasoningEffort', reason: `${NAME} did not accept the effort level "high".` });
+    expect(sent(h.agent, 'session/set_config_option').slice(before).map(paramsOf)).toEqual([
+      { sessionId: SESSION_ID, configId: 'model', value: 'model-b' },
+      { sessionId: SESSION_ID, configId: 'reasoning_effort', value: 'high' },
+      { sessionId: SESSION_ID, configId: 'model', value: 'model-a' },
+    ]);
+  });
+
   it('refuses a model the agent rejects, naming the CLI and the model', async () => {
     const h = start({ agent: { configOptions: [MODEL_OPTION] }, profile: effortProfile });
     await expect(h.handle.done).resolves.toBe(0);

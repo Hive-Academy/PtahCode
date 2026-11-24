@@ -101,6 +101,14 @@ import {
 import { ptahMcpServerUrl } from './ptah-mcp-url';
 import { laneMcpAuthUrl } from './lane-mcp-credentials';
 import { classifyCliStderr } from './cli-stderr-severity';
+import { UnverifiedLaneModel } from './lane-unverified-model';
+
+/**
+ * Refusal for a turn with more than one attached file (S2): `--file` is a
+ * single-value flag in `opencode run --help`, and repeating it is unconfirmed.
+ */
+export const OPENCODE_ONE_FILE_TEXT =
+  'OpenCode lanes take one attached file per message. The message was not sent.';
 
 /**
  * Provider API-key env vars treated as a "credentials present" signal when no
@@ -398,6 +406,9 @@ export class OpencodeCliAdapter implements CliAdapter {
         model: { state: 'supported', appliesAt: 'next-spawn' },
         effort: { state: 'unsupported', reason: 'OpenCode model variants for reasoning effort are not known to Ptah.' },
         images: { state: 'unsupported', reason: 'OpenCode image input through --file is not confirmed.' },
+        // One file per turn (S2): `opencode run --help` (v2.3.2) lists
+        // `--file, -f string`, a single value like `--model`; whether it
+        // repeats is not confirmed, so a second file is refused at send.
         files: { state: 'supported', delivery: 'reference' },
         commands: { state: 'unsupported', reason: 'OpenCode lanes take no slash commands in run mode.' },
         skills: { state: 'unsupported', reason: 'OpenCode lanes do not expose skills to the composer.' },
@@ -737,6 +748,7 @@ export class OpencodeCliAdapter implements CliAdapter {
     }
     /** The model of the next spawned turn (`applyTurnSettings`, next-spawn). */
     let turnModel = options.model;
+    const unverifiedModel = new UnverifiedLaneModel('OpenCode', (item) => segment.emit(item));
     const standalone = await this.supportsStandalone(binary);
     const legacyAutoFallback = policy.requested.permission === 'yolo'
       && options.permissionSource === 'built-in' && !standalone;
@@ -798,11 +810,18 @@ export class OpencodeCliAdapter implements CliAdapter {
       if (sessionId) {
         args.push('--session', sessionId);
       }
-      // One `--file` per attachment, each its own argv entry (never a joined string).
-      for (const file of files) args.push('--file', file);
+      // At most one `--file` (S2), its own argv entry; `continue` refuses more.
+      const [file] = files;
+      if (file !== undefined) args.push('--file', file);
       // Prompt is a positional arg; keep it LAST.
       args.push(prompt);
       assertCommandLineWithinLimit(spawnDescriptor.command, args);
+      const settleModel = (code: number): number => {
+        // A failed turn drops its unchecked model (M3); an aborted one proves nothing.
+        if (!abortController.signal.aborted && unverifiedModel.settle(model, code === 0))
+          turnModel = options.model;
+        return code;
+      };
       return this.runTurn({
         windowsJobPolicy: standalone === true ? 'job' : 'no-job',
         turnNumber: ++turnSequence,
@@ -832,7 +851,7 @@ export class OpencodeCliAdapter implements CliAdapter {
           }
         },
         expectedSessionId: sessionId,
-      });
+      }).then(settleModel);
     };
 
     const resumableSessionId = (): string | undefined =>
@@ -865,6 +884,8 @@ export class OpencodeCliAdapter implements CliAdapter {
             ),
           );
         }
+        if ((content?.files?.length ?? 0) > 1)
+          return Promise.reject(new Error(OPENCODE_ONE_FILE_TEXT));
         // The session already holds the task and its context; the message is
         // the whole prompt of the new turn.
         return Promise.resolve({ done: startTurn(message, sessionId, content?.files) });
@@ -877,9 +898,8 @@ export class OpencodeCliAdapter implements CliAdapter {
           );
         const { model } = settings;
         if (model !== undefined) {
-          const known = await this.listModels();
-          if (known.length > 0 && !known.some((entry) => entry.id === model))
-            throw new LaneTurnSettingRefusal('model', `OpenCode has no model "${model}".`);
+          // An empty list (failed probe) takes the model unchecked and says so (M3).
+          unverifiedModel.accept(model, await this.listModels());
           turnModel = model;
         }
         return { ...(model !== undefined ? { model } : {}), appliesAt: 'next-spawn' };

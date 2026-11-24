@@ -80,6 +80,7 @@ import {
 import { ptahMcpServerUrl } from './ptah-mcp-url';
 import { laneMcpAuthUrl } from './lane-mcp-credentials';
 import { classifyCliStderr } from './cli-stderr-severity';
+import { UnverifiedLaneModel } from './lane-unverified-model';
 import type { CopilotPermissionBridge } from './copilot-permission-bridge';
 
 /** Shell/command execution tool names across providers */
@@ -344,6 +345,12 @@ export class CopilotSdkAdapter implements CliAdapter {
 
     /** Model and effort the next spawned turn uses (`applyTurnSettings`, next-spawn). */
     const nextTurn: { model?: string; reasoningEffort?: string } = {};
+    const unverifiedModel = new UnverifiedLaneModel('Copilot', (item) => segment.emit(item));
+    /** Drops a failed turn's unchecked model (M3); an aborted turn proves nothing. */
+    const settleTurnModel = (turnModel: string | undefined, exitCode: number): void => {
+      if (abortController.signal.aborted) return;
+      if (unverifiedModel.settle(turnModel, exitCode === 0)) nextTurn.model = undefined;
+    };
     const runTurn = (
       prompt: string,
       resumeSessionId?: string,
@@ -362,7 +369,8 @@ export class CopilotSdkAdapter implements CliAdapter {
         args.push(`--resume=${resumeSessionId}`);
       }
 
-      const model = nextTurn.model ?? options.model;
+      const turnModel = nextTurn.model;
+      const model = turnModel ?? options.model;
       if (model) {
         args.push('--model', model);
       }
@@ -539,6 +547,7 @@ export class CopilotSdkAdapter implements CliAdapter {
               }),
             });
           }
+          settleTurnModel(turnModel, exitCode);
           resolve(exitCode);
         });
 
@@ -549,6 +558,7 @@ export class CopilotSdkAdapter implements CliAdapter {
             content: `Copilot CLI Error: ${err.message}`,
           });
           activeChild = undefined;
+          settleTurnModel(turnModel, 1);
           resolve(1);
         });
       });
@@ -576,10 +586,9 @@ export class CopilotSdkAdapter implements CliAdapter {
         if (reasoningEffort !== undefined && !COPILOT_LANE_EFFORTS.includes(reasoningEffort))
           throw new LaneTurnSettingRefusal('reasoningEffort', `Copilot has no effort level "${reasoningEffort}".`);
         if (model !== undefined) {
-          // Checked only when the CLI can list its models; Copilot lists none today.
-          const known = await this.listModels();
-          if (known.length > 0 && !known.some((entry) => entry.id === model))
-            throw new LaneTurnSettingRefusal('model', `Copilot has no model "${model}".`);
+          // Copilot lists no models today, so the model is taken unchecked
+          // and the lane says so (M3).
+          unverifiedModel.accept(model, await this.listModels());
           nextTurn.model = model;
         }
         if (reasoningEffort !== undefined) nextTurn.reasoningEffort = reasoningEffort;

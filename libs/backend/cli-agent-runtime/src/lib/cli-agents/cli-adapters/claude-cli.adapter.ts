@@ -6,6 +6,7 @@ import type {
   EffectiveCapabilitySet,
   CliOutputSegment,
   FlatStreamEventUnion,
+  LanePermissionMode,
   PhaseDispatchV1,
 } from '@ptah-extension/shared';
 import type {
@@ -98,7 +99,7 @@ export class ClaudeCliAdapter implements ClaudeCliAdapterContract {
     );
   }
 
-  capabilities(): CliAdapterManifest {
+  capabilities(permission?: LanePermissionMode): CliAdapterManifest {
     return {
       messaging: {
         steer: { state: 'unsupported', reason: 'The SDK prompt mailbox starts turns; it has no mid-turn steer.' },
@@ -121,7 +122,7 @@ export class ClaudeCliAdapter implements ClaudeCliAdapterContract {
       mcp: { state: 'supported' },
       turnInput: CLAUDE_SDK_LANE_TURN_INPUT,
       usage: { timing: 'live' },
-      prompts: claudeSdkLanePrompts(),
+      prompts: claudeSdkLanePrompts(permission),
     };
   }
 

@@ -180,6 +180,15 @@ describe('ClaudeCliAdapter constructibility', () => {
     });
     expect(f.query).not.toHaveBeenCalled();
   });
+  it('declares approval prompts unsupported for a yolo lane only (M1)', () => {
+    const f = fixture();
+    expect(f.adapter.capabilities('yolo').prompts?.approvals).toEqual({
+      state: 'unsupported',
+      reason: 'This lane runs in yolo mode: every tool runs without an approval prompt.',
+    });
+    expect(f.adapter.capabilities('ask').prompts?.approvals.state).toBe('supported');
+    expect(f.adapter.capabilities().prompts?.approvals.state).toBe('supported');
+  });
 });
 
 describe('ClaudeCliAdapter native SDK execution', () => {

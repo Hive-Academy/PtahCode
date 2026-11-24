@@ -2292,6 +2292,17 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       },
     );
 
+    it('resolves the lane manifest with the spawn permission (M1)', async () => {
+      useAdapter('claude');
+      await manager.spawn({
+        task: 'Task',
+        cli: 'claude',
+        workingDirectory: '/workspace/root',
+        permission: 'yolo',
+      });
+      expect(sdkAdapter.capabilities).toHaveBeenCalledWith('yolo');
+    });
+
     it.each([
       ['claude', 'ask', undefined],
       ['codex', 'auto-edit', 'deny'],

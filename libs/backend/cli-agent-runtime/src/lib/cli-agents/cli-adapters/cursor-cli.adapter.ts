@@ -162,6 +162,8 @@ interface CursorSdkModule {
  * Local agents require an explicit model selection.
  */
 const DEFAULT_CURSOR_MODEL = 'composer-2.5';
+/** Bound on the Cursor model list read by `applyTurnSettings` (m3), as Grok's 8 s. */
+const CURSOR_MODELS_TIMEOUT_MS = 8_000;
 
 /**
  * Cached successful import of the ESM-only @cursor/sdk package.
@@ -643,11 +645,23 @@ export class CursorCliAdapter implements CliAdapter {
         const { model } = settings;
         if (model !== undefined) {
           let known: CliModelInfo[];
+          let timer: ReturnType<typeof setTimeout> | undefined;
           try {
-            known = await this.listModels();
+            // Bounded (m3): `models.list()` is a network call with no timeout of its own.
+            known = await Promise.race([
+              this.listModels(),
+              new Promise<never>((_resolve, reject) => {
+                timer = setTimeout(
+                  () => reject(new Error('Cursor models timed out.')),
+                  CURSOR_MODELS_TIMEOUT_MS,
+                );
+              }),
+            ]);
           } catch {
             // degradation-audit: reported - the refusal tells the user the model was not changed; listModels logs the redacted cause.
             throw new LaneTurnSettingRefusal('model', 'Cursor models could not be read; the model was not changed.');
+          } finally {
+            clearTimeout(timer);
           }
           if (known.length > 0 && !known.some((entry) => entry.id === model))
             throw new LaneTurnSettingRefusal('model', `Cursor has no model "${model}".`);

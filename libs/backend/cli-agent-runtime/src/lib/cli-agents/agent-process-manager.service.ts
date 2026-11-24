@@ -1431,7 +1431,9 @@ export class AgentProcessManager {
       ...roleStamp,
       taskKind: request.taskKind,
       routingSource: request.routingSource,
-      potentialCapabilities: this.cliDetection.getAdapter(cli)?.capabilities(),
+      potentialCapabilities: this.cliDetection
+        .getAdapter(cli)
+        ?.capabilities(options.effectivePolicy?.requested?.permission),
       // Flat policy, not the `translateLaneSpawnPolicy` wrapper: the
       // formatter and `SystemCliLaneResumer` read `permission` directly.
       effectivePolicy: options.effectivePolicy?.requested,
@@ -1855,7 +1857,9 @@ export class AgentProcessManager {
     info = { ...info, ...reference };
     const potential =
       info.potentialCapabilities ??
-      this.cliDetection.getAdapter(info.cli)?.capabilities();
+      this.cliDetection
+        .getAdapter(info.cli)
+        ?.capabilities(info.effectivePolicy?.permission);
     if (potential)
       info = {
         ...info,
@@ -3140,7 +3144,9 @@ export class AgentProcessManager {
     beforeInterrupt = false,
   ): Promise<LaneTurnContent | undefined> {
     const manifest = tracked.info.potentialCapabilities ??
-      this.cliDetection.getAdapter(tracked.info.cli)?.capabilities();
+      this.cliDetection
+        .getAdapter(tracked.info.cli)
+        ?.capabilities(tracked.info.effectivePolicy?.permission);
     const input = manifest
       ? resolveEffectiveLaneCapabilities(tracked.info, manifest, sdkHandle).turnInput
       : undefined;

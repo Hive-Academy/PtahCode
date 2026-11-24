@@ -257,6 +257,14 @@ export interface PtahCliTurnResult {
   readonly userMessageUuids?: readonly string[];
 }
 
+/** One assistant message's usage counters, as emitted so far this turn. */
+interface MessageUsageCounters {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cacheReadTokens: number;
+  readonly cacheWriteTokens: number;
+}
+
 /** Aggregate display ID; pricing uses the billed models in `usage.models`. */
 const MULTI_MODEL_ID = 'mixed-model';
 
@@ -289,11 +297,12 @@ export class PtahCliStreamLoop {
   /** Track toolCallIds already emitted via stream_event to avoid duplicate tool_start from assistant */
   private readonly emittedToolCallIds = new Set<string>();
   /**
-   * Assistant message ids whose usage was already emitted this turn. The SDK
-   * sends one assistant frame per content block, each repeating the same
-   * message's usage (A2), so a message's usage counts once.
+   * Usage already emitted this turn, per assistant message id. The SDK sends
+   * one assistant frame per content block, each repeating the message's usage
+   * so far (A2); an early frame's `output_tokens` can be a streaming
+   * placeholder. Each frame adds only what grew since the last one (m1).
    */
-  private readonly usageMessageIds = new Set<string>();
+  private readonly usageMessageIds = new Map<string, MessageUsageCounters>();
   /** Main-thread tool call ids that have no `tool_result` yet. */
   private readonly toolsInFlight = new Set<string>();
   private turnModelDeltas: Array<{ modelId: string; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }> = [];
@@ -810,27 +819,50 @@ export class PtahCliStreamLoop {
   }
 
   /**
-   * Live usage (B5): each assistant message's own usage as a `message`-scoped
-   * increment, once per `message.id`. The result's `turn` segment later
+   * Live usage (B5): each assistant message's own usage as `message`-scoped
+   * increments, per `message.id` only what grew since its previous frame
+   * (m1). The result's `turn` segment later
    * corrects the running sum to the provider's turn total.
    */
   private emitMessageUsage(msg: SDKAssistantMessage): void {
     const id = msg.message?.id;
     const usage = msg.message?.usage;
-    if (!id || !usage || this.usageMessageIds.has(id)) return;
-    this.usageMessageIds.add(id);
+    if (!id || !usage) return;
+    const current: MessageUsageCounters = {
+      inputTokens: usage.input_tokens ?? 0,
+      outputTokens: usage.output_tokens ?? 0,
+      cacheReadTokens: usage.cache_read_input_tokens ?? 0,
+      cacheWriteTokens: usage.cache_creation_input_tokens ?? 0,
+    };
+    const previous = this.usageMessageIds.get(id);
+    // Only growth counts: a later frame with a smaller counter adds nothing.
+    const grown = (key: keyof MessageUsageCounters): number =>
+      Math.max(0, current[key] - (previous?.[key] ?? 0));
+    const delta: MessageUsageCounters = {
+      inputTokens: grown('inputTokens'),
+      outputTokens: grown('outputTokens'),
+      cacheReadTokens: grown('cacheReadTokens'),
+      cacheWriteTokens: grown('cacheWriteTokens'),
+    };
+    if (previous && Object.values(delta).every((value) => value === 0)) return;
+    this.usageMessageIds.set(id, {
+      inputTokens: (previous?.inputTokens ?? 0) + delta.inputTokens,
+      outputTokens: (previous?.outputTokens ?? 0) + delta.outputTokens,
+      cacheReadTokens: (previous?.cacheReadTokens ?? 0) + delta.cacheReadTokens,
+      cacheWriteTokens: (previous?.cacheWriteTokens ?? 0) + delta.cacheWriteTokens,
+    });
     this.config.emitSegment({
       type: 'info',
       content: 'Claude message usage.',
       usageScope: 'message',
       usage: {
-        inputTokens: usage.input_tokens,
-        outputTokens: usage.output_tokens,
+        inputTokens: delta.inputTokens,
+        outputTokens: delta.outputTokens,
         ...(typeof usage.cache_read_input_tokens === 'number' && {
-          cacheReadTokens: usage.cache_read_input_tokens,
+          cacheReadTokens: delta.cacheReadTokens,
         }),
         ...(typeof usage.cache_creation_input_tokens === 'number' && {
-          cacheWriteTokens: usage.cache_creation_input_tokens,
+          cacheWriteTokens: delta.cacheWriteTokens,
         }),
         ...(msg.message.model && { model: msg.message.model }),
       },

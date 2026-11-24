@@ -76,6 +76,8 @@ import { CodexLaneWriteDacPreflight } from './codex-lane-write-dac-preflight';
 
 /** Safety bound for app-server builds that omit a trailing usage notification. */
 export const CODEX_LANE_USAGE_DRAIN_MS = 2_000;
+/** Fixed refusal of `applyTurnSettings` (M7); the runtime's detail goes to the log. */
+export const CODEX_TURN_SETTINGS_REFUSED_TEXT = 'Codex did not accept the turn settings.';
 
 export class CodexLaneResumeIdentityError extends Error {
   constructor() {
@@ -876,11 +878,13 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
           ...(effort !== undefined ? { effort } : {}),
         });
       } catch (error: unknown) {
-        // The runtime's own message is fixed text (no vendor payload).
-        throw new LaneTurnSettingRefusal(
+        // Fixed text only (M7): the runtime message can name paths, so it
+        // goes to the redacting log, never into the refusal.
+        this.logger.warn('[CodexAppServerLaneAdapter] Codex refused the turn settings', {
           field,
-          `Codex did not accept the turn settings${error instanceof Error && error.message ? `: ${error.message.slice(0, 200)}` : '.'}`,
-        );
+          detail: error instanceof Error ? error.message.slice(0, 200) : String(error),
+        });
+        throw new LaneTurnSettingRefusal(field, CODEX_TURN_SETTINGS_REFUSED_TEXT);
       }
       if (model !== undefined) currentModel = model;
       if (effort !== undefined) currentEffort = effort;

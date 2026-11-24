@@ -1818,7 +1818,7 @@ describe('CodexAppServerLaneAdapter lane turn input (B7)', () => {
     update.mockRejectedValueOnce(new Error('Invalid Codex turn settings'));
     await expect(handle.applyTurnSettings?.({ model: 'bad' })).rejects.toMatchObject({
       field: 'model',
-      reason: 'Codex did not accept the turn settings: Invalid Codex turn settings',
+      reason: 'Codex did not accept the turn settings.',
     });
     await terminal(h.context);
     await handle.done;

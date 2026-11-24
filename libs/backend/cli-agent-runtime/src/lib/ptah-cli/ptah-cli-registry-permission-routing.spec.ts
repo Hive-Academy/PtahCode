@@ -398,6 +398,7 @@ describe('PtahCliRegistry.spawnAgent — lane turn input (B5)', () => {
     await result.handle.continue?.('next', { files: ['src/a.ts'] });
     expect(pushes[0]?.[0]).toEqual({
       content: 'next\n\nAttached files:\n- src/a.ts',
+      uuid: expect.any(String),
     });
     spy.mockRestore();
     result.handle.abort.abort();

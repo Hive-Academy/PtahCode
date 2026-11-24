@@ -143,6 +143,7 @@ jest.mock('fs/promises', () => ({
 
 import path from 'path';
 import {
+  OPENCODE_ONE_FILE_TEXT,
   OpencodeCliAdapter,
   resolveOpencodeNativeBinary,
 } from './opencode-cli.adapter';
@@ -1868,7 +1869,7 @@ describe('OpencodeCliAdapter lane turn input (B9)', () => {
     expect(laneTurnInputContractViolations(handle, manifest)).toEqual([]);
   });
 
-  it('spawns the next turn with the applied model and one --file entry per file, prompt last', async () => {
+  it('spawns the next turn with the applied model and one --file entry, prompt last', async () => {
     const { handle } = await firstTurn();
     jest.spyOn(adapter, 'listModels').mockResolvedValue([
       { id: 'opencode-go/glm-5.3', name: 'opencode-go/glm-5.3' },
@@ -1876,14 +1877,35 @@ describe('OpencodeCliAdapter lane turn input (B9)', () => {
     ]);
     await expect(handle.applyTurnSettings?.({ model: 'openai/gpt-x' }))
       .resolves.toEqual({ model: 'openai/gpt-x', appliesAt: 'next-spawn' });
-    const next = await handle.continue?.('Next', { files: ['/proj/a b.ts', '/proj/c.ts'] });
+    const next = await handle.continue?.('Next', { files: ['/proj/a b.ts'] });
     currentChild?.emitClose(0);
     await next?.done;
     const args = spawnArgs(1);
     expect(args[args.indexOf('--model') + 1]).toBe('openai/gpt-x');
     expect(args).not.toContain('opencode-go/glm-5.3');
-    expect(args.slice(-7)).toEqual(['--session', 'ses_1', '--file', '/proj/a b.ts', '--file', '/proj/c.ts', 'Next']);
+    expect(args.slice(-5)).toEqual(['--session', 'ses_1', '--file', '/proj/a b.ts', 'Next']);
     await expect(handle.listTurnOptions?.()).resolves.toMatchObject({ currentModel: 'openai/gpt-x', efforts: [] });
+  });
+
+  it('refuses a second attached file and spawns nothing (S2)', async () => {
+    const { handle } = await firstTurn();
+    const spawned = mockSpawnCli.mock.calls.length;
+    await expect(handle.continue?.('Next', { files: ['/proj/a.ts', '/proj/c.ts'] }))
+      .rejects.toThrow(OPENCODE_ONE_FILE_TEXT);
+    expect(mockSpawnCli.mock.calls.length).toBe(spawned);
+  });
+
+  it('says an unlisted model is unchecked when opencode lists none (M3)', async () => {
+    const { handle } = await firstTurn();
+    const segments: CliOutputSegment[] = [];
+    handle.onSegment?.((item) => segments.push(item));
+    jest.spyOn(adapter, 'listModels').mockResolvedValue([]);
+    await expect(handle.applyTurnSettings?.({ model: 'open/typo' }))
+      .resolves.toEqual({ model: 'open/typo', appliesAt: 'next-spawn' });
+    expect(segments).toContainEqual({
+      type: 'info',
+      content: 'OpenCode lists no models, so "open/typo" was not checked. The next turn uses it.',
+    });
   });
 
   it('refuses an unknown model and any effort', async () => {

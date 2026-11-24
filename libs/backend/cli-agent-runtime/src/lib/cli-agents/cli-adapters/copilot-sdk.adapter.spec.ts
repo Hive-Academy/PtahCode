@@ -1192,6 +1192,29 @@ describe('CopilotSdkAdapter lane turn input (B9)', () => {
       .rejects.toMatchObject({ field: 'model', reason: 'Copilot has no model "gpt-x".' });
   });
 
+  it('says an unlisted model is unchecked and drops it after a failed turn (M3)', async () => {
+    const handle = await firstTurn();
+    const segments: CliOutputSegment[] = [];
+    handle.onSegment?.((item) => segments.push(item));
+    await handle.applyTurnSettings?.({ model: 'gtp-typo' });
+    expect(segments).toContainEqual({
+      type: 'info',
+      content: 'Copilot lists no models, so "gtp-typo" was not checked. The next turn uses it.',
+    });
+    const failed = await handle.continue?.('follow up');
+    currentChild?.emitClose(1);
+    await failed?.done;
+    expect(segments).toContainEqual({
+      type: 'info',
+      content: 'The turn with the unchecked model "gtp-typo" failed. The next turn uses the lane\'s model again.',
+    });
+    const next = await handle.continue?.('again');
+    currentChild?.emitClose(0);
+    await next?.done;
+    const [, args] = mockSpawnCli.mock.calls[2] as [string, string[]];
+    expect(args).not.toContain('gtp-typo');
+  });
+
   it('streams each request usage mid-turn before the turn total', async () => {
     const handle = await adapter.runSdk(options);
     const segments: CliOutputSegment[] = [];

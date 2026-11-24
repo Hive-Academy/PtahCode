@@ -513,18 +513,47 @@ export function createProviderSessionLaneHandle(
         model !== undefined ? 'model' : 'reasoningEffort',
         `${name} has no running ACP session.`,
       );
-    if (model !== undefined && !(await session.setModel(model)))
-      throw new LaneTurnSettingRefusal('model', `${name} did not accept the model "${model}".`);
-    if (reasoningEffort !== undefined && !(await session.setEffort(reasoningEffort)))
-      throw new LaneTurnSettingRefusal(
+    const effortRefused = (): LaneTurnSettingRefusal =>
+      new LaneTurnSettingRefusal(
         'reasoningEffort',
         `${name} did not accept the effort level "${reasoningEffort}".`,
       );
+    // Both fields are checked before anything is sent (M2): an effort the
+    // profile maps to no config entry would otherwise apply nothing.
+    if (reasoningEffort !== undefined && !profileEfforts().includes(reasoningEffort))
+      throw effortRefused();
+    const previousModel = session.getModels().find((entry) => entry.isDefault)?.id;
+    if (model !== undefined && !(await session.setModel(model)))
+      throw new LaneTurnSettingRefusal('model', `${name} did not accept the model "${model}".`);
+    if (reasoningEffort !== undefined && !(await session.setEffort(reasoningEffort))) {
+      // A refusal leaves the settings as they were: the model is rolled back.
+      if (model !== undefined && model !== previousModel && !(await rollBackModel(previousModel)))
+        throw new LaneTurnSettingRefusal(
+          'reasoningEffort',
+          `${name} did not accept the effort level "${reasoningEffort}"; the model change could not be undone.`,
+        );
+      throw effortRefused();
+    }
     return {
       ...(model !== undefined ? { model } : {}),
       ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
       appliesAt: 'next-turn',
     };
+  };
+
+  /** Restores `previous` after a refused effort; false when it cannot. */
+  const rollBackModel = async (previous: string | undefined): Promise<boolean> => {
+    if (previous === undefined) return false;
+    try {
+      return await session.setModel(previous);
+    } catch (error: unknown) {
+      // degradation-audit: reported - logged at warn; the caller's refusal says the model change could not be undone.
+      logger?.warn('[AcpSessionHandle] model rollback failed', {
+        ...logContext,
+        errorClass: error instanceof Error ? error.name : typeof error,
+      });
+      return false;
+    }
   };
 
   /** Effort values the profile maps to a config entry other than the model. */

@@ -91,6 +91,13 @@ function specTierPreferences(
 
 describe('Ptah CLI provider manifest', () => {
   const registry = Object.create(PtahCliRegistry.prototype) as PtahCliRegistry;
+  // The manifest reads the real provider entries (image support, S1).
+  beforeEach(() => {
+    jest.mocked(getAnthropicProvider).mockImplementation(
+      jest.requireActual<typeof import('@ptah-extension/agent-sdk')>('@ptah-extension/agent-sdk')
+        .getAnthropicProvider,
+    );
+  });
 
   it('uses Claude SDK permission mappings and refuses network denial', () => {
     const manifest = registry.capabilities('claude-cli');
@@ -118,6 +125,16 @@ describe('Ptah CLI provider manifest', () => {
     });
     expect(manifest.usage).toEqual({ timing: 'live' });
     expect(manifest.prompts?.approvals.state).toBe('supported');
+  });
+
+  it('offers images only on providers whose every model reads them (S1)', () => {
+    for (const providerId of ['claude-cli', 'anthropic-api'])
+      expect(registry.capabilities(providerId).turnInput?.images).toEqual({ state: 'supported', onSteer: false });
+    for (const providerId of ['openrouter', 'z-ai', 'ollama', 'no-such-provider'])
+      expect(registry.capabilities(providerId).turnInput?.images).toEqual({
+        state: 'unsupported',
+        reason: 'This provider does not report which of its models accept images.',
+      });
   });
 
   it('states that approval prompts do not reach Ptah from a yolo spawn', () => {

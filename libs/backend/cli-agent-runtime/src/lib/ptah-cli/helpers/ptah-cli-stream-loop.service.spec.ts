@@ -1219,6 +1219,22 @@ describe('PtahCliStreamLoop live message usage and interrupted turns (B5)', () =
     ]);
   });
 
+  it('adds only the growth of a later frame of the same message (m1)', async () => {
+    const { loop, emitSegment } = makeLiveLoop();
+    const early = assistant('msg-1', { type: 'thinking', thinking: 'hm' }) as unknown as {
+      message: { usage: { output_tokens: number } };
+    };
+    early.message.usage = { ...early.message.usage, output_tokens: 1 };
+    await loop.run(manyMessages([
+      early as unknown as SDKMessage,
+      assistant('msg-1', { type: 'text', text: 'hi' }),
+    ]));
+    expect(usageSegments(emitSegment).map((segment) => segment.usage)).toEqual([
+      { inputTokens: 10, outputTokens: 1, cacheReadTokens: 3, model: 'claude-opus-x' },
+      { inputTokens: 0, outputTokens: 4, cacheReadTokens: 0, model: 'claude-opus-x' },
+    ]);
+  });
+
   it('marks the result usage as the turn total', async () => {
     const { loop, emitSegment } = makeLiveLoop();
     await loop.run(singleMessage({

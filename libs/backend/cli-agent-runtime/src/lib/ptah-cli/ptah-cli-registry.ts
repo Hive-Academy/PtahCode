@@ -1,6 +1,7 @@
 import { buildClaudeSdkLaneOptions } from '../claude/claude-sdk-lane-options';
 import {
-  CLAUDE_SDK_LANE_TURN_INPUT,
+  CLAUDE_SDK_LANE_IMAGES_UNKNOWN_TEXT,
+  claudeSdkLaneTurnInput,
   ClaudeSdkLaneRunner,
   claudeSdkLanePrompts,
 } from '../claude/claude-sdk-lane-runner';
@@ -405,7 +406,13 @@ export class PtahCliRegistry {
               reason: 'No provider-specific owner limit reader is registered.',
             },
       mcp: { state: 'supported' },
-      turnInput: CLAUDE_SDK_LANE_TURN_INPUT,
+      // Images only where every model of the provider reads them (S1): no
+      // live catalog reports vision per model for the other providers.
+      turnInput: claudeSdkLaneTurnInput(
+        resolveLaneProvider(providerId)?.imageInputOnEveryModel === true
+          ? { state: 'supported', onSteer: false }
+          : { state: 'unsupported', reason: CLAUDE_SDK_LANE_IMAGES_UNKNOWN_TEXT },
+      ),
       usage: { timing: 'live' },
       prompts: claudeSdkLanePrompts(permission),
     };
@@ -1016,6 +1023,10 @@ export class PtahCliRegistry {
         laneToolGate: options?.laneToolGate,
       });
       options?.checkResumeOwner?.();
+      const potentialCapabilities = this.capabilities(
+        agentConfig.providerId,
+        lanePolicy.requested.permission,
+      );
       const { handle, setAgentId: attachAgentId } = new ClaudeSdkLaneRunner(
         this.logger,
         this.messageTransformer,
@@ -1045,6 +1056,7 @@ export class PtahCliRegistry {
         emitStreamEvent,
         disposeCallbacks,
         stopProxy,
+        imageInput: potentialCapabilities.turnInput?.images,
       });
 
       this.logger.info(
@@ -1057,10 +1069,7 @@ export class PtahCliRegistry {
           ? { ...handle, honorsLaneToolGate: true }
           : handle,
         agentName: agentConfig.name,
-        potentialCapabilities: this.capabilities(
-          agentConfig.providerId,
-          lanePolicy.requested.permission,
-        ),
+        potentialCapabilities,
         effectivePolicy: lanePolicy.requested,
         toolProfileApplied: Boolean(
           options?.phase?.toolProfile.disallowedTools.length &&

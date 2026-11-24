@@ -113,6 +113,7 @@ import {
   type IProcessSpawner,
 } from '@ptah-extension/platform-core';
 import { classifyCliStderr } from './cli-stderr-severity';
+import { UnverifiedLaneModel } from './lane-unverified-model';
 
 /**
  * Provider API-key env vars treated as a "credentials present" signal when no
@@ -467,6 +468,7 @@ export class PiCliAdapter implements CliAdapter {
 
     /** Model and thinking level of the next spawned turn (`applyTurnSettings`, next-spawn). */
     const nextTurn: { model?: string; reasoningEffort?: string } = {};
+    const unverifiedModel = new UnverifiedLaneModel('Pi', (item) => segment.emit(item));
     const runTurn = (
       message: string,
       resumeSessionId?: string,
@@ -474,7 +476,8 @@ export class PiCliAdapter implements CliAdapter {
     ): Promise<number> => {
       const args: string[] = ['--mode', 'rpc', '-a'];
       if (turnInstructionPath) args.push('--append-system-prompt', turnInstructionPath);
-      const spawnModel = nextTurn.model ?? options.model;
+      const appliedModel = nextTurn.model;
+      const spawnModel = appliedModel ?? options.model;
       if (spawnModel) {
         args.push('--model', spawnModel);
       }
@@ -534,6 +537,9 @@ export class PiCliAdapter implements CliAdapter {
           // into the just-killed child. onAbort reading undefined is a safe
           // no-op; continue()'s runTurn re-assigns activeChild on re-spawn.
           activeChild = undefined;
+          // A failed turn drops its unchecked model (M3); an aborted one proves nothing.
+          if (!abortController.signal.aborted && unverifiedModel.settle(appliedModel, code === 0))
+            nextTurn.model = undefined;
           resolve(code);
         };
 
@@ -708,9 +714,8 @@ export class PiCliAdapter implements CliAdapter {
         if (reasoningEffort !== undefined && !PI_LANE_EFFORTS.includes(reasoningEffort))
           throw new LaneTurnSettingRefusal('reasoningEffort', `Pi has no thinking level "${reasoningEffort}".`);
         if (model !== undefined) {
-          const known = await this.listModels();
-          if (known.length > 0 && !known.some((entry) => entry.id === model))
-            throw new LaneTurnSettingRefusal('model', `Pi has no model "${model}".`);
+          // An empty list (failed probe) takes the model unchecked and says so (M3).
+          unverifiedModel.accept(model, await this.listModels());
           nextTurn.model = model;
         }
         if (reasoningEffort !== undefined) nextTurn.reasoningEffort = reasoningEffort;
