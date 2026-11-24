@@ -1250,3 +1250,45 @@ describe('PtahCliStreamLoop live message usage and interrupted turns (B5)', () =
     expect(onTurnComplete).toHaveBeenCalledWith(1);
   });
 });
+
+describe('PtahCliStreamLoop tool-in-flight signal (B6)', () => {
+  function makeToolSignalLoop() {
+    const onToolInFlightChange = jest.fn();
+    const loop = new PtahCliStreamLoop({
+      logger: createLogger(),
+      messageTransformer: createTransformerStub(),
+      emitOutput: jest.fn(),
+      emitSegment: jest.fn(),
+      emitStreamEvent: jest.fn(),
+      agentName: 'test-agent',
+      onToolInFlightChange,
+    });
+    return { loop, onToolInFlightChange };
+  }
+  function toolUse(id: string, parent: string | null = null): SDKMessage {
+    return {
+      type: 'assistant',
+      parent_tool_use_id: parent,
+      message: { id: `m-${id}`, content: [{ type: 'tool_use', id, name: 'Bash', input: {} }] },
+    } as unknown as SDKMessage;
+  }
+  function toolResult(id: string): SDKMessage {
+    return {
+      type: 'user',
+      parent_tool_use_id: null,
+      message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: 'ok' }] },
+    } as unknown as SDKMessage;
+  }
+
+  it('reports a main-thread tool call in flight until its result', async () => {
+    const { loop, onToolInFlightChange } = makeToolSignalLoop();
+    await loop.run(manyMessages([toolUse('t1'), toolUse('t2'), toolResult('t1'), toolResult('t2')]));
+    expect(onToolInFlightChange.mock.calls).toEqual([[true], [false]]);
+  });
+
+  it('ignores subagent tool calls and clears on the result frame', async () => {
+    const { loop, onToolInFlightChange } = makeToolSignalLoop();
+    await loop.run(manyMessages([toolUse('sub', 'parent-tool'), toolUse('t1'), successResult]));
+    expect(onToolInFlightChange.mock.calls).toEqual([[true], [false]]);
+  });
+});

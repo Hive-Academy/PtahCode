@@ -9,7 +9,12 @@ import type {
   ClaudeLaunchBoundaryOutcome,
   ProviderAccountAdmissionPort,
 } from '@ptah-extension/auth-providers-tokens';
-import type { ProviderAccountBinding } from '@ptah-extension/shared';
+import type {
+  AgentProcessInfo,
+  CliAdapterManifest,
+  ProviderAccountBinding,
+} from '@ptah-extension/shared';
+import { resolveEffectiveLaneCapabilities } from '../cli-agents/messaging/agent-effective-capabilities';
 import { LaneTurnSettingRefusal } from '../cli-agents/cli-adapters/cli-adapter.interface';
 import {
   ClaudeCertifiedLaunchRefusal,
@@ -41,6 +46,8 @@ import {
   claudeLaneTurnContent,
   CLAUDE_INTERRUPT_TIMEOUT_TEXT,
   CLAUDE_LATE_INTERRUPT_TEXT,
+  CLAUDE_SDK_LANE_TURN_INPUT,
+  CLAUDE_STEER_MISSED_TEXT,
   type ClaudeLaneAccountPersistence,
   type ClaudeSdkLaneRunContext,
 } from './claude-sdk-lane-runner';
@@ -295,6 +302,7 @@ function runnerFixture(
   ownerSettled: Promise<void> = Promise.resolve(),
   named?: ClaudeSdkLaneRunContext['named'],
   sdkQuery?: object,
+  contextPatch: Partial<ClaudeSdkLaneRunContext> = {},
 ) {
   let finish: (code: number) => void = () => {
     throw new Error('not initialized');
@@ -337,6 +345,7 @@ function runnerFixture(
     emitStreamEvent: jest.fn(),
     disposeCallbacks: jest.fn(),
     stopProxy: jest.fn(async () => undefined),
+    ...contextPatch,
   };
   // The mocked stream loop owns transformer interaction in these lifecycle tests.
   const runner = new ClaudeSdkLaneRunner(logger, {} as SdkMessageTransformer);
@@ -1490,6 +1499,101 @@ describe('Claude lane interrupt, turn settings, content and catalog (B5)', () =>
       commands: [],
       error: 'Lane options could not be read.',
     });
+    f.finish(0);
+  });
+});
+
+describe('Claude lane steer fold-in (B6, dormant until Batch 30)', () => {
+  function manifest(steer: CliAdapterManifest['messaging']['steer']): CliAdapterManifest {
+    return {
+      messaging: {
+        steer,
+        interrupt: { state: 'supported' },
+        continuation: { state: 'supported' },
+        resume: { state: 'supported' },
+      },
+      roleChannel: 'system-prompt',
+      permissionModes: {},
+      networkModes: { allow: { state: 'supported' }, deny: { state: 'unsupported', reason: 'fixture' } },
+      limitReader: { state: 'no-reliable-source', reason: 'fixture' },
+      mcp: { state: 'supported' },
+      turnInput: CLAUDE_SDK_LANE_TURN_INPUT,
+    };
+  }
+  const info = { agentId: 'lane-1', cli: 'claude' } as unknown as AgentProcessInfo;
+  const unsupportedSteer = { state: 'unsupported' as const, reason: 'The SDK prompt mailbox starts turns; it has no mid-turn steer.' };
+
+  it('keeps effective steer unsupported with the current manifest, even while a tool runs', () => {
+    const f = runnerFixture(Promise.resolve(), undefined, {}, { manifestSteer: unsupportedSteer });
+    f.config.onToolInFlightChange?.(true);
+    expect(f.handle.steer).toBeUndefined();
+    expect(f.handle.supportsSteer).toBeUndefined();
+    const caps = resolveEffectiveLaneCapabilities(info, manifest(unsupportedSteer), f.handle);
+    expect(caps.messaging.steer.state).toBe('unsupported');
+    f.finish(0);
+  });
+
+  it('offers steer only while a main-thread tool call is in flight', () => {
+    const f = runnerFixture(Promise.resolve(), undefined, {}, { manifestSteer: { state: 'supported' } });
+    expect(f.handle.supportsSteer?.()).toBe(false);
+    expect(resolveEffectiveLaneCapabilities(info, manifest({ state: 'supported' }), f.handle).messaging.steer.state)
+      .toBe('unsupported');
+    f.config.onToolInFlightChange?.(true);
+    expect(f.handle.supportsSteer?.()).toBe(true);
+    expect(resolveEffectiveLaneCapabilities(info, manifest({ state: 'supported' }), f.handle).messaging.steer.state)
+      .toBe('supported');
+    f.config.onToolInFlightChange?.(false);
+    expect(f.handle.supportsSteer?.()).toBe(false);
+    f.finish(0);
+  });
+
+  it('pushes a uuid-tagged message without a new turn; a result listing both uuids folds it in', async () => {
+    const f = runnerFixture(Promise.resolve(), undefined, {}, { manifestSteer: { state: 'supported' } });
+    const first = (await f.context.mailbox.prompt.next()).value;
+    f.config.onToolInFlightChange?.(true);
+    await f.handle.steer?.('also check the tests');
+    const steered = (await f.context.mailbox.prompt.next()).value;
+    expect(steered.message.content).toBe('also check the tests');
+    expect(typeof steered.uuid).toBe('string');
+    expect(steered.uuid).not.toBe(first.uuid);
+    f.config.onTurnResult?.({ subtype: 'success', userMessageUuids: [first.uuid, steered.uuid] });
+    expect(f.context.emitSegment).not.toHaveBeenCalledWith({ type: 'info', content: CLAUDE_STEER_MISSED_TEXT });
+    f.config.onTurnComplete?.(0);
+    await expect(f.handle.done).resolves.toBe(0);
+    // No extra turn was queued for the steer.
+    expect(f.handle.supportsInterrupt?.()).toBe(false);
+    f.finish(0);
+  });
+
+  it('emits the info segment when the result misses a steer uuid and keeps the next turn aligned', async () => {
+    const f = runnerFixture(Promise.resolve(), undefined, {}, { manifestSteer: { state: 'supported' } });
+    const first = (await f.context.mailbox.prompt.next()).value;
+    f.config.onToolInFlightChange?.(true);
+    await f.handle.steer?.('late note');
+    f.config.onTurnResult?.({ subtype: 'success', userMessageUuids: [first.uuid] });
+    expect(f.context.emitSegment).toHaveBeenCalledWith({ type: 'info', content: CLAUDE_STEER_MISSED_TEXT });
+    f.config.onTurnComplete?.(0);
+    await expect(f.handle.done).resolves.toBe(0);
+    const next = await f.handle.continue?.('real follow-up');
+    const settled = jest.fn();
+    void next?.done.then(settled);
+    // The missed steer runs as its own turn first.
+    f.config.onTurnResult?.({ subtype: 'success' });
+    f.config.onTurnComplete?.(0);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(settled).not.toHaveBeenCalled();
+    f.config.onTurnResult?.({ subtype: 'success' });
+    f.config.onTurnComplete?.(0);
+    await expect(next?.done).resolves.toBe(0);
+    f.finish(0);
+  });
+
+  it('refuses a steer when no tool call is in flight', async () => {
+    const f = runnerFixture(Promise.resolve(), undefined, {}, { manifestSteer: { state: 'supported' } });
+    await expect(f.handle.steer?.('now')).rejects.toThrow(
+      'Claude takes a message mid-turn only while one of its tools runs.',
+    );
     f.finish(0);
   });
 });

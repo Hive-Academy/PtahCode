@@ -229,6 +229,12 @@ export interface PtahCliStreamLoopConfig {
    */
   readonly onTurnResult?: (result: PtahCliTurnResult) => { readonly interrupted: boolean };
   /**
+   * Called when the main thread starts its first tool call without a result
+   * (`true`) and when the last one gets its result or the turn ends
+   * (`false`). A steer folds in only at such a tool boundary (B6).
+   */
+  readonly onToolInFlightChange?: (inFlight: boolean) => void;
+  /**
    * Receives the lane's plan-limit evidence (`rate_limit_event`, rate-limit
    * `api_retry`, assistant `rate_limit` error) and one `success` per
    * successful turn. Called synchronously on the stream path; it must not
@@ -288,6 +294,8 @@ export class PtahCliStreamLoop {
    * message's usage (A2), so a message's usage counts once.
    */
   private readonly usageMessageIds = new Set<string>();
+  /** Main-thread tool call ids that have no `tool_result` yet. */
+  private readonly toolsInFlight = new Set<string>();
   private turnModelDeltas: Array<{ modelId: string; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }> = [];
   /**
    * Previous cumulative SDK modelUsage snapshot per model, used to emit one
@@ -523,6 +531,7 @@ export class PtahCliStreamLoop {
             if (isContentBlockStart(event)) {
               const block = event.content_block;
               if (isToolUseBlock(block)) {
+                if (!msg.parent_tool_use_id) this.markToolStarted(block.id);
                 const key = this.toolBlockKey(
                   msg.parent_tool_use_id,
                   event.index,
@@ -578,6 +587,7 @@ export class PtahCliStreamLoop {
                     emitSegment({ type: 'text', content: block.text });
                   }
                 } else if (isToolUseBlock(block)) {
+                  if (!msg.parent_tool_use_id) this.markToolStarted(block.id);
                   if (!this.emittedToolSegments.has(block.id)) {
                     const argsStr = summarizeToolInput(block.input);
                     emitOutput(
@@ -614,6 +624,7 @@ export class PtahCliStreamLoop {
             if (Array.isArray(content)) {
               for (const block of content) {
                 if (block.type === 'tool_result') {
+                  this.markToolFinished(block.tool_use_id);
                   const resultText =
                     typeof block.content === 'string'
                       ? block.content
@@ -655,6 +666,7 @@ export class PtahCliStreamLoop {
           }
           if (isResultMessage(msg)) {
             this.flushPendingToolCalls();
+            this.clearToolsInFlight();
             let turnExitCode = 0;
             const interrupted = this.config.onTurnResult?.({
               subtype: msg.subtype,
@@ -776,7 +788,25 @@ export class PtahCliStreamLoop {
       this.emittedMessageIds.clear();
       this.emittedToolCallIds.clear();
       this.usageMessageIds.clear();
+      this.clearToolsInFlight();
     }
+  }
+
+  private markToolStarted(id: string): void {
+    if (!id || this.toolsInFlight.has(id)) return;
+    this.toolsInFlight.add(id);
+    if (this.toolsInFlight.size === 1) this.config.onToolInFlightChange?.(true);
+  }
+
+  private markToolFinished(id: string): void {
+    if (!this.toolsInFlight.delete(id)) return;
+    if (this.toolsInFlight.size === 0) this.config.onToolInFlightChange?.(false);
+  }
+
+  private clearToolsInFlight(): void {
+    if (this.toolsInFlight.size === 0) return;
+    this.toolsInFlight.clear();
+    this.config.onToolInFlightChange?.(false);
   }
 
   /**

@@ -1,6 +1,6 @@
 # Batches - TASK_2026_2320_lnpar
 
-Total tasks: 49 | Batches: 30 | Complete: 24/30
+Total tasks: 49 | Batches: 30 | Complete: 25/30
 
 Source: `implementation-plan.md` revision 3 plus "Binding notes from Gate 2" (R3-1, R3-2 bind
 Batch 20), `task-description.md`, `design-spec.md`, `prototype/README.md`, `parity-inventory.md`,
@@ -1116,7 +1116,7 @@ Edge cases:
 
 - Artifacts exist; scoped commands pass.
 
-## Batch 25: B6a Claude steer fold-in, dormant - PENDING (AFTER REBASE)
+## Batch 25: B6a Claude steer fold-in, dormant - COMPLETE
 
 - Shape: logic
 - Estimated weight (tokens): ~25k
@@ -1138,7 +1138,7 @@ Edge cases:
 - Tasks: 1 | Depends on: Batches 23, 24
 - Phase: P6 Adapters
 
-### Task 25.1: Steer push, tool-in-flight gate, uuid reconciliation - PENDING
+### Task 25.1: Steer push, tool-in-flight gate, uuid reconciliation - COMPLETE
 
 - Validation notes: steer-exposure risk (HIGH)
 

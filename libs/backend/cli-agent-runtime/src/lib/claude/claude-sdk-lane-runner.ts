@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import {
   ClaudeCertifiedLaunchRefusal,
   assertCertifiedLaunch,
@@ -19,6 +20,7 @@ import {
   EFFORT_LEVELS,
   resolveImageMediaType,
   type EffortLevel,
+  type LaneCapabilitySupport,
   type LaneComposerCommandOption,
   type LanePermissionMode,
   type LanePromptCapabilities,
@@ -79,6 +81,10 @@ const CLAUDE_CATALOG_TIMEOUT_MS = 5_000;
 export const CLAUDE_INTERRUPT_TIMEOUT_TEXT = 'Claude did not stop the turn in 3 s';
 export const CLAUDE_LATE_INTERRUPT_TEXT =
   'The turn ended after a late interrupt; your message was not sent.';
+/** Info segment when a steer was not folded into the turn it was sent to (B6). */
+export const CLAUDE_STEER_MISSED_TEXT = 'A message may start the next turn.';
+const CLAUDE_STEER_REFUSED_TEXT =
+  'Claude takes a message mid-turn only while one of its tools runs.';
 const CLAUDE_TURN_OPTIONS_ERROR = 'Lane options could not be read.';
 /**
  * Claude commands hidden from lanes (D18). Empty until a permission-policy
@@ -195,6 +201,11 @@ export interface ClaudeSdkLaneRunContext {
   emitStreamEvent: PtahCliStreamLoopConfig['emitStreamEvent'];
   disposeCallbacks: () => void;
   stopProxy: () => Promise<void>;
+  /**
+   * The lane manifest's `messaging.steer` (B6). Steer is exposed only when it
+   * is `supported`; absent keeps the fold-in dormant.
+   */
+  manifestSteer?: LaneCapabilitySupport;
 }
 
 /** One native query and stream loop per spawn; no provider/config fabrication. */
@@ -266,6 +277,10 @@ export class ClaudeSdkLaneRunner {
     let queuedTurns = 1;
     let completedTurns = 0;
     let interruptPending: { turnIndex: number; timedOut: boolean } | undefined;
+    // Steer fold-in (B6): main-thread tool calls without their result, and
+    // the uuids of steers pushed since the last result frame.
+    let toolInFlight = false;
+    const pendingSteers = new Set<string>();
     let currentModel: string | undefined = options.model;
     let currentEffort: string | undefined =
       typeof options.effort === 'string' ? options.effort : undefined;
@@ -309,7 +324,11 @@ export class ClaudeSdkLaneRunner {
           void lanePlanLimits.settled.then(() => resolve(exitCode));
         }
       },
-      onTurnResult: ({ subtype }) => {
+      onToolInFlightChange: (inFlight) => {
+        toolInFlight = inFlight;
+      },
+      onTurnResult: ({ subtype, userMessageUuids }) => {
+        reconcileSteers(userMessageUuids);
         const turnIndex = completedTurns++;
         // The flag clears on this turn's result frame, whatever its outcome.
         const flag = interruptPending;
@@ -329,6 +348,41 @@ export class ClaudeSdkLaneRunner {
     let finished = false;
     const turnRunning = (): boolean =>
       !closed && !finished && queuedTurns > completedTurns;
+    const supportsSteer = (): boolean => toolInFlight && turnRunning();
+    /**
+     * A steer the result frame does not list was not folded in: the CLI runs
+     * it as its own turn next. That turn gets a resolver of its own, so the
+     * next real turn's `done` is not settled by it (queued sends may
+     * coalesce, so one turn is assumed for all missed steers).
+     */
+    const reconcileSteers = (consumed?: readonly string[]): void => {
+      if (pendingSteers.size === 0) return;
+      const listed = new Set(consumed ?? []);
+      const missed = [...pendingSteers].some((uuid) => !listed.has(uuid));
+      pendingSteers.clear();
+      if (!missed) return;
+      emitSegment({ type: 'info', content: CLAUDE_STEER_MISSED_TEXT });
+      queuedTurns++;
+      pendingTurns.splice(1, 0, () => undefined);
+    };
+    const steer = async (message: string, content?: LaneTurnContent): Promise<void> => {
+      if (!supportsSteer()) throw new Error(CLAUDE_STEER_REFUSED_TEXT);
+      if (context.named && abortController.signal.aborted) throw claudeLaneRefusal();
+      // Tagged so the result frame's `user_message_uuids` proves the fold-in.
+      const turn: PromptTurn = {
+        content: claudeLaneTurnContent(message, content),
+        uuid: randomUUID(),
+      };
+      pendingSteers.add(turn.uuid as string);
+      this.logger.info(`[ClaudeLane] steer pushed into the running turn for "${agentName}"`, {
+        messageLength: message.length,
+        imageCount: content?.images?.length ?? 0,
+        fileCount: content?.files?.length ?? 0,
+      });
+      if (context.named)
+        await context.named.enqueue(turn, resolvedSessionId ?? undefined);
+      else mailbox.push(turn, resolvedSessionId ?? undefined);
+    };
     const applyTurnSettings = async (
       settings: LaneTurnSettings,
     ): Promise<LaneTurnSettingsResult> => {
@@ -400,6 +454,8 @@ export class ClaudeSdkLaneRunner {
       if (finished) return;
       finished = true;
       interruptPending = undefined;
+      pendingSteers.clear();
+      toolInFlight = false;
       abortController.signal.removeEventListener('abort', closeMailbox);
       closeMailbox();
       disposeCallbacks();
@@ -508,6 +564,8 @@ export class ClaudeSdkLaneRunner {
           throw error;
         }
       },
+      // Dormant until the manifest declares steer (Batch 30, after live L4).
+      ...(context.manifestSteer?.state === 'supported' ? { steer, supportsSteer } : {}),
       applyTurnSettings,
       // Images need no live gate: the SDK accepts image blocks on every turn.
       turnInputSupport: () => ({ images: { state: 'supported' } }),
