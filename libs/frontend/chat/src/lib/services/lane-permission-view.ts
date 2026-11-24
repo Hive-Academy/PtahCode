@@ -30,6 +30,13 @@ export const LANE_WAITING_LABEL = 'Waiting for you';
 export const LANE_ANSWER_REFUSED_TEXT =
   'Already answered. Your second answer was not sent.';
 
+/**
+ * Shown after Always allow on a Copilot lane: the Copilot bridge has no rule
+ * store, so the answer allows this one call and nothing is remembered.
+ */
+export const COPILOT_ALWAYS_ALLOW_ONCE_TEXT =
+  'Allowed this call only. Copilot lanes do not remember Always allow; the next call asks again.';
+
 /** Reason main chat's permission card sends when its countdown runs out. */
 const CARD_TIMEOUT_REASON = 'Request timeout';
 
@@ -216,6 +223,7 @@ export class LanePermissionView {
     const timedOut =
       response.decision === 'deny' && response.reason === CARD_TIMEOUT_REASON;
     const prior = this.sentOutcomes.get(response.id);
+    const cli = this.agent()?.cli;
     // Recorded before the send: the prompt can leave the queue synchronously.
     this.recordOutcome(
       response.id,
@@ -231,6 +239,13 @@ export class LanePermissionView {
       response.decision,
       response.reason,
       response.modifiedInput,
+      (refusal) => {
+        // The host refused this answer and the prompt is still pending: show
+        // why next to the card, and forget the outcome recorded for it.
+        if (this.agent()?.agentId !== agentId) return;
+        this.restoreOutcome(response.id, prior);
+        this._notice.set(refusal);
+      },
     );
     if (!sent) {
       this.restoreOutcome(response.id, prior);
@@ -238,7 +253,11 @@ export class LanePermissionView {
       if (!timedOut) this._notice.set(LANE_ANSWER_REFUSED_TEXT);
       return false;
     }
-    this._notice.set(null);
+    this._notice.set(
+      cli === 'copilot' && response.decision === 'always_allow'
+        ? COPILOT_ALWAYS_ALLOW_ONCE_TEXT
+        : null,
+    );
     return true;
   }
 

@@ -13,6 +13,7 @@ import { TabManagerService } from '@ptah-extension/chat-state';
 import { AgentPermissionResponder } from './agent-permission-responder';
 import { ChatStore } from './chat.store';
 import {
+  COPILOT_ALWAYS_ALLOW_ONCE_TEXT,
   LANE_ANSWER_REFUSED_TEXT,
   LanePermissionView,
   toLanePermissionRequest,
@@ -134,8 +135,30 @@ describe('LanePermissionView', () => {
 
   it('sends every card decision with the edited input through respondLane', () => {
     expect(view.respond({ id: 'perm-1', decision: 'always_allow', modifiedInput: { command: 'ls' } })).toBe(true);
-    expect(respondLane).toHaveBeenCalledWith('lane-a', 'perm-1', 'always_allow', undefined, { command: 'ls' });
+    expect(respondLane).toHaveBeenCalledWith(
+      'lane-a', 'perm-1', 'always_allow', undefined, { command: 'ls' }, expect.any(Function),
+    );
     expect(view.notice()).toBeNull();
+  });
+
+  it('shows a host refusal next to the card and keeps the prompt answerable', () => {
+    view.respond({ id: 'perm-1', decision: 'allow', modifiedInput: { command: 'ls' } });
+    const onRefused = respondLane.mock.calls[0][5] as (message: string) => void;
+    onRefused('Copilot lanes cannot run a tool with edited input.');
+    expect(view.notice()).toBe('Copilot lanes cannot run a tool with edited input.');
+    expect(view.permissions().map((request) => request.id)).toEqual(['perm-1']);
+    // The refused answer is forgotten: a later expiry is not reported as allowed by you.
+    view.resolvedStatus();
+    agent.set(lane([]));
+    expect(view.resolvedStatus()).toBe(
+      'Permission · Bash · npm run verify - Answered, denied or expired in another view. No longer answerable here.',
+    );
+  });
+
+  it('tells a Copilot lane user that Always allow applies to this call only', () => {
+    agent.set({ ...lane([permission()]), cli: 'copilot' } as MonitoredAgent);
+    view.respond({ id: 'perm-1', decision: 'always_allow' });
+    expect(view.notice()).toBe(COPILOT_ALWAYS_ALLOW_ONCE_TEXT);
   });
 
   it('shows the refusal once when a second answer is not sent', () => {

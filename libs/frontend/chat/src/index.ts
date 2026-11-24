@@ -40,6 +40,7 @@ export { ChatAgentFeedbackSender } from './lib/services/agent-feedback/chat-agen
 export { AgentPermissionResponder } from './lib/services/agent-permission-responder';
 export {
   LanePermissionView,
+  COPILOT_ALWAYS_ALLOW_ONCE_TEXT,
   LANE_ANSWER_REFUSED_TEXT,
   LANE_WAITING_LABEL,
   toLanePermissionRequest,
