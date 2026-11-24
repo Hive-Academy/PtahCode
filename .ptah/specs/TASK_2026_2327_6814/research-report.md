@@ -104,8 +104,8 @@ Service log today (`journalctl -u ollama --since today`):
 2. **Saved timeout 60 s at measurement time (Ptah setting).** Each model POST could block 60 s
    and then fail. With no end-to-end deadline (router R1), `ptah_route_decide` exceeded the MCP
    call time.
-3. **Shared 4096-token KV cache (host, minor).** Overlapping calls queue (section 7) and can
-   retry. The share of the retries in the delay is not measured. They do not change the prefill
+3. **Shared 4096-token KV cache (host, minor).** The pre-F4 overlap timings are consistent
+   with queueing (section 7), and overlapping calls can retry. The share of the retries in the delay is not measured. They do not change the prefill
    cost.
 
 The host did not degrade. The earlier benchmark measured small questions.
@@ -117,7 +117,7 @@ The host did not degrade. The earlier benchmark measured small questions.
 | F1 | Router task TASK_2026_2326_5d16 | Cut the server tokens per call: compact the shared state (request text, `availableExecutors`, `pastOutcomes`) and the lane criteria while keeping the required facts; cap the questions sent to the model per call and answer the rest deterministically. Measure server `input_tokens` and latency after the change | Cost is about questions x (state + criteria). 590 tokens = 12 s, 160 tokens = 3 s on this host |
 | F2 | Router task (R1) | Use the estimate (about 1 s per 48 server input tokens on this host) only as a skip rule. For the deadline, reserve time for the fallback and cap the model POST at the remaining budget after that reserve | `ptah_route_decide` returns within its deadline also when the model call is slow or queued |
 | F3 | User setting | Lower `decisionModelTimeoutMs` (applied: 15000), or disable the decision model | A model POST that is still pending at 15 s is aborted, and on that timeout the router falls back to the deterministic ranking; a faster POST returns normally; a disabled model skips the POST |
-| F4 | Host, needs approval | `OLLAMA_CONTEXT_LENGTH=8192` in the chappie service (more KV cache memory; 6 GB available); optional `OLLAMA_NUM_PARALLEL=4` | Removes KV-full retries when calls overlap; no change to prefill speed |
+| F4 | Host, approved and applied (section 7) | `OLLAMA_CONTEXT_LENGTH=8192` in the chappie service; `OLLAMA_NUM_PARALLEL` not changed | Expected: fewer KV-full retries when calls overlap. Unverified: the runner context stayed at 4096 (section 7) |
 | F5 | Hardware | A GPU on the decision host | The only change that makes 2000+ token prompts fast |
 
 A Q4 quantization is not recommended without a benchmark: the workload is prefill only, and on
@@ -136,8 +136,8 @@ CPU prefill is compute-bound, so Q4 gives little gain.
 Change applied on chappie: backup of `/etc/systemd/system/ollama.service.d/` to
 `~/ollama.service.d.bak-20261124-f4`, new drop-in `context-length.conf` with
 `Environment="OLLAMA_CONTEXT_LENGTH=8192"`, `daemon-reload`, `restart ollama`.
-`OLLAMA_NUM_PARALLEL` was not changed: the report listed it only as optional, and it does not
-change throughput. After the restart, the service is `active` with `OLLAMA_CONTEXT_LENGTH=8192`,
+`OLLAMA_NUM_PARALLEL` was not changed: the report listed it only as optional. Its effect was
+not tested. After the restart, the service is `active` with `OLLAMA_CONTEXT_LENGTH=8192`,
 `OLLAMA_KEEP_ALIVE=-1`, and `d3:4b` is resident `Forever`.
 
 **F4 did not change the runner context.** After the restart, llama-server still runs with
@@ -163,7 +163,8 @@ Conclusions:
 - In the unload trial, the cold request took about 14 s more than the warm request
   (17.3 s - 3.5 s = 13.8 s). `OLLAMA_KEEP_ALIVE=-1` keeps the model loaded between calls; a
   restart and an explicit unload are the two cold cases this task observed.
-- Before F4, B finished 51.9 s after A, close to the 51.2 s single-call time. This is consistent
+- Before F4, A and B started at nearly the same time, and the difference of their elapsed
+  times was 51.9 s, close to the 51.2 s single-call time. This is consistent
   with the server running the two calls one after the other (queueing). After F4, A was not
   captured, so the order is unknown. The first overlap trial had a long wait and 0 KV-full lines,
   so the wait happened without a logged retry. The counts do not show how much retries add in

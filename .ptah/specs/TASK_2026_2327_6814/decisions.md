@@ -9,7 +9,7 @@
 | D5 | Blob integrity accepted without a digest | The model loads and answers correctly (p=0.9999); the manifest-v2 format did not match the check script |
 | D6 | Commit, push and open a docs-only PR | First commit only (session contract). The parent then asked for the CLAUDE.md delivery flow; a docs-only PR is fine |
 | D7 | Review: codex lane (family codex; author family claude, in-process). Initial REVISE (7 findings), round 1 REVISE (3 open), round 2 REVISE (1 open) | `research-report-review.md`, `research-report-rereview.md`, `research-report-rereview-2.md` |
-| D9 | F4 applied as `OLLAMA_CONTEXT_LENGTH=8192` only, no `OLLAMA_NUM_PARALLEL` | User approval relayed by the parent; the report listed NUM_PARALLEL as optional with no throughput gain |
+| D9 | F4 applied as `OLLAMA_CONTEXT_LENGTH=8192` only, no `OLLAMA_NUM_PARALLEL` | User approval relayed by the parent; the report listed NUM_PARALLEL only as optional; its effect was not tested |
 | D10 | Keep the drop-in in place; no derived model | The user approved the change; the runner context did not change after it; a derived model is a new model and was not approved |
 | D11 | Cold estimate taken from the unload trial only (17.3 s vs 3.5 s warm) | The post-restart run overlapped another call (HTTP 500 after 59.98 s) and cannot isolate the load cost |
 | D12 | Final review (fresh codex lane) REVISE, 4 wording findings; fixed in one round, then re-review | `research-report-review-final.md` |
