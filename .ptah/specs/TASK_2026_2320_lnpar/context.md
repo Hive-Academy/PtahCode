@@ -129,3 +129,6 @@ completion -> research (modernization scan).
 - 2026-11-23 User: "full auto mode" for both tasks until review, live test, review comments addressed
   and merge. Approval mode for the remaining document gate (Gate 2) switches to orchestrator
   approval after an APPROVED review; escalate only user-reserved decisions.
+- 2026-11-23 Gate 2: implementation-plan.md revision 3 approved by the orchestrator under the user's
+  full-auto instruction. Same-side review: 2 revise rounds plus one scoped post-cap recheck; the last
+  two findings (R3-1, R3-2) are binding notes at the end of the plan. Decisions rows 13-15.
