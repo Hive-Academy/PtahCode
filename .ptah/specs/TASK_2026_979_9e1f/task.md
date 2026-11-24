@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_979_9e1f
-status: in_progress
+status: in_review
 type: BUGFIX
 title: Keep Ptah MCP connectors in scheduled, resumed and worktree sessions
 description: >-
