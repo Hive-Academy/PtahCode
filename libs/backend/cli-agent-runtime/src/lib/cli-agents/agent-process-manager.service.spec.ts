@@ -2987,6 +2987,46 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       );
     });
 
+    it('hands each mid-turn usage increment to the buffer before the turn ends, and records the turn total', async () => {
+      const segmentCallbacks: Array<(segment: CliOutputSegment) => void> = [];
+      Object.assign(sdkControls.handle, {
+        outcomeUsageIsTurnTotal: true,
+        usageScope: 'turn',
+        onSegment: (cb: (segment: CliOutputSegment) => void) => {
+          segmentCallbacks.push(cb);
+        },
+      });
+      const appended: CliOutputSegment[] = [];
+      const append = jest.spyOn(outputBuffer, 'appendSegment')
+        .mockImplementation((_id, _tracked, segment: CliOutputSegment) => { appended.push(segment); });
+      try {
+        const spawned = await manager.spawn({
+          task: 'Usage increments',
+          cli: 'codex',
+          workingDirectory: '/workspace/root',
+        });
+        const emit = (segment: CliOutputSegment): void => {
+          for (const cb of segmentCallbacks) cb(segment);
+        };
+        emit({ type: 'info', content: 'Usage', usageScope: 'message', usage: { inputTokens: 100, outputTokens: 10 } });
+        expect(appended.at(-1)?.usage).toEqual({ inputTokens: 100, outputTokens: 10 });
+        emit({ type: 'info', content: 'Usage', usageScope: 'message', usage: { inputTokens: 50, outputTokens: 5 } });
+        expect(appended.at(-1)?.usage).toEqual({ inputTokens: 50, outputTokens: 5 });
+        expect(manager.getStatus(spawned.agentId)).toHaveProperty('status', 'running');
+        emit({ type: 'info', content: 'Usage', usage: { inputTokens: 160, outputTokens: 15, costUsd: 0.01 } });
+        expect(appended.at(-1)?.usage).toEqual({ inputTokens: 10, outputTokens: 0, costUsd: 0.01 });
+
+        sdkControls.resolve(0);
+        await Promise.resolve();
+        expect(laneCompletion.signal).toHaveBeenCalledWith(
+          expect.objectContaining({ agentId: spawned.agentId }),
+          expect.objectContaining({ usage: { inputTokens: 160, outputTokens: 15, costUsd: 0.01 } }),
+        );
+      } finally {
+        append.mockRestore();
+      }
+    });
+
     it('leaves outcome usage absent for multiple step usage segments without a turn-total declaration', async () => {
       const segmentCallbacks: Array<(segment: CliOutputSegment) => void> = [];
       Object.assign(sdkControls.handle, {

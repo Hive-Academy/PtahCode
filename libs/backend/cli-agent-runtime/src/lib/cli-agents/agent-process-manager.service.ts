@@ -2060,12 +2060,18 @@ export class AgentProcessManager {
         if (this.agents.get(agentId) !== tracked) return;
         this.recordInactivityActivity(agentId, tracked);
         if (captureSessionId) updateCliSessionId(captureSessionId());
-        if (sdkHandle.outcomeUsageIsTurnTotal && segment.usage) {
-          tracked.outcomeUsage = this.laneUsageNormalizer.accept(
+        // The card adds up increments; the durable outcome keeps the turn total (B4).
+        let shown = segment;
+        if (segment.usage) {
+          const step = this.laneUsageNormalizer.accept(
             String(agentId),
-            sdkHandle.usageScope ?? 'turn',
+            segment.usageScope ?? sdkHandle.usageScope ?? 'turn',
             segment.usage,
           );
+          if (sdkHandle.outcomeUsageIsTurnTotal) tracked.outcomeUsage = step.turnTotal;
+          if (hasNegativeCounter(step.increment))
+            this.logger.debug('[AgentProcessManager] Lane usage correction below the running sum', { agentId });
+          shown = { ...segment, usage: step.increment };
         }
         if (segment.turnTelemetry) {
           const observed = observedModelFrom(info.cli, segment.turnTelemetry);
@@ -2078,9 +2084,10 @@ export class AgentProcessManager {
         this.outputBuffer.appendSegment(
           agentId,
           this.agents.get(agentId),
-          segment,
+          shown,
           onFlushDue,
         );
+        // Request context reads the provider's own figure, not the increment.
         this.recordRequestContext(tracked, segment);
         this.applyLaneGuard(agentId, segment);
       });
@@ -4684,4 +4691,10 @@ function resolveModelScope(
 ): string | null {
   const id = model?.trim().toLowerCase() || null;
   return cli === 'ptah-cli' ? (claudeModelFamily(id) ?? id) : id;
+}
+
+/** True when a usage increment carries a negative counter (a `turn` correction). */
+function hasNegativeCounter(usage: NonNullable<CliOutputSegment['usage']>): boolean {
+  return [usage.inputTokens, usage.outputTokens, usage.cacheReadTokens, usage.cacheWriteTokens,
+    usage.totalTokens].some((value) => typeof value === 'number' && value < 0);
 }

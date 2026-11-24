@@ -1,6 +1,6 @@
 # Batches - TASK_2026_2320_lnpar
 
-Total tasks: 49 | Batches: 30 | Complete: 20/30
+Total tasks: 49 | Batches: 30 | Complete: 21/30
 
 Source: `implementation-plan.md` revision 3 plus "Binding notes from Gate 2" (R3-1, R3-2 bind
 Batch 20), `task-description.md`, `design-spec.md`, `prototype/README.md`, `parity-inventory.md`,
@@ -972,7 +972,7 @@ Edge cases:
 
 - Artifacts exist (dispatcher spec created); scoped commands pass.
 
-## Batch 21: B4 live usage normalization - PENDING (AFTER REBASE)
+## Batch 21: B4 live usage normalization - COMPLETE
 
 - Shape: logic
 - Estimated weight (tokens): ~15k
@@ -999,8 +999,8 @@ Edge cases:
 - Tasks: 2 | Depends on: Batches 1, 19 (manager file)
 - Phase: P5 Messaging core
 
-### Task 21.1: Normalizer API and semantics + specs - PENDING
-### Task 21.2: Manager usage fold - PENDING
+### Task 21.1: Normalizer API and semantics + specs - COMPLETE
+### Task 21.2: Manager usage fold - COMPLETE
 
 ### Batch 21 verification
 
