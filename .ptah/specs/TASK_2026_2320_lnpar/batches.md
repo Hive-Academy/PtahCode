@@ -1,6 +1,6 @@
 # Batches - TASK_2026_2320_lnpar
 
-Total tasks: 49 | Batches: 30 | Complete: 15/30
+Total tasks: 49 | Batches: 30 | Complete: 16/30
 
 Source: `implementation-plan.md` revision 3 plus "Binding notes from Gate 2" (R3-1, R3-2 bind
 Batch 20), `task-description.md`, `design-spec.md`, `prototype/README.md`, `parity-inventory.md`,
@@ -789,7 +789,7 @@ Edge cases:
 
 - Post-rebase checks reported; artifacts exist; scoped commands pass.
 
-## Batch 16: B8a ACP runtime available commands and hidden list - PENDING (AFTER REBASE)
+## Batch 16: B8a ACP runtime available commands and hidden list - COMPLETE
 
 - Shape: logic
 - Estimated weight (tokens): ~20k (`acp-session-runtime.ts` ranges ~6k, spec ranges ~6k, profiles ~3k, fixtures grep)
@@ -814,7 +814,7 @@ Edge cases:
 - Tasks: 1 | Depends on: rebase
 - Phase: P6 Adapters | Phase review: see Batch 29
 
-### Task 16.1: availableCommands capture, getAvailableCommands, hiddenLaneCommands - PENDING
+### Task 16.1: availableCommands capture, getAvailableCommands, hiddenLaneCommands - COMPLETE
 
 ### Batch 16 verification
 

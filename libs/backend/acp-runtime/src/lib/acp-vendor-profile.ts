@@ -190,6 +190,12 @@ export interface AcpVendorProfile {
   /** Default `kill`: interrupt is offered only for `await-reply`. */
   readonly cancelBehavior?: AcpCancelBehavior;
   /**
+   * Advertised slash commands a lane hides from its `/` list and refuses when
+   * typed (names without `/`), because they change the permission policy the
+   * lane was spawned with. Absent: none.
+   */
+  readonly hiddenLaneCommands?: readonly string[];
+  /**
    * The `authenticate` method id to try once when `session/new` answers the
    * ACP auth-required error and the agent advertised that method.
    */

@@ -404,3 +404,16 @@ describe('grokAcpProfile', () => {
     });
   });
 });
+
+describe('grokAcpProfile.hiddenLaneCommands', () => {
+  it('hides only the permission-policy command Grok advertises', () => {
+    expect(grokAcpProfile.hiddenLaneCommands).toEqual(['always-approve']);
+    const advertised = readEnvelopes('grok-plain-turn.ndjson')
+      .map((envelope) => envelope.msg?.params?.['update'])
+      .filter((update): update is { sessionUpdate: string; availableCommands: { name: string }[] } =>
+        typeof update === 'object' && update !== null &&
+        (update as { sessionUpdate?: unknown }).sessionUpdate === 'available_commands_update')
+      .at(-1)?.availableCommands.map((command) => command.name) ?? [];
+    expect(advertised).toContain('always-approve');
+  });
+});
