@@ -7,14 +7,32 @@ import {
 import { laneFamilyOf, type CliDetectionResult } from '@ptah-extension/shared';
 import type { IWorkspaceProvider } from '@ptah-extension/platform-core';
 import type { LaneModelEntry, LaneModelListing } from '@ptah-extension/lane-routing';
-import { REVIEW_LANE_CATALOG_MAX, ReviewModelIdSchema, type ReviewLaneCatalog } from '@ptah-extension/review-contracts';
-import { type IReviewLaneGateway, type ReviewLaneCandidate } from '@ptah-extension/review-core';
+import {
+  REVIEW_LANE_CATALOG_MAX, RepoIdentitySchema, ReviewModelIdSchema, type RepoIdentity, type ReviewLaneCatalog,
+} from '@ptah-extension/review-contracts';
+import {
+  ReviewLaneRunUsageSchema, ReviewLaneSpawnError, type IReviewLaneGateway, type ReviewLaneCandidate, type ReviewLaneRunUsage,
+  type ReviewLaneSpawnResult,
+} from '@ptah-extension/review-core';
 
 const spawnInputSchema = z.object({
   laneId: z.string().min(1).max(128), cwd: z.string().min(1),
   prompt: z.string().min(1).max(200_000),
   model: z.string().trim().min(1).max(200).optional(),
+  repo: RepoIdentitySchema,
 }).strict();
+
+/** Lane usage without the `partial` flag, which only the end of the lane decides. */
+type LaneUsageRead = Omit<ReviewLaneRunUsage, 'partial'>;
+const UNREAD_USAGE: LaneUsageRead = { inputTokens: null, outputTokens: null, cacheReadTokens: null, cacheWriteTokens: null,
+  costUsd: null, model: null };
+const USAGE_FIELDS = ReviewLaneRunUsageSchema.shape;
+
+/** One top-level usage field, or null when it is missing or invalid; never 0 for unknown. */
+function fieldOf<T>(schema: z.ZodType<T>, value: unknown): T | null {
+  const parsed = schema.safeParse(value);
+  return parsed.success ? parsed.data : null;
+}
 
 const FAILED_CATALOG: ReviewLaneCatalog = { status: 'failed', models: [], truncated: false, verifiable: false };
 const EMPTY_CATALOG: ReviewLaneCatalog = { status: 'empty', models: [], truncated: false, verifiable: false };
@@ -79,6 +97,8 @@ export class ReviewLaneGateway implements IReviewLaneGateway {
     private readonly getWorkspaceProvider?: () => IWorkspaceProvider | undefined,
     private readonly logger?: ReviewLaneLogger,
     private readonly getModelListing?: () => LaneModelListing | undefined,
+    /** The registered workspace folder that is the checkout of `repo`; the lane's usage ledger rows are keyed by it. */
+    private readonly resolveUsageWorkspace?: (repo: RepoIdentity, signal: AbortSignal) => Promise<string | null>,
   ) {}
 
   private async buildLanes(): Promise<CliDetectionResult[]> {
@@ -148,27 +168,46 @@ export class ReviewLaneGateway implements IReviewLaneGateway {
     return findBlockedLaneModel(model) !== undefined;
   }
 
-  async spawn(input: { laneId: string; model?: string; cwd: string; prompt: string; signal: AbortSignal }): Promise<void> {
-    const parsed = spawnInputSchema.parse({ laneId: input.laneId, cwd: input.cwd, prompt: input.prompt,
-      ...(input.model !== undefined ? { model: input.model } : {}) });
-    if (input.signal.aborted) throw new Error('Review lane cancelled');
-    const lane = (await this.buildLanes()).find((entry) => idOf(entry) === parsed.laneId);
-    if (!lane) throw new Error('Review lane unavailable');
-    const [limit] = await this.limits.lookup([lane], { signal: input.signal });
-    if (limit?.state.state === 'at-limit') throw new Error('Review lane is at its limit');
-    // A fresh directory per spawn: no earlier lane can have planted a symlink
-    // in it, and concurrent lanes in one attempt never share the file.
-    const taskDir = Buffer.byteLength(parsed.prompt, 'utf8') > PROMPT_FILE_THRESHOLD_BYTES
-      ? await mkdtemp(join(parsed.cwd, 'task-')) : undefined;
+  /**
+   * Starts the lane and resolves with its usage once it ended. Every failure before the agent exists
+   * rejects with `spawned: false`; every failure after it rejects with `spawned: true` and the usage read
+   * at the end. Both keep the original message.
+   */
+  async spawn(input: { laneId: string; model?: string; cwd: string; prompt: string; signal: AbortSignal; repo: RepoIdentity }): Promise<ReviewLaneSpawnResult> {
+    let taskDir: string | undefined;
     try {
-      let task = parsed.prompt;
-      if (taskDir) {
-        const taskFile = join(taskDir, 'review-task.md');
-        await writeFile(taskFile, parsed.prompt, { encoding: 'utf8', flag: 'wx' });
-        task = `Read ${taskFile} with your file tool and follow its instructions exactly, `
-          + 'including every output file it names.';
+      let agentId: string;
+      try {
+        const parsed = spawnInputSchema.parse({ laneId: input.laneId, cwd: input.cwd, prompt: input.prompt, repo: input.repo,
+          ...(input.model !== undefined ? { model: input.model } : {}) });
+        if (input.signal.aborted) throw new Error('Review lane cancelled');
+        const lane = (await this.buildLanes()).find((entry) => idOf(entry) === parsed.laneId);
+        if (!lane) throw new Error('Review lane unavailable');
+        const [limit] = await this.limits.lookup([lane], { signal: input.signal });
+        if (limit?.state.state === 'at-limit') throw new Error('Review lane is at its limit');
+        // A fresh directory per spawn: no earlier lane can have planted a symlink
+        // in it, and concurrent lanes in one attempt never share the file.
+        taskDir = Buffer.byteLength(parsed.prompt, 'utf8') > PROMPT_FILE_THRESHOLD_BYTES
+          ? await mkdtemp(join(parsed.cwd, 'task-')) : undefined;
+        let task = parsed.prompt;
+        if (taskDir) {
+          const taskFile = join(taskDir, 'review-task.md');
+          await writeFile(taskFile, parsed.prompt, { encoding: 'utf8', flag: 'wx' });
+          task = `Read ${taskFile} with your file tool and follow its instructions exactly, `
+            + 'including every output file it names.';
+        }
+        const folder = await this.usageWorkspace(parsed.repo, input.signal);
+        // The model is a typed request field; this code never puts it into command text.
+        const result = await this.manager.spawn({ task, cli: lane.cli,
+          ...(lane.ptahCliId ? { ptahCliId: lane.ptahCliId } : {}), ...(parsed.model ? { model: parsed.model } : {}),
+          workingDirectory: parsed.cwd, taskKind: 'review', attachMcp: false, deliverables: ['out/lane-output.json'],
+          ...(folder ? { usageWorkspaceRoot: folder } : {}) });
+        agentId = String(result.agentId);
+      } catch (error: unknown) {
+        // No agent id exists, so there is no usage to read; a ledger row the manager wrote still counts.
+        throw ReviewLaneSpawnError.from(error, false, null);
       }
-      await this.runLane(lane, task, parsed.cwd, parsed.model, input.signal);
+      return await this.runLane(agentId, input.signal);
     } finally {
       if (taskDir) {
         try {
@@ -180,29 +219,54 @@ export class ReviewLaneGateway implements IReviewLaneGateway {
     }
   }
 
-  private async runLane(lane: CliDetectionResult, task: string, cwd: string, model: string | undefined, signal: AbortSignal): Promise<void> {
-    // The model is a typed request field; this code never puts it into command text.
-    const result = await this.manager.spawn({ task, cli: lane.cli,
-      ...(lane.ptahCliId ? { ptahCliId: lane.ptahCliId } : {}), ...(model ? { model } : {}), workingDirectory: cwd,
-      taskKind: 'review', attachMcp: false, deliverables: ['out/lane-output.json'] });
-    const agentId = String(result.agentId);
-    if (signal.aborted) {
-      await this.manager.stop(agentId);
-      throw new Error('Review lane cancelled');
-    }
-    // Continuation-capable SDK handles can keep their process alive after the
-    // turn completes. waitForAgents listens for process exit, which may be the
-    // five-minute idle release rather than the end of the review turn.
-    const deadline = Date.now() + 15 * 60_000;
+  /** The usage ledger folder of `repo`, or undefined; a failed lookup never fails the lane. */
+  private async usageWorkspace(repo: RepoIdentity, signal: AbortSignal): Promise<string | undefined> {
+    if (!this.resolveUsageWorkspace) return undefined;
     try {
+      return (await this.resolveUsageWorkspace(repo, signal)) ?? undefined;
+    } catch (error: unknown) {
+      // degradation-audit: reported - logged at warn here; the lane's usage rows keep the attempt-root key, stored but uncounted.
+      this.logger?.warn('[ReviewLaneGateway] Review usage folder lookup failed', { error: messageOf(error) });
+      return undefined;
+    }
+  }
+
+  /** The agent's top-level usage counters (never its per-model rows), or null when none was read. */
+  private readUsage(agentId: string): LaneUsageRead | null {
+    let usage: ReturnType<AgentProcessManager['findAgentUsage']>;
+    try {
+      usage = this.manager.findAgentUsage(agentId);
+    } catch {
+      // degradation-audit: optional-capability - an unreadable usage stays unknown (null), never 0, and the lane outcome is unchanged.
+      return null;
+    }
+    if (!usage) return null;
+    return { inputTokens: fieldOf(USAGE_FIELDS.inputTokens, usage.inputTokens),
+      outputTokens: fieldOf(USAGE_FIELDS.outputTokens, usage.outputTokens),
+      cacheReadTokens: fieldOf(USAGE_FIELDS.cacheReadTokens, usage.cacheReadTokens),
+      cacheWriteTokens: fieldOf(USAGE_FIELDS.cacheWriteTokens, usage.cacheWriteTokens),
+      costUsd: fieldOf(USAGE_FIELDS.costUsd, usage.costUsd), model: fieldOf(USAGE_FIELDS.model, usage.model) };
+  }
+
+  private async runLane(agentId: string, signal: AbortSignal): Promise<ReviewLaneSpawnResult> {
+    let last = this.readUsage(agentId);
+    let pollFailed = false;
+    let pollError: unknown;
+    try {
+      if (signal.aborted) throw new Error('Review lane cancelled');
+      // Continuation-capable SDK handles can keep their process alive after the
+      // turn completes. waitForAgents listens for process exit, which may be the
+      // five-minute idle release rather than the end of the review turn.
+      const deadline = Date.now() + 15 * 60_000;
       while (true) {
+        last = this.readUsage(agentId) ?? last;
         if (signal.aborted) throw new Error('cancelled');
         if (Date.now() >= deadline) throw new Error('timeout');
         // Review attempts live outside the active editor workspace, so the
         // caller-scoped getStatus API would reject this internal lane.
         const status = this.manager.findAgentInfo(agentId);
         if (!status) throw new Error('status-failed: missing agent');
-        if (status.status === 'completed') return;
+        if (status.status === 'completed') break;
         if (status.status === 'failed' || status.status === 'stopped' || status.status === 'timeout') {
           const detail = status.status === 'timeout' ? 'timeout' :
             `status-failed: ${status.failureKind ?? status.exitCode ?? status.status}`;
@@ -210,9 +274,25 @@ export class ReviewLaneGateway implements IReviewLaneGateway {
         }
         await new Promise<void>((resolve) => setTimeout(resolve, Math.min(200, Math.max(1, deadline - Date.now()))));
       }
-    } finally {
+    } catch (error: unknown) {
+      pollFailed = true;
+      pollError = error;
+    }
+    let stopFailed = false;
+    let stopError: unknown;
+    try {
       // stop preserves the completed status while releasing a live SDK handle.
       await this.manager.stop(agentId);
+    } catch (error: unknown) {
+      // Kept aside: a poll failure wins over it, otherwise it rejects below.
+      stopFailed = true;
+      stopError = error;
+      this.logger?.warn('[ReviewLaneGateway] Lane stop failed', { error: messageOf(error) });
     }
+    // A record released by stop can read empty; the newest earlier read then stands.
+    const usage = this.readUsage(agentId) ?? last ?? UNREAD_USAGE;
+    if (pollFailed) throw ReviewLaneSpawnError.from(pollError, true, { ...usage, partial: true });
+    if (stopFailed) throw ReviewLaneSpawnError.from(stopError, true, { ...usage, partial: true });
+    return { usage: { ...usage, partial: false } };
   }
 }

@@ -32,7 +32,7 @@ import {
   type IWorkspaceProvider,
   type ISecretStorage,
 } from '@ptah-extension/platform-core';
-import { registerReviewCore, REVIEW_CORE_TOKENS, REVIEW_CONTEXT_TOKENS, REVIEW_LANE_TOKENS, ReviewWorktreeService, ReviewPolicyService, ReviewStatusCoordinatorService, type IReviewSettingsStore, type ReviewOrchestratorService, type ReviewStageEnvironment } from '@ptah-extension/review-core';
+import { registerReviewCore, findRepositoryWorkspaceFolder, REVIEW_CORE_TOKENS, REVIEW_CONTEXT_TOKENS, REVIEW_LANE_TOKENS, ReviewWorktreeService, ReviewPolicyService, ReviewStatusCoordinatorService, type IReviewSettingsStore, type ReviewOrchestratorService, type ReviewStageEnvironment } from '@ptah-extension/review-core';
 import { registerReviewGithubServices, REVIEW_GITHUB_TOKENS, REVIEW_GITHUB_TOKEN_KEY, type ReviewPublicationGuard } from '@ptah-extension/review-github';
 import type { IGitHubReviewPort } from '@ptah-extension/review-contracts';
 import { ReviewSecretPresence } from '../services/review/review-secret-presence';
@@ -175,6 +175,17 @@ import { ElectronSkillRepropagation } from '../activation/skill-repropagation';
 import { createUserLayerRefresher } from '../activation/plugin-activation';
 import { registerClaudeNamedAccountBindings } from './claude-named-account-bindings';
 import { registerElectronCodexLaneFactory } from './codex-lane-composition';
+
+/** `fs.promises.realpath`, or a rejection as soon as `signal` aborts; a late result is dropped. */
+function realpathUntilAborted(folder: string, signal: AbortSignal): Promise<string> {
+  return new Promise<string>((resolvePath, reject) => {
+    const onAbort = (): void => reject(new Error('Review usage folder lookup aborted'));
+    if (signal.aborted) { onAbort(); return; }
+    signal.addEventListener('abort', onAbort, { once: true });
+    void fs.promises.realpath(folder).then(resolvePath, reject)
+      .finally(() => signal.removeEventListener('abort', onAbort));
+  });
+}
 
 /**
  * `harness.preflightTimeoutMs` — how long a session start may wait for the
@@ -565,24 +576,8 @@ export function registerPhase2Libraries(
       },
     });
     container.register(REVIEW_LANE_TOKENS.GATEWAY, {
-      useFactory: (provider) => new ReviewLaneGateway(
-        provider.resolve<AgentProcessManager>(TOKENS.AGENT_PROCESS_MANAGER),
-        provider.resolve(CliDetectionService),
-        provider.resolve<LaneLimitLookupService>(CLI_AGENT_RUNTIME_TOKENS.LANE_LIMIT_LOOKUP),
-        provider.resolve(AgentSpawnEnvironment),
-        () => {
-          try {
-            return provider.resolve<ReviewPtahCliRegistry>(CLI_AGENT_RUNTIME_TOKENS.SDK_PTAH_CLI_REGISTRY);
-          } catch (error) {
-            // degradation-audit: reported - logged at warn here; review lanes
-            // get no Ptah CLI registry (undefined).
-            logger.warn('[Electron DI] Review lanes cannot resolve the Ptah CLI registry', {
-              error: error instanceof Error ? error.message : String(error),
-            });
-            return undefined;
-          }
-        },
-        () => {
+      useFactory: (provider) => {
+        const workspaceProvider = (): IWorkspaceProvider | undefined => {
           try {
             return provider.resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER);
           } catch (error) {
@@ -593,21 +588,46 @@ export function registerPhase2Libraries(
             });
             return undefined;
           }
-        },
-        logger,
-        () => {
-          try {
-            return provider.resolve<LaneModelListing>(LANE_ROUTING_TOKENS.LANE_MODEL_LISTING);
-          } catch (error) {
-            // degradation-audit: reported - logged at warn here; review lanes
-            // read no model catalogs (undefined), so saved models pass unchecked.
-            logger.warn('[Electron DI] Review lanes cannot resolve the lane model listing', {
-              error: error instanceof Error ? error.message : String(error),
-            });
-            return undefined;
-          }
-        },
-      ),
+        };
+        return new ReviewLaneGateway(
+          provider.resolve<AgentProcessManager>(TOKENS.AGENT_PROCESS_MANAGER),
+          provider.resolve(CliDetectionService),
+          provider.resolve<LaneLimitLookupService>(CLI_AGENT_RUNTIME_TOKENS.LANE_LIMIT_LOOKUP),
+          provider.resolve(AgentSpawnEnvironment),
+          () => {
+            try {
+              return provider.resolve<ReviewPtahCliRegistry>(CLI_AGENT_RUNTIME_TOKENS.SDK_PTAH_CLI_REGISTRY);
+            } catch (error) {
+              // degradation-audit: reported - logged at warn here; review lanes
+              // get no Ptah CLI registry (undefined).
+              logger.warn('[Electron DI] Review lanes cannot resolve the Ptah CLI registry', {
+                error: error instanceof Error ? error.message : String(error),
+              });
+              return undefined;
+            }
+          },
+          workspaceProvider,
+          logger,
+          () => {
+            try {
+              return provider.resolve<LaneModelListing>(LANE_ROUTING_TOKENS.LANE_MODEL_LISTING);
+            } catch (error) {
+              // degradation-audit: reported - logged at warn here; review lanes
+              // read no model catalogs (undefined), so saved models pass unchecked.
+              logger.warn('[Electron DI] Review lanes cannot resolve the lane model listing', {
+                error: error instanceof Error ? error.message : String(error),
+              });
+              return undefined;
+            }
+          },
+          // The checkout folder keys the lane's usage ledger rows; the folder read stops when the lane's signal aborts.
+          (repo, signal) => findRepositoryWorkspaceFolder({
+            environment: provider.resolve<ReviewStageEnvironment>(REVIEW_CORE_TOKENS.ENVIRONMENT), repo,
+            folders: workspaceProvider()?.getWorkspaceFolders() ?? [],
+            realpath: (folder) => realpathUntilAborted(folder, signal),
+          }),
+        );
+      },
     });
     container.register(ReviewFiles, {
       useFactory: (provider) => {

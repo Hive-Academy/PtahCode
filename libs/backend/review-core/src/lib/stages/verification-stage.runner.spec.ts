@@ -3,6 +3,7 @@ import { MIGRATIONS, type SqliteDatabase } from '@ptah-extension/persistence-sql
 import { ReviewLaneRunner, type IReviewLaneFiles, type IReviewLaneGateway } from '../lanes/review-lane.runner';
 import { ReviewLaneAdmissionService, type IReviewLaneClock } from '../lanes/review-lane-admission.service';
 import { ReviewLaneAttempt } from '../lanes/review-lane-attempt';
+import { UNKNOWN_LANE_RUN_USAGE } from '../lanes/review-lane-usage';
 import type { ReviewLaneCandidate } from '../lanes/review-lane-list';
 import type { IReviewRepository } from '../persistence/review-repository.interface';
 import type { ReviewQueueClaim } from '../review-queue.service';
@@ -166,7 +167,10 @@ async function verifyWith(options: { lanes: ReviewLaneCandidate[]; authors: stri
     list: async () => ({ lanes: options.lanes, maxConcurrentAgents: 4 }),
     listModels: async () => ({}),
     modelBlocked: () => false,
-    spawn: async (input) => { spawned.push({ laneId: input.laneId, ...(input.model !== undefined ? { model: input.model } : {}) }); },
+    spawn: async (input) => {
+      spawned.push({ laneId: input.laneId, ...(input.model !== undefined ? { model: input.model } : {}) });
+      return { usage: UNKNOWN_LANE_RUN_USAGE(false) };
+    },
   };
   const lenses = authoredBy(options.authors);
   const files: IReviewLaneFiles = { prepare: async () => 'same', sourceChecksum: async () => 'same', clearOutput: async () => undefined,

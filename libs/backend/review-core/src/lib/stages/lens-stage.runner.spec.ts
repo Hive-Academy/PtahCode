@@ -3,6 +3,7 @@ import type { IReviewRepository, ReviewStageRecord } from '../persistence/review
 import { ReviewLaneRunner, type IReviewLaneFiles, type IReviewLaneGateway, type ReviewLaneUse } from '../lanes/review-lane.runner';
 import { ReviewLaneAdmissionService, type IReviewLaneClock } from '../lanes/review-lane-admission.service';
 import { ReviewLaneAttempt } from '../lanes/review-lane-attempt';
+import { UNKNOWN_LANE_RUN_USAGE } from '../lanes/review-lane-usage';
 import type { ReviewLaneCandidate } from '../lanes/review-lane-list';
 import { LensStageRunner } from './lens-stage.runner';
 import type { ContextStageResult } from './context-stage.runner';
@@ -61,7 +62,7 @@ function harness(options: HarnessOptions = {}) {
     modelBlocked: (model) => model === 'blocked-model',
     spawn: async (input) => {
       spawned.push({ laneId: input.laneId, ...(input.model !== undefined ? { model: input.model } : {}) });
-      await options.spawn?.(input);
+      return (await options.spawn?.(input)) ?? { usage: UNKNOWN_LANE_RUN_USAGE(false) };
     },
   };
   const files: IReviewLaneFiles = { prepare: async () => 'same', sourceChecksum: async () => 'same', clearOutput: async () => undefined,
@@ -201,7 +202,10 @@ describe('LensStageRunner lane diversity through the real lane runner (#1481)', 
 
   it('does not retry a started lane that fails (Req 4.6)', async () => {
     let calls = 0;
-    const h = harness({ spawn: async () => { if (++calls === 1) throw new Error('status-failed: quota'); } });
+    const h = harness({ spawn: async () => {
+      if (++calls === 1) throw new Error('status-failed: quota');
+      return { usage: UNKNOWN_LANE_RUN_USAGE(false) };
+    } });
     const results = await h.run();
     expect(results[0].result).toMatchObject({ status: 'partial', reason: 'status-failed: quota', lane: { lane: 'codex' } });
     expect(h.spawned).toHaveLength(4);
