@@ -49,7 +49,7 @@ function withPlatform<T>(platform: NodeJS.Platform, run: () => T): T {
 }
 
 describe('antigravityAcpProfile — spawn', () => {
-  it('runs `agy acp` unattended by default and for yolo, as the stream-json lane does', () => {
+  it('runs `agy acp` unattended by default and for yolo', () => {
     expect(antigravityAcpProfile.buildSpawn(base).args).toEqual([
       'acp',
       '--dangerously-skip-permissions',
@@ -74,7 +74,7 @@ describe('antigravityAcpProfile — spawn', () => {
     }
   });
 
-  it('adds the working directory to the workspace, as stream-json does (round 4)', () => {
+  it('adds the working directory to the workspace (round 4)', () => {
     const dir = 'C:\\work space\\repo';
     expect(
       antigravityAcpProfile.buildSpawn({ ...base, workingDirectory: dir, autoApprove: false }).args,

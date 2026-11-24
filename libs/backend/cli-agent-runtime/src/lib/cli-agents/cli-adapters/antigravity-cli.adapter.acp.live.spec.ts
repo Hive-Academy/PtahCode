@@ -188,7 +188,6 @@ async function startLane(
   const recorder = createAcpTeeRecorder(spawnAcpProcess);
   const adapter = new AntigravityCliAdapter(
     createLiveProcessSpawner(),
-    undefined,
     createMockLogger() as unknown as Logger,
     { transportFactory: recorder.factory },
   );

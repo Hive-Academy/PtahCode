@@ -60,10 +60,11 @@
  * Ptah used to keep a persistent entry in `~/.gemini/config/mcp_config.json`
  * (read by the `agy` CLI) and in `{ws}/.agents/mcp_config.json` (read by the
  * Antigravity editor). It no longer plans either slot: an `agy` session Ptah
- * spawns gets the server per session (`ptah_lane` in ACP `session/new`, or the
- * stream-json lane's own entry), and a home-global file must not carry a
- * long-lived Ptah credential. `retired-ptah-mcp-slots.ts` removes the entries
- * an earlier Ptah wrote. An `agy` run from a terminal gets no Ptah tools.
+ * spawns gets the server per session (`ptah_lane` in ACP `session/new`, with no
+ * config file written), and a home-global file must not carry a long-lived Ptah
+ * credential. `retired-ptah-mcp-slots.ts` removes the entries an earlier Ptah
+ * wrote, persistent and lane-shaped alike. An `agy` run from a terminal gets no
+ * Ptah tools.
  *
  * ## Copilot is deliberately absent, and that is not a gap
  *

@@ -11,12 +11,14 @@
  * no torn file, and nothing in any health report to notice it by.
  *
  * That was harmless while the reconciler was the only writer, because it holds
- * the workspace lock. TASK_2026_285 ended that: `AntigravityCliAdapter` writes
- * Ptah's own `ptah` server into `~/.gemini/config/mcp_config.json` before every
- * spawn and removes it after `done`, and the reconciler writes the USER's
- * servers into the same file. Two writers, and the workspace lock cannot
- * serialize them — the file is in `$HOME`, and two open workspaces hold two
- * different workspace locks over one shared config anyway.
+ * the workspace lock. TASK_2026_285 ended that: the former writer,
+ * `AntigravityCliAdapter` (its per-spawn write was removed in TASK_2026_2322),
+ * put Ptah's own `ptah` server into `~/.gemini/config/mcp_config.json` around
+ * every spawn while the reconciler wrote the USER's servers into the same file.
+ * The rationale outlives that writer: `CodeExecutionMCP`, another Ptah process
+ * or the user can still edit a user-global config concurrently, and the
+ * workspace lock cannot serialize them — the file is in `$HOME`, and two open
+ * workspaces hold two different workspace locks over one shared config anyway.
  *
  * So the lock is keyed by the CONFIG FILE, which is the thing actually being
  * contended, and every facet mutation goes through it. The user-global files
