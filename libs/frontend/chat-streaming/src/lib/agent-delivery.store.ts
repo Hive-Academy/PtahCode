@@ -77,6 +77,14 @@ export interface DeliveryStatus {
 
 const RECEIPTS_CAP = 1024;
 const PARENT_DELIVERIES_CAP = 1024;
+/** Failed receipts a lane composer already put back; bounded like the receipts. */
+const RESTORED_CAP = 1024;
+/**
+ * Failures a plain Retry cannot fix: the lane refused the settings or the
+ * input, and the same envelope would be refused again. The user changes the
+ * draft the composer restored and sends it anew.
+ */
+const NOT_RETRYABLE_REASONS: ReadonlySet<string> = new Set(['turn-options-refused', 'turn-input-unsupported']);
 
 const RECEIPT_RANK: Readonly<Record<AgentDeliveryReceipt['state'], number>> = {
   accepted: 0,
@@ -283,6 +291,8 @@ export class AgentDeliveryStore {
   private readonly _previews = signal<PreviewMap>(new Map());
   /** Messages recovered from the backend body store, waiting for the lane composer. */
   private readonly _recovered = signal<ReadonlyMap<string, RecoveredLaneMessage>>(new Map());
+  /** Receipt ids whose message a composer already restored; their row offers no Recover text. */
+  private readonly _restored = signal<ReadonlySet<string>>(new Set());
 
   /** Receipts grouped by lane: the resolved lane after a cold resume, and the lane addressed. */
   readonly receipts = computed<ReadonlyMap<string, readonly AgentDeliveryReceipt[]>>(() => {
@@ -410,9 +420,27 @@ export class AgentDeliveryStore {
     return undefined;
   }
 
+  /**
+   * A lane composer put this failed message back into its draft (text,
+   * attachments and pick). Recover text would add a second copy, so the
+   * thread row stops offering it.
+   */
+  markRestored(messageId: string): void {
+    if (this._restored().has(messageId)) return;
+    this._restored.update((current) => {
+      const next = new Set(current).add(messageId);
+      for (const id of next) {
+        if (next.size <= RESTORED_CAP) break;
+        next.delete(id);
+      }
+      return next;
+    });
+  }
+
   receiptStatus(receipt: AgentDeliveryReceipt): DeliveryStatus {
     const confirmRetry = receipt.everDispatched === true || receipt.state === 'outcome-unknown';
-    const recoverable = receipt.hasRecoverableBody !== false;
+    const recoverable = receipt.hasRecoverableBody !== false && !this._restored().has(receipt.id);
+    const retriable = !(receipt.reason && NOT_RETRYABLE_REASONS.has(receipt.reason));
     const cancel = CANCELLABLE_RECEIPT_STATES.has(receipt.state) ? [CANCEL] : [];
     const aged = (label: string, actions: readonly DeliveryAction[], attention = true) =>
       this.status(label, receipt.createdAt, actions, attention, receipt);
@@ -441,7 +469,7 @@ export class AgentDeliveryStore {
           [retry(true), ...(recoverable ? [RECOVER] : []), ...cancel]);
       case 'failed':
         return aged(`Not delivered: ${this.reasonText(receipt)}`,
-          [retry(confirmRetry), ...(recoverable ? [RECOVER] : []), ...cancel]);
+          [...(retriable ? [retry(confirmRetry)] : []), ...(recoverable ? [RECOVER] : []), ...cancel]);
       case 'interrupted-undelivered':
         return aged('Interrupted — not sent',
           [retry(confirmRetry), ...(recoverable ? [RECOVER] : []), ...cancel]);

@@ -92,6 +92,7 @@ describe('LaneComposerComponent', () => {
     composerState: jest.fn(),
     receiptLabel: () => 'Queued',
     receiptStatus: (item: { state: string }) => ({ label: item.state === 'failed' ? 'Not delivered: lane stopped' : 'Queued' }),
+    markRestored: jest.fn(),
     receipt: () => undefined,
     newIdempotencyKey: () => `key-${++keys}`,
     takeRecoveredMessage: (id: string) => {
@@ -687,6 +688,61 @@ describe('LaneComposerComponent', () => {
     await settle(fixture);
     expect(root(fixture).querySelector('[data-testid="suggestions-footer"]')?.textContent?.trim())
       .toBe('Chosen files are sent as file references.');
+  });
+
+  it('disables Send past the host image limit and says how many to remove (M2)', async () => {
+    store.composerState.mockReturnValue(previews({}, {}, capabilities(turnInput({
+      images: { state: 'supported', onSteer: true },
+    }))));
+    const fixture = await mount();
+    type(fixture, 'Many shots');
+    fixture.componentRef.injector.get(ComposerAttachmentsService).images.set(
+      Array.from({ length: 10 }, (_, index) => ({
+        id: `img-${index}`, data: 'aGk=', mediaType: 'image/png', dataUrl: 'data:image/png;base64,aGk=', name: `s${index}.png`,
+      })),
+    );
+    fixture.detectChanges();
+    expect(sendButton(fixture).disabled).toBe(true);
+    expect(statusText(fixture)).toBe('A lane message takes at most 8 images. Remove 2 to send.');
+    key(fixture, {});
+    await settle(fixture);
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  it('gives the host reason, not "no effort levels", for a stopped lane with no cached catalog (S2)', async () => {
+    rpcCall.mockReset().mockResolvedValue(rpcSuccess({
+      models: [{ id: 'gpt-5.5', name: 'GPT-5.5' }], efforts: [], commands: [],
+      unavailableReason: 'Effort levels, commands and skills appear when the lane is running.',
+    }));
+    const fixture = await mount({ stopped: true });
+    const pill = root(fixture).querySelector('ptah-composer-effort-picker [aria-disabled="true"]') as HTMLElement;
+    expect(pill.getAttribute('title')).toBe('Effort levels, commands and skills appear when the lane is running.');
+  });
+
+  it('shows the cached lists with a stale notice when the host answers with an error beside them (M5)', async () => {
+    rpcCall.mockReset().mockResolvedValue(rpcSuccess({
+      models: [{ id: 'gpt-5.5', name: 'GPT-5.5' }], efforts: ['low'], commands: [],
+      error: 'Lane options could not be read.',
+    }));
+    const fixture = await mount();
+    expect(root(fixture).querySelector('[role="alert"]')).toBeNull();
+    expect(root(fixture).querySelector('[data-testid="lane-options-stale"]')?.textContent)
+      .toContain('Showing the last known lane options. The latest read failed.');
+    expect(root(fixture).querySelector('ptah-composer-effort-picker [aria-disabled="true"]')).toBeNull();
+  });
+
+  it('shows the lane files reason in the @ list and offers no file (minor)', async () => {
+    store.composerState.mockReturnValue(previews({}, {}, capabilities(turnInput({
+      files: { state: 'unsupported', reason: 'This lane takes no files.' },
+    }))));
+    const fixture = await mount();
+    const input = fixture.componentRef.injector.get(ComposerInputController);
+    type(fixture, '@');
+    input.handleAtActivated({ triggerPosition: 0, query: '' } as Parameters<typeof input.handleAtActivated>[0]);
+    fixture.detectChanges();
+    await settle(fixture);
+    expect(input.suggestionNotice()).toBe('This lane takes no files.');
+    expect(input.filteredSuggestions()).toEqual([]);
   });
 
   it('folds into the compact bar while the lane runs idle and expands on click', async () => {

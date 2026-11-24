@@ -164,6 +164,18 @@ describe('LaneTurnSettingsStore', () => {
       expect(store.catalog(lane).errorDetail).toBe('transport closed');
     });
 
+    it('keeps the cached lists the host sent beside an error, and shows the error (M5)', async () => {
+      const partial = options({ efforts: [], commands: [], error: 'Lane options could not be read.' });
+      rpc.call.mockResolvedValueOnce(rpcSuccess(partial));
+      await store.loadCatalog(lane);
+      expect(store.catalog(lane)).toEqual({
+        status: 'ready', options: partial, refreshing: false, errorDetail: 'Lane options could not be read.',
+      });
+      rpc.call.mockResolvedValueOnce(rpcSuccess(options()));
+      await store.loadCatalog(lane);
+      expect(store.catalog(lane)).toEqual({ status: 'ready', options: options(), refreshing: false });
+    });
+
     it('refreshes a ready catalog without leaving ready, and keeps the old options on failure', async () => {
       rpc.call.mockResolvedValueOnce(rpcSuccess(options()));
       await store.loadCatalog(lane);

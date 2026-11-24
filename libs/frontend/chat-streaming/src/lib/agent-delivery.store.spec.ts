@@ -262,6 +262,26 @@ describe('AgentDeliveryStore', () => {
     ])('labels the %s reason', (reason, text) => {
       expect(store.receiptStatus(receipt({ state: 'failed', reason })).text).toBe(text);
     });
+
+    it.each(['turn-options-refused', 'turn-input-unsupported'])(
+      'offers no Retry for a %s failure, which would be refused again',
+      (reason) => {
+        const kinds = store.receiptStatus(receipt({ state: 'failed', reason })).actions.map((action) => action.kind);
+        expect(kinds).toEqual(['recover', 'cancel']);
+      },
+    );
+
+    it('keeps Retry for a transient failure', () => {
+      const kinds = store.receiptStatus(receipt({ state: 'failed', reason: 'delivery-failed' })).actions.map((a) => a.kind);
+      expect(kinds).toEqual(['retry', 'recover', 'cancel']);
+    });
+
+    it('stops offering Recover text once a composer restored the message (M4)', () => {
+      const failed = receipt({ state: 'failed', reason: 'agent_stopped' });
+      expect(store.receiptStatus(failed).actions.map((action) => action.kind)).toContain('recover');
+      store.markRestored(failed.id);
+      expect(store.receiptStatus(failed).actions.map((action) => action.kind)).toEqual(['retry', 'cancel']);
+    });
   });
 
   describe('actions', () => {

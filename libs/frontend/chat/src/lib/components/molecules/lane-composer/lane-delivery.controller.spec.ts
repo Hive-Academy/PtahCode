@@ -51,6 +51,7 @@ describe('LaneDeliveryController', () => {
         : 'Queued',
     }),
     receipt: () => undefined,
+    markRestored: jest.fn(),
     newIdempotencyKey: () => `key-${++keys}`,
     takeRecoveredMessage: (id: string) => {
       const message = recovered().get(id) ?? null;
@@ -137,6 +138,56 @@ describe('LaneDeliveryController', () => {
     expect(accepted).toHaveBeenCalledTimes(1);
   });
 
+  it('clears the pick once the message carrying it is accepted, so a later steer is not refused (M1)', async () => {
+    store.sendMessage.mockResolvedValue({ mode: 'queue-next-turn', receipt: receipt() });
+    fillComposer();
+    await controller.send('queue');
+    expect(settings.pending(AGENT)).toEqual({});
+
+    draft.set('Steer');
+    await controller.send('now');
+    expect(store.sendMessage).toHaveBeenLastCalledWith(AGENT, 'Steer', 'now', false, 'key-2', undefined);
+  });
+
+  it('keeps the pick when the send is refused', async () => {
+    store.sendMessage.mockResolvedValue({ mode: 'unsupported', reasonCode: 'queue-full', detail: 'queue-full' });
+    fillComposer();
+    await controller.send('queue');
+    expect(settings.pending(AGENT)).toEqual({ model: 'opus', reasoningEffort: 'high' });
+    expect(controller.error()).toBe('The lane queue is full. Try again when a queued message has started.');
+  });
+
+  it('shows user text, never the raw code, for an attachment capacity refusal (S1)', async () => {
+    store.sendMessage.mockResolvedValue({
+      mode: 'unsupported', reasonCode: 'attachments-capacity', detail: 'attachments-capacity',
+    });
+    fillComposer();
+    await controller.send('queue');
+    expect(controller.error()).toBe(
+      'Held attachments are using all attachment storage. Remove an image or wait for earlier messages to finish.',
+    );
+  });
+
+  it('does not fold into the queued message when the fold would pass the image limit (M2)', async () => {
+    const image = (index: number): ComposerImage => ({ ...IMAGE, id: `img-${index}` });
+    const earlier = receipt();
+    store.sendMessage.mockResolvedValueOnce({ mode: 'queue-next-turn', receipt: earlier });
+    draft.set('First');
+    attachments.images.set([1, 2, 3, 4, 5].map(image));
+    await controller.send('queue');
+    push(earlier);
+
+    store.sendMessage.mockResolvedValueOnce({ mode: 'queue-next-turn', receipt: receipt() });
+    draft.set('Second');
+    attachments.images.set([6, 7, 8, 9].map(image));
+    await controller.send('queue');
+
+    const [, text, , , , turn] = store.sendMessage.mock.calls[1];
+    expect(text).toBe('Second');
+    expect(turn.images).toHaveLength(4);
+    expect(store.cancelMessage).not.toHaveBeenCalled();
+  });
+
   it('sends a text-only message without a turn', async () => {
     store.sendMessage.mockResolvedValue({ mode: 'queue-next-turn', receipt: receipt() });
     draft.set('Plain');
@@ -162,6 +213,8 @@ describe('LaneDeliveryController', () => {
       expect(settings.pending(AGENT)).toEqual({ model: 'opus', reasoningEffort: 'high' });
       expect(controller.error()).toContain('Not delivered:');
       expect(controller.error()).toContain('Model opus is not offered by this lane');
+      // The thread row must not offer Recover text for what the composer now holds (M4).
+      expect(store.markRestored).toHaveBeenCalledWith(sent.id);
     },
   );
 

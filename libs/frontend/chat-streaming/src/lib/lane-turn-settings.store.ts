@@ -9,10 +9,10 @@
  * not change the main chat's per-tab model or effort overrides, so the store
  * has no dependency on `TabManagerService`.
  *
- * A pending pick is cleared once the agent record confirms it: the model when
- * the record's `model` or `observedModel` equals the pick, the effort when its
- * `reasoningEffort` equals the pick. Entries of agents the monitor no longer
- * tracks are dropped.
+ * A pending pick is cleared once a message carrying it is accepted, or once
+ * the agent record confirms it: the model when the record's `model` or
+ * `observedModel` equals the pick, the effort when its `reasoningEffort`
+ * equals the pick. Entries of agents the monitor no longer tracks are dropped.
  */
 
 import { Injectable, effect, inject, signal } from '@angular/core';
@@ -32,6 +32,8 @@ export const LANE_OPTIONS_CHECKING_TEXT = 'Checking lane options…';
 export const LANE_OPTIONS_ERROR_TEXT = 'Could not load lane options.';
 /** Shown when the lane answered its preview without a per-turn input section. */
 export const LANE_OPTIONS_UNREPORTED_TEXT = 'Lane did not report its options.';
+/** Shown beside Retry when the lists shown are the last known ones and the latest read failed. */
+export const LANE_OPTIONS_STALE_TEXT = 'Showing the last known lane options. The latest read failed.';
 
 /** Renderer budget for one catalog read; the host bounds its own lookup. */
 const LANE_OPTIONS_TIMEOUT_MS = 15_000;
@@ -44,7 +46,10 @@ export interface LaneComposerCatalog {
   readonly options?: AgentGetLaneComposerOptionsResult;
   /** True while a refresh of a `ready` catalog runs (the pickers stay enabled). */
   readonly refreshing: boolean;
-  /** Backend or transport reason of the last failed read, for logs and titles. */
+  /**
+   * Backend or transport reason of the last failed read. On a `ready` catalog
+   * the lists shown are the last known ones (a partial answer or a failed refresh).
+   */
   readonly errorDetail?: string;
 }
 
@@ -136,6 +141,7 @@ export class LaneTurnSettingsStore {
     this.pick(agentId, 'reasoningEffort', effort?.trim() || undefined);
   }
 
+  /** Drop the lane's pick; the composer calls it once a message carrying the pick is accepted. */
   clearPending(agentId: string): void {
     if (!this._pending().has(agentId)) return;
     this._pending.update((current) => withEntry(current, agentId, undefined));
@@ -174,7 +180,11 @@ export class LaneTurnSettingsStore {
       if (this.inFlight.get(agentId) !== read) return;
       this.inFlight.delete(agentId);
       if (outcome.ok) {
-        this.setCatalog(agentId, { status: 'ready', options: outcome.options, refreshing: false });
+        // A partial answer keeps its lists and shows its error beside them (M5).
+        this.setCatalog(agentId, {
+          status: 'ready', options: outcome.options, refreshing: false,
+          ...(outcome.options.error ? { errorDetail: outcome.options.error } : {}),
+        });
         return;
       }
       this.logger.warn('LaneTurnSettingsStore', 'Lane composer options failed', outcome.detail);
@@ -197,7 +207,11 @@ export class LaneTurnSettingsStore {
         { timeout: LANE_OPTIONS_TIMEOUT_MS },
       );
       if (!result.isSuccess()) return { ok: false, detail: result.error ?? 'Lane options request failed' };
-      if (result.data.error) return { ok: false, detail: result.data.error };
+      const { models, efforts, commands, error } = result.data;
+      // The host sends what it still has beside `error`: usable lists are kept.
+      if (error && models.length === 0 && efforts.length === 0 && commands.length === 0) {
+        return { ok: false, detail: error };
+      }
       return { ok: true, options: result.data };
     } catch (error) {
       return { ok: false, detail: error instanceof Error ? error.message : String(error) };

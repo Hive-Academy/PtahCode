@@ -29,14 +29,17 @@ import {
   AgentMonitorStore,
   LANE_OPTIONS_CHECKING_TEXT,
   LANE_OPTIONS_ERROR_TEXT,
+  LANE_OPTIONS_STALE_TEXT,
   LaneTurnSettingsStore,
 } from '@ptah-extension/chat-streaming';
 import type { CommandSuggestion } from '@ptah-extension/core';
-import type {
-  EffectiveLaneCapabilities,
-  EffortLevel,
-  LaneComposerCommandOption,
-  LanePermissionMode,
+import {
+  LANE_TURN_MAX_FILES,
+  LANE_TURN_MAX_IMAGES,
+  type EffectiveLaneCapabilities,
+  type EffortLevel,
+  type LaneComposerCommandOption,
+  type LanePermissionMode,
 } from '@ptah-extension/shared';
 import {
   COMPOSER_CARD_BORDER_CLASS,
@@ -225,6 +228,7 @@ export class LaneComposerComponent {
   protected readonly stopButtonClass = COMPOSER_STOP_BUTTON_CLASS;
   protected readonly statusLineClass = COMPOSER_STATUS_LINE_CLASS;
   protected readonly optionsErrorText = LANE_OPTIONS_ERROR_TEXT;
+  protected readonly optionsStaleText = LANE_OPTIONS_STALE_TEXT;
   protected readonly ArrowUpIcon = ArrowUp;
   protected readonly SquareIcon = Square;
   protected readonly PlayIcon = Play;
@@ -270,6 +274,10 @@ export class LaneComposerComponent {
   /** The previews or the catalog failed: "Could not load lane options." with Retry. */
   protected readonly optionsFailed = computed(
     () => this.catalog().status === 'error' || (!this.delivery.previewsReady() && !!this.delivery.error()),
+  );
+  /** The lists shown are the last known ones: the host answered with an error beside them (M5). */
+  protected readonly optionsStale = computed(
+    () => !this.optionsFailed() && this.catalog().status === 'ready' && !!this.catalog().errorDetail,
   );
   /** First catalog load or no preview yet: gated controls wait (design-spec 4.8). */
   protected readonly checking = computed(
@@ -330,6 +338,24 @@ export class LaneComposerComponent {
   protected readonly imagesBlocked = computed(
     () => this.imagesUnsupportedReason() !== null && this.attachments.images().length > 0,
   );
+  /** The lane reported that it takes no files: `@` and Attach files say why instead. */
+  private readonly filesUnsupportedReason = computed(() => {
+    const input = this.turnInput();
+    if (input.kind !== 'reported' || input.turnInput.files.state === 'supported') return null;
+    return input.turnInput.files.reason ?? `${this.cli()} lanes cannot take files.`;
+  });
+  /** Past the host limits of one turn; the send would be refused (M2). */
+  protected readonly attachmentLimitText = computed(() => {
+    const images = this.attachments.images().length;
+    const files = this.attachments.files().length;
+    if (images > LANE_TURN_MAX_IMAGES) {
+      return `A lane message takes at most ${LANE_TURN_MAX_IMAGES} images. Remove ${images - LANE_TURN_MAX_IMAGES} to send.`;
+    }
+    if (files > LANE_TURN_MAX_FILES) {
+      return `A lane message takes at most ${LANE_TURN_MAX_FILES} files. Remove ${files - LANE_TURN_MAX_FILES} to send.`;
+    }
+    return null;
+  });
   private readonly fileMode = computed((): ComposerFileMode => {
     const input = this.turnInput();
     return input.kind === 'reported' ? (input.turnInput.files.delivery ?? 'reference') : 'reference';
@@ -352,6 +378,8 @@ export class LaneComposerComponent {
     }
     const blocked = new Set(commands.blocked ?? []);
     const entries = (catalog.options?.commands ?? []).filter((entry) => !blocked.has(entry.name));
+    // A stopped lane with no cached list: the host says when the list appears (S2).
+    const notLoaded = catalog.options?.unavailableReason;
     const group = (
       label: string,
       kind: LaneComposerCommandOption['group'],
@@ -361,7 +389,7 @@ export class LaneComposerComponent {
     ): ComposerCommandGroup => ({
       label,
       commands: supported ? entries.filter((entry) => entry.group === kind).map(commandSuggestion) : [],
-      emptyReason: supported ? noneText : (reason ?? noneText),
+      emptyReason: supported ? (notLoaded ?? noneText) : (reason ?? noneText),
     });
     return {
       state: 'ready',
@@ -407,10 +435,13 @@ export class LaneComposerComponent {
 
   // ---- Send and the status line ----
   protected readonly sendDisabled = computed(
-    () => this.delivery.queueDisabled() || this.imagesBlocked() || this.attachments.pendingReads() > 0,
+    () => this.delivery.queueDisabled() || this.imagesBlocked() || this.attachmentLimitText() !== null
+      || this.attachments.pendingReads() > 0,
   );
   protected readonly sendTitle = computed(() => {
     if (this.imagesBlocked()) return this.imagesBlockedText();
+    const overLimit = this.attachmentLimitText();
+    if (overLimit) return overLimit;
     if (this.stopped()) return this.delivery.hint();
     return this.delivery.state().queueDisabledReason ?? 'Send message';
   });
@@ -422,10 +453,14 @@ export class LaneComposerComponent {
     const revealed = this.revealedReason();
     if (revealed) return revealed;
     if (this.imagesBlocked()) return this.imagesBlockedText();
+    const overLimit = this.attachmentLimitText();
+    if (overLimit) return overLimit;
     if (this.checking()) return LANE_OPTIONS_CHECKING_TEXT;
     return this.composerInput.statusNote() ?? this.actionNote() ?? this.delivery.hint();
   });
-  protected readonly statusNeedsAction = computed(() => !this.revealedReason() && this.imagesBlocked());
+  protected readonly statusNeedsAction = computed(
+    () => !this.revealedReason() && (this.imagesBlocked() || this.attachmentLimitText() !== null),
+  );
   /** What this lane cannot do here; the "N limited" badge (hint only). */
   protected readonly limitedReasons = computed((): readonly string[] => {
     if (this.checking() || this.optionsFailed()) return [];
@@ -456,6 +491,7 @@ export class LaneComposerComponent {
       dropdown: this.dropdownRef,
       commands: this.commandSource,
       fileMode: this.fileMode,
+      filesUnsupportedReason: this.filesUnsupportedReason,
       prompts: false,
       submit: () => {
         if (!this.confirmLoss()) void this.send();
@@ -541,6 +577,13 @@ export class LaneComposerComponent {
     }
   }
 
+  /** Attach files, unless the lane reported that it takes none. */
+  protected pickFiles(): void {
+    const reason = this.filesUnsupportedReason();
+    if (reason) this.actionNote.set(reason);
+    else void this.attachments.pickFiles();
+  }
+
   protected loadCatalog(): void {
     void this.settings.loadCatalog(this.agentId());
   }
@@ -572,7 +615,7 @@ export class LaneComposerComponent {
 
   /** Ctrl/Cmd+Enter: Send now for the draft, after the loss confirmation when the turn would lose work. */
   protected requestNow(): void {
-    if (this.stopped() || this.delivery.nowDisabled() || this.imagesBlocked()) return;
+    if (this.stopped() || this.delivery.nowDisabled() || this.imagesBlocked() || this.attachmentLimitText()) return;
     if (this.waitForReads()) return;
     this.lossTarget = { kind: 'draft' };
     if (this.delivery.nowNeedsConfirmation()) this.confirmLoss.set(true);
@@ -689,8 +732,9 @@ export class LaneComposerComponent {
     if (support.state !== 'supported') {
       return support.reason ?? `${this.cli()} lanes cannot change the ${kind === 'model' ? 'model' : 'reasoning effort'} here.`;
     }
-    if (kind === 'effort' && (this.catalog().options?.efforts.length ?? 0) === 0) {
-      return `${this.cli()} reports no reasoning effort levels.`;
+    const options = this.catalog().options;
+    if (kind === 'effort' && (options?.efforts.length ?? 0) === 0) {
+      return options?.unavailableReason ?? `${this.cli()} reports no reasoning effort levels.`;
     }
     return null;
   }

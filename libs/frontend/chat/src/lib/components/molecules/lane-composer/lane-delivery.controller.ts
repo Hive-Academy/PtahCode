@@ -13,12 +13,15 @@ import {
   AgentDeliveryStore,
   AgentMonitorStore,
   LaneTurnSettingsStore,
+  messageOutcomeText,
 } from '@ptah-extension/chat-streaming';
-import type {
-  AgentDeliveryReceipt,
-  AgentMessageDelivery,
-  LaneTurnRequest,
-  LaneTurnSettings,
+import {
+  LANE_TURN_MAX_FILES,
+  LANE_TURN_MAX_IMAGES,
+  type AgentDeliveryReceipt,
+  type AgentMessageDelivery,
+  type LaneTurnRequest,
+  type LaneTurnSettings,
 } from '@ptah-extension/shared';
 import {
   ComposerAttachmentsService,
@@ -93,9 +96,12 @@ function preferredComposer(agentId: string): number | undefined {
   return latest;
 }
 
+function isEmptySettings(settings: LaneTurnSettings): boolean {
+  return settings.model === undefined && settings.reasoningEffort === undefined;
+}
+
 function isEmptySnapshot(snapshot: LaneTurnSnapshot): boolean {
-  return snapshot.files.length === 0 && snapshot.images.length === 0
-    && snapshot.settings.model === undefined && snapshot.settings.reasoningEffort === undefined;
+  return snapshot.files.length === 0 && snapshot.images.length === 0 && isEmptySettings(snapshot.settings);
 }
 
 /** `later` attachments after `earlier`'s, without duplicates; `later` settings win. */
@@ -113,6 +119,17 @@ function mergeSnapshots(earlier: LaneTurnSnapshot, later: LaneTurnSnapshot): Lan
     },
   };
 }
+
+/** The host limits of one lane turn (8 images, 32 files). */
+export function withinTurnLimits(snapshot: Pick<LaneTurnSnapshot, 'files' | 'images'>): boolean {
+  return snapshot.images.length <= LANE_TURN_MAX_IMAGES && snapshot.files.length <= LANE_TURN_MAX_FILES;
+}
+
+function sameSettings(a: LaneTurnSettings, b: LaneTurnSettings): boolean {
+  return a.model === b.model && a.reasoningEffort === b.reasoningEffort;
+}
+
+const SEND_FAILED_TEXT = 'Could not send your message. Try again.';
 
 function toTurnRequest(snapshot: LaneTurnSnapshot): LaneTurnRequest | undefined {
   if (isEmptySnapshot(snapshot)) return undefined;
@@ -327,10 +344,12 @@ export class LaneDeliveryController {
       if (delivery === 'queue') {
         const queued = this.queuedReceipts()[0];
         const earlier = queued ? acceptedMessages.get(queued.id) : undefined;
-        if (queued && earlier?.agentId === agentId) {
+        const merged = queued && earlier?.agentId === agentId ? mergeSnapshots(earlier.snapshot, draftSnapshot) : null;
+        // A fold past the host limits would be refused: the draft goes as its own message.
+        if (queued && earlier && merged && withinTurnLimits(merged)) {
           earlierQueuedId = queued.id;
           text = `${earlier.text}\n${draftText}`;
-          snapshot = mergeSnapshots(earlier.snapshot, draftSnapshot);
+          snapshot = merged;
         }
       }
       const turn = toTurnRequest(snapshot);
@@ -346,7 +365,7 @@ export class LaneDeliveryController {
       if (!limitHeld && (outcome.mode === 'unsupported' || (receipt && receipt.state !== 'accepted' && receipt.state !== 'started'))) {
         // Refused at send: the draft, its attachments and the pick stay where they are.
         if (switched) { this.holdForLane(agentId, draftText, draftSnapshot); return; }
-        this._error.set(outcome.detail ?? 'Could not send your message. Try again.');
+        this._error.set(messageOutcomeText(outcome, SEND_FAILED_TEXT));
         this.refreshPreviews();
         return;
       }
@@ -358,6 +377,12 @@ export class LaneDeliveryController {
       if (!switched) {
         if (sources.draft().trim() === draftText) sources.draft.set('');
         sent.removeSent();
+      }
+      // The pick now rides on the accepted message; a later steer must not
+      // carry it again (M1). A pick changed while the send ran stays.
+      const sentSettings = draftSnapshot.settings;
+      if (!isEmptySettings(sentSettings) && sameSettings(this.settings.pending(agentId), sentSettings)) {
+        this.settings.clearPending(agentId);
       }
       if (receipt.state === 'accepted' || limitHeld) {
         // Remembered even after a lane switch, so a later refusal restores it
@@ -429,7 +454,7 @@ export class LaneDeliveryController {
       if (outcome.mode === 'unsupported' || !receipt || (receipt.state !== 'accepted' && receipt.state !== 'started')) {
         // The message left the queue; put it back so nothing is lost.
         if (this.restoreFor(agentId, message.text, message.snapshot)) {
-          this._error.set(outcome.detail ?? 'Could not send your message. Try again.');
+          this._error.set(messageOutcomeText(outcome, SEND_FAILED_TEXT));
           this.refreshPreviews();
         }
         return;
@@ -496,6 +521,8 @@ export class LaneDeliveryController {
     if (receipt.state === 'failed' || receipt.state === 'expired' || receipt.state === 'interrupted-undelivered') {
       if (!this.receivesMessageOf(pending.owner)) return;
       this.restore(pending.text, pending.snapshot);
+      // The composer holds it now: the thread row must not offer Recover text too (M4).
+      this.store.markRestored(receipt.id);
       this._error.set(`${this.store.receiptStatus(receipt).label}: ${receiptRefusalText(receipt)}`);
       acceptedMessages.delete(receipt.id);
     } else if (receipt.state === 'settled') acceptedMessages.delete(receipt.id);

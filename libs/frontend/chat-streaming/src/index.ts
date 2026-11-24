@@ -73,10 +73,12 @@ export {
   type ParentDeliveryItem,
   type RecoveredLaneMessage,
 } from './lib/agent-delivery.store';
+export { messageOutcomeText } from './lib/agent-message-outcome-text';
 export {
   LaneTurnSettingsStore,
   LANE_OPTIONS_CHECKING_TEXT,
   LANE_OPTIONS_ERROR_TEXT,
+  LANE_OPTIONS_STALE_TEXT,
   LANE_OPTIONS_UNREPORTED_TEXT,
   type LaneCatalogStatus,
   type LaneComposerCatalog,

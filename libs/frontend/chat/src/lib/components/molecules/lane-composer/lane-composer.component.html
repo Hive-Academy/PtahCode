@@ -119,7 +119,7 @@
           <div class="ptah-composer-toolbar flex items-center gap-1 px-2 pr-2.5 pb-2 min-w-0">
             <div class="ptah-composer-toolbar-start flex items-center gap-1 min-w-0 flex-1">
               <ptah-composer-attach-menu
-                (pickFiles)="attachments.pickFiles()"
+                (pickFiles)="pickFiles()"
                 (pickImages)="attachments.pickImages()"
               />
               <ptah-lane-approval-chip
@@ -233,6 +233,11 @@
     </p>
   } @else if (delivery.error(); as message) {
     <p class="mt-1 px-1 text-xs text-state-err" role="alert">{{ message }}</p>
+  } @else if (optionsStale()) {
+    <p class="mt-1 flex items-center gap-1 px-1 text-xs text-state-need" role="status" data-testid="lane-options-stale">
+      {{ optionsStaleText }}
+      <button type="button" ptahButton variant="ghost" size="xs" (click)="retryOptions()">Retry</button>
+    </p>
   }
 
   <div [class]="statusLineClass + ' mt-1.5'" data-testid="lane-status-line">

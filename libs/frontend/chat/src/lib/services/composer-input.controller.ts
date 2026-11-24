@@ -90,6 +90,11 @@ export interface ComposerInputSources {
   readonly dropdown: Signal<ComposerSuggestionsPanel | undefined>;
   readonly commands: Signal<ComposerCommandSource>;
   readonly fileMode: Signal<ComposerFileMode>;
+  /**
+   * Why the target takes no files; null or absent when it does. While set,
+   * `@` shows this reason as its one row and a file cannot be chosen.
+   */
+  readonly filesUnsupportedReason?: Signal<string | null>;
   /** Append the prompt catalogue after the `/` entries. */
   readonly prompts: boolean;
   /** Enter (no Shift) with the suggestions closed. */
@@ -145,6 +150,9 @@ export class ComposerInputController {
   private readonly commandSource = computed<ComposerCommandSource>(
     () => this.sources()?.commands() ?? { state: 'discovery' },
   );
+  private readonly filesBlockedReason = computed(
+    () => this.sources()?.filesUnsupportedReason?.() ?? null,
+  );
 
   /** Spinner row: a fetch is running, or the `/` source is still loading. */
   readonly isLoadingSuggestions = computed(
@@ -164,8 +172,9 @@ export class ComposerInputController {
   /** One non-selectable row instead of the `/` list (source unsupported). */
   readonly suggestionNotice = computed(() => {
     const source = this.commandSource();
-    return this._suggestionMode() === 'slash-trigger' &&
-      source.state === 'unsupported'
+    const mode = this._suggestionMode();
+    if (mode === 'at-trigger') return this.filesBlockedReason();
+    return mode === 'slash-trigger' && source.state === 'unsupported'
       ? source.reason
       : null;
   });
@@ -209,6 +218,7 @@ export class ComposerInputController {
     this._projectedQuery();
 
     if (mode === 'at-trigger') {
+      if (this.filesBlockedReason() !== null) return [];
       const localResults = this._localSuggestions().filter(
         (suggestion): suggestion is FileSuggestionItem =>
           suggestion.type === 'file',
@@ -357,7 +367,7 @@ export class ComposerInputController {
     this._currentQuery.set(event.query);
     this._showSuggestions.set(true);
     this.refreshSuggestions(event.query);
-    void this.fetchAtSuggestions();
+    if (this.filesBlockedReason() === null) void this.fetchAtSuggestions();
   }
 
   /**
@@ -414,7 +424,9 @@ export class ComposerInputController {
   /** File tag (reference), path text, command or prompt insertion. */
   handleSuggestionSelected(suggestion: SuggestionItem): void {
     if (suggestion.type === 'file') {
-      if (this.sources()?.fileMode() === 'path-text') {
+      if (this.filesBlockedReason() !== null) {
+        // The target takes no files: nothing is inserted.
+      } else if (this.sources()?.fileMode() === 'path-text') {
         if (this.replaceTrigger(`${suggestion.path} `)) {
           this._statusNote.set(
             `Inserted ${suggestion.name} as path text in your message.`,
