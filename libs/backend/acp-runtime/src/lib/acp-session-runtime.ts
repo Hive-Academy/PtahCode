@@ -641,6 +641,25 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
     },
     extNotification: async (method, params) => {
       if (dropStale(target, method)) return;
+      // Per-call usage counts only for the running prompt of this session:
+      // replay (`session/load`) and another session's frames are ignored.
+      if (
+        promptInFlight &&
+        currentTurnId &&
+        sessionId !== undefined &&
+        params['sessionId'] === sessionId
+      ) {
+        const callUsage = profile.extensions?.usage?.(method, params);
+        if (callUsage) {
+          const model = callUsage.model ?? sessionModel();
+          emit({
+            type: 'usageProgress',
+            provider: name,
+            turnId: currentTurnId,
+            usage: model ? { ...callUsage, model } : callUsage,
+          });
+        }
+      }
       if (profile.extensions?.notification?.(method, params, logger)) return;
       logger?.debug('[AcpSessionHandle] unsupported extension notification', {
         ...logContext,

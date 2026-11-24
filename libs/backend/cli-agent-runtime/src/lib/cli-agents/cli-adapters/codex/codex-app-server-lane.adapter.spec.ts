@@ -1757,6 +1757,42 @@ describe('CodexAppServerLaneAdapter', () => {
     expect(h.runtime.openCatalog).toHaveBeenCalledTimes(4);
     expect(h.binary.resolve).toHaveBeenCalledTimes(5);
   });
+  it('serves a stopped lane models and the advertised efforts from one catalog read', async () => {
+    const h = harness((context) => {
+      context.models = [
+        { id: 'c-1', model: 'gpt-6-sol', displayName: 'GPT-6-Sol', isDefault: true, supportedEfforts: ['low', 'high'] },
+        { id: 'c-2', model: 'gpt-6-astra', displayName: 'GPT-6-Astra', isDefault: false, supportedEfforts: ['high', 'xhigh', 'bogus'] },
+      ];
+    });
+    const handle = await h.adapter.runSdk(options());
+    await terminal(h.context);
+    await handle.done;
+    const opened = jest.mocked(h.runtime.openCatalog).mock.calls.length;
+    await expect(h.adapter.stoppedLaneCatalog()).resolves.toEqual({
+      models: [
+        { id: 'gpt-6-sol', name: 'GPT-6-Sol (Codex default)' },
+        { id: 'gpt-6-astra', name: 'GPT-6-Astra' },
+      ],
+      efforts: ['low', 'high', 'xhigh'],
+    });
+    expect(h.runtime.openCatalog).toHaveBeenCalledTimes(opened + 1);
+  });
+
+  it('adds no static efforts for a stopped lane, and gives empties when the catalog fails', async () => {
+    const h = harness((context) => {
+      context.models = [{ id: 'c-1', model: 'gpt-6-sol', displayName: 'GPT-6-Sol', isDefault: true }];
+    });
+    const handle = await h.adapter.runSdk(options());
+    await terminal(h.context);
+    await handle.done;
+    await expect(h.adapter.stoppedLaneCatalog()).resolves.toEqual({
+      models: [{ id: 'gpt-6-sol', name: 'GPT-6-Sol (Codex default)' }],
+      efforts: [],
+    });
+    jest.mocked(h.runtime.openCatalog).mockRejectedValueOnce(new Error('catalog failed'));
+    await expect(h.adapter.stoppedLaneCatalog()).resolves.toEqual({ models: [], efforts: [] });
+    expect(h.logger.warn).toHaveBeenCalledWith(expect.stringContaining('catalog failed'), expect.any(Object));
+  });
 });
 
 describe('CodexAppServerLaneAdapter lane turn input (B7)', () => {

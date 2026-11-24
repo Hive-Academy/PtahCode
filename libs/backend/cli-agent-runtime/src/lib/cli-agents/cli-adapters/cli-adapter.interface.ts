@@ -402,6 +402,12 @@ export interface ContinuationOutcome {
   readonly done: Promise<number>;
 }
 
+/** What {@link CliAdapter.stoppedLaneCatalog} serves. */
+export interface StoppedLaneCatalog {
+  readonly models: CliModelInfo[];
+  readonly efforts: readonly string[];
+}
+
 export interface CliAdapter {
   /** Optional until the host's named account admission is certified. */
   readonly accountBindings?: LaneAccountBindingPort;
@@ -461,10 +467,19 @@ export interface CliAdapter {
 
   /**
    * Optional: the reasoning effort levels this CLI's lanes accept, when the
-   * list is fixed and known without a running lane. Served to the composer of
-   * a stopped or restored lane that has no cached catalog.
+   * list is known without a running lane. Served to the composer of a
+   * stopped or restored lane that has no cached catalog. `model` is the lane
+   * record's model, for a CLI whose levels depend on it; others ignore it.
    */
-  laneEfforts?(): readonly string[];
+  laneEfforts?(model?: string): readonly string[];
+
+  /**
+   * Optional: models and effort levels for a stopped lane's composer from one
+   * live catalog read, for a CLI whose levels come only from that catalog.
+   * When present the coordinator uses it instead of `listModels` and
+   * `laneEfforts`. Never rejects: a failed read gives empty lists.
+   */
+  stoppedLaneCatalog?(): Promise<StoppedLaneCatalog>;
 
   /**
    * Optional: Ensure OAuth tokens are fresh (for adapters that use OAuth).

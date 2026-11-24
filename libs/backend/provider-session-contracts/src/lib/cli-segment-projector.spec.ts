@@ -130,6 +130,31 @@ describe('projectToCliSegments', () => {
     });
   });
 
+  it('projects mid-turn usage to a message-scope usage row without turn telemetry', () => {
+    const rows = projectToCliSegments({
+      type: 'usageProgress',
+      provider: 'Grok',
+      turnId: 'sess:run:1',
+      usage: { inputTokens: 18267, outputTokens: 168 },
+    });
+    expect(rows).toEqual([
+      {
+        type: 'info',
+        content: 'Grok usage update.',
+        usageScope: 'message',
+        usage: { inputTokens: 18267, outputTokens: 168, model: 'Grok/unknown' },
+      },
+    ]);
+    const [named] = projectToCliSegments({
+      type: 'usageProgress',
+      provider: 'Grok',
+      turnId: 'sess:run:1',
+      usage: { inputTokens: 1, outputTokens: 1, model: 'grok-4.7' },
+    });
+    expect(named?.usage?.model).toBe('grok-4.7');
+    expect(named).not.toHaveProperty('turnTelemetry');
+  });
+
   it('labels missing usage as unavailable telemetry with the provider fallback model', () => {
     const [row] = projectToCliSegments({
       type: 'usage',

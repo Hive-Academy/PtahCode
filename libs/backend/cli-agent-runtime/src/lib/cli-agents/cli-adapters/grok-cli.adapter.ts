@@ -42,6 +42,7 @@ import { probeCliStdout } from './cli-stdout-probe';
 import { grokAcpProfile } from '@ptah-extension/acp-runtime';
 import {
   acpLaneManifestSections,
+  acpProfileEfforts,
   createProviderSessionLaneHandle,
 } from './provider-session/provider-session-lane-handle';
 
@@ -215,6 +216,11 @@ export class GrokCliAdapter implements CliAdapter {
 
   parseOutput(raw: string): string {
     return stripAnsiCodes(raw);
+  }
+
+  /** The levels a live Grok lane serves for `model` (the profile mapping); no lane needed. */
+  laneEfforts(model?: string): readonly string[] {
+    return acpProfileEfforts(grokAcpProfile, model);
   }
 
   /** The models `grok models` lists; empty when the probe fails or prints something unrecognised. */

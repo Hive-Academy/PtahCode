@@ -397,6 +397,11 @@ describe('AntigravityCliAdapter', () => {
     it('strips ANSI escape codes', () => {
       expect(adapter.parseOutput('\x1b[32mok\x1b[0m')).toBe('ok');
     });
+
+    it('serves a stopped lane its thought levels, none for a model with an effort suffix', () => {
+      expect(adapter.laneEfforts('gemini-3-pro')).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
+      expect(adapter.laneEfforts('gemini-3-pro-high')).toEqual([]);
+    });
   });
 });
 

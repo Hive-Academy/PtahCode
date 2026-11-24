@@ -141,6 +141,18 @@ export type ProviderSessionEventBody =
       readonly turnId: string;
       readonly usage?: ProviderUsage;
     }
+  /**
+   * One model call inside a running turn; never completes the turn. The
+   * turn's `usage` still follows and is the authoritative total, so a
+   * consumer that sums these must treat that total as a correction.
+   */
+  | {
+      readonly type: 'usageProgress';
+      /** The provider's display name, used in labels and the fallback model id. */
+      readonly provider: string;
+      readonly turnId: string;
+      readonly usage: ProviderUsage;
+    }
   | { readonly type: 'approvalRequested'; readonly request: ProviderApprovalRequest }
   | {
       readonly type: 'approvalSettled';

@@ -108,15 +108,33 @@ export function acpLaneManifestSections(
   };
   return {
     turnInput,
-    usage: {
-      timing: 'turn-end',
-      reason: `${profile.displayName} reports token usage when the turn ends.`,
-    },
+    // A profile that reads per-call usage streams it during the turn; the
+    // turn-end total still corrects the card.
+    usage: profile.extensions?.usage
+      ? { timing: 'live' }
+      : {
+          timing: 'turn-end',
+          reason: `${profile.displayName} reports token usage when the turn ends.`,
+        },
     prompts: {
       approvals: { state: 'unsupported', reason: promptReason },
       questions: { state: 'unsupported', reason: promptReason },
     },
   };
+}
+
+/**
+ * The effort levels `profile` maps to a config entry other than the model,
+ * for `model`. Pure, with no spawn options: the live handle and a stopped
+ * lane (its record's model) derive the same list. A profile without
+ * `sessionConfig` gives none.
+ */
+export function acpProfileEfforts(profile: AcpVendorProfile, model?: string): string[] {
+  return EFFORT_LEVELS.filter((effort) =>
+    (profile.sessionConfig?.({ model, reasoningEffort: effort }) ?? []).some(
+      (entry) => entry.configId !== 'model',
+    ),
+  );
 }
 
 /** An advertised ACP command as a composer entry: a `SKILL.md` path marks a skill (D10). */
@@ -556,13 +574,8 @@ export function createProviderSessionLaneHandle(
     }
   };
 
-  /** Effort values the profile maps to a config entry other than the model. */
-  const profileEfforts = (): string[] =>
-    EFFORT_LEVELS.filter((effort) =>
-      (profile.sessionConfig?.({ ...options, mcp: [], reasoningEffort: effort }) ?? []).some(
-        (entry) => entry.configId !== 'model',
-      ),
-    );
+  /** Effort values the profile maps for the lane's model. */
+  const profileEfforts = (): string[] => acpProfileEfforts(profile, options.model);
 
   const laneCommands = (): LaneComposerCommandOption[] =>
     filterLaneCommands(

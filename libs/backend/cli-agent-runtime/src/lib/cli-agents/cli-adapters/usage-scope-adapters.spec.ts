@@ -27,4 +27,19 @@ describe('CLI adapter usage scopes', () => {
       expect(telemetry).not.toHaveProperty('usage');
     },
   );
+
+  it('grok sums its per-call message increments to the turn total, which then corrects nothing', () => {
+    // The three `response_completed` calls of grok-p1-ptah-mcp-search-use-tool.ndjson,
+    // then its `_meta.usage` turn total (the fixture replay is in provider-session-lane-handle.spec.ts).
+    const normalizer = new LaneUsageNormalizer();
+    const calls = [
+      normalizer.accept('grok-lane', 'message', { inputTokens: 18267, outputTokens: 168 }),
+      normalizer.accept('grok-lane', 'message', { inputTokens: 25092, outputTokens: 227 }),
+      normalizer.accept('grok-lane', 'message', { inputTokens: 25665, outputTokens: 78 }),
+    ];
+    const total = normalizer.accept('grok-lane', 'turn', { inputTokens: 69024, outputTokens: 473 });
+    expect(calls.map((step) => step.increment.inputTokens)).toEqual([18267, 25092, 25665]);
+    expect(total.increment).toEqual({ inputTokens: 0, outputTokens: 0 });
+    expect(total.turnTotal).toEqual({ inputTokens: 69024, outputTokens: 473 });
+  });
 });

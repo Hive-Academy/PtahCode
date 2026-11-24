@@ -318,6 +318,42 @@ describe('AgentMessageCoordinator — turn input refusals and options', () => {
     });
   });
 
+  it("derives a stopped lane's efforts for the record's model", async () => {
+    const { h, coordinator } = setupTurn();
+    h.tracked.sdkHandle = undefined;
+    h.setInfo({ status: 'stopped', model: 'grok-4' });
+    const laneEfforts = jest.fn((model?: string) => (model === 'grok-4' ? ['low', 'high'] : []));
+    (h.detection.getAdapter as jest.Mock).mockReturnValue({ listModels: async () => [], laneEfforts });
+    await expect(coordinator.turnOptions(h.agentId)).resolves.toMatchObject({
+      currentModel: 'grok-4', efforts: ['low', 'high'],
+      unavailableReason: 'Commands and skills appear when the lane is running.',
+    });
+    expect(laneEfforts).toHaveBeenCalledWith('grok-4');
+  });
+
+  it('serves a stopped Codex lane models and efforts from one catalog read (D4)', async () => {
+    const { h, coordinator } = setupTurn();
+    h.tracked.sdkHandle = undefined;
+    h.setInfo({ status: 'stopped' });
+    const stoppedLaneCatalog = jest.fn(async () => ({
+      models: [{ id: 'gpt-5', name: 'GPT-5 (Codex default)' }], efforts: ['low', 'medium', 'high'],
+    }));
+    const listModels = jest.fn(async () => []);
+    const laneEfforts = jest.fn(() => ['max']);
+    (h.detection.getAdapter as jest.Mock).mockReturnValue({ stoppedLaneCatalog, listModels, laneEfforts });
+    await expect(coordinator.turnOptions(h.agentId)).resolves.toEqual({
+      models: [{ id: 'gpt-5', name: 'GPT-5 (Codex default)' }], efforts: ['low', 'medium', 'high'], commands: [],
+      unavailableReason: 'Commands and skills appear when the lane is running.',
+    });
+    expect(stoppedLaneCatalog).toHaveBeenCalledTimes(1);
+    expect(listModels).not.toHaveBeenCalled();
+    expect(laneEfforts).not.toHaveBeenCalled();
+    stoppedLaneCatalog.mockResolvedValueOnce({ models: [], efforts: [] });
+    await expect(coordinator.turnOptions(h.agentId)).resolves.toMatchObject({
+      efforts: [], unavailableReason: 'Effort levels, commands and skills appear when the lane is running.',
+    });
+  });
+
   it('reads the cached command list for a / send instead of asking the lane again (M9)', async () => {
     const { h, coordinator } = setupTurn();
     const listTurnOptions = jest.fn(async () => ({
