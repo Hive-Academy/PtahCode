@@ -8,7 +8,6 @@ jest.mock('@ptah-extension/cli-agent-runtime', () => ({
     roleDelivery: 'native',
     roleChannel: 'agent-selection',
   },
-  AgentContinueError: class AgentContinueError extends Error {},
 }));
 
 jest.mock('@ptah-extension/agent-sdk', () => ({

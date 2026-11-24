@@ -517,7 +517,7 @@ function wireAgentMonitorListeners(
   // The TTL sweep that drops a completed agent from the manager's map. Not a
   // lifecycle transition — the agent already exited — but the webview's card is
   // still on screen offering a follow-up, and this is the only notice it gets
-  // that `agent:continue` will now fail.
+  // that an in-process follow-up will now fail.
   agentProcessManager.events.on(
     'agent:expired',
     (payload: { agentId: string }) => {
@@ -536,7 +536,7 @@ function wireAgentMonitorListeners(
   // that is not a shortcut. The message means exactly "in-process continuation
   // is no longer available for this agentId", which is precisely what a release
   // makes true — the record and its output survive, but the process behind
-  // `agent:continue` is gone. The card flips to its resume-by-session mode
+  // an in-process follow-up is gone. The card flips to its resume-by-session mode
   // either way, so a second message type would carry no information the first
   // does not (TASK_2026_323 B11).
   agentProcessManager.events.on(

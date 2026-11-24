@@ -1,13 +1,11 @@
 /**
  * SubagentMessageDispatcher — bidirectional messaging for running subagents.
  *
- * Provides four operations:
+ * Provides three operations:
  *   - `sendToSubagent` — relay a user message toward a running subagent via
  *     a coordinator nudge on the session's streamInput channel.
  *   - `stopSubagent` — call Query.stopTask(taskId) to gracefully stop a
  *     running subagent and write its output file.
- *   - `interruptSession` — call Query.interrupt() to abort the entire
- *     session, stopping all subagents.
  *   - `backgroundTask` — call Query.backgroundTasks(toolUseId) to move an
  *     in-flight foreground task to the background.
  *
@@ -340,42 +338,6 @@ export class SubagentMessageDispatcher {
       const message = error instanceof Error ? error.message : String(error);
       throw new RpcUserError(
         `Session ended before task could be backgrounded: ${message}`,
-        'SESSION_ENDED',
-      );
-    }
-  }
-
-  /**
-   * Interrupt the entire session, stopping all running subagents.
-   *
-   * @param sessionId - The session to interrupt
-   */
-  async interruptSession(sessionId: string): Promise<void> {
-    const session = this.sessionLifecycle.find(sessionId as string);
-    if (!session) {
-      throw new RpcUserError(
-        `Session '${sessionId}' is not active — cannot interrupt`,
-        'SESSION_NOT_FOUND',
-      );
-    }
-
-    if (!session.query) {
-      throw new RpcUserError(
-        `Session '${sessionId}' query is not ready — cannot interrupt`,
-        'SESSION_NOT_FOUND',
-      );
-    }
-
-    this.logger.debug('[SubagentMessageDispatcher] interruptSession', {
-      sessionId,
-    });
-
-    try {
-      await session.query.interrupt();
-    } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw new RpcUserError(
-        `Session ended before interrupt could be delivered: ${message}`,
         'SESSION_ENDED',
       );
     }

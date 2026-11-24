@@ -2616,14 +2616,6 @@ describe('AgentMonitorStore', () => {
       expect(ok).toBe(true);
     });
 
-    it('interruptSession dispatches subagent:interrupt for the active session', async () => {
-      rpcMock.call.mockResolvedValueOnce(rpcSuccess({ ok: true } as const));
-      await store.interruptSession();
-      expect(rpcMock.call).toHaveBeenCalledWith('subagent:interrupt', {
-        sessionId: SESSION,
-      });
-    });
-
     it('sendMessageToAgent fails fast when there is no active session', async () => {
       mockActiveTab.set(null);
       await store.sendMessageToAgent(PARENT, 'hello');
@@ -2637,44 +2629,6 @@ describe('AgentMonitorStore', () => {
       await store.stopAgent(TASK);
       const after = store.subagents().get(PARENT)?.status;
       expect(after).toBe(before); // unchanged — waits for agent_completed
-    });
-  });
-
-  describe('continueAgent', () => {
-    it('calls agent:continue with agentId + message and maps success', async () => {
-      rpcMock.call.mockResolvedValueOnce(rpcSuccess({ success: true }));
-
-      const result = await store.continueAgent('agent-1', 'do more');
-
-      expect(rpcMock.call).toHaveBeenCalledWith('agent:continue', {
-        agentId: 'agent-1',
-        message: 'do more',
-      });
-      expect(result).toEqual({ ok: true, code: undefined });
-    });
-
-    it('reports a refusal as ok=false, carrying its typed code', async () => {
-      // The handler answers a refusal as a transport SUCCESS whose payload says
-      // `success: false`. Reading only the envelope reports every refusal as a
-      // sent message, and the caller clears the user's draft over a follow-up
-      // that never reached the agent.
-      rpcMock.call.mockResolvedValueOnce(
-        rpcSuccess({ success: false, code: 'busy' }),
-      );
-
-      const result = await store.continueAgent('agent-1', 'do more');
-
-      expect(result.ok).toBe(false);
-      expect(result.code).toBe('busy');
-    });
-
-    it('reports ok=false when the RPC itself fails', async () => {
-      rpcMock.call.mockResolvedValueOnce(rpcError<unknown>('boom'));
-
-      const result = await store.continueAgent('agent-1', 'do more');
-
-      expect(result.ok).toBe(false);
-      expect(result.code).toBeUndefined();
     });
   });
 
@@ -3276,59 +3230,6 @@ describe('AgentMonitorStore', () => {
 
       expect(card('live-no-turn')?.usageTotals).toBeNull();
       expect(card('live-no-turn')?.model).toBeUndefined();
-    });
-  });
-
-  describe('resumeAgentWithMessage', () => {
-    const expired = {
-      agentId: 'agent-x',
-      cli: 'codex' as const,
-      task: 'the original task',
-      cliSessionId: 'session-9',
-      parentSessionId: 'parent-1',
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    } as any;
-
-    it('resumes the session with the follow-up as the run task', async () => {
-      rpcMock.call.mockResolvedValueOnce(
-        rpcSuccess({ success: true, agentId: 'agent-y' }),
-      );
-
-      const result = await store.resumeAgentWithMessage(expired, 'do more');
-
-      expect(rpcMock.call).toHaveBeenCalledWith('agent:resumeCliSession', {
-        cliSessionId: 'session-9',
-        cli: 'codex',
-        // The follow-up IS the resumed run's task — history comes from the
-        // session id, not from re-sending the original prompt.
-        task: 'do more',
-        parentSessionId: 'parent-1',
-        ptahCliId: undefined,
-        previousAgentId: 'agent-x',
-      });
-      expect(result.ok).toBe(true);
-    });
-
-    it('refuses without a session id rather than spawning a contextless agent', async () => {
-      const result = await store.resumeAgentWithMessage(
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        { ...expired, cliSessionId: undefined } as any,
-        'do more',
-      );
-
-      expect(rpcMock.call).not.toHaveBeenCalled();
-      expect(result.ok).toBe(false);
-      expect(result.error).toContain('no session to resume');
-    });
-
-    it('surfaces a handler-level failure verbatim', async () => {
-      rpcMock.call.mockResolvedValueOnce(
-        rpcSuccess({ success: false, error: 'no such session file' }),
-      );
-
-      const result = await store.resumeAgentWithMessage(expired, 'do more');
-
-      expect(result).toEqual({ ok: false, error: 'no such session file' });
     });
   });
 

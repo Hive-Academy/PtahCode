@@ -23,7 +23,7 @@ export function planAgentDelivery(input: AgentDeliveryPlanInput): AgentMessagePr
   const has = (key: keyof typeof messaging) => messaging[key].state === 'supported';
   const base = { agentId, delivery, effectiveCapabilities };
   const refuse = (reason: string): AgentMessagePreview => ({ ...base, mode: 'unsupported', supported: false, usesResume: false, reason });
-  // Stable code: `agent:continue` maps `not_found` to its typed RPC error.
+  // Stable code: the message coordinator maps `not_found` to its typed refusal reason.
   if (!info) return refuse('not_found');
   if (info.status === 'starting')
     return refuse('The lane is starting; try again when its handle is ready.');

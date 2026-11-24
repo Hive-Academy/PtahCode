@@ -10,9 +10,9 @@
  * through).
  *
  * On parse failure the handler's own `catch` returns
- * `{ success: false, error }` — the exact shape
- * `AgentMonitorStore.resumeAgentWithMessage` already reads — so a rejection
- * surfaces as a failed resume with the offending field named. Nothing
+ * `{ success: false, error }`, the result shape of `agent:resumeCliSession`
+ * that its caller (`agent-card.component.ts` `resumeAgent`) receives, so a
+ * rejection surfaces as a failed resume with the offending field named. Nothing
  * propagates: the backend transport wraps every handler
  * (`libs/backend/vscode-core/src/messaging/rpc-handler.ts`) and the frontend
  * client's `call()` has no reject path, so an unhandled rejection is

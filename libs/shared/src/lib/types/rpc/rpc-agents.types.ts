@@ -754,40 +754,6 @@ export interface AgentSetConfigParams {
   decisionModelCustomApiKey?: string;
 }
 
-/**
- * Why `agent:continue` refused.
- *
- * The wire copy of `AgentContinueError`'s code in
- * `@ptah-extension/cli-agent-runtime`. Backend libs may not be imported from
- * here (this is the foundation layer), so the two unions are kept in step by
- * intent — a code added there and not here fails `agent-rpc.handlers.ts` at
- * compile time, which is the guard.
- */
-export type AgentContinueErrorCode =
-  | 'not_found'
-  | 'invalid_params'
-  | 'unsupported'
-  | 'busy'
-  /**
-   * The agent record is still live and still readable, but its CLI subprocess
-   * was released after idling to free memory. In-process continuation is gone;
-   * the conversation is not. Recover by resuming `cliSessionId` — the same
-   * fallback `not_found` takes (TASK_2026_323 B11).
-   */
-  | 'released'
-  /**
-   * The lane's named Claude account was refused at continuation (route
-   * changed, unsupported source or identity not proved). The agent is not
-   * continued on another account.
-   */
-  | 'account_refused'
-  /**
-   * The lane refused the per-turn settings (model or effort) sent with the
-   * continuation. The message is not delivered with other settings.
-   */
-  | 'turn-options-refused'
-  | 'unknown';
-
 /** Parameters for ptahCli:list RPC method */
 export type PtahCliListParams = Record<string, never>;
 

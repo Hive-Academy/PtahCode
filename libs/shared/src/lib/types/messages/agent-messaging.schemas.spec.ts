@@ -11,10 +11,7 @@ import type {
 } from '../agent-process.types';
 import { RPC_METHOD_NAMES } from '../rpc.types';
 import type { RpcMethodRegistry } from '../rpc.types';
-import type {
-  AgentContinueErrorCode,
-  AgentGetQueuedMessageBodyResult,
-} from '../rpc/rpc-agents.types';
+import type { AgentGetQueuedMessageBodyResult } from '../rpc/rpc-agents.types';
 import type {
   AgentPermissionDecision,
   LanePermissionResponse,
@@ -315,11 +312,9 @@ describe('agent messaging RPC contracts', () => {
         agentId,
       };
     const textOnly: AgentGetQueuedMessageBodyResult = { text: 'Continue.' };
-    const code: AgentContinueErrorCode = 'turn-options-refused';
     expect(params.agentId).toBe(agentId);
     expect(result.commands[0].group).toBe('skill');
     expect(textOnly.turn).toBeUndefined();
-    expect(code).toBe('turn-options-refused');
   });
 
   it('re-exports the shared message limits through agent-process.types', () => {

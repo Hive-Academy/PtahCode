@@ -5,7 +5,6 @@
  *   - chat:subagent-query
  *   - subagent:send-message
  *   - subagent:stop
- *   - subagent:interrupt
  *   - subagent:background
  *   - subagent:history-page
  *
@@ -16,7 +15,6 @@
  *     not the schema's — see subagent-rpc.schema.ts.
  *   - subagent:send-message: delegates to dispatcher.sendToSubagent; validates params.
  *   - subagent:stop: delegates to dispatcher.stopSubagent; validates params.
- *   - subagent:interrupt: delegates to dispatcher.interruptSession; validates params.
  *   - subagent:background: delegates to dispatcher.backgroundTask; validates params.
  *   - Failure posture: registry errors return { subagents: [] } and capture to Sentry.
  *     Dispatcher errors propagate as RPC failures (not silently swallowed).
@@ -86,7 +84,7 @@ function createMockSubagentRegistry(): MockSubagentRegistry {
 type MockDispatcher = jest.Mocked<
   Pick<
     SubagentMessageDispatcher,
-    'sendToSubagent' | 'stopSubagent' | 'interruptSession' | 'backgroundTask'
+    'sendToSubagent' | 'stopSubagent' | 'backgroundTask'
   >
 >;
 
@@ -94,7 +92,6 @@ function createMockDispatcher(): MockDispatcher {
   return {
     sendToSubagent: jest.fn().mockResolvedValue(undefined),
     stopSubagent: jest.fn().mockResolvedValue(undefined),
-    interruptSession: jest.fn().mockResolvedValue(undefined),
     backgroundTask: jest.fn().mockResolvedValue(true),
   };
 }
@@ -238,7 +235,7 @@ async function call<TResult>(
 
 describe('SubagentRpcHandlers', () => {
   describe('register()', () => {
-    it('registers all seven methods', () => {
+    it('registers all six methods', () => {
       const h = makeHarness();
       h.handlers.register();
 
@@ -247,10 +244,9 @@ describe('SubagentRpcHandlers', () => {
       expect(methods).toContain('chat:dismiss-resumable-subagents');
       expect(methods).toContain('subagent:send-message');
       expect(methods).toContain('subagent:stop');
-      expect(methods).toContain('subagent:interrupt');
       expect(methods).toContain('subagent:background');
       expect(methods).toContain('subagent:history-page');
-      expect(methods).toHaveLength(7);
+      expect(methods).toHaveLength(6);
     });
   });
 
@@ -1308,33 +1304,6 @@ describe('SubagentRpcHandlers', () => {
 
       await expect(
         call(h, 'subagent:stop', { sessionId: 'sess-abc' }),
-      ).rejects.toThrow();
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // subagent:interrupt
-  // -------------------------------------------------------------------------
-
-  describe('subagent:interrupt', () => {
-    it('delegates to dispatcher.interruptSession and returns { ok: true }', async () => {
-      const h = makeHarness();
-      h.handlers.register();
-
-      const result = await call<{ ok: boolean }>(h, 'subagent:interrupt', {
-        sessionId: 'sess-abc',
-      });
-
-      expect(result).toEqual({ ok: true });
-      expect(h.dispatcher.interruptSession).toHaveBeenCalledWith('sess-abc');
-    });
-
-    it('rejects when sessionId is empty', async () => {
-      const h = makeHarness();
-      h.handlers.register();
-
-      await expect(
-        call(h, 'subagent:interrupt', { sessionId: '' }),
       ).rejects.toThrow();
     });
   });

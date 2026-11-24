@@ -427,14 +427,4 @@ export class ClaudeRpcService implements MessageHandler {
   ): Promise<RpcResult<SubagentCommandResult>> {
     return this.call('subagent:stop', { sessionId, taskId });
   }
-
-  /**
-   * Interrupt the entire active session (all running subagents in scope).
-   * @param sessionId - Session to interrupt
-   */
-  async interruptSubagentSession(
-    sessionId: SessionId,
-  ): Promise<RpcResult<SubagentCommandResult>> {
-    return this.call('subagent:interrupt', { sessionId });
-  }
 }
