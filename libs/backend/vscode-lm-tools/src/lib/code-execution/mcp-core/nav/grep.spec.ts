@@ -426,6 +426,19 @@ describe('handleGrep (node engine)', () => {
     expect(included.text).toContain('src/secret.ts');
   });
 
+  it('drops a .gitignore rule that backtracks and keeps the other rules', async () => {
+    const slow = `${'*a'.repeat(30)}b`;
+    await writeFile(path.join(root, '.gitignore'), `${slow}\n*.log\n`);
+    const longName = `${'a'.repeat(200)}.ts`;
+    await writeFile(path.join(root, 'src', longName), 'LIMIT slow\n');
+    await writeFile(path.join(root, 'src', 'run.log'), 'LIMIT log\n');
+    const started = Date.now();
+    const reply = await handleGrep({ pattern: 'LIMIT' }, deps);
+    expect(Date.now() - started).toBeLessThan(5000);
+    expect(reply.text).toContain(longName);
+    expect(reply.text).not.toContain('run.log');
+  }, 15000);
+
   it('applies the .gitignore files above a scoped target folder', async () => {
     await mkdir(path.join(root, 'src', 'deep'), { recursive: true });
     await writeFile(path.join(root, '.gitignore'), '*.log\n');

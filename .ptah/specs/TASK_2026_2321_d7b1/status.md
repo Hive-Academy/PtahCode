@@ -28,3 +28,6 @@ Source: benchmark report PR #1493 (TASK_2026_2320_15a6), findings (c)2 and (d).
 - next: push, PR, watch CI and reviews
 - PR #1494 head e5e07fc8da01bc831b5ad36a780c2786ea756ae3: CI 17 pass (macOS git-real-git rerun after a cancelled
   runner), 0 open review threads. CodeRabbit 2 findings fixed in e5e07fc8d. Waiting for the parent to merge.
+- CodeRabbit finding on d3b7a0749 (unbounded ignore-rule regex): each ignore rule now runs under the `vm`
+  time limit (`buildLineTester`); a rule that times out is dropped for the walk and never hides a file.
+  Spec added; gate `npm run verify -- -p vscode-lm-tools` passed.

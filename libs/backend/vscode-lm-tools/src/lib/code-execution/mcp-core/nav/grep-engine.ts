@@ -348,12 +348,38 @@ async function loadIgnoreTest(dir: string): Promise<IgnoreTest | undefined> {
       negated,
     });
   }
+  // Each rule runs under the same `vm` time limit as a user glob, so a
+  // backtracking rule cannot freeze the event loop. A rule that runs past
+  // the limit is dropped for the rest of the walk: the entry it would have
+  // tested stays in, so a pathological rule never hides a file. The tester
+  // is built on first use to keep the load of a large file cheap.
+  const testers = new Map<IgnoreRule, (text: string) => boolean>();
+  const dropped = new Set<IgnoreRule>();
+  const matches = (rule: IgnoreRule, text: string): boolean => {
+    if (dropped.has(rule)) {
+      return false;
+    }
+    let tester = testers.get(rule);
+    if (tester === undefined) {
+      tester = buildLineTester(rule.regex, true, 'the ignore rule');
+      testers.set(rule, tester);
+    }
+    try {
+      return tester(text);
+    } catch (error) {
+      if (error instanceof RegexTimeoutError) {
+        dropped.add(rule);
+        return false;
+      }
+      throw error;
+    }
+  };
   return (relative, name, isDir) => {
     let ignored: boolean | undefined;
     for (const rule of rules) {
       if (
         (!rule.dirOnly || isDir) &&
-        rule.regex.test(rule.anchored ? relative : name)
+        matches(rule, rule.anchored ? relative : name)
       ) {
         ignored = !rule.negated;
       }
