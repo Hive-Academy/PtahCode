@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_2327_6814
-status: backlog
+status: in_review
 type: RESEARCH
 title: Find why the decision model on chappie is slow for route_decide
 depends_on: []
