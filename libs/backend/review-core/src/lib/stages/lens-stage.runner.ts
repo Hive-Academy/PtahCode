@@ -51,18 +51,25 @@ export class LensStageRunner {
         await onCompleted?.(results.length, lenses.length);
         continue;
       }
+      const startedAt = new Date().toISOString();
       const row: ReviewStageRecord = { attemptId: claim.attemptId, stage: name, ordinal: 0, state: 'running',
-        startedAt: new Date().toISOString(), endedAt: null, outcome: null, errorSummary: null, artifactHash: null, artifactPath: null };
+        startedAt, endedAt: null, outcome: null, errorSummary: null, artifactHash: null, artifactPath: null };
       await this.repository.saveStage(row);
       try {
         const builtPrompt = prompt(context.promptInput);
         recordPromptTruncation(builtPrompt, context.coverage);
+        await this.repository.beginStageLaneRun(claim.attemptId, name, 0);
         const result = await this.lanes.run({ repo: claim.repo, prKey: `${claim.repo.owner}/${claim.repo.name}#${claim.prNumber}`,
           attemptId: claim.attemptId, attemptRoot: context.attemptRoot, headSha: claim.headSha,
           kind: lens, prompt: builtPrompt, runDeadlineMs: deadline, signal, attempt,
           usedFamilies: usedFamilies(results), laterLenses: lenses.slice(index + 1).map(([later]) => later) });
-        if (signal?.aborted) break;
-        if (result.lane) await this.repository.saveStageLane(claim.attemptId, name, 0, result.lane);
+        // Always record the lane and its usage, also on abort, so the pending run marker is closed (req 7.1, 7.6).
+        await this.repository.saveStageLane(claim.attemptId, name, 0, result.lane ?? null, result.run);
+        if (signal?.aborted) {
+          // No checkpoint: the lens reruns on resume (req 7.4).
+          await this.repository.closeRunningStage(claim.attemptId, name, 0, startedAt, new Date().toISOString());
+          break;
+        }
         await this.repository.saveCheckpoint(claim.attemptId, name, 0, result);
         await this.repository.saveStage({ ...row, state: result.status === 'completed' ? 'completed' : 'interrupted',
           endedAt: new Date().toISOString(), outcome: result.status,
@@ -72,11 +79,22 @@ export class LensStageRunner {
         results.push({ lens, result });
         await onCompleted?.(results.length, lenses.length);
       } catch (error: unknown) {
-        await this.repository.saveStage({ ...row, state: 'failed', endedAt: new Date().toISOString(),
+        await this.removePendingRun(claim.attemptId, name);
+        if (signal?.aborted) await this.repository.closeRunningStage(claim.attemptId, name, 0, startedAt, new Date().toISOString());
+        else await this.repository.saveStage({ ...row, state: 'failed', endedAt: new Date().toISOString(),
           errorSummary: sanitizeReviewFailureMessage(error instanceof Error ? error.message : 'Lens failed') });
         throw error;
       }
     }
     return results;
+  }
+
+  /** Clears the pending run marker after a lens throws; the lens error stays the one rethrown. */
+  private async removePendingRun(attemptId: string, name: string): Promise<void> {
+    try {
+      await this.repository.saveStageLane(attemptId, name, 0, null, undefined);
+    } catch {
+      // degradation-audit: reported — the caller rethrows the lens error; a stale marker reads as partial usage.
+    }
   }
 }

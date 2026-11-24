@@ -15,6 +15,8 @@ import { ReviewWorktreeService } from './context/review-worktree.service';
 import { ReviewStatusCoordinatorService } from './status/review-status-coordinator.service';
 import { ReviewLaneSelectionService } from './lanes/review-lane-selection.service';
 import { ReviewLaneAttempt } from './lanes/review-lane-attempt';
+import { ReviewLaneRunner, type ReviewLaneResult } from './lanes/review-lane.runner';
+import type { ReviewLaneRunUsage } from './lanes/review-lane-usage';
 
 const sha = 'a'.repeat(40);
 const claim: ReviewQueueClaim = { repo: { owner: 'Hive-Academy', name: 'PtahCode' }, prNumber: 1,
@@ -42,7 +44,11 @@ function fixture(withStatuses = false) {
     getCheckpoint: async (_id, name, ordinal) => checkpoints.get(key(name, ordinal)) ?? null,
     beginStageLaneRun: jest.fn().mockResolvedValue(undefined),
     saveStageLane: jest.fn().mockResolvedValue(undefined),
-    closeRunningStage: jest.fn().mockResolvedValue(undefined),
+    // Mirrors the SQLite guard: only the `running` row this owner started is closed.
+    closeRunningStage: jest.fn(async (_id: string, name: string, ordinal: number, startedAt: string, endedAt: string) => {
+      const row = stages.get(key(name, ordinal));
+      if (row?.state === 'running' && row.startedAt === startedAt) stages.set(key(name, ordinal), { ...row, state: 'interrupted', endedAt });
+    }),
     getStatusSync: jest.fn().mockResolvedValue(null), saveStatusSync: jest.fn(),
     getPendingStatusSync: jest.fn().mockResolvedValue([]), getMachineStatusSync: jest.fn().mockResolvedValue([]),
     syncFindingResolution: jest.fn().mockResolvedValue(false),
@@ -328,6 +334,71 @@ describe('ReviewOrchestratorService', () => {
     expect(f.release).toHaveBeenCalledWith(claim.attemptId, 'worker', 'partial');
   });
 
+  describe('stage() abort paths leave no running row (M6, req 7.3)', () => {
+    const running = (f: ReturnType<typeof fixture>) => [...f.stages.values()].filter((row) => row.state === 'running');
+
+    it('closes a stage interrupted, with no checkpoint, when the abort lands while it runs', async () => {
+      const f = fixture();
+      const controller = new AbortController();
+      f.triageRun.mockImplementationOnce(async () => { controller.abort(); return { status: 'partial', reason: 'aborted' }; });
+      await f.coordinator.drain('worker', Date.now() + 10_000, controller.signal);
+      expect(f.stages.get('triage:1')).toEqual(expect.objectContaining({ state: 'interrupted', outcome: null, errorSummary: null,
+        endedAt: expect.any(String) }));
+      expect(f.checkpoints.has('triage:1')).toBe(false);
+      expect(running(f)).toEqual([]);
+      expect(f.release).not.toHaveBeenCalled();
+    });
+
+    it('closes a stage interrupted when it throws after the abort, and saves no failure', async () => {
+      const f = fixture();
+      const controller = new AbortController();
+      f.contextRun.mockImplementationOnce(async () => { controller.abort(); throw new Error('shutdown'); });
+      await f.coordinator.drain('worker', Date.now() + 10_000, controller.signal);
+      expect(f.stages.get('context:0')).toEqual(expect.objectContaining({ state: 'interrupted', errorSummary: null }));
+      expect(running(f)).toEqual([]);
+      expect(f.repository.saveFailure).not.toHaveBeenCalled();
+    });
+
+    it('closes a stage interrupted when the abort lands right after the running row is saved', async () => {
+      const f = fixture();
+      const controller = new AbortController();
+      const saveStage = f.repository.saveStage.bind(f.repository);
+      f.repository.saveStage = async (row) => {
+        await saveStage(row);
+        if (row.stage === 'triage' && row.state === 'running') controller.abort();
+      };
+      await f.coordinator.drain('worker', Date.now() + 10_000, controller.signal);
+      expect(f.triageRun).not.toHaveBeenCalled();
+      expect(f.stages.get('triage:1')?.state).toBe('interrupted');
+      expect(running(f)).toEqual([]);
+    });
+
+    it('closes a stage interrupted when the abort lands after its checkpoint, so it reruns on resume', async () => {
+      const f = fixture();
+      const controller = new AbortController();
+      const saveCheckpoint = f.repository.saveCheckpoint.bind(f.repository);
+      f.repository.saveCheckpoint = async (id, name, ordinal, data) => {
+        await saveCheckpoint(id, name, ordinal, data);
+        if (name === 'triage') controller.abort();
+      };
+      await f.coordinator.drain('worker', Date.now() + 10_000, controller.signal);
+      expect(f.stages.get('triage:1')?.state).toBe('interrupted');
+      expect(running(f)).toEqual([]);
+      (f.repository.claimNext as jest.Mock).mockResolvedValueOnce(claim);
+      await f.coordinator.drain('worker', Date.now() + 10_000);
+      expect(f.triageRun).toHaveBeenCalledTimes(2);
+      expect(f.stages.get('triage:1')?.state).toBe('completed');
+    });
+
+    it('keeps the failed state when a stage throws without an abort', async () => {
+      const f = fixture();
+      f.triageRun.mockRejectedValueOnce(new Error('lane exploded'));
+      await f.coordinator.drain('worker', Date.now() + 10_000);
+      expect(f.stages.get('triage:1')).toEqual(expect.objectContaining({ state: 'failed', errorSummary: 'lane exploded' }));
+      expect(f.repository.closeRunningStage).not.toHaveBeenCalled();
+    });
+  });
+
   it('supersedes when the head changes at a stage boundary', async () => {
     const f = fixture();
     let reads = 0;
@@ -350,3 +421,48 @@ describe('ReviewOrchestratorService', () => {
   });
 });
 
+
+describe('TriageStageRunner lane usage (M6)', () => {
+  const run: ReviewLaneRunUsage = { inputTokens: 10, outputTokens: null, cacheReadTokens: null, cacheWriteTokens: null,
+    costUsd: null, model: null, partial: true };
+  const lane = { lane: 'codex', model: null, family: 'codex', fallback: [] };
+
+  function triage(result: () => Promise<ReviewLaneResult>) {
+    const { repository, laneAttempt } = fixture();
+    const order: string[] = [];
+    (repository.beginStageLaneRun as jest.Mock).mockImplementation(async () => { order.push('begin'); });
+    (repository.saveStageLane as jest.Mock).mockImplementation(async () => { order.push('save'); });
+    const lanes = Object.create(ReviewLaneRunner.prototype) as ReviewLaneRunner;
+    const laneRun = jest.spyOn(lanes, 'run').mockImplementation(async () => { order.push('run'); return result(); });
+    const runner = new TriageStageRunner(lanes, repository);
+    return { repository, order, laneRun, run: (signal?: AbortSignal) => runner.run(claim, contextValue, 10_000_000, laneAttempt, signal) };
+  }
+
+  it('records the lane and usage of a lane that returned after the abort (req 7.1, 7.6)', async () => {
+    const controller = new AbortController();
+    const t = triage(async () => { controller.abort(); return { status: 'partial', reason: 'aborted', lane, run }; });
+    await expect(t.run(controller.signal)).resolves.toEqual({ status: 'partial', reason: 'aborted', lane, run });
+    expect(t.order).toEqual(['begin', 'run', 'save']);
+    expect(t.repository.beginStageLaneRun).toHaveBeenCalledWith(claim.attemptId, 'triage', 1);
+    expect(t.repository.saveStageLane).toHaveBeenCalledWith(claim.attemptId, 'triage', 1, lane, run);
+  });
+
+  it('ends the pending run with no lane when the result has none', async () => {
+    const t = triage(async () => ({ status: 'partial', reason: 'lane-settings-unavailable' }));
+    await t.run();
+    expect(t.repository.saveStageLane).toHaveBeenCalledWith(claim.attemptId, 'triage', 1, null, undefined);
+  });
+
+  it('removes the pending run and rethrows when the lane runner throws before selection (req 7.2)', async () => {
+    const t = triage(async () => { throw new Error('Invalid run deadline'); });
+    await expect(t.run()).rejects.toThrow('Invalid run deadline');
+    expect(t.order).toEqual(['begin', 'run', 'save']);
+    expect(t.repository.saveStageLane).toHaveBeenCalledWith(claim.attemptId, 'triage', 1, null, undefined);
+  });
+
+  it('rethrows the lane error when removing the pending run also fails', async () => {
+    const t = triage(async () => { throw new Error('lane exploded'); });
+    (t.repository.saveStageLane as jest.Mock).mockRejectedValue(new Error('disk full'));
+    await expect(t.run()).rejects.toThrow('lane exploded');
+  });
+});

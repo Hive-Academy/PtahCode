@@ -1,9 +1,14 @@
+import 'reflect-metadata';
+import { MIGRATIONS, SqliteConnectionService, type SqliteDatabase } from '@ptah-extension/persistence-sqlite';
+import { Logger } from '@ptah-extension/vscode-core';
 import type { ReviewLaneCatalog, ReviewLaneSettings } from '@ptah-extension/review-contracts';
 import type { IReviewRepository, ReviewStageRecord } from '../persistence/review-repository.interface';
 import { ReviewLaneRunner, type IReviewLaneFiles, type IReviewLaneGateway, type ReviewLaneUse } from '../lanes/review-lane.runner';
 import { ReviewLaneAdmissionService, type IReviewLaneClock } from '../lanes/review-lane-admission.service';
 import { ReviewLaneAttempt } from '../lanes/review-lane-attempt';
-import { UNKNOWN_LANE_RUN_USAGE } from '../lanes/review-lane-usage';
+import { ReviewLaneSpawnError, UNKNOWN_LANE_RUN_USAGE, type ReviewLaneRunUsage } from '../lanes/review-lane-usage';
+import { ReviewQueryRepository } from '../persistence/review-query.repository';
+import { SqliteReviewRepository } from '../persistence/sqlite-review.repository';
 import type { ReviewLaneCandidate } from '../lanes/review-lane-list';
 import { LensStageRunner } from './lens-stage.runner';
 import type { ContextStageResult } from './context-stage.runner';
@@ -51,6 +56,8 @@ interface HarnessOptions {
   settings?: ReviewLaneSettings;
   listModels?: IReviewLaneGateway['listModels'];
   spawn?: IReviewLaneGateway['spawn'];
+  /** Replaces the in-memory fake, e.g. with a real SQLite repository. */
+  repository?: IReviewRepository;
 }
 
 /** A real `ReviewLaneRunner` and `ReviewLaneAttempt` over a fake gateway, files and clock (the #1481 seam). */
@@ -77,8 +84,10 @@ function harness(options: HarnessOptions = {}) {
   const store = { get: jest.fn(async () => settings), update: jest.fn() };
   const attempt = new ReviewLaneAttempt({ source: gateway, settings: store, clock, logger: { warn: jest.fn() } });
   const memory = memoryRepository();
-  const lenses = new LensStageRunner(runner, memory.repository);
-  return { ...memory, gateway, spawned, attempt, store, logger, run: () => lenses.run(claim, context, 10_000_000, attempt) };
+  const lenses = new LensStageRunner(runner, options.repository ?? memory.repository);
+  return { ...memory, gateway, spawned, attempt, store, logger,
+    run: (target: ReviewQueueClaim = claim, signal?: AbortSignal, deadline = 10_000_000) =>
+      lenses.run(target, context, deadline, attempt, signal) };
 }
 
 const families = (results: Awaited<ReturnType<ReturnType<typeof harness>['run']>>): (string | null)[] =>
@@ -213,5 +222,129 @@ describe('LensStageRunner lane diversity through the real lane runner (#1481)', 
     expect(h.spawned).toHaveLength(4);
     // The failed lane's family still counts as used, so the next lens moves on.
     expect(h.spawned[1].laneId).toBe('claude');
+  });
+});
+
+describe('LensStageRunner lane usage and abort (M6) on in-memory SQLite', () => {
+  const FIRST = 'lens:correctness-lifecycle';
+  const at = (offset: number): string => new Date(Date.UTC(2026, 0, 1) + offset).toISOString();
+  const usage = (inputTokens: number | null, partial = false): ReviewLaneRunUsage => ({ inputTokens, outputTokens: null,
+    cacheReadTokens: null, cacheWriteTokens: null, costUsd: null, model: null, partial });
+
+  async function sqlite() {
+    const Database = require('better-sqlite3') as new (path: string) => SqliteDatabase;
+    const db = new Database(':memory:');
+    db.pragma('foreign_keys = ON');
+    for (const version of [65, 66, 67, 68, 69]) {
+      const migration = MIGRATIONS.find((entry) => entry.version === version);
+      if (!migration?.sql) throw new Error('Review migration missing: ' + version);
+      db.exec(migration.sql);
+    }
+    const logger = Object.create(Logger.prototype) as Logger;
+    logger.info = jest.fn();
+    const connection = new SqliteConnectionService(':memory:', logger);
+    Object.defineProperty(connection, 'db', { value: db });
+    const repository = new SqliteReviewRepository(connection, logger);
+    const attempt = await repository.enqueueDiscovered({ repo: claim.repo, prNumber: claim.prNumber, headSha: sha }, at(0));
+    await repository.claimNext('owner', at(1), at(100_000));
+    const target: ReviewQueueClaim = { ...claim, attemptId: attempt.attemptId };
+    const row = (stage: string) => db.prepare(`SELECT state, outcome, family, error_summary AS errorSummary, ended_at AS endedAt
+      FROM review_stages WHERE attempt_id = ? AND stage = ? AND ordinal = 0`).get(target.attemptId, stage) as
+      { state: string; outcome: string | null; family: string | null; errorSummary: string | null; endedAt: number | null } | undefined;
+    const lensStage = async (scope: string) => (await new ReviewQueryRepository(connection).getRun(target.attemptId))
+      ?.stages.find((stage) => stage.name === 'lenses' && stage.scope === scope);
+    const running = () => db.prepare(`SELECT COUNT(*) AS n FROM review_stages WHERE state = 'running'`).get();
+    return { db, repository, target, row, lensStage, running };
+  }
+
+  /** A gateway spawn that aborts the caller mid-lane and still reports the usage read so far. */
+  const abortingSpawn = (controller: AbortController, inputTokens: number): IReviewLaneGateway['spawn'] =>
+    async () => { controller.abort(); return { usage: usage(inputTokens) }; };
+
+  it('records the lane and usage of a lane that ran before the abort and leaves the row interrupted (req 7.1, 7.3, 7.6)', async () => {
+    const store = await sqlite();
+    try {
+      const controller = new AbortController();
+      const h = harness({ repository: store.repository, spawn: abortingSpawn(controller, 7) });
+      expect(await h.run(store.target, controller.signal)).toEqual([]);
+      expect(h.spawned).toHaveLength(1);
+      expect(store.row(FIRST)).toMatchObject({ state: 'interrupted', outcome: null, family: 'codex', errorSummary: null });
+      expect(store.row(FIRST)?.endedAt).not.toBeNull();
+      expect(await store.repository.getCheckpoint(store.target.attemptId, FIRST, 0)).toBeNull();
+      expect(await store.lensStage('correctness-lifecycle')).toMatchObject({ status: 'interrupted', lane: 'codex',
+        usage: { inputTokens: 7, runs: 1 } });
+      expect(store.running()).toEqual({ n: 0 });
+    } finally { store.db.close(); }
+  });
+
+  it('shows the lane, usage and tokensPartial of a started lane that rejected, keeping the partial outcome (req 1.6, A5)', async () => {
+    const store = await sqlite();
+    try {
+      let calls = 0;
+      const h = harness({ repository: store.repository, spawn: async () => {
+        if (++calls === 1) throw new ReviewLaneSpawnError(new Error('status-failed: quota'), true, usage(10, true));
+        return { usage: usage(1) };
+      } });
+      const results = await h.run(store.target);
+      expect(results[0].result).toMatchObject({ status: 'partial', reason: 'status-failed: quota', lane: { lane: 'codex' } });
+      expect(store.row(FIRST)).toMatchObject({ state: 'interrupted', outcome: 'partial', errorSummary: 'status-failed: quota' });
+      expect(store.row('lens:contracts-callers')).toMatchObject({ state: 'completed', outcome: 'completed' });
+      expect(await store.lensStage('correctness-lifecycle')).toMatchObject({ status: 'partial', lane: 'codex',
+        usage: { inputTokens: 10, tokensPartial: true, runs: 1 } });
+    } finally { store.db.close(); }
+  });
+
+  it('fails a lens that throws before a lane is chosen, with no lane and no runs (req 7.2)', async () => {
+    const store = await sqlite();
+    try {
+      const h = harness({ repository: store.repository });
+      await expect(h.run(store.target, undefined, Number.NaN)).rejects.toThrow('Invalid run deadline');
+      expect(h.spawned).toEqual([]);
+      expect(store.row(FIRST)).toMatchObject({ state: 'failed', family: null, errorSummary: 'Invalid run deadline' });
+      const stage = await store.lensStage('correctness-lifecycle');
+      expect(stage).toMatchObject({ status: 'failed', lane: null });
+      expect(stage?.usage).toBeUndefined();
+    } finally { store.db.close(); }
+  });
+
+  it('closes the row interrupted and clears the pending run when the lens throws after an abort', async () => {
+    const store = await sqlite();
+    try {
+      const controller = new AbortController();
+      const h = harness({ repository: store.repository });
+      jest.spyOn(h.gateway, 'list').mockImplementation(async () => { controller.abort(); throw new Error('list offline'); });
+      await expect(h.run(store.target, controller.signal)).rejects.toThrow('list offline');
+      expect(store.row(FIRST)).toMatchObject({ state: 'interrupted', errorSummary: null });
+      expect((await store.lensStage('correctness-lifecycle'))?.usage).toBeUndefined();
+      expect(store.running()).toEqual({ n: 0 });
+    } finally { store.db.close(); }
+  });
+
+  it('reruns an aborted lens on resume: the new lane replaces the old one and usage sums (req 7.4)', async () => {
+    const store = await sqlite();
+    try {
+      const controller = new AbortController();
+      await harness({ repository: store.repository, spawn: abortingSpawn(controller, 7) }).run(store.target, controller.signal);
+      const resumed = harness({ repository: store.repository, lists: [[lane('claude'), lane('gemini')]],
+        spawn: async () => ({ usage: usage(20) }) });
+      expect(await resumed.run(store.target)).toHaveLength(4);
+      expect(resumed.spawned[0].laneId).toBe('claude');
+      expect(store.row(FIRST)).toMatchObject({ state: 'completed', outcome: 'completed', family: 'claude' });
+      expect(await store.lensStage('correctness-lifecycle')).toMatchObject({ status: 'succeeded', lane: 'claude',
+        usage: { inputTokens: 27, runs: 2 } });
+    } finally { store.db.close(); }
+  });
+
+  it('overwrites a stale family with null when the rerun finds no lane (req 7.5)', async () => {
+    const store = await sqlite();
+    try {
+      const controller = new AbortController();
+      await harness({ repository: store.repository, spawn: abortingSpawn(controller, 7) }).run(store.target, controller.signal);
+      expect(store.row(FIRST)?.family).toBe('codex');
+      await harness({ repository: store.repository, settings: { pins: {}, pool: [{ lane: 'missing', model: null }] } }).run(store.target);
+      expect(store.row(FIRST)).toMatchObject({ state: 'interrupted', outcome: 'partial', family: null, errorSummary: 'no-confirmed-room' });
+      expect(await store.lensStage('correctness-lifecycle')).toMatchObject({ lane: null, family: null,
+        usage: { inputTokens: 7, runs: 1 } });
+    } finally { store.db.close(); }
   });
 });
