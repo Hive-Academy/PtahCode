@@ -27,6 +27,7 @@ import {
   type ClaudeCliAdapterDependencies,
 } from './claude-cli.adapter';
 import type { ClaudeCliCommandOptions } from './cli-adapter.interface';
+import { laneTurnInputContractViolations } from '../testing/lane-turn-input-contract';
 import {
   ClaudeSdkLaneRunner,
   type ClaudeSdkLaneRunContext,
@@ -304,6 +305,23 @@ describe('ClaudeCliAdapter native SDK execution', () => {
     // steer or interrupt must not expose either.
     expect(typeof handle.continue === 'function')
       .toBe(reported.messaging.continuation.state === 'supported');
+    expect(typeof handle.interrupt === 'function')
+      .toBe(reported.messaging.interrupt.state === 'supported');
+    expect(handle.steer).toBeUndefined();
+    expect(reported.messaging.steer.state).toBe('unsupported');
+    // Req 4.3: every claimed turn input item has its handle operation.
+    expect(laneTurnInputContractViolations(handle, reported)).toEqual([]);
+    expect(reported.turnInput).toMatchObject({
+      model: { state: 'supported', appliesAt: 'next-turn' },
+      effort: { state: 'supported', appliesAt: 'next-turn' },
+      images: { state: 'supported' },
+      files: { state: 'supported', delivery: 'path-text' },
+      commands: { state: 'supported' },
+      skills: { state: 'supported' },
+    });
+    expect(reported.usage).toEqual({ timing: 'live' });
+    expect(reported.prompts).toEqual({ approvals: { state: 'supported' }, questions: { state: 'supported' } });
+    expect(handle.turnInputSupport?.()).toEqual({ images: { state: 'supported' } });
     f.finish(0);
     await expect(handle.done).resolves.toBe(0);
   });

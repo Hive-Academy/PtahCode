@@ -28,6 +28,8 @@ import {
   claudeLaneRefusal,
   claudeLaneRefusalCode,
   claudeLaneForeignErrorClass,
+  claudeSdkLanePrompts,
+  CLAUDE_SDK_LANE_TURN_INPUT,
   type ClaudeLaneAccountPersistence,
   type ClaudeSdkLaneRunner,
   type ClaudeSdkLaneRunContext,
@@ -100,7 +102,7 @@ export class ClaudeCliAdapter implements ClaudeCliAdapterContract {
     return {
       messaging: {
         steer: { state: 'unsupported', reason: 'The SDK prompt mailbox starts turns; it has no mid-turn steer.' },
-        interrupt: { state: 'unsupported', reason: 'The SDK handle exposes no run-scoped interrupt.' },
+        interrupt: { state: 'supported' },
         continuation: { state: 'supported' },
         resume: { state: 'supported' },
       },
@@ -117,6 +119,9 @@ export class ClaudeCliAdapter implements ClaudeCliAdapterContract {
       },
       limitReader: { state: 'available', source: 'anthropic' },
       mcp: { state: 'supported' },
+      turnInput: CLAUDE_SDK_LANE_TURN_INPUT,
+      usage: { timing: 'live' },
+      prompts: claudeSdkLanePrompts(),
     };
   }
 

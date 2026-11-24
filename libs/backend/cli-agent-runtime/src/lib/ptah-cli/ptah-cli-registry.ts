@@ -1,5 +1,9 @@
 import { buildClaudeSdkLaneOptions } from '../claude/claude-sdk-lane-options';
-import { ClaudeSdkLaneRunner } from '../claude/claude-sdk-lane-runner';
+import {
+  CLAUDE_SDK_LANE_TURN_INPUT,
+  ClaudeSdkLaneRunner,
+  claudeSdkLanePrompts,
+} from '../claude/claude-sdk-lane-runner';
 import { injectable, inject, type DependencyContainer } from 'tsyringe';
 import { PLATFORM_TOKENS, type IWorkspaceProvider } from '@ptah-extension/platform-core';
 import {
@@ -371,18 +375,22 @@ export class PtahCliRegistry {
     return summaries;
   }
 
-  /** Static SDK capabilities for one configured provider lane. */
-  capabilities(providerId: string): CliAdapterManifest {
+  /**
+   * SDK capabilities for one configured provider lane. `permission` is the
+   * spawn's effective mode when known; it decides whether approval prompts
+   * can reach the host.
+   */
+  capabilities(
+    providerId: string,
+    permission?: import('@ptah-extension/shared').LanePermissionMode,
+  ): CliAdapterManifest {
     return {
       messaging: {
         steer: {
           state: 'unsupported',
           reason: 'The SDK prompt mailbox starts a new turn.',
         },
-        interrupt: {
-          state: 'unsupported',
-          reason: 'No run-scoped interrupt is exposed.',
-        },
+        interrupt: { state: 'supported' },
         continuation: { state: 'supported' },
         resume: { state: 'supported' },
       },
@@ -396,6 +404,9 @@ export class PtahCliRegistry {
               reason: 'No provider-specific owner limit reader is registered.',
             },
       mcp: { state: 'supported' },
+      turnInput: CLAUDE_SDK_LANE_TURN_INPUT,
+      usage: { timing: 'live' },
+      prompts: claudeSdkLanePrompts(permission),
     };
   }
 
@@ -1042,7 +1053,10 @@ export class PtahCliRegistry {
           ? { ...handle, honorsLaneToolGate: true }
           : handle,
         agentName: agentConfig.name,
-        potentialCapabilities: this.capabilities(agentConfig.providerId),
+        potentialCapabilities: this.capabilities(
+          agentConfig.providerId,
+          lanePolicy.requested.permission,
+        ),
         effectivePolicy: lanePolicy.requested,
         toolProfileApplied: Boolean(
           options?.phase?.toolProfile.disallowedTools.length &&

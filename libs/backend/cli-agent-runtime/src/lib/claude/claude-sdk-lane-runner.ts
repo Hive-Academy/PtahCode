@@ -20,7 +20,10 @@ import {
   resolveImageMediaType,
   type EffortLevel,
   type LaneComposerCommandOption,
+  type LanePermissionMode,
+  type LanePromptCapabilities,
   type LaneTurnContent,
+  type LaneTurnInputCapabilities,
   type LaneTurnSettings,
   type ProviderAccountBinding,
   type ProviderAccountIdentityEvidence,
@@ -82,6 +85,38 @@ const CLAUDE_TURN_OPTIONS_ERROR = 'Lane options could not be read.';
  * command is proven to exist for Claude lanes.
  */
 export const CLAUDE_HIDDEN_LANE_COMMANDS: readonly string[] = [];
+
+/**
+ * Per-turn input of every Claude SDK lane (Claude and Ptah CLI, B5). Each
+ * supported item has its handle operation (Req 4.3): `applyTurnSettings`,
+ * `continue` with content, `turnInputSupport`, `listTurnOptions`.
+ */
+export const CLAUDE_SDK_LANE_TURN_INPUT: LaneTurnInputCapabilities = {
+  model: { state: 'supported', appliesAt: 'next-turn' },
+  effort: { state: 'supported', appliesAt: 'next-turn' },
+  images: { state: 'supported', onSteer: false },
+  files: { state: 'supported', delivery: 'path-text' },
+  commands: { state: 'supported', blocked: CLAUDE_HIDDEN_LANE_COMMANDS },
+  skills: { state: 'supported' },
+};
+
+/**
+ * Approval prompts reach the host through `canUseTool`. In `yolo` (native
+ * `bypassPermissions`) every tool runs without one; `ask`, `auto-edit` and
+ * `plan` still ask for the tools they do not auto-allow. `AskUserQuestion`
+ * reaches the host in every mode (B11). Without a known mode the CLI's own
+ * capability is reported.
+ */
+export function claudeSdkLanePrompts(
+  permission?: LanePermissionMode,
+): LanePromptCapabilities {
+  return {
+    approvals: permission === 'yolo'
+      ? { state: 'unsupported', reason: 'This lane runs in yolo mode: every tool runs without an approval prompt.' }
+      : { state: 'supported' },
+    questions: { state: 'supported' },
+  };
+}
 
 /** Rejects with `text` when `call` has not settled within `ms`. */
 function boundedCall<T>(call: Promise<T>, ms: number, text: string): Promise<T> {
@@ -474,6 +509,8 @@ export class ClaudeSdkLaneRunner {
         }
       },
       applyTurnSettings,
+      // Images need no live gate: the SDK accepts image blocks on every turn.
+      turnInputSupport: () => ({ images: { state: 'supported' } }),
       listTurnOptions,
     };
     return { handle, setAgentId: attachAgentId };
