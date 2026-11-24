@@ -16,17 +16,22 @@ let childProcessModule: ChildProcessModule | null = null;
 let childProcessLoading: Promise<ChildProcessModule> | null = null;
 
 function loadChildProcess(): Promise<ChildProcessModule> {
-  childProcessLoading ??= import('node:child_process').then(
-    (loaded) => {
-      childProcessModule = loaded;
-      return loaded;
-    },
-    (error: unknown) => {
-      // Not cached: the next call tries again.
-      childProcessLoading = null;
-      throw error;
-    },
-  );
+  if (childProcessLoading === null) {
+    // Return the bare `import()` promise: a wrapping `.then` would add a
+    // microtask before `taskkill` starts. The cache is filled on the side.
+    const loading = import('node:child_process');
+    childProcessLoading = loading;
+    loading.then(
+      (loaded) => {
+        childProcessModule = loaded;
+      },
+      () => {
+        // degradation-audit: optional-capability - the caller awaiting
+        // `loading` gets the rejection; clearing lets the next call retry.
+        childProcessLoading = null;
+      },
+    );
+  }
   return childProcessLoading;
 }
 
