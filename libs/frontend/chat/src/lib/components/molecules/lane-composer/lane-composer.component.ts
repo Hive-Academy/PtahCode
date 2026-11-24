@@ -92,6 +92,14 @@ import { LaneDeliveryController } from './lane-delivery.controller';
 let nextLaneComposerId = 0;
 
 const NEXT_TURN_FOOTER = 'Applies from your next message. The lane keeps running.';
+const STOPPED_FOOTER = 'Applies from your next message, which resumes the lane.';
+const MODELS_LOADING_LABEL = 'Loading models…';
+/**
+ * The id the host reports when one turn used several models
+ * (`ptah-cli-stream-loop.service.ts` MULTI_MODEL_ID). It names no model, so
+ * the composer never shows or selects it.
+ */
+const MULTI_MODEL_ID = 'mixed-model';
 const ATTACHMENT_READING_TEXT = 'An attachment is still loading. Send when it appears in the tray.';
 const STEER_HINT ='Send this message into the running turn now';
 const INTERRUPT_HINT = 'Stop the current turn and send this message now';
@@ -118,6 +126,33 @@ function effortOption(id: string): ComposerEffortOption {
     textColor: 'text-base-content-muted',
     bars: 3,
   };
+}
+
+/**
+ * The catalog row for a model id the lane recorded. Lanes report the same
+ * model as a catalog id, a display name or a dated provider id
+ * (`claude-haiku-5-5` for `claude-haiku-5-5-20261001`), so the match is exact
+ * first, then case-insensitive on id or name, then on a dated suffix.
+ */
+export function findLaneModelOption(
+  options: readonly ComposerModelOption[],
+  id: string,
+): ComposerModelOption | undefined {
+  const exact = options.find((option) => option.id === id);
+  if (exact) return exact;
+  const wanted = id.toLowerCase();
+  const named = options.find((option) => option.id.toLowerCase() === wanted || option.name.toLowerCase() === wanted);
+  if (named) return named;
+  // A dated recorded id: the longest catalog id it extends wins, so
+  // `gpt-5.5-mini-…` matches `gpt-5.5-mini`, not `gpt-5.5`.
+  let best: ComposerModelOption | undefined;
+  for (const option of options) {
+    if (wanted.startsWith(`${option.id.toLowerCase()}-`) && (!best || option.id.length > best.id.length)) best = option;
+  }
+  if (best) return best;
+  // A dated catalog id: only when exactly one row extends the recorded id.
+  const dated = options.filter((option) => option.id.toLowerCase().startsWith(`${wanted}-`));
+  return dated.length === 1 ? dated[0] : undefined;
 }
 
 function commandSuggestion(option: LaneComposerCommandOption): CommandSuggestion {
@@ -222,11 +257,13 @@ export class LaneComposerComponent {
   protected readonly lossTitleId = `lane-loss-title-${this.instance}`;
   protected readonly lossTextId = `lane-loss-text-${this.instance}`;
 
-  protected readonly cardClass = `${COMPOSER_CARD_CLASS} ${COMPOSER_CARD_BORDER_CLASS}`;
+  // `chat-composer-card` / `chat-composer-column`: main chat's focus frame on
+  // the card (the textarea draws no ring) and its denser glass fill (S2).
+  protected readonly cardClass = `chat-composer-column chat-composer-card ${COMPOSER_CARD_CLASS} ${COMPOSER_CARD_BORDER_CLASS}`;
   protected readonly textareaClass = `ptah-fold-fade ${COMPOSER_TEXTAREA_CLASS}`;
   protected readonly sendButtonClass = COMPOSER_SEND_BUTTON_CLASS;
   protected readonly stopButtonClass = COMPOSER_STOP_BUTTON_CLASS;
-  protected readonly statusLineClass = COMPOSER_STATUS_LINE_CLASS;
+  protected readonly statusLineClass = `${COMPOSER_STATUS_LINE_CLASS} mt-1.5 py-0.5`;
   protected readonly optionsErrorText = LANE_OPTIONS_ERROR_TEXT;
   protected readonly optionsStaleText = LANE_OPTIONS_STALE_TEXT;
   protected readonly ArrowUpIcon = ArrowUp;
@@ -288,9 +325,24 @@ export class LaneComposerComponent {
   protected readonly modelOptions = computed((): readonly ComposerModelOption[] =>
     (this.catalog().options?.models ?? []).map((model) => ({ id: model.id, name: model.name })),
   );
+  /**
+   * The model the next turn uses, as a catalog id when the catalog lists it,
+   * so the pill keeps one label and the menu marks the row (M1). The record's
+   * `model` comes before `observedModel`, which can lag a turn behind a change
+   * (`LaneTurnSettingsStore`), and the multi-model id is never a selection.
+   */
   protected readonly selectedModel = computed(() => {
     const record = this.record();
-    return this.pending().model ?? record?.observedModel ?? record?.model ?? this.catalog().options?.currentModel ?? null;
+    const id = [this.pending().model, record?.model, this.catalog().options?.currentModel, record?.observedModel]
+      .find((candidate): candidate is string => !!candidate && candidate !== MULTI_MODEL_ID);
+    if (!id) return null;
+    return findLaneModelOption(this.modelOptions(), id)?.id ?? id;
+  });
+  /** The pill text while no model is known: never a blank pill (M2). */
+  protected readonly modelEmptyLabel = computed(() => {
+    const status = this.catalog().status;
+    if (status === 'idle' || status === 'loading' || this.checking()) return MODELS_LOADING_LABEL;
+    return `${this.cli()} default`;
   });
   protected readonly effortOptions = computed((): readonly ComposerEffortOption[] => [
     COMPOSER_EFFORT_OPTIONS[0],
@@ -303,16 +355,18 @@ export class LaneComposerComponent {
     const input = this.turnInput();
     return input.kind === 'reported' && input.turnInput.model.appliesAt === 'next-spawn'
       ? `${this.cli()} starts a new process each turn: applies when the next turn starts.`
-      : NEXT_TURN_FOOTER;
+      : this.stopped() ? STOPPED_FOOTER : NEXT_TURN_FOOTER;
   });
   protected readonly modelReason = computed(() => this.settingReason('model'));
   protected readonly effortReason = computed(() => this.settingReason('effort'));
   /** The model the provider confirmed (compact bar chip), never the pending pick. */
   protected readonly confirmedModelLabel = computed(() => {
     const record = this.record();
-    const id = record?.observedModel ?? record?.model;
+    const id = [record?.model, record?.observedModel].find(
+      (candidate): candidate is string => !!candidate && candidate !== MULTI_MODEL_ID,
+    );
     if (!id) return '';
-    return this.modelOptions().find((model) => model.id === id)?.name ?? id;
+    return findLaneModelOption(this.modelOptions(), id)?.name ?? id;
   });
 
   // ---- Approval ----
@@ -445,9 +499,11 @@ export class LaneComposerComponent {
     if (this.stopped()) return this.delivery.hint();
     return this.delivery.state().queueDisabledReason ?? 'Send message';
   });
-  private readonly imagesBlockedText = computed(
-    () => `${this.cli()} lanes cannot take images. Remove the image to send.`,
-  );
+  /** The lane's own reason (e.g. "Images need a running lane."), then what to do. */
+  private readonly imagesBlockedText = computed(() => {
+    const reason = this.imagesUnsupportedReason() ?? `${this.cli()} lanes cannot take images.`;
+    return `${reason} Remove the image to send.`;
+  });
   /** Priority: a revealed reason, the image block, checking, the last action, the mode hint. */
   protected readonly statusText = computed(() => {
     const revealed = this.revealedReason();
@@ -531,6 +587,15 @@ export class LaneComposerComponent {
         if (status === 'idle' || status === 'error') void this.settings.loadCatalog(agentId);
       });
     });
+    let wasStopped: boolean | undefined;
+    effect(() => {
+      // A note about the last send describes the lane state it was made in
+      // ("Sent. It joined the running turn."). When the lane starts or ends
+      // a run, the note is stale and the mode hint takes over (M3).
+      const stopped = this.stopped();
+      if (wasStopped !== undefined && wasStopped !== stopped) untracked(() => this.actionNote.set(null));
+      wasStopped = stopped;
+    });
     effect(() => {
       if (this.confirmLoss()) this.confirmButton()?.nativeElement.focus();
     });
@@ -608,8 +673,13 @@ export class LaneComposerComponent {
     if (this.sendDisabled() || this.confirmLoss()) return;
     const queuedBehindTurn = this.laneActive();
     await this.delivery.send('queue');
-    if (!this.delivery.error() && queuedBehindTurn) {
+    if (this.delivery.error()) return;
+    if (queuedBehindTurn) {
       this.actionNote.set('Queued for the next turn. Withdraw it until the lane starts it.');
+    } else if (this.stopped()) {
+      // Until the record reports the resumed run, the stopped-lane hint
+      // ("Resume with message: …") would still describe the old state (M3).
+      this.actionNote.set(`Sent. ${this.cli()} resumes with your message.`);
     }
   }
 

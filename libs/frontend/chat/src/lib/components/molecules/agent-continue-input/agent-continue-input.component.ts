@@ -30,7 +30,7 @@ import { LaneComposerComponent } from '../lane-composer/lane-composer.component'
           <ptah-lane-composer
             [agentId]="agent().agentId"
             [laneLabel]="agent().displayName || agent().cli"
-            [cli]="agent().cli"
+            [cli]="agent().displayName || agent().cli"
             [stopped]="!active()"
             [resumePath]="resumePath()"
             [showLaneControls]="variant() === 'composer'"

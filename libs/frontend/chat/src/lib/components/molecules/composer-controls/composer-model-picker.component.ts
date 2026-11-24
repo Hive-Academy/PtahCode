@@ -323,6 +323,8 @@ export class ComposerModelPickerComponent {
    * pill; an unlisted id is shown as it is.
    */
   readonly selectedId = input<string | null | undefined>(null);
+  /** Pill text while no model is selected (e.g. "Loading models…"); empty by default. */
+  readonly emptyLabel = input<string>('');
   /** The catalog is being read: spinner in the pill, pill disabled. */
   readonly loading = input<boolean>(false);
   /** A read finished; an empty catalog then says so. */
@@ -422,9 +424,9 @@ export class ComposerModelPickerComponent {
     return id ? this.options().find((option) => option.id === id) : undefined;
   });
 
-  /** Pill label: the listed name, else the id as it is. */
+  /** Pill label: the listed name, else the id as it is, else the empty label. */
   readonly displayName = computed(
-    () => this.selectedOption()?.name ?? this.selectedId() ?? '',
+    () => this.selectedOption()?.name || this.selectedId() || this.emptyLabel(),
   );
 
   /** The provider model behind a tier override, or `null`. */

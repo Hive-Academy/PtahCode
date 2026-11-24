@@ -655,7 +655,8 @@ describe('LaneComposerComponent', () => {
     fixture.detectChanges();
     expect(root(fixture).querySelector('[data-testid="attachment-image-blocked"]')?.textContent).toBe("Can't send");
     expect(sendButton(fixture).disabled).toBe(true);
-    expect(statusText(fixture)).toBe('Copilot lanes cannot take images. Remove the image to send.');
+    // The lane's own reason, not a generic "{CLI} lanes cannot take images" (L3).
+    expect(statusText(fixture)).toBe('Image input is not confirmed for the Copilot lane. Remove the image to send.');
     key(fixture, {});
     await settle(fixture);
     expect(sendMessage).not.toHaveBeenCalled();
@@ -690,6 +691,61 @@ describe('LaneComposerComponent', () => {
     const retry = Array.from(alert.querySelectorAll('button')).find((button) => button.textContent?.trim() === 'Retry') as HTMLButtonElement;
     retry.click();
     expect(previewMessage.mock.calls.map((call) => call[1])).toEqual(['queue', 'now']);
+  });
+
+  it('uses the main chat card classes, so the textarea draws no ring and the card frames focus (S2)', async () => {
+    const fixture = await mount();
+    const card = field(fixture).closest('[data-glass-surface="tile"]') as HTMLElement;
+    expect(card.classList).toContain('chat-composer-card');
+    expect(card.classList).toContain('chat-composer-column');
+    expect(field(fixture).classList).toContain('focus:outline-none');
+    const line = root(fixture).querySelector('[data-testid="lane-status-line"]') as HTMLElement;
+    expect(line.getAttribute('data-glass-surface')).toBe('plate');
+  });
+
+  it('keeps one model label: the record model as a catalog row, never the dated or multi-model id (M1)', async () => {
+    store.agentsById.set(new Map([[agentId, {
+      status: 'running', cli: 'codex', model: 'gpt-5.5-mini-20261001', observedModel: 'mixed-model',
+    }]]));
+    const fixture = await mount();
+    const pill = root(fixture).querySelector('[data-testid="composer-model-pill"]') as HTMLElement;
+    expect(pill.textContent).toContain('GPT-5.5 mini');
+    expect(pill.textContent).not.toContain('mixed-model');
+    const component = fixture.componentInstance as unknown as { selectedModel(): string | null };
+    expect(component.selectedModel()).toBe('gpt-5.5-mini');
+  });
+
+  it('prefers the record model over a lagging observed model (M1)', async () => {
+    store.agentsById.set(new Map([[agentId, {
+      status: 'running', cli: 'codex', model: 'gpt-5.5-mini', observedModel: 'gpt-5.5',
+    }]]));
+    const fixture = await mount();
+    const component = fixture.componentInstance as unknown as { selectedModel(): string | null };
+    expect(component.selectedModel()).toBe('gpt-5.5-mini');
+  });
+
+  it('names the pill while no model is known instead of leaving it blank (M2)', async () => {
+    rpcCall.mockResolvedValue(rpcSuccess({ models: [], efforts: [], commands: [] }));
+    const fixture = await mount();
+    const pill = root(fixture).querySelector('[data-testid="composer-model-pill"]') as HTMLElement;
+    expect(pill.textContent).toContain('Codex default');
+  });
+
+  it('says the pick applies when the stopped lane resumes (M4)', async () => {
+    const fixture = await mount({ stopped: true });
+    const component = fixture.componentInstance as unknown as { settingFooter(): string };
+    expect(component.settingFooter()).toBe('Applies from your next message, which resumes the lane.');
+  });
+
+  it('drops the last send note when the lane starts or ends a run (M3)', async () => {
+    const fixture = await mount();
+    const component = fixture.componentInstance as unknown as { pickModel(id: string): void };
+    component.pickModel('gpt-5.5-mini');
+    fixture.detectChanges();
+    expect(statusText(fixture)).toContain('Model set to GPT-5.5 mini.');
+    fixture.componentRef.setInput('stopped', true);
+    await settle(fixture);
+    expect(statusText(fixture)).not.toContain('Model set to');
   });
 
   it('notes a model pick on the status line and sends it with the next message', async () => {

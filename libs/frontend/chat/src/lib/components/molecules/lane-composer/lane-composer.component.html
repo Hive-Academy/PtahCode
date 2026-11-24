@@ -148,6 +148,7 @@
                   class="min-w-0"
                   [options]="modelOptions()"
                   [selectedId]="selectedModel()"
+                  [emptyLabel]="modelEmptyLabel()"
                   [loading]="catalog().status === 'loading'"
                   [loaded]="catalog().status === 'ready'"
                   [pending]="pending().model !== undefined"
@@ -246,7 +247,8 @@
     </p>
   }
 
-  <div [class]="statusLineClass + ' mt-1.5'" data-testid="lane-status-line">
+  <!-- Main chat's plate under the status line: the text keeps its contrast over the scene (S4). -->
+  <div [class]="statusLineClass" data-glass-surface="plate" data-testid="lane-status-line">
     @if (checking()) {
       <span class="loading loading-spinner loading-xs flex-shrink-0" aria-hidden="true"></span>
     }
