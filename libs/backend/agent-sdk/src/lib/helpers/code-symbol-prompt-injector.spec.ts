@@ -139,3 +139,38 @@ describe('CodeSymbolPromptInjector.buildBlock', () => {
     );
   });
 });
+
+/**
+ * Size guard on the symbol block (TASK_2026_2323). The block is sent with the
+ * system prompt of every turn that has a query; the hit count and the snippet
+ * cap are what keep it bounded. The input is the worst realistic case: the
+ * index returns every hit it is asked for, each with a long path, a long name
+ * and a long first line. Raise the budget only with a measured reason.
+ */
+describe('CodeSymbolPromptInjector.buildBlock size budget', () => {
+  // Measured 3,618 chars on main (TASK_2026_2323), plus five percent.
+  const BLOCK_CHAR_BUDGET = 3_799;
+
+  it('stays within the measured budget for the worst realistic hits', async () => {
+    const reader: ICodeSymbolReader = {
+      searchSymbols: jest.fn((_query: string, limit: number) =>
+        Promise.resolve({
+          hits: Array.from({ length: limit }, (_, i) =>
+            makeHit({
+              id: String(i),
+              filePath: `/home/user/projects/app/libs/backend/feature-${i}/src/lib/services/${'x'.repeat(40)}.service.ts`,
+              symbolName: `handle${'Y'.repeat(50)}${i}`,
+              text: `export async function handle(${'arg: string, '.repeat(40)}): Promise<void> {}`,
+            }),
+          ),
+          bm25Only: false,
+        }),
+      ),
+    };
+    const injector = new CodeSymbolPromptInjector(makeLogger(), makeWorkspace(), reader);
+
+    const block = await injector.buildBlock(QUERY, '/home/user/projects/app');
+
+    expect(block.length).toBeLessThanOrEqual(BLOCK_CHAR_BUDGET);
+  });
+});

@@ -99,10 +99,24 @@ Code Mode "after" uses the retry row for `files-session-handoff` (see Code Mode)
   (90,875–92,843) and about 111k now (111,166–112,658). So turn 1 is about 45k tokens in
   round 6 and about 56k now (example: `usages-text-abort-reason-superseded`, cacheWrite
   36,333 + cacheRead 19,518 on turn 1). The larger fixed prompt explains the increase, not
-  more tool calls. Suspected cause, not proven: PR #1475 ("one source for ptah tool
-  substitution guidance", merge 467a1ddb6, included in build head cd25c1cac). This run did
-  not isolate the source. Other possible sources are the tool schemas and the claude.ai connectors that the
-  isolated Claude login attaches (see harness note 4).
+  more tool calls.
+  **Attribution (corrected in TASK_2026_2323_9838, offline measurement):** the about 11k rise
+  of turn 1 has three parts.
+  1. About 4.6k: a third copy of the 13.4k-char CLAUDE.md. This is a harness artifact, not a
+     product change (harness note 5). The ptah-haiku sessions loaded 3 copies (the main
+     checkout, the worktree and the workspace). Two ptah-haiku smoke sessions of the same
+     build that ran before the `git init` of the workspace loaded 2 copies, and their turn 1
+     was 49.5k–49.7k instead of 54.1k–55.9k.
+  2. About 6k: external, on the Claude CLI side (CLI version, base prompt and tool schemas,
+     the claude.ai connectors of harness note 4). native-haiku, which runs no Ptah code, rose
+     by about 5k per turn on the same tasks.
+  3. About 250 tokens: Ptah-controlled. The system prompt append grew from 16,637 to 16,910
+     chars. The 15 eager (`alwaysLoad`) Ptah tool definitions grew from 20,325 to 21,029 chars
+     (mostly `ptah_grep`). The MCP server instructions, the eager tool set, and the agents,
+     skills and plugin commands did not change. PR #1475 is not the cause: the core prompt is
+     the same size at both commits.
+  So the ptah-haiku before/after cost comparison above is skewed by the artifact, and it
+  overstates the product change by about 4.6k tokens per turn.
 - **ptah-codex**: correctness equal (7/8), but a different task failed (see wrong answers).
   Calls 33 → 36. Weighted +29% (142k → 183k), mostly non-cached input (79k → 123k). Wall time
   −40% (713 s → 429 s).
@@ -238,6 +252,13 @@ human uses no CPU, so this deferral gives no benefit to the foreground.
 4. **claude.ai login attaches connectors.** The isolated Claude CLI uses the user's claude.ai
    login, so claude.ai connectors and session context attach to the test sessions. Raw
    transcripts contain the account e-mail and are not committed.
+5. **Do not `git init` the workspace in the middle of a run.** The fix of note 2 ran after the
+   native-haiku arm and before the ptah-haiku arm. Inside the linked worktree, the Claude CLI
+   skips the main checkout's CLAUDE.md. As a standalone repository nested in the checkout,
+   the workspace made the CLI load every ancestor CLAUDE.md, so the later arms paid for one
+   more copy on each turn. Set up the final workspace layout before the first arm runs, and
+   keep it the same for all arms. Ptah now also excludes ancestor CLAUDE.md files whose bytes
+   equal a nearer copy (TASK_2026_2323_9838).
 
 ### (d) Other observations
 

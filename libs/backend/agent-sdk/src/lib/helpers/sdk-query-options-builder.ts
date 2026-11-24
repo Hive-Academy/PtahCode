@@ -27,6 +27,7 @@ import {
 } from '@ptah-extension/platform-core';
 import { createCronApprovalGate } from '../permission/cron-approval-gate';
 import { MemoryPromptInjector } from './memory-prompt-injector';
+import { findDuplicateClaudeMdExcludes } from './claude-md-dedup';
 import { CodeSymbolPromptInjector } from './code-symbol-prompt-injector';
 import { redactMcpUrl, redactMcpOverrideMap } from './redact-mcp-url';
 import {
@@ -439,6 +440,7 @@ export function buildFlagSettings(
   autoCompact?: AutoCompactSettings,
   capabilityFlags?: Partial<SessionCapabilityFlags>,
   subagentPromptCacheTtl?: SubagentPromptCacheTtl,
+  claudeMdExcludes?: readonly string[],
 ): Settings {
   assertSingleOutputStylePath(sessionConfig);
   const styleName = sessionConfig?.outputStyleName?.trim();
@@ -455,7 +457,8 @@ export function buildFlagSettings(
     !styleName &&
     Object.keys(autoCompactKeys).length === 0 &&
     Object.keys(capabilityKeys).length === 0 &&
-    subagentPromptCacheTtl === undefined
+    subagentPromptCacheTtl === undefined &&
+    !claudeMdExcludes?.length
   ) {
     return PTAH_DISABLE_SDK_AUTO_MEMORY;
   }
@@ -465,6 +468,9 @@ export function buildFlagSettings(
     ...autoCompactKeys,
     ...capabilityKeys,
     ...(subagentPromptCacheTtl !== undefined ? { subagentPromptCacheTtl } : {}),
+    ...(claudeMdExcludes?.length
+      ? { claudeMdExcludes: [...claudeMdExcludes] }
+      : {}),
   };
 }
 
@@ -771,12 +777,14 @@ export function buildFlagSettingsArg(
   autoCompact?: AutoCompactSettings,
   capabilityFlags?: Partial<SessionCapabilityFlags>,
   subagentPromptCacheTtl?: SubagentPromptCacheTtl,
+  claudeMdExcludes?: readonly string[],
 ): string {
   const settings = buildFlagSettings(
     sessionConfig,
     autoCompact,
     capabilityFlags,
     subagentPromptCacheTtl,
+    claudeMdExcludes,
   );
   if (crossSessionInbound === undefined) {
     return JSON.stringify(settings);
@@ -1641,6 +1649,20 @@ export class SdkQueryOptionsBuilder {
     const claudeConfigDir = resolveClaudeConfigDir(
       named ? [named.launch.env] : [effectiveAuthEnv, process.env],
     );
+    // Exact repeats of a nearer CLAUDE.md (a workspace nested in a copy of
+    // its own checkout) would be sent on every turn. The flag tier unions
+    // with the user's own `claudeMdExcludes`. The helper excludes nothing
+    // unless the kept copy is sure to load (see its doc).
+    const claudeMdExcludes = await findDuplicateClaudeMdExcludes(cwd, {
+      settingSources,
+      claudeConfigDir,
+    });
+    if (claudeMdExcludes.length > 0) {
+      this.logger.info(
+        '[SdkQueryOptionsBuilder] Excluding repeated CLAUDE.md copies',
+        { cwd, claudeMdExcludes },
+      );
+    }
     // Only the verified path emits skill denials, so only it pays for the
     // synced read and the same-name discovery. claude.ai account-synced
     // skills are denied by their qualified `anthropic-skills:<name>` key,
@@ -1754,6 +1776,7 @@ export class SdkQueryOptionsBuilder {
           autoCompact,
           capabilityFlags,
           subagentTtl.sdkValue,
+          claudeMdExcludes,
         ),
         tools: sessionTools,
         // Applies on the verified and the unverified path alike, and on every
