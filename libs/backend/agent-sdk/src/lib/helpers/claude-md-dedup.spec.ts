@@ -8,18 +8,41 @@ import {
   findDuplicateClaudeMdExcludes,
   hasClaudeMdImport,
   toClaudeMdExcludePattern,
+  withDeadline,
 } from './claude-md-dedup';
 import { buildFlagSettings, buildFlagSettingsArg } from './sdk-query-options-builder';
 
 const TEXT = '# Project rules\n\nRun the focused checks only.\n';
 
-describe('findDuplicateClaudeMdExcludes', () => {
+const ALL_SOURCES = ['user', 'project', 'local'] as const;
+
+/**
+ * The walk uses real folders. On Windows the helper returns forward-slash
+ * patterns and symlinks need elevation, so the folder cases run on POSIX only;
+ * the Windows spelling is covered by `toClaudeMdExcludePattern` below.
+ */
+const describePosix = process.platform === 'win32' ? describe.skip : describe;
+
+describePosix('findDuplicateClaudeMdExcludes', () => {
   let root: string;
+  let configDir: string;
 
   beforeEach(() => {
     // realpath: the OS temp folder can be a symlink (macOS /var -> /private/var).
     root = realpathSync(mkdtempSync(path.join(tmpdir(), 'claude-md-dedup-')));
+    configDir = path.join(root, 'config');
+    mkdirSync(configDir);
   });
+
+  function find(
+    cwd: string,
+    settingSources: readonly string[] = ALL_SOURCES,
+  ): Promise<string[]> {
+    return findDuplicateClaudeMdExcludes(cwd, {
+      settingSources,
+      claudeConfigDir: configDir,
+    });
+  }
 
   afterEach(() => {
     rmSync(root, { recursive: true, force: true });
@@ -38,9 +61,7 @@ describe('findDuplicateClaudeMdExcludes', () => {
     const worktree = write('repo/.claude-worktrees/wt/CLAUDE.md', TEXT);
     write('repo/.claude-worktrees/wt/.ptah/tmp/ws/CLAUDE.md', TEXT);
 
-    const excludes = await findDuplicateClaudeMdExcludes(
-      path.join(root, 'repo/.claude-worktrees/wt/.ptah/tmp/ws'),
-    );
+    const excludes = await find(path.join(root, 'repo/.claude-worktrees/wt/.ptah/tmp/ws'));
 
     expect(excludes.sort()).toEqual([main, worktree].sort());
   });
@@ -50,7 +71,7 @@ describe('findDuplicateClaudeMdExcludes', () => {
     write('repo/packages/app/CLAUDE.md', '# App rules\n');
 
     await expect(
-      findDuplicateClaudeMdExcludes(path.join(root, 'repo/packages/app')),
+      find(path.join(root, 'repo/packages/app')),
     ).resolves.toEqual([]);
   });
 
@@ -59,7 +80,7 @@ describe('findDuplicateClaudeMdExcludes', () => {
     write('repo/ws/CLAUDE.md', `${TEXT} `);
 
     await expect(
-      findDuplicateClaudeMdExcludes(path.join(root, 'repo/ws')),
+      find(path.join(root, 'repo/ws')),
     ).resolves.toEqual([]);
   });
 
@@ -68,7 +89,7 @@ describe('findDuplicateClaudeMdExcludes', () => {
     write('repo/ws/CLAUDE.local.md', TEXT);
 
     await expect(
-      findDuplicateClaudeMdExcludes(path.join(root, 'repo/ws')),
+      find(path.join(root, 'repo/ws')),
     ).resolves.toEqual([dotClaude]);
   });
 
@@ -78,7 +99,7 @@ describe('findDuplicateClaudeMdExcludes', () => {
     write('repo/ws/CLAUDE.md', withImport);
 
     await expect(
-      findDuplicateClaudeMdExcludes(path.join(root, 'repo/ws')),
+      find(path.join(root, 'repo/ws')),
     ).resolves.toEqual([]);
   });
 
@@ -87,7 +108,7 @@ describe('findDuplicateClaudeMdExcludes', () => {
     symlinkSync(kept, path.join(root, 'repo/CLAUDE.md'));
 
     await expect(
-      findDuplicateClaudeMdExcludes(path.join(root, 'repo/ws')),
+      find(path.join(root, 'repo/ws')),
     ).resolves.toEqual([]);
   });
 
@@ -96,7 +117,7 @@ describe('findDuplicateClaudeMdExcludes', () => {
     write('re[po]/ws/CLAUDE.md', TEXT);
 
     await expect(
-      findDuplicateClaudeMdExcludes(path.join(root, 're[po]/ws')),
+      find(path.join(root, 're[po]/ws')),
     ).resolves.toEqual([]);
   });
 
@@ -106,13 +127,69 @@ describe('findDuplicateClaudeMdExcludes', () => {
     write('repo/ws/CLAUDE.md', big);
 
     await expect(
-      findDuplicateClaudeMdExcludes(path.join(root, 'repo/ws')),
+      find(path.join(root, 'repo/ws')),
     ).resolves.toEqual([]);
+  });
+
+  it('excludes nothing when the session does not load project and local', async () => {
+    write('repo/CLAUDE.md', TEXT);
+    write('repo/ws/CLAUDE.local.md', TEXT);
+    const ws = path.join(root, 'repo/ws');
+
+    await expect(find(ws, ['user', 'project'])).resolves.toEqual([]);
+    await expect(find(ws, ['local'])).resolves.toEqual([]);
+    await expect(find(ws, [])).resolves.toEqual([]);
+  });
+
+  it.each([
+    ['user', 'config/settings.json'],
+    ['project', 'repo/ws/.claude/settings.json'],
+    ['local', 'repo/ws/.claude/settings.local.json'],
+  ])(
+    'excludes nothing when the %s settings set their own claudeMdExcludes',
+    async (_tier, settingsFile) => {
+      write('repo/CLAUDE.md', TEXT);
+      write('repo/ws/CLAUDE.md', TEXT);
+      write(settingsFile, JSON.stringify({ claudeMdExcludes: ['**/ws/CLAUDE.md'] }));
+
+      await expect(find(path.join(root, 'repo/ws'))).resolves.toEqual([]);
+    },
+  );
+
+  it('excludes nothing when a loaded settings file is not valid JSON', async () => {
+    write('repo/CLAUDE.md', TEXT);
+    write('repo/ws/CLAUDE.md', TEXT);
+    write('repo/ws/.claude/settings.local.json', '{ not json');
+
+    await expect(find(path.join(root, 'repo/ws'))).resolves.toEqual([]);
+  });
+
+  it('excludes nothing when a loaded settings file cannot be read', async () => {
+    write('repo/CLAUDE.md', TEXT);
+    write('repo/ws/CLAUDE.md', TEXT);
+    // A folder in place of the file: reading it fails with EISDIR.
+    mkdirSync(path.join(root, 'repo/ws/.claude/settings.json'), { recursive: true });
+
+    await expect(find(path.join(root, 'repo/ws'))).resolves.toEqual([]);
+  });
+
+  it('never keeps or excludes the user memory file', async () => {
+    // The config folder sits on the walk as `<home>/.claude` would.
+    const home = path.join(root, 'home');
+    configDir = path.join(home, '.claude');
+    write('home/.claude/CLAUDE.md', TEXT);
+    write('home/repo/CLAUDE.md', TEXT);
+    const kept = write('home/repo/ws/CLAUDE.md', TEXT);
+
+    const excludes = await find(path.join(home, 'repo/ws'));
+
+    expect(excludes).toEqual([path.join(home, 'repo/CLAUDE.md')]);
+    expect(excludes).not.toContain(kept);
   });
 
   it('returns no excludes for a folder that does not exist', async () => {
     await expect(
-      findDuplicateClaudeMdExcludes(path.join(root, 'missing/deeper')),
+      find(path.join(root, 'missing/deeper')),
     ).resolves.toEqual([]);
   });
 });
@@ -128,6 +205,19 @@ describe('hasClaudeMdImport', () => {
     expect(hasClaudeMdImport('```\n@import\n```\n')).toBe(false);
     expect(hasClaudeMdImport('<!-- @hidden -->')).toBe(false);
     expect(hasClaudeMdImport('mail user@example.com')).toBe(false);
+  });
+});
+
+describe('withDeadline', () => {
+  it('returns no excludes when the work does not settle in time', async () => {
+    const never = new Promise<string[]>(() => undefined);
+    await expect(withDeadline(never, 5)).resolves.toEqual([]);
+  });
+
+  it('returns the work result when it settles in time', async () => {
+    await expect(withDeadline(Promise.resolve(['/a/CLAUDE.md']), 1_000)).resolves.toEqual([
+      '/a/CLAUDE.md',
+    ]);
   });
 });
 

@@ -1642,18 +1642,6 @@ export class SdkQueryOptionsBuilder {
         ? ['user', 'project', 'local']
         : ['project', 'local'];
 
-    // Exact repeats of a nearer CLAUDE.md (a workspace nested in a copy of
-    // its own checkout) would be sent on every turn. The flag tier unions
-    // with the user's own `claudeMdExcludes`; no setting source, no read.
-    const claudeMdExcludes =
-      settingSources.length > 0 ? await findDuplicateClaudeMdExcludes(cwd) : [];
-    if (claudeMdExcludes.length > 0) {
-      this.logger.info(
-        '[SdkQueryOptionsBuilder] Excluding repeated CLAUDE.md copies',
-        { cwd, claudeMdExcludes },
-      );
-    }
-
     const policy = this.sessionCapabilityPolicy(capabilityPolicy, cwd);
     // The config dir the Claude child reads (D-B2): a named run's certified
     // launch env alone (it never inherits the host env), otherwise the auth
@@ -1661,6 +1649,20 @@ export class SdkQueryOptionsBuilder {
     const claudeConfigDir = resolveClaudeConfigDir(
       named ? [named.launch.env] : [effectiveAuthEnv, process.env],
     );
+    // Exact repeats of a nearer CLAUDE.md (a workspace nested in a copy of
+    // its own checkout) would be sent on every turn. The flag tier unions
+    // with the user's own `claudeMdExcludes`. The helper excludes nothing
+    // unless the kept copy is sure to load (see its doc).
+    const claudeMdExcludes = await findDuplicateClaudeMdExcludes(cwd, {
+      settingSources,
+      claudeConfigDir,
+    });
+    if (claudeMdExcludes.length > 0) {
+      this.logger.info(
+        '[SdkQueryOptionsBuilder] Excluding repeated CLAUDE.md copies',
+        { cwd, claudeMdExcludes },
+      );
+    }
     // Only the verified path emits skill denials, so only it pays for the
     // synced read and the same-name discovery. claude.ai account-synced
     // skills are denied by their qualified `anthropic-skills:<name>` key,

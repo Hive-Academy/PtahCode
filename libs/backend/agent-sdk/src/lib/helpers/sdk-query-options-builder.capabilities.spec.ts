@@ -46,6 +46,7 @@ import type {
 } from './session-mcp-status-callback-registry';
 import type { Options } from '../types/sdk-types/claude-sdk.types';
 import { PTAH_DISABLE_SDK_AUTO_MEMORY } from '../constants';
+import { toClaudeMdExcludePattern } from './claude-md-dedup';
 import {
   CLAUDE_BUILTIN_SETTING_KEYS,
   CLAUDE_BUILTIN_TERMINAL_SKILL_IDS,
@@ -585,7 +586,7 @@ describe('SdkQueryOptionsBuilder — repeated CLAUDE.md copies', () => {
 
     expect(built.options.cwd).toBe(workspace);
     expect(built.settings['claudeMdExcludes']).toEqual([
-      join(root, 'checkout', 'CLAUDE.md'),
+      toClaudeMdExcludePattern(join(root, 'checkout', 'CLAUDE.md')),
     ]);
   });
 

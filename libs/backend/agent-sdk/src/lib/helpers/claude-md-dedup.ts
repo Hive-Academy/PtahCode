@@ -21,6 +21,7 @@
  */
 import { createHash } from 'node:crypto';
 import { readFile, realpath, stat } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import * as path from 'node:path';
 
 /** Instruction file names the CLI reads in each folder, nearest first. */
@@ -111,27 +112,83 @@ async function collectCandidates(cwd: string): Promise<FoundFile[]> {
   return found;
 }
 
+/** What the session loads, so a kept copy is known to reach the model. */
+export interface ClaudeMdDedupOptions {
+  /** The SDK `settingSources` of the session. */
+  readonly settingSources: readonly string[];
+  /** The Claude config folder the child reads (`~/.claude` by default). */
+  readonly claudeConfigDir?: string;
+  readonly platform?: NodeJS.Platform;
+  /** The walk gives up and excludes nothing after this many ms. */
+  readonly deadlineMs?: number;
+}
+
+/** Default time limit of the walk; session start must not wait on a slow mount. */
+export const CLAUDE_MD_DEDUP_DEADLINE_MS = 1_500;
+
 /**
- * The `claudeMdExcludes` patterns that drop exact repeats of an instruction
- * file nearer to `cwd`. Empty when nothing repeats. Never throws.
- *
- * A second path to a file already kept (a symlink) is not excluded: the CLI
- * already reads such a file once. Both the spelled path and the real path of
- * an excluded file are returned, because the CLI may match either spelling.
+ * True when a settings file the session loads sets its own
+ * `claudeMdExcludes`, or cannot be read as JSON. The user's own list could
+ * drop the copy this module keeps, so the walk then excludes nothing.
  */
-export async function findDuplicateClaudeMdExcludes(
+async function userExcludesMayApply(
   cwd: string,
-  platform: NodeJS.Platform = process.platform,
-): Promise<string[]> {
-  let candidates: FoundFile[];
-  try {
-    // A session folder that does not exist starts no CLI that could load a
-    // file, so there is nothing to dedupe.
-    if (!(await stat(path.resolve(cwd))).isDirectory()) return [];
-    candidates = await collectCandidates(cwd);
-  } catch {
-    return [];
+  options: ClaudeMdDedupOptions,
+  configDir: string,
+): Promise<boolean> {
+  const files: string[] = [];
+  if (options.settingSources.includes('user')) {
+    files.push(path.join(configDir, 'settings.json'));
   }
+  files.push(path.join(cwd, '.claude', 'settings.json'));
+  files.push(path.join(cwd, '.claude', 'settings.local.json'));
+  for (const file of files) {
+    let text: string;
+    try {
+      text = await readFile(file, 'utf8');
+    } catch (error: unknown) {
+      const code = (error as NodeJS.ErrnoException | undefined)?.code;
+      // Absent: the file sets nothing. Any other failure (no permission, a
+      // folder in its place) could hide the user's own list.
+      if (code === 'ENOENT' || code === 'ENOTDIR') continue;
+      return true;
+    }
+    try {
+      const parsed: unknown = JSON.parse(text);
+      if (
+        typeof parsed === 'object' &&
+        parsed !== null &&
+        'claudeMdExcludes' in parsed
+      ) {
+        return true;
+      }
+    } catch {
+      return true;
+    }
+  }
+  return false;
+}
+
+async function computeExcludes(
+  cwd: string,
+  options: ClaudeMdDedupOptions,
+): Promise<string[]> {
+  const platform = options.platform ?? process.platform;
+  const configDir = path.resolve(
+    options.claudeConfigDir ?? path.join(homedir(), '.claude'),
+  );
+  // A session folder that does not exist starts no CLI that could load a
+  // file, so there is nothing to dedupe.
+  if (!(await stat(path.resolve(cwd))).isDirectory()) return [];
+  if (await userExcludesMayApply(cwd, options, configDir)) return [];
+  // The user memory file loads only with the `user` source; it is never kept
+  // and never excluded, so no decision depends on it.
+  const userMemory = path.join(configDir, 'CLAUDE.md');
+  const userMemoryReal = await realpath(userMemory).catch(() => userMemory);
+  const candidates = (await collectCandidates(cwd)).filter(
+    (file) => file.filePath !== userMemory && file.realPath !== userMemoryReal,
+  );
+
   const keptDigests = new Set<string>();
   const keptRealPaths = new Set<string>();
   const excludes = new Set<string>();
@@ -153,4 +210,51 @@ export async function findDuplicateClaudeMdExcludes(
     for (const p of patterns) excludes.add(p as string);
   }
   return [...excludes];
+}
+
+/**
+ * The `claudeMdExcludes` patterns that drop exact repeats of an instruction
+ * file nearer to `cwd`. Empty when nothing repeats. Never throws.
+ *
+ * A kept copy must reach the model, so the walk excludes nothing unless the
+ * session loads both the `project` and the `local` source (every candidate
+ * except the user memory file is then loaded) and no loaded settings file
+ * sets its own `claudeMdExcludes`. It also excludes nothing when it does not
+ * finish within the deadline.
+ *
+ * A second path to a file already kept (a symlink) is not excluded: the CLI
+ * already reads such a file once. Both the spelled path and the real path of
+ * an excluded file are returned, because the CLI may match either spelling.
+ */
+export async function findDuplicateClaudeMdExcludes(
+  cwd: string,
+  options: ClaudeMdDedupOptions,
+): Promise<string[]> {
+  if (
+    !options.settingSources.includes('project') ||
+    !options.settingSources.includes('local')
+  ) {
+    return [];
+  }
+  return withDeadline(
+    computeExcludes(cwd, options).catch((): string[] => []),
+    options.deadlineMs ?? CLAUDE_MD_DEDUP_DEADLINE_MS,
+  );
+}
+
+/** `work`, or no excludes when it does not settle within `ms`. */
+export async function withDeadline(
+  work: Promise<string[]>,
+  ms: number,
+): Promise<string[]> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<string[]>((resolve) => {
+    timer = setTimeout(() => resolve([]), ms);
+    timer.unref?.();
+  });
+  try {
+    return await Promise.race([work, deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
 }
