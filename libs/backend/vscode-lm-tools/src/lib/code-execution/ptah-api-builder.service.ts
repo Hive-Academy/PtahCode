@@ -139,6 +139,7 @@ import {
   CliDetectionService,
   McpRegistryProvider,
   McpInstallService,
+  refreshBoundMcpGateway,
   SmitheryRegistrySource,
   SkillsShApiClient,
 } from '@ptah-extension/cli-agent-runtime';
@@ -706,6 +707,9 @@ export class PtahAPIBuilder {
       },
     };
 
+    const ast = this.buildNamespaceSafe('ast', () =>
+      buildAstNamespace(astDeps),
+    );
     const code = this.buildNamespaceSafe('code', () =>
       buildCodeNamespace({
         getCodeSymbolSearch: () => this.codeSymbolReader,
@@ -713,6 +717,8 @@ export class PtahAPIBuilder {
         getSymbolIndexer: () => this.symbolIndexer,
         getWorkspaceRoot: () => this.getWorkspaceRoot(),
         getHostWorkspaceRoots: () => this.getHostWorkspaceRoots(),
+        getNavWorkspaceRoot: () => this.resolveSessionWorkspaceRoot(),
+        analyze: (absolutePath) => ast.analyze(absolutePath),
         logger: this.logger,
       }),
     );
@@ -745,7 +751,7 @@ export class PtahAPIBuilder {
       dependencies: this.buildNamespaceSafe('dependencies', () =>
         buildDependencyNamespace(analysisDeps),
       ),
-      ast: this.buildNamespaceSafe('ast', () => buildAstNamespace(astDeps)),
+      ast,
       ide: this.buildNamespaceSafe('ide', () =>
         // The desktop host answers definitions from the symbol index, so a
         // definition lookup (direct tool or execute_code) starts the lazy
@@ -1024,9 +1030,17 @@ export class PtahAPIBuilder {
           smitheryRegistry,
           // Same installer that backs the marketplace MCP directory and
           // harness:apply, so an agent-initiated install records the same
-          // intent in ~/.ptah/mcp-installed.json and reaches the config files
-          // through the same reconcile pass.
-          mcpInstaller: new McpInstallService(this.harnessReconciler ?? null),
+          // intent in ~/.ptah/mcp-installed.json, which the MCP gateway
+          // serves. No config file is written.
+          mcpInstaller: new McpInstallService(
+            this.harnessReconciler ?? null,
+            undefined,
+            {
+              onIntentsChanged: () => {
+                if (this.container) refreshBoundMcpGateway(this.container);
+              },
+            },
+          ),
           getWorkspaceRoot: () => this.getWorkspaceRoot(),
           // Same root source as `getPluginPaths`: never the home fallback.
           getPolicyWorkspaceRoot: () => this.resolveSessionWorkspaceRoot(),

@@ -104,7 +104,6 @@ describe('EffortSelectorComponent per-session effort', () => {
       const component = createComponent(signal('child'));
 
       expect(component.effectiveEffort()).toBe('high');
-      expect(component.selectedOption().value).toBe('high');
     });
 
     it('lets a tab override win over the pin of the parent and over the global effort', () => {

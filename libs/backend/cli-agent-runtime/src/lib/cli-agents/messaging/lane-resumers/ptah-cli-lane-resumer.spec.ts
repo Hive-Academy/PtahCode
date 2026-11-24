@@ -189,6 +189,41 @@ describe('PtahCliLaneResumer', () => {
     );
   });
 
+  it('carries the turn effort into the resumed query (S4)', async () => {
+    const h = harness();
+    await h.resumer.resume({ ...info, model: 'claude-opus-4', reasoningEffort: 'high' }, 'continue');
+    expect(h.registry.spawnAgent).toHaveBeenCalledWith('ptah-config', 'prepared task',
+      expect.objectContaining({ model: 'claude-opus-4', reasoningEffort: 'high' }));
+  });
+
+  it('checks the resumed model before launch and keeps model and effort on the new record', async () => {
+    const h = harness();
+    await h.resumer.resume({ ...info, model: 'claude-opus-4', reasoningEffort: 'high' }, 'continue');
+    expect(h.manager.prepareSdkHandleSpawn).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'claude-opus-4' }));
+    expect(h.manager.spawnFromSdkHandle).toHaveBeenCalledWith(h.handle,
+      expect.objectContaining({ model: 'claude-opus-4', reasoningEffort: 'high' }));
+  });
+
+  it('does not launch when the blocked-model check refuses the resumed model', async () => {
+    const h = harness();
+    jest.mocked(h.manager.prepareSdkHandleSpawn).mockRejectedValueOnce(new Error('Model blocked'));
+    await expect(h.resumer.resume({ ...info, model: 'blocked-model' }, 'continue'))
+      .rejects.toMatchObject({ code: 'spawn-failed' });
+    expect(h.registry.spawnAgent).not.toHaveBeenCalled();
+  });
+
+  it('refuses an effort Ptah CLI has no level for before any spawn', async () => {
+    const h = harness();
+    // Thrown before any await, like the other pre-spawn refusals of `resume`.
+    const failure = (async () => h.resumer.resume({ ...info, reasoningEffort: 'turbo' }, 'continue'))();
+    await expect(failure).rejects.toMatchObject({
+      code: 'turn-settings-refused', message: 'Ptah CLI has no effort level "turbo".',
+    });
+    expect(h.manager.prepareSdkHandleSpawn).not.toHaveBeenCalled();
+    expect(h.registry.spawnAgent).not.toHaveBeenCalled();
+  });
+
   it('raises LaneResumeError for a registry refusal', async () => {
     const h = harness();
     h.registry.spawnAgent = jest.fn(async () => ({

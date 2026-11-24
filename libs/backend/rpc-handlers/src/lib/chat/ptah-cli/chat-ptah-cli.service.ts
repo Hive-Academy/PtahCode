@@ -111,8 +111,8 @@ export class ChatPtahCliService {
     // Everything from here to the session entry runs under the lease taken by
     // `getProfile` above, and the lease is only ever given back from a session
     // entry (`handleAbort` / `deleteSession` read `entry.leaseKey`). So a throw
-    // in between — `ensureRegisteredForSubagents` failing to write `.mcp.json`,
-    // or the spawn itself — used to strand the reference forever: the proxy's
+    // in between — `ensureRegisteredForSubagents` rejecting, or the spawn
+    // itself — used to strand the reference forever: the proxy's
     // refCount never returned to zero, its listening socket stayed up for the
     // life of the host, and the next attempt on the same agent took a second
     // one. Release on the failure path, then rethrow untouched (TASK_2026_326).
@@ -146,17 +146,16 @@ export class ChatPtahCliService {
       });
 
       if (mcpServerRunning) {
-        // Awaited: the CLI spawned below reads `.mcp.json` to discover this
-        // server, so the entry has to be on disk first (TASK_2026_318) — and
-        // the outcome decides the flag we pass to the spawn (TASK_2026_332).
-        // Telling the CLI the server is running when the file it reads has no
-        // `ptah` key is the false assurance this replaces.
+        // A readiness answer (TASK_2026_979 B19): the spawned CLI gets `ptah`
+        // in its own spawn config, so nothing is written. The outcome still
+        // decides the flag passed to the spawn (TASK_2026_332): a server being
+        // torn down must not be advertised as running.
         const registration =
           await this.codeExecutionMcp.ensureRegisteredForSubagents();
         if (!registration.registered) {
           mcpServerRunning = false;
           this.logger.warn(
-            '[RPC] chat:start - .mcp.json entry absent, spawning Ptah CLI without MCP',
+            '[RPC] chat:start - Ptah MCP server not ready, spawning Ptah CLI without MCP',
             { tabId, ptahCliId: agentId, reason: registration.reason },
           );
         }
@@ -258,7 +257,7 @@ export class ChatPtahCliService {
         await this.codeExecutionMcp.ensureRegisteredForSubagents();
       if (!registration.registered) {
         this.logger.warn(
-          '[RPC] chat:continue - .mcp.json entry absent for Ptah CLI turn',
+          '[RPC] chat:continue - Ptah MCP server not ready for Ptah CLI turn',
           { sessionId, tabId, reason: registration.reason },
         );
       }

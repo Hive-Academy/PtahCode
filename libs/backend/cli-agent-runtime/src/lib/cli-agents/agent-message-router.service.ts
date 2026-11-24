@@ -25,6 +25,9 @@ import {
   formatBudgetPauseNotice,
   type AgentMessageOutcome,
   type AgentProcessInfo,
+  type CliAdapterManifest,
+  type LaneTurnContent,
+  type LaneTurnRequest,
 } from '@ptah-extension/shared';
 import { CliDetectionService } from './cli-detection.service';
 import { currentLaneNotice, isLanePaused, type TrackedAgent } from './tracked-agent';
@@ -38,7 +41,8 @@ import {
   AgentMessageDispatchWithdrawnError,
   type AgentMessageDispatchJournal,
 } from './messaging/agent-message-dispatch-journal.port';
-import { classifyContinuationFailure } from './messaging/continuation-failure.classifier';
+import { classifyContinuationFailureDetail } from './messaging/continuation-failure.classifier';
+import { resolveEffectiveLaneCapabilities } from './messaging/agent-effective-capabilities';
 
 /**
  * How many messages may wait for an agent's current turn to finish.
@@ -118,11 +122,19 @@ export interface PendingAgentMessage {
   readonly journaled?: boolean;
   /** A paused dispatch retains its existing durable dispatch reservation. */
   readonly dispatchReserved?: boolean;
+  /** Settings and attachments of the turn this message starts. */
+  readonly turn?: LaneTurnRequest;
+  /**
+   * The message as the user wrote it, before any Ptah header. The manager's
+   * blocked-command pre-flight reads it, so a header never hides a `/command`.
+   */
+  readonly rawBody?: string;
 }
 
 export type AgentMessageStatus =
   | { status: 'pending' | 'delivered' }
-  | { status: 'failed'; reason: string }
+  /** `lastError`: fixed refusal text a settings or turn-input refusal keeps (≤ 200 chars). */
+  | { status: 'failed'; reason: string; lastError?: string }
   | { status: 'unknown' };
 
 const MAX_TERMINAL_MESSAGES = 64;
@@ -135,8 +147,79 @@ type JournalResult = 'ok' | 'refused' | 'withdrawn';
  * with a fake and the module graph stays acyclic.
  */
 export interface ContinuationDispatcher {
-  continueConversation(agentId: string, message: string, messageId?: string): Promise<void>;
+  continueConversation(
+    agentId: string,
+    message: string,
+    messageId?: string,
+    turn?: LaneTurnRequest,
+    rawBody?: string,
+  ): Promise<void>;
+  /**
+   * Check and apply a turn's input before an interrupt-and-send interrupts
+   * the running turn; a throw leaves that turn running. Absent: no pre-flight.
+   */
+  prepareInterruptTurn?(
+    agentId: string,
+    message: string,
+    turn: LaneTurnRequest | undefined,
+    rawBody: string | undefined,
+  ): Promise<void>;
 }
+
+/** What a route call carries beside the text: the turn request and the raw body. */
+export interface RouteTurnInput {
+  readonly turn?: LaneTurnRequest;
+  readonly rawBody?: string;
+  /**
+   * Never steer (R3-2: a raw provider `/command` must start its own turn).
+   * `now` then interrupts and resumes when confirmed; `steer` is refused.
+   */
+  readonly noSteer?: boolean;
+}
+
+/**
+ * Call `continueConversation` with only the arguments that are set, so a
+ * text-only message keeps the call shape it had before turn input existed.
+ */
+function continueWith(
+  dispatcher: ContinuationDispatcher,
+  agentId: string,
+  message: string,
+  messageId: string | undefined,
+  input: RouteTurnInput,
+): Promise<void> {
+  if (input.turn === undefined && input.rawBody === undefined)
+    return messageId === undefined
+      ? dispatcher.continueConversation(agentId, message)
+      : dispatcher.continueConversation(agentId, message, messageId);
+  return dispatcher.continueConversation(agentId, message, messageId, input.turn, input.rawBody);
+}
+
+/** The images and files of a turn request, or undefined when it has none. */
+export function turnContentOf(turn: LaneTurnRequest | undefined): LaneTurnContent | undefined {
+  const images = turn?.images?.length ? turn.images : undefined;
+  const files = turn?.files?.length ? turn.files : undefined;
+  if (!images && !files) return undefined;
+  return { ...(images ? { images } : {}), ...(files ? { files } : {}) };
+}
+
+/** Stand-in manifest for a live handle whose adapter declares none: only the handle's own probes count. */
+const UNDECLARED_MANIFEST: CliAdapterManifest = {
+  messaging: {
+    steer: { state: 'unsupported', reason: 'No manifest.' },
+    interrupt: { state: 'unsupported', reason: 'No manifest.' },
+    continuation: { state: 'unsupported', reason: 'No manifest.' },
+    resume: { state: 'unsupported', reason: 'No manifest.' },
+  },
+  roleChannel: 'task-prompt',
+  permissionModes: {},
+  networkModes: {
+    allow: { state: 'unsupported', reason: 'No manifest.' },
+    deny: { state: 'unsupported', reason: 'No manifest.' },
+  },
+  limitReader: { state: 'no-reliable-source', reason: 'No manifest.' },
+  mcp: { state: 'unsupported', reason: 'No manifest.' },
+};
 
 /** Microtask ticks drained while waiting for an aborted turn's exit handling. */
 const TURN_SETTLE_TICKS = 20;
@@ -169,8 +252,9 @@ export class AgentMessageRouter {
     delivery: 'queue' | 'now' | 'steer' = 'queue',
     messageId?: string,
     allowPartialTurnLoss = false,
+    input: RouteTurnInput = {},
   ): Promise<AgentMessageOutcome> {
-    const outcome = await this.select(agentId, tracked, message, dispatcher, delivery, messageId, allowPartialTurnLoss);
+    const outcome = await this.select(agentId, tracked, message, dispatcher, delivery, messageId, allowPartialTurnLoss, input);
     this.logger.info('[AgentMessageRouter] Message routed', {
       agentId,
       cli: tracked.info.cli,
@@ -188,6 +272,7 @@ export class AgentMessageRouter {
     delivery: 'queue' | 'now' | 'steer',
     messageId?: string,
     allowPartialTurnLoss = false,
+    input: RouteTurnInput = {},
   ): Promise<AgentMessageOutcome> {
     if (tracked.info.status === 'starting') {
       return {
@@ -197,17 +282,21 @@ export class AgentMessageRouter {
       };
     }
     // Host-generated handoff asks use the manager's separate delivery path.
-    if (isLanePaused(tracked)) return this.hold(agentId, tracked, message, messageId);
+    if (isLanePaused(tracked)) return this.hold(agentId, tracked, message, messageId, input);
 
     const handle = tracked.sdkHandle;
     const caps = this.resolveCapabilities(tracked);
     const turnInFlight = tracked.info.status === 'running';
+    const content = turnContentOf(input.turn);
+    // Called on the handle itself, so a class-based handle keeps its `this`.
+    const steer = (live: SdkHandle) =>
+      content ? live.steer?.(message, content) : live.steer?.(message);
 
     if (delivery === 'steer') {
-      if (!turnInFlight || !caps.steer || !handle?.steer)
+      if (input.noSteer || !turnInFlight || !caps.steer || !handle?.steer)
         return { mode: 'unsupported', reasonCode: 'steer-unavailable', detail: 'Explicit steer is unavailable for this active turn.' };
       try {
-        await handle.steer(message);
+        await steer(handle);
       } catch {
         return { mode: 'unsupported', reasonCode: 'steer-rejected', detail: 'The live handle rejected the steer request.' };
       }
@@ -220,9 +309,9 @@ export class AgentMessageRouter {
     }
 
     if (delivery === 'now') {
-      if (turnInFlight && caps.steer && handle?.steer) {
+      if (!input.noSteer && turnInFlight && caps.steer && handle?.steer) {
         try {
-          await handle.steer(message);
+          await steer(handle);
           return { mode: 'steer', detail: 'Injected into the active turn.' };
         } catch (error: unknown) {
           return { mode: 'unsupported', reasonCode: 'steer-rejected', detail: `Steer rejected: ${describeError(error)}` };
@@ -231,15 +320,15 @@ export class AgentMessageRouter {
       if (turnInFlight && caps.interrupt && caps.continuation && handle?.interrupt) {
         if (!allowPartialTurnLoss)
           return { mode: 'unsupported', reasonCode: 'confirmation-required', detail: 'Confirm partial turn work loss before interrupting.' };
-        return this.interruptAndResume(agentId, tracked, message, dispatcher, messageId);
+        return this.interruptAndResume(agentId, tracked, message, dispatcher, messageId, input);
       }
       return { mode: 'unsupported', reasonCode: 'immediate-unavailable', detail: 'No immediate delivery mechanism is available.' };
     }
 
     if (caps.continuation) {
       return turnInFlight
-        ? this.park(tracked, message, messageId)
-        : this.startNewTurn(agentId, tracked, message, dispatcher, messageId);
+        ? this.park(tracked, message, messageId, input)
+        : this.startNewTurn(agentId, tracked, message, dispatcher, messageId, input);
     }
 
     return {
@@ -267,7 +356,25 @@ export class AgentMessageRouter {
     message: string,
     dispatcher: ContinuationDispatcher,
     messageId?: string,
+    input: RouteTurnInput = {},
   ): Promise<AgentMessageOutcome> {
+    if (input.turn !== undefined && dispatcher.prepareInterruptTurn) {
+      try {
+        await dispatcher.prepareInterruptTurn(agentId, message, input.turn, input.rawBody);
+      } catch (error: unknown) {
+        // Refused before the interrupt: the running turn keeps going.
+        const refused = classifyContinuationFailureDetail(error);
+        if (refused.reasonCode && refused.lastError)
+          return { mode: 'unsupported', reasonCode: refused.reasonCode, detail: refused.lastError };
+        return {
+          mode: 'unsupported',
+          reasonCode: 'interrupt-failed',
+          detail:
+            `Preparing the new ${tracked.info.cli} turn failed: ${describeError(error)}. ` +
+            `Nothing was delivered and the turn was left running.`,
+        };
+      }
+    }
     this.interrupting.add(agentId);
     try {
       await tracked.sdkHandle?.interrupt?.();
@@ -286,10 +393,10 @@ export class AgentMessageRouter {
     let resubmitted = false;
     try {
       await this.awaitTurnSettled(tracked);
-      await dispatcher.continueConversation(agentId, message);
+      await continueWith(dispatcher, agentId, message, undefined, input);
       resubmitted = true;
     } catch (error: unknown) {
-      if (error instanceof AgentLanePausedError) return this.hold(agentId, tracked, message, messageId);
+      if (error instanceof AgentLanePausedError) return this.hold(agentId, tracked, message, messageId, input);
       throw new AgentInterruptedDeliveryError(
         `The ${tracked.info.cli} turn was interrupted but the message could not be re-submitted: ${describeError(error)}.`,
       );
@@ -312,6 +419,7 @@ export class AgentMessageRouter {
     tracked: MessageRoutableAgent,
     message: string,
     receiptId?: string,
+    input: RouteTurnInput = {},
   ): AgentMessageOutcome {
     if (tracked.pendingMessages.length >= MAX_PENDING_MESSAGES) {
       return {
@@ -332,6 +440,8 @@ export class AgentMessageRouter {
     tracked.pendingMessages.push({
       messageId, cliSessionId, text: message,
       ...(receiptId !== undefined ? { journaled: true } : {}),
+      ...(input.turn !== undefined ? { turn: input.turn } : {}),
+      ...(input.rawBody !== undefined ? { rawBody: input.rawBody } : {}),
     });
     return {
       mode: 'queue-next-turn',
@@ -347,8 +457,9 @@ export class AgentMessageRouter {
     tracked: MessageRoutableAgent,
     message: string,
     messageId?: string,
+    input: RouteTurnInput = {},
   ): AgentMessageOutcome {
-    const outcome = this.park(tracked, message, messageId);
+    const outcome = this.park(tracked, message, messageId, input);
     if (outcome.mode !== 'queue-next-turn') return outcome;
     const notice = currentLaneNotice(tracked);
     const holdText = notice ? formatBudgetPauseNotice(notice, agentId) : '';
@@ -370,11 +481,16 @@ export class AgentMessageRouter {
     message: string,
     dispatcher: ContinuationDispatcher,
     messageId?: string,
+    input: RouteTurnInput = {},
   ): Promise<AgentMessageOutcome> {
     try {
-      await dispatcher.continueConversation(agentId, message);
+      await continueWith(dispatcher, agentId, message, undefined, input);
     } catch (error: unknown) {
-      if (error instanceof AgentLanePausedError) return this.hold(agentId, tracked, message, messageId);
+      if (error instanceof AgentLanePausedError) return this.hold(agentId, tracked, message, messageId, input);
+      // A settings refusal carries fixed text from the adapter, safe to show.
+      const refused = classifyContinuationFailureDetail(error);
+      if (refused.reasonCode && refused.lastError)
+        return { mode: 'unsupported', reasonCode: refused.reasonCode, detail: refused.lastError };
       return {
         mode: 'unsupported',
         reasonCode: 'start-turn-failed',
@@ -450,7 +566,7 @@ export class AgentMessageRouter {
           tracked.pendingMessages.unshift({ ...next, dispatchReserved: true });
           return;
         }
-        await dispatcher.continueConversation(agentId, next.text, next.messageId);
+        await continueWith(dispatcher, agentId, next.text, next.messageId, next);
         if (this.terminal.get(`${agentId}:${next.messageId}`)?.status !== 'failed')
           this.setTerminal(agentId, next.messageId, { status: 'delivered' });
         this.logger.info('[AgentMessageRouter] Delivered queued message', {
@@ -467,10 +583,13 @@ export class AgentMessageRouter {
           offerNext = !isLanePaused(tracked);
         }
       } else {
-        const reason = classifyContinuationFailure(error);
+        const detail = classifyContinuationFailureDetail(error);
+        const reason = detail.reasonCode ?? detail.reason;
         // The reconciler decides between a backoff retry and a permanent hold.
-        offerNext = reason === 'continuation_rejected';
-        this.setTerminal(agentId, next.messageId, { status: 'failed', reason });
+        offerNext = detail.reason === 'continuation_rejected';
+        this.setTerminal(agentId, next.messageId, {
+          status: 'failed', reason, ...(detail.lastError ? { lastError: detail.lastError } : {}),
+        });
         this.logger.error('[AgentMessageRouter] Queued message could not be delivered', {
           agentId,
           cli: tracked.info.cli,
@@ -583,22 +702,25 @@ export class AgentMessageRouter {
     tracked: MessageRoutableAgent,
   ): AgentMessagingCapabilities {
     const handle = tracked.sdkHandle;
-    if (handle) {
-      return {
-        steer: typeof handle.steer === 'function',
-        interrupt:
-          handle.supportsInterrupt?.() === true &&
-          typeof handle.interrupt === 'function',
-        continuation:
-          handle.supportsContinuation?.() === true &&
-          typeof handle.continue === 'function' &&
-          !tracked.subprocessReleased,
-      };
-    }
-
     const adapterCaps = this.cliDetection
       .getAdapter(tracked.info.cli)
       ?.capabilities();
+    if (handle) {
+      // One resolver for preview, the manager record and this router (E7).
+      const manifest = tracked.info.potentialCapabilities ?? adapterCaps;
+      const messaging = resolveEffectiveLaneCapabilities(
+        tracked.info,
+        manifest?.messaging ? manifest : UNDECLARED_MANIFEST,
+        handle,
+        tracked.subprocessReleased,
+      ).messaging;
+      return {
+        steer: messaging.steer.state === 'supported',
+        interrupt: messaging.interrupt.state === 'supported',
+        continuation: messaging.continuation.state === 'supported',
+      };
+    }
+
     return (
       adapterCaps ? legacyMessagingCapabilities(adapterCaps) : { steer: false, interrupt: false, continuation: false }
     );

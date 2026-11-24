@@ -7,28 +7,75 @@ import { recordLaneUsageOutcome } from './lane-completion-outcome';
 
 describe('LaneUsageNormalizer', () => {
   const usage = (inputTokens?: number) => ({ inputTokens });
+  type Usage = Parameters<LaneUsageNormalizer['accept']>[2];
+  const sumOf = (steps: { increment: Usage }[], key: 'inputTokens' | 'outputTokens') =>
+    steps.reduce((total, step) => total + (step.increment[key] ?? 0), 0);
 
-  it('keeps one message total per turn', () => {
+  it('message: each message is its own increment and the turn total adds them up', () => {
     const normalizer = new LaneUsageNormalizer();
-    expect(normalizer.accept('lane', 'message', usage(2)).inputTokens).toBe(2);
-    expect(normalizer.accept('lane', 'message', usage(3)).inputTokens).toBe(5);
+    const steps = [normalizer.accept('lane', 'message', usage(2)), normalizer.accept('lane', 'message', usage(3))];
+    expect(steps.map((step) => step.increment.inputTokens)).toEqual([2, 3]);
+    expect(steps[1]?.turnTotal.inputTokens).toBe(5);
+    expect(sumOf(steps, 'inputTokens')).toBe(steps[1]?.turnTotal.inputTokens);
     normalizer.settleTurn('lane');
-    expect(normalizer.accept('lane', 'message', usage(1)).inputTokens).toBe(1);
+    expect(normalizer.accept('lane', 'message', usage(1)).turnTotal.inputTokens).toBe(1);
   });
 
-  it('passes turn totals and preserves measured zero', () => {
+  it('turn: passes the total, preserves measured zero and keeps absent counters absent', () => {
     const normalizer = new LaneUsageNormalizer();
-    expect(normalizer.accept('lane', 'turn', usage(0)).inputTokens).toBe(0);
-    expect(normalizer.accept('lane', 'turn', usage()).inputTokens).toBeUndefined();
+    expect(normalizer.accept('lane', 'turn', usage(0))).toEqual({ increment: { inputTokens: 0 }, turnTotal: { inputTokens: 0 } });
+    const absent = normalizer.accept('other', 'turn', usage());
+    expect(absent.increment).not.toHaveProperty('inputTokens');
+    expect(absent.turnTotal.inputTokens).toBeUndefined();
   });
 
-  it('turns cumulative snapshots into deltas and handles regression', () => {
+  it('turn after increments emits the (possibly negative) correction so card sum = total', () => {
     const normalizer = new LaneUsageNormalizer();
-    expect(normalizer.accept('lane', 'cumulative', usage(5)).inputTokens).toBe(5);
-    expect(normalizer.accept('lane', 'cumulative', usage(8)).inputTokens).toBe(3);
-    expect(normalizer.accept('lane', 'cumulative', usage(2)).inputTokens).toBe(2);
-    expect(normalizer.accept('lane', 'cumulative', usage()).inputTokens).toBeUndefined();
-    expect(normalizer.accept('lane', 'cumulative', usage(0)).inputTokens).toBe(0);
+    const steps = [
+      normalizer.accept('lane', 'message', { inputTokens: 4, outputTokens: 2 }),
+      normalizer.accept('lane', 'message', { inputTokens: 6, outputTokens: 3 }),
+      normalizer.accept('lane', 'turn', { inputTokens: 9, outputTokens: 7, costUsd: 0.02 }),
+    ];
+    expect(steps[2]?.increment).toEqual({ inputTokens: -1, outputTokens: 2, costUsd: 0.02 });
+    expect(sumOf(steps, 'inputTokens')).toBe(9);
+    expect(sumOf(steps, 'outputTokens')).toBe(7);
+    expect(steps[2]?.turnTotal).toEqual({ inputTokens: 9, outputTokens: 7, costUsd: 0.02 });
+  });
+
+  it('cumulative: deltas to the previous snapshot of this turn; card sum = durable total', () => {
+    const normalizer = new LaneUsageNormalizer();
+    const steps = [5, 8, 8].map((tokens) => normalizer.accept('lane', 'cumulative', usage(tokens)));
+    expect(steps.map((step) => step.increment.inputTokens)).toEqual([5, 3, 0]);
+    expect(steps[2]?.turnTotal.inputTokens).toBe(8);
+    expect(sumOf(steps, 'inputTokens')).toBe(8);
+    expect(normalizer.accept('lane', 'cumulative', usage()).increment).not.toHaveProperty('inputTokens');
+  });
+
+  it('after settleTurn the first cumulative snapshot of the next turn is a full increment', () => {
+    const normalizer = new LaneUsageNormalizer();
+    normalizer.accept('lane', 'cumulative', usage(5));
+    normalizer.accept('lane', 'cumulative', usage(8));
+    normalizer.settleTurn('lane');
+    expect(normalizer.accept('lane', 'cumulative', usage(6))).toMatchObject({
+      increment: { inputTokens: 6 }, turnTotal: { inputTokens: 6 },
+    });
+  });
+
+  it('passes contextTokens, durationMs and model through and never subtracts them', () => {
+    const normalizer = new LaneUsageNormalizer();
+    normalizer.accept('lane', 'cumulative', { inputTokens: 5, contextTokens: 900, durationMs: 10, model: 'm' });
+    const second = normalizer.accept('lane', 'cumulative', {
+      inputTokens: 8, totalTokens: 12, contextTokens: 1_200, durationMs: 25, model: 'm2', costUsd: 0.5,
+    });
+    expect(second.increment).toEqual({ inputTokens: 3, totalTokens: 12, contextTokens: 1_200, durationMs: 25, model: 'm2' });
+    const turn = normalizer.accept('lane', 'turn', { inputTokens: 8, contextTokens: 1_300, durationMs: 30 });
+    expect(turn.increment).toEqual({ inputTokens: 0, contextTokens: 1_300, durationMs: 30 });
+  });
+
+  it('omits costUsd on message and cumulative increments, keeps it on turn', () => {
+    const normalizer = new LaneUsageNormalizer();
+    expect(normalizer.accept('lane', 'message', { inputTokens: 1, costUsd: 0.1 }).increment).not.toHaveProperty('costUsd');
+    expect(normalizer.accept('lane', 'turn', { inputTokens: 1, costUsd: 0.1 }).increment.costUsd).toBe(0.1);
   });
 });
 

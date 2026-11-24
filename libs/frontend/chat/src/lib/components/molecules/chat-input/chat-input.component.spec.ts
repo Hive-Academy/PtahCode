@@ -82,6 +82,7 @@ import {
 } from '@ptah-extension/core';
 import { rpcSuccess } from '@ptah-extension/core/testing';
 import { VoiceInputService } from '../../../services/voice-input.service';
+import { ComposerInputController } from '../../../services/composer-input.controller';
 import type { AtTriggerEvent } from '../../../directives/at-trigger.directive';
 import {
   SESSION_CONTEXT,
@@ -230,6 +231,7 @@ describe('ChatInputComponent', () => {
         // Component-level in production; the class is built directly here.
         ComposerCompactStore,
         ComposerAttachmentsService,
+        ComposerInputController,
         { provide: ChangeDetectorRef, useValue: mockChangeDetector },
         { provide: ChatStore, useValue: mockChatStore },
         { provide: TabManagerService, useValue: mockTabManager },
@@ -688,32 +690,24 @@ describe('ChatInputComponent', () => {
   });
 
   describe('attach menu', () => {
-    it('toggles open and closed', () => {
-      expect(component.attachMenuOpen()).toBe(false);
-      component.toggleAttachMenu();
-      expect(component.attachMenuOpen()).toBe(true);
-      component.toggleAttachMenu();
-      expect(component.attachMenuOpen()).toBe(false);
+    // Open / close and the menu items are pinned by the attach menu's spec;
+    // the composer only opens the picker it is asked for.
+    it('opens the file picker on "Attach files"', async () => {
+      const attachments = TestBed.inject(ComposerAttachmentsService);
+      const pick = jest
+        .spyOn(attachments, 'pickFiles')
+        .mockResolvedValue(undefined);
+      await component.handleAttachFiles();
+      expect(pick).toHaveBeenCalledTimes(1);
     });
 
-    it('closes and opens the file picker on "Attach files"', () => {
-      const spy = jest
-        .spyOn(component, 'handleAttachFiles')
+    it('opens the image picker on "Attach images"', async () => {
+      const attachments = TestBed.inject(ComposerAttachmentsService);
+      const pick = jest
+        .spyOn(attachments, 'pickImages')
         .mockResolvedValue(undefined);
-      component.toggleAttachMenu();
-      component.selectAttachFiles();
-      expect(component.attachMenuOpen()).toBe(false);
-      expect(spy).toHaveBeenCalledTimes(1);
-    });
-
-    it('closes and opens the image picker on "Attach images"', () => {
-      const spy = jest
-        .spyOn(component, 'handleAttachImages')
-        .mockResolvedValue(undefined);
-      component.toggleAttachMenu();
-      component.selectAttachImages();
-      expect(component.attachMenuOpen()).toBe(false);
-      expect(spy).toHaveBeenCalledTimes(1);
+      await component.handleAttachImages();
+      expect(pick).toHaveBeenCalledTimes(1);
     });
   });
 
@@ -813,6 +807,7 @@ describe('ChatInputComponent', () => {
           provideZonelessChangeDetection(),
           ComposerCompactStore,
           ComposerAttachmentsService,
+          ComposerInputController,
           { provide: ChangeDetectorRef, useValue: mockChangeDetector },
           { provide: ChatStore, useValue: chatStore },
           { provide: TabManagerService, useValue: tabManager },
@@ -923,9 +918,9 @@ describe('ChatInputComponent', () => {
         triggerPosition: 0,
       };
 
-      component.handleAtActivated(event);
+      component.composerInput.handleAtActivated(event);
 
-      expect(component.suggestionMode()).toBe('at-trigger');
+      expect(component.composerInput.suggestionMode()).toBe('at-trigger');
     });
 
     it('should show suggestions immediately', () => {
@@ -935,9 +930,9 @@ describe('ChatInputComponent', () => {
         triggerPosition: 0,
       };
 
-      component.handleAtActivated(event);
+      component.composerInput.handleAtActivated(event);
 
-      expect(component.showSuggestions()).toBe(true);
+      expect(component.composerInput.showSuggestions()).toBe(true);
     });
 
     it('should set current query from activation event', () => {
@@ -947,12 +942,12 @@ describe('ChatInputComponent', () => {
         triggerPosition: 0,
       };
 
-      component.handleAtActivated(event);
+      component.composerInput.handleAtActivated(event);
 
       // Verify by checking filteredSuggestions is called with the query
       // The _currentQuery is private, but we can verify via filteredSuggestions behavior
-      expect(component.showSuggestions()).toBe(true);
-      expect(component.suggestionMode()).toBe('at-trigger');
+      expect(component.composerInput.showSuggestions()).toBe(true);
+      expect(component.composerInput.suggestionMode()).toBe('at-trigger');
     });
 
     it('should call ensureFilesLoaded for @ trigger', () => {
@@ -962,7 +957,7 @@ describe('ChatInputComponent', () => {
         triggerPosition: 0,
       };
 
-      component.handleAtActivated(event);
+      component.composerInput.handleAtActivated(event);
 
       expect(mockFilePicker.ensureFilesLoaded).toHaveBeenCalled();
     });
@@ -975,18 +970,18 @@ describe('ChatInputComponent', () => {
   describe('handleAtTriggered (debounced - NO query overwrite)', () => {
     it('should NOT overwrite _currentQuery when handleAtTriggered fires', () => {
       // Step 1: Activate with query "portal"
-      component.handleAtActivated({
+      component.composerInput.handleAtActivated({
         query: 'portal',
         cursorPosition: 7,
         triggerPosition: 0,
       });
 
       // Step 2: User keeps typing, handleQueryChanged updates to "portal.comp"
-      component.handleQueryChanged('portal.comp');
+      component.composerInput.handleQueryChanged('portal.comp');
 
       // Step 3: handleAtTriggered fires with STALE query "portal" (150ms later)
       // This is the race condition - the debounced handler should NOT overwrite
-      component.handleAtTriggered({
+      component.composerInput.handleAtTriggered({
         query: 'portal', // Stale value from 150ms ago
         cursorPosition: 7,
         triggerPosition: 0,
@@ -994,7 +989,7 @@ describe('ChatInputComponent', () => {
 
       // Verify: filteredSuggestions should use searchFiles with latest query
       // Access the computed to trigger evaluation
-      component.filteredSuggestions();
+      component.composerInput.filteredSuggestions();
 
       // searchFiles should have been called (from filteredSuggestions computed)
       // and the query should be the LATEST one ("portal.comp"), not the stale "portal"
@@ -1004,21 +999,21 @@ describe('ChatInputComponent', () => {
 
     it('should only update triggerPosition from debounced event', () => {
       // Activate
-      component.handleAtActivated({
+      component.composerInput.handleAtActivated({
         query: '',
         cursorPosition: 1,
         triggerPosition: 0,
       });
 
       // Debounced trigger fires with new position (user may have edited text before @)
-      component.handleAtTriggered({
+      component.composerInput.handleAtTriggered({
         query: 'test',
         cursorPosition: 15,
         triggerPosition: 10,
       });
 
       // The method should work without error (it only sets triggerPosition)
-      expect(component.showSuggestions()).toBe(true);
+      expect(component.composerInput.showSuggestions()).toBe(true);
     });
   });
 
@@ -1029,21 +1024,21 @@ describe('ChatInputComponent', () => {
   describe('handleQueryChanged (immediate query update)', () => {
     it('keeps the query current while deferring trigger projection', () => {
       // Activate first
-      component.handleAtActivated({
+      component.composerInput.handleAtActivated({
         query: '',
         cursorPosition: 1,
         triggerPosition: 0,
       });
 
       // Query changes as user types
-      component.handleQueryChanged('p');
-      component.handleQueryChanged('po');
-      component.handleQueryChanged('por');
-      component.handleQueryChanged('portal');
+      component.composerInput.handleQueryChanged('p');
+      component.composerInput.handleQueryChanged('po');
+      component.composerInput.handleQueryChanged('por');
+      component.composerInput.handleQueryChanged('portal');
 
       // The local resolver runs on the bounded trigger schedule, not on this
       // synchronous input path.
-      expect(component.showSuggestions()).toBe(true);
+      expect(component.composerInput.showSuggestions()).toBe(true);
     });
   });
 
@@ -1067,7 +1062,7 @@ describe('ChatInputComponent', () => {
 
     it('coalesces trigger typing to one latest-query projection', () => {
       jest.useFakeTimers();
-      component.handleAtActivated({
+      component.composerInput.handleAtActivated({
         query: '',
         cursorPosition: 1,
         triggerPosition: 0,
@@ -1075,9 +1070,9 @@ describe('ChatInputComponent', () => {
       mockFilePicker.searchFiles.mockClear();
       mockFilePicker.searchFilesRemote.mockClear();
 
-      component.handleQueryChanged('p');
-      component.handleQueryChanged('po');
-      component.handleQueryChanged('portal');
+      component.composerInput.handleQueryChanged('p');
+      component.composerInput.handleQueryChanged('po');
+      component.composerInput.handleQueryChanged('portal');
 
       expect(mockFilePicker.searchFiles).not.toHaveBeenCalled();
       jest.advanceTimersByTime(49);
@@ -1091,16 +1086,16 @@ describe('ChatInputComponent', () => {
 
     it('reuses a cached trigger projection when a query is revisited', () => {
       jest.useFakeTimers();
-      component.handleAtActivated({
+      component.composerInput.handleAtActivated({
         query: 'portal',
         cursorPosition: 7,
         triggerPosition: 0,
       });
       mockFilePicker.searchFiles.mockClear();
 
-      component.handleQueryChanged('port');
+      component.composerInput.handleQueryChanged('port');
       jest.advanceTimersByTime(50);
-      component.handleQueryChanged('portal');
+      component.composerInput.handleQueryChanged('portal');
       jest.advanceTimersByTime(50);
 
       expect(mockFilePicker.searchFiles).toHaveBeenCalledTimes(1);
@@ -1109,14 +1104,14 @@ describe('ChatInputComponent', () => {
 
     it('restores immediate trigger projection when the rollback flag is off', () => {
       createComponent({ composerTriggerCacheEnabled: false });
-      component.handleAtActivated({
+      component.composerInput.handleAtActivated({
         query: '',
         cursorPosition: 1,
         triggerPosition: 0,
       });
       mockFilePicker.searchFiles.mockClear();
 
-      component.handleQueryChanged('portal');
+      component.composerInput.handleQueryChanged('portal');
 
       expect(mockFilePicker.searchFiles).toHaveBeenCalledWith('portal');
     });
@@ -1129,34 +1124,34 @@ describe('ChatInputComponent', () => {
   describe('handleAtClosed', () => {
     it('should close suggestions when in at-trigger mode', () => {
       // Activate
-      component.handleAtActivated({
+      component.composerInput.handleAtActivated({
         query: 'test',
         cursorPosition: 5,
         triggerPosition: 0,
       });
-      expect(component.showSuggestions()).toBe(true);
+      expect(component.composerInput.showSuggestions()).toBe(true);
 
       // Close
-      component.handleAtClosed();
+      component.composerInput.handleAtClosed();
 
-      expect(component.showSuggestions()).toBe(false);
-      expect(component.suggestionMode()).toBeNull();
+      expect(component.composerInput.showSuggestions()).toBe(false);
+      expect(component.composerInput.suggestionMode()).toBeNull();
     });
 
     it('should NOT close suggestions when in slash-trigger mode', () => {
       // Activate with slash
-      component.handleSlashActivated({
+      component.composerInput.handleSlashActivated({
         query: 'test',
         cursorPosition: 5,
       });
-      expect(component.showSuggestions()).toBe(true);
+      expect(component.composerInput.showSuggestions()).toBe(true);
 
       // Try to close with @ handler (should not affect slash mode)
-      component.handleAtClosed();
+      component.composerInput.handleAtClosed();
 
       // Should still be showing (wrong mode)
-      expect(component.showSuggestions()).toBe(true);
-      expect(component.suggestionMode()).toBe('slash-trigger');
+      expect(component.composerInput.showSuggestions()).toBe(true);
+      expect(component.composerInput.suggestionMode()).toBe('slash-trigger');
     });
   });
 
@@ -1166,17 +1161,17 @@ describe('ChatInputComponent', () => {
 
   describe('handleSlashActivated (IMMEDIATE)', () => {
     it('should set suggestion mode to slash-trigger', () => {
-      component.handleSlashActivated({
+      component.composerInput.handleSlashActivated({
         query: '',
         cursorPosition: 1,
       });
 
-      expect(component.suggestionMode()).toBe('slash-trigger');
-      expect(component.showSuggestions()).toBe(true);
+      expect(component.composerInput.suggestionMode()).toBe('slash-trigger');
+      expect(component.composerInput.showSuggestions()).toBe(true);
     });
 
     it('should fetch command suggestions', () => {
-      component.handleSlashActivated({
+      component.composerInput.handleSlashActivated({
         query: 'orch',
         cursorPosition: 5,
       });
@@ -1188,50 +1183,50 @@ describe('ChatInputComponent', () => {
   describe('handleSlashTriggered (debounced - NO query overwrite)', () => {
     it('should be a no-op (no query overwrite)', () => {
       // Activate
-      component.handleSlashActivated({
+      component.composerInput.handleSlashActivated({
         query: 'test',
         cursorPosition: 5,
       });
 
       // Update query
-      component.handleQueryChanged('orchestrate');
+      component.composerInput.handleQueryChanged('orchestrate');
 
       // Debounced trigger fires - should not change anything
-      component.handleSlashTriggered();
+      component.composerInput.handleSlashTriggered();
 
       // Should still show suggestions (no change)
-      expect(component.showSuggestions()).toBe(true);
+      expect(component.composerInput.showSuggestions()).toBe(true);
     });
   });
 
   describe('handleSlashClosed', () => {
     it('should close suggestions when in slash-trigger mode', () => {
-      component.handleSlashActivated({
+      component.composerInput.handleSlashActivated({
         query: 'test',
         cursorPosition: 5,
       });
-      expect(component.showSuggestions()).toBe(true);
+      expect(component.composerInput.showSuggestions()).toBe(true);
 
-      component.handleSlashClosed();
+      component.composerInput.handleSlashClosed();
 
-      expect(component.showSuggestions()).toBe(false);
-      expect(component.suggestionMode()).toBeNull();
+      expect(component.composerInput.showSuggestions()).toBe(false);
+      expect(component.composerInput.suggestionMode()).toBeNull();
     });
 
     it('should NOT close suggestions when in at-trigger mode', () => {
-      component.handleAtActivated({
+      component.composerInput.handleAtActivated({
         query: 'file',
         cursorPosition: 5,
         triggerPosition: 0,
       });
-      expect(component.showSuggestions()).toBe(true);
+      expect(component.composerInput.showSuggestions()).toBe(true);
 
       // Try closing with slash handler
-      component.handleSlashClosed();
+      component.composerInput.handleSlashClosed();
 
       // Should still be showing
-      expect(component.showSuggestions()).toBe(true);
-      expect(component.suggestionMode()).toBe('at-trigger');
+      expect(component.composerInput.showSuggestions()).toBe(true);
+      expect(component.composerInput.suggestionMode()).toBe('at-trigger');
     });
   });
 
@@ -1253,13 +1248,13 @@ describe('ChatInputComponent', () => {
       ];
       mockFilePicker.searchFiles.mockReturnValue(mockResults);
 
-      component.handleAtActivated({
+      component.composerInput.handleAtActivated({
         query: 'portal',
         cursorPosition: 7,
         triggerPosition: 0,
       });
 
-      const results = component.filteredSuggestions();
+      const results = component.composerInput.filteredSuggestions();
 
       expect(mockFilePicker.searchFiles).toHaveBeenCalledWith('portal');
       expect(results.length).toBe(1);
@@ -1271,12 +1266,12 @@ describe('ChatInputComponent', () => {
         { name: 'orchestrate', description: 'Orchestrate tasks', icon: '' },
       ]);
 
-      component.handleSlashActivated({
+      component.composerInput.handleSlashActivated({
         query: 'orch',
         cursorPosition: 5,
       });
 
-      const results = component.filteredSuggestions();
+      const results = component.composerInput.filteredSuggestions();
 
       expect(mockCommandDiscovery.searchCommands).toHaveBeenCalledWith('');
       // The matching command comes first; the catalogue prompts that also
@@ -1293,7 +1288,7 @@ describe('ChatInputComponent', () => {
     });
 
     it('should return empty array when no mode is set', () => {
-      const results = component.filteredSuggestions();
+      const results = component.composerInput.filteredSuggestions();
 
       expect(results).toEqual([]);
     });
@@ -1321,9 +1316,9 @@ describe('ChatInputComponent', () => {
     });
 
     it('lists the whole catalogue after the commands when / activates', () => {
-      component.handleSlashActivated({ query: '', cursorPosition: 1 });
+      component.composerInput.handleSlashActivated({ query: '', cursorPosition: 1 });
 
-      const results = component.filteredSuggestions();
+      const results = component.composerInput.filteredSuggestions();
 
       expect(results.length).toBe(1 + cataloguePromptCount);
       expect(results[0]?.type).toBe('command');
@@ -1340,13 +1335,13 @@ describe('ChatInputComponent', () => {
       ['creative', 'Design landing page'], // category match
       ['parallax', 'Add scroll animation'], // text match
     ])('filters catalogue prompts matching %s', (query, expectedLabel) => {
-      component.handleSlashActivated({
+      component.composerInput.handleSlashActivated({
         query,
         cursorPosition: query.length + 1,
       });
 
       const prompts = component
-        .filteredSuggestions()
+        .composerInput.filteredSuggestions()
         .filter((s) => s.type === 'prompt');
 
       expect(
@@ -1355,10 +1350,10 @@ describe('ChatInputComponent', () => {
     });
 
     it('exposes the category label with the matched prompt', () => {
-      component.handleSlashActivated({ query: 'security', cursorPosition: 9 });
+      component.composerInput.handleSlashActivated({ query: 'security', cursorPosition: 9 });
 
       const prompts = component
-        .filteredSuggestions()
+        .composerInput.filteredSuggestions()
         .filter((s) => s.type === 'prompt');
 
       expect(prompts).toEqual([
@@ -1373,17 +1368,17 @@ describe('ChatInputComponent', () => {
     });
 
     it('prefills the composer with the prompt text when a prompt is selected', () => {
-      component.handleSlashActivated({ query: 'security', cursorPosition: 9 });
+      component.composerInput.handleSlashActivated({ query: 'security', cursorPosition: 9 });
       const prompts = component
-        .filteredSuggestions()
+        .composerInput.filteredSuggestions()
         .filter((s) => s.type === 'prompt');
       expect(prompts.length).toBe(1);
 
-      component.handleSuggestionSelected(prompts[0]);
+      component.composerInput.handleSuggestionSelected(prompts[0]);
 
       expect(component.currentMessage()).toBe('/review-security');
-      expect(component.showSuggestions()).toBe(false);
-      expect(component.suggestionMode()).toBeNull();
+      expect(component.composerInput.showSuggestions()).toBe(false);
+      expect(component.composerInput.suggestionMode()).toBeNull();
 
       // The queued-restore default keeps FIX #2: a non-empty input is not
       // clobbered by a later restore without the explicit replace option.
@@ -1399,17 +1394,17 @@ describe('ChatInputComponent', () => {
   describe('closeSuggestions()', () => {
     it('should reset all suggestion state', () => {
       // Activate
-      component.handleAtActivated({
+      component.composerInput.handleAtActivated({
         query: 'test',
         cursorPosition: 5,
         triggerPosition: 0,
       });
 
       // Close
-      component.closeSuggestions();
+      component.composerInput.closeSuggestions();
 
-      expect(component.showSuggestions()).toBe(false);
-      expect(component.suggestionMode()).toBeNull();
+      expect(component.composerInput.showSuggestions()).toBe(false);
+      expect(component.composerInput.suggestionMode()).toBeNull();
     });
   });
 
@@ -1517,31 +1512,31 @@ describe('ChatInputComponent', () => {
       //    FIX: handleAtTriggered no longer sets _currentQuery
 
       // Step 1: Activation
-      component.handleAtActivated({
+      component.composerInput.handleAtActivated({
         query: '',
         cursorPosition: 1,
         triggerPosition: 0,
       });
-      expect(component.showSuggestions()).toBe(true);
+      expect(component.composerInput.showSuggestions()).toBe(true);
 
       // Steps 2-7: Progressive typing (each handleQueryChanged is immediate)
-      component.handleQueryChanged('p');
-      component.handleQueryChanged('po');
-      component.handleQueryChanged('por');
-      component.handleQueryChanged('port');
-      component.handleQueryChanged('porta');
-      component.handleQueryChanged('portal');
+      component.composerInput.handleQueryChanged('p');
+      component.composerInput.handleQueryChanged('po');
+      component.composerInput.handleQueryChanged('por');
+      component.composerInput.handleQueryChanged('port');
+      component.composerInput.handleQueryChanged('porta');
+      component.composerInput.handleQueryChanged('portal');
 
       // Step 8: Debounced atTriggered fires with STALE query
-      component.handleAtTriggered({
+      component.composerInput.handleAtTriggered({
         query: '', // Stale value from activation 150ms ago
         cursorPosition: 1,
         triggerPosition: 0,
       });
 
       // CRITICAL ASSERTION: Dropdown should still be showing
-      expect(component.showSuggestions()).toBe(true);
-      expect(component.suggestionMode()).toBe('at-trigger');
+      expect(component.composerInput.showSuggestions()).toBe(true);
+      expect(component.composerInput.suggestionMode()).toBe('at-trigger');
 
       // The stale debounced directive event must not close or overwrite the
       // latest draft query; projection is covered by the scheduling seam.
@@ -1553,76 +1548,22 @@ describe('ChatInputComponent', () => {
   // ============================================================================
 
   describe('voice input', () => {
-    it('hides the mic button (isElectron false) when not in Electron', () => {
-      createComponent({ isElectron: false });
-      expect(component.isElectron).toBe(false);
-    });
-
-    it('shows the mic button (isElectron true) when in Electron', () => {
-      createComponent({ isElectron: true });
-      expect(component.isElectron).toBe(true);
-    });
-
-    it('starts recording when idle and the button is pressed', async () => {
-      createComponent({ isElectron: true });
-      mockVoiceInput.isRecording.set(false);
-      mockVoiceInput.isTranscribing.set(false);
-
-      await component.handleVoiceButton();
-
-      expect(mockVoiceInput.startRecording).toHaveBeenCalled();
-    });
-
-    it('surfaces a permission error when start fails', async () => {
-      createComponent({ isElectron: true });
-      mockVoiceInput.isRecording.set(false);
-      mockVoiceInput.startRecording.mockResolvedValue(undefined);
-      voiceErrorSignal.set('Microphone access denied');
-
-      await component.handleVoiceButton();
-
-      expect(component.imageAttachmentError()).toBe('Microphone access denied');
-    });
-
-    it('stops and inserts the transcript into the input on success', async () => {
-      createComponent({ isElectron: true });
-      mockVoiceInput.isRecording.set(true);
-      mockVoiceInput.stopRecording.mockResolvedValue({
-        ok: true,
-        transcript: 'transcribed text',
-      });
-
-      await component.handleVoiceButton();
-
-      expect(mockVoiceInput.stopRecording).toHaveBeenCalled();
+    // Recording, the Electron-only render and the error hand-off are pinned
+    // by the voice button's spec; the composer inserts what it hands over.
+    it('inserts the transcript into the input', () => {
+      component.composerInput.insertTranscript('transcribed text');
       expect(component.currentMessage()).toContain('transcribed text');
     });
 
-    it('appends transcript with a leading space after existing text', async () => {
-      createComponent({ isElectron: true });
+    it('appends transcript with a leading space after existing text', () => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (component as any)._currentMessage.set('existing');
-      mockVoiceInput.isRecording.set(true);
-      mockVoiceInput.stopRecording.mockResolvedValue({
-        ok: true,
-        transcript: 'spoken',
-      });
-
-      await component.handleVoiceButton();
-
+      component.composerInput.insertTranscript('spoken');
       expect(component.currentMessage()).toBe('existing spoken');
     });
 
-    it('shows an error when transcription fails', async () => {
-      createComponent({ isElectron: true });
-      mockVoiceInput.isRecording.set(true);
-      mockVoiceInput.stopRecording.mockResolvedValue({
-        ok: false,
-        error: 'whisper unavailable',
-      });
-
-      await component.handleVoiceButton();
-
+    it('shows a recording or transcription error near the input', () => {
+      component.composerInput.showError('whisper unavailable');
       expect(component.imageAttachmentError()).toBe('whisper unavailable');
       expect(component.currentMessage()).toBe('');
     });

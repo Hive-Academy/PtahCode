@@ -2,11 +2,14 @@
  * The lock mechanism, with no opinion about what is being locked.
  *
  * `workspace-lock.ts` was the only caller until TASK_2026_285 put a SECOND
- * writer on an MCP config file that lives in `$HOME` — `AntigravityCliAdapter`
- * writes Ptah's own server into `~/.gemini/config/mcp_config.json` before every
- * spawn, while the reconciler writes the user's servers into the same file. The
- * workspace lock cannot serialize those two: the file is not in the workspace,
- * and two workspaces have two different locks anyway.
+ * writer on an MCP config file that lives in `$HOME` — the former writer,
+ * `AntigravityCliAdapter` (per-spawn write removed in TASK_2026_2322), wrote
+ * Ptah's own server into `~/.gemini/config/mcp_config.json` while the
+ * reconciler wrote the user's servers into the same file. Any concurrent
+ * mutation of such a file (the retired-entry sweep in `CodeExecutionMCP`,
+ * another Ptah process, the user) still needs this: the workspace lock cannot
+ * serialize them, because the file is not in the workspace and two workspaces
+ * have two different locks anyway.
  *
  * So the policy (WHICH file, and where its lock file lives) moved out to the
  * callers and the mechanism stayed here, unchanged:
@@ -281,13 +284,11 @@ export async function acquireFileLock(
  * outcome ruled out is writing unlocked in silence.
  *
  * Failing is affordable because every caller of this function already treats a
- * mutation failure as transient and retries on its own schedule:
- * `applyMcpFacet` records a `writeFailed` row that the next `mode: 'full'` pass
- * (every host activation) re-attempts; `AntigravityCliAdapter` documents its
- * spawn-time write as non-fatal and the next spawn rewrites it;
- * `CodeExecutionMCP` logs and deliberately keeps its registration record so a
- * later call retries. What is traded away is liveness for ONE mutation under
- * cross-process contention — which is the trade the deadline was already
+ * mutation failure as transient and retries on its own schedule (the next
+ * reconcile, sweep or store write). The `AntigravityCliAdapter` spawn-time
+ * write this paragraph once cited is gone (TASK_2026_979 decision row 13).
+ * What is traded away is liveness for ONE mutation under cross-process
+ * contention — which is the trade the deadline was already
  * making, just now in the direction that cannot lose data.
  *
  * `no-lock-directory` is deliberately NOT a failure here: see

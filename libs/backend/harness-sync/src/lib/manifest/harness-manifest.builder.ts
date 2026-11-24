@@ -71,33 +71,19 @@ import {
   type ContentHashOptions,
 } from '../hash/content-hash';
 import type { HarnessSourceState } from '../sources/harness-source.port';
-import { userAgentFiles, type UserAgentLog } from '../sources/user-agent-source';
+import {
+  userAgentFiles,
+  type UserAgentLog,
+} from '../sources/user-agent-source';
 import type { SkillSyncSelection } from '../state/skill-sync-gate';
-import { hashMcpConfig } from '../targets/mcp/mcp-json-format';
 import type {
   HarnessDesiredAgent,
   HarnessDesiredCommand,
-  HarnessDesiredMcpServer,
   HarnessDesiredSkill,
   HarnessDesiredState,
 } from './desired-state.types';
 import { createPluginOriginGate } from './plugin-origin-gate';
 import { canonicalSlug, isReservedSlug } from './slug-rules';
-
-/** Ids the reconciler knows how to route an MCP intent to. */
-const HARNESS_TARGET_IDS: ReadonlySet<string> = new Set<HarnessTargetId>([
-  'claude',
-  'codex',
-  'copilot',
-  'cursor',
-  'antigravity',
-  'opencode',
-  'vscode',
-]);
-
-function isHarnessTargetId(value: string): value is HarnessTargetId {
-  return HARNESS_TARGET_IDS.has(value);
-}
 
 /**
  * Providers whose agent copies harness-sync writes. Claude is excluded: the
@@ -331,8 +317,12 @@ export class HarnessManifestBuilder {
     private readonly warn: (message: string, detail?: unknown) => void = () =>
       undefined,
     private readonly agentLog: UserAgentLog = {
-      warn: (message, detail) => { throw new Error(`${message}: ${String(detail)}`); },
-      error: (_message, error) => { throw error; },
+      warn: (message, detail) => {
+        throw new Error(`${message}: ${String(detail)}`);
+      },
+      error: (_message, error) => {
+        throw error;
+      },
     },
   ) {}
 
@@ -374,11 +364,7 @@ export class HarnessManifestBuilder {
       skills,
       commands,
       agents,
-      mcp: this.buildMcp(sources),
       collisions,
-      // MCP is deliberately NOT counted. `sources` answers "did the user layer
-      // have anything to offer", and MCP intents come from a different file
-      // that is present on a cold offline first run when the user layer is not.
       sources: this.classifySources(
         skills.length + commands.length + agents.length,
         options.downloadPending === true,
@@ -409,33 +395,6 @@ export class HarnessManifestBuilder {
     for (const pluginPath of sources.overlayPluginPaths) add(pluginPath);
 
     return [...roots].sort();
-  }
-
-  // ------------------------------------------------------------------- mcp
-
-  /**
-   * MCP servers the user asked Ptah to install, from the intent store.
-   *
-   * The install target ids and the harness target ids are the same strings by
-   * construction, so an intent maps to a target without a lookup table; an
-   * unrecognised id is dropped rather than guessed at, which is what keeps a
-   * hand-edited intent file from making a target write a server nobody asked
-   * for.
-   */
-  private buildMcp(sources: HarnessSourceState): HarnessDesiredMcpServer[] {
-    const servers: HarnessDesiredMcpServer[] = [];
-    for (const intent of sources.mcpIntents ?? []) {
-      const targets = intent.targets.filter(isHarnessTargetId);
-      if (targets.length === 0) continue;
-      servers.push({
-        serverKey: intent.serverKey,
-        registryName: intent.registryName,
-        config: intent.config,
-        targets,
-        contentHash: hashMcpConfig(intent.config),
-      });
-    }
-    return servers.sort((a, b) => a.serverKey.localeCompare(b.serverKey));
   }
 
   /**
@@ -675,7 +634,11 @@ export class HarnessManifestBuilder {
       // degradation-audit: optional-capability - a missing skills directory
       // (a plugin without skills) contributes no skills; other read failures
       // are logged at warn and also return an empty list.
-      warnUnlessMissing(this.warn, '[harness-sync] skills directory unreadable', error);
+      warnUnlessMissing(
+        this.warn,
+        '[harness-sync] skills directory unreadable',
+        error,
+      );
       return [];
     }
     const slugs: string[] = [];
@@ -778,13 +741,16 @@ export class HarnessManifestBuilder {
     const claimed = new Map<string, HarnessDesiredAgent>();
     for (const file of await userAgentFiles(workspaceRoot, this.agentLog)) {
       const slug = file.replace(/\.md$/i, '');
-      if (!isAgentSelectedForSync(
-        {
-          agentSyncEnabled: options.agentSyncEnabled,
-          disabledAgentIds: sources.disabledAgentIds,
-        },
-        slug,
-      )) continue;
+      if (
+        !isAgentSelectedForSync(
+          {
+            agentSyncEnabled: options.agentSyncEnabled,
+            disabledAgentIds: sources.disabledAgentIds,
+          },
+          slug,
+        )
+      )
+        continue;
       const collision = this.rejectSlug(
         claimed,
         slug,
@@ -850,7 +816,11 @@ export class HarnessManifestBuilder {
       // degradation-audit: optional-capability - a missing commands directory
       // (a plugin without commands) contributes no commands; other read
       // failures are logged at warn and also return an empty list.
-      warnUnlessMissing(this.warn, '[harness-sync] commands directory unreadable', error);
+      warnUnlessMissing(
+        this.warn,
+        '[harness-sync] commands directory unreadable',
+        error,
+      );
       return [];
     }
     const files: string[] = [];

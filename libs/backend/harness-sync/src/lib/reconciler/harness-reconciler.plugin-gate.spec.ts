@@ -37,7 +37,6 @@ import type {
   HarnessSourceLayout,
   HarnessSourceState,
 } from '../sources/harness-source.port';
-import { McpIntentStore } from '../sources/mcp-intent-store';
 import {
   createPluginConfigSourceResolver,
   type HarnessPluginConfigReader,
@@ -284,11 +283,7 @@ describe('HarnessReconcilerService — the plugin gate on disk', () => {
       logger,
       new HarnessManifestBuilder(),
       store,
-      createPluginConfigSourceResolver(
-        readerFactory,
-        layout(),
-        new McpIntentStore(join(tempHome, '.ptah', 'mcp-installed.json')),
-      ),
+      createPluginConfigSourceResolver(readerFactory, layout()),
       [new ClaudeTarget(store)],
     );
   }

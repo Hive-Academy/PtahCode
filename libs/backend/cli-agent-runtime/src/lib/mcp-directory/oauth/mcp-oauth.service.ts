@@ -32,6 +32,7 @@ import {
   discoverAuthorizationServer,
   discoverAuthServerMetadata,
   registerClient,
+  selectAuthorizationScope,
   withRequestTimeout,
   OAuthTimeoutError,
   OAUTH_DISCOVERY_DEADLINE_MS,
@@ -40,6 +41,7 @@ import {
   OAUTH_TIMEOUT_ERROR_NAME,
   type AuthServerMetadata,
   type FetchLike,
+  type ProtectedResourceDiscovery,
 } from './mcp-oauth-metadata';
 import type {
   McpOAuthTokenRecord,
@@ -229,19 +231,30 @@ export class McpOAuthService {
     }
   }
 
-  /** Discover the authorization server and its metadata within `signal`. */
+  /**
+   * Discover the protected resource (auth server + the scopes it asks for) and
+   * the authorization server's metadata within `signal`.
+   */
   private discover(
     serverUrl: string,
     signal: AbortSignal,
     step: OAuthStep = 'discovery',
-  ): Promise<AuthServerMetadata> {
+  ): Promise<{
+    meta: AuthServerMetadata;
+    resource: ProtectedResourceDiscovery;
+  }> {
     return this.timedStep(step, serverUrl, async () => {
-      const authServer = await discoverAuthorizationServer(
+      const resource = await discoverAuthorizationServer(
         serverUrl,
         this.fetchImpl,
         signal,
       );
-      return discoverAuthServerMetadata(authServer, this.fetchImpl, signal);
+      const meta = await discoverAuthServerMetadata(
+        resource.authorizationServer,
+        this.fetchImpl,
+        signal,
+      );
+      return { meta, resource };
     });
   }
 
@@ -291,7 +304,7 @@ export class McpOAuthService {
 
     // One deadline for everything before the browser callback wait.
     const deadline = AbortSignal.timeout(this.discoveryDeadlineMs);
-    const meta = await this.discover(serverUrl, deadline);
+    const { meta, resource } = await this.discover(serverUrl, deadline);
 
     const pkce = generatePkceChallenge();
 
@@ -336,7 +349,10 @@ export class McpOAuthService {
         );
       }
 
-      const scope = options.scope ?? meta.scopesSupported?.join(' ');
+      // Never the authorization server's `scopes_supported`: it lists every
+      // scope the server knows, and Clerk rejects a request for one the client
+      // was not granted (`invalid_scope`, TASK_2026_HIGGSFIELD).
+      const scope = selectAuthorizationScope(options.scope, resource);
       const authorizeUrl = this.buildAuthorizeUrl(meta.authorizationEndpoint, {
         clientId,
         redirectUri,
@@ -393,7 +409,7 @@ export class McpOAuthService {
   async probeDiscovery(
     serverUrl: string,
   ): Promise<{ dynamicRegistration: boolean }> {
-    const meta = await this.discover(
+    const { meta } = await this.discover(
       serverUrl,
       AbortSignal.timeout(this.probeDeadlineMs),
       'probe-discovery',
@@ -502,7 +518,10 @@ export class McpOAuthService {
         if (!this.manifest.has(serverKey)) return null;
         const stored = await this.tokenStore.getToken(serverKey);
         if (!stored || stored.refreshToken === token.refreshToken) return null;
-        if (stored.expiresAt && stored.expiresAt - this.now() < EXPIRY_SKEW_MS) {
+        if (
+          stored.expiresAt &&
+          stored.expiresAt - this.now() < EXPIRY_SKEW_MS
+        ) {
           return null;
         }
         return stored;

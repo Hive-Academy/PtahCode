@@ -684,8 +684,10 @@ export class IndexingControlService {
    * Run a background (lifecycle / watcher) full index for `workspaceRoot`
    * inside the shared census registry. `run` receives the record's progress
    * handler and its resolution or rejection is returned unchanged. This never
-   * writes `last_indexed_at` or `last_error`; the record's single settle
-   * writes `lastRun` and pushes complete/failed.
+   * writes `last_error`; the record's single settle writes `lastRun`, pushes
+   * complete/failed and, for a succeeded background run, records
+   * `last_indexed_at` and the HEAD sha so the derived state is not
+   * `never-indexed`.
    */
   async trackBackgroundRun<T>(
     workspaceRoot: string,
@@ -916,10 +918,12 @@ export class IndexingControlService {
       (o) => o.origin === 'background' && o.outcome.kind !== 'aborted',
     );
     let decided: ParticipantOutcome | null = null;
+    let decidedBackground = false;
     if (manual && manual.outcome.kind !== 'aborted') {
       decided = manual.outcome;
     } else if (background) {
       decided = background.outcome;
+      decidedBackground = true;
     } else if (
       manual &&
       manual.outcome.kind === 'aborted' &&
@@ -981,6 +985,29 @@ export class IndexingControlService {
     }
 
     if (decided.kind === 'succeeded' && persisted) {
+      // A manual run writes `last_indexed_at` itself. A background run (the
+      // lifecycle / watcher full index) did not, so `indexing:getStatus` kept
+      // reporting `never-indexed` for a fully indexed workspace. Record the
+      // completion time, the HEAD it indexed (never overwrite a stored sha
+      // with null: a non-git root or an unreadable HEAD would disable the
+      // stale check) and clear an older failure: this run succeeded after it.
+      // `symbols_cursor` stays untouched, it belongs to a paused run.
+      if (decidedBackground) {
+        const saved = this.upsertRow(record.fp, {
+          last_indexed_at: finishedAt,
+          last_error: null,
+          ...(record.gitHeadSha === null
+            ? {}
+            : { git_head_sha: record.gitHeadSha }),
+        });
+        if (!saved) {
+          // upsertRow warned with the cause; the push below still goes out.
+          this.logger.warn(
+            '[indexing-control] background run succeeded but its completion time could not be saved',
+            { workspaceRoot: record.workspaceRoot },
+          );
+        }
+      }
       const completeEvent: IndexingCompleteEvent = {
         workspaceRoot: record.workspaceRoot,
         workspaceFingerprint: record.fp,
@@ -1136,7 +1163,11 @@ export class IndexingControlService {
     if (chosen === null) {
       // A manual start still in its setup reads: report it as running.
       return pending
-        ? { origin: 'manual', startedAt: pending.startedAt, force: pending.force }
+        ? {
+            origin: 'manual',
+            startedAt: pending.startedAt,
+            force: pending.force,
+          }
         : null;
     }
     // A pending manual start joins the open record once its setup ends.
@@ -1416,7 +1447,8 @@ export class IndexingControlService {
       const stmt = this.sqlite.db.prepare(
         'SELECT * FROM indexing_state WHERE workspace_fingerprint = ?',
       );
-      const row = (stmt.get(fingerprint) as IndexingStateRow | undefined) ?? null;
+      const row =
+        (stmt.get(fingerprint) as IndexingStateRow | undefined) ?? null;
       return { ok: true, row };
     } catch (error: unknown) {
       // degradation-audit: reported - the error is returned to the caller;

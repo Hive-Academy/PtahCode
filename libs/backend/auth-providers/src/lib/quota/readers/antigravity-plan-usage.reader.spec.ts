@@ -95,6 +95,12 @@ describe('Antigravity source chain', () => {
     expect(options.budgetMs).toBeGreaterThan(0);
     expect(options.budgetMs).toBeLessThan(ANTIGRAVITY_CHAIN_TIMEOUT_MS);
   });
+  it('passes a manual refresh on to the CLI stage, and a normal read as not a refresh', async () => {
+    const { reader } = setup();
+    await reader({ target, refresh: true });
+    await reader({ target, refresh: false });
+    expect(readCli.mock.calls.map(([, options]) => options.refresh)).toEqual([true, false]);
+  });
   it('says "not signed in" only when the agy sign-in check says so', async () => {
     readCli.mockImplementation(async () => cliFailure('cli-not-signed-in', 'signed-out'));
     expect((await setup().reader({ target, refresh: true })).statusReason).toBe('cli-not-signed-in');
@@ -162,7 +168,7 @@ describe('Antigravity source chain', () => {
     expect((await reader({ target, refresh: true })).source).toBe('provider-api');
     expect(run).not.toHaveBeenCalled();
   });
-  it('settles hanging stages before twelve seconds with linked aborts', async () => {
+  it('settles hanging stages inside the chain budget with linked aborts', async () => {
     jest.useFakeTimers();
     try {
       const start = Date.now();
@@ -175,7 +181,7 @@ describe('Antigravity source chain', () => {
       await jest.advanceTimersByTimeAsync(ANTIGRAVITY_CHAIN_TIMEOUT_MS);
       const result = await pending;
       expect(result.sourceFailures?.filter(({ cause }) => cause === 'timeout')).toHaveLength(2);
-      expect(Date.now() - start).toBeLessThan(12_000);
+      expect(Date.now() - start).toBeLessThanOrEqual(ANTIGRAVITY_CHAIN_TIMEOUT_MS);
       expect(signals.every((signal) => signal.aborted)).toBe(true);
       expect(jest.getTimerCount()).toBe(0);
     } finally { jest.useRealTimers(); }

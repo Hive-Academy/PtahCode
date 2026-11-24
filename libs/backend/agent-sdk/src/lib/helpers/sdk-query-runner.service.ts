@@ -53,8 +53,12 @@ import {
   isUnsafeWorkspacePath,
   type IPlatformInfo,
   type IMcpCallerCredentials,
+  type IMcpGateway,
+  internalQueryGatewayScope,
 } from '@ptah-extension/platform-core';
 import { SDK_TOKENS } from '../di/tokens';
+import { oneShotGatewayDenyHookFor } from '../permission/one-shot-gateway-deny-hook';
+import { gatewayServesPtah } from './gateway-session-wiring';
 import {
   AUTH_PROVIDERS_TOKENS,
   type ProviderAccountAdmissionPort,
@@ -201,6 +205,8 @@ export interface OneShotRunInput {
    * filled in this runner, from `resolveModelId`, not from `input.model`.
    */
   dispatch?: ModelDispatchRoute;
+  /** Opt in to the user's own MCP servers served by `ptah` (unattended, never asked). */
+  includeConnectors?: boolean;
 }
 
 /** The `canUseTool` of a `'none'` one-shot: every request is refused. */
@@ -338,6 +344,8 @@ export class SdkQueryRunner {
     readonly accountPersistence: NamedAccountPersistencePort | null = null,
     @inject(PLATFORM_TOKENS.MCP_CALLER_CREDENTIALS, { isOptional: true })
     private readonly mcpCallerCredentials?: IMcpCallerCredentials,
+    @inject(PLATFORM_TOKENS.MCP_GATEWAY, { isOptional: true })
+    private readonly mcpGateway?: IMcpGateway,
   ) {}
 
   /**
@@ -690,6 +698,7 @@ export class SdkQueryRunner {
       );
     }
     const toolAccess = input.toolAccess ?? 'claude-code';
+    const includeConnectors = input.includeConnectors === true;
     const mcpServers =
       toolAccess === 'none'
         ? {}
@@ -699,12 +708,13 @@ export class SdkQueryRunner {
               input.mcpPort,
               input.cwd,
               credentialSubject,
+              includeConnectors,
             ),
             policy,
             capabilityFlags.deniedMcpServers,
           );
 
-    const hooks = this.buildOneShotHooks(input.cwd);
+    const hooks = this.buildOneShotHooks(input.cwd, includeConnectors);
 
     const compactionConfig = this.compactionConfigProvider.getConfig();
     this.logger.debug(
@@ -719,7 +729,12 @@ export class SdkQueryRunner {
       // `PTAH_DISABLE_SDK_AUTO_MEMORY` by identity when the policy adds no key.
       settings: buildFlagSettings(undefined, undefined, capabilityFlags),
       mcpServers,
-      ...capabilityIsolationOptions(policy),
+      // Strict MCP (C11) only for a run that opted in to connectors and gets
+      // them through `ptah`; any other run keeps the CLI's own MCP sources.
+      ...capabilityIsolationOptions(
+        policy,
+        includeConnectors && gatewayServesPtah(this.mcpGateway, mcpServers),
+      ),
       ...toolAccessOptions(toolAccess),
       maxTurns: input.maxTurns ?? DEFAULT_ONE_SHOT_MAX_TURNS,
       includePartialMessages: true,
@@ -842,6 +857,7 @@ export class SdkQueryRunner {
     mcpPort: number | undefined,
     cwd: string,
     credentialSubject: string,
+    includeConnectors: boolean,
   ): Record<string, McpHttpServerConfig> {
     if (!mcpServerRunning) {
       this.logger.warn(`${SERVICE_TAG} MCP disabled (server not running)`);
@@ -855,7 +871,7 @@ export class SdkQueryRunner {
       );
     }
     const token = this.mcpCallerCredentials.issue(
-      { kind: 'internal-query', workspaceRoot: cwd, capability: 'privileged' },
+      internalQueryGatewayScope(cwd, includeConnectors),
       credentialSubject,
       15 * 60 * 1000,
     );
@@ -870,6 +886,7 @@ export class SdkQueryRunner {
 
   private buildOneShotHooks(
     cwd: string,
+    includeConnectors: boolean,
   ): Partial<Record<HookEvent, HookCallbackMatcher[]>> {
     // One synthetic id for BOTH handlers. A one-shot query has no Ptah session
     // id at all, and passing none to the subagent handler left every subagent
@@ -906,6 +923,16 @@ export class SdkQueryRunner {
     for (const [event, matchers] of Object.entries(subagentHooks)) {
       mergedHooks[event as HookEvent] = matchers;
     }
+
+    // No connector opt-in: deny gateway tools, even under `bypassPermissions`.
+    const gatewayDeny = oneShotGatewayDenyHookFor(
+      this.mcpGateway,
+      includeConnectors,
+      this.logger,
+      SERVICE_TAG,
+    );
+    if (gatewayDeny)
+      mergedHooks.PreToolUse = [gatewayDeny, ...(mergedHooks.PreToolUse ?? [])];
 
     return mergedHooks;
   }

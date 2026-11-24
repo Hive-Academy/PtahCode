@@ -10,6 +10,7 @@ jest.mock('node:child_process', () => ({
 import {
   PROCESS_TREE_KILL_GRACE_MS,
   killProcessTree,
+  preloadProcessTreeKill,
 } from './process-tree-reaper';
 
 describe('killProcessTree', () => {
@@ -103,6 +104,24 @@ describe('killProcessTree', () => {
     const onError = jest.fn();
     await killProcessTree(4242, 'SIGTERM', onError);
     expect(onError).not.toHaveBeenCalled();
+  });
+
+  it('starts taskkill in the same tick once preloaded (quit path)', async () => {
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    await preloadProcessTreeKill();
+
+    const done = killProcessTree(5151);
+
+    // No await ran yet: a quit that never waits still starts the kill.
+    expect(mockExecFile).toHaveBeenCalledTimes(1);
+    expect(mockExecFile.mock.calls[0][1]).toEqual(['/pid', '5151', '/T', '/F']);
+    await done;
+  });
+
+  it('preload is a no-op off Windows', async () => {
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true });
+    await expect(preloadProcessTreeKill()).resolves.toBeUndefined();
+    expect(mockExecFile).not.toHaveBeenCalled();
   });
 
   it('escalates a live POSIX process group after the grace period', async () => {

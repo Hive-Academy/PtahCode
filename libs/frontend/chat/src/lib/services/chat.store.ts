@@ -482,13 +482,19 @@ export class ChatStore {
     this.permissionHandler.handleQuestionRequest(request);
   }
 
-  /** User answer to AskUserQuestion. */
+  /**
+   * User answer to AskUserQuestion. `decidingTabId` is the tab the answer
+   * was given for; omitted, the active tab decides. `null` means no tab
+   * decided (a lane surface whose owner tab is not open).
+   */
   handleQuestionResponse(
     response: AskUserQuestionResponse,
-    decidingTabId?: string,
+    decidingTabId?: string | null,
   ): void {
     const decidingTabIdRaw =
-      decidingTabId ?? this.tabManager.activeTabId() ?? null;
+      decidingTabId === undefined
+        ? (this.tabManager.activeTabId() ?? null)
+        : decidingTabId;
     const parsedDecidingTabId = decidingTabIdRaw
       ? (TabId.safeParse(decidingTabIdRaw) ?? null)
       : null;

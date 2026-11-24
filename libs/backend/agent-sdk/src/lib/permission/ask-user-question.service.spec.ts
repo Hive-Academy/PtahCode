@@ -280,6 +280,49 @@ describe('AskUserQuestionService - webviewManager.sendMessage contract', () => {
   });
 });
 
+describe('AskUserQuestionService - lane agentId', () => {
+  const SESSION_ID = '11111111-2222-4333-8444-555555555555';
+
+  async function sentPayload(
+    agentId?: string,
+  ): Promise<Record<string, unknown>> {
+    const { service, sent } = makeService();
+    const ac = new AbortController();
+    const pending = service.handleAskUserQuestion(
+      makeAskInput(),
+      'tool-lane-question',
+      asSessionId(SESSION_ID),
+      ac.signal,
+      undefined,
+      agentId,
+    );
+    await flushMicrotasks();
+    const broadcast = sent.find(
+      (m) => m.type === MESSAGE_TYPES.ASK_USER_QUESTION_REQUEST,
+    );
+    expect(broadcast).toBeDefined();
+    ac.abort();
+    await pending;
+    return broadcast!.payload;
+  }
+
+  it('stamps the lane agentId on the request', async () => {
+    const payload = await sentPayload('lane-agent-7');
+    expect(payload['agentId']).toBe('lane-agent-7');
+    expect(payload['sessionId']).toBe(SESSION_ID);
+  });
+
+  it('adds no agentId key for a main chat question', async () => {
+    const payload = await sentPayload();
+    expect('agentId' in payload).toBe(false);
+  });
+
+  it('adds no agentId key when the lane id is empty', async () => {
+    const payload = await sentPayload('');
+    expect('agentId' in payload).toBe(false);
+  });
+});
+
 describe('AskUserQuestionService - idle-timeout answer keying (Fix 6)', () => {
   beforeEach(() => {
     jest.useFakeTimers();

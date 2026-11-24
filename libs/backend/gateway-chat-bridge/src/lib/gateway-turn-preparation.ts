@@ -205,26 +205,16 @@ export class GatewayTurnPreparation {
     try {
       mcpServerRunning = this.deps.codeExecutionMcp.getPort() !== null;
       if (mcpServerRunning) {
-        // Awaited: the turn's session starts once this context resolves, and
-        // its subagents read `.mcp.json` (TASK_2026_318).
-        //
-        // The RESULT is read, not just awaited (TASK_2026_332). The catch below
-        // was written believing a failed write would reject through to it, and
-        // it never did: both mutation helpers absorbed every failure into a
-        // warn and resolved normally, so `mcpServerRunning` stayed `true` from
-        // the `getPort()` line above while the entry a subagent reads did not
-        // exist. The call now reports its outcome instead, and that outcome is
-        // what decides the flag.
+        // The RESULT is read, not just awaited (TASK_2026_332), and it decides
+        // the flag. It is a readiness answer (TASK_2026_979 B19): false only
+        // when the server is down or being torn down. Nothing is written; the
+        // turn's session and its subagents get `ptah` in their spawn config.
         const registration =
           await this.deps.codeExecutionMcp.ensureRegisteredForSubagents();
-        // A deadline expiry means the write is still queued, not refused: the
-        // turn's own session MCP config does not read `.mcp.json`, so keep it.
-        const pending =
-          !registration.registered && registration.reason === 'timeout';
-        mcpServerRunning = registration.registered || pending;
+        mcpServerRunning = registration.registered;
         if (!registration.registered) {
           this.deps.logger.warn(
-            '[gateway-chat-bridge] MCP running but .mcp.json entry absent — subagents get no Ptah tools this turn',
+            '[gateway-chat-bridge] Ptah MCP server not ready — this turn runs without Ptah tools',
             { reason: registration.reason },
           );
         }

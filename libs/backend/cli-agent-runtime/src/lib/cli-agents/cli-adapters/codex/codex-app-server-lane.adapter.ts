@@ -3,6 +3,7 @@ import {
   CodexPreTurnConfigRejectedError,
   CodexUnsupportedMethodError,
   type ApprovalSink,
+  type CodexAttachment,
   type CodexContext,
   type CodexExecutionProfile,
   type CodexExecutionProfileInput,
@@ -12,18 +13,24 @@ import {
   type CodexThreadIdentity,
   type CodexTurnReceipt,
 } from '@ptah-extension/codex-runtime';
-import type {
-  CliAdapterManifest,
-  CliDetectionResult,
-  CliOutputSegment,
-  CodexSandboxMode,
+import {
+  CLI_REASONING_EFFORT_VALUES,
+  type CliAdapterManifest,
+  type CliDetectionResult,
+  type CliOutputSegment,
+  type CodexSandboxMode,
+  type LaneTurnContent,
+  type LaneTurnSettings,
 } from '@ptah-extension/shared';
 import type { Logger } from '@ptah-extension/vscode-core';
 import {
+  LaneTurnSettingRefusal,
   type CliAdapter,
   type CliCommandOptions,
   type CliModelInfo,
   type ContinuationOutcome,
+  type LaneTurnOptionsCatalog,
+  type LaneTurnSettingsResult,
   type SdkHandle,
 } from '../cli-adapter.interface';
 import { bestMessagingCapability } from '../cli-adapter.interface';
@@ -69,6 +76,8 @@ import { CodexLaneWriteDacPreflight } from './codex-lane-write-dac-preflight';
 
 /** Safety bound for app-server builds that omit a trailing usage notification. */
 export const CODEX_LANE_USAGE_DRAIN_MS = 2_000;
+/** Fixed refusal of `applyTurnSettings` (M7); the runtime's detail goes to the log. */
+export const CODEX_TURN_SETTINGS_REFUSED_TEXT = 'Codex did not accept the turn settings.';
 
 export class CodexLaneResumeIdentityError extends Error {
   constructor() {
@@ -185,7 +194,7 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
     return {
       messaging: {
         steer: { state: 'supported' },
-        interrupt: { state: 'unsupported', reason: 'App Server steer keeps the turn alive; no run-scoped interrupt is exposed.' },
+        interrupt: { state: 'supported' },
         continuation: { state: 'supported' },
         resume: { state: 'supported' },
       },
@@ -202,6 +211,21 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
       },
       limitReader: { state: 'available', source: 'openai-codex' },
       mcp: { state: 'supported' },
+      turnInput: {
+        model: { state: 'supported', appliesAt: 'next-turn' },
+        effort: { state: 'supported', appliesAt: 'next-turn' },
+        // `turn/steer` carries the same input items as `turn/start` (A6).
+        images: { state: 'supported', onSteer: true },
+        files: { state: 'supported', delivery: 'reference' },
+        commands: { state: 'unsupported', reason: 'No slash commands in Codex lanes.' },
+        skills: { state: 'unsupported', reason: 'Codex lanes do not expose skills to the composer.' },
+      },
+      usage: { timing: 'live' },
+      // D12: approvals stay with the manifest's `ask` reason; Codex lanes run approvalPolicy never.
+      prompts: {
+        approvals: { state: 'unsupported', reason: 'Codex lanes force approvalPolicy never; no Ptah approval route exists.' },
+        questions: { state: 'unsupported', reason: 'Codex lane questions do not reach Ptah.' },
+      },
     };
   }
 
@@ -382,6 +406,8 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
     let reservation: LiveLaneWriter | undefined;
     let sessionId = resume?.threadId;
     let hasTurnHistory = resume !== undefined;
+    // The turn the host asked Codex to interrupt; its `interrupted` terminal resolves 0.
+    let interruptedTurnId: string | undefined;
     let roleDelivery: 'developer-instructions' | 'task-prompt' =
       'developer-instructions';
     const pending: CodexRuntimeEvent[] = [];
@@ -698,8 +724,13 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
         clearTimeout(usageDrainTimer);
         const turn = active;
         active = undefined;
-        turn.resolve(mapped.terminal === 'completed' ? 0 : 1);
-        if (mapped.terminal !== 'completed') void close();
+        const interrupted =
+          mapped.terminal === 'interrupted' &&
+          interruptedTurnId === turn.receipt.turnId;
+        interruptedTurnId = undefined;
+        // A host interrupt keeps the thread: the next message continues it.
+        turn.resolve(mapped.terminal === 'completed' || interrupted ? 0 : 1);
+        if (mapped.terminal !== 'completed' && !interrupted) void close();
       }
     };
     const pump = async (
@@ -728,7 +759,11 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
     };
     void pump(opened, eventAbort.signal);
     const nextTurnWarnings: string[] = [];
-    const runTurn = (text: string, onStarted?: () => void): Promise<number> => {
+    const runTurn = (
+      text: string,
+      onStarted?: () => void,
+      attachments?: readonly CodexAttachment[],
+    ): Promise<number> => {
       if (closed) return Promise.reject(new Error('Codex lane is closed'));
       if (active || starting)
         return Promise.reject(new Error('Codex lane turn is already active'));
@@ -745,7 +780,7 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
             let receipt: CodexTurnReceipt;
             try {
               receipt = await withCodexLaneStartupTimeout(
-                opened.startTurn({ text, signal: abort.signal }),
+                opened.startTurn({ text, signal: abort.signal, ...(attachments && { attachments }) }),
                 abort,
               );
             } catch (error: unknown) {
@@ -770,7 +805,7 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
               );
               void pump(opened, eventAbort.signal);
               receipt = await withCodexLaneStartupTimeout(
-                opened.startTurn({ text, signal: abort.signal }),
+                opened.startTurn({ text, signal: abort.signal, ...(attachments && { attachments }) }),
                 abort,
               );
             }
@@ -826,6 +861,54 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
       ...options,
       lanePolicyDelivery: 'developer-instructions',
     });
+    let currentModel = selectedModel;
+    let currentEffort = reasoningEffort;
+    const applyTurnSettings = async (
+      settings: LaneTurnSettings,
+    ): Promise<LaneTurnSettingsResult> => {
+      const field = settings.model !== undefined ? 'model' : 'reasoningEffort';
+      const { model, reasoningEffort: effort } = settings;
+      if (closed || !context)
+        throw new LaneTurnSettingRefusal(field, 'The Codex lane has ended.');
+      if (effort !== undefined && validatedEffort(effort) === undefined)
+        throw new LaneTurnSettingRefusal('reasoningEffort', `Codex has no effort level "${effort}".`);
+      try {
+        await context.updateNextTurn({
+          ...(model !== undefined ? { model } : {}),
+          ...(effort !== undefined ? { effort } : {}),
+        });
+      } catch (error: unknown) {
+        // Fixed text only (M7): the runtime message can name paths, so it
+        // goes to the redacting log, never into the refusal.
+        this.logger.warn('[CodexAppServerLaneAdapter] Codex refused the turn settings', {
+          field,
+          detail: error instanceof Error ? error.message.slice(0, 200) : String(error),
+        });
+        throw new LaneTurnSettingRefusal(field, CODEX_TURN_SETTINGS_REFUSED_TEXT);
+      }
+      if (model !== undefined) currentModel = model;
+      if (effort !== undefined) currentEffort = effort;
+      return {
+        ...(model !== undefined ? { model } : {}),
+        ...(effort !== undefined ? { reasoningEffort: effort } : {}),
+        appliesAt: 'next-turn',
+      };
+    };
+    const listTurnOptions = async (): Promise<LaneTurnOptionsCatalog> => {
+      if (closed || !context) throw new Error('Codex lane is closed');
+      const catalog = await context.listModels();
+      const advertised = [...new Set(catalog.flatMap((model) => model.supportedEfforts ?? []))]
+        .filter((effort) => validatedEffort(effort) !== undefined);
+      return {
+        models: codexLaneModels(catalog),
+        efforts: advertised.length > 0
+          ? advertised
+          : CLI_REASONING_EFFORT_VALUES.filter((effort) => validatedEffort(effort) !== undefined),
+        ...(currentModel ? { currentModel } : {}),
+        ...(currentEffort ? { currentEffort } : {}),
+        commands: [],
+      };
+    };
     return {
       abort,
       done,
@@ -847,11 +930,37 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
       getObservedNativeThreadId: () => registeredThreadId,
       onLaneConfigRejected: configRejection.subscribe,
       supportsContinuation: () => !closed,
-      steer: async (message: string): Promise<void> => {
+      supportsInterrupt: () => !closed && !starting && active !== undefined,
+      interrupt: async (): Promise<void> => {
+        const turnId = active?.receipt.turnId;
+        if (closed || !turnId || !context) return;
+        interruptedTurnId = turnId;
+        let accepted: boolean;
+        try {
+          accepted = await context.interrupt(turnId);
+        } catch (error: unknown) {
+          if (interruptedTurnId === turnId) interruptedTurnId = undefined;
+          throw error;
+        }
+        // `false` with the turn gone: it ended on its own, nothing to stop.
+        if (!accepted && active?.receipt.turnId === turnId) {
+          interruptedTurnId = undefined;
+          throw new Error('Codex did not accept the interrupt');
+        }
+      },
+      applyTurnSettings,
+      // Codex accepts image and file input items on every turn and steer.
+      turnInputSupport: () => ({ images: { state: 'supported', onSteer: true } }),
+      listTurnOptions,
+      steer: async (message: string, content?: LaneTurnContent): Promise<void> => {
         const expectedTurnId = active?.receipt.turnId;
         if (closed || !expectedTurnId || !context || starting)
           throw new Error('Codex active turn unavailable');
-        const receipt = await context.steer({ text: message }, expectedTurnId);
+        const attachments = codexAttachments(content);
+        const receipt = await context.steer(
+          { text: message, ...(attachments && { attachments }) },
+          expectedTurnId,
+        );
         if (
           receipt.turnId !== expectedTurnId ||
           active?.receipt.turnId !== expectedTurnId
@@ -862,7 +971,7 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
         if (closed) throw new Error('Codex lane is closed');
         if (nextTurnWarnings.length < 1) nextTurnWarnings.push(message);
       },
-      continue: (message: string): Promise<ContinuationOutcome> => {
+      continue: (message: string, content?: LaneTurnContent): Promise<ContinuationOutcome> => {
         if (closed) return Promise.reject(new Error('Codex lane is closed'));
         if (active || starting)
           return Promise.reject(new Error('Codex lane turn is already active'));
@@ -886,7 +995,7 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
         return Promise.resolve({
           done: runTurn(role + nextPrompt, () => {
             if (role) roleDelivery = 'task-prompt';
-          }),
+          }, codexAttachments(content)),
         });
       },
     };
@@ -913,4 +1022,22 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
       throw new CodexLaneResumeIdentityError();
     return identity;
   }
+}
+
+/**
+ * Turn content as Codex input items (B7): images inline, files as native
+ * references. `undefined` keeps a text-only turn free of an empty list.
+ */
+export function codexAttachments(
+  content?: LaneTurnContent,
+): readonly CodexAttachment[] | undefined {
+  const items: CodexAttachment[] = [
+    ...(content?.images ?? []).map((image): CodexAttachment => ({
+      type: 'image',
+      data: image.data,
+      mediaType: image.mediaType,
+    })),
+    ...(content?.files ?? []).map((path): CodexAttachment => ({ type: 'file', path })),
+  ];
+  return items.length > 0 ? items : undefined;
 }

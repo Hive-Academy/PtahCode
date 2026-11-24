@@ -43,6 +43,7 @@ import {
 } from './permission/permission-description';
 import { PermissionRuleStore } from './permission/permission-rule-store';
 import { PendingResponseRegistry } from './permission/pending-response-registry';
+import { ChangeNotifyingMap } from './permission/change-notifying-map';
 import {
   AskUserQuestionService,
   type AskUserQuestionResponse,
@@ -60,6 +61,10 @@ import type {
   UnattendedSessionPolicyRegistry,
 } from './permission/unattended-session-policy.registry';
 import { SDK_TOKENS } from './di/tokens';
+import {
+  PLATFORM_TOKENS,
+  type IMcpGateway,
+} from '@ptah-extension/platform-core';
 import type { SessionToolDispositionPort } from './helpers/session-tool-disposition.port';
 import type { SubagentBudgetMonitor } from './helpers/compaction/subagent-budget-monitor';
 import { buildBudgetResumeRefusal } from './helpers/compaction/subagent-resume-advice';
@@ -121,6 +126,12 @@ interface PendingRequest {
   resolve: (response: InternalPermissionResponse) => void;
   sessionId?: SessionId;
   tabId?: TabId;
+  /**
+   * False for a prompt a CLI lane raised: it is keyed to the PARENT session id
+   * but the parent's own turn keeps running, so it must not count as "this
+   * session waits on a person" (see `isSessionWaitingOnPrompt`).
+   */
+  blocksTurn: boolean;
 }
 
 /**
@@ -201,7 +212,10 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
     const state =
       this.budgetMonitor?.getAgentBudgetState(target, sessionId) ??
       this.budgetMonitor?.getAgentBudgetState(targetName, sessionId);
-    return (state ? buildBudgetResumeRefusal(state, targetName) : undefined) ?? undefined;
+    return (
+      (state ? buildBudgetResumeRefusal(state, targetName) : undefined) ??
+      undefined
+    );
   }
 
   /**
@@ -255,7 +269,15 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
   }
   private _permissionLevel: PermissionLevel = 'ask';
 
-  private pendingRequests = new Map<string, PendingRequest>();
+  private readonly pendingRequests = new ChangeNotifyingMap<
+    string,
+    PendingRequest
+  >(() => this.notifyPromptWaitChange());
+  private readonly promptWaitListeners = new Set<() => void>();
+  private readonly questionRegistry: PendingResponseRegistry<
+    AskUserQuestionResponse,
+    AskUserQuestionRequest
+  >;
   private readonly pendingCliAgentPermissions = new Map<
     string,
     AgentPermissionRequest
@@ -323,17 +345,22 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
     },
     @inject(SDK_TOKENS.SDK_SESSION_TOOL_DISPOSITION, { isOptional: true })
     private readonly toolDisposition?: SessionToolDispositionPort,
+    // Bound only when the host serves the user's own MCP servers through the
+    // `ptah` server; without it every `mcp__ptah__*` tool is a host tool.
+    @inject(PLATFORM_TOKENS.MCP_GATEWAY, { isOptional: true })
+    private readonly mcpGateway?: Pick<IMcpGateway, 'isGatewayTool'>,
   ) {
     this.ruleStore = new PermissionRuleStore(this.logger);
 
-    const questionRegistry = new PendingResponseRegistry<
+    this.questionRegistry = new PendingResponseRegistry<
       AskUserQuestionResponse,
       AskUserQuestionRequest
     >(this.logger);
+    this.questionRegistry.onChange(() => this.notifyPromptWaitChange());
     this.askUserQuestion = new AskUserQuestionService(
       this.webviewManager,
       this.logger,
-      questionRegistry,
+      this.questionRegistry,
       this.hostAttention,
     );
     this.exitPlanMode = new ExitPlanModeService(
@@ -368,6 +395,51 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
       (request) =>
         request.sessionId === sessionId || request.tabId === sessionId,
     ).length;
+  }
+
+  /**
+   * True while a permission prompt or an AskUserQuestion that blocks this
+   * session's turn (or tab's) waits for a person. A prompt raised by a CLI lane
+   * does not block the parent's turn and is not counted. (A lane's own
+   * AskUserQuestion is keyed to the parent and still counts: lanes run
+   * unattended and do not raise it in practice.) Read from the live pending state, not from a
+   * copy. The background-work governor uses it: a turn blocked on a human uses
+   * no CPU, so it is not foreground activity.
+   */
+  isSessionWaitingOnPrompt(sessionOrTabId: string): boolean {
+    for (const request of this.pendingRequests.values()) {
+      if (
+        request.blocksTurn &&
+        (request.sessionId === sessionOrTabId ||
+          request.tabId === sessionOrTabId)
+      ) {
+        return true;
+      }
+    }
+    return this.questionRegistry.hasSession(sessionOrTabId);
+  }
+
+  /**
+   * Called after a prompt starts or stops waiting (raised, answered, aborted,
+   * timed out, torn down). Returns the unsubscribe function.
+   */
+  onPromptWaitChange(listener: () => void): () => void {
+    this.promptWaitListeners.add(listener);
+    return () => {
+      this.promptWaitListeners.delete(listener);
+    };
+  }
+
+  private notifyPromptWaitChange(): void {
+    for (const listener of [...this.promptWaitListeners]) {
+      try {
+        listener();
+      } catch (error: unknown) {
+        this.logger.warn('[SdkPermissionHandler] prompt wait listener threw', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
   }
 
   recordBudgetStop(sessionId: string): void {
@@ -843,12 +915,15 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
         this.logger.info(
           `[SdkPermissionHandler] Handling AskUserQuestion tool request (bypasses all auto-approval)`,
         );
+        // A lane question carries its lane id so the card can name the lane.
+        // An unresolved id leaves the request as a main chat question.
         return await this.askUserQuestion.handleAskUserQuestion(
           input,
           options.toolUseID,
           resolveSessionId(),
           options.signal,
           tabId,
+          cliAgentResolver?.(),
         );
       }
 
@@ -1039,6 +1114,26 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
   }
 
   /**
+   * Whether a `mcp__ptah__*` name is a third-party tool the gateway serves.
+   * Such a tool gets the decision any third-party MCP tool gets, never the
+   * Ptah MCP allow. Fail-closed: a predicate that throws counts as gateway.
+   */
+  private isGatewayTool(toolName: string): boolean {
+    if (!this.mcpGateway) return false;
+    try {
+      return this.mcpGateway.isGatewayTool(toolName);
+    } catch (error: unknown) {
+      // degradation-audit: reported - logged here, and the tool is treated
+      // as a gateway tool, so it takes the out-of-policy branch.
+      this.logger.warn(
+        `[SdkPermissionHandler] Gateway tool check failed for ${toolName}; treating it as a gateway tool`,
+        error instanceof Error ? error : new Error(String(error)),
+      );
+      return true;
+    }
+  }
+
+  /**
    * The decision table for an unattended session (TASK_2026_584). Nobody is
    * watching, so no call may wait without bound: a call outside the policy
    * gets a prompt in the child's own tab that is denied after
@@ -1061,7 +1156,8 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
       return {
         behavior: 'deny' as const,
         message: formatHostPermissionDenial(
-          toolName, 'plan mode is unavailable in an unattended agent session',
+          toolName,
+          'plan mode is unavailable in an unattended agent session',
           `Write your plan to a file inside ${policy.writableRoot}, then carry on with the task.`,
         ),
         interrupt: false,
@@ -1071,7 +1167,8 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
       return {
         behavior: 'deny' as const,
         message: formatHostPermissionDenial(
-          toolName, `nobody is watching this unattended agent session started by ${policy.ownerLabel}`,
+          toolName,
+          `nobody is watching this unattended agent session started by ${policy.ownerLabel}`,
           'Make the decision yourself, then tell the parent session what you decided and why with ptah_agent_report.',
         ),
         interrupt: false,
@@ -1081,7 +1178,8 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
       toolName === 'ExitPlanMode' ||
       SAFE_TOOLS.includes(toolName) ||
       SUBAGENT_TOOLS.includes(toolName) ||
-      toolName.startsWith(PTAH_MCP_TOOL_PREFIX)
+      (toolName.startsWith(PTAH_MCP_TOOL_PREFIX) &&
+        !this.isGatewayTool(toolName))
     ) {
       this.logger.debug(
         `[SdkPermissionHandler] Unattended policy allowed: ${toolName}`,
@@ -1204,8 +1302,8 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
       toolName,
       `this unattended agent session started by ${policy.ownerLabel} requires approval for this call (${reason})`,
       `Bash runs without approval only for a single command (no ; & | \` $( < > or newline) that starts with one of: ${allowlist}. ` +
-      `Files can be written without approval only inside ${policy.writableRoot}. ` +
-      `Do NOT retry the same call. If this blocks your task, report the blocker to the parent session with ptah_agent_report, then continue with what you can do.`
+        `Files can be written without approval only inside ${policy.writableRoot}. ` +
+        `Do NOT retry the same call. If this blocks your task, report the blocker to the parent session with ptah_agent_report, then continue with what you can do.`,
     );
   }
 
@@ -1388,6 +1486,7 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
         sessionId,
         tabId,
         denyWindowMs,
+        !cliAgentId,
       );
     } finally {
       this.unattendedRequestIds.delete(requestId);
@@ -1404,7 +1503,8 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
         response?.decision === 'allow' || response?.decision === 'always_allow'
           ? 'prompt'
           : 'deny',
-      decisionSource: response?.origin ?? (response ? 'user-response' : 'aborted'),
+      decisionSource:
+        response?.origin ?? (response ? 'user-response' : 'aborted'),
       interrupt: response?.decision === 'deny' && !response.origin,
       recentSubagentBudgetStop:
         sessionId !== undefined &&
@@ -1659,6 +1759,7 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
     sessionId?: SessionId,
     tabId?: TabId,
     timeoutMs?: number,
+    blocksTurn = true,
   ): Promise<InternalPermissionResponse | null> {
     return new Promise<InternalPermissionResponse | null>((resolve) => {
       if (signal?.aborted) {
@@ -1695,6 +1796,7 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
         },
         sessionId,
         tabId,
+        blocksTurn,
       });
 
       // Every route except a live webview surface supplies a positive window —

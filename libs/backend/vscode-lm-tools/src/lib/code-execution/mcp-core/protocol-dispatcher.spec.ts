@@ -119,7 +119,10 @@ import {
   walkGlobMatches,
   withCoverageVerdict,
   type IFileSystemProvider,
+  type IMcpGateway,
   type LanguageCoverage,
+  type McpCallerBinding,
+  type McpGatewayTool,
 } from '@ptah-extension/platform-core';
 import { Result } from '@ptah-extension/shared';
 import {
@@ -992,7 +995,7 @@ describe('harness tools', () => {
       serverKey: 'server',
       scope: 'user',
       targets: ['codex'],
-      installedPaths: [],
+      recordedTargets: [],
       results: [],
       warnings: [],
     }));
@@ -10995,5 +10998,494 @@ describe('protocol-handlers › navigation tools bind workspaceRoot to a known r
     );
     expect(reply.isError).toBe(false);
     expect(enrichFile).toHaveBeenCalledWith(outsideFile, undefined);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Gateway routing (TASK_2026_979 Batch 6)
+// ---------------------------------------------------------------------------
+
+describe('protocol-handlers › MCP gateway', () => {
+  const ZERNIO: McpGatewayTool = {
+    name: 'zernio__create_post',
+    description: 'Create a post',
+    inputSchema: { type: 'object', properties: { text: { type: 'string' } } },
+  };
+  const ALPHA: McpGatewayTool = {
+    name: 'alpha__ping',
+    description: 'Ping',
+    inputSchema: { type: 'object', properties: {} },
+  };
+  const SESSION_BINDING: McpCallerBinding = {
+    kind: 'session',
+    sessionId: 'tab-1',
+    workspaceRoot: '/ws',
+    capability: 'privileged',
+    gatewayApproval: true,
+  };
+
+  interface FakeGateway extends IMcpGateway {
+    listTools: jest.Mock;
+    callTool: jest.Mock;
+  }
+
+  function fakeGateway(
+    tools: readonly McpGatewayTool[] = [ZERNIO, ALPHA],
+  ): FakeGateway {
+    return {
+      registerHostToolNames: jest.fn(),
+      isGatewayTool: jest.fn(() => true),
+      listTools: jest.fn(async () => tools),
+      callTool: jest.fn(async () => ({
+        content: [{ type: 'text', text: 'posted' }],
+        structuredContent: { id: 'p1' },
+        _meta: { upstream: true },
+      })),
+      status: jest.fn(() => []),
+      servedFileServerNames: jest.fn(async () => []),
+      onToolsChanged: jest.fn(() => ({ dispose: jest.fn() })),
+      refresh: jest.fn(async () => undefined),
+      dispose: jest.fn(),
+    };
+  }
+
+  function bound(binding: McpCallerBinding): Partial<MCPRequest> {
+    return { _callerBinding: binding, _callerCapability: binding.capability };
+  }
+
+  async function list(
+    gateway: IMcpGateway | undefined,
+    request: Partial<MCPRequest>,
+    logger: MockLogger = createMockLogger(),
+  ): Promise<Array<{ name: string; _meta?: Record<string, unknown> }>> {
+    const response = await handleMCPRequest(
+      makeRequest({ id: 'gw-list', method: 'tools/list', ...request }),
+      buildDeps({ gateway, logger: asLogger(logger) }),
+    );
+    expect(response.error).toBeUndefined();
+    return (response.result as { tools: Array<{ name: string }> }).tools;
+  }
+
+  async function call(
+    gateway: IMcpGateway | undefined,
+    request: Partial<MCPRequest>,
+    name: string,
+    args?: unknown,
+    logger: MockLogger = createMockLogger(),
+  ): Promise<MCPResponse> {
+    return handleMCPRequest(
+      makeRequest({
+        id: 'gw-call',
+        method: 'tools/call',
+        params: { name, ...(args !== undefined && { arguments: args }) },
+        ...request,
+      }),
+      buildDeps({ gateway, logger: asLogger(logger) }),
+    );
+  }
+
+  it('lists sorted gateway tools after the Ptah tools for an approved session, never eager', async () => {
+    const gateway = fakeGateway();
+    const controller = new AbortController();
+    const tools = await list(gateway, {
+      ...bound(SESSION_BINDING),
+      _abortSignal: controller.signal,
+    });
+    const names = tools.map((tool) => tool.name);
+    expect(names.slice(-2)).toEqual(['alpha__ping', 'zernio__create_post']);
+    expect(names).toContain('ptah_workspace_analyze');
+    const firstGateway = names.indexOf('alpha__ping');
+    expect(names.slice(0, firstGateway).every((n) => !n.includes('__'))).toBe(
+      true,
+    );
+    for (const tool of tools.slice(-2)) expect(tool._meta).toBeUndefined();
+    expect(gateway.listTools).toHaveBeenCalledTimes(1);
+    expect(gateway.listTools).toHaveBeenCalledWith(
+      {
+        kind: 'session',
+        capability: 'privileged',
+        workspaceRoot: '/ws',
+        gatewayApproval: true,
+      },
+      controller.signal,
+    );
+  });
+
+  it('keeps the Ptah list byte-identical to a host without a gateway', async () => {
+    const without = await list(undefined, bound(SESSION_BINDING));
+    const withGateway = await list(fakeGateway(), bound(SESSION_BINDING));
+    expect(withGateway.slice(0, without.length)).toEqual(without);
+    expect(withGateway).toHaveLength(without.length + 2);
+  });
+
+  it.each<[string, McpCallerBinding]>([
+    [
+      'a session without gatewayApproval',
+      { ...SESSION_BINDING, gatewayApproval: undefined },
+    ],
+    [
+      'a lane-report lane',
+      { kind: 'agent', agentId: 'lane-a', capability: 'lane-report' },
+    ],
+    [
+      'a read-only lane',
+      { kind: 'agent', agentId: 'lane-a', capability: 'read-only' },
+    ],
+    [
+      'a privileged workspace slot',
+      { kind: 'workspace', workspaceRoot: '/ws', capability: 'privileged' },
+    ],
+    ['a home slot', { kind: 'home', capability: 'read-only' }],
+    [
+      'an internal-query without includeConnectors',
+      {
+        kind: 'internal-query',
+        workspaceRoot: '/ws',
+        capability: 'privileged',
+      },
+    ],
+  ])('lists and routes no gateway tools for %s', async (_label, binding) => {
+    const gateway = fakeGateway();
+    const names = (await list(gateway, bound(binding))).map((t) => t.name);
+    expect(names).not.toContain('zernio__create_post');
+    const response = await call(
+      gateway,
+      bound(binding),
+      'zernio__create_post',
+      {},
+    );
+    expect(gateway.listTools).not.toHaveBeenCalled();
+    expect(gateway.callTool).not.toHaveBeenCalled();
+    expect(response.result).toBeUndefined();
+    expect([-32602, MCP_CALLER_FORBIDDEN_CODE]).toContain(response.error?.code);
+  });
+
+  it('lists no gateway tools for an untokened in-process request', async () => {
+    const gateway = fakeGateway();
+    const names = (await list(gateway, {})).map((t) => t.name);
+    expect(names).not.toContain('zernio__create_post');
+    expect(gateway.listTools).not.toHaveBeenCalled();
+  });
+
+  it('serves privileged lanes and opted-in internal queries', async () => {
+    for (const binding of [
+      { kind: 'agent', agentId: 'lane-a', capability: 'privileged' },
+      {
+        kind: 'internal-query',
+        workspaceRoot: '/ws',
+        capability: 'privileged',
+        includeConnectors: true,
+      },
+    ] as McpCallerBinding[]) {
+      const gateway = fakeGateway();
+      const names = (await list(gateway, bound(binding))).map((t) => t.name);
+      expect(names).toContain('zernio__create_post');
+      expect(gateway.listTools.mock.calls[0][0]).toMatchObject({
+        kind: binding.kind,
+        capability: 'privileged',
+        ...(binding.includeConnectors && { includeConnectors: true }),
+      });
+    }
+  });
+
+  it('forwards a listed name with its arguments and the abort signal, passing the result through', async () => {
+    const gateway = fakeGateway();
+    await list(gateway, bound(SESSION_BINDING));
+    const controller = new AbortController();
+    const response = await call(
+      gateway,
+      { ...bound(SESSION_BINDING), _abortSignal: controller.signal },
+      'zernio__create_post',
+      { text: 'hi' },
+    );
+    expect(gateway.listTools).toHaveBeenCalledTimes(1);
+    expect(gateway.callTool).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: 'session', gatewayApproval: true }),
+      'zernio__create_post',
+      { text: 'hi' },
+      controller.signal,
+    );
+    expect(response.error).toBeUndefined();
+    expect(response.result).toEqual({
+      content: [{ type: 'text', text: 'posted' }],
+      structuredContent: { id: 'p1' },
+      _meta: { upstream: true },
+    });
+  });
+
+  it('re-lists once on a miss and forwards a name that appeared since', async () => {
+    const gateway = fakeGateway();
+    const response = await call(
+      gateway,
+      bound(SESSION_BINDING),
+      'zernio__create_post',
+    );
+    expect(gateway.listTools).toHaveBeenCalledTimes(1);
+    expect(gateway.callTool).toHaveBeenCalledWith(
+      expect.anything(),
+      'zernio__create_post',
+      {},
+      undefined,
+    );
+    expect(response.error).toBeUndefined();
+  });
+
+  it('answers -32602 after one re-list when the name is still unknown', async () => {
+    const gateway = fakeGateway();
+    const response = await call(
+      gateway,
+      bound(SESSION_BINDING),
+      'nobody__nothing',
+      {},
+    );
+    expect(gateway.listTools).toHaveBeenCalledTimes(1);
+    expect(gateway.callTool).not.toHaveBeenCalled();
+    expect(response.error?.code).toBe(-32602);
+    expect(response.error?.message).toBe('Unknown tool: nobody__nothing');
+  });
+
+  it('rejects non-object arguments for a gateway tool', async () => {
+    const gateway = fakeGateway();
+    await list(gateway, bound(SESSION_BINDING));
+    const response = await call(
+      gateway,
+      bound(SESSION_BINDING),
+      'zernio__create_post',
+      ['x'],
+    );
+    expect(response.error?.code).toBe(-32602);
+    expect(gateway.callTool).not.toHaveBeenCalled();
+  });
+
+  it('applies the phase disallowedTools by name to list and call', async () => {
+    const binding: McpCallerBinding = {
+      kind: 'agent',
+      agentId: 'lane-a',
+      capability: 'privileged',
+      phaseKind: 'review',
+      disallowedTools: ['zernio__create_post'],
+    };
+    const gateway = fakeGateway();
+    const names = (await list(gateway, bound(binding))).map((t) => t.name);
+    expect(names).toContain('alpha__ping');
+    expect(names).not.toContain('zernio__create_post');
+    const response = await call(
+      gateway,
+      bound(binding),
+      'zernio__create_post',
+      {},
+    );
+    expect(response.error).toEqual({
+      code: MCP_CALLER_FORBIDDEN_CODE,
+      message: MCP_TOOL_DENIED_MESSAGE,
+    });
+    expect(gateway.callTool).not.toHaveBeenCalled();
+  });
+
+  it('hides every gateway tool under a malformed phase list', async () => {
+    const binding = {
+      kind: 'agent',
+      agentId: 'lane-a',
+      capability: 'privileged',
+      phaseKind: 'review',
+      disallowedTools: 'zernio__create_post',
+    } as unknown as McpCallerBinding;
+    const names = (await list(fakeGateway(), bound(binding))).map(
+      (t) => t.name,
+    );
+    expect(names.some((n) => n.includes('__'))).toBe(false);
+  });
+
+  it('re-checks the caller phase on every call, whatever another caller listed (M2)', async () => {
+    const gateway = fakeGateway();
+    // Caller A: same scope key (agent, privileged, no root), no phase.
+    const laneA: McpCallerBinding = {
+      kind: 'agent',
+      agentId: 'lane-a',
+      capability: 'privileged',
+    };
+    expect((await list(gateway, bound(laneA))).map((t) => t.name)).toContain(
+      'zernio__create_post',
+    );
+    // Caller B: same scope key, malformed phase list. The name is cached.
+    const laneB = {
+      kind: 'agent',
+      agentId: 'lane-b',
+      capability: 'privileged',
+      phaseKind: 'review',
+      disallowedTools: 'not-a-list',
+    } as unknown as McpCallerBinding;
+    const response = await call(
+      gateway,
+      bound(laneB),
+      'zernio__create_post',
+      {},
+    );
+    expect(response.error).toEqual({
+      code: MCP_CALLER_FORBIDDEN_CODE,
+      message: MCP_TOOL_DENIED_MESSAGE,
+    });
+    expect(gateway.callTool).not.toHaveBeenCalled();
+    // Caller A still reaches it.
+    const allowed = await call(
+      gateway,
+      bound(laneA),
+      'zernio__create_post',
+      {},
+    );
+    expect(allowed.error).toBeUndefined();
+    expect(gateway.callTool).toHaveBeenCalledTimes(1);
+  });
+
+  describe('result budget (M3)', () => {
+    let spoolRoot: string;
+
+    beforeEach(() => {
+      spoolRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'ptah-gw-budget-'));
+    });
+
+    afterEach(() => {
+      fs.rmSync(spoolRoot, { recursive: true, force: true });
+    });
+
+    async function callBudgeted(
+      gateway: FakeGateway,
+    ): Promise<Record<string, unknown>> {
+      const response = await handleMCPRequest(
+        makeRequest({
+          id: 'gw-budget',
+          method: 'tools/call',
+          params: { name: 'zernio__create_post', arguments: {} },
+          ...bound(SESSION_BINDING),
+          _callerWorkspaceRoot: spoolRoot,
+        }),
+        buildDeps({ gateway, workspaceProvider: knownFolders(spoolRoot) }),
+      );
+      expect(response.error).toBeUndefined();
+      return response.result as Record<string, unknown>;
+    }
+
+    it('cuts an over-budget gateway result to the default budget and spools it', async () => {
+      const gateway = fakeGateway();
+      const huge = Array.from(
+        { length: 4_000 },
+        (_, i) => `line ${i} of a very long upstream answer`,
+      ).join('\n');
+      const image = { type: 'image', data: 'AAAA', mimeType: 'image/png' };
+      gateway.callTool.mockResolvedValue({
+        content: [{ type: 'text', text: huge }, image],
+        structuredContent: { rows: huge },
+        _meta: { upstream: true },
+      });
+
+      const result = await callBudgeted(gateway);
+      const content = result['content'] as Array<{
+        type: string;
+        text?: string;
+      }>;
+
+      expect(content).toHaveLength(2);
+      expect(content[0].type).toBe('text');
+      expect(content[0].text?.length).toBeLessThanOrEqual(
+        DEFAULT_TOOL_RESULT_BUDGET_CHARS,
+      );
+      expect(content[0].text).not.toBe(huge);
+      expect(content[1]).toEqual(image);
+      expect(result['structuredContent']).toBeUndefined();
+      expect(result['_meta']).toEqual({ upstream: true });
+      expect(
+        fs.readdirSync(path.join(spoolRoot, '.ptah', 'tmp', 'mcp-out')).length,
+      ).toBeGreaterThan(0);
+    });
+
+    it('budgets structuredContent when the result has no text item', async () => {
+      const gateway = fakeGateway();
+      gateway.callTool.mockResolvedValue({
+        content: [],
+        structuredContent: { blob: 'x'.repeat(50_000) },
+      });
+
+      const result = await callBudgeted(gateway);
+      const content = result['content'] as Array<{
+        type: string;
+        text?: string;
+      }>;
+
+      expect(content).toHaveLength(1);
+      expect(content[0].text?.length).toBeLessThanOrEqual(
+        DEFAULT_TOOL_RESULT_BUDGET_CHARS,
+      );
+      expect(result['structuredContent']).toBeUndefined();
+    });
+  });
+
+  it('drops a gateway tool whose name collides with a host tool', async () => {
+    const gateway = fakeGateway([
+      { ...ZERNIO, name: 'ptah_workspace_analyze', description: 'shadow' },
+      ALPHA,
+    ]);
+    const tools = await list(gateway, bound(SESSION_BINDING));
+    const analyze = tools.filter((t) => t.name === 'ptah_workspace_analyze');
+    expect(analyze).toHaveLength(1);
+    expect((analyze[0] as { description?: string }).description).not.toBe(
+      'shadow',
+    );
+  });
+
+  it('lists Ptah tools only, with a warning, when listTools throws', async () => {
+    const gateway = fakeGateway();
+    gateway.listTools.mockRejectedValue(new Error('hub down'));
+    const logger = createMockLogger();
+    const without = await list(undefined, bound(SESSION_BINDING));
+    const tools = await list(gateway, bound(SESSION_BINDING), logger);
+    expect(tools).toEqual(without);
+    expect(logger.warn).toHaveBeenCalledWith(
+      '[MCP] gateway tools/list failed; listing Ptah tools only',
+      { error: 'hub down' },
+    );
+  });
+
+  it('answers an isError result, never -32603, when callTool throws', async () => {
+    const gateway = fakeGateway();
+    gateway.callTool.mockRejectedValue(new Error('upstream reset'));
+    await list(gateway, bound(SESSION_BINDING));
+    const logger = createMockLogger();
+    const response = await call(
+      gateway,
+      bound(SESSION_BINDING),
+      'zernio__create_post',
+      {},
+      logger,
+    );
+    expect(response.error).toBeUndefined();
+    expect(response.result).toEqual({
+      content: [
+        {
+          type: 'text',
+          text: 'Gateway tool zernio__create_post failed: upstream reset',
+        },
+      ],
+      isError: true,
+    });
+    expect(logger.warn).toHaveBeenCalledWith(
+      '[MCP] gateway tools/call failed',
+      {
+        tool: 'zernio__create_post',
+        error: 'upstream reset',
+      },
+    );
+  });
+
+  it('still dispatches host tools without consulting the gateway', async () => {
+    const gateway = fakeGateway();
+    const response = await call(
+      gateway,
+      bound(SESSION_BINDING),
+      'ptah_search_files',
+      {},
+    );
+    expect(gateway.listTools).not.toHaveBeenCalled();
+    expect(gateway.callTool).not.toHaveBeenCalled();
+    expect(response.error?.code).not.toBe(-32602);
   });
 });

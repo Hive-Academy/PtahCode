@@ -27,6 +27,7 @@ import type { BootRefs } from './boot-coordinator';
 import {
   CHAT_SESSION_DISPOSE_BUDGET_MS,
   CODEX_SIGN_IN_STOP_BUDGET_MS,
+  MCP_GATEWAY_DISPOSE_BUDGET_MS,
   RUN_CHECK_KILL_BUDGET_MS,
   TASK_END_HOOK_STOP_BUDGET_MS,
   CODEX_DISPOSE_BUDGET_MS,
@@ -100,6 +101,7 @@ function quitDeps(refs: BootRefs) {
     flushSessionMetadataStores: jest.fn(async () => undefined),
     clearTimers: jest.fn(),
     disposeVoiceWorker: jest.fn(),
+    disposeMcpGateway: jest.fn(),
     deferQuit: jest.fn(),
     quit: jest.fn(),
   };
@@ -843,5 +845,94 @@ describe('will-quit — the tree-sitter worker', () => {
     handleWillQuit(deps);
     await flushMicrotasks();
     expect(order).toContain('diagnostics');
+  });
+});
+
+describe('will-quit — MCP gateway dispose (TASK_2026_979 B23)', () => {
+  beforeEach(() => {
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('disposes the gateway after SQLite closes, before the quit is issued', async () => {
+    const order: string[] = [];
+    const deps = quitDeps(minimalRefs(order));
+    deps.disposeMcpGateway.mockImplementation(() => { order.push('mcpGateway'); });
+    handleWillQuit(deps);
+    await flushMicrotasks();
+    expect(deps.disposeMcpGateway).toHaveBeenCalledTimes(1);
+    expect(order.indexOf('mcpGateway')).toBeGreaterThan(order.indexOf('sqliteConnection'));
+    expect(order.indexOf('mcpGateway')).toBeLessThan(order.indexOf('diagnostics'));
+  });
+
+  it('re-issues a deferred quit only after the stdio kills finished (S3)', async () => {
+    jest.useFakeTimers();
+    try {
+      pids.mockReturnValue([4242]);
+      const order: string[] = [];
+      const deps = quitDeps(minimalRefs(order));
+      deps.disposeMcpGateway.mockImplementation(() => {
+        order.push('mcpGateway');
+        return new Promise<void>((resolve) => setTimeout(resolve, 1000));
+      });
+
+      handleWillQuit(deps);
+      await flushMicrotasks();
+
+      // Started in the same pass as its siblings; nothing queued behind it.
+      expect(order).toEqual(['sqliteConnection', 'mcpGateway', 'diagnostics']);
+      expect(deps.quit).not.toHaveBeenCalled();
+
+      await jest.advanceTimersByTimeAsync(1000);
+      await flushMicrotasks();
+      expect(deps.quit).toHaveBeenCalledTimes(1);
+      expect(console.warn).not.toHaveBeenCalled();
+    } finally {
+      pids.mockReset().mockReturnValue([]);
+      jest.useRealTimers();
+    }
+  });
+
+  it('quits anyway once a wedged gateway dispose exceeds its budget', async () => {
+    jest.useFakeTimers();
+    try {
+      pids.mockReturnValue([4242]);
+      const deps = quitDeps(minimalRefs([]));
+      deps.disposeMcpGateway.mockImplementation(
+        () => new Promise<void>(() => undefined),
+      );
+
+      handleWillQuit(deps);
+      await flushMicrotasks();
+      expect(deps.quit).not.toHaveBeenCalled();
+
+      await jest.advanceTimersByTimeAsync(MCP_GATEWAY_DISPOSE_BUDGET_MS);
+      await flushMicrotasks();
+      expect(deps.quit).toHaveBeenCalledTimes(1);
+      expect(console.warn).toHaveBeenCalledWith(
+        expect.stringContaining('MCP gateway dispose exceeded'),
+      );
+    } finally {
+      pids.mockReset().mockReturnValue([]);
+      jest.useRealTimers();
+    }
+  });
+
+  it('keeps disposing when the gateway dispose throws', async () => {
+    const order: string[] = [];
+    const deps = quitDeps(minimalRefs(order));
+    deps.disposeMcpGateway.mockImplementation(() => {
+      throw new Error('stdio host gone');
+    });
+    handleWillQuit(deps);
+    await flushMicrotasks();
+    expect(order).toContain('diagnostics');
+    expect(console.warn).toHaveBeenCalledWith(
+      expect.stringContaining('MCP gateway dispose failed'),
+      'stdio host gone',
+    );
   });
 });

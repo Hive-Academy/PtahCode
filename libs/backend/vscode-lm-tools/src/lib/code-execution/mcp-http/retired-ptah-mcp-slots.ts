@@ -5,35 +5,48 @@
  * once kept a persistent `ptah` entry in `~/.gemini/config/mcp_config.json`
  * (read by the `agy` CLI) and in `{ws}/.agents/mcp_config.json` (read by the
  * Antigravity editor). An `agy` session Ptah spawns now receives the server
- * per session only: the ACP lane attaches `ptah_lane` in `session/new`, and the
- * stream-json fallback lane writes and restores its own entry around the run
- * (`AntigravityCliAdapter.configureMcpServer`). An `agy` the user starts from
- * a terminal gets no Ptah tools. That is the accepted cost of keeping a
- * long-lived credential out of a home-global file.
+ * per session only: the ACP lane attaches `ptah_lane` in `session/new` and
+ * writes no config file. An `agy` the user starts from a terminal gets no Ptah
+ * tools. That is the accepted cost of keeping a long-lived credential out of a
+ * home-global file.
  *
  * A slot that is no longer planned is removed by the reconcile only when it is
  * in the in-memory registration record, so an entry an EARLIER Ptah process
  * wrote would stay on disk forever. This module finds those files and takes
- * back the `ptah` key, and only when the entry has the shape Ptah's persistent
+ * back the `ptah` key, and only when the entry has a shape an earlier Ptah
  * writer produced.
  *
  * ## Which `ptah` entries are Ptah's
  *
- * The key alone is not proof: it is also the key the stream-json lane writes,
- * and a user may have authored a `ptah` server of their own. An entry is
- * removed only when it is a remote entry with no headers and its URL is one of
- * the persistent writer's shapes:
+ * The key alone is not proof: a user may have authored a `ptah` server of
+ * their own. An entry is removed only when it is a remote entry with no
+ * `command` and no `headers`, and its URL is one of two families of shapes.
+ *
+ * The persistent writer's shapes (logged as `persistent`):
  *
  *  - `http://localhost:{port}`                               (bare, home slot)
  *  - `http://localhost:{port}/workspace/{enc}`               (workspace slot)
  *  - `http://localhost:{port}/auth/{43}`                     (home slot, M1)
  *  - `http://localhost:{port}/auth/{43}/workspace/{enc}`     (workspace, M1)
  *
- * A lane entry carries an `/agent/{id}` segment and never matches, so a
- * stream-json lane that is running during the sweep keeps its entry. The bare
- * origin also covers what an older lane restored after its run: that lane
- * normalised the persistent entry it found to its origin before putting it
- * back.
+ * The retired stream-json lane's shapes (logged as `lane`):
+ *
+ *  - `http://localhost:{port}/agent/{id}[/workspace/{enc}]`
+ *  - `http://localhost:{port}/auth/{43}/agent/{id}[/workspace/{enc}]`
+ *
+ * No Ptah writer produces either family anymore. A lane entry is what a
+ * stream-json lane left behind when it crashed before restoring the file; the
+ * next stream-json spawn used to clean it up, and with that lane gone this
+ * sweep is the only cleanup. The bare origin also covers what an older lane
+ * restored after its run: that lane normalised the persistent entry it found
+ * to its origin before putting it back.
+ *
+ * Accepted risk: an OLDER Ptah build running a stream-json lane at the moment
+ * this sweep runs loses its live lane entry. That needs two Ptah builds on one
+ * machine during the upgrade window, the lane loses only its Ptah MCP tools for
+ * the rest of its run, and it restores its prior entry when it ends. The info
+ * line names the removed shape (`lane` or `persistent`) so such a report can be
+ * traced.
  *
  * ## Why the removal is not routed through the facet
  *
@@ -53,6 +66,7 @@ import {
   ANTIGRAVITY_URL_KEY,
   PTAH_SPAWN_MCP_KEY,
   createMcpFacet,
+  isLinkedWorktreeRoot,
   withMcpConfigLock,
 } from '@ptah-extension/harness-sync';
 
@@ -62,9 +76,29 @@ export const RETIRED_PTAH_MCP_TARGET: HarnessTargetId = 'antigravity';
 /** `{ws}/.agents/mcp_config.json`, the Antigravity editor's workspace file. */
 const WORKSPACE_SEGMENTS = ['.agents', 'mcp_config.json'] as const;
 
-/** The URL shapes the persistent writer produced; see the file header. */
+/**
+ * The URL shapes the persistent writer produced; see the file header. A path
+ * segment holds no `?` or `#`: the writers percent-encoded every segment, so a
+ * query or fragment marks a URL a user wrote.
+ */
 const PTAH_PERSISTENT_URL =
-  /^http:\/\/localhost:\d+(?:\/auth\/[A-Za-z0-9_-]{43})?(?:\/workspace\/[^/]+)?\/?$/;
+  /^http:\/\/localhost:\d+(?:\/auth\/[A-Za-z0-9_-]{43})?(?:\/workspace\/[^/?#]+)?\/?$/;
+
+/**
+ * The URL shapes the retired stream-json lane wrote; see the file header.
+ *
+ * Copied from the grammar of `ptahMcpServerUrl` (`cli-adapters/ptah-mcp-url.ts`)
+ * and `laneMcpAuthUrl` (`cli-adapters/lane-mcp-credentials.ts`) in
+ * `@ptah-extension/cli-agent-runtime`. Neither is on that library's barrel,
+ * and this matcher must keep recognising the retired shape even if those
+ * builders change, so the grammar is pinned here rather than imported. As in
+ * {@link PTAH_PERSISTENT_URL}, no segment holds a `?` or `#`.
+ */
+const PTAH_LANE_URL =
+  /^http:\/\/localhost:\d+(?:\/auth\/[A-Za-z0-9_-]{43})?\/agent\/[^/?#]+(?:\/workspace\/[^/?#]+)?\/?$/;
+
+/** Which family of Ptah-written shapes a removed entry had. */
+export type RetiredPtahEntryShape = 'lane' | 'persistent';
 
 export interface RetiredPtahMcpDeps {
   /** Every open workspace folder, plus the active root; deduplicated here. */
@@ -100,18 +134,41 @@ export async function retiredPtahMcpConfigPaths(
 
 /** True when `entry` is a `ptah` entry Ptah's persistent writer produced. */
 export function isPtahPersistentEntry(entry: unknown): boolean {
-  if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
-    return false;
-  }
-  const record = entry as Record<string, unknown>;
-  if ('command' in record || 'headers' in record) return false;
-  const url = record[ANTIGRAVITY_URL_KEY] ?? record['url'];
-  return typeof url === 'string' && PTAH_PERSISTENT_URL.test(url);
+  const url = remoteEntryUrl(entry);
+  return url !== null && PTAH_PERSISTENT_URL.test(url);
+}
+
+/** True when `entry` is a `ptah` entry the retired stream-json lane wrote. */
+export function isPtahLaneEntry(entry: unknown): boolean {
+  const url = remoteEntryUrl(entry);
+  return url !== null && PTAH_LANE_URL.test(url);
 }
 
 /**
- * Remove the `ptah` key from `configPath` when Ptah's persistent writer put it
- * there. Returns whether the file changed.
+ * The URL of a remote entry with no `command` and no `headers`, or null for
+ * anything else. Both predicates share this guard, so a user's server with
+ * headers is never taken for Ptah's, whichever URL it carries.
+ */
+function remoteEntryUrl(entry: unknown): string | null {
+  if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) {
+    return null;
+  }
+  const record = entry as Record<string, unknown>;
+  if ('command' in record || 'headers' in record) return null;
+  const url = record[ANTIGRAVITY_URL_KEY] ?? record['url'];
+  return typeof url === 'string' ? url : null;
+}
+
+function retiredShapeOf(entry: unknown): RetiredPtahEntryShape | false {
+  if (isPtahLaneEntry(entry)) return 'lane';
+  if (isPtahPersistentEntry(entry)) return 'persistent';
+  return false;
+}
+
+/**
+ * Remove the `ptah` key from `configPath` when an earlier Ptah writer put it
+ * there. Returns the shape that was removed, or `false` when the file did not
+ * change.
  *
  * An absent file, a file with no `mcpServers` object and a `ptah` entry of any
  * other shape are left exactly as they are. A file that does not parse throws,
@@ -120,7 +177,7 @@ export function isPtahPersistentEntry(entry: unknown): boolean {
  */
 export async function removeRetiredPtahEntry(
   configPath: string,
-): Promise<boolean> {
+): Promise<RetiredPtahEntryShape | false> {
   // Checked before the lock as well as inside it: taking the lock creates a
   // lock file beside the config, which for an absent file would add a
   // directory to the user's workspace or home for nothing.
@@ -137,20 +194,29 @@ export async function removeRetiredPtahEntry(
       // on, and an MCP config holds secrets in `env` and `headers`.
       throw new Error(`${configPath} is not valid JSON; left unchanged`);
     }
-    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    if (
+      typeof parsed !== 'object' ||
+      parsed === null ||
+      Array.isArray(parsed)
+    ) {
       return false;
     }
     const config = parsed as Record<string, unknown>;
     const servers = config['mcpServers'];
-    if (typeof servers !== 'object' || servers === null || Array.isArray(servers)) {
+    if (
+      typeof servers !== 'object' ||
+      servers === null ||
+      Array.isArray(servers)
+    ) {
       return false;
     }
     const map = servers as Record<string, unknown>;
-    if (!isPtahPersistentEntry(map[PTAH_SPAWN_MCP_KEY])) return false;
+    const shape = retiredShapeOf(map[PTAH_SPAWN_MCP_KEY]);
+    if (shape === false) return false;
 
     delete map[PTAH_SPAWN_MCP_KEY];
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
-    return true;
+    return shape;
   });
 }
 
@@ -166,6 +232,12 @@ export interface RetiredPtahMcpSweepDeps extends RetiredPtahMcpDeps {
  *
  * The credential is revoked before the file is read, so the token stops
  * authorizing in memory even when the file cannot be changed this pass.
+ *
+ * The workspace file of a root that is a linked git worktree is never written
+ * (#1469): it is usually a tracked file of the shared repository, and a rewrite
+ * there would put unrelated config churn on the task branch. Its credential is
+ * still revoked, which touches no file. The main checkout and the home file are
+ * swept as before.
  */
 export async function sweepRetiredPtahMcpEntries(
   deps: RetiredPtahMcpSweepDeps,
@@ -182,12 +254,19 @@ export async function sweepRetiredPtahMcpEntries(
     );
     return;
   }
+  // Nothing to sweep (agy not detected): touch no disk at all, as before.
+  if (configPaths.length === 0) return;
+  const linkedWorkspaceFiles = await linkedWorktreeWorkspaceFiles(
+    deps.workspaceRoots,
+  );
   for (const configPath of configPaths) {
     try {
       await deps.revokeCredential(configPath);
-      if (await removeRetiredPtahEntry(configPath)) {
+      if (linkedWorkspaceFiles.has(configPath)) continue;
+      const removed = await removeRetiredPtahEntry(configPath);
+      if (removed !== false) {
         deps.logger.info(
-          `[CodeExecutionMCP] Removed retired ptah entry from ${configPath}`,
+          `[CodeExecutionMCP] Removed retired ptah entry from ${configPath} (${removed})`,
           'CodeExecutionMCP',
         );
       }
@@ -200,6 +279,27 @@ export async function sweepRetiredPtahMcpEntries(
       );
     }
   }
+}
+
+/**
+ * The workspace config path of every root that is a linked git worktree.
+ * `isLinkedWorktreeRoot` never rejects; an error reads as "not linked", which
+ * keeps the main-checkout behaviour.
+ */
+async function linkedWorktreeWorkspaceFiles(
+  roots: readonly string[],
+): Promise<Set<string>> {
+  const unique = [...new Set(roots.filter((root) => root !== ''))];
+  const linked = await Promise.all(
+    unique.map(async (root) =>
+      (await isLinkedWorktreeRoot(root)) ? root : null,
+    ),
+  );
+  return new Set(
+    linked
+      .filter((root): root is string => root !== null)
+      .map((root) => path.join(root, ...WORKSPACE_SEGMENTS)),
+  );
 }
 
 function messageOf(error: unknown): string {

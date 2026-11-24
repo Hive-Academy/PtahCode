@@ -17,9 +17,8 @@
  *     `MultiCliAgentWriterService`, in both formats (markdown and TOML)
  *   - a genuinely foreign directory sitting on a DESIRED path
  *   - a genuinely foreign agent file sitting on a DESIRED path
- *   - the user's own MCP server in `.vscode/mcp.json`, which is not ours and
- *     is not a finding
- *   - the user's own MCP server under a key Ptah wants, which IS a finding
+ *   - the user's own MCP servers in `.vscode/mcp.json`, which are not ours
+ *     and never a finding: no target writes MCP config (TASK_2026_979)
  *
  * Three assertions, and the third is the one that would have caught the
  * original bug on its own: reconcile's health and a following verify's health
@@ -54,7 +53,6 @@ import { ClaudeTarget } from '../targets/claude-target';
 import {
   createCodexTarget,
   createCopilotTarget,
-  createVscodeMcpTarget,
 } from '../targets/rival-targets';
 import { HarnessReconcilerService } from './harness-reconciler.service';
 
@@ -101,6 +99,18 @@ function findTarget(
   return found;
 }
 
+/** The user's own VS Code MCP config, which no pass may report or touch. */
+const USER_VSCODE_MCP = JSON.stringify(
+  {
+    servers: {
+      'user-thing': { type: 'stdio', command: 'the-users-server' },
+      wanted: { type: 'stdio', command: 'the-users-other-server' },
+    },
+  },
+  null,
+  2,
+);
+
 describe('HarnessReconcilerService — reconcile and verify agree', () => {
   let ws: string;
   let sourcesRoot: string;
@@ -137,14 +147,6 @@ describe('HarnessReconcilerService — reconcile and verify agree', () => {
       overlayPluginPaths: [],
       disabledSkillIds: [],
       disabledPluginIds: [],
-      mcpIntents: [
-        {
-          serverKey: 'wanted',
-          registryName: 'io.github.example/wanted',
-          config: { type: 'stdio', command: 'wanted-server' },
-          targets: ['vscode'],
-        },
-      ],
     };
   }
 
@@ -196,24 +198,10 @@ describe('HarnessReconcilerService — reconcile and verify agree', () => {
       'utf-8',
     );
 
-    // The user's own MCP servers. `user-thing` is simply not ours and must not
-    // be reported at all; `wanted` collides with a key Ptah was asked to
-    // install and must be reported as both foreign and missing.
+    // The user's own MCP servers. Not ours, so never reported and never
+    // touched: no harness target writes MCP config any more.
     mkdirSync(join(ws, '.vscode'), { recursive: true });
-    writeFileSync(
-      join(ws, '.vscode', 'mcp.json'),
-      JSON.stringify(
-        {
-          servers: {
-            'user-thing': { type: 'stdio', command: 'the-users-server' },
-            wanted: { type: 'stdio', command: 'the-users-other-server' },
-          },
-        },
-        null,
-        2,
-      ),
-      'utf-8',
-    );
+    writeFileSync(join(ws, '.vscode', 'mcp.json'), USER_VSCODE_MCP, 'utf-8');
   }
 
   beforeEach(() => {
@@ -253,7 +241,6 @@ describe('HarnessReconcilerService — reconcile and verify agree', () => {
         new ClaudeTarget(store),
         createCodexTarget(deps),
         createCopilotTarget(deps),
-        createVscodeMcpTarget(deps),
       ],
     );
   });
@@ -353,27 +340,22 @@ describe('HarnessReconcilerService — reconcile and verify agree', () => {
     ).toBe('# my own notes about agent-two\n');
   });
 
-  it("counts the user's own MCP server as foreign only when it occupies a key Ptah wants", async () => {
+  it("never reports or touches the user's own MCP servers", async () => {
     const health = await reconciler.reconcile(ws, {
       mode: 'full',
       reason: 'test',
     });
-    const vscode = findTarget(health, 'vscode');
 
-    // A collision: Ptah was asked to install `wanted`, the user already has one.
-    expect(vscode.foreign).toContain('.vscode/mcp.json#wanted');
-    expect(vscode.missing).toContain('.vscode/mcp.json#wanted');
-
-    // Not a collision, not ours, not a finding. Reporting it made an ordinary
-    // config file read as a list of problems nobody could act on.
-    expect(vscode.foreign).not.toContain('.vscode/mcp.json#user-thing');
-    expect(vscode.missing).not.toContain('.vscode/mcp.json#user-thing');
-
-    // And it is still on disk, byte for byte.
-    const config = JSON.parse(
-      readFileSync(join(ws, '.vscode', 'mcp.json'), 'utf-8'),
-    ) as { servers: Record<string, { command?: string }> };
-    expect(config.servers['user-thing'].command).toBe('the-users-server');
-    expect(config.servers['wanted'].command).toBe('the-users-other-server');
+    expect(health.targets.map((target) => target.target)).not.toContain(
+      'vscode',
+    );
+    for (const target of health.targets) {
+      for (const relPath of [...target.foreign, ...target.missing]) {
+        expect(relPath).not.toContain('mcp.json');
+      }
+    }
+    expect(readFileSync(join(ws, '.vscode', 'mcp.json'), 'utf-8')).toBe(
+      USER_VSCODE_MCP,
+    );
   });
 });

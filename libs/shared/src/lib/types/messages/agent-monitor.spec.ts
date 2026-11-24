@@ -2,9 +2,15 @@ import type {
   AgentDeliveryReceipt,
   AgentDeliveryReceiptState,
   AgentId,
+  AgentMessageReasonCode,
   AgentMessageRequest,
+  AgentProcessInfo,
   CliAdapterManifest,
   CliDetectionResult,
+  CliOutputSegment,
+  EffectiveLaneCapabilities,
+  LaneTurnRequest,
+  UsageScope,
 } from '../agent-process.types';
 import type {
   RpcMethodParams,
@@ -138,6 +144,80 @@ describe('agent monitor lane contracts', () => {
       ).toBe(false);
     },
   );
+  it('keeps every lane-turn field optional', () => {
+    const textOnly: AgentMessageRequest = { agentId, message: 'hi' };
+    const capabilities: EffectiveLaneCapabilities = {
+      agentId,
+      resolvedAt: 1,
+      source: 'live-handle',
+      messaging: manifest.messaging,
+      mcp: manifest.mcp,
+    };
+    const segment: CliOutputSegment = { type: 'text', content: 'x' };
+    const info: Pick<AgentProcessInfo, 'agentId' | 'reasoningEffort' | 'observedModel'> = {
+      agentId,
+    };
+
+    expect(textOnly.turn).toBeUndefined();
+    expect(manifest).not.toHaveProperty('turnInput');
+    expect(capabilities.turnInput).toBeUndefined();
+    expect(capabilities.effectiveApproval).toBeUndefined();
+    expect(segment.usageScope).toBeUndefined();
+    expect(info.reasoningEffort).toBeUndefined();
+    expect(info.observedModel).toBeUndefined();
+  });
+
+  it('carries turn settings, attachments and the new capability sections', () => {
+    const turn: LaneTurnRequest = {
+      model: 'gpt-5',
+      reasoningEffort: 'high',
+      images: [{ data: 'aGk=', mediaType: 'image/png' }],
+      files: ['src/index.ts'],
+    };
+    const send: AgentMessageRequest = { ...request, turn };
+    const full = {
+      ...manifest,
+      turnInput: {
+        model: { state: 'supported', appliesAt: 'next-turn' },
+        effort: { state: 'supported', appliesAt: 'next-spawn' },
+        images: { state: 'supported', onSteer: false },
+        files: { state: 'supported', delivery: 'path-text' },
+        commands: { state: 'supported', blocked: ['/always-approve'] },
+        skills: { state: 'unsupported', reason: 'No skill channel.' },
+      },
+      usage: { timing: 'turn-end', reason: 'Totals arrive at turn end.' },
+      prompts: {
+        approvals: { state: 'supported' },
+        questions: { state: 'unsupported', reason: 'No question tool.' },
+      },
+    } satisfies CliAdapterManifest;
+    const effective: EffectiveLaneCapabilities = {
+      agentId,
+      resolvedAt: 1,
+      source: 'restored-record',
+      messaging: full.messaging,
+      mcp: full.mcp,
+      turnInput: full.turnInput,
+      usage: full.usage,
+      prompts: full.prompts,
+      effectiveApproval: { mode: 'unknown', reason: 'Lane did not report its mode.' },
+    };
+    const scopes: UsageScope[] = ['message', 'turn', 'cumulative'];
+    const segment: CliOutputSegment = { type: 'info', content: '', usageScope: 'message' };
+    const codes: AgentMessageReasonCode[] = [
+      'turn-options-refused',
+      'turn-input-unsupported',
+      'attachments-unavailable',
+      'attachments-capacity',
+    ];
+
+    expect(send.turn?.images).toHaveLength(1);
+    expect(effective.turnInput?.commands.blocked).toEqual(['/always-approve']);
+    expect(effective.effectiveApproval?.mode).toBe('unknown');
+    expect(scopes).toContain(segment.usageScope);
+    expect(codes).toHaveLength(4);
+  });
+
   it.each(['delivered', 'no-deliverable', 'failed', 'unverified'] as const)(
     'accepts the %s completion verdict',
     (verdict) => {

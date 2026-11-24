@@ -8,11 +8,19 @@ import type {
   AgentMessageRequest,
   AgentMessageSender,
   AgentProcessInfo,
+  LaneTurnRequest,
 } from '@ptah-extension/shared';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type { AgentProcessManager } from '../agent-process-manager.service';
 import { AgentMessageError } from '../agent-message-router.service';
 import type { CliDetectionService } from '../cli-detection.service';
+import type { LaneTurnOptionsCatalog, SdkHandle } from '../cli-adapters/cli-adapter.interface';
+import { filterLaneCommands } from '../cli-adapters/lane-command-filter';
+import { turnInputRefusal, type TurnInputRefusal } from './agent-delivery-planner';
+import {
+  AgentMessageAttachmentCapacityError,
+  type AgentMessageAttachmentStore,
+} from './agent-message-attachment.store';
 import type { AgentLaneResumeService } from './agent-lane-resume.service';
 import type {
   AgentMessageAckRequest,
@@ -28,7 +36,11 @@ import { AgentMessageDispatcher } from './agent-message-dispatcher';
 import { CAPABILITY_METADATA_UNAVAILABLE, previewAgentMessage } from './agent-message-preview';
 import { AgentMessageReconciler, envelopeLane, removeParkedEntry } from './agent-message-reconciler';
 import { agentMessageSenderKey, mayActOnEnvelope } from './agent-message-sender';
-import type { AgentMessageEnvelope, NewEnvelope } from './envelope/agent-message-envelope.schema';
+import type {
+  AgentMessageEnvelope,
+  AgentMessageEnvelopeTurn,
+  NewEnvelope,
+} from './envelope/agent-message-envelope.schema';
 import {
   AgentMessageBodyUnavailableError,
   AgentMessageStorageError,
@@ -40,6 +52,7 @@ import {
   planLimitRetry,
   requiresLimitGate,
   type LaneDeliveryLimitGate,
+  type LimitGateDecision,
 } from './lane-delivery-limit.gate';
 import type { ParentSessionPurge } from './parent-session-purge.service';
 import type { LaneMessageDenyReason, LaneMessagePolicy, VerifiedLaneSender } from './lane-message.policy';
@@ -78,8 +91,28 @@ export interface AgentMessageCoordinatorDeps {
   readonly isParentFrozen?: (parentSessionId: string) => boolean;
   /** Lane-to-lane authorization (Component 15). Absent: every lane send is refused. */
   readonly lanePolicy?: Pick<LaneMessagePolicy, 'authorize'> | null;
+  /** Host-memory images of held messages (D4). Absent: messages with images are refused. */
+  readonly attachments?: Pick<AgentMessageAttachmentStore, 'hold' | 'take' | 'release' | 'keep'> | null;
   readonly clock?: () => number;
 }
+
+/**
+ * What `turnOptions` serves: the lane's catalog, with `error` when the lookup
+ * failed, and `unavailableReason` when a stopped lane has no list to serve yet.
+ */
+export interface LaneTurnOptionsView extends LaneTurnOptionsCatalog {
+  readonly error?: string;
+  readonly unavailableReason?: string;
+}
+
+/** D17: catalog lookups (`listTurnOptions`, `listModels`) are bounded at 5 s. */
+export const LANE_TURN_OPTIONS_TIMEOUT_MS = 5_000;
+/** Lineages whose last served catalog is kept for a stopped lane. */
+const MAX_CACHED_CATALOGS = 64;
+const TURN_OPTIONS_ERROR = 'Lane options could not be read.';
+/** S1: shown in the composer when held images would exceed the host attachment cap. */
+export const ATTACHMENTS_CAPACITY_TEXT =
+  'Held attachments are using all attachment storage. Remove an image or wait for earlier messages to finish.';
 
 type ReasonCode = NonNullable<AgentMessageOutcome['reasonCode']>;
 type RouterDelivery = 'queue' | 'now' | 'steer';
@@ -101,6 +134,8 @@ export class AgentMessageCoordinator implements AgentMessageDeliveryTarget {
   private readonly reconciler: AgentMessageReconciler;
   private readonly clock: () => number;
   private startup?: Promise<void>;
+  /** Per-lineage last served catalog, so a stopped lane still has its command list. */
+  private readonly catalogs = new Map<AgentId, LaneTurnOptionsView>();
 
   constructor(private readonly deps: AgentMessageCoordinatorDeps) {
     this.clock = deps.clock ?? Date.now;
@@ -111,6 +146,8 @@ export class AgentMessageCoordinator implements AgentMessageDeliveryTarget {
     this.dispatcher = new AgentMessageDispatcher({
       manager: deps.manager, store: deps.store, aliases: deps.aliases, resume: deps.resume,
       settleTurn: (info) => this.reconciler.settleTurn(info), logger: deps.logger,
+      ...(deps.attachments ? { attachments: deps.attachments } : {}),
+      advertisedCommands: (laneId, lineage) => this.advertisedCommands(laneId, lineage),
     });
     this.reconciler.attach();
   }
@@ -173,17 +210,33 @@ export class AgentMessageCoordinator implements AgentMessageDeliveryTarget {
       const info = this.deps.manager.findAgentInfo(laneId);
       const refusal = refusalFor(request, plan);
       if (refusal || !info) return this.refuse({ ...base, lineage }, refusal ?? 'not_found', plan.reason);
+      // Turn input the plan cannot take: refused, and nothing is stored.
+      const turnRefusal = turnInputRefusal(plan, request.message, request.turn, info);
+      if (turnRefusal) return turnRefused(request.agentId, turnRefusal);
       if (info.parentSessionId && this.deps.isParentFrozen?.(info.parentSessionId))
         return this.refuse({ ...base, lineage }, 'parent-session-deleted');
-      const limitDecision = requiresLimitGate(plan) && this.deps.limitGate
-        ? await this.deps.limitGate.check(info)
-        : { kind: 'proceed' as const };
+      const envelopeId = randomUUID();
+      const held = this.holdImages(envelopeId, request);
+      if (held) return held;
+      const turn = envelopeTurnOf(request.turn);
+      let limitDecision: LimitGateDecision;
+      try {
+        limitDecision = requiresLimitGate(plan) && this.deps.limitGate
+          ? await this.deps.limitGate.check(info)
+          : { kind: 'proceed' };
+      } catch (error: unknown) {
+        // No envelope exists yet, so no terminal listener would release them.
+        this.deps.attachments?.release(envelopeId);
+        throw error;
+      }
       const retryPlan = limitDecision.kind === 'blocked'
         ? planLimitRetry(undefined, limitDecision.resetAt)
         : undefined;
       let put: { envelope: AgentMessageEnvelope; deduplicated: boolean };
       try {
         put = await this.deps.store.put({
+          id: envelopeId,
+          ...(turn ? { turn } : {}),
           targetAgentId: request.agentId, laneLineageId: lineage,
           ...(laneId !== request.agentId ? { actualAgentId: laneId } : {}),
           ...(info.parentSessionId ? { parentSessionId: info.parentSessionId } : {}),
@@ -201,9 +254,13 @@ export class AgentMessageCoordinator implements AgentMessageDeliveryTarget {
           } : {}),
         }, request.message);
       } catch (error: unknown) {
+        this.deps.attachments?.release(envelopeId);
         return this.storageRefusal(error, request.agentId);
       }
-      if (put.deduplicated) return this.duplicate(put.envelope, request.agentId);
+      if (put.deduplicated) {
+        this.deps.attachments?.release(envelopeId);
+        return this.duplicate(put.envelope, request.agentId);
+      }
       if (retryPlan) {
         if (retryPlan.nextRetryAt !== undefined) {
           this.deps.scheduler.schedule(put.envelope.id, retryPlan.nextRetryAt);
@@ -277,6 +334,8 @@ export class AgentMessageCoordinator implements AgentMessageDeliveryTarget {
       } finally {
         if (!committed) await this.rearmHeld(messageId);
       }
+      // A failed message kept its images for Retry; they are held again until it ends.
+      this.deps.attachments?.keep(messageId);
       // A flush that took the entry meanwhile is gated by `markDispatching`'s from-states.
       removeParkedEntry(this.deps.manager, envelopeLane(current), messageId);
       return this.routeHeld(reopened, body, reopened.delivery, false);
@@ -414,6 +473,138 @@ export class AgentMessageCoordinator implements AgentMessageDeliveryTarget {
   }
 
   /**
+   * The stored body and turn request of an undelivered message (Recover
+   * text). Images are present only while the host still holds them.
+   */
+  async getMessage(
+    agentId: AgentId,
+    messageId: string,
+    actor: AgentMessageSender,
+  ): Promise<{ text: string; turn?: LaneTurnRequest }> {
+    const text = await this.getBody(agentId, messageId, actor);
+    const envelope = await this.deps.store.get(messageId);
+    // Reading never releases images: a failed message keeps them for Retry
+    // until its TTL, a cancel or another terminal state (P5 S2).
+    const turn = envelope ? this.heldTurn(envelope) : undefined;
+    return turn ? { text, turn } : { text };
+  }
+
+  /**
+   * Models, efforts and commands a lane offers its composer. A live handle
+   * answers through `listTurnOptions()`; a stopped lane through the adapter's
+   * `listModels()` plus the last list served for its lineage. Both lookups
+   * are bounded (D17). A stopped lane with no cached list takes the
+   * adapter's static effort levels and says what appears once it runs
+   * (`unavailableReason`). A failure returns the cached lists with `error`
+   * set; it never throws. Hidden permission-policy commands are always dropped.
+   */
+  async turnOptions(agentId: AgentId): Promise<LaneTurnOptionsView> {
+    const { agentId: laneId } = await this.deps.aliases.resolve(agentId);
+    const lineage = await this.deps.aliases.rootOf(agentId);
+    const info = this.deps.manager.findAgentInfo(laneId);
+    if (!info) return { models: [], efforts: [], commands: [], error: 'Lane not found.' };
+    const current = {
+      ...(info.model ? { currentModel: info.model } : {}),
+      ...(info.reasoningEffort ? { currentEffort: info.reasoningEffort } : {}),
+    };
+    const adapter = this.deps.detection.getAdapter(info.cli);
+    const blocked = (info.potentialCapabilities ?? adapter?.capabilities())?.turnInput?.commands.blocked ?? [];
+    const cached = this.catalogs.get(lineage);
+    try {
+      const handle = this.liveHandle(laneId);
+      if (handle?.listTurnOptions) {
+        const catalog = await bounded(handle.listTurnOptions(), LANE_TURN_OPTIONS_TIMEOUT_MS);
+        const served: LaneTurnOptionsView = {
+          ...current, ...catalog, commands: filterLaneCommands(catalog.commands, blocked),
+        };
+        this.remember(lineage, served);
+        return served;
+      }
+      const models = adapter?.listModels
+        ? await bounded(adapter.listModels(), LANE_TURN_OPTIONS_TIMEOUT_MS)
+        : cached?.models ?? [];
+      if (cached) return { ...current, models, efforts: cached.efforts, commands: cached.commands };
+      const efforts = adapter?.laneEfforts?.() ?? [];
+      return {
+        ...current, models, efforts: [...efforts], commands: [],
+        unavailableReason: efforts.length > 0
+          ? 'Commands and skills appear when the lane is running.'
+          : 'Effort levels, commands and skills appear when the lane is running.',
+      };
+    } catch (error: unknown) {
+      // degradation-audit: reported - logged here, and the result carries `error` for the composer.
+      this.deps.logger.warn('[AgentMessageCoordinator] Lane turn options unavailable', {
+        agentId: laneId, error: error instanceof Error ? error.name : 'unknown',
+      });
+      return {
+        ...current, models: cached?.models ?? [], efforts: cached?.efforts ?? [...(adapter?.laneEfforts?.() ?? [])],
+        commands: cached?.commands ?? [], error: TURN_OPTIONS_ERROR,
+      };
+    }
+  }
+
+  /**
+   * The command and skill names a lane advertises, or undefined when no list
+   * is known. Runs inside the lineage's send queue, so the list the composer
+   * last loaded is used when there is one; only a lineage with no cached list
+   * asks the live handle (bounded).
+   */
+  private async advertisedCommands(laneId: AgentId, lineage: AgentId): Promise<readonly string[] | undefined> {
+    const cached = this.catalogs.get(lineage);
+    if (cached) return cached.commands.map((command) => command.name);
+    if (!this.liveHandle(laneId)?.listTurnOptions) return undefined;
+    const view = await this.turnOptions(laneId);
+    return view.error ? undefined : view.commands.map((command) => command.name);
+  }
+
+  private liveHandle(laneId: AgentId): SdkHandle | undefined {
+    const tracked = this.deps.manager.getMessageRoutableAgent(laneId);
+    return tracked?.sdkHandle && !tracked.subprocessReleased && !tracked.restored ? tracked.sdkHandle : undefined;
+  }
+
+  private remember(lineage: AgentId, view: LaneTurnOptionsView): void {
+    this.catalogs.delete(lineage);
+    this.catalogs.set(lineage, view);
+    if (this.catalogs.size > MAX_CACHED_CATALOGS) {
+      const oldest = this.catalogs.keys().next().value;
+      if (oldest !== undefined) this.catalogs.delete(oldest);
+    }
+  }
+
+  /** The turn request of a held envelope, with its images while they are held. */
+  private heldTurn(envelope: AgentMessageEnvelope): LaneTurnRequest | undefined {
+    const stored = envelope.turn;
+    const images = (stored?.imageCount ?? 0) > 0 ? this.deps.attachments?.take(envelope.id) : undefined;
+    if (!stored && !images) return undefined;
+    return {
+      ...(stored?.model !== undefined ? { model: stored.model } : {}),
+      ...(stored?.reasoningEffort !== undefined ? { reasoningEffort: stored.reasoningEffort } : {}),
+      ...(stored?.files?.length ? { files: stored.files } : {}),
+      ...(images?.length ? { images } : {}),
+    };
+  }
+
+  /** Hold the images of a new envelope before it is stored; a refusal stores nothing. */
+  private holdImages(envelopeId: string, request: AgentMessageRequest): AgentMessageOutcome | undefined {
+    const images = request.turn?.images ?? [];
+    if (images.length === 0) return undefined;
+    if (!this.deps.attachments)
+      return turnRefused(request.agentId, {
+        code: 'turn-input-unsupported', reason: 'This host cannot hold images for a lane message.',
+      });
+    try {
+      this.deps.attachments.hold(envelopeId, images);
+      return undefined;
+    } catch (error: unknown) {
+      if (!(error instanceof AgentMessageAttachmentCapacityError)) throw error;
+      return {
+        mode: 'unsupported', reasonCode: 'attachments-capacity', detail: ATTACHMENTS_CAPACITY_TEXT,
+        requestedAgentId: request.agentId,
+      };
+    }
+  }
+
+  /**
    * A held envelope whose body cannot be read is failed visibly, with no retry
    * time and no recoverable body; a failed write throws so the scheduler backs off.
    */
@@ -455,6 +646,15 @@ export class AgentMessageCoordinator implements AgentMessageDeliveryTarget {
         state: 'failed', reason: plan.reason ?? refusal,
       }, [envelope.state]);
       return this.unsupportedFor(failed ?? envelope, refusal);
+    }
+    // The lane may have changed since the message was held: re-check its turn input.
+    const turnRefusal = turnInputRefusal(plan, body, this.heldTurn(envelope), info);
+    if (turnRefusal) {
+      const failed = await this.deps.store.transition(envelope.id, {
+        state: 'failed', reason: turnRefusal.code, lastError: turnRefusal.reason.slice(0, 200),
+        nextRetryAt: undefined,
+      }, [envelope.state]);
+      return { ...this.unsupportedFor(failed ?? envelope, turnRefusal.code), detail: turnRefusal.reason };
     }
     let dispatchable = envelope;
     if (!limitChecked && requiresLimitGate(plan) && this.deps.limitGate) {
@@ -599,6 +799,33 @@ function refusalFor(
       ? plan.reason : 'delivery-refused';
   if (plan.mode === 'interrupt-resume' && request.allowPartialTurnLoss !== true) return 'confirmation-required';
   return undefined;
+}
+
+/** A turn-input refusal: nothing was stored, so the outcome has no message id. */
+function turnRefused(requested: AgentId, refusal: TurnInputRefusal): AgentMessageOutcome {
+  return { mode: 'unsupported', reasonCode: refusal.code, detail: refusal.reason, requestedAgentId: requested };
+}
+
+/** The durable summary of a turn request: settings, files and an image count, never image bytes. */
+function envelopeTurnOf(turn: LaneTurnRequest | undefined): AgentMessageEnvelopeTurn | undefined {
+  if (!turn) return undefined;
+  const summary: AgentMessageEnvelopeTurn = {
+    ...(turn.model !== undefined ? { model: turn.model } : {}),
+    ...(turn.reasoningEffort !== undefined ? { reasoningEffort: turn.reasoningEffort } : {}),
+    ...(turn.files?.length ? { files: [...turn.files] } : {}),
+    ...(turn.images?.length ? { imageCount: turn.images.length } : {}),
+  };
+  return Object.keys(summary).length > 0 ? summary : undefined;
+}
+
+/** Rejects after `ms`; the timer is cleared when the call settles first. */
+function bounded<T>(call: Promise<T>, ms: number): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error('Lane option lookup timed out.')), ms);
+    timer.unref?.();
+  });
+  return Promise.race([call, timeout]).finally(() => clearTimeout(timer));
 }
 
 function sameHeldSnapshot(before: AgentMessageEnvelope, current: AgentMessageEnvelope): boolean {

@@ -98,6 +98,7 @@ import type {
   CliOutputSegment,
 } from '@ptah-extension/shared';
 import { CopilotSdkAdapter } from './copilot-sdk.adapter';
+import { laneTurnInputContractViolations } from '../testing/lane-turn-input-contract';
 import {
   buildTaskPrompt,
   CliCommandLineTooLongError,
@@ -657,11 +658,17 @@ describe('CopilotSdkAdapter', () => {
       const joined = output.join('');
       expect(joined).toContain('Usage:');
       expect(joined).toContain('claude-sonnet-4.5');
+      // Per-request usage goes out live as a `message` increment (B9).
       expect(segments).toContainEqual({
         type: 'info',
         content:
           'Usage: model: claude-sonnet-4.5, 1000 input, 500 output, $0.0025, 3.5s',
-        usage: undefined,
+        usageScope: 'message',
+        usage: { model: 'claude-sonnet-4.5', inputTokens: 1000, outputTokens: 500, costUsd: 0.0025, durationMs: 3500 },
+      });
+      expect(segments.find((item) => item.turnTelemetry)).toMatchObject({
+        usageScope: 'turn',
+        usage: { inputTokens: 1000, outputTokens: 500, costUsd: 0.0025 },
       });
       expect(segments).toContainEqual(expect.objectContaining({
         turnTelemetry: expect.objectContaining({
@@ -726,7 +733,9 @@ describe('CopilotSdkAdapter', () => {
       expect(segments.find((item) => item.turnTelemetry)?.turnTelemetry).toMatchObject({
         status: 'unavailable',
       });
-      expect(segments.every((item) => item.usage === undefined)).toBe(true);
+      // The valid request still went out live; no turn total corrects it.
+      expect(segments.filter((item) => item.usage).map((item) => item.usageScope)).toEqual(['message']);
+      expect(segments.find((item) => item.turnTelemetry)?.usage).toBeUndefined();
     });
 
     it('fails closed when a successful turn has no usage event', async () => {
@@ -1118,5 +1127,106 @@ describe('CopilotSdkAdapter', () => {
       await adapter.dispose();
       expect(cleanupSpy).toHaveBeenCalled();
     });
+  });
+});
+
+describe('CopilotSdkAdapter lane turn input (B9)', () => {
+  let adapter: CopilotSdkAdapter;
+  const options = { task: 'Implement feature X', workingDirectory: '/proj', model: 'gpt-a' };
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    currentChild = null;
+    mockSpawnCli.mockImplementation(() => {
+      currentChild = createFakeChild();
+      return currentChild.child;
+    });
+    mockResolveCliPath.mockResolvedValue('/usr/local/bin/copilot');
+    adapter = new CopilotSdkAdapter(new CopilotPermissionBridge());
+  });
+
+  async function firstTurn() {
+    const handle = await adapter.runSdk(options);
+    handle.onOutput(() => {});
+    currentChild?.stdout.write(JSON.stringify({ type: 'result', sessionId: 'sess-1', exitCode: 0 }) + '\n');
+    currentChild?.emitClose(0);
+    await handle.done;
+    return handle;
+  }
+
+  it('declares next-spawn settings, live usage and unsupported attachments', async () => {
+    const manifest = adapter.capabilities();
+    expect(manifest.turnInput).toMatchObject({
+      model: { state: 'supported', appliesAt: 'next-spawn' },
+      effort: { state: 'supported', appliesAt: 'next-spawn' },
+      images: { state: 'unsupported', reason: 'Copilot image input is not confirmed for -p mode.' },
+      files: { state: 'unsupported', reason: 'Copilot file attachments are not confirmed for -p mode.' },
+      commands: { state: 'unsupported' },
+      skills: { state: 'unsupported' },
+    });
+    expect(manifest.usage).toEqual({ timing: 'live' });
+    expect(manifest.prompts?.approvals.state).toBe('unsupported');
+    const handle = await firstTurn();
+    expect(laneTurnInputContractViolations(handle, manifest)).toEqual([]);
+  });
+
+  it('spawns the next turn with the applied model and effort', async () => {
+    const handle = await firstTurn();
+    await expect(handle.applyTurnSettings?.({ model: 'gpt-b', reasoningEffort: 'high' }))
+      .resolves.toEqual({ model: 'gpt-b', reasoningEffort: 'high', appliesAt: 'next-spawn' });
+    const next = await handle.continue?.('follow up');
+    currentChild?.emitClose(0);
+    await next?.done;
+    const [, args] = mockSpawnCli.mock.calls[1] as [string, string[]];
+    expect(args[args.indexOf('--model') + 1]).toBe('gpt-b');
+    expect(args[args.indexOf('--effort') + 1]).toBe('high');
+    await expect(handle.listTurnOptions?.()).resolves.toMatchObject({ currentModel: 'gpt-b', currentEffort: 'high' });
+  });
+
+  it('refuses an unknown effort and, when Copilot lists models, an unknown model', async () => {
+    const handle = await firstTurn();
+    await expect(handle.applyTurnSettings?.({ reasoningEffort: 'turbo' }))
+      .rejects.toMatchObject({ field: 'reasoningEffort', reason: 'Copilot has no effort level "turbo".' });
+    jest.spyOn(adapter, 'listModels').mockResolvedValue([{ id: 'gpt-a', name: 'GPT A' }]);
+    await expect(handle.applyTurnSettings?.({ model: 'gpt-x' }))
+      .rejects.toMatchObject({ field: 'model', reason: 'Copilot has no model "gpt-x".' });
+  });
+
+  it('says an unlisted model is unchecked and drops it after a failed turn (M3)', async () => {
+    const handle = await firstTurn();
+    const segments: CliOutputSegment[] = [];
+    handle.onSegment?.((item) => segments.push(item));
+    await handle.applyTurnSettings?.({ model: 'gtp-typo' });
+    expect(segments).toContainEqual({
+      type: 'info',
+      content: 'Copilot lists no models, so "gtp-typo" was not checked. The next turn uses it.',
+    });
+    const failed = await handle.continue?.('follow up');
+    currentChild?.emitClose(1);
+    await failed?.done;
+    expect(segments).toContainEqual({
+      type: 'info',
+      content: 'The turn with the unchecked model "gtp-typo" failed. The next turn uses the lane\'s model again.',
+    });
+    const next = await handle.continue?.('again');
+    currentChild?.emitClose(0);
+    await next?.done;
+    const [, args] = mockSpawnCli.mock.calls[2] as [string, string[]];
+    expect(args).not.toContain('gtp-typo');
+  });
+
+  it('streams each request usage mid-turn before the turn total', async () => {
+    const handle = await adapter.runSdk(options);
+    const segments: CliOutputSegment[] = [];
+    handle.onSegment?.((item) => segments.push(item));
+    currentChild?.stdout.write(JSON.stringify({ type: 'assistant.usage', data: { model: 'gpt-a', inputTokens: 10, outputTokens: 2 } }) + '\n');
+    await new Promise((resolve) => setImmediate(resolve));
+    // Mid-turn: the increment is out before the process exits.
+    expect(segments.filter((item) => item.usage)).toEqual([
+      expect.objectContaining({ usageScope: 'message', usage: expect.objectContaining({ inputTokens: 10, outputTokens: 2 }) }),
+    ]);
+    currentChild?.emitClose(0);
+    await handle.done;
+    expect(segments.filter((item) => item.usage).map((item) => item.usageScope)).toEqual(['message', 'turn']);
   });
 });

@@ -19,20 +19,11 @@ import {
   LucideAngularModule,
   ArrowUp,
   GitBranch,
-  Zap,
   Square,
   ImageIcon,
-  Paperclip,
-  ImagePlus,
-  File as FileIcon,
   Folder as FolderIcon,
-  Mic,
-  Plus,
 } from 'lucide-angular';
-import { NativePopoverComponent } from '@ptah-extension/ui';
-import {
-  type EffortLevel,
-} from '@ptah-extension/shared';
+import type { EffortLevel } from '@ptah-extension/shared';
 import { ChatStore } from '../../../services/chat.store';
 import { isTabBusyGenerating } from '../../../services/chat-store/tab-busy';
 import { ComposerRestoreService } from '../../../services/composer-restore.service';
@@ -71,38 +62,26 @@ import {
   ComposerCompactBarComponent,
   COMPOSER_CARD_BORDER_CLASS,
   COMPOSER_CARD_CLASS,
-  PROMPT_CATALOGUE,
 } from '@ptah-extension/chat-ui';
-import {
-  FilePickerService,
-  type FileSuggestion,
-  type ChatFile,
-} from '../../../services/file-picker.service';
-import {
-  UnifiedSuggestionsDropdownComponent,
-  type SuggestionItem,
-} from '../../file-suggestions/unified-suggestions-dropdown.component';
+import type { ChatFile } from '../../../services/file-picker.service';
+import { UnifiedSuggestionsDropdownComponent } from '../../file-suggestions/unified-suggestions-dropdown.component';
 import { AttachmentTrayComponent } from '../attachment-tray/attachment-tray.component';
 import { ComposerAttachmentsService, type ComposerImage } from '../../../services/composer-attachments.service';
 import {
-  AtTriggerDirective,
-  type AtTriggerEvent,
-} from '../../../directives/at-trigger.directive';
-import {
-  SlashTriggerDirective,
-  type SlashTriggerEvent,
-} from '../../../directives/slash-trigger.directive';
+  ComposerInputController,
+  type ComposerCommandSource,
+  type ComposerFileMode,
+} from '../../../services/composer-input.controller';
+import { AtTriggerDirective } from '../../../directives/at-trigger.directive';
+import { SlashTriggerDirective } from '../../../directives/slash-trigger.directive';
 import { EffortSelectorComponent } from './effort-selector.component';
 import { McpStatusChipComponent } from '../mcp-status-chip.component';
 import { PeerSessionSendComponent } from '../peer-session-send';
-import {
-  COMPOSER_TRIGGER_CACHE_ENABLED,
-  MAX_CACHED_TRIGGER_QUERIES,
-  TRIGGER_PROJECTION_DEBOUNCE_MS,
-} from '../../../services/composer-trigger-scheduler';
+import { ComposerAttachMenuComponent } from '../composer-controls/composer-attach-menu.component';
+import { ComposerVoiceButtonComponent } from '../composer-controls/composer-voice-button.component';
 
-type FileSuggestionItem = Extract<SuggestionItem, { type: 'file' }>;
-type CommandSuggestionItem = Extract<SuggestionItem, { type: 'command' }>;
+/** Main chat lists the workspace command catalogue behind `/`. */
+const DISCOVERY_COMMANDS: ComposerCommandSource = { state: 'discovery' };
 
 /** Per-instance suffix for the textarea id (several composers can mount). */
 let nextComposerId = 0;
@@ -155,12 +134,19 @@ function folderName(root: string): string {
     EffortSelectorComponent,
     McpStatusChipComponent,
     PeerSessionSendComponent,
-    NativePopoverComponent,
     ComposerActivityDirective,
     ComposerCompactBarComponent,
     ComposerTypeToExpandDirective,
+    ComposerAttachMenuComponent,
+    ComposerVoiceButtonComponent,
   ],
-  providers: [VoiceInputService, ComposerCompactStore, ComposerAttachmentsService],
+  // VoiceInputService is per composer; the voice button uses this instance.
+  providers: [
+    VoiceInputService,
+    ComposerCompactStore,
+    ComposerAttachmentsService,
+    ComposerInputController,
+  ],
   template: `
     <div
       class="ptah-composer relative flex flex-col px-3 pt-2 pb-2 bg-surface-0"
@@ -169,8 +155,8 @@ function folderName(root: string): string {
       (typeToExpand)="expandComposer()"
       (pasteToExpand)="pasteIntoCompact($event)"
       (dragover)="handleDragOver($event)"
-      (dragleave)="handleDragLeave($event)"
-      (drop)="handleDrop($event)"
+      (dragleave)="composerInput.handleDragLeave($event)"
+      (drop)="composerInput.handleDrop($event)"
     >
       <!-- Image attachment validation error (auto-clears after 4s) -->
       @if (commandCenterHeld()) {
@@ -225,7 +211,7 @@ function folderName(root: string): string {
           </div>
         }
         <!-- Drop zone overlay -->
-        @if (isDraggingOver()) {
+        @if (composerInput.dragging()) {
           <div
             class="absolute inset-0 z-10 flex items-center justify-center bg-primary/10 border border-dashed border-primary rounded-xl pointer-events-none"
           >
@@ -307,24 +293,24 @@ function folderName(root: string): string {
             [readonly]="attachedReadOnly()"
             [class.opacity-60]="attachedReadOnly()"
             (input)="handleInput($event)"
-            (keydown)="handleKeyDown($event)"
-            (paste)="handlePaste($event)"
+            (keydown)="composerInput.handleKeyDown($event)"
+            (paste)="composerInput.handlePaste($event)"
             rows="2"
             role="combobox"
-            [attr.aria-expanded]="showSuggestions()"
-            [attr.aria-controls]="getListboxId()"
-            [attr.aria-activedescendant]="getActiveDescendantId()"
+            [attr.aria-expanded]="composerInput.showSuggestions()"
+            [attr.aria-controls]="composerInput.getListboxId()"
+            [attr.aria-activedescendant]="composerInput.getActiveDescendantId()"
             aria-autocomplete="list"
             ptahAtTrigger
-            (atActivated)="handleAtActivated($event)"
-            (atTriggered)="handleAtTriggered($event)"
-            (atClosed)="handleAtClosed()"
-            (atQueryChanged)="handleQueryChanged($event)"
+            (atActivated)="composerInput.handleAtActivated($event)"
+            (atTriggered)="composerInput.handleAtTriggered($event)"
+            (atClosed)="composerInput.handleAtClosed()"
+            (atQueryChanged)="composerInput.handleQueryChanged($event)"
             ptahSlashTrigger
-            (slashActivated)="handleSlashActivated($event)"
-            (slashTriggered)="handleSlashTriggered()"
-            (slashClosed)="handleSlashClosed()"
-            (slashQueryChanged)="handleQueryChanged($event)"
+            (slashActivated)="composerInput.handleSlashActivated($event)"
+            (slashTriggered)="composerInput.handleSlashTriggered()"
+            (slashClosed)="composerInput.handleSlashClosed()"
+            (slashQueryChanged)="composerInput.handleQueryChanged($event)"
           ></textarea>
 
           <!-- File/Folder Suggestions Dropdown - positioned above textarea.
@@ -333,15 +319,21 @@ function folderName(root: string): string {
                containing block of this position:fixed panel. Floating UI
                would then write box-relative left/top that land near the
                window's top-left once the translate returns to none. -->
-          @if (showSuggestions() && textareaOrigin() && compactStore.unclipped()) {
+          @if (
+            composerInput.showSuggestions() &&
+            textareaOrigin() &&
+            compactStore.unclipped()
+          ) {
             <ptah-unified-suggestions-dropdown
               #suggestionsDropdown
               [overlayOrigin]="textareaOrigin()!"
-              [suggestions]="filteredSuggestions()"
-              [isLoading]="isLoadingSuggestions()"
-              [errorMessage]="filePickerError()"
-              (suggestionSelected)="handleSuggestionSelected($event)"
-              (closed)="closeSuggestions()"
+              [suggestions]="composerInput.filteredSuggestions()"
+              [isLoading]="composerInput.isLoadingSuggestions()"
+              [errorMessage]="composerInput.filePickerError()"
+              (suggestionSelected)="
+                composerInput.handleSuggestionSelected($event)
+              "
+              (closed)="composerInput.closeSuggestions()"
             />
           }
         </div>
@@ -350,60 +342,10 @@ function folderName(root: string): string {
              spacer -> model / effort group -> mic -> stop / send -->
         <div class="ptah-composer-toolbar flex items-center gap-1 px-2 pr-2.5 pb-2 min-w-0">
           <div class="ptah-composer-toolbar-start flex items-center gap-1 min-w-0 flex-1">
-            <ptah-native-popover
-              [isOpen]="attachMenuOpen()"
-              [placement]="'top-start'"
-              [hasBackdrop]="true"
-              [backdropClass]="'transparent'"
-              (closed)="closeAttachMenu()"
-            >
-              <button
-                trigger
-                class="inline-flex items-center justify-center h-7 w-7 flex-shrink-0 rounded-md text-base-content-muted hover:text-base-content hover:bg-surface-2 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[oklch(var(--s))]"
-                [class.bg-surface-2]="attachMenuOpen()"
-                [class.text-base-content]="attachMenuOpen()"
-                (click)="toggleAttachMenu()"
-                type="button"
-                title="Attach"
-                aria-label="Attach files or add context"
-                aria-haspopup="menu"
-                [attr.aria-expanded]="attachMenuOpen()"
-                data-testid="chat-attach-btn"
-              >
-                <lucide-angular
-                  [img]="PlusIcon"
-                  class="w-4 h-4"
-                  aria-hidden="true"
-                />
-              </button>
-
-              <div content data-glass-surface="overlay" data-composer-overlay class="w-44 p-1 flex flex-col" role="menu">
-                <button
-                  class="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-xs text-left hover:bg-base-300 focus-visible:bg-base-300 focus-visible:outline-none transition-colors"
-                  (click)="selectAttachFiles()"
-                  type="button"
-                  role="menuitem"
-                >
-                  <lucide-angular
-                    [img]="PaperclipIcon"
-                    class="w-3.5 h-3.5 text-base-content-muted"
-                  />
-                  <span>Attach files</span>
-                </button>
-                <button
-                  class="flex items-center gap-2 px-2.5 py-1.5 rounded-md text-xs text-left hover:bg-base-300 focus-visible:bg-base-300 focus-visible:outline-none transition-colors"
-                  (click)="selectAttachImages()"
-                  type="button"
-                  role="menuitem"
-                >
-                  <lucide-angular
-                    [img]="ImagePlusIcon"
-                    class="w-3.5 h-3.5 text-base-content-muted"
-                  />
-                  <span>Attach images</span>
-                </button>
-              </div>
-            </ptah-native-popover>
+            <ptah-composer-attach-menu
+              (pickFiles)="handleAttachFiles()"
+              (pickImages)="handleAttachImages()"
+            />
 
             <!-- Approval chip (moved from the status line; data unchanged:
                  AutopilotStateService.stateFor(sessionId)) -->
@@ -430,58 +372,11 @@ function folderName(root: string): string {
               />
             </div>
 
-            @if (isElectron) {
-              @if (isRecording()) {
-                <span class="text-xs text-error tabular-nums px-0.5">{{
-                  voiceElapsedLabel()
-                }}</span>
-              }
-              <button
-                [class]="
-                  'inline-flex items-center justify-center h-7 w-7 flex-shrink-0 rounded-md transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[oklch(var(--s))] disabled:opacity-50 ' +
-                  (isRecording()
-                    ? 'text-error bg-error/10 animate-pulse'
-                    : 'text-base-content-muted hover:text-base-content hover:bg-surface-2')
-                "
-                [disabled]="isTranscribing()"
-                (click)="handleVoiceButton()"
-                [title]="
-                  isRecording()
-                    ? 'Stop recording'
-                    : isTranscribing()
-                      ? 'Transcribing...'
-                      : 'Dictate'
-                "
-                [attr.aria-label]="
-                  isRecording()
-                    ? 'Stop recording'
-                    : isTranscribing()
-                      ? 'Transcribing...'
-                      : 'Dictate'
-                "
-                type="button"
-                data-testid="chat-voice-btn"
-              >
-                @if (isTranscribing()) {
-                  <span
-                    class="loading loading-spinner loading-xs"
-                    aria-hidden="true"
-                  ></span>
-                } @else if (isRecording()) {
-                  <lucide-angular
-                    [img]="SquareIcon"
-                    class="w-3.5 h-3.5"
-                    aria-hidden="true"
-                  />
-                } @else {
-                  <lucide-angular
-                    [img]="MicIcon"
-                    class="w-4 h-4"
-                    aria-hidden="true"
-                  />
-                }
-              </button>
-            }
+            <!-- Dictation (renders only in Electron) -->
+            <ptah-composer-voice-button
+              (transcript)="composerInput.insertTranscript($event)"
+              (failed)="composerInput.showError($event)"
+            />
 
             <!-- Stop Button (streaming only), same 28 px circle as Send.
                  Gated on the same busy predicate the dispatcher queues on, so
@@ -611,21 +506,8 @@ export class ChatInputComponent implements OnInit, OnDestroy {
   readonly autopilotState = inject(AutopilotStateService);
   private readonly vscodeService = inject(VSCodeService);
   private readonly gitStore = inject(SessionGitStatsStore);
-  readonly voiceInput = inject(VoiceInputService);
-  readonly filePicker = inject(FilePickerService);
-  private readonly composerTriggerCacheEnabled = inject(
-    COMPOSER_TRIGGER_CACHE_ENABLED,
-  );
-
-  readonly isElectron = this.vscodeService.isElectron;
-  readonly isRecording = this.voiceInput.isRecording;
-  readonly isTranscribing = this.voiceInput.isTranscribing;
-  readonly voiceElapsedLabel = computed(() => {
-    const total = this.voiceInput.elapsedSeconds();
-    const minutes = Math.floor(total / 60);
-    const seconds = total % 60;
-    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
-  });
+  /** Textarea behaviour: `/` and `@` suggestions, paste, drop, keys, voice. */
+  readonly composerInput = inject(ComposerInputController);
   readonly commandDiscovery = inject(CommandDiscoveryFacade);
   private readonly authState = inject(AuthStateService);
 
@@ -816,6 +698,7 @@ export class ChatInputComponent implements OnInit, OnDestroy {
   private readonly document = inject(DOCUMENT);
   private readonly composerActivity = viewChild(ComposerActivityDirective);
   private readonly modelSelector = viewChild(ModelSelectorComponent);
+  private readonly attachMenu = viewChild(ComposerAttachMenuComponent);
 
   /** The composer is folded into its one-row bar. */
   readonly isCompact = this.compactStore.compact;
@@ -859,7 +742,7 @@ export class ChatInputComponent implements OnInit, OnDestroy {
     event.preventDefault();
     this.expandComposer();
     if (text) this._currentMessage.update((current) => current + text);
-    this.handlePaste(event);
+    this.composerInput.handlePaste(event);
   }
 
   /** Wire the store and the polite fold announcement. */
@@ -880,11 +763,11 @@ export class ChatInputComponent implements OnInit, OnDestroy {
       ),
       overlayOpen: computed(
         () =>
-          this._showSuggestions() ||
-          this._attachMenuOpen() ||
+          this.composerInput.showSuggestions() ||
+          (this.attachMenu()?.isOpen() ?? false) ||
           (this.composerActivity()?.popoverOpen() ?? false),
       ),
-      dragging: this._isDraggingOver,
+      dragging: this.composerInput.dragging,
     });
 
     let announced = false;
@@ -928,17 +811,8 @@ export class ChatInputComponent implements OnInit, OnDestroy {
   readonly ArrowUpIcon = ArrowUp;
   readonly FolderHintIcon = FolderIcon;
   readonly GitBranchIcon = GitBranch;
-  readonly ZapIcon = Zap;
   readonly SquareIcon = Square;
   readonly ImageIconRef = ImageIcon;
-  readonly PaperclipIcon = Paperclip;
-  readonly ImagePlusIcon = ImagePlus;
-  readonly MicIcon = Mic;
-  readonly PlusIcon = Plus;
-
-  /** Open state of the `+` attach menu in the composer toolbar. */
-  private readonly _attachMenuOpen = signal(false);
-  readonly attachMenuOpen = this._attachMenuOpen.asReadonly();
 
   /**
    * Composer card classes (design-spec §6 card line: surface-1, 12 px radius,
@@ -962,22 +836,8 @@ export class ChatInputComponent implements OnInit, OnDestroy {
   });
 
   private _lastSessionId: string | null = null;
+  /** The draft text; the input controller edits it, this component owns it. */
   private readonly _currentMessage = signal('');
-  private readonly _showSuggestions = signal(false);
-  readonly showSuggestions = this._showSuggestions.asReadonly();
-
-  private readonly _suggestionMode = signal<
-    'at-trigger' | 'slash-trigger' | null
-  >(null);
-  private readonly _triggerPosition = signal(0); // Position where trigger (@, /) starts
-  private readonly _currentQuery = signal(''); // Current search query after trigger
-  /** Query whose expensive local suggestion projection is ready to render. */
-  private readonly _projectedQuery = signal('');
-  private readonly _localSuggestions = signal<SuggestionItem[]>([]);
-  private readonly _fileSuggestionCache = new Map<string, SuggestionItem[]>();
-  private _commandSuggestions: CommandSuggestionItem[] | null = null;
-  private _triggerProjectionTimeout: ReturnType<typeof setTimeout> | null =
-    null;
   readonly attachments = inject(ComposerAttachmentsService);
   private readonly _selectedFiles = this.attachments.files;
   private readonly _pastedImages = this.attachments.images;
@@ -992,15 +852,10 @@ export class ChatInputComponent implements OnInit, OnDestroy {
     files: ChatFile[];
     images: ComposerImage[];
   } | null = null;
-  private readonly _isDraggingOver = signal(false);
-  private readonly _isLoadingSuggestions = signal(false);
   readonly imageAttachmentError = this.attachments.error.asReadonly();
   readonly currentMessage = this._currentMessage.asReadonly();
-  readonly suggestionMode = this._suggestionMode.asReadonly();
   readonly selectedFiles = this._selectedFiles.asReadonly();
   readonly pastedImages = this._pastedImages.asReadonly();
-  readonly isDraggingOver = this._isDraggingOver.asReadonly();
-  readonly isLoadingSuggestions = this._isLoadingSuggestions.asReadonly();
   readonly canSend = computed(
     () =>
       this.attachments.pendingReads() === 0 && (
@@ -1008,13 +863,6 @@ export class ChatInputComponent implements OnInit, OnDestroy {
         this._pastedImages().length > 0 ||
         this._selectedFiles().length > 0
       ),
-  );
-
-  /** Expose fetch error only when in @ mode (not stale from previous mode) */
-  readonly filePickerError = computed(() =>
-    this._suggestionMode() === 'at-trigger'
-      ? this.filePicker.fetchError()
-      : null,
   );
 
   /**
@@ -1027,47 +875,11 @@ export class ChatInputComponent implements OnInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.saveDraft();
-    this.clearTriggerProjectionTimeout();
   }
 
   /**
-   * Computed signal for filtered suggestions.
-   * Hybrid approach: merges local fuzzy results + server-side remote results.
-   * Local results appear immediately; remote results merge in when RPC completes.
-   */
-  readonly filteredSuggestions = computed(() => {
-    const mode = this._suggestionMode();
-    this._projectedQuery();
-
-    if (mode === 'at-trigger') {
-      const localResults = this._localSuggestions().filter(
-        (suggestion): suggestion is FileSuggestionItem =>
-          suggestion.type === 'file',
-      );
-      const remoteResults = this.filePicker.remoteResults();
-      const seenPaths = new Set(localResults.map((f) => f.path));
-      const merged = [...localResults];
-      for (const remote of remoteResults) {
-        if (!seenPaths.has(remote.path)) {
-          merged.push(this.toFileSuggestionItem(remote));
-          seenPaths.add(remote.path);
-        }
-      }
-
-      return merged.slice(0, 40);
-    }
-
-    if (mode === 'slash-trigger') {
-      return this._localSuggestions();
-    }
-
-    return [];
-  });
-
-  /**
-   * Handle input change (value sync only — the textarea sizes itself via
-   * `field-sizing: content`, so no layout reads or height writes happen here;
-   * trigger detection is delegated to directives)
+   * Value sync only: the textarea sizes itself via `field-sizing: content`,
+   * and trigger detection lives in the directives.
    */
   handleInput(event: Event): void {
     this._currentMessage.set((event.target as HTMLTextAreaElement).value);
@@ -1075,39 +887,10 @@ export class ChatInputComponent implements OnInit, OnDestroy {
 
   /**
    * Show a transient, user-visible error near the input area.
-   * Mirrors the signal+timeout pattern used in editor.service.ts showError().
    * Auto-clears after 4 seconds.
    */
   private showComposerError(message: string): void {
     this.attachments.showError(message);
-  }
-
-  handlePaste(event: ClipboardEvent): void {
-    this.attachments.onPaste(event);
-  }
-
-  removePastedImage(id: string): void {
-    this.attachments.remove(id);
-  }
-
-  toggleAttachMenu(): void {
-    this._attachMenuOpen.update((open) => !open);
-  }
-
-  closeAttachMenu(): void {
-    this._attachMenuOpen.set(false);
-  }
-
-  /** `+` menu → Attach files. Closes the menu, then opens the picker. */
-  selectAttachFiles(): void {
-    this.closeAttachMenu();
-    void this.handleAttachFiles();
-  }
-
-  /** `+` menu → Attach images. Closes the menu, then opens the picker. */
-  selectAttachImages(): void {
-    this.closeAttachMenu();
-    void this.handleAttachImages();
   }
 
   /**
@@ -1122,348 +905,11 @@ export class ChatInputComponent implements OnInit, OnDestroy {
     await this.attachments.pickImages();
   }
 
-  async handleVoiceButton(): Promise<void> {
-    if (this.isTranscribing()) return;
-
-    if (this.isRecording()) {
-      const result = await this.voiceInput.stopRecording();
-      if (!result) return;
-      if (result.ok && result.transcript) {
-        this.insertTranscript(result.transcript);
-      } else if (!result.ok && result.error) {
-        this.showComposerError(result.error);
-      }
-      return;
-    }
-
-    await this.voiceInput.startRecording();
-    const error = this.voiceInput.error();
-    if (error) {
-      this.showComposerError(error);
-    }
-  }
-
-  private insertTranscript(transcript: string): void {
-    const text = transcript.trim();
-    if (!text) return;
-
-    const textarea = this.textareaRef()?.nativeElement;
-    const currentValue = this._currentMessage();
-
-    if (!textarea) {
-      const needsSpace =
-        currentValue.length > 0 && !currentValue.endsWith(' ') ? ' ' : '';
-      this._currentMessage.set(currentValue + needsSpace + text);
-      return;
-    }
-
-    const cursorStart = textarea.selectionStart ?? currentValue.length;
-    const cursorEnd = textarea.selectionEnd ?? currentValue.length;
-    const before = currentValue.substring(0, cursorStart);
-    const after = currentValue.substring(cursorEnd);
-    const atEndAfterText =
-      cursorStart === currentValue.length && before.length > 0;
-    const leadingSpace = atEndAfterText && !before.endsWith(' ') ? ' ' : '';
-    const insertion = leadingSpace + text;
-    const newValue = before + insertion + after;
-
-    this._currentMessage.set(newValue);
-    textarea.value = newValue;
-    const newCursorPos = cursorStart + insertion.length;
-    textarea.focus();
-    textarea.setSelectionRange(newCursorPos, newCursorPos);
-  }
-
-  /**
-   * Handle dragover - show drop zone for image files
-   */
+  /** Dragover with files: show the drop zone and open a folded composer. */
   handleDragOver(event: DragEvent): void {
-    const hasImages = Array.from(event.dataTransfer?.types ?? []).includes(
-      'Files',
-    );
-    if (hasImages) {
-      event.preventDefault();
-      event.stopPropagation();
-      this._isDraggingOver.set(true);
-      if (this.isCompact()) this.compactStore.expand();
+    if (this.composerInput.handleDragOver(event) && this.isCompact()) {
+      this.compactStore.expand();
     }
-  }
-
-  /**
-   * Handle dragleave - hide drop zone
-   */
-  handleDragLeave(event: DragEvent): void {
-    const relatedTarget = event.relatedTarget as Node | null;
-    const container = event.currentTarget as HTMLElement;
-    if (!relatedTarget || !container.contains(relatedTarget)) {
-      this._isDraggingOver.set(false);
-    }
-  }
-
-  /**
-   * Handle drop - extract images from dropped files
-   */
-  handleDrop(event: DragEvent): void {
-    this._isDraggingOver.set(false);
-    this.attachments.onDrop(event);
-  }
-
-  /**
-   * Handle @ trigger activation (IMMEDIATE - no debounce)
-   * Opens dropdown instantly when @ is first detected.
-   */
-  handleAtActivated(event: AtTriggerEvent): void {
-    this._suggestionMode.set('at-trigger');
-    this._triggerPosition.set(event.triggerPosition);
-    this._currentQuery.set(event.query);
-    this._showSuggestions.set(true);
-    this.refreshSuggestions(event.query);
-    this.fetchAtSuggestions();
-  }
-
-  /**
-   * Handle debounced @ trigger from AtTriggerDirective
-   * Only updates trigger position (may shift if user edits before @).
-   * Does NOT overwrite _currentQuery — handleQueryChanged already has the latest value.
-   */
-  handleAtTriggered(event: AtTriggerEvent): void {
-    this._triggerPosition.set(event.triggerPosition);
-  }
-
-  /**
-   * Handle @ trigger closed from AtTriggerDirective
-   */
-  handleAtClosed(): void {
-    if (this._suggestionMode() === 'at-trigger') {
-      this._showSuggestions.set(false);
-      this._suggestionMode.set(null);
-      this.filePicker.clearRemoteResults();
-      this.clearTriggerProjectionTimeout();
-    }
-  }
-
-  /**
-   * Handle / trigger activation (IMMEDIATE - no debounce)
-   * Opens dropdown instantly when / is first detected.
-   */
-  handleSlashActivated(event: SlashTriggerEvent): void {
-    this._suggestionMode.set('slash-trigger');
-    this._triggerPosition.set(0); // Slash always starts at position 0
-    this._currentQuery.set(event.query);
-    this._showSuggestions.set(true);
-    this.refreshSuggestions(event.query);
-    this.fetchCommandSuggestions();
-  }
-
-  /**
-   * Handle debounced / trigger from SlashTriggerDirective
-   * Does NOT overwrite _currentQuery — handleQueryChanged already has the latest value.
-   */
-  handleSlashTriggered(): void {
-    // Intentionally empty: handleQueryChanged already holds the latest query.
-  }
-
-  /**
-   * Handle / trigger closed from SlashTriggerDirective
-   */
-  handleSlashClosed(): void {
-    if (this._suggestionMode() === 'slash-trigger') {
-      this._showSuggestions.set(false);
-      this._suggestionMode.set(null);
-      this.clearTriggerProjectionTimeout();
-    }
-  }
-
-  /**
-   * Handle immediate query changes for responsive filtering.
-   * Also triggers debounced server-side search for @ file queries.
-   */
-  handleQueryChanged(query: string): void {
-    this._currentQuery.set(query);
-    this.scheduleSuggestionRefresh(query);
-  }
-
-  /**
-   * Keeps typing on the synchronous draft path. The potentially expensive
-   * local search/filter work runs once after a brief quiet period instead of
-   * for every trigger keystroke.
-   */
-  private scheduleSuggestionRefresh(query: string): void {
-    this.clearTriggerProjectionTimeout();
-    if (!this.composerTriggerCacheEnabled) {
-      this.refreshSuggestions(query);
-      return;
-    }
-    this._triggerProjectionTimeout = setTimeout(() => {
-      this._triggerProjectionTimeout = null;
-      this.refreshSuggestions(query);
-    }, TRIGGER_PROJECTION_DEBOUNCE_MS);
-  }
-
-  private refreshSuggestions(query: string): void {
-    const mode = this._suggestionMode();
-    if (!mode) return;
-
-    this._projectedQuery.set(query);
-    if (mode === 'at-trigger') {
-      const cached = this._fileSuggestionCache.get(query);
-      if (cached) {
-        this._localSuggestions.set(cached);
-      } else {
-        const suggestions = this.filePicker
-          .searchFiles(query)
-          .slice(0, 40)
-          .map((file) => this.toFileSuggestionItem(file));
-        this.cacheFileSuggestions(query, suggestions);
-        this._localSuggestions.set(suggestions);
-      }
-      this.filePicker.searchFilesRemote(query);
-      return;
-    }
-
-    const commands: CommandSuggestionItem[] =
-      this._commandSuggestions ??
-      this.commandDiscovery.searchCommands('').map(
-        (command): CommandSuggestionItem => ({
-          type: 'command',
-          ...command,
-        }),
-      );
-    this._commandSuggestions = commands;
-    const matchedCommands = !query
-      ? commands
-      : commands.filter(
-          (command) =>
-            command.name.toLowerCase().includes(query.toLowerCase()) ||
-            (command.description &&
-              command.description
-                .toLowerCase()
-                .includes(query.toLowerCase())),
-        );
-    // TASK_2026_721 D7: the prompt catalogue lives behind `/`, appended after
-    // the commands so the dropdown renders one command group then prompts.
-    this._localSuggestions.set([
-      ...matchedCommands,
-      ...this.toPromptSuggestionItems(query),
-    ]);
-  }
-
-  private toFileSuggestionItem(file: FileSuggestion): FileSuggestionItem {
-    const isFolder = file.type === 'directory';
-    return {
-      type: 'file',
-      icon: isFolder ? FolderIcon : file.isImage ? ImageIcon : FileIcon,
-      description: file.directory,
-      path: file.path,
-      name: file.name,
-      directory: file.directory,
-      extension: file.extension,
-      size: file.size,
-      lastModified: file.lastModified,
-      isImage: file.isImage,
-      isText: file.isText,
-    };
-  }
-
-  private cacheFileSuggestions(
-    query: string,
-    suggestions: SuggestionItem[],
-  ): void {
-    if (this._fileSuggestionCache.size >= MAX_CACHED_TRIGGER_QUERIES) {
-      const oldest = this._fileSuggestionCache.keys().next().value;
-      if (oldest !== undefined) this._fileSuggestionCache.delete(oldest);
-    }
-    this._fileSuggestionCache.set(query, suggestions);
-  }
-
-  /**
-   * Catalogue prompt suggestions for the `/` dropdown. The typed query
-   * filters by label, description, category and text; every entry carries
-   * its category label for the "Prompt · <Category>" badge. An empty query
-   * lists the whole catalogue.
-   */
-  private toPromptSuggestionItems(query: string): SuggestionItem[] {
-    const needle = query.toLowerCase();
-    const prompts: SuggestionItem[] = [];
-    for (const category of PROMPT_CATALOGUE) {
-      for (const prompt of category.prompts) {
-        const matches =
-          !needle ||
-          prompt.label.toLowerCase().includes(needle) ||
-          (prompt.description?.toLowerCase().includes(needle) ?? false) ||
-          category.label.toLowerCase().includes(needle) ||
-          prompt.text.toLowerCase().includes(needle);
-        if (matches) {
-          prompts.push({
-            type: 'prompt',
-            category: category.label,
-            ...prompt,
-          });
-        }
-      }
-    }
-    return prompts;
-  }
-
-  private clearTriggerProjectionTimeout(): void {
-    if (!this._triggerProjectionTimeout) return;
-    clearTimeout(this._triggerProjectionTimeout);
-    this._triggerProjectionTimeout = null;
-  }
-
-  /**
-   * Fetch suggestions for @ trigger (files + folders only)
-   */
-  private async fetchAtSuggestions(): Promise<void> {
-    this._isLoadingSuggestions.set(true);
-    try {
-      await this.filePicker.ensureFilesLoaded();
-      this._fileSuggestionCache.clear();
-      this.refreshSuggestions(this._currentQuery());
-    } catch (error) {
-      console.error(
-        '[ChatInputComponent] Failed to fetch @ suggestions:',
-        error,
-      );
-    } finally {
-      this._isLoadingSuggestions.set(false);
-    }
-  }
-
-  /**
-   * Fetch suggestions for / trigger (commands)
-   */
-  private async fetchCommandSuggestions(): Promise<void> {
-    this._isLoadingSuggestions.set(true);
-    try {
-      await this.commandDiscovery.fetchCommands();
-      this._commandSuggestions = null;
-      this.refreshSuggestions(this._currentQuery());
-    } catch (error) {
-      console.error(
-        '[ChatInputComponent] Failed to fetch / suggestions:',
-        error,
-      );
-    } finally {
-      this._isLoadingSuggestions.set(false);
-    }
-  }
-
-  /**
-   * Handle suggestion selection (file tag vs text insertion)
-   */
-  handleSuggestionSelected(suggestion: SuggestionItem): void {
-    if (suggestion.type === 'file') {
-      this.addFileTag(suggestion);
-      this.removeTriggerText();
-    } else if (suggestion.type === 'command') {
-      this.replaceTrigger(`/${suggestion.name} `);
-    } else if (suggestion.type === 'prompt') {
-      // A prompt prefills the composer for editing; it does not send.
-      this.restoreContentToInput(suggestion.text, { replace: true });
-    }
-
-    this.closeSuggestions();
   }
 
   /**
@@ -1473,152 +919,6 @@ export class ChatInputComponent implements OnInit, OnDestroy {
    */
   onEffortChange(_effort: EffortLevel | undefined): void {
     console.log('ChatInputComponent.onEffortChange called');
-  }
-
-  /**
-   * Add file tag above textarea (prevents duplicates)
-   */
-  private addFileTag(file: FileSuggestion): void {
-    const existingPaths = this._selectedFiles().map((f) => f.path);
-    if (existingPaths.includes(file.path)) {
-      console.log('[ChatInputComponent] File already selected:', file.path);
-      return;
-    }
-
-    const chatFile: ChatFile = {
-      path: file.path,
-      name: file.name,
-      size: file.size || 0,
-      type: file.isText ? 'text' : 'binary',
-      isLarge: (file.size || 0) > 100_000,
-      tokenEstimate: Math.ceil((file.size || 0) / 4),
-    };
-
-    this.attachments.addFile(chatFile);
-  }
-
-  /**
-   * Remove file tag
-   */
-  removeFile(filePath: string): void {
-    this.attachments.remove(filePath);
-  }
-
-  /**
-   * Replace trigger text with selected suggestion
-   * Used for /command autocomplete
-   */
-  private replaceTrigger(replacement: string): void {
-    const textarea = this.textareaRef()?.nativeElement;
-    if (!textarea) return;
-
-    const currentValue = this._currentMessage();
-    const triggerStart = this._triggerPosition();
-    const cursorPos = textarea.selectionStart;
-    const newValue =
-      currentValue.substring(0, triggerStart) +
-      replacement +
-      currentValue.substring(cursorPos);
-
-    this._currentMessage.set(newValue);
-    textarea.value = newValue;
-    const newCursorPos = triggerStart + replacement.length;
-    textarea.setSelectionRange(newCursorPos, newCursorPos);
-  }
-
-  /**
-   * Remove trigger text from input (for file selection where we add tag instead)
-   */
-  private removeTriggerText(): void {
-    const textarea = this.textareaRef()?.nativeElement;
-    if (!textarea) return;
-
-    const currentValue = this._currentMessage();
-    const triggerStart = this._triggerPosition();
-    const cursorPos = textarea.selectionStart;
-    const newValue =
-      currentValue.substring(0, triggerStart) +
-      currentValue.substring(cursorPos);
-
-    this._currentMessage.set(newValue);
-    textarea.value = newValue;
-    textarea.setSelectionRange(triggerStart, triggerStart);
-  }
-
-  /**
-   * Close suggestions dropdown
-   */
-  closeSuggestions(): void {
-    this._showSuggestions.set(false);
-    this._suggestionMode.set(null);
-    this._currentQuery.set('');
-    this.clearTriggerProjectionTimeout();
-    this.filePicker.clearRemoteResults();
-  }
-
-  /**
-   * Get listbox ID for aria-controls attribute
-   * Returns the ID of the dropdown's listbox element, or null if closed.
-   *
-   * ACCESSIBILITY: aria-controls tells assistive technology which element
-   * the combobox controls (the popup listbox).
-   */
-  getListboxId(): string | null {
-    if (!this.showSuggestions()) {
-      return null;
-    }
-    return this.dropdownRef()?.listboxId ?? null;
-  }
-
-  /**
-   * Get active descendant ID for aria-activedescendant attribute
-   * Returns the ID of the currently highlighted option in the dropdown,
-   * or null if dropdown is closed or no option is active.
-   *
-   * ACCESSIBILITY: Screen readers use aria-activedescendant to announce
-   * the currently focused option without moving DOM focus from the textarea.
-   */
-  getActiveDescendantId(): string | null {
-    if (!this.showSuggestions()) {
-      return null;
-    }
-    return this.dropdownRef()?.getActiveDescendantId() ?? null;
-  }
-
-  /**
-   * Handle keyboard shortcuts
-   * - When dropdown is closed: Enter sends message, Shift+Enter for new line
-   *
-   * KEYBOARD NAVIGATION PATTERN (NEW: Batch 13):
-   * - Dropdown has its own filter input that receives focus when open
-   * - User types in filter input (NOT textarea)
-   * - Dropdown handles all keyboard navigation internally
-   * - No need to forward events from textarea to dropdown
-   *
-   * IMPORTANT: Textarea only handles Enter to send messages when dropdown is CLOSED.
-   * When dropdown is open, focus is on filter input, so textarea doesn't receive events.
-   */
-  handleKeyDown(event: KeyboardEvent): void {
-    const dropdown = this.dropdownRef();
-    if (this.showSuggestions() && dropdown) {
-      if (
-        ['ArrowDown', 'ArrowUp', 'Home', 'End', 'Enter', 'Escape'].includes(
-          event.key,
-        )
-      ) {
-        const handled = dropdown.onKeyDown(event);
-        if (handled) {
-          event.preventDefault();
-          return;
-        }
-      }
-    }
-    if (!this.showSuggestions() && event.key === 'Enter' && !event.shiftKey) {
-      event.preventDefault();
-      // Read-only while attached to a messaging binding — Enter must not send.
-      if (this.attachedReadOnly() || this.commandCenterHeld()) return;
-      this.handleSend();
-    }
   }
 
   /**
@@ -1730,21 +1030,24 @@ export class ChatInputComponent implements OnInit, OnDestroy {
     if (!options?.replace && this._currentMessage().trim()) {
       return;
     }
-
-    this._currentMessage.set(content);
-    // `field-sizing: content` sizes the box to the restored value. A folded
-    // composer opens on the new text; focus once it is no longer inert.
-    const textarea = this.textareaRef()?.nativeElement;
-    if (textarea?.closest('[inert]')) {
-      afterNextRender(() => textarea.focus({ preventScroll: true }), {
-        injector: this.injector,
-      });
-    } else {
-      textarea?.focus();
-    }
+    this.composerInput.replaceText(content);
   }
 
   constructor() {
+    this.composerInput.connect({
+      text: this._currentMessage,
+      textarea: this.textareaRef,
+      dropdown: this.dropdownRef,
+      commands: signal(DISCOVERY_COMMANDS).asReadonly(),
+      fileMode: signal<ComposerFileMode>('reference').asReadonly(),
+      prompts: true,
+      // Read-only while attached to messaging or held by Command Center:
+      // Enter must not send (handleSend checks the same gates).
+      submit: () => {
+        if (this.attachedReadOnly() || this.commandCenterHeld()) return;
+        void this.handleSend();
+      },
+    });
     this.setupCompactComposer();
     this.draftTabId = this._sessionContext?.() ?? this.tabManager.activeTabId();
     if (this.draftTabId) this.restoreDraft(this.draftTabId);

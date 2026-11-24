@@ -67,6 +67,7 @@ function usedPercent(remainingFraction: number): number {
 
 function toWindow(
   identity: { key: `other:${string}`; label: string },
+  group: string,
   descriptor: WindowDescriptor,
   remainingFraction: number,
   resetsAt: number | undefined,
@@ -76,6 +77,7 @@ function toWindow(
     key: identity.key,
     kind: descriptor.kind,
     label: identity.label,
+    group,
     ...(descriptor.durationMins && { durationMins: descriptor.durationMins }),
     used: { kind: 'percent', percent: usedPercent(remainingFraction) },
     usedSource: 'provider-unofficial',
@@ -123,7 +125,7 @@ export function parseAntigravityUsageGroups(
         bucket.name ?? descriptor.label, collides(group.name));
       if (keys.has(identity.key)) continue;
       keys.add(identity.key);
-      windows.push(toWindow(identity, descriptor, bucket.remaining_fraction,
+      windows.push(toWindow(identity, group.name, descriptor, bucket.remaining_fraction,
         knownReset(bucket.reset_time, observedAt), observedAt));
     }
   }
@@ -157,7 +159,7 @@ export function parseAntigravityUsageTsv(
       descriptor.kind, label, collides(group));
     if (keys.has(identity.key)) return undefined;
     keys.add(identity.key);
-    windows.push(toWindow(identity, descriptor, remainingPercent / 100,
+    windows.push(toWindow(identity, group, descriptor, remainingPercent / 100,
       knownReset(reset, observedAt), observedAt));
   }
   return windows;

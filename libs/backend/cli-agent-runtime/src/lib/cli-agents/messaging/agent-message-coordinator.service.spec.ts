@@ -66,7 +66,7 @@ describe('AgentMessageCoordinator', () => {
       expect(outcome.receipt).toMatchObject({ state: 'started', turnSeq: 1, everDispatched: true, hasRecoverableBody: true });
       expect(h.sendToAgent).toHaveBeenCalledWith(h.agentId,
         `[Ptah message ${idOf(outcome)} from the parent session]\n\nchange\n\n${agentMessageAckLine(idOf(outcome))}`,
-        'now', idOf(outcome), false);
+        'now', idOf(outcome), false, { rawBody: 'change' });
     });
 
     it('keeps a parked queued message not-started with the parking attempt undone', async () => {
@@ -88,7 +88,8 @@ describe('AgentMessageCoordinator', () => {
       expect(outcome).toMatchObject({ mode: 'start-turn', requestedAgentId: h.agentId, agentId: spawned });
       expect(outcome.receipt).toMatchObject({ state: 'started', agentId: h.agentId, actualAgentId: spawned, cliSessionId: 'session-2' });
       expect(h.resume.resume).toHaveBeenCalledWith(expect.objectContaining({ agentId: h.agentId }),
-        `[Ptah message ${idOf(outcome)} from the parent session]\n\nresume\n\n${agentMessageAckLine(idOf(outcome))}`);
+        `[Ptah message ${idOf(outcome)} from the parent session]\n\nresume\n\n${agentMessageAckLine(idOf(outcome))}`,
+        { rawBody: 'resume', blocked: [] }, undefined);
       expect(await h.aliases.resolve(h.agentId)).toEqual({ requestedAgentId: h.agentId, agentId: spawned });
     });
 
@@ -98,7 +99,8 @@ describe('AgentMessageCoordinator', () => {
       await h.coordinator.send({ agentId: h.agentId, message: 'resume' }, anonymousParent);
       const second = await h.coordinator.send({ agentId: h.agentId, message: 'again' }, anonymousParent);
       expect(h.resume.resume).toHaveBeenCalledTimes(1);
-      expect(h.sendToAgent).toHaveBeenCalledWith(spawned, expect.any(String), 'queue', idOf(second), false);
+      expect(h.sendToAgent).toHaveBeenCalledWith(spawned, expect.any(String), 'queue', idOf(second), false,
+        { rawBody: 'again' });
       expect(second).toMatchObject({ requestedAgentId: h.agentId, agentId: spawned });
     });
 

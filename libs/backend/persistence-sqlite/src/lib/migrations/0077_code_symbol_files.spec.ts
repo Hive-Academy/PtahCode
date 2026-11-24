@@ -4,7 +4,14 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import { sql } from './0077_code_symbol_files';
 import { MIGRATIONS } from './index';
-import { SqliteConnectionService } from '../sqlite-connection.service';
+import {
+  defaultBetterSqlite3Factory,
+  SqliteConnectionService,
+} from '../sqlite-connection.service';
+import {
+  SqliteMigrationRunner,
+  type MigrationRunResult,
+} from '../migration-runner';
 import { createMockLogger } from '../testing/mock-logger';
 
 interface DatabaseShape {
@@ -345,6 +352,100 @@ describe('migration 0077_code_symbol_files — real runner (skipped without nati
 
       writer.close();
       reader.close();
+    },
+  );
+
+  // TASK_2026_2312_c3ef review: both connections read the ledger before
+  // either commits 0077. The second to take the write lock must find the
+  // peer's row, commit an empty transaction and still report version 77.
+  maybe(
+    'two real connections race 0077: applied once, loser skips and reports 77',
+    async () => {
+      const dbPath = makeTempDbPath();
+      const archiveRoot = path.join(path.dirname(dbPath), 'archive');
+      const options = { vecExtensionLoaded: false };
+      const before77 = MIGRATIONS.filter((entry) => entry.version < 77);
+      const through77 = MIGRATIONS.filter((entry) => entry.version <= 77);
+      const loserDb = defaultBetterSqlite3Factory(dbPath);
+      const winnerDb = defaultBetterSqlite3Factory(dbPath);
+      try {
+        await new SqliteMigrationRunner(
+          loserDb,
+          createMockLogger(),
+          undefined,
+          archiveRoot,
+        ).applyAll(before77, options);
+        expect(loserDb.prepare('PRAGMA user_version').get()).toEqual({
+          user_version: 76,
+        });
+
+        const loser = new SqliteMigrationRunner(
+          loserDb,
+          createMockLogger(),
+          undefined,
+          archiveRoot,
+        );
+        const winner = new SqliteMigrationRunner(
+          winnerDb,
+          createMockLogger(),
+          undefined,
+          archiveRoot,
+        );
+        const loserExec = loserDb.exec.bind(loserDb);
+        const race: {
+          winnerRun?: Promise<MigrationRunResult>;
+          ledgerBeforeLoserLock?: unknown;
+        } = {};
+        jest.spyOn(loserDb, 'exec').mockImplementation((statement) => {
+          if (statement === 'BEGIN IMMEDIATE' && race.winnerRun === undefined) {
+            // The loser has read the ledger (77 pending) and is about to take
+            // the write lock. The winner reads the ledger and commits 0077
+            // first. With no backup service applyAll has no await before its
+            // loop, so the winner's commit lands before the loser's BEGIN.
+            race.winnerRun = winner.applyAll(through77, options);
+            race.ledgerBeforeLoserLock = winnerDb
+              .prepare('SELECT COUNT(*) AS n FROM schema_migrations WHERE version = 77')
+              .get();
+          }
+          return loserExec(statement);
+        });
+
+        const loserResult = await loser.applyAll(through77, options);
+        expect(race.winnerRun).toBeDefined();
+        const winnerResult = await race.winnerRun;
+
+        expect(race.ledgerBeforeLoserLock).toEqual({ n: 1 });
+        expect(winnerResult?.appliedVersions).toEqual([77]);
+        expect(winnerResult?.finalVersion).toBe(77);
+        expect(winner.lastAppliedVersion).toBe(77);
+        expect(loserResult.appliedVersions).toEqual([]);
+        expect(loserResult.skippedVersions).toContain(77);
+        expect(loserResult.finalVersion).toBe(77);
+        expect(loser.lastAppliedVersion).toBe(77);
+        expect(loserDb.inTransaction).toBe(false);
+
+        for (const db of [loserDb, winnerDb]) {
+          expect(
+            db
+              .prepare('SELECT COUNT(*) AS n FROM schema_migrations WHERE version = 77')
+              .get(),
+          ).toEqual({ n: 1 });
+          expect(db.prepare('PRAGMA user_version').get()).toEqual({
+            user_version: 77,
+          });
+          expect(
+            db
+              .prepare(
+                `SELECT name FROM sqlite_master
+                 WHERE type = 'table' AND name = 'code_symbol_files'`,
+              )
+              .all(),
+          ).toEqual([{ name: 'code_symbol_files' }]);
+        }
+      } finally {
+        loserDb.close();
+        winnerDb.close();
+      }
     },
   );
 });

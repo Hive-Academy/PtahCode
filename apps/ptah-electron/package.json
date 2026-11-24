@@ -19,6 +19,7 @@
     "@slack/bolt": "*",
     "@tavily/core": "*",
     "@huggingface/transformers": "*",
+    "@modelcontextprotocol/sdk": "*",
     "axios": "*",
     "better-sqlite3": "*",
     "chokidar": "*",

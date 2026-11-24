@@ -20,6 +20,7 @@ import { LANE_ROUTING_TOKENS } from '@ptah-extension/lane-routing';
 import { TOKENS } from '@ptah-extension/vscode-core';
 import {
   PLATFORM_TOKENS,
+  type IMcpGateway,
   type IWorkspaceProvider,
   type IWindowsJobAssigner,
 } from '@ptah-extension/platform-core';
@@ -259,7 +260,11 @@ export function registerSdkServices(
   options: {
     readonly devHost?: boolean;
     readonly env?: NodeJS.ProcessEnv;
-    readonly windowsJobs?: { assigner: IWindowsJobAssigner; binaryPath: string; setting: () => boolean };
+    readonly windowsJobs?: {
+      assigner: IWindowsJobAssigner;
+      binaryPath: string;
+      setting: () => boolean;
+    };
   } = {},
 ): void {
   const overrides = readDevOverrides(
@@ -578,16 +583,18 @@ export function registerSdkServices(
     { lifecycle: Lifecycle.Singleton },
   );
 
-  container.register(
-    SDK_TOKENS.SDK_PROCESS_SPAWNER,
-    { useFactory: instanceCachingFactory((c: DependencyContainer) => {
+  container.register(SDK_TOKENS.SDK_PROCESS_SPAWNER, {
+    useFactory: instanceCachingFactory((c: DependencyContainer) => {
       const spawner = c.resolve(OffThreadProcessSpawner);
-      if (options.windowsJobs) spawner.configureWindowsJobs(
-        options.windowsJobs.assigner, options.windowsJobs.binaryPath, options.windowsJobs.setting,
-      );
+      if (options.windowsJobs)
+        spawner.configureWindowsJobs(
+          options.windowsJobs.assigner,
+          options.windowsJobs.binaryPath,
+          options.windowsJobs.setting,
+        );
       return spawner;
-    }) },
-  );
+    }),
+  });
 
   container.register(
     SDK_TOKENS.SDK_QUERY_RUNNER,
@@ -639,20 +646,25 @@ export function registerSdkServices(
   // A factory rather than `useClass`: `SDK_CODE_OUTLINER` is optional and is
   // bound by the hosts, not here. It is looked up when the capper is first
   // resolved; when no host bound it, the capper gets none and Read reduction
-  // takes the log reducer plus the file path pointer.
+  // takes the log reducer plus the file path pointer. `MCP_GATEWAY` is
+  // optional the same way: with a gateway bound, the third-party tools it
+  // serves through `ptah` are capped like any other MCP tool.
   container.register(SDK_TOKENS.SDK_TOOL_OUTPUT_CAPPER, {
-    useFactory: instanceCachingFactory(
-      (c) =>
-        new ToolOutputCapper(
-          c.resolve<Logger>(TOKENS.LOGGER),
-          c.resolve<CompactionConfigProvider>(
-            SDK_TOKENS.SDK_COMPACTION_CONFIG_PROVIDER,
-          ),
-          c.isRegistered(SDK_TOKENS.SDK_CODE_OUTLINER, true)
-            ? c.resolve<CodeOutliner>(SDK_TOKENS.SDK_CODE_OUTLINER)
-            : undefined,
+    useFactory: instanceCachingFactory((c) => {
+      const gateway = c.isRegistered(PLATFORM_TOKENS.MCP_GATEWAY, true)
+        ? c.resolve<IMcpGateway>(PLATFORM_TOKENS.MCP_GATEWAY)
+        : undefined;
+      return new ToolOutputCapper(
+        c.resolve<Logger>(TOKENS.LOGGER),
+        c.resolve<CompactionConfigProvider>(
+          SDK_TOKENS.SDK_COMPACTION_CONFIG_PROVIDER,
         ),
-    ),
+        c.isRegistered(SDK_TOKENS.SDK_CODE_OUTLINER, true)
+          ? c.resolve<CodeOutliner>(SDK_TOKENS.SDK_CODE_OUTLINER)
+          : undefined,
+        gateway ? (toolName) => gateway.isGatewayTool(toolName) : undefined,
+      );
+    }),
   });
 
   // A factory rather than `useClass`: the coordinator is a plain class (no
@@ -871,7 +883,8 @@ export function registerSdkServices(
   );
   // Foreground source for the background-work governor (TASK_2026_437 C14):
   // background lanes yield while any session is generating (a record stuck in
-  // `generating` past the stale ceiling stops counting). The governor lives in
+  // `generating` past the stale ceiling, or one blocked on a permission /
+  // AskUserQuestion prompt, stops counting). The governor lives in
   // vscode-core, which this lib already depends on; vscode-core cannot see the
   // registry, so the source implements the structural `ForegroundActivitySource`.
   // Every host registers the governor in `registerVsCodeCorePlatformAgnostic`
@@ -881,7 +894,23 @@ export function registerSdkServices(
     container
       .resolve<BackgroundWorkGovernor>(TOKENS.BACKGROUND_WORK_GOVERNOR)
       .addForegroundSource(
-        new TurnStateForegroundSource(turnStateRegistry, logger),
+        new TurnStateForegroundSource(
+          turnStateRegistry,
+          logger,
+          undefined,
+          undefined,
+          // A session blocked on a permission or AskUserQuestion prompt is
+          // not foreground work. Resolved lazily and retried by the source on
+          // every read: in Electron the webview manager the handler needs is
+          // registered AFTER these services, so resolving at subscription
+          // time fails; the first turn transition (a read) succeeds.
+          () =>
+            container.isRegistered(SDK_TOKENS.SDK_PERMISSION_HANDLER, true)
+              ? container.resolve<SdkPermissionHandler>(
+                  SDK_TOKENS.SDK_PERMISSION_HANDLER,
+                )
+              : undefined,
+        ),
       );
   }
   container

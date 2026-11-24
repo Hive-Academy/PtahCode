@@ -37,8 +37,13 @@ export const CLI_LANE_DEFAULTS_PATCH_SCHEMA = z.partialRecord(
 
 export type CliLaneDefaultsPatch = z.infer<typeof CLI_LANE_DEFAULTS_PATCH_SCHEMA>;
 
-const PERMISSIONS: readonly LanePermissionMode[] = ['plan', 'ask', 'auto-edit', 'yolo'];
-const NETWORKS: readonly LaneNetworkMode[] = ['allow', 'deny'];
+/**
+ * Built-in lane default preference, most capable first: a CLI lane with no explicit or saved
+ * choice runs with the first permission its manifest supports, then the first network that
+ * permission supports. Backend resolution and the settings UI both read these orders.
+ */
+export const CLI_LANE_BUILT_IN_PERMISSION_ORDER: readonly LanePermissionMode[] = ['yolo', 'auto-edit', 'ask', 'plan'];
+export const CLI_LANE_BUILT_IN_NETWORK_ORDER: readonly LaneNetworkMode[] = ['allow', 'deny'];
 
 export function resolveCliLaneDefaultPair(
   capabilities: Pick<CliAdapterManifest, 'permissionModes' | 'networkModes'>,
@@ -46,22 +51,20 @@ export function resolveCliLaneDefaultPair(
 ): { permission?: LanePermissionMode; network?: LaneNetworkMode;
   permissionSource?: 'saved' | 'built-in'; networkSource?: 'saved' | 'built-in' }
   | { unsupported: string } {
-  const permissions: readonly LanePermissionMode[] = saved.permission
-    ? [saved.permission]
-    : (['plan'] as const);
-  const networks = saved.network ? [saved.network] : NETWORKS;
+  const permissions = saved.permission ? [saved.permission] : CLI_LANE_BUILT_IN_PERMISSION_ORDER;
+  const networks = saved.network ? [saved.network] : CLI_LANE_BUILT_IN_NETWORK_ORDER;
   for (const permission of permissions) {
-    const support = capabilities.permissionModes[permission as LanePermissionMode];
+    const support = capabilities.permissionModes[permission];
     if (support?.state !== 'supported') continue;
     for (const network of networks) {
       if (capabilities.networkModes[network].state !== 'supported' || !support.networkModes.includes(network)) continue;
-      return { permission: permission as LanePermissionMode, network,
+      return { permission, network,
         permissionSource: saved.permission ? 'saved' : 'built-in',
         networkSource: saved.network ? 'saved' : 'built-in' };
     }
   }
   if (saved.permission || saved.network) return { unsupported: 'Saved CLI lane default has no supported permission/network pair.' };
-  return { unsupported: 'Adapter does not support plan permission; no default possible.' };
+  return { unsupported: 'Adapter supports no permission/network pair; no default possible.' };
 }
 
 /** Shared permission contract used by the Ptah CLI registry and settings RPC. */

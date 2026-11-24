@@ -15,7 +15,7 @@ import {
   ChangeDetectionStrategy,
 } from '@angular/core';
 import { SlicePipe } from '@angular/common';
-import { LucideAngularModule } from 'lucide-angular';
+import { Check, LucideAngularModule } from 'lucide-angular';
 import { ClaudeRpcService } from '@ptah-extension/core';
 import { type MonitoredAgent } from '@ptah-extension/chat-streaming';
 import { CliAgentOutputComponent } from './cli-agent-output.component';
@@ -30,9 +30,16 @@ import {
   createStderrParser,
 } from './agent-card.utils';
 import {
+  PermissionRequestCardComponent,
+  QuestionCardComponent,
   type RenderSegment,
   type StderrSegment,
 } from '@ptah-extension/chat-ui';
+import { PtahBadgeDirective } from '@ptah-extension/ui';
+import {
+  LANE_WAITING_LABEL,
+  LanePermissionView,
+} from '../../../services/lane-permission-view';
 
 @Component({
   selector: 'ptah-agent-card',
@@ -44,7 +51,11 @@ import {
     CliLaneUsageSummaryComponent,
     CliAgentOutputComponent,
     AgentContinueInputComponent,
+    PermissionRequestCardComponent,
+    QuestionCardComponent,
+    PtahBadgeDirective,
   ],
+  providers: [LanePermissionView],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
@@ -133,6 +144,57 @@ import {
           />
         }
         @if (presentation() === 'card') {
+          @if (
+            prompts.waiting() || prompts.notice() || prompts.resolvedStatus()
+          ) {
+            <div
+              class="flex flex-col gap-1.5 px-2 pt-1.5 flex-shrink-0"
+              data-testid="lane-prompts"
+            >
+              @if (prompts.waiting()) {
+                <span
+                  ptahBadge
+                  tone="warn"
+                  size="xs"
+                  class="self-start"
+                  role="status"
+                  >{{ waitingLabel }}</span
+                >
+              }
+              @if (prompts.notice(); as notice) {
+                <p class="text-[11px] text-state-need" role="status">
+                  {{ notice }}
+                </p>
+              }
+              @for (request of prompts.permissions(); track request.id) {
+                <ptah-permission-request-card
+                  [request]="request"
+                  [laneLabel]="prompts.laneLabel()"
+                  (responded)="prompts.respond($event)"
+                />
+              }
+              @for (request of prompts.questions(); track request.id) {
+                <ptah-question-card
+                  [request]="request"
+                  [laneLabel]="prompts.laneLabel()"
+                  (answered)="prompts.answer($event)"
+                />
+              }
+              @if (!prompts.waiting() && prompts.resolvedStatus(); as status) {
+                <p
+                  class="flex items-center gap-1 text-[11px] text-base-content-muted"
+                  role="status"
+                >
+                  <lucide-angular
+                    [img]="CheckIcon"
+                    class="w-3 h-3 flex-shrink-0 text-success"
+                    aria-hidden="true"
+                  />
+                  {{ status }}
+                </p>
+              }
+            </div>
+          }
           <ptah-agent-continue-input class="block px-2 pb-2" [agent]="agent()" variant="panel" />
         }
       }
@@ -147,7 +209,15 @@ export class AgentCardComponent {
   readonly toggleExpanded = output<void>();
   readonly closeLane = output<string>();
 
+  constructor() {
+    this.prompts.connect({ agent: this.agent });
+  }
+
   private readonly rpcService = inject(ClaudeRpcService);
+  /** This lane's approval and question prompts (Req 5), card presentation only. */
+  protected readonly prompts = inject(LanePermissionView);
+  protected readonly waitingLabel = LANE_WAITING_LABEL;
+  protected readonly CheckIcon = Check;
   readonly isStopping = signal(false);
   readonly isResuming = signal(false);
 

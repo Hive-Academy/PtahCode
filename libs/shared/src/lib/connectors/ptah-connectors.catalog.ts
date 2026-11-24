@@ -279,6 +279,18 @@ export const PTAH_CONNECTORS: readonly PtahConnector[] = [
     verifiedAt: VERIFIED_AT,
   },
   {
+    // Clerk-hosted OAuth with DCR. Its AS lists scopes a registered client may
+    // not request; Connect asks for the resource's own scope (TASK_2026_HIGGSFIELD).
+    id: 'higgsfield',
+    label: 'Higgsfield',
+    brandSlug: 'higgsfield',
+    description: 'AI image and video generation; uses your Higgsfield credits.',
+    category: 'design',
+    kind: 'oauth-dcr',
+    url: 'https://mcp.higgsfield.ai/mcp',
+    verifiedAt: '2026-11-24',
+  },
+  {
     id: 'stripe',
     label: 'Stripe',
     brandSlug: 'stripe',

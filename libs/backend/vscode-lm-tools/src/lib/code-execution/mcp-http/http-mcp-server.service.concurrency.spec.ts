@@ -1,36 +1,15 @@
 /**
- * `CodeExecutionMCP` × `harness-sync` — REAL lock, REAL filesystem.
+ * `CodeExecutionMCP` on a REAL filesystem: it writes no MCP config file.
  *
- * ## Why this file exists separately
+ * `http-mcp-server.service.spec.ts` mocks `fs`, so it proves no write CALL is
+ * made. This spec keeps the real `fs` and a real temporary workspace, and
+ * proves the observable half: after a chat start, a child-session retain and
+ * release, and a stop, the workspace holds no new file and an existing
+ * `.mcp.json` (including a `ptah` entry an earlier Ptah wrote, D-U5 Option 1)
+ * is byte-identical (TASK_2026_979_9e1f, decision 10).
  *
- * `http-mcp-server.service.spec.ts` mocks `fs` wholesale, so it has to stub
- * `withMcpConfigLock` into a straight-through pass (the lock needs a real
- * filesystem). That stub is fine for asserting the lock is TAKEN and that the
- * read and the write sit inside it — but it means no concurrency is exercised
- * at all: every mutation completes inside one microtask, so two writers can
- * never actually be in flight together and a missing lock would look identical
- * to a present one.
- *
- * TASK_2026_332 asks for the missing half: `.mcp.json` has TWO writers in
- * production — this service, and `harness-sync`'s `claude` MCP facet — and the
- * property worth pinning is that a simultaneous mutation from each preserves
- * BOTH writers' keys. So this spec keeps the real `fs`, the real
- * `withMcpConfigLock`, and a real temporary workspace on disk.
- *
- * ## Only the FIRST test proves anything about the lock — read this before
- * ## trusting the other two
- *
- * Both facets' critical sections are fully SYNCHRONOUS: they read, mutate and
- * write with no `await` in between. Two such tasks cannot interleave on one
- * event loop no matter how they are started, so `Promise.all` over them passes
- * with the lock removed. Tests 2 and 3 are therefore WIRING SMOKE TESTS — they
- * prove the service and the facet agree about the path, the schema and the key
- * partition, and they would keep passing if `withMcpConfigLock` were deleted.
- * Verified by deleting it: 2 and 3 still pass, 1 fails.
- *
- * Test 1 is the concurrency-safety test. It introduces a real yield between the
- * harness writer's READ and its WRITE, which is the actual shape of the lost
- * update, and it is the only one here that fails when the lock is removed.
+ * The retired Antigravity sweep (TASK_2026_2297) is the one file write this
+ * service still makes, and it stays as it was; its cases are at the end.
  *
  * Everything mocked below is mocked for module-loading reasons only (the
  * `vscode` ambient module and the transitive SDK imports), never to weaken the
@@ -82,6 +61,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -99,15 +79,8 @@ import {
   createMockWorkspaceProvider,
 } from '@ptah-extension/platform-core/testing';
 import { createMockLogger } from '@ptah-extension/shared/testing';
-// The REAL lock and the REAL facet — that is the entire point of this spec.
-import {
-  CodexTomlMcpFacet,
-  createMcpFacet,
-  withMcpConfigLock,
-  type IHarnessCliDetector,
-} from '@ptah-extension/harness-sync';
+import type { IHarnessCliDetector } from '@ptah-extension/harness-sync';
 import type { HarnessTargetId } from '@ptah-extension/shared';
-import type { PtahMcpSlot } from './ptah-mcp-slots';
 
 import { CodeExecutionMCP } from './http-mcp-server.service';
 import type { PtahAPIBuilder } from '../ptah-api-builder.service';
@@ -151,18 +124,9 @@ function buildService(): CodeExecutionMCP {
     {} as unknown as PermissionPromptService,
     undefined,
     undefined,
-    // No CLI detector: every target but `claude` is gated on one, so this
-    // suite exercises the same single `.mcp.json` it was written against.
+    // No CLI detector: the retired-entry sweep touches no file without one.
     undefined,
   );
-}
-
-/** The `mcpServers` map as it currently stands ON DISK. */
-function serversOnDisk(): Record<string, unknown> {
-  const parsed = JSON.parse(readFileSync(configPath, 'utf-8')) as {
-    mcpServers?: Record<string, unknown>;
-  };
-  return parsed.mcpServers ?? {};
 }
 
 beforeEach(async () => {
@@ -186,299 +150,50 @@ afterEach(async () => {
   rmSync(workspaceRoot, { recursive: true, force: true });
 });
 
-describe('CodeExecutionMCP × harness-sync — one .mcp.json, two writers', () => {
-  // THE concurrency-safety test: the only one in this file that fails when the
-  // lock is removed. See the file header.
-  it("CONCURRENCY: preserves BOTH writers' keys when a harness mutation and a registration overlap", async () => {
-    // A hand-authored server, so the file exists and has something to lose.
-    writeFileSync(
-      configPath,
+describe('CodeExecutionMCP on a real disk — no MCP config file is written', () => {
+  it('a chat start, a retain/release and a stop leave an empty workspace empty', async () => {
+    const child = mkdtempSync(join(tmpdir(), 'ptah-mcp-child-'));
+    try {
+      await expect(service.ensureRegisteredForSubagents()).resolves.toEqual({
+        registered: true,
+      });
+      await expect(service.retainRoot(child)).resolves.toEqual({
+        registered: true,
+      });
+      await service.releaseRoot(child);
+      await service.stop();
+
+      expect(readdirSync(workspaceRoot)).toEqual([]);
+      expect(readdirSync(child)).toEqual([]);
+    } finally {
+      rmSync(child, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves an existing .mcp.json, with an earlier ptah entry, byte-identical', async () => {
+    const before =
       JSON.stringify(
         {
-          $schema: 'https://example.invalid/mcp.schema.json',
           mcpServers: {
             'my-own-server': { command: 'node', args: ['x.js'] },
+            ptah: {
+              type: 'http',
+              url: `http://localhost:${PORT}/auth/${'A'.repeat(43)}/workspace/${encodeURIComponent(workspaceRoot)}`,
+            },
           },
         },
         null,
         2,
-      ) + '\n',
-    );
+      ) + '\n';
+    writeFileSync(configPath, before, 'utf-8');
 
-    // A harness-shaped mutation with a real yield between its READ and its
-    // WRITE. That yield is the whole lost update: two writers that each read,
-    // each edit their own key, and each write their own copy back — the second
-    // write wins whole and the first key is gone, with no error and no torn
-    // file. Both facets do exactly this, just without an await in the middle.
-    let enterHarness!: () => void;
-    const harnessEntered = new Promise<void>((resolve) => {
-      enterHarness = resolve;
-    });
-    let releaseHarness!: () => void;
-    const harnessGate = new Promise<void>((resolve) => {
-      releaseHarness = resolve;
-    });
-
-    const harnessMutation = withMcpConfigLock(configPath, async () => {
-      const config = JSON.parse(readFileSync(configPath, 'utf-8')) as {
-        mcpServers: Record<string, unknown>;
-      };
-      enterHarness();
-      await harnessGate;
-      config.mcpServers['harness-server'] = { command: 'node', args: ['h.js'] };
-      writeFileSync(configPath, JSON.stringify(config, null, 2) + '\n');
-    });
-
-    await harnessEntered;
-
-    // The service now wants the same file while the harness holds it.
-    const registration = service.ensureRegisteredForSubagents();
-
-    // Give it every chance to jump the queue before the harness has written.
-    await new Promise((resolve) => setTimeout(resolve, 30));
-    expect(serversOnDisk()).not.toHaveProperty('ptah');
-
-    releaseHarness();
-    await harnessMutation;
-    await registration;
-
-    const servers = serversOnDisk();
-    expect(servers['harness-server']).toEqual({
-      command: 'node',
-      args: ['h.js'],
-    });
-    expect(servers['ptah']).toEqual({
-      type: 'http',
-      url: expect.stringMatching(
-        new RegExp(
-          `^http://localhost:${PORT}/auth/[A-Za-z0-9_-]{43}/workspace/`,
-        ),
-      ),
-    });
-    // ...and the user's own server survived both of them.
-    expect(servers['my-own-server']).toEqual({
-      command: 'node',
-      args: ['x.js'],
-    });
-  });
-
-  // WIRING SMOKE TEST, not a concurrency test — both critical sections are
-  // synchronous, so this passes with the lock removed. What it does prove is
-  // that the service and the facet agree about the path, the root key and the
-  // key partition, which is worth pinning on its own.
-  it('WIRING: the REAL claude facet and the service address one file and different keys', async () => {
-    const facet = createMcpFacet('claude');
-
-    await Promise.all([
-      facet.write(workspaceRoot, 'github', {
-        type: 'stdio',
-        command: 'npx',
-        args: ['-y', '@foo/github-mcp'],
-      }),
-      service.ensureRegisteredForSubagents(),
-    ]);
-
-    const servers = serversOnDisk();
-    expect(Object.keys(servers).sort()).toEqual(['github', 'ptah']);
-    expect(servers['ptah']).toEqual({
-      type: 'http',
-      url: expect.stringMatching(
-        new RegExp(
-          `^http://localhost:${PORT}/auth/[A-Za-z0-9_-]{43}/workspace/`,
-        ),
-      ),
-    });
-  });
-
-  it('keeps the complete credential file byte-identical across registration passes', async () => {
     await service.ensureRegisteredForSubagents();
-    const first = readFileSync(configPath);
-    const url = (serversOnDisk()['ptah'] as { url: string }).url;
-    expect(url).toMatch(
-      /^http:\/\/localhost:\d+\/auth\/[A-Za-z0-9_-]{43}\/workspace\//,
-    );
-    await service.ensureRegisteredForSubagents();
-    expect(readFileSync(configPath)).toEqual(first);
-    expect((serversOnDisk()['ptah'] as { url: string }).url).toBe(url);
-  });
+    await service.retainRoot(workspaceRoot);
+    await service.releaseRoot(workspaceRoot);
+    await service.stop();
 
-  it('keeps every facet credential file byte-identical across writes', async () => {
-    const home = join(workspaceRoot, 'home');
-    const slots: PtahMcpSlot[] = [
-      {
-        target: 'cursor',
-        facet: createMcpFacet('cursor'),
-        workspaceRoot,
-        configPath: join(workspaceRoot, '.cursor', 'mcp.json'),
-      },
-      {
-        target: 'codex',
-        facet: new CodexTomlMcpFacet({ scope: 'workspace', homeDir: home }),
-        workspaceRoot,
-        configPath: join(workspaceRoot, '.codex', 'config.toml'),
-      },
-      {
-        target: 'codex',
-        facet: createMcpFacet('codex', { homeDir: home }),
-        workspaceRoot: '',
-        configPath: join(home, '.codex', 'config.toml'),
-      },
-      {
-        target: 'antigravity',
-        facet: createMcpFacet('antigravity', { homeDir: home }),
-        workspaceRoot: '',
-        configPath: join(home, '.gemini', 'config', 'mcp_config.json'),
-      },
-    ];
-    for (const slot of slots) {
-      const token = 'a'.repeat(43);
-      await expect(service['writeFacetEntry'](slot, PORT, token)).resolves.toBe(
-        true,
-      );
-      const first = readFileSync(slot.configPath);
-      await expect(service['writeFacetEntry'](slot, PORT, token)).resolves.toBe(
-        false,
-      );
-      expect(readFileSync(slot.configPath)).toEqual(first);
-    }
-  });
-
-  // Stop preserves the credential for M1. A concurrent facet write must remain.
-  it('WIRING: stop preserves the ptah key and a concurrent facet write', async () => {
-    const facet = createMcpFacet('claude');
-    await service.ensureRegisteredForSubagents();
-    const before = serversOnDisk()['ptah'];
-
-    await Promise.all([
-      facet.write(workspaceRoot, 'github', {
-        type: 'stdio',
-        command: 'npx',
-      }),
-      service.stop(),
-    ]);
-
-    const servers = serversOnDisk();
-    expect(servers['github']).toBeDefined();
-    expect(servers['ptah']).toEqual(before);
-  });
-});
-
-describe('chat registration queue behavior', () => {
-  it('returns an existing active registration while the operation queue is blocked', async () => {
-    expect((await service.ensureRegisteredForSubagents()).registered).toBe(true);
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => { release = resolve; });
-    const queued = service['enqueueMcpOp'](() => gate);
-    const result = await service.ensureRegisteredForSubagents();
-    expect(result).toEqual({ registered: true });
-    release();
-    await queued;
-  });
-
-  it('returns timeout while a queued registration continues in the background', async () => {
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => { release = resolve; });
-    const queued = service['enqueueMcpOp'](() => gate);
-    const result = await service.ensureRegisteredForSubagents();
-    expect(result).toEqual({ registered: false, reason: 'timeout' });
-    release();
-    await queued;
-    await service['mcpOpQueue'];
-    expect(serversOnDisk()).toHaveProperty('ptah');
-  }, 10000);
-
-  it('queues one reconcile for chat callers that arrive before it starts', async () => {
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => { release = resolve; });
-    const queued = service['enqueueMcpOp'](() => gate);
-    const first = service['queueEnsureRegistered']();
-    const second = service['queueEnsureRegistered']();
-    expect(second).toBe(first);
-    release();
-    await queued;
-    expect((await first).registered).toBe(true);
-    expect(service['queueEnsureRegistered']()).not.toBe(first);
-    await service['mcpOpQueue'];
-  });
-
-  it('does not take the fast path for an entry with a changed URL path', async () => {
-    expect((await service.ensureRegisteredForSubagents()).registered).toBe(true);
-    const configPath = join(workspaceRoot, '.mcp.json');
-    const config = JSON.parse(readFileSync(configPath, 'utf-8'));
-    config.mcpServers.ptah.url = `${config.mcpServers.ptah.url}/extra`;
-    writeFileSync(configPath, JSON.stringify(config));
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => { release = resolve; });
-    const queued = service['enqueueMcpOp'](() => gate);
-    expect(await service.ensureRegisteredForSubagents()).toEqual({ registered: false, reason: 'timeout' });
-    release();
-    await queued;
-    await service['mcpOpQueue'];
-  }, 10000);
-
-  it('keeps a shared root entry until the last session releases it', async () => {
-    const sharedRoot = mkdtempSync(join(tmpdir(), 'ptah-mcp-shared-'));
-    const sharedConfig = join(sharedRoot, '.mcp.json');
-    const ptahOnDisk = (): unknown =>
-      JSON.parse(readFileSync(sharedConfig, 'utf-8')).mcpServers?.ptah;
-    try {
-      expect((await service.retainRoot(sharedRoot)).registered).toBe(true);
-      expect((await service.retainRoot(sharedRoot)).registered).toBe(true);
-      await service.releaseRoot(sharedRoot);
-      expect(ptahOnDisk()).toBeDefined();
-      await service.releaseRoot(sharedRoot);
-      expect(ptahOnDisk()).toBeUndefined();
-    } finally {
-      rmSync(sharedRoot, { recursive: true, force: true });
-    }
-  });
-
-  it('retains only slots belonging to the requested root', async () => {
-    const otherRoot = mkdtempSync(join(tmpdir(), 'ptah-mcp-other-'));
-    try {
-      expect((await service.retainRoot(otherRoot)).registered).toBe(true);
-      const otherConfig = join(otherRoot, '.mcp.json');
-      writeFileSync(otherConfig, JSON.stringify({ mcpServers: {} }));
-      await service.retainRoot(workspaceRoot);
-      expect(JSON.parse(readFileSync(otherConfig, 'utf-8'))).toEqual({ mcpServers: {} });
-    } finally {
-      await service.releaseRoot(otherRoot);
-      rmSync(otherRoot, { recursive: true, force: true });
-    }
-  });
-
-  it('coalesces pending full reconciles', async () => {
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => { release = resolve; });
-    const queued = service['enqueueMcpOp'](() => gate);
-    const first = service['queueRepoint']();
-    const second = service['queueRepoint']();
-    expect(second).toBe(first);
-    release();
-    await queued;
-    await first;
-  });
-
-  it('queues a new reconcile for a change that arrives while one runs', async () => {
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => { release = resolve; });
-    let entered!: () => void;
-    const started = new Promise<void>((resolve) => { entered = resolve; });
-    const original = service['syncMcpJsonRegistration'];
-    let calls = 0;
-    service['syncMcpJsonRegistration'] = async () => {
-      calls += 1;
-      if (calls === 1) { entered(); await gate; }
-    };
-    const first = service['queueRepoint']();
-    await started;
-    const second = service['queueRepoint']();
-    expect(second).not.toBe(first);
-    release();
-    await first;
-    await second;
-    expect(calls).toBe(2);
-    service['syncMcpJsonRegistration'] = original;
+    expect(readFileSync(configPath, 'utf-8')).toBe(before);
+    expect(readdirSync(workspaceRoot)).toEqual(['.mcp.json']);
   });
 });
 
@@ -539,16 +254,14 @@ describe('retired Antigravity slots (TASK_2026_2297)', () => {
     rmSync(home, { recursive: true, force: true });
   });
 
-  it('writes no antigravity entry when agy is installed, and claude is unchanged', async () => {
+  it('writes no antigravity entry when agy is installed, and no .mcp.json', async () => {
     await expect(agyService.ensureRegisteredForSubagents()).resolves.toEqual({
       registered: true,
     });
 
     expect(existsSync(dirname(homeFile()))).toBe(false);
     expect(existsSync(dirname(wsFile()))).toBe(false);
-    expect((serversOnDisk()['ptah'] as { url: string }).url).toMatch(
-      /^http:\/\/localhost:51820\/auth\/[A-Za-z0-9_-]{43}\/workspace\//,
-    );
+    expect(existsSync(configPath)).toBe(false);
   });
 
   it('removes the Ptah-owned entries an earlier Ptah wrote and keeps user servers', async () => {
@@ -575,7 +288,7 @@ describe('retired Antigravity slots (TASK_2026_2297)', () => {
     expect(servers(wsFile())).toEqual({ docs });
   });
 
-  it("keeps a running stream-json lane's entry and a user's own `ptah` server", async () => {
+  it("removes a leftover stream-json lane entry and keeps a user's own `ptah` server", async () => {
     const lane = {
       serverUrl: `http://localhost:${PORT}/auth/${TOKEN}/agent/a1/workspace/${encodeURIComponent(workspaceRoot)}`,
     };
@@ -585,7 +298,7 @@ describe('retired Antigravity slots (TASK_2026_2297)', () => {
 
     await agyService.ensureRegisteredForSubagents();
 
-    expect(servers(homeFile())).toEqual({ ptah: lane });
+    expect(servers(homeFile())).toEqual({});
     expect(servers(wsFile())).toEqual({ ptah: userPtah });
   });
 

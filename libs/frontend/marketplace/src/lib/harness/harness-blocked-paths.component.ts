@@ -90,10 +90,10 @@ import type { HarnessBlockedDisclosure } from './harness-health.model';
         class="text-[10px] text-base-content-muted leading-relaxed"
         data-testid="harness-blocked-action"
       >
-        Move the occupant aside — the file or directory at each path, or the
-        conflicting key in each config file — {{ reconcileStep() }} Nothing here
-        proves Ptah wrote these, so they may be your own work: keep what you
-        move, and read it before you discard anything.
+        Move the occupant aside — the file or directory at each path —
+        {{ reconcileStep() }} Nothing here proves Ptah wrote these, so they may
+        be your own work: keep what you move, and read it before you discard
+        anything.
       </p>
     </section>
   `,

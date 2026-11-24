@@ -51,6 +51,11 @@ describe('AgentMessageRpcHandlers', () => {
       cancel: jest.fn().mockResolvedValue({ id: MESSAGE_ID, state: 'cancelled' }),
       retry: jest.fn().mockResolvedValue({ mode: 'queue-next-turn', messageId: MESSAGE_ID }),
       getBody: jest.fn().mockResolvedValue('held text'),
+      getMessage: jest.fn().mockResolvedValue({ text: 'held text' }),
+      turnOptions: jest.fn().mockResolvedValue({
+        models: [{ id: 'grok-4', name: 'Grok 4' }], efforts: ['low', 'high'], currentModel: 'grok-4',
+        commands: [{ name: 'compact', group: 'command', description: 'Compact' }, { name: 'code-review', group: 'skill' }],
+      }),
       listReceipts: jest.fn().mockResolvedValue([]),
     });
     const envelopes = [...stored];
@@ -69,10 +74,11 @@ describe('AgentMessageRpcHandlers', () => {
     return { coordinator, parentDelivery, laneCompletion, envelopes, rpc, call };
   };
 
-  it('registers exactly the ten agent message methods', () => {
+  it('registers exactly the eleven agent message methods', () => {
     const { rpc } = setup();
     expect(rpc.getRegisteredMethods()).toEqual(AgentMessageRpcHandlers.METHODS);
-    expect(AgentMessageRpcHandlers.METHODS).toHaveLength(10);
+    expect(AgentMessageRpcHandlers.METHODS).toHaveLength(11);
+    expect(AgentMessageRpcHandlers.METHODS).toContain('agent:getLaneComposerOptions');
   });
 
   it('routes preview, send, receipt and cancel to the coordinator as the user', async () => {
@@ -144,7 +150,7 @@ describe('AgentMessageRpcHandlers', () => {
       const { coordinator, call } = setup();
       const result = await call('agent:getQueuedMessageBody', { agentId: AGENT_ID, messageId: MESSAGE_ID });
       expect(result.data).toEqual({ text: 'held text' });
-      expect(coordinator.getBody).toHaveBeenCalledWith(AGENT_ID, MESSAGE_ID, USER);
+      expect(coordinator.getMessage).toHaveBeenCalledWith(AGENT_ID, MESSAGE_ID, USER);
       const invalid = await call('agent:getQueuedMessageBody', { agentId: AGENT_ID, messageId: 'not-a-uuid' });
       expect(invalid).toMatchObject({ success: false, errorCode: 'INVALID_PARAMS' });
     });
@@ -223,6 +229,101 @@ describe('AgentMessageRpcHandlers', () => {
       expect(laneCompletion.retryUnsaved).toHaveBeenCalledWith(REPORT_ID);
       expect(retry).toMatchObject({ success: false, errorCode: 'MESSAGE_ID_NOT_FOUND' });
       expect(cancel).toMatchObject({ success: false, errorCode: 'MESSAGE_ID_NOT_FOUND' });
+    });
+  });
+
+  describe('turn input and composer options', () => {
+    const image = { data: 'aGVsbG8=', mediaType: 'image/png' };
+
+    it('passes a valid turn to the coordinator', async () => {
+      const { coordinator, call } = setup();
+      const turn = { model: 'claude-opus-4@1m', reasoningEffort: 'high', files: ['src/a.ts'], images: [image] };
+      const result = await call('agent:sendMessage', { agentId: AGENT_ID, message: 'look', turn });
+      expect(result.success).toBe(true);
+      expect(coordinator.send).toHaveBeenCalledWith({ agentId: AGENT_ID, message: 'look', turn }, USER);
+    });
+
+    it.each([
+      'gpt-5.1-codex', 'grok-4-fast', 'gemini-4-hydrogen-low', 'Gemini 3.1 Pro (High)',
+      'claude-sonnet-4-6', 'opus[1m]', 'openai/gpt-5', 'claude-opus-4@1m',
+    ])('accepts the provider model id %s', async (model) => {
+      const { coordinator, call } = setup();
+      const result = await call('agent:sendMessage', { agentId: AGENT_ID, message: 'x', turn: { model } });
+      expect(result.success).toBe(true);
+      expect(coordinator.send).toHaveBeenCalled();
+    });
+
+    it.each([
+      ['an unknown turn key', { extra: true }],
+      ['a model with a control character', { model: 'bad\u0007model' }],
+      ['a model that reads as a flag', { model: '--dangerously-skip-permissions' }],
+      ['a model with surrounding whitespace', { model: ' opus ' }],
+      ['a 201-character effort', { reasoningEffort: 'x'.repeat(201) }],
+      ['33 files', { files: Array.from({ length: 33 }, (_, index) => `f${index}`) }],
+      ['a non-image media type', { images: [{ data: 'aGk=', mediaType: 'text/plain' }] }],
+      ['non-base64 data', { images: [{ data: 'not base64!', mediaType: 'image/png' }] }],
+      ['nine images', { images: Array.from({ length: 9 }, () => image) }],
+      ['an unknown image key', { images: [{ ...image, path: '/etc/passwd' }] }],
+    ])('rejects %s', async (_label, turn) => {
+      const { coordinator, call } = setup();
+      const result = await call('agent:sendMessage', { agentId: AGENT_ID, message: 'x', turn });
+      expect(result).toMatchObject({ success: false, errorCode: 'INVALID_PARAMS' });
+      expect(coordinator.send).not.toHaveBeenCalled();
+    });
+
+    it('rejects an image larger than MAX_IMAGE_SIZE_BYTES once decoded', async () => {
+      const { coordinator, call } = setup();
+      const data = 'A'.repeat(Math.ceil((5 * 1024 * 1024 * 4) / 3) + 4);
+      const result = await call('agent:sendMessage', {
+        agentId: AGENT_ID, message: 'x', turn: { images: [{ data, mediaType: 'image/png' }] },
+      });
+      expect(result).toMatchObject({ success: false, errorCode: 'INVALID_PARAMS' });
+      expect(coordinator.send).not.toHaveBeenCalled();
+    });
+
+    it('returns the held turn with the queued body', async () => {
+      const { coordinator, call } = setup();
+      (coordinator.getMessage as jest.Mock).mockResolvedValueOnce({ text: 'held', turn: { model: 'm', files: ['a.ts'] } });
+      const result = await call('agent:getQueuedMessageBody', { agentId: AGENT_ID, messageId: MESSAGE_ID });
+      expect(result.data).toEqual({ text: 'held', turn: { model: 'm', files: ['a.ts'] } });
+    });
+
+    it('serves the lane composer options', async () => {
+      const { coordinator, call } = setup();
+      const result = await call('agent:getLaneComposerOptions', { agentId: AGENT_ID });
+      expect(coordinator.turnOptions).toHaveBeenCalledWith(AGENT_ID);
+      expect(result.data).toEqual({
+        models: [{ id: 'grok-4', name: 'Grok 4' }], efforts: ['low', 'high'], currentModel: 'grok-4',
+        commands: [{ name: 'compact', group: 'command', description: 'Compact' }, { name: 'code-review', group: 'skill' }],
+      });
+    });
+
+    it('passes the cached lists beside an error, and the stopped-lane reason (M5, S2)', async () => {
+      const { coordinator, call } = setup();
+      (coordinator.turnOptions as jest.Mock).mockResolvedValueOnce({
+        models: [{ id: 'grok-4', name: 'Grok 4' }], efforts: [], commands: [], error: 'Lane options could not be read.',
+        unavailableReason: 'Commands and skills appear when the lane is running.',
+      });
+      const result = await call('agent:getLaneComposerOptions', { agentId: AGENT_ID });
+      expect(result.data).toEqual({
+        models: [{ id: 'grok-4', name: 'Grok 4' }], efforts: [], commands: [], error: 'Lane options could not be read.',
+        unavailableReason: 'Commands and skills appear when the lane is running.',
+      });
+    });
+
+    it('answers a failed lookup with error, never a throw', async () => {
+      const { coordinator, call } = setup();
+      (coordinator.turnOptions as jest.Mock).mockRejectedValueOnce(new Error('boom'));
+      const result = await call('agent:getLaneComposerOptions', { agentId: AGENT_ID });
+      expect(result.success).toBe(true);
+      expect(result.data).toEqual({ models: [], efforts: [], commands: [], error: 'Lane options could not be read.' });
+    });
+
+    it('rejects invalid composer option params', async () => {
+      const { coordinator, call } = setup();
+      const result = await call('agent:getLaneComposerOptions', { agentId: 'nope' });
+      expect(result).toMatchObject({ success: false, errorCode: 'INVALID_PARAMS' });
+      expect(coordinator.turnOptions).not.toHaveBeenCalled();
     });
   });
 });

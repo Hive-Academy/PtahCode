@@ -71,15 +71,26 @@ function windowsFrom(data: z.infer<typeof usage>, observedAt: number): PlanLimit
   return entries.flatMap(([source, key, kind, label, durationMins]) => {
     const value = data.usages[source];
     if (!value) return [];
+    const percent = Math.max(0, Math.min(100, value.used_ratio * 100));
+    const resetsAt = value.reset_time ? Date.parse(value.reset_time) : undefined;
     return [{
       key, kind, label,
       ...(durationMins !== undefined && { durationMins }),
-      used: { kind: 'percent' as const, percent: Math.max(0, Math.min(100, value.used_ratio * 100)) },
+      used: { kind: 'percent' as const, percent },
       usedSource: 'provider-api' as const,
       usedObservedAt: observedAt,
-      ...(value.reset_time && {
-        resetsAt: Date.parse(value.reset_time),
+      ...(resetsAt !== undefined && {
+        resetsAt,
         resetSource: 'provider-api' as const,
+      }),
+      // A full window with a known reset is kept as exhaustion, so the lane
+      // stays AT LIMIT after a failed later read or an app restart. The next
+      // reading below the limit, or the reset itself, clears it.
+      ...(percent >= 100 && resetsAt !== undefined && {
+        exhaustion: {
+          observedAt, source: 'provider-api' as const,
+          resetsAt, resetSource: 'provider-api' as const,
+        },
       }),
       observedAt,
     }];

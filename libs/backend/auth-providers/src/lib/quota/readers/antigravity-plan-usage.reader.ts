@@ -42,7 +42,12 @@ import { readUsageSourceChain } from './usage-source-chain';
 import type { UsageSource, UsageSourceResult, UsageFailureReason, UsageSourceLabel } from './plan-usage-reader.types';
 
 export const ANTIGRAVITY_USAGE_TIMEOUT_MS = 3_000;
-export const ANTIGRAVITY_CHAIN_TIMEOUT_MS = 11_000;
+/**
+ * One budget for the three stages: the token file and the IDE server (3 s each
+ * at most), the sign-in check (1 s at most) and the CLI margin leave room for
+ * the full CLI window (`ANTIGRAVITY_CLI_TIMEOUT_MS`), with 1 s to spare.
+ */
+export const ANTIGRAVITY_CHAIN_TIMEOUT_MS = 22_000;
 const ANTIGRAVITY_OAUTH_STAGE_TIMEOUT_MS = 3_000;
 const MIN_STAGE_MS = 1_000;
 /** Time the CLI stage leaves for its own cleanup before the chain deadline. */
@@ -62,7 +67,7 @@ type StatusRequest = (
 ) => Promise<unknown>;
 type CliUsageRead = (
   signal: AbortSignal | undefined,
-  options: { ownerKey: string; accountFingerprint: string; budgetMs: number },
+  options: { ownerKey: string; accountFingerprint: string; budgetMs: number; refresh?: boolean },
 ) => Promise<AntigravityUsageReading>;
 type ProbeCommandRunner = (
   command: string,
@@ -136,7 +141,8 @@ export function createAntigravityPlanUsageReader(
           return record(antigravityFailure('cli-command', 'account-mismatch'), 'cli-command');
         return record(await readCli(stage.signal, { ownerKey: target.ownerRef.key,
           accountFingerprint: storeOwner.key,
-          budgetMs: chainDeadline - now() - CLI_STAGE_MARGIN_MS }), 'cli-command');
+          budgetMs: chainDeadline - now() - CLI_STAGE_MARGIN_MS,
+          refresh: stage.refresh }), 'cli-command');
       } },
     ];
     const reading = await readUsageSourceChain(sources, request, now, Math.max(0, chainDeadline - now()));

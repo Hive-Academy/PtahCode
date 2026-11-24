@@ -37,6 +37,7 @@ import type { PtahCliConfig } from '@ptah-extension/shared';
 import { PtahCliRegistry } from './ptah-cli-registry';
 import { createFakeSdkProcessSpawner } from './testing/fake-sdk-process-spawner';
 import * as mailboxModule from './helpers/ptah-cli-prompt-mailbox';
+import { laneTurnInputContractViolations } from '../cli-agents/testing/lane-turn-input-contract';
 
 jest.mock('@ptah-extension/agent-sdk', () => {
   const actual = jest.requireActual('@ptah-extension/agent-sdk');
@@ -206,19 +207,16 @@ describe('PtahCliRegistry.spawnAgent — permission routing identity', () => {
     mailboxSpy.mockRestore();
   });
 
-  it('uses the built-in plan mode when no lane choice is saved (D24)', async () => {
-    // D24: a lane with no spawn argument and no saved row runs in plan,
-    // the most restrictive mode. It never falls back to manifest yolo.
+  it('uses the built-in yolo mode when no lane choice is saved', async () => {
+    // A lane with no spawn argument and no saved row runs with the built-in
+    // default: the most capable mode the manifest supports (yolo for Ptah CLI).
     const { registry, queryFn } = buildHarness();
     await registry.spawnAgent(BASE_CONFIG.id, 'do work');
     expect(queryFn).toHaveBeenCalledWith(expect.objectContaining({
       options: expect.objectContaining({
-        permissionMode: 'plan',
-        allowDangerouslySkipPermissions: false,
+        permissionMode: 'bypassPermissions',
+        allowDangerouslySkipPermissions: true,
       }),
-    }));
-    expect(queryFn).not.toHaveBeenCalledWith(expect.objectContaining({
-      options: expect.objectContaining({ permissionMode: 'bypassPermissions' }),
     }));
   });
 
@@ -377,5 +375,51 @@ describe('PtahCliRegistry.spawnAgent — lane tool gate (TASK_2026_2297 P4)', ()
     expect(arg.options.permissionMode).toBe('bypassPermissions');
     expect(arg.options.canUseTool).toBeUndefined();
     expect(results).toEqual([deniedByPtah]);
+  });
+});
+
+describe('PtahCliRegistry.spawnAgent — lane turn input (B5)', () => {
+  it('pushes a continued turn into the mailbox as a turn object with path text', async () => {
+    const { registry } = buildHarness();
+    const original = mailboxModule.createPromptMailbox;
+    const pushes: Parameters<mailboxModule.PromptMailbox['push']>[] = [];
+    const spy = jest
+      .spyOn(mailboxModule, 'createPromptMailbox')
+      .mockImplementation((task: string) => {
+        const mailbox = original(task);
+        const push = mailbox.push.bind(mailbox);
+        return { ...mailbox, prompt: mailbox.prompt, push: (...args) => { pushes.push(args); push(...args); } };
+      });
+    const result = await registry.spawnAgent(BASE_CONFIG.id, 'do work', { permission: 'ask' });
+    if (!('handle' in result)) throw new Error('expected a handle');
+    await result.handle.continue?.('next', { files: ['src/a.ts'] });
+    expect(pushes[0]?.[0]).toEqual({
+      content: 'next\n\nAttached files:\n- src/a.ts',
+      uuid: expect.any(String),
+    });
+    spy.mockRestore();
+    result.handle.abort.abort();
+  });
+
+  it('keeps every claimed turn input item backed by a handle operation (Req 4.3)', async () => {
+    const { registry } = buildHarness();
+    const result = await registry.spawnAgent(BASE_CONFIG.id, 'do work', { permission: 'ask' });
+    if (!('handle' in result)) throw new Error('expected a handle');
+    expect(laneTurnInputContractViolations(result.handle, registry.capabilities(BASE_CONFIG.providerId))).toEqual([]);
+    expect(typeof result.handle.interrupt).toBe('function');
+    result.handle.abort.abort();
+  });
+
+  it.each([
+    ['ask', 'supported'],
+    ['auto-edit', 'supported'],
+    ['yolo', 'unsupported'],
+  ] as const)('declares approval prompts for a %s spawn as %s', async (permission, state) => {
+    const { registry } = buildHarness();
+    const result = await registry.spawnAgent(BASE_CONFIG.id, 'do work', { permission });
+    if (!('potentialCapabilities' in result)) throw new Error('expected capabilities');
+    expect(result.potentialCapabilities.prompts?.approvals.state).toBe(state);
+    expect(result.potentialCapabilities.prompts?.questions.state).toBe('supported');
+    if ('handle' in result) result.handle.abort.abort();
   });
 });

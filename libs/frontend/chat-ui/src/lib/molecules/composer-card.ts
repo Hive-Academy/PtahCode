@@ -25,3 +25,36 @@ export const COMPOSER_TOOLBAR_CLASS =
 /** The main chat's send button: a 28 px neutral inverse circle. */
 export const COMPOSER_SEND_BUTTON_CLASS =
   'inline-flex items-center justify-center h-7 w-7 flex-shrink-0 rounded-full bg-base-content text-base-100 transition-transform enabled:hover:scale-105 enabled:active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[oklch(var(--s))]';
+
+/**
+ * The composer's 28 px square icon button (attach `+`, mic), as the main chat
+ * toolbar draws it. Hover and the open state fill it with `surface-2`.
+ */
+export const COMPOSER_ICON_BUTTON_CLASS =
+  'inline-flex items-center justify-center h-7 w-7 flex-shrink-0 rounded-md text-base-content-muted hover:text-base-content hover:bg-surface-2 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[oklch(var(--s))] disabled:opacity-50';
+
+/** The composer toolbar's pill (model, effort): `h-7`, rounded, muted ink. */
+export const COMPOSER_PILL_CLASS =
+  'inline-flex items-center gap-1.5 h-7 px-2 rounded-full text-xs font-normal min-w-0 text-base-content-muted hover:text-base-content hover:bg-base-content/5 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[oklch(var(--s))]';
+
+/** The composer's Stop button: the same 28 px circle as Send, in error tint. */
+export const COMPOSER_STOP_BUTTON_CLASS =
+  'inline-flex items-center justify-center h-7 w-7 flex-shrink-0 rounded-full bg-error/15 text-error hover:bg-error/25 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[oklch(var(--s))]';
+
+/**
+ * The one-line status under the composer card (the slot main chat uses for
+ * MCP and auth). Callers add `aria-live="polite"` and the full text in `title`.
+ */
+export const COMPOSER_STATUS_LINE_CLASS =
+  'flex items-center gap-2 min-w-0 px-1 text-[11px] text-base-content-muted';
+
+/**
+ * A toolbar control the current lane cannot honour (design-spec 5.1): it stays
+ * focusable (`aria-disabled`, not `disabled`), keeps its ink (no opacity: that
+ * drops light-theme text below 3:1), loses its hover fill and gets a dashed
+ * `surface-border-strong` edge so the state is not colour-only. Applied by
+ * `ComposerGatedControlDirective` while a reason is bound. The `aria-disabled`
+ * variants outrank the control's own `hover:` classes by specificity.
+ */
+export const COMPOSER_DISABLED_CONTROL_CLASS =
+  'border border-dashed border-[var(--surface-border-strong)] cursor-not-allowed aria-disabled:hover:bg-transparent aria-disabled:hover:text-base-content-muted';

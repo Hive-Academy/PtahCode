@@ -9,7 +9,6 @@ describe('AntigravityCliAdapter.ensureTokensFresh', () => {
       logger,
       lane: new AntigravityCliAdapter(
         undefined,
-        undefined,
         logger as unknown as Logger,
         {},
         read,

@@ -1,8 +1,9 @@
 import type { PhaseKind } from '@ptah-extension/shared';
 
-export type UsageExecutorType = 'sdk-subagent' | 'session' | 'lane';
+/** Declared in shared so renderer and lane segments use the same scope vocabulary. */
+export type { UsageScope } from '@ptah-extension/shared';
 
-export type UsageScope = 'message' | 'turn' | 'cumulative';
+export type UsageExecutorType = 'sdk-subagent' | 'session' | 'lane';
 
 export type UsageMissingReason =
   | 'no-usage-event'

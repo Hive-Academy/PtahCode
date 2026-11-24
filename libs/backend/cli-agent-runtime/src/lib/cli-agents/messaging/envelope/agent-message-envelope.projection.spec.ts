@@ -48,6 +48,13 @@ describe('projectAgentMessageEnvelope', () => {
       .toMatchObject({ state: 'failed', reason: 'delivery-failed' });
   });
 
+  it('projects a raw command delivery, and omits the flag otherwise', () => {
+    expect(projectAgentMessageEnvelope(envelope({
+      state: 'started', rawDelivery: { raw: true }, ackState: 'unavailable',
+    }))).toMatchObject({ rawDelivery: true, ackState: 'unavailable' });
+    expect(projectAgentMessageEnvelope(envelope())).not.toHaveProperty('rawDelivery');
+  });
+
   it('flattens a lane sender and its verified flag', () => {
     const senderAgentId = AgentId.create();
     expect(projectAgentMessageEnvelope(envelope({

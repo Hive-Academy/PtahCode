@@ -5,10 +5,18 @@ import {
 } from '@ptah-extension/chat-streaming';
 import { ClaudeRpcService } from '@ptah-extension/core';
 import type {
+  LanePermissionResponse,
   PermissionRequest,
   PermissionResponse,
 } from '@ptah-extension/shared';
 import { ActionBannerService } from './action-banner.service';
+
+/** Backend reply when the request id is unknown: already answered, expired or never ours. */
+const NOT_PENDING_ERROR = 'No pending permission request matched this response';
+
+/** Banner for a request that left the queue before the answer arrived. */
+export const LANE_PERMISSION_NOT_PENDING_TEXT =
+  'This permission request is no longer pending. Refresh the lane to see its current state.';
 
 @Injectable({ providedIn: 'root' })
 export class AgentPermissionResponder {
@@ -30,11 +38,24 @@ export class AgentPermissionResponder {
     });
   }
 
+  /**
+   * Send a lane user's answer as a `LanePermissionResponse`. Every decision of
+   * main chat's permission card is accepted, with the edited tool input.
+   * Returns false when the answer was not sent: already answered, awaiting
+   * reconciliation, or no longer pending for this lane.
+   *
+   * When the host refuses the answer for a reason other than "not pending"
+   * (a Copilot edit refusal, a schema rejection), the request stays pending
+   * and answerable: the refusal text is shown in the banner and passed to
+   * `onRefused` so the surface can show it next to the card.
+   */
   respondLane(
     agentId: string,
     requestId: string,
-    decision: 'allow' | 'deny',
+    decision: LanePermissionResponse['decision'],
     reason?: string,
+    modifiedInput?: LanePermissionResponse['modifiedInput'],
+    onRefused?: (message: string) => void,
   ): boolean {
     if (this.answeredRequestIds.has(requestId)) return false;
     if (this.reconciliationRequired.has(requestId)) {
@@ -46,20 +67,33 @@ export class AgentPermissionResponder {
         request.requestId === requestId && this.agentStore.permissionBelongsToAgent(request, agent))
     )) return false;
     this.answeredRequestIds.add(requestId);
-    void this.withTimeout(this.rpc.call('agent:permissionResponse', {
-          requestId,
-          decision,
-          ...(decision === 'deny'
-            ? { reason: reason ?? 'User denied' }
-            : reason === undefined
-              ? {}
-              : { reason }),
-    }), AgentPermissionResponder.ACK_TIMEOUT_MS).then((result) => {
+    const response: LanePermissionResponse = {
+      requestId,
+      decision,
+      ...(decision === 'deny'
+        ? { reason: reason ?? 'User denied' }
+        : reason === undefined
+          ? {}
+          : { reason }),
+      ...(modifiedInput === undefined ? {} : { modifiedInput }),
+    };
+    void this.withTimeout(
+      this.rpc.call('agent:permissionResponse', response),
+      AgentPermissionResponder.ACK_TIMEOUT_MS,
+    ).then((result) => {
       if (result.success && result.data?.success) {
         this.agentStore.clearPermission(agentId, requestId);
       } else {
         this.answeredRequestIds.delete(requestId);
-        this.actionBanner.showError('This permission request is no longer pending. Refresh the lane to see its current state.');
+        // Only the handler's own reply says the request is still pending; a
+        // transport failure keeps the generic "no longer pending" banner.
+        const refusal = result.success ? result.data?.error : undefined;
+        if (refusal === undefined || refusal === NOT_PENDING_ERROR) {
+          this.actionBanner.showError(LANE_PERMISSION_NOT_PENDING_TEXT);
+        } else {
+          this.actionBanner.showError(refusal);
+          onRefused?.(refusal);
+        }
       }
     }).catch(() => {
       this.reconciliationRequired.add(requestId);

@@ -6,7 +6,11 @@
  * - The agent process is spawned synchronously and the handle returned at
  *   once (Cursor/Pi convention). `done` is the first turn: the handshake,
  *   then the Ptah MCP attachment wait, then the task prompt.
- * - `continue(message)` is a further prompt on the same session.
+ * - `continue(message, content?)` is a further prompt on the same session;
+ *   images and files become ACP content blocks (`toAcpPromptContent`).
+ * - Per-turn model and effort go through `session/set_config_option`
+ *   (`applyTurnSettings`); the composer catalog is the session's models, the
+ *   profile's effort entries and its `available_commands_update` (B8).
  * - There is no `steer`: an ACP agent queues a mid-turn prompt instead of
  *   injecting it. `interrupt` is offered when the profile's cancel behaviour
  *   keeps the process (`await-reply`): `session/cancel` ends the turn and the
@@ -18,35 +22,32 @@
  *   and command preparer (`lane-acp-spawn.ts`). Without a spawner the lane
  *   fails at once with one error.
  * - Each prompt is bounded by {@link LANE_ACP_PROMPT_TIMEOUT_MS}; a failed
- *   resume falls back to a new session (lanes keep that fallback).
- *
- * - Fallback (optional, {@link ProviderSessionLaneFallback}): when the ACP
- *   session cannot be opened at all (spawn, `initialize` or `session/new`
- *   failed, so no session id) and nothing was prompted, the lane runs on the
- *   fallback transport instead, with one `info` naming the ACP failure. The
- *   setup's own output is held until the outcome is known. Never mid-run: once
- *   a session exists the lane stays on ACP.
+ *   resume opens a new session instead.
+ * - One transport: a lane whose ACP session cannot be opened (spawn,
+ *   `initialize` or `session/new` failed) fails with the session's one error
+ *   and `done` 1. Setup output reaches the lane as it happens.
  *
  * - MCP credential (round 4): `options.onMcpConfigRestored` is the
- *   manager's revoke of the lane's Ptah MCP credential (Antigravity wires it;
- *   stream-json calls it after restoring `mcp_config.json`). An ACP lane
- *   writes no config, so it calls the hook once the agent process exits on
- *   its own: a failed setup or a lost process. An abort is the manager's stop
- *   or idle release, which revoke the subject themselves
+ *   manager's revoke of the lane's Ptah MCP credential. An ACP lane writes no
+ *   config, so it calls the hook once the agent process exits on its own: a
+ *   failed setup or a lost process. An abort is the manager's stop or idle
+ *   release, which revoke the subject themselves
  *   (`AgentProcessManager.stop`, `releaseSubprocess`); calling the hook from
  *   that late exit could revoke a credential the manager has meanwhile minted
  *   for a resumed lane of the same id. A warm process keeps the credential
- *   for its continuations. After a fallback the fallback transport owns it.
+ *   for its continuations.
  *
  * Session events reach the lane twice: as segments (`projectToCliSegments`,
  * the text log and lane outcome) and as flat stream events
  * (`createFlatStreamProjector`, `onStreamEvent`), from which the renderer
- * builds the lane's execution cards. stderr lines are classified here (`classifyCliStderr`). `done` and every continuation
+ * builds the lane's execution cards. stderr lines are redacted and classified here (`laneStderrLine`). `done` and every continuation
  * `done` resolve with 0 or 1 and never reject; failures become one `error`
  * segment.
  */
-import { createAcpSession } from '@ptah-extension/acp-runtime';
+import { createAcpSession, toAcpPromptContent } from '@ptah-extension/acp-runtime';
 import type {
+  AcpAvailableCommand,
+  AcpSession,
   AcpTransportFactory,
   AcpVendorProfile,
 } from '@ptah-extension/acp-runtime';
@@ -55,42 +56,81 @@ import {
   createFlatStreamProjector,
   projectToCliSegments,
 } from '@ptah-extension/provider-session-contracts';
-import type {
-  ProviderSessionError,
-  ProviderSessionEvent,
-} from '@ptah-extension/provider-session-contracts';
-import type {
-  CliOutputSegment,
-  FlatStreamEventUnion,
+import type { ProviderSessionEvent } from '@ptah-extension/provider-session-contracts';
+import {
+  EFFORT_LEVELS,
+  type CliAdapterManifest,
+  type CliOutputSegment,
+  type FlatStreamEventUnion,
+  type LaneComposerCommandOption,
+  type LaneTurnContent,
+  type LaneTurnInputCapabilities,
+  type LaneTurnSettings,
 } from '@ptah-extension/shared';
 import type { Logger } from '@ptah-extension/vscode-core';
 import { MCP_ATTACHMENT_TIMEOUT_MS } from '../../mcp-attachment-probe.port';
-import type {
-  CliCommandOptions,
-  ContinuationOutcome,
-  SdkHandle,
+import {
+  LaneTurnSettingRefusal,
+  type CliCommandOptions,
+  type ContinuationOutcome,
+  type LaneTurnOptionsCatalog,
+  type LaneTurnSettingsResult,
+  type SdkHandle,
 } from '../cli-adapter.interface';
+import { filterLaneCommands } from '../lane-command-filter';
 import { buildTaskPrompt, createBufferedEmitter } from '../cli-adapter.utils';
-import { classifyCliStderr } from '../cli-stderr-severity';
 import {
   LANE_ACP_PROMPT_TIMEOUT_MS,
   laneAcpBaseEnv,
   laneAcpCommandPreparer,
 } from './lane-acp-spawn';
 import { buildLaneMcpAttachments } from './lane-mcp-attachments';
+import { laneStderrLine } from './lane-stderr-redaction';
 
 /**
- * Setup output held while a fallback is still possible. Beyond it the output
- * is released, so a noisy setup is never silenced for long.
+ * The per-turn sections every ACP lane manifest declares (B8, D9, D12).
+ * Images and skills are narrowed live by {@link SdkHandle.turnInputSupport}:
+ * images need `promptCapabilities.image`, skills an advertised `SKILL.md`
+ * command. `commands.blocked` is the profile's hidden list, the static
+ * source live and restored records share (D18).
  */
-const MAX_HELD_SETUP_ITEMS = 200;
+export function acpLaneManifestSections(
+  profile: AcpVendorProfile,
+  promptReason: string,
+): Required<Pick<CliAdapterManifest, 'turnInput' | 'usage' | 'prompts'>> {
+  const turnInput: LaneTurnInputCapabilities = {
+    model: { state: 'supported', appliesAt: 'next-turn' },
+    effort: { state: 'supported', appliesAt: 'next-turn' },
+    images: { state: 'supported', onSteer: false },
+    files: { state: 'supported', delivery: 'reference' },
+    commands: { state: 'supported', blocked: [...(profile.hiddenLaneCommands ?? [])] },
+    skills: { state: 'supported' },
+  };
+  return {
+    turnInput,
+    usage: {
+      timing: 'turn-end',
+      reason: `${profile.displayName} reports token usage when the turn ends.`,
+    },
+    prompts: {
+      approvals: { state: 'unsupported', reason: promptReason },
+      questions: { state: 'unsupported', reason: promptReason },
+    },
+  };
+}
 
-/** Another transport for the same lane, used only when the ACP session never opened. */
-export interface ProviderSessionLaneFallback {
-  /** Names the transport in the lane's `info`, e.g. `stream-json`. */
-  readonly label: string;
-  /** Start the lane on that transport. A rejection fails the lane with one error. */
-  readonly run: () => Promise<SdkHandle>;
+/** An advertised ACP command as a composer entry: a `SKILL.md` path marks a skill (D10). */
+export function acpLaneCommandOption(command: AcpAvailableCommand): LaneComposerCommandOption {
+  return {
+    name: command.name,
+    ...(command.description ? { description: command.description } : {}),
+    group: command.path?.endsWith('SKILL.md') ? 'skill' : 'command',
+  };
+}
+
+/** The base name of a host path, Windows or POSIX. */
+function baseName(path: string): string {
+  return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 }
 
 export interface ProviderSessionLaneHandleConfig {
@@ -104,8 +144,6 @@ export interface ProviderSessionLaneHandleConfig {
   readonly transportFactory?: AcpTransportFactory;
   /** Receives the raw failure detail that user-facing segments summarise. */
   readonly logger?: Logger;
-  /** Runs the lane elsewhere when the ACP session could not be opened. */
-  readonly fallback?: ProviderSessionLaneFallback;
 }
 
 /**
@@ -143,29 +181,6 @@ export function createProviderSessionLaneHandle(
   const sessionResolved = createBufferedEmitter<string>();
   const stream = createBufferedEmitter<FlatStreamEventUnion>();
   let streamProjector = createFlatStreamProjector();
-
-  /**
-   * While the setup runs and a fallback is configured, output is held: a
-   * setup that fails over must not leave its errors on the lane.
-   */
-  let holdingSetup = !!config.fallback;
-  const held: Array<() => void> = [];
-  const setupErrors: ProviderSessionError[] = [];
-  const releaseHeld = (): void => {
-    holdingSetup = false;
-    for (const send of held.splice(0)) send();
-  };
-  const deliver = (send: () => void): void => {
-    if (!holdingSetup) {
-      send();
-      return;
-    }
-    held.push(send);
-    if (held.length > MAX_HELD_SETUP_ITEMS) releaseHeld();
-  };
-  /** The lane runs on the fallback transport; ACP events are ignored from then on. */
-  let delegate: SdkHandle | undefined;
-  let delegating = false;
   let mcpTimedOut = false;
   let onMcpTimeout: (() => void) | undefined;
 
@@ -182,8 +197,9 @@ export function createProviderSessionLaneHandle(
   const project = (event: ProviderSessionEvent): void => {
     const turnKey = event.turnId ?? `${event.contextId}:setup`;
     if (event.type === 'diagnostic') {
-      output.emit(`[stderr] ${event.line}\n`);
-      segment.emit({ type: classifyCliStderr(event.line), content: event.line });
+      const { severity, text } = laneStderrLine(event.line, options.mcpToken);
+      output.emit(`[stderr] ${text}\n`);
+      segment.emit({ type: severity, content: text });
       return;
     }
     if (event.type === 'textDelta') output.emit(event.delta);
@@ -218,10 +234,8 @@ export function createProviderSessionLaneHandle(
   };
 
   const onEvent = (event: ProviderSessionEvent): void => {
-    if (delegating) return;
     if (event.type === 'terminal') lastTerminalStatus = event.status;
-    if (event.type === 'error' && holdingSetup) setupErrors.push(event.error);
-    deliver(() => project(event));
+    project(event);
   };
 
   const session = createAcpSession({
@@ -307,7 +321,7 @@ export function createProviderSessionLaneHandle(
    * as Cursor's does: the lane is healthy and the router continues it, so it
    * must not be recorded as a failed lane. A whole-lane abort stays 1.
    */
-  const runTurn = (text: string): Promise<number> => {
+  const runTurn = (text: Parameters<AcpSession['prompt']>[0]): Promise<number> => {
     // An interrupted turn can leave a tool or its message open in the
     // projector; the next turn starts from a clean projection.
     if (lastTerminalStatus === 'interrupted') {
@@ -367,82 +381,6 @@ export function createProviderSessionLaneHandle(
     }
   };
 
-  /**
-   * Whether a failed setup may fail over: nothing was aborted, no ACP session
-   * was opened, the held output was not released, and the failure is not a
-   * missing sign-in (both transports share agy's profile, so the fallback
-   * would fail the same way, and the ACP error carries the sign-in hint).
-   */
-  const mayFallBack = (): boolean =>
-    holdingSetup &&
-    !abort.signal.aborted &&
-    !session.getSessionId() &&
-    !setupErrors.some((error) => error.code === 'auth-required');
-
-  /** Run the lane on the fallback transport and forward everything it emits. */
-  const runFallback = async (
-    fallback: ProviderSessionLaneFallback,
-  ): Promise<number> => {
-    delegating = true;
-    held.length = 0;
-    holdingSetup = false;
-    const reason =
-      setupErrors.map((error) => error.message).join('; ') ||
-      'the ACP session did not open';
-    logger?.warn('[AcpSessionHandle] ACP setup failed; the lane falls back', {
-      ...logContext,
-      transport: fallback.label,
-      reason,
-    });
-    let next: SdkHandle;
-    try {
-      next = await fallback.run();
-    } catch (error: unknown) {
-      logger?.error(
-        '[AcpSessionHandle] fallback transport failed to start',
-        error instanceof Error ? error : new Error(String(error)),
-      );
-      const detail = error instanceof Error ? error.message : String(error);
-      const message = `${name} could not start: ACP failed (${reason}), then ${fallback.label} failed (${detail})`;
-      output.emit(`\n[${name}] ${message}\n`);
-      segment.emit({ type: 'error', content: message });
-      return 1;
-    }
-    delegate = next;
-    if (abort.signal.aborted) next.abort.abort();
-    else {
-      abort.signal.addEventListener('abort', () => next.abort.abort(), {
-        once: true,
-      });
-    }
-    const notice = `${name} could not open an ACP session (${reason}); this lane runs on ${fallback.label} instead.`;
-    output.emit(`\n[${name}] ${notice}\n`);
-    segment.emit({ type: 'info', content: notice });
-    // The manager reads `mcpConfigWriteFailed` once, at spawn, while this
-    // handle still ran ACP; a fallback that could not write its MCP config
-    // is reported here (round-2 M1). The fallback prints its own output line.
-    if (next.mcpConfigWriteFailed) {
-      logger?.warn('[AcpSessionHandle] fallback could not configure Ptah MCP', {
-        ...logContext,
-        transport: fallback.label,
-        cause: 'config-write-failed',
-      });
-      segment.emit({
-        type: 'info',
-        content: `Ptah MCP was not configured for the ${fallback.label} lane (config-write-failed); report in your final message.`,
-      });
-    }
-    next.onOutput(output.emit);
-    next.onSegment?.(segment.emit);
-    next.onStreamEvent?.(stream.emit);
-    next.onSessionResolved?.(sessionResolved.emit);
-    next.onMcpAttachmentTimeout?.(() => {
-      mcpTimedOut = true;
-      onMcpTimeout?.();
-    });
-    return next.done;
-  };
-
   /** Revoke the lane's MCP credential once, when the ACP process is gone. */
   let credentialReleased = false;
   const releaseCredential = (): void => {
@@ -462,13 +400,7 @@ export function createProviderSessionLaneHandle(
 
   const runFirstTurn = async (): Promise<number> => {
     const setup = await session.start();
-    if (!setup.ok && config.fallback && mayFallBack()) {
-      return runFallback(config.fallback);
-    }
-    // Decided after the fallback check: a fallback lane still needs the
-    // credential, and its own transport revokes it.
     releaseCredentialOnExit();
-    releaseHeld();
     if (!setup.ok || abort.signal.aborted) return 1;
     const sessionId = session.getSessionId();
     if (!sessionId || !(await persistAccountBinding(sessionId))) return 1;
@@ -492,9 +424,7 @@ export function createProviderSessionLaneHandle(
   };
 
   const supportsContinuation = (): boolean => {
-    if (delegate) return delegate.supportsContinuation?.() ?? false;
     return (
-      !delegating &&
       session.isSetupComplete() &&
       !!session.getSessionId() &&
       !session.isClosed() &&
@@ -511,14 +441,30 @@ export function createProviderSessionLaneHandle(
     return 1;
   };
 
-  const continueTurn = (message: string): Promise<ContinuationOutcome> => {
-    if (delegate) {
-      return delegate.continue
-        ? delegate.continue(message)
-        : Promise.reject(
-            new Error(`${name} on ${config.fallback?.label} takes no further messages`),
-          );
-    }
+  const imageInputAdvertised = (): boolean =>
+    session.getAgentCapabilities()?.promptCapabilities?.image === true;
+
+  /** Text alone, or ACP content blocks when the turn carries images or files. */
+  const turnPrompt = (
+    message: string,
+    content?: LaneTurnContent,
+  ): Parameters<AcpSession['prompt']>[0] => {
+    const images = content?.images ?? [];
+    const files = content?.files ?? [];
+    if (images.length === 0 && files.length === 0) return message;
+    if (images.length > 0 && !imageInputAdvertised())
+      throw new Error(`${name} did not advertise image input`);
+    return toAcpPromptContent({
+      text: message,
+      images: images.map((image) => ({ mimeType: image.mediaType, data: image.data })),
+      files: files.map((path) => ({ path, name: baseName(path) })),
+    });
+  };
+
+  const continueTurn = (
+    message: string,
+    content?: LaneTurnContent,
+  ): Promise<ContinuationOutcome> => {
     if (session.isClosed() || abort.signal.aborted) {
       return Promise.reject(
         new Error(`${name} is no longer running; resume the session by id`),
@@ -535,17 +481,118 @@ export function createProviderSessionLaneHandle(
     if (session.isTurnRunning()) {
       return Promise.reject(new Error(`${name} is still running a turn`));
     }
+    let prompt: Parameters<AcpSession['prompt']>[0];
+    try {
+      prompt = turnPrompt(message, content);
+    } catch (error: unknown) {
+      return Promise.reject(error instanceof Error ? error : new Error(String(error)));
+    }
+    // Counts only: no image data or file path reaches the log.
+    if (typeof prompt !== 'string')
+      logger?.info('[AcpSessionHandle] turn with content blocks', {
+        ...logContext,
+        imageCount: content?.images?.length ?? 0,
+        fileCount: content?.files?.length ?? 0,
+      });
     return Promise.resolve({
-      done: runTurn(message).catch(onUnexpectedTurnError),
+      done: runTurn(prompt).catch(onUnexpectedTurnError),
     });
   };
 
+  /**
+   * Model and effort for the next prompt (`session/set_config_option`). A
+   * refused value rejects with fixed text; the ACP error detail itself goes
+   * out through the session's own `readAcpErrorDetail` path.
+   */
+  const applyTurnSettings = async (
+    settings: LaneTurnSettings,
+  ): Promise<LaneTurnSettingsResult> => {
+    const { model, reasoningEffort } = settings;
+    if (!supportsContinuation())
+      throw new LaneTurnSettingRefusal(
+        model !== undefined ? 'model' : 'reasoningEffort',
+        `${name} has no running ACP session.`,
+      );
+    const effortRefused = (): LaneTurnSettingRefusal =>
+      new LaneTurnSettingRefusal(
+        'reasoningEffort',
+        `${name} did not accept the effort level "${reasoningEffort}".`,
+      );
+    // Both fields are checked before anything is sent (M2): an effort the
+    // profile maps to no config entry would otherwise apply nothing.
+    if (reasoningEffort !== undefined && !profileEfforts().includes(reasoningEffort))
+      throw effortRefused();
+    const previousModel = session.getModels().find((entry) => entry.isDefault)?.id;
+    if (model !== undefined && !(await session.setModel(model)))
+      throw new LaneTurnSettingRefusal('model', `${name} did not accept the model "${model}".`);
+    if (reasoningEffort !== undefined && !(await session.setEffort(reasoningEffort))) {
+      // A refusal leaves the settings as they were: the model is rolled back.
+      if (model !== undefined && model !== previousModel && !(await rollBackModel(previousModel)))
+        throw new LaneTurnSettingRefusal(
+          'reasoningEffort',
+          `${name} did not accept the effort level "${reasoningEffort}"; the model change could not be undone.`,
+        );
+      throw effortRefused();
+    }
+    return {
+      ...(model !== undefined ? { model } : {}),
+      ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
+      appliesAt: 'next-turn',
+    };
+  };
+
+  /** Restores `previous` after a refused effort; false when it cannot. */
+  const rollBackModel = async (previous: string | undefined): Promise<boolean> => {
+    if (previous === undefined) return false;
+    try {
+      return await session.setModel(previous);
+    } catch (error: unknown) {
+      // degradation-audit: reported - logged at warn; the caller's refusal says the model change could not be undone.
+      logger?.warn('[AcpSessionHandle] model rollback failed', {
+        ...logContext,
+        errorClass: error instanceof Error ? error.name : typeof error,
+      });
+      return false;
+    }
+  };
+
+  /** Effort values the profile maps to a config entry other than the model. */
+  const profileEfforts = (): string[] =>
+    EFFORT_LEVELS.filter((effort) =>
+      (profile.sessionConfig?.({ ...options, mcp: [], reasoningEffort: effort }) ?? []).some(
+        (entry) => entry.configId !== 'model',
+      ),
+    );
+
+  const laneCommands = (): LaneComposerCommandOption[] =>
+    filterLaneCommands(
+      session.getAvailableCommands().map(acpLaneCommandOption),
+      profile.hiddenLaneCommands ?? [],
+    );
+
+  const listTurnOptions = async (): Promise<LaneTurnOptionsCatalog> => {
+    const models = session.getModels();
+    const current = models.find((model) => model.isDefault)?.id;
+    return {
+      models: models.map((model) => ({ id: model.id, name: model.name ?? model.id })),
+      efforts: profileEfforts(),
+      ...(current ? { currentModel: current } : {}),
+      commands: laneCommands(),
+    };
+  };
+
+  /** Live gates: images need the agent's advertisement, skills an advertised skill. */
+  const turnInputSupport = (): Partial<LaneTurnInputCapabilities> => ({
+    images: imageInputAdvertised()
+      ? { state: 'supported', onSteer: false }
+      : { state: 'unsupported', reason: `${name} did not advertise image input.` },
+    skills: laneCommands().some((command) => command.group === 'skill')
+      ? { state: 'supported' }
+      : { state: 'unsupported', reason: `${name} advertises no skills to lanes.` },
+  });
+
   /** Cancel the running turn; the process and session stay for `continue`. */
   const interrupt = async (): Promise<void> => {
-    if (delegate) {
-      await delegate.interrupt?.();
-      return;
-    }
     interruptRequested = true;
     const kept = await session.interrupt();
     logger?.info('[AcpSessionHandle] turn interrupted', {
@@ -578,30 +625,21 @@ export function createProviderSessionLaneHandle(
       onMcpTimeout = callback;
       if (mcpTimedOut) callback();
     },
-    // After a fallback, the fallback transport's answer (it writes the file).
-    get mcpConfigWriteFailed() {
-      return delegate?.mcpConfigWriteFailed;
-    },
-    getSessionId: () =>
-      delegate
-        ? delegate.getSessionId?.()
-        : (session.getSessionId() ?? options.resumeSessionId),
+    getSessionId: () => session.getSessionId() ?? options.resumeSessionId,
     onSessionResolved: sessionResolved.subscribe,
     supportsContinuation,
     continue: continueTurn,
+    applyTurnSettings,
+    turnInputSupport,
+    listTurnOptions,
     // Before the task prompt there is no turn to cancel.
     supportsInterrupt: () =>
-      delegate
-        ? (delegate.supportsInterrupt?.() ?? false)
-        : taskPromptSent && session.supportsInterrupt() && !abort.signal.aborted,
+      taskPromptSent && session.supportsInterrupt() && !abort.signal.aborted,
     interrupt,
-    getPid: () => (delegate ? delegate.getPid?.() : session.getPid()),
-    // Both transports report per-turn totals.
+    getPid: () => session.getPid(),
+    // ACP reports per-turn totals.
     outcomeUsageIsTurnTotal: true,
     usageScope: 'turn',
-    getObservedNativeThreadId: () =>
-      delegate
-        ? (delegate.getObservedNativeThreadId?.() ?? delegate.getSessionId?.())
-        : session.getSessionId(),
+    getObservedNativeThreadId: () => session.getSessionId(),
   };
 }

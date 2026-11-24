@@ -17,4 +17,5 @@ export const ANTHROPIC_API_LANE_ENTRY: AnthropicProvider = {
   modelsEndpoint: 'https://api.anthropic.com/v1/models?limit=1000',
   modelsAuthScheme: 'anthropic',
   defaultTiers: CLAUDE_CLI_PROVIDER_ENTRY.defaultTiers,
+  imageInputOnEveryModel: true,
 };

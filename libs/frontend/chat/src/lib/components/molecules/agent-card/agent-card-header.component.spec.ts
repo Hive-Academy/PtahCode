@@ -69,6 +69,27 @@ describe('AgentCardHeaderComponent — prompt cache (N6)', () => {
     );
   });
 
+  describe('model chip', () => {
+    const chip = (el: HTMLElement) => el.querySelector('[data-testid="lane-model"]');
+
+    it('shows the model the provider confirmed, with the full name in the title', () => {
+      const el = setup(lane({ model: 'gpt-5', observedModel: 'gpt-5.1-codex-max-2026-11-01' }));
+      expect(chip(el)?.textContent?.trim()).toBe('gpt-5.1-codex-max-2026-11-01');
+      expect(chip(el)?.getAttribute('title')).toBe('Model: gpt-5.1-codex-max-2026-11-01');
+      expect(chip(el)?.querySelector('.ptah-badge-text')).not.toBeNull();
+    });
+
+    it('falls back to the requested model until the provider confirms one', () => {
+      const el = setup(lane({ model: 'gpt-5' }));
+      expect(chip(el)?.textContent?.trim()).toBe('gpt-5');
+      expect(chip(el)?.getAttribute('title')).toBe('Model: gpt-5');
+    });
+
+    it('shows no chip when neither model is known', () => {
+      expect(chip(setup(lane()))).toBeNull();
+    });
+  });
+
   it('explains a repeat-call stop', () => {
     const repeat = setup(
       lane({ status: 'stopped', stopReason: 'repeat-call' }),

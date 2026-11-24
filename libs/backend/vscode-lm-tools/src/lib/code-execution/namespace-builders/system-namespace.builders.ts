@@ -51,6 +51,7 @@ export const HELP_DOCS: Record<string, string> = {
 
 WORKSPACE: workspace, search, files, diagnostics
 ANALYSIS: context, project, relevance, ast, dependencies
+CODE: ptah.code.* (searchSymbols finds a function/class/method by name or meaning; grep searches file text; readSymbol reads one declaration; reindex, ensureIndexFresh) - start here to find code
 JSON: ptah.json.* (validate/repair JSON files)
 GIT: ptah.git.* (worktree operations)
 IDE: ptah.ide.* (lsp, editor, actions, testing) — host-dependent: full in VS Code; the desktop app has an LSP fallback for definitions/references; the CLI has no IDE host at all
@@ -60,11 +61,49 @@ MEMORY/CORPUS: ptah.memory.* (search/list memories), ptah.corpus.* (build/list/r
 HARNESS: ptah.harness.* (skill + MCP discovery, install, and proposeConfig)
 TASKS: ptah.tasks.* (task specs: create, update, get, paged list, check)
 CRON: ptah.cron.* (scheduled jobs: list, get, create, update, toggle, delete, runNow, runs, nextFire)
+SESSION: ptah.session.* (child sessions: start, send, status, read, stop, handoff)
+ROUTE: ptah.route.* (decide which agent or model should take a task)
+BROWSER: ptah.browser.* (navigate, evaluate, type, record in a browser page)
+SKILL: ptah.skill.* (list and describe promoted skills)
+WEBSEARCH: ptah.webSearch (grounded web search)
 SESSION ORGANIZATION: ptah.sessionOrganization.* (link the calling session to a task)
 DASHBOARD: ptah.dashboard.* (propose a declarative dashboard spec to the surface)
 SURFACE: ptah.surface.* (create, replace, patch, delete and read scoped surface state)
 
 Use ptah.help('namespace') for details on any namespace.`,
+
+  code: `ptah.code - Code Index and Code Search
+
+Find code without reading whole files. Also exposed as the MCP tools
+ptah_code_search_symbols, ptah_grep and ptah_read_symbol. The three calls below are the
+same implementations as those tools, scoped to the current workspace.
+
+- searchSymbols(query, { maxResults?, filePath? }) - Search indexed symbols (functions,
+    classes, methods, types) by name or meaning. Returns { index, coverage, hits }. Each
+    hit has name, file, lines, signature and an extract. Use it to find where a symbol is
+    defined: ptah.code.searchSymbols('clamp read tail').
+    A search can start a background reindex when the index is empty or stale.
+- grep({ pattern, path?, glob?, regex?, caseSensitive?, context?, maxMatches?,
+    includeIgnored?, inlineBody? }) - Search file text (strings, constants, comments, any
+    usage). Returns plain text: matches grouped by file, each with its line number and the
+    enclosing declaration in [brackets]. Literal unless the pattern has clear regex syntax
+    (pass regex:true or regex:false to force it); smart case. Skips ignored paths, binary
+    files and files over 1 MB. includeIgnored needs a scoped path, such as "node_modules/zod".
+- readSymbol({ file, name?, kind?, startLine?, endLine?, maxLines? }) - Read one declaration
+    by name ('Class.method' works), or a line range of any text file. Returns plain text with
+    line numbers. An ambiguous name lists the matches.
+- reindex({ filePath? }) - With filePath: reindex that file and wait. Without: start a full
+    background run.
+- ensureIndexFresh() - Read the index freshness; start a background reindex when stale.
+
+grep and readSymbol take no workspaceRoot (they run in the current workspace) and throw the
+tool's error text when a call fails.
+
+Example:
+  const hits = await ptah.code.searchSymbols('permission request handler');
+  const text = await ptah.code.readSymbol({ file: hits.hits[0].file, name: hits.hits[0].name });
+  const uses = await ptah.code.grep({ pattern: 'pendingPermissionCount', path: 'libs' });
+  return { text, uses };`,
 
   dashboard: `ptah.dashboard - Declarative dashboards
 
@@ -248,7 +287,10 @@ DISCOVERY:
     Smithery API key is configured). Returns { servers, count, status, sources,
     next_cursor? }. 'limit' bounds the MERGED list, drawn round-robin so neither
     source starves the other.
-- listInstalledMcpServers() - Servers already in .vscode/mcp.json and .mcp.json.
+- listInstalledMcpServers() - Servers in .vscode/mcp.json and .mcp.json, plus
+    those installed through Ptah (served by the gateway, in no config file).
+    Each row has { name, config, source, targets? }; source is the file or
+    'ptah-intent (global|workspace|main checkout)'.
 
 READING A SEARCH RESULT — three states, not two:
   status 'ok'       + empty list -> the catalogue genuinely has nothing.
@@ -284,8 +326,9 @@ HANDING BACK TO THE USER:
     enabledTools) is still refused — the container shape is negotiable, the
     key is not.
 
-- installMcpServer(serverName, config, serverKey?, targets?, scope?) - Writes a
-    transport config to the target files. Defaults to ['claude','vscode'] and
+- installMcpServer(serverName, config, serverKey?, targets?, scope?) - Records
+    the server for the targets; Ptah serves it through its own MCP server and
+    writes no config file. Defaults to ['claude','vscode'] and
     scope 'workspace'; scope 'user' installs for every workspace and is required
     for codex/copilot/antigravity. The result includes the scope.`,
 

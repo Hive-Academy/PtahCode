@@ -462,6 +462,8 @@ export {
   unverifiedCapabilityPolicy,
   withClaudeBuiltinSkillDenials,
 } from './lib/helpers/sdk-query-options-builder';
+// Strict MCP when the gateway serves `ptah` (TASK_2026_979 C11), shared with the Claude lanes.
+export { gatewayServesPtah } from './lib/helpers/gateway-session-wiring';
 // Claude built-ins Ptah turns off by default (TASK_2026_853, A-1), shared with
 // the Claude lanes and the settings RPC so all three apply ONE catalog.
 export {
@@ -505,7 +507,11 @@ export {
   resolveClaudeConfigDir,
   type SyncedClaudeSkill,
 } from './lib/helpers/synced-claude-skills.reader';
-export { redactMcpUrl, redactMcpOverrideMap } from './lib/helpers';
+export {
+  redactMcpUrl,
+  redactMcpOverrideMap,
+  redactMcpErrorText,
+} from './lib/helpers';
 export {
   TIER_ENV_VAR_MAP,
   TIER_METADATA_ENV_VAR_MAP,

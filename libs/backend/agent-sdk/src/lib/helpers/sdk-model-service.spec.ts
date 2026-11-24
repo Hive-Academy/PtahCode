@@ -175,6 +175,24 @@ function makeHarness(opts: {
   };
 }
 
+// The SDK bridge env is `{ ...process.env, ...authEnv }`, so an ANTHROPIC_*
+// value the shell exports reaches every spawn env these specs assert on. A
+// Ptah session exports `ANTHROPIC_BASE_URL=''` for a native Claude login, so
+// each spec starts with those keys removed and gets them back afterwards.
+let savedAnthropicEnv: Array<[string, string | undefined]> = [];
+beforeEach(() => {
+  savedAnthropicEnv = Object.keys(process.env)
+    .filter((key) => key.startsWith('ANTHROPIC_'))
+    .map((key) => [key, process.env[key]]);
+  for (const [key] of savedAnthropicEnv) delete process.env[key];
+});
+afterEach(() => {
+  for (const key of Object.keys(process.env)) {
+    if (key.startsWith('ANTHROPIC_')) delete process.env[key];
+  }
+  for (const [key, value] of savedAnthropicEnv) process.env[key] = value;
+});
+
 /** The list the SDK reports through a third-party translation proxy. */
 const SDK_LIST_VIA_PROXY: ModelInfo[] = [
   { value: 'default', displayName: 'Default (recommended)', description: '' },

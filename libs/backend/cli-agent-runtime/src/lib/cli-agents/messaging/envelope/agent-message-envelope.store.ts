@@ -33,6 +33,8 @@ const MAX_BODYLESS = 256;
 const MAX_BODYLESS_PER_AGENT = 64;
 /** States `markDispatching` may leave; anything else was decided elsewhere. */
 const DISPATCHABLE: readonly AgentMessageEnvelopeState[] = ['not-started', 'blocked-retryable'];
+/** States after which nothing more is delivered for an envelope on its own. */
+const TERMINAL = new Set<AgentMessageEnvelopeState>(['settled', 'cancelled', 'failed', 'expired']);
 const UNDELIVERED = new Set<AgentMessageEnvelopeState>([
   'not-started', 'dispatching', 'blocked-retryable', 'outcome-unknown', 'failed', 'expired',
 ]);
@@ -106,6 +108,7 @@ export class AgentMessageValidationError extends Error {
 export class AgentMessageEnvelopeStore {
   private readonly envelopes = new Map<string, AgentMessageEnvelope>();
   private chain: Promise<void> = Promise.resolve();
+  private terminalListener?: (envelope: AgentMessageEnvelope) => void;
   readonly ready: Promise<void>;
 
   constructor(
@@ -128,6 +131,15 @@ export class AgentMessageEnvelopeStore {
     logger?: Logger,
   ): AgentMessageEnvelopeStore {
     return new AgentMessageEnvelopeStore(storage, sink, Date.now, logger);
+  }
+
+  /**
+   * Called with every envelope that reaches a terminal state (settled,
+   * cancelled, failed, expired), including a send-time refusal. Used to
+   * release what the host holds beside the envelope (images). One listener.
+   */
+  setTerminalListener(listener: (envelope: AgentMessageEnvelope) => void): void {
+    this.terminalListener = listener;
   }
 
   async put(
@@ -254,9 +266,14 @@ export class AgentMessageEnvelopeStore {
     });
   }
 
+  /**
+   * Journal an attempt as `dispatching`. `marker` is written in the same
+   * record (the raw-delivery decision), so a storage failure leaves neither.
+   */
   async markDispatching(
     id: string,
     fromStates: readonly AgentMessageEnvelopeState[] = DISPATCHABLE,
+    marker: Pick<EnvelopePatch, 'rawDelivery'> = {},
   ): Promise<AgentMessageEnvelope> {
     await this.ready;
     return this.serialize(async () => {
@@ -276,6 +293,7 @@ export class AgentMessageEnvelopeStore {
         everDispatched: true,
         attemptCount: existing.attemptCount + 1,
         nextRetryAt: undefined,
+        ...(marker.rawDelivery ? { rawDelivery: marker.rawDelivery } : {}),
       }, fromStates, true);
       if (!next || next.state !== 'dispatching')
         throw new AgentMessageStorageError('storage-unavailable');
@@ -572,6 +590,13 @@ export class AgentMessageEnvelopeStore {
     } catch (error: unknown) {
       // Degradation: a push sink cannot reverse a durable envelope transition.
       this.logger?.error('[AgentMessageEnvelopeStore] Receipt sink failed', this.error(error));
+    }
+    if (!TERMINAL.has(envelope.state)) return;
+    try {
+      this.terminalListener?.(envelope);
+    } catch (error: unknown) {
+      // Degradation: a release hook cannot reverse a durable envelope transition.
+      this.logger?.error('[AgentMessageEnvelopeStore] Terminal listener failed', this.error(error));
     }
   }
 

@@ -137,13 +137,24 @@ function makeEnvironment(
 }
 
 describe('AgentSpawnEnvironment', () => {
-  it('spawns with plan permission when no lane policy row or permission was requested', () => {
+  it('spawns with yolo permission and network allowed when no lane policy row or permission was requested', () => {
     const { environment } = makeEnvironment();
     const manifest = PTAH_CLI_PERMISSION_CAPABILITIES as CliAdapterManifest;
     const adapter = { name: 'ptah-cli' as const, capabilities: () => manifest } as unknown as Parameters<typeof environment.resolveLanePolicy>[0];
 
     expect(environment.resolveLanePolicy(adapter, {})).toMatchObject({
-      requested: { permission: 'plan', network: 'allow', permissionSource: 'built-in' },
+      requested: { permission: 'yolo', network: 'allow', permissionSource: 'built-in', networkSource: 'built-in' },
+      permissionMode: 'bypassPermissions',
+    });
+  });
+
+  it('caps a ptah-cli lane to plan under a plan parent despite the yolo built-in default', () => {
+    const { environment } = makeEnvironment();
+    const manifest = PTAH_CLI_PERMISSION_CAPABILITIES as CliAdapterManifest;
+    const adapter = { name: 'ptah-cli' as const, capabilities: () => manifest } as unknown as Parameters<typeof environment.resolveLanePolicy>[0];
+
+    expect(environment.resolveLanePolicy(adapter, { parentLevel: 'plan' })).toMatchObject({
+      requested: { permission: 'plan', permissionSource: 'parent-plan' },
       permissionMode: 'plan',
     });
   });

@@ -24,9 +24,15 @@ import {
   type HostKind,
   type IWorkspaceProvider,
   type IMcpCallerCredentials,
+  type IMcpGateway,
 } from '@ptah-extension/platform-core';
 import { createCronApprovalGate } from '../permission/cron-approval-gate';
+import {
+  createSessionGatewayGate,
+  gatewayServesPtah,
+} from './gateway-session-wiring';
 import { MemoryPromptInjector } from './memory-prompt-injector';
+import { findDuplicateClaudeMdExcludes } from './claude-md-dedup';
 import { CodeSymbolPromptInjector } from './code-symbol-prompt-injector';
 import { redactMcpUrl, redactMcpOverrideMap } from './redact-mcp-url';
 import {
@@ -439,6 +445,7 @@ export function buildFlagSettings(
   autoCompact?: AutoCompactSettings,
   capabilityFlags?: Partial<SessionCapabilityFlags>,
   subagentPromptCacheTtl?: SubagentPromptCacheTtl,
+  claudeMdExcludes?: readonly string[],
 ): Settings {
   assertSingleOutputStylePath(sessionConfig);
   const styleName = sessionConfig?.outputStyleName?.trim();
@@ -455,7 +462,8 @@ export function buildFlagSettings(
     !styleName &&
     Object.keys(autoCompactKeys).length === 0 &&
     Object.keys(capabilityKeys).length === 0 &&
-    subagentPromptCacheTtl === undefined
+    subagentPromptCacheTtl === undefined &&
+    !claudeMdExcludes?.length
   ) {
     return PTAH_DISABLE_SDK_AUTO_MEMORY;
   }
@@ -465,6 +473,9 @@ export function buildFlagSettings(
     ...autoCompactKeys,
     ...capabilityKeys,
     ...(subagentPromptCacheTtl !== undefined ? { subagentPromptCacheTtl } : {}),
+    ...(claudeMdExcludes?.length
+      ? { claudeMdExcludes: [...claudeMdExcludes] }
+      : {}),
   };
 }
 
@@ -604,16 +615,24 @@ export function withClaudeBuiltinSkillDenials(
 }
 
 /**
- * The options that isolate a session whose policy could not be verified:
- * only the MCP servers passed in `mcpServers` load, and no skill is listed.
- * Empty for a verified policy, which is enforced through the flag tier.
+ * The options that isolate a session's MCP and skill sources.
+ *
+ * - Unverified policy: only the MCP servers passed in `mcpServers` load, and
+ *   no skill is listed (`skills: []`), whatever the gateway does.
+ * - Verified policy with `ptah` served by the MCP gateway (C11): strict MCP,
+ *   so `ptah` is the only MCP source and the CLI does not also load its own
+ *   copies of the servers the gateway serves. Skills stay on the flag tier.
+ * - Verified policy without the gateway: empty, today's behaviour.
+ *
+ * Callers spread this before any narrower option (the `'none'` one-shot), and
+ * nothing spread after it sets `strictMcpConfig: false`.
  */
 export function capabilityIsolationOptions(
   policy: EffectiveCapabilitySet,
+  servedByGateway: boolean,
 ): Pick<Options, 'strictMcpConfig' | 'skills'> {
-  return policy.status === 'verified'
-    ? {}
-    : { strictMcpConfig: true, skills: [] };
+  if (policy.status !== 'verified') return { strictMcpConfig: true, skills: [] };
+  return servedByGateway ? { strictMcpConfig: true } : {};
 }
 
 /**
@@ -771,12 +790,14 @@ export function buildFlagSettingsArg(
   autoCompact?: AutoCompactSettings,
   capabilityFlags?: Partial<SessionCapabilityFlags>,
   subagentPromptCacheTtl?: SubagentPromptCacheTtl,
+  claudeMdExcludes?: readonly string[],
 ): string {
   const settings = buildFlagSettings(
     sessionConfig,
     autoCompact,
     capabilityFlags,
     subagentPromptCacheTtl,
+    claudeMdExcludes,
   );
   if (crossSessionInbound === undefined) {
     return JSON.stringify(settings);
@@ -1243,6 +1264,8 @@ export class SdkQueryOptionsBuilder {
     private readonly hostKind?: HostKind,
     @inject(PLATFORM_TOKENS.MCP_CALLER_CREDENTIALS, { isOptional: true })
     private readonly mcpCallerCredentials?: IMcpCallerCredentials,
+    @inject(PLATFORM_TOKENS.MCP_GATEWAY, { isOptional: true })
+    private readonly mcpGateway?: IMcpGateway,
   ) {}
 
   /**
@@ -1408,7 +1431,15 @@ export class SdkQueryOptionsBuilder {
           },
         ),
     });
-    const canUseToolCallback: CanUseTool = cronApprovalGate.canUseTool;
+    // Gateway tools are asked ahead of allow rules too; the gate wraps the cron gate.
+    const gatewayGate = createSessionGatewayGate(
+      this.mcpGateway,
+      heldPermissionCallback,
+      cronApprovalGate.canUseTool,
+      this.logger,
+    );
+    const canUseToolCallback: CanUseTool =
+      gatewayGate?.canUseTool ?? cronApprovalGate.canUseTool;
     const hooks = this.createHooks(
       cwd,
       sessionId,
@@ -1513,6 +1544,7 @@ export class SdkQueryOptionsBuilder {
     hooks.PreToolUse = [
       { matcher: 'SendMessage', hooks: [budgetMessageGate] },
       { hooks: [pausedToolGate] },
+      ...(gatewayGate ? [gatewayGate.hookMatcher] : []),
       cronApprovalGate.hookMatcher,
       ...(hooks.PreToolUse ?? []),
     ];
@@ -1641,6 +1673,20 @@ export class SdkQueryOptionsBuilder {
     const claudeConfigDir = resolveClaudeConfigDir(
       named ? [named.launch.env] : [effectiveAuthEnv, process.env],
     );
+    // Exact repeats of a nearer CLAUDE.md (a workspace nested in a copy of
+    // its own checkout) would be sent on every turn. The flag tier unions
+    // with the user's own `claudeMdExcludes`. The helper excludes nothing
+    // unless the kept copy is sure to load (see its doc).
+    const claudeMdExcludes = await findDuplicateClaudeMdExcludes(cwd, {
+      settingSources,
+      claudeConfigDir,
+    });
+    if (claudeMdExcludes.length > 0) {
+      this.logger.info(
+        '[SdkQueryOptionsBuilder] Excluding repeated CLAUDE.md copies',
+        { cwd, claudeMdExcludes },
+      );
+    }
     // Only the verified path emits skill denials, so only it pays for the
     // synced read and the same-name discovery. claude.ai account-synced
     // skills are denied by their qualified `anthropic-skills:<name>` key,
@@ -1754,13 +1800,19 @@ export class SdkQueryOptionsBuilder {
           autoCompact,
           capabilityFlags,
           subagentTtl.sdkValue,
+          claudeMdExcludes,
         ),
         tools: sessionTools,
         // Applies on the verified and the unverified path alike, and on every
         // route: it is an SDK option, not a setting source.
         disallowedTools,
         mcpServers: configuredMcpServers,
-        ...capabilityIsolationOptions(policy),
+        // Strict MCP when the gateway serves `ptah` here (C11): `ptah` is
+        // then the only MCP source, so no native copy duplicates a served one.
+        ...capabilityIsolationOptions(
+          policy,
+          gatewayServesPtah(this.mcpGateway, configuredMcpServers),
+        ),
         permissionMode,
         allowDangerouslySkipPermissions: permissionMode === 'bypassPermissions',
         canUseTool: canUseToolCallback,
@@ -2435,6 +2487,8 @@ export class SdkQueryOptionsBuilder {
         // of `SdkPermissionHandler` runs in `canUseTool` and, ahead of SDK
         // allow rules, in `PreToolUse` (permission/cron-approval-gate.ts).
         cronWriteApproval: true,
+        // A bound gateway means the gateway gate is installed (see above).
+        ...(this.mcpGateway ? { gatewayApproval: true } : {}),
       },
       subject,
       INTERACTIVE_MCP_CREDENTIAL_MAX_AGE_MS,

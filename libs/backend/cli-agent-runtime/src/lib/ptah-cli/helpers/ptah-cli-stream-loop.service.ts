@@ -41,6 +41,7 @@ import {
   claudeModelFamily,
   mapClaudePlanLimitMessage,
   type ClaudeTurnBilling,
+  type SDKAssistantMessage,
   type SDKMessage,
   type SDKResultSuccess,
   type SessionPlanLimitSignal,
@@ -221,6 +222,19 @@ export interface PtahCliStreamLoopConfig {
   readonly onSessionResolved?: (sessionId: string) => void;
   readonly onTurnComplete?: (exitCode: number) => void;
   /**
+   * Called on every result frame, before its exit code is chosen. Returns
+   * `interrupted: true` only when this result ends a turn the host
+   * interrupted: an `error_during_execution` result then exits 0 with an
+   * info segment instead of an error.
+   */
+  readonly onTurnResult?: (result: PtahCliTurnResult) => { readonly interrupted: boolean };
+  /**
+   * Called when the main thread starts its first tool call without a result
+   * (`true`) and when the last one gets its result or the turn ends
+   * (`false`). A steer folds in only at such a tool boundary (B6).
+   */
+  readonly onToolInFlightChange?: (inFlight: boolean) => void;
+  /**
    * Receives the lane's plan-limit evidence (`rate_limit_event`, rate-limit
    * `api_retry`, assistant `rate_limit` error) and one `success` per
    * successful turn. Called synchronously on the stream path; it must not
@@ -234,6 +248,21 @@ export interface PtahCliStreamLoopConfig {
    * as for a native session (Decision 4 S1).
    */
   readonly planBilledSuccess?: boolean;
+}
+
+/** What a result frame tells the lane runner about the turn it ends. */
+export interface PtahCliTurnResult {
+  readonly subtype: string;
+  /** Client uuids of every user message this turn consumed (absent from older CLIs). */
+  readonly userMessageUuids?: readonly string[];
+}
+
+/** One assistant message's usage counters, as emitted so far this turn. */
+interface MessageUsageCounters {
+  readonly inputTokens: number;
+  readonly outputTokens: number;
+  readonly cacheReadTokens: number;
+  readonly cacheWriteTokens: number;
 }
 
 /** Aggregate display ID; pricing uses the billed models in `usage.models`. */
@@ -267,6 +296,15 @@ export class PtahCliStreamLoop {
   private readonly emittedMessageIds = new Set<string>();
   /** Track toolCallIds already emitted via stream_event to avoid duplicate tool_start from assistant */
   private readonly emittedToolCallIds = new Set<string>();
+  /**
+   * Usage already emitted this turn, per assistant message id. The SDK sends
+   * one assistant frame per content block, each repeating the message's usage
+   * so far (A2); an early frame's `output_tokens` can be a streaming
+   * placeholder. Each frame adds only what grew since the last one (m1).
+   */
+  private readonly usageMessageIds = new Map<string, MessageUsageCounters>();
+  /** Main-thread tool call ids that have no `tool_result` yet. */
+  private readonly toolsInFlight = new Set<string>();
   private turnModelDeltas: Array<{ modelId: string; inputTokens: number; outputTokens: number; cacheReadTokens: number; cacheWriteTokens: number }> = [];
   /**
    * Previous cumulative SDK modelUsage snapshot per model, used to emit one
@@ -502,6 +540,7 @@ export class PtahCliStreamLoop {
             if (isContentBlockStart(event)) {
               const block = event.content_block;
               if (isToolUseBlock(block)) {
+                if (!msg.parent_tool_use_id) this.markToolStarted(block.id);
                 const key = this.toolBlockKey(
                   msg.parent_tool_use_id,
                   event.index,
@@ -547,6 +586,7 @@ export class PtahCliStreamLoop {
           }
           if (isAssistantMessage(msg)) {
             this.flushPendingToolCalls(msg.parent_tool_use_id ?? null);
+            this.emitMessageUsage(msg);
             const blocks = msg.message?.content;
             if (Array.isArray(blocks)) {
               for (const block of blocks) {
@@ -556,6 +596,7 @@ export class PtahCliStreamLoop {
                     emitSegment({ type: 'text', content: block.text });
                   }
                 } else if (isToolUseBlock(block)) {
+                  if (!msg.parent_tool_use_id) this.markToolStarted(block.id);
                   if (!this.emittedToolSegments.has(block.id)) {
                     const argsStr = summarizeToolInput(block.input);
                     emitOutput(
@@ -592,6 +633,7 @@ export class PtahCliStreamLoop {
             if (Array.isArray(content)) {
               for (const block of content) {
                 if (block.type === 'tool_result') {
+                  this.markToolFinished(block.tool_use_id);
                   const resultText =
                     typeof block.content === 'string'
                       ? block.content
@@ -633,7 +675,12 @@ export class PtahCliStreamLoop {
           }
           if (isResultMessage(msg)) {
             this.flushPendingToolCalls();
+            this.clearToolsInFlight();
             let turnExitCode = 0;
+            const interrupted = this.config.onTurnResult?.({
+              subtype: msg.subtype,
+              ...(msg.user_message_uuids && { userMessageUuids: msg.user_message_uuids }),
+            }).interrupted === true && msg.subtype === 'error_during_execution';
             if (isSuccessResult(msg)) {
               const parts: string[] = [];
               if (msg.usage) {
@@ -670,7 +717,7 @@ export class PtahCliStreamLoop {
               emitSegment({
                 type: 'info',
                 content: usageStr,
-                ...(usage && { usage }),
+                ...(usage && { usage, usageScope: 'turn' as const }),
                 ...(attachTelemetry && { turnTelemetry }),
               });
               if (!attachTelemetry)
@@ -685,6 +732,9 @@ export class PtahCliStreamLoop {
                   content: PTAH_API_RATE_LIMIT_SEGMENT,
                 });
               }
+            } else if (isErrorResult(msg) && interrupted) {
+              emitOutput('\n[Turn interrupted]\n');
+              emitSegment({ type: 'info', content: 'Turn interrupted.' });
             } else if (isErrorResult(msg)) {
               turnExitCode = 1;
               const errorMsg =
@@ -700,6 +750,7 @@ export class PtahCliStreamLoop {
             this.turnEventCount = 0;
             this.resetTurnPlanLimits();
             this.emittedToolSegments.clear();
+            this.usageMessageIds.clear();
             this.config.onTurnComplete?.(turnExitCode);
             continue;
           }
@@ -745,7 +796,77 @@ export class PtahCliStreamLoop {
       this.emittedToolSegments.clear();
       this.emittedMessageIds.clear();
       this.emittedToolCallIds.clear();
+      this.usageMessageIds.clear();
+      this.clearToolsInFlight();
     }
+  }
+
+  private markToolStarted(id: string): void {
+    if (!id || this.toolsInFlight.has(id)) return;
+    this.toolsInFlight.add(id);
+    if (this.toolsInFlight.size === 1) this.config.onToolInFlightChange?.(true);
+  }
+
+  private markToolFinished(id: string): void {
+    if (!this.toolsInFlight.delete(id)) return;
+    if (this.toolsInFlight.size === 0) this.config.onToolInFlightChange?.(false);
+  }
+
+  private clearToolsInFlight(): void {
+    if (this.toolsInFlight.size === 0) return;
+    this.toolsInFlight.clear();
+    this.config.onToolInFlightChange?.(false);
+  }
+
+  /**
+   * Live usage (B5): each assistant message's own usage as `message`-scoped
+   * increments, per `message.id` only what grew since its previous frame
+   * (m1). The result's `turn` segment later
+   * corrects the running sum to the provider's turn total.
+   */
+  private emitMessageUsage(msg: SDKAssistantMessage): void {
+    const id = msg.message?.id;
+    const usage = msg.message?.usage;
+    if (!id || !usage) return;
+    const current: MessageUsageCounters = {
+      inputTokens: usage.input_tokens ?? 0,
+      outputTokens: usage.output_tokens ?? 0,
+      cacheReadTokens: usage.cache_read_input_tokens ?? 0,
+      cacheWriteTokens: usage.cache_creation_input_tokens ?? 0,
+    };
+    const previous = this.usageMessageIds.get(id);
+    // Only growth counts: a later frame with a smaller counter adds nothing.
+    const grown = (key: keyof MessageUsageCounters): number =>
+      Math.max(0, current[key] - (previous?.[key] ?? 0));
+    const delta: MessageUsageCounters = {
+      inputTokens: grown('inputTokens'),
+      outputTokens: grown('outputTokens'),
+      cacheReadTokens: grown('cacheReadTokens'),
+      cacheWriteTokens: grown('cacheWriteTokens'),
+    };
+    if (previous && Object.values(delta).every((value) => value === 0)) return;
+    this.usageMessageIds.set(id, {
+      inputTokens: (previous?.inputTokens ?? 0) + delta.inputTokens,
+      outputTokens: (previous?.outputTokens ?? 0) + delta.outputTokens,
+      cacheReadTokens: (previous?.cacheReadTokens ?? 0) + delta.cacheReadTokens,
+      cacheWriteTokens: (previous?.cacheWriteTokens ?? 0) + delta.cacheWriteTokens,
+    });
+    this.config.emitSegment({
+      type: 'info',
+      content: 'Claude message usage.',
+      usageScope: 'message',
+      usage: {
+        inputTokens: delta.inputTokens,
+        outputTokens: delta.outputTokens,
+        ...(typeof usage.cache_read_input_tokens === 'number' && {
+          cacheReadTokens: delta.cacheReadTokens,
+        }),
+        ...(typeof usage.cache_creation_input_tokens === 'number' && {
+          cacheWriteTokens: delta.cacheWriteTokens,
+        }),
+        ...(msg.message.model && { model: msg.message.model }),
+      },
+    });
   }
 
   /**

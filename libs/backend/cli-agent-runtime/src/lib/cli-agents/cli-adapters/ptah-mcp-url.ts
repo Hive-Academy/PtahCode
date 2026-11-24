@@ -10,12 +10,11 @@
  *
  * The segment is the same mechanism as the `/session/{id}` segment Ptah's own
  * SDK sessions send, and is parsed beside it in `vscode-lm-tools`'
- * `http-server.handler.ts`. The file-writer twin — for the persistent entries
- * in `.mcp.json` and the rival CLIs' config files — is `ptahMcpUrl` in
- * `vscode-lm-tools/.../mcp-http/ptah-mcp-slots.ts`. The session-segment
- * builder is `ptahMcpSessionUrl` in `@ptah-extension/codex-runtime`
- * (`src/lib/codex-ptah-mcp.ts`). The three must produce the same workspace
- * grammar; each names the others so a change to one finds all three.
+ * `http-server.handler.ts`. The session-segment twin is `ptahMcpSessionUrl`
+ * in `@ptah-extension/codex-runtime` (`src/lib/codex-ptah-mcp.ts`). The two
+ * must produce the same workspace grammar; each names the other so a change
+ * to one finds both. (A third, file-writer twin went with the persistent
+ * `.mcp.json` entries in TASK_2026_979: Ptah writes no MCP config file.)
  *
  * `encodeURIComponent`, never hand-rolled escaping: a Windows root carries a
  * colon and backslashes, and the encoding turns every `/` in the directory

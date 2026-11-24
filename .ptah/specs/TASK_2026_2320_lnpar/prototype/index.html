@@ -1,0 +1,633 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="ptah-glass" data-theme-mode="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Prototype - TASK_2026_2320 lane composer</title>
+<!-- assets/app.css is generated from the webview's own styles.css entry and tailwind.config.js, scanning this file. See README. -->
+<link href="assets/app.css" rel="stylesheet" type="text/css" />
+<style>
+  /* Prototype-only chrome (not part of the design). Everything inside .lc is the specified design. */
+  body { font-family: Inter, system-ui, sans-serif; }
+  .frame { border: 1px dashed var(--surface-border-strong); border-radius: 12px; padding: 10px; background: oklch(var(--b1)); }
+  .frame-title { font-size: 11px; letter-spacing: .04em; text-transform: uppercase; }
+  /* Same container query contract as chat-input.component.css (639px / 400px). */
+  .lc { container-type: inline-size; container-name: ptah-composer; }
+  @container ptah-composer (max-width: 639px) { .lc-effort-label { display: none; } }
+  @container ptah-composer (max-width: 400px) {
+    .lc-label { display: none; }
+    .lc-toolbar { flex-wrap: wrap; }
+    .lc-toolbar-start { flex-basis: auto; }
+    .lc-toolbar-end { margin-left: auto; }
+    .lc-status-long { display: none; }
+  }
+  .lc-card.sim-focus { border-color: var(--surface-border-strong); }
+  .sim-ring { outline: 2px solid oklch(var(--s)); outline-offset: 2px; }
+  .lc-ctl[aria-disabled='true'] { cursor: not-allowed; border: 1px dashed var(--surface-border-strong); }
+  .lc-ctl[aria-disabled='true']:hover { background: transparent; color: inherit; }
+  @keyframes lc-flash { from { background: oklch(var(--p) / .28); } to { background: transparent; } }
+  .flash { animation: lc-flash 900ms ease-out; border-radius: 6px; }
+  @media (prefers-reduced-motion: reduce) { .flash { animation: none; } }
+  .sr-desc { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  textarea.lc-ta { field-sizing: content; }
+</style>
+</head>
+<body class="bg-base-100 text-base-content min-h-screen">
+
+<header class="sticky top-0 z-40 bg-base-200 border-b border-base-300 px-3 py-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs">
+  <label class="flex items-center gap-1">Theme
+    <select id="themeSel" class="select select-xs select-bordered">
+      <option value="ptah-glass|dark">Ptah Glass (dark)</option>
+      <option value="ptah-glass-light|light">Ptah Glass (light)</option>
+      <option value="anubis|dark">Anubis (dark)</option>
+      <option value="anubis-light|light">Anubis (light)</option>
+    </select></label>
+  <label class="flex items-center gap-1">Lane
+    <select id="laneSel" class="select select-xs select-bordered"></select></label>
+  <label class="flex items-center gap-1">State
+    <select id="stateSel" class="select select-xs select-bordered">
+      <option value="idle">Idle, ready</option>
+      <option value="focus">Focus (textarea + control)</option>
+      <option value="typing">Typing a draft</option>
+      <option value="running">Turn running</option>
+      <option value="compact">Turn running, composer folded to its bar</option>
+      <option value="queued">Running, 2 queued (folded bar)</option>
+      <option value="modelchg">Model changed, waiting for next turn</option>
+      <option value="sending">Sending</option>
+      <option value="loss">Send now: loss confirmation</option>
+      <option value="refused">Error: provider refused model change</option>
+      <option value="image">Image on a lane without image input</option>
+      <option value="stopped">Stopped: resume with message</option>
+      <option value="checking">Loading: checking lane options</option>
+      <option value="capfail">Error: capability query failed</option>
+    </select></label>
+  <label class="flex items-center gap-1">Mounts
+    <select id="mountSel" class="select select-xs select-bordered">
+      <option value="all">All three + main chat</option>
+      <option value="canvas">Canvas lane (720)</option>
+      <option value="card">Agent card (400)</option>
+      <option value="inspector">Inspector row (320)</option>
+    </select></label>
+  <button id="usageBtn" class="btn btn-xs btn-outline" data-ptah-button>Simulate usage event</button>
+  <nav class="ml-auto flex flex-wrap gap-1" aria-label="Prototype sections">
+    <button class="btn btn-xs btn-ghost" data-ptah-button data-tab="composer" aria-pressed="true">Composer</button>
+    <button class="btn btn-xs btn-ghost" data-ptah-button data-tab="matrix">Capability matrix</button>
+    <button class="btn btn-xs btn-ghost" data-ptah-button data-tab="prompts">Prompts &amp; usage</button>
+  </nav>
+</header>
+
+<main class="p-4 space-y-4">
+  <section id="tab-composer" data-section>
+    <p class="text-xs text-base-content-muted mb-3 max-w-3xl">The same composer renders in every frame. Try: type text, press Enter (queues while a turn runs), Ctrl+Enter (Send now), type <code>/</code> or <code>@</code>, open Model / Effort / Attach. While a turn runs and the composer is idle it folds to its bar; click the bar or just start typing. Disabled controls stay focusable and show their reason below the card.</p>
+    <div id="frames" class="flex flex-wrap items-start gap-4"></div>
+    <div id="sessMain" class="mt-4 max-w-sm"></div>
+  </section>
+  <section id="tab-matrix" data-section hidden></section>
+  <section id="tab-prompts" data-section hidden></section>
+</main>
+
+<script>
+/* ---------- icons (lucide paths, 24px) ---------- */
+const P = {
+  plus:'<path d="M5 12h14"/><path d="M12 5v14"/>',
+  up:'<path d="m5 12 7-7 7 7"/><path d="M12 19V5"/>',
+  down:'<path d="m6 9 6 6 6-6"/>',
+  square:'<rect width="18" height="18" x="3" y="3" rx="2"/>',
+  mic:'<path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><path d="M12 19v3"/>',
+  clip:'<path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/>',
+  image:'<rect width="18" height="18" x="3" y="3" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/>',
+  clock:'<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>',
+  box:'<path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/>',
+  gauge:'<path d="m12 14 4-4"/><path d="M3.34 19a10 10 0 1 1 17.32 0"/>',
+  shield:'<path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/><path d="M12 8v4"/><path d="M12 16h.01"/>',
+  help:'<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>',
+  info:'<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
+  check:'<path d="M20 6 9 17l-5-5"/>',
+  x:'<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+  pencil:'<path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>',
+  play:'<polygon points="6 3 20 12 6 21 6 3"/>',
+  chevUp:'<path d="m18 15-6-6-6 6"/>',
+  warn:'<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+};
+const ic = (n, c = 'w-4 h-4') => `<svg class="${c} flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[n]}</svg>`;
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+/* ---------- capability statements (illustrative; derived from research-report.md) ----------
+   ok:true => enabled. why => the backend reason string shown when unsupported.        */
+const Y = { ok: true };
+const N = why => ({ ok: false, why });
+/* cmd / skills are separate: a lane can take skills but no slash commands. Reason strings are backend-owned placeholders. */
+const noCmd = c => N(`No slash commands in ${c} lanes.`);
+const noSkill = c => N(`No skills in ${c} lanes.`);
+/* approvalLabel = the lane's EFFECTIVE permission mode, shown on the disabled chip (never "Ask" on a lane that does not ask). */
+const STEER_TOOL = 'joins the running turn at its next tool call, or starts the next turn if this one ends first';
+const LANES = {
+  main:   { name:'Main chat', cli:'Claude', steer:{ok:true,unproven:true}, interrupt:Y, model:{ok:true,when:'turn'}, effort:{ok:true,when:'turn'}, images:Y, files:{ok:true,as:'ref'}, cmd:Y, skills:Y, usage:'live', approval:Y, approvalLabel:'Ask', models:['opus','sonnet','haiku'], efforts:['Default','Low','Medium','High'] },
+  claude: { name:'Claude SDK lane', cli:'Claude', steer:{ok:true,unproven:true,how:STEER_TOOL}, interrupt:Y, model:{ok:true,when:'turn'}, effort:{ok:true,when:'turn'}, images:Y, files:{ok:true,as:'ref'}, cmd:Y, skills:Y, usage:'live', approval:Y, approvalLabel:'Ask', models:['opus','sonnet','haiku'], efforts:['Default','Low','Medium','High'] },
+  claudesteer: { name:'Claude SDK lane (steer, after fixture)', cli:'Claude', steer:{ok:true,how:STEER_TOOL}, interrupt:Y, model:{ok:true,when:'turn'}, effort:{ok:true,when:'turn'}, images:Y, files:{ok:true,as:'ref'}, cmd:Y, skills:Y, usage:'live', approval:Y, approvalLabel:'Ask', models:['opus','sonnet','haiku'], efforts:['Default','Low','Medium','High'] },
+  codex:  { name:'Codex lane', cli:'Codex', steer:Y, interrupt:Y, model:{ok:true,when:'turn'}, effort:{ok:true,when:'turn'}, images:Y, files:{ok:true,as:'ref'}, cmd:noCmd('Codex'), skills:Y, usage:'live', approval:N('The Codex lane runs with approvals off, so it never asks. Set at spawn.'), approvalLabel:'Auto', models:['codex-large','codex-mini'], efforts:['Low','Medium','High'] },
+  pi:     { name:'Pi lane', cli:'Pi', steer:Y, interrupt:N('Pi has no abort that keeps its agent alive.'), model:{ok:true,when:'turn'}, effort:{ok:true,when:'turn'}, images:Y, files:{ok:true,as:'path'}, cmd:noCmd('Pi'), skills:noSkill('Pi'), usage:'live', approval:N('Pi has no tool approval prompts.'), approvalLabel:'Auto', models:['pi-model-a','pi-model-b'], efforts:['Off','Low','High'] },
+  cursor: { name:'Cursor lane', cli:'Cursor', steer:N('Cursor has no live steer channel.'), interrupt:Y, model:{ok:true,when:'turn'}, effort:{ok:true,when:'turn'}, images:Y, files:{ok:true,as:'path'}, cmd:noCmd('Cursor'), skills:Y, usage:'turn-end', usageWhy:'Cursor reports usage once, when the turn ends.', approval:N('The Cursor SDK exposes no approval prompts.'), approvalLabel:'Auto', models:['cursor-auto','cursor-max'], efforts:['Default','High'] },
+  copilot:{ name:'Copilot lane', cli:'Copilot', steer:N('Copilot starts a new process for every turn.'), interrupt:N('Copilot starts a new process for every turn.'), model:{ok:true,when:'spawn'}, effort:{ok:true,when:'spawn'}, images:N('Image input is not confirmed for the Copilot lane.'), files:{ok:true,as:'path'}, cmd:noCmd('Copilot'), skills:Y, usage:'live', approval:N('The Copilot lane runs with all tools allowed.'), approvalLabel:'Auto', models:['copilot-a','copilot-b'], efforts:['Low','Medium','High'] },
+  opencode:{ name:'OpenCode lane', cli:'OpenCode', steer:N('OpenCode resumes on the next turn.'), interrupt:N('OpenCode ends its process after each turn.'), model:{ok:true,when:'spawn'}, effort:{ok:true,when:'spawn'}, images:N('Image input is not confirmed for the OpenCode lane.'), files:{ok:true,as:'ref'}, cmd:noCmd('OpenCode'), skills:noSkill('OpenCode'), usage:'live', approval:N('OpenCode lanes cannot ask before running a tool.'), approvalLabel:'Auto', models:['oc-model-a','oc-model-b'], efforts:['Default','High'] },
+  grok:   { name:'Grok ACP lane', cli:'Grok', steer:N('Grok queues a message sent during a turn for the next turn.'), interrupt:Y, model:{ok:true,when:'turn'}, effort:{ok:true,when:'turn'}, images:{ok:true,cond:'Only when the agent reports image input.'}, files:{ok:true,as:'ref'}, cmd:noCmd('Grok'), skills:noSkill('Grok'), usage:'live', approval:N('Approval prompts are not enabled for Grok lanes yet.'), approvalLabel:'Auto', models:['grok-a','grok-b'], efforts:['Low','High'] },
+  agyacp: { name:'Antigravity (ACP) lane', cli:'Antigravity', steer:N('Antigravity queues a message sent during a turn for the next turn.'), interrupt:Y, model:{ok:true,when:'turn'}, effort:{ok:true,when:'turn'}, images:{ok:true,cond:'Only when the agent reports image input.'}, files:{ok:true,as:'ref'}, cmd:noCmd('Antigravity'), skills:Y, usage:'live', approval:N('Approval prompts are not enabled for Antigravity lanes yet.'), approvalLabel:'Auto', models:['agy-acp-a','agy-acp-b'], efforts:['Low','High'] },
+  agy:    { name:'Antigravity (stream-json) lane', cli:'Antigravity', steer:N('This transport has no verified mid-turn steer.'), interrupt:N('This transport cannot end a turn and keep the session.'), model:{ok:true,when:'process'}, effort:{ok:true,when:'process'}, images:N('Image input is not confirmed for this transport.'), files:{ok:true,as:'path'}, cmd:noCmd('Antigravity'), skills:Y, usage:'live', approval:N('This transport skips permission prompts.'), approvalLabel:'Auto', models:['agy-a','agy-b'], efforts:['Default','High'] },
+};
+/* Send now mode: steer only when proven (Req 2.5); else interrupt; else none. */
+const nowMode = l => (l.steer.ok && !l.steer.unproven) ? 'steer' : l.interrupt.ok ? 'interrupt' : 'none';
+const nowLabel = l => nowMode(l) === 'steer' ? 'Send now' : 'Interrupt & send';
+const nowWhy = l => nowMode(l) === 'none' ? (l.steer.why || l.interrupt.why) : '';
+const steerNote = l => l.steer.how ? `Sent. It ${l.steer.how}.` : 'Sent. It joined the running turn.';
+const whenCopy = (l, cap) => cap.when === 'turn' ? 'Applies from your next message. The lane keeps running.' : cap.when === 'spawn' ? `${l.cli} starts a new process each turn: applies when the next turn starts.` : `${l.cli} applies this when the lane next starts its process.`;
+const whenShort = cap => cap.when === 'turn' ? 'Next turn' : cap.when === 'spawn' ? 'Next spawn' : 'Next process start';
+const SLASH_CMDS = [['/compact','Summarise the conversation'],['/review','Review the working tree']];
+const SLASH_SKILLS = [['/skill: refactor','Skill from this workspace']];
+const FILES = ['src/app/lane/lane-view.ts','src/app/lane/lane.store.ts','docs/design-system/README.md'];
+const SAMPLE_IMG = 'screenshot.png';
+const usage = { tokens: {}, partial: false };
+Object.keys(LANES).forEach((k, i) => usage.tokens[k] = 18240 + i * 3100);
+usage.sessIn = 61400; usage.sessOut = 12900;
+
+/* ---------- composer instance ---------- */
+const instances = [];
+let nextId = 0;
+function mk(mount, laneKey) {
+  const inst = { id: ++nextId, mount, laneKey, status: 'idle', draft: '', attachments: [], queued: [], menu: null, confirm: false, sending: false,
+    error: null, note: null, reason: null, model: 0, effort: 0, confirmed: 0, expanded: false, confirmQ: null, justConfirmed: false, approval: 'ask', suggest: null, simFocus: false, simRing: null, delivered: null };
+  instances.push(inst);
+  return inst;
+}
+const L = i => LANES[i.laneKey];
+const mainMode = i => i.mount === 'main';
+
+function modeHint(i) {
+  const l = L(i), m = nowMode(l);
+  if (i.status === 'stopped' && !mainMode(i)) return 'Resume path: saved conversation · ~/.ptah/lanes/7f3a…/session.jsonl';
+  if (i.status !== 'running') return 'Enter sends · Shift+Enter adds a line · Ctrl+Enter sends now';
+  const now = m === 'steer' ? `Send now: ${l.steer.how || 'joins the running turn'}` : m === 'interrupt' ? 'Interrupt & send: ends this turn, keeps the session' : `Send now unavailable: ${nowWhy(l)}`;
+  return `Enter queues for the next turn · ${now}`;
+}
+/* The composer folds into its one-row bar only while the turn streams and the composer is idle (ComposerCompactStore). */
+const isCompactBar = i => i.status === 'running' && !i.draft && !i.attachments.length && !i.menu && !i.suggest && !i.expanded && !i.confirm && !i.sending;
+function limited(i) {
+  const l = L(i), out = [];
+  if (!l.model.ok) out.push(['Model', l.model.why]);
+  if (!l.effort.ok) out.push(['Effort', l.effort.why]);
+  if (!l.approval.ok) out.push(['Approval', l.approval.why]);
+  if (i.status === 'running' && nowMode(l) === 'none') out.push(['Send now', nowWhy(l)]);
+  return out;
+}
+const imageBlocked = i => !mainMode(i) && !L(i).images.ok && i.attachments.some(a => a.kind === 'image');
+
+/* disabled-with-reason control wrapper attrs */
+function gate(i, key, cap) {
+  const checking = i.status === 'checking' || i.status === 'capfail';
+  if (checking) return { off: true, why: i.status === 'checking' ? 'Checking lane options…' : 'Lane options could not be loaded. Use Retry.' };
+  if (!cap.ok) return { off: true, why: cap.why };
+  return { off: false };
+}
+function ctlAttrs(i, key, g, label) {
+  if (!g.off) return `aria-label="${label}" data-act="${key}"`;
+  return `aria-label="${label}" aria-disabled="true" aria-describedby="r-${i.id}-${key}" title="${esc(g.why)}" data-act="reason" data-key="${key}"`;
+}
+
+function render(i) {
+  const el = document.getElementById('lc-' + i.id);
+  if (!el) return;
+  const hadFocus = document.activeElement && document.activeElement.id === 'ta-' + i.id;
+  const ae = document.activeElement && el.contains(document.activeElement) ? document.activeElement : null;
+  const refocus = ae && ae.dataset && ae.dataset.act ? `[data-act="${ae.dataset.act}"]` + (ae.dataset.key ? `[data-key="${ae.dataset.key}"]` : '') : null;
+  const l = L(i), main = mainMode(i), folded = isCompactBar(i);
+  const running = i.status === 'running';
+  const stopped = i.status === 'stopped';
+  const ph = stopped ? `Resume ${l.name} with a message…` : main ? 'Ask the orchestrator to plan, build or review...' : `Message ${l.name}...`;
+
+  const gm = gate(i, 'model', l.model), ge = gate(i, 'effort', l.effort), ga = gate(i, 'approval', l.approval);
+  const blocked = imageBlocked(i);
+  const sendOff = (!i.draft.trim() && !i.attachments.length) || i.sending || blocked || i.status === 'checking' || i.status === 'capfail';
+  const sendWhy = blocked ? `${l.cli} lanes cannot take images. Remove the image to send.` : i.status === 'checking' ? 'Checking lane options…' : i.status === 'capfail' ? 'Lane options could not be loaded.' : 'Send message';
+
+  /* tray */
+  const tray = i.attachments.length ? `<div class="flex flex-wrap gap-1.5 px-3 pt-2.5">${i.attachments.map((a, n) => {
+    const bad = a.kind === 'image' && !main && !l.images.ok;
+    return `<span class="inline-flex items-center gap-1.5 rounded-md border ${bad ? 'border-warning' : 'border-surface-border'} bg-surface-2 pl-1.5 pr-1 py-1 text-[11px]">
+      ${ic(a.kind === 'image' ? 'image' : 'clip', 'w-3.5 h-3.5 text-base-content-muted')}
+      <span class="truncate max-w-[9rem]">${esc(a.name)}</span>
+      ${bad ? `<span data-ptah-badge data-tone="warn" data-size="xs"><span class="ptah-badge-text">Can't send</span></span>` : a.kind === 'file' && !main && l.files.as === 'path' ? `<span data-ptah-badge data-tone="neutral" data-size="xs"><span class="ptah-badge-text">path text</span></span>` : ''}
+      <button type="button" class="inline-flex h-5 w-5 items-center justify-center rounded text-base-content-muted hover:text-base-content hover:bg-surface-3" aria-label="Remove ${esc(a.name)}" data-act="rm-att" data-n="${n}">${ic('x', 'w-3 h-3')}</button></span>`; }).join('')}</div>` : '';
+
+  /* suggestions */
+  let sug = '';
+  if (i.suggest === 'slash') {
+    const opt = (v, d) => `<button type="button" role="option" class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-base-300" data-act="pick-slash" data-v="${esc(v)}"><span class="font-mono">${esc(v)}</span><span class="text-base-content-muted truncate">${esc(d)}</span></button>`;
+    const off = why => `<div role="option" aria-disabled="true" class="flex items-start gap-2 px-2 py-1.5 text-base-content-muted">${ic('info', 'w-3.5 h-3.5 mt-0.5')}<span>${esc(why)}</span></div>`;
+    const head = t => `<div class="px-2 pt-1 pb-0.5 text-[11px] font-semibold uppercase tracking-wide text-base-content-muted">${t}</div>`;
+    const body = (!l.cmd.ok && !l.skills.ok)
+      ? off(`${l.cli} lanes take no slash commands or skills.`)
+      : head('Commands') + (l.cmd.ok ? SLASH_CMDS.map(c => opt(c[0], c[1])).join('') : off(l.cmd.why)) + head('Skills') + (l.skills.ok ? SLASH_SKILLS.map(c => opt(c[0], c[1])).join('') : off(l.skills.why));
+    sug = `<div class="absolute left-2 right-2 bottom-full mb-1 z-30 rounded-lg border border-surface-border-strong bg-base-100 p-1 shadow-lg text-xs" role="listbox" aria-label="Commands and skills">${body}</div>`;
+  } else if (i.suggest === 'at') {
+    sug = `<div class="absolute left-2 right-2 bottom-full mb-1 z-30 rounded-lg border border-surface-border-strong bg-base-100 p-1 shadow-lg text-xs" role="listbox" aria-label="Files and folders">` +
+      FILES.map(f => `<button type="button" role="option" class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left font-mono hover:bg-base-300" data-act="pick-at" data-v="${esc(f)}">${ic('clip', 'w-3.5 h-3.5 text-base-content-muted')}${esc(f)}</button>`).join('') +
+      `<div class="border-t border-surface-border mt-1 px-2 pt-1.5 pb-1 text-[11px] text-base-content-muted">${main || l.files.as === 'ref' ? 'Chosen files are sent as file references.' : `${esc(l.cli)} takes files as text: the path is inserted into your message.`}</div></div>`;
+  }
+
+  /* toolbar controls */
+  const modelName = l.models[i.model] || '';
+  const effName = l.efforts.length ? l.efforts[i.effort] : 'n/a';
+  const dd = (key, title, items, sel, cap) => i.menu !== key ? '' : `<div class="absolute bottom-full left-0 mb-1 z-30 w-64 rounded-lg border border-surface-border-strong bg-base-100 shadow-lg text-xs" role="listbox" aria-label="${title}">
+      <div class="px-2 py-1.5 border-b border-base-300 text-[11px] font-semibold uppercase tracking-wide text-base-content-muted">${title}</div>
+      <div class="p-1">${items.map((m, n) => `<button type="button" role="option" aria-selected="${n === sel}" class="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left hover:bg-base-300 ${n === sel ? 'bg-base-300' : ''}" data-act="pick-${key}" data-n="${n}">${n === sel ? ic('check', 'w-3.5 h-3.5') : '<span class="w-3.5"></span>'}<span>${esc(m)}</span></button>`).join('')}</div>
+      <div class="border-t border-surface-border px-2 py-1.5 text-[11px] text-base-content-muted">${main ? 'Applies to this tab.' : esc(whenCopy(l, cap))}</div></div>`;
+
+  const pill = (key, g, icon, label, extra) => `<div class="relative min-w-0">
+      <button type="button" class="lc-ctl inline-flex items-center gap-1.5 h-7 px-2 rounded-full text-xs font-normal min-w-0 text-base-content-muted hover:text-base-content hover:bg-base-content/5 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[oklch(var(--s))] ${i.menu === key ? 'bg-base-300 text-base-content' : ''} ${i.simRing === key ? 'sim-ring' : ''}" ${ctlAttrs(i, key, g, key === 'model' ? 'Select model' : 'Select effort')} ${g.off ? '' : `aria-haspopup="listbox" aria-expanded="${i.menu === key}"`}>
+        ${ic(icon, 'w-3.5 h-3.5')}${extra}
+        <span class="${key === 'effort' ? 'lc-label lc-effort-label' : 'lc-label'} min-w-0 truncate">${esc(label)}</span>
+        ${g.off ? ic('info', 'w-3 h-3 opacity-80') : ic('down', 'w-3 h-3 opacity-60')}
+      </button><span id="r-${i.id}-${key}" class="sr-desc">${g.off ? esc(g.why) : ''}</span></div>`;
+
+  const pendingDot = k => (!main && i.pending === k) ? `<span class="h-1.5 w-1.5 rounded-full bg-primary" aria-hidden="true" title="Changed. ${esc(whenCopy(l, l[k]))} Clears when the lane card shows the confirmed ${k}."></span>` : '';
+  const modelPill = pill('model', gm, 'box', gm.off ? modelName || 'Model' : modelName, pendingDot('model'));
+  const effortPill = pill('effort', ge, 'gauge', ge.off ? 'Effort' : effName, pendingDot('effort'));
+
+  const approvalLabel = i.status === 'checking' ? 'Checking' : i.status === 'capfail' ? 'Unknown' : ga.off ? l.approvalLabel : (i.approval === 'ask' ? 'Ask' : 'Auto');
+  const approval = `<div class="relative min-w-0"><button type="button" class="lc-ctl inline-flex items-center gap-1.5 h-7 px-2 rounded-md text-xs min-w-0 text-base-content-muted hover:text-base-content hover:bg-surface-2 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[oklch(var(--s))] ${i.simRing === 'approval' ? 'sim-ring' : ''}" ${ctlAttrs(i, 'approval', ga, 'Approval mode: ' + approvalLabel)}>
+      ${ic('shield', 'w-3.5 h-3.5')}<span class="lc-label truncate">${approvalLabel}</span>${ga.off ? ic('info', 'w-3 h-3 opacity-80') : ''}</button><span id="r-${i.id}-approval" class="sr-desc">${ga.off ? esc(ga.why) : ''}</span></div>`;
+
+  const attachMenu = i.menu === 'attach' ? `<div class="absolute bottom-full left-0 mb-1 z-30 w-44 rounded-lg border border-surface-border-strong bg-base-100 p-1 shadow-lg text-xs" role="menu">
+      <button type="button" role="menuitem" class="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left hover:bg-base-300" data-act="add-file">${ic('clip', 'w-3.5 h-3.5 text-base-content-muted')}Attach files</button>
+      <button type="button" role="menuitem" class="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-left hover:bg-base-300" data-act="add-image">${ic('image', 'w-3.5 h-3.5 text-base-content-muted')}Attach images</button></div>` : '';
+
+  const stopBtn = (running && !main) || (main && running) ? `<button type="button" class="inline-flex items-center justify-center h-7 w-7 flex-shrink-0 rounded-full bg-error/15 text-error hover:bg-error/25 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[oklch(var(--s))]" title="Stop generating" aria-label="Stop generating" data-act="stop">${ic('square', 'w-3.5 h-3.5')}</button>` : '';
+  const resumeBtn = stopped && !main ? `<button type="button" class="inline-flex items-center justify-center h-7 w-7 flex-shrink-0 rounded-full bg-error/15 text-error hover:bg-error/25 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[oklch(var(--s))]" title="Resume session" aria-label="Resume ${esc(l.cli)} session" data-act="noop">${ic('play', 'w-3.5 h-3.5')}</button>` : '';
+
+  /* Send: exactly main chat's button, including the real `disabled` attribute and disabled:opacity-40. */
+  const sendBtn = `<button type="button" class="inline-flex items-center justify-center h-7 w-7 flex-shrink-0 rounded-full bg-base-content text-base-100 transition-transform enabled:hover:scale-105 enabled:active:scale-95 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[oklch(var(--s))] ${i.simRing === 'send' ? 'sim-ring' : ''}"
+      ${sendOff ? 'disabled' : 'data-act="send"'} title="${esc(stopped ? 'Resume with message' : 'Send message')}" aria-label="${stopped ? 'Resume with message' : 'Send message'}">
+      ${i.sending ? '<span class="loading loading-spinner loading-xs" aria-hidden="true"></span>' : ic('up')}</button>`;
+
+  /* queued messages: the shared QueuedFollowUps card, unchanged markup (right-aligned, rounded-2xl, text-sm, Withdraw).
+     Only the fix from decisions.md #9 differs: "Queued" is text-base-content and the note is text-state-need. */
+  const nm = nowMode(l), nLabel = nowLabel(l);
+  const queue = i.queued.length ? `<section class="pb-3" aria-label="Queued messages"><ul class="flex flex-col gap-2">${i.queued.map(q => `<li class="flex justify-end" data-testid="queued-follow-up-item"><article class="max-w-[85%] min-w-0 rounded-2xl border border-dashed border-primary/50 bg-primary/5 px-3 py-2 text-sm">
+      <header class="flex items-center gap-1.5 text-[11px] text-base-content-muted">${ic('clock', 'w-3.5 h-3.5 text-primary')}<span class="font-medium text-base-content">Queued</span><span aria-hidden="true">·</span><span>Queued for the next turn</span></header>
+      <p class="mt-1 whitespace-pre-wrap break-words text-base-content">${esc(q.text)}</p>
+      ${q.note ? `<p class="mt-1 text-xs text-state-need" role="status">${esc(q.note)}</p>` : ''}
+      <div class="mt-2 flex items-center justify-end gap-1">
+        ${q.parent ? '<span class="mr-auto text-[11px] text-base-content-muted">Sent by the parent session</span>' : `<button type="button" class="btn btn-xs btn-ghost" data-ptah-button data-act="edit-q" data-q="${q.id}" title="Withdraw and put the text back in the composer" aria-label="Withdraw: ${esc(q.text.slice(0, 40))}">Withdraw</button>`}
+        ${nm !== 'none' ? `<button type="button" class="btn btn-xs btn-primary" data-ptah-button data-act="now-q" data-q="${q.id}" title="${nm === 'steer' ? 'Send this message into the running turn now' : 'Stop the current turn and send this message now'}" aria-label="${nm === 'steer' ? 'Send now: ' : 'Interrupt and send: '}${esc(q.text.slice(0, 40))}">${nLabel}</button>`
+          : `<button type="button" class="btn btn-xs btn-primary" data-ptah-button aria-disabled="true" aria-describedby="r-${i.id}-q${q.id}" style="opacity:.5;cursor:not-allowed">Send now</button>`}
+      </div>
+      ${nm === 'none' ? `<p id="r-${i.id}-q${q.id}" class="mt-1 text-right text-[11px] text-base-content-muted">Send now unavailable: ${esc(nowWhy(l))}</p>` : ''}
+      </article></li>`).join('')}</ul></section>` : '';
+
+  /* loss dialog */
+  const dialog = i.confirm ? `<div role="alertdialog" aria-modal="true" aria-label="Confirm interrupt and send" class="rounded-xl border border-warning bg-base-100 p-2.5 text-xs shadow-lg">
+      <div class="flex gap-2">${ic('warn', 'w-4 h-4 text-warning mt-0.5')}<p><span class="font-semibold">Interrupt this turn?</span> Work this turn has not finished will be discarded. ${esc(l.cli)} keeps the conversation, and your message starts the next turn.</p></div>
+      <div class="mt-2 flex justify-end gap-1.5"><button type="button" class="btn btn-xs btn-ghost" data-ptah-button data-act="keep">Keep current turn</button><button type="button" class="btn btn-xs btn-warning" data-act="confirm">Interrupt &amp; send</button></div></div>` : '';
+
+  /* status line (aria-live) */
+  const lim = limited(i);
+  let statusMsg, statusCls = 'text-base-content-muted', statusIcon = '';
+  if (i.status === 'checking') statusMsg = '<span class="loading loading-spinner loading-xs" aria-hidden="true"></span> Checking lane options…';
+  else if (i.status === 'capfail') statusMsg = `${ic('warn', 'w-3.5 h-3.5 text-state-err')} <span class="text-state-err">Could not load lane options.</span> <button type="button" class="btn btn-xs btn-ghost" data-ptah-button data-act="retry">Retry</button>`;
+  else if (i.reason) statusMsg = `${ic('info', 'w-3.5 h-3.5')} <span><span class="font-medium">${esc(i.reason.label)} is unavailable here.</span> ${esc(i.reason.why)}</span>`;
+  else if (blocked) statusMsg = `${ic('warn', 'w-3.5 h-3.5 text-state-need')} <span class="text-state-need">${esc(l.cli)} lanes cannot take images. Remove the image to send.</span>`;
+  else if (i.note) statusMsg = `${ic('check', 'w-3.5 h-3.5 text-state-done')} <span>${esc(i.note)}</span>`;
+  else statusMsg = `<span class="truncate">${esc(modeHint(i))}</span>`;
+  const err = i.error ? `<p class="flex items-start gap-1.5 px-1 text-xs text-state-err" role="alert">${ic('warn', 'w-3.5 h-3.5 mt-px')}<span>${esc(i.error)}</span></p>` : '';
+
+  const modelChip = main ? l.models[i.model] : l.models[i.confirmed];
+  const bar = `<div class="lc-card relative flex flex-col w-full rounded-xl border border-surface-border bg-surface-1 shadow-[inset_0_1px_0_var(--surface-highlight),var(--elev-shadow)]" data-glass-surface="tile" data-testid="composer-compact-bar">
+      <div class="flex items-center gap-1 h-10 pl-1 pr-1.5 min-w-0">
+        <button type="button" class="group flex flex-1 items-center gap-2 h-8 min-w-0 px-2.5 rounded-lg text-left text-xs text-base-content hover:bg-surface-2 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[oklch(var(--s))]" aria-expanded="false" title="Expand the composer" data-act="expand">
+          <span class="sr-only">Expand composer.</span>
+          <span class="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-primary" aria-hidden="true"></span>
+          <span class="min-w-0 truncate">${main ? 'Ptah is working…' : esc(l.cli) + ' is working…'}</span>
+          <span class="min-w-0 max-w-[45%] flex-shrink truncate rounded-md bg-surface-2 px-1.5 py-0.5 text-[11px] leading-4 text-base-content-muted">${esc(modelChip)}</span>
+          ${ic('chevUp', 'ml-auto w-4 h-4 text-base-content-muted group-hover:text-base-content')}</button>
+        <button type="button" class="inline-flex items-center justify-center h-7 w-7 flex-shrink-0 rounded-full bg-error/15 text-error hover:bg-error/25 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[oklch(var(--s))]" title="Stop generating" aria-label="Stop generating" data-act="stop">${ic('square', 'w-3.5 h-3.5')}</button>
+      </div></div>`;
+  const mainStatus = `<div class="ptah-composer-status-line flex items-center gap-2 px-1 mt-1.5 min-w-0 w-full" data-glass-surface="plate"><div class="flex items-center gap-0.5 min-w-0"></div><span class="ml-auto min-w-0 truncate text-xs text-base-content-muted" title="Authenticated via Claude Pro">Claude Pro</span></div>`;
+  const laneStatus = `${err}
+    <div class="lc-status flex items-center gap-2 px-1 min-w-0 text-[11px] text-base-content-muted" aria-live="polite" data-glass-surface="plate">
+      <span class="flex items-center gap-1.5 min-w-0 flex-1 ${i.reason || blocked || i.note ? '' : 'truncate'}" title="${esc(modeHint(i))}">${statusMsg}</span>
+      ${lim.length ? `<span data-ptah-badge data-tone="neutral" data-size="xs" class="flex-shrink-0 lc-status-long" title="${esc(lim.map(x => x[0] + ': ' + x[1]).join('\n'))}"><span class="ptah-badge-text">${lim.length} limited</span></span>` : ''}
+    </div>`;
+  if (main) { const tq = document.getElementById('tq-' + i.id); if (tq) tq.innerHTML = queue; }
+  el.innerHTML = `<div class="space-y-1.5 min-w-0">
+    ${main ? '' : queue}${dialog}
+    ${folded ? bar : `<div class="lc-card relative flex flex-col w-full rounded-xl border border-surface-border focus-within:border-[var(--surface-border-strong)] bg-surface-1 shadow-[inset_0_1px_0_var(--surface-highlight),var(--elev-shadow)] transition-colors ${i.simFocus ? 'sim-focus' : ''}" data-glass-surface="tile">
+      ${tray}
+      <div class="relative">
+        <label class="sr-only" for="ta-${i.id}">${esc(main ? 'Message the orchestrator' : 'Message ' + l.name)}</label>
+        <textarea id="ta-${i.id}" dir="auto" rows="2" class="lc-ta block w-full min-h-[60px] max-h-[calc(8lh+1rem)] overflow-y-auto resize-none bg-transparent border-0 px-3.5 pt-3 pb-1 text-[13px] leading-[1.6] text-base-content placeholder:text-base-content-muted outline-none focus:outline-none focus:ring-0" placeholder="${esc(ph)}" ${i.confirm ? 'readonly' : ''} role="combobox" aria-expanded="${!!i.suggest}" aria-autocomplete="list" data-ta>${''}</textarea>
+        ${sug}
+      </div>
+      <div class="lc-toolbar flex items-center gap-1 px-2 pr-2.5 pb-2 min-w-0">
+        <div class="lc-toolbar-start flex items-center gap-1 min-w-0 flex-1">
+          <div class="relative">
+            <button type="button" class="inline-flex items-center justify-center h-7 w-7 flex-shrink-0 rounded-md text-base-content-muted hover:text-base-content hover:bg-surface-2 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[oklch(var(--s))] ${i.menu === 'attach' ? 'bg-surface-2 text-base-content' : ''}" title="Attach" aria-label="Attach files or add context" aria-haspopup="menu" aria-expanded="${i.menu === 'attach'}" data-act="attach">${ic('plus')}</button>${attachMenu}</div>
+          ${approval}
+        </div>
+        <div class="lc-toolbar-end flex items-center gap-1 min-w-0 flex-shrink">
+          <div role="group" aria-label="Model and effort" class="relative inline-flex items-center h-7 min-w-0 rounded-md text-xs text-base-content-muted">
+            ${modelPill}<span class="px-0.5" aria-hidden="true">·</span>${effortPill}
+            ${dd('model', 'Select model', l.models, i.model, l.model)}${dd('effort', 'Reasoning effort', l.efforts, i.effort, l.effort)}
+          </div>
+          <button type="button" class="inline-flex items-center justify-center h-7 w-7 flex-shrink-0 rounded-md text-base-content-muted hover:text-base-content hover:bg-surface-2 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[oklch(var(--s))]" title="Dictate" aria-label="Dictate" data-act="noop">${ic('mic')}</button>
+          ${stopBtn}${resumeBtn}${sendBtn}
+        </div>
+      </div>
+    </div>`}
+    ${main ? mainStatus : laneStatus}</div>`;
+
+  const hd = document.getElementById('head-' + i.id); if (hd) hd.innerHTML = laneHeader(i);
+  const ta = el.querySelector('textarea');
+  if (refocus) el.querySelector(refocus)?.focus();
+  if (ta) ta.value = i.draft;
+  else if (i.wantFocus) { i.wantFocus = false; }
+  if (ta && (hadFocus || i.wantFocus)) { ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); i.wantFocus = false; }
+}
+
+/* ---------- actions ---------- */
+let qid = 0;
+function after(i, ms, fn) { setTimeout(() => { fn(); render(i); }, ms); }
+function resetTransient(i) { i.error = null; i.note = null; i.reason = null; }
+function startTurn(i) {
+  /* the provider confirms the model when the turn starts (Req 2.7): the lane card chip and the pill agree again */
+  if (i.confirmed !== i.model) i.justConfirmed = true;
+  i.confirmed = i.model; i.pending = null; i.expanded = false;
+}
+function doSend(i, mode) {
+  const l = L(i);
+  if (imageBlocked(i)) return;
+  const text = i.draft.trim(); if (!text && !i.attachments.length) return;
+  resetTransient(i);
+  if (i.status === 'idle' || i.status === 'stopped') {
+    i.sending = true; render(i);
+    after(i, 600, () => { i.sending = false; i.status = 'running'; i.draft = ''; i.attachments = []; i.note = i.pending === 'model' ? `Started a turn with ${l.models[i.model]}.` : 'Turn started.'; startTurn(i); });
+    return;
+  }
+  if (mode === 'now') {
+    const m = nowMode(l);
+    if (m === 'steer') { i.draft = ''; i.attachments = []; i.note = steerNote(l); return render(i); }
+    if (m === 'interrupt') { i.confirm = true; i.confirmQ = null; i.menu = null; return render(i); }
+    return;
+  }
+  i.queued.push({ id: ++qid, text }); i.draft = ''; i.attachments = []; i.note = 'Queued for the next turn. Withdraw it until the lane starts it.'; render(i);
+}
+function onClick(i, e) {
+  const t = e.target.closest('[data-act]'); if (!t) { if (i.menu || i.suggest) { i.menu = null; i.suggest = null; render(i); } return; }
+  const a = t.dataset.act, l = L(i);
+  const keepMenu = ['attach','model','effort'];
+  if (a === 'noop') return;
+  if (a === 'expand') { i.expanded = true; i.wantFocus = true; return render(i); }
+  if (keepMenu.includes(a)) { i.menu = i.menu === a ? null : a; i.suggest = null; i.reason = null; return render(i); }
+  if (a === 'reason') { i.menu = null; const key = t.dataset.key; const cap = key === 'model' ? l.model : key === 'effort' ? l.effort : l.approval; const why = i.status === 'checking' ? 'Checking lane options…' : i.status === 'capfail' ? 'Lane options could not be loaded.' : cap.why; i.reason = { label: key[0].toUpperCase() + key.slice(1), why }; return render(i); }
+  i.menu = null; i.suggest = null;
+  if (a === 'send') return doSend(i, 'queue');
+  if (a === 'now') return doSend(i, 'now');
+  if (a === 'confirm') { i.confirm = false; if (i.confirmQ) { i.queued = i.queued.filter(x => x.id !== i.confirmQ); i.confirmQ = null; } else { i.draft = ''; i.attachments = []; } i.status = 'running'; i.note = 'Turn ended. Same session. Your message starts the next turn.'; startTurn(i); return render(i); }
+  if (a === 'keep') { i.confirm = false; i.confirmQ = null; return render(i); }
+  if (a === 'stop') { i.status = 'idle'; i.expanded = false; i.note = mainMode(i) ? null : 'Stopped.'; return render(i); }
+  if (a === 'retry') { i.status = 'checking'; render(i); return after(i, 700, () => { i.status = 'idle'; }); }
+  if (a === 'edit-q') { const q = i.queued.find(x => x.id == t.dataset.q); i.queued = i.queued.filter(x => x !== q); i.draft = q.text + (i.draft ? '\n' + i.draft : ''); i.wantFocus = true; i.note = 'Moved back to the composer. Edit and send again.'; return render(i); }
+  if (a === 'now-q') {
+    const q = i.queued.find(x => x.id == t.dataset.q), m = nowMode(l);
+    if (mainMode(i)) { i.queued = i.queued.filter(x => x !== q); return render(i); }
+    if (m === 'steer') { i.queued = i.queued.filter(x => x !== q); i.note = steerNote(l); return render(i); }
+    i.confirm = true; i.confirmQ = q.id; return render(i);
+  }
+  if (a === 'add-file') { i.attachments.push({ kind: 'file', name: 'notes.md' }); return render(i); }
+  if (a === 'add-image') { i.attachments.push({ kind: 'image', name: SAMPLE_IMG }); return render(i); }
+  if (a === 'rm-att') { i.attachments.splice(+t.dataset.n, 1); return render(i); }
+  if (a === 'pick-model') { const n = +t.dataset.n; if (n !== i.model) { i.model = n; i.pending = 'model'; i.note = mainMode(i) ? null : `Model set to ${l.models[n]}. ${whenCopy(l, l.model)}`.replace(/^(Model set to \S+\. )Applies from your next message\. The lane keeps running\./, '$1Applies from your next message; the lane keeps running.'); } return render(i); }
+  if (a === 'pick-effort') { const n = +t.dataset.n; if (n !== i.effort) { i.effort = n; i.pending = 'effort'; i.note = mainMode(i) ? null : `Effort set to ${l.efforts[n]}. ${whenCopy(l, l.effort)}`; } return render(i); }
+  if (a === 'pick-slash') { i.draft = t.dataset.v + ' '; i.wantFocus = true; return render(i); }
+  if (a === 'pick-at') { i.draft = i.draft.replace(/@\S*$/, t.dataset.v + ' '); i.note = (mainMode(i) || l.files.as === 'ref') ? 'Added as a file reference.' : `Inserted as path text. ${l.cli} takes files as text.`; i.wantFocus = true; return render(i); }
+  render(i);
+}
+const main = mainMode;
+function onInput(i, ta) {
+  i.draft = ta.value; i.reason = null; i.note = null;
+  const v = ta.value, tok = v.split(/\s/).pop();
+  const prev = i.suggest;
+  i.suggest = /^\/[\w:-]*$/.test(v.trim()) && v.trim().startsWith('/') && !v.includes(' ') ? 'slash' : tok.startsWith('@') ? 'at' : null;
+  if (prev !== i.suggest || true) { i.wantFocus = true; render(i); }
+}
+function onKey(i, e) {
+  if (e.key === 'Escape') { i.menu = null; i.suggest = null; i.confirm = false; return render(i); }
+  if (isCompactBar(i) && e.key.length === 1 && e.key !== ' ' && !e.ctrlKey && !e.metaKey && !e.altKey) { e.preventDefault(); i.expanded = true; i.draft = e.key; i.wantFocus = true; return render(i); }
+  if (e.target.id !== 'ta-' + i.id || e.isComposing) return;
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !mainMode(i)) { e.preventDefault(); return doSend(i, 'now'); }
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); doSend(i, 'queue'); }
+}
+
+/* ---------- scenarios ---------- */
+function applyScenario(i, s) {
+  const l = L(i);
+  Object.assign(i, { status: 'idle', draft: '', attachments: [], queued: [], menu: null, confirm: false, confirmQ: null, expanded: false, confirmed: 0, justConfirmed: false, sending: false, error: null, note: null, reason: null, suggest: null, simFocus: false, simRing: null, pending: null, model: 0, effort: 0 });
+  const msg = 'Also cover the empty state and the 400px width.';
+  if (s === 'focus') { i.draft = ''; i.simFocus = true; i.simRing = l.model.ok ? 'send' : 'model'; if (!l.approval.ok) i.simRing = 'approval'; i.wantFocus = false; }
+  if (s === 'typing') i.draft = 'Refactor the lane view to use the shared composer, keep the loss dialog.';
+  if (s === 'running') { i.status = 'running'; i.draft = msg; }
+  if (s === 'compact') { i.status = 'running'; }
+  if (s === 'modelchg') { i.status = 'running'; i.draft = 'Next, review the diff.'; i.model = 1 % l.models.length; i.pending = 'model'; if (i.mount !== 'main') i.note = `Model set to ${l.models[i.model]}. ${whenCopy(l, l.model)}`; }
+  if (s === 'queued') { i.status = 'running'; i.queued = [{ id: ++qid, text: 'After that, update the lane view spec to match the new toolbar order.', note: 'The session has not confirmed this message yet.' }, ...(i.mount === 'main' ? [] : [{ id: ++qid, text: 'Parent: please post the result when done.', parent: true }])]; i.draft = ''; i.note = 'Queued for the next turn. Withdraw it until the lane starts it.'; }
+  if (s === 'sending') { i.sending = true; i.draft = 'Run the focused specs for chat-ui.'; }
+  if (s === 'loss' && i.mount === 'main') { i.status = 'running'; i.draft = msg; }
+  else if (s === 'loss') { i.status = 'running'; i.draft = msg; const m = nowMode(l); i.confirm = m === 'interrupt'; if (m === 'steer') i.note = steerNote(l); }
+  if (s === 'refused') { i.status = 'running'; i.draft = 'Use the larger model for the next step.'; i.model = 1 % l.models.length; i.pending = 'model'; i.error = `${l.cli} refused the model change: model "${l.models[i.model]}" is not available for this account. Nothing was sent; your draft is kept.`; }
+  if (s === 'image') { i.draft = 'What is wrong with this layout?'; i.attachments = [{ kind: 'image', name: SAMPLE_IMG }]; }
+  if (s === 'stopped') { i.status = 'stopped'; i.draft = 'Continue with the remaining files.'; }
+  if (s === 'checking') i.status = 'checking';
+  if (s === 'capfail') i.status = 'capfail';
+  render(i);
+}
+
+/* ---------- lane header (usage + status) ---------- */
+function fmt(n) { return n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n); }
+function laneHeader(i) {
+  const l = L(i), turnOnly = l.usage === 'turn-end';
+  const run = i.status === 'running';
+  return `<div class="flex items-center gap-2 min-w-0 text-xs" data-lane-head="${i.laneKey}">
+    <span class="h-2 w-2 rounded-full flex-shrink-0 ${run ? 'bg-primary' : i.status === 'stopped' ? 'bg-error' : 'bg-success'}" aria-hidden="true"></span>
+    <span class="font-medium truncate">${esc(l.name)}</span>
+    <span data-ptah-badge data-tone="neutral" data-size="xs"><span class="ptah-badge-text">${run ? 'Running' : i.status === 'stopped' ? 'Stopped' : 'Idle'}</span></span>
+    ${(() => { const fl = i.justConfirmed; i.justConfirmed = false; return `<span class="min-w-0 truncate rounded-md bg-surface-2 px-1.5 py-0.5 text-[11px] leading-4 text-base-content-muted ${fl ? 'flash' : ''}" data-confirmed-model title="Model the provider confirmed for the last turn">${esc(l.models[i.confirmed])}</span>`; })()}
+    <span class="ml-auto flex items-center gap-1.5 flex-shrink-0">
+      ${turnOnly ? `<span class="text-base-content-muted" title="${esc(l.usageWhy)}">${ic('clock', 'w-3 h-3')}</span>` : ''}
+      ${usage.partial && !turnOnly ? `<span data-ptah-badge data-tone="warn" data-size="xs" title="The provider sent incomplete usage. Showing the last good value."><span class="ptah-badge-text">partial</span></span>` : ''}
+      <span class="tabular-nums text-base-content-muted" data-tok="${i.laneKey}" title="${turnOnly ? esc(l.usageWhy) : 'Tokens this session, updated as the provider reports them'}">${fmt(usage.tokens[i.laneKey])} tok</span></span></div>`;
+}
+
+/* ---------- frames ---------- */
+const MOUNTS = { canvas: { w: 720, label: 'Canvas lane view' }, card: { w: 400, label: 'Agent card panel' }, inspector: { w: 320, label: 'Session inspector row' }, main: { w: 720, label: 'Main chat (today\'s composer; shared queued card with the contrast fix)' } };
+const TRANSCRIPT = [
+  ['Reading','libs/frontend/chat-ui/src/lib/molecules/lane-composer.component.ts'],
+  ['Edit','composer-card.ts'],
+];
+function buildFrames() {
+  const mountSel = document.getElementById('mountSel').value;
+  const lane = document.getElementById('laneSel').value;
+  instances.length = 0;
+  const host = document.getElementById('frames'); host.innerHTML = '';
+  const order = mountSel === 'all' ? ['main', 'canvas', 'card', 'inspector'] : [mountSel];
+  for (const m of order) {
+    const i = mk(m, m === 'main' ? 'main' : lane);
+    const f = document.createElement('div');
+    f.className = 'frame';
+    f.style.width = Math.min(MOUNTS[m].w, 1400) + 'px'; f.style.maxWidth = '100%';
+    f.innerHTML = `<div class="frame-title text-base-content-muted mb-2">${MOUNTS[m].label} · ${MOUNTS[m].w}px</div>
+      ${m === 'main' ? '' : `<div class="mb-2" id="head-${i.id}">${laneHeader(i)}</div>`}
+      <div class="rounded-lg bg-surface-2 border border-surface-border px-2.5 py-2 mb-2 text-[11px] text-base-content-muted font-mono space-y-0.5">${m === 'inspector' ? `<div>${esc(TRANSCRIPT[0][1].split('/').pop())}</div>` : TRANSCRIPT.map(t => `<div><span class="text-base-content">${t[0]}</span> ${esc(t[1])}</div>`).join('')}</div>
+      ${m === 'main' ? `<div id="tq-${i.id}"></div>` : ''}
+      <div class="lc" id="lc-${i.id}"></div>`;
+    host.appendChild(f);
+    const root = f.querySelector('.lc');
+    f.addEventListener('click', e => onClick(i, e));
+    root.addEventListener('input', e => { if (e.target.matches('[data-ta]')) onInput(i, e.target); });
+    root.addEventListener('keydown', e => onKey(i, e));
+    root.addEventListener('focusin', e => { const b = e.target.closest('[data-act="reason"]'); if (b) { const l = L(i); const key = b.dataset.key; const cap = key === 'model' ? l.model : key === 'effort' ? l.effort : l.approval; if ((i.status === 'idle' || i.status === 'running') && !(i.reason && i.reason.label.toLowerCase() === key)) { i.reason = { label: key[0].toUpperCase() + key.slice(1), why: cap.why }; render(i); } } });
+    root.addEventListener('mouseover', e => { const b = e.target.closest('[data-act="reason"]'); if (b && !i.reason && (i.status === 'idle' || i.status === 'running')) { const l = L(i); const key = b.dataset.key; const cap = key === 'model' ? l.model : key === 'effort' ? l.effort : l.approval; i.reason = { label: key[0].toUpperCase() + key.slice(1), why: cap.why }; render(i); } });
+    root.addEventListener('mouseout', e => { if (e.target.closest('[data-act="reason"]') && i.reason && !root.contains(document.activeElement.closest('[data-act="reason"]'))) { i.reason = null; render(i); } });
+    applyScenario(i, document.getElementById('stateSel').value);
+  }
+}
+function refreshHeads() { instances.forEach(i => { const h = document.getElementById('head-' + i.id); if (h) h.innerHTML = laneHeader(i); }); }
+
+/* ---------- matrix ---------- */
+function buildMatrix() {
+  const rows = [['Send now: steer', l => l.steer], ['Interrupt and continue', l => l.interrupt], ['Model', l => l.model], ['Effort', l => l.effort], ['Images', l => l.images], ['Slash commands', l => l.cmd], ['Skills', l => l.skills], ['Tool approval', l => l.approval]];
+  const keys = Object.keys(LANES).filter(k => k !== 'main' && k !== 'claudesteer');
+  const cell = (c, r) => {
+    if (!c.ok) return `<td class="align-top"><span data-ptah-badge data-tone="neutral" data-size="xs"><span class="ptah-badge-text">Off</span></span><div class="mt-1 text-[11px] text-base-content-muted max-w-[16ch]">${esc(c.why)}</div></td>`;
+    const label = (r === 'Model' || r === 'Effort') ? whenShort(c) : c.unproven ? 'After fixture' : c.cond ? 'If advertised' : 'Yes';
+    const extra = c.unproven ? 'Send now reads "Interrupt &amp; send" until a fixture proves steer (Req 2.5).' : c.cond ? esc(c.cond) : '';
+    return `<td class="align-top"><span data-ptah-badge data-tone="${c.unproven || c.cond ? 'warn' : 'ok'}" data-size="xs"><span class="ptah-badge-text">${label}</span></span>${extra ? `<div class="mt-1 text-[11px] text-base-content-muted max-w-[16ch]">${extra}</div>` : ''}</td>`;
+  };
+  document.getElementById('tab-matrix').innerHTML = `<p class="text-xs text-base-content-muted mb-3 max-w-3xl">Illustrative statement per lane, taken from research-report.md. In the product these values and reasons come from the backend capability statement (Requirement 4); reason strings here are placeholders the backend owns. "Off" text is the reason a disabled control shows. Slash commands and skills are separate rows: a lane can take one without the other. Which lanes take skills is illustrative (skill sync targets exist per workspace-target.ts; whether the lane CLI accepts the typed skill is not settled by the research).</p>
+  <div class="overflow-x-auto"><table class="table table-xs"><thead><tr><th>Control</th>${keys.map(k => `<th>${esc(LANES[k].name)}</th>`).join('')}</tr></thead><tbody>` +
+  rows.map(r => `<tr><th class="align-top">${r[0]}</th>${keys.map(k => cell(r[1](LANES[k]), r[0])).join('')}</tr>`).join('') +
+  `<tr><th class="align-top">Live usage</th>${keys.map(k => `<td class="align-top">${LANES[k].usage === 'live' ? '<span data-ptah-badge data-tone="ok" data-size="xs"><span class="ptah-badge-text">Live</span></span>' : `<span data-ptah-badge data-tone="neutral" data-size="xs"><span class="ptah-badge-text">At turn end</span></span><div class="mt-1 text-[11px] text-base-content-muted max-w-[16ch]">${esc(LANES[k].usageWhy)}</div>`}</td>`).join('')}</tr></tbody></table></div>`;
+}
+
+/* ---------- prompts & usage ---------- */
+const prompt = { state: 'pending', answer: null, tries: 0, q: 'pending' };
+function permCard(surfaceId, laneName, compact) {
+  const st = prompt.state;
+  const lane = `<span data-ptah-badge data-tone="accent" data-appearance="outline" data-size="xs"><span class="ptah-badge-text">${esc(laneName)}</span></span>`;
+  if (st !== 'pending') return `<div class="rounded border-l-2 border-base-content/30 bg-base-300/30 px-2 py-1.5 text-[11px] text-base-content-muted flex items-center gap-1.5 flex-wrap" role="status">${ic('check', 'w-3 h-3')}${lane}<span>Bash · <span class="font-mono">npm run verify</span></span><span class="ml-auto">${prompt.answer === 'deny' ? 'Denied' : 'Allowed'} by you${surfaceId === prompt.at ? '' : ' in ' + prompt.atLabel}. No longer answerable here.</span></div>` + (prompt.tries && surfaceId === prompt.lastTry ? `<p class="mt-1 text-xs text-state-need" role="alert">Already answered. Your second answer was not sent.</p>` : '');
+  return `<div class="relative bg-base-300/30 rounded border-l-2 animate-glow" style="border-left-color: oklch(var(--wa))" role="alert">
+    <div class="py-1.5 px-2 flex items-center gap-1.5 flex-wrap text-[11px]">
+      ${ic('shield', 'w-3 h-3 text-warning')}<span class="font-semibold text-base-content-muted">Permission</span>${lane}
+      <span data-ptah-badge data-tone="neutral" data-size="xs" class="font-mono">${ic('clock', 'w-2.5 h-2.5')}<span class="ptah-badge-text">Bash</span></span>
+      <span class="text-base-content-muted ${compact ? 'w-full' : 'flex-1'} truncate font-mono text-[10px]" title="npm run verify -- -p chat-ui">npm run verify -- -p chat-ui</span>
+      <span data-ptah-badge data-tone="warn" data-size="xs" class="font-mono ml-auto">${ic('clock', 'w-2.5 h-2.5')}<span class="ptah-badge-text">4:32</span></span></div>
+    <div class="flex flex-wrap gap-1.5 px-2 py-1.5 border-t border-base-300/30 bg-base-100/20">
+      <button class="btn btn-xs btn-success gap-0.5 px-2" data-ans="allow" data-surface="${surfaceId}" aria-label="Allow this request once">${ic('check', 'w-3 h-3')}Allow</button>
+      <button class="btn btn-xs btn-info gap-0.5 px-2" data-ans="allow" data-surface="${surfaceId}" aria-label="Always allow this tool in this session">Always in session</button>
+      <button class="btn btn-xs btn-error gap-0.5 px-2" data-ans="deny" data-surface="${surfaceId}" aria-label="Deny this request and stop execution">${ic('x', 'w-3 h-3')}Deny</button></div></div>`;
+}
+function questionCard(laneName, sid) {
+  if (prompt.q !== 'pending') return `<div class="rounded border-l-2 border-base-content/30 bg-base-300/30 px-2 py-1.5 text-[11px] text-base-content-muted flex items-center gap-1.5" role="status">${ic('check', 'w-3 h-3')}<span data-ptah-badge data-tone="accent" data-appearance="outline" data-size="xs"><span class="ptah-badge-text">${esc(laneName)}</span></span>Answered: <span class="font-mono">${esc(prompt.q)}</span></div>`;
+  return `<div class="relative bg-base-300/30 rounded border-l-2 border-info" role="alert">
+    <div class="py-1.5 px-2 flex items-center gap-1.5 text-[11px] border-b border-base-300/30">${ic('help', 'w-3 h-3 text-info')}<span class="font-semibold text-info">Input needed</span>
+      <span data-ptah-badge data-tone="accent" data-appearance="outline" data-size="xs"><span class="ptah-badge-text">${esc(laneName)}</span></span>
+      <span data-ptah-badge data-tone="warn" data-size="xs" class="font-mono ml-auto">${ic('clock', 'w-2.5 h-2.5')}<span class="ptah-badge-text">42s</span></span></div>
+    <div class="px-2 py-2 text-xs"><p class="font-medium mb-1.5">Which spec should I update first?</p>
+      <label class="flex items-center gap-2 py-0.5"><input type="radio" name="q-${sid}" class="radio radio-xs" checked><span>lane-composer.component.spec.ts</span></label>
+      <label class="flex items-center gap-2 py-0.5"><input type="radio" name="q-${sid}" class="radio radio-xs"><span>agent-continue-input.component.spec.ts</span></label></div>
+    <div class="flex justify-end px-2 py-1.5 border-t border-base-300/30 bg-base-100/20"><button class="btn btn-xs btn-primary" data-q-submit>Submit answer</button></div></div>`;
+}
+function buildPrompts() {
+  const sec = document.getElementById('tab-prompts');
+  const lane = 'Claude SDK lane';
+  sec.innerHTML = `<p class="text-xs text-base-content-muted mb-3 max-w-3xl">One lane request, three surfaces. Answer it in any surface: the others stop being answerable at once, and a second answer is refused with a message. The lane label sits on the card header so a prompt can never be mistaken for another lane's.</p>
+  <div class="flex flex-wrap gap-4 items-start">
+    <div class="frame" style="width:560px;max-width:100%"><div class="frame-title text-base-content-muted mb-2">Canvas lane view · 560px</div><div id="h-canvas"></div><div class="mt-2 space-y-2" id="s-canvas"></div></div>
+    <div class="frame" style="width:400px;max-width:100%"><div class="frame-title text-base-content-muted mb-2">Agent card panel · 400px</div><div id="h-card"></div><div class="mt-2 space-y-2" id="s-card"></div></div>
+    <div class="frame" style="width:320px;max-width:100%"><div class="frame-title text-base-content-muted mb-2">Inspector row · 320px</div>
+      <div class="flex items-center gap-2 text-xs"><span class="h-2 w-2 rounded-full bg-warning flex-shrink-0" aria-hidden="true"></span><span class="font-medium truncate">${lane}</span><span id="insp-badge"></span></div></div>
+  </div>
+  <div class="mt-3 flex gap-2"><button class="btn btn-xs btn-outline" id="resetPrompt">Reset prompts</button></div>
+
+  <h2 class="text-sm font-semibold mt-6 mb-2">When a lane cannot ask</h2>
+  <div class="frame max-w-xl text-xs space-y-2">
+    <p class="text-base-content-muted">Approval chip on a Codex lane: visible, focusable, with the reason on the status line and in the accessible description. No card ever appears for it.</p>
+    <div class="lc" id="lc-nopath"></div>
+    <div class="rounded border-l-2 border-error bg-base-300/30 px-2 py-1.5 text-[11px] flex items-center gap-1.5" role="status">${ic('x', 'w-3 h-3 text-error')}<span class="font-semibold">Denied</span><span class="text-base-content-muted">Bash · <span class="font-mono">rm -rf build</span> was denied: no window could answer in time (lane: Claude SDK lane). The lane continues without it.</span></div>
+    <p class="text-base-content-muted">Transcript line when a prompt auto-denies (keeps today's deny-with-reason).</p></div>
+
+  <h2 class="text-sm font-semibold mt-6 mb-2">Live usage on the lane card</h2>
+  <div class="grid gap-3 max-w-3xl sm:grid-cols-2" id="usageDemo"></div>
+  <h2 class="text-sm font-semibold mt-6 mb-2">Session totals (existing Session inspector, SESSION section)</h2>
+  <div id="sessDemo" class="max-w-sm"></div>`;
+  document.getElementById('sessDemo').innerHTML = sessHtml();
+  renderPromptSurfaces();
+  const u = document.getElementById('usageDemo');
+  const ex = (title, body) => `<div class="frame"><div class="frame-title text-base-content-muted mb-2">${title}</div><div class="flex items-center gap-2 text-xs"><span class="h-2 w-2 rounded-full bg-primary" aria-hidden="true"></span><span class="font-medium">Claude SDK lane</span><span class="ml-auto flex items-center gap-1.5">${body}</span></div></div>`;
+  u.innerHTML = ex('Live: updates per assistant message', `<span class="tabular-nums text-base-content-muted" data-live-demo>${fmt(usage.tokens.claude)} tok</span>`) +
+    ex('Provider reports at turn end only (Cursor)', `${ic('clock', 'w-3 h-3 text-base-content-muted')}<span class="tabular-nums text-base-content-muted" title="Cursor reports usage once, when the turn ends.">9.1k tok</span><span class="text-[11px] text-base-content-muted">at turn end</span>`) +
+    ex('Partial or malformed event', `<span data-ptah-badge data-tone="warn" data-size="xs" title="The provider sent incomplete usage. Showing the last good value."><span class="ptah-badge-text">partial</span></span><span class="tabular-nums text-base-content-muted">18.2k tok</span>`) +
+    ex('Restored after reload (unknown until live)', `<span class="tabular-nums text-base-content-muted" title="Usage is unknown until the lane reports again.">- tok</span>`);
+  // no-path composer
+  const i = mk('card', 'codex'); const el = document.getElementById('lc-nopath'); el.id = 'lc-' + i.id;
+  el.addEventListener('click', e => onClick(i, e)); el.addEventListener('input', e => { if (e.target.matches('[data-ta]')) onInput(i, e.target); }); el.addEventListener('keydown', e => onKey(i, e));
+  i.reason = { label: 'Approval', why: LANES.codex.approval.why }; render(i);
+}
+const sessFmt = n => fmt(n);
+function sessHtml() {
+  return `<div class="frame text-xs"><div class="frame-title text-base-content-muted mb-2">Session inspector · SESSION (320px)</div>
+    <div class="flex items-center justify-between py-0.5"><span class="text-base-content-muted">Input tokens</span><span class="tabular-nums" data-sess="in">${sessFmt(usage.sessIn)}</span></div>
+    <div class="flex items-center justify-between py-0.5"><span class="text-base-content-muted">Output tokens</span><span class="tabular-nums" data-sess="out">${sessFmt(usage.sessOut)}</span></div>
+    <p class="mt-1.5 text-[11px] text-base-content-muted">Moves in the same tick as the lane figure. The lane's increment is counted once.</p></div>`;
+}
+function laneHeaderStatic(n) { const w = prompt.state === 'pending'; return `<div class="flex items-center gap-2 text-xs"><span class="h-2 w-2 rounded-full ${w ? 'bg-warning' : 'bg-primary'}" aria-hidden="true"></span><span class="font-medium">${n}</span><span data-ptah-badge data-tone="${w ? 'warn' : 'neutral'}" data-size="xs"><span class="ptah-badge-text">${w ? 'Waiting for you' : 'Running'}</span></span></div>`; }
+function renderPromptSurfaces() {
+  const lane = 'Claude SDK lane';
+  const set = (id, h) => { const e = document.getElementById(id); if (e) e.innerHTML = h; };
+  set('h-canvas', laneHeaderStatic(lane)); set('h-card', laneHeaderStatic(lane));
+  set('s-canvas', permCard('canvas', lane) + questionCard(lane, 'canvas'));
+  set('s-card', permCard('card', lane, true) + questionCard(lane, 'card'));
+  set('insp-badge', prompt.state === 'pending' ? `<span data-ptah-badge data-tone="warn" data-size="xs" class="ml-auto"><span class="ptah-badge-text">Waiting for you</span></span>` : `<span data-ptah-badge data-tone="neutral" data-size="xs" class="ml-auto"><span class="ptah-badge-text">Running</span></span>`);
+}
+
+/* ---------- wiring ---------- */
+const laneSel = document.getElementById('laneSel');
+Object.keys(LANES).filter(k => k !== 'main').forEach(k => laneSel.add(new Option(LANES[k].name, k)));
+document.getElementById('themeSel').addEventListener('change', e => { const [t, m] = e.target.value.split('|'); document.documentElement.setAttribute('data-theme', t); document.documentElement.setAttribute('data-theme-mode', m); });
+['laneSel', 'mountSel'].forEach(id => document.getElementById(id).addEventListener('change', buildFrames));
+document.getElementById('stateSel').addEventListener('change', e => instances.forEach(i => applyScenario(i, e.target.value)));
+document.getElementById('usageBtn').addEventListener('click', () => {
+  const k = laneSel.value, d = 640 + Math.floor(Math.random() * 400); usage.tokens[k] += d; usage.sessIn += Math.round(d * 0.8); usage.sessOut += d - Math.round(d * 0.8);
+  document.querySelectorAll('[data-sess]').forEach(n => { n.textContent = sessFmt(n.dataset.sess === 'in' ? usage.sessIn : usage.sessOut); n.classList.remove('flash'); void n.offsetWidth; n.classList.add('flash'); });
+  document.querySelectorAll(`[data-tok="${k}"]`).forEach(n => { n.textContent = fmt(usage.tokens[k]) + ' tok'; n.classList.remove('flash'); void n.offsetWidth; n.classList.add('flash'); });
+});
+document.querySelectorAll('[data-tab]').forEach(b => b.addEventListener('click', () => {
+  document.querySelectorAll('[data-tab]').forEach(x => x.setAttribute('aria-pressed', x === b));
+  document.querySelectorAll('[data-section]').forEach(s => s.hidden = s.id !== 'tab-' + b.dataset.tab);
+  if (b.dataset.tab === 'prompts' && !document.getElementById('s-canvas')) buildPrompts();
+}));
+document.addEventListener('click', e => {
+  const a = e.target.closest('[data-ans]');
+  if (a) { if (prompt.state !== 'pending') { prompt.tries++; prompt.lastTry = a.dataset.surface; } else { prompt.state = 'answered'; prompt.answer = a.dataset.ans; prompt.at = a.dataset.surface; prompt.atLabel = { canvas: 'the lane view', card: 'the agent card' }[a.dataset.surface]; } renderPromptSurfaces(); }
+  if (e.target.closest('[data-q-submit]')) { prompt.q = 'lane-composer.component.spec.ts'; renderPromptSurfaces(); }
+  if (e.target.id === 'resetPrompt') { Object.assign(prompt, { state: 'pending', answer: null, tries: 0, q: 'pending' }); renderPromptSurfaces(); }
+});
+buildMatrix();
+buildFrames();
+document.getElementById('sessMain').innerHTML = sessHtml();
+const q = new URLSearchParams(location.search);
+if (q.get('theme')) { const o = [...document.getElementById('themeSel').options].find(x => x.value.startsWith(q.get('theme') + '|')); if (o) { themeSel.value = o.value; themeSel.dispatchEvent(new Event('change')); } }
+if (q.get('lane')) { laneSel.value = q.get('lane'); }
+if (q.get('mounts')) document.getElementById('mountSel').value = q.get('mounts');
+if (q.get('state')) document.getElementById('stateSel').value = q.get('state');
+if (q.get('lane') || q.get('mounts') || q.get('state')) buildFrames();
+if (q.get('tab')) document.querySelector(`[data-tab="${q.get('tab')}"]`).click();
+</script>
+</body>
+</html>

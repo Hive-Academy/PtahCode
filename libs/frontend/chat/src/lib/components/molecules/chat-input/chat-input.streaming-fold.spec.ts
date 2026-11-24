@@ -37,10 +37,13 @@ import { ComposerAttachmentsService } from '../../../services/composer-attachmen
 import { COMPOSER_TRIGGER_CACHE_ENABLED } from '../../../services/composer-trigger-scheduler';
 import { FilePickerService } from '../../../services/file-picker.service';
 import { VoiceInputService } from '../../../services/voice-input.service';
+import { ComposerInputController } from '../../../services/composer-input.controller';
 import { ComposerActivityDirective } from '../../../directives/composer-activity.directive';
 import { ComposerCompactBarComponent } from '@ptah-extension/chat-ui';
 import { ComposerTypeToExpandDirective } from './composer-type-to-expand.directive';
 import { UnifiedSuggestionsDropdownComponent } from '../../file-suggestions/unified-suggestions-dropdown.component';
+import { ComposerAttachMenuComponent } from '../composer-controls/composer-attach-menu.component';
+import { ComposerVoiceButtonComponent } from '../composer-controls/composer-voice-button.component';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -99,6 +102,11 @@ describe('ChatInputComponent streaming fold', () => {
     cancelRecording: jest.fn(),
   };
   const appStateStub = { setCurrentView: jest.fn() };
+  /** The voice button reads `isElectron` when it is created. */
+  const vscodeStub = {
+    isElectron: false,
+    config: () => ({ workspaceRoot: '' }),
+  };
 
   function root(): HTMLElement {
     return fixture.nativeElement as HTMLElement;
@@ -167,10 +175,7 @@ describe('ChatInputComponent streaming fold', () => {
         },
         {
           provide: VSCodeService,
-          useValue: {
-            isElectron: false,
-            config: () => ({ workspaceRoot: '' }),
-          },
+          useValue: vscodeStub,
         },
         { provide: VoiceInputService, useValue: voiceInputStub },
         {
@@ -204,8 +209,12 @@ describe('ChatInputComponent streaming fold', () => {
             ComposerCompactBarComponent,
             ComposerTypeToExpandDirective,
             UnifiedSuggestionsDropdownComponent,
+            // Real toolbar controls: the glass guard and the output wiring
+            // below need their rendered markup.
+            ComposerAttachMenuComponent,
+            ComposerVoiceButtonComponent,
           ],
-          providers: [ComposerAttachmentsService],
+          providers: [ComposerAttachmentsService, ComposerInputController],
           schemas: [CUSTOM_ELEMENTS_SCHEMA],
         },
       })
@@ -430,6 +439,9 @@ describe('ChatInputComponent streaming fold', () => {
     input.value = 'x';
     input.dispatchEvent(new Event('input', { bubbles: true }));
     await settle();
+    // Open the attach menu so its glass overlay is in the DOM.
+    button('chat-attach-btn').click();
+    await settle();
 
     const faded = Array.from(
       root().querySelectorAll<HTMLElement>('.ptah-fold-fade, .ptah-compact-row'),
@@ -441,7 +453,9 @@ describe('ChatInputComponent streaming fold', () => {
     }
     // The toolbar holds the attach menu's glass overlay: it must not fade.
     const toolbar = root().querySelector('.ptah-composer-toolbar')!;
-    expect(toolbar.querySelector('[data-glass-surface]')).not.toBeNull();
+    const overlay = toolbar.querySelector('[data-glass-surface="overlay"]');
+    expect(overlay).not.toBeNull();
+    expect(overlay?.hasAttribute('data-composer-overlay')).toBe(true);
     expect(toolbar.closest('.ptah-fold-fade')).toBeNull();
     expect(toolbar.querySelector('.ptah-fold-fade')).toBeNull();
   });
@@ -464,9 +478,9 @@ describe('ChatInputComponent streaming fold', () => {
     jest.useFakeTimers();
     try {
       button('composer-compact-expand').click();
-      fixture.componentInstance.handleSlashActivated({
+      fixture.componentInstance.composerInput.handleSlashActivated({
         query: '',
-      } as Parameters<ChatInputComponent['handleSlashActivated']>[0]);
+      } as Parameters<ChatInputComponent['composerInput']['handleSlashActivated']>[0]);
       fixture.detectChanges();
       TestBed.tick();
       const dropdown = () =>
@@ -487,9 +501,9 @@ describe('ChatInputComponent streaming fold', () => {
 
   it('opens slash suggestions at once when the composer is not folding', async () => {
     await settle();
-    fixture.componentInstance.handleSlashActivated({
+    fixture.componentInstance.composerInput.handleSlashActivated({
       query: '',
-    } as Parameters<ChatInputComponent['handleSlashActivated']>[0]);
+    } as Parameters<ChatInputComponent['composerInput']['handleSlashActivated']>[0]);
     fixture.detectChanges();
     expect(
       root().querySelector('ptah-unified-suggestions-dropdown'),
@@ -500,5 +514,67 @@ describe('ChatInputComponent streaming fold', () => {
     await startStreaming();
     button('chat-stop-btn').click();
     expect(chatStoreStub.abortWithConfirmation).toHaveBeenCalledTimes(1);
+  });
+
+  describe('toolbar controls, rendered in Electron', () => {
+    beforeEach(() => {
+      vscodeStub.isElectron = true;
+      fixture.destroy();
+      fixture = TestBed.createComponent(ChatInputComponent);
+      fixture.detectChanges();
+    });
+
+    afterEach(() => {
+      vscodeStub.isElectron = false;
+      voiceInputStub.isRecording.set(false);
+      voiceInputStub.startRecording.mockClear();
+      voiceInputStub.stopRecording.mockReset().mockResolvedValue(null);
+    });
+
+    it('puts the Dictate transcript into the draft', async () => {
+      await settle();
+      button('chat-voice-btn').click();
+      await settle();
+      expect(voiceInputStub.startRecording).toHaveBeenCalledTimes(1);
+
+      voiceInputStub.isRecording.set(true);
+      voiceInputStub.stopRecording.mockResolvedValue({
+        ok: true,
+        transcript: ' hello from voice ',
+      });
+      await settle();
+      button('chat-voice-btn').click();
+      await settle();
+
+      expect(voiceInputStub.stopRecording).toHaveBeenCalledTimes(1);
+      expect(fixture.componentInstance.currentMessage()).toBe(
+        'hello from voice',
+      );
+    });
+
+    it('opens the file and the image picker from the attach menu', async () => {
+      const attachments = fixture.debugElement.injector.get(
+        ComposerAttachmentsService,
+      );
+      const pickFiles = jest
+        .spyOn(attachments, 'pickFiles')
+        .mockResolvedValue(undefined);
+      const pickImages = jest
+        .spyOn(attachments, 'pickImages')
+        .mockResolvedValue(undefined);
+      await settle();
+
+      button('chat-attach-btn').click();
+      await settle();
+      button('composer-attach-files').click();
+      await settle();
+      expect(pickFiles).toHaveBeenCalledTimes(1);
+
+      button('chat-attach-btn').click();
+      await settle();
+      button('composer-attach-images').click();
+      await settle();
+      expect(pickImages).toHaveBeenCalledTimes(1);
+    });
   });
 });

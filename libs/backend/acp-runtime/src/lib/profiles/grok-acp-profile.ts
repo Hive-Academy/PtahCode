@@ -112,6 +112,9 @@ export const grokAcpProfile: AcpVendorProfile = {
   displayName: 'Grok',
   signInHint: SIGN_IN_HINT,
   cancelBehavior: 'await-reply',
+  // `/always-approve` toggles "skip all permission prompts" (grok-plain-turn
+  // fixture); a lane's approval mode is set at spawn, so lanes hide it.
+  hiddenLaneCommands: ['always-approve'],
 
   buildSpawn(options: AcpSessionOptions): AcpSpawnSpec {
     // A chat never gets `--always-approve` (`AcpSessionOptions.consumer`).

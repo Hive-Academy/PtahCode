@@ -258,6 +258,11 @@ export interface AcpSession {
    * current one.
    */
   getModels(): readonly AcpModelEntry[];
+  /**
+   * The latest `available_commands_update` of this session, in the agent's
+   * order (empty until one arrives). Each update replaces the whole list.
+   */
+  getAvailableCommands(): readonly AcpAvailableCommand[];
   /** Resolves when the current agent process ends. Never rejects. */
   readonly exited: Promise<AcpProcessExit>;
   /**
@@ -287,6 +292,40 @@ export interface AcpSession {
 
 /** One model the session offers (see {@link AcpSession.getModels}). */
 export type AcpModelEntry = AcpModelEntryShape;
+
+/** One slash command an agent advertised (`available_commands_update`). */
+export interface AcpAvailableCommand {
+  readonly name: string;
+  readonly description?: string;
+  /** `_meta.path` when the agent sent one (Grok skills end in `SKILL.md`). */
+  readonly path?: string;
+}
+
+/**
+ * The command list of an `available_commands_update`, read defensively:
+ * an entry without a string name is skipped; `undefined` when the update
+ * carries no list at all.
+ */
+export function readAvailableCommands(update: unknown): AcpAvailableCommand[] | undefined {
+  if (!isRecord(update) || update['sessionUpdate'] !== 'available_commands_update') return undefined;
+  const list = update['availableCommands'];
+  if (!Array.isArray(list)) return undefined;
+  const commands: AcpAvailableCommand[] = [];
+  for (const entry of list) {
+    if (!isRecord(entry)) continue;
+    const name = entry['name'];
+    if (typeof name !== 'string' || !name) continue;
+    const description = entry['description'];
+    const meta = entry['_meta'];
+    const path = isRecord(meta) ? meta['path'] : undefined;
+    commands.push({
+      name,
+      ...(typeof description === 'string' && description ? { description } : {}),
+      ...(typeof path === 'string' && path ? { path } : {}),
+    });
+  }
+  return commands;
+}
 
 /**
  * The delimited block that carries a session's instructions in front of its
@@ -378,6 +417,8 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
   let advertisedModes: readonly string[] = [];
   /** `models` of the session reply (`session/new|resume|load`), read defensively. */
   let advertisedModels: readonly AcpModelEntry[] = [];
+  /** Latest `available_commands_update` list (session state, not history). */
+  let availableCommands: readonly AcpAvailableCommand[] = [];
   /**
    * Instructions still owed to a new session that took none on `session/new`:
    * sent in front of its first prompt, then cleared.
@@ -542,6 +583,10 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
     sessionUpdate: async (notification) => {
       if (dropStale(target, 'session/update')) return;
       if (!isOwnSession(notification.sessionId)) return;
+      // The command list is session state, not history: an update sent while
+      // `session/load` replays is still the agent's current list.
+      const commands = readAvailableCommands(notification.update);
+      if (commands) availableCommands = commands;
       if (replayCollector) {
         // Everything `session/load` sends before it answers is history.
         replayCollector.add(replayMapper.map(notification.update));
@@ -1781,6 +1826,7 @@ export function createAcpSession(config: AcpSessionConfig): AcpSession {
     getAgentCapabilities: () => gen.init?.agentCapabilities ?? undefined,
     getModes,
     getModels,
+    getAvailableCommands: () => availableCommands,
     get exited() {
       return gen.transport.exited;
     },

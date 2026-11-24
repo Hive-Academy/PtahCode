@@ -355,7 +355,6 @@ export function registerPhase2Libraries(
         };
       },
       undefined,
-      undefined,
       createAgentModelSettingsGetter(container),
     ),
     // Batch 3. `HarnessPropagationService` runs this before each reconcile, so

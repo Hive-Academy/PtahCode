@@ -582,14 +582,14 @@ export class HarnessRpcHandlers {
             settingsError instanceof Error ? settingsError : new Error(msg),
           );
         }
-        // Install the MCP servers the design recorded. Entries the agent left
+        // Record the MCP servers the design named. Entries the agent left
         // without a transport config surface as warnings rather than silently
-        // doing nothing.
+        // doing nothing. Recording writes no config file, so no MCP path joins
+        // appliedPaths: Ptah's gateway serves the recorded servers.
         const mcpOutcome = await this.mcpInstall.installServers(
           config.mcp.servers ?? [],
           workspaceRoot,
         );
-        appliedPaths.push(...mcpOutcome.installedPaths);
         warnings.push(...mcpOutcome.warnings);
 
         // Install the skills.sh skills the design recorded. Refs the agent
@@ -817,11 +817,14 @@ export class HarnessRpcHandlers {
    * {@link partitionRequiredPlugins}. A generic Stage A contract is a duller
    * prompt; a named skill that does not exist is a broken one.
    */
-  private async resolveAvailableSkillIds(workspaceRoot?: string): Promise<string[]> {
+  private async resolveAvailableSkillIds(
+    workspaceRoot?: string,
+  ): Promise<string[]> {
     try {
       if (!workspaceRoot) return [];
       const normalizedRoot = resolveHarnessWorkspaceRoot(workspaceRoot);
-      const effective = await this.pluginLoader.getEffectivePluginConfig(normalizedRoot);
+      const effective =
+        await this.pluginLoader.getEffectivePluginConfig(normalizedRoot);
       const effectiveSkills = new Set(
         this.pluginLoader
           .discoverSkillsForPlugins(effective.overlayPluginPaths)
@@ -830,10 +833,11 @@ export class HarnessRpcHandlers {
       const disabled = new Set(effective.config.disabledSkillIds);
       const discovered = this.workspaceContext
         .discoverAvailableSkills()
-        .filter((skill) =>
-          skill.isActive &&
-          effectiveSkills.has(skill.descriptorId) &&
-          !disabled.has(skill.id),
+        .filter(
+          (skill) =>
+            skill.isActive &&
+            effectiveSkills.has(skill.descriptorId) &&
+            !disabled.has(skill.id),
         )
         .map((skill) => skill.id);
       const decision = this.skillSyncGate.resolve(normalizedRoot);
@@ -931,10 +935,16 @@ export class HarnessRpcHandlers {
         const profileSkillSlugs = this.collectProfileSkillSlugs(profile);
 
         const workspaceRoot = this.workspaceProvider.getWorkspaceRoot();
-        const config = await this.pluginLoader.getWorkspacePluginConfigForWrite();
-        const effectiveConfig = await this.pluginLoader.getEffectivePluginConfig(workspaceRoot);
-        const disabledPlugins = new Set(effectiveConfig.config.disabledPluginIds ?? []);
-        const availableBundled = bundled.filter((id) => !disabledPlugins.has(id));
+        const config =
+          await this.pluginLoader.getWorkspacePluginConfigForWrite();
+        const effectiveConfig =
+          await this.pluginLoader.getEffectivePluginConfig(workspaceRoot);
+        const disabledPlugins = new Set(
+          effectiveConfig.config.disabledPluginIds ?? [],
+        );
+        const availableBundled = bundled.filter(
+          (id) => !disabledPlugins.has(id),
+        );
         const requiredBundled =
           profile &&
           !disabledPlugins.has(DEFAULT_BUNDLED_PLUGIN_ID) &&

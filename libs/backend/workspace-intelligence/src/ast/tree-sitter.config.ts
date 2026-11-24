@@ -15,7 +15,9 @@ export const EXTENSION_LANGUAGE_MAP: Readonly<
   Record<string, SupportedLanguage>
 > = Object.fromEntries(
   MODULES.flatMap((module) =>
-    module.extensions.map((extension) => [extension, module.id] as const),
+    [...module.extensions, ...(module.moduleFlavourExtensions ?? [])].map(
+      (extension) => [extension, module.id] as const,
+    ),
   ),
 );
 

@@ -1,0 +1,53 @@
+# Executor hand-off notes (orchestrator-owned)
+
+- Batch 3: owns `turn-options-refused` in `AgentContinueErrorCode` (`rpc/rpc-agents.types.ts`); Batch 1 left it out.
+- Batches 8 and 11: keep `providers: [VoiceInputService]` on each composer (voice button uses the host's
+  instance). The voice button does the Electron-only check itself, so hosts drop `@if (isElectron)`.
+- Batch 4: choose focus style for pickers — the new pill constant uses main chat's focus outline,
+  `model-selector` uses a focus ring today.
+- Batch 2 exported the new composer-card class constants from `chat-ui/src/index.ts`.
+- RPC renamed by Batch 3: `agent:getLaneComposerOptions` (was `agent:getLaneTurnOptions`; a contract
+  spec rejects new RPC names containing "turn"). batches.md and implementation-plan.md updated.
+- Batch 6: also update `libs/shared/.../permission.parsers.ts` (`parseAskUserQuestionRequest`) and
+  `permission.schemas.ts` (`AskUserQuestionRequestSchema`) so `agentId` survives parsing; add specs.
+- Batch 22: owns the strict `LanePermissionResponse` zod schema in rpc-handlers; check
+  `rpc-surface.spec.ts` (new method needs a handler) — run it in Batch 22.
+- Batch 4 (committed 433db608e): pickers keep main chat's focus ring; effort option ids include an
+  instance id; gated pill uses @if/@else (directive sets title=null when not gated, which would
+  wipe an existing title — later batches using the directive on a titled element must handle it).
+  `composer-controls` has no barrel export yet — Batch 11 adds it if it needs one.
+- Memory: the machine is near its limit. Run checks one at a time; if a verify run is killed for
+  low memory, report it and do not restart it.
+- Batch 7 gap (for Batch 14 or a chat-streaming batch before it): `MonitoredAgent` in
+  `agent-monitor.store.ts` must copy the new `reasoningEffort` and `observedModel` fields so a pending
+  model/effort pick clears on confirmation. Also run `agent-follow-up-queue.service.spec.ts` in the
+  chat test gate (Batch 7 could not while Batch 8 edited chat).
+- Batch 11: add the @ footer line from design-spec 5.3 ("Chosen files are sent as file references."). Draft text stays in chat-input/host (controller edits via connect.text).
+- Batch 9 (queued list): each queued item has extra 'busy' and 'sendable' fields; Send-now input is named 'sendNowAction' (outputs stay 'withdraw' and 'sendNow'). Batch 11 must use these names.
+- Batch 10 (committed): `LaneDeliveryController` API — connect({ agentId, draft, stopped, cli,
+  resumePath, accepted }); send(delivery, allowPartialTurnLoss?), withdraw(id), refreshPreviews(),
+  draftChanged(); signals sending, error, state, previewsReady, queuedReceipts, lastReceiptLabel,
+  queueDisabled, nowDisabled, nowNeedsConfirmation, hint, resumeDescription. Provide it next to
+  ComposerAttachmentsService. Batch 11 owns the menu, loss dialog, focus and Req 1.6 image gating.
+- chat-streaming gap (same follow-up as the MonitoredAgent fields): `AgentDeliveryStore.recoverIntoComposer`
+  restores text only, not attachments/model/effort.
+- Batch 11: switch lane-delivery.controller.ts:226-229 to `takeRecoveredMessage()` (restores text + turn: files, images, model, effort), then delete `takeRecovered` and its spec mocks in chat-streaming.
+- Open (minor, from fix-p2): focus is lost when a gated pill swaps to the enabled one; check in Electron visual review along with the attach-menu 'contents' host.
+- Batch 22 (binding, from code-logic-review-p3p4 S1/S2): the frontend now sends every main-chat
+  decision (`allow`, `always_allow`, `deny`, ...) and `modifiedInput` in `agent:permissionResponse`.
+  (a) `agent-rpc.handlers.ts:~1398` must forward `modifiedInput` (today it rebuilds `{id, decision,
+  reason}`); (b) `copilot-permission-bridge.ts:185,225` must treat `always_allow` as allow (today
+  only `'allow'`, so Always allow DENIES on Copilot) and apply or explicitly refuse `modifiedInput`;
+  add `copilot-permission-bridge.ts` (+ spec) to Batch 22's write set. The strict zod schema must
+  accept exactly what the frontend sends. A lane that cannot honour an edit must refuse visibly, not
+  report "Allowed by you".
+- Batch 30 (binding, from code-logic-review-p6 M6): fix the dormant Claude steer fold-in in
+  `claude-sdk-lane-runner.ts` before `manifestSteer` turns it on. (a) `reconcileSteers`: a result
+  frame without `user_message_uuids` (older CLI) is "unknown, assume folded": no placeholder turn
+  and no "A message may start the next turn." info, otherwise the next real turn's `done` never
+  settles. (b) `steer`: remove the uuid from `pendingSteers` when `context.named.enqueue` (or
+  `mailbox.push`) throws. (c) Insert the missed-steer placeholder at the position of the turn the
+  steer was sent into, not at `inFlight` index 1 (a queued `continue` can sit there). P6 replaced
+  `pendingTurns`/`queuedTurns` with the `inFlight` list (each entry may carry its prompt uuid), so
+  place it by that list. (d) Pass `manifestSteer` from both `claude-cli.adapter.ts` and
+  `ptah-cli-registry.ts` (today neither passes it; grep shows only the declaration and the check).

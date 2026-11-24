@@ -198,8 +198,9 @@ describe('registerCliAgentRuntimeServices — PtahCliRegistry DI smoke', () => {
     );
     expect(adapter.capabilities().messaging).toMatchObject({
       continuation: { state: 'supported' },
+      // Steer stays dormant until Batch 30; interrupt is supported since Batch 23.
       steer: { state: 'unsupported' },
-      interrupt: { state: 'unsupported' },
+      interrupt: { state: 'supported' },
       resume: { state: 'supported' },
     });
   });

@@ -140,8 +140,35 @@ describe('QueuedFollowUpsComponent', () => {
       entry('a', { note: 'The turn changed. It stays queued for the next turn.' }),
     );
     const fixture = render();
+    const note = fixture.nativeElement.querySelector('[role="status"]');
+    expect(note.textContent).toContain('The turn changed');
+    expect(note.classList).toContain('text-state-need');
+  });
+
+  it('disables both buttons while an action is in flight', async () => {
+    store.add(entry('a'));
+    followUps.canSendNow.mockReturnValue(true);
+    let resolve!: () => void;
+    followUps.withdraw.mockReturnValue(
+      new Promise<boolean>((done) => (resolve = () => done(true))),
+    );
+    const fixture = render();
+    const root = fixture.nativeElement as HTMLElement;
+    (root.querySelector('[data-testid="queued-withdraw"]') as HTMLButtonElement).click();
+    fixture.detectChanges();
     expect(
-      fixture.nativeElement.querySelector('[role="status"]').textContent,
-    ).toContain('The turn changed');
+      (root.querySelector('[data-testid="queued-withdraw"]') as HTMLButtonElement).disabled,
+    ).toBe(true);
+    expect(
+      (root.querySelector('[data-testid="queued-follow-up-send-now"]') as HTMLButtonElement)
+        .disabled,
+    ).toBe(true);
+    resolve();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(
+      (root.querySelector('[data-testid="queued-withdraw"]') as HTMLButtonElement).disabled,
+    ).toBe(false);
+    expect(followUps.withdraw).toHaveBeenCalledTimes(1);
   });
 });

@@ -3,6 +3,7 @@ import type { KimiCodeRequestCredential } from '../../providers/kimi-code/kimi-c
 import { KimiCodeHomeResolver } from '../../providers/kimi-code/kimi-code-home-resolver';
 import { PlanSecret, type PlanCredentialResolution } from '../plan-credential.source';
 import { cliStoreOwnerKey, credentialOwnerKey, quotaOwnerRefFromKey } from '../provider-owner.resolver';
+import { applicableLimits, classifyLaneState, FRESHNESS_MS, NEAR_LIMIT_PERCENT } from '@ptah-extension/shared';
 import { createKimiCodePlanUsageReader, KIMI_CODE_USAGE_URL } from './kimi-code-plan-usage.reader';
 import type { PlanOwnerTarget } from './plan-usage-reader.types';
 
@@ -62,6 +63,53 @@ describe('Kimi Code plan usage reader', () => {
       method: 'GET', redirect: 'error',
       headers: { Authorization: 'Bearer oauth-token', Accept: 'application/json' },
     }));
+  });
+
+  describe('a plan that reached its monthly limit', () => {
+    const resetAt = '2026-11-25T00:00:00Z';
+    const atLimit = { usages: {
+      limit_5h: { used_ratio: 0, reset_time: '2026-11-23T16:00:00Z' },
+      limit_7d: { used_ratio: 0.4, reset_time: '2026-11-27T00:00:00Z' },
+      limit_month_total: { used_ratio: 1, reset_time: resetAt },
+      limit_month_code: { used_ratio: 1, reset_time: resetAt },
+    } };
+
+    it('keeps the full windows, the unused window and every reset time', async () => {
+      const result = await harness({ payload: atLimit }).reader({ target: main(), refresh: true });
+      expect(result.windows.map((value) => [value.key, value.label,
+        value.used?.kind === 'percent' ? value.used.percent : undefined])).toEqual([
+        ['five_hour', 'Kimi Code · 5-hour', 0], ['weekly', 'Kimi Code · Weekly', 40],
+        ['monthly', 'Kimi Code · Monthly total', 100], ['other:monthly-code', 'Kimi Code · Monthly code', 100],
+      ]);
+      const [fiveHour, , total, code] = result.windows;
+      expect(total).toMatchObject({ resetsAt: Date.parse(resetAt), resetSource: 'provider-api',
+        exhaustion: { source: 'provider-api', resetsAt: Date.parse(resetAt), observedAt: 1000 } });
+      expect(code).toMatchObject({ resetsAt: Date.parse(resetAt), exhaustion: { resetsAt: Date.parse(resetAt) } });
+      // A window at 0 % is kept and carries no exhaustion.
+      expect(fiveHour).toMatchObject({ usedSource: 'provider-api', resetsAt: Date.parse('2026-11-23T16:00:00Z') });
+      expect(fiveHour?.exhaustion).toBeUndefined();
+    });
+
+    it('gates the lane as AT LIMIT, naming the monthly window, but not for the 5-hour window', async () => {
+      const result = await harness({ payload: atLimit }).reader({ target: main(), refresh: true });
+      const now = Date.parse('2026-11-23T12:00:00Z');
+      const snapshot = { owner: oauthOwner, status: result.status, windowSetEstablished: true,
+        windows: result.windows.map((value) => ({ ...value, observedAt: now - 60_000, usedObservedAt: now - 60_000 })),
+        ownerEvidence: [] } as Parameters<typeof applicableLimits>[0];
+      const state = classifyLaneState(applicableLimits(snapshot, null),
+        { now, nearLimitPercent: NEAR_LIMIT_PERCENT, freshnessMs: FRESHNESS_MS });
+      expect(state.state).toBe('at-limit');
+      expect(state.reasons.map((reason) => (reason as { window?: { label: string } }).window?.label))
+        .toEqual(expect.arrayContaining(['Kimi Code · Monthly total']));
+      expect(JSON.stringify(state.reasons)).not.toContain('5-hour');
+    });
+
+    it('does not mark a full window without a reset time as exhausted', async () => {
+      const payload = { usages: { limit_month_total: { used_ratio: 1 } } };
+      const result = await harness({ payload }).reader({ target: main(), refresh: true });
+      expect(result.windows[0]?.exhaustion).toBeUndefined();
+      expect(result.windows[0]?.used).toEqual({ kind: 'percent', percent: 100 });
+    });
   });
 
   it('omits absent monthly entries', async () => {

@@ -12,10 +12,11 @@ import {
 import {
   AgentCardComponent,
   AgentContinueInputComponent,
-  AgentPermissionResponder,
   ChatSessionLayoutComponent,
   ChatStore,
   LANE_COLUMN_CLASS,
+  LANE_WAITING_LABEL,
+  LanePermissionView,
   SubagentLaneComponent,
   ownedBySession,
   parseLaneKey,
@@ -26,7 +27,13 @@ import {
   AgentMonitorStore,
 } from '@ptah-extension/chat-streaming';
 import { NgTemplateOutlet } from '@angular/common';
-import { BackgroundAgentStripComponent, QuestionCardComponent } from '@ptah-extension/chat-ui';
+import {
+  BackgroundAgentStripComponent,
+  PermissionRequestCardComponent,
+  QuestionCardComponent,
+} from '@ptah-extension/chat-ui';
+import { PtahBadgeDirective } from '@ptah-extension/ui';
+import { Check, LucideAngularModule } from 'lucide-angular';
 import { CanvasDetailTranscriptComponent } from './canvas-detail-transcript.component';
 import { CanvasDetailService } from './canvas-detail.service';
 
@@ -83,9 +90,13 @@ const LANE_PANEL_CLASS =
     SubagentLaneComponent,
     BackgroundAgentStripComponent,
     QuestionCardComponent,
+    PermissionRequestCardComponent,
+    PtahBadgeDirective,
+    LucideAngularModule,
     CanvasDetailTranscriptComponent,
     NgTemplateOutlet,
   ],
+  providers: [LanePermissionView],
   changeDetection: ChangeDetectionStrategy.OnPush,
   host: {
     class: 'block h-full min-h-0',
@@ -142,7 +153,7 @@ const LANE_PANEL_CLASS =
         >
           @for (request of pendingQuestions(); track request.id) {
             <div class="mx-auto w-full max-w-[758px] px-2 pb-2">
-              <ptah-question-card [request]="request" (answered)="chatStore.handleQuestionResponse($event)" />
+              <ptah-question-card [request]="request" (answered)="chatStore.handleQuestionResponse($event, tabId())" />
             </div>
           }
           @switch (selectedKind()) {
@@ -156,45 +167,63 @@ const LANE_PANEL_CLASS =
                   data-testid="lane-panel"
                 >
                   <ptah-chat-session-layout class="!flex-none min-h-full">
-                    @for (
-                      permission of agent.permissionQueue;
-                      track permission.requestId
+                    <!-- The lane's approvals and questions, as main chat's cards (Req 5). -->
+                    @if (
+                      prompts.waiting() ||
+                      prompts.notice() ||
+                      prompts.resolvedStatus()
                     ) {
                       <div
                         [class]="
-                          laneColumnClass +
-                          ' mb-2 shrink-0 rounded-box border border-warning/40 bg-warning/10 p-2 text-xs'
+                          laneColumnClass + ' mb-2 flex shrink-0 flex-col gap-1.5'
                         "
+                        data-testid="lane-prompts"
                       >
-                        <div>Permission: {{ permission.toolName }}</div>
-                        <div class="flex gap-2 mt-1">
-                          <button
-                            type="button"
-                            class="btn btn-xs btn-success"
-                            (click)="
-                              respond(
-                                agent.agentId,
-                                permission.requestId,
-                                'allow'
-                              )
-                            "
+                        @if (prompts.waiting()) {
+                          <span
+                            ptahBadge
+                            tone="warn"
+                            size="xs"
+                            class="self-start"
+                            role="status"
+                            >{{ waitingLabel }}</span
                           >
-                            Allow
-                          </button>
-                          <button
-                            type="button"
-                            class="btn btn-xs btn-error btn-outline"
-                            (click)="
-                              respond(
-                                agent.agentId,
-                                permission.requestId,
-                                'deny'
-                              )
-                            "
+                        }
+                        @if (prompts.notice(); as notice) {
+                          <p class="text-[11px] text-state-need" role="status">
+                            {{ notice }}
+                          </p>
+                        }
+                        @for (request of prompts.permissions(); track request.id) {
+                          <ptah-permission-request-card
+                            [request]="request"
+                            [laneLabel]="prompts.laneLabel()"
+                            (responded)="prompts.respond($event)"
+                          />
+                        }
+                        @for (request of prompts.questions(); track request.id) {
+                          <ptah-question-card
+                            [request]="request"
+                            [laneLabel]="prompts.laneLabel()"
+                            (answered)="prompts.answer($event)"
+                          />
+                        }
+                        @if (
+                          !prompts.waiting() && prompts.resolvedStatus();
+                          as status
+                        ) {
+                          <p
+                            class="flex items-center gap-1 text-[11px] text-base-content-muted"
+                            role="status"
                           >
-                            Deny
-                          </button>
-                        </div>
+                            <lucide-angular
+                              [img]="CheckIcon"
+                              class="w-3 h-3 flex-shrink-0 text-success"
+                              aria-hidden="true"
+                            />
+                            {{ status }}
+                          </p>
+                        }
                       </div>
                     }
                     <ptah-agent-card
@@ -280,7 +309,6 @@ export class CanvasLaneViewComponent {
   readonly chatStore = inject(ChatStore);
   private readonly detail = inject(CanvasDetailService);
   private readonly background = inject(BackgroundAgentStore);
-  private readonly responder = inject(AgentPermissionResponder);
   private readonly host = inject<ElementRef<HTMLElement>>(ElementRef);
   private readonly injector = inject(Injector);
   private opener: HTMLElement | null = null;
@@ -290,6 +318,15 @@ export class CanvasLaneViewComponent {
   readonly panelId = input('canvas-lane-panel');
   readonly sessionId = input<string | null>(null);
   readonly laneKey = input('orchestrator');
+  /** The selected CLI lane's approvals and questions; empty for other lanes. */
+  protected readonly prompts = inject(LanePermissionView);
+  protected readonly waitingLabel = LANE_WAITING_LABEL;
+  protected readonly CheckIcon = Check;
+  /**
+   * Tab questions shown above a non-orchestrator lane, which covers the
+   * transcript. A question asked by a CLI lane (`agentId` set) is left out: it
+   * shows only in that lane's own card list, never in another lane.
+   */
   readonly pendingQuestions = computed(() => {
     if (this.selectedKind() === 'orchestrator') return [];
     const questions = this.chatStore.questionRequests();
@@ -297,7 +334,7 @@ export class CanvasLaneViewComponent {
     this.chatStore.routingTargetRevision();
     const sessionId = this.sessionId();
     const tabId = this.tabId();
-    return questions.filter(request => questionBelongsToTab(
+    return questions.filter(request => !request.agentId && questionBelongsToTab(
       request,
       this.chatStore.questionTargetTabsFor(request.id),
       this.chatStore.isQuestionClaimedByWorkflow(request),
@@ -349,6 +386,7 @@ export class CanvasLaneViewComponent {
     this.chatStore.getPermissionForTool(id);
 
   constructor() {
+    this.prompts.connect({ agent: this.selectedCli });
     let previousTabId: string | undefined;
     let previousKind: string | undefined;
     effect(() => {
@@ -393,14 +431,6 @@ export class CanvasLaneViewComponent {
       if (agent && !agent.expanded)
         this.monitor.toggleAgentExpanded(agent.agentId);
     });
-  }
-
-  respond(
-    agentId: string,
-    requestId: string,
-    decision: 'allow' | 'deny',
-  ): void {
-    this.responder.respondLane(agentId, requestId, decision);
   }
 
   back(): void {
