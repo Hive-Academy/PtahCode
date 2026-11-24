@@ -5,6 +5,7 @@ import { provideMarkdown } from 'ngx-markdown';
 import {
   AgentDeliveryStore,
   AgentMonitorStore,
+  PermissionHandlerService,
   type MonitoredAgent,
 } from '@ptah-extension/chat-streaming';
 import {
@@ -48,6 +49,7 @@ describe('AgentCardComponent flat execution header', () => {
     TestBed.configureTestingModule({
       imports: [AgentCardComponent],
       providers: [
+        { provide: PermissionHandlerService, useValue: { questionRequests: signal([]) } },
         { provide: PTAH_CLOCK, useValue: { now: signal(Date.now()), acquire: () => () => undefined } },
         provideSurfaceActiveTesting(),
         provideMarkdown(),

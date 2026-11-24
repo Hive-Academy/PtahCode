@@ -129,6 +129,25 @@ describe('AgentPermissionResponder', () => {
     expect(call).not.toHaveBeenCalled();
   });
 
+  it('sends always_allow with the edited tool input as a LanePermissionResponse', () => {
+    expect(responder.respondLane('agent', 'first', 'always_allow', undefined, { command: 'npm test' })).toBe(true);
+    expect(call).toHaveBeenCalledWith('agent:permissionResponse',
+      { requestId: 'first', decision: 'always_allow', modifiedInput: { command: 'npm test' } });
+  });
+
+  it('sends deny_with_message with the typed reason', () => {
+    expect(responder.respondLane('agent', 'first', 'deny_with_message', 'Use the lint target')).toBe(true);
+    expect(call).toHaveBeenCalledWith('agent:permissionResponse',
+      { requestId: 'first', decision: 'deny_with_message', reason: 'Use the lint target' });
+  });
+
+  it('refuses a second answer after the first was acknowledged', async () => {
+    expect(responder.respondLane('agent', 'first', 'always_allow')).toBe(true);
+    await settle();
+    expect(responder.respondLane('agent', 'first', 'deny')).toBe(false);
+    expect(call).toHaveBeenCalledTimes(1);
+  });
+
   it('forwards the deciding tab for session permissions', () => {
     const request = { id: 'session-perm' } as PermissionRequest;
     responder.respondSession(request, 'allow', 'tab-2');

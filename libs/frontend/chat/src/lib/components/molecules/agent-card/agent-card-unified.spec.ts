@@ -9,6 +9,7 @@ import { provideMarkdown } from 'ngx-markdown';
 import {
   AgentDeliveryStore,
   AgentMonitorStore,
+  PermissionHandlerService,
   type MonitoredAgent,
 } from '@ptah-extension/chat-streaming';
 import {
@@ -50,6 +51,7 @@ describe('agent card unified output regressions', () => {
     TestBed.configureTestingModule({
       imports: [AgentCardComponent, CliAgentOutputComponent],
       providers: [
+        { provide: PermissionHandlerService, useValue: { questionRequests: signal([]) } },
         { provide: PTAH_CLOCK, useValue: { now: signal(Date.now()), acquire: () => () => undefined } },
         {
           provide: ChatStore,

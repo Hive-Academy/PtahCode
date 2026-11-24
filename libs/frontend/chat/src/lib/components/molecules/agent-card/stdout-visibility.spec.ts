@@ -5,6 +5,7 @@ import { provideMarkdown } from 'ngx-markdown';
 import {
   AgentDeliveryStore,
   AgentMonitorStore,
+  PermissionHandlerService,
   type MonitoredAgent,
 } from '@ptah-extension/chat-streaming';
 import {
@@ -74,6 +75,7 @@ describe('raw stdout fallback', () => {
     TestBed.configureTestingModule({
       imports: [AgentCardComponent],
       providers: [
+        { provide: PermissionHandlerService, useValue: { questionRequests: signal([]) } },
         { provide: PTAH_CLOCK, useValue: { now, acquire: () => () => undefined } },
         {
           provide: ChatStore,

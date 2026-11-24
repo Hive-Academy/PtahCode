@@ -39,6 +39,13 @@ export { SessionWorktreeLookup } from './lib/services/session-git-scope/session-
 export { ChatAgentFeedbackSender } from './lib/services/agent-feedback/chat-agent-feedback-sender.service';
 export { AgentPermissionResponder } from './lib/services/agent-permission-responder';
 export {
+  LanePermissionView,
+  LANE_ANSWER_REFUSED_TEXT,
+  LANE_WAITING_LABEL,
+  toLanePermissionRequest,
+  type LanePermissionViewSources,
+} from './lib/services/lane-permission-view';
+export {
   buildLaneSummary,
   LANE_KEY_PREFIX,
   laneKey,

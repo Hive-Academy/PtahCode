@@ -5,6 +5,7 @@ import {
 } from '@ptah-extension/chat-streaming';
 import { ClaudeRpcService } from '@ptah-extension/core';
 import type {
+  LanePermissionResponse,
   PermissionRequest,
   PermissionResponse,
 } from '@ptah-extension/shared';
@@ -30,11 +31,18 @@ export class AgentPermissionResponder {
     });
   }
 
+  /**
+   * Send a lane user's answer as a `LanePermissionResponse`. Every decision of
+   * main chat's permission card is accepted, with the edited tool input.
+   * Returns false when the answer was not sent: already answered, awaiting
+   * reconciliation, or no longer pending for this lane.
+   */
   respondLane(
     agentId: string,
     requestId: string,
-    decision: 'allow' | 'deny',
+    decision: LanePermissionResponse['decision'],
     reason?: string,
+    modifiedInput?: LanePermissionResponse['modifiedInput'],
   ): boolean {
     if (this.answeredRequestIds.has(requestId)) return false;
     if (this.reconciliationRequired.has(requestId)) {
@@ -46,15 +54,20 @@ export class AgentPermissionResponder {
         request.requestId === requestId && this.agentStore.permissionBelongsToAgent(request, agent))
     )) return false;
     this.answeredRequestIds.add(requestId);
-    void this.withTimeout(this.rpc.call('agent:permissionResponse', {
-          requestId,
-          decision,
-          ...(decision === 'deny'
-            ? { reason: reason ?? 'User denied' }
-            : reason === undefined
-              ? {}
-              : { reason }),
-    }), AgentPermissionResponder.ACK_TIMEOUT_MS).then((result) => {
+    const response: LanePermissionResponse = {
+      requestId,
+      decision,
+      ...(decision === 'deny'
+        ? { reason: reason ?? 'User denied' }
+        : reason === undefined
+          ? {}
+          : { reason }),
+      ...(modifiedInput === undefined ? {} : { modifiedInput }),
+    };
+    void this.withTimeout(
+      this.rpc.call('agent:permissionResponse', response),
+      AgentPermissionResponder.ACK_TIMEOUT_MS,
+    ).then((result) => {
       if (result.success && result.data?.success) {
         this.agentStore.clearPermission(agentId, requestId);
       } else {
