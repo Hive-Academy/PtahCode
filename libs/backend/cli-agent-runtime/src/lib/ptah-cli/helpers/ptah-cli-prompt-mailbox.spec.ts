@@ -23,11 +23,37 @@ describe('createPromptMailbox', () => {
     const mailbox = createPromptMailbox('task');
     await mailbox.prompt.next();
 
-    mailbox.push('follow-up');
+    mailbox.push({ content: 'follow-up' });
     const second = await mailbox.prompt.next();
 
     expect(second.done).toBe(false);
     expect(content(second.value)).toBe('follow-up');
+  });
+
+  it('carries content blocks, the given uuid and the session id', async () => {
+    const mailbox = createPromptMailbox('task');
+    await mailbox.prompt.next();
+    const blocks = [
+      { type: 'text' as const, text: 'look' },
+      {
+        type: 'image' as const,
+        source: { type: 'base64' as const, media_type: 'image/png' as const, data: 'AAAA' },
+      },
+    ];
+
+    mailbox.push({ content: blocks, uuid: 'steer-uuid' }, 'session-1');
+    const next = await mailbox.prompt.next();
+
+    expect(next.value.message.content).toEqual(blocks);
+    expect(next.value.uuid).toBe('steer-uuid');
+    expect(next.value.session_id).toBe('session-1');
+  });
+
+  it('generates a uuid when none is given', async () => {
+    const mailbox = createPromptMailbox('task');
+    const first = await mailbox.prompt.next();
+    expect(typeof first.value.uuid).toBe('string');
+    expect(first.value.uuid.length).toBeGreaterThan(0);
   });
 
   it('blocks waiting for the next message until one is pushed', async () => {
@@ -42,7 +68,7 @@ describe('createPromptMailbox', () => {
     await Promise.resolve();
     expect(resolved).toBe(false);
 
-    mailbox.push('later');
+    mailbox.push({ content: 'later' });
     const result = await pending;
     expect(content(result.value)).toBe('later');
   });
@@ -62,7 +88,7 @@ describe('createPromptMailbox', () => {
     const mailbox = createPromptMailbox('task');
     await mailbox.prompt.next();
     mailbox.close();
-    mailbox.push('dropped');
+    mailbox.push({ content: 'dropped' });
 
     const result = await mailbox.prompt.next();
     expect(result.done).toBe(true);

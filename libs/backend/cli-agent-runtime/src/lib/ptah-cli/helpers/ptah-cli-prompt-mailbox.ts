@@ -1,19 +1,32 @@
 import { randomUUID } from 'node:crypto';
 import type { SDKUserMessage } from '@ptah-extension/agent-sdk';
 
+/** A user turn's content: plain text, or text plus image blocks. */
+export type PromptTurnContent = SDKUserMessage['message']['content'];
+
+/** One user turn for the mailbox; `uuid` is generated when absent. */
+export interface PromptTurn {
+  readonly content: PromptTurnContent;
+  readonly uuid?: string;
+}
+
 export interface PromptMailbox {
   readonly prompt: AsyncGenerator<SDKUserMessage>;
-  push(message: string, sessionId?: string): void;
+  push(turn: PromptTurn, sessionId?: string): void;
   close(): void;
 }
 
-function toUserMessage(message: string, sessionId?: string): SDKUserMessage {
+/** The SDK user message for one turn; shared by the mailbox and the named-account gate. */
+export function toUserMessage(
+  turn: PromptTurn,
+  sessionId?: string,
+): SDKUserMessage {
   return {
     type: 'user',
-    uuid: randomUUID() as SDKUserMessage['uuid'],
+    uuid: (turn.uuid ?? randomUUID()) as SDKUserMessage['uuid'],
     message: {
       role: 'user',
-      content: message,
+      content: turn.content,
     },
     parent_tool_use_id: null,
     ...(sessionId ? { session_id: sessionId } : {}),
@@ -21,7 +34,7 @@ function toUserMessage(message: string, sessionId?: string): SDKUserMessage {
 }
 
 export function createPromptMailbox(initialTask: string): PromptMailbox {
-  const queue: SDKUserMessage[] = [toUserMessage(initialTask)];
+  const queue: SDKUserMessage[] = [toUserMessage({ content: initialTask })];
   let closed = false;
   let notify: (() => void) | null = null;
 
@@ -55,11 +68,11 @@ export function createPromptMailbox(initialTask: string): PromptMailbox {
 
   return {
     prompt: generator(),
-    push(message: string, sessionId?: string): void {
+    push(turn: PromptTurn, sessionId?: string): void {
       if (closed) {
         return;
       }
-      queue.push(toUserMessage(message, sessionId));
+      queue.push(toUserMessage(turn, sessionId));
       wake();
     },
     close(): void {

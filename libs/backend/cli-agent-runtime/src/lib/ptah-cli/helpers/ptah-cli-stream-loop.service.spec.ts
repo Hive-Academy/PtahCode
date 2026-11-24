@@ -1171,3 +1171,82 @@ describe('PtahCliStreamLoop usage tracking', () => {
     expect(emitSegment).toHaveBeenCalled();
   });
 });
+
+describe('PtahCliStreamLoop live message usage and interrupted turns (B5)', () => {
+  function makeLiveLoop(onTurnResult?: (result: { subtype: string }) => { interrupted: boolean }) {
+    const emitSegment = jest.fn();
+    const onTurnComplete = jest.fn();
+    const loop = new PtahCliStreamLoop({
+      logger: createLogger(),
+      messageTransformer: createTransformerStub(),
+      emitOutput: jest.fn(),
+      emitSegment,
+      emitStreamEvent: jest.fn(),
+      agentName: 'test-agent',
+      onTurnComplete,
+      ...(onTurnResult && { onTurnResult: jest.fn(onTurnResult) }),
+    });
+    return { loop, emitSegment, onTurnComplete };
+  }
+  function assistant(id: string, block: Record<string, unknown>): SDKMessage {
+    return {
+      type: 'assistant',
+      parent_tool_use_id: null,
+      message: {
+        id,
+        model: 'claude-opus-x',
+        content: [block],
+        usage: { input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 3, cache_creation_input_tokens: null },
+      },
+    } as unknown as SDKMessage;
+  }
+  function usageSegments(emitSegment: jest.Mock) {
+    return emitSegment.mock.calls.map(([segment]) => segment).filter((segment) => segment.usage);
+  }
+
+  it('counts two content-block frames of one message once, as message scope', async () => {
+    const { loop, emitSegment } = makeLiveLoop();
+    await loop.run(manyMessages([
+      assistant('msg-1', { type: 'thinking', thinking: 'hm' }),
+      assistant('msg-1', { type: 'text', text: 'hi' }),
+      assistant('msg-2', { type: 'text', text: 'again' }),
+    ]));
+    expect(usageSegments(emitSegment)).toEqual([
+      { type: 'info', content: 'Claude message usage.', usageScope: 'message',
+        usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 3, model: 'claude-opus-x' } },
+      { type: 'info', content: 'Claude message usage.', usageScope: 'message',
+        usage: { inputTokens: 10, outputTokens: 5, cacheReadTokens: 3, model: 'claude-opus-x' } },
+    ]);
+  });
+
+  it('marks the result usage as the turn total', async () => {
+    const { loop, emitSegment } = makeLiveLoop();
+    await loop.run(singleMessage({
+      type: 'result', subtype: 'success', num_turns: 1,
+      usage: { input_tokens: 20, output_tokens: 10 },
+    } as unknown as SDKMessage));
+    expect(usageSegments(emitSegment)).toEqual([
+      expect.objectContaining({ usageScope: 'turn', usage: expect.objectContaining({ inputTokens: 20 }) }),
+    ]);
+  });
+
+  it('ends an interrupted error_during_execution turn with exit 0 and no error segment', async () => {
+    const { loop, emitSegment, onTurnComplete } = makeLiveLoop(() => ({ interrupted: true }));
+    await loop.run(singleMessage(errorResult));
+    expect(onTurnComplete).toHaveBeenCalledWith(0);
+    expect(emitSegment).toHaveBeenCalledWith({ type: 'info', content: 'Turn interrupted.' });
+    expect(emitSegment).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'error' }));
+  });
+
+  it('keeps exit 1 for any other error subtype even when the runner reports an interrupt', async () => {
+    const { loop, onTurnComplete } = makeLiveLoop(() => ({ interrupted: true }));
+    await loop.run(singleMessage({ type: 'result', subtype: 'error_max_turns', errors: ['x'] } as unknown as SDKMessage));
+    expect(onTurnComplete).toHaveBeenCalledWith(1);
+  });
+
+  it('keeps exit 1 for an error_during_execution the runner did not interrupt', async () => {
+    const { loop, onTurnComplete } = makeLiveLoop(() => ({ interrupted: false }));
+    await loop.run(singleMessage(errorResult));
+    expect(onTurnComplete).toHaveBeenCalledWith(1);
+  });
+});

@@ -1,6 +1,6 @@
 # Batches - TASK_2026_2320_lnpar
 
-Total tasks: 49 | Batches: 30 | Complete: 22/30
+Total tasks: 49 | Batches: 30 | Complete: 23/30
 
 Source: `implementation-plan.md` revision 3 plus "Binding notes from Gate 2" (R3-1, R3-2 bind
 Batch 20), `task-description.md`, `design-spec.md`, `prototype/README.md`, `parity-inventory.md`,
@@ -1045,7 +1045,7 @@ Edge cases:
 
 - Artifacts exist; scoped commands pass; Phase P5 review requested.
 
-## Batch 23: B5a Claude SDK lane runner (interrupt, content blocks, settings, live usage) - PENDING (AFTER REBASE)
+## Batch 23: B5a Claude SDK lane runner (interrupt, content blocks, settings, live usage) - COMPLETE
 
 - Shape: logic
 - Estimated weight (tokens): ~42k (runner 8.9k, runner spec 13.6k, mailbox + spec ~2k, stream loop 8.7k + spec ranges ~5k, sdk.d.ts ranges ~2k)
@@ -1075,11 +1075,11 @@ Edge cases:
 - Tasks: 2 | Depends on: Batches 15, 21
 - Phase: P6 Adapters
 
-### Task 23.1: Runner: content blocks, interrupt lifecycle, settings, catalog - PENDING
+### Task 23.1: Runner: content blocks, interrupt lifecycle, settings, catalog - COMPLETE
 
 - Validation notes: A3, A14
 
-### Task 23.2: Stream loop message-scoped usage with id dedupe - PENDING
+### Task 23.2: Stream loop message-scoped usage with id dedupe - COMPLETE
 
 - Validation notes: A2
 

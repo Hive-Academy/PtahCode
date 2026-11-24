@@ -10,6 +10,7 @@ import type {
   ProviderAccountAdmissionPort,
 } from '@ptah-extension/auth-providers-tokens';
 import type { ProviderAccountBinding } from '@ptah-extension/shared';
+import { LaneTurnSettingRefusal } from '../cli-agents/cli-adapters/cli-adapter.interface';
 import {
   ClaudeCertifiedLaunchRefusal,
   assertCertifiedLaunch,
@@ -37,6 +38,9 @@ import {
   claudeLaneRefusal,
   claudeLaneRefusalCode,
   claudeLaneForeignErrorClass,
+  claudeLaneTurnContent,
+  CLAUDE_INTERRUPT_TIMEOUT_TEXT,
+  CLAUDE_LATE_INTERRUPT_TEXT,
   type ClaudeLaneAccountPersistence,
   type ClaudeSdkLaneRunContext,
 } from './claude-sdk-lane-runner';
@@ -290,6 +294,7 @@ describe('Claude native lane options', () => {
 function runnerFixture(
   ownerSettled: Promise<void> = Promise.resolve(),
   named?: ClaudeSdkLaneRunContext['named'],
+  sdkQuery?: object,
 ) {
   let finish: (code: number) => void = () => {
     throw new Error('not initialized');
@@ -308,6 +313,7 @@ function runnerFixture(
   const remove = jest.spyOn(abortController.signal, 'removeEventListener');
   type QueryFn = ClaudeSdkLaneRunContext['queryFn'];
   const queryFn = jest.fn<ReturnType<QueryFn>, Parameters<QueryFn>>();
+  if (sdkQuery) queryFn.mockReturnValue(sdkQuery as ReturnType<QueryFn>);
   const context: ClaudeSdkLaneRunContext = {
     queryFn,
     named,
@@ -352,8 +358,8 @@ describe('Claude native lane lifecycle', () => {
     expect(f.context.options.mcpServers).toHaveProperty('ptah');
     expect(f.handle.supportsContinuation?.()).toBe(true);
     expect(f.handle.steer).toBeUndefined();
-    expect(f.handle.interrupt).toBeUndefined();
-    expect(f.handle.supportsInterrupt?.() ?? false).toBe(false);
+    expect(typeof f.handle.interrupt).toBe('function');
+    expect(f.handle.supportsInterrupt?.()).toBe(true);
     f.finish(0);
     await expect(f.handle.done).resolves.toBe(0);
   });
@@ -519,9 +525,9 @@ describe('named runner handoff', () => {
     expect(f.handle.accountBinding).toBe(f.named.reference.accountBinding);
     expect(f.handle.accountBindingId).toBe('run');
     const queued = await f.handle.continue?.('next');
-    expect(f.named.enqueue).toHaveBeenCalledWith('next', undefined);
+    expect(f.named.enqueue).toHaveBeenCalledWith({ content: 'next' }, undefined);
     expect(f.handle.steer).toBeUndefined();
-    expect(f.handle.interrupt).toBeUndefined();
+    expect(typeof f.handle.interrupt).toBe('function');
     f.finish(0);
     await f.handle.done;
     await queued?.done;
@@ -1325,5 +1331,165 @@ describe('Claude lane usage scope and native thread ID', () => {
     expect(f.handle.getObservedNativeThreadId?.()).toBeUndefined();
     f.config.onSessionResolved?.('session-123');
     expect(f.handle.getObservedNativeThreadId?.()).toBe('session-123');
+  });
+});
+
+describe('Claude lane interrupt, turn settings, content and catalog (B5)', () => {
+  const PNG = 'iVBORw0KGgo=';
+  function fakeQuery() {
+    return {
+      interrupt: jest.fn(async () => undefined),
+      setModel: jest.fn(async () => undefined),
+      applyFlagSettings: jest.fn(async () => undefined),
+      supportedModels: jest.fn(async () => [
+        { value: 'claude-opus-x', displayName: 'Opus X', description: '' },
+      ]),
+      supportedCommands: jest.fn(async () => [
+        { name: 'compact', description: 'Compact', argumentHint: '', builtin: true },
+        { name: 'review-pr', description: 'Review', argumentHint: '' },
+      ]),
+    };
+  }
+  function fixture(query = fakeQuery()) {
+    return { ...runnerFixture(Promise.resolve(), undefined, query), query };
+  }
+
+  afterEach(() => jest.useRealTimers());
+
+  it('interrupts the running turn, then continues on the same session id', async () => {
+    const f = fixture();
+    f.config.onSessionResolved?.('session-1');
+    expect(f.handle.supportsInterrupt?.()).toBe(true);
+    await f.handle.interrupt?.();
+    expect(f.query.interrupt).toHaveBeenCalledTimes(1);
+    expect(f.config.onTurnResult?.({ subtype: 'error_during_execution' })).toEqual({ interrupted: true });
+    f.config.onTurnComplete?.(0);
+    await expect(f.handle.done).resolves.toBe(0);
+    expect(f.handle.supportsInterrupt?.()).toBe(false);
+    const next = await f.handle.continue?.('after interrupt');
+    await f.context.mailbox.prompt.next();
+    expect((await f.context.mailbox.prompt.next()).value).toMatchObject({
+      session_id: 'session-1',
+      message: { content: 'after interrupt' },
+    });
+    expect(f.handle.supportsInterrupt?.()).toBe(true);
+    f.finish(0);
+    await next?.done;
+  });
+
+  it('keeps a non-interrupt error after an interrupt as a failure', async () => {
+    const f = fixture();
+    await f.handle.interrupt?.();
+    expect(f.config.onTurnResult?.({ subtype: 'error_max_turns' })).toEqual({ interrupted: false });
+    f.finish(0);
+  });
+
+  it('clears the flag on the result frame, so a later turn error is not masked', async () => {
+    const f = fixture();
+    await f.handle.interrupt?.();
+    expect(f.config.onTurnResult?.({ subtype: 'success' })).toEqual({ interrupted: false });
+    await f.handle.continue?.('next');
+    expect(f.config.onTurnResult?.({ subtype: 'error_during_execution' })).toEqual({ interrupted: false });
+    f.finish(0);
+  });
+
+  it('does not map an interrupted result once the lane has closed', async () => {
+    const f = fixture();
+    await f.handle.interrupt?.();
+    f.handle.abort.abort();
+    expect(f.config.onTurnResult?.({ subtype: 'error_during_execution' })).toEqual({ interrupted: false });
+    f.finish(1);
+  });
+
+  it('rejects after 3 s, and a late interrupted result maps to 0 with the info segment', async () => {
+    jest.useFakeTimers();
+    const query = fakeQuery();
+    query.interrupt.mockReturnValue(new Promise<undefined>(() => undefined));
+    const f = fixture(query);
+    const interrupting = f.handle.interrupt?.();
+    const settled = expect(interrupting).rejects.toThrow(CLAUDE_INTERRUPT_TIMEOUT_TEXT);
+    await jest.advanceTimersByTimeAsync(3_000);
+    await settled;
+    expect(f.config.onTurnResult?.({ subtype: 'error_during_execution' })).toEqual({ interrupted: true });
+    expect(f.context.emitSegment).toHaveBeenCalledWith({ type: 'info', content: CLAUDE_LATE_INTERRUPT_TEXT });
+    f.finish(0);
+  });
+
+  it('resolves at once when no turn runs', async () => {
+    const f = fixture();
+    f.config.onTurnResult?.({ subtype: 'success' });
+    await f.handle.interrupt?.();
+    expect(f.query.interrupt).not.toHaveBeenCalled();
+    f.finish(0);
+  });
+
+  it('applies model and effort for the next turn, mapping max to xhigh', async () => {
+    const f = fixture();
+    await expect(f.handle.applyTurnSettings?.({ model: 'claude-opus-x', reasoningEffort: 'max' }))
+      .resolves.toEqual({ model: 'claude-opus-x', reasoningEffort: 'max', appliesAt: 'next-turn' });
+    expect(f.query.setModel).toHaveBeenCalledWith('claude-opus-x');
+    expect(f.query.applyFlagSettings).toHaveBeenCalledWith({ effortLevel: 'xhigh' });
+    const catalog = await f.handle.listTurnOptions?.();
+    expect(catalog).toMatchObject({ currentModel: 'claude-opus-x', currentEffort: 'max' });
+    f.finish(0);
+  });
+
+  it('refuses a model the provider rejects and an unknown effort level', async () => {
+    const query = fakeQuery();
+    query.setModel.mockRejectedValue(new Error('unknown model'));
+    const f = fixture(query);
+    const refusal = await f.handle.applyTurnSettings?.({ model: 'nope' }).catch((error: unknown) => error);
+    expect(refusal).toBeInstanceOf(LaneTurnSettingRefusal);
+    expect(refusal).toMatchObject({ field: 'model', reason: 'Claude did not accept the model "nope": unknown model' });
+    await expect(f.handle.applyTurnSettings?.({ reasoningEffort: 'turbo' }))
+      .rejects.toMatchObject({ field: 'reasoningEffort' });
+    expect(query.applyFlagSettings).not.toHaveBeenCalled();
+    f.finish(0);
+  });
+
+  it('pushes image blocks and file paths as one user turn', async () => {
+    const f = fixture();
+    await f.handle.continue?.('look', { images: [{ data: PNG, mediaType: 'image/jpeg' }], files: ['src/a.ts'] });
+    await f.context.mailbox.prompt.next();
+    const turn = (await f.context.mailbox.prompt.next()).value;
+    expect(turn.message.content).toEqual([
+      { type: 'text', text: 'look\n\nAttached files:\n- src/a.ts' },
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: PNG } },
+    ]);
+    const logged = JSON.stringify(jest.mocked(logger.info).mock.calls);
+    expect(logged).not.toContain(PNG);
+    expect(logged).not.toContain('src/a.ts');
+    f.finish(0);
+  });
+
+  it('rejects an unresolvable image and queues nothing', async () => {
+    expect(() => claudeLaneTurnContent('x', { images: [{ data: 'AAAA', mediaType: 'text/plain' }] }))
+      .toThrow('An attached image is not a PNG, JPEG, GIF or WebP image.');
+    const f = fixture();
+    await expect(f.handle.continue?.('x', { images: [{ data: 'AAAA', mediaType: 'text/plain' }] })).rejects.toThrow();
+    f.config.onTurnResult?.({ subtype: 'success' });
+    expect(f.handle.supportsInterrupt?.()).toBe(false);
+    f.finish(0);
+  });
+
+  it('lists models, efforts and grouped commands; a failed lookup carries error', async () => {
+    const f = fixture();
+    const catalog = await f.handle.listTurnOptions?.();
+    expect(catalog).not.toHaveProperty('error');
+    expect(catalog).toMatchObject({
+      models: [{ id: 'claude-opus-x', name: 'Opus X' }],
+      efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+      commands: [
+        { name: 'compact', description: 'Compact', group: 'command' },
+        { name: 'review-pr', description: 'Review', group: 'skill' },
+      ],
+    });
+    f.query.supportedCommands.mockRejectedValue(new Error('down'));
+    await expect(f.handle.listTurnOptions?.()).resolves.toMatchObject({
+      models: [{ id: 'claude-opus-x', name: 'Opus X' }],
+      commands: [],
+      error: 'Lane options could not be read.',
+    });
+    f.finish(0);
   });
 });

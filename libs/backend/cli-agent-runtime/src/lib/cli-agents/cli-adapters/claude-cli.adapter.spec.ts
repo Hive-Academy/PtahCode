@@ -284,7 +284,7 @@ describe('ClaudeCliAdapter native SDK execution', () => {
     expect(f.adapter.roleChannel).toBe('system-prompt');
     expect(handle.supportsContinuation?.()).toBe(true);
     expect(handle.steer).toBeUndefined();
-    expect(handle.interrupt).toBeUndefined();
+    expect(typeof handle.interrupt).toBe('function');
     handle.setAgentId?.('tracked-id');
     expect(f.limits.attach).toHaveBeenCalledWith('tracked-id');
     const next = await handle.continue?.('follow up');
@@ -473,7 +473,7 @@ describe('ClaudeCliAdapter native SDK execution', () => {
     const context = f.run.mock.calls[0][0];
     expect(context.options.abortController.signal.aborted).toBe(true);
     // A closed mailbox ends after the initial task drains; nothing new queues.
-    context.mailbox.push('late follow up');
+    context.mailbox.push({ content: 'late follow up' });
     const drained: unknown[] = [];
     for await (const message of context.mailbox.prompt) drained.push(message);
     expect(drained).toHaveLength(1);

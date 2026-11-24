@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import {
   ClaudeCertifiedLaunchRefusal,
   assertCertifiedLaunch,
@@ -16,9 +15,15 @@ import type {
   SDKUserMessage,
   SessionMetadata,
 } from '@ptah-extension/agent-sdk';
-import type {
-  ProviderAccountBinding,
-  ProviderAccountIdentityEvidence,
+import {
+  EFFORT_LEVELS,
+  resolveImageMediaType,
+  type EffortLevel,
+  type LaneComposerCommandOption,
+  type LaneTurnContent,
+  type LaneTurnSettings,
+  type ProviderAccountBinding,
+  type ProviderAccountIdentityEvidence,
 } from '@ptah-extension/shared';
 import type {
   ClaudeAccountNamedRoute,
@@ -30,10 +35,16 @@ import type {
   ProviderAccountPortRefusal,
 } from '@ptah-extension/auth-providers-tokens';
 import { claudeActualLaunch } from './claude-sdk-lane-options';
-import type {
-  LaneAccountBindingPort,
-  LaneAccountReference,
+import {
+  LaneTurnSettingRefusal,
+  type CliModelInfo,
+  type LaneAccountBindingPort,
+  type LaneAccountReference,
+  type LaneTurnOptionsCatalog,
+  type LaneTurnSettingsResult,
 } from '../cli-agents/cli-adapters/cli-adapter.interface';
+import { filterLaneCommands } from '../cli-agents/cli-adapters/lane-command-filter';
+import { withFileReferences } from '../cli-agents/messaging/lane-resumers/ptah-cli-lane-resumer';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type {
   Options,
@@ -49,7 +60,82 @@ import {
   isPlanBilledLaneProvider,
   type PtahCliLanePlanLimits,
 } from '../ptah-cli/helpers/ptah-cli-lane-plan-limits';
-import type { PromptMailbox } from '../ptah-cli/helpers/ptah-cli-prompt-mailbox';
+import {
+  toUserMessage,
+  type PromptMailbox,
+  type PromptTurn,
+  type PromptTurnContent,
+} from '../ptah-cli/helpers/ptah-cli-prompt-mailbox';
+
+/** D17: the SDK's interrupt must settle within 3 s or the router reports `interrupt-failed`. */
+const CLAUDE_INTERRUPT_TIMEOUT_MS = 3_000;
+/** `setModel` / `applyFlagSettings` bound (B5). */
+const CLAUDE_SETTINGS_TIMEOUT_MS = 10_000;
+/** `supportedModels` / `supportedCommands` bound, each (D17). */
+const CLAUDE_CATALOG_TIMEOUT_MS = 5_000;
+export const CLAUDE_INTERRUPT_TIMEOUT_TEXT = 'Claude did not stop the turn in 3 s';
+export const CLAUDE_LATE_INTERRUPT_TEXT =
+  'The turn ended after a late interrupt; your message was not sent.';
+const CLAUDE_TURN_OPTIONS_ERROR = 'Lane options could not be read.';
+/**
+ * Claude commands hidden from lanes (D18). Empty until a permission-policy
+ * command is proven to exist for Claude lanes.
+ */
+export const CLAUDE_HIDDEN_LANE_COMMANDS: readonly string[] = [];
+
+/** Rejects with `text` when `call` has not settled within `ms`. */
+function boundedCall<T>(call: Promise<T>, ms: number, text: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([
+    call,
+    new Promise<never>((_resolve, reject) => {
+      timer = setTimeout(() => reject(new Error(text)), ms);
+    }),
+  ]).finally(() => clearTimeout(timer));
+}
+
+function isEffortLevel(value: string): value is EffortLevel {
+  return (EFFORT_LEVELS as readonly string[]).includes(value);
+}
+
+/**
+ * The user turn's content (B5): plain text, or text plus base64 image
+ * blocks. Attached files go into the text as paths (`path-text`, D14). An
+ * image whose media type cannot be resolved rejects the turn; it is never
+ * dropped silently.
+ */
+export function claudeLaneTurnContent(
+  message: string,
+  content?: LaneTurnContent,
+): PromptTurnContent {
+  const text = withFileReferences(message, content?.files);
+  const images = content?.images ?? [];
+  if (images.length === 0) return text;
+  const blocks: Exclude<PromptTurnContent, string> = [{ type: 'text', text }];
+  for (const image of images) {
+    const mediaType = resolveImageMediaType(image.mediaType, image.data);
+    if (mediaType === null)
+      throw new Error('An attached image is not a PNG, JPEG, GIF or WebP image.');
+    blocks.push({
+      type: 'image',
+      source: { type: 'base64', media_type: mediaType, data: image.data },
+    });
+  }
+  return blocks;
+}
+
+/** Claude's built-in commands are commands; every other entry is a skill or user command (D10). */
+function laneCommandOption(command: {
+  name: string;
+  description?: string;
+  builtin?: boolean;
+}): LaneComposerCommandOption {
+  return {
+    name: command.name,
+    ...(command.description ? { description: command.description } : {}),
+    group: command.builtin ? 'command' : 'skill',
+  };
+}
 
 type LaneQueryFunction = Awaited<
   ReturnType<SdkModuleLoader['getQueryFunction']>
@@ -140,6 +226,25 @@ export class ClaudeSdkLaneRunner {
         pendingTurns.push(resolve);
       });
     const turn1Done = enqueueTurn();
+    // Turn bookkeeping for interrupt (B5): a turn runs from its enqueue to
+    // its result frame.
+    let queuedTurns = 1;
+    let completedTurns = 0;
+    let interruptPending: { turnIndex: number; timedOut: boolean } | undefined;
+    let currentModel: string | undefined = options.model;
+    let currentEffort: string | undefined =
+      typeof options.effort === 'string' ? options.effort : undefined;
+    const settingRefusal = (
+      field: LaneTurnSettingRefusal['field'],
+      fixed: string,
+      error: unknown,
+    ): LaneTurnSettingRefusal => {
+      // Named lanes show no provider text: it can carry account paths.
+      const detail = !context.named && error instanceof Error && error.message
+        ? `: ${error.message.slice(0, 200)}`
+        : '.';
+      return new LaneTurnSettingRefusal(field, `${fixed}${detail}`);
+    };
     const attachAgentId = (agentId: string): void => {
       agentIdHolder.value = agentId;
       lanePlanLimits.attach(agentId);
@@ -169,13 +274,97 @@ export class ClaudeSdkLaneRunner {
           void lanePlanLimits.settled.then(() => resolve(exitCode));
         }
       },
+      onTurnResult: ({ subtype }) => {
+        const turnIndex = completedTurns++;
+        // The flag clears on this turn's result frame, whatever its outcome.
+        const flag = interruptPending;
+        interruptPending = undefined;
+        const interrupted =
+          flag !== undefined &&
+          flag.turnIndex === turnIndex &&
+          subtype === 'error_during_execution' &&
+          !closed;
+        if (interrupted && flag.timedOut)
+          emitSegment({ type: 'info', content: CLAUDE_LATE_INTERRUPT_TEXT });
+        return { interrupted };
+      },
       onPlanLimitSignal: (signal) => lanePlanLimits.onSignal(signal),
       planBilledSuccess: isPlanBilledLaneProvider(providerId),
     });
     let finished = false;
+    const turnRunning = (): boolean =>
+      !closed && !finished && queuedTurns > completedTurns;
+    const applyTurnSettings = async (
+      settings: LaneTurnSettings,
+    ): Promise<LaneTurnSettingsResult> => {
+      const { model, reasoningEffort } = settings;
+      if (closed || finished)
+        throw new LaneTurnSettingRefusal(
+          model !== undefined ? 'model' : 'reasoningEffort',
+          'The Claude lane has ended.',
+        );
+      if (reasoningEffort !== undefined && !isEffortLevel(reasoningEffort))
+        throw new LaneTurnSettingRefusal(
+          'reasoningEffort',
+          `Claude has no effort level "${reasoningEffort}".`,
+        );
+      if (model !== undefined) {
+        try {
+          await boundedCall(sdkQuery.setModel(model), CLAUDE_SETTINGS_TIMEOUT_MS,
+            'Claude did not confirm the model in 10 s.');
+        } catch (error: unknown) {
+          throw settingRefusal('model', `Claude did not accept the model "${model}"`, error);
+        }
+        currentModel = model;
+      }
+      if (reasoningEffort !== undefined && isEffortLevel(reasoningEffort)) {
+        // The flag layer has no `max` tier (E20), as in main chat.
+        const effortLevel = reasoningEffort === 'max' ? 'xhigh' : reasoningEffort;
+        try {
+          await boundedCall(sdkQuery.applyFlagSettings({ effortLevel }), CLAUDE_SETTINGS_TIMEOUT_MS,
+            'Claude did not confirm the effort level in 10 s.');
+        } catch (error: unknown) {
+          throw settingRefusal('reasoningEffort',
+            `Claude did not accept the effort level "${reasoningEffort}"`, error);
+        }
+        currentEffort = reasoningEffort;
+      }
+      return {
+        ...(model !== undefined ? { model } : {}),
+        ...(reasoningEffort !== undefined ? { reasoningEffort } : {}),
+        appliesAt: 'next-turn',
+      };
+    };
+    const listTurnOptions = async (): Promise<LaneTurnOptionsCatalog> => {
+      const [models, commands] = await Promise.allSettled([
+        boundedCall(sdkQuery.supportedModels(), CLAUDE_CATALOG_TIMEOUT_MS, 'Claude models timed out.'),
+        boundedCall(sdkQuery.supportedCommands(), CLAUDE_CATALOG_TIMEOUT_MS, 'Claude commands timed out.'),
+      ]);
+      const failed = models.status === 'rejected' || commands.status === 'rejected';
+      if (failed)
+        // degradation-audit: reported - the catalog carries `error` for the composer and the failure is logged.
+        this.logger.warn('[ClaudeLane] Lane turn options could not be read.', {
+          models: models.status,
+          commands: commands.status,
+        });
+      const catalog: LaneTurnOptionsCatalog & { readonly error?: string } = {
+        models: models.status === 'fulfilled'
+          ? models.value.map((model): CliModelInfo => ({ id: model.value, name: model.displayName }))
+          : [],
+        efforts: [...EFFORT_LEVELS],
+        ...(currentModel ? { currentModel } : {}),
+        ...(currentEffort ? { currentEffort } : {}),
+        commands: commands.status === 'fulfilled'
+          ? filterLaneCommands(commands.value.map(laneCommandOption), CLAUDE_HIDDEN_LANE_COMMANDS)
+          : [],
+        ...(failed ? { error: CLAUDE_TURN_OPTIONS_ERROR } : {}),
+      };
+      return catalog;
+    };
     const finish = (exitCode: number): void => {
       if (finished) return;
       finished = true;
+      interruptPending = undefined;
       abortController.signal.removeEventListener('abort', closeMailbox);
       closeMailbox();
       disposeCallbacks();
@@ -236,22 +425,56 @@ export class ClaudeSdkLaneRunner {
       // Called by the manager as soon as it tracks the run, which is when
       // the lane's owner can be recorded on it.
       setAgentId: attachAgentId,
-      continue: async (message: string) => {
+      continue: async (message: string, content?: LaneTurnContent) => {
         if (context.named && (closed || abortController.signal.aborted))
           throw claudeLaneRefusal();
+        // Built before the turn is queued: an unresolvable image rejects
+        // the call and nothing is sent.
+        const turn: PromptTurn = { content: claudeLaneTurnContent(message, content) };
         const done = enqueueTurn();
+        queuedTurns++;
         if (context.named)
-          await context.named.enqueue(message, resolvedSessionId ?? undefined);
+          await context.named.enqueue(turn, resolvedSessionId ?? undefined);
         if (context.named && (closed || abortController.signal.aborted))
           throw claudeLaneRefusal();
+        // Counts only: no image data or file path reaches the log.
         this.logger.info(
           `[PtahCliRegistry] continue() pushing follow-up turn for "${agentName}"`,
-          { sessionId: resolvedSessionId, messageLength: message.length },
+          {
+            sessionId: resolvedSessionId,
+            messageLength: message.length,
+            imageCount: content?.images?.length ?? 0,
+            fileCount: content?.files?.length ?? 0,
+          },
         );
         if (!context.named)
-          mailbox.push(message, resolvedSessionId ?? undefined);
+          mailbox.push(turn, resolvedSessionId ?? undefined);
         return Promise.resolve({ done });
       },
+      supportsInterrupt: turnRunning,
+      interrupt: async () => {
+        if (!turnRunning()) return;
+        const pending = { turnIndex: completedTurns, timedOut: false };
+        interruptPending = pending;
+        try {
+          await boundedCall(
+            Promise.resolve(sdkQuery.interrupt()).then(() => undefined),
+            CLAUDE_INTERRUPT_TIMEOUT_MS,
+            CLAUDE_INTERRUPT_TIMEOUT_TEXT,
+          );
+        } catch (error: unknown) {
+          if (error instanceof Error && error.message === CLAUDE_INTERRUPT_TIMEOUT_TEXT) {
+            // The flag stays set until this turn's result frame, so a late
+            // interrupt still ends the turn with exit 0.
+            pending.timedOut = true;
+          } else if (interruptPending === pending) {
+            interruptPending = undefined;
+          }
+          throw error;
+        }
+      },
+      applyTurnSettings,
+      listTurnOptions,
     };
     return { handle, setAgentId: attachAgentId };
   }
@@ -805,7 +1028,7 @@ export class ClaudeNamedLaneAdmission {
     // user message (D68): release the first turn now; nothing is forwarded
     // and no tool runs until init is verified below.
     this.step = 'released';
-    this.releasedTurn = this.userTurn(firstTurn.message, firstTurn.sessionId);
+    this.releasedTurn = this.userTurn({ content: firstTurn.message }, firstTurn.sessionId);
     if (
       !gate.push(this.releasedTurn) ||
       !gate.commit()
@@ -923,25 +1146,19 @@ export class ClaudeNamedLaneAdmission {
     this.assertOpen();
   }
 
-  private userTurn(message: string, sessionId?: string): SDKUserMessage {
-    return {
-      type: 'user',
-      uuid: randomUUID() as SDKUserMessage['uuid'],
-      message: { role: 'user', content: message },
-      parent_tool_use_id: null,
-      ...(sessionId ? { session_id: sessionId } : {}),
-    };
+  private userTurn(turn: PromptTurn, sessionId?: string): SDKUserMessage {
+    return toUserMessage(turn, sessionId);
   }
 
   /** A later turn; the first turn is released by `launch`. */
-  async enqueue(message: string, sessionId?: string): Promise<void> {
+  async enqueue(turn: PromptTurn, sessionId?: string): Promise<void> {
     try {
       await this.validateTurn();
       this.step = 'gate';
       const gate = this.gates[this.gates.length - 1];
       if (
         !this.released ||
-        !gate.push(this.userTurn(message, sessionId)) ||
+        !gate.push(this.userTurn(turn, sessionId)) ||
         !gate.commit()
       )
         throw claudeLaneRefusal();
