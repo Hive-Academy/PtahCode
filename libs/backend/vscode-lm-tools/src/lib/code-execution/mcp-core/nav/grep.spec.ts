@@ -426,7 +426,7 @@ describe('handleGrep (node engine)', () => {
     expect(included.text).toContain('src/secret.ts');
   });
 
-  it('drops a .gitignore rule that backtracks and keeps the other rules', async () => {
+  it('skips a .gitignore rule that could backtrack, keeps the others and says so', async () => {
     const slow = `${'*a'.repeat(30)}b`;
     await writeFile(path.join(root, '.gitignore'), `${slow}\n*.log\n`);
     const longName = `${'a'.repeat(200)}.ts`;
@@ -437,7 +437,36 @@ describe('handleGrep (node engine)', () => {
     expect(Date.now() - started).toBeLessThan(5000);
     expect(reply.text).toContain(longName);
     expect(reply.text).not.toContain('run.log');
+    expect(reply.text).toContain('1 .gitignore rule(s) too complex to test');
   }, 15000);
+
+  it('walks a realistic tree with a 40-rule .gitignore well inside the time limit', async () => {
+    const rules = [
+      ...Array.from({ length: 30 }, (_, i) => `ignored-${i}/`),
+      ...Array.from({ length: 8 }, (_, i) => `*.gen${i}`),
+      '/src/**/*.snap',
+      '!keep.gen0',
+    ];
+    await writeFile(path.join(root, '.gitignore'), `${rules.join('\n')}\n`);
+    for (let d = 0; d < 30; d++) {
+      const dir = path.join(root, 'pkg', `dir${d}`);
+      await mkdir(dir, { recursive: true });
+      for (let f = 0; f < 100; f++) {
+        await writeFile(path.join(dir, `file${f}.ts`), 'const x = 1;\n');
+      }
+    }
+    await writeFile(
+      path.join(root, 'pkg', 'dir29', 'file99.ts'),
+      'LIMIT end\n',
+    );
+    await writeFile(path.join(root, 'src', 'view.snap'), 'LIMIT snap\n');
+    const started = Date.now();
+    const reply = await handleGrep({ pattern: 'LIMIT' }, deps);
+    expect(Date.now() - started).toBeLessThan(8000);
+    expect(reply.text).toContain('pkg/dir29/file99.ts');
+    expect(reply.text).not.toContain('view.snap');
+    expect(reply.text).not.toContain('stopped early');
+  }, 30000);
 
   it('applies the .gitignore files above a scoped target folder', async () => {
     await mkdir(path.join(root, 'src', 'deep'), { recursive: true });

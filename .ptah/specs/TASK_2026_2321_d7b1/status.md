@@ -31,3 +31,8 @@ Source: benchmark report PR #1493 (TASK_2026_2320_15a6), findings (c)2 and (d).
 - CodeRabbit finding on d3b7a0749 (unbounded ignore-rule regex): each ignore rule now runs under the `vm`
   time limit (`buildLineTester`); a rule that times out is dropped for the walk and never hides a file.
   Spec added; gate `npm run verify -- -p vscode-lm-tools` passed.
+- Delta review N1 (vm per ignore-rule test cost ~216 us): ignore rules now run as plain `RegExp.test`.
+  The ReDoS risk is bounded at load: a pattern over 256 chars or with more than 3 wildcard tokens
+  (`*`, `**`, `{`) is skipped and counted in the reply note (N2); tested text is capped at 512 chars.
+  Specs: skipped rule + note (N3 renamed), 40-rule / 3,000-file tree with a time bound.
+  Gate `npm run verify -- -p vscode-lm-tools` passed.

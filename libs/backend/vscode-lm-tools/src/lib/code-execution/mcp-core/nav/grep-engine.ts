@@ -208,6 +208,33 @@ export function buildLineTester(
   };
 }
 
+/**
+ * Wildcard tokens (`*`, `**`, `{a,b}`) that one ignore rule may hold. A rule
+ * with more can backtrack for a long time on a crafted name, so it is not
+ * tested; the cost of a rule with at most this many is polynomial and small.
+ */
+const MAX_IGNORE_RULE_WILDCARDS = 3;
+
+/** Longest ignore pattern that is tested, in characters. */
+const MAX_IGNORE_PATTERN_CHARS = 256;
+
+/** Longest entry path an ignore rule is tested against, in characters. */
+const MAX_IGNORE_TEXT_CHARS = 512;
+
+/**
+ * True when `pattern` is cheap to test as a regular expression. This bounds
+ * the backtracking of an ignore rule when it loads, so each test is a plain
+ * `RegExp.test` with no per-call `vm` timeout.
+ */
+export function isIgnorePatternBounded(pattern: string): boolean {
+  if (pattern.length > MAX_IGNORE_PATTERN_CHARS) {
+    return false;
+  }
+  const stars = pattern.match(/\*+/g)?.length ?? 0;
+  const braces = pattern.match(/\{/g)?.length ?? 0;
+  return stars + braces <= MAX_IGNORE_RULE_WILDCARDS;
+}
+
 /** Glob to RegExp: `**`, `*`, `?` and `{a,b}`; matched on the relative path. */
 export function globToRegExp(glob: string): RegExp {
   return globToRegExpBody(glob.startsWith('!') ? glob.slice(1) : glob);
@@ -322,7 +349,10 @@ interface IgnoreLayer {
   readonly test: IgnoreTest;
 }
 
-async function loadIgnoreTest(dir: string): Promise<IgnoreTest | undefined> {
+async function loadIgnoreTest(
+  dir: string,
+  onSkippedRule: () => void,
+): Promise<IgnoreTest | undefined> {
   const text = await readIgnoreText(dir);
   if (text === undefined) {
     return undefined;
@@ -340,6 +370,12 @@ async function loadIgnoreTest(dir: string): Promise<IgnoreTest | undefined> {
     if (pattern === '') {
       continue;
     }
+    if (!isIgnorePatternBounded(pattern)) {
+      // A rule that could backtrack for long is not tested, so its entries
+      // stay in the search. The caller reports the count.
+      onSkippedRule();
+      continue;
+    }
     const anchored = rule.replace(/\/+$/, '').includes('/');
     rules.push({
       regex: anchored ? globToAnchoredRegExp(pattern) : globToRegExp(pattern),
@@ -348,44 +384,23 @@ async function loadIgnoreTest(dir: string): Promise<IgnoreTest | undefined> {
       negated,
     });
   }
-  // Each rule runs under the same `vm` time limit as a user glob, so a
-  // backtracking rule cannot freeze the event loop. A rule that runs past
-  // the limit is dropped for the rest of the walk: the entry it would have
-  // tested stays in, so a pathological rule never hides a file. The tester
-  // is built on first use to keep the load of a large file cheap.
-  const testers = new Map<IgnoreRule, (text: string) => boolean>();
-  const dropped = new Set<IgnoreRule>();
-  const matches = (rule: IgnoreRule, text: string): boolean => {
-    if (dropped.has(rule)) {
-      return false;
-    }
-    let tester = testers.get(rule);
-    if (tester === undefined) {
-      tester = buildLineTester(rule.regex, true, 'the ignore rule');
-      testers.set(rule, tester);
-    }
-    try {
-      return tester(text);
-    } catch (error) {
-      if (error instanceof RegexTimeoutError) {
-        dropped.add(rule);
-        return false;
-      }
-      throw error;
-    }
-  };
   return (relative, name, isDir) => {
     let ignored: boolean | undefined;
     for (const rule of rules) {
       if (
         (!rule.dirOnly || isDir) &&
-        matches(rule, rule.anchored ? relative : name)
+        testIgnoreRule(rule, rule.anchored ? relative : name)
       ) {
         ignored = !rule.negated;
       }
     }
     return ignored;
   };
+}
+
+/** One ignore rule against `text`; text over the cap is never a match. */
+function testIgnoreRule(rule: IgnoreRule, text: string): boolean {
+  return text.length <= MAX_IGNORE_TEXT_CHARS && rule.regex.test(text);
 }
 
 /**
@@ -962,6 +977,10 @@ export async function runNodeSearch(
   let skippedLargeFiles = 0;
   let skippedLongLines = 0;
   let unreadable = 0;
+  let skippedIgnoreRules = 0;
+  const onSkippedIgnoreRule = (): void => {
+    skippedIgnoreRules++;
+  };
   // `.gitignore` files from the root down to the folder being walked. A
   // scoped target also takes the files of the folders between the root and
   // the target, as rg does.
@@ -975,7 +994,10 @@ export async function runNodeSearch(
     // The folders above the target. The walk loads the target folder itself.
     for (let depth = 0; depth < chain.length; depth++) {
       const base = chain.slice(0, depth).join('/');
-      const test = await loadIgnoreTest(path.join(request.rootReal, base));
+      const test = await loadIgnoreTest(
+        path.join(request.rootReal, base),
+        onSkippedIgnoreRule,
+      );
       if (test) {
         baseLayers.push({ base, test });
       }
@@ -1044,7 +1066,7 @@ export async function runNodeSearch(
   ): Promise<void> => {
     let layers = inherited;
     if (!request.includeIgnored) {
-      const test = await loadIgnoreTest(dir);
+      const test = await loadIgnoreTest(dir, onSkippedIgnoreRule);
       if (test) {
         const base = toPosixRelative(request.rootReal, dir);
         layers = [...inherited, { base: base === '.' ? '' : base, test }];
@@ -1136,6 +1158,9 @@ export async function runNodeSearch(
       ? `${skippedLongLines} line(s) over ${GREP_MAX_SEARCHED_LINE_CHARS} chars (regex only)`
       : '',
     unreadable > 0 ? `${unreadable} unreadable file(s) or folder(s)` : '',
+    skippedIgnoreRules > 0
+      ? `${skippedIgnoreRules} .gitignore rule(s) too complex to test (the entries they name are searched)`
+      : '',
     prunedNames.size > 0
       ? `folder(s) on the code-index exclude list (${[...prunedNames].slice(0, 5).join(', ')}); search one with includeIgnored and a scoped path`
       : '',
