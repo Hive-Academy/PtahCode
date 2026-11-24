@@ -1,10 +1,13 @@
 /**
  * Stage 2 of the live test (TASK_2026_2299_d6f5).
  * Arms: ptah-haiku, native-haiku, ptah-codex, native-codex. 8 tasks each.
- * Usage: node stage2.mjs <arm>[,<arm>] [taskIndexFrom] [taskIndexTo]
- * Needs drive.mjs running for the ptah arms. Appends to stage2-results.jsonl.
+ * Usage: node stage2.mjs <arm>[,<arm>] [taskIndexFrom] [taskIndexTo] [--control-port=51991]
+ * Needs drive.mjs running for the ptah arms (same --control-port / BENCH_CONTROL_PORT).
+ * Appends to $BENCH_RESULTS (default stage2-r7.jsonl). Exits 1 when a timed-out
+ * chat cannot be aborted. BENCH_CODEX_AUTH_HOME overrides the home of the Codex login.
  */
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -28,7 +31,15 @@ const codeModeDeny = () => [
 ];
 const CODE_MODE_PREFIX =
   'Use only the execute_code tool for code navigation: it runs JavaScript against the `ptah` global (call ptah.help() for the API). Do not call other tools. Question: ';
-const CONTROL = 'http://127.0.0.1:51991';
+// Same source as drive.mjs: --control-port=<n>, else BENCH_CONTROL_PORT, else 51991.
+const controlPortArg = process.argv.find((a) => a.startsWith('--control-port='));
+const CONTROL_PORT = Number(
+  controlPortArg ? controlPortArg.split('=')[1] : process.env.BENCH_CONTROL_PORT || 51991,
+);
+if (!Number.isInteger(CONTROL_PORT) || CONTROL_PORT < 1 || CONTROL_PORT > 65535) {
+  throw new Error(`bad control port: ${controlPortArg ?? process.env.BENCH_CONTROL_PORT}`);
+}
+const CONTROL = `http://127.0.0.1:${CONTROL_PORT}`;
 const SUFFIX =
   ' Answer briefly. Name the full file paths and the exact identifiers.';
 const KEYS = {
@@ -186,18 +197,27 @@ async function rpc(method, params, timeoutMs = 60000) {
   return r.json();
 }
 
+// A chat that could not be stopped would run on into the next task and spoil its
+// numbers. This error stops the whole benchmark run (exit 1) after its row is written.
+class FatalBenchError extends Error {}
+
 // A timed-out Ptah chat must not run on into the next task: abort it and wait
-// until its transcript stops growing.
+// until its transcript stops growing. Any failure here is fatal for the run.
 async function abortChat(sessionId, file) {
-  if (!sessionId) return 'no sessionId to abort';
+  if (!sessionId) throw new FatalBenchError('timeout: no sessionId to abort; chat may still run');
+  let r;
   try {
-    const r = await rpc('chat:abort', { sessionId, source: 'stop-button' });
-    if (!r.success) return `chat:abort ${JSON.stringify(r).slice(0, 200)}`;
+    r = await rpc('chat:abort', { sessionId, source: 'stop-button' });
   } catch (e) {
-    return `chat:abort ${String(e?.message ?? e)}`;
+    throw new FatalBenchError(`timeout: chat:abort failed: ${String(e?.message ?? e)}`);
   }
-  if (file) await waitFor(() => Date.now() - fs.statSync(file).mtimeMs > 10000, 60000);
-  else await sleep(10000);
+  if (!r?.success) {
+    throw new FatalBenchError(`timeout: chat:abort failed: ${JSON.stringify(r).slice(0, 200)}`);
+  }
+  if (file) {
+    const quiet = await waitFor(() => Date.now() - fs.statSync(file).mtimeMs > 10000, 60000);
+    if (!quiet) throw new FatalBenchError('timeout: transcript still grows 60 s after chat:abort');
+  } else await sleep(10000);
   return 'aborted';
 }
 
@@ -320,7 +340,9 @@ async function ptahCodex(q) {
 async function nativeCodex(q) {
   fs.mkdirSync(CODEX_NATIVE_HOME, { recursive: true });
   const link = path.join(CODEX_NATIVE_HOME, 'auth.json');
-  if (!fs.existsSync(link)) fs.symlinkSync('/home/amun/.codex/auth.json', link);
+  // The real user's Codex login. BENCH_CODEX_AUTH_HOME overrides the home dir.
+  const authHome = process.env.BENCH_CODEX_AUTH_HOME || os.homedir();
+  if (!fs.existsSync(link)) fs.symlinkSync(path.join(authHome, '.codex', 'auth.json'), link);
   const dir = path.join(CODEX_NATIVE_HOME, 'sessions');
   const before = new Set(listFiles(dir));
   const r = await run(
@@ -336,9 +358,11 @@ async function nativeCodex(q) {
 }
 
 const ARMS = { 'code-mode': codeMode, 'ptah-haiku': ptahHaiku, 'native-haiku': nativeHaiku, 'ptah-codex': ptahCodex, 'native-codex': nativeCodex };
-const arms = (process.argv[2] || '').split(',').filter(Boolean);
-const from = Number(process.argv[3] ?? 0);
-const to = Number(process.argv[4] ?? tasks.length - 1);
+const positional = process.argv.slice(2).filter((a) => !a.startsWith('--'));
+const arms = (positional[0] || '').split(',').filter(Boolean);
+const from = Number(positional[1] ?? 0);
+const to = Number(positional[2] ?? tasks.length - 1);
+let fatal = null;
 
 for (const arm of arms) {
   for (let i = from; i <= to; i++) {
@@ -349,6 +373,7 @@ for (const arm of arms) {
       res = await ARMS[arm](task.question + SUFFIX);
     } catch (e) {
       res = { error: String(e?.message ?? e) };
+      if (e instanceof FatalBenchError) fatal = e;
     }
     const keys = KEYS[task.id];
     const ans = res.answer || '';
@@ -374,5 +399,9 @@ for (const arm of arms) {
     };
     fs.appendFileSync(RESULTS, JSON.stringify(row) + '\n');
     console.log(`${arm} ${task.id} ${row.correct ? 'OK' : 'WRONG'} calls=${row.calls} ${JSON.stringify(row.byClass)} ${row.ms}ms ${row.error || ''}`);
+    if (fatal) {
+      console.error(`[stage2] FATAL, run stopped after ${arm} ${task.id}: ${fatal.message}`);
+      process.exit(1);
+    }
   }
 }

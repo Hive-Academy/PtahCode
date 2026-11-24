@@ -17,7 +17,8 @@
  * Every `to-renderer` message the main process sends is appended to
  * events.jsonl (one JSON object per line, with `t` = epoch ms).
  *
- * Usage: node drive.mjs [--control-port=51991]
+ * The token is checked before any body is read, and a body over 1 MB gets 413.
+ * Usage: node drive.mjs [--control-port=51991]   (or BENCH_CONTROL_PORT=51991)
  */
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import * as fs from 'node:fs';
@@ -33,8 +34,15 @@ const TH = path.join(WORKTREE, '.ptah', 'tmp', 'live-test-home');
 const WS = path.join(WORKTREE, '.ptah', 'tmp', 'nav-live-ws');
 const ENTRY = path.join(WORKTREE, 'dist', 'apps', 'ptah-electron', 'main.mjs');
 const EVENTS = path.join(HERE, 'events.jsonl');
+// Same source as stage2.mjs: --control-port=<n>, else BENCH_CONTROL_PORT, else 51991.
 const portArg = process.argv.find((a) => a.startsWith('--control-port='));
-const CONTROL_PORT = portArg ? Number(portArg.split('=')[1]) : 51991;
+const CONTROL_PORT = Number(
+  portArg ? portArg.split('=')[1] : process.env.BENCH_CONTROL_PORT || 51991,
+);
+if (!Number.isInteger(CONTROL_PORT) || CONTROL_PORT < 1 || CONTROL_PORT > 65535) {
+  throw new Error(`bad control port: ${portArg ?? process.env.BENCH_CONTROL_PORT}`);
+}
+const MAX_BODY_BYTES = 1024 * 1024;
 const TOKEN_FILE = path.join(TH, 'bench-control-token');
 const TOKEN = randomBytes(32).toString('hex');
 // Only the RPC methods that the benchmark needs.
@@ -166,15 +174,42 @@ async function main() {
     );
 
   const server = http.createServer((req, res) => {
-    let body = '';
-    req.on('data', (c) => (body += c));
+    const send = (code, obj, close = false) => {
+      res.writeHead(code, {
+        'content-type': 'application/json',
+        ...(close ? { connection: 'close' } : {}),
+      });
+      res.end(JSON.stringify(obj));
+    };
+    // Token first: an unauthorized client gets no body buffered at all.
+    if (!authorized(req)) {
+      send(401, { error: 'unauthorized' }, true);
+      req.destroy();
+      return;
+    }
+    if (Number(req.headers['content-length'] ?? 0) > MAX_BODY_BYTES) {
+      send(413, { error: 'body too large' }, true);
+      req.destroy();
+      return;
+    }
+    const chunks = [];
+    let size = 0;
+    let rejected = false;
+    req.on('data', (c) => {
+      if (rejected) return;
+      size += c.length;
+      if (size > MAX_BODY_BYTES) {
+        rejected = true;
+        send(413, { error: 'body too large' }, true);
+        req.destroy();
+        return;
+      }
+      chunks.push(c);
+    });
     req.on('end', async () => {
-      const send = (code, obj) => {
-        res.writeHead(code, { 'content-type': 'application/json' });
-        res.end(JSON.stringify(obj));
-      };
+      if (rejected) return;
+      const body = Buffer.concat(chunks).toString('utf8');
       try {
-        if (!authorized(req)) return send(401, { error: 'unauthorized' });
         if (req.url === '/health') return send(200, { ok: true, pid: app.process().pid });
         if (req.method !== 'POST') return send(405, { error: 'POST only' });
         if (req.url === '/stop') {

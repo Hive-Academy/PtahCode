@@ -34,3 +34,9 @@
   as a failed task (`stage2.mjs`). `node --check` passes. No paid runs. Report corrected: turn 1
   prompt about 45k (r6) vs 56k (r7), suspected cause PR #1475, unproven. The report also now
   records that the timed-out code-mode chat overlapped task 8 for about 13 s.
+- 2026-11-24 — Third successor. Review round 2 (4 PtahCode threads): a failed chat abort now
+  stops the run with exit 1; Codex auth link from `BENCH_CODEX_AUTH_HOME` or `os.homedir()`;
+  `hashes.sh` paths from env, so no personal path stays in a committed file; `drive.mjs`
+  checks the token before it reads the body and caps the body at 1 MB (413); both scripts read
+  the port from `--control-port=` or `BENCH_CONTROL_PORT`. `node --check` and `bash -n` pass.
+  No paid runs.
