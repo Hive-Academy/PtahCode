@@ -74,6 +74,12 @@ native), deferred tool names about 4k to 8.5k chars, MCP instructions about 2.6k
    (S1), it excludes nothing unless the session loads both the `project` and `local` sources
    and no loaded settings file sets its own `claudeMdExcludes`. The user memory file is never
    kept or excluded. The walk has a 1.5 s time limit and then excludes nothing.
+   After the PR review, managed settings can also turn the walk off. It excludes nothing when
+   a managed source exists or cannot be read: `/etc/claude-code/managed-settings.json`, its
+   `managed-settings.d` folder, the cached server-managed settings in the Claude config folder,
+   or the WSL `reg.exe`. On macOS and Windows, MDM and the registry key cannot be checked with
+   a file read, so the walk is off there. The import scan is linear (an `indexOf` scan for HTML
+   comments), and a fence closes only on the same marker with a run at least as long.
 2. `sdk-query-options-builder.ts` — the main-chat `build()` passes the result as the flag-tier
    `claudeMdExcludes`. The CLI merges arrays across settings sources as a de-duplicated union
    (verified in the CLI 2.1.329 settings merge function), so the user's own excludes stay.

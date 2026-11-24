@@ -21,3 +21,13 @@
   `npm run verify -- -t typecheck -p ptah-electron`.
 - Report and benchmark-report correction committed (9e13544c3). PR #1497 opened against main.
 - Task status set to in_review. CI and the CodeRabbit review were pending at this batch.
+
+## Batch 3 — CI and review findings (2026-11-24)
+
+- CI `checks` failed in the degradation audit (4 unsuppressed catch sites in
+  `claude-md-dedup.ts`). Fixed with reasoned `optional-capability` markers; audit reports 0.
+- Review threads fixed: managed settings now turn the walk off (present or unreadable source;
+  off on macOS and Windows, where MDM and the registry cannot be checked by a file read);
+  linear HTML-comment scan with a size cap; fence close rule (same marker, run at least as
+  long). Specs added for each fix.
+- Related tests, lint/typecheck and the full gate for agent-sdk and vscode-lm-tools passed.

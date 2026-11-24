@@ -5,8 +5,10 @@ import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import {
   CLAUDE_MD_DEDUP_MAX_BYTES,
+  CLAUDE_MD_IMPORT_SCAN_MAX_CHARS,
   findDuplicateClaudeMdExcludes,
   hasClaudeMdImport,
+  machinePolicyPaths,
   toClaudeMdExcludePattern,
   withDeadline,
 } from './claude-md-dedup';
@@ -34,6 +36,15 @@ describePosix('findDuplicateClaudeMdExcludes', () => {
     mkdirSync(configDir);
   });
 
+  /** Stand-ins for the machine's managed settings sources, inside `root`. */
+  function policyPaths(): string[] {
+    return [
+      path.join(root, 'etc/managed-settings.json'),
+      path.join(root, 'etc/managed-settings.d'),
+      path.join(configDir, 'remote-settings.json'),
+    ];
+  }
+
   function find(
     cwd: string,
     settingSources: readonly string[] = ALL_SOURCES,
@@ -41,6 +52,7 @@ describePosix('findDuplicateClaudeMdExcludes', () => {
     return findDuplicateClaudeMdExcludes(cwd, {
       settingSources,
       claudeConfigDir: configDir,
+      machinePolicyPaths: policyPaths(),
     });
   }
 
@@ -187,6 +199,50 @@ describePosix('findDuplicateClaudeMdExcludes', () => {
     expect(excludes).not.toContain(kept);
   });
 
+  it.each([
+    ['the managed-settings file', 'etc/managed-settings.json', 'file'],
+    ['the managed-settings drop-in folder', 'etc/managed-settings.d', 'folder'],
+    ['the cached server-managed settings', 'config/remote-settings.json', 'file'],
+  ])(
+    'excludes nothing when %s exists',
+    async (_name, rel, kind) => {
+      write('repo/CLAUDE.md', TEXT);
+      write('repo/ws/CLAUDE.md', TEXT);
+      if (kind === 'folder') mkdirSync(path.join(root, rel), { recursive: true });
+      // Managed policy could exclude the nearer copy, so even `{}` turns it off.
+      else write(rel, '{}');
+
+      await expect(find(path.join(root, 'repo/ws'))).resolves.toEqual([]);
+    },
+  );
+
+  it('excludes nothing when a managed settings path cannot be checked', async () => {
+    write('repo/CLAUDE.md', TEXT);
+    write('repo/ws/CLAUDE.md', TEXT);
+    // A symlink loop: stat fails with ELOOP, not ENOENT.
+    mkdirSync(path.join(root, 'etc'));
+    const loop = path.join(root, 'etc/managed-settings.json');
+    symlinkSync(loop, loop);
+
+    await expect(find(path.join(root, 'repo/ws'))).resolves.toEqual([]);
+  });
+
+  it.each(['darwin', 'win32'] as const)(
+    'excludes nothing on %s, where policy is not only in files',
+    async (platform) => {
+      write('repo/CLAUDE.md', TEXT);
+      write('repo/ws/CLAUDE.md', TEXT);
+
+      await expect(
+        findDuplicateClaudeMdExcludes(path.join(root, 'repo/ws'), {
+          settingSources: ALL_SOURCES,
+          claudeConfigDir: configDir,
+          platform,
+        }),
+      ).resolves.toEqual([]);
+    },
+  );
+
   it('returns no excludes for a folder that does not exist', async () => {
     await expect(
       find(path.join(root, 'missing/deeper')),
@@ -205,6 +261,55 @@ describe('hasClaudeMdImport', () => {
     expect(hasClaudeMdImport('```\n@import\n```\n')).toBe(false);
     expect(hasClaudeMdImport('<!-- @hidden -->')).toBe(false);
     expect(hasClaudeMdImport('mail user@example.com')).toBe(false);
+  });
+
+  it('closes a fence only on the same marker with a run at least as long', () => {
+    // A three-backtick line inside a four-backtick block does not close it.
+    expect(hasClaudeMdImport('````\n```\n````\n@rules.md\n')).toBe(true);
+    expect(hasClaudeMdImport('````\n```\n@hidden.md\n````\n')).toBe(false);
+    // A backtick line does not close a tilde block, and the reverse.
+    expect(hasClaudeMdImport('~~~\n```\n~~~\n@rules.md\n')).toBe(true);
+    expect(hasClaudeMdImport('~~~\n```\n@hidden.md\n')).toBe(false);
+    // A longer closer closes the block.
+    expect(hasClaudeMdImport('```\ncode\n`````\n@rules.md\n')).toBe(true);
+  });
+
+  it('treats a backtick line with a backtick in its info string as prose', () => {
+    expect(hasClaudeMdImport('``` a`b\n@rules.md\n')).toBe(true);
+  });
+
+  it('keeps text after an unterminated HTML comment', () => {
+    expect(hasClaudeMdImport('<!-- a --> @rules.md <!-- open')).toBe(true);
+    expect(hasClaudeMdImport('<!-- open @rules.md')).toBe(true);
+  });
+
+  it('scans many unterminated comment openers in linear time', () => {
+    const openers = '<!--'.repeat(Math.floor(CLAUDE_MD_IMPORT_SCAN_MAX_CHARS / 4) - 4);
+    const started = Date.now();
+
+    expect(hasClaudeMdImport(`${openers} x`)).toBe(false);
+    // The former regex rescanned to the end per opener (seconds at this size).
+    expect(Date.now() - started).toBeLessThan(500);
+  });
+
+  it('counts a text above the scan cap as one with an import', () => {
+    expect(hasClaudeMdImport('x'.repeat(CLAUDE_MD_IMPORT_SCAN_MAX_CHARS + 1))).toBe(true);
+  });
+});
+
+describe('machinePolicyPaths', () => {
+  it('lists the Linux managed files, the WSL reg.exe and the remote cache', () => {
+    expect(machinePolicyPaths('linux', '/home/u/.claude')).toEqual([
+      '/etc/claude-code/managed-settings.json',
+      '/etc/claude-code/managed-settings.d',
+      '/mnt/c/Windows/System32/reg.exe',
+      path.join('/home/u/.claude', 'remote-settings.json'),
+    ]);
+  });
+
+  it('cannot prove absence where policy is in MDM or the registry', () => {
+    expect(machinePolicyPaths('darwin', '/Users/u/.claude')).toBeUndefined();
+    expect(machinePolicyPaths('win32', 'C:\\Users\\u\\.claude')).toBeUndefined();
   });
 });
 

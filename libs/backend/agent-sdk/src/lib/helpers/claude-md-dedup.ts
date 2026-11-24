@@ -49,16 +49,77 @@ interface FoundFile {
 }
 
 /**
+ * Longest text the import scan reads. A longer text counts as one with an
+ * import, so its file is always kept.
+ */
+export const CLAUDE_MD_IMPORT_SCAN_MAX_CHARS = CLAUDE_MD_DEDUP_MAX_BYTES;
+
+/** A fence opener: up to three spaces, then three or more of one marker. */
+const FENCE_OPEN = /^ {0,3}(`{3,}|~{3,})(.*)$/;
+
+/** A fence closer candidate: a run of one marker and trailing blanks only. */
+const FENCE_CLOSE = /^ {0,3}(`+|~+)[ \t]*\r?$/;
+
+/**
+ * `text` with each fenced code block blanked. A block closes only on a line
+ * of the opener's marker with a run at least as long (CommonMark); a block
+ * with no closer runs to the end. The scan reads each line once.
+ */
+function stripFencedBlocks(text: string): string {
+  const out: string[] = [];
+  let fence: { readonly marker: string; readonly length: number } | undefined;
+  for (const line of text.split('\n')) {
+    if (fence) {
+      const close = FENCE_CLOSE.exec(line);
+      if (close && close[1][0] === fence.marker && close[1].length >= fence.length) {
+        fence = undefined;
+      }
+      out.push('');
+      continue;
+    }
+    const open = FENCE_OPEN.exec(line);
+    // The info string of a backtick fence cannot hold a backtick.
+    if (open && !(open[1][0] === '`' && open[2].includes('`'))) {
+      fence = { marker: open[1][0], length: open[1].length };
+      out.push('');
+      continue;
+    }
+    out.push(line);
+  }
+  return out.join('\n');
+}
+
+/**
+ * `text` with each closed HTML comment blanked. An unterminated `<!--` and
+ * the text after it stay as they are. Each search starts after the previous
+ * match, so the scan is linear in the text length.
+ */
+function stripHtmlComments(text: string): string {
+  let out = '';
+  let from = 0;
+  for (;;) {
+    const open = text.indexOf('<!--', from);
+    if (open < 0) break;
+    const close = text.indexOf('-->', open + 4);
+    if (close < 0) break;
+    out += `${text.slice(from, open)} `;
+    from = close + 3;
+  }
+  return out + text.slice(from);
+}
+
+/**
  * True when Markdown text holds an `@path` import outside code. Fenced blocks,
- * inline code spans and HTML comments are removed first, as the CLI skips
- * imports in them.
+ * HTML comments and inline code spans are removed first, as the CLI skips
+ * imports in them. A text above {@link CLAUDE_MD_IMPORT_SCAN_MAX_CHARS}
+ * counts as one with an import.
  */
 export function hasClaudeMdImport(text: string): boolean {
-  const prose = text
-    .replace(/```[\s\S]*?(```|$)/g, ' ')
-    .replace(/~~~[\s\S]*?(~~~|$)/g, ' ')
-    .replace(/<!--[\s\S]*?-->/g, ' ')
-    .replace(/`[^`\n]*`/g, ' ');
+  if (text.length > CLAUDE_MD_IMPORT_SCAN_MAX_CHARS) return true;
+  const prose = stripHtmlComments(stripFencedBlocks(text)).replace(
+    /`[^`\n]*`/g,
+    ' ',
+  );
   return /(?:^|\s)@[^\s]/.test(prose);
 }
 
@@ -91,7 +152,8 @@ async function readCandidate(filePath: string): Promise<FoundFile | undefined> {
       hasImport: hasClaudeMdImport(bytes.toString('utf8')),
     };
   } catch {
-    // Absent or unreadable: the CLI cannot load it twice either.
+    // degradation-audit: optional-capability - an absent or unreadable file
+    // is not a candidate; the CLI cannot load it twice either.
     return undefined;
   }
 }
@@ -121,6 +183,64 @@ export interface ClaudeMdDedupOptions {
   readonly platform?: NodeJS.Platform;
   /** The walk gives up and excludes nothing after this many ms. */
   readonly deadlineMs?: number;
+  /**
+   * Replaces {@link machinePolicyPaths} for the platform (a test hook). The
+   * walk excludes nothing when one of these paths exists.
+   */
+  readonly machinePolicyPaths?: readonly string[];
+}
+
+/** The folder of the managed-settings file the CLI reads on Linux. */
+const LINUX_MANAGED_DIR = '/etc/claude-code';
+
+/** The reg.exe a CLI under WSL runs to read the Windows policy key. */
+const WSL_REG_EXE = '/mnt/c/Windows/System32/reg.exe';
+
+/**
+ * The paths of the managed (policy) settings sources the CLI reads on
+ * `platform`: the managed-settings file, its drop-in folder, the cached
+ * server-managed settings, and on Linux the reg.exe of WSL (WSL can inherit
+ * the Windows policy). `undefined` on a platform where a policy source is not
+ * a file (the macOS MDM profile, the Windows registry key), because a file
+ * check cannot prove that it is absent.
+ */
+export function machinePolicyPaths(
+  platform: NodeJS.Platform,
+  claudeConfigDir: string,
+): readonly string[] | undefined {
+  if (platform !== 'linux') return undefined;
+  return [
+    path.posix.join(LINUX_MANAGED_DIR, 'managed-settings.json'),
+    path.posix.join(LINUX_MANAGED_DIR, 'managed-settings.d'),
+    WSL_REG_EXE,
+    path.join(claudeConfigDir, 'remote-settings.json'),
+  ];
+}
+
+/**
+ * True when a managed settings source may apply. Managed settings can set
+ * `claudeMdExcludes` (or a policy helper that sets it), and that list could
+ * drop the copy this module keeps. So any present, unreadable or uncheckable
+ * source turns the walk off.
+ */
+async function machinePolicyMayApply(
+  paths: readonly string[] | undefined,
+): Promise<boolean> {
+  if (paths === undefined) return true;
+  for (const file of paths) {
+    try {
+      await stat(file);
+      return true;
+    } catch (error: unknown) {
+      // degradation-audit: optional-capability - an absent policy path holds
+      // no policy; one that cannot be checked may hold policy, so the walk
+      // turns off (excludes nothing).
+      const code = (error as NodeJS.ErrnoException | undefined)?.code;
+      if (code === 'ENOENT' || code === 'ENOTDIR') continue;
+      return true;
+    }
+  }
+  return false;
 }
 
 /** Default time limit of the walk; session start must not wait on a slow mount. */
@@ -147,9 +267,10 @@ async function userExcludesMayApply(
     try {
       text = await readFile(file, 'utf8');
     } catch (error: unknown) {
+      // degradation-audit: optional-capability - an absent file sets nothing;
+      // any other failure (no permission, a folder in its place) could hide
+      // the user's own list, so the walk turns off (excludes nothing).
       const code = (error as NodeJS.ErrnoException | undefined)?.code;
-      // Absent: the file sets nothing. Any other failure (no permission, a
-      // folder in its place) could hide the user's own list.
       if (code === 'ENOENT' || code === 'ENOTDIR') continue;
       return true;
     }
@@ -163,6 +284,8 @@ async function userExcludesMayApply(
         return true;
       }
     } catch {
+      // degradation-audit: optional-capability - a settings file that is not
+      // valid JSON could hide the user's own list, so the walk turns off.
       return true;
     }
   }
@@ -180,6 +303,9 @@ async function computeExcludes(
   // A session folder that does not exist starts no CLI that could load a
   // file, so there is nothing to dedupe.
   if (!(await stat(path.resolve(cwd))).isDirectory()) return [];
+  const policyPaths =
+    options.machinePolicyPaths ?? machinePolicyPaths(platform, configDir);
+  if (await machinePolicyMayApply(policyPaths)) return [];
   if (await userExcludesMayApply(cwd, options, configDir)) return [];
   // The user memory file loads only with the `user` source; it is never kept
   // and never excluded, so no decision depends on it.
@@ -219,8 +345,12 @@ async function computeExcludes(
  * A kept copy must reach the model, so the walk excludes nothing unless the
  * session loads both the `project` and the `local` source (every candidate
  * except the user memory file is then loaded) and no loaded settings file
- * sets its own `claudeMdExcludes`. It also excludes nothing when it does not
- * finish within the deadline.
+ * sets its own `claudeMdExcludes`. Managed settings can set the same key, so
+ * it also excludes nothing when a managed source exists, cannot be read, or
+ * cannot be checked with a file read (macOS and Windows; see
+ * {@link machinePolicyPaths}). Ptah never passes the SDK `managedSettings`
+ * option (the certified launch refuses it). It also excludes nothing when it
+ * does not finish within the deadline.
  *
  * A second path to a file already kept (a symlink) is not excluded: the CLI
  * already reads such a file once. Both the spelled path and the real path of
@@ -236,6 +366,8 @@ export async function findDuplicateClaudeMdExcludes(
   ) {
     return [];
   }
+  // degradation-audit: optional-capability - dedup only saves tokens; on any
+  // failure the session loads every copy, which is the behavior without it.
   return withDeadline(
     computeExcludes(cwd, options).catch((): string[] => []),
     options.deadlineMs ?? CLAUDE_MD_DEDUP_DEADLINE_MS,
