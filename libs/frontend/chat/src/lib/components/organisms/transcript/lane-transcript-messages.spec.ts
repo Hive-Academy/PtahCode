@@ -150,4 +150,26 @@ describe('lane transcript user echo (L2/M5)', () => {
     const messages = laneTranscriptMessages('lane', [echo(0, 'hello', 6)], events);
     expect(messages.filter((m) => m.role === 'user')).toHaveLength(1);
   });
+
+  it('keeps a later echo that only an earlier turn contains (PR 1509)', () => {
+    const events = [
+      { eventType: 'message_start', role: 'user', messageId: 'u1', timestamp: 5 },
+      { eventType: 'text_delta', messageId: 'u1', delta: 'Please run tests' },
+    ] as unknown as FlatStreamEventUnion[];
+    const reply = createExecutionNode({ id: 'm1', type: 'message', startTime: 10 });
+    const messages = laneTranscriptMessages('lane', [reply, echo(1, 'run tests', 20)], events);
+    expect(messages.filter((m) => m.role === 'user').map((m) => m.rawContent)).toEqual([
+      'Please run tests',
+      'run tests',
+    ]);
+  });
+
+  it('matches each streamed user turn to one echo, so a repeated message stays visible (PR 1509)', () => {
+    const events = [
+      { eventType: 'message_start', role: 'user', messageId: 'u1', timestamp: 5 },
+      { eventType: 'text_delta', messageId: 'u1', delta: 'continue' },
+    ] as unknown as FlatStreamEventUnion[];
+    const messages = laneTranscriptMessages('lane', [echo(0, 'continue', 6), echo(1, 'continue', 7)], events);
+    expect(messages.filter((m) => m.role === 'user')).toHaveLength(2);
+  });
 });

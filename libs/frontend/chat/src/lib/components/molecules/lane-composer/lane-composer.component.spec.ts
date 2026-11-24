@@ -38,7 +38,7 @@ import { VoiceInputService } from '../../../services/voice-input.service';
 import { ComposerInputController } from '../../../services/composer-input.controller';
 import { ComposerAttachmentsService } from '../../../services/composer-attachments.service';
 import { COMPOSER_TRIGGER_CACHE_ENABLED } from '../../../services/composer-trigger-scheduler';
-import { LaneComposerComponent } from './lane-composer.component';
+import { findLaneModelOption, LaneComposerComponent } from './lane-composer.component';
 
 const agentId = '00000000-0000-4000-8000-000000000001';
 
@@ -852,5 +852,28 @@ describe('LaneComposerComponent', () => {
     const resume = root(fixture).querySelector('[data-testid="lane-resume-btn"]') as HTMLButtonElement;
     expect(resume.getAttribute('aria-label')).toBe('Resume Codex session');
     expect(resume.title).toBe('Resume session');
+  });
+});
+
+describe('findLaneModelOption (PR 1509)', () => {
+  const options = [
+    { id: 'gpt-5.5', name: 'GPT-5.5' },
+    { id: 'claude-haiku-5-5-20261001', name: 'Haiku 5.5' },
+  ];
+
+  it('matches a recorded id that is a catalog id plus a date suffix', () => {
+    expect(findLaneModelOption(options, 'gpt-5.5-20261001')?.id).toBe('gpt-5.5');
+    expect(findLaneModelOption(options, 'gpt-5.5-2026-10-01')?.id).toBe('gpt-5.5');
+    expect(findLaneModelOption(options, 'claude-haiku-5-5')?.id).toBe('claude-haiku-5-5-20261001');
+  });
+
+  it('keeps an unmatched variant id instead of picking its base or its variant', () => {
+    expect(findLaneModelOption(options, 'gpt-5.5-mini')).toBeUndefined();
+    expect(findLaneModelOption([{ id: 'gpt-5.5-mini', name: 'GPT-5.5 mini' }], 'gpt-5.5')).toBeUndefined();
+  });
+
+  it('keeps exact and name matches', () => {
+    expect(findLaneModelOption(options, 'GPT-5.5')?.id).toBe('gpt-5.5');
+    expect(findLaneModelOption(options, 'haiku 5.5')?.id).toBe('claude-haiku-5-5-20261001');
   });
 });

@@ -1795,6 +1795,96 @@ describe('Claude lane steer fold-in (B6, dormant until the manifest flip)', () =
     f.finish(0);
   });
 
+  it('lets an unproven steer run as its own turn without settling a queued prompt (PR 1509)', async () => {
+    const f = runnerFixture(Promise.resolve(), undefined, {}, { manifestSteer: { state: 'supported' } });
+    const { turn } = await provedTurn(f);
+    f.config.onToolInFlightChange?.(true);
+    await f.handle.steer?.('also check the tests');
+    const steered = (await f.context.mailbox.prompt.next()).value;
+    const queued = await f.handle.continue?.('queued follow-up');
+    const queuedPrompt = (await f.context.mailbox.prompt.next()).value;
+    const settled = jest.fn();
+    void queued?.done.then(settled);
+    // The anchor's frame omits the field: the steer's fate is unproven.
+    f.config.onTurnResult?.({ subtype: 'success' });
+    f.config.onTurnComplete?.(0);
+    await expect(turn.done).resolves.toBe(0);
+    // The steer was not folded in: it runs as its own turn first.
+    f.config.onTurnResult?.({ subtype: 'success', userMessageUuids: [steered.uuid] });
+    f.config.onTurnComplete?.(0);
+    await flush();
+    expect(settled).not.toHaveBeenCalled();
+    f.config.onTurnResult?.({ subtype: 'success', userMessageUuids: [queuedPrompt.uuid] });
+    f.config.onTurnComplete?.(0);
+    await expect(queued?.done).resolves.toBe(0);
+    expect(f.handle.supportsInterrupt?.()).toBe(false);
+    f.finish(0);
+  });
+
+  it('gives an unproven steer no placeholder when the next frame lists only the queued prompt (PR 1509)', async () => {
+    const f = runnerFixture(Promise.resolve(), undefined, {}, { manifestSteer: { state: 'supported' } });
+    const { turn } = await provedTurn(f);
+    f.config.onToolInFlightChange?.(true);
+    await f.handle.steer?.('also check the tests');
+    const steered = (await f.context.mailbox.prompt.next()).value;
+    const queued = await f.handle.continue?.('queued follow-up');
+    const queuedPrompt = (await f.context.mailbox.prompt.next()).value;
+    f.config.onTurnResult?.({ subtype: 'success' });
+    f.config.onTurnComplete?.(0);
+    await expect(turn.done).resolves.toBe(0);
+    // The frame without uuids may have folded the steer in: no notice, no placeholder.
+    f.config.onTurnResult?.({ subtype: 'success', userMessageUuids: [queuedPrompt.uuid] });
+    f.config.onTurnComplete?.(0);
+    await expect(queued?.done).resolves.toBe(0);
+    expect(f.context.emitSegment).not.toHaveBeenCalledWith({ type: 'info', content: CLAUDE_STEER_MISSED_TEXT });
+    expect(f.handle.supportsInterrupt?.()).toBe(false);
+    // Should the steer still run, its frame settles no later prompt.
+    const later = await f.handle.continue?.('later follow-up');
+    const laterPrompt = (await f.context.mailbox.prompt.next()).value;
+    const settled = jest.fn();
+    void later?.done.then(settled);
+    f.config.onTurnResult?.({ subtype: 'success', userMessageUuids: [steered.uuid] });
+    f.config.onTurnComplete?.(0);
+    await flush();
+    expect(settled).not.toHaveBeenCalled();
+    f.config.onTurnResult?.({ subtype: 'success', userMessageUuids: [laterPrompt.uuid] });
+    f.config.onTurnComplete?.(0);
+    await expect(later?.done).resolves.toBe(0);
+    f.finish(0);
+  });
+
+  it('settles a prompt the gate committed before an earlier missed steer on its own frame (PR 1509)', async () => {
+    const f = runnerFixture(Promise.resolve(), undefined, {}, { manifestSteer: { state: 'supported' } });
+    const { turn, prompt } = await provedTurn(f);
+    f.config.onToolInFlightChange?.(true);
+    await f.handle.steer?.('late note');
+    const steered = (await f.context.mailbox.prompt.next()).value;
+    const queued = await f.handle.continue?.('queued follow-up');
+    const queuedPrompt = (await f.context.mailbox.prompt.next()).value;
+    const third = await f.handle.continue?.('third follow-up');
+    const thirdPrompt = (await f.context.mailbox.prompt.next()).value;
+    const thirdSettled = jest.fn();
+    void third?.done.then(thirdSettled);
+    // The steer is missed; its placeholder sits before the queued prompt.
+    f.config.onTurnResult?.({ subtype: 'success', userMessageUuids: [prompt.uuid] });
+    f.config.onTurnComplete?.(0);
+    await expect(turn.done).resolves.toBe(0);
+    expect(f.context.emitSegment).toHaveBeenCalledWith({ type: 'info', content: CLAUDE_STEER_MISSED_TEXT });
+    // The gate committed the queued prompt first, so the CLI runs it first.
+    f.config.onTurnResult?.({ subtype: 'success', userMessageUuids: [queuedPrompt.uuid] });
+    f.config.onTurnComplete?.(2);
+    await expect(queued?.done).resolves.toBe(2);
+    // The steer's own frame settles its placeholder, not the third prompt.
+    f.config.onTurnResult?.({ subtype: 'success', userMessageUuids: [steered.uuid] });
+    f.config.onTurnComplete?.(7);
+    await flush();
+    expect(thirdSettled).not.toHaveBeenCalled();
+    f.config.onTurnResult?.({ subtype: 'success', userMessageUuids: [thirdPrompt.uuid] });
+    f.config.onTurnComplete?.(0);
+    await expect(third?.done).resolves.toBe(0);
+    f.finish(0);
+  });
+
   it('forgets a steer whose push fails, so the next result reports no missed steer (M6 b)', async () => {
     const f = runnerFixture(Promise.resolve(), undefined, {}, { manifestSteer: { state: 'supported' } });
     const { turn, prompt } = await provedTurn(f);

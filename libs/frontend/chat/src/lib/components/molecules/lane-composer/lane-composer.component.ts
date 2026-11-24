@@ -128,11 +128,14 @@ function effortOption(id: string): ComposerEffortOption {
   };
 }
 
+/** A provider date suffix: `-20261001` or `-2026-10-01`. */
+const DATE_SUFFIX = /^-(?:\d{8}|\d{4}-\d{2}-\d{2})$/;
+
 /**
  * The catalog row for a model id the lane recorded. Lanes report the same
  * model as a catalog id, a display name or a dated provider id
  * (`claude-haiku-5-5` for `claude-haiku-5-5-20261001`), so the match is exact
- * first, then case-insensitive on id or name, then on a dated suffix.
+ * first, then case-insensitive on id or name, then on a date suffix alone.
  */
 export function findLaneModelOption(
   options: readonly ComposerModelOption[],
@@ -143,16 +146,15 @@ export function findLaneModelOption(
   const wanted = id.toLowerCase();
   const named = options.find((option) => option.id.toLowerCase() === wanted || option.name.toLowerCase() === wanted);
   if (named) return named;
-  // A dated recorded id: the longest catalog id it extends wins, so
-  // `gpt-5.5-mini-…` matches `gpt-5.5-mini`, not `gpt-5.5`.
-  let best: ComposerModelOption | undefined;
-  for (const option of options) {
-    if (wanted.startsWith(`${option.id.toLowerCase()}-`) && (!best || option.id.length > best.id.length)) best = option;
-  }
-  if (best) return best;
-  // A dated catalog id: only when exactly one row extends the recorded id.
-  const dated = options.filter((option) => option.id.toLowerCase().startsWith(`${wanted}-`));
-  return dated.length === 1 ? dated[0] : undefined;
+  // A dated recorded id: the catalog id plus a date suffix only, so
+  // `gpt-5.5-mini` never matches `gpt-5.5`.
+  const dated = (longer: string, base: string): boolean =>
+    longer.startsWith(base) && DATE_SUFFIX.test(longer.slice(base.length));
+  const base = options.find((option) => dated(wanted, option.id.toLowerCase()));
+  if (base) return base;
+  // A dated catalog id: only when exactly one row is the recorded id plus a date.
+  const rows = options.filter((option) => dated(option.id.toLowerCase(), wanted));
+  return rows.length === 1 ? rows[0] : undefined;
 }
 
 function commandSuggestion(option: LaneComposerCommandOption): CommandSuggestion {

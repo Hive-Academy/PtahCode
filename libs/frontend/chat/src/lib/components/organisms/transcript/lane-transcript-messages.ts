@@ -85,10 +85,33 @@ export function laneTranscriptMessages(
   }
   users.sort((a, b) => a.timestamp - b.timestamp);
   // A user turn the stream already shows (a provider that echoes its prompt)
-  // keeps one bubble: the host echo of the same body is dropped.
-  const streamedUserText = users.map((user) => user.rawContent ?? '');
-  const alreadyStreamed = (body: string): boolean =>
-    body.trim() !== '' && streamedUserText.some((text) => text.includes(body.trim()));
+  // keeps one bubble: the host echo of the same body is dropped. Each echo
+  // matches one streamed user message of its own delivery, used only once: a
+  // timed echo takes the first unused one that contains its body and does not
+  // predate the last output before the send, so an earlier turn's message
+  // never hides a later delivery.
+  const streamedUsed = users.map(() => false);
+  const outputTimes = nodes
+    .filter((node) => !isUserEcho(node) && !userTextIds.has(node.id))
+    .map((node) => node.startTime)
+    .filter((time): time is number => time !== undefined);
+  const consumeStreamed = (body: string, sentAt?: number): boolean => {
+    const wanted = body.trim();
+    if (wanted === '') return false;
+    const floor =
+      sentAt === undefined
+        ? -Infinity
+        : outputTimes.reduce((last, time) => (time < sentAt && time > last ? time : last), -Infinity);
+    const index = users.findIndex(
+      (user, i) =>
+        !streamedUsed[i] &&
+        user.timestamp >= floor &&
+        (user.rawContent ?? '').includes(wanted),
+    );
+    if (index < 0) return false;
+    streamedUsed[index] = true;
+    return true;
+  };
 
   const messages: ExecutionChatMessage[] = [];
   /** Emitted SDK message node per id, with its position in `messages`. */
@@ -133,7 +156,7 @@ export function laneTranscriptMessages(
       flush();
       const body = node.content ?? '';
       lastTime = node.startTime ?? lastTime;
-      if (!alreadyStreamed(body))
+      if (!consumeStreamed(body, node.startTime))
         messages.push(
           createExecutionChatMessage({
             id: `${laneId}:echo:${node.id}`,
