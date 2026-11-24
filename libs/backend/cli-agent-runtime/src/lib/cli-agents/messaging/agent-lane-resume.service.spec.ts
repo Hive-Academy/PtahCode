@@ -15,6 +15,14 @@ describe('AgentLaneResumeService', () => {
     expect(spawn).toHaveBeenCalledWith(expect.objectContaining({ parentLevel: 'plan' }));
   });
 
+  it('drops the host-internal usage workspace root before spawning', async () => {
+    const spawn = jest.fn().mockResolvedValue({ agentId: AgentId.create() });
+    const resume = new AgentLaneResumeService({ spawn, prepareSdkHandleSpawn: jest.fn(), releaseIdleForResume: jest.fn() }, ptahCli());
+    await resume.resumeRequest({ cli: 'codex', task: 'continue', workingDirectory: '.', resumeSessionId: 'session', usageWorkspaceRoot: 'D:/other' });
+    expect(spawn).toHaveBeenCalledWith(expect.objectContaining({ resumeSessionId: 'session', workingDirectory: '.' }));
+    expect(spawn.mock.calls[0][0]).not.toHaveProperty('usageWorkspaceRoot');
+  });
+
   it('keeps an explicitly parentless resume parentless', async () => {
     const spawn = jest.fn().mockResolvedValue({ agentId: AgentId.create() });
     const lookup = jest.fn(() => 'plan' as const);

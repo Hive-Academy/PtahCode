@@ -1727,6 +1727,15 @@ describe('buildAgentNamespace — spawn boundary', () => {
     expect(mocks.processManager.beginSpawn.mock.calls[0][0]).not.toHaveProperty('externalOwner');
   });
 
+  it('drops a caller-supplied usageWorkspaceRoot before manager.spawn', async () => {
+    const { deps, mocks } = makeDeps();
+    mocks.processManager.spawn.mockResolvedValue({ agentId: 'a' } as SpawnAgentResult);
+    const namespace = buildAgentNamespace(deps);
+    await namespace.spawn({ task: 't', cli: 'codex', usageWorkspaceRoot: 'D:/other-folder' });
+    expect(mocks.processManager.spawn).toHaveBeenCalledTimes(1);
+    expect(mocks.processManager.spawn.mock.calls[0][0]).not.toHaveProperty('usageWorkspaceRoot');
+  });
+
   it('stamps only the authenticated request owner on both spawn paths', async () => {
     const { deps, mocks } = makeDeps();
     const forged = { transport: 'http' as const, principal: 'a'.repeat(32), exclusive: true };

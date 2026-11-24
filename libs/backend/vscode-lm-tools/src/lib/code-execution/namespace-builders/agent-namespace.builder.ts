@@ -727,6 +727,8 @@ export function buildAgentNamespace(
           roleDefinition: _callerRoleDefinition,
           systemPrompt: _callerSystemPrompt,
           accountSelection: _rawAccountSelection,
+          // Host-internal ledger key: a caller must not re-key its usage rows.
+          usageWorkspaceRoot: _rawUsageWorkspaceRoot,
           ...requestFields
         } = request;
 

@@ -37,4 +37,24 @@ describe('recordLaneUsageOutcome model attribution', () => {
     });
     expect(records[0]).toMatchObject({ executorType: 'lane', phaseKind: 'implement' });
   });
+
+  it('keys the contribution by the workspace override when one is given', () => {
+    const records: SessionUsageContribution[] = [];
+    const sink: SessionUsageSink = { recordUsage: (value) => { records.push(value); } };
+    recordLaneUsageOutcome(sink, logger, info, '2026-11-08T00:01:00.000Z', {
+      inputTokens: 1, outputTokens: 1,
+    }, null, undefined, undefined, 'D:/review-root');
+    expect(records).toHaveLength(1);
+    expect(records[0].workspaceKey).toBe('D:/review-root');
+  });
+
+  it('keys the contribution by the working directory without an override', () => {
+    const records: SessionUsageContribution[] = [];
+    const sink: SessionUsageSink = { recordUsage: (value) => { records.push(value); } };
+    recordLaneUsageOutcome(sink, logger, info, '2026-11-08T00:01:00.000Z', {
+      inputTokens: 1, outputTokens: 1,
+    });
+    expect(records).toHaveLength(1);
+    expect(records[0].workspaceKey).toBe('C:/workspace');
+  });
 });

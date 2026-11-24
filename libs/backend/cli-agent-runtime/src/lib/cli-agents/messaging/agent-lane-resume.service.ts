@@ -45,7 +45,9 @@ export class AgentLaneResumeService {
         'No CLI session is available for resume.',
       );
     }
-    return this.manager.spawn({ ...request,
+    // The ledger key override is host-internal; a resume never re-keys usage rows.
+    const { usageWorkspaceRoot: _usageWorkspaceRoot, ...forwarded } = request;
+    return this.manager.spawn({ ...forwarded,
       ...(this.parentLevel && request.parentSessionId
         ? { parentLevel: this.parentLevel(request.parentSessionId) } : {}),
     });
