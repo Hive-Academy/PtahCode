@@ -1290,7 +1290,7 @@ describe('B07 additive totals, routing rules, AM3 override, and AM4 model refine
     });
   });
 
-  it('truncates long exclude selector snippets, caps ambiguous match lists, and computes exclusion counterfactuals', () => {
+  it('preserves full exclude selector identity for diagnostic deduplication, caps ambiguous match lists, and computes exclusion counterfactuals', () => {
     const lanes = [
       makeLane('codex', { family: 'shared-fam' }),
       makeLane('grok', { family: 'shared-fam' }),
@@ -1332,7 +1332,7 @@ describe('B07 additive totals, routing rules, AM3 override, and AM4 model refine
     ).plans[0];
     expect(nonDecisive.ruleExclusionChangedChoice).toBe(false);
     expect(nonDecisive.ruleDiagnostics).toEqual([
-      `routing rule bounded-diag: exclude selector "${'x'.repeat(45)}..." matched no candidate`,
+      `routing rule bounded-diag: exclude selector "${longSelector}" matched no candidate`,
       'routing rule bounded-diag: exclude selector "shared-fam" is ambiguous (codex, cursor, grok, and 2 more)',
     ]);
 

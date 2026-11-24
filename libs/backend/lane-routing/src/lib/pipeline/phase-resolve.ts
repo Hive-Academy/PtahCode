@@ -72,6 +72,7 @@ export function resolvePhase(
     return fallback(null);
   }
   const outcome = context.outcome;
+  if (outcome.questionCap?.has(plan.phaseId)) return fallback('question-cap');
   if (!outcome.sent || outcome.requestCause !== null) {
     return fallback(outcome.requestCause);
   }

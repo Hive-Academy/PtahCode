@@ -99,6 +99,7 @@ type RosterEntry = GateResult['roster'][number];
 
 function shortlistTrace(row: RosterEntry): RosterEntry {
   if (row.candidates === undefined) return row;
+  if (row.candidates.length === 0) return { ...row, candidates: undefined };
   let chosen: CandidateTrace | undefined;
   let alternative: CandidateTrace | undefined;
   for (const candidate of row.candidates) {
@@ -118,6 +119,14 @@ function shortlistTrace(row: RosterEntry): RosterEntry {
     candidates: candidates.length > 0 ? candidates : undefined,
     traceOmitted: (row.traceOmitted ?? 0) + omitted,
   };
+}
+
+function shortenExplanation(text: string | undefined, maxChars: number): string | undefined {
+  if (text === undefined || text.length <= maxChars) return text;
+  const end = maxChars - 1;
+  const last = text.charCodeAt(end - 1);
+  const splitsPair = last >= 0xD800 && last <= 0xDBFF;
+  return `${text.slice(0, splitsPair ? end - 1 : end)}…`;
 }
 
 function tryRoster(result: GateResult, roster: GateResult['roster']): string | null {
@@ -164,9 +173,7 @@ function compactRouteResult(result: RouteDecideResult): string | null {
   const maxExplanationChars = 96;
   const shortened = tryRoster(result, roster.map((row) => ({
     ...row,
-    explanation: row.explanation !== undefined && row.explanation.length > maxExplanationChars
-      ? `${row.explanation.slice(0, maxExplanationChars - 1)}…`
-      : row.explanation,
+    explanation: shortenExplanation(row.explanation, maxExplanationChars),
   })));
   if (shortened !== null) return shortened;
 

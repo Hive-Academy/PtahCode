@@ -553,6 +553,83 @@ describe('gatherRouteCall', () => {
     }
   });
 
+  it('retains a ready browser tool proof and lane eligibility when matrix.load synchronously advances the injected clock past the deadline', async () => {
+    let now = 1_000;
+    const deadline = createRouteDeadline(now + 10, () => now);
+    const callOrder: string[] = [];
+    const baseMatrix = neutralMatrix();
+
+    const tools = jest.fn(() => {
+      callOrder.push('tools');
+      return Promise.resolve(['ptah_browser_navigate']);
+    });
+    const matrix: RouteMatrix = {
+      load: jest.fn((input) => {
+        callOrder.push('matrix.load');
+        now += 20;
+        return baseMatrix.load(input);
+      }),
+    };
+
+    const gathered = await gatherRouteCall({
+      source: {
+        rows: () => Promise.resolve([lane('codex')]),
+        limits: async () => new Map(),
+        roles: async () => [],
+        tools,
+      },
+      listing: undefined,
+      matrix,
+      rotation: okRotation(),
+      logger: testLogger(),
+      nowMs: 50_000,
+      listingBudgetMs: 500,
+      deadline,
+      phases: [
+        {
+          id: 'look',
+          kind: 'visual-review',
+          requiredCapabilities: ['browser'],
+        },
+      ],
+    });
+
+    expect(tools).toHaveBeenCalled();
+    expect(callOrder.indexOf('tools')).toBeGreaterThanOrEqual(0);
+    expect(callOrder.indexOf('matrix.load')).toBeGreaterThan(
+      callOrder.indexOf('tools'),
+    );
+    expect(gathered.toolNamesByPhase?.get('look')?.get('codex')).toEqual([
+      'ptah_browser_navigate',
+    ]);
+    expect(gathered.detailReasons).not.toContain(
+      'tool evidence unavailable for phase look (timeout)',
+    );
+    expect(gathered.missing).toContain('matrix-file');
+
+    const phase = gathered.resolvedPhases?.[0];
+    if (phase === undefined) {
+      throw new Error('expected resolved phase');
+    }
+    const constrained = constrainPhase({
+      phase,
+      candidates: candidatesForPhase(phase, gathered),
+      toolNames: gathered.toolNamesByPhase?.get('look'),
+    });
+    expect(constrained.status).toBe('eligible');
+    if (constrained.status === 'eligible') {
+      expect(constrained.eligible.map((candidate) => candidate.id)).toContain(
+        'codex',
+      );
+      expect(
+        constrained.excluded.some(
+          (entry) =>
+            entry.candidate === 'codex' && entry.rule === 'capability-unknown',
+        ),
+      ).toBe(false);
+    }
+  });
+
   it('starts child-session, built-in, and custom-role tool proofs independently of hanging rows and sibling phase definitions', async () => {
     jest.useFakeTimers();
     const deadline = createRouteDeadline(Date.now() + 80, () => Date.now());

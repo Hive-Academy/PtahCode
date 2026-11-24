@@ -84,6 +84,23 @@ describe('runLaneRequest outcome figures', () => {
     expect(result.offered.has('third')).toBe(false);
     expect(Object.keys(captured.payloads[0].questions['first'].criteria)).toEqual(['o1', 'o2']);
   });
+  it('keeps the third question capped even when the model pass fails', async () => {
+    const captured = capture();
+    const result = await runLaneRequest({
+      provider: 'ollama',
+      request: 'ship',
+      phases: ['first', 'second', 'third'].map((phaseId) => ({ ...phases[0], phaseId })),
+      outcomes,
+      maxRequestBytes: 100_000,
+      dispatch: captured.dispatch,
+      logger,
+    });
+
+    expect(Object.keys(captured.payloads[0].questions)).toEqual(['first', 'second']);
+    expect(result.requestCause).toBe('provider-error');
+    expect(result.questionCap).toEqual(new Set(['third']));
+  });
+
   it('sends only offered pairs and deduplicates repeated phase/kind pairs', async () => {
     const captured = capture();
     const result = await runLaneRequest({
@@ -96,9 +113,7 @@ describe('runLaneRequest outcome figures', () => {
     expect(Object.keys(captured.payloads[0].state.pastOutcomes)).toEqual(
       lanes.map((lane) => `${lane.laneId}/implement`),
     );
-    expect(captured.payloads[0].state.pastOutcomes['codex/implement']).toEqual({
-      delivered: 2, failed: 1,
-    });
+    expect(captured.payloads[0].state.pastOutcomes['codex/implement']).toEqual([67, 3]);
   });
 
   it('skips subagent options and other task kinds', async () => {
@@ -223,6 +238,18 @@ describe('runLaneRequest outcome figures', () => {
     });
     expect(result.outcomeFigures).toBe(0);
     expect(captured.payloads[0].state.pastOutcomes).toEqual({});
+  });
+
+  it('sends every fixed question because the lane question cap does not apply', async () => {
+    const captured = capture();
+    const keys = ['engineering', 'settled', 'relation', 'materialChange'];
+    const result = await runFixedRequest({
+      request: 'scope',
+      questions: keys.map((key) => ({ key, instructions: 'Answer', criteria: { yes: 'Yes', no: 'No' } })),
+      maxRequestBytes: 100_000, dispatch: captured.dispatch, logger,
+    });
+    expect(Object.keys(captured.payloads[0].questions)).toEqual(keys);
+    expect(result.questionCap).toEqual(new Set());
   });
 
   it('tracks optionCapOffered and distinguishes option-cap, payload-fit, and below-band without pruning lanes on alternate drops', async () => {

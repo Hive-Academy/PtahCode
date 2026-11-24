@@ -198,7 +198,7 @@ describe('route decide preflight', () => {
     expect(JSON.stringify((logger.info as jest.Mock).mock.calls)).not.toMatch(/SECRET/);
   });
 
-  it('returns a validated copy of a confirmed cached result without dispatching', async () => {
+  it.each([false, true])('returns a validated copy of a confirmed cached result without dispatching (inside reserve: %s)', async (insideReserve) => {
     const reuse = reuseCache();
     reuse.confirmRevision('tab-1', 4);
     const first = harness({ selection: OLLAMA, reuse });
@@ -217,6 +217,7 @@ describe('route decide preflight', () => {
     const next = harness({ selection: OLLAMA, reuse, logger });
     const reused = await next.service.decide(preflight, source(), {
       sessionKey: 'tab-1',
+      ...(insideReserve ? { deadlineAtMs: performance.now() + ROUTE_RETURN_RESERVE_MS / 2 } : {}),
     });
     expect(next.calls).toHaveLength(0);
     expect(logger.info).toHaveBeenCalledTimes(1);

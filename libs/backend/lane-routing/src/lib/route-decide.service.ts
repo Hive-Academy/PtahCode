@@ -19,6 +19,7 @@ import {
 } from './contracts/route-decide-args.schema';
 import {
   DECISION_MODEL_TIMEOUT_MIN_MS,
+  isRetiredRole,
   loggableErrorName,
   type LoggableErrorName,
 } from '@ptah-extension/shared';
@@ -85,6 +86,7 @@ import {
   emptyRotationState,
   rotationKey,
   withPick,
+  type RotationState,
 } from './ranking/rotation.store';
 import { overallConfidence } from './reasons/confidence';
 import { compilePreflightReasons } from './reasons/compile-reasons';
@@ -92,6 +94,8 @@ import { gateSummary, preflightSummary, type DecisionSummaryFacts } from './reas
 import type { PreflightReuseCache } from './scope/preflight-reuse-cache';
 import type { RoutingRulesSetting } from './scope/routing-rules-setting';
 import {
+  DECISION_QUESTIONS_PER_CALL,
+  DECISION_REQUEST_TIMEOUT_MS,
   MODEL_LISTING_BUDGET_MS,
   MIN_OPTIONS_PER_PHASE,
   QUESTIONS_PER_REQUEST,
@@ -114,6 +118,7 @@ export interface RouteDecideDependencies {
   readonly routingRulesSetting?: Pick<RoutingRulesSetting, 'read'>;
   readonly rotationSetting?: { isEnabled(): boolean };
   readonly config: DecisionModelConfig;
+  readonly readPrefillTokensPerSecond?: () => unknown;
   readonly matrix: RouteMatrix;
   readonly rotation: RouteRotation;
   readonly logger: LaneRoutingLogger;
@@ -123,6 +128,8 @@ export interface RouteDecideDependencies {
   readonly phaseDefinitionReader?: PhaseDefinitionReader;
   readonly seams?: RouteDecideSeams;
 }
+
+const ROTATION_SAVE_TIMEOUT_MS = 1000;
 
 type PreflightArgs = Extract<RouteDecideArgs, { stage: 'pre-flight' }>;
 
@@ -163,8 +170,11 @@ export class RouteDecideService implements RotationStateReader {
         throw schemaError('invalid route decide args', parsed.error);
       }
       stage = parsed.data.stage;
+      const suppliedDeadline = context?.deadlineAtMs;
       const deadline = createRouteDeadline(
-        context?.deadlineAtMs ?? enteredAt + ROUTE_DEADLINE_MS[stage],
+        suppliedDeadline !== undefined && Number.isFinite(suppliedDeadline)
+          ? suppliedDeadline
+          : enteredAt + ROUTE_DEADLINE_MS[stage],
         monotonicNow,
       );
       const ioDeadline = createRouteDeadline(
@@ -172,7 +182,7 @@ export class RouteDecideService implements RotationStateReader {
         monotonicNow,
       );
       if (parsed.data.stage === 'pre-flight') {
-        if (ioDeadline.remainingMs() > 0 && context?.sessionKey !== undefined && this.deps.reuse !== undefined) {
+        if (context?.sessionKey !== undefined && this.deps.reuse !== undefined) {
           const fingerprint = JSON.stringify(this.deps.config.getSelection());
           const cached = this.deps.reuse.get(context.sessionKey, fingerprint);
           if (cached !== null) {
@@ -248,7 +258,7 @@ export class RouteDecideService implements RotationStateReader {
           reportedConfidence: read.depth.answer.confidence,
         },
       ]),
-      reasons: [...reasons],
+      reasons: outcome?.requestReason === undefined ? [...reasons] : [...reasons, outcome.requestReason],
       usage: usageOf(tally),
     };
     const validated = PreflightResultSchema.safeParse(result);
@@ -346,18 +356,52 @@ export class RouteDecideService implements RotationStateReader {
       tally,
       [pass1Run.outcome, pass2Run.outcome],
     );
-    const validated = GateResultSchema.safeParse(ioDeadline.remainingMs() === 0 ? {
+    const costReasons = new Map<string, string>();
+    for (const [pass, run] of [[pass1, pass1Run], [pass2, pass2Run]] as const) {
+      const reason = run.outcome?.requestReason;
+      if (reason === undefined) continue;
+      for (const plan of pass.plans) costReasons.set(plan.phaseId, reason);
+    }
+    const deadlineReads = gathered.deadlineReads;
+    const phaseById = new Map(phases.map((phase) => [phase.id, phase]));
+    const pinById = new Map(args.pins?.map((pin) => [pin.phaseId, pin.executor]));
+    const validated = GateResultSchema.safeParse(costReasons.size > 0 || deadlineReads !== undefined ? {
       ...result,
-      roster: result.roster.map((row) => row.status === 'unavailable'
-        ? { ...row, reason: `${row.reason}; route deadline reached` }
-        : row),
+      roster: result.roster.map((row) => {
+        const costReason = costReasons.get(row.phaseId);
+        if (row.fallbackCause === 'deadline' && costReason !== undefined) {
+          return { ...row, reason: `${row.reason}; ${costReason}` };
+        }
+        if (row.status === 'unavailable' && deadlineReads !== undefined && unavailableReadTimedOut(
+          row,
+          phaseById.get(row.phaseId)?.role,
+          pinById.get(row.phaseId),
+          plans.get(row.phaseId)?.inventory ?? [],
+          deadlineReads,
+        )) {
+          return {
+            ...row,
+            reason: `${row.reason}; route deadline reached`,
+            ...(row.explanation === undefined ? {} : {
+              explanation: `${row.explanation}; route deadline reached`,
+            }),
+          };
+        }
+        return row;
+      }),
     } : result);
     if (!validated.success) {
       throw schemaError('route decide result failed schema', validated.error);
     }
-    this.rotationWrites = this.rotationWrites.then(async () => {
-      if (deadline.remainingMs() > 0) await this.persistRotation(gathered, validated.data);
-    }).catch((error: unknown) => this.logBackgroundFailure('rotation state could not be saved', error));
+    if (!gathered.rotationUnavailable) {
+      let picks = emptyRotationState();
+      for (const row of validated.data.roster) {
+        if (row.status === 'chosen') {
+          picks = withPick(picks, rotationKey(row.phaseId, row.taskKind), row.executor.id);
+        }
+      }
+      if (picks.entries.length > 0) this.queueRotationWrite(picks, deadline);
+    }
     this.logSummary(() => gateSummary(validated.data, this.summaryFacts(
       caller, started,
       (pass1Run.outcome?.outcomeFigures ?? 0) + (pass2Run.outcome?.outcomeFigures ?? 0),
@@ -377,46 +421,74 @@ export class RouteDecideService implements RotationStateReader {
     deadline: RouteDeadline,
     run: (dispatch: ModelDispatch) => Promise<ModelRequestOutcome>,
   ): Promise<ModelRequestOutcome> {
-    if (deadline.remainingMs() < DECISION_MODEL_TIMEOUT_MIN_MS) return emptyOutcome('deadline');
+    if (!(deadline.remainingMs() >= DECISION_MODEL_TIMEOUT_MIN_MS)) return emptyOutcome('deadline');
     if (caller.kind === 'system-one' && caller.target.locality === 'local' && caller.target.probe === 'daemon') {
       const url = ollamaPsUrl(caller.target.baseUrl);
       const residency = await withinBudget(
         capRouteDeadline(deadline, SYSTEM_ONE_RESIDENCY_PROBE_TIMEOUT_MS),
         async (signal) => {
           if (url === null) return null;
-          const response = await (this.deps.seams?.residencyFetch ?? fetch)(url, { method: 'GET', signal });
-          return response.ok ? residentFromPsBody(await response.text(), caller.target.model) : null;
+          const response: Awaited<ReturnType<SystemOneFetch>> & Partial<Pick<Response, 'body'>> =
+            await (this.deps.seams?.residencyFetch ?? fetch)(url, { method: 'GET', signal });
+          if (!response.ok) {
+            void response.body?.cancel().catch(() => {
+              // degradation-audit: optional-capability - the HTTP failure is logged below.
+            });
+            return { status: response.status };
+          }
+          return residentFromPsBody(await response.text(), caller.target.model);
         },
       );
-      if (deadline.remainingMs() < DECISION_MODEL_TIMEOUT_MIN_MS) return emptyOutcome('deadline');
+      if (residency.kind === 'error') {
+        this.deps.logger.debug('[lane-routing] residency probe failed', errorFacts(residency.error));
+      } else if (residency.kind === 'deadline') {
+        this.deps.logger.debug('[lane-routing] residency probe timed out');
+      } else if (typeof residency.value === 'object' && residency.value !== null) {
+        this.deps.logger.debug('[lane-routing] residency probe returned an HTTP error', residency.value);
+      }
+      if (!(deadline.remainingMs() >= DECISION_MODEL_TIMEOUT_MIN_MS)) return emptyOutcome('deadline');
       if (residency.kind !== 'ok' || residency.value !== true) return emptyOutcome('model-cold');
     }
 
     let sent = false;
+    const configuredTimeoutMs = caller.kind === 'system-one'
+      ? caller.target.timeoutMs
+      : DECISION_REQUEST_TIMEOUT_MS;
+    let cappedByDeadline = false;
+    let cappedStructuredSignal: AbortSignal | undefined;
     const result = await withinBudget(deadline, async (signal) => {
       // Arm the outer timer before synchronous payload fitting begins.
       await Promise.resolve();
       const timeoutCapMs = Math.floor(deadline.remainingMs());
-      if (timeoutCapMs < DECISION_MODEL_TIMEOUT_MIN_MS) return emptyOutcome('deadline');
-      const dispatch = this.decisionCaller.dispatchFor(caller, { signal, timeoutCapMs });
+      if (!(timeoutCapMs >= DECISION_MODEL_TIMEOUT_MIN_MS)) return emptyOutcome('deadline');
+      const dispatch = this.decisionCaller.dispatchFor(caller, { signal, remainingMs: deadline.remainingMs });
       if (dispatch.kind === 'system-one') {
         return run({
           ...dispatch,
           caller: {
-            decide: (payload) => {
+            decide: (payload, capMs) => {
               sent = true;
-              return dispatch.caller.decide(payload);
+              cappedByDeadline = (capMs ?? timeoutCapMs) <= configuredTimeoutMs;
+              return dispatch.caller.decide(payload, capMs);
             },
           },
         });
       }
+      if (timeoutCapMs <= configuredTimeoutMs) cappedStructuredSignal = dispatch.signal;
       return run({
         ...dispatch,
         completer: {
           isReady: (id) => dispatch.completer.isReady(id),
-          complete: (input) => {
+          complete: async (input) => {
             sent = true;
-            return dispatch.completer.complete(input);
+            try {
+              return await dispatch.completer.complete(input);
+            } catch (error: unknown) {
+              if (signal.aborted || cappedStructuredSignal?.aborted) {
+                throw dispatch.signal.reason;
+              }
+              throw error;
+            }
           },
         },
       });
@@ -426,7 +498,10 @@ export class RouteDecideService implements RotationStateReader {
     void this.decisionCaller.noteLive(caller, result.value).catch(
       (error: unknown) => this.logBackgroundFailure('decision model live recheck failed', error),
     );
-    return result.value;
+    return (cappedByDeadline && result.value.requestCause === 'timeout') ||
+      (result.value.requestCause !== null && cappedStructuredSignal?.aborted === true)
+      ? { ...result.value, requestCause: 'deadline' }
+      : result.value;
   }
 
   private logBackgroundFailure(message: string, error: unknown): void {
@@ -477,10 +552,10 @@ export class RouteDecideService implements RotationStateReader {
       Number(laneQuestion(b).primaryCount >= MIN_OPTIONS_PER_PHASE) -
       Number(laneQuestion(a).primaryCount >= MIN_OPTIONS_PER_PHASE),
     );
-    const send = sendable.slice(0, QUESTIONS_PER_REQUEST);
-    const limited = new Set(
-      sendable.slice(QUESTIONS_PER_REQUEST).map((plan) => plan.phaseId),
-    );
+    const isSystemOne = caller.kind === 'system-one';
+    const cap = isSystemOne ? DECISION_QUESTIONS_PER_CALL : QUESTIONS_PER_REQUEST;
+    const send = sendable.slice(0, cap);
+    const capped = new Set(sendable.slice(cap).map((plan) => plan.phaseId));
     let outcome: ModelRequestOutcome | null = null;
     if (
       mode === 'model' &&
@@ -491,40 +566,40 @@ export class RouteDecideService implements RotationStateReader {
         provider:
           caller.kind === 'structured' ? 'structuredOutput' : caller.provider,
         request: args.request,
+        taskType: args.taskType,
+        depth: args.depth,
         phases: send.map(laneQuestion),
         outcomes,
         maxRequestBytes: this.maxBytes,
         dispatch,
         logger: this.deps.logger,
       }));
+      if (isSystemOne && capped.size > 0) outcome = { ...outcome, questionCap: capped };
     }
     return {
       outcome,
       context: {
         mode,
         blockedCause: caller.kind === 'blocked' ? caller.cause : null,
-        limited,
+        limited: isSystemOne ? new Set() : capped,
         outcome,
       },
     };
   }
 
-  private async persistRotation(
-    gathered: GatheredCall,
-    result: GateResult,
-  ): Promise<void> {
-    if (gathered.rotationUnavailable) return;
-    const chosen = result.roster.filter((entry) => entry.status === 'chosen');
-    if (chosen.length === 0) return;
-    let picks = emptyRotationState();
-    for (const entry of chosen) {
-      picks = withPick(
-        picks,
-        rotationKey(entry.phaseId, entry.taskKind),
-        entry.executor.id,
+  private queueRotationWrite(picks: RotationState, deadline: RouteDeadline): void {
+    this.rotationWrites = this.rotationWrites.then(async () => {
+      if (deadline.remainingMs() <= 0) return;
+      const saved = await withinBudget(
+        capRouteDeadline(deadline, ROTATION_SAVE_TIMEOUT_MS),
+        () => this.deps.rotation.save(picks),
       );
-    }
-    await this.deps.rotation.save(picks);
+      if (saved.kind === 'deadline') {
+        this.logBackgroundFailure('rotation state save timed out', new Error());
+      } else if (saved.kind === 'error') {
+        this.logBackgroundFailure('rotation state could not be saved', saved.error);
+      }
+    }).catch((error: unknown) => this.logBackgroundFailure('rotation state could not be saved', error));
   }
 
   private get nowMs(): number {
@@ -563,6 +638,38 @@ function schemaError(
  * carry a key (a key can even equal a real Node code), so only the fixed
  * `loggableErrorName` category is logged and the code is never read.
  */
+function unavailableReadTimedOut(
+  row: Extract<GateResult['roster'][number], { status: 'unavailable' }>,
+  role: string | undefined,
+  pin: string | undefined,
+  inventory: readonly RoutingCandidate[],
+  reads: NonNullable<GatheredCall['deadlineReads']>,
+): boolean {
+  if (reads.rows && (pin === undefined
+    ? row.exclusionReason !== 'reviewer-family'
+    : row.pinRule === 'not-listed' && pin !== 'child-session' && !pin.startsWith('subagent:'))) {
+    return true;
+  }
+  if (reads.roles && role !== undefined && !isRetiredRole(role) &&
+      (pin === undefined || row.pinRule === 'not-listed' && pin === `subagent:${role}`)) {
+    return true;
+  }
+  const capabilityBlocked = row.exclusionReason === 'missing-capability' ||
+    row.pinRule === 'missing-capability' || row.pinRule === 'capability-unknown';
+  if (!capabilityBlocked) return false;
+  if (reads.phaseDefinitions?.has(row.phaseId)) return true;
+
+  const timedOut = reads.tools?.get(row.phaseId);
+  if (timedOut === undefined) return false;
+  if (pin === undefined) {
+    return row.excludedBy.some((entry) => entry.rule === 'capability-unknown' && timedOut.has(entry.candidate));
+  }
+  if (row.pinRule !== 'capability-unknown') return false;
+  const target = inventory.find((candidate) => candidate.id === pin) ??
+    inventory.find((candidate) => candidate.kind === 'lane' && candidate.cli === pin);
+  return target !== undefined && timedOut.has(target.id);
+}
+
 function errorFacts(error: unknown): { readonly name: LoggableErrorName } {
   return { name: loggableErrorName(error) };
 }

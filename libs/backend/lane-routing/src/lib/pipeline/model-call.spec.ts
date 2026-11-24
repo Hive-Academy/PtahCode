@@ -1,3 +1,10 @@
+import {
+  createMockSecretStorage,
+  createMockStateStorage,
+  createMockWorkspaceProvider,
+} from '@ptah-extension/platform-core/testing';
+import { DecisionCaller } from '../decision-model/decision-caller';
+import { DecisionModelConfig } from '../decision-model/decision-model.config';
 import type { LaneRoutingLogger } from '../lane-routing-logger';
 import type { SystemOneTarget } from '../decision-model/decision-model.config';
 import type { DecisionPayload } from '../decision-model/decision-payload';
@@ -5,6 +12,8 @@ import type { StructuredDecisionCompleter } from '../decision-model/structured-d
 import {
   SystemOneClient,
   type SystemOneFetch,
+  type SystemOneCallResult,
+  type SystemOneClientOptions,
 } from '../decision-model/system-one.client';
 import {
   SYSTEM_ONE_KEEP_ALIVE,
@@ -17,7 +26,8 @@ import {
   DECISION_RETURN_MARGIN_MS,
 } from '../routing-constants';
 import { callStructured, callSystemOne } from './model-call';
-import { systemOneClientOptions } from './model-refine';
+import { runFixedRequest, systemOneClientOptions } from './model-refine';
+import { PrefillRateStore } from './prefill-rate.store';
 
 const BUDGET = DECISION_REQUEST_TIMEOUT_MS + DECISION_RETURN_MARGIN_MS;
 
@@ -234,3 +244,139 @@ async function budgetsFor(
     timeout.mockRestore();
   }
 }
+
+
+describe('System One admission and token measurement', () => {
+  const reply: SystemOneCallResult = {
+    ok: true,
+    result: { model: 'nimble', answers: {}, usage: { input_tokens: 80 } },
+  };
+
+  function admissionTest(remainingMs = 1000) {
+    let now = 0;
+    const rates = new PrefillRateStore();
+    const abort = new AbortController();
+    const logger = { ...quietLogger(), debug: jest.fn() };
+    const metrics = {
+      promptTokens: 100,
+      logger,
+      admission: { targetKey: 'target', rates, remainingMs: () => remainingMs, now: () => now, signal: abort.signal },
+    };
+    return { metrics, rates, abort, logger, advance: (ms: number) => { now += ms; } };
+  }
+
+  it('skips over-budget estimates and dispatches at the cost boundary', async () => {
+    const { metrics, rates, advance, logger } = admissionTest(1250);
+    const decide = jest.fn(async () => {
+      advance(1000);
+      return reply;
+    });
+    rates.recordCompleted('target', 99, 1000);
+    const skipped = await callSystemOne({ decide }, PAYLOAD, new Map(), [], metrics);
+    expect(skipped).toMatchObject({
+      sent: false, requestCause: 'deadline',
+      requestReason: 'estimated decision model cost 1261 ms exceeds 1250 ms remaining',
+    });
+    expect(decide).not.toHaveBeenCalled();
+    expect(logger.debug).not.toHaveBeenCalled();
+
+    rates.recordAbort('target', 100, 1000);
+    const atBoundary = {
+      ...metrics,
+      admission: { ...metrics.admission, configuredRate: 100 },
+    };
+    const sent = await callSystemOne({ decide }, PAYLOAD, new Map(), [], atBoundary);
+    expect(sent).toMatchObject({ sent: true, inputTokens: 80 });
+    expect(decide).toHaveBeenCalledWith(PAYLOAD, 1250);
+    expect(rates.rate('target')).toBeCloseTo(93.3);
+    expect(logger.debug).toHaveBeenCalledTimes(1);
+    expect(logger.debug).toHaveBeenCalledWith(expect.any(String), { inputTokens: 80, inputTokensSource: 'usage' });
+  });
+
+  it('reads the configured override and caps the actual client timeout after fitting', async () => {
+    const readRate = jest.fn((): number | undefined => undefined);
+    let now = 0;
+    let remaining = 3000;
+    const workspace = createMockWorkspaceProvider();
+    const logger = quietLogger();
+    const seen: SystemOneClientOptions[] = [];
+    const caller = new DecisionCaller({
+      config: new DecisionModelConfig(workspace, createMockSecretStorage(), createMockStateStorage(), logger),
+      logger,
+      readPrefillTokensPerSecond: readRate,
+      seams: {
+        monotonicNow: () => now,
+        systemOne: (options) => {
+          seen.push(options);
+          return {
+            decide: async () => {
+              now += 1000;
+              return { ok: true, result: { model: 'nimble', answers: {}, usage: { input_tokens: 1 } } };
+            },
+          };
+        },
+      },
+    });
+    const run = () => {
+      const dispatch = caller.dispatchFor({
+        kind: 'system-one',
+        selection: { kind: 'ollama-cloud', model: REMOTE_TARGET.model },
+        provider: 'ollama',
+        target: { ...REMOTE_TARGET, timeoutMs: 15000, timeoutExplicit: true },
+      }, { remainingMs: () => remaining, signal: new AbortController().signal });
+      return runFixedRequest({
+        request: 'classify',
+        questions: [{ key: 'q', instructions: 'Choose', criteria: { o1: 'A', o2: 'B' } }],
+        maxRequestBytes: 100_000,
+        dispatch,
+        logger,
+      });
+    };
+
+    expect((await run()).sent).toBe(true);
+    expect(seen[0].timeoutMs).toBe(3000);
+    expect(await run()).toMatchObject({
+      sent: false, requestCause: 'deadline', requestReason: expect.stringContaining('estimated decision model cost'),
+    });
+    expect(seen).toHaveLength(1);
+    readRate.mockReturnValue(1000);
+    remaining = 1500;
+    expect((await run()).sent).toBe(true);
+    expect(seen[1].timeoutMs).toBe(1500);
+  });
+
+  it('skips overlapping requests for the same target and keeps other targets independent', async () => {
+    const { metrics, advance } = admissionTest();
+    let finish: (value: SystemOneCallResult) => void = () => undefined;
+    const decide = jest.fn(() => new Promise<SystemOneCallResult>((resolve) => { finish = resolve; }));
+    const first = callSystemOne({ decide }, PAYLOAD, new Map(), [], metrics);
+    expect(await callSystemOne({ decide }, PAYLOAD, new Map(), [], metrics))
+      .toMatchObject({ sent: false, requestCause: 'model-busy' });
+    const other = { ...metrics, admission: { ...metrics.admission, targetKey: 'other' } };
+    expect((await callSystemOne({ decide: async () => reply }, PAYLOAD, new Map(), [], other)).sent).toBe(true);
+    expect(decide).toHaveBeenCalledTimes(1);
+    advance(100);
+    finish(reply);
+    await first;
+    expect((await callSystemOne({ decide: async () => reply }, PAYLOAD, new Map(), [], metrics)).sent)
+      .toBe(true);
+  });
+
+  it('lowers the rate and logs the estimated input once if the route aborts before transport settles', async () => {
+    const { metrics, rates, abort, advance, logger } = admissionTest(2000);
+    rates.recordCompleted('target', 200, 1000);
+    let finish: (value: SystemOneCallResult) => void = () => undefined;
+    const pending = callSystemOne({
+      decide: () => new Promise<SystemOneCallResult>((resolve) => { finish = resolve; }),
+    }, PAYLOAD, new Map(), [], metrics);
+
+    advance(1500);
+    abort.abort();
+    expect(rates.rate('target')).toBeCloseTo(100 / 1.5);
+    expect(logger.debug).toHaveBeenCalledWith(expect.any(String), { inputTokens: 100, inputTokensSource: 'bytes/4' });
+    finish(reply);
+    await pending;
+    expect(logger.debug).toHaveBeenCalledTimes(1);
+    expect(rates.rate('target')).toBeCloseTo(100 / 1.5);
+  });
+});

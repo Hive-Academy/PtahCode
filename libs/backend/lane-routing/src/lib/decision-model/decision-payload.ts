@@ -1,5 +1,9 @@
 import type { LaneLimitState } from '@ptah-extension/shared';
-import type { SystemOneQuestions, SystemOneState } from './system-one.schema';
+import type {
+  CompactSystemOneState,
+  SystemOneQuestions,
+  SystemOneState,
+} from './system-one.schema';
 
 /** Request text is capped at the payload boundary (NFR Security, part A §12). */
 export const REQUEST_TEXT_MAX_CHARS = 8000;
@@ -16,6 +20,7 @@ export interface DecisionOption {
 /** A phase question whose options are ranked lane entries, labelled `o1..oN` in order. */
 export interface LaneChoiceQuestionInput {
   readonly kind: 'lane-choice';
+  readonly taskKind?: string;
   readonly phaseId: string;
   readonly instructions: string;
   /** Top P with the rotation pick first (part A §6 step 8). */
@@ -43,6 +48,8 @@ export interface DecisionOutcomeFigures {
 
 export interface DecisionPayloadInput {
   readonly request: string;
+  readonly taskType?: string;
+  readonly depth?: string;
   readonly questions: readonly DecisionQuestionInput[];
   readonly outcomeFigures: readonly DecisionOutcomeFigures[];
 }
@@ -53,7 +60,7 @@ export interface DecisionPayload {
   readonly questions: SystemOneQuestions;
 }
 
-/** The option text a `choice` criterion carries. Pinned by `decision-payload.spec.ts`. */
+/** The option text carried by the structured-provider prompt. */
 export function formatDecisionOptionLabel(option: DecisionOption): string {
   return [
     `lane ${option.laneId}`,
@@ -64,39 +71,45 @@ export function formatDecisionOptionLabel(option: DecisionOption): string {
   ].join(', ');
 }
 
-/**
- * Build the System One request payload.
- *
- * Emits ONLY the pinned field set (NFR Security): request text, option labels
- * (lane id, family, model, limit state, score) and aggregated outcome
- * figures. The return value is built from scratch, so nothing else on the
- * input object can leave the machine through this function.
- */
-export function buildDecisionPayload(
-  input: DecisionPayloadInput,
-): DecisionPayload {
-  const state: SystemOneState = {
-    request: input.request.slice(0, REQUEST_TEXT_MAX_CHARS),
+/** Build the allowlisted request state and choice criteria. */
+export function buildDecisionPayload(input: DecisionPayloadInput): DecisionPayload {
+  const request = input.request.slice(0, REQUEST_TEXT_MAX_CHARS);
+  const state: CompactSystemOneState = {
+    request,
+    ...(input.taskType === undefined ? {} : { taskType: input.taskType }),
+    ...(input.depth === undefined ? {} : { depth: input.depth }),
+    legend: 'Criteria: executor index, total (includes outcomes), limit state, sample count. Executors: lane, family, model. Past outcomes by lane/task kind: delivery %, sample count.',
     availableExecutors: {},
     pastOutcomes: {},
   };
   const questions: SystemOneQuestions = {};
+  const executorIndices = new Map<string, string>();
+  const figuresByKey = new Map<string, [number, number]>();
+  for (const figures of input.outcomeFigures) {
+    const samples = figures.delivered + figures.failed;
+    if (samples > 0) {
+      figuresByKey.set(`${figures.laneId}/${figures.taskKind}`, [
+        Math.round(100 * figures.delivered / samples),
+        samples,
+      ]);
+    }
+  }
 
   for (const question of input.questions) {
     const criteria: Record<string, string> = {};
     if (question.kind === 'lane-choice') {
       question.options.forEach((option, index) => {
-        criteria[`o${index + 1}`] = formatDecisionOptionLabel(option);
-        // Roster entry on first appearance: per-phase scores differ, and the
-        // criteria labels stay authoritative for each question.
-        if (!(option.laneId in state.availableExecutors)) {
-          state.availableExecutors[option.laneId] = {
-            family: option.family,
-            model: option.model,
-            limitState: option.limitState,
-            score: option.score,
-          };
+        const pair = JSON.stringify([option.laneId, option.model]);
+        let executor = executorIndices.get(pair);
+        if (executor === undefined) {
+          executor = `e${executorIndices.size + 1}`;
+          executorIndices.set(pair, executor);
+          state.availableExecutors[executor] = [option.laneId, option.family, option.model];
         }
+        const key = `${option.laneId}/${question.taskKind}`;
+        const outcome = figuresByKey.get(key);
+        if (outcome !== undefined) state.pastOutcomes[key] = outcome;
+        criteria[`o${index + 1}`] = `${executor} ${option.score} ${option.limitState} ${outcome?.[1] ?? 0}`;
       });
     } else {
       Object.assign(criteria, question.criteria);
@@ -108,12 +121,8 @@ export function buildDecisionPayload(
     };
   }
 
-  for (const figures of input.outcomeFigures) {
-    state.pastOutcomes[`${figures.laneId}/${figures.taskKind}`] = {
-      delivered: figures.delivered,
-      failed: figures.failed,
-    };
-  }
-
-  return { state, questions };
+  return {
+    state: executorIndices.size === 0 ? { request, availableExecutors: {}, pastOutcomes: {} } : state,
+    questions,
+  };
 }

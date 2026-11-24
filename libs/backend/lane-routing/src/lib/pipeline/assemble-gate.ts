@@ -456,10 +456,13 @@ function buildCandidateTrace(
     const id = row.candidate.id;
     if (seen.has(id)) continue;
     seen.add(id);
-    trace.push({
+    const total = effectiveTotal(row.scored);
+    const tiedPrunedIndex = trace.findIndex((entry) => entry.rule === 'pruned' && entry.total === total);
+    // The compactor keeps the first alternative at a tied total.
+    trace.splice(tiedPrunedIndex === -1 ? trace.length : tiedPrunedIndex, 0, {
       candidate: id,
       displayName: candidateDisplayName(row.candidate),
-      total: effectiveTotal(row.scored),
+      total,
       ...(row.scored.parts !== undefined ? { parts: row.scored.parts } : {}),
       disposition: 'ranked',
       ...laneMetaOf(row.candidate, gathered),

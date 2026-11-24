@@ -157,6 +157,13 @@ export interface PreflightAnswerFacts {
   readonly modelProposalOption?: string;
 }
 
+export interface AggregateDiagnostic {
+  readonly identity: string;
+  readonly display: string;
+}
+
+export type AggregateDiagnosticInput = string | AggregateDiagnostic;
+
 export interface GateReasonInput {
   readonly chosen: readonly ChosenReasonFacts[];
   readonly unavailable: readonly UnavailableReasonFacts[];
@@ -164,7 +171,7 @@ export interface GateReasonInput {
   readonly missingInputs: readonly MissingInput[];
   readonly inputRowIds: readonly string[];
   /** Deduplicated aggregate diagnostics (matrix notes, per-lane model status, routing rules, gather timeouts). */
-  readonly extraReasons?: readonly string[];
+  readonly extraReasons?: readonly AggregateDiagnosticInput[];
 }
 
 export interface GateReasonOutput {
@@ -750,6 +757,61 @@ export function compileGateReasons(input: GateReasonInput): GateReasonOutput {
   return { chosenReasons, unavailableReasons, reasons };
 }
 
+const RULE_EXCLUDE_PREFIX_START = 'routing rule ';
+const RULE_EXCLUDE_SELECTOR_MARKER = ': exclude selector "';
+const RULE_EXCLUDE_UNKNOWN_SUFFIX = '" matched no candidate';
+const RULE_EXCLUDE_AMBIGUOUS_MARKER = '" is ambiguous (';
+
+function formatAggregateDiagnosticDisplay(raw: string): string {
+  if (raw.startsWith(RULE_EXCLUDE_PREFIX_START)) {
+    const markerIndex = raw.indexOf(
+      RULE_EXCLUDE_SELECTOR_MARKER,
+      RULE_EXCLUDE_PREFIX_START.length,
+    );
+    if (markerIndex !== -1) {
+      const selectorStart = markerIndex + RULE_EXCLUDE_SELECTOR_MARKER.length;
+      let selectorEnd = -1;
+      if (raw.endsWith(RULE_EXCLUDE_UNKNOWN_SUFFIX)) {
+        selectorEnd = raw.length - RULE_EXCLUDE_UNKNOWN_SUFFIX.length;
+      } else if (raw.endsWith(')')) {
+        const ambiguousIndex = raw.lastIndexOf(RULE_EXCLUDE_AMBIGUOUS_MARKER);
+        if (ambiguousIndex >= selectorStart) {
+          selectorEnd = ambiguousIndex;
+        }
+      }
+      if (selectorEnd >= selectorStart) {
+        const prefix = raw.slice(0, selectorStart);
+        const selector = raw.slice(selectorStart, selectorEnd);
+        const suffix = raw.slice(selectorEnd);
+        const boundedSelector = truncateSnippet(
+          selector,
+          DIAGNOSTIC_SELECTOR_SNIPPET_MAX_CHARS,
+        );
+        return truncateSnippet(
+          `${prefix}${boundedSelector}${suffix}`,
+          DIAGNOSTIC_LINE_MAX_CHARS,
+        );
+      }
+    }
+  }
+  return truncateSnippet(raw, DIAGNOSTIC_LINE_MAX_CHARS);
+}
+
+function toAggregateDiagnostic(
+  entry: AggregateDiagnosticInput,
+): AggregateDiagnostic {
+  if (typeof entry === 'string') {
+    return {
+      identity: entry,
+      display: formatAggregateDiagnosticDisplay(entry),
+    };
+  }
+  return {
+    identity: entry.identity,
+    display: formatAggregateDiagnosticDisplay(entry.display),
+  };
+}
+
 function omittedDiagnosticsLine(omitted: number): string {
   return omitted === 1
     ? 'and 1 more diagnostic entry omitted'
@@ -757,32 +819,55 @@ function omittedDiagnosticsLine(omitted: number): string {
 }
 
 function boundAggregateDiagnostics(
-  rawLines: readonly string[],
+  rawEntries: readonly AggregateDiagnosticInput[],
   alreadySeen: ReadonlySet<string>,
 ): readonly string[] {
-  const unique: string[] = [];
-  const seen = new Set<string>(alreadySeen);
-  for (const raw of rawLines) {
-    const line = truncateSnippet(raw, DIAGNOSTIC_LINE_MAX_CHARS);
-    if (line.length === 0 || seen.has(line)) continue;
-    seen.add(line);
-    unique.push(line);
+  const distinct: AggregateDiagnostic[] = [];
+  const seenIdentities = new Set<string>(alreadySeen);
+  for (const rawEntry of rawEntries) {
+    const entry = toAggregateDiagnostic(rawEntry);
+    if (entry.display.length === 0 || seenIdentities.has(entry.identity)) {
+      continue;
+    }
+    seenIdentities.add(entry.identity);
+    distinct.push(entry);
   }
+
+  const uniqueDisplays: string[] = [];
+  const seenDisplays = new Set<string>(alreadySeen);
+  let displayCollisions = 0;
+  for (const entry of distinct) {
+    if (seenDisplays.has(entry.display)) {
+      displayCollisions += 1;
+      continue;
+    }
+    seenDisplays.add(entry.display);
+    uniqueDisplays.push(entry.display);
+  }
+
   const emitted: string[] = [];
   let usedChars = 0;
-  for (let index = 0; index < unique.length; index += 1) {
-    const line = unique[index];
-    const remainingAfter = unique.length - (index + 1);
+  let cappedCount = 0;
+  for (let index = 0; index < uniqueDisplays.length; index += 1) {
+    const line = uniqueDisplays[index];
+    const remainingDisplaysAfter = uniqueDisplays.length - (index + 1);
+    const omittedIfEmitted = displayCollisions + remainingDisplaysAfter;
     const reserve =
-      remainingAfter > 0 ? omittedDiagnosticsLine(remainingAfter).length : 0;
+      omittedIfEmitted > 0
+        ? omittedDiagnosticsLine(omittedIfEmitted).length
+        : 0;
     if (usedChars + line.length + reserve <= AGGREGATE_DIAGNOSTIC_MAX_CHARS) {
       emitted.push(line);
       usedChars += line.length;
       continue;
     }
-    const omitted = unique.length - index;
-    emitted.push(omittedDiagnosticsLine(omitted));
+    cappedCount = uniqueDisplays.length - index;
     break;
+  }
+
+  const totalOmitted = displayCollisions + cappedCount;
+  if (totalOmitted > 0) {
+    emitted.push(omittedDiagnosticsLine(totalOmitted));
   }
   return emitted;
 }

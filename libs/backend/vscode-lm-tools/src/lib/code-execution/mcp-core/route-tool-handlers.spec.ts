@@ -2,8 +2,20 @@ import 'reflect-metadata';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { GateResultSchema, type CandidateTrace, type GateResult, type RouteDecideResult } from '@ptah-extension/lane-routing';
-import { countTokens } from '@ptah-extension/tool-output-reducers';
+import {
+  GateResultSchema,
+  RouteDecideService,
+  type CandidateTrace,
+  type DecisionModelConfig,
+  type GateResult,
+  type RouteCandidateSource,
+  type RouteDecideResult,
+} from '@ptah-extension/lane-routing';
+import type { CliDetectionResult, RoutingRule } from '@ptah-extension/shared';
+import {
+  countTokens,
+  countTokensPiecewise,
+} from '@ptah-extension/tool-output-reducers';
 import {
   applyToolResultBudget,
   getToolResultBudget,
@@ -457,6 +469,98 @@ describe('handleRouteToolCall', () => {
         isError: true,
         text: `ptah_route_decide failed: result exceeds the ${MAX_CHARS}-character / ${MAX_TOKENS}-token tool limit`,
       });
+    });
+
+    it('returns a non-error result under countTokensPiecewise for ten distinct rules with 32 unknown 200-char exclude selectors each', async () => {
+      const phases = Array.from({ length: 10 }, (_, idx) => ({
+        id: `phase-${idx}`,
+        kind: 'implement' as const,
+        role: `custom-role-${idx}`,
+      }));
+      const rules: RoutingRule[] = Array.from({ length: 10 }, (_, idx) => ({
+        id: `rule-${idx}`,
+        match: { role: `custom-role-${idx}` },
+        set: {
+          exclude: Array.from({ length: 32 }, (_, selIdx) =>
+            `unknown/rule_${idx}:sel_${selIdx}_${idx * 37 + selIdx}_${'x9/a7='.repeat(30)}`.slice(
+              0,
+              200,
+            ),
+          ),
+        },
+      }));
+      const cliRows: CliDetectionResult[] = [
+        { cli: 'codex', installed: true, messagingMode: 'none' },
+        { cli: 'grok', installed: true, messagingMode: 'none' },
+        { cli: 'opencode', installed: true, messagingMode: 'none' },
+        { cli: 'cursor', installed: true, messagingMode: 'none' },
+        { cli: 'copilot', installed: true, messagingMode: 'none' },
+        { cli: 'claude', installed: true, messagingMode: 'none' },
+      ];
+      const source: RouteCandidateSource = {
+        rows: async () => cliRows,
+        limits: async () => new Map(),
+        roles: async () => [],
+      };
+      const service = new RouteDecideService({
+        config: {
+          getSelection: () => ({ kind: 'unset' as const }),
+        } as unknown as DecisionModelConfig,
+        routingRulesSetting: {
+          read: () => ({ rules, diagnostics: [] }),
+        },
+        rotationSetting: { isEnabled: () => false },
+        matrix: {
+          load: async () => ({
+            outcomeFigures: () => null,
+            reasons: [],
+            resolve: (family, model, taskKind) => ({
+              family,
+              model,
+              profileModel: '*',
+              taskKind,
+              layers: {},
+              cell: { kind: 'unknown' as const },
+              score: 50,
+              noProfile: true,
+            }),
+          }),
+        },
+        rotation: {
+          load: () => ({ state: { version: 1, entries: [] }, reason: null }),
+          save: async () => ({ persisted: true }),
+        },
+        logger: {
+          debug: jest.fn(),
+          info: jest.fn(),
+          warn: jest.fn(),
+          error: jest.fn(),
+        },
+      });
+
+      const reply = await handleRouteToolCall(
+        {
+          stage: 'gate-0.1',
+          request: 'Implement ten phases with dense rule exclude diagnostics',
+          taskType: 'FEATURE',
+          depth: 'Full',
+          phases,
+        },
+        route((parsed, context) => service.decide(parsed, source, context)),
+        logger(),
+      );
+
+      expect(reply.isError).toBe(false);
+      expect(reply.text.length).toBeLessThanOrEqual(MAX_CHARS);
+      expect(countTokensPiecewise(reply.text, MAX_TOKENS)).toBeLessThanOrEqual(
+        MAX_TOKENS,
+      );
+      const parsed = GateResultSchema.parse(JSON.parse(reply.text));
+      expect(parsed.roster).toHaveLength(10);
+      expect(parsed.reasons[parsed.reasons.length - 1]).toMatch(
+        /^and \d+ more diagnostic entries omitted$/,
+      );
+      expect(reply.text).not.toContain(rules[0].set.exclude?.[0] ?? '');
     });
   });
 

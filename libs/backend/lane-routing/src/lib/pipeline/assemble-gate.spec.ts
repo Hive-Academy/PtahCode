@@ -961,4 +961,70 @@ describe('assembleGateResult trace and explanations', () => {
     // Review phase where codex is excluded by reviewer-family emits the new distinct status (`ineligible`).
     expect(resultB.roster[9].explanation).toContain('codex->codex: ineligible');
   });
+
+  it('counts 31 omitted distinct entries when 32 unknown exclude selectors share the same 45-char prefix across phases', () => {
+    const lanes = [makeLane('codex'), makeLane('grok')];
+    const gathered = makeGathered(lanes, { codex: 82, grok: 78 });
+    const sharedPrefix = 'p'.repeat(45);
+    const rule: RoutingRule = {
+      id: 'same-prefix-rule',
+      match: { kind: 'implement' },
+      set: {
+        exclude: Array.from(
+          { length: 32 },
+          (_, idx) => `${sharedPrefix}-tail-${idx}`,
+        ),
+      },
+    };
+    const args: GateArgs = {
+      stage: 'gate-0.1',
+      request: 'Implement two phases with shared-prefix rule excludes',
+      taskType: 'FEATURE',
+      depth: 'Full',
+      phases: [
+        { id: 'impl-1', kind: 'implement', role: 'custom-role' },
+        { id: 'impl-2', kind: 'implement', role: 'custom-role' },
+      ],
+    };
+
+    const planned = planRoutePhases(
+      args.phases,
+      args,
+      gathered,
+      gathered.rotation,
+      false,
+      [],
+      () => undefined,
+      false,
+      undefined,
+      { rules: [rule] },
+    ).plans;
+    const planMap = new Map(planned.map((p) => [p.phaseId, p]));
+    const resMap = new Map(
+      planned.map((p) => [
+        p.phaseId,
+        resolvePhase(p, {
+          mode: 'ranking',
+          blockedCause: null,
+          limited: new Set(),
+          outcome: null,
+        }),
+      ]),
+    );
+    const result = assembleGateResult(
+      args,
+      gathered,
+      planMap,
+      resMap,
+      lanes.map((l) => l.id),
+      { requests: 0, input: null, output: null, successes: 0 },
+      [null],
+    );
+
+    expect(GateResultSchema.safeParse(result).success).toBe(true);
+    expect(result.reasons).toEqual([
+      `routing rule same-prefix-rule: exclude selector "${sharedPrefix}..." matched no candidate`,
+      'and 31 more diagnostic entries omitted',
+    ]);
+  });
 });

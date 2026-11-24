@@ -85,6 +85,7 @@ export interface CandidateToolsDetailedResult {
     ReadonlyMap<string, readonly string[] | null>
   >;
   readonly timedOutPhases: readonly string[];
+  readonly timedOutCandidatesByPhase: ReadonlyMap<string, ReadonlySet<string>>;
   /** One bounded, sanitized aggregate reason per phase with unavailable/failed tool evidence. */
   readonly reasons: readonly string[];
 }
@@ -98,7 +99,7 @@ interface CandidateToolReadOutcome {
 interface PhaseToolsOutcome {
   readonly phaseId: string;
   readonly map: ReadonlyMap<string, readonly string[] | null>;
-  readonly timedOut: boolean;
+  readonly timedOutCandidates: ReadonlySet<string>;
   readonly reason?: string;
 }
 
@@ -265,17 +266,19 @@ async function readPhaseToolsIncremental(
 
   const map = new Map<string, readonly string[] | null>();
   const causes = new Set<ToolEvidenceFailureCause>();
+  const timedOutCandidates = new Set<string>();
   for (const entry of orderedOutcomes) {
     map.set(entry.candidateId, entry.tools);
     if (entry.failure !== undefined) {
       causes.add(entry.failure);
+      if (entry.failure === 'timeout') timedOutCandidates.add(entry.candidateId);
     }
   }
 
   return {
     phaseId: phase.id,
     map,
-    timedOut: causes.has('timeout'),
+    timedOutCandidates,
     ...(causes.size > 0
       ? { reason: formatToolUnavailableReason(phase.id, causes) }
       : {}),
@@ -295,10 +298,11 @@ export async function readCandidateToolsIncremental(
 ): Promise<CandidateToolsDetailedResult> {
   const byPhase = new Map<string, ReadonlyMap<string, readonly string[] | null>>();
   const timedOutPhases: string[] = [];
+  const timedOutCandidatesByPhase = new Map<string, ReadonlySet<string>>();
   const reasons: string[] = [];
 
   if (phasePromises.length === 0) {
-    return { byPhase, timedOutPhases, reasons };
+    return { byPhase, timedOutPhases, timedOutCandidatesByPhase, reasons };
   }
 
   const phaseResults = await Promise.all(
@@ -310,14 +314,15 @@ export async function readCandidateToolsIncremental(
   for (const result of phaseResults) {
     if (result === null) continue;
     byPhase.set(result.phaseId, result.map);
-    if (result.timedOut) {
+    if (result.timedOutCandidates.size > 0) {
       timedOutPhases.push(result.phaseId);
+      timedOutCandidatesByPhase.set(result.phaseId, result.timedOutCandidates);
     }
     if (result.reason !== undefined) {
       reasons.push(result.reason);
     }
   }
-  return { byPhase, timedOutPhases, reasons };
+  return { byPhase, timedOutPhases, timedOutCandidatesByPhase, reasons };
 }
 
 /** Read gate-stage tool lists once per phase and candidate, optionally bounded by a deadline. */

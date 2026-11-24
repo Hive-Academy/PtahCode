@@ -217,13 +217,18 @@ export function registerLaneRoutingServices(
         c,
         LANE_ROUTING_TOKENS.STRUCTURED_DECISION,
       );
+      const workspace = c.resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER);
       return new RouteDecideService({
+        readPrefillTokensPerSecond: () => workspace.getConfiguration<unknown>(
+          'ptah',
+          'agentOrchestration.decisionModelPrefillTokensPerSecond',
+        ),
         routingRulesSetting: new RoutingRulesSetting(
-          c.resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER),
+          workspace,
           c.resolve<LaneRoutingLogger>(LANE_ROUTING_TOKENS.LOGGER),
         ),
         rotationSetting: new LaneRotationSetting(
-          c.resolve<IWorkspaceProvider>(PLATFORM_TOKENS.WORKSPACE_PROVIDER),
+          workspace,
           c.resolve<LaneRoutingLogger>(LANE_ROUTING_TOKENS.LOGGER),
         ),
         config: c.resolve<DecisionModelConfig>(

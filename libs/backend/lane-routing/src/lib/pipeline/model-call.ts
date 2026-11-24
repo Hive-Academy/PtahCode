@@ -2,11 +2,13 @@
  * Sends one fitted decision-model request. A live HTTP 404/405 is reported
  * as `notFoundDetail` and is not marked here.
  */
+import { DECISION_MODEL_TIMEOUT_MIN_MS } from '@ptah-extension/shared';
 import type { LaneRoutingLogger } from '../lane-routing-logger';
 import type {
   DecisionOption,
   DecisionPayload,
 } from '../decision-model/decision-payload';
+import type { SystemOneCallResult } from '../decision-model/system-one.client';
 import type { SystemOneResult } from '../decision-model/system-one.schema';
 import type { FallbackCause } from '../reasons/compile-reasons';
 import {
@@ -24,17 +26,37 @@ import type {
   ModelRequestOutcome,
   SystemOneCaller,
 } from './model-refine';
+import type { PrefillRateStore } from './prefill-rate.store';
+
+export interface SystemOneAdmission {
+  readonly targetKey: string;
+  readonly rates: PrefillRateStore;
+  readonly configuredRate?: number;
+  readonly remainingMs: () => number;
+  readonly now: () => number;
+  readonly signal: AbortSignal;
+}
+
+interface SystemOneMetrics {
+  readonly promptTokens: number;
+  readonly logger: LaneRoutingLogger;
+  readonly admission?: SystemOneAdmission;
+}
 
 interface AskedQuestion {
   readonly phaseId: string;
   readonly labels: readonly string[];
 }
 
-export function emptyOutcome(cause: FallbackCause): ModelRequestOutcome {
+export function emptyOutcome(
+  cause: FallbackCause,
+  requestReason?: string,
+): ModelRequestOutcome {
   return {
     sent: false,
     succeeded: false,
     requestCause: cause,
+    ...(requestReason === undefined ? {} : { requestReason }),
     notFoundDetail: null,
     answers: new Map(),
     offered: new Map(),
@@ -70,8 +92,61 @@ export async function callSystemOne(
   payload: DecisionPayload,
   offered: ReadonlyMap<string, readonly DecisionOption[]>,
   questions: readonly AskedQuestion[],
+  metrics?: SystemOneMetrics,
 ): Promise<ModelRequestOutcome> {
-  const result = await caller.decide(payload);
+  const admission = metrics?.admission;
+  let timeoutCapMs: number | undefined;
+  if (admission !== undefined && metrics !== undefined) {
+    const remainingMs = admission.remainingMs();
+    timeoutCapMs = Math.floor(remainingMs);
+    if (admission.signal.aborted || timeoutCapMs < DECISION_MODEL_TIMEOUT_MIN_MS) {
+      return emptyOutcome('deadline');
+    }
+    const { rates, targetKey } = admission;
+    if (!rates.tryStart(targetKey)) return emptyOutcome('model-busy');
+    const rate = admission.configuredRate ?? rates.rate(targetKey);
+    if (rate !== undefined) {
+      const costMs = metrics.promptTokens * 1000 / rate + DECISION_RETURN_MARGIN_MS;
+      if (costMs > remainingMs) {
+        rates.finish(targetKey);
+        return emptyOutcome(
+          'deadline',
+          `estimated decision model cost ${Math.ceil(costMs)} ms exceeds ${timeoutCapMs} ms remaining`,
+        );
+      }
+    }
+  }
+
+  const started = admission?.now();
+  let measured = false;
+  const measure = (usage: number | null, aborted: boolean, completed: boolean): void => {
+    if (measured || metrics === undefined) return;
+    measured = true;
+    const inputTokens = usage ?? metrics.promptTokens;
+    if (admission !== undefined && started !== undefined) {
+      const elapsedMs = admission.now() - started;
+      if (aborted) {
+        admission.rates.recordAbort(admission.targetKey, metrics.promptTokens, elapsedMs);
+      } else if (completed) {
+        admission.rates.recordCompleted(admission.targetKey, inputTokens, elapsedMs);
+      }
+    }
+    logInputTokens(metrics.logger, inputTokens, usage === null ? 'bytes/4' : 'usage');
+  };
+  const onAbort = (): void => measure(null, true, false);
+  admission?.signal.addEventListener('abort', onAbort, { once: true });
+  let result: SystemOneCallResult | undefined;
+  try {
+    result = await caller.decide(payload, timeoutCapMs);
+  } finally {
+    admission?.signal.removeEventListener('abort', onAbort);
+    admission?.rates.finish(admission.targetKey);
+    measure(
+      result?.ok ? tokenCount(result.result.usage?.input_tokens) : null,
+      admission?.signal.aborted === true || result?.ok === false && result.cause === 'timeout',
+      result?.ok === true,
+    );
+  }
   if (!result.ok) {
     return {
       sent: true,
@@ -97,6 +172,21 @@ export async function callSystemOne(
     outputTokens: tokenCount(usage?.output_tokens),
     outcomeFigures: 0,
   };
+}
+
+function logInputTokens(
+  logger: LaneRoutingLogger,
+  inputTokens: number,
+  inputTokensSource: 'usage' | 'bytes/4',
+): void {
+  try {
+    logger.debug('[lane-routing] decision model input tokens', {
+      inputTokens,
+      inputTokensSource,
+    });
+  } catch {
+    // degradation-audit: optional-capability - telemetry cannot interrupt routing.
+  }
 }
 
 export async function callStructured(

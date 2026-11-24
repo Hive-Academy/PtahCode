@@ -1252,4 +1252,53 @@ describe('B08 one-sentence explanations and per-lane reason deduplication', () =
     });
     expect(scoreExplanation).toContain('boost +12 on codex total 77 lost to total 90 (gap -13)');
   });
+
+  it('deduplicates by original identity across phases and counts display collisions from truncated selectors in the omission marker', () => {
+    const sharedPrefix = 'a'.repeat(45);
+    const distinct32 = Array.from(
+      { length: 32 },
+      (_, idx) =>
+        `routing rule same-prefix: exclude selector "${sharedPrefix}-suffix-${idx}" matched no candidate`,
+    );
+    // Simulate two phases matching the same rule (32 distinct identities repeated twice).
+    const gate = compileGateReasons({
+      chosen: [chosen()],
+      unavailable: [],
+      excluded: [],
+      missingInputs: [],
+      inputRowIds: ['grok', 'codex'],
+      extraReasons: [...distinct32, ...distinct32],
+    });
+
+    expect(gate.reasons).toEqual([
+      `routing rule same-prefix: exclude selector "${sharedPrefix}..." matched no candidate`,
+      'and 31 more diagnostic entries omitted',
+    ]);
+
+    // Also verify mixed display collisions + character cap keep total chars <= 4000 and exact total count.
+    const manyRules = Array.from({ length: 60 }, (_, idx) => ({
+      identity: `id-rule-${idx}`,
+      display: `routing rule cap-${idx}: exclude selector "${'b'.repeat(60)}" matched no candidate`,
+    }));
+    const collidingExplicit = Array.from({ length: 5 }, (_, idx) => ({
+      identity: `explicit-collision-${idx}`,
+      display: 'routing rule shared-explicit: repeated bounded display',
+    }));
+    const combined = compileGateReasons({
+      chosen: [chosen()],
+      unavailable: [],
+      excluded: [],
+      missingInputs: [],
+      inputRowIds: ['grok', 'codex'],
+      extraReasons: [...collidingExplicit, ...manyRules],
+    });
+    const omittedLine = combined.reasons[combined.reasons.length - 1];
+    const match = /^and (\d+) more diagnostic entries omitted$/.exec(omittedLine);
+    expect(match).not.toBeNull();
+    const emittedCount = combined.reasons.length - 1;
+    const omittedCount = Number(match?.[1]);
+    expect(emittedCount + omittedCount).toBe(65);
+    const totalChars = combined.reasons.reduce((sum, line) => sum + line.length, 0);
+    expect(totalChars).toBeLessThanOrEqual(4000);
+  });
 });

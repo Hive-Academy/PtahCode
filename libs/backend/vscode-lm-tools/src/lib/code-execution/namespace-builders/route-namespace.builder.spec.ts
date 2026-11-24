@@ -350,3 +350,23 @@ describe('buildRouteNamespace', () => {
     await expect(sourceOf(decide).rows()).rejects.toThrow('agent list down');
   });
 });
+
+describe('route namespace dispatch context and limit errors', () => {
+  it('forwards the session key and deadline to the service', async () => {
+    const decide = jest.fn().mockResolvedValue(RESULT);
+    const namespace = buildRouteNamespace({
+      agent: agent(),
+      hasIDECapabilities: false,
+      container: locator({ registered: true, service: { decide } }).container,
+    });
+    const context = { sessionKey: 'tab-1', deadlineAtMs: 1234 };
+    await namespace.decide(ARGS, context);
+    expect(decide).toHaveBeenCalledWith(ARGS, expect.any(Object), context);
+  });
+
+  it('propagates a rejected limit evidence read to gather', async () => {
+    const failure = new Error('limit read failed');
+    const source = buildRouteCandidateSource(agent({ limits: jest.fn().mockRejectedValue(failure) }));
+    await expect(source.limitEvidence?.([cliRow('codex')])).rejects.toBe(failure);
+  });
+});

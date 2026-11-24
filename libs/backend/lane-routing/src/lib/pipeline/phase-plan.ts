@@ -44,7 +44,6 @@ import { spread, type SpreadResult } from '../ranking/spread';
 import type { FallbackCause } from '../reasons/compile-reasons';
 import {
   DIAGNOSTIC_AMBIGUOUS_MATCH_SAMPLE_CAP,
-  DIAGNOSTIC_SELECTOR_SNIPPET_MAX_CHARS,
   LANE_MODEL_ALTERNATES_CAP,
   SCORE_MAX,
 } from '../routing-constants';
@@ -512,17 +511,17 @@ function resolveRuleExclusions(
   if (rule === undefined || selectors === undefined || selectors.length === 0) return { userExclusions, diagnostics };
   const tag: UserRuleExclusion = `user-rule:${rule.id}`;
   for (const match of resolvePreferences(selectors, inventory)) {
-    const label = truncateSnippet(sanitizeSelector(match.entry), DIAGNOSTIC_SELECTOR_SNIPPET_MAX_CHARS);
+    const selector = sanitizeSelector(match.entry);
     if (match.status === 'matched') {
       userExclusions.set(match.ids[0], tag);
       continue;
     }
     if (match.status === 'unknown') {
-      diagnostics.push(`routing rule ${rule.id}: exclude selector "${label}" matched no candidate`);
+      diagnostics.push(`routing rule ${rule.id}: exclude selector "${selector}" matched no candidate`);
       continue;
     }
     if (match.status === 'ambiguous') {
-      diagnostics.push(`routing rule ${rule.id}: exclude selector "${label}" is ambiguous (${formatAmbiguousSample(match.ids)})`);
+      diagnostics.push(`routing rule ${rule.id}: exclude selector "${selector}" is ambiguous (${formatAmbiguousSample(match.ids)})`);
     }
   }
   return { userExclusions, diagnostics };
@@ -530,11 +529,6 @@ function resolveRuleExclusions(
 
 function sanitizeSelector(value: string): string {
   return value.replace(/[;\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
-}
-
-function truncateSnippet(value: string, maxChars: number): string {
-  if (value.length <= maxChars) return value;
-  return maxChars <= 3 ? value.slice(0, maxChars) : `${value.slice(0, maxChars - 3)}...`;
 }
 
 function formatAmbiguousSample(ids: readonly string[]): string {

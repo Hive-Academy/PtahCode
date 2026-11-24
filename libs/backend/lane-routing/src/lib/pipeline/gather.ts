@@ -72,6 +72,12 @@ export interface LaneModelFacts {
 }
 
 export interface GatheredCall {
+  readonly deadlineReads?: {
+    readonly rows?: boolean;
+    readonly roles?: boolean;
+    readonly phaseDefinitions?: ReadonlySet<string>;
+    readonly tools?: ReadonlyMap<string, ReadonlySet<string>>;
+  };
   readonly childSessionEligible?: boolean;
   readonly lanes: readonly LaneCandidate[];
   readonly roles: readonly string[];
@@ -182,10 +188,20 @@ export async function gatherRouteCall(input: {
   if (phaseDefs !== undefined) {
     phaseDefs.phasePromises.forEach(observeLateFailure);
     observeLateFailure(phaseDefs.reasonsPromise);
+    observeLateFailure(phaseDefs.timedOutPhasesPromise);
   }
 
   const rows = await rowsPromise;
   const rowSnapshot = [...rows.rows];
+
+  if (phaseDefs !== undefined) {
+    // Let ready tool-proof reactions (provisional lane proofs and immediately
+    // settled phase definitions or tool reads) start and observe their settled
+    // outcomes before invoking independent adapters whose synchronous setup
+    // could spend the remaining deadline budget.
+    await provisionalLanesPromise;
+    await flushReadyToolProofTurns();
+  }
 
   const [
     limits,
@@ -194,6 +210,7 @@ export async function gatherRouteCall(input: {
     matrix,
     resolvedPhases,
     phaseDefReasons,
+    timedOutPhaseDefinitions,
     toolResult,
   ] = await Promise.all([
     readLimits(input.source, rowSnapshot, input.logger, gatherDeadline),
@@ -218,6 +235,7 @@ export async function gatherRouteCall(input: {
     phaseDefs === undefined
       ? Promise.resolve<readonly string[]>([])
       : phaseDefs.reasonsPromise,
+    phaseDefs?.timedOutPhasesPromise,
     toolResultPromise,
   ]);
 
@@ -247,6 +265,14 @@ export async function gatherRouteCall(input: {
 
   return {
     childSessionEligible,
+    ...(rows.timedOut || roles.timedOut || timedOutPhaseDefinitions?.size || toolResult?.timedOutCandidatesByPhase.size
+      ? { deadlineReads: {
+          rows: rows.timedOut,
+          roles: roles.timedOut,
+          phaseDefinitions: timedOutPhaseDefinitions,
+          tools: toolResult?.timedOutCandidatesByPhase,
+        } }
+      : {}),
     lanes,
     roles: [...roles.roles],
     matrix,
@@ -268,6 +294,7 @@ async function readRows(
 ): Promise<{
   readonly rows: readonly CliDetectionResult[];
   readonly failed: boolean;
+  readonly timedOut?: true;
 }> {
   if (deadline !== undefined) {
     const raced = await withinBudget(
@@ -283,7 +310,7 @@ async function readRows(
     if (raced.kind === 'ok') return { rows: raced.value, failed: false };
     if (raced.kind === 'deadline') {
       logger.warn('[lane-routing] agent list timed out');
-      return { rows: [], failed: true };
+      return { rows: [], failed: true, timedOut: true };
     }
     logger.warn('[lane-routing] agent list failed', logFacts(raced.error));
     return { rows: [], failed: true };
@@ -380,7 +407,7 @@ async function readRoles(
   source: RouteCandidateSource,
   logger: LaneRoutingLogger,
   deadline?: RouteDeadline,
-): Promise<{ readonly roles: readonly string[]; readonly failed: boolean }> {
+): Promise<{ readonly roles: readonly string[]; readonly failed: boolean; readonly timedOut?: true }> {
   if (deadline !== undefined) {
     const raced = await withinBudget(
       deadline,
@@ -395,7 +422,7 @@ async function readRoles(
     if (raced.kind === 'ok') return { roles: raced.value, failed: false };
     if (raced.kind === 'deadline') {
       logger.warn('[lane-routing] role list timed out');
-      return { roles: [], failed: true };
+      return { roles: [], failed: true, timedOut: true };
     }
     logger.warn('[lane-routing] role list failed', logFacts(raced.error));
     return { roles: [], failed: true };
@@ -596,11 +623,19 @@ type GatePhase = GatePhases[number];
 type PhaseDefinitionFailureCause = 'timeout' | 'error' | 'invalid';
 
 interface PhaseDefinitionOutcome {
+  readonly timedOut?: true;
   readonly capabilities: GatePhase['requiredCapabilities'];
   readonly reason?: string;
 }
 
 const MAX_PHASE_KIND_LABEL_CHARS = 64;
+const READY_TOOL_PROOF_MICROTASK_TURNS = 6;
+
+async function flushReadyToolProofTurns(): Promise<void> {
+  for (let turn = 0; turn < READY_TOOL_PROOF_MICROTASK_TURNS; turn += 1) {
+    await Promise.resolve();
+  }
+}
 
 function phaseDefinitionUnavailableReason(
   kind: PhaseKind,
@@ -629,6 +664,7 @@ function startPhaseDefinitions(
 ): {
   readonly phasePromises: readonly Promise<GatePhase>[];
   readonly reasonsPromise: Promise<readonly string[]>;
+  readonly timedOutPhasesPromise: Promise<ReadonlySet<string>>;
 } {
   const kindsToRead: PhaseKind[] = [];
   for (const phase of phases) {
@@ -666,7 +702,8 @@ function startPhaseDefinitions(
     }));
   });
 
-  const reasonsPromise = Promise.all(outcomePromises).then((outcomes) => {
+  const outcomes = Promise.all(outcomePromises);
+  const reasonsPromise = outcomes.then((outcomes) => {
     const reasons: string[] = [];
     for (const outcome of outcomes) {
       if (outcome.reason !== undefined) {
@@ -676,7 +713,14 @@ function startPhaseDefinitions(
     return reasons;
   });
 
-  return { phasePromises, reasonsPromise };
+  const timedOutPhasesPromise = outcomes.then((outcomes) => {
+    const timedOutKinds = new Set(kindsToRead.filter((_, index) => outcomes[index].timedOut));
+    return new Set(phases
+      .filter((phase) => phase.requiredCapabilities === undefined && timedOutKinds.has(phase.kind))
+      .map((phase) => phase.id));
+  });
+
+  return { phasePromises, reasonsPromise, timedOutPhasesPromise };
 }
 
 function warnPhaseDefUnavailable(
@@ -722,6 +766,7 @@ async function readOnePhaseDefinition(
       );
       return {
         capabilities: legacy,
+        timedOut: true,
         reason: phaseDefinitionUnavailableReason(kind, 'timeout'),
       };
     }
