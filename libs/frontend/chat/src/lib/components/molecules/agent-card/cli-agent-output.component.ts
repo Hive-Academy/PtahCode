@@ -187,6 +187,8 @@ export class CliAgentOutputComponent {
             this.treeSegments().filter(
               (segment) =>
                 segment.type === 'error' ||
+                // The user echo exists only as a segment (the SDK does not echo it).
+                segment.type === 'user' ||
                 (!hasTextDeltas && segment.type === 'text') ||
                 (segment.type === 'info' &&
                   segment.content.startsWith('Message from unverified peer')),

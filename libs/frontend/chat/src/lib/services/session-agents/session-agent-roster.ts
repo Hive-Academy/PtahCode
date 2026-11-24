@@ -76,7 +76,8 @@ export function orchestratorAgent(
 export function cliActivity(agent: MonitoredAgent): string | null {
   for (let segmentIndex = agent.segments.length - 1; segmentIndex >= 0; segmentIndex--) {
     const segment = agent.segments[segmentIndex];
-    if (isUsageSegment(segment)) continue;
+    // The user's own echoed message is not lane activity.
+    if (isUsageSegment(segment) || segment.type === 'user') continue;
     const lines = segment.content.split(/\r?\n/);
     for (let i = lines.length - 1; i >= 0; i--) {
       const line = lines[i].trim();

@@ -39,6 +39,7 @@ interface Harness {
   readonly resolved: string[];
   readonly abort: AbortController;
   readonly spawn: () => AcpSpawnOptions | undefined;
+  readonly logger: ReturnType<typeof createMockLogger>;
 }
 
 const live: FakeAcpAgent[] = [];
@@ -56,6 +57,7 @@ function start(
   const resolved: string[] = [];
   const abort = new AbortController();
   let spawn: AcpSpawnOptions | undefined;
+  const logger = createMockLogger();
   const session = createAcpSession({
     profile: sessionProfile,
     options: { workingDirectory: process.cwd(), agentId: 'agent-1', mcp: [] },
@@ -65,7 +67,7 @@ function start(
       spawn = options;
       return transport;
     },
-    logger: createMockLogger(),
+    logger,
     signal: abort.signal,
     onEvent: (event) => events.push(event),
     onSessionResolved: (id) => resolved.push(id),
@@ -78,6 +80,7 @@ function start(
     resolved,
     abort,
     spawn: () => spawn,
+    logger,
   };
 }
 
@@ -405,6 +408,38 @@ describe('per-call usage (Grok `response_completed`)', () => {
     await h.agent.notify('_x.ai/session_notification', { ...vendorNotifications[0], sessionId: SESSION_ID });
     await expect(h.session.prompt('hi')).resolves.toBe(0);
     expect(h.events.filter((event) => event.type === 'usageProgress')).toHaveLength(3);
+    h.abort.abort();
+  });
+
+  it('warns once per session when usage frames stop parsing, and the turn total still lands (M2)', async () => {
+    const drifted = { sessionUpdate: 'response_completed', usage: { input: 5, output: 1 } };
+    const h = start(
+      {},
+      (agent) =>
+        agent.handle('session/prompt', async (params, fake) => {
+          const sessionId = String(params['sessionId']);
+          for (let i = 0; i < 3; i += 1) {
+            await fake.notify('_x.ai/session_notification', { sessionId, update: drifted });
+          }
+          await fake.notify('_x.ai/session_notification', { sessionId, update: { sessionUpdate: 'turn_completed' } });
+          return { result: recordedResult(P1, 'session/prompt') };
+        }),
+      grokHooks,
+    );
+    await h.session.start();
+    await expect(h.session.prompt('hi')).resolves.toBe(0);
+    await expect(h.session.prompt('again')).resolves.toBe(0);
+    expect(h.events.some((event) => event.type === 'usageProgress')).toBe(false);
+    expect(h.events.filter((event) => event.type === 'usage')).toHaveLength(2);
+    const warnings = (h.logger.warn as jest.Mock).mock.calls.filter(
+      ([message]) => String(message).includes('usage notification did not parse'),
+    );
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.[1]).toMatchObject({
+      method: '_x.ai/session_notification',
+      fieldPaths: expect.arrayContaining(['update.usage.input_tokens']),
+    });
+    expect(JSON.stringify(warnings[0]?.[1])).not.toContain('"input":5');
     h.abort.abort();
   });
 

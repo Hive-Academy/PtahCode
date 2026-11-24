@@ -1,5 +1,6 @@
 import type {
   AgentProcessInfo,
+  InlineImageAttachment,
   SpawnAgentRequest,
   SpawnAgentResult,
 } from '@ptah-extension/shared';
@@ -19,6 +20,7 @@ import type {
 } from './lane-resumers/ptah-cli-lane-resumer';
 import { SystemCliLaneResumer } from './lane-resumers/system-cli-lane-resumer';
 import type { ParentLaneLevel } from './parent-lane-level';
+import { LANE_IMAGES_NEED_RUNNING_TEXT } from './agent-effective-capabilities';
 
 /**
  * Explicit resume and cold message sends share the manager's resume gate.
@@ -42,16 +44,23 @@ export class AgentLaneResumeService {
   /**
    * Cold-resume `info` with `task`. A `guard` whose raw body starts with a
    * blocked `/command` is refused with `blocked-command` before any spawn.
-   * `info.model` / `info.reasoningEffort` and `files` reach the resumed spawn.
+   * `info.model` / `info.reasoningEffort`, `files` and `images` reach the
+   * resumed spawn. A Ptah CLI resume has no image channel, so it refuses
+   * images before any spawn.
    */
   async resume(
     info: AgentProcessInfo,
     task: string,
     guard?: LaneResumeGuard,
     files?: readonly string[],
+    images?: readonly InlineImageAttachment[],
   ): Promise<LaneResumeResult> {
     const blocked = guard ? blockedLaneCommand(guard.rawBody, guard.blocked) : undefined;
     if (blocked) throw new LaneResumeError('blocked-command', blockedLaneCommandReason(blocked));
+    const hasImages = (images?.length ?? 0) > 0;
+    if (hasImages && info.cli === 'ptah-cli')
+      throw new LaneResumeError('turn-input-refused', LANE_IMAGES_NEED_RUNNING_TEXT);
+    if (hasImages) return this.system.resume(info, task, files, images);
     const resumer = info.cli === 'ptah-cli' ? this.ptahCli : this.system;
     return files && files.length > 0 ? resumer.resume(info, task, files) : resumer.resume(info, task);
   }

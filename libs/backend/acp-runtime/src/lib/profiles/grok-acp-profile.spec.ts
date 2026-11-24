@@ -294,6 +294,20 @@ describe('grokAcpProfile', () => {
       expect(usageOf('_x.ai/session_notification', {})).toBeUndefined();
     });
 
+    it('reports a malformed response_completed frame, and no other frame (M2)', () => {
+      const hook = grokAcpProfile.extensions?.usage;
+      if (!hook) throw new Error('extensions.usage missing');
+      const malformed = jest.fn();
+      hook('_x.ai/session_notification', { update: { sessionUpdate: 'turn_completed' } }, malformed);
+      hook('_x.ai/session_notification', {}, malformed);
+      hook('_x.ai/mcp/servers_updated', { update: { sessionUpdate: 'response_completed' } }, malformed);
+      expect(malformed).not.toHaveBeenCalled();
+      expect(
+        hook('_x.ai/session_notification', { update: { sessionUpdate: 'response_completed', usage: { output_tokens: 1 } } }, malformed),
+      ).toBeUndefined();
+      expect(malformed).toHaveBeenCalledWith(['update.usage.input_tokens']);
+    });
+
     it('counts cache-creation input like cached input', () => {
       expect(
         usageOf('_x.ai/session_notification', {

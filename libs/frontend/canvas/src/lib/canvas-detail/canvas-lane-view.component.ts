@@ -74,16 +74,10 @@ export function effectiveCanvasLaneKind(
 }
 
 /**
- * A lane's panel: the main chat view's chrome surface, and the size container
- * that `LANE_COLUMN_CLASS` and the lane transcript measure their column from.
- */
-const LANE_PANEL_CLASS =
-  'relative flex h-full min-h-0 min-w-0 flex-col overflow-y-auto pt-2 [container-type:inline-size]';
-
-/**
- * A CLI lane's panel: the same surface and size container, but it does not
- * scroll. Its session layout scrolls the transcript and keeps the composer
- * below it, as the main chat view does.
+ * A lane's panel (CLI and sub-agent): the main chat view's chrome surface and
+ * the size container that `LANE_COLUMN_CLASS` and the lane transcript measure
+ * their column from. It does not scroll: the transcript scrolls in its own
+ * region and the composer sits below it, as the main chat view does.
  */
 const LANE_CLI_PANEL_CLASS =
   'relative flex h-full min-h-0 min-w-0 flex-col pt-2 [container-type:inline-size]';
@@ -297,15 +291,17 @@ const LANE_CLI_PANEL_CLASS =
       }
       <ng-template #subagentLane>
         @if (selectedSubagent(); as sub) {
+          <!-- The CLI lane's shell: the lane scrolls its transcript and keeps
+               its composer below it (M4, as B1). -->
           <div
-            [class]="lanePanelClass"
+            [class]="cliPanelClass"
             data-glass-surface="chrome"
             data-testid="lane-panel"
           >
-            <ptah-chat-session-layout class="!flex-none min-h-full">
+            <ptah-chat-session-layout>
               <ptah-subagent-lane
                 [showStats]="false"
-                class="flex-1 min-h-fit"
+                class="min-h-0 flex-1"
                 presentation="flat"
                 [record]="sub"
                 [sessionId]="sessionId()"
@@ -322,7 +318,6 @@ const LANE_CLI_PANEL_CLASS =
   `,
 })
 export class CanvasLaneViewComponent {
-  protected readonly lanePanelClass = LANE_PANEL_CLASS;
   protected readonly cliPanelClass = LANE_CLI_PANEL_CLASS;
   protected readonly laneColumnClass = LANE_COLUMN_CLASS;
   readonly monitor = inject(AgentMonitorStore);

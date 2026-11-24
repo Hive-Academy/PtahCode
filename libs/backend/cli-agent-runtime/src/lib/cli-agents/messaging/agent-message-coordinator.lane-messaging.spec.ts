@@ -354,6 +354,42 @@ describe('AgentMessageCoordinator — turn input refusals and options', () => {
     });
   });
 
+  it('reports an error, not an empty catalog, when a stopped Codex catalog read fails (S1)', async () => {
+    const { h, coordinator } = setupTurn();
+    h.tracked.sdkHandle = undefined;
+    h.setInfo({ status: 'stopped' });
+    const stoppedLaneCatalog = jest.fn(async () => {
+      throw new Error('Codex executable is unavailable');
+    });
+    const laneEfforts = jest.fn(() => ['max']);
+    (h.detection.getAdapter as jest.Mock).mockReturnValue({ stoppedLaneCatalog, laneEfforts });
+    const view = await coordinator.turnOptions(h.agentId);
+    expect(view).toMatchObject({
+      models: [], efforts: [], commands: [], error: 'Lane options could not be read.',
+    });
+    expect(view.unavailableReason).toBeUndefined();
+    expect(laneEfforts).not.toHaveBeenCalled();
+    expect(h.logger.warn).toHaveBeenCalledWith(
+      '[AgentMessageCoordinator] Lane turn options unavailable', expect.any(Object),
+    );
+  });
+
+  it('says a model with its own effort level offers none, instead of promising efforts later (M1)', async () => {
+    const { h, coordinator } = setupTurn();
+    h.tracked.sdkHandle = undefined;
+    h.setInfo({ status: 'stopped', model: 'gemini-3-pro-high' });
+    const laneEfforts = jest.fn((model?: string) => (model?.endsWith('-high') ? [] : ['low', 'high']));
+    (h.detection.getAdapter as jest.Mock).mockReturnValue({ listModels: async () => [], laneEfforts });
+    await expect(coordinator.turnOptions(h.agentId)).resolves.toMatchObject({
+      efforts: [],
+      unavailableReason: 'This model sets its own effort level. Commands and skills appear when the lane is running.',
+    });
+    h.setInfo({ status: 'stopped', model: 'gemini-3-pro' });
+    await expect(coordinator.turnOptions(h.agentId)).resolves.toMatchObject({
+      efforts: ['low', 'high'], unavailableReason: 'Commands and skills appear when the lane is running.',
+    });
+  });
+
   it('reads the cached command list for a / send instead of asking the lane again (M9)', async () => {
     const { h, coordinator } = setupTurn();
     const listTurnOptions = jest.fn(async () => ({

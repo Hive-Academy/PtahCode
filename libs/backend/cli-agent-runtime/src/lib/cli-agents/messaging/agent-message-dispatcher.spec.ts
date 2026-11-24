@@ -18,6 +18,9 @@ import {
 import { LaneResumeError } from './lane-resumers/lane-resumer.port';
 import type { NewEnvelope } from './envelope/agent-message-envelope.schema';
 import { harness, manifest } from './__fixtures__/agent-message-harness';
+import { AgentId } from '@ptah-extension/shared';
+
+const AgentIdFor = (): AgentId => AgentId.create();
 
 const grokManifest: CliAdapterManifest = {
   ...manifest,
@@ -49,8 +52,9 @@ function setup(options: {
   h.sendToAgent.mockResolvedValue({ mode: 'start-turn' });
   const attachments = new AgentMessageAttachmentStore(h.logger);
   const advertisedCommands = jest.fn(async () => options.advertised);
+  const recordAgentNote = jest.fn();
   const dispatcher = new AgentMessageDispatcher({
-    manager: h.manager, store: h.store, aliases: h.aliases, resume: h.resume,
+    manager: { ...h.manager, recordAgentNote }, store: h.store, aliases: h.aliases, resume: h.resume,
     settleTurn: async () => undefined, logger: h.logger, attachments, advertisedCommands,
   });
   const attempt = async (
@@ -75,7 +79,7 @@ function setup(options: {
       },
     };
   };
-  return { h, dispatcher, attachments, advertisedCommands, attempt };
+  return { h, dispatcher, attachments, advertisedCommands, attempt, recordAgentNote };
 }
 
 /** Argument `index` of the first `sendToAgent` call (the harness mock types only four). */
@@ -92,7 +96,7 @@ describe('AgentMessageDispatcher', () => {
       const outcome = await s.dispatcher.attempt(attempt);
       expect(outcome.mode).toBe('start-turn');
       expect(s.h.sendToAgent).toHaveBeenCalledWith(s.h.agentId, '/compact', 'queue', id, false,
-        { rawBody: '  /compact', noSteer: true });
+        { rawBody: '  /compact', noSteer: true, echo: '  /compact' });
       expect(await s.h.store.get(id)).toMatchObject({
         state: 'started', rawDelivery: { raw: true }, ackState: 'unavailable',
       });
@@ -113,7 +117,8 @@ describe('AgentMessageDispatcher', () => {
       const text = String(sentArg(s, 1) ?? '');
       expect(text.startsWith(`[Ptah message ${id} from the user]`)).toBe(true);
       expect(text).toContain(agentMessageAckLine(id));
-      expect(sentArg(s, 5)).toEqual({ rawBody: 'please compact' });
+      // The echo is the body alone: the header and ack line are not shown.
+      expect(sentArg(s, 5)).toEqual({ rawBody: 'please compact', echo: 'please compact' });
       expect(await s.h.store.get(id)).toMatchObject({ ackState: 'pending' });
       expect((await s.h.store.get(id))?.rawDelivery).toBeUndefined();
     });
@@ -228,6 +233,69 @@ describe('AgentMessageDispatcher', () => {
     });
   });
 
+  describe('cold resume images (L3)', () => {
+    it('forwards held images to the resumed first turn', async () => {
+      const s = setup({ advertised: [], live: false });
+      const image = { data: 'aGk=', mediaType: 'image/png' };
+      const { attempt, id } = await s.attempt('look', { turn: { imageCount: 1 } });
+      s.attachments.hold(id, [image]);
+      await s.dispatcher.attempt(attempt);
+      expect(s.h.resume.resume).toHaveBeenCalledWith(expect.anything(), expect.any(String),
+        expect.anything(), undefined, [image]);
+    });
+  });
+
+  describe('resume failure reason (L12)', () => {
+    it('fails a policy refusal with its reason, logs it redacted, and does not retry', async () => {
+      const s = setup({ advertised: [], live: false });
+      s.h.resume.resume.mockRejectedValueOnce(new LaneResumeError('policy-refused',
+        'Parent plan cap permission: Grok exposes no native read-only plan flag. token=abc123'));
+      const { attempt, id } = await s.attempt('continue');
+      const outcome = await s.dispatcher.attempt(attempt);
+      expect(outcome).toMatchObject({ mode: 'unsupported', reasonCode: 'resume-failed' });
+      expect(outcome.detail).toContain('Grok exposes no native read-only plan flag.');
+      expect(await s.h.store.get(id)).toMatchObject({ state: 'failed', reason: 'resume-failed' });
+      const warn = (s.h.logger.warn as jest.Mock).mock.calls.find(([text]) => text === '[AgentMessageCoordinator] Lane resume failed');
+      expect(warn?.[1]).toMatchObject({ cli: 'grok', code: 'policy-refused' });
+      expect(warn?.[1].reason).toContain('token=[REDACTED]');
+      expect(JSON.stringify(warn)).not.toContain('abc123');
+    });
+
+    it('logs the reason of a spawn failure and keeps it retryable', async () => {
+      const s = setup({ advertised: [], live: false });
+      s.h.resume.resume.mockRejectedValueOnce(new LaneResumeError('spawn-failed', 'grok CLI is not installed.'));
+      const { attempt, id } = await s.attempt('continue');
+      await s.dispatcher.attempt(attempt);
+      expect(await s.h.store.get(id)).toMatchObject({ state: 'blocked-retryable', reason: 'resume-failed' });
+      expect(s.h.logger.warn).toHaveBeenCalledWith('[AgentMessageCoordinator] Lane resume failed',
+        expect.objectContaining({ code: 'spawn-failed', reason: 'grok CLI is not installed.' }));
+    });
+  });
+
+  describe('user echo (L2/M5)', () => {
+    it('asks the router to echo a user message body, never a parent message', async () => {
+      const s = setup({ advertised: [] });
+      const { attempt } = await s.attempt('hello lane');
+      await s.dispatcher.attempt(attempt);
+      expect(sentArg(s, 5)).toMatchObject({ rawBody: 'hello lane', echo: 'hello lane' });
+
+      const p = setup({ advertised: [] });
+      const { attempt: fromParent } = await p.attempt('from parent', { sender: parent });
+      await p.dispatcher.attempt(fromParent);
+      expect(sentArg(p, 5)).not.toHaveProperty('echo');
+    });
+
+    it('echoes a cold resume on the resumed lane, body only', async () => {
+      const s = setup({ advertised: [], live: false });
+      const spawned = s.h.addLane(AgentIdFor());
+      s.h.resume.resume.mockResolvedValueOnce({ agentId: spawned.info.agentId });
+      const { attempt } = await s.attempt('resume and do it');
+      await s.dispatcher.attempt(attempt);
+      expect(s.recordAgentNote).toHaveBeenCalledWith(spawned.info.agentId,
+        { type: 'user', content: 'resume and do it', sentAt: expect.any(Number) });
+    });
+  });
+
   describe('attachments', () => {
     it('fails attachments-unavailable with the body kept when held images are gone', async () => {
       const s = setup({ advertised: [] });
@@ -248,7 +316,7 @@ describe('AgentMessageDispatcher', () => {
       s.attachments.hold(id, [image]);
       await s.dispatcher.attempt(attempt);
       expect(sentArg(s, 5)).toEqual({
-        turn: { model: 'grok-4', files: ['src/a.ts'], images: [image] }, rawBody: 'look',
+        turn: { model: 'grok-4', files: ['src/a.ts'], images: [image] }, rawBody: 'look', echo: 'look',
       });
       const logged = JSON.stringify([
         (s.h.logger.info as jest.Mock).mock.calls, (s.h.logger.warn as jest.Mock).mock.calls,

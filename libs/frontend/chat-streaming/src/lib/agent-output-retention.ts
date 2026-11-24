@@ -211,6 +211,8 @@ const LANDMARK_SEGMENT_TYPES: ReadonlySet<string> = new Set([
   'file-change',
   'error',
   'info',
+  // The user's echoed message: kept so the transcript keeps what was sent.
+  'user',
 ]);
 
 /**

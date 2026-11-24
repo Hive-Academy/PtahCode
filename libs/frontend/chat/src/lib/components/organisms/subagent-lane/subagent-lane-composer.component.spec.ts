@@ -1,5 +1,6 @@
 import { signal } from '@angular/core';
 import { TestBed, type ComponentFixture } from '@angular/core/testing';
+import { By } from '@angular/platform-browser';
 import type { SubagentRecord } from '@ptah-extension/chat-streaming';
 import {
   COMPOSER_CARD_BORDER_CLASS,
@@ -15,6 +16,7 @@ import type { TrayAgentContext } from '../../../services/session-agents/session-
 import { SessionAgentTrayService } from '../../../services/session-agents/session-agent-tray.service';
 import { ChatAgentFeedbackSender } from '../../../services/agent-feedback/chat-agent-feedback-sender.service';
 import { VoiceInputService } from '../../../services/voice-input.service';
+import { ComposerVoiceButtonComponent } from '../../molecules/composer-controls/composer-voice-button.component';
 import {
   SUBAGENT_GATED_REASONS,
   SubagentLaneComposerComponent,
@@ -310,6 +312,25 @@ describe('SubagentLaneComposerComponent', () => {
     expect(byId(fixture, 'subagent-composer-error')).toBeNull();
     expect(field(fixture).value).toBe('');
     expect(send).not.toHaveBeenCalled();
+  });
+
+  it('keeps a voice transcript added while the send was pending (M5)', async () => {
+    let resolve: (sent: boolean) => void = () => undefined;
+    steer.mockReturnValue(new Promise<boolean>((done) => (resolve = done)));
+    const fixture = setup({ ...record, status: 'running' }, context(true));
+    fill(fixture, 'Check tests');
+    field(fixture).dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }));
+    fixture.detectChanges();
+    expect(field(fixture).disabled).toBe(true);
+    const voiceButton = fixture.debugElement.query(By.directive(ComposerVoiceButtonComponent));
+    (voiceButton.componentInstance as ComposerVoiceButtonComponent).transcript.emit('and the lint');
+    fixture.detectChanges();
+    resolve(true);
+    for (let i = 0; i < 5; i++) await Promise.resolve();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    expect(steer).toHaveBeenCalledWith(expect.anything(), 'Check tests');
+    expect(field(fixture).value).toBe('and the lint');
   });
 
   it('sends through the Send button', async () => {

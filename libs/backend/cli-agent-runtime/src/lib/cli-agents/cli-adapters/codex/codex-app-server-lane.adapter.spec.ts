@@ -1778,7 +1778,7 @@ describe('CodexAppServerLaneAdapter', () => {
     expect(h.runtime.openCatalog).toHaveBeenCalledTimes(opened + 1);
   });
 
-  it('adds no static efforts for a stopped lane, and gives empties when the catalog fails', async () => {
+  it('adds no static efforts for a stopped lane, and rejects when the catalog fails', async () => {
     const h = harness((context) => {
       context.models = [{ id: 'c-1', model: 'gpt-6-sol', displayName: 'GPT-6-Sol', isDefault: true }];
     });
@@ -1790,7 +1790,7 @@ describe('CodexAppServerLaneAdapter', () => {
       efforts: [],
     });
     jest.mocked(h.runtime.openCatalog).mockRejectedValueOnce(new Error('catalog failed'));
-    await expect(h.adapter.stoppedLaneCatalog()).resolves.toEqual({ models: [], efforts: [] });
+    await expect(h.adapter.stoppedLaneCatalog()).rejects.toThrow('catalog failed');
     expect(h.logger.warn).toHaveBeenCalledWith(expect.stringContaining('catalog failed'), expect.any(Object));
   });
 });

@@ -33,7 +33,8 @@ export function toUserMessage(
   };
 }
 
-export function createPromptMailbox(initialTask: string): PromptMailbox {
+/** `initialTask` is the first turn: plain text, or text plus image blocks (a cold resume). */
+export function createPromptMailbox(initialTask: PromptTurnContent): PromptMailbox {
   const queue: SDKUserMessage[] = [toUserMessage({ content: initialTask })];
   let closed = false;
   let notify: (() => void) | null = null;

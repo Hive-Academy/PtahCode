@@ -99,6 +99,43 @@ describe('InspectorLimitsLanesComponent', () => {
   });
 });
 
+describe('InspectorLimitsLanesComponent dedupe (M8)', () => {
+  afterEach(() => TestBed.resetTestingModule());
+  const claude = { key: 'claude#account:aaaa227d', providerId: 'claude', identityKind: 'account', label: 'Claude account' } as const;
+  const codex = { key: 'openai-codex#account:bbbb58b5', providerId: 'openai-codex', identityKind: 'account', label: 'Codex account' } as const;
+  const weekly: PlanLimitWindow = {
+    key: 'weekly', kind: 'weekly', label: 'Weekly', observedAt: now - 1000,
+    used: { kind: 'percent', percent: 81 }, usedSource: 'provider-api',
+    resetsAt: now + 86_400_000, resetSource: 'provider-api',
+  };
+  const owner = (o: typeof claude | typeof codex): PlanLimitOwnerSnapshot => ({
+    owner: o, status: 'available', windowSetEstablished: true, ownerEvidence: [], windows: [weekly],
+  });
+  const renderRows = (laneOwner: typeof claude | typeof codex) => {
+    TestBed.configureTestingModule({ imports: [InspectorLimitsLanesComponent] });
+    const fixture = TestBed.createComponent(InspectorLimitsLanesComponent);
+    fixture.componentRef.setInput('limits', buildStatsLimitViewModel({
+      sessionId: 's', sessionOwnerKey: claude.key, sessionModelScope: null,
+      owners: [owner(claude), owner(codex)],
+      laneRuns: [{ ...run('a', 'frontend'), cli: laneOwner === claude ? 'claude' : 'codex',
+        cliLabel: laneOwner === claude ? 'Claude' : 'Codex', quotaOwner: laneOwner }],
+      now, time: { timeZone: 'UTC', zoneNameLocale: 'en-GB' },
+    }));
+    fixture.detectChanges();
+    return [...(fixture.nativeElement as HTMLElement).querySelectorAll('ptah-provider-lane-limit-tile')];
+  };
+
+  it('shows a Claude lane on the session account once, not twice', () => {
+    const rows = renderRows(claude);
+    expect(rows).toHaveLength(1);
+    expect(rows[0].textContent).toContain('81%');
+  });
+
+  it('keeps the row of a lane on another account', () => {
+    expect(renderRows(codex)).toHaveLength(2);
+  });
+});
+
 describe('Plan Limits provider states', () => {
   const grok = { key: 'grok#account:abcd1234', providerId: 'grok', identityKind: 'account', label: 'Grok account' } as const;
   const kimi = { key: 'kimi-code#account:abcd2b78', providerId: 'kimi-code', identityKind: 'account', label: 'Kimi account' } as const;

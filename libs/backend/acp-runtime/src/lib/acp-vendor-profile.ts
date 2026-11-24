@@ -182,9 +182,16 @@ export interface AcpExtensionHooks {
    * while a prompt runs, or `undefined` when the notification carries none.
    * A pure parse of untrusted input that never throws. The runtime emits each
    * result as `usageProgress`; the prompt response's usage stays the turn
-   * total. Its presence makes a lane report usage live.
+   * total. Its presence makes a lane report usage live. When a frame is the
+   * usage notification but its counters do not parse (a vendor shape change),
+   * the hook calls `malformed` with the failing field paths (never values);
+   * the runtime logs that once per session.
    */
-  usage?(method: string, params: Record<string, unknown>): ProviderUsage | undefined;
+  usage?(
+    method: string,
+    params: Record<string, unknown>,
+    malformed?: (fieldPaths: readonly string[]) => void,
+  ): ProviderUsage | undefined;
   /**
    * A vendor request from the agent. Resolve the result, or `undefined` to
    * answer method-not-found. Without this hook every agent request is

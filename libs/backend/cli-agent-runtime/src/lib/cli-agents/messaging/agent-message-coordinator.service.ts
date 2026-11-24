@@ -131,13 +131,29 @@ function stoppedLaneView(
   current: Pick<LaneTurnOptionsView, 'currentModel' | 'currentEffort'>,
   models: LaneTurnOptionsView['models'],
   efforts: readonly string[],
+  effortsFixedByModel = false,
 ): LaneTurnOptionsView {
   return {
     ...current, models, efforts: [...efforts], commands: [],
     unavailableReason: efforts.length > 0
       ? 'Commands and skills appear when the lane is running.'
-      : 'Effort levels, commands and skills appear when the lane is running.',
+      : effortsFixedByModel
+        ? 'This model sets its own effort level. Commands and skills appear when the lane is running.'
+        : 'Effort levels, commands and skills appear when the lane is running.',
   };
+}
+
+/**
+ * M1: the record's model offers no effort levels although the CLI offers
+ * some for other models (an agy model id with an effort suffix). Such a lane
+ * serves none when it runs either, so the reason must not promise them.
+ */
+function effortsFixedByModel(
+  laneEfforts: ((model?: string) => readonly string[]) | undefined,
+  model: string | undefined,
+  efforts: readonly string[],
+): boolean {
+  return !!laneEfforts && !!model && efforts.length === 0 && laneEfforts(undefined).length > 0;
 }
 
 /**
@@ -547,14 +563,17 @@ export class AgentMessageCoordinator implements AgentMessageDeliveryTarget {
         ? await bounded(adapter.listModels(), LANE_TURN_OPTIONS_TIMEOUT_MS)
         : cached?.models ?? [];
       if (cached) return { ...current, models, efforts: cached.efforts, commands: cached.commands };
-      return stoppedLaneView(current, models, adapter?.laneEfforts?.(info.model) ?? []);
+      const laneEfforts = adapter?.laneEfforts?.bind(adapter);
+      const efforts = laneEfforts?.(info.model) ?? [];
+      return stoppedLaneView(current, models, efforts, effortsFixedByModel(laneEfforts, info.model, efforts));
     } catch (error: unknown) {
       // degradation-audit: reported - logged here, and the result carries `error` for the composer.
       this.deps.logger.warn('[AgentMessageCoordinator] Lane turn options unavailable', {
         agentId: laneId, error: error instanceof Error ? error.name : 'unknown',
       });
       return {
-        ...current, models: cached?.models ?? [], efforts: cached?.efforts ?? [...(adapter?.laneEfforts?.(info.model) ?? [])],
+        ...current, models: cached?.models ?? [], efforts: cached?.efforts
+          ?? (adapter?.stoppedLaneCatalog ? [] : [...(adapter?.laneEfforts?.(info.model) ?? [])]),
         commands: cached?.commands ?? [], error: TURN_OPTIONS_ERROR,
       };
     }

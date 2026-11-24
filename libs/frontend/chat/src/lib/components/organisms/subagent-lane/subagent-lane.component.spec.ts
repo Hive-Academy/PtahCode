@@ -268,27 +268,24 @@ describe('SubagentLaneComponent', () => {
     expect(scroller?.classList).toContain('overflow-y-auto');
   });
 
-  it('lets flat lane rows flow through the host scroller', () => {
+  // M4: as the canvas CLI lane (B1), the flat lane scrolls its transcript in
+  // its own region and keeps the composer below it, outside the scroller.
+  it('keeps the flat composer below its own transcript scroller, never over it', () => {
     const fixture = setup();
     fixture.componentRef.setInput('presentation', 'flat');
     fixture.detectChanges();
-    const body = (fixture.nativeElement as HTMLElement).querySelector(
-      '[data-testid="lane-scroll"]',
-    );
-    expect(
-      (fixture.nativeElement as HTMLElement).querySelector(
-        'ptah-execution-header',
-      ),
-    ).toBeNull();
-    expect(body?.classList).not.toContain('overflow-y-auto');
-    expect(body?.classList).toContain('flex-none');
-    const composer = (fixture.nativeElement as HTMLElement).querySelector(
-      'ptah-subagent-lane-composer',
-    );
-    expect(composer?.classList).toContain('sticky');
-    expect(composer?.classList).toContain('mt-auto');
-    expect(composer?.classList).toContain('bottom-0');
-    expect(composer?.classList).toContain('bg-base-100');
+    const lane = fixture.nativeElement as HTMLElement;
+    const body = lane.querySelector('[data-testid="lane-scroll"]');
+    expect(lane.querySelector('ptah-execution-header')).toBeNull();
+    expect(lane.classList).not.toContain('!min-h-fit');
+    expect(body?.classList).toContain('overflow-y-auto');
+    expect(body?.classList).toContain('flex-1');
+    expect(body?.classList).toContain('min-h-0');
+    const composer = lane.querySelector('ptah-subagent-lane-composer');
+    expect(composer?.classList).not.toContain('sticky');
+    expect(composer?.classList).toContain('shrink-0');
+    expect(body?.contains(composer)).toBe(false);
+    expect(composer?.parentElement).toBe(lane);
   });
 
   // The control row (stats, meta, actions) renders inline in the
@@ -405,21 +402,24 @@ describe('SubagentLaneComponent', () => {
     const root: HTMLElement = fixture.nativeElement;
     root
       .querySelector<HTMLButtonElement>(
-        '[aria-label="Send Explore to background"]',
+        '[data-testid="subagent-composer-background"]',
       )!
       .click();
     root
-      .querySelector<HTMLButtonElement>('[aria-label="Stop Explore"]')!
+      .querySelector<HTMLButtonElement>('[data-testid="subagent-composer-stop"]')!
       .click();
     fixture.detectChanges();
     expect(sendToBackground).toHaveBeenCalledWith('session-123456', 'tool-1');
     expect(stop).toHaveBeenCalledWith('task-1', 'session-123456');
+    // The composer owns both actions; the header repeats neither.
+    expect(root.querySelector('[executionHeaderActions]')).toBeNull();
+    expect(root.querySelectorAll('[data-testid="subagent-composer-stop"]')).toHaveLength(1);
     expect(root.querySelector('[aria-label="Message Explore"]')).toBeNull();
     contexts.set(new Map([['tool-1', context({ steerable: true })]]));
     fixture.detectChanges();
-    expect(root.querySelector('[aria-label="Stop Explore"]')).toBeNull();
+    expect(root.querySelector('[data-testid="subagent-composer-stop"]')).toBeNull();
     expect(
-      root.querySelector('[aria-label="Send Explore to background"]'),
+      root.querySelector('[data-testid="subagent-composer-background"]'),
     ).toBeNull();
   });
 
@@ -454,7 +454,7 @@ describe('SubagentLaneComponent', () => {
     expect(root.querySelector('[data-testid="native-codex-controls"]')).toBeNull();
     expect(root.textContent).not.toContain('Native Codex subagents do not support send or stop from Ptah yet.');
     expect(root.querySelector('ptah-subagent-lane-composer textarea')).not.toBeNull();
-    const stopButton = root.querySelector<HTMLButtonElement>('[aria-label="Stop Explore"]');
+    const stopButton = root.querySelector<HTMLButtonElement>('[data-testid="subagent-composer-stop"]');
     expect(stopButton?.disabled).toBe(false);
     stopButton?.click();
     await Promise.resolve();
@@ -612,10 +612,10 @@ describe('SubagentLaneComponent', () => {
     const fixture = setup();
     const root: HTMLElement = fixture.nativeElement;
     const stopButton = root.querySelector<HTMLButtonElement>(
-      '[aria-label="Stop Explore"]',
+      '[data-testid="subagent-composer-stop"]',
     )!;
     const backgroundButton = root.querySelector<HTMLButtonElement>(
-      '[aria-label="Send Explore to background"]',
+      '[data-testid="subagent-composer-background"]',
     )!;
     stopButton.click();
     backgroundButton.click();
@@ -742,9 +742,9 @@ describe('SubagentLaneComponent', () => {
     fixture.detectChanges();
     const root: HTMLElement = fixture.nativeElement;
     expect(root.querySelector('ptah-agent-lane-stats')).toBeNull();
-    expect(root.querySelector('[aria-label="Stop Explore"]')).not.toBeNull();
+    expect(root.querySelector('[data-testid="subagent-composer-stop"]')).not.toBeNull();
     expect(
-      root.querySelector('[aria-label="Send Explore to background"]'),
+      root.querySelector('[data-testid="subagent-composer-background"]'),
     ).not.toBeNull();
     expect(
       root.querySelector('[data-test="execution-header-details"]'),

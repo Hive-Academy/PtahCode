@@ -331,8 +331,15 @@ describe('CanvasLaneViewComponent', () => {
     ).toBeNull();
     const subLane = fixture.nativeElement.querySelector('ptah-subagent-lane');
     expect(subLane?.parentElement?.tagName).toBe('PTAH-CHAT-SESSION-LAYOUT');
-    expect(subLane?.parentElement?.classList.contains('!flex-none')).toBe(true);
-    expect(subLane?.parentElement?.classList.contains('min-h-full')).toBe(true);
+    // M4: the sub-agent lane panel does not scroll either; the lane scrolls
+    // its own transcript and keeps its composer below it.
+    expect(subLane?.parentElement?.classList.contains('!flex-none')).toBe(false);
+    expect(subLane?.parentElement?.classList.contains('min-h-full')).toBe(false);
+    expect(subLane?.classList.contains('min-h-0')).toBe(true);
+    expect(subLane?.classList.contains('flex-1')).toBe(true);
+    expect(
+      subLane?.closest('[data-testid="lane-panel"]')?.classList.contains('overflow-y-auto'),
+    ).toBe(false);
     expect(
       subLane
         ?.closest('[data-testid="lane-panel"]')

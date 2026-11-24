@@ -89,12 +89,18 @@ const grokCallUsageSchema = z.object({
 function readGrokCallUsage(
   method: string,
   params: Record<string, unknown>,
+  malformed?: (fieldPaths: readonly string[]) => void,
 ): ProviderUsage | undefined {
   if (method !== SESSION_NOTIFICATION) return undefined;
   const parsed = grokCallUsageSchema.safeParse(params);
-  // A frame without valid counters adds no increment; the turn-end total
-  // still lands and corrects the card.
-  if (!parsed.success) return undefined;
+  if (!parsed.success) {
+    // A frame without valid counters adds no increment; the turn-end total
+    // still lands and corrects the card. Only a `response_completed` frame
+    // is a usage frame, so only its failure is reported as shape drift.
+    if (isResponseCompleted(params))
+      malformed?.(parsed.error.issues.map((issue) => issue.path.join('.')));
+    return undefined;
+  }
   const usage = parsed.data.update.usage;
   return {
     inputTokens:
@@ -103,6 +109,15 @@ function readGrokCallUsage(
       (usage.cache_creation_input_tokens ?? 0),
     outputTokens: usage.output_tokens,
   };
+}
+
+function isResponseCompleted(params: Record<string, unknown>): boolean {
+  const update = params['update'];
+  return (
+    typeof update === 'object' &&
+    update !== null &&
+    (update as Record<string, unknown>)['sessionUpdate'] === 'response_completed'
+  );
 }
 
 /** Grok's -32000 auth failures say "Authentication required" / "no auth method id provided". */

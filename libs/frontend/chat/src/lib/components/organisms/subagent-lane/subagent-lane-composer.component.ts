@@ -409,6 +409,9 @@ export class SubagentLaneComposerComponent {
     const mode = this.mode();
     if (mode === 'unavailable') return;
     const generation = this.generation;
+    // The draft as sent: a voice transcript can join it while the send is
+    // pending (the textarea is disabled, so nothing else changes it).
+    const sentDraft = this.draft();
     this.error.set(null);
     this.status.set(null);
     this.pending.set(true);
@@ -420,7 +423,11 @@ export class SubagentLaneComposerComponent {
         this.error.set(failure);
         return;
       }
-      this.draft.set('');
+      // M5: clear only what was sent; text added while pending stays.
+      const current = this.draft();
+      this.draft.set(
+        current.startsWith(sentDraft) ? current.slice(sentDraft.length).trimStart() : current,
+      );
       if (mode === 'follow-up') this.status.set('Sent to the main chat');
     } finally {
       if (generation === this.generation) this.pending.set(false);

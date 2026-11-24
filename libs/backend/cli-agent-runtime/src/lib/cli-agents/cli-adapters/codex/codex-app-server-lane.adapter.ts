@@ -269,13 +269,21 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
   }
 
   async listModels(): Promise<CliModelInfo[]> {
-    return (await this.stoppedLaneCatalog()).models;
+    try {
+      return (await this.stoppedLaneCatalog()).models;
+    } catch {
+      // degradation-audit: optional-capability - stoppedLaneCatalog already
+      // logged the failure, and an empty list lets the caller use its default model.
+      return [];
+    }
   }
 
   /**
    * Models and effort levels from one live catalog read (no lane needed),
    * for the composer of a stopped lane. Efforts are only what the catalog
-   * advertises; nothing static is added.
+   * advertises; nothing static is added. A failed read is logged and
+   * rethrown, so the coordinator reports an error instead of a false
+   * empty list.
    */
   async stoppedLaneCatalog(): Promise<StoppedLaneCatalog> {
     try {
@@ -288,8 +296,7 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
       );
       return { models: codexLaneModels(catalog), efforts: codexAdvertisedEfforts(catalog) };
     } catch (error: unknown) {
-      // degradation-audit: optional-capability - the warning reports catalog
-      // failure, and empty lists let the caller use its default model.
+      // degradation-audit: reported - logged here and rethrown to the caller.
       this.logger.warn(
         '[CodexAppServerLaneAdapter] Codex model catalog failed',
         {
@@ -297,7 +304,7 @@ export class CodexAppServerLaneAdapter implements CliAdapter {
             error instanceof Error ? error.constructor.name : typeof error,
         },
       );
-      return { models: [], efforts: [] };
+      throw error;
     }
   }
 

@@ -119,6 +119,8 @@ export interface ClaudeCliCommandOptions extends CliCommandOptions {
   readonly parentSessionId?: string;
   /** Selection only: never an environment bag or a caller-certified route. */
   readonly accountAdmission?: import('@ptah-extension/auth-providers-tokens').ClaudeAccountAdmissionRequest;
+  /** Images of a cold resume's first turn (`SpawnAgentRequest.turnImages`). */
+  readonly turnImages?: readonly import('@ptah-extension/shared').InlineImageAttachment[];
 }
 
 /**
@@ -477,7 +479,8 @@ export interface CliAdapter {
    * Optional: models and effort levels for a stopped lane's composer from one
    * live catalog read, for a CLI whose levels come only from that catalog.
    * When present the coordinator uses it instead of `listModels` and
-   * `laneEfforts`. Never rejects: a failed read gives empty lists.
+   * `laneEfforts`. Rejects when the read fails, so the coordinator reports an
+   * error instead of a false empty list.
    */
   stoppedLaneCatalog?(): Promise<StoppedLaneCatalog>;
 

@@ -51,6 +51,24 @@ describe('AgentLaneResumeService', () => {
     expect(spawn).toHaveBeenCalledTimes(1);
   });
 
+  it('forwards held images of a cold send to the resumed spawn (L3)', async () => {
+    const spawn = jest.fn().mockResolvedValue({ agentId: AgentId.create() });
+    const resume = new AgentLaneResumeService({ spawn, prepareSdkHandleSpawn: jest.fn(),
+      releaseIdleForResume: jest.fn().mockResolvedValue(undefined) }, ptahCli());
+    const images = [{ data: 'iVBORw0KGgo=', mediaType: 'image/png' }];
+    await resume.resume({ ...info, cli: 'claude' }, 'look', undefined, undefined, images);
+    expect(spawn).toHaveBeenCalledWith(expect.objectContaining({ cli: 'claude', task: 'look', turnImages: images }));
+  });
+
+  it('refuses images on a Ptah CLI cold resume before any spawn', async () => {
+    const ptah = ptahCli();
+    const resume = new AgentLaneResumeService({ spawn: jest.fn(), prepareSdkHandleSpawn: jest.fn(),
+      releaseIdleForResume: jest.fn() }, ptah);
+    await expect(resume.resume({ ...info, cli: 'ptah-cli' }, 'look', undefined, undefined,
+      [{ data: 'x', mediaType: 'image/png' }])).rejects.toMatchObject({ code: 'turn-input-refused' });
+    expect(ptah.resume).not.toHaveBeenCalled();
+  });
+
   it('refuses a record without a session', async () => {
     const spawn = jest.fn();
     const resume = new AgentLaneResumeService({ spawn, prepareSdkHandleSpawn: jest.fn(), releaseIdleForResume: jest.fn() }, ptahCli());

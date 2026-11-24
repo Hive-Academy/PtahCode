@@ -9,8 +9,11 @@
 import {
   appendToBuffer,
   capBuffer,
+  capSegments,
+  MAX_AGENT_SEGMENTS,
   trimPendingOutput,
 } from './agent-output-retention';
+import type { CliOutputSegment } from '@ptah-extension/shared';
 
 const MAX = 100;
 const NOTICE =
@@ -119,5 +122,17 @@ describe('capBuffer', () => {
   it('returns the same reference when within the cap', () => {
     const small = 'small';
     expect(capBuffer(small, MAX)).toBe(small);
+  });
+});
+
+describe('capSegments user echo (L2)', () => {
+  it('keeps the user echo as a landmark when prose is folded', () => {
+    const segments: CliOutputSegment[] = [
+      { type: 'user', content: 'what I asked', sentAt: 1 },
+      ...Array.from({ length: MAX_AGENT_SEGMENTS + 10 }, (_, i): CliOutputSegment =>
+        i % 2 ? { type: 'text', content: `t${i}` } : { type: 'tool-call', content: '', toolName: 'Read' }),
+    ];
+    const capped = capSegments(segments);
+    expect(capped.some((segment) => segment.type === 'user' && segment.content === 'what I asked')).toBe(true);
   });
 });

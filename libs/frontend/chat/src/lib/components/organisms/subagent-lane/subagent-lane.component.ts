@@ -13,7 +13,6 @@ import {
   ElementRef,
   viewChild,
 } from '@angular/core';
-import { LucideAngularModule, Moon, Square } from 'lucide-angular';
 import { injectClock } from '@ptah-extension/core';
 import {
   AgentMonitorStore,
@@ -35,10 +34,9 @@ import { summarizeExecutionNodes } from '../../../utils/message-summary.utils';
 import { subagentProgressText } from '../../../utils/subagent-progress.utils';
 import { subagentLaneStats } from '../../../utils/lane-stats.adapters';
 import { SubagentLaneComposerComponent } from './subagent-lane-composer.component';
-import { findScrollingAncestor } from '../../../utils/scroll-parent.utils';
 import { isNativeCodexAgent, NATIVE_CODEX_CONTROL_REASON } from '../native-codex-control-reason';
 
-import { PtahButtonDirective, PtahIconButtonDirective } from '@ptah-extension/ui';
+import { PtahButtonDirective } from '@ptah-extension/ui';
 import {
   AgentActionNoticeChipComponent,
   subagentActionNoticeView,
@@ -53,21 +51,18 @@ const LIVE_HISTORY_REFRESH_MS = 5000;
   selector: 'ptah-subagent-lane',
   standalone: true,
   imports: [
-    LucideAngularModule,
     AgentLaneStatsComponent,
     ExecutionHeaderComponent,
     LaneTranscriptComponent,
     SubagentLaneComposerComponent,
     PtahButtonDirective,
-    PtahIconButtonDirective,
     AgentActionNoticeChipComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
-  // Card mode keeps a bounded transcript; flat mode flows through its host scroller.
-  host: {
-    class: 'flex min-h-0 flex-col',
-    '[class.!min-h-fit]': "presentation() === 'flat'",
-  },
+  // Both modes keep a bounded lane: the transcript scrolls in its own region
+  // and the composer sits below it, never over it (M4, as the canvas CLI
+  // lane's session layout). The host must give the lane a definite height.
+  host: { class: 'flex min-h-0 flex-col' },
   template: `
     @if (presentation() === 'card') {
     <ptah-execution-header
@@ -85,38 +80,6 @@ const LIVE_HISTORY_REFRESH_MS = 5000;
           class="block min-w-0"
           [stats]="stats()"
         />
-      }
-      @if (context(); as ctx) {
-        <div executionHeaderActions class="flex shrink-0 items-center gap-0.5">
-          @if (ctx.entry.canBackground) {
-            <button
-              type="button"
-              ptahIconButton size="xs" [label]="'Send ' + name() + ' to background'"
-              [disabled]="backgroundPending()"
-              (click)="onBackground(ctx)"
-            >
-              <lucide-angular
-                [img]="MoonIcon"
-                class="h-3 w-3"
-                aria-hidden="true"
-              />
-            </button>
-          }
-          @if (ctx.entry.stoppable) {
-            <button
-              type="button"
-              ptahIconButton size="xs" [label]="'Stop ' + name()"
-              [disabled]="stopPending()"
-              (click)="onStop(ctx)"
-            >
-              <lucide-angular
-                [img]="SquareIcon"
-                class="h-3 w-3 text-error"
-                aria-hidden="true"
-              />
-            </button>
-          }
-        </div>
       }
     </ptah-execution-header>
     }
@@ -154,9 +117,10 @@ const LIVE_HISTORY_REFRESH_MS = 5000;
         {{ err.message }}
       </p>
     }
+    <!-- The transcript region owns the scroll in both modes (M4). -->
     <div
       #laneBody
-      [class]="presentation() === 'card' ? 'relative min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable_both-edges]' : 'relative flex-none'"
+      class="relative min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable_both-edges]"
       data-testid="lane-scroll"
     >
       <div [class]="columnClass + ' space-y-2 pt-2'">
@@ -238,8 +202,10 @@ const LIVE_HISTORY_REFRESH_MS = 5000;
         </div>
       }
     </div>
+    <!-- Below the scroller, outside it: transcript rows never pass under it.
+         Stop and Send to background are in its toolbar, not in the header. -->
     <ptah-subagent-lane-composer
-      [class]="columnClass + ' shrink-0 pt-2 pb-2' + (presentation() === 'flat' ? ' mt-auto sticky bottom-0 z-10 bg-base-100' : '')"
+      [class]="columnClass + ' shrink-0 pt-2 pb-2'"
       [record]="record()"
       [context]="isNativeCodex() ? null : context()"
       [sessionId]="isNativeCodex() ? null : sessionId()"
@@ -273,8 +239,6 @@ export class SubagentLaneComponent {
   private readonly laneBody = viewChild<ElementRef<HTMLDivElement>>('laneBody');
   private flatScroller: HTMLElement | null = null;
   private flatPinned = true;
-  protected readonly MoonIcon = Moon;
-  protected readonly SquareIcon = Square;
   protected readonly stopPending = signal(false);
   protected readonly backgroundPending = signal(false);
   protected readonly context = computed(
@@ -358,9 +322,8 @@ export class SubagentLaneComponent {
   constructor() {
     afterNextRender(() => {
       if (this.presentation() !== 'flat') return;
-      const body = this.laneBody()?.nativeElement;
-      if (!body) return;
-      const scroller = findScrollingAncestor(body);
+      // The flat lane follows new output in its own transcript scroller.
+      const scroller = this.laneBody()?.nativeElement;
       if (!scroller) return;
       this.flatScroller = scroller;
       const onScroll = (): void => {

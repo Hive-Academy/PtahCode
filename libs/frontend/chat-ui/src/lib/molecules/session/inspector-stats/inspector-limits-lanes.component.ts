@@ -37,7 +37,14 @@ export class InspectorLimitsLanesComponent {
       windows: vm.planTiles, message: '', ownerDetails: [],
       accountId: vm.sessionProviderAccountId, source: vm.sessionProviderSource, indicator: vm.indicator,
     }] : [];
-    return [...session, ...vm.providerLimits.map(provider => ({
+    // A lane on the session's own account reads the same windows: its row
+    // would repeat the session row ("Claude · Weekly" twice, M8). Rows are
+    // compared by tile id, which holds the owner key and the window key.
+    const sessionTileIds = new Set(vm.planTiles.map(tile => tile.id));
+    const repeatsSession = (provider: ProviderLaneLimitModel): boolean =>
+      session.length > 0 && provider.windows.length > 0
+      && provider.windows.every(tile => sessionTileIds.has(tile.id));
+    return [...session, ...vm.providerLimits.filter(provider => !repeatsSession(provider)).map(provider => ({
       ...provider,
       label: provider.id === 'provider:codex' ? 'Codex'
         : provider.id === 'provider:kimi-code' || provider.id === 'provider:kimi' ? 'Kimi Code'
