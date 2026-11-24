@@ -16,6 +16,8 @@
  *     -> SDK hook returns decision
  */
 
+import type { PermissionResponse } from './permission.types';
+
 /**
  * Permission request from a CLI agent (Copilot SDK onPreToolUse hook).
  *
@@ -70,4 +72,28 @@ export interface AgentPermissionDecision {
 
   /** Optional reason for the decision (e.g., "User denied", "Timed out") */
   readonly reason?: string;
+}
+
+/**
+ * A lane user's answer to a permission card, sent as the params of
+ * `agent:permissionResponse`.
+ *
+ * A superset of `AgentPermissionDecision`: it carries every decision the main
+ * chat permission card offers (`PermissionResponse['decision']`) and the
+ * optional edited tool input. The RPC handler validates it with a strict
+ * schema and narrows it to `AgentPermissionDecision` before it reaches the
+ * Copilot bridge, which keeps its `allow | deny` contract.
+ */
+export interface LanePermissionResponse {
+  /** Must match requestId from the corresponding permission request */
+  readonly requestId: string;
+
+  /** allow (once), deny, always_allow (create rule) or deny_with_message */
+  readonly decision: PermissionResponse['decision'];
+
+  /** Optional reason; the message text for `deny_with_message` */
+  readonly reason?: string;
+
+  /** Tool input the user edited before approval */
+  readonly modifiedInput?: PermissionResponse['modifiedInput'];
 }

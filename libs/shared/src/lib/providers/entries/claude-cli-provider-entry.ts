@@ -29,6 +29,7 @@ export const CLAUDE_CLI_PROVIDER_ENTRY: AnthropicProvider = {
   authEnvVar: 'ANTHROPIC_API_KEY',
   authType: 'none',
   nativeAuth: true,
+  imageInputOnEveryModel: true,
   keyPrefix: '',
   helpUrl: 'https://www.anthropic.com/claude-code',
   description: 'Use your local Claude login / subscription — no API key needed',

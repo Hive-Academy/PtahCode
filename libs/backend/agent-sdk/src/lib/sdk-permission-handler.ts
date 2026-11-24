@@ -915,12 +915,15 @@ export class SdkPermissionHandler implements ISdkPermissionHandler {
         this.logger.info(
           `[SdkPermissionHandler] Handling AskUserQuestion tool request (bypasses all auto-approval)`,
         );
+        // A lane question carries its lane id so the card can name the lane.
+        // An unresolved id leaves the request as a main chat question.
         return await this.askUserQuestion.handleAskUserQuestion(
           input,
           options.toolUseID,
           resolveSessionId(),
           options.signal,
           tabId,
+          cliAgentResolver?.(),
         );
       }
 

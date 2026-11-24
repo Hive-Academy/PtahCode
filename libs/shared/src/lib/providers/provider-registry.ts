@@ -90,6 +90,13 @@ export interface AnthropicProvider {
    */
   liveModelCapabilities?: readonly ModelCapability[];
   /**
+   * True only when every model this provider serves accepts image input
+   * (Anthropic's own API). A Ptah CLI lane offers image attachments only
+   * then; any other provider reports images unsupported, because no live
+   * catalog tells which of its models can read them.
+   */
+  imageInputOnEveryModel?: boolean;
+  /**
    * Authentication type
    * - 'apiKey': Traditional API key input (default if not set)
    * - 'oauth': OAuth-based authentication (e.g., GitHub Copilot)

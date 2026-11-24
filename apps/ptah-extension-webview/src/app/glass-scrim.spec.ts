@@ -120,8 +120,8 @@ describe('glass local scrim floors', () => {
   });
 
   it('marks the composer attachment menu as an overlay without changing the shared native popover', () => {
-    const source = readFileSync(join(__dirname, '../../../../libs/frontend/chat/src/lib/components/molecules/chat-input/chat-input.component.ts'), 'utf8');
-    expect(source).toMatch(/<div content data-glass-surface="overlay" data-composer-overlay[^>]*role="menu"/);
+    const source = readFileSync(join(__dirname, '../../../../libs/frontend/chat/src/lib/components/molecules/composer-controls/composer-attach-menu.component.ts'), 'utf8');
+    expect(source).toMatch(/<div\s+content\s+data-glass-surface="overlay"\s+data-composer-overlay[^>]*role="menu"/);
   });
 
   it('keeps composer overlays dense and respects opaque accessibility modes', () => {

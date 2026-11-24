@@ -144,6 +144,7 @@ import type {
   CliAdapter,
   SdkHandle,
 } from './cli-adapters/cli-adapter.interface';
+import { LaneTurnSettingRefusal } from './cli-adapters/cli-adapter.interface';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type {
   ICallerWorkspaceResolver,
@@ -1566,6 +1567,22 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       ).toContain('(no-port)');
     });
 
+    it('records the model and effort a Ptah CLI handle was started with', async () => {
+      const controls = createMockSdkHandle();
+      const result = await manager.spawnFromSdkHandle(controls.handle, {
+        task: 'Resume',
+        cli: 'ptah-cli',
+        workingDirectory: '/workspace/root',
+        expectsMcp: false,
+        model: 'claude-opus-4',
+        reasoningEffort: 'high',
+      });
+      expect(manager.getStatus(result.agentId)).toMatchObject({
+        model: 'claude-opus-4', reasoningEffort: 'high',
+      });
+      controls.resolve(0);
+    });
+
     it('records a config write failure in status and completion', async () => {
       const controls = createMockSdkHandle();
       const handle = { ...controls.handle, mcpConfigWriteFailed: true };
@@ -2291,6 +2308,17 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       },
     );
 
+    it('resolves the lane manifest with the spawn permission (M1)', async () => {
+      useAdapter('claude');
+      await manager.spawn({
+        task: 'Task',
+        cli: 'claude',
+        workingDirectory: '/workspace/root',
+        permission: 'yolo',
+      });
+      expect(sdkAdapter.capabilities).toHaveBeenCalledWith('yolo');
+    });
+
     it.each([
       ['claude', 'ask', undefined],
       ['codex', 'auto-edit', 'deny'],
@@ -2984,6 +3012,46 @@ describe('AgentProcessManager - SDK Execution Path', () => {
           lastRequestContext: { tokens: 18_500, source: 'estimate' },
         }),
       );
+    });
+
+    it('hands each mid-turn usage increment to the buffer before the turn ends, and records the turn total', async () => {
+      const segmentCallbacks: Array<(segment: CliOutputSegment) => void> = [];
+      Object.assign(sdkControls.handle, {
+        outcomeUsageIsTurnTotal: true,
+        usageScope: 'turn',
+        onSegment: (cb: (segment: CliOutputSegment) => void) => {
+          segmentCallbacks.push(cb);
+        },
+      });
+      const appended: CliOutputSegment[] = [];
+      const append = jest.spyOn(outputBuffer, 'appendSegment')
+        .mockImplementation((_id, _tracked, segment: CliOutputSegment) => { appended.push(segment); });
+      try {
+        const spawned = await manager.spawn({
+          task: 'Usage increments',
+          cli: 'codex',
+          workingDirectory: '/workspace/root',
+        });
+        const emit = (segment: CliOutputSegment): void => {
+          for (const cb of segmentCallbacks) cb(segment);
+        };
+        emit({ type: 'info', content: 'Usage', usageScope: 'message', usage: { inputTokens: 100, outputTokens: 10 } });
+        expect(appended.at(-1)?.usage).toEqual({ inputTokens: 100, outputTokens: 10 });
+        emit({ type: 'info', content: 'Usage', usageScope: 'message', usage: { inputTokens: 50, outputTokens: 5 } });
+        expect(appended.at(-1)?.usage).toEqual({ inputTokens: 50, outputTokens: 5 });
+        expect(manager.getStatus(spawned.agentId)).toHaveProperty('status', 'running');
+        emit({ type: 'info', content: 'Usage', usage: { inputTokens: 160, outputTokens: 15, costUsd: 0.01 } });
+        expect(appended.at(-1)?.usage).toEqual({ inputTokens: 10, outputTokens: 0, costUsd: 0.01 });
+
+        sdkControls.resolve(0);
+        await Promise.resolve();
+        expect(laneCompletion.signal).toHaveBeenCalledWith(
+          expect.objectContaining({ agentId: spawned.agentId }),
+          expect.objectContaining({ usage: { inputTokens: 160, outputTokens: 15, costUsd: 0.01 } }),
+        );
+      } finally {
+        append.mockRestore();
+      }
     });
 
     it('leaves outcome usage absent for multiple step usage segments without a turn-total declaration', async () => {
@@ -5289,6 +5357,185 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       expect(manager.getStatus(agentId)).toHaveProperty('status', 'running');
 
       blockerControls.resolve(0);
+    });
+
+    describe('turn input pre-flight', () => {
+      const turnManifest = (): CliAdapterManifest => ({
+        messaging: {
+          steer: { state: 'unsupported', reason: 'x' }, interrupt: { state: 'unsupported', reason: 'x' },
+          continuation: { state: 'supported' }, resume: { state: 'supported' },
+        },
+        roleChannel: 'task-prompt', permissionModes: {},
+        networkModes: { allow: { state: 'supported' }, deny: { state: 'unsupported', reason: 'x' } },
+        limitReader: { state: 'no-reliable-source', reason: 'x' }, mcp: { state: 'unsupported', reason: 'x' },
+        turnInput: {
+          model: { state: 'supported', appliesAt: 'next-turn' },
+          effort: { state: 'supported', appliesAt: 'next-turn' },
+          images: { state: 'unsupported', reason: 'Codex lanes take no images here.' },
+          files: { state: 'supported', delivery: 'reference' },
+          commands: { state: 'supported', blocked: ['always-approve'] },
+          skills: { state: 'unsupported', reason: 'x' },
+        },
+      });
+      const trackedOf = (agentId: string) =>
+        (Reflect.get(manager, 'agents') as Map<string, { info: AgentProcessInfo }>).get(agentId);
+
+      const idleLane = async (): Promise<string> => {
+        const agentId = await spawnContinuable();
+        await completeTurn1();
+        const tracked = trackedOf(agentId);
+        if (tracked) tracked.info = { ...tracked.info, potentialCapabilities: turnManifest() };
+        return agentId;
+      };
+
+      it('refuses formatted text whose rawBody is a blocked command before any state change', async () => {
+        const agentId = await idleLane();
+        const before = { ...trackedOf(agentId)?.info };
+        await expect(manager.continueConversation(
+          agentId, '[Ptah message from user]\n/always-approve on', 'env-1', undefined, '/always-approve on',
+        )).rejects.toMatchObject({
+          code: 'unsupported',
+          message: 'Ptah does not allow /always-approve in a lane: its approval mode is set at spawn.',
+        });
+        expect(trackedOf(agentId)?.info.status).toBe(before.status);
+        expect(trackedOf(agentId)?.info.turnSeq).toBe(before.turnSeq);
+        expect(continuableControls.continueCallCount()).toBe(0);
+      });
+
+      it('refuses content the lane cannot take', async () => {
+        const agentId = await idleLane();
+        await expect(manager.continueConversation(agentId, 'look', undefined,
+          { images: [{ data: 'aGk=', mediaType: 'image/png' }] }))
+          .rejects.toMatchObject({ code: 'unsupported', message: 'Codex lanes take no images here.' });
+        expect(continuableControls.continueCallCount()).toBe(0);
+      });
+
+      it('applies settings before continue, updates the record and passes content', async () => {
+        const agentId = await idleLane();
+        const order: string[] = [];
+        const applyTurnSettings = jest.fn(async () => {
+          order.push('apply');
+          return { model: 'gpt-5', reasoningEffort: 'high', appliesAt: 'next-turn' as const };
+        });
+        const handle = continuableControls.handle as { -readonly [K in keyof SdkHandle]: SdkHandle[K] };
+        handle.applyTurnSettings = applyTurnSettings;
+        const original = handle.continue;
+        const contents: unknown[] = [];
+        handle.continue = (message: string, content?: unknown) => {
+          order.push('continue');
+          contents.push(content);
+          if (!original) throw new Error('continuable handle without continue');
+          return original(message);
+        };
+        const spawned: AgentProcessInfo[] = [];
+        manager.events.on('agent:spawned', (info) => spawned.push(info));
+        await manager.continueConversation(agentId, 'go', undefined,
+          { model: 'gpt-5', reasoningEffort: 'high', files: ['src/a.ts'] });
+        expect(applyTurnSettings).toHaveBeenCalledWith({ model: 'gpt-5', reasoningEffort: 'high' });
+        expect(order).toEqual(['apply', 'continue']);
+        expect(contents).toEqual([{ files: ['src/a.ts'] }]);
+        expect(trackedOf(agentId)?.info).toMatchObject({ model: 'gpt-5', reasoningEffort: 'high', status: 'running' });
+        expect(spawned.at(-1)).toMatchObject({ model: 'gpt-5', reasoningEffort: 'high' });
+      });
+
+      it('a settings refusal is turn-options-refused and leaves status and turnSeq unchanged', async () => {
+        const agentId = await idleLane();
+        const handle = continuableControls.handle as { -readonly [K in keyof SdkHandle]: SdkHandle[K] };
+        handle.applyTurnSettings = jest.fn(async () => {
+          throw new LaneTurnSettingRefusal('model', 'Codex did not accept the model gpt-x.');
+        });
+        const before = { ...trackedOf(agentId)?.info };
+        await expect(manager.continueConversation(agentId, 'go', undefined, { model: 'gpt-x' }))
+          .rejects.toMatchObject({ code: 'turn-options-refused', message: 'Codex did not accept the model gpt-x.' });
+        expect(trackedOf(agentId)?.info).toMatchObject({
+          status: before.status, turnSeq: before.turnSeq, model: before.model,
+        });
+        expect(continuableControls.continueCallCount()).toBe(0);
+      });
+
+      it('refuses a second concurrent settings change on one lane as busy', async () => {
+        const agentId = await idleLane();
+        const handle = continuableControls.handle as { -readonly [K in keyof SdkHandle]: SdkHandle[K] };
+        let release: (() => void) | undefined;
+        const applyTurnSettings = jest.fn(() => new Promise<{ model: string; appliesAt: 'next-turn' }>((resolve) => {
+          release = () => resolve({ model: 'gpt-5', appliesAt: 'next-turn' });
+        }));
+        handle.applyTurnSettings = applyTurnSettings;
+        const first = manager.continueConversation(agentId, 'one', undefined, { model: 'gpt-5' });
+        for (let tick = 0; tick < 50 && applyTurnSettings.mock.calls.length === 0; tick += 1) await Promise.resolve();
+        expect(applyTurnSettings).toHaveBeenCalledTimes(1);
+        await expect(manager.continueConversation(agentId, 'two', undefined, { model: 'gpt-6' }))
+          .rejects.toMatchObject({ code: 'busy' });
+        release?.();
+        await first;
+        expect(applyTurnSettings).toHaveBeenCalledTimes(1);
+        expect(trackedOf(agentId)?.info).toMatchObject({ model: 'gpt-5' });
+      });
+
+      it('refuses a second text-only continuation that races the first on one idle lane', async () => {
+        const agentId = await idleLane();
+        const before = trackedOf(agentId)?.info.turnSeq ?? 1;
+        const results = await Promise.allSettled([
+          manager.continueConversation(agentId, 'one'),
+          manager.continueConversation(agentId, 'two'),
+        ]);
+        expect(results.map((result) => result.status).sort()).toEqual(['fulfilled', 'rejected']);
+        const rejected = results.find((result) => result.status === 'rejected') as PromiseRejectedResult;
+        expect(rejected.reason).toMatchObject({ code: 'busy' });
+        expect(continuableControls.continueCallCount()).toBe(1);
+        expect(trackedOf(agentId)?.info.turnSeq).toBe(before + 1);
+      });
+
+      it('refuses the turn when the subprocess is released while settings apply', async () => {
+        const agentId = await idleLane();
+        const handle = continuableControls.handle as { -readonly [K in keyof SdkHandle]: SdkHandle[K] };
+        let release: (() => void) | undefined;
+        handle.applyTurnSettings = jest.fn(() => new Promise<{ model: string; appliesAt: 'next-turn' }>((resolve) => {
+          release = () => resolve({ model: 'gpt-5', appliesAt: 'next-turn' });
+        }));
+        const spawned: AgentProcessInfo[] = [];
+        manager.events.on('agent:spawned', (info) => spawned.push(info));
+        const pending = manager.continueConversation(agentId, 'go', undefined, { model: 'gpt-5' });
+        for (let tick = 0; tick < 50 && !release; tick += 1) await Promise.resolve();
+        const tracked = (Reflect.get(manager, 'agents') as Map<string, { subprocessReleased: boolean; info: AgentProcessInfo }>)
+          .get(agentId);
+        if (tracked) tracked.subprocessReleased = true;
+        const statusBefore = tracked?.info.status;
+        release?.();
+        await expect(pending).rejects.toMatchObject({ code: 'released' });
+        expect(continuableControls.continueCallCount()).toBe(0);
+        expect(tracked?.info.status).toBe(statusBefore);
+        expect(spawned).toHaveLength(0);
+      });
+
+      it('prepareInterruptTurn applies settings while the turn runs; a refusal leaves it running (M4)', async () => {
+        const agentId = await idleLane();
+        const tracked = trackedOf(agentId);
+        if (tracked) tracked.info = { ...tracked.info, status: 'running' };
+        const handle = continuableControls.handle as { -readonly [K in keyof SdkHandle]: SdkHandle[K] };
+        handle.applyTurnSettings = jest.fn(async () => ({ model: 'gpt-5', appliesAt: 'next-turn' as const }));
+        await manager.prepareInterruptTurn(agentId, 'go', { model: 'gpt-5' }, undefined);
+        expect(trackedOf(agentId)?.info).toMatchObject({ model: 'gpt-5', status: 'running' });
+
+        handle.applyTurnSettings = jest.fn(async () => {
+          throw new LaneTurnSettingRefusal('model', 'Codex did not accept the model gpt-x.');
+        });
+        await expect(manager.prepareInterruptTurn(agentId, 'go', { model: 'gpt-x' }, undefined))
+          .rejects.toMatchObject({ code: 'turn-options-refused' });
+        expect(trackedOf(agentId)?.info).toMatchObject({ model: 'gpt-5', status: 'running' });
+        expect(continuableControls.continueCallCount()).toBe(0);
+      });
+
+      it('skips applyTurnSettings when the settings equal the record', async () => {
+        const agentId = await idleLane();
+        const tracked = trackedOf(agentId);
+        if (tracked) tracked.info = { ...tracked.info, model: 'gpt-5' };
+        const handle = continuableControls.handle as { -readonly [K in keyof SdkHandle]: SdkHandle[K] };
+        handle.applyTurnSettings = jest.fn();
+        await manager.continueConversation(agentId, 'go', undefined, { model: 'gpt-5' });
+        expect(handle.applyTurnSettings).not.toHaveBeenCalled();
+        expect(continuableControls.continueMessages).toEqual(['go']);
+      });
     });
   });
 

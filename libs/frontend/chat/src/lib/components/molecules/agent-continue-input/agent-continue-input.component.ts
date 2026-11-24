@@ -1,16 +1,21 @@
-import { NgTemplateOutlet } from '@angular/common';
 import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
 import { LucideAngularModule, Play, Square } from 'lucide-angular';
 import type { MonitoredAgent } from '@ptah-extension/chat-streaming';
 import { isAgentBudgetStopReason } from '@ptah-extension/shared';
-import { LaneComposerComponent } from '@ptah-extension/chat-ui';
+import { COMPOSER_STOP_BUTTON_CLASS } from '@ptah-extension/chat-ui';
 import { laneGuardStopText } from '../agent-card/agent-card-header.component';
+import { LaneComposerComponent } from '../lane-composer/lane-composer.component';
 
-/** The monitor and canvas lane use the same backend-owned message contract. */
+/**
+ * Hosts the lane composer for the agent card panel and the canvas lane view.
+ * It owns the visibility rules (no field while starting or without a way to
+ * continue; Stop alone then) and the terminal status line. The canvas
+ * (`composer`) mount puts Stop / Resume session into the composer toolbar.
+ */
 @Component({
   selector: 'ptah-agent-continue-input',
   standalone: true,
-  imports: [LaneComposerComponent, LucideAngularModule, NgTemplateOutlet],
+  imports: [LaneComposerComponent, LucideAngularModule],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (
@@ -26,43 +31,41 @@ import { laneGuardStopText } from '../agent-card/agent-card-header.component';
             [agentId]="agent().agentId"
             [laneLabel]="agent().displayName || agent().cli"
             [cli]="agent().cli"
-            [variant]="variant() === 'composer' ? 'full' : 'compact'"
-            [stopped]="
-              agent().status !== 'running' && agent().status !== 'starting'
-            "
+            [stopped]="!active()"
             [resumePath]="resumePath()"
-          >
-            @if (variant() === 'composer') {
-              <ng-container laneControls [ngTemplateOutlet]="controls" />
-            }
-          </ptah-lane-composer>
+            [showLaneControls]="variant() === 'composer'"
+            [resumable]="!!agent().cliSessionId"
+            [stopPending]="stopPending()"
+            [resumePending]="resumePending()"
+            (stopRequested)="stopRequested.emit($event)"
+            (resumeRequested)="resumeRequested.emit($event)"
+          />
         } @else if (variant() === 'composer' || agent().status === 'starting') {
-          <ng-container [ngTemplateOutlet]="controls" />
+          <!-- No message field: Stop (or Resume session) stands alone. -->
+          @if (active()) {
+            <button type="button" [class]="stopButtonClass" aria-label="Stop generating" title="Stop generating"
+              [disabled]="stopPending()" (click)="stopRequested.emit($event)">
+              @if (stopPending()) { <span class="loading loading-spinner loading-xs"></span> }
+              @else { <lucide-angular [img]="SquareIcon" class="w-3.5 h-3.5" aria-hidden="true" /> }
+            </button>
+          } @else if (agent().cliSessionId) {
+            <button type="button" [class]="stopButtonClass" [attr.aria-label]="'Resume ' + agent().cli + ' session'"
+              title="Resume session" [disabled]="resumePending()" (click)="resumeRequested.emit($event)">
+              @if (resumePending()) { <span class="loading loading-spinner loading-xs"></span> }
+              @else { <lucide-angular [img]="PlayIcon" class="w-3.5 h-3.5" aria-hidden="true" /> }
+            </button>
+          }
         }
         @if (variant() === 'composer' && terminalStatus(); as message) {
           <span class="px-1 text-[11px] text-warning">{{ message }}</span>
         }
       </div>
     }
-    <ng-template #controls>
-      @if (agent().status === 'running' || agent().status === 'starting') {
-        <button type="button" [class]="stopButtonClass" aria-label="Stop generating" title="Stop generating"
-          [disabled]="stopPending()" (click)="stopRequested.emit($event)">
-          @if (stopPending()) { <span class="loading loading-spinner loading-xs"></span> }
-          @else { <lucide-angular [img]="SquareIcon" class="w-3.5 h-3.5" aria-hidden="true" /> }
-        </button>
-      } @else if (agent().cliSessionId) {
-        <button type="button" [class]="stopButtonClass" [attr.aria-label]="'Resume '+agent().cli+' session'"
-          title="Resume session" [disabled]="resumePending()" (click)="resumeRequested.emit($event)">
-          @if (resumePending()) { <span class="loading loading-spinner loading-xs"></span> }
-          @else { <lucide-angular [img]="PlayIcon" class="w-3.5 h-3.5" aria-hidden="true" /> }
-        </button>
-      }
-    </ng-template>
   `,
 })
 export class AgentContinueInputComponent {
   readonly agent = input.required<MonitoredAgent>();
+  /** `composer`: the canvas lane view (Stop / Resume in the toolbar, terminal status). */
   readonly variant = input<'panel' | 'composer'>('panel');
   readonly stopPending = input(false);
   readonly resumePending = input(false);
@@ -70,7 +73,11 @@ export class AgentContinueInputComponent {
   readonly resumeRequested = output<Event>();
   protected readonly SquareIcon = Square;
   protected readonly PlayIcon = Play;
-  protected readonly stopButtonClass = 'inline-flex items-center justify-center h-7 w-7 flex-shrink-0 rounded-full bg-error/15 text-error hover:bg-error/25 transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2';
+  protected readonly stopButtonClass = COMPOSER_STOP_BUTTON_CLASS;
+  protected readonly active = computed(() => {
+    const status = this.agent().status;
+    return status === 'running' || status === 'starting';
+  });
   protected readonly terminalStatus = computed(() => {
     const agent = this.agent();
     const status = agent.status === 'failed' ? 'Failed' : agent.status === 'timeout' ? 'Timed out'
@@ -78,9 +85,7 @@ export class AgentContinueInputComponent {
         ? (isAgentBudgetStopReason(agent.stopReason) ? 'Stopped by Ptah budget monitor' : 'Stopped')
         : '';
     const reason = laneGuardStopText(agent.stopReason);
-    return agent.status === 'running' || agent.status === 'starting'
-      ? ''
-      : [status, reason].filter(Boolean).join(' \u00b7 ');
+    return this.active() ? '' : [status, reason].filter(Boolean).join(' · ');
   });
   protected readonly visible = computed(() => {
     const agent = this.agent();
@@ -93,7 +98,7 @@ export class AgentContinueInputComponent {
   });
   protected readonly resumePath = computed(() => {
     const agent = this.agent();
-    if (agent.status === 'running' || agent.status === 'starting') return null;
+    if (this.active()) return null;
     if (
       agent.supportsContinuation === true &&
       agent.continuationExpired !== true

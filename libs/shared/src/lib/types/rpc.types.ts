@@ -479,6 +479,8 @@ import type {
   AgentListMessageReceiptsResult,
   AgentGetQueuedMessageBodyParams,
   AgentGetQueuedMessageBodyResult,
+  AgentGetLaneComposerOptionsParams,
+  AgentGetLaneComposerOptionsResult,
   AgentRetryMessageParams,
   AgentRetryMessageResult,
   AgentCancelMessageParams,
@@ -496,7 +498,7 @@ import type {
   AgentSetClaudeBuiltinResult,
   AgentListCliModelsResult,
   AgentContinueErrorCode,
-  AgentPermissionDecision,
+  LanePermissionResponse,
   SkillShEntry,
   InstalledSkill,
   SkillsShInstallParams,
@@ -1941,6 +1943,11 @@ export interface RpcMethodRegistry
     params: AgentGetQueuedMessageBodyParams;
     result: AgentGetQueuedMessageBodyResult;
   };
+  /** Models, efforts and slash commands one lane offers its composer. */
+  'agent:getLaneComposerOptions': {
+    params: AgentGetLaneComposerOptionsParams;
+    result: AgentGetLaneComposerOptionsResult;
+  };
   'agent:retryMessage': {
     params: AgentRetryMessageParams;
     result: AgentRetryMessageResult;
@@ -1965,9 +1972,9 @@ export interface RpcMethodRegistry
     params: void;
     result: AgentListCliModelsResult;
   };
-  /** Route user's permission decision to Copilot SDK bridge */
+  /** Route a lane user's permission decision to the SDK handler or the Copilot bridge */
   'agent:permissionResponse': {
-    params: AgentPermissionDecision;
+    params: LanePermissionResponse;
     result: { success: boolean; error?: string };
   };
   'agent:pendingPermissions': {
@@ -2971,7 +2978,10 @@ export interface RpcMethodRegistry
   };
   'tasks:list': { params: TasksListParams; result: TasksListResult };
   'tasks:get': { params: TasksGetParams; result: TasksGetResult };
-  'tasks:getDigest': { params: TasksGetDigestParams; result: TasksGetDigestResult };
+  'tasks:getDigest': {
+    params: TasksGetDigestParams;
+    result: TasksGetDigestResult;
+  };
   'tasks:getArtifact': {
     params: TasksGetArtifactParams;
     result: TasksGetArtifactResult;
@@ -3953,6 +3963,7 @@ const RPC_METHOD_ENTRIES: Record<RpcMethodName, true> = {
   'agent:listMessageReceipts': true,
   'agent:getMessageReceipt': true,
   'agent:getQueuedMessageBody': true,
+  'agent:getLaneComposerOptions': true,
   'agent:retryMessage': true,
   'agent:cancelMessage': true,
   'agent:listParentDeliveries': true,

@@ -35,6 +35,7 @@ import type {
 import {
   CliDetectionService,
   CopilotPermissionBridge,
+  COPILOT_EDIT_REFUSED,
   AgentProcessManager,
   AgentMessageCoordinator,
   AgentLaneResumeService,
@@ -82,8 +83,8 @@ import type {
   CapabilityPolicyStatus,
   ICapabilityResolver,
   AgentListCliModelsResult,
-  AgentPermissionDecision,
   AgentPermissionRequest,
+  LanePermissionResponse,
   AgentContinueErrorCode,
   AgentResumeOutcome,
   CliDetectionResult,
@@ -121,7 +122,10 @@ import {
   AUTH_PROVIDERS_TOKENS,
   ProviderAccountService,
 } from '@ptah-extension/auth-providers';
-import { AgentResumeCliSessionParamsSchema } from './agent-rpc.schema';
+import {
+  AgentResumeCliSessionParamsSchema,
+  LanePermissionResponseSchema,
+} from './agent-rpc.schema';
 import type { IMcpExternalCallerAccessUpdater } from '@ptah-extension/vscode-lm-tools';
 import {
   DecisionModelWriter,
@@ -1378,9 +1382,12 @@ export class AgentRpcHandlers {
    */
   private registerPermissionResponse(): void {
     this.rpcHandler.registerMethod<
-      AgentPermissionDecision,
+      unknown,
       { success: boolean; error?: string }
-    >('agent:permissionResponse', async (params) => {
+    >('agent:permissionResponse', async (input) => {
+      const parsed = LanePermissionResponseSchema.safeParse(input ?? {});
+      if (!parsed.success) return { success: false, error: 'Invalid permission response.' };
+      const params: LanePermissionResponse = parsed.data;
       try {
         this.logger.debug('RPC: agent:permissionResponse called', {
           requestId: params.requestId,
@@ -1399,6 +1406,7 @@ export class AgentRpcHandlers {
             id: params.requestId,
             decision: params.decision,
             reason: params.reason,
+            ...(params.modifiedInput !== undefined ? { modifiedInput: params.modifiedInput } : {}),
           };
           handled = permissionHandler.handleResponse(
             params.requestId,
@@ -1410,9 +1418,12 @@ export class AgentRpcHandlers {
           const bridge = (
             copilotAdapter as { permissionBridge: CopilotPermissionBridge }
           ).permissionBridge;
-          const copilotPending = bridge.hasPendingRequest(params.requestId);
-          bridge.resolvePermission(params.requestId, params);
-          handled = copilotPending || handled;
+          const outcome = bridge.resolveLaneResponse(params);
+          if (outcome === 'edit-refused') {
+            // The request stays pending; the card can still Allow or Deny it unedited.
+            return { success: false, error: COPILOT_EDIT_REFUSED };
+          }
+          handled = outcome === 'resolved' || handled;
         }
 
         if (handled) {

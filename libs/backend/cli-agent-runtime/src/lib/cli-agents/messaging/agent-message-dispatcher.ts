@@ -10,10 +10,22 @@ import type {
   AgentMessageOutcome,
   AgentMessagePreview,
   AgentProcessInfo,
+  LaneTurnRequest,
 } from '@ptah-extension/shared';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type { AgentProcessManager } from '../agent-process-manager.service';
-import { AgentInterruptedDeliveryError, AgentMessageError } from '../agent-message-router.service';
+import {
+  AgentInterruptedDeliveryError,
+  AgentMessageError,
+  type RouteTurnInput,
+} from '../agent-message-router.service';
+import {
+  blockedLaneCommand,
+  blockedLaneCommandReason,
+  leadingLaneCommand,
+  matchesLaneCommand,
+} from '../cli-adapters/lane-command-filter';
+import type { AgentMessageAttachmentStore } from './agent-message-attachment.store';
 import { LaneAccountResumeError } from '../lane-resume-gate';
 import type { AgentLaneResumeService } from './agent-lane-resume.service';
 import type { AgentIdAliasRegistry } from './agent-id-alias.registry';
@@ -53,6 +65,19 @@ export interface AgentMessageDispatcherDeps {
   /** Settles a started envelope whose turn already ended (reconciler). */
   readonly settleTurn: (info: AgentProcessInfo) => Promise<void>;
   readonly logger: Logger;
+  /** Held images by envelope id. Absent: a message with images fails `attachments-unavailable`. */
+  readonly attachments?: Pick<AgentMessageAttachmentStore, 'take'>;
+  /**
+   * The command and skill names the lane advertises (bounded lookup, cached
+   * per lineage), or undefined when no list is known.
+   */
+  readonly advertisedCommands?: (laneId: AgentId, lineage: AgentId) => Promise<readonly string[] | undefined>;
+}
+
+/** The text a delivery sends and how it is routed. */
+interface DeliveryForm {
+  readonly raw: boolean;
+  readonly turn?: LaneTurnRequest;
 }
 
 export class AgentMessageDispatcher {
@@ -60,18 +85,108 @@ export class AgentMessageDispatcher {
 
   async attempt(attempt: DispatchAttempt): Promise<AgentMessageOutcome> {
     const { envelope } = attempt;
+    // Before any adapter call and before the dispatch journal: a refused
+    // envelope fails with its body kept (Recover text / Withdraw).
+    const blocked = blockedLaneCommand(attempt.body, blockedCommandsOf(attempt));
+    if (blocked)
+      return this.refuseHeld(attempt, 'turn-input-unsupported', blockedLaneCommandReason(blocked));
+    const form = await this.deliveryForm(attempt);
+    if ('refusal' in form) return this.refuseHeld(attempt, form.refusal, form.lastError);
     let dispatching: AgentMessageEnvelope;
     try {
-      dispatching = await this.deps.store.markDispatching(envelope.id, [envelope.state]);
+      // The raw decision is written with the journal record, once, so a retry
+      // or re-offer delivers it raw again; a failed write sends nothing.
+      dispatching = await this.deps.store.markDispatching(envelope.id, [envelope.state],
+        form.raw && envelope.rawDelivery?.raw !== true ? { rawDelivery: { raw: true } } : {});
     } catch (error: unknown) {
       return this.journalFailed(attempt, error);
     }
-    // The ack line and the `started` ack state come from the same capability (A5).
-    const ackRequested = ackStateAtStart(undefined, attempt.plan.effectiveCapabilities.mcp) === 'pending';
-    const text = formatAgentMessageDeliveryText(envelope.id, envelope.sender, attempt.body, ackRequested);
+    // A raw `/command` carries no header and no ack line. Otherwise the ack
+    // line and the `started` ack state come from the same capability (A5).
+    const text = form.raw
+      ? attempt.body.trimStart()
+      : formatAgentMessageDeliveryText(envelope.id, envelope.sender, attempt.body,
+        ackStateAtStart(undefined, attempt.plan.effectiveCapabilities.mcp) === 'pending');
     return attempt.plan.usesResume
-      ? this.cold(attempt, dispatching, text)
-      : this.live(attempt, dispatching, text);
+      ? this.cold(attempt, dispatching, text, form)
+      : this.live(attempt, dispatching, text, form);
+  }
+
+  /**
+   * Raw or formatted, and the turn request with its held images. A message
+   * that expects images the host no longer holds (a restart) is refused
+   * `attachments-unavailable`.
+   */
+  private async deliveryForm(
+    attempt: DispatchAttempt,
+  ): Promise<DeliveryForm | { refusal: ReasonCode; lastError?: string }> {
+    const { envelope } = attempt;
+    const imageCount = envelope.turn?.imageCount ?? 0;
+    const images = imageCount > 0 ? this.deps.attachments?.take(envelope.id) : undefined;
+    if (imageCount > 0 && (!images || images.length < imageCount))
+      return { refusal: 'attachments-unavailable' };
+    const stored = envelope.turn;
+    const turn: LaneTurnRequest | undefined = stored || images ? {
+      ...(stored?.model !== undefined ? { model: stored.model } : {}),
+      ...(stored?.reasoningEffort !== undefined ? { reasoningEffort: stored.reasoningEffort } : {}),
+      ...(stored?.files?.length ? { files: stored.files } : {}),
+      ...(images?.length ? { images } : {}),
+    } : undefined;
+    return { raw: await this.deliversRaw(attempt), ...(turn ? { turn } : {}) };
+  }
+
+  /**
+   * Raw command delivery (decisions.md 15): only a user's message whose first
+   * token is an advertised `/command` or skill. Parent and lane senders always
+   * keep the header, so an agent can never issue provider commands into a
+   * lane. With no known list nothing goes raw: the text keeps its header, so
+   * a message such as `/usr/bin is missing` is never run as a command.
+   */
+  private async deliversRaw(attempt: DispatchAttempt): Promise<boolean> {
+    const { envelope } = attempt;
+    if (envelope.rawDelivery?.raw === true) return true;
+    if (envelope.sender.kind !== 'user' || leadingLaneCommand(attempt.body) === undefined) return false;
+    let names: readonly string[] | undefined;
+    try {
+      names = await this.deps.advertisedCommands?.(attempt.laneId, envelope.laneLineageId);
+    } catch (error: unknown) {
+      // degradation-audit: reported - logged; with no list the message keeps its header.
+      this.deps.logger.warn('[AgentMessageCoordinator] Lane command list unavailable', {
+        error: error instanceof Error ? error.name : 'unknown',
+      });
+    }
+    return names ? matchesLaneCommand(attempt.body, names) : false;
+  }
+
+  /**
+   * Fail a held envelope before dispatch; its body stays recoverable. Nothing
+   * was sent, so a failed write leaves the envelope in its prior state and
+   * returns `storage-unavailable` instead of throwing.
+   */
+  private async refuseHeld(
+    attempt: DispatchAttempt,
+    reason: ReasonCode,
+    lastError?: string,
+  ): Promise<AgentMessageOutcome> {
+    let failed: AgentMessageEnvelope | undefined;
+    try {
+      failed = await this.deps.store.transition(attempt.envelope.id, {
+        state: 'failed', reason, nextRetryAt: undefined,
+        ...(lastError ? { lastError: lastError.slice(0, 200) } : {}),
+      }, [attempt.envelope.state]);
+    } catch (error: unknown) {
+      this.deps.logger.error('[AgentMessageCoordinator] Refusal write failed; nothing dispatched',
+        asError(error));
+      return this.unsupported(attempt, attempt.envelope, 'storage-unavailable');
+    }
+    return { ...this.unsupported(attempt, failed ?? attempt.envelope, reason), ...(lastError ? { detail: lastError } : {}) };
+  }
+
+  /** Where a raw `/command` must not steer (R3-2): interrupt-resume when confirmed, else queue. */
+  private routerDeliveryFor(attempt: DispatchAttempt, raw: boolean): DispatchAttempt['routerDelivery'] {
+    if (!raw || attempt.routerDelivery === 'queue') return attempt.routerDelivery;
+    if (attempt.plan.mode !== 'steer' && attempt.routerDelivery === 'now') return 'now';
+    return attempt.envelope.allowPartialTurnLoss === true ? 'now' : 'queue';
   }
 
   /** Nothing ran: disk keeps the prior state; the hold is written best-effort. */
@@ -92,11 +207,19 @@ export class AgentMessageDispatcher {
     return this.unsupported(attempt, shown, 'storage-unavailable');
   }
 
-  private async cold(attempt: DispatchAttempt, dispatching: AgentMessageEnvelope, text: string): Promise<AgentMessageOutcome> {
+  private async cold(attempt: DispatchAttempt, dispatching: AgentMessageEnvelope, text: string, form: DeliveryForm): Promise<AgentMessageOutcome> {
     let spawnedId: AgentId;
     let spawnedSession: string | undefined;
+    const { turn } = form;
+    const info: AgentProcessInfo = {
+      ...attempt.info,
+      ...(turn?.model !== undefined ? { model: turn.model } : {}),
+      ...(turn?.reasoningEffort !== undefined ? { reasoningEffort: turn.reasoningEffort } : {}),
+    };
     try {
-      const result = await this.deps.resume.resume(attempt.info, text);
+      // The guard reads the body as written, before the Ptah header.
+      const result = await this.deps.resume.resume(info, text,
+        { rawBody: attempt.body, blocked: blockedCommandsOf(attempt) }, turn?.files);
       spawnedId = result.agentId;
       spawnedSession = result.cliSessionId;
     } catch (error: unknown) {
@@ -111,7 +234,7 @@ export class AgentMessageDispatcher {
     const spawned = this.deps.manager.findAgentInfo(spawnedId);
     const started = await this.deps.store.transition(dispatching.id, {
       state: 'started', mode: 'start-turn', route: 'cold', actualAgentId: spawnedId, maybeDelivered: true,
-      ackState: ackStateAtStart(dispatching.ackState, attempt.plan.effectiveCapabilities.mcp),
+      ackState: startAck(dispatching, attempt, form.raw),
       turnSeq: spawned?.turnSeq ?? 1,
       cliSessionId: spawnedSession ?? spawned?.cliSessionId ?? dispatching.cliSessionId,
     }, ['dispatching']);
@@ -123,12 +246,17 @@ export class AgentMessageDispatcher {
     };
   }
 
-  private async live(attempt: DispatchAttempt, dispatching: AgentMessageEnvelope, text: string): Promise<AgentMessageOutcome> {
+  private async live(attempt: DispatchAttempt, dispatching: AgentMessageEnvelope, text: string, form: DeliveryForm): Promise<AgentMessageOutcome> {
     const { envelope, laneId } = attempt;
     let result: AgentMessageOutcome;
+    const input: RouteTurnInput = {
+      ...(form.turn ? { turn: form.turn } : {}),
+      rawBody: attempt.body,
+      ...(form.raw ? { noSteer: true } : {}),
+    };
     try {
-      result = await this.deps.manager.sendToAgent(laneId, text, attempt.routerDelivery, envelope.id,
-        envelope.allowPartialTurnLoss === true);
+      result = await this.deps.manager.sendToAgent(laneId, text, this.routerDeliveryFor(attempt, form.raw), envelope.id,
+        envelope.allowPartialTurnLoss === true, input);
     } catch (error: unknown) {
       return this.failed(attempt, dispatching, error);
     }
@@ -136,10 +264,14 @@ export class AgentMessageDispatcher {
       // The router's contract: `unsupported` means nothing was delivered.
       const queueFull = result.reasonCode === 'queue-full';
       const reason = result.reasonCode ?? 'delivery-refused';
+      // A settings or turn-input refusal's detail is fixed adapter or host text, kept as `lastError`.
+      const shownError = (reason === 'turn-options-refused' || reason === 'turn-input-unsupported') && result.detail
+        ? result.detail.slice(0, 200) : undefined;
       const next = await this.deps.store.transition(envelope.id, {
         state: queueFull ? 'blocked-retryable' : 'failed',
         ...(queueFull ? {} : { mode: 'unsupported' as const }),
         reason, everDispatched: envelope.everDispatched ?? false,
+        ...(shownError ? { lastError: shownError } : {}),
       }, ['dispatching']);
       return this.unsupported(attempt, next ?? dispatching, reason);
     }
@@ -147,7 +279,7 @@ export class AgentMessageDispatcher {
     const current = this.deps.manager.findAgentInfo(laneId);
     const started = await this.deps.store.transition(envelope.id, {
       state: 'started', mode: result.mode, route: 'live', maybeDelivered: true,
-      ackState: ackStateAtStart(dispatching.ackState, attempt.plan.effectiveCapabilities.mcp),
+      ackState: startAck(dispatching, attempt, form.raw),
       turnSeq: current?.turnSeq ?? attempt.info.turnSeq ?? 1,
     }, ['dispatching']);
     await this.settleIfFinished(laneId);
@@ -226,6 +358,12 @@ export function classifyAttemptFailure(
   }
   if (error instanceof LaneAccountResumeError)
     return { reason: 'account_refused', patch: { state: 'failed', reason: 'account_refused', ...undo } };
+  if (error instanceof LaneResumeError && error.code === 'blocked-command')
+    return { reason: 'turn-input-unsupported',
+      patch: { state: 'failed', reason: 'turn-input-unsupported', lastError: error.message.slice(0, 200), ...undo } };
+  if (error instanceof LaneResumeError && error.code === 'turn-settings-refused')
+    return { reason: 'turn-options-refused',
+      patch: { state: 'failed', reason: 'turn-options-refused', lastError: error.message.slice(0, 200), ...undo } };
   if (error instanceof LaneResumeError) {
     return error.code === 'no-session'
       ? { reason: 'resume-failed', patch: { state: 'failed', reason: 'resume-failed', ...undo } }
@@ -234,6 +372,20 @@ export function classifyAttemptFailure(
   // The adapter call began and threw: the text may have reached the lane.
   return { reason: 'delivery-failed',
     patch: { state: 'outcome-unknown', reason: 'delivery-failed', maybeDelivered: true } };
+}
+
+/** The record's static blocked `/command` list (D18): resolved turn input, then the manifest. */
+function blockedCommandsOf(attempt: DispatchAttempt): readonly string[] {
+  return attempt.plan.effectiveCapabilities.turnInput?.commands.blocked ??
+    attempt.info.potentialCapabilities?.turnInput?.commands.blocked ?? [];
+}
+
+/**
+ * A raw message asks for no ack (R3-1); a lane's own ack is never reset. The
+ * attempt's own decision counts, so the text sent and the ack state agree.
+ */
+function startAck(dispatching: AgentMessageEnvelope, attempt: DispatchAttempt, raw: boolean) {
+  return ackStateAtStart(dispatching.ackState, raw ? undefined : attempt.plan.effectiveCapabilities.mcp);
 }
 
 function asError(error: unknown): Error {

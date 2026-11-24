@@ -17,6 +17,7 @@ export {
   createAcpSession,
 } from './lib/acp-session-runtime';
 export type {
+  AcpAvailableCommand,
   AcpHandshakePhase,
   AcpModelEntry,
   AcpSession,

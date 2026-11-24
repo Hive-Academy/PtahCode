@@ -9,7 +9,13 @@ import type {
   ClaudeLaunchBoundaryOutcome,
   ProviderAccountAdmissionPort,
 } from '@ptah-extension/auth-providers-tokens';
-import type { ProviderAccountBinding } from '@ptah-extension/shared';
+import type {
+  AgentProcessInfo,
+  CliAdapterManifest,
+  ProviderAccountBinding,
+} from '@ptah-extension/shared';
+import { resolveEffectiveLaneCapabilities } from '../cli-agents/messaging/agent-effective-capabilities';
+import { LaneTurnSettingRefusal } from '../cli-agents/cli-adapters/cli-adapter.interface';
 import {
   ClaudeCertifiedLaunchRefusal,
   assertCertifiedLaunch,
@@ -37,6 +43,11 @@ import {
   claudeLaneRefusal,
   claudeLaneRefusalCode,
   claudeLaneForeignErrorClass,
+  claudeLaneTurnContent,
+  CLAUDE_INTERRUPT_TIMEOUT_TEXT,
+  CLAUDE_LATE_INTERRUPT_TEXT,
+  CLAUDE_SDK_LANE_TURN_INPUT,
+  CLAUDE_STEER_MISSED_TEXT,
   type ClaudeLaneAccountPersistence,
   type ClaudeSdkLaneRunContext,
 } from './claude-sdk-lane-runner';
@@ -290,6 +301,8 @@ describe('Claude native lane options', () => {
 function runnerFixture(
   ownerSettled: Promise<void> = Promise.resolve(),
   named?: ClaudeSdkLaneRunContext['named'],
+  sdkQuery?: object,
+  contextPatch: Partial<ClaudeSdkLaneRunContext> = {},
 ) {
   let finish: (code: number) => void = () => {
     throw new Error('not initialized');
@@ -308,6 +321,7 @@ function runnerFixture(
   const remove = jest.spyOn(abortController.signal, 'removeEventListener');
   type QueryFn = ClaudeSdkLaneRunContext['queryFn'];
   const queryFn = jest.fn<ReturnType<QueryFn>, Parameters<QueryFn>>();
+  if (sdkQuery) queryFn.mockReturnValue(sdkQuery as ReturnType<QueryFn>);
   const context: ClaudeSdkLaneRunContext = {
     queryFn,
     named,
@@ -331,6 +345,7 @@ function runnerFixture(
     emitStreamEvent: jest.fn(),
     disposeCallbacks: jest.fn(),
     stopProxy: jest.fn(async () => undefined),
+    ...contextPatch,
   };
   // The mocked stream loop owns transformer interaction in these lifecycle tests.
   const runner = new ClaudeSdkLaneRunner(logger, {} as SdkMessageTransformer);
@@ -352,8 +367,8 @@ describe('Claude native lane lifecycle', () => {
     expect(f.context.options.mcpServers).toHaveProperty('ptah');
     expect(f.handle.supportsContinuation?.()).toBe(true);
     expect(f.handle.steer).toBeUndefined();
-    expect(f.handle.interrupt).toBeUndefined();
-    expect(f.handle.supportsInterrupt?.() ?? false).toBe(false);
+    expect(typeof f.handle.interrupt).toBe('function');
+    expect(f.handle.supportsInterrupt?.()).toBe(true);
     f.finish(0);
     await expect(f.handle.done).resolves.toBe(0);
   });
@@ -519,13 +534,27 @@ describe('named runner handoff', () => {
     expect(f.handle.accountBinding).toBe(f.named.reference.accountBinding);
     expect(f.handle.accountBindingId).toBe('run');
     const queued = await f.handle.continue?.('next');
-    expect(f.named.enqueue).toHaveBeenCalledWith('next', undefined);
+    expect(f.named.enqueue).toHaveBeenCalledWith({ content: 'next', uuid: expect.any(String) }, undefined);
     expect(f.handle.steer).toBeUndefined();
-    expect(f.handle.interrupt).toBeUndefined();
+    expect(typeof f.handle.interrupt).toBe('function');
     f.finish(0);
     await f.handle.done;
     await queued?.done;
     expect(f.named.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it('drops a turn the named gate refuses, so the next result settles the right turn (M5)', async () => {
+    const f = namedRunnerFixture();
+    f.named.enqueue.mockRejectedValueOnce(new Error('refused'));
+    await expect(f.handle.continue?.('refused')).rejects.toThrow('refused');
+    const first = jest.fn();
+    void f.handle.done.then(first);
+    f.config.onTurnResult?.({ subtype: 'success' });
+    f.config.onTurnComplete?.(0);
+    await f.handle.done;
+    expect(first).toHaveBeenCalledWith(0);
+    expect(f.handle.supportsInterrupt?.()).toBe(false);
+    f.finish(0);
   });
 
   it('settles turns and cleans listeners once on named abort even when the stream stays pending', async () => {
@@ -1325,5 +1354,332 @@ describe('Claude lane usage scope and native thread ID', () => {
     expect(f.handle.getObservedNativeThreadId?.()).toBeUndefined();
     f.config.onSessionResolved?.('session-123');
     expect(f.handle.getObservedNativeThreadId?.()).toBe('session-123');
+  });
+});
+
+describe('Claude lane interrupt, turn settings, content and catalog (B5)', () => {
+  const PNG = 'iVBORw0KGgo=';
+  function fakeQuery() {
+    return {
+      interrupt: jest.fn(async () => undefined),
+      setModel: jest.fn(async () => undefined),
+      applyFlagSettings: jest.fn(async () => undefined),
+      supportedModels: jest.fn(async () => [
+        { value: 'claude-opus-x', displayName: 'Opus X', description: '' },
+      ]),
+      supportedCommands: jest.fn(async () => [
+        { name: 'compact', description: 'Compact', argumentHint: '', builtin: true },
+        { name: 'review-pr', description: 'Review', argumentHint: '' },
+      ]),
+    };
+  }
+  function fixture(query = fakeQuery()) {
+    return { ...runnerFixture(Promise.resolve(), undefined, query), query };
+  }
+
+  afterEach(() => jest.useRealTimers());
+
+  it('interrupts the running turn, then continues on the same session id', async () => {
+    const f = fixture();
+    f.config.onSessionResolved?.('session-1');
+    expect(f.handle.supportsInterrupt?.()).toBe(true);
+    await f.handle.interrupt?.();
+    expect(f.query.interrupt).toHaveBeenCalledTimes(1);
+    expect(f.config.onTurnResult?.({ subtype: 'error_during_execution' })).toEqual({ interrupted: true });
+    f.config.onTurnComplete?.(0);
+    await expect(f.handle.done).resolves.toBe(0);
+    expect(f.handle.supportsInterrupt?.()).toBe(false);
+    const next = await f.handle.continue?.('after interrupt');
+    await f.context.mailbox.prompt.next();
+    expect((await f.context.mailbox.prompt.next()).value).toMatchObject({
+      session_id: 'session-1',
+      message: { content: 'after interrupt' },
+    });
+    expect(f.handle.supportsInterrupt?.()).toBe(true);
+    f.finish(0);
+    await next?.done;
+  });
+
+  it('keeps a non-interrupt error after an interrupt as a failure', async () => {
+    const f = fixture();
+    await f.handle.interrupt?.();
+    expect(f.config.onTurnResult?.({ subtype: 'error_max_turns' })).toEqual({ interrupted: false });
+    f.finish(0);
+  });
+
+  it('clears the flag on the result frame, so a later turn error is not masked', async () => {
+    const f = fixture();
+    await f.handle.interrupt?.();
+    expect(f.config.onTurnResult?.({ subtype: 'success' })).toEqual({ interrupted: false });
+    await f.handle.continue?.('next');
+    expect(f.config.onTurnResult?.({ subtype: 'error_during_execution' })).toEqual({ interrupted: false });
+    f.finish(0);
+  });
+
+  it('does not map an interrupted result once the lane has closed', async () => {
+    const f = fixture();
+    await f.handle.interrupt?.();
+    f.handle.abort.abort();
+    expect(f.config.onTurnResult?.({ subtype: 'error_during_execution' })).toEqual({ interrupted: false });
+    f.finish(1);
+  });
+
+  it('rejects after 3 s, and a late interrupted result maps to 0 with the info segment', async () => {
+    jest.useFakeTimers();
+    const query = fakeQuery();
+    query.interrupt.mockReturnValue(new Promise<undefined>(() => undefined));
+    const f = fixture(query);
+    const interrupting = f.handle.interrupt?.();
+    const settled = expect(interrupting).rejects.toThrow(CLAUDE_INTERRUPT_TIMEOUT_TEXT);
+    await jest.advanceTimersByTimeAsync(3_000);
+    await settled;
+    expect(f.config.onTurnResult?.({ subtype: 'error_during_execution' })).toEqual({ interrupted: true });
+    expect(f.context.emitSegment).toHaveBeenCalledWith({ type: 'info', content: CLAUDE_LATE_INTERRUPT_TEXT });
+    f.finish(0);
+  });
+
+  it('resolves at once when no turn runs', async () => {
+    const f = fixture();
+    f.config.onTurnResult?.({ subtype: 'success' });
+    await f.handle.interrupt?.();
+    expect(f.query.interrupt).not.toHaveBeenCalled();
+    f.finish(0);
+  });
+
+  it('applies model and effort for the next turn, mapping max to xhigh and reporting xhigh (m4)', async () => {
+    const f = fixture();
+    await expect(f.handle.applyTurnSettings?.({ model: 'claude-opus-x', reasoningEffort: 'max' }))
+      .resolves.toEqual({ model: 'claude-opus-x', reasoningEffort: 'xhigh', appliesAt: 'next-turn' });
+    expect(f.query.setModel).toHaveBeenCalledWith('claude-opus-x');
+    expect(f.query.applyFlagSettings).toHaveBeenCalledWith({ effortLevel: 'xhigh' });
+    const catalog = await f.handle.listTurnOptions?.();
+    expect(catalog).toMatchObject({ currentModel: 'claude-opus-x', currentEffort: 'xhigh' });
+    f.finish(0);
+  });
+
+  it('refuses a model the provider rejects and an unknown effort level', async () => {
+    const query = fakeQuery();
+    query.setModel.mockRejectedValue(new Error('unknown model'));
+    const f = fixture(query);
+    const refusal = await f.handle.applyTurnSettings?.({ model: 'nope' }).catch((error: unknown) => error);
+    expect(refusal).toBeInstanceOf(LaneTurnSettingRefusal);
+    // Fixed text only (M7); the provider's detail goes to the log.
+    expect(refusal).toMatchObject({ field: 'model', reason: 'Claude did not accept the model.' });
+    await expect(f.handle.applyTurnSettings?.({ reasoningEffort: 'turbo' }))
+      .rejects.toMatchObject({ field: 'reasoningEffort' });
+    expect(query.applyFlagSettings).not.toHaveBeenCalled();
+    f.finish(0);
+  });
+
+  it('pushes image blocks and file paths as one user turn', async () => {
+    const f = fixture();
+    await f.handle.continue?.('look', { images: [{ data: PNG, mediaType: 'image/jpeg' }], files: ['src/a.ts'] });
+    await f.context.mailbox.prompt.next();
+    const turn = (await f.context.mailbox.prompt.next()).value;
+    expect(turn.message.content).toEqual([
+      { type: 'text', text: 'look\n\nAttached files:\n- src/a.ts' },
+      { type: 'image', source: { type: 'base64', media_type: 'image/png', data: PNG } },
+    ]);
+    const logged = JSON.stringify(jest.mocked(logger.info).mock.calls);
+    expect(logged).not.toContain(PNG);
+    expect(logged).not.toContain('src/a.ts');
+    f.finish(0);
+  });
+
+  it('rejects an unresolvable image and queues nothing', async () => {
+    expect(() => claudeLaneTurnContent('x', { images: [{ data: 'AAAA', mediaType: 'text/plain' }] }))
+      .toThrow('An attached image is not a PNG, JPEG, GIF or WebP image.');
+    const f = fixture();
+    await expect(f.handle.continue?.('x', { images: [{ data: 'AAAA', mediaType: 'text/plain' }] })).rejects.toThrow();
+    f.config.onTurnResult?.({ subtype: 'success' });
+    expect(f.handle.supportsInterrupt?.()).toBe(false);
+    f.finish(0);
+  });
+
+  it('rolls the model back when the effort is refused, and logs no provider text in the refusal (M2, M7)', async () => {
+    const query = fakeQuery();
+    query.applyFlagSettings.mockRejectedValue(new Error('C:\\Users\\me\\secret effort failure'));
+    const f = fixture(query);
+    const refusal = await f.handle
+      .applyTurnSettings?.({ model: 'claude-opus-x', reasoningEffort: 'high' })
+      .catch((error: unknown) => error);
+    expect(refusal).toMatchObject({ field: 'reasoningEffort', reason: 'Claude did not accept the effort level.' });
+    expect(JSON.stringify(refusal)).not.toContain('secret');
+    // Rolled back to the spawn's model.
+    expect(query.setModel.mock.calls).toEqual([['claude-opus-x'], ['sonnet']]);
+    expect(await f.handle.listTurnOptions?.()).toHaveProperty('currentModel', 'sonnet');
+    f.finish(0);
+  });
+
+  it('says the model stayed changed when the rollback also fails (M2)', async () => {
+    const query = fakeQuery();
+    query.applyFlagSettings.mockRejectedValue(new Error('no'));
+    query.setModel.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error('no'));
+    const f = fixture(query);
+    await expect(f.handle.applyTurnSettings?.({ model: 'claude-opus-x', reasoningEffort: 'high' }))
+      .rejects.toMatchObject({
+        reason: 'Claude did not accept the effort level; the model change could not be undone.',
+      });
+    expect(await f.handle.listTurnOptions?.()).toHaveProperty('currentModel', 'claude-opus-x');
+    f.finish(0);
+  });
+
+  it('ignores a result frame with no turn in flight, so a later turn stays interruptible (M4)', async () => {
+    const f = fixture();
+    f.config.onTurnResult?.({ subtype: 'success' });
+    f.config.onTurnComplete?.(0);
+    await expect(f.handle.done).resolves.toBe(0);
+    // Unsolicited: a CLI-initiated result while nothing is queued.
+    expect(f.config.onTurnResult?.({ subtype: 'success' })).toEqual({ interrupted: false });
+    f.config.onTurnComplete?.(0);
+    const next = await f.handle.continue?.('next');
+    expect(f.handle.supportsInterrupt?.()).toBe(true);
+    await f.handle.interrupt?.();
+    expect(f.query.interrupt).toHaveBeenCalledTimes(1);
+    expect(f.config.onTurnResult?.({ subtype: 'error_during_execution' })).toEqual({ interrupted: true });
+    f.config.onTurnComplete?.(0);
+    await expect(next?.done).resolves.toBe(0);
+    f.finish(0);
+  });
+
+  it('settles a queued turn the result frame lists as folded in', async () => {
+    const f = fixture();
+    const next = await f.handle.continue?.('next');
+    await f.context.mailbox.prompt.next();
+    const pushed = (await f.context.mailbox.prompt.next()).value as { uuid: string };
+    f.config.onTurnResult?.({ subtype: 'success', userMessageUuids: [pushed.uuid] });
+    f.config.onTurnComplete?.(0);
+    await expect(next?.done).resolves.toBe(0);
+    expect(f.handle.supportsInterrupt?.()).toBe(false);
+    f.finish(0);
+  });
+
+  it('refuses image turns when the provider cannot take images (S1)', async () => {
+    const reason = 'This provider does not report which of its models accept images.';
+    const f = runnerFixture(Promise.resolve(), undefined, fakeQuery(), {
+      imageInput: { state: 'unsupported', reason },
+    });
+    expect(f.handle.turnInputSupport?.()).toEqual({ images: { state: 'unsupported', reason } });
+    await expect(f.handle.continue?.('look', { images: [{ data: PNG, mediaType: 'image/png' }] }))
+      .rejects.toThrow(reason);
+    f.config.onTurnResult?.({ subtype: 'success' });
+    expect(f.handle.supportsInterrupt?.()).toBe(false);
+    f.finish(0);
+  });
+
+  it('lists models, efforts and grouped commands; a failed lookup carries error', async () => {
+    const f = fixture();
+    const catalog = await f.handle.listTurnOptions?.();
+    expect(catalog).not.toHaveProperty('error');
+    expect(catalog).toMatchObject({
+      models: [{ id: 'claude-opus-x', name: 'Opus X' }],
+      efforts: ['low', 'medium', 'high', 'xhigh', 'max'],
+      commands: [
+        { name: 'compact', description: 'Compact', group: 'command' },
+        { name: 'review-pr', description: 'Review', group: 'skill' },
+      ],
+    });
+    f.query.supportedCommands.mockRejectedValue(new Error('down'));
+    await expect(f.handle.listTurnOptions?.()).resolves.toMatchObject({
+      models: [{ id: 'claude-opus-x', name: 'Opus X' }],
+      commands: [],
+      error: 'Lane options could not be read.',
+    });
+    f.finish(0);
+  });
+});
+
+describe('Claude lane steer fold-in (B6, dormant until Batch 30)', () => {
+  function manifest(steer: CliAdapterManifest['messaging']['steer']): CliAdapterManifest {
+    return {
+      messaging: {
+        steer,
+        interrupt: { state: 'supported' },
+        continuation: { state: 'supported' },
+        resume: { state: 'supported' },
+      },
+      roleChannel: 'system-prompt',
+      permissionModes: {},
+      networkModes: { allow: { state: 'supported' }, deny: { state: 'unsupported', reason: 'fixture' } },
+      limitReader: { state: 'no-reliable-source', reason: 'fixture' },
+      mcp: { state: 'supported' },
+      turnInput: CLAUDE_SDK_LANE_TURN_INPUT,
+    };
+  }
+  const info = { agentId: 'lane-1', cli: 'claude' } as unknown as AgentProcessInfo;
+  const unsupportedSteer = { state: 'unsupported' as const, reason: 'The SDK prompt mailbox starts turns; it has no mid-turn steer.' };
+
+  it('keeps effective steer unsupported with the current manifest, even while a tool runs', () => {
+    const f = runnerFixture(Promise.resolve(), undefined, {}, { manifestSteer: unsupportedSteer });
+    f.config.onToolInFlightChange?.(true);
+    expect(f.handle.steer).toBeUndefined();
+    expect(f.handle.supportsSteer).toBeUndefined();
+    const caps = resolveEffectiveLaneCapabilities(info, manifest(unsupportedSteer), f.handle);
+    expect(caps.messaging.steer.state).toBe('unsupported');
+    f.finish(0);
+  });
+
+  it('offers steer only while a main-thread tool call is in flight', () => {
+    const f = runnerFixture(Promise.resolve(), undefined, {}, { manifestSteer: { state: 'supported' } });
+    expect(f.handle.supportsSteer?.()).toBe(false);
+    expect(resolveEffectiveLaneCapabilities(info, manifest({ state: 'supported' }), f.handle).messaging.steer.state)
+      .toBe('unsupported');
+    f.config.onToolInFlightChange?.(true);
+    expect(f.handle.supportsSteer?.()).toBe(true);
+    expect(resolveEffectiveLaneCapabilities(info, manifest({ state: 'supported' }), f.handle).messaging.steer.state)
+      .toBe('supported');
+    f.config.onToolInFlightChange?.(false);
+    expect(f.handle.supportsSteer?.()).toBe(false);
+    f.finish(0);
+  });
+
+  it('pushes a uuid-tagged message without a new turn; a result listing both uuids folds it in', async () => {
+    const f = runnerFixture(Promise.resolve(), undefined, {}, { manifestSteer: { state: 'supported' } });
+    const first = (await f.context.mailbox.prompt.next()).value;
+    f.config.onToolInFlightChange?.(true);
+    await f.handle.steer?.('also check the tests');
+    const steered = (await f.context.mailbox.prompt.next()).value;
+    expect(steered.message.content).toBe('also check the tests');
+    expect(typeof steered.uuid).toBe('string');
+    expect(steered.uuid).not.toBe(first.uuid);
+    f.config.onTurnResult?.({ subtype: 'success', userMessageUuids: [first.uuid, steered.uuid] });
+    expect(f.context.emitSegment).not.toHaveBeenCalledWith({ type: 'info', content: CLAUDE_STEER_MISSED_TEXT });
+    f.config.onTurnComplete?.(0);
+    await expect(f.handle.done).resolves.toBe(0);
+    // No extra turn was queued for the steer.
+    expect(f.handle.supportsInterrupt?.()).toBe(false);
+    f.finish(0);
+  });
+
+  it('emits the info segment when the result misses a steer uuid and keeps the next turn aligned', async () => {
+    const f = runnerFixture(Promise.resolve(), undefined, {}, { manifestSteer: { state: 'supported' } });
+    const first = (await f.context.mailbox.prompt.next()).value;
+    f.config.onToolInFlightChange?.(true);
+    await f.handle.steer?.('late note');
+    f.config.onTurnResult?.({ subtype: 'success', userMessageUuids: [first.uuid] });
+    expect(f.context.emitSegment).toHaveBeenCalledWith({ type: 'info', content: CLAUDE_STEER_MISSED_TEXT });
+    f.config.onTurnComplete?.(0);
+    await expect(f.handle.done).resolves.toBe(0);
+    const next = await f.handle.continue?.('real follow-up');
+    const settled = jest.fn();
+    void next?.done.then(settled);
+    // The missed steer runs as its own turn first.
+    f.config.onTurnResult?.({ subtype: 'success' });
+    f.config.onTurnComplete?.(0);
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(settled).not.toHaveBeenCalled();
+    f.config.onTurnResult?.({ subtype: 'success' });
+    f.config.onTurnComplete?.(0);
+    await expect(next?.done).resolves.toBe(0);
+    f.finish(0);
+  });
+
+  it('refuses a steer when no tool call is in flight', async () => {
+    const f = runnerFixture(Promise.resolve(), undefined, {}, { manifestSteer: { state: 'supported' } });
+    await expect(f.handle.steer?.('now')).rejects.toThrow(
+      'Claude takes a message mid-turn only while one of its tools runs.',
+    );
+    f.finish(0);
   });
 });

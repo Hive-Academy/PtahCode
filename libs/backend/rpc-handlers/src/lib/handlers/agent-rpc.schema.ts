@@ -95,3 +95,61 @@ export const AgentResumeCliSessionParamsSchema = z
 export type AgentResumeCliSessionInput = z.infer<
   typeof AgentResumeCliSessionParamsSchema
 >;
+
+/** Keys that would reach an object's prototype once copied by a consumer. */
+const PROTOTYPE_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+/** `modifiedInput` once serialized to JSON, in characters. */
+export const MAX_MODIFIED_INPUT_CHARS = 100_000;
+const MAX_MODIFIED_INPUT_DEPTH = 64;
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+/** True when a prototype key appears at any depth, or the value nests too deep. */
+function hasPrototypeKey(value: unknown, depth = 0): boolean {
+  if (depth > MAX_MODIFIED_INPUT_DEPTH) return true;
+  if (Array.isArray(value)) return value.some((item) => hasPrototypeKey(item, depth + 1));
+  if (typeof value !== 'object' || value === null) return false;
+  return Object.keys(value).some((key) =>
+    PROTOTYPE_KEYS.has(key) || hasPrototypeKey((value as Record<string, unknown>)[key], depth + 1));
+}
+
+function serializedLength(value: unknown): number {
+  try {
+    return JSON.stringify(value)?.length ?? Number.POSITIVE_INFINITY;
+  } catch {
+    // degradation-audit: reported - an unserializable input is rejected by the schema refinement.
+    return Number.POSITIVE_INFINITY;
+  }
+}
+
+/**
+ * Tool input the user edited on a permission card: a plain JSON object of at
+ * most 100,000 characters with no prototype keys at any depth. Validated as
+ * is and never copied, so a `__proto__` own key cannot rewrite a prototype.
+ */
+const ModifiedInputSchema = z.custom<Record<string, unknown>>(
+  (value) =>
+    isPlainObject(value) &&
+    !hasPrototypeKey(value) &&
+    serializedLength(value) <= MAX_MODIFIED_INPUT_CHARS,
+  { message: 'modifiedInput must be a plain JSON object of at most 100,000 characters' },
+);
+
+/**
+ * `agent:permissionResponse` params (`LanePermissionResponse`, D22). Strict,
+ * unlike the `.passthrough()` house rule above: this payload is an approval
+ * decision, and an unknown field must not ride along to the permission
+ * handlers. Every main chat decision is accepted.
+ */
+export const LanePermissionResponseSchema = z
+  .object({
+    requestId: z.string().min(1).max(200),
+    decision: z.enum(['allow', 'deny', 'always_allow', 'deny_with_message']),
+    reason: z.string().max(500).optional(),
+    modifiedInput: ModifiedInputSchema.optional(),
+  })
+  .strict();

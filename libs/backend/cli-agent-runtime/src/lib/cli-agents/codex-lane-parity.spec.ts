@@ -259,7 +259,7 @@ describe('native Codex lane parity at the CliAdapter boundary', () => {
     const h = harness();
     expect(h.adapter.capabilities().messaging).toMatchObject({
       steer: { state: 'supported' },
-      interrupt: { state: 'unsupported' },
+      interrupt: { state: 'supported' },
       continuation: { state: 'supported' },
       resume: { state: 'supported' },
     });

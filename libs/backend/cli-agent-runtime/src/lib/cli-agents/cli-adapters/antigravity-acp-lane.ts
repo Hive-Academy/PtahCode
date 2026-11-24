@@ -4,9 +4,14 @@
  * and the manifest the lane declares. The lane itself is
  * `createProviderSessionLaneHandle` with `antigravityAcpProfile`.
  */
-import { spawnAcpProcess, type AcpTransportFactory } from '@ptah-extension/acp-runtime';
+import {
+  antigravityAcpProfile,
+  spawnAcpProcess,
+  type AcpTransportFactory,
+} from '@ptah-extension/acp-runtime';
 import type { AgentRoleChannel } from '@ptah-extension/shared';
 import type { CliAdapterManifest } from './cli-adapter.interface';
+import { acpLaneManifestSections } from './provider-session/provider-session-lane-handle';
 
 /** The first `agy` release with a usable `agy acp` (research §2, preflight PF-3). */
 export const AGY_ACP_MIN_VERSION = '1.5.1';
@@ -91,6 +96,10 @@ export function antigravityAcpManifest(
     },
     limitReader: { state: 'available', source: 'antigravity' },
     mcp: { state: 'supported' },
+    ...acpLaneManifestSections(
+      antigravityAcpProfile,
+      'A lane has no approval route; tool approvals are decided headlessly.',
+    ),
   };
 }
 

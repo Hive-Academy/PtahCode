@@ -14,9 +14,10 @@ import {
   type FakeAcpAgentOptions,
   type FakeAcpTransport,
 } from './__fixtures__/fake-acp-agent';
+import { readAcpFixture } from './__fixtures__/acp-fixture-reader';
 import type { AcpSpawnOptions } from './acp-process-transport';
 import * as loader from './acp-sdk-loader';
-import { createAcpSession, type AcpSession } from './acp-session-runtime';
+import { createAcpSession, readAvailableCommands, type AcpSession } from './acp-session-runtime';
 import type { AcpVendorProfile } from './acp-vendor-profile';
 
 const SESSION_ID = 'sess-1';
@@ -291,5 +292,56 @@ describe('createAcpSession', () => {
       expect.objectContaining({ type: 'terminal', status: 'failed', disposition: 'broken' }),
     ]);
     h.abort.abort();
+  });
+});
+
+describe('available commands', () => {
+  /** Every recorded `available_commands_update` payload of a fixture, in order. */
+  function recordedCommandUpdates(name: string): Record<string, unknown>[] {
+    return readAcpFixture(name)
+      .filter((envelope) => envelope.dir === 'in' && envelope.msg?.['method'] === 'session/update')
+      .map((envelope) => (envelope.msg?.['params'] as { update?: unknown } | undefined)?.update)
+      .filter((update): update is Record<string, unknown> =>
+        typeof update === 'object' && update !== null &&
+        (update as Record<string, unknown>)['sessionUpdate'] === 'available_commands_update');
+  }
+
+  async function captured(fixture: string): Promise<AcpSession> {
+    const updates = recordedCommandUpdates(fixture);
+    expect(updates.length).toBeGreaterThan(0);
+    const h = start({}, (agent) =>
+      agent.handle('session/prompt', async (params, fake) => {
+        for (const update of updates) await fake.sessionUpdate(String(params['sessionId']), update);
+        return { result: { stopReason: 'end_turn' } };
+      }),
+    );
+    await h.session.start();
+    expect(h.session.getAvailableCommands()).toEqual([]);
+    await h.session.prompt('hi');
+    return h.session;
+  }
+
+  it('keeps the latest Grok list: 55 entries, skills carry their SKILL.md path', async () => {
+    const commands = (await captured('grok-plain-turn.ndjson')).getAvailableCommands();
+    expect(commands).toHaveLength(55);
+    expect(commands[0]).toEqual({ name: 'compact', description: 'Compress conversation history to save context window' });
+    expect(commands.filter((command) => command.path?.endsWith('SKILL.md'))).toHaveLength(40);
+    expect(commands.map((command) => command.name)).toContain('always-approve');
+  });
+
+  it('keeps the agy list, which has no _meta paths', async () => {
+    const commands = (await captured('antigravity-p3-ptah-mcp-tool-use.ndjson')).getAvailableCommands();
+    expect(commands).toHaveLength(13);
+    expect(commands[0]?.name).toBe('goal');
+    expect(commands.some((command) => command.path !== undefined)).toBe(false);
+  });
+
+  it('reads malformed updates defensively', () => {
+    expect(readAvailableCommands({ sessionUpdate: 'plan' })).toBeUndefined();
+    expect(readAvailableCommands({ sessionUpdate: 'available_commands_update' })).toBeUndefined();
+    expect(readAvailableCommands({
+      sessionUpdate: 'available_commands_update',
+      availableCommands: [null, { name: '' }, { name: 'x', description: 3, _meta: { path: 7 } }],
+    })).toEqual([{ name: 'x' }]);
   });
 });

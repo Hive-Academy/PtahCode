@@ -206,8 +206,9 @@ describe('CodexLaneEvents', () => {
     expect(map({ type: 'reasoning', itemId: 'thought', text: 'think', phase: 'delta' }).segments[0]?.messageId).toBe('thought');
   });
 
-  it('emits only the latest reported usage once at terminal', () => {
+  it('emits each valid snapshot as cumulative usage and the latest as the turn total', () => {
     const map = mapper();
+    // A snapshot without both counters is not live usage.
     expect(map({ type: 'usage', usage: { inputTokens: 5 } }).segments).toEqual(
       [],
     );
@@ -221,11 +222,17 @@ describe('CodexLaneEvents', () => {
           totalTokens: 12,
         },
       }).segments,
-    ).toEqual([]);
+    ).toEqual([{
+      type: 'info',
+      content: 'Codex usage update.',
+      usageScope: 'cumulative',
+      usage: { inputTokens: 10, cacheReadTokens: 4, outputTokens: 2, totalTokens: 12 },
+    }]);
     expect(map({ type: 'terminal', status: 'completed' }).segments).toEqual([
       expect.objectContaining({
         type: 'info',
         content: 'Codex turn usage.',
+        usageScope: 'turn',
         usage: {
           inputTokens: 10,
           cacheReadTokens: 4,

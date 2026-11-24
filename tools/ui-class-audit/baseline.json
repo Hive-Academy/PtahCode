@@ -16,12 +16,7 @@
     "<dynamic>": 2
   },
   "libs/frontend/canvas/src/lib/canvas-detail/canvas-lane-view.component.ts": {
-    "<dynamic>": 4,
-    "btn": 2,
-    "btn-error": 1,
-    "btn-outline": 1,
-    "btn-success": 1,
-    "btn-xs": 2
+    "<dynamic>": 4
   },
   "libs/frontend/canvas/src/lib/canvas-rail/canvas-empty-board.component.ts": {
     "btn": 1,
@@ -86,12 +81,6 @@
   },
   "libs/frontend/chat-ui/src/lib/molecules/composer-compact-bar.component.ts": {
     "<dynamic>": 1
-  },
-  "libs/frontend/chat-ui/src/lib/molecules/lane-composer.component.ts": {
-    "<dynamic>": 4,
-    "btn": 1,
-    "btn-sm": 1,
-    "btn-warning": 1
   },
   "libs/frontend/chat-ui/src/lib/molecules/lane-result/lane-result-card.component.ts": {
     "<dynamic>": 1
@@ -215,8 +204,17 @@
   "libs/frontend/chat/src/lib/components/molecules/chat-input/chat-input.component.ts": {
     "<dynamic>": 1
   },
-  "libs/frontend/chat/src/lib/components/molecules/chat-input/effort-selector.component.ts": {
-    "<dynamic>": 4
+  "libs/frontend/chat/src/lib/components/molecules/composer-controls/composer-attach-menu.component.ts": {
+    "<dynamic>": 3
+  },
+  "libs/frontend/chat/src/lib/components/molecules/composer-controls/composer-effort-picker.component.ts": {
+    "<dynamic>": 7
+  },
+  "libs/frontend/chat/src/lib/components/molecules/composer-controls/composer-model-picker.component.ts": {
+    "<dynamic>": 3
+  },
+  "libs/frontend/chat/src/lib/components/molecules/composer-controls/composer-voice-button.component.ts": {
+    "<dynamic>": 1
   },
   "libs/frontend/chat/src/lib/components/molecules/confirmation-dialog.component.ts": {
     "btn": 1,
@@ -226,6 +224,12 @@
   },
   "libs/frontend/chat/src/lib/components/molecules/execution-header/execution-header.component.ts": {
     "<dynamic>": 1
+  },
+  "libs/frontend/chat/src/lib/components/molecules/lane-composer/lane-composer.component.html": {
+    "btn": 1,
+    "btn-warning": 1,
+    "btn-xs": 1,
+    "<dynamic>": 6
   },
   "libs/frontend/chat/src/lib/components/molecules/mcp-server-list.component.ts": {
     "<dynamic>": 1
@@ -291,24 +295,7 @@
     "<dynamic>": 2
   },
   "libs/frontend/chat/src/lib/components/organisms/session-inspector/inspector-agents-section.component.ts": {
-    "<dynamic>": 2
-  },
-  "libs/frontend/chat/src/lib/components/organisms/session-inspector/inspector-session-actions.component.html": {
-    "btn": 2,
-    "btn-ghost": 2,
-    "btn-sm": 1,
-    "btn-square": 1,
-    "btn-xs": 1
-  },
-  "libs/frontend/chat/src/lib/components/organisms/session-inspector/inspector-task-section.component.ts": {
-    "alert": 2,
-    "alert-error": 2,
-    "alert-soft": 2,
-    "btn": 1,
-    "btn-active": 1,
-    "btn-ghost": 1,
-    "btn-xs": 1,
-    "skeleton": 3
+    "<dynamic>": 1
   },
   "libs/frontend/chat/src/lib/components/organisms/subagent-lane/subagent-lane-composer.component.ts": {
     "<dynamic>": 2
@@ -393,9 +380,6 @@
   "libs/frontend/chat/src/lib/settings/providers/main-agent-scope-badges.component.ts": {
     "<dynamic>": 2
   },
-  "libs/frontend/chat/src/lib/settings/providers/provider-catalog-modal.component.ts": {
-    "<dynamic>": 2
-  },
   "libs/frontend/chat/src/lib/settings/providers/provider-connection-card.component.ts": {
     "<dynamic>": 4
   },
@@ -409,7 +393,7 @@
     "<dynamic>": 5
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/agent-orchestration-config.component.html": {
-    "<dynamic>": 5
+    "<dynamic>": 4
   },
   "libs/frontend/chat/src/lib/settings/ptah-ai/claude-lane-account-cell.component.ts": {
     "<dynamic>": 2
@@ -433,9 +417,6 @@
     "btn": 1,
     "btn-primary": 1,
     "btn-xs": 1
-  },
-  "libs/frontend/chat/src/lib/settings/ptah-ai/ptah-cli-instances.component.html": {
-    "<dynamic>": 9
   },
   "libs/frontend/command-center/src/lib/components/command-center-page.component.html": {
     "alert": 1
@@ -689,11 +670,6 @@
   "libs/frontend/memory-curator-ui/src/lib/components/diagnostics/memory-diagnostics-accordion.component.ts": {
     "alert": 2,
     "alert-error": 2
-  },
-  "libs/frontend/memory-curator-ui/src/lib/components/memory-search-bar.component.ts": {
-    "btn": 2,
-    "btn-primary": 2,
-    "btn-sm": 2
   },
   "libs/frontend/memory-curator-ui/src/lib/components/timeline-view.component.ts": {
     "alert": 1,

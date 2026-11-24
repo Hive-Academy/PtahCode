@@ -180,6 +180,79 @@ describe('AgentMonitorStore', () => {
     });
   });
 
+  describe('lane turn settings on the record (TASK_2026_2320_lnpar)', () => {
+    const lane = (agentId: string): AgentProcessInfo => ({
+      agentId: agentId as AgentId,
+      cli: 'codex',
+      task: 'Work',
+      workingDirectory: '/workspace/root',
+      startedAt: '2026-10-01T10:00:00.000Z',
+      status: 'running',
+      model: 'gpt-5',
+    });
+
+    it('copies reasoningEffort and observedModel from a fresh spawn', () => {
+      store.onAgentSpawned({ ...lane('lane'), reasoningEffort: 'high', observedModel: 'gpt-5.1' });
+      expect(store.agents()[0]).toMatchObject({
+        model: 'gpt-5',
+        reasoningEffort: 'high',
+        observedModel: 'gpt-5.1',
+      });
+    });
+
+    it('leaves both fields undefined when the record has none', () => {
+      store.onAgentSpawned(lane('lane'));
+      expect(store.agents()[0].reasoningEffort).toBeUndefined();
+      expect(store.agents()[0].observedModel).toBeUndefined();
+    });
+
+    it('takes new values on a same-id re-spawn and keeps known ones when absent', () => {
+      store.onAgentSpawned({ ...lane('lane'), turnSeq: 1, reasoningEffort: 'low', observedModel: 'a' });
+      store.onAgentSpawned({ ...lane('lane'), turnSeq: 2, reasoningEffort: 'high' });
+      expect(store.agents()[0]).toMatchObject({ reasoningEffort: 'high', observedModel: 'a' });
+    });
+
+    it('takes the model a continued turn publishes and keeps it when absent', () => {
+      store.onAgentSpawned({ ...lane('lane'), turnSeq: 1, model: 'gpt-5.4' });
+      store.onAgentSpawned({ ...lane('lane'), turnSeq: 2, model: 'gpt-5.5' });
+      expect(store.agents()[0].model).toBe('gpt-5.5');
+      store.onAgentSpawned({ ...lane('lane'), turnSeq: 3, model: undefined });
+      expect(store.agents()[0].model).toBe('gpt-5.5');
+    });
+
+    it('takes the values an exit payload carries and keeps known ones when absent', () => {
+      store.onAgentSpawned({ ...lane('lane'), reasoningEffort: 'low' });
+      store.onAgentExited({ ...lane('lane'), status: 'completed', observedModel: 'gpt-5.1' });
+      expect(store.agents()[0]).toMatchObject({
+        status: 'completed',
+        reasoningEffort: 'low',
+        observedModel: 'gpt-5.1',
+      });
+    });
+
+    it('copies both fields onto a replacement card', () => {
+      store.onAgentSpawned({ ...lane('old'), cliSessionId: 'thread', parentSessionId: 'owner' });
+      store.onAgentExited({
+        ...lane('old'),
+        status: 'completed',
+        cliSessionId: 'thread',
+        parentSessionId: 'owner',
+      });
+      store.onAgentSpawned({
+        ...lane('new'),
+        cliSessionId: 'thread',
+        reasoningEffort: 'medium',
+        observedModel: 'gpt-5.1',
+      });
+      expect(store.agents()).toHaveLength(1);
+      expect(store.agents()[0]).toMatchObject({
+        agentId: 'new',
+        reasoningEffort: 'medium',
+        observedModel: 'gpt-5.1',
+      });
+    });
+  });
+
   describe('CLI turn and resume lifecycle', () => {
     const info = (
       agentId: string,

@@ -75,6 +75,7 @@ export class CodexLaneEvents {
         return { segments: [this.unavailableTelemetry(event.usage, event.evidence?.modelId)], terminal: 'completed' };
       return { segments: [{
         type: 'info', content: 'Codex turn usage.',
+        usageScope: 'turn',
         usage: laneUsage(event.usage),
         turnTelemetry: completedTurnTelemetry({
           ...turnIdentity({ provider: 'codex', turnId: this.identity.turnId,
@@ -214,11 +215,18 @@ export class CodexLaneEvents {
           ],
         };
       case 'usage':
-        // Core reports turn snapshots. CLI totals add segments, so emit only once,
-        // on terminal, instead of counting every snapshot (and terminal) again.
+        // Core reports turn-scoped snapshots (E25). Each valid snapshot goes out
+        // as `cumulative`, so the host turns it into an increment; the terminal
+        // total is the `turn` correction (B4).
         this.usage = event.usage;
         this.usageModelId = event.evidence?.modelId ?? this.usageModelId;
-        return { segments: [] };
+        return validUsage(event.usage)
+          ? { segments: [{
+              type: 'info', content: 'Codex usage update.',
+              usageScope: 'cumulative',
+              usage: laneUsage(event.usage),
+            }] }
+          : { segments: [] };
       case 'error':
         return { segments: this.error() };
       case 'subagentActivity':
@@ -245,6 +253,7 @@ export class CodexLaneEvents {
           segments.push({
             type: 'info',
             content: 'Codex turn usage.',
+            usageScope: 'turn',
             usage: laneUsage(usage),
             turnTelemetry: telemetry,
           });
@@ -282,6 +291,13 @@ export class CodexLaneEvents {
       segments: content === '' ? [] : [{ type, content, messageId: id }],
     };
   }
+}
+
+/** Both counters present, safe and non-negative: the same test the turn total uses. */
+function validUsage(usage: CodexReportedUsage): boolean {
+  return usage.inputTokens !== undefined && usage.outputTokens !== undefined &&
+    Number.isSafeInteger(usage.inputTokens) && Number.isSafeInteger(usage.outputTokens) &&
+    usage.inputTokens >= 0 && usage.outputTokens >= 0;
 }
 
 function laneUsage(

@@ -18,6 +18,7 @@ export { isTabBusyGenerating } from './lib/services/chat-store/tab-busy';
 export * from './lib/directives';
 export { ComposerAttachmentsService, type ComposerImage } from './lib/services/composer-attachments.service';
 export { AttachmentTrayComponent } from './lib/components/molecules/attachment-tray/attachment-tray.component';
+export { LaneComposerComponent } from './lib/components/molecules/lane-composer/lane-composer.component';
 
 export { UpdateDialogService } from './lib/update-dialog/update-dialog.service';
 export { UpdateDialogComponent } from './lib/update-dialog/update-dialog.component';
@@ -37,6 +38,14 @@ export { GitWindowSync } from './lib/services/git-window/git-window-sync.service
 export { SessionWorktreeLookup } from './lib/services/session-git-scope/session-worktree-lookup.service';
 export { ChatAgentFeedbackSender } from './lib/services/agent-feedback/chat-agent-feedback-sender.service';
 export { AgentPermissionResponder } from './lib/services/agent-permission-responder';
+export {
+  LanePermissionView,
+  COPILOT_ALWAYS_ALLOW_ONCE_TEXT,
+  LANE_ANSWER_REFUSED_TEXT,
+  LANE_WAITING_LABEL,
+  toLanePermissionRequest,
+  type LanePermissionViewSources,
+} from './lib/services/lane-permission-view';
 export {
   buildLaneSummary,
   LANE_KEY_PREFIX,

@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import type { Logger } from '@ptah-extension/vscode-core';
-import { SessionId } from '@ptah-extension/shared';
+import { EFFORT_LEVELS, SessionId } from '@ptah-extension/shared';
 import type {
   CliAdapterManifest,
   EffectiveCapabilitySet,
   CliOutputSegment,
   FlatStreamEventUnion,
+  LanePermissionMode,
   PhaseDispatchV1,
 } from '@ptah-extension/shared';
 import type {
@@ -28,6 +29,8 @@ import {
   claudeLaneRefusal,
   claudeLaneRefusalCode,
   claudeLaneForeignErrorClass,
+  claudeSdkLanePrompts,
+  CLAUDE_SDK_LANE_TURN_INPUT,
   type ClaudeLaneAccountPersistence,
   type ClaudeSdkLaneRunner,
   type ClaudeSdkLaneRunContext,
@@ -96,11 +99,11 @@ export class ClaudeCliAdapter implements ClaudeCliAdapterContract {
     );
   }
 
-  capabilities(): CliAdapterManifest {
+  capabilities(permission?: LanePermissionMode): CliAdapterManifest {
     return {
       messaging: {
         steer: { state: 'unsupported', reason: 'The SDK prompt mailbox starts turns; it has no mid-turn steer.' },
-        interrupt: { state: 'unsupported', reason: 'The SDK handle exposes no run-scoped interrupt.' },
+        interrupt: { state: 'supported' },
         continuation: { state: 'supported' },
         resume: { state: 'supported' },
       },
@@ -117,6 +120,9 @@ export class ClaudeCliAdapter implements ClaudeCliAdapterContract {
       },
       limitReader: { state: 'available', source: 'anthropic' },
       mcp: { state: 'supported' },
+      turnInput: CLAUDE_SDK_LANE_TURN_INPUT,
+      usage: { timing: 'live' },
+      prompts: claudeSdkLanePrompts(permission),
     };
   }
 
@@ -137,6 +143,11 @@ export class ClaudeCliAdapter implements ClaudeCliAdapterContract {
 
   parseOutput(raw: string): string {
     return stripAnsiCodes(raw);
+  }
+
+  /** Claude lanes accept every shared effort level (`claude-sdk-lane-runner`). */
+  laneEfforts(): readonly string[] {
+    return EFFORT_LEVELS;
   }
 
   async listModels() {

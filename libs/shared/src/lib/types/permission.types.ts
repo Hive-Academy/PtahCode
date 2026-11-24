@@ -201,6 +201,11 @@ export interface AskUserQuestionRequest {
    * question UI to its own chrome instead of the standard chat surface.
    */
   readonly surfaceMode?: boolean;
+  /**
+   * Agent id of the CLI lane that asked. Absent for a main chat question; the
+   * renderer uses it to label the card with the lane.
+   */
+  readonly agentId?: string;
 }
 
 /**
