@@ -445,6 +445,12 @@ describe('AgentDeliveryStore', () => {
       expect(store.receiptStatus(item).ackLabel).toBe(expected);
     });
 
+    it('labels a raw /command delivery instead of a missing ack', () => {
+      const item = receipt({ state: 'settled', ackState: 'unavailable', rawDelivery: true });
+      expect(AgentDeliveryStore.ackLabel(item)).toBe('Delivered as a command');
+      expect(store.receiptStatus(item).ackLabel).toBe('Delivered as a command');
+    });
+
     it('distinguishes known vs unknown limit reset times and keeps transport, turn outcome, and ack separate', () => {
       const resetAt = NOW + 15 * 60_000;
       const knownLimit = store.receiptStatus(

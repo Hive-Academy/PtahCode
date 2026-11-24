@@ -460,9 +460,15 @@ export class AgentDeliveryStore {
 
   /** Exact user-facing label for a lane message acknowledgment state. */
   static ackLabel(
-    input: Pick<AgentDeliveryReceipt, 'ackState' | 'ackNote'> | AgentMessageAckState | null | undefined,
+    input:
+      | (Pick<AgentDeliveryReceipt, 'ackState' | 'ackNote'> & Partial<Pick<AgentDeliveryReceipt, 'rawDelivery'>>)
+      | AgentMessageAckState
+      | null
+      | undefined,
     ackNote?: string,
   ): string | null {
+    // A raw `/command` carries no Ptah header, so the lane never acks it.
+    if (typeof input === 'object' && input?.rawDelivery === true) return 'Delivered as a command';
     const state = typeof input === 'string' ? input : input?.ackState;
     const note = (typeof input === 'string' ? ackNote : input?.ackNote ?? ackNote)?.trim();
     switch (state) {
