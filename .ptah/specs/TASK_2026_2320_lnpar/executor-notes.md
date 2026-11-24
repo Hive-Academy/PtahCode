@@ -33,3 +33,11 @@
   restores text only, not attachments/model/effort.
 - Batch 11: switch lane-delivery.controller.ts:226-229 to `takeRecoveredMessage()` (restores text + turn: files, images, model, effort), then delete `takeRecovered` and its spec mocks in chat-streaming.
 - Open (minor, from fix-p2): focus is lost when a gated pill swaps to the enabled one; check in Electron visual review along with the attach-menu 'contents' host.
+- Batch 22 (binding, from code-logic-review-p3p4 S1/S2): the frontend now sends every main-chat
+  decision (`allow`, `always_allow`, `deny`, ...) and `modifiedInput` in `agent:permissionResponse`.
+  (a) `agent-rpc.handlers.ts:~1398` must forward `modifiedInput` (today it rebuilds `{id, decision,
+  reason}`); (b) `copilot-permission-bridge.ts:185,225` must treat `always_allow` as allow (today
+  only `'allow'`, so Always allow DENIES on Copilot) and apply or explicitly refuse `modifiedInput`;
+  add `copilot-permission-bridge.ts` (+ spec) to Batch 22's write set. The strict zod schema must
+  accept exactly what the frontend sends. A lane that cannot honour an edit must refuse visibly, not
+  report "Allowed by you".
