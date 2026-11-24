@@ -19,6 +19,7 @@ import type {
 } from '@ptah-extension/shared';
 import { Logger } from '@ptah-extension/vscode-core';
 import type { CliCommandOptions } from '../cli-adapter.interface';
+import { laneTurnInputContractViolations } from '../../testing/lane-turn-input-contract';
 import {
   CodexAppServerLaneAdapter,
   CodexLaneResumeIdentityError,
@@ -1737,5 +1738,132 @@ describe('CodexAppServerLaneAdapter', () => {
     await h.adapter.listModels();
     expect(h.runtime.openCatalog).toHaveBeenCalledTimes(4);
     expect(h.binary.resolve).toHaveBeenCalledTimes(5);
+  });
+});
+
+describe('CodexAppServerLaneAdapter lane turn input (B7)', () => {
+  async function started(h: ReturnType<typeof harness>) {
+    const handle = await h.adapter.runSdk(options());
+    for (let tick = 0; tick < 20 && h.context.inputs.length === 0; tick += 1)
+      await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setImmediate(resolve));
+    return handle;
+  }
+
+  it('declares the turn input sections and keeps each claim backed by the handle (Req 4.3)', async () => {
+    const h = harness();
+    const manifest = h.adapter.capabilities();
+    expect(manifest.messaging.interrupt.state).toBe('supported');
+    expect(manifest.turnInput).toEqual({
+      model: { state: 'supported', appliesAt: 'next-turn' },
+      effort: { state: 'supported', appliesAt: 'next-turn' },
+      images: { state: 'supported', onSteer: true },
+      files: { state: 'supported', delivery: 'reference' },
+      commands: { state: 'unsupported', reason: 'No slash commands in Codex lanes.' },
+      skills: { state: 'unsupported', reason: 'Codex lanes do not expose skills to the composer.' },
+    });
+    expect(manifest.usage).toEqual({ timing: 'live' });
+    expect(manifest.prompts?.approvals.state).toBe('unsupported');
+    const handle = await started(h);
+    expect(laneTurnInputContractViolations(handle, manifest)).toEqual([]);
+    await terminal(h.context);
+    await handle.done;
+    handle.abort.abort();
+  });
+
+  it('interrupts the active turn, resolves it 0 and continues on the same thread', async () => {
+    const h = harness();
+    const handle = await started(h);
+    expect(handle.supportsInterrupt?.()).toBe(true);
+    const interrupt = jest.spyOn(h.context, 'interrupt').mockResolvedValue(true);
+    await handle.interrupt?.();
+    expect(interrupt).toHaveBeenCalledWith('turn-1');
+    h.context.event('turn-1', 100, { type: 'terminal', status: 'interrupted' });
+    expect(await handle.done).toBe(0);
+    expect(h.context.close).not.toHaveBeenCalled();
+    expect(handle.supportsInterrupt?.()).toBe(false);
+    const next = await handle.continue?.('after interrupt');
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(h.context.inputs.at(-1)?.text).toContain('after interrupt');
+    await terminal(h.context, 'turn-2');
+    expect(await next?.done).toBe(0);
+    handle.abort.abort();
+  });
+
+  it('keeps an interrupted terminal the host did not request as a failure', async () => {
+    const h = harness();
+    const handle = await started(h);
+    h.context.event('turn-1', 100, { type: 'terminal', status: 'interrupted' });
+    expect(await handle.done).toBe(1);
+  });
+
+  it('rejects when Codex refuses the interrupt of a still-active turn', async () => {
+    const h = harness();
+    const handle = await started(h);
+    await expect(handle.interrupt?.()).rejects.toThrow('Codex did not accept the interrupt');
+    await terminal(h.context);
+    expect(await handle.done).toBe(0);
+    handle.abort.abort();
+  });
+
+  it('applies model and effort through updateNextTurn and refuses unknown efforts', async () => {
+    const h = harness();
+    const handle = await started(h);
+    const update = jest.spyOn(h.context, 'updateNextTurn');
+    await expect(handle.applyTurnSettings?.({ model: 'gpt-x', reasoningEffort: 'high' }))
+      .resolves.toEqual({ model: 'gpt-x', reasoningEffort: 'high', appliesAt: 'next-turn' });
+    expect(update).toHaveBeenCalledWith({ model: 'gpt-x', effort: 'high' });
+    await expect(handle.applyTurnSettings?.({ reasoningEffort: 'turbo' }))
+      .rejects.toMatchObject({ field: 'reasoningEffort', reason: 'Codex has no effort level "turbo".' });
+    update.mockRejectedValueOnce(new Error('Invalid Codex turn settings'));
+    await expect(handle.applyTurnSettings?.({ model: 'bad' })).rejects.toMatchObject({
+      field: 'model',
+      reason: 'Codex did not accept the turn settings: Invalid Codex turn settings',
+    });
+    await terminal(h.context);
+    await handle.done;
+    handle.abort.abort();
+  });
+
+  it('passes images and file references on continue and steer', async () => {
+    const h = harness();
+    const handle = await started(h);
+    const image = { data: 'iVBORw0KGgo=', mediaType: 'image/png' };
+    await handle.steer?.('look', { images: [image] });
+    expect(h.context.inputs.at(-1)).toEqual({
+      text: 'look',
+      attachments: [{ type: 'image', data: image.data, mediaType: 'image/png' }],
+    });
+    await terminal(h.context);
+    await handle.done;
+    const next = await handle.continue?.('next', { files: ['src/a.ts'], images: [image] });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(h.context.inputs.at(-1)?.attachments).toEqual([
+      { type: 'image', data: image.data, mediaType: 'image/png' },
+      { type: 'file', path: 'src/a.ts' },
+    ]);
+    await terminal(h.context, 'turn-2');
+    await next?.done;
+    handle.abort.abort();
+  });
+
+  it('lists models and their efforts from the live context', async () => {
+    const h = harness();
+    const handle = await started(h);
+    h.context.models = [
+      { id: 'k1', model: 'gpt-x', displayName: 'GPT X', isDefault: true, supportedEfforts: ['low', 'high', 'none'] },
+    ];
+    await expect(handle.listTurnOptions?.()).resolves.toMatchObject({
+      models: [{ id: 'gpt-x', name: 'GPT X (Codex default)' }],
+      efforts: ['low', 'high'],
+      commands: [],
+    });
+    h.context.models = [{ id: 'k2', model: 'gpt-y', displayName: 'GPT Y', isDefault: false }];
+    await expect(handle.listTurnOptions?.()).resolves.toMatchObject({
+      efforts: ['low', 'medium', 'high', 'xhigh'],
+    });
+    await terminal(h.context);
+    await handle.done;
+    handle.abort.abort();
   });
 });

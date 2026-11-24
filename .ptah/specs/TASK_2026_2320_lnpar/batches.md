@@ -1,6 +1,6 @@
 # Batches - TASK_2026_2320_lnpar
 
-Total tasks: 49 | Batches: 30 | Complete: 25/30
+Total tasks: 49 | Batches: 30 | Complete: 26/30
 
 Source: `implementation-plan.md` revision 3 plus "Binding notes from Gate 2" (R3-1, R3-2 bind
 Batch 20), `task-description.md`, `design-spec.md`, `prototype/README.md`, `parity-inventory.md`,
@@ -127,7 +127,7 @@ Assumptions:
   whole rebase wait. Renderer code treats an absent section as "Checking" until the first preview,
   then as unsupported with "Lane did not report its options." (Task 7.1, 11.1).
 - A-TL2 `team-leader-modes.md` (heavy-file split rule) is not present in the repo or user config
-  (searched `WT` and `C:\Users\abdal\.claude`). Heavy files are handled by read ranges and by
+  (searched `WT` and `C:\Users\<user>\.claude`). Heavy files are handled by read ranges and by
   splitting batches so no executor edits more than one >40k-token file.
 
 | Risk | Severity | Mitigation |
@@ -1146,7 +1146,7 @@ Edge cases:
 
 - Artifacts exist; scoped commands pass.
 
-## Batch 26: B7 Codex app-server lane - PENDING (AFTER REBASE)
+## Batch 26: B7 Codex app-server lane - COMPLETE
 
 - Shape: logic
 - Estimated weight (tokens): ~27k
@@ -1174,7 +1174,7 @@ Edge cases:
 - Tasks: 1 | Depends on: Batches 15, 21
 - Phase: P6 Adapters
 
-### Task 26.1: Codex interrupt, settings, attachments, catalog, live usage, manifest - PENDING
+### Task 26.1: Codex interrupt, settings, attachments, catalog, live usage, manifest - COMPLETE
 
 - Validation notes: A6
 
