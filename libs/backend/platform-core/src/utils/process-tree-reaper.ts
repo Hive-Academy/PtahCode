@@ -26,8 +26,8 @@ function loadChildProcess(): Promise<ChildProcessModule> {
         childProcessModule = loaded;
       },
       () => {
-        // degradation-audit: optional-capability - the caller awaiting
-        // `loading` gets the rejection; clearing lets the next call retry.
+        // The caller awaiting `loading` gets the rejection; clearing the
+        // cache lets the next call retry.
         childProcessLoading = null;
       },
     );
