@@ -198,6 +198,160 @@ describe('readRoutingRules', () => {
       `routing rules list truncated to ${MAX_ROUTING_RULES} entries`,
     ]);
   });
+
+  it('drops and reports a throwing entry getter while keeping valid siblings on both sides', () => {
+    const throwingMatchEntry = {
+      id: 'exploding-match',
+      get match(): unknown {
+        throw new Error('match getter failed');
+      },
+      set: { effort: 'high' },
+    };
+    const throwingIdLabelEntry = {
+      idReads: 0,
+      get id(): string {
+        this.idReads += 1;
+        if (this.idReads > 1) {
+          throw new Error('id getter failed on label read');
+        }
+        return 'flaky-id';
+      },
+      match: { kind: 'invalid-kind' },
+      set: { effort: 'high' },
+    };
+
+    const entries: unknown[] = [
+      {
+        id: 'before-throw',
+        match: { kind: 'design' },
+        set: { minTier: 'opus' },
+      },
+      throwingMatchEntry,
+      throwingIdLabelEntry,
+      {
+        id: 'after-throw',
+        match: { kind: 'review' },
+        set: { maxTier: 'sonnet' },
+      },
+    ];
+
+    const result = readRoutingRules(entries);
+
+    expect(result.rules).toEqual([
+      {
+        id: 'before-throw',
+        match: { kind: 'design' },
+        set: { minTier: 'opus' },
+      },
+      {
+        id: 'after-throw',
+        match: { kind: 'review' },
+        set: { maxTier: 'sonnet' },
+      },
+    ]);
+    expect(result.diagnostics).toEqual([
+      'routing rule 1: unreadable entry',
+      'routing rule 2: unreadable entry',
+    ]);
+  });
+
+  it('isolates a throwing array slot getter and a throwing top-level proxy without aborting or throwing', () => {
+    const arrayWithThrowingSlot: unknown[] = [
+      {
+        id: 'first-valid',
+        match: { kind: 'implement' },
+        set: { effort: 'medium' },
+      },
+      undefined,
+      {
+        id: 'last-valid',
+        match: { kind: 'tests' },
+        set: { effort: 'low' },
+      },
+    ];
+    Object.defineProperty(arrayWithThrowingSlot, 1, {
+      enumerable: true,
+      get() {
+        throw new Error('slot 1 unreadable');
+      },
+    });
+
+    const slotResult = readRoutingRules(arrayWithThrowingSlot);
+    expect(slotResult.rules.map((r) => r.id)).toEqual([
+      'first-valid',
+      'last-valid',
+    ]);
+    expect(slotResult.diagnostics).toEqual(['routing rule 1: unreadable entry']);
+
+    const throwingProxy = new Proxy([], {
+      get(_target, prop) {
+        if (prop === 'length') {
+          throw new Error('length unreadable');
+        }
+        return undefined;
+      },
+    });
+    expect(readRoutingRules(throwingProxy)).toEqual({
+      rules: [],
+      diagnostics: ['routing rules setting could not be read'],
+    });
+  });
+
+  it('removes C1 controls and Unicode line separators from diagnostics', () => {
+    const result = readRoutingRules([
+      {
+        id: 'c1-key',
+        match: {},
+        set: { effort: 'high' },
+        'csi\u009b[2Jnel\u0085ls\u2028ps\u2029end': true,
+      },
+    ]);
+
+    expect(result.rules).toEqual([]);
+    expect(result.diagnostics).toHaveLength(1);
+    expect(result.diagnostics[0]).toMatch(/^routing rule c1-key: /);
+    expect(result.diagnostics[0]).not.toMatch(/[\u0080-\u009f\u2028\u2029]/);
+  });
+
+  it('sanitizes control characters, semicolons, line breaks, and length in diagnostics for unknown properties', () => {
+    const unsafeKey = `bad;key\nwith\r\u001b\u0000\u007fctrl_${'x'.repeat(200)}`;
+    const result = readRoutingRules([
+      {
+        id: 'unsafe-key-rule',
+        match: { kind: 'implement' },
+        set: { effort: 'high' },
+        [unsafeKey]: true,
+      },
+      {
+        id: 'short-unsafe-key',
+        match: { kind: 'design' },
+        set: { effort: 'medium' },
+        'semi;line\nbreak\u001besc': true,
+      },
+      {
+        id: 'valid-sibling',
+        match: { kind: 'review' },
+        set: { maxTier: 'sonnet' },
+      },
+    ]);
+
+    expect(result.rules.map((r) => r.id)).toEqual(['valid-sibling']);
+    expect(result.diagnostics).toHaveLength(2);
+    expect(result.diagnostics[0]).toMatch(/^routing rule unsafe-key-rule: /);
+    expect(result.diagnostics[0]).toMatch(/\.\.\.$/);
+    expect(result.diagnostics[1]).toMatch(/^routing rule short-unsafe-key: /);
+
+    for (const diagnostic of result.diagnostics) {
+      expect(diagnostic.length).toBeLessThanOrEqual(160);
+      expect(diagnostic).not.toMatch(/[;\r\n]/);
+      expect(diagnostic).not.toMatch(/\s{2,}/);
+      for (let i = 0; i < diagnostic.length; i += 1) {
+        const code = diagnostic.charCodeAt(i);
+        expect(code).toBeGreaterThan(0x1f);
+        expect(code).not.toBe(0x7f);
+      }
+    }
+  });
 });
 
 describe('matchRoutingRule', () => {
@@ -272,6 +426,76 @@ describe('matchRoutingRule', () => {
         rules.slice(0, 2),
       ),
     ).toBeUndefined();
+  });
+
+  it('trims padded phase and rule roles case-sensitively without mutating the phase', () => {
+    const parsed = readRoutingRules([
+      {
+        id: 'single-role',
+        match: { role: '  backend-developer  ' },
+        set: { minTier: 'opus' },
+      },
+      {
+        id: 'role-array',
+        match: { role: ['  frontend-developer ', ' qa-engineer  '] },
+        set: { effort: 'high' },
+      },
+      {
+        id: 'catch-all',
+        match: {},
+        set: { maxTier: 'sonnet' },
+      },
+    ]);
+    expect(parsed.diagnostics).toEqual([]);
+
+    const paddedSinglePhase = {
+      kind: 'implement' as const,
+      role: '  backend-developer ',
+    };
+    expect(
+      matchRoutingRule(paddedSinglePhase, 'FEATURE', parsed.rules)?.id,
+    ).toBe('single-role');
+    expect(paddedSinglePhase.role).toBe('  backend-developer ');
+
+    expect(
+      matchRoutingRule(
+        { kind: 'implement', role: ' frontend-developer  ' },
+        'FEATURE',
+        parsed.rules,
+      )?.id,
+    ).toBe('role-array');
+
+    // Direct call with un-normalized rule role also trims consistently.
+    const unnormalizedRules: readonly RoutingRule[] = [
+      {
+        id: 'direct-padded-role',
+        match: { role: '  security-reviewer  ' },
+        set: { minTier: 'opus' },
+      },
+    ];
+    expect(
+      matchRoutingRule(
+        { kind: 'review', role: 'security-reviewer ' },
+        'FEATURE',
+        unnormalizedRules,
+      )?.id,
+    ).toBe('direct-padded-role');
+
+    // Case-sensitive comparison and blank phase role do not match role-scoped rules.
+    expect(
+      matchRoutingRule(
+        { kind: 'implement', role: 'Backend-Developer' },
+        'FEATURE',
+        parsed.rules,
+      )?.id,
+    ).toBe('catch-all');
+    expect(
+      matchRoutingRule(
+        { kind: 'implement', role: '   ' },
+        'FEATURE',
+        parsed.rules,
+      )?.id,
+    ).toBe('catch-all');
   });
 });
 

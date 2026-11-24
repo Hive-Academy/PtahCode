@@ -34,7 +34,18 @@ const TIER_ORDER: Readonly<Record<ModelTier, number>> = {
   opus: 2,
 };
 
-const RoleValueSchema = z.string().trim().min(1).max(64);
+/**
+ * Role normalization shared by the reader and matcher: trims leading and
+ * trailing whitespace while keeping comparison case-sensitive.
+ */
+function normalizeRole(role: string): string {
+  return role.trim();
+}
+
+const RoleValueSchema = z
+  .string()
+  .transform(normalizeRole)
+  .pipe(z.string().min(1).max(64));
 const SelectorListSchema = z
   .array(z.string().trim().min(1).max(200))
   .max(MAX_ROUTING_RULE_SELECTORS);
@@ -98,8 +109,23 @@ function ruleLabel(rawEntry: unknown, index: number): string {
   return String(index);
 }
 
-function sanitizeReason(reason: string): string {
-  const cleaned = reason.replace(/[;\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
+function isUnsafeDiagnosticChar(code: number): boolean {
+  return (
+    code <= 0x1f || // U+0000-U+001F (includes CR, LF, TAB, ESC)
+    (code >= 0x7f && code <= 0x9f) || // DEL and C1 controls (NEL, CSI, ...)
+    code === 0x2028 || // LINE SEPARATOR
+    code === 0x2029 || // PARAGRAPH SEPARATOR
+    code === 0x3b // ';'
+  );
+}
+
+function sanitizeDiagnostic(message: string): string {
+  let replaced = '';
+  for (let index = 0; index < message.length; index += 1) {
+    const code = message.charCodeAt(index);
+    replaced += isUnsafeDiagnosticChar(code) ? ' ' : message[index];
+  }
+  const cleaned = replaced.replace(/\s+/g, ' ').trim();
   if (cleaned.length <= MAX_DIAGNOSTIC_REASON_CHARS) {
     return cleaned;
   }
@@ -112,7 +138,7 @@ function formatZodFailure(error: z.ZodError): string {
     return 'invalid rule';
   }
   const path = first.path.length > 0 ? `${first.path.join('.')}: ` : '';
-  return sanitizeReason(`${path}${first.message}`);
+  return `${path}${first.message}`;
 }
 
 function hasAnySetField(set: RoutingRule['set']): boolean {
@@ -127,16 +153,42 @@ function hasAnySetField(set: RoutingRule['set']): boolean {
 
 /**
  * Validates raw configuration for `ptah.agentOrchestration.routingRules`.
- * Invalid rules are dropped and reported while valid siblings stay in order.
+ * Invalid or unreadable rules are dropped and reported while valid siblings
+ * stay in order. Every returned diagnostic is sanitized and length-capped.
  */
 export function readRoutingRules(raw: unknown): RoutingRulesReadResult {
   if (raw === undefined) {
     return { rules: [], diagnostics: [] };
   }
-  if (!Array.isArray(raw)) {
+
+  let rawArray: readonly unknown[];
+  let length: number;
+  try {
+    if (!Array.isArray(raw)) {
+      return {
+        rules: [],
+        diagnostics: [
+          sanitizeDiagnostic('routing rules setting must be an array'),
+        ],
+      };
+    }
+    rawArray = raw;
+    length = rawArray.length;
+  } catch {
     return {
       rules: [],
-      diagnostics: ['routing rules setting must be an array'],
+      diagnostics: [
+        sanitizeDiagnostic('routing rules setting could not be read'),
+      ],
+    };
+  }
+
+  if (typeof length !== 'number' || !Number.isInteger(length) || length < 0) {
+    return {
+      rules: [],
+      diagnostics: [
+        sanitizeDiagnostic('routing rules setting could not be read'),
+      ],
     };
   }
 
@@ -144,47 +196,63 @@ export function readRoutingRules(raw: unknown): RoutingRulesReadResult {
   const diagnostics: string[] = [];
   const seenIds = new Set<string>();
 
-  const limit = Math.min(raw.length, MAX_ROUTING_RULES);
-  if (raw.length > MAX_ROUTING_RULES) {
+  const limit = Math.min(length, MAX_ROUTING_RULES);
+  if (length > MAX_ROUTING_RULES) {
     diagnostics.push(
-      `routing rules list truncated to ${MAX_ROUTING_RULES} entries`,
+      sanitizeDiagnostic(
+        `routing rules list truncated to ${MAX_ROUTING_RULES} entries`,
+      ),
     );
   }
 
   for (let index = 0; index < limit; index += 1) {
-    const entry: unknown = raw[index];
-    const parsed = RoutingRuleSchema.safeParse(entry);
-    if (!parsed.success) {
-      diagnostics.push(
-        `routing rule ${ruleLabel(entry, index)}: ${formatZodFailure(parsed.error)}`,
-      );
-      continue;
-    }
+    try {
+      const entry: unknown = rawArray[index];
+      const parsed = RoutingRuleSchema.safeParse(entry);
+      if (!parsed.success) {
+        diagnostics.push(
+          sanitizeDiagnostic(
+            `routing rule ${ruleLabel(entry, index)}: ${formatZodFailure(parsed.error)}`,
+          ),
+        );
+        continue;
+      }
 
-    const rule: RoutingRule = parsed.data;
-    if (!hasAnySetField(rule.set)) {
-      diagnostics.push(
-        `routing rule ${rule.id}: set must specify at least one field`,
-      );
-      continue;
-    }
-    if (
-      rule.set.minTier !== undefined &&
-      rule.set.maxTier !== undefined &&
-      TIER_ORDER[rule.set.minTier] > TIER_ORDER[rule.set.maxTier]
-    ) {
-      diagnostics.push(
-        `routing rule ${rule.id}: minTier ${rule.set.minTier} is above maxTier ${rule.set.maxTier}`,
-      );
-      continue;
-    }
-    if (seenIds.has(rule.id)) {
-      diagnostics.push(`routing rule ${rule.id}: duplicate id`);
-      continue;
-    }
+      const rule: RoutingRule = parsed.data;
+      if (!hasAnySetField(rule.set)) {
+        diagnostics.push(
+          sanitizeDiagnostic(
+            `routing rule ${rule.id}: set must specify at least one field`,
+          ),
+        );
+        continue;
+      }
+      if (
+        rule.set.minTier !== undefined &&
+        rule.set.maxTier !== undefined &&
+        TIER_ORDER[rule.set.minTier] > TIER_ORDER[rule.set.maxTier]
+      ) {
+        diagnostics.push(
+          sanitizeDiagnostic(
+            `routing rule ${rule.id}: minTier ${rule.set.minTier} is above maxTier ${rule.set.maxTier}`,
+          ),
+        );
+        continue;
+      }
+      if (seenIds.has(rule.id)) {
+        diagnostics.push(
+          sanitizeDiagnostic(`routing rule ${rule.id}: duplicate id`),
+        );
+        continue;
+      }
 
-    seenIds.add(rule.id);
-    rules.push(rule);
+      seenIds.add(rule.id);
+      rules.push(rule);
+    } catch {
+      diagnostics.push(
+        sanitizeDiagnostic(`routing rule ${index}: unreadable entry`),
+      );
+    }
   }
 
   return { rules, diagnostics };
@@ -205,9 +273,33 @@ function matchesField<T>(
     : expected === actual;
 }
 
+function matchesRole(
+  expected: RoutingRuleMatchValue<string> | undefined,
+  actual: string | undefined,
+): boolean {
+  if (expected === undefined) {
+    return true;
+  }
+  if (actual === undefined) {
+    return false;
+  }
+  const normalizedActual = normalizeRole(actual);
+  if (normalizedActual.length === 0) {
+    return false;
+  }
+  if (typeof expected === 'string') {
+    return normalizeRole(expected) === normalizedActual;
+  }
+  return expected.some(
+    (candidate) => normalizeRole(candidate) === normalizedActual,
+  );
+}
+
 /**
  * Returns the first rule whose match fields all match the phase (AND across
  * fields, OR inside an array field; an empty match object matches every phase).
+ * Role values are normalized by trimming outer whitespace on both the rule and
+ * the phase while keeping comparison case-sensitive.
  */
 export function matchRoutingRule(
   phase: RoutingRuleMatchPhase,
@@ -219,7 +311,7 @@ export function matchRoutingRule(
       matchesField(rule.match.kind, phase.kind) &&
       matchesField(rule.match.shape, phase.shape) &&
       matchesField(rule.match.taskType, taskType) &&
-      matchesField(rule.match.role, phase.role),
+      matchesRole(rule.match.role, phase.role),
   );
 }
 
@@ -244,7 +336,9 @@ export class RoutingRulesSetting {
       });
       return {
         rules: [],
-        diagnostics: ['routing rules setting could not be read'],
+        diagnostics: [
+          sanitizeDiagnostic('routing rules setting could not be read'),
+        ],
       };
     }
   }
