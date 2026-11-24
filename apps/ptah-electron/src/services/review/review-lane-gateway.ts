@@ -197,6 +197,8 @@ export class ReviewLaneGateway implements IReviewLaneGateway {
             + 'including every output file it names.';
         }
         const folder = await this.usageWorkspace(parsed.repo, input.signal);
+        // The lookup swallows its own abort, so an abort during it must stop here: no agent may start.
+        if (input.signal.aborted) throw new Error('Review lane cancelled');
         // The model is a typed request field; this code never puts it into command text.
         const result = await this.manager.spawn({ task, cli: lane.cli,
           ...(lane.ptahCliId ? { ptahCliId: lane.ptahCliId } : {}), ...(parsed.model ? { model: parsed.model } : {}),
@@ -226,6 +228,8 @@ export class ReviewLaneGateway implements IReviewLaneGateway {
       return (await this.resolveUsageWorkspace(repo, signal)) ?? undefined;
     } catch (error: unknown) {
       // degradation-audit: reported - logged at warn here; the lane's usage rows keep the attempt-root key, stored but uncounted.
+      // An abort is no lookup failure and is not logged: the caller re-checks the signal and cancels before spawning.
+      if (signal.aborted) return undefined;
       this.logger?.warn('[ReviewLaneGateway] Review usage folder lookup failed', { error: messageOf(error) });
       return undefined;
     }

@@ -66,16 +66,27 @@ Tasks 5b.1-5b.4 are done. Nothing is staged or committed. The coordinator commit
 
 ## Deviations
 
-- The catch passes `undefined` as `run`, not the usage caught from a `ReviewLaneSpawnError`. This follows plan `:262`. `ReviewLaneRunner.run` already turns a spawn error after selection into a `partial` result carrying `run` (B4 `laneRunOf`). So the usage of a started lane reaches the always-save path, which the rejecting-gateway case proves. A throw out of `lanes.run` happens only before spawn, from validation or the lane list, or as `Lane mutated source`. In those cases B4 already gives no `run`, except for the mutated-source case. That case reaches the catch, and its usage, if any, is dropped (see open risk).
+- The catch passes `undefined` as `run`, not the usage caught from a `ReviewLaneSpawnError`. This follows plan `:262`. `ReviewLaneRunner.run` already turns a spawn error after selection into a `partial` result carrying `run` (B4 `laneRunOf`). So the usage of a started lane reaches the always-save path, which the rejecting-gateway case proves. A throw out of `lanes.run` happens only before spawn, from validation or the lane list, and B4 gives no `run` there. `Lane mutated source` does not throw out of `lanes.run`: the P2 review found it returns a `partial` result with `run`, so its usage is kept (see the corrected note below).
 - The plan says the lens catch closes the stage when aborted "(today)". The old code always saved `failed`. The aborted branch is new behaviour, as the batch contract asks.
 - The best-effort marker removal is a small private method on each of the three runners. No shared helper was added, because the write set allows no new file.
 
 ## Out-of-scope observations / open risks
 
-- `Lane mutated source` is thrown inside `ReviewLaneRunner.run` after spawn, so `run` was already computed when it fires. The lens catch then records `saveStageLane(null, undefined)`, which loses that lane's usage and leaves the stored lane unchanged. Recording it would mean returning `run` with that error, a runner change in B4's file. Reported, not changed.
+- Corrected by the P2 logic review: `Lane mutated source` is not a usage gap. The catch in `review-lane.runner.ts` turns it into a `partial` result that carries `lane` and `run`, so the lens always-save path stores that lane's usage. No change needed.
 - In the orchestrator `stage()`, a `closeRunningStage` that rejects inside the catch replaces the primary error. A failing `saveStage(failed)` already behaves the same way today.
 
 ## Decisions
 
 - Lens `startedAt` is held in a local string, matching orchestrator `:346`. The other option was a non-null assertion on `row.startedAt`. Evidence: the `ReviewStageRecord.startedAt` type. Reversible.
 - The orchestrator spec fake's `closeRunningStage` implements the same `state='running' AND started_at=?` guard as SQLite, so "no running row" is checked on state rather than on call counts. Reversible.
+
+## P2 fix round
+
+Fixes from `code-logic-review-P2.md`. Nothing is staged or committed.
+
+- m2: `apps/ptah-electron/src/services/review/review-lane-gateway.ts` re-checks `input.signal` after the usage folder lookup and throws `Review lane cancelled`, so the lane fails as not started (`spawned: false`, no agent id) and `manager.spawn` never runs. `usageWorkspace` no longer logs the "lookup failed" warning when the signal is aborted. New case in `review-lane-gateway.spec.ts`, covering a lookup that rejects after the abort and one that resolves after it.
+- m3: `lens-stage.runner.ts` tracks a local `pendingRun` flag. It is set after `beginStageLaneRun` and cleared after `saveStageLane`, and the catch removes the marker only while it is set. In `triage-stage.runner.ts` and `verification-stage.runner.ts` the try already spans only `lanes.run`, between begin and save, so they need no flag. A comment now records that the try scope is the guard. New cases:
+  - lens (in-memory SQLite): a `beginStageLaneRun` that throws leaves an older stored lane document with a stale marker byte-equal and makes no `saveStageLane` call; a `saveCheckpoint` that throws after the lane save keeps both the older marker and the saved run;
+  - verification: begin throwing writes nothing; a missing verdict array after the save calls `saveStageLane` exactly once;
+  - triage (`review-orchestrator.service.spec.ts`): begin throwing writes nothing; a failing lane save is not followed by a marker removal.
+- Checks (logs in `.ptah/tmp/p2fix-*.log`): review-core jest over 3 suites passed, 76/76; electron gateway jest passed, 33/33; `tsc --noEmit` on review-core `tsconfig.spec.json` and `tsconfig.lib.json` and electron `tsconfig.spec.json` all exit 0; eslint on the 8 changed files exit 0; degradation audit TOTAL 0.

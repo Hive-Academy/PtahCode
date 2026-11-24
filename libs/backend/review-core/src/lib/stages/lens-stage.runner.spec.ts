@@ -320,6 +320,41 @@ describe('LensStageRunner lane usage and abort (M6) on in-memory SQLite', () => 
     } finally { store.db.close(); }
   });
 
+  /** The stored lane document of the first lens, with one stale pending marker an earlier crash left. */
+  async function withStaleMarker(store: Awaited<ReturnType<typeof sqlite>>) {
+    await store.repository.beginStageLaneRun(store.target.attemptId, FIRST, 0);
+    return () => store.repository.getCheckpoint(store.target.attemptId, `lane:${FIRST}`, 0);
+  }
+
+  it('leaves an older stored lane document untouched when the lens throws before begin (P2 m3)', async () => {
+    const store = await sqlite();
+    try {
+      const laneDoc = await withStaleMarker(store);
+      const before = await laneDoc();
+      jest.spyOn(store.repository, 'beginStageLaneRun').mockRejectedValueOnce(new Error('begin failed'));
+      const save = jest.spyOn(store.repository, 'saveStageLane');
+      const h = harness({ repository: store.repository });
+      await expect(h.run(store.target)).rejects.toThrow('begin failed');
+      expect(save).not.toHaveBeenCalled();
+      expect(h.spawned).toEqual([]);
+      expect(await laneDoc()).toEqual(before);
+      expect(store.row(FIRST)).toMatchObject({ state: 'failed', errorSummary: 'begin failed' });
+    } finally { store.db.close(); }
+  });
+
+  it('keeps the saved run and the older marker when the lens throws after the lane save (P2 m3)', async () => {
+    const store = await sqlite();
+    try {
+      const laneDoc = await withStaleMarker(store);
+      jest.spyOn(store.repository, 'saveCheckpoint').mockRejectedValueOnce(new Error('checkpoint failed'));
+      const h = harness({ repository: store.repository, spawn: async () => ({ usage: usage(5) }) });
+      await expect(h.run(store.target)).rejects.toThrow('checkpoint failed');
+      const runs = (await laneDoc() as { usage: { runs: { ended: boolean; inputTokens: number | null }[] } }).usage.runs;
+      expect(runs).toEqual([expect.objectContaining({ ended: false }), expect.objectContaining({ ended: true, inputTokens: 5 })]);
+      expect(store.row(FIRST)).toMatchObject({ state: 'failed', family: 'codex', errorSummary: 'checkpoint failed' });
+    } finally { store.db.close(); }
+  });
+
   it('reruns an aborted lens on resume: the new lane replaces the old one and usage sums (req 7.4)', async () => {
     const store = await sqlite();
     try {

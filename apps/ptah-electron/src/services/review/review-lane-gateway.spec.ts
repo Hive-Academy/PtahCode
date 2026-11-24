@@ -503,5 +503,19 @@ describe('ReviewLaneGateway lane usage', () => {
     expect(failing.spawn.mock.calls[0][0]).not.toHaveProperty('usageWorkspaceRoot');
     expect(failing.logger.warn).toHaveBeenCalledWith('[ReviewLaneGateway] Review usage folder lookup failed', { error: 'lookup failed' });
   });
+
+  it('spawns no lane and logs no lookup warning when the signal aborts during the folder lookup (P2 m2)', async () => {
+    let controller: AbortController | undefined;
+    const rejecting = setup({ resolveUsageWorkspace: async () => { controller?.abort(); throw new Error('lookup aborted'); } });
+    controller = rejecting.controller;
+    expect(await rejection(rejecting.run())).toMatchObject({ message: 'Review lane cancelled', spawned: false, usage: null });
+    expect(rejecting.spawn).not.toHaveBeenCalled();
+    expect(rejecting.logger.warn).not.toHaveBeenCalled();
+    // A lookup that resolves after the abort is cancelled the same way.
+    const resolving = setup({ resolveUsageWorkspace: async () => { controller?.abort(); return '/repos/ptah'; } });
+    controller = resolving.controller;
+    expect(await rejection(resolving.run())).toMatchObject({ message: 'Review lane cancelled', spawned: false, usage: null });
+    expect(resolving.spawn).not.toHaveBeenCalled();
+  });
 });
 

@@ -279,6 +279,30 @@ describe('VerificationStageRunner lane usage and abort (M6)', () => {
       .run(claim, context, authoredBy(['codex']), 10_000_000, idleAttempt())).rejects.toThrow('lane exploded');
   });
 
+  it('writes no lane document when begin itself throws, so an older marker stays (P2 m3)', async () => {
+    const lanes = Object.create(ReviewLaneRunner.prototype) as ReviewLaneRunner;
+    const run = jest.spyOn(lanes, 'run');
+    const repository = Object.assign(Object.create(null) as IReviewRepository, {
+      beginStageLaneRun: jest.fn().mockRejectedValue(new Error('begin failed')), saveStageLane: jest.fn() });
+    await expect(new VerificationStageRunner(lanes, null, null, repository)
+      .run(claim, context, authoredBy(['codex']), 10_000_000, idleAttempt())).rejects.toThrow('begin failed');
+    expect(run).not.toHaveBeenCalled();
+    expect(repository.saveStageLane).not.toHaveBeenCalled();
+  });
+
+  it('does not remove a marker once the lane was saved and a later step throws (P2 m3)', async () => {
+    const lanes = Object.create(ReviewLaneRunner.prototype) as ReviewLaneRunner;
+    // A completed batch without a verdict array throws after the lane save.
+    jest.spyOn(lanes, 'run').mockResolvedValue({ status: 'completed', family: 'gemini', lane: gemini, run: usage(4),
+      output: {} as never });
+    const repository = Object.assign(Object.create(null) as IReviewRepository, {
+      beginStageLaneRun: jest.fn().mockResolvedValue(undefined), saveStageLane: jest.fn().mockResolvedValue(undefined) });
+    await expect(new VerificationStageRunner(lanes, null, null, repository)
+      .run(claim, context, authoredBy(['codex']), 10_000_000, idleAttempt())).rejects.toThrow('Verifier batch output missing');
+    expect(repository.saveStageLane).toHaveBeenCalledTimes(1);
+    expect(repository.saveStageLane).toHaveBeenCalledWith(claim.attemptId, 'verification', 3, gemini, usage(4));
+  });
+
   it('begins no run when nothing needs verifying or the caller already aborted', async () => {
     const controller = new AbortController();
     controller.abort();

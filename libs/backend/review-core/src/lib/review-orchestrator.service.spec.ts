@@ -465,4 +465,20 @@ describe('TriageStageRunner lane usage (M6)', () => {
     (t.repository.saveStageLane as jest.Mock).mockRejectedValue(new Error('disk full'));
     await expect(t.run()).rejects.toThrow('lane exploded');
   });
+
+  it('writes no lane document when begin throws, so an older marker stays (P2 m3)', async () => {
+    const t = triage(async () => ({ status: 'partial', reason: 'unused' }));
+    (t.repository.beginStageLaneRun as jest.Mock).mockRejectedValue(new Error('begin failed'));
+    await expect(t.run()).rejects.toThrow('begin failed');
+    expect(t.laneRun).not.toHaveBeenCalled();
+    expect(t.repository.saveStageLane).not.toHaveBeenCalled();
+  });
+
+  it('removes no marker when the lane save itself throws after the run (P2 m3)', async () => {
+    const t = triage(async () => ({ status: 'partial', reason: 'aborted', lane, run }));
+    (t.repository.saveStageLane as jest.Mock).mockRejectedValue(new Error('disk full'));
+    await expect(t.run()).rejects.toThrow('disk full');
+    expect(t.repository.saveStageLane).toHaveBeenCalledTimes(1);
+    expect(t.repository.saveStageLane).toHaveBeenCalledWith(claim.attemptId, 'triage', 1, lane, run);
+  });
 });

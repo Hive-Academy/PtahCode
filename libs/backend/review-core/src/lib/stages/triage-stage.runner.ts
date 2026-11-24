@@ -22,6 +22,7 @@ export class TriageStageRunner {
     const { name, ordinal } = TRIAGE_STAGE;
     await this.repository.beginStageLaneRun(claim.attemptId, name, ordinal);
     let result: ReviewLaneResult;
+    // The try spans only the lane run: the marker is removed only after begin and before the lane save (P2 m3).
     try {
       result = await this.lanes.run({ repo: claim.repo, prKey: `${claim.repo.owner}/${claim.repo.name}#${claim.prNumber}`, attemptId: claim.attemptId,
         attemptRoot: context.attemptRoot, headSha: claim.headSha, kind: 'triage',
