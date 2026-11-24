@@ -144,6 +144,7 @@ import type {
   CliAdapter,
   SdkHandle,
 } from './cli-adapters/cli-adapter.interface';
+import { LaneTurnSettingRefusal } from './cli-adapters/cli-adapter.interface';
 import type { Logger } from '@ptah-extension/vscode-core';
 import type {
   ICallerWorkspaceResolver,
@@ -5289,6 +5290,112 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       expect(manager.getStatus(agentId)).toHaveProperty('status', 'running');
 
       blockerControls.resolve(0);
+    });
+
+    describe('turn input pre-flight', () => {
+      const turnManifest = (): CliAdapterManifest => ({
+        messaging: {
+          steer: { state: 'unsupported', reason: 'x' }, interrupt: { state: 'unsupported', reason: 'x' },
+          continuation: { state: 'supported' }, resume: { state: 'supported' },
+        },
+        roleChannel: 'task-prompt', permissionModes: {},
+        networkModes: { allow: { state: 'supported' }, deny: { state: 'unsupported', reason: 'x' } },
+        limitReader: { state: 'no-reliable-source', reason: 'x' }, mcp: { state: 'unsupported', reason: 'x' },
+        turnInput: {
+          model: { state: 'supported', appliesAt: 'next-turn' },
+          effort: { state: 'supported', appliesAt: 'next-turn' },
+          images: { state: 'unsupported', reason: 'Codex lanes take no images here.' },
+          files: { state: 'supported', delivery: 'reference' },
+          commands: { state: 'supported', blocked: ['always-approve'] },
+          skills: { state: 'unsupported', reason: 'x' },
+        },
+      });
+      const trackedOf = (agentId: string) =>
+        (Reflect.get(manager, 'agents') as Map<string, { info: AgentProcessInfo }>).get(agentId);
+
+      const idleLane = async (): Promise<string> => {
+        const agentId = await spawnContinuable();
+        await completeTurn1();
+        const tracked = trackedOf(agentId);
+        if (tracked) tracked.info = { ...tracked.info, potentialCapabilities: turnManifest() };
+        return agentId;
+      };
+
+      it('refuses formatted text whose rawBody is a blocked command before any state change', async () => {
+        const agentId = await idleLane();
+        const before = { ...trackedOf(agentId)?.info };
+        await expect(manager.continueConversation(
+          agentId, '[Ptah message from user]\n/always-approve on', 'env-1', undefined, '/always-approve on',
+        )).rejects.toMatchObject({
+          code: 'unsupported',
+          message: 'Ptah does not allow /always-approve in a lane: its approval mode is set at spawn.',
+        });
+        expect(trackedOf(agentId)?.info.status).toBe(before.status);
+        expect(trackedOf(agentId)?.info.turnSeq).toBe(before.turnSeq);
+        expect(continuableControls.continueCallCount()).toBe(0);
+      });
+
+      it('refuses content the lane cannot take', async () => {
+        const agentId = await idleLane();
+        await expect(manager.continueConversation(agentId, 'look', undefined,
+          { images: [{ data: 'aGk=', mediaType: 'image/png' }] }))
+          .rejects.toMatchObject({ code: 'unsupported', message: 'Codex lanes take no images here.' });
+        expect(continuableControls.continueCallCount()).toBe(0);
+      });
+
+      it('applies settings before continue, updates the record and passes content', async () => {
+        const agentId = await idleLane();
+        const order: string[] = [];
+        const applyTurnSettings = jest.fn(async () => {
+          order.push('apply');
+          return { model: 'gpt-5', reasoningEffort: 'high', appliesAt: 'next-turn' as const };
+        });
+        const handle = continuableControls.handle as { -readonly [K in keyof SdkHandle]: SdkHandle[K] };
+        handle.applyTurnSettings = applyTurnSettings;
+        const original = handle.continue;
+        const contents: unknown[] = [];
+        handle.continue = (message: string, content?: unknown) => {
+          order.push('continue');
+          contents.push(content);
+          if (!original) throw new Error('continuable handle without continue');
+          return original(message);
+        };
+        const spawned: AgentProcessInfo[] = [];
+        manager.events.on('agent:spawned', (info) => spawned.push(info));
+        await manager.continueConversation(agentId, 'go', undefined,
+          { model: 'gpt-5', reasoningEffort: 'high', files: ['src/a.ts'] });
+        expect(applyTurnSettings).toHaveBeenCalledWith({ model: 'gpt-5', reasoningEffort: 'high' });
+        expect(order).toEqual(['apply', 'continue']);
+        expect(contents).toEqual([{ files: ['src/a.ts'] }]);
+        expect(trackedOf(agentId)?.info).toMatchObject({ model: 'gpt-5', reasoningEffort: 'high', status: 'running' });
+        expect(spawned.at(-1)).toMatchObject({ model: 'gpt-5', reasoningEffort: 'high' });
+      });
+
+      it('a settings refusal is turn-options-refused and leaves status and turnSeq unchanged', async () => {
+        const agentId = await idleLane();
+        const handle = continuableControls.handle as { -readonly [K in keyof SdkHandle]: SdkHandle[K] };
+        handle.applyTurnSettings = jest.fn(async () => {
+          throw new LaneTurnSettingRefusal('model', 'Codex did not accept the model gpt-x.');
+        });
+        const before = { ...trackedOf(agentId)?.info };
+        await expect(manager.continueConversation(agentId, 'go', undefined, { model: 'gpt-x' }))
+          .rejects.toMatchObject({ code: 'turn-options-refused', message: 'Codex did not accept the model gpt-x.' });
+        expect(trackedOf(agentId)?.info).toMatchObject({
+          status: before.status, turnSeq: before.turnSeq, model: before.model,
+        });
+        expect(continuableControls.continueCallCount()).toBe(0);
+      });
+
+      it('skips applyTurnSettings when the settings equal the record', async () => {
+        const agentId = await idleLane();
+        const tracked = trackedOf(agentId);
+        if (tracked) tracked.info = { ...tracked.info, model: 'gpt-5' };
+        const handle = continuableControls.handle as { -readonly [K in keyof SdkHandle]: SdkHandle[K] };
+        handle.applyTurnSettings = jest.fn();
+        await manager.continueConversation(agentId, 'go', undefined, { model: 'gpt-5' });
+        expect(handle.applyTurnSettings).not.toHaveBeenCalled();
+        expect(continuableControls.continueMessages).toEqual(['go']);
+      });
     });
   });
 

@@ -56,6 +56,8 @@ import type {
   OutcomeRoutingSource,
   ProviderAccountSelection,
   ExternalOwnerKey,
+  LaneTurnContent,
+  LaneTurnRequest,
 } from '@ptah-extension/shared';
 import {
   killProcessTree,
@@ -84,9 +86,17 @@ import {
   AgentMessageError,
   AgentLanePausedError,
   AgentMessageRouter,
+  turnContentOf,
   type MessageRoutableAgent,
+  type RouteTurnInput,
 } from './agent-message-router.service';
 import { resolveEffectiveLaneCapabilities } from './messaging/agent-effective-capabilities';
+import { TURN_INPUT_NOT_REPORTED } from './messaging/agent-delivery-planner';
+import {
+  blockedLaneCommand,
+  blockedLaneCommandReason,
+} from './cli-adapters/lane-command-filter';
+import { LaneTurnSettingRefusal } from './cli-adapters/cli-adapter.interface';
 import type {
   CliCommandOptions,
   SdkHandle,
@@ -239,6 +249,11 @@ export type AgentContinueErrorCode =
   | 'released'
   /** A Claude lane's account route was refused; the lane did not run. */
   | 'account_refused'
+  /**
+   * The lane refused the model or effort sent with the continuation; nothing
+   * was sent and the record is unchanged. Permanent: never retried.
+   */
+  | 'turn-options-refused'
   | 'unknown';
 
 /** Why a subprocess was released — carried on the `agent:released` event. */
@@ -2056,6 +2071,8 @@ export class AgentProcessManager {
           const observed = observedModelFrom(info.cli, segment.turnTelemetry);
           if (observed && tracked.modelLog)
             tracked.modelLog.actualModel = observed;
+          // The confirmed model the lane header shows (never the pending pick).
+          if (observed) tracked.info.observedModel = observed;
           this.budgetTelemetry.accept(agentId, tracked, segment.turnTelemetry);
         }
         this.outputBuffer.appendSegment(
@@ -3017,6 +3034,7 @@ export class AgentProcessManager {
     delivery: 'queue' | 'now' | 'steer' = 'queue',
     messageId?: string,
     allowPartialTurnLoss = false,
+    input: RouteTurnInput = {},
   ): Promise<AgentMessageOutcome> {
     const tracked = this.agents.get(agentId);
     if (!tracked) {
@@ -3066,6 +3084,7 @@ export class AgentProcessManager {
         delivery,
         messageId,
         allowPartialTurnLoss,
+        input,
       );
       if (warning && outcome.mode === 'unsupported')
         tracked.heldBudgetWarning = warning;
@@ -3082,6 +3101,84 @@ export class AgentProcessManager {
       if (warning) tracked.heldBudgetWarning = warning;
       throw error;
     }
+  }
+
+  /**
+   * Checks and applies the turn input of one continuation (B3):
+   * - a blocked `/command` in `rawBody ?? message` and content the lane
+   *   cannot take are refused `unsupported` (this repeats the coordinator
+   *   check for queued messages whose capability changed);
+   * - a model / effort that differs from the record is applied through
+   *   `applyTurnSettings`; a provider refusal is `turn-options-refused`.
+   * On success the record carries the applied settings (the next
+   * `agent:spawned` publishes them). Returns the content for `continue`.
+   */
+  private async applyContinuationTurnInput(
+    agentId: string,
+    tracked: TrackedAgent,
+    sdkHandle: SdkHandle,
+    message: string,
+    turnRequest: LaneTurnRequest | undefined,
+    rawBody: string | undefined,
+  ): Promise<LaneTurnContent | undefined> {
+    const manifest = tracked.info.potentialCapabilities ??
+      this.cliDetection.getAdapter(tracked.info.cli)?.capabilities();
+    const input = manifest
+      ? resolveEffectiveLaneCapabilities(tracked.info, manifest, sdkHandle).turnInput
+      : undefined;
+    const blocked = blockedLaneCommand(
+      rawBody ?? message,
+      input?.commands.blocked ?? manifest?.turnInput?.commands.blocked ?? [],
+    );
+    if (blocked) throw new AgentContinueError('unsupported', blockedLaneCommandReason(blocked));
+    const content = turnContentOf(turnRequest);
+    const model = turnRequest?.model !== undefined && turnRequest.model !== tracked.info.model
+      ? turnRequest.model : undefined;
+    const effort = turnRequest?.reasoningEffort !== undefined &&
+      turnRequest.reasoningEffort !== tracked.info.reasoningEffort
+      ? turnRequest.reasoningEffort : undefined;
+    if (!content && model === undefined && effort === undefined) return undefined;
+    const refuse = (reason: string | undefined, fallback: string): never => {
+      throw new AgentContinueError('unsupported', reason ?? fallback);
+    };
+    if (!input) refuse(TURN_INPUT_NOT_REPORTED, TURN_INPUT_NOT_REPORTED);
+    if (content?.images && input?.images.state !== 'supported')
+      refuse(input?.images.reason, 'This lane cannot take images.');
+    if (content?.files && input?.files.state !== 'supported')
+      refuse(input?.files.reason, 'This lane cannot take attached files.');
+    if (model !== undefined && input?.model.state !== 'supported')
+      refuse(input?.model.reason, 'This lane cannot change its model per turn.');
+    if (effort !== undefined && input?.effort.state !== 'supported')
+      refuse(input?.effort.reason, 'This lane cannot change its reasoning effort per turn.');
+    if ((model !== undefined || effort !== undefined) && sdkHandle.applyTurnSettings) {
+      let applied: Awaited<ReturnType<NonNullable<SdkHandle['applyTurnSettings']>>>;
+      try {
+        applied = await sdkHandle.applyTurnSettings({
+          ...(model !== undefined ? { model } : {}),
+          ...(effort !== undefined ? { reasoningEffort: effort } : {}),
+        });
+      } catch (error: unknown) {
+        const reason = error instanceof LaneTurnSettingRefusal
+          ? error.reason
+          : `${tracked.info.displayName ?? tracked.info.cli} could not apply the requested model or effort.`;
+        this.logger.warn('[AgentProcessManager] Lane refused turn settings', {
+          agentId,
+          field: error instanceof LaneTurnSettingRefusal ? error.field : 'unknown',
+        });
+        throw new AgentContinueError('turn-options-refused', reason);
+      }
+      // The await let other work run: the record must still be this idle lane.
+      if (this.agents.get(agentId) !== tracked)
+        throw new AgentContinueError('released', 'Lane was replaced while applying turn settings.');
+      if (tracked.info.status === 'running' || tracked.info.status === 'starting')
+        throw new AgentContinueError('busy', `Agent ${agentId} is busy (status: ${tracked.info.status})`);
+      tracked.info = {
+        ...tracked.info,
+        ...(model !== undefined ? { model: applied.model ?? model } : {}),
+        ...(effort !== undefined ? { reasoningEffort: applied.reasoningEffort ?? effort } : {}),
+      };
+    }
+    return content;
   }
 
   getAgentMessageStatus(agentId: string, messageId: string) {
@@ -3130,6 +3227,8 @@ export class AgentProcessManager {
     agentId: string,
     message: string,
     messageId?: string,
+    turnRequest?: LaneTurnRequest,
+    rawBody?: string,
   ): Promise<void> {
     const tracked = this.agents.get(agentId);
     if (!tracked) {
@@ -3218,6 +3317,12 @@ export class AgentProcessManager {
       );
     }
 
+    // Turn input pre-flight, before `turnSeq` or `status` change: a refusal
+    // leaves the record exactly as it was.
+    const content = await this.applyContinuationTurnInput(
+      agentId, tracked, sdkHandle, message, turnRequest, rawBody,
+    );
+
     const turn = Symbol('lane-turn');
     this.turns.set(tracked, turn);
 
@@ -3278,7 +3383,9 @@ export class AgentProcessManager {
       // flush window. Stamp the edge BEFORE the continuation can emit, so the
       // flush-time merge never fuses the two turns (TASK_2026_466 defect 5).
       this.outputBuffer.markTurnBoundary(agentId);
-      outcome = await sdkHandle.continue(message);
+      outcome = content
+        ? await sdkHandle.continue(message, content)
+        : await sdkHandle.continue(message);
     } catch (error: unknown) {
       if (!this.isCurrentTurn(tracked, turn)) throw error;
       if (accountScoped) {

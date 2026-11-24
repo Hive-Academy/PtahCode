@@ -1,6 +1,6 @@
 # Batches - TASK_2026_2320_lnpar
 
-Total tasks: 49 | Batches: 30 | Complete: 18/30
+Total tasks: 49 | Batches: 30 | Complete: 19/30
 
 Source: `implementation-plan.md` revision 3 plus "Binding notes from Gate 2" (R3-1, R3-2 bind
 Batch 20), `task-description.md`, `design-spec.md`, `prototype/README.md`, `parity-inventory.md`,
@@ -883,7 +883,7 @@ Edge cases:
 
 - Artifacts exist; scoped commands pass.
 
-## Batch 19: B3d router and manager continueConversation turn pipeline - PENDING (AFTER REBASE)
+## Batch 19: B3d router and manager continueConversation turn pipeline - COMPLETE
 
 - Shape: logic
 - Estimated weight (tokens): ~36k (router 6.2k + spec ranges ~6k; manager ranges ~10k; manager spec ranges ~10k; plan ~3k)
@@ -914,8 +914,8 @@ Edge cases:
 - Tasks: 2 | Depends on: Batches 15, 17
 - Phase: P5 Messaging core
 
-### Task 19.1: Router queue entry turn/rawBody, dispatcher signature, shared resolver - PENDING
-### Task 19.2: Manager continueConversation pre-flight, settings, content, observedModel - PENDING
+### Task 19.1: Router queue entry turn/rawBody, dispatcher signature, shared resolver - COMPLETE
+### Task 19.2: Manager continueConversation pre-flight, settings, content, observedModel - COMPLETE
 
 - Depends on: Task 19.1
 - Validation notes: heavy-file risk; edit only `continueConversation` and the telemetry line
