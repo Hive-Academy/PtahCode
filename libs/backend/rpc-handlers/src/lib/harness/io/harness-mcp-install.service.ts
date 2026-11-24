@@ -26,7 +26,10 @@
 
 import { inject, injectable } from 'tsyringe';
 import type { DependencyContainer } from 'tsyringe';
-import { McpInstallService } from '@ptah-extension/cli-agent-runtime';
+import {
+  McpInstallService,
+  refreshBoundMcpGateway,
+} from '@ptah-extension/cli-agent-runtime';
 import { PLATFORM_TOKENS } from '@ptah-extension/platform-core';
 import {
   HARNESS_SYNC_TOKENS,
@@ -67,6 +70,8 @@ export class HarnessMcpInstallService {
             HARNESS_SYNC_TOKENS.RECONCILER,
           )
         : null,
+      undefined,
+      { onIntentsChanged: () => refreshBoundMcpGateway(container) },
     );
   }
 

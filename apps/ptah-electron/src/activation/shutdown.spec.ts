@@ -100,6 +100,7 @@ function quitDeps(refs: BootRefs) {
     flushSessionMetadataStores: jest.fn(async () => undefined),
     clearTimers: jest.fn(),
     disposeVoiceWorker: jest.fn(),
+    disposeMcpGateway: jest.fn(),
     deferQuit: jest.fn(),
     quit: jest.fn(),
   };
@@ -843,5 +844,41 @@ describe('will-quit — the tree-sitter worker', () => {
     handleWillQuit(deps);
     await flushMicrotasks();
     expect(order).toContain('diagnostics');
+  });
+});
+
+describe('will-quit — MCP gateway dispose (TASK_2026_979 B23)', () => {
+  beforeEach(() => {
+    jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('disposes the gateway after SQLite closes, before the quit is issued', async () => {
+    const order: string[] = [];
+    const deps = quitDeps(minimalRefs(order));
+    deps.disposeMcpGateway.mockImplementation(() => { order.push('mcpGateway'); });
+    handleWillQuit(deps);
+    await flushMicrotasks();
+    expect(deps.disposeMcpGateway).toHaveBeenCalledTimes(1);
+    expect(order.indexOf('mcpGateway')).toBeGreaterThan(order.indexOf('sqliteConnection'));
+    expect(order.indexOf('mcpGateway')).toBeLessThan(order.indexOf('diagnostics'));
+  });
+
+  it('keeps disposing when the gateway dispose throws', async () => {
+    const order: string[] = [];
+    const deps = quitDeps(minimalRefs(order));
+    deps.disposeMcpGateway.mockImplementation(() => {
+      throw new Error('stdio host gone');
+    });
+    handleWillQuit(deps);
+    await flushMicrotasks();
+    expect(order).toContain('diagnostics');
+    expect(console.warn).toHaveBeenCalledWith(
+      expect.stringContaining('MCP gateway dispose failed'),
+      'stdio host gone',
+    );
   });
 });

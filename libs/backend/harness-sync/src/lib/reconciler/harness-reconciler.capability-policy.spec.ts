@@ -30,7 +30,6 @@ import { HarnessStateStore } from '../gitignore/harness-state-store';
 import { HarnessManifestBuilder } from '../manifest/harness-manifest.builder';
 import { ManagedManifestStore } from '../manifest-store/managed-manifest';
 import type { HarnessSourceLayout } from '../sources/harness-source.port';
-import { McpIntentStore } from '../sources/mcp-intent-store';
 import {
   createPluginConfigSourceResolver,
   createStaticSourceResolver,
@@ -207,11 +206,7 @@ describe('HarnessReconcilerService — layered capability policy', () => {
       makeFakeLogger(),
       new HarnessManifestBuilder(),
       store,
-      createPluginConfigSourceResolver(
-        readerFactory,
-        layout(),
-        new McpIntentStore(join(tempHome, '.ptah', 'mcp-installed.json')),
-      ),
+      createPluginConfigSourceResolver(readerFactory, layout()),
       [new ClaudeTarget(store)],
     );
   }

@@ -20,7 +20,10 @@ import {
   ALLOWED_METHOD_PREFIXES,
   RpcUserError,
 } from '@ptah-extension/vscode-core';
-import type { IWorkspaceProvider } from '@ptah-extension/platform-core';
+import type {
+  IMcpGateway,
+  IWorkspaceProvider,
+} from '@ptah-extension/platform-core';
 import {
   CAPABILITY_POLICY_UNKNOWN_ERROR_NAME,
   type CapabilityEntry,
@@ -120,6 +123,7 @@ function setup(
   options: {
     root?: string | undefined;
     resolver?: jest.Mocked<ICapabilityResolver>;
+    gateway?: Pick<IMcpGateway, 'refresh'>;
   } = {},
 ) {
   const logger = createLogger();
@@ -134,6 +138,7 @@ function setup(
     rpcHandler,
     workspaceProvider,
     resolver,
+    options.gateway as IMcpGateway | undefined,
   ).register();
   const call = (method: string, params?: unknown) => {
     const handler = registered.get(method);
@@ -236,6 +241,38 @@ describe('CapabilityRpcHandlers', () => {
   });
 
   describe('capabilities:setEnabled', () => {
+    it('refreshes the MCP gateway after a saved toggle (TASK_2026_979 B23)', async () => {
+      const gateway = { refresh: jest.fn(async () => undefined) };
+      const { call } = setup({ gateway });
+
+      await call('capabilities:setEnabled', {
+        scope: 'workspace',
+        kind: 'mcp',
+        id: 'github',
+        enabled: false,
+      });
+
+      expect(gateway.refresh).toHaveBeenCalledTimes(1);
+    });
+
+    it('does not refresh the MCP gateway when the write is rejected', async () => {
+      const gateway = { refresh: jest.fn(async () => undefined) };
+      const resolver = createResolver();
+      resolver.set.mockRejectedValue(new Error('EACCES /secret/path'));
+      const { call } = setup({ resolver, gateway });
+
+      await expect(
+        call('capabilities:setEnabled', {
+          scope: 'workspace',
+          kind: 'mcp',
+          id: 'github',
+          enabled: false,
+        }),
+      ).rejects.toThrow();
+
+      expect(gateway.refresh).not.toHaveBeenCalled();
+    });
+
     it('writes one ordinary toggle with the workspace as cwd', async () => {
       const { call, resolver } = setup();
 

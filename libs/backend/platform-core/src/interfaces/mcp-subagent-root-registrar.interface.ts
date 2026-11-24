@@ -1,12 +1,14 @@
 /**
- * IMcpSubagentRootRegistrar — keeps a Ptah MCP entry in a folder's
- * `.mcp.json` for as long as an agent session runs there.
+ * IMcpSubagentRootRegistrar — answers whether an agent session started in a
+ * folder gets Ptah's MCP server.
  *
- * Claude Code subagents (the `Task` tool) do not inherit the parent session's
- * programmatic MCP servers; they read `<cwd>/.mcp.json`. The in-process MCP
- * server writes that entry for every OPEN workspace folder only, so a session
- * started in a folder that is not open — a child session's git worktree — would
- * have Ptah tools in its main thread and none in its subagents.
+ * A readiness answer, not a write (TASK_2026_979 B19). Ptah no longer writes a
+ * `ptah` entry into any `.mcp.json`: every session, its Claude `Task`
+ * subagents and every CLI lane get `ptah` in their own spawn config, so a
+ * session started in a folder that is not open — a child session's git
+ * worktree — has Ptah tools without anything written there. The port and its
+ * retain/release pairing stay so callers are unchanged; the implementation
+ * holds nothing.
  *
  * A port rather than the concrete server for the same reason as
  * `IMcpServerStatus`: the consumer (cli-agent-runtime) must not depend on
@@ -17,33 +19,26 @@
  */
 export interface IMcpSubagentRootRegistrar {
   /**
-   * Add `root` to the folders whose `.mcp.json` carries the Ptah entry, and
-   * write it before resolving.
+   * Whether a session in `root` gets Ptah's server: true when the HTTP MCP
+   * server is up. Nothing is written or retained.
    *
-   * Never rejects. `registered: false` (with a `reason`) means no entry is on
-   * disk for `root` and nothing was retained: the session may still start, but
-   * its subagents have no Ptah tools. Retention is counted per root: each
-   * successful retain needs exactly one {@link releaseRoot}, so sessions that
-   * share a worktree keep the entry until the last one releases it.
+   * Never rejects. `registered: false` (with a `reason`) means the server is
+   * not running, or `root` is not an absolute path: the session may still
+   * start, but without Ptah tools. Callers still pair each successful retain
+   * with one {@link releaseRoot}.
    */
   retainRoot(root: string): Promise<McpSubagentRootRetention>;
 
   /**
-   * Give back one hold on `root`. When the last hold is released, its entry is
-   * removed unless the folder is also an open workspace folder (which keeps
-   * its own entry).
-   *
-   * Call it once per successful retain: a second call for the same hold drops
-   * another holder's count. Releasing a root that is not retained does nothing. Never
-   * rejects; a failed removal is logged and retried by the server's next
-   * reconcile or stop.
+   * Give back one retain on `root`. Nothing is held, so this does nothing; it
+   * stays so callers keep their retain/release pairing. Never rejects.
    */
   releaseRoot(root: string): Promise<void>;
 }
 
 /** The outcome of {@link IMcpSubagentRootRegistrar.retainRoot}. */
 export interface McpSubagentRootRetention {
-  /** True only when a Ptah entry is on disk in `<root>/.mcp.json`. */
+  /** True when a session in the root gets Ptah's server in its spawn config. */
   readonly registered: boolean;
   /** Present exactly when `registered` is false. */
   readonly reason?: string;

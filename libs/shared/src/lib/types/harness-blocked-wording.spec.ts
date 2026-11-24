@@ -368,10 +368,10 @@ describe('the approved action strings', () => {
       expect(
         action.replace(HARNESS_BLOCKED_RECONCILE_STEPS[surface], '<step>'),
       ).toBe(
-        'Move the occupant aside — the file or directory at each path, or the ' +
-          'conflicting key in each config file — <step> Nothing here proves ' +
-          'Ptah wrote these, so they may be your own work: keep what you move, ' +
-          'and read it before you discard anything.',
+        'Move the occupant aside — the file or directory at each path — ' +
+          '<step> Nothing here proves Ptah wrote these, so they may be your ' +
+          'own work: keep what you move, and read it before you discard ' +
+          'anything.',
       );
     }
   });

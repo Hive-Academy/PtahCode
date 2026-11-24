@@ -32,15 +32,16 @@
  *   edit. Uninstalling it reports that, and the Installed tab gives the
  *   removal instruction instead of a delete button (decision D2).
  *
- * ## `listInstalled` reads FOUR sources, not one
+ * ## `listInstalled` reads FIVE sources, not one
  *
- * The harness MCP config files (read-only, through the facets' `inspect`),
- * `~/.claude.json`, the Smithery manifest and the OAuth manifest. Every row
- * carries its {@link McpServerOrigin}, a display label, and the
- * {@link McpRemovalKind} that says how — or whether — it can be removed. Rows
- * are deduplicated by (`serverKey`, `origin`, `configPath`, `scope`) and NOT
- * by key alone: the same key legitimately lives in several config files, and
- * each of those is its own row.
+ * The intent store (servers installed through Ptah, which no file carries
+ * since decision row 10), the harness MCP config files (read-only, through the
+ * facets' `inspect`), `~/.claude.json`, the Smithery manifest and the OAuth
+ * manifest. Every row carries its {@link McpServerOrigin}, a display label,
+ * and the {@link McpRemovalKind} that says how — or whether — it can be
+ * removed. Rows are deduplicated by (`serverKey`, `origin`, `configPath`,
+ * `scope`, `target`) and NOT by key alone: the same key legitimately lives in
+ * several config files, and each of those is its own row.
  *
  * claude.ai ACCOUNT connectors (Gmail, Calendar, Drive, Canva) are deliberately
  * absent. They exist nowhere on disk; the frontend derives those rows from live
@@ -90,6 +91,7 @@ const ALL_TARGETS: McpInstallTarget[] = [
 /** Display label per origin. One place, so the four readers cannot disagree. */
 const ORIGIN_LABELS: Record<McpServerOrigin, string> = {
   'harness-config': 'Config file',
+  'ptah-intent': 'Ptah',
   'claude-user': 'Claude CLI',
   smithery: 'Smithery',
   oauth: 'OAuth',
@@ -129,6 +131,12 @@ export interface McpInstallServiceOptions {
    * cause is dropped.
    */
   warn?: (message: string, detail?: unknown) => void;
+  /**
+   * Called after an install, a make-global or an uninstall saved its intent
+   * change. The host passes `refreshBoundMcpGateway`, so a running session
+   * hears the change at once instead of at the gateway's next poll.
+   */
+  onIntentsChanged?: () => void;
 }
 
 /** The detail logged for a caught cause: never sent to the UI. */
@@ -227,6 +235,7 @@ export class McpInstallService {
       if (!(error instanceof McpIntentPersistError)) throw error;
       return this.intentNotSaved(targets, serverKey, error);
     }
+    this.options.onIntentsChanged?.();
     return targets.map((target) => recorded(target));
   }
 
@@ -247,6 +256,7 @@ export class McpInstallService {
       workspaceRoot,
       homeTargets,
     );
+    this.options.onIntentsChanged?.();
     return targets.map((target) => recorded(target));
   }
 
@@ -301,6 +311,7 @@ export class McpInstallService {
       if (!(error instanceof McpIntentPersistError)) throw error;
       return this.intentNotSaved(visited, serverKey, error);
     }
+    this.options.onIntentsChanged?.();
     return visited.map((target) =>
       recordedTargets.has(target)
         ? recorded(target)
@@ -339,9 +350,10 @@ export class McpInstallService {
   async listInstalled(workspaceRoot?: string): Promise<InstalledMcpServer[]> {
     const { declarations } = await this.listDeclarations(workspaceRoot);
 
-    // Identity is (origin, configPath, serverKey, scope). NOT the key alone:
-    // one server installed to five targets is five real rows in five real
-    // files, and that is exactly how the Installed tab groups them today.
+    // Identity is (origin, configPath, serverKey, scope, target). NOT the key
+    // alone: one server installed to five targets is five real rows in five
+    // real files, and that is exactly how the Installed tab groups them
+    // today. The target matters for intent rows, which share one store file.
     const seen = new Set<string>();
     const deduped: InstalledMcpServer[] = [];
     for (const row of declarations) {
@@ -350,6 +362,7 @@ export class McpInstallService {
         row.configPath,
         row.serverKey,
         row.scope,
+        row.target ?? null,
       ]);
       if (seen.has(identity)) continue;
       seen.add(identity);
@@ -375,16 +388,21 @@ export class McpInstallService {
   ): Promise<McpDeclarationInventory> {
     const harness = await this.harnessConfigRows(workspaceRoot);
     const declarations = [
+      ...this.intentRows(workspaceRoot),
       ...harness.rows,
       ...this.claudeUserRows(workspaceRoot),
       ...this.smitheryRows(),
       ...this.oauthRows(),
     ].map((row) => ({
       ...row,
-      scope: classifyMcpScope({
-        origin: row.origin,
-        ...(row.target === undefined ? {} : { target: row.target }),
-      }),
+      // An intent row carries the scope it was recorded in; every other
+      // source is classified by where it was read from.
+      scope:
+        row.scope ??
+        classifyMcpScope({
+          origin: row.origin,
+          ...(row.target === undefined ? {} : { target: row.target }),
+        }),
     }));
     return { declarations, sourceStatus: harness.sourceStatus };
   }
@@ -462,6 +480,76 @@ export class McpInstallService {
       }
     }
     return { rows, sourceStatus };
+  }
+
+  /**
+   * The servers installed through Ptah (`~/.ptah/mcp-installed.json`) that
+   * apply here: the global record and this workspace's own, one row per
+   * recorded target. No config file carries them; the gateway serves them, so
+   * without these rows an install would never show on the Installed tab.
+   * Each is removed by forgetting its intent (`ptah-managed`).
+   */
+  private intentRows(workspaceRoot?: string): InstalledMcpServer[] {
+    try {
+      return this.readIntentRows(workspaceRoot ?? '');
+    } catch (error: unknown) {
+      // degradation-audit: optional-capability - an unreadable intent file
+      // costs the Ptah rows (logged); every other source still renders, and
+      // the gateway reports the same file as unreadable on its own path.
+      this.options.warn?.(
+        '[mcp-install] The MCP intent store could not be read',
+        causeDetail(error),
+      );
+      return [];
+    }
+  }
+
+  /** {@link intentRows} without the read guard. Throws what the store throws. */
+  private readIntentRows(root: string): InstalledMcpServer[] {
+    const rows: InstalledMcpServer[] = [];
+    const push = (
+      serverKey: string,
+      config: McpServerConfig,
+      targets: readonly McpInstallTarget[],
+      scope: CapabilityScope,
+    ): void => {
+      for (const target of targets) {
+        rows.push({
+          serverKey,
+          target,
+          configPath: this.intents.filePath,
+          config,
+          managedByPtah: true,
+          origin: 'ptah-intent',
+          originLabel: ORIGIN_LABELS['ptah-intent'],
+          removal: 'ptah-managed',
+          scope,
+        });
+      }
+    };
+
+    // `listFor('')` is the global record alone.
+    for (const intent of this.intents.listFor('')) {
+      push(intent.serverKey, intent.config, intent.targets, 'global');
+    }
+    if (root.trim() === '') return rows;
+
+    // `listFor(root)` merges in this workspace's record, whose config is the
+    // one that lists the workspace record's targets.
+    const applying = this.intents.listFor(root);
+    for (const serverKey of new Set(applying.map((i) => i.serverKey))) {
+      const local = this.intents.targetsIn(serverKey, 'workspace', root);
+      if (local.length === 0) continue;
+      const intent = applying.find(
+        (candidate) =>
+          candidate.serverKey === serverKey &&
+          candidate.targets.some((target) => local.includes(target)),
+      );
+      if (intent !== undefined) {
+        push(serverKey, intent.config, local, 'workspace');
+      }
+    }
+    return rows;
   }
 
   /** `~/.claude.json`, user scope and this workspace's project scope. */

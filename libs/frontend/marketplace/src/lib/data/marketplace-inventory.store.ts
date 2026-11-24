@@ -242,13 +242,14 @@ export function serverGroupScope(
 }
 
 /**
- * Whether "Make global" applies: a Ptah-managed workspace install read from a
- * harness config. Hand-written, Smithery, OAuth and connector rows have no
- * recorded intent the conversion could move.
+ * Whether "Make global" applies: a Ptah-managed workspace install, read from
+ * the intent store or from a harness config Ptah once wrote. Hand-written,
+ * Smithery, OAuth and connector rows have no recorded intent the conversion
+ * could move.
  */
 export function canMakeServerGlobal(group: InstalledServerGroup): boolean {
   return (
-    group.origin === 'harness-config' &&
+    (group.origin === 'ptah-intent' || group.origin === 'harness-config') &&
     group.servers.some(
       (server) => server.managedByPtah && server.scope === 'workspace',
     )

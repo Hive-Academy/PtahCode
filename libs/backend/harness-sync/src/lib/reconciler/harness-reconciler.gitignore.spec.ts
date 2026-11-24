@@ -82,14 +82,6 @@ describe('HarnessReconcilerService × .gitignore (E23)', () => {
       overlayPluginPaths: [],
       disabledSkillIds: [],
       disabledPluginIds: [],
-      mcpIntents: [
-        {
-          serverKey: 'github',
-          registryName: 'io.github.example/server',
-          config: { type: 'stdio', command: 'npx', args: ['-y', 'gh-mcp'] },
-          targets: ['claude', 'cursor'],
-        },
-      ],
     };
   }
 

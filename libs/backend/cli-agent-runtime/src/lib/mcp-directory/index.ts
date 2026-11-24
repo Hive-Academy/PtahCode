@@ -145,3 +145,4 @@ export type {
  */
 export { McpGateway } from './gateway/mcp-gateway.service';
 export type { McpGatewayDeps } from './gateway/mcp-gateway.service';
+export { refreshBoundMcpGateway } from './gateway/refresh-bound-gateway';

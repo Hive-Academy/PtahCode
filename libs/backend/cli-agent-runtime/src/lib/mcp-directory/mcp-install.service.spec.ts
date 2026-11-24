@@ -530,6 +530,143 @@ describe('McpInstallService', () => {
     });
   });
 
+  describe('Installed rows from the intent store (TASK_2026_979 B23)', () => {
+    const stdio = { type: 'stdio' as const, command: 'node' };
+    const intentFile = (): string =>
+      path.join(tmp, '.ptah', 'mcp-installed.json');
+
+    it('lists a workspace install, which no config file carries, as a removable Ptah row', async () => {
+      await service().install('r/k', 'k', stdio, ['claude', 'cursor'], tmp);
+
+      const rows = await service().listInstalled(tmp);
+
+      expect(rows).toEqual(
+        ['claude', 'cursor'].map((target) => ({
+          serverKey: 'k',
+          target,
+          configPath: intentFile(),
+          config: stdio,
+          managedByPtah: true,
+          origin: 'ptah-intent',
+          originLabel: 'Ptah',
+          removal: 'ptah-managed',
+          scope: 'workspace',
+        })),
+      );
+    });
+
+    it('lists a global install in any workspace and with no folder open', async () => {
+      await service().install(
+        'r/g',
+        'g',
+        stdio,
+        ['codex'],
+        undefined,
+        'global',
+      );
+
+      for (const root of [tmp, undefined]) {
+        const rows = await service().listInstalled(root);
+        expect(rows).toEqual([
+          expect.objectContaining({
+            serverKey: 'g',
+            target: 'codex',
+            origin: 'ptah-intent',
+            scope: 'global',
+          }),
+        ]);
+      }
+    });
+
+    it('gives a key recorded in both scopes one row per scope, each with its own config', async () => {
+      const wsConfig = { type: 'stdio' as const, command: 'ws' };
+      await service().install(
+        'r/k',
+        'k',
+        stdio,
+        ['codex'],
+        undefined,
+        'global',
+      );
+      await service().install('r/k', 'k', wsConfig, ['claude'], tmp);
+
+      const rows = await service().listInstalled(tmp);
+
+      expect(rows.map((row) => [row.target, row.scope, row.config])).toEqual([
+        ['codex', 'global', stdio],
+        ['claude', 'workspace', wsConfig],
+      ]);
+    });
+
+    it('drops the row once the install is uninstalled', async () => {
+      await service().install('r/k', 'k', stdio, ['claude'], tmp);
+      await service().uninstall('k', ['claude'], tmp);
+
+      expect(await service().listInstalled(tmp)).toEqual([]);
+    });
+
+    it('feeds the same rows to the capability inventory', async () => {
+      await service().install('r/k', 'k', stdio, ['claude'], tmp);
+
+      const { declarations } = await service().listDeclarations(tmp);
+
+      expect(declarations).toEqual([
+        expect.objectContaining({ serverKey: 'k', origin: 'ptah-intent' }),
+      ]);
+    });
+
+    it('lists no Ptah rows, and logs why, when the intent file is unreadable', async () => {
+      fs.writeFileSync(intentFile(), '{ not json', 'utf-8');
+      const warn = jest.fn();
+      const svc = new McpInstallService(null, intents, { homeDir: tmp, warn });
+
+      const rows = await svc.listInstalled(tmp);
+
+      expect(rows).toEqual([]);
+      expect(warn).toHaveBeenCalledWith(
+        '[mcp-install] The MCP intent store could not be read',
+        expect.anything(),
+      );
+    });
+  });
+
+  describe('onIntentsChanged (TASK_2026_979 B23)', () => {
+    const stdio = { type: 'stdio' as const, command: 'node' };
+
+    it('fires after a saved install, make-global and uninstall', async () => {
+      const onIntentsChanged = jest.fn();
+      const svc = new McpInstallService(null, intents, {
+        homeDir: tmp,
+        onIntentsChanged,
+      });
+
+      await svc.install('r/k', 'k', stdio, ['claude'], tmp);
+      expect(onIntentsChanged).toHaveBeenCalledTimes(1);
+      await svc.makeGlobal('k', tmp, []);
+      expect(onIntentsChanged).toHaveBeenCalledTimes(2);
+      await svc.uninstall('k', undefined, tmp);
+      expect(onIntentsChanged).toHaveBeenCalledTimes(3);
+    });
+
+    it('does not fire when the intent change was not saved', async () => {
+      fs.writeFileSync(
+        path.join(tmp, '.ptah', 'mcp-installed.json'),
+        '{ not json',
+        'utf-8',
+      );
+      const onIntentsChanged = jest.fn();
+      const svc = new McpInstallService(null, intents, {
+        homeDir: tmp,
+        onIntentsChanged,
+      });
+
+      const results = await svc.install('r/k', 'k', stdio, ['claude'], tmp);
+
+      expect(results[0]).toMatchObject({ success: false });
+      expect(onIntentsChanged).not.toHaveBeenCalled();
+    });
+  });
+
   describe('uninstall', () => {
     const stdio = { type: 'stdio' as const, command: 'node' };
 

@@ -479,9 +479,9 @@ function harnessHealthLabel(
  * cannot drift from it:
  *
  *   - every planner pushes a blocked path into BOTH lists in one step
- *     (`harness-sync/.../claude-target.ts:277`, `workspace-target.ts:164-166`,
- *     `mcp/mcp-facet-planner.ts:107-108`), so `blocked ⊆ foreign` holds by
- *     construction rather than by two lists being kept in step;
+ *     (`harness-sync/.../claude-target.ts`, `workspace-target.ts`), so
+ *     `blocked ⊆ foreign` holds by construction rather than by two lists
+ *     being kept in step;
  *   - `missing` is the planned (or failed) writes PLUS `plan.blocked`, and a
  *     desired path is either written or blocked and never both — so the only
  *     members of `missing` that can also be `foreign` are the blocked ones.

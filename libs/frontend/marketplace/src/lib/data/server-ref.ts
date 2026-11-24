@@ -30,6 +30,7 @@ export interface ServerRef {
  */
 const KNOWN_ORIGINS: Readonly<Record<McpServerOrigin, true>> = {
   'harness-config': true,
+  'ptah-intent': true,
   'claude-user': true,
   smithery: true,
   oauth: true,

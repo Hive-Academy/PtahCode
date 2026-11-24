@@ -125,6 +125,15 @@ export interface IMcpGateway {
   /** Fires when any scope's tool list may have changed. */
   onToolsChanged(listener: () => void): IDisposable;
 
+  /**
+   * Drop every cached source set and re-read each workspace root the gateway
+   * serves, now. `onToolsChanged` fires for every root whose served set
+   * changed. Call it after an install, an uninstall or a capability toggle so
+   * a running session hears the change at once instead of at the next poll.
+   * Never rejects.
+   */
+  refresh(): Promise<void>;
+
   /** Close every upstream connection and drop listeners. */
   dispose(): void;
 }

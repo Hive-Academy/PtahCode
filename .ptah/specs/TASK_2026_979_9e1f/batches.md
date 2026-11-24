@@ -1079,7 +1079,7 @@ P2 gate:
 
 ### Task 22.2: agy spawn-write removal - COMPLETE
 
-## Batch 23: P2 fix reserve - PENDING
+## Batch 23: P2 fix reserve - COMPLETE
 
 - Id: P2-B10 | Phase: P2 | Shape: logic
 - Purpose: a placeholder for an overflow from B17 (more than 8 files), a `HttpMcpServer.stop`

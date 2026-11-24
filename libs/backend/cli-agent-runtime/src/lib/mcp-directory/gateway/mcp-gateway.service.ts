@@ -56,7 +56,9 @@
  * `onToolsChanged` fires when a root's served set or aliases change, when a
  * listed server's tools change (an upstream `list_changed` included), when a
  * server loses its tools to `needs-auth`, and when a cold-start straggler
- * lands. While anyone listens, one 30 s poll re-reads the known roots (so a
+ * lands. {@link refresh} re-reads the known roots at once; the host calls it
+ * after an install, an uninstall or a capability toggle. While anyone
+ * listens, one 30 s poll also re-reads the known roots (so a
  * connector enabled, disabled, connected or removed is noticed without a
  * list) and retries servers whose back-off has expired (so a reconnected
  * token is noticed).
@@ -94,8 +96,14 @@ import {
 } from './server-sources';
 import { StdioServerHost } from './stdio-server-host';
 import {
+  errorName,
+  errorResult,
+  errorText,
+  isProtocolError,
+  normalizeCallResult,
+} from './gateway-call-result';
+import {
   createUpstreamClient,
-  type UpstreamCallResult,
   type UpstreamClient,
   type UpstreamClientFactory,
   type UpstreamEndpoint,
@@ -365,6 +373,20 @@ export class McpGateway implements IMcpGateway {
         if (this.listeners.size === 0) this.stopPoll();
       },
     };
+  }
+
+  async refresh(): Promise<void> {
+    if (this.disposed) return;
+    this.deps.sources.invalidate();
+    try {
+      await this.rereadKnownRoots();
+    } catch (error: unknown) {
+      // degradation-audit: reported - logged; callers fire and forget, and
+      // the next list or poll re-reads the roots anyway.
+      this.deps.logger?.warn('MCP gateway refresh failed', {
+        error: errorName(error),
+      });
+    }
   }
 
   dispose(): void {
@@ -824,19 +846,25 @@ export class McpGateway implements IMcpGateway {
     if (this.polling || this.disposed) return;
     this.polling = true;
     try {
-      for (const root of [...this.roots.keys()]) {
-        const view = await this.refreshRoot(root);
-        if (view === null || this.disposed) continue;
-        for (const state of this.statesOf(view)) {
-          // Connected lists refresh on the next `tools/list`; the poll only
-          // retries servers that are not serving.
-          if (state.status !== 'connected' || state.stale) {
-            if (this.dueForBackgroundLoad(state)) void this.load(state);
-          }
-        }
-      }
+      await this.rereadKnownRoots();
     } finally {
       this.polling = false;
+    }
+  }
+
+  /**
+   * Re-read each known root in turn (`refreshRoot` emits for a changed set)
+   * and start loading the servers that are not serving. Connected lists
+   * refresh on the next `tools/list`.
+   */
+  private async rereadKnownRoots(): Promise<void> {
+    for (const root of [...this.roots.keys()]) {
+      const view = await this.refreshRoot(root);
+      if (view === null || this.disposed) continue;
+      for (const state of this.statesOf(view)) {
+        if (state.status === 'connected' && !state.stale) continue;
+        if (this.dueForBackgroundLoad(state)) void this.load(state);
+      }
     }
   }
 
@@ -867,43 +895,6 @@ function toolsFingerprint(tools: readonly UpstreamTool[]): string {
   return JSON.stringify(tools);
 }
 
-function errorResult(text: string): McpGatewayCallResult {
-  return { content: [{ type: 'text', text }], isError: true };
-}
-
-function normalizeCallResult(result: UpstreamCallResult): McpGatewayCallResult {
-  const { content, isError, structuredContent, ...rest } = result;
-  return {
-    ...rest,
-    content: Array.isArray(content) ? content : [],
-    ...(isError === true ? { isError: true } : {}),
-    ...(isPlainObject(structuredContent) ? { structuredContent } : {}),
-  };
-}
-
-/**
- * A JSON-RPC error the upstream answered (negative code), other than
- * "connection closed" (-32000). Such an error is the tool's, not the
- * server's, so it does not put the server into back-off.
- */
-function isProtocolError(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    'code' in error &&
-    typeof error.code === 'number' &&
-    error.code < 0 &&
-    error.code !== -32000
-  );
-}
-
-function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
-function errorName(error: unknown): string {
-  return error instanceof Error ? error.name : typeof error;
-}
-
 /** Remove the URL and the dedup key (either may carry a key) and bound it. */
 function redact(text: string, state: ServerState): string {
   let out = text;
@@ -913,8 +904,4 @@ function redact(text: string, state: ServerState): string {
   return out.length > MAX_ERROR_TEXT
     ? `${out.slice(0, MAX_ERROR_TEXT)}...`
     : out;
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }

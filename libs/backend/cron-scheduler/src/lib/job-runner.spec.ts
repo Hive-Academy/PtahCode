@@ -488,6 +488,7 @@ describe('JobRunner prompt jobs — connectors opt-in and MCP warning', () => {
       ),
       servedFileServerNames: jest.fn(async () => []),
       onToolsChanged: jest.fn(() => ({ dispose: jest.fn() })),
+      refresh: jest.fn(async () => undefined),
       dispose: jest.fn(),
     };
   }

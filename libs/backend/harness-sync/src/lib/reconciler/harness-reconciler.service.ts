@@ -1041,7 +1041,7 @@ export class HarnessReconcilerService {
         //
         // Point to the live Skills & Plugins disclosure and its repair action.
         action:
-          'Move the occupant aside — the file or directory at each path, or the conflicting key in each config file — then re-run `ptah harness doctor --fix`. The same list is on the Skills & Plugins page, in the harness health badge. Nothing here proves Ptah wrote these, so they may be your own work: keep what you move, and read it before you discard anything.',
+          'Move the occupant aside — the file or directory at each path — then re-run `ptah harness doctor --fix`. The same list is on the Skills & Plugins page, in the harness health badge. Nothing here proves Ptah wrote these, so they may be your own work: keep what you move, and read it before you discard anything.',
         paths,
       },
     );

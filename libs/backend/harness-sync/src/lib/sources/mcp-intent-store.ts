@@ -268,6 +268,11 @@ function requireRoot(
 export class McpIntentStore {
   constructor(private readonly path: string = defaultMcpIntentPath()) {}
 
+  /** Absolute path of the store file, reported as an Installed row's `configPath`. */
+  get filePath(): string {
+    return this.path;
+  }
+
   /**
    * Every server that applies to this workspace, sorted by key so the desired
    * state is stable. An empty root yields only the global entries.

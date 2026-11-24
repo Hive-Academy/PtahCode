@@ -307,10 +307,8 @@ describe('buildHarnessNamespace — installMcpServer', () => {
     expect(out.scope).toBe('workspace');
     expect(out.serverKey).toBe('server-name');
     expect(out.targets).toEqual(['claude', 'vscode']);
-    expect(out.installedPaths).toEqual([
-      'D:/ws/.mcp.json',
-      'D:/ws/.vscode/mcp.json',
-    ]);
+    expect(out.recordedTargets).toEqual(['claude', 'vscode']);
+    expect(out).not.toHaveProperty('installedPaths');
     expect(out.warnings).toEqual([]);
   });
 
@@ -355,13 +353,13 @@ describe('buildHarnessNamespace — installMcpServer', () => {
       stdio,
     );
 
-    expect(out.installedPaths).toEqual(['D:/ws/.mcp.json']);
+    expect(out.recordedTargets).toEqual(['claude']);
     expect(out.warnings).toEqual([
       'Failed to install "owner/srv" to vscode: permission denied',
     ]);
   });
 
-  it('dedupes repeated config paths', async () => {
+  it('names each recorded target once', async () => {
     const mcpInstaller = makeInstaller([
       { target: 'claude', success: true, configPath: 'D:/ws/.mcp.json' },
       { target: 'cursor', success: true, configPath: 'D:/ws/.mcp.json' },
@@ -375,7 +373,7 @@ describe('buildHarnessNamespace — installMcpServer', () => {
       ['claude', 'cursor'],
     );
 
-    expect(out.installedPaths).toEqual(['D:/ws/.mcp.json']);
+    expect(out.recordedTargets).toEqual(['claude', 'cursor']);
   });
 
   it('degrades with a clear error when no installer is wired', async () => {
@@ -456,7 +454,7 @@ describe('buildHarnessNamespace — installMcpServer', () => {
           undefined,
           ['claude', target],
         ),
-      ).rejects.toThrow("Use scope 'user' to write home-folder CLI configs");
+      ).rejects.toThrow("Use scope 'user' to install for home-folder CLIs");
       expect(mcpInstaller.install).not.toHaveBeenCalled();
     },
   );
@@ -488,7 +486,7 @@ describe('buildHarnessNamespace — installMcpServer', () => {
       'global',
     );
     expect(out.scope).toBe('user');
-    expect(out.installedPaths).toEqual(['D:/home/.codex/config.toml']);
+    expect(out.recordedTargets).toEqual(['codex']);
   });
 
   it('records an explicit user-scope install with no folder open', async () => {
@@ -522,7 +520,7 @@ describe('buildHarnessNamespace — installMcpServer', () => {
     );
     // Deferred, not failed: one note, no per-target failure warning.
     expect(out.warnings).toEqual([
-      '"owner/srv" was saved for all workspaces. Its config files are written when you open a folder.',
+      '"owner/srv" was saved for all workspaces. Ptah serves it in every workspace you open.',
     ]);
   });
 

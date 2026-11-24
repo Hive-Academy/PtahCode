@@ -1984,21 +1984,21 @@ export function buildHarnessListInstalledMcpTool(): MCPToolDefinition {
 
 /**
  * Build the ptah_harness_install_mcp_server tool definition
- * Write an MCP server entry into the workspace/CLI config files
+ * Record an MCP server install; the MCP gateway serves it (no file written)
  */
 export function buildHarnessInstallMcpTool(): MCPToolDefinition {
   return {
     name: 'ptah_harness_install_mcp_server',
     description:
-      'Harness-builder tool: install an MCP server by writing its transport config to target ' +
-      'config files (claude -> .mcp.json, vscode -> .vscode/mcp.json, cursor -> ' +
-      '.cursor/mcp.json). Default targets ["claude","vscode"]. scope:"workspace" (the DEFAULT) ' +
+      'Harness-builder tool: install an MCP server for the target CLIs. Ptah records the ' +
+      'install and serves the server through its own ptah MCP server; no config file is ' +
+      'written. Default targets ["claude","vscode"]. scope:"workspace" (the DEFAULT) ' +
       'needs an open folder and refuses home-folder targets (codex, copilot, antigravity); ' +
       'scope:"user" installs for every workspace. ' +
       'Find a server with ptah_harness_search_mcp_registry and check ' +
       'ptah_harness_list_installed_mcp first. Supply the transport config yourself; the registry ' +
-      'entry gives the package/URL. Returns the server key, files written and per-target ' +
-      'warnings. The server is available to a NEW agent session only.',
+      'entry gives the package/URL. Returns the server key, the recorded targets and ' +
+      'per-target warnings.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -2037,14 +2037,14 @@ export function buildHarnessInstallMcpTool(): MCPToolDefinition {
           },
           description:
             'Optional install targets. Defaults to ["claude","vscode"]. An EMPTY array is rejected ' +
-            '— omit the key to take the default. "codex", "copilot" and "antigravity" write ' +
-            'home-folder configs and need scope "user".',
+            '— omit the key to take the default. "codex", "copilot" and "antigravity" are ' +
+            'home-folder CLIs and need scope "user".',
         },
         scope: {
           type: 'string',
           enum: ['user', 'workspace'],
           description:
-            '"workspace" (default) installs for this workspace only and writes project files only; ' +
+            '"workspace" (default) installs for this workspace only; ' +
             '"user" installs for every workspace and is required for home-folder targets.',
         },
       },

@@ -284,8 +284,9 @@ HANDING BACK TO THE USER:
     enabledTools) is still refused — the container shape is negotiable, the
     key is not.
 
-- installMcpServer(serverName, config, serverKey?, targets?, scope?) - Writes a
-    transport config to the target files. Defaults to ['claude','vscode'] and
+- installMcpServer(serverName, config, serverKey?, targets?, scope?) - Records
+    the server for the targets; Ptah serves it through its own MCP server and
+    writes no config file. Defaults to ['claude','vscode'] and
     scope 'workspace'; scope 'user' installs for every workspace and is required
     for codex/copilot/antigravity. The result includes the scope.`,
 

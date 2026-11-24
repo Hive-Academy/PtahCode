@@ -291,6 +291,7 @@ function toProviderRow(
 
 function kindOf(origin: McpServerOrigin): ProviderRowKind {
   switch (origin) {
+    case 'ptah-intent':
     case 'harness-config':
     case 'claude-user':
       return 'config';
@@ -350,9 +351,13 @@ const exactly = (scope: keyof typeof SCOPE_RANK): ScopeRange => ({
  *   (`projects[<workspace>].mcpServers`) and a `user` map, and the backend
  *   folds which one a row came from into prose only
  *   (`mcp-install.service.ts:303-329`), so the row spans both.
+ * - `ptah-intent`: never by its own name. The MCP gateway serves it inside
+ *   Ptah's `ptah` server, so a session reports no server called this.
  */
 function sessionScopeOf(group: InstalledServerGroup): ScopeRange | null {
   switch (group.origin) {
+    case 'ptah-intent':
+      return null;
     case 'harness-config':
       return group.targets.includes('claude') ? exactly('project') : null;
     case 'claude-user':

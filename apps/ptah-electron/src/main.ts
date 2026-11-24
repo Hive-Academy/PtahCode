@@ -34,6 +34,7 @@ import {
   migrateSessionBudgetMeasure,
   resolvePtahSettingsDir,
   type IArtifactStore,
+  type IMcpGateway,
 } from '@ptah-extension/platform-core';
 import type { ElectronWorkspaceProvider } from '@ptah-extension/platform-electron';
 import { flushSessionMetadataStores } from '@ptah-extension/agent-sdk';
@@ -557,6 +558,15 @@ if (!gotLock) {
         if (diContainer.isRegistered(VOICE_TOKENS.VOICE_WORKER_CLIENT)) {
           diContainer
             .resolve<{ dispose: () => void }>(VOICE_TOKENS.VOICE_WORKER_CLIENT)
+            .dispose();
+        }
+      },
+      disposeMcpGateway: () => {
+        // `isRegistered` first: a host without auth secrets binds no gateway,
+        // and a quit before boot finished may have no container at all.
+        if (bootContainer?.isRegistered(PLATFORM_TOKENS.MCP_GATEWAY, true)) {
+          bootContainer
+            .resolve<IMcpGateway>(PLATFORM_TOKENS.MCP_GATEWAY)
             .dispose();
         }
       },

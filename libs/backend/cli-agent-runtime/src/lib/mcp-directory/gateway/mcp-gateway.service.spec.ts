@@ -718,6 +718,61 @@ describe('McpGateway', () => {
     });
   });
 
+  describe('refresh (B23)', () => {
+    it('invalidates the sources and fires at once when a toggle changes the set', async () => {
+      const h = harness([endpoint('zernio'), endpoint('other')]);
+      const changed = jest.fn();
+      h.gateway.onToolsChanged(changed);
+      await h.gateway.listTools(SESSION);
+      h.sources.invalidate.mockClear();
+
+      h.setPolicy({ deniedMcpServers: ['other'] });
+      await h.gateway.refresh();
+
+      expect(h.sources.invalidate).toHaveBeenCalledTimes(1);
+      expect(changed).toHaveBeenCalledTimes(1);
+      expect(h.clients.get('other')?.close).toHaveBeenCalled();
+      h.gateway.dispose();
+    });
+
+    it('fires at once when an install adds a server', async () => {
+      const h = harness([endpoint('zernio')]);
+      const changed = jest.fn();
+      h.gateway.onToolsChanged(changed);
+      await h.gateway.listTools(SESSION);
+
+      h.setEndpoints([endpoint('zernio'), endpoint('other')]);
+      await h.gateway.refresh();
+
+      expect(changed).toHaveBeenCalledTimes(1);
+      h.gateway.dispose();
+    });
+
+    it('does not fire when nothing changed', async () => {
+      const h = harness([endpoint('zernio')]);
+      const changed = jest.fn();
+      h.gateway.onToolsChanged(changed);
+      await h.gateway.listTools(SESSION);
+
+      await h.gateway.refresh();
+
+      expect(h.sources.invalidate).toHaveBeenCalled();
+      expect(changed).not.toHaveBeenCalled();
+      h.gateway.dispose();
+    });
+
+    it('resolves without reading anything once disposed', async () => {
+      const h = harness([endpoint('zernio')]);
+      await h.gateway.listTools(SESSION);
+      h.gateway.dispose();
+      h.sources.list.mockClear();
+
+      await expect(h.gateway.refresh()).resolves.toBeUndefined();
+
+      expect(h.sources.list).not.toHaveBeenCalled();
+    });
+  });
+
   describe('servedFileServerNames', () => {
     it('returns the sources names without ptah', async () => {
       const h = harness([]);

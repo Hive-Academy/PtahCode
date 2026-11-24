@@ -197,15 +197,20 @@ export interface HarnessMcpInstaller {
 
 /**
  * Outcome of installMcpServer: the resolved identity and scope of the install,
- * the raw per-target results, the deduped set of config files written, and any
+ * the raw per-target results, the targets whose intent was recorded, and any
  * per-target failures surfaced as warnings rather than a hard throw.
+ *
+ * No config file is written (TASK_2026_979): the install is recorded in
+ * `~/.ptah/mcp-installed.json` and the MCP gateway serves it through Ptah's
+ * own `ptah` server, so the outcome names targets, not paths.
  */
 export interface HarnessMcpInstallOutcome {
   serverName: string;
   serverKey: string;
   scope: HarnessSkillScope;
   targets: McpInstallTarget[];
-  installedPaths: string[];
+  /** Targets whose install intent was saved. */
+  recordedTargets: McpInstallTarget[];
   results: McpInstallResult[];
   warnings: string[];
 }
@@ -1081,15 +1086,15 @@ export function buildHarnessNamespace(
 
       const resolvedScope = resolveHarnessScope(scope);
 
-      // A workspace install writes project files only; the home-folder CLI
-      // configs (codex, copilot, antigravity) are shared by every workspace,
-      // so they need the explicit user scope. Refused before any write.
+      // The home-folder CLIs (codex, copilot, antigravity) are shared by
+      // every workspace, so they need the explicit user scope. Refused
+      // before anything is recorded.
       if (resolvedScope === 'workspace') {
         const homeTargets = resolvedTargets.filter(isHomeTarget);
         if (homeTargets.length > 0) {
           throw new Error(
-            `Use scope 'user' to write home-folder CLI configs (${homeTargets.join(', ')}). ` +
-              'A workspace-scoped install writes only project files.',
+            `Use scope 'user' to install for home-folder CLIs (${homeTargets.join(', ')}). ` +
+              'A workspace-scoped install applies to project targets only.',
           );
         }
       }
@@ -1100,14 +1105,13 @@ export function buildHarnessNamespace(
       const workspaceRoot = getPolicyWorkspaceRoot() || undefined;
       if (!workspaceRoot && resolvedScope === 'workspace') {
         throw new Error(
-          'No workspace folder is open. Workspace-scoped MCP configs cannot be written — ' +
+          'No workspace folder is open. A workspace-scoped MCP install needs one — ' +
             `open a folder and retry, ${NO_WORKSPACE_USER_HINT}`,
         );
       }
 
       // A user-scope install with no folder open still records the global
-      // intent; the per-target results then report the missing folder, and
-      // the next reconcile in any workspace writes the configs.
+      // intent, which the MCP gateway serves in every workspace.
       const results = await mcpInstaller.install(
         trimmedName,
         resolvedKey,
@@ -1117,12 +1121,12 @@ export function buildHarnessNamespace(
         toCapabilityScope(resolvedScope),
       );
 
-      const installedPaths: string[] = [];
+      const recordedTargets: McpInstallTarget[] = [];
       const warnings: string[] = [];
       let deferred = false;
       for (const result of results) {
         if (result.success) {
-          installedPaths.push(result.configPath);
+          recordedTargets.push(result.target);
         } else if (result.deferred === true) {
           deferred = true;
         } else {
@@ -1134,13 +1138,13 @@ export function buildHarnessNamespace(
 
       logger.info(
         `[Harness] installMcpServer "${trimmedName}" as "${resolvedKey}" (${resolvedScope} scope) -> ${resolvedTargets.join(', ')} ` +
-          `(${installedPaths.length} written, ${warnings.length} failed${deferred ? ', deferred until a folder opens' : ''})`,
+          `(${recordedTargets.length} recorded, ${warnings.length} failed${deferred ? ', deferred until a folder opens' : ''})`,
       );
-      // A deferred install (user scope, no folder open) saved the intent; it
-      // is not a failure, so it gets one note instead of a warning per target.
+      // A deferred result saved the intent; it is not a failure, so it gets
+      // one note instead of a warning per target.
       if (deferred) {
         warnings.push(
-          `"${trimmedName}" was saved for all workspaces. Its config files are written when you open a folder.`,
+          `"${trimmedName}" was saved for all workspaces. Ptah serves it in every workspace you open.`,
         );
       }
 
@@ -1149,7 +1153,7 @@ export function buildHarnessNamespace(
         serverKey: resolvedKey,
         scope: resolvedScope,
         targets: resolvedTargets,
-        installedPaths: Array.from(new Set(installedPaths)),
+        recordedTargets: Array.from(new Set(recordedTargets)),
         results,
         warnings,
       };

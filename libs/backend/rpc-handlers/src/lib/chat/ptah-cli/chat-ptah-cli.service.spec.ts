@@ -339,18 +339,16 @@ describe('ChatPtahCliService', () => {
     });
 
     /**
-     * TASK_2026_332. `ensureRegisteredForSubagents` used to resolve with
-     * `undefined` whether or not it wrote anything — every failure was absorbed
-     * into a warn two layers down — so this spawn passed `mcpServerRunning:
-     * true` while `.mcp.json` had no `ptah` key. The CLI then started believing
-     * it had Ptah tools and had none, with a warn line as the only trace.
+     * TASK_2026_332, kept after TASK_2026_979 B19 made the call a readiness
+     * answer: a server reported not ready (being torn down) must not be
+     * advertised to the spawn as running.
      */
-    it('spawns with mcpServerRunning FALSE when the .mcp.json entry was not written', async () => {
+    it('spawns with mcpServerRunning FALSE when the server is not ready', async () => {
       const s = makeSuite();
       s.sdkContext.isMcpServerRunning.mockReturnValue(true);
       s.codeExecutionMcp.ensureRegisteredForSubagents.mockResolvedValue({
         registered: false,
-        reason: 'lock-timeout',
+        reason: 'not-started',
       });
 
       await s.service.handleStart({
@@ -363,12 +361,12 @@ describe('ChatPtahCliService', () => {
       expect(s.agentAdapter.startChatSession).toHaveBeenCalledWith(
         expect.objectContaining({ mcpServerRunning: false }),
       );
-      // The spawn still happens — a contended config file must not cost the
-      // user their turn, which is why this reports instead of rejecting.
+      // The spawn still happens — an unready server must not cost the user
+      // their turn, which is why this reports instead of rejecting.
       expect(s.registry.releaseProfile).not.toHaveBeenCalled();
     });
 
-    it('spawns with mcpServerRunning TRUE once the entry is confirmed on disk', async () => {
+    it('spawns with mcpServerRunning TRUE once the server is ready', async () => {
       const s = makeSuite();
       s.sdkContext.isMcpServerRunning.mockReturnValue(true);
       s.codeExecutionMcp.ensureRegisteredForSubagents.mockResolvedValue({

@@ -25,7 +25,6 @@ import type {
   HarnessSourceState,
   IHarnessSourceResolver,
 } from './harness-source.port';
-import { McpIntentStore, type HarnessMcpIntent } from './mcp-intent-store';
 
 /**
  * The slice of `PluginLoaderService` the reconciler reads.
@@ -173,12 +172,6 @@ export class PluginConfigSourceResolver implements IHarnessSourceResolver {
      */
     private readonly readerFactory: () => HarnessPluginConfigReader | null,
     private readonly layout: HarnessSourceLayout = defaultHarnessSourceLayout(),
-    /**
-     * MCP intents are read on every resolve, exactly like the plugin config:
-     * an `mcp:install` triggers a reconcile immediately afterwards and must see
-     * the entry it just recorded.
-     */
-    private readonly mcpIntents: McpIntentStore = new McpIntentStore(),
     private readonly agentModelsFactory?: AgentModelsFactory,
     /** The root the retired skills.sh registry and its roots live under. */
     private readonly skillsShPluginsRoot: string = defaultSkillsShPluginsRoot(),
@@ -202,7 +195,6 @@ export class PluginConfigSourceResolver implements IHarnessSourceResolver {
   resolve(
     workspaceRoot?: string,
   ): HarnessSourceState | Promise<HarnessSourceState> {
-    const mcpIntents = this.readMcpIntents(workspaceRoot);
     // Read before the plugin reader is even asked: retirement is permanent and
     // owes nothing to the policy, so every state below — the read failures
     // and the frozen one included — carries the same answer.
@@ -220,7 +212,6 @@ export class PluginConfigSourceResolver implements IHarnessSourceResolver {
     // workspace. Adding the flag to this literal is the whole failure mode.
     const empty: HarnessSourceState = {
       layout,
-      mcpIntents,
       retired,
       overlayPluginPaths: [],
       disabledSkillIds: [],
@@ -248,7 +239,6 @@ export class PluginConfigSourceResolver implements IHarnessSourceResolver {
       const config = reader.getWorkspacePluginConfig(workspaceRoot);
       return {
         layout,
-        mcpIntents,
         retired,
         overlayPluginPaths: reader.resolveCurrentPluginPaths(workspaceRoot),
         // The one path that actually asked the plugin loader and got an answer,
@@ -285,7 +275,6 @@ export class PluginConfigSourceResolver implements IHarnessSourceResolver {
       if (effective === undefined) return empty;
       return {
         layout: empty.layout,
-        mcpIntents: empty.mcpIntents,
         retired: empty.retired,
         overlayPluginPaths: effective.overlayPluginPaths,
         overlayPluginPathsKnown: true,
@@ -324,27 +313,6 @@ export class PluginConfigSourceResolver implements IHarnessSourceResolver {
       // the existing source/policy resolution. This resolver has no logger.
       return undefined;
     }
-  }
-
-  /**
-   * The global records plus this workspace's own. The store canonicalizes the
-   * root (`resolveHarnessWorkspaceRoot`), the key the reconciler locks and
-   * keeps its manifest on, so a sub-directory and its root read the same
-   * records. No root yields the global records only — never every
-   * workspace's, which is the leak v2 exists to close.
-   *
-   * NOT caught. An unreadable store (`McpIntentPersistError` 'read-failed')
-   * once came back as `[]`, an AUTHORITATIVE "no Ptah-managed MCP servers
-   * here" that made the (now removed) MCP facet plan a removal for every owned
-   * entry. Thrown, it fails `resolve`, and the reconciler reads its source before it
-   * takes the lock or plans a target, so the pass writes and removes nothing.
-   * Every reconcile caller already catches that rejection and logs a warning
-   * (`HarnessPropagationService.propagate`, the preflight, host activation,
-   * `McpInstallService` maps it to fixed copy). The error's message is fixed;
-   * the filesystem cause stays on `cause`.
-   */
-  private readMcpIntents(workspaceRoot?: string): HarnessMcpIntent[] {
-    return this.mcpIntents.listFor(workspaceRoot ?? '');
   }
 
   /** The skills.sh registry, re-read and sorted on every pass. */
@@ -391,13 +359,11 @@ export class PluginConfigSourceResolver implements IHarnessSourceResolver {
 export function createPluginConfigSourceResolver(
   readerFactory: () => HarnessPluginConfigReader | null,
   layout?: HarnessSourceLayout,
-  mcpIntents?: McpIntentStore,
   agentModelsFactory?: AgentModelsFactory,
 ): IHarnessSourceResolver {
   return new PluginConfigSourceResolver(
     readerFactory,
     layout,
-    mcpIntents,
     agentModelsFactory,
   );
 }

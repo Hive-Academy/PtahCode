@@ -33,10 +33,7 @@ import {
   managedEntry,
   ManagedManifestStore,
 } from '../manifest-store/managed-manifest';
-import type {
-  HarnessSourceState,
-  IHarnessCliDetector,
-} from '../sources/harness-source.port';
+import type { IHarnessCliDetector } from '../sources/harness-source.port';
 import { createStaticSourceResolver } from '../sources/plugin-config-source-resolver';
 import { PTAH_SPAWN_MCP_KEY } from '../targets/mcp/mcp-facet.port';
 import { createAntigravityTarget } from '../targets/rival-targets';
@@ -105,9 +102,7 @@ describe('HarnessReconcilerService — antigravity writes no MCP config (TASK_20
   });
 
   /** A reconciler wired with the antigravity target alone, pointed at `home`. */
-  function makeReconciler(
-    intents: HarnessSourceState['mcpIntents'],
-  ): HarnessReconcilerService {
+  function makeReconciler(): HarnessReconcilerService {
     return new HarnessReconcilerService(
       fakeLogger(),
       new HarnessManifestBuilder(),
@@ -121,7 +116,6 @@ describe('HarnessReconcilerService — antigravity writes no MCP config (TASK_20
         overlayPluginPaths: [],
         disabledSkillIds: [],
         disabledPluginIds: [],
-        mcpIntents: intents,
       }),
       [
         createAntigravityTarget({
@@ -133,24 +127,13 @@ describe('HarnessReconcilerService — antigravity writes no MCP config (TASK_20
     );
   }
 
-  const githubIntent = {
-    serverKey: 'github',
-    registryName: 'io.github.example/github',
-    config: {
-      type: 'stdio' as const,
-      command: 'github-mcp',
-      args: ['--stdio'],
-    },
-    targets: ['antigravity' as const],
-  };
-
   function writeUserConfig(): void {
     mkdirSync(join(configPath, '..'), { recursive: true });
     writeFileSync(configPath, USER_CONFIG, 'utf-8');
   }
 
-  it('an intent recorded for antigravity creates no config file, and skills still land', async () => {
-    const health = await makeReconciler([githubIntent]).reconcile(ws, {
+  it('a full pass creates no config file, and skills still land', async () => {
+    const health = await makeReconciler().reconcile(ws, {
       mode: 'full',
       reason: 'spec',
     });
@@ -170,14 +153,14 @@ describe('HarnessReconcilerService — antigravity writes no MCP config (TASK_20
   it('an existing config stays byte-identical across an install pass and an uninstall pass', async () => {
     writeUserConfig();
 
-    await makeReconciler([githubIntent]).reconcile(ws, {
+    await makeReconciler().reconcile(ws, {
       mode: 'full',
       reason: 'install',
     });
     expect(readFileSync(configPath, 'utf-8')).toBe(USER_CONFIG);
 
-    // The intent is gone: what `McpInstallService.uninstall` used to reconcile.
-    const health = await makeReconciler([]).reconcile(ws, {
+    // What `McpInstallService.uninstall` used to reconcile.
+    const health = await makeReconciler().reconcile(ws, {
       mode: 'full',
       reason: 'uninstall',
     });
@@ -211,7 +194,7 @@ describe('HarnessReconcilerService — antigravity writes no MCP config (TASK_20
       'utf-8',
     );
 
-    const health = await makeReconciler([]).reconcile(ws, {
+    const health = await makeReconciler().reconcile(ws, {
       mode: 'full',
       reason: 'spec',
     });

@@ -66,14 +66,12 @@ export type HarnessBlockedSurface =
 /**
  * The fixed head of the "clear it yourself" sentence.
  *
- * It opens on MOVE deliberately, and the first clause names both shapes a
- * blocked path takes — a file or directory, or a server key inside a config
- * file the user also writes — because "move the occupant" is meaningless
- * advice for the second.
+ * It opens on MOVE deliberately. A blocked path is a file or directory: since
+ * TASK_2026_979 no target writes MCP config, so a server key inside a config
+ * file can no longer block a pass.
  */
 const CLEAR_IT_YOURSELF_OPENING =
-  'Move the occupant aside — the file or directory at each path, or the ' +
-  'conflicting key in each config file — ';
+  'Move the occupant aside — the file or directory at each path — ';
 
 /**
  * The fixed tail. It hands the judgement back: Ptah states that it cannot
@@ -253,11 +251,9 @@ export const HARNESS_BLOCKED_WARN_NOTE =
   'blocked path never enters the write plan, so `writeFailed` can never ' +
   'report one.';
 
-/** The two per-path `reason` strings the WARN may carry. */
+/** The per-path `reason` strings the WARN may carry. */
 export const HARNESS_BLOCKED_WARN_REASONS = {
   occupiedPath: 'occupied by a file or directory Ptah does not own',
-  occupiedMcpKey:
-    'the config file already defines this server key, and Ptah did not write it',
 } as const satisfies Readonly<Record<string, string>>;
 
 /**
@@ -279,7 +275,6 @@ export const HARNESS_BLOCKED_APPROVED_PROSE: Readonly<
     HARNESS_BLOCKED_WARN_MESSAGE,
     HARNESS_BLOCKED_WARN_NOTE,
     HARNESS_BLOCKED_WARN_REASONS.occupiedPath,
-    HARNESS_BLOCKED_WARN_REASONS.occupiedMcpKey,
   ]),
   'marketplace-popover': Object.freeze([
     HARNESS_BLOCKED_APPROVED_ACTIONS['marketplace-popover'],

@@ -130,6 +130,9 @@ const EXPECTED_LIFO_ORDER: readonly string[] = [
   // The tree-sitter utility process: a parser, it writes nothing.
   'treeSitterParser',
   'cliRegistry',
+  // After the agent reap and the CLI registry: stdio MCP server processes
+  // stop once no agent can call them (TASK_2026_979 B23).
+  'disposeMcpGateway',
   // The watch host (TASK_2026_437 C8): captured pre-window beside
   // `cliRegistry`, killed after its consumer stopped; writes nothing.
   'workspaceWatcher',
@@ -248,6 +251,7 @@ function inertDeps(order: string[]) {
     flushSessionMetadataStores: jest.fn(),
     clearTimers: () => order.push('clearTimers'),
     disposeVoiceWorker: () => order.push('disposeVoiceWorker'),
+    disposeMcpGateway: () => order.push('disposeMcpGateway'),
   };
 }
 

@@ -995,7 +995,7 @@ describe('harness tools', () => {
       serverKey: 'server',
       scope: 'user',
       targets: ['codex'],
-      installedPaths: [],
+      recordedTargets: [],
       results: [],
       warnings: [],
     }));
@@ -11044,6 +11044,7 @@ describe('protocol-handlers › MCP gateway', () => {
       status: jest.fn(() => []),
       servedFileServerNames: jest.fn(async () => []),
       onToolsChanged: jest.fn(() => ({ dispose: jest.fn() })),
+      refresh: jest.fn(async () => undefined),
       dispose: jest.fn(),
     };
   }

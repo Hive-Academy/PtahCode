@@ -205,6 +205,13 @@ export interface QuitSequenceDeps {
   clearTimers: () => void;
   /** Terminates the voice `utilityProcess` worker, if one was registered. */
   disposeVoiceWorker: () => void;
+  /**
+   * Disposes the MCP gateway (`PLATFORM_TOKENS.MCP_GATEWAY`), which stops the
+   * process tree of every stdio server it runs. A no-op when none is bound.
+   * On Windows a child is not reaped when its parent exits, so without this a
+   * stdio MCP server outlives the app.
+   */
+  disposeMcpGateway: () => void;
   /** `event.preventDefault()` — only called when the quit must be deferred. */
   deferQuit: () => void;
   /** `app.quit()` — only called after a deferred quit has finished draining. */
@@ -233,6 +240,7 @@ export type DisposalDeps = Pick<
   | 'refs'
   | 'clearTimers'
   | 'disposeVoiceWorker'
+  | 'disposeMcpGateway'
   | 'flushSessionMetadataStores'
   | 'gatewayStopBudgetMs'
   | 'agentReapBudgetMs'
@@ -496,6 +504,9 @@ async function disposeAfterPersistence(deps: DisposalDeps): Promise<void> {
   nonFatal('Voice worker dispose', deps.disposeVoiceWorker);
   nonFatal('Tree-sitter worker dispose', () => refs.treeSitterParser?.dispose());
   nonFatal('CLI registry dispose', () => refs.cliRegistry?.disposeAll());
+  // After the agent reap: a CLI lane reaches stdio MCP servers through the
+  // gateway, so its processes stop only once no agent can call them.
+  nonFatal('MCP gateway dispose', deps.disposeMcpGateway);
   // Captured pre-window beside `cliRegistry`, so disposed beside it. Nothing
   // consumes it yet (Batch 11 moves the git watcher onto it, and that consumer
   // will stop in `disposeBeforePersistence`). This kills the watch host process

@@ -843,6 +843,7 @@ describe('CodeExecutionMCP — MCP gateway wiring', () => {
         listener = l;
         return { dispose: unsubscribe };
       }),
+      refresh: jest.fn(async () => undefined),
       dispose: jest.fn(),
     } as unknown as jest.Mocked<IMcpGateway>;
     return {
@@ -912,6 +913,26 @@ describe('CodeExecutionMCP — MCP gateway wiring', () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+
+  it('disposes the gateway on disposeAsync, after the server stopped', async () => {
+    const { gateway } = buildGateway();
+    const { service } = build({ gateway });
+    await service.start();
+
+    await service.disposeAsync();
+
+    expect(gateway.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the gateway alive across stop() so a restart can serve it', async () => {
+    const { gateway } = buildGateway();
+    const { service } = build({ gateway });
+    await service.start();
+
+    await service.stop();
+
+    expect(gateway.dispose).not.toHaveBeenCalled();
   });
 
   it('leaves the current behaviour when no gateway is bound', async () => {

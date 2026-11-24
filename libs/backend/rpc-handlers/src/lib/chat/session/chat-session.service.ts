@@ -1221,30 +1221,16 @@ export class ChatSessionService {
       });
 
       if (mcpServerRunning) {
-        // Awaited: subagents spawned by this session discover the server
-        // through `.mcp.json`, so the entry must be on disk before the session
-        // starts (TASK_2026_318).
-        //
-        // And the outcome is READ (TASK_2026_332). The call used to resolve
-        // with `undefined` whether or not it wrote anything, so a contended
-        // config lock started this session claiming MCP was available while the
-        // entry subagents look for was absent. `false` is the honest answer and
-        // the SDK path already supports it.
+        // A readiness answer, not a write (TASK_2026_979 B19): it is false
+        // only when the HTTP server is down or being torn down, and then the
+        // session starts without Ptah's server. Subagents reach `ptah`
+        // through the session's own spawn config; no `.mcp.json` is written.
         const registration = await timing.measure('mcpRegistration', () =>
           this.codeExecutionMcp.ensureRegisteredForSubagents());
-        if (!registration.registered && registration.reason === 'timeout') {
-          // The registration is still queued and lands in the background. The
-          // session's own Ptah MCP config is built per session and does not read
-          // `.mcp.json`, so only subagents started before the write miss the
-          // entry. Disabling MCP for the whole session would cost far more.
-          this.logger.warn(
-            '[ptah.main] chat:start - .mcp.json registration still pending; starting with session MCP',
-            { reason: registration.reason },
-          );
-        } else if (!registration.registered) {
+        if (!registration.registered) {
           mcpServerRunning = false;
           this.logger.warn(
-            '[ptah.main] chat:start - .mcp.json entry absent, starting session without MCP',
+            '[ptah.main] chat:start - Ptah MCP server not ready, starting session without MCP',
             { reason: registration.reason },
           );
         }
@@ -2045,25 +2031,15 @@ export class ChatSessionService {
         await this.historyRead.resolveSessionFolder(sessionId);
       // Threaded into the resume below rather than dropped: `autoResumeIfInactive`
       // re-derives `mcpServerRunning` from `isMcpServerRunning()`, which only
-      // says the HTTP server is up — it cannot know whether the `.mcp.json`
-      // entry was actually written (TASK_2026_332).
+      // says the HTTP server is up, not whether it is being torn down.
       let mcpRegisteredForSubagents = true;
       if (this.sdkContext.isMcpServerRunning()) {
         const registration =
           await this.codeExecutionMcp.ensureRegisteredForSubagents();
-        // A deadline expiry means the write is still queued, not refused: the
-        // resumed session's own MCP config does not read `.mcp.json`.
-        const pending =
-          !registration.registered && registration.reason === 'timeout';
-        mcpRegisteredForSubagents = registration.registered || pending;
-        if (pending) {
+        mcpRegisteredForSubagents = registration.registered;
+        if (!registration.registered) {
           this.logger.warn(
-            '[ptah.main] chat:continue - .mcp.json registration still pending; resuming with session MCP',
-            { reason: registration.reason },
-          );
-        } else if (!registration.registered) {
-          this.logger.warn(
-            '[ptah.main] chat:continue - .mcp.json entry absent, resuming without MCP',
+            '[ptah.main] chat:continue - Ptah MCP server not ready, resuming without MCP',
             { reason: registration.reason },
           );
         }

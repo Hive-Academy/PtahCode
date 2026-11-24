@@ -82,6 +82,7 @@ import {
   McpRegistryProvider,
   McpRegistrySourceRegistry,
   McpInstallService,
+  refreshBoundMcpGateway,
   SmitheryRegistrySource,
   SmitheryConnectionResolver,
   SmitheryKeyMissingError,
@@ -309,6 +310,8 @@ export class McpDirectoryRpcHandlers {
         oauth: this.oauthManifest,
         // Results carry fixed copy only; the raw cause lands here.
         warn: (message, detail) => this.logger.warn(message, detail),
+        // A running session hears an install or uninstall at once.
+        onIntentsChanged: () => refreshBoundMcpGateway(container),
       },
     );
 

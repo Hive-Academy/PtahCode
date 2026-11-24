@@ -143,7 +143,6 @@ import {
 } from '@ptah-extension/agent-generation';
 import {
   HARNESS_SYNC_TOKENS,
-  McpIntentStore,
   codexHomeDir,
   createPluginConfigSourceResolver,
   defaultHarnessSourceLayout,
@@ -353,7 +352,6 @@ function buildFixture(opts: { disabledAgentIds?: string[] } = {}): Fixture {
         }),
       }),
       defaultHarnessSourceLayout(home),
-      new McpIntentStore(path.join(home, '.ptah', 'mcp-installed.json')),
     ),
     cliDetector: detector,
     // The hosts' refresh: mirror, then reconcileAll, gated on agent consent.

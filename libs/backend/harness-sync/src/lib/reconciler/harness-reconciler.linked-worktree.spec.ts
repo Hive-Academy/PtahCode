@@ -125,7 +125,6 @@ describe('HarnessReconcilerService — linked git worktree (#1469, LR1)', () => 
       overlayPluginPaths: [],
       disabledSkillIds: [],
       disabledPluginIds: [],
-      mcpIntents: [],
     };
   }
 
