@@ -41,3 +41,13 @@
   add `copilot-permission-bridge.ts` (+ spec) to Batch 22's write set. The strict zod schema must
   accept exactly what the frontend sends. A lane that cannot honour an edit must refuse visibly, not
   report "Allowed by you".
+- Batch 30 (binding, from code-logic-review-p6 M6): fix the dormant Claude steer fold-in in
+  `claude-sdk-lane-runner.ts` before `manifestSteer` turns it on. (a) `reconcileSteers`: a result
+  frame without `user_message_uuids` (older CLI) is "unknown, assume folded": no placeholder turn
+  and no "A message may start the next turn." info, otherwise the next real turn's `done` never
+  settles. (b) `steer`: remove the uuid from `pendingSteers` when `context.named.enqueue` (or
+  `mailbox.push`) throws. (c) Insert the missed-steer placeholder at the position of the turn the
+  steer was sent into, not at `inFlight` index 1 (a queued `continue` can sit there). P6 replaced
+  `pendingTurns`/`queuedTurns` with the `inFlight` list (each entry may carry its prompt uuid), so
+  place it by that list. (d) Pass `manifestSteer` from both `claude-cli.adapter.ts` and
+  `ptah-cli-registry.ts` (today neither passes it; grep shows only the declaration and the check).
