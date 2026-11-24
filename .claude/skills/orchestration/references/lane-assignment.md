@@ -31,6 +31,16 @@ in `decisions.md` with stage, source, confidence, reasons, fallback cause and an
 low-confidence model proposal. If the tool is not listed, skip it silently and use
 the live-list rules below.
 
+Pass `preferences.prefer` selectors as candidate ids or display names, or family or
+CLI values (`kimi code` matches a display name). Earlier entries rank higher and add
+a boost of 12, 8, 4 or 2 points to the total. A boost never pins a lane. Each chosen
+row carries a one-sentence `explanation` — selected executor, total with its score
+parts, runner-up with gap, deciding factor, preference diagnostics — and `candidates[]`
+where every candidate is `chosen`, `ranked` or `excluded` with a named rule
+(`user-rule:<id>` for a routing rule). When the result text exceeds the tool budget,
+the trace compacts: each row keeps the chosen and the best alternative first, then
+explanations shorten, then drop.
+
 Each chosen roster row returns `executor`, `model`, `tier`
 (`haiku|sonnet|opus`), `effort` (`low|medium|high|xhigh|max`) and a `reason` ending
 `policy Rn; tier ..., effort ..., shape ..., weight ...`. For subagent Agent/Task calls,
