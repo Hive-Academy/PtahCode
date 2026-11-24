@@ -192,6 +192,21 @@ export const CONFIDENCE_THRESHOLD = 0.5;
 /** Request body cap for every decision-model kind. */
 export const REQUEST_SIZE_LIMIT_BYTES = 64 * 1024;
 
+/** Maximum characters kept from one selector string in diagnostic text. */
+export const DIAGNOSTIC_SELECTOR_SNIPPET_MAX_CHARS = 48;
+
+/** Maximum matched candidate IDs shown in an ambiguous-selector diagnostic before "and K more". */
+export const DIAGNOSTIC_AMBIGUOUS_MATCH_SAMPLE_CAP = 3;
+
+/** Maximum characters kept from any single aggregate diagnostic line. */
+export const DIAGNOSTIC_LINE_MAX_CHARS = 240;
+
+/** Maximum aggregate diagnostic characters emitted into top-level `reasons` (including omitted marker). */
+export const AGGREGATE_DIAGNOSTIC_MAX_CHARS = 4000;
+
+/** Maximum preference diagnostics listed in one phase explanation before "and K more". */
+export const EXPLANATION_PREFERENCE_DIAGNOSTICS_CAP = 8;
+
 /** Stale when `now - asOf > STALENESS_AGE_MS`. */
 export const STALENESS_AGE_DAYS = 180;
 export const STALENESS_AGE_MS = STALENESS_AGE_DAYS * MS_PER_DAY;

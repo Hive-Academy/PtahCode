@@ -42,7 +42,12 @@ import {
 } from '../ranking/score';
 import { spread, type SpreadResult } from '../ranking/spread';
 import type { FallbackCause } from '../reasons/compile-reasons';
-import { LANE_MODEL_ALTERNATES_CAP, SCORE_MAX } from '../routing-constants';
+import {
+  DIAGNOSTIC_AMBIGUOUS_MATCH_SAMPLE_CAP,
+  DIAGNOSTIC_SELECTOR_SNIPPET_MAX_CHARS,
+  LANE_MODEL_ALTERNATES_CAP,
+  SCORE_MAX,
+} from '../routing-constants';
 import { matchRoutingRule } from '../scope/routing-rules-setting';
 import { candidatesForPhase } from './candidate-tools';
 import type { GatheredCall } from './gather';
@@ -120,6 +125,8 @@ export interface PhasePlan {
   readonly matchedRule?: RoutingRule;
   /** Rule policy note (tier clamp / effort override), if any. */
   readonly policyRuleNote?: string | null;
+  /** True when the matched rule's exclude list changed the ranking pick under the same cursor. */
+  readonly ruleExclusionChangedChoice?: boolean;
   /** Routing-rule diagnostics (settings-level and per-phase selector diagnostics). */
   readonly ruleDiagnostics?: readonly string[];
 }
@@ -249,28 +256,48 @@ export function planRoutePhases(
     const pinModel = constraint.pinAccepted ? pin?.model : undefined;
     const applyBuiltinOverride = !constraint.pinAccepted && matchedRule === undefined &&
       (phase.kind === 'visual-review' || phase.kind === 'design');
-    const scored = scorePool.map((candidate) => {
-      const base = scoreCandidate(candidate, policy.tier, taskKind, candidate.id === pinnedId ? pinModel : undefined, gathered);
-      return {
-        candidate,
-        scored: applyBuiltinOverride && candidate.kind === 'subagent' ? applyBuiltinSubagentOverride(base) : base,
-      };
-    });
+    const scored = scorePool.map((candidate) => ({
+      candidate,
+      scored: scoreCandidate(candidate, policy.tier, taskKind, candidate.id === pinnedId ? pinModel : undefined, gathered),
+    }));
+    const spreadCandidates = scored.map((row) => ({
+      candidate: row.candidate,
+      score: row.scored.score,
+      total: row.scored.total,
+      parts: row.scored.parts,
+      ...(applyBuiltinOverride && row.candidate.kind === 'subagent'
+        ? {
+            totalOverride: {
+              target: SCORE_MAX,
+              label: BUILTIN_VISUAL_DESIGN_OVERRIDE_LABEL,
+            },
+          }
+        : {}),
+    }));
     const spreadResult = spread({
       phaseId: phase.id,
       taskKind,
-      candidates: scored.map((row) => ({
-        candidate: row.candidate,
-        score: row.scored.score,
-        total: row.scored.total,
-        parts: row.scored.parts,
-      })),
+      candidates: spreadCandidates,
       inventory,
       ...(matchedRule?.set.prefer !== undefined ? { rulePrefer: matchedRule.set.prefer } : {}),
       ...(args.preferences !== undefined ? { preferences: args.preferences } : {}),
       rotation: cursor,
       rotate: constraint.pinAccepted ? false : rotate,
     });
+    const ruleExclusionChangedChoice = computeRuleExclusionChangedChoice(
+      matchedRule,
+      constraint,
+      inventory,
+      spreadCandidates,
+      spreadResult.pick?.candidate.id,
+      phase.id,
+      policy.tier,
+      taskKind,
+      args.preferences,
+      cursor,
+      rotate,
+      gathered,
+    );
     const rankedByTotal = orderScored(scored, spreadResult.rankingByTotal);
     let ranked: ScoredCandidate[];
     if (constraint.pinAccepted && pinnedId !== undefined) {
@@ -296,7 +323,7 @@ export function planRoutePhases(
       alternates: constraint.pinAccepted ? [] : alternateOptions(ranked, taskKind, gathered),
       spread: spreadResult,
       inventory,
-      ...(matchedRule !== undefined ? { matchedRule } : {}),
+      ...(matchedRule !== undefined ? { matchedRule, ruleExclusionChangedChoice } : {}),
       policyRuleNote: applied.note,
       ruleDiagnostics,
     });
@@ -406,25 +433,12 @@ export function computeLaneOfferDispositions(
       continue;
     }
     if (!inBand) {
-      dispositions.set(id, {
-        candidateId: id,
-        inBand: false,
-        offered: false,
-        prunedCause: 'below-band',
-      });
+      dispositions.set(id, { candidateId: id, inBand: false, offered: false, prunedCause: 'below-band' });
       continue;
     }
     const cause: PrunedCause =
-      prunedFromModel?.get(id) ??
-      (capLaneIds !== undefined && !capLaneIds.has(id)
-        ? 'option-cap'
-        : 'payload-fit');
-    dispositions.set(id, {
-      candidateId: id,
-      inBand: true,
-      offered: false,
-      prunedCause: cause,
-    });
+      prunedFromModel?.get(id) ?? (capLaneIds !== undefined && !capLaneIds.has(id) ? 'option-cap' : 'payload-fit');
+    dispositions.set(id, { candidateId: id, inBand: true, offered: false, prunedCause: cause });
   }
   return dispositions;
 }
@@ -435,10 +449,7 @@ function alternateOptions(
   gathered: GatheredCall,
 ): AlternateOption[] {
   const options: AlternateOption[] = [];
-  const top =
-    ranked.length === 0
-      ? 0
-      : Math.max(...ranked.map((row) => effectiveTotal(row.scored)));
+  const top = ranked.length === 0 ? 0 : Math.max(...ranked.map((row) => effectiveTotal(row.scored)));
   for (const row of ranked) {
     const candidate = row.candidate;
     if (!isSystemCliLane(candidate)) continue;
@@ -446,26 +457,13 @@ function alternateOptions(
     const laneOptions: AlternateOption[] = [];
     for (const listed of gathered.models.get(candidate.id)?.models ?? []) {
       if (
-        listed.provenance !== 'reported' ||
-        listed.auto === true ||
-        listed.id === LANE_DEFAULT_MODEL ||
-        listed.id === AUTOMATIC_MATRIX_MODEL ||
-        listed.id === '' ||
-        seen.has(listed.id)
-      ) {
-        continue;
-      }
+        listed.provenance !== 'reported' || listed.auto === true ||
+        listed.id === LANE_DEFAULT_MODEL || listed.id === AUTOMATIC_MATRIX_MODEL ||
+        listed.id === '' || seen.has(listed.id)
+      ) continue;
       seen.add(listed.id);
-      const resolved = gathered.matrix.resolve(
-        candidate.family,
-        listed.id,
-        taskKind,
-      );
-      const recomputed = scoreResolvedCell(
-        candidate,
-        resolved,
-        row.preferenceRank,
-      );
+      const resolved = gathered.matrix.resolve(candidate.family, listed.id, taskKind);
+      const recomputed = scoreResolvedCell(candidate, resolved, row.preferenceRank);
       if (!insideClosenessBand(top, recomputed.total)) continue;
       const scored: CandidateScore = {
         ...row.scored,
@@ -480,9 +478,7 @@ function alternateOptions(
       };
       laneOptions.push({ option: toOption({ candidate, scored }), scored });
     }
-    laneOptions.sort(
-      (a, b) => effectiveTotal(b.scored) - effectiveTotal(a.scored),
-    );
+    laneOptions.sort((a, b) => effectiveTotal(b.scored) - effectiveTotal(a.scored));
     options.push(...laneOptions.slice(0, LANE_MODEL_ALTERNATES_CAP));
   }
   return options;
@@ -497,52 +493,36 @@ export function implementersOf(
     if (plan.kind !== 'implement') continue;
     const resolution = resolutions.get(plan.phaseId);
     if (resolution === undefined || resolution.kind !== 'chosen') continue;
-    known.push({
-      phaseId: plan.phaseId,
-      kind: 'implement',
-      family: resolution.candidate.family,
-    });
+    known.push({ phaseId: plan.phaseId, kind: 'implement', family: resolution.candidate.family });
   }
   return known;
 }
 
-export function candidatesFor(
-  phase: GatePhase,
-  gathered: GatheredCall,
-): RoutingCandidate[] {
+export function candidatesFor(phase: GatePhase, gathered: GatheredCall): RoutingCandidate[] {
   return candidatesForPhase(phase, gathered);
 }
 
 function resolveRuleExclusions(
   rule: RoutingRule | undefined,
   inventory: readonly RoutingCandidate[],
-): {
-  readonly userExclusions: ReadonlyMap<string, UserRuleExclusion>;
-  readonly diagnostics: readonly string[];
-} {
+): { readonly userExclusions: ReadonlyMap<string, UserRuleExclusion>; readonly diagnostics: readonly string[] } {
   const userExclusions = new Map<string, UserRuleExclusion>();
   const diagnostics: string[] = [];
   const selectors = rule?.set.exclude;
-  if (rule === undefined || selectors === undefined || selectors.length === 0) {
-    return { userExclusions, diagnostics };
-  }
+  if (rule === undefined || selectors === undefined || selectors.length === 0) return { userExclusions, diagnostics };
   const tag: UserRuleExclusion = `user-rule:${rule.id}`;
   for (const match of resolvePreferences(selectors, inventory)) {
-    const label = sanitizeSelector(match.entry);
+    const label = truncateSnippet(sanitizeSelector(match.entry), DIAGNOSTIC_SELECTOR_SNIPPET_MAX_CHARS);
     if (match.status === 'matched') {
       userExclusions.set(match.ids[0], tag);
       continue;
     }
     if (match.status === 'unknown') {
-      diagnostics.push(
-        `routing rule ${rule.id}: exclude selector "${label}" matched no candidate`,
-      );
+      diagnostics.push(`routing rule ${rule.id}: exclude selector "${label}" matched no candidate`);
       continue;
     }
     if (match.status === 'ambiguous') {
-      diagnostics.push(
-        `routing rule ${rule.id}: exclude selector "${label}" is ambiguous (${match.ids.join(', ')})`,
-      );
+      diagnostics.push(`routing rule ${rule.id}: exclude selector "${label}" is ambiguous (${formatAmbiguousSample(match.ids)})`);
     }
   }
   return { userExclusions, diagnostics };
@@ -552,19 +532,55 @@ function sanitizeSelector(value: string): string {
   return value.replace(/[;\r\n]+/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-function applyBuiltinSubagentOverride(
-  base: AdditiveCandidateScore,
-): AdditiveCandidateScore {
-  const override = SCORE_MAX - base.total;
-  return {
-    ...base,
-    total: SCORE_MAX,
-    parts: {
-      ...base.parts,
-      override,
-      overrideLabel: BUILTIN_VISUAL_DESIGN_OVERRIDE_LABEL,
-    },
-  };
+function truncateSnippet(value: string, maxChars: number): string {
+  if (value.length <= maxChars) return value;
+  return maxChars <= 3 ? value.slice(0, maxChars) : `${value.slice(0, maxChars - 3)}...`;
+}
+
+function formatAmbiguousSample(ids: readonly string[]): string {
+  if (ids.length <= DIAGNOSTIC_AMBIGUOUS_MATCH_SAMPLE_CAP) return ids.join(', ');
+  const shown = ids.slice(0, DIAGNOSTIC_AMBIGUOUS_MATCH_SAMPLE_CAP).join(', ');
+  return `${shown}, and ${ids.length - DIAGNOSTIC_AMBIGUOUS_MATCH_SAMPLE_CAP} more`;
+}
+
+function computeRuleExclusionChangedChoice(
+  matchedRule: RoutingRule | undefined,
+  constraint: Extract<PhaseConstraintResult, { status: 'eligible' }>,
+  inventory: readonly RoutingCandidate[],
+  spreadCandidates: Parameters<typeof spread>[0]['candidates'],
+  actualPickId: string | undefined,
+  phaseId: string,
+  tier: PhasePolicy['tier'],
+  taskKind: OutcomeTaskKind,
+  preferences: GateArgs['preferences'],
+  incomingCursor: GatheredCall['rotation'],
+  rotate: boolean,
+  gathered: GatheredCall,
+): boolean {
+  if (matchedRule === undefined || constraint.pinAccepted) return false;
+  const ruleTag: UserRuleExclusion = `user-rule:${matchedRule.id}`;
+  const excludedByRule = new Set(
+    constraint.excluded.filter((entry) => entry.rule === ruleTag).map((entry) => entry.candidate),
+  );
+  if (excludedByRule.size === 0) return false;
+  const restored = inventory
+    .filter((candidate) => excludedByRule.has(candidate.id))
+    .map((candidate) => {
+      const scored = scoreCandidate(candidate, tier, taskKind, undefined, gathered);
+      return { candidate, score: scored.score, total: scored.total, parts: scored.parts };
+    });
+  if (restored.length === 0) return false;
+  const counterfactual = spread({
+    phaseId,
+    taskKind,
+    candidates: [...spreadCandidates, ...restored],
+    inventory,
+    ...(matchedRule.set.prefer !== undefined ? { rulePrefer: matchedRule.set.prefer } : {}),
+    ...(preferences !== undefined ? { preferences } : {}),
+    rotation: incomingCursor,
+    rotate,
+  });
+  return counterfactual.pick?.candidate.id !== actualPickId;
 }
 
 function constraintInput(
@@ -586,9 +602,7 @@ function constraintInput(
     candidates,
     toolNames,
     ...(executor !== undefined ? { pin: { executor } } : {}),
-    ...(deferReviewerFamily
-      ? { deferReviewerFamily: true }
-      : { knownExecutors }),
+    ...(deferReviewerFamily ? { deferReviewerFamily: true } : { knownExecutors }),
     ...(userExclusions !== undefined ? { userExclusions } : {}),
   };
 }
@@ -600,12 +614,10 @@ function scoreCandidate(
   pinModel: string | undefined,
   gathered: GatheredCall,
 ): AdditiveCandidateScore {
-  const facts =
-    candidate.kind === 'lane' ? gathered.models.get(candidate.id) : undefined;
-  const configuredModel =
-    candidate.kind !== 'lane'
-      ? { id: tier, provenance: 'tier' as const }
-      : facts?.configuredModel;
+  const facts = candidate.kind === 'lane' ? gathered.models.get(candidate.id) : undefined;
+  const configuredModel = candidate.kind !== 'lane'
+    ? { id: tier, provenance: 'tier' as const }
+    : facts?.configuredModel;
   const scored = score(
     {
       candidate,
@@ -615,15 +627,9 @@ function scoreCandidate(
     taskKind,
     gathered.matrix,
   );
-  if (pinModel === undefined) return scored;
-  return applyPinModel(
-    scored,
-    candidate,
-    pinModel,
-    facts?.models ?? [],
-    taskKind,
-    gathered,
-  );
+  return pinModel === undefined
+    ? scored
+    : applyPinModel(scored, candidate, pinModel, facts?.models ?? [], taskKind, gathered);
 }
 
 function applyPinModel(

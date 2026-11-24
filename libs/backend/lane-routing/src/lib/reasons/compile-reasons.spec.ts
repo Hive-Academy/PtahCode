@@ -1156,4 +1156,100 @@ describe('B08 one-sentence explanations and per-lane reason deduplication', () =
       'routing rule bad: ignored',
     ]);
   });
+
+  it('bounds selector snippets, ambiguous samples, preference diagnostics, and aggregate extraReasons characters', () => {
+    const longSelector = 'unknown-selector-'.repeat(12);
+    const explanation = compileChosenExplanation({
+      candidateId: 'codex',
+      displayName: 'codex',
+      model: 'gpt-5',
+      total: 85,
+      decidingFactor: 'call preference',
+      preferenceSource: 'call',
+      preferenceMatches: [
+        { entry: longSelector, rank: 1, ids: [], status: 'unknown' },
+        { entry: longSelector, rank: 2, ids: [], status: 'unknown' },
+        {
+          entry: 'shared-family',
+          rank: 3,
+          ids: ['a', 'b', 'c', 'd', 'e', 'f'],
+          via: 'family',
+          status: 'ambiguous',
+        },
+        ...Array.from({ length: 10 }, (_, idx) => ({
+          entry: `missing-${idx}`,
+          rank: idx + 4,
+          ids: [],
+          status: 'unknown' as const,
+        })),
+      ],
+      policyCondition: 'R5 shape=unset weight omitted',
+      tier: 'sonnet',
+      effort: 'medium',
+      limitState: 'confirmed-room',
+    });
+    expect(explanation).toContain('decided by call preference');
+    expect(explanation).toContain(`${longSelector.slice(0, 45)}...: unknown`);
+    expect(explanation).not.toContain(longSelector);
+    expect(explanation).toContain('shared-family: ambiguous (a/b/c and 3 more)');
+    expect(explanation).toContain('and 4 more');
+
+    const manyExtras = Array.from(
+      { length: 200 },
+      (_, idx) => `routing rule r-${idx}: exclude selector "${'z'.repeat(180)}" matched no candidate`,
+    );
+    const gate = compileGateReasons({
+      chosen: [chosen()],
+      unavailable: [],
+      excluded: [],
+      missingInputs: ['model-lists'],
+      inputRowIds: ['grok', 'codex'],
+      extraReasons: ['models unknown for codex (timeout)', ...manyExtras],
+    });
+    expect(gate.reasons).toContain('models unknown for codex (timeout)');
+    expect(gate.reasons).not.toContain('models unknown');
+    const last = gate.reasons[gate.reasons.length - 1];
+    expect(last).toMatch(/^and \d+ more diagnostic entries omitted$/);
+    const aggregateChars = gate.reasons.reduce((sum, line) => sum + line.length, 0);
+    expect(aggregateChars).toBeLessThanOrEqual(4000);
+  });
+
+  it('reports pin or rotation on preference loss regardless of negative deficit', () => {
+    const base = {
+      candidateId: 'grok',
+      displayName: 'grok',
+      model: 'grok-4',
+      total: 90,
+      preferenceSource: 'call' as const,
+      preferenceLoss: {
+        candidateDisplayName: 'codex',
+        candidateTotal: 77,
+        boost: 12,
+      },
+      policyCondition: 'R5 shape=unset weight omitted',
+      tier: 'sonnet' as const,
+      effort: 'medium' as const,
+      limitState: 'confirmed-room' as const,
+    };
+
+    const pinExplanation = compileChosenExplanation({
+      ...base,
+      decidingFactor: 'pin',
+    });
+    expect(pinExplanation).toContain('boost +12 on codex total 77 lost under pin');
+    expect(pinExplanation).not.toContain('lost to total 90');
+
+    const rotExplanation = compileChosenExplanation({
+      ...base,
+      decidingFactor: 'rotation',
+    });
+    expect(rotExplanation).toContain('boost +12 on codex total 77 lost under rotation');
+    expect(rotExplanation).not.toContain('lost to total 90');
+
+    const scoreExplanation = compileChosenExplanation({
+      ...base,
+      decidingFactor: 'score',
+    });
+    expect(scoreExplanation).toContain('boost +12 on codex total 77 lost to total 90 (gap -13)');
+  });
 });

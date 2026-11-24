@@ -326,18 +326,24 @@ it('ranks reported alternates before capping and keeps the system CLI default ro
     candidate: { id: 'codex' },
   });
   expect(invalid).toMatchObject({ cause: null, proposal: null });
+  expect(
+    resolvePhase(phase, {
+      mode: 'model' as const,
+      blockedCause: null,
+      limited: new Set(['build']),
+      outcome,
+    }),
+  ).toMatchObject({
+    source: 'ranking',
+    cause: 'question-limit',
+    proposal: null,
+  });
   for (const context of [
     {
       mode: 'blocked' as const,
       blockedCause: 'provider-error' as const,
       limited: new Set<string>(),
       outcome: null,
-    },
-    {
-      mode: 'model' as const,
-      blockedCause: null,
-      limited: new Set(['build']),
-      outcome,
     },
     {
       mode: 'model' as const,
@@ -969,6 +975,58 @@ describe('B07 additive totals, routing rules, AM3 override, and AM4 model refine
       pinPlan.ranked.find((r) => r.candidate.kind === 'subagent')?.scored.parts
         ?.override,
     ).toBeUndefined();
+
+    // Call preference for the design subagent keeps total at 100, preserves parts sum, and keeps a 97 competitor in band.
+    const designArgs: GateArgs = {
+      stage: 'gate-0.1',
+      request: 'Design UI',
+      taskType: 'FEATURE',
+      depth: 'Full',
+      phases: [{ id: 'design-ui', kind: 'design' }],
+      preferences: { prefer: ['subagent:design'] },
+    };
+    const closeGathered = makeGathered([makeLane('codex')], { codex: 92 });
+    const designPlan = planRoutePhases(
+      designArgs.phases,
+      designArgs,
+      closeGathered,
+      closeGathered.rotation,
+      false,
+      [],
+      () => undefined,
+      false,
+    ).plans[0];
+    const designSubagent = designPlan.ranked.find(
+      (row) => row.candidate.id === 'subagent:design',
+    );
+    const designCodex = designPlan.ranked.find(
+      (row) => row.candidate.id === 'codex',
+    );
+    expect(designSubagent?.scored.total).toBe(100);
+    expect(designSubagent?.scored.parts).toMatchObject({
+      prior: 50,
+      learned: 5,
+      preference: 12,
+      limit: -5,
+      override: 38,
+      overrideLabel: BUILTIN_VISUAL_DESIGN_OVERRIDE_LABEL,
+    });
+    const designParts = designSubagent?.scored.parts;
+    expect(
+      designParts
+        ? designParts.prior +
+            designParts.learned +
+            designParts.preference +
+            designParts.limit +
+            (designParts.override ?? 0)
+        : null,
+    ).toBe(100);
+    expect(designCodex?.scored.total).toBe(97);
+    expect(designPlan.spread?.preferenceChangedChoice).toBe(false);
+    expect(laneQuestion(designPlan).options.map((o) => [o.laneId, o.score])).toEqual([
+      ['subagent:design', 100],
+      ['codex', 97],
+    ]);
   });
 
   it('applies routing rule prefer, exclude, tier clamp, effort override, and emits unknown/ambiguous diagnostics', () => {
@@ -1209,6 +1267,20 @@ describe('B07 additive totals, routing rules, AM3 override, and AM4 model refine
       cause: 'deadline',
     });
 
+    // Question-limit skip is also preserved through alternates-only suppression.
+    const limitedRes = resolvePhase(altPlan, {
+      mode: 'model',
+      blockedCause: null,
+      limited: new Set(['build']),
+      outcome: null,
+    });
+    expect(limitedRes).toMatchObject({
+      kind: 'chosen',
+      source: 'ranking',
+      cause: 'question-limit',
+      proposal: null,
+    });
+
     // Offer dispositions with no dispatch have no prunedCause.
     const noDispatch = computeLaneOfferDispositions(planned, null);
     expect(noDispatch.get('codex')).toEqual({
@@ -1216,5 +1288,68 @@ describe('B07 additive totals, routing rules, AM3 override, and AM4 model refine
       inBand: true,
       offered: false,
     });
+  });
+
+  it('truncates long exclude selector snippets, caps ambiguous match lists, and computes exclusion counterfactuals', () => {
+    const lanes = [
+      makeLane('codex', { family: 'shared-fam' }),
+      makeLane('grok', { family: 'shared-fam' }),
+      makeLane('opencode', { family: 'shared-fam' }),
+      makeLane('cursor', { family: 'shared-fam' }),
+      makeLane('kimi-cli', { family: 'shared-fam' }),
+    ];
+    const gathered = makeGathered(lanes, {
+      'shared-fam': 70,
+    });
+    const longSelector = 'x'.repeat(200);
+    const rule: RoutingRule = {
+      id: 'bounded-diag',
+      match: { kind: 'implement' },
+      set: {
+        exclude: [longSelector, 'shared-fam', 'kimi-cli'],
+      },
+    };
+    const args: GateArgs = {
+      stage: 'gate-0.1',
+      request: 'Implement',
+      taskType: 'FEATURE',
+      depth: 'Full',
+      phases: [{ id: 'build', kind: 'implement', role: 'custom-role' }],
+    };
+
+    // With no cursor, codex beats kimi-cli by ordinal id -> excluding kimi-cli did not change the pick.
+    const nonDecisive = planRoutePhases(
+      args.phases,
+      args,
+      gathered,
+      gathered.rotation,
+      false,
+      [],
+      () => undefined,
+      false,
+      undefined,
+      { rules: [rule] },
+    ).plans[0];
+    expect(nonDecisive.ruleExclusionChangedChoice).toBe(false);
+    expect(nonDecisive.ruleDiagnostics).toEqual([
+      `routing rule bounded-diag: exclude selector "${'x'.repeat(45)}..." matched no candidate`,
+      'routing rule bounded-diag: exclude selector "shared-fam" is ambiguous (codex, cursor, grok, and 2 more)',
+    ]);
+
+    // With incoming cursor on grok, next in band would be kimi-cli -> excluding kimi-cli changes the pick to opencode.
+    const decisive = planRoutePhases(
+      args.phases,
+      args,
+      gathered,
+      { version: 1, entries: [{ key: 'build|implement', candidateId: 'grok' }] },
+      false,
+      [],
+      () => undefined,
+      true,
+      undefined,
+      { rules: [rule] },
+    ).plans[0];
+    expect(decisive.spread?.pick?.candidate.id).toBe('opencode');
+    expect(decisive.ruleExclusionChangedChoice).toBe(true);
   });
 });

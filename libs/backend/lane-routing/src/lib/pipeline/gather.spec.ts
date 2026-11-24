@@ -7,9 +7,14 @@ import { FAMILY_PROFILE_MODEL } from '../matrix/matrix.types';
 import { EMPTY_OUTCOME_FIGURES } from '../matrix/outcome-figures';
 import type { PhaseDefinitionReader } from '../phase-definition-reader.port';
 import { emptyRotationState } from '../ranking/rotation.store';
+import { constrainPhase } from '../ranking/hard-constraints';
 import type { RouteCandidateSource } from '../route-candidate-source.port';
 import { NEUTRAL_SCORE } from '../routing-constants';
-import { readCandidateTools } from './candidate-tools';
+import {
+  candidatesForPhase,
+  readCandidateTools,
+  readCandidateToolsDetailed,
+} from './candidate-tools';
 import { gatherRouteCall, type RouteMatrix, type RouteRotation } from './gather';
 import {
   capRouteDeadline,
@@ -468,6 +473,269 @@ describe('gatherRouteCall', () => {
     expect(gathered.missing).toContain('agent-list');
     expect(gathered.missing).not.toContain('roles');
   });
+
+  it('retains a fast browser tool proof and lane eligibility even when matrix, limits, listing, and roles hang', async () => {
+    jest.useFakeTimers();
+    const deadline = createRouteDeadline(Date.now() + 100, () => Date.now());
+    const hangingMatrix = deferred<Awaited<ReturnType<RouteMatrix['load']>>>();
+    const hangingLimits = deferred<ReadonlyMap<string, LimitEvidence> | null>();
+    const hangingListing = deferred<readonly { id: string; provenance: 'reported' }[]>();
+    const hangingRoles = deferred<readonly string[]>();
+
+    const tools = jest.fn(async (candidate: { readonly id: string }) =>
+      candidate.id === 'codex'
+        ? ['ptah_browser_navigate']
+        : ['ptah_browser_screenshot'],
+    );
+
+    const gatherPromise = gatherRouteCall({
+      source: {
+        rows: async () => [lane('codex')],
+        limits: async () => new Map(),
+        limitEvidence: () => hangingLimits.promise,
+        roles: () => hangingRoles.promise,
+        tools,
+      },
+      listing: { list: () => hangingListing.promise },
+      matrix: { load: () => hangingMatrix.promise },
+      rotation: okRotation(),
+      logger: testLogger(),
+      nowMs: 50_000,
+      listingBudgetMs: 500,
+      deadline,
+      phases: [
+        {
+          id: 'look',
+          kind: 'visual-review',
+          requiredCapabilities: ['browser'],
+        },
+      ],
+    });
+
+    await jest.advanceTimersByTimeAsync(100);
+    const gathered = await gatherPromise;
+
+    expect(tools).toHaveBeenCalled();
+    expect(gathered.toolNamesByPhase?.get('look')?.get('codex')).toEqual([
+      'ptah_browser_navigate',
+    ]);
+    expect(
+      gathered.toolNamesByPhase?.get('look')?.get('subagent:visual-review'),
+    ).toEqual(['ptah_browser_screenshot']);
+    expect(gathered.detailReasons).not.toContain(
+      'tool evidence unavailable for phase look (timeout)',
+    );
+    expect(gathered.lanes[0]).toMatchObject({
+      id: 'codex',
+      limitState: 'unknown',
+    });
+
+    const phase = gathered.resolvedPhases?.[0];
+    if (phase === undefined) {
+      throw new Error('expected resolved phase');
+    }
+    const constrained = constrainPhase({
+      phase,
+      candidates: candidatesForPhase(phase, gathered),
+      toolNames: gathered.toolNamesByPhase?.get('look'),
+    });
+    expect(constrained.status).toBe('eligible');
+    if (constrained.status === 'eligible') {
+      expect(constrained.eligible.map((candidate) => candidate.id)).toContain(
+        'codex',
+      );
+      expect(
+        constrained.excluded.some(
+          (entry) =>
+            entry.candidate === 'codex' && entry.rule === 'capability-unknown',
+        ),
+      ).toBe(false);
+    }
+  });
+
+  it('starts child-session, built-in, and custom-role tool proofs independently of hanging rows and sibling phase definitions', async () => {
+    jest.useFakeTimers();
+    const deadline = createRouteDeadline(Date.now() + 80, () => Date.now());
+    const hangingRows = deferred<readonly CliDetectionResult[]>();
+    const hangingPhaseDef = deferred<string>();
+    const validDesignDef = `---\nversion: 2\nkind: design\ninput: [brief]\ndeliverable: [spec]\nverdict: [ok]\nacceptanceStep: [review]\nrequiredCapabilities: [design]\nmachineCapabilities: [browser]\ntoolProfile:\n  disallowedTools: []\n  permission: prompt\n---\n## Method\nM.\n## Output contract\nO.\n## Return value\nR.\n## Refusals\nX.\n## Escalation protocol\nE.\n`;
+
+    const gatherPromise = gatherRouteCall({
+      source: {
+        rows: () => hangingRows.promise,
+        limits: async () => new Map(),
+        roles: async () => ['design-specialist'],
+        childSessionEligible: () => true,
+        tools: async (candidate) =>
+          candidate.id === 'child-session' ||
+          candidate.id === 'subagent:design-specialist'
+            ? ['ptah_browser_navigate']
+            : [],
+      },
+      listing: undefined,
+      matrix: neutralMatrix(),
+      rotation: okRotation(),
+      logger: testLogger(),
+      nowMs: 1000,
+      listingBudgetMs: 100,
+      deadline,
+      phases: [
+        { id: 'draw', kind: 'design', role: 'design-specialist' },
+        { id: 'look', kind: 'visual-review' },
+      ],
+      phaseDefinitionReader: {
+        read: (kind) =>
+          kind === 'design'
+            ? Promise.resolve(validDesignDef)
+            : hangingPhaseDef.promise,
+      },
+    });
+
+    await jest.advanceTimersByTimeAsync(80);
+    const gathered = await gatherPromise;
+
+    expect(gathered.toolNamesByPhase?.get('draw')?.get('child-session')).toEqual([
+      'ptah_browser_navigate',
+    ]);
+    expect(
+      gathered.toolNamesByPhase?.get('draw')?.get('subagent:design-specialist'),
+    ).toEqual(['ptah_browser_navigate']);
+    expect(gathered.detailReasons).toContain(
+      'phase definition unavailable for visual-review (timeout)',
+    );
+    expect(gathered.detailReasons).toContain(
+      'tool evidence unavailable for phase look (timeout)',
+    );
+    expect(gathered.detailReasons).not.toContain(
+      'tool evidence unavailable for phase draw (timeout)',
+    );
+  });
+
+  it('emits one bounded sanitized reason per affected kind when phase definitions reject or are malformed', async () => {
+    const logger = testLogger();
+    const reader: PhaseDefinitionReader = {
+      read: async (kind) => {
+        if (kind === 'visual-review') {
+          throw new Error('disk failure; secret=/tmp/key\nline2');
+        }
+        if (kind === 'design') {
+          return '---\nversion: 2\nkind: design\n---\nmalformed body';
+        }
+        return '---\nversion: 2\n---\n';
+      },
+    };
+
+    const gathered = await gatherRouteCall({
+      source: {
+        rows: async () => [lane('codex')],
+        limits: async () => new Map(),
+        roles: async () => [],
+        tools: async () => ['ptah_browser_navigate'],
+      },
+      listing: undefined,
+      matrix: neutralMatrix(),
+      rotation: okRotation(),
+      logger,
+      nowMs: 1000,
+      listingBudgetMs: 100,
+      phases: [
+        { id: 'look-1', kind: 'visual-review' },
+        { id: 'look-2', kind: 'visual-review' },
+        { id: 'draw', kind: 'design' },
+      ],
+      phaseDefinitionReader: reader,
+    });
+
+    // Safe legacy fallbacks preserved.
+    expect(gathered.resolvedPhases?.map((p) => p.requiredCapabilities)).toEqual([
+      ['browser'],
+      ['browser'],
+      ['browser'],
+    ]);
+
+    // Exactly one reason per affected kind, sanitized and without leaked error text.
+    const visualReasons = gathered.detailReasons.filter((reason) =>
+      reason.includes('visual-review'),
+    );
+    const designReasons = gathered.detailReasons.filter((reason) =>
+      reason.includes('design'),
+    );
+    expect(visualReasons).toEqual([
+      'phase definition unavailable for visual-review (error)',
+    ]);
+    expect(designReasons).toEqual([
+      'phase definition unavailable for design (invalid)',
+    ]);
+    for (const reason of [...visualReasons, ...designReasons]) {
+      expect(reason.length).toBeLessThanOrEqual(160);
+      expect(reason).not.toMatch(/[;\r\n]/);
+    }
+  });
+
+  it('emits bounded sanitized reasons when tool port returns null or rejects while keeping empty lists distinct', async () => {
+    const longDirtyPhaseId = `look;\n\r\t\x1b[31m_${'x'.repeat(180)}`;
+    const gathered = await gatherRouteCall({
+      source: {
+        rows: async () => [lane('codex'), lane('grok')],
+        limits: async () => new Map(),
+        roles: async () => [],
+        tools: async (candidate, phase) => {
+          if (phase.kind === 'design') {
+            // Known empty tool list for every candidate -> NOT unavailable evidence.
+            return [];
+          }
+          if (candidate.id === 'codex') {
+            throw new Error('tool bridge crash');
+          }
+          return null;
+        },
+      },
+      listing: undefined,
+      matrix: neutralMatrix(),
+      rotation: okRotation(),
+      logger: testLogger(),
+      nowMs: 1000,
+      listingBudgetMs: 100,
+      phases: [
+        {
+          id: 'draw-empty',
+          kind: 'design',
+          requiredCapabilities: ['browser'],
+        },
+        {
+          id: longDirtyPhaseId,
+          kind: 'visual-review',
+          requiredCapabilities: ['browser'],
+        },
+      ],
+    });
+
+    // Known empty tool list stays [] (not null) and produces no unavailable reason.
+    expect(gathered.toolNamesByPhase?.get('draw-empty')?.get('codex')).toEqual([]);
+    expect(gathered.toolNamesByPhase?.get('draw-empty')?.get('grok')).toEqual([]);
+    expect(
+      gathered.detailReasons.some((reason) => reason.includes('draw-empty')),
+    ).toBe(false);
+
+    // Non-timeout rejection and null return produce null tool evidence and ONE
+    // bounded, sanitized aggregate reason for the affected phase.
+    expect(
+      gathered.toolNamesByPhase?.get(longDirtyPhaseId)?.get('codex'),
+    ).toBeNull();
+    expect(
+      gathered.toolNamesByPhase?.get(longDirtyPhaseId)?.get('grok'),
+    ).toBeNull();
+    const toolReasons = gathered.detailReasons.filter((reason) =>
+      reason.startsWith('tool evidence unavailable for phase '),
+    );
+    expect(toolReasons).toHaveLength(1);
+    expect(toolReasons[0]).toContain('(error, unavailable)');
+    expect(toolReasons[0].length).toBeLessThanOrEqual(160);
+    expect(toolReasons[0]).not.toMatch(/[;\r\n\t]/);
+    for (let i = 0; i < toolReasons[0].length; i += 1) {
+      expect(toolReasons[0].charCodeAt(i)).toBeGreaterThan(0x1f);
+    }
+  });
 });
 
 describe('readCandidateTools', () => {
@@ -545,5 +813,47 @@ describe('readCandidateTools', () => {
     await Promise.resolve();
     await Promise.resolve();
     expect(byPhase.get('look')?.get('opencode')).toBeNull();
+  });
+
+  it('distinguishes known empty tool lists from null and rejected tool reads in detailed reasons', async () => {
+    const logger = testLogger();
+    const laneDef = {
+      kind: 'lane' as const,
+      id: 'codex',
+      cli: 'codex' as const,
+      family: 'codex',
+      installed: true,
+      disabled: false,
+      limitState: 'confirmed-room' as const,
+    };
+
+    const result = await readCandidateToolsDetailed(
+      [
+        { id: 'empty-ok', kind: 'design', requiredCapabilities: ['browser'] },
+        { id: 'null-only', kind: 'visual-review', requiredCapabilities: ['browser'] },
+        { id: 'err-only', kind: 'implement', requiredCapabilities: ['browser'] },
+      ],
+      { lanes: [laneDef], roles: [] },
+      {
+        rows: async () => [],
+        limits: async () => new Map(),
+        roles: async () => [],
+        tools: async (_candidate, phase) => {
+          if (phase.kind === 'design') return [];
+          if (phase.kind === 'visual-review') return null;
+          throw new Error('port error');
+        },
+      },
+      logger,
+    );
+
+    expect(result.byPhase.get('empty-ok')?.get('codex')).toEqual([]);
+    expect(result.byPhase.get('null-only')?.get('codex')).toBeNull();
+    expect(result.byPhase.get('err-only')?.get('codex')).toBeNull();
+    expect(result.timedOutPhases).toEqual([]);
+    expect(result.reasons).toEqual([
+      'tool evidence unavailable for phase null-only (unavailable)',
+      'tool evidence unavailable for phase err-only (error)',
+    ]);
   });
 });

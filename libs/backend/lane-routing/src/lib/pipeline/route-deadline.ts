@@ -37,14 +37,20 @@ export function capRouteDeadline(
   };
 }
 
+function isExpired(deadline: RouteDeadline): boolean {
+  const remaining = deadline.remainingMs();
+  return Number.isNaN(remaining) || remaining <= 0;
+}
+
 /**
  * Race an async task against `deadline`.
  *
  * - Returns `{ kind: 'deadline' }` immediately without starting `task` when the
  *   budget is already exhausted.
+ * - Rechecks the monotonic deadline after task invocation and at fulfillment,
+ *   rejection, and synchronous throw so settlements after cutoff never win.
  * - Aborts the passed `AbortSignal` when the deadline expires and classifies
- *   any abort-triggered rejection as `{ kind: 'deadline' }` regardless of
- *   settlement order.
+ *   any post-cutoff or abort-triggered settlement as `{ kind: 'deadline' }`.
  * - Observes losing promises so late rejections never become unhandled.
  */
 export async function withinBudget<T>(
@@ -52,8 +58,7 @@ export async function withinBudget<T>(
   task: (signal: AbortSignal) => Promise<T>,
   onLateError?: (error: unknown) => void,
 ): Promise<BudgetResult<T>> {
-  const remaining = deadline.remainingMs();
-  if (Number.isNaN(remaining) || remaining <= 0) {
+  if (isExpired(deadline)) {
     return { kind: 'deadline' };
   }
 
@@ -62,27 +67,67 @@ export async function withinBudget<T>(
   try {
     promise = task(controller.signal);
   } catch (error: unknown) {
+    if (isExpired(deadline)) {
+      controller.abort();
+      onLateError?.(error);
+      return { kind: 'deadline' };
+    }
     return { kind: 'error', error };
   }
 
-  if (!Number.isFinite(remaining)) {
+  const tracked = Promise.resolve(promise);
+  const remainingAfterStart = deadline.remainingMs();
+  if (Number.isNaN(remainingAfterStart) || remainingAfterStart <= 0) {
+    // Observe the losing promise before aborting so sync or async rejections never go unhandled.
+    void tracked.then(
+      () => undefined,
+      (error: unknown) => {
+        onLateError?.(error);
+      },
+    );
+    controller.abort();
+    return { kind: 'deadline' };
+  }
+
+  if (!Number.isFinite(remainingAfterStart)) {
     try {
-      return { kind: 'ok', value: await promise };
+      const value = await tracked;
+      if (isExpired(deadline)) {
+        controller.abort();
+        return { kind: 'deadline' };
+      }
+      return { kind: 'ok', value };
     } catch (error: unknown) {
+      if (isExpired(deadline)) {
+        controller.abort();
+        onLateError?.(error);
+        return { kind: 'deadline' };
+      }
       return { kind: 'error', error };
     }
   }
 
   let expired = false;
-  let settled = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
 
-  const guarded = promise.then(
-    (value): BudgetResult<T> =>
-      expired ? { kind: 'deadline' } : { kind: 'ok', value },
+  const markExpired = (): void => {
+    if (expired) return;
+    expired = true;
+    controller.abort();
+  };
+
+  const guarded = tracked.then(
+    (value): BudgetResult<T> => {
+      if (expired || isExpired(deadline)) {
+        markExpired();
+        return { kind: 'deadline' };
+      }
+      return { kind: 'ok', value };
+    },
     (error: unknown): BudgetResult<T> => {
-      if (expired) {
-        if (settled) onLateError?.(error);
+      if (expired || isExpired(deadline)) {
+        markExpired();
+        onLateError?.(error);
         return { kind: 'deadline' };
       }
       return { kind: 'error', error };
@@ -91,16 +136,14 @@ export async function withinBudget<T>(
 
   const timeout = new Promise<BudgetResult<T>>((resolve) => {
     timer = setTimeout(() => {
-      expired = true;
-      controller.abort();
+      markExpired();
       resolve({ kind: 'deadline' });
-    }, remaining);
+    }, remainingAfterStart);
   });
 
   try {
     return await Promise.race([guarded, timeout]);
   } finally {
-    settled = true;
     if (timer !== undefined) clearTimeout(timer);
   }
 }

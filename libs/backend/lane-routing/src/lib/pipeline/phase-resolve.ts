@@ -14,6 +14,18 @@ import type {
 } from './phase-plan';
 import { laneQuestion } from './phase-plan';
 
+/**
+ * Causes that skipped the model pass before any answer existed. They stay on
+ * an alternates-only row so the user sees why the model did not refine it.
+ */
+const SKIP_CAUSES: ReadonlySet<FallbackCause> = new Set<FallbackCause>([
+  'deadline',
+  'question-limit',
+  'question-cap',
+  'model-cold',
+  'model-busy',
+]);
+
 export function isSendable(plan: PhasePlan): boolean {
   return (
     plan.constraint.status === 'eligible' &&
@@ -39,7 +51,7 @@ export function resolvePhase(
   const alternatesOnly =
     laneQuestion(plan).primaryCount < MIN_OPTIONS_PER_PHASE;
   const suppressCause = (cause: FallbackCause | null): boolean =>
-    alternatesOnly && cause !== 'deadline';
+    alternatesOnly && (cause === null || !SKIP_CAUSES.has(cause));
   const fallback = (
     cause: FallbackCause | null,
     proposal: ChosenResolution['proposal'] = null,

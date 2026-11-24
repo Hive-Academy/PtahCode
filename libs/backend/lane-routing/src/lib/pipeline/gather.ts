@@ -45,7 +45,10 @@ import type { FallbackModel, ListedModel } from '../ranking/score';
 import { MISSING_INPUTS, type MissingInput } from '../reasons/compile-reasons';
 import type { RouteCandidateSource } from '../route-candidate-source.port';
 import { GATHER_BUDGET_MS, NEUTRAL_SCORE } from '../routing-constants';
-import { readCandidateToolsDetailed } from './candidate-tools';
+import {
+  readCandidateToolsIncremental,
+  sanitizeGatherReason,
+} from './candidate-tools';
 import {
   capRouteDeadline,
   createRouteDeadline,
@@ -137,20 +140,62 @@ export async function gatherRouteCall(input: {
   // Start row-independent reads immediately in parallel with rows().
   const rowsPromise = readRows(input.source, input.logger, gatherDeadline);
   const rolesPromise = readRoles(input.source, input.logger, gatherDeadline);
-  const phaseDefsPromise =
+  const phaseDefs =
     input.phases === undefined
-      ? Promise.resolve(undefined)
-      : resolvePhaseDefinitions(
+      ? undefined
+      : startPhaseDefinitions(
           input.phases,
           input.phaseDefinitionReader,
           input.logger,
           gatherDeadline,
         );
 
+  // Build provisional lane identities from rows so tool proofs start as soon as
+  // candidate identities and phase requirements are known, independent of
+  // limits, model lists, matrix, and (for non-custom-role candidates) roles.
+  const provisionalLanesPromise = rowsPromise.then((rowsResult) =>
+    rowsResult.rows.map((row) => toLaneCandidate(row, null, null)),
+  );
+  const provisionalRolesPromise = rolesPromise.then(
+    (rolesResult) => rolesResult.roles,
+  );
+  const toolResultPromise =
+    phaseDefs === undefined
+      ? Promise.resolve(undefined)
+      : readCandidateToolsIncremental(
+          phaseDefs.phasePromises,
+          {
+            lanes: provisionalLanesPromise,
+            roles: provisionalRolesPromise,
+            childSessionEligible,
+          },
+          input.source,
+          input.logger,
+          gatherDeadline,
+        );
+  // A rows failure rethrows below before Promise.all observes the derived
+  // reads, so mark them handled now. Promise.all still sees their outcome.
+  observeLateFailure(provisionalLanesPromise);
+  observeLateFailure(provisionalRolesPromise);
+  observeLateFailure(toolResultPromise);
+  observeLateFailure(rolesPromise);
+  if (phaseDefs !== undefined) {
+    phaseDefs.phasePromises.forEach(observeLateFailure);
+    observeLateFailure(phaseDefs.reasonsPromise);
+  }
+
   const rows = await rowsPromise;
   const rowSnapshot = [...rows.rows];
 
-  const [limits, roles, listed, matrix, phaseDefs] = await Promise.all([
+  const [
+    limits,
+    roles,
+    listed,
+    matrix,
+    resolvedPhases,
+    phaseDefReasons,
+    toolResult,
+  ] = await Promise.all([
     readLimits(input.source, rowSnapshot, input.logger, gatherDeadline),
     rolesPromise,
     listModels(
@@ -167,23 +212,18 @@ export async function gatherRouteCall(input: {
       input.logger,
       gatherDeadline,
     ),
-    phaseDefsPromise,
+    phaseDefs === undefined
+      ? Promise.resolve(undefined)
+      : Promise.all(phaseDefs.phasePromises),
+    phaseDefs === undefined
+      ? Promise.resolve<readonly string[]>([])
+      : phaseDefs.reasonsPromise,
+    toolResultPromise,
   ]);
 
   const lanes = rowSnapshot.map((row) =>
     toLaneCandidate(row, limits.map, limits.evidence),
   );
-
-  const toolResult =
-    phaseDefs === undefined
-      ? undefined
-      : await readCandidateToolsDetailed(
-          phaseDefs.phases,
-          { lanes, roles: roles.roles, childSessionEligible },
-          input.source,
-          input.logger,
-          gatherDeadline,
-        );
 
   const matrixNotes = classifyMatrixReasons(matrix.reasons);
   const missing = orderedMissing([
@@ -200,10 +240,8 @@ export async function gatherRouteCall(input: {
   const detailReasons: string[] = [
     ...matrixNotes.extra,
     ...listed.reasons,
-    ...(phaseDefs?.reasons ?? []),
-    ...(toolResult?.timedOutPhases.map(
-      (phaseId) => `tool evidence unavailable for phase ${phaseId} (timeout)`,
-    ) ?? []),
+    ...phaseDefReasons,
+    ...(toolResult?.reasons ?? []),
     ...(childEligibilityReason ? [childEligibilityReason] : []),
   ];
 
@@ -218,7 +256,7 @@ export async function gatherRouteCall(input: {
     missing,
     detailReasons,
     nowMs: input.nowMs,
-    ...(phaseDefs === undefined ? {} : { resolvedPhases: phaseDefs.phases }),
+    ...(resolvedPhases === undefined ? {} : { resolvedPhases }),
     ...(toolResult === undefined ? {} : { toolNamesByPhase: toolResult.byPhase }),
   };
 }
@@ -554,12 +592,44 @@ function neutralSnapshot(cause: 'unreadable' | 'timeout'): CapabilityMatrixSnaps
   };
 }
 
-async function resolvePhaseDefinitions(
+type GatePhase = GatePhases[number];
+type PhaseDefinitionFailureCause = 'timeout' | 'error' | 'invalid';
+
+interface PhaseDefinitionOutcome {
+  readonly capabilities: GatePhase['requiredCapabilities'];
+  readonly reason?: string;
+}
+
+const MAX_PHASE_KIND_LABEL_CHARS = 64;
+
+function phaseDefinitionUnavailableReason(
+  kind: PhaseKind,
+  cause: PhaseDefinitionFailureCause,
+): string {
+  const safeKind =
+    sanitizeGatherReason(String(kind), MAX_PHASE_KIND_LABEL_CHARS) || 'unknown';
+  return sanitizeGatherReason(
+    `phase definition unavailable for ${safeKind} (${cause})`,
+  );
+}
+
+function phaseDefinitionErrorCause(
+  error: unknown,
+): Exclude<PhaseDefinitionFailureCause, 'timeout'> {
+  return error instanceof PhaseDefinitionError && error.code !== 'MISSING'
+    ? 'invalid'
+    : 'error';
+}
+
+function startPhaseDefinitions(
   phases: GatePhases,
   reader: PhaseDefinitionReader | undefined,
   logger: LaneRoutingLogger,
   deadline?: RouteDeadline,
-): Promise<{ readonly phases: GatePhases; readonly reasons: readonly string[] }> {
+): {
+  readonly phasePromises: readonly Promise<GatePhase>[];
+  readonly reasonsPromise: Promise<readonly string[]>;
+} {
   const kindsToRead: PhaseKind[] = [];
   for (const phase of phases) {
     if (
@@ -570,90 +640,124 @@ async function resolvePhaseDefinitions(
     }
   }
 
-  const resolvedByKind = new Map<PhaseKind, GatePhases[number]['requiredCapabilities']>();
-  const reasons: string[] = [];
+  const outcomeByKind = new Map<PhaseKind, Promise<PhaseDefinitionOutcome>>();
+  const outcomePromises: Promise<PhaseDefinitionOutcome>[] = [];
+  for (const kind of kindsToRead) {
+    const promise = readOnePhaseDefinition(kind, reader, logger, deadline);
+    outcomeByKind.set(kind, promise);
+    outcomePromises.push(promise);
+  }
 
-  await Promise.all(
-    kindsToRead.map(async (kind) => {
-      const legacy = legacyCapabilities(kind);
-      if (reader === undefined) {
-        resolvedByKind.set(kind, legacy);
-        return;
+  const phasePromises: readonly Promise<GatePhase>[] = phases.map((phase) => {
+    if (phase.requiredCapabilities !== undefined) {
+      return Promise.resolve(phase);
+    }
+    const pending = outcomeByKind.get(phase.kind);
+    if (pending === undefined) {
+      return Promise.resolve({
+        ...phase,
+        requiredCapabilities: legacyCapabilities(phase.kind),
+      });
+    }
+    return pending.then((outcome) => ({
+      ...phase,
+      requiredCapabilities:
+        outcome.capabilities ?? legacyCapabilities(phase.kind),
+    }));
+  });
+
+  const reasonsPromise = Promise.all(outcomePromises).then((outcomes) => {
+    const reasons: string[] = [];
+    for (const outcome of outcomes) {
+      if (outcome.reason !== undefined) {
+        reasons.push(outcome.reason);
       }
-      if (deadline !== undefined) {
-        const raced = await withinBudget(
-          deadline,
-          () => reader.read(kind),
-          (error) => {
-            logger.warn(
-              '[lane-routing] phase definition rejected after deadline',
-              { kind, ...logFacts(error) },
-            );
-          },
-        );
-        if (raced.kind === 'deadline') {
-          logger.warn(
-            '[lane-routing] phase definition timed out; using legacy machine capabilities',
-            { kind },
-          );
-          reasons.push(`phase definition unavailable for ${kind} (timeout)`);
-          resolvedByKind.set(kind, legacy);
-          return;
-        }
-        if (raced.kind === 'error') {
-          logger.warn(
-            '[lane-routing] phase definition unavailable; using legacy machine capabilities',
-            {
-              kind,
-              errorName:
-                raced.error instanceof Error ? raced.error.name : 'unknown',
-              code:
-                raced.error instanceof PhaseDefinitionError
-                  ? raced.error.code
-                  : undefined,
-            },
-          );
-          resolvedByKind.set(kind, legacy);
-          return;
-        }
-        resolvedByKind.set(kind, parsePhaseCapabilities(kind, raced.value, logger, legacy));
-        return;
-      }
-      try {
-        const text = await reader.read(kind);
-        resolvedByKind.set(kind, parsePhaseCapabilities(kind, text, logger, legacy));
-      } catch (error: unknown) {
+    }
+    return reasons;
+  });
+
+  return { phasePromises, reasonsPromise };
+}
+
+function warnPhaseDefUnavailable(
+  logger: LaneRoutingLogger,
+  kind: PhaseKind,
+  error: unknown,
+): void {
+  logger.warn(
+    '[lane-routing] phase definition unavailable; using legacy machine capabilities',
+    {
+      kind,
+      errorName: error instanceof Error ? error.name : 'unknown',
+      code: error instanceof PhaseDefinitionError ? error.code : undefined,
+    },
+  );
+}
+
+async function readOnePhaseDefinition(
+  kind: PhaseKind,
+  reader: PhaseDefinitionReader | undefined,
+  logger: LaneRoutingLogger,
+  deadline?: RouteDeadline,
+): Promise<PhaseDefinitionOutcome> {
+  const legacy = legacyCapabilities(kind);
+  if (reader === undefined) {
+    return { capabilities: legacy };
+  }
+  if (deadline !== undefined) {
+    const raced = await withinBudget(
+      deadline,
+      () => reader.read(kind),
+      (error) => {
         logger.warn(
-          '[lane-routing] phase definition unavailable; using legacy machine capabilities',
-          {
-            kind,
-            errorName: error instanceof Error ? error.name : 'unknown',
-            code: error instanceof PhaseDefinitionError ? error.code : undefined,
-          },
+          '[lane-routing] phase definition rejected after deadline',
+          { kind, ...logFacts(error) },
         );
-        resolvedByKind.set(kind, legacy);
-      }
-    }),
-  );
-
-  const resolvedPhases = phases.map((phase) =>
-    phase.requiredCapabilities !== undefined
-      ? phase
-      : {
-          ...phase,
-          requiredCapabilities:
-            resolvedByKind.get(phase.kind) ?? legacyCapabilities(phase.kind),
-        },
-  );
-  return { phases: resolvedPhases, reasons };
+      },
+    );
+    if (raced.kind === 'deadline') {
+      logger.warn(
+        '[lane-routing] phase definition timed out; using legacy machine capabilities',
+        { kind },
+      );
+      return {
+        capabilities: legacy,
+        reason: phaseDefinitionUnavailableReason(kind, 'timeout'),
+      };
+    }
+    if (raced.kind === 'error') {
+      warnPhaseDefUnavailable(logger, kind, raced.error);
+      return {
+        capabilities: legacy,
+        reason: phaseDefinitionUnavailableReason(
+          kind,
+          phaseDefinitionErrorCause(raced.error),
+        ),
+      };
+    }
+    return parsePhaseCapabilities(kind, raced.value, logger, legacy);
+  }
+  try {
+    const text = await reader.read(kind);
+    return parsePhaseCapabilities(kind, text, logger, legacy);
+  } catch (error: unknown) {
+    warnPhaseDefUnavailable(logger, kind, error);
+    return {
+      capabilities: legacy,
+      reason: phaseDefinitionUnavailableReason(
+        kind,
+        phaseDefinitionErrorCause(error),
+      ),
+    };
+  }
 }
 
 function parsePhaseCapabilities(
   kind: PhaseKind,
   text: string,
   logger: LaneRoutingLogger,
-  legacy: GatePhases[number]['requiredCapabilities'],
-): GatePhases[number]['requiredCapabilities'] {
+  legacy: GatePhase['requiredCapabilities'],
+): PhaseDefinitionOutcome {
   try {
     const definition = resolvePhaseDefinition(kind, () => text).definition;
     if (definition.version === 1) {
@@ -662,17 +766,13 @@ function parsePhaseCapabilities(
         { kind },
       );
     }
-    return [...effectiveMachineCapabilities(definition)];
+    return { capabilities: [...effectiveMachineCapabilities(definition)] };
   } catch (error: unknown) {
-    logger.warn(
-      '[lane-routing] phase definition unavailable; using legacy machine capabilities',
-      {
-        kind,
-        errorName: error instanceof Error ? error.name : 'unknown',
-        code: error instanceof PhaseDefinitionError ? error.code : undefined,
-      },
-    );
-    return legacy;
+    warnPhaseDefUnavailable(logger, kind, error);
+    return {
+      capabilities: legacy,
+      reason: phaseDefinitionUnavailableReason(kind, 'invalid'),
+    };
   }
 }
 
@@ -724,6 +824,11 @@ function pushMissing(list: MissingInput[], item: MissingInput): void {
 
 function orderedMissing(items: readonly MissingInput[]): MissingInput[] {
   return MISSING_INPUTS.filter((item) => items.includes(item));
+}
+
+/** Marks a started read as handled; its awaiting caller still sees the outcome. */
+function observeLateFailure(promise: Promise<unknown>): void {
+  promise.catch(() => undefined);
 }
 
 function logFacts(error: unknown): {

@@ -26,6 +26,14 @@ export interface RankedCandidate {
   /** Additive score from the calculator, before preference if no parts are supplied. */
   readonly total?: number;
   readonly parts?: ScoreParts;
+  /**
+   * Optional target total override applied after the preference part is known
+   * (including in the unboosted counterfactual), preserving the parts sum.
+   */
+  readonly totalOverride?: {
+    readonly target: number;
+    readonly label: string;
+  };
 }
 
 interface RankedTotal extends RankedCandidate {
@@ -120,6 +128,33 @@ function rankCandidates(
     const preferenceRank = ranks?.get(entry.candidate.id);
     const preference = preferenceBoost(preferenceRank);
     const parts = entry.parts;
+    if (entry.totalOverride !== undefined) {
+      const target = entry.totalOverride.target;
+      const preOverrideBase = entry.total === undefined
+        ? parts === undefined
+          ? entry.score + legacyLimitAdjustment(entry.candidate)
+          : parts.prior + parts.learned + parts.limit
+        : entry.total - (parts?.preference ?? 0) - (parts?.override ?? 0);
+      if (!Number.isFinite(preOverrideBase)) {
+        throw new Error(`base total must be finite for candidate ${entry.candidate.id}`);
+      }
+      const override = target - (preOverrideBase + preference);
+      return {
+        ...entry,
+        total: target,
+        ...(parts === undefined
+          ? {}
+          : {
+              parts: {
+                ...parts,
+                preference,
+                override,
+                overrideLabel: entry.totalOverride.label,
+              },
+            }),
+        ...(preferenceRank === undefined ? {} : { preferenceRank }),
+      };
+    }
     const base = entry.total === undefined
       ? parts === undefined
         ? entry.score + legacyLimitAdjustment(entry.candidate)
@@ -191,6 +226,9 @@ function assertCandidates(candidates: readonly RankedCandidate[]): void {
     }
     if (entry.total !== undefined && !Number.isFinite(entry.total)) {
       throw new Error('total must be finite');
+    }
+    if (entry.totalOverride !== undefined && !Number.isFinite(entry.totalOverride.target)) {
+      throw new Error(`total override must be finite for candidate ${id}`);
     }
     if (candidate.kind === 'lane' && candidate.limitState !== EXCLUDED_LIMIT_STATE
         && !Object.hasOwn(LIMIT_ADJUST, candidate.limitState)) {

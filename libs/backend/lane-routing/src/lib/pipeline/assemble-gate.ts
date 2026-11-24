@@ -27,6 +27,7 @@ import {
   compileChosenExplanation,
   compileGateReasons,
   compileUnavailableExplanation,
+  preferenceDiagnosticKey,
   type ChosenExecutor,
   type ChosenReasonFacts,
   type DecidingFactor,
@@ -251,42 +252,22 @@ function pushExcluded(
   plan: PhasePlan,
   dispositions: ReadonlyMap<string, LaneOfferDisposition>,
 ): void {
-  if (
-    plan.constraint.status === 'eligible' ||
-    plan.constraint.status === 'unavailable'
-  ) {
+  if (plan.constraint.status === 'eligible' || plan.constraint.status === 'unavailable') {
     for (const entry of plan.constraint.excluded) {
       excluded.push({
         phaseId: plan.phaseId,
         candidate: entry.candidate,
         rule: entry.rule,
-        ...(entry.capability !== undefined
-          ? { capability: entry.capability }
-          : {}),
+        ...(entry.capability !== undefined ? { capability: entry.capability } : {}),
       });
-      reasonExcluded.push({
-        phaseId: plan.phaseId,
-        candidate: entry.candidate,
-        rule: entry.rule,
-      });
+      reasonExcluded.push({ phaseId: plan.phaseId, candidate: entry.candidate, rule: entry.rule });
     }
   }
   for (const row of plan.ranked) {
-    const cause: PrunedCause | undefined = dispositions.get(
-      row.candidate.id,
-    )?.prunedCause;
+    const cause: PrunedCause | undefined = dispositions.get(row.candidate.id)?.prunedCause;
     if (cause === undefined) continue;
-    excluded.push({
-      phaseId: plan.phaseId,
-      candidate: row.candidate.id,
-      rule: 'pruned',
-      cause,
-    });
-    reasonExcluded.push({
-      phaseId: plan.phaseId,
-      candidate: row.candidate.id,
-      rule: 'pruned',
-    });
+    excluded.push({ phaseId: plan.phaseId, candidate: row.candidate.id, rule: 'pruned', cause });
+    reasonExcluded.push({ phaseId: plan.phaseId, candidate: row.candidate.id, rule: 'pruned' });
   }
 }
 
@@ -310,6 +291,7 @@ function rosterFrom(
 ): (ChosenEntry | UnavailableEntry)[] {
   let chosenIndex = 0;
   let unavailableIndex = 0;
+  const seenPreferenceDiagnostics = new Set<string>();
   const roster: (ChosenEntry | UnavailableEntry)[] = [];
   for (const draft of drafts) {
     if (draft.kind === 'unavailable') {
@@ -333,7 +315,15 @@ function rosterFrom(
       draft.plan,
     );
     chosenIndex += 1;
-    roster.push(chosenEntry(draft, gathered, args.preferenceSource, reason));
+    roster.push(
+      chosenEntry(
+        draft,
+        gathered,
+        args.preferenceSource,
+        reason,
+        seenPreferenceDiagnostics,
+      ),
+    );
   }
   if (roster.length !== args.phases.length) {
     throw new Error('route decide roster does not cover every phase');
@@ -503,19 +493,22 @@ function decidingFactorOf(
   alternative: ExplanationAlternative | undefined,
 ): DecidingFactor {
   if (resolution.source === 'pin') return 'pin';
-  if (resolution.source === 'model') return 'model refinement';
+  if (resolution.source === 'model' && resolution.modelRefined === true) {
+    return 'model refinement';
+  }
   if (plan.spread?.rotationChangedChoice) return 'rotation';
-  if (plan.matchedRule !== undefined) {
-    const ruleTag = `user-rule:${plan.matchedRule.id}`;
-    const ruleExcludedSomeone = plan.constraint.excluded.some(
-      (entry) => entry.rule === ruleTag,
-    );
-    if (
+  if (
+    plan.matchedRule !== undefined &&
+    (plan.ruleExclusionChangedChoice === true ||
       (plan.spread?.preferenceSource === 'rule' &&
-        plan.spread.preferenceChangedChoice) ||
-      ruleExcludedSomeone
-    ) {
-      return `rule ${plan.matchedRule.id}`;
+        plan.spread.preferenceChangedChoice))
+  ) {
+    return `rule ${plan.matchedRule.id}`;
+  }
+  if (plan.spread?.preferenceChangedChoice) {
+    if (plan.spread.preferenceSource === 'call') return 'call preference';
+    if (plan.spread.preferenceSource === 'configured') {
+      return 'configured preference';
     }
   }
   if (alternative !== undefined && selectedTotal === alternative.total) {
@@ -606,6 +599,7 @@ function chosenEntry(
   gathered: GatheredCall,
   callerPreferenceNote: string | undefined,
   reason: string,
+  seenPreferenceDiagnostics: Set<string>,
 ): ChosenEntry {
   const plan = draft.plan;
   const row = plan.ranked.find((entry) => entry.candidate.id === draft.resolution.candidate.id);
@@ -626,6 +620,12 @@ function chosenEntry(
   const alternative = strongestAlternativeOf(plan, draft.resolution.candidate.id);
   const decidingFactor = decidingFactorOf(plan, draft.resolution, selectedTotal, alternative);
   const preferenceLoss = preferenceLossOf(plan, draft.resolution.candidate.id);
+  const preferenceMatches = plan.spread?.preferenceMatches?.filter((entry) => {
+    const key = preferenceDiagnosticKey(entry);
+    if (seenPreferenceDiagnostics.has(key)) return false;
+    seenPreferenceDiagnostics.add(key);
+    return true;
+  });
   const explanation = compileChosenExplanation({
     candidateId: draft.resolution.candidate.id,
     displayName: candidateDisplayName(draft.resolution.candidate),
@@ -638,7 +638,7 @@ function chosenEntry(
     ...(plan.spread?.overriddenPreferenceSources !== undefined
       ? { overriddenPreferenceSources: plan.spread.overriddenPreferenceSources }
       : {}),
-    ...(plan.spread?.preferenceMatches !== undefined ? { preferenceMatches: plan.spread.preferenceMatches } : {}),
+    ...(preferenceMatches !== undefined ? { preferenceMatches } : {}),
     ...(preferenceLoss !== undefined ? { preferenceLoss } : {}),
     ...(callerPreferenceNote !== undefined ? { callerPreferenceNote } : {}),
     policyCondition: plan.policy.condition ?? plan.policy.ruleId,

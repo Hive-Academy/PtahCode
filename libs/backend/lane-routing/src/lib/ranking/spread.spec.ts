@@ -561,4 +561,53 @@ describe('additive spread', () => {
       parts: { preference: 12, override: 45 },
     });
   });
+
+  it('applies totalOverride after preference and in the counterfactual while preserving parts sum and closeness band', () => {
+    const sub = {
+      ...subagent('design', 50),
+      total: 50,
+      parts: { prior: 50, learned: 5, limit: -5, preference: 0 },
+      totalOverride: { target: 100, label: 'builtin design/visual-review subagent' },
+    };
+    const competitor = {
+      ...ranked('codex', 92),
+      total: 97,
+      parts: { prior: 92, learned: 5, limit: 0, preference: 0 },
+    };
+
+    // Call prefers the overridden subagent: total stays 100 (not 112), override adjusts to 38, competitor at 97 stays in band.
+    const preferred = decide([sub, competitor], emptyRotationState(), { prefer: ['subagent:design'] });
+    expect(preferred.pick).toMatchObject({
+      candidate: { id: 'subagent:design' },
+      total: 100,
+      parts: {
+        prior: 50,
+        learned: 5,
+        limit: -5,
+        preference: 12,
+        override: 38,
+        overrideLabel: 'builtin design/visual-review subagent',
+      },
+    });
+    const parts = preferred.pick?.parts;
+    expect(parts).toBeDefined();
+    if (parts) {
+      expect(parts.prior + parts.learned + parts.preference + parts.limit + (parts.override ?? 0)).toBe(100);
+    }
+    // Counterfactual also applies totalOverride (100 vs 97), so preference did not change the choice.
+    expect(preferred.preferenceChangedChoice).toBe(false);
+
+    // Rotation proves competitor at 97 stays inside the 5-point band of 100.
+    const key = rotationKey('build', 'implement');
+    const rotated = decide([sub, competitor], withPick(emptyRotationState(), key, 'subagent:design'), {
+      prefer: ['subagent:design'],
+    });
+    expect(pickId(rotated)).toBe('codex');
+    expect(rotated.rotationChangedChoice).toBe(true);
+
+    // Rejects non-finite totalOverride target.
+    expect(() =>
+      decide([{ ...sub, totalOverride: { target: Number.NaN, label: 'bad' } }]),
+    ).toThrow(/total override must be finite/);
+  });
 });

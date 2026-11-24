@@ -18,7 +18,15 @@ import {
 } from '../contracts/route-decide-result.schema';
 import type { MatrixCell, ValueMatrixCell } from '../matrix/matrix.types';
 import type { PreferenceDiagnostic } from '../ranking/preference-match';
-import { SCORE_MAX, SCORE_MIN } from '../routing-constants';
+import {
+  AGGREGATE_DIAGNOSTIC_MAX_CHARS,
+  DIAGNOSTIC_AMBIGUOUS_MATCH_SAMPLE_CAP,
+  DIAGNOSTIC_LINE_MAX_CHARS,
+  DIAGNOSTIC_SELECTOR_SNIPPET_MAX_CHARS,
+  EXPLANATION_PREFERENCE_DIAGNOSTICS_CAP,
+  SCORE_MAX,
+  SCORE_MIN,
+} from '../routing-constants';
 import { formatConfidence } from './confidence';
 
 export const ROSTER_EXCLUSION_REASONS = [
@@ -45,6 +53,8 @@ export type DecidingFactor =
   | 'rotation'
   | 'tie-break'
   | 'model refinement'
+  | 'call preference'
+  | 'configured preference'
   | `rule ${string}`;
 
 export const NO_CONFIDENCE_REPORTED = 'no confidence reported';
@@ -412,11 +422,46 @@ function formatCandidateLabel(displayName: string, id: string): string {
   return cleanName === id ? id : `${cleanName} (${id})`;
 }
 
+function truncateSnippet(value: string, maxChars: number): string {
+  if (value.length <= maxChars) return value;
+  if (maxChars <= 3) return value.slice(0, maxChars);
+  return `${value.slice(0, maxChars - 3)}...`;
+}
+
+function formatAmbiguousMatchIds(ids: readonly string[]): string {
+  if (ids.length <= DIAGNOSTIC_AMBIGUOUS_MATCH_SAMPLE_CAP) {
+    return ids.join('/');
+  }
+  const shown = ids.slice(0, DIAGNOSTIC_AMBIGUOUS_MATCH_SAMPLE_CAP).join('/');
+  const remaining = ids.length - DIAGNOSTIC_AMBIGUOUS_MATCH_SAMPLE_CAP;
+  return `${shown} and ${remaining} more`;
+}
+
+/** Stable deduplication key for one preference diagnostic entry and match set. */
+export function preferenceDiagnosticKey(entry: PreferenceDiagnostic): string {
+  if ('source' in entry) {
+    return `empty\u0000${entry.source}\u0000${entry.status}`;
+  }
+  const rankKey = entry.status === 'matched' ? String(entry.rank) : '';
+  return [
+    'match',
+    sanitizeText(entry.entry),
+    entry.status,
+    entry.ids.join('\u0001'),
+    entry.via ?? '',
+    rankKey,
+    entry.detail ?? '',
+  ].join('\u0000');
+}
+
 function formatPreferenceDiagnostic(entry: PreferenceDiagnostic): string {
   if ('source' in entry) {
     return `${entry.source} list empty (ignored)`;
   }
-  const selector = sanitizeText(entry.entry);
+  const selector = truncateSnippet(
+    sanitizeText(entry.entry),
+    DIAGNOSTIC_SELECTOR_SNIPPET_MAX_CHARS,
+  );
   switch (entry.status) {
     case 'matched':
       return `${selector}->${entry.ids[0]} via ${entry.via ?? 'id'} (#${entry.rank})`;
@@ -425,7 +470,7 @@ function formatPreferenceDiagnostic(entry: PreferenceDiagnostic): string {
         ? `${selector}: unknown (${entry.detail})`
         : `${selector}: unknown`;
     case 'ambiguous':
-      return `${selector}: ambiguous (${entry.ids.join('/')})`;
+      return `${selector}: ambiguous (${formatAmbiguousMatchIds(entry.ids)})`;
     case 'duplicate':
       return `${selector}: duplicate`;
     case 'ineligible':
@@ -442,17 +487,31 @@ function formatPreferenceClause(input: ChosenExplanationInput): string {
     details.push(`overridden: ${input.overriddenPreferenceSources.join(', ')}`);
   }
   if (input.preferenceMatches !== undefined) {
+    const unique: PreferenceDiagnostic[] = [];
+    const seen = new Set<string>();
     for (const match of input.preferenceMatches) {
+      const key = preferenceDiagnosticKey(match);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      unique.push(match);
+    }
+    const shown = unique.slice(0, EXPLANATION_PREFERENCE_DIAGNOSTICS_CAP);
+    for (const match of shown) {
       details.push(formatPreferenceDiagnostic(match));
+    }
+    if (unique.length > shown.length) {
+      details.push(`and ${unique.length - shown.length} more`);
     }
   }
   if (input.preferenceLoss !== undefined) {
     const loss = input.preferenceLoss;
     const deficit = loss.candidateTotal - input.total;
     const why =
-      deficit < 0
-        ? `boost ${signed(loss.boost)} on ${sanitizeText(loss.candidateDisplayName)} total ${loss.candidateTotal} lost to total ${input.total} (gap ${signed(deficit)})`
-        : `boost ${signed(loss.boost)} on ${sanitizeText(loss.candidateDisplayName)} total ${loss.candidateTotal} lost under ${input.decidingFactor}`;
+      input.decidingFactor === 'pin' ||
+      input.decidingFactor === 'rotation' ||
+      deficit >= 0
+        ? `boost ${signed(loss.boost)} on ${sanitizeText(loss.candidateDisplayName)} total ${loss.candidateTotal} lost under ${input.decidingFactor}`
+        : `boost ${signed(loss.boost)} on ${sanitizeText(loss.candidateDisplayName)} total ${loss.candidateTotal} lost to total ${input.total} (gap ${signed(deficit)})`;
     details.push(why);
   }
   const note = blankToUndefined(input.callerPreferenceNote);
@@ -677,15 +736,53 @@ export function compileGateReasons(input: GateReasonInput): GateReasonOutput {
     }
   }
   const extraReasons = input.extraReasons ?? [];
-  const hasPerLaneModelStatus = extraReasons.some((line) =>
+  const boundedExtra = boundAggregateDiagnostics(extraReasons, seenReasons);
+  const hasPerLaneModelStatus = boundedExtra.some((line) =>
     line.startsWith(PER_LANE_MODEL_UNKNOWN_PREFIX),
   );
   for (const missing of uniqueMissing(input.missingInputs)) {
     if (missing === 'model-lists' && hasPerLaneModelStatus) continue;
     pushReason(MISSING_INPUT_REASON[missing]);
   }
-  for (const extra of extraReasons) {
+  for (const extra of boundedExtra) {
     pushReason(extra);
   }
   return { chosenReasons, unavailableReasons, reasons };
+}
+
+function omittedDiagnosticsLine(omitted: number): string {
+  return omitted === 1
+    ? 'and 1 more diagnostic entry omitted'
+    : `and ${omitted} more diagnostic entries omitted`;
+}
+
+function boundAggregateDiagnostics(
+  rawLines: readonly string[],
+  alreadySeen: ReadonlySet<string>,
+): readonly string[] {
+  const unique: string[] = [];
+  const seen = new Set<string>(alreadySeen);
+  for (const raw of rawLines) {
+    const line = truncateSnippet(raw, DIAGNOSTIC_LINE_MAX_CHARS);
+    if (line.length === 0 || seen.has(line)) continue;
+    seen.add(line);
+    unique.push(line);
+  }
+  const emitted: string[] = [];
+  let usedChars = 0;
+  for (let index = 0; index < unique.length; index += 1) {
+    const line = unique[index];
+    const remainingAfter = unique.length - (index + 1);
+    const reserve =
+      remainingAfter > 0 ? omittedDiagnosticsLine(remainingAfter).length : 0;
+    if (usedChars + line.length + reserve <= AGGREGATE_DIAGNOSTIC_MAX_CHARS) {
+      emitted.push(line);
+      usedChars += line.length;
+      continue;
+    }
+    const omitted = unique.length - index;
+    emitted.push(omittedDiagnosticsLine(omitted));
+    break;
+  }
+  return emitted;
 }
