@@ -48,6 +48,69 @@ describe('buildRouteDecideTool', () => {
     expect(JSON.stringify(schema)).toContain('FEATURE');
   });
 
+  it('keeps a stage note only on fields a stage requires', () => {
+    const properties = buildRouteDecideTool().inputSchema.properties;
+
+    expect(JSON.stringify(properties['taskType'])).toContain(
+      'Required when stage is gate-0.1.',
+    );
+    expect(JSON.stringify(properties['depth'])).toContain(
+      'Required when stage is gate-0.1.',
+    );
+    expect(JSON.stringify(properties['phases'])).toContain(
+      'Required when stage is gate-0.1.',
+    );
+
+    expect(JSON.stringify(properties['pins'])).not.toContain(
+      'Required when stage',
+    );
+    expect(JSON.stringify(properties['pins'])).not.toContain(
+      'Required when stage is .',
+    );
+    expect(JSON.stringify(properties['preferenceSource'])).not.toContain(
+      'Required when stage',
+    );
+    expect(JSON.stringify(properties['preferences'])).not.toContain(
+      'Required when stage',
+    );
+    expect(JSON.stringify(properties['request'])).not.toContain(
+      'Required when stage',
+    );
+  });
+
+  it('keeps an empty-owner description without a required note', () => {
+    const properties = buildRouteDecideTool().inputSchema.properties;
+
+    const pins = properties['pins'] as { description?: string };
+    expect(pins.description).toBe(
+      'Executors fixed to a phase. Applies to stage gate-0.1.',
+    );
+
+    const preferenceSource = properties['preferenceSource'] as {
+      description?: string;
+    };
+    expect(preferenceSource.description).toBe(
+      'Free text, max 200 characters, no semicolon or line break. Applies to stage gate-0.1.',
+    );
+
+    const preferences = properties['preferences'] as { description?: string };
+    expect(preferences.description).toBe(
+      'Candidate preferences. Applies to stage gate-0.1.',
+    );
+  });
+
+  it('describes candidate preference entries', () => {
+    const preferences = buildRouteDecideTool().inputSchema.properties[
+      'preferences'
+    ] as {
+      properties?: Record<string, { items?: { description?: string } }>;
+    };
+    const prefer = preferences.properties?.['prefer'];
+    expect(prefer?.items?.description).toBe(
+      'Candidate ids (cli id, ptahCliId, subagent:<role>, child-session) or display names; earlier entries rank higher.',
+    );
+  });
+
   it('accepts the same stage values the zod schema accepts', () => {
     expect(
       RouteDecideArgsSchema.safeParse({

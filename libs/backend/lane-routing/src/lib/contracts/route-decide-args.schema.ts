@@ -38,6 +38,32 @@ const PinSchema = z
   })
   .strict();
 
+const PREFERENCE_SOURCE_MAX = 200;
+const PREFERENCE_SOURCE_FORBIDDEN = /[;\r\n]/;
+const PREFERENCE_SOURCE_DESCRIPTION =
+  'Free text, max 200 characters, no semicolon or line break. Applies to stage gate-0.1.';
+const PREFER_DESCRIPTION =
+  'Candidate ids (cli id, ptahCliId, subagent:<role>, child-session) or display names; ' +
+  'earlier entries rank higher.';
+
+/**
+ * Rejects a semicolon or a line break on the raw input, then trims. An
+ * empty trimmed value parses as absent. The 200-character limit applies
+ * to the trimmed value.
+ */
+const PreferenceSourceSchema = z
+  .string()
+  .refine((value) => !PREFERENCE_SOURCE_FORBIDDEN.test(value), {
+    message: 'preferenceSource must not contain a semicolon or a line break',
+  })
+  .transform((value) => value.trim())
+  .refine((value) => value.length <= PREFERENCE_SOURCE_MAX, {
+    message: `preferenceSource must be at most ${PREFERENCE_SOURCE_MAX} characters`,
+  })
+  .transform((value) => (value === '' ? undefined : value))
+  .describe(PREFERENCE_SOURCE_DESCRIPTION);
+
+
 export const RouteDecideArgsSchema = z
   .discriminatedUnion('stage', [
     z
@@ -53,12 +79,17 @@ export const RouteDecideArgsSchema = z
         taskType: z.enum(TASK_TYPES),
         depth: z.enum(DEPTHS),
         phases: z.array(PhaseSchema).min(1).max(100),
-        pins: z.array(PinSchema).max(100).optional(),
-        preferenceSource: z.string().max(200).optional(),
+        pins: z
+          .array(PinSchema)
+          .max(100)
+          .optional()
+          .describe('Executors fixed to a phase. Applies to stage gate-0.1.'),
+        preferenceSource: PreferenceSourceSchema.optional(),
         preferences: z
-          .object({ prefer: z.array(z.string().max(200)).max(32) })
+          .object({ prefer: z.array(z.string().max(200).describe(PREFER_DESCRIPTION)).max(32) })
           .strict()
-          .optional(),
+          .optional()
+          .describe('Candidate preferences. Applies to stage gate-0.1.'),
       })
       .strict(),
   ])

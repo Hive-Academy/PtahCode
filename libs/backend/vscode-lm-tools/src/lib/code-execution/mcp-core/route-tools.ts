@@ -70,6 +70,7 @@ function flattenStageUnion(branches: readonly unknown[]): InputSchema {
     if (key === 'stage') continue;
     const owners = requiredBy.get(key) ?? [];
     if (owners.length === stages.length) continue;
+    if (owners.length === 0) continue;
     properties[key] = withStageNote(schema, owners);
   }
 
