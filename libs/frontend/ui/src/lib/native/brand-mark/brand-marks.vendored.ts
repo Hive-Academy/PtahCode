@@ -1147,6 +1147,7 @@ export const MONOGRAM_SLUGS: readonly string[] = [
   'canva',
   'context7',
   'google-people',
+  'higgsfield',
   'klaviyo',
   'neon',
   'pipedream',

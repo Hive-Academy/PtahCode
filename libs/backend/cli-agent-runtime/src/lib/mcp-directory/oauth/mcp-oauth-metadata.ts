@@ -62,12 +62,30 @@ export type FetchLike = (
   headers?: { get(name: string): string | null };
 }>;
 
+/**
+ * RFC 8414 authorization-server metadata. It deliberately carries no
+ * `scopes_supported`: that list names every scope the server knows, not the
+ * scopes a client may ask for, and requesting it is how Clerk answered
+ * `invalid_scope` for Higgsfield (TASK_2026_HIGGSFIELD). The scope comes from
+ * the protected resource instead; see {@link selectAuthorizationScope}.
+ */
 export interface AuthServerMetadata {
   issuer?: string;
   authorizationEndpoint: string;
   tokenEndpoint: string;
   registrationEndpoint?: string;
-  scopesSupported?: string[];
+}
+
+/**
+ * What the protected resource (the MCP server) told us about itself: the
+ * authorization server it trusts and the scopes it wants.
+ */
+export interface ProtectedResourceDiscovery {
+  authorizationServer: string;
+  /** The `scope` parameter of the server's 401 challenge, when it was read. */
+  challengeScope?: string;
+  /** RFC 9728 `scopes_supported` of the document that named the auth server. */
+  resourceScopes?: string[];
 }
 
 export interface RegisteredClient {
@@ -185,16 +203,33 @@ function str(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value : undefined;
 }
 
+/** The non-empty strings of a JSON array, or undefined when there are none. */
+function stringList(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const list = value.filter(
+    (item): item is string => typeof item === 'string' && item.length > 0,
+  );
+  return list.length > 0 ? list : undefined;
+}
+
+/** One RFC 9728 document: the auth server it names and the scopes it lists. */
+interface ProtectedResourceDocument {
+  authorizationServer: string;
+  scopesSupported?: string[];
+}
+
 /**
- * Read `authorization_servers[0]` from one RFC 9728 protected-resource metadata
- * document. Returns undefined for any failure — a missing document is the
- * normal case here, not an error.
+ * Read `authorization_servers[0]` and `scopes_supported` from one RFC 9728
+ * protected-resource metadata document. Returns undefined for any failure — a
+ * missing document is the normal case here, not an error. A body that is not
+ * JSON (an SPA answering every path with HTML 200) makes `json()` throw and
+ * counts as missing.
  */
 async function readProtectedResourceMetadata(
   prmUrl: string,
   fetchImpl: FetchLike,
   signal: AbortSignal | undefined,
-): Promise<string | undefined> {
+): Promise<ProtectedResourceDocument | undefined> {
   try {
     const resp = await fetchImpl(prmUrl, {
       headers: { Accept: 'application/json' },
@@ -204,7 +239,12 @@ async function readProtectedResourceMetadata(
     const body = asRecord(await resp.json());
     const servers = body['authorization_servers'];
     if (!Array.isArray(servers) || servers.length === 0) return undefined;
-    return str(servers[0]);
+    const authorizationServer = str(servers[0]);
+    if (!authorizationServer) return undefined;
+    return {
+      authorizationServer,
+      scopesSupported: stringList(body['scopes_supported']),
+    };
     // degradation-audit: optional-capability - per the doc comment on this
     // function, a missing protected-resource document is the normal case, not
     // an error; the caller tries the next discovery candidate.
@@ -228,16 +268,59 @@ export function parseResourceMetadataChallenge(
 }
 
 /**
+ * Read the `scope` parameter out of a `WWW-Authenticate` challenge (RFC 6750
+ * §3). The name must start the header or follow a space or a comma, so
+ * `resource_metadata` and quoted values such as `"insufficient_scope"` never
+ * match.
+ */
+export function parseScopeChallenge(
+  header: string | null | undefined,
+): string | undefined {
+  if (!header) return undefined;
+  const match = /(?:^|[\s,])scope\s*=\s*(?:"([^"]*)"|([^\s,]+))/i.exec(header);
+  if (!match) return undefined;
+  return str((match[1] ?? match[2])?.trim());
+}
+
+/**
+ * The scope to request at the authorization endpoint, per the MCP
+ * authorization spec's scope selection: an explicit caller scope, else the
+ * `scope` of the server's 401 challenge, else the protected resource's
+ * `scopes_supported`, else none (the `scope` parameter is omitted). The
+ * authorization server's own `scopes_supported` is never a source.
+ */
+export function selectAuthorizationScope(
+  explicitScope: string | undefined,
+  resource: Pick<
+    ProtectedResourceDiscovery,
+    'challengeScope' | 'resourceScopes'
+  >,
+): string | undefined {
+  const explicit = explicitScope?.trim();
+  if (explicit) return explicit;
+  if (resource.challengeScope) return resource.challengeScope;
+  return resource.resourceScopes?.length
+    ? resource.resourceScopes.join(' ')
+    : undefined;
+}
+
+/** The two parameters of a 401 challenge that discovery uses. */
+interface ResourceChallenge {
+  resourceMetadataUrl?: string;
+  scope?: string;
+}
+
+/**
  * Ask the MCP server itself where its protected-resource metadata lives, by
  * reading the `WWW-Authenticate` challenge on its 401. This is the only route
  * that works when a host serves many servers under different paths and
  * publishes no document the client could have guessed.
  */
-async function discoverPrmUrlFromChallenge(
+async function readResourceChallenge(
   serverUrl: string,
   fetchImpl: FetchLike,
   signal: AbortSignal | undefined,
-): Promise<string | undefined> {
+): Promise<ResourceChallenge | undefined> {
   try {
     const resp = await fetchImpl(serverUrl, {
       headers: { Accept: 'application/json, text/event-stream' },
@@ -248,7 +331,10 @@ async function discoverPrmUrlFromChallenge(
       resp.headers?.get('WWW-Authenticate') ??
       resp.headers?.get('www-authenticate') ??
       null;
-    return parseResourceMetadataChallenge(header);
+    return {
+      resourceMetadataUrl: parseResourceMetadataChallenge(header),
+      scope: parseScopeChallenge(header),
+    };
     // degradation-audit: optional-capability - one candidate in the multi-step
     // discovery chain documented on `discoverAuthorizationServer`; a probe
     // failure here just means the caller falls through to the next candidate.
@@ -258,7 +344,8 @@ async function discoverPrmUrlFromChallenge(
 }
 
 /**
- * Discover the authorization server for an MCP server URL.
+ * Discover the authorization server for an MCP server URL, with the scopes the
+ * server asks for.
  *
  * Candidate order:
  *   1. RFC 9728 §3.1 path form — `/.well-known/oauth-protected-resource<path>`.
@@ -267,6 +354,10 @@ async function discoverPrmUrlFromChallenge(
  *   4. Fall back to the MCP server's origin. Many servers co-locate their OAuth
  *      endpoints, and RFC 8414 discovery below will confirm or reject it.
  *
+ * The 401 is read only when steps 1-2 found nothing, so `challengeScope` is set
+ * only on that route; on the others the document's `resourceScopes` is the
+ * scope source (see {@link selectAuthorizationScope}).
+ *
  * `signal` is the phase deadline: once it aborts, no further candidate is
  * tried and the call rejects with {@link OAuthTimeoutError}.
  */
@@ -274,7 +365,7 @@ export async function discoverAuthorizationServer(
   serverUrl: string,
   fetchImpl: FetchLike,
   signal?: AbortSignal,
-): Promise<string> {
+): Promise<ProtectedResourceDiscovery> {
   const url = new URL(serverUrl);
   const base = url.origin;
   const path = significantPath(url);
@@ -291,27 +382,35 @@ export async function discoverAuthorizationServer(
       fetchImpl,
       signal,
     );
-    if (found) return found;
+    if (found) {
+      return {
+        authorizationServer: found.authorizationServer,
+        resourceScopes: found.scopesSupported,
+      };
+    }
   }
 
   assertBeforeDeadline(signal, serverUrl);
-  const hinted = await discoverPrmUrlFromChallenge(
-    serverUrl,
-    fetchImpl,
-    signal,
-  );
-  if (hinted) {
+  const challenge = await readResourceChallenge(serverUrl, fetchImpl, signal);
+  const challengeScope = challenge?.scope;
+  if (challenge?.resourceMetadataUrl) {
     assertBeforeDeadline(signal, serverUrl);
     const found = await readProtectedResourceMetadata(
-      hinted,
+      challenge.resourceMetadataUrl,
       fetchImpl,
       signal,
     );
-    if (found) return found;
+    if (found) {
+      return {
+        authorizationServer: found.authorizationServer,
+        challengeScope,
+        resourceScopes: found.scopesSupported,
+      };
+    }
   }
 
   assertBeforeDeadline(signal, serverUrl);
-  return base;
+  return { authorizationServer: base, challengeScope };
 }
 
 /**
@@ -366,11 +465,6 @@ export async function discoverAuthServerMetadata(
           authorizationEndpoint,
           tokenEndpoint,
           registrationEndpoint: str(body['registration_endpoint']),
-          scopesSupported: Array.isArray(body['scopes_supported'])
-            ? (body['scopes_supported'] as unknown[]).filter(
-                (s): s is string => typeof s === 'string',
-              )
-            : undefined,
         };
       }
     } catch {

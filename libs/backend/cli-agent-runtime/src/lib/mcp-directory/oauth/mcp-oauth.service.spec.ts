@@ -6,6 +6,12 @@ import { McpOAuthService, deriveMcpOAuthServerKey } from './mcp-oauth.service';
 import { createMcpOAuthTokenStore } from './mcp-oauth-token-store';
 import { McpOAuthInstalledManifestStore } from './mcp-oauth-installed-manifest';
 import type { FetchLike } from './mcp-oauth-metadata';
+import {
+  HIGGSFIELD_AUTHORIZE,
+  HIGGSFIELD_MCP_URL,
+  HIGGSFIELD_RESOURCE_SCOPE,
+  higgsfieldFetch,
+} from './__fixtures__/higgsfield-oauth.fixture';
 
 function jsonResp(body: unknown) {
   return {
@@ -756,5 +762,84 @@ describe('deriveMcpOAuthServerKey', () => {
     expect(deriveMcpOAuthServerKey('https://mcp.notion.com/mcp')).toBe(
       'oauth-mcp.notion.com-mcp',
     );
+  });
+});
+
+describe('McpOAuthService scope selection (TASK_2026_HIGGSFIELD)', () => {
+  const cleanup: string[] = [];
+  afterEach(() => {
+    for (const p of cleanup.splice(0)) fs.rmSync(p, { force: true });
+  });
+
+  async function connectAndCapture(
+    serverUrl: string,
+    fetchOverride: FetchLike,
+    scope?: string,
+  ) {
+    const harness = makeService({ fetchImpl: fetchOverride });
+    cleanup.push(harness.manifestPath);
+    const { serverKey } = await harness.service.connect({ serverUrl, scope });
+    const authorizeUrl = new URL(harness.capture.authorizeUrl ?? '');
+    const token = await harness.tokenStore.getToken(serverKey);
+    return { authorizeUrl, token };
+  }
+
+  it('asks Clerk for the resource scope, never its scopes_supported (Higgsfield)', async () => {
+    const { authorizeUrl, token } = await connectAndCapture(
+      HIGGSFIELD_MCP_URL,
+      higgsfieldFetch(),
+    );
+    expect(`${authorizeUrl.origin}${authorizeUrl.pathname}`).toBe(
+      HIGGSFIELD_AUTHORIZE,
+    );
+    expect(authorizeUrl.searchParams.get('scope')).toBe(
+      HIGGSFIELD_RESOURCE_SCOPE,
+    );
+    expect(authorizeUrl.searchParams.get('client_id')).toBe('clerk-client-1');
+    expect(authorizeUrl.searchParams.get('resource')).toBe(HIGGSFIELD_MCP_URL);
+    expect(authorizeUrl.toString()).not.toContain('private_metadata');
+    expect(token?.accessToken).toBe('HF-AT');
+    expect(token?.scope).toBe(HIGGSFIELD_RESOURCE_SCOPE);
+  });
+
+  it('uses the 401 challenge scope when the challenge led discovery', async () => {
+    const { authorizeUrl } = await connectAndCapture(
+      HIGGSFIELD_MCP_URL,
+      higgsfieldFetch([], { prmOnlyViaChallenge: true }),
+    );
+    expect(authorizeUrl.searchParams.get('scope')).toBe(
+      HIGGSFIELD_RESOURCE_SCOPE,
+    );
+  });
+
+  it('lets an explicit scope win', async () => {
+    const { authorizeUrl, token } = await connectAndCapture(
+      HIGGSFIELD_MCP_URL,
+      higgsfieldFetch(),
+      'openid',
+    );
+    expect(authorizeUrl.searchParams.get('scope')).toBe('openid');
+    expect(token?.scope).toBe('openid');
+  });
+
+  it('omits scope when neither the challenge nor the resource names one', async () => {
+    // The AS publishes scopes_supported; it must still not be requested.
+    const withAsScopes: FetchLike = async (url, init) => {
+      if (url.endsWith('/.well-known/oauth-authorization-server')) {
+        return jsonResp({
+          authorization_endpoint: 'https://auth.example.com/authorize',
+          token_endpoint: 'https://auth.example.com/token',
+          registration_endpoint: 'https://auth.example.com/register',
+          scopes_supported: ['admin', 'everything'],
+        });
+      }
+      return fetchImpl(url, init);
+    };
+    const { authorizeUrl, token } = await connectAndCapture(
+      'https://mcp.example.com/mcp',
+      withAsScopes,
+    );
+    expect(authorizeUrl.searchParams.has('scope')).toBe(false);
+    expect(token?.scope).toBeUndefined();
   });
 });

@@ -109,6 +109,7 @@ export {
 export type {
   FetchLike,
   AuthServerMetadata,
+  ProtectedResourceDiscovery,
   RegisteredClient,
 } from './oauth/mcp-oauth-metadata';
 /**
