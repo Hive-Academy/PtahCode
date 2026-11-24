@@ -385,6 +385,12 @@ export class AgentContinueError extends Error {
   constructor(
     readonly code: AgentContinueErrorCode,
     message: string,
+    /**
+     * Set when an `unsupported` refusal is the turn input itself (a blocked
+     * `/command`, images or files the lane cannot take): the envelope fails
+     * with this receipt code and keeps the message as `lastError`.
+     */
+    readonly receiptReason?: 'turn-input-unsupported',
   ) {
     super(message);
     this.name = 'AgentContinueError';
@@ -415,6 +421,8 @@ export class AgentProcessManager {
   /** Recent tab resolutions cover lanes spawned after session open. */
   private readonly resolvedParentSessions = new Map<string, string>();
   private readonly turns = new WeakMap<TrackedAgent, symbol>();
+  /** Lanes with an `applyTurnSettings` call in flight; a second caller is refused `busy`. */
+  private readonly applyingTurnSettings = new WeakSet<TrackedAgent>();
   /**
    * Lanes adopted by a handoff whose new session is still starting, keyed by
    * agent id: the parent to restore if the start fails, and whether the
@@ -3119,6 +3127,8 @@ export class AgentProcessManager {
    *   `applyTurnSettings`; a provider refusal is `turn-options-refused`.
    * On success the record carries the applied settings (the next
    * `agent:spawned` publishes them). Returns the content for `continue`.
+   * `beforeInterrupt`: called while the turn still runs, ahead of an
+   * interrupt-and-send, so a refusal leaves that turn running.
    */
   private async applyContinuationTurnInput(
     agentId: string,
@@ -3127,6 +3137,7 @@ export class AgentProcessManager {
     message: string,
     turnRequest: LaneTurnRequest | undefined,
     rawBody: string | undefined,
+    beforeInterrupt = false,
   ): Promise<LaneTurnContent | undefined> {
     const manifest = tracked.info.potentialCapabilities ??
       this.cliDetection.getAdapter(tracked.info.cli)?.capabilities();
@@ -3137,7 +3148,8 @@ export class AgentProcessManager {
       rawBody ?? message,
       input?.commands.blocked ?? manifest?.turnInput?.commands.blocked ?? [],
     );
-    if (blocked) throw new AgentContinueError('unsupported', blockedLaneCommandReason(blocked));
+    if (blocked)
+      throw new AgentContinueError('unsupported', blockedLaneCommandReason(blocked), 'turn-input-unsupported');
     const content = turnContentOf(turnRequest);
     const model = turnRequest?.model !== undefined && turnRequest.model !== tracked.info.model
       ? turnRequest.model : undefined;
@@ -3146,7 +3158,7 @@ export class AgentProcessManager {
       ? turnRequest.reasoningEffort : undefined;
     if (!content && model === undefined && effort === undefined) return undefined;
     const refuse = (reason: string | undefined, fallback: string): never => {
-      throw new AgentContinueError('unsupported', reason ?? fallback);
+      throw new AgentContinueError('unsupported', reason ?? fallback, 'turn-input-unsupported');
     };
     if (!input) refuse(TURN_INPUT_NOT_REPORTED, TURN_INPUT_NOT_REPORTED);
     if (content?.images && input?.images.state !== 'supported')
@@ -3158,6 +3170,10 @@ export class AgentProcessManager {
     if (effort !== undefined && input?.effort.state !== 'supported')
       refuse(input?.effort.reason, 'This lane cannot change its reasoning effort per turn.');
     if ((model !== undefined || effort !== undefined) && sdkHandle.applyTurnSettings) {
+      // Two continuations racing on one idle lane: only one applies settings.
+      if (this.applyingTurnSettings.has(tracked))
+        throw new AgentContinueError('busy', `Agent ${agentId} is applying turn settings for another message.`);
+      this.applyingTurnSettings.add(tracked);
       let applied: Awaited<ReturnType<NonNullable<SdkHandle['applyTurnSettings']>>>;
       try {
         applied = await sdkHandle.applyTurnSettings({
@@ -3173,11 +3189,13 @@ export class AgentProcessManager {
           field: error instanceof LaneTurnSettingRefusal ? error.field : 'unknown',
         });
         throw new AgentContinueError('turn-options-refused', reason);
+      } finally {
+        this.applyingTurnSettings.delete(tracked);
       }
       // The await let other work run: the record must still be this idle lane.
       if (this.agents.get(agentId) !== tracked)
         throw new AgentContinueError('released', 'Lane was replaced while applying turn settings.');
-      if (tracked.info.status === 'running' || tracked.info.status === 'starting')
+      if (!beforeInterrupt && (tracked.info.status === 'running' || tracked.info.status === 'starting'))
         throw new AgentContinueError('busy', `Agent ${agentId} is busy (status: ${tracked.info.status})`);
       tracked.info = {
         ...tracked.info,
@@ -3230,6 +3248,26 @@ export class AgentProcessManager {
    * could apply here, and swapping a live lane for a fresh handoff mid
    * conversation would cost the caller its context for a token saving.
    */
+  /**
+   * Interrupt-and-send pre-flight (`ContinuationDispatcher`): check the turn
+   * input and apply a model / effort change while the current turn still
+   * runs, so a refusal leaves that turn running and nothing is lost. The
+   * continuation after the interrupt then finds the settings already applied.
+   */
+  async prepareInterruptTurn(
+    agentId: string,
+    message: string,
+    turnRequest: LaneTurnRequest | undefined,
+    rawBody: string | undefined,
+  ): Promise<void> {
+    const tracked = this.agents.get(agentId);
+    if (!tracked) throw new AgentContinueError('not_found', `Agent not found: ${agentId}`);
+    const sdkHandle = tracked.sdkHandle;
+    if (!sdkHandle || tracked.subprocessReleased)
+      throw new AgentContinueError('released', `Agent ${agentId} has no live handle to interrupt.`);
+    await this.applyContinuationTurnInput(agentId, tracked, sdkHandle, message, turnRequest, rawBody, true);
+  }
+
   async continueConversation(
     agentId: string,
     message: string,
@@ -4169,7 +4207,11 @@ export class AgentProcessManager {
             messageId,
           );
           return status.status === 'failed'
-            ? [{ messageId, reason: status.reason }]
+            ? [{
+                messageId,
+                reason: status.reason,
+                ...(status.lastError ? { lastError: status.lastError } : {}),
+              }]
             : [];
         });
         this.events.emit('agent:queue-updated', { agentId, failures });

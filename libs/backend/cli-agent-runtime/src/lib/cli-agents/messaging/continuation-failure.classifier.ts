@@ -20,6 +20,8 @@ export type ContinuationFailureReason =
 
 /** The refusal of per-turn settings (model / effort) a lane would not accept. */
 const TURN_OPTIONS_REFUSED = 'turn-options-refused';
+/** Turn input the lane cannot take: a blocked `/command`, images or files. */
+const TURN_INPUT_UNSUPPORTED = 'turn-input-unsupported';
 type ClassifiedCode = AgentContinueErrorCode | typeof TURN_OPTIONS_REFUSED;
 
 /** `lastError` is stored on the envelope, whose schema caps it at 200 chars. */
@@ -54,24 +56,30 @@ export function classifyContinuationFailure(error: unknown): ContinuationFailure
 /** A permanent failure with the receipt code and the text to keep as `lastError`. */
 export interface ContinuationFailureDetail {
   readonly reason: ContinuationFailureReason;
-  /** Set for a settings refusal: the envelope fails with this reason code. */
-  readonly reasonCode?: typeof TURN_OPTIONS_REFUSED;
-  /** The refusal text (≤ 200 chars), only for a settings refusal. */
+  /** Set for a settings or turn-input refusal: the envelope fails with this reason code. */
+  readonly reasonCode?: typeof TURN_OPTIONS_REFUSED | typeof TURN_INPUT_UNSUPPORTED;
+  /** The refusal text (≤ 200 chars), only for a settings or turn-input refusal. */
   readonly lastError?: string;
 }
 
+function turnInputRefusal(error: unknown): boolean {
+  return continueErrorCode(error) === 'unsupported' && error instanceof Error &&
+    'receiptReason' in error && error.receiptReason === TURN_INPUT_UNSUPPORTED;
+}
+
 /**
- * {@link classifyContinuationFailure} plus what a settings refusal needs:
- * `turn-options-refused` is terminal and never retried (the provider would
- * refuse the same settings again), and its message — fixed refusal text from
- * the adapter — becomes the envelope's `lastError`.
+ * {@link classifyContinuationFailure} plus what a settings or turn-input
+ * refusal needs: `turn-options-refused` and `turn-input-unsupported` are
+ * terminal and never retried (the lane would refuse the same input again),
+ * and the message — fixed refusal text from the adapter or the host's
+ * capability check — becomes the envelope's `lastError`.
  */
 export function classifyContinuationFailureDetail(error: unknown): ContinuationFailureDetail {
   const reason = classifyContinuationFailure(error);
-  if (continueErrorCode(error) !== TURN_OPTIONS_REFUSED || !(error instanceof Error)) return { reason };
-  return {
-    reason,
-    reasonCode: TURN_OPTIONS_REFUSED,
-    lastError: error.message.slice(0, MAX_LAST_ERROR),
-  };
+  if (!(error instanceof Error)) return { reason };
+  const reasonCode = continueErrorCode(error) === TURN_OPTIONS_REFUSED
+    ? TURN_OPTIONS_REFUSED
+    : turnInputRefusal(error) ? TURN_INPUT_UNSUPPORTED : undefined;
+  if (!reasonCode) return { reason };
+  return { reason, reasonCode, lastError: error.message.slice(0, MAX_LAST_ERROR) };
 }

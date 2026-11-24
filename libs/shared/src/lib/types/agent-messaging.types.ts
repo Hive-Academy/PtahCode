@@ -226,6 +226,11 @@ export interface AgentDeliveryReceipt {
   readonly ackAt?: number;
   /** At most 500 characters. */
   readonly ackNote?: string;
+  /**
+   * True when the message was delivered as the provider's own `/command`:
+   * no Ptah header and no acknowledgement line, so `ackState` is `unavailable`.
+   */
+  readonly rawDelivery?: boolean;
 }
 
 /**

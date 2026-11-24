@@ -838,6 +838,26 @@ describe('AgentMessageRouter turn input and raw body', () => {
     expect(dispatcher.continueConversation).toHaveBeenCalledWith(AGENT_ID, 'formatted', undefined, turn, rawBody);
   });
 
+  it('refuses a settings change before interrupting, leaving the running turn alone (M4)', async () => {
+    const router = new AgentMessageRouter(createLogger(), createDetection());
+    const tracked = continuable();
+    const interrupt = jest.fn();
+    tracked.sdkHandle = { ...tracked.sdkHandle, supportsInterrupt: () => true, interrupt } as SdkHandle;
+    const refusal = Object.assign(new Error('Codex did not accept the model gpt-x.'), { code: 'turn-options-refused' });
+    refusal.name = 'AgentContinueError';
+    const dispatcher = {
+      ...createDispatcher(),
+      prepareInterruptTurn: jest.fn().mockRejectedValue(refusal),
+    };
+    const outcome = await router.route(AGENT_ID, tracked, 'formatted', dispatcher, 'now', 'env-3', true, { turn, rawBody });
+    expect(outcome).toMatchObject({
+      mode: 'unsupported', reasonCode: 'turn-options-refused', detail: 'Codex did not accept the model gpt-x.',
+    });
+    expect(dispatcher.prepareInterruptTurn).toHaveBeenCalledWith(AGENT_ID, 'formatted', turn, rawBody);
+    expect(interrupt).not.toHaveBeenCalled();
+    expect(dispatcher.continueConversation).not.toHaveBeenCalled();
+  });
+
   it('passes images and files as steer content, and text-only steers keep one argument', async () => {
     const router = new AgentMessageRouter(createLogger(), createDetection());
     const tracked = continuable();

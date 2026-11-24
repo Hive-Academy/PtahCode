@@ -266,9 +266,14 @@ export class AgentMessageEnvelopeStore {
     });
   }
 
+  /**
+   * Journal an attempt as `dispatching`. `marker` is written in the same
+   * record (the raw-delivery decision), so a storage failure leaves neither.
+   */
   async markDispatching(
     id: string,
     fromStates: readonly AgentMessageEnvelopeState[] = DISPATCHABLE,
+    marker: Pick<EnvelopePatch, 'rawDelivery'> = {},
   ): Promise<AgentMessageEnvelope> {
     await this.ready;
     return this.serialize(async () => {
@@ -288,6 +293,7 @@ export class AgentMessageEnvelopeStore {
         everDispatched: true,
         attemptCount: existing.attemptCount + 1,
         nextRetryAt: undefined,
+        ...(marker.rawDelivery ? { rawDelivery: marker.rawDelivery } : {}),
       }, fromStates, true);
       if (!next || next.state !== 'dispatching')
         throw new AgentMessageStorageError('storage-unavailable');

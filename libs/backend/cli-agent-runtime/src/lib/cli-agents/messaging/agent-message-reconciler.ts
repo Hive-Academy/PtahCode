@@ -45,7 +45,8 @@ export interface AgentMessageReconcilerDeps {
 
 interface QueueUpdate {
   readonly agentId: string;
-  readonly failures?: readonly { messageId: string; reason: string }[];
+  /** `lastError`: the refusal text of a settings or turn-input refusal, kept on the envelope. */
+  readonly failures?: readonly { messageId: string; reason: string; lastError?: string }[];
 }
 
 /** Router reasons for an entry that was parked but never dispatched (exit race, gap 10). */
@@ -191,19 +192,26 @@ export class AgentMessageReconciler {
   }
 
   private async onQueueUpdated({ agentId, failures = [] }: QueueUpdate): Promise<void> {
-    const reasons = new Map(failures.map((entry) => [entry.messageId, entry.reason]));
+    const reasons = new Map(failures.map((entry) => [entry.messageId, entry]));
     // A router status the event did not carry (an older emitter) is read from the
     // durable list, never from a memory-only id map.
     const live = (await this.deps.store.list({ states: ['not-started', 'dispatching'] }))
       .filter((envelope) => envelopeLane(envelope) === agentId && !reasons.has(envelope.id));
     for (const envelope of live) {
       const status = this.deps.manager.getAgentMessageStatus(agentId, envelope.id);
-      if (status.status === 'failed') reasons.set(envelope.id, status.reason);
+      if (status.status === 'failed')
+        reasons.set(envelope.id, { messageId: envelope.id, reason: status.reason, lastError: status.lastError });
     }
-    for (const [messageId, reason] of reasons) await this.applyQueueFailure(agentId, messageId, reason);
+    for (const [messageId, failure] of reasons)
+      await this.applyQueueFailure(agentId, messageId, failure.reason, failure.lastError);
   }
 
-  private async applyQueueFailure(agentId: string, messageId: string, reason: string): Promise<void> {
+  private async applyQueueFailure(
+    agentId: string,
+    messageId: string,
+    reason: string,
+    lastError?: string,
+  ): Promise<void> {
     const envelope = await this.deps.store.get(messageId);
     if (!envelope) return;
     if (envelope.state === 'cancelled' || envelope.state === 'settled') {
@@ -248,9 +256,11 @@ export class AgentMessageReconciler {
       }, ['not-started']);
       return;
     }
-    // A permanent rejection keeps the body for Retry, Recover text or Cancel.
+    // A permanent rejection keeps the body for Retry, Recover text or Cancel,
+    // and a settings or turn-input refusal keeps its text for the receipt.
     await this.deps.store.transition(messageId, {
       state: 'failed', reason: KNOWN_FAILURES.has(reason) ? reason : 'delivery-failed',
+      ...(lastError ? { lastError: lastError.slice(0, 200) } : {}),
     }, ['not-started', 'dispatching']);
   }
 

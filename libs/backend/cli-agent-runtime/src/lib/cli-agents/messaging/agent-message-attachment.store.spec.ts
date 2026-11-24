@@ -72,12 +72,12 @@ describe('AgentMessageAttachmentStore', () => {
     expect(store.heldBytes()).toBe(0);
   });
 
-  it.each(['settled', 'cancelled', 'failed', 'expired'] as const)(
+  it.each(['settled', 'cancelled', 'expired'] as const)(
     'is released when the envelope reaches %s through the store listener',
     async (state) => {
       const attachments = new AgentMessageAttachmentStore();
       const envelopes = new AgentMessageEnvelopeStore(memory());
-      envelopes.setTerminalListener((envelope) => attachments.release(envelope.id));
+      envelopes.setTerminalListener((envelope) => attachments.releaseForTerminal(envelope));
       const agentId = AgentId.create();
       const { envelope } = await envelopes.put({
         targetAgentId: agentId, laneLineageId: agentId, sender: { kind: 'user' }, senderKey: 'user',
@@ -99,7 +99,7 @@ describe('AgentMessageAttachmentStore', () => {
   it('keeps images while the envelope is still undelivered', async () => {
     const attachments = new AgentMessageAttachmentStore();
     const envelopes = new AgentMessageEnvelopeStore(memory());
-    envelopes.setTerminalListener((envelope) => attachments.release(envelope.id));
+    envelopes.setTerminalListener((envelope) => attachments.releaseForTerminal(envelope));
     const agentId = AgentId.create();
     const { envelope } = await envelopes.put({
       targetAgentId: agentId, laneLineageId: agentId, sender: { kind: 'user' }, senderKey: 'user',
@@ -108,5 +108,54 @@ describe('AgentMessageAttachmentStore', () => {
     attachments.hold(envelope.id, [image(4)]);
     await envelopes.transition(envelope.id, { state: 'blocked-retryable', reason: 'continuation_transient' });
     expect(attachments.take(envelope.id)).toHaveLength(1);
+  });
+
+  describe('a failed message keeps its images for Recover text (S2)', () => {
+    const failed = (id: string, reason?: string) => ({ id, state: 'failed' as const, reason });
+
+    it('keeps them after failed until the TTL, then drops them', () => {
+      let now = 1_000;
+      const store = new AgentMessageAttachmentStore(undefined, 1_000_000, () => now, 60_000);
+      store.hold('a', [image(4)]);
+      store.releaseForTerminal(failed('a', 'turn-input-unsupported'));
+      expect(store.take('a')).toHaveLength(1);
+      now += 60_000;
+      expect(store.take('a')).toBeUndefined();
+      expect(store.heldBytes()).toBe(0);
+    });
+
+    it('releases at once when the images were already incomplete', () => {
+      const store = new AgentMessageAttachmentStore();
+      store.hold('a', [image(4)]);
+      store.releaseForTerminal(failed('a', 'attachments-unavailable'));
+      expect(store.take('a')).toBeUndefined();
+    });
+
+    it('evicts failed messages first, oldest first, when a new hold needs room', () => {
+      let now = 0;
+      const cost = 100 + 'image/png'.length;
+      const store = new AgentMessageAttachmentStore(createMockLogger(), cost * 2, () => now, 60_000);
+      store.hold('old', [image(100)]);
+      store.releaseForTerminal(failed('old'));
+      now = 10;
+      store.hold('pending', [image(100)]);
+      store.hold('new', [image(100)]);
+      expect(store.take('old')).toBeUndefined();
+      expect(store.take('pending')).toHaveLength(1);
+      expect(store.take('new')).toHaveLength(1);
+      // Only pending (never failed) images remain: nothing more can be evicted.
+      expect(() => store.hold('more', [image(100)])).toThrow(AgentMessageAttachmentCapacityError);
+      expect(store.take('new')).toHaveLength(1);
+    });
+
+    it('keep() clears the TTL of a reopened message', () => {
+      let now = 0;
+      const store = new AgentMessageAttachmentStore(undefined, 1_000_000, () => now, 60_000);
+      store.hold('a', [image(4)]);
+      store.releaseForTerminal(failed('a'));
+      store.keep('a');
+      now += 120_000;
+      expect(store.take('a')).toHaveLength(1);
+    });
   });
 });

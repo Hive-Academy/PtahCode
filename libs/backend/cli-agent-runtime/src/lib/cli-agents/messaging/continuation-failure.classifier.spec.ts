@@ -41,6 +41,16 @@ describe('classifyContinuationFailureDetail', () => {
     expect(detail.lastError?.startsWith('Codex did not accept the model')).toBe(true);
   });
 
+  it('keeps a blocked or content refusal as turn-input-unsupported with its text', () => {
+    const error = Object.assign(continueError('unsupported'), { receiptReason: 'turn-input-unsupported' });
+    error.message = 'Ptah does not allow /always-approve in a lane: its approval mode is set at spawn.';
+    expect(classifyContinuationFailureDetail(error)).toEqual({
+      reason: 'continuation_rejected',
+      reasonCode: 'turn-input-unsupported',
+      lastError: 'Ptah does not allow /always-approve in a lane: its approval mode is set at spawn.',
+    });
+  });
+
   it('adds nothing for other failures', () => {
     expect(classifyContinuationFailureDetail(continueError('busy'))).toEqual({ reason: 'continuation_transient' });
     expect(classifyContinuationFailureDetail(continueError('unsupported'))).toEqual({ reason: 'continuation_rejected' });

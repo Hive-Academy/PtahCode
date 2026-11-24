@@ -34,7 +34,7 @@ export interface LaneResumeGuard {
 
 export class LaneResumeError extends Error {
   constructor(
-    readonly code: 'no-session' | 'spawn-failed' | 'blocked-command',
+    readonly code: 'no-session' | 'spawn-failed' | 'blocked-command' | 'turn-settings-refused',
     message: string,
   ) {
     super(message);

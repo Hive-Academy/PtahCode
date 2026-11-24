@@ -13,6 +13,7 @@ import {
   type PtahCliSummary,
   type CliAdapterManifest,
   type EffectiveLanePolicy,
+  type EffortLevel,
   type PtahCliState,
   type CliOutputSegment,
   type EffectiveCapabilitySet,
@@ -805,6 +806,9 @@ export class PtahCliRegistry {
       /** Raw provider model id override (spawn-scoped). Wins over selectedModel and tier.
        *  Does NOT mutate the persisted agent config. */
       model?: string;
+      /** Effort override (spawn-scoped), e.g. a cold resume's turn effort. Wins over
+       *  the agent's saved effort and does NOT mutate the persisted agent config. */
+      reasoningEffort?: EffortLevel;
       /**
        * The agent id `AgentProcessManager` reserved for this spawn
        * (TASK_2026_402). Threaded into the MCP URL as `/agent/{id}` so the MCP
@@ -997,7 +1001,7 @@ export class PtahCliRegistry {
         abortController,
         model,
         cwd,
-        effort: agentConfig.reasoningEffort || undefined,
+        effort: options?.reasoningEffort || agentConfig.reasoningEffort || undefined,
         agentName: agentConfig.name,
         agentId: options?.agentId,
         routingId: `ptah-cli:${id}`,

@@ -103,6 +103,7 @@ export const AgentDeliveryReceiptSchema = z.object({
   ackState: z.enum(['pending', 'read', 'acted', 'rejected', 'unavailable']).optional(),
   ackAt: z.number().int().nonnegative().optional(),
   ackNote: z.string().max(500).optional(),
+  rawDelivery: z.boolean().optional(),
 }).strict();
 
 export const AgentMonitorMessageReceiptPayloadSchema = z.object({

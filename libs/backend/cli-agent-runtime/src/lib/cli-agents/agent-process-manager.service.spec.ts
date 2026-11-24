@@ -5426,6 +5426,43 @@ describe('AgentProcessManager - SDK Execution Path', () => {
         expect(continuableControls.continueCallCount()).toBe(0);
       });
 
+      it('refuses a second concurrent settings change on one lane as busy', async () => {
+        const agentId = await idleLane();
+        const handle = continuableControls.handle as { -readonly [K in keyof SdkHandle]: SdkHandle[K] };
+        let release: (() => void) | undefined;
+        const applyTurnSettings = jest.fn(() => new Promise<{ model: string; appliesAt: 'next-turn' }>((resolve) => {
+          release = () => resolve({ model: 'gpt-5', appliesAt: 'next-turn' });
+        }));
+        handle.applyTurnSettings = applyTurnSettings;
+        const first = manager.continueConversation(agentId, 'one', undefined, { model: 'gpt-5' });
+        for (let tick = 0; tick < 50 && applyTurnSettings.mock.calls.length === 0; tick += 1) await Promise.resolve();
+        expect(applyTurnSettings).toHaveBeenCalledTimes(1);
+        await expect(manager.continueConversation(agentId, 'two', undefined, { model: 'gpt-6' }))
+          .rejects.toMatchObject({ code: 'busy' });
+        release?.();
+        await first;
+        expect(applyTurnSettings).toHaveBeenCalledTimes(1);
+        expect(trackedOf(agentId)?.info).toMatchObject({ model: 'gpt-5' });
+      });
+
+      it('prepareInterruptTurn applies settings while the turn runs; a refusal leaves it running (M4)', async () => {
+        const agentId = await idleLane();
+        const tracked = trackedOf(agentId);
+        if (tracked) tracked.info = { ...tracked.info, status: 'running' };
+        const handle = continuableControls.handle as { -readonly [K in keyof SdkHandle]: SdkHandle[K] };
+        handle.applyTurnSettings = jest.fn(async () => ({ model: 'gpt-5', appliesAt: 'next-turn' as const }));
+        await manager.prepareInterruptTurn(agentId, 'go', { model: 'gpt-5' }, undefined);
+        expect(trackedOf(agentId)?.info).toMatchObject({ model: 'gpt-5', status: 'running' });
+
+        handle.applyTurnSettings = jest.fn(async () => {
+          throw new LaneTurnSettingRefusal('model', 'Codex did not accept the model gpt-x.');
+        });
+        await expect(manager.prepareInterruptTurn(agentId, 'go', { model: 'gpt-x' }, undefined))
+          .rejects.toMatchObject({ code: 'turn-options-refused' });
+        expect(trackedOf(agentId)?.info).toMatchObject({ model: 'gpt-5', status: 'running' });
+        expect(continuableControls.continueCallCount()).toBe(0);
+      });
+
       it('skips applyTurnSettings when the settings equal the record', async () => {
         const agentId = await idleLane();
         const tracked = trackedOf(agentId);

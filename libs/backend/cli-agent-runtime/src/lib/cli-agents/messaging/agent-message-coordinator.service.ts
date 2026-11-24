@@ -52,6 +52,7 @@ import {
   planLimitRetry,
   requiresLimitGate,
   type LaneDeliveryLimitGate,
+  type LimitGateDecision,
 } from './lane-delivery-limit.gate';
 import type { ParentSessionPurge } from './parent-session-purge.service';
 import type { LaneMessageDenyReason, LaneMessagePolicy, VerifiedLaneSender } from './lane-message.policy';
@@ -91,7 +92,7 @@ export interface AgentMessageCoordinatorDeps {
   /** Lane-to-lane authorization (Component 15). Absent: every lane send is refused. */
   readonly lanePolicy?: Pick<LaneMessagePolicy, 'authorize'> | null;
   /** Host-memory images of held messages (D4). Absent: messages with images are refused. */
-  readonly attachments?: Pick<AgentMessageAttachmentStore, 'hold' | 'take' | 'release'> | null;
+  readonly attachments?: Pick<AgentMessageAttachmentStore, 'hold' | 'take' | 'release' | 'keep'> | null;
   readonly clock?: () => number;
 }
 
@@ -211,9 +212,16 @@ export class AgentMessageCoordinator implements AgentMessageDeliveryTarget {
       const held = this.holdImages(envelopeId, request);
       if (held) return held;
       const turn = envelopeTurnOf(request.turn);
-      const limitDecision = requiresLimitGate(plan) && this.deps.limitGate
-        ? await this.deps.limitGate.check(info)
-        : { kind: 'proceed' as const };
+      let limitDecision: LimitGateDecision;
+      try {
+        limitDecision = requiresLimitGate(plan) && this.deps.limitGate
+          ? await this.deps.limitGate.check(info)
+          : { kind: 'proceed' };
+      } catch (error: unknown) {
+        // No envelope exists yet, so no terminal listener would release them.
+        this.deps.attachments?.release(envelopeId);
+        throw error;
+      }
       const retryPlan = limitDecision.kind === 'blocked'
         ? planLimitRetry(undefined, limitDecision.resetAt)
         : undefined;
@@ -319,6 +327,8 @@ export class AgentMessageCoordinator implements AgentMessageDeliveryTarget {
       } finally {
         if (!committed) await this.rearmHeld(messageId);
       }
+      // A failed message kept its images for Retry; they are held again until it ends.
+      this.deps.attachments?.keep(messageId);
       // A flush that took the entry meanwhile is gated by `markDispatching`'s from-states.
       removeParkedEntry(this.deps.manager, envelopeLane(current), messageId);
       return this.routeHeld(reopened, body, reopened.delivery, false);
@@ -467,6 +477,9 @@ export class AgentMessageCoordinator implements AgentMessageDeliveryTarget {
     const text = await this.getBody(agentId, messageId, actor);
     const envelope = await this.deps.store.get(messageId);
     const turn = envelope ? this.heldTurn(envelope) : undefined;
+    // A failed message's images were kept only for this: they now live in
+    // the composer, so the host lets them go. A pending message keeps them.
+    if (envelope?.state === 'failed') this.deps.attachments?.release(messageId);
     return turn ? { text, turn } : { text };
   }
 
@@ -515,13 +528,18 @@ export class AgentMessageCoordinator implements AgentMessageDeliveryTarget {
     }
   }
 
-  /** The command and skill names a lane advertises, or undefined when no list is known. */
+  /**
+   * The command and skill names a lane advertises, or undefined when no list
+   * is known. Runs inside the lineage's send queue, so the list the composer
+   * last loaded is used when there is one; only a lineage with no cached list
+   * asks the live handle (bounded).
+   */
   private async advertisedCommands(laneId: AgentId, lineage: AgentId): Promise<readonly string[] | undefined> {
-    if (this.liveHandle(laneId)?.listTurnOptions) {
-      const view = await this.turnOptions(laneId);
-      if (!view.error) return view.commands.map((command) => command.name);
-    }
-    return this.catalogs.get(lineage)?.commands.map((command) => command.name);
+    const cached = this.catalogs.get(lineage);
+    if (cached) return cached.commands.map((command) => command.name);
+    if (!this.liveHandle(laneId)?.listTurnOptions) return undefined;
+    const view = await this.turnOptions(laneId);
+    return view.error ? undefined : view.commands.map((command) => command.name);
   }
 
   private liveHandle(laneId: AgentId): SdkHandle | undefined {

@@ -116,16 +116,22 @@ export class AgentMessageDeliveryScheduler implements AgentMessageDeliverySchedu
    * Images live only in host memory (D4): after a host restart every held
    * message that expected images has lost them. It fails visibly as
    * `attachments-unavailable` with its text kept for Recover text, instead
-   * of being delivered without its images.
+   * of being delivered without its images. A failed write is logged and the
+   * start goes on: the dispatcher refuses that envelope `attachments-unavailable`
+   * at its next attempt, so it is still never sent without its images.
    */
   private async failLostAttachments(): Promise<void> {
     const undelivered = await this.store.list({ states: ['not-started', 'blocked-retryable'] });
     for (const envelope of undelivered) {
       if (this.disposed) return;
       if ((envelope.turn?.imageCount ?? 0) === 0) continue;
-      await this.store.transition(envelope.id, {
-        state: 'failed', reason: 'attachments-unavailable', nextRetryAt: undefined,
-      }, [envelope.state]);
+      try {
+        await this.store.transition(envelope.id, {
+          state: 'failed', reason: 'attachments-unavailable', nextRetryAt: undefined,
+        }, [envelope.state]);
+      } catch (error: unknown) {
+        this.logger.error('[AgentMessageDeliveryScheduler] Lost-attachment write failed', this.asError(error));
+      }
     }
   }
 

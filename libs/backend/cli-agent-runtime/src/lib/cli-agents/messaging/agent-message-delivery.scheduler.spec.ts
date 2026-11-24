@@ -597,4 +597,27 @@ describe('AgentMessageDeliveryScheduler lost attachments (D4)', () => {
     expect(deliver.deliver).not.toHaveBeenCalled();
     scheduler.dispose();
   });
+
+  it('still re-arms held messages when a lost-attachment write fails', async () => {
+    jest.useFakeTimers({ doNotFake: ['setImmediate'] });
+    now = START;
+    const storage = new FakeStateStorage();
+    const before = await open(storage);
+    const withImages = await put(before, { turn: { imageCount: 1 } });
+    const held = await put(before);
+    await before.transition(held, { state: 'blocked-retryable', reason: 'delivery-failed', nextRetryAt: START + 5_000 });
+
+    const store = await open(storage);
+    const log = logger();
+    jest.spyOn(store, 'transition').mockRejectedValueOnce(new Error('disk full'));
+    const scheduler = new AgentMessageDeliveryScheduler(store, log, { clock });
+    await expect(scheduler.start(target())).resolves.toBeUndefined();
+
+    expect(log.error as jest.Mock).toHaveBeenCalledWith(
+      '[AgentMessageDeliveryScheduler] Lost-attachment write failed', expect.any(Error));
+    expect((await store.get(withImages))?.state).not.toBe('failed');
+    // The held message without images is still re-armed for its retry.
+    expect(jest.getTimerCount()).toBe(1);
+    scheduler.dispose();
+  });
 });

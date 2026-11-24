@@ -236,4 +236,16 @@ describe('AgentMessageReconciler raw delivery (R3-1)', () => {
     expect(await h.store.get(id)).toMatchObject({ state: 'failed', reason: 'turn-options-refused' });
     expect(await h.store.getBody(id)).toBe('later');
   });
+
+  it('keeps the refusal text of a flushed blocked command (M3)', async () => {
+    const h = harness();
+    const id = await parked(h);
+    await flushTakes(h, id);
+    const lastError = 'Ptah does not allow /always-approve in a lane: its approval mode is set at spawn.';
+    h.events.emit('agent:queue-updated', {
+      agentId: h.agentId, failures: [{ messageId: id, reason: 'turn-input-unsupported', lastError }],
+    });
+    await settleEvents();
+    expect(await h.store.get(id)).toMatchObject({ state: 'failed', reason: 'turn-input-unsupported', lastError });
+  });
 });

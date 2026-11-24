@@ -115,6 +115,12 @@ describe('agent messaging schemas', () => {
     expect(AgentDeliveryReceiptSchema.parse(receipt)).toEqual(receipt);
   });
 
+  it('accepts a receipt delivered as a provider command', () => {
+    const receipt = { ...legacyReceipt, rawDelivery: true, ackState: 'unavailable' };
+
+    expect(AgentDeliveryReceiptSchema.parse(receipt)).toEqual(receipt);
+  });
+
   it('validates senderAgentId as an AgentId string', () => {
     expect(
       AgentDeliveryReceiptSchema.safeParse({

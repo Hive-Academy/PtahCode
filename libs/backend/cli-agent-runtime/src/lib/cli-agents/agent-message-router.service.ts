@@ -133,7 +133,8 @@ export interface PendingAgentMessage {
 
 export type AgentMessageStatus =
   | { status: 'pending' | 'delivered' }
-  | { status: 'failed'; reason: string }
+  /** `lastError`: fixed refusal text a settings or turn-input refusal keeps (≤ 200 chars). */
+  | { status: 'failed'; reason: string; lastError?: string }
   | { status: 'unknown' };
 
 const MAX_TERMINAL_MESSAGES = 64;
@@ -152,6 +153,16 @@ export interface ContinuationDispatcher {
     messageId?: string,
     turn?: LaneTurnRequest,
     rawBody?: string,
+  ): Promise<void>;
+  /**
+   * Check and apply a turn's input before an interrupt-and-send interrupts
+   * the running turn; a throw leaves that turn running. Absent: no pre-flight.
+   */
+  prepareInterruptTurn?(
+    agentId: string,
+    message: string,
+    turn: LaneTurnRequest | undefined,
+    rawBody: string | undefined,
   ): Promise<void>;
 }
 
@@ -347,6 +358,23 @@ export class AgentMessageRouter {
     messageId?: string,
     input: RouteTurnInput = {},
   ): Promise<AgentMessageOutcome> {
+    if (input.turn !== undefined && dispatcher.prepareInterruptTurn) {
+      try {
+        await dispatcher.prepareInterruptTurn(agentId, message, input.turn, input.rawBody);
+      } catch (error: unknown) {
+        // Refused before the interrupt: the running turn keeps going.
+        const refused = classifyContinuationFailureDetail(error);
+        if (refused.reasonCode && refused.lastError)
+          return { mode: 'unsupported', reasonCode: refused.reasonCode, detail: refused.lastError };
+        return {
+          mode: 'unsupported',
+          reasonCode: 'interrupt-failed',
+          detail:
+            `Preparing the new ${tracked.info.cli} turn failed: ${describeError(error)}. ` +
+            `Nothing was delivered and the turn was left running.`,
+        };
+      }
+    }
     this.interrupting.add(agentId);
     try {
       await tracked.sdkHandle?.interrupt?.();
@@ -559,7 +587,9 @@ export class AgentMessageRouter {
         const reason = detail.reasonCode ?? detail.reason;
         // The reconciler decides between a backoff retry and a permanent hold.
         offerNext = detail.reason === 'continuation_rejected';
-        this.setTerminal(agentId, next.messageId, { status: 'failed', reason });
+        this.setTerminal(agentId, next.messageId, {
+          status: 'failed', reason, ...(detail.lastError ? { lastError: detail.lastError } : {}),
+        });
         this.logger.error('[AgentMessageRouter] Queued message could not be delivered', {
           agentId,
           cli: tracked.info.cli,

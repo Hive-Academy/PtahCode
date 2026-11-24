@@ -43,5 +43,6 @@ export function projectAgentMessageEnvelope(
     ...(envelope.ackState ? { ackState: envelope.ackState } : {}),
     ...(envelope.ackAt !== undefined ? { ackAt: envelope.ackAt } : {}),
     ...(envelope.ackNote ? { ackNote: envelope.ackNote } : {}),
+    ...(envelope.rawDelivery?.raw === true ? { rawDelivery: true } : {}),
   };
 }

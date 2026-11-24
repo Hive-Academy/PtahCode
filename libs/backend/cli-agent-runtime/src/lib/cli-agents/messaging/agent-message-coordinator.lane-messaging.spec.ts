@@ -223,6 +223,40 @@ describe('AgentMessageCoordinator — turn input refusals and options', () => {
     await expect(coordinator.getBody(h.agentId, id, user)).resolves.toBe('look');
   });
 
+  it('returns a failed message with its images once, then lets them go (S2)', async () => {
+    const withImages: CliAdapterManifest = {
+      ...grok, turnInput: { ...grokTurnInput, images: { state: 'supported' } },
+    };
+    const { h, coordinator, attachments } = setupTurn();
+    h.setInfo({ potentialCapabilities: withImages });
+    h.tracked.sdkHandle = { ...handleOf(h), turnInputSupport: () => ({ images: { state: 'supported' } }) };
+    const id = idOf(await coordinator.send({ agentId: h.agentId, message: 'look', turn: { images: [image] } }, user));
+    await h.store.transition(id, { state: 'failed', reason: 'turn-input-unsupported' });
+    await expect(coordinator.getMessage(h.agentId, id, user)).resolves.toEqual({
+      text: 'look', turn: { images: [image] },
+    });
+    expect(attachments?.take(id)).toBeUndefined();
+  });
+
+  it('releases held images when the limit gate throws before the envelope exists (M2)', async () => {
+    const withImages: CliAdapterManifest = {
+      ...grok, turnInput: { ...grokTurnInput, images: { state: 'supported' } },
+    };
+    const h = harness();
+    h.coordinator.dispose();
+    h.setInfo({ cli: 'grok', displayName: 'Grok', potentialCapabilities: withImages });
+    h.tracked.sdkHandle = { ...handleOf(h), turnInputSupport: () => ({ images: { state: 'supported' } }) };
+    const attachments = new AgentMessageAttachmentStore();
+    const coordinator = new AgentMessageCoordinator({
+      manager: h.manager, detection: h.detection, store: h.store, aliases: h.aliases, resume: h.resume,
+      scheduler: h.scheduler, ack: h.ack, logger: h.logger, attachments,
+      limitGate: { check: jest.fn().mockRejectedValue(new Error('limit lookup failed')) },
+    });
+    await expect(coordinator.send({ agentId: h.agentId, message: 'look', turn: { images: [image] } }, user))
+      .rejects.toThrow('limit lookup failed');
+    expect(attachments.heldBytes()).toBe(0);
+  });
+
   it('serves the live catalog without hidden commands and keeps it for a stopped lane', async () => {
     const { h, coordinator } = setupTurn();
     h.setInfo({ model: 'grok-4' });
@@ -246,6 +280,19 @@ describe('AgentMessageCoordinator — turn input refusals and options', () => {
     h.setInfo({ status: 'stopped' });
     const stopped = await coordinator.turnOptions(h.agentId);
     expect(stopped.commands.map((command) => command.name)).toEqual(['compact', 'code-review']);
+  });
+
+  it('reads the cached command list for a / send instead of asking the lane again (M9)', async () => {
+    const { h, coordinator } = setupTurn();
+    const listTurnOptions = jest.fn(async () => ({
+      models: [], efforts: [], commands: [{ name: 'compact', group: 'command' as const }],
+    }));
+    h.tracked.sdkHandle = { ...handleOf(h), listTurnOptions };
+    await coordinator.turnOptions(h.agentId);
+    await coordinator.send({ agentId: h.agentId, message: '/compact' }, user);
+    expect(listTurnOptions).toHaveBeenCalledTimes(1);
+    expect(h.sendToAgent).toHaveBeenCalledWith(h.agentId, '/compact', expect.anything(), expect.any(String),
+      false, expect.objectContaining({ noSteer: true }));
   });
 
   it('returns an error result, never a throw, when the lookup fails', async () => {

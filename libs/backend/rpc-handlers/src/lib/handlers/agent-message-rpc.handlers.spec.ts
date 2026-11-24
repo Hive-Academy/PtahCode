@@ -244,8 +244,20 @@ describe('AgentMessageRpcHandlers', () => {
     });
 
     it.each([
+      'gpt-5.1-codex', 'grok-4-fast', 'gemini-4-hydrogen-low', 'Gemini 3.1 Pro (High)',
+      'claude-sonnet-4-6', 'opus[1m]', 'openai/gpt-5', 'claude-opus-4@1m',
+    ])('accepts the provider model id %s', async (model) => {
+      const { coordinator, call } = setup();
+      const result = await call('agent:sendMessage', { agentId: AGENT_ID, message: 'x', turn: { model } });
+      expect(result.success).toBe(true);
+      expect(coordinator.send).toHaveBeenCalled();
+    });
+
+    it.each([
       ['an unknown turn key', { extra: true }],
-      ['a model with spaces', { model: 'bad model' }],
+      ['a model with a control character', { model: 'bad\u0007model' }],
+      ['a model that reads as a flag', { model: '--dangerously-skip-permissions' }],
+      ['a model with surrounding whitespace', { model: ' opus ' }],
       ['a 201-character effort', { reasoningEffort: 'x'.repeat(201) }],
       ['33 files', { files: Array.from({ length: 33 }, (_, index) => `f${index}`) }],
       ['a non-image media type', { images: [{ data: 'aGk=', mediaType: 'text/plain' }] }],

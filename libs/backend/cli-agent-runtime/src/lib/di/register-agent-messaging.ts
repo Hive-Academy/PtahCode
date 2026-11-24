@@ -44,7 +44,10 @@ const envelopeStore = (c: DependencyContainer): AgentMessageEnvelopeStore =>
 const isParentFrozen = (c: DependencyContainer) => (parentSessionId: string): boolean =>
   c.resolve(ParentEnvelopeStoreService).isParentFrozen(parentSessionId);
 
-/** Held images go when their envelope ends (settled, cancelled, failed, expired). */
+/**
+ * Held images go when their envelope ends (settled, cancelled, expired); a
+ * failed one keeps them for Recover text or Retry, bounded by a TTL and the cap.
+ */
 function withAttachmentRelease(
   c: DependencyContainer,
   store: AgentMessageEnvelopeStore,
@@ -52,7 +55,7 @@ function withAttachmentRelease(
   const attachments = c.resolve<AgentMessageAttachmentStore>(
     CLI_AGENT_RUNTIME_TOKENS.AGENT_MESSAGE_ATTACHMENT_STORE,
   );
-  store.setTerminalListener((envelope) => attachments.release(envelope.id));
+  store.setTerminalListener((envelope) => attachments.releaseForTerminal(envelope));
   return store;
 }
 

@@ -30,8 +30,15 @@ const parentDeliveryId = z.custom<ParentDeliveryView['deliveryId']>(
   (value) => typeof value === 'string' && /^lane-delivery:\S{1,480}$/.test(value),
 );
 const previewSchema = z.object({ agentId, delivery: z.enum(['queue', 'now']).optional() }).strict();
-/** Model and effort ids: provider ids such as `claude-opus-4@1m`, `openai/gpt-5`, `high`. */
-const turnSetting = z.string().min(1).max(200).regex(/^[\w.:/@+-]+$/);
+/**
+ * Model and effort ids as providers list them: `claude-opus-4@1m`, `opus[1m]`,
+ * `openai/gpt-5`, `gemini-4-hydrogen-low`, agy's `Gemini 3.1 Pro (High)`, `high`.
+ * No control characters, no surrounding whitespace, and no leading `-`, so an
+ * id handed to a CLI argument list cannot read as a flag.
+ */
+const turnSetting = z.string().min(1).max(200)
+  .regex(/^(?!-)[^\p{Cc}]+$/u)
+  .refine((value) => value.trim() === value);
 /** Base64 text of one image at most `MAX_IMAGE_SIZE_BYTES` decoded. */
 const MAX_IMAGE_BASE64_CHARS = Math.ceil((MAX_IMAGE_SIZE_BYTES * 4) / 3);
 const imageSchema = z.object({

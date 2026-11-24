@@ -10,7 +10,12 @@ import {
 } from '@ptah-extension/shared';
 import { AgentMessageAttachmentStore } from './agent-message-attachment.store';
 import { agentMessageAckLine } from './agent-message-delivery-text';
-import { AgentMessageDispatcher, type DispatchAttempt } from './agent-message-dispatcher';
+import {
+  AgentMessageDispatcher,
+  classifyAttemptFailure,
+  type DispatchAttempt,
+} from './agent-message-dispatcher';
+import { LaneResumeError } from './lane-resumers/lane-resumer.port';
 import type { NewEnvelope } from './envelope/agent-message-envelope.schema';
 import { harness, manifest } from './__fixtures__/agent-message-harness';
 
@@ -128,17 +133,21 @@ describe('AgentMessageDispatcher', () => {
       expect(String(sentArg(s, 1))).toMatch(/^\[Ptah message /);
     });
 
-    it('with no known list, goes raw only when the manifest supports commands or skills', async () => {
+    it('with no known list, keeps the header even when the manifest supports commands', async () => {
       const s = setup({ advertised: undefined });
-      const { attempt } = await s.attempt('/anything');
+      const { attempt, id } = await s.attempt('/usr/bin is missing');
       await s.dispatcher.attempt(attempt);
-      expect(sentArg(s, 1)).toBe('/anything');
+      expect(String(sentArg(s, 1))).toMatch(/^\[Ptah message /);
+      expect(await s.h.store.get(id)).toMatchObject({ ackState: 'pending' });
+      expect((await s.h.store.get(id))?.rawDelivery).toBeUndefined();
+    });
 
-      const bare = setup({ advertised: undefined });
-      bare.h.setInfo({ potentialCapabilities: manifest });
-      const second = await bare.attempt('/anything');
-      await bare.dispatcher.attempt(second.attempt);
-      expect(String(sentArg(bare, 1))).toMatch(/^\[Ptah message /);
+    it('keeps the header when the command list lookup throws', async () => {
+      const s = setup();
+      s.advertisedCommands.mockRejectedValueOnce(new Error('catalog down'));
+      const { attempt } = await s.attempt('/compact');
+      await s.dispatcher.attempt(attempt);
+      expect(String(sentArg(s, 1))).toMatch(/^\[Ptah message /);
     });
 
     it('refuses /always-approve on before any adapter call, keeping the body', async () => {
@@ -160,6 +169,42 @@ describe('AgentMessageDispatcher', () => {
       const { attempt } = await s.attempt('/compact', { rawDelivery: { raw: true } });
       await s.dispatcher.attempt(attempt);
       expect(sentArg(s, 1)).toBe('/compact');
+    });
+  });
+
+  describe('storage failures return an outcome (never throw, never stay dispatching)', () => {
+    it('returns storage-unavailable when the refusal write of a blocked command fails', async () => {
+      const s = setup({ advertised: ['compact'] });
+      const { attempt, id } = await s.attempt('/always-approve on');
+      jest.spyOn(s.h.store, 'transition').mockRejectedValueOnce(new Error('disk full'));
+      const outcome = await s.dispatcher.attempt(attempt);
+      expect(outcome).toMatchObject({ mode: 'unsupported', reasonCode: 'storage-unavailable' });
+      expect(s.h.sendToAgent).not.toHaveBeenCalled();
+      expect((await s.h.store.get(id))?.state).toBe('not-started');
+    });
+
+    it('writes the raw marker with the journal record, and sends nothing when that write fails', async () => {
+      const s = setup({ advertised: ['compact'] });
+      const { attempt, id } = await s.attempt('/compact');
+      const mark = jest.spyOn(s.h.store, 'markDispatching').mockRejectedValueOnce(new Error('disk full'));
+      const outcome = await s.dispatcher.attempt(attempt);
+      expect(mark).toHaveBeenCalledWith(id, ['not-started'], { rawDelivery: { raw: true } });
+      expect(outcome).toMatchObject({ mode: 'unsupported', reasonCode: 'storage-unavailable' });
+      expect(s.h.sendToAgent).not.toHaveBeenCalled();
+      expect((await s.h.store.get(id))?.state).not.toBe('dispatching');
+    });
+  });
+
+  describe('cold resume settings refusal', () => {
+    it('fails turn-options-refused with the refusal text, never retried', async () => {
+      const s = setup();
+      const { attempt } = await s.attempt('hello');
+      const { patch, reason } = classifyAttemptFailure(
+        new LaneResumeError('turn-settings-refused', 'Ptah CLI has no effort level "turbo".'), attempt.envelope);
+      expect(reason).toBe('turn-options-refused');
+      expect(patch).toMatchObject({
+        state: 'failed', reason: 'turn-options-refused', lastError: 'Ptah CLI has no effort level "turbo".',
+      });
     });
   });
 
