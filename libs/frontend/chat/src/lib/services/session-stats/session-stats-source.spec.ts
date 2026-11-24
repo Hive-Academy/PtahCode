@@ -143,6 +143,8 @@ describe('injectSessionStatsSource plan limits across a session switch', () => {
   } as PlanLimitOwnerSnapshot;
   const limitsSnapshot = signal<PlanLimitsSnapshot | null>(null);
   const owners = signal<Record<string, string | null>>({});
+  const limitsNow = signal(2_000);
+  const mainSnapshot = signal<SessionStatsEntry | null>(null);
   const mainProvider = signal<string | null>('anthropic');
   const ownerCodex = {
     owner: { key: 'c', providerId: 'openai-codex', identityKind: 'account', label: 'Codex account' },
@@ -159,10 +161,12 @@ describe('injectSessionStatsSource plan limits across a session switch', () => {
     sessionId.set('s1');
     limitsSnapshot.set({ generatedAt: 1_000, owners: [ownerA], sessionOwners: {} });
     owners.set({ s1: 'a' });
+    limitsNow.set(2_000);
+    mainSnapshot.set(null);
     TestBed.configureTestingModule({ providers: [
-      { provide: ChatStore, useValue: { sessionStats: signal(null), liveModelStats: signal(null), compactionCount: signal(0) } },
+      { provide: ChatStore, useValue: { sessionStats: mainSnapshot, liveModelStats: signal(null), compactionCount: signal(0) } },
       { provide: PlanLimitsStore, useValue: {
-        snapshot: limitsSnapshot, now: signal(2_000), loadError: signal(false),
+        snapshot: limitsSnapshot, now: limitsNow, loadError: signal(false),
         sessionOwner: (id: string) => {
           const ownerKey = owners()[id];
           return ownerKey === undefined ? null : { ownerKey, modelScope: null };
@@ -176,6 +180,32 @@ describe('injectSessionStatsSource plan limits across a session switch', () => {
   function planTileIds(stats: ReturnType<typeof injectSessionStatsSource>): string[] {
     return stats.inputs()?.limits?.planTiles.map((tile) => tile.id) ?? [];
   }
+
+  // Regression (NG0103): a new cache object on every plan-limit clock tick fed
+  // the inspector's cache clock gate and looped change detection.
+  it('keeps the inputs().cache object across a plan-limit clock tick', () => {
+    const cache = { ttl: '5m' as const, lastRequestAt: 1_000, expiresAt: 301_000 };
+    mainSnapshot.set({ tokenCount: 1, cache } as SessionStatsEntry);
+    const stats = TestBed.runInInjectionContext(() => injectSessionStatsSource({
+      tab: () => null, sessionId, available: () => true, budget: () => null,
+    }));
+    const first = stats.inputs();
+    const parsed = first?.cache;
+    expect(parsed).toEqual(cache);
+
+    limitsNow.set(3_000);
+    const next = stats.inputs();
+    expect(next).not.toBe(first);
+    expect(next?.cache).toBe(parsed);
+
+    // An equal cache in a new snapshot keeps the object; a changed one replaces it.
+    mainSnapshot.set({ tokenCount: 2, cache: { ...cache } } as SessionStatsEntry);
+    expect(stats.inputs()?.cache).toBe(parsed);
+    const later = { ttl: '5m' as const, lastRequestAt: 5_000, expiresAt: 305_000 };
+    mainSnapshot.set({ tokenCount: 3, cache: later } as SessionStatsEntry);
+    expect(stats.inputs()?.cache).not.toBe(parsed);
+    expect(stats.inputs()?.cache).toEqual(later);
+  });
 
   it('keeps showing the account limits when the new session is not resolved yet', () => {
     const stats = TestBed.runInInjectionContext(() => injectSessionStatsSource({

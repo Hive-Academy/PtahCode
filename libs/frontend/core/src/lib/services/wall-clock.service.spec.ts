@@ -12,6 +12,7 @@ import {
   WallClockService,
   injectWallClock,
 } from './wall-clock.service';
+import { ClockService } from './clock.service';
 
 describe(WallClockService.name, () => {
   let hidden: boolean;
@@ -157,6 +158,36 @@ describe(WallClockService.name, () => {
     TestBed.tick();
     expect(jest.getTimerCount()).toBe(1);
     injector.destroy();
+    expect(jest.getTimerCount()).toBe(0);
+  });
+  // Regression (NG0103): acquire() writes the clock, so an active() that reads
+  // the clock re-ran its own effect and released and re-acquired on every tick.
+  it('does not re-acquire when active() reads the clock, on its own write or on a tick', () => {
+    const injector = createEnvironmentInjector([], TestBed.inject(EnvironmentInjector));
+    const clock = TestBed.inject(ClockService);
+    const realAcquire = clock.acquire.bind(clock);
+    const release = jest.fn();
+    const acquire = jest.spyOn(clock, 'acquire').mockImplementation((granularity) => {
+      const realRelease = realAcquire(granularity);
+      return () => {
+        release();
+        realRelease();
+      };
+    });
+    runInInjectionContext(injector, () => injectWallClock('second', () => clock.now() > 0));
+    TestBed.tick();
+    expect(acquire).toHaveBeenCalledTimes(1);
+
+    jest.advanceTimersByTime(1_000);
+    TestBed.tick();
+    jest.advanceTimersByTime(1_000);
+    TestBed.tick();
+    expect(acquire).toHaveBeenCalledTimes(1);
+    expect(release).not.toHaveBeenCalled();
+    expect(clock.now()).toBe(3_000);
+
+    injector.destroy();
+    expect(release).toHaveBeenCalledTimes(1);
     expect(jest.getTimerCount()).toBe(0);
   });
 });

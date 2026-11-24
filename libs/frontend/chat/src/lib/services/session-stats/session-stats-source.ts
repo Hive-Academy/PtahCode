@@ -25,6 +25,7 @@ import type {
   PlanLimitOwnerSnapshot,
   PlanLimitsSnapshot,
   SessionBudgetState,
+  SessionStatsEntry,
 } from '@ptah-extension/shared';
 import { parseSessionStatsCache } from '@ptah-extension/shared';
 import { usageTotalsFromSegments } from '../../components/molecules/agent-card/stats-bar.utils';
@@ -115,6 +116,21 @@ function recordedOwnerKeys(agents: readonly MonitoredAgent[]): string[] {
 
 function sameStrings(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((value, i) => value === b[i]);
+}
+
+type SessionStatsCache = NonNullable<SessionStatsEntry['cache']>;
+
+/** Structural equality, so an equal parse keeps the previous object (and its consumers idle). */
+function sameSessionStatsCache(a: SessionStatsCache | null, b: SessionStatsCache | null): boolean {
+  if (a === b) return true;
+  return (
+    a !== null &&
+    b !== null &&
+    a.ttl === b.ttl &&
+    a.lastRequestAt === b.lastRequestAt &&
+    a.expiresAt === b.expiresAt &&
+    a.idleCompactAt === b.idleCompactAt
+  );
 }
 
 /**
@@ -273,6 +289,11 @@ export function injectSessionStatsSource(
     });
   });
 
+  /** Parsed once per snapshot change; a plan-limit clock tick keeps the same object. */
+  const cache = computed(() => parseSessionStatsCache(snapshot()?.cache), {
+    equal: sameSessionStatsCache,
+  });
+
   const inputs = computed<SessionStatsInputs | null>(() => {
     if (!host.available()) return null;
     const live = liveModelStats();
@@ -280,7 +301,7 @@ export function injectSessionStatsSource(
     return {
       sessionId: host.sessionId(),
       snapshot: snapshot(),
-      cache: parseSessionStatsCache(snapshot()?.cache),
+      cache: cache(),
       liveModelStats: live,
       compactionCount: compactionCount(),
       limits: limitView,
