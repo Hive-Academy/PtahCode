@@ -7,6 +7,7 @@ import {
 } from '@angular/core';
 import { ModelStateService } from '@ptah-extension/core';
 import {
+  PtahBadgeDirective,
   PtahDisclosureComponent,
   PtahMeterComponent,
   PtahStatComponent,
@@ -17,6 +18,7 @@ import {
   type PtahTimeInput,
 } from '@ptah-extension/ui';
 import { resolveModelDisplayName } from '@ptah-extension/shared';
+import { Bot, Boxes, CircleDollarSign, Clock, Coins, Gauge, LucideAngularModule } from 'lucide-angular';
 import { formatExpandedUsageCost, inspectorBudgetDisplay, SDK_BUDGET_SCOPE } from '../session-budget-format';
 import { SessionModelBreakdownComponent } from '../session-model-breakdown.component';
 import { StatsTileExpansionState } from '../plan-limits/stats-tile-expansion.state';
@@ -37,6 +39,8 @@ let nextSessionId = 0;
   selector: 'ptah-inspector-session-stats',
   standalone: true,
   imports: [
+    LucideAngularModule,
+    PtahBadgeDirective,
     PtahDisclosureComponent,
     PtahMeterComponent,
     PtahStatComponent,
@@ -46,6 +50,7 @@ let nextSessionId = 0;
   ],
   template: `
     <ptah-surface-section
+      tone="flush"
       class="session-section block"
       padding="md"
       role="region"
@@ -54,9 +59,9 @@ let nextSessionId = 0;
       data-testid="inspector-session-stats"
     >
       <div section-header class="flex items-baseline justify-between gap-2">
-        <h3 [id]="headingId" tabindex="-1" class="text-xs font-semibold uppercase tracking-wide">Session</h3>
+        <h3 [id]="headingId" tabindex="-1" class="sec-label text-[10.5px] font-semibold uppercase">Session</h3>
         @if (hasCli()) {
-          <span class="text-xs text-base-content-muted">SDK + CLI</span>
+          <span ptahBadge size="xs">SDK + CLI</span>
         }
       </div>
       <div class="grid grid-cols-3 gap-y-0" data-testid="inspector-stats-grid">
@@ -75,8 +80,9 @@ let nextSessionId = 0;
             [attr.data-testid]="'session-' + metric.id"
             role="group"
             appearance="plain"
-            size="sm"
+            size="xs"
           >
+            <lucide-angular ptahStatIcon class="stat-icon" [img]="metric.id === 'tokens' ? TokensIcon : CostIcon" aria-hidden="true" />
             @if (hasCli()) {
               <ptah-meter
                 class="mt-0.5"
@@ -105,13 +111,14 @@ let nextSessionId = 0;
           [attr.aria-label]="timeDetail()"
           [hint]="turnText()"
           appearance="plain"
-          size="sm"
+          size="xs"
           role="group"
           data-testid="session-time"
         >
+          <lucide-angular ptahStatIcon class="stat-icon" [img]="TimeIcon" aria-hidden="true" />
           <ptah-timer
             ptahStatMedia
-            class="text-lg font-semibold tabular-nums"
+            class="text-sm font-semibold tabular-nums"
             aria-hidden="true"
             [startedAt]="duration() === null ? null : startedAt()"
             [durationMs]="duration()"
@@ -130,8 +137,10 @@ let nextSessionId = 0;
           [attr.aria-label]="agentDetail()"
           role="group"
           appearance="plain"
-          size="sm"
-        />
+          size="xs"
+        >
+          <lucide-angular ptahStatIcon class="stat-icon" [img]="AgentsIcon" aria-hidden="true" />
+        </ptah-stat>
 
         <ptah-disclosure
           class="models contents"
@@ -144,7 +153,8 @@ let nextSessionId = 0;
           (keydown.escape)="closeModels($event, modelsHost)"
         >
           <span ptahDisclosureSummary class="col-span-2 grid min-w-0">
-            <span class="text-lg font-semibold tabular-nums" [class.text-base-content-muted]="!modelNames().length">
+            <span class="inline-flex items-center gap-1 text-sm font-semibold tabular-nums" [class.text-base-content-muted]="!modelNames().length">
+              <lucide-angular class="size-3 shrink-0 text-base-content-muted" [img]="ModelsIcon" aria-hidden="true" />
               {{ modelNames().length || '—' }}
             </span>
             @if (modelSummary(); as summary) {
@@ -174,11 +184,13 @@ let nextSessionId = 0;
             [attr.aria-label]="view.detail"
             role="group"
             appearance="plain"
-            size="sm"
+            size="xs"
             data-testid="session-budget"
           >
             @if (hasCli()) {
               <span ptahStatIcon class="source-swatch sdk-swatch" aria-hidden="true"></span>
+            } @else {
+              <lucide-angular ptahStatIcon class="stat-icon" [img]="BudgetIcon" aria-hidden="true" />
             }
             @if (view.percent !== null) {
               <ptah-meter
@@ -195,18 +207,18 @@ let nextSessionId = 0;
                 track="thin"
               />
             }
-            <span class="text-xs text-base-content-muted">{{ view.numerator }} / {{ view.limitText }}</span>
+            <span class="text-[11px] text-base-content-muted">{{ view.numerator }} / {{ view.limitText }}</span>
             @if (view.stage !== 'normal') {
-              <span class="text-xs capitalize text-base-content-muted">{{ view.stage }}</span>
+              <span class="text-[11px] capitalize text-base-content-muted">{{ view.stage }}</span>
             }
             @if (stats().budget?.measure === 'weighted-fallback') {
-              <span class="text-xs text-base-content-muted">{{ view.label }}</span>
+              <span class="text-[11px] text-base-content-muted">{{ view.label }}</span>
             }
           </ptah-stat>
         }
       </div>
       @if (hasCli() || showEstimates() || showBounds()) {
-        <div class="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-[11px] text-base-content-muted"
+        <div class="flex flex-wrap items-baseline gap-x-2 gap-y-1 text-[10.5px] text-base-content-muted"
           [attr.data-testid]="hasCli() ? 'session-source-legend' : null">
           @if (hasCli()) {
             @let tokens = metrics()[0];
@@ -238,7 +250,11 @@ let nextSessionId = 0;
   `,
   styles: `
     .metric { min-width: 0; padding-inline-end: 0.5rem; }
-    .session-section ::ng-deep > section { padding: 0.75rem; gap: 0.5rem; border-radius: 0; }
+    /* The stat icon sits on the label line, not 0.5rem down (the plain stat has no padding). */
+    .metric ::ng-deep [ptahStatIcon] { top: 0.125rem; right: 0.5rem; }
+    .metric ::ng-deep [ptahStatIcon].source-swatch { top: 0.25rem; }
+    .stat-icon { width: 0.75rem; height: 0.75rem; color: var(--bcm, oklch(var(--bc) / 0.6)); }
+    .session-section ::ng-deep > section { padding: 0.75rem; gap: 0.5rem; }
     .models { display: contents; }
     .models ::ng-deep > div:first-child {
       grid-area: 2 / 2 / 3 / 3;
@@ -301,6 +317,12 @@ export class InspectorSessionStatsComponent {
   });
 
   protected readonly headingId = `ptah-session-heading-${++nextSessionId}`;
+  protected readonly TokensIcon = Coins;
+  protected readonly CostIcon = CircleDollarSign;
+  protected readonly TimeIcon = Clock;
+  protected readonly AgentsIcon = Bot;
+  protected readonly ModelsIcon = Boxes;
+  protected readonly BudgetIcon = Gauge;
   protected readonly budgetScope = SDK_BUDGET_SCOPE;
   protected readonly accuracy = USAGE_ACCURACY;
   protected readonly hasCli = computed(() => this.lanes().length > 0);
