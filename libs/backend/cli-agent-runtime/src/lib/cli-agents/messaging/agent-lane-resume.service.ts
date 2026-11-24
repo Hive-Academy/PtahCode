@@ -4,7 +4,15 @@ import type {
   SpawnAgentResult,
 } from '@ptah-extension/shared';
 import type { AgentProcessManager } from '../agent-process-manager.service';
-import { LaneResumeError, type LaneResumeResult } from './lane-resumers/lane-resumer.port';
+import {
+  blockedLaneCommand,
+  blockedLaneCommandReason,
+} from '../cli-adapters/lane-command-filter';
+import {
+  LaneResumeError,
+  type LaneResumeGuard,
+  type LaneResumeResult,
+} from './lane-resumers/lane-resumer.port';
 import type {
   PtahCliLaneResumer,
   PtahCliResumeParams,
@@ -31,11 +39,21 @@ export class AgentLaneResumeService {
     this.system = new SystemCliLaneResumer(manager, parentLevel);
   }
 
-  resume(info: AgentProcessInfo, task: string): Promise<LaneResumeResult> {
-    if (info.cli === 'ptah-cli') {
-      return this.ptahCli.resume(info, task);
-    }
-    return this.system.resume(info, task);
+  /**
+   * Cold-resume `info` with `task`. A `guard` whose raw body starts with a
+   * blocked `/command` is refused with `blocked-command` before any spawn.
+   * `info.model` / `info.reasoningEffort` and `files` reach the resumed spawn.
+   */
+  async resume(
+    info: AgentProcessInfo,
+    task: string,
+    guard?: LaneResumeGuard,
+    files?: readonly string[],
+  ): Promise<LaneResumeResult> {
+    const blocked = guard ? blockedLaneCommand(guard.rawBody, guard.blocked) : undefined;
+    if (blocked) throw new LaneResumeError('blocked-command', blockedLaneCommandReason(blocked));
+    const resumer = info.cli === 'ptah-cli' ? this.ptahCli : this.system;
+    return files && files.length > 0 ? resumer.resume(info, task, files) : resumer.resume(info, task);
   }
 
   resumeRequest(request: SpawnAgentRequest): Promise<SpawnAgentResult> {

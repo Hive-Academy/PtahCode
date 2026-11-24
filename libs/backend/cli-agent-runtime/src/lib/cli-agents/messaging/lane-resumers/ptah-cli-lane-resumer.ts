@@ -28,6 +28,17 @@ export interface PtahCliResumeParams {
   readonly permission?: LanePermissionMode;
   readonly network?: LaneNetworkMode;
   readonly effectivePolicy?: import('@ptah-extension/shared').EffectiveLanePolicy;
+  /** Provider model id the resumed SDK query starts with. */
+  readonly model?: string;
+}
+
+/**
+ * Ptah CLI lanes take attached files as path text (D14): the paths follow the
+ * prompt, one per line. A text with no files is returned unchanged.
+ */
+export function withFileReferences(task: string, files?: readonly string[]): string {
+  if (!files || files.length === 0) return task;
+  return `${task}\n\nAttached files:\n${files.map((file) => `- ${file}`).join('\n')}`;
 }
 
 export type PtahCliLaneResumerManager = Pick<
@@ -48,7 +59,11 @@ export class PtahCliLaneResumer implements LaneResumer {
     private readonly parentLevel?: ParentLaneLevel,
   ) {}
 
-  resume(info: AgentProcessInfo, task: string): Promise<LaneResumeResult> {
+  resume(
+    info: AgentProcessInfo,
+    task: string,
+    files?: readonly string[],
+  ): Promise<LaneResumeResult> {
     if (!info.cliSessionId) {
       throw new LaneResumeError(
         'no-session',
@@ -65,9 +80,11 @@ export class PtahCliLaneResumer implements LaneResumer {
       {
         cliSessionId: info.cliSessionId,
         cli: info.cli,
-        task,
+        task: withFileReferences(task, files),
         parentSessionId: info.parentSessionId,
         ptahCliId: info.ptahCliId,
+        // The registry has no effort option; the model is carried (A11).
+        ...(info.model ? { model: info.model } : {}),
         previousAgentId: info.agentId,
         permission: info.effectivePolicy?.permission,
         network: info.effectivePolicy?.network,
@@ -100,6 +117,7 @@ export class PtahCliLaneResumer implements LaneResumer {
           ...(this.parentLevel && parentSessionId
             ? { parentLevel: this.parentLevel(parentSessionId) } : {}),
           agentId,
+          ...(params.model ? { model: params.model } : {}),
           laneToolGate: this.manager.laneToolGateFor(agentId),
           ...(params.permission ? { permission: params.permission } : {}),
           ...(params.network ? { network: params.network } : {}),

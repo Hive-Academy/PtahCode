@@ -85,4 +85,43 @@ describe('AgentLaneResumeService', () => {
     expect(ptah.resume).toHaveBeenCalledWith(ptahInfo, 'follow up');
     expect(spawn).not.toHaveBeenCalled();
   });
+
+  describe('blocked-command guard and turn settings', () => {
+    const guard = { rawBody: '  /always-approve on', blocked: ['always-approve'] };
+
+    it('refuses a blocked /command before any spawn', async () => {
+      const spawn = jest.fn();
+      const prepareSdkHandleSpawn = jest.fn();
+      const ptah = ptahCli();
+      const resume = new AgentLaneResumeService({ spawn, prepareSdkHandleSpawn, releaseIdleForResume: jest.fn() }, ptah);
+      for (const record of [info, { ...info, cli: 'ptah-cli', ptahCliId: 'config' } as AgentProcessInfo]) {
+        await expect(resume.resume(record, '[Ptah message]\n/always-approve on', guard)).rejects.toMatchObject({
+          name: 'LaneResumeError', code: 'blocked-command',
+          message: 'Ptah does not allow /always-approve in a lane: its approval mode is set at spawn.',
+        });
+      }
+      expect(spawn).not.toHaveBeenCalled();
+      expect(prepareSdkHandleSpawn).not.toHaveBeenCalled();
+      expect(ptah.resume).not.toHaveBeenCalled();
+    });
+
+    it('spawns a normal body and carries model, effort and files (A11)', async () => {
+      const spawn = jest.fn().mockResolvedValue({ agentId: AgentId.create() });
+      const resume = new AgentLaneResumeService({ spawn, prepareSdkHandleSpawn: jest.fn(), releaseIdleForResume: jest.fn() }, ptahCli());
+      await resume.resume({ ...info, model: 'gpt-5', reasoningEffort: 'high' }, 'follow up',
+        { rawBody: 'follow up', blocked: ['always-approve'] }, ['src/a.ts']);
+      expect(spawn).toHaveBeenCalledWith(expect.objectContaining({
+        task: 'follow up', model: 'gpt-5', effort: 'high', files: ['src/a.ts'],
+      }));
+    });
+
+    it('passes files to the Ptah CLI resumer only when present', async () => {
+      const ptah = ptahCli();
+      ptah.resume.mockResolvedValue({ agentId: AgentId.create() });
+      const resume = new AgentLaneResumeService({ spawn: jest.fn(), prepareSdkHandleSpawn: jest.fn(), releaseIdleForResume: jest.fn() }, ptah);
+      const ptahInfo = { ...info, cli: 'ptah-cli', ptahCliId: 'config' } as AgentProcessInfo;
+      await resume.resume(ptahInfo, 'follow up', undefined, ['a.ts']);
+      expect(ptah.resume).toHaveBeenCalledWith(ptahInfo, 'follow up', ['a.ts']);
+    });
+  });
 });

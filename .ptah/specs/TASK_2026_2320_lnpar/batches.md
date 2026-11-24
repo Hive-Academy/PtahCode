@@ -1,6 +1,6 @@
 # Batches - TASK_2026_2320_lnpar
 
-Total tasks: 49 | Batches: 30 | Complete: 17/30
+Total tasks: 49 | Batches: 30 | Complete: 18/30
 
 Source: `implementation-plan.md` revision 3 plus "Binding notes from Gate 2" (R3-1, R3-2 bind
 Batch 20), `task-description.md`, `design-spec.md`, `prototype/README.md`, `parity-inventory.md`,
@@ -852,7 +852,7 @@ Edge cases:
 
 - Artifacts exist; scoped commands pass.
 
-## Batch 18: B3c cold-resume blocked-command guard and turn settings - PENDING (AFTER REBASE)
+## Batch 18: B3c cold-resume blocked-command guard and turn settings - COMPLETE
 
 - Shape: logic
 - Estimated weight (tokens): ~10k
@@ -875,7 +875,7 @@ Edge cases:
 - Tasks: 1 | Depends on: Batches 15, 17
 - Phase: P5 Messaging core
 
-### Task 18.1: Resume guard, error code, resumers carry model/effort/files - PENDING
+### Task 18.1: Resume guard, error code, resumers carry model/effort/files - COMPLETE
 
 - Validation notes: A11; restored Grok record edge case
 

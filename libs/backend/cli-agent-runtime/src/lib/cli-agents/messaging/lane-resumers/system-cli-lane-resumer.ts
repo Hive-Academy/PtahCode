@@ -21,6 +21,7 @@ export class SystemCliLaneResumer implements LaneResumer {
   async resume(
     info: AgentProcessInfo,
     task: string,
+    files?: readonly string[],
   ): Promise<LaneResumeResult> {
     if (!info.cliSessionId) {
       throw new LaneResumeError(
@@ -35,6 +36,10 @@ export class SystemCliLaneResumer implements LaneResumer {
         task,
         workingDirectory: info.workingDirectory,
         resumeSessionId: info.cliSessionId,
+        // The resumed process starts with the lane's current settings (A11).
+        ...(info.model ? { model: info.model } : {}),
+        ...(info.reasoningEffort ? { effort: info.reasoningEffort } : {}),
+        ...(files && files.length > 0 ? { files: [...files] } : {}),
         parentSessionId: info.parentSessionId,
         ...(this.parentLevel && info.parentSessionId
           ? { parentLevel: this.parentLevel(info.parentSessionId) } : {}),
