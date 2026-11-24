@@ -13,6 +13,8 @@ import type { CodexSandboxMode } from '../advanced-settings.types';
 import type { PtahCliSummary } from '../ptah-cli.types';
 import type { AgentPermissionDecision } from '../agent-permission.types';
 import type { EffortLevel } from '../ai-provider.types';
+import type { PhaseKind } from '../phase-contract.types';
+import type { TaskType } from '../task-spec.types';
 import type {
   AgentDeliveryReceipt,
   AgentId,
@@ -30,6 +32,7 @@ import type { CapabilityScope } from '../mcp-directory.types';
 import type {
   ModelListFailureReason,
   ProviderModelListSource,
+  ProviderModelTier,
 } from './rpc-providers.types';
 
 export type AgentSendMessageParams = AgentMessageRequest;
@@ -304,6 +307,51 @@ export const DECISION_MODEL_TIMEOUT_SETTING_KEY =
   'agentOrchestration.decisionModelTimeoutMs';
 export const DECISION_MODEL_TIMEOUT_MIN_MS = 1_000;
 export const DECISION_MODEL_TIMEOUT_MAX_MS = 60_000;
+
+/**
+ * File-based setting (section `ptah`) holding ordered user routing rules.
+ * Validated by `@ptah-extension/lane-routing`; this is the shared plain type.
+ */
+export const ROUTING_RULES_SETTING_KEY = 'agentOrchestration.routingRules';
+
+/** One value or an array of values (OR inside a match field). */
+export type RoutingRuleMatchValue<T> = T | readonly T[];
+
+/** Canonical phase shapes matching `@ptah-extension/lane-routing`'s `PhaseShape`. */
+export type RoutingRulePhaseShape =
+  | 'mechanical'
+  | 'logic'
+  | 'contract'
+  | 'test'
+  | 'docs'
+  | 'review';
+
+/**
+ * Phase selector for a {@link RoutingRule}. Specified fields combine with AND;
+ * an array inside a field combines with OR; an empty object matches every phase.
+ */
+export interface RoutingRuleMatch {
+  readonly kind?: RoutingRuleMatchValue<PhaseKind>;
+  readonly shape?: RoutingRuleMatchValue<RoutingRulePhaseShape>;
+  readonly taskType?: RoutingRuleMatchValue<TaskType>;
+  readonly role?: RoutingRuleMatchValue<string>;
+}
+
+/** Policy and candidate overrides applied when a {@link RoutingRule} matches. */
+export interface RoutingRuleSet {
+  readonly minTier?: ProviderModelTier;
+  readonly maxTier?: ProviderModelTier;
+  readonly effort?: EffortLevel;
+  readonly prefer?: readonly string[];
+  readonly exclude?: readonly string[];
+}
+
+/** One user-authored routing rule in `ptah.agentOrchestration.routingRules`. */
+export interface RoutingRule {
+  readonly id: string;
+  readonly match: RoutingRuleMatch;
+  readonly set: RoutingRuleSet;
+}
 
 /**
  * `agent:setConfig` error when the decision-model selection write failed and

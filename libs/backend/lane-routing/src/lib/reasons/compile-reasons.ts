@@ -47,6 +47,7 @@ import type { LaneLimitState } from '@ptah-extension/shared';
 import {
   EXCLUSION_RULES,
   FALLBACK_CAUSES,
+  type UserRuleExclusion,
 } from '../contracts/route-decide-result.schema';
 import type { MatrixCell, ValueMatrixCell } from '../matrix/matrix.types';
 import { SCORE_MAX, SCORE_MIN } from '../routing-constants';
@@ -63,7 +64,10 @@ export type RosterExclusionReason = (typeof ROSTER_EXCLUSION_REASONS)[number];
 
 export type FallbackCause = (typeof FALLBACK_CAUSES)[number];
 
-export type ExclusionRule = (typeof EXCLUSION_RULES)[number];
+/** A built-in exclusion rule, or `user-rule:<id>` from a matched routing rule. */
+export type ExclusionRule =
+  | (typeof EXCLUSION_RULES)[number]
+  | UserRuleExclusion;
 
 export type ChoiceSource = 'model' | 'ranking' | 'pin';
 

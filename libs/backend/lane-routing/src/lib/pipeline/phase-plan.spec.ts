@@ -508,6 +508,7 @@ it('scores a subagent with the policy tier and keeps a lane configured model', (
     tier: 'haiku',
     effort: 'low',
     ruleId: 'R4',
+    condition: 'R4 shape=mechanical weight<4000',
   });
   expect(
     plans[0].ranked.find((row) => row.candidate.kind === 'subagent')?.scored
@@ -521,6 +522,7 @@ it('scores a subagent with the policy tier and keeps a lane configured model', (
     tier: 'opus',
     effort: 'xhigh',
     ruleId: 'R3',
+    condition: 'R3 shape=logic weight>=8000',
   });
   expect(plans[2].ranked[0].scored.model).toBe('haiku');
   expect(plans[2].ranked[0].scored.provenance).toBe('tier');
@@ -593,7 +595,12 @@ function subagentPlan(hints: SubagentPhaseHints, pinModel?: string): PhasePlan {
 
 it('scores an unpinned subagent on a light R4 phase with the haiku tier', () => {
   const phase = subagentPlan({ shape: 'mechanical', weight: 2000 });
-  expect(phase.policy).toEqual({ tier: 'haiku', effort: 'low', ruleId: 'R4' });
+  expect(phase.policy).toEqual({
+    tier: 'haiku',
+    effort: 'low',
+    ruleId: 'R4',
+    condition: 'R4 shape=mechanical weight<4000',
+  });
   expect(phase.ranked[0].scored).toMatchObject({
     model: 'haiku',
     provenance: 'tier',
@@ -606,6 +613,7 @@ it('uses the R4 middle bucket for a mechanical phase without a weight', () => {
     tier: 'sonnet',
     effort: 'medium',
     ruleId: 'R4',
+    condition: 'R4 shape=mechanical weight omitted',
   });
   expect(phase.shape).toBe('mechanical');
   expect(phase.weight).toBeUndefined();
@@ -617,7 +625,12 @@ it('uses the R4 middle bucket for a mechanical phase without a weight', () => {
 
 it('uses R5 for a weight-only phase and carries the weight on the plan', () => {
   const phase = subagentPlan({ weight: 9000 });
-  expect(phase.policy).toEqual({ tier: 'opus', effort: 'high', ruleId: 'R5' });
+  expect(phase.policy).toEqual({
+    tier: 'opus',
+    effort: 'high',
+    ruleId: 'R5',
+    condition: 'R5 shape=unset weight>=8000',
+  });
   expect(phase.shape).toBeUndefined();
   expect(phase.weight).toBe(9000);
   expect(phase.ranked[0].scored).toMatchObject({
@@ -640,7 +653,12 @@ it('applies a haiku subagent pin as a tier pin on a light R4 phase', () => {
 
 it('applies a sonnet subagent pin over a light R4 policy tier', () => {
   const phase = subagentPlan({ shape: 'mechanical', weight: 2000 }, 'sonnet');
-  expect(phase.policy).toEqual({ tier: 'haiku', effort: 'low', ruleId: 'R4' });
+  expect(phase.policy).toEqual({
+    tier: 'haiku',
+    effort: 'low',
+    ruleId: 'R4',
+    condition: 'R4 shape=mechanical weight<4000',
+  });
   expect(phase.constraint).toMatchObject({
     status: 'eligible',
     pinAccepted: true,
@@ -657,6 +675,7 @@ it('applies an unlisted haiku pin over the selected sonnet tier', () => {
     tier: 'sonnet',
     effort: 'medium',
     ruleId: 'R5',
+    condition: 'R5 shape=unset weight omitted',
   });
   expect(phase.constraint).toMatchObject({
     status: 'eligible',
