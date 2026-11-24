@@ -114,7 +114,7 @@ console probes in section 5.
   - `VIEW_EFFECT_NODE.consumerMarkedDirty` marks the view and its ancestors for traversal (6073).
   - `MAXIMUM_REFRESH_RERUNS$1 = 100` and the throw are at 12105 and 12129-12136.
 
-### Logs (`C:\Users\abdal\AppData\Roaming\Ptah Dev\logs`)
+### Logs (`C:\Users\<user>\AppData\Roaming\Ptah Dev\logs`)
 
 - NG0103 per file: 11-20: 0, 11-21: 0, 11-22: 0, 11-23: 0, **11-24: 1776 lines (888 errors, each logged as a line plus a `Context:` line)**.
 - Windows on 11-24:

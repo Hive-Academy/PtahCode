@@ -1,6 +1,6 @@
 ---
 id: TASK_2026_2324_efc4
-status: in_progress
+status: in_review
 type: FEATURE
 title: CLI lane parity follow-ups
 description: >-
