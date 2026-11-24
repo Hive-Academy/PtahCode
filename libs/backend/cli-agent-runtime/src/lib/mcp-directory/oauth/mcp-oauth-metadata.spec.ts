@@ -2,7 +2,9 @@ import {
   discoverAuthorizationServer,
   discoverAuthServerMetadata,
   parseResourceMetadataChallenge,
+  parseScopeChallenge,
   registerClient,
+  selectAuthorizationScope,
   OAuthDiscoveryError,
   OAUTH_DISCOVERY_ERROR_NAME,
   OAuthTimeoutError,
@@ -10,6 +12,17 @@ import {
   withRequestTimeout,
   type FetchLike,
 } from './mcp-oauth-metadata';
+import {
+  HIGGSFIELD_AS,
+  HIGGSFIELD_AS_PATH_INSERT,
+  HIGGSFIELD_AS_ROOT,
+  HIGGSFIELD_AUTHORIZE,
+  HIGGSFIELD_CHALLENGE,
+  HIGGSFIELD_MCP_URL,
+  HIGGSFIELD_PRM_URL,
+  HIGGSFIELD_RESOURCE_SCOPE,
+  higgsfieldFetch,
+} from './__fixtures__/higgsfield-oauth.fixture';
 
 /**
  * A request that never answers on its own and settles only when its signal
@@ -108,7 +121,7 @@ describe('discoverAuthorizationServer', () => {
       'https://mcp.example.com/mcp',
       fetchImpl,
     );
-    expect(result).toBe('https://auth.example.com');
+    expect(result.authorizationServer).toBe('https://auth.example.com');
   });
 
   it('falls back to the server origin when PRM is absent', async () => {
@@ -117,7 +130,7 @@ describe('discoverAuthorizationServer', () => {
       'https://mcp.example.com/mcp',
       fetchImpl,
     );
-    expect(result).toBe('https://mcp.example.com');
+    expect(result.authorizationServer).toBe('https://mcp.example.com');
   });
 
   it('reads the RFC 9728 path form first (Smithery shape)', async () => {
@@ -126,7 +139,7 @@ describe('discoverAuthorizationServer', () => {
       'https://server.smithery.ai/hubspot/mcp',
       smitheryFetch(seen),
     );
-    expect(result).toBe('https://auth.smithery.ai/hubspot');
+    expect(result.authorizationServer).toBe('https://auth.smithery.ai/hubspot');
     // The path form is tried BEFORE the root document, which Smithery 404s.
     expect(seen[0]).toBe(SMITHERY_PRM_PATH);
   });
@@ -148,9 +161,11 @@ describe('discoverAuthorizationServer', () => {
       'https://mcp.hubspot.com',
       fetchImpl,
     );
-    expect(result).toBe('https://mcp.hubspot.com');
+    expect(result.authorizationServer).toBe('https://mcp.hubspot.com');
+    // The document first, then the server's own 401 for its challenge scope.
     expect(seen).toEqual([
       'https://mcp.hubspot.com/.well-known/oauth-protected-resource',
+      'https://mcp.hubspot.com',
     ]);
   });
 
@@ -174,7 +189,7 @@ describe('discoverAuthorizationServer', () => {
       'https://hubspot.run.tools/mcp',
       fetchImpl,
     );
-    expect(result).toBe('https://auth.smithery.ai/hubspot');
+    expect(result.authorizationServer).toBe('https://auth.smithery.ai/hubspot');
   });
 
   it('falls back to the origin when the challenge document names no auth server', async () => {
@@ -191,7 +206,7 @@ describe('discoverAuthorizationServer', () => {
       'https://mcp.example.com/mcp',
       fetchImpl,
     );
-    expect(result).toBe('https://mcp.example.com');
+    expect(result.authorizationServer).toBe('https://mcp.example.com');
   });
 
   it('tolerates a fetch impl that exposes no response headers', async () => {
@@ -204,7 +219,10 @@ describe('discoverAuthorizationServer', () => {
     });
     await expect(
       discoverAuthorizationServer('https://mcp.example.com/mcp', fetchImpl),
-    ).resolves.toBe('https://mcp.example.com');
+    ).resolves.toEqual({
+      authorizationServer: 'https://mcp.example.com',
+      challengeScope: undefined,
+    });
   });
 });
 
@@ -249,7 +267,9 @@ describe('discoverAuthServerMetadata', () => {
     );
     expect(meta.tokenEndpoint).toBe('https://auth.example.com/token');
     expect(meta.registrationEndpoint).toBe('https://auth.example.com/register');
-    expect(meta.scopesSupported).toEqual(['read', 'write']);
+    // The AS list is every scope it knows, never a request scope
+    // (TASK_2026_HIGGSFIELD), so the metadata does not carry it at all.
+    expect(meta).not.toHaveProperty('scopesSupported');
   });
 
   it('falls back to the OIDC discovery document', async () => {
@@ -525,5 +545,204 @@ describe('discovery deadline', () => {
     );
     expect(meta.tokenEndpoint).toBe('https://auth.smithery.ai/hubspot/token');
     expect(seen).toEqual([SMITHERY_AS_PATH_INSERT]);
+  });
+});
+
+describe('parseScopeChallenge', () => {
+  it.each([
+    [HIGGSFIELD_CHALLENGE, HIGGSFIELD_RESOURCE_SCOPE],
+    ['Bearer scope="read write"', 'read write'],
+    ['Bearer scope=read', 'read'],
+    ['Bearer realm="x",scope="a b"', 'a b'],
+    ['Bearer error="insufficient_scope", scope="files:read"', 'files:read'],
+  ])('parses %s', (header, expected) => {
+    expect(parseScopeChallenge(header)).toBe(expected);
+  });
+
+  it('returns undefined when the challenge names no scope', () => {
+    expect(parseScopeChallenge(null)).toBeUndefined();
+    expect(parseScopeChallenge(undefined)).toBeUndefined();
+    expect(
+      parseScopeChallenge('Bearer resource_metadata="https://a/prm"'),
+    ).toBeUndefined();
+    expect(
+      parseScopeChallenge('Bearer error="insufficient_scope"'),
+    ).toBeUndefined();
+    expect(parseScopeChallenge('Bearer scope=""')).toBeUndefined();
+  });
+});
+
+describe('selectAuthorizationScope (MCP scope selection)', () => {
+  const both = { challengeScope: 'a b', resourceScopes: ['c', 'd'] };
+
+  it('prefers an explicit scope', () => {
+    expect(selectAuthorizationScope('x y', both)).toBe('x y');
+  });
+
+  it('uses the 401 challenge scope over the protected-resource scopes', () => {
+    expect(selectAuthorizationScope(undefined, both)).toBe('a b');
+  });
+
+  it('falls back to the protected-resource scopes_supported', () => {
+    expect(
+      selectAuthorizationScope(undefined, { resourceScopes: ['c', 'd'] }),
+    ).toBe('c d');
+  });
+
+  it('requests no scope when none is known', () => {
+    expect(selectAuthorizationScope(undefined, {})).toBeUndefined();
+    expect(
+      selectAuthorizationScope('  ', { resourceScopes: [] }),
+    ).toBeUndefined();
+  });
+
+  it('treats a blank explicit scope as absent', () => {
+    expect(selectAuthorizationScope('   ', both)).toBe('a b');
+  });
+});
+
+describe('Higgsfield (Clerk) discovery shape', () => {
+  it('reads the PRM path form, then the 401 challenge for its scope', async () => {
+    const seen: string[] = [];
+    const result = await discoverAuthorizationServer(
+      HIGGSFIELD_MCP_URL,
+      higgsfieldFetch(seen),
+    );
+    expect(result).toEqual({
+      authorizationServer: HIGGSFIELD_AS,
+      challengeScope: HIGGSFIELD_RESOURCE_SCOPE,
+      resourceScopes: ['openid', 'email', 'offline_access'],
+    });
+    expect(seen).toEqual([HIGGSFIELD_PRM_URL, HIGGSFIELD_MCP_URL]);
+  });
+
+  it('lets a narrower challenge scope win over broad PRM scopes', async () => {
+    const fetchImpl: FetchLike = async (url) => {
+      if (
+        url ===
+        'https://mcp.example.com/.well-known/oauth-protected-resource/mcp'
+      ) {
+        return jsonResp({
+          authorization_servers: ['https://auth.example.com'],
+          scopes_supported: ['files:read', 'files:write', 'admin'],
+        });
+      }
+      if (url === 'https://mcp.example.com/mcp') {
+        return challenge401(
+          'Bearer resource_metadata="https://mcp.example.com/.well-known/oauth-protected-resource/mcp", scope="files:read"',
+        );
+      }
+      return notFound();
+    };
+    const result = await discoverAuthorizationServer(
+      'https://mcp.example.com/mcp',
+      fetchImpl,
+    );
+    expect(result.challengeScope).toBe('files:read');
+    expect(result.resourceScopes).toEqual([
+      'files:read',
+      'files:write',
+      'admin',
+    ]);
+    expect(selectAuthorizationScope(undefined, result)).toBe('files:read');
+  });
+
+  it.each<[string, FetchLike]>([
+    [
+      'the challenge request throws',
+      async (url) => {
+        if (url.includes('oauth-protected-resource')) {
+          return jsonResp({
+            authorization_servers: ['https://auth.example.com'],
+            scopes_supported: ['a', 'b'],
+          });
+        }
+        throw new TypeError('fetch failed');
+      },
+    ],
+    [
+      'the server answers without a challenge',
+      async (url) =>
+        url.includes('oauth-protected-resource')
+          ? jsonResp({
+              authorization_servers: ['https://auth.example.com'],
+              scopes_supported: ['a', 'b'],
+            })
+          : jsonResp({}),
+    ],
+  ])('falls back to PRM scopes when %s', async (_case, fetchImpl) => {
+    const result = await discoverAuthorizationServer(
+      'https://mcp.example.com/mcp',
+      fetchImpl,
+    );
+    expect(result).toEqual({
+      authorizationServer: 'https://auth.example.com',
+      challengeScope: undefined,
+      resourceScopes: ['a', 'b'],
+    });
+    expect(selectAuthorizationScope(undefined, result)).toBe('a b');
+  });
+
+  it('carries the 401 challenge scope when the challenge led to the PRM', async () => {
+    const result = await discoverAuthorizationServer(
+      HIGGSFIELD_MCP_URL,
+      higgsfieldFetch([], { prmOnlyViaChallenge: true }),
+    );
+    expect(result).toEqual({
+      authorizationServer: HIGGSFIELD_AS,
+      challengeScope: HIGGSFIELD_RESOURCE_SCOPE,
+      resourceScopes: ['openid', 'email', 'offline_access'],
+    });
+  });
+
+  it('keeps the challenge scope when the origin fallback is used', async () => {
+    const fetchImpl: FetchLike = async (url) =>
+      url === 'https://mcp.example.com/mcp'
+        ? challenge401('Bearer scope="files:read"')
+        : notFound();
+    await expect(
+      discoverAuthorizationServer('https://mcp.example.com/mcp', fetchImpl),
+    ).resolves.toEqual({
+      authorizationServer: 'https://mcp.example.com',
+      challengeScope: 'files:read',
+    });
+  });
+
+  it('reads Clerk metadata from the path-insert form first', async () => {
+    const seen: string[] = [];
+    const meta = await discoverAuthServerMetadata(
+      HIGGSFIELD_AS,
+      higgsfieldFetch(seen),
+    );
+    expect(meta.authorizationEndpoint).toBe(HIGGSFIELD_AUTHORIZE);
+    expect(seen).toEqual([HIGGSFIELD_AS_PATH_INSERT]);
+    // Clerk's scopes_supported is published but never surfaced.
+    expect(JSON.stringify(meta)).not.toContain('private_metadata');
+  });
+
+  it('never counts an HTML 200 page as authorization-server metadata', async () => {
+    const seen: string[] = [];
+    const base = higgsfieldFetch(seen);
+    // Hide every JSON form, so only the SPA's HTML 200 root answers.
+    const fetchImpl: FetchLike = async (url, init) =>
+      url === HIGGSFIELD_AS_ROOT ? base(url, init) : notFound();
+    await expect(
+      discoverAuthServerMetadata(HIGGSFIELD_AS, fetchImpl),
+    ).rejects.toBeInstanceOf(OAuthDiscoveryError);
+    expect(seen).toEqual([HIGGSFIELD_AS_ROOT]);
+  });
+
+  it('never counts an HTML 200 page as protected-resource metadata', async () => {
+    const html = {
+      ok: true,
+      status: 200,
+      json: async () => JSON.parse('<!doctype html>') as unknown,
+      text: async () => '<!doctype html>',
+    };
+    const result = await discoverAuthorizationServer(
+      'https://spa.example.com/mcp',
+      async () => html,
+    );
+    expect(result.authorizationServer).toBe('https://spa.example.com');
   });
 });

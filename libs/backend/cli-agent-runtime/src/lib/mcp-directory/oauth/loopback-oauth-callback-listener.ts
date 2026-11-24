@@ -85,9 +85,13 @@ export class LoopbackOAuthCallbackListener implements IOAuthCallbackListener {
         return;
       }
       if (error) {
+        const reason = describeAuthorizationError(
+          error,
+          query.get('error_description'),
+        );
         res.writeHead(400, { 'Content-Type': 'text/html' });
-        res.end(HTML_ERROR(`Authorization failed: ${error}`));
-        rejectCode(new Error(`Authorization denied: ${error}`));
+        res.end(HTML_ERROR(`Authorization failed: ${reason}`));
+        rejectCode(new Error(`Authorization denied: ${reason}`));
         return;
       }
       if (!code) {
@@ -154,6 +158,30 @@ export class LoopbackOAuthCallbackListener implements IOAuthCallbackListener {
       return await this.httpServerProvider.listen('127.0.0.1', 0, handler);
     }
   }
+}
+
+/** Longest `error_description` echoed back; the server controls the text. */
+const MAX_ERROR_DESCRIPTION_LENGTH = 300;
+
+/**
+ * The RFC 6749 §4.1.2.1 error code plus its `error_description`, when the
+ * authorization server sent one: `invalid_scope` alone tells the user nothing,
+ * Clerk's description names the scope it refused. Control characters are
+ * dropped and the description is capped, because it is server-controlled text
+ * that ends up in the UI.
+ */
+function describeAuthorizationError(
+  error: string,
+  description: string | null,
+): string {
+  const detail = Array.from(description ?? '', (char) => {
+    const code = char.charCodeAt(0);
+    return code < 0x20 || code === 0x7f ? ' ' : char;
+  })
+    .join('')
+    .trim()
+    .slice(0, MAX_ERROR_DESCRIPTION_LENGTH);
+  return detail ? `${error} - ${detail}` : error;
 }
 
 const HTML_SUCCESS =

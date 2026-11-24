@@ -297,6 +297,20 @@ describe('PTAH_CONNECTORS', () => {
     }
   });
 
+  it('lists Higgsfield as a one-click OAuth design connector', () => {
+    const higgsfield = PTAH_CONNECTORS.find((c) => c.id === 'higgsfield');
+    expect(higgsfield).toMatchObject({
+      label: 'Higgsfield',
+      brandSlug: 'higgsfield',
+      category: 'design',
+      kind: 'oauth-dcr',
+      url: 'https://mcp.higgsfield.ai/mcp',
+    });
+    // The resource's 401 and PRM name the scope; the entry must not pin one.
+    expect(higgsfield?.scopes).toBeUndefined();
+    expect(higgsfield?.setupSteps).toBeUndefined();
+  });
+
   it('keeps both Asana endpoints and tells them apart', () => {
     // v1 is the deprecated beta transport; v2 registers no client for you.
     const asana = PTAH_CONNECTORS.filter((c) => c.id.startsWith('asana'));
