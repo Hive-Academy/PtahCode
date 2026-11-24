@@ -47,17 +47,18 @@
  *   harness. It appears here solely because `.vscode/mcp.json` is a real MCP
  *   surface the install RPC has always offered.
  *
- * ## Antigravity MCP has two writers, and one of them is not here
+ * ## Antigravity MCP has more than one writer, and not all of them are here
  *
- * `agy` reads `~/.gemini/config/mcp_config.json`, and `AntigravityCliAdapter`
- * (`cli-agent-runtime`) writes Ptah's OWN server into that same file before
- * every spawn. Both sides now go through this target's facet, so the file has
- * one module that knows its format, its lock and its atomic write. The keys are
- * partitioned and neither side may reap the other's: `ptah`
- * ({@link PTAH_SPAWN_MCP_KEY}) is ephemeral and adapter-owned, manifest-owned
- * keys are the user's installs, and everything else is the user's own. The key
- * name itself is `PTAH_SPAWN_MCP_KEY` in `mcp/mcp-facet.port.ts`, so the two
- * writers cannot disagree about it. TASK_2026_285.
+ * `agy` reads `~/.gemini/config/mcp_config.json`. Besides this target,
+ * `CodeExecutionMCP` writes Ptah's OWN `ptah` server into that file; the former
+ * per-spawn writer, `AntigravityCliAdapter` (`cli-agent-runtime`), stopped in
+ * TASK_2026_2322. Every writer goes through this target's facet, so the file
+ * has one module that knows its format, its lock and its atomic write. The keys
+ * are partitioned and no side may reap another's: `ptah`
+ * ({@link PTAH_SPAWN_MCP_KEY}) is not manifest-owned, manifest-owned keys are
+ * the user's installs, and everything else is the user's own. The key name
+ * itself is `PTAH_SPAWN_MCP_KEY` in `mcp/mcp-facet.port.ts`, so the writers
+ * cannot disagree about it. TASK_2026_285.
  *
  * ## Codex and Antigravity share `{ws}/.agents/skills`
  *

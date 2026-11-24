@@ -75,6 +75,11 @@ export interface LanguageRegistryEntry {
   /** Lower-case extensions (leading dot) the capabilities apply to. */
   readonly extensions: readonly string[];
   /**
+   * ESM/CJS module-flavour extensions parsed with this grammar; they hold only
+   * `MODULE_FLAVOUR_CAPABILITIES` (see `extensionHasCapability`).
+   */
+  readonly moduleFlavourExtensions: readonly string[];
+  /**
    * Source extensions of this language that no capability covers yet; they
    * are recognised (counted as `unsupported`), never analysed.
    */
@@ -111,6 +116,7 @@ function buildEntry(id: LanguageId): LanguageRegistryEntry {
   return {
     id,
     extensions: language.extensions,
+    moduleFlavourExtensions: language.moduleFlavourExtensions ?? [],
     recognitionOnlyExtensions: language.recognitionOnlyExtensions,
     grammarFile: language.grammarFile,
     capabilities: {
@@ -137,11 +143,37 @@ const ANALYSED_EXTENSION_TO_LANGUAGE: ReadonlyMap<string, LanguageId> = new Map(
   ),
 );
 
+/**
+ * What a module-flavour extension (`.mjs/.cjs/.mts/.cts`) holds: the parse and
+ * the capabilities that only read it. `graphEdges` is withheld because the
+ * TS/JS import resolver neither probes nor rewrites these suffixes, and
+ * `definitionFallback` because the Electron declaration scan has not been
+ * proven on them; `syntaxDiagnostics` is false for TS/JS anyway.
+ */
+export const MODULE_FLAVOUR_CAPABILITIES: ReadonlySet<LanguageCapability> =
+  new Set<LanguageCapability>([
+    'parse',
+    'outline',
+    'enrichSummary',
+    'codeIndex',
+    'publicSymbols',
+  ]);
+
+/** Module-flavour extensions, each parsed with its language's grammar. */
+const FLAVOUR_EXTENSION_TO_LANGUAGE: ReadonlyMap<string, LanguageId> = new Map(
+  LANGUAGE_IDS.flatMap((id) =>
+    LANGUAGE_REGISTRY[id].moduleFlavourExtensions.map(
+      (extension) => [extension, id] as const,
+    ),
+  ),
+);
+
 const EXTENSION_TO_LANGUAGE: ReadonlyMap<
   string,
   LanguageId | RecognisedLanguageId
 > = new Map<string, LanguageId | RecognisedLanguageId>([
   ...ANALYSED_EXTENSION_TO_LANGUAGE,
+  ...FLAVOUR_EXTENSION_TO_LANGUAGE,
   ...LANGUAGE_IDS.flatMap((id) =>
     LANGUAGE_REGISTRY[id].recognitionOnlyExtensions.map(
       (extension) => [extension, id] as const,
@@ -195,15 +227,26 @@ export function languageForExtension(
 
 /**
  * Whether a file with this extension is covered by `capability`. Per
- * extension, not per language: `.mjs` is JavaScript but not analysed yet, so
- * a census puts it in `unsupported` even though JavaScript has `codeIndex`.
+ * extension, not per language: `.mjs` is JavaScript and is code-indexed, but
+ * holds no `graphEdges` (see `MODULE_FLAVOUR_CAPABILITIES`), so a graph census
+ * puts it in `unsupported` even though JavaScript has graph edges; a
+ * recognition-only suffix (`.pyi`) holds nothing.
  */
 export function extensionHasCapability(
   extension: string,
   capability: LanguageCapability,
 ): boolean {
-  const language = ANALYSED_EXTENSION_TO_LANGUAGE.get(extension.toLowerCase());
-  return language !== undefined && hasCapability(language, capability);
+  const key = extension.toLowerCase();
+  const language = ANALYSED_EXTENSION_TO_LANGUAGE.get(key);
+  if (language !== undefined) {
+    return hasCapability(language, capability);
+  }
+  const flavourLanguage = FLAVOUR_EXTENSION_TO_LANGUAGE.get(key);
+  return (
+    flavourLanguage !== undefined &&
+    MODULE_FLAVOUR_CAPABILITIES.has(capability) &&
+    hasCapability(flavourLanguage, capability)
+  );
 }
 
 /**
@@ -402,7 +445,8 @@ export function isCParsedAsCpp(filePath: string): boolean {
  * - `eligible`: the extension is covered by `capability` (the producer then
  *   records `analyzed`, `failed`, `unchecked` or `omittedByCap`);
  * - `unsupported`: a registry or recognised language claims it, but not with
- *   this capability (includes recognition-only suffixes such as `.mjs`);
+ *   this capability (includes recognition-only suffixes such as `.pyi`, and
+ *   module-flavour suffixes such as `.mjs` for `graphEdges`);
  * - `unrecognised`: a known build/source base name (`CODE_FILE_NAMES`, which
  *   outranks the extension lists), an unknown extension, or anything else;
  * - `nonSource`: on the documented non-source lists and nothing above.

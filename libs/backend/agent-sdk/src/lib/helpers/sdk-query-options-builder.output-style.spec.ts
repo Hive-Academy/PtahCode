@@ -286,13 +286,14 @@ describe('build() wiring', () => {
     // through exactly one builder. Auto-compaction keys ride the same call
     // (TASK_2026_414), which is why `autoCompact` is an argument here and not
     // a second settings object. The subagent prompt-cache TTL rides it too
-    // (TASK_2026_597 N1), and only from this call.
+    // (TASK_2026_597 N1), and only from this call. The excludes of repeated
+    // CLAUDE.md copies ride it last.
     //
     // Whitespace-collapsed because the call is formatted across lines; the
     // argument ORDER is what this guard is pinning.
     const normalized = source.replace(/\s+/g, ' ');
     expect(normalized).toContain(
-      "settings: buildFlagSettingsArg( sessionConfig, 'accept', this.logger, autoCompact, capabilityFlags, subagentTtl.sdkValue, ),",
+      "settings: buildFlagSettingsArg( sessionConfig, 'accept', this.logger, autoCompact, capabilityFlags, subagentTtl.sdkValue, claudeMdExcludes, ),",
     );
     // The bare reference is what this task replaced. If it reappears on the
     // options object, the flag tier stops carrying the style.

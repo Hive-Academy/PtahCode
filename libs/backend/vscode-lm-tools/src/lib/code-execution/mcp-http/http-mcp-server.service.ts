@@ -840,10 +840,12 @@ export class CodeExecutionMCP
   }
 
   /**
-   * Take back the persistent `ptah` entries an earlier Ptah wrote into config
-   * files it no longer plans (Antigravity, TASK_2026_2297), and drop their
-   * credentials. Every full reconcile runs it, because a stream-json lane that
-   * was running during an earlier pass may restore the old entry when it ends.
+   * Take back the `ptah` entries an earlier Ptah wrote into config files it no
+   * longer plans (Antigravity, TASK_2026_2297): the persistent slots and any
+   * entry a stream-json lane of an older build left behind. Drop their
+   * credentials too. Every full reconcile runs it, because an older build's
+   * lane that was running during an earlier pass may restore an entry when it
+   * ends.
    * Failures are logged and retried by the next full reconcile; they do not
    * mark the registration for retry. See `retired-ptah-mcp-slots.ts`.
    */
@@ -1207,8 +1209,9 @@ export class CodeExecutionMCP
    * The facet owns the path, the dialect (`url` versus `serverUrl`, a fenced
    * TOML table for Codex), the atomic write and — critically — the
    * per-config-file lock. Hand-rolling any of that here would make this a
-   * second writer with a second idea of the format, which is the failure
-   * `AntigravityCliAdapter` already documents.
+   * second writer with a second idea of the format, racing the facet's own
+   * read-modify-write outside its lock: the lost-update failure the facet's
+   * lock exists to prevent.
    *
    * The read-compare is OUTSIDE the facet's lock. That is sound for THIS key
    * and would not be for a user's server: a stale read can only cost one

@@ -66,11 +66,11 @@ export function mcpEntryKey(configRelPath: string, serverKey: string): string {
  *   Ptah tools too. No manifest ever records it and no reconcile ever writes or
  *   reaps it — the facet planner only touches keys the desired state names or
  *   the manifest owns, and this key is in neither.
- * - **A spawn adapter may borrow it for one run and must RESTORE it, not
- *   delete it.** `AntigravityCliAdapter` overwrites the key with its own run's
- *   port before the spawn and puts back whatever it found after `done`. It used
- *   to delete unconditionally, which was right while it was the only writer and
- *   silently revokes the persistent registration now.
+ * - **A spawn adapter that borrows it for one run must RESTORE it, not delete
+ *   it.** The former writer, `AntigravityCliAdapter`'s per-spawn path (removed
+ *   in TASK_2026_2322), overwrote the key with its run's port and put back what
+ *   it found after `done`. Deleting unconditionally would silently revoke the
+ *   persistent registration, so any future borrower keeps the restore rule.
  * - Every OTHER key is either manifest-owned (a user install, reconciled) or
  *   the user's own (never touched).
  *

@@ -26,10 +26,47 @@ export class PendingResponseRegistry<TResponse, TRequest = never> {
     PendingResolver<TResponse, TRequest>
   >();
 
+  private readonly changeListeners = new Set<() => void>();
+
   constructor(private readonly logger: Logger) {}
+
+  /**
+   * Called after the set of pending entries changed (an entry was registered,
+   * resolved, cleared or disposed). Synchronous; a throwing listener is
+   * swallowed so it can never break the caller that resolves a prompt.
+   * Returns the unsubscribe function.
+   */
+  onChange(listener: () => void): () => void {
+    this.changeListeners.add(listener);
+    return () => {
+      this.changeListeners.delete(listener);
+    };
+  }
+
+  private notifyChange(): void {
+    for (const listener of [...this.changeListeners]) {
+      try {
+        listener();
+      } catch (error: unknown) {
+        this.logger.warn('[PendingResponseRegistry] change listener threw', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  }
+
+  /** True while an entry is pending for this session or tab id. */
+  hasSession(sessionOrTabId: string): boolean {
+    for (const entry of this.pending.values()) {
+      if (entry.tabId === sessionOrTabId || entry.sessionId === sessionOrTabId)
+        return true;
+    }
+    return false;
+  }
 
   register(id: string, resolver: PendingResolver<TResponse, TRequest>): void {
     this.pending.set(id, resolver);
+    this.notifyChange();
   }
 
   resolve(id: string, value: TResponse | null): boolean {
@@ -39,6 +76,7 @@ export class PendingResponseRegistry<TResponse, TRequest = never> {
     }
     if (entry.idleTimer) clearTimeout(entry.idleTimer);
     this.pending.delete(id);
+    this.notifyChange();
     entry.resolve(value);
     return true;
   }
@@ -59,7 +97,9 @@ export class PendingResponseRegistry<TResponse, TRequest = never> {
     const entry = this.pending.get(id);
     if (!entry) return false;
     if (entry.idleTimer) clearTimeout(entry.idleTimer);
-    return this.pending.delete(id);
+    this.pending.delete(id);
+    this.notifyChange();
+    return true;
   }
 
   entries(): IterableIterator<[string, PendingResolver<TResponse, TRequest>]> {
@@ -79,6 +119,7 @@ export class PendingResponseRegistry<TResponse, TRequest = never> {
       entry.resolve(disposalValue);
     }
     this.pending.clear();
+    this.notifyChange();
   }
 
   /**
@@ -120,6 +161,7 @@ export class PendingResponseRegistry<TResponse, TRequest = never> {
         removed.push(id);
       }
     }
+    if (removed.length > 0) this.notifyChange();
     return removed;
   }
 }

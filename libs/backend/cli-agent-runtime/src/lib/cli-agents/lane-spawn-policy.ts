@@ -52,10 +52,10 @@ export type LaneSpawnPolicyTranslation = {
       readonly allowDangerouslySkipPermissions?: boolean;
     }
   | {
-      readonly cli: 'copilot' | 'antigravity' | 'opencode';
+      readonly cli: 'copilot' | 'opencode';
       readonly argv: LaneArgvPolicyTranslation;
     }
-  | { readonly cli: 'cursor' | 'grok' | 'pi' }
+  | { readonly cli: 'antigravity' | 'cursor' | 'grok' | 'pi' }
 );
 
 /** Validate an explicit spawn policy against the adapter's declared manifest. */
@@ -153,13 +153,6 @@ export function translateLaneSpawnPolicy(
         nativeDescription,
         argv: copilotArgv(validated.permission),
       };
-    case 'antigravity':
-      return {
-        cli,
-        requested: validated,
-        nativeDescription,
-        argv: antigravityArgv(validated.permission),
-      };
     case 'opencode':
       return {
         cli,
@@ -167,6 +160,7 @@ export function translateLaneSpawnPolicy(
         nativeDescription,
         argv: opencodeArgv(validated.permission),
       };
+    case 'antigravity':
     case 'cursor':
     case 'grok':
     case 'pi':
@@ -244,23 +238,6 @@ function copilotArgv(
       };
     case 'yolo':
       return { addArgs: ['--allow-all'], removeArgs };
-    default:
-      return { addArgs: [], removeArgs };
-  }
-}
-
-function antigravityArgv(
-  permission: LanePermissionMode | undefined,
-): LaneArgvPolicyTranslation {
-  if (!permission) return { addArgs: [], removeArgs: [] };
-  const removeArgs = ['--dangerously-skip-permissions'];
-  switch (permission) {
-    case 'plan':
-      return { addArgs: ['--mode', 'plan'], removeArgs };
-    case 'auto-edit':
-      return { addArgs: ['--mode', 'accept-edits'], removeArgs };
-    case 'yolo':
-      return { addArgs: ['--dangerously-skip-permissions'], removeArgs };
     default:
       return { addArgs: [], removeArgs };
   }
@@ -483,7 +460,7 @@ function mapEffortToCli(effort: string): string | undefined {
   }
 }
 
-/** Allowlist the `low|medium|high|xhigh|max` scale `agy --effort` accepts. */
+/** Allowlist the `low|medium|high|xhigh|max` scale agy ACP `thought_level` accepts. */
 function mapEffortToAgy(effort: string): string | undefined {
   switch (effort) {
     case 'low':

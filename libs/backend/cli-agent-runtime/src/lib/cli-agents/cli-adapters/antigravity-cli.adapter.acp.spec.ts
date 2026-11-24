@@ -1,8 +1,9 @@
 /**
- * AntigravityCliAdapter — the ACP lane (TASK_2026_2291, P3): transport
- * choice, then `runSdk` on `agy acp` against the fake ACP agent scripted with
- * the agy 1.5.13 recordings (`antigravity-p3-*`). The stream-json lane keeps
- * its own specs (`antigravity-cli.adapter.spec.ts`, `.mcp.spec.ts`).
+ * AntigravityCliAdapter — the ACP-only lane (TASK_2026_2291 P3,
+ * TASK_2026_2322): the version floor, then `runSdk` on `agy acp` against the
+ * fake ACP agent scripted with the agy 1.5.13 recordings
+ * (`antigravity-p3-*`), and the `agy models` id cache that feeds the ACP
+ * `model` option.
  */
 import 'reflect-metadata';
 import { EventEmitter } from 'events';
@@ -45,24 +46,14 @@ jest.mock('./cli-adapter.utils', () => {
 import { classifyLaneLimit } from '../limits/lane-limit-classifier';
 import { matchesApiRateLimit } from '../limits/lane-rate-limit-classifier';
 import {
-  AGY_ACP_FAILURE_COOLDOWN_MS,
-  AGY_TRANSPORT_ENV,
+  antigravityAcpManifest,
   meetsAgyAcpFloor,
-  readAgyTransportOverride,
   type AntigravityAcpSeam,
 } from './antigravity-acp-lane';
 import { AntigravityCliAdapter } from './antigravity-cli.adapter';
 
 const TOOL_USE = readAcpFixture('antigravity-p3-ptah-mcp-tool-use.ndjson');
 const CANCEL = readAcpFixture('antigravity-p3-cancel-then-continue.ndjson');
-const AGY_HELP = [
-  'Usage of agy.exe:',
-  '  --input-format                  Input format for print mode (text, stream-json)',
-  '',
-  'Available subcommands:',
-  '  acp             Start the Agent Client Protocol (ACP) stdio server',
-  '  models          List available models',
-].join('\n');
 
 /**
  * Lines of the `agy models` stdout agy 1.5.14 printed on 2026-11-22 (the full
@@ -73,6 +64,9 @@ const AGY_MODELS_STDOUT = [
   'gemini-3.8-flash-high\tGemini 3.8 Flash (High)',
   'gemini-3.8-flash-medium\tGemini 3.8 Flash (Medium)',
   'gemini-3.8-flash-low\tGemini 3.8 Flash (Low)',
+  'claude-opus-5-5-low\tClaude Opus 5.5 (Low)',
+  'claude-opus-5-5-medium\tClaude Opus 5.5 (Medium)',
+  'claude-opus-5-5-high\tClaude Opus 5.5 (High)',
   'claude-sonnet-5-5-low\tClaude Sonnet 5.5 (Low)',
   'claude-sonnet-5-5-medium\tClaude Sonnet 5.5 (Medium)',
   'claude-sonnet-5-5-high\tClaude Sonnet 5.5 (High)',
@@ -80,7 +74,7 @@ const AGY_MODELS_STDOUT = [
 ].join('\r\n');
 
 /** A `spawnCli` child that prints `stdout` and closes. */
-function helpChild(stdout: string): EventEmitter & {
+function printingChild(stdout: string): EventEmitter & {
   stdout: PassThrough;
   stderr: PassThrough;
   whenSpawned: Promise<number>;
@@ -100,33 +94,6 @@ function helpChild(stdout: string): EventEmitter & {
   return child;
 }
 
-/** A `spawnCli` child that never answers and reports no pid (nothing to kill). */
-function hangingChild(): EventEmitter & {
-  stdout: PassThrough;
-  stderr: PassThrough;
-  whenSpawned: Promise<number | undefined>;
-  killed: boolean;
-} {
-  return Object.assign(new EventEmitter(), {
-    stdout: new PassThrough(),
-    stderr: new PassThrough(),
-    whenSpawned: Promise.resolve(undefined),
-    killed: false,
-  });
-}
-
-/** A `spawnCli` child whose spawn fails. */
-function failingChild(): EventEmitter & {
-  stdout: PassThrough;
-  stderr: PassThrough;
-  whenSpawned: Promise<number | undefined>;
-  killed: boolean;
-} {
-  const child = hangingChild();
-  setImmediate(() => child.emit('error', new Error('spawn EBUSY')));
-  return child;
-}
-
 const fakeSpawner: IProcessSpawner = {
   spawnProcess: () => {
     throw new Error('the ACP specs use an in-memory transport');
@@ -134,6 +101,22 @@ const fakeSpawner: IProcessSpawner = {
 };
 
 const settle = (): Promise<void> => new Promise((resolve) => setImmediate(resolve));
+
+/** How many `agy models` probes were spawned. */
+function modelProbeCount(): number {
+  return mockSpawnCli.mock.calls.filter(([, args]) => (args as string[])[0] === 'models')
+    .length;
+}
+
+/** The `model` value the lane sent in `session/set_config_option`. */
+function sentModel(agent: FakeAcpAgent): unknown {
+  const config = agent.received.find(
+    (message) =>
+      message.method === 'session/set_config_option' &&
+      (message.params as { configId?: unknown } | undefined)?.configId === 'model',
+  );
+  return (config?.params as { value?: unknown } | undefined)?.value;
+}
 
 describe('meetsAgyAcpFloor', () => {
   it.each([
@@ -149,215 +132,98 @@ describe('meetsAgyAcpFloor', () => {
   });
 });
 
-describe('AntigravityCliAdapter — transport choice', () => {
+describe('AntigravityCliAdapter — detection', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     mockResolveCliPath.mockResolvedValue('/usr/local/bin/agy');
   });
 
-  it('uses ACP when agy >= 1.5.1 lists `acp` and a spawner exists, from one --help spawn', async () => {
+  it('reads only --version and declares the ACP manifest', async () => {
     mockProbeCliVersion.mockResolvedValue('1.5.13');
-    mockSpawnCli.mockImplementation(() => helpChild(AGY_HELP));
     const adapter = new AntigravityCliAdapter(fakeSpawner);
-    await adapter.detect();
+    await expect(adapter.detect()).resolves.toMatchObject({
+      installed: true,
+      version: '1.5.13',
+    });
+    expect(mockProbeCliVersion).toHaveBeenCalledTimes(1);
+    expect(mockSpawnCli).not.toHaveBeenCalled();
     const manifest = adapter.capabilities();
+    expect(manifest).toEqual(antigravityAcpManifest('task-prompt'));
     expect(manifest.messaging.interrupt.state).toBe('supported');
     expect(manifest.messaging.continuation.state).toBe('supported');
     expect(manifest.permissionModes.ask?.state).toBe('unsupported');
-    expect(mockSpawnCli).toHaveBeenCalledTimes(1);
-    expect(mockSpawnCli.mock.calls[0][1]).toEqual(['--help']);
   });
 
-  it('falls back to stream-json below the version floor', async () => {
+  it('still reports an agy below the floor as installed', async () => {
     mockProbeCliVersion.mockResolvedValue('1.4.2');
-    mockSpawnCli.mockImplementation(() => helpChild(AGY_HELP));
     const adapter = new AntigravityCliAdapter(fakeSpawner);
-    await adapter.detect();
-    expect(adapter.capabilities().messaging.interrupt.state).toBe('unsupported');
-    expect(adapter.capabilities().messaging.continuation.state).toBe('supported');
+    await expect(adapter.detect()).resolves.toMatchObject({
+      installed: true,
+      version: '1.4.2',
+    });
+    expect(mockSpawnCli).not.toHaveBeenCalled();
   });
 
-  it('falls back to stream-json when `acp` is not listed', async () => {
-    mockProbeCliVersion.mockResolvedValue('1.5.13');
-    mockSpawnCli.mockImplementation(() =>
-      helpChild('  --input-format  Input format for print mode\n'),
+  it('rejects a lane with the upgrade message from the version detection read', async () => {
+    mockProbeCliVersion.mockResolvedValue('1.4.2');
+    const transportFactory = jest.fn();
+    const adapter = new AntigravityCliAdapter(fakeSpawner, undefined, { transportFactory });
+    await adapter.detect();
+    await expect(
+      adapter.runSdk({ task: 'x', workingDirectory: '/proj', binaryPath: '/usr/local/bin/agy' }),
+    ).rejects.toThrow(
+      'Antigravity lanes need agy 1.5.1 or later (installed: 1.4.2). Update agy and try again.',
     );
-    const adapter = new AntigravityCliAdapter(fakeSpawner);
+    // A below-floor answer is not cached: the lane reads the version again.
+    expect(mockProbeCliVersion).toHaveBeenCalledTimes(2);
+    expect(transportFactory).not.toHaveBeenCalled();
+  });
+
+  it('reports the freshly read version after agy is upgraded in place', async () => {
+    mockProbeCliVersion.mockResolvedValueOnce('1.5.0').mockResolvedValueOnce('1.5.2');
+    const transportFactory = jest.fn();
+    const adapter = new AntigravityCliAdapter(fakeSpawner, undefined, { transportFactory });
+    await expect(adapter.detect()).resolves.toMatchObject({
+      installed: true,
+      version: '1.5.0',
+    });
+    await expect(adapter.detect()).resolves.toMatchObject({
+      installed: true,
+      version: '1.5.2',
+    });
+    expect(mockProbeCliVersion).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not read --version a second time when the detection read is unreadable', async () => {
+    mockProbeCliVersion.mockResolvedValue(undefined);
+    const transportFactory = jest.fn();
+    const adapter = new AntigravityCliAdapter(fakeSpawner, undefined, { transportFactory });
+    await expect(adapter.detect()).resolves.toMatchObject({ installed: true });
+    // One read: a timed-out read is not run again inside the same detection.
+    expect(mockProbeCliVersion).toHaveBeenCalledTimes(1);
+
+    // The next lane request still retries the read.
+    mockProbeCliVersion.mockResolvedValue('1.4.2');
+    await expect(
+      adapter.runSdk({ task: 'x', workingDirectory: '/proj', binaryPath: '/usr/local/bin/agy' }),
+    ).rejects.toThrow('(installed: 1.4.2)');
+    expect(mockProbeCliVersion).toHaveBeenCalledTimes(2);
+    expect(transportFactory).not.toHaveBeenCalled();
+  });
+
+  it('drops a cached floor pass when detection reads a downgraded agy', async () => {
+    mockProbeCliVersion.mockResolvedValueOnce('1.5.13').mockResolvedValue('1.4.2');
+    const transportFactory = jest.fn();
+    const adapter = new AntigravityCliAdapter(fakeSpawner, undefined, { transportFactory });
     await adapter.detect();
-    expect(adapter.capabilities().messaging.interrupt.state).toBe('unsupported');
-  });
-
-  it('never chooses ACP without a spawner (the ACP runtime cannot start one)', async () => {
-    mockProbeCliVersion.mockResolvedValue('1.5.13');
-    mockSpawnCli.mockImplementation(() => helpChild(AGY_HELP));
-    const adapter = new AntigravityCliAdapter();
     await adapter.detect();
-    expect(adapter.capabilities().messaging.interrupt.state).toBe('unsupported');
-  });
-
-  describe('a probe that could not tell is not cached (S2)', () => {
-    afterEach(() => jest.useRealTimers());
-
-    it('probes again after `agy --help` timed out, then chooses ACP', async () => {
-      jest.useFakeTimers({ doNotFake: ['setImmediate', 'nextTick'] });
-      mockProbeCliVersion.mockResolvedValue('1.5.13');
-      mockSpawnCli
-        .mockImplementationOnce(() => hangingChild())
-        .mockImplementationOnce(() => hangingChild())
-        .mockImplementation(() => helpChild(AGY_HELP));
-      const adapter = new AntigravityCliAdapter(fakeSpawner);
-
-      const first = adapter.detect();
-      await jest.advanceTimersByTimeAsync(8_000);
-      await jest.advanceTimersByTimeAsync(8_000);
-      await first;
-      expect(adapter.capabilities().messaging.interrupt.state).toBe('unsupported');
-
-      jest.useRealTimers();
-      await adapter.detect();
-      expect(adapter.capabilities().messaging.interrupt.state).toBe('supported');
-    });
-
-    it('probes again after a spawn error or an unreadable version', async () => {
-      // detect() reads the version, and the ACP probe reads it again when
-      // detect() got none: both fail on the first detect.
-      mockProbeCliVersion
-        .mockResolvedValueOnce(undefined)
-        .mockResolvedValueOnce(undefined)
-        .mockResolvedValue('1.5.13');
-      mockSpawnCli
-        .mockImplementationOnce(() => failingChild())
-        .mockImplementation(() => helpChild(AGY_HELP));
-      const adapter = new AntigravityCliAdapter(fakeSpawner);
-      await adapter.detect();
-      expect(adapter.capabilities().messaging.interrupt.state).toBe('unsupported');
-      await adapter.detect();
-      expect(adapter.capabilities().messaging.interrupt.state).toBe('supported');
-    });
-
-    it('logs why --help could not be read (round-2 minor)', async () => {
-      mockProbeCliVersion.mockResolvedValue('1.5.13');
-      mockSpawnCli.mockImplementation(() => failingChild());
-      const logger = createMockLogger();
-      const adapter = new AntigravityCliAdapter(
-        fakeSpawner,
-        undefined,
-        logger as unknown as Logger,
-      );
-      await adapter.detect();
-      expect(logger.warn).toHaveBeenCalledWith(
-        '[AntigravityCliAdapter] agy --help could not be spawned',
-        { error: 'spawn EBUSY' },
-      );
-    });
-
-    it('caches a definite "not listed" answer', async () => {
-      mockProbeCliVersion.mockResolvedValue('1.5.13');
-      mockSpawnCli.mockImplementation(() => helpChild('  --input-format  x\n'));
-      const adapter = new AntigravityCliAdapter(fakeSpawner);
-      await adapter.detect();
-      await adapter.detect();
-      // One --help per binary: the stream-json and ACP answers are both cached.
-      expect(mockSpawnCli).toHaveBeenCalledTimes(1);
-      expect(adapter.capabilities().messaging.interrupt.state).toBe('unsupported');
-    });
-
-    it('re-runs an injected probe that answered undefined, shares one in flight', async () => {
-      let answers = 0;
-      const probe = jest.fn(async () => (answers++ === 0 ? undefined : true));
-      const adapter = new AntigravityCliAdapter(undefined, async () => true, undefined, {
-        probe,
-      });
-      mockProbeCliVersion.mockResolvedValue('1.5.13');
-      await adapter.detect();
-      expect(adapter.capabilities().messaging.interrupt.state).toBe('unsupported');
-      await Promise.all([adapter.detect(), adapter.detect()]);
-      expect(probe).toHaveBeenCalledTimes(2);
-      expect(adapter.capabilities().messaging.interrupt.state).toBe('supported');
-    });
-  });
-
-  describe('transport override (S3)', () => {
-    it.each([
-      [undefined, 'auto'],
-      ['acp', 'acp'],
-      [' STREAM-JSON ', 'stream-json'],
-      ['bogus', 'auto'],
-    ])('%s reads as %s', (value, expected) => {
-      expect(
-        readAgyTransportOverride(value === undefined ? {} : { [AGY_TRANSPORT_ENV]: value }),
-      ).toBe(expected);
-    });
-
-    it('stream-json skips the probe and keeps the stream-json manifest', async () => {
-      mockProbeCliVersion.mockResolvedValue('1.5.13');
-      mockSpawnCli.mockImplementation(() => helpChild(AGY_HELP));
-      const probe = jest.fn(async () => true);
-      const adapter = new AntigravityCliAdapter(fakeSpawner, undefined, undefined, {
-        probe,
-        transport: 'stream-json',
-      });
-      await adapter.detect();
-      expect(probe).not.toHaveBeenCalled();
-      expect(adapter.capabilities().messaging.interrupt.state).toBe('unsupported');
-    });
-
-    it('acp forces the ACP manifest even when the probe says no', async () => {
-      mockProbeCliVersion.mockResolvedValue('1.4.0');
-      mockSpawnCli.mockImplementation(() => helpChild(AGY_HELP));
-      const probe = jest.fn(async () => false);
-      const adapter = new AntigravityCliAdapter(fakeSpawner, undefined, undefined, {
-        probe,
-        transport: 'acp',
-      });
-      await adapter.detect();
-      expect(probe).not.toHaveBeenCalled();
-      expect(adapter.capabilities().messaging.interrupt.state).toBe('supported');
-    });
-
-    it('reports an unknown value through onUnknown, but not auto or blank', () => {
-      const unknown: string[] = [];
-      for (const value of ['acpp', 'auto', '  ', 'ACP']) {
-        readAgyTransportOverride({ [AGY_TRANSPORT_ENV]: value }, (raw) => unknown.push(raw));
-      }
-      expect(unknown).toEqual(['acpp']);
-    });
-
-    it('warns once about an unknown environment value (round-2 minor)', () => {
-      const real = process.env[AGY_TRANSPORT_ENV];
-      process.env[AGY_TRANSPORT_ENV] = 'acpp';
-      const logger = createMockLogger();
-      try {
-        const adapter = new AntigravityCliAdapter(
-          undefined,
-          undefined,
-          logger as unknown as Logger,
-        );
-        adapter.capabilities();
-        adapter.capabilities();
-        const warned = logger.warn.mock.calls.filter(([message]) =>
-          /unknown PTAH_AGY_TRANSPORT/.test(String(message)),
-        );
-        expect(warned).toHaveLength(1);
-        expect(warned[0][1]).toMatchObject({ value: 'acpp' });
-      } finally {
-        if (real === undefined) delete process.env[AGY_TRANSPORT_ENV];
-        else process.env[AGY_TRANSPORT_ENV] = real;
-      }
-    });
-
-    it('is read from the environment by default', () => {
-      const real = process.env[AGY_TRANSPORT_ENV];
-      process.env[AGY_TRANSPORT_ENV] = 'acp';
-      try {
-        expect(new AntigravityCliAdapter().capabilities().messaging.interrupt.state).toBe(
-          'supported',
-        );
-      } finally {
-        if (real === undefined) delete process.env[AGY_TRANSPORT_ENV];
-        else process.env[AGY_TRANSPORT_ENV] = real;
-      }
-    });
+    expect(mockProbeCliVersion).toHaveBeenCalledTimes(2);
+    await expect(
+      adapter.runSdk({ task: 'x', workingDirectory: '/proj', binaryPath: '/usr/local/bin/agy' }),
+    ).rejects.toThrow(
+      'Antigravity lanes need agy 1.5.1 or later (installed: 1.4.2). Update agy and try again.',
+    );
+    expect(transportFactory).not.toHaveBeenCalled();
   });
 });
 
@@ -375,7 +241,7 @@ describe('AntigravityCliAdapter — ACP lane', () => {
     servedModels = AGY_MODELS_STDOUT;
     mockSpawnCli.mockImplementation((_binary: string, args: string[]) => {
       if (args[0] !== 'models') throw new Error(`unexpected spawn: ${args.join(' ')}`);
-      return helpChild(servedModels);
+      return printingChild(servedModels);
     });
     home = mkdtempSync(join(tmpdir(), 'ptah-agy-acp-'));
     process.env['HOME'] = home;
@@ -401,24 +267,32 @@ describe('AntigravityCliAdapter — ACP lane', () => {
     /** Extra scripting after the recorded handlers (overrides them). */
     readonly script?: (agent: FakeAcpAgent) => void;
     readonly seam?: Partial<AntigravityAcpSeam>;
-    readonly adapter?: (adapter: AntigravityCliAdapter) => void;
+    readonly logger?: Logger;
   }
 
-  async function startLane(
+  /** One adapter and every ACP agent its lanes opened, in spawn order. */
+  interface Rig {
+    readonly adapter: AntigravityCliAdapter;
+    readonly agents: FakeAcpAgent[];
+    readonly transports: FakeAcpTransport[];
+    readonly spawns: AcpSpawnOptions[];
+  }
+
+  function laneRig(
     fixture: ReturnType<typeof readAcpFixture>,
     prompt: (nth: number) => 'result' | 'hold',
-    options: Partial<CliCommandOptions> = {},
     setup: LaneSetup = {},
-  ): Promise<Lane> {
-    let agent: FakeAcpAgent | undefined;
-    let transport: FakeAcpTransport | undefined;
-    let spawn: AcpSpawnOptions | undefined;
-    let prompts = 0;
-    const adapter = new AntigravityCliAdapter(undefined, undefined, undefined, {
+  ): Rig {
+    const agents: FakeAcpAgent[] = [];
+    const transports: FakeAcpTransport[] = [];
+    const spawns: AcpSpawnOptions[] = [];
+    const adapter = new AntigravityCliAdapter(undefined, setup.logger, {
       probe: async () => true,
       transportFactory: (spawnOptions) => {
-        spawn = spawnOptions;
-        agent = createFakeAcpAgent();
+        spawns.push(spawnOptions);
+        const agent = createFakeAcpAgent();
+        let prompts = 0;
+        agents.push(agent);
         live.push(agent);
         agent.handle('session/new', () => ({ result: recordedResult(fixture, 'session/new') }));
         agent.handle('session/set_config_option', () => ({
@@ -434,13 +308,18 @@ describe('AntigravityCliAdapter — ACP lane', () => {
             : { result: recordedResult(fixture, 'session/prompt', nth) };
         });
         setup.script?.(agent);
-        transport = createFakeAcpTransport(agent);
+        const transport = createFakeAcpTransport(agent);
+        transports.push(transport);
         return transport;
       },
       ...setup.seam,
     });
-    setup.adapter?.(adapter);
-    const handle = await adapter.runSdk({
+    return { adapter, agents, transports, spawns };
+  }
+
+  async function runLane(rig: Rig, options: Partial<CliCommandOptions> = {}): Promise<Lane> {
+    const nth = rig.agents.length;
+    const handle = await rig.adapter.runSdk({
       task: 'Call the ptah_echo_token MCP tool',
       workingDirectory: join(home, 'work'),
       agentId: 'agent-1',
@@ -455,13 +334,223 @@ describe('AntigravityCliAdapter — ACP lane', () => {
     handle.onStreamEvent?.((event) => stream.push(event));
     return {
       handle,
-      agent: () => agent as FakeAcpAgent,
-      transport: () => transport as FakeAcpTransport,
-      spawn: () => spawn as AcpSpawnOptions,
+      agent: () => rig.agents[nth],
+      transport: () => rig.transports[nth],
+      spawn: () => rig.spawns[nth],
       segments,
       stream,
     };
   }
+
+  async function startLane(
+    fixture: ReturnType<typeof readAcpFixture>,
+    prompt: (nth: number) => 'result' | 'hold',
+    options: Partial<CliCommandOptions> = {},
+    setup: LaneSetup = {},
+  ): Promise<Lane> {
+    return runLane(laneRig(fixture, prompt, setup), options);
+  }
+
+  /** Run one lane to its first `done`, then stop it; returns the model it sent. */
+  async function finishLane(rig: Rig, options: Partial<CliCommandOptions> = {}): Promise<unknown> {
+    const lane = await runLane(rig, options);
+    await lane.handle.done;
+    lane.handle.abort.abort();
+    return lane.agent() ? sentModel(lane.agent()) : undefined;
+  }
+
+  const failInitialize = (agent: FakeAcpAgent): void =>
+    agent.handle('initialize', () => ({
+      error: { code: -32603, message: 'agent runtime unpack failed' },
+    }));
+
+  it('drops the Windows ConPTY noise from agy stderr and keeps every other line', async () => {
+    const lane = await startLane(TOOL_USE, () => 'hold', { mcpPort: undefined });
+    await settle();
+    const lines = [
+      'Error: conpty_console_list_agent.js:12',
+      'at a',
+      'at b',
+      'at c',
+      'at d',
+      'at e',
+      'kept one',
+      'AttachConsole failed',
+      'x',
+      'y',
+      'z',
+      'kept two',
+    ];
+    for (const line of lines) lane.spawn().onStderrLine?.(line);
+    await settle();
+    const shown = lane.segments
+      .map((segment) => segment.content)
+      .filter((content) => content !== undefined && lines.includes(content));
+    expect(shown).toEqual(['kept one', 'kept two']);
+    lane.handle.abort.abort();
+  });
+
+  describe('version floor', () => {
+    const production = { probe: undefined };
+
+    it('runs ACP at or above 1.5.1 from one --version read and no --help spawn', async () => {
+      mockProbeCliVersion.mockResolvedValue('1.5.13');
+      const rig = laneRig(TOOL_USE, () => 'result', { seam: production });
+      const lane = await runLane(rig, { mcpPort: undefined });
+      await expect(lane.handle.done).resolves.toBe(0);
+      lane.handle.abort.abort();
+      expect(lane.spawn().args).toEqual([
+        'acp',
+        '--dangerously-skip-permissions',
+        '--add-dir',
+        join(home, 'work'),
+      ]);
+      expect(mockProbeCliVersion).toHaveBeenCalledTimes(1);
+      expect(mockProbeCliVersion.mock.calls[0][0]).toBe('agy');
+      // The only other spawn is the `agy models` read; the beforeEach mock
+      // throws on any other argv (`--help`, `--print`, stream-json flags).
+      for (const [, args] of mockSpawnCli.mock.calls as Array<[string, string[]]>) {
+        expect(args).toEqual(['models']);
+      }
+
+      // A definite answer is cached per binary.
+      await finishLane(rig, { mcpPort: undefined });
+      expect(mockProbeCliVersion).toHaveBeenCalledTimes(1);
+    });
+
+    it('rejects below the floor with the upgrade message, before any spawn or folder write', async () => {
+      mockProbeCliVersion.mockResolvedValue('1.4.2');
+      const logger = createMockLogger();
+      const rig = laneRig(TOOL_USE, () => 'result', {
+        seam: production,
+        logger: logger as unknown as Logger,
+      });
+      await expect(runLane(rig)).rejects.toThrow(
+        'Antigravity lanes need agy 1.5.1 or later (installed: 1.4.2). Update agy and try again.',
+      );
+      expect(rig.spawns).toHaveLength(0);
+      expect(mockSpawnCli).not.toHaveBeenCalled();
+      expect(existsSync(join(home, '.gemini'))).toBe(false);
+      expect(logger.info).toHaveBeenCalledWith(
+        '[AntigravityCliAdapter] agy is below the ACP floor',
+        { version: '1.4.2', minVersion: '1.5.1' },
+      );
+    });
+
+    it('does not cache an unreadable version, and the lane runs ACP', async () => {
+      mockProbeCliVersion.mockResolvedValue(undefined);
+      const logger = createMockLogger();
+      const rig = laneRig(TOOL_USE, () => 'result', {
+        seam: production,
+        logger: logger as unknown as Logger,
+      });
+      const lane = await runLane(rig, { mcpPort: undefined });
+      await expect(lane.handle.done).resolves.toBe(0);
+      lane.handle.abort.abort();
+      expect(lane.spawn().args[0]).toBe('acp');
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('could not read the agy version'),
+        { version: null },
+      );
+
+      await finishLane(rig, { mcpPort: undefined });
+      expect(mockProbeCliVersion).toHaveBeenCalledTimes(2);
+      expect(rig.spawns).toHaveLength(2);
+      // Detection polls: only the first unreadable read per binary warns.
+      const unreadable = (calls: unknown[][]): number =>
+        calls.filter(([message]) => String(message).includes('could not read the agy version'))
+          .length;
+      expect(unreadable(logger.warn.mock.calls)).toBe(1);
+      expect(unreadable(logger.debug.mock.calls)).toBe(1);
+    });
+
+    it('lets the next lane run once agy is upgraded in place after a below-floor answer', async () => {
+      mockProbeCliVersion.mockResolvedValueOnce('1.5.0').mockResolvedValue('1.5.2');
+      const rig = laneRig(TOOL_USE, () => 'result', { seam: production });
+      await expect(runLane(rig, { mcpPort: undefined })).rejects.toThrow(
+        'Antigravity lanes need agy 1.5.1 or later (installed: 1.5.0). Update agy and try again.',
+      );
+      expect(rig.spawns).toHaveLength(0);
+
+      await finishLane(rig, { mcpPort: undefined });
+      expect(rig.spawns).toHaveLength(1);
+      expect(mockProbeCliVersion).toHaveBeenCalledTimes(2);
+
+      // The passing answer is cached.
+      await finishLane(rig, { mcpPort: undefined });
+      expect(rig.spawns).toHaveLength(2);
+      expect(mockProbeCliVersion).toHaveBeenCalledTimes(2);
+    });
+
+    it('re-runs an injected probe that answered undefined, and shares one in flight', async () => {
+      let answers = 0;
+      const probe = jest.fn(async () => (answers++ === 0 ? undefined : true));
+      const rig = laneRig(TOOL_USE, () => 'result', { seam: { probe } });
+      await finishLane(rig, { mcpPort: undefined });
+      expect(probe).toHaveBeenCalledTimes(1);
+      expect(rig.spawns).toHaveLength(1);
+
+      const concurrent = await Promise.all([
+        runLane(rig, { mcpPort: undefined }),
+        runLane(rig, { mcpPort: undefined }),
+      ]);
+      expect(probe).toHaveBeenCalledTimes(2);
+      for (const lane of concurrent) {
+        await lane.handle.done;
+        lane.handle.abort.abort();
+      }
+
+      await finishLane(rig, { mcpPort: undefined });
+      expect(probe).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it('a session that never opens fails the lane with one ACP error and no stream-json spawn', async () => {
+    const lane = await startLane(TOOL_USE, () => 'result', { mcpPort: undefined }, {
+      script: failInitialize,
+    });
+    await expect(lane.handle.done).resolves.toBe(1);
+    lane.handle.abort.abort();
+    expect(lane.segments.filter((segment) => segment.type === 'error')).toHaveLength(1);
+    expect(rigSpawnArgs()).toEqual([['models']]);
+  });
+
+  /** Every `spawnCli` argv: only `agy models` reads are allowed on an ACP lane. */
+  function rigSpawnArgs(): string[][] {
+    return (mockSpawnCli.mock.calls as Array<[string, string[]]>).map(([, args]) => args);
+  }
+
+  it('an unknown resume id starts a new session with one info', async () => {
+    const notFound = (): { error: { code: number; message: string; data: string } } => ({
+      error: { code: -32002, message: 'Resource not found', data: 'no such session' },
+    });
+    const lane = await startLane(
+      TOOL_USE,
+      () => 'result',
+      { mcpPort: undefined, resumeSessionId: 'stream-json-conversation-7' },
+      {
+        script: (agent) => {
+          agent.handle('session/resume', notFound);
+          agent.handle('session/load', notFound);
+        },
+      },
+    );
+    await expect(lane.handle.done).resolves.toBe(0);
+    lane.handle.abort.abort();
+    const infos = lane.segments
+      .filter((segment) => segment.type === 'info' && !segment.turnTelemetry)
+      .map((segment) => segment.content);
+    expect(infos).toEqual([
+      expect.stringMatching(
+        /^could not resume stream-json-conversation-7: .*; started a new session$/,
+      ),
+    ]);
+    expect(lane.agent().received.some((message) => message.method === 'session/new')).toBe(true);
+    expect(lane.handle.getSessionId?.()).toBe(
+      String(recordedResult(TOOL_USE, 'session/new')['sessionId']),
+    );
+    expect(lane.segments.filter((segment) => segment.type === 'error')).toEqual([]);
+  });
 
   it('runs the task on agy acp with Ptah MCP as an http entry and no mcp_config.json write', async () => {
     const lane = await startLane(TOOL_USE, () => 'result');
@@ -513,20 +602,13 @@ describe('AntigravityCliAdapter — ACP lane', () => {
     lane.handle.abort.abort();
   });
 
-  it('sends a retired saved id as a live id of the closest base, as the stream-json lane does', async () => {
+  it('sends a retired saved id as a live id of the closest base', async () => {
     const lane = await startLane(TOOL_USE, () => 'result', { model: 'claude-sonnet-4-6' });
     await lane.handle.done;
-    const config = lane.agent().received.find(
-      (message) =>
-        message.method === 'session/set_config_option' &&
-        (message.params as { configId?: unknown } | undefined)?.configId === 'model',
-    );
     // Only an id `agy models` lists is derived: the pinned output has no bare
     // `claude-sonnet-5-5`, so the middle effort variant is sent (the full id
     // carries the effort, so no `thought_level` is needed).
-    expect(config?.params).toEqual(
-      expect.objectContaining({ configId: 'model', value: 'claude-sonnet-5-5-medium' }),
-    );
+    expect(sentModel(lane.agent())).toBe('claude-sonnet-5-5-medium');
     lane.handle.abort.abort();
   });
 
@@ -534,15 +616,120 @@ describe('AntigravityCliAdapter — ACP lane', () => {
     servedModels = '';
     const lane = await startLane(TOOL_USE, () => 'result', { model: 'claude-sonnet-4-6' });
     await lane.handle.done;
-    const config = lane.agent().received.find(
-      (message) =>
-        message.method === 'session/set_config_option' &&
-        (message.params as { configId?: unknown } | undefined)?.configId === 'model',
-    );
-    expect(config?.params).toEqual(
-      expect.objectContaining({ configId: 'model', value: 'claude-sonnet-4-6' }),
-    );
+    expect(sentModel(lane.agent())).toBe('claude-sonnet-4-6');
     lane.handle.abort.abort();
+  });
+
+  describe('the `agy models` id cache behind the ACP model option', () => {
+    const noMcp = { mcpPort: undefined };
+
+    it('replaces a retired saved id with a live variant of the closest base, from `id<TAB>name`', async () => {
+      const logger = createMockLogger();
+      const rig = laneRig(TOOL_USE, () => 'result', { logger: logger as unknown as Logger });
+      const model = await finishLane(rig, {
+        ...noMcp,
+        model: 'claude-sonnet-4-6\tClaude Sonnet 4.6 (Thinking)',
+      });
+      expect(model).toBe('claude-sonnet-5-5-medium');
+      expect(logger.warn).toHaveBeenCalledWith(
+        expect.stringContaining('closest live model'),
+        { saved: 'claude-sonnet-4-6', model: 'claude-sonnet-5-5-medium' },
+      );
+    });
+
+    it('keeps the effort of a retired saved id when the closest base lists it', async () => {
+      const rig = laneRig(TOOL_USE, () => 'result');
+      expect(await finishLane(rig, { ...noMcp, model: 'claude-sonnet-4-6-high' })).toBe(
+        'claude-sonnet-5-5-high',
+      );
+    });
+
+    it('applies the chosen effort to a retired id through its closest live base', async () => {
+      const rig = laneRig(TOOL_USE, () => 'result');
+      expect(
+        await finishLane(rig, { ...noMcp, model: 'claude-opus-4-8', reasoningEffort: 'high' }),
+      ).toBe('claude-opus-5-5-high');
+    });
+
+    it('does not re-probe agy models for every spawn after a failed probe', async () => {
+      servedModels = '';
+      const rig = laneRig(TOOL_USE, () => 'result');
+      for (let i = 0; i < 2; i++) {
+        expect(await finishLane(rig, { ...noMcp, model: 'm-1' })).toBe('m-1');
+      }
+      expect(modelProbeCount()).toBe(1);
+    });
+
+    it('scopes the live ids to the binary: another binary probes its own', async () => {
+      mockResolveCliPath.mockResolvedValue('/usr/local/bin/agy');
+      const rig = laneRig(TOOL_USE, () => 'result');
+      await rig.adapter.listModels();
+      expect(modelProbeCount()).toBe(1);
+
+      for (const binaryPath of ['/usr/local/bin/agy', '/opt/other/agy']) {
+        await finishLane(rig, { ...noMcp, model: 'm-1', binaryPath });
+      }
+
+      // The same binary reuses the listing's ids; the other one probes.
+      const probes = (mockSpawnCli.mock.calls as Array<[string, string[]]>).filter(
+        ([, args]) => args[0] === 'models',
+      );
+      expect(probes.map(([binary]) => binary)).toEqual(['/usr/local/bin/agy', '/opt/other/agy']);
+    });
+
+    it('a clean empty refresh drops the earlier ids for the next spawn', async () => {
+      mockResolveCliPath.mockResolvedValue('/usr/local/bin/agy');
+      const rig = laneRig(TOOL_USE, () => 'result');
+      await rig.adapter.listModels();
+      servedModels = '';
+      expect(await rig.adapter.listModels()).toEqual([]);
+
+      // The earlier list would map the retired id to its live base; the empty
+      // answer leaves no ids, and its retry window spares the spawn a third probe.
+      const model = await finishLane(rig, {
+        ...noMcp,
+        model: 'claude-opus-4-8',
+        reasoningEffort: 'high',
+        binaryPath: '/usr/local/bin/agy',
+      });
+      expect(model).toBe('claude-opus-4-8');
+      expect(modelProbeCount()).toBe(2);
+    });
+
+    it('probes `agy models` at most once per freshness window and shares one probe', async () => {
+      const rig = laneRig(TOOL_USE, () => 'result');
+      const lanes = await Promise.all([
+        runLane(rig, { ...noMcp, model: 'claude-sonnet-5-5-low' }),
+        runLane(rig, { ...noMcp, model: 'claude-opus-5-5-low' }),
+      ]);
+      expect(modelProbeCount()).toBe(1);
+      for (const lane of lanes) {
+        await lane.handle.done;
+        lane.handle.abort.abort();
+      }
+      await finishLane(rig, { ...noMcp, model: 'claude-sonnet-5-5-high' });
+      expect(modelProbeCount()).toBe(1);
+    });
+
+    it('re-probes once the last ids are older than 10 minutes', async () => {
+      const clock = { now: 1_000_000 };
+      const rig = laneRig(TOOL_USE, () => 'result', { seam: { now: () => clock.now } });
+      await finishLane(rig, { ...noMcp, model: 'claude-sonnet-5-5-low' });
+      clock.now += 10 * 60_000 - 1;
+      await finishLane(rig, { ...noMcp, model: 'claude-sonnet-5-5-low' });
+      expect(modelProbeCount()).toBe(1);
+      clock.now += 1;
+      await finishLane(rig, { ...noMcp, model: 'claude-sonnet-5-5-low' });
+      expect(modelProbeCount()).toBe(2);
+    });
+
+    it('does not probe `agy models` when no model is chosen', async () => {
+      const rig = laneRig(TOOL_USE, () => 'result');
+      expect(
+        await finishLane(rig, { ...noMcp, model: undefined, reasoningEffort: 'high' }),
+      ).toBeUndefined();
+      expect(modelProbeCount()).toBe(0);
+    });
   });
 
   it('interrupts mid-turn on the same process and continues the session', async () => {
@@ -684,7 +871,7 @@ describe('AntigravityCliAdapter — ACP lane', () => {
     });
   });
 
-  describe('ACP quota and rate-limit errors classify as on stream-json', () => {
+  describe('ACP quota and rate-limit errors keep their wording', () => {
     async function failedLane(data: unknown): Promise<string[]> {
       const lane = await startLane(TOOL_USE, () => 'result', { mcpPort: undefined }, {
         script: (agent) =>
@@ -705,13 +892,13 @@ describe('AntigravityCliAdapter — ACP lane', () => {
       expect(errors).toEqual([expect.stringContaining(wording)]);
       const observedAt = Date.UTC(2026, 10, 21);
       const viaAcp = classifyLaneLimit({ cliOrProvider: 'antigravity', texts: errors, observedAt });
-      const viaStreamJson = classifyLaneLimit({
+      const fromWording = classifyLaneLimit({
         cliOrProvider: 'antigravity',
         texts: [wording],
         observedAt,
       });
       expect(viaAcp).toMatchObject({ failureKind: 'quota' });
-      expect(viaAcp).toEqual(viaStreamJson);
+      expect(viaAcp).toEqual(fromWording);
     });
 
     it('keeps a 429 rate-limit wording, so the rate-limit matcher reads it', async () => {
@@ -721,180 +908,6 @@ describe('AntigravityCliAdapter — ACP lane', () => {
       expect(
         classifyLaneLimit({ cliOrProvider: 'antigravity', texts: errors, observedAt: 0 }),
       ).toBeNull();
-    });
-  });
-
-  describe('a session that never opens falls back to stream-json (S3)', () => {
-    type StreamJsonRun = (options: CliCommandOptions) => Promise<SdkHandle>;
-
-    function stubStreamJson(adapter: AntigravityCliAdapter): jest.Mock {
-      const run = jest.fn<ReturnType<StreamJsonRun>, Parameters<StreamJsonRun>>(async () => ({
-        abort: new AbortController(),
-        done: Promise.resolve(0),
-        onOutput: () => undefined,
-        onSegment: (callback: (segment: CliOutputSegment) => void) =>
-          callback({ type: 'text', content: 'stream-json ran' }),
-      }));
-      (adapter as unknown as { runStreamJson: StreamJsonRun }).runStreamJson = run;
-      return run;
-    }
-
-    const failInitialize = (agent: FakeAcpAgent): void =>
-      agent.handle('initialize', () => ({
-        error: { code: -32603, message: 'agent runtime unpack failed' },
-      }));
-
-    it('runs the stream-json lane with the same options when initialize fails', async () => {
-      let run: jest.Mock | undefined;
-      const lane = await startLane(TOOL_USE, () => 'result', { permission: 'auto-edit' }, {
-        script: failInitialize,
-        adapter: (adapter) => {
-          run = stubStreamJson(adapter);
-        },
-      });
-      await expect(lane.handle.done).resolves.toBe(0);
-      expect(run).toHaveBeenCalledTimes(1);
-      expect(run?.mock.calls[0][0]).toMatchObject({ permission: 'auto-edit', agentId: 'agent-1' });
-      expect(lane.segments.filter((segment) => segment.type === 'error')).toEqual([]);
-      expect(lane.segments).toContainEqual({ type: 'text', content: 'stream-json ran' });
-      expect(lane.segments).toContainEqual({
-        type: 'info',
-        content: expect.stringMatching(/this lane runs on stream-json instead\.$/),
-      });
-    });
-
-    it('starts a fresh conversation instead of resuming an id on stream-json (round-2 M3)', async () => {
-      let run: jest.Mock | undefined;
-      const lane = await startLane(TOOL_USE, () => 'result', { resumeSessionId: 'acp-session-7' }, {
-        script: (agent) => {
-          failInitialize(agent);
-        },
-        adapter: (adapter) => {
-          run = stubStreamJson(adapter);
-        },
-      });
-      await expect(lane.handle.done).resolves.toBe(0);
-      expect(run?.mock.calls[0][0].resumeSessionId).toBeUndefined();
-      expect(run?.mock.calls[0][0]).toMatchObject({ agentId: 'agent-1', task: expect.any(String) });
-      expect(lane.segments).toContainEqual({
-        type: 'info',
-        content: expect.stringMatching(/cannot resume the earlier session on stream-json.*fresh conversation\.$/),
-      });
-    });
-
-    it('does not fall back when the transport is forced to acp', async () => {
-      let run: jest.Mock | undefined;
-      const lane = await startLane(TOOL_USE, () => 'result', {}, {
-        script: failInitialize,
-        seam: { transport: 'acp' },
-        adapter: (adapter) => {
-          run = stubStreamJson(adapter);
-        },
-      });
-      await expect(lane.handle.done).resolves.toBe(1);
-      expect(run).not.toHaveBeenCalled();
-      expect(lane.segments.filter((segment) => segment.type === 'error')).toHaveLength(1);
-    });
-
-    it('runs stream-json directly when the transport is forced to it', async () => {
-      let run: jest.Mock | undefined;
-      const lane = await startLane(TOOL_USE, () => 'result', {}, {
-        seam: { transport: 'stream-json' },
-        adapter: (adapter) => {
-          run = stubStreamJson(adapter);
-        },
-      });
-      await expect(lane.handle.done).resolves.toBe(0);
-      expect(run).toHaveBeenCalledTimes(1);
-      expect(lane.spawn()).toBeUndefined();
-    });
-  });
-
-  describe('ACP failure cooldown (round-2 M2)', () => {
-    type StreamJsonRun = (options: CliCommandOptions) => Promise<SdkHandle>;
-
-    function cooldownAdapter(seam: Partial<AntigravityAcpSeam> = {}): {
-      adapter: AntigravityCliAdapter;
-      spawns: () => number;
-      streamJson: jest.Mock;
-      clock: { now: number };
-    } {
-      const clock = { now: 1_000_000 };
-      let spawns = 0;
-      const adapter = new AntigravityCliAdapter(undefined, undefined, undefined, {
-        probe: async () => true,
-        now: () => clock.now,
-        transportFactory: () => {
-          spawns++;
-          const agent = createFakeAcpAgent();
-          live.push(agent);
-          agent.handle('initialize', () => ({
-            error: { code: -32603, message: 'agent runtime unpack failed' },
-          }));
-          return createFakeAcpTransport(agent);
-        },
-        ...seam,
-      });
-      const streamJson = jest.fn<ReturnType<StreamJsonRun>, Parameters<StreamJsonRun>>(
-        async () => ({
-          abort: new AbortController(),
-          done: Promise.resolve(0),
-          onOutput: () => undefined,
-          onSegment: () => undefined,
-        }),
-      );
-      (adapter as unknown as { runStreamJson: StreamJsonRun }).runStreamJson = streamJson;
-      return { adapter, spawns: () => spawns, streamJson, clock };
-    }
-
-    const run = async (adapter: AntigravityCliAdapter): Promise<CliOutputSegment[]> => {
-      const handle = await adapter.runSdk({
-        task: 'Say hi',
-        workingDirectory: join(home, 'work'),
-        agentId: 'agent-1',
-      });
-      const segments: CliOutputSegment[] = [];
-      handle.onSegment?.((segment) => segments.push(segment));
-      await handle.done;
-      handle.abort.abort();
-      return segments;
-    };
-
-    it('sends later lanes straight to stream-json, with one info, until it expires', async () => {
-      const h = cooldownAdapter();
-      await run(h.adapter);
-      expect(h.spawns()).toBe(1);
-      expect(h.streamJson).toHaveBeenCalledTimes(1);
-
-      h.clock.now += AGY_ACP_FAILURE_COOLDOWN_MS - 1;
-      const cooled = await run(h.adapter);
-      expect(h.spawns()).toBe(1);
-      expect(h.streamJson).toHaveBeenCalledTimes(2);
-      expect(cooled.filter((segment) => segment.type === 'info')).toEqual([
-        {
-          type: 'info',
-          content:
-            'Antigravity runs this lane on stream-json: an earlier ACP session failed to start within the last 10 minutes.',
-        },
-      ]);
-      expect(h.adapter.capabilities().messaging.interrupt.state).toBe('unsupported');
-
-      h.clock.now += 1;
-      await run(h.adapter);
-      expect(h.spawns()).toBe(2);
-    });
-
-    it('is bypassed by PTAH_AGY_TRANSPORT=acp', async () => {
-      const forced = cooldownAdapter({ transport: 'acp' });
-      // A forced lane never records a failure itself, so seed one directly.
-      (forced.adapter as unknown as { acpFailedAtByBinary: Map<string, number> }).acpFailedAtByBinary.set(
-        'agy',
-        forced.clock.now,
-      );
-      const segments = await run(forced.adapter);
-      expect(forced.spawns()).toBe(1);
-      expect(forced.streamJson).not.toHaveBeenCalled();
-      expect(segments.filter((segment) => segment.type === 'error')).toHaveLength(1);
     });
   });
 

@@ -133,7 +133,11 @@ describe('HarnessReconcilerService — antigravity MCP (TASK_2026_285)', () => {
     return parsed['mcpServers'] ?? {};
   }
 
-  /** What `AntigravityCliAdapter` does before a spawn, via the same facet. */
+  /**
+   * A second writer of the `ptah` key through the same facet — what the former
+   * writer `AntigravityCliAdapter` did before a spawn (removed in
+   * TASK_2026_2322). Kept: the lock still has to protect any concurrent writer.
+   */
   function spawnWrite(port: number): Promise<void> {
     return createMcpFacet('antigravity', { homeDir: home }).write(
       '',

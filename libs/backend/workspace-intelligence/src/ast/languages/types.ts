@@ -89,13 +89,21 @@ export interface LanguageModule {
   /** Extensions parsed with this grammar (lower-case, leading dot). */
   readonly extensions: readonly string[];
   /**
+   * ESM/CJS module-flavour suffixes (`.mjs/.cjs`, `.mts/.cts`) parsed with
+   * this grammar. They are in `EXTENSION_LANGUAGE_MAP`, but hold only the
+   * registry's `MODULE_FLAVOUR_CAPABILITIES` (parse and what reads the parse:
+   * outline, enrichSummary, codeIndex, publicSymbols). Graph edges and the
+   * Electron definition fallback stay with `extensions`: the TS/JS import
+   * resolver does not probe these suffixes yet. Absent means none.
+   */
+  readonly moduleFlavourExtensions?: readonly string[];
+  /**
    * Source suffixes of this language that no consumer accepts yet: the
-   * parser map, the code-symbol indexer and the graph glob all skip them today
-   * (Batch 7 KI: `.mts/.cts/.mjs/.cjs` are aliased only inside the enrich
-   * builder). They are recognised so a census counts them as `unsupported`
-   * under their language instead of losing them (r1 S1), and they grant no
-   * capability until a batch moves them into `extensions` together with its
-   * consumers.
+   * parser map, the code-symbol indexer and the graph glob all skip them.
+   * They are recognised so a census counts them as `unsupported` under their
+   * language instead of losing them (r1 S1), and they grant no capability
+   * until a batch moves them into `extensions` (or
+   * `moduleFlavourExtensions`) together with its consumers.
    */
   readonly recognitionOnlyExtensions: readonly string[];
   /** WASM grammar file, bundled by `scripts/copy-wasm.js`. */

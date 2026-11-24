@@ -9,8 +9,15 @@ jest.mock('../route-tool-handlers', () => ({
   describeZodIssues: () => 'invalid',
 }));
 
+// The real package cannot load under Jest (tree-sitter loader). This stand-in
+// has the excluded folders the specs use; the predicate itself is pinned by
+// workspace-default-excludes.spec.ts.
 jest.mock('@ptah-extension/workspace-intelligence', () => ({
   EXTENSION_LANGUAGE_MAP: { '.ts': 'typescript' },
+  isCodeIndexExcluded: (relativePath: string) =>
+    /(^|\/)(node_modules|dist|build|out|target|tmp|coverage)(\/|$)/.test(
+      relativePath,
+    ),
 }));
 
 const SOURCE = [

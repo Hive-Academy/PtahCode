@@ -246,7 +246,7 @@ describe('buildAstNamespace — analyze', () => {
   it.each([
     ['sample.swift', 'unsupported'],
     ['sample.xyz', 'unrecognised'],
-    ['sample.mjs', 'unsupported'],
+    ['sample.pyi', 'unsupported'],
   ])(
     '24a rejects %s with shared coverage ahead of the path',
     async (file, bucket) => {
