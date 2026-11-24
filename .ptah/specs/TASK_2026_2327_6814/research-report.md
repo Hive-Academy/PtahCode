@@ -43,7 +43,7 @@ The custom target sends no `keep_alive`, but the chappie service sets `OLLAMA_KE
 - The tunnel adds no measurable latency: the same request took 3.0–3.5 s through the tunnel and
   3.4 s on chappie. A `GET /api/ps` round trip through the tunnel took 4 ms.
 
-## 3. chappie host state
+## 3. chappie host state (before F4; see section 7 for the later state)
 
 | Item | Value |
 |---|---|
@@ -74,8 +74,7 @@ effective input tokens per second against total response time.
 | 4 questions, real-size state | 2361 | 53.2 s | 44.4 tokens/s |
 
 Time to first token equals total time: the endpoint returns one JSON body (`output_tokens: 0`).
-A cold test was not possible without an unload, which needs approval. `OLLAMA_KEEP_ALIVE=-1`
-keeps the model resident, so a cold load does not occur in normal use.
+A cold test needed an unload. The user approved it later; the result is in section 7.
 
 Service log today (`journalctl -u ollama --since today`):
 
@@ -90,7 +89,8 @@ Service log today (`journalctl -u ollama --since today`):
 - In the sampled recent time windows, a call started 4 tasks at the same time (one per question).
 - 140 lines `failed to find free space in the KV cache`. The 16 slots share one 4096-token
   KV cache. A 4-question batch (about 2700 tokens) does not fit while other prompts hold cache
-  space, so llama.cpp retries with smaller batches. This adds delay when two callers overlap.
+  space, so llama.cpp retries with smaller batches. This can add delay when callers overlap;
+  how much is not measured (section 7).
 - The µs-long 400/404 responses are the Ptah capability probe. They are expected.
 
 ## 5. Root cause
@@ -104,8 +104,9 @@ Service log today (`journalctl -u ollama --since today`):
 2. **Saved timeout 60 s at measurement time (Ptah setting).** Each model POST could block 60 s
    and then fail. With no end-to-end deadline (router R1), `ptah_route_decide` exceeded the MCP
    call time.
-3. **Shared 4096-token KV cache (host, minor).** Overlapping calls from two sessions queue and
-   retry. This adds delay but does not change the prefill cost.
+3. **Shared 4096-token KV cache (host, minor).** Overlapping calls queue (section 7) and can
+   retry. The share of the retries in the delay is not measured. They do not change the prefill
+   cost.
 
 The host did not degrade. The earlier benchmark measured small questions.
 
@@ -127,7 +128,8 @@ CPU prefill is compute-bound, so Q4 gives little gain.
 - F1, F2: forwarded by the parent session to TASK_2026_2326_5d16.
 - F3: applied by the parent session with the user's approval: `decisionModelTimeoutMs`
   60000 -> 15000.
-- F4: approved by the user and applied; no effect for `d3:4b` (section 7).
+- F4: approved by the user and applied. The runner context did not change, so its expected
+  effect is unverified (section 7).
 
 ## 7. F4 and cold-load results (approved by the user, 2026-11-24, relayed by the parent)
 
@@ -138,38 +140,45 @@ Change applied on chappie: backup of `/etc/systemd/system/ollama.service.d/` to
 change throughput. After the restart, the service is `active` with `OLLAMA_CONTEXT_LENGTH=8192`,
 `OLLAMA_KEEP_ALIVE=-1`, and `d3:4b` is resident `Forever`.
 
-**F4 has no effect for this model.** llama-server still runs with `-c 4096 -np 16`, because the
-`d3:4b` Modelfile sets `PARAMETER num_ctx 4096`, and a model parameter overrides
-`OLLAMA_CONTEXT_LENGTH`. A larger KV cache needs a derived model (for example a Modelfile
-`FROM d3:4b` with `PARAMETER num_ctx 8192`) and a change of the Ptah model id. That is a new
-model and is not approved. The drop-in stays in place (approved, no effect); remove it with
-`sudo rm` of the file, `daemon-reload` and a restart if it is not wanted.
+**F4 did not change the runner context.** After the restart, llama-server still runs with
+`-c 4096 -np 16`. The `d3:4b` Modelfile sets `PARAMETER num_ctx 4096`. This model parameter is
+the explanation that the configuration supports: it takes precedence over
+`OLLAMA_CONTEXT_LENGTH`. A derived model (for example a Modelfile `FROM d3:4b` with
+`PARAMETER num_ctx 8192`) and a change of the Ptah model id is an untested option. It is a new
+model and is not approved. The drop-in stays in place; remove it with `sudo rm` of the file,
+`daemon-reload` and a restart if it is not wanted.
 
 Measurements through `127.0.0.1:11435` (requests without `keep_alive`):
 
 | Test | Before F4 | After F4 |
 |---|---|---|
-| Warm, 4 questions, 2361 tokens | 51.2 s | 51.5 s |
-| Two overlapping 4-question callers | A 51.8 s, B 103.7 s (run one after the other) | B 90.3 s (A not captured) |
+| Warm, 4 questions, 2361 tokens (separate F4 baseline; section 4 trial: 53.2 s) | 51.2 s | 51.5 s |
+| Two overlapping 4-question callers, A started in the background and B at once after it | A 51.8 s, B 103.7 s | B 90.3 s (A not captured) |
 | `failed to find free space in the KV cache` lines, single call | 3 | 1 |
 | Same, overlap test | 0 | 1 |
 | Cold: first 159-token request after unload | 17.3 s (`ollama stop`, then request; warm = 3.5 s) | 54.0 s after the restart, not valid: an outside call (HTTP 500 at 59.98 s, 18:31:30) ran at the same time |
 
 Conclusions:
 
-- The cold load costs about 14 s (17.3 s - 3.5 s). With `OLLAMA_KEEP_ALIVE=-1` it happens only
-  after a service restart or an explicit unload.
-- The server runs two overlapping `/v1/systemone` calls one after the other, so a second caller
-  waits for the first one. The KV-full retries were rare in these tests and are not a cause.
-- A request `keep_alive` value replaces the server value. A test request with `"30m"` changed
-  the residency from `Forever` to 30 minutes. The custom target sends no `keep_alive`, but a
-  daemon target sends `30m` (`system-one.residency.ts:18`).
-- At 18:31:30, after the parent set `decisionModelTimeoutMs` to 15000, a caller still aborted at
-  about 60 s. A running Ptah process or another client still uses the 60 s timeout.
+- In the unload trial, the cold request took about 14 s more than the warm request
+  (17.3 s - 3.5 s = 13.8 s). `OLLAMA_KEEP_ALIVE=-1` keeps the model loaded between calls; a
+  restart and an explicit unload are the two cold cases this task observed.
+- Before F4, B finished 51.9 s after A, close to the 51.2 s single-call time. This is consistent
+  with the server running the two calls one after the other (queueing). After F4, A was not
+  captured, so the order is unknown. The first overlap trial had a long wait and 0 KV-full lines,
+  so the wait happened without a logged retry. The counts do not show how much retries add in
+  other cases (sections 4 and 5).
+- In one test, a request with `"keep_alive": "30m"` changed the residency from `Forever` to
+  30 minutes. The custom target sends no `keep_alive`, but a local daemon target sends `30m`
+  (`system-one.residency.ts:18`).
+- At 18:31:30, after the parent set `decisionModelTimeoutMs` to 15000, a call that overlapped
+  the restart returned HTTP 500 after 59.98 s. The log does not show which client sent it or what
+  ended it. A client-side trace is necessary to find out whether a caller still uses 60 s.
 
 ## Open items
 
-- F4 had no effect (see section 7). A derived model with `num_ctx 8192` needs a new decision.
-- A caller still uses a 60 s timeout after the F3 change (see section 7).
+- F4 did not change the runner context (section 7). A derived model with `num_ctx 8192` is
+  untested and needs a new decision.
+- An HTTP 500 after 59.98 s at 18:31:30, after the F3 change (section 7). The client is unknown.
 - Per-question token attribution inside the Ollama renderer is inferred from `input_tokens`
   (590 vs 2361), not from a server trace.
