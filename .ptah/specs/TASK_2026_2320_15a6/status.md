@@ -29,3 +29,8 @@
 - 20:40Z — CI on 5e361761f: all checks pass. `git-real-git (macos-latest)` first ended
   `cancelled` with no step run (runner problem); one job rerun passed. CodeRabbit skipped
   (`.ptah/specs/**` path filter). Waiting for human review; not merged.
+- 2026-11-24 — Second successor. Fixed the 3 PtahCode threads on the harness: per-run control
+  token and RPC allowlist (`drive.mjs`), abort of a timed-out Ptah chat, spawn ENOENT recorded
+  as a failed task (`stage2.mjs`). `node --check` passes. No paid runs. Report corrected: turn 1
+  prompt about 45k (r6) vs 56k (r7), suspected cause PR #1475, unproven. The report also now
+  records that the timed-out code-mode chat overlapped task 8 for about 13 s.

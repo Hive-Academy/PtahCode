@@ -175,25 +175,55 @@ function parseCodex(file) {
   return { calls, answer, resultChars, tok, model, done };
 }
 
+// drive.mjs writes a random per-run token here; every control request sends it.
+const TOKEN_FILE = path.join(TH, 'bench-control-token');
 async function rpc(method, params, timeoutMs = 60000) {
   const r = await fetch(`${CONTROL}/rpc`, {
     method: 'POST',
+    headers: { 'x-bench-token': fs.readFileSync(TOKEN_FILE, 'utf8').trim() },
     body: JSON.stringify({ method, params, timeoutMs }),
   });
   return r.json();
 }
 
+// A timed-out Ptah chat must not run on into the next task: abort it and wait
+// until its transcript stops growing.
+async function abortChat(sessionId, file) {
+  if (!sessionId) return 'no sessionId to abort';
+  try {
+    const r = await rpc('chat:abort', { sessionId, source: 'stop-button' });
+    if (!r.success) return `chat:abort ${JSON.stringify(r).slice(0, 200)}`;
+  } catch (e) {
+    return `chat:abort ${String(e?.message ?? e)}`;
+  }
+  if (file) await waitFor(() => Date.now() - fs.statSync(file).mtimeMs > 10000, 60000);
+  else await sleep(10000);
+  return 'aborted';
+}
+
 function run(cmd, args, opts, timeoutMs) {
   return new Promise((resolve) => {
-    const child = spawn(cmd, args, { ...opts, stdio: ['ignore', 'pipe', 'pipe'] });
+    let child;
+    try {
+      child = spawn(cmd, args, { ...opts, stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (e) {
+      resolve({ code: null, out: '', spawnError: String(e?.message ?? e) });
+      return;
+    }
     let out = '';
+    let settled = false;
+    const finish = (r) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ out, ...r });
+    };
     child.stdout.on('data', (c) => (out += c));
     child.stderr.on('data', (c) => (out += c));
     const timer = setTimeout(() => child.kill('SIGKILL'), timeoutMs);
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      resolve({ code, out });
-    });
+    // e.g. ENOENT when the native CLI is not on PATH: fail this task only
+    child.on('error', (e) => finish({ code: null, spawnError: `${cmd}: ${e.code ?? e.message}` }));
+    child.on('close', (code) => finish({ code }));
   });
 }
 
@@ -226,11 +256,17 @@ async function ptahHaiku(q) {
     options: { model: 'haiku' },
   });
   if (!r.success) return { error: `chat:start ${JSON.stringify(r).slice(0, 200)}` };
+  const sessionId = r.data?.sessionId;
+  // Prefer the transcript named after the started session; else the first new one.
+  const pick = () => {
+    const fresh = listFiles(claudeDir).filter((x) => !before.has(x) && !x.includes('/subagents/'));
+    return fresh.find((x) => sessionId && path.basename(x, '.jsonl') === sessionId) ?? fresh[0];
+  };
   const file = await waitFor(() => {
-    const f = listFiles(claudeDir).find((x) => !before.has(x) && !x.includes('/subagents/'));
+    const f = pick();
     return f && claudeDone(f) ? f : null;
   }, 300000);
-  if (!file) return { error: 'timeout' };
+  if (!file) return { error: `timeout (${await abortChat(sessionId, pick())})` };
   return { file, ...parseClaude(file) };
 }
 
@@ -255,6 +291,7 @@ async function nativeHaiku(q) {
     { cwd: WS, env: cleanEnv() },
     300000,
   );
+  if (r.spawnError) return { error: `spawn failed: ${r.spawnError}` };
   const file = listFiles(claudeDir).find((x) => !before.has(x) && !x.includes('/subagents/'));
   if (!file) return { error: `no transcript, exit ${r.code}: ${r.out.slice(0, 200)}` };
   return { file, ...parseClaude(file) };
@@ -275,8 +312,8 @@ async function ptahCodex(q) {
     const f = listFiles(dir).find((x) => !before.has(x));
     return f && parseCodex(f).done ? f : null;
   }, 360000);
+  if (!file) return { error: `timeout (${await abortChat(r.data?.sessionId)})` };
   await sleep(20000); // let the haiku spawner turn end
-  if (!file) return { error: 'timeout' };
   return { file, ...parseCodex(file) };
 }
 
@@ -292,6 +329,7 @@ async function nativeCodex(q) {
     { cwd: WS, env: cleanEnv({ CODEX_HOME: CODEX_NATIVE_HOME }) },
     360000,
   );
+  if (r.spawnError) return { error: `spawn failed: ${r.spawnError}` };
   const file = listFiles(dir).find((x) => !before.has(x));
   if (!file) return { error: `no rollout, exit ${r.code}: ${r.out.slice(0, 200)}` };
   return { file, ...parseCodex(file) };

@@ -14,6 +14,12 @@ Live rerun of the navigation benchmark of TASK_2026_2299_d6f5. Round 6 is "befor
   alive. Only recorded PIDs were stopped (by `POST /stop`).
 - The harness copy is in `harness/` (secret-free). Raw rows and transcripts stay in
   `.ptah/tmp/bench/` and are not committed: transcripts hold the account e-mail.
+- After the PR review, the committed harness differs from the copy that ran: the control API
+  of `drive.mjs` needs a random per-run token (`x-bench-token`) and forwards only 4 RPC
+  methods, `stage2.mjs` aborts a timed-out Ptah chat before the next task, and a missing
+  native CLI fails only its task. The rows in this report come from the earlier copy. One
+  task hit the chat timeout path: the first code-mode pass of `files-session-handoff` (see
+  Code Mode arm). The earlier copy did not abort that chat, and it overlapped the next task.
 
 ## Method
 
@@ -88,12 +94,15 @@ Code Mode "after" uses the retry row for `files-session-handoff` (see Code Mode)
 ## Deltas (all 8 tasks, after vs before)
 
 - **ptah-haiku**: correctness equal (8/8). Calls 11 → 14. Weighted +36% (341k → 464k). Wall time
-  equal. The per-task cost rose on every task: one-call tasks cost about 55k weighted now and
-  42k in round 6. The first turn of a session now writes and reads about 56k tokens of prompt
-  (example: `usages-text-abort-reason-superseded`, cacheWrite 36,333 + cacheRead 19,518 on
-  turn 1). The larger fixed prompt explains the increase, not more tool calls. The source of
-  the larger prompt (system prompt, tool schemas, or the claude.ai connectors that the
-  isolated Claude login attaches, see harness note 4) was not isolated in this run.
+  equal. The per-task cost rose on every task. The prompt of each turn grew by about 10k
+  tokens. A one-call task has 2 turns: its cacheWrite + cacheRead is about 91k in round 6
+  (90,875–92,843) and about 111k now (111,166–112,658). So turn 1 is about 45k tokens in
+  round 6 and about 56k now (example: `usages-text-abort-reason-superseded`, cacheWrite
+  36,333 + cacheRead 19,518 on turn 1). The larger fixed prompt explains the increase, not
+  more tool calls. Suspected cause, not proven: PR #1475 ("one source for ptah tool
+  substitution guidance", merge 467a1ddb6, included in build head cd25c1cac). This run did
+  not isolate the source. Other possible sources are the tool schemas and the claude.ai connectors that the
+  isolated Claude login attaches (see harness note 4).
 - **ptah-codex**: correctness equal (7/8), but a different task failed (see wrong answers).
   Calls 33 → 36. Weighted +29% (142k → 183k), mostly non-cached input (79k → 123k). Wall time
   −40% (713 s → 429 s).
@@ -120,11 +129,20 @@ Code Mode is new in this round. The agent can use only `execute_code` and the `p
   per task). The deny list probably removes the denied tool schemas from the prompt. This run
   did not isolate that cause. The cache read is higher (1,441k vs 714k) because of the many
   turns.
-- Retry: the first pass of `files-session-handoff` timed out after 302 s with 0 calls. The
-  transcript shows API connection errors (StreamNoResponse after about 150 s, then
-  ECONNREFUSED), so it is a harness/service failure, not an answer. The one allowed retry ran
-  on the restarted instance: correct, 4 calls, 25k weighted, 22 s. The timeout row stays in
-  the raw file. The table uses the retry row.
+- Retry: the first pass of `files-session-handoff` timed out after 302 s. The row shows 0
+  calls because the harness found no finished transcript. The transcript
+  (`125b0a41…`) shows 2 calls (19:35:27–19:35:30Z), then API connection errors
+  (StreamNoResponse at 19:38:02Z, ECONNREFUSED at 19:40:17Z). So it is a harness/service
+  failure, not an answer. The one allowed retry ran on the restarted instance: correct, 4
+  calls, 25k weighted, 22 s. The timeout row stays in the raw file. The table uses the retry
+  row.
+- Overlap after that timeout: the earlier harness did not abort the chat. The session
+  recovered and made 3 more `execute_code` calls (19:40:19–19:40:31Z) and an answer at
+  19:40:35Z. Task 8 (`concept-release-attach-claim`) ran 19:40:22–19:40:42Z, so the two
+  sessions shared the instance for about 13 s. Task 8 was scored from its own transcript
+  (`5b1015b2…`, its own question): the older file was already in the harness's "before"
+  set. Task 8 was correct. Its wall time (20 s) may include some contention. The committed
+  harness now aborts a timed-out chat before the next task.
 - Wrong answer `concept-clamp-read-tail` (missing `clampTail`): 10 calls. The agent read
   `ptah.help()`, scanned files by hand, and never found a symbol search. It answered
   `retainSubagentEventsTail`. The API has `ptah.code.searchSymbols`, but the help does not show

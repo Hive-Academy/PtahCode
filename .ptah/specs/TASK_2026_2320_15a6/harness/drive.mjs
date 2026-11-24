@@ -10,11 +10,16 @@
  *   GET  /health
  *   POST /stop  -> closes the app and exits
  *
+ * Every endpoint needs the header `x-bench-token: <token>`. The token is random
+ * per run and is written (mode 0600) to <live-test-home>/bench-control-token,
+ * where stage2.mjs reads it. /rpc forwards only the methods in RPC_ALLOW.
+ *
  * Every `to-renderer` message the main process sends is appended to
  * events.jsonl (one JSON object per line, with `t` = epoch ms).
  *
  * Usage: node drive.mjs [--control-port=51991]
  */
+import { randomBytes, timingSafeEqual } from 'node:crypto';
 import * as fs from 'node:fs';
 import * as http from 'node:http';
 import * as path from 'node:path';
@@ -30,6 +35,20 @@ const ENTRY = path.join(WORKTREE, 'dist', 'apps', 'ptah-electron', 'main.mjs');
 const EVENTS = path.join(HERE, 'events.jsonl');
 const portArg = process.argv.find((a) => a.startsWith('--control-port='));
 const CONTROL_PORT = portArg ? Number(portArg.split('=')[1]) : 51991;
+const TOKEN_FILE = path.join(TH, 'bench-control-token');
+const TOKEN = randomBytes(32).toString('hex');
+// Only the RPC methods that the benchmark needs.
+const RPC_ALLOW = new Set([
+  'chat:start',
+  'chat:abort',
+  'config:autopilot-toggle',
+  'indexing:getStatus',
+]);
+const authorized = (req) => {
+  const got = Buffer.from(String(req.headers['x-bench-token'] ?? ''));
+  const want = Buffer.from(TOKEN);
+  return got.length === want.length && timingSafeEqual(got, want);
+};
 
 // Whitelist only: nothing of the hosting session (ANTHROPIC_*, CLAUDE_*,
 // ELECTRON_*, DBUS, real XDG dirs) may reach the test instance.
@@ -155,7 +174,9 @@ async function main() {
         res.end(JSON.stringify(obj));
       };
       try {
+        if (!authorized(req)) return send(401, { error: 'unauthorized' });
         if (req.url === '/health') return send(200, { ok: true, pid: app.process().pid });
+        if (req.method !== 'POST') return send(405, { error: 'POST only' });
         if (req.url === '/stop') {
           send(200, { ok: true });
           clearInterval(drain);
@@ -164,6 +185,7 @@ async function main() {
         }
         if (req.url === '/rpc') {
           const { method, params, timeoutMs } = JSON.parse(body);
+          if (!RPC_ALLOW.has(method)) return send(403, { error: `method not allowed: ${method}` });
           return send(200, await rpc(method, params ?? {}, timeoutMs ?? 20_000));
         }
         send(404, { error: 'unknown' });
@@ -172,8 +194,9 @@ async function main() {
       }
     });
   });
+  fs.writeFileSync(TOKEN_FILE, TOKEN, { mode: 0o600 });
   server.listen(CONTROL_PORT, '127.0.0.1', () =>
-    console.log(`[drive] control on http://127.0.0.1:${CONTROL_PORT}`),
+    console.log(`[drive] control on http://127.0.0.1:${CONTROL_PORT} (token in ${TOKEN_FILE})`),
   );
   app.process().on('exit', (code) => {
     console.log(`[drive] app exited ${code}`);
