@@ -431,7 +431,7 @@ export class ClaudeSdkLaneRunner {
       ]);
       const failed = models.status === 'rejected' || commands.status === 'rejected';
       if (failed)
-        // degradation-audit: reported - the catalog carries `error` for the composer and the failure is logged.
+        // Not silent: the catalog carries `error` for the composer and the failure is logged.
         this.logger.warn('[ClaudeLane] Lane turn options could not be read.', {
           models: models.status,
           commands: commands.status,

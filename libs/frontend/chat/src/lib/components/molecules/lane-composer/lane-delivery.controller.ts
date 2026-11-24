@@ -482,6 +482,8 @@ export class LaneDeliveryController {
       acceptedMessages.delete(messageId);
       return message;
     } catch {
+      // degradation-audit: reported - the failure is shown to the user through
+      // errorFor and the queued message stays for a retry; null means "not withdrawn".
       this.errorFor(agentId, 'Could not cancel the queued message. Try again.');
       return null;
     }
