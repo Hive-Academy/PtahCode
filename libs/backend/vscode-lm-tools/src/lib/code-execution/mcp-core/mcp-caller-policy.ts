@@ -123,7 +123,7 @@ const TASK_GIT_TOOLS: ReadonlySet<string> = new Set([
 
 const HARNESS_TOOLS: ReadonlySet<string> = new Set([
   'ptah_harness_create_skill',
-  'ptah_harness_install_mcp',
+  'ptah_harness_install_mcp_server',
   'ptah_harness_propose_config',
   'ptah_code_reindex',
   'ptah_artifact_publish',

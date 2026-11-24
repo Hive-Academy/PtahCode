@@ -6,7 +6,12 @@
  */
 
 import type { McpGatewayCallResult } from '@ptah-extension/platform-core';
+import type { GatewayEndpoint } from './server-sources';
 import type { UpstreamCallResult } from './upstream-client';
+
+const MAX_ERROR_TEXT = 500;
+/** Shorter values are too common to redact without mangling the text. */
+const MIN_REDACTED_LENGTH = 4;
 
 export function errorResult(text: string): McpGatewayCallResult {
   return { content: [{ type: 'text', text }], isError: true };
@@ -37,6 +42,53 @@ export function isProtocolError(error: unknown): boolean {
     error.code < 0 &&
     error.code !== -32000
   );
+}
+
+/**
+ * A list the server answered with an error, or did not answer in time. The
+ * process may be healthy (a slow first list after a cold start), so a stdio
+ * server keeps it rather than being killed and counted as a restart (S1).
+ * A closed connection (-32000) is neither.
+ */
+export function isSlowOrRefusedList(error: unknown): boolean {
+  if (isProtocolError(error)) return true;
+  const name =
+    typeof error === 'object' && error !== null && 'name' in error
+      ? error.name
+      : undefined;
+  return name === 'TimeoutError';
+}
+
+/**
+ * Error text safe for status and tool results: the URL and the dedup key
+ * (either may carry a key) become `<server>`; a stdio server's command,
+ * arguments and env values (any may be a secret) become `<redacted>`.
+ * Bounded to {@link MAX_ERROR_TEXT} characters.
+ */
+export function redactGatewayText(
+  text: string,
+  endpoint: GatewayEndpoint,
+  key: string,
+): string {
+  let out = text;
+  const url = endpoint.transport === 'stdio' ? '' : endpoint.url;
+  for (const secret of [url, key]) {
+    if (secret !== '') out = out.split(secret).join('<server>');
+  }
+  if (endpoint.transport === 'stdio') {
+    const values = [
+      endpoint.command,
+      ...endpoint.args,
+      ...Object.values(endpoint.env),
+    ]
+      .filter((value) => value.length >= MIN_REDACTED_LENGTH)
+      // Longest first, so a value that contains another is removed whole.
+      .sort((a, b) => b.length - a.length);
+    for (const value of values) out = out.split(value).join('<redacted>');
+  }
+  return out.length > MAX_ERROR_TEXT
+    ? `${out.slice(0, MAX_ERROR_TEXT)}...`
+    : out;
 }
 
 export function errorText(error: unknown): string {

@@ -34,6 +34,8 @@
  * their servers on the next macrotask, so the first session or cron run finds
  * the lists loaded or in flight instead of paying the cold wait. It never
  * blocks the subscriber, runs once per gateway, and only logs a failure.
+ * Pre-warm loads remote servers only: a stdio server starts on its root's
+ * first list or call (S2), so boot spawns no process in every open folder.
  *
  * ## Stdio servers (C10)
  *
@@ -42,7 +44,19 @@
  * below. The host adds its own restart cap and idle shutdown; a connected
  * stdio server's list is refreshed on `list_changed` or a restart only, never
  * by age, so a list does not restart a process that was stopped for idling.
- * {@link dispose} stops every process tree.
+ * The poll and {@link refresh} reload a stdio server only for a root that
+ * listed or called within {@link STDIO_IDLE_MS} (S2): a root nobody uses gets
+ * no new process, and the host stops the running one once it idles, so a
+ * worktree folder is not held open. A stdio list that timed out or was
+ * refused keeps the process (S1); only a closed or failed connection kills
+ * it. {@link dispose} stops every process tree and settles once they stopped.
+ *
+ * ## Read ordering (S5)
+ *
+ * The poll, {@link refresh} and lists read a root concurrently. Each read
+ * takes a sequence number; a read that a newer read of the same root
+ * overtook writes nothing and answers with the newer read's view, so a read
+ * that saw the sources before an install never replaces the view after it.
  *
  * ## Failures
  *
@@ -84,23 +98,26 @@ import {
   PTAH_MCP_SERVER_NAME,
   type ICapabilityResolver,
 } from '@ptah-extension/shared';
+import { assignGatewayAliases } from './gateway-tool-naming';
 import {
-  assignGatewayAliases,
-  buildGatewayToolName,
-} from './gateway-tool-naming';
+  buildGatewayToolList,
+  type GatewayToolRoute,
+} from './gateway-tool-list';
 import {
   GATEWAY_SOURCES_CACHE_MS,
   type GatewayEndpoint,
   type GatewayServerSources,
   type GatewaySourcesLogger,
 } from './server-sources';
-import { StdioServerHost } from './stdio-server-host';
+import { STDIO_IDLE_MS, StdioServerHost } from './stdio-server-host';
 import {
   errorName,
   errorResult,
   errorText,
   isProtocolError,
+  isSlowOrRefusedList,
   normalizeCallResult,
+  redactGatewayText,
 } from './gateway-call-result';
 import {
   createUpstreamClient,
@@ -127,7 +144,6 @@ export const GATEWAY_POLL_MS = GATEWAY_SOURCES_CACHE_MS;
 export const GATEWAY_MAX_ROOTS = 32;
 
 const NEEDS_AUTH_DETAIL = 'reconnect in Settings > Connectors';
-const MAX_ERROR_TEXT = 500;
 
 export interface McpGatewayDeps {
   readonly sources: Pick<GatewayServerSources, 'list' | 'invalidate'>;
@@ -175,21 +191,24 @@ interface ServerState {
   closed: boolean;
 }
 
-interface Route {
-  readonly key: string;
-  readonly upstreamName: string;
-}
-
 interface RootView {
   readonly endpoints: readonly GatewayEndpoint[];
   readonly aliases: ReadonlyMap<string, string>;
   readonly fingerprint: string;
-  routes: ReadonlyMap<string, Route>;
+  routes: ReadonlyMap<string, GatewayToolRoute>;
 }
 
 export class McpGateway implements IMcpGateway {
   private readonly servers = new Map<string, ServerState>();
   private readonly roots = new Map<string, RootView>();
+  /** The newest read of each root still running (S5). */
+  private readonly rootReads = new Map<
+    string,
+    { readonly seq: number; readonly view: Promise<RootView | null> }
+  >();
+  private readSeq = 0;
+  /** Last list or call per root; gates stdio loads by the poll (S2). */
+  private readonly rootUsedAt = new Map<string, number>();
   private readonly listeners = new Set<() => void>();
   private hostToolNames: ReadonlySet<string> = new Set();
   private readonly clientFactory: UpstreamClientFactory;
@@ -225,6 +244,7 @@ export class McpGateway implements IMcpGateway {
   ): Promise<readonly McpGatewayTool[]> {
     const root = this.permittedRoot(scope);
     if (root === null) return [];
+    this.rootUsedAt.set(root, this.now());
     const view = await this.refreshRoot(root);
     if (view === null || this.disposed) return [];
 
@@ -248,6 +268,7 @@ export class McpGateway implements IMcpGateway {
     if (root === null) {
       return errorResult('Gateway tools are not available to this caller.');
     }
+    this.rootUsedAt.set(root, this.now());
     const bare = stripPtahMcpToolPrefix(name);
     let route = this.roots.get(root)?.routes.get(bare);
     if (route === undefined) {
@@ -312,7 +333,7 @@ export class McpGateway implements IMcpGateway {
       });
       const message = state.unauthorized
         ? `authorization failed; ${NEEDS_AUTH_DETAIL}`
-        : redact(errorText(error), state);
+        : redactGatewayText(errorText(error), state.endpoint, state.key);
       return errorResult(`${display} error: ${message}`);
     }
   }
@@ -389,7 +410,11 @@ export class McpGateway implements IMcpGateway {
     }
   }
 
-  dispose(): void {
+  /**
+   * Terminal. The kills start before the first `await`; the promise settles
+   * once the stdio host stopped every process. Never rejects.
+   */
+  async dispose(): Promise<void> {
     if (this.disposed) return;
     this.disposed = true;
     this.stopPoll();
@@ -397,13 +422,17 @@ export class McpGateway implements IMcpGateway {
     for (const state of this.servers.values()) this.closeState(state);
     this.servers.clear();
     this.roots.clear();
-    this.stdioHost.dispose().catch((error: unknown) => {
+    this.rootReads.clear();
+    this.rootUsedAt.clear();
+    try {
+      await this.stdioHost.dispose();
+    } catch (error: unknown) {
       // degradation-audit: reported - logged; every client was already told
       // to stop its process tree above.
       this.deps.logger?.warn('MCP gateway could not stop its stdio servers', {
         error: errorName(error),
       });
-    });
+    }
   }
 
   // ---- roots -----------------------------------------------------------------
@@ -417,9 +446,32 @@ export class McpGateway implements IMcpGateway {
   /**
    * Re-read the served set for `root`, update the server states, close the
    * servers no root serves any more, and announce a changed set. Returns the
-   * last known view when the sources fail, or null when there is none.
+   * last known view when the sources fail, or null when there is none. A
+   * read overtaken by a newer read of the same root writes nothing (S5).
    */
-  private async refreshRoot(root: string): Promise<RootView | null> {
+  private refreshRoot(root: string): Promise<RootView | null> {
+    const seq = ++this.readSeq;
+    const view = this.readRoot(root, seq).finally(() => {
+      if (this.rootReads.get(root)?.seq === seq) this.rootReads.delete(root);
+    });
+    this.rootReads.set(root, { seq, view });
+    return view;
+  }
+
+  /**
+   * Undefined while `seq` is the newest read of `root`; otherwise the newer
+   * read's view, or the view it already wrote.
+   */
+  private overtaken(
+    root: string,
+    seq: number,
+  ): Promise<RootView | null> | undefined {
+    const newest = this.rootReads.get(root);
+    if (newest?.seq === seq) return undefined;
+    return newest?.view ?? Promise.resolve(this.roots.get(root) ?? null);
+  }
+
+  private async readRoot(root: string, seq: number): Promise<RootView | null> {
     let endpoints: GatewayEndpoint[];
     try {
       const [set, policy] = await Promise.all([
@@ -437,9 +489,11 @@ export class McpGateway implements IMcpGateway {
       this.deps.logger?.warn('MCP gateway could not resolve its servers', {
         error: errorName(error),
       });
-      return this.roots.get(root) ?? null;
+      return this.overtaken(root, seq) ?? this.roots.get(root) ?? null;
     }
     if (this.disposed) return null;
+    const newer = this.overtaken(root, seq);
+    if (newer !== undefined) return newer;
 
     const aliases = assignGatewayAliases(endpoints);
     const fingerprint = endpoints
@@ -459,6 +513,7 @@ export class McpGateway implements IMcpGateway {
       const oldest = this.roots.keys().next().value;
       if (oldest === undefined) break;
       this.roots.delete(oldest);
+      this.rootUsedAt.delete(oldest);
     }
     this.closeUnserved();
     if (previous !== undefined && previous.fingerprint !== fingerprint) {
@@ -703,7 +758,11 @@ export class McpGateway implements IMcpGateway {
       // needs-auth with back-off and logged; status() surfaces it and every
       // other server still lists.
       if (state.closed) return;
-      this.markFailed(state, error);
+      // A stdio process that listed slowly or refused the list is still
+      // running: keep it, so a cold start is not counted as a restart (S1).
+      const keepProcess =
+        state.transport === 'stdio' && isSlowOrRefusedList(error);
+      this.markFailed(state, error, keepProcess);
       this.deps.logger?.warn('MCP gateway tools/list failed', {
         server: state.endpoint.serverName,
         durationMs: this.now() - started,
@@ -712,26 +771,32 @@ export class McpGateway implements IMcpGateway {
     }
   }
 
-  private markFailed(state: ServerState, error: unknown): void {
+  private markFailed(
+    state: ServerState,
+    error: unknown,
+    keepSession = false,
+  ): void {
     const needsAuth = state.unauthorized;
     state.status = needsAuth ? 'needs-auth' : 'failed';
     state.detail = needsAuth
       ? NEEDS_AUTH_DETAIL
-      : redact(errorText(error), state);
+      : redactGatewayText(errorText(error), state.endpoint, state.key);
     state.backoffMs =
       state.backoffMs === 0
         ? GATEWAY_BACKOFF_INITIAL_MS
         : Math.min(state.backoffMs * 2, GATEWAY_BACKOFF_MAX_MS);
     state.retryAt = this.now() + state.backoffMs;
     // Drop the session so the next attempt reconnects from scratch.
-    state.client.close().catch((closeError: unknown) => {
-      // degradation-audit: reported - logged; the next attempt reconnects
-      // regardless.
-      this.deps.logger?.debug('MCP gateway could not close an upstream', {
-        server: state.endpoint.serverName,
-        error: errorName(closeError),
+    if (!keepSession) {
+      state.client.close().catch((closeError: unknown) => {
+        // degradation-audit: reported - logged; the next attempt reconnects
+        // regardless.
+        this.deps.logger?.debug('MCP gateway could not close an upstream', {
+          server: state.endpoint.serverName,
+          error: errorName(closeError),
+        });
       });
-    });
+    }
     if (needsAuth && state.tools !== null) {
       // A revoked connector's tools go away until it is reconnected.
       state.tools = null;
@@ -757,41 +822,17 @@ export class McpGateway implements IMcpGateway {
   // ---- tools -----------------------------------------------------------------
 
   private buildTools(view: RootView): McpGatewayTool[] {
-    const routes = new Map<string, Route>();
-    const tools: McpGatewayTool[] = [];
-    for (const endpoint of view.endpoints) {
-      const state = this.servers.get(endpoint.key);
-      const alias = view.aliases.get(endpoint.key);
-      if (state === undefined || alias === undefined) continue;
-      if (state.tools === null) {
-        state.missedByList = true;
-        continue;
-      }
-      const display = endpoint.serverName;
-      for (const tool of state.tools) {
-        const name = buildGatewayToolName(alias, tool.name, this.hostToolNames);
-        if (name === null || routes.has(name)) {
-          this.deps.logger?.debug('MCP gateway skipped a tool name', {
-            server: display,
-            tool: tool.name,
-          });
-          continue;
-        }
-        routes.set(name, { key: endpoint.key, upstreamName: tool.name });
-        const text = tool.description ?? tool.title ?? '';
-        tools.push({
-          name,
-          description: `[${display} via Ptah] ${text}`.trimEnd(),
-          inputSchema: tool.inputSchema,
-          ...(tool.annotations === undefined
-            ? {}
-            : { annotations: tool.annotations }),
-          ...(tool.outputSchema === undefined
-            ? {}
-            : { outputSchema: tool.outputSchema }),
-        });
-      }
-    }
+    const { tools, routes } = buildGatewayToolList({
+      endpoints: view.endpoints,
+      aliases: view.aliases,
+      toolsOf: (key) => this.servers.get(key)?.tools,
+      hostToolNames: this.hostToolNames,
+      onMissing: (key) => {
+        const state = this.servers.get(key);
+        if (state !== undefined) state.missedByList = true;
+      },
+      logger: this.deps.logger,
+    });
     view.routes = routes;
     return tools;
   }
@@ -806,7 +847,10 @@ export class McpGateway implements IMcpGateway {
     timer.unref?.();
   }
 
-  /** Resolve each root and start its servers' first loads. Never rejects. */
+  /**
+   * Resolve each root and start its remote servers' first loads; stdio
+   * servers wait for their root's first list or call (S2). Never rejects.
+   */
   private async prewarm(): Promise<void> {
     try {
       const roots = this.deps.prewarmRoots?.() ?? [];
@@ -816,6 +860,7 @@ export class McpGateway implements IMcpGateway {
         const view = await this.refreshRoot(root);
         if (view === null || this.disposed) continue;
         for (const state of this.statesOf(view)) {
+          if (state.transport === 'stdio') continue;
           if (this.dueForBackgroundLoad(state)) void this.load(state);
         }
       }
@@ -855,17 +900,26 @@ export class McpGateway implements IMcpGateway {
   /**
    * Re-read each known root in turn (`refreshRoot` emits for a changed set)
    * and start loading the servers that are not serving. Connected lists
-   * refresh on the next `tools/list`.
+   * refresh on the next `tools/list`. A stdio server is loaded only while its
+   * root is in use (S2).
    */
   private async rereadKnownRoots(): Promise<void> {
     for (const root of [...this.roots.keys()]) {
       const view = await this.refreshRoot(root);
       if (view === null || this.disposed) continue;
+      const rootInUse = this.rootInUse(root);
       for (const state of this.statesOf(view)) {
         if (state.status === 'connected' && !state.stale) continue;
+        if (state.transport === 'stdio' && !rootInUse) continue;
         if (this.dueForBackgroundLoad(state)) void this.load(state);
       }
     }
+  }
+
+  /** The root listed or called within {@link STDIO_IDLE_MS}. */
+  private rootInUse(root: string): boolean {
+    const usedAt = this.rootUsedAt.get(root);
+    return usedAt !== undefined && this.now() - usedAt < STDIO_IDLE_MS;
   }
 
   private emit(): void {
@@ -893,15 +947,4 @@ function urlOf(endpoint: GatewayEndpoint): string {
 
 function toolsFingerprint(tools: readonly UpstreamTool[]): string {
   return JSON.stringify(tools);
-}
-
-/** Remove the URL and the dedup key (either may carry a key) and bound it. */
-function redact(text: string, state: ServerState): string {
-  let out = text;
-  for (const secret of [state.url, state.key]) {
-    if (secret !== '') out = out.split(secret).join('<server>');
-  }
-  return out.length > MAX_ERROR_TEXT
-    ? `${out.slice(0, MAX_ERROR_TEXT)}...`
-    : out;
 }

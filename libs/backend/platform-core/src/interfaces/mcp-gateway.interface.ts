@@ -134,6 +134,11 @@ export interface IMcpGateway {
    */
   refresh(): Promise<void>;
 
-  /** Close every upstream connection and drop listeners. */
-  dispose(): void;
+  /**
+   * Close every upstream connection, drop listeners and stop every process the
+   * gateway runs. Terminal. The process-tree kills start before this returns;
+   * the promise settles once they finished, so a quit can wait for them under
+   * its own budget. Never rejects.
+   */
+  dispose(): Promise<void>;
 }

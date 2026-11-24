@@ -41,3 +41,12 @@ Setup: dev build of HEAD 53550a7c3 (B14-B23) plus B24 work in progress, same `te
 | LR-P2-0 (a) claude.ai account connectors with `strictMcpConfig` on (local, uncommitted toggle in `capabilityIsolationOptions`) | **FAIL** - with strict on, a new main-chat session has one server `ptah` (86 tools, `livecheck__echo` among them) and the MCP panel lists only `ptah` + `livecheck`. Baseline build without the toggle, same prompt: panel lists `ptah`, `claude.ai Claude Docs` (Connecting) and `livecheck`. Strict drops the account connector and the hub does not serve it (R8). Per the B20 brief, B20 is not merged; new user decision raised. | live5/08-reply.png, live5/09-mcp.png, live6/01-baseline.png |
 | LR-P2-0 (b) plugin MCP served by the hub | NOT TESTABLE here - no enabled plugin declares an MCP server on this machine (both runs show none). | same |
 | No duplicate `livecheck` in main chat without strict | PASS - baseline session has `mcp__ptah__livecheck__echo` only; the P1 flag-tier suppression holds. | live6/01-baseline.png |
+
+### P2 live review on the B20 build (HEAD 6d8cbeb04, strict MCP on)
+
+| Item | Result | Evidence |
+|---|---|---|
+| Main chat, strict on: one copy of each server | PASS - one server `ptah`; `mcp__ptah__livecheck__echo` once, no `mcp__livecheck__echo`; MCP panel `ptah` + `livecheck` (gateway). claude.ai connector absent as accepted in row 40. | live7/01-main.png |
+| Claude lane, strict on: no duplicate (P1 finding) | PASS - lane lists only `mcp__ptah__livecheck__echo`; upstream log `call echo("hello-p2-claude")` | live7/04-table.png, echo-mcp log |
+| agy lane sees gateway tools (B22 fix of the P1 FAIL) | PASS - `mcp_ptah_lane_livecheck__echo`, reply `echo: hello-p2-antigravity`, upstream log `call echo("hello-p2-antigravity")` | live7/04-table.png, echo-mcp log |
+| Lanes spawn with the yolo + network default (row 37) | PASS - both lanes spawned with no mode argument and ran the gateway call | same |

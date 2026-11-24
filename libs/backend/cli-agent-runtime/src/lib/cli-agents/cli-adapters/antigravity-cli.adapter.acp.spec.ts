@@ -315,6 +315,35 @@ describe('AntigravityCliAdapter — transport choice', () => {
       expect(adapter.capabilities().messaging.interrupt.state).toBe('supported');
     });
 
+    it.each([
+      ['stream-json', true, false],
+      ['acp', false, true],
+      ['auto', false, false],
+      ['auto', true, true],
+    ] as const)(
+      'attachesMcp with transport %s and probe %s is %s (S4)',
+      async (transport, probeSays, expected) => {
+        const adapter = new AntigravityCliAdapter(undefined, undefined, undefined, {
+          probe: async () => probeSays,
+          transport,
+        });
+        await expect(adapter.attachesMcp('agy')).resolves.toBe(expected);
+      },
+    );
+
+    it('attachesMcp is false while ACP cools down after a setup failure (S4)', async () => {
+      let now = 1_000;
+      const adapter = new AntigravityCliAdapter(undefined, undefined, undefined, {
+        probe: async () => true,
+        transport: 'auto',
+        now: () => now,
+      });
+      Reflect.get(adapter, 'acpFailedAtByBinary').set('agy', now);
+      await expect(adapter.attachesMcp('agy')).resolves.toBe(false);
+      now += AGY_ACP_FAILURE_COOLDOWN_MS;
+      await expect(adapter.attachesMcp('agy')).resolves.toBe(true);
+    });
+
     it('reports an unknown value through onUnknown, but not auto or blank', () => {
       const unknown: string[] = [];
       for (const value of ['acpp', 'auto', '  ', 'ACP']) {

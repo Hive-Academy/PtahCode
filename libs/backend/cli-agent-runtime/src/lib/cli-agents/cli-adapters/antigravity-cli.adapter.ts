@@ -1141,6 +1141,16 @@ export class AntigravityCliAdapter implements CliAdapter {
    * Run the task on `agy acp` when this binary supports it (or the transport
    * is forced to it), else on the stream-json lane.
    */
+  /**
+   * Only the ACP lane attaches MCP. Mirrors the choice {@link runSdk} makes;
+   * an ACP setup that fails over to stream-json mid-run is not foreseen here.
+   */
+  async attachesMcp(binaryPath: string | undefined): Promise<boolean> {
+    const binary = binaryPath ?? 'agy';
+    if (!(await this.probeAcp(binary))) return false;
+    return !(this.transportOverride() === 'auto' && this.acpCoolingDown(binary));
+  }
+
   async runSdk(options: CliCommandOptions): Promise<SdkHandle> {
     const binary = options.binaryPath ?? 'agy';
     if (!(await this.probeAcp(binary))) return this.runStreamJson(options);
@@ -1213,9 +1223,10 @@ export class AntigravityCliAdapter implements CliAdapter {
     // This lane writes no MCP config (TASK_2026_979 decision row 13): `agy`
     // print mode has no per-spawn MCP flag, and the old spawn-time write of
     // the home `mcp_config.json` put a lane credential in a shared file. The
-    // credential the manager minted for the lane is unused here; it is still
-    // revoked through `onMcpConfigRestored` once the lane ends (or fails to
-    // start), the same teardown the ACP lane uses.
+    // manager mints no credential for a lane `attachesMcp` reports as
+    // stream-json; one minted for an ACP lane that fell back here is unused
+    // and revoked through `onMcpConfigRestored` once the lane ends (or fails
+    // to start), the same teardown the ACP lane uses.
     let credentialReleased = false;
     const releaseMcpCredential = (): void => {
       if (credentialReleased) return;

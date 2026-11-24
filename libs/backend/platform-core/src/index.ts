@@ -397,6 +397,7 @@ export { formatSourceHash } from './utils/source-hash';
 export {
   PROCESS_TREE_KILL_GRACE_MS,
   killProcessTree,
+  preloadProcessTreeKill,
 } from './utils/process-tree-reaper';
 export {
   runProcessToCompletion,

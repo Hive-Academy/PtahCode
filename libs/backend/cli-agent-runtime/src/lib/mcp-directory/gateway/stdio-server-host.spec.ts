@@ -1,9 +1,11 @@
+import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { StdioServerParameters } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { PassThrough } from 'node:stream';
 import {
   buildStdioChildEnv,
+  STDIO_FIRST_LIST_TIMEOUT_MS,
   STDIO_IDLE_MS,
   STDIO_RESTART_BACKOFF_MS,
   STDIO_RESTART_LIMIT_DETAIL,
@@ -15,6 +17,7 @@ import {
   type StdioServerSpec,
   type StdioTransportHandle,
 } from './stdio-server-host';
+import { UPSTREAM_LIST_TIMEOUT_MS } from './upstream-client';
 
 const ROOT = '/ws/root';
 const SECRET = 'stdio-secret-value';
@@ -229,6 +232,30 @@ describe('StdioServerHost', () => {
       await h.host.dispose();
     });
 
+    it('gives the first list after each spawn the cold-start timeout (S1)', async () => {
+      const h = harness();
+      const listSpy = jest.spyOn(Client.prototype, 'listTools');
+      try {
+        const client = h.host.createClient(h.options());
+        await client.listTools();
+        await client.listTools();
+        await crash(h.spawned[0]);
+        const restarted = client.listTools();
+        await h.clock.advance(STDIO_RESTART_BACKOFF_MS[0]);
+        await restarted;
+
+        const timeouts = listSpy.mock.calls.map((call) => call[1]?.timeout);
+        expect(timeouts).toEqual([
+          STDIO_FIRST_LIST_TIMEOUT_MS,
+          UPSTREAM_LIST_TIMEOUT_MS,
+          STDIO_FIRST_LIST_TIMEOUT_MS,
+        ]);
+      } finally {
+        listSpy.mockRestore();
+        await h.host.dispose();
+      }
+    });
+
     it('shares one start between concurrent callers', async () => {
       const h = harness();
       const client = h.host.createClient(h.options());
@@ -243,7 +270,7 @@ describe('StdioServerHost', () => {
   });
 
   describe('restarts', () => {
-    it('backs off 1, 2, then 4 s and stays failed after 3 restarts in 10 minutes', async () => {
+    it('backs off 1, 2, then 4 s and refuses after 3 restarts in 10 minutes', async () => {
       const h = harness();
       const onDisconnected = jest.fn();
       const client = h.host.createClient(h.options({ onDisconnected }));
@@ -270,6 +297,39 @@ describe('StdioServerHost', () => {
         STDIO_RESTART_LIMIT_DETAIL,
       );
       expect(h.spawned).toHaveLength(4);
+      await h.host.dispose();
+    });
+
+    it('starts again with a fresh budget once the cap window passed (S1)', async () => {
+      const h = harness();
+      const client = h.host.createClient(h.options());
+      await client.connect();
+      for (const [index, delay] of STDIO_RESTART_BACKOFF_MS.entries()) {
+        await crash(h.spawned[index]);
+        const restarted = client.connect();
+        await h.clock.advance(delay);
+        await restarted;
+      }
+      await crash(h.spawned[3]);
+      await expect(client.connect()).rejects.toThrow(
+        STDIO_RESTART_LIMIT_DETAIL,
+      );
+
+      await h.clock.advance(STDIO_RESTART_WINDOW_MS - 1);
+      await expect(client.connect()).rejects.toThrow(
+        STDIO_RESTART_LIMIT_DETAIL,
+      );
+      await h.clock.advance(1);
+      const retried = client.connect();
+      // A fresh budget: the first restart waits 1 s again.
+      await h.clock.advance(STDIO_RESTART_BACKOFF_MS[0]);
+      await retried;
+      expect(h.spawned).toHaveLength(5);
+      expect(client.running).toBe(true);
+      expect(h.logs).toContainEqual([
+        'MCP gateway retries a capped stdio server',
+        { server: 'local', status: 'retry' },
+      ]);
       await h.host.dispose();
     });
 

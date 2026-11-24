@@ -82,6 +82,16 @@ export const BOOT_DRAIN_BUDGET_MS = 2000;
 export const GATEWAY_STOP_BUDGET_MS = 2000;
 
 /**
+ * How long the disposal chain may wait for the MCP gateway to stop its stdio
+ * MCP servers (TASK_2026_979 S3). The kills start synchronously when the
+ * dispose is called (`killProcessTree` is pre-loaded at the first spawn), so
+ * this buys the kills their completion, not their start. Three seconds is the
+ * `taskkill` timeout in `killProcessTree`. It is the last await of the chain,
+ * so no other disposal queues behind it.
+ */
+export const MCP_GATEWAY_DISPOSE_BUDGET_MS = 3000;
+
+/**
  * How long the disposal chain may wait for the agents to exit before it gives
  * up and flushes whatever they managed to stage.
  *
@@ -209,9 +219,10 @@ export interface QuitSequenceDeps {
    * Disposes the MCP gateway (`PLATFORM_TOKENS.MCP_GATEWAY`), which stops the
    * process tree of every stdio server it runs. A no-op when none is bound.
    * On Windows a child is not reaped when its parent exits, so without this a
-   * stdio MCP server outlives the app.
+   * stdio MCP server outlives the app. The kills start before it returns; the
+   * promise settles once they finished. Never rejects.
    */
-  disposeMcpGateway: () => void;
+  disposeMcpGateway: () => Promise<void>;
   /** `event.preventDefault()` — only called when the quit must be deferred. */
   deferQuit: () => void;
   /** `app.quit()` — only called after a deferred quit has finished draining. */
@@ -220,6 +231,8 @@ export interface QuitSequenceDeps {
   drainBudgetMs?: number;
   /** Override for tests. Defaults to {@link GATEWAY_STOP_BUDGET_MS}. */
   gatewayStopBudgetMs?: number;
+  /** Override for tests. Defaults to {@link MCP_GATEWAY_DISPOSE_BUDGET_MS}. */
+  mcpGatewayDisposeBudgetMs?: number;
   /** Override for tests. Defaults to {@link AGENT_REAP_BUDGET_MS}. */
   agentReapBudgetMs?: number;
   /** Override for tests. Defaults to {@link METADATA_FLUSH_BUDGET_MS}. */
@@ -243,6 +256,7 @@ export type DisposalDeps = Pick<
   | 'disposeMcpGateway'
   | 'flushSessionMetadataStores'
   | 'gatewayStopBudgetMs'
+  | 'mcpGatewayDisposeBudgetMs'
   | 'agentReapBudgetMs'
   | 'metadataFlushBudgetMs'
   | 'runCheckKillBudgetMs'
@@ -261,6 +275,22 @@ function nonFatal(label: string, fn: () => void): void {
       `[Ptah Electron] ${label} failed (non-fatal):`,
       error instanceof Error ? error.message : String(error),
     );
+  }
+}
+
+/**
+ * {@link nonFatal} for a disposal that returns a promise: the call (and every
+ * kill it starts synchronously) happens now; the promise is awaited later.
+ */
+function startNonFatal(label: string, fn: () => Promise<void>): Promise<void> {
+  try {
+    return Promise.resolve(fn());
+  } catch (error: unknown) {
+    console.warn(
+      `[Ptah Electron] ${label} failed (non-fatal):`,
+      error instanceof Error ? error.message : String(error),
+    );
+    return Promise.resolve();
   }
 }
 
@@ -505,14 +535,28 @@ async function disposeAfterPersistence(deps: DisposalDeps): Promise<void> {
   nonFatal('Tree-sitter worker dispose', () => refs.treeSitterParser?.dispose());
   nonFatal('CLI registry dispose', () => refs.cliRegistry?.disposeAll());
   // After the agent reap: a CLI lane reaches stdio MCP servers through the
-  // gateway, so its processes stop only once no agent can call them.
-  nonFatal('MCP gateway dispose', deps.disposeMcpGateway);
+  // gateway, so its processes stop only once no agent can call them. Started
+  // here, in this tick, so the kills begin on a path Electron does not wait
+  // for; awaited at the end of this function under its own budget.
+  const mcpGatewayStopped = startNonFatal(
+    'MCP gateway dispose',
+    deps.disposeMcpGateway,
+  );
   // Captured pre-window beside `cliRegistry`, so disposed beside it. Nothing
   // consumes it yet (Batch 11 moves the git watcher onto it, and that consumer
   // will stop in `disposeBeforePersistence`). This kills the watch host process
   // if one was forked, and writes nothing.
   nonFatal('Workspace watcher dispose', () => refs.workspaceWatcher?.dispose());
   nonFatal('Diagnostics dispose', () => refs.diagnostics?.dispose());
+
+  // LAST, so no disposal above queues behind it. On the deferred path the
+  // re-issued quit waits for the stdio kills to finish (TASK_2026_979 S3).
+  await withBudget(
+    'MCP gateway dispose',
+    () => mcpGatewayStopped,
+    deps.mcpGatewayDisposeBudgetMs ?? MCP_GATEWAY_DISPOSE_BUDGET_MS,
+    'quitting with stdio MCP servers possibly still alive.',
+  );
 }
 
 /**
@@ -855,8 +899,9 @@ export function handleWillQuit(deps: QuitSequenceDeps): boolean {
     // drain, and `requiresDeferredDisposal` returning false is exactly the
     // statement that there are no chat sessions to end, no agent manager to
     // reap and no outcome drain to await.
-    // So the body runs to completion synchronously before the promise is
-    // returned, and the `void` discards a promise that is already settled.
+    // So every disposal runs synchronously before the promise is returned. The
+    // one await left is the MCP gateway's, which is last: its kills already
+    // started, so the `void` only drops the wait for them to finish.
     //
     // The run-check kill is discarded for the same reason: false also means no
     // check was running, so it has no tree to kill.

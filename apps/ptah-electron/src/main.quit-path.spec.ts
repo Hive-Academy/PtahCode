@@ -251,7 +251,9 @@ function inertDeps(order: string[]) {
     flushSessionMetadataStores: jest.fn(),
     clearTimers: () => order.push('clearTimers'),
     disposeVoiceWorker: () => order.push('disposeVoiceWorker'),
-    disposeMcpGateway: () => order.push('disposeMcpGateway'),
+    disposeMcpGateway: async () => {
+      order.push('disposeMcpGateway');
+    },
   };
 }
 

@@ -5,9 +5,9 @@
  * once kept a persistent `ptah` entry in `~/.gemini/config/mcp_config.json`
  * (read by the `agy` CLI) and in `{ws}/.agents/mcp_config.json` (read by the
  * Antigravity editor). An `agy` session Ptah spawns now receives the server
- * per session only: the ACP lane attaches `ptah_lane` in `session/new`, and the
- * stream-json fallback lane writes and restores its own entry around the run
- * (`AntigravityCliAdapter.configureMcpServer`). An `agy` the user starts from
+ * per session only: the ACP lane attaches `ptah_lane` in `session/new`. The
+ * stream-json fallback lane writes no MCP config at all and runs without
+ * Ptah tools (TASK_2026_979 decision row 13). An `agy` the user starts from
  * a terminal gets no Ptah tools. That is the accepted cost of keeping a
  * long-lived credential out of a home-global file.
  *
@@ -19,8 +19,9 @@
  *
  * ## Which `ptah` entries are Ptah's
  *
- * The key alone is not proof: it is also the key the stream-json lane writes,
- * and a user may have authored a `ptah` server of their own. An entry is
+ * The key alone is not proof: an older Ptah's stream-json lane wrote the same
+ * key around its runs, and a user may have authored a `ptah` server of their
+ * own. An entry is
  * removed only when it is a remote entry with no headers and its URL is one of
  * the persistent writer's shapes:
  *

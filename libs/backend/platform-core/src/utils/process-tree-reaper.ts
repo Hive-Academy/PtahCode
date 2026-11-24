@@ -4,6 +4,41 @@
 // consumer of that barrel — measured at roughly 9 MB of heap, enough on its own
 // to push `electron-state-storage-worker-runtime.error-paths.spec.ts` past its
 // 64 MiB budget. POSIX never needs it at all.
+//
+// A caller that may have to kill at quit calls {@link preloadProcessTreeKill}
+// early. Once the module is loaded, a win32 kill spawns `taskkill` in the same
+// tick as the call, with no `await` in front of it, so a quit sequence that
+// does not wait for the returned promise still starts the kill.
+
+type ChildProcessModule = typeof import('node:child_process');
+
+let childProcessModule: ChildProcessModule | null = null;
+let childProcessLoading: Promise<ChildProcessModule> | null = null;
+
+function loadChildProcess(): Promise<ChildProcessModule> {
+  childProcessLoading ??= import('node:child_process').then(
+    (loaded) => {
+      childProcessModule = loaded;
+      return loaded;
+    },
+    (error: unknown) => {
+      // Not cached: the next call tries again.
+      childProcessLoading = null;
+      throw error;
+    },
+  );
+  return childProcessLoading;
+}
+
+/**
+ * Load what a win32 tree kill needs, so a later {@link killProcessTree} starts
+ * `taskkill` synchronously. A no-op off Windows. May reject when the module
+ * cannot be loaded; the kill itself then loads it again.
+ */
+export async function preloadProcessTreeKill(): Promise<void> {
+  if (process.platform !== 'win32' || childProcessModule !== null) return;
+  await loadChildProcess();
+}
 
 /** Grace period for SIGTERM before SIGKILL escalation. */
 export const PROCESS_TREE_KILL_GRACE_MS = 5_000;
@@ -60,7 +95,7 @@ export async function killProcessTree(
   if (process.platform === 'win32') {
     if (options?.groupOnly) return;
     try {
-      const { execFile } = await import('node:child_process');
+      const { execFile } = childProcessModule ?? (await loadChildProcess());
       await new Promise<void>((resolve, reject) => {
         execFile(
           resolveTaskkill(),

@@ -281,12 +281,11 @@ export async function acquireFileLock(
  * outcome ruled out is writing unlocked in silence.
  *
  * Failing is affordable because every caller of this function already treats a
- * mutation failure as transient and retries on its own schedule:
- * `AntigravityCliAdapter` documents its
- * spawn-time write as non-fatal and the next spawn rewrites it;
- * `CodeExecutionMCP` logs and deliberately keeps its registration record so a
- * later call retries. What is traded away is liveness for ONE mutation under
- * cross-process contention — which is the trade the deadline was already
+ * mutation failure as transient and retries on its own schedule (the next
+ * reconcile, sweep or store write). The `AntigravityCliAdapter` spawn-time
+ * write this paragraph once cited is gone (TASK_2026_979 decision row 13).
+ * What is traded away is liveness for ONE mutation under cross-process
+ * contention — which is the trade the deadline was already
  * making, just now in the direction that cannot lose data.
  *
  * `no-lock-directory` is deliberately NOT a failure here: see

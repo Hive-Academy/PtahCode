@@ -24,21 +24,33 @@
  *
  * Every spawn after the first is a restart, except the first one after an
  * idle shutdown. A restart waits 1, 2, then 4 s. A fourth restart within
- * 10 minutes is refused and the client stays `failed` (every connect throws)
- * until the source changes, which gives the gateway a new key and a new
- * client.
+ * 10 minutes is refused: every connect throws for the next 10 minutes, then
+ * the client starts again with a fresh restart budget (S1). A source change
+ * gives the gateway a new key and a new client at once.
+ *
+ * ## Cold first list (S1)
+ *
+ * The first `tools/list` after a spawn gets {@link STDIO_FIRST_LIST_TIMEOUT_MS}
+ * instead of the remote 5 s: a process that just finished an `npx` download
+ * may answer its first list slowly, and the gateway would otherwise count
+ * that as a failure. Later lists use the remote timeout.
  *
  * ## Idle shutdown
  *
  * A process with no call in flight and no use for 10 minutes is stopped. One
  * sweep interval runs for the whole host while any process lives. The next
  * call starts the process again and asks the gateway to re-list its tools.
+ * The gateway starts a process only for a root that listed or called within
+ * that window (S2), so a process whose cwd is a worktree stops at most
+ * 10 minutes after its root's last use and no longer holds the folder.
  *
  * ## Shutdown
  *
  * Every stop kills the process tree first (`taskkill /T` on Windows), then
  * closes the transport, so an `npx` wrapper never leaves its server behind.
- * {@link StdioServerHost.dispose} stops every process.
+ * {@link StdioServerHost.dispose} stops every process. With the default
+ * killer the host pre-loads the win32 kill at its first spawn, so a stop
+ * started at quit spawns `taskkill` in the same tick (S3).
  *
  * SECURITY: logs carry the server name and status only. The command, its
  * arguments and the env are never logged; the stderr tail is logged at debug
@@ -52,7 +64,10 @@ import {
   type StdioServerParameters,
 } from '@modelcontextprotocol/sdk/client/stdio.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
-import { killProcessTree } from '@ptah-extension/platform-core';
+import {
+  killProcessTree,
+  preloadProcessTreeKill,
+} from '@ptah-extension/platform-core';
 import type { Stream } from 'node:stream';
 import {
   UPSTREAM_CALL_TIMEOUT_MS,
@@ -71,6 +86,8 @@ export const STDIO_RESTART_BACKOFF_MS: readonly number[] = [
 /** Restarts allowed within {@link STDIO_RESTART_WINDOW_MS}. */
 export const STDIO_MAX_RESTARTS = 3;
 export const STDIO_RESTART_WINDOW_MS = 10 * 60_000;
+/** The first `tools/list` after a spawn; a cold `npx` start may list slowly. */
+export const STDIO_FIRST_LIST_TIMEOUT_MS = 30_000;
 /** A process unused for this long is stopped. */
 export const STDIO_IDLE_MS = 10 * 60_000;
 /** The one sweep interval of the host. */
@@ -78,7 +95,7 @@ export const STDIO_SWEEP_MS = 60_000;
 /** stderr lines kept per server. */
 export const STDIO_STDERR_LINES = 50;
 /** Detail of a client that used up its restarts. */
-export const STDIO_RESTART_LIMIT_DETAIL = `stopped after ${STDIO_MAX_RESTARTS} restarts in 10 minutes`;
+export const STDIO_RESTART_LIMIT_DETAIL = `stopped after ${STDIO_MAX_RESTARTS} restarts in 10 minutes; retries after 10 minutes`;
 
 const MAX_LIST_PAGES = 50;
 const MAX_STDERR_LINE = 500;
@@ -178,6 +195,7 @@ export class StdioServerHost {
   private readonly live = new Set<HostedStdioClient>();
   private sweepHandle: unknown = null;
   private disposed = false;
+  private killPreloaded = false;
   readonly clock: StdioHostClock;
 
   constructor(private readonly deps: StdioServerHostDeps = {}) {
@@ -211,7 +229,21 @@ export class StdioServerHost {
   }
 
   spawn(params: StdioServerParameters): StdioTransportHandle {
+    this.preloadKill();
     return (this.deps.createTransport ?? createSdkTransport)(params);
+  }
+
+  /** Load the default win32 kill once, long before any quit needs it. */
+  private preloadKill(): void {
+    if (this.killPreloaded || this.deps.killTree !== undefined) return;
+    this.killPreloaded = true;
+    preloadProcessTreeKill().catch((error: unknown) => {
+      // degradation-audit: reported - logged; the kill loads the module itself
+      // when it runs, only later than the same tick.
+      this.deps.logger?.warn('MCP gateway could not pre-load the process kill', {
+        error: error instanceof Error ? error.name : typeof error,
+      });
+    });
   }
 
   async killTree(pid: number, serverName: string): Promise<void> {
@@ -279,7 +311,10 @@ class HostedStdioClient implements StdioUpstreamClient {
   private spawns = 0;
   private lastEnd: EndReason = 'failure';
   private readonly restarts: number[] = [];
-  private capped = false;
+  /** When the restart cap was reached; connects are refused for a window. */
+  private cappedAt: number | null = null;
+  /** The running process answered a `tools/list` (cold-list timeout used up). */
+  private listedSinceSpawn = false;
   private lastUsed = 0;
   private inFlight = 0;
   private readonly stderrLines: string[] = [];
@@ -304,7 +339,10 @@ class HostedStdioClient implements StdioUpstreamClient {
 
   async listTools(signal?: AbortSignal): Promise<UpstreamTool[]> {
     return this.inUse(signal, async (client) => {
-      const deadline = AbortSignal.timeout(UPSTREAM_LIST_TIMEOUT_MS);
+      const timeout = this.listedSinceSpawn
+        ? UPSTREAM_LIST_TIMEOUT_MS
+        : STDIO_FIRST_LIST_TIMEOUT_MS;
+      const deadline = AbortSignal.timeout(timeout);
       const listSignal =
         signal === undefined ? deadline : AbortSignal.any([signal, deadline]);
       const tools: UpstreamTool[] = [];
@@ -312,11 +350,14 @@ class HostedStdioClient implements StdioUpstreamClient {
       for (let page = 0; page < MAX_LIST_PAGES; page++) {
         const result = await client.listTools(
           cursor === undefined ? undefined : { cursor },
-          { signal: listSignal, timeout: UPSTREAM_LIST_TIMEOUT_MS },
+          { signal: listSignal, timeout },
         );
         for (const tool of result.tools) tools.push(toUpstreamTool(tool));
         cursor = result.nextCursor;
-        if (cursor === undefined || cursor === '') return tools;
+        if (cursor === undefined || cursor === '') {
+          if (this.client === client) this.listedSinceSpawn = true;
+          return tools;
+        }
       }
       throw new Error(
         `MCP stdio tools/list returned more than ${MAX_LIST_PAGES} pages`,
@@ -429,7 +470,7 @@ class HostedStdioClient implements StdioUpstreamClient {
 
   private async open(signal: AbortSignal): Promise<Client> {
     if (this.host.isDisposed) throw new Error('MCP stdio host is shut down');
-    if (this.capped) throw new Error(STDIO_RESTART_LIMIT_DETAIL);
+    this.checkRestartCap();
     const restart = this.spawns > 0 && this.lastEnd !== 'idle';
     const respawn = this.spawns > 0;
     if (restart) {
@@ -496,6 +537,7 @@ class HostedStdioClient implements StdioUpstreamClient {
     this.client = client;
     this.transport = transport;
     this.pid = transport.pid;
+    this.listedSinceSpawn = false;
     this.lastUsed = this.host.clock.now();
     this.host.markLive(this);
     this.host.logger?.debug('MCP gateway started a stdio server', {
@@ -505,6 +547,23 @@ class HostedStdioClient implements StdioUpstreamClient {
     // The tools may differ from the list the gateway still holds.
     if (respawn) this.options.onToolsChanged?.();
     return client;
+  }
+
+  /**
+   * Refuse while the cap holds. Once {@link STDIO_RESTART_WINDOW_MS} passed
+   * since the cap was reached, the client starts over with a full budget.
+   */
+  private checkRestartCap(): void {
+    if (this.cappedAt === null) return;
+    if (this.host.clock.now() - this.cappedAt < STDIO_RESTART_WINDOW_MS) {
+      throw new Error(STDIO_RESTART_LIMIT_DETAIL);
+    }
+    this.cappedAt = null;
+    this.restarts.length = 0;
+    this.host.logger?.debug('MCP gateway retries a capped stdio server', {
+      server: this.options.serverName,
+      status: 'retry',
+    });
   }
 
   /** Wait out the restart back-off, or refuse once the cap is reached. */
@@ -517,7 +576,7 @@ class HostedStdioClient implements StdioUpstreamClient {
       this.restarts.shift();
     }
     if (this.restarts.length >= STDIO_MAX_RESTARTS) {
-      this.capped = true;
+      this.cappedAt = now;
       this.host.logger?.warn('MCP gateway stopped restarting a stdio server', {
         server: this.options.serverName,
         status: 'failed',

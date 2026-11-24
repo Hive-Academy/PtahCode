@@ -1106,6 +1106,23 @@ P2 gate:
 - Report: `batch-24-report.md`
 - Status: COMPLETE (uncommitted; the coordinator commits)
 
+## Batch 25: P2 logic-review fixes - COMPLETE
+
+- Id: P2-B12 | Phase: P2 | Shape: logic
+- Purpose: the should-fix findings S1-S5 and two nits of `code-logic-review-p2.md`: (S1) a capped
+  stdio server retries after its 10-minute window and a slow first `tools/list` does not kill the
+  process; (S2) no stdio spawn in pre-warm, and the poll/refresh reload a stdio server only for a
+  root used within `STDIO_IDLE_MS`; (S3) `IMcpGateway.dispose()` returns a promise, awaited by
+  `HttpMcpServer.disposeAsync` and by the Electron quit chain under `MCP_GATEWAY_DISPOSE_BUDGET_MS`,
+  with the win32 kill pre-loaded; (S4) agy stream-json lanes expect no MCP and get no lane token;
+  (S5) a per-root read sequence so an older read never overwrites a newer view. Nits: stale agy
+  write comments, stdio command/args/env redaction. S6 is not in this batch (orchestrator).
+- Executor: backend-developer (subagent)
+- Projects: platform-core, cli-agent-runtime, vscode-lm-tools, harness-sync (comment only),
+  ptah-electron
+- Report: `batch-25-report.md`
+- Status: COMPLETE (uncommitted; the coordinator commits)
+
 ---
 
 ## Live review (completion gate)

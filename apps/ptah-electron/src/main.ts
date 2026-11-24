@@ -564,11 +564,14 @@ if (!gotLock) {
       disposeMcpGateway: () => {
         // `isRegistered` first: a host without auth secrets binds no gateway,
         // and a quit before boot finished may have no container at all.
+        // The kills start inside `dispose()`; the quit chain awaits the rest
+        // under `MCP_GATEWAY_DISPOSE_BUDGET_MS`.
         if (bootContainer?.isRegistered(PLATFORM_TOKENS.MCP_GATEWAY, true)) {
-          bootContainer
+          return bootContainer
             .resolve<IMcpGateway>(PLATFORM_TOKENS.MCP_GATEWAY)
             .dispose();
         }
+        return Promise.resolve();
       },
       deferQuit: () => event.preventDefault(),
       // A macrotask, never a direct call. On Windows, once `will-quit` has

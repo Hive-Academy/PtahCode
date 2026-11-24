@@ -1282,6 +1282,34 @@ describe('AgentProcessManager - SDK Execution Path', () => {
       ).toBe(1);
     });
 
+    it('mints no lane token when the adapter reports no MCP for this run (S4)', async () => {
+      setupVscodeConfig({ maxConcurrentAgents: 8 });
+      getMcpPort.mockReturnValue(51820);
+      const attachesMcp = jest.fn(async () => false);
+      Object.assign(sdkAdapter, { attachesMcp });
+
+      await manager.spawn({
+        task: 'stream-json lane',
+        cli: 'codex',
+        workingDirectory: '/workspace/root',
+      });
+
+      expect(attachesMcp).toHaveBeenCalledWith('/usr/local/bin/codex');
+      expect(mcpCredentials.issue).not.toHaveBeenCalled();
+      const options = (sdkAdapter.runSdk as jest.Mock).mock.calls.at(-1)?.[0];
+      // The port still reaches the adapter (its no-MCP notice reads it).
+      expect(options).toMatchObject({ mcpPort: 51820 });
+      expect(options.mcpToken).toBeUndefined();
+
+      attachesMcp.mockResolvedValue(true);
+      await manager.spawn({
+        task: 'acp lane',
+        cli: 'codex',
+        workingDirectory: '/workspace/root',
+      });
+      expect(mcpCredentials.issue).toHaveBeenCalledTimes(1);
+    });
+
     it('records a tool-profile result and stamps the lane credential', async () => {
       setupVscodeConfig({ maxConcurrentAgents: 8 });
       getMcpPort.mockReturnValue(51820);

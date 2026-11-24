@@ -572,7 +572,9 @@ export class CodeExecutionMCP
     await this.stop();
     // Here and not in `stop()`: a stop can be followed by another start, and
     // `IMcpGateway.dispose()` is terminal. It stops every stdio server's
-    // process tree, which a host exit does not reap on Windows.
-    this.gateway?.dispose();
+    // process tree, which a host exit does not reap on Windows; awaited so a
+    // caller that waits for this teardown also waits for those kills. It
+    // never rejects.
+    await this.gateway?.dispose();
   }
 }

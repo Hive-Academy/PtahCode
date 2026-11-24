@@ -16,6 +16,7 @@ import type {
   GatewayStdioEndpoint,
 } from './server-sources';
 import {
+  STDIO_IDLE_MS,
   STDIO_RESTART_LIMIT_DETAIL,
   type StdioClientOptions,
   type StdioUpstreamClient,
@@ -898,6 +899,217 @@ describe('McpGateway', () => {
       h.gateway.dispose();
       expect(host.clients.get('local')?.close).toHaveBeenCalled();
       expect(host.dispose).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('stdio lifecycle (P2 review S1, S2, S3)', () => {
+    function timeoutError(): Error {
+      const error = new Error('The operation was aborted due to timeout');
+      error.name = 'TimeoutError';
+      return error;
+    }
+
+    it('keeps a stdio process whose list timed out, but backs off (S1)', async () => {
+      const host = fakeStdioHost({
+        local: { listTools: () => Promise.reject(timeoutError()) },
+      });
+      const h = harness([stdioEndpoint('local')], {}, { stdioHost: host });
+      await h.gateway.listTools(SESSION);
+
+      expect(h.gateway.status(SESSION)).toEqual([
+        expect.objectContaining({ key: 'local', status: 'failed' }),
+      ]);
+      expect(host.clients.get('local')?.close).not.toHaveBeenCalled();
+    });
+
+    it('keeps a stdio process whose list was refused with a JSON-RPC error (S1)', async () => {
+      const refused = Object.assign(new Error('Request timed out'), {
+        code: -32001,
+      });
+      const host = fakeStdioHost({
+        local: { listTools: () => Promise.reject(refused) },
+      });
+      const h = harness([stdioEndpoint('local')], {}, { stdioHost: host });
+      await h.gateway.listTools(SESSION);
+      expect(host.clients.get('local')?.close).not.toHaveBeenCalled();
+    });
+
+    it('still drops a stdio process whose connection failed (S1)', async () => {
+      const host = fakeStdioHost({
+        local: { listTools: failing('Connection closed') },
+      });
+      const h = harness([stdioEndpoint('local')], {}, { stdioHost: host });
+      await h.gateway.listTools(SESSION);
+      expect(host.clients.get('local')?.close).toHaveBeenCalled();
+    });
+
+    it('pre-warms remote servers only; stdio waits for its root (S2)', async () => {
+      jest.useFakeTimers();
+      const host = fakeStdioHost();
+      const h = harness(
+        [stdioEndpoint('local'), endpoint('zernio')],
+        {},
+        { stdioHost: host, prewarmRoots: () => [ROOT] },
+      );
+      const subscription = h.gateway.onToolsChanged(jest.fn());
+      await jest.advanceTimersByTimeAsync(0);
+
+      expect(h.clients.get('zernio')?.listTools).toHaveBeenCalledTimes(1);
+      expect(host.clients.get('local')?.listTools).not.toHaveBeenCalled();
+
+      const names = (await h.gateway.listTools(SESSION)).map((t) => t.name);
+      expect(names).toEqual(['local__search', 'zernio__search']);
+      expect(host.clients.get('local')?.listTools).toHaveBeenCalledTimes(1);
+      subscription.dispose();
+      await h.gateway.dispose();
+    });
+
+    it('the poll stops reloading a stdio server once its root is idle (S2)', async () => {
+      jest.useFakeTimers();
+      const host = fakeStdioHost({
+        local: { listTools: failing('Connection closed') },
+      });
+      const h = harness(
+        [stdioEndpoint('local'), endpoint('zernio')],
+        { zernio: { listTools: failing('fetch failed') } },
+        { stdioHost: host },
+      );
+      const subscription = h.gateway.onToolsChanged(jest.fn());
+      await h.gateway.listTools(SESSION);
+      const stdioList = host.clients.get('local')?.listTools;
+      expect(stdioList).toHaveBeenCalledTimes(1);
+
+      // While the root is in use, the poll retries it after its back-off.
+      await jest.advanceTimersByTimeAsync(GATEWAY_POLL_MS);
+      expect(stdioList?.mock.calls.length).toBeGreaterThan(1);
+
+      await jest.advanceTimersByTimeAsync(STDIO_IDLE_MS);
+      const stdioCalls = stdioList?.mock.calls.length ?? 0;
+      const remoteCalls =
+        h.clients.get('zernio')?.listTools.mock.calls.length ?? 0;
+      await jest.advanceTimersByTimeAsync(GATEWAY_POLL_MS * 4);
+
+      // Idle root: no new stdio process; a remote server is still retried.
+      expect(stdioList?.mock.calls.length).toBe(stdioCalls);
+      expect(
+        h.clients.get('zernio')?.listTools.mock.calls.length,
+      ).toBeGreaterThan(remoteCalls);
+
+      // The next list is root activity again.
+      await h.gateway.listTools(SESSION);
+      await jest.advanceTimersByTimeAsync(GATEWAY_POLL_MS * 2);
+      expect(stdioList?.mock.calls.length).toBeGreaterThan(stdioCalls);
+      subscription.dispose();
+      await h.gateway.dispose();
+    });
+
+    it('redacts a stdio command, its arguments and env values from status', async () => {
+      const host = fakeStdioHost({
+        local: {
+          listTools: failing('spawn node server.js stdio-secret ENOENT'),
+        },
+      });
+      const h = harness([stdioEndpoint('local')], {}, { stdioHost: host });
+      await h.gateway.listTools(SESSION);
+      const [status] = h.gateway.status(SESSION);
+      expect(status.detail).toBe(
+        'spawn <redacted> <redacted> <redacted> ENOENT',
+      );
+    });
+
+    it('dispose settles only after the stdio host stopped (S3)', async () => {
+      const host = fakeStdioHost();
+      let stopped: () => void = () => undefined;
+      host.dispose.mockImplementation(
+        () =>
+          new Promise<void>((resolve) => {
+            stopped = resolve;
+          }),
+      );
+      const h = harness([stdioEndpoint('local')], {}, { stdioHost: host });
+      await h.gateway.listTools(SESSION);
+
+      let settled = false;
+      const disposing = h.gateway.dispose().then(() => {
+        settled = true;
+      });
+      // The process kills started synchronously.
+      expect(host.clients.get('local')?.close).toHaveBeenCalled();
+      await settle();
+      expect(settled).toBe(false);
+      stopped();
+      await disposing;
+      expect(settled).toBe(true);
+    });
+
+    it('dispose never rejects when the stdio host fails to stop (S3)', async () => {
+      const host = fakeStdioHost();
+      host.dispose.mockRejectedValue(new Error('host gone'));
+      const h = harness([stdioEndpoint('local')], {}, { stdioHost: host });
+      await h.gateway.listTools(SESSION);
+      await expect(h.gateway.dispose()).resolves.toBeUndefined();
+      expect(h.logs).toContainEqual([
+        'MCP gateway could not stop its stdio servers',
+        { error: 'Error' },
+      ]);
+    });
+  });
+
+  describe('read ordering (S5)', () => {
+    function heldList(h: Harness): (set: GatewayServerSet) => void {
+      let release: (set: GatewayServerSet) => void = () => undefined;
+      h.sources.list.mockImplementationOnce(
+        () =>
+          new Promise<GatewayServerSet>((resolve) => {
+            release = resolve;
+          }),
+      );
+      return (set) => release(set);
+    }
+
+    it('a read that started before an install never replaces the newer view', async () => {
+      const h = harness([endpoint('zernio')]);
+      await h.gateway.listTools(SESSION);
+
+      // The poll-like read sees the sources before the install...
+      const releaseOld = heldList(h);
+      const olderRead = h.gateway.refresh();
+      await settle();
+
+      // ...the install lands, and its refresh reads the new set first.
+      h.setEndpoints([endpoint('zernio'), endpoint('added')]);
+      await h.gateway.refresh();
+      releaseOld({ endpoints: [endpoint('zernio')], servedFileServerNames: [] });
+      await olderRead;
+
+      const names = (await h.gateway.listTools(SESSION)).map((t) => t.name);
+      expect(names).toEqual(['zernio__search', 'added__search']);
+      expect(h.clients.get('added')?.close).not.toHaveBeenCalled();
+      expect(h.gateway.status(SESSION).map((s) => s.key)).toEqual([
+        'zernio',
+        'added',
+      ]);
+    });
+
+    it('an overtaken read answers with the newer view', async () => {
+      const h = harness([endpoint('zernio')]);
+      await h.gateway.listTools(SESSION);
+      const releaseOld = heldList(h);
+      const older = h.gateway.listTools(SESSION);
+      await settle();
+      h.setEndpoints([endpoint('zernio'), endpoint('added')]);
+      const newer = h.gateway.listTools(SESSION);
+      await settle();
+      releaseOld({ endpoints: [endpoint('zernio')], servedFileServerNames: [] });
+
+      expect((await older).map((t) => t.name)).toEqual([
+        'zernio__search',
+        'added__search',
+      ]);
+      expect((await newer).map((t) => t.name)).toEqual([
+        'zernio__search',
+        'added__search',
+      ]);
     });
   });
 
