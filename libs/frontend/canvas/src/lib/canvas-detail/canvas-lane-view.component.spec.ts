@@ -15,7 +15,13 @@ import {
   SessionEmbedComponent,
   SubagentLaneComponent,
   TabManagerService,
+  toLanePermissionRequest,
 } from '@ptah-extension/chat';
+import {
+  PermissionRequestCardComponent,
+  QuestionCardComponent,
+} from '@ptah-extension/chat-ui';
+import type { AgentPermissionRequest } from '@ptah-extension/shared';
 import {
   AgentMonitorStore,
   ExecutionTreeBuilderService,
@@ -58,7 +64,9 @@ describe('CanvasLaneViewComponent', () => {
   const getPermissionForTool = jest.fn();
   const handlePermissionResponse = jest.fn();
   const toggleAgentExpanded = jest.fn();
-  const respondLane = jest.fn();
+  const respondLane = jest.fn((..._args: unknown[]) => true);
+  const permissionBelongsToAgent = jest.fn(() => true);
+  const handleQuestionResponse = jest.fn();
   const respondSession = jest.fn();
   const findTabByIdAcrossWorkspaces = jest.fn(() => null);
   const treeFor = jest.fn(() => []);
@@ -85,6 +93,8 @@ describe('CanvasLaneViewComponent', () => {
     handlePermissionResponse.mockClear();
     toggleAgentExpanded.mockClear();
     respondLane.mockClear();
+    permissionBelongsToAgent.mockReset().mockReturnValue(true);
+    handleQuestionResponse.mockClear();
     respondSession.mockClear();
     findTabByIdAcrossWorkspaces.mockClear();
     treeFor.mockClear();
@@ -109,6 +119,7 @@ describe('CanvasLaneViewComponent', () => {
             tick: signal(0),
             backgroundAgent,
             sendMessageToAgent,
+            permissionBelongsToAgent,
           },
         },
         {
@@ -118,7 +129,10 @@ describe('CanvasLaneViewComponent', () => {
             isBackgroundAgent: jest.fn(() => false),
           },
         },
-        { provide: PermissionHandlerService, useValue: { permissionRequests } },
+        {
+          provide: PermissionHandlerService,
+          useValue: { permissionRequests, questionRequests },
+        },
         {
           provide: AgentPermissionResponder,
           useValue: { respondLane, respondSession },
@@ -134,7 +148,7 @@ describe('CanvasLaneViewComponent', () => {
         },
         {
           provide: ChatStore,
-          useValue: { getPermissionForTool, handlePermissionResponse, questionRequests,
+          useValue: { getPermissionForTool, handlePermissionResponse, questionRequests, handleQuestionResponse,
             routingTargetRevision, questionTargetTabsFor, isQuestionClaimedByWorkflow },
         },
         {
@@ -447,14 +461,50 @@ describe('CanvasLaneViewComponent', () => {
     expect(toggleAgentExpanded).toHaveBeenCalledTimes(2);
   });
 
-  it('uses the owner responder for CLI Allow and Deny', () => {
+  /** Render the lane prompts with main chat's real permission and question cards. */
+  function useRealPromptCards(): void {
+    TestBed.overrideComponent(CanvasLaneViewComponent, {
+      set: {
+        imports: [
+          AgentCardComponent,
+          NgTemplateOutlet,
+          PermissionRequestCardComponent,
+          QuestionCardComponent,
+        ],
+        schemas: [NO_ERRORS_SCHEMA],
+      },
+    });
+  }
+
+  function lanePermission(
+    agentId: string,
+    overrides: Partial<AgentPermissionRequest> = {},
+  ): AgentPermissionRequest {
+    return {
+      requestId: 'r',
+      agentId,
+      parentSessionId: 'owner',
+      laneGeneration: '2026-11-24T10:00:00.000Z',
+      kind: 'write',
+      toolName: 'Write',
+      toolArgs: '{"file_path":"src/a.ts"}',
+      description: 'Write src/a.ts',
+      timestamp: 1,
+      timeoutAt: 0,
+      ...overrides,
+    };
+  }
+
+  it('answers a CLI lane approval through the main chat card and the owner responder', () => {
+    useRealPromptCards();
     agents.set([
       {
         agentId: 'a',
         parentSessionId: 'owner',
-        cli: 'Codex',
+        cli: 'codex',
+        displayName: 'Codex lane',
         expanded: true,
-        permissionQueue: [{ requestId: 'r', toolName: 'Write' }],
+        permissionQueue: [lanePermission('a')],
       },
     ]);
     const fixture = TestBed.createComponent(CanvasLaneViewComponent);
@@ -462,13 +512,121 @@ describe('CanvasLaneViewComponent', () => {
     fixture.componentRef.setInput('sessionId', 'owner');
     fixture.componentRef.setInput('laneKey', 'cli:a');
     fixture.detectChanges();
-    const buttons = [
-      ...fixture.nativeElement.querySelectorAll('button'),
-    ] as HTMLButtonElement[];
-    buttons[0].click();
-    buttons[1].click();
-    expect(respondLane).toHaveBeenNthCalledWith(1, 'a', 'r', 'allow');
-    expect(respondLane).toHaveBeenNthCalledWith(2, 'a', 'r', 'deny');
+    const cards = fixture.nativeElement.querySelectorAll(
+      'ptah-permission-request-card',
+    );
+    expect(cards).toHaveLength(1);
+    expect(cards[0].textContent).toContain('Codex lane');
+    expect(
+      fixture.nativeElement.querySelector('[data-testid="lane-prompts"]')
+        .textContent,
+    ).toContain('Waiting for you');
+    (
+      cards[0].querySelector(
+        '[aria-label="Allow this request once"]',
+      ) as HTMLButtonElement
+    ).click();
+    expect(respondLane).toHaveBeenCalledWith(
+      'a',
+      'r',
+      'allow',
+      undefined,
+      undefined,
+    );
+  });
+
+  it('renders a Copilot-origin lane approval with the same card (Req 5.7)', () => {
+    useRealPromptCards();
+    const copilotRequest = lanePermission('cp', {
+      requestId: 'copilot-r',
+      kind: 'shell',
+      toolName: 'shell',
+      toolArgs: '{"command":"npm test"}',
+      description: 'Run npm test',
+    });
+    agents.set([
+      {
+        agentId: 'cp',
+        parentSessionId: 'owner',
+        cli: 'copilot',
+        displayName: 'Copilot',
+        expanded: true,
+        permissionQueue: [copilotRequest],
+      },
+    ]);
+    const fixture = TestBed.createComponent(CanvasLaneViewComponent);
+    fixture.componentRef.setInput('tabId', 'tab');
+    fixture.componentRef.setInput('sessionId', 'owner');
+    fixture.componentRef.setInput('laneKey', 'cli:cp');
+    fixture.detectChanges();
+    const card = fixture.debugElement.query(
+      By.directive(PermissionRequestCardComponent),
+    );
+    expect(card).not.toBeNull();
+    const instance = card.componentInstance as PermissionRequestCardComponent;
+    expect(instance.request()).toEqual(toLanePermissionRequest(copilotRequest));
+    expect(instance.laneLabel()).toBe('Copilot');
+    (
+      card.nativeElement.querySelector(
+        '[aria-label="Deny this request and stop execution"]',
+      ) as HTMLButtonElement
+    ).click();
+    expect(respondLane).toHaveBeenCalledWith(
+      'cp',
+      'copilot-r',
+      'deny',
+      undefined,
+      undefined,
+    );
+  });
+
+  it('shows a lane question only in the lane that asked it', () => {
+    useRealPromptCards();
+    agents.set([
+      { agentId: 'a', parentSessionId: 'owner', cli: 'codex', expanded: true, permissionQueue: [] },
+      { agentId: 'b', parentSessionId: 'owner', cli: 'gemini', expanded: true, permissionQueue: [] },
+    ]);
+    subagents.set(new Map([['sub', { parentToolUseId: 'sub', parentSessionId: 'owner' }]]));
+    // Routed to this tab, so only the lane filter keeps it out of other lanes.
+    questionTargetTabsFor.mockReturnValue(['tab']);
+    questionRequests.set([
+      {
+        id: 'qa',
+        toolName: 'AskUserQuestion',
+        agentId: 'a',
+        sessionId: 'owner',
+        timestamp: 1,
+        timeoutAt: 0,
+        questions: [
+          {
+            question: 'Which file?',
+            header: 'File',
+            multiSelect: false,
+            options: [
+              { label: 'a.ts', description: '' },
+              { label: 'b.ts', description: '' },
+            ],
+          },
+        ],
+      },
+    ]);
+    const fixture = TestBed.createComponent(CanvasLaneViewComponent);
+    fixture.componentRef.setInput('tabId', 'tab');
+    fixture.componentRef.setInput('sessionId', 'owner');
+    fixture.componentRef.setInput('laneKey', 'cli:b');
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelectorAll('ptah-question-card')).toHaveLength(0);
+    expect(fixture.nativeElement.textContent).not.toContain('Which file?');
+
+    fixture.componentRef.setInput('laneKey', 'sub:sub');
+    fixture.detectChanges();
+    expect(fixture.nativeElement.querySelectorAll('ptah-question-card')).toHaveLength(0);
+
+    fixture.componentRef.setInput('laneKey', 'cli:a');
+    fixture.detectChanges();
+    const cards = fixture.nativeElement.querySelectorAll('ptah-question-card');
+    expect(cards).toHaveLength(1);
+    expect(cards[0].textContent).toContain('Which file?');
   });
 
   it('does not show a foreign or unresolved agent', () => {
