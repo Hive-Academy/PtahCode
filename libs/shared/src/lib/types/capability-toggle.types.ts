@@ -108,7 +108,9 @@ export interface CapabilityPolicyReason {
  * Why a capability has the default it has, for the UI badge.
  *
  * - `ptah` — Ptah's own server: ON.
- * - `user-scope` — declared in at least one user-scope source: ON.
+ * - `user-scope` — declared in at least one user-scope source, or installed
+ *   through Ptah in any scope (the record lives in the user's own
+ *   `~/.ptah/mcp-installed.json`, so it is the user's decision): ON.
  * - `repository-only` — declared only in repository files (`.mcp.json`,
  *   `.vscode/mcp.json`, …): OFF, because a cloned repository must not be able
  *   to start a server on its own say-so.
@@ -138,6 +140,12 @@ export type CapabilityDefaultInput =
       id: string;
       /** The scope of every declaration of this name (see {@link classifyMcpScope}). */
       scopes: readonly CapabilityScope[];
+      /**
+       * A Ptah install intent declares this name. A workspace-scoped intent
+       * has scope `workspace` but is the user's own record, not a
+       * repository file, so it is ON by default like a user-scope entry.
+       */
+      installedByPtah?: boolean;
     }
   | { kind: 'skill'; id: string }
   | { kind: 'plugin'; id: string; source?: PluginSource };
@@ -151,7 +159,7 @@ export function defaultEnabled(
       if (input.id === PTAH_MCP_SERVER_NAME) {
         return { enabled: true, reason: 'ptah' };
       }
-      if (input.scopes.includes('global')) {
+      if (input.scopes.includes('global') || input.installedByPtah === true) {
         return { enabled: true, reason: 'user-scope' };
       }
       return {

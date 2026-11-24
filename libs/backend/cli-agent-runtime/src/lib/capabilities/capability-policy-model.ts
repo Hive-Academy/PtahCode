@@ -129,15 +129,23 @@ export function mcpRows(
 ): CapabilityRow[] {
   const declared = new Map<
     string,
-    { sources: CapabilitySourceRef[]; scopes: Set<CapabilityScope> }
+    {
+      sources: CapabilitySourceRef[];
+      scopes: Set<CapabilityScope>;
+      installedByPtah: boolean;
+    }
   >();
   for (const row of inventory.declarations) {
     const entry = declared.get(row.serverKey) ?? {
       sources: [],
       scopes: new Set<CapabilityScope>(),
+      installedByPtah: false,
     };
     const scope = row.scope ?? 'workspace';
     entry.scopes.add(scope);
+    // A workspace-scoped Ptah install keeps its `workspace` scope for display,
+    // but its default follows the user's own record, not a repository file.
+    if (row.origin === 'ptah-intent') entry.installedByPtah = true;
     if (
       !entry.sources.some(
         (source) => source.path === row.configPath && source.scope === scope,
@@ -174,7 +182,12 @@ export function mcpRows(
       ...(workspace === undefined ? {} : { workspace }),
       ...(importedValue === undefined ? {} : { imported: importedValue }),
       ...(global === undefined ? {} : { global }),
-      defaultValue: defaultEnabled({ kind: 'mcp', id: name, scopes }),
+      defaultValue: defaultEnabled({
+        kind: 'mcp',
+        id: name,
+        scopes,
+        installedByPtah: declaration?.installedByPtah === true,
+      }),
     };
     return {
       kind: 'mcp' as const,
