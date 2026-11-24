@@ -140,15 +140,13 @@ export function mcpMakeGlobalFailureCopy(serverKey: string): string {
 /**
  * Validated shape for the `mcpDirectory:uninstall` RPC method.
  *
- * `force` is the only field that can delete something Ptah did not write, so it
- * is validated rather than read off an untyped payload, and it DEFAULTS TO
- * FALSE — a caller that omits it gets the ordinary reconcile-based uninstall,
- * which leaves a user-owned key alone.
+ * There is no `force` field any more (TASK_2026_979 B18, decision D2): an
+ * uninstall forgets Ptah's intent and never edits a config file. A stale
+ * caller that still sends `force` has it stripped by this (non-strict) schema.
  */
 export const UninstallMcpSchema = z.object({
   serverKey: z.string().min(1),
   targets: z.array(McpInstallTargetSchema).optional(),
-  force: z.boolean().optional().default(false),
 });
 
 export type UninstallMcpInput = z.infer<typeof UninstallMcpSchema>;

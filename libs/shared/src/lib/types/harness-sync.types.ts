@@ -479,9 +479,9 @@ function harnessHealthLabel(
  * cannot drift from it:
  *
  *   - every planner pushes a blocked path into BOTH lists in one step
- *     (`harness-sync/.../claude-target.ts:277`, `workspace-target.ts:164-166`,
- *     `mcp/mcp-facet-planner.ts:107-108`), so `blocked ⊆ foreign` holds by
- *     construction rather than by two lists being kept in step;
+ *     (`harness-sync/.../claude-target.ts`, `workspace-target.ts`), so
+ *     `blocked ⊆ foreign` holds by construction rather than by two lists
+ *     being kept in step;
  *   - `missing` is the planned (or failed) writes PLUS `plan.blocked`, and a
  *     desired path is either written or blocked and never both — so the only
  *     members of `missing` that can also be `foreign` are the blocked ones.
@@ -675,9 +675,6 @@ export interface HarnessRepairBlockedParams {
  *   (nor a kept local edit carrying an approval digest). Refused, untouched.
  *   This is what stops the RPC being a general-purpose "move this directory"
  *   primitive.
- * - `not-a-path` — a blocked MCP fragment key (`.mcp.json#github`). It is a key
- *   inside a config file the user also writes, not a file, so there is nothing
- *   to move aside and this repair does not apply to it.
  * - `changed-since-approval` — the path carried an approval digest and its
  *   content no longer matches it (edited again, deleted, recreated or now
  *   unreadable). Kept exactly as it is; nothing was moved or written.
@@ -688,7 +685,6 @@ export type HarnessRepairOutcome =
   | 'move-failed'
   | 'restore-failed'
   | 'not-blocked'
-  | 'not-a-path'
   | 'changed-since-approval';
 
 /** Per-path outcome, one entry per requested path, in request order. */

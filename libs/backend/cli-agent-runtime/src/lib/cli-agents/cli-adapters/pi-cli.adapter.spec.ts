@@ -143,6 +143,7 @@ import type {
   CliOutputSegment,
 } from '@ptah-extension/shared';
 import { buildTaskPrompt, renderRoleBlock } from './cli-adapter.utils';
+import { resolveCliLanePolicy } from '../cli-lane-policy-resolver';
 import { LaneInstructionFileStore } from '../lane-instruction-file-store';
 import type { IFileSystemProvider } from '@ptah-extension/platform-core';
 
@@ -940,6 +941,11 @@ describe('PiCliAdapter (RPC mode)', () => {
       expect(adapter.capabilities().messaging.steer.state).toBe('supported');
       expect(adapter.capabilities().limitReader.state).toBe('no-reliable-source');
       expect(adapter.supportsMcp).toBe(false);
+    });
+
+    it('has no built-in lane policy because no permission mode is verified', () => {
+      expect(() => resolveCliLanePolicy({ cli: 'pi', manifest: adapter.capabilities(), saved: {}, request: {} }))
+        .toThrow('supports no verified permission mode');
     });
 
     it('strips ANSI escape codes', () => {

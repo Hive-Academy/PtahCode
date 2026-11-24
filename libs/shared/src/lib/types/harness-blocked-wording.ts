@@ -66,14 +66,12 @@ export type HarnessBlockedSurface =
 /**
  * The fixed head of the "clear it yourself" sentence.
  *
- * It opens on MOVE deliberately, and the first clause names both shapes a
- * blocked path takes — a file or directory, or a server key inside a config
- * file the user also writes — because "move the occupant" is meaningless
- * advice for the second.
+ * It opens on MOVE deliberately. A blocked path is a file or directory: since
+ * TASK_2026_979 no target writes MCP config, so a server key inside a config
+ * file can no longer block a pass.
  */
 const CLEAR_IT_YOURSELF_OPENING =
-  'Move the occupant aside — the file or directory at each path, or the ' +
-  'conflicting key in each config file — ';
+  'Move the occupant aside — the file or directory at each path — ';
 
 /**
  * The fixed tail. It hands the judgement back: Ptah states that it cannot
@@ -187,9 +185,6 @@ export const HARNESS_REPAIR_REASONS = {
   /** `restore-failed`. Continues with the quarantine path and `describeError(error)`. */
   restoreFailed:
     'the managed copy was not written and your original could not be put back — it is at',
-  /** `not-a-path`. Fixed. */
-  notAPath:
-    'this is a server key inside a config file you also write, not a file — there is nothing to move aside',
   /** `not-blocked`. Fixed. */
   notBlocked:
     'this path is not in the current blocked set, so it was left untouched',
@@ -253,11 +248,9 @@ export const HARNESS_BLOCKED_WARN_NOTE =
   'blocked path never enters the write plan, so `writeFailed` can never ' +
   'report one.';
 
-/** The two per-path `reason` strings the WARN may carry. */
+/** The per-path `reason` strings the WARN may carry. */
 export const HARNESS_BLOCKED_WARN_REASONS = {
   occupiedPath: 'occupied by a file or directory Ptah does not own',
-  occupiedMcpKey:
-    'the config file already defines this server key, and Ptah did not write it',
 } as const satisfies Readonly<Record<string, string>>;
 
 /**
@@ -279,7 +272,6 @@ export const HARNESS_BLOCKED_APPROVED_PROSE: Readonly<
     HARNESS_BLOCKED_WARN_MESSAGE,
     HARNESS_BLOCKED_WARN_NOTE,
     HARNESS_BLOCKED_WARN_REASONS.occupiedPath,
-    HARNESS_BLOCKED_WARN_REASONS.occupiedMcpKey,
   ]),
   'marketplace-popover': Object.freeze([
     HARNESS_BLOCKED_APPROVED_ACTIONS['marketplace-popover'],
@@ -314,8 +306,6 @@ export const HARNESS_BLOCKED_APPROVED_PROSE: Readonly<
     'Moved aside, Ptah did not install its copy, and your content could not ' +
       'be put back. It is in the quarantine folder named below and nowhere else.',
     'No longer blocked, so Ptah refused it and left it untouched.',
-    'A server key inside a config file you also write, not a file. There is ' +
-      'nothing to move aside, so this one does not apply.',
     'Kept: changed since approval. It no longer matches what you approved, ' +
       'so Ptah left it exactly as it is.',
     'Move aside and install',

@@ -56,7 +56,10 @@ import {
   type HarnessReconcilerService,
   type IHarnessCliDetector,
 } from '@ptah-extension/harness-sync';
-import { McpInstallService } from '@ptah-extension/cli-agent-runtime';
+import {
+  McpInstallService,
+  refreshBoundMcpGateway,
+} from '@ptah-extension/cli-agent-runtime';
 import { PLATFORM_TOKENS } from '@ptah-extension/platform-core';
 import type { IWorkspaceProvider } from '@ptah-extension/platform-core';
 import { CommandDiscoveryService } from '@ptah-extension/workspace-intelligence';
@@ -159,7 +162,9 @@ function resolveExternalPluginMcpService(
 
   return new ExternalPluginMcpService(
     logger,
-    new McpInstallService(reconciler),
+    new McpInstallService(reconciler, undefined, {
+      onIntentsChanged: () => refreshBoundMcpGateway(container),
+    }),
     detector,
   );
 }

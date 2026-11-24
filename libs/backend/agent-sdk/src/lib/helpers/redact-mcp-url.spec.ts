@@ -1,4 +1,8 @@
-import { redactMcpUrl, redactMcpOverrideMap } from './redact-mcp-url';
+import {
+  redactMcpUrl,
+  redactMcpOverrideMap,
+  redactMcpErrorText,
+} from './redact-mcp-url';
 
 describe('redactMcpUrl', () => {
   it('masks api_key and config but keeps host + path', () => {
@@ -69,5 +73,42 @@ describe('redactMcpOverrideMap', () => {
     expect(redactMcpOverrideMap({ empty: undefined })).toEqual({
       empty: '<no-url>',
     });
+  });
+});
+
+describe('redactMcpErrorText', () => {
+  it('drops the query, fragment and userinfo of every URL in the text', () => {
+    const out = redactMcpErrorText(
+      'GET https://user:pw-LEAK@srv.example/mcp?api_key=K-LEAK&x=1#frag-LEAK ' +
+        'then http://localhost:7654/session/abc failed',
+    );
+
+    expect(out).toContain('https://srv.example/mcp?***redacted***');
+    expect(out).toContain('http://localhost:7654/session/abc failed');
+    expect(out).not.toMatch(/LEAK/);
+    expect(out).not.toContain('x=1');
+  });
+
+  it('masks credential header values', () => {
+    const out = redactMcpErrorText(
+      'Authorization: Token abc-LEAK1, X-Api-Key: LEAK2; Cookie: sid=LEAK3',
+    );
+
+    expect(out).not.toMatch(/LEAK/);
+    expect(out).toContain('Authorization: ***redacted***');
+    expect(out).toContain('X-Api-Key: ***redacted***');
+  });
+
+  it('masks bearer tokens and credential assignments', () => {
+    const out = redactMcpErrorText(
+      'upstream said Bearer eyJhbGciOiJIUzI1NiJ9.LEAK and token=ghp_LEAKLEAKLEAKLEAK',
+    );
+
+    expect(out).not.toMatch(/LEAK/);
+  });
+
+  it('leaves plain error text alone', () => {
+    expect(redactMcpErrorText('spawn ENOENT')).toBe('spawn ENOENT');
+    expect(redactMcpErrorText('')).toBe('');
   });
 });

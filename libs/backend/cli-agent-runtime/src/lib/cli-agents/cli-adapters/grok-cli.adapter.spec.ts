@@ -73,6 +73,7 @@ jest.mock('./provider-session/provider-session-lane-handle', () => {
 });
 
 import { GrokCliAdapter, parseGrokModels } from './grok-cli.adapter';
+import { resolveCliLanePolicy } from '../cli-lane-policy-resolver';
 
 /** `grok models` as grok 1.0.46 printed it (`grok-probe.md` §6). */
 const PROBED_MODELS_OUTPUT = [
@@ -156,6 +157,12 @@ describe('GrokCliAdapter', () => {
       expect(adapter.capabilities().messaging.interrupt.state).toBe('supported');
       expect(adapter.capabilities().messaging.steer.state).toBe('unsupported');
       expect(adapter.capabilities().permissionModes.plan?.state).toBe('unsupported');
+    });
+
+    it('defaults a lane with no explicit mode to its only verified mode, yolo with network', () => {
+      expect(resolveCliLanePolicy({ cli: 'grok', manifest: adapter.capabilities(), saved: {}, request: {} }))
+        .toMatchObject({ permission: 'yolo', network: 'allow',
+          permissionSource: 'built-in', networkSource: 'built-in' });
     });
 
     it('strips ANSI codes from raw output', () => {

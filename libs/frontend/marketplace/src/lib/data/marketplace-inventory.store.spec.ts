@@ -1670,6 +1670,28 @@ describe('MarketplaceInventoryStore', () => {
       expect(canMakeSkillGlobal(skill('b'))).toBe(false);
     });
 
+    it('offers Make global for a workspace install read from the intent store (TASK_2026_979 B23)', async () => {
+      const intentRow = (
+        serverKey: string,
+        scope: 'workspace' | 'global',
+      ): InstalledMcpServer => ({
+        ...diskServer(serverKey),
+        configPath: '/home/me/.ptah/mcp-installed.json',
+        origin: 'ptah-intent',
+        originLabel: 'Ptah',
+        managedByPtah: true,
+        removal: 'ptah-managed',
+        scope,
+      });
+      await loadServers([
+        intentRow('recorded', 'workspace'),
+        intentRow('everywhere', 'global'),
+      ]);
+
+      expect(canMakeServerGlobal(groupFor('recorded'))).toBe(true);
+      expect(canMakeServerGlobal(groupFor('everywhere'))).toBe(false);
+    });
+
     it('makes a server global with only the ticked home targets, then reloads', async () => {
       await loadServers([workspaceServer('acme')]);
       responders.set('mcpDirectory:makeGlobal', () =>

@@ -139,6 +139,7 @@ import {
   CliDetectionService,
   McpRegistryProvider,
   McpInstallService,
+  refreshBoundMcpGateway,
   SmitheryRegistrySource,
   SkillsShApiClient,
 } from '@ptah-extension/cli-agent-runtime';
@@ -1029,9 +1030,17 @@ export class PtahAPIBuilder {
           smitheryRegistry,
           // Same installer that backs the marketplace MCP directory and
           // harness:apply, so an agent-initiated install records the same
-          // intent in ~/.ptah/mcp-installed.json and reaches the config files
-          // through the same reconcile pass.
-          mcpInstaller: new McpInstallService(this.harnessReconciler ?? null),
+          // intent in ~/.ptah/mcp-installed.json, which the MCP gateway
+          // serves. No config file is written.
+          mcpInstaller: new McpInstallService(
+            this.harnessReconciler ?? null,
+            undefined,
+            {
+              onIntentsChanged: () => {
+                if (this.container) refreshBoundMcpGateway(this.container);
+              },
+            },
+          ),
           getWorkspaceRoot: () => this.getWorkspaceRoot(),
           // Same root source as `getPluginPaths`: never the home fallback.
           getPolicyWorkspaceRoot: () => this.resolveSessionWorkspaceRoot(),

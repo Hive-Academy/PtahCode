@@ -54,6 +54,7 @@ import type {
   SessionMcpStatusEvent,
 } from './session-mcp-status-callback-registry';
 import type { IPricingProvider } from '../pricing.port';
+import type { IMcpGateway } from '@ptah-extension/platform-core';
 import type { SessionPlanLimitCallbackRegistry } from './plan-limits/session-plan-limit-callback-registry';
 import type { SDKBackgroundTasksChangedMessage, SDKMessage } from '../types/sdk-types/claude-sdk.types';
 
@@ -177,7 +178,10 @@ interface Harness {
   statsOwner: SessionStatsOwnerService;
 }
 
-function makeHarness(authEnv: AuthEnv = makeAuthEnv()): Harness {
+function makeHarness(
+  authEnv: AuthEnv = makeAuthEnv(),
+  mcpGateway?: Pick<IMcpGateway, 'status'>,
+): Harness {
   const logger = makeLogger();
   const messageTransformer = makeMessageTransformer();
   const modelResolver = makeModelResolver();
@@ -198,6 +202,7 @@ function makeHarness(authEnv: AuthEnv = makeAuthEnv()): Harness {
     mcpStatus,
     statsOwner,
     { notifyAll: jest.fn() } as unknown as SessionPlanLimitCallbackRegistry,
+    mcpGateway,
   );
   const routeAuthority = classifyUsageCostSource(authEnv);
   return {
@@ -2547,6 +2552,153 @@ describe('StreamTransformer — session MCP status (TASK_2026_375)', () => {
     );
 
     expect(mcpEvents).toHaveLength(1);
+  });
+});
+
+/**
+ * TASK_2026_979 — servers Ptah serves through its `ptah` MCP server via the
+ * gateway are appended to the init status, so a session that loses one shows
+ * it. They carry `source: 'ptah-gateway'` and the gateway's server key.
+ */
+describe('StreamTransformer — gateway server status (TASK_2026_979)', () => {
+  const MODEL = 'claude-sonnet-4-20250514';
+  const CWD = 'D:/work/repo';
+
+  async function drain(iterable: AsyncIterable<unknown>): Promise<void> {
+    for await (const _ of iterable) {
+      // Consuming the stream is the point.
+    }
+  }
+
+  /** The init message; `withCwd: false` leaves `cwd` out. */
+  function initWithCwd(mcpServers: unknown, withCwd = true): SDKMessage {
+    return {
+      ...(systemInit(mcpServers, 'real-uuid') as object),
+      ...(withCwd ? { cwd: CWD } : {}),
+    } as unknown as SDKMessage;
+  }
+
+  function makeGateway(
+    status: IMcpGateway['status'] = () => [
+      {
+        key: 'https://mcp.linear.app/sse',
+        display: 'Linear',
+        status: 'failed',
+        detail: 'tools/list timed out after 12s',
+      },
+      { key: 'github', display: 'GitHub', status: 'connected' },
+    ],
+  ): { status: jest.Mock } {
+    return { status: jest.fn(status) };
+  }
+
+  async function run(
+    mcpGateway: Pick<IMcpGateway, 'status'> | undefined,
+    init: SDKMessage,
+  ) {
+    const harness = makeHarness(makeAuthEnv(), mcpGateway);
+    await drain(
+      harness.transformer.transform({
+        sdkQuery: asAsyncIterable([init]),
+        sessionId: 'tab-1' as SessionId,
+        initialModel: MODEL,
+        onResultStats: jest.fn(),
+      }),
+    );
+    return harness;
+  }
+
+  it('appends gateway entries after the CLI entries, scoped to the session caller', async () => {
+    const gateway = makeGateway();
+    const { mcpEvents } = await run(
+      gateway,
+      initWithCwd([
+        { name: 'ptah', status: 'connected' },
+        { name: 'smithery', status: 'needs-auth' },
+      ]),
+    );
+
+    expect(gateway.status).toHaveBeenCalledWith({
+      kind: 'session',
+      capability: 'privileged',
+      workspaceRoot: CWD,
+      gatewayApproval: true,
+    });
+    expect(mcpEvents).toEqual([
+      {
+        kind: 'servers',
+        sessionId: 'real-uuid',
+        servers: [
+          { name: 'ptah', status: 'connected' },
+          { name: 'smithery', status: 'needs-auth' },
+          {
+            name: 'https://mcp.linear.app/sse',
+            status: 'failed',
+            source: 'ptah-gateway',
+          },
+          { name: 'github', status: 'connected', source: 'ptah-gateway' },
+        ],
+      },
+    ]);
+  });
+
+  it('leaves the output unchanged when no gateway is bound', async () => {
+    const { mcpEvents } = await run(
+      undefined,
+      initWithCwd([{ name: 'ptah', status: 'connected' }]),
+    );
+
+    expect(mcpEvents).toEqual([
+      {
+        kind: 'servers',
+        sessionId: 'real-uuid',
+        servers: [{ name: 'ptah', status: 'connected' }],
+      },
+    ]);
+  });
+
+  it('appends nothing when the session has no ptah server', async () => {
+    const gateway = makeGateway();
+    const { mcpEvents } = await run(
+      gateway,
+      initWithCwd([{ name: 'smithery', status: 'connected' }]),
+    );
+
+    expect(gateway.status).not.toHaveBeenCalled();
+    expect(mcpEvents[0]).toMatchObject({
+      servers: [{ name: 'smithery', status: 'connected' }],
+    });
+  });
+
+  it('appends nothing when the init message names no workspace', async () => {
+    const gateway = makeGateway();
+    const { mcpEvents } = await run(
+      gateway,
+      initWithCwd([{ name: 'ptah', status: 'connected' }], false),
+    );
+
+    expect(gateway.status).not.toHaveBeenCalled();
+    expect(mcpEvents[0]).toMatchObject({
+      servers: [{ name: 'ptah', status: 'connected' }],
+    });
+  });
+
+  it('still publishes the CLI entries when the gateway status throws', async () => {
+    const gateway = makeGateway(() => {
+      throw new Error('cache unavailable');
+    });
+    const { mcpEvents, logger } = await run(
+      gateway,
+      initWithCwd([{ name: 'ptah', status: 'connected' }]),
+    );
+
+    expect(mcpEvents[0]).toMatchObject({
+      servers: [{ name: 'ptah', status: 'connected' }],
+    });
+    expect(logger.warn).toHaveBeenCalledWith(
+      '[StreamTransformer] Gateway server status unavailable',
+      { sessionId: 'real-uuid', error: 'cache unavailable' },
+    );
   });
 });
 

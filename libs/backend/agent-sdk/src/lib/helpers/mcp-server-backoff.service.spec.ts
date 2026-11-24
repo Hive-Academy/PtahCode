@@ -302,4 +302,38 @@ describe('McpServerBackoffService', () => {
     );
     expect(service.getRecord('firecrawl')?.failureCount).toBe(1);
   });
+  it('ignores gateway entries: a failed one starts no back-off, a connected one clears none', () => {
+    const { service, mcpStatus } = makeHarness();
+    service.recordFailure('firecrawl', Date.now(), 'launch-1');
+
+    mcpStatus.notifyAll({
+      kind: 'servers',
+      sessionId: 'sdk-session-1',
+      servers: [
+        { name: 'linear', status: 'failed', source: 'ptah-gateway' },
+        { name: 'firecrawl', status: 'connected', source: 'ptah-gateway' },
+      ],
+    });
+    jest.advanceTimersByTime(1_000);
+
+    expect(service.getRecord('linear')).toBeUndefined();
+    expect(service.isBackingOff('linear')).toBe(false);
+    expect(service.getRecord('firecrawl')?.failureCount).toBe(1);
+  });
+
+  it('still tracks CLI entries reported beside gateway entries', () => {
+    const { service, mcpStatus } = makeHarness();
+    mcpStatus.notifyAll({
+      kind: 'servers',
+      sessionId: '',
+      servers: [
+        { name: 'firecrawl', status: 'failed', source: 'cli' },
+        { name: 'linear', status: 'failed', source: 'ptah-gateway' },
+      ],
+    });
+    jest.advanceTimersByTime(1_000);
+
+    expect(service.getRecord('firecrawl')?.failureCount).toBe(1);
+    expect(service.getRecord('linear')).toBeUndefined();
+  });
 });

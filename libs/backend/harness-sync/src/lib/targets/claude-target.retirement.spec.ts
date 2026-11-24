@@ -60,7 +60,6 @@ const EMPTY_DESIRED: HarnessDesiredState = {
   skills: [],
   commands: [],
   agents: [],
-  mcp: [],
   collisions: [],
   sources: 'ok',
   sourceRoots: [],
@@ -100,7 +99,7 @@ describe('ClaudeTarget — retired copy removal proofs (D-2)', () => {
     ws = join(tempRoot, 'ws');
     mkdirSync(ws, { recursive: true });
     retiredRoot = join(tempRoot, 'plugins', ROOT_ID);
-    retired = { skillSourceRoots: [retiredRoot], mcpServerKeys: [] };
+    retired = { skillSourceRoots: [retiredRoot] };
   });
 
   afterEach(() => {
@@ -541,5 +540,68 @@ describe('ClaudeTarget — retired copy removal proofs (D-2)', () => {
       '[harness-sync] Released tracked command from managed manifest',
       { target: 'claude', relPath: trackedCommand },
     );
+  });
+});
+
+describe('ClaudeTarget — no MCP config writes (TASK_2026_979, decision row 10)', () => {
+  let tempRoot: string;
+  let ws: string;
+
+  beforeEach(() => {
+    tempRoot = mkdtempSync(join(tmpdir(), 'ptah-b16-claude-'));
+    ws = join(tempRoot, 'ws');
+    mkdirSync(ws, { recursive: true });
+  });
+
+  afterEach(() => {
+    rmSync(tempRoot, { recursive: true, force: true });
+  });
+
+  it('reports the mcp facet unsupported and counts no MCP key in preflight', () => {
+    const target = new ClaudeTarget(new ManagedManifestStore());
+    expect(target.facets.mcp).toBe('unsupported');
+    expect([...target.preflightKeys(EMPTY_DESIRED).keys()]).toEqual([]);
+  });
+
+  it('plans and applies no `.mcp.json` write', async () => {
+    const target = new ClaudeTarget(new ManagedManifestStore());
+    const plan = await target.plan(EMPTY_DESIRED, ws, emptyManifest('claude'));
+    expect(plan.writes).toEqual([]);
+    expect(plan.expected).toBe(0);
+    await target.apply(plan, ws);
+    expect(existsSync(join(ws, '.mcp.json'))).toBe(false);
+  });
+
+  it('drops an old manifest mcp row on load and leaves the user `.mcp.json` untouched', async () => {
+    const content = '{"mcpServers":{"github":{"command":"npx"}}}\n';
+    writeFileSync(join(ws, '.mcp.json'), content);
+    const store = new ManagedManifestStore();
+    // A pre-P2 manifest on disk, as the old facet planner left it (D1).
+    const stored: ManagedManifest = {
+      ...emptyManifest('claude'),
+      entries: {
+        '.mcp.json#github': managedEntry(
+          'hash-github',
+          'io.github.example/github',
+          'mcp',
+        ),
+      },
+    };
+    mkdirSync(join(store.manifestPath(ws, 'claude'), '..'), {
+      recursive: true,
+    });
+    writeFileSync(store.manifestPath(ws, 'claude'), JSON.stringify(stored));
+
+    const manifest = store.load(ws, 'claude');
+    expect(manifest.entries).toEqual({});
+
+    const target = new ClaudeTarget(store);
+    const plan = await target.plan(EMPTY_DESIRED, ws, manifest, undefined, {
+      skillSourceRoots: [],
+    });
+    expect(plan.removals).toEqual([]);
+    const result = await target.apply(plan, ws);
+    expect(result.removed).toEqual([]);
+    expect(readFileSync(join(ws, '.mcp.json'), 'utf-8')).toBe(content);
   });
 });

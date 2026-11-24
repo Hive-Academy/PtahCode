@@ -631,10 +631,6 @@ describe('harness repair consent dialog', () => {
               quarantinePath: quarantined,
               reason: `${HARNESS_REPAIR_REASONS.restoreFailed} ${quarantined} (EPERM: operation not permitted)`,
             }),
-            pathResult('.vscode/mcp.json#wanted', {
-              outcome: 'not-a-path',
-              reason: HARNESS_REPAIR_REASONS.notAPath,
-            }),
             pathResult('.claude/skills/d', {
               outcome: 'not-blocked',
               reason: HARNESS_REPAIR_REASONS.notBlocked,
@@ -678,7 +674,6 @@ describe('harness repair consent dialog', () => {
             '.claude/skills/c',
             '.claude/skills/d',
             '.claude/skills/e',
-            '.vscode/mcp.json#wanted',
             'Claude Code',
             quarantined,
             'EBUSY: resource busy or locked',
@@ -799,24 +794,23 @@ describe('harness repair consent dialog', () => {
     });
 
     it('explains a refusal in plain language rather than showing a wire token', async () => {
-      // A blocked MCP fragment key is refused as `not-a-path`. The dialog does
-      // not filter those out client-side — the predicate lives in `harness-sync`
-      // and copying it would be a second definition on the far side of the wire
-      // — so the refusal has to be legible when it comes back.
+      // A row the backend refuses as `not-blocked` (its occupant left the
+      // blocked set after the dialog opened). The dialog does not filter rows
+      // client-side, so the refusal has to be legible when it comes back.
       rpcMock.call.mockResolvedValue(
         ok(
           repairResult([
-            pathResult('.mcp.json#github', { outcome: 'not-a-path' }),
+            pathResult('.claude/skills/gone', { outcome: 'not-blocked' }),
           ]),
         ),
       );
-      await open(makeHealth([blockedTarget('claude', ['.mcp.json#github'])]));
-      await tick('claude::.mcp.json#github');
+      await open(makeHealth([blockedTarget('claude', ['.claude/skills/gone'])]));
+      await tick('claude::.claude/skills/gone');
       await click('harness-repair-confirm');
 
       const row = host.querySelector('[data-testid="harness-repair-result"]');
-      expect(textOf(row)).toContain('does not apply');
-      expect(textOf(row)).not.toContain('not-a-path');
+      expect(textOf(row)).toContain('left it untouched');
+      expect(textOf(row)).not.toContain('not-blocked');
     });
 
     it('renders a path that changed since approval as kept, never as moved', async () => {

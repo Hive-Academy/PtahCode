@@ -22,6 +22,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -392,5 +393,52 @@ describe('sweepRetiredPtahMcpEntries', () => {
     expect(serversIn(wsPath)).toEqual({});
     expect(logger.warn).toHaveBeenCalledTimes(1);
     expect(String(logger.warn.mock.calls[0]?.[0])).not.toContain('not json');
+  });
+
+  // Regression #1469: in a linked git worktree (`.git` is a FILE) the tracked
+  // `.agents/mcp_config.json` must stay byte-identical, so the task branch
+  // gets no config churn. The home file is swept as before.
+  it('leaves the workspace file of a linked git worktree byte-identical', async () => {
+    const homePath = join(tempHome, '.gemini', 'config', 'mcp_config.json');
+    const wsPath = join(ws, '.agents', 'mcp_config.json');
+    writeFileSync(join(ws, '.git'), 'gitdir: /repo/.git/worktrees/task\n');
+    writeJson(homePath, {
+      mcpServers: { ptah: { serverUrl: 'http://localhost:51820' } },
+    });
+    writeJson(wsPath, {
+      mcpServers: { ptah: { serverUrl: 'http://localhost:51820/workspace/x' } },
+    });
+    const before = readFileSync(wsPath);
+    const revoked: string[] = [];
+
+    const { run, logger } = sweep((path) => {
+      revoked.push(path);
+      return Promise.resolve(true);
+    });
+    await run;
+
+    expect(readFileSync(wsPath).equals(before)).toBe(true);
+    // No lock file or backup was created beside it either.
+    expect(readdirSync(dirname(wsPath))).toEqual(['mcp_config.json']);
+    expect(serversIn(homePath)).toEqual({});
+    expect(revoked).toEqual([homePath, wsPath]);
+    expect(logger.info).toHaveBeenCalledTimes(1);
+    expect(logger.warn).not.toHaveBeenCalled();
+  });
+
+  it('still sweeps the workspace file of a main checkout (`.git` directory)', async () => {
+    const wsPath = join(ws, '.agents', 'mcp_config.json');
+    mkdirSync(join(ws, '.git'));
+    writeJson(wsPath, {
+      mcpServers: {
+        ptah: { serverUrl: 'http://localhost:51820/workspace/x' },
+        mine: { command: 'node' },
+      },
+    });
+
+    const { run } = sweep(() => Promise.resolve(true));
+    await run;
+
+    expect(serversIn(wsPath)).toEqual({ mine: { command: 'node' } });
   });
 });

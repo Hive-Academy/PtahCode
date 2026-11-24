@@ -99,4 +99,28 @@ describe('ManagedManifestStore', () => {
       '.claude/skills/zeta',
     ]);
   });
+
+  it('loads a pre-P2 manifest with `kind: mcp` rows and drops only those rows (TASK_2026_979, D1)', () => {
+    const warn = jest.fn();
+    const store = new ManagedManifestStore(warn);
+    const skill = managedEntry('h-skill', '/src/alpha', 'skill');
+    const path = store.manifestPath(ws, 'claude');
+    mkdirSync(join(path, '..'), { recursive: true });
+    const raw = JSON.stringify({
+      ...emptyManifest('claude'),
+      entries: {
+        '.claude/skills/alpha': skill,
+        '.mcp.json#github': managedEntry('h-mcp', 'io.example/github', 'mcp'),
+      },
+    });
+    writeFileSync(path, raw, 'utf-8');
+
+    const manifest = store.load(ws, 'claude');
+
+    // The schema still accepts `mcp`, so the file is not "unreadable".
+    expect(warn).not.toHaveBeenCalled();
+    expect(manifest.entries).toEqual({ '.claude/skills/alpha': skill });
+    // Loading writes nothing back: the file keeps its old row until a pass saves.
+    expect(readFileSync(path, 'utf-8')).toBe(raw);
+  });
 });

@@ -2,9 +2,11 @@
  * `HarnessReconcilerService.remove()` — the explicit uninstall path (E22).
  *
  * Bounded strictly by the manifest: a foreign skill directory the user made by
- * hand, a foreign server key the user added to `.mcp.json`, and the user-layer
- * source directories all survive. Only what Ptah's own manifests say it owns
- * is deleted, across every target.
+ * hand, the user's own `.mcp.json`, and the user-layer source directories all
+ * survive. Only what Ptah's own manifests say it owns is deleted, across every
+ * target. A pre-P2 `kind: 'mcp'` manifest row produces no removal: it is
+ * dropped on load and the config entry it named stays (TASK_2026_979, parity
+ * row 23, D-U5).
  *
  * Source-under-test: `HarnessReconcilerService.remove` + `ClaudeTarget` +
  * `createCodexTarget`.
@@ -27,7 +29,10 @@ import { createStaticSourceResolver } from '../sources/plugin-config-source-reso
 import type { HarnessSourceState } from '../sources/harness-source.port';
 import { HarnessManifestBuilder } from '../manifest/harness-manifest.builder';
 import { HarnessReconcilerService } from './harness-reconciler.service';
-import { ManagedManifestStore } from '../manifest-store/managed-manifest';
+import {
+  managedEntry,
+  ManagedManifestStore,
+} from '../manifest-store/managed-manifest';
 import { HarnessStateStore } from '../gitignore/harness-state-store';
 
 /**
@@ -109,14 +114,6 @@ describe('HarnessReconcilerService.remove (E22)', () => {
       overlayPluginPaths: [],
       disabledSkillIds: [],
       disabledPluginIds: [],
-      mcpIntents: [
-        {
-          serverKey: 'github',
-          registryName: 'io.github.example/server',
-          config: { type: 'stdio', command: 'npx', args: ['-y', 'gh-mcp'] },
-          targets: ['claude'],
-        },
-      ],
     };
 
     const logger = makeFakeLogger();
@@ -148,7 +145,8 @@ describe('HarnessReconcilerService.remove (E22)', () => {
     expect(existsSync(claudeSkillDir)).toBe(true);
     expect(existsSync(claudeCommandFile)).toBe(true);
     expect(existsSync(codexSkillDir)).toBe(true);
-    expect(existsSync(mcpConfigPath)).toBe(true);
+    // No target writes MCP config (TASK_2026_979, decision row 10).
+    expect(existsSync(mcpConfigPath)).toBe(false);
 
     // Foreign skill the user made by hand, right next to Ptah's own.
     const foreignSkillDir = join(ws, '.claude', 'skills', 'mine');
@@ -158,19 +156,29 @@ describe('HarnessReconcilerService.remove (E22)', () => {
       "---\nname: mine\n---\nmy own skill, not Ptah's\n";
     writeFileSync(foreignSkillFile, foreignSkillContent, 'utf-8');
 
-    // Foreign server key the user added to `.mcp.json` by hand.
-    const mcpConfig = JSON.parse(readFileSync(mcpConfigPath, 'utf-8')) as {
-      mcpServers: Record<string, unknown>;
+    // The user's `.mcp.json`: `github` was written by a pre-P2 pass, and a
+    // pre-P2 manifest row still names it; `myown` the user added by hand.
+    const mcpConfigContent = `${JSON.stringify(
+      {
+        mcpServers: {
+          github: { command: 'npx', args: ['-y', 'gh-mcp'] },
+          myown: { command: 'node', args: ['own-server.js'] },
+        },
+      },
+      null,
+      2,
+    )}\n`;
+    writeFileSync(mcpConfigPath, mcpConfigContent, 'utf-8');
+    const claudeManifestPath = store.manifestPath(ws, 'claude');
+    const seeded = JSON.parse(readFileSync(claudeManifestPath, 'utf-8')) as {
+      entries: Record<string, unknown>;
     };
-    mcpConfig.mcpServers['myown'] = {
-      command: 'node',
-      args: ['own-server.js'],
-    };
-    writeFileSync(
-      mcpConfigPath,
-      `${JSON.stringify(mcpConfig, null, 2)}\n`,
-      'utf-8',
+    seeded.entries['.mcp.json#github'] = managedEntry(
+      'hash-github',
+      'io.github.example/server',
+      'mcp',
     );
+    writeFileSync(claudeManifestPath, JSON.stringify(seeded), 'utf-8');
 
     await reconciler.remove(ws);
 
@@ -182,12 +190,11 @@ describe('HarnessReconcilerService.remove (E22)', () => {
     expect(existsSync(foreignSkillFile)).toBe(true);
     expect(readFileSync(foreignSkillFile, 'utf-8')).toBe(foreignSkillContent);
 
-    // `.mcp.json` survives with the foreign key and without Ptah's.
-    const mcpAfter = JSON.parse(readFileSync(mcpConfigPath, 'utf-8')) as {
-      mcpServers: Record<string, unknown>;
-    };
-    expect(mcpAfter.mcpServers['myown']).toBeDefined();
-    expect(mcpAfter.mcpServers['github']).toBeUndefined();
+    // `.mcp.json` survives byte-identical: the old row removed nothing.
+    expect(readFileSync(mcpConfigPath, 'utf-8')).toBe(mcpConfigContent);
+    expect(readFileSync(claudeManifestPath, 'utf-8')).not.toContain(
+      '.mcp.json#github',
+    );
 
     // Every manifest this run touched is now empty.
     const claudeManifest = new ManagedManifestStore().load(ws, 'claude');

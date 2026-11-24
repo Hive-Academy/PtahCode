@@ -34,6 +34,8 @@ import type {
 } from './codex-app-server-lane-auth';
 import type { CodexLaneProfileInput } from './codex-lane-profile';
 import { essentialLaneSession } from './codex-app-server-lane-rejection';
+import { resolveCliLanePolicy } from '../../cli-lane-policy-resolver';
+import { translateLaneSpawnPolicy } from '../../lane-spawn-policy';
 import {
   CodexLaneWriteDacDeniedError,
   CodexLaneWriteDacPreflight,
@@ -334,6 +336,22 @@ describe('CodexAppServerLaneAdapter', () => {
     expect(jest.mocked(h.runtime.open).mock.calls[0]?.[5]).toEqual(new Map());
     await terminal(h.context);
     await handle.done;
+  });
+
+  it('defaults a lane with no explicit or saved policy to yolo with network (danger-full-access)', () => {
+    const manifest = harness().adapter.capabilities();
+    const resolved = resolveCliLanePolicy({ cli: 'codex', manifest, saved: {}, request: {} });
+    expect(resolved).toMatchObject({ permission: 'yolo', network: 'allow',
+      permissionSource: 'built-in', networkSource: 'built-in' });
+    expect(translateLaneSpawnPolicy('codex', manifest, resolved)).toMatchObject({
+      sandboxMode: 'danger-full-access', networkAccess: undefined,
+    });
+  });
+
+  it('keeps the plan-parent cap over the yolo built-in default', () => {
+    const manifest = harness().adapter.capabilities();
+    expect(resolveCliLanePolicy({ cli: 'codex', manifest, saved: {}, request: {}, parentLevel: 'plan' }))
+      .toMatchObject({ permission: 'plan', network: 'deny', permissionSource: 'parent-plan' });
   });
 
   it('advertises only denied network for the native read-only plan mode', () => {

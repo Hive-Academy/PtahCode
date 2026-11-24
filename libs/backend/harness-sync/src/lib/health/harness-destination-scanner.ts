@@ -274,7 +274,6 @@ function probeState(item: HarnessDestinationItem): HarnessDesiredState {
     skills: item.kind === 'skill' ? [{ ...entry, sourceDir: '' }] : [],
     commands: item.kind === 'command' ? [{ ...entry, sourceFile: '' }] : [],
     agents: [],
-    mcp: [],
     collisions: [],
     sources: 'ok',
     sourceRoots: [],

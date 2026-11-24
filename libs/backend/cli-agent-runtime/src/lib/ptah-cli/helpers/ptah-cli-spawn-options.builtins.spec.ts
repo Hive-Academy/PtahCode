@@ -88,6 +88,8 @@ function buildService(
   mcp?: {
     readonly status?: { getPort(): number | null };
     readonly credentials?: IMcpCallerCredentials;
+    /** A bound MCP gateway stand-in; only its presence is read. */
+    readonly gateway?: object;
   },
 ): PtahCliSpawnOptions {
   const ctor = PtahCliSpawnOptions as unknown as new (
@@ -103,6 +105,7 @@ function buildService(
     undefined,
     workspace,
     mcp?.credentials,
+    mcp?.gateway,
   );
 }
 
@@ -558,5 +561,59 @@ describe('PtahCliSpawnOptions — phase credential', () => {
       phaseKind: 'visual-review',
       disallowedTools: [],
     });
+  });
+});
+
+// Regression 6, strict half, lanes (C11): a Claude lane that gets `ptah`
+// from a bound gateway runs strict, so no native copy duplicates a server
+// the gateway serves (the P1 live review saw `mcp__livecheck__echo` twice).
+describe('PtahCliSpawnOptions — strict MCP from the gateway (C11)', () => {
+  const credentials = {
+    issue: jest.fn().mockReturnValue('c'.repeat(43)),
+    revokeSubject: jest.fn(),
+  } satisfies IMcpCallerCredentials;
+  const status = { getPort: () => 51820 };
+  /** A lane spawn: the agent id is what mints the lane's `ptah` credential. */
+  const assembleLane = (service: PtahCliSpawnOptions) =>
+    service.assembleSpawnOptions(
+      AUTH_ENV,
+      CWD,
+      'opus',
+      undefined,
+      'lane-1',
+      undefined,
+      verifiedPolicy(),
+    );
+
+  it('runs strict when the gateway is bound and the lane gets ptah', async () => {
+    const assembly = await assembleLane(
+      buildService(settingsWorkspace(() => undefined), {
+        status,
+        credentials,
+        gateway: {},
+      }),
+    );
+    expect(Object.keys(assembly.mcpServers)).toEqual(['ptah']);
+    expect(assembly.capabilityIsolation).toEqual({ strictMcpConfig: true });
+  });
+
+  it('keeps the lane MCP sources when no gateway is bound', async () => {
+    const assembly = await assembleLane(
+      buildService(settingsWorkspace(() => undefined), { status, credentials }),
+    );
+    expect(Object.keys(assembly.mcpServers)).toEqual(['ptah']);
+    expect(assembly.capabilityIsolation).toEqual({});
+  });
+
+  it('keeps the lane MCP sources when the ptah server is not running', async () => {
+    const assembly = await assembleLane(
+      buildService(settingsWorkspace(() => undefined), {
+        status: { getPort: () => null },
+        credentials,
+        gateway: {},
+      }),
+    );
+    expect(assembly.mcpServers).toEqual({});
+    expect(assembly.capabilityIsolation).toEqual({});
   });
 });

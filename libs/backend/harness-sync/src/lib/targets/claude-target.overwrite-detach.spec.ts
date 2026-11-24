@@ -91,7 +91,6 @@ describe('ClaudeTarget — detach before replacing, exclusive create (P1 review 
         },
       ],
       agents: [],
-      mcp: [],
       collisions: [],
       sources: 'ok',
       sourceRoots: [join(tempRoot, 'sources')],
@@ -181,7 +180,11 @@ describe('ClaudeTarget — detach before replacing, exclusive create (P1 review 
   });
 
   it('never replaces a COMMAND the user created at a path the plan saw vacant', async () => {
-    const plan = await target.plan(await desired(), ws, emptyManifest('claude'));
+    const plan = await target.plan(
+      await desired(),
+      ws,
+      emptyManifest('claude'),
+    );
     expect(plan.writes.find((w) => w.relPath === COMMAND)?.reason).toBe(
       'create',
     );
@@ -205,10 +208,12 @@ describe('ClaudeTarget — detach before replacing, exclusive create (P1 review 
   });
 
   it('never deletes or writes into a SKILL directory the user created at a path the plan saw vacant', async () => {
-    const plan = await target.plan(await desired(), ws, emptyManifest('claude'));
-    expect(plan.writes.find((w) => w.relPath === SKILL)?.reason).toBe(
-      'create',
+    const plan = await target.plan(
+      await desired(),
+      ws,
+      emptyManifest('claude'),
     );
+    expect(plan.writes.find((w) => w.relPath === SKILL)?.reason).toBe('create');
 
     mkdirSync(abs(SKILL), { recursive: true });
     writeFileSync(join(abs(SKILL), 'notes.md'), 'my notes\n', 'utf-8');

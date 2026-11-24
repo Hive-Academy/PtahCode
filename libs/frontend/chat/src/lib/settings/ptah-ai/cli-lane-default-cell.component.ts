@@ -643,8 +643,12 @@ export class CliLaneDefaultCellComponent {
         network: parsed.data,
       });
   }
+  /**
+   * Confirms only an escalation to full access: a CLI whose effective mode is already yolo
+   * (for example the built-in default) saves a yolo choice without the dialog.
+   */
   private propose(choice: Choice): void {
-    if (choice.permission === 'yolo')
+    if (choice.permission === 'yolo' && this.effectivePermission() !== 'yolo')
       this.openConfirmation({ kind: 'choice', value: choice });
     else this.selected.emit(choice);
   }
@@ -656,7 +660,10 @@ export class CliLaneDefaultCellComponent {
         ? document.activeElement
         : null;
     this.resetOpen.set(false);
-    if (this.defaultPermission() === 'yolo')
+    if (
+      this.defaultPermission() === 'yolo' &&
+      this.effectivePermission() !== 'yolo'
+    )
       this.openConfirmation({ kind: 'reset' });
     else this.resetRequested.emit();
   }

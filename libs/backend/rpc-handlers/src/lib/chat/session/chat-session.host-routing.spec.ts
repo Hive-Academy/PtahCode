@@ -215,14 +215,6 @@ function makeHarness(opts: HarnessOptions = {}): Harness {
     { ...createFakeDriverLockCoordinator(), ...opts.driverLock } as never,
   );
 
-  jest
-    .spyOn(
-      service as unknown as {
-        buildMcpServersOverride: (caller: unknown) => Promise<unknown>;
-      },
-      'buildMcpServersOverride',
-    )
-    .mockResolvedValue(undefined);
   return {
     service,
     logger,

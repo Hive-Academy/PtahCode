@@ -1991,13 +1991,14 @@ describe('GatewayChatBridge — SDK context wiring (MCP + prompts) (Task 2.4/3.3
    * two layers down. The `catch` below this line in `resolveSdkContext` was
    * written specifically to degrade the flag and could never fire.
    *
-   * A live port plus an absent `.mcp.json` entry means the session is told it
-   * has Ptah tools and its subagents find none. `false` is the honest answer.
+   * A live port while the server reports not ready (being torn down) means
+   * the session would be told it has Ptah tools it cannot reach. `false` is
+   * the honest answer (TASK_2026_979 B19: a readiness answer, no file).
    */
-  it('live MCP port but the .mcp.json entry was NOT written: startChatSession receives mcpServerRunning false', async () => {
+  it('live MCP port but the server is not ready: startChatSession receives mcpServerRunning false', async () => {
     const h = setup({
       mcpPort: 4319,
-      mcpRegistration: { registered: false, reason: 'lock-timeout' },
+      mcpRegistration: { registered: false, reason: 'not-started' },
     });
     const binding = makeBinding({ workspaceRoot: '/ws/proj' });
     h.adapter.startChatSession.mockResolvedValue(
@@ -2016,8 +2017,8 @@ describe('GatewayChatBridge — SDK context wiring (MCP + prompts) (Task 2.4/3.3
     expect(h.codeExecutionMcp.ensureRegisteredForSubagents).toHaveBeenCalled();
     const config = h.adapter.startChatSession.mock.calls[0][0];
     expect(config.mcpServerRunning).toBe(false);
-    // The turn still runs — a contended config file must not cost the user
-    // their message.
+    // The turn still runs — an unready server must not cost the user their
+    // message.
     expect(h.gateway.completeOutboundTurn).toHaveBeenCalledTimes(1);
   });
 

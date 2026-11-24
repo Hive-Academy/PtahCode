@@ -30,6 +30,7 @@
 import 'reflect-metadata';
 import { SubagentStopNotices } from '../helpers/compaction/subagent-stop-notices';
 import { SessionIdResolvedCallbackRegistry } from '../helpers/session-id-resolved-callback-registry';
+import { ToolOutputCapper } from '../helpers/compaction/tool-output-capper';
 
 import { container as rootContainer } from 'tsyringe';
 import type { DependencyContainer } from 'tsyringe';
@@ -413,5 +414,56 @@ describe('registerSdkServices — session budget DI smoke', () => {
 
     expect(service).toBeInstanceOf(SessionBudgetService);
     expect(container.resolve(SDK_TOKENS.SDK_SESSION_BUDGET)).toBe(service);
+  });
+});
+
+/**
+ * TASK_2026_979 — the capper factory passes the optional gateway's
+ * `isGatewayTool` as its predicate, so a third-party tool served through
+ * `ptah` is capped, while Ptah's own tools and a gateway-less host keep
+ * every `mcp__ptah__*` tool exempt.
+ */
+describe('registerSdkServices — tool output capper gateway predicate', () => {
+  const GATEWAY_TOOL = 'mcp__ptah__zernio__create_post';
+  const HOST_TOOL = 'mcp__ptah__ptah_search_files';
+
+  function injectedPredicate(
+    capper: ToolOutputCapper,
+  ): ((toolName: string) => boolean) | undefined {
+    return (
+      capper as unknown as {
+        isGatewayTool?: (toolName: string) => boolean;
+      }
+    ).isGatewayTool;
+  }
+
+  it('caps a gateway tool when a gateway is bound', () => {
+    const container = buildSmokeContainer();
+    const isGatewayTool = jest.fn((name: string) => name !== HOST_TOOL);
+    container.register(PLATFORM_TOKENS.MCP_GATEWAY, {
+      useValue: { isGatewayTool },
+    });
+
+    const capper = container.resolve<ToolOutputCapper>(
+      SDK_TOKENS.SDK_TOOL_OUTPUT_CAPPER,
+    );
+    const predicate = injectedPredicate(capper);
+
+    expect(capper).toBeInstanceOf(ToolOutputCapper);
+    expect(ToolOutputCapper.appliesTo(GATEWAY_TOOL, predicate)).toBe(true);
+    expect(ToolOutputCapper.appliesTo(HOST_TOOL, predicate)).toBe(false);
+    expect(isGatewayTool).toHaveBeenCalledWith(GATEWAY_TOOL);
+  });
+
+  it('leaves every ptah tool exempt when no gateway is bound', () => {
+    const container = buildSmokeContainer();
+
+    const capper = container.resolve<ToolOutputCapper>(
+      SDK_TOKENS.SDK_TOOL_OUTPUT_CAPPER,
+    );
+    const predicate = injectedPredicate(capper);
+
+    expect(predicate).toBeUndefined();
+    expect(ToolOutputCapper.appliesTo(GATEWAY_TOOL, predicate)).toBe(false);
   });
 });

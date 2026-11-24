@@ -53,6 +53,12 @@ export interface SessionMcpServerEntry {
   readonly name: string;
   /** Status the CLI reported. See {@link SessionMcpServerStatus}. */
   readonly status: SessionMcpServerStatus;
+  /**
+   * Who reported the entry. `cli` (or absent) is the CLI's own `init`
+   * report. `ptah-gateway` is a server Ptah serves through its `ptah` MCP
+   * server (`IMcpGateway.status`); MCP reconnect back-off ignores it.
+   */
+  readonly source?: 'cli' | 'ptah-gateway';
 }
 
 /**

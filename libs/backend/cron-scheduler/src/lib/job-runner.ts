@@ -38,10 +38,12 @@ import type { IRunStore } from './run.store';
 import { SlotAlreadyClaimedError } from './run.store';
 import type { RunId } from '@ptah-extension/shared';
 import type { IHandlerRegistry, JobHandlerResult, ScheduledJob } from './types';
-import { SDK_TOKENS } from '@ptah-extension/agent-sdk';
+import { SDK_TOKENS, redactMcpErrorText } from '@ptah-extension/agent-sdk';
 import {
   PLATFORM_TOKENS,
+  internalQueryGatewayScope,
   resolveMcpSessionWiring,
+  type IMcpGateway,
   type IMcpServerStatus,
 } from '@ptah-extension/platform-core';
 import type {
@@ -60,6 +62,68 @@ interface IInternalQueryService {
 }
 
 const HANDLER_PREFIX = 'handler:';
+const SUMMARY_CAP = 500;
+const MCP_WARNING_CAP = 300;
+
+/** One MCP server the run could not use, as named in the run summary. */
+interface UnavailableMcpServer {
+  readonly name: string;
+  readonly status: string;
+  readonly detail?: string;
+}
+
+/**
+ * The `system`/`init` message lists every MCP server the CLI loaded. Returns
+ * the entries that are neither `connected` nor deliberately `disabled`, with
+ * the CLI's error text, redacted, as detail when it gives one.
+ */
+function readUnavailableInitServers(msg: unknown): UnavailableMcpServer[] {
+  if (!msg || typeof msg !== 'object') return [];
+  const m = msg as { type?: unknown; subtype?: unknown; mcp_servers?: unknown };
+  if (m.type !== 'system' || m.subtype !== 'init') return [];
+  if (!Array.isArray(m.mcp_servers)) return [];
+  const out: UnavailableMcpServer[] = [];
+  for (const entry of m.mcp_servers as unknown[]) {
+    if (!entry || typeof entry !== 'object') continue;
+    const e = entry as { name?: unknown; status?: unknown; error?: unknown };
+    if (typeof e.name !== 'string' || typeof e.status !== 'string') continue;
+    if (e.status === 'connected' || e.status === 'disabled') continue;
+    out.push({
+      name: e.name,
+      status: e.status,
+      ...(typeof e.error === 'string' && e.error.length > 0
+        ? { detail: redactMcpErrorText(e.error) }
+        : {}),
+    });
+  }
+  return out;
+}
+
+/**
+ * One warning line naming every MCP server the run could not use, capped at
+ * 300 characters, or `''` when there is none. Details are already redacted.
+ * The warning never changes the run status (decision 6): the job reached its
+ * own verdict either way.
+ */
+function mcpWarningLine(unavailable: readonly UnavailableMcpServer[]): string {
+  if (unavailable.length === 0) return '';
+  const names = unavailable
+    .map((s) =>
+      s.detail
+        ? `${s.name}(${s.status}: ${s.detail})`
+        : `${s.name}(${s.status})`,
+    )
+    .join(', ');
+  return `\n[warning] MCP unavailable: ${names}`.slice(0, MCP_WARNING_CAP);
+}
+
+/** `base` capped at 500 characters, then the MCP warning line. */
+function withMcpWarning(
+  base: string,
+  unavailable: readonly UnavailableMcpServer[],
+): string {
+  return base.slice(0, SUMMARY_CAP) + mcpWarningLine(unavailable);
+}
 
 /**
  * Every SDK message carries the id of the session that produced it; the
@@ -117,6 +181,12 @@ export class JobRunner {
      */
     @inject(PLATFORM_TOKENS.MCP_SERVER_STATUS, { isOptional: true })
     private readonly mcpServerStatus: IMcpServerStatus | null = null,
+    /**
+     * Optional: a host without auth secrets binds no gateway. Read only for
+     * the run-summary warning about connectors that were not available.
+     */
+    @inject(PLATFORM_TOKENS.MCP_GATEWAY, { isOptional: true })
+    private readonly mcpGateway?: IMcpGateway,
   ) {}
 
   /**
@@ -282,8 +352,9 @@ export class JobRunner {
     const { model, auth } = await this.workspaceLlm.resolveForPath(
       job.workspaceRoot ?? undefined,
     );
+    const cwd = job.workspaceRoot ?? process.cwd();
     const handle = await this.internalQuery.execute({
-      cwd: job.workspaceRoot ?? process.cwd(),
+      cwd,
       model,
       ...(auth ? { auth } : {}),
       prompt: job.prompt,
@@ -291,11 +362,16 @@ export class JobRunner {
       // single Ptah tool on a host where the server was listening the whole
       // time (defect 13). Derived now, from the live port.
       ...resolveMcpSessionWiring(this.mcpServerStatus),
+      // A scheduled job is the user's own automation, so it sees the user's
+      // connectors through the gateway. It is the only one-shot caller that
+      // opts in (#1466).
+      includeConnectors: true,
       abortController: ctl,
     });
 
     let summary: string | undefined;
     let sessionRecorded = false;
+    const unavailable: UnavailableMcpServer[] = [];
     try {
       for await (const msg of handle.stream) {
         if (ctl.signal.aborted) break;
@@ -306,23 +382,95 @@ export class JobRunner {
             this.recordSessionId(job, runId, sessionId);
           }
         }
+        unavailable.push(...readUnavailableInitServers(msg));
         if (
           msg &&
           typeof msg === 'object' &&
           (msg as { type?: unknown }).type === 'result'
         ) {
           const r = msg as { result?: unknown; subtype?: unknown };
-          if (typeof r.result === 'string') summary = r.result.slice(0, 500);
+          if (typeof r.result === 'string') summary = r.result;
           else if (r.subtype === 'error_max_turns')
             throw new Error('SDK reported max-turns exceeded');
           else if (r.subtype === 'error_during_execution')
             throw new Error('SDK reported execution error');
         }
       }
+    } catch (err) {
+      // degradation-audit: reported - rethrown, not swallowed: the run still
+      // fails with the same error, now naming the MCP servers it could not use.
+      throw this.withFailureMcpWarning(err, job, runId, cwd, unavailable);
     } finally {
       handle.close();
     }
-    return { summary: summary ?? 'ok' };
+    this.addGatewayUnavailable(job, runId, cwd, unavailable);
+    return { summary: withMcpWarning(summary ?? 'ok', unavailable) };
+  }
+
+  /**
+   * `err` with the MCP warning appended to its message, the original as its
+   * `cause`. With nothing to warn about, `err` itself, unchanged.
+   */
+  private withFailureMcpWarning(
+    err: unknown,
+    job: ScheduledJob,
+    runId: RunId,
+    cwd: string,
+    unavailable: UnavailableMcpServer[],
+  ): unknown {
+    this.addGatewayUnavailable(job, runId, cwd, unavailable);
+    const warning = mcpWarningLine(unavailable);
+    if (!warning) return err;
+    const message = err instanceof Error ? err.message : String(err);
+    return new Error(message + warning, { cause: err });
+  }
+
+  /** Adds the gateway's unavailable servers not already named by the CLI. */
+  private addGatewayUnavailable(
+    job: ScheduledJob,
+    runId: RunId,
+    cwd: string,
+    unavailable: UnavailableMcpServer[],
+  ): void {
+    for (const server of this.readGatewayUnavailable(job, runId, cwd)) {
+      if (!unavailable.some((u) => u.name === server.name)) {
+        unavailable.push(server);
+      }
+    }
+  }
+
+  /**
+   * Gateway servers the run's scope could see but that were not connected,
+   * including a cold-start `pending` server with its timeout detail. Reads
+   * the gateway's cache only; it never connects.
+   */
+  private readGatewayUnavailable(
+    job: ScheduledJob,
+    runId: RunId,
+    workspaceRoot: string,
+  ): UnavailableMcpServer[] {
+    if (!this.mcpGateway) return [];
+    try {
+      return this.mcpGateway
+        .status(internalQueryGatewayScope(workspaceRoot, true))
+        .filter((s) => s.status !== 'connected')
+        .map((s) => ({
+          name: s.display,
+          status: s.status,
+          ...(s.detail ? { detail: redactMcpErrorText(s.detail) } : {}),
+        }));
+    } catch (err) {
+      // degradation-audit: reported - the gateway status only feeds the
+      // run-summary warning; a failed read is logged at warn and the run keeps
+      // its own verdict and summary.
+      const error = err instanceof Error ? err : new Error(String(err));
+      this.logger.logWithContext(
+        'warn',
+        '[cron-scheduler] could not read MCP gateway status',
+        { error, metadata: { jobId: job.id, runId } },
+      );
+      return [];
+    }
   }
 
   /**
