@@ -27,7 +27,29 @@ import { v4 as uuidv4 } from 'uuid';
 import type {
   AgentPermissionRequest,
   AgentPermissionDecision,
+  LanePermissionResponse,
 } from '@ptah-extension/shared';
+
+/** What happened to a lane user's answer (see {@link CopilotPermissionBridge.resolveLaneResponse}). */
+export type CopilotLaneResponseResult = 'resolved' | 'not-pending' | 'edit-refused';
+
+/** Shown when an approval carries edited tool input, which Copilot hooks cannot apply. */
+export const COPILOT_EDIT_REFUSED =
+  'Copilot lanes cannot run a tool with edited input. Allow or deny it without editing.';
+
+/**
+ * The bridge's narrow decision for a lane answer: `always_allow` allows this
+ * call (Copilot has no rule store, so nothing is remembered), and
+ * `deny_with_message` denies with its message as the reason.
+ */
+export function toBridgeDecision(response: LanePermissionResponse): AgentPermissionDecision {
+  const allow = response.decision === 'allow' || response.decision === 'always_allow';
+  return {
+    requestId: response.requestId,
+    decision: allow ? 'allow' : 'deny',
+    ...(response.reason !== undefined ? { reason: response.reason } : {}),
+  };
+}
 
 /**
  * Fine-grained permission policy for Copilot SDK tool/permission approval.
@@ -295,6 +317,21 @@ export class CopilotPermissionBridge {
     if (entry) {
       entry.resolve(decision);
     }
+  }
+
+  /**
+   * Resolve a pending request from a lane user's answer (the main chat
+   * card's decisions, `agent:permissionResponse`). An approval that carries
+   * edited tool input is refused visibly and the request stays pending: the
+   * Copilot hooks can only allow or deny the call as the agent sent it, so
+   * running it while the user sees "Allowed" with an edit would be false.
+   */
+  resolveLaneResponse(response: LanePermissionResponse): CopilotLaneResponseResult {
+    if (!this.pending.has(response.requestId)) return 'not-pending';
+    const decision = toBridgeDecision(response);
+    if (decision.decision === 'allow' && response.modifiedInput !== undefined) return 'edit-refused';
+    this.resolvePermission(response.requestId, decision);
+    return 'resolved';
   }
 
   hasPendingRequest(requestId: string): boolean {

@@ -30,6 +30,10 @@ jest.mock('@ptah-extension/cli-agent-runtime', () => ({
   },
   MIN_CONCURRENT_AGENTS: 1,
   MAX_CONCURRENT_AGENTS: 10,
+  // The real bridge constant: a refused edit's text is asserted below.
+  COPILOT_EDIT_REFUSED: jest.requireActual(
+    '../../../../cli-agent-runtime/src/lib/cli-agents/cli-adapters/copilot-permission-bridge',
+  ).COPILOT_EDIT_REFUSED,
 }));
 
 jest.mock('@ptah-extension/agent-sdk', () => ({
@@ -149,6 +153,10 @@ interface Harness {
 
 interface HarnessOptions {
   readonly sdkPending?: AgentPermissionRequest[];
+  /** Registers an SDK permission handler whose `handleResponse` is this mock. */
+  readonly handleResponse?: jest.Mock;
+  /** A Copilot adapter with this permission bridge. */
+  readonly copilotBridge?: unknown;
   readonly laneOwner?: { agentId: string; parentSessionId?: string; startedAt: string; status: 'running' | 'completed' };
   readonly detectedClis?: CliDetectionResult[];
   /** Registers a fake account service whose lookup is this mock. */
@@ -271,7 +279,8 @@ function makeHarness(options: HarnessOptions = {}): Harness {
     logger as unknown as Logger,
     rpcHandler as unknown as RpcHandler,
     {
-      getAdapter: jest.fn().mockReturnValue(undefined),
+      getAdapter: jest.fn((cli: string) =>
+        cli === 'copilot' && options.copilotBridge ? { permissionBridge: options.copilotBridge } : undefined),
       invalidateCache: jest.fn(),
       detectAll: jest.fn().mockResolvedValue(options.detectedClis ?? []),
       refresh: jest.fn().mockResolvedValue(options.detectedClis ?? []),
@@ -290,7 +299,8 @@ function makeHarness(options: HarnessOptions = {}): Harness {
           (accountLookup !== undefined && token === ProviderAccountService) ||
           (capabilityResolver !== undefined &&
             token === SDK_TOKENS.SDK_CAPABILITY_RESOLVER) ||
-          (options.sdkPending !== undefined && token === SDK_TOKENS.SDK_PERMISSION_HANDLER) ||
+          ((options.sdkPending !== undefined || options.handleResponse !== undefined) &&
+            token === SDK_TOKENS.SDK_PERMISSION_HANDLER) ||
           token === AUTH_PROVIDERS_TOKENS.SDK_AUTH_ENV,
       ),
       resolve: jest.fn((token: unknown) =>
@@ -303,7 +313,7 @@ function makeHarness(options: HarnessOptions = {}): Harness {
           : token === SDK_TOKENS.SDK_CAPABILITY_RESOLVER
             ? capabilityResolver
             : token === SDK_TOKENS.SDK_PERMISSION_HANDLER
-              ? { getPendingCliAgentPermissions: () => options.sdkPending }
+              ? { getPendingCliAgentPermissions: () => options.sdkPending, handleResponse: options.handleResponse }
             : token === AUTH_PROVIDERS_TOKENS.SDK_AUTH_ENV
               ? authEnv
               : undefined,
@@ -1746,5 +1756,74 @@ describe('AgentRpcHandlers — agent:setClaudeBuiltin (TASK_2026_853 R2)', () =>
       enabledTools: ['DesignSync'],
       enabledSkills: [],
     });
+  });
+});
+
+describe('AgentRpcHandlers — agent:permissionResponse (D22, S1/S2)', () => {
+  type Bridge = {
+    requestToolPermission(params: { agentId: string; toolName: string; toolArgs: unknown }): Promise<{ permissionDecision: 'allow' | 'deny' }>;
+    setAutoApprove(value: boolean): void;
+    hasPendingRequest(id: string): boolean;
+    events: { on(event: string, listener: (payload: { requestId: string }) => void): void };
+  };
+  const { CopilotPermissionBridge, COPILOT_EDIT_REFUSED } = jest.requireActual(
+    '../../../../cli-agent-runtime/src/lib/cli-agents/cli-adapters/copilot-permission-bridge',
+  ) as { CopilotPermissionBridge: new () => Bridge; COPILOT_EDIT_REFUSED: string };
+
+  function copilotRequest() {
+    const bridge = new CopilotPermissionBridge();
+    bridge.setAutoApprove(false);
+    let requestId = '';
+    bridge.events.on('permission-request', (payload) => { requestId = payload.requestId; });
+    const answer = bridge.requestToolPermission({ agentId: 'lane', toolName: 'Write', toolArgs: {} });
+    return { bridge, answer, requestId: () => requestId };
+  }
+
+  it('forwards every decision and the edited input to the SDK handler', async () => {
+    const handleResponse = jest.fn().mockReturnValue(true);
+    const h = makeHarness({ handleResponse });
+    const result = await call<{ success: boolean }>(h, 'agent:permissionResponse', {
+      requestId: 'req-1', decision: 'always_allow', modifiedInput: { command: 'ls' },
+    });
+    expect(result.success).toBe(true);
+    expect(handleResponse).toHaveBeenCalledWith('req-1', {
+      id: 'req-1', decision: 'always_allow', reason: undefined, modifiedInput: { command: 'ls' },
+    });
+  });
+
+  it.each([
+    ['an unknown decision', { requestId: 'r', decision: 'maybe' }],
+    ['an empty request id', { requestId: '', decision: 'allow' }],
+    ['a 501-character reason', { requestId: 'r', decision: 'deny', reason: 'x'.repeat(501) }],
+    ['an unknown field', { requestId: 'r', decision: 'allow', extra: true }],
+    ['an array modifiedInput', { requestId: 'r', decision: 'allow', modifiedInput: ['a'] }],
+    ['an oversized modifiedInput', { requestId: 'r', decision: 'allow', modifiedInput: { text: 'x'.repeat(100_001) } }],
+    ['a prototype key', { requestId: 'r', decision: 'allow', modifiedInput: JSON.parse('{"a":{"__proto__":{"x":1}}}') }],
+  ])('rejects %s without touching any handler', async (_label, params) => {
+    const handleResponse = jest.fn().mockReturnValue(true);
+    const h = makeHarness({ handleResponse });
+    const result = await call<{ success: boolean; error?: string }>(h, 'agent:permissionResponse', params);
+    expect(result).toEqual({ success: false, error: 'Invalid permission response.' });
+    expect(handleResponse).not.toHaveBeenCalled();
+  });
+
+  it('lets the Copilot bridge allow the call for always_allow (Req 5.7)', async () => {
+    const { bridge, answer, requestId } = copilotRequest();
+    const h = makeHarness({ copilotBridge: bridge });
+    const result = await call<{ success: boolean }>(h, 'agent:permissionResponse', {
+      requestId: requestId(), decision: 'always_allow',
+    });
+    expect(result.success).toBe(true);
+    await expect(answer).resolves.toMatchObject({ permissionDecision: 'allow' });
+  });
+
+  it('refuses an edited approval on Copilot visibly and keeps the request pending', async () => {
+    const { bridge, requestId } = copilotRequest();
+    const h = makeHarness({ copilotBridge: bridge });
+    const result = await call<{ success: boolean; error?: string }>(h, 'agent:permissionResponse', {
+      requestId: requestId(), decision: 'allow', modifiedInput: { path: 'other.ts' },
+    });
+    expect(result).toEqual({ success: false, error: COPILOT_EDIT_REFUSED });
+    expect(bridge.hasPendingRequest(requestId())).toBe(true);
   });
 });

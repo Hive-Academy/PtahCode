@@ -1,6 +1,6 @@
 # Batches - TASK_2026_2320_lnpar
 
-Total tasks: 49 | Batches: 30 | Complete: 21/30
+Total tasks: 49 | Batches: 30 | Complete: 22/30
 
 Source: `implementation-plan.md` revision 3 plus "Binding notes from Gate 2" (R3-1, R3-2 bind
 Batch 20), `task-description.md`, `design-spec.md`, `prototype/README.md`, `parity-inventory.md`,
@@ -1006,7 +1006,7 @@ Edge cases:
 
 - Artifacts exist; scoped commands pass.
 
-## Batch 22: B10 RPC surface - PENDING (AFTER REBASE)
+## Batch 22: B10 RPC surface - COMPLETE
 
 - Shape: contract
 - Estimated weight (tokens): ~22k
@@ -1038,8 +1038,8 @@ Edge cases:
 - Phase: P5 Messaging core (last batch, with 21: phase review due after both commit) |
   Phase review: code-logic + style (new RPC method, new handle contract)
 
-### Task 22.1: agent-message RPC: turn schema, getLaneTurnOptions, queued body turn - PENDING
-### Task 22.2: permissionResponse strict schema and bridge mapping; electron surface spec - PENDING
+### Task 22.1: agent-message RPC: turn schema, getLaneTurnOptions, queued body turn - COMPLETE
+### Task 22.2: permissionResponse strict schema and bridge mapping; electron surface spec - COMPLETE
 
 ### Batch 22 verification
 

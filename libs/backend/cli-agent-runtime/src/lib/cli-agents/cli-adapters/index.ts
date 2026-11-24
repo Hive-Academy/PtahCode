@@ -20,7 +20,12 @@ export {
 export { fixPath, fixPathReady } from './fix-path';
 export { ptahMcpServerUrl } from './ptah-mcp-url';
 export { CopilotSdkAdapter } from './copilot-sdk.adapter';
-export { CopilotPermissionBridge } from './copilot-permission-bridge';
+export {
+  CopilotPermissionBridge,
+  COPILOT_EDIT_REFUSED,
+  toBridgeDecision,
+  type CopilotLaneResponseResult,
+} from './copilot-permission-bridge';
 export { CursorCliAdapter } from './cursor-cli.adapter';
 export { AntigravityCliAdapter } from './antigravity-cli.adapter';
 export { OpencodeCliAdapter } from './opencode-cli.adapter';

@@ -3,7 +3,9 @@ import { z } from 'zod';
 import {
   AGENT_MESSAGE_MAX_CHARS,
   AgentId,
+  MAX_IMAGE_SIZE_BYTES,
   type AgentDeliveryReceipt,
+  type AgentGetLaneComposerOptionsResult,
   type AgentGetQueuedMessageBodyResult,
   type AgentListMessageReceiptsResult,
   type AgentListParentDeliveriesResult,
@@ -28,13 +30,29 @@ const parentDeliveryId = z.custom<ParentDeliveryView['deliveryId']>(
   (value) => typeof value === 'string' && /^lane-delivery:\S{1,480}$/.test(value),
 );
 const previewSchema = z.object({ agentId, delivery: z.enum(['queue', 'now']).optional() }).strict();
+/** Model and effort ids: provider ids such as `claude-opus-4@1m`, `openai/gpt-5`, `high`. */
+const turnSetting = z.string().min(1).max(200).regex(/^[\w.:/@+-]+$/);
+/** Base64 text of one image at most `MAX_IMAGE_SIZE_BYTES` decoded. */
+const MAX_IMAGE_BASE64_CHARS = Math.ceil((MAX_IMAGE_SIZE_BYTES * 4) / 3);
+const imageSchema = z.object({
+  data: z.string().min(1).max(MAX_IMAGE_BASE64_CHARS).regex(/^[A-Za-z0-9+/]+={0,2}$/),
+  mediaType: z.string().max(100).regex(/^image\/[A-Za-z0-9.+-]+$/),
+}).strict();
+const turnSchema = z.object({
+  model: turnSetting.optional(),
+  reasoningEffort: turnSetting.optional(),
+  files: z.array(z.string().min(1).max(4096)).max(32).optional(),
+  images: z.array(imageSchema).max(8).optional(),
+}).strict();
 const sendSchema = z.object({
   agentId,
   message: z.string().min(1).max(AGENT_MESSAGE_MAX_CHARS).refine((value) => value.trim().length > 0),
   delivery: z.enum(['queue', 'now', 'steer']).optional(),
   allowPartialTurnLoss: z.boolean().optional(),
   idempotencyKey: z.string().regex(/^[A-Za-z0-9._:-]{1,128}$/).optional(),
+  turn: turnSchema.optional(),
 }).strict();
+const composerOptionsSchema = z.object({ agentId }).strict();
 const receiptSchema = z.object({ agentId, messageId }).strict();
 const listReceiptsSchema = z.object({ agentId: agentId.optional(), parentSessionId: parentSessionId.optional() }).strict();
 const retryMessageSchema = z.object({ agentId, messageId, confirmDuplicateRisk: z.boolean().optional() }).strict();
@@ -69,6 +87,7 @@ export class AgentMessageRpcHandlers {
     'agent:getMessageReceipt',
     'agent:listMessageReceipts',
     'agent:getQueuedMessageBody',
+    'agent:getLaneComposerOptions',
     'agent:retryMessage',
     'agent:cancelMessage',
     'agent:listParentDeliveries',
@@ -101,8 +120,10 @@ export class AgentMessageRpcHandlers {
     });
     this.rpc.registerMethod<unknown, AgentGetQueuedMessageBodyResult>('agent:getQueuedMessageBody', async (input) => {
       const params = parse(receiptSchema, input);
-      return { text: await this.coordinator.getBody(params.agentId, params.messageId, USER) };
+      return this.coordinator.getMessage(params.agentId, params.messageId, USER);
     });
+    this.rpc.registerMethod<unknown, AgentGetLaneComposerOptionsResult>('agent:getLaneComposerOptions', async (input) =>
+      this.composerOptions(parse(composerOptionsSchema, input).agentId));
     this.rpc.registerMethod<unknown, AgentMessageOutcome>('agent:retryMessage', (input) => {
       const params = parse(retryMessageSchema, input);
       return this.coordinator.retry(params.agentId, params.messageId, USER, {
@@ -126,6 +147,33 @@ export class AgentMessageRpcHandlers {
       if (!this.holds(deliveryId)) throw notFound();
       return this.parentView(deliveryId, await this.parentDelivery.cancel(deliveryId));
     });
+  }
+
+  /**
+   * The lane's models, efforts and commands. A failed lookup is a result
+   * with `error` and empty lists, never a throw (the composer shows it and
+   * offers Retry).
+   */
+  private async composerOptions(agentId: AgentId): Promise<AgentGetLaneComposerOptionsResult> {
+    try {
+      const view = await this.coordinator.turnOptions(agentId);
+      return {
+        models: view.models.map((model) => ({
+          id: model.id, name: model.name, ...(model.isFallback ? { isFallback: true } : {}),
+        })),
+        efforts: [...view.efforts],
+        ...(view.currentModel ? { currentModel: view.currentModel } : {}),
+        ...(view.currentEffort ? { currentEffort: view.currentEffort } : {}),
+        commands: view.commands.map((command) => ({
+          name: command.name, group: command.group,
+          ...(command.description ? { description: command.description } : {}),
+        })),
+        ...(view.error ? { error: view.error } : {}),
+      };
+    } catch {
+      // degradation-audit: reported - the coordinator logs lookup failures; the composer shows `error`.
+      return { models: [], efforts: [], commands: [], error: 'Lane options could not be read.' };
+    }
   }
 
   /**
