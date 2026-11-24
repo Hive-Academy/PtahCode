@@ -107,12 +107,29 @@ describe('LaneTurnSettingsStore', () => {
     it('clears each pick once the record confirms it', () => {
       store.pickModel(lane, 'gpt-5.5');
       store.pickEffort(lane, 'high');
-      agentsById.set(new Map([[lane, { model: 'gpt-5.4', observedModel: 'gpt-5.5' }]]));
+      agentsById.set(new Map([[lane, { model: 'gpt-5.5', reasoningEffort: 'low' }]]));
       TestBed.tick();
       expect(store.pending(lane)).toEqual({ reasoningEffort: 'high' });
       agentsById.set(new Map([[lane, { model: 'gpt-5.5', reasoningEffort: 'high' }]]));
       TestBed.tick();
       expect(store.pendingByAgent().has(lane)).toBe(false);
+    });
+
+    it('compares a model pick with the recorded model, not a lagging observed model', () => {
+      // The host applied gpt-5.5; the served model of the last turn still reads gpt-5.4.
+      agentsById.set(new Map([[lane, { model: 'gpt-5.5', observedModel: 'gpt-5.4' }]]));
+      TestBed.tick();
+      store.pickModel(lane, 'gpt-5.4');
+      expect(store.turnSettings(lane)).toEqual({ model: 'gpt-5.4' });
+      store.pickModel(lane, 'gpt-5.5');
+      expect(store.turnSettings(lane)).toBeUndefined();
+    });
+
+    it('confirms against the observed model when no model is recorded', () => {
+      agentsById.set(new Map([[lane, { observedModel: 'gpt-5.5' }]]));
+      TestBed.tick();
+      store.pickModel(lane, 'gpt-5.5');
+      expect(store.turnSettings(lane)).toBeUndefined();
     });
 
     it('drops the entries of a lane the monitor no longer tracks', async () => {
@@ -239,13 +256,21 @@ describe('LaneTurnSettingsStore', () => {
       TestBed.tick();
     });
 
-    it('clears a pending model once the lane reports it as the observed model', () => {
+    it('clears a pending model once a continued turn publishes it as the model', () => {
       settings.pickModel(lane, 'gpt-5.5');
       TestBed.tick();
       expect(settings.pending(lane)).toEqual({ model: 'gpt-5.5' });
-      monitor.onAgentSpawned(record({ turnSeq: 2, observedModel: 'gpt-5.5' }));
+      monitor.onAgentSpawned(record({ turnSeq: 2, model: 'gpt-5.5' }));
       TestBed.tick();
       expect(settings.pendingByAgent().has(lane)).toBe(false);
+    });
+
+    it('keeps a pick of the spawn model once a continued turn moved the lane off it', () => {
+      monitor.onAgentSpawned(record({ turnSeq: 2, model: 'gpt-5.5', observedModel: 'gpt-5.4' }));
+      TestBed.tick();
+      settings.pickModel(lane, 'gpt-5.4');
+      TestBed.tick();
+      expect(settings.turnSettings(lane)).toEqual({ model: 'gpt-5.4' });
     });
 
     it('clears a pending effort once the lane reports it, keeping an unconfirmed model', () => {

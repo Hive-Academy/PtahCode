@@ -171,6 +171,66 @@ describe('ComposerEffortPickerComponent menu', () => {
   });
 });
 
+describe('ComposerEffortPickerComponent keyboard', () => {
+  afterEach(() => TestBed.resetTestingModule());
+
+  const press = async (
+    fixture: ComponentFixture<ComposerEffortPickerComponent>,
+    key: string,
+  ): Promise<KeyboardEvent> => {
+    const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+    pill(fixture).dispatchEvent(event);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    return event;
+  };
+
+  it('opens on ArrowDown, starts on the selected level and chooses with Enter', async () => {
+    const fixture = await render({ selectedId: 'medium' });
+    const selected: ComposerEffortOption[] = [];
+    fixture.componentInstance.selected.subscribe((o) => selected.push(o));
+
+    const opening = await press(fixture, 'ArrowDown');
+    expect(opening.defaultPrevented).toBe(true);
+    expect(fixture.componentInstance.isOpen()).toBe(true);
+    expect(pill(fixture).getAttribute('aria-activedescendant')).toBe(rows(fixture)[2].id);
+
+    await press(fixture, 'ArrowDown');
+    expect(rows(fixture)[3].getAttribute('aria-selected')).toBe('true');
+    expect(pill(fixture).getAttribute('aria-activedescendant')).toBe(rows(fixture)[3].id);
+
+    await press(fixture, 'Enter');
+    expect(selected.map((o) => o.value)).toEqual(['high']);
+    expect(fixture.componentInstance.isOpen()).toBe(false);
+  });
+
+  it('moves with the arrows from a pointer-opened menu and chooses with Space', async () => {
+    const fixture = await render({ selectedId: '' });
+    const selected: ComposerEffortOption[] = [];
+    fixture.componentInstance.selected.subscribe((o) => selected.push(o));
+    await open(fixture);
+    // A pointer open shows no active row until a key or a hover moves.
+    expect(rows(fixture).some((row) => row.getAttribute('aria-selected') === 'true')).toBe(false);
+
+    await press(fixture, 'ArrowDown');
+    await press(fixture, 'ArrowUp');
+    expect(rows(fixture).at(-1)?.getAttribute('aria-selected')).toBe('true');
+    await press(fixture, ' ');
+    expect(selected.map((o) => o.value)).toEqual(['max']);
+  });
+
+  it('closes on Escape without choosing', async () => {
+    const fixture = await render({});
+    const selected = jest.fn();
+    fixture.componentInstance.selected.subscribe(selected);
+    await open(fixture);
+    await press(fixture, 'Escape');
+    expect(fixture.componentInstance.isOpen()).toBe(false);
+    expect(selected).not.toHaveBeenCalled();
+  });
+});
+
 describe('ComposerEffortPickerComponent gated', () => {
   afterEach(() => TestBed.resetTestingModule());
 

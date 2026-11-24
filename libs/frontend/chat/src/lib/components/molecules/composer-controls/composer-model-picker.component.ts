@@ -23,6 +23,7 @@ import {
   linkedSignal,
   output,
   signal,
+  untracked,
 } from '@angular/core';
 import {
   Box,
@@ -37,6 +38,7 @@ import {
   NativeOptionComponent,
 } from '@ptah-extension/ui';
 import { ComposerGatedControlDirective } from './composer-gated-control.directive';
+import { composerMenuKey } from './composer-menu-keys';
 
 let nextModelPickerId = 0;
 
@@ -154,17 +156,23 @@ const MODEL_PILL_CLASS =
           [class.bg-base-300]="isOpen()"
           [class.text-base-content]="isOpen()"
           (click)="toggle()"
+          (keydown)="onMenuKeydown($event)"
           [disabled]="loading()"
           aria-label="Select model"
           aria-haspopup="listbox"
           [attr.aria-expanded]="isOpen()"
+          [attr.aria-activedescendant]="activeOptionId()"
           data-testid="composer-model-pill"
         >
           <ng-container [ngTemplateOutlet]="pillContent" />
         </button>
       }
 
-      <div content class="w-72 max-h-80 flex flex-col">
+      <div
+        content
+        class="w-72 max-h-80 flex flex-col"
+        (keydown)="onMenuKeydown($event)"
+      >
         <!-- Header -->
         <div class="px-2 py-1.5 border-b border-base-300">
           <span
@@ -195,7 +203,7 @@ const MODEL_PILL_CLASS =
             <ptah-native-option
               [optionId]="'model-' + instanceId + '-' + rowIndex"
               [value]="model"
-              [isActive]="rowIndex === activeIndex()"
+              [isActive]="navigated() && rowIndex === activeIndex()"
               (selected)="choose($event.id)"
               (hovered)="onHover(rowIndex)"
             >
@@ -239,9 +247,11 @@ const MODEL_PILL_CLASS =
               [attr.id]="otherVersionsToggleId"
               type="button"
               class="block w-full text-left rounded-md px-3 py-2 transition-colors cursor-pointer hover:bg-surface-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[oklch(var(--s))]"
+              [class.bg-surface-2]="navigated() && activeIndex() === primaryModels().length"
               [attr.aria-expanded]="isOtherSectionOpen()"
               [attr.aria-controls]="otherVersionsSectionId"
               (click)="toggleOtherVersions()"
+              (mouseenter)="onHover(primaryModels().length)"
             >
               <div class="flex items-center gap-3 py-0.5">
                 <div
@@ -269,7 +279,7 @@ const MODEL_PILL_CLASS =
                     [ngTemplateOutlet]="modelRow"
                     [ngTemplateOutletContext]="{
                       $implicit: model,
-                      rowIndex: primaryModels().length + i,
+                      rowIndex: primaryModels().length + 1 + i,
                     }"
                   />
                 }
@@ -339,6 +349,12 @@ export class ComposerModelPickerComponent {
 
   private readonly keyboardNav = inject(KeyboardNavigationService);
   readonly activeIndex = this.keyboardNav.activeIndex;
+  /**
+   * A row is shown active only after a hover or a key moved through the
+   * menu, so a menu opened by the pointer keeps its unhighlighted look.
+   */
+  protected readonly navigated = signal(false);
+  private configuredOpen = false;
 
   protected readonly ChevronDownIcon = ChevronDown;
   protected readonly CheckIcon = Check;
@@ -372,6 +388,28 @@ export class ComposerModelPickerComponent {
         this.reasonShown = false;
         this.reasonCleared.emit();
       }
+    });
+    // The rows the arrow keys move through: the visible rows, so the count
+    // follows "Other versions". Each open starts on the selected row; a count
+    // change while open keeps the active row in range.
+    effect(() => {
+      const open = this.menuOpen();
+      const count = this.navRowCount();
+      untracked(() => {
+        if (!open) {
+          this.configuredOpen = false;
+          this.navigated.set(false);
+          return;
+        }
+        const keep = this.activeIndex();
+        this.keyboardNav.configure({ itemCount: count, wrap: true });
+        if (!this.configuredOpen) {
+          this.configuredOpen = true;
+          this.keyboardNav.setActiveIndex(this.selectedRowIndex());
+        } else {
+          this.keyboardNav.setActiveIndex(Math.min(keep, count - 1));
+        }
+      });
     });
   }
 
@@ -431,6 +469,37 @@ export class ComposerModelPickerComponent {
     return this.otherModels().some((row) => row.isSelected);
   });
 
+  /**
+   * Keyboard row indexes: primary rows `0..P-1`, the "Other versions" toggle
+   * at `P`, then the open section's rows from `P + 1`. The template's
+   * `rowIndex` uses the same numbers.
+   */
+  private readonly navRowCount = computed(() => {
+    const others = this.otherModels().length;
+    if (others === 0) return this.primaryModels().length;
+    return this.primaryModels().length + 1 + (this.isOtherSectionOpen() ? others : 0);
+  });
+
+  /** The selected row's keyboard index, or `0` when it is not visible. */
+  private selectedRowIndex(): number {
+    const primary = this.primaryModels();
+    const inPrimary = primary.findIndex((row) => row.isSelected);
+    if (inPrimary >= 0) return inPrimary;
+    const inOther = this.isOtherSectionOpen()
+      ? this.otherModels().findIndex((row) => row.isSelected)
+      : -1;
+    return inOther >= 0 ? primary.length + 1 + inOther : 0;
+  }
+
+  /** The active row's id for `aria-activedescendant`; `null` while none is shown. */
+  protected readonly activeOptionId = computed(() => {
+    const index = this.activeIndex();
+    if (!this.menuOpen() || !this.navigated() || index < 0) return null;
+    const primary = this.primaryModels().length;
+    if (this.otherModels().length > 0 && index === primary) return this.otherVersionsToggleId;
+    return `model-${this.instanceId}-${index}`;
+  });
+
   toggle(): void {
     const opening = !this._isOpen();
     this._isOpen.set(opening);
@@ -468,6 +537,50 @@ export class ComposerModelPickerComponent {
   }
 
   onHover(index: number): void {
+    this.navigated.set(true);
     this.keyboardNav.setActiveIndex(index);
+  }
+
+  /** Arrow keys, Home / End, Enter / Space, Escape and Tab on the pill or the open menu. */
+  onMenuKeydown(event: KeyboardEvent): void {
+    const key = composerMenuKey(event, this.menuOpen());
+    if (key === null) return;
+    if (key === 'leave') {
+      this.close();
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    if (key === 'open') {
+      this.toggle();
+      this.navigated.set(true);
+    } else if (key === 'close') {
+      this.close();
+    } else if (key === 'move') {
+      // The first key shows the selected row; later keys move from it.
+      if (this.navigated()) this.keyboardNav.handleKeyDown(event);
+      else this.navigated.set(true);
+    } else if (this.navigated()) {
+      this.activateRow(this.activeIndex());
+    } else {
+      this.close();
+    }
+  }
+
+  /** Enter / Space on a row: choose a model, or open / close "Other versions". */
+  private activateRow(index: number): void {
+    const primary = this.primaryModels();
+    if (index >= 0 && index < primary.length) {
+      this.choose(primary[index].id);
+      return;
+    }
+    const others = this.otherModels();
+    if (others.length === 0) return;
+    if (index === primary.length) {
+      this.toggleOtherVersions();
+      return;
+    }
+    const other = this.isOtherSectionOpen() ? others[index - primary.length - 1] : undefined;
+    if (other) this.choose(other.id);
   }
 }

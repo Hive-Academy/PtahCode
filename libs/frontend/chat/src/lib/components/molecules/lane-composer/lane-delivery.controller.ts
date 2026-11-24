@@ -72,7 +72,9 @@ const TURN_REFUSAL_REASONS: ReadonlySet<string> = new Set(['turn-options-refused
 /**
  * Accepted messages by receipt id, shared across composer mounts so a tab
  * switch does not discard accepted text or its attachments. Bounded: at most
- * {@link ACCEPTED_CAP} entries and {@link ACCEPTED_PER_LANE_CAP} per lane.
+ * {@link ACCEPTED_CAP} entries and {@link ACCEPTED_PER_LANE_CAP} per lane,
+ * evicting only entries whose receipt can no longer restore them;
+ * unresolved ones stay past the caps.
  */
 const acceptedMessages = new Map<string, AcceptedMessage>();
 
@@ -177,6 +179,13 @@ export class LaneDeliveryController {
   private readonly sources = signal<LaneDeliverySources | null>(null);
   private readonly cancelling = new Set<string>();
   private submission: Submission | null = null;
+  /**
+   * One visit per lane shown (a switch away and back is a new visit). A send
+   * that outlives its visit never touches the draft or tray of a later one.
+   */
+  private visit = 0;
+  /** The busy operation that owns `sending`; an older one ending leaves it alone. */
+  private busyOp = 0;
 
   private readonly _sending = signal(false);
   readonly sending = this._sending.asReadonly();
@@ -247,9 +256,11 @@ export class LaneDeliveryController {
           next.delete(this.id);
           return next.set(this.id, agentId);
         });
+        this.visit++;
         sources.draft.set('');
         this.attachments.clear();
         this._error.set(null);
+        this.busyOp++;
         this._sending.set(false);
         void this.loadPreviews(agentId);
       });
@@ -267,9 +278,11 @@ export class LaneDeliveryController {
     effect(() => {
       if (!this.sources()) return;
       const receipts = this.store.receipts().get(this.agentId()) ?? [];
-      // Re-run when this composer becomes the lane's preferred one: it then
-      // takes over messages whose owner left the lane.
+      // Re-run when this composer becomes the lane's preferred one, and when
+      // a composer leaves (it may own a failed message this one held back
+      // while that owner was still mounted).
       this.preferred();
+      mountedComposers();
       untracked(() => {
         for (const receipt of receipts) this.processReceipt(receipt);
       });
@@ -327,6 +340,7 @@ export class LaneDeliveryController {
     if (delivery === 'now' ? this.nowDisabled() : this.queueDisabled()) return;
     if (delivery === 'now' && sources.stopped()) return;
     const agentId = this.agentId();
+    const visit = this.visit;
     const draftText = this.draftText();
     const sent = this.attachments.snapshotForSend();
     const draftSnapshot: LaneTurnSnapshot = {
@@ -336,9 +350,10 @@ export class LaneDeliveryController {
     };
     let text = draftText;
     let snapshot = draftSnapshot;
-    let earlierQueuedId: string | null = null;
+    /** The earlier queued message this send carries; already out of the queue. */
+    let folded: AcceptedMessage | null = null;
     this.markUsed();
-    this._sending.set(true);
+    const op = this.beginBusy();
     this._error.set(null);
     try {
       if (delivery === 'queue') {
@@ -347,9 +362,19 @@ export class LaneDeliveryController {
         const merged = queued && earlier?.agentId === agentId ? mergeSnapshots(earlier.snapshot, draftSnapshot) : null;
         // A fold past the host limits would be refused: the draft goes as its own message.
         if (queued && earlier && merged && withinTurnLimits(merged)) {
-          earlierQueuedId = queued.id;
-          text = `${earlier.text}\n${draftText}`;
-          snapshot = merged;
+          // The earlier message leaves the queue BEFORE the combined one is
+          // sent, so the lane can never run it twice. If it already started,
+          // the draft goes on its own.
+          const taken = await this.takeForFold(agentId, queued.id);
+          if (taken === 'failed') {
+            if (this.visit === visit) this._error.set('Could not update the queued message. Try again.');
+            return;
+          }
+          if (taken === 'cancelled') {
+            folded = earlier;
+            text = `${earlier.text}\n${draftText}`;
+            snapshot = merged;
+          }
         }
       }
       const turn = toTurnRequest(snapshot);
@@ -358,20 +383,26 @@ export class LaneDeliveryController {
       );
       this.submission = null;
       // A lane switch while the send was in flight cleared the draft and the
-      // tray. The message then goes back to its own lane, never to this one.
-      const switched = this.agentId() !== agentId;
+      // tray, even when the user came back to this lane. The message then
+      // goes back to its lane as a held message, never into the new draft.
+      const switched = this.visit !== visit;
       const receipt = outcome.receipt;
       const limitHeld = receipt?.state === 'blocked-retryable' && receipt.reason === 'lane-at-limit';
       if (!limitHeld && (outcome.mode === 'unsupported' || (receipt && receipt.state !== 'accepted' && receipt.state !== 'started'))) {
-        // Refused at send: the draft, its attachments and the pick stay where they are.
-        if (switched) { this.holdForLane(agentId, draftText, draftSnapshot); return; }
+        // Refused at send: the draft, its attachments and the pick stay where
+        // they are, and a folded earlier message goes back in front of them.
+        if (switched) { this.holdForLane(agentId, text, snapshot); return; }
+        if (folded) this.restore(folded.text, folded.snapshot, 'before');
         this._error.set(messageOutcomeText(outcome, SEND_FAILED_TEXT));
         this.refreshPreviews();
         return;
       }
       if (!receipt) {
-        if (switched) this.holdForLane(agentId, draftText, draftSnapshot);
-        else this._error.set('No message receipt was returned. Try again.');
+        if (switched) this.holdForLane(agentId, text, snapshot);
+        else {
+          if (folded) this.restore(folded.text, folded.snapshot, 'before');
+          this._error.set('No message receipt was returned. Try again.');
+        }
         return;
       }
       if (!switched) {
@@ -391,17 +422,17 @@ export class LaneDeliveryController {
         const latest = this.store.receipt(agentId, receipt.id);
         if (latest && !switched) this.processReceipt(latest);
       }
-      if (earlierQueuedId) await this.withdrawCombined(agentId, earlierQueuedId);
       if (!switched) sources.accepted();
     } catch {
-      if (this.agentId() === agentId) {
+      if (this.visit === visit) {
+        if (folded) this.restore(folded.text, folded.snapshot, 'before');
         this._error.set('Could not send your message. Try again.');
         this.refreshPreviews();
       } else {
-        this.holdForLane(agentId, draftText, draftSnapshot);
+        this.holdForLane(agentId, text, snapshot);
       }
     } finally {
-      if (this.agentId() === agentId) this._sending.set(false);
+      this.endBusy(op);
     }
   }
 
@@ -410,14 +441,14 @@ export class LaneDeliveryController {
     const agentId = this.agentId();
     if (!agentId) return;
     this.markUsed();
-    this._sending.set(true);
+    const op = this.beginBusy();
     this.cancelling.add(messageId);
     try {
       const message = await this.takeQueued(agentId, messageId);
       if (message) this.restoreFor(agentId, message.text, message.snapshot);
     } finally {
       this.cancelling.delete(messageId);
-      if (this.agentId() === agentId) this._sending.set(false);
+      this.endBusy(op);
     }
   }
 
@@ -437,7 +468,7 @@ export class LaneDeliveryController {
     if (!sources || !agentId || sources.stopped() || this._sending()) return;
     if (!this.state().now || this.state().nowDisabledReason) return;
     this.markUsed();
-    this._sending.set(true);
+    const op = this.beginBusy();
     this._error.set(null);
     this.cancelling.add(messageId);
     let message: AcceptedMessage | null = null;
@@ -473,8 +504,18 @@ export class LaneDeliveryController {
       }
     } finally {
       this.cancelling.delete(messageId);
-      if (this.agentId() === agentId) this._sending.set(false);
+      this.endBusy(op);
     }
+  }
+
+  private beginBusy(): number {
+    this._sending.set(true);
+    return ++this.busyOp;
+  }
+
+  /** Clears `sending` only when no later operation (or lane visit) took it over. */
+  private endBusy(op: number): void {
+    if (this.busyOp === op) this._sending.set(false);
   }
 
   /**
@@ -528,33 +569,51 @@ export class LaneDeliveryController {
     } else if (receipt.state === 'settled') acceptedMessages.delete(receipt.id);
   }
 
-  /** Cancel the earlier queued message a combined send already carries. */
-  private async withdrawCombined(agentId: string, earlierQueuedId: string): Promise<void> {
-    // The combined message already carries the earlier content, so the earlier
-    // receipt must never restore it, even when its cancel push arrives before
-    // this RPC resolves.
-    acceptedMessages.delete(earlierQueuedId);
-    this.cancelling.add(earlierQueuedId);
+  /**
+   * Take the earlier queued message out of the queue for a fold:
+   * `cancelled` when it left, `started` when the lane already took it (it
+   * runs and the draft goes alone), `failed` when the cancel did not answer.
+   */
+  private async takeForFold(agentId: string, messageId: string): Promise<'cancelled' | 'started' | 'failed'> {
+    // Its cancel push must not restore it: the fold carries its content.
+    this.cancelling.add(messageId);
     try {
-      const cancelled = await this.store.cancelMessage(agentId, earlierQueuedId);
-      if (cancelled.reason !== 'cancelled-by-user') this.errorFor(agentId, 'Earlier message already started; both messages may be delivered.');
+      const cancelled = await this.store.cancelMessage(agentId, messageId);
+      if (cancelled.reason !== 'cancelled-by-user') return 'started';
+      acceptedMessages.delete(messageId);
+      return 'cancelled';
     } catch {
-      this.errorFor(agentId, 'Could not cancel the earlier message; both messages may be delivered.');
+      // degradation-audit: reported - the send stops with an error shown, and
+      // the queued message and the draft both stay, so nothing is lost or sent twice.
+      return 'failed';
     } finally {
-      this.cancelling.delete(earlierQueuedId);
+      this.cancelling.delete(messageId);
     }
   }
 
-  /** Put text and its snapshot back: text after the current draft, attachments beside the tray's, the pick back. */
-  private restore(text: string, snapshot: LaneTurnSnapshot): void {
+  /**
+   * Put text and its snapshot back: text after the current draft (or before
+   * it, for a folded earlier message), attachments beside the tray's, the
+   * pick back.
+   */
+  private restore(text: string, snapshot: LaneTurnSnapshot, place: 'after' | 'before' = 'after'): void {
     const sources = this.sources();
     if (!sources) return;
-    sources.draft.update((draft) => (draft.trim() ? `${draft}\n${text}` : text));
-    for (const file of snapshot.files) this.attachments.addFile(file);
+    if (place === 'before') {
+      sources.draft.update((draft) => (draft.trim() ? `${text}\n${draft}` : text));
+      this.attachments.files.update((files) => {
+        const paths = new Set(files.map((file) => file.path));
+        return [...snapshot.files.filter((file) => !paths.has(file.path)), ...files];
+      });
+    } else {
+      sources.draft.update((draft) => (draft.trim() ? `${draft}\n${text}` : text));
+      for (const file of snapshot.files) this.attachments.addFile(file);
+    }
     if (snapshot.images.length) {
       this.attachments.images.update((images) => {
         const ids = new Set(images.map((image) => image.id));
-        return [...images, ...snapshot.images.filter((image) => !ids.has(image.id))];
+        const added = snapshot.images.filter((image) => !ids.has(image.id));
+        return place === 'before' ? [...added, ...images] : [...images, ...added];
       });
     }
     // A pick the user made after this message left keeps priority over the message's own.
@@ -610,17 +669,31 @@ export class LaneDeliveryController {
     if (this.agentId() === agentId) this._error.set(text);
   }
 
+  /**
+   * Keep an accepted message's text and snapshot until its receipt settles.
+   * The caps evict oldest first, but only entries that can no longer be
+   * restored (settled, cancelled, or no longer known to the store). An
+   * unresolved message stays past the caps: its text may still be needed,
+   * and the host queue bounds how many there are.
+   */
   private remember(messageId: string, message: AcceptedMessage): void {
     acceptedMessages.set(messageId, message);
     let laneCount = 0;
     for (const item of acceptedMessages.values()) if (item.agentId === message.agentId) laneCount++;
     for (const [id, item] of acceptedMessages) {
       if (acceptedMessages.size <= ACCEPTED_CAP && laneCount <= ACCEPTED_PER_LANE_CAP) break;
+      if (id === messageId || !this.restoreSettled(item.agentId, id)) continue;
       if (item.agentId === message.agentId || acceptedMessages.size > ACCEPTED_CAP) {
         acceptedMessages.delete(id);
         if (item.agentId === message.agentId) laneCount--;
       }
     }
+  }
+
+  /** True when the receipt can no longer put its message back. */
+  private restoreSettled(agentId: string, messageId: string): boolean {
+    const state = this.store.receipt(agentId, messageId)?.state;
+    return state === undefined || state === 'settled' || state === 'cancelled';
   }
 
   /** A snapshot from the turn the backend kept for a queued message. */

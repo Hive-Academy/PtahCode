@@ -475,9 +475,11 @@ export class ComposerInputController {
   /**
    * Keys: while the dropdown is open it takes the navigation keys; with it
    * closed, Enter submits (Shift+Enter is a new line) and Ctrl/Cmd+Enter
-   * runs `submitNow` when the owner offers it.
+   * runs `submitNow` when the owner offers it. An Enter that commits IME
+   * composition belongs to the IME: it neither submits nor picks a row.
    */
   handleKeyDown(event: KeyboardEvent): void {
+    if (event.isComposing || event.keyCode === 229) return;
     const sources = this.sources();
     const dropdown = sources?.dropdown();
     if (this.showSuggestions() && dropdown) {

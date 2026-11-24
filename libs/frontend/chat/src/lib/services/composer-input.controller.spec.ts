@@ -322,6 +322,24 @@ describe('ComposerInputController', () => {
       expect(submit).not.toHaveBeenCalled();
     });
 
+    it('ignores an Enter that commits IME composition, open dropdown or not', () => {
+      controller.handleKeyDown(key({ key: 'Enter', isComposing: true }));
+      controller.handleKeyDown(key({ key: 'Enter', keyCode: 229 } as KeyboardEventInit));
+      expect(submit).not.toHaveBeenCalled();
+
+      const onKeyDown = jest.fn(() => true);
+      dropdown.set({
+        listboxId: 'list-1',
+        getActiveDescendantId: () => 'suggestion-0',
+        onKeyDown,
+      } as unknown as ComposerSuggestionsPanel);
+      controller.handleSlashActivated({ query: '', cursorPosition: 1 });
+      const composing = key({ key: 'Enter', isComposing: true });
+      controller.handleKeyDown(composing);
+      expect(onKeyDown).not.toHaveBeenCalled();
+      expect(composing.defaultPrevented).toBe(false);
+    });
+
     it('submits on Ctrl+Enter when there is no submitNow', () => {
       controller.handleKeyDown(key({ key: 'Enter', ctrlKey: true }));
       expect(submit).toHaveBeenCalledTimes(1);

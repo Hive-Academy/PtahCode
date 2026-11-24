@@ -10,9 +10,12 @@
  * has no dependency on `TabManagerService`.
  *
  * A pending pick is cleared once a message carrying it is accepted, or once
- * the agent record confirms it: the model when the record's `model` or
- * `observedModel` equals the pick, the effort when its `reasoningEffort`
- * equals the pick. Entries of agents the monitor no longer tracks are dropped.
+ * the agent record confirms it: the model when the lane's current model
+ * equals the pick, the effort when its `reasoningEffort` equals the pick.
+ * The current model is the record's `model`, which the host compares a pick
+ * against and republishes on each turn; `observedModel` stands in only when
+ * no model is recorded, because it can lag one turn behind an applied change.
+ * Entries of agents the monitor no longer tracks are dropped.
  */
 
 import { Injectable, effect, inject, signal } from '@angular/core';
@@ -75,8 +78,8 @@ const EMPTY_PENDING: LaneTurnSettings = {};
 
 /** The pick minus the fields the record already confirms; the same object when nothing is confirmed. */
 function unconfirmed(pick: LaneTurnSettings, record: LaneTurnRecord): LaneTurnSettings {
-  const modelConfirmed =
-    pick.model !== undefined && (record.model === pick.model || record.observedModel === pick.model);
+  const currentModel = record.model ?? record.observedModel;
+  const modelConfirmed = pick.model !== undefined && currentModel === pick.model;
   const effortConfirmed =
     pick.reasoningEffort !== undefined && record.reasoningEffort === pick.reasoningEffort;
   if (!modelConfirmed && !effortConfirmed) return pick;

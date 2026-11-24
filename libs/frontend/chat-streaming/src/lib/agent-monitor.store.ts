@@ -1664,8 +1664,9 @@ export class AgentMonitorStore implements OnDestroy {
           displayName:
             info.displayName || info.ptahCliName || existing.displayName,
           providerId: info.providerId ?? existing.providerId,
-          // A new turn may change the effort or the served model; an absent
-          // value keeps what the card already knows.
+          // A new turn may change the model, the effort or the served model;
+          // an absent value keeps what the card already knows.
+          model: info.model ?? existing.model,
           reasoningEffort: info.reasoningEffort ?? existing.reasoningEffort,
           observedModel: info.observedModel ?? existing.observedModel,
           // Prefer-known, never downgrade: a respawn that arrives before the
@@ -2027,6 +2028,7 @@ export class AgentMonitorStore implements OnDestroy {
         permissionQueue: [],
         supportsContinuation:
           info.supportsContinuation ?? agent.supportsContinuation,
+        model: info.model ?? agent.model,
         reasoningEffort: info.reasoningEffort ?? agent.reasoningEffort,
         observedModel: info.observedModel ?? agent.observedModel,
         role: info.role ?? agent.role,

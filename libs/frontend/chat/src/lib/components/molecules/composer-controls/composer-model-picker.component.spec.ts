@@ -246,6 +246,74 @@ describe('ComposerModelPickerComponent other versions', () => {
   });
 });
 
+describe('ComposerModelPickerComponent keyboard', () => {
+  afterEach(() => TestBed.resetTestingModule());
+
+  const catalog: readonly ComposerModelOption[] = [
+    option('default'),
+    option('opus-4-5', { group: 'other' }),
+    option('sonnet'),
+  ];
+
+  const press = async (
+    fixture: ComponentFixture<ComposerModelPickerComponent>,
+    key: string,
+  ): Promise<KeyboardEvent> => {
+    const event = new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+    pill(fixture).dispatchEvent(event);
+    fixture.detectChanges();
+    await fixture.whenStable();
+    fixture.detectChanges();
+    return event;
+  };
+
+  it('opens on ArrowDown and chooses a primary row with Enter', async () => {
+    const fixture = await render({ options: catalog, selectedId: 'default' });
+    const selected: string[] = [];
+    fixture.componentInstance.selected.subscribe((id) => selected.push(id));
+
+    expect((await press(fixture, 'ArrowDown')).defaultPrevented).toBe(true);
+    expect(fixture.componentInstance.isOpen()).toBe(true);
+    expect(pill(fixture).getAttribute('aria-activedescendant')).toBe(rows(fixture)[0].id);
+
+    await press(fixture, 'ArrowDown');
+    expect(rows(fixture)[1].getAttribute('aria-selected')).toBe('true');
+    await press(fixture, 'Enter');
+    expect(selected).toEqual(['sonnet']);
+    expect(fixture.componentInstance.isOpen()).toBe(false);
+  });
+
+  it('opens "Other versions" from the keyboard and reaches its rows', async () => {
+    const fixture = await render({ options: catalog, selectedId: 'default' });
+    const selected: string[] = [];
+    fixture.componentInstance.selected.subscribe((id) => selected.push(id));
+    const toggleId = fixture.componentInstance.otherVersionsToggleId;
+
+    await press(fixture, 'ArrowDown');
+    await press(fixture, 'End');
+    expect(pill(fixture).getAttribute('aria-activedescendant')).toBe(toggleId);
+    await press(fixture, 'Enter');
+    expect(fixture.componentInstance.isOtherSectionOpen()).toBe(true);
+    expect(fixture.componentInstance.isOpen()).toBe(true);
+    expect(rows(fixture)).toHaveLength(3);
+
+    await press(fixture, 'ArrowDown');
+    expect(rows(fixture)[2].getAttribute('aria-selected')).toBe('true');
+    await press(fixture, ' ');
+    expect(selected).toEqual(['opus-4-5']);
+  });
+
+  it('closes on Escape without choosing', async () => {
+    const fixture = await render({ options: catalog });
+    const selected = jest.fn();
+    fixture.componentInstance.selected.subscribe(selected);
+    await open(fixture);
+    await press(fixture, 'Escape');
+    expect(fixture.componentInstance.isOpen()).toBe(false);
+    expect(selected).not.toHaveBeenCalled();
+  });
+});
+
 describe('ComposerModelPickerComponent gated', () => {
   afterEach(() => TestBed.resetTestingModule());
 

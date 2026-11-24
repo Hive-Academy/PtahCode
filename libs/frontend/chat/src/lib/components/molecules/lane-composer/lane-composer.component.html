@@ -8,7 +8,9 @@
   (dragleave)="composerInput.handleDragLeave($event)"
   (drop)="composerInput.handleDrop($event)"
 >
+  <!-- While the turn-loss dialog is open, only the dialog takes input. -->
   <ptah-queued-message-list
+    [attr.inert]="confirmLoss() ? '' : null"
     [items]="queuedItems()"
     [sendNowAction]="sendNowAction()"
     (withdraw)="withdraw($event)"
@@ -45,7 +47,11 @@
     </div>
   }
 
-  <div class="ptah-composer-stage" [attr.data-compact]="isCompact() ? '' : null">
+  <div
+    class="ptah-composer-stage"
+    [attr.data-compact]="isCompact() ? '' : null"
+    [attr.inert]="confirmLoss() ? '' : null"
+  >
     <div class="ptah-composer-fold ptah-composer-fold--full">
       <div
         class="ptah-composer-fold-clip"

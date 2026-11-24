@@ -565,8 +565,7 @@ export class LaneComposerComponent {
   }
 
   protected onKeydown(event: KeyboardEvent): void {
-    // IME composition owns Enter until it commits.
-    if (event.isComposing || event.keyCode === 229) return;
+    // IME composition owns Enter until it commits (checked in handleKeyDown).
     this.composerInput.handleKeyDown(event);
   }
 
@@ -605,7 +604,8 @@ export class LaneComposerComponent {
   }
 
   protected async send(): Promise<void> {
-    if (this.sendDisabled()) return;
+    // The loss dialog owns input until it closes (its background is inert).
+    if (this.sendDisabled() || this.confirmLoss()) return;
     const queuedBehindTurn = this.laneActive();
     await this.delivery.send('queue');
     if (!this.delivery.error() && queuedBehindTurn) {
@@ -615,6 +615,7 @@ export class LaneComposerComponent {
 
   /** Ctrl/Cmd+Enter: Send now for the draft, after the loss confirmation when the turn would lose work. */
   protected requestNow(): void {
+    if (this.confirmLoss()) return;
     if (this.stopped() || this.delivery.nowDisabled() || this.imagesBlocked() || this.attachmentLimitText()) return;
     if (this.waitForReads()) return;
     this.lossTarget = { kind: 'draft' };
@@ -634,6 +635,8 @@ export class LaneComposerComponent {
 
   /** The queued card's Send now / Interrupt & send. */
   protected requestQueuedNow(id: string): void {
+    // An open dialog keeps its target: confirming sends what it was opened for.
+    if (this.confirmLoss()) return;
     this.lossTarget = { kind: 'queued', id };
     if (this.delivery.nowNeedsConfirmation()) this.confirmLoss.set(true);
     else void this.sendNow(false);
@@ -646,7 +649,8 @@ export class LaneComposerComponent {
 
   protected closeLoss(): void {
     this.confirmLoss.set(false);
-    this.textareaRef()?.nativeElement.focus();
+    // The field is inert until the dialog leaves the view; focus it after that render.
+    afterNextRender(() => this.textareaRef()?.nativeElement.focus(), { injector: this.injector });
   }
 
   protected withdraw(id: string): void {

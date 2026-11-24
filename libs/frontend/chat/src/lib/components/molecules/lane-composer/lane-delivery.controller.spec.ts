@@ -262,6 +262,96 @@ describe('LaneDeliveryController', () => {
     expect(attachments.images()).toEqual([IMAGE]);
   });
 
+  describe('folding into the queued message', () => {
+    async function queueEarlier(): Promise<AgentDeliveryReceipt> {
+      const earlier = receipt();
+      store.sendMessage.mockResolvedValueOnce({ mode: 'queue-next-turn', receipt: earlier });
+      draft.set('First');
+      attachments.addFile(FILE);
+      await controller.send('queue');
+      push(earlier);
+      return earlier;
+    }
+
+    it('takes the earlier message out of the queue before the combined send', async () => {
+      const earlier = await queueEarlier();
+      const order: string[] = [];
+      store.cancelMessage.mockImplementationOnce(async () => {
+        order.push('cancel');
+        return { ...earlier, state: 'cancelled', reason: 'cancelled-by-user' };
+      });
+      store.sendMessage.mockImplementationOnce(async () => {
+        order.push('send');
+        return { mode: 'queue-next-turn', receipt: receipt() };
+      });
+      draft.set('Second');
+      await controller.send('queue');
+      expect(order).toEqual(['cancel', 'send']);
+      expect(store.sendMessage).toHaveBeenLastCalledWith(
+        AGENT, 'First\nSecond', 'queue', false, expect.any(String), { files: [FILE.path] },
+      );
+    });
+
+    it('sends the draft alone when the earlier message already started', async () => {
+      const earlier = await queueEarlier();
+      store.cancelMessage.mockResolvedValueOnce({ ...earlier, state: 'started', reason: undefined });
+      store.sendMessage.mockResolvedValueOnce({ mode: 'queue-next-turn', receipt: receipt() });
+      draft.set('Second');
+      await controller.send('queue');
+      expect(store.sendMessage).toHaveBeenLastCalledWith(AGENT, 'Second', 'queue', false, expect.any(String), undefined);
+      expect(controller.error()).toBeNull();
+    });
+
+    it('sends nothing and keeps the draft when the cancel fails', async () => {
+      await queueEarlier();
+      store.cancelMessage.mockRejectedValueOnce(new Error('transport'));
+      draft.set('Second');
+      await controller.send('queue');
+      expect(store.sendMessage).toHaveBeenCalledTimes(1);
+      expect(draft()).toBe('Second');
+      expect(controller.error()).toBe('Could not update the queued message. Try again.');
+      expect(controller.sending()).toBe(false);
+    });
+
+    it('puts the earlier message back in front of the draft when the combined send is refused', async () => {
+      const earlier = await queueEarlier();
+      store.cancelMessage.mockResolvedValueOnce({ ...earlier, state: 'cancelled', reason: 'cancelled-by-user' });
+      store.sendMessage.mockResolvedValueOnce({ mode: 'unsupported', detail: 'Lane cannot take images' });
+      draft.set('Second');
+      attachments.images.set([IMAGE]);
+      await controller.send('queue');
+      expect(draft()).toBe('First\nSecond');
+      expect(attachments.files()).toEqual([FILE]);
+      expect(attachments.images()).toEqual([IMAGE]);
+      expect(controller.error()).toBe('Lane cannot take images');
+    });
+  });
+
+  it('keeps an unresolved message when the lane cap evicts entries', async () => {
+    const receiptsById = new Map<string, AgentDeliveryReceipt>();
+    const lookup = jest.spyOn(store, 'receipt').mockImplementation(
+      ((_agent: string, id: string) => receiptsById.get(id)) as typeof store.receipt,
+    );
+    try {
+      const first = receipt();
+      receiptsById.set(first.id, first);
+      store.sendMessage.mockResolvedValueOnce({ mode: 'queue-next-turn', receipt: first });
+      draft.set('Oldest unresolved');
+      await controller.send('queue');
+      for (let index = 0; index < 9; index++) {
+        const next = receipt();
+        receiptsById.set(next.id, { ...next, state: 'started' });
+        store.sendMessage.mockResolvedValueOnce({ mode: 'queue-next-turn', receipt: next });
+        draft.set(`Message ${index}`);
+        await controller.send('now');
+      }
+      push({ ...first, state: 'failed', reason: 'turn-input-unsupported', updatedAt: 1000 });
+      expect(draft()).toBe('Oldest unresolved');
+    } finally {
+      lookup.mockRestore();
+    }
+  });
+
   it('withdraws a queued message into the composer with its snapshot', async () => {
     const queued = receipt();
     store.sendMessage.mockResolvedValue({ mode: 'queue-next-turn', receipt: queued });
@@ -474,6 +564,29 @@ describe('LaneDeliveryController', () => {
       return queued;
     }
 
+    it('a send that outlived its lane visit leaves the next visit\'s draft and busy state alone', async () => {
+      const first = deferred<unknown>();
+      const second = deferred<unknown>();
+      store.sendMessage.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+      draft.set('Same text');
+      const run1 = controller.send('queue');
+      switchLane(OTHER_AGENT);
+      switchLane(AGENT);
+      draft.set('Same text');
+      const run2 = controller.send('queue');
+      expect(controller.sending()).toBe(true);
+
+      first.resolve({ mode: 'queue-next-turn', receipt: receipt() });
+      await run1;
+      expect(draft()).toBe('Same text');
+      expect(controller.sending()).toBe(true);
+
+      second.resolve({ mode: 'queue-next-turn', receipt: receipt() });
+      await run2;
+      expect(draft()).toBe('');
+      expect(controller.sending()).toBe(false);
+    });
+
     it('Send now still sends the cancelled message for its own lane', async () => {
       const queued = await queueOne();
       const cancel = deferred<AgentDeliveryReceipt>();
@@ -625,6 +738,40 @@ describe('LaneDeliveryController', () => {
 
       expect(secondDraft()).toBe('Owner left');
       expect(draft()).toBe('');
+    });
+
+    it('restores a failed message once its owner leaves, even when this composer was already preferred', async () => {
+      const ownerInjector = Injector.create({
+        providers: [LaneDeliveryController, ComposerAttachmentsService],
+        parent: TestBed.inject(Injector),
+      });
+      try {
+        const owner = ownerInjector.get(LaneDeliveryController);
+        const ownerLane = signal(AGENT);
+        const ownerDraft = signal('');
+        owner.connect({
+          agentId: ownerLane, draft: ownerDraft, stopped: signal(false), cli: signal('Codex'),
+          resumePath: signal(null), accepted: jest.fn(),
+        });
+        TestBed.tick();
+        const sent = receipt();
+        store.sendMessage.mockResolvedValue({ mode: 'queue-next-turn', receipt: sent });
+        ownerDraft.set('Owner text');
+        await owner.send('queue');
+        second.draftChanged();
+        TestBed.tick();
+
+        // The failure lands in the same flush in which the owner leaves the lane:
+        // the preferred composer reads it while the owner still shows the lane.
+        receipts.set(new Map([[AGENT, [{ ...sent, state: 'failed', reason: 'turn-input-unsupported', updatedAt: 500 }]]]));
+        ownerLane.set(OTHER_AGENT);
+        TestBed.tick();
+
+        expect(secondDraft()).toBe('Owner text');
+        expect(draft()).toBe('');
+      } finally {
+        ownerInjector.destroy();
+      }
     });
 
     it('puts recovered text into the composer the user last used for the lane', () => {

@@ -212,6 +212,14 @@ describe('AgentMonitorStore', () => {
       expect(store.agents()[0]).toMatchObject({ reasoningEffort: 'high', observedModel: 'a' });
     });
 
+    it('takes the model a continued turn publishes and keeps it when absent', () => {
+      store.onAgentSpawned({ ...lane('lane'), turnSeq: 1, model: 'gpt-5.4' });
+      store.onAgentSpawned({ ...lane('lane'), turnSeq: 2, model: 'gpt-5.5' });
+      expect(store.agents()[0].model).toBe('gpt-5.5');
+      store.onAgentSpawned({ ...lane('lane'), turnSeq: 3, model: undefined });
+      expect(store.agents()[0].model).toBe('gpt-5.5');
+    });
+
     it('takes the values an exit payload carries and keeps known ones when absent', () => {
       store.onAgentSpawned({ ...lane('lane'), reasoningEffort: 'low' });
       store.onAgentExited({ ...lane('lane'), status: 'completed', observedModel: 'gpt-5.1' });

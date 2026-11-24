@@ -349,7 +349,8 @@ describe('LaneComposerComponent', () => {
     type(fixture, 'New thought');
     await clickSend(fixture);
     expect(sendMessage).toHaveBeenLastCalledWith(agentId, 'Earlier text\nNew thought', 'queue', false, expect.any(String), undefined);
-    expect(cancelMessage.mock.invocationCallOrder[0]).toBeGreaterThan(sendMessage.mock.invocationCallOrder[1]);
+    // The earlier message leaves the queue before the combined one is sent.
+    expect(cancelMessage.mock.invocationCallOrder[0]).toBeLessThan(sendMessage.mock.invocationCallOrder[1]);
   });
 
   it('does not restore coalesced text when the cancel push arrives before the cancel RPC resolves', async () => {
@@ -373,9 +374,10 @@ describe('LaneComposerComponent', () => {
     expect(root(fixture).querySelector('[role="alert"]')).toBeNull();
   });
 
-  it('keeps the earlier queue and new draft when a combined send is refused', async () => {
+  it('puts the earlier message back in front of the new draft when a combined send is refused', async () => {
     sendMessage.mockResolvedValueOnce({ mode: 'queue-next-turn', receipt })
       .mockResolvedValueOnce({ mode: 'unsupported', detail: 'Lane is unavailable' });
+    cancelMessage.mockResolvedValue({ ...receipt, state: 'cancelled', reason: 'cancelled-by-user', updatedAt: 2 });
     const fixture = await mount();
     type(fixture, 'Earlier text');
     await clickSend(fixture);
@@ -384,8 +386,8 @@ describe('LaneComposerComponent', () => {
     type(fixture, 'New thought');
     await clickSend(fixture);
     expect(sendMessage).toHaveBeenLastCalledWith(agentId, 'Earlier text\nNew thought', 'queue', false, expect.any(String), undefined);
-    expect(cancelMessage).not.toHaveBeenCalled();
-    expect(field(fixture).value).toBe('New thought');
+    expect(cancelMessage).toHaveBeenCalledWith(agentId, 'message-1');
+    expect(field(fixture).value).toBe('Earlier text\nNew thought');
     expect(root(fixture).querySelector('[role="alert"]')?.textContent).toContain('Lane is unavailable');
   });
 
@@ -464,6 +466,29 @@ describe('LaneComposerComponent', () => {
       expect(field(fixture).readOnly).toBe(false);
       expect(sendMessage).not.toHaveBeenCalled();
       fixture.nativeElement.remove();
+    });
+
+    it('makes the background inert and keeps the draft as the target while the dialog is open', async () => {
+      store.composerState.mockReturnValue(lossy());
+      receipts.set(new Map([[agentId, [receipt]]]));
+      sendMessage.mockResolvedValue({ mode: 'interrupt-resume', receipt: { ...receipt, id: 'now-1', state: 'started', delivery: 'now' } });
+      const fixture = await mount();
+      type(fixture, 'Draft text');
+      key(fixture, { ctrlKey: true });
+      fixture.detectChanges();
+      const stage = root(fixture).querySelector('.ptah-composer-stage') as HTMLElement;
+      const queued = root(fixture).querySelector('ptah-queued-message-list') as HTMLElement;
+      expect(stage.hasAttribute('inert')).toBe(true);
+      expect(queued.hasAttribute('inert')).toBe(true);
+      // jsdom does not enforce inert, so a click that still lands must not retarget the dialog.
+      (root(fixture).querySelector('[data-testid="queued-follow-up-send-now"]') as HTMLButtonElement).click();
+      fixture.detectChanges();
+      (root(fixture).querySelector('[role="alertdialog"] button.btn-warning') as HTMLButtonElement).click();
+      await settle(fixture);
+      expect(cancelMessage).not.toHaveBeenCalled();
+      expect(sendMessage).toHaveBeenCalledWith(agentId, 'Draft text', 'now', true, expect.any(String), undefined);
+      expect(stage.hasAttribute('inert')).toBe(false);
+      expect(queued.hasAttribute('inert')).toBe(false);
     });
 
     it('closes on Keep current turn without sending', async () => {

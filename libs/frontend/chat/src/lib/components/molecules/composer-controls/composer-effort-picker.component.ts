@@ -23,6 +23,8 @@ import {
   input,
   linkedSignal,
   output,
+  signal,
+  untracked,
 } from '@angular/core';
 import { Check, ChevronDown, Info, LucideAngularModule } from 'lucide-angular';
 import type { EffortLevel } from '@ptah-extension/shared';
@@ -32,6 +34,7 @@ import {
   NativeOptionComponent,
 } from '@ptah-extension/ui';
 import { ComposerGatedControlDirective } from './composer-gated-control.directive';
+import { composerMenuKey } from './composer-menu-keys';
 
 let nextEffortPickerId = 0;
 
@@ -194,9 +197,11 @@ const EFFORT_PILL_CLASS =
           [class.bg-base-300]="isOpen()"
           [class.text-base-content]="isOpen()"
           (click)="toggle()"
+          (keydown)="onMenuKeydown($event)"
           aria-label="Select reasoning effort level"
           aria-haspopup="listbox"
           [attr.aria-expanded]="isOpen()"
+          [attr.aria-activedescendant]="activeOptionId()"
           [title]="'Reasoning effort: ' + selectedLabel()"
           data-testid="composer-effort-pill"
         >
@@ -204,7 +209,11 @@ const EFFORT_PILL_CLASS =
         </button>
       }
 
-      <div content class="w-56 max-h-80 flex flex-col">
+      <div
+        content
+        class="w-56 max-h-80 flex flex-col"
+        (keydown)="onMenuKeydown($event)"
+      >
         <!-- Header -->
         <div class="px-2 py-1.5 border-b border-base-300">
           <span
@@ -222,7 +231,7 @@ const EFFORT_PILL_CLASS =
             <ptah-native-option
               [optionId]="'effort-' + instanceId + '-' + i"
               [value]="option"
-              [isActive]="i === activeIndex()"
+              [isActive]="navigated() && i === activeIndex()"
               (selected)="choose(option)"
               (hovered)="onHover(i)"
             >
@@ -318,6 +327,12 @@ export class ComposerEffortPickerComponent {
 
   private readonly keyboardNav = inject(KeyboardNavigationService);
   readonly activeIndex = this.keyboardNav.activeIndex;
+  /**
+   * A row is shown active only after a hover or a key moved through the
+   * menu, so a menu opened by the pointer keeps its unhighlighted look.
+   */
+  protected readonly navigated = signal(false);
+  private configuredOpen = false;
 
   protected readonly ChevronDownIcon = ChevronDown;
   protected readonly CheckIcon = Check;
@@ -351,6 +366,27 @@ export class ComposerEffortPickerComponent {
         this.reasonCleared.emit();
       }
     });
+    // The row count the arrow keys move through. Each open starts on the
+    // selected level; a list change while open keeps the active row in range.
+    effect(() => {
+      const open = this.menuOpen();
+      const options = this.options();
+      untracked(() => {
+        if (!open) {
+          this.configuredOpen = false;
+          this.navigated.set(false);
+          return;
+        }
+        const keep = this.activeIndex();
+        this.keyboardNav.configure({ itemCount: options.length, wrap: true });
+        if (!this.configuredOpen) {
+          this.configuredOpen = true;
+          this.keyboardNav.setActiveIndex(options.indexOf(this.selectedOption()));
+        } else {
+          this.keyboardNav.setActiveIndex(Math.min(keep, options.length - 1));
+        }
+      });
+    });
   }
 
   /** A gated picker never shows its menu, even if it was open when gated. */
@@ -368,6 +404,13 @@ export class ComposerEffortPickerComponent {
   });
 
   readonly selectedLabel = computed(() => this.selectedOption().label);
+
+  /** The active row's id for `aria-activedescendant`; `null` while none is shown. */
+  protected readonly activeOptionId = computed(() =>
+    this.menuOpen() && this.navigated() && this.activeIndex() >= 0
+      ? `effort-${this.instanceId}-${this.activeIndex()}`
+      : null,
+  );
 
   toggle(): void {
     this._isOpen.set(!this._isOpen());
@@ -393,6 +436,33 @@ export class ComposerEffortPickerComponent {
   }
 
   onHover(index: number): void {
+    this.navigated.set(true);
     this.keyboardNav.setActiveIndex(index);
+  }
+
+  /** Arrow keys, Home / End, Enter / Space, Escape and Tab on the pill or the open menu. */
+  onMenuKeydown(event: KeyboardEvent): void {
+    const key = composerMenuKey(event, this.menuOpen());
+    if (key === null) return;
+    if (key === 'leave') {
+      this.close();
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    if (key === 'open') {
+      this.toggle();
+      this.navigated.set(true);
+    } else if (key === 'close') {
+      this.close();
+    } else if (key === 'move') {
+      // The first key shows the selected row; later keys move from it.
+      if (this.navigated()) this.keyboardNav.handleKeyDown(event);
+      else this.navigated.set(true);
+    } else {
+      const option = this.navigated() ? this.options()[this.activeIndex()] : undefined;
+      if (option) this.choose(option);
+      else this.close();
+    }
   }
 }
