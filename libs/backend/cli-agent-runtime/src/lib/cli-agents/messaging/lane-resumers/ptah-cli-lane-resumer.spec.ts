@@ -196,6 +196,23 @@ describe('PtahCliLaneResumer', () => {
       expect.objectContaining({ model: 'claude-opus-4', reasoningEffort: 'high' }));
   });
 
+  it('checks the resumed model before launch and keeps model and effort on the new record', async () => {
+    const h = harness();
+    await h.resumer.resume({ ...info, model: 'claude-opus-4', reasoningEffort: 'high' }, 'continue');
+    expect(h.manager.prepareSdkHandleSpawn).toHaveBeenCalledWith(
+      expect.objectContaining({ model: 'claude-opus-4' }));
+    expect(h.manager.spawnFromSdkHandle).toHaveBeenCalledWith(h.handle,
+      expect.objectContaining({ model: 'claude-opus-4', reasoningEffort: 'high' }));
+  });
+
+  it('does not launch when the blocked-model check refuses the resumed model', async () => {
+    const h = harness();
+    jest.mocked(h.manager.prepareSdkHandleSpawn).mockRejectedValueOnce(new Error('Model blocked'));
+    await expect(h.resumer.resume({ ...info, model: 'blocked-model' }, 'continue'))
+      .rejects.toMatchObject({ code: 'spawn-failed' });
+    expect(h.registry.spawnAgent).not.toHaveBeenCalled();
+  });
+
   it('refuses an effort Ptah CLI has no level for before any spawn', async () => {
     const h = harness();
     // Thrown before any await, like the other pre-spawn refusals of `resume`.

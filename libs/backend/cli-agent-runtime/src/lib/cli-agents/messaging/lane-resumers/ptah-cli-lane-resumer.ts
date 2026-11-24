@@ -121,6 +121,8 @@ export class PtahCliLaneResumer implements LaneResumer {
       const prepared = await this.manager.prepareSdkHandleSpawn({
         cli: 'ptah-cli',
         task: params.task,
+        // R9.5 checks the model this resume launches, not only the default.
+        ...(params.model ? { model: params.model } : {}),
         resumeSessionId: params.cliSessionId,
       });
       const agentId = this.manager.reserveAgentId();
@@ -178,8 +180,11 @@ export class PtahCliLaneResumer implements LaneResumer {
         agentId,
         mcpPort: this.registry.getMcpPort(),
         expectsMcp: true,
-        // Stored on the new record, so the next resume keeps the same policy.
+        // Stored on the new record, so the next resume keeps the same policy,
+        // model and effort.
         effectivePolicy: spawnResult.effectivePolicy,
+        ...(params.model ? { model: params.model } : {}),
+        ...(params.reasoningEffort ? { reasoningEffort: params.reasoningEffort } : {}),
       });
       spawnResult.setAgentId(result.agentId);
       return result;

@@ -423,6 +423,8 @@ export class AgentProcessManager {
   private readonly turns = new WeakMap<TrackedAgent, symbol>();
   /** Lanes with an `applyTurnSettings` call in flight; a second caller is refused `busy`. */
   private readonly applyingTurnSettings = new WeakSet<TrackedAgent>();
+  /** Lanes with a `continueConversation` between admission and `running`. */
+  private readonly continuationsInFlight = new WeakSet<TrackedAgent>();
   /**
    * Lanes adopted by a handoff whose new session is still starting, keyed by
    * agent id: the parent to restore if the start fails, and whether the
@@ -1709,6 +1711,13 @@ export class AgentProcessManager {
       toolProfileApplied?: boolean;
       /** Phase handoff. A non-empty denial list is recorded on the spawn result. */
       phase?: SpawnAgentRequest['phase'];
+      /**
+       * Model and effort the handle was started with, when the caller chose
+       * them (a cold resume carries the lane's last settings). Recorded so a
+       * later resume or per-turn compare reads them; absent leaves both unset.
+       */
+      model?: string;
+      reasoningEffort?: string;
     },
   ): Promise<SpawnAgentResult> {
     if (!meta.admission) await this.reserveSpawnSlot();
@@ -1755,6 +1764,8 @@ export class AgentProcessManager {
         displayName: meta.ptahCliName,
         ptahCliName: meta.ptahCliName,
         ptahCliId: meta.ptahCliId,
+        ...(meta.model ? { model: meta.model } : {}),
+        ...(meta.reasoningEffort ? { reasoningEffort: meta.reasoningEffort } : {}),
         providerId: sdkHandle.providerId,
         potentialCapabilities: meta.potentialCapabilities,
         effectivePolicy: meta.effectivePolicy,
@@ -3274,6 +3285,55 @@ export class AgentProcessManager {
     await this.applyContinuationTurnInput(agentId, tracked, sdkHandle, message, turnRequest, rawBody, true);
   }
 
+  /**
+   * The synchronous admission checks of `continueConversation`. Run once
+   * before the turn pre-flight and once after it, because the pre-flight
+   * awaits and the lane can be released, paused or started meanwhile.
+   */
+  private assertLaneAdmitsTurn(agentId: string, tracked: TrackedAgent): void {
+    if (tracked.subprocessReleased) {
+      // The record is intact and still readable — only the OS process is gone.
+      // Name the recovery in the message: `persistSession: true` is set on every
+      // ptah-cli spawn, so `tracked.info.cliSessionId` is a real, resumable
+      // conversation and the caller should hand it back as `resume_session_id`.
+      throw new AgentContinueError(
+        'released',
+        `Agent ${agentId} released its process after idling. ` +
+          `Resume the conversation instead: spawn with ` +
+          `resume_session_id: ${tracked.info.cliSessionId ?? '<unknown>'}.`,
+      );
+    }
+    // `stop()` stamps `stopped` before it awaits the kill and sets
+    // `subprocessReleased` only after it: the handle is going away.
+    if (tracked.info.status === 'stopped')
+      throw new AgentContinueError('released', `Agent ${agentId} was stopped.`);
+
+    const currentPause = currentLaneNotice(tracked);
+    if (currentPause?.action === 'paused')
+      throw new AgentLanePausedError(formatBudgetPauseNotice(currentPause, agentId));
+
+    if (tracked.info.status === 'running' || tracked.info.status === 'starting') {
+      throw new AgentContinueError(
+        'busy',
+        `Agent ${agentId} is busy (status: ${tracked.info.status})`,
+      );
+    }
+
+    const admission = tracked.budget?.admission();
+    const ceiling = admission ? laneBudgetNotice(admission) : undefined;
+    if (ceiling?.action === 'paused') {
+      this.publishLaneNotice(agentId, 'budget', ceiling);
+      throw new AgentLanePausedError(formatBudgetPauseNotice(ceiling, agentId));
+    }
+    // Historical records only: new code never stamps a budget stop reason.
+    if (isAgentBudgetStopReason(tracked.info.stopReason)) {
+      throw new AgentContinueError(
+        'released',
+        'Ptah budget monitor recorded an exhausted lane budget. Start a fresh lane.',
+      );
+    }
+  }
+
   async continueConversation(
     agentId: string,
     message: string,
@@ -3330,49 +3390,28 @@ export class AgentProcessManager {
       );
     }
 
-    if (tracked.subprocessReleased) {
-      // The record is intact and still readable — only the OS process is gone.
-      // Name the recovery in the message: `persistSession: true` is set on every
-      // ptah-cli spawn, so `tracked.info.cliSessionId` is a real, resumable
-      // conversation and the caller should hand it back as `resume_session_id`.
-      throw new AgentContinueError(
-        'released',
-        `Agent ${agentId} released its process after idling. ` +
-          `Resume the conversation instead: spawn with ` +
-          `resume_session_id: ${tracked.info.cliSessionId ?? '<unknown>'}.`,
+    this.assertLaneAdmitsTurn(agentId, tracked);
+    // Reserve the lane until `status` is `running`: the pre-flight awaits
+    // (even a text-only one yields), and a second continuation in that
+    // window must be refused before it writes any turn state.
+    if (this.continuationsInFlight.has(tracked))
+      throw new AgentContinueError('busy', `Agent ${agentId} is starting another turn.`);
+    this.continuationsInFlight.add(tracked);
+    let content: LaneTurnContent | undefined;
+    try {
+      // Turn input pre-flight, before `turnSeq` or `status` change: a refusal
+      // leaves the record exactly as it was.
+      content = await this.applyContinuationTurnInput(
+        agentId, tracked, sdkHandle, message, turnRequest, rawBody,
       );
+      // The await let `stop()`, an idle release or a budget pause run: check
+      // admission again before the record turns `running`.
+      if (this.agents.get(agentId) !== tracked)
+        throw new AgentContinueError('released', 'Lane was replaced while preparing the turn.');
+      this.assertLaneAdmitsTurn(agentId, tracked);
+    } finally {
+      this.continuationsInFlight.delete(tracked);
     }
-
-    const currentPause = currentLaneNotice(tracked);
-    if (currentPause?.action === 'paused')
-      throw new AgentLanePausedError(formatBudgetPauseNotice(currentPause, agentId));
-
-    if (tracked.info.status === 'running' || tracked.info.status === 'starting') {
-      throw new AgentContinueError(
-        'busy',
-        `Agent ${agentId} is busy (status: ${tracked.info.status})`,
-      );
-    }
-
-    const admission = tracked.budget?.admission();
-    const ceiling = admission ? laneBudgetNotice(admission) : undefined;
-    if (ceiling?.action === 'paused') {
-      this.publishLaneNotice(agentId, 'budget', ceiling);
-      throw new AgentLanePausedError(formatBudgetPauseNotice(ceiling, agentId));
-    }
-    // Historical records only: new code never stamps a budget stop reason.
-    if (isAgentBudgetStopReason(tracked.info.stopReason)) {
-      throw new AgentContinueError(
-        'released',
-        'Ptah budget monitor recorded an exhausted lane budget. Start a fresh lane.',
-      );
-    }
-
-    // Turn input pre-flight, before `turnSeq` or `status` change: a refusal
-    // leaves the record exactly as it was.
-    const content = await this.applyContinuationTurnInput(
-      agentId, tracked, sdkHandle, message, turnRequest, rawBody,
-    );
 
     const turn = Symbol('lane-turn');
     this.turns.set(tracked, turn);
