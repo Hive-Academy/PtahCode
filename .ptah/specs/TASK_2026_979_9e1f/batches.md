@@ -972,7 +972,7 @@ P2 gate:
 
 ### Task 19.1: Remove the slot writer - COMPLETE
 
-## Batch 20: Strict MCP for Claude (C11) - PENDING
+## Batch 20: Strict MCP for Claude (C11) - COMPLETE
 
 - Id: P2-B7 | Phase: P2 | Shape: logic
 - Recommended executor: backend-developer (subagent; reason: lanes disabled)
@@ -1001,9 +1001,9 @@ P2 gate:
   - Regression 6, strict half: strict is set iff bound.
   - The A7 result is recorded.
   - Unbound means today's behaviour.
-- Status: PENDING
+- Status: COMPLETE (batch-20-report.md; decision row 40 overrides the LR-P2-0(a) stop)
 
-### Task 20.1: Strict flag, flag-tier removal, A7 - PENDING
+### Task 20.1: Strict flag, flag-tier removal, A7 - COMPLETE
 
 ## Batch 21: Lane config switches, copilot, cursor, opencode (C14a) - COMPLETE
 

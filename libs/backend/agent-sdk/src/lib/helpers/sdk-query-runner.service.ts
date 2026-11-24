@@ -58,7 +58,7 @@ import {
 } from '@ptah-extension/platform-core';
 import { SDK_TOKENS } from '../di/tokens';
 import { oneShotGatewayDenyHookFor } from '../permission/one-shot-gateway-deny-hook';
-import { readOneShotServedFileServerNames } from './gateway-session-wiring';
+import { gatewayServesPtah } from './gateway-session-wiring';
 import {
   AUTH_PROVIDERS_TOKENS,
   type ProviderAccountAdmissionPort,
@@ -454,14 +454,6 @@ export class SdkQueryRunner {
       this.logger,
     );
     const credentialSubject = `claude-internal-query:${randomUUID()}`;
-    // An opted-in run gets the file servers through `ptah`; the CLI's copies go.
-    const servedFileServers = await readOneShotServedFileServerNames(
-      this.mcpGateway,
-      input,
-      policy.ptahEnabled,
-      this.logger,
-      SERVICE_TAG,
-    );
     try {
       const options = this.buildOneShotOptions(
         input,
@@ -469,7 +461,6 @@ export class SdkQueryRunner {
         cliJsPath,
         policy,
         credentialSubject,
-        servedFileServers,
       );
 
       const systemPromptObj =
@@ -675,7 +666,6 @@ export class SdkQueryRunner {
     cliJsPath: string | null,
     policy: EffectiveCapabilitySet,
     credentialSubject: string,
-    servedFileServers: readonly string[] = [],
   ): SdkQueryOptions {
     const authEnv = input.auth?.env ?? this.authEnv;
     const effectiveBaseUrl =
@@ -699,9 +689,8 @@ export class SdkQueryRunner {
 
     // The same capability flags an interactive session gets, or strict MCP
     // with ptah only and `skills: []` when the policy is unverified. One-shots
-    // track no back-off, so the flag lists come from the policy plus the file
-    // servers the gateway already serves through `ptah`.
-    const capabilityFlags = capabilityFlagsFor(policy, servedFileServers);
+    // track no back-off, so the flag lists come from the policy alone.
+    const capabilityFlags = capabilityFlagsFor(policy, []);
     if (policy.status !== 'verified') {
       this.logger.warn(
         `${SERVICE_TAG} Capability policy is unverified — one-shot runs with Ptah tools only and no skills`,
@@ -740,7 +729,12 @@ export class SdkQueryRunner {
       // `PTAH_DISABLE_SDK_AUTO_MEMORY` by identity when the policy adds no key.
       settings: buildFlagSettings(undefined, undefined, capabilityFlags),
       mcpServers,
-      ...capabilityIsolationOptions(policy),
+      // Strict MCP (C11) only for a run that opted in to connectors and gets
+      // them through `ptah`; any other run keeps the CLI's own MCP sources.
+      ...capabilityIsolationOptions(
+        policy,
+        includeConnectors && gatewayServesPtah(this.mcpGateway, mcpServers),
+      ),
       ...toolAccessOptions(toolAccess),
       maxTurns: input.maxTurns ?? DEFAULT_ONE_SHOT_MAX_TURNS,
       includePartialMessages: true,

@@ -27,6 +27,7 @@ import {
   PLATFORM_TOKENS,
   type IMcpServerStatus,
   type IMcpCallerCredentials,
+  type IMcpGateway,
   type IWorkspaceProvider,
 } from '@ptah-extension/platform-core';
 import {
@@ -39,6 +40,7 @@ import {
   capabilityFlagsFor,
   capabilityIsolationOptions,
   filterMcpServersByPolicy,
+  gatewayServesPtah,
   getActiveProviderId,
   guardClaudeBuiltinSkillDenials,
   readClaudeBuiltinOptInSettings,
@@ -102,8 +104,10 @@ export interface PtahSpawnAssembly {
    */
   readonly capabilityFlags: ReturnType<typeof capabilityFlagsFor>;
   /**
-   * `{strictMcpConfig: true, skills: []}` when the policy is unverified, `{}`
-   * when it is verified. Spread by the caller into the SDK options.
+   * `{strictMcpConfig: true, skills: []}` when the policy is unverified;
+   * `{strictMcpConfig: true}` when it is verified and the MCP gateway serves
+   * this spawn's `ptah` (C11, so no native copy duplicates a served server);
+   * `{}` otherwise. Spread by the caller into the SDK options.
    */
   readonly capabilityIsolation: ReturnType<typeof capabilityIsolationOptions>;
   /**
@@ -190,6 +194,9 @@ export class PtahCliSpawnOptions {
     private readonly workspace?: IWorkspaceProvider,
     @inject(PLATFORM_TOKENS.MCP_CALLER_CREDENTIALS, { isOptional: true })
     private readonly mcpCredentials?: IMcpCallerCredentials,
+    /** Bound gateway: a spawn that gets `ptah` runs strict MCP (C11). */
+    @inject(PLATFORM_TOKENS.MCP_GATEWAY, { isOptional: true })
+    private readonly mcpGateway?: IMcpGateway,
   ) {}
 
   /**
@@ -414,7 +421,10 @@ export class PtahCliSpawnOptions {
       autoCompact,
       outputStyleName: outputStyle.outputStyleName,
       capabilityFlags,
-      capabilityIsolation: capabilityIsolationOptions(policy),
+      capabilityIsolation: capabilityIsolationOptions(
+        policy,
+        gatewayServesPtah(this.mcpGateway, mcpServers),
+      ),
       builtinPolicy,
     };
   }

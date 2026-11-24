@@ -5,7 +5,7 @@ import type {
   IPlatformInfo,
   McpCallerBinding,
 } from '@ptah-extension/platform-core';
-import type { AuthEnv } from '@ptah-extension/shared';
+import type { AuthEnv, EffectiveCapabilitySet } from '@ptah-extension/shared';
 import { createMockLogger } from '@ptah-extension/shared/testing';
 import {
   SdkQueryRunner,
@@ -51,20 +51,31 @@ describe('keepMcpServersOnArgv', () => {
 const HOST_TOOL = 'mcp__ptah__ptah_workspace_analyze';
 const GATEWAY_TOOL = 'mcp__ptah__github__create_issue';
 
-type GatewayStub = jest.Mocked<
-  Pick<IMcpGateway, 'isGatewayTool' | 'servedFileServerNames'>
->;
+type GatewayStub = jest.Mocked<Pick<IMcpGateway, 'isGatewayTool'>>;
 
-function gatewayStub(served: string[] | Error = []): GatewayStub {
+function gatewayStub(): GatewayStub {
   return {
     isGatewayTool: jest.fn((name: string) => name !== HOST_TOOL),
-    servedFileServerNames: jest.fn((_root: string) =>
-      served instanceof Error
-        ? Promise.reject(served)
-        : Promise.resolve(served),
-    ),
   };
 }
+
+/** A resolver that answers with a verified policy, ptah ON. */
+const verifiedResolver = {
+  resolve: jest.fn(
+    async (root: string): Promise<EffectiveCapabilitySet> => ({
+      physicalRoot: root,
+      policyKey: root,
+      status: 'verified',
+      reasons: [],
+      ptahEnabled: true,
+      deniedMcpServers: [],
+      approvedProjectMcpServers: [],
+      deniedSkillNames: [],
+      disabledPluginIds: [],
+      harnessFingerprint: 'fp',
+    }),
+  ),
+};
 
 interface Harness {
   run(extra?: Partial<OneShotRunInput>): Promise<SdkQueryOptions>;
@@ -72,7 +83,10 @@ interface Harness {
   logger: ReturnType<typeof createMockLogger>;
 }
 
-function harness(gateway?: GatewayStub): Harness {
+function harness(
+  gateway?: GatewayStub,
+  capabilityResolver: typeof verifiedResolver | null = null,
+): Harness {
   const logger = createMockLogger();
   const queryFn = jest.fn(() => ({
     [Symbol.asyncIterator]: () => ({
@@ -113,7 +127,7 @@ function harness(gateway?: GatewayStub): Harness {
       globalStoragePath: '/opt/ptah-storage',
     } as unknown as IPlatformInfo,
     { spawn: jest.fn() } as unknown as OffThreadProcessSpawner,
-    null,
+    capabilityResolver,
     null,
     null,
     null,
@@ -300,40 +314,50 @@ describe('SdkQueryRunner: connector opt-in (TASK_2026_979)', () => {
     });
   });
 
-  describe('flag-tier suppression of served file servers (C4)', () => {
-    it('denies the file servers the gateway serves, with the opt-in', async () => {
-      const gateway = gatewayStub(['github', 'ptah', 'linear']);
-      const h = harness(gateway);
+  // Regression 6, strict half (C11). Verified policy, so only the gateway
+  // decides strict; the flag-tier served list is gone.
+  describe('strict MCP when the gateway serves the run (C11)', () => {
+    it('runs strict with ptah as the only source, with the opt-in', async () => {
+      const h = harness(gatewayStub(), verifiedResolver);
       const options = await h.run({ includeConnectors: true });
 
-      expect(gateway.servedFileServerNames).toHaveBeenCalledWith(
-        '/work/project',
-      );
-      expect(options.settings).toMatchObject({
-        disabledMcpjsonServers: ['github', 'linear'],
-      });
-      // `ptah` itself is never suppressed.
+      expect(options.strictMcpConfig).toBe(true);
+      expect(options.skills).toBeUndefined();
       expect(Object.keys(options.mcpServers ?? {})).toEqual(['ptah']);
+      expect(options.settings).not.toHaveProperty('disabledMcpjsonServers');
     });
 
-    it('does not ask the gateway for a run without the opt-in', async () => {
-      const gateway = gatewayStub(['github']);
-      const h = harness(gateway);
+    it('keeps the CLI MCP sources for a run without the opt-in', async () => {
+      const h = harness(gatewayStub(), verifiedResolver);
       const options = await h.run();
 
-      expect(gateway.servedFileServerNames).not.toHaveBeenCalled();
-      expect(options.settings).not.toHaveProperty('disabledMcpjsonServers');
+      expect(options.strictMcpConfig).toBeUndefined();
     });
 
-    it('gives an empty list and a warning when the gateway throws', async () => {
-      const h = harness(gatewayStub(new Error('disk gone')));
+    it('keeps the CLI MCP sources when no gateway is bound', async () => {
+      const h = harness(undefined, verifiedResolver);
       const options = await h.run({ includeConnectors: true });
 
-      expect(options.settings).not.toHaveProperty('disabledMcpjsonServers');
-      expect(h.logger.warn).toHaveBeenCalledWith(
-        expect.stringContaining('gateway serves'),
-        expect.objectContaining({ error: 'disk gone' }),
-      );
+      expect(options.strictMcpConfig).toBeUndefined();
+    });
+
+    it('keeps the CLI MCP sources when the ptah server is not running', async () => {
+      const h = harness(gatewayStub(), verifiedResolver);
+      const options = await h.run({
+        includeConnectors: true,
+        mcpServerRunning: false,
+      });
+
+      expect(options.mcpServers).toEqual({});
+      expect(options.strictMcpConfig).toBeUndefined();
+    });
+
+    it('keeps strict and skills: [] when the policy is unverified', async () => {
+      const h = harness(gatewayStub());
+      const options = await h.run();
+
+      expect(options.strictMcpConfig).toBe(true);
+      expect(options.skills).toEqual([]);
     });
   });
 });

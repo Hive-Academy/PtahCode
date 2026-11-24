@@ -1,7 +1,7 @@
 /**
- * How a Claude query consumes Ptah's MCP gateway (TASK_2026_979): the file
- * servers the gateway already serves through `ptah`, and the approval gate
- * an interactive session puts in front of every gateway tool.
+ * How a Claude query consumes Ptah's MCP gateway (TASK_2026_979): whether the
+ * gateway serves the session through `ptah` (strict MCP, C11), and the
+ * approval gate an interactive session puts in front of every gateway tool.
  */
 import type { IMcpGateway } from '@ptah-extension/platform-core';
 import { PTAH_MCP_SERVER_NAME } from '@ptah-extension/shared';
@@ -14,61 +14,20 @@ import {
 import type { CanUseTool } from '../types/sdk-types/claude-sdk.types';
 
 /**
- * File-declared MCP server names the gateway serves through `ptah` under
- * `root` (C4). The caller adds them to the flag-tier denied list, so the CLI
- * does not also load its own copy of a server that `ptah` already serves.
- * Empty when no gateway or no root is given. Fail-open to the old behaviour:
- * on an error the list is empty and a warning is logged, so the CLI loads its
- * copies as before.
+ * Whether the MCP gateway serves the servers of a session built with
+ * `mcpServers`: a gateway is bound on this host and `ptah` is in the map the
+ * session will load. The caller then runs strict MCP (C11), so `ptah` is the
+ * only MCP source and the CLI loads no copy of a server the gateway serves.
+ * No gateway, or no `ptah` in the map (server not running, or the policy
+ * turned it OFF), is `false`: the CLI keeps its own MCP sources as before.
  */
-export async function readServedFileServerNames(
-  gateway: Pick<IMcpGateway, 'servedFileServerNames'> | undefined,
-  root: string | undefined,
-  logger: Pick<Logger, 'warn'>,
-  serviceTag: string,
-): Promise<string[]> {
-  if (!gateway || !root) return [];
-  try {
-    const names = await gateway.servedFileServerNames(root);
-    return names.filter((name) => name !== PTAH_MCP_SERVER_NAME);
-  } catch (error: unknown) {
-    // degradation-audit: reported - logged below; without the list the CLI
-    // loads its own copies of those servers, as it did before the gateway.
-    logger.warn(
-      `${serviceTag} Could not read the MCP servers the gateway serves; the CLI keeps its own copies`,
-      { root, error: error instanceof Error ? error.message : String(error) },
-    );
-    return [];
-  }
-}
-
-/**
- * `readServedFileServerNames` for a one-shot run. Only a run that opted in to
- * connectors, with tools and a reachable `ptah` server, gets the file servers
- * through `ptah`; every other run gets an empty list.
- */
-export function readOneShotServedFileServerNames(
-  gateway: Pick<IMcpGateway, 'servedFileServerNames'> | undefined,
-  run: {
-    readonly cwd: string;
-    readonly mcpServerRunning: boolean;
-    readonly includeConnectors?: boolean;
-    readonly toolAccess?: string;
-  },
-  ptahEnabled: boolean,
-  logger: Pick<Logger, 'warn'>,
-  serviceTag: string,
-): Promise<string[]> {
-  const eligible =
-    run.includeConnectors === true &&
-    run.mcpServerRunning &&
-    (run.toolAccess ?? 'claude-code') !== 'none' &&
-    ptahEnabled;
-  return readServedFileServerNames(
-    eligible ? gateway : undefined,
-    run.cwd,
-    logger,
-    serviceTag,
+export function gatewayServesPtah(
+  gateway: IMcpGateway | null | undefined,
+  mcpServers: Readonly<Record<string, unknown>>,
+): boolean {
+  return (
+    gateway != null &&
+    Object.prototype.hasOwnProperty.call(mcpServers, PTAH_MCP_SERVER_NAME)
   );
 }
 

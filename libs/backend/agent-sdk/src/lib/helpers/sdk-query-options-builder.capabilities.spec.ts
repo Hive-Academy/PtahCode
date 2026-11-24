@@ -31,6 +31,7 @@ import {
   SdkQueryOptionsBuilder,
   buildFlagSettings,
   capabilityFlagsFor,
+  capabilityIsolationOptions,
   resolveSessionCapabilityPolicy,
   unverifiedCapabilityPolicy,
 } from './sdk-query-options-builder';
@@ -107,7 +108,7 @@ interface BuildInput {
   authEnv?: AuthEnv;
   mcpServersOverride?: Record<string, McpHttpServerOverride>;
   /** `IMcpGateway` stand-in (TASK_2026_979); absent means no gateway bound. */
-  gateway?: Pick<IMcpGateway, 'isGatewayTool' | 'servedFileServerNames'>;
+  gateway?: Pick<IMcpGateway, 'isGatewayTool'>;
   /** The permission callback `createCallback` returns. */
   ask?: jest.Mock;
 }
@@ -534,18 +535,11 @@ describe('SdkQueryOptionsBuilder: MCP gateway (TASK_2026_979)', () => {
   const CRON_TOOL = 'mcp__ptah__ptah_cron_create';
   const GATEWAY_TOOL = 'mcp__ptah__github__create_issue';
 
-  function gateway(
-    served: string[] | Error = [],
-  ): jest.Mocked<Pick<IMcpGateway, 'isGatewayTool' | 'servedFileServerNames'>> {
+  function gateway(): jest.Mocked<Pick<IMcpGateway, 'isGatewayTool'>> {
     return {
       // Fail-closed worst case: no host tool name registered yet, so every
       // `ptah` tool, cron writes included, reads as a gateway tool.
       isGatewayTool: jest.fn().mockReturnValue(true),
-      servedFileServerNames: jest.fn((_root: string) =>
-        served instanceof Error
-          ? Promise.reject(served)
-          : Promise.resolve(served),
-      ),
     };
   }
 
@@ -659,39 +653,43 @@ describe('SdkQueryOptionsBuilder: MCP gateway (TASK_2026_979)', () => {
     expect(matchers).toContain('mcp__ptah__ptah_cron_.*');
   });
 
-  it('suppresses the file servers the gateway serves on the flag tier', async () => {
-    const gw = gateway(['github', 'ptah', 'linear']);
-    const built = await build({ capabilityPolicy: policy(), gateway: gw });
+  // Regression 6, strict half (C11): strict is set iff the gateway is bound
+  // and serves this session's `ptah`; the flag-tier served list is gone.
+  it('runs strict MCP with ptah as the only source when the gateway is bound', async () => {
+    const built = await build({ capabilityPolicy: policy(), gateway: gateway() });
 
-    expect(gw.servedFileServerNames).toHaveBeenCalledWith(PROJECT);
-    expect(built.settings['disabledMcpjsonServers']).toEqual([
-      'github',
-      'linear',
-    ]);
+    expect(built.options.strictMcpConfig).toBe(true);
+    // Verified: skills stay on the flag tier, strict does not hide them.
+    expect(built.options.skills).toBeUndefined();
     expect(Object.keys(built.options.mcpServers ?? {})).toEqual(['ptah']);
-  });
-
-  it('does not ask the gateway when the policy turned ptah OFF', async () => {
-    const gw = gateway(['github']);
-    await build({
-      capabilityPolicy: policy({ ptahEnabled: false }),
-      gateway: gw,
-    });
-
-    expect(gw.servedFileServerNames).not.toHaveBeenCalled();
-  });
-
-  it('gives an empty list and a warning when the gateway throws', async () => {
-    const built = await build({
-      capabilityPolicy: policy(),
-      gateway: gateway(new Error('disk gone')),
-    });
-
     expect(built.settings).not.toHaveProperty('disabledMcpjsonServers');
-    expect(built.logger.warn).toHaveBeenCalledWith(
-      expect.stringContaining('gateway serves'),
-      expect.objectContaining({ error: 'disk gone' }),
-    );
+  });
+
+  it('keeps the current MCP sources when no gateway is bound', async () => {
+    const built = await build({ capabilityPolicy: policy() });
+
+    expect(built.options.strictMcpConfig).toBeUndefined();
+    expect(built.options.skills).toBeUndefined();
+  });
+
+  it('keeps the current MCP sources when the policy turned ptah OFF', async () => {
+    const built = await build({
+      capabilityPolicy: policy({ ptahEnabled: false }),
+      gateway: gateway(),
+    });
+
+    expect(built.options.mcpServers).toEqual({});
+    expect(built.options.strictMcpConfig).toBeUndefined();
+  });
+
+  it('keeps strict and skills: [] for an unverified policy with the gateway bound', async () => {
+    const built = await build({
+      capabilityPolicy: policy({ status: 'unverified' }),
+      gateway: gateway(),
+    });
+
+    expect(built.options.strictMcpConfig).toBe(true);
+    expect(built.options.skills).toEqual([]);
   });
 });
 
@@ -700,6 +698,20 @@ describe('capability helpers', () => {
     expect(
       buildFlagSettings(undefined, undefined, capabilityFlagsFor(policy(), [])),
     ).toBe(PTAH_DISABLE_SDK_AUTO_MEMORY);
+  });
+
+  it('capabilityIsolationOptions: strict iff unverified or served by the gateway', () => {
+    expect(capabilityIsolationOptions(policy(), false)).toEqual({});
+    expect(capabilityIsolationOptions(policy(), true)).toEqual({
+      strictMcpConfig: true,
+    });
+    const unverified = policy({ status: 'unverified' });
+    for (const served of [false, true]) {
+      expect(capabilityIsolationOptions(unverified, served)).toEqual({
+        strictMcpConfig: true,
+        skills: [],
+      });
+    }
   });
 
   it('capabilityFlagsFor never lists ptah as denied while it is ON', () => {

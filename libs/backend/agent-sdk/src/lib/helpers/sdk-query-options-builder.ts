@@ -29,7 +29,7 @@ import {
 import { createCronApprovalGate } from '../permission/cron-approval-gate';
 import {
   createSessionGatewayGate,
-  readServedFileServerNames,
+  gatewayServesPtah,
 } from './gateway-session-wiring';
 import { MemoryPromptInjector } from './memory-prompt-injector';
 import { CodeSymbolPromptInjector } from './code-symbol-prompt-injector';
@@ -609,16 +609,24 @@ export function withClaudeBuiltinSkillDenials(
 }
 
 /**
- * The options that isolate a session whose policy could not be verified:
- * only the MCP servers passed in `mcpServers` load, and no skill is listed.
- * Empty for a verified policy, which is enforced through the flag tier.
+ * The options that isolate a session's MCP and skill sources.
+ *
+ * - Unverified policy: only the MCP servers passed in `mcpServers` load, and
+ *   no skill is listed (`skills: []`), whatever the gateway does.
+ * - Verified policy with `ptah` served by the MCP gateway (C11): strict MCP,
+ *   so `ptah` is the only MCP source and the CLI does not also load its own
+ *   copies of the servers the gateway serves. Skills stay on the flag tier.
+ * - Verified policy without the gateway: empty, today's behaviour.
+ *
+ * Callers spread this before any narrower option (the `'none'` one-shot), and
+ * nothing spread after it sets `strictMcpConfig: false`.
  */
 export function capabilityIsolationOptions(
   policy: EffectiveCapabilitySet,
+  servedByGateway: boolean,
 ): Pick<Options, 'strictMcpConfig' | 'skills'> {
-  return policy.status === 'verified'
-    ? {}
-    : { strictMcpConfig: true, skills: [] };
+  if (policy.status !== 'verified') return { strictMcpConfig: true, skills: [] };
+  return servedByGateway ? { strictMcpConfig: true } : {};
 }
 
 /**
@@ -1680,15 +1688,8 @@ export class SdkQueryOptionsBuilder {
             this.logger,
           )
         : builtinPolicy;
-    // File servers the gateway serves through `ptah` are off on the flag tier.
-    const servedFileServers = await readServedFileServerNames(
-      mcpServerRunning && policy.ptahEnabled ? this.mcpGateway : undefined,
-      cwd,
-      this.logger,
-      '[SdkQueryOptionsBuilder]',
-    );
     const capabilityFlags = withClaudeBuiltinSkillDenials(
-      capabilityFlagsFor(policy, [...backingOffServers, ...servedFileServers]),
+      capabilityFlagsFor(policy, backingOffServers),
       policy,
       sessionBuiltinPolicy,
     );
@@ -1783,7 +1784,12 @@ export class SdkQueryOptionsBuilder {
         // route: it is an SDK option, not a setting source.
         disallowedTools,
         mcpServers: configuredMcpServers,
-        ...capabilityIsolationOptions(policy),
+        // Strict MCP when the gateway serves `ptah` here (C11): `ptah` is
+        // then the only MCP source, so no native copy duplicates a served one.
+        ...capabilityIsolationOptions(
+          policy,
+          gatewayServesPtah(this.mcpGateway, configuredMcpServers),
+        ),
         permissionMode,
         allowDangerouslySkipPermissions: permissionMode === 'bypassPermissions',
         canUseTool: canUseToolCallback,
